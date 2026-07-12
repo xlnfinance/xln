@@ -2,9 +2,9 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { handleCreateSettlement } from '../entity-tx/handlers/create-settlement';
-import { handleMintReserves } from '../entity-tx/handlers/mint-reserves';
-import { handleR2R } from '../entity-tx/handlers/r2r';
+import { handleCreateSettlement } from '../entity/tx/handlers/create-settlement';
+import { handleMintReserves } from '../entity/tx/handlers/mint-reserves';
+import { handleR2R } from '../entity/tx/handlers/r2r';
 import type { EntityState, EntityTx, Env } from '../types';
 
 const entityId = `0x${'aa'.repeat(32)}`;
@@ -89,12 +89,12 @@ test('entity j-batch operation handler state transitions are unchanged', async (
 
 test('entity j-batch operation handlers stay behind structured logging', () => {
   for (const path of [
-    'runtime/entity-tx/handlers/r2r.ts',
-    'runtime/entity-tx/handlers/create-settlement.ts',
-    'runtime/entity-tx/handlers/mint-reserves.ts',
-    'runtime/entity-tx/handlers/j-broadcast.ts',
-    'runtime/entity-tx/handlers/j-clear-batch.ts',
-    'runtime/entity-tx/handlers/j-abort-sent-batch.ts',
+    'runtime/entity/tx/handlers/r2r.ts',
+    'runtime/entity/tx/handlers/create-settlement.ts',
+    'runtime/entity/tx/handlers/mint-reserves.ts',
+    'runtime/entity/tx/handlers/j-broadcast.ts',
+    'runtime/entity/tx/handlers/j-clear-batch.ts',
+    'runtime/entity/tx/handlers/j-abort-sent-batch.ts',
   ]) {
     const source = readFileSync(join(process.cwd(), path), 'utf8');
     expect(source).toContain("createStructuredLogger('entity.jbatch')");
@@ -104,7 +104,7 @@ test('entity j-batch operation handlers stay behind structured logging', () => {
 });
 
 test('r2c handler traces stay behind structured debug logging', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/entity-tx/handlers/r2c.ts'), 'utf8');
+  const source = readFileSync(join(process.cwd(), 'runtime/entity/tx/handlers/r2c.ts'), 'utf8');
 
   expect(source).toContain("const r2cLog = createStructuredLogger('entity.r2c');");
   expect(source).not.toContain('console.log');
@@ -112,7 +112,7 @@ test('r2c handler traces stay behind structured debug logging', () => {
 });
 
 test('htlc payment handler traces stay behind structured logging', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/entity-tx/handlers/htlc-payment.ts'), 'utf8');
+  const source = readFileSync(join(process.cwd(), 'runtime/entity/tx/handlers/htlc-payment.ts'), 'utf8');
 
   expect(source).toContain("const htlcLog = createStructuredLogger('entity.htlc');");
   expect(source).not.toContain('console.');
@@ -121,7 +121,7 @@ test('htlc payment handler traces stay behind structured logging', () => {
 });
 
 test('dispute handler traces stay behind structured logging', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/entity-tx/handlers/dispute.ts'), 'utf8');
+  const source = readFileSync(join(process.cwd(), 'runtime/entity/tx/handlers/dispute.ts'), 'utf8');
 
   expect(source).toContain("const disputeLog = createStructuredLogger('entity.dispute');");
   expect(source).not.toContain('console.');

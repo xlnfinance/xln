@@ -3,7 +3,7 @@
  * committed account/J-layer side effects back into the runtime.
  */
 
-import { applyEntityTx } from './entity-tx';
+import { applyEntityTx } from './entity/tx';
 import type {
   AccountTx,
   ConsensusConfig,
@@ -42,7 +42,7 @@ import {
   type SwapCancelEvent,
   type SwapCancelRequestEvent,
   type SwapOfferEvent,
-} from './entity-tx/handlers/account';
+} from './entity/tx/handlers/account';
 import {
   markWorkingOrderbookOffer,
   swapKey,
@@ -79,10 +79,10 @@ import {
   isWitnessHashType,
   normalizeProposedFrameCollectedSigs,
   type HankoWitnessEntry,
-} from './entity-consensus/hanko-witness';
+} from './entity/consensus/hanko-witness';
 import { cloneCrossJurisdictionAccountTxRoute } from './cross-jurisdiction';
 import { buildCrossJurisdictionFillId, CROSS_J_PENDING_FILL_ACK_TTL_MS } from './cross-jurisdiction-fill-ack';
-import { pruneSettledOriginatedHtlcRoutes } from './entity-tx/htlc-route-lifecycle';
+import { pruneSettledOriginatedHtlcRoutes } from './entity/tx/htlc-route-lifecycle';
 export { mergeEntityInputs } from './entity-input-merge';
 
 export const MAX_PENDING_CROSS_J_FILL_ACKS = 1024;

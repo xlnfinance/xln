@@ -31,7 +31,7 @@ import {
   applyEntityInput,
 } from '../entity-consensus';
 import { createEntityFrameHash } from '../entity-consensus-frame';
-import { buildEntityHashesToSign } from '../entity-consensus/hanko-witness';
+import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
 import {
   assertCrossJurisdictionOrderAdmissible,
   findCrossJurisdictionBookAdmissionForAck,
@@ -50,18 +50,18 @@ import {
   deriveCrossJurisdictionPrivateSeed,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../cross-jurisdiction';
-import { applyEntityTx } from '../entity-tx/apply';
-import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity-tx/handlers/account-cross-j-followups';
-import { applyCommittedHtlcLockFollowup } from '../entity-tx/handlers/account/committed-htlc-followups';
-import { handleAdmitCrossJurisdictionBookOrderEntityTx } from '../entity-tx/handlers/cross-j-book-order';
-import { handleDisputeFinalize, handleDisputeStart, handlePrepareDispute } from '../entity-tx/handlers/dispute';
-import { handleJAbortSentBatch } from '../entity-tx/handlers/j-abort-sent-batch';
-import { handleJRebroadcast } from '../entity-tx/handlers/j-rebroadcast';
-import { handleSetRebalancePolicyEntityTx } from '../entity-tx/handlers/account-admin';
-import { processSettleAction } from '../entity-tx/handlers/settle';
-import { applyJEvent } from '../entity-tx/j-events';
-import { tryFinalizeAccountJEvents } from '../entity-tx/j-events-account';
-import { queueCrossJurisdictionSalvageFromArgumentList } from '../entity-tx/j-events-htlc';
+import { applyEntityTx } from '../entity/tx/apply';
+import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity/tx/handlers/account-cross-j-followups';
+import { applyCommittedHtlcLockFollowup } from '../entity/tx/handlers/account/committed-htlc-followups';
+import { handleAdmitCrossJurisdictionBookOrderEntityTx } from '../entity/tx/handlers/cross-j-book-order';
+import { handleDisputeFinalize, handleDisputeStart, handlePrepareDispute } from '../entity/tx/handlers/dispute';
+import { handleJAbortSentBatch } from '../entity/tx/handlers/j-abort-sent-batch';
+import { handleJRebroadcast } from '../entity/tx/handlers/j-rebroadcast';
+import { handleSetRebalancePolicyEntityTx } from '../entity/tx/handlers/account-admin';
+import { processSettleAction } from '../entity/tx/handlers/settle';
+import { applyJEvent } from '../entity/tx/j-events';
+import { tryFinalizeAccountJEvents } from '../entity/tx/j-events-account';
+import { queueCrossJurisdictionSalvageFromArgumentList } from '../entity/tx/j-events-htlc';
 import {
   buildJEventObservationDigest,
   canonicalDisputeFinalizationEvidenceHash,

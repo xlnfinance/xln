@@ -4,7 +4,7 @@ import { resolveEntityProposerId } from '../state-helpers';
 import { getAccountMachine, getEntityOutCapacity, hasAccount } from './entity-lookup';
 import { getFaucetHubProfiles } from './faucet-hubs';
 import { getRequestCreditCap } from './hub-health';
-import { isEntityId32 } from '../server/utils';
+import { isEntityId32 } from './utils';
 import type { RegisterReceiptOptions, RuntimeIngressReceipt } from './ingress-receipts';
 
 export const handleCreditRequest = async (input: {

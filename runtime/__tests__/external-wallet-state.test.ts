@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account-crypto';
 import { buildJEventObservationDigest, canonicalJurisdictionEventsHash } from '../j-event-observation';
 import { createEntityFrameHash } from '../entity-consensus-frame';
-import { applyJEvent, type JEventEntityTxData } from '../entity-tx/j-events';
+import { applyJEvent, type JEventEntityTxData } from '../entity/tx/j-events';
 import { buildJEventsRuntimeInput } from '../jadapter/watcher';
 import {
   applyRuntimeInput,

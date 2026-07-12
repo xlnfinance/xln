@@ -14,7 +14,7 @@ Core:
   /docs/                Philosophy, architecture, eternal specs
   /runtime/             Consensus engine (BFT entity + bilateral account state machines)
     /account/tx/        Account transaction handlers
-    /entity-tx/         Entity transaction handlers
+    /entity/tx/         Entity transaction handlers
     /scenarios/         Economic simulations (ahb.ts, grid.ts, etc.)
     /evms/              EVM integrations (BrowserVM, remote)
   /jurisdictions/       Solidity contracts (Ethereum, Polygon, Arbitrum, ...)

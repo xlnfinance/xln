@@ -21,9 +21,9 @@ Perform **forensic-level analysis** of the Alice-Hub-Bob scenario and underlying
 ### Phase 2: Trace Execution Paths (30 min)
 4. `runtime/entity-consensus.ts` (lines 180-674) - E-layer BFT consensus
 5. `runtime/account-consensus.ts` (lines 112-613) - A-layer bilateral consensus
-6. `runtime/entity-tx/apply.ts` - Entity transaction dispatcher
+6. `runtime/entity/tx/apply.ts` - Entity transaction dispatcher
 7. `runtime/account/tx/apply.ts` - Account transaction dispatcher
-8. `runtime/entity-tx/handlers/j-broadcast.ts` - E→J mempool queuing
+8. `runtime/entity/tx/handlers/j-broadcast.ts` - E→J mempool queuing
 9. `runtime/j-batch.ts` (lines 1-150) - Batch accumulation system
 
 ### Phase 3: J-Layer Integration (20 min)

@@ -36,15 +36,15 @@ finalization.
   `initialArguments`.
 - Before V2, `jurisdictions/contracts/Depository.sol:891` passed `finalArguments` and
   `initialArguments` into `_finalizeAccount`.
-- Before V2, `runtime/entity-tx/handlers/dispute.ts:425` built `initialArguments` from the current
+- Before V2, `runtime/entity/tx/handlers/dispute.ts:425` built `initialArguments` from the current
   `AccountMachine`.
-- Before V2, `runtime/entity-tx/handlers/dispute.ts:447` then used a stored
+- Before V2, `runtime/entity/tx/handlers/dispute.ts:447` then used a stored
   `counterpartyDisputeProofBodyHash`, so the arguments and proof body can be from
   different heights.
-- Before V2, `runtime/entity-tx/handlers/dispute.ts:777` built `finalArguments` from the current
-  `AccountMachine`, while `runtime/entity-tx/handlers/dispute.ts:805` could finalize using a
+- Before V2, `runtime/entity/tx/handlers/dispute.ts:777` built `finalArguments` from the current
+  `AccountMachine`, while `runtime/entity/tx/handlers/dispute.ts:805` could finalize using a
   stored proof body.
-- Before V2, `runtime/entity-tx/j-events.ts:528` stored only `activeDispute.initialArguments`.
+- Before V2, `runtime/entity/tx/j-events.ts:528` stored only `activeDispute.initialArguments`.
 - Before V2, `runtime/watchtower/action.ts:198` reimplemented the same one-argument dispute hash.
 
 ## Bug Class
@@ -394,7 +394,7 @@ Rules:
 
 ### disputeStart handler
 
-- `runtime/entity-tx/handlers/dispute.ts`
+- `runtime/entity/tx/handlers/dispute.ts`
   - Replace current live-state `initialArguments` construction.
   - Select `initialProofbodyHash = account.counterpartyDisputeProofBodyHash`.
   - Build `starterInitialArguments` for that exact hash.
@@ -407,7 +407,7 @@ Rules:
 
 ### disputeFinalize handler
 
-- `runtime/entity-tx/handlers/dispute.ts`
+- `runtime/entity/tx/handlers/dispute.ts`
   - Use `account.activeDispute.starterInitialArguments` and
     `account.activeDispute.starterIncrementedArguments`.
   - If finalizing the initial proof, build the caller/opponent side fields for the initial
@@ -419,7 +419,7 @@ Rules:
 
 ### J-events
 
-- `runtime/entity-tx/j-events.ts`
+- `runtime/entity/tx/j-events.ts`
   - Parse `DisputeStarted`.
   - Store both starter argument blobs in `activeDispute`.
   - Store the revealed `watchSeed` for last-resort dispute protection.

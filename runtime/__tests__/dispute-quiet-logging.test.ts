@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { handleDisputeFinalize } from '../entity-tx/handlers/dispute';
+import { handleDisputeFinalize } from '../entity/tx/handlers/dispute';
 import type { EntityState, EntityTx, Env } from '../types';
 
 const ALICE = `0x${'11'.repeat(32)}`;

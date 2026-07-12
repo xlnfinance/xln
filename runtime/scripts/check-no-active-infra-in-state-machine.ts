@@ -1,10 +1,10 @@
 import { readFile } from 'node:fs/promises';
 
 const TARGETS = [
-  'runtime/entity-tx/apply.ts',
-  'runtime/entity-tx/j-events.ts',
-  'runtime/entity-tx/handlers/dispute.ts',
-  'runtime/entity-tx/handlers/j-broadcast.ts',
+  'runtime/entity/tx/apply.ts',
+  'runtime/entity/tx/j-events.ts',
+  'runtime/entity/tx/handlers/dispute.ts',
+  'runtime/entity/tx/handlers/j-broadcast.ts',
   'runtime/account-consensus.ts',
   'runtime/entity-consensus.ts',
 ];

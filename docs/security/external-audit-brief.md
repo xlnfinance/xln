@@ -97,10 +97,10 @@ operational evidence for restart/load stability, not unit-test substitutes.
 - `runtime/runtime.ts`
 - `runtime/entity-consensus.ts`
 - `runtime/account-consensus.ts`
-- `runtime/entity-tx/apply.ts`
-- `runtime/entity-tx/j-events.ts`
-- `runtime/entity-tx/handlers/account.ts`
-- `runtime/entity-tx/handlers/account-cross-j-followups.ts`
+- `runtime/entity/tx/apply.ts`
+- `runtime/entity/tx/j-events.ts`
+- `runtime/entity/tx/handlers/account.ts`
+- `runtime/entity/tx/handlers/account-cross-j-followups.ts`
 - `runtime/account/tx/handlers/pull.ts`
 - `runtime/account/tx/handlers/swap-resolve.ts`
 - `runtime/cross-jurisdiction.ts`
@@ -112,7 +112,7 @@ operational evidence for restart/load stability, not unit-test substitutes.
 - `runtime/jadapter/helpers.ts`
 - `runtime/lending.ts`
 - `runtime/types/lending.ts`
-- `runtime/entity-tx/handlers/lending.ts`
+- `runtime/entity/tx/handlers/lending.ts`
 - `runtime/server/lending.ts`
 - `runtime/relay/router.ts`
 - `runtime/networking/p2p.ts`

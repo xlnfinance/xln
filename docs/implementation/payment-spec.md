@@ -54,7 +54,7 @@ interface DirectPaymentAccountTx {
 
 #### Step 1: Entity Machine Receives Payment Command
 ```typescript
-// In entity-tx/apply.ts
+// In entity/tx/apply.ts
 function applyDirectPaymentTx(
   entityState: EntityState,
   tx: DirectPaymentEntityTx,
@@ -249,7 +249,7 @@ interface CancelHashlockAccountTx {
 ### 2.3 Onion Routing Implementation
 
 ```typescript
-// In entity-tx/onion.ts
+// In entity/tx/onion.ts
 import { encrypt, decrypt } from '../crypto-utils';
 
 interface OnionLayer {
@@ -317,7 +317,7 @@ export function peelOnionLayer(
 
 #### Step 1: E-Machine Initiates Hashlock Payment
 ```typescript
-// In entity-tx/handlers/payment.ts
+// In entity/tx/handlers/payment.ts
 async function applyHashlockPaymentTx(
   env: Env,
   entityState: EntityState,
@@ -690,7 +690,7 @@ export class PathFinder {
 ### 3.4 Integration with Entity Machine
 
 ```typescript
-// In entity-tx/handlers/routing.ts
+// In entity/tx/handlers/routing.ts
 export async function findPaymentRoute(
   env: Env,
   source: string,

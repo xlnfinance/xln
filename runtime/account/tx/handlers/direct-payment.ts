@@ -208,7 +208,7 @@ export function handleDirectPayment(
         );
 
         // Store forwarding info for entity-consensus to create next hop transaction
-        // NOTE: Route already sliced by entity-tx/apply (sender removed)
+        // NOTE: Route already sliced by entity/tx/apply (sender removed)
         // So route[0] = current entity, route[1] = next hop
         accountMachine.pendingForward = {
           tokenId,

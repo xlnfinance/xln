@@ -1,0 +1,598 @@
+/**
+ * HTLC Payment Handler (Entity-level)
+ * Creates conditional payment with hashlock, routes through network
+ * Keysend model: the sender supplies the preimage up front and every hop uses
+ * encrypted envelopes. Hashlock-only invoice mode is intentionally rejected so
+ * validator replay never depends on secret discovery outside the signed tx.
+ *
+ * Pattern: Exactly like directPayment but creates htlc_lock instead of direct_payment
+ * Reference: entity/tx/apply.ts:302-437 (directPayment handler)
+ */
+
+import type { EntityState, EntityInput, AccountTx, Env, EntityTx, HtlcNoteKey } from '../../../types';
+import { cloneEntityState } from '../../../state-helpers';
+import { generateLockId, calculateHopTimelock, calculateHopRevealHeight, hashHtlcSecret } from '../../../htlc-utils';
+import { calculateRequiredInboundForDesiredForward } from '../../../htlc-utils';
+import { calculateDirectionalFeePPM, sanitizeBaseFee, sanitizeFeePPM } from '../../../routing/fees';
+import { getTokenCapacity } from '../../../routing/capacity';
+import { deriveDelta } from '../../../account-utils';
+import { NobleCryptoProvider } from '../../../crypto-noble';
+import { createOnionEnvelopes, type HtlcEnvelope } from '../../../htlc-envelope-types';
+import { getRuntimeJurisdictionHeight } from '../../../j-height';
+import { compareStableText, safeStringify } from '../../../serialization-utils';
+import { resolvePaymentDeadlineWindow } from '../../../payment-delivery';
+import { getReplicaByEntityId } from '../../../replica-utils';
+import { createStructuredLogger, formatAmount, shortHash, shortId } from '../../../logger';
+
+const formatEntityId = (id: string) => id.slice(-4);
+const addMessage = (state: EntityState, message: string) => state.messages.push(message);
+const htlcLog = createStructuredLogger('entity.htlc');
+const logError = (context: string, message: string) => htlcLog.error('failed', { context, message });
+const isHexChar = (char: string): boolean => {
+  const code = char.charCodeAt(0);
+  return (
+    (code >= 48 && code <= 57) ||
+    (code >= 65 && code <= 70) ||
+    (code >= 97 && code <= 102)
+  );
+};
+
+const isHexValue = (value: string, expectedBytes: number): boolean => {
+  const expectedLength = 2 + expectedBytes * 2;
+  if (value.length !== expectedLength || !value.startsWith('0x')) return false;
+  for (let index = 2; index < value.length; index += 1) {
+    if (!isHexChar(value[index]!)) return false;
+  }
+  return true;
+};
+
+export async function handleHtlcPayment(
+  entityState: EntityState,
+  entityTx: Extract<EntityTx, { type: 'htlcPayment' }>,
+  env: Env
+): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: Array<{ accountId: string; tx: AccountTx }> }> {
+  const trace = (message: string, fields: Record<string, unknown> = {}): void => {
+    if (env.quietRuntimeLogs !== true) htlcLog.debug(message, fields);
+  };
+
+  trace('start', {
+    from: shortId(entityState.entityId),
+    target: shortId(entityTx.data.targetEntityId),
+    tokenId: entityTx.data.tokenId,
+    amount: formatAmount(entityTx.data.amount),
+    route: entityTx.data.route?.map((entityId: string) => shortId(entityId)) ?? [],
+  });
+
+  // Emit HTLC initiation event
+  env.emit('HtlcInitiated', {
+    fromEntity: entityState.entityId,
+    toEntity: entityTx.data.targetEntityId,
+    tokenId: entityTx.data.tokenId,
+    amount: entityTx.data.amount.toString(),
+    route: entityTx.data.route,
+  });
+
+  const newState = cloneEntityState(entityState);
+  const outputs: EntityInput[] = [];
+  const mempoolOps: Array<{ accountId: string; tx: AccountTx }> = [];
+
+  // Extract payment details
+  let { targetEntityId, tokenId, amount, route, description, secret, hashlock } = entityTx.data;
+  const deliveryMode = entityTx.data.deliveryMode ?? 'async';
+  if (deliveryMode !== 'instant' && deliveryMode !== 'async') {
+    throw new Error(`HTLC_PAYMENT_DELIVERY_MODE_INVALID:${String(deliveryMode)}`);
+  }
+  const desiredRecipientAmount: bigint = typeof amount === 'bigint' ? amount : BigInt(String(amount));
+  amount = desiredRecipientAmount;
+  const paymentStartedAtMs =
+    typeof entityTx.data.startedAtMs === 'number' ? entityTx.data.startedAtMs : newState.timestamp;
+
+  // Validate secret/hashlock - MUST be provided in tx (determinism requirement)
+  if (!secret && !hashlock) {
+    // CRITICAL: Cannot generate in consensus - would cause validator divergence!
+    logError("HTLC_PAYMENT", `❌ secret/hashlock REQUIRED in tx.data (determinism)`);
+    addMessage(newState, `❌ HTLC payment failed: secret/hashlock must be provided`);
+    return { newState, outputs: [], mempoolOps: [] };
+  } else if (secret && !hashlock) {
+    try {
+      hashlock = hashHtlcSecret(secret);
+      trace('hashlock.derived', { hashlock: shortHash(hashlock) });
+    } catch (error) {
+      logError("HTLC_PAYMENT", `❌ Invalid secret format: ${error instanceof Error ? error.message : String(error)}`);
+      addMessage(newState, `❌ HTLC payment failed: invalid secret`);
+      return { newState, outputs: [], mempoolOps: [] };
+    }
+  } else if (!secret && hashlock) {
+    logError("HTLC_PAYMENT", `❌ Provided hashlock without secret`);
+    addMessage(newState, `❌ HTLC payment failed: missing secret`);
+    return { newState, outputs: [], mempoolOps: [] };
+  } else if (secret && hashlock) {
+    try {
+      const computed = hashHtlcSecret(secret);
+      if (computed !== hashlock) {
+        logError("HTLC_PAYMENT", `❌ Secret/hashlock mismatch: computed ${computed.slice(0,16)}..., expected ${hashlock.slice(0,16)}...`);
+        addMessage(newState, `❌ HTLC payment failed: secret/hash mismatch`);
+        return { newState, outputs: [], mempoolOps: [] };
+      }
+    } catch (error) {
+      logError("HTLC_PAYMENT", `❌ Invalid secret format: ${error instanceof Error ? error.message : String(error)}`);
+      addMessage(newState, `❌ HTLC payment failed: invalid secret`);
+      return { newState, outputs: [], mempoolOps: [] };
+    }
+  }
+  if (!secret || !hashlock) {
+    logError("HTLC_PAYMENT", `❌ Missing finalized secret/hashlock after validation`);
+    addMessage(newState, `❌ HTLC payment failed: missing secret`);
+    return { newState, outputs: [], mempoolOps: [] };
+  }
+  const finalizedSecret = secret;
+  const finalizedHashlock = hashlock;
+
+  // If no route provided, check for direct account or calculate route
+  if (!route || route.length === 0) {
+    // Account keyed by counterparty ID (no canonical helper needed)
+    if (newState.accounts.has(targetEntityId)) {
+      trace('route.direct_account', { target: shortId(targetEntityId) });
+      route = [entityState.entityId, targetEntityId];
+    } else {
+      // Find route through network using gossip
+      if (env.gossip) {
+        const networkGraph = env.gossip.getNetworkGraph();
+        const paths = await networkGraph.findPaths(entityState.entityId, targetEntityId, amount, tokenId);
+
+        if (paths.length > 0) {
+          const selectedPath = paths[0]?.path;
+          if (!selectedPath) {
+            logError("HTLC_PAYMENT", `❌ Route search returned an empty path to ${formatEntityId(targetEntityId)}`);
+            addMessage(newState, `❌ HTLC payment failed: invalid route`);
+            return { newState, outputs: [], mempoolOps: [] };
+          }
+          route = selectedPath;
+          trace('route.discovery_found', { route: route.map((entityId: string) => shortId(entityId)) });
+        } else {
+          logError("HTLC_PAYMENT", `❌ No route found to ${formatEntityId(targetEntityId)}`);
+          addMessage(newState, `❌ HTLC payment failed: No route to ${formatEntityId(targetEntityId)}`);
+          return { newState, outputs: [], mempoolOps: [] };
+        }
+      } else {
+        logError("HTLC_PAYMENT", `❌ Cannot find route: Gossip layer not available`);
+        addMessage(newState, `❌ HTLC payment failed: Network routing unavailable`);
+        return { newState, outputs: [], mempoolOps: [] };
+      }
+    }
+  }
+
+  // Validate route starts with current entity
+  if (route.length < 1 || route[0] !== entityState.entityId) {
+    logError("HTLC_PAYMENT", `❌ Invalid route: doesn't start with current entity`);
+    return { newState: entityState, outputs: [], mempoolOps: [] };
+  }
+
+  // Validate route ends with targetEntityId
+  if (route[route.length - 1] !== targetEntityId) {
+    logError("HTLC_PAYMENT", `❌ Invalid route: end doesn't match targetEntityId`);
+    return { newState: entityState, outputs: [], mempoolOps: [] };
+  }
+
+  // Check if we're the final destination
+  if (route.length === 1 && route[0] === targetEntityId) {
+    addMessage(newState, `💰 Received HTLC payment of ${amount} (token ${tokenId})`);
+    return { newState, outputs: [], mempoolOps: [] };
+  }
+
+  // Determine next hop
+  const nextHop = route[1];
+  if (!nextHop) {
+    logError("HTLC_PAYMENT", `❌ Invalid route: no next hop`);
+    return { newState, outputs: [], mempoolOps: [] };
+  }
+
+  // Check if we have an account with next hop
+  // Accounts keyed by counterparty ID (simpler than canonical)
+  if (!newState.accounts.has(nextHop)) {
+    logError("HTLC_PAYMENT", `❌ No account with next hop: ${nextHop.slice(-4)}`);
+    addMessage(newState, `❌ HTLC payment failed: No account with ${formatEntityId(nextHop)}`);
+    return { newState, outputs: [], mempoolOps: [] };
+  }
+
+  const preparedSenderLockRaw = entityTx.data.preparedSenderLockAmount;
+  const preparedEnvelopeRaw = entityTx.data.preparedEnvelope;
+  const preparedLockIdRaw = entityTx.data.preparedLockId;
+  const preparedTimelockRaw = entityTx.data.preparedTimelock;
+  const preparedRevealBeforeHeightRaw = entityTx.data.preparedRevealBeforeHeight;
+  let senderLockAmount: bigint | null = null;
+  let totalFee: bigint | null = null;
+  let lockId: string | null = null;
+  let timelock: bigint | null = null;
+  let revealBeforeHeight: number | null = null;
+  const hopForwardAmounts = new Map<string, bigint>();
+
+  // Recipient-exact semantics:
+  // tx.data.amount is what final recipient should receive.
+  // Compute sender lock amount by inverting per-intermediary fee schedule.
+  // On replay, prefer persisted prepared payload to avoid non-deterministic
+  // re-encryption and route-dependent drift.
+  const feeConfigForHop = (
+    fromEntityId: string,
+    toEntityId: string,
+    tokId: number
+  ): { feePpm: number; baseFee: bigint } => {
+    const fromNorm = String(fromEntityId || '').toLowerCase();
+    const toNorm = String(toEntityId || '').toLowerCase();
+    const profile = env.gossip?.getProfiles?.().find((candidate) => candidate.entityId.toLowerCase() === fromNorm);
+    const basePpm = sanitizeFeePPM(profile?.metadata.routingFeePPM ?? 1, 1);
+    const baseFee = sanitizeBaseFee(profile?.metadata.baseFee ?? 0n);
+
+    const account = profile?.accounts.find((candidate) => candidate.counterpartyId.toLowerCase() === toNorm) ?? null;
+    const tokenCap = getTokenCapacity(account?.tokenCapacities, tokId);
+    const outCap = tokenCap?.outCapacity ?? 0n;
+    const inCap = tokenCap?.inCapacity ?? 0n;
+    const feePpm = calculateDirectionalFeePPM(basePpm, outCap, inCap);
+    return { feePpm, baseFee };
+  };
+  if (preparedSenderLockRaw !== undefined && preparedEnvelopeRaw !== undefined) {
+    try {
+      senderLockAmount = typeof preparedSenderLockRaw === 'bigint'
+        ? preparedSenderLockRaw
+        : BigInt(String(preparedSenderLockRaw));
+      totalFee = senderLockAmount - desiredRecipientAmount;
+      if (senderLockAmount <= 0n || totalFee < 0n) {
+        throw new Error(`invalid prepared amounts senderLock=${senderLockAmount} totalFee=${totalFee}`);
+      }
+      trace('quote.prepared', {
+        recipient: formatAmount(desiredRecipientAmount),
+        senderLock: formatAmount(senderLockAmount),
+        totalFee: formatAmount(totalFee),
+      });
+    } catch (error) {
+      logError('HTLC_PAYMENT', `❌ Invalid prepared sender lock amount: ${error instanceof Error ? error.message : String(error)}`);
+      addMessage(newState, '❌ HTLC payment failed: invalid prepared payload');
+      return { newState, outputs: [], mempoolOps: [] };
+    }
+  } else {
+    let computedSenderLockAmount = desiredRecipientAmount;
+    for (let i = route.length - 2; i >= 1; i -= 1) {
+      const intermediary = route[i]!;
+      const nextHop = route[i + 1]!;
+      const { feePpm, baseFee } = feeConfigForHop(intermediary, nextHop, tokenId);
+      const forwardAmount = computedSenderLockAmount;
+      hopForwardAmounts.set(intermediary, forwardAmount);
+      computedSenderLockAmount = calculateRequiredInboundForDesiredForward(forwardAmount, feePpm, baseFee);
+    }
+    if (computedSenderLockAmount < desiredRecipientAmount) {
+      logError('HTLC_PAYMENT', '❌ Sender lock amount underflow after fee inversion');
+      addMessage(newState, '❌ HTLC payment failed: fee inversion underflow');
+      return { newState, outputs: [], mempoolOps: [] };
+    }
+    senderLockAmount = computedSenderLockAmount;
+    totalFee = computedSenderLockAmount - desiredRecipientAmount;
+    trace('quote.computed', {
+      recipient: formatAmount(desiredRecipientAmount),
+      senderLock: formatAmount(computedSenderLockAmount),
+      totalFee: formatAmount(totalFee),
+    });
+  }
+  if (senderLockAmount === null || totalFee === null) {
+    logError('HTLC_PAYMENT', '❌ Missing finalized HTLC quote amounts');
+    addMessage(newState, '❌ HTLC payment failed: missing quote amounts');
+    return { newState, outputs: [], mempoolOps: [] };
+  }
+  const finalizedSenderLockAmount = senderLockAmount;
+  const finalizedTotalFee = totalFee;
+
+  // Fail-fast sender-side capacity gate:
+  // reject overspend before queuing any account mempool operation.
+  const nextHopDelta = newState.accounts.get(nextHop)?.deltas?.get(tokenId);
+  if (!nextHopDelta) {
+    logError("HTLC_PAYMENT", `❌ No delta state for next hop ${formatEntityId(nextHop)} token ${tokenId}`);
+    addMessage(newState, `❌ HTLC payment failed: missing account state`);
+    return { newState, outputs: [], mempoolOps: [] };
+  }
+  const senderIsLeftOnNextAccount = newState.accounts.get(nextHop)?.leftEntity === entityState.entityId;
+  const nextHopCapacity = deriveDelta(nextHopDelta, senderIsLeftOnNextAccount).outCapacity;
+  if (finalizedSenderLockAmount > nextHopCapacity) {
+    logError(
+      "HTLC_PAYMENT",
+      `❌ Insufficient outbound capacity to ${formatEntityId(nextHop)}: required=${finalizedSenderLockAmount} available=${nextHopCapacity}`
+    );
+    addMessage(newState, `❌ HTLC payment failed: insufficient capacity`);
+    return { newState, outputs: [], mempoolOps: [] };
+  }
+
+  if (
+    preparedLockIdRaw !== undefined &&
+    preparedTimelockRaw !== undefined &&
+    preparedRevealBeforeHeightRaw !== undefined
+  ) {
+    try {
+      lockId = String(preparedLockIdRaw).trim();
+      timelock = typeof preparedTimelockRaw === 'bigint'
+        ? preparedTimelockRaw
+        : BigInt(String(preparedTimelockRaw));
+      revealBeforeHeight = Number(preparedRevealBeforeHeightRaw);
+      if (!lockId || !isHexValue(lockId, 32)) {
+        throw new Error(`invalid lockId=${String(preparedLockIdRaw)}`);
+      }
+      if (timelock <= 0n || !Number.isFinite(revealBeforeHeight) || revealBeforeHeight <= 0) {
+        throw new Error(`invalid deadlines timelock=${String(preparedTimelockRaw)} revealBeforeHeight=${String(preparedRevealBeforeHeightRaw)}`);
+      }
+      trace('deadlines.prepared', {
+        lockId: shortHash(lockId),
+        timelock: timelock.toString(),
+        revealBeforeHeight,
+      });
+    } catch (error) {
+      logError(
+        'HTLC_PAYMENT',
+        `❌ Invalid prepared HTLC deadlines: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      addMessage(newState, '❌ HTLC payment failed: invalid prepared deadlines');
+      return { newState, outputs: [], mempoolOps: [] };
+    }
+  } else {
+    // Calculate timelocks and reveal heights (Alice gets most time).
+    // Use the runtime jurisdiction tip, not entityState.lastFinalizedJHeight:
+    // leaf users may not have processed recent j_event_claims, but live hubs will gate
+    // against the runtime-wide chain tip when deciding whether a forwarded lock is still valid.
+    const totalHops = route.length - 1; // Minus sender
+    const hopIndex = 0; // We're always hop 0 (sender) in this handler
+    const runtimeJHeight = getRuntimeJurisdictionHeight(
+      env,
+      newState.lastFinalizedJHeight || 0,
+      newState.config.jurisdiction?.name,
+    );
+    const { baseTimelock, baseHeight } = resolvePaymentDeadlineWindow({
+      mode: deliveryMode,
+      runtimeJHeight,
+      timestamp: newState.timestamp,
+      totalHops,
+    });
+
+    timelock = calculateHopTimelock(baseTimelock, hopIndex, totalHops);
+    revealBeforeHeight = calculateHopRevealHeight(baseHeight, hopIndex, totalHops);
+    lockId = generateLockId(finalizedHashlock, newState.height, 0, newState.timestamp);
+
+    entityTx.data.preparedLockId = lockId;
+    entityTx.data.preparedTimelock = timelock.toString();
+    entityTx.data.preparedRevealBeforeHeight = revealBeforeHeight;
+    trace('deadlines.runtime', {
+      runtimeJHeight,
+      lockId: shortHash(lockId),
+      timelock: timelock.toString(),
+      revealBeforeHeight,
+    });
+  }
+
+  if (!lockId || timelock === null || revealBeforeHeight === null) {
+    logError('HTLC_PAYMENT', '❌ Missing finalized HTLC lock parameters');
+    addMessage(newState, '❌ HTLC payment failed: missing lock parameters');
+    return { newState, outputs: [], mempoolOps: [] };
+  }
+
+  // Store routing info (like 2024 hashlockMap)
+  newState.htlcRoutes.set(finalizedHashlock, {
+    hashlock: finalizedHashlock,
+    tokenId,
+    amount,
+    startedAtMs: paymentStartedAtMs,
+    outboundEntity: nextHop,
+    outboundLockId: lockId,
+    createdTimestamp: newState.timestamp
+  });
+
+  const rawPaymentDescription = typeof description === 'string' ? description.trim() : '';
+  const paymentDescription = rawPaymentDescription;
+  if (paymentDescription) {
+    if (!(newState.htlcNotes instanceof Map)) newState.htlcNotes = new Map<HtlcNoteKey, string>();
+    newState.htlcNotes.set(`hashlock:${finalizedHashlock}`, paymentDescription);
+    newState.htlcNotes.set(`lock:${lockId}`, paymentDescription);
+  }
+
+  // Create encrypted onion envelope (privacy-preserving routing)
+  let envelope: HtlcEnvelope | string | undefined;
+  if (preparedEnvelopeRaw !== undefined) {
+    if (typeof preparedEnvelopeRaw !== 'string' && !preparedEnvelopeRaw) {
+      logError("HTLC_PAYMENT", `❌ Invalid prepared envelope`);
+      addMessage(newState, `❌ HTLC payment failed: invalid prepared envelope`);
+      return { newState, outputs: [], mempoolOps: [] };
+    }
+    envelope = preparedEnvelopeRaw as HtlcEnvelope | string;
+  } else try {
+    const normalizeX25519Hex = (raw: unknown): string | null => {
+      if (typeof raw !== 'string') return null;
+      const trimmed = raw.trim();
+      if (!trimmed) return null;
+      const prefixed = trimmed.startsWith('0x') ? trimmed : `0x${trimmed}`;
+      return isHexValue(prefixed, 32) ? prefixed.toLowerCase() : null;
+    };
+    const normalizeX25519Base64 = (raw: unknown): string | null => {
+      if (typeof raw !== 'string') return null;
+      const trimmed = raw.trim();
+      if (!trimmed) return null;
+      if (trimmed.length % 4 !== 0) return null;
+      let paddingStarted = false;
+      let paddingCount = 0;
+      for (const char of trimmed) {
+        const code = char.charCodeAt(0);
+        const isUpper = code >= 65 && code <= 90;
+        const isLower = code >= 97 && code <= 122;
+        const isDigit = code >= 48 && code <= 57;
+        const isBase64 = isUpper || isLower || isDigit || char === '+' || char === '/';
+        if (char === '=') {
+          paddingStarted = true;
+          paddingCount += 1;
+          if (paddingCount > 2) return null;
+          continue;
+        }
+        if (!isBase64 || paddingStarted) return null;
+      }
+      try {
+        const bytes = typeof atob === 'function'
+          ? Uint8Array.from(atob(trimmed), (c) => c.charCodeAt(0))
+          : new Uint8Array(Buffer.from(trimmed, 'base64'));
+        return bytes.length === 32 ? trimmed : null;
+      } catch {
+        return null;
+      }
+    };
+    type ResolvedKey = { key: string; source: string };
+    const resolveEntityEncryptionKey = (entityId: string): ResolvedKey | null => {
+      // Prefer gossip-advertised key first: it is the network source-of-truth for remote delivery.
+      // Local mirrored replicas can be stale/mixed across runtime switches.
+      if (env.gossip) {
+        const profiles = typeof env.gossip.getProfiles === 'function' ? env.gossip.getProfiles() : [];
+        const matches = profiles.filter((profile) => profile.entityId === entityId);
+        for (const profile of matches) {
+          const key = normalizeX25519Hex(profile.metadata.entityEncPubKey)
+            ?? normalizeX25519Base64(profile.metadata.entityEncPubKey);
+          if (key) return { key, source: 'gossip.metadata.entityEncPubKey' };
+        }
+      }
+
+      // Fallback: local replica key for same-rt scenarios or when gossip is stale.
+      const replica = getReplicaByEntityId(env, entityId);
+      const localKey = normalizeX25519Hex(replica?.state?.entityEncPubKey)
+        ?? normalizeX25519Base64(replica?.state?.entityEncPubKey);
+      if (localKey) return { key: localKey, source: 'localReplica.state.entityEncPubKey' };
+
+      return null;
+    };
+
+    // Gather public keys for each HOP (all route entities EXCEPT sender at [0])
+    // Sender never encrypts to self — only to intermediaries and recipient
+    const entityPubKeys = new Map<string, string>();
+    const keySources = new Map<string, string>();
+    const hops = route.slice(1); // Everyone except sender
+    const missingKeys: string[] = [];
+    for (const entityId of hops) {
+      const resolved = resolveEntityEncryptionKey(entityId);
+      if (resolved) {
+        entityPubKeys.set(entityId, resolved.key);
+        keySources.set(entityId, resolved.source);
+        continue;
+      }
+      missingKeys.push(entityId);
+    }
+
+    if (missingKeys.length > 0) {
+      const missingList = missingKeys.map(e => formatEntityId(e)).join(', ');
+      const availableList = [...entityPubKeys.keys()].map(e => formatEntityId(e)).join(', ');
+      const msg = `❌ HTLC rejected: missing encryption keys for route hops [${missingList}]`;
+      logError("HTLC_PAYMENT", `${msg} route=${route.map(formatEntityId).join('→')} available=[${availableList}]`);
+      addMessage(newState, `${msg}. Refresh gossip and retry.`);
+      htlcLog.warn('envelope.keys_missing', {
+        route: route.map((entityId: string) => shortId(entityId)),
+        missing: missingKeys.map((entityId) => shortId(entityId)),
+        available: [...entityPubKeys.keys()].map((entityId) => shortId(entityId)),
+      });
+      return { newState, outputs: [], mempoolOps: [] };
+    }
+    const keyDebug = hops.map((entityId: string) => {
+      const key = entityPubKeys.get(entityId) || '';
+      const isHex = isHexValue(key, 32);
+      const source = keySources.get(entityId) || 'unknown';
+      return { entity: shortId(entityId), format: isHex ? 'hex32' : 'b64', length: key.length, source };
+    });
+    trace('envelope.keys', { keys: keyDebug });
+    const deterministicEnvelopeSeed = safeStringify({
+      version: 'xln:htlc-envelope-entropy:v1',
+      sender: newState.entityId,
+      targetEntityId,
+      tokenId,
+      recipientAmount: desiredRecipientAmount.toString(),
+      senderLockAmount: finalizedSenderLockAmount.toString(),
+      totalFee: finalizedTotalFee.toString(),
+      hashlock: finalizedHashlock,
+      secret: finalizedSecret,
+      route,
+      startedAtMs: paymentStartedAtMs,
+      hopForwardAmounts: Array.from(hopForwardAmounts.entries())
+        .sort(([left], [right]) => compareStableText(left, right))
+        .map(([entityId, forwardAmount]) => [entityId, forwardAmount.toString()]),
+      entityPubKeys: Array.from(entityPubKeys.entries())
+        .sort(([left], [right]) => compareStableText(left, right)),
+    });
+    const crypto = new NobleCryptoProvider({ deterministicSeed: deterministicEnvelopeSeed });
+
+    envelope = await createOnionEnvelopes(
+      route,
+      finalizedSecret,
+      entityPubKeys,
+      crypto,
+      hopForwardAmounts,
+      paymentDescription || undefined,
+      paymentStartedAtMs,
+    );
+    trace('envelope.created', {
+      encrypted: true,
+      hops: hops.length,
+      keyCount: entityPubKeys.size,
+      missing: missingKeys.map((entityId) => shortId(entityId)),
+    });
+
+    // Persist deterministic payload for WAL replay.
+    entityTx.data.preparedEnvelope = envelope;
+    entityTx.data.preparedSenderLockAmount = finalizedSenderLockAmount.toString();
+    entityTx.data.preparedTotalFee = finalizedTotalFee.toString();
+  } catch (e) {
+    logError("HTLC_PAYMENT", `❌ Envelope creation failed: ${e instanceof Error ? e.message : String(e)}`);
+    addMessage(newState, `❌ HTLC payment failed: Invalid route`);
+    return { newState, outputs: [], mempoolOps: [] };
+  }
+
+  // Create htlc_lock AccountTx
+  const accountTx: AccountTx = {
+    type: 'htlc_lock',
+    data: {
+      lockId,
+      hashlock: finalizedHashlock,
+      timelock,
+      revealBeforeHeight,
+      amount: finalizedSenderLockAmount,
+      tokenId,
+      deliveryMode,
+      envelope  // Onion envelope (cleartext JSON in Phase 2)
+    },
+  };
+
+  // Queue mempool operation (entity-consensus will apply + mark account proposable)
+  const accountMachine = newState.accounts.get(nextHop);
+  if (accountMachine) {
+    mempoolOps.push({ accountId: nextHop, tx: accountTx });
+    trace('mempool.queued', {
+      account: shortId(nextHop),
+      lockId: shortHash(lockId),
+      revealBeforeHeight,
+      amount: formatAmount(finalizedSenderLockAmount),
+      tokenId,
+    });
+
+    // Add to lockBook (E-Machine aggregated view)
+    newState.lockBook.set(lockId, {
+      lockId,
+      accountId: nextHop, // Use counterparty ID as key (simpler than canonical)
+      tokenId,
+      amount: finalizedSenderLockAmount,
+      hashlock: finalizedHashlock,
+      timelock,
+      direction: 'outgoing',
+      createdAt: BigInt(newState.timestamp),
+    });
+
+    addMessage(newState,
+      `🔒 HTLC: Recipient ${desiredRecipientAmount}, sender lock ${finalizedSenderLockAmount} (fee ${finalizedTotalFee}) to ${formatEntityId(targetEntityId)} via ${route.length - 1} hops`
+    );
+
+    // Trigger processing
+    const firstValidator = entityState.config.validators[0];
+    if (firstValidator) {
+      outputs.push({
+        entityId: entityState.entityId,
+        signerId: firstValidator,
+        entityTxs: []
+      });
+    }
+  }
+
+  return { newState, outputs, mempoolOps };
+}

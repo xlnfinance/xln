@@ -26,7 +26,7 @@ This folder owns bilateral account transaction application.
 ## Called by
 
 - `account-consensus.ts`
-- `entity-tx/handlers/account*.ts` followups that inspect committed account tx results
+- `entity/tx/handlers/account*.ts` followups that inspect committed account tx results
 
 ## Calls into
 

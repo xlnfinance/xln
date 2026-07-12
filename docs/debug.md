@@ -103,7 +103,7 @@ All critical paths MUST emit structured events through env/p2p pipeline, not ad-
 REA metadata path:
 
 - Build tx: `type: 'profile-update'`
-- Apply in runtime consensus flow (`runtime/entity-tx/apply.ts`)
+- Apply in runtime consensus flow (`runtime/entity/tx/apply.ts`)
 - Persist + gossip sync via name-resolution pipeline
 - Observe results in relay debug timeline (`debug_event`, `message`, `gossip_store`)
 

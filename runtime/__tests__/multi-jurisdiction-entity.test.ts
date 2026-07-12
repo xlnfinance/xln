@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { buildDebtEnforcementRuntimeInput, createEmptyEnv, enqueueRuntimeInput, process } from '../runtime';
-import { applyEntityTx } from '../entity-tx/apply';
+import { applyEntityTx } from '../entity/tx/apply';
 import {
   assertSameJurisdictionAccount,
   getJReplicaByJurisdictionRef,

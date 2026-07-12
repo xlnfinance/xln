@@ -23,7 +23,7 @@ import {
   assert, findReplica, usd, snap,
 } from './helpers';
 import { bootScenario, registerEntities, type RegisteredEntity } from './boot';
-import { userAutoApprove } from '../entity-tx/handlers/settle';
+import { userAutoApprove } from '../entity/tx/handlers/settle';
 import { deriveDelta } from '../account-utils';
 import { isLeftEntity } from '../entity-id-utils';
 import { hashHtlcSecret } from '../htlc-utils';

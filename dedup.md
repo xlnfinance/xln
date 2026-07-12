@@ -22,22 +22,22 @@ Top 100 simplification targets:
 10. `runtime/account-consensus.ts` — split proposer commit, receiver commit, and ACK handling into separate modules.
 11. `runtime/account-consensus.ts` — centralize dispute-hanko verification instead of repeating it in multiple branches.
 12. `runtime/account-consensus.ts` — centralize frame-history append logic behind one canonical frame clone helper.
-13. `runtime/entity-tx/apply.ts` — reduce giant tx-type switch by moving branch tables into handler registry.
-14. `runtime/entity-tx/apply.ts` — move event emission collection out of handler switch scaffolding.
-15. `runtime/entity-tx/handlers/account.ts` — split HTLC resolve, direct payment, and swap-side delta logic.
-16. `runtime/entity-tx/handlers/account.ts` — centralize disputed-account gate instead of inline repeated checks.
-17. `runtime/entity-tx/handlers/settle.ts` — split workspace mutation, approval, execute, and auto-approve paths.
-18. `runtime/entity-tx/handlers/settle.ts` — unify post-settlement dispute-proof refresh logic.
-19. `runtime/entity-tx/handlers/dispute.ts` — split disputeStart and disputeFinalize into separate files.
-20. `runtime/entity-tx/handlers/dispute.ts` — move proof-body canonicalization helpers to shared proof module.
-21. `runtime/entity-tx/handlers/dispute.ts` — centralize on-chain account read and stale-local-dispute cleanup.
-22. `runtime/entity-tx/handlers/dispute.ts` — centralize current J-height lookup through one imported helper only.
-23. `runtime/entity-tx/handlers/htlc-payment.ts` — split route preparation from lock creation and envelope prep.
-24. `runtime/entity-tx/handlers/htlc-payment.ts` — move prepared-deadline validation into a shared HTLC utility.
-25. `runtime/entity-tx/j-events.ts` — split per-event handlers into smaller files by event family.
-26. `runtime/entity-tx/j-events.ts` — extract dispute event application into `j-events-dispute.ts`.
-27. `runtime/entity-tx/j-events.ts` — extract reserve event application into `j-events-reserve.ts`.
-28. `runtime/entity-tx/j-events.ts` — extract settlement event application into `j-events-settlement.ts`.
+13. `runtime/entity/tx/apply.ts` — reduce giant tx-type switch by moving branch tables into handler registry.
+14. `runtime/entity/tx/apply.ts` — move event emission collection out of handler switch scaffolding.
+15. `runtime/entity/tx/handlers/account.ts` — split HTLC resolve, direct payment, and swap-side delta logic.
+16. `runtime/entity/tx/handlers/account.ts` — centralize disputed-account gate instead of inline repeated checks.
+17. `runtime/entity/tx/handlers/settle.ts` — split workspace mutation, approval, execute, and auto-approve paths.
+18. `runtime/entity/tx/handlers/settle.ts` — unify post-settlement dispute-proof refresh logic.
+19. `runtime/entity/tx/handlers/dispute.ts` — split disputeStart and disputeFinalize into separate files.
+20. `runtime/entity/tx/handlers/dispute.ts` — move proof-body canonicalization helpers to shared proof module.
+21. `runtime/entity/tx/handlers/dispute.ts` — centralize on-chain account read and stale-local-dispute cleanup.
+22. `runtime/entity/tx/handlers/dispute.ts` — centralize current J-height lookup through one imported helper only.
+23. `runtime/entity/tx/handlers/htlc-payment.ts` — split route preparation from lock creation and envelope prep.
+24. `runtime/entity/tx/handlers/htlc-payment.ts` — move prepared-deadline validation into a shared HTLC utility.
+25. `runtime/entity/tx/j-events.ts` — split per-event handlers into smaller files by event family.
+26. `runtime/entity/tx/j-events.ts` — extract dispute event application into `j-events-dispute.ts`.
+27. `runtime/entity/tx/j-events.ts` — extract reserve event application into `j-events-reserve.ts`.
+28. `runtime/entity/tx/j-events.ts` — extract settlement event application into `j-events-settlement.ts`.
 29. `runtime/entity-crontab.ts` — split periodic tasks and one-shot hooks into separate modules.
 30. `runtime/entity-crontab.ts` — extract dispute hook logic from rebalance and HTLC hook logic.
 31. `runtime/runtime.ts` — split storage replay loop from validation and debug/read helpers.

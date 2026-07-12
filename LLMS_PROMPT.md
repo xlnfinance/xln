@@ -19,8 +19,8 @@ Read first:
 2. contracts/Depository.sol, Account.sol, DeltaTransformer.sol.
 3. runtime/types.ts, runtime/runtime.ts, runtime/entity-consensus.ts, runtime/account-consensus.ts.
 4. runtime/cross-jurisdiction*.ts, runtime/orderbook/cross-j-orderbook.ts.
-5. runtime/entity-tx/handlers/cross-j-*.ts, swap-requests.ts, dispute.ts.
-6. runtime/entity-tx/handlers/account/orderbook-matching-*.ts.
+5. runtime/entity/tx/handlers/cross-j-*.ts, swap-requests.ts, dispute.ts.
+6. runtime/entity/tx/handlers/account/orderbook-matching-*.ts.
 7. runtime/account/tx/handlers/swap-*.ts and cross-swap-fill-ack.ts.
 8. runtime/orchestrator/mm-node.ts, runtime/server/market-maker-health.ts, runtime/relay/market-subscriptions.ts.
 9. frontend SwapPanel.svelte, OrderbookPanel.svelte, routed-swap-planner.ts, routed-swap-execution.ts.
@@ -57,7 +57,7 @@ ANALYSIS QUESTIONS:
 1. **Invariant Safety**: Can RCPAN invariant be violated? Check boundary conditions in deriveDelta()
 2. **Consensus Correctness**: Is BFT threshold properly enforced? Check signature verification
 3. **Race Conditions**: Can bilateral accounts desync? Review account-consensus state machine
-4. **Financial Bugs**: Can reserves go negative? Review entity-tx/financial.ts arithmetic
+4. **Financial Bugs**: Can reserves go negative? Review entity/tx/financial.ts arithmetic
 5. **Reentrancy**: Can J-batch processing be exploited? Check j-batch.ts ordering
 
 OUTPUT FORMAT:
@@ -74,7 +74,7 @@ Be specific: cite line numbers, provide attack scenarios, suggest fixes.
 ```
 You are a security auditor hunting low-hanging bugs in XLN protocol. Focus on:
 
-FINANCIAL ARITHMETIC (types.ts, account-utils.ts, entity-tx/financial.ts):
+FINANCIAL ARITHMETIC (types.ts, account-utils.ts, entity/tx/financial.ts):
 - Integer overflow/underflow in BigInt operations
 - Division by zero in deriveDelta calculations
 - Negative reserves after withdrawal
@@ -151,7 +151,7 @@ FOCUS AREAS:
 FILES TO SCAN:
 - runtime/types.ts (interface design)
 - runtime/state-helpers.ts (pure functions)
-- runtime/entity-tx/apply.ts (dispatcher pattern)
+- runtime/entity/tx/apply.ts (dispatcher pattern)
 - runtime/account-utils.ts (utility functions)
 
 OUTPUT:

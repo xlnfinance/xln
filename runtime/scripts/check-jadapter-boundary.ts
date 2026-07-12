@@ -19,7 +19,7 @@ const DIRECT_EVM_ALLOWLIST = new Set<string>([
   'runtime/j-batch.ts',
   'runtime/jadapter/index.ts',
   'runtime/entity-factory.ts',
-  'runtime/entity-tx/j-events.ts',
+  'runtime/entity/tx/j-events.ts',
   'runtime/scenarios/boot.ts',
   'runtime/scripts/dev-anvil-stack.ts',
 ]);
@@ -101,7 +101,7 @@ function findViolations(text: string, fileRel: string): Violation[] {
   }
 
   // Reserve state must come from canonical j_event application, not direct chain reads.
-  if (fileRel !== 'runtime/entity-tx/j-events.ts') {
+  if (fileRel !== 'runtime/entity/tx/j-events.ts') {
     pushMatches(/\b(?:\w+\.)?state\.reserves\.set\s*\(/g, 'runtime-no-direct-reserve-write');
   }
 

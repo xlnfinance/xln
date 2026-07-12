@@ -1,5 +1,5 @@
 import type { AccountMachine, AccountTx, CrossJurisdictionSwapRoute } from '../../../types';
-import type { SwapOfferEvent } from '../../../entity-tx/handlers/account';
+import type { SwapOfferEvent } from '../../../entity/tx/handlers/account';
 import { SWAP_LOT_SCALE } from '../../../orderbook';
 import {
   CROSS_J_MAX_FILL_RATIO,

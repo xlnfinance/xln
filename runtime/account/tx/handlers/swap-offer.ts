@@ -11,7 +11,7 @@
  */
 
 import type { AccountMachine, AccountTx, SwapOffer } from '../../../types';
-import type { SwapOfferEvent } from '../../../entity-tx/handlers/account';
+import type { SwapOfferEvent } from '../../../entity/tx/handlers/account';
 import { deriveDelta, getSwapPairPolicyByBaseQuote } from '../../../account-utils';
 import { deriveSide, SWAP_LOT_SCALE, ORDERBOOK_PRICE_SCALE, prepareSwapOrder } from '../../../orderbook';
 import { FINANCIAL, LIMITS } from '../../../constants';

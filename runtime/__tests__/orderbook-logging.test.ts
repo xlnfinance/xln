@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 test('same-jurisdiction orderbook matching uses structured logging only', () => {
   const source = readFileSync(
-    join(process.cwd(), 'runtime/entity-tx/handlers/account/orderbook-matching-same.ts'),
+    join(process.cwd(), 'runtime/entity/tx/handlers/account/orderbook-matching-same.ts'),
     'utf8',
   );
 

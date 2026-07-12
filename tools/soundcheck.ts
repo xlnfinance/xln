@@ -65,10 +65,10 @@ const ORDERBOOK_MARKERS = [
   'runtime/orderbook',
   'runtime/swap-execution.ts',
   'runtime/account/tx/handlers/swap-resolve.ts',
-  'runtime/entity-tx/handlers/account.ts',
+  'runtime/entity/tx/handlers/account.ts',
   'runtime/storage/index.ts',
   'runtime/entity-consensus.ts',
-  'runtime/entity-tx/handlers/dispute.ts',
+  'runtime/entity/tx/handlers/dispute.ts',
   'runtime/scenarios/swap.ts',
   'runtime/types.ts',
 ];
@@ -201,7 +201,7 @@ function scanOrderbookWeakTypes(files: string[]): Finding | null {
 function scanRehydrateContinues(files: string[]): Finding | null {
   const matches: Finding['matches'] = [];
   for (const file of files) {
-    if (!file.endsWith('runtime/entity-tx/handlers/account.ts')) continue;
+    if (!file.endsWith('runtime/entity/tx/handlers/account.ts')) continue;
     const lines = readLines(file);
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i]!;

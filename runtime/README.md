@@ -14,7 +14,7 @@ If you only have 1-2 hours, read files in this order:
    Entity-frame proposer/validator/commit flow.
 3. `account-consensus.ts`
    Bilateral account-frame proposer/validator/commit flow.
-4. `entity-tx/apply.ts`
+4. `entity/tx/apply.ts`
    Entity-tx dispatcher and domain entry points.
 5. `account/tx/apply.ts`
    Bilateral account-tx dispatcher.
@@ -31,11 +31,11 @@ If you only have 1-2 hours, read files in this order:
 
 - `runtime.ts`
   Owns the runtime loop, frame persistence, env lifecycle, and top-level API.
-- `entity-consensus.ts`, `entity-consensus/`
+- `entity-consensus.ts`, `entity/consensus/`
   Own entity-frame consensus, proposal hashing, and cross-j orderbook orchestration.
 - `account-consensus.ts`, `account/consensus/`
   Own bilateral frame consensus, replay protection, and dispute proof updates.
-- `entity-tx/`
+- `entity/tx/`
   Applies entity-layer transactions, J-events, disputes, settlement, cross-j coordination.
 - `account/tx/`
   Applies bilateral txs such as payment, HTLC, pull, swap, settlement-side actions.
@@ -53,7 +53,7 @@ If you only have 1-2 hours, read files in this order:
 ## Folder Readmes
 
 - [account/tx/README.md](/Users/zigota/xln/runtime/account/tx/README.md)
-- [entity-tx/README.md](/Users/zigota/xln/runtime/entity-tx/README.md)
+- [entity/tx/README.md](/Users/zigota/xln/runtime/entity/tx/README.md)
 - [storage/README.md](/Users/zigota/xln/runtime/storage/README.md)
 - [networking/README.md](/Users/zigota/xln/runtime/networking/README.md)
 - [server/README.md](/Users/zigota/xln/runtime/server/README.md)
@@ -69,7 +69,7 @@ These files define correctness and are the first audit target:
 - `runtime.ts`
 - `entity-consensus.ts`
 - `account-consensus.ts`
-- `entity-tx/`
+- `entity/tx/`
 - `account/tx/`
 - `cross-jurisdiction.ts`
 - `j-batch.ts`

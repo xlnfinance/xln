@@ -20,7 +20,7 @@ import { safeStringify } from '../serialization-utils';
 import { resolveEntityProposerId } from '../state-helpers';
 import type { EntityTx, Env } from '../types';
 import { hashHtlcSecret } from '../htlc-utils';
-import { isEntityId32 } from '../server/utils';
+import { isEntityId32 } from './utils';
 import { requireDaemonRpcAuth } from './auth';
 import { getEntityReplicaById } from './entity-lookup';
 import type { RelaySocket } from './relay-direct';

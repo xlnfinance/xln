@@ -5,7 +5,7 @@ import {
   DEBUG_DUMPS_DIR,
   buildDebugDumpFileName,
   ensureDebugDumpDir,
-} from '../server/utils';
+} from './utils';
 
 const readDumpPayload = async (req: Request): Promise<Record<string, unknown>> => {
   const rawBody = await req.text().catch(() => '');

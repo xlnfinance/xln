@@ -55,7 +55,7 @@ import { resolveEntityProposerId } from './state-helpers';
 import { normalizeRebalanceMatchingStrategy } from './rebalance-policy';
 import { TIMING } from './constants';
 import { DEFAULT_SOFT_LIMIT } from './types';
-import { terminateHtlcRoute } from './entity-tx/htlc-route-lifecycle';
+import { terminateHtlcRoute } from './entity/tx/htlc-route-lifecycle';
 import { getRuntimeJurisdictionHeight } from './j-height';
 import { markStorageAccountDirty, markStorageEntityDirty } from './env-events';
 import { createStructuredLogger, shortHash, shortId } from './logger';

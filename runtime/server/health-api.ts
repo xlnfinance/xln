@@ -5,7 +5,7 @@ import { getStorageHealthSnapshotSync } from '../orchestrator/storage-monitor';
 import { getAllGossipProfiles, normalizeRuntimeKey, type RelayStore } from '../relay/store';
 import type { Profile } from '../networking/gossip';
 import { isLocalOperatorRequest, publicRuntimeHealthBody } from '../health-redaction';
-import { buildDiskSummary } from '../server/utils';
+import { buildDiskSummary } from './utils';
 import { getReplicaAccountCount, getReplicaReserveSnapshot } from './entity-lookup';
 import {
   HUB_MESH_CREDIT_AMOUNT,

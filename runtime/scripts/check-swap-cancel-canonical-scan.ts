@@ -18,13 +18,13 @@ assertIncludes(entityTypes, "type: 'proposeCancelSwap';", entityTypesPath);
 assertNotIncludes(entityTypes, "type: 'cancelSwap';", entityTypesPath);
 assertNotIncludes(entityTypes, "type: 'cancelSwapOffer';", entityTypesPath);
 
-const applyPath = 'runtime/entity-tx/apply.ts';
+const applyPath = 'runtime/entity/tx/apply.ts';
 const apply = readText(applyPath);
 assertIncludes(apply, 'proposeCancelSwap: (_env, state, tx, options) => handleCancelSwapRequest', applyPath);
 assertNotIncludes(apply, 'cancelSwapOffer:', applyPath);
 assertNotIncludes(apply, 'cancelSwap:', applyPath);
 
-const handlerPath = 'runtime/entity-tx/handlers/swap-requests.ts';
+const handlerPath = 'runtime/entity/tx/handlers/swap-requests.ts';
 const handler = readText(handlerPath);
 assertIncludes(handler, "Extract<EntityTx, { type: 'proposeCancelSwap' }>", handlerPath);
 assertIncludes(handler, 'const requireSwapAccount =', handlerPath);
@@ -33,7 +33,7 @@ assertNotIncludes(handler, "'cancelSwapOffer' | 'cancelSwap' | 'proposeCancelSwa
 assertNotIncludes(handler, 'console.error', handlerPath);
 assertNotIncludes(handler, 'return { newState: entityState, outputs: [] };', handlerPath);
 
-const invariantPath = 'runtime/entity-tx/invariant-errors.ts';
+const invariantPath = 'runtime/entity/tx/invariant-errors.ts';
 const invariant = readText(invariantPath);
 assertIncludes(invariant, "'SWAP_REQUEST_',", invariantPath);
 

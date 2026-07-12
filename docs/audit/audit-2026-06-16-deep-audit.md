@@ -194,7 +194,7 @@ Documented as legacy/reserved; removing them shrinks dispute/batch calldata:
   Dead + misleading; delete it. Fee math itself is sound (positive guard, fee≥amount throw).
 
 ### R8 — `AccountSettled` reserve guard skips legitimate zero (low, currently masked)
-- `entity-tx/j-events.ts:496` sets local reserve only `if (ownReserve)`. When a
+- `entity/tx/j-events.ts:496` sets local reserve only `if (ownReserve)`. When a
   settlement drives a reserve to exactly **0** and `ownReserve` normalizes to `0n`/`0`
   (falsy), the handler skips the write and logs `reserve_missing`, leaving a stale
   non-zero local reserve.
@@ -248,7 +248,7 @@ highest-leverage move toward the "less code" goal and reduces re-render/merge ri
 - Frontend is otherwise clean: only 6 `@ts-ignore`/`TODO`-class markers total.
 
 ### F2 — Misc runtime dedup (low)
-- `entity-tx/handlers/settle.ts:827 userAutoApprove` is a no-op wrapper around
+- `entity/tx/handlers/settle.ts:827 userAutoApprove` is a no-op wrapper around
   `settlement-ops.ts:146 userAutoApprove` (imported as `userAutoApproveByDiff`).
   Have `canAutoApproveWorkspace` + the two `scenarios/settle*.ts` import the real one
   directly and drop the wrapper.
@@ -313,7 +313,7 @@ encoding artifact that would coincidentally block the bad signature earlier:
   `Account.sol` and `Depository.sol`.
 - **Collateral / "God Mode" defense is robust.** Direct `reserve_to_collateral` txs are
   hard-blocked (`account/tx/handlers/reserve-to-collateral.ts`). The only collateral
-  path is `j_event_claim` → `tryFinalizeAccountJEvents` (`entity-tx/j-events-account.ts:123,147`),
+  path is `j_event_claim` → `tryFinalizeAccountJEvents` (`entity/tx/j-events-account.ts:123,147`),
   which finalizes a collateral change ONLY when **both** sides independently observed the
   same `(jHeight, jBlockHash)` AND the event multisets match. A single party cannot forge
   collateral; replay-guarded by `lastFinalizedJHeight` + `jEventChain` dedup.

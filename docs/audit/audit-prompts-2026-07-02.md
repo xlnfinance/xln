@@ -230,7 +230,7 @@ Evidence:
   `runtime/entity-consensus.ts:784-827`.
 - Single-signer hash-linked frame path:
   `runtime/entity-consensus.ts:1129-1188`.
-- Entity tx dispatch table: `runtime/entity-tx/apply.ts:193-276`.
+- Entity tx dispatch table: `runtime/entity/tx/apply.ts:193-276`.
 
 Risks:
 

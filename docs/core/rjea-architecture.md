@@ -435,7 +435,7 @@ const claimIsFromLeft = isOurFrame ? iAmLeft : !iAmLeft;
 // When Alice (LEFT) processes Hub's claim:   isOurFrame=false, iAmLeft=true → RIGHT obs ✓
 ```
 
-**Matching Logic (entity-tx/j-events.ts:158-177):**
+**Matching Logic (entity/tx/j-events.ts:158-177):**
 ```typescript
 function tryFinalizeAccountJEvents(account, counterpartyId, env) {
   // Find observations with same (jHeight, jBlockHash) from both sides

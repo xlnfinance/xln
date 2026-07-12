@@ -2,14 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
 
 import { applyAccountTx } from '../account/tx/apply';
-import { applyEntityTx } from '../entity-tx/apply';
+import { applyEntityTx } from '../entity/tx/apply';
 import {
   buildCrossJurisdictionPullBinding,
   buildCrossJurisdictionPullReveal,
   buildPreparedCrossJurisdictionRoute,
   deriveCrossJurisdictionPrivateSeed,
 } from '../cross-jurisdiction';
-import { validateCrossJurisdictionLocalBinding } from '../entity-tx/cross-jurisdiction-helpers';
+import { validateCrossJurisdictionLocalBinding } from '../entity/tx/cross-jurisdiction-helpers';
 import { createEmptyEnv } from '../runtime';
 import type { CrossJurisdictionSwapRoute } from '../types';
 import {

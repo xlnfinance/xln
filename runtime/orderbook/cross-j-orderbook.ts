@@ -2,7 +2,7 @@ import type { CrossJurisdictionBookAdmission, EntityState, Env } from '../types'
 import {
   normalizeSwapOfferForOrderbook,
   type SwapCancelEvent,
-} from '../entity-tx/handlers/account';
+} from '../entity/tx/handlers/account';
 import { type OrderbookExtState } from './index';
 import { removeBookOrderById } from './cross-j';
 import {

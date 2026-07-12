@@ -6,7 +6,7 @@ import { normalizeRuntimeKey, pushDebugEvent, type RelayStore } from '../relay/s
 import { createStructuredLogger, shortId } from '../logger';
 import { encodeRebalancePolicyMemo } from '../rebalance-policy';
 import { resolveEntityProposerId } from '../state-helpers';
-import { getErrorMessage, isEntityId32 } from '../server/utils';
+import { getErrorMessage, isEntityId32 } from './utils';
 import { getAccountMachine, getEntityOutCapacity, getEntityReplicaById, hasAccount } from './entity-lookup';
 import { getFaucetHubProfiles } from './faucet-hubs';
 import type { RegisterReceiptOptions, RuntimeIngressReceipt } from './ingress-receipts';

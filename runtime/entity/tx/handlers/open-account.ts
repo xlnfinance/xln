@@ -1,0 +1,227 @@
+import { isLeftEntity } from '../../../entity-id-utils';
+import { announceLocalEntityProfile } from '../../../networking/gossip-helper';
+import { DEFAULT_HARD_LIMIT, DEFAULT_MAX_FEE, DEFAULT_SOFT_LIMIT } from '../../../types';
+import type { Delta, EntityInput, EntityState, EntityTx, Env } from '../../../types';
+import { formatEntityId } from '../../../utils';
+import { markStorageAccountDirty, markStorageEntityDirty } from '../../../env-events';
+import { upsertSortedStringMapEntry } from '../../../sorted-index';
+import { cloneEntityState, addMessage } from '../../../state-helpers';
+import { assertSameJurisdictionAccount } from '../../../jurisdiction/jurisdiction-runtime';
+import { findAccountKey, normalizeEntityRef } from '../account-key';
+import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../../account/default-tokens';
+import { deriveAccountWatchSeed, normalizeAccountWatchSeed } from '../../../account/watch-seed';
+import { createStructuredLogger, shortId } from '../../../logger';
+import {
+  accountStateDomainFromJurisdiction,
+  computeAccountStateRoot,
+  EMPTY_ACCOUNT_STATE_ROOT,
+} from '../../../account/state-root';
+
+type OpenAccountEntityTx = Extract<EntityTx, { type: 'openAccount' }>;
+
+type OpenAccountResult = {
+  newState: EntityState;
+  outputs: EntityInput[];
+};
+
+const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
+const isEntityId32 = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
+const openAccountLog = createStructuredLogger('account.open');
+
+const USD_SCALE = 10n ** 18n;
+const toUsdWei = (value: number): bigint => BigInt(Math.max(0, Math.floor(value))) * USD_SCALE;
+
+const resolveJurisdictionRebalanceDefaults = (
+  entityState: EntityState,
+): { r2cRequestSoftLimit: bigint; hardLimit: bigint; maxAcceptableFee: bigint } => {
+  const raw = entityState.config?.jurisdiction?.rebalancePolicyUsd;
+  if (!raw) {
+    return {
+      r2cRequestSoftLimit: DEFAULT_SOFT_LIMIT,
+      hardLimit: DEFAULT_HARD_LIMIT,
+      maxAcceptableFee: DEFAULT_MAX_FEE,
+    };
+  }
+  const r2cRequestSoftLimit = toUsdWei(raw.r2cRequestSoftLimit);
+  const hardLimit = toUsdWei(raw.hardLimit);
+  const maxAcceptableFee = toUsdWei(raw.maxFee);
+  if (r2cRequestSoftLimit <= 0n || hardLimit < r2cRequestSoftLimit) {
+    return {
+      r2cRequestSoftLimit: DEFAULT_SOFT_LIMIT,
+      hardLimit: DEFAULT_HARD_LIMIT,
+      maxAcceptableFee: DEFAULT_MAX_FEE,
+    };
+  }
+  return { r2cRequestSoftLimit, hardLimit, maxAcceptableFee };
+};
+
+export const handleOpenAccountEntityTx = (
+  env: Env,
+  entityState: EntityState,
+  entityTx: OpenAccountEntityTx,
+): OpenAccountResult => {
+  const targetEntityId = entityTx.data.targetEntityId;
+  if (!isEntityId32(targetEntityId)) {
+    throw new Error(
+      `INVALID_ENTITY_ID: openAccount targetEntityId must be bytes32 hex, got "${String(targetEntityId)}"`,
+    );
+  }
+
+  const counterpartyId = normalizeEntityRef(targetEntityId);
+  const isLeft = isLeftEntity(entityState.entityId, targetEntityId);
+  const watchSeed = entityTx.data.watchSeed !== undefined
+    ? normalizeAccountWatchSeed(entityTx.data.watchSeed, 'OPEN_ACCOUNT')
+    : deriveAccountWatchSeed({
+        runtimeSeed: env.runtimeSeed ?? '',
+        runtimeId: env.runtimeId ?? null,
+        entityId: entityState.entityId,
+        counterpartyId,
+        timestamp: env.timestamp,
+      });
+  assertSameJurisdictionAccount(env, entityState.entityId, entityState.config?.jurisdiction, targetEntityId);
+
+  if (findAccountKey(entityState, counterpartyId)) {
+    const error =
+      `OPEN_ACCOUNT_ALREADY_EXISTS: entity=${formatEntityId(entityState.entityId)} ` +
+      `counterparty=${formatEntityId(counterpartyId)}`;
+    openAccountLog.error('already_exists', {
+      entity: shortId(entityState.entityId),
+      counterparty: shortId(counterpartyId),
+    });
+    throw new Error(error);
+  }
+
+  const newState = cloneEntityState(entityState);
+  const outputs: EntityInput[] = [];
+
+  addMessage(newState, `💳 Opening account with Entity ${formatEntityId(entityTx.data.targetEntityId)}...`);
+
+  const existingAccountKey = findAccountKey(newState, counterpartyId);
+  const createdLocalAccount = !existingAccountKey;
+  const accountKey = existingAccountKey ?? counterpartyId;
+  if (createdLocalAccount) {
+    env.emit('AccountOpening', {
+      entityId: entityState.entityId,
+      counterpartyId: targetEntityId,
+    });
+
+    const initialDeltas = new Map<number, Delta>();
+    const leftEntity = isLeft ? entityState.entityId : counterpartyId;
+    const rightEntity = isLeft ? counterpartyId : entityState.entityId;
+
+    upsertSortedStringMapEntry(newState.accounts, accountKey, {
+      leftEntity,
+      rightEntity,
+      watchSeed,
+      status: 'active',
+      mempool: [],
+      currentFrame: {
+        height: 0,
+        timestamp: 0,
+        jHeight: 0,
+        accountTxs: [],
+        prevFrameHash: '',
+        accountStateRoot: EMPTY_ACCOUNT_STATE_ROOT,
+        deltas: [],
+        stateHash: '',
+        byLeft: isLeft,
+      },
+      deltas: initialDeltas,
+      globalCreditLimits: {
+        ownLimit: 0n,
+        peerLimit: 0n,
+      },
+      currentHeight: 0,
+      pendingSignatures: [],
+      rollbackCount: 0,
+      proofHeader: {
+        fromEntity: entityState.entityId,
+        toEntity: counterpartyId,
+        nextProofNonce: 1,
+      },
+      proofBody: { tokenIds: [], deltas: [] },
+      disputeConfig: {
+        leftDisputeDelay: 576,
+        rightDisputeDelay: 576,
+      },
+      pendingWithdrawals: new Map(),
+      requestedRebalance: new Map(),
+      requestedRebalanceFeeState: new Map(),
+      shadow: {
+        rebalance: {
+          policy: new Map(),
+          submittedAtByToken: new Map(),
+        },
+      },
+      locks: new Map(),
+      swapOffers: new Map(),
+      pulls: new Map(),
+      swapOrderHistory: new Map(),
+      swapClosedOrders: new Map(),
+      leftJObservations: [],
+      rightJObservations: [],
+      jEventChain: [],
+      lastFinalizedJHeight: 0,
+      jNonce: 0,
+    });
+    markStorageAccountDirty(env, newState.entityId, counterpartyId);
+    markStorageEntityDirty(env, newState.entityId);
+  }
+
+  const localAccount = newState.accounts.get(accountKey);
+  if (!localAccount) {
+    throw new Error(`CRITICAL: Account machine not found after creation`);
+  }
+  const jurisdiction = entityState.config?.jurisdiction;
+  if (!jurisdiction) {
+    throw new Error(`ACCOUNT_STATE_DOMAIN_MISSING: entity=${formatEntityId(entityState.entityId)}`);
+  }
+  localAccount.currentFrame.accountStateRoot = computeAccountStateRoot(
+    localAccount,
+    accountStateDomainFromJurisdiction(jurisdiction),
+  );
+  localAccount.currentFrame.stateHash = localAccount.currentFrame.accountStateRoot;
+
+  const tokenId = entityTx.data.tokenId ?? 1;
+  const defaultTokenIds = Array.from(new Set([tokenId, ...DEFAULT_ACCOUNT_TOKEN_IDS]))
+    .filter((id) => Number.isFinite(id) && id > 0);
+  const creditAmount = entityTx.data.creditAmount;
+
+  if (!createdLocalAccount) {
+    throw new Error(
+      `OPEN_ACCOUNT_ALREADY_EXISTS_AFTER_CLONE: entity=${formatEntityId(entityState.entityId)} ` +
+      `counterparty=${formatEntityId(counterpartyId)}`,
+    );
+  }
+
+  for (const deltaTokenId of defaultTokenIds) {
+    localAccount.mempool.push({ type: 'add_delta', data: { tokenId: deltaTokenId } });
+  }
+  if (creditAmount && creditAmount > 0n) {
+    localAccount.mempool.push({ type: 'set_credit_limit', data: { tokenId, amount: creditAmount } });
+  }
+
+  const requestedPolicy = entityTx.data.rebalancePolicy;
+  const jurisdictionPolicyDefaults = resolveJurisdictionRebalanceDefaults(newState);
+  let autopilotSoftLimit = requestedPolicy?.r2cRequestSoftLimit ?? jurisdictionPolicyDefaults.r2cRequestSoftLimit;
+  let autopilotHardLimit = requestedPolicy?.hardLimit ?? jurisdictionPolicyDefaults.hardLimit;
+  let autopilotMaxFee = requestedPolicy?.maxAcceptableFee ?? jurisdictionPolicyDefaults.maxAcceptableFee;
+  if (autopilotSoftLimit <= 0n) autopilotSoftLimit = jurisdictionPolicyDefaults.r2cRequestSoftLimit;
+  if (autopilotHardLimit < autopilotSoftLimit) autopilotHardLimit = autopilotSoftLimit;
+  if (autopilotMaxFee < 0n) autopilotMaxFee = jurisdictionPolicyDefaults.maxAcceptableFee;
+  for (const policyTokenId of defaultTokenIds) {
+    localAccount.shadow.rebalance.policy.set(policyTokenId, {
+      r2cRequestSoftLimit: autopilotSoftLimit,
+      hardLimit: autopilotHardLimit,
+      maxAcceptableFee: autopilotMaxFee,
+    });
+  }
+
+  addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(counterpartyId)}`);
+
+  if (env.gossip) {
+    announceLocalEntityProfile(env, newState, env.timestamp);
+  }
+
+  return { newState, outputs };
+};

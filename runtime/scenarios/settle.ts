@@ -17,7 +17,7 @@ import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdiction
 import type { JAdapter } from '../jadapter/types';
 import { formatRuntime } from '../runtime-ascii';
 import { createGossipLayer } from '../networking/gossip';
-import { userAutoApprove } from '../entity-tx/handlers/settle';
+import { userAutoApprove } from '../entity/tx/handlers/settle';
 
 const USDC_TOKEN_ID = 1;
 const DECIMALS = 18n;

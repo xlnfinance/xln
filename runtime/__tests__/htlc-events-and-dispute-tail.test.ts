@@ -5,8 +5,8 @@ import {
   buildHtlcFinalizedEventPayload,
   buildHtlcReceivedEventPayload,
 } from '../htlc-events';
-import { applyCommittedAccountFrameFollowups } from '../entity-tx/handlers/account';
-import { pruneSettledOriginatedHtlcRoutes } from '../entity-tx/htlc-route-lifecycle';
+import { applyCommittedAccountFrameFollowups } from '../entity/tx/handlers/account';
+import { pruneSettledOriginatedHtlcRoutes } from '../entity/tx/htlc-route-lifecycle';
 import { createEmptyEnv } from '../runtime';
 import type { AccountMachine, EntityReplica } from '../types';
 

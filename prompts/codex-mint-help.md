@@ -11,7 +11,7 @@ Trying to make `mintReserves` work the SAME way as `reserve_to_reserve` (via jBa
 
 ## Code
 
-**mintReserves handler** (runtime/entity-tx/handlers/mint-reserves.ts:36):
+**mintReserves handler** (runtime/entity/tx/handlers/mint-reserves.ts:36):
 ```typescript
 newState.jBatchState.batch.reserveToReserve.push({
   receivingEntity: entityState.entityId,

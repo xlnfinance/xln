@@ -4,8 +4,8 @@ import { signAccountFrame } from '../account-crypto';
 import { buildJEventObservationDigest, canonicalJurisdictionEventsHash } from '../j-event-observation';
 import { decode, encode } from '../snapshot-coder';
 import { cloneEntityState } from '../state-helpers';
-import { applyJEvent, type JEventEntityTxData } from '../entity-tx/j-events';
-import { applyDebtEnforced } from '../entity-tx/j-events-debt';
+import { applyJEvent, type JEventEntityTxData } from '../entity/tx/j-events';
+import { applyDebtEnforced } from '../entity/tx/j-events-debt';
 import { createEmptyEnv } from '../runtime';
 import type { ConsensusConfig, EntityState, JurisdictionEvent } from '../types';
 

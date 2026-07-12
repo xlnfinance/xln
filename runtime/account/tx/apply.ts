@@ -125,7 +125,7 @@ export async function applyAccountTx(
       return handleLendingAccountTx(accountMachine, accountTx, byLeft);
 
     case 'account_settle':
-      // Blockchain settlement - handled separately in entity-tx/handlers/account.ts
+      // Blockchain settlement - handled separately in entity/tx/handlers/account.ts
       return { success: false, events: ['❌ account_settle must not be processed here'], error: 'account_settle handled externally' };
 
     case 'reserve_to_collateral':

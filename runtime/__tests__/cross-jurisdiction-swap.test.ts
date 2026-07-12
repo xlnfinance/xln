@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
 
-import { applyEntityTx } from '../entity-tx/apply';
+import { applyEntityTx } from '../entity/tx/apply';
 import { applyAccountTx } from '../account/tx/apply';
 import { handlePullCancel } from '../account/tx/handlers/pull';
-import { processOrderbookCancels } from '../entity-tx/handlers/account';
+import { processOrderbookCancels } from '../entity/tx/handlers/account';
 import { applyEntityInput } from '../entity-consensus';
 import {
   createEmptyEnv,
@@ -18,7 +18,7 @@ import { generateLazyEntityId } from '../entity-factory';
 import { createDefaultDelta } from '../validation-utils';
 import { cloneEntityState } from '../state-helpers';
 import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
-import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity-tx/handlers/account-cross-j-followups';
+import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity/tx/handlers/account-cross-j-followups';
 import {
   CROSS_J_TARGET_REVEAL_SAFETY_MS,
   buildCrossJurisdictionCloseProof,

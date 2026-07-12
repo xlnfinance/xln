@@ -486,7 +486,7 @@ export async function proposeAccountFrame(
     );
   }
 
-  // Settlements are handled via SettlementWorkspace flow (entity-tx/handlers/settle.ts).
+  // Settlements are handled via SettlementWorkspace flow (entity/tx/handlers/settle.ts).
 
   // Set pending state (no longer storing clone - re-execution on commit)
   accountMachine.pendingFrame = newFrame;

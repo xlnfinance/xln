@@ -81,18 +81,18 @@ const CORE_FILES = {
     'serialization-utils.ts', // BigInt serialization (common bug source)
 
     // Transaction processing (how txs are applied)
-    'entity-tx/index.ts',    // Entity transaction types
-    'entity-tx/apply.ts',    // Entity transaction dispatcher
-    'entity-tx/validation.ts', // Transaction validation
-    'entity-tx/financial.ts', // Financial accounting (addToReserves, subtractFromReserves)
-    'entity-tx/proposals.ts', // Proposal logic
-    'entity-tx/j-events.ts',  // Jurisdiction event handling
-    'entity-tx/handlers/account.ts',         // Account operations (openAccount, extendCredit)
-    'entity-tx/handlers/r2c.ts', // Deposit collateral / reserve-to-collateral flow (R2C)
-    'entity-tx/handlers/htlc-payment.ts',    // HTLC payment routing
-    'entity-tx/handlers/create-settlement.ts', // Settlement creation
-    'entity-tx/handlers/mint-reserves.ts',   // Reserve minting (J-events)
-    'entity-tx/handlers/dispute.ts',         // Dispute/salvage gateway and evidence handling
+    'entity/tx/index.ts',    // Entity transaction types
+    'entity/tx/apply.ts',    // Entity transaction dispatcher
+    'entity/tx/validation.ts', // Transaction validation
+    'entity/tx/financial.ts', // Financial accounting (addToReserves, subtractFromReserves)
+    'entity/tx/proposals.ts', // Proposal logic
+    'entity/tx/j-events.ts',  // Jurisdiction event handling
+    'entity/tx/handlers/account.ts',         // Account operations (openAccount, extendCredit)
+    'entity/tx/handlers/r2c.ts', // Deposit collateral / reserve-to-collateral flow (R2C)
+    'entity/tx/handlers/htlc-payment.ts',    // HTLC payment routing
+    'entity/tx/handlers/create-settlement.ts', // Settlement creation
+    'entity/tx/handlers/mint-reserves.ts',   // Reserve minting (J-events)
+    'entity/tx/handlers/dispute.ts',         // Dispute/salvage gateway and evidence handling
 
     // Swaps, orderbooks, and cross-jurisdiction markets (critical for current product)
     'runtime-swap-pairs.ts',                 // Canonical same-chain swap pair orientation and policies
@@ -104,24 +104,24 @@ const CORE_FILES = {
     'cross-jurisdiction-orderbook.ts',       // Cross-j book-owner and route ownership rules
     'cross-jurisdiction-boundary.ts',        // Runtime topology for source/target/book-owner roles
     'orderbook/cross-j-orderbook.ts', // Cross-j admission lookup/stash/drain helpers
-    'entity-tx/cross-j-outputs.ts',          // Cross-j runtime outputs and notices
-    'entity-tx/cross-jurisdiction-helpers.ts', // Cross-j account/route helper logic
-    'entity-tx/handlers/swap-requests.ts',   // Same-chain and cross-j swap request creation
-    'entity-tx/handlers/cross-j-setup.ts',   // Cross-j setup/admission path
-    'entity-tx/handlers/cross-j-book-order.ts', // Remote book-order admission
-    'entity-tx/handlers/cross-j-fill.ts',    // Cross-j fill notice routing
-    'entity-tx/handlers/cross-j-salvage.ts', // Cross-j salvage path
-    'entity-tx/handlers/cross-j-clear.ts',   // Cross-j route cleanup
-    'entity-tx/handlers/cross-j-sweep.ts',   // Cross-j terminal sweep
-    'entity-tx/handlers/account/orderbook-offers.ts', // Book order projection from swap offers
-    'entity-tx/handlers/account/orderbook-matching.ts', // Account matching orchestrator
-    'entity-tx/handlers/account/orderbook-matching-same.ts', // Same-chain order matching
-    'entity-tx/handlers/account/orderbook-matching-cross.ts', // Cross-j order matching
-    'entity-tx/handlers/account/orderbook-matching-helpers.ts', // Shared matching helpers
-    'entity-tx/handlers/account/orderbook-cancels.ts', // Orderbook cancellation path
+    'entity/tx/cross-j-outputs.ts',          // Cross-j runtime outputs and notices
+    'entity/tx/cross-jurisdiction-helpers.ts', // Cross-j account/route helper logic
+    'entity/tx/handlers/swap-requests.ts',   // Same-chain and cross-j swap request creation
+    'entity/tx/handlers/cross-j-setup.ts',   // Cross-j setup/admission path
+    'entity/tx/handlers/cross-j-book-order.ts', // Remote book-order admission
+    'entity/tx/handlers/cross-j-fill.ts',    // Cross-j fill notice routing
+    'entity/tx/handlers/cross-j-salvage.ts', // Cross-j salvage path
+    'entity/tx/handlers/cross-j-clear.ts',   // Cross-j route cleanup
+    'entity/tx/handlers/cross-j-sweep.ts',   // Cross-j terminal sweep
+    'entity/tx/handlers/account/orderbook-offers.ts', // Book order projection from swap offers
+    'entity/tx/handlers/account/orderbook-matching.ts', // Account matching orchestrator
+    'entity/tx/handlers/account/orderbook-matching-same.ts', // Same-chain order matching
+    'entity/tx/handlers/account/orderbook-matching-cross.ts', // Cross-j order matching
+    'entity/tx/handlers/account/orderbook-matching-helpers.ts', // Shared matching helpers
+    'entity/tx/handlers/account/orderbook-cancels.ts', // Orderbook cancellation path
     'lending.ts',                              // Hub lending pool math, terms, ids, memos
     'types/lending.ts',                        // Lending pool/loan state model
-    'entity-tx/handlers/lending.ts',           // Lending offer/borrow/repay entity tx handlers
+    'entity/tx/handlers/lending.ts',           // Lending offer/borrow/repay entity tx handlers
     'server/lending.ts',                       // Hub lending API handlers
     'account/tx/handlers/swap-offer.ts',     // Account-level swap offer placement
     'account/tx/handlers/swap-resolve.ts',   // Swap settlement / hashladder resolution
@@ -270,33 +270,33 @@ const CROSS_FILES = {
     'cross-jurisdiction-market.ts',
     'cross-jurisdiction-orderbook.ts',
     'cross-jurisdiction-boundary.ts',
-    'entity-tx/index.ts',
-    'entity-tx/apply.ts',
-    'entity-tx/financial.ts',
-    'entity-tx/j-events.ts',
-    'entity-tx/cross-j-outputs.ts',
-    'entity-tx/cross-jurisdiction-helpers.ts',
-    'entity-tx/handlers/account.ts',
-    'entity-tx/handlers/account-cross-j-followups.ts',
-    'entity-tx/handlers/account/committed-frame-followups.ts',
-    'entity-tx/handlers/account/committed-htlc-followups.ts',
-    'entity-tx/handlers/account/orderbook-offers.ts',
-    'entity-tx/handlers/account/orderbook-queue.ts',
-    'entity-tx/handlers/account/orderbook-matching.ts',
-    'entity-tx/handlers/account/orderbook-matching-same.ts',
-    'entity-tx/handlers/account/orderbook-matching-cross.ts',
-    'entity-tx/handlers/account/orderbook-matching-helpers.ts',
-    'entity-tx/handlers/account/orderbook-cancels.ts',
-    'entity-tx/handlers/swap-requests.ts',
-    'entity-tx/handlers/cross-j-setup.ts',
-    'entity-tx/handlers/cross-j-book-order.ts',
-    'entity-tx/handlers/cross-j-fill.ts',
-    'entity-tx/handlers/cross-j-salvage.ts',
-    'entity-tx/handlers/cross-j-clear.ts',
-    'entity-tx/handlers/cross-j-sweep.ts',
-    'entity-tx/handlers/dispute.ts',
-    'entity-tx/handlers/htlc-payment.ts',
-    'entity-tx/handlers/create-settlement.ts',
+    'entity/tx/index.ts',
+    'entity/tx/apply.ts',
+    'entity/tx/financial.ts',
+    'entity/tx/j-events.ts',
+    'entity/tx/cross-j-outputs.ts',
+    'entity/tx/cross-jurisdiction-helpers.ts',
+    'entity/tx/handlers/account.ts',
+    'entity/tx/handlers/account-cross-j-followups.ts',
+    'entity/tx/handlers/account/committed-frame-followups.ts',
+    'entity/tx/handlers/account/committed-htlc-followups.ts',
+    'entity/tx/handlers/account/orderbook-offers.ts',
+    'entity/tx/handlers/account/orderbook-queue.ts',
+    'entity/tx/handlers/account/orderbook-matching.ts',
+    'entity/tx/handlers/account/orderbook-matching-same.ts',
+    'entity/tx/handlers/account/orderbook-matching-cross.ts',
+    'entity/tx/handlers/account/orderbook-matching-helpers.ts',
+    'entity/tx/handlers/account/orderbook-cancels.ts',
+    'entity/tx/handlers/swap-requests.ts',
+    'entity/tx/handlers/cross-j-setup.ts',
+    'entity/tx/handlers/cross-j-book-order.ts',
+    'entity/tx/handlers/cross-j-fill.ts',
+    'entity/tx/handlers/cross-j-salvage.ts',
+    'entity/tx/handlers/cross-j-clear.ts',
+    'entity/tx/handlers/cross-j-sweep.ts',
+    'entity/tx/handlers/dispute.ts',
+    'entity/tx/handlers/htlc-payment.ts',
+    'entity/tx/handlers/create-settlement.ts',
     'account/tx/index.ts',
     'account/tx/apply.ts',
     'account/tx/handlers/swap-offer.ts',
@@ -391,7 +391,7 @@ const RUNTIME_FILES = {
     'runtime-j-submit.ts',
     'entity-consensus.ts',
     'entity-consensus-frame.ts',
-    'entity-consensus/hanko-witness.ts',
+    'entity/consensus/hanko-witness.ts',
     'entity-input-merge.ts',
     'account-consensus.ts',
     'account-consensus-frame.ts',
@@ -403,23 +403,23 @@ const RUNTIME_FILES = {
     'j-height.ts',
     'j-event-normalization.ts',
     'j-event-observation.ts',
-    'entity-tx/index.ts',
-    'entity-tx/apply.ts',
-    'entity-tx/validation.ts',
-    'entity-tx/financial.ts',
-    'entity-tx/proposals.ts',
-    'entity-tx/j-events.ts',
-    'entity-tx/j-events-account.ts',
-    'entity-tx/j-events-batch.ts',
-    'entity-tx/j-events-debt.ts',
-    'entity-tx/j-events-history.ts',
-    'entity-tx/j-events-htlc.ts',
-    'entity-tx/j-events-types.ts',
-    'entity-tx/handlers/account.ts',
-    'entity-tx/handlers/r2c.ts',
-    'entity-tx/handlers/htlc-payment.ts',
-    'entity-tx/handlers/create-settlement.ts',
-    'entity-tx/handlers/mint-reserves.ts',
+    'entity/tx/index.ts',
+    'entity/tx/apply.ts',
+    'entity/tx/validation.ts',
+    'entity/tx/financial.ts',
+    'entity/tx/proposals.ts',
+    'entity/tx/j-events.ts',
+    'entity/tx/j-events-account.ts',
+    'entity/tx/j-events-batch.ts',
+    'entity/tx/j-events-debt.ts',
+    'entity/tx/j-events-history.ts',
+    'entity/tx/j-events-htlc.ts',
+    'entity/tx/j-events-types.ts',
+    'entity/tx/handlers/account.ts',
+    'entity/tx/handlers/r2c.ts',
+    'entity/tx/handlers/htlc-payment.ts',
+    'entity/tx/handlers/create-settlement.ts',
+    'entity/tx/handlers/mint-reserves.ts',
     'account/tx/index.ts',
     'account/tx/apply.ts',
     'account/tx/handlers/add-delta.ts',
@@ -479,14 +479,14 @@ const ORDERBOOK_FILES = {
     'open-swap-offers.ts',
     'entity-consensus.ts',
     'orderbook/cross-j-orderbook.ts',
-    'entity-tx/handlers/account.ts',
-    'entity-tx/handlers/account/orderbook-offers.ts',
-    'entity-tx/handlers/account/orderbook-queue.ts',
-    'entity-tx/handlers/account/orderbook-matching.ts',
-    'entity-tx/handlers/account/orderbook-matching-same.ts',
-    'entity-tx/handlers/account/orderbook-matching-cross.ts',
-    'entity-tx/handlers/account/orderbook-matching-helpers.ts',
-    'entity-tx/handlers/account/orderbook-cancels.ts',
+    'entity/tx/handlers/account.ts',
+    'entity/tx/handlers/account/orderbook-offers.ts',
+    'entity/tx/handlers/account/orderbook-queue.ts',
+    'entity/tx/handlers/account/orderbook-matching.ts',
+    'entity/tx/handlers/account/orderbook-matching-same.ts',
+    'entity/tx/handlers/account/orderbook-matching-cross.ts',
+    'entity/tx/handlers/account/orderbook-matching-helpers.ts',
+    'entity/tx/handlers/account/orderbook-cancels.ts',
     'account/tx/handlers/swap-offer.ts',
     'account/tx/handlers/swap-resolve.ts',
     'account/tx/handlers/swap-cancel.ts',
@@ -545,15 +545,15 @@ const SWAP_FILES = {
     'swap-execution.ts',
     'swap-keys.ts',
     'open-swap-offers.ts',
-    'entity-tx/apply.ts',
-    'entity-tx/handlers/account.ts',
-    'entity-tx/handlers/swap-requests.ts',
-    'entity-tx/handlers/account/orderbook-offers.ts',
-    'entity-tx/handlers/account/orderbook-queue.ts',
-    'entity-tx/handlers/account/orderbook-matching.ts',
-    'entity-tx/handlers/account/orderbook-matching-same.ts',
-    'entity-tx/handlers/account/orderbook-matching-helpers.ts',
-    'entity-tx/handlers/account/orderbook-cancels.ts',
+    'entity/tx/apply.ts',
+    'entity/tx/handlers/account.ts',
+    'entity/tx/handlers/swap-requests.ts',
+    'entity/tx/handlers/account/orderbook-offers.ts',
+    'entity/tx/handlers/account/orderbook-queue.ts',
+    'entity/tx/handlers/account/orderbook-matching.ts',
+    'entity/tx/handlers/account/orderbook-matching-same.ts',
+    'entity/tx/handlers/account/orderbook-matching-helpers.ts',
+    'entity/tx/handlers/account/orderbook-cancels.ts',
     'account/tx/apply.ts',
     'account/tx/handlers/swap-offer.ts',
     'account/tx/handlers/swap-resolve.ts',
@@ -672,11 +672,11 @@ swaps executable and disputable.
    \`Account.sol\` -> \`Depository.sol\` -> interfaces/types.
 2. Runtime model: \`types/cross-jurisdiction.ts\`, \`cross-jurisdiction.ts\`,
    \`cross-jurisdiction-orderbook.ts\`, \`entity-consensus.ts\`.
-3. Execution path: \`entity-tx/handlers/cross-j-*.ts\`,
+3. Execution path: \`entity/tx/handlers/cross-j-*.ts\`,
    \`account/tx/handlers/cross-swap-fill-ack.ts\`,
    \`account/tx/handlers/swap-resolve.ts\`, then orderbook matching.
 4. Backstop: \`cross-j-salvage.ts\`, \`dispute-arguments.ts\`,
-   \`entity-tx/handlers/dispute.ts\`, watchtower action, and dispute docs.
+   \`entity/tx/handlers/dispute.ts\`, watchtower action, and dispute docs.
 5. Product proof: \`SwapPanel.svelte\`, \`OrderbookPanel.svelte\`, and
    \`tests/e2e-cross-j-swap.spec.ts\`.
 
@@ -980,7 +980,7 @@ market-maker bootstrapping, manual route recommendations, and hub lending.
 
 \`\`\`
 User UI -> placeSwapOffer
-  -> entity-tx/handlers/swap-requests.ts
+  -> entity/tx/handlers/swap-requests.ts
   -> account/tx/handlers/swap-offer.ts
   -> account orderbook matching
   -> account/tx/handlers/swap-resolve.ts
@@ -988,8 +988,8 @@ User UI -> placeSwapOffer
 \`\`\`
 
 Same-chain orderbook matching lives in:
-- \`runtime/entity-tx/handlers/account/orderbook-matching-same.ts\`
-- \`runtime/entity-tx/handlers/account/orderbook-matching-helpers.ts\`
+- \`runtime/entity/tx/handlers/account/orderbook-matching-same.ts\`
+- \`runtime/entity/tx/handlers/account/orderbook-matching-helpers.ts\`
 - \`runtime/account/tx/handlers/swap-offer.ts\`
 - \`runtime/account/tx/handlers/swap-resolve.ts\`
 
@@ -1022,7 +1022,7 @@ Read these together:
 - \`runtime/cross-jurisdiction-orderbook.ts\`
 - \`runtime/cross-jurisdiction-boundary.ts\`
 - \`runtime/orderbook/cross-j-orderbook.ts\`
-- \`runtime/entity-tx/handlers/cross-j-*.ts\`
+- \`runtime/entity/tx/handlers/cross-j-*.ts\`
 - \`runtime/account/tx/handlers/cross-swap-fill-ack.ts\`
 
 Design rule: expected market failures (no liquidity, no market, quote expired)
@@ -1054,7 +1054,7 @@ No-liquidity is an expected terminal product state, not a protocol fatal.
 Read these together:
 - \`runtime/lending.ts\`
 - \`runtime/types/lending.ts\`
-- \`runtime/entity-tx/handlers/lending.ts\`
+- \`runtime/entity/tx/handlers/lending.ts\`
 - \`runtime/server/lending.ts\`
 - \`frontend/src/lib/components/Entity/LendingPanel.svelte\`
 - \`runtime/__tests__/lending.test.ts\`
@@ -1077,7 +1077,7 @@ The security argument depends on the on-chain exit actually working:
 - \`Account.sol\` verifies bilateral account settlement/dispute state
 - \`DeltaTransformer.sol\` verifies delta-transforming primitives
 - \`runtime/dispute-arguments.ts\` builds dispute arguments/evidence
-- \`runtime/entity-tx/handlers/dispute.ts\` gates dispute starts
+- \`runtime/entity/tx/handlers/dispute.ts\` gates dispute starts
 - \`docs/security/dispute-two-arguments-spec.md\` explains the evidence model
 
 If cross-j salvage cannot lead to a valid dispute path, the backstop is broken.
@@ -1103,7 +1103,7 @@ salvage -> evidence -> dispute -> finalization path is tested.
 - types.ts - All TypeScript interfaces
 - entity-consensus.ts - BFT state machine
 - account-consensus.ts - Bilateral consensus
-- entity-tx/apply.ts - Transaction dispatcher
+- entity/tx/apply.ts - Transaction dispatcher
 - docs/implementation/payment-spec.md - payments/HTLC/onion
 - docs/merkle.md - durable integrity root
 - docs/radapter.md - runtime/frontend contract
@@ -1141,8 +1141,8 @@ xln/
       cross-jurisdiction-market.ts ${fileSizes['runtime/cross-jurisdiction-market.ts'] || '?'} lines - Cross-j market derivation
       cross-jurisdiction-orderbook.ts ${fileSizes['runtime/cross-jurisdiction-orderbook.ts'] || '?'} lines - Cross-j book owner rules
       orderbook/cross-j-orderbook.ts ${fileSizes['runtime/orderbook/cross-j-orderbook.ts'] || '?'} lines - Cross-j admissions
-      entity-tx/handlers/cross-j-*.ts - Cross-j setup/book/fill/salvage/clear/sweep
-      entity-tx/handlers/account/orderbook-matching-*.ts - Same/cross matching
+      entity/tx/handlers/cross-j-*.ts - Cross-j setup/book/fill/salvage/clear/sweep
+      entity/tx/handlers/account/orderbook-matching-*.ts - Same/cross matching
       account/tx/handlers/swap-*.ts - Account-level offer/resolve/cancel
       account/tx/handlers/cross-swap-fill-ack.ts ${fileSizes['runtime/account/tx/handlers/cross-swap-fill-ack.ts'] || '?'} lines - Fill ACK processing
       relay/market-subscriptions.ts ${fileSizes['runtime/relay/market-subscriptions.ts'] || '?'} lines - Book streaming
@@ -1150,21 +1150,21 @@ xln/
       server/market-maker-health.ts ${fileSizes['runtime/server/market-maker-health.ts'] || '?'} lines - MM readiness health
       lending.ts                  ${fileSizes['runtime/lending.ts'] || '?'} lines - Lending math and ids
       types/lending.ts            ${fileSizes['runtime/types/lending.ts'] || '?'} lines - Lending state types
-      entity-tx/handlers/lending.ts ${fileSizes['runtime/entity-tx/handlers/lending.ts'] || '?'} lines - Lending tx handlers
+      entity/tx/handlers/lending.ts ${fileSizes['runtime/entity/tx/handlers/lending.ts'] || '?'} lines - Lending tx handlers
       server/lending.ts           ${fileSizes['runtime/server/lending.ts'] || '?'} lines - Lending API handlers
 
-    entity-tx/
-      index.ts                   ${fileSizes['runtime/entity-tx/index.ts'] || '?'} lines - Entity transaction types
-      apply.ts                   ${fileSizes['runtime/entity-tx/apply.ts'] || '?'} lines - Entity tx dispatcher
-      validation.ts              ${fileSizes['runtime/entity-tx/validation.ts'] || '?'} lines - Transaction validation
-      financial.ts               ${fileSizes['runtime/entity-tx/financial.ts'] || '?'} lines - Financial accounting
-      proposals.ts               ${fileSizes['runtime/entity-tx/proposals.ts'] || '?'} lines - Proposal logic
-      j-events.ts                ${fileSizes['runtime/entity-tx/j-events.ts'] || '?'} lines - Jurisdiction events
-      handlers/account.ts              ${fileSizes['runtime/entity-tx/handlers/account.ts'] || '?'} lines - Account operations
-      handlers/r2c.ts                  ${fileSizes['runtime/entity-tx/handlers/r2c.ts'] || '?'} lines - R2C deposits
-      handlers/htlc-payment.ts         ${fileSizes['runtime/entity-tx/handlers/htlc-payment.ts'] || '?'} lines - HTLC routing
-      handlers/create-settlement.ts    ${fileSizes['runtime/entity-tx/handlers/create-settlement.ts'] || '?'} lines - Settlement creation
-      handlers/mint-reserves.ts        ${fileSizes['runtime/entity-tx/handlers/mint-reserves.ts'] || '?'} lines - Reserve minting
+    entity/tx/
+      index.ts                   ${fileSizes['runtime/entity/tx/index.ts'] || '?'} lines - Entity transaction types
+      apply.ts                   ${fileSizes['runtime/entity/tx/apply.ts'] || '?'} lines - Entity tx dispatcher
+      validation.ts              ${fileSizes['runtime/entity/tx/validation.ts'] || '?'} lines - Transaction validation
+      financial.ts               ${fileSizes['runtime/entity/tx/financial.ts'] || '?'} lines - Financial accounting
+      proposals.ts               ${fileSizes['runtime/entity/tx/proposals.ts'] || '?'} lines - Proposal logic
+      j-events.ts                ${fileSizes['runtime/entity/tx/j-events.ts'] || '?'} lines - Jurisdiction events
+      handlers/account.ts              ${fileSizes['runtime/entity/tx/handlers/account.ts'] || '?'} lines - Account operations
+      handlers/r2c.ts                  ${fileSizes['runtime/entity/tx/handlers/r2c.ts'] || '?'} lines - R2C deposits
+      handlers/htlc-payment.ts         ${fileSizes['runtime/entity/tx/handlers/htlc-payment.ts'] || '?'} lines - HTLC routing
+      handlers/create-settlement.ts    ${fileSizes['runtime/entity/tx/handlers/create-settlement.ts'] || '?'} lines - Settlement creation
+      handlers/mint-reserves.ts        ${fileSizes['runtime/entity/tx/handlers/mint-reserves.ts'] || '?'} lines - Reserve minting
 
     account/tx/
       index.ts                   ${fileSizes['runtime/account/tx/index.ts'] || '?'} lines - Account transaction types
