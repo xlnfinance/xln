@@ -13,6 +13,7 @@ import { computeAccountStateRoot } from '../account/state-root';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account/crypto';
 import { deriveAccountWatchSeed } from '../account/watch-seed';
 import { applyAccountTx } from '../account/tx/apply';
+import { isPullRevealExpired } from '../account/pull-deadline';
 import { handleHtlcLock } from '../account/tx/handlers/htlc-lock';
 import { handleHtlcResolve } from '../account/tx/handlers/htlc-resolve';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
@@ -2078,6 +2079,66 @@ describe('audit fail-fast regressions', () => {
     expect(Array.from(transformerArguments.secrets)).toEqual([secret]);
   });
 
+  test('signed deterministic replay failure freezes only the account and retains evidence', async () => {
+    const seed = 'signed-invalid-account-frame';
+    const env = createEmptyEnv(seed);
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const first = registerLazySigner(seed, '1');
+    const second = registerLazySigner(seed, '2');
+    const left = isLeftEntity(first.entityId, second.entityId) ? first : second;
+    const right = left === first ? second : first;
+    attachSigningReplica(env, left.entityId, left.signerId);
+    attachSigningReplica(env, right.entityId, right.signerId);
+
+    const receiver = makeProposalAccount([], left.entityId, right.entityId);
+    receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
+    const invalidFrame = makeIncomingAccountFrame(
+      receiver,
+      { type: 'set_credit_limit', data: { tokenId: 1, amount: -1n } },
+      true,
+      env.timestamp,
+      0,
+    );
+    invalidFrame.prevFrameHash = 'genesis';
+    invalidFrame.stateHash = await createFrameHash(invalidFrame);
+    const [frameHanko] = await signEntityHashes(env, left.entityId, left.signerId, [invalidFrame.stateHash]);
+    if (!frameHanko) throw new Error('SIGNED_INVALID_FRAME_HANKO_MISSING');
+    const accountInput: AccountInput = {
+      kind: 'frame',
+      fromEntityId: left.entityId,
+      toEntityId: right.entityId,
+      proposal: { frame: invalidFrame, frameHanko },
+    };
+
+    const accountResult = await applyAccountInput(env, cloneAccountMachine(receiver), accountInput, {
+      entityTimestamp: env.timestamp,
+      finalizedJHeight: 0,
+    });
+    expect(accountResult.success).toBe(false);
+    expect(accountResult.disputeRequired?.reason).toContain('Credit limit cannot be negative');
+    expect(accountResult.disputeRequired?.signedFrame).toEqual({ frame: invalidFrame, frameHanko });
+
+    const receiverState = makeEntityState(right.entityId);
+    receiverState.config = makeSingleSignerConfigFor(right.signerId);
+    receiverState.timestamp = env.timestamp;
+    receiverState.accounts.set(left.entityId, receiver);
+    const applied = await applyEntityTx(env, receiverState, {
+      type: 'accountInput',
+      data: accountInput,
+    });
+    const rejectedAccount = applied.newState.accounts.get(left.entityId)!;
+    expect(rejectedAccount.currentHeight).toBe(0);
+    expect(rejectedAccount.deltas.size).toBe(0);
+    expect(rejectedAccount.status).toBe('dispute_preparing');
+    expect(rejectedAccount).not.toHaveProperty('rejectedFrameEvidence');
+    expect(rejectedAccount.shadow.rejectedFrameEvidence).toEqual({
+      reason: expect.stringContaining('Credit limit cannot be negative'),
+      frame: invalidFrame,
+      frameHanko,
+    });
+  });
+
   test('receiver-local preflight rejects stale creation of unenforceable HTLC and pull locks', () => {
     const account = makeProposalAccount([], 'alice', 'hub');
     const context = { entityTimestamp: 100_000, finalizedJHeight: 50 };
@@ -2117,7 +2178,7 @@ describe('audit fail-fast regressions', () => {
     )?.reason).toContain('PULL_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT');
   });
 
-  test('receiver-local preflight rejects incremental pull claims after local expiry', () => {
+  test('receiver-local preflight matches Solidity pull deadline seconds exactly', () => {
     const account = makeProposalAccount([], 'alice', 'hub');
     const proof = buildHashLadderProof('stale-pull-resolve');
     const reveal = revealHashLadder(proof, 32_768);
@@ -2133,15 +2194,23 @@ describe('audit fail-fast regressions', () => {
       createdHeight: 0,
       createdTimestamp: 0,
     }]]);
-    const context = { entityTimestamp: 20_000, finalizedJHeight: 1 };
+    const claimFrame = makeIncomingAccountFrame(account, {
+      type: 'pull_resolve',
+      data: { pullId: 'pull-1', binary: reveal.binary },
+    }, false);
+
+    expect(isPullRevealExpired(20_000, 20_999)).toBe(false);
+    expect(isPullRevealExpired(20_000, 21_000)).toBe(true);
+    expect(getIncomingAccountDeadlineViolation(
+      account,
+      claimFrame,
+      { entityTimestamp: 20_999, finalizedJHeight: 1 },
+    )).toBeUndefined();
 
     expect(getIncomingAccountDeadlineViolation(
       account,
-      makeIncomingAccountFrame(account, {
-        type: 'pull_resolve',
-        data: { pullId: 'pull-1', binary: reveal.binary },
-      }, false),
-      context,
+      claimFrame,
+      { entityTimestamp: 21_000, finalizedJHeight: 1 },
     )?.reason).toContain('PULL_CLAIM_AFTER_LOCAL_EXPIRY');
     expect(getIncomingAccountDeadlineViolation(
       account,
@@ -2163,7 +2232,7 @@ describe('audit fail-fast regressions', () => {
           },
         },
       }, false),
-      context,
+      { entityTimestamp: 21_000, finalizedJHeight: 1 },
     )?.reason).toContain('CROSS_PULL_CLAIM_AFTER_LOCAL_EXPIRY');
   });
 
@@ -2191,6 +2260,24 @@ describe('audit fail-fast regressions', () => {
       }, true, 120_001),
       { entityTimestamp: 100_000, finalizedJHeight: 1 },
     )?.reason).toContain('PULL_PAYER_CANCEL_BEFORE_LOCAL_EXPIRY');
+
+    expect(getIncomingAccountDeadlineViolation(
+      account,
+      makeIncomingAccountFrame(account, {
+        type: 'pull_cancel',
+        data: { pullId: 'pull-1', reason: 'expired' },
+      }, true, 120_999),
+      { entityTimestamp: 120_999, finalizedJHeight: 1 },
+    )?.reason).toContain('PULL_PAYER_CANCEL_BEFORE_LOCAL_EXPIRY');
+
+    expect(getIncomingAccountDeadlineViolation(
+      account,
+      makeIncomingAccountFrame(account, {
+        type: 'pull_cancel',
+        data: { pullId: 'pull-1', reason: 'expired' },
+      }, true, 121_000),
+      { entityTimestamp: 121_000, finalizedJHeight: 1 },
+    )).toBeUndefined();
   });
 
   test('receiver-local preflight blocks payer HTLC timeout using future peer J-height', () => {
@@ -4392,7 +4479,32 @@ describe('audit fail-fast regressions', () => {
       throw new Error('BUNDLED_ACK_RESPONSE_MISSING');
     }
     const proposalSeal = accepted.response.proposal.disputeSeal;
+    const ackSeal = accepted.response.ack.disputeSeal;
+    expect(ackSeal).toBeDefined();
     expect(proposalSeal).toBeDefined();
+    expect(accepted.hashesToSign).toEqual(expect.arrayContaining([
+      {
+        hash: proposed.accountInput.proposal.frame.stateHash,
+        type: 'accountFrame',
+        context: `account:${left.entityId.slice(-8)}:ack:1`,
+      },
+      {
+        hash: ackSeal!.hash,
+        type: 'dispute',
+        context: `account:${left.entityId.slice(-8)}:ack-dispute`,
+      },
+      {
+        hash: accepted.response.proposal.frame.stateHash,
+        type: 'accountFrame',
+        context: expect.stringContaining(':frame:2'),
+      },
+      {
+        hash: proposalSeal!.hash,
+        type: 'dispute',
+        context: expect.stringContaining(':dispute'),
+      },
+    ]));
+    expect(new Set(accepted.hashesToSign?.map(({ hash }) => hash)).size).toBe(4);
     const committedBundled = await applyAccountInput(env, proposer, accepted.response);
     expect(committedBundled.success).toBe(true);
     expect(proposer.currentHeight).toBe(2);

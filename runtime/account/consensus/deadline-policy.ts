@@ -1,5 +1,6 @@
 import { HASHLADDER_MAX_FILL_RATIO, verifyHashLadderBinary } from '../../protocol/htlc/hash-ladder';
 import type { AccountFrame, AccountMachine, HtlcLock } from '../../types';
+import { isPullRevealExpired } from '../pull-deadline';
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from './constants';
 
 export const HTLC_ENFORCEMENT_RESERVE_MS = ACCOUNT_NETWORK_ALLOWANCE_MS;
@@ -93,7 +94,7 @@ const pullClaimViolation = (
   for (const tx of frame.accountTxs) {
     if (tx.type !== 'pull_resolve' && tx.type !== 'cross_pull_close') continue;
     const pull = account.pulls?.get(tx.data.pullId);
-    if (!pull || context.entityTimestamp < pull.revealedUntilTimestamp) continue;
+    if (!pull || !isPullRevealExpired(pull.revealedUntilTimestamp, context.entityTimestamp)) continue;
     if (tx.type === 'cross_pull_close') {
       if (normalizedFillRatio(tx.data.proof.fillRatio) > normalizedFillRatio(pull.claimedRatio)) {
         return deadlineViolation(
@@ -129,7 +130,7 @@ const pullCancelViolation = (
     const pull = account.pulls?.get(tx.data.pullId);
     if (!pull) continue;
     const payerIsLeft = !(pull.amount > 0n);
-    if (frame.byLeft === payerIsLeft && context.entityTimestamp < pull.revealedUntilTimestamp) {
+    if (frame.byLeft === payerIsLeft && !isPullRevealExpired(pull.revealedUntilTimestamp, context.entityTimestamp)) {
       return deadlineViolation(
         `PULL_PAYER_CANCEL_BEFORE_LOCAL_EXPIRY: pull=${tx.data.pullId} localTimestamp=${context.entityTimestamp}`,
       );

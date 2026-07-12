@@ -1007,13 +1007,17 @@ async function preflightIncomingAccountFrame(
 
   const deadlineViolation = getIncomingAccountDeadlineViolation(accountMachine, receivedFrame, securityContext);
   if (deadlineViolation) {
+    const proposal = accountInputProposal(input)!;
     return {
       kind: 'return',
       result: {
         success: false,
         error: deadlineViolation.reason,
         events,
-        disputeRequired: deadlineViolation,
+        disputeRequired: {
+          ...deadlineViolation,
+          signedFrame: { frame: structuredClone(receivedFrame), frameHanko: proposal.frameHanko },
+        },
       },
     };
   }
@@ -1493,7 +1497,6 @@ function buildIncomingFrameReturnPayload(
   response: AccountInput,
   validation: IncomingFrameValidation,
   proposeResult: ProposeAccountFrameResult | undefined,
-  batchedWithNewFrame: boolean,
   ackDisputeHash: string | undefined,
   events: string[],
   timedOutHashlocks: string[],
@@ -1512,7 +1515,7 @@ function buildIncomingFrameReturnPayload(
       type: 'accountFrame',
       context: `account:${input.fromEntityId.slice(-8)}:ack:${receivedFrame.height}`,
     },
-    ...(!batchedWithNewFrame && ackDisputeHash
+    ...(ackDisputeHash
       ? [{ hash: ackDisputeHash, type: 'dispute' as const, context: `account:${input.fromEntityId.slice(-8)}:ack-dispute` }]
       : []),
     ...(proposeResult?.hashesToSign || []),
@@ -1561,7 +1564,6 @@ async function buildAckResponseForIncomingFrame(
     material.response,
     events,
   );
-  const batchedWithNewFrame = response.kind === 'frame_ack';
   // The bundled proposal is ephemeral, but its ACK answers the peer's current
   // committed frame until this account advances. Keep that ACK independently
   // so a rollback or lost bundled response cannot wedge at-least-once delivery.
@@ -1572,7 +1574,6 @@ async function buildAckResponseForIncomingFrame(
     response,
     validation,
     proposeResult,
-    batchedWithNewFrame,
     material.ackDisputeHash,
     events,
     timedOutHashlocks,
@@ -1606,7 +1607,18 @@ async function handleIncomingAccountFrame(
     committedFrames,
     securityContext,
   );
-  if (preflight.kind === 'return') return preflight;
+  if (preflight.kind === 'return') {
+    if (!preflight.result.success && !preflight.result.disputeRequired) {
+      return {
+        kind: 'return',
+        result: {
+          ...preflight.result,
+          rejected: { reason: preflight.result.error ?? 'Incoming account frame rejected' },
+        },
+      };
+    }
+    return preflight;
+  }
 
   const validationResult = await validateIncomingFrameOnClone(
     env,
@@ -1618,7 +1630,26 @@ async function handleIncomingAccountFrame(
     timedOutHashlocks,
     validatedCounterpartyDisputeSeal,
   );
-  if (validationResult.kind === 'return') return validationResult;
+  if (validationResult.kind === 'return') {
+    if (!validationResult.result.success) {
+      const proposal = accountInputProposal(input)!;
+      return {
+        kind: 'return',
+        result: {
+          ...validationResult.result,
+          disputeRequired: {
+            reason: validationResult.result.error ?? 'Signed account frame failed deterministic replay',
+            evidenceSecrets: [],
+            signedFrame: {
+              frame: structuredClone(preflight.receivedFrame),
+              frameHanko: proposal.frameHanko,
+            },
+          },
+        },
+      };
+    }
+    return validationResult;
+  }
 
   await commitIncomingFrameOnRealState(
     env,

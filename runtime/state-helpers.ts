@@ -896,6 +896,9 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
           ? { pendingRequest: { ...account.shadow.rebalance.pendingRequest } }
           : {}),
       },
+      ...(account.shadow.rejectedFrameEvidence
+        ? { rejectedFrameEvidence: structuredClone(account.shadow.rejectedFrameEvidence) }
+        : {}),
     },
   };
 

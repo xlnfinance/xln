@@ -13,6 +13,7 @@ import {
 } from '../../../protocol/htlc/hash-ladder';
 import { addHold, releaseHold } from '../hold-utils';
 import { ensureDelta } from '../delta-utils';
+import { isPullRevealExpired } from '../../pull-deadline';
 
 type PullLockTx = Extract<AccountTx, { type: 'pull_lock' }>;
 type PullResolveTx = Extract<AccountTx, { type: 'pull_resolve' }>;
@@ -22,8 +23,6 @@ type CrossPullCloseTx = Extract<AccountTx, { type: 'cross_pull_close' }>;
 const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 
 const absBigInt = (value: bigint): bigint => value >= 0n ? value : -value;
-const isPullRevealExpired = (deadline: number, currentTimestamp: number): boolean =>
-  Number.isFinite(deadline) && deadline > 0 && currentTimestamp >= deadline;
 const isCrossJurisdictionPullCancelWithinClear = (route: CrossJurisdictionSwapRoute): boolean => (
   route.status === 'clearing' ||
   route.status === 'source_claimed' ||

@@ -275,6 +275,27 @@ describe("DeltaTransformer", function () {
     expect(result[0]).to.equal(BigInt(partialRatio));
     expect(result[1]).to.equal(-1234n);
 
+    const atDeadline = await transformer.applyBatchWithArgumentTimestamps.staticCall(
+      [0, 0],
+      encodedBatch,
+      leftArguments,
+      rightArguments,
+      deadline,
+      deadline,
+    );
+    expect(atDeadline[0]).to.equal(BigInt(partialRatio));
+    expect(atDeadline[1]).to.equal(-1234n);
+
+    const afterDeadline = await transformer.applyBatchWithArgumentTimestamps.staticCall(
+      [0, 0],
+      encodedBatch,
+      leftArguments,
+      rightArguments,
+      deadline + 1,
+      deadline + 1,
+    );
+    expect(afterDeadline).to.deep.equal([0n, 0n]);
+
     const previouslyClaimed = 0x1000;
     const cumulativeBatch = {
       payment: [],

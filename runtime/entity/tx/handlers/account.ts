@@ -468,6 +468,13 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
         });
       }
     } else if (result.disputeRequired) {
+      if (result.disputeRequired.signedFrame) {
+        accountMachine.shadow.rejectedFrameEvidence = {
+          reason: result.disputeRequired.reason,
+          frame: structuredClone(result.disputeRequired.signedFrame.frame),
+          frameHanko: result.disputeRequired.signedFrame.frameHanko,
+        };
+      }
       for (const { hashlock, secret } of result.disputeRequired.evidenceSecrets) {
         const lock = [...accountMachine.locks.values()].find(
           candidate => candidate.hashlock.toLowerCase() === hashlock.toLowerCase(),
@@ -533,6 +540,21 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
       return {
         newState: started.newState,
         outputs: [...outputs, ...prepared.outputs, ...started.outputs, ...disputeOutputs],
+        mempoolOps,
+        swapOffersCreated: allSwapOffersCreated,
+        swapCancelRequests: allSwapCancelRequests,
+        swapOffersCancelled: allSwapOffersCancelled,
+        ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
+      };
+    } else if (result.rejected) {
+      accountHandlerLog.warn('frame.rejected', {
+        from: shortId(input.fromEntityId),
+        error: result.rejected.reason,
+      });
+      addMessage(newState, `⚠️ Rejected account frame: ${result.rejected.reason}`);
+      return {
+        newState,
+        outputs,
         mempoolOps,
         swapOffersCreated: allSwapOffersCreated,
         swapCancelRequests: allSwapCancelRequests,

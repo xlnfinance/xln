@@ -157,6 +157,12 @@ export type HtlcNoteKey = `hashlock:${string}` | `lock:${string}`;
 
 export type AccountStatus = 'active' | 'dispute_preparing' | 'disputed';
 
+export interface AccountRejectedFrameEvidence {
+  reason: string;
+  frame: AccountFrame;
+  frameHanko: HankoString;
+}
+
 export interface AccountSubcontract {
   transformerAddress: string;
   encodedBatch: string;
@@ -366,6 +372,7 @@ export interface AccountMachine {
   // never sent to the counterparty.
   shadow: {
     rebalance: AccountRebalanceShadowState;
+    rejectedFrameEvidence?: AccountRejectedFrameEvidence;
   };
 }
 

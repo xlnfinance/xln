@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountInput, AccountTx } from '../../types';
+import type { AccountFrame, AccountInput, AccountTx, HankoString } from '../../types';
 
 export type AccountConsensusHashToSign = {
   hash: string;
@@ -45,5 +45,10 @@ export type HandleAccountInputResult = AccountConsensusFrameResult & {
   disputeRequired?: {
     reason: string;
     evidenceSecrets: Array<{ hashlock: string; secret: string }>;
+    signedFrame?: {
+      frame: AccountFrame;
+      frameHanko: HankoString;
+    };
   };
+  rejected?: { reason: string };
 };
