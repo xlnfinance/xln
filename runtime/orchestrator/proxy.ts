@@ -50,6 +50,11 @@ const FORBIDDEN_RPC_PROXY_PREFIXES = [
 const MAX_RPC_PROXY_INDEX = 8;
 const DEFAULT_RPC_PROXY_TIMEOUT_MS = 5_000;
 const DEFAULT_HUB_API_PROXY_TIMEOUT_MS = 5_000;
+const DEFAULT_HUB_FAUCET_PROXY_TIMEOUT_MS = 30_000;
+const LONG_RUNNING_HUB_ENDPOINTS = new Set([
+  '/api/faucet/erc20',
+  '/api/faucet/gas',
+]);
 
 const serializeError = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
@@ -98,11 +103,18 @@ const readPositiveIntEnv = (name: string, fallback: number): number => {
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
 };
 
-const readHubApiProxyTimeoutMs = (): number =>
-  readPositiveIntEnv(
+const readHubApiProxyTimeoutMs = (endpointWithQuery = ''): number => {
+  const defaultTimeoutMs = readPositiveIntEnv(
     'XLN_HUB_API_PROXY_TIMEOUT_MS',
     readPositiveIntEnv('XLN_RPC_PROXY_TIMEOUT_MS', DEFAULT_HUB_API_PROXY_TIMEOUT_MS),
   );
+  const pathname = endpointWithQuery.split('?', 1)[0] || '';
+  if (!LONG_RUNNING_HUB_ENDPOINTS.has(pathname)) return defaultTimeoutMs;
+  return readPositiveIntEnv(
+    'XLN_HUB_FAUCET_PROXY_TIMEOUT_MS',
+    Math.max(defaultTimeoutMs, DEFAULT_HUB_FAUCET_PROXY_TIMEOUT_MS),
+  );
+};
 
 const fetchTextWithTimeout = async (
   url: string,
@@ -251,7 +263,7 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
 
     try {
       const upstreamStartedAt = Date.now();
-      const timeoutMs = readHubApiProxyTimeoutMs();
+      const timeoutMs = readHubApiProxyTimeoutMs(endpoint);
       const { response, text } = await fetchTextWithTimeout(`http://${deps.host}:${child.apiPort}${endpoint}`, {
         method: 'POST',
         headers: {
@@ -325,7 +337,7 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
 
     try {
       const upstreamStartedAt = Date.now();
-      const timeoutMs = readHubApiProxyTimeoutMs();
+      const timeoutMs = readHubApiProxyTimeoutMs(endpoint);
       const { response, text } = await fetchTextWithTimeout(`http://${deps.host}:${child.apiPort}${endpoint}`, {
         method: 'POST',
         headers: {
@@ -385,7 +397,7 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
         headers: {
           'content-type': request.headers.get('content-type') || 'application/json',
         },
-      }, readHubApiProxyTimeoutMs());
+      }, readHubApiProxyTimeoutMs(endpointWithQuery));
       return new Response(text, {
         status: response.status,
         headers: {
@@ -430,7 +442,7 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
           'content-type': request.headers.get('content-type') || 'application/json',
         },
         ...(bodyText.length > 0 ? { body: bodyText } : {}),
-      }, readHubApiProxyTimeoutMs());
+      }, readHubApiProxyTimeoutMs(endpointWithQuery));
       return new Response(text, {
         status: response.status,
         headers: {

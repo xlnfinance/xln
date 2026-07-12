@@ -1869,6 +1869,55 @@ describe('production startup wiring', () => {
     }
   }, 2_000);
 
+  test('on-chain faucet proxy allows mining without weakening the generic hub timeout', async () => {
+    const previousHubTimeout = process.env['XLN_HUB_API_PROXY_TIMEOUT_MS'];
+    const previousFaucetTimeout = process.env['XLN_HUB_FAUCET_PROXY_TIMEOUT_MS'];
+    const server = Bun.serve({
+      port: 0,
+      fetch: async () => {
+        await Bun.sleep(60);
+        return Response.json({ success: true });
+      },
+    });
+    process.env['XLN_HUB_API_PROXY_TIMEOUT_MS'] = '25';
+    process.env['XLN_HUB_FAUCET_PROXY_TIMEOUT_MS'] = '100';
+    try {
+      const handlers = createOrchestratorProxyHandlers({
+        host: '127.0.0.1',
+        defaultRpcUrl: '',
+        pollAllHubHealth: async () => {},
+        getHubChildByEntityId: () => null,
+        getHealthyHub: () => ({ apiPort: server.port } as any),
+      });
+      const request = (endpoint: string) => new Request(`http://xln.local${endpoint}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+
+      const genericResponse = await handlers.proxyAnyHubRequest(
+        request('/api/health/slow'),
+        '/api/health/slow',
+      );
+      expect(genericResponse.status).toBe(502);
+      expect((await genericResponse.json() as { error?: string }).error)
+        .toContain('PROXY_UPSTREAM_TIMEOUT:25');
+
+      const faucetResponse = await handlers.proxyAnyHubRequest(
+        request('/api/faucet/erc20?chainId=31337'),
+        '/api/faucet/erc20?chainId=31337',
+      );
+      expect(faucetResponse.status).toBe(200);
+      expect(await faucetResponse.json()).toEqual({ success: true });
+    } finally {
+      if (previousHubTimeout === undefined) delete process.env['XLN_HUB_API_PROXY_TIMEOUT_MS'];
+      else process.env['XLN_HUB_API_PROXY_TIMEOUT_MS'] = previousHubTimeout;
+      if (previousFaucetTimeout === undefined) delete process.env['XLN_HUB_FAUCET_PROXY_TIMEOUT_MS'];
+      else process.env['XLN_HUB_FAUCET_PROXY_TIMEOUT_MS'] = previousFaucetTimeout;
+      await server.stop(true);
+    }
+  }, 2_000);
+
   test('generic hub API proxy exposes typed no-healthy-hub failure', async () => {
     let pollCalls = 0;
     const handlers = createOrchestratorProxyHandlers({
