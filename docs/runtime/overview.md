@@ -1,4 +1,4 @@
-# Runtime Map
+# Runtime Code Map
 
 This README is the entry point for reading the XLN runtime. It is not a full
 file catalog. The goal is to show where protocol truth lives, which modules are
@@ -52,6 +52,12 @@ If you only have 1-2 hours, read files in this order:
 
 ## Folder Readmes
 
+- [Runtime machine](./machine.md)
+- [Entity machine](./entity.md)
+- [Account machine](./account.md)
+- [Jurisdiction machine](./jurisdiction.md)
+- [Protocol primitives](./protocol.md)
+- [Runtime extensions](./extensions.md)
 - [Account transactions](./account-transactions.md)
 - [Entity transactions](./entity-transactions.md)
 - [Storage](./storage.md)
