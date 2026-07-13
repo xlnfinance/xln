@@ -347,6 +347,7 @@ export const relayRoute = async (
       details: { traceId },
     });
 
+    send(ws, serializeWsMessage({ type: 'hello_ack', to: fromKey }));
     flushPendingToSocket(store, fromKey, ws, send);
 
     return;

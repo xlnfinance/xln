@@ -4,8 +4,43 @@ import {
   protectVaultSecrets,
   redactVaultRuntimeForPersistence,
   sameVaultProtectionLease,
+  unprotectVaultSecrets,
   type ProtectedVaultSecrets,
 } from '../../frontend/src/lib/security/vaultProtection';
+
+const installSuccessfulKeyDb = (operations: Array<{ method: string; key: IDBValidKey }>): IDBFactory => ({
+  open: () => {
+    const openRequest: Record<string, unknown> = {};
+    setTimeout(() => {
+      const db = {
+        objectStoreNames: { contains: () => true },
+        transaction: () => {
+          const transaction: Record<string, unknown> = {
+            objectStore: () => ({
+              put: (_value: unknown, key: IDBValidKey) => completeRequest('put', key),
+              delete: (key: IDBValidKey) => completeRequest('delete', key),
+            }),
+          };
+          const completeRequest = (method: string, key: IDBValidKey): Record<string, unknown> => {
+            const request: Record<string, unknown> = {};
+            operations.push({ method, key });
+            setTimeout(() => {
+              request['result'] = undefined;
+              (request['onsuccess'] as (() => void) | undefined)?.();
+              (transaction['oncomplete'] as (() => void) | undefined)?.();
+            }, 0);
+            return request;
+          };
+          return transaction;
+        },
+        close: () => {},
+      };
+      openRequest['result'] = db;
+      (openRequest['onsuccess'] as (() => void) | undefined)?.();
+    }, 0);
+    return openRequest;
+  },
+}) as unknown as IDBFactory;
 
 test('vault key write resolves only after IndexedDB transaction commit', async () => {
   const previousIndexedDb = globalThis.indexedDB;
@@ -96,4 +131,45 @@ test('legacy vault protection leases compare their encrypted record exactly', ()
   };
   expect(sameVaultProtectionLease(legacy, { ...legacy, unlockUntil: 10 })).toBe(true);
   expect(sameVaultProtectionLease(legacy, { ...legacy, ciphertext: 'other' })).toBe(false);
+});
+
+test('expired V2 lease deletes only its exact IndexedDB key before returning locked', async () => {
+  const previousIndexedDb = globalThis.indexedDB;
+  const operations: Array<{ method: string; key: IDBValidKey }> = [];
+  globalThis.indexedDB = installSuccessfulKeyDb(operations);
+  try {
+    const result = await unprotectVaultSecrets('Runtime-A', {
+      version: 2,
+      keyId: 'expired-key',
+      iv: 'unused',
+      ciphertext: 'unused',
+      unlockUntil: 0,
+    });
+
+    expect(result).toBeNull();
+    expect(operations).toEqual([{ method: 'delete', key: 'runtime-a:expired-key' }]);
+  } finally {
+    globalThis.indexedDB = previousIndexedDb;
+  }
+});
+
+test('vault unlock leases encode ten minutes, one day, and forever exactly', async () => {
+  const previousIndexedDb = globalThis.indexedDB;
+  const previousNow = Date.now;
+  const operations: Array<{ method: string; key: IDBValidKey }> = [];
+  globalThis.indexedDB = installSuccessfulKeyDb(operations);
+  Date.now = () => 1_000_000;
+  try {
+    const tenMinutes = await protectVaultSecrets('runtime-a', { seed: 'ten-minute-secret' }, 600_000);
+    const oneDay = await protectVaultSecrets('runtime-a', { seed: 'one-day-secret' }, 86_400_000);
+    const forever = await protectVaultSecrets('runtime-a', { seed: 'forever-secret' }, null);
+
+    expect(tenMinutes.unlockUntil).toBe(1_600_000);
+    expect(oneDay.unlockUntil).toBe(87_400_000);
+    expect(forever.unlockUntil).toBeNull();
+    expect(operations.filter(operation => operation.method === 'put')).toHaveLength(3);
+  } finally {
+    Date.now = previousNow;
+    globalThis.indexedDB = previousIndexedDb;
+  }
 });

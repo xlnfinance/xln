@@ -163,6 +163,9 @@ export const unprotectVaultSecrets = async (
     throw new Error('VAULT_PROTECTION_VERSION_UNSUPPORTED');
   }
   if (protectedSecrets.unlockUntil !== null && protectedSecrets.unlockUntil <= Date.now()) {
+    if (protectedSecrets.version === 2) {
+      await deleteVaultDeviceKey(runtimeId, protectedSecrets);
+    }
     return null;
   }
   const key = await getDeviceKey(runtimeId, protectedSecrets);

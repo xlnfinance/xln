@@ -40,6 +40,7 @@ const makeClient = (options: {
   seed: string;
   runtimeId: string;
   signerId: string;
+  onOpen?: () => void;
   onRecoveryBundleRequest?: (from: string, lookupKey: string) => Promise<unknown> | unknown;
   onError?: (error: Error) => void;
 }): RuntimeWsClient => {
@@ -50,6 +51,7 @@ const makeClient = (options: {
     seed: options.seed,
     useHelloAuth: true,
     encryptionKeyPair: deriveEncryptionKeyPair(options.seed),
+    onOpen: options.onOpen,
     onRecoveryBundleRequest: options.onRecoveryBundleRequest,
     onError: options.onError,
   });
@@ -71,6 +73,28 @@ describe('runtime websocket recovery requests', () => {
     expect(source).toContain("relayStandaloneLog.info('service.listen'");
     expect(source).not.toContain('console.');
     expect(source).not.toContain('[WS] Runtime relay');
+  });
+
+  test('authenticated client becomes ready only after relay registration is acknowledged', async () => {
+    const relay = startRelay();
+    const errors: string[] = [];
+    let registeredWhenOpened = false;
+    const client = makeClient({
+      url: `ws://127.0.0.1:${relay.server.port}`,
+      seed: SEED_A,
+      runtimeId: RUNTIME_A,
+      signerId: '1',
+      onOpen: () => {
+        registeredWhenOpened = relay.store.clients.has(RUNTIME_A);
+      },
+      onError: error => errors.push(error.message),
+    });
+
+    await client.connect();
+    await waitUntil(() => registeredWhenOpened, 'registered hello acknowledgement');
+
+    expect(registeredWhenOpened).toBe(true);
+    expect(errors).toEqual([]);
   });
 
   test('requestRecoveryBundles resolves a correlated peer response through relay', async () => {

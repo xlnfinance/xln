@@ -22,6 +22,7 @@ import { decodeBinaryPayload, encodeBinaryPayload } from '../storage/binary-code
 export type RuntimeWsMessageType =
   | 'hello'
   | 'hello_challenge'
+  | 'hello_ack'
   | 'entity_input'
   | 'debug_event'
   | 'gossip_request'

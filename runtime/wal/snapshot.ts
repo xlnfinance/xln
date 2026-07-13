@@ -179,7 +179,7 @@ export const buildDurableRuntimeMachineSnapshot = (
   ...(env.browserVMState ? { browserVMState: structuredClone(env.browserVMState) } : {}),
   ...(env.runtimeConfig ? { runtimeConfig: structuredClone(env.runtimeConfig) } : {}),
   ...(buildDurableRuntimeStateSnapshot(env) ? { runtimeState: buildDurableRuntimeStateSnapshot(env) } : {}),
-  runtimeInput: cloneRuntimeInput(env.runtimeMempool ?? env.runtimeInput),
+  runtimeInput: withoutEphemeralScheduledWake(env.runtimeMempool ?? env.runtimeInput),
   ...(env.pendingOutputs?.length ? { pendingOutputs: cloneRuntimeOutputs(env.pendingOutputs) } : {}),
   ...(env.networkInbox?.length ? { networkInbox: cloneRuntimeOutputs(env.networkInbox) } : {}),
   ...((options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs)?.length
@@ -215,7 +215,7 @@ export const buildCanonicalRuntimeStateSnapshot = (
   ...(options?.browserVMState ?? env.browserVMState ? { browserVMState: options?.browserVMState ?? env.browserVMState } : {}),
   ...(env.runtimeConfig ? { runtimeConfig: structuredClone(env.runtimeConfig) } : {}),
   ...(buildDurableRuntimeStateSnapshot(env) ? { runtimeState: buildDurableRuntimeStateSnapshot(env) } : {}),
-  runtimeInput: cloneRuntimeInput(env.runtimeMempool ?? env.runtimeInput),
+  runtimeInput: withoutEphemeralScheduledWake(env.runtimeMempool ?? env.runtimeInput),
   ...(env.pendingOutputs ? { pendingOutputs: cloneRuntimeOutputs(env.pendingOutputs) } : {}),
   ...(env.networkInbox ? { networkInbox: cloneRuntimeOutputs(env.networkInbox) } : {}),
   ...(env.pendingNetworkOutputs ? { pendingNetworkOutputs: cloneRuntimeOutputs(env.pendingNetworkOutputs) } : {}),

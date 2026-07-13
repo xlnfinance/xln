@@ -106,6 +106,9 @@ describe('relay-router gossip fanout', () => {
     await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
     await relayRoute(config, wsB, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
 
+    expect(sentBySocket.get(wsA)).toContainEqual({ type: 'hello_ack', to: RUNTIME_A.toLowerCase() });
+    expect(sentBySocket.get(wsB)).toContainEqual({ type: 'hello_ack', to: RUNTIME_B.toLowerCase() });
+
     await relayRoute(config, wsA, {
       type: 'gossip_announce',
       id: 'announce-1',
@@ -423,7 +426,9 @@ describe('relay-router gossip fanout', () => {
       txs: 1,
     });
 
-    expect(sentBySocket.get(staleB) ?? []).toHaveLength(0);
+    expect(sentBySocket.get(staleB) ?? []).toEqual([
+      { type: 'hello_ack', to: RUNTIME_B.toLowerCase() },
+    ]);
     expect(store.clients.has(RUNTIME_B)).toBe(false);
     expect(store.pendingMessages.get(RUNTIME_B)).toBeUndefined();
     expect((sentBySocket.get(wsA)?.at(-1) as { type?: string; error?: string } | undefined)).toMatchObject({

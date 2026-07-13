@@ -2511,6 +2511,82 @@ describe('audit fail-fast regressions', () => {
     )?.reason).toContain('HTLC_PAYER_CANCEL_BEFORE_LOCAL_EXPIRY');
   });
 
+  test('receiver-local preflight follows HTLC transitions before checking reused ids', () => {
+    const account = makeProposalAccount([], 'alice', 'hub');
+    const secret = `0x${'42'.repeat(32)}`;
+    account.locks.set('reused-lock', {
+      lockId: 'reused-lock',
+      hashlock: hashHtlcSecret(secret),
+      timelock: 300_000n,
+      revealBeforeHeight: 100,
+      amount: 100n,
+      tokenId: 1,
+      senderIsLeft: true,
+      createdHeight: 0,
+      createdTimestamp: 0,
+    });
+    const frame = makeIncomingAccountFrame(account, {
+      type: 'htlc_resolve',
+      data: { lockId: 'reused-lock', outcome: 'secret', secret },
+    }, false);
+    frame.accountTxs.push({
+      type: 'htlc_lock',
+      data: {
+        lockId: 'reused-lock',
+        hashlock: `0x${'43'.repeat(32)}`,
+        timelock: 120_000n,
+        revealBeforeHeight: 51,
+        amount: 100n,
+        tokenId: 1,
+      },
+    });
+
+    expect(getIncomingAccountDeadlineViolation(
+      account,
+      frame,
+      { entityTimestamp: 100_000, finalizedJHeight: 50 },
+    )?.reason).toContain('HTLC_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT');
+  });
+
+  test('receiver-local preflight follows pull cancellation before checking reused ids', () => {
+    const account = makeProposalAccount([], 'alice', 'hub');
+    const existingProof = buildHashLadderProof('existing-reused-pull');
+    const replacementProof = buildHashLadderProof('replacement-reused-pull');
+    account.pulls = new Map([['reused-pull', {
+      pullId: 'reused-pull',
+      tokenId: 1,
+      amount: -100n,
+      claimedRatio: 0,
+      claimedAmount: 0n,
+      revealedUntilTimestamp: 120_000,
+      fullHash: existingProof.fullHash,
+      partialRoot: existingProof.partialRoot,
+      createdHeight: 0,
+      createdTimestamp: 0,
+    }]]);
+    const frame = makeIncomingAccountFrame(account, {
+      type: 'pull_cancel',
+      data: { pullId: 'reused-pull', reason: 'expired' },
+    }, true, 121_000);
+    frame.accountTxs.push({
+      type: 'pull_lock',
+      data: {
+        pullId: 'reused-pull',
+        tokenId: 1,
+        amount: -100n,
+        revealedUntilTimestamp: 130_000,
+        fullHash: replacementProof.fullHash,
+        partialRoot: replacementProof.partialRoot,
+      },
+    });
+
+    expect(getIncomingAccountDeadlineViolation(
+      account,
+      frame,
+      { entityTimestamp: 121_000, finalizedJHeight: 50 },
+    )?.reason).toContain('PULL_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT');
+  });
+
   test('failed account tx mutations do not leak into later valid txs in the same proposal', async () => {
     const env = createEmptyEnv('account-tx-atomicity');
     env.scenarioMode = true;
@@ -4348,6 +4424,42 @@ describe('audit fail-fast regressions', () => {
 
     expect(mutatedCommitResult.accepted).toBe(false);
     expect(mutatedCommitResult.workingReplica.state.height).toBe(0);
+
+    env.runtimeId = `0x${'71'.repeat(20)}`;
+    env.runtimeState ??= {};
+    env.runtimeState.entityRuntimeHints = new Map();
+    env.eReplicas.set(`${entityId}:${second.signerId}`, precommitResult.workingReplica);
+    const remoteEntityId = `0x${'72'.repeat(32)}`;
+    const lockedMempoolSize = precommitResult.workingReplica.mempool.length;
+    const mergedResult = await applyMergedEntityInputs(env, [{
+      from: `0x${'73'.repeat(20)}`,
+      entityId,
+      signerId: second.signerId,
+      entityTxs: [{
+        type: 'accountInput',
+        data: { fromEntityId: remoteEntityId, toEntityId: entityId },
+      } as never],
+      proposedFrame: {
+        ...honestProposal,
+        hash: ethers.keccak256(ethers.toUtf8Bytes('commit-does-not-match-validator-lock')),
+        collectedSigs: signaturesBySigner,
+      },
+    }], [], {
+      isReplay: false,
+      routingDeps: {
+        ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+        enqueueRuntimeInputs: () => {},
+        extractEntityId: (replicaKey) => replicaKey.split(':')[0] ?? '',
+        hasLocalSignerForEntity: () => true,
+        hasLocalSignerForEntitySigner: () => true,
+        resolveSoleLocalSignerForEntity: () => second.signerId,
+        getP2P: () => null,
+      },
+    });
+
+    expect(mergedResult.appliedEntityInputs).toEqual([]);
+    expect(env.eReplicas.get(`${entityId}:${second.signerId}`)?.mempool).toHaveLength(lockedMempoolSize);
+    expect(env.runtimeState.entityRuntimeHints.has(remoteEntityId)).toBe(false);
   });
 
   test('entity catch-up commit rejects a secondary hash not emitted by local replay', async () => {

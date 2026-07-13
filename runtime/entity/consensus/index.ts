@@ -905,7 +905,7 @@ async function handleCommitNotification(
       logError('FRAME_CONSENSUS', `❌ BYZANTINE: Commit frame doesn't match locked frame!`);
       logError('FRAME_CONSENSUS', `   Locked: ${workingReplica.lockedFrame.hash}`);
       logError('FRAME_CONSENSUS', `   Commit: ${proposedFrame.hash}`);
-      return finishApplyEntityInput(context);
+      return rejectEntityConsensusInput(context);
     }
     entityLog.debug('commit.locked_frame_verified', { frame: shortHash(workingReplica.lockedFrame.hash) });
   }
@@ -921,7 +921,7 @@ async function handleCommitNotification(
         commitHeight: proposedFrame.height,
         frame: shortHash(proposedFrame.hash),
       });
-      return finishApplyEntityInput(context);
+      return rejectEntityConsensusInput(context);
     }
 
     const {
@@ -951,7 +951,7 @@ async function handleCommitNotification(
       logError('FRAME_CONSENSUS', `❌ COMMIT REJECTED: replayed catch-up state does not match signed frame hash!`);
       logError('FRAME_CONSENSUS', `   Expected: ${replayedHash.slice(0, 30)}...`);
       logError('FRAME_CONSENSUS', `   Received: ${proposedFrame.hash.slice(0, 30)}...`);
-      return finishApplyEntityInput(context);
+      return rejectEntityConsensusInput(context);
     }
     expectedHashesToSign = buildEntityHashesToSign(
       workingReplica.state.entityId,
@@ -992,7 +992,7 @@ async function handleCommitNotification(
     )) {
       logError('FRAME_CONSENSUS', `❌ BYZANTINE: Invalid hash signature bundle from ${signerId}`);
       logError('FRAME_CONSENSUS', `   Frame hash: ${proposedFrame.hash.slice(0, 30)}...`);
-      return finishApplyEntityInput(context);
+      return rejectEntityConsensusInput(context);
     }
   }
   entityLog.debug('commit.signatures_verified', {

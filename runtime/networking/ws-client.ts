@@ -157,6 +157,7 @@ export class RuntimeWsClient {
   private nextReconnectAt: number = 0;
   private suppressNextClose = false;
   private helloSent = false;
+  private helloAcknowledged = false;
   private readonly maxReconnectAttempts: number;
   private readonly pendingRecoveryBundleRequests = new Map<string, PendingRecoveryBundleRequest>();
 
@@ -191,6 +192,7 @@ export class RuntimeWsClient {
     this.closed = false;
     this.connecting = true;
     this.helloSent = false;
+    this.helloAcknowledged = false;
 
     // Close any stale WS before creating new one
     if (this.ws) {
@@ -453,6 +455,21 @@ export class RuntimeWsClient {
     }
     if (msg.type === 'hello_challenge') {
       if (!this.options.useHelloAuth || !msg.challenge || !this.sendHello(msg.challenge)) return;
+      return;
+    }
+    if (msg.type === 'hello_ack') {
+      const expectedRuntimeId = this.options.runtimeId.toLowerCase();
+      const acknowledgedRuntimeId = String(msg.to || '').toLowerCase();
+      if (!this.options.useHelloAuth || !this.helloSent || acknowledgedRuntimeId !== expectedRuntimeId) {
+        const error = new Error(
+          `WS_HELLO_ACK_INVALID: expected=${expectedRuntimeId} received=${acknowledgedRuntimeId || 'missing'}`,
+        );
+        this.options.onError?.(error);
+        this.ws?.close();
+        return;
+      }
+      if (this.helloAcknowledged) return;
+      this.helloAcknowledged = true;
       this.options.onOpen?.();
       return;
     }

@@ -12,6 +12,7 @@ import {
   type ScheduledWakeTx,
 } from '../machine/scheduled-wake';
 import { safeStringify } from '../protocol/serialization';
+import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import type { EntityReplica, EntityState } from '../types';
 import { buildCanonicalRuntimeStateSnapshot, restoreDurableRuntimeSnapshot } from '../wal/snapshot';
 
@@ -325,11 +326,14 @@ describe('runtime scheduled wake', () => {
 
     const snapshot = buildCanonicalRuntimeStateSnapshot(env);
     const persistedInput = snapshot['runtimeInput'] as typeof env.runtimeMempool;
-    expect(persistedInput?.entityInputs[0]?.entityTxs?.map(tx => tx.type)).toEqual(['scheduledWake', 'chatMessage']);
+    expect(persistedInput?.entityInputs[0]?.entityTxs?.map(tx => tx.type)).toEqual(['chatMessage']);
 
     const restored = createEmptyEnv('scheduled-wake-snapshot-filter-restored');
+    restored.height = env.height;
+    restored.timestamp = env.timestamp;
     restoreDurableRuntimeSnapshot(restored, snapshot);
     expect(restored.runtimeMempool?.entityInputs[0]?.entityTxs?.map(tx => tx.type)).toEqual(['chatMessage']);
+    expect(computeCanonicalStateHashFromEnv(restored)).toBe(computeCanonicalStateHashFromEnv(env));
   });
 
   test('does not enqueue another wake while one is awaiting entity consensus', () => {
