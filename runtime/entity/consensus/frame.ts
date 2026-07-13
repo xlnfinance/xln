@@ -83,20 +83,21 @@ const canonicalJEventDataForFrameHash = (value: unknown): Record<string, unknown
       ? canonicalDisputeFinalizationEvidenceHash(evidence)
       : '';
 
-  // J block hash, tx hash, and observation signature are external evidence.
-  // They are fail-fast verified by applyJEvent before a validator signs this
-  // frame. The RJEA frame hash commits to the semantic event set instead:
-  // block height + eventsHash + canonical event bodies (+ evidence hash).
-  // This avoids honest replay divergence when the same event bodies are carried
-  // by different simulator block headers, while still changing the frame hash
-  // whenever the event content or optional dispute evidence changes.
+  // Commit the exact signed observation, not only its semantic event set. If
+  // blockHash/signature were omitted, a commit notification could substitute a
+  // different valid observation that hashes to the same entity frame and make a
+  // catch-up validator replay different J-block history.
   return {
     version: 'xln:j-event-frame:v1',
     from: String(data['from'] ?? '').toLowerCase(),
-    observedAt: toInt(data['observedAt']),
+    jurisdictionRef: String(data['jurisdictionRef'] ?? '').trim().toLowerCase(),
+    observedAt: toInt(data['blockNumber']),
     blockNumber: toInt(data['blockNumber']),
+    blockHash: String(data['blockHash'] ?? '').toLowerCase(),
+    transactionHash: String(data['transactionHash'] ?? '').toLowerCase(),
     eventsHash,
     events,
+    signature: String(data['signature'] ?? '').toLowerCase(),
     ...(evidenceHash ? { disputeFinalizationEvidenceHash: evidenceHash } : {}),
   };
 };

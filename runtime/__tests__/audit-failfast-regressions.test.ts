@@ -32,6 +32,7 @@ import {
   applyEntityInput,
 } from '../entity/consensus/index';
 import { createEntityFrameHash } from '../entity/consensus/frame';
+import { mergeEntityInputs } from '../entity/consensus/input-merge';
 import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
 import {
   assertCrossJurisdictionOrderAdmissible,
@@ -67,6 +68,7 @@ import {
   buildJEventObservationDigest,
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
+  getJEventJurisdictionRef,
 } from '../jurisdiction/event-observation';
 import { getRuntimeJurisdictionHeight } from '../jurisdiction/height';
 import { createEmptyBatch } from '../jurisdiction/batch';
@@ -89,7 +91,7 @@ import { NobleCryptoProvider } from '../protocol/crypto/noble';
 import { handleMeshBootstrapLoopError } from '../orchestrator/mesh-bootstrap-fail-fast';
 import { fitCrossAmountsToOrderbook } from '../orchestrator/mm-node';
 import { cloneAccountMachine, resolveEntityProposerId } from '../state-helpers';
-import type { AccountFrame, AccountInput, AccountMachine, AccountTx, ConsensusConfig, CrossJurisdictionSwapRoute, DisputeFinalizationEvidence, EntityInput, EntityReplica, EntityState, Env, JurisdictionEvent } from '../types';
+import type { AccountFrame, AccountInput, AccountMachine, AccountTx, ConsensusConfig, CrossJurisdictionSwapRoute, DisputeFinalizationEvidence, EntityInput, EntityReplica, EntityState, EntityTx, Env, JurisdictionEvent } from '../types';
 import { ethers } from 'ethers';
 
 const makeSingleSignerConfig = (): EntityState['config'] => ({
@@ -269,9 +271,11 @@ const signJEventObservation = (
 	    transactionHash: string;
 	    events: JurisdictionEvent[];
 	    disputeFinalizationEvidence?: DisputeFinalizationEvidence[];
+	    jurisdictionRef?: string;
 	  },
-	): { eventsHash: string; signature: string; disputeFinalizationEvidenceHash?: string } => {
+): { jurisdictionRef: string; eventsHash: string; signature: string; disputeFinalizationEvidenceHash?: string } => {
 	  const eventsHash = canonicalJurisdictionEventsHash(input.events);
+	  const jurisdictionRef = input.jurisdictionRef ?? getJEventJurisdictionRef(undefined);
 	  const disputeFinalizationEvidenceHash = input.disputeFinalizationEvidence?.length
 	    ? canonicalDisputeFinalizationEvidenceHash(input.disputeFinalizationEvidence)
 	    : undefined;
@@ -280,6 +284,7 @@ const signJEventObservation = (
 	    signerId,
 	    buildJEventObservationDigest({
 	      entityId,
+	      jurisdictionRef,
       signerId,
       blockNumber: input.blockNumber,
 	      blockHash: input.blockHash,
@@ -289,6 +294,7 @@ const signJEventObservation = (
 	    }),
 	  );
 	  return {
+	    jurisdictionRef,
 	    eventsHash,
 	    signature,
 	    ...(disputeFinalizationEvidenceHash ? { disputeFinalizationEvidenceHash } : {}),
@@ -984,6 +990,7 @@ describe('audit fail-fast regressions', () => {
     };
     const common = {
       from: signerId,
+      jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
       observedAt: 1_000,
       blockNumber: 2,
       blockHash: `0x${'12'.repeat(32)}`,
@@ -995,6 +1002,7 @@ describe('audit fail-fast regressions', () => {
       blockHash: common.blockHash,
       transactionHash: common.transactionHash,
       events: [event],
+      jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
     });
 
     await expect(applyJEvent(state, { ...common } as any, env)).rejects.toThrow(
@@ -1037,6 +1045,7 @@ describe('audit fail-fast regressions', () => {
       blockHash: initialCommon.blockHash,
       transactionHash: initialCommon.transactionHash,
       events: [initialReserveEvent],
+      jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
     });
     state = (await applyJEvent(state, { ...initialCommon, ...initialSigned }, env)).newState;
     expect(state.reserves.get(1)).toBe(777n);
@@ -1066,6 +1075,7 @@ describe('audit fail-fast regressions', () => {
       blockHash: common.blockHash,
       transactionHash: common.transactionHash,
       events: [event],
+      jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
     });
 
     const result = await applyJEvent(state, { ...common, ...signed }, env);
@@ -1089,6 +1099,7 @@ describe('audit fail-fast regressions', () => {
       type: 'j_event',
       data: {
         from: signerId,
+        jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
         observedAt: 1_000,
         blockNumber: 3,
         blockHash: `0x${'14'.repeat(32)}`,
@@ -1836,28 +1847,155 @@ describe('audit fail-fast regressions', () => {
       blockHash: common.blockHash,
       transactionHash: common.transactionHash,
       events: [honestEvent],
+      jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
     });
     const signedFake = signJEventObservation(env, entityId, '2', {
       blockNumber: common.blockNumber,
       blockHash: common.blockHash,
       transactionHash: common.transactionHash,
       events: [fakeEvent],
+      jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
     });
     const signedHonest3 = signJEventObservation(env, entityId, '3', {
       blockNumber: common.blockNumber,
       blockHash: common.blockHash,
       transactionHash: common.transactionHash,
       events: [honestEvent],
+      jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
     });
 
     state = (await applyJEvent(state, { ...common, from: '1', event: honestEvent, ...signedHonest1 }, env)).newState;
+    state = (await applyJEvent(state, { ...common, from: '1', event: honestEvent, ...signedHonest1 }, env)).newState;
+    expect(state.jBlockObservations).toHaveLength(1);
     state = (await applyJEvent(state, { ...common, from: '2', event: fakeEvent, ...signedFake }, env)).newState;
     expect(state.jBlockChain.length).toBe(0);
+    expect(state.jBlockObservations.map((observation) => observation.signerId)).toEqual(['1', '2']);
     expect(state.reserves.get(1)).toBeUndefined();
 
     state = (await applyJEvent(state, { ...common, from: '3', event: honestEvent, ...signedHonest3 }, env)).newState;
     expect(state.jBlockChain.length).toBe(1);
     expect(state.reserves.get(1)).toBe(100n);
+    expect(state.jBlockChain[0]?.events).toHaveLength(1);
+    expect(state.jBlockChain[0]?.eventsHash).toBe(signedHonest1.eventsHash);
+    expect(state.jBlockChain[0]?.attestations.map((attestation) => attestation.signerId)).toEqual(['1', '3']);
+    expect(state.jBlockChain[0]?.signerPower).toBe(2n);
+  });
+
+  test('entity input merge preserves validator J histories and dedupes exact replay only', () => {
+    const entityId = `0x${'45'.repeat(32)}`;
+    const targetSigner = `0x${'46'.repeat(20)}`;
+    const event: JurisdictionEvent = {
+      type: 'ReserveUpdated',
+      data: { entity: entityId, tokenId: 1, newBalance: '100' },
+    };
+    const eventsHash = canonicalJurisdictionEventsHash([event]);
+    const observation = (from: string, signatureByte: string): EntityTx => ({
+      type: 'j_event',
+      data: {
+        from,
+        jurisdictionRef: 'stack:1:0x1111111111111111111111111111111111111111',
+        event,
+        events: [event],
+        observedAt: 7,
+        blockNumber: 7,
+        blockHash: `0x${'55'.repeat(32)}`,
+        transactionHash: `0x${'66'.repeat(32)}`,
+        eventsHash,
+        signature: `0x${signatureByte.repeat(65)}`,
+      },
+    });
+    const validatorOne = observation('validator-1', '11');
+    const validatorTwo = observation('validator-2', '22');
+
+    const merged = mergeEntityInputs([
+      { entityId, signerId: targetSigner, entityTxs: [validatorOne] },
+      { entityId, signerId: targetSigner, entityTxs: [validatorOne, validatorTwo] },
+    ]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.entityTxs).toHaveLength(2);
+    expect(merged[0]?.entityTxs?.map((tx) => String(tx.data?.from))).toEqual(['validator-1', 'validator-2']);
+  });
+
+  test('entity frame hash commits to exact J block identity and validator signature', async () => {
+    const entityId = `0x${'47'.repeat(32)}`;
+    const state = makeEntityState(entityId);
+    const event: JurisdictionEvent = {
+      type: 'ReserveUpdated',
+      data: { entity: entityId, tokenId: 1, newBalance: '100' },
+    };
+    const data = {
+      from: 'validator-1',
+      jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
+      event,
+      events: [event],
+      observedAt: 7,
+      blockNumber: 7,
+      blockHash: `0x${'55'.repeat(32)}`,
+      transactionHash: `0x${'66'.repeat(32)}`,
+      eventsHash: canonicalJurisdictionEventsHash([event]),
+      signature: `0x${'11'.repeat(65)}`,
+    };
+    const hash = (jEventData: typeof data) => createEntityFrameHash(
+      'genesis',
+      1,
+      1_000,
+      [{ type: 'j_event', data: jEventData }],
+      state,
+    );
+
+    const canonical = await hash(data);
+    expect(await hash({ ...data, blockHash: `0x${'77'.repeat(32)}` })).not.toBe(canonical);
+    expect(await hash({ ...data, signature: `0x${'22'.repeat(65)}` })).not.toBe(canonical);
+  });
+
+  test('one validator cannot equivocate at the same jurisdiction height', async () => {
+    const entityId = `0x${'48'.repeat(32)}`;
+    let state = makeEntityState(entityId);
+    state.config = {
+      mode: 'proposer-based',
+      threshold: 2n,
+      validators: ['1', '2'],
+      shares: { '1': 1n, '2': 1n },
+    };
+    const env = createEmptyEnv('j-event-equivocation');
+    const event: JurisdictionEvent = {
+      type: 'ReserveUpdated',
+      data: { entity: entityId, tokenId: 1, newBalance: '100' },
+    };
+    const common = {
+      from: '1',
+      jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
+      observedAt: 9,
+      blockNumber: 9,
+      transactionHash: `0x${'68'.repeat(32)}`,
+      event,
+    };
+    const first = signJEventObservation(env, entityId, '1', {
+      blockNumber: 9,
+      blockHash: `0x${'58'.repeat(32)}`,
+      transactionHash: common.transactionHash,
+      events: [event],
+      jurisdictionRef: common.jurisdictionRef,
+    });
+    state = (await applyJEvent(state, {
+      ...common,
+      blockHash: `0x${'58'.repeat(32)}`,
+      ...first,
+    }, env)).newState;
+    const conflicting = signJEventObservation(env, entityId, '1', {
+      blockNumber: 9,
+      blockHash: `0x${'59'.repeat(32)}`,
+      transactionHash: common.transactionHash,
+      events: [event],
+      jurisdictionRef: common.jurisdictionRef,
+    });
+
+    await expect(applyJEvent(state, {
+      ...common,
+      blockHash: `0x${'59'.repeat(32)}`,
+      ...conflicting,
+    }, env)).rejects.toThrow('j_event equivocation');
   });
 
   test('multi-validator j_event observations must be signed by the claimed signer', async () => {
@@ -1875,6 +2013,7 @@ describe('audit fail-fast regressions', () => {
       data: { entity: entityId, tokenId: 1, newBalance: '100' },
     };
     const common = {
+      jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
       observedAt: 1_000,
       blockNumber: 8,
       blockHash: `0x${'5a'.repeat(32)}`,
@@ -1886,6 +2025,7 @@ describe('audit fail-fast regressions', () => {
       blockHash: common.blockHash,
       transactionHash: common.transactionHash,
       events: [event],
+      jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
     });
 
     await expect(applyJEvent(state, { ...common, from: '1', eventsHash: signerOne.eventsHash }, env)).rejects.toThrow(
@@ -2816,6 +2956,7 @@ describe('audit fail-fast regressions', () => {
       blockHash: `0x${'99'.repeat(32)}`,
       transactionHash: `0x${'88'.repeat(32)}`,
       events: [disputeFinalizedEvent],
+      jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
     });
 
     await applyEntityInput(env, replica, {
@@ -5095,6 +5236,7 @@ describe('audit fail-fast regressions', () => {
       transactionHash: `0x${'88'.repeat(32)}`,
       events: [disputeFinalizedEvent],
       disputeFinalizationEvidence,
+      jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
     });
     const finalized = await applyJEvent(state, {
       from: '1',
@@ -5132,6 +5274,7 @@ describe('audit fail-fast regressions', () => {
       blockHash: `0x${'77'.repeat(32)}`,
       transactionHash: `0x${'66'.repeat(32)}`,
       events: [failedBatchEvent],
+      jurisdictionRef: getJEventJurisdictionRef(finalized.newState.config.jurisdiction),
     });
     const failed = await applyJEvent(finalized.newState, {
       from: '1',
@@ -5606,6 +5749,7 @@ describe('audit fail-fast regressions', () => {
       blockHash: `0x${'96'.repeat(32)}`,
       transactionHash: `0x${'97'.repeat(32)}`,
       events: [failedBatchEvent],
+      jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
     });
     const failed = await applyJEvent(state, {
       from: '1',

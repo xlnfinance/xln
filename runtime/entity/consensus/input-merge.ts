@@ -1,4 +1,4 @@
-import type { EntityTx, JurisdictionEvent, JurisdictionEventData, RoutedEntityInput } from '../../types';
+import type { EntityTx, JurisdictionEventData, RoutedEntityInput } from '../../types';
 import { signatureMapSize } from '../../protocol/signatures';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { HEAVY_LOGS } from '../../utils';
@@ -8,16 +8,7 @@ const entityInputMergeLog = createStructuredLogger('entity.input.merge');
 
 const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
   const merged: EntityTx[] = [];
-
-  const normalizeJEventList = (data: JurisdictionEventData, source: string): JurisdictionEvent[] => {
-    if (data.events !== undefined) {
-      if (!Array.isArray(data.events)) {
-        throw new Error(`RUNTIME_J_EVENT_EVENTS_NOT_ARRAY:${source}`);
-      }
-      return data.events;
-    }
-    return data.event ? [data.event] : [];
-  };
+  const seenSignedObservations = new Set<string>();
 
   for (const tx of txs) {
     if (tx.type !== 'j_event' || !tx.data) {
@@ -26,53 +17,19 @@ const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
     }
 
     const data = tx.data as JurisdictionEventData;
-    const blockNumber = data.blockNumber;
-    const blockHash = data.blockHash;
-
-    const existing = merged.find(
-      candidate =>
-        candidate.type === 'j_event' &&
-        candidate.data &&
-        candidate.data.blockNumber === blockNumber &&
-        candidate.data.blockHash === blockHash,
-    );
-
-    if (!existing || !existing.data) {
-      merged.push(tx);
-      continue;
-    }
-
-    const existingData = existing.data as JurisdictionEventData;
-    const existingEvents = normalizeJEventList(existingData, 'existing');
-    const incomingEvents = normalizeJEventList(data, 'incoming');
-
-    const seen = new Set<string>();
-    const mergedEvents: JurisdictionEvent[] = [];
-    for (const event of [...existingEvents, ...incomingEvents]) {
-      const key = `${event?.type ?? 'unknown'}:${safeStringify(event?.data ?? event)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      mergedEvents.push(event);
-    }
-
-    const firstMergedEvent = mergedEvents[0];
-    if (!firstMergedEvent) continue;
-    existingData.events = mergedEvents;
-    existingData.event = firstMergedEvent;
-
-    if (typeof data.observedAt === 'number') {
-      if (typeof existingData.observedAt !== 'number' || data.observedAt < existingData.observedAt) {
-        existingData.observedAt = data.observedAt;
-      }
-    }
-
-    if (HEAVY_LOGS) {
-      entityInputMergeLog.debug('j_events.merged', {
-        blockNumber,
-        blockHash: typeof blockHash === 'string' ? shortHash(blockHash) : blockHash,
-        events: mergedEvents.length,
-      });
-    }
+    const signedObservationKey = safeStringify({
+      from: String(data.from || '').toLowerCase(),
+      jurisdictionRef: String(data.jurisdictionRef || '').toLowerCase(),
+      blockNumber: data.blockNumber,
+      blockHash: String(data.blockHash || '').toLowerCase(),
+      transactionHash: String(data.transactionHash || '').toLowerCase(),
+      eventsHash: String(data.eventsHash || '').toLowerCase(),
+      disputeFinalizationEvidenceHash: String(data.disputeFinalizationEvidenceHash || '').toLowerCase(),
+      signature: String(data.signature || '').toLowerCase(),
+    });
+    if (seenSignedObservations.has(signedObservationKey)) continue;
+    seenSignedObservations.add(signedObservationKey);
+    merged.push(tx);
   }
 
   return merged;

@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 import type { JurisdictionEvent } from '../types';
 import type { DisputeFinalizationEvidence } from '../types/jurisdiction-events';
+import { getJurisdictionIdentityRef } from './jurisdiction-runtime';
 import {
   canonicalJurisdictionEventKey,
   normalizeJurisdictionEvents,
@@ -8,6 +9,7 @@ import {
 
 export type JEventObservationDigestInput = {
   entityId: string;
+  jurisdictionRef: string;
   signerId: string;
   blockNumber: number;
   blockHash: string;
@@ -15,6 +17,11 @@ export type JEventObservationDigestInput = {
   eventsHash: string;
   disputeFinalizationEvidenceHash?: string;
 };
+
+export const UNCONFIGURED_J_EVENT_JURISDICTION = 'unconfigured';
+
+export const getJEventJurisdictionRef = (jurisdiction: unknown): string =>
+  getJurisdictionIdentityRef(jurisdiction) || UNCONFIGURED_J_EVENT_JURISDICTION;
 
 export const canonicalJurisdictionEventsHash = (events: JurisdictionEvent[]): string => {
   const keys = normalizeJurisdictionEvents(events)
@@ -62,6 +69,7 @@ export const buildJEventObservationDigest = (input: JEventObservationDigestInput
   const payload = [
     'xln:j-event-observation:v1',
     String(input.entityId || '').toLowerCase(),
+    String(input.jurisdictionRef || '').trim().toLowerCase(),
     String(input.signerId || '').toLowerCase(),
     Number(input.blockNumber || 0),
     String(input.blockHash || '').toLowerCase(),

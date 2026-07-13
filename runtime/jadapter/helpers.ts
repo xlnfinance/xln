@@ -15,6 +15,7 @@ import {
   buildJEventObservationDigest,
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
+  getJEventJurisdictionRef,
 } from '../jurisdiction/event-observation';
 import { rememberRecentJEvents } from '../jurisdiction/event-evidence';
 
@@ -719,7 +720,7 @@ export function buildRawJEventsRuntimeInput(
     };
   });
 
-  const eventsByReplica = new Map<string, { entityId: string; signerId: string; events: RawJEvent[] }>();
+  const eventsByReplica = new Map<string, { entityId: string; signerId: string; jurisdictionRef: string; events: RawJEvent[] }>();
 
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
     const [entityIdFromKey, signerIdFromKey] = replicaKey.split(':');
@@ -735,12 +736,17 @@ export function buildRawJEventsRuntimeInput(
       existing.events.push(...relevant);
       continue;
     }
-    eventsByReplica.set(replicaKey, { entityId, signerId, events: [...relevant] });
+    eventsByReplica.set(replicaKey, {
+      entityId,
+      signerId,
+      jurisdictionRef: getJEventJurisdictionRef(replica.state.config.jurisdiction),
+      events: [...relevant],
+    });
   }
 
   const entityInputs: EntityInput[] = [];
   const evidenceEventsByLog = new Map<string, RawJEvent>();
-  for (const { entityId, signerId, events } of eventsByReplica.values()) {
+  for (const { entityId, signerId, jurisdictionRef, events } of eventsByReplica.values()) {
     const jEvents = events.flatMap((event) => rawEventToJEvents(event, entityId));
     if (jEvents.length === 0) continue;
     const firstJEvent = jEvents[0];
@@ -785,6 +791,7 @@ export function buildRawJEventsRuntimeInput(
       signerId,
       buildJEventObservationDigest({
         entityId,
+        jurisdictionRef,
         signerId,
         blockNumber,
         blockHash,
@@ -802,6 +809,7 @@ export function buildRawJEventsRuntimeInput(
           type: 'j_event',
           data: {
             from: signerId,
+            jurisdictionRef,
             observedAt,
             blockNumber,
             blockHash,

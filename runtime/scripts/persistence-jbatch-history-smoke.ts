@@ -8,8 +8,14 @@ import {
   loadEnvFromDB,
   closeRuntimeDb,
 } from '../runtime.ts';
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
+import {
+  buildJEventObservationDigest,
+  canonicalJurisdictionEventsHash,
+  getJEventJurisdictionRef,
+} from '../jurisdiction/event-observation';
+import type { JurisdictionEvent, JurisdictionEventData } from '../types';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`ASSERT: ${message}`);
@@ -43,6 +49,45 @@ async function main() {
 
   const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
   const otherEntityId = generateLazyEntityId(['0x0000000000000000000000000000000000000001'], 1n).toLowerCase();
+  const jurisdiction = {
+    address: '0x' + '1'.repeat(40),
+    name: 'default',
+    entityProviderAddress: '0x' + '2'.repeat(40),
+    depositoryAddress: '0x' + '3'.repeat(40),
+    chainId: 31337,
+  };
+  const buildSignedJEvent = (
+    events: JurisdictionEvent[],
+    blockNumber: number,
+    blockHash: string,
+    transactionHash: string,
+  ): JurisdictionEventData => {
+    const event = events[0];
+    if (!event) throw new Error('J_EVENT_EMPTY');
+    const jurisdictionRef = getJEventJurisdictionRef(jurisdiction);
+    const eventsHash = canonicalJurisdictionEventsHash(events);
+    const signature = signAccountFrame(env, signerId, buildJEventObservationDigest({
+      entityId,
+      jurisdictionRef,
+      signerId,
+      blockNumber,
+      blockHash,
+      transactionHash,
+      eventsHash,
+    }));
+    return {
+      from: signerId,
+      jurisdictionRef,
+      observedAt: blockNumber,
+      blockNumber,
+      blockHash,
+      transactionHash,
+      event,
+      events,
+      eventsHash,
+      signature,
+    };
+  };
   env.jReplicas.set('default', {
     name: 'default',
     depositoryAddress: '0x' + '3'.repeat(40),
@@ -80,13 +125,7 @@ async function main() {
             threshold: 1n,
             validators: [signerId],
             shares: { [signerId]: 1n },
-            jurisdiction: {
-              address: '0x' + '1'.repeat(40),
-              name: 'default',
-              entityProviderAddress: '0x' + '2'.repeat(40),
-              depositoryAddress: '0x' + '3'.repeat(40),
-              chainId: 31337,
-            },
+            jurisdiction,
           },
         },
       },
@@ -100,21 +139,14 @@ async function main() {
     signerId,
     entityTxs: [{
       type: 'j_event',
-      data: {
-        from: signerId,
-        observedAt: env.timestamp + 1,
-        blockNumber: 1,
-        blockHash: '0x' + '4'.repeat(64),
-        transactionHash: '0x' + '5'.repeat(64),
-        event: {
+      data: buildSignedJEvent([{
           type: 'ReserveUpdated',
           data: {
             entity: entityId,
             tokenId: 1,
             newBalance: (1000n * 10n ** 18n).toString(),
           },
-        },
-      },
+        }], 1, '0x' + '4'.repeat(64), '0x' + '5'.repeat(64)),
     }],
   }]);
 
@@ -151,14 +183,7 @@ async function main() {
       signerId,
       entityTxs: [{
         type: 'j_event',
-        data: {
-          from: signerId,
-          observedAt: env.timestamp + 1,
-          blockNumber: nonce + 1,
-          blockHash: `0x${String(nonce).padStart(64, '0')}`,
-          transactionHash: `0x${String(nonce + 100).padStart(64, '0')}`,
-          event: reserveUpdatedEvent,
-          events: [
+        data: buildSignedJEvent([
             reserveUpdatedEvent,
             {
               type: 'HankoBatchProcessed',
@@ -169,8 +194,7 @@ async function main() {
                 success: true,
               },
             },
-          ],
-        },
+          ], nonce + 1, `0x${String(nonce).padStart(64, '0')}`, `0x${String(nonce + 100).padStart(64, '0')}`),
       }],
     }]);
   }

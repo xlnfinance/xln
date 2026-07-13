@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account/crypto';
-import { buildJEventObservationDigest, canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
+import { buildJEventObservationDigest, canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../jurisdiction/event-observation';
 import { createEntityFrameHash } from '../entity/consensus/frame';
 import { applyJEvent, type JEventEntityTxData } from '../entity/tx/j-events';
 import { buildJEventsRuntimeInput } from '../jadapter/watcher';
@@ -68,11 +68,13 @@ const signJEventInput = (
   transactionHash: string,
 ) => {
   const eventsHash = canonicalJurisdictionEventsHash(events);
+  const jurisdictionRef = getJEventJurisdictionRef(undefined);
   const signature = signAccountFrame(
     env,
     signerId,
     buildJEventObservationDigest({
       entityId,
+      jurisdictionRef,
       signerId,
       blockNumber,
       blockHash,
@@ -80,7 +82,7 @@ const signJEventInput = (
       eventsHash,
     }),
   );
-  return { eventsHash, signature };
+  return { jurisdictionRef, eventsHash, signature };
 };
 
 const buildSignedInput = (

@@ -3808,6 +3808,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       blockHash: secret('7b'),
       transactionHash: secret('7c'),
       events: [disputeStartedEvent],
+      jurisdictionRef: jref(eth),
     });
     const result = await applyEntityTx(env, state, {
       type: 'j_event',
@@ -3923,6 +3924,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       blockHash: secret('8b'),
       transactionHash: secret('8c'),
       events: [disputeStartedEvent],
+      jurisdictionRef: jref(eth),
     });
     const result = await applyEntityTx(env, state, {
       type: 'j_event',
@@ -4023,6 +4025,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       transactionHash: secret('9d'),
       events: [finalizedEvent],
       disputeFinalizationEvidence,
+      jurisdictionRef: jref(eth),
     });
     const result = await applyEntityTx(env, state, {
       type: 'j_event',
@@ -4119,6 +4122,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       blockHash: secret('ac'),
       transactionHash: secret('ad'),
       events: [finalizedEvent],
+      jurisdictionRef: jref(eth),
     });
 
     await expect(applyEntityTx(env, state, {
@@ -4213,6 +4217,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       transactionHash: secret('bd'),
       events: [finalizedEvent],
       disputeFinalizationEvidence,
+      jurisdictionRef: jref(eth),
     });
     const first = await applyEntityTx(env, state, {
       type: 'j_event',
@@ -4234,6 +4239,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       blockHash: secret('bc'),
       transactionHash: secret('bd'),
       events: [finalizedEvent],
+      jurisdictionRef: jref(eth),
     });
     const second = await applyEntityTx(env, first.newState, {
       type: 'j_event',
@@ -4487,6 +4493,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       blockHash: secret('9b'),
       transactionHash: secret('9c'),
       events: [disputeStartedEvent],
+      jurisdictionRef: jref(base),
     });
     const originalError = console.error;
     const originalWarn = console.warn;

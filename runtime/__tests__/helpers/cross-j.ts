@@ -7,6 +7,7 @@ import {
   buildJEventObservationDigest,
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
+  getJEventJurisdictionRef,
 } from '../../jurisdiction/event-observation';
 import type {
   AccountMachine,
@@ -55,8 +56,13 @@ export const signJEventObservation = (
     transactionHash: string;
     events: JurisdictionEvent[];
     disputeFinalizationEvidence?: DisputeFinalizationEvidence[];
+    jurisdictionRef?: string;
   },
-): { eventsHash: string; signature: string; disputeFinalizationEvidenceHash?: string } => {
+): { jurisdictionRef: string; eventsHash: string; signature: string; disputeFinalizationEvidenceHash?: string } => {
+  const matchingReplica = Array.from(env.eReplicas.values()).find((replica) =>
+    replica.entityId.toLowerCase() === entityId.toLowerCase() &&
+    replica.signerId.toLowerCase() === signerId.toLowerCase());
+  const jurisdictionRef = input.jurisdictionRef ?? getJEventJurisdictionRef(matchingReplica?.state.config.jurisdiction);
   const eventsHash = canonicalJurisdictionEventsHash(input.events);
   const disputeFinalizationEvidenceHash = input.disputeFinalizationEvidence?.length
     ? canonicalDisputeFinalizationEvidenceHash(input.disputeFinalizationEvidence)
@@ -66,6 +72,7 @@ export const signJEventObservation = (
     signerId,
     buildJEventObservationDigest({
       entityId,
+      jurisdictionRef,
       signerId,
       blockNumber: input.blockNumber,
       blockHash: input.blockHash,
@@ -75,6 +82,7 @@ export const signJEventObservation = (
     }),
   );
   return {
+    jurisdictionRef,
     eventsHash,
     signature,
     ...(disputeFinalizationEvidenceHash ? { disputeFinalizationEvidenceHash } : {}),

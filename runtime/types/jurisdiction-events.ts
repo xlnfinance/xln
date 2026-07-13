@@ -166,6 +166,7 @@ export type JurisdictionEvent =
  */
 export interface JurisdictionEventData {
   from: string;
+  jurisdictionRef: string;
   event: JurisdictionEvent;
   events?: JurisdictionEvent[];
   // Optional calldata-derived evidence. This is deliberately outside
@@ -187,13 +188,28 @@ export interface JurisdictionEventData {
  */
 export interface JBlockObservation {
   signerId: string;
+  jurisdictionRef: string;
   jHeight: number;
   jBlockHash: string;
+  transactionHash: string;
   eventsHash: string;
   events: JurisdictionEvent[];
+  signature: string;
   disputeFinalizationEvidence?: DisputeFinalizationEvidence[];
   disputeFinalizationEvidenceHash?: string;
   observedAt: number;
+}
+
+/**
+ * One validator's immutable vote inside a finalized J-block certificate.
+ * The shared block identity and eventsHash live on JBlockFinalized; these
+ * fields retain enough data to independently verify each validator signature.
+ */
+export interface JBlockAttestation {
+  signerId: string;
+  transactionHash: string;
+  signature: string;
+  disputeFinalizationEvidenceHash?: string;
 }
 
 /**
@@ -201,9 +217,13 @@ export interface JBlockObservation {
  * Events from this block can be safely applied to entity state.
  */
 export interface JBlockFinalized {
+  jurisdictionRef: string;
   jHeight: number;
   jBlockHash: string;
+  eventsHash: string;
   events: JurisdictionEvent[];
+  attestations: JBlockAttestation[];
   finalizedAt: number;
   signerCount: number;
+  signerPower: bigint;
 }

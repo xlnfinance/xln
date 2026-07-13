@@ -263,12 +263,20 @@ describe('runtime recovery tower', () => {
       txs: [],
       hash: `0x${'a1'.repeat(32)}`,
       newState: bloatedState,
+      leader: {
+        proposerSignerId: replica!.signerId,
+        view: replica!.state.leaderState?.view ?? 0,
+      },
     };
     replica!.lockedFrame = {
       height: Number(replica!.state.height || 0) + 1,
       txs: [],
       hash: `0x${'b2'.repeat(32)}`,
       newState: bloatedState,
+      leader: {
+        proposerSignerId: replica!.signerId,
+        view: replica!.state.leaderState?.view ?? 0,
+      },
     };
     replica!.validatorComputedState = bloatedState;
     env.browserVMState = {

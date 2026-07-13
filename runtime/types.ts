@@ -47,6 +47,7 @@ export type {
 } from './types/debt';
 export type {
   DisputeFinalizationEvidence,
+  JBlockAttestation,
   JBlockFinalized,
   JBlockObservation,
   JurisdictionEvent,

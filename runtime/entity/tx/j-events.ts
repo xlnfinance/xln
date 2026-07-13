@@ -4,6 +4,7 @@ import type {
   EntityState,
   JBlockObservation,
   JBlockFinalized,
+  JBlockAttestation,
   JurisdictionEvent,
   DisputeFinalizationEvidence,
   Env,
@@ -25,6 +26,7 @@ import {
   canonicalDisputeFinalizationEvidenceHash,
   canonicalDisputeFinalizationEvidenceKey,
   canonicalJurisdictionEventsHash,
+  getJEventJurisdictionRef,
 } from '../../jurisdiction/event-observation';
 import { verifyAccountSignature } from '../../account/crypto';
 import { markStorageEntityDirty } from '../../machine/env-events';
@@ -46,6 +48,7 @@ import type { JEventApplyResult, JEventMempoolOp } from './j-events-types';
 import { appendBatchHistory, emptyOpBreakdown } from './j-events-history';
 import { applyHankoBatchProcessedEvent } from './j-events-batch';
 import { isDisputeStartedByLeft } from '../../account/consensus/dispute-policy';
+import { compareStableText } from '../../protocol/serialization';
 import {
   applySignerEntityExternalWalletDelta,
   applySignerEntityExternalWalletSnapshot,
@@ -57,6 +60,7 @@ const jEventLog = createStructuredLogger('j.event');
 // threshold agreement on the canonical event set.
 export interface JEventEntityTxData {
   from: string;  // Signer ID that observed the event
+  jurisdictionRef: string;
   event: {
     type: string;  // Event name (e.g., "ReserveUpdated", "AccountSettled")
     data: Record<string, unknown>;  // Event-specific data from blockchain
@@ -131,7 +135,7 @@ const syncJBatchEntityNonceFromEvent = (
 };
 
 export const applyJEvent = async (entityState: EntityState, entityTxData: JEventEntityTxData, env: Env): Promise<JEventApplyResult> => {
-  const { from: signerId, observedAt, blockNumber, blockHash } = entityTxData;
+  const { from: signerId, blockNumber, blockHash } = entityTxData;
   if (!isValidatorSigner(entityState, signerId)) {
     throw new Error(`j_event rejected: non-validator signer ${String(signerId)}`);
   }
@@ -143,26 +147,27 @@ export const applyJEvent = async (entityState: EntityState, entityTxData: JEvent
     signature?: string;
   };
   const batchData = entityTxData as RawJEventBatchData;
+  if (!Number.isSafeInteger(blockNumber) || blockNumber <= 0) {
+    throw new Error(`j_event rejected: invalid blockNumber ${String(blockNumber)}`);
+  }
+  if (typeof blockHash !== 'string' || !blockHash.trim()) {
+    throw new Error(`j_event rejected: missing blockHash for signer ${String(signerId)}`);
+  }
+  if (typeof batchData.transactionHash !== 'string' || !batchData.transactionHash.trim()) {
+    throw new Error(`j_event rejected: missing transactionHash for signer ${String(signerId)} block ${blockNumber}`);
+  }
+  const expectedJurisdictionRef = getJEventJurisdictionRef(entityState.config.jurisdiction);
+  const suppliedJurisdictionRef = String(batchData.jurisdictionRef || '').trim().toLowerCase();
+  if (suppliedJurisdictionRef !== expectedJurisdictionRef) {
+    throw new Error(
+      `j_event rejected: jurisdiction mismatch expected=${expectedJurisdictionRef} got=${suppliedJurisdictionRef || 'missing'}`,
+    );
+  }
   const rawEvents = Array.isArray(batchData.events)
     ? batchData.events
     : batchData.event !== undefined
       ? [batchData.event]
       : [];
-
-  // Already-finalized heights are idempotent only when the hash matches.
-  const finalizedAtHeight = entityState.jBlockChain.find(b => b.jHeight === blockNumber);
-  if (finalizedAtHeight) {
-    if (finalizedAtHeight.jBlockHash !== blockHash) {
-      throw new Error(
-        `j_event conflict: block ${blockNumber} finalized as ${finalizedAtHeight.jBlockHash}, observed ${blockHash}`,
-      );
-    }
-    return { newState: entityState, mempoolOps: [], outputs: [], dirtyAccounts: [] };
-  }
-
-  if (blockNumber <= entityState.lastFinalizedJHeight) {
-    return { newState: entityState, mempoolOps: [], outputs: [], dirtyAccounts: [] };
-  }
 
   const jEvents: JurisdictionEvent[] = [];
   for (const raw of rawEvents) {
@@ -223,6 +228,7 @@ export const applyJEvent = async (entityState: EntityState, entityTxData: JEvent
   }
   const digest = buildJEventObservationDigest({
     entityId: entityState.entityId,
+    jurisdictionRef: expectedJurisdictionRef,
     signerId: String(signerId),
     blockNumber,
     blockHash,
@@ -234,20 +240,58 @@ export const applyJEvent = async (entityState: EntityState, entityTxData: JEvent
     throw new Error(`j_event rejected: invalid observation signature for signer ${String(signerId)}`);
   }
 
+  // Even a replay below the finalized tip must be a real validator-authored
+  // observation. Otherwise an unauthenticated peer can smuggle arbitrary data
+  // through the j_event EntityTx path under the guise of an idempotent replay.
+  const finalizedAtHeight = entityState.jBlockChain.find((block) => block.jHeight === blockNumber);
+  if (finalizedAtHeight) {
+    const finalizedEventsHash = String(finalizedAtHeight.eventsHash || '').toLowerCase() ||
+      canonicalJurisdictionEventsHash(finalizedAtHeight.events || []);
+    if (
+      finalizedAtHeight.jBlockHash.toLowerCase() !== blockHash.toLowerCase() ||
+      finalizedEventsHash !== canonicalEventsHash
+    ) {
+      throw new Error(
+        `j_event conflict: block ${blockNumber} finalized as ${finalizedAtHeight.jBlockHash}:${finalizedEventsHash}, observed ${blockHash}:${canonicalEventsHash}`,
+      );
+    }
+    return { newState: entityState, mempoolOps: [], outputs: [], dirtyAccounts: [] };
+  }
+
+  if (blockNumber <= entityState.lastFinalizedJHeight) {
+    return { newState: entityState, mempoolOps: [], outputs: [], dirtyAccounts: [] };
+  }
+
   let newEntityState = cloneEntityState(entityState);
 
   const observation: JBlockObservation = {
     signerId: normalizeSignerId(signerId),
+    jurisdictionRef: expectedJurisdictionRef,
     jHeight: blockNumber,
-    jBlockHash: blockHash,
+    jBlockHash: blockHash.toLowerCase(),
+    transactionHash: String(batchData.transactionHash || '').toLowerCase(),
     eventsHash: canonicalEventsHash,
     events: jEvents,
+    signature: signature.toLowerCase(),
     ...(canonicalEvidenceHash ? { disputeFinalizationEvidenceHash: canonicalEvidenceHash } : {}),
     ...(disputeFinalizationEvidence.length
       ? { disputeFinalizationEvidence }
       : {}),
-    observedAt,
+    observedAt: blockNumber,
   };
+
+  const duplicate = newEntityState.jBlockObservations.some((existing) =>
+    normalizeSignerId(existing.signerId) === observation.signerId &&
+    existing.jHeight === observation.jHeight &&
+    existing.jBlockHash.toLowerCase() === observation.jBlockHash.toLowerCase() &&
+    observationEventsHash(existing) === observation.eventsHash &&
+    String(existing.transactionHash || '').toLowerCase() === observation.transactionHash.toLowerCase() &&
+    String(existing.disputeFinalizationEvidenceHash || '').toLowerCase() ===
+      String(observation.disputeFinalizationEvidenceHash || '').toLowerCase()
+  );
+  if (duplicate) {
+    return { newState: entityState, mempoolOps: [], outputs: [], dirtyAccounts: [] };
+  }
 
   newEntityState.jBlockObservations.push(observation);
 
@@ -269,23 +313,57 @@ async function tryFinalizeJBlocks(
   // A block-hash quorum is not enough: signers must agree on the event-set hash
   // too, otherwise a Byzantine signer could union fake events into a real block.
   const observationGroups = new Map<string, JBlockObservation[]>();
-  const signerObservationHashes = new Map<string, string>();
+  const signerObservationIdentities = new Map<string, string>();
+  const expectedJurisdictionRef = getJEventJurisdictionRef(state.config.jurisdiction);
 
   for (const obs of state.jBlockObservations) {
     if (!isValidatorSigner(state, obs.signerId)) {
       throw new Error(`j_event rejected: non-validator signer ${String(obs.signerId)}`);
     }
     const signerId = normalizeSignerId(obs.signerId);
-    const eventsHash = observationEventsHash(obs);
-    const signerKey = `${obs.jHeight}:${obs.jBlockHash}:${signerId}`;
-    const previousEventsHash = signerObservationHashes.get(signerKey);
-    if (previousEventsHash && previousEventsHash !== eventsHash) {
+    const jurisdictionRef = String(obs.jurisdictionRef || '').trim().toLowerCase();
+    if (jurisdictionRef !== expectedJurisdictionRef) {
       throw new Error(
-        `j_event conflict: signer ${signerId} submitted multiple event sets for block ${obs.jHeight}:${obs.jBlockHash}`,
+        `j_event conflict: pending observation jurisdiction mismatch expected=${expectedJurisdictionRef} got=${jurisdictionRef || 'missing'}`,
       );
     }
-    signerObservationHashes.set(signerKey, eventsHash);
-    const key = `${obs.jHeight}:${obs.jBlockHash}:${eventsHash}`;
+    const canonicalBodyHash = canonicalJurisdictionEventsHash(obs.events || []);
+    const eventsHash = observationEventsHash(obs);
+    if (canonicalBodyHash !== eventsHash) {
+      throw new Error(
+        `j_event conflict: observation body hash mismatch for signer ${signerId} block ${obs.jHeight}`,
+      );
+    }
+    const observationDigest = buildJEventObservationDigest({
+      entityId: state.entityId,
+      jurisdictionRef,
+      signerId,
+      blockNumber: obs.jHeight,
+      blockHash: obs.jBlockHash,
+      transactionHash: obs.transactionHash,
+      eventsHash,
+      ...(obs.disputeFinalizationEvidenceHash
+        ? { disputeFinalizationEvidenceHash: obs.disputeFinalizationEvidenceHash }
+        : {}),
+    });
+    if (!verifyAccountSignature(env, signerId, observationDigest, obs.signature)) {
+      throw new Error(`j_event conflict: stored observation signature invalid for signer ${signerId} block ${obs.jHeight}`);
+    }
+    const signerKey = `${jurisdictionRef}:${obs.jHeight}:${signerId}`;
+    const observationIdentity = [
+      String(obs.jBlockHash || '').toLowerCase(),
+      eventsHash,
+      String(obs.transactionHash || '').toLowerCase(),
+      String(obs.disputeFinalizationEvidenceHash || '').toLowerCase(),
+    ].join(':');
+    const previousIdentity = signerObservationIdentities.get(signerKey);
+    if (previousIdentity && previousIdentity !== observationIdentity) {
+      throw new Error(
+        `j_event equivocation: signer ${signerId} submitted conflicting observations for ${jurisdictionRef} block ${obs.jHeight}`,
+      );
+    }
+    signerObservationIdentities.set(signerKey, observationIdentity);
+    const key = `${jurisdictionRef}:${obs.jHeight}:${String(obs.jBlockHash || '').toLowerCase()}:${eventsHash}`;
     if (!observationGroups.has(key)) {
       observationGroups.set(key, []);
     }
@@ -321,7 +399,12 @@ async function tryFinalizeJBlocks(
     }
   }
 
-  for (const [_key, observations] of observationGroups) {
+  const quorumGroups = Array.from(observationGroups.entries())
+    .filter(([, observations]) => signerVotingPower(state, observations.map((observation) => observation.signerId)) >= threshold)
+    .sort(([leftKey, left], [rightKey, right]) =>
+      left[0]!.jHeight - right[0]!.jHeight || compareStableText(leftKey, rightKey));
+
+  for (const [_key, observations] of quorumGroups) {
     const uniqueSigners = new Set(observations.map(o => normalizeSignerId(o.signerId)));
     const signerCount = uniqueSigners.size;
     const signerPower = signerVotingPower(state, uniqueSigners);
@@ -335,15 +418,20 @@ async function tryFinalizeJBlocks(
         continue;
       }
 
-      const events = mergeSignerObservations(observations);
+      const events = canonicalEventsFromQuorum(observations);
       const disputeFinalizationEvidence = mergeThresholdDisputeFinalizationEvidence(state, observations, threshold);
+      const attestations = buildJBlockAttestations(observations);
 
       const finalized: JBlockFinalized = {
+        jurisdictionRef: expectedJurisdictionRef,
         jHeight,
         jBlockHash,
+        eventsHash: observationEventsHash(observations[0]!),
         events,
+        attestations,
         finalizedAt: state.timestamp, // Entity-level timestamp for determinism across validators
         signerCount,
+        signerPower,
       };
 
       // Add to jBlockChain before applying events to prevent duplicate
@@ -395,20 +483,33 @@ async function tryFinalizeJBlocks(
   return { newState: state, mempoolOps: allMempoolOps, outputs: allOutputs, dirtyAccounts: Array.from(dirtyAccounts) };
 }
 
-function mergeSignerObservations(observations: JBlockObservation[]): JurisdictionEvent[] {
-  const eventMap = new Map<string, JurisdictionEvent>();
+function canonicalEventsFromQuorum(observations: JBlockObservation[]): JurisdictionEvent[] {
+  const canonicalObservation = [...observations]
+    .sort((left, right) => compareStableText(normalizeSignerId(left.signerId), normalizeSignerId(right.signerId)))[0];
+  if (!canonicalObservation) throw new Error('j_event finality invariant: empty quorum');
 
-  for (const obs of observations) {
-    const normalized = normalizeJurisdictionEvents(obs.events);
-    for (const event of normalized) {
-      const key = canonicalJurisdictionEventKey(event);
-      if (!eventMap.has(key)) {
-        eventMap.set(key, event);
-      }
-    }
+  // Every observation was independently verified against the same eventsHash.
+  // Finality selects one canonical body; it never unions validator histories.
+  return normalizeJurisdictionEvents(canonicalObservation.events)
+    .sort((left, right) => compareStableText(canonicalJurisdictionEventKey(left), canonicalJurisdictionEventKey(right)));
+}
+
+function buildJBlockAttestations(observations: JBlockObservation[]): JBlockAttestation[] {
+  const bySigner = new Map<string, JBlockObservation>();
+  for (const observation of observations) {
+    const signerId = normalizeSignerId(observation.signerId);
+    if (!bySigner.has(signerId)) bySigner.set(signerId, observation);
   }
-
-  return Array.from(eventMap.values());
+  return Array.from(bySigner.values())
+    .sort((left, right) => compareStableText(normalizeSignerId(left.signerId), normalizeSignerId(right.signerId)))
+    .map((observation) => ({
+      signerId: normalizeSignerId(observation.signerId),
+      transactionHash: String(observation.transactionHash || '').toLowerCase(),
+      signature: String(observation.signature || '').toLowerCase(),
+      ...(observation.disputeFinalizationEvidenceHash
+        ? { disputeFinalizationEvidenceHash: observation.disputeFinalizationEvidenceHash.toLowerCase() }
+        : {}),
+    }));
 }
 
 function mergeThresholdDisputeFinalizationEvidence(

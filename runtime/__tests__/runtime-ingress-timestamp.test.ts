@@ -1,13 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account/crypto';
 import { TIMING } from '../constants';
 import { initCrontab, scheduleHook } from '../entity/scheduler';
 import { generateLazyEntityId } from '../entity/factory';
 import { processEventBatch } from '../jadapter/watcher';
+import {
+  buildJEventObservationDigest,
+  canonicalJurisdictionEventsHash,
+  getJEventJurisdictionRef,
+} from '../jurisdiction/event-observation';
 import { createEmptyEnv, enqueueRuntimeInput, entityNeedsPeriodicWake, process, startRuntimeLoop } from '../runtime';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
-import type { AccountMachine, EntityReplica, Env, JurisdictionConfig } from '../types';
+import type { AccountMachine, EntityReplica, Env, JurisdictionConfig, JurisdictionEvent } from '../types';
 import { getWallClockMs } from '../utils';
 
 const TEST_JURISDICTION = {
@@ -257,6 +262,24 @@ describe('runtime ingress timestamp', () => {
     const jEventEntityId = generateLazyEntityId([jEventSignerAddress], 1n);
     env.eReplicas.set(`${normalEntityId}:${normalSignerId}`, makeReplica(normalEntityId, 1_000, normalSignerId));
     env.eReplicas.set(`${jEventEntityId}:${jEventSignerId}`, makeReplica(jEventEntityId, 1_000, jEventSignerId));
+    const jEvent: JurisdictionEvent = {
+      type: 'ReserveUpdated',
+      data: { entity: jEventEntityId, tokenId: 1, newBalance: '100' },
+    };
+    const jurisdictionRef = getJEventJurisdictionRef(TEST_JURISDICTION);
+    const blockNumber = 1;
+    const blockHash = `0x${'ab'.repeat(32)}`;
+    const transactionHash = `0x${'cd'.repeat(32)}`;
+    const eventsHash = canonicalJurisdictionEventsHash([jEvent]);
+    const signature = signAccountFrame(env, jEventSignerId, buildJEventObservationDigest({
+      entityId: jEventEntityId,
+      jurisdictionRef,
+      signerId: jEventSignerId,
+      blockNumber,
+      blockHash,
+      transactionHash,
+      eventsHash,
+    }));
 
     enqueueRuntimeInput(env, {
       runtimeTxs: [],
@@ -281,10 +304,15 @@ describe('runtime ingress timestamp', () => {
             type: 'j_event',
             data: {
               from: jEventSignerId,
+              jurisdictionRef,
+              event: jEvent,
+              events: [jEvent],
               observedAt: 1_000,
-              blockNumber: 1,
-              blockHash: `0x${'ab'.repeat(32)}`,
-              transactionHash: `0x${'cd'.repeat(32)}`,
+              blockNumber,
+              blockHash,
+              transactionHash,
+              eventsHash,
+              signature,
             },
           }],
         },
