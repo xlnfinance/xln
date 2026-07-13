@@ -3,7 +3,14 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { buildFrozenTree, collectFrozenCore, createFrozenManifest, hashFrozenFile } from '../../tools/frozen-core/core.ts';
+import {
+  buildFrozenTree,
+  collectFrozenCore,
+  createFrozenManifest,
+  freezeFile,
+  hashFrozenFile,
+  unfreezeFile,
+} from '../../tools/frozen-core/core.ts';
 
 const roots: string[] = [];
 
@@ -81,5 +88,28 @@ describe('frozen core integrity', () => {
     expect(result.exitCode).not.toBe(0);
     expect(new TextDecoder().decode(result.stderr)).toContain('FROZEN_CORE_ALREADY_INITIALIZED');
     expect(readFileSync(manifestPath, 'utf8')).toBe(sentinel);
+  });
+
+  test('records owner policy changes while removing and restoring a frozen file', () => {
+    const root = fixture();
+    const manifest = createFrozenManifest(root, ['runtime/runtime.ts'], '0.1.7', 'test baseline');
+
+    unfreezeFile(root, manifest, 'runtime/runtime.ts', '0.1.8', 'Temporary maintenance window.', '2026-07-13T00:00:00.000Z');
+    expect(manifest.files).toHaveLength(0);
+    expect(manifest.policyChanges?.at(-1)).toMatchObject({
+      action: 'unfreeze',
+      path: 'runtime/runtime.ts',
+      reason: 'Temporary maintenance window.',
+    });
+    expect(collectFrozenCore(root, manifest, '0.1.8').rootHash).toBe(manifest.rootHash);
+
+    freezeFile(root, manifest, 'runtime/runtime.ts', '0.1.8', 'Maintenance complete.', '2026-07-13T01:00:00.000Z');
+    expect(manifest.files).toHaveLength(1);
+    expect(manifest.policyChanges?.at(-1)).toMatchObject({
+      action: 'freeze',
+      path: 'runtime/runtime.ts',
+      reason: 'Maintenance complete.',
+    });
+    expect(collectFrozenCore(root, manifest, '0.1.8').rootHash).toBe(manifest.rootHash);
   });
 });

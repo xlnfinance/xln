@@ -18,12 +18,23 @@ export type FrozenApproval = {
   comment: string;
 };
 
+export type FrozenPolicyChange = {
+  action: 'freeze' | 'unfreeze';
+  path: string;
+  contentHash: string;
+  leafHash: string;
+  release: string;
+  changedAt: string;
+  reason: string;
+};
+
 export type FrozenCoreManifest = {
   schemaVersion: 1;
   algorithm: 'sha256';
   rootHash: string;
   files: FrozenFileBaseline[];
   approvals: FrozenApproval[];
+  policyChanges?: FrozenPolicyChange[];
 };
 
 export type FrozenTreeNode = {

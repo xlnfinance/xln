@@ -100,7 +100,13 @@ function mutableDependencies(root: string, source: string, frozenPaths: Set<stri
 
 export function readFrozenManifest(path: string): FrozenCoreManifest {
   const parsed = JSON.parse(readFileSync(path, 'utf8')) as FrozenCoreManifest;
-  if (parsed.schemaVersion !== 1 || parsed.algorithm !== 'sha256' || !Array.isArray(parsed.files)) {
+  if (
+    parsed.schemaVersion !== 1 ||
+    parsed.algorithm !== 'sha256' ||
+    !Array.isArray(parsed.files) ||
+    !Array.isArray(parsed.approvals) ||
+    (parsed.policyChanges !== undefined && !Array.isArray(parsed.policyChanges))
+  ) {
     throw new Error(`FROZEN_CORE_MANIFEST_INVALID:${path}`);
   }
   const paths = parsed.files.map((file) => file.path);
@@ -146,7 +152,62 @@ export function collectFrozenCore(root: string, manifest: FrozenCoreManifest, re
 
 export function createFrozenManifest(root: string, paths: string[], release: string, reason: string): FrozenCoreManifest {
   const files = paths.map((path) => ({ ...hashFrozenFile(root, path), frozenAtRelease: release, reason }));
-  return { schemaVersion: 1, algorithm: 'sha256', rootHash: buildFrozenTree(files).hash, files, approvals: [] };
+  return {
+    schemaVersion: 1,
+    algorithm: 'sha256',
+    rootHash: buildFrozenTree(files).hash,
+    files,
+    approvals: [],
+    policyChanges: [],
+  };
+}
+
+export function freezeFile(
+  root: string,
+  manifest: FrozenCoreManifest,
+  path: string,
+  release: string,
+  reason: string,
+  changedAt: string,
+): void {
+  if (manifest.files.some((file) => file.path === path)) throw new Error(`FROZEN_CORE_ALREADY_FROZEN:${path}`);
+  const current = hashFrozenFile(root, path);
+  manifest.files.push({ ...current, frozenAtRelease: release, reason });
+  manifest.files.sort((left, right) => left.path.localeCompare(right.path));
+  (manifest.policyChanges ??= []).push({
+    action: 'freeze',
+    path,
+    contentHash: current.contentHash,
+    leafHash: current.leafHash,
+    release,
+    changedAt,
+    reason,
+  });
+  manifest.rootHash = buildFrozenTree(manifest.files).hash;
+}
+
+export function unfreezeFile(
+  root: string,
+  manifest: FrozenCoreManifest,
+  path: string,
+  release: string,
+  reason: string,
+  changedAt: string,
+): void {
+  const index = manifest.files.findIndex((file) => file.path === path);
+  if (index < 0) throw new Error(`FROZEN_CORE_NOT_FROZEN:${path}`);
+  const current = hashFrozenFile(root, path);
+  manifest.files.splice(index, 1);
+  (manifest.policyChanges ??= []).push({
+    action: 'unfreeze',
+    path,
+    contentHash: current.contentHash,
+    leafHash: current.leafHash,
+    release,
+    changedAt,
+    reason,
+  });
+  manifest.rootHash = buildFrozenTree(manifest.files).hash;
 }
 
 export function renderFrozenTree(snapshot: FrozenCoreSnapshot): string {

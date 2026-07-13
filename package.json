@@ -158,6 +158,8 @@
     "frozen-core:check": "bun tools/frozen-core.ts check",
     "frozen-core:tree": "bun tools/frozen-core.ts tree",
     "frozen-core:approve": "bun tools/frozen-core.ts approve",
+    "frozen-core:add": "bun tools/frozen-core.ts add",
+    "frozen-core:remove": "bun tools/frozen-core.ts remove",
     "foundation-release:init": "bun tools/foundation-release.ts init",
     "foundation-release:verify": "bun tools/foundation-release.ts verify",
     "foundation-release:publish-check": "bun tools/foundation-release.ts publish-check",

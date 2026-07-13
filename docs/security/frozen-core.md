@@ -25,9 +25,19 @@ imports that can alter behavior without changing a frozen file.
 ## Approval
 
 Only the project owner may run `bun run frozen-core:approve`. The command has no
-non-interactive mode and requires the exact file path plus a substantive
-comment. Approval records preserve old/new hashes, release, timestamp, and
-comment. Release history renders either `UNCHANGED` or `APPROVED CHANGE`.
+non-interactive mode. Approval records preserve old/new hashes, release,
+timestamp, and comment. Release history renders either `UNCHANGED` or
+`APPROVED CHANGE`.
+
+The owner can temporarily change the boundary with
+`bun run frozen-core:remove -- <path>` and restore it with
+`bun run frozen-core:add -- <path>`. Both commands require an interactive TTY
+and an explicit confirmation. The manifest retains each policy change with the
+file hash, release, timestamp, and reason; removing a file never erases its
+approval history.
+
+When the manifest contains exactly one frozen file,
+`bun run frozen-core:remove` selects it automatically.
 
 ## Foundation Release Hanko
 

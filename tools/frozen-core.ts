@@ -8,9 +8,11 @@ import {
   buildFrozenTree,
   collectFrozenCore,
   createFrozenManifest,
+  freezeFile,
   hashFrozenFile,
   readFrozenManifest,
   renderFrozenTree,
+  unfreezeFile,
 } from './frozen-core/core.ts';
 import type { FrozenApproval } from './frozen-core/types.ts';
 
@@ -44,6 +46,42 @@ if (command === 'check' || command === 'tree') {
   if (snapshot.mutableDependencies.length) {
     console.warn(`FROZEN_CORE_DEPENDENCY_WARNING: ${snapshot.mutableDependencies.length} mutable imports`);
   }
+  process.exit(0);
+}
+
+if (command === 'add' || command === 'remove') {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('FROZEN_CORE_POLICY_CHANGE_REQUIRES_INTERACTIVE_TTY');
+  const explicitPaths = process.argv.slice(3).filter((arg) => arg !== '--' && !arg.startsWith('--reason='));
+  const paths = explicitPaths.length > 0
+    ? explicitPaths
+    : command === 'remove' && manifest.files.length === 1
+      ? [manifest.files[0]!.path]
+      : [];
+  if (!paths.length) {
+    throw new Error(`Usage: bun tools/frozen-core.ts ${command} <file> [...] [--reason=<reason>]`);
+  }
+  const defaultReason = command === 'add'
+    ? 'Frozen by project owner.'
+    : 'Temporarily unfrozen by project owner.';
+  const reason = process.argv.find((arg) => arg.startsWith('--reason='))?.slice('--reason='.length).trim() || defaultReason;
+  const prompt = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    for (const path of paths) {
+      const verb = command === 'add' ? 'FREEZE' : 'UNFREEZE';
+      const confirmation = paths.length === 1 ? verb : `${verb} ${path}`;
+      console.log(`\n${command === 'add' ? 'Freeze' : 'Unfreeze'} ${path}\nreason ${reason}`);
+      while ((await prompt.question(`Type ${confirmation}: `)).trim() !== confirmation) {
+        console.error(`Not confirmed. Type exactly: ${confirmation}`);
+      }
+      const changedAt = new Date().toISOString();
+      if (command === 'add') freezeFile(root, manifest, path, release, reason, changedAt);
+      else unfreezeFile(root, manifest, path, release, reason, changedAt);
+    }
+  } finally {
+    prompt.close();
+  }
+  writeManifest(manifest);
+  console.log(`Frozen core policy updated for release ${release}: ${paths.length} file(s)`);
   process.exit(0);
 }
 

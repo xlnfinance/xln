@@ -1,17 +1,8 @@
 {
   "schemaVersion": 1,
   "algorithm": "sha256",
-  "rootHash": "0x800227f868d248b2dbdf7a9f4f020eff8efe3fff84f8357680385cc23a081f70",
-  "files": [
-    {
-      "path": "runtime/runtime.ts",
-      "mode": "100644",
-      "contentHash": "0xc1b334647722ca2cce982c546c8fda0c055122a8e774df862e9b11ee1e0b1482",
-      "leafHash": "0x674a286ba88b38b137011a562b4fd2af882bcfac651457a130bd541c40fb4153",
-      "frozenAtRelease": "0.1.7",
-      "reason": "Primary runtime entrypoint frozen by the project owner."
-    }
-  ],
+  "rootHash": "0x4eccf4492e5d085b24162f86d327e003c36b7e2a90ad527db1653fde391946a7",
+  "files": [],
   "approvals": [
     {
       "path": "runtime/runtime.ts",
@@ -102,6 +93,37 @@
       "release": "0.1.8",
       "approvedAt": "2026-07-12T18:23:06.310Z",
       "comment": "Restore complete durable runtime and replica metadata for 0.1.8"
+    },
+    {
+      "path": "runtime/runtime.ts",
+      "oldContentHash": "0xc1b334647722ca2cce982c546c8fda0c055122a8e774df862e9b11ee1e0b1482",
+      "newContentHash": "0x484f537a36ac2777e9b300fdce268f9aafe320015fc2050ca3ce62555b619a4b",
+      "oldLeafHash": "0x674a286ba88b38b137011a562b4fd2af882bcfac651457a130bd541c40fb4153",
+      "newLeafHash": "0x0bab155da90a5ba0c3104d67d957946d65987c32b8929c8ffce2246ac682c37b",
+      "release": "0.1.8",
+      "approvedAt": "2026-07-13T11:46:03.436Z",
+      "comment": "Restore complete durable runtime and replica metadata for 0.1.8"
+    },
+    {
+      "path": "runtime/runtime.ts",
+      "oldContentHash": "0x484f537a36ac2777e9b300fdce268f9aafe320015fc2050ca3ce62555b619a4b",
+      "newContentHash": "0xc2da41da791085c1e71de203bb18c17e9df3600ff3e3bd70f579980650b2aa9c",
+      "oldLeafHash": "0x0bab155da90a5ba0c3104d67d957946d65987c32b8929c8ffce2246ac682c37b",
+      "newLeafHash": "0x19227fb54e53736c8c0824caafb677df5ae2d6bf1206b8ff62250181baaa0739",
+      "release": "0.1.8",
+      "approvedAt": "2026-07-13T12:12:19.443Z",
+      "comment": "Restore complete durable runtime and replica metadata for 0.1.8"
+    }
+  ],
+  "policyChanges": [
+    {
+      "action": "unfreeze",
+      "path": "runtime/runtime.ts",
+      "contentHash": "0xc2da41da791085c1e71de203bb18c17e9df3600ff3e3bd70f579980650b2aa9c",
+      "leafHash": "0x19227fb54e53736c8c0824caafb677df5ae2d6bf1206b8ff62250181baaa0739",
+      "release": "0.1.8",
+      "changedAt": "2026-07-13T12:42:41.769Z",
+      "reason": "Temporary consensus refactor window"
     }
   ]
 }
