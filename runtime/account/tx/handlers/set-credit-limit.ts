@@ -1,6 +1,8 @@
 /**
  * Set Credit Limit Handler
- * Channel.ts pattern: proposer extends credit to counterparty.
+ * Channel.ts pattern: proposer sets the counterparty's credit grant.
+ * A lower grant applies prospectively; deriveDelta preserves already-drawn
+ * exposure so revocation cannot erase a receivable or block cure/netting.
  * Uses byLeft (frame property, same on both sides) — NOT perspective-dependent.
  */
 

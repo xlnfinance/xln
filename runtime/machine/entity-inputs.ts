@@ -1,4 +1,5 @@
 import { applyEntityInput, mergeEntityInputs } from '../entity/consensus/index';
+import type { EntityInputOutcome } from '../entity/consensus/index';
 import {
   entityInputHasCrossJurisdictionIntraRuntimeTx,
   isCrossJurisdictionEntityInputRemoteHopAllowed,
@@ -17,6 +18,9 @@ import { DEBUG, getPerfMs } from '../utils';
 import { createStructuredLogger, logError, shortId } from '../infra/logger';
 
 const entityInputLog = createStructuredLogger('runtime.entity_inputs');
+
+const isCommittedEntityInput = (outcome: EntityInputOutcome): boolean =>
+  outcome.kind === 'committed';
 
 const ENTITY_INPUT_PROFILE =
   nodeProcess?.env?.['XLN_ENTITY_INPUT_PROFILE'] === '1' ||
@@ -187,7 +191,7 @@ export const applyMergedEntityInputs = async (
     }
 
     const result = await applyEntityInputToReplica(env, entityReplica, replicaKey, entityInput, actualSignerId, isReplay);
-    if (result.accepted && entityInput.from) {
+    if (isCommittedEntityInput(result.outcome) && entityInput.from) {
       const appliedRouteHints = new Set([
         ...collectAppliedAccountSenderHints(entityInput),
         ...collectCrossJurisdictionRemoteEntityHints(env, entityInput, entityInput.from, routingDeps),
@@ -210,7 +214,7 @@ export const applyMergedEntityInputs = async (
         jOutputs: result.jOutputs.length,
       });
     }
-    if (result.accepted) appliedEntityInputs.push(result.appliedInput);
+    if (isCommittedEntityInput(result.outcome)) appliedEntityInputs.push(result.appliedInput);
     env.eReplicas.set(replicaKey, result.nextReplica);
     entityOutbox.push(...result.outputs);
     if (result.jOutputs.length > 0) {
@@ -272,7 +276,7 @@ export const applyMergedEntityInputs = async (
           jOutputs: result.jOutputs.length,
         });
       }
-      if (result.accepted) appliedEntityInputs.push(result.appliedInput);
+      if (isCommittedEntityInput(result.outcome)) appliedEntityInputs.push(result.appliedInput);
       env.eReplicas.set(replicaKey, result.nextReplica);
       entityOutbox.push(...result.outputs);
       if (result.jOutputs.length > 0) {
@@ -311,7 +315,7 @@ const applyEntityInputToReplica = async (
   actualSignerId: string,
   isReplay: boolean,
 ): Promise<{
-  accepted: boolean;
+  outcome: EntityInputOutcome;
   appliedInput: RoutedEntityInput;
   nextReplica: EntityReplica;
   outputs: RoutedEntityInput[];
@@ -344,7 +348,7 @@ const applyEntityInputToReplica = async (
     });
   }
 
-  const { accepted, newState, outputs, jOutputs, workingReplica } = await applyEntityInput(
+  const { outcome, newState, outputs, jOutputs, workingReplica } = await applyEntityInput(
     env,
     entityReplica,
     normalizedInput,
@@ -356,15 +360,16 @@ const applyEntityInputToReplica = async (
     validatorComputedState: _oldValidatorComputedState,
     ...replicaBase
   } = entityReplica;
-  const nextReplica: EntityReplica = accepted ? {
+  const committed = isCommittedEntityInput(outcome);
+  const nextReplica: EntityReplica = committed ? {
     ...replicaBase,
     state: newState,
     mempool: workingReplica.mempool,
   } : entityReplica;
-  if (accepted && workingReplica.proposal !== undefined) nextReplica.proposal = workingReplica.proposal;
-  if (accepted && workingReplica.lockedFrame !== undefined) nextReplica.lockedFrame = workingReplica.lockedFrame;
-  if (accepted && workingReplica.hankoWitness !== undefined) nextReplica.hankoWitness = workingReplica.hankoWitness;
-  if (accepted && workingReplica.validatorComputedState !== undefined) {
+  if (committed && workingReplica.proposal !== undefined) nextReplica.proposal = workingReplica.proposal;
+  if (committed && workingReplica.lockedFrame !== undefined) nextReplica.lockedFrame = workingReplica.lockedFrame;
+  if (committed && workingReplica.hankoWitness !== undefined) nextReplica.hankoWitness = workingReplica.hankoWitness;
+  if (committed && workingReplica.validatorComputedState !== undefined) {
     nextReplica.validatorComputedState = workingReplica.validatorComputedState;
   }
 
@@ -381,7 +386,7 @@ const applyEntityInputToReplica = async (
     }
   });
 
-  return { accepted, appliedInput, nextReplica, outputs: routedOutputs, jOutputs: jOutputs || [] };
+  return { outcome, appliedInput, nextReplica, outputs: routedOutputs, jOutputs: jOutputs || [] };
 };
 
 const findReplicaKeyInsensitive = (env: Env, entityId: string, signerId?: string | null): string | null => {

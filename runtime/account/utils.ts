@@ -80,14 +80,16 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   // When delta < 0: we owe peer (we're using PEER's credit or they hold our collateral)
 
   // [---.*∆--][INVARIANT-3]
-  // inOwnCredit = how much we currently owe, bounded by the credit line peer granted us
+  // Credit limits govern NEW risk, not already-drawn debt. A lender may revoke
+  // unused credit prospectively, but that cannot erase the signed receivable or
+  // remove the creditor's capacity to net/cure it. Clamping debt to the current
+  // limit made a limit reduction rewrite accounting history and wedge repayment.
   let inOwnCredit = nonNegative(-totalDelta);
-  if (inOwnCredit > ownCreditLimit) inOwnCredit = ownCreditLimit;
 
   // [---.*∆--][INVARIANT-4]
-  // outPeerCredit = how much peer owes us (bounded by peerCreditLimit)
+  // outPeerCredit = how much peer owes us beyond collateral. Like inOwnCredit,
+  // this is historical exposure and therefore is not clamped by a later grant.
   let outPeerCredit = nonNegative(totalDelta - collateral);
-  if (outPeerCredit > peerCreditLimit) outPeerCredit = peerCreditLimit;
 
   // [---.*∆--][INVARIANT-5][MIRROR]
   // outOwnCredit = unused portion of our credit window
@@ -100,8 +102,8 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   // LEFT perspective initialization:
   // - peerCreditUsed: credit peer lent to left that left is currently using
   // - ownCreditUsed:  credit left lent to peer that peer is currently using
-  let peerCreditUsed = totalDelta < 0n ? nonNegative(-totalDelta - collateral) : 0n;
-  let ownCreditUsed = totalDelta > 0n ? nonNegative(totalDelta - collateral) : 0n;
+  let peerCreditUsed = inOwnCredit;
+  let ownCreditUsed = outPeerCredit;
 
   let inAllowance = delta.rightAllowance;
   let outAllowance = delta.leftAllowance;
@@ -109,7 +111,9 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   // settlement paths. They reduce immediate capacity, but do not change
   // delta/collateral ownership semantics.
 
-  const totalCapacity = collateral + ownCreditLimit + peerCreditLimit;
+  const effectiveOwnCreditWindow = ownCreditLimit > inOwnCredit ? ownCreditLimit : inOwnCredit;
+  const effectivePeerCreditWindow = peerCreditLimit > outPeerCredit ? peerCreditLimit : outPeerCredit;
+  const totalCapacity = collateral + effectiveOwnCreditWindow + effectivePeerCreditWindow;
 
   // Unified per-side holds (single source of truth).
   const leftHold = delta.leftHold || 0n;
@@ -152,10 +156,11 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   // [---.*∆--][DEBUG-VISUAL]
   // ASCII visualization for deterministic debugging and quick human inspection.
   const totalWidth = Number(totalCapacity);
-  const leftCreditWidth = Math.floor((Number(ownCreditLimit) / totalWidth) * 50);
-  const collateralWidth = Math.floor((Number(collateral) / totalWidth) * 50);
+  const safeTotalWidth = Number.isFinite(totalWidth) && totalWidth > 0 ? totalWidth : 1;
+  const leftCreditWidth = Math.floor((Number(effectiveOwnCreditWindow) / safeTotalWidth) * 50);
+  const collateralWidth = Math.floor((Number(collateral) / safeTotalWidth) * 50);
   const rightCreditWidth = 50 - leftCreditWidth - collateralWidth;
-  const deltaPosition = Math.floor(((Number(totalDelta) + Number(ownCreditLimit)) / totalWidth) * 50);
+  const deltaPosition = Math.floor(((Number(totalDelta) + Number(effectiveOwnCreditWindow)) / safeTotalWidth) * 50);
 
   // ASCII visualization - proper bar with position marker
   // Build the full capacity bar first

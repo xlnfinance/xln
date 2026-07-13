@@ -780,8 +780,14 @@ const validateVotingPower = (power: bigint): boolean => {
 
 // === CORE ENTITY PROCESSING ===
 
+export type EntityInputOutcome =
+  | { kind: 'committed' }
+  | { kind: 'noop'; reason: string }
+  | { kind: 'deferred'; reason: string }
+  | { kind: 'rejected'; code: string };
+
 type ApplyEntityInputResult = {
-  accepted: boolean;
+  outcome: EntityInputOutcome;
   newState: EntityState;
   outputs: EntityInput[];
   jOutputs: JInput[];
@@ -797,16 +803,30 @@ type ApplyEntityInputContext = {
   frameHash: string;
 };
 
-const finishApplyEntityInput = (context: ApplyEntityInputContext): ApplyEntityInputResult => ({
-  accepted: true,
+const commitEntityConsensusInput = (context: ApplyEntityInputContext): ApplyEntityInputResult => ({
+  outcome: { kind: 'committed' },
   newState: context.workingReplica.state,
   outputs: context.entityOutbox,
   jOutputs: context.jOutbox,
   workingReplica: context.workingReplica,
 });
 
-const rejectEntityConsensusInput = (context: ApplyEntityInputContext): ApplyEntityInputResult => ({
-  accepted: false,
+const noopEntityConsensusInput = (
+  context: ApplyEntityInputContext,
+  reason: string,
+): ApplyEntityInputResult => ({
+  outcome: { kind: 'noop', reason },
+  newState: context.workingReplica.state,
+  outputs: [],
+  jOutputs: [],
+  workingReplica: context.workingReplica,
+});
+
+const rejectEntityConsensusInput = (
+  context: ApplyEntityInputContext,
+  code = 'ENTITY_CONSENSUS_REJECTED',
+): ApplyEntityInputResult => ({
+  outcome: { kind: 'rejected', code },
   newState: context.workingReplica.state,
   outputs: [],
   jOutputs: [],
@@ -876,7 +896,7 @@ async function handleLeaderTimeoutVote(
 async function handleCommitNotification(
   context: ApplyEntityInputContext,
 ): Promise<ApplyEntityInputResult | null> {
-  const { env, entityInput, workingReplica, entityOutbox, jOutbox } = context;
+  const { env, entityInput, workingReplica } = context;
   const frameCollectedSigs = entityInput.proposedFrame?.collectedSigs;
   if (!frameCollectedSigs?.size || !entityInput.proposedFrame || workingReplica.proposal) {
     return null;
@@ -885,8 +905,8 @@ async function handleCommitNotification(
   const proposedFrame = entityInput.proposedFrame;
   if (workingReplica.state.height === proposedFrame.height) {
     return workingReplica.state.prevFrameHash === proposedFrame.hash
-      ? finishApplyEntityInput(context)
-      : rejectEntityConsensusInput(context);
+      ? noopEntityConsensusInput(context, 'COMMIT_ALREADY_APPLIED')
+      : rejectEntityConsensusInput(context, 'COMMIT_HEIGHT_HASH_CONFLICT');
   }
   if (!validateProposedFrameLeader(env, workingReplica.state, proposedFrame)) {
     return rejectEntityConsensusInput(context);
@@ -1060,7 +1080,7 @@ async function handleCommitNotification(
     frame: shortHash(proposedFrame.hash),
   });
 
-  return { accepted: true, newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
+  return commitEntityConsensusInput(context);
 }
 
 async function handleProposedFramePrecommit(
@@ -1131,7 +1151,7 @@ async function handleProposedFramePrecommit(
     logError('FRAME_CONSENSUS', `   Expected: ${validatorComputedHash.slice(0, 30)}...`);
     logError('FRAME_CONSENSUS', `   Received: ${proposedFrame.hash.slice(0, 30)}...`);
     logError('FRAME_CONSENSUS', `   This could indicate equivocation attack or state divergence bug.`);
-    return finishApplyEntityInput(context);
+    return rejectEntityConsensusInput(context, 'PROPOSAL_FRAME_HASH_MISMATCH');
   }
 
   entityLog.debug('proposal.hash_verified', { frame: shortHash(proposedFrame.hash) });
@@ -1229,8 +1249,7 @@ async function handleHashPrecommits(
   const signers = Array.from(proposal.collectedSigs?.keys() || []);
   const totalPower = calculateQuorumPower(workingReplica.state.config, signers);
   if (!validateVotingPower(totalPower)) {
-    log.error(`❌ Invalid voting power calculation: ${totalPower}`);
-    return finishApplyEntityInput(context);
+    throw new Error(`ENTITY_CONSENSUS_FATAL_INVALID_VOTING_POWER:${totalPower}`);
   }
 
   if (DEBUG) {
@@ -1384,7 +1403,13 @@ export const applyEntityInput = async (
   const admissionError = getEntityMempoolAdmissionError(entityReplica, entityInput);
   if (admissionError) {
     log.error(`❌ Entity mempool admission rejected for ${entityInput.entityId}: ${admissionError}`);
-    return { accepted: false, newState: entityReplica.state, outputs: [], jOutputs: [], workingReplica: entityReplica };
+    return {
+      outcome: { kind: 'rejected', code: 'ENTITY_MEMPOOL_ADMISSION_REJECTED' },
+      newState: entityReplica.state,
+      outputs: [],
+      jOutputs: [],
+      workingReplica: entityReplica,
+    };
   }
 
   // IMMUTABILITY: Clone replica at function start (fintech-safe, hacker-proof)
@@ -1424,11 +1449,23 @@ export const applyEntityInput = async (
   if (!validateEntityInput(entityInput)) {
     const detail = `entityId=${entityInput.entityId} txs=${entityInput.entityTxs?.map(tx => tx.type).join(',') || 'none'}`;
     log.error(`❌ Invalid input for ${entityInput.entityId}: ${detail}`);
-    return { accepted: false, newState: workingReplica.state, outputs: [], jOutputs: [], workingReplica };
+    return {
+      outcome: { kind: 'rejected', code: 'ENTITY_INPUT_INVALID' },
+      newState: workingReplica.state,
+      outputs: [],
+      jOutputs: [],
+      workingReplica,
+    };
   }
   if (!validateEntityReplica(workingReplica)) {
     log.error(`❌ Invalid replica state for ${workingReplica.entityId}:${workingReplica.signerId}`);
-    return { accepted: false, newState: workingReplica.state, outputs: [], jOutputs: [], workingReplica };
+    return {
+      outcome: { kind: 'rejected', code: 'ENTITY_REPLICA_INVALID' },
+      newState: workingReplica.state,
+      outputs: [],
+      jOutputs: [],
+      workingReplica,
+    };
   }
 
   const entityOutbox: EntityInput[] = [];
@@ -1495,8 +1532,7 @@ export const applyEntityInput = async (
   if (!localCanPropose && workingReplica.mempool.length > 0) {
     const proposerId = getReplicaProposalLeader(workingReplica).activeValidatorId;
     if (!proposerId) {
-      logError('FRAME_CONSENSUS', `❌ No proposer found in validators: ${workingReplica.state.config.validators}`);
-      return { accepted: true, newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
+      throw new Error(`ENTITY_CONSENSUS_FATAL_PROPOSER_MISSING:${workingReplica.state.config.validators.join(',')}`);
     }
 
     const txCount = workingReplica.mempool.length;
@@ -1624,7 +1660,7 @@ export const applyEntityInput = async (
     jOutbox.push(...frameJOutputs);
 
     workingReplica.mempool.length = 0;
-    return { accepted: true, newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
+    return { outcome: { kind: 'committed' }, newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
   }
 
   if (
@@ -1749,7 +1785,7 @@ export const applyEntityInput = async (
     });
   });
 
-  return { accepted: true, newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
+  return { outcome: { kind: 'committed' }, newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
 };
 
 type ApplyEntityTxsInOrderContext = {

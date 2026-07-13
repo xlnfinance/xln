@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
 import { deriveDelta } from '../account/utils';
+import { handleDirectPayment } from '../account/tx/handlers/direct-payment';
+import { handleSetCreditLimit } from '../account/tx/handlers/set-credit-limit';
 import type { Delta, DerivedDelta } from '../types';
+import { makeAccount } from './helpers/cross-j';
 
 const nonNegative = (value: bigint): bigint => value > 0n ? value : 0n;
 
@@ -126,6 +129,50 @@ describe('deriveDelta deterministic property invariants', () => {
 
       expect(leftHeld.outCapacity <= baselineLeft.outCapacity).toBe(true);
       expect(rightHeld.outCapacity <= baselineRight.outCapacity).toBe(true);
+    }
+  });
+
+  test('prospective credit revocation preserves drawn exposure and cure capacity', () => {
+    const leftEntity = `0x${'11'.repeat(32)}`;
+    const rightEntity = `0x${'22'.repeat(32)}`;
+
+    for (const debtDirection of ['right-owes-left', 'left-owes-right'] as const) {
+      for (const collateral of [0n, 40n, 100n]) {
+        const account = makeAccount(leftEntity, rightEntity);
+        const delta = account.deltas.get(1)!;
+        delta.collateral = collateral;
+        delta.ondelta = debtDirection === 'right-owes-left' ? 80n : -80n;
+        delta.offdelta = 0n;
+
+        const grantorIsLeft = debtDirection === 'right-owes-left';
+        const revoked = handleSetCreditLimit(account, {
+          type: 'set_credit_limit',
+          data: { tokenId: 1, amount: 0n },
+        }, grantorIsLeft);
+        expect(revoked.success).toBe(true);
+
+        const creditorIsLeft = debtDirection === 'right-owes-left';
+        const creditorView = deriveDelta(delta, creditorIsLeft);
+        const debtorView = deriveDelta(delta, !creditorIsLeft);
+        const unsecuredExposure = debtDirection === 'right-owes-left'
+          ? nonNegative(80n - collateral)
+          : 80n;
+        expect(creditorView.outPeerCredit).toBe(unsecuredExposure);
+        expect(creditorView.outCapacity >= 80n).toBe(true);
+        expect(debtorView.outOwnCredit).toBe(0n);
+
+        const cured = handleDirectPayment(account, {
+          type: 'direct_payment',
+          data: {
+            tokenId: 1,
+            amount: 80n,
+            fromEntityId: creditorIsLeft ? leftEntity : rightEntity,
+            toEntityId: creditorIsLeft ? rightEntity : leftEntity,
+          },
+        }, creditorIsLeft);
+        expect(cured.success).toBe(true);
+        expect(delta.ondelta + delta.offdelta).toBe(0n);
+      }
     }
   });
 });

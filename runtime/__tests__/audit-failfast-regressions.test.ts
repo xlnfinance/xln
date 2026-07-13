@@ -4201,7 +4201,7 @@ describe('audit fail-fast regressions', () => {
       }],
     });
 
-    expect(result.accepted).toBe(false);
+    expect(result.outcome).toEqual({ kind: 'rejected', code: 'ENTITY_MEMPOOL_ADMISSION_REJECTED' });
     expect(result.workingReplica).toBe(replica);
     expect(result.outputs).toEqual([]);
     expect(result.jOutputs).toEqual([]);
@@ -4370,6 +4370,25 @@ describe('audit fail-fast regressions', () => {
       state: baseState,
     };
 
+    const invalidFrameHashResult = await applyEntityInput(env, validatorReplica, {
+      entityId,
+      signerId: second.signerId,
+      proposedFrame: {
+        height: 1,
+        txs: frameTxs,
+        hash: ethers.keccak256(ethers.toUtf8Bytes('proposer-selected-invalid-frame-hash')),
+        newState: proposedNewState,
+        leader: { proposerSignerId: first.signerId, view: 0 },
+        hashesToSign: localManifest,
+      },
+    });
+    expect(invalidFrameHashResult.outcome).toEqual({
+      kind: 'rejected',
+      code: 'PROPOSAL_FRAME_HASH_MISMATCH',
+    });
+    expect(invalidFrameHashResult.outputs).toEqual([]);
+    expect(invalidFrameHashResult.workingReplica.lockedFrame).toBeUndefined();
+
     const forgedProposalResult = await applyEntityInput(env, validatorReplica, {
       entityId,
       signerId: second.signerId,
@@ -4386,7 +4405,7 @@ describe('audit fail-fast regressions', () => {
       },
     });
 
-    expect(forgedProposalResult.accepted).toBe(false);
+    expect(forgedProposalResult.outcome.kind).toBe('rejected');
     expect(forgedProposalResult.outputs).toEqual([]);
     expect(forgedProposalResult.workingReplica.lockedFrame).toBeUndefined();
 
@@ -4422,7 +4441,7 @@ describe('audit fail-fast regressions', () => {
       },
     });
 
-    expect(mutatedCommitResult.accepted).toBe(false);
+    expect(mutatedCommitResult.outcome.kind).toBe('rejected');
     expect(mutatedCommitResult.workingReplica.state.height).toBe(0);
 
     env.runtimeId = `0x${'71'.repeat(20)}`;

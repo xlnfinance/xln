@@ -139,8 +139,8 @@ describe('entity leader policy', () => {
 
     const ownVoteResult = await applyEntityInput(env, replicas.get('2')!, vote2!);
     const voteFrom3 = await applyEntityInput(env, replicas.get('3')!, vote3!);
-    expect(ownVoteResult.accepted).toBe(true);
-    expect(voteFrom3.accepted).toBe(true);
+    expect(ownVoteResult.outcome.kind).toBe('committed');
+    expect(voteFrom3.outcome.kind).toBe('committed');
     const deliveredVote3 = voteFrom3.outputs.find(output => output.signerId === '2');
     expect(deliveredVote3?.leaderTimeoutVote?.signature).toMatch(/^0x[0-9a-f]+$/i);
     expect(verifyAccountSignature(
@@ -151,7 +151,7 @@ describe('entity leader policy', () => {
     )).toBe(true);
 
     const certified = await applyEntityInput(env, ownVoteResult.workingReplica, deliveredVote3!);
-    expect(certified.accepted).toBe(true);
+    expect(certified.outcome.kind).toBe('committed');
     expect(certified.workingReplica.leaderVotes?.size).toBe(2);
     expect(certified.workingReplica.pendingLeaderCertificate?.nextLeaderId).toBe('2');
     expect(certified.workingReplica.proposal?.leader).toMatchObject({ proposerSignerId: '2', view: 1 });
