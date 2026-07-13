@@ -165,10 +165,31 @@ const buildDurableRuntimeStateSnapshot = (env: Env): Record<string, unknown> | u
     ...(state.pendingFrameDbRecords ? { pendingFrameDbRecords: structuredClone(state.pendingFrameDbRecords) } : {}),
     ...(state.deferredNetworkMeta ? { deferredNetworkMeta: structuredClone(state.deferredNetworkMeta) } : {}),
     ...(state.verifiedProfileRoutes ? { verifiedProfileRoutes: structuredClone(state.verifiedProfileRoutes) } : {}),
-    ...(state.pendingCommittedJOutbox ? { pendingCommittedJOutbox: structuredClone(state.pendingCommittedJOutbox) } : {}),
+    ...(state.runtimeAdapterCommandResults ? { runtimeAdapterCommandResults: structuredClone(state.runtimeAdapterCommandResults) } : {}),
   };
   return Object.keys(durable).length > 0 ? durable : undefined;
 };
+
+export const buildDurableRuntimeMachineSnapshot = (
+  env: Env,
+  options?: { pendingNetworkOutputs?: RoutedEntityInput[] },
+): Record<string, unknown> => ({
+  ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
+  ...(env.activeJurisdiction ? { activeJurisdiction: env.activeJurisdiction } : {}),
+  ...(env.browserVMState ? { browserVMState: structuredClone(env.browserVMState) } : {}),
+  ...(env.runtimeConfig ? { runtimeConfig: structuredClone(env.runtimeConfig) } : {}),
+  ...(buildDurableRuntimeStateSnapshot(env) ? { runtimeState: buildDurableRuntimeStateSnapshot(env) } : {}),
+  runtimeInput: cloneRuntimeInput(env.runtimeMempool ?? env.runtimeInput),
+  ...(env.pendingOutputs?.length ? { pendingOutputs: cloneRuntimeOutputs(env.pendingOutputs) } : {}),
+  ...(env.networkInbox?.length ? { networkInbox: cloneRuntimeOutputs(env.networkInbox) } : {}),
+  ...((options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs)?.length
+    ? { pendingNetworkOutputs: cloneRuntimeOutputs(options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs ?? []) }
+    : {}),
+  jReplicas: Array.from((env.jReplicas || new Map()).entries()).map(([key, replica]) => [
+    key,
+    buildCanonicalJReplicaSnapshot(replica),
+  ]),
+});
 
 const cloneProfiles = (profiles: Profile[] | undefined): Profile[] | undefined => {
   if (!profiles || profiles.length === 0) return undefined;
@@ -190,7 +211,6 @@ export const buildCanonicalRuntimeStateSnapshot = (
   height: env.height,
   timestamp: env.timestamp,
   ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
-  ...(env.dbNamespace ? { dbNamespace: env.dbNamespace } : {}),
   ...(env.activeJurisdiction ? { activeJurisdiction: env.activeJurisdiction } : {}),
   ...(options?.browserVMState ?? env.browserVMState ? { browserVMState: options?.browserVMState ?? env.browserVMState } : {}),
   ...(env.runtimeConfig ? { runtimeConfig: structuredClone(env.runtimeConfig) } : {}),
@@ -230,6 +250,11 @@ export const restoreDurableRuntimeSnapshot = (
   env: Env,
   snapshot: Record<string, unknown>,
 ): void => {
+  if (typeof snapshot['runtimeId'] === 'string') env.runtimeId = snapshot['runtimeId'];
+  if (typeof snapshot['activeJurisdiction'] === 'string') env.activeJurisdiction = snapshot['activeJurisdiction'];
+  if (snapshot['browserVMState']) {
+    env.browserVMState = structuredClone(snapshot['browserVMState']) as NonNullable<Env['browserVMState']>;
+  }
   const runtimeInput = snapshot['runtimeInput'];
   if (runtimeInput && typeof runtimeInput === 'object') {
     const restoredInput = withoutEphemeralScheduledWake(structuredClone(runtimeInput) as RuntimeInput);
@@ -256,6 +281,14 @@ export const restoreDurableRuntimeSnapshot = (
     : [];
   if (typeof snapshot['lockRuntimeSeed'] === 'boolean') {
     env.lockRuntimeSeed = snapshot['lockRuntimeSeed'];
+  }
+  if (Array.isArray(snapshot['jReplicas'])) {
+    env.jReplicas = new Map(snapshot['jReplicas'].map((entry) => {
+      if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string') {
+        throw new Error('RUNTIME_MACHINE_J_REPLICA_ENTRY_INVALID');
+      }
+      return [entry[0], structuredClone(entry[1]) as JReplica];
+    }));
   }
 };
 

@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 import { compareStableText, serializeTaggedJson } from '../protocol/serialization';
 import type { Env } from '../types';
+import { buildDurableRuntimeMachineSnapshot } from '../wal/snapshot';
 import {
   computeCanonicalEntityHashesFromEnv,
   computeCanonicalRuntimeStateHash,
@@ -177,6 +178,7 @@ export const prepareStorageCanonicalStateHashes = (
   touchedEntities: string[],
   previousFrame: StorageFrameRecord | null,
   replicaLookup = buildReplicaLookup(env),
+  runtimeMachine = buildDurableRuntimeMachineSnapshot(env),
 ): { canonicalStateHash: string; canonicalEntityHashes: StorageFrameEntityHash[] } => {
   void touchedEntities;
   void previousFrame;
@@ -185,7 +187,12 @@ export const prepareStorageCanonicalStateHashes = (
     .sort((left, right) => compareStableText(left.entityId, right.entityId));
   return {
     canonicalEntityHashes,
-    canonicalStateHash: computeCanonicalRuntimeStateHash(env.height, env.timestamp, canonicalEntityHashes),
+    canonicalStateHash: computeCanonicalRuntimeStateHash(
+      env.height,
+      env.timestamp,
+      canonicalEntityHashes,
+      runtimeMachine,
+    ),
   };
 };
 

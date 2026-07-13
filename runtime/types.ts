@@ -732,11 +732,6 @@ export interface Env {
         jInputCount: number;
       },
     ) => Promise<void>) | null;
-    /**
-     * J-side effects that were intentionally deferred after the frame was
-     * committed because the recovery backup barrier did not complete yet.
-     */
-    pendingCommittedJOutbox?: JInput[];
     runtimeAdapterCommandResults?: Map<string, {
       inputHash: string;
       result: {

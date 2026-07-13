@@ -266,9 +266,6 @@ const snapshotEnvProjection = (env: Env): Record<string, unknown> => ({
   pendingOutputs: env.pendingOutputs ?? [],
   pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
   networkInbox: env.networkInbox ?? [],
-  runtimeState: {
-    pendingCommittedJOutbox: env.runtimeState?.pendingCommittedJOutbox ?? [],
-  },
 });
 
 const snapshotProjection = (snapshot: Env['history'][number]): Record<string, unknown> => ({

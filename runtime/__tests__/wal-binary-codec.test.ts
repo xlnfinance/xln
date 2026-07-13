@@ -9,7 +9,7 @@ import {
 import { createEmptyEnv } from '../runtime';
 import {
   buildCanonicalEnvSnapshot,
-  buildRuntimeCheckpointSnapshot,
+  buildDurableRuntimeMachineSnapshot,
   buildRuntimeRecoveryCheckpointSnapshot,
   restoreDurableRuntimeSnapshot,
 } from '../wal/snapshot';
@@ -88,13 +88,25 @@ describe('WAL binary codec', () => {
     }];
     env.runtimeState = {
       clockPrimed: true,
-      pendingCommittedJOutbox: [{ jurisdictionName: 'Testnet', jTxs: [] }],
       verifiedProfileRoutes: new Map([[
         `0x${'44'.repeat(32)}`,
         { runtimeId: `0x${'55'.repeat(20)}`, lastUpdated: 123 },
       ]]),
+      runtimeAdapterCommandResults: new Map([[
+        'durable-command-0001',
+        { inputHash: `0x${'66'.repeat(32)}`, result: { height: 7 }, recordedAt: 123 },
+      ]]),
     };
-    const checkpoint = buildRuntimeCheckpointSnapshot(env);
+    env.jReplicas.set('Testnet', {
+      name: 'Testnet',
+      blockNumber: 44n,
+      stateRoot: new Uint8Array(32).fill(7),
+      mempool: [],
+      blockDelayMs: 300,
+      lastBlockTimestamp: 123,
+      position: { x: 0, y: 50, z: 0 },
+    });
+    const checkpoint = buildDurableRuntimeMachineSnapshot(env);
     const restored = createEmptyEnv('wal-durable-runtime');
 
     restoreDurableRuntimeSnapshot(restored, checkpoint);
@@ -103,7 +115,12 @@ describe('WAL binary codec', () => {
     expect(restored.runtimeMempool).toBe(restored.runtimeInput);
     expect(restored.runtimeConfig).toEqual(env.runtimeConfig);
     expect(restored.pendingOutputs).toEqual(env.pendingOutputs);
-    expect(restored.runtimeState?.pendingCommittedJOutbox).toEqual(env.runtimeState.pendingCommittedJOutbox);
     expect(restored.runtimeState?.verifiedProfileRoutes).toEqual(env.runtimeState.verifiedProfileRoutes);
+    expect(restored.runtimeState?.runtimeAdapterCommandResults).toEqual(env.runtimeState.runtimeAdapterCommandResults);
+    expect(restored.jReplicas.get('Testnet')).toEqual(expect.objectContaining({
+      blockNumber: 44n,
+      stateRoot: new Uint8Array(32).fill(7),
+    }));
+    expect(restored.jReplicas.get('Testnet')?.jadapter).toBeUndefined();
   });
 });

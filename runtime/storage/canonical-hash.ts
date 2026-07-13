@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 import { compareStableText } from '../protocol/serialization';
 import type { EntityReplica, Env } from '../types';
+import { buildDurableRuntimeMachineSnapshot } from '../wal/snapshot';
 
 export type CanonicalFrameEntityHash = {
   entityId: string;
@@ -116,9 +117,10 @@ export const computeCanonicalRuntimeStateHash = (
   height: number,
   timestamp: number,
   entityHashes: CanonicalFrameEntityHash[],
+  runtimeMachine?: Record<string, unknown>,
 ): string =>
   hashCanonical({
-    kind: 'xln.storage.canonicalRuntimeHash.v1',
+    kind: runtimeMachine ? 'xln.storage.canonicalRuntimeHash.v2' : 'xln.storage.canonicalRuntimeHash.v1',
     height,
     timestamp,
     entities: entityHashes
@@ -128,7 +130,13 @@ export const computeCanonicalRuntimeStateHash = (
         cellCount: entry.cellCount,
       }))
       .sort((left, right) => compareStableText(left.entityId, right.entityId)),
+    ...(runtimeMachine ? { runtimeMachine: canonicalizeStorageAuditValue(runtimeMachine) } : {}),
   });
 
 export const computeCanonicalStateHashFromEnv = (env: Env): string =>
-  computeCanonicalRuntimeStateHash(env.height, env.timestamp, computeCanonicalEntityHashesFromEnv(env));
+  computeCanonicalRuntimeStateHash(
+    env.height,
+    env.timestamp,
+    computeCanonicalEntityHashesFromEnv(env),
+    buildDurableRuntimeMachineSnapshot(env),
+  );

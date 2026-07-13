@@ -208,6 +208,7 @@ export type StorageFrameRecord = {
   canonicalStateHash?: string;
   canonicalEntityHashes?: StorageFrameEntityHash[];
   runtimeInput: RuntimeInput;
+  runtimeMachine?: Record<string, unknown>;
   /**
    * Transport envelopes not yet terminally delivered after this committed
    * frame. They are replayable at-least-once side effects, not consensus state.

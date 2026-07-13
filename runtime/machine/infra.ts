@@ -47,7 +47,11 @@ export const ensureLiveJAdapterForReplica = async (
   }
   if (jReplica.jadapter) return jReplica.jadapter;
 
-  const hasRpcs = jReplica.rpcs && jReplica.rpcs.length > 0 && jReplica.rpcs[0] !== '';
+  const rpcUrl = jReplica.rpcs?.find((candidate) => {
+    const normalized = String(candidate || '').trim().toLowerCase();
+    return normalized.length > 0 && !normalized.startsWith('browservm:');
+  });
+  const hasRpcs = Boolean(rpcUrl);
   const chainId = jReplica.chainId ?? 31337;
   const context = options.context ?? `restore:${name}`;
   const attempts = options.attempts ?? (typeof window !== 'undefined' ? 5 : 3);
@@ -60,7 +64,6 @@ export const ensureLiveJAdapterForReplica = async (
   };
 
   if (hasRpcs) {
-    const rpcUrl = jReplica.rpcs?.[0];
     if (!rpcUrl) return null;
     adapterConfig.rpcUrl = rpcUrl;
     adapterConfig.fromReplica = jReplica;

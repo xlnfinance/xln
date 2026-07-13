@@ -34,6 +34,7 @@ import { listOpenSwapOffers } from './orderbook/open-swap-offers';
 import { setDeltaTransformerAddress } from './protocol/dispute/proof-builder';
 import {
   buildCanonicalEnvSnapshot,
+  buildDurableRuntimeMachineSnapshot,
   buildRuntimeCheckpointSnapshot,
   normalizePersistedSnapshotInPlace,
   restoreDurableRuntimeSnapshot,
@@ -413,7 +414,6 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
       directEntityInputDispatch: null,
       canUseConnectedRelayFallback: null,
       recoveryBackupBarrier: null,
-      pendingCommittedJOutbox: [],
     };
   }
   if (!env.runtimeState.entityRuntimeHints) {
@@ -2428,9 +2428,7 @@ export const persistRestoredEnvToDB = async (env: Env): Promise<void> => {
     currentBatch.put(keyLiveReplicaMeta(entityId), encodeBuffer(projectReplicaMeta(replica)));
   }
 
-  const retainedHistoryBytes =
-    keyFrame(restoredHeight).byteLength +
-    encodeBuffer({}).byteLength;
+  const retainedHistoryBytes = keyFrame(restoredHeight).byteLength + encodeBuffer({}).byteLength;
   const head: StorageHead = {
     schemaVersion: STORAGE_SCHEMA_VERSION,
     latestHeight: restoredHeight,
@@ -2448,6 +2446,7 @@ export const persistRestoredEnvToDB = async (env: Env): Promise<void> => {
   const snapshotResult = await createSnapshot(currentDb, frameDb, restoredHeight, env.timestamp);
   const canonicalEntityHashes = computeCanonicalEntityHashesFromEnv(env);
   const canonicalStateHash = computeCanonicalStateHashFromEnv(env);
+  const runtimeMachine = buildDurableRuntimeMachineSnapshot(env);
   const frameRecordBase: StorageFrameRecord = {
     height: restoredHeight,
     timestamp: env.timestamp,
@@ -2458,6 +2457,7 @@ export const persistRestoredEnvToDB = async (env: Env): Promise<void> => {
     entityHashes: preparedHashes.entityHashes,
     canonicalStateHash,
     canonicalEntityHashes,
+    runtimeMachine,
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     touchedEntities: Array.from(new Set(puts.map((doc) => doc.entityId))).sort(),
     touchedAccounts: puts
@@ -2736,8 +2736,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     let appliedRuntimeInputForPersistence: RuntimeInput | undefined;
 
     let entityOutbox: RoutedEntityInput[] = [];
-    let jOutbox: JInput[] = [...(state.pendingCommittedJOutbox ?? [])];
-    state.pendingCommittedJOutbox = [];
+    let jOutbox: JInput[] = [];
     const changedEntityIds = new Set<string>();
     const getLocallySignableEntityIds = (): Set<string> => {
       const localEntityIds = new Set<string>();
@@ -3462,6 +3461,7 @@ const loadEnvFromStorage = async (
     }
     env.frameLogs = restoredFrameLogs;
     rebuildPersistedJurisdictions(env);
+    if (frame.runtimeMachine) restoreDurableRuntimeSnapshot(env, frame.runtimeMachine);
     const shouldVerifyCanonicalAudit = Boolean(frame.canonicalStateHash) || shouldRequireCanonicalStorageAudit();
     if (shouldVerifyCanonicalAudit && !frame.canonicalStateHash) {
       throw new Error(`STORAGE_RESTORE_CANONICAL_HASH_MISSING: height=${targetHeight}`);

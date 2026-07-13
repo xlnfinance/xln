@@ -53,6 +53,7 @@ import {
 } from './keys';
 import { createStructuredLogger } from '../infra/logger';
 import type { Env, RoutedEntityInput, RuntimeInput, RuntimeFrameDbRecord } from '../types';
+import { buildDurableRuntimeMachineSnapshot } from '../wal/snapshot';
 import type {
   PerfDeps,
   RuntimeDbLike,
@@ -415,9 +416,12 @@ export const saveRuntimeFrameToStorage = async (options: {
         ...(cachedEntityHashDocs ? { entityHashDocs: cachedEntityHashDocs } : {}),
       })
     : null;
+  const runtimeMachine = buildDurableRuntimeMachineSnapshot(options.env, {
+    pendingNetworkOutputs: options.currentFrameOutputs ?? options.env.pendingNetworkOutputs ?? [],
+  });
   const canonicalHashEnabled = config.canonicalHashPeriodFrames > 0;
   const canonicalHashes = canonicalHashEnabled
-    ? prepareStorageCanonicalStateHashes(options.env, [], previousFrame, replicaLookup)
+    ? prepareStorageCanonicalStateHashes(options.env, [], previousFrame, replicaLookup, runtimeMachine)
     : null;
   const frameRecordBase: StorageFrameRecord = {
     height: options.env.height,
@@ -432,6 +436,7 @@ export const saveRuntimeFrameToStorage = async (options: {
       canonicalEntityHashes: canonicalHashes.canonicalEntityHashes,
     } : {}),
     runtimeInput: appliedRuntimeInput,
+    runtimeMachine,
     ...(options.currentFrameOutputs && options.currentFrameOutputs.length > 0
       ? { runtimeOutputs: structuredClone(options.currentFrameOutputs) }
       : {}),

@@ -169,7 +169,6 @@ describe('runtime recovery tower', () => {
       ...(env.runtimeState ?? {}),
       clockPrimed: true,
       maxEntityInputsPerFrame: 123,
-      pendingCommittedJOutbox: [{ jurisdictionName: jurisdiction.name, jTxs: [] }],
     };
     env.pendingOutputs = [{ entityId, signerId: runtimeId, runtimeId, entityTxs: [] }];
     env.networkInbox = [{ entityId, signerId: runtimeId, runtimeId, entityTxs: [] }];
@@ -214,7 +213,6 @@ describe('runtime recovery tower', () => {
     expect(restoredEnv.runtimeConfig).toEqual(env.runtimeConfig);
     expect(restoredEnv.runtimeState?.clockPrimed).toBe(true);
     expect(restoredEnv.runtimeState?.maxEntityInputsPerFrame).toBe(123);
-    expect(restoredEnv.runtimeState?.pendingCommittedJOutbox).toEqual(env.runtimeState?.pendingCommittedJOutbox);
     expect(restoredEnv.pendingOutputs).toEqual(env.pendingOutputs);
     expect(restoredEnv.networkInbox).toEqual(env.networkInbox);
     expect(restoredEnv.lockRuntimeSeed).toBe(true);

@@ -115,7 +115,12 @@ export const verifyStorageTailIntegrity = async (
         if (!Array.isArray(record.canonicalEntityHashes) || !record.canonicalStateHash) {
           throw new Error(`STORAGE_VERIFY_CANONICAL_HASH_MISSING: height=${height}`);
         }
-        const expectedCanonicalHash = computeCanonicalRuntimeStateHash(record.height, record.timestamp, record.canonicalEntityHashes);
+        const expectedCanonicalHash = computeCanonicalRuntimeStateHash(
+          record.height,
+          record.timestamp,
+          record.canonicalEntityHashes,
+          record.runtimeMachine,
+        );
         if (record.canonicalStateHash !== expectedCanonicalHash) {
           throw new Error(`STORAGE_VERIFY_CANONICAL_HASH_MISMATCH: height=${height} expected=${expectedCanonicalHash} actual=${record.canonicalStateHash}`);
         }

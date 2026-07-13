@@ -5,7 +5,7 @@ import {
   buildCanonicalJReplicaSnapshot,
   normalizePersistedSnapshotInPlace,
 } from '../wal/snapshot';
-import { normalizeRestoredJReplicas } from '../machine/infra';
+import { ensureLiveJAdapterForReplica, normalizeRestoredJReplicas } from '../machine/infra';
 
 const makeJReplica = (overrides: Partial<JReplica> = {}): JReplica => ({
   name: 'arrakis',
@@ -101,6 +101,16 @@ describe('JReplica stateRoot semantics', () => {
       lastBlockTimestamp: 0,
       position: { x: 0, y: 50, z: 0 },
     });
+  });
+
+  test('does not send persisted BrowserVM pseudo URLs to an RPC provider', async () => {
+    const replica = makeJReplica({ name: 'local', rpcs: ['browservm://local'] });
+    const env = {
+      jReplicas: new Map([['local', replica]]),
+    } as Parameters<typeof ensureLiveJAdapterForReplica>[0];
+
+    expect(await ensureLiveJAdapterForReplica(env, 'local', { allowBrowserVm: false })).toBeNull();
+    expect(replica.jadapter).toBeUndefined();
   });
 
   test('legacy persisted RPC zero roots normalize to explicit unavailable', () => {

@@ -4,7 +4,12 @@ import {
   inferRuntimeLifecyclePhase,
   transitionRuntimeLifecycle,
 } from '../machine/lifecycle';
-import { createEmptyEnv, resumeRuntimeLoop, startRuntimeLoop, stopRuntimeLoopAndWait } from '../runtime';
+import {
+  createEmptyEnv,
+  resumeRuntimeLoop,
+  startRuntimeLoop,
+  stopRuntimeLoopAndWait,
+} from '../runtime';
 import type { Env } from '../types';
 
 describe('runtime lifecycle', () => {
@@ -43,4 +48,5 @@ describe('runtime lifecycle', () => {
     expect(env.runtimeState?.lifecyclePhase).toBe('running');
     env.runtimeState?.stopLoop?.();
   });
+
 });
