@@ -132,6 +132,7 @@ export const projectReplicaMeta = (replica: EntityReplica): StorageReplicaMeta =
   ...withProp('leaderVotes', replica.leaderVotes),
   ...withProp('pendingLeaderCertificate', replica.pendingLeaderCertificate),
   ...withProp('lastConsensusProgressAt', replica.lastConsensusProgressAt),
+  ...withProp('jHistory', replica.jHistory),
 });
 
 const projectAccountDocFull = (account: AccountMachine): StorageAccountDoc => ({

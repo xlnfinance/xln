@@ -778,6 +778,18 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
     ...(replica.leaderVotes && { leaderVotes: new Map(Array.from(replica.leaderVotes.entries()).map(([key, vote]) => [key, { ...vote }])) }),
     ...(replica.pendingLeaderCertificate && { pendingLeaderCertificate: structuredClone(replica.pendingLeaderCertificate) }),
     ...(replica.lastConsensusProgressAt !== undefined && { lastConsensusProgressAt: replica.lastConsensusProgressAt }),
+    ...(replica.jHistory && {
+      jHistory: {
+        jurisdictionRef: replica.jHistory.jurisdictionRef,
+        scannedThroughHeight: replica.jHistory.scannedThroughHeight,
+        tipBlockHash: replica.jHistory.tipBlockHash,
+        eventBlocks: new Map(Array.from(replica.jHistory.eventBlocks.entries()).map(([height, block]) => [
+          height,
+          structuredClone(block),
+        ])),
+        blockHashes: new Map(replica.jHistory.blockHashes),
+      },
+    }),
   }, 'cloneEntityReplica');
 };
 

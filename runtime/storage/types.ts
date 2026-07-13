@@ -282,6 +282,7 @@ export type StorageReplicaMeta = {
   leaderVotes?: EntityReplica['leaderVotes'];
   pendingLeaderCertificate?: EntityReplica['pendingLeaderCertificate'];
   lastConsensusProgressAt?: EntityReplica['lastConsensusProgressAt'];
+  jHistory?: EntityReplica['jHistory'];
 };
 
 type AssertNoUnclassifiedPersistenceKeys<T extends never> = T;

@@ -205,6 +205,34 @@ export interface JBlockObservation {
 }
 
 /**
+ * One canonical event-bearing jurisdiction block as observed by a validator.
+ * This is local evidence until an Entity frame includes the same ordered
+ * block in a J range and obtains the normal Entity Hanko.
+ */
+export interface ValidatorJEventBlock {
+  jurisdictionRef: string;
+  jHeight: number;
+  jBlockHash: string;
+  eventsHash: string;
+  events: JurisdictionEvent[];
+  disputeFinalizationEvidence?: DisputeFinalizationEvidence[];
+  disputeFinalizationEvidenceHash?: string;
+}
+
+/**
+ * Validator-private, durable J-chain view. It is persisted with EntityReplica
+ * metadata but deliberately excluded from EntityState and every consensus
+ * hash: validators may be synchronized to different chain heights.
+ */
+export interface ValidatorJHistory {
+  jurisdictionRef: string;
+  scannedThroughHeight: number;
+  tipBlockHash: string;
+  eventBlocks: Map<number, ValidatorJEventBlock>;
+  blockHashes: Map<number, string>;
+}
+
+/**
  * One validator's signed claim about its complete jurisdiction history through
  * a height. The eventHistoryRoot is an append-only accumulator over that
  * validator's own event-block observations; histories are never unioned.

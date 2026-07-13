@@ -237,6 +237,30 @@ describe('state helper cloning', () => {
     expect(cloned.mempool).toEqual([]);
   });
 
+  test('clones validator-private J history without aliasing durable evidence', () => {
+    const replica = makeProjectionReplica() as any;
+    replica.jHistory = {
+      jurisdictionRef: 'testnet:1',
+      scannedThroughHeight: 12,
+      tipBlockHash: `0x${'12'.repeat(32)}`,
+      eventBlocks: new Map([[12, {
+        jurisdictionRef: 'testnet:1',
+        jHeight: 12,
+        jBlockHash: `0x${'12'.repeat(32)}`,
+        eventsHash: `0x${'34'.repeat(32)}`,
+        events: [],
+      }]]),
+      blockHashes: new Map([[12, `0x${'12'.repeat(32)}`]]),
+    };
+
+    const cloned = cloneEntityReplica(replica);
+    cloned.jHistory!.eventBlocks.get(12)!.eventsHash = `0x${'ff'.repeat(32)}`;
+    cloned.jHistory!.blockHashes.set(13, `0x${'13'.repeat(32)}`);
+
+    expect(replica.jHistory.eventBlocks.get(12).eventsHash).toBe(`0x${'34'.repeat(32)}`);
+    expect(replica.jHistory.blockHashes.has(13)).toBe(false);
+  });
+
   test('manual account clone fallback normalizes missing mempool', () => {
     const cloned = cloneAccountMachine({
       currentFrame: {

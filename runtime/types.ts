@@ -8,6 +8,7 @@ import type {
   JBlockFinalized,
   JBlockObservation,
   JHistoryCheckpoint,
+  ValidatorJHistory,
   JHistoryFinality,
 } from './types/jurisdiction-events';
 import type { HankoString } from './types/hanko';
@@ -57,6 +58,8 @@ export type {
   JHistoryFinality,
   JurisdictionEvent,
   JurisdictionEventData,
+  ValidatorJEventBlock,
+  ValidatorJHistory,
 } from './types/jurisdiction-events';
 export type {
   FrameLogEntry,
@@ -574,6 +577,8 @@ export interface EntityReplica {
   leaderVotes?: Map<string, EntityLeaderTimeoutVote>;
   pendingLeaderCertificate?: EntityLeaderCertificate;
   lastConsensusProgressAt?: number;
+  /** Validator-private durable J-chain evidence; never part of EntityState. */
+  jHistory?: ValidatorJHistory;
   // Position is RELATIVE to j-machine (jurisdiction)
   // Frontend calculates: worldPos = jMachine.position + relativePosition
   position?: {

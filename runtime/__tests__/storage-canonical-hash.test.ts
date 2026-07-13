@@ -159,6 +159,28 @@ test('canonical storage hash ignores UI frameHistory and reacts to consensus sta
   expect(changedReserve).not.toBe(base);
 });
 
+test('canonical Entity hash excludes validator-private J history', () => {
+  const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  const before = computeCanonicalEntityHash(replica).hash;
+
+  replica.jHistory = {
+    jurisdictionRef: 'testnet:1',
+    scannedThroughHeight: 25,
+    tipBlockHash: `0x${'25'.repeat(32)}`,
+    eventBlocks: new Map([[25, {
+      jurisdictionRef: 'testnet:1',
+      jHeight: 25,
+      jBlockHash: `0x${'25'.repeat(32)}`,
+      eventsHash: `0x${'26'.repeat(32)}`,
+      events: [],
+    }]]),
+    blockHashes: new Map([[25, `0x${'25'.repeat(32)}`]]),
+  };
+
+  expect(computeCanonicalEntityHash(replica).hash).toBe(before);
+});
+
 test('storage projection round-trip preserves canonical account optional-field shape', () => {
   const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
   const replica = Array.from(env.eReplicas.values())[0]!;
@@ -231,9 +253,17 @@ test('replica metadata projection preserves in-flight consensus and layout state
   const replica = Array.from(env.eReplicas.values())[0]!;
   replica.mempool = [{ type: 'broadcast', data: { message: 'pending' } }];
   replica.position = { x: 1, y: 2, z: 3, jurisdiction: 'Testnet' };
+  replica.jHistory = {
+    jurisdictionRef: 'testnet:1',
+    scannedThroughHeight: 7,
+    tipBlockHash: `0x${'07'.repeat(32)}`,
+    eventBlocks: new Map(),
+    blockHashes: new Map([[7, `0x${'07'.repeat(32)}`]]),
+  };
 
   const meta = projectReplicaMeta(replica);
 
   expect(meta.mempool).toEqual(replica.mempool);
   expect(meta.position).toEqual(replica.position);
+  expect(meta.jHistory).toEqual(replica.jHistory);
 });

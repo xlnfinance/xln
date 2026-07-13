@@ -1004,6 +1004,38 @@ export function validateEntityReplica(value: unknown, context = 'EntityReplica')
       throw new FinancialDataCorruptionError(`${context}.lastConsensusProgressAt must be a non-negative safe integer`);
     }
   }
+  if (obj['jHistory'] !== undefined) {
+    const history = validateObject(obj['jHistory'], `${context}.jHistory`);
+    validateString(history['jurisdictionRef'], `${context}.jHistory.jurisdictionRef`);
+    const scannedThroughHeight = validateNumber(
+      history['scannedThroughHeight'],
+      `${context}.jHistory.scannedThroughHeight`,
+    );
+    if (!Number.isSafeInteger(scannedThroughHeight) || scannedThroughHeight < 0) {
+      throw new FinancialDataCorruptionError(`${context}.jHistory.scannedThroughHeight must be a non-negative safe integer`);
+    }
+    validateString(history['tipBlockHash'], `${context}.jHistory.tipBlockHash`);
+    const eventBlocks = validateMapInstance(history['eventBlocks'], `${context}.jHistory.eventBlocks`);
+    for (const [height, blockValue] of eventBlocks.entries()) {
+      if (!Number.isSafeInteger(height) || Number(height) <= 0) {
+        throw new FinancialDataCorruptionError(`${context}.jHistory.eventBlocks key must be a positive safe integer`);
+      }
+      const block = validateObject(blockValue, `${context}.jHistory.eventBlocks[${String(height)}]`);
+      validateString(block['jurisdictionRef'], `${context}.jHistory.eventBlocks[${String(height)}].jurisdictionRef`);
+      if (validateNumber(block['jHeight'], `${context}.jHistory.eventBlocks[${String(height)}].jHeight`) !== height) {
+        throw new FinancialDataCorruptionError(`${context}.jHistory event block height must match its map key`);
+      }
+      validateString(block['jBlockHash'], `${context}.jHistory.eventBlocks[${String(height)}].jBlockHash`);
+      validateString(block['eventsHash'], `${context}.jHistory.eventBlocks[${String(height)}].eventsHash`);
+      validateArray(block['events'], `${context}.jHistory.eventBlocks[${String(height)}].events`);
+    }
+    const blockHashes = validateMapInstance(history['blockHashes'], `${context}.jHistory.blockHashes`);
+    for (const [height, hash] of blockHashes.entries()) {
+      if (!Number.isSafeInteger(height) || Number(height) <= 0 || typeof hash !== 'string' || hash.length === 0) {
+        throw new FinancialDataCorruptionError(`${context}.jHistory.blockHashes entries must be positive-height hashes`);
+      }
+    }
+  }
   return obj as unknown as EntityReplica;
 }
 

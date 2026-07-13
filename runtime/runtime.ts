@@ -3436,6 +3436,7 @@ const loadEnvFromStorage = async (
         ...(meta?.lockedFrame ? { lockedFrame: meta.lockedFrame } : {}),
         ...(meta?.validatorComputedState ? { validatorComputedState: meta.validatorComputedState } : {}),
         ...(meta?.position ? { position: meta.position } : {}),
+        ...(meta?.jHistory ? { jHistory: meta.jHistory } : {}),
       });
     }
 
