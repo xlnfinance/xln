@@ -1,6 +1,6 @@
 # Runtime Code Map
 
-This README is the entry point for reading the XLN runtime. It is not a full
+This document is the entry point for reading the xln runtime. It is not a full
 file catalog. The goal is to show where protocol truth lives, which modules are
 infrastructure, and which folders are generated or scenario-only.
 
@@ -8,46 +8,52 @@ infrastructure, and which folders are generated or scenario-only.
 
 If you only have 1-2 hours, read files in this order:
 
-1. `runtime.ts`
-   Runtime loop, persistence boundary, ingress, exports.
-2. `entity-consensus.ts`
-   Entity-frame proposer/validator/commit flow.
-3. `account-consensus.ts`
-   Bilateral account-frame proposer/validator/commit flow.
-4. `entity/tx/apply.ts`
+1. `runtime/runtime.ts`
+   Public runtime API and compatibility entry point.
+2. `runtime/machine/lifecycle.ts`, `runtime/machine/input-queue.ts`, `runtime/machine/entity-inputs.ts`, `runtime/machine/output-routing.ts`
+   Single-writer loop, ingress, entity dispatch, and durable output routing.
+3. `runtime/entity/consensus/index.ts`, `runtime/entity/consensus/frame.ts`, `runtime/entity/consensus/leader.ts`
+   Entity-frame proposal, quorum validation, commit, and ordered leader failover.
+4. `runtime/account/consensus/index.ts`, `runtime/account/consensus/frame.ts`, `runtime/account/consensus/deadline-policy.ts`
+   Bilateral account proposal/ACK, secondary-manifest validation, and receiver-local deadline policy.
+5. `runtime/entity/tx/apply.ts`
    Entity-tx dispatcher and domain entry points.
-5. `account/tx/apply.ts`
+6. `runtime/account/tx/apply.ts`
    Bilateral account-tx dispatcher.
-6. `cross-jurisdiction.ts`
-   Cross-j route lifecycle helpers, fill monotonicity, route FSM guardrails.
-7. `storage/README.md`
-   Snapshot/WAL/materialization/canonical-hash map.
-8. `server/README.md`
-   Public API surface for runtime, relay, discovery, control, and faucet.
-9. `watchtower/README.md`
-   Standalone recovery/watchtower API service backed by LevelDB.
+7. `runtime/jurisdiction/history-consensus.ts`, `runtime/jurisdiction/event-observation.ts`, `runtime/machine/j-submit.ts`
+   Per-validator J-block histories, quorum-prefix finality, observation, and durable submission.
+8. `runtime/storage/`, `runtime/wal/snapshot.ts`
+   Snapshot/WAL/materialization and local integrity hashes.
+9. `runtime/extensions/cross-j/`, `runtime/orderbook/`
+   Cross-j lifecycle and same-j market extensions outside the minimal payment core.
+10. `runtime/networking/`, `runtime/relay/`, `runtime/server/`
+    Transport and operator surfaces; these do not define financial truth.
 
 ## Core Domains
 
-- `runtime.ts`
+- `runtime/runtime.ts`
   Owns the runtime loop, frame persistence, env lifecycle, and top-level API.
-- `entity-consensus.ts`, `entity/consensus/`
+- `runtime/machine/`
+  Owns lifecycle, input admission, scheduled wakes, routing, and persistence orchestration.
+- `runtime/entity/consensus/`
   Own entity-frame consensus, proposal hashing, and cross-j orderbook orchestration.
-- `account-consensus.ts`, `account/consensus/`
+- `runtime/account/consensus/`
   Own bilateral frame consensus, replay protection, and dispute proof updates.
-- `entity/tx/`
+- `runtime/entity/tx/`
   Applies entity-layer transactions, J-events, disputes, settlement, cross-j coordination.
-- `account/tx/`
+- `runtime/account/tx/`
   Applies bilateral txs such as payment, HTLC, pull, swap, settlement-side actions.
-- `storage/`
+- `runtime/jurisdiction/`
+  Groups validator observations by jurisdiction block and finalizes only the exact quorum-supported prefix.
+- `runtime/storage/`, `runtime/wal/`
   Durable truth: snapshot, WAL, materialized docs, canonical hash verification.
-- `networking/`, `relay/`, `relay-router.ts`, `relay-local-delivery.ts`
+- `runtime/networking/`, `runtime/relay/`
   Transport only. These modules deliver inputs; they do not define financial truth.
-- `server.ts`, `server/`
+- `runtime/server/`
   Runtime HTTP/WS surface, health, faucet, ingress receipts, tower/recovery APIs.
-- `jadapter/`
+- `runtime/jadapter/`
   J-layer bridge. `rpc.ts` is production-testnet relevant. BrowserVM adapters are legacy/dev-oriented.
-- `orderbook/`, `routing/`
+- `runtime/orderbook/`, `runtime/routing/`
   Same-j swap matching, book state, graph routing, and pathfinding.
 
 ## Folder Readmes
@@ -73,37 +79,38 @@ If you only have 1-2 hours, read files in this order:
 
 These files define correctness and are the first audit target:
 
-- `runtime.ts`
-- `entity-consensus.ts`
-- `account-consensus.ts`
-- `entity/tx/`
-- `account/tx/`
-- `cross-jurisdiction.ts`
-- `j-batch.ts`
-- `storage/`
+- `runtime/runtime.ts`
+- `runtime/machine/`
+- `runtime/entity/consensus/`
+- `runtime/account/consensus/`
+- `runtime/entity/tx/`
+- `runtime/account/tx/`
+- `runtime/jurisdiction/`
+- `runtime/storage/`
+- `runtime/wal/`
 
 ### Infrastructure, not protocol truth
 
-- `server.ts`, `server/`
-- `networking/`
-- `relay/`
-- `orchestrator/`
-- `radapter/`
+- `runtime/server/`
+- `runtime/networking/`
+- `runtime/relay/`
+- `runtime/orchestrator/`
+- `runtime/radapter/`
 
 ### Scenario / dev / operator tooling
 
-- `scripts/`
-- `scenarios/`
-- `runtime-ascii.ts`
-- `qa/`
+- `runtime/scripts/`
+- `runtime/scenarios/`
+- `runtime/qa/runtime-ascii.ts`
+- `runtime/qa/`
 
 ### Generated or compatibility surface
 
-- `xln-api.ts`
-- `types.ts`
+- `runtime/xln-api.ts`
+- `runtime/types.ts`
 
-`xln-api.ts` is a frontend-facing compatibility/export surface.
-`types.ts` is a compatibility barrel while the codebase still migrates to
+`runtime/xln-api.ts` is a frontend-facing compatibility/export surface.
+`runtime/types.ts` is a compatibility barrel while the codebase still migrates to
 domain types under `runtime/types/`.
 Contract bindings are generated under `jurisdictions/typechain-types/`; do not
 recreate a second runtime-local typechain copy.

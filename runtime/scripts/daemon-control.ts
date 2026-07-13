@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { serializeTaggedJson } from '../protocol/serialization';
+import { readInheritedChildSecrets, resolveChildSecret } from '../orchestrator/child-secrets';
 import {
   becomeHub,
   DaemonControlClient,
@@ -11,6 +12,7 @@ import {
 } from '../orchestrator/daemon-control';
 
 const args = process.argv.slice(2);
+const inheritedSecrets = readInheritedChildSecrets();
 
 const command = args[0] || '';
 
@@ -89,7 +91,7 @@ const requireBaseConfig = (): {
 } => {
   const baseUrl = getArg('--base-url', '').trim();
   const name = getArg('--name', '').trim();
-  const seed = getArg('--seed', '').trim();
+  const seed = resolveChildSecret(inheritedSecrets, 'seed', getArg('--seed', ''));
   const signerLabel = getArg('--signer-label', '').trim();
   if (!baseUrl || !name || !seed || !signerLabel) {
     throw new Error('--base-url, --name, --seed, and --signer-label are required');
@@ -109,7 +111,7 @@ const requireBaseConfig = (): {
     seed,
     signerLabel,
   };
-  const authKey = getArg('--auth-key', '').trim();
+  const authKey = resolveChildSecret(inheritedSecrets, 'authKey', getArg('--auth-key', ''));
   if (authKey) result.authKey = authKey;
   const relayUrl = getArg('--relay-url', '').trim();
   if (relayUrl) result.relayUrl = relayUrl;

@@ -5,6 +5,11 @@ import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
 import { deserializeTaggedJson } from '../protocol/serialization';
+import {
+  childSecretFdEnv,
+  type ChildSecrets,
+  writeInheritedChildSecrets,
+} from './child-secrets';
 
 const DEFAULT_CHILD_READY_TIMEOUT_MS = 120_000;
 const LOG_TAIL_LINES = 80;
@@ -299,21 +304,27 @@ const isDaemonHealthReady = (_response: Response, bodyText: string): boolean => 
 export const runDaemonControl = async (
   args: string[],
   env: NodeJS.ProcessEnv,
+  secrets: ChildSecrets,
 ): Promise<DaemonControlCliResult> => {
-  return await new Promise<DaemonControlCliResult>((resolve, reject) => {
-    const proc = spawn('bun', ['runtime/scripts/daemon-control.ts', ...args], {
-      cwd: process.cwd(),
-      env: { ...process.env, ...env },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
+  const proc = spawn('bun', ['runtime/scripts/daemon-control.ts', ...args], {
+    cwd: process.cwd(),
+    env: { ...process.env, ...env, ...childSecretFdEnv() },
+    stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
+  });
+  if (!proc.stdout || !proc.stderr) {
+    proc.kill('SIGTERM');
+    throw new Error('DAEMON_CONTROL_STDIO_MISSING');
+  }
+  const stdoutStream = proc.stdout;
+  const stderrStream = proc.stderr;
+  const result = new Promise<DaemonControlCliResult>((resolve, reject) => {
     let stdout = '';
     let stderr = '';
 
-    proc.stdout.on('data', chunk => {
+    stdoutStream.on('data', chunk => {
       stdout += chunk.toString('utf8');
     });
-    proc.stderr.on('data', chunk => {
+    stderrStream.on('data', chunk => {
       stderr += chunk.toString('utf8');
     });
 
@@ -348,6 +359,8 @@ export const runDaemonControl = async (
       }
     });
   });
+  await writeInheritedChildSecrets(proc, secrets);
+  return await result;
 };
 
 export const fetchDebugEntities = async (apiBaseUrl: string): Promise<DebugEntitySummary[]> => {
@@ -614,9 +627,7 @@ export const startCustodySupport = async (
         'setup-custody',
         '--base-url', `http://127.0.0.1:${options.daemonPort}`,
         '--name', options.profileName,
-        '--seed', options.seed,
         '--signer-label', options.signerLabel,
-        '--auth-key', daemonAuthKey,
         '--hub-ids', hubIds.join(','),
         '--relay-url', options.relayUrl,
         '--gossip-poll-ms', '250',
@@ -624,6 +635,7 @@ export const startCustodySupport = async (
       {
         USE_ANVIL: 'true',
       },
+      { seed: options.seed, authKey: daemonAuthKey },
     );
 
     if (!controlResult.ok) {

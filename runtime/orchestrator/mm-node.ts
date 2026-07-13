@@ -5,6 +5,7 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { createStructuredLogger } from '../infra/logger';
+import { readInheritedChildSecrets, resolveChildSecret } from './child-secrets';
 import { decodeRuntimeAdapterMessage } from '../radapter/codec';
 import { deriveAccountWatchSeed } from '../account/watch-seed';
 import { deriveSignerAddressSync, deriveSignerKeySync, prewarmSignerLabels, registerSignerKey } from '../account/crypto';
@@ -478,8 +479,13 @@ const parseArgs = (): Args => {
     throw new Error(`Invalid --api-port: ${String(apiPort)}`);
   }
   const rpcUrls = readRpcUrls();
-  const seed = getArg('--seed', process.env['XLN_RUNTIME_SEED'] || '').trim();
-  if (!seed) throw new Error('Market-maker seed is required via --seed or XLN_RUNTIME_SEED');
+  const childSecrets = readInheritedChildSecrets();
+  const seed = resolveChildSecret(
+    childSecrets,
+    'runtimeSeed',
+    getArg('--seed', process.env['XLN_RUNTIME_SEED'] || ''),
+  );
+  if (!seed) throw new Error('Market-maker seed is required via inherited secret FD, --seed, or XLN_RUNTIME_SEED');
   return {
     name: getArg('--name', 'MM'),
     seed,
@@ -501,7 +507,7 @@ const parseArgs = (): Args => {
 
 const defaultArgsForImport = (): Args => ({
   name: 'MM',
-  seed: 'xln-mesh-mm',
+  seed: '',
   signerLabel: 'mm-1',
   relayUrl: 'ws://127.0.0.1:20002/relay',
   apiHost: '127.0.0.1',

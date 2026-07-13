@@ -12,6 +12,7 @@ import { createStructuredLogger } from '../infra/logger';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
 import { sanitizeChildProcessEnv } from '../server/child-process-env';
+import { childSecretFdEnv, writeInheritedChildSecrets } from './child-secrets';
 import {
   startCustodySupport,
   stopManagedChild,
@@ -1088,7 +1089,6 @@ const spawnHub = async (child: HubChild): Promise<void> => {
     'runtime/orchestrator/hub-node.ts',
     '--name', child.name,
     '--region', child.region,
-    '--seed', child.seed,
     '--signer-label', child.signerLabel,
     '--relay-url', relayUrl,
     '--api-host', args.host,
@@ -1111,9 +1111,10 @@ const spawnHub = async (child: HubChild): Promise<void> => {
   child.recentStderr = [];
   const proc = spawn('bun', cmd, {
     cwd: process.cwd(),
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
     env: sanitizeChildProcessEnv({
       ...process.env,
+      ...childSecretFdEnv(),
       XLN_DB_PATH: child.dbPath,
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
       ...buildRpcChildEnv(),
@@ -1158,6 +1159,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       failFastUnexpectedChildExit(`${child.name} exited unexpectedly with code=${String(code)}`);
     }
   });
+  await writeInheritedChildSecrets(proc, { runtimeSeed: child.seed });
 };
 
 const spawnMarketMaker = async (): Promise<void> => {
@@ -1168,7 +1170,6 @@ const spawnMarketMaker = async (): Promise<void> => {
   const cmd = [
     'runtime/orchestrator/mm-node.ts',
     '--name', marketMakerChild.name,
-    '--seed', marketMakerChild.seed,
     '--signer-label', marketMakerChild.signerLabel,
     '--relay-url', relayUrl,
     '--api-host', args.host,
@@ -1191,9 +1192,10 @@ const spawnMarketMaker = async (): Promise<void> => {
   marketMakerChild.recentStderr = [];
   const proc = spawn('bun', cmd, {
     cwd: process.cwd(),
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
     env: sanitizeChildProcessEnv({
       ...process.env,
+      ...childSecretFdEnv(),
       XLN_DB_PATH: marketMakerChild.dbPath,
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
       ...buildRpcChildEnv(),
@@ -1247,6 +1249,7 @@ const spawnMarketMaker = async (): Promise<void> => {
       );
     }
   });
+  await writeInheritedChildSecrets(proc, { runtimeSeed: marketMakerChild.seed });
 };
 
 const stopAllChildren = async (options: StopAllChildrenOptions = {}): Promise<void> => {

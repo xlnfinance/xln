@@ -37,6 +37,7 @@ import { createRelayStore } from '../relay/store';
 import { safeStringify } from '../protocol/serialization';
 import { createStructuredLogger } from '../infra/logger';
 import { handleMeshBootstrapLoopError } from './mesh-bootstrap-fail-fast';
+import { readInheritedChildSecrets, resolveChildSecret } from './child-secrets';
 import { findMissingRpcContractCode } from './contract-readiness';
 import { getTokenIdsForJurisdiction } from '../account/utils';
 import { isLocalOperatorRequest, publicLocalHubHealth, resolveSocketPeerAddress } from '../server/health-redaction';
@@ -372,8 +373,13 @@ const parseArgs = (): Args => {
   }
   const rpcUrls = readRpcUrls();
 
-  const seed = getArg('--seed', process.env['XLN_RUNTIME_SEED'] || '').trim();
-  if (!seed) throw new Error('Hub seed is required via --seed or XLN_RUNTIME_SEED');
+  const childSecrets = readInheritedChildSecrets();
+  const seed = resolveChildSecret(
+    childSecrets,
+    'runtimeSeed',
+    getArg('--seed', process.env['XLN_RUNTIME_SEED'] || ''),
+  );
+  if (!seed) throw new Error('Hub seed is required via inherited secret FD, --seed, or XLN_RUNTIME_SEED');
   return {
     name: getArg('--name', 'H1'),
     region: getArg('--region', 'global'),

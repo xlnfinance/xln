@@ -71,14 +71,14 @@ const CORE_FILES = {
 
     // Main coordinators (how the system works)
     'runtime.ts',            // Main coordinator, 100ms ticks, R->E->A routing
-    'entity-consensus.ts',   // BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
-    'account-consensus.ts',  // Bilateral account consensus between entities
-    'account-consensus-state.ts', // Bilateral state machine (classifyBilateralState)
-    'j-batch.ts',            // J-batch system: E-machine accumulates -> jBroadcast -> J-machine
+    'entity/consensus/index.ts',   // BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
+    'account/consensus/index.ts',  // Bilateral account consensus between entities
+    'account/view-state.ts', // Bilateral state machine (classifyBilateralState)
+    'jurisdiction/batch.ts',            // J-batch system: E-machine accumulates -> jBroadcast -> J-machine
 
     // Financial accounting (CRITICAL for bug analysis)
-    'account-utils.ts',      // deriveDelta() RCPAN calculation, TOKEN_REGISTRY
-    'serialization-utils.ts', // BigInt serialization (common bug source)
+    'account/utils.ts',      // deriveDelta() RCPAN calculation, TOKEN_REGISTRY
+    'protocol/serialization.ts', // BigInt serialization (common bug source)
 
     // Transaction processing (how txs are applied)
     'entity/tx/index.ts',    // Entity transaction types
@@ -95,14 +95,14 @@ const CORE_FILES = {
     'entity/tx/handlers/dispute.ts',         // Dispute/salvage gateway and evidence handling
 
     // Swaps, orderbooks, and cross-jurisdiction markets (critical for current product)
-    'runtime-swap-pairs.ts',                 // Canonical same-chain swap pair orientation and policies
-    'swap-execution.ts',                     // Swap lifecycle helpers and terminal settlement summaries
-    'swap-keys.ts',                          // Swap/order identifier keys and namespacing
-    'open-swap-offers.ts',                   // Open swap offer projection
-    'cross-jurisdiction.ts',                 // Cross-j route hash, market, and fill-progress helpers
-    'cross-jurisdiction-market.ts',          // Canonical cross-j market derivation
-    'cross-jurisdiction-orderbook.ts',       // Cross-j book-owner and route ownership rules
-    'cross-jurisdiction-boundary.ts',        // Runtime topology for source/target/book-owner roles
+    'machine/swap-pairs.ts',                 // Canonical same-chain swap pair orientation and policies
+    'orderbook/swap-execution.ts',                     // Swap lifecycle helpers and terminal settlement summaries
+    'orderbook/swap-keys.ts',                          // Swap/order identifier keys and namespacing
+    'orderbook/open-swap-offers.ts',                   // Open swap offer projection
+    'extensions/cross-j/index.ts',                 // Cross-j route hash, market, and fill-progress helpers
+    'extensions/cross-j/market.ts',          // Canonical cross-j market derivation
+    'extensions/cross-j/orderbook.ts',       // Cross-j book-owner and route ownership rules
+    'extensions/cross-j/boundary.ts',        // Runtime topology for source/target/book-owner roles
     'orderbook/cross-j-orderbook.ts', // Cross-j admission lookup/stash/drain helpers
     'entity/tx/cross-j-outputs.ts',          // Cross-j runtime outputs and notices
     'entity/tx/cross-jurisdiction-helpers.ts', // Cross-j account/route helper logic
@@ -119,7 +119,7 @@ const CORE_FILES = {
     'entity/tx/handlers/account/orderbook-matching-cross.ts', // Cross-j order matching
     'entity/tx/handlers/account/orderbook-matching-helpers.ts', // Shared matching helpers
     'entity/tx/handlers/account/orderbook-cancels.ts', // Orderbook cancellation path
-    'lending.ts',                              // Hub lending pool math, terms, ids, memos
+    'extensions/lending.ts',                              // Hub lending pool math, terms, ids, memos
     'types/lending.ts',                        // Lending pool/loan state model
     'entity/tx/handlers/lending.ts',           // Lending offer/borrow/repay entity tx handlers
     'server/lending.ts',                       // Hub lending API handlers
@@ -128,13 +128,13 @@ const CORE_FILES = {
     'account/tx/handlers/swap-cancel.ts',    // Swap cancellation
     'account/tx/handlers/cross-swap-fill-ack.ts', // Cross-j fill acknowledgement processing
     'orderbook/cross-j.ts',                  // Cross-j book types and conversion helpers
-    'market-snapshot.ts',                    // Market snapshot projection
+    'relay/market-snapshot.ts',                    // Market snapshot projection
     'relay/market-subscriptions.ts',         // Orderbook streaming subscriptions
-    'market-subscription-limiter.ts',        // Stream rate limiting
+    'relay/market-subscription-limiter.ts',        // Stream rate limiting
     'orchestrator/mm-node.ts',               // Market maker bootstrap, quote loop, cross books
     'server/market-maker-health.ts',         // Health/self-test contract for MM books
     'orchestrator/mesh-common.ts',           // Bootstrap defaults for hubs/MM/accounts
-    'dispute-arguments.ts',                  // Dispute argument builder/evidence inclusion
+    'protocol/dispute/arguments.ts',                  // Dispute argument builder/evidence inclusion
     'watchtower/action.ts',                  // Watchtower action decisions
     'server/watchtower-proxy.ts',            // Runtime watchtower proxy API
 
@@ -147,12 +147,12 @@ const CORE_FILES = {
     'routing/pathfinding.ts', // Dijkstra routing algorithm
 
     // Cryptography (signature verification bugs)
-    'account-crypto.ts',     // Account frame signing/verification (CRITICAL)
+    'account/crypto.ts',     // Account frame signing/verification (CRITICAL)
 
     // Utilities (support functions)
     'state-helpers.ts',      // Pure state management functions
-    'snapshot-coder.ts',     // Deterministic state serialization (RLP encoding)
-    'runtime-jurisdiction-api.ts', // J-adapter / on-chain integration surface
+    'storage/snapshot-coder.ts',     // Deterministic state serialization (RLP encoding)
+    'machine/jurisdiction-api.ts', // J-adapter / on-chain integration surface
   ],
   docs: [
     // Canonical live docs only - theory, current status, and implementation-grade specs
@@ -242,34 +242,34 @@ const CROSS_FILES = {
     'types/jurisdiction-events.ts',
     'types/jurisdiction-runtime.ts',
     'ids.ts',
-    'account-utils.ts',
-    'serialization-utils.ts',
-    'account-crypto.ts',
+    'account/utils.ts',
+    'protocol/serialization.ts',
+    'account/crypto.ts',
     'state-helpers.ts',
     'runtime.ts',
-    'runtime-jurisdiction-api.ts',
-    'runtime-swap-pairs.ts',
-    'runtime-output-routing.ts',
-    'runtime-j-submit.ts',
-    'entity-consensus.ts',
+    'machine/jurisdiction-api.ts',
+    'machine/swap-pairs.ts',
+    'machine/output-routing.ts',
+    'machine/j-submit.ts',
+    'entity/consensus/index.ts',
     'orderbook/cross-j-orderbook.ts',
-    'account-consensus.ts',
-    'account-consensus-state.ts',
-    'account-dispute-policy.ts',
-    'j-batch.ts',
-    'j-height.ts',
-    'j-event-normalization.ts',
-    'j-event-observation.ts',
-    'jurisdiction-runtime.ts',
-    'hashladder.ts',
-    'swap-execution.ts',
-    'swap-keys.ts',
-    'open-swap-offers.ts',
-    'cross-jurisdiction.ts',
-    'cross-jurisdiction-fill-ack.ts',
-    'cross-jurisdiction-market.ts',
-    'cross-jurisdiction-orderbook.ts',
-    'cross-jurisdiction-boundary.ts',
+    'account/consensus/index.ts',
+    'account/view-state.ts',
+    'account/consensus/dispute-policy.ts',
+    'jurisdiction/batch.ts',
+    'jurisdiction/height.ts',
+    'jurisdiction/event-normalization.ts',
+    'jurisdiction/event-observation.ts',
+    'jurisdiction/jurisdiction-runtime.ts',
+    'protocol/htlc/hash-ladder.ts',
+    'orderbook/swap-execution.ts',
+    'orderbook/swap-keys.ts',
+    'orderbook/open-swap-offers.ts',
+    'extensions/cross-j/index.ts',
+    'extensions/cross-j/fill-ack.ts',
+    'extensions/cross-j/market.ts',
+    'extensions/cross-j/orderbook.ts',
+    'extensions/cross-j/boundary.ts',
     'entity/tx/index.ts',
     'entity/tx/apply.ts',
     'entity/tx/financial.ts',
@@ -312,8 +312,8 @@ const CROSS_FILES = {
     'orderbook/core.ts',
     'orderbook/cross-j.ts',
     'orderbook/validity.ts',
-    'market-snapshot.ts',
-    'market-subscription-limiter.ts',
+    'relay/market-snapshot.ts',
+    'relay/market-subscription-limiter.ts',
     'relay/market-subscriptions.ts',
     'orchestrator/mm-node.ts',
     'orchestrator/mesh-common.ts',
@@ -321,7 +321,7 @@ const CROSS_FILES = {
     'orchestrator/jurisdictions.ts',
     'server/market-maker-health.ts',
     'server/jurisdictions.ts',
-    'dispute-arguments.ts',
+    'protocol/dispute/arguments.ts',
     'watchtower/action.ts',
     'server/watchtower-proxy.ts',
   ],
@@ -377,7 +377,6 @@ const CROSS_FILES = {
 const RUNTIME_FILES = {
   contracts: [],
   runtime: uniqueFiles([
-    'README.md',
     'types.ts',
     'types/account.ts',
     'types/entity-tx.ts',
@@ -386,23 +385,23 @@ const RUNTIME_FILES = {
     'ids.ts',
     'constants.ts',
     'runtime.ts',
-    'runtime-tx-handlers.ts',
-    'runtime-output-routing.ts',
-    'runtime-j-submit.ts',
-    'entity-consensus.ts',
-    'entity-consensus-frame.ts',
+    'machine/tx-handlers.ts',
+    'machine/output-routing.ts',
+    'machine/j-submit.ts',
+    'entity/consensus/index.ts',
+    'entity/consensus/frame.ts',
     'entity/consensus/hanko-witness.ts',
-    'entity-input-merge.ts',
-    'account-consensus.ts',
-    'account-consensus-frame.ts',
-    'account-consensus-helpers.ts',
-    'account-consensus-state.ts',
+    'entity/consensus/input-merge.ts',
+    'account/consensus/index.ts',
+    'account/consensus/frame.ts',
+    'account/consensus/helpers.ts',
+    'account/view-state.ts',
     'account/consensus/propose.ts',
     'account/consensus/types.ts',
-    'j-batch.ts',
-    'j-height.ts',
-    'j-event-normalization.ts',
-    'j-event-observation.ts',
+    'jurisdiction/batch.ts',
+    'jurisdiction/height.ts',
+    'jurisdiction/event-normalization.ts',
+    'jurisdiction/event-observation.ts',
     'entity/tx/index.ts',
     'entity/tx/apply.ts',
     'entity/tx/validation.ts',
@@ -425,19 +424,19 @@ const RUNTIME_FILES = {
     'account/tx/handlers/add-delta.ts',
     'account/tx/handlers/direct-payment.ts',
     'account/tx/handlers/set-credit-limit.ts',
-    'account-utils.ts',
-    'account-crypto.ts',
-    'account-frame.ts',
-    'consensus-signatures.ts',
-    'serialization-utils.ts',
-    'snapshot-coder.ts',
+    'account/utils.ts',
+    'account/crypto.ts',
+    'account/frame.ts',
+    'protocol/signatures.ts',
+    'protocol/serialization.ts',
+    'storage/snapshot-coder.ts',
     'state-helpers.ts',
-    'env-events.ts',
-    'logger.ts',
-    'jurisdiction-runtime.ts',
-    'jurisdiction-config.ts',
-    'jurisdiction-stack.ts',
-    'runtime-jurisdiction-api.ts',
+    'machine/env-events.ts',
+    'infra/logger.ts',
+    'jurisdiction/jurisdiction-runtime.ts',
+    'jurisdiction/config.ts',
+    'jurisdiction/jurisdiction-stack.ts',
+    'machine/jurisdiction-api.ts',
     'storage/canonical-hash.ts',
     'storage/hashes.ts',
     'wal/hash.ts',
@@ -470,14 +469,14 @@ const ORDERBOOK_FILES = {
     'types/account.ts',
     'types/entity-tx.ts',
     'ids.ts',
-    'account-utils.ts',
-    'serialization-utils.ts',
+    'account/utils.ts',
+    'protocol/serialization.ts',
     'state-helpers.ts',
-    'runtime-swap-pairs.ts',
-    'swap-execution.ts',
-    'swap-keys.ts',
-    'open-swap-offers.ts',
-    'entity-consensus.ts',
+    'machine/swap-pairs.ts',
+    'orderbook/swap-execution.ts',
+    'orderbook/swap-keys.ts',
+    'orderbook/open-swap-offers.ts',
+    'entity/consensus/index.ts',
     'orderbook/cross-j-orderbook.ts',
     'entity/tx/handlers/account.ts',
     'entity/tx/handlers/account/orderbook-offers.ts',
@@ -496,8 +495,8 @@ const ORDERBOOK_FILES = {
     'orderbook/core.ts',
     'orderbook/cross-j.ts',
     'orderbook/validity.ts',
-    'market-snapshot.ts',
-    'market-subscription-limiter.ts',
+    'relay/market-snapshot.ts',
+    'relay/market-subscription-limiter.ts',
     'relay/market-subscriptions.ts',
     'orchestrator/mm-node.ts',
     'orchestrator/mm-transport.ts',
@@ -538,13 +537,13 @@ const SWAP_FILES = {
     'types/account.ts',
     'types/entity-tx.ts',
     'ids.ts',
-    'account-utils.ts',
-    'serialization-utils.ts',
+    'account/utils.ts',
+    'protocol/serialization.ts',
     'state-helpers.ts',
-    'runtime-swap-pairs.ts',
-    'swap-execution.ts',
-    'swap-keys.ts',
-    'open-swap-offers.ts',
+    'machine/swap-pairs.ts',
+    'orderbook/swap-execution.ts',
+    'orderbook/swap-keys.ts',
+    'orderbook/open-swap-offers.ts',
     'entity/tx/apply.ts',
     'entity/tx/handlers/account.ts',
     'entity/tx/handlers/swap-requests.ts',
@@ -564,7 +563,7 @@ const SWAP_FILES = {
     'orderbook/types.ts',
     'orderbook/core.ts',
     'orderbook/validity.ts',
-    'market-snapshot.ts',
+    'relay/market-snapshot.ts',
     'server/market-maker-health.ts',
   ]),
   docs: [
@@ -670,12 +669,12 @@ swaps executable and disputable.
 
 1. Contracts first: \`HashLadder.sol\` -> \`DeltaTransformer.sol\` ->
    \`Account.sol\` -> \`Depository.sol\` -> interfaces/types.
-2. Runtime model: \`types/cross-jurisdiction.ts\`, \`cross-jurisdiction.ts\`,
-   \`cross-jurisdiction-orderbook.ts\`, \`entity-consensus.ts\`.
+2. Runtime model: \`types/cross-jurisdiction.ts\`, \`extensions/cross-j/index.ts\`,
+   \`extensions/cross-j/orderbook.ts\`, \`entity/consensus/index.ts\`.
 3. Execution path: \`entity/tx/handlers/cross-j-*.ts\`,
    \`account/tx/handlers/cross-swap-fill-ack.ts\`,
    \`account/tx/handlers/swap-resolve.ts\`, then orderbook matching.
-4. Backstop: \`cross-j-salvage.ts\`, \`dispute-arguments.ts\`,
+4. Backstop: \`cross-j-salvage.ts\`, \`protocol/dispute/arguments.ts\`,
    \`entity/tx/handlers/dispute.ts\`, watchtower action, and dispute docs.
 5. Product proof: \`SwapPanel.svelte\`, \`OrderbookPanel.svelte\`, and
    \`tests/e2e-cross-j-swap.spec.ts\`.
@@ -1101,8 +1100,8 @@ salvage -> evidence -> dispute -> finalization path is tested.
 **Implementation path (read third, ~45min):**
 - Depository.sol (7min) - enforceDebts() FIFO
 - types.ts - All TypeScript interfaces
-- entity-consensus.ts - BFT state machine
-- account-consensus.ts - Bilateral consensus
+- entity/consensus/index.ts - BFT state machine
+- account/consensus/index.ts - Bilateral consensus
 - entity/tx/apply.ts - Transaction dispatcher
 - docs/implementation/payment-spec.md - payments/HTLC/onion
 - docs/merkle.md - durable integrity root
@@ -1125,21 +1124,21 @@ xln/
     types.ts                     ${fileSizes['runtime/types.ts'] || '?'} lines - All TypeScript interfaces (START HERE)
     ids.ts                       ${fileSizes['runtime/ids.ts'] || '?'} lines - Identity system: EntityId, SignerId, JId, ReplicaKey
     runtime.ts                   ${fileSizes['runtime/runtime.ts'] || '?'} lines - Main coordinator, 100ms ticks, R->E->A routing
-    entity-consensus.ts          ${fileSizes['runtime/entity/consensus/index.ts'] || '?'} lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
-    account-consensus.ts         ${fileSizes['runtime/account/consensus/index.ts'] || '?'} lines - Bilateral consensus, left/right perspective
-    account-consensus-state.ts   ${fileSizes['runtime/account/view-state.ts'] || '?'} lines - Bilateral state machine
-    j-batch.ts                   ${fileSizes['runtime/jurisdiction/batch.ts'] || '?'} lines - J-batch: E-machine accumulates -> jBroadcast -> J-machine
-    account-utils.ts             ${fileSizes['runtime/account/utils.ts'] || '?'} lines - deriveDelta() RCPAN calculation
-    serialization-utils.ts       ${fileSizes['runtime/protocol/serialization.ts'] || '?'} lines - BigInt serialization
-    account-crypto.ts            ${fileSizes['runtime/account/crypto.ts'] || '?'} lines - Signature verification
-    runtime-jurisdiction-api.ts  ${fileSizes['runtime/machine/jurisdiction-api.ts'] || '?'} lines - J-adapter / on-chain integration
+    entity/consensus/index.ts          ${fileSizes['runtime/entity/consensus/index.ts'] || '?'} lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
+    account/consensus/index.ts         ${fileSizes['runtime/account/consensus/index.ts'] || '?'} lines - Bilateral consensus, left/right perspective
+    account/view-state.ts   ${fileSizes['runtime/account/view-state.ts'] || '?'} lines - Bilateral state machine
+    jurisdiction/batch.ts                   ${fileSizes['runtime/jurisdiction/batch.ts'] || '?'} lines - J-batch: E-machine accumulates -> jBroadcast -> J-machine
+    account/utils.ts             ${fileSizes['runtime/account/utils.ts'] || '?'} lines - deriveDelta() RCPAN calculation
+    protocol/serialization.ts       ${fileSizes['runtime/protocol/serialization.ts'] || '?'} lines - BigInt serialization
+    account/crypto.ts            ${fileSizes['runtime/account/crypto.ts'] || '?'} lines - Signature verification
+    machine/jurisdiction-api.ts  ${fileSizes['runtime/machine/jurisdiction-api.ts'] || '?'} lines - J-adapter / on-chain integration
 
     swap/cross-j/orderbook:
-      runtime-swap-pairs.ts       ${fileSizes['runtime/runtime-swap-pairs.ts'] || '?'} lines - Same-chain pair orientation/policies
-      swap-execution.ts           ${fileSizes['runtime/orderbook/swap-execution.ts'] || '?'} lines - Swap lifecycle helpers
-      cross-jurisdiction.ts       ${fileSizes['runtime/extensions/cross-j/index.ts'] || '?'} lines - Cross-j route hashes and fill progress
-      cross-jurisdiction-market.ts ${fileSizes['runtime/extensions/cross-j/market.ts'] || '?'} lines - Cross-j market derivation
-      cross-jurisdiction-orderbook.ts ${fileSizes['runtime/extensions/cross-j/orderbook.ts'] || '?'} lines - Cross-j book owner rules
+      machine/swap-pairs.ts       ${fileSizes['runtime/machine/swap-pairs.ts'] || '?'} lines - Same-chain pair orientation/policies
+      orderbook/swap-execution.ts           ${fileSizes['runtime/orderbook/swap-execution.ts'] || '?'} lines - Swap lifecycle helpers
+      extensions/cross-j/index.ts       ${fileSizes['runtime/extensions/cross-j/index.ts'] || '?'} lines - Cross-j route hashes and fill progress
+      extensions/cross-j/market.ts ${fileSizes['runtime/extensions/cross-j/market.ts'] || '?'} lines - Cross-j market derivation
+      extensions/cross-j/orderbook.ts ${fileSizes['runtime/extensions/cross-j/orderbook.ts'] || '?'} lines - Cross-j book owner rules
       orderbook/cross-j-orderbook.ts ${fileSizes['runtime/orderbook/cross-j-orderbook.ts'] || '?'} lines - Cross-j admissions
       entity/tx/handlers/cross-j-*.ts - Cross-j setup/book/fill/salvage/clear/sweep
       entity/tx/handlers/account/orderbook-matching-*.ts - Same/cross matching
@@ -1176,7 +1175,7 @@ xln/
       pathfinding.ts             ${fileSizes['runtime/routing/pathfinding.ts'] || '?'} lines - Dijkstra routing
 
     state-helpers.ts             ${fileSizes['runtime/state-helpers.ts'] || '?'} lines - Pure state management
-    snapshot-coder.ts            ${fileSizes['runtime/storage/snapshot-coder.ts'] || '?'} lines - Deterministic RLP serialization
+    storage/snapshot-coder.ts            ${fileSizes['runtime/storage/snapshot-coder.ts'] || '?'} lines - Deterministic RLP serialization
   docs/
     readme.md                           ${fileSizes['docs/readme.md'] || '?'} lines - Live docs index and reading path
     constraints.md                      ${fileSizes['docs/constraints.md'] || '?'} lines - Why bilateral provable-credit settlement is necessary
@@ -1225,7 +1224,7 @@ Reading Guide:
 2. Follow the token budget guide for efficient learning:
    - Conceptual path (20min): readme.md -> constraints.md -> intro.md -> core/12_invariant.md
    - Architecture/current state (25min): core/rjea-architecture.md -> status.md -> mainnet.md -> consensus-invariants.md
-   - Implementation (45min): Depository.sol -> types.ts -> entity-consensus.ts -> account-consensus.ts -> implementation/payment-spec.md -> merkle.md -> radapter.md -> recovery-watchtower-protocol.md
+   - Implementation (45min): Depository.sol -> types.ts -> entity/consensus/index.ts -> account/consensus/index.ts -> implementation/payment-spec.md -> merkle.md -> radapter.md -> recovery-watchtower-protocol.md
 3. Use status.md for "what is current" and mainnet.md for "what blocks launch"
 4. Use archive docs only when you explicitly need historical wording or superseded planning
 
@@ -1237,11 +1236,9 @@ Suggested LLM prompt: "Read the conceptual and architecture paths, then explain 
 function readFileContent(baseDir, relativePath) {
   const fullPath = path.join(baseDir, relativePath);
   try {
-    const content = fs.readFileSync(fullPath, 'utf8');
-    return content;
+    return fs.readFileSync(fullPath, 'utf8');
   } catch (error) {
-    console.warn(`WARNING: Could not read ${relativePath}: ${error.message}`);
-    return null;
+    throw new Error(`AUDIT_CONTEXT_REQUIRED_FILE_MISSING:${fullPath}:${error.message}`);
   }
 }
 
