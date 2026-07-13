@@ -2,9 +2,6 @@ import { AbiCoder, getAddress, keccak256, toUtf8Bytes, zeroPadValue } from 'ethe
 
 type LazyValidator = string | { name: string; weight: number };
 
-const compareStableText = (left: string, right: string): number =>
-	left < right ? -1 : left > right ? 1 : 0;
-
 const resolveValidatorAddress = (validator: string): string => {
 	const raw = String(validator || '').trim();
 	if (raw.startsWith('0x') && raw.length === 42) return getAddress(raw);
@@ -40,10 +37,8 @@ export const generateLazyEntityIdPreview = (
 			? { name: validator, weight: 1n }
 			: { name: validator.name, weight: BigInt(validator.weight) });
 
-	const sortedValidators = validatorData.slice().sort((left, right) =>
-		compareStableText(resolveValidatorAddress(left.name), resolveValidatorAddress(right.name)));
 	const shares: Record<string, bigint> = {};
-	const validatorIds = sortedValidators.map((validator) => {
+	const validatorIds = validatorData.map((validator) => {
 		shares[validator.name] = validator.weight;
 		return validator.name;
 	});

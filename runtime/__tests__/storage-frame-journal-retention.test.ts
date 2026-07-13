@@ -286,21 +286,21 @@ describe('storage frame journal retention', () => {
     installTestJurisdiction(env, jurisdiction);
 
     enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
-        entityId,
-        signerId: signerA,
-        data: {
-          isProposer: true,
-          config: {
-            mode: 'proposer-based',
-            threshold: 2n,
-            validators: [signerA, signerB],
-            shares: { [signerA]: 1n, [signerB]: 1n },
-            jurisdiction,
+      runtimeTxs: [signerA, signerB].map((signerId, index) => ({
+          type: 'importReplica' as const,
+          entityId,
+          signerId,
+          data: {
+            isProposer: index === 0,
+            config: {
+              mode: 'proposer-based' as const,
+              threshold: 2n,
+              validators: [signerA, signerB],
+              shares: { [signerA]: 1n, [signerB]: 1n },
+              jurisdiction,
+            },
           },
-        },
-      }],
+        })),
       entityInputs: [],
     });
     await processRuntime(env, []);
@@ -309,11 +309,17 @@ describe('storage frame journal retention', () => {
 
     const restored = await loadEnvFromDB(runtimeId, seed);
     if (!restored) throw new Error('test fixture failed to restore multi-validator runtime');
-    const restoredReplica = Array.from(restored.eReplicas.values()).find((replica) => replica.entityId === entityId);
-    expect(restoredReplica?.signerId).toBe(signerA);
-    expect(restoredReplica?.isProposer).toBe(true);
+    const restoredReplicas = Array.from(restored.eReplicas.values())
+      .filter((replica) => replica.entityId === entityId)
+      .sort((left, right) => left.signerId.localeCompare(right.signerId));
+    const expectedReplicas = [
+      [signerA, true],
+      [signerB, false],
+    ].sort((left, right) => String(left[0]).localeCompare(String(right[0])));
+    expect(restoredReplicas.map(({ signerId, isProposer }) => [signerId, isProposer])).toEqual(expectedReplicas);
 
-    await getRuntimeStorageDb(restored).del(keyLiveReplicaMeta(entityId));
+    await getRuntimeStorageDb(restored).del(keyLiveReplicaMeta(entityId, signerA));
+    await getRuntimeStorageDb(restored).del(keyLiveReplicaMeta(entityId, signerB));
     await closeRuntimeDb(restored);
     await closeInfraDb(restored);
 

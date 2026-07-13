@@ -13,8 +13,8 @@ import { verifyAccountSignature } from '../account/crypto';
 import { applyEntityInput } from '../entity/consensus';
 import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../machine/scheduled-wake';
 import { createEmptyEnv } from '../runtime';
-import type { ConsensusConfig, EntityReplica, EntityState } from '../types';
-import { validateEntityReplica } from '../validation-utils';
+import type { ConsensusConfig, EntityReplica, EntityState, ProposedEntityFrame } from '../types';
+import { validateEntityInput, validateEntityReplica } from '../validation-utils';
 
 const config = (threshold = 8n): ConsensusConfig => ({
   mode: 'proposer-based',
@@ -36,7 +36,6 @@ const state = (leaderState?: EntityState['leaderState']): EntityState => ({
   reserves: new Map(),
   accounts: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockObservations: [],
   jBlockChain: [],
   entityEncPubKey: 'pub',
   entityEncPrivKey: 'priv',
@@ -68,6 +67,19 @@ describe('entity leader policy', () => {
       previousLeaderId: 'ceo',
       nextLeaderId: 'bob',
     });
+  });
+
+  test('accepts a leader-timeout vote as a standalone routed entity input', () => {
+    const vote = {
+      ...buildEntityLeaderVoteBody(state()),
+      voterId: 'alice',
+      signature: '',
+    };
+    expect(validateEntityInput({
+      entityId: state().entityId,
+      signerId: 'alice',
+      leaderTimeoutVote: vote,
+    }).leaderTimeoutVote).toEqual(vote);
   });
 
   test('uses linear timeout backoff capped at sixty seconds', () => {
@@ -160,5 +172,49 @@ describe('entity leader policy', () => {
       view: 1,
       changedAtHeight: 1,
     });
+  });
+
+  test('ignores a delayed committed proposal without replacing the next proposal', async () => {
+    const env = createEmptyEnv('entity-stale-proposal');
+    env.scenarioMode = true;
+    env.timestamp = 2_000;
+    const committedHash = `0x${'11'.repeat(32)}`;
+    const nextHash = `0x${'22'.repeat(32)}`;
+    const committedState = state();
+    committedState.entityId = '9';
+    committedState.height = 1;
+    committedState.prevFrameHash = committedHash;
+    const staleFrame: ProposedEntityFrame = {
+      height: 1,
+      txs: [],
+      hash: committedHash,
+      newState: structuredClone(committedState),
+      leader: { proposerSignerId: 'ceo', view: 0 },
+    };
+    const nextFrame: ProposedEntityFrame = {
+      height: 2,
+      txs: [],
+      hash: nextHash,
+      newState: { ...structuredClone(committedState), height: 2 },
+      leader: { proposerSignerId: 'ceo', view: 0 },
+    };
+    const replica: EntityReplica = {
+      entityId: committedState.entityId,
+      signerId: 'ceo',
+      state: committedState,
+      mempool: [],
+      proposal: nextFrame,
+      isProposer: true,
+    };
+
+    const result = await applyEntityInput(env, replica, {
+      entityId: committedState.entityId,
+      signerId: 'ceo',
+      proposedFrame: staleFrame,
+    });
+
+    expect(result.outcome).toEqual({ kind: 'noop', reason: 'PROPOSAL_ALREADY_COMMITTED' });
+    expect(result.workingReplica.state.height).toBe(1);
+    expect(result.workingReplica.proposal?.hash).toBe(nextHash);
   });
 });

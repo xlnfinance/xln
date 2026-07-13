@@ -52,7 +52,7 @@ assertIncludes(accountPropose, 'const frameJHeight = entityJHeight ?? accountMac
 assertIncludes(accountConsensus, 'const pendingJHeight = accountMachine.pendingFrame.jHeight ?? accountMachine.lastFinalizedJHeight ?? 0;', accountConsensusPath);
 assertIncludes(accountConsensus, 'const currentJHeight = accountMachine.lastFinalizedJHeight ?? 0;', accountConsensusPath);
 assertIncludes(accountConsensus, 'const frameJHeight = receivedFrame.jHeight ?? currentJHeight;', accountConsensusPath);
-assertIncludes(accountFrame, "if (typeof frame.jHeight !== 'number' || frame.jHeight < 0)", accountFramePath);
+assertIncludes(accountFrame, 'if (!Number.isSafeInteger(frame.jHeight) || frame.jHeight < 0)', accountFramePath);
 assertIncludes(accountFrame, 'jHeight: frame.jHeight,', accountFramePath);
 
 assertOrder(accountConsensus, accountConsensusPath, [

@@ -144,7 +144,6 @@ const makeProjectionReplica = () => ({
     accounts: new Map(),
     deferredAccountProposals: new Map(),
     lastFinalizedJHeight: 0,
-    jBlockObservations: [],
     jBlockChain: [],
     entityEncPubKey: '',
     entityEncPrivKey: '',

@@ -128,10 +128,10 @@ export const handleOffchainFaucet = async (input: {
       const runtimePubKey = relayStore.runtimeEncryptionKeys.get(normalizedRuntimeKey);
       if (!runtimeSeenLocally || !runtimePubKey) {
         const activeRelayClients = Array.from(relayStore.clients.keys());
-        faucetLog.warn('offchain.runtime_local_miss', { requestId, runtime: shortId(normalizedUserRuntimeId, 10) });
+        faucetLog.info('offchain.runtime_not_local', { requestId, runtime: shortId(normalizedUserRuntimeId, 10) });
         pushDebugEvent(relayStore, {
           event: 'debug_event',
-          status: 'warning',
+          status: 'info',
           reason: !runtimeSeenLocally ? 'FAUCET_RUNTIME_NOT_LOCAL_RELAY_CLIENT' : 'FAUCET_RUNTIME_PUBKEY_MISSING_LOCAL',
           details: {
             endpoint: '/api/faucet/offchain',

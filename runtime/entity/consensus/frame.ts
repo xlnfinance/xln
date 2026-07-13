@@ -4,10 +4,7 @@ import { HEAVY_LOGS } from '../../utils';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { safeStringify } from '../../protocol/serialization';
 import { compareCanonicalText } from '../../orderbook/swap-execution';
-import {
-  canonicalDisputeFinalizationEvidenceHash,
-  canonicalJurisdictionEventsHash,
-} from '../../jurisdiction/event-observation';
+import { canonicalJurisdictionEventsHash } from '../../jurisdiction/event-observation';
 import { normalizeJurisdictionEvents } from '../../jurisdiction/event-normalization';
 import { canonicalAccountTxForFrameHash } from '../../account/consensus/frame';
 import { computeAccountShadowRoot } from '../../account/state-root';
@@ -63,42 +60,45 @@ const rawJEvents = (data: Record<string, unknown>): unknown[] =>
 
 const canonicalEventsForFrameHash = (data: Record<string, unknown>): Array<Record<string, unknown>> =>
   normalizeJurisdictionEvents(rawJEvents(data)).map((event) => ({
+    blockNumber: event.blockNumber ?? null,
+    blockHash: event.blockHash?.toLowerCase() ?? null,
+    transactionHash: event.transactionHash?.toLowerCase() ?? null,
+    logIndex: event.logIndex ?? null,
+    eventIndex: event.eventIndex ?? null,
     type: event.type,
     data: event.data,
   }));
 
 const canonicalJEventDataForFrameHash = (value: unknown): Record<string, unknown> => {
   const data = toRecord(value);
-  const events = canonicalEventsForFrameHash(data);
-  const normalizedEvents = normalizeJurisdictionEvents(rawJEvents(data));
-  const eventsHash = typeof data['eventsHash'] === 'string' && data['eventsHash']
-    ? data['eventsHash'].toLowerCase()
-    : canonicalJurisdictionEventsHash(normalizedEvents);
-  const evidence = Array.isArray(data['disputeFinalizationEvidence'])
-    ? data['disputeFinalizationEvidence']
+  if (!Array.isArray(data['blocks']) || data['rangeHash'] === undefined) {
+    throw new Error('ENTITY_FRAME_J_EVENT_RANGE_REQUIRED');
+  }
+  const blocks = Array.isArray(data['blocks'])
+    ? data['blocks'].map((rawBlock) => {
+        const block = toRecord(rawBlock);
+        const blockEvents = canonicalEventsForFrameHash({ events: block['events'] });
+        return {
+          blockNumber: toInt(block['blockNumber']),
+          blockHash: String(block['blockHash'] ?? '').toLowerCase(),
+          eventsHash: String(block['eventsHash'] ?? '').toLowerCase(),
+          events: blockEvents,
+          disputeFinalizationEvidenceHash: String(block['disputeFinalizationEvidenceHash'] ?? '').toLowerCase(),
+        };
+      })
     : [];
-  const evidenceHash = typeof data['disputeFinalizationEvidenceHash'] === 'string' && data['disputeFinalizationEvidenceHash']
-    ? data['disputeFinalizationEvidenceHash'].toLowerCase()
-    : evidence.length > 0
-      ? canonicalDisputeFinalizationEvidenceHash(evidence)
-      : '';
-
-  // Commit the exact signed observation, not only its semantic event set. If
-  // blockHash/signature were omitted, a commit notification could substitute a
-  // different valid observation that hashes to the same entity frame and make a
-  // catch-up validator replay different J-block history.
   return {
-    version: 'xln:j-event-frame:v1',
+    version: 'xln:j-event-range-frame:v1',
     from: String(data['from'] ?? '').toLowerCase(),
     jurisdictionRef: String(data['jurisdictionRef'] ?? '').trim().toLowerCase(),
-    observedAt: toInt(data['blockNumber']),
-    blockNumber: toInt(data['blockNumber']),
-    blockHash: String(data['blockHash'] ?? '').toLowerCase(),
-    transactionHash: String(data['transactionHash'] ?? '').toLowerCase(),
-    eventsHash,
-    events,
+    baseHeight: toInt(data['baseHeight']),
+    scannedThroughHeight: toInt(data['scannedThroughHeight']),
+    tipBlockHash: String(data['tipBlockHash'] ?? '').toLowerCase(),
+    eventHistoryRoot: String(data['eventHistoryRoot'] ?? '').toLowerCase(),
+    rangeHash: String(data['rangeHash'] ?? '').toLowerCase(),
+    blocks,
     signature: String(data['signature'] ?? '').toLowerCase(),
-    ...(evidenceHash ? { disputeFinalizationEvidenceHash: evidenceHash } : {}),
+    observedAt: toInt(data['observedAt']),
   };
 };
 

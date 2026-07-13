@@ -9,7 +9,6 @@ import { getCachedSignerAddress } from '../account/crypto';
 import { createJAdapter } from '../jadapter';
 import { buildJAdapterConfigFromJurisdiction } from '../jadapter/jurisdiction';
 import { createStructuredLogger, shortHash, shortId } from '../infra/logger';
-import { compareStableText } from '../protocol/serialization';
 import type { ConsensusConfig, EntityType, JurisdictionConfig } from '../types';
 import { DEBUG } from '../utils';
 
@@ -85,16 +84,9 @@ export const generateLazyEntityId = (
     }));
   }
 
-  // Sort by resolved address for canonical ordering
-  const sortedValidators = validatorData.slice().sort((a, b) => {
-    const aAddr = resolveValidatorAddress(a.name);
-    const bAddr = resolveValidatorAddress(b.name);
-    return compareStableText(aAddr, bAddr);
-  });
-
   const shares: { [validatorId: string]: bigint } = {};
-  const validatorIds = sortedValidators.map(v => v.name);
-  for (const validator of sortedValidators) {
+  const validatorIds = validatorData.map(v => v.name);
+  for (const validator of validatorData) {
     shares[validator.name] = validator.weight;
   }
 

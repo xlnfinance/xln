@@ -42,6 +42,22 @@ describe('mergeEntityInputs', () => {
     expect(merged[1]?.entityTxs?.map((tx) => (tx.data as { name: string }).name)).toEqual(['a', 'b']);
   });
 
+  test('orders an older commit before a newer proposal regardless of route metadata', () => {
+    const target = entityId('7');
+    const frame = (height: number, hashByte: string) => ({
+      height,
+      txs: [],
+      hash: `0x${hashByte.repeat(64)}`,
+      newState: {},
+      leader: { proposerSignerId: '1', view: 0 },
+    }) as never;
+    const older = { entityId: target, signerId: '2', from: 'z-route', proposedFrame: frame(9, '1') };
+    const newer = { entityId: target, signerId: '2', from: 'a-route', proposedFrame: frame(10, '2') };
+
+    expect(mergeEntityInputs([newer, older]).map(input => input.proposedFrame?.height)).toEqual([9, 10]);
+    expect(mergeEntityInputs([older, newer]).map(input => input.proposedFrame?.height)).toEqual([9, 10]);
+  });
+
   test('runs one canonical scheduled wake before txs that can replace its due hooks', () => {
     const wake = {
       type: 'scheduledWake',

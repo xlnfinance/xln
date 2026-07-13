@@ -64,9 +64,9 @@ import {
   partialBinary,
   registerTestSigner,
   secret,
-  signJEventObservation,
+  prepareJEventInput,
 } from './helpers/cross-j';
-import { applyJEventAndCheckpoint } from './helpers/j-history';
+import { applyJEventRange, buildJEventRangeData } from './helpers/j-history';
 
 describe('cross-jurisdiction hashledger swap', () => {
   test('hashlockPayment creates a direct hashlock-only account lock', async () => {
@@ -3804,14 +3804,14 @@ describe('cross-jurisdiction hashledger swap', () => {
         jNonce: 1,
       },
     };
-    const signed = signJEventObservation(env, user, signer, {
+    const signed = prepareJEventInput(env, user, signer, {
       blockNumber: 2,
       blockHash: secret('7b'),
       transactionHash: secret('7c'),
       events: [disputeStartedEvent],
       jurisdictionRef: jref(eth),
     });
-    const result = await applyJEventAndCheckpoint(state, {
+    const result = await applyJEventRange(state, {
       from: signer,
       event: disputeStartedEvent,
       observedAt: env.timestamp,
@@ -3917,14 +3917,14 @@ describe('cross-jurisdiction hashledger swap', () => {
         jNonce: 1,
       },
     };
-    const signed = signJEventObservation(env, sourceUser, signer, {
+    const signed = prepareJEventInput(env, sourceUser, signer, {
       blockNumber: 2,
       blockHash: secret('8b'),
       transactionHash: secret('8c'),
       events: [disputeStartedEvent],
       jurisdictionRef: jref(eth),
     });
-    const result = await applyJEventAndCheckpoint(state, {
+    const result = await applyJEventRange(state, {
       from: signer,
       event: disputeStartedEvent,
       observedAt: env.timestamp,
@@ -4014,7 +4014,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       starterInitialArguments: '0x',
       starterIncrementedArguments: '0x',
     }];
-    const signed = signJEventObservation(env, sourceUser, signer, {
+    const signed = prepareJEventInput(env, sourceUser, signer, {
       blockNumber: 3,
       blockHash: secret('9c'),
       transactionHash: secret('9d'),
@@ -4022,7 +4022,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       disputeFinalizationEvidence,
       jurisdictionRef: jref(eth),
     });
-    const result = await applyJEventAndCheckpoint(state, {
+    const result = await applyJEventRange(state, {
       from: signer,
       event: finalizedEvent,
       observedAt: env.timestamp,
@@ -4109,7 +4109,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         finalProofbodyHash: secret('ab'),
       },
     };
-    const signedWithoutEvidence = signJEventObservation(env, sourceUser, signer, {
+    const signedWithoutEvidence = prepareJEventInput(env, sourceUser, signer, {
       blockNumber: 4,
       blockHash: secret('ac'),
       transactionHash: secret('ad'),
@@ -4117,131 +4117,21 @@ describe('cross-jurisdiction hashledger swap', () => {
       jurisdictionRef: jref(eth),
     });
 
+    const unsignedEvidenceRange = buildJEventRangeData(state, {
+      from: signer,
+      event: finalizedEvent,
+      observedAt: env.timestamp,
+      blockNumber: 4,
+      blockHash: secret('ac'),
+      transactionHash: secret('ad'),
+      ...signedWithoutEvidence,
+    }, env);
+    unsignedEvidenceRange.blocks[0]!.disputeFinalizationEvidence = disputeFinalizationEvidence;
+
     await expect(applyEntityTx(env, state, {
       type: 'j_event',
-      data: {
-        from: signer,
-        event: finalizedEvent,
-        observedAt: env.timestamp,
-        blockNumber: 4,
-        blockHash: secret('ac'),
-        transactionHash: secret('ad'),
-        disputeFinalizationEvidence,
-        ...signedWithoutEvidence,
-      },
-    })).rejects.toThrow('missing dispute finalization evidence hash');
-  });
-
-  test('DisputeFinalized sidecar args require validator threshold before salvage', async () => {
-    const env = createEmptyEnv('cross-dispute-finalized-sidecar-quorum');
-    env.scenarioMode = true;
-    env.timestamp = 33_000;
-    env.quietRuntimeLogs = true;
-    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
-    const base = makeJurisdiction('Base', 8453, '21', '22');
-    const sourceUser = entity('3d');
-    const sourceHub = entity('3e');
-    const targetHub = entity('3f');
-    const targetUser = entity('40');
-    const signerOne = registerTestSigner(env, 'cross-dispute-finalized-sidecar-quorum', '1');
-    const signerTwo = registerTestSigner(env, 'cross-dispute-finalized-sidecar-quorum', '2');
-    const state = makeState(sourceUser, signerOne, eth, sourceHub);
-    state.config.validators = [signerOne, signerTwo];
-    state.config.shares = { [signerOne]: 1n, [signerTwo]: 1n };
-    state.config.threshold = 2n;
-    const route = buildPreparedCrossJurisdictionRoute({
-      orderId: 'cross-pull-finalize-sidecar-quorum',
-      makerEntityId: sourceUser,
-      hubEntityId: sourceHub,
-      source: {
-        jurisdiction: jref(eth),
-        entityId: sourceUser,
-        counterpartyEntityId: sourceHub,
-        tokenId: 1,
-        amount: 100n,
-      },
-      target: {
-        jurisdiction: jref(base),
-        entityId: targetHub,
-        counterpartyEntityId: targetUser,
-        tokenId: 1,
-        amount: 90n,
-      },
-      status: 'resting' as const,
-      createdAt: env.timestamp,
-      updatedAt: env.timestamp,
-    }, { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.timestamp });
-    state.crossJurisdictionSwaps?.set(route.orderId, route);
-
-    const binary = buildCrossJurisdictionPullReveal(
-      route,
-      0x3333,
-      deriveCrossJurisdictionPrivateSeed('test-seed', route),
-    ).binary;
-    const crossPullArgs = ethers.AbiCoder.defaultAbiCoder().encode(
-      ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
-      [{ fillRatios: [], secrets: [], pulls: [binary] }],
-    );
-    const disputeFinalizationEvidence = [{
-      sender: sourceHub,
-      counterentity: sourceUser,
-      initialNonce: '1',
-      initialProofbodyHash: secret('ba'),
-      finalProofbodyHash: secret('bb'),
-      leftArguments: ethers.AbiCoder.defaultAbiCoder().encode(['bytes[]'], [[crossPullArgs]]),
-      rightArguments: '0x',
-      starterInitialArguments: '0x',
-      starterIncrementedArguments: '0x',
-    }];
-    const finalizedEvent: JurisdictionEvent = {
-      type: 'DisputeFinalized',
-      data: {
-        sender: sourceHub,
-        counterentity: sourceUser,
-        initialNonce: '1',
-        initialProofbodyHash: secret('ba'),
-        finalProofbodyHash: secret('bb'),
-      },
-    };
-    const signedOne = signJEventObservation(env, sourceUser, signerOne, {
-      blockNumber: 5,
-      blockHash: secret('bc'),
-      transactionHash: secret('bd'),
-      events: [finalizedEvent],
-      disputeFinalizationEvidence,
-      jurisdictionRef: jref(eth),
-    });
-    const first = await applyJEventAndCheckpoint(state, {
-      from: signerOne,
-      event: finalizedEvent,
-      observedAt: env.timestamp,
-      blockNumber: 5,
-      blockHash: secret('bc'),
-      transactionHash: secret('bd'),
-      disputeFinalizationEvidence,
-      ...signedOne,
-    }, env);
-    expect(first.outputs).toEqual([]);
-
-    const signedTwo = signJEventObservation(env, sourceUser, signerTwo, {
-      blockNumber: 5,
-      blockHash: secret('bc'),
-      transactionHash: secret('bd'),
-      events: [finalizedEvent],
-      jurisdictionRef: jref(eth),
-    });
-    const second = await applyJEventAndCheckpoint(first.newState, {
-      from: signerTwo,
-      event: finalizedEvent,
-      observedAt: env.timestamp,
-      blockNumber: 5,
-      blockHash: secret('bc'),
-      transactionHash: secret('bd'),
-      ...signedTwo,
-    }, env);
-
-    expect(second.newState.jBlockChain).toHaveLength(1);
-    expect(second.outputs).toEqual([]);
+      data: unsignedEvidenceRange,
+    })).rejects.toThrow('evidence hash mismatch');
   });
 
   test('crossJurisdictionSalvage starts target dispute then queues broadcast', async () => {
@@ -4474,7 +4364,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         jNonce: 1,
       },
     };
-    const signed = signJEventObservation(env, targetUser, targetSigner, {
+    const signed = prepareJEventInput(env, targetUser, targetSigner, {
       blockNumber: 2,
       blockHash: secret('9b'),
       transactionHash: secret('9c'),
@@ -4493,7 +4383,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       warnings.push(args.map(String).join(' '));
     };
     try {
-      result = await applyJEventAndCheckpoint(targetState, {
+      result = await applyJEventRange(targetState, {
         from: targetSigner,
         event: disputeStartedEvent,
         observedAt: env.timestamp,

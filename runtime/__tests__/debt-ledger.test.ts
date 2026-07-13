@@ -1,11 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
-import { signAccountFrame } from '../account/crypto';
-import { buildJEventObservationDigest, canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../jurisdiction/event-observation';
+import { getJEventJurisdictionRef } from '../jurisdiction/event-observation';
 import { decode, encode } from '../storage/snapshot-coder';
 import { cloneEntityState } from '../state-helpers';
-import { type JEventEntityTxData } from '../entity/tx/j-events';
-import { applyJEventAndCheckpoint } from './helpers/j-history';
+import { applyJEventRange, type LegacyJEventInput } from './helpers/j-history';
 import { applyDebtEnforced } from '../entity/tx/j-events-debt';
 import { createEmptyEnv } from '../runtime';
 import type { ConsensusConfig, EntityState, JurisdictionEvent } from '../types';
@@ -33,7 +31,6 @@ const makeState = (entityId: string): EntityState => ({
   accounts: new Map(),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockObservations: [],
   jBlockChain: [],
   entityEncPubKey: `${'0x'}${'11'.repeat(32)}`,
   entityEncPrivKey: `${'0x'}${'22'.repeat(32)}`,
@@ -58,18 +55,9 @@ const makeJEventInput = (
   event: JurisdictionEvent,
   blockNumber: number,
   transactionHash: string,
-): JEventEntityTxData => {
+): LegacyJEventInput => {
   const blockHash = `0x${String(blockNumber).padStart(64, '0')}`;
-  const eventsHash = canonicalJurisdictionEventsHash([event]);
   const jurisdictionRef = getJEventJurisdictionRef(undefined);
-  const signature = signAccountFrame(env, SIGNER_ID, buildJEventObservationDigest({
-    entityId,
-    jurisdictionRef,
-    signerId: SIGNER_ID,
-    blockNumber,
-    blockHash,
-    eventsHash,
-  }));
   return {
     from: SIGNER_ID,
     jurisdictionRef,
@@ -78,8 +66,6 @@ const makeJEventInput = (
     blockNumber,
     blockHash,
     transactionHash,
-    eventsHash,
-    signature,
   };
 };
 
@@ -143,8 +129,8 @@ describe('debt ledger', () => {
       },
     };
 
-    aliceState = (await applyJEventAndCheckpoint(aliceState, makeJEventInput(env, ALICE, created, 12, String(created.transactionHash)), env)).newState;
-    bobState = (await applyJEventAndCheckpoint(bobState, makeJEventInput(env, BOB, created, 12, String(created.transactionHash)), env)).newState;
+    aliceState = (await applyJEventRange(aliceState, makeJEventInput(env, ALICE, created, 12, String(created.transactionHash)), env)).newState;
+    bobState = (await applyJEventRange(bobState, makeJEventInput(env, BOB, created, 12, String(created.transactionHash)), env)).newState;
 
     const aliceOpen = findOnlyDebt(aliceState, 'out');
     const bobIncoming = findOnlyDebt(bobState, 'in');
@@ -172,8 +158,8 @@ describe('debt ledger', () => {
       },
     };
 
-    aliceState = (await applyJEventAndCheckpoint(aliceState, makeJEventInput(env, ALICE, enforced, 13, String(enforced.transactionHash)), env)).newState;
-    bobState = (await applyJEventAndCheckpoint(bobState, makeJEventInput(env, BOB, enforced, 13, String(enforced.transactionHash)), env)).newState;
+    aliceState = (await applyJEventRange(aliceState, makeJEventInput(env, ALICE, enforced, 13, String(enforced.transactionHash)), env)).newState;
+    bobState = (await applyJEventRange(bobState, makeJEventInput(env, BOB, enforced, 13, String(enforced.transactionHash)), env)).newState;
 
     const alicePartial = findOnlyDebt(aliceState, 'out');
     const bobPartial = findOnlyDebt(bobState, 'in');
@@ -198,8 +184,8 @@ describe('debt ledger', () => {
       },
     };
 
-    aliceState = (await applyJEventAndCheckpoint(aliceState, makeJEventInput(env, ALICE, forgiven, 14, String(forgiven.transactionHash)), env)).newState;
-    bobState = (await applyJEventAndCheckpoint(bobState, makeJEventInput(env, BOB, forgiven, 14, String(forgiven.transactionHash)), env)).newState;
+    aliceState = (await applyJEventRange(aliceState, makeJEventInput(env, ALICE, forgiven, 14, String(forgiven.transactionHash)), env)).newState;
+    bobState = (await applyJEventRange(bobState, makeJEventInput(env, BOB, forgiven, 14, String(forgiven.transactionHash)), env)).newState;
 
     const aliceSettled = findOnlyDebt(aliceState, 'out');
     const bobSettled = findOnlyDebt(bobState, 'in');

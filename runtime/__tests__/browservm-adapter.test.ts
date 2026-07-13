@@ -27,7 +27,6 @@ const makeReplica = (entityId: string, signerId: string): EntityReplica =>
       accounts: new Map(),
       deferredAccountProposals: new Map(),
       lastFinalizedJHeight: 0,
-      jBlockObservations: [],
       jBlockChain: [],
       entityEncPubKey: `${'0x'}${'11'.repeat(32)}`,
       entityEncPrivKey: `${'0x'}${'22'.repeat(32)}`,
@@ -77,11 +76,14 @@ describe('BrowserVM JAdapter boundary', () => {
       expect(events.some((event) => event.name === 'ReserveUpdated')).toBe(true);
 
       const queued = env.runtimeMempool?.entityInputs ?? [];
+      const runtimeTxs = env.runtimeMempool?.runtimeTxs ?? [];
+      expect(runtimeTxs.some((tx) => tx.type === 'observeJRange')).toBe(true);
       expect(queued).toHaveLength(1);
       expect(queued[0]?.entityId).toBe(entityId);
       expect(queued[0]?.entityTxs[0]?.type).toBe('j_event');
-      expect(queued[0]?.entityTxs[0]?.data.event.type).toBe('ReserveUpdated');
-      expect(queued[0]?.entityTxs[1]?.type).toBe('j_history_checkpoint');
+      const range = queued[0]?.entityTxs[0];
+      expect(range?.type === 'j_event' ? range.data.blocks[0]?.events[0]?.type : null).toBe('ReserveUpdated');
+      expect(queued[0]?.entityTxs).toHaveLength(1);
     } finally {
       await adapter.close();
     }

@@ -8,16 +8,6 @@ import {
   normalizeJurisdictionEvents,
 } from './event-normalization';
 
-export type JEventObservationDigestInput = {
-  entityId: string;
-  jurisdictionRef: string;
-  signerId: string;
-  blockNumber: number;
-  blockHash: string;
-  eventsHash: string;
-  disputeFinalizationEvidenceHash?: string;
-};
-
 export const UNCONFIGURED_J_EVENT_JURISDICTION = 'unconfigured';
 
 export const getJEventJurisdictionRef = (jurisdiction: unknown): string =>
@@ -62,23 +52,4 @@ export const canonicalDisputeFinalizationEvidenceHash = (
 ): string => {
   const keys = evidence.map(canonicalDisputeFinalizationEvidenceKey).sort();
   return ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(keys)));
-};
-
-export const buildJEventObservationDigest = (input: JEventObservationDigestInput): string => {
-  const evidenceHash = String(input.disputeFinalizationEvidenceHash || '').trim().toLowerCase();
-  const payload = [
-    'xln:j-event-observation:v1',
-    String(input.entityId || '').toLowerCase(),
-    String(input.jurisdictionRef || '').trim().toLowerCase(),
-    String(input.signerId || '').toLowerCase(),
-    Number(input.blockNumber || 0),
-    String(input.blockHash || '').toLowerCase(),
-    String(input.eventsHash || '').toLowerCase(),
-    // Optional calldata-derived evidence is not part of canonical event
-    // consensus. If a validator includes it, bind it into that validator's
-    // observation signature so an untrusted relayer cannot graft side effects
-    // onto a valid block/event attestation.
-    ...(evidenceHash ? [evidenceHash] : []),
-  ];
-  return ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(payload)));
 };

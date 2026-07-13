@@ -9,24 +9,8 @@ const entityInputMergeLog = createStructuredLogger('entity.input.merge');
 const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
   const merged: EntityTx[] = [];
   const seenSignedObservations = new Set<string>();
-  const seenSignedCheckpoints = new Set<string>();
 
   for (const tx of txs) {
-    if (tx.type === 'j_history_checkpoint') {
-      const checkpointKey = safeStringify({
-        from: String(tx.data.from || '').toLowerCase(),
-        jurisdictionRef: String(tx.data.jurisdictionRef || '').toLowerCase(),
-        baseHeight: tx.data.baseHeight,
-        scannedThroughHeight: tx.data.scannedThroughHeight,
-        tipBlockHash: String(tx.data.tipBlockHash || '').toLowerCase(),
-        eventHistoryRoot: String(tx.data.eventHistoryRoot || '').toLowerCase(),
-        signature: String(tx.data.signature || '').toLowerCase(),
-      });
-      if (seenSignedCheckpoints.has(checkpointKey)) continue;
-      seenSignedCheckpoints.add(checkpointKey);
-      merged.push(tx);
-      continue;
-    }
     if (tx.type !== 'j_event' || !tx.data) {
       merged.push(tx);
       continue;
@@ -36,11 +20,11 @@ const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
     const signedObservationKey = safeStringify({
       from: String(data.from || '').toLowerCase(),
       jurisdictionRef: String(data.jurisdictionRef || '').toLowerCase(),
-      blockNumber: data.blockNumber,
-      blockHash: String(data.blockHash || '').toLowerCase(),
-      transactionHash: String(data.transactionHash || '').toLowerCase(),
-      eventsHash: String(data.eventsHash || '').toLowerCase(),
-      disputeFinalizationEvidenceHash: String(data.disputeFinalizationEvidenceHash || '').toLowerCase(),
+      baseHeight: data.baseHeight,
+      scannedThroughHeight: data.scannedThroughHeight,
+      tipBlockHash: String(data.tipBlockHash || '').toLowerCase(),
+      eventHistoryRoot: String(data.eventHistoryRoot || '').toLowerCase(),
+      rangeHash: String(data.rangeHash || '').toLowerCase(),
       signature: String(data.signature || '').toLowerCase(),
     });
     if (seenSignedObservations.has(signedObservationKey)) continue;
@@ -79,8 +63,19 @@ const canonicalEntityInputSortKey = (input: RoutedEntityInput): string => safeSt
 });
 
 const sortMergedEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInput[] =>
-  [...inputs].sort((left, right) =>
-    compareStableText(canonicalEntityInputSortKey(left), canonicalEntityInputSortKey(right)));
+  [...inputs].sort((left, right) => {
+    const entityOrder = compareStableText(left.entityId.toLowerCase(), right.entityId.toLowerCase());
+    if (entityOrder !== 0) return entityOrder;
+    const signerOrder = compareStableText(
+      String(left.signerId || '').toLowerCase(),
+      String(right.signerId || '').toLowerCase(),
+    );
+    if (signerOrder !== 0) return signerOrder;
+    if (left.proposedFrame && right.proposedFrame && left.proposedFrame.height !== right.proposedFrame.height) {
+      return left.proposedFrame.height - right.proposedFrame.height;
+    }
+    return compareStableText(canonicalEntityInputSortKey(left), canonicalEntityInputSortKey(right));
+  });
 
 export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInput[] => {
   const merged = new Map<string, RoutedEntityInput>();

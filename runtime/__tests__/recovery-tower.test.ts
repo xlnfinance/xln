@@ -167,7 +167,6 @@ describe('runtime recovery tower', () => {
     env.runtimeConfig = { minFrameDelayMs: 25, snapshotIntervalFrames: 7 };
     env.runtimeState = {
       ...(env.runtimeState ?? {}),
-      clockPrimed: true,
       maxEntityInputsPerFrame: 123,
     };
     env.pendingOutputs = [{ entityId, signerId: runtimeId, runtimeId, entityTxs: [] }];
@@ -211,7 +210,6 @@ describe('runtime recovery tower', () => {
     expect(restoredEnv.runtimeInput).toEqual(env.runtimeInput);
     expect(restoredEnv.runtimeMempool).toBe(restoredEnv.runtimeInput);
     expect(restoredEnv.runtimeConfig).toEqual(env.runtimeConfig);
-    expect(restoredEnv.runtimeState?.clockPrimed).toBe(true);
     expect(restoredEnv.runtimeState?.maxEntityInputsPerFrame).toBe(123);
     expect(restoredEnv.pendingOutputs).toEqual(env.pendingOutputs);
     expect(restoredEnv.networkInbox).toEqual(env.networkInbox);

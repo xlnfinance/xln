@@ -561,9 +561,7 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
       : {}),
     // JBlock consensus state
     lastFinalizedJHeight: entityState.lastFinalizedJHeight,
-    jBlockObservations: cloneArray(entityState.jBlockObservations || []),
     jBlockChain: cloneArray(entityState.jBlockChain || []),
-    jHistoryCheckpoints: cloneArray(entityState.jHistoryCheckpoints || []),
     ...(entityState.jHistoryFinality
       ? { jHistoryFinality: structuredClone(entityState.jHistoryFinality) }
       : {}),

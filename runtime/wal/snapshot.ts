@@ -157,7 +157,6 @@ const buildDurableRuntimeStateSnapshot = (env: Env): Record<string, unknown> | u
   const durable = {
     ...(state.halted !== undefined ? { halted: state.halted } : {}),
     ...(state.fatalDebugPayload ? { fatalDebugPayload: structuredClone(state.fatalDebugPayload) } : {}),
-    ...(state.clockPrimed !== undefined ? { clockPrimed: state.clockPrimed } : {}),
     ...(state.maxEntityInputsPerFrame !== undefined ? { maxEntityInputsPerFrame: state.maxEntityInputsPerFrame } : {}),
     ...(state.maxEntityTxsPerFrame !== undefined ? { maxEntityTxsPerFrame: state.maxEntityTxsPerFrame } : {}),
     ...(state.pendingAuditEvents ? { pendingAuditEvents: structuredClone(state.pendingAuditEvents) } : {}),

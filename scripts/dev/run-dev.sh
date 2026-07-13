@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 source "$REPO_ROOT/scripts/lib/port-layout.sh"
+source "$REPO_ROOT/scripts/lib/start-common.sh"
 
 RPC_PORT="$(xln_rpc_port)"
 RPC2_PORT="$((RPC_PORT + 1))"
@@ -22,6 +23,8 @@ RUNTIME_VERBOSE_LOGS="${RUNTIME_VERBOSE_LOGS:-0}"
 XLN_LOG_WARN_STDOUT="${XLN_LOG_WARN_STDOUT:-1}"
 
 export XLN_JURISDICTIONS_PATH="${XLN_JURISDICTIONS_PATH:-./db/dev/jurisdictions.json}"
+XLN_MESH_ROOT_SEED_FILE="${XLN_MESH_ROOT_SEED_FILE:-$REPO_ROOT/db/dev/secrets/mesh-root.seed}"
+export XLN_MESH_ROOT_SEED="${XLN_MESH_ROOT_SEED:-$(xln_read_or_create_operator_seed "$XLN_MESH_ROOT_SEED_FILE")}"
 export RPC_PORT RPC2_PORT API_PORT WEB_PORT WEB_HTTP_PORT CUSTODY_PORT CUSTODY_DAEMON_PORT WATCHTOWER_PORT
 export ANVIL_BLOCK_TIME DEV_LOG_DIR MESH_LOG_LEVEL DEV_VERBOSE RUNTIME_VERBOSE_LOGS XLN_LOG_WARN_STDOUT
 

@@ -1053,7 +1053,6 @@ const compactEntityCoreForRemote = (core: StorageEntityCoreDoc): StorageEntityCo
     proposals: new Map(Array.from(core.proposals.entries()).slice(-20)),
     reserves: compactMapHead(core.reserves, 100) ?? new Map(),
     lastFinalizedJHeight: core.lastFinalizedJHeight,
-    jBlockObservations: core.jBlockObservations.slice(-20),
     jBlockChain: core.jBlockChain.slice(-20),
     htlcRoutes: compactMapTail(core.htlcRoutes, 20) ?? new Map(),
     htlcFeesEarned: core.htlcFeesEarned,

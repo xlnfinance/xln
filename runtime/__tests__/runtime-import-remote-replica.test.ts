@@ -73,37 +73,22 @@ describe('runtime remote replica import', () => {
     expect(env.gossip.getProfiles().some(profile => profile.entityId === entityId)).toBe(false);
 
     if (!replica) throw new Error('test replica missing after import');
-    replica.state.jHistoryCheckpoints = [{
-      signerId,
-      jurisdictionRef: 'stack:31337:0x1111111111111111111111111111111111111111',
-      baseHeight: 87,
-      scannedThroughHeight: 90,
-      tipBlockHash: `0x${'44'.repeat(32)}`,
-      eventHistoryRoot: `0x${'55'.repeat(32)}`,
-      signature: `0x${'66'.repeat(65)}`,
-    }];
+    const jurisdictionRef = 'stack:31337:0x1111111111111111111111111111111111111111';
     replica.state.jHistoryFinality = {
-      jurisdictionRef: replica.state.jHistoryCheckpoints[0]!.jurisdictionRef,
+      jurisdictionRef,
       baseHeight: 87,
       finalizedThroughHeight: 90,
-      tipBlockHash: replica.state.jHistoryCheckpoints[0]!.tipBlockHash,
-      eventHistoryRoot: replica.state.jHistoryCheckpoints[0]!.eventHistoryRoot,
-      attestations: [{
-        signerId,
-        signedThroughHeight: 14,
-        tipBlockHash: `0x${'34'.repeat(32)}`,
-        eventHistoryRoot: replica.state.jHistoryCheckpoints[0]!.eventHistoryRoot,
-        signature: replica.state.jHistoryCheckpoints[0]!.signature,
-      }],
-      signerCount: 1,
-      signerPower: 1n,
+      tipBlockHash: `0x${'44'.repeat(32)}`,
+      eventHistoryRoot: `0x${'55'.repeat(32)}`,
+      proposerSignerId: signerId,
+      proposerSignature: `0x${'66'.repeat(65)}`,
+      entityHeight: 1,
     };
     const hydrated = hydrateEntityStateFromStorage({
       core: projectEntityCoreDoc(replica.state, replica),
       accounts: new Map(),
       books: new Map(),
     });
-    expect(hydrated.jHistoryCheckpoints).toEqual(replica.state.jHistoryCheckpoints);
     expect(hydrated.jHistoryFinality).toEqual(replica.state.jHistoryFinality);
   });
 });

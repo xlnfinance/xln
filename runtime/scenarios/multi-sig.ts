@@ -15,13 +15,33 @@
  * Run with: bun runtime/scenarios/multi-sig.ts
  */
 
-import type { Env } from '../types';
-import { ensureJAdapter, getJAdapterMode, createJReplica } from './boot';
+import type { ConsensusConfig, EntityReplica, Env } from '../types';
+import { encodeBoard, generateLazyEntityId, generateNumberedEntityId, hashBoard } from '../entity/factory';
+import { ensureJAdapter, getJAdapterMode, createJReplica, createJurisdictionConfig } from './boot';
 import { findReplica, assert, processWithOffline, convergeWithOffline, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, syncChain, commitRuntimeInput } from './helpers';
 
 const USDC = 1;
 const ONE = 10n ** 18n;
 const usd = (amount: number | bigint) => BigInt(amount) * ONE;
+
+const hasSuccessfulHankoBatch = (replica: EntityReplica): boolean =>
+  (replica.state.jBlockChain || []).some((block) =>
+    (block.events || []).some((event) => event.type === 'HankoBatchProcessed' && event.data?.success === true));
+
+const importBoardReplicas = (
+  entityId: string,
+  config: ConsensusConfig,
+  x: number,
+) => config.validators.map((signerId, index) => ({
+  type: 'importReplica' as const,
+  entityId,
+  signerId,
+  data: {
+    isProposer: index === 0,
+    position: { x: x + index * 20, y: 0, z: 0 },
+    config,
+  },
+}));
 
 export async function multiSig(env: Env): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'Multi-Sig');
@@ -33,7 +53,7 @@ export async function multiSig(env: Env): Promise<void> {
   const offlineSigners = new Set<string>();
 
   clearSignerKeys();
-  ensureSignerKeysFromSeed(env, ['1', '2', '3', '4', '5', '6', '7'], 'Multi-Sig');
+  ensureSignerKeysFromSeed(env, ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'], 'Multi-Sig');
 
   if (env.scenarioMode && env.height === 0) {
     env.timestamp = 1;
@@ -59,81 +79,78 @@ export async function multiSig(env: Env): Promise<void> {
     account: jadapter.addresses.account,
     deltaTransformer: jadapter.addresses.deltaTransformer,
   };
+  env.jAdapter = jadapter;
+  jadapter.startWatching(env);
+  const jurisdiction = createJurisdictionConfig(
+    'MultiSig',
+    jadapter.addresses.depository,
+    jadapter.addresses.entityProvider,
+    jadapter.mode === 'browservm' ? 'browservm://' : (process.env['ANVIL_RPC'] || 'http://localhost:8545'),
+    Number(jadapter.chainId),
+  );
   console.log('✅ JAdapter ready\n');
 
   // ============================================================================
-  // SETUP: Create Alice (2-of-3) and Hub (single signer)
+  // SETUP: Create lazy and registered 2-of-3 entities plus a lazy recipient
   // ============================================================================
   console.log('📦 Creating entities...');
 
-  const alice = { id: '0x' + '1'.padStart(64, '0'), validators: ['1', '2', '3'] }; // 2-of-3
-  const hub = { id: '0x' + '2'.padStart(64, '0'), validators: ['4'], signer: '4' }; // Single
-
-  const aliceConfig = {
+  const aliceConfig: ConsensusConfig = {
     mode: 'proposer-based' as const,
     threshold: 2n, // CRITICAL: 2-of-3 threshold
     validators: ['1', '2', '3'],
     shares: { '1': 1n, '2': 1n, '3': 1n },
+    jurisdiction,
+  };
+  const alice = {
+    id: generateLazyEntityId(aliceConfig.validators, aliceConfig.threshold).toLowerCase(),
+    validators: aliceConfig.validators,
+  };
+  assert(alice.id === hashBoard(encodeBoard(aliceConfig)).toLowerCase(), 'lazy entity ID commits exact validator order');
+
+  const hubConfig: ConsensusConfig = {
+    mode: 'proposer-based',
+    threshold: 1n,
+    validators: ['4'],
+    shares: { '4': 1n },
+    jurisdiction,
+  };
+  const hub = {
+    id: generateLazyEntityId(hubConfig.validators, hubConfig.threshold).toLowerCase(),
+    validators: hubConfig.validators,
+    signer: '4',
+  };
+
+  const registeredConfig: ConsensusConfig = {
+    mode: 'proposer-based',
+    threshold: 2n,
+    validators: ['5', '6', '7'],
+    shares: { '5': 1n, '6': 1n, '7': 1n },
+    jurisdiction,
+  };
+  const registeredBoardHash = hashBoard(encodeBoard(registeredConfig));
+  const nextEntityNumber = await jadapter.entityProvider.nextNumber();
+  const registration = await jadapter.entityProvider.registerNumberedEntity(registeredBoardHash);
+  const registrationReceipt = await registration.wait();
+  assert(registrationReceipt?.status === 1, 'numbered multisig board registered on EntityProvider');
+  const registered = {
+    id: generateNumberedEntityId(Number(nextEntityNumber)).toLowerCase(),
+    validators: registeredConfig.validators,
   };
 
   // CRITICAL: Multi-signer requires separate replica for EACH validator
   await commitRuntimeInput(env, {
     runtimeTxs: [
-      // Alice validator 1 (proposer)
-      {
-        type: 'importReplica',
-        entityId: alice.id,
-        signerId: '1',
-        data: {
-          isProposer: true,
-          position: { x: 0, y: 0, z: 0 },
-          config: aliceConfig,
-        },
-      },
-      // Alice validator 2
-      {
-        type: 'importReplica',
-        entityId: alice.id,
-        signerId: '2',
-        data: {
-          isProposer: false, // Not proposer
-          position: { x: 0, y: 0, z: 0 },
-          config: aliceConfig,
-        },
-      },
-      // Alice validator 3
-      {
-        type: 'importReplica',
-        entityId: alice.id,
-        signerId: '3',
-        data: {
-          isProposer: false,
-          position: { x: 0, y: 0, z: 0 },
-          config: aliceConfig,
-        },
-      },
-      // Hub (single signer)
-      {
-        type: 'importReplica',
-        entityId: hub.id,
-        signerId: hub.signer,
-        data: {
-          isProposer: true,
-          position: { x: 100, y: 0, z: 0 },
-          config: {
-            mode: 'proposer-based',
-            threshold: 1n,
-            validators: [hub.signer],
-            shares: { [hub.signer]: 1n },
-          },
-        },
-      },
+      ...importBoardReplicas(alice.id, aliceConfig, 0),
+      ...importBoardReplicas(registered.id, registeredConfig, 100),
+      ...importBoardReplicas(hub.id, hubConfig, 220),
     ],
     entityInputs: [],
   });
 
   console.log('  ✅ Alice: 2-of-3 validators (1, 2, 3)');
-  console.log('  ✅ Hub: single validator\n');
+  console.log(`  ✅ Registered: ${registered.id.slice(-8)} with 2-of-3 validators (5, 6, 7)`);
+  console.log('  ✅ Hub: lazy single validator\n');
 
   // ============================================================================
   // SETUP: Entity-level commit under 2-of-3 threshold
@@ -145,7 +162,14 @@ export async function multiSig(env: Env): Promise<void> {
     signerId: '1',
     entityTxs: [{ type: 'mintReserves', data: { tokenId: USDC, amount: usd(1_000) } }],
   }], offlineSigners);
+  await convergeWithOffline(env, offlineSigners, 20);
+  await syncChain(env, 5);
 
+  await processWithOffline(env, [{
+    entityId: registered.id,
+    signerId: '5',
+    entityTxs: [{ type: 'mintReserves', data: { tokenId: USDC, amount: usd(1_000) } }],
+  }], offlineSigners);
   await convergeWithOffline(env, offlineSigners, 20);
   await syncChain(env, 5);
 
@@ -167,6 +191,37 @@ export async function multiSig(env: Env): Promise<void> {
     assert(!hasPending, `Validator ${validator} is idle after the initial multi-sig commit`);
   }
 
+  for (const validator of registered.validators) {
+    const replica = env.eReplicas.get(`${registered.id}:${validator}`);
+    assert((replica?.state.height || 0) > 0, `Registered validator ${validator} committed initial entity tx`);
+    assert((replica?.state.reserves.get(USDC) || 0n) === usd(1_000), `Registered validator ${validator} finalized minted reserve`);
+  }
+
+  // Both entity forms must authorize a real Depository batch with their 2-of-3 Hanko.
+  for (const board of [
+    { name: 'lazy', id: alice.id, proposer: '1', validators: alice.validators, amount: usd(10) },
+    { name: 'registered', id: registered.id, proposer: '5', validators: registered.validators, amount: usd(15) },
+  ]) {
+    await processWithOffline(env, [{
+      entityId: board.id,
+      signerId: board.proposer,
+      entityTxs: [
+        { type: 'r2r', data: { toEntityId: hub.id, tokenId: USDC, amount: board.amount } },
+        { type: 'j_broadcast', data: {} },
+      ],
+    }], offlineSigners);
+    await convergeWithOffline(env, offlineSigners, 20);
+    await syncChain(env, 8);
+
+    for (const validator of board.validators) {
+      const replica = env.eReplicas.get(`${board.id}:${validator}`);
+      assert(!!replica, `${board.name} validator ${validator} replica exists`);
+      assert(hasSuccessfulHankoBatch(replica!), `${board.name} validator ${validator} finalized HankoBatchProcessed`);
+      assert(!replica!.proposal && !replica!.lockedFrame && replica!.mempool.length === 0,
+        `${board.name} validator ${validator} is idle after J finality`);
+    }
+  }
+
   // ============================================================================
   // TEST 0: NEGATIVE TEST - Proposer alone can't commit (threshold enforcement)
   // ============================================================================
@@ -175,31 +230,33 @@ export async function multiSig(env: Env): Promise<void> {
   console.log('═══════════════════════════════════════════════════════════════\\n');
 
   console.log('🔒 Creating isolated 2-of-3 entity for negative test...');
-  const testEntity = { id: ('0x' + 'F'.padStart(64, '0')).toLowerCase(), validators: ['5', '6', '7'] };
-  const testConfig = {
+  const testConfig: ConsensusConfig = {
     mode: 'proposer-based' as const,
     threshold: 2n,
-    validators: ['5', '6', '7'],
-    shares: { '5': 1n, '6': 1n, '7': 1n },
+    validators: ['8', '9', '10'],
+    shares: { '8': 1n, '9': 1n, '10': 1n },
+    jurisdiction,
+  };
+  const testEntity = {
+    id: generateLazyEntityId(testConfig.validators, testConfig.threshold).toLowerCase(),
+    validators: testConfig.validators,
   };
 
-  // Create every validator replica, then take 6/7 offline. Missing replicas are
+  // Create every validator replica, then take 9/10 offline. Missing replicas are
   // a topology error; this negative test is only about threshold enforcement.
   await commitRuntimeInput(env, {
     runtimeTxs: [
-      { type: 'importReplica', entityId: testEntity.id, signerId: '5', data: { isProposer: true, position: { x: 200, y: 0, z: 0 }, config: testConfig }},
-      { type: 'importReplica', entityId: testEntity.id, signerId: '6', data: { isProposer: false, position: { x: 240, y: 0, z: 0 }, config: testConfig }},
-      { type: 'importReplica', entityId: testEntity.id, signerId: '7', data: { isProposer: false, position: { x: 280, y: 0, z: 0 }, config: testConfig }},
+      ...importBoardReplicas(testEntity.id, testConfig, 340),
     ],
     entityInputs: [],
   });
-  offlineSigners.add('6');
-  offlineSigners.add('7');
+  offlineSigners.add('9');
+  offlineSigners.add('10');
 
   // Proposer creates a proposal (entity-level operation)
   await processWithOffline(env, [{
     entityId: testEntity.id,
-    signerId: '5',
+    signerId: '8',
     entityTxs: [{ type: 'mintReserves', data: { tokenId: USDC, amount: usd(10) }}],
   }], offlineSigners);
 
@@ -241,8 +298,8 @@ export async function multiSig(env: Env): Promise<void> {
   if (env.runtimeInput?.entityInputs) {
     env.runtimeInput.entityInputs = env.runtimeInput.entityInputs.filter(input => input.entityId !== testEntity.id);
   }
-  offlineSigners.delete('6');
-  offlineSigners.delete('7');
+  offlineSigners.delete('9');
+  offlineSigners.delete('10');
   // ============================================================================
   // TEST 1: Byzantine tolerance (3 offline, 1+2 reach threshold on Alice entity)
   // ============================================================================
@@ -311,6 +368,7 @@ export async function multiSig(env: Env): Promise<void> {
   console.log('═══════════════════════════════════════════════════════════════');
   console.log(`📊 Total frames: ${env.history?.length || 0}`);
   console.log('   Entity-level 2-of-3 threshold: ✅');
+  console.log('   Lazy + registered on-chain Hanko: ✅');
   console.log('   Proposer alone cannot commit: ✅');
   console.log('   Byzantine tolerance (3 offline): ✅');
   console.log('   Post-commit convergence: ✅');

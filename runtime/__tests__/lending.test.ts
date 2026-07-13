@@ -34,7 +34,6 @@ const makeState = (): EntityState => ({
   accounts: new Map(),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockObservations: [],
   jBlockChain: [],
   entityEncPubKey: `0x${'11'.repeat(32)}`,
   entityEncPrivKey: `0x${'22'.repeat(32)}`,

@@ -77,12 +77,82 @@ function randomLabel(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
-function logPage(page: Page, tag: string): void {
+function logPage(page: Page, tag: string): string[] {
+  const errors: string[] = [];
   page.on('console', (msg) => {
     const text = msg.text();
+    if (msg.type() === 'error') errors.push(text);
     if (msg.type() === 'error' || text.includes('HTLC') || text.includes('Payment') || text.includes('[E2E]')) {
       process.stdout.write(`[${tag}] ${text.slice(0, 300)}\n`);
     }
+  });
+  page.on('pageerror', (error) => errors.push(error.message));
+  return errors;
+}
+
+async function readJWatcherDiagnostics(page: Page): Promise<unknown> {
+  return page.evaluate(() => {
+    type ReplicaState = {
+      entityId?: string;
+      lastFinalizedJHeight?: number;
+      config?: { jurisdiction?: { name?: string; chainId?: number; depositoryAddress?: string } };
+      jHistoryFinality?: { finalizedThroughHeight?: number; tipBlockHash?: string; jurisdictionRef?: string };
+    };
+    type EntityReplica = {
+      entityId?: string;
+      signerId?: string;
+      state?: ReplicaState;
+      jHistory?: {
+        jurisdictionRef?: string;
+        scannedThroughHeight?: number;
+        tipBlockHash?: string;
+        blockHashes?: Map<number, string>;
+      };
+    };
+    type JurisdictionReplica = {
+      name?: string;
+      chainId?: number;
+      blockNumber?: bigint;
+      depositoryAddress?: string;
+      rpcs?: string[];
+      jadapter?: { chainId?: number };
+    };
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        eReplicas?: Map<string, EntityReplica>;
+        jReplicas?: Map<string, JurisdictionReplica>;
+      };
+    }).isolatedEnv;
+    return {
+      jurisdictions: [...(env?.jReplicas?.entries() ?? [])].map(([key, replica]) => ({
+        key,
+        name: replica.name,
+        chainId: replica.chainId,
+        adapterChainId: replica.jadapter?.chainId,
+        blockNumber: String(replica.blockNumber ?? ''),
+        depositoryAddress: replica.depositoryAddress,
+        rpcs: replica.rpcs,
+      })),
+      entities: [...(env?.eReplicas?.entries() ?? [])].map(([key, replica]) => {
+        const finalizedHeight = Number(replica.state?.lastFinalizedJHeight ?? 0);
+        return {
+          key,
+          entityId: replica.entityId,
+          signerId: replica.signerId,
+          jurisdiction: replica.state?.config?.jurisdiction,
+          finalizedHeight,
+          finality: replica.state?.jHistoryFinality,
+          history: replica.jHistory
+            ? {
+                jurisdictionRef: replica.jHistory.jurisdictionRef,
+                scannedThroughHeight: replica.jHistory.scannedThroughHeight,
+                tipBlockHash: replica.jHistory.tipBlockHash,
+                finalizedBlockHash: replica.jHistory.blockHashes?.get(finalizedHeight),
+              }
+            : null,
+        };
+      }),
+    };
   });
 }
 
@@ -471,8 +541,8 @@ test.describe('Payment Smoke', () => {
 
       const senderPage = await senderContext.newPage();
       const recipientPage = await recipientContext.newPage();
-      logPage(senderPage, 'SENDER');
-      logPage(recipientPage, 'RECIPIENT');
+      const senderErrors = logPage(senderPage, 'SENDER');
+      const recipientErrors = logPage(recipientPage, 'RECIPIENT');
 
       await Promise.all([
         gotoApp(senderPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: CONSENSUS_TIMEOUT_MS, settleMs: 1_000 }),
@@ -590,6 +660,16 @@ test.describe('Payment Smoke', () => {
           intervals: [500, 1000, 1500],
         })
         .toBe(recipientAfterPayment);
+
+      const runtimeErrors = [...senderErrors, ...recipientErrors];
+      if (runtimeErrors.length > 0 || process.env.E2E_DEBUG_J === '1') {
+        const diagnostics = {
+          sender: await readJWatcherDiagnostics(senderPage),
+          recipient: await readJWatcherDiagnostics(recipientPage),
+        };
+        process.stdout.write(`[PAY-SMOKE][RUNTIME-DIAGNOSTICS] ${JSON.stringify(diagnostics)}\n`);
+      }
+      expect(runtimeErrors, 'payment runtime pages must not emit console/page errors').toEqual([]);
 
       process.stdout.write(
         `[PAY-SMOKE] PASS senderAfter=${senderAfterPayment} recipientAfter=${recipientAfterPayment} amount=${PAYMENT_AMOUNT.toString()}\n`,

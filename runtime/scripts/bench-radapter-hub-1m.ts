@@ -276,7 +276,6 @@ const makeHubState = (entityId: string, height: number, timestamp: number): Enti
   accounts: new Map(),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockObservations: [],
   jBlockChain: [],
   entityEncPubKey: 'bench-pub',
   entityEncPrivKey: 'bench-priv',

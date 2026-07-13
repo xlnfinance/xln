@@ -163,44 +163,31 @@ export type JurisdictionEvent =
       };
     });
 
+/** One event-bearing EVM block inside an ordered jurisdiction range. */
+export interface JurisdictionEventBlock {
+  blockNumber: number;
+  blockHash: string;
+  eventsHash: string;
+  events: JurisdictionEvent[];
+  disputeFinalizationEvidence?: DisputeFinalizationEvidence[];
+  disputeFinalizationEvidenceHash?: string;
+}
+
 /**
- * Jurisdiction event data for j_event transactions.
- * Includes a canonical eventsHash so BFT consensus is over the exact event set,
- * not merely over a block hash observed by signers.
+ * One proposer-authenticated jurisdiction prefix. Validators compare this
+ * exact ordered range with their own durable local history before signing the
+ * enclosing Entity frame; the Entity Hanko is the only quorum certificate.
  */
 export interface JurisdictionEventData {
   from: string;
   jurisdictionRef: string;
-  event: JurisdictionEvent;
-  events?: JurisdictionEvent[];
-  // Optional calldata-derived evidence. This is deliberately outside
-  // canonical eventsHash: transformer args are adversarial evidence and must not
-  // fork J-event consensus when a provider cannot serve transaction input.
-  disputeFinalizationEvidence?: DisputeFinalizationEvidence[];
-  disputeFinalizationEvidenceHash?: string;
-  eventsHash?: string;
-  signature?: string;
-  observedAt: number;
-  blockNumber: number;
-  blockHash: string;
-  /** Debug metadata only; each canonical event carries its own transactionHash. */
-  transactionHash?: string;
-}
-
-/**
- * Observation of a J-block by a single signer.
- * Submitted as j_event EntityTx, aggregated by entity consensus.
- */
-export interface JBlockObservation {
-  signerId: string;
-  jurisdictionRef: string;
-  jHeight: number;
-  jBlockHash: string;
-  eventsHash: string;
-  events: JurisdictionEvent[];
+  baseHeight: number;
+  scannedThroughHeight: number;
+  tipBlockHash: string;
+  eventHistoryRoot: string;
+  rangeHash: string;
+  blocks: JurisdictionEventBlock[];
   signature: string;
-  disputeFinalizationEvidence?: DisputeFinalizationEvidence[];
-  disputeFinalizationEvidenceHash?: string;
   observedAt: number;
 }
 
@@ -219,6 +206,11 @@ export interface ValidatorJEventBlock {
   disputeFinalizationEvidenceHash?: string;
 }
 
+export interface ValidatorJBlockHeader {
+  jHeight: number;
+  jBlockHash: string;
+}
+
 /**
  * Validator-private, durable J-chain view. It is persisted with EntityReplica
  * metadata but deliberately excluded from EntityState and every consensus
@@ -232,51 +224,16 @@ export interface ValidatorJHistory {
   blockHashes: Map<number, string>;
 }
 
-/**
- * One validator's signed claim about its complete jurisdiction history through
- * a height. The eventHistoryRoot is an append-only accumulator over that
- * validator's own event-block observations; histories are never unioned.
- */
-export interface JHistoryCheckpoint {
-  signerId: string;
-  jurisdictionRef: string;
-  baseHeight: number;
-  scannedThroughHeight: number;
-  tipBlockHash: string;
-  eventHistoryRoot: string;
-  signature: string;
-}
-
-export interface JHistoryCheckpointAttestation {
-  signerId: string;
-  signedThroughHeight: number;
-  tipBlockHash: string;
-  eventHistoryRoot: string;
-  signature: string;
-}
-
-/** Stake-quorum certificate for one common validator-history prefix. */
+/** Entity-certified jurisdiction-history prefix. */
 export interface JHistoryFinality {
   jurisdictionRef: string;
   baseHeight: number;
   finalizedThroughHeight: number;
-  /** Present only when a supporting checkpoint ends exactly at the finalized prefix. */
-  tipBlockHash?: string;
+  tipBlockHash: string;
   eventHistoryRoot: string;
-  attestations: JHistoryCheckpointAttestation[];
-  signerCount: number;
-  signerPower: bigint;
-}
-
-/**
- * One validator's immutable vote inside a finalized J-block certificate.
- * The shared block identity and eventsHash live on JBlockFinalized; these
- * fields retain enough data to independently verify each validator signature.
- */
-export interface JBlockAttestation {
-  signerId: string;
-  signature: string;
-  disputeFinalizationEvidenceHash?: string;
+  proposerSignerId: string;
+  proposerSignature: string;
+  entityHeight: number;
 }
 
 /**
@@ -289,8 +246,7 @@ export interface JBlockFinalized {
   jBlockHash: string;
   eventsHash: string;
   events: JurisdictionEvent[];
-  attestations: JBlockAttestation[];
   finalizedAt: number;
-  signerCount: number;
-  signerPower: bigint;
+  proposerSignerId: string;
+  proposerSignature: string;
 }

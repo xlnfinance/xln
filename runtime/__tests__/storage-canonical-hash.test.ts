@@ -84,7 +84,6 @@ const makeEnv = (account: AccountMachine, reserves: Array<[number, bigint]>): En
           accounts: new Map([[counterpartyId, account]]),
           deferredAccountProposals: new Map(),
           lastFinalizedJHeight: 0,
-          jBlockObservations: [],
           jBlockChain: [],
           entityEncPubKey: 'pub',
           entityEncPrivKey: 'priv',

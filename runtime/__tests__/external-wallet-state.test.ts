@@ -1,10 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account/crypto';
-import { buildJEventObservationDigest, canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../jurisdiction/event-observation';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
+import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../jurisdiction/event-observation';
 import { createEntityFrameHash } from '../entity/consensus/frame';
-import { type JEventEntityTxData } from '../entity/tx/j-events';
-import { applyJEventAndCheckpoint } from './helpers/j-history';
+import { applyJEventRange, type LegacyJEventInput } from './helpers/j-history';
 import { buildJEventsRuntimeInput } from '../jadapter/watcher';
 import {
   applyRuntimeInput,
@@ -40,7 +39,6 @@ const makeState = (entityId: string, signerId: string): EntityState => ({
   accounts: new Map(),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockObservations: [],
   jBlockChain: [],
   entityEncPubKey: `${'0x'}${'11'.repeat(32)}`,
   entityEncPrivKey: `${'0x'}${'22'.repeat(32)}`,
@@ -70,19 +68,7 @@ const signJEventInput = (
 ) => {
   const eventsHash = canonicalJurisdictionEventsHash(events);
   const jurisdictionRef = getJEventJurisdictionRef(undefined);
-  const signature = signAccountFrame(
-    env,
-    signerId,
-    buildJEventObservationDigest({
-      entityId,
-      jurisdictionRef,
-      signerId,
-      blockNumber,
-      blockHash,
-      eventsHash,
-    }),
-  );
-  return { jurisdictionRef, eventsHash, signature };
+  return { jurisdictionRef, eventsHash };
 };
 
 const buildSignedInput = (
@@ -90,7 +76,7 @@ const buildSignedInput = (
   entityId: string,
   signerId: string,
   event: JurisdictionEvent,
-): JEventEntityTxData => ({
+): LegacyJEventInput => ({
   from: signerId,
   event,
   events: [event],
@@ -155,7 +141,7 @@ describe('external wallet observed state', () => {
     };
     const input = buildSignedInput(env, entityId, signerId, event);
 
-    const result = await applyJEventAndCheckpoint(makeState(entityId, signerId), input, env);
+    const result = await applyJEventRange(makeState(entityId, signerId), input, env);
     const ownerState = result.newState.externalWallet?.balances.get(signerId);
     expect(ownerState?.get(NATIVE)?.balance).toBe(1_000_000_000_000_000_000n);
     expect(ownerState?.get(TOKEN)?.balance).toBe(2_500n);
@@ -301,7 +287,7 @@ describe('external wallet observed state', () => {
         allowances: [{ tokenAddress: TOKEN, spender: SPENDER, allowance: '900' }],
       },
     };
-    const afterSnapshot = await applyJEventAndCheckpoint(makeState(entityId, signerId), buildSignedInput(env, entityId, signerId, snapshot), env);
+    const afterSnapshot = await applyJEventRange(makeState(entityId, signerId), buildSignedInput(env, entityId, signerId, snapshot), env);
     const delta: JurisdictionEvent = {
       type: 'ExternalWalletDelta',
       blockNumber: 43,
@@ -318,7 +304,7 @@ describe('external wallet observed state', () => {
       },
     };
 
-    const result = await applyJEventAndCheckpoint(afterSnapshot.newState, buildSignedInput(env, entityId, signerId, delta), env);
+    const result = await applyJEventRange(afterSnapshot.newState, buildSignedInput(env, entityId, signerId, delta), env);
     expect(result.newState.externalWallet?.balances.get(signerId)?.get(TOKEN)?.balance).toBe(2_100n);
     expect(result.newState.externalWallet?.allowances.get(signerId)?.get(`${TOKEN}:${SPENDER}`)?.allowance).toBe(700n);
   });
@@ -344,7 +330,7 @@ describe('external wallet observed state', () => {
       },
     };
     await expect(
-      applyJEventAndCheckpoint(makeState(entityId, signerId), buildSignedInput(env, entityId, signerId, snapshot), env),
+      applyJEventRange(makeState(entityId, signerId), buildSignedInput(env, entityId, signerId, snapshot), env),
     ).rejects.toThrow('EXTERNAL_WALLET_OWNER_NOT_SIGNER');
 
     const stateWithForeignBaseline = makeState(entityId, signerId);
@@ -371,7 +357,7 @@ describe('external wallet observed state', () => {
       },
     };
     await expect(
-      applyJEventAndCheckpoint(stateWithForeignBaseline, buildSignedInput(env, entityId, signerId, delta), env),
+      applyJEventRange(stateWithForeignBaseline, buildSignedInput(env, entityId, signerId, delta), env),
     ).rejects.toThrow('EXTERNAL_WALLET_OWNER_NOT_SIGNER');
   });
 
@@ -397,7 +383,7 @@ describe('external wallet observed state', () => {
     };
 
     await expect(
-      applyJEventAndCheckpoint(makeState(entityId, signerId), buildSignedInput(env, entityId, signerId, delta), env),
+      applyJEventRange(makeState(entityId, signerId), buildSignedInput(env, entityId, signerId, delta), env),
     ).rejects.toThrow('EXTERNAL_WALLET_BASELINE_MISSING:balance');
   });
 });

@@ -11,11 +11,12 @@ import {
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
 import {
-  buildJEventObservationDigest,
   canonicalJurisdictionEventsHash,
   getJEventJurisdictionRef,
 } from '../jurisdiction/event-observation';
-import type { JurisdictionEvent, JurisdictionEventData } from '../types';
+import { buildJEventRangeDigest } from '../jurisdiction/history-consensus';
+import { buildUnsignedJEventRange, recordValidatorJHistory } from '../jurisdiction/local-history';
+import type { JurisdictionEvent, RuntimeTx } from '../types';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`ASSERT: ${message}`);
@@ -56,36 +57,43 @@ async function main() {
     depositoryAddress: '0x' + '3'.repeat(40),
     chainId: 31337,
   };
-  const buildSignedJEvent = (
+  const applySignedJEvent = async (
     events: JurisdictionEvent[],
     blockNumber: number,
     blockHash: string,
-    transactionHash: string,
-  ): JurisdictionEventData => {
-    const event = events[0];
-    if (!event) throw new Error('J_EVENT_EMPTY');
+  ): Promise<void> => {
+    if (events.length === 0) throw new Error('J_EVENT_EMPTY');
+    const replica = Array.from(env.eReplicas.values()).find((candidate) => candidate.entityId === entityId);
+    if (!replica) throw new Error('J_EVENT_REPLICA_MISSING');
     const jurisdictionRef = getJEventJurisdictionRef(jurisdiction);
     const eventsHash = canonicalJurisdictionEventsHash(events);
-    const signature = signAccountFrame(env, signerId, buildJEventObservationDigest({
-      entityId,
-      jurisdictionRef,
-      signerId,
-      blockNumber,
-      blockHash,
-      eventsHash,
-    }));
-    return {
-      from: signerId,
-      jurisdictionRef,
-      observedAt: blockNumber,
-      blockNumber,
-      blockHash,
-      transactionHash,
-      event,
-      events,
-      eventsHash,
-      signature,
+    const observeTx: Extract<RuntimeTx, { type: 'observeJRange' }> = {
+      type: 'observeJRange',
+      data: {
+        entityId,
+        signerId,
+        jurisdictionRef,
+        scannedThroughHeight: blockNumber,
+        tipBlockHash: blockHash,
+        blocks: [{ jurisdictionRef, jHeight: blockNumber, jBlockHash: blockHash, eventsHash, events }],
+      },
     };
+    const history = recordValidatorJHistory(replica.jHistory, observeTx.data);
+    const unsigned = buildUnsignedJEventRange(replica.state, history);
+    if (!unsigned) throw new Error('J_EVENT_RANGE_EMPTY');
+    const signature = signAccountFrame(env, signerId, buildJEventRangeDigest({ entityId, signerId, ...unsigned }));
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [observeTx],
+      entityInputs: [{
+        entityId,
+        signerId,
+        entityTxs: [{
+          type: 'j_event',
+          data: { from: signerId, observedAt: blockNumber, signature, ...unsigned },
+        }],
+      }],
+    });
+    await processRuntime(env, []);
   };
   env.jReplicas.set('default', {
     name: 'default',
@@ -133,21 +141,14 @@ async function main() {
   });
   await processRuntime(env, []);
 
-  await processRuntime(env, [{
-    entityId,
-    signerId,
-    entityTxs: [{
-      type: 'j_event',
-      data: buildSignedJEvent([{
+  await applySignedJEvent([{
           type: 'ReserveUpdated',
           data: {
             entity: entityId,
             tokenId: 1,
             newBalance: (1000n * 10n ** 18n).toString(),
           },
-        }], 1, '0x' + '4'.repeat(64), '0x' + '5'.repeat(64)),
-    }],
-  }]);
+        }], 1, '0x' + '4'.repeat(64));
 
   for (let nonce = 1; nonce <= 3; nonce++) {
     await processRuntime(env, [{
@@ -177,12 +178,7 @@ async function main() {
         newBalance: ((1000n - BigInt(nonce)) * 10n ** 18n).toString(),
       },
     };
-    await processRuntime(env, [{
-      entityId,
-      signerId,
-      entityTxs: [{
-        type: 'j_event',
-        data: buildSignedJEvent([
+    await applySignedJEvent([
             reserveUpdatedEvent,
             {
               type: 'HankoBatchProcessed',
@@ -193,9 +189,7 @@ async function main() {
                 success: true,
               },
             },
-          ], nonce + 1, `0x${String(nonce).padStart(64, '0')}`, `0x${String(nonce + 100).padStart(64, '0')}`),
-      }],
-    }]);
+          ], nonce + 1, `0x${String(nonce).padStart(64, '0')}`);
   }
 
   const replica = Array.from(env.eReplicas.values()).find((candidate) => candidate.entityId === entityId);

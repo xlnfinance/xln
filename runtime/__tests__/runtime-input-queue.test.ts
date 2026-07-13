@@ -23,7 +23,7 @@ test('runtime input queue debug diagnostics use structured logging', () => {
   expect(source).not.toContain('[enqueueRuntimeInput]');
 });
 
-test('enqueueRuntimeInputs primes clock and wakes loop for meaningful entity input', () => {
+test('enqueueRuntimeInputs timestamps work and wakes the loop', () => {
   const env = makeEnv();
   let wakeCount = 0;
 
@@ -52,5 +52,4 @@ test('enqueueRuntimeInputs primes clock and wakes loop for meaningful entity inp
   expect(env.runtimeMempool).toBe(env.runtimeInput);
   expect((env.runtimeInput as RuntimeInput).entityInputs).toHaveLength(1);
   expect(env.runtimeInput.queuedAt).toBe(1000);
-  expect(env.runtimeState?.clockPrimed).toBe(true);
 });

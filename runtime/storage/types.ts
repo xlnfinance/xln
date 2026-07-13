@@ -89,9 +89,7 @@ export type StorageEntityCoreDoc = {
   externalWallet?: EntityState['externalWallet'];
   deferredAccountProposals?: Map<string, true>;
   lastFinalizedJHeight: number;
-  jBlockObservations: EntityState['jBlockObservations'];
   jBlockChain: EntityState['jBlockChain'];
-  jHistoryCheckpoints?: EntityState['jHistoryCheckpoints'];
   jHistoryFinality?: EntityState['jHistoryFinality'];
   batchHistory?: EntityState['batchHistory'];
   accountInputQueue?: AccountInput[];

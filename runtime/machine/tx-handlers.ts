@@ -15,6 +15,8 @@ import {
   requireBoundEntityConfig,
 } from '../jurisdiction/jurisdiction-runtime';
 import { getJHistoryRegistrationBaseHeight } from '../jurisdiction/history-consensus';
+import { recordValidatorJHistory, rewindValidatorJHistory } from '../jurisdiction/local-history';
+import { getJEventJurisdictionRef } from '../jurisdiction/event-observation';
 import { announceLocalEntityProfile } from '../networking/gossip-helper';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import type { EntityReplica, Env, JReplica, RuntimeTx } from '../types';
@@ -49,8 +51,63 @@ export const applyRuntimeTx = async (
     importReplicaRuntimeTx(env, runtimeTx);
     return;
   }
+  if (runtimeTx.type === 'observeJRange') {
+    observeJRangeRuntimeTx(env, runtimeTx);
+    return;
+  }
+  if (runtimeTx.type === 'rewindJHistory') {
+    rewindJHistoryRuntimeTx(env, runtimeTx);
+    return;
+  }
   const exhaustive: never = runtimeTx;
   throw new Error(`RUNTIME_TX_UNKNOWN: ${(exhaustive as { type?: string }).type ?? 'unknown'}`);
+};
+
+const rewindJHistoryRuntimeTx = (
+  env: Env,
+  runtimeTx: Extract<RuntimeTx, { type: 'rewindJHistory' }>,
+): void => {
+  const entityId = String(runtimeTx.data.entityId || '').trim().toLowerCase();
+  const signerId = String(runtimeTx.data.signerId || '').trim().toLowerCase();
+  const match = findExistingReplicaCaseInsensitive(env, entityId, signerId);
+  if (!match) throw new Error(`J_HISTORY_LOCAL_REPLICA_MISSING:${entityId}:${signerId}`);
+  const jurisdictionRef = String(runtimeTx.data.jurisdictionRef || '').trim().toLowerCase();
+  if (String(match.replica.jHistory?.jurisdictionRef || '').trim().toLowerCase() !== jurisdictionRef) {
+    throw new Error(`J_HISTORY_REWIND_JURISDICTION_MISMATCH:${entityId}:${signerId}`);
+  }
+  if (runtimeTx.data.conflictingHeight <= match.replica.state.lastFinalizedJHeight) {
+    throw new Error(`J_HISTORY_FINALIZED_REORG:${runtimeTx.data.conflictingHeight}`);
+  }
+  const rewound = rewindValidatorJHistory(match.replica.state, match.replica.jHistory);
+  if (rewound) match.replica.jHistory = rewound;
+  else delete match.replica.jHistory;
+  markStorageEntityDirty(env, entityId);
+};
+
+const observeJRangeRuntimeTx = (
+  env: Env,
+  runtimeTx: Extract<RuntimeTx, { type: 'observeJRange' }>,
+): void => {
+  const entityId = String(runtimeTx.data.entityId || '').trim().toLowerCase();
+  const signerId = String(runtimeTx.data.signerId || '').trim().toLowerCase();
+  const match = findExistingReplicaCaseInsensitive(env, entityId, signerId);
+  if (!match) throw new Error(`J_HISTORY_LOCAL_REPLICA_MISSING:${entityId}:${signerId}`);
+  const expectedJurisdictionRef = getJEventJurisdictionRef(match.replica.state.config.jurisdiction);
+  const observedJurisdictionRef = String(runtimeTx.data.jurisdictionRef || '').trim().toLowerCase();
+  if (observedJurisdictionRef !== expectedJurisdictionRef) {
+    throw new Error(
+      `J_HISTORY_OBSERVATION_JURISDICTION_MISMATCH:${entityId}:${signerId}` +
+      `:expected=${expectedJurisdictionRef}:observed=${observedJurisdictionRef || 'missing'}`,
+    );
+  }
+  match.replica.jHistory = recordValidatorJHistory(match.replica.jHistory, {
+    jurisdictionRef: runtimeTx.data.jurisdictionRef,
+    scannedThroughHeight: runtimeTx.data.scannedThroughHeight,
+    tipBlockHash: runtimeTx.data.tipBlockHash,
+    ...(runtimeTx.data.headers ? { headers: runtimeTx.data.headers } : {}),
+    blocks: runtimeTx.data.blocks,
+  });
+  markStorageEntityDirty(env, entityId);
 };
 
 const importJurisdictionRuntimeTx = async (
@@ -234,8 +291,6 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): vo
     if (
       existingReplica.state.lastFinalizedJHeight === 0 &&
       existingReplica.state.jBlockChain.length === 0 &&
-      existingReplica.state.jBlockObservations.length === 0 &&
-      (existingReplica.state.jHistoryCheckpoints?.length ?? 0) === 0 &&
       !existingReplica.state.jHistoryFinality
     ) {
       existingReplica.state.lastFinalizedJHeight = getJHistoryRegistrationBaseHeight(config.jurisdiction);
@@ -274,7 +329,6 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): vo
       accounts: new Map(),
       deferredAccountProposals: new Map(),
       lastFinalizedJHeight: getJHistoryRegistrationBaseHeight(config.jurisdiction),
-      jBlockObservations: [],
       jBlockChain: [],
       entityEncPubKey: replicaKeys.publicKey,
       entityEncPrivKey: replicaKeys.privateKey,

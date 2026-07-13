@@ -79,8 +79,13 @@ export const keyLiveBook = (entityId: string, pairId: string): Buffer =>
 export const keyLiveBookPrefix = (entityId?: string): Buffer =>
   entityId ? Buffer.concat([Buffer.from([KEY_LIVE_BOOK]), hexBytes(entityId)]) : Buffer.from([KEY_LIVE_BOOK]);
 
-export const keyLiveReplicaMeta = (entityId: string): Buffer =>
-  Buffer.concat([Buffer.from([KEY_LIVE_REPLICA_META]), hexBytes(entityId)]);
+export const keyLiveReplicaMetaPrefix = (entityId?: string): Buffer =>
+  entityId
+    ? Buffer.concat([Buffer.from([KEY_LIVE_REPLICA_META]), hexBytes(entityId)])
+    : Buffer.from([KEY_LIVE_REPLICA_META]);
+
+export const keyLiveReplicaMeta = (entityId: string, signerId: string): Buffer =>
+  Buffer.concat([keyLiveReplicaMetaPrefix(entityId), hexBytes(signerId)]);
 
 export type StorageMerkleNamespace =
   | 'runtime-roots'

@@ -96,6 +96,7 @@ export {
   listStorageLiveEntityIds,
   listStorageSnapshotEntityIds,
   listStorageSnapshotHeights,
+  listStorageReplicaMetas,
   loadEntityAccountDocFromStorage,
   loadEntityStateFromStorage,
   loadEntityViewPageFromStorage,
@@ -514,7 +515,9 @@ export const saveRuntimeFrameToStorage = async (options: {
     if (!replica?.state) continue;
     const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || '');
     if (!entityId) continue;
-    batch.put(keyLiveReplicaMeta(entityId), encodeBuffer(projectReplicaMeta(replica)));
+    const signerId = normalizeEntityId(replica.signerId || '');
+    if (!signerId) throw new Error(`STORAGE_REPLICA_SIGNER_MISSING:${entityId}`);
+    batch.put(keyLiveReplicaMeta(entityId, signerId), encodeBuffer(projectReplicaMeta(replica)));
   }
 
   const nextHead: StorageHead = {

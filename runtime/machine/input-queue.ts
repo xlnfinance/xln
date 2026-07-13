@@ -10,16 +10,6 @@ export type RuntimeInputQueueDeps = {
   requestRuntimeLoopWake: (env: Env) => void;
 };
 
-const hasMeaningfulEnqueuedWork = (inputs?: EntityInput[], runtimeTxs?: RuntimeTx[]): boolean => {
-  if ((runtimeTxs?.length ?? 0) > 0) return true;
-  return (inputs ?? []).some((input) => {
-    const hasEntityTxs = (input.entityTxs?.length ?? 0) > 0;
-    const hasProposal = !!input.proposedFrame;
-    const hasHashPrecommits = !!input.hashPrecommits && input.hashPrecommits.size > 0;
-    return hasEntityTxs || hasProposal || hasHashPrecommits || !!input.leaderTimeoutVote;
-  });
-};
-
 const shouldLogRuntimeInputDebug = (): boolean => {
   const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
   return env?.['XLN_RUNTIME_INPUT_DEBUG'] === '1';
@@ -60,7 +50,7 @@ export const enqueueRuntimeInputs = (
   explicitTimestamp?: number,
 ): void => {
   const mempool = ensureRuntimeMempool(env);
-  const runtimeState = deps.ensureRuntimeState(env);
+  deps.ensureRuntimeState(env);
   const normalizedTimestamp = normalizeIngressTimestamp(env, explicitTimestamp);
   if (runtimeTxs && runtimeTxs.length > 0) {
     mempool.runtimeTxs.push(...runtimeTxs);
@@ -95,9 +85,6 @@ export const enqueueRuntimeInputs = (
       mempool.queuedAt === undefined
         ? targetQueuedAt
         : Math.max(mempool.queuedAt, targetQueuedAt);
-    if (hasMeaningfulEnqueuedWork(inputs, runtimeTxs) || (jInputs?.length ?? 0) > 0) {
-      runtimeState.clockPrimed = true;
-    }
     deps.requestRuntimeLoopWake(env);
   }
 };

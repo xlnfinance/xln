@@ -85,7 +85,6 @@ const makeState = (book: BookState, offerId = 'offer-1', offer = makeOffer()): E
     reserves: new Map(),
     accounts: new Map([['alice', makeAccount(offerId, offer)]]),
     lastFinalizedJHeight: 0,
-    jBlockObservations: [],
     jBlockChain: [],
     entityEncPubKey: '',
     entityEncPrivKey: '',

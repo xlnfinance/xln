@@ -188,9 +188,14 @@ export function validateEntityInput(input: unknown): RoutedEntityInput {
     );
   }
 
-  // entityTxs optional if proposedFrame or hashPrecommits present (multi-signer proposals)
-  if (obj['entityTxs'] === undefined && obj['proposedFrame'] === undefined && obj['hashPrecommits'] === undefined) {
-    throw new Error(`FINANCIAL-SAFETY: entityTxs, proposedFrame, or hashPrecommits required`);
+  // entityTxs are optional for consensus protocol messages.
+  if (
+    obj['entityTxs'] === undefined &&
+    obj['proposedFrame'] === undefined &&
+    obj['hashPrecommits'] === undefined &&
+    obj['leaderTimeoutVote'] === undefined
+  ) {
+    throw new Error(`FINANCIAL-SAFETY: entityTxs, proposedFrame, hashPrecommits, or leaderTimeoutVote required`);
   }
 
   if (obj['entityTxs'] !== undefined && !Array.isArray(obj['entityTxs'])) {

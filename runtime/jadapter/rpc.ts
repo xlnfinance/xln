@@ -47,9 +47,12 @@ import {
 } from './helpers';
 import { CANONICAL_J_EVENTS } from './helpers';
 import {
-  enqueueJHistoryCheckpoint,
+  applyJBlockHeadersIngressTransform,
+  enqueueJHistoryRewind,
+  enqueueJHistoryRange,
+  findWatcherJurisdictionReplica,
   getWatcherStartBlock,
-  hasJHistoryLivenessCheckpointDue,
+  isEntityReplicaRelevantToWatcher,
   processEventBatch,
   rememberPendingWatcherJBlock,
   resolveCommittedWatcherCursor,
@@ -59,6 +62,7 @@ import {
   type RawJEvent,
   type RawJEventArgs,
 } from './watcher';
+import { getValidatorJExpectedBlockHash } from '../jurisdiction/local-history';
 import { DEV_CHAIN_IDS } from './index';
 import { decodeJBatch, getBatchSize, isBatchEmpty, preflightBatchForE2 } from '../jurisdiction/batch';
 import { requireUsableContractAddress } from '../jurisdiction/contract-address';
@@ -491,6 +495,44 @@ export async function createRpcAdapter(
     if (config.chainId === 1) return 12;
     if (isTronChainId(config.chainId)) return TRON_FINALITY_DEPTH;
     return 2;
+  };
+
+  const readBlockHeadersAtHeights = async (
+    heights: number[],
+  ): Promise<Array<{ jHeight: number; jBlockHash: string }>> => {
+    const rpcUrl = String(config.rpcUrl || '').trim();
+    if (!rpcUrl) throw new Error('J_HISTORY_HEADER_RPC_URL_MISSING');
+    const canonicalHeights = [...new Set(heights)].sort((left, right) => left - right);
+    const requests: RpcBatchRequest[] = canonicalHeights.map((jHeight) => ({
+        id: jHeight,
+        jsonrpc: '2.0',
+        method: 'eth_getBlockByNumber',
+        params: [ethers.toQuantity(jHeight), false],
+      }));
+    const responses = await sendRpcBatch(rpcUrl, requests);
+    const headers = requests.map(({ id }) => {
+      const response = responses.get(id);
+      const block = response?.result && typeof response.result === 'object'
+        ? response.result as { hash?: unknown; number?: unknown }
+        : null;
+      const hash = String(block?.hash || '').trim().toLowerCase();
+      if (response?.error || !hash) {
+        throw new Error(
+          `J_HISTORY_HEADER_MISSING:height=${id} error=${String(response?.error?.message || 'none')}`,
+        );
+      }
+      return { jHeight: id, jBlockHash: hash };
+    });
+    return applyJBlockHeadersIngressTransform(headers);
+  };
+
+  const readFinalizedBlockHeaders = async (
+    fromBlock: number,
+    toBlock: number,
+  ): Promise<Array<{ jHeight: number; jBlockHash: string }>> => {
+    const heights: number[] = [];
+    for (let height = fromBlock; height <= toBlock; height += 1) heights.push(height);
+    return readBlockHeadersAtHeights(heights);
   };
 
   // Serialize batch submissions per signer EOA to avoid nonce races across concurrent entity batches.
@@ -1920,10 +1962,11 @@ export async function createRpcAdapter(
       txCounter.value = 0;
       txCounter._seenLogs = { set: new Set<string>(), order: [] as string[] };
       const pendingWatcherJBlocks: PendingWatcherJBlockMap = new Map();
+      let reorgRewindPendingReplicaKeys: string[] = [];
       const watchPollMs = BLOCKCHAIN.J_WATCHER_POLL_INTERVAL_MS;
       const manualPolling = env.scenarioMode === true;
       const confirmationDepth = resolveFinalityDepth(!!env?.scenarioMode);
-      const startBlock = getWatcherStartBlock(env, addresses.depository);
+      const startBlock = getWatcherStartBlock(env, addresses.depository, config.chainId);
       lastSyncedBlock = Math.max(0, startBlock - 1);
       rpcLog.info('watcher.start', {
         chainId: config.chainId,
@@ -2147,7 +2190,7 @@ export async function createRpcAdapter(
         }
       };
       const readCommittedWatcherCursor = (activeEnv: Env): number =>
-        Math.max(0, getWatcherStartBlock(activeEnv, addresses.depository) - 1);
+        Math.max(0, getWatcherStartBlock(activeEnv, addresses.depository, config.chainId) - 1);
       const commitScannedWatcherCursor = (activeEnv: Env, candidateCursor: number): number => {
         const currentCursor = readCommittedWatcherCursor(activeEnv);
         const resolvedCursor = resolveCommittedWatcherCursor(
@@ -2157,9 +2200,100 @@ export async function createRpcAdapter(
           currentCursor,
         );
         if (resolvedCursor > currentCursor) {
-          updateWatcherJurisdictionCursor(activeEnv, resolvedCursor, addresses.depository);
+          updateWatcherJurisdictionCursor(activeEnv, resolvedCursor, addresses.depository, config.chainId);
         }
         return resolvedCursor;
+      };
+      const reconcileWatcherCanonicalTip = async (activeEnv: Env): Promise<boolean> => {
+        if (reorgRewindPendingReplicaKeys.length > 0) {
+          const stillPending = reorgRewindPendingReplicaKeys.some((replicaKey) => {
+            const replica = activeEnv.eReplicas.get(replicaKey);
+            return replica?.jHistory &&
+              replica.jHistory.scannedThroughHeight > replica.state.lastFinalizedJHeight;
+          });
+          if (stillPending) return true;
+          reorgRewindPendingReplicaKeys = [];
+        }
+        if (lastSyncedBlock <= 0) return false;
+        const watcherReplica = findWatcherJurisdictionReplica(activeEnv, addresses.depository, config.chainId);
+        if (!watcherReplica) return false;
+        const relevantReplicas = [...activeEnv.eReplicas.values()]
+          .filter((replica) => isEntityReplicaRelevantToWatcher(activeEnv, replica, watcherReplica));
+        if (relevantReplicas.length === 0) return false;
+
+        const expectedTipHashes = new Set(
+          relevantReplicas
+            .map((replica) => getValidatorJExpectedBlockHash(replica.state, replica.jHistory, lastSyncedBlock))
+            .filter((hash): hash is string => Boolean(hash)),
+        );
+        if (expectedTipHashes.size === 0) return false;
+        if (expectedTipHashes.size !== 1) {
+          throw new Error(`J_HISTORY_LOCAL_TIP_DIVERGENCE:height=${lastSyncedBlock}`);
+        }
+        const canonicalTip = (await readBlockHeadersAtHeights([lastSyncedBlock]))[0];
+        if (!canonicalTip) throw new Error(`J_HISTORY_HEADER_MISSING:height=${lastSyncedBlock}`);
+        const expectedTipHash = [...expectedTipHashes][0]!;
+        if (canonicalTip.jBlockHash === expectedTipHash) return false;
+
+        const finalizedAnchors = new Map<number, string>();
+        for (const replica of relevantReplicas) {
+          const height = Number(replica.state.lastFinalizedJHeight || 0);
+          if (height <= 0) continue;
+          const hash = getValidatorJExpectedBlockHash(replica.state, replica.jHistory, height);
+          if (!hash) continue;
+          const existing = finalizedAnchors.get(height);
+          if (existing && existing !== hash) {
+            throw new Error(`J_HISTORY_FINALIZED_ANCHOR_DIVERGENCE:height=${height}`);
+          }
+          finalizedAnchors.set(height, hash);
+        }
+        const canonicalAnchors = await readBlockHeadersAtHeights([...finalizedAnchors.keys()]);
+        for (const anchor of canonicalAnchors) {
+          const expectedAnchorHash = finalizedAnchors.get(anchor.jHeight);
+          if (expectedAnchorHash !== anchor.jBlockHash) {
+            const owners = relevantReplicas
+              .filter((replica) => Number(replica.state.lastFinalizedJHeight || 0) === anchor.jHeight)
+              .map((replica) => {
+                const entityId = String(replica.entityId || replica.state.entityId || '').slice(0, 10);
+                const jurisdiction = replica.state.config.jurisdiction;
+                return `${entityId}/${String(jurisdiction?.name || 'unnamed')}/${String(jurisdiction?.chainId ?? 'missing')}`;
+              })
+              .join(',');
+            throw new Error(
+              `J_HISTORY_FINALIZED_REORG:${anchor.jHeight}` +
+              `:chain=${config.chainId}` +
+              `:owners=${owners || 'unknown'}` +
+              `:expected=${expectedAnchorHash || 'missing'}` +
+              `:canonical=${anchor.jBlockHash}`,
+            );
+          }
+        }
+
+        reorgRewindPendingReplicaKeys = enqueueJHistoryRewind(
+          activeEnv,
+          lastSyncedBlock,
+          canonicalTip.jBlockHash,
+          addresses.depository,
+          config.chainId,
+        );
+        if (reorgRewindPendingReplicaKeys.length === 0) {
+          throw new Error(`J_HISTORY_REORG_WITHOUT_REWINDABLE_SUFFIX:${lastSyncedBlock}`);
+        }
+        pendingWatcherJBlocks.clear();
+        txCounter._seenLogs = { set: new Set<string>(), order: [] };
+        lastSyncedBlock = Math.max(
+          0,
+          Math.min(...relevantReplicas.map((replica) => Number(replica.state.lastFinalizedJHeight || 0))),
+        );
+        emitWatcherDebug({
+          event: 'j_watch_reorg_rewind_enqueued',
+          conflictingHeight: canonicalTip.jHeight,
+          expectedBlockHash: expectedTipHash,
+          canonicalBlockHash: canonicalTip.jBlockHash,
+          rewindToHeight: lastSyncedBlock,
+          replicaCount: reorgRewindPendingReplicaKeys.length,
+        });
+        return true;
       };
       const isJEventIngressPaused = (activeEnv: Env): boolean =>
         !!activeEnv.runtimeState?.persistenceQuiescing && !activeEnv.scenarioMode;
@@ -2200,6 +2334,8 @@ export async function createRpcAdapter(
           if (watcherPollCancelled()) return;
           const safeToBlock = currentBlock - confirmationDepth;
           if (safeToBlock <= 0) return;
+          pollStep = `verifyCanonicalTip:${lastSyncedBlock}`;
+          if (await reconcileWatcherCanonicalTip(activeEnv)) return;
           commitScannedWatcherCursor(activeEnv, lastSyncedBlock);
           if (lastSyncedBlock >= safeToBlock) return;
 
@@ -2241,7 +2377,11 @@ export async function createRpcAdapter(
                 const parsed = kind === 'depository'
                   ? depositoryIface.parseLog({ topics: log.topics as string[], data: log.data })
                   : erc20WatchIface.parseLog({ topics: log.topics as string[], data: log.data });
-                if (!parsed) continue;
+                if (!parsed) {
+                  throw new Error(
+                    `unrecognized ${kind} log at block=${String(log.blockNumber)} index=${String(log.index)}`,
+                  );
+                }
                 if (kind === 'erc20') {
                   const tokenAddress = normalizeEvmAddress(log.address);
                   const token = tokenByAddress.get(tokenAddress);
@@ -2327,8 +2467,12 @@ export async function createRpcAdapter(
                   logIndex: log.index,
                   ...(disputeFinalizationEvidence ? { disputeFinalizationEvidence } : {}),
                 });
-              } catch {
-                // Skip unparseable logs
+              } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                throw new Error(
+                  `J_EVENT_LOG_DECODE_FAILED:block=${String(log.blockNumber)} ` +
+                  `tx=${String(log.transactionHash || 'unknown')} index=${String(log.index)}: ${message}`,
+                );
               }
             }
 
@@ -2380,20 +2524,24 @@ export async function createRpcAdapter(
                   addresses.depository,
                   true,
                   'chain',
+                  config.chainId,
                 );
                 if (builtInput) observedInputs.push(builtInput);
               }
-              pollStep = `eth_getBlockByNumber:${toBlock}`;
-              const checkpointTip = await provider.getBlock(toBlock);
-              if (!checkpointTip?.hash) throw new Error(`J_HISTORY_CHECKPOINT_TIP_UNAVAILABLE:${toBlock}`);
-              const checkpointReplicaKeys = enqueueJHistoryCheckpoint(
+              pollStep = `eth_getBlockHeaders:${fromBlock}-${toBlock}`;
+              const headers = await readFinalizedBlockHeaders(fromBlock, toBlock);
+              const rangeTipHash = headers[headers.length - 1]?.jBlockHash;
+              if (!rangeTipHash) throw new Error(`J_HISTORY_RANGE_TIP_UNAVAILABLE:${toBlock}`);
+              const rangeReplicaKeys = enqueueJHistoryRange(
                 activeEnv,
                 observedInputs,
                 toBlock,
-                checkpointTip.hash,
+                rangeTipHash,
                 addresses.depository,
+                headers,
+                config.chainId,
               );
-              rememberPendingWatcherJBlock(pendingWatcherJBlocks, toBlock, checkpointReplicaKeys);
+              rememberPendingWatcherJBlock(pendingWatcherJBlocks, toBlock, rangeReplicaKeys);
 
               emitWatcherDebug({
                 event: 'j_watch_batch',
@@ -2422,19 +2570,20 @@ export async function createRpcAdapter(
             return;
           }
 
-          if (hasJHistoryLivenessCheckpointDue(activeEnv, toBlock, addresses.depository)) {
-            pollStep = `eth_getBlockByNumber:${toBlock}`;
-            const checkpointTip = await provider.getBlock(toBlock);
-            if (!checkpointTip?.hash) throw new Error(`J_HISTORY_CHECKPOINT_TIP_UNAVAILABLE:${toBlock}`);
-            const checkpointReplicaKeys = enqueueJHistoryCheckpoint(
-              activeEnv,
-              [],
-              toBlock,
-              checkpointTip.hash,
-              addresses.depository,
-            );
-            rememberPendingWatcherJBlock(pendingWatcherJBlocks, toBlock, checkpointReplicaKeys);
-          }
+          pollStep = `eth_getBlockHeaders:${fromBlock}-${toBlock}`;
+          const headers = await readFinalizedBlockHeaders(fromBlock, toBlock);
+          const rangeTipHash = headers[headers.length - 1]?.jBlockHash;
+          if (!rangeTipHash) throw new Error(`J_HISTORY_RANGE_TIP_UNAVAILABLE:${toBlock}`);
+          const rangeReplicaKeys = enqueueJHistoryRange(
+            activeEnv,
+            [],
+            toBlock,
+            rangeTipHash,
+            addresses.depository,
+            headers,
+            config.chainId,
+          );
+          rememberPendingWatcherJBlock(pendingWatcherJBlocks, toBlock, rangeReplicaKeys);
 
           lastSyncedBlock = toBlock;
           consecutiveTransientWatcherFailures = 0;

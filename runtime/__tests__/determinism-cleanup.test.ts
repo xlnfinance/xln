@@ -59,8 +59,9 @@ describe('determinism cleanup lifecycle', () => {
   test('determinism oracle replays external J inputs without masking consensus evidence', () => {
     const source = readSource('runtime/scenarios/determinism-test.ts');
     expect(source).toContain('createJEventTraceTransform(jEventTraceMode, jEventTrace)');
-    expect(source).toContain('createJHistoryCheckpointTraceTransform(jEventTraceMode, jEventTrace)');
-    expect(source).toContain('return cloneJHistoryCheckpointIngress(expected);');
+    expect(source).toContain('createJBlockHeadersTraceTransform(jEventTraceMode, jEventTrace)');
+    expect(source).toContain('createJHistoryRangeTraceTransform(jEventTraceMode, jEventTrace)');
+    expect(source).toContain('return cloneJHistoryRangeIngress(expected);');
     expect(source).not.toContain("'<external-block-hash>'");
     expect(source).not.toContain("'<external-j-event-signature>'");
     expect(source).toContain('logs: snapshot.logs ?? [],');

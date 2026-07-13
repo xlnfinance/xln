@@ -1,11 +1,11 @@
 import { ethers } from 'ethers';
-import type { JBlockObservation } from '../types';
-import { compareStableText } from '../protocol/serialization';
+import type { JurisdictionEventBlock, ValidatorJEventBlock } from '../types';
 
 const HISTORY_EMPTY_DOMAIN = 'xln:j-history-empty:v1';
 const HISTORY_LEAF_DOMAIN = 'xln:j-history-event-block:v1';
 const HISTORY_FOLD_DOMAIN = 'xln:j-history-fold:v1';
-const HISTORY_CHECKPOINT_DOMAIN = 'xln:j-history-checkpoint:v1';
+const HISTORY_RANGE_DOMAIN = 'xln:j-history-range:v1';
+const HISTORY_RANGE_BODY_DOMAIN = 'xln:j-history-range-body:v1';
 
 export const EMPTY_J_HISTORY_ROOT = ethers.keccak256(ethers.toUtf8Bytes(HISTORY_EMPTY_DOMAIN));
 
@@ -31,18 +31,10 @@ const normalizeHeight = (value: unknown, label: string): number => {
   return height;
 };
 
-export type JHistoryCheckpointDigestInput = {
-  entityId: string;
-  jurisdictionRef: string;
-  signerId: string;
-  baseHeight: number;
-  scannedThroughHeight: number;
-  tipBlockHash: string;
-  eventHistoryRoot: string;
-};
+type JHistoryBlockIdentity = Pick<ValidatorJEventBlock, 'jurisdictionRef' | 'jHeight' | 'jBlockHash' | 'eventsHash'>;
 
 export const canonicalJHistoryObservationLeaf = (
-  observation: Pick<JBlockObservation, 'jurisdictionRef' | 'jHeight' | 'jBlockHash' | 'eventsHash'>,
+  observation: JHistoryBlockIdentity,
 ): string => ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
   ['bytes32', 'bytes32', 'uint64', 'bytes32', 'bytes32'],
   [
@@ -54,21 +46,14 @@ export const canonicalJHistoryObservationLeaf = (
   ],
 ));
 
-const observationKey = (
-  observation: Pick<JBlockObservation, 'jHeight' | 'jBlockHash' | 'eventsHash'>,
-): string => [
-  normalizeHeight(observation.jHeight, 'OBSERVATION_HEIGHT').toString().padStart(16, '0'),
-  String(observation.jBlockHash || '').toLowerCase(),
-  String(observation.eventsHash || '').toLowerCase(),
-].join(':');
-
 export const foldJHistoryRoot = (
   baseRoot: string,
-  observations: ReadonlyArray<Pick<JBlockObservation, 'jurisdictionRef' | 'jHeight' | 'jBlockHash' | 'eventsHash'>>,
+  observations: ReadonlyArray<JHistoryBlockIdentity>,
 ): string => {
   let root = normalizeRoot(baseRoot, 'BASE_ROOT');
   const byHeight = new Map<number, string>();
-  const ordered = [...observations].sort((left, right) => compareStableText(observationKey(left), observationKey(right)));
+  const ordered = [...observations].sort((left, right) =>
+    normalizeHeight(left.jHeight, 'OBSERVATION_HEIGHT') - normalizeHeight(right.jHeight, 'OBSERVATION_HEIGHT'));
 
   for (const observation of ordered) {
     const height = normalizeHeight(observation.jHeight, 'OBSERVATION_HEIGHT');
@@ -85,16 +70,65 @@ export const foldJHistoryRoot = (
   return root;
 };
 
-export const buildJHistoryCheckpointDigest = (input: JHistoryCheckpointDigestInput): string => {
+const normalizeRangeBlocks = (
+  jurisdictionRef: string,
+  blocks: readonly JurisdictionEventBlock[],
+): JHistoryBlockIdentity[] => {
+  let previousHeight = -1;
+  return blocks.map((block) => {
+    const jHeight = normalizeHeight(block.blockNumber, 'RANGE_BLOCK_HEIGHT');
+    if (jHeight <= previousHeight) throw new Error('J_HISTORY_RANGE_BLOCK_ORDER_INVALID');
+    previousHeight = jHeight;
+    return {
+      jurisdictionRef,
+      jHeight,
+      jBlockHash: String(block.blockHash || '').trim().toLowerCase(),
+      eventsHash: normalizeRoot(block.eventsHash, 'RANGE_EVENTS_ROOT'),
+    };
+  });
+};
+
+export const canonicalJEventRangeHash = (
+  jurisdictionRef: string,
+  blocks: readonly JurisdictionEventBlock[],
+): string => {
+  const identities = normalizeRangeBlocks(jurisdictionRef, blocks);
+  const evidenceHashes = blocks.map((block) => {
+    const evidenceHash = String(block.disputeFinalizationEvidenceHash || '').trim().toLowerCase();
+    return evidenceHash ? normalizeRoot(evidenceHash, 'RANGE_EVIDENCE_ROOT') : ethers.ZeroHash;
+  });
+  return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+    ['bytes32', 'uint64[]', 'bytes32[]', 'bytes32[]', 'bytes32[]'],
+    [
+      textHash(HISTORY_RANGE_BODY_DOMAIN),
+      identities.map((block) => block.jHeight),
+      identities.map((block) => textHash(block.jBlockHash)),
+      identities.map((block) => block.eventsHash),
+      evidenceHashes,
+    ],
+  ));
+};
+
+export type JEventRangeDigestInput = {
+  entityId: string;
+  jurisdictionRef: string;
+  signerId: string;
+  baseHeight: number;
+  scannedThroughHeight: number;
+  tipBlockHash: string;
+  eventHistoryRoot: string;
+  rangeHash: string;
+};
+
+export const buildJEventRangeDigest = (input: JEventRangeDigestInput): string => {
   const baseHeight = normalizeHeight(input.baseHeight, 'BASE_HEIGHT');
   const scannedThroughHeight = normalizeHeight(input.scannedThroughHeight, 'SCANNED_HEIGHT');
-  if (scannedThroughHeight <= baseHeight) throw new Error('J_HISTORY_CHECKPOINT_EMPTY_RANGE');
-  if (!String(input.tipBlockHash || '').trim()) throw new Error('J_HISTORY_CHECKPOINT_TIP_HASH_MISSING');
-
+  if (scannedThroughHeight <= baseHeight) throw new Error('J_HISTORY_RANGE_EMPTY');
+  if (!String(input.tipBlockHash || '').trim()) throw new Error('J_HISTORY_RANGE_TIP_HASH_MISSING');
   return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-    ['bytes32', 'bytes32', 'bytes32', 'bytes32', 'uint64', 'uint64', 'bytes32', 'bytes32'],
+    ['bytes32', 'bytes32', 'bytes32', 'bytes32', 'uint64', 'uint64', 'bytes32', 'bytes32', 'bytes32'],
     [
-      textHash(HISTORY_CHECKPOINT_DOMAIN),
+      textHash(HISTORY_RANGE_DOMAIN),
       textHash(input.entityId),
       textHash(input.jurisdictionRef),
       textHash(input.signerId),
@@ -102,6 +136,7 @@ export const buildJHistoryCheckpointDigest = (input: JHistoryCheckpointDigestInp
       scannedThroughHeight,
       textHash(input.tipBlockHash),
       normalizeRoot(input.eventHistoryRoot, 'EVENT_HISTORY_ROOT'),
+      normalizeRoot(input.rangeHash, 'RANGE_ROOT'),
     ],
   ));
 };

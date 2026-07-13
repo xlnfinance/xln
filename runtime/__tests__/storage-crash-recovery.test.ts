@@ -89,7 +89,6 @@ const entityDoc = (height: number): StorageEntityCoreDoc => ({
   config: { validators: [entityId] } as StorageEntityCoreDoc['config'],
   reserves: new Map([[1, BigInt(height)]]),
   lastFinalizedJHeight: 0,
-  jBlockObservations: [],
   jBlockChain: [],
   entityEncPubKey: '',
   entityEncPrivKey: '',

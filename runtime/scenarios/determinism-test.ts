@@ -20,10 +20,12 @@ import {
   type AccountStateRootDebugRecord,
 } from '../account/state-root';
 import {
+  setJBlockHeadersIngressTransform,
   setJEventIngressTransform,
-  setJHistoryCheckpointIngressTransform,
+  setJHistoryRangeIngressTransform,
+  type JBlockHeadersIngress,
   type JEventIngressBatch,
-  type JHistoryCheckpointIngress,
+  type JHistoryRangeIngress,
   type RawJEvent,
 } from '../jadapter/watcher';
 
@@ -68,8 +70,10 @@ type JEventTraceMode = 'record' | 'replay';
 type JEventTrace = {
   batches: JEventIngressBatch[];
   cursor: number;
-  checkpoints: JHistoryCheckpointIngress[];
-  checkpointCursor: number;
+  headerReads: JBlockHeadersIngress[];
+  headerCursor: number;
+  ranges: JHistoryRangeIngress[];
+  rangeCursor: number;
 };
 
 const cloneJEventTraceValue = (value: unknown): unknown => {
@@ -92,9 +96,13 @@ const cloneJEventTraceValue = (value: unknown): unknown => {
 const cloneJEventIngressBatch = (batch: JEventIngressBatch): JEventIngressBatch =>
   cloneJEventTraceValue(batch) as JEventIngressBatch;
 
-const cloneJHistoryCheckpointIngress = (
-  checkpoint: JHistoryCheckpointIngress,
-): JHistoryCheckpointIngress => cloneJEventTraceValue(checkpoint) as JHistoryCheckpointIngress;
+const cloneJHistoryRangeIngress = (
+  range: JHistoryRangeIngress,
+): JHistoryRangeIngress => cloneJEventTraceValue(range) as JHistoryRangeIngress;
+
+const cloneJBlockHeadersIngress = (
+  headers: JBlockHeadersIngress,
+): JBlockHeadersIngress => cloneJEventTraceValue(headers) as JBlockHeadersIngress;
 
 const jEventSemanticProjection = (events: RawJEvent[]): unknown => toDebugTraceValue(
   events.map((event) => ({
@@ -132,27 +140,50 @@ const createJEventTraceTransform = (
   return cloneJEventIngressBatch(expected);
 };
 
-const createJHistoryCheckpointTraceTransform = (
+const createJHistoryRangeTraceTransform = (
   mode: JEventTraceMode,
   trace: JEventTrace,
-): ((checkpoint: JHistoryCheckpointIngress) => JHistoryCheckpointIngress) => (checkpoint) => {
+): ((range: JHistoryRangeIngress) => JHistoryRangeIngress) => (range) => {
   if (mode === 'record') {
-    trace.checkpoints.push(cloneJHistoryCheckpointIngress(checkpoint));
-    return checkpoint;
+    trace.ranges.push(cloneJHistoryRangeIngress(range));
+    return range;
   }
 
-  const expected = trace.checkpoints[trace.checkpointCursor];
+  const expected = trace.ranges[trace.rangeCursor];
   if (!expected) {
-    throw new Error(`J_CHECKPOINT_TRACE_UNEXPECTED:index=${trace.checkpointCursor}`);
+    throw new Error(`J_RANGE_TRACE_UNEXPECTED:index=${trace.rangeCursor}`);
   }
-  if (checkpoint.scannedThroughHeight !== expected.scannedThroughHeight) {
+  if (range.scannedThroughHeight !== expected.scannedThroughHeight) {
     throw new Error(
-      `J_CHECKPOINT_TRACE_HEIGHT_MISMATCH:index=${trace.checkpointCursor} ` +
-      `expected=${expected.scannedThroughHeight} actual=${checkpoint.scannedThroughHeight}`,
+      `J_RANGE_TRACE_HEIGHT_MISMATCH:index=${trace.rangeCursor} ` +
+      `expected=${expected.scannedThroughHeight} actual=${range.scannedThroughHeight}`,
     );
   }
-  trace.checkpointCursor += 1;
-  return cloneJHistoryCheckpointIngress(expected);
+  trace.rangeCursor += 1;
+  return cloneJHistoryRangeIngress(expected);
+};
+
+const createJBlockHeadersTraceTransform = (
+  mode: JEventTraceMode,
+  trace: JEventTrace,
+): ((headers: JBlockHeadersIngress) => JBlockHeadersIngress) => (headers) => {
+  if (mode === 'record') {
+    trace.headerReads.push(cloneJBlockHeadersIngress(headers));
+    return headers;
+  }
+  const expected = trace.headerReads[trace.headerCursor];
+  if (!expected) throw new Error(`J_HEADER_TRACE_UNEXPECTED:index=${trace.headerCursor}`);
+  const expectedHeights = expected.map(({ jHeight }) => jHeight);
+  const actualHeights = headers.map(({ jHeight }) => jHeight);
+  const heightDiff = findFirstDiff(expectedHeights, actualHeights);
+  if (heightDiff) {
+    throw new Error(
+      `J_HEADER_TRACE_HEIGHT_MISMATCH:index=${trace.headerCursor} path=${heightDiff.path} ` +
+      `expected=${previewValue(heightDiff.left)} actual=${previewValue(heightDiff.right)}`,
+    );
+  }
+  trace.headerCursor += 1;
+  return cloneJBlockHeadersIngress(expected);
 };
 
 const normalizeOracleValue = (value: unknown): unknown => {
@@ -445,8 +476,11 @@ const runScenarioOnce = async (
   const restoreJEventIngressTransform = setJEventIngressTransform(
     createJEventTraceTransform(jEventTraceMode, jEventTrace),
   );
-  const restoreJHistoryCheckpointIngressTransform = setJHistoryCheckpointIngressTransform(
-    createJHistoryCheckpointTraceTransform(jEventTraceMode, jEventTrace),
+  const restoreJHistoryRangeIngressTransform = setJHistoryRangeIngressTransform(
+    createJHistoryRangeTraceTransform(jEventTraceMode, jEventTrace),
+  );
+  const restoreJBlockHeadersIngressTransform = setJBlockHeadersIngressTransform(
+    createJBlockHeadersTraceTransform(jEventTraceMode, jEventTrace),
   );
   try {
     const rpcUrl = rpcUrlForScenarioRun(scenarioIndex, runIndex);
@@ -483,11 +517,20 @@ const runScenarioOnce = async (
     }
     if (
       jEventTraceMode === 'replay' &&
-      jEventTrace.checkpointCursor !== jEventTrace.checkpoints.length
+      jEventTrace.rangeCursor !== jEventTrace.ranges.length
     ) {
       throw new Error(
-        `J_CHECKPOINT_TRACE_INCOMPLETE:consumed=${jEventTrace.checkpointCursor} ` +
-        `total=${jEventTrace.checkpoints.length}`,
+        `J_RANGE_TRACE_INCOMPLETE:consumed=${jEventTrace.rangeCursor} ` +
+        `total=${jEventTrace.ranges.length}`,
+      );
+    }
+    if (
+      jEventTraceMode === 'replay' &&
+      jEventTrace.headerCursor !== jEventTrace.headerReads.length
+    ) {
+      throw new Error(
+        `J_HEADER_TRACE_INCOMPLETE:consumed=${jEventTrace.headerCursor} ` +
+        `total=${jEventTrace.headerReads.length}`,
       );
     }
     return buildOracle(activeEnv, frameHashRecords, accountStateRootRecords);
@@ -495,7 +538,8 @@ const runScenarioOnce = async (
     restoreFrameHashRecorder();
     restoreAccountStateRootRecorder();
     restoreJEventIngressTransform();
-    restoreJHistoryCheckpointIngressTransform();
+    restoreJHistoryRangeIngressTransform();
+    restoreJBlockHeadersIngressTransform();
     restoreConsole(originalConsole);
     if (previousJAdapterMode === undefined) delete process.env['JADAPTER_MODE'];
     else process.env['JADAPTER_MODE'] = previousJAdapterMode;
@@ -516,11 +560,19 @@ const runScenarioOnce = async (
 
 async function verifyScenarioDeterminism(scenario: ScenarioEntry, scenarioIndex: number): Promise<ScenarioResult> {
   const runs: ScenarioOracle[] = [];
-  const jEventTrace: JEventTrace = { batches: [], cursor: 0, checkpoints: [], checkpointCursor: 0 };
+  const jEventTrace: JEventTrace = {
+    batches: [],
+    cursor: 0,
+    headerReads: [],
+    headerCursor: 0,
+    ranges: [],
+    rangeCursor: 0,
+  };
   try {
     for (let runIndex = 0; runIndex < RUNS; runIndex += 1) {
       jEventTrace.cursor = 0;
-      jEventTrace.checkpointCursor = 0;
+      jEventTrace.headerCursor = 0;
+      jEventTrace.rangeCursor = 0;
       const oracle = await runScenarioOnce(
         scenario,
         runIndex + 1,

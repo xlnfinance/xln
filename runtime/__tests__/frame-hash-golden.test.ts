@@ -59,7 +59,6 @@ const makeEntityStateFixture = (accountHash: string): EntityState => ({
   ]]),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 42,
-  jBlockObservations: [],
   jBlockChain: [],
   entityEncPubKey: 'pub',
   entityEncPrivKey: 'priv',

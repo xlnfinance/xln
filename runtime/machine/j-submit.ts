@@ -22,7 +22,7 @@ export type RuntimeJSubmitDeps = {
 };
 
 const hasJHistoryTx = (input: EntityInput): boolean =>
-  (input.entityTxs ?? []).some((tx) => tx?.type === 'j_event' || tx?.type === 'j_history_checkpoint');
+  (input.entityTxs ?? []).some((tx) => tx?.type === 'j_event');
 
 const captureQueuedEntityInputs = (env: Env): EntityInput[] => {
   const mempool = env.runtimeMempool ?? env.runtimeInput;
@@ -62,61 +62,58 @@ const pollSubmittedJEventsBeforeFollowups = async (env: Env, jAdapter: { pollNow
 
 const normalizedEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
-type DisputeFinalizeClaim = {
-  counterparty: string;
-  initialNonce: string;
-  initialProofbodyHash: string;
-};
+type DisputeFinalizeClaim = { counterparty: string };
 
 const getDisputeFinalizeClaims = (jTx: JTx): DisputeFinalizeClaim[] => {
   if (jTx.type !== 'batch') return [];
   return (jTx.data.batch.disputeFinalizations || []).map((op) => ({
     counterparty: normalizedEntityId(op.counterentity),
-    initialNonce: String(op.initialNonce),
-    initialProofbodyHash: normalizedEntityId(op.initialProofbodyHash),
-  })).filter((claim) => claim.counterparty && claim.initialNonce && claim.initialProofbodyHash);
+  })).filter((claim) => claim.counterparty);
 };
 
-const hasMatchingDisputeFinalizedEvent = (
-  inputs: EntityInput[],
+type DisputeAccountReader = {
+  getAccountInfo?: (
+    entityId: string,
+    counterpartyId: string,
+  ) => Promise<{ disputeHash: string; disputeTimeout: bigint }>;
+};
+
+const ZERO_BYTES32 = `0x${'0'.repeat(64)}`;
+
+const hasStaleDisputeFinalizeOnChain = async (
+  jAdapter: DisputeAccountReader,
   entityId: string,
   claims: DisputeFinalizeClaim[],
-): boolean => inputs.some((input) => (input.entityTxs || []).some((tx) => {
-  if (tx.type !== 'j_event') return false;
-  const events = Array.isArray(tx.data.events) ? tx.data.events : [tx.data.event];
-  return events.some((event) => {
-    if (event?.type !== 'DisputeFinalized') return false;
-    const sender = normalizedEntityId(event.data.sender);
-    const counterentity = normalizedEntityId(event.data.counterentity);
-    const counterparty = sender === entityId
-      ? counterentity
-      : counterentity === entityId
-        ? sender
-        : '';
-    if (!counterparty) return false;
-    const initialNonce = String(event.data.initialNonce);
-    const initialProofbodyHash = normalizedEntityId(event.data.initialProofbodyHash);
-    return claims.some((claim) =>
-      claim.counterparty === counterparty &&
-      claim.initialNonce === initialNonce &&
-      claim.initialProofbodyHash === initialProofbodyHash
-    );
-  });
-}));
+): Promise<boolean> => {
+  if (typeof jAdapter.getAccountInfo !== 'function') return false;
+  for (const claim of claims) {
+    const account = await jAdapter.getAccountInfo(entityId, claim.counterparty);
+    const disputeHash = normalizedEntityId(account.disputeHash);
+    if (disputeHash === ZERO_BYTES32 && account.disputeTimeout === 0n) return true;
+  }
+  return false;
+};
 
 const reconcileFinalizedDispute = async (
   env: Env,
-  jAdapter: { pollNow?: () => Promise<void> },
+  jAdapter: DisputeAccountReader,
   jTx: JTx,
   deps: RuntimeJSubmitDeps,
   reason: 'counterparty-finalized-before-submit' | 'counterparty-finalized-after-submit-failure',
 ): Promise<boolean> => {
   if (jTx.type !== 'batch') return false;
   const claims = getDisputeFinalizeClaims(jTx);
-  if (claims.length === 0 || typeof jAdapter.pollNow !== 'function') return false;
-  await pollSubmittedJEventsBeforeFollowups(env, jAdapter);
+  if (claims.length === 0) return false;
   const entityId = normalizedEntityId(jTx.entityId);
-  if (!hasMatchingDisputeFinalizedEvent(captureQueuedEntityInputs(env), entityId, claims)) return false;
+  try {
+    if (!await hasStaleDisputeFinalizeOnChain(jAdapter, entityId, claims)) return false;
+  } catch (error) {
+    jSubmitLog.warn('dispute_finalize.reconcile_read_failed', {
+      entityId: shortId(jTx.entityId),
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
 
   const replica = getEntityReplicaById(env, jTx.entityId);
   const signerId = normalizedEntityId(jTx.data.signerId || replica?.signerId);
@@ -139,7 +136,7 @@ const reconcileFinalizedDispute = async (
 
 const reconcilePermanentSubmitFailure = async (
   env: Env,
-  jAdapter: { pollNow?: () => Promise<void> },
+  jAdapter: DisputeAccountReader,
   jTx: JTx,
   deps: RuntimeJSubmitDeps,
 ): Promise<boolean> => reconcileFinalizedDispute(

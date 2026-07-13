@@ -6,8 +6,6 @@ import type { CrossJurisdictionBookAdmission, CrossJurisdictionSwapRoute } from 
 import type { DebtEntry } from './types/debt';
 import type {
   JBlockFinalized,
-  JBlockObservation,
-  JHistoryCheckpoint,
   ValidatorJHistory,
   JHistoryFinality,
 } from './types/jurisdiction-events';
@@ -50,14 +48,12 @@ export type {
 } from './types/debt';
 export type {
   DisputeFinalizationEvidence,
-  JBlockAttestation,
   JBlockFinalized,
-  JBlockObservation,
-  JHistoryCheckpoint,
-  JHistoryCheckpointAttestation,
   JHistoryFinality,
   JurisdictionEvent,
+  JurisdictionEventBlock,
   JurisdictionEventData,
+  ValidatorJBlockHeader,
   ValidatorJEventBlock,
   ValidatorJHistory,
 } from './types/jurisdiction-events';
@@ -245,6 +241,28 @@ export type RuntimeTx =
       };
     }
   | {
+      type: 'observeJRange';
+      data: {
+        entityId: string;
+        signerId: string;
+        jurisdictionRef: string;
+        scannedThroughHeight: number;
+        tipBlockHash: string;
+        headers?: import('./types/jurisdiction-events').ValidatorJBlockHeader[];
+        blocks: import('./types/jurisdiction-events').ValidatorJEventBlock[];
+      };
+    }
+  | {
+      type: 'rewindJHistory';
+      data: {
+        entityId: string;
+        signerId: string;
+        jurisdictionRef: string;
+        conflictingHeight: number;
+        conflictingBlockHash: string;
+      };
+    }
+  | {
       type: 'importJ';
       data: {
         name: string;           // Unique J-machine name (key in jReplicas Map)
@@ -422,11 +440,7 @@ export interface EntityState {
   deferredAccountProposals?: Map<string, true>;
   // 🔭 J-machine tracking (JBlock consensus)
   lastFinalizedJHeight: number;           // Last finalized J-block height
-  jBlockObservations: JBlockObservation[]; // Pending observations from signers
   jBlockChain: JBlockFinalized[];          // Finalized J-blocks (prunable)
-  // Optional during the local pre-mainnet schema transition. Constructors and
-  // restore normalize these before live consensus uses them.
-  jHistoryCheckpoints?: JHistoryCheckpoint[];
   jHistoryFinality?: JHistoryFinality;
 
   // 🔗 Account machine integration
@@ -650,7 +664,6 @@ export interface Env {
     stopLoop?: (() => void) | null;
     wakeLoop?: (() => void) | null;
     wakeRequested?: boolean;
-    clockPrimed?: boolean;
     scheduledWakeIndex?: {
       heap: Array<{
         dueAt: number;

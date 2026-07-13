@@ -36,7 +36,6 @@ const makeState = (id: string, proposer: string, timestamp: number): EntityState
   accounts: new Map(),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockObservations: [],
   jBlockChain: [],
   profile: { name: 'wake-test', isHub: false, avatar: '', bio: '', website: '' },
   entityEncPubKey: `0x${'11'.repeat(32)}`,

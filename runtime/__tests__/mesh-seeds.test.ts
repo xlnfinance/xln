@@ -30,10 +30,14 @@ describe('mesh operator seed derivation', () => {
   test('production mesh startup contains no public child runtime seeds', () => {
     const orchestrator = readFileSync('runtime/orchestrator/orchestrator.ts', 'utf8');
     const startup = readFileSync('scripts/start-server.sh', 'utf8');
+    const devStartup = readFileSync('scripts/dev/run-dev.sh', 'utf8');
     expect(orchestrator).not.toContain("seed: 'xln-mesh-mm'");
     expect(orchestrator).not.toContain("seed: 'xln-mesh-custody-seed'");
     expect(orchestrator).not.toContain('seed: `xln-e2e-');
     expect(orchestrator).toContain("runtimeSeedFor('CUSTODY')");
     expect(startup).toContain('xln_read_or_create_operator_seed "$XLN_MESH_ROOT_SEED_FILE"');
+    expect(devStartup).toContain('source "$REPO_ROOT/scripts/lib/start-common.sh"');
+    expect(devStartup).toContain('db/dev/secrets/mesh-root.seed');
+    expect(devStartup).toContain('xln_read_or_create_operator_seed "$XLN_MESH_ROOT_SEED_FILE"');
   });
 });

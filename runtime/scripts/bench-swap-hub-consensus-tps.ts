@@ -163,7 +163,6 @@ const makeEntityState = (
   reserves: new Map(),
   accounts: new Map(),
   lastFinalizedJHeight: 0,
-  jBlockObservations: [],
   jBlockChain: [],
   entityEncPubKey: `0x${'aa'.repeat(32)}`,
   entityEncPrivKey: `0x${'bb'.repeat(32)}`,

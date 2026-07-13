@@ -230,7 +230,7 @@ import {
   BigIntMath,
   FINANCIAL_CONSTANTS,
 } from './account/financial-utils';
-import { resolveEntityProposerId } from './state-helpers';
+import { cloneEntityState, resolveEntityProposerId } from './state-helpers';
 import { getEntityShortId, formatEntityId } from './utils';
 import { safeStringify } from './protocol/serialization';
 import { computeCanonicalEntityHashesFromEnv, computeCanonicalStateHashFromEnv } from './storage/canonical-hash';
@@ -243,6 +243,7 @@ import {
   inspectStorage,
   listStorageSnapshotEntityIds,
   listStorageSnapshotHeights,
+  listStorageReplicaMetas,
   loadEntityAccountDocFromStorage,
   loadEntityStateFromStorage,
   loadEntityViewPageFromStorage,
@@ -251,7 +252,6 @@ import {
   readStorageFrameRecord,
   readStorageHead,
   readStorageOverlayRecordsFromDiffs,
-  readStorageReplicaMeta,
   saveRuntimeFrameToStorage,
   type StorageHead,
 } from './storage';
@@ -407,7 +407,6 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
       stopLoop: null,
       wakeLoop: null,
       wakeRequested: false,
-      clockPrimed: false,
       p2p: null,
       pendingP2PConfig: null,
       lastP2PConfig: null,
@@ -713,7 +712,6 @@ const hasAccountMempoolWakeInput = (env: Env): boolean => {
 const prioritizeJEventFrame = (
   runtimeInput: RuntimeInput,
   mempool: RuntimeInput,
-  runtimeState: NonNullable<Env['runtimeState']>,
   timestamp: number,
 ): boolean => {
   const priorityInputs: EntityInput[] = [];
@@ -721,8 +719,8 @@ const prioritizeJEventFrame = (
 
   for (const input of runtimeInput.entityInputs) {
     const entityTxs = input.entityTxs ?? [];
-    const jEventTxs = entityTxs.filter((tx) => tx?.type === 'j_event' || tx?.type === 'j_history_checkpoint');
-    const otherTxs = entityTxs.filter((tx) => tx?.type !== 'j_event' && tx?.type !== 'j_history_checkpoint');
+    const jEventTxs = entityTxs.filter((tx) => tx?.type === 'j_event');
+    const otherTxs = entityTxs.filter((tx) => tx?.type !== 'j_event');
     const hasNonTxPayload =
       !!input.proposedFrame ||
       (!!input.hashPrecommits && input.hashPrecommits.size > 0);
@@ -749,14 +747,12 @@ const prioritizeJEventFrame = (
   runtimeInput.entityInputs = priorityInputs;
   mempool.entityInputs = [...deferredInputs, ...mempool.entityInputs];
   mempool.queuedAt = mempool.queuedAt ?? timestamp;
-  runtimeState.clockPrimed = true;
   return true;
 };
 
 const applyEntityInputFrameCap = (
   runtimeInput: RuntimeInput,
   mempool: RuntimeInput,
-  runtimeState: NonNullable<Env['runtimeState']>,
   maxEntityInputsPerFrame: number,
   timestamp: number,
 ): boolean => {
@@ -767,7 +763,6 @@ const applyEntityInputFrameCap = (
   runtimeInput.entityInputs = runtimeInput.entityInputs.slice(0, frameLimit);
   mempool.entityInputs = [...deferredInputs, ...mempool.entityInputs];
   mempool.queuedAt = mempool.queuedAt ?? timestamp;
-  runtimeState.clockPrimed = true;
   return true;
 };
 
@@ -777,7 +772,6 @@ const entityInputHasNonTxPayload = (input: EntityInput): boolean =>
 const applyEntityTxFrameCap = (
   runtimeInput: RuntimeInput,
   mempool: RuntimeInput,
-  runtimeState: NonNullable<Env['runtimeState']>,
   maxEntityTxsPerFrame: number,
   timestamp: number,
 ): boolean => {
@@ -839,7 +833,6 @@ const applyEntityTxFrameCap = (
   runtimeInput.entityInputs = frameInputs;
   mempool.entityInputs = [...deferredInputs, ...mempool.entityInputs];
   mempool.queuedAt = mempool.queuedAt ?? timestamp;
-  runtimeState.clockPrimed = true;
   return true;
 };
 
@@ -1128,7 +1121,6 @@ export function startRuntimeLoop(env: Env, config?: RuntimeLoopConfig): () => vo
               mempool.queuedAt === undefined
                 ? dueTimestamp
                 : Math.max(mempool.queuedAt, dueTimestamp);
-            state.clockPrimed = true;
             generateHookPings(env, dueTimestamp, dueTimestamp);
           }
           continue;
@@ -2425,7 +2417,9 @@ export const persistRestoredEnvToDB = async (env: Env): Promise<void> => {
     if (!replica?.state) continue;
     const entityId = String(replica.entityId || replica.state.entityId || '').toLowerCase();
     if (!entityId) continue;
-    currentBatch.put(keyLiveReplicaMeta(entityId), encodeBuffer(projectReplicaMeta(replica)));
+    const signerId = String(replica.signerId || '').toLowerCase();
+    if (!signerId) throw new Error(`STORAGE_REPLICA_SIGNER_MISSING:${entityId}`);
+    currentBatch.put(keyLiveReplicaMeta(entityId, signerId), encodeBuffer(projectReplicaMeta(replica)));
   }
 
   const retainedHistoryBytes = keyFrame(restoredHeight).byteLength + encodeBuffer({}).byteLength;
@@ -2706,20 +2700,17 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     const jEventFramePrioritized = prioritizeJEventFrame(
       runtimeInput,
       mempool,
-      state,
       mempoolQueuedAt ?? (env.timestamp ?? 0),
     );
     applyEntityTxFrameCap(
       runtimeInput,
       mempool,
-      state,
       state.maxEntityTxsPerFrame ?? 0,
       mempoolQueuedAt ?? (env.timestamp ?? 0),
     );
     applyEntityInputFrameCap(
       runtimeInput,
       mempool,
-      state,
       state.maxEntityInputsPerFrame ?? 0,
       mempoolQueuedAt ?? (env.timestamp ?? 0),
     );
@@ -3276,14 +3267,14 @@ export const readPersistedStorageFrameRecord = async (
   return null;
 };
 
-const readPersistedStorageReplicaMeta = async (
+const readPersistedStorageReplicaMetas = async (
   env: Env,
   entityId: string,
-): Promise<ReturnType<typeof readStorageReplicaMeta> extends Promise<infer T> ? T : never> => {
+): Promise<Awaited<ReturnType<typeof listStorageReplicaMetas>>> => {
   const normalizedEntityId = String(entityId || '').toLowerCase();
-  if (!normalizedEntityId) return null;
-  if (!(await tryOpenStorageDb(env, 'current'))) return null;
-  return readStorageReplicaMeta(getStorageDb(env, 'current'), normalizedEntityId);
+  if (!normalizedEntityId) return [];
+  if (!(await tryOpenStorageDb(env, 'current'))) return [];
+  return listStorageReplicaMetas(getStorageDb(env, 'current'), normalizedEntityId);
 };
 
 const resolvePersistedSnapshotHeight = async (env: Env, targetHeight: number): Promise<number> => {
@@ -3338,7 +3329,7 @@ const listPersistedReplicaValidators = (state: EntityState): string[] => {
 const resolvePersistedReplicaIdentity = (
   entityId: string,
   state: EntityState,
-  meta: Awaited<ReturnType<typeof readPersistedStorageReplicaMeta>> | null,
+  meta: Awaited<ReturnType<typeof readPersistedStorageReplicaMetas>>[number] | null,
   targetHeight: number,
   latestHeight: number,
 ): { signerId: string; isProposer: boolean } => {
@@ -3422,22 +3413,27 @@ const loadEnvFromStorage = async (
     env.eReplicas = new Map();
     env.activeJurisdiction = undefined;
     for (const [entityId, state] of restoredStates.entries()) {
-      const meta = targetHeight === latestHeight ? await readPersistedStorageReplicaMeta(env, entityId) : null;
-      const { signerId, isProposer } = resolvePersistedReplicaIdentity(entityId, state, meta, targetHeight, latestHeight);
-      const hankoWitness = meta?.hankoWitness instanceof Map ? meta.hankoWitness : new Map();
-      env.eReplicas.set(formatReplicaKey(createReplicaKey(entityId, signerId)), {
-        entityId,
-        signerId,
-        state,
-        mempool: meta?.mempool ?? [],
-        isProposer,
-        hankoWitness,
-        ...(meta?.proposal ? { proposal: meta.proposal } : {}),
-        ...(meta?.lockedFrame ? { lockedFrame: meta.lockedFrame } : {}),
-        ...(meta?.validatorComputedState ? { validatorComputedState: meta.validatorComputedState } : {}),
-        ...(meta?.position ? { position: meta.position } : {}),
-        ...(meta?.jHistory ? { jHistory: meta.jHistory } : {}),
-      });
+      const persistedMetas = targetHeight === latestHeight
+        ? await readPersistedStorageReplicaMetas(env, entityId)
+        : [];
+      const metas = persistedMetas.length > 0 ? persistedMetas : [null];
+      for (const meta of metas) {
+        const { signerId, isProposer } = resolvePersistedReplicaIdentity(entityId, state, meta, targetHeight, latestHeight);
+        const hankoWitness = meta?.hankoWitness instanceof Map ? meta.hankoWitness : new Map();
+        env.eReplicas.set(formatReplicaKey(createReplicaKey(entityId, signerId)), {
+          entityId,
+          signerId,
+          state: cloneEntityState(state, true),
+          mempool: meta?.mempool ?? [],
+          isProposer,
+          hankoWitness,
+          ...(meta?.proposal ? { proposal: meta.proposal } : {}),
+          ...(meta?.lockedFrame ? { lockedFrame: meta.lockedFrame } : {}),
+          ...(meta?.validatorComputedState ? { validatorComputedState: meta.validatorComputedState } : {}),
+          ...(meta?.position ? { position: meta.position } : {}),
+          ...(meta?.jHistory ? { jHistory: meta.jHistory } : {}),
+        });
+      }
     }
 
     const frame = await readPersistedStorageFrameRecord(env, targetHeight);
@@ -4065,7 +4061,6 @@ export {
   getSignerPublicKey,
 } from './account/crypto.js';
 export {
-  buildJEventObservationDigest,
   canonicalJurisdictionEventsHash,
 } from './jurisdiction/event-observation';
 export type {

@@ -1,81 +1,99 @@
 import { signAccountFrame } from '../../account/crypto';
+import { applyJEvent } from '../../entity/tx/j-events';
 import {
-  applyJEvent,
-  applyJHistoryCheckpoint,
-  type JEventEntityTxData,
-} from '../../entity/tx/j-events';
-import {
-  buildJHistoryCheckpointDigest,
-  EMPTY_J_HISTORY_ROOT,
+  buildJEventRangeDigest,
+  canonicalJEventRangeHash,
   foldJHistoryRoot,
 } from '../../jurisdiction/history-consensus';
-import { getJEventJurisdictionRef } from '../../jurisdiction/event-observation';
-import type { EntityState, Env } from '../../types';
+import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../../jurisdiction/event-observation';
+import { finalizedJHistoryRoot } from '../../jurisdiction/local-history';
+import type {
+  DisputeFinalizationEvidence,
+  EntityState,
+  Env,
+  JurisdictionEvent,
+  JurisdictionEventData,
+} from '../../types';
 import type { JEventApplyResult } from '../../entity/tx/j-events-types';
 
-const finalizedRoot = (state: EntityState): string =>
-  state.jHistoryFinality?.eventHistoryRoot || foldJHistoryRoot(EMPTY_J_HISTORY_ROOT, state.jBlockChain);
+export type LegacyJEventInput = {
+  from: string;
+  jurisdictionRef: string;
+  event: JurisdictionEvent;
+  events?: JurisdictionEvent[];
+  observedAt: number;
+  blockNumber: number;
+  blockHash: string;
+  transactionHash?: string;
+  eventsHash?: string;
+  signature?: string;
+  disputeFinalizationEvidence?: DisputeFinalizationEvidence[];
+  disputeFinalizationEvidenceHash?: string;
+};
 
-export const buildJHistoryCheckpointData = (
+const signRange = (
   state: EntityState,
   env: Env,
   signerId: string,
-  scannedThroughHeight: number,
-  tipBlockHash: string,
-) => {
-  const baseHeight = state.lastFinalizedJHeight;
-  const jurisdictionRef = getJEventJurisdictionRef(state.config.jurisdiction);
-  const eventHistoryRoot = foldJHistoryRoot(
-    finalizedRoot(state),
-    state.jBlockObservations.filter((observation) =>
-      String(observation.signerId).toLowerCase() === String(signerId).toLowerCase() &&
-      observation.jHeight > baseHeight &&
-      observation.jHeight <= scannedThroughHeight
-    ),
-  );
-  const signature = signAccountFrame(env, signerId, buildJHistoryCheckpointDigest({
+  unsigned: Omit<JurisdictionEventData, 'from' | 'signature' | 'observedAt'>,
+): JurisdictionEventData => ({
+  from: signerId,
+  observedAt: unsigned.scannedThroughHeight,
+  signature: signAccountFrame(env, signerId, buildJEventRangeDigest({
     entityId: state.entityId,
-    jurisdictionRef,
     signerId,
-    baseHeight,
-    scannedThroughHeight,
-    tipBlockHash,
-    eventHistoryRoot,
-  }));
-  return {
-    from: signerId,
+    ...unsigned,
+  })),
+  ...unsigned,
+});
+
+export const buildJEventRangeData = (
+  state: EntityState,
+  data: LegacyJEventInput,
+  env: Env,
+): JurisdictionEventData => {
+  const events = (data.events ?? [data.event]).map((event, index) => ({
+    ...event,
+    blockNumber: data.blockNumber,
+    blockHash: data.blockHash,
+    ...(event.transactionHash || data.transactionHash
+      ? { transactionHash: event.transactionHash ?? data.transactionHash }
+      : {}),
+    logIndex: event.logIndex ?? index,
+    eventIndex: event.eventIndex ?? 0,
+  })) as JurisdictionEvent[];
+  const eventsHash = canonicalJurisdictionEventsHash(events);
+  const evidence = data.disputeFinalizationEvidence ?? [];
+  const blocks: JurisdictionEventData['blocks'] = [{
+    blockNumber: data.blockNumber,
+    blockHash: data.blockHash,
+    eventsHash,
+    events,
+    ...(evidence.length > 0 ? { disputeFinalizationEvidence: evidence } : {}),
+    ...(data.disputeFinalizationEvidenceHash
+      ? { disputeFinalizationEvidenceHash: data.disputeFinalizationEvidenceHash }
+      : {}),
+  }];
+  const jurisdictionRef = getJEventJurisdictionRef(state.config.jurisdiction);
+  const unsigned = {
     jurisdictionRef,
-    baseHeight,
-    scannedThroughHeight,
-    tipBlockHash,
-    eventHistoryRoot,
-    signature,
+    baseHeight: state.lastFinalizedJHeight,
+    scannedThroughHeight: data.blockNumber,
+    tipBlockHash: data.blockHash,
+    eventHistoryRoot: foldJHistoryRoot(finalizedJHistoryRoot(state), [{
+      jurisdictionRef,
+      jHeight: data.blockNumber,
+      jBlockHash: data.blockHash,
+      eventsHash,
+    }]),
+    rangeHash: canonicalJEventRangeHash(jurisdictionRef, blocks),
+    blocks,
   };
+  return signRange(state, env, data.from, unsigned);
 };
 
-export const submitJHistoryCheckpoint = async (
+export const applyJEventRange = async (
   state: EntityState,
+  data: LegacyJEventInput,
   env: Env,
-  signerId: string,
-  scannedThroughHeight: number,
-  tipBlockHash: string,
-): Promise<EntityState> => {
-  return (await applyJHistoryCheckpoint(
-    state,
-    buildJHistoryCheckpointData(state, env, signerId, scannedThroughHeight, tipBlockHash),
-    env,
-  )).newState;
-};
-
-export const applyJEventAndCheckpoint = async (
-  state: EntityState,
-  data: JEventEntityTxData,
-  env: Env,
-): Promise<JEventApplyResult> => {
-  const observed = await applyJEvent(state, data, env);
-  return applyJHistoryCheckpoint(
-    observed.newState,
-    buildJHistoryCheckpointData(observed.newState, env, data.from, data.blockNumber, data.blockHash),
-    env,
-  );
-};
+): Promise<JEventApplyResult> => applyJEvent(state, buildJEventRangeData(state, data, env), env);

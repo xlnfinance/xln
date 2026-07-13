@@ -87,7 +87,6 @@ describe('WAL binary codec', () => {
       entityTxs: [],
     }];
     env.runtimeState = {
-      clockPrimed: true,
       verifiedProfileRoutes: new Map([[
         `0x${'44'.repeat(32)}`,
         { runtimeId: `0x${'55'.repeat(20)}`, lastUpdated: 123 },

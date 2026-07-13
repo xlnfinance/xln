@@ -22,6 +22,7 @@ import {
   keyMerkleLeafPrefix,
   keyMerkleRoot,
   keyLiveReplicaMeta,
+  keyLiveReplicaMetaPrefix,
   keySnapshotAccountPrefix,
   keySnapshotBookPrefix,
   keySnapshotEntity,
@@ -96,7 +97,20 @@ export const readStorageFrameRecord = async (
 export const readStorageReplicaMeta = async (
   db: RuntimeDbLike,
   entityId: string,
-): Promise<StorageReplicaMeta | null> => readJsonOrNull<StorageReplicaMeta>(db, keyLiveReplicaMeta(entityId));
+  signerId: string,
+): Promise<StorageReplicaMeta | null> =>
+  readJsonOrNull<StorageReplicaMeta>(db, keyLiveReplicaMeta(entityId, signerId));
+
+export const listStorageReplicaMetas = async (
+  db: RuntimeDbLike,
+  entityId: string,
+): Promise<StorageReplicaMeta[]> => {
+  const metas: StorageReplicaMeta[] = [];
+  for await (const key of iterateKeys(db, { prefix: keyLiveReplicaMetaPrefix(entityId) })) {
+    metas.push(decodeBuffer<StorageReplicaMeta>(await db.get(key)));
+  }
+  return metas.sort((left, right) => compareAscii(String(left.signerId || ''), String(right.signerId || '')));
+};
 
 export const listStorageSnapshotHeights = async (db: RuntimeDbLike): Promise<number[]> => {
   return listSnapshotHeights(db);

@@ -1,10 +1,9 @@
 import { deriveAccountWatchSeed } from '../../account/watch-seed';
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../../account/crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../account/crypto';
 import { buildCrossJurisdictionPullBinding } from '../../extensions/cross-j/index';
 import { buildCrossJurisdictionBookAdmissionReceipt } from '../../extensions/cross-j/orderbook';
 import { getJurisdictionStackId } from '../../jurisdiction/jurisdiction-runtime';
 import {
-  buildJEventObservationDigest,
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
   getJEventJurisdictionRef,
@@ -46,7 +45,7 @@ export const registerTestSigner = (env: Env, seed: string, slot = '1'): string =
   return signerId;
 };
 
-export const signJEventObservation = (
+export const prepareJEventInput = (
   env: Env,
   entityId: string,
   signerId: string,
@@ -58,7 +57,7 @@ export const signJEventObservation = (
     disputeFinalizationEvidence?: DisputeFinalizationEvidence[];
     jurisdictionRef?: string;
   },
-): { jurisdictionRef: string; eventsHash: string; signature: string; disputeFinalizationEvidenceHash?: string } => {
+): { jurisdictionRef: string; eventsHash: string; disputeFinalizationEvidenceHash?: string } => {
   const matchingReplica = Array.from(env.eReplicas.values()).find((replica) =>
     replica.entityId.toLowerCase() === entityId.toLowerCase() &&
     replica.signerId.toLowerCase() === signerId.toLowerCase());
@@ -67,23 +66,9 @@ export const signJEventObservation = (
   const disputeFinalizationEvidenceHash = input.disputeFinalizationEvidence?.length
     ? canonicalDisputeFinalizationEvidenceHash(input.disputeFinalizationEvidence)
     : undefined;
-  const signature = signAccountFrame(
-    env,
-    signerId,
-    buildJEventObservationDigest({
-      entityId,
-      jurisdictionRef,
-      signerId,
-      blockNumber: input.blockNumber,
-      blockHash: input.blockHash,
-      eventsHash,
-      ...(disputeFinalizationEvidenceHash ? { disputeFinalizationEvidenceHash } : {}),
-    }),
-  );
   return {
     jurisdictionRef,
     eventsHash,
-    signature,
     ...(disputeFinalizationEvidenceHash ? { disputeFinalizationEvidenceHash } : {}),
   };
 };
@@ -163,7 +148,6 @@ export const makeState = (
   reserves: new Map(),
   accounts: counterpartyId ? new Map([[counterpartyId, makeAccount(entityId, counterpartyId)]]) : new Map(),
   lastFinalizedJHeight: 0,
-  jBlockObservations: [],
   jBlockChain: [],
   entityEncPubKey: `0x${'aa'.repeat(32)}`,
   entityEncPrivKey: `0x${'bb'.repeat(32)}`,

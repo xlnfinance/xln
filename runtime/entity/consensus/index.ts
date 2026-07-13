@@ -85,6 +85,10 @@ import {
   leaderVoteCollectionKey,
 } from './leader';
 import { buildQuorumHanko, signEntityHashes } from '../../hanko/signing';
+import {
+  getJEventRangeValidationError,
+  pruneFinalizedValidatorJHistory,
+} from '../../jurisdiction/local-history';
 import { proposeAccountFrame } from '../../account/consensus/propose';
 import {
   attachHankoWitnessToOutputs,
@@ -112,6 +116,39 @@ const ENTITY_FRAME_SLOW_MS = Math.max(
 export { createEntityFrameHash } from './frame';
 export { CROSS_J_PENDING_FILL_ACK_TTL_MS } from '../../extensions/cross-j/fill-ack';
 const entityLog = createStructuredLogger('entity');
+
+const getReplicaJRangeValidationError = (
+  replica: EntityReplica,
+  txs: EntityTx[],
+): string | null => {
+  const activeProposerId = getEntityLeaderState(replica.state).activeValidatorId;
+  for (const tx of txs) {
+    if (tx.type !== 'j_event') continue;
+    try {
+      const error = getJEventRangeValidationError(
+        replica.state,
+        replica.jHistory,
+        tx.data,
+        activeProposerId,
+      );
+      if (error) return error;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }
+  return null;
+};
+
+const assertProposerJRangesMatchLocalHistory = (replica: EntityReplica, txs: EntityTx[]): void => {
+  const error = getReplicaJRangeValidationError(replica, txs);
+  if (error) throw new Error(`ENTITY_PROPOSER_J_RANGE_INVALID:${error}`);
+};
+
+const pruneReplicaFinalizedJHistory = (replica: EntityReplica): void => {
+  const pruned = pruneFinalizedValidatorJHistory(replica.jHistory, replica.state.lastFinalizedJHeight);
+  if (pruned) replica.jHistory = pruned;
+  else delete replica.jHistory;
+};
 
 function queueUniqueAccountMempoolTx(
   account: EntityState['accounts'] extends Map<string, infer T> ? T : never,
@@ -944,6 +981,11 @@ async function handleCommitNotification(
       return rejectEntityConsensusInput(context);
     }
 
+    const jRangeError = getReplicaJRangeValidationError(workingReplica, proposedFrame.txs);
+    if (jRangeError) {
+      entityLog.error('commit.catch_up_j_range_rejected', { error: jRangeError });
+      return rejectEntityConsensusInput(context, 'COMMIT_J_RANGE_MISMATCH');
+    }
     const {
       newState: replayedState,
       collectedHashes: replayedCollectedHashes = [],
@@ -1057,6 +1099,7 @@ async function handleCommitNotification(
     height: proposedFrame.height,
     prevFrameHash: proposedFrame.hash,
   } as EntityState;
+  pruneReplicaFinalizedJHistory(workingReplica);
   markStorageEntityDirty(env, workingReplica.state.entityId);
 
   const committedTxs = proposedFrame.txs;
@@ -1091,9 +1134,20 @@ async function handleProposedFramePrecommit(
 
   const config = workingReplica.state.config;
   const proposedFrame = entityInput.proposedFrame;
+  if (proposedFrame.height < workingReplica.state.height) {
+    return noopEntityConsensusInput(context, 'PROPOSAL_STALE');
+  }
+  if (proposedFrame.height === workingReplica.state.height) {
+    return workingReplica.state.prevFrameHash === proposedFrame.hash
+      ? noopEntityConsensusInput(context, 'PROPOSAL_ALREADY_COMMITTED')
+      : rejectEntityConsensusInput(context, 'PROPOSAL_HEIGHT_HASH_CONFLICT');
+  }
   const existingFrame = workingReplica.proposal ?? workingReplica.lockedFrame;
   if (existingFrame) {
     if (existingFrame.hash !== proposedFrame.hash) {
+      if (existingFrame.height < proposedFrame.height) {
+        return noopEntityConsensusInput(context, 'PROPOSAL_PRIOR_FRAME_PENDING');
+      }
       entityLog.error('proposal.conflict_rejected', {
         existing: shortHash(existingFrame.hash),
         incoming: shortHash(proposedFrame.hash),
@@ -1118,6 +1172,12 @@ async function handleProposedFramePrecommit(
       expectedPrevHeight,
     });
     return null;
+  }
+
+  const jRangeError = getReplicaJRangeValidationError(workingReplica, proposedFrame.txs);
+  if (jRangeError) {
+    entityLog.error('proposal.j_range_rejected', { error: jRangeError });
+    return rejectEntityConsensusInput(context, 'PROPOSAL_J_RANGE_MISMATCH');
   }
 
   const {
@@ -1356,6 +1416,7 @@ async function handleHashPrecommits(
     height: proposal.height,
     prevFrameHash: proposal.hash,
   };
+  pruneReplicaFinalizedJHistory(workingReplica);
   markStorageEntityDirty(env, workingReplica.state.entityId);
 
   const committedFrame = proposal;
@@ -1586,6 +1647,7 @@ export const applyEntityInput = async (
     isSingleSigner
   ) {
     entityLog.debug('single_signer.execute', { txs: workingReplica.mempool.map(tx => tx.type) });
+    assertProposerJRangesMatchLocalHistory(workingReplica, workingReplica.mempool);
     const {
       newState: newEntityState,
       outputs: frameOutputs,
@@ -1653,6 +1715,7 @@ export const applyEntityInput = async (
       ...singleSignerNewState,
       prevFrameHash: singleSignerFrameHash, // Chain linkage
     };
+    pruneReplicaFinalizedJHistory(workingReplica);
     workingReplica.lastConsensusProgressAt = env.timestamp;
     markStorageEntityDirty(env, workingReplica.state.entityId);
 
@@ -1673,6 +1736,7 @@ export const applyEntityInput = async (
       mempool: workingReplica.mempool.length,
       txs: workingReplica.mempool.map(tx => tx.type),
     });
+    assertProposerJRangesMatchLocalHistory(workingReplica, workingReplica.mempool);
     const {
       newState: newEntityState,
       deterministicState: proposerDeterministicState,

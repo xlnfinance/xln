@@ -360,6 +360,9 @@ const canonicalJurisdictionEventPayloadKey = (event: JurisdictionEvent): string 
 
 export function canonicalJurisdictionEventKey(event: JurisdictionEvent): string {
   return safeStringify([
+    event.blockNumber ?? null,
+    event.blockHash?.toLowerCase() ?? null,
+    event.transactionHash?.toLowerCase() ?? null,
     event.logIndex ?? null,
     event.eventIndex ?? null,
     canonicalJurisdictionEventPayloadKey(event),

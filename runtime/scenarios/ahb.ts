@@ -1974,6 +1974,7 @@ export async function ahb(env: Env): Promise<void> {
 
   // H10 AUDIT FIX: Verify solvency DURING active dispute (before timeout)
   checkSolvency(env, TOTAL_SOLVENCY, 'PHASE 7 DISPUTE-ACTIVE');
+  const bobReserveBeforeDispute = await jadapter.getReserves(bob.id, USDC_TOKEN_ID);
 
   // 5) Wait for real block timeout
   const targetBlock = bobAccountAfterStart.activeDispute.disputeTimeout;
@@ -2040,70 +2041,36 @@ export async function ahb(env: Env): Promise<void> {
     'phase7 dispute timeout',
   );
 
-  // 6) Bob finalizes dispute (unilateral after timeout)
-  console.log('\n⚖️ STEP 6: Bob finalizes dispute (unilateral)...');
-  const bobReserveBeforeDispute = await jadapter.getReserves(bob.id, USDC_TOKEN_ID);
-
-  await process(env, [{
-    entityId: bob.id,
-    signerId: bob.signer,
-    entityTxs: [{
-      type: 'disputeFinalize',
-      data: {
-        counterpartyEntityId: hub.id,
-        cooperative: false,
-        description: 'Finalize after timeout'
-      }
-    }]
-  }]);
-
-  if (AHB_DEBUG) {
-    const [, bobBeforeFinalizeBroadcast] = findReplica(env, bob.id);
-    const bobRuntimeDispute = bobBeforeFinalizeBroadcast.state.accounts.get(hub.id)?.activeDispute;
-    const bobQueuedFinalizations =
-      bobBeforeFinalizeBroadcast.state.jBatchState?.batch?.disputeFinalizations?.length ?? 0;
-    const onChainAccountInfo = await jadapter.getAccountInfo(bob.id, hub.id);
-    const providerBlock = await jadapter.provider.getBlockNumber();
-    const visibleBlock = env.jReplicas?.get(AHB_JURISDICTION)?.blockNumber ?? 0n;
-    console.log(
-      `   AHB_DEBUG phase7 pre-broadcast: providerBlock=${providerBlock}` +
-      ` visibleBlock=${visibleBlock}` +
-      ` runtimeTimeout=${bobRuntimeDispute?.disputeTimeout ?? 'none'}` +
-      ` onchainTimeout=${onChainAccountInfo.disputeTimeout}` +
-      ` onchainNonce=${onChainAccountInfo.nonce}` +
-      ` disputeHash=${onChainAccountInfo.disputeHash.slice(0, 10)}...` +
-      ` queuedFinalizations=${bobQueuedFinalizations}`,
-    );
-  }
-
-  await process(env, [{
-    entityId: bob.id,
-    signerId: bob.signer,
-    entityTxs: [{
-      type: 'j_broadcast',
-      data: {}
-    }]
-  }]);
-
-  // Wait for J-machine finalization
-  await processUntil(env, () => {
-    const jRep = env.jReplicas?.get('AHB Demo');
-    return jRep ? jRep.mempool.length === 0 : false;
-  }, 40, 'J-machine finalize dispute');
-
-  await processJEvents(env);
+  // 6) The canonical scheduler wakes the proposer at the on-chain timeout,
+  // queues disputeFinalize, seals the batch, and submits it. A second manual
+  // finalize would duplicate the already sealed nonce.
+  console.log('\n⚖️ STEP 6: Scheduler finalizes dispute after timeout...');
+  const zeroHash = '0x' + '0'.repeat(64);
+  const waitForDisputeFinality = async (label: string): Promise<void> => {
+    for (let round = 0; round < 40; round++) {
+      await syncChain(env, 1);
+      const onChainInfo = await jadapter.getAccountInfo(bob.id, hub.id);
+      const [, bobReplica] = findReplica(env, bob.id);
+      const [, hubReplica] = findReplica(env, hub.id);
+      if (
+        onChainInfo.disputeHash === zeroHash &&
+        onChainInfo.disputeTimeout === 0n &&
+        !bobReplica.state.accounts.get(hub.id)?.activeDispute &&
+        !hubReplica.state.accounts.get(bob.id)?.activeDispute &&
+        !bobReplica.state.jBatchState?.sentBatch &&
+        !hubReplica.state.jBatchState?.sentBatch
+      ) return;
+    }
+    throw new Error(`ASSERT: ${label}: scheduled dispute finalization did not converge on chain and both entities`);
+  };
+  await waitForDisputeFinality('PHASE 7');
 
   // 7) Verify dispute cleared on-chain and results correct
   console.log('✅ STEP 7: Verify dispute finalized on-chain...');
-  const zeroHash = '0x' + '0'.repeat(64);
-  if (vm?.getAccountInfo) {
-    const disputeFinalInfo = await vm.getAccountInfo(bob.id, hub.id);
-    assert(disputeFinalInfo.disputeHash === zeroHash, 'PHASE 7: Dispute hash not cleared after finalize');
-    assert(disputeFinalInfo.disputeTimeout === 0n, 'PHASE 7: Dispute timeout not cleared');
-    console.log(`   Dispute cleared on-chain ✅`);
-  } else {
-    console.log('   ℹ️ Skipped BrowserVM-only on-chain dispute hash assertions (RPC mode)');
-  }
+  const disputeFinalInfo = await jadapter.getAccountInfo(bob.id, hub.id);
+  assert(disputeFinalInfo.disputeHash === zeroHash, 'PHASE 7: Dispute hash not cleared after finalize');
+  assert(disputeFinalInfo.disputeTimeout === 0n, 'PHASE 7: Dispute timeout not cleared');
+  console.log(`   Dispute cleared on-chain ✅`);
 
   const [, bobFinalCheck] = findReplica(env, bob.id);
   const bobAccountFinal = bobFinalCheck.state.accounts.get(hub.id);
@@ -2158,7 +2125,7 @@ export async function ahb(env: Env): Promise<void> {
   console.log('   - Bob disputeStart entity tx → jBatch → J-machine');
   console.log('   - DisputeStarted event → both Bob + Hub (bilateral awareness)');
   console.log('   - Block timeout verified (real block.number checks)');
-  console.log('   - Bob disputeFinalize entity tx → J-machine');
+  console.log('   - Canonical scheduler → disputeFinalize → J-machine');
   console.log('   - Bob reserve += $100K collateral, Hub debt = $50K (exceeded collateral)\n');
 
   // ============================================================================
@@ -2359,35 +2326,8 @@ export async function ahb(env: Env): Promise<void> {
     'phase8 counter-dispute timeout',
   );
 
-  console.log('⚖️ STEP 8c: Hub counter-dispute finalize (post-timeout)...');
-  await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: [{
-      type: 'disputeFinalize',
-      data: {
-        counterpartyEntityId: bob.id,
-        cooperative: false,
-        description: 'Counter-dispute with newer state'
-      }
-    }]
-  }]);
-
-  await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: [{
-      type: 'j_broadcast',
-      data: {}
-    }]
-  }]);
-
-  await processUntil(env, () => {
-    const jRep = env.jReplicas?.get('AHB Demo');
-    return jRep ? jRep.mempool.length === 0 : false;
-  }, 40, 'J-machine counter-dispute finalize');
-
-  await processJEvents(env);
+  console.log('⚖️ STEP 8c: Scheduler finalizes the latest counter-proof (post-timeout)...');
+  await waitForDisputeFinality('PHASE 8');
 
   const edgeInfoAfterCounter = vm?.getAccountInfo ? await vm.getAccountInfo(bob.id, hub.id) : null;
   if (edgeInfoAfterCounter) {
@@ -2395,7 +2335,7 @@ export async function ahb(env: Env): Promise<void> {
   }
   const [, bobEdgeFinal] = findReplica(env, bob.id);
   assert(!bobEdgeFinal.state.accounts.get(hub.id)?.activeDispute, 'PHASE 8: activeDispute not cleared after counter-dispute');
-  console.log('✅ Counter-dispute finalized after timeout (non-starter path)');
+  console.log('✅ Latest counter-proof finalized after timeout and converged on both entities');
 
   // H10 AUDIT FIX: Verify solvency AFTER counter-dispute finalized.
   checkSolvency(env, TOTAL_SOLVENCY, 'PHASE 8 POST-COUNTER-DISPUTE');

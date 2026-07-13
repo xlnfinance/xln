@@ -1,15 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account/crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { TIMING } from '../constants';
 import { initCrontab, scheduleHook } from '../entity/scheduler';
 import { generateLazyEntityId } from '../entity/factory';
 import { processEventBatch } from '../jadapter/watcher';
-import {
-  buildJEventObservationDigest,
-  canonicalJurisdictionEventsHash,
-  getJEventJurisdictionRef,
-} from '../jurisdiction/event-observation';
+import { buildJEventRangeData } from './helpers/j-history';
+import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { createEmptyEnv, enqueueRuntimeInput, entityNeedsPeriodicWake, process, startRuntimeLoop } from '../runtime';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import type { AccountMachine, EntityReplica, Env, JurisdictionConfig, JurisdictionEvent } from '../types';
@@ -82,7 +79,6 @@ const makeReplica = (entityId: string, timestamp: number, signerId = '1'): Entit
       accounts: new Map(),
       deferredAccountProposals: new Map(),
       lastFinalizedJHeight: 0,
-      jBlockObservations: [],
       jBlockChain: [],
       entityEncPubKey: `${'0x'}${'11'.repeat(32)}`,
       entityEncPrivKey: `${'0x'}${'22'.repeat(32)}`,
@@ -266,19 +262,31 @@ describe('runtime ingress timestamp', () => {
       type: 'ReserveUpdated',
       data: { entity: jEventEntityId, tokenId: 1, newBalance: '100' },
     };
-    const jurisdictionRef = getJEventJurisdictionRef(TEST_JURISDICTION);
     const blockNumber = 1;
     const blockHash = `0x${'ab'.repeat(32)}`;
     const transactionHash = `0x${'cd'.repeat(32)}`;
-    const eventsHash = canonicalJurisdictionEventsHash([jEvent]);
-    const signature = signAccountFrame(env, jEventSignerId, buildJEventObservationDigest({
-      entityId: jEventEntityId,
-      jurisdictionRef,
-      signerId: jEventSignerId,
+    const jEventReplica = env.eReplicas.get(`${jEventEntityId}:${jEventSignerId}`)!;
+    const jEventRange = buildJEventRangeData(jEventReplica.state, {
+      from: jEventSignerId,
+      event: jEvent,
+      observedAt: blockNumber,
       blockNumber,
       blockHash,
-      eventsHash,
-    }));
+      transactionHash,
+    }, env);
+    const rangeBlock = jEventRange.blocks[0]!;
+    jEventReplica.jHistory = recordValidatorJHistory(undefined, {
+      jurisdictionRef: jEventRange.jurisdictionRef,
+      scannedThroughHeight: jEventRange.scannedThroughHeight,
+      tipBlockHash: jEventRange.tipBlockHash,
+      blocks: [{
+        jurisdictionRef: jEventRange.jurisdictionRef,
+        jHeight: rangeBlock.blockNumber,
+        jBlockHash: rangeBlock.blockHash,
+        eventsHash: rangeBlock.eventsHash,
+        events: rangeBlock.events,
+      }],
+    });
 
     enqueueRuntimeInput(env, {
       runtimeTxs: [],
@@ -301,18 +309,7 @@ describe('runtime ingress timestamp', () => {
           signerId: jEventSignerId,
           entityTxs: [{
             type: 'j_event',
-            data: {
-              from: jEventSignerId,
-              jurisdictionRef,
-              event: jEvent,
-              events: [jEvent],
-              observedAt: 1_000,
-              blockNumber,
-              blockHash,
-              transactionHash,
-              eventsHash,
-              signature,
-            },
+            data: jEventRange,
           }],
         },
       ],
@@ -387,7 +384,7 @@ describe('runtime ingress timestamp', () => {
     const replica = makeReplica(entityId, 1_000);
     env.eReplicas.set(`${entityId}:1`, replica);
 
-    const before = Date.now();
+    const before = getWallClockMs();
     await process(env, [{ entityId, signerId: '1', entityTxs: [] }]);
 
     expect(env.timestamp).toBeGreaterThanOrEqual(before);
@@ -521,8 +518,6 @@ describe('runtime ingress timestamp', () => {
       data: {},
     });
 
-    env.runtimeState.clockPrimed = true;
-
     const stop = startRuntimeLoop(env, { tickDelayMs: 5 });
     try {
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -549,8 +544,6 @@ describe('runtime ingress timestamp', () => {
       type: 'watchdog',
       data: {},
     });
-
-    env.runtimeState.clockPrimed = true;
 
     const stop = startRuntimeLoop(env, { tickDelayMs: 5 });
     try {

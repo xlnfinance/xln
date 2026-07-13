@@ -21,7 +21,6 @@ test('persisted pending network outputs retry after backup recovery', async () =
     ...(env.runtimeState || {}),
     loopActive: false,
     wakeRequested: false,
-    clockPrimed: true,
     entityRuntimeHints: new Map([[targetEntityId, { runtimeId: '0x2222222222222222222222222222222222222222', seenAt: env.timestamp }]]),
     directEntityInputDispatch: () => {
       dispatchCount += 1;

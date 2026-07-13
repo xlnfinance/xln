@@ -6,13 +6,12 @@
 
 import { ethers } from 'ethers';
 import type { JEvent } from './types';
-import type { DisputeFinalizationEvidence, EntityInput, EntityReplica, EntityTx, Env, JBlockObservation, JReplica, JurisdictionConfig, JurisdictionEvent, RuntimeInput } from '../types';
+import type { DisputeFinalizationEvidence, EntityInput, Env, JReplica, JurisdictionConfig, JurisdictionEvent, RuntimeInput, RuntimeTx, ValidatorJBlockHeader, ValidatorJEventBlock } from '../types';
 import { createEmptyBatch, type JBatch } from '../jurisdiction/batch';
 import { enqueueRuntimeInput } from '../runtime';
 import { signAccountFrame } from '../account/crypto';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import {
-  buildJEventObservationDigest,
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
   getJEventJurisdictionRef,
@@ -20,10 +19,13 @@ import {
 import { rememberRecentJEvents } from '../jurisdiction/event-evidence';
 import { JBLOCK_LIVENESS_INTERVAL } from '../types';
 import {
-  buildJHistoryCheckpointDigest,
-  EMPTY_J_HISTORY_ROOT,
-  foldJHistoryRoot,
+  buildJEventRangeDigest,
 } from '../jurisdiction/history-consensus';
+import {
+  buildUnsignedJEventRange,
+  recordValidatorJHistory,
+} from '../jurisdiction/local-history';
+import { isEntityActiveLeader } from '../entity/consensus/leader';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CANONICAL J-EVENTS (Single Source of Truth — must match Depository.sol)
@@ -172,14 +174,19 @@ export type JEventIngressBatch = {
   blockHash: string;
 };
 
-export type JHistoryCheckpointIngress = {
+export type JHistoryRangeIngress = {
   scannedThroughHeight: number;
   tipBlockHash: string;
+  headers: ValidatorJBlockHeader[];
 };
 
+export type JBlockHeadersIngress = ValidatorJBlockHeader[];
+
 let jEventIngressTransform: ((batch: JEventIngressBatch) => JEventIngressBatch) | null = null;
-let jHistoryCheckpointIngressTransform:
-  ((checkpoint: JHistoryCheckpointIngress) => JHistoryCheckpointIngress) | null = null;
+let jHistoryRangeIngressTransform:
+  ((range: JHistoryRangeIngress) => JHistoryRangeIngress) | null = null;
+let jBlockHeadersIngressTransform:
+  ((headers: JBlockHeadersIngress) => JBlockHeadersIngress) | null = null;
 
 export const setJEventIngressTransform = (
   transform: ((batch: JEventIngressBatch) => JEventIngressBatch) | null,
@@ -191,14 +198,40 @@ export const setJEventIngressTransform = (
   };
 };
 
-export const setJHistoryCheckpointIngressTransform = (
-  transform: ((checkpoint: JHistoryCheckpointIngress) => JHistoryCheckpointIngress) | null,
+export const setJHistoryRangeIngressTransform = (
+  transform: ((range: JHistoryRangeIngress) => JHistoryRangeIngress) | null,
 ): (() => void) => {
-  const previous = jHistoryCheckpointIngressTransform;
-  jHistoryCheckpointIngressTransform = transform;
+  const previous = jHistoryRangeIngressTransform;
+  jHistoryRangeIngressTransform = transform;
   return () => {
-    jHistoryCheckpointIngressTransform = previous;
+    jHistoryRangeIngressTransform = previous;
   };
+};
+
+export const setJBlockHeadersIngressTransform = (
+  transform: ((headers: JBlockHeadersIngress) => JBlockHeadersIngress) | null,
+): (() => void) => {
+  const previous = jBlockHeadersIngressTransform;
+  jBlockHeadersIngressTransform = transform;
+  return () => {
+    jBlockHeadersIngressTransform = previous;
+  };
+};
+
+export const applyJBlockHeadersIngressTransform = (
+  headers: JBlockHeadersIngress,
+): JBlockHeadersIngress => {
+  const transformed = jBlockHeadersIngressTransform
+    ? jBlockHeadersIngressTransform(headers.map((header) => ({ ...header })))
+    : headers;
+  if (transformed.length !== headers.length) throw new Error('J_HISTORY_HEADER_TRACE_LENGTH_MISMATCH');
+  return transformed.map((header, index) => {
+    const expectedHeight = headers[index]?.jHeight;
+    if (header.jHeight !== expectedHeight || !String(header.jBlockHash || '').trim()) {
+      throw new Error(`J_HISTORY_HEADER_TRACE_INVALID:index=${index}`);
+    }
+    return { jHeight: header.jHeight, jBlockHash: header.jBlockHash.toLowerCase() };
+  });
 };
 
 const normalizeJurisdictionLabel = (value: unknown): string =>
@@ -207,19 +240,43 @@ const normalizeJurisdictionLabel = (value: unknown): string =>
 const normalizeJurisdictionAddress = (value: unknown): string =>
   String(value || '').trim().toLowerCase();
 
-const findWatcherJurisdictionReplica = (env: Env, depositoryAddress?: string) => {
+export const findWatcherJurisdictionReplica = (
+  env: Env,
+  depositoryAddress?: string,
+  chainId?: number,
+) => {
   const replicas = Array.from(env?.jReplicas?.values?.() || []);
   if (replicas.length === 0) return null;
 
   const normalizedDepository = String(depositoryAddress ?? '').trim().toLowerCase();
-  if (normalizedDepository) {
-    const matched = replicas.find((replica) => {
+  const normalizedChainId = Number.isFinite(chainId) && Number(chainId) > 0 ? Math.floor(Number(chainId)) : null;
+  if (normalizedDepository || normalizedChainId !== null) {
+    const addressMatches = replicas.filter((replica) => {
       const candidate = String(
         replica?.depositoryAddress || replica?.contracts?.depository || '',
       ).trim().toLowerCase();
-      return candidate === normalizedDepository;
+      return !normalizedDepository || candidate === normalizedDepository;
     });
-    if (matched) return matched;
+    const matches = normalizedChainId === null
+      ? addressMatches
+      : addressMatches.filter((replica) => watcherChainIdOf(replica) === normalizedChainId);
+    if (matches.length === 1) return matches[0]!;
+    if (matches.length > 1) {
+      throw new Error(`J_WATCHER_JURISDICTION_AMBIGUOUS:${normalizedChainId ?? 'any'}:${normalizedDepository || 'any'}`);
+    }
+
+    // Legacy/scenario replicas may predate the chainId field. A unique Depository
+    // still identifies them safely; deterministic deployments with two replicas at
+    // the same address remain fail-closed instead of guessing a jurisdiction.
+    if (
+      normalizedChainId !== null &&
+      normalizedDepository &&
+      addressMatches.length === 1 &&
+      watcherChainIdOf(addressMatches[0]) === null
+    ) {
+      return addressMatches[0]!;
+    }
+    return null;
   }
 
   if (env.activeJurisdiction) {
@@ -228,6 +285,28 @@ const findWatcherJurisdictionReplica = (env: Env, depositoryAddress?: string) =>
   }
 
   return replicas[0] || null;
+};
+
+const requireWatcherJurisdictionReplica = (
+  env: Env,
+  depositoryAddress: string | undefined,
+  chainId: number | undefined,
+  context: string,
+): JReplica => {
+  const replica = findWatcherJurisdictionReplica(env, depositoryAddress, chainId);
+  if (replica) return replica;
+  const available = [...(env.jReplicas?.values?.() || [])]
+    .map((candidate) => {
+      const address = String(candidate.depositoryAddress || candidate.contracts?.depository || '').toLowerCase();
+      return `${candidate.name || 'unnamed'}/${String(candidate.chainId ?? 'missing')}/${address || 'missing'}`;
+    })
+    .join(',');
+  throw new Error(
+    `J_WATCHER_JURISDICTION_NOT_FOUND:${context}` +
+    `:chain=${String(chainId ?? 'any')}` +
+    `:depository=${String(depositoryAddress || 'any').toLowerCase()}` +
+    `:available=${available || 'none'}`,
+  );
 };
 
 const watcherDepositoryOf = (replica: JReplica | null | undefined): string =>
@@ -252,17 +331,20 @@ export const isEntityReplicaRelevantToWatcher = (
   }
   const watcherDepository = watcherDepositoryOf(watcherReplica);
   const entityDepository = normalizeJurisdictionAddress(jurisdiction.depositoryAddress);
-  if (watcherDepository && entityDepository) return watcherDepository === entityDepository;
-  const watcherName = watcherNameOf(watcherReplica);
-  const entityName = normalizeJurisdictionLabel(jurisdiction.name);
   const watcherChainId = watcherChainIdOf(watcherReplica);
   const entityChainId = Number(jurisdiction.chainId);
   const chainMatches = !watcherChainId || !Number.isFinite(entityChainId) || watcherChainId === Math.floor(entityChainId);
+  if (!chainMatches) return false;
+  if (watcherDepository && entityDepository) return watcherDepository === entityDepository;
+  const watcherName = watcherNameOf(watcherReplica);
+  const entityName = normalizeJurisdictionLabel(jurisdiction.name);
   return Boolean(watcherName && entityName && watcherName === entityName && chainMatches);
 };
 
-export function getWatcherStartBlock(env: Env, depositoryAddress?: string): number {
-  const replica = findWatcherJurisdictionReplica(env, depositoryAddress);
+export function getWatcherStartBlock(env: Env, depositoryAddress?: string, chainId?: number): number {
+  const replica = depositoryAddress || chainId !== undefined
+    ? requireWatcherJurisdictionReplica(env, depositoryAddress, chainId, 'start-block')
+    : findWatcherJurisdictionReplica(env, depositoryAddress, chainId);
   const replicaBlockNumber = Number(replica?.blockNumber ?? 0n);
   const signerBlockNumber = replica ? getMinimumCommittedSignerJHeight(env, replica) : getMinimumCommittedSignerJHeight(env);
   const blockNumber = signerBlockNumber === null
@@ -287,8 +369,11 @@ export function updateWatcherJurisdictionCursor(
   env: Env,
   blockNumber: number,
   depositoryAddress?: string,
+  chainId?: number,
 ): void {
-  const replica = findWatcherJurisdictionReplica(env, depositoryAddress);
+  const replica = depositoryAddress || chainId !== undefined
+    ? requireWatcherJurisdictionReplica(env, depositoryAddress, chainId, 'cursor-update')
+    : findWatcherJurisdictionReplica(env, depositoryAddress, chainId);
   if (!replica) return;
   if (!Number.isFinite(blockNumber) || blockNumber < 0) return;
   const nextBlock = Math.floor(blockNumber);
@@ -710,6 +795,8 @@ export function buildRawJEventsRuntimeInput(
     logBatch?: boolean;
     emitSettledDebugEvents?: boolean;
     watcherDepositoryAddress?: string;
+    watcherChainId?: number;
+    emitRange?: boolean;
   },
 ): JEventsRuntimeInputBuildResult | null {
   if (rawEvents.length === 0) return null;
@@ -722,6 +809,8 @@ export function buildRawJEventsRuntimeInput(
     logBatch = false,
     emitSettledDebugEvents = false,
     watcherDepositoryAddress,
+    watcherChainId,
+    emitRange = true,
   } = options;
 
   if (logBatch) {
@@ -761,16 +850,25 @@ export function buildRawJEventsRuntimeInput(
   });
 
   const eventsByReplica = new Map<string, { entityId: string; signerId: string; jurisdictionRef: string; events: RawJEvent[] }>();
+  const watcherReplica = watcherDepositoryAddress || watcherChainId !== undefined
+    ? requireWatcherJurisdictionReplica(env, watcherDepositoryAddress, watcherChainId, 'event-batch')
+    : undefined;
+  const watcherJurisdictionRef = watcherReplica ? getJEventJurisdictionRef(watcherReplica) : '';
 
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
-    const watcherReplica = watcherDepositoryAddress
-      ? findWatcherJurisdictionReplica(env, watcherDepositoryAddress)
-      : undefined;
     if (watcherReplica && !isEntityReplicaRelevantToWatcher(env, replica, watcherReplica)) continue;
+    const jurisdictionRef = getJEventJurisdictionRef(replica.state.config.jurisdiction);
+    if (watcherReplica && jurisdictionRef !== watcherJurisdictionRef) {
+      throw new Error(
+        `J_WATCHER_ENTITY_JURISDICTION_MISMATCH:event-batch` +
+        `:watcher=${watcherJurisdictionRef}:entity=${jurisdictionRef}:replica=${replicaKey}`,
+      );
+    }
     const [entityIdFromKey, signerIdFromKey] = replicaKey.split(':');
     const entityId = String(replica.entityId || entityIdFromKey || '').toLowerCase();
     const signerId = String(replica.signerId || signerIdFromKey || '');
     if (!entityId || !signerId) continue;
+    if (blockNumber <= Number(replica.state.lastFinalizedJHeight || 0)) continue;
 
     const relevant = enrichedRawEvents.filter((event) => isEventRelevantToEntity(event, entityId));
     if (relevant.length === 0) continue;
@@ -783,14 +881,17 @@ export function buildRawJEventsRuntimeInput(
     eventsByReplica.set(replicaKey, {
       entityId,
       signerId,
-      jurisdictionRef: getJEventJurisdictionRef(replica.state.config.jurisdiction),
+      jurisdictionRef,
       events: [...relevant],
     });
   }
 
+  const runtimeTxs: RuntimeTx[] = [];
   const entityInputs: EntityInput[] = [];
   const evidenceEventsByLog = new Map<string, RawJEvent>();
-  for (const { entityId, signerId, jurisdictionRef, events } of eventsByReplica.values()) {
+  for (const [replicaKey, { entityId, signerId, jurisdictionRef, events }] of eventsByReplica) {
+    const replica = env.eReplicas.get(replicaKey);
+    if (!replica) throw new Error(`J_HISTORY_LOCAL_REPLICA_MISSING:${replicaKey}`);
     const jEvents = events.flatMap((event) => rawEventToJEvents(event, entityId));
     if (jEvents.length === 0) continue;
     const firstJEvent = jEvents[0];
@@ -823,50 +924,56 @@ export function buildRawJEventsRuntimeInput(
       }
     }
 
-    const transactionHash =
-      events[0]?.transactionHash ??
-      `${adapterLabel}-${blockNumber}-${txCounter ? txCounter.value++ : entityInputs.length}`;
+    if (txCounter) txCounter.value += 1;
     const eventsHash = canonicalJurisdictionEventsHash(jEvents);
     const disputeFinalizationEvidenceHash = disputeFinalizationEvidence.length > 0
       ? canonicalDisputeFinalizationEvidenceHash(disputeFinalizationEvidence)
       : undefined;
-    const signature = signAccountFrame(
-      env,
-      signerId,
-      buildJEventObservationDigest({
+    const localBlock: ValidatorJEventBlock = {
+      jurisdictionRef,
+      jHeight: blockNumber,
+      jBlockHash: blockHash.toLowerCase(),
+      eventsHash,
+      events: jEvents,
+      ...(disputeFinalizationEvidenceHash ? { disputeFinalizationEvidenceHash } : {}),
+      ...(disputeFinalizationEvidence.length > 0 ? { disputeFinalizationEvidence } : {}),
+    };
+    const observeTx: Extract<RuntimeTx, { type: 'observeJRange' }> = {
+      type: 'observeJRange',
+      data: {
         entityId,
-        jurisdictionRef,
         signerId,
-        blockNumber,
-        blockHash,
-        eventsHash,
-        ...(disputeFinalizationEvidenceHash ? { disputeFinalizationEvidenceHash } : {}),
-      }),
-    );
+        jurisdictionRef,
+        scannedThroughHeight: blockNumber,
+        tipBlockHash: blockHash.toLowerCase(),
+        blocks: [localBlock],
+      },
+    };
+    runtimeTxs.push(observeTx);
 
-    entityInputs.push({
-      entityId,
-      signerId,
-      entityTxs: [
-        {
+    if (emitRange && isEntityActiveLeader(replica)) {
+      const tentativeHistory = recordValidatorJHistory(replica.jHistory, observeTx.data);
+      const unsignedRange = buildUnsignedJEventRange(replica.state, tentativeHistory);
+      if (!unsignedRange) throw new Error(`J_HISTORY_RANGE_NOT_AHEAD:${entityId}:${blockNumber}`);
+      const signature = signAccountFrame(env, signerId, buildJEventRangeDigest({
+        entityId,
+        signerId,
+        ...unsignedRange,
+      }));
+      entityInputs.push({
+        entityId,
+        signerId,
+        entityTxs: [{
           type: 'j_event',
           data: {
             from: signerId,
-            jurisdictionRef,
             observedAt,
-            blockNumber,
-            blockHash,
-            transactionHash,
-            eventsHash,
             signature,
-            events: jEvents,
-            event: firstJEvent,
-            ...(disputeFinalizationEvidenceHash ? { disputeFinalizationEvidenceHash } : {}),
-            ...(disputeFinalizationEvidence.length > 0 ? { disputeFinalizationEvidence } : {}),
+            ...unsignedRange,
           },
-        },
-      ],
-    });
+        }],
+      });
+    }
 
     for (let index = 0; index < events.length; index += 1) {
       const event = events[index]!;
@@ -885,89 +992,75 @@ export function buildRawJEventsRuntimeInput(
     }
   }
 
-  if (entityInputs.length === 0) return null;
+  if (runtimeTxs.length === 0) return null;
   return {
     input: {
       timestamp: observedAt,
-      runtimeTxs: [],
+      runtimeTxs,
       entityInputs,
     },
     evidenceEvents: [...evidenceEventsByLog.values()],
   };
 }
 
-const observationFromJEventTx = (
-  signerId: string,
-  tx: Extract<EntityTx, { type: 'j_event' }>,
-): JBlockObservation => ({
-  signerId,
-  jurisdictionRef: String(tx.data.jurisdictionRef || '').toLowerCase(),
-  jHeight: Number(tx.data.blockNumber),
-  jBlockHash: String(tx.data.blockHash || '').toLowerCase(),
-  eventsHash: String(tx.data.eventsHash || '').toLowerCase(),
-  events: tx.data.events || [tx.data.event],
-  signature: String(tx.data.signature || '').toLowerCase(),
-  ...(tx.data.disputeFinalizationEvidenceHash
-    ? { disputeFinalizationEvidenceHash: tx.data.disputeFinalizationEvidenceHash }
-    : {}),
-  ...(tx.data.disputeFinalizationEvidence
-    ? { disputeFinalizationEvidence: tx.data.disputeFinalizationEvidence }
-    : {}),
-  observedAt: Number(tx.data.observedAt),
-});
-
-const finalizedRootForReplica = (replica: EntityReplica): string => {
-  const state = replica.state;
-  if (state.jHistoryFinality?.eventHistoryRoot) return state.jHistoryFinality.eventHistoryRoot;
-  return foldJHistoryRoot(EMPTY_J_HISTORY_ROOT, state.jBlockChain || []);
-};
-
-export type JHistoryCheckpointRuntimeInput = {
+export type JHistoryRangeRuntimeInput = {
   input: RuntimeInput;
   replicaKeys: string[];
 };
 
-const appendJHistoryCheckpoints = (
+type JHistoryRangeScope = 'watcher' | 'observed';
+
+const appendJHistoryRange = (
   observedInput: RuntimeInput,
-  checkpointInput: RuntimeInput | null,
+  rangeInput: RuntimeInput | null,
 ): RuntimeInput => {
-  if (!checkpointInput?.entityInputs?.length) return observedInput;
+  if (!rangeInput) return observedInput;
   const merged = new Map<string, EntityInput>();
   for (const input of observedInput.entityInputs || []) {
     merged.set(`${String(input.entityId).toLowerCase()}:${String(input.signerId).toLowerCase()}`, input);
   }
-  for (const checkpoint of checkpointInput.entityInputs) {
-    const key = `${String(checkpoint.entityId).toLowerCase()}:${String(checkpoint.signerId).toLowerCase()}`;
+  for (const range of rangeInput.entityInputs) {
+    const key = `${String(range.entityId).toLowerCase()}:${String(range.signerId).toLowerCase()}`;
     const observation = merged.get(key);
     merged.set(key, observation
-      ? { ...observation, entityTxs: [...(observation.entityTxs || []), ...(checkpoint.entityTxs || [])] }
-      : checkpoint);
+      ? { ...observation, entityTxs: [...(observation.entityTxs || []), ...(range.entityTxs || [])] }
+      : range);
   }
-  return { ...observedInput, entityInputs: [...merged.values()] };
+  return {
+    ...observedInput,
+    runtimeTxs: [...observedInput.runtimeTxs, ...rangeInput.runtimeTxs],
+    entityInputs: [...merged.values()],
+  };
 };
 
-export function buildJHistoryCheckpointRuntimeInput(
+export function buildJHistoryRangeRuntimeInput(
   env: Env,
   newlyObservedInputs: RuntimeInput[],
   scannedThroughHeight: number,
   tipBlockHash: string,
   depositoryAddress?: string,
-): JHistoryCheckpointRuntimeInput | null {
+  headers: Array<{ jHeight: number; jBlockHash: string }> = [],
+  chainId?: number,
+  scope: JHistoryRangeScope = 'watcher',
+): JHistoryRangeRuntimeInput | null {
   if (!Number.isSafeInteger(scannedThroughHeight) || scannedThroughHeight <= 0) {
-    throw new Error(`J_HISTORY_CHECKPOINT_INVALID_SCANNED_HEIGHT:${String(scannedThroughHeight)}`);
+    throw new Error(`J_HISTORY_RANGE_INVALID_SCANNED_HEIGHT:${String(scannedThroughHeight)}`);
   }
-  if (!String(tipBlockHash || '').trim()) throw new Error('J_HISTORY_CHECKPOINT_TIP_HASH_MISSING');
-  const watcherReplica = depositoryAddress ? findWatcherJurisdictionReplica(env, depositoryAddress) : undefined;
-  const newTxsByReplica = new Map<string, Array<Extract<EntityTx, { type: 'j_event' }>>>();
+  if (!String(tipBlockHash || '').trim()) throw new Error('J_HISTORY_RANGE_TIP_HASH_MISSING');
+  const watcherReplica = depositoryAddress || chainId !== undefined
+    ? requireWatcherJurisdictionReplica(env, depositoryAddress, chainId, 'history-range')
+    : undefined;
+  const watcherJurisdictionRef = watcherReplica ? getJEventJurisdictionRef(watcherReplica) : '';
+  const observationsByReplica = new Map<string, Array<Extract<RuntimeTx, { type: 'observeJRange' }>>>();
   for (const runtimeInput of newlyObservedInputs) {
-    for (const input of runtimeInput.entityInputs || []) {
-      const key = `${String(input.entityId || '').toLowerCase()}:${String(input.signerId || '').toLowerCase()}`;
-      const txs = (input.entityTxs || []).filter((tx): tx is Extract<EntityTx, { type: 'j_event' }> => tx.type === 'j_event');
-      if (txs.length === 0) continue;
-      newTxsByReplica.set(key, [...(newTxsByReplica.get(key) || []), ...txs]);
+    for (const tx of runtimeInput.runtimeTxs || []) {
+      if (tx.type !== 'observeJRange') continue;
+      const key = `${String(tx.data.entityId).toLowerCase()}:${String(tx.data.signerId).toLowerCase()}`;
+      observationsByReplica.set(key, [...(observationsByReplica.get(key) || []), tx]);
     }
   }
 
+  const runtimeTxs: RuntimeTx[] = [];
   const entityInputs: EntityInput[] = [];
   const replicaKeys: string[] = [];
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
@@ -976,94 +1069,146 @@ export function buildJHistoryCheckpointRuntimeInput(
     const signerId = String(replica.signerId || '').toLowerCase();
     if (!entityId || !signerId) continue;
     const key = `${entityId}:${signerId}`;
-    const newTxs = newTxsByReplica.get(key) || [];
+    // A transaction receipt proves only the entities named by its events. It
+    // cannot advance an unrelated entity's empty J range because the receipt
+    // API does not carry the source jurisdiction. In a multi-J runtime with
+    // deterministic deployments, doing so would copy chain A's block hash into
+    // chain B's Entity history. Long-lived watchers are different: they pass an
+    // exact (chainId, Depository) selector and may advance every matching Entity.
+    if (scope === 'observed' && !observationsByReplica.has(key)) continue;
     const baseHeight = Number(replica.state.lastFinalizedJHeight || 0);
     const livenessDue = scannedThroughHeight - baseHeight >= JBLOCK_LIVENESS_INTERVAL;
-    if (newTxs.length === 0 && !livenessDue) continue;
+    const observations = observationsByReplica.get(key) || [];
+    const hasLocalHeaders = headers.length > 0;
+    if (observations.length === 0 && !livenessDue && !hasLocalHeaders) continue;
     if (scannedThroughHeight <= baseHeight) continue;
-
-    const pending = (replica.state.jBlockObservations || []).filter((observation) =>
-      String(observation.signerId || '').toLowerCase() === signerId &&
-      observation.jHeight > baseHeight &&
-      observation.jHeight <= scannedThroughHeight
-    );
-    const incoming = newTxs.map((tx) => observationFromJEventTx(signerId, tx));
-    const byIdentity = new Map<string, JBlockObservation>();
-    for (const observation of [...pending, ...incoming]) {
-      const identity = `${observation.jHeight}:${observation.jBlockHash}:${observation.eventsHash}`;
-      byIdentity.set(identity, observation);
-    }
-    const eventHistoryRoot = foldJHistoryRoot(finalizedRootForReplica(replica), [...byIdentity.values()]);
     const jurisdictionRef = getJEventJurisdictionRef(replica.state.config.jurisdiction);
-    const signature = signAccountFrame(env, signerId, buildJHistoryCheckpointDigest({
+    if (watcherReplica && jurisdictionRef !== watcherJurisdictionRef) {
+      throw new Error(
+        `J_WATCHER_ENTITY_JURISDICTION_MISMATCH:history-range` +
+        `:watcher=${watcherJurisdictionRef}:entity=${jurisdictionRef}:replica=${replicaKey}`,
+      );
+    }
+    let tentativeHistory = replica.jHistory;
+    for (const observation of observations) {
+      tentativeHistory = recordValidatorJHistory(tentativeHistory, observation.data);
+    }
+    const normalizedTipBlockHash = String(tipBlockHash).toLowerCase();
+    if (
+      headers.length > 0 ||
+      !tentativeHistory ||
+      tentativeHistory.scannedThroughHeight !== scannedThroughHeight ||
+      tentativeHistory.tipBlockHash !== normalizedTipBlockHash
+    ) {
+      const scanTipObservation: Extract<RuntimeTx, { type: 'observeJRange' }> = {
+        type: 'observeJRange',
+        data: {
+          entityId,
+          signerId,
+          jurisdictionRef,
+          scannedThroughHeight,
+          tipBlockHash: normalizedTipBlockHash,
+          ...(headers.length > 0 ? { headers } : {}),
+          blocks: [],
+        },
+      };
+      tentativeHistory = recordValidatorJHistory(tentativeHistory, scanTipObservation.data);
+      runtimeTxs.push(scanTipObservation);
+    }
+    replicaKeys.push(replicaKey);
+    if (!isEntityActiveLeader(replica) || (observations.length === 0 && !livenessDue)) continue;
+    const unsignedRange = buildUnsignedJEventRange(replica.state, tentativeHistory);
+    if (!unsignedRange) continue;
+    const signature = signAccountFrame(env, signerId, buildJEventRangeDigest({
       entityId,
-      jurisdictionRef,
       signerId,
-      baseHeight,
-      scannedThroughHeight,
-      tipBlockHash,
-      eventHistoryRoot,
+      ...unsignedRange,
     }));
     entityInputs.push({
       entityId,
       signerId,
       entityTxs: [{
-        type: 'j_history_checkpoint',
+        type: 'j_event',
         data: {
           from: signerId,
-          jurisdictionRef,
-          baseHeight,
-          scannedThroughHeight,
-          tipBlockHash: String(tipBlockHash).toLowerCase(),
-          eventHistoryRoot,
+          observedAt: scannedThroughHeight,
           signature,
+          ...unsignedRange,
         },
       }],
     });
-    replicaKeys.push(replicaKey);
   }
-  if (entityInputs.length === 0) return null;
+  if (runtimeTxs.length === 0 && entityInputs.length === 0) return null;
   return {
-    input: { timestamp: scannedThroughHeight, runtimeTxs: [], entityInputs },
+    input: { timestamp: scannedThroughHeight, runtimeTxs, entityInputs },
     replicaKeys: replicaKeys.sort(),
   };
 }
 
-export function enqueueJHistoryCheckpoint(
+export function enqueueJHistoryRange(
   env: Env,
   newlyObservedInputs: RuntimeInput[],
   scannedThroughHeight: number,
   tipBlockHash: string,
   depositoryAddress?: string,
+  headers: Array<{ jHeight: number; jBlockHash: string }> = [],
+  chainId?: number,
 ): string[] {
-  const ingress = jHistoryCheckpointIngressTransform
-    ? jHistoryCheckpointIngressTransform({ scannedThroughHeight, tipBlockHash })
-    : { scannedThroughHeight, tipBlockHash };
-  const built = buildJHistoryCheckpointRuntimeInput(
+  const ingress = jHistoryRangeIngressTransform
+    ? jHistoryRangeIngressTransform({ scannedThroughHeight, tipBlockHash, headers })
+    : { scannedThroughHeight, tipBlockHash, headers };
+  const built = buildJHistoryRangeRuntimeInput(
     env,
     newlyObservedInputs,
     ingress.scannedThroughHeight,
     ingress.tipBlockHash,
     depositoryAddress,
+    ingress.headers,
+    chainId,
   );
   if (!built) return [];
   enqueueRuntimeInput(env, built.input);
   return built.replicaKeys;
 }
 
-export function hasJHistoryLivenessCheckpointDue(
+export function enqueueJHistoryRewind(
   env: Env,
-  scannedThroughHeight: number,
+  conflictingHeight: number,
+  conflictingBlockHash: string,
   depositoryAddress?: string,
-): boolean {
-  const watcherReplica = depositoryAddress ? findWatcherJurisdictionReplica(env, depositoryAddress) : undefined;
-  for (const replica of env.eReplicas.values()) {
+  chainId?: number,
+): string[] {
+  const watcherReplica = depositoryAddress || chainId !== undefined
+    ? requireWatcherJurisdictionReplica(env, depositoryAddress, chainId, 'history-rewind')
+    : findWatcherJurisdictionReplica(env, depositoryAddress, chainId);
+  const runtimeTxs: RuntimeTx[] = [];
+  const replicaKeys: string[] = [];
+  for (const [replicaKey, replica] of env.eReplicas.entries()) {
     if (watcherReplica && !isEntityReplicaRelevantToWatcher(env, replica, watcherReplica)) continue;
-    if (scannedThroughHeight - Number(replica.state.lastFinalizedJHeight || 0) >= JBLOCK_LIVENESS_INTERVAL) {
-      return true;
-    }
+    if (!replica.jHistory || replica.jHistory.scannedThroughHeight <= replica.state.lastFinalizedJHeight) continue;
+    const entityId = String(replica.state.entityId || replica.entityId || '').trim().toLowerCase();
+    const signerId = String(replica.signerId || '').trim().toLowerCase();
+    const jurisdictionRef = getJEventJurisdictionRef(replica.state.config.jurisdiction);
+    if (!entityId || !signerId) throw new Error(`J_HISTORY_REWIND_REPLICA_ID_MISSING:${replicaKey}`);
+    runtimeTxs.push({
+      type: 'rewindJHistory',
+      data: {
+        entityId,
+        signerId,
+        jurisdictionRef,
+        conflictingHeight,
+        conflictingBlockHash: String(conflictingBlockHash || '').trim().toLowerCase(),
+      },
+    });
+    replicaKeys.push(replicaKey);
   }
-  return false;
+  if (runtimeTxs.length === 0) return [];
+  enqueueRuntimeInput(env, {
+    timestamp: conflictingHeight,
+    runtimeTxs,
+    entityInputs: [],
+  });
+  return replicaKeys.sort();
 }
 
 export function applyJEventsToEnv(env: Env, events: JEvent[], label = 'J-EVENTS'): void {
@@ -1093,17 +1238,10 @@ export function applyJEventsToEnv(env: Env, events: JEvent[], label = 'J-EVENTS'
     owners.set(owner, Math.max(owners.get(owner) ?? 0, Number.isFinite(blockNumber) ? blockNumber : 0));
     env.runtimeState.externalWalletWatchOwners.set(entityId, owners);
   }
-  const blockGroups = new Map<number, RawJEvent[]>();
-  for (const event of rawEvents) {
-    const blockNumber = Number(event.blockNumber ?? 0);
-    if (!blockGroups.has(blockNumber)) blockGroups.set(blockNumber, []);
-    blockGroups.get(blockNumber)!.push(event);
-  }
-  const dedupCounter = env.runtimeState?.watcherDedupCounter ?? { value: 0 };
-  for (const [blockNumber, groupedEvents] of blockGroups) {
-    const blockHash = groupedEvents[0]?.blockHash ?? '0x';
-    processEventBatch(groupedEvents, env, blockNumber, blockHash, dedupCounter, label);
-  }
+  const input = buildJEventsRuntimeInput(env, events, label);
+  if (!input) return;
+  rememberRecentJEvents(env, rawEvents);
+  enqueueRuntimeInput(env, input);
 }
 
 export function buildJEventsRuntimeInput(env: Env, events: JEvent[], label = 'J-EVENTS'): RuntimeInput | null {
@@ -1128,7 +1266,7 @@ export function buildJEventsRuntimeInput(env: Env, events: JEvent[], label = 'J-
   }
 
   const txCounter: EventBatchCounter = { value: 0 };
-  const entityInputs: EntityInput[] = [];
+  const runtimeTxs: RuntimeTx[] = [];
   let timestamp = 0;
   let tipBlockHash = '';
   for (const [blockNumber, groupedEvents] of blockGroups) {
@@ -1140,26 +1278,31 @@ export function buildJEventsRuntimeInput(env: Env, events: JEvent[], label = 'J-
       txCounter,
       logBatch: false,
       emitSettledDebugEvents: false,
+      emitRange: false,
     });
-    if (built?.input.entityInputs?.length) {
-      entityInputs.push(...built.input.entityInputs);
+    if (built?.input.runtimeTxs?.length) {
+      runtimeTxs.push(...built.input.runtimeTxs);
       timestamp = Math.max(timestamp, Number(built.input.timestamp ?? 0));
       if (blockNumber === timestamp) tipBlockHash = blockHash;
     }
   }
-  if (entityInputs.length === 0) return null;
+  if (runtimeTxs.length === 0) return null;
   const observedInput: RuntimeInput = {
     timestamp,
-    runtimeTxs: [],
-    entityInputs,
+    runtimeTxs,
+    entityInputs: [],
   };
-  const checkpoint = buildJHistoryCheckpointRuntimeInput(
+  const range = buildJHistoryRangeRuntimeInput(
     env,
     [observedInput],
     timestamp,
     tipBlockHash,
+    undefined,
+    [],
+    undefined,
+    'observed',
   );
-  return appendJHistoryCheckpoints(observedInput, checkpoint?.input ?? null);
+  return appendJHistoryRange(observedInput, range?.input ?? null);
 }
 
 /**
@@ -1174,8 +1317,9 @@ export function processEventBatch(
   txCounter: EventBatchCounter,
   adapterLabel: string,
   watcherDepositoryAddress?: string,
-  deferHistoryCheckpoint = false,
+  deferHistoryRange = false,
   source: 'chain' | 'synthetic' = 'synthetic',
+  watcherChainId?: number,
 ): RuntimeInput | null {
   // Filter to canonical events only
   const canonical = rawEvents.filter(isCanonicalEvent);
@@ -1253,19 +1397,23 @@ export function processEventBatch(
     logBatch: !!env?.debugJWatcherBatches,
     emitSettledDebugEvents: true,
     ...(watcherDepositoryAddress ? { watcherDepositoryAddress } : {}),
+    ...(watcherChainId !== undefined ? { watcherChainId } : {}),
+    emitRange: false,
   });
   if (!built) return null;
   rememberRecentJEvents(env, built.evidenceEvents);
-  const checkpoint = deferHistoryCheckpoint
+  const range = deferHistoryRange
     ? null
-    : buildJHistoryCheckpointRuntimeInput(
+    : buildJHistoryRangeRuntimeInput(
       env,
       [built.input],
       ingressBatch.blockNumber,
       ingressBatch.blockHash,
       watcherDepositoryAddress,
+      [],
+      watcherChainId,
     );
-  const input = appendJHistoryCheckpoints(built.input, checkpoint?.input ?? null);
+  const input = appendJHistoryRange(built.input, range?.input ?? null);
   enqueueRuntimeInput(env, input);
   return input;
 }

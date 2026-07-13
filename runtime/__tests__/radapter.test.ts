@@ -156,7 +156,6 @@ const makeEnv = (): Env => ({
         ]),
         deferredAccountProposals: new Map(),
         lastFinalizedJHeight: 0,
-        jBlockObservations: [],
         jBlockChain: [],
         entityEncPubKey: 'pub',
         entityEncPrivKey: 'priv',

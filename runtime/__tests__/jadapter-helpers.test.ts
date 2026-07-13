@@ -14,25 +14,28 @@ import {
   applyJEventsToEnv,
   buildJEventsRuntimeInput,
   collectRelevantJEventReplicaKeys,
+  findWatcherJurisdictionReplica,
   getWatcherStartBlock,
   getMinimumCommittedSignerJHeight,
   processEventBatch,
-  enqueueJHistoryCheckpoint,
+  enqueueJHistoryRange,
+  isEntityReplicaRelevantToWatcher,
   rawEventToJEvents,
   rememberPendingWatcherJBlock,
   resolveCommittedWatcherCursor,
   setJEventIngressTransform,
-  setJHistoryCheckpointIngressTransform,
+  setJHistoryRangeIngressTransform,
   updateWatcherJurisdictionCursor,
 } from '../jadapter/watcher';
 import { findRecentReserveUpdatedEvent } from '../jurisdiction/event-evidence';
 import { createEmptyEnv } from '../runtime';
 import type { EntityReplica, Env, JReplica, JurisdictionConfig } from '../types';
 
-const makeJReplica = (name: string, blockNumber: bigint, depositoryAddress: string): JReplica => ({
+const makeJReplica = (name: string, blockNumber: bigint, depositoryAddress: string, chainId?: number): JReplica => ({
   name,
   blockNumber,
   depositoryAddress,
+  ...(chainId !== undefined ? { chainId } : {}),
   stateRoot: new Uint8Array(32),
   mempool: [],
   blockDelayMs: 0,
@@ -78,7 +81,6 @@ const makeReplica = (entityId: string, signerId: string, isProposer: boolean): E
       accounts: new Map(),
       deferredAccountProposals: new Map(),
       lastFinalizedJHeight: 0,
-      jBlockObservations: [],
       jBlockChain: [],
       entityEncPubKey: `${'0x'}${'11'.repeat(32)}`,
       entityEncPrivKey: `${'0x'}${'22'.repeat(32)}`,
@@ -347,6 +349,61 @@ describe('jadapter helper cursors', () => {
     expect(getWatcherStartBlock(env, wakanda.depositoryAddress)).toBe(6);
   });
 
+  test('watcher identity includes chainId when deterministic deployments share an address', () => {
+    const sharedDepository = `0x${'aa'.repeat(20)}`;
+    const arrakis = makeJurisdiction('Arrakis', 31337, sharedDepository);
+    const wakanda = makeJurisdiction('Wakanda', 31338, sharedDepository);
+    const arrakisJ = makeJReplica(arrakis.name, 120n, sharedDepository, arrakis.chainId);
+    const wakandaJ = makeJReplica(wakanda.name, 80n, sharedDepository, wakanda.chainId);
+    const env = makeCursorEnv('jadapter-cursor-shared-address', [arrakisJ, wakandaJ], arrakis.name);
+    const arrakisEntity = makeReplica(`0x${'68'.repeat(32)}`, '1', true);
+    const wakandaEntity = makeReplica(`0x${'69'.repeat(32)}`, '2', true);
+    arrakisEntity.state.config.jurisdiction = arrakis;
+    wakandaEntity.state.config.jurisdiction = wakanda;
+    arrakisEntity.state.lastFinalizedJHeight = 100;
+    wakandaEntity.state.lastFinalizedJHeight = 5;
+    env.eReplicas.set(`${arrakisEntity.entityId}:1`, arrakisEntity);
+    env.eReplicas.set(`${wakandaEntity.entityId}:2`, wakandaEntity);
+
+    expect(isEntityReplicaRelevantToWatcher(env, arrakisEntity, arrakisJ)).toBe(true);
+    expect(isEntityReplicaRelevantToWatcher(env, arrakisEntity, wakandaJ)).toBe(false);
+    expect(isEntityReplicaRelevantToWatcher(env, wakandaEntity, arrakisJ)).toBe(false);
+    expect(isEntityReplicaRelevantToWatcher(env, wakandaEntity, wakandaJ)).toBe(true);
+    expect(getWatcherStartBlock(env, sharedDepository, 31337)).toBe(101);
+    expect(getWatcherStartBlock(env, sharedDepository, 31338)).toBe(6);
+    expect(() => getWatcherStartBlock(env, sharedDepository)).toThrow(/J_WATCHER_JURISDICTION_AMBIGUOUS/);
+    expect(() => getWatcherStartBlock(env, sharedDepository, 31339)).toThrow(
+      /J_WATCHER_JURISDICTION_NOT_FOUND:start-block/,
+    );
+    expect(() => enqueueJHistoryRange(
+      env,
+      [],
+      121,
+      `0x${'12'.repeat(32)}`,
+      sharedDepository,
+      [{ jHeight: 121, jBlockHash: `0x${'12'.repeat(32)}` }],
+      31339,
+    )).toThrow(/J_WATCHER_JURISDICTION_NOT_FOUND:history-range/);
+    expect(arrakisEntity.jHistory).toBeUndefined();
+    expect(wakandaEntity.jHistory).toBeUndefined();
+  });
+
+  test('watcher accepts a unique legacy replica without chainId but never guesses between duplicates', () => {
+    const sharedDepository = `0x${'ac'.repeat(20)}`;
+    const legacy = makeJReplica('Legacy', 40n, sharedDepository);
+    const env = makeCursorEnv('jadapter-cursor-legacy-chain', [legacy], legacy.name);
+
+    expect(findWatcherJurisdictionReplica(env, sharedDepository, 31337)).toBe(legacy);
+    expect(getWatcherStartBlock(env, sharedDepository, 31337)).toBe(41);
+
+    const duplicate = makeJReplica('Legacy Duplicate', 41n, sharedDepository);
+    env.jReplicas.set(duplicate.name, duplicate);
+    expect(findWatcherJurisdictionReplica(env, sharedDepository, 31337)).toBeNull();
+    expect(() => getWatcherStartBlock(env, sharedDepository, 31337)).toThrow(
+      /J_WATCHER_JURISDICTION_NOT_FOUND:start-block/,
+    );
+  });
+
   test('watcher cursor waits for relevant signer replicas to finalize their j-block', () => {
     const env = createEmptyEnv('jadapter-cursor-pending-jblock');
     const entityId = `0x${'65'.repeat(32)}`;
@@ -396,8 +453,18 @@ describe('jadapter helper cursors', () => {
     const entityId = `0x${'44'.repeat(32)}`;
     const proposerSignerId = '1';
     const validatorSignerId = '2';
-    env.eReplicas.set(`${entityId}:${proposerSignerId}`, makeReplica(entityId, proposerSignerId, true));
-    env.eReplicas.set(`${entityId}:${validatorSignerId}`, makeReplica(entityId, validatorSignerId, false));
+    const proposer = makeReplica(entityId, proposerSignerId, true);
+    const validator = makeReplica(entityId, validatorSignerId, false);
+    const board = {
+      mode: 'proposer-based' as const,
+      threshold: 2n,
+      validators: [proposerSignerId, validatorSignerId],
+      shares: { [proposerSignerId]: 1n, [validatorSignerId]: 1n },
+    };
+    proposer.state.config = board;
+    validator.state.config = board;
+    env.eReplicas.set(`${entityId}:${proposerSignerId}`, proposer);
+    env.eReplicas.set(`${entityId}:${validatorSignerId}`, validator);
 
     processEventBatch(
       [{
@@ -420,13 +487,14 @@ describe('jadapter helper cursors', () => {
     );
 
     const queuedInputs = env.runtimeMempool?.entityInputs ?? [];
-    expect(queuedInputs.length).toBe(2);
+    expect(queuedInputs.length).toBe(1);
     expect(queuedInputs.every((input) => input.entityId === entityId.toLowerCase())).toBe(true);
-    expect(queuedInputs.map((input) => input.signerId).sort()).toEqual([proposerSignerId, validatorSignerId].sort());
+    expect(queuedInputs.map((input) => input.signerId)).toEqual([proposerSignerId]);
     expect(queuedInputs.every((input) => input.entityTxs[0]?.type === 'j_event')).toBe(true);
-    expect(queuedInputs.every((input) => input.entityTxs[1]?.type === 'j_history_checkpoint')).toBe(true);
-    expect(queuedInputs.map((input) => input.entityTxs[0]?.data?.observedAt)).toEqual([7, 7]);
-    expect(queuedInputs.map((input) => input.entityTxs[0]?.data?.events?.[0]?.logIndex)).toEqual([0, 0]);
+    expect(queuedInputs.every((input) => input.entityTxs.length === 1)).toBe(true);
+    expect(queuedInputs.map((input) => input.entityTxs[0]?.data?.observedAt)).toEqual([7]);
+    expect(queuedInputs.map((input) => input.entityTxs[0]?.data?.blocks?.[0]?.events?.[0]?.logIndex)).toEqual([0]);
+    expect(env.runtimeMempool?.runtimeTxs.filter((tx) => tx.type === 'observeJRange')).toHaveLength(2);
     expect(env.runtimeState?.wakeRequested).toBe(true);
   });
 
@@ -491,31 +559,38 @@ describe('jadapter helper cursors', () => {
     }
 
     const jEventData = env.runtimeMempool?.entityInputs?.[0]?.entityTxs?.[0]?.data;
-    expect(jEventData?.blockNumber).toBe(70);
-    expect(jEventData?.blockHash).toBe(recordedBlockHash);
+    expect(jEventData?.blocks?.[0]?.blockNumber).toBe(70);
+    expect(jEventData?.blocks?.[0]?.blockHash).toBe(recordedBlockHash);
     expect(jEventData?.observedAt).toBe(70);
   });
 
-  test('J-history checkpoint ingress transform replaces external tip identity before signing', () => {
-    const env = createEmptyEnv('jadapter-checkpoint-trace-transform');
+  test('J-history range ingress transform replaces external tip identity before signing', () => {
+    const env = createEmptyEnv('jadapter-range-trace-transform');
     const entityId = `0x${'47'.repeat(32)}`;
     env.eReplicas.set(`${entityId}:1`, makeReplica(entityId, '1', true));
     const recordedTipHash = `0x${'99'.repeat(32)}`;
-    const restore = setJHistoryCheckpointIngressTransform(() => ({
+    const restore = setJHistoryRangeIngressTransform(() => ({
       scannedThroughHeight: 180,
       tipBlockHash: recordedTipHash,
+      headers: [{ jHeight: 180, jBlockHash: recordedTipHash }],
     }));
 
     try {
-      enqueueJHistoryCheckpoint(env, [], 180, `0x${'77'.repeat(32)}`);
+      enqueueJHistoryRange(env, [], 180, `0x${'77'.repeat(32)}`);
     } finally {
       restore();
     }
 
-    const checkpointData = env.runtimeMempool?.entityInputs?.[0]?.entityTxs?.[0]?.data;
-    expect(checkpointData?.scannedThroughHeight).toBe(180);
-    expect(checkpointData?.tipBlockHash).toBe(recordedTipHash);
-    expect(checkpointData?.signature).toMatch(/^0x[0-9a-f]{130}$/);
+    const rangeData = env.runtimeMempool?.entityInputs?.[0]?.entityTxs?.[0]?.data;
+    expect(rangeData?.scannedThroughHeight).toBe(180);
+    expect(rangeData?.tipBlockHash).toBe(recordedTipHash);
+    expect(rangeData?.signature).toMatch(/^0x[0-9a-f]{130}$/);
+    const localHistory = env.eReplicas.get(`${entityId}:1`)?.jHistory;
+    expect(localHistory?.blockHashes.get(180)).toBeUndefined();
+    const observation = env.runtimeMempool?.runtimeTxs?.find((tx) => tx.type === 'observeJRange');
+    expect(observation?.type === 'observeJRange' ? observation.data.headers : []).toEqual([
+      { jHeight: 180, jBlockHash: recordedTipHash },
+    ]);
   });
 
   test('buildJEventsRuntimeInput returns j_event input without enqueueing into runtime mempool', () => {
@@ -526,8 +601,18 @@ describe('jadapter helper cursors', () => {
     const entityId = `0x${'45'.repeat(32)}`;
     const proposerSignerId = '1';
     const validatorSignerId = '2';
-    env.eReplicas.set(`${entityId}:${proposerSignerId}`, makeReplica(entityId, proposerSignerId, true));
-    env.eReplicas.set(`${entityId}:${validatorSignerId}`, makeReplica(entityId, validatorSignerId, false));
+    const proposer = makeReplica(entityId, proposerSignerId, true);
+    const validator = makeReplica(entityId, validatorSignerId, false);
+    const board = {
+      mode: 'proposer-based' as const,
+      threshold: 2n,
+      validators: [proposerSignerId, validatorSignerId],
+      shares: { [proposerSignerId]: 1n, [validatorSignerId]: 1n },
+    };
+    proposer.state.config = board;
+    validator.state.config = board;
+    env.eReplicas.set(`${entityId}:${proposerSignerId}`, proposer);
+    env.eReplicas.set(`${entityId}:${validatorSignerId}`, validator);
 
     const event = {
       name: 'ReserveUpdated',
@@ -547,16 +632,48 @@ describe('jadapter helper cursors', () => {
 
     expect(input?.timestamp).toBe(8);
     expect(rebuiltInput?.timestamp).toBe(8);
-    expect(input?.runtimeTxs).toEqual([]);
-    expect(input?.entityInputs).toHaveLength(2);
+    expect(input?.runtimeTxs.filter((tx) => tx.type === 'observeJRange')).toHaveLength(2);
+    expect(input?.entityInputs).toHaveLength(1);
     expect(input?.entityInputs?.every((entry) => entry.entityId === entityId.toLowerCase())).toBe(true);
-    expect(input?.entityInputs?.map((entry) => entry.signerId).sort()).toEqual([proposerSignerId, validatorSignerId].sort());
+    expect(input?.entityInputs?.map((entry) => entry.signerId)).toEqual([proposerSignerId]);
     expect(input?.entityInputs?.every((entry) => entry.entityTxs[0]?.type === 'j_event')).toBe(true);
-    expect(input?.entityInputs?.every((entry) => entry.entityTxs[1]?.type === 'j_history_checkpoint')).toBe(true);
-    expect(input?.entityInputs?.map((entry) => entry.entityTxs[0]?.data?.observedAt)).toEqual([8, 8]);
-    expect(rebuiltInput?.entityInputs?.map((entry) => entry.entityTxs[0]?.data?.observedAt)).toEqual([8, 8]);
+    expect(input?.entityInputs?.every((entry) => entry.entityTxs.length === 1)).toBe(true);
+    expect(input?.entityInputs?.map((entry) => entry.entityTxs[0]?.data?.observedAt)).toEqual([8]);
+    expect(rebuiltInput?.entityInputs?.map((entry) => entry.entityTxs[0]?.data?.observedAt)).toEqual([8]);
     expect(env.runtimeMempool?.entityInputs ?? []).toEqual([]);
     expect(env.runtimeState?.wakeRequested).not.toBe(true);
+  });
+
+  test('receipt events never advance an unobserved entity on another jurisdiction', () => {
+    const sharedDepository = `0x${'aa'.repeat(20)}`;
+    const testnet = makeJurisdiction('Testnet', 31337, sharedDepository);
+    const tron = makeJurisdiction('Tron', 31338, sharedDepository);
+    const env = makeCursorEnv('jadapter-receipt-jurisdiction-scope', [
+      makeJReplica(testnet.name, 120n, sharedDepository, testnet.chainId),
+      makeJReplica(tron.name, 120n, sharedDepository, tron.chainId),
+    ]);
+    const testnetEntityId = `0x${'73'.repeat(32)}`;
+    const tronEntityId = `0x${'74'.repeat(32)}`;
+    const testnetReplica = makeReplica(testnetEntityId, '1', true);
+    const tronReplica = makeReplica(tronEntityId, '2', true);
+    testnetReplica.state.config.jurisdiction = testnet;
+    tronReplica.state.config.jurisdiction = tron;
+    env.eReplicas.set(`${testnetEntityId}:1`, testnetReplica);
+    env.eReplicas.set(`${tronEntityId}:2`, tronReplica);
+
+    const input = buildJEventsRuntimeInput(env, [{
+      name: 'ReserveUpdated',
+      args: { entity: testnetEntityId, tokenId: 1, newBalance: 10n },
+      blockNumber: 120,
+      blockHash: `0x${'37'.repeat(32)}`,
+      transactionHash: `0x${'75'.repeat(32)}`,
+      logIndex: 0,
+    }], 'testnet-receipt');
+
+    const observed = input?.runtimeTxs.filter((tx) => tx.type === 'observeJRange') ?? [];
+    expect(observed.map((tx) => tx.data.entityId)).toEqual([testnetEntityId]);
+    expect(input?.entityInputs.map((entry) => entry.entityId)).toEqual([testnetEntityId]);
+    expect(observed.some((tx) => tx.data.entityId === tronEntityId)).toBe(false);
   });
 
   test('watcher reserve evidence survives unrelated two-jurisdiction traffic', () => {
@@ -673,9 +790,6 @@ describe('jadapter helper cursors', () => {
     expect(queuedInputs.length).toBe(2);
     expect(queuedInputs.map((input) => input.entityId).sort()).toEqual([leftEntityId, rightEntityId].sort());
     expect(queuedInputs.map((input) => input.entityTxs[0]?.type)).toEqual(['j_event', 'j_event']);
-    expect(queuedInputs.map((input) => input.entityTxs[1]?.type)).toEqual([
-      'j_history_checkpoint',
-      'j_history_checkpoint',
-    ]);
+    expect(queuedInputs.every((input) => input.entityTxs.length === 1)).toBe(true);
   });
 });
