@@ -226,6 +226,11 @@ export async function createEntityFrameHash(
     timestamp,
     txs: txs.map(canonicalEntityTxForFrameHash),
     entityId: newState.entityId,
+    leaderState: newState.leaderState ?? {
+      activeValidatorId: newState.config.validators[0],
+      view: 0,
+      changedAtHeight: 0,
+    },
     reserves: Array.from(newState.reserves.entries())
       .sort((a, b) => compareNumericKey(a[0], b[0]))
       .map(([k, v]) => [k, v.toString()]),

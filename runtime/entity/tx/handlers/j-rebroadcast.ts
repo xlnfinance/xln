@@ -7,6 +7,7 @@ import {
   requireRuntimeJurisdictionConfigByName,
 } from '../../../jurisdiction/jurisdiction-runtime';
 import type { ApplyEntityTxResult } from '../apply';
+import { getEntityLeaderState } from '../../consensus/leader';
 
 const MIN_GAS_BUMP_BPS = 0;
 const MAX_GAS_BUMP_BPS = 20_000; // +200%
@@ -44,7 +45,7 @@ export async function handleJRebroadcast(
     addMessage(newState, msg);
     throw new Error(msg);
   }
-  const signerId = entityState.config.validators[0];
+  const signerId = getEntityLeaderState(entityState).activeValidatorId;
   if (!signerId) {
     const msg = '❌ No signerId available for j_rebroadcast';
     addMessage(newState, msg);

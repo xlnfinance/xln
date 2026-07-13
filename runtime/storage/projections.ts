@@ -82,6 +82,7 @@ export const projectEntityCoreDoc = (
   htlcFeesEarned: state.htlcFeesEarned,
   lockBook: state.lockBook,
   ...withProp('prevFrameHash', state.prevFrameHash),
+  ...withProp('leaderState', state.leaderState),
   ...withProp('deferredAccountProposals', state.deferredAccountProposals),
   ...withProp('accountInputQueue', state.accountInputQueue),
   ...withProp('crontabState', state.crontabState),
@@ -126,6 +127,9 @@ export const projectReplicaMeta = (replica: EntityReplica): StorageReplicaMeta =
   ...withProp('lockedFrame', replica.lockedFrame),
   ...withProp('validatorComputedState', replica.validatorComputedState),
   ...withProp('hankoWitness', cloneHankoWitness(replica.hankoWitness)),
+  ...withProp('leaderVotes', replica.leaderVotes),
+  ...withProp('pendingLeaderCertificate', replica.pendingLeaderCertificate),
+  ...withProp('lastConsensusProgressAt', replica.lastConsensusProgressAt),
 });
 
 const projectAccountDocFull = (account: AccountMachine): StorageAccountDoc => ({

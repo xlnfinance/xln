@@ -16,7 +16,7 @@ const hasMeaningfulEnqueuedWork = (inputs?: EntityInput[], runtimeTxs?: RuntimeT
     const hasEntityTxs = (input.entityTxs?.length ?? 0) > 0;
     const hasProposal = !!input.proposedFrame;
     const hasHashPrecommits = !!input.hashPrecommits && input.hashPrecommits.size > 0;
-    return hasEntityTxs || hasProposal || hasHashPrecommits;
+    return hasEntityTxs || hasProposal || hasHashPrecommits || !!input.leaderTimeoutVote;
   });
 };
 

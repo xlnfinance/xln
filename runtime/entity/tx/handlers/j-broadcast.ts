@@ -27,6 +27,7 @@ import {
 } from '../../../jurisdiction/jurisdiction-runtime';
 import type { ApplyEntityTxResult } from '../apply';
 import { createStructuredLogger, shortHash, shortId } from '../../../infra/logger';
+import { getEntityLeaderState } from '../../consensus/leader';
 
 const jBatchActionLog = createStructuredLogger('entity.jbatch');
 
@@ -92,7 +93,7 @@ export async function handleJBroadcast(
   }
 
   // ── Validate: signerId available ──
-  const signerId = entityState.config.validators[0];
+  const signerId = getEntityLeaderState(entityState).activeValidatorId;
   if (!signerId) {
     addMessage(newState, '❌ No signerId available');
     return { newState, outputs, jOutputs };

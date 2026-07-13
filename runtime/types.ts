@@ -182,6 +182,31 @@ export interface ConsensusConfig {
   jurisdiction?: JurisdictionConfig;
 }
 
+export interface EntityLeaderState {
+  activeValidatorId: string;
+  view: number;
+  changedAtHeight: number;
+}
+
+export interface EntityLeaderTimeoutVoteBody {
+  entityId: string;
+  targetHeight: number;
+  previousFrameHash: string;
+  fromView: number;
+  toView: number;
+  previousLeaderId: string;
+  nextLeaderId: string;
+}
+
+export interface EntityLeaderTimeoutVote extends EntityLeaderTimeoutVoteBody {
+  voterId: string;
+  signature: string;
+}
+
+export interface EntityLeaderCertificate extends EntityLeaderTimeoutVoteBody {
+  votes: Map<string, string>;
+}
+
 export interface RuntimeInput {
   runtimeTxs: RuntimeTx[];
   entityInputs: EntityInput[];
@@ -253,6 +278,7 @@ export interface EntityInput {
   // HANKO PRECOMMITS: signerId -> array of EOA sigs (one per proposedFrame.hashesToSign[])
   // Validators sign ALL hashes, proposer collects and merges into hankos after threshold
   hashPrecommits?: Map<string, string[]>;
+  leaderTimeoutVote?: EntityLeaderTimeoutVote;
 }
 
 /**
@@ -370,6 +396,7 @@ export interface EntityState {
   proposals: Map<string, Proposal>;
   config: ConsensusConfig;
   prevFrameHash?: string; // Chain linkage for BFT consensus (keccak256 of previous frame)
+  leaderState?: EntityLeaderState;
 
   // 💰 Financial state
   // Financial invariant: entity reserves are always keyed by numeric tokenId.
@@ -496,6 +523,11 @@ export interface ProposedEntityFrame {
   txs: EntityTx[];
   hash: string;
   newState: EntityState;
+  leader: {
+    proposerSignerId: string;
+    view: number;
+    certificate?: EntityLeaderCertificate;
+  };
 
   // DETERMINISTIC OUTPUTS: Stored at proposal time, used at commit time
   // CRITICAL: Cannot re-apply frame at commit because proposal.newState already
@@ -527,6 +559,9 @@ export interface EntityReplica {
   // Used at commit time instead of proposer's newState to prevent state injection
   validatorComputedState?: EntityState;
   isProposer: boolean;
+  leaderVotes?: Map<string, EntityLeaderTimeoutVote>;
+  pendingLeaderCertificate?: EntityLeaderCertificate;
+  lastConsensusProgressAt?: number;
   // Position is RELATIVE to j-machine (jurisdiction)
   // Frontend calculates: worldPos = jMachine.position + relativePosition
   position?: {

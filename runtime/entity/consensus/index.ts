@@ -8,6 +8,7 @@ import type {
   AccountTx,
   ConsensusConfig,
   EntityInput,
+  EntityLeaderTimeoutVote,
   EntityReplica,
   EntityState,
   EntityTx,
@@ -16,6 +17,7 @@ import type {
   HashToSign,
   HashType,
   JInput,
+  ProposedEntityFrame,
 } from '../../types';
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, getPerfMs, log } from '../../utils';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
@@ -70,6 +72,18 @@ import {
 } from '../../orderbook/cross-j-orderbook';
 import { markCrossJurisdictionBookAdmissionResolving } from '../../extensions/cross-j/orderbook';
 import { createEntityFrameHash } from './frame';
+import {
+  assertEntityLeaderVoteMatchesState,
+  buildEntityLeaderCertificate,
+  getEntityLeaderState,
+  getEntityQuorumSafetyWarning,
+  getReplicaProposalLeader,
+  hashEntityLeaderVoteBody,
+  isEntityActiveLeader,
+  isLocalEntityLeaderTimeoutVote,
+  isReplicaProposalLeader,
+  leaderVoteCollectionKey,
+} from './leader';
 import { buildQuorumHanko, signEntityHashes } from '../../hanko/signing';
 import { proposeAccountFrame } from '../../account/consensus/propose';
 import {
@@ -182,6 +196,68 @@ const verifyHashPrecommitSignatures = (
     }
   }
   return true;
+};
+
+const verifyEntityLeaderCertificate = (
+  env: Env,
+  state: EntityState,
+  frame: ProposedEntityFrame,
+): boolean => {
+  const committedLeader = getEntityLeaderState(state);
+  const proposedLeaderId = frame.leader.proposerSignerId.toLowerCase();
+  const certificate = frame.leader.certificate;
+  if (!certificate) {
+    return proposedLeaderId === committedLeader.activeValidatorId && frame.leader.view === committedLeader.view;
+  }
+  try {
+    assertEntityLeaderVoteMatchesState(state, certificate);
+  } catch (error) {
+    entityLog.warn('leader.certificate.stale', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+  if (proposedLeaderId !== certificate.nextLeaderId || frame.leader.view !== certificate.toView) return false;
+  const voteHash = hashEntityLeaderVoteBody(certificate);
+  const validSigners: string[] = [];
+  for (const [rawSignerId, signature] of certificate.votes) {
+    const signerId = rawSignerId.toLowerCase();
+    if (!state.config.validators.some(validator => validator.toLowerCase() === signerId)) return false;
+    if (!verifyFrame(env, signerId, voteHash, signature)) return false;
+    validSigners.push(signerId);
+  }
+  return calculateQuorumPower(state.config, validSigners) >= state.config.threshold;
+};
+
+const expectedCommittedLeaderState = (
+  state: EntityState,
+  frame: ProposedEntityFrame,
+): NonNullable<EntityState['leaderState']> => {
+  const current = getEntityLeaderState(state);
+  const certificate = frame.leader.certificate;
+  return certificate
+    ? {
+        activeValidatorId: certificate.nextLeaderId,
+        view: certificate.toView,
+        changedAtHeight: frame.height,
+      }
+    : current;
+};
+
+const validateProposedFrameLeader = (
+  env: Env,
+  state: EntityState,
+  frame: ProposedEntityFrame,
+): boolean => {
+  if (!frame.leader || !verifyEntityLeaderCertificate(env, state, frame)) return false;
+  const expected = expectedCommittedLeaderState(state, frame);
+  const received = frame.newState.leaderState;
+  return Boolean(
+    received &&
+    received.activeValidatorId.toLowerCase() === expected.activeValidatorId.toLowerCase() &&
+    received.view === expected.view &&
+    received.changedAtHeight === expected.changedAtHeight
+  );
 };
 
 const buildCrossJurisdictionFillNoticeTx = (tx: CrossSwapFillAckTx, accountId: string): CrossJurisdictionFillNoticeTx => {
@@ -607,6 +683,30 @@ const validateEntityInput = (input: EntityInput): boolean => {
         log.error(`❌ Invalid frame hash: ${frame.hash}`);
         return false;
       }
+      if (
+        !frame.leader ||
+        typeof frame.leader.proposerSignerId !== 'string' ||
+        !Number.isSafeInteger(frame.leader.view) ||
+        frame.leader.view < 0
+      ) {
+        log.error(`❌ Invalid frame leader metadata`);
+        return false;
+      }
+    }
+
+    if (input.leaderTimeoutVote) {
+      const vote = input.leaderTimeoutVote;
+      if (
+        typeof vote.entityId !== 'string' ||
+        typeof vote.voterId !== 'string' ||
+        typeof vote.signature !== 'string' ||
+        !Number.isSafeInteger(vote.targetHeight) ||
+        !Number.isSafeInteger(vote.fromView) ||
+        !Number.isSafeInteger(vote.toView)
+      ) {
+        log.error(`❌ Invalid leader timeout vote`);
+        return false;
+      }
     }
 
     return true;
@@ -713,6 +813,66 @@ const rejectEntityConsensusInput = (context: ApplyEntityInputContext): ApplyEnti
   workingReplica: context.workingReplica,
 });
 
+async function handleLeaderTimeoutVote(
+  context: ApplyEntityInputContext,
+): Promise<ApplyEntityInputResult | null> {
+  const { env, entityInput, workingReplica, entityOutbox } = context;
+  const incoming = entityInput.leaderTimeoutVote;
+  if (!incoming) return null;
+  try {
+    assertEntityLeaderVoteMatchesState(workingReplica.state, incoming);
+  } catch (error) {
+    entityLog.warn('leader.vote.rejected', { error: error instanceof Error ? error.message : String(error) });
+    return rejectEntityConsensusInput(context);
+  }
+
+  const voterId = incoming.voterId.toLowerCase();
+  const isValidator = workingReplica.state.config.validators.some(validator => validator.toLowerCase() === voterId);
+  if (!isValidator) return rejectEntityConsensusInput(context);
+  const voteHash = hashEntityLeaderVoteBody(incoming);
+  let vote: EntityLeaderTimeoutVote = incoming;
+  if (isLocalEntityLeaderTimeoutVote(incoming)) {
+    if (voterId !== workingReplica.signerId.toLowerCase() || incoming.signature) {
+      return rejectEntityConsensusInput(context);
+    }
+    vote = { ...incoming, signature: await signFrame(env, workingReplica.signerId, voteHash) };
+    workingReplica.lastConsensusProgressAt = env.timestamp;
+    for (const validatorId of workingReplica.state.config.validators) {
+      if (validatorId.toLowerCase() === workingReplica.signerId.toLowerCase()) continue;
+      entityOutbox.push({
+        entityId: entityInput.entityId,
+        signerId: validatorId,
+        leaderTimeoutVote: vote,
+      });
+    }
+  } else if (!verifyFrame(env, voterId, voteHash, incoming.signature)) {
+    return rejectEntityConsensusInput(context);
+  }
+
+  const collectionKey = leaderVoteCollectionKey(vote);
+  const previousCollectionKey = workingReplica.leaderVotes?.values().next().value as EntityLeaderTimeoutVote | undefined;
+  if (previousCollectionKey && leaderVoteCollectionKey(previousCollectionKey) !== collectionKey) {
+    workingReplica.leaderVotes = new Map();
+  }
+  if (!workingReplica.leaderVotes) workingReplica.leaderVotes = new Map();
+  workingReplica.leaderVotes.set(voterId, vote);
+
+  const signers = Array.from(workingReplica.leaderVotes.keys());
+  const power = calculateQuorumPower(workingReplica.state.config, signers);
+  if (power >= workingReplica.state.config.threshold) {
+    workingReplica.pendingLeaderCertificate = buildEntityLeaderCertificate(vote, workingReplica.leaderVotes);
+    workingReplica.lastConsensusProgressAt = env.timestamp;
+    entityLog.warn('leader.view_change_certified', {
+      entity: shortId(workingReplica.entityId),
+      from: shortId(vote.previousLeaderId),
+      to: shortId(vote.nextLeaderId),
+      view: vote.toView,
+      power: power.toString(),
+    });
+  }
+  return null;
+}
+
 async function handleCommitNotification(
   context: ApplyEntityInputContext,
 ): Promise<ApplyEntityInputResult | null> {
@@ -723,6 +883,14 @@ async function handleCommitNotification(
   }
 
   const proposedFrame = entityInput.proposedFrame;
+  if (workingReplica.state.height === proposedFrame.height) {
+    return workingReplica.state.prevFrameHash === proposedFrame.hash
+      ? finishApplyEntityInput(context)
+      : rejectEntityConsensusInput(context);
+  }
+  if (!validateProposedFrameLeader(env, workingReplica.state, proposedFrame)) {
+    return rejectEntityConsensusInput(context);
+  }
   const signers = Array.from(frameCollectedSigs.keys());
   const totalPower = calculateQuorumPower(workingReplica.state.config, signers);
   if (totalPower < workingReplica.state.config.threshold) {
@@ -770,6 +938,7 @@ async function handleCommitNotification(
       entityId: workingReplica.state.entityId,
       height: proposedFrame.height,
       timestamp: proposedFrame.newState.timestamp,
+      leaderState: expectedCommittedLeaderState(workingReplica.state, proposedFrame),
     };
     const replayedHash = await createEntityFrameHash(
       getPrevFrameHash(workingReplica.state),
@@ -831,6 +1000,37 @@ async function handleCommitNotification(
     frame: shortHash(proposedFrame.hash),
   });
 
+  const committedHankos: HankoString[] = [];
+  if (expectedHashesToSign) {
+    for (let index = 0; index < expectedHashesToSign.length; index += 1) {
+      const hashInfo = expectedHashesToSign[index];
+      if (!hashInfo) continue;
+      const signatures = Array.from(frameCollectedSigs.entries()).flatMap(([signerId, signerSigs]) => {
+        const signature = signerSigs[index];
+        return signature ? [{ signerId, signature }] : [];
+      });
+      committedHankos.push(await buildQuorumHanko(
+        env,
+        workingReplica.state.entityId,
+        hashInfo.hash,
+        signatures,
+        workingReplica.state.config,
+      ));
+    }
+  }
+  if (!workingReplica.hankoWitness) workingReplica.hankoWitness = new Map();
+  for (let index = 0; index < (expectedHashesToSign?.length ?? 0); index += 1) {
+    const hashInfo = expectedHashesToSign?.[index];
+    const hanko = committedHankos[index];
+    if (!hashInfo || !hanko || !isWitnessHashType(hashInfo.type)) continue;
+    workingReplica.hankoWitness.set(hashInfo.hash, {
+      hanko,
+      type: hashInfo.type,
+      entityHeight: proposedFrame.height,
+      createdAt: env.timestamp,
+    });
+  }
+
   workingReplica.state = {
     ...stateToApply,
     entityId: workingReplica.state.entityId,
@@ -851,6 +1051,10 @@ async function handleCommitNotification(
 
   delete workingReplica.lockedFrame;
   delete workingReplica.validatorComputedState;
+  delete workingReplica.pendingLeaderCertificate;
+  workingReplica.leaderVotes = new Map();
+  workingReplica.lastConsensusProgressAt = env.timestamp;
+  workingReplica.isProposer = isEntityActiveLeader(workingReplica);
   entityLog.debug('commit.applied', {
     height: workingReplica.state.height,
     frame: shortHash(proposedFrame.hash),
@@ -863,17 +1067,30 @@ async function handleProposedFramePrecommit(
   context: ApplyEntityInputContext,
 ): Promise<ApplyEntityInputResult | null> {
   const { env, entityInput, workingReplica, entityOutbox, frameHash } = context;
-  if (
-    !entityInput.proposedFrame ||
-    (workingReplica.proposal && !(workingReplica.state.config.mode === 'gossip-based' && workingReplica.isProposer))
-  ) {
-    return null;
-  }
+  if (!entityInput.proposedFrame) return null;
 
   const config = workingReplica.state.config;
   const proposedFrame = entityInput.proposedFrame;
+  const existingFrame = workingReplica.proposal ?? workingReplica.lockedFrame;
+  if (existingFrame) {
+    if (existingFrame.hash !== proposedFrame.hash) {
+      entityLog.error('proposal.conflict_rejected', {
+        existing: shortHash(existingFrame.hash),
+        incoming: shortHash(proposedFrame.hash),
+      });
+      return rejectEntityConsensusInput(context);
+    }
+    return null;
+  }
+  if (!validateProposedFrameLeader(env, workingReplica.state, proposedFrame)) {
+    entityLog.error('proposal.leader_rejected', {
+      proposer: shortId(proposedFrame.leader?.proposerSignerId ?? ''),
+      view: proposedFrame.leader?.view ?? null,
+    });
+    return rejectEntityConsensusInput(context);
+  }
   const expectedPrevHeight = proposedFrame.height - 1;
-  const canVerify = workingReplica.state.height >= expectedPrevHeight;
+  const canVerify = workingReplica.state.height === expectedPrevHeight;
   if (!canVerify) {
     entityLog.warn('proposal.catch_up_wait', {
       signer: shortId(workingReplica.signerId),
@@ -897,6 +1114,7 @@ async function handleProposedFramePrecommit(
     entityId: workingReplica.state.entityId,
     height: proposedFrame.height,
     timestamp: proposedFrame.newState.timestamp,
+    leaderState: expectedCommittedLeaderState(workingReplica.state, proposedFrame),
   };
 
   const prevFrameHash = getPrevFrameHash(workingReplica.state);
@@ -943,31 +1161,34 @@ async function handleProposedFramePrecommit(
   );
   entityLog.debug('proposal.hashes_signed', { count: allSignatures.length });
 
-  workingReplica.lockedFrame = { ...proposedFrame, hashesToSign };
+  const collectedSigs = new Map<string, string[]>();
+  for (const [signerId, signatures] of proposedFrame.collectedSigs ?? []) {
+    if (!verifyHashPrecommitSignatures(
+      env,
+      signerId,
+      hashesToSign,
+      proposedFrame.hash,
+      proposedFrame.height,
+      signatures,
+      'PROPOSAL_PRECOMMIT_REJECTED',
+    )) return rejectEntityConsensusInput(context);
+    collectedSigs.set(signerId.toLowerCase(), [...signatures]);
+  }
+  collectedSigs.set(workingReplica.signerId.toLowerCase(), allSignatures);
+  workingReplica.lockedFrame = { ...proposedFrame, hashesToSign, collectedSigs };
   workingReplica.validatorComputedState = validatorNewState;
+  workingReplica.lastConsensusProgressAt = env.timestamp;
 
-  if (config.mode === 'gossip-based') {
-    config.validators.forEach(validatorId => {
-      entityOutbox.push({
-        entityId: entityInput.entityId,
-        signerId: validatorId,
-        hashPrecommits: new Map([[workingReplica.signerId, allSignatures]]),
-      });
-    });
-  } else {
-    const proposerId = config.validators[0];
-    if (!proposerId) {
-      logError('FRAME_CONSENSUS', `❌ No proposer found in validators: ${config.validators}`);
-      return finishApplyEntityInput(context);
-    }
+  config.validators.forEach(validatorId => {
+    if (validatorId.toLowerCase() === workingReplica.signerId.toLowerCase()) return;
     entityOutbox.push({
       entityId: entityInput.entityId,
-      signerId: proposerId,
+      signerId: validatorId,
       hashPrecommits: new Map([[workingReplica.signerId, allSignatures]]),
     });
-  }
+  });
   entityLog.debug('proposal.precommit_sent', {
-    mode: config.mode,
+    recipients: Math.max(0, config.validators.length - 1),
     frame: frameHash,
     signatures: allSignatures.length,
   });
@@ -979,11 +1200,12 @@ async function handleHashPrecommits(
   context: ApplyEntityInputContext,
 ): Promise<ApplyEntityInputResult | null> {
   const { env, entityInput, workingReplica, entityOutbox, jOutbox } = context;
-  if (!entityInput.hashPrecommits?.size || !workingReplica.proposal) {
+  const frame = workingReplica.proposal ?? workingReplica.lockedFrame;
+  if (!entityInput.hashPrecommits?.size || !frame) {
     return null;
   }
 
-  const proposal = workingReplica.proposal;
+  const proposal = frame;
   for (const [signerId, sigs] of entityInput.hashPrecommits) {
     if (!verifyHashPrecommitSignatures(
       env,
@@ -1027,6 +1249,17 @@ async function handleHashPrecommits(
     signers: signers.length,
     hashes: proposal.hashesToSign?.length || 1,
   });
+
+  const stateToCommit = workingReplica.proposal
+    ? proposal.newState
+    : workingReplica.validatorComputedState;
+  if (!stateToCommit) {
+    entityLog.warn('commit.local_state_missing', {
+      signer: shortId(workingReplica.signerId),
+      frame: shortHash(proposal.hash),
+    });
+    return null;
+  }
 
   const committedHankos: HankoString[] = [];
   if (proposal.hashesToSign && proposal.collectedSigs) {
@@ -1076,17 +1309,22 @@ async function handleHashPrecommits(
 
   // Stored outputs are emitted as-is; re-applying proposal txs here would
   // duplicate non-idempotent side effects such as account creation.
-  const commitOutputs = proposal.outputs || [];
-  const commitJOutputs = proposal.jOutputs || [];
-  const attachedCount = attachHankoWitnessToOutputs(
-    commitOutputs,
-    commitJOutputs,
-    workingReplica.hankoWitness,
-    workingReplica.state.height + 1,
-  );
+  const isFrameLeader = proposal.leader.proposerSignerId.toLowerCase() === workingReplica.signerId.toLowerCase();
+  const commitOutputs = isFrameLeader ? (proposal.outputs || []) : [];
+  const commitJOutputs = isFrameLeader ? (proposal.jOutputs || []) : [];
+  const attachedCount = isFrameLeader
+    ? attachHankoWitnessToOutputs(
+        commitOutputs,
+        commitJOutputs,
+        workingReplica.hankoWitness,
+        workingReplica.state.height + 1,
+      )
+    : 0;
 
-  entityOutbox.push(...commitOutputs);
-  jOutbox.push(...commitJOutputs);
+  if (isFrameLeader) {
+    entityOutbox.push(...commitOutputs);
+    jOutbox.push(...commitJOutputs);
+  }
   entityLog.info('commit.outputs', {
     outputs: commitOutputs.length,
     jOutputs: commitJOutputs.length,
@@ -1094,7 +1332,7 @@ async function handleHashPrecommits(
   });
 
   workingReplica.state = {
-    ...proposal.newState,
+    ...stateToCommit,
     entityId: workingReplica.state.entityId,
     height: proposal.height,
     prevFrameHash: proposal.hash,
@@ -1109,28 +1347,28 @@ async function handleHashPrecommits(
   }
   delete workingReplica.proposal;
   delete workingReplica.lockedFrame;
+  delete workingReplica.validatorComputedState;
+  delete workingReplica.pendingLeaderCertificate;
+  workingReplica.leaderVotes = new Map();
+  workingReplica.lastConsensusProgressAt = env.timestamp;
+  workingReplica.isProposer = isEntityActiveLeader(workingReplica);
 
-  if (workingReplica.state.config.mode === 'proposer-based') {
-    const committedProposalHash = committedFrame.hash.slice(0, 10);
-    const precommitSigners = Array.from(committedFrame.collectedSigs?.keys() || []);
-    entityLog.debug('commit.notify_validators', {
-      frame: committedProposalHash,
-      validators: workingReplica.state.config.validators.length - 1,
-      precommitSigners: precommitSigners.map(shortId),
-    });
+  const committedProposalHash = committedFrame.hash.slice(0, 10);
+  const precommitSigners = Array.from(committedFrame.collectedSigs?.keys() || []);
+  entityLog.debug('commit.notify_validators', {
+    frame: committedProposalHash,
+    validators: workingReplica.state.config.validators.length - 1,
+    precommitSigners: precommitSigners.map(shortId),
+  });
 
-    workingReplica.state.config.validators.forEach(validatorId => {
-      if (validatorId !== workingReplica.signerId) {
-        entityOutbox.push({
-          entityId: entityInput.entityId,
-          signerId: validatorId,
-          proposedFrame: committedFrame,
-        });
-      }
+  workingReplica.state.config.validators.forEach(validatorId => {
+    if (validatorId.toLowerCase() === workingReplica.signerId.toLowerCase()) return;
+    entityOutbox.push({
+      entityId: entityInput.entityId,
+      signerId: validatorId,
+      proposedFrame: committedFrame,
     });
-  } else {
-    entityLog.debug('commit.gossip_mode_no_notifications', { frame: shortHash(committedFrame.hash) });
-  }
+  });
 
   return null;
 }
@@ -1204,10 +1442,19 @@ export const applyEntityInput = async (
     frameHash,
   };
 
+  const leaderVoteResult = await handleLeaderTimeoutVote(phaseContext);
+  if (leaderVoteResult) return leaderVoteResult;
+  const quorumSafetyWarning = getEntityQuorumSafetyWarning(workingReplica.state.config);
+  if (quorumSafetyWarning && workingReplica.state.height === 0) {
+    entityLog.warn('board.quorum_safety', { warning: quorumSafetyWarning });
+  }
+  const localCanPropose = isReplicaProposalLeader(workingReplica);
+  workingReplica.isProposer = localCanPropose;
+
   // Proposer advances entity timestamp from its own wall clock (source of truth).
   // This ensures crontab and hooks see current time, even when no frame is produced.
   // Validators will receive the proposer's timestamp in the frame when frames ARE created.
-  if (!env.scenarioMode) {
+  if (!env.scenarioMode && localCanPropose) {
     if (workingReplica.state.timestamp !== env.timestamp) {
       workingReplica.state.timestamp = env.timestamp;
       markStorageEntityDirty(env, workingReplica.state.entityId);
@@ -1222,6 +1469,9 @@ export const applyEntityInput = async (
 
   // Add transactions to mempool (mutable for performance)
   if (entityInput.entityTxs?.length) {
+    if (!localCanPropose && workingReplica.lastConsensusProgressAt === undefined) {
+      workingReplica.lastConsensusProgressAt = env.timestamp;
+    }
     const voteTransactions = entityInput.entityTxs.filter(tx => tx.type === 'vote');
     if (voteTransactions.length > 0) {
       entityLog.debug('vote.mempool', { signer: shortId(workingReplica.signerId), count: voteTransactions.length });
@@ -1242,8 +1492,8 @@ export const applyEntityInput = async (
 
   // Forward before handling commits so fresh validator txs cannot be cleared by a
   // commit notification in the same tick.
-  if (!workingReplica.isProposer && workingReplica.mempool.length > 0) {
-    const proposerId = workingReplica.state.config.validators[0];
+  if (!localCanPropose && workingReplica.mempool.length > 0) {
+    const proposerId = getReplicaProposalLeader(workingReplica).activeValidatorId;
     if (!proposerId) {
       logError('FRAME_CONSENSUS', `❌ No proposer found in validators: ${workingReplica.state.config.validators}`);
       return { accepted: true, newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
@@ -1294,7 +1544,7 @@ export const applyEntityInput = async (
   // Single-signer entities still produce a hash-linked frame; they only skip
   // the multi-validator precommit/commit round trip.
   if (
-    workingReplica.isProposer &&
+    localCanPropose &&
     (workingReplica.mempool.length > 0 || hasProposableAccountMempool) &&
     !workingReplica.proposal &&
     isSingleSigner
@@ -1310,11 +1560,13 @@ export const applyEntityInput = async (
     const newTimestamp = env.timestamp;
 
     const prevFrameHash = getPrevFrameHash(workingReplica.state);
+    const singleSignerLeader = getEntityLeaderState(workingReplica.state);
     const singleSignerNewState = {
       ...newEntityState,
       entityId: workingReplica.state.entityId,
       height: newHeight,
       timestamp: newTimestamp,
+      leaderState: singleSignerLeader,
     };
     const singleSignerFrameHash = await createEntityFrameHash(
       prevFrameHash,
@@ -1365,6 +1617,7 @@ export const applyEntityInput = async (
       ...singleSignerNewState,
       prevFrameHash: singleSignerFrameHash, // Chain linkage
     };
+    workingReplica.lastConsensusProgressAt = env.timestamp;
     markStorageEntityDirty(env, workingReplica.state.entityId);
 
     entityOutbox.push(...frameOutputs);
@@ -1376,7 +1629,7 @@ export const applyEntityInput = async (
 
   if (
     !isSingleSigner &&
-    workingReplica.isProposer &&
+    localCanPropose &&
     (workingReplica.mempool.length > 0 || hasProposableAccountMempool) &&
     !workingReplica.proposal
   ) {
@@ -1399,11 +1652,20 @@ export const applyEntityInput = async (
     const newHeight = workingReplica.state.height + 1;
 
     // Build proposed new state (full state with account proposals — for commit)
+    const leader = getReplicaProposalLeader(workingReplica);
+    const committedLeaderState = {
+      activeValidatorId: workingReplica.signerId.toLowerCase(),
+      view: leader.view,
+      changedAtHeight: workingReplica.pendingLeaderCertificate
+        ? newHeight
+        : (workingReplica.state.leaderState?.changedAtHeight ?? 0),
+    };
     const proposedNewState = {
       ...newEntityState,
       entityId: workingReplica.state.entityId,
       height: newHeight,
       timestamp: newTimestamp,
+      leaderState: committedLeaderState,
     };
 
     // Build deterministic state for hashing (before account proposals — matches validator)
@@ -1412,6 +1674,7 @@ export const applyEntityInput = async (
       entityId: workingReplica.state.entityId,
       height: newHeight,
       timestamp: newTimestamp,
+      leaderState: committedLeaderState,
     };
 
     const prevFrameHash = getPrevFrameHash(workingReplica.state);
@@ -1426,20 +1689,28 @@ export const applyEntityInput = async (
 
     const selfSigs = await Promise.all(hashesToSign.map(h => signFrame(env, workingReplica.signerId, h.hash)));
 
-    workingReplica.proposal = {
+    const proposal: ProposedEntityFrame = {
       height: newHeight,
       txs: [...workingReplica.mempool],
       hash: frameHash,
       newState: proposedNewState,
+      leader: {
+        proposerSignerId: workingReplica.signerId.toLowerCase(),
+        view: leader.view,
+        ...(workingReplica.pendingLeaderCertificate
+          ? { certificate: workingReplica.pendingLeaderCertificate }
+          : {}),
+      },
       outputs: proposalOutputs,
       jOutputs: proposalJOutputs,
       hashesToSign,
       collectedSigs: new Map([[workingReplica.signerId, selfSigs]]),
     };
+    workingReplica.proposal = proposal;
 
     entityLog.debug('proposal.created', {
-      frame: shortHash(workingReplica.proposal.hash),
-      txs: workingReplica.proposal.txs.length,
+      frame: shortHash(proposal.hash),
+      txs: proposal.txs.length,
       hashes: hashesToSign.length,
     });
 
@@ -1448,7 +1719,7 @@ export const applyEntityInput = async (
         entityOutbox.push({
           entityId: entityInput.entityId,
           signerId: validatorId,
-          proposedFrame: workingReplica.proposal!,
+          proposedFrame: proposal,
         });
       }
     });
@@ -2296,8 +2567,10 @@ export const applyEntityFrame = async (
  * Calculate quorum power based on validator shares
  */
 export const calculateQuorumPower = (config: ConsensusConfig, signers: string[]): bigint => {
-  return signers.reduce((total, signerId) => {
-    const shares = config.shares[signerId];
+  const uniqueSigners = new Set(signers.map(signerId => signerId.toLowerCase()));
+  return Array.from(uniqueSigners).reduce((total, signerId) => {
+    const originalSignerId = config.validators.find(validator => validator.toLowerCase() === signerId);
+    const shares = config.shares[signerId] ?? (originalSignerId ? config.shares[originalSignerId] : undefined);
     if (shares === undefined) {
       logError('FRAME_CONSENSUS', `⚠️ BYZANTINE: Unknown signer ${signerId} in quorum calculation — skipped`);
       return total;

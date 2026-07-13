@@ -84,6 +84,7 @@ export type StorageEntityCoreDoc = {
   proposals: Map<string, Proposal>;
   config: ConsensusConfig;
   prevFrameHash?: string;
+  leaderState?: EntityState['leaderState'];
   reserves: Map<number, bigint>;
   externalWallet?: EntityState['externalWallet'];
   deferredAccountProposals?: Map<string, true>;
@@ -276,6 +277,9 @@ export type StorageReplicaMeta = {
   lockedFrame?: EntityReplica['lockedFrame'];
   validatorComputedState?: EntityReplica['validatorComputedState'];
   hankoWitness?: EntityReplica['hankoWitness'];
+  leaderVotes?: EntityReplica['leaderVotes'];
+  pendingLeaderCertificate?: EntityReplica['pendingLeaderCertificate'];
+  lastConsensusProgressAt?: EntityReplica['lastConsensusProgressAt'];
 };
 
 type AssertNoUnclassifiedPersistenceKeys<T extends never> = T;

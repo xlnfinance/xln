@@ -3981,6 +3981,7 @@ describe('audit fail-fast regressions', () => {
       entityId,
       height: 1,
       timestamp: env.timestamp,
+      leaderState: { activeValidatorId: signerId, view: 0, changedAtHeight: 0 },
     };
     const frameHash = await createEntityFrameHash(
       'genesis',
@@ -4015,6 +4016,7 @@ describe('audit fail-fast regressions', () => {
         txs: frameTxs,
         hash: frameHash,
         newState: tamperedNewState,
+        leader: { proposerSignerId: signerId, view: 0 },
         hashesToSign,
         collectedSigs: new Map([[signerId, frameSignatures]]),
       },
@@ -4051,13 +4053,14 @@ describe('audit fail-fast regressions', () => {
       frameTxs,
       env.timestamp,
     );
-    const proposedNewState = { ...newState, entityId, height: 1, timestamp: env.timestamp };
+    const leaderState = { activeValidatorId: first.signerId, view: 0, changedAtHeight: 0 };
+    const proposedNewState = { ...newState, entityId, height: 1, timestamp: env.timestamp, leaderState };
     const frameHash = await createEntityFrameHash(
       'genesis',
       1,
       env.timestamp,
       frameTxs,
-      { ...deterministicState, entityId, height: 1, timestamp: env.timestamp },
+      { ...deterministicState, entityId, height: 1, timestamp: env.timestamp, leaderState },
     );
     const localManifest = buildEntityHashesToSign(entityId, 1, frameHash, collectedHashes);
     const attackerHash = ethers.keccak256(ethers.toUtf8Bytes('attacker-selected-dispute-hash'));
@@ -4077,6 +4080,7 @@ describe('audit fail-fast regressions', () => {
         txs: frameTxs,
         hash: frameHash,
         newState: proposedNewState,
+        leader: { proposerSignerId: first.signerId, view: 0 },
         hashesToSign: [
           ...localManifest,
           { hash: attackerHash, type: 'dispute', context: 'attacker-selected' },
@@ -4093,6 +4097,7 @@ describe('audit fail-fast regressions', () => {
       txs: frameTxs,
       hash: frameHash,
       newState: proposedNewState,
+      leader: { proposerSignerId: first.signerId, view: 0 },
       hashesToSign: localManifest,
     };
     const precommitResult = await applyEntityInput(env, validatorReplica, {

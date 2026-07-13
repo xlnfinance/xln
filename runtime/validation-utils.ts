@@ -726,6 +726,19 @@ export function validateEntityState(value: unknown, context = 'EntityState'): En
   }
 
   validateConsensusConfig(obj['config'], `${context}.config`);
+  if (obj['leaderState'] !== undefined) {
+    const leader = validateObject(obj['leaderState'], `${context}.leaderState`);
+    const activeValidatorId = validateString(leader['activeValidatorId'], `${context}.leaderState.activeValidatorId`).toLowerCase();
+    const view = validateNumber(leader['view'], `${context}.leaderState.view`);
+    const changedAtHeight = validateNumber(leader['changedAtHeight'], `${context}.leaderState.changedAtHeight`);
+    const config = obj['config'] as ConsensusConfig;
+    if (!Number.isSafeInteger(view) || view < 0 || !Number.isSafeInteger(changedAtHeight) || changedAtHeight < 0) {
+      throw new FinancialDataCorruptionError(`${context}.leaderState counters must be non-negative safe integers`);
+    }
+    if (!config.validators.some((validator) => validator.toLowerCase() === activeValidatorId)) {
+      throw new FinancialDataCorruptionError(`${context}.leaderState.activeValidatorId must be a board validator`);
+    }
+  }
 
   if (!(obj['reserves'] instanceof Map)) {
     throw new FinancialDataCorruptionError(`${context}.reserves must be a Map`);
@@ -855,12 +868,58 @@ export function validateConsensusConfig(value: unknown, context = 'ConsensusConf
   return obj as unknown as ConsensusConfig;
 }
 
+const validateEntityLeaderVoteBody = (value: unknown, context: string): Record<string, unknown> => {
+  const vote = validateObject(value, context);
+  validateString(vote['entityId'], `${context}.entityId`);
+  validateString(vote['previousFrameHash'], `${context}.previousFrameHash`);
+  validateString(vote['previousLeaderId'], `${context}.previousLeaderId`);
+  validateString(vote['nextLeaderId'], `${context}.nextLeaderId`);
+  for (const field of ['targetHeight', 'fromView', 'toView'] as const) {
+    const number = validateNumber(vote[field], `${context}.${field}`);
+    if (!Number.isSafeInteger(number) || number < 0) {
+      throw new FinancialDataCorruptionError(`${context}.${field} must be a non-negative safe integer`);
+    }
+  }
+  if (Number(vote['toView']) !== Number(vote['fromView']) + 1) {
+    throw new FinancialDataCorruptionError(`${context}.toView must advance exactly one view`);
+  }
+  return vote;
+};
+
+const validateEntityLeaderVote = (value: unknown, context: string): void => {
+  const vote = validateEntityLeaderVoteBody(value, context);
+  validateString(vote['voterId'], `${context}.voterId`);
+  validateString(vote['signature'], `${context}.signature`);
+};
+
+const validateEntityLeaderCertificate = (value: unknown, context: string): void => {
+  const certificate = validateEntityLeaderVoteBody(value, context);
+  const votes = validateMapInstance(certificate['votes'], `${context}.votes`);
+  if (votes.size === 0) {
+    throw new FinancialDataCorruptionError(`${context}.votes cannot be empty`);
+  }
+  for (const [signerId, signature] of votes.entries()) {
+    if (typeof signerId !== 'string' || signerId.length === 0 || typeof signature !== 'string' || signature.length === 0) {
+      throw new FinancialDataCorruptionError(`${context}.votes must map signer IDs to signatures`);
+    }
+  }
+};
+
 function validateProposedEntityFrame(value: unknown, context: string): ProposedEntityFrame {
   const obj = validateObject(value, context);
   validateNumber(obj['height'], `${context}.height`);
   validateArray(obj['txs'], `${context}.txs`);
   validateString(obj['hash'], `${context}.hash`);
   validateEntityState(obj['newState'], `${context}.newState`);
+  const leader = validateObject(obj['leader'], `${context}.leader`);
+  validateString(leader['proposerSignerId'], `${context}.leader.proposerSignerId`);
+  const leaderView = validateNumber(leader['view'], `${context}.leader.view`);
+  if (!Number.isSafeInteger(leaderView) || leaderView < 0) {
+    throw new FinancialDataCorruptionError(`${context}.leader.view must be a non-negative safe integer`);
+  }
+  if (leader['certificate'] !== undefined) {
+    validateEntityLeaderCertificate(leader['certificate'], `${context}.leader.certificate`);
+  }
   if (obj['outputs'] !== undefined) validateArray(obj['outputs'], `${context}.outputs`);
   if (obj['jOutputs'] !== undefined) validateArray(obj['jOutputs'], `${context}.jOutputs`);
   if (obj['hashesToSign'] !== undefined) {
@@ -925,6 +984,24 @@ export function validateEntityReplica(value: unknown, context = 'EntityReplica')
       validateString(entry['type'], `${context}.hankoWitness[${hash}].type`);
       validateNumber(entry['entityHeight'], `${context}.hankoWitness[${hash}].entityHeight`);
       validateNumber(entry['createdAt'], `${context}.hankoWitness[${hash}].createdAt`);
+    }
+  }
+  if (obj['leaderVotes'] !== undefined) {
+    const votes = validateMapInstance(obj['leaderVotes'], `${context}.leaderVotes`);
+    for (const [signerId, vote] of votes.entries()) {
+      if (typeof signerId !== 'string' || signerId.length === 0) {
+        throw new FinancialDataCorruptionError(`${context}.leaderVotes signer must be non-empty string`);
+      }
+      validateEntityLeaderVote(vote, `${context}.leaderVotes[${signerId}]`);
+    }
+  }
+  if (obj['pendingLeaderCertificate'] !== undefined) {
+    validateEntityLeaderCertificate(obj['pendingLeaderCertificate'], `${context}.pendingLeaderCertificate`);
+  }
+  if (obj['lastConsensusProgressAt'] !== undefined) {
+    const progressAt = validateNumber(obj['lastConsensusProgressAt'], `${context}.lastConsensusProgressAt`);
+    if (!Number.isSafeInteger(progressAt) || progressAt < 0) {
+      throw new FinancialDataCorruptionError(`${context}.lastConsensusProgressAt must be a non-negative safe integer`);
     }
   }
   return obj as unknown as EntityReplica;

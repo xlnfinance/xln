@@ -39,6 +39,7 @@ import {
 import type { CrontabState, ScheduledHook } from './entity/scheduler-types';
 import type { Profile } from './networking/gossip';
 import { createStructuredLogger } from './infra/logger';
+import { getEntityLeaderState, isEntityActiveLeader } from './entity/consensus/leader';
 
 const stateHelperLog = createStructuredLogger('state.helpers');
 import type {
@@ -273,12 +274,12 @@ export function resolveEntityProposerId(env: Env, entityId: string, context: str
     if (replicaEntityId !== targetEntityId && keyEntityId !== targetEntityId) continue;
     const replicaSignerId = String(replica.signerId || keyParts[1] || '').trim();
     const configuredValidators = replica.state.config.validators || [];
-    if (replica.isProposer && replicaSignerId && getCachedSignerPrivateKey(replicaSignerId)) return replicaSignerId;
+    if (isEntityActiveLeader(replica) && replicaSignerId && getCachedSignerPrivateKey(replicaSignerId)) return replicaSignerId;
     if (!localKeyReplicaFallback && replicaSignerId && getCachedSignerPrivateKey(replicaSignerId)) {
       localKeyReplicaFallback = replicaSignerId;
     }
     if (!configFallback) {
-      configFallback = configuredValidators[0] || null;
+      configFallback = getEntityLeaderState(replica.state).activeValidatorId || configuredValidators[0] || null;
     }
   }
 
@@ -743,6 +744,7 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
         txs: cloneArray(replica.proposal.txs),
         hash: replica.proposal.hash,
         newState: replica.proposal.newState,
+        leader: structuredClone(replica.proposal.leader),
         // Stored outputs from proposal time (used at commit, NOT re-applied)
         ...(replica.proposal.outputs && { outputs: [...replica.proposal.outputs] }),
         ...(replica.proposal.jOutputs && { jOutputs: [...replica.proposal.jOutputs] }),
@@ -758,6 +760,7 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
         txs: cloneArray(replica.lockedFrame.txs),
         hash: replica.lockedFrame.hash,
         newState: replica.lockedFrame.newState,
+        leader: structuredClone(replica.lockedFrame.leader),
         // Deep clone HashToSign objects (hash, type, context)
         ...(replica.lockedFrame.hashesToSign && { hashesToSign: replica.lockedFrame.hashesToSign.map(h => ({ ...h })) }),
         ...(replica.lockedFrame.collectedSigs && { collectedSigs: new Map(Array.from(replica.lockedFrame.collectedSigs.entries()).map(([k, v]) => [k, [...v]])) }),
@@ -768,6 +771,9 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
     ...(replica.position && { position: { ...replica.position } }),
     // SECURITY: Clone validator's computed state for state injection prevention
     ...(replica.validatorComputedState && { validatorComputedState: cloneEntityState(replica.validatorComputedState) }),
+    ...(replica.leaderVotes && { leaderVotes: new Map(Array.from(replica.leaderVotes.entries()).map(([key, vote]) => [key, { ...vote }])) }),
+    ...(replica.pendingLeaderCertificate && { pendingLeaderCertificate: structuredClone(replica.pendingLeaderCertificate) }),
+    ...(replica.lastConsensusProgressAt !== undefined && { lastConsensusProgressAt: replica.lastConsensusProgressAt }),
   }, 'cloneEntityReplica');
 };
 

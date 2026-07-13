@@ -1,6 +1,15 @@
-import type { EntityReplica, EntityState, EntityTx, Env } from '../types';
+import type { EntityInput, EntityLeaderTimeoutVote, EntityReplica, EntityState, EntityTx, Env } from '../types';
 import type { CrontabTaskMethod } from '../entity/scheduler-types';
 import { compareStableText, safeStringify } from '../protocol/serialization';
+import {
+  buildEntityLeaderVoteBody,
+  getEntityLeaderState,
+  getEntityLeaderTimeoutMs,
+  hasEntityLeaderWork,
+  isEntityActiveLeader,
+  leaderVoteCollectionKey,
+  markLocalEntityLeaderTimeoutVote,
+} from '../entity/consensus/leader';
 
 export type ScheduledWakeTx = Extract<EntityTx, { type: 'scheduledWake' }>;
 export type ScheduledWakeJob = ScheduledWakeTx['data']['jobs'][number];
@@ -112,7 +121,14 @@ export const collectDueScheduledWakeJobs = (
 };
 
 const nextReplicaDeadline = (replica: EntityReplica): number | null => {
-  if (!replica.isProposer) return null;
+  if (!isEntityActiveLeader(replica)) {
+    if (!hasEntityLeaderWork(replica)) return null;
+    const voteBody = buildEntityLeaderVoteBody(replica.state);
+    const alreadyVoted = replica.leaderVotes?.get(replica.signerId.toLowerCase());
+    if (alreadyVoted && leaderVoteCollectionKey(alreadyVoted) === leaderVoteCollectionKey(voteBody)) return null;
+    const startedAt = replica.lastConsensusProgressAt ?? replica.state.timestamp;
+    return startedAt + getEntityLeaderTimeoutMs(voteBody.toView);
+  }
   let next = Infinity;
   for (const hook of replica.state.crontabState?.hooks?.values() ?? []) {
     next = Math.min(next, hook.triggerAt);
@@ -196,14 +212,10 @@ const peekValidDeadline = (env: Env): DeadlineEntry | null => {
 export const getNextScheduledWakeTimestamp = (env: Env): number | null =>
   peekValidDeadline(env)?.dueAt ?? null;
 
-export const createDueScheduledWakeInputs = (env: Env, now: number): Array<{
-  entityId: string;
-  signerId: string;
-  entityTxs: ScheduledWakeTx[];
-}> => {
-  const inputs: Array<{ entityId: string; signerId: string; entityTxs: ScheduledWakeTx[] }> = [];
+export const createDueScheduledWakeInputs = (env: Env, now: number): EntityInput[] => {
+  const inputs: EntityInput[] = [];
   const queued = new Set((env.runtimeMempool?.entityInputs ?? [])
-    .filter(input => input.entityTxs?.some(tx => tx.type === 'scheduledWake'))
+    .filter(input => input.leaderTimeoutVote || input.entityTxs?.some(tx => tx.type === 'scheduledWake'))
     .map(input => replicaKey(input.entityId, input.signerId)));
   for (const replica of env.eReplicas.values()) {
     if (replica.mempool.some(tx => tx.type === 'scheduledWake')) {
@@ -218,7 +230,27 @@ export const createDueScheduledWakeInputs = (env: Env, now: number): Array<{
     heapPop(index.heap);
     const key = replicaKey(entry.entityId, entry.signerId);
     const replica = index.replicas.get(key);
-    if (!replica?.isProposer || queued.has(key)) continue;
+    if (!replica || queued.has(key)) continue;
+    if (!isEntityActiveLeader(replica)) {
+      if (!hasEntityLeaderWork(replica)) {
+        refreshReplica(env, replica);
+        continue;
+      }
+      const body = buildEntityLeaderVoteBody(replica.state);
+      const vote: EntityLeaderTimeoutVote = {
+        ...body,
+        voterId: replica.signerId.toLowerCase(),
+        signature: '',
+      };
+      markLocalEntityLeaderTimeoutVote(vote);
+      inputs.push({
+        entityId: replica.entityId,
+        signerId: replica.signerId,
+        leaderTimeoutVote: vote,
+      });
+      queued.add(key);
+      continue;
+    }
     const dueJobs = collectDueScheduledWakeJobs(replica.state, now, entityNeedsPeriodicWake(replica));
     if (dueJobs.length === 0) {
       refreshReplica(env, replica);
@@ -256,7 +288,7 @@ export const assertScheduledWakeMatchesState = (
   state: EntityState,
   tx: ScheduledWakeTx,
 ): void => {
-  const proposerSignerId = state.config.validators?.[0];
+  const proposerSignerId = getEntityLeaderState(state).activeValidatorId;
   if (!proposerSignerId || proposerSignerId.toLowerCase() !== tx.data.proposerSignerId.toLowerCase()) {
     throw new Error('SCHEDULED_WAKE_PROPOSER_MISMATCH');
   }
