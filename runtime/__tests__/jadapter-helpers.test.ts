@@ -422,8 +422,34 @@ describe('jadapter helper cursors', () => {
     expect(queuedInputs.every((input) => input.entityId === entityId.toLowerCase())).toBe(true);
     expect(queuedInputs.map((input) => input.signerId).sort()).toEqual([proposerSignerId, validatorSignerId].sort());
     expect(queuedInputs.every((input) => input.entityTxs[0]?.type === 'j_event')).toBe(true);
+    expect(queuedInputs.every((input) => input.entityTxs[1]?.type === 'j_history_checkpoint')).toBe(true);
     expect(queuedInputs.map((input) => input.entityTxs[0]?.data?.observedAt)).toEqual([7, 7]);
+    expect(queuedInputs.map((input) => input.entityTxs[0]?.data?.events?.[0]?.logIndex)).toEqual([0, 0]);
     expect(env.runtimeState?.wakeRequested).toBe(true);
+  });
+
+  test('chain watcher rejects a Solidity event that lost its EVM log index', () => {
+    const env = createEmptyEnv('jadapter-chain-log-order');
+    const entityId = `0x${'49'.repeat(32)}`;
+    env.eReplicas.set(`${entityId}:1`, makeReplica(entityId, '1', true));
+
+    expect(() => processEventBatch(
+      [{
+        name: 'ReserveUpdated',
+        args: { entity: entityId, tokenId: 2, newBalance: 123n },
+        blockNumber: 7,
+        blockHash: `0x${'66'.repeat(32)}`,
+        transactionHash: `0x${'77'.repeat(32)}`,
+      }],
+      env,
+      7,
+      `0x${'66'.repeat(32)}`,
+      { value: 0 },
+      'rpc-test',
+      undefined,
+      false,
+      'chain',
+    )).toThrow('J_EVENT_CHAIN_LOG_INDEX_MISSING:rpc-test:ReserveUpdated');
   });
 
   test('J-event ingress transform replaces external block identity before signing', () => {
@@ -502,6 +528,7 @@ describe('jadapter helper cursors', () => {
     expect(input?.entityInputs?.every((entry) => entry.entityId === entityId.toLowerCase())).toBe(true);
     expect(input?.entityInputs?.map((entry) => entry.signerId).sort()).toEqual([proposerSignerId, validatorSignerId].sort());
     expect(input?.entityInputs?.every((entry) => entry.entityTxs[0]?.type === 'j_event')).toBe(true);
+    expect(input?.entityInputs?.every((entry) => entry.entityTxs[1]?.type === 'j_history_checkpoint')).toBe(true);
     expect(input?.entityInputs?.map((entry) => entry.entityTxs[0]?.data?.observedAt)).toEqual([8, 8]);
     expect(rebuiltInput?.entityInputs?.map((entry) => entry.entityTxs[0]?.data?.observedAt)).toEqual([8, 8]);
     expect(env.runtimeMempool?.entityInputs ?? []).toEqual([]);
@@ -622,5 +649,9 @@ describe('jadapter helper cursors', () => {
     expect(queuedInputs.length).toBe(2);
     expect(queuedInputs.map((input) => input.entityId).sort()).toEqual([leftEntityId, rightEntityId].sort());
     expect(queuedInputs.map((input) => input.entityTxs[0]?.type)).toEqual(['j_event', 'j_event']);
+    expect(queuedInputs.map((input) => input.entityTxs[1]?.type)).toEqual([
+      'j_history_checkpoint',
+      'j_history_checkpoint',
+    ]);
   });
 });

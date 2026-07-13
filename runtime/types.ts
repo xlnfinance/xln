@@ -7,6 +7,8 @@ import type { DebtEntry } from './types/debt';
 import type {
   JBlockFinalized,
   JBlockObservation,
+  JHistoryCheckpoint,
+  JHistoryFinality,
 } from './types/jurisdiction-events';
 import type { HankoString } from './types/hanko';
 import type {
@@ -50,6 +52,9 @@ export type {
   JBlockAttestation,
   JBlockFinalized,
   JBlockObservation,
+  JHistoryCheckpoint,
+  JHistoryCheckpointAttestation,
+  JHistoryFinality,
   JurisdictionEvent,
   JurisdictionEventData,
 } from './types/jurisdiction-events';
@@ -167,6 +172,8 @@ export interface JurisdictionConfig {
   depositoryAddress: string;
   chainId?: number;
   blockTimeMs?: number;
+  /** First J block relevant to this registered entity's history. */
+  registrationBlock?: number;
   // Optional per-jurisdiction onboarding defaults (USD whole units).
   rebalancePolicyUsd?: {
     r2cRequestSoftLimit: number;
@@ -414,6 +421,10 @@ export interface EntityState {
   lastFinalizedJHeight: number;           // Last finalized J-block height
   jBlockObservations: JBlockObservation[]; // Pending observations from signers
   jBlockChain: JBlockFinalized[];          // Finalized J-blocks (prunable)
+  // Optional during the local pre-mainnet schema transition. Constructors and
+  // restore normalize these before live consensus uses them.
+  jHistoryCheckpoints?: JHistoryCheckpoint[];
+  jHistoryFinality?: JHistoryFinality;
 
   // 🔗 Account machine integration
   accountInputQueue?: AccountInput[]; // Queue of settlement events to be processed by a-machine

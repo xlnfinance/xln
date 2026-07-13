@@ -5,6 +5,7 @@ import type {
   JBlockObservation,
   JBlockFinalized,
   JBlockAttestation,
+  JHistoryCheckpoint,
   JurisdictionEvent,
   DisputeFinalizationEvidence,
   Env,
@@ -17,7 +18,7 @@ import { scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } 
 import { getRuntimeJurisdictionDefaultDisputeDelayBlocks } from '../../jurisdiction/height';
 import { scrubDisputeFinalizationsForCounterparty } from './dispute-finalize-guards';
 import {
-  canonicalJurisdictionEventKey,
+  compareCanonicalJurisdictionEvents,
   normalizeJurisdictionEvent,
   normalizeJurisdictionEvents,
 } from '../../jurisdiction/event-normalization';
@@ -53,6 +54,12 @@ import {
   applySignerEntityExternalWalletDelta,
   applySignerEntityExternalWalletSnapshot,
 } from '../signer-wallet';
+import {
+  buildJHistoryCheckpointDigest,
+  canonicalJHistoryObservationLeaf,
+  EMPTY_J_HISTORY_ROOT,
+  foldJHistoryRoot,
+} from '../../jurisdiction/history-consensus';
 
 const jEventLog = createStructuredLogger('j.event');
 
@@ -61,18 +68,12 @@ const jEventLog = createStructuredLogger('j.event');
 export interface JEventEntityTxData {
   from: string;  // Signer ID that observed the event
   jurisdictionRef: string;
-  event: {
-    type: string;  // Event name (e.g., "ReserveUpdated", "AccountSettled")
-    data: Record<string, unknown>;  // Event-specific data from blockchain
-  };
-  events?: Array<{
-    type: string;  // Event name (e.g., "ReserveUpdated", "AccountSettled")
-    data: Record<string, unknown>;
-  }>;
+  event: JurisdictionEvent;
+  events?: JurisdictionEvent[];
   observedAt: number;  // Timestamp when event was observed (ms)
   blockNumber: number;  // Blockchain block number where event occurred
   blockHash: string;    // Block hash for JBlock consensus
-  transactionHash: string;  // Blockchain transaction hash
+  transactionHash?: string; // Debug metadata; events carry their own tx hashes.
   eventsHash?: string;
   signature?: string;
   disputeFinalizationEvidence?: DisputeFinalizationEvidence[];
@@ -171,6 +172,15 @@ export const applyJEvent = async (entityState: EntityState, entityTxData: JEvent
 
   const jEvents: JurisdictionEvent[] = [];
   for (const raw of rawEvents) {
+    if (typeof raw === 'object' && raw !== null) {
+      const rawBlockNumber = 'blockNumber' in raw ? Number(raw.blockNumber) : blockNumber;
+      const rawBlockHash = 'blockHash' in raw ? String(raw.blockHash || '').toLowerCase() : blockHash.toLowerCase();
+      if (rawBlockNumber !== blockNumber || (rawBlockHash && rawBlockHash !== blockHash.toLowerCase())) {
+        throw new Error(
+          `j_event rejected: mixed block batch expected=${blockNumber}:${blockHash.toLowerCase()} got=${rawBlockNumber}:${rawBlockHash}`,
+        );
+      }
+    }
     const normalized = normalizeJurisdictionEvent({
       ...(raw || {}),
       blockNumber,
@@ -191,6 +201,7 @@ export const applyJEvent = async (entityState: EntityState, entityTxData: JEvent
     jEventLog.warn('observation.empty_after_normalize', { block: blockNumber });
     return { newState: entityState, mempoolOps: [], outputs: [], dirtyAccounts: [] };
   }
+  jEvents.sort(compareCanonicalJurisdictionEvents);
   const canonicalEventsHash = canonicalJurisdictionEventsHash(jEvents);
   const suppliedEventsHash = typeof batchData.eventsHash === 'string' ? batchData.eventsHash.toLowerCase() : '';
   if (!suppliedEventsHash) {
@@ -232,7 +243,6 @@ export const applyJEvent = async (entityState: EntityState, entityTxData: JEvent
     signerId: String(signerId),
     blockNumber,
     blockHash,
-    transactionHash: batchData.transactionHash || '',
     eventsHash: canonicalEventsHash,
     ...(canonicalEvidenceHash ? { disputeFinalizationEvidenceHash: canonicalEvidenceHash } : {}),
   });
@@ -269,7 +279,6 @@ export const applyJEvent = async (entityState: EntityState, entityTxData: JEvent
     jurisdictionRef: expectedJurisdictionRef,
     jHeight: blockNumber,
     jBlockHash: blockHash.toLowerCase(),
-    transactionHash: String(batchData.transactionHash || '').toLowerCase(),
     eventsHash: canonicalEventsHash,
     events: jEvents,
     signature: signature.toLowerCase(),
@@ -285,7 +294,6 @@ export const applyJEvent = async (entityState: EntityState, entityTxData: JEvent
     existing.jHeight === observation.jHeight &&
     existing.jBlockHash.toLowerCase() === observation.jBlockHash.toLowerCase() &&
     observationEventsHash(existing) === observation.eventsHash &&
-    String(existing.transactionHash || '').toLowerCase() === observation.transactionHash.toLowerCase() &&
     String(existing.disputeFinalizationEvidenceHash || '').toLowerCase() ===
       String(observation.disputeFinalizationEvidenceHash || '').toLowerCase()
   );
@@ -295,13 +303,127 @@ export const applyJEvent = async (entityState: EntityState, entityTxData: JEvent
 
   newEntityState.jBlockObservations.push(observation);
 
-  const { newState, mempoolOps, outputs, dirtyAccounts } = await tryFinalizeJBlocks(newEntityState, entityState.config.threshold, env);
+  const { newState, mempoolOps, outputs, dirtyAccounts } = await tryFinalizeJHistory(newEntityState, entityState.config.threshold, env);
   newEntityState = newState;
 
   return { newState: newEntityState, mempoolOps, outputs, dirtyAccounts };
 };
 
-async function tryFinalizeJBlocks(
+export type JHistoryCheckpointEntityTxData = {
+  from: string;
+  jurisdictionRef: string;
+  baseHeight: number;
+  scannedThroughHeight: number;
+  tipBlockHash: string;
+  eventHistoryRoot: string;
+  signature: string;
+};
+
+const finalizedHistoryRoot = (state: EntityState): string => {
+  if (state.jHistoryFinality?.eventHistoryRoot) return state.jHistoryFinality.eventHistoryRoot;
+  return foldJHistoryRoot(EMPTY_J_HISTORY_ROOT, (state.jBlockChain || []).map((block) => ({
+    jurisdictionRef: block.jurisdictionRef,
+    jHeight: block.jHeight,
+    jBlockHash: block.jBlockHash,
+    eventsHash: block.eventsHash,
+  })));
+};
+
+const observationsForSignerRange = (
+  state: EntityState,
+  signerId: string,
+  baseHeight: number,
+  scannedThroughHeight: number,
+): JBlockObservation[] => state.jBlockObservations.filter((observation) =>
+  normalizeSignerId(observation.signerId) === normalizeSignerId(signerId) &&
+  observation.jHeight > baseHeight &&
+  observation.jHeight <= scannedThroughHeight
+);
+
+export const applyJHistoryCheckpoint = async (
+  entityState: EntityState,
+  data: JHistoryCheckpointEntityTxData,
+  env: Env,
+): Promise<JEventApplyResult> => {
+  const signerId = normalizeSignerId(data.from);
+  if (!isValidatorSigner(entityState, signerId)) {
+    throw new Error(`j_history_checkpoint rejected: non-validator signer ${signerId}`);
+  }
+  const jurisdictionRef = String(data.jurisdictionRef || '').trim().toLowerCase();
+  const expectedJurisdictionRef = getJEventJurisdictionRef(entityState.config.jurisdiction);
+  if (jurisdictionRef !== expectedJurisdictionRef) {
+    throw new Error(`j_history_checkpoint rejected: jurisdiction mismatch expected=${expectedJurisdictionRef} got=${jurisdictionRef || 'missing'}`);
+  }
+  const baseHeight = Number(data.baseHeight);
+  const scannedThroughHeight = Number(data.scannedThroughHeight);
+  if (!Number.isSafeInteger(baseHeight) || baseHeight < 0) {
+    throw new Error(`j_history_checkpoint rejected: invalid baseHeight ${String(data.baseHeight)}`);
+  }
+  if (!Number.isSafeInteger(scannedThroughHeight) || scannedThroughHeight <= baseHeight) {
+    throw new Error(`j_history_checkpoint rejected: invalid scannedThroughHeight ${String(data.scannedThroughHeight)}`);
+  }
+  const tipBlockHash = String(data.tipBlockHash || '').trim().toLowerCase();
+  const eventHistoryRoot = String(data.eventHistoryRoot || '').trim().toLowerCase();
+  const signature = String(data.signature || '').trim().toLowerCase();
+  const digest = buildJHistoryCheckpointDigest({
+    entityId: entityState.entityId,
+    jurisdictionRef,
+    signerId,
+    baseHeight,
+    scannedThroughHeight,
+    tipBlockHash,
+    eventHistoryRoot,
+  });
+  if (!signature || !verifyAccountSignature(env, signerId, digest, signature)) {
+    throw new Error(`j_history_checkpoint rejected: invalid signature for signer ${signerId}`);
+  }
+
+  if (baseHeight < entityState.lastFinalizedJHeight) {
+    return { newState: entityState, mempoolOps: [], outputs: [], dirtyAccounts: [] };
+  }
+  if (baseHeight !== entityState.lastFinalizedJHeight) {
+    throw new Error(
+      `j_history_checkpoint rejected: non-current base expected=${entityState.lastFinalizedJHeight} got=${baseHeight}`,
+    );
+  }
+  const expectedRoot = foldJHistoryRoot(
+    finalizedHistoryRoot(entityState),
+    observationsForSignerRange(entityState, signerId, baseHeight, scannedThroughHeight),
+  );
+  if (expectedRoot !== eventHistoryRoot) {
+    throw new Error(`j_history_checkpoint rejected: history root mismatch for signer ${signerId}`);
+  }
+
+  const checkpoint: JHistoryCheckpoint = {
+    signerId,
+    jurisdictionRef,
+    baseHeight,
+    scannedThroughHeight,
+    tipBlockHash,
+    eventHistoryRoot,
+    signature,
+  };
+  const pending = entityState.jHistoryCheckpoints || [];
+  const sameSlot = pending.filter((existing) =>
+    normalizeSignerId(existing.signerId) === signerId &&
+    existing.baseHeight === baseHeight &&
+    existing.scannedThroughHeight === scannedThroughHeight
+  );
+  if (sameSlot.some((existing) =>
+    existing.tipBlockHash !== tipBlockHash || existing.eventHistoryRoot !== eventHistoryRoot
+  )) {
+    throw new Error(`j_history_checkpoint equivocation: signer ${signerId} range ${baseHeight + 1}-${scannedThroughHeight}`);
+  }
+  if (sameSlot.length > 0) {
+    return { newState: entityState, mempoolOps: [], outputs: [], dirtyAccounts: [] };
+  }
+
+  const newState = cloneEntityState(entityState);
+  newState.jHistoryCheckpoints = [...(newState.jHistoryCheckpoints || []), checkpoint];
+  return tryFinalizeJHistory(newState, newState.config.threshold, env);
+};
+
+async function tryFinalizeJHistory(
   state: EntityState,
   threshold: bigint,
   env: Env
@@ -310,9 +432,6 @@ async function tryFinalizeJBlocks(
   const allOutputs: EntityInput[] = [];
   const dirtyAccounts = new Set<string>();
 
-  // A block-hash quorum is not enough: signers must agree on the event-set hash
-  // too, otherwise a Byzantine signer could union fake events into a real block.
-  const observationGroups = new Map<string, JBlockObservation[]>();
   const signerObservationIdentities = new Map<string, string>();
   const expectedJurisdictionRef = getJEventJurisdictionRef(state.config.jurisdiction);
 
@@ -340,7 +459,6 @@ async function tryFinalizeJBlocks(
       signerId,
       blockNumber: obs.jHeight,
       blockHash: obs.jBlockHash,
-      transactionHash: obs.transactionHash,
       eventsHash,
       ...(obs.disputeFinalizationEvidenceHash
         ? { disputeFinalizationEvidenceHash: obs.disputeFinalizationEvidenceHash }
@@ -353,7 +471,6 @@ async function tryFinalizeJBlocks(
     const observationIdentity = [
       String(obs.jBlockHash || '').toLowerCase(),
       eventsHash,
-      String(obs.transactionHash || '').toLowerCase(),
       String(obs.disputeFinalizationEvidenceHash || '').toLowerCase(),
     ].join(':');
     const previousIdentity = signerObservationIdentities.get(signerKey);
@@ -363,122 +480,193 @@ async function tryFinalizeJBlocks(
       );
     }
     signerObservationIdentities.set(signerKey, observationIdentity);
-    const key = `${jurisdictionRef}:${obs.jHeight}:${String(obs.jBlockHash || '').toLowerCase()}:${eventsHash}`;
-    if (!observationGroups.has(key)) {
-      observationGroups.set(key, []);
-    }
-    observationGroups.get(key)!.push({ ...obs, signerId, eventsHash });
   }
 
-  const finalizedHeights: number[] = [];
-
-  const thresholdHashesByHeight = new Map<number, Set<string>>();
-  const thresholdEventHashesByBlock = new Map<string, Set<string>>();
-  for (const observations of observationGroups.values()) {
-    const uniqueSigners = new Set(observations.map(o => normalizeSignerId(o.signerId)));
-    if (signerVotingPower(state, uniqueSigners) < threshold) continue;
-    const jHeight = observations[0]!.jHeight;
-    const jBlockHash = observations[0]!.jBlockHash;
-    const eventsHash = observationEventsHash(observations[0]!);
-    const hashes = thresholdHashesByHeight.get(jHeight) ?? new Set<string>();
-    hashes.add(jBlockHash);
-    thresholdHashesByHeight.set(jHeight, hashes);
-    if (hashes.size > 1) {
-      throw new Error(
-        `j_event conflict: multiple threshold hashes for block ${jHeight}: ${Array.from(hashes).join(', ')}`,
-      );
+  const baseHeight = state.lastFinalizedJHeight;
+  const baseRoot = finalizedHistoryRoot(state);
+  const checkpointsBySigner = new Map<string, JHistoryCheckpoint[]>();
+  const checkpointIdentities = new Map<string, string>();
+  for (const checkpoint of state.jHistoryCheckpoints || []) {
+    const signerId = normalizeSignerId(checkpoint.signerId);
+    if (!isValidatorSigner(state, signerId)) {
+      throw new Error(`j_history_checkpoint rejected: non-validator signer ${signerId}`);
     }
-    const blockKey = `${jHeight}:${jBlockHash}`;
-    const eventHashes = thresholdEventHashesByBlock.get(blockKey) ?? new Set<string>();
-    eventHashes.add(eventsHash);
-    thresholdEventHashesByBlock.set(blockKey, eventHashes);
-    if (eventHashes.size > 1) {
-      throw new Error(
-        `j_event conflict: multiple threshold event sets for block ${blockKey}: ${Array.from(eventHashes).join(', ')}`,
-      );
+    const digest = buildJHistoryCheckpointDigest({
+      entityId: state.entityId,
+      jurisdictionRef: checkpoint.jurisdictionRef,
+      signerId,
+      baseHeight: checkpoint.baseHeight,
+      scannedThroughHeight: checkpoint.scannedThroughHeight,
+      tipBlockHash: checkpoint.tipBlockHash,
+      eventHistoryRoot: checkpoint.eventHistoryRoot,
+    });
+    if (!verifyAccountSignature(env, signerId, digest, checkpoint.signature)) {
+      throw new Error(`j_history_checkpoint conflict: stored signature invalid for signer ${signerId}`);
     }
-  }
-
-  const quorumGroups = Array.from(observationGroups.entries())
-    .filter(([, observations]) => signerVotingPower(state, observations.map((observation) => observation.signerId)) >= threshold)
-    .sort(([leftKey, left], [rightKey, right]) =>
-      left[0]!.jHeight - right[0]!.jHeight || compareStableText(leftKey, rightKey));
-
-  for (const [_key, observations] of quorumGroups) {
-    const uniqueSigners = new Set(observations.map(o => normalizeSignerId(o.signerId)));
-    const signerCount = uniqueSigners.size;
-    const signerPower = signerVotingPower(state, uniqueSigners);
-
-    if (signerPower >= threshold) {
-      const jHeight = observations[0]!.jHeight;
-      const jBlockHash = observations[0]!.jBlockHash;
-
-      const alreadyInChain = state.jBlockChain.some(b => b.jHeight === jHeight);
-      if (alreadyInChain) {
-        continue;
-      }
-
-      const events = canonicalEventsFromQuorum(observations);
-      const disputeFinalizationEvidence = mergeThresholdDisputeFinalizationEvidence(state, observations, threshold);
-      const attestations = buildJBlockAttestations(observations);
-
-      const finalized: JBlockFinalized = {
-        jurisdictionRef: expectedJurisdictionRef,
-        jHeight,
-        jBlockHash,
-        eventsHash: observationEventsHash(observations[0]!),
-        events,
-        attestations,
-        finalizedAt: state.timestamp, // Entity-level timestamp for determinism across validators
-        signerCount,
-        signerPower,
-      };
-
-      // Add to jBlockChain before applying events to prevent duplicate
-      // finalization if an event handler clones state.
-      state.jBlockChain.push(finalized);
-      state.lastFinalizedJHeight = jHeight;
-      finalizedHeights.push(jHeight);
-
-      for (const event of events) {
-        const { newState, mempoolOps, outputs, dirtyAccounts: eventDirtyAccounts } = await applyFinalizedJEvent(
-          state,
-          event,
-          env,
-          disputeFinalizationEvidence,
-        );
-        state = newState;
-        allMempoolOps.push(...mempoolOps);
-        allOutputs.push(...outputs);
-        for (const accountId of eventDirtyAccounts) dirtyAccounts.add(accountId);
-        if (!state.jBlockChain.some(b => b.jHeight === jHeight)) {
-          jEventLog.warn('finalize.clone_lost_chain', { height: jHeight });
-          state.jBlockChain.push(finalized);
-          state.lastFinalizedJHeight = jHeight;
-        }
-      }
-
-      // Multiple AccountSettled events from the same batch create separate observations
-      // and j_event_claims per token. Merge them so tryFinalizeAccountJEvents processes
-      // all token updates atomically in one bilateral consensus round.
-      for (const [cpId, account] of state.accounts) {
-        const leftChanged = mergeAccountJObservations(account.leftJObservations);
-        const rightChanged = mergeAccountJObservations(account.rightJObservations);
-        if (leftChanged || rightChanged) dirtyAccounts.add(String(cpId).toLowerCase());
-      }
-      mergeJEventClaimOps(allMempoolOps);
+    const slot = `${signerId}:${checkpoint.baseHeight}:${checkpoint.scannedThroughHeight}`;
+    const identity = `${checkpoint.tipBlockHash}:${checkpoint.eventHistoryRoot}`;
+    const previous = checkpointIdentities.get(slot);
+    if (previous && previous !== identity) {
+      throw new Error(`j_history_checkpoint equivocation: signer ${signerId} range ${checkpoint.baseHeight + 1}-${checkpoint.scannedThroughHeight}`);
     }
-  }
-
-  // Only remove observations for heights that were actually finalized.
-  // Keep observations for unfinalized heights (even if lower than highest finalized)
-  // to allow out-of-order finalization and detect conflicts.
-  if (finalizedHeights.length > 0) {
-    const finalizedSet = new Set(finalizedHeights);
-    state.jBlockObservations = state.jBlockObservations.filter(
-      obs => !finalizedSet.has(obs.jHeight)
+    checkpointIdentities.set(slot, identity);
+    if (checkpoint.baseHeight !== baseHeight) continue;
+    const signerRoot = foldJHistoryRoot(
+      baseRoot,
+      observationsForSignerRange(state, signerId, baseHeight, checkpoint.scannedThroughHeight),
     );
+    if (signerRoot !== checkpoint.eventHistoryRoot) {
+      throw new Error(`j_history_checkpoint conflict: stored history root mismatch for signer ${signerId}`);
+    }
+    const signerCheckpoints = checkpointsBySigner.get(signerId) || [];
+    signerCheckpoints.push({ ...checkpoint, signerId });
+    checkpointsBySigner.set(signerId, signerCheckpoints);
   }
+
+  type PrefixSupport = {
+    prefixRoot: string;
+    finalizedThroughHeight: number;
+    checkpoints: JHistoryCheckpoint[];
+  };
+  let selectedSupport: PrefixSupport | undefined;
+  const candidateHeights = Array.from(new Set(
+    Array.from(checkpointsBySigner.values()).flatMap((checkpoints) =>
+      checkpoints.map((checkpoint) => checkpoint.scannedThroughHeight)),
+  )).sort((left, right) => right - left);
+
+  for (const finalizedThroughHeight of candidateHeights) {
+    const prefixGroups = new Map<string, JHistoryCheckpoint[]>();
+    for (const [signerId, signerCheckpoints] of checkpointsBySigner) {
+      const coveringCheckpoint = signerCheckpoints
+        .filter((checkpoint) => checkpoint.scannedThroughHeight >= finalizedThroughHeight)
+        .sort((left, right) =>
+          left.scannedThroughHeight - right.scannedThroughHeight ||
+          compareStableText(left.eventHistoryRoot, right.eventHistoryRoot) ||
+          compareStableText(left.tipBlockHash, right.tipBlockHash))[0];
+      if (!coveringCheckpoint) continue;
+      const prefixRoot = foldJHistoryRoot(
+        baseRoot,
+        observationsForSignerRange(state, signerId, baseHeight, finalizedThroughHeight),
+      );
+      const group = prefixGroups.get(prefixRoot) || [];
+      group.push(coveringCheckpoint);
+      prefixGroups.set(prefixRoot, group);
+    }
+
+    const quorumPrefixes = [...prefixGroups.entries()]
+      .filter(([, checkpoints]) =>
+        signerVotingPower(state, checkpoints.map((checkpoint) => checkpoint.signerId)) >= threshold)
+      .sort(([leftRoot], [rightRoot]) => compareStableText(leftRoot, rightRoot));
+    if (quorumPrefixes.length > 1) {
+      throw new Error(
+        `j_history_checkpoint conflict: multiple quorum histories at ${finalizedThroughHeight}: ${quorumPrefixes.map(([root]) => root).join(',')}`,
+      );
+    }
+    const quorumPrefix = quorumPrefixes[0];
+    if (!quorumPrefix) continue;
+    selectedSupport = {
+      prefixRoot: quorumPrefix[0],
+      finalizedThroughHeight,
+      checkpoints: quorumPrefix[1],
+    };
+    break;
+  }
+
+  if (!selectedSupport) {
+    return { newState: state, mempoolOps: allMempoolOps, outputs: allOutputs, dirtyAccounts: [] };
+  }
+
+  const checkpoints = selectedSupport.checkpoints;
+  const uniqueSigners = new Set(checkpoints.map((checkpoint) => normalizeSignerId(checkpoint.signerId)));
+  const signerPower = signerVotingPower(state, uniqueSigners);
+  const finalizedThroughHeight = selectedSupport.finalizedThroughHeight;
+  const canonicalSignerId = [...uniqueSigners].sort(compareStableText)[0]!;
+  const canonicalObservations = observationsForSignerRange(
+    state,
+    canonicalSignerId,
+    baseHeight,
+    finalizedThroughHeight,
+  ).sort((left, right) => left.jHeight - right.jHeight || compareStableText(observationEventsHash(left), observationEventsHash(right)));
+
+  for (const canonicalObservation of canonicalObservations) {
+    const leaf = canonicalJHistoryObservationLeaf(canonicalObservation);
+    const matching = state.jBlockObservations.filter((observation) =>
+      uniqueSigners.has(normalizeSignerId(observation.signerId)) &&
+      canonicalJHistoryObservationLeaf(observation) === leaf
+    );
+    if (signerVotingPower(state, matching.map((observation) => observation.signerId)) < threshold) {
+      throw new Error(`j_history_checkpoint conflict: quorum event body missing at ${canonicalObservation.jHeight}`);
+    }
+
+    const events = canonicalEventsFromQuorum(matching);
+    const disputeFinalizationEvidence = mergeThresholdDisputeFinalizationEvidence(state, matching, threshold);
+    const finalized: JBlockFinalized = {
+      jurisdictionRef: expectedJurisdictionRef,
+      jHeight: canonicalObservation.jHeight,
+      jBlockHash: canonicalObservation.jBlockHash,
+      eventsHash: observationEventsHash(canonicalObservation),
+      events,
+      attestations: buildJBlockAttestations(matching),
+      finalizedAt: state.timestamp,
+      signerCount: uniqueSigners.size,
+      signerPower,
+    };
+    state.jBlockChain.push(finalized);
+    state.lastFinalizedJHeight = canonicalObservation.jHeight;
+
+    for (const event of events) {
+      const result = await applyFinalizedJEvent(state, event, env, disputeFinalizationEvidence);
+      state = result.newState;
+      allMempoolOps.push(...result.mempoolOps);
+      allOutputs.push(...result.outputs);
+      for (const accountId of result.dirtyAccounts) dirtyAccounts.add(accountId);
+      if (!state.jBlockChain.some((block) => block.jHeight === finalized.jHeight)) {
+        throw new Error(`j_history_checkpoint invariant: finalized block ${finalized.jHeight} lost during event apply`);
+      }
+    }
+  }
+
+  state.lastFinalizedJHeight = finalizedThroughHeight;
+  const exactTipCheckpoint = checkpoints
+    .filter((checkpoint) => checkpoint.scannedThroughHeight === finalizedThroughHeight)
+    .sort((left, right) => compareStableText(left.signerId, right.signerId))[0];
+  state.jHistoryFinality = {
+    jurisdictionRef: expectedJurisdictionRef,
+    baseHeight,
+    finalizedThroughHeight,
+    ...(exactTipCheckpoint ? { tipBlockHash: exactTipCheckpoint.tipBlockHash } : {}),
+    eventHistoryRoot: selectedSupport.prefixRoot,
+    attestations: checkpoints
+      .slice()
+      .sort((left, right) => compareStableText(left.signerId, right.signerId))
+      .map((checkpoint) => ({
+        signerId: checkpoint.signerId,
+        signedThroughHeight: checkpoint.scannedThroughHeight,
+        tipBlockHash: checkpoint.tipBlockHash,
+        eventHistoryRoot: checkpoint.eventHistoryRoot,
+        signature: checkpoint.signature,
+      })),
+    signerCount: uniqueSigners.size,
+    signerPower,
+  };
+  state.jBlockChain.sort((left, right) => left.jHeight - right.jHeight);
+  state.jBlockObservations = state.jBlockObservations.filter((observation) => observation.jHeight > finalizedThroughHeight);
+  state.jHistoryCheckpoints = (state.jHistoryCheckpoints || []).filter((checkpoint) =>
+    checkpoint.baseHeight >= finalizedThroughHeight && checkpoint.scannedThroughHeight > finalizedThroughHeight
+  );
+
+  for (const [cpId, account] of state.accounts) {
+    const leftChanged = mergeAccountJObservations(account.leftJObservations);
+    const rightChanged = mergeAccountJObservations(account.rightJObservations);
+    if (leftChanged || rightChanged) dirtyAccounts.add(String(cpId).toLowerCase());
+  }
+  mergeJEventClaimOps(allMempoolOps);
+  jEventLog.info('history.finalized', {
+    range: `${baseHeight + 1}-${finalizedThroughHeight}`,
+    root: shortHash(selectedSupport.prefixRoot),
+    signerPower: signerPower.toString(),
+    supportHeights: checkpoints.map((checkpoint) => checkpoint.scannedThroughHeight),
+  });
 
   return { newState: state, mempoolOps: allMempoolOps, outputs: allOutputs, dirtyAccounts: Array.from(dirtyAccounts) };
 }
@@ -491,7 +679,7 @@ function canonicalEventsFromQuorum(observations: JBlockObservation[]): Jurisdict
   // Every observation was independently verified against the same eventsHash.
   // Finality selects one canonical body; it never unions validator histories.
   return normalizeJurisdictionEvents(canonicalObservation.events)
-    .sort((left, right) => compareStableText(canonicalJurisdictionEventKey(left), canonicalJurisdictionEventKey(right)));
+    .sort(compareCanonicalJurisdictionEvents);
 }
 
 function buildJBlockAttestations(observations: JBlockObservation[]): JBlockAttestation[] {
@@ -504,7 +692,6 @@ function buildJBlockAttestations(observations: JBlockObservation[]): JBlockAttes
     .sort((left, right) => compareStableText(normalizeSignerId(left.signerId), normalizeSignerId(right.signerId)))
     .map((observation) => ({
       signerId: normalizeSignerId(observation.signerId),
-      transactionHash: String(observation.transactionHash || '').toLowerCase(),
       signature: String(observation.signature || '').toLowerCase(),
       ...(observation.disputeFinalizationEvidenceHash
         ? { disputeFinalizationEvidenceHash: observation.disputeFinalizationEvidenceHash.toLowerCase() }

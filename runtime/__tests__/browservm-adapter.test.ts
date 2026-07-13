@@ -81,6 +81,7 @@ describe('BrowserVM JAdapter boundary', () => {
       expect(queued[0]?.entityId).toBe(entityId);
       expect(queued[0]?.entityTxs[0]?.type).toBe('j_event');
       expect(queued[0]?.entityTxs[0]?.data.event.type).toBe('ReserveUpdated');
+      expect(queued[0]?.entityTxs[1]?.type).toBe('j_history_checkpoint');
     } finally {
       await adapter.close();
     }

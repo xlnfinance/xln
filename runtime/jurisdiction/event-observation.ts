@@ -4,6 +4,7 @@ import type { DisputeFinalizationEvidence } from '../types/jurisdiction-events';
 import { getJurisdictionIdentityRef } from './jurisdiction-runtime';
 import {
   canonicalJurisdictionEventKey,
+  compareCanonicalJurisdictionEvents,
   normalizeJurisdictionEvents,
 } from './event-normalization';
 
@@ -13,7 +14,6 @@ export type JEventObservationDigestInput = {
   signerId: string;
   blockNumber: number;
   blockHash: string;
-  transactionHash: string;
   eventsHash: string;
   disputeFinalizationEvidenceHash?: string;
 };
@@ -25,8 +25,8 @@ export const getJEventJurisdictionRef = (jurisdiction: unknown): string =>
 
 export const canonicalJurisdictionEventsHash = (events: JurisdictionEvent[]): string => {
   const keys = normalizeJurisdictionEvents(events)
-    .map((event) => canonicalJurisdictionEventKey(event))
-    .sort();
+    .sort(compareCanonicalJurisdictionEvents)
+    .map((event) => canonicalJurisdictionEventKey(event));
   return ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(keys)));
 };
 
@@ -73,7 +73,6 @@ export const buildJEventObservationDigest = (input: JEventObservationDigestInput
     String(input.signerId || '').toLowerCase(),
     Number(input.blockNumber || 0),
     String(input.blockHash || '').toLowerCase(),
-    String(input.transactionHash || ''),
     String(input.eventsHash || '').toLowerCase(),
     // Optional calldata-derived evidence is not part of canonical event
     // consensus. If a validator includes it, bind it into that validator's

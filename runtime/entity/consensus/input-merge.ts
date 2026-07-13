@@ -9,8 +9,24 @@ const entityInputMergeLog = createStructuredLogger('entity.input.merge');
 const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
   const merged: EntityTx[] = [];
   const seenSignedObservations = new Set<string>();
+  const seenSignedCheckpoints = new Set<string>();
 
   for (const tx of txs) {
+    if (tx.type === 'j_history_checkpoint') {
+      const checkpointKey = safeStringify({
+        from: String(tx.data.from || '').toLowerCase(),
+        jurisdictionRef: String(tx.data.jurisdictionRef || '').toLowerCase(),
+        baseHeight: tx.data.baseHeight,
+        scannedThroughHeight: tx.data.scannedThroughHeight,
+        tipBlockHash: String(tx.data.tipBlockHash || '').toLowerCase(),
+        eventHistoryRoot: String(tx.data.eventHistoryRoot || '').toLowerCase(),
+        signature: String(tx.data.signature || '').toLowerCase(),
+      });
+      if (seenSignedCheckpoints.has(checkpointKey)) continue;
+      seenSignedCheckpoints.add(checkpointKey);
+      merged.push(tx);
+      continue;
+    }
     if (tx.type !== 'j_event' || !tx.data) {
       merged.push(tx);
       continue;

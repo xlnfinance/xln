@@ -13,6 +13,8 @@ export {
   collectRelevantJEventReplicaKeys,
   getWatcherStartBlock,
   getMinimumCommittedSignerJHeight,
+  hasJHistoryLivenessCheckpointDue,
+  enqueueJHistoryCheckpoint,
   processEventBatch,
   rawEventToJEvents,
   rememberPendingWatcherJBlock,

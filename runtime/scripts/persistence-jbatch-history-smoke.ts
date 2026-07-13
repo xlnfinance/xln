@@ -72,7 +72,6 @@ async function main() {
       signerId,
       blockNumber,
       blockHash,
-      transactionHash,
       eventsHash,
     }));
     return {

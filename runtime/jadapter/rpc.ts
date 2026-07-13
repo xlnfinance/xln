@@ -47,8 +47,9 @@ import {
 } from './helpers';
 import { CANONICAL_J_EVENTS } from './helpers';
 import {
-  collectRelevantJEventReplicaKeys,
+  enqueueJHistoryCheckpoint,
   getWatcherStartBlock,
+  hasJHistoryLivenessCheckpointDue,
   processEventBatch,
   rememberPendingWatcherJBlock,
   resolveCommittedWatcherCursor,
@@ -2365,13 +2366,34 @@ export async function createRpcAdapter(
                 if (!byBlock.has(bn)) byBlock.set(bn, []);
                 byBlock.get(bn)!.push(e);
               }
+              const observedInputs = [];
               for (const [blockNum, events] of byBlock) {
                 const blockHash = events[0]?.blockHash ?? '0x0';
                 pollStep = `processEventBatch:${blockNum}`;
-                const relevantReplicaKeys = collectRelevantJEventReplicaKeys(activeEnv, events);
-                processEventBatch(events, activeEnv, blockNum, blockHash, txCounter, 'rpc');
-                rememberPendingWatcherJBlock(pendingWatcherJBlocks, blockNum, relevantReplicaKeys);
+                const builtInput = processEventBatch(
+                  events,
+                  activeEnv,
+                  blockNum,
+                  blockHash,
+                  txCounter,
+                  'rpc',
+                  addresses.depository,
+                  true,
+                  'chain',
+                );
+                if (builtInput) observedInputs.push(builtInput);
               }
+              pollStep = `eth_getBlockByNumber:${toBlock}`;
+              const checkpointTip = await provider.getBlock(toBlock);
+              if (!checkpointTip?.hash) throw new Error(`J_HISTORY_CHECKPOINT_TIP_UNAVAILABLE:${toBlock}`);
+              const checkpointReplicaKeys = enqueueJHistoryCheckpoint(
+                activeEnv,
+                observedInputs,
+                toBlock,
+                checkpointTip.hash,
+                addresses.depository,
+              );
+              rememberPendingWatcherJBlock(pendingWatcherJBlocks, toBlock, checkpointReplicaKeys);
 
               emitWatcherDebug({
                 event: 'j_watch_batch',
@@ -2398,6 +2420,20 @@ export async function createRpcAdapter(
           // forever and the runtime never sees its J-events.
           if (fromBlock === safeToBlock) {
             return;
+          }
+
+          if (hasJHistoryLivenessCheckpointDue(activeEnv, toBlock, addresses.depository)) {
+            pollStep = `eth_getBlockByNumber:${toBlock}`;
+            const checkpointTip = await provider.getBlock(toBlock);
+            if (!checkpointTip?.hash) throw new Error(`J_HISTORY_CHECKPOINT_TIP_UNAVAILABLE:${toBlock}`);
+            const checkpointReplicaKeys = enqueueJHistoryCheckpoint(
+              activeEnv,
+              [],
+              toBlock,
+              checkpointTip.hash,
+              addresses.depository,
+            );
+            rememberPendingWatcherJBlock(pendingWatcherJBlocks, toBlock, checkpointReplicaKeys);
           }
 
           lastSyncedBlock = toBlock;

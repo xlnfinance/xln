@@ -45,6 +45,7 @@ const eventsToRaw = (events: JEvent[]): RawJEvent[] =>
     blockNumber: event.blockNumber,
     blockHash: event.blockHash,
     transactionHash: event.transactionHash,
+    ...(event.logIndex !== undefined ? { logIndex: event.logIndex } : {}),
   }));
 
 const receiptFromEvents = (events: JEvent[]): JBatchReceipt => ({
@@ -96,6 +97,7 @@ export async function createBrowserVMAdapter(
     blockNumber?: number;
     blockHash?: string;
     transactionHash?: string;
+    logIndex?: number;
   }>): JEvent[] => normalizeAdapterEvents(events);
 
   const adapter: JAdapter = {
@@ -319,7 +321,7 @@ export async function createBrowserVMAdapter(
         if (normalized.length === 0) return;
         const blockNumber = normalized[0]?.blockNumber ?? Number(browserVM.getBlockNumber());
         const blockHash = normalized[0]?.blockHash ?? browserVM.getBlockHash();
-        processEventBatch(eventsToRaw(normalized), activeEnv, blockNumber, blockHash, txCounter, 'browservm');
+        processEventBatch(eventsToRaw(normalized), activeEnv, blockNumber, blockHash, txCounter, 'browservm', undefined, false, 'chain');
       });
     },
 

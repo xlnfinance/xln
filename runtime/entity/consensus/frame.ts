@@ -243,6 +243,7 @@ export async function createEntityFrameHash(
         }
       : {}),
     lastFinalizedJHeight: newState.lastFinalizedJHeight,
+    jHistoryFinality: newState.jHistoryFinality ?? null,
     accountHashes: Array.from(newState.accounts.entries())
       .sort((a, b) => compareCanonicalText(a[0], b[0]))
       .map(([cpId, acct]) => ({

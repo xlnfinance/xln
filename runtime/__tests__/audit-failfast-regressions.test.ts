@@ -62,6 +62,11 @@ import { handleJRebroadcast } from '../entity/tx/handlers/j-rebroadcast';
 import { handleSetRebalancePolicyEntityTx } from '../entity/tx/handlers/account-admin';
 import { processSettleAction } from '../entity/tx/handlers/settle';
 import { applyJEvent } from '../entity/tx/j-events';
+import {
+  applyJEventAndCheckpoint,
+  buildJHistoryCheckpointData,
+  submitJHistoryCheckpoint,
+} from './helpers/j-history';
 import { tryFinalizeAccountJEvents } from '../entity/tx/j-events-account';
 import { queueCrossJurisdictionSalvageFromArgumentList } from '../entity/tx/j-events-htlc';
 import {
@@ -288,7 +293,6 @@ const signJEventObservation = (
       signerId,
       blockNumber: input.blockNumber,
 	      blockHash: input.blockHash,
-	      transactionHash: input.transactionHash,
 	      eventsHash,
 	      ...(disputeFinalizationEvidenceHash ? { disputeFinalizationEvidenceHash } : {}),
 	    }),
@@ -1012,7 +1016,7 @@ describe('audit fail-fast regressions', () => {
       'missing observation signature',
     );
 
-    const result = await applyJEvent(state, { ...common, ...signed }, env);
+    const result = await applyJEventAndCheckpoint(state, { ...common, ...signed }, env);
     expect(result.newState.jBlockChain.length).toBe(1);
     expect(result.newState.reserves.get(1)).toBe(100n);
   });
@@ -1047,7 +1051,7 @@ describe('audit fail-fast regressions', () => {
       events: [initialReserveEvent],
       jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
     });
-    state = (await applyJEvent(state, { ...initialCommon, ...initialSigned }, env)).newState;
+    state = (await applyJEventAndCheckpoint(state, { ...initialCommon, ...initialSigned }, env)).newState;
     expect(state.reserves.get(1)).toBe(777n);
     const event: JurisdictionEvent = {
       type: 'AccountSettled',
@@ -1078,7 +1082,7 @@ describe('audit fail-fast regressions', () => {
       jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
     });
 
-    const result = await applyJEvent(state, { ...common, ...signed }, env);
+    const result = await applyJEventAndCheckpoint(state, { ...common, ...signed }, env);
 
     expect(result.newState.reserves.get(1)).toBe(0n);
   });
@@ -1864,21 +1868,68 @@ describe('audit fail-fast regressions', () => {
       jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
     });
 
-    state = (await applyJEvent(state, { ...common, from: '1', event: honestEvent, ...signedHonest1 }, env)).newState;
-    state = (await applyJEvent(state, { ...common, from: '1', event: honestEvent, ...signedHonest1 }, env)).newState;
+    state = (await applyJEventAndCheckpoint(state, { ...common, from: '1', event: honestEvent, ...signedHonest1 }, env)).newState;
+    state = (await applyJEventAndCheckpoint(state, { ...common, from: '1', event: honestEvent, ...signedHonest1 }, env)).newState;
     expect(state.jBlockObservations).toHaveLength(1);
-    state = (await applyJEvent(state, { ...common, from: '2', event: fakeEvent, ...signedFake }, env)).newState;
+    state = (await applyJEventAndCheckpoint(state, { ...common, from: '2', event: fakeEvent, ...signedFake }, env)).newState;
     expect(state.jBlockChain.length).toBe(0);
     expect(state.jBlockObservations.map((observation) => observation.signerId)).toEqual(['1', '2']);
     expect(state.reserves.get(1)).toBeUndefined();
 
-    state = (await applyJEvent(state, { ...common, from: '3', event: honestEvent, ...signedHonest3 }, env)).newState;
+    state = (await applyJEventAndCheckpoint(state, { ...common, from: '3', event: honestEvent, ...signedHonest3 }, env)).newState;
     expect(state.jBlockChain.length).toBe(1);
     expect(state.reserves.get(1)).toBe(100n);
     expect(state.jBlockChain[0]?.events).toHaveLength(1);
     expect(state.jBlockChain[0]?.eventsHash).toBe(signedHonest1.eventsHash);
     expect(state.jBlockChain[0]?.attestations.map((attestation) => attestation.signerId)).toEqual(['1', '3']);
     expect(state.jBlockChain[0]?.signerPower).toBe(2n);
+  });
+
+  test('entity quorum advances an empty J-history range without inventing events', async () => {
+    const entityId = `0x${'43'.repeat(32)}`;
+    let state = makeEntityState(entityId);
+    state.config = {
+      mode: 'proposer-based',
+      threshold: 2n,
+      validators: ['1', '2', '3'],
+      shares: { '1': 1n, '2': 1n, '3': 1n },
+    };
+    const env = createEmptyEnv('j-history-empty-range-quorum');
+    const tipBlockHash = `0x${'57'.repeat(32)}`;
+
+    state = await submitJHistoryCheckpoint(state, env, '1', 100, tipBlockHash);
+    expect(state.lastFinalizedJHeight).toBe(0);
+    expect(state.jHistoryCheckpoints).toHaveLength(1);
+
+    state = await submitJHistoryCheckpoint(state, env, '2', 100, tipBlockHash);
+    expect(state.lastFinalizedJHeight).toBe(100);
+    expect(state.jBlockChain).toHaveLength(0);
+    expect(state.jBlockObservations).toHaveLength(0);
+    expect(state.jHistoryFinality?.finalizedThroughHeight).toBe(100);
+    expect(state.jHistoryFinality?.attestations.map(({ signerId }) => signerId)).toEqual(['1', '2']);
+    expect(state.jHistoryFinality?.signerPower).toBe(2n);
+  });
+
+  test('entity quorum finalizes the highest exact common J-history prefix across different scan tips', async () => {
+    const entityId = `0x${'42'.repeat(32)}`;
+    let state = makeEntityState(entityId);
+    state.config = {
+      mode: 'proposer-based',
+      threshold: 2n,
+      validators: ['1', '2', '3'],
+      shares: { '1': 1n, '2': 1n, '3': 1n },
+    };
+    const env = createEmptyEnv('j-history-common-prefix');
+
+    state = await submitJHistoryCheckpoint(state, env, '1', 100, `0x${'51'.repeat(32)}`);
+    state = await submitJHistoryCheckpoint(state, env, '2', 110, `0x${'52'.repeat(32)}`);
+
+    expect(state.lastFinalizedJHeight).toBe(100);
+    expect(state.jHistoryFinality?.finalizedThroughHeight).toBe(100);
+    expect(state.jHistoryFinality?.attestations.map((attestation) => [
+      attestation.signerId,
+      attestation.signedThroughHeight,
+    ])).toEqual([['1', 100], ['2', 110]]);
   });
 
   test('entity input merge preserves validator J histories and dedupes exact replay only', () => {
@@ -1906,15 +1957,31 @@ describe('audit fail-fast regressions', () => {
     });
     const validatorOne = observation('validator-1', '11');
     const validatorTwo = observation('validator-2', '22');
+    const checkpoint: EntityTx = {
+      type: 'j_history_checkpoint',
+      data: {
+        from: 'validator-1',
+        jurisdictionRef: 'stack:1:0x1111111111111111111111111111111111111111',
+        baseHeight: 0,
+        scannedThroughHeight: 7,
+        tipBlockHash: `0x${'55'.repeat(32)}`,
+        eventHistoryRoot: `0x${'77'.repeat(32)}`,
+        signature: `0x${'33'.repeat(65)}`,
+      },
+    };
 
     const merged = mergeEntityInputs([
-      { entityId, signerId: targetSigner, entityTxs: [validatorOne] },
-      { entityId, signerId: targetSigner, entityTxs: [validatorOne, validatorTwo] },
+      { entityId, signerId: targetSigner, entityTxs: [validatorOne, checkpoint] },
+      { entityId, signerId: targetSigner, entityTxs: [validatorOne, validatorTwo, checkpoint] },
     ]);
 
     expect(merged).toHaveLength(1);
-    expect(merged[0]?.entityTxs).toHaveLength(2);
-    expect(merged[0]?.entityTxs?.map((tx) => String(tx.data?.from))).toEqual(['validator-1', 'validator-2']);
+    expect(merged[0]?.entityTxs).toHaveLength(3);
+    expect(merged[0]?.entityTxs?.map((tx) => `${tx.type}:${String(tx.data?.from)}`)).toEqual([
+      'j_event:validator-1',
+      'j_history_checkpoint:validator-1',
+      'j_event:validator-2',
+    ]);
   });
 
   test('entity frame hash commits to exact J block identity and validator signature', async () => {
@@ -2791,7 +2858,6 @@ describe('audit fail-fast regressions', () => {
         },
       } as any],
     });
-
     const marks = env.runtimeState?.currentStorageOverlayMarks ?? [];
     expect(marks.some((record) => record.family === 'entity' && record.entityId === entityId)).toBe(true);
   });
@@ -2959,7 +3025,7 @@ describe('audit fail-fast regressions', () => {
       jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
     });
 
-    await applyEntityInput(env, replica, {
+    const observationResult = await applyEntityInput(env, replica, {
       entityId,
       signerId,
       entityTxs: [{
@@ -2974,6 +3040,21 @@ describe('audit fail-fast regressions', () => {
           event: disputeFinalizedEvent,
         },
       } as any],
+    });
+    const checkpointReplica = observationResult.workingReplica;
+    await applyEntityInput(env, checkpointReplica, {
+      entityId,
+      signerId,
+      entityTxs: [{
+        type: 'j_history_checkpoint',
+        data: buildJHistoryCheckpointData(
+          checkpointReplica.state,
+          env,
+          signerId,
+          22,
+          `0x${'99'.repeat(32)}`,
+        ),
+      }],
     });
 
     const marks = env.runtimeState?.currentStorageOverlayMarks ?? [];
@@ -5238,7 +5319,7 @@ describe('audit fail-fast regressions', () => {
       disputeFinalizationEvidence,
       jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
     });
-    const finalized = await applyJEvent(state, {
+    const finalized = await applyJEventAndCheckpoint(state, {
       from: '1',
       observedAt: 2000,
       blockNumber: 22,
@@ -5276,7 +5357,7 @@ describe('audit fail-fast regressions', () => {
       events: [failedBatchEvent],
       jurisdictionRef: getJEventJurisdictionRef(finalized.newState.config.jurisdiction),
     });
-    const failed = await applyJEvent(finalized.newState, {
+    const failed = await applyJEventAndCheckpoint(finalized.newState, {
       from: '1',
       observedAt: 3000,
       blockNumber: 23,
@@ -5751,7 +5832,7 @@ describe('audit fail-fast regressions', () => {
       events: [failedBatchEvent],
       jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
     });
-    const failed = await applyJEvent(state, {
+    const failed = await applyJEventAndCheckpoint(state, {
       from: '1',
       observedAt: 3000,
       blockNumber: 23,

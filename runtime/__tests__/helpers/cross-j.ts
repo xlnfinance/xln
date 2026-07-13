@@ -76,7 +76,6 @@ export const signJEventObservation = (
       signerId,
       blockNumber: input.blockNumber,
       blockHash: input.blockHash,
-      transactionHash: input.transactionHash,
       eventsHash,
       ...(disputeFinalizationEvidenceHash ? { disputeFinalizationEvidenceHash } : {}),
     }),

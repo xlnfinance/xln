@@ -67,6 +67,18 @@ export type EntityTx =
       data: JurisdictionEventData;
     }
   | {
+      type: 'j_history_checkpoint';
+      data: {
+        from: string;
+        jurisdictionRef: string;
+        baseHeight: number;
+        scannedThroughHeight: number;
+        tipBlockHash: string;
+        eventHistoryRoot: string;
+        signature: string;
+      };
+    }
+  | {
       type: 'accountInput';
       data: AccountInput;
     }

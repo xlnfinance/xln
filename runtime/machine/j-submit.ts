@@ -21,8 +21,8 @@ export type RuntimeJSubmitDeps = {
   enqueueRuntimeInputs: RuntimeJOutboxQueue;
 };
 
-const hasJEventTx = (input: EntityInput): boolean =>
-  (input.entityTxs ?? []).some((tx) => tx?.type === 'j_event');
+const hasJHistoryTx = (input: EntityInput): boolean =>
+  (input.entityTxs ?? []).some((tx) => tx?.type === 'j_event' || tx?.type === 'j_history_checkpoint');
 
 const captureQueuedEntityInputs = (env: Env): EntityInput[] => {
   const mempool = env.runtimeMempool ?? env.runtimeInput;
@@ -36,10 +36,10 @@ const prioritizeJEventsQueuedAfterSubmit = (env: Env, beforePoll: EntityInput[])
   if (current.length <= beforePoll.length) return 0;
 
   const newlyQueued = current.slice(beforePoll.length);
-  const newlyQueuedJEvents = newlyQueued.filter(hasJEventTx);
+  const newlyQueuedJEvents = newlyQueued.filter(hasJHistoryTx);
   if (newlyQueuedJEvents.length === 0) return 0;
 
-  const newlyQueuedOtherInputs = newlyQueued.filter((input) => !hasJEventTx(input));
+  const newlyQueuedOtherInputs = newlyQueued.filter((input) => !hasJHistoryTx(input));
   // Chain receipts caused by the just-submitted J batch must be visible before
   // same-entity local follow-ups already queued for the next R-frame. Otherwise
   // a follow-up such as j_broadcast can observe a stale sentBatch latch and

@@ -146,6 +146,8 @@ export const hydrateEntityStateFromStorage = (options: {
     lastFinalizedJHeight: core.lastFinalizedJHeight,
     jBlockObservations: core.jBlockObservations ?? [],
     jBlockChain: core.jBlockChain ?? [],
+    ...withProp('jHistoryCheckpoints', core.jHistoryCheckpoints),
+    ...withProp('jHistoryFinality', core.jHistoryFinality),
     entityEncPubKey: core.entityEncPubKey,
     entityEncPrivKey: core.entityEncPrivKey,
     profile: core.profile,

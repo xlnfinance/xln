@@ -14,6 +14,7 @@ import {
   backfillEntityJurisdictionBinding,
   requireBoundEntityConfig,
 } from '../jurisdiction/jurisdiction-runtime';
+import { getJHistoryRegistrationBaseHeight } from '../jurisdiction/history-consensus';
 import { announceLocalEntityProfile } from '../networking/gossip-helper';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import type { EntityReplica, Env, JReplica, RuntimeTx } from '../types';
@@ -230,6 +231,15 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): vo
     existingReplica.signerId = importedSignerId;
     existingReplica.state.entityId = importedEntityId;
     existingReplica.state.config = config;
+    if (
+      existingReplica.state.lastFinalizedJHeight === 0 &&
+      existingReplica.state.jBlockChain.length === 0 &&
+      existingReplica.state.jBlockObservations.length === 0 &&
+      (existingReplica.state.jHistoryCheckpoints?.length ?? 0) === 0 &&
+      !existingReplica.state.jHistoryFinality
+    ) {
+      existingReplica.state.lastFinalizedJHeight = getJHistoryRegistrationBaseHeight(config.jurisdiction);
+    }
     canonicalizeLocalEntityCryptoKeys(env, importedEntityId, importedSignerId, existingReplica.state);
     normalizeEntitySwapTradingPairs(existingReplica.state);
     if (existingReplicaKey !== replicaKey) {
@@ -263,7 +273,7 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): vo
       reserves: new Map(),
       accounts: new Map(),
       deferredAccountProposals: new Map(),
-      lastFinalizedJHeight: 0,
+      lastFinalizedJHeight: getJHistoryRegistrationBaseHeight(config.jurisdiction),
       jBlockObservations: [],
       jBlockChain: [],
       entityEncPubKey: replicaKeys.publicKey,

@@ -37,6 +37,7 @@ export interface JEvent {
   blockNumber: number;
   blockHash: string;
   transactionHash: string;
+  logIndex?: number;
 }
 
 export interface JTokenInfo {

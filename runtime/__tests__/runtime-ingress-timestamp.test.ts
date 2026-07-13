@@ -277,7 +277,6 @@ describe('runtime ingress timestamp', () => {
       signerId: jEventSignerId,
       blockNumber,
       blockHash,
-      transactionHash,
       eventsHash,
     }));
 

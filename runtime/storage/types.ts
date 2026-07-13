@@ -91,6 +91,8 @@ export type StorageEntityCoreDoc = {
   lastFinalizedJHeight: number;
   jBlockObservations: EntityState['jBlockObservations'];
   jBlockChain: EntityState['jBlockChain'];
+  jHistoryCheckpoints?: EntityState['jHistoryCheckpoints'];
+  jHistoryFinality?: EntityState['jHistoryFinality'];
   batchHistory?: EntityState['batchHistory'];
   accountInputQueue?: AccountInput[];
   crontabState?: CrontabState;

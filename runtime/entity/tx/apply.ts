@@ -8,7 +8,7 @@ import {
   type SwapCancelEvent,
   type SwapCancelRequestEvent,
 } from './handlers/account';
-import { applyJEvent } from './j-events';
+import { applyJEvent, applyJHistoryCheckpoint } from './j-events';
 import { shouldRethrowEntityTxError } from './invariant-errors';
 import { createStructuredLogger, logError } from '../../infra/logger';
 import { handleR2E } from './handlers/r2e';
@@ -141,6 +141,17 @@ const handleJEventEntityTx: EntityTxDispatcher = async (env, entityState, entity
   return { newState, outputs: outputs || [], mempoolOps: mempoolOps || [], dirtyAccounts };
 };
 
+const handleJHistoryCheckpointEntityTx: EntityTxDispatcher = async (env, entityState, entityTx) => {
+  if (entityTx.type !== 'j_history_checkpoint') throw new Error(`ENTITY_TX_DISPATCH_MISMATCH: ${entityTx.type}`);
+  const result = await applyJHistoryCheckpoint(entityState, entityTx.data, env);
+  return {
+    newState: result.newState,
+    outputs: result.outputs,
+    mempoolOps: result.mempoolOps,
+    dirtyAccounts: result.dirtyAccounts,
+  };
+};
+
 const handleAccountInputEntityTx: EntityTxDispatcher = async (env, entityState, entityTx) => {
   if (entityTx.type !== 'accountInput') throw new Error(`ENTITY_TX_DISPATCH_MISMATCH: ${entityTx.type}`);
   const result = await applyAccountInput(entityState, entityTx.data, env);
@@ -198,6 +209,7 @@ const entityTxDispatchers: Record<string, EntityTxDispatcher> = {
   'profile-update': (env, state, tx) => handleProfileUpdateEntityTx(env, state, tx as Extract<EntityTx, { type: 'profile-update' }>),
   initOrderbookExt: (_env, state, tx) => handleInitOrderbookExtEntityTx(state, tx as Extract<EntityTx, { type: 'initOrderbookExt' }>),
   j_event: handleJEventEntityTx,
+  j_history_checkpoint: handleJHistoryCheckpointEntityTx,
   accountInput: handleAccountInputEntityTx,
   openAccount: (env, state, tx) => handleOpenAccountEntityTx(env, state, tx as Extract<EntityTx, { type: 'openAccount' }>),
   htlcPayment: (env, state, tx) => handleHtlcPayment(state, tx as Extract<EntityTx, { type: 'htlcPayment' }>, env),

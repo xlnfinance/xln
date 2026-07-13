@@ -294,7 +294,7 @@ export const createNumberedEntity = async (
       threshold,
       validators,
       shares,
-      jurisdiction,
+      jurisdiction: { ...jurisdiction, registrationBlock: receipt.blockNumber },
     };
 
     return { config, entityNumber, entityId };
@@ -343,8 +343,12 @@ export const createNumberedEntitiesBatch = async (
   // Build results
   return entityNumbers.map((entityNumber, i) => {
     const entityId = generateNumberedEntityId(entityNumber);
-    const config = configs[i];
-    if (!config) throw new Error(`Missing config for entity ${i}`);
+    const preparedConfig = configs[i];
+    if (!preparedConfig) throw new Error(`Missing config for entity ${i}`);
+    const config: ConsensusConfig = {
+      ...preparedConfig,
+      jurisdiction: { ...jurisdiction, registrationBlock: receipt.blockNumber },
+    };
 
     if (DEBUG) {
       factoryLog.debug('numbered.batch_registered', {

@@ -75,6 +75,8 @@ export const projectEntityCoreDoc = (
   lastFinalizedJHeight: state.lastFinalizedJHeight,
   jBlockObservations: state.jBlockObservations,
   jBlockChain: state.jBlockChain,
+  ...withProp('jHistoryCheckpoints', state.jHistoryCheckpoints),
+  ...withProp('jHistoryFinality', state.jHistoryFinality),
   entityEncPubKey: state.entityEncPubKey,
   entityEncPrivKey: state.entityEncPrivKey,
   profile: state.profile,

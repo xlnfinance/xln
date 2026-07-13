@@ -5,6 +5,10 @@ interface JEventMetadata {
   blockNumber?: number;
   blockHash?: string;
   transactionHash?: string;
+  /** Canonical EVM log position within the block. */
+  logIndex?: number;
+  /** Stable order when one Solidity log expands into multiple xln events. */
+  eventIndex?: number;
 }
 
 export interface DisputeFinalizationEvidence {
@@ -179,7 +183,8 @@ export interface JurisdictionEventData {
   observedAt: number;
   blockNumber: number;
   blockHash: string;
-  transactionHash: string;
+  /** Debug metadata only; each canonical event carries its own transactionHash. */
+  transactionHash?: string;
 }
 
 /**
@@ -191,7 +196,6 @@ export interface JBlockObservation {
   jurisdictionRef: string;
   jHeight: number;
   jBlockHash: string;
-  transactionHash: string;
   eventsHash: string;
   events: JurisdictionEvent[];
   signature: string;
@@ -201,13 +205,48 @@ export interface JBlockObservation {
 }
 
 /**
+ * One validator's signed claim about its complete jurisdiction history through
+ * a height. The eventHistoryRoot is an append-only accumulator over that
+ * validator's own event-block observations; histories are never unioned.
+ */
+export interface JHistoryCheckpoint {
+  signerId: string;
+  jurisdictionRef: string;
+  baseHeight: number;
+  scannedThroughHeight: number;
+  tipBlockHash: string;
+  eventHistoryRoot: string;
+  signature: string;
+}
+
+export interface JHistoryCheckpointAttestation {
+  signerId: string;
+  signedThroughHeight: number;
+  tipBlockHash: string;
+  eventHistoryRoot: string;
+  signature: string;
+}
+
+/** Stake-quorum certificate for one common validator-history prefix. */
+export interface JHistoryFinality {
+  jurisdictionRef: string;
+  baseHeight: number;
+  finalizedThroughHeight: number;
+  /** Present only when a supporting checkpoint ends exactly at the finalized prefix. */
+  tipBlockHash?: string;
+  eventHistoryRoot: string;
+  attestations: JHistoryCheckpointAttestation[];
+  signerCount: number;
+  signerPower: bigint;
+}
+
+/**
  * One validator's immutable vote inside a finalized J-block certificate.
  * The shared block identity and eventsHash live on JBlockFinalized; these
  * fields retain enough data to independently verify each validator signature.
  */
 export interface JBlockAttestation {
   signerId: string;
-  transactionHash: string;
   signature: string;
   disputeFinalizationEvidenceHash?: string;
 }

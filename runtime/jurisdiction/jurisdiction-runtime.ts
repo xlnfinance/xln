@@ -212,6 +212,8 @@ export function requireRuntimeJurisdictionConfigByName(
             ? { chainId: replica.jadapter.chainId }
             : {}
     ),
+    ...(current?.blockTimeMs !== undefined ? { blockTimeMs: current.blockTimeMs } : {}),
+    ...(current?.registrationBlock !== undefined ? { registrationBlock: current.registrationBlock } : {}),
     ...(current?.rebalancePolicyUsd ? { rebalancePolicyUsd: current.rebalancePolicyUsd } : {}),
   };
 

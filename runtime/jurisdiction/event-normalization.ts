@@ -51,13 +51,21 @@ const normalizeInt = (value: unknown): number | null => {
 };
 
 const normalizeMetadata = (raw: Record<string, unknown>) => {
-  const out: Pick<JurisdictionEvent, 'blockNumber' | 'blockHash' | 'transactionHash'> = {};
+  const out: Pick<JurisdictionEvent, 'blockNumber' | 'blockHash' | 'transactionHash' | 'logIndex' | 'eventIndex'> = {};
   if (raw['blockNumber'] !== undefined) {
     const n = normalizeInt(raw['blockNumber']);
     if (n !== null) out.blockNumber = n;
   }
   if (typeof raw['blockHash'] === 'string' && raw['blockHash'].trim()) out.blockHash = raw['blockHash'];
   if (typeof raw['transactionHash'] === 'string' && raw['transactionHash'].trim()) out.transactionHash = raw['transactionHash'];
+  if (raw['logIndex'] !== undefined) {
+    const n = normalizeInt(raw['logIndex']);
+    if (n !== null && n >= 0) out.logIndex = n;
+  }
+  if (raw['eventIndex'] !== undefined) {
+    const n = normalizeInt(raw['eventIndex']);
+    if (n !== null && n >= 0) out.eventIndex = n;
+  }
   return out;
 };
 
@@ -334,7 +342,7 @@ export function normalizeJurisdictionEvents(value: unknown): JurisdictionEvent[]
   return out;
 }
 
-export function canonicalJurisdictionEventKey(event: JurisdictionEvent): string {
+const canonicalJurisdictionEventPayloadKey = (event: JurisdictionEvent): string => {
   if (event.type === 'AccountSettled') {
     const d = event.data;
     const leftEntity = String(d.leftEntity).toLowerCase();
@@ -348,4 +356,34 @@ export function canonicalJurisdictionEventKey(event: JurisdictionEvent): string 
     return `AccountSettled:${leftEntity}:${rightEntity}:${tokenId}:${leftReserve}:${rightReserve}:${collateral}:${ondelta}:${nonce}`;
   }
   return `${event.type}:${safeStringify(event.data)}`;
+};
+
+export function canonicalJurisdictionEventKey(event: JurisdictionEvent): string {
+  return safeStringify([
+    event.logIndex ?? null,
+    event.eventIndex ?? null,
+    canonicalJurisdictionEventPayloadKey(event),
+  ]);
+}
+
+const compareOptionalIndex = (left: number | undefined, right: number | undefined): number => {
+  if (left !== undefined && right !== undefined) return left - right;
+  if (left !== undefined) return -1;
+  if (right !== undefined) return 1;
+  return 0;
+};
+
+/**
+ * EVM execution order is consensus data. Payload sorting is only a deterministic
+ * fallback for synthetic events that have no chain log position.
+ */
+export function compareCanonicalJurisdictionEvents(
+  left: JurisdictionEvent,
+  right: JurisdictionEvent,
+): number {
+  return compareOptionalIndex(left.blockNumber, right.blockNumber)
+    || compareOptionalIndex(left.logIndex, right.logIndex)
+    || compareOptionalIndex(left.eventIndex, right.eventIndex)
+    || compareStableText(left.transactionHash?.toLowerCase() ?? '', right.transactionHash?.toLowerCase() ?? '')
+    || compareStableText(canonicalJurisdictionEventPayloadKey(left), canonicalJurisdictionEventPayloadKey(right));
 }

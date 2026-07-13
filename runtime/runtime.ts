@@ -721,8 +721,8 @@ const prioritizeJEventFrame = (
 
   for (const input of runtimeInput.entityInputs) {
     const entityTxs = input.entityTxs ?? [];
-    const jEventTxs = entityTxs.filter((tx) => tx?.type === 'j_event');
-    const otherTxs = entityTxs.filter((tx) => tx?.type !== 'j_event');
+    const jEventTxs = entityTxs.filter((tx) => tx?.type === 'j_event' || tx?.type === 'j_history_checkpoint');
+    const otherTxs = entityTxs.filter((tx) => tx?.type !== 'j_event' && tx?.type !== 'j_history_checkpoint');
     const hasNonTxPayload =
       !!input.proposedFrame ||
       (!!input.hashPrecommits && input.hashPrecommits.size > 0);

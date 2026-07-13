@@ -563,6 +563,10 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
     lastFinalizedJHeight: entityState.lastFinalizedJHeight,
     jBlockObservations: cloneArray(entityState.jBlockObservations || []),
     jBlockChain: cloneArray(entityState.jBlockChain || []),
+    jHistoryCheckpoints: cloneArray(entityState.jHistoryCheckpoints || []),
+    ...(entityState.jHistoryFinality
+      ? { jHistoryFinality: structuredClone(entityState.jHistoryFinality) }
+      : {}),
     // Crontab state is part of entity state, but it remains declarative:
     // task metadata + scheduled hooks only. Handlers are rebound from the static
     // registry in entity-crontab.ts, so clone/persistence must preserve the data
