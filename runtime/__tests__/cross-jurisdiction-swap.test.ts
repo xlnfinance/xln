@@ -66,6 +66,7 @@ import {
   secret,
   signJEventObservation,
 } from './helpers/cross-j';
+import { applyJEventAndCheckpoint } from './helpers/j-history';
 
 describe('cross-jurisdiction hashledger swap', () => {
   test('hashlockPayment creates a direct hashlock-only account lock', async () => {
@@ -3810,18 +3811,15 @@ describe('cross-jurisdiction hashledger swap', () => {
       events: [disputeStartedEvent],
       jurisdictionRef: jref(eth),
     });
-    const result = await applyEntityTx(env, state, {
-      type: 'j_event',
-      data: {
-        from: signer,
-        event: disputeStartedEvent,
-        observedAt: env.timestamp,
-        blockNumber: 2,
-        blockHash: secret('7b'),
-        transactionHash: secret('7c'),
-        ...signed,
-      },
-    });
+    const result = await applyJEventAndCheckpoint(state, {
+      from: signer,
+      event: disputeStartedEvent,
+      observedAt: env.timestamp,
+      blockNumber: 2,
+      blockHash: secret('7b'),
+      transactionHash: secret('7c'),
+      ...signed,
+    }, env);
 
     expect(result.outputs).toHaveLength(1);
     expect(result.outputs?.[0]?.entityId).toBe(targetUser);
@@ -3926,18 +3924,15 @@ describe('cross-jurisdiction hashledger swap', () => {
       events: [disputeStartedEvent],
       jurisdictionRef: jref(eth),
     });
-    const result = await applyEntityTx(env, state, {
-      type: 'j_event',
-      data: {
-        from: signer,
-        event: disputeStartedEvent,
-        observedAt: env.timestamp,
-        blockNumber: 2,
-        blockHash: secret('8b'),
-        transactionHash: secret('8c'),
-        ...signed,
-      },
-    });
+    const result = await applyJEventAndCheckpoint(state, {
+      from: signer,
+      event: disputeStartedEvent,
+      observedAt: env.timestamp,
+      blockNumber: 2,
+      blockHash: secret('8b'),
+      transactionHash: secret('8c'),
+      ...signed,
+    }, env);
 
     expect(result.outputs).toHaveLength(1);
     expect(result.outputs?.[0]?.entityId).toBe(targetUser);
@@ -4027,19 +4022,16 @@ describe('cross-jurisdiction hashledger swap', () => {
       disputeFinalizationEvidence,
       jurisdictionRef: jref(eth),
     });
-    const result = await applyEntityTx(env, state, {
-      type: 'j_event',
-      data: {
-        from: signer,
-        event: finalizedEvent,
-        observedAt: env.timestamp,
-        blockNumber: 3,
-        blockHash: secret('9c'),
-        transactionHash: secret('9d'),
-        disputeFinalizationEvidence,
-        ...signed,
-      },
-    });
+    const result = await applyJEventAndCheckpoint(state, {
+      from: signer,
+      event: finalizedEvent,
+      observedAt: env.timestamp,
+      blockNumber: 3,
+      blockHash: secret('9c'),
+      transactionHash: secret('9d'),
+      disputeFinalizationEvidence,
+      ...signed,
+    }, env);
 
     expect(result.outputs).toHaveLength(1);
     expect(result.outputs?.[0]?.entityId).toBe(targetUser);
@@ -4219,19 +4211,16 @@ describe('cross-jurisdiction hashledger swap', () => {
       disputeFinalizationEvidence,
       jurisdictionRef: jref(eth),
     });
-    const first = await applyEntityTx(env, state, {
-      type: 'j_event',
-      data: {
-        from: signerOne,
-        event: finalizedEvent,
-        observedAt: env.timestamp,
-        blockNumber: 5,
-        blockHash: secret('bc'),
-        transactionHash: secret('bd'),
-        disputeFinalizationEvidence,
-        ...signedOne,
-      },
-    });
+    const first = await applyJEventAndCheckpoint(state, {
+      from: signerOne,
+      event: finalizedEvent,
+      observedAt: env.timestamp,
+      blockNumber: 5,
+      blockHash: secret('bc'),
+      transactionHash: secret('bd'),
+      disputeFinalizationEvidence,
+      ...signedOne,
+    }, env);
     expect(first.outputs).toEqual([]);
 
     const signedTwo = signJEventObservation(env, sourceUser, signerTwo, {
@@ -4241,18 +4230,15 @@ describe('cross-jurisdiction hashledger swap', () => {
       events: [finalizedEvent],
       jurisdictionRef: jref(eth),
     });
-    const second = await applyEntityTx(env, first.newState, {
-      type: 'j_event',
-      data: {
-        from: signerTwo,
-        event: finalizedEvent,
-        observedAt: env.timestamp,
-        blockNumber: 5,
-        blockHash: secret('bc'),
-        transactionHash: secret('bd'),
-        ...signedTwo,
-      },
-    });
+    const second = await applyJEventAndCheckpoint(first.newState, {
+      from: signerTwo,
+      event: finalizedEvent,
+      observedAt: env.timestamp,
+      blockNumber: 5,
+      blockHash: secret('bc'),
+      transactionHash: secret('bd'),
+      ...signedTwo,
+    }, env);
 
     expect(second.newState.jBlockChain).toHaveLength(1);
     expect(second.outputs).toEqual([]);
@@ -4507,18 +4493,15 @@ describe('cross-jurisdiction hashledger swap', () => {
       warnings.push(args.map(String).join(' '));
     };
     try {
-      result = await applyEntityTx(env, targetState, {
-        type: 'j_event',
-        data: {
-          from: targetSigner,
-          event: disputeStartedEvent,
-          observedAt: env.timestamp,
-          blockNumber: 2,
-          blockHash: secret('9b'),
-          transactionHash: secret('9c'),
-          ...signed,
-        },
-      });
+      result = await applyJEventAndCheckpoint(targetState, {
+        from: targetSigner,
+        event: disputeStartedEvent,
+        observedAt: env.timestamp,
+        blockNumber: 2,
+        blockHash: secret('9b'),
+        transactionHash: secret('9c'),
+        ...signed,
+      }, env);
     } finally {
       console.error = originalError;
       console.warn = originalWarn;

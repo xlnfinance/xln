@@ -5,7 +5,7 @@ import { createEntityFrameHash } from '../entity/consensus/frame';
 import type { AccountFrame, EntityState, EntityTx } from '../types';
 
 const ACCOUNT_FRAME_GOLDEN_HASH = '0x24608c6f58a8ad49080c316a4e1d04fe272704cec4b6e091deadf5929e83ff79';
-const ENTITY_FRAME_GOLDEN_HASH = '0x65023f75d608103dcf6694e2a17c6b64804816f8a2b94516141cc98d4e8b91fd';
+const ENTITY_FRAME_GOLDEN_HASH = '0x29fafc439487af7a3bc0e52c9d483f7705400475b9f47e5541208e7393635ee6';
 
 const makeAccountFrameFixture = (): AccountFrame => ({
   height: 7,

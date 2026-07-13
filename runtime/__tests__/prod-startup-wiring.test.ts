@@ -1268,7 +1268,8 @@ describe('production startup wiring', () => {
     expect(unitTestsRunner).toContain("'--no-cleanup'");
     expect(unitTestsRunner).toContain('const SUBPROCESS_STDIO_TEST_FILES = [');
     expect(unitTestsRunner).toContain('`--path-ignore-patterns=**/${file}`');
-    expect(unitTestsRunner).toContain("resolve(process.cwd(), 'runtime')");
+    expect(unitTestsRunner).toContain("resolve(ROOT, 'runtime')");
+    expect(unitTestsRunner).toContain('await ensureContractArtifacts();');
     expect(e2eFastRunner).toContain('cleanupTestArtifactsBeforeRun({');
     expect(e2eFastRunner).toContain("reason: 'e2e-fast'");
     expect(e2eFastRunner).toContain("scope: 'e2e'");
@@ -1816,7 +1817,7 @@ describe('production startup wiring', () => {
     const pauseHelper = rpc.indexOf('const isJEventIngressPaused = (activeEnv: Env): boolean =>');
     const earlyPause = rpc.indexOf("pauseJEventWatcherForQuiesce({ step: 'before-block-number' });");
     const batchPause = rpc.indexOf("step: 'before-process-event-batch'");
-    const processBatch = rpc.indexOf("processEventBatch(events, activeEnv, blockNum, blockHash, txCounter, 'rpc');");
+    const processBatch = rpc.indexOf('const builtInput = processEventBatch(');
 
     expect(pauseHelper).toBeGreaterThan(0);
     expect(rpc).toContain("event: 'j_watch_paused_persistence_quiescing'");
