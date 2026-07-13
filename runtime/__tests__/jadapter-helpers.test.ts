@@ -17,10 +17,12 @@ import {
   getWatcherStartBlock,
   getMinimumCommittedSignerJHeight,
   processEventBatch,
+  enqueueJHistoryCheckpoint,
   rawEventToJEvents,
   rememberPendingWatcherJBlock,
   resolveCommittedWatcherCursor,
   setJEventIngressTransform,
+  setJHistoryCheckpointIngressTransform,
   updateWatcherJurisdictionCursor,
 } from '../jadapter/watcher';
 import { findRecentReserveUpdatedEvent } from '../jurisdiction/event-evidence';
@@ -492,6 +494,28 @@ describe('jadapter helper cursors', () => {
     expect(jEventData?.blockNumber).toBe(70);
     expect(jEventData?.blockHash).toBe(recordedBlockHash);
     expect(jEventData?.observedAt).toBe(70);
+  });
+
+  test('J-history checkpoint ingress transform replaces external tip identity before signing', () => {
+    const env = createEmptyEnv('jadapter-checkpoint-trace-transform');
+    const entityId = `0x${'47'.repeat(32)}`;
+    env.eReplicas.set(`${entityId}:1`, makeReplica(entityId, '1', true));
+    const recordedTipHash = `0x${'99'.repeat(32)}`;
+    const restore = setJHistoryCheckpointIngressTransform(() => ({
+      scannedThroughHeight: 180,
+      tipBlockHash: recordedTipHash,
+    }));
+
+    try {
+      enqueueJHistoryCheckpoint(env, [], 180, `0x${'77'.repeat(32)}`);
+    } finally {
+      restore();
+    }
+
+    const checkpointData = env.runtimeMempool?.entityInputs?.[0]?.entityTxs?.[0]?.data;
+    expect(checkpointData?.scannedThroughHeight).toBe(180);
+    expect(checkpointData?.tipBlockHash).toBe(recordedTipHash);
+    expect(checkpointData?.signature).toMatch(/^0x[0-9a-f]{130}$/);
   });
 
   test('buildJEventsRuntimeInput returns j_event input without enqueueing into runtime mempool', () => {

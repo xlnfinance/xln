@@ -21,7 +21,9 @@ import {
 } from '../account/state-root';
 import {
   setJEventIngressTransform,
+  setJHistoryCheckpointIngressTransform,
   type JEventIngressBatch,
+  type JHistoryCheckpointIngress,
   type RawJEvent,
 } from '../jadapter/watcher';
 
@@ -66,6 +68,8 @@ type JEventTraceMode = 'record' | 'replay';
 type JEventTrace = {
   batches: JEventIngressBatch[];
   cursor: number;
+  checkpoints: JHistoryCheckpointIngress[];
+  checkpointCursor: number;
 };
 
 const cloneJEventTraceValue = (value: unknown): unknown => {
@@ -87,6 +91,10 @@ const cloneJEventTraceValue = (value: unknown): unknown => {
 
 const cloneJEventIngressBatch = (batch: JEventIngressBatch): JEventIngressBatch =>
   cloneJEventTraceValue(batch) as JEventIngressBatch;
+
+const cloneJHistoryCheckpointIngress = (
+  checkpoint: JHistoryCheckpointIngress,
+): JHistoryCheckpointIngress => cloneJEventTraceValue(checkpoint) as JHistoryCheckpointIngress;
 
 const jEventSemanticProjection = (events: RawJEvent[]): unknown => toDebugTraceValue(
   events.map((event) => ({
@@ -124,12 +132,28 @@ const createJEventTraceTransform = (
   return cloneJEventIngressBatch(expected);
 };
 
-const isJEventObservationEnvelope = (value: Record<string, unknown>): boolean =>
-  typeof value['signature'] === 'string' &&
-  typeof value['blockHash'] === 'string' &&
-  typeof value['eventsHash'] === 'string' &&
-  (typeof value['blockNumber'] === 'number' || typeof value['blockNumber'] === 'string') &&
-  (typeof value['from'] === 'string' || typeof value['signerId'] === 'string');
+const createJHistoryCheckpointTraceTransform = (
+  mode: JEventTraceMode,
+  trace: JEventTrace,
+): ((checkpoint: JHistoryCheckpointIngress) => JHistoryCheckpointIngress) => (checkpoint) => {
+  if (mode === 'record') {
+    trace.checkpoints.push(cloneJHistoryCheckpointIngress(checkpoint));
+    return checkpoint;
+  }
+
+  const expected = trace.checkpoints[trace.checkpointCursor];
+  if (!expected) {
+    throw new Error(`J_CHECKPOINT_TRACE_UNEXPECTED:index=${trace.checkpointCursor}`);
+  }
+  if (checkpoint.scannedThroughHeight !== expected.scannedThroughHeight) {
+    throw new Error(
+      `J_CHECKPOINT_TRACE_HEIGHT_MISMATCH:index=${trace.checkpointCursor} ` +
+      `expected=${expected.scannedThroughHeight} actual=${checkpoint.scannedThroughHeight}`,
+    );
+  }
+  trace.checkpointCursor += 1;
+  return cloneJHistoryCheckpointIngress(expected);
+};
 
 const normalizeOracleValue = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(normalizeOracleValue);
@@ -140,62 +164,8 @@ const normalizeOracleValue = (value: unknown): unknown => {
 
   const source = value as Record<string, unknown>;
   const normalized: Record<string, unknown> = {};
-  const isJEventObservation = isJEventObservationEnvelope(source);
-  for (const key of Object.keys(source)) {
-    // Anvil block hashes include external block metadata and can differ even
-    // when event bodies, tx hashes, nonces, balances, and RJEA transitions match.
-    if (key === 'blockHash' || key === 'jBlockHash') {
-      normalized[key] = '<external-block-hash>';
-      continue;
-    }
-    if (isJEventObservation && key === 'blockNumber') {
-      normalized[key] = '<external-block-number>';
-      continue;
-    }
-    // J-event observation signatures sign the external block hash above. Once
-    // the oracle normalizes that block hash, comparing the raw signature would
-    // only compare the hidden external block metadata, not RJEA state behavior.
-    // Do not mask other signatures: account/entity consensus signatures remain
-    // deterministic acceptance evidence.
-    if (isJEventObservation && key === 'signature') {
-      normalized[key] = '<external-j-event-signature>';
-      continue;
-    }
-    normalized[key] = normalizeOracleValue(source[key]);
-  }
+  for (const key of Object.keys(source)) normalized[key] = normalizeOracleValue(source[key]);
   return normalized;
-};
-
-const normalizeFrameLogDataForOracle = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(normalizeFrameLogDataForOracle);
-  if (value === null || typeof value !== 'object') return value;
-
-  const source = value as Record<string, unknown>;
-  const normalized: Record<string, unknown> = {};
-  for (const key of Object.keys(source)) {
-    // Frame logs are diagnostic UI/audit records. Their external chain cursor
-    // can drift between fresh Anvil runs while RJEA state and J replicas still
-    // match. Only mask this log metadata; protocol state is normalized through
-    // snapshotEnvProjection/snapshotProjection and remains fully compared.
-    if (key === 'blockNumber' || key === 'jBlockNumber') {
-      normalized[key] = '<external-frame-log-block-number>';
-      continue;
-    }
-    normalized[key] = normalizeFrameLogDataForOracle(source[key]);
-  }
-  return normalized;
-};
-
-const normalizeFrameLogsForOracle = (logs: Env['frameLogs'] | undefined): unknown[] => {
-  if (!Array.isArray(logs) || logs.length === 0) return [];
-  return logs.map((entry) => {
-    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return entry;
-    const source = entry as unknown as Record<string, unknown>;
-    return {
-      ...source,
-      ...(source['data'] !== undefined ? { data: normalizeFrameLogDataForOracle(source['data']) } : {}),
-    };
-  });
 };
 
 const toOracleValue = (value: unknown): unknown => {
@@ -278,7 +248,7 @@ const snapshotProjection = (snapshot: Env['history'][number]): Record<string, un
   runtimeOutputs: snapshot.runtimeOutputs,
   description: snapshot.description,
   meta: snapshot.meta,
-  logs: normalizeFrameLogsForOracle(snapshot.logs),
+  logs: snapshot.logs ?? [],
 });
 
 const buildFrameHashTrace = (records: EntityFrameHashDebugRecord[]): unknown[] =>
@@ -475,6 +445,9 @@ const runScenarioOnce = async (
   const restoreJEventIngressTransform = setJEventIngressTransform(
     createJEventTraceTransform(jEventTraceMode, jEventTrace),
   );
+  const restoreJHistoryCheckpointIngressTransform = setJHistoryCheckpointIngressTransform(
+    createJHistoryCheckpointTraceTransform(jEventTraceMode, jEventTrace),
+  );
   try {
     const rpcUrl = rpcUrlForScenarioRun(scenarioIndex, runIndex);
     process.env['JADAPTER_MODE'] = 'rpc';
@@ -508,11 +481,21 @@ const runScenarioOnce = async (
         `J_EVENT_TRACE_INCOMPLETE:consumed=${jEventTrace.cursor} total=${jEventTrace.batches.length}`,
       );
     }
+    if (
+      jEventTraceMode === 'replay' &&
+      jEventTrace.checkpointCursor !== jEventTrace.checkpoints.length
+    ) {
+      throw new Error(
+        `J_CHECKPOINT_TRACE_INCOMPLETE:consumed=${jEventTrace.checkpointCursor} ` +
+        `total=${jEventTrace.checkpoints.length}`,
+      );
+    }
     return buildOracle(activeEnv, frameHashRecords, accountStateRootRecords);
   } finally {
     restoreFrameHashRecorder();
     restoreAccountStateRootRecorder();
     restoreJEventIngressTransform();
+    restoreJHistoryCheckpointIngressTransform();
     restoreConsole(originalConsole);
     if (previousJAdapterMode === undefined) delete process.env['JADAPTER_MODE'];
     else process.env['JADAPTER_MODE'] = previousJAdapterMode;
@@ -533,10 +516,11 @@ const runScenarioOnce = async (
 
 async function verifyScenarioDeterminism(scenario: ScenarioEntry, scenarioIndex: number): Promise<ScenarioResult> {
   const runs: ScenarioOracle[] = [];
-  const jEventTrace: JEventTrace = { batches: [], cursor: 0 };
+  const jEventTrace: JEventTrace = { batches: [], cursor: 0, checkpoints: [], checkpointCursor: 0 };
   try {
     for (let runIndex = 0; runIndex < RUNS; runIndex += 1) {
       jEventTrace.cursor = 0;
+      jEventTrace.checkpointCursor = 0;
       const oracle = await runScenarioOnce(
         scenario,
         runIndex + 1,

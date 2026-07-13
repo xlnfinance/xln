@@ -56,21 +56,14 @@ describe('determinism cleanup lifecycle', () => {
     expect(source).toContain('process.exit(1);');
   });
 
-  test('determinism oracle masks external j-event block metadata', () => {
+  test('determinism oracle replays external J inputs without masking consensus evidence', () => {
     const source = readSource('runtime/scenarios/determinism-test.ts');
-    const normalizeStart = source.indexOf('const normalizeOracleValue =');
-    const normalizeEnd = source.indexOf('const toOracleValue =', normalizeStart);
-    expect(normalizeStart).toBeGreaterThan(0);
-    expect(normalizeEnd).toBeGreaterThan(normalizeStart);
-    const normalizeSource = source.slice(normalizeStart, normalizeEnd);
-
-    expect(normalizeSource).toContain("normalized[key] = '<external-block-hash>';");
-    expect(normalizeSource).toContain("normalized[key] = '<external-block-number>';");
-    expect(normalizeSource).toContain("normalized[key] = '<external-j-event-signature>';");
-    expect(normalizeSource).toContain("if (isJEventObservation && key === 'blockNumber')");
-    expect(source).toContain('const normalizeFrameLogsForOracle =');
-    expect(source).toContain("if (key === 'blockNumber' || key === 'jBlockNumber')");
-    expect(source).toContain('logs: normalizeFrameLogsForOracle(snapshot.logs),');
+    expect(source).toContain('createJEventTraceTransform(jEventTraceMode, jEventTrace)');
+    expect(source).toContain('createJHistoryCheckpointTraceTransform(jEventTraceMode, jEventTrace)');
+    expect(source).toContain('return cloneJHistoryCheckpointIngress(expected);');
+    expect(source).not.toContain("'<external-block-hash>'");
+    expect(source).not.toContain("'<external-j-event-signature>'");
+    expect(source).toContain('logs: snapshot.logs ?? [],');
   });
 
   test('determinism oracle uses canonical J replica snapshots', () => {

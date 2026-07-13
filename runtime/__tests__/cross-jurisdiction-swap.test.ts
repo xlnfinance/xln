@@ -2455,7 +2455,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const expired = await applyAccountTx(account, {
       type: 'pull_cancel',
       data: { pullId, reason: 'expired' },
-    }, payerIsLeft, 10_000, 3);
+    }, payerIsLeft, 11_000, 3);
     expect(expired.success).toBe(true);
     expect(account.pulls.has(pullId)).toBe(false);
     expect(payerIsLeft ? delta.leftHold : delta.rightHold).toBe(0n);
@@ -2737,7 +2737,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const result = await handlePullCancel(account, {
       type: 'pull_cancel',
       data: { pullId: route.sourcePull!.pullId, reason: 'expired' },
-    }, payerIsLeft, route.sourcePull!.revealedUntilTimestamp);
+    }, payerIsLeft, route.sourcePull!.revealedUntilTimestamp + 1_000);
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('must clear through requestCrossJurisdictionClear');

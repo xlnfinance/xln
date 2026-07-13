@@ -172,7 +172,14 @@ export type JEventIngressBatch = {
   blockHash: string;
 };
 
+export type JHistoryCheckpointIngress = {
+  scannedThroughHeight: number;
+  tipBlockHash: string;
+};
+
 let jEventIngressTransform: ((batch: JEventIngressBatch) => JEventIngressBatch) | null = null;
+let jHistoryCheckpointIngressTransform:
+  ((checkpoint: JHistoryCheckpointIngress) => JHistoryCheckpointIngress) | null = null;
 
 export const setJEventIngressTransform = (
   transform: ((batch: JEventIngressBatch) => JEventIngressBatch) | null,
@@ -181,6 +188,16 @@ export const setJEventIngressTransform = (
   jEventIngressTransform = transform;
   return () => {
     jEventIngressTransform = previous;
+  };
+};
+
+export const setJHistoryCheckpointIngressTransform = (
+  transform: ((checkpoint: JHistoryCheckpointIngress) => JHistoryCheckpointIngress) | null,
+): (() => void) => {
+  const previous = jHistoryCheckpointIngressTransform;
+  jHistoryCheckpointIngressTransform = transform;
+  return () => {
+    jHistoryCheckpointIngressTransform = previous;
   };
 };
 
@@ -1019,11 +1036,14 @@ export function enqueueJHistoryCheckpoint(
   tipBlockHash: string,
   depositoryAddress?: string,
 ): string[] {
+  const ingress = jHistoryCheckpointIngressTransform
+    ? jHistoryCheckpointIngressTransform({ scannedThroughHeight, tipBlockHash })
+    : { scannedThroughHeight, tipBlockHash };
   const built = buildJHistoryCheckpointRuntimeInput(
     env,
     newlyObservedInputs,
-    scannedThroughHeight,
-    tipBlockHash,
+    ingress.scannedThroughHeight,
+    ingress.tipBlockHash,
     depositoryAddress,
   );
   if (!built) return [];
