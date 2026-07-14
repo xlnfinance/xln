@@ -60,6 +60,8 @@ export type { ERC20Mock } from "./contracts/ERC20Mock";
 export { ERC20Mock__factory } from "./factories/contracts/ERC20Mock__factory";
 export type { ERC721Mock } from "./contracts/ERC721Mock";
 export { ERC721Mock__factory } from "./factories/contracts/ERC721Mock__factory";
+export type { HankoCodec } from "./contracts/HankoCodec";
+export { HankoCodec__factory } from "./factories/contracts/HankoCodec__factory";
 export type { HashLadder } from "./contracts/HashLadder";
 export { HashLadder__factory } from "./factories/contracts/HashLadder__factory";
 export type { IDeltaTransformer } from "./contracts/IDeltaTransformer";

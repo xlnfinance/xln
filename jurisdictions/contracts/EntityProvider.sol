@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
+import "./HankoEncoding.sol";
 
 contract EntityProvider is ERC1155 { 
   error InvalidHankoWeight();
@@ -1105,6 +1106,43 @@ contract EntityProvider is ERC1155 {
 
   // === ENTITY SIGNATURE RECOVERY ===
 
+  // The contract domain is always derived locally. Never accept chainId or the
+  // EntityProvider address as calldata: deterministic deployments may reuse an
+  // address on another chain, and signatures must not cross either boundary.
+  function encodeEntityTransferHankoPayload(
+    uint256 entityNumber,
+    address to,
+    uint256 tokenId,
+    uint256 amount,
+    uint256 actionNonce
+  ) public view returns (bytes memory) {
+    return HankoEncoding.encodeEntityTransfer(
+      block.chainid,
+      address(this),
+      entityNumber,
+      to,
+      tokenId,
+      amount,
+      actionNonce
+    );
+  }
+
+  function computeEntityTransferHankoHash(
+    uint256 entityNumber,
+    address to,
+    uint256 tokenId,
+    uint256 amount,
+    uint256 actionNonce
+  ) public view returns (bytes32) {
+    return keccak256(encodeEntityTransferHankoPayload(
+      entityNumber,
+      to,
+      tokenId,
+      amount,
+      actionNonce
+    ));
+  }
+
   /**
    * @notice Transfer tokens from entity using hanko signature authorization
    * @param entityNumber The entity number
@@ -1125,17 +1163,13 @@ contract EntityProvider is ERC1155 {
     bytes32 entityId = bytes32(entityNumber);
     uint256 actionNonce = entityActionNonces[entityId] + 1;
 
-    // Create transfer hash
-    bytes32 transferHash = keccak256(abi.encodePacked(
-      "ENTITY_TRANSFER",
-      block.chainid,
-      address(this),
+    bytes32 transferHash = computeEntityTransferHankoHash(
       entityNumber,
       to,
       tokenId,
       amount,
       actionNonce
-    ));
+    );
     
     // Verify entity signature
     uint256 recoveredEntityId = recoverEntity(encodedBoard, encodedSignature, transferHash);
@@ -1156,6 +1190,44 @@ contract EntityProvider is ERC1155 {
     uint256 dividendAmount,
     string purpose
   );
+
+  function encodeReleaseControlSharesHankoPayload(
+    uint256 entityNumber,
+    address depository,
+    uint256 controlAmount,
+    uint256 dividendAmount,
+    string memory purpose,
+    uint256 actionNonce
+  ) public view returns (bytes memory) {
+    return HankoEncoding.encodeReleaseControlShares(
+      block.chainid,
+      address(this),
+      entityNumber,
+      depository,
+      controlAmount,
+      dividendAmount,
+      purpose,
+      actionNonce
+    );
+  }
+
+  function computeReleaseControlSharesHankoHash(
+    uint256 entityNumber,
+    address depository,
+    uint256 controlAmount,
+    uint256 dividendAmount,
+    string memory purpose,
+    uint256 actionNonce
+  ) public view returns (bytes32) {
+    return keccak256(encodeReleaseControlSharesHankoPayload(
+      entityNumber,
+      depository,
+      controlAmount,
+      dividendAmount,
+      purpose,
+      actionNonce
+    ));
+  }
 
   /**
    * @notice Release entity's control and/or dividend shares to depository for trading
@@ -1184,18 +1256,14 @@ contract EntityProvider is ERC1155 {
     require(entities[entityId].currentBoardHash != bytes32(0), "Entity doesn't exist");
     uint256 actionNonce = entityActionNonces[entityId] + 1;
     
-    // Create release authorization hash
-    bytes32 releaseHash = keccak256(abi.encodePacked(
-      "RELEASE_CONTROL_SHARES",
-      block.chainid,
-      address(this),
+    bytes32 releaseHash = computeReleaseControlSharesHankoHash(
       entityNumber,
       depository,
       controlAmount,
       dividendAmount,
-      keccak256(bytes(purpose)),
+      purpose,
       actionNonce
-    ));
+    );
     
     // Verify entity signature authorization
     uint256 recoveredEntityId = recoverEntity(encodedBoard, encodedSignature, releaseHash);

@@ -29,7 +29,9 @@ const entityConsensusPath = 'runtime/entity/consensus/index.ts';
 const entityFramePath = 'runtime/entity/consensus/frame.ts';
 const hankoSigningPath = 'runtime/hanko/signing.ts';
 const hankoBatchPath = 'runtime/hanko/batch.ts';
+const onchainHankoDomainPath = 'runtime/hanko/onchain-domain.ts';
 const jBatchPath = 'runtime/jurisdiction/batch.ts';
+const rpcAdapterPath = 'runtime/jadapter/rpc.ts';
 const depositoryPath = 'jurisdictions/contracts/Depository.sol';
 const accountContractPath = 'jurisdictions/contracts/Account.sol';
 const auditDocPath = 'docs/security/consensus-hanko-scan.md';
@@ -41,7 +43,9 @@ const entityConsensus = readText(entityConsensusPath);
 const entityFrame = readText(entityFramePath);
 const hankoSigning = readText(hankoSigningPath);
 const hankoBatch = readText(hankoBatchPath);
+const onchainHankoDomain = readText(onchainHankoDomainPath);
 const jBatch = readText(jBatchPath);
+const rpcAdapter = readText(rpcAdapterPath);
 const depository = readText(depositoryPath);
 const accountContract = readText(accountContractPath);
 const auditDoc = readText(auditDocPath);
@@ -117,13 +121,25 @@ assertIncludes(hankoSigning, 'if (eoaSignatures.length === 0)', hankoSigningPath
 assertIncludes(hankoSigning, 'if (reconstructedBoardHash !== expectedEntityId.toLowerCase())', hankoSigningPath);
 assertIncludes(hankoSigning, 'const targetRecovered = recovered.yesEntities.some((entity) =>', hankoSigningPath);
 
-assertIncludes(jBatch, "const BATCH_DOMAIN_SEPARATOR = ethers.keccak256(ethers.toUtf8Bytes('XLN_DEPOSITORY_HANKO_V1'));", jBatchPath);
-assertIncludes(jBatch, '[BATCH_DOMAIN_SEPARATOR, chainId, depositoryAddress, encodedBatch, nonce]', jBatchPath);
+assertIncludes(onchainHankoDomain, "ethers.toUtf8Bytes('XLN_DEPOSITORY_HANKO_V1')", onchainHankoDomainPath);
+assertIncludes(onchainHankoDomain, '[DEPOSITORY_BATCH_HANKO_DOMAIN, chainId, depositoryAddress, encodedBatch, requireUint(nonce,', onchainHankoDomainPath);
+assertIncludes(jBatch, 'return hashDepositoryBatchHankoPayload(', jBatchPath);
 assertIncludes(hankoBatch, 'const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);', hankoBatchPath);
 assertIncludes(depository, 'bytes32 public constant DOMAIN_SEPARATOR = keccak256("XLN_DEPOSITORY_HANKO_V1");', depositoryPath);
-assertIncludes(depository, 'Account.computeBatchHankoHash(DOMAIN_SEPARATOR, block.chainid, address(this), encodedBatch, nonce)', depositoryPath);
+assertIncludes(depository, 'Account.computeBatchHankoHash(DOMAIN_SEPARATOR, encodedBatch, nonce)', depositoryPath);
 assertIncludes(depository, 'if (nonce != entityNonces[entityId] + 1) revert E2();', depositoryPath);
-assertIncludes(accountContract, 'return keccak256(abi.encodePacked(domainSep, chainId, depository, encodedBatch, nonce));', accountContractPath);
+assertIncludes(accountContract, 'return HankoEncoding.encodeBatch(', accountContractPath);
+assertIncludes(accountContract, 'return HankoEncoding.encodeCooperativeUpdate(', accountContractPath);
+assertIncludes(accountContract, 'return HankoEncoding.encodeDisputeProof(', accountContractPath);
+assertIncludes(accountContract, 'return HankoEncoding.encodeCooperativeDisputeProof(', accountContractPath);
+assertIncludes(accountContract, 'block.chainid,\n      address(this),', accountContractPath);
+assertIncludes(rpcAdapter, 'const disputeHash = hashDisputeProofHankoPayload(', rpcAdapterPath);
+assertNotMatches(
+  rpcAdapter,
+  /\['uint8',\s*'address',\s*'bytes',\s*'uint256',\s*'bytes32',\s*'bytes32'\]/g,
+  rpcAdapterPath,
+  'legacy chainless dispute Hanko recomputation',
+);
 
 for (const marker of [
   '# Consensus And Hanko Production Scan',

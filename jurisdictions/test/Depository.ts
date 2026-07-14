@@ -76,9 +76,10 @@ async function cooperativeUpdateHash(
   diffs: unknown[],
   forgiveDebtsInTokenIds: bigint[] = [],
 ): Promise<string> {
+  const chainId = (await ethers.provider.getNetwork()).chainId;
   return ethers.keccak256(abi.encode(
-    ["uint8", "address", "bytes", "uint256", SETTLEMENT_DIFFS_ABI, "uint256[]"],
-    [COOPERATIVE_UPDATE, await depository.getAddress(), accountKey, nonce, diffs, forgiveDebtsInTokenIds],
+    ["uint8", "uint256", "address", "bytes", "uint256", SETTLEMENT_DIFFS_ABI, "uint256[]"],
+    [COOPERATIVE_UPDATE, chainId, await depository.getAddress(), accountKey, nonce, diffs, forgiveDebtsInTokenIds],
   ));
 }
 
@@ -89,9 +90,10 @@ async function disputeProofHash(
   proofbodyHash: string,
   watchSeed: string = TEST_WATCH_SEED,
 ): Promise<string> {
+  const chainId = (await ethers.provider.getNetwork()).chainId;
   return ethers.keccak256(abi.encode(
-    ["uint8", "address", "bytes", "uint256", "bytes32", "bytes32"],
-    [DISPUTE_PROOF, await depository.getAddress(), accountKey, nonce, proofbodyHash, watchSeed],
+    ["uint8", "uint256", "address", "bytes", "uint256", "bytes32", "bytes32"],
+    [DISPUTE_PROOF, chainId, await depository.getAddress(), accountKey, nonce, proofbodyHash, watchSeed],
   ));
 }
 
@@ -102,10 +104,12 @@ async function cooperativeDisputeProofHash(
   proofbody: Record<string, unknown>,
   starterInitialArguments: string,
 ): Promise<string> {
+  const chainId = (await ethers.provider.getNetwork()).chainId;
   return ethers.keccak256(abi.encode(
-    ["uint8", "address", "bytes", "uint256", "bytes32", "bytes32"],
+    ["uint8", "uint256", "address", "bytes", "uint256", "bytes32", "bytes32"],
     [
       COOPERATIVE_DISPUTE_PROOF,
+      chainId,
       await depository.getAddress(),
       accountKey,
       nonce,

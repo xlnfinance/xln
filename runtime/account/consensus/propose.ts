@@ -18,9 +18,7 @@ import { signEntityHashes } from '../../hanko/signing';
 import {
   assertNoUnilateralSettlementMutation,
   captureSettlementVector,
-  getAccountDepositoryAddress,
   getAccountStateDomain,
-  isAddress20,
   isEntityId32,
   shouldIncludeToken,
 } from './helpers';
@@ -413,15 +411,6 @@ export async function proposeAccountFrame(
     };
   }
 
-  const depositoryAddress = getAccountDepositoryAddress(env, accountMachine);
-  if (!isAddress20(depositoryAddress)) {
-    return {
-      success: false,
-      error: `DISPUTE_PROOF_BUILD_FAILED: MISSING_DEPOSITORY_ADDRESS`,
-      events,
-    };
-  }
-
   let proofResult: ReturnType<typeof buildAccountProofBody>;
   let disputeHash: string | undefined;
   let signedProofNonce = 0;
@@ -439,7 +428,7 @@ export async function proposeAccountFrame(
       disputeHash = createDisputeProofHashWithNonce(
         clonedMachine,
         proofResult.proofBodyHash,
-        depositoryAddress,
+        getAccountStateDomain(env, accountMachine),
         signedProofNonce,
       );
     }

@@ -1,21 +1,16 @@
-import type { AccountMachine, AccountTx, Delta, Env, JurisdictionConfig } from '../../types';
-import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
+import type { AccountMachine, AccountTx, Delta, Env } from '../../types';
+import { createStructuredLogger } from '../../infra/logger';
 import { txFingerprint } from '../../state-helpers';
-import { getJurisdictionConfigName } from '../../jurisdiction/jurisdiction-runtime';
 import { getReplicaByEntityId } from '../../entity/replica';
 import { checkAutoRebalance } from '../tx/handlers/request-collateral';
-import type { AccountStateDomain } from '../state-root';
+import { accountStateDomainFromJurisdiction, type AccountStateDomain } from '../state-root';
 
 const accountConsensusHelperLog = createStructuredLogger('account.consensus');
 
 export const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
-export const ADDRESS_HEX_20_RE = /^0x[0-9a-fA-F]{40}$/;
 
 export const isEntityId32 = (value: unknown): value is string =>
   typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
-
-export const isAddress20 = (value: unknown): value is string =>
-  typeof value === 'string' && ADDRESS_HEX_20_RE.test(value);
 
 type DebugEventEmitter = {
   sendDebugEvent(payload: Record<string, unknown>): void;
@@ -39,132 +34,42 @@ export const summarizeDeltasForLog = (deltas: Map<number, Delta>) =>
     rightHold: delta.rightHold?.toString(),
   }));
 
-/**
- * Resolve the J-layer depository used in account-frame signatures.
- * Active live jurisdiction wins; BrowserVM is only a fallback for pure local sims.
- */
-export function getDepositoryAddress(env: Env): string {
-  const browserVMProvider = env.browserVM as
-    | (typeof env.browserVM & { browserVM?: { getDepositoryAddress?: () => string } })
-    | undefined;
-  const browserVMAddress =
-    browserVMProvider?.getDepositoryAddress?.() ||
-    browserVMProvider?.browserVM?.getDepositoryAddress?.();
-
-  if (env.activeJurisdiction) {
-    const jReplica = env.jReplicas.get(env.activeJurisdiction);
-    if (jReplica?.jadapter?.addresses?.depository) {
-      if (browserVMAddress && browserVMAddress !== jReplica.jadapter.addresses.depository) {
-        accountConsensusHelperLog.warn('depository.browser_vm_ignored', {
-          browserVMAddress,
-          jurisdictionName: env.activeJurisdiction,
-          depositoryAddress: jReplica.jadapter.addresses.depository,
-        });
-      }
-      return jReplica.jadapter.addresses.depository;
-    }
-    if (jReplica?.depositoryAddress) {
-      if (browserVMAddress && browserVMAddress !== jReplica.depositoryAddress) {
-        accountConsensusHelperLog.warn('depository.browser_vm_ignored', {
-          browserVMAddress,
-          jurisdictionName: env.activeJurisdiction,
-          depositoryAddress: jReplica.depositoryAddress,
-        });
-      }
-      return jReplica.depositoryAddress;
-    }
-  }
-
-  for (const jReplica of env.jReplicas.values()) {
-    if (jReplica.jadapter?.addresses?.depository) {
-      return jReplica.jadapter.addresses.depository;
-    }
-    if (jReplica.depositoryAddress) {
-      return jReplica.depositoryAddress;
-    }
-  }
-
-  if (browserVMAddress && browserVMAddress !== '0x0000000000000000000000000000000000000000') {
-    return browserVMAddress;
-  }
-
-  accountConsensusHelperLog.debug('depository.missing');
-  return '';
-}
-
 const normalizeEntityRef = (value: unknown): string => String(value || '').toLowerCase();
 
-const findEntityJurisdiction = (env: Env, entityId: string): JurisdictionConfig | undefined => {
-  const wanted = normalizeEntityRef(entityId);
-  for (const replica of env.eReplicas?.values?.() || []) {
-    const replicaEntityId = normalizeEntityRef(replica?.state?.entityId || replica?.entityId);
-    if (replicaEntityId !== wanted) continue;
-    const jurisdiction = replica?.state?.config?.jurisdiction;
-    if (jurisdiction?.depositoryAddress) return jurisdiction;
-  }
+type AccountDomainSubject = Readonly<{
+  proofHeader: Pick<AccountMachine['proofHeader'], 'fromEntity' | 'toEntity'>;
+}>;
 
-  const profile = env.gossip?.getProfiles?.().find((candidate) =>
-    normalizeEntityRef(candidate?.entityId || '') === wanted,
-  );
-  const profileJurisdiction = profile?.metadata?.jurisdiction as JurisdictionConfig | undefined;
-  return profileJurisdiction?.depositoryAddress ? profileJurisdiction : undefined;
+const trustedAccountDomains = (env: Env, accountMachine: AccountDomainSubject): AccountStateDomain[] => {
+  const accountEntities = new Set([
+    normalizeEntityRef(accountMachine.proofHeader.fromEntity),
+    normalizeEntityRef(accountMachine.proofHeader.toEntity),
+  ]);
+  const domains: AccountStateDomain[] = [];
+  for (const replica of env.eReplicas.values()) {
+    const entityId = normalizeEntityRef(replica.state.entityId || replica.entityId);
+    if (!accountEntities.has(entityId)) continue;
+    const jurisdiction = replica.state.config?.jurisdiction;
+    if (!jurisdiction) throw new Error(`ACCOUNT_STATE_DOMAIN_REPLICA_MISSING:${entityId}`);
+    domains.push(accountStateDomainFromJurisdiction(jurisdiction));
+  }
+  return domains;
 };
 
-export function getAccountDepositoryAddress(env: Env, accountMachine: AccountMachine): string {
-  const localJurisdiction = findEntityJurisdiction(env, accountMachine.proofHeader.fromEntity);
-  if (localJurisdiction?.depositoryAddress) {
-    return localJurisdiction.depositoryAddress;
-  }
-
-  const counterpartyJurisdiction = findEntityJurisdiction(env, accountMachine.proofHeader.toEntity);
-  if (counterpartyJurisdiction?.depositoryAddress) {
-    return counterpartyJurisdiction.depositoryAddress;
-  }
-
-  // Account dispute proofs are money evidence for one bilateral account, so
-  // they are bound to that account's jurisdiction, not to current UI/runtime
-  // focus. Counterexample: a user connects a Tron sibling while a Testnet hub
-  // frame is in flight; using env.activeJurisdiction makes the receiver verify
-  // a valid Testnet signature against the Tron depository and rejects consensus.
-  // The fallback is only for old pure-local tests that build an AccountMachine
-  // without an entity config; live entity accounts are expected to return above.
-  const fallback = getDepositoryAddress(env);
-  accountConsensusHelperLog.debug('account_depository.fallback', {
-    from: shortId(accountMachine.proofHeader.fromEntity),
-    to: shortId(accountMachine.proofHeader.toEntity),
-    localJurisdiction: getJurisdictionConfigName(localJurisdiction),
-    counterpartyJurisdiction: getJurisdictionConfigName(counterpartyJurisdiction),
-    fallback: shortHash(fallback),
-  });
-  return fallback;
-}
-
-export function getAccountStateDomain(env: Env, accountMachine: AccountMachine): AccountStateDomain {
-  const local = findEntityJurisdiction(env, accountMachine.proofHeader.fromEntity);
-  const counterparty = findEntityJurisdiction(env, accountMachine.proofHeader.toEntity);
-  const jurisdiction = local ?? counterparty;
-  const depositoryAddress = String(jurisdiction?.depositoryAddress || getAccountDepositoryAddress(env, accountMachine));
-  const matchingReplica = Array.from(env.jReplicas.values()).find((replica) => {
-    const address = replica.jadapter?.addresses?.depository || replica.depositoryAddress || '';
-    return address.toLowerCase() === depositoryAddress.toLowerCase();
-  });
-  const browserVm = env.browserVM as (typeof env.browserVM & {
-    getChainId?: () => bigint | number;
-    browserVM?: { getChainId?: () => bigint | number };
-  }) | undefined;
-  const chainId = Number(
-    jurisdiction?.chainId ??
-    matchingReplica?.jadapter?.chainId ??
-    matchingReplica?.chainId ??
-    browserVm?.getChainId?.() ??
-    browserVm?.browserVM?.getChainId?.(),
+export function getAccountStateDomain(env: Env, accountMachine: AccountDomainSubject): AccountStateDomain {
+  const domains = trustedAccountDomains(env, accountMachine);
+  if (domains.length === 0) throw new Error('ACCOUNT_STATE_DOMAIN_TRUSTED_CONFIG_MISSING');
+  const first = domains[0]!;
+  const firstKey = `${first.chainId}:${first.depositoryAddress.toLowerCase()}`;
+  const conflict = domains.find((domain) =>
+    `${domain.chainId}:${domain.depositoryAddress.toLowerCase()}` !== firstKey,
   );
-  if (!Number.isSafeInteger(chainId) || chainId <= 0 || !isAddress20(depositoryAddress)) {
+  if (conflict) {
     throw new Error(
-      `ACCOUNT_STATE_DOMAIN_MISSING: chainId=${String(jurisdiction?.chainId)} depository=${depositoryAddress || 'missing'}`,
+      `ACCOUNT_STATE_DOMAIN_CONFLICT:${firstKey}:${conflict.chainId}:${conflict.depositoryAddress.toLowerCase()}`,
     );
   }
-  return { chainId, depositoryAddress };
+  return first;
 }
 
 export function shouldIncludeToken(delta: Delta, totalDelta: bigint): boolean {

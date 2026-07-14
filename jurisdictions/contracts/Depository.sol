@@ -5,6 +5,7 @@ import "./EntityProvider.sol";
 import "./DeltaTransformer.sol";
 import "./Types.sol";
 import "./Account.sol";
+import "./HankoEncoding.sol";
 
 abstract contract ReentrancyGuardLite {
   error E0();
@@ -231,7 +232,7 @@ contract Depository is ReentrancyGuardLite {
     (bytes32 entityId, bool hankoValid) =
       EntityProvider(entityProvider).verifyHankoSignature(
         hankoData,
-        Account.computeBatchHankoHash(DOMAIN_SEPARATOR, block.chainid, address(this), encodedBatch, nonce)
+        Account.computeBatchHankoHash(DOMAIN_SEPARATOR, encodedBatch, nonce)
       );
     if (!hankoValid || entityId == bytes32(0)) revert E4();
     if (nonce != entityNonces[entityId] + 1) revert E2();
@@ -244,6 +245,29 @@ contract Depository is ReentrancyGuardLite {
   /// @notice Hash that an entity authorizes for a tower-only delayed counter-dispute.
   /// @dev The authorization is exact: tower address, account side, counterparty, final nonce,
   ///      proof-body hash, last-resort window, and appointment sequence are all bound.
+  function _encodeWatchtowerCounterDisputeHankoPayload(
+    address tower,
+    bytes32 entityId,
+    bytes32 counterentity,
+    uint256 finalNonce,
+    bytes32 finalProofbodyHash,
+    uint256 lastResortWindowBlocks,
+    uint256 appointmentSequence
+  ) private view returns (bytes memory) {
+    return HankoEncoding.encodeWatchtowerCounterDispute(
+      WATCHTOWER_COUNTER_DISPUTE_DOMAIN_SEPARATOR,
+      block.chainid,
+      address(this),
+      tower,
+      entityId,
+      counterentity,
+      finalNonce,
+      finalProofbodyHash,
+      lastResortWindowBlocks,
+      appointmentSequence
+    );
+  }
+
   function computeWatchtowerCounterDisputeHash(
     address tower,
     bytes32 entityId,
@@ -253,20 +277,15 @@ contract Depository is ReentrancyGuardLite {
     uint256 lastResortWindowBlocks,
     uint256 appointmentSequence
   ) public view returns (bytes32) {
-    return keccak256(
-      abi.encode(
-        WATCHTOWER_COUNTER_DISPUTE_DOMAIN_SEPARATOR,
-        block.chainid,
-        address(this),
-        tower,
-        entityId,
-        counterentity,
-        finalNonce,
-        finalProofbodyHash,
-        lastResortWindowBlocks,
-        appointmentSequence
-      )
-    );
+    return keccak256(_encodeWatchtowerCounterDisputeHankoPayload(
+      tower,
+      entityId,
+      counterentity,
+      finalNonce,
+      finalProofbodyHash,
+      lastResortWindowBlocks,
+      appointmentSequence
+    ));
   }
 
   /// @notice Delegated last-resort counter-dispute for a designated watchtower.
@@ -831,7 +850,6 @@ contract Depository is ReentrancyGuardLite {
       if (params.sig.length == 0) revert E4();
       if (!Account.verifyCooperativeProofHanko(
         entityProvider,
-        address(this),
         acct_key,
         params.finalNonce,
         keccak256(abi.encode(params.finalProofbody)),
@@ -875,7 +893,7 @@ contract Depository is ReentrancyGuardLite {
         if (params.finalNonce <= params.initialNonce) revert E2();
 
         bytes32 finalProofbodyHash = keccak256(abi.encode(params.finalProofbody));
-        if (!Account.verifyDisputeProofHanko(entityProvider, address(this), acct_key, params.finalNonce, finalProofbodyHash, params.finalProofbody.watchSeed, params.sig, params.counterentity)) revert E4();
+        if (!Account.verifyDisputeProofHanko(entityProvider, acct_key, params.finalNonce, finalProofbodyHash, params.finalProofbody.watchSeed, params.sig, params.counterentity)) revert E4();
         Account.requireStarterArguments(
           params.startedByLeft,
           params.leftArguments,

@@ -130,6 +130,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.ERC721Mock__factory>;
     getContractFactory(
+      name: "HankoCodec",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.HankoCodec__factory>;
+    getContractFactory(
       name: "HashLadder",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.HashLadder__factory>;
@@ -312,6 +316,11 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.ERC721Mock>;
     getContractAt(
+      name: "HankoCodec",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.HankoCodec>;
+    getContractAt(
       name: "HashLadder",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -474,6 +483,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.ERC721Mock>;
     deployContract(
+      name: "HankoCodec",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.HankoCodec>;
+    deployContract(
       name: "HashLadder",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.HashLadder>;
@@ -655,6 +668,11 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.ERC721Mock>;
+    deployContract(
+      name: "HankoCodec",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.HankoCodec>;
     deployContract(
       name: "HashLadder",
       args: any[],

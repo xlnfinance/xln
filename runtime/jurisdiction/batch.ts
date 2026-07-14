@@ -18,6 +18,7 @@ import type { RuntimeFailureSignal } from '../protocol/failure-taxonomy';
 import { normalizeEntityId, compareEntityIds } from '../entity/id';
 import { createStructuredLogger, shortHash, shortId } from '../infra/logger';
 import { PROOF_BODY_ABI } from '../protocol/dispute/proof-body';
+import { hashDepositoryBatchHankoPayload } from '../hanko/onchain-domain';
 
 const jBatchLog = createStructuredLogger('j.batch');
 
@@ -363,7 +364,6 @@ const DEPOSITORY_BATCH_ABI =
   ')';
 const DEPOSITORY_BATCH_PARAM = ethers.ParamType.from(DEPOSITORY_BATCH_ABI);
 
-const BATCH_DOMAIN_SEPARATOR = ethers.keccak256(ethers.toUtf8Bytes('XLN_DEPOSITORY_HANKO_V1'));
 const PROOF_BODY_PARAM = ethers.ParamType.from(PROOF_BODY_ABI);
 
 export function encodeJBatch(batch: JBatch): string {
@@ -683,10 +683,11 @@ export function computeBatchHankoHash(
   encodedBatch: string,
   nonce: bigint
 ): string {
-  return ethers.keccak256(ethers.solidityPacked(
-    ['bytes32', 'uint256', 'address', 'bytes', 'uint256'],
-    [BATCH_DOMAIN_SEPARATOR, chainId, depositoryAddress, encodedBatch, nonce]
-  ));
+  return hashDepositoryBatchHankoPayload(
+    { chainId, depositoryAddress },
+    encodedBatch,
+    nonce,
+  );
 }
 
 /**

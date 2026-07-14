@@ -9,7 +9,6 @@ import type {
   Result,
   Interface,
   EventFragment,
-  AddressLike,
   ContractRunner,
   ContractMethod,
   Listener,
@@ -88,7 +87,7 @@ export interface AccountInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "computeBatchHankoHash",
-    values: [BytesLike, BigNumberish, AddressLike, BytesLike, BigNumberish]
+    values: [BytesLike, BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "encodeDisputeHash",
@@ -295,13 +294,7 @@ export interface Account extends BaseContract {
   >;
 
   computeBatchHankoHash: TypedContractMethod<
-    [
-      domainSep: BytesLike,
-      chainId: BigNumberish,
-      depository: AddressLike,
-      encodedBatch: BytesLike,
-      nonce: BigNumberish
-    ],
+    [domainSep: BytesLike, encodedBatch: BytesLike, nonce: BigNumberish],
     [string],
     "view"
   >;
@@ -340,13 +333,7 @@ export interface Account extends BaseContract {
   getFunction(
     nameOrSignature: "computeBatchHankoHash"
   ): TypedContractMethod<
-    [
-      domainSep: BytesLike,
-      chainId: BigNumberish,
-      depository: AddressLike,
-      encodedBatch: BytesLike,
-      nonce: BigNumberish
-    ],
+    [domainSep: BytesLike, encodedBatch: BytesLike, nonce: BigNumberish],
     [string],
     "view"
   >;

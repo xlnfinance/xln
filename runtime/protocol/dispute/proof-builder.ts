@@ -29,8 +29,18 @@ import { PROOF_BODY_ABI, BATCH_ABI } from './proof-body.ts';
 import { sortTransformerEntries } from '../transformer-ordering.ts';
 import { normalizeAccountWatchSeed } from '../../account/watch-seed.ts';
 import { HASHLADDER_MAX_FILL_RATIO } from '../htlc/hash-ladder.ts';
+import {
+  encodeDisputeProofHankoPayload,
+  hashCooperativeDisputeProofHankoPayload,
+  hashCooperativeUpdateHankoPayload,
+  hashDisputeProofHankoPayload,
+  type DepositoryHankoDomain,
+} from '../../hanko/onchain-domain.ts';
+
+export type { DepositoryHankoDomain } from '../../hanko/onchain-domain.ts';
 
 type DisputeHashAccount = Pick<AccountMachine, 'leftEntity' | 'rightEntity' | 'proofHeader' | 'watchSeed'>;
+type SettlementHashAccount = Pick<AccountMachine, 'leftEntity' | 'rightEntity'>;
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 const ABI_CODER = ethers.AbiCoder.defaultAbiCoder();
@@ -382,31 +392,22 @@ function getCanonicalAccountKey(accountMachine: DisputeHashAccount): string {
  * Encode dispute message for signing (matches Account.sol verifyDisputeProofHanko)
  *
  * MessageType.DisputeProof = 1
- * Format: abi.encode(MessageType.DisputeProof, depository, account_key, nonce, proofbodyHash, watchSeed)
- *
- * The depository address binds the proof to a specific chain+depository for replay protection.
+ * Format: abi.encode(MessageType.DisputeProof, chainId, depository, account_key,
+ * nonce, proofbodyHash, watchSeed)
  */
 export function encodeDisputeMessage(
   accountMachine: DisputeHashAccount,
   proofBodyHash: string,
-  depositoryAddress: string
+  domain: DepositoryHankoDomain,
 ): string {
   const chKey = getCanonicalAccountKey(accountMachine);
   const watchSeed = normalizeAccountWatchSeed(accountMachine.watchSeed, 'DISPUTE_MESSAGE');
-
-  // MessageType.DisputeProof = 1
-  const MESSAGE_TYPE_DISPUTE_PROOF = 1;
-
-  return ABI_CODER.encode(
-    ['uint256', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
-    [
-      MESSAGE_TYPE_DISPUTE_PROOF,
-      depositoryAddress,
-      chKey,
-      accountMachine.proofHeader.nextProofNonce,
-      proofBodyHash,
-      watchSeed,
-    ]
+  return encodeDisputeProofHankoPayload(
+    domain,
+    chKey,
+    accountMachine.proofHeader.nextProofNonce,
+    proofBodyHash,
+    watchSeed,
   );
 }
 
@@ -417,14 +418,15 @@ export function encodeDisputeMessage(
 export function createDisputeProofHash(
   accountMachine: DisputeHashAccount,
   proofBodyHash: string,
-  depositoryAddress: string
+  domain: DepositoryHankoDomain,
 ): string {
-  const encodedMessage = encodeDisputeMessage(
-    accountMachine,
+  return hashDisputeProofHankoPayload(
+    domain,
+    getCanonicalAccountKey(accountMachine),
+    accountMachine.proofHeader.nextProofNonce,
     proofBodyHash,
-    requireContractAddress('depository', depositoryAddress),
+    normalizeAccountWatchSeed(accountMachine.watchSeed, 'DISPUTE_MESSAGE'),
   );
-  return ethers.keccak256(encodedMessage);
 }
 
 /**
@@ -441,24 +443,29 @@ export function createDisputeProofHash(
 export function createDisputeProofHashWithNonce(
   accountMachine: DisputeHashAccount,
   proofBodyHash: string,
-  depositoryAddress: string,
+  domain: DepositoryHankoDomain,
   nonce: number,
 ): string {
   const chKey = getCanonicalAccountKey(accountMachine);
   const watchSeed = normalizeAccountWatchSeed(accountMachine.watchSeed, 'DISPUTE_MESSAGE');
-  const MESSAGE_TYPE_DISPUTE_PROOF = 1;
-  const encodedMessage = ABI_CODER.encode(
-    ['uint256', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
-    [
-      MESSAGE_TYPE_DISPUTE_PROOF,
-      requireContractAddress('depository', depositoryAddress),
-      chKey,
-      nonce,
-      proofBodyHash,
-      watchSeed,
-    ]
+  return hashDisputeProofHankoPayload(domain, chKey, nonce, proofBodyHash, watchSeed);
+}
+
+/** Matches Account.sol MessageType.CooperativeDisputeProof exactly. */
+export function createCooperativeDisputeProofHash(
+  accountMachine: DisputeHashAccount,
+  proofBodyHash: string,
+  starterInitialArgumentsHash: string,
+  domain: DepositoryHankoDomain,
+  nonce: number,
+): string {
+  return hashCooperativeDisputeProofHankoPayload(
+    domain,
+    getCanonicalAccountKey(accountMachine),
+    nonce,
+    proofBodyHash,
+    starterInitialArgumentsHash,
   );
-  return ethers.keccak256(encodedMessage);
 }
 
 /**
@@ -484,10 +491,11 @@ export function getDisputeDelayBlocks(configValue: number): number {
  * Matches Account.sol CooperativeUpdate encoding
  * @param nonce The on-chain nonce for cooperative settlement
  *
- * The depository address binds the settlement to a specific chain+depository for replay protection.
+ * Both chain ID and Depository address are required. Deterministic deployments
+ * can reuse an address across chains, so either value alone is not a domain.
  */
 export function createSettlementHashWithNonce(
-  accountMachine: AccountMachine,
+  accountMachine: SettlementHashAccount,
   diffs: Array<{
     tokenId: number;
     leftDiff: bigint;
@@ -495,7 +503,8 @@ export function createSettlementHashWithNonce(
     collateralDiff: bigint;
     ondeltaDiff: bigint;
   }>,
-  depositoryAddress: string,
+  forgiveDebtsInTokenIds: readonly number[],
+  domain: DepositoryHankoDomain,
   nonce: number
 ): string {
   // Account key is canonical (left:right)
@@ -505,19 +514,13 @@ export function createSettlementHashWithNonce(
   );
 
   // Match Account.sol CooperativeUpdate encoding exactly:
-  // abi.encode(MessageType.CooperativeUpdate, address(this), acct_key, s.nonce, s.diffs, s.forgiveDebtsInTokenIds)
-  const MESSAGE_TYPE_COOPERATIVE_UPDATE = 0;
-  const encodedMsg = ABI_CODER.encode(
-    ['uint256', 'address', 'bytes', 'uint256', 'tuple(uint256,int256,int256,int256,int256)[]', 'uint256[]'],
-    [
-      MESSAGE_TYPE_COOPERATIVE_UPDATE,
-      depositoryAddress,
-      accountKey,
-      nonce,
-      diffs.map(d => [d.tokenId, d.leftDiff, d.rightDiff, d.collateralDiff, d.ondeltaDiff]),
-      [], // forgiveDebtsInTokenIds
-    ]
+  // abi.encode(MessageType.CooperativeUpdate, block.chainid, address(this),
+  //   acct_key, s.nonce, s.diffs, s.forgiveDebtsInTokenIds)
+  return hashCooperativeUpdateHankoPayload(
+    domain,
+    accountKey,
+    nonce,
+    diffs,
+    forgiveDebtsInTokenIds,
   );
-
-  return ethers.keccak256(encodedMsg);
 }

@@ -186,10 +186,13 @@ const disputeProofHash = async (
   nonce: bigint,
   proofbodyHashValue: string,
   watchSeed: string,
-): Promise<string> => ethers.keccak256(abiCoder.encode(
-  ['uint8', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
-  [DISPUTE_PROOF, await depository.getAddress(), accountKey, nonce, proofbodyHashValue, watchSeed],
-));
+): Promise<string> => {
+  const network = await depository.runner!.provider!.getNetwork();
+  return ethers.keccak256(abiCoder.encode(
+    ['uint8', 'uint256', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
+    [DISPUTE_PROOF, network.chainId, await depository.getAddress(), accountKey, nonce, proofbodyHashValue, watchSeed],
+  ));
+};
 
 describe('watchtower rpc last-resort integration', () => {
   test('standalone tower skips early and submits a real on-chain counter-dispute in the last-resort window', async () => {

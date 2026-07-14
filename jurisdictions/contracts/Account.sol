@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import "./Types.sol";
 import "./DeltaTransformer.sol";
 import "./IEntityProvider.sol";
+import "./HankoEncoding.sol";
 
 /**
  * Account.sol - Library for bilateral account operations
@@ -145,8 +146,110 @@ library Account {
     if (actual != expected) revert E9();
   }
 
-  function computeBatchHankoHash(bytes32 domainSep, uint256 chainId, address depository, bytes memory encodedBatch, uint256 nonce) external pure returns (bytes32) {
-    return keccak256(abi.encodePacked(domainSep, chainId, depository, encodedBatch, nonce));
+  function _encodeBatchHankoPayload(
+    bytes32 domainSep,
+    bytes memory encodedBatch,
+    uint256 nonce
+  ) private view returns (bytes memory) {
+    return HankoEncoding.encodeBatch(
+      domainSep,
+      block.chainid,
+      address(this),
+      encodedBatch,
+      nonce
+    );
+  }
+
+  function computeBatchHankoHash(
+    bytes32 domainSep,
+    bytes memory encodedBatch,
+    uint256 nonce
+  ) external view returns (bytes32) {
+    return keccak256(_encodeBatchHankoPayload(domainSep, encodedBatch, nonce));
+  }
+
+  // Account is a linked library, so production entry points execute by
+  // DELEGATECALL and address(this) is the Depository. Never pass either domain
+  // component into a verifier: a caller-controlled chain/address would make it
+  // accept a signature for a different jurisdiction.
+  function _encodeCooperativeUpdateHankoPayload(
+    bytes memory acct_key,
+    uint nonce,
+    SettlementDiff[] memory diffs,
+    uint[] memory forgiveDebtsInTokenIds
+  ) private view returns (bytes memory) {
+    return HankoEncoding.encodeCooperativeUpdate(
+      block.chainid,
+      address(this),
+      acct_key,
+      nonce,
+      diffs,
+      forgiveDebtsInTokenIds
+    );
+  }
+
+  function _cooperativeUpdateHankoHash(
+    bytes memory acct_key,
+    uint nonce,
+    SettlementDiff[] memory diffs,
+    uint[] memory forgiveDebtsInTokenIds
+  ) private view returns (bytes32) {
+    return keccak256(_encodeCooperativeUpdateHankoPayload(acct_key, nonce, diffs, forgiveDebtsInTokenIds));
+  }
+
+  function _encodeDisputeProofHankoPayload(
+    bytes memory acct_key,
+    uint nonce,
+    bytes32 proofbodyHash,
+    bytes32 watchSeed
+  ) private view returns (bytes memory) {
+    return HankoEncoding.encodeDisputeProof(
+      block.chainid,
+      address(this),
+      acct_key,
+      nonce,
+      proofbodyHash,
+      watchSeed
+    );
+  }
+
+  function _disputeProofHankoHash(
+    bytes memory acct_key,
+    uint nonce,
+    bytes32 proofbodyHash,
+    bytes32 watchSeed
+  ) private view returns (bytes32) {
+    return keccak256(_encodeDisputeProofHankoPayload(acct_key, nonce, proofbodyHash, watchSeed));
+  }
+
+  function _encodeCooperativeDisputeProofHankoPayload(
+    bytes memory acct_key,
+    uint nonce,
+    bytes32 proofbodyHash,
+    bytes32 starterInitialArgumentsHash
+  ) private view returns (bytes memory) {
+    return HankoEncoding.encodeCooperativeDisputeProof(
+      block.chainid,
+      address(this),
+      acct_key,
+      nonce,
+      proofbodyHash,
+      starterInitialArgumentsHash
+    );
+  }
+
+  function _cooperativeDisputeProofHankoHash(
+    bytes memory acct_key,
+    uint nonce,
+    bytes32 proofbodyHash,
+    bytes32 starterInitialArgumentsHash
+  ) private view returns (bytes32) {
+    return keccak256(_encodeCooperativeDisputeProofHankoPayload(
+      acct_key,
+      nonce,
+      proofbodyHash,
+      starterInitialArgumentsHash
+    ));
   }
 
   // ========== HANKO VERIFICATION ==========
@@ -154,7 +257,6 @@ library Account {
   /// @notice Verify dispute proof with hanko (entity-level signature)
   function verifyDisputeProofHanko(
     address entityProvider,
-    address depository,
     bytes memory acct_key,
     uint nonce,
     bytes32 proofbodyHash,
@@ -162,23 +264,7 @@ library Account {
     bytes memory hanko,
     bytes32 expectedEntity
   ) external returns (bool success) {
-    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, depository, acct_key, nonce, proofbodyHash, watchSeed);
-    bytes32 hash = keccak256(encoded_msg);
-    (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
-    return valid && recoveredEntity == expectedEntity;
-  }
-
-  /// @notice Verify final dispute proof with hanko (counter-dispute)
-  function verifyFinalDisputeProofHanko(
-    address entityProvider,
-    address depository,
-    bytes memory acct_key,
-    uint finalNonce,
-    bytes memory hanko,
-    bytes32 expectedEntity
-  ) external returns (bool success) {
-    bytes memory encoded_msg = abi.encode(MessageType.FinalDisputeProof, depository, acct_key, finalNonce);
-    bytes32 hash = keccak256(encoded_msg);
+    bytes32 hash = _disputeProofHankoHash(acct_key, nonce, proofbodyHash, watchSeed);
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
     return valid && recoveredEntity == expectedEntity;
   }
@@ -186,7 +272,6 @@ library Account {
   /// @notice Verify cooperative proof with hanko
   function verifyCooperativeProofHanko(
     address entityProvider,
-    address depository,
     bytes memory acct_key,
     uint nonce,
     bytes32 proofbodyHash,
@@ -194,8 +279,12 @@ library Account {
     bytes memory hanko,
     bytes32 expectedEntity
   ) external returns (bool success) {
-    bytes memory encoded_msg = abi.encode(MessageType.CooperativeDisputeProof, depository, acct_key, nonce, proofbodyHash, starterInitialArgumentsHash);
-    bytes32 hash = keccak256(encoded_msg);
+    bytes32 hash = _cooperativeDisputeProofHankoHash(
+      acct_key,
+      nonce,
+      proofbodyHash,
+      starterInitialArgumentsHash
+    );
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
     return valid && recoveredEntity == expectedEntity;
   }
@@ -250,15 +339,7 @@ library Account {
     });
 
     // Verify counterparty signature (hash includes signedNonce, not storedNonce)
-    bytes memory encoded_msg = abi.encode(
-      MessageType.CooperativeUpdate,
-      address(this),
-      acct_key,
-      c2r.nonce,
-      diffs,
-      new uint[](0)
-    );
-    bytes32 hash = keccak256(encoded_msg);
+    bytes32 hash = _cooperativeUpdateHankoHash(acct_key, c2r.nonce, diffs, new uint[](0));
 
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(c2r.sig, hash);
     if (!valid || recoveredEntity != c2r.counterparty) {
@@ -352,8 +433,12 @@ library Account {
 
     require(s.sig.length > 0, "Signature required for settlement");
     // Hash includes signedNonce (from settlement struct), not storedNonce
-    bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, address(this), acct_key, s.nonce, s.diffs, s.forgiveDebtsInTokenIds);
-    bytes32 hash = keccak256(encoded_msg);
+    bytes32 hash = _cooperativeUpdateHankoHash(
+      acct_key,
+      s.nonce,
+      s.diffs,
+      s.forgiveDebtsInTokenIds
+    );
 
     try IEntityProvider(entityProvider).verifyHankoSignature(s.sig, hash) returns (bytes32 recoveredEntity, bool valid) {
       if (!valid || recoveredEntity != counterparty) {
@@ -460,8 +545,12 @@ library Account {
 
     require(params.sig.length > 0, "Signature required for dispute");
 
-    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, address(this), acct_key, params.nonce, params.proofbodyHash, params.watchSeed);
-    bytes32 hash = keccak256(encoded_msg);
+    bytes32 hash = _disputeProofHankoHash(
+      acct_key,
+      params.nonce,
+      params.proofbodyHash,
+      params.watchSeed
+    );
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(params.sig, hash);
     if (!valid || recoveredEntity != params.counterentity) revert E4();
 

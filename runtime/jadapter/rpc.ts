@@ -68,6 +68,7 @@ import { decodeJBatch, getBatchSize, isBatchEmpty, preflightBatchForE2 } from '.
 import { requireUsableContractAddress } from '../jurisdiction/contract-address';
 import { setDeltaTransformerAddress } from '../protocol/dispute/proof-builder';
 import { prepareSignedBatch } from '../hanko/batch';
+import { hashDisputeProofHankoPayload } from '../hanko/onchain-domain';
 import { resolveEntityProposerId } from '../state-helpers';
 import { BLOCKCHAIN } from '../constants';
 import { DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction } from './default-tokens';
@@ -1730,11 +1731,12 @@ export async function createRpcAdapter(
             const { inspectHankoForHash } = await import('../hanko/signing');
             disputeStartDebug = await Promise.all(batch.disputeStarts.map(async (start) => {
               const accountKey = computeAccountKey(normalizedId, start.counterentity);
-              const disputeHash = ethers.keccak256(
-                ethers.AbiCoder.defaultAbiCoder().encode(
-                  ['uint8', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
-                  [1, depositoryAddr, accountKey, BigInt(start.nonce), start.proofbodyHash, start.watchSeed],
-                ),
+              const disputeHash = hashDisputeProofHankoPayload(
+                { chainId: config.chainId, depositoryAddress: depositoryAddr },
+                accountKey,
+                start.nonce,
+                start.proofbodyHash,
+                start.watchSeed,
               );
               const hankoDebug = await inspectHankoForHash(start.sig, disputeHash);
               const matchingClaim = hankoDebug.claims.find(

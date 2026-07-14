@@ -4196,7 +4196,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const targetDisputeHash = createDisputeProofHashWithNonce(
       targetAccount,
       targetProof.proofBodyHash,
-      base.depositoryAddress,
+      { chainId: base.chainId, depositoryAddress: base.depositoryAddress },
       1,
     );
     const [targetDisputeHanko] = await signEntityHashes(env, targetHub, targetHubSigner, [targetDisputeHash]);

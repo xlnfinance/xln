@@ -32,9 +32,7 @@ import { normalizeAccountWatchSeed } from '../watch-seed';
 import {
   assertNoUnilateralSettlementMutation,
   captureSettlementVector,
-  getAccountDepositoryAddress,
   getAccountStateDomain,
-  isAddress20,
   kickHubRebalanceAfterFrameFinalize,
   prependUniqueMempoolTxs,
   runPostFrameAutoRebalanceCheck,
@@ -106,20 +104,17 @@ async function validateCounterpartyDisputeSeal(
 ): Promise<ValidatedCounterpartyDisputeSeal | undefined> {
   if (!seal) return undefined;
 
-  const depositoryAddress = getAccountDepositoryAddress(env, accountMachine);
-  if (!isAddress20(depositoryAddress)) {
-    throw new Error(`${context}:DISPUTE_SEAL_DEPOSITORY_MISSING`);
-  }
+  const hankoDomain = getAccountStateDomain(env, accountMachine);
 
   // A dispute Hanko is only useful if it signs the exact Solidity message:
-  // (MessageType.DisputeProof, depository, canonical accountKey, nonce,
+  // (MessageType.DisputeProof, chainId, depository, canonical accountKey, nonce,
   // proofbodyHash). Verifying a peer-supplied `newDisputeHash` alone is not
   // enough: a malicious peer can sign any random hash, attach a plausible
   // proofbodyHash, and make us store metadata that later fails on-chain.
   const expectedHash = createDisputeProofHashWithNonce(
     accountMachine,
     seal.proofBodyHash,
-    depositoryAddress,
+    hankoDomain,
     seal.proofNonce,
   );
   if (String(seal.hash).toLowerCase() !== expectedHash.toLowerCase()) {
@@ -1354,10 +1349,7 @@ async function buildIncomingFrameAckMaterial(
 
   accountLog.debug('hanko.ack.sign', { entity: shortId(ackEntityId), signer: shortId(ackSignerId), height: receivedFrame.height });
 
-  const ackDepositoryAddress = getAccountDepositoryAddress(env, accountMachine);
-  if (!isAddress20(ackDepositoryAddress)) {
-    return { kind: 'return', result: { success: false, error: 'ACK_DISPUTE_PROOF_BUILD_FAILED: MISSING_DEPOSITORY_ADDRESS', events } };
-  }
+  const ackHankoDomain = getAccountStateDomain(env, accountMachine);
   const ackProofResult = buildAccountProofBody(accountMachine);
   const proofChanged =
     ackProofResult.proofBodyHash.toLowerCase() !== accountMachine.currentDisputeProofBodyHash?.toLowerCase() ||
@@ -1370,7 +1362,7 @@ async function buildIncomingFrameAckMaterial(
     ? createDisputeProofHashWithNonce(
       accountMachine,
       ackProofResult.proofBodyHash,
-      ackDepositoryAddress,
+      ackHankoDomain,
       ackSignedNonce,
     )
     : undefined;

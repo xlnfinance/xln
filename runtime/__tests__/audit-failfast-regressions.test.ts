@@ -4324,7 +4324,7 @@ describe('audit fail-fast regressions', () => {
     accountMachine.currentDisputeHash = createDisputeProofHashWithNonce(
       accountMachine,
       accountMachine.currentDisputeProofBodyHash,
-      hex20('dd'),
+      { chainId: 31337, depositoryAddress: hex20('dd') },
       1,
     );
     accountMachine.currentDisputeProofHanko = '0xcafe';
@@ -5237,7 +5237,7 @@ describe('audit fail-fast regressions', () => {
     account.counterpartyDisputeHash = createDisputeProofHashWithNonce(
       account,
       counterProof.proofBodyHash,
-      depositoryAddress,
+      { chainId: 31337, depositoryAddress },
       2,
     );
     account.activeDispute = {
@@ -5341,7 +5341,7 @@ describe('audit fail-fast regressions', () => {
     const postDisputeHash = createDisputeProofHashWithNonce(
       account,
       postProof.proofBodyHash,
-      depositoryAddress,
+      { chainId: 31337, depositoryAddress },
       2,
     );
     account.counterpartyDisputeHash = `0x${'aa'.repeat(32)}`;

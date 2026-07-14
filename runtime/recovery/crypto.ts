@@ -13,13 +13,13 @@ import type {
   TowerModeV1,
 } from './types';
 import { normalizeAccountWatchSeed } from '../account/watch-seed';
+import { hashWatchtowerCounterDisputeHankoPayload } from '../hanko/onchain-domain';
 
 const RECOVERY_LOOKUP_DOMAIN = 'xln:recovery:lookup:v1';
 const RECOVERY_ACTION_LOOKUP_DOMAIN = 'xln:recovery:action-lookup:v1';
 const RECOVERY_AES_KEY_DOMAIN = 'xln:recovery:key:v1';
 const TOWER_WATCH_SEED_PAYLOAD_AES_KEY_DOMAIN = 'xln:tower:watch-seed-payload-key:v1';
 const TOWER_APPOINTMENT_DOMAIN = 'xln:tower:appointment:v1';
-const WATCHTOWER_COUNTER_DISPUTE_DOMAIN = 'XLN_WATCHTOWER_COUNTER_DISPUTE_V1';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -166,22 +166,17 @@ export const computeWatchtowerCounterDisputeAuthorizationHash = (
   finalProofbodyHash: string,
   lastResortWindowBlocks: number,
   appointmentSequence: number,
-): string => ethers.keccak256(
-  ethers.AbiCoder.defaultAbiCoder().encode(
-    ['bytes32', 'uint256', 'address', 'address', 'bytes32', 'bytes32', 'uint256', 'bytes32', 'uint256', 'uint256'],
-    [
-      ethers.keccak256(ethers.toUtf8Bytes(WATCHTOWER_COUNTER_DISPUTE_DOMAIN)),
-      BigInt(Math.max(0, Math.floor(Number(chainId || 0)))),
-      depositoryAddress,
-      towerAddress,
-      entityId,
-      counterentity,
-      BigInt(Math.max(0, Math.floor(Number(finalNonce || 0)))),
-      finalProofbodyHash,
-      BigInt(Math.max(0, Math.floor(Number(lastResortWindowBlocks || 0)))),
-      BigInt(Math.max(0, Math.floor(Number(appointmentSequence || 0)))),
-    ],
-  ),
+): string => hashWatchtowerCounterDisputeHankoPayload(
+  { chainId, depositoryAddress },
+  {
+    towerAddress,
+    entityId,
+    counterentity,
+    finalNonce,
+    finalProofbodyHash,
+    lastResortWindowBlocks,
+    appointmentSequence,
+  },
 );
 
 export const encryptRuntimeRecoveryBundle = async (

@@ -8,6 +8,7 @@ import {
 } from '../protocol/dispute/proof-builder';
 
 const DEPOSITORY = '0x4ed7c70F96B99c776995fB64377f0d4aB3B0e1C1';
+const HANKO_DOMAIN = { chainId: 31337, depositoryAddress: DEPOSITORY } as const;
 const PROOF_BODY_HASH = '0x216659016a52d3f9df41568d0c85bd6870ee46705ada7366c9f68d60e0a83548';
 const TEST_WATCH_SEED = `0x${'11'.repeat(32)}`;
 
@@ -32,15 +33,15 @@ describe('proof-builder dispute hash', () => {
     );
     const expected = ethers.keccak256(
       ethers.AbiCoder.defaultAbiCoder().encode(
-        ['uint256', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
-        [1, DEPOSITORY, sortedKey, 1, PROOF_BODY_HASH, TEST_WATCH_SEED],
+        ['uint256', 'uint256', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
+        [1, HANKO_DOMAIN.chainId, DEPOSITORY, sortedKey, 1, PROOF_BODY_HASH, TEST_WATCH_SEED],
       ),
     );
 
-    expect(createDisputeProofHash(leftOriented, PROOF_BODY_HASH, DEPOSITORY)).toBe(expected);
-    expect(createDisputeProofHash(rightOriented, PROOF_BODY_HASH, DEPOSITORY)).toBe(expected);
-    expect(createDisputeProofHashWithNonce(leftOriented, PROOF_BODY_HASH, DEPOSITORY, 1)).toBe(expected);
-    expect(createDisputeProofHashWithNonce(rightOriented, PROOF_BODY_HASH, DEPOSITORY, 1)).toBe(expected);
+    expect(createDisputeProofHash(leftOriented, PROOF_BODY_HASH, HANKO_DOMAIN)).toBe(expected);
+    expect(createDisputeProofHash(rightOriented, PROOF_BODY_HASH, HANKO_DOMAIN)).toBe(expected);
+    expect(createDisputeProofHashWithNonce(leftOriented, PROOF_BODY_HASH, HANKO_DOMAIN, 1)).toBe(expected);
+    expect(createDisputeProofHashWithNonce(rightOriented, PROOF_BODY_HASH, HANKO_DOMAIN, 1)).toBe(expected);
   });
 
   test('fails fast when depository address is missing', () => {
@@ -50,10 +51,25 @@ describe('proof-builder dispute hash', () => {
       proofHeader: { nextProofNonce: 1 },
       watchSeed: TEST_WATCH_SEED,
     };
-    expect(() => createDisputeProofHash(account, PROOF_BODY_HASH, '')).toThrow('MISSING_DEPOSITORY_ADDRESS');
-    expect(() => createDisputeProofHashWithNonce(account, PROOF_BODY_HASH, '', 1)).toThrow(
-      'MISSING_DEPOSITORY_ADDRESS',
+    const missingAddress = { chainId: 31337, depositoryAddress: '' };
+    expect(() => createDisputeProofHash(account, PROOF_BODY_HASH, missingAddress)).toThrow('INVALID_HANKO_DEPOSITORY_ADDRESS:missing');
+    expect(() => createDisputeProofHashWithNonce(account, PROOF_BODY_HASH, missingAddress, 1)).toThrow(
+      'INVALID_HANKO_DEPOSITORY_ADDRESS:missing',
     );
+  });
+
+  test('fails fast when the Hanko chain domain is missing', () => {
+    const account = {
+      leftEntity: '0x1ee7a317604eea0486bd28ef857fa194171f6e844f5933cb13efecf3cd36ec73',
+      rightEntity: '0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da',
+      proofHeader: { nextProofNonce: 1 },
+      watchSeed: TEST_WATCH_SEED,
+    };
+    expect(() => createDisputeProofHash(
+      account,
+      PROOF_BODY_HASH,
+      { chainId: 0, depositoryAddress: DEPOSITORY },
+    )).toThrow('INVALID_HANKO_DOMAIN_CHAIN_ID:0');
   });
 
   test('fails fast when transformer address is missing for HTLC/swaps', () => {

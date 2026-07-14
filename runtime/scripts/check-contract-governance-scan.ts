@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { readFileSync } from 'node:fs';
+import { checkOnchainHankoAst } from './check-onchain-hanko-ast.ts';
 
 const readText = (path: string): string => readFileSync(path, 'utf8');
 
@@ -95,6 +96,10 @@ assertFunctionAllowlist(entityProvider, entityProviderPath, [
   'batchVerifyHankoSignatures',
   'cancelBoardProposal',
   'entityTransferTokens',
+  'encodeEntityTransferHankoPayload',
+  'computeEntityTransferHankoHash',
+  'encodeReleaseControlSharesHankoPayload',
+  'computeReleaseControlSharesHankoHash',
   'foundationRegisterEntity',
   'getEntityFromToken',
   'getEntityInfo',
@@ -122,7 +127,7 @@ assertFunctionHeaderIncludes(depository, depositoryPath, 'processBatch', 'extern
 assertFunctionHeaderIncludes(depository, depositoryPath, 'watchtowerCounterDispute', 'external nonReentrant');
 assertFunctionHeaderIncludes(depository, depositoryPath, 'mintToReserve', 'external onlyLocalDevAdmin');
 assertFunctionHeaderIncludes(depository, depositoryPath, 'adminRegisterExternalToken', 'external onlyLocalDevAdmin nonReentrant');
-assertIncludes(depository, 'Account.computeBatchHankoHash(DOMAIN_SEPARATOR, block.chainid, address(this), encodedBatch, nonce)', depositoryPath);
+assertIncludes(depository, 'Account.computeBatchHankoHash(DOMAIN_SEPARATOR, encodedBatch, nonce)', depositoryPath);
 assertIncludes(depository, 'if (nonce != entityNonces[entityId] + 1) revert E2();', depositoryPath);
 assertIncludes(depository, 'entityNonces[entityId] = nonce;', depositoryPath);
 assertIncludes(depository, 'if (account.disputeHash == bytes32(0)) revert E5();', depositoryPath);
@@ -167,4 +172,5 @@ for (const marker of [
   assertIncludes(auditDoc, marker, auditDocPath);
 }
 
+checkOnchainHankoAst();
 console.log('contract governance scan check passed');

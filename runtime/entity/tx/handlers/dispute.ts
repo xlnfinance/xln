@@ -24,6 +24,7 @@ import { getRuntimeJurisdictionDefaultDisputeDelayBlocks, getRuntimeJurisdiction
 import {
   buildAccountProofBody,
   createDisputeProofHashWithNonce,
+  type DepositoryHankoDomain,
 } from '../../../protocol/dispute/proof-builder';
 import { inspectHankoForHash, verifyHankoForHash } from '../../../hanko/signing';
 import { decodeHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
@@ -212,10 +213,15 @@ function collectHtlcSecrets(entityState: EntityState, counterpartyEntityId: stri
   return secrets;
 }
 
-function resolveDepositoryAddress(entityState: EntityState): string | null {
-  const address = entityState.config.jurisdiction?.depositoryAddress || '';
-  if (isUsableContractAddress(address)) return address;
-  return null;
+function resolveDepositoryHankoDomain(entityState: EntityState): DepositoryHankoDomain | null {
+  const jurisdiction = entityState.config.jurisdiction;
+  const address = jurisdiction?.depositoryAddress || '';
+  if (!isUsableContractAddress(address)) return null;
+  const chainId = Number(jurisdiction?.chainId);
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+    throw new Error(`DISPUTE_HANKO_CHAIN_ID_INVALID:${String(jurisdiction?.chainId)}`);
+  }
+  return { chainId, depositoryAddress: address };
 }
 
 function hasQueuedDisputeStart(state: EntityState, counterpartyEntityId: string): boolean {
@@ -705,12 +711,12 @@ export async function handleDisputeStart(
       })()
     : '0x';
 
-  const depositoryAddress = resolveDepositoryAddress(entityState);
-  if (depositoryAddress) {
+  const hankoDomain = resolveDepositoryHankoDomain(entityState);
+  if (hankoDomain) {
     const exactDisputeHash = createDisputeProofHashWithNonce(
       account,
       proofBodyHashToUse,
-      depositoryAddress,
+      hankoDomain,
       signedNonce,
     );
     if (
@@ -740,7 +746,7 @@ export async function handleDisputeStart(
         proofBodyHash: proofBodyHashToUse,
         disputeHashSource,
         disputeHash: exactDisputeHash,
-        depositoryAddress,
+        depositoryAddress: hankoDomain.depositoryAddress,
         hankoBytes: Math.max(counterpartyDisputeHanko.length - 2, 0) / 2,
         recoveredAddresses: hankoDebug.recoveredAddresses,
         matchingClaim: matchingClaim
@@ -790,7 +796,7 @@ export async function handleDisputeStart(
         knownDisputeProofHashes: Object.keys(account.disputeProofNoncesByHash ?? {}),
         disputeHashSource,
         disputeHash: exactDisputeHash,
-        depositoryAddress,
+        depositoryAddress: hankoDomain.depositoryAddress,
         recoveredEntityId: exactDisputeVerify.entityId,
         hankoBytes: Math.max(counterpartyDisputeHanko.length - 2, 0) / 2,
       });
@@ -1052,14 +1058,14 @@ export async function handleDisputeFinalize(
   }
 
   if (shouldUseCounterProof && account.counterpartyDisputeHash) {
-    const depositoryAddress = resolveDepositoryAddress(entityState);
-    if (!depositoryAddress) {
+    const hankoDomain = resolveDepositoryHankoDomain(entityState);
+    if (!hankoDomain) {
       throw new Error('DISPUTE_COUNTER_FINALIZE_DEPOSITORY_MISSING');
     }
     const expectedHash = createDisputeProofHashWithNonce(
       account,
       counterProofBodyHash!,
-      depositoryAddress,
+      hankoDomain,
       finalNonce,
     );
     if (account.counterpartyDisputeHash.toLowerCase() !== expectedHash.toLowerCase()) {

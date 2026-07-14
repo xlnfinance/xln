@@ -13,6 +13,7 @@ export type { ERC1155Mock } from "./ERC1155Mock";
 export type { ERC20Mock } from "./ERC20Mock";
 export type { ERC721Mock } from "./ERC721Mock";
 export type { EntityProvider } from "./EntityProvider";
+export type { HankoCodec } from "./HankoCodec";
 export type { HashLadder } from "./HashLadder";
 export type { IDeltaTransformer } from "./IDeltaTransformer";
 export type { IDepository } from "./IDepository";

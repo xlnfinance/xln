@@ -31,6 +31,10 @@ import { batchAddSettlement, createEmptyBatch, decodeJBatch, summarizeBatch } fr
 import { setDeltaTransformerAddress } from '../protocol/dispute/proof-builder.js';
 import { buildExternalTokenToReserveBatch, packTokenReference } from './helpers';
 import { buildSingleSignerHanko, prepareSignedBatch } from '../hanko/batch';
+import {
+  hashCooperativeUpdateHankoPayload,
+  hashDisputeProofHankoPayload,
+} from '../hanko/onchain-domain';
 import { DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction } from './default-tokens';
 import { getBootstrapTokenAmountBySymbol } from '../jurisdiction/bootstrap-economy';
 import {
@@ -867,14 +871,6 @@ export class BrowserVMProvider {
   // SIGNATURE GENERATION FOR HANKO-COMPATIBLE OPERATIONS
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /** MessageType enum values (must match Types.sol) */
-  private static readonly MessageType = {
-    CooperativeUpdate: 0,
-    DisputeProof: 1,
-    FinalDisputeProof: 2,
-    CooperativeDisputeProof: 3,
-  };
-
   // Cache of entity wallets (entityId -> wallet)
   private entityWallets: Map<string, ethers.Wallet> = new Map();
 
@@ -1014,32 +1010,20 @@ export class BrowserVMProvider {
     const leftEntity = isLeft ? initiatorEntityId : counterpartyEntityId;
     const rightEntity = isLeft ? counterpartyEntityId : initiatorEntityId;
     const accountKey = this.getAccountKey(leftEntity, rightEntity);
+    if (!this.depositoryAddress) throw new Error('Depository not deployed');
 
-    // Encode the message (must match Account.sol encoding)
-    // IMPORTANT: Solidity enums are encoded as uint256, not uint8!
-    // Include depositoryAddress for chain+depository binding (replay protection)
-    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-    const encodedMsg = abiCoder.encode(
-      ['uint256', 'address', 'bytes', 'uint256', 'tuple(uint256,int256,int256,int256,int256)[]', 'uint256[]'],
-      [
-        BrowserVMProvider.MessageType.CooperativeUpdate,
-        this.depositoryAddress?.toString() || '0x0000000000000000000000000000000000000000',
-        accountKey,
-        jNonce,
-        diffs.map(d => [d.tokenId, d.leftDiff, d.rightDiff, d.collateralDiff, d.ondeltaDiff]),
-        forgiveDebtsInTokenIds,
-      ]
+    const hash = hashCooperativeUpdateHankoPayload(
+      { chainId: this.getChainId(), depositoryAddress: this.depositoryAddress.toString() },
+      accountKey,
+      jNonce,
+      diffs,
+      forgiveDebtsInTokenIds,
     );
-
-    const hash = ethers.keccak256(encodedMsg);
     console.log(`[BrowserVM] signSettlement:`);
     console.log(`  hash: ${hash}`);
     console.log(`  accountKey: ${accountKey} (${(accountKey.length - 2) / 2} bytes)`);
     console.log(`  nonce: ${jNonce}`);
     console.log(`  diffs: ${JSON.stringify(diffs.map(d => ({ tokenId: d.tokenId, leftDiff: d.leftDiff.toString(), rightDiff: d.rightDiff.toString(), collateralDiff: d.collateralDiff.toString(), ondeltaDiff: d.ondeltaDiff.toString() })))}`);
-    console.log(`  encodedMsg length: ${(encodedMsg.length - 2) / 2} bytes`);
-    console.log(`  encodedMsg first 200: ${encodedMsg.slice(0, 200)}`);
-    console.log(`  MessageType value: ${BrowserVMProvider.MessageType.CooperativeUpdate}`);
 
     const counterpartyWallet = this.getSigningWallet(counterpartyEntityId);
     const hankoEncoded = buildSingleSignerHanko(counterpartyEntityId, hash, counterpartyWallet.privateKey);
@@ -1059,17 +1043,15 @@ export class BrowserVMProvider {
     watchSeed: string,
   ): Promise<string> {
     const accountKey = this.getAccountKey(entityId, counterpartyEntityId);
+    if (!this.depositoryAddress) throw new Error('Depository not deployed');
 
-    // IMPORTANT: Solidity enums are encoded as uint256, not uint8!
-    // Include depositoryAddress for chain+depository binding (replay protection)
-    // Unified nonce: single nonce replaces cooperativeNonce + disputeNonce
-    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-    const encodedMsg = abiCoder.encode(
-      ['uint256', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
-      [BrowserVMProvider.MessageType.DisputeProof, this.depositoryAddress?.toString() || '0x0000000000000000000000000000000000000000', accountKey, nonce, proofbodyHash, watchSeed]
+    const hash = hashDisputeProofHankoPayload(
+      { chainId: this.getChainId(), depositoryAddress: this.depositoryAddress.toString() },
+      accountKey,
+      nonce,
+      proofbodyHash,
+      watchSeed,
     );
-
-    const hash = ethers.keccak256(encodedMsg);
     const counterpartyWallet = this.getSigningWallet(counterpartyEntityId);
     return buildSingleSignerHanko(counterpartyEntityId, hash, counterpartyWallet.privateKey);
   }

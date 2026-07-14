@@ -58,6 +58,10 @@ export interface EntityProviderInterface extends Interface {
       | "batchVerifyHankoSignatures"
       | "boardHashToEntityId"
       | "cancelBoardProposal"
+      | "computeEntityTransferHankoHash"
+      | "computeReleaseControlSharesHankoHash"
+      | "encodeEntityTransferHankoPayload"
+      | "encodeReleaseControlSharesHankoPayload"
       | "entities"
       | "entityActionNonces"
       | "entityIdToNumber"
@@ -152,6 +156,48 @@ export interface EntityProviderInterface extends Interface {
   encodeFunctionData(
     functionFragment: "cancelBoardProposal",
     values: [BytesLike, BigNumberish, EntityProvider.EntityArticlesStruct]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "computeEntityTransferHankoHash",
+    values: [
+      BigNumberish,
+      AddressLike,
+      BigNumberish,
+      BigNumberish,
+      BigNumberish
+    ]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "computeReleaseControlSharesHankoHash",
+    values: [
+      BigNumberish,
+      AddressLike,
+      BigNumberish,
+      BigNumberish,
+      string,
+      BigNumberish
+    ]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "encodeEntityTransferHankoPayload",
+    values: [
+      BigNumberish,
+      AddressLike,
+      BigNumberish,
+      BigNumberish,
+      BigNumberish
+    ]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "encodeReleaseControlSharesHankoPayload",
+    values: [
+      BigNumberish,
+      AddressLike,
+      BigNumberish,
+      BigNumberish,
+      string,
+      BigNumberish
+    ]
   ): string;
   encodeFunctionData(functionFragment: "entities", values: [BytesLike]): string;
   encodeFunctionData(
@@ -338,6 +384,22 @@ export interface EntityProviderInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "cancelBoardProposal",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "computeEntityTransferHankoHash",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "computeReleaseControlSharesHankoHash",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "encodeEntityTransferHankoPayload",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "encodeReleaseControlSharesHankoPayload",
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "entities", data: BytesLike): Result;
@@ -825,6 +887,56 @@ export interface EntityProvider extends BaseContract {
     "nonpayable"
   >;
 
+  computeEntityTransferHankoHash: TypedContractMethod<
+    [
+      entityNumber: BigNumberish,
+      to: AddressLike,
+      tokenId: BigNumberish,
+      amount: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+
+  computeReleaseControlSharesHankoHash: TypedContractMethod<
+    [
+      entityNumber: BigNumberish,
+      depository: AddressLike,
+      controlAmount: BigNumberish,
+      dividendAmount: BigNumberish,
+      purpose: string,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+
+  encodeEntityTransferHankoPayload: TypedContractMethod<
+    [
+      entityNumber: BigNumberish,
+      to: AddressLike,
+      tokenId: BigNumberish,
+      amount: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+
+  encodeReleaseControlSharesHankoPayload: TypedContractMethod<
+    [
+      entityNumber: BigNumberish,
+      depository: AddressLike,
+      controlAmount: BigNumberish,
+      dividendAmount: BigNumberish,
+      purpose: string,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+
   entities: TypedContractMethod<
     [arg0: BytesLike],
     [
@@ -1103,6 +1215,60 @@ export interface EntityProvider extends BaseContract {
     ],
     [void],
     "nonpayable"
+  >;
+  getFunction(
+    nameOrSignature: "computeEntityTransferHankoHash"
+  ): TypedContractMethod<
+    [
+      entityNumber: BigNumberish,
+      to: AddressLike,
+      tokenId: BigNumberish,
+      amount: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "computeReleaseControlSharesHankoHash"
+  ): TypedContractMethod<
+    [
+      entityNumber: BigNumberish,
+      depository: AddressLike,
+      controlAmount: BigNumberish,
+      dividendAmount: BigNumberish,
+      purpose: string,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "encodeEntityTransferHankoPayload"
+  ): TypedContractMethod<
+    [
+      entityNumber: BigNumberish,
+      to: AddressLike,
+      tokenId: BigNumberish,
+      amount: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "encodeReleaseControlSharesHankoPayload"
+  ): TypedContractMethod<
+    [
+      entityNumber: BigNumberish,
+      depository: AddressLike,
+      controlAmount: BigNumberish,
+      dividendAmount: BigNumberish,
+      purpose: string,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
   >;
   getFunction(
     nameOrSignature: "entities"

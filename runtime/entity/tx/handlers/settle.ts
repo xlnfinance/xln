@@ -59,7 +59,10 @@ async function signPostSettlementDisputeProof(
     ) + 1;
     const { proofBodyHash, proofBodyStruct } = buildAccountProofBody(account);
     const disputeHash = createDisputeProofHashWithNonce(
-      account, proofBodyHash, jurisdiction.depositoryAddress, nonce
+      account,
+      proofBodyHash,
+      { chainId: Number(jurisdiction.chainId), depositoryAddress: jurisdiction.depositoryAddress },
+      nonce,
     );
     const hankos = await signEntityHashes(env, entityState.entityId, signerId, [disputeHash]);
     if (!hankos[0]) return null;
@@ -370,7 +373,13 @@ export async function handleSettleApprove(
   if (!jurisdiction) throw new Error('No jurisdiction configured');
 
   // Guard 5: Sign over compiled diffs (on-chain hash unchanged)
-  const settlementHash = createSettlementHashWithNonce(account, diffs, jurisdiction.depositoryAddress, signedNonce);
+  const settlementHash = createSettlementHashWithNonce(
+    account,
+    diffs,
+    forgiveTokenIds,
+    { chainId: Number(jurisdiction.chainId), depositoryAddress: jurisdiction.depositoryAddress },
+    signedNonce,
+  );
 
   const signerId = entityState.config.validators[0];
   if (!signerId) throw new Error('No validator configured for entity');
@@ -685,7 +694,11 @@ export async function processSettleAction(
           const jurisdiction = entityState.config.jurisdiction;
           if (jurisdiction?.depositoryAddress) {
             const settlementHash = createSettlementHashWithNonce(
-              account, compiledDiffs, jurisdiction.depositoryAddress, signedNonce
+              account,
+              compiledDiffs,
+              forgiveTokenIds,
+              { chainId: Number(jurisdiction.chainId), depositoryAddress: jurisdiction.depositoryAddress },
+              signedNonce,
             );
 
             const signerId = entityState.config.validators[0];
