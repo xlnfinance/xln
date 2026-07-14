@@ -1,8 +1,9 @@
 import type { EntityTx, JurisdictionEventData, RoutedEntityInput } from '../../types';
-import { signatureMapSize } from '../../protocol/signatures';
+import { hasEntityCommitCertificate, signatureMapSize } from '../../protocol/signatures';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { HEAVY_LOGS } from '../../utils';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
+import { hashEntityLeaderVoteBody } from './leader';
 
 const entityInputMergeLog = createStructuredLogger('entity.input.merge');
 
@@ -59,8 +60,55 @@ const canonicalEntityInputSortKey = (input: RoutedEntityInput): string => safeSt
       }
     : null,
   hashPrecommitCount: signatureMapSize(input.hashPrecommits),
+  leaderTimeoutVote: input.leaderTimeoutVote
+    ? {
+        targetHeight: input.leaderTimeoutVote.targetHeight,
+        voterId: input.leaderTimeoutVote.voterId.toLowerCase(),
+        voteHash: hashEntityLeaderVoteBody(input.leaderTimeoutVote),
+      }
+    : null,
   entityTxs: input.entityTxs ?? [],
 });
+
+const entityInputMergeKey = (input: RoutedEntityInput): string => {
+  const base = `${input.entityId.toLowerCase()}:${String(input.signerId || '').toLowerCase()}`;
+  const vote = input.leaderTimeoutVote;
+  if (!vote) return base;
+  // Each timeout vote is its own signed consensus message. Collapsing several
+  // voters into the target replica's route key drops quorum evidence before
+  // Entity consensus can validate it.
+  return `${base}:leader:${vote.targetHeight}:${vote.voterId.toLowerCase()}:${hashEntityLeaderVoteBody(vote)}`;
+};
+
+const mergePrecommitBundles = (
+  existing: Map<string, string[]> | undefined,
+  incoming: Map<string, string[]>,
+): Map<string, string[]> => {
+  const normalize = (bundles: Map<string, string[]>, source: string): Map<string, string[]> => {
+    const normalized = new Map<string, string[]>();
+    for (const [rawSignerId, signatures] of bundles) {
+      const signerId = rawSignerId.trim().toLowerCase();
+      if (normalized.has(signerId)) {
+        throw new Error(`ENTITY_INPUT_PRECOMMIT_DUPLICATE_SIGNER:${source}:${rawSignerId}`);
+      }
+      normalized.set(signerId, [...signatures]);
+    }
+    return normalized;
+  };
+  const merged = existing ? normalize(existing, 'existing') : new Map<string, string[]>();
+  const normalizedIncoming = normalize(incoming, 'incoming');
+  for (const [signerId, signatures] of normalizedIncoming) {
+    const previous = merged.get(signerId);
+    if (previous) {
+      const exactDuplicate = previous.length === signatures.length &&
+        previous.every((signature, index) => signature === signatures[index]);
+      if (!exactDuplicate) throw new Error(`ENTITY_INPUT_PRECOMMIT_EQUIVOCATION:${signerId}`);
+      continue;
+    }
+    merged.set(signerId, [...signatures]);
+  }
+  return merged;
+};
 
 const sortMergedEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInput[] =>
   [...inputs].sort((left, right) => {
@@ -81,20 +129,29 @@ export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInpu
   const merged = new Map<string, RoutedEntityInput>();
   const conflicts: RoutedEntityInput[] = [];
   let duplicateCount = 0;
-  const isCommitNotificationFrame = (input: RoutedEntityInput): boolean =>
-    signatureMapSize(input.proposedFrame?.collectedSigs) > 0;
-
   for (const input of inputs) {
-    const key = `${input.entityId}:${input.signerId || ''}`;
+    const key = entityInputMergeKey(input);
     const entityShort = input.entityId.slice(0, 10);
 
     if (merged.has(key)) {
       const existing = merged.get(key)!;
       duplicateCount++;
 
+      if (input.leaderTimeoutVote || existing.leaderTimeoutVote) {
+        if (safeStringify(input.leaderTimeoutVote) !== safeStringify(existing.leaderTimeoutVote)) {
+          throw new Error(`ENTITY_LEADER_VOTE_EQUIVOCATION:${input.leaderTimeoutVote?.voterId ?? 'missing'}`);
+        }
+      }
+
       const existingFrameHash = existing.proposedFrame?.hash;
       const incomingFrameHash = input.proposedFrame?.hash;
-      if (existingFrameHash && incomingFrameHash && existingFrameHash !== incomingFrameHash) {
+      const existingFrameHeight = existing.proposedFrame?.height;
+      const incomingFrameHeight = input.proposedFrame?.height;
+      if (
+        existingFrameHash &&
+        incomingFrameHash &&
+        (existingFrameHash !== incomingFrameHash || existingFrameHeight !== incomingFrameHeight)
+      ) {
         const existingHasPrecommits = !!existing.hashPrecommits && existing.hashPrecommits.size > 0;
         const incomingHasPrecommits = !!input.hashPrecommits && input.hashPrecommits.size > 0;
         entityInputMergeLog.warn('frame.conflict', {
@@ -102,6 +159,8 @@ export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInpu
           signer: shortId(input.signerId || ''),
           existing: shortHash(existingFrameHash),
           incoming: shortHash(incomingFrameHash),
+          existingHeight: existingFrameHeight,
+          incomingHeight: incomingFrameHeight,
           existingHasPrecommits,
           incomingHasPrecommits,
         });
@@ -147,16 +206,17 @@ export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInpu
               signatures: sigs.length,
             });
           }
-          existingPrecommits.set(signerId, sigs);
         });
-        existing.hashPrecommits = existingPrecommits;
-        if (HEAVY_LOGS) entityInputMergeLog.debug('precommits.result', { total: existingPrecommits.size });
+        existing.hashPrecommits = mergePrecommitBundles(existing.hashPrecommits, input.hashPrecommits);
+        if (HEAVY_LOGS) {
+          entityInputMergeLog.debug('precommits.result', { total: existing.hashPrecommits.size });
+        }
       }
 
       if (input.proposedFrame) {
-        const existingIsCommit = isCommitNotificationFrame(existing);
-        const incomingIsCommit = isCommitNotificationFrame(input);
-        if (!existing.proposedFrame || incomingIsCommit || !existingIsCommit) {
+        const existingIsCommit = hasEntityCommitCertificate(existing.proposedFrame);
+        const incomingIsCommit = hasEntityCommitCertificate(input.proposedFrame);
+        if (!existing.proposedFrame || (incomingIsCommit && !existingIsCommit)) {
           existing.proposedFrame = input.proposedFrame;
         }
       }

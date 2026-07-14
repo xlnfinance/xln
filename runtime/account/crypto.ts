@@ -7,7 +7,7 @@ import * as secp256k1 from '@noble/secp256k1';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { concatBytes } from '@noble/hashes/utils.js';
-import { HDNodeWallet, getIndexedAccountPath, getBytes, keccak256, recoverAddress } from 'ethers';
+import { HDNodeWallet, getIndexedAccountPath, getBytes, keccak256 } from 'ethers';
 import { Buffer as BufferPolyfill } from 'buffer';
 import * as bip39 from 'bip39';
 
@@ -561,6 +561,43 @@ export function recoverAddressFromDigestSignature(
   }
 }
 
+type CanonicalDigestSignature = {
+  compact: Uint8Array;
+  digest: Uint8Array;
+  recovery: 0 | 1;
+};
+
+const parseCanonicalDigestSignature = (
+  digestHex: string,
+  signatureHex: string,
+): CanonicalDigestSignature | null => {
+  if (!/^0x[0-9a-f]{64}$/i.test(digestHex) || !/^0x[0-9a-f]{130}$/i.test(signatureHex)) {
+    return null;
+  }
+  const bytes = Buffer.from(signatureHex.slice(2), 'hex');
+  const recovery = bytes[64];
+  if (recovery !== 0 && recovery !== 1) return null;
+  try {
+    if (secp256k1.Signature.fromCompact(bytes.slice(0, 64)).hasHighS()) return null;
+  } catch {
+    return null;
+  }
+  return {
+    compact: bytes.slice(0, 64),
+    digest: Buffer.from(digestHex.slice(2), 'hex'),
+    recovery,
+  };
+};
+
+const addressFromPublicKey = (publicKey: Uint8Array): string | null => {
+  try {
+    const uncompressed = secp256k1.Point.fromHex(publicKey).toRawBytes(false);
+    return `0x${keccak256(uncompressed.slice(1)).slice(-40)}`.toLowerCase();
+  } catch {
+    return null;
+  }
+};
+
 /**
  * Verify account signature using secp256k1
  */
@@ -572,20 +609,20 @@ export function verifyAccountSignature(
 ): boolean {
   const key = signerId.toLowerCase();
   const quiet = env?.quietRuntimeLogs === true;
+  const parsed = parseCanonicalDigestSignature(frameHash, signature);
+  if (!parsed) return false;
   const publicKey = getSignerPublicKey(env, key);
   if (!publicKey) {
     // Deterministic fallback for replay/recovery: recover address from signature.
     // This removes runtime dependence on gossip key registration for account frame verification.
     if (/^0x[a-f0-9]{40}$/i.test(key)) {
-      try {
-        const recovered = recoverAddress(frameHash, signature).toLowerCase();
-        if (recovered === key) {
-          return true;
-        }
-      } catch (error) {
-        if (!quiet) {
-          console.warn(`⚠️ recoverAddress failed for signer ${key.slice(-4)}:`, error);
-        }
+      const recovered = recoverAddressFromDigestSignature(
+        parsed.digest,
+        parsed.compact,
+        parsed.recovery,
+      );
+      if (recovered === key) {
+        return true;
       }
     }
 
@@ -598,18 +635,18 @@ export function verifyAccountSignature(
   }
 
   try {
-    // Extract compact signature (64 bytes) from hex
-    const sigHex = signature.replace('0x', '');
-    const sigBytes = Buffer.from(sigHex.slice(0, 128), 'hex'); // First 64 bytes (r + s)
-
-    // CRITICAL: Verify against raw hash - NO double hashing
-    // Must match signAccountFrame and on-chain _recoverSigner behavior
-    const messageBytes = Buffer.from(frameHash.replace('0x', ''), 'hex');
+    const recovered = recoverAddressFromDigestSignature(
+      parsed.digest,
+      parsed.compact,
+      parsed.recovery,
+    );
+    const expectedAddress = addressFromPublicKey(publicKey);
+    if (!recovered || !expectedAddress || recovered !== expectedAddress) return false;
 
     const native = getNativeSecp256k1();
     return native
-      ? native.ecdsaVerify(sigBytes, messageBytes, publicKey)
-      : secp256k1.verify(sigBytes, messageBytes, publicKey);
+      ? native.ecdsaVerify(parsed.compact, parsed.digest, publicKey)
+      : secp256k1.verify(parsed.compact, parsed.digest, publicKey);
   } catch (error) {
     console.error(`❌ Signature verification error for ${signerId.slice(-4)}:`, error);
     return false;

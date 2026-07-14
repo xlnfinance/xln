@@ -391,12 +391,20 @@ export async function proposeAccountFrame(
   if (!signingReplica) {
     return { success: false, error: `Cannot find replica for entity ${signingEntityId.slice(-4)}`, events };
   }
-  const signingSignerId = signingReplica.state.config.validators[0]; // Single-signer: use first validator
+  const signingSignerId = signingReplica.state.config.validators[0];
   if (!signingSignerId) {
     return { success: false, error: `Entity ${signingEntityId.slice(-4)} has no validators`, events };
   }
+  const directSigner = signingReplica.state.config.validators.length === 1
+    ? signingSignerId
+    : undefined;
 
-  if (!quiet) accountLog.debug('hanko.sign', { entity: shortId(signingEntityId), signer: shortId(signingSignerId) });
+  if (!quiet) {
+    accountLog.debug(directSigner ? 'hanko.sign' : 'hanko.defer_to_entity_quorum', {
+      entity: shortId(signingEntityId),
+      ...(directSigner ? { signer: shortId(directSigner) } : {}),
+    });
+  }
 
   // Build the on-chain projection from NEW state. Credit-limit and other
   // off-chain-only changes alter accountStateRoot but intentionally reuse the
@@ -441,21 +449,25 @@ export async function proposeAccountFrame(
   }
 
   const proofChanged = disputeHash !== undefined;
-  const [frameHanko, disputeHanko] = await signEntityHashes(
-    env,
-    signingEntityId,
-    signingSignerId,
-    [newFrame.stateHash, ...(disputeHash ? [disputeHash] : [])],
-  );
-  if (!frameHanko) {
-    return { success: false, error: 'Failed to build frame hanko', events };
+  let frameHanko: string | undefined;
+  let disputeHanko: string | undefined;
+  if (directSigner) {
+    [frameHanko, disputeHanko] = await signEntityHashes(
+      env,
+      signingEntityId,
+      directSigner,
+      [newFrame.stateHash, ...(disputeHash ? [disputeHash] : [])],
+    );
+    if (!frameHanko) {
+      return { success: false, error: 'Failed to build frame hanko', events };
+    }
+    if (proofChanged && !disputeHanko) {
+      return { success: false, error: 'Failed to build dispute hanko', events };
+    }
+    accountMachine.currentFrameHanko = frameHanko;
   }
-  if (proofChanged && !disputeHanko) {
-    return { success: false, error: 'Failed to build dispute hanko', events };
-  }
-  accountMachine.currentFrameHanko = frameHanko;
-  if (proofChanged && disputeHanko && disputeHash) {
-    accountMachine.currentDisputeProofHanko = disputeHanko;
+  if (proofChanged && disputeHash) {
+    if (disputeHanko) accountMachine.currentDisputeProofHanko = disputeHanko;
     accountMachine.currentDisputeProofNonce = signedProofNonce;
     accountMachine.currentDisputeProofBodyHash = proofResult.proofBodyHash;
     accountMachine.currentDisputeHash = disputeHash;
@@ -495,8 +507,8 @@ export async function proposeAccountFrame(
     reusableAck.counterpartyEntityId.toLowerCase() === accountMachine.proofHeader.toEntity.toLowerCase() &&
     Number(reusableAck.height) === Number(newFrame.height) - 1 &&
     Number(accountMachine.currentHeight) === Number(reusableAck.height);
-  const disputeSeal = proofChanged && disputeHanko && disputeHash ? {
-    hanko: disputeHanko,
+  const disputeSeal = proofChanged && disputeHash ? {
+    ...(disputeHanko ? { hanko: disputeHanko } : {}),
     hash: disputeHash,
     proofBodyHash: proofResult.proofBodyHash,
     proofNonce: signedProofNonce,
@@ -515,7 +527,7 @@ export async function proposeAccountFrame(
   );
   const proposal = {
     frame: outboundFrame,
-    frameHanko,
+    ...(frameHanko ? { frameHanko } : {}),
     ...(disputeSeal ? { disputeSeal } : {}),
   };
   const accountInput: AccountInput = shouldBundlePreviousAck ? {

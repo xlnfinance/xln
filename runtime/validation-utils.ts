@@ -20,6 +20,7 @@ import type {
   EntityState,
   AccountMachine,
   AccountFrame,
+  EntityLeaderTimeoutVote,
   ProposedEntityFrame,
 } from './types';
 import type { CrontabState, CrontabTaskMethod, CrontabTaskState, ScheduledHook, ScheduledHookType } from './entity/scheduler-types';
@@ -845,22 +846,35 @@ export function validateConsensusConfig(value: unknown, context = 'ConsensusConf
     if (typeof validator !== 'string' || validator.trim().length === 0) {
       throw new FinancialDataCorruptionError(`${context}.validators[${index}] must be a non-empty string`);
     }
-    if (seen.has(validator)) {
+    const normalizedValidator = validator.trim().toLowerCase();
+    if (seen.has(normalizedValidator)) {
       throw new FinancialDataCorruptionError(`${context}.validators has duplicate signer`, { validator });
     }
-    seen.add(validator);
+    seen.add(normalizedValidator);
   }
   const shares = validateBigIntRecordValues(obj['shares'], `${context}.shares`);
+  const normalizedShares = new Map<string, bigint>();
+  for (const [rawSigner, power] of Object.entries(shares)) {
+    const signer = rawSigner.trim().toLowerCase();
+    if (normalizedShares.has(signer)) {
+      throw new FinancialDataCorruptionError(`${context}.shares has case-duplicate signer`, { rawSigner });
+    }
+    normalizedShares.set(signer, power);
+  }
   let totalPower = 0n;
   for (const validator of validators) {
-    const power = shares[validator as string];
+    const normalizedValidator = String(validator).trim().toLowerCase();
+    const power = normalizedShares.get(normalizedValidator);
     if (typeof power !== 'bigint' || power <= 0n) {
       throw new FinancialDataCorruptionError(`${context}.shares missing positive power for validator`, { validator });
+    }
+    if (power > 0xffffn) {
+      throw new FinancialDataCorruptionError(`${context}.shares exceeds uint16 board encoding`, { validator, power });
     }
     totalPower += power;
   }
   for (const shareSigner of Object.keys(shares)) {
-    if (!seen.has(shareSigner)) {
+    if (!seen.has(shareSigner.trim().toLowerCase())) {
       throw new FinancialDataCorruptionError(`${context}.shares contains signer outside validators`, { shareSigner });
     }
   }
@@ -869,6 +883,15 @@ export function validateConsensusConfig(value: unknown, context = 'ConsensusConf
       threshold,
       totalPower,
     });
+  }
+  if (threshold > 0xffffn) {
+    throw new FinancialDataCorruptionError(`${context}.threshold exceeds uint16 board encoding`, { threshold });
+  }
+  if (threshold * 3n <= totalPower * 2n) {
+    throw new FinancialDataCorruptionError(
+      `${context}.threshold must be strictly greater than two-thirds of total validator power`,
+      { threshold, totalPower },
+    );
   }
   return obj as unknown as ConsensusConfig;
 }
@@ -895,6 +918,9 @@ const validateEntityLeaderVote = (value: unknown, context: string): void => {
   const vote = validateEntityLeaderVoteBody(value, context);
   validateString(vote['voterId'], `${context}.voterId`);
   validateString(vote['signature'], `${context}.signature`);
+  if (vote['preparedFrame'] !== undefined) {
+    validateProposedEntityFrame(vote['preparedFrame'], `${context}.preparedFrame`);
+  }
 };
 
 const validateEntityLeaderCertificate = (value: unknown, context: string): void => {
@@ -907,6 +933,25 @@ const validateEntityLeaderCertificate = (value: unknown, context: string): void 
     if (typeof signerId !== 'string' || signerId.length === 0 || typeof signature !== 'string' || signature.length === 0) {
       throw new FinancialDataCorruptionError(`${context}.votes must map signer IDs to signatures`);
     }
+  }
+  if (certificate['preparedVotes'] !== undefined) {
+    const preparedVotes = validateMapInstance(certificate['preparedVotes'], `${context}.preparedVotes`);
+    if (preparedVotes.size !== votes.size) {
+      throw new FinancialDataCorruptionError(`${context}.preparedVotes must cover every certificate vote`);
+    }
+    for (const [signerId, vote] of preparedVotes.entries()) {
+      if (typeof signerId !== 'string' || signerId.length === 0) {
+        throw new FinancialDataCorruptionError(`${context}.preparedVotes signer ID must be non-empty`);
+      }
+      validateEntityLeaderVote(vote, `${context}.preparedVotes[${signerId}]`);
+      const voteObject = vote as EntityLeaderTimeoutVote;
+      if (voteObject.voterId.toLowerCase() !== signerId.toLowerCase() || voteObject.signature !== votes.get(signerId)) {
+        throw new FinancialDataCorruptionError(`${context}.preparedVotes must match votes signature and voterId`);
+      }
+    }
+  }
+  if (certificate['preparedFrameHash'] !== undefined) {
+    validateString(certificate['preparedFrameHash'], `${context}.preparedFrameHash`);
   }
 };
 
@@ -924,6 +969,9 @@ function validateProposedEntityFrame(value: unknown, context: string): ProposedE
   }
   if (leader['certificate'] !== undefined) {
     validateEntityLeaderCertificate(leader['certificate'], `${context}.leader.certificate`);
+  }
+  if (leader['relayCertificate'] !== undefined) {
+    validateEntityLeaderCertificate(leader['relayCertificate'], `${context}.leader.relayCertificate`);
   }
   if (obj['outputs'] !== undefined) validateArray(obj['outputs'], `${context}.outputs`);
   if (obj['jOutputs'] !== undefined) validateArray(obj['jOutputs'], `${context}.jOutputs`);

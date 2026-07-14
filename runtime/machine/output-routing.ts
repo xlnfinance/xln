@@ -1,5 +1,5 @@
 import type { DeliverableEntityInput, Env, RoutedEntityInput } from '../types';
-import { signatureMapSize } from '../protocol/signatures';
+import { hasEntityCommitCertificate } from '../protocol/signatures';
 import {
   entityInputHasCrossJurisdictionIntraRuntimeTx,
   isCrossJurisdictionEntityInputRemoteHopAllowed,
@@ -10,6 +10,7 @@ import { txFingerprint } from '../state-helpers';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { getWallClockMs } from '../utils';
 import { validateDeliverableEntityInput } from '../validation-utils';
+import { hashEntityLeaderVoteBody } from '../entity/consensus/leader';
 import {
   deliveryAccepted,
   deliveryDeferred,
@@ -23,7 +24,43 @@ import {
 
 const routeLog = createStructuredLogger('network.route');
 
+export const carriesEntityCommitNotification = (output: RoutedEntityInput): boolean =>
+  hasEntityCommitCertificate(output.proposedFrame);
+
+type EntityFrameIdentity = {
+  entityId: string;
+  height: number;
+  frameHash: string;
+};
+
+const getEntityFrameIdentity = (output: RoutedEntityInput): EntityFrameIdentity | null => {
+  if (!output.proposedFrame) return null;
+  return {
+    entityId: output.entityId,
+    height: output.proposedFrame.height,
+    frameHash: output.proposedFrame.hash,
+  };
+};
+
 export const buildRouteOutputKey = (output: RoutedEntityInput): string => {
+  const entityFrame = getEntityFrameIdentity(output);
+  if (entityFrame) {
+    return safeStringify({
+      runtimeId: output.runtimeId ?? '',
+      signerId: output.signerId,
+      entityFrame,
+    });
+  }
+  if (output.leaderTimeoutVote) {
+    return safeStringify({
+      runtimeId: output.runtimeId ?? '',
+      entityId: output.entityId.toLowerCase(),
+      signerId: output.signerId.toLowerCase(),
+      targetHeight: output.leaderTimeoutVote.targetHeight,
+      voterId: output.leaderTimeoutVote.voterId.toLowerCase(),
+      voteHash: hashEntityLeaderVoteBody(output.leaderTimeoutVote),
+    });
+  }
   const precommits = output.hashPrecommits
     ? [...output.hashPrecommits.entries()]
       .sort(([left], [right]) => compareStableText(left, right))
@@ -35,13 +72,6 @@ export const buildRouteOutputKey = (output: RoutedEntityInput): string => {
     signerId: output.signerId,
     from: output.from ?? '',
     txs: (output.entityTxs || []).map(tx => txFingerprint(tx)),
-    proposedFrame: output.proposedFrame
-      ? {
-          height: output.proposedFrame.height,
-          hash: output.proposedFrame.hash,
-          committed: signatureMapSize(output.proposedFrame.collectedSigs) > 0,
-        }
-      : null,
     precommits,
   });
 };
@@ -50,24 +80,50 @@ export const MAX_PENDING_NETWORK_OUTPUTS = 10_000;
 const NETWORK_RETRY_BASE_MS = 1_000;
 const NETWORK_RETRY_MAX_MS = 30_000;
 
-export const carriesEntityCommitNotification = (output: RoutedEntityInput): boolean =>
-  signatureMapSize(output.proposedFrame?.collectedSigs) > 0;
-
 export const mergeRoutedEntityOutput = <T extends RoutedEntityInput>(existing: T, incoming: T): T => {
+  if (incoming.leaderTimeoutVote || existing.leaderTimeoutVote) {
+    if (safeStringify(incoming.leaderTimeoutVote) !== safeStringify(existing.leaderTimeoutVote)) {
+      throw new Error(`ROUTE_LEADER_VOTE_EQUIVOCATION:${incoming.leaderTimeoutVote?.voterId ?? 'missing'}`);
+    }
+  }
   if (incoming.entityTxs?.length) {
     existing.entityTxs = [...(existing.entityTxs || []), ...incoming.entityTxs];
   }
   if (incoming.hashPrecommits) {
-    const mergedPrecommits = existing.hashPrecommits || new Map<string, string[]>();
-    incoming.hashPrecommits.forEach((sigs, signerId) => {
-      mergedPrecommits.set(signerId, sigs);
-    });
+    const normalizePrecommits = (
+      bundles: Map<string, string[]>,
+      source: string,
+    ): Map<string, string[]> => {
+      const normalized = new Map<string, string[]>();
+      for (const [rawSignerId, signatures] of bundles) {
+        const signerId = rawSignerId.trim().toLowerCase();
+        if (normalized.has(signerId)) {
+          throw new Error(`ROUTE_PRECOMMIT_DUPLICATE_SIGNER:${source}:${rawSignerId}`);
+        }
+        normalized.set(signerId, [...signatures]);
+      }
+      return normalized;
+    };
+    const mergedPrecommits = existing.hashPrecommits
+      ? normalizePrecommits(existing.hashPrecommits, 'existing')
+      : new Map<string, string[]>();
+    const normalizedIncoming = normalizePrecommits(incoming.hashPrecommits, 'incoming');
+    for (const [signerId, signatures] of normalizedIncoming) {
+      const previous = mergedPrecommits.get(signerId);
+      if (previous) {
+        const exactDuplicate = previous.length === signatures.length &&
+          previous.every((signature, index) => signature === signatures[index]);
+        if (!exactDuplicate) throw new Error(`ROUTE_PRECOMMIT_EQUIVOCATION:${signerId}`);
+        continue;
+      }
+      mergedPrecommits.set(signerId, [...signatures]);
+    }
     existing.hashPrecommits = mergedPrecommits;
   }
   if (incoming.proposedFrame) {
     const existingIsCommit = carriesEntityCommitNotification(existing);
     const incomingIsCommit = carriesEntityCommitNotification(incoming);
-    if (!existing.proposedFrame || incomingIsCommit || !existingIsCommit) {
+    if (!existing.proposedFrame || (incomingIsCommit && !existingIsCommit)) {
       existing.proposedFrame = incoming.proposedFrame;
     }
   }
@@ -135,6 +191,7 @@ const toDeliverableEntityInput = (
 const isTriggerOnlyOutput = (output: RoutedEntityInput): boolean =>
   (output.entityTxs?.length ?? 0) === 0 &&
   !output.proposedFrame &&
+  !output.leaderTimeoutVote &&
   (!output.hashPrecommits || output.hashPrecommits.size === 0);
 
 const isTxBearingOutput = (output: RoutedEntityInput): boolean =>
@@ -244,13 +301,25 @@ export const hasReadyPendingNetworkOutputs = (
 };
 
 const outputDeliveryPriority = (output: RoutedEntityInput): number => {
-  if (carriesEntityCommitNotification(output)) return 0;
+  if (output.proposedFrame) return 0;
+  if (output.leaderTimeoutVote) return 0;
   if (output.hashPrecommits && output.hashPrecommits.size > 0) return 0;
   const txTypes = new Set((output.entityTxs ?? []).map(tx => tx.type));
   if ([...txTypes].some(type => type === 'j_event' || type.startsWith('dispute'))) return 0;
-  if (output.proposedFrame) return 1;
   if (txTypes.has('accountInput')) return 2;
   return 3;
+};
+
+const compareEntityFrameDelivery = (left: RoutedEntityInput, right: RoutedEntityInput): number => {
+  const leftIdentity = getEntityFrameIdentity(left);
+  const rightIdentity = getEntityFrameIdentity(right);
+  if (!leftIdentity) return rightIdentity ? 1 : 0;
+  if (!rightIdentity) return -1;
+  return compareStableText(left.runtimeId ?? '', right.runtimeId ?? '') ||
+    compareStableText(leftIdentity.entityId, rightIdentity.entityId) ||
+    compareStableText(left.signerId, right.signerId) ||
+    leftIdentity.height - rightIdentity.height ||
+    compareStableText(leftIdentity.frameHash, rightIdentity.frameHash);
 };
 
 export const buildPendingNetworkOutputs = (outputs: RoutedEntityInput[]): RoutedEntityInput[] => {
@@ -263,6 +332,7 @@ export const buildPendingNetworkOutputs = (outputs: RoutedEntityInput[]): Routed
   }
   const pending = [...deduped.values()].sort((left, right) =>
     outputDeliveryPriority(left) - outputDeliveryPriority(right) ||
+    compareEntityFrameDelivery(left, right) ||
     compareStableText(buildRouteOutputKey(left), buildRouteOutputKey(right)));
   if (pending.length > MAX_PENDING_NETWORK_OUTPUTS) {
     throw new Error(
@@ -469,7 +539,13 @@ const batchOutputsByTarget = (outputs: DeliverableEntityInput[]): DeliverableEnt
   const batched = new Map<string, DeliverableEntityInput>();
 
   for (const output of outputs) {
-    const key = `${output.runtimeId}:${output.entityId}:${output.signerId || ''}`;
+    const entityFrame = getEntityFrameIdentity(output);
+    const laneKey = `${output.runtimeId}:${output.entityId}:${output.signerId || ''}`;
+    const key = entityFrame
+      ? `${laneKey}:${safeStringify(entityFrame)}`
+      : output.leaderTimeoutVote
+        ? `${laneKey}:${buildRouteOutputKey(output)}`
+        : laneKey;
     const existing = batched.get(key);
 
     if (existing) {
@@ -480,7 +556,9 @@ const batchOutputsByTarget = (outputs: DeliverableEntityInput[]): DeliverableEnt
     }
   }
 
-  return Array.from(batched.values());
+  return Array.from(batched.values()).sort((left, right) =>
+    compareEntityFrameDelivery(left, right) ||
+    compareStableText(buildRouteOutputKey(left), buildRouteOutputKey(right)));
 };
 
 export const dispatchEntityOutputs = (

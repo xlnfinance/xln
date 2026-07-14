@@ -11,6 +11,7 @@ import type {
   Env,
   EntityState,
   Delta,
+  HankoString,
 } from '../../types';
 import {
   cloneAccountFrame,
@@ -103,6 +104,9 @@ async function validateCounterpartyDisputeSeal(
   context: string,
 ): Promise<ValidatedCounterpartyDisputeSeal | undefined> {
   if (!seal) return undefined;
+  if (!seal.hanko) {
+    throw new Error(`${context}:DISPUTE_SEAL_HANKO_MISSING`);
+  }
 
   const hankoDomain = getAccountStateDomain(env, accountMachine);
 
@@ -1003,6 +1007,7 @@ async function preflightIncomingAccountFrame(
   const deadlineViolation = getIncomingAccountDeadlineViolation(accountMachine, receivedFrame, securityContext);
   if (deadlineViolation) {
     const proposal = accountInputProposal(input)!;
+    if (!proposal.frameHanko) throw new Error('INBOUND_ACCOUNT_FRAME_HANKO_MISSING_AFTER_PREFLIGHT');
     return {
       kind: 'return',
       result: {
@@ -1347,7 +1352,12 @@ async function buildIncomingFrameAckMaterial(
     return { kind: 'return', result: { success: false, error: `Cannot find signerId for ACK from ${ackEntityId.slice(-4)}`, events } };
   }
 
-  accountLog.debug('hanko.ack.sign', { entity: shortId(ackEntityId), signer: shortId(ackSignerId), height: receivedFrame.height });
+  const directSigner = ackReplica?.state.config.validators.length === 1 ? ackSignerId : undefined;
+  accountLog.debug(directSigner ? 'hanko.ack.sign' : 'hanko.ack.defer_to_entity_quorum', {
+    entity: shortId(ackEntityId),
+    ...(directSigner ? { signer: shortId(directSigner) } : {}),
+    height: receivedFrame.height,
+  });
 
   const ackHankoDomain = getAccountStateDomain(env, accountMachine);
   const ackProofResult = buildAccountProofBody(accountMachine);
@@ -1366,16 +1376,20 @@ async function buildIncomingFrameAckMaterial(
       ackSignedNonce,
     )
     : undefined;
-  const [confirmationHanko, ackDisputeHanko] = await signEntityHashes(env, ackEntityId, ackSignerId, [
-    receivedFrame.stateHash,
-    ...(ackDisputeHash ? [ackDisputeHash] : []),
-  ]);
-  if (!confirmationHanko) {
-    return { kind: 'return', result: { success: false, error: 'Failed to build ACK hanko', events } };
+  let confirmationHanko: HankoString | undefined;
+  let ackDisputeHanko: HankoString | undefined;
+  if (directSigner) {
+    [confirmationHanko, ackDisputeHanko] = await signEntityHashes(env, ackEntityId, directSigner, [
+      receivedFrame.stateHash,
+      ...(ackDisputeHash ? [ackDisputeHash] : []),
+    ]);
+    if (!confirmationHanko) {
+      return { kind: 'return', result: { success: false, error: 'Failed to build ACK hanko', events } };
+    }
   }
 
   if (proofChanged) {
-    if (!ackDisputeHanko || !ackDisputeHash) {
+    if (!ackDisputeHash || (directSigner && !ackDisputeHanko)) {
       return { kind: 'return', result: { success: false, error: 'Failed to build ACK dispute hanko', events } };
     }
     accountMachine.disputeProofNoncesByHash ??= {};
@@ -1394,8 +1408,8 @@ async function buildIncomingFrameAckMaterial(
     );
   }
 
-  const ackDisputeSeal = proofChanged && ackDisputeHanko && ackDisputeHash ? {
-    hanko: ackDisputeHanko,
+  const ackDisputeSeal = proofChanged && ackDisputeHash ? {
+    ...(ackDisputeHanko ? { hanko: ackDisputeHanko } : {}),
     hash: ackDisputeHash,
     proofBodyHash: ackProofResult.proofBodyHash,
     proofNonce: ackSignedNonce,
@@ -1420,7 +1434,7 @@ async function buildIncomingFrameAckMaterial(
     watchSeed: accountMachine.watchSeed,
     ack: {
       height: receivedFrame.height,
-      frameHanko: confirmationHanko,
+      ...(confirmationHanko ? { frameHanko: confirmationHanko } : {}),
       ...(ackDisputeSeal ? { disputeSeal: ackDisputeSeal } : {}),
     },
   };
@@ -1475,8 +1489,10 @@ function storeAckDisputeState(
   accountMachine: AccountMachine,
   material: IncomingFrameAckMaterial,
 ): void {
-  if (material.proofChanged && material.ackDisputeHanko && material.ackDisputeHash) {
-    accountMachine.currentDisputeProofHanko = material.ackDisputeHanko;
+  if (material.proofChanged && material.ackDisputeHash) {
+    if (material.ackDisputeHanko) {
+      accountMachine.currentDisputeProofHanko = material.ackDisputeHanko;
+    }
     accountMachine.currentDisputeProofNonce = material.ackSignedNonce;
     accountMachine.currentDisputeProofBodyHash = material.ackProofBodyHash;
     accountMachine.currentDisputeHash = material.ackDisputeHash;
@@ -1625,6 +1641,7 @@ async function handleIncomingAccountFrame(
   if (validationResult.kind === 'return') {
     if (!validationResult.result.success) {
       const proposal = accountInputProposal(input)!;
+      if (!proposal.frameHanko) throw new Error('INBOUND_ACCOUNT_FRAME_HANKO_MISSING_AFTER_VALIDATION');
       return {
         kind: 'return',
         result: {

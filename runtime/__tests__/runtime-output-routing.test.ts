@@ -1,18 +1,103 @@
 import { describe, expect, test } from 'bun:test';
 import { handleInboundP2PEntityInput, resolveRuntimeIdForEntity } from '../machine/entity-routing';
 import {
+  buildPendingNetworkOutputs,
   buildRouteOutputKey,
+  carriesEntityCommitNotification,
   dispatchEntityOutputs,
+  mergeRoutedEntityOutput,
   planEntityOutputs,
   rescheduleDeferredOutputs,
   sendEntityInputWithRouting,
   splitPendingOutputsByRetryWindow,
 } from '../machine/output-routing';
 import { deliveryAccepted, deliveryDeferred, deliveryFailure } from '../protocol/payments/delivery-result';
-import type { DeliverableEntityInput, Env, RoutedEntityInput } from '../types';
+import type { DeliverableEntityInput, EntityLeaderTimeoutVote, Env, RoutedEntityInput } from '../types';
 
 const runtimeId = (byte: string): string => `0x${byte.repeat(20)}`;
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
+
+const timeoutVote = (voterId: string, signature: string): EntityLeaderTimeoutVote => ({
+  entityId: entityId('75'),
+  targetHeight: 7,
+  previousFrameHash: `0x${'cd'.repeat(32)}`,
+  fromView: 1,
+  toView: 2,
+  previousLeaderId: runtimeId('76'),
+  nextLeaderId: runtimeId('77'),
+  voterId,
+  signature,
+});
+
+const committedOutput = (
+  targetRuntimeId: string,
+  targetEntityId: string,
+  targetSignerId: string,
+  height: number,
+  hash: string,
+  signature: string,
+): DeliverableEntityInput => ({
+  runtimeId: targetRuntimeId,
+  entityId: targetEntityId,
+  signerId: targetSignerId,
+  entityTxs: [],
+  proposedFrame: {
+    height,
+    hash,
+    collectedSigs: new Map([[targetSignerId, [signature]]]),
+    hankos: [`0xhanko-${signature}`],
+  } as never,
+});
+
+const proposalOutput = (
+  targetRuntimeId: string,
+  targetEntityId: string,
+  targetSignerId: string,
+  height: number,
+  hash: string,
+  signature: string,
+): DeliverableEntityInput => {
+  const committed = committedOutput(
+    targetRuntimeId,
+    targetEntityId,
+    targetSignerId,
+    height,
+    hash,
+    signature,
+  );
+  const { hankos: _hankos, ...proposedFrame } = committed.proposedFrame!;
+  return { ...committed, proposedFrame };
+};
+
+const dispatchFrameOutputs = (outputs: DeliverableEntityInput[]): {
+  deferred: RoutedEntityInput[];
+  delivered: DeliverableEntityInput[];
+} => {
+  const targetRuntimeId = outputs[0]?.runtimeId;
+  if (!targetRuntimeId) throw new Error('TEST_COMMIT_TARGET_RUNTIME_MISSING');
+  const delivered: DeliverableEntityInput[] = [];
+  const env = {
+    timestamp: 2_500,
+    runtimeState: {
+      directEntityInputDispatch: (_runtimeId: string, input: DeliverableEntityInput) => {
+        delivered.push(input);
+        return deliveryAccepted('ROUTE_DIRECT_DELIVERED');
+      },
+    },
+  } as unknown as Env;
+  const deferred = dispatchEntityOutputs(env, outputs.map(output => ({ output, targetRuntimeId })), {
+    ensureRuntimeState: target => target.runtimeState!,
+    getP2P: () => null,
+    enqueueRuntimeInputs: () => {},
+    extractEntityId: key => String(key).split(':')[0] || '',
+    hasLocalSignerForEntity: () => false,
+    hasLocalSignerForEntitySigner: () => false,
+    resolveSoleLocalSignerForEntity: () => null,
+    resolveRuntimeIdForEntity: () => targetRuntimeId,
+    resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
+  });
+  return { deferred, delivered };
+};
 
 describe('runtime output routing', () => {
   test('uses existing proposal identity to distinguish transport envelopes', () => {
@@ -29,8 +114,63 @@ describe('runtime output routing', () => {
       ...base,
       proposedFrame: { height: 1, hash: '0xbbb', txs: [], newState: {} as never },
     } as RoutedEntityInput;
+    const nextHeightSameHash = {
+      ...base,
+      proposedFrame: { height: 2, hash: '0xaaa', txs: [], newState: {} as never },
+    } as RoutedEntityInput;
 
     expect(buildRouteOutputKey(first)).not.toBe(buildRouteOutputKey(second));
+    expect(buildRouteOutputKey(first)).not.toBe(buildRouteOutputKey(nextHeightSameHash));
+  });
+
+  test('keeps distinct leader-timeout votes in separate deterministic route envelopes', () => {
+    const base = {
+      runtimeId: runtimeId('74'),
+      entityId: entityId('75'),
+      signerId: runtimeId('77'),
+      entityTxs: [],
+    } satisfies RoutedEntityInput;
+    const first = { ...base, leaderTimeoutVote: timeoutVote(runtimeId('78'), '0xsig-a') };
+    const second = { ...base, leaderTimeoutVote: timeoutVote(runtimeId('79'), '0xsig-b') };
+
+    expect(buildRouteOutputKey(first)).not.toBe(buildRouteOutputKey(second));
+    expect(buildPendingNetworkOutputs([first, second])).toHaveLength(2);
+    expect(buildPendingNetworkOutputs([second, first]).map(buildRouteOutputKey)).toEqual(
+      buildPendingNetworkOutputs([first, second]).map(buildRouteOutputKey),
+    );
+    const deliveredForward = dispatchFrameOutputs([first, second] as DeliverableEntityInput[]).delivered;
+    const deliveredReverse = dispatchFrameOutputs([second, first] as DeliverableEntityInput[]).delivered;
+    expect(deliveredForward).toHaveLength(2);
+    expect(deliveredReverse.map(buildRouteOutputKey)).toEqual(deliveredForward.map(buildRouteOutputKey));
+  });
+
+  test('accepts only exact duplicate precommit bundles and rejects arrival-order equivocation', () => {
+    const base = {
+      runtimeId: runtimeId('7a'),
+      entityId: entityId('7b'),
+      signerId: runtimeId('7c'),
+      entityTxs: [],
+    } satisfies RoutedEntityInput;
+    const voter = runtimeId('7d');
+    const output = (signature: string): RoutedEntityInput => ({
+      ...base,
+      hashPrecommits: new Map([[voter, [signature]]]),
+    });
+
+    const exact = mergeRoutedEntityOutput(output('0xsig-a'), output('0xsig-a'));
+    expect(exact.hashPrecommits).toEqual(new Map([[voter, ['0xsig-a']]]));
+    for (const [left, right] of [
+      [output('0xsig-a'), output('0xsig-b')],
+      [output('0xsig-b'), output('0xsig-a')],
+    ] as const) {
+      const before = structuredClone(left.hashPrecommits);
+      expect(() => mergeRoutedEntityOutput(left, right)).toThrow('ROUTE_PRECOMMIT_EQUIVOCATION');
+      expect(left.hashPrecommits).toEqual(before);
+    }
+    const caseDuplicate = output('0xsig-a');
+    caseDuplicate.hashPrecommits?.set(`0x${voter.slice(2).toUpperCase()}`, ['0xsig-a']);
+    expect(() => mergeRoutedEntityOutput({ ...base }, caseDuplicate))
+      .toThrow('ROUTE_PRECOMMIT_DUPLICATE_SIGNER');
   });
 
   test('backs off retryable envelopes without treating them as fatal', () => {
@@ -294,6 +434,105 @@ describe('runtime output routing', () => {
 
     expect(deferred).toEqual([]);
     expect(p2pCalls).toHaveLength(0);
+  });
+
+  test('delivers distinct proposal and committed frame identities in ascending height order', () => {
+    const targetRuntimeId = runtimeId('26');
+    const targetEntityId = entityId('27');
+    const targetSignerId = runtimeId('28');
+    const outputs = [
+      committedOutput(targetRuntimeId, targetEntityId, targetSignerId, 10, '0xcommit10', '0xsig10'),
+      proposalOutput(targetRuntimeId, targetEntityId, targetSignerId, 1, '0xcommit01b', '0xsig01b'),
+      committedOutput(targetRuntimeId, targetEntityId, targetSignerId, 1, '0xcommit01', '0xsig01'),
+      proposalOutput(targetRuntimeId, targetEntityId, targetSignerId, 2, '0xcommit02', '0xsig02'),
+    ];
+    const { deferred, delivered } = dispatchFrameOutputs(outputs);
+
+    expect(deferred).toEqual([]);
+    expect(delivered.map(input => ({
+      height: input.proposedFrame?.height,
+      hash: input.proposedFrame?.hash,
+    }))).toEqual([
+      { height: 1, hash: '0xcommit01' },
+      { height: 1, hash: '0xcommit01b' },
+      { height: 2, hash: '0xcommit02' },
+      { height: 10, hash: '0xcommit10' },
+    ]);
+  });
+
+  test('deduplicates repeated commit certificates with the same frame identity', () => {
+    const targetRuntimeId = runtimeId('29');
+    const targetEntityId = entityId('2a');
+    const targetSignerId = runtimeId('2b');
+    const first = committedOutput(
+      targetRuntimeId,
+      targetEntityId,
+      targetSignerId,
+      3,
+      '0xcommit03',
+      '0xsig03a',
+    );
+    const duplicate = committedOutput(
+      targetRuntimeId,
+      targetEntityId,
+      targetSignerId,
+      3,
+      '0xcommit03',
+      '0xsig03b',
+    );
+    const conflictingHash = committedOutput(
+      targetRuntimeId,
+      targetEntityId,
+      targetSignerId,
+      3,
+      '0xcommit03-conflict',
+      '0xsig03c',
+    );
+
+    expect(buildRouteOutputKey(first)).toBe(buildRouteOutputKey(duplicate));
+    expect(buildRouteOutputKey(first)).not.toBe(buildRouteOutputKey(conflictingHash));
+
+    const { deferred, delivered } = dispatchFrameOutputs([first, duplicate]);
+
+    expect(deferred).toEqual([]);
+    expect(delivered.map(input => input.proposedFrame?.hash)).toEqual(['0xcommit03']);
+  });
+
+  test('prefers a same-frame commit certificate over a proposal in either arrival order', () => {
+    const targetRuntimeId = runtimeId('2c');
+    const targetEntityId = entityId('2d');
+    const targetSignerId = runtimeId('2e');
+    const proposal = proposalOutput(
+      targetRuntimeId,
+      targetEntityId,
+      targetSignerId,
+      4,
+      '0xframe04',
+      '0xproposer-sig',
+    );
+    const certificate = committedOutput(
+      targetRuntimeId,
+      targetEntityId,
+      targetSignerId,
+      4,
+      '0xframe04',
+      '0xquorum-sig',
+    );
+
+    expect(carriesEntityCommitNotification(proposal)).toBe(false);
+    expect(carriesEntityCommitNotification(certificate)).toBe(true);
+    expect(buildRouteOutputKey(proposal)).toBe(buildRouteOutputKey(certificate));
+
+    for (const outputs of [[proposal, certificate], [certificate, proposal]]) {
+      const pending = buildPendingNetworkOutputs(outputs);
+      expect(pending).toHaveLength(1);
+      expect(pending[0]?.proposedFrame?.hankos).toEqual(certificate.proposedFrame?.hankos);
+
+      const { deferred, delivered } = dispatchFrameOutputs(outputs);
+      expect(deferred).toEqual([]);
+      expect(delivered).toHaveLength(1);
+      expect(delivered[0]?.proposedFrame?.hankos).toEqual(certificate.proposedFrame?.hankos);
+    }
   });
 
   test('rejects legacy boolean direct dispatch results', () => {

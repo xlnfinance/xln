@@ -3,6 +3,7 @@ import type { CrontabTaskMethod } from '../entity/scheduler-types';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import {
   buildEntityLeaderVoteBody,
+  buildPreparedFrameEvidence,
   getEntityLeaderState,
   getEntityLeaderTimeoutMs,
   hasEntityLeaderWork,
@@ -92,8 +93,8 @@ export const entityNeedsPeriodicWake = (replica: EntityReplica): boolean => {
     }
     if (account.activeDispute || account.pendingFrame || account.pendingAccountInput) return true;
   }
-  if (!state.hubRebalanceConfig) return false;
   if (state.jBatchState?.sentBatch) return true;
+  if (!state.hubRebalanceConfig) return false;
   for (const account of state.accounts.values()) {
     if ((account.requestedRebalance?.size ?? 0) > 0) return true;
     if ((account.requestedRebalanceFeeState?.size ?? 0) > 0) return true;
@@ -237,10 +238,12 @@ export const createDueScheduledWakeInputs = (env: Env, now: number): EntityInput
         continue;
       }
       const body = buildEntityLeaderVoteBody(replica.state);
+      const preparedFrame = buildPreparedFrameEvidence(replica.lockedFrame);
       const vote: EntityLeaderTimeoutVote = {
         ...body,
         voterId: replica.signerId.toLowerCase(),
         signature: '',
+        ...(preparedFrame ? { preparedFrame } : {}),
       };
       markLocalEntityLeaderTimeoutVote(vote);
       inputs.push({

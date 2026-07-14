@@ -8,6 +8,7 @@ import type {
   EntityLeaderTimeoutVoteBody,
   EntityReplica,
   EntityState,
+  ProposedEntityFrame,
 } from '../../types';
 import { compareStableText, serializeTaggedJson } from '../../protocol/serialization';
 
@@ -18,10 +19,8 @@ export const ENTITY_J_SUBMIT_FALLBACK_MS = 60_000;
 const normalizeSignerId = (value: string): string => value.trim().toLowerCase();
 
 const validatorShares = (config: ConsensusConfig, normalizedId: string): bigint => {
-  const direct = config.shares[normalizedId];
-  if (direct !== undefined) return direct;
-  const original = config.validators.find(value => normalizeSignerId(value) === normalizedId);
-  return original ? (config.shares[original] ?? 0n) : 0n;
+  return Object.entries(config.shares)
+    .find(([signerId]) => normalizeSignerId(signerId) === normalizedId)?.[1] ?? 0n;
 };
 
 export const getEntityLeaderOrder = (config: ConsensusConfig): string[] => {
@@ -65,7 +64,9 @@ export const isEntityActiveLeader = (replica: EntityReplica): boolean =>
 
 export const getReplicaProposalLeader = (replica: EntityReplica): EntityLeaderState => {
   const certificate = replica.pendingLeaderCertificate;
-  if (!certificate) return getEntityLeaderState(replica.state);
+  if (!certificate || certificate.targetHeight !== replica.state.height + 1) {
+    return getEntityLeaderState(replica.state);
+  }
   return {
     activeValidatorId: certificate.nextLeaderId,
     view: certificate.toView,
@@ -102,10 +103,27 @@ const leaderVoteFields = (vote: EntityLeaderTimeoutVoteBody): EntityLeaderTimeou
   nextLeaderId: normalizeSignerId(vote.nextLeaderId),
 });
 
-export const hashEntityLeaderVoteBody = (body: EntityLeaderTimeoutVoteBody): string =>
+export const buildPreparedFrameEvidence = (
+  frame: ProposedEntityFrame | undefined,
+): ProposedEntityFrame | undefined => {
+  if (!frame) return undefined;
+  const evidence = structuredClone(frame);
+  // Relay certificates do not participate in the prepared frame hash and must
+  // not recursively nest in later view-change votes. The original proposal
+  // certificate stays: it may be required to validate the frame's bound
+  // leaderState.
+  delete evidence.leader.relayCertificate;
+  delete evidence.hankos;
+  return evidence;
+};
+
+export const hashEntityLeaderVoteBody = (
+  body: EntityLeaderTimeoutVoteBody & { preparedFrame?: ProposedEntityFrame },
+): string =>
   ethers.keccak256(ethers.toUtf8Bytes(serializeTaggedJson({
     domain: 'xln.entity.leader-timeout.v1',
     ...leaderVoteFields(body),
+    preparedFrame: buildPreparedFrameEvidence(body.preparedFrame) ?? null,
   })));
 
 export const assertEntityLeaderVoteMatchesState = (
@@ -133,10 +151,27 @@ export const isLocalEntityLeaderTimeoutVote = (vote: EntityLeaderTimeoutVote): b
 export const buildEntityLeaderCertificate = (
   body: EntityLeaderTimeoutVoteBody,
   votes: Map<string, EntityLeaderTimeoutVote>,
-): EntityLeaderCertificate => ({
-  ...leaderVoteFields(body),
-  votes: new Map(Array.from(votes.entries()).map(([signerId, vote]) => [normalizeSignerId(signerId), vote.signature])),
-});
+): EntityLeaderCertificate => {
+  const canonicalVotes = Array.from(votes.entries())
+    .map(([signerId, vote]) => [normalizeSignerId(signerId), vote] as const)
+    .sort(([left], [right]) => compareStableText(left, right));
+  const preparedVotes = canonicalVotes.some(([, vote]) => vote.preparedFrame)
+    ? new Map<string, EntityLeaderTimeoutVote>(canonicalVotes.map(([signerId, vote]) => {
+      const preparedFrame = buildPreparedFrameEvidence(vote.preparedFrame);
+      return [signerId, {
+        ...leaderVoteFields(vote),
+        voterId: normalizeSignerId(vote.voterId),
+        signature: vote.signature,
+        ...(preparedFrame ? { preparedFrame } : {}),
+      }];
+    }))
+    : undefined;
+  return {
+    ...leaderVoteFields(body),
+    votes: new Map(canonicalVotes.map(([signerId, vote]) => [signerId, vote.signature])),
+    ...(preparedVotes ? { preparedVotes } : {}),
+  };
+};
 
 export const getEntityQuorumSafetyWarning = (config: ConsensusConfig): string | null => {
   const totalShares = Object.values(config.shares).reduce((total, shares) => total + shares, 0n);
@@ -148,7 +183,12 @@ export const getEntityQuorumSafetyWarning = (config: ConsensusConfig): string | 
 };
 
 export const hasEntityLeaderWork = (replica: EntityReplica): boolean => {
-  if (replica.mempool.length > 0 || replica.proposal || replica.lockedFrame) return true;
+  if (
+    replica.mempool.length > 0 ||
+    replica.proposal ||
+    replica.lockedFrame ||
+    replica.pendingLeaderCertificate
+  ) return true;
   for (const account of replica.state.accounts.values()) {
     if (account.mempool.length > 0 || account.pendingFrame || account.pendingAccountInput) return true;
   }

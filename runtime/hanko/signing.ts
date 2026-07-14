@@ -31,18 +31,6 @@ const bufferFrom = (data: string | Uint8Array | number[], encoding?: BufferEncod
   return new Uint8Array(data) as Buffer;
 };
 
-const bufferAlloc = (size: number, fill?: number): Buffer => {
-  if (typeof Buffer !== 'undefined' && Buffer.alloc) {
-    return Buffer.alloc(size, fill);
-  }
-  // Browser fallback
-  const result = new Uint8Array(size);
-  if (fill !== undefined) {
-    result.fill(fill);
-  }
-  return result as Buffer;
-};
-
 const normalizeAddress = (value: string): string | null => {
   try {
     return ethers.getAddress(value).toLowerCase();
@@ -81,8 +69,8 @@ const recoverAddressFromPackedSignature = (hashBuffer: Buffer, sig: Buffer): str
 type DecodedHankoClaim = {
   entityId: string;
   entityIndexes: number[];
-  weights: number[];
-  threshold: number;
+  weights: bigint[];
+  threshold: bigint;
 };
 
 type DecodedHankoEnvelope = {
@@ -109,18 +97,40 @@ type AbiDecodedHankoEnvelope = readonly [
 const toEntityIdHex = (value: Uint8Array | Buffer): string =>
   `0x${Array.from(value).map((b) => b.toString(16).padStart(2, '0')).join('')}`;
 
+const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+const MAX_BOARD_POWER = 0xffffn;
+
+const decodeSafeEntityIndex = (value: bigint): number => {
+  if (value < 0n || value > MAX_SAFE_BIGINT) {
+    throw new Error(`HANKO_ENTITY_INDEX_UNSAFE: value=${value}`);
+  }
+  return Number(value);
+};
+
+const decodeBoardPower = (value: bigint, label: string): bigint => {
+  if (value < 0n || value > MAX_BOARD_POWER) {
+    throw new Error(`HANKO_BOARD_POWER_OUT_OF_RANGE: ${label}=${value}`);
+  }
+  return value;
+};
+
 function decodeHankoEnvelope(hankoBytes: HankoString): DecodedHankoEnvelope {
   const decoded = ABI_CODER.decode(HANKO_ABI, hankoBytes) as unknown as AbiDecodedHankoEnvelope;
   const [placeholders, packedSignatures, claims] = decoded[0];
   return {
     placeholders: placeholders.map((p) => ethers.hexlify(p).toLowerCase()),
     packedSignatures: bufferFrom(packedSignatures.replace('0x', ''), 'hex'),
-    claims: claims.map((c) => ({
-      entityId: ethers.hexlify(c[0]).toLowerCase(),
-      entityIndexes: c[1].map((idx: bigint) => Number(idx)),
-      weights: c[2].map((w: bigint) => Number(w)),
-      threshold: Number(c[3]),
-    })),
+    claims: claims.map((c, claimIndex) => {
+      if (c[1].length !== c[2].length) {
+        throw new Error(`HANKO_CLAIM_SHAPE_MISMATCH: claim=${claimIndex}`);
+      }
+      return {
+        entityId: ethers.hexlify(c[0]).toLowerCase(),
+        entityIndexes: c[1].map(decodeSafeEntityIndex),
+        weights: c[2].map((weight, index) => decodeBoardPower(weight, `claim=${claimIndex} weight=${index}`)),
+        threshold: decodeBoardPower(c[3], `claim=${claimIndex} threshold`),
+      };
+    }),
   };
 }
 
@@ -143,8 +153,8 @@ const reconstructBoardEntityIds = (
   });
 
 const reconstructBoardHash = (
-  threshold: number,
-  weights: number[],
+  threshold: bigint,
+  weights: bigint[],
   boardEntityIds: string[],
 ): string => {
   const encodedBoard = ABI_CODER.encode(
@@ -175,8 +185,8 @@ export async function inspectHankoForHash(
   claims: Array<{
     entityId: string;
     entityIndexes: number[];
-    weights: number[];
-    threshold: number;
+    weights: bigint[];
+    threshold: bigint;
     boardEntityIds: string[];
     reconstructedBoardHash: string;
   }>;
@@ -305,6 +315,182 @@ export async function signEntityHashes(
   return hankos;
 }
 
+type QuorumConfig = {
+  threshold: bigint;
+  validators: string[];
+  shares: Record<string, bigint>;
+};
+
+type QuorumValidator = {
+  signerId: string;
+  signerKey: string;
+  address: string;
+  share: bigint;
+};
+
+const canonicalSignerKey = (signerId: string): string => {
+  if (typeof signerId !== 'string' || signerId.trim().length === 0) {
+    throw new Error('BUILD_QUORUM_HANKO_INVALID_SIGNER_ID');
+  }
+  return signerId.trim().toLowerCase();
+};
+
+const buildCanonicalShareMap = (shares: Record<string, bigint>): Map<string, bigint> => {
+  const result = new Map<string, bigint>();
+  for (const [signerId, share] of Object.entries(shares)) {
+    const signerKey = canonicalSignerKey(signerId);
+    if (result.has(signerKey)) {
+      throw new Error(`BUILD_QUORUM_HANKO_DUPLICATE_SHARE: signerId=${signerId}`);
+    }
+    if (typeof share !== 'bigint' || share <= 0n) {
+      throw new Error(`BUILD_QUORUM_HANKO_INVALID_SHARE: signerId=${signerId}`);
+    }
+    result.set(signerKey, share);
+  }
+  return result;
+};
+
+const assertExactBoardShares = (signerKeys: Set<string>, shares: Map<string, bigint>): void => {
+  for (const signerKey of signerKeys) {
+    if (!shares.has(signerKey)) {
+      throw new Error(`BUILD_QUORUM_HANKO_MISSING_SHARE: signerId=${signerKey}`);
+    }
+  }
+  for (const shareKey of shares.keys()) {
+    if (!signerKeys.has(shareKey)) {
+      throw new Error(`BUILD_QUORUM_HANKO_UNKNOWN_SHARE: signerId=${shareKey}`);
+    }
+  }
+};
+
+const resolveQuorumBoard = (
+  env: Env,
+  config: QuorumConfig,
+  getSignerAddress: (env: Env, signerId: string) => string | null,
+): QuorumValidator[] => {
+  if (typeof config.threshold !== 'bigint' || config.threshold <= 0n) {
+    throw new Error('BUILD_QUORUM_HANKO_INVALID_THRESHOLD');
+  }
+  if (!Array.isArray(config.validators) || config.validators.length === 0) {
+    throw new Error('BUILD_QUORUM_HANKO_EMPTY_BOARD');
+  }
+  const shares = buildCanonicalShareMap(config.shares);
+  const signerKeys = new Set<string>();
+  const validatorIds = config.validators.map((signerId) => {
+    const signerKey = canonicalSignerKey(signerId);
+    if (signerKeys.has(signerKey)) {
+      throw new Error(`BUILD_QUORUM_HANKO_DUPLICATE_VALIDATOR: signerId=${signerId}`);
+    }
+    signerKeys.add(signerKey);
+    return { signerId, signerKey };
+  });
+  assertExactBoardShares(signerKeys, shares);
+  const addresses = new Set<string>();
+  return validatorIds.map(({ signerId, signerKey }) => {
+    const address = publicKeyToAddress(signerId) ?? normalizeAddress(getSignerAddress(env, signerId) ?? '');
+    if (!address) {
+      throw new Error(`BUILD_QUORUM_HANKO_PLACEHOLDER_ADDRESS_MISSING: signerId=${signerId}`);
+    }
+    if (addresses.has(address)) {
+      throw new Error(`BUILD_QUORUM_HANKO_DUPLICATE_VALIDATOR_ADDRESS: address=${address}`);
+    }
+    addresses.add(address);
+    return { signerId, signerKey, address, share: shares.get(signerKey)! };
+  });
+};
+
+const canonicalBoardHash = (validators: QuorumValidator[], threshold: bigint): string => {
+  const validatorAddresses = validators.map((validator) => validator.address);
+  return hashBoard(encodeBoard({
+    mode: 'proposer-based',
+    threshold,
+    validators: validatorAddresses,
+    shares: Object.fromEntries(validators.map((validator) => [validator.address, validator.share])),
+  })).toLowerCase();
+};
+
+const assertQuorumBoardBinding = (
+  env: Env,
+  entityId: string,
+  config: QuorumConfig,
+  validators: QuorumValidator[],
+  getSignerAddress: (env: Env, signerId: string) => string | null,
+): void => {
+  const suppliedBoardHash = canonicalBoardHash(validators, config.threshold);
+  if (detectEntityType(entityId) === 'lazy') {
+    if (suppliedBoardHash !== encodeQuorumEntityId(entityId)) {
+      throw new Error(
+        `BUILD_QUORUM_HANKO_BOARD_MISMATCH: entityId=${entityId} suppliedBoard=${suppliedBoardHash}`,
+      );
+    }
+    return;
+  }
+  const authoritativeConfig = findLocalConsensusConfig(env, entityId);
+  if (!authoritativeConfig) {
+    throw new Error(`BUILD_QUORUM_HANKO_BOARD_UNAVAILABLE: entityId=${entityId}`);
+  }
+  const authoritativeValidators = resolveQuorumBoard(env, authoritativeConfig, getSignerAddress);
+  const authoritativeBoardHash = canonicalBoardHash(authoritativeValidators, authoritativeConfig.threshold);
+  if (suppliedBoardHash !== authoritativeBoardHash) {
+    throw new Error(
+      `BUILD_QUORUM_HANKO_BOARD_MISMATCH: entityId=${entityId} ` +
+        `authoritative=${authoritativeBoardHash} supplied=${suppliedBoardHash}`,
+    );
+  }
+};
+
+const parseQuorumDigest = (hash: string): Buffer => {
+  if (!/^0x[0-9a-f]{64}$/i.test(hash)) {
+    throw new Error(`BUILD_QUORUM_HANKO_INVALID_DIGEST: hash=${hash}`);
+  }
+  return bufferFrom(hash.slice(2), 'hex');
+};
+
+const parseQuorumSignature = (
+  digest: Buffer,
+  validator: QuorumValidator,
+  signature: string,
+): Buffer => {
+  if (!/^0x[0-9a-f]{130}$/i.test(signature)) {
+    throw new Error(`BUILD_QUORUM_HANKO_INVALID_SIGNATURE_LENGTH: signerId=${validator.signerId}`);
+  }
+  const bytes = bufferFrom(signature.slice(2), 'hex');
+  const recovery = bytes[64];
+  // Precommit signatures have one wire representation: signAccountFrame emits
+  // recovery 0/1. Accepting 27/28 here would give the same vote two byte-level
+  // encodings; only the Hanko packer below converts the canonical vote to 27/28.
+  if (recovery !== 0 && recovery !== 1) {
+    throw new Error(`BUILD_QUORUM_HANKO_NON_CANONICAL_RECOVERY: signerId=${validator.signerId}`);
+  }
+  const s = BigInt(`0x${signature.slice(66, 130)}`);
+  const secp256k1HalfOrder = BigInt('0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0');
+  if (s === 0n || s > secp256k1HalfOrder) {
+    throw new Error(`BUILD_QUORUM_HANKO_NON_CANONICAL_SIGNATURE: signerId=${validator.signerId}`);
+  }
+  const recovered = recoverAddressFromDigestSignature(digest, bytes.slice(0, 64), recovery);
+  if (!recovered || recovered !== validator.address) {
+    throw new Error(
+      `BUILD_QUORUM_HANKO_SIGNER_MISMATCH: signerId=${validator.signerId} ` +
+        `expected=${validator.address} recovered=${recovered ?? 'null'}`,
+    );
+  }
+  const packed = bufferFrom(bytes);
+  packed[64] = 27 + recovery;
+  return packed;
+};
+
+const encodeQuorumEntityId = (entityId: string): string => {
+  const normalized = entityId.trim();
+  if (!/^(?:0x[0-9a-f]+|[0-9]+)$/i.test(normalized)) {
+    throw new Error(`BUILD_QUORUM_HANKO_INVALID_ENTITY_ID: entityId=${entityId}`);
+  }
+  try {
+    return ethers.toBeHex(BigInt(normalized), 32).toLowerCase();
+  } catch {
+    throw new Error(`BUILD_QUORUM_HANKO_INVALID_ENTITY_ID: entityId=${entityId}`);
+  }
+};
+
 /**
  * Build quorum hanko from multiple validator EOA signatures
  *
@@ -321,136 +507,57 @@ export async function signEntityHashes(
 export async function buildQuorumHanko(
   env: Env,
   entityId: string,
-  _hash: string,
+  hash: string,
   signatures: Array<{ signerId: string; signature: string }>,
-  config: { threshold: bigint; validators: string[]; shares: Record<string, bigint> }
+  config: QuorumConfig,
 ): Promise<HankoString> {
-  // Build quorum hanko from signatures
-
   const { getSignerAddress } = await import('../account/crypto');
-
-  // Step 1: Determine which validators signed and which didn't
-  const signerSet = new Set(signatures.map(s => s.signerId));
-  const signingValidators: string[] = [];
-  const nonSigningValidators: string[] = [];
-
-  for (const validatorId of config.validators) {
-    if (signerSet.has(validatorId)) {
-      signingValidators.push(validatorId);
-    } else {
-      nonSigningValidators.push(validatorId);
+  const digest = parseQuorumDigest(hash);
+  const validators = resolveQuorumBoard(env, config, getSignerAddress);
+  const validatorsByKey = new Map(validators.map((validator) => [validator.signerKey, validator]));
+  const signaturesByKey = new Map<string, Buffer>();
+  for (const entry of signatures) {
+    const signerKey = canonicalSignerKey(entry.signerId);
+    if (signaturesByKey.has(signerKey)) {
+      throw new Error(`BUILD_QUORUM_HANKO_DUPLICATE_SIGNATURE: signerId=${entry.signerId}`);
     }
-  }
-
-  // Step 2: Build placeholders for non-signing validators (as bytes32 addresses)
-  const placeholders: string[] = [];
-  for (const validatorId of nonSigningValidators) {
-    const address = getSignerAddress(env, validatorId);
-    if (!address) {
-      console.warn(`⚠️ BUILD-QUORUM-HANKO: Cannot derive address for non-signing validator ${validatorId}`);
-      continue;
+    const validator = validatorsByKey.get(signerKey);
+    if (!validator) {
+      throw new Error(`BUILD_QUORUM_HANKO_UNKNOWN_SIGNER: signerId=${entry.signerId}`);
     }
-    // Convert address to bytes32 (left-pad with zeros, matching EP.sol conversion)
-    placeholders.push('0x' + address.replace('0x', '').toLowerCase().padStart(64, '0'));
+    signaturesByKey.set(signerKey, parseQuorumSignature(digest, validator, entry.signature));
   }
-
-  // Step 3: Convert signing validators' signatures to packed format
-  const sigBuffers: Buffer[] = [];
-  const validSignerIds: string[] = [];
-
-  for (const { signerId, signature } of signatures) {
-    // Only pack signatures from known validators
-    if (!config.validators.includes(signerId)) {
-      console.warn(`⚠️ BUILD-QUORUM-HANKO: Unknown validator ${signerId} - skipping`);
-      continue;
-    }
-
-    // Parse signature (65 bytes: r[32] + s[32] + v[1])
-    const sigHex = signature.replace('0x', '');
-    if (sigHex.length < 130) {
-      console.warn(`⚠️ Invalid signature from ${signerId}: too short (${sigHex.length} hex chars)`);
-      continue;
-    }
-    const sigBuffer = bufferFrom(sigHex.slice(0, 130), 'hex');
-
-    // Get v value (last byte)
-    const vHex = sigHex.slice(128, 130);
-    const v = parseInt(vHex, 16);
-    const vNormalized = v < 27 ? v + 27 : v;
-
-    // Combine r, s, v into 65-byte signature
-    const fullSig = bufferAlloc(65);
-    fullSig.set(sigBuffer.slice(0, 64), 0); // r + s
-    fullSig[64] = vNormalized;
-
-    sigBuffers.push(fullSig);
-    validSignerIds.push(signerId);
+  const signedPower = validators.reduce(
+    (power, validator) => power + (signaturesByKey.has(validator.signerKey) ? validator.share : 0n),
+    0n,
+  );
+  if (signedPower < config.threshold) {
+    throw new Error(`BUILD_QUORUM_HANKO_INSUFFICIENT_QUORUM: power=${signedPower} threshold=${config.threshold}`);
   }
+  assertQuorumBoardBinding(env, entityId, config, validators, getSignerAddress);
 
-  if (sigBuffers.length === 0) {
-    throw new Error(`BUILD-QUORUM-HANKO: No valid signatures provided`);
-  }
-
-  // Pack all signatures
+  const signingValidators = validators.filter((validator) => signaturesByKey.has(validator.signerKey));
+  const nonSigningValidators = validators.filter((validator) => !signaturesByKey.has(validator.signerKey));
+  const placeholders = nonSigningValidators.map((validator) => ethers.zeroPadValue(validator.address, 32));
+  const sigBuffers = signingValidators.map((validator) => signaturesByKey.get(validator.signerKey)!);
   const { packRealSignatures } = await import('./core');
   const packedSignatures = packRealSignatures(sigBuffers);
-
-  // Step 4: Build entityIndexes and weights in ORIGINAL BOARD ORDER
-  // This is critical for board hash reconstruction in EP.sol
-  // Index mapping:
-  //   0..placeholders.length-1 → placeholders (non-signers)
-  //   placeholders.length..placeholders.length+signers.length-1 → signers
-  const entityIndexes: number[] = [];
-  const weights: number[] = [];
-
-  // Map validatorId → their signature index in sigBuffers
-  const signerToSigIndex = new Map<string, number>();
-  validSignerIds.forEach((id, idx) => signerToSigIndex.set(id, idx));
-
-  // Map validatorId → their placeholder index
-  const nonSignerToPlaceholderIndex = new Map<string, number>();
-  nonSigningValidators.forEach((id, idx) => nonSignerToPlaceholderIndex.set(id, idx));
-
-  // Build indexes in original validator order (preserves board order for hash)
-  for (const validatorId of config.validators) {
-    const sigIndex = signerToSigIndex.get(validatorId);
-    if (sigIndex !== undefined) {
-      // Signed → index into signers (offset by placeholder count)
-      entityIndexes.push(placeholders.length + sigIndex);
-    } else {
-      const placeholderIndex = nonSignerToPlaceholderIndex.get(validatorId);
-      if (placeholderIndex !== undefined) {
-        // Didn't sign → index into placeholders
-        entityIndexes.push(placeholderIndex);
-      }
-    }
-    weights.push(Number(config.shares[validatorId] || 1n));
-  }
-
-  // Build claim for this entity
-  const toHex = (buf: Buffer) => '0x' + Array.from(buf).map(b => b.toString(16).padStart(2, '0')).join('');
-
-  // ABI encode hanko - MATCH EP.sol struct exactly
-  // With M-of-N: placeholders contains non-signing board members
+  const signerIndexes = new Map(signingValidators.map((validator, index) => [validator.signerKey, index]));
+  const placeholderIndexes = new Map(nonSigningValidators.map((validator, index) => [validator.signerKey, index]));
+  const entityIndexes = validators.map((validator) => {
+    const signerIndex = signerIndexes.get(validator.signerKey);
+    return signerIndex === undefined
+      ? placeholderIndexes.get(validator.signerKey)!
+      : placeholders.length + signerIndex;
+  });
   const abiEncoded = ABI_CODER.encode(
-    ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'],
-    [
-      [
-        placeholders, // Non-signing board members (enables M-of-N)
-        toHex(packedSignatures as Buffer),
-        [
-          [
-            '0x' + entityId.replace('0x', '').padStart(64, '0'),
-            entityIndexes,
-            weights,
-            Number(config.threshold),
-          ],
-        ],
-      ],
-    ],
+    HANKO_ABI,
+    [[
+      placeholders,
+      ethers.hexlify(packedSignatures),
+      [[encodeQuorumEntityId(entityId), entityIndexes, validators.map((validator) => validator.share), config.threshold]],
+    ]],
   );
-
-  // Hanko built: sigBuffers.length sigs, placeholders.length placeholders
   return abiEncoded as HankoString;
 }
 
@@ -478,8 +585,10 @@ export async function verifyHankoForHash(
       claims: decodedHanko.claims.map((c) => ({
         entityId: bufferFrom(c.entityId.replace('0x', ''), 'hex'),
         entityIndexes: [...c.entityIndexes],
-        weights: [...c.weights],
-        threshold: c.threshold,
+        // recoverHankoEntities predates bigint board powers. decodeHankoEnvelope
+        // already enforces uint16 board bounds, so this conversion is exact.
+        weights: c.weights.map((weight) => Number(weight)),
+        threshold: Number(c.threshold),
       })),
     };
 
@@ -504,11 +613,11 @@ export async function verifyHankoForHash(
       const claim = decodedHanko.claims[0]!;
       const canonicalSingleSignerClaim =
         claim.entityId.replace('0x', '') === expectedEntityIdPadded &&
-        claim.threshold === 1 &&
+        claim.threshold === 1n &&
         claim.entityIndexes.length === 1 &&
         claim.entityIndexes[0] === 0 &&
         claim.weights.length === 1 &&
-        claim.weights[0] === 1;
+        claim.weights[0] === 1n;
       if (canonicalSingleSignerClaim) {
         // Hot path for the normal runtime shape: one lazy entity, one EOA,
         // threshold 1. We still recover the signer from the exact signed hash,
@@ -560,18 +669,17 @@ export async function verifyHankoForHash(
     }
 
     // CRITICAL: Find claim for expectedEntityId (NOT just last claim!)
-    const matchingClaim = hanko.claims.find((c: { entityId: Uint8Array }) => {
-      const claimEntityHex = toEntityIdHex(c.entityId).replace('0x', '');
-      return claimEntityHex === expectedEntityIdPadded;
-    });
+    const matchingClaim = decodedHanko.claims.find(
+      (claim) => claim.entityId.replace('0x', '') === expectedEntityIdPadded,
+    );
 
     if (!matchingClaim) {
       console.warn(`❌ Hanko rejected: No claim found for entity ${expectedEntityId.slice(-4)}`);
       return { valid: false, entityId: null };
     }
 
-    const targetEntity = '0x' + Array.from(matchingClaim.entityId).map((b) => (b as number).toString(16).padStart(2, '0')).join('');
-    const claimEntityIds = hanko.claims.map((claim) => toEntityIdHex(claim.entityId).toLowerCase());
+    const targetEntity = matchingClaim.entityId;
+    const claimEntityIds = decodedHanko.claims.map((claim) => claim.entityId);
     const reconstructedBoardEntityIds = reconstructBoardEntityIds(
       matchingClaim,
       decodedHanko.placeholders,
@@ -652,13 +760,13 @@ export async function verifyHankoForHash(
       // For gossip/first-contact: sufficient because real security is at consensus layer
       const numPlaceholders = hanko.placeholders.length;
       const numSignatures = eoaSignatures.length;
-      let signerWeightSum = 0;
+      let signerWeightSum = 0n;
       for (let i = 0; i < matchingClaim.entityIndexes.length; i++) {
         const memberIndex = matchingClaim.entityIndexes[i];
         if (memberIndex === undefined) continue;
         if (memberIndex >= numPlaceholders && memberIndex < numPlaceholders + numSignatures) {
           // This slot maps to a signer (not a placeholder) — they actually signed
-          signerWeightSum += matchingClaim.weights[i] ?? 0;
+          signerWeightSum += matchingClaim.weights[i] ?? 0n;
         }
       }
       if (signerWeightSum >= matchingClaim.threshold) {

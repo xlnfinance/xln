@@ -208,10 +208,17 @@ export interface EntityLeaderTimeoutVoteBody {
 export interface EntityLeaderTimeoutVote extends EntityLeaderTimeoutVoteBody {
   voterId: string;
   signature: string;
+  /** Exact locally locked frame, including every precommit observed so far. */
+  preparedFrame?: ProposedEntityFrame;
 }
 
 export interface EntityLeaderCertificate extends EntityLeaderTimeoutVoteBody {
+  /** Compact signatures for certificates whose votes carry no lock evidence. */
   votes: Map<string, string>;
+  /** Individual signed votes when prepared evidence differs per voter. */
+  preparedVotes?: Map<string, EntityLeaderTimeoutVote>;
+  /** Set only after exact prepared evidence reaches the Entity threshold. */
+  preparedFrameHash?: string;
 }
 
 export interface RuntimeInput {
@@ -556,6 +563,8 @@ export interface ProposedEntityFrame {
     proposerSignerId: string;
     view: number;
     certificate?: EntityLeaderCertificate;
+    /** View-change authorization to relay this exact already-prepared frame. */
+    relayCertificate?: EntityLeaderCertificate;
   };
 
   // DETERMINISTIC OUTPUTS: Stored at proposal time, used at commit time

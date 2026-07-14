@@ -103,7 +103,11 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
   const allSwapCancelRequests: SwapCancelRequestEvent[] = [];
   const allSwapOffersCancelled: SwapCancelEvent[] = [];
   // Multi-signer: Collect hashes during processing (not scanning)
-  const allHashesToSign: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }> = [];
+  const allHashesToSign: Array<{
+    hash: string;
+    type: 'accountFrame' | 'dispute' | 'settlement';
+    context: string;
+  }> = [];
 
   // Get or create account machine (KEY: counterparty ID for simpler lookups)
   // AccountMachine still uses canonical left/right internally
@@ -283,6 +287,9 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
       // Inline auto-approve: send hanko back to proposer immediately
       if (result.autoApproveOutput) {
         outputs.push(result.autoApproveOutput);
+      }
+      if (result.hashesToSign) {
+        allHashesToSign.push(...result.hashesToSign);
       }
     } else {
       accountHandlerLog.warn('settle_action.failed', {

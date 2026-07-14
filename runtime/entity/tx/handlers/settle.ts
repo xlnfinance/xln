@@ -17,7 +17,7 @@ import { initJBatch, batchAddSettlement } from '../../../jurisdiction/batch';
 import { isLeftEntity } from '../../id';
 import type { Env, HankoString } from '../../../types';
 import { createSettlementHashWithNonce, createDisputeProofHashWithNonce, buildAccountProofBody } from '../../../protocol/dispute/proof-builder';
-import { signEntityHashes } from '../../../hanko/signing';
+import { signEntityHashes, verifyHankoForHash } from '../../../hanko/signing';
 import { compileOps, userAutoApprove as userAutoApproveByDiff } from '../../../protocol/settlement/operations';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../../protocol/dispute/arguments';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
@@ -45,44 +45,39 @@ async function signPostSettlementDisputeProof(
   entityState: EntityState,
   account: AccountMachine,
   settlementNonce: number,
-): Promise<{ hanko: HankoString; proofBodyHash: string; disputeHash: string; nonce: number } | null> {
+): Promise<{ hanko?: HankoString; proofBodyHash: string; disputeHash: string; nonce: number } | null> {
   const jurisdiction = entityState.config.jurisdiction;
   if (!jurisdiction?.depositoryAddress) return null;
   const signerId = entityState.config.validators[0];
-  if (!signerId) return null;
+  if (!signerId) throw new Error('POST_SETTLEMENT_DISPUTE_SIGNER_MISSING');
 
-  try {
-    const nonce = Math.max(
-      settlementNonce,
-      account.jNonce ?? 0,
-      account.proofHeader?.nextProofNonce ?? 0,
-    ) + 1;
-    const { proofBodyHash, proofBodyStruct } = buildAccountProofBody(account);
-    const disputeHash = createDisputeProofHashWithNonce(
-      account,
-      proofBodyHash,
-      { chainId: Number(jurisdiction.chainId), depositoryAddress: jurisdiction.depositoryAddress },
-      nonce,
-    );
+  const nonce = Math.max(
+    settlementNonce,
+    account.jNonce ?? 0,
+    account.proofHeader?.nextProofNonce ?? 0,
+  ) + 1;
+  const { proofBodyHash, proofBodyStruct } = buildAccountProofBody(account);
+  const disputeHash = createDisputeProofHashWithNonce(
+    account,
+    proofBodyHash,
+    { chainId: Number(jurisdiction.chainId), depositoryAddress: jurisdiction.depositoryAddress },
+    nonce,
+  );
+  let hanko: HankoString | undefined;
+  if (entityState.config.validators.length === 1) {
     const hankos = await signEntityHashes(env, entityState.entityId, signerId, [disputeHash]);
-    if (!hankos[0]) return null;
-    account.disputeProofBodiesByHash ??= {};
-    account.disputeProofBodiesByHash[proofBodyHash] = proofBodyStruct;
-    account.disputeProofNoncesByHash ??= {};
-    account.disputeProofNoncesByHash[proofBodyHash] = nonce;
-    storeDisputeArgumentSnapshot(
-      account,
-      captureDisputeArgumentSnapshot(account, proofBodyHash, nonce, proofBodyStruct),
-    );
-    return { hanko: hankos[0], proofBodyHash, disputeHash, nonce };
-  } catch (e) {
-    settleLog.warn('post_settlement_dispute_sign_failed', {
-      left: shortId(account.leftEntity),
-      right: shortId(account.rightEntity),
-      error: e instanceof Error ? e.message : String(e),
-    });
-    return null;
+    hanko = hankos[0];
+    if (!hanko) throw new Error('POST_SETTLEMENT_DISPUTE_HANKO_MISSING');
   }
+  account.disputeProofBodiesByHash ??= {};
+  account.disputeProofBodiesByHash[proofBodyHash] = proofBodyStruct;
+  account.disputeProofNoncesByHash ??= {};
+  account.disputeProofNoncesByHash[proofBodyHash] = nonce;
+  storeDisputeArgumentSnapshot(
+    account,
+    captureDisputeArgumentSnapshot(account, proofBodyHash, nonce, proofBodyStruct),
+  );
+  return { ...(hanko ? { hanko } : {}), proofBodyHash, disputeHash, nonce };
 }
 
 /**
@@ -324,7 +319,7 @@ export async function handleSettleApprove(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_approve' }>,
   env: Env
-): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[]; hashesToSign?: Array<{ hash: string; type: 'settlement'; context: string }> }> {
+): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[]; hashesToSign?: Array<{ hash: string; type: 'settlement' | 'dispute'; context: string }> }> {
   const { counterpartyEntityId } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
@@ -384,15 +379,18 @@ export async function handleSettleApprove(
   const signerId = entityState.config.validators[0];
   if (!signerId) throw new Error('No validator configured for entity');
 
-  const hankos = await signEntityHashes(env, entityState.entityId, signerId, [settlementHash]);
-  const hanko = hankos[0];
-  if (!hanko) throw new Error(`Failed to generate settlement hanko for ${signerId.slice(-4)}`);
+  let hanko: HankoString | undefined;
+  if (entityState.config.validators.length === 1) {
+    const hankos = await signEntityHashes(env, entityState.entityId, signerId, [settlementHash]);
+    hanko = hankos[0];
+    if (!hanko) throw new Error(`Failed to generate settlement hanko for ${signerId.slice(-4)}`);
+  }
+  workspace.settlementHash = settlementHash;
 
   // Store our hanko
-  if (iAmLeft) {
-    workspace.leftHanko = hanko;
-  } else {
-    workspace.rightHanko = hanko;
+  if (hanko) {
+    if (iAmLeft) workspace.leftHanko = hanko;
+    else workspace.rightHanko = hanko;
   }
 
   // Post-settlement dispute proof
@@ -410,10 +408,9 @@ export async function handleSettleApprove(
         `POST_SETTLEMENT_DISPUTE_HASH_MISMATCH:${workspace.postSettlementDisputeProof.disputeHash}:${disputeResult.disputeHash}`,
       );
     }
-    if (iAmLeft) {
-      workspace.postSettlementDisputeProof.leftHanko = disputeResult.hanko;
-    } else {
-      workspace.postSettlementDisputeProof.rightHanko = disputeResult.hanko;
+    if (disputeResult.hanko) {
+      if (iAmLeft) workspace.postSettlementDisputeProof.leftHanko = disputeResult.hanko;
+      else workspace.postSettlementDisputeProof.rightHanko = disputeResult.hanko;
     }
     settleLog.debug('approve.post_settlement_dispute_signed', { nonce: disputeResult.nonce });
   }
@@ -426,7 +423,8 @@ export async function handleSettleApprove(
   // Send approval to counterparty
   const settleAction: AccountSettleAction = {
     type: 'approve',
-    hanko,
+    ...(hanko ? { hanko } : {}),
+    settlementHash,
     version: workspace.version,
     nonceAtSign: workspace.nonceAtSign,
   };
@@ -445,8 +443,15 @@ export async function handleSettleApprove(
     }]
   });
 
-  const hashesToSign: Array<{ hash: string; type: 'settlement'; context: string }> = [
+  const hashesToSign: Array<{ hash: string; type: 'settlement' | 'dispute'; context: string }> = [
     { hash: settlementHash, type: 'settlement', context: `settlement:${counterpartyEntityId.slice(-8)}:nonce:${signedNonce}` },
+    ...(disputeResult
+      ? [{
+          hash: disputeResult.disputeHash,
+          type: 'dispute' as const,
+          context: `settlement:${counterpartyEntityId.slice(-8)}:post-dispute:nonce:${disputeResult.nonce}`,
+        }]
+      : []),
   ];
 
   return { newState, outputs, mempoolOps, hashesToSign };
@@ -648,7 +653,12 @@ export async function processSettleAction(
   entityTimestamp: number,
   env?: Env,
   entityState?: EntityState,
-): Promise<{ success: boolean; message: string; autoApproveOutput?: EntityInput }> {
+): Promise<{
+  success: boolean;
+  message: string;
+  autoApproveOutput?: EntityInput;
+  hashesToSign?: Array<{ hash: string; type: 'settlement' | 'dispute'; context: string }>;
+}> {
   const { iAmLeft } = getAccountPerspective(account, myEntityId);
   const theyAreLeft = !iAmLeft;
 
@@ -680,94 +690,87 @@ export async function processSettleAction(
 
       // Auto-approve: compile then check safety
       let autoApproveOutput: EntityInput | undefined;
+      let autoApproveHashes: Array<{ hash: string; type: 'settlement' | 'dispute'; context: string }> | undefined;
       if (env && entityState && canAutoApproveWorkspace(workspace, iAmLeft)) {
         settleLog.debug('receive.auto_approve.start', { from: shortId(fromEntityId) });
-        try {
-          const signedNonce = getNextSettlementNonce(account);
-          workspace.nonceAtSign = signedNonce;
+        const signedNonce = getNextSettlementNonce(account);
+        workspace.nonceAtSign = signedNonce;
 
-          // Cache compiled diffs
-          const { diffs: compiledDiffs, forgiveTokenIds } = compileOps(ops, workspace.lastModifiedByLeft);
-          workspace.compiledDiffs = compiledDiffs;
-          workspace.compiledForgiveTokenIds = forgiveTokenIds;
+        const { diffs: compiledDiffs, forgiveTokenIds } = compileOps(ops, workspace.lastModifiedByLeft);
+        workspace.compiledDiffs = compiledDiffs;
+        workspace.compiledForgiveTokenIds = forgiveTokenIds;
 
-          const jurisdiction = entityState.config.jurisdiction;
-          if (jurisdiction?.depositoryAddress) {
-            const settlementHash = createSettlementHashWithNonce(
-              account,
-              compiledDiffs,
-              forgiveTokenIds,
-              { chainId: Number(jurisdiction.chainId), depositoryAddress: jurisdiction.depositoryAddress },
-              signedNonce,
-            );
+        const jurisdiction = entityState.config.jurisdiction;
+        if (!jurisdiction?.depositoryAddress) throw new Error('AUTO_APPROVE_JURISDICTION_MISSING');
+        const settlementHash = createSettlementHashWithNonce(
+          account,
+          compiledDiffs,
+          forgiveTokenIds,
+          { chainId: Number(jurisdiction.chainId), depositoryAddress: jurisdiction.depositoryAddress },
+          signedNonce,
+        );
+        workspace.settlementHash = settlementHash;
 
-            const signerId = entityState.config.validators[0];
-            if (signerId) {
-              const hankos = await signEntityHashes(env, myEntityId, signerId, [settlementHash]);
-              const hanko = hankos[0];
-              if (hanko) {
-                if (iAmLeft) {
-                  workspace.leftHanko = hanko;
-                } else {
-                  workspace.rightHanko = hanko;
-                }
-                workspace.status = 'awaiting_counterparty';
-
-                autoApproveOutput = {
-                  entityId: fromEntityId,
-                  signerId: resolveEntityProposerId(env, fromEntityId, 'settle.auto-approve.output'),
-                  entityTxs: [{
-                    type: 'accountInput',
-                    data: {
-                      kind: 'settle',
-                      fromEntityId: myEntityId,
-                      toEntityId: fromEntityId,
-                      settleAction: {
-                        type: 'approve' as const,
-                        hanko,
-                        version: workspace.version,
-                        nonceAtSign: signedNonce,
-                      },
-                    }
-                  }]
-                };
-                settleLog.debug('receive.auto_approve.signed', { nonce: signedNonce });
-
-                const disputeResult = await signPostSettlementDisputeProof(env, entityState, account, signedNonce);
-                if (disputeResult) {
-                  if (!workspace.postSettlementDisputeProof) {
-                    workspace.postSettlementDisputeProof = {
-                      disputeHash: disputeResult.disputeHash,
-                      proofBodyHash: disputeResult.proofBodyHash,
-                      nonce: disputeResult.nonce,
-                    };
-                  }
-                  if (workspace.postSettlementDisputeProof.disputeHash !== disputeResult.disputeHash) {
-                    throw new Error(
-                      `POST_SETTLEMENT_DISPUTE_HASH_MISMATCH:${workspace.postSettlementDisputeProof.disputeHash}:${disputeResult.disputeHash}`,
-                    );
-                  }
-                  if (iAmLeft) {
-                    workspace.postSettlementDisputeProof.leftHanko = disputeResult.hanko;
-                  } else {
-                    workspace.postSettlementDisputeProof.rightHanko = disputeResult.hanko;
-                  }
-                }
-              }
-            }
-          }
-        } catch (e) {
-          settleLog.warn('receive.auto_approve.sign_failed', {
-            from: shortId(fromEntityId),
-            error: e instanceof Error ? e.message : String(e),
-          });
+        const signerId = entityState.config.validators[0];
+        if (!signerId) throw new Error('AUTO_APPROVE_SIGNER_MISSING');
+        let hanko: HankoString | undefined;
+        if (entityState.config.validators.length === 1) {
+          const hankos = await signEntityHashes(env, myEntityId, signerId, [settlementHash]);
+          hanko = hankos[0];
+          if (!hanko) throw new Error('AUTO_APPROVE_HANKO_MISSING');
+          if (iAmLeft) workspace.leftHanko = hanko;
+          else workspace.rightHanko = hanko;
         }
+        workspace.status = 'awaiting_counterparty';
+
+        autoApproveOutput = {
+          entityId: fromEntityId,
+          signerId: resolveEntityProposerId(env, fromEntityId, 'settle.auto-approve.output'),
+          entityTxs: [{
+            type: 'accountInput',
+            data: {
+              kind: 'settle',
+              fromEntityId: myEntityId,
+              toEntityId: fromEntityId,
+              settleAction: {
+                type: 'approve' as const,
+                ...(hanko ? { hanko } : {}),
+                settlementHash,
+                version: workspace.version,
+                nonceAtSign: signedNonce,
+              },
+            }
+          }]
+        };
+        settleLog.debug('receive.auto_approve.drafted', { nonce: signedNonce });
+
+        const disputeResult = await signPostSettlementDisputeProof(env, entityState, account, signedNonce);
+        if (disputeResult) {
+          workspace.postSettlementDisputeProof = {
+            disputeHash: disputeResult.disputeHash,
+            proofBodyHash: disputeResult.proofBodyHash,
+            nonce: disputeResult.nonce,
+            ...(iAmLeft && disputeResult.hanko ? { leftHanko: disputeResult.hanko } : {}),
+            ...(!iAmLeft && disputeResult.hanko ? { rightHanko: disputeResult.hanko } : {}),
+          };
+        }
+        autoApproveHashes = [
+          { hash: settlementHash, type: 'settlement', context: `settlement:${fromEntityId.slice(-8)}:auto:nonce:${signedNonce}` },
+          ...(disputeResult
+            ? [{
+                hash: disputeResult.disputeHash,
+                type: 'dispute' as const,
+                context: `settlement:${fromEntityId.slice(-8)}:auto-post-dispute:nonce:${disputeResult.nonce}`,
+              }]
+            : []),
+        ];
       }
 
       return {
         success: true,
         message: `Settlement proposed by ${fromEntityId.slice(-4)}${autoApproveOutput ? ' (auto-approved)' : ''}`,
         ...(autoApproveOutput ? { autoApproveOutput } : {}),
+        ...(autoApproveHashes ? { hashesToSign: autoApproveHashes } : {}),
       };
     }
 
@@ -810,6 +813,32 @@ export async function processSettleAction(
 
       if (!settleAction.hanko) {
         return { success: false, message: 'No hanko provided' };
+      }
+      if (!settleAction.settlementHash || settleAction.nonceAtSign == null) {
+        return { success: false, message: 'Settlement authorization hash or nonce missing' };
+      }
+      const jurisdiction = entityState?.config.jurisdiction;
+      if (!jurisdiction?.depositoryAddress) {
+        return { success: false, message: 'Settlement jurisdiction missing' };
+      }
+      const { diffs, forgiveTokenIds } = compileOps(
+        account.settlementWorkspace.ops,
+        account.settlementWorkspace.lastModifiedByLeft,
+      );
+      const expectedHash = createSettlementHashWithNonce(
+        account,
+        diffs,
+        forgiveTokenIds,
+        { chainId: Number(jurisdiction.chainId), depositoryAddress: jurisdiction.depositoryAddress },
+        settleAction.nonceAtSign,
+      );
+      if (expectedHash.toLowerCase() !== settleAction.settlementHash.toLowerCase()) {
+        return { success: false, message: 'Settlement authorization hash mismatch' };
+      }
+      if (!env) return { success: false, message: 'Settlement verifier environment missing' };
+      const verified = await verifyHankoForHash(settleAction.hanko, expectedHash, fromEntityId, env);
+      if (!verified.valid || verified.entityId?.toLowerCase() !== fromEntityId.toLowerCase()) {
+        return { success: false, message: 'Settlement Hanko invalid' };
       }
 
       // Store their hanko + nonce

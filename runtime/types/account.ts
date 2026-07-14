@@ -416,6 +416,8 @@ export type AccountSettleAction = {
   memo?: string;                       // For propose/update/reject
   version?: number;                    // Version being approved/executed
   nonceAtSign?: number;                // Settlement nonce counterparty signed with (approve)
+  /** Exact cooperative-settlement digest; required for Entity-quorum drafts. */
+  settlementHash?: string;
 };
 
 type AccountInputBase = {
@@ -425,7 +427,12 @@ type AccountInputBase = {
 };
 
 export type AccountDisputeSeal = {
-  hanko: HankoString;
+  /**
+   * Absent only while the Account output is an internal Entity-consensus draft.
+   * Any routed AccountInput must be sealed before it leaves the committing
+   * Entity replica; inbound validation rejects an absent Hanko.
+   */
+  hanko?: HankoString;
   hash: string;
   proofBodyHash: string;
   proofNonce: number;
@@ -433,13 +440,15 @@ export type AccountDisputeSeal = {
 
 export type AccountFrameAck = {
   height: number;
-  frameHanko: HankoString;
+  /** Internal Entity-consensus draft until the secondary hash reaches quorum. */
+  frameHanko?: HankoString;
   disputeSeal?: AccountDisputeSeal;
 };
 
 export type AccountFrameProposal = {
   frame: AccountFrame;
-  frameHanko: HankoString;
+  /** Internal Entity-consensus draft until the secondary hash reaches quorum. */
+  frameHanko?: HankoString;
   disputeSeal?: AccountDisputeSeal;
 };
 
@@ -539,6 +548,7 @@ export interface SettlementWorkspace {
   // Hanko signatures
   leftHanko?: HankoString;                    // Left's signature on settlement
   rightHanko?: HankoString;                   // Right's signature on settlement
+  settlementHash?: string;                    // Exact digest sealed by the Entity quorum
 
   // Metadata
   lastModifiedByLeft: boolean;                // Who last proposed/updated
