@@ -447,7 +447,9 @@ export interface EntityState {
   deferredAccountProposals?: Map<string, true>;
   // 🔭 J-machine tracking (JBlock consensus)
   lastFinalizedJHeight: number;           // Last finalized J-block height
-  jBlockChain: JBlockFinalized[];          // Finalized J-blocks (prunable)
+  // Certified event blocks are retained in full: jHistoryFinality commits the
+  // cumulative root, so pruning requires a future certified checkpoint root.
+  jBlockChain: JBlockFinalized[];
   jHistoryFinality?: JHistoryFinality;
 
   // 🔗 Account machine integration

@@ -245,6 +245,11 @@ export interface JBlockFinalized {
   jHeight: number;
   jBlockHash: string;
   eventsHash: string;
+  /**
+   * Canonical hash of transaction-calldata evidence consumed by the reducer.
+   * The event log alone does not bind finalNonce or transformer arguments.
+   */
+  disputeFinalizationEvidenceHash?: string;
   events: JurisdictionEvent[];
   finalizedAt: number;
   proposerSignerId: string;

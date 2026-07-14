@@ -31,18 +31,24 @@ const normalizeHeight = (value: unknown, label: string): number => {
   return height;
 };
 
-type JHistoryBlockIdentity = Pick<ValidatorJEventBlock, 'jurisdictionRef' | 'jHeight' | 'jBlockHash' | 'eventsHash'>;
+type JHistoryBlockIdentity = Pick<
+  ValidatorJEventBlock,
+  'jurisdictionRef' | 'jHeight' | 'jBlockHash' | 'eventsHash' | 'disputeFinalizationEvidenceHash'
+>;
 
 export const canonicalJHistoryObservationLeaf = (
   observation: JHistoryBlockIdentity,
 ): string => ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-  ['bytes32', 'bytes32', 'uint64', 'bytes32', 'bytes32'],
+  ['bytes32', 'bytes32', 'uint64', 'bytes32', 'bytes32', 'bytes32'],
   [
     textHash(HISTORY_LEAF_DOMAIN),
     textHash(observation.jurisdictionRef),
     normalizeHeight(observation.jHeight, 'OBSERVATION_HEIGHT'),
     textHash(observation.jBlockHash),
     normalizeRoot(observation.eventsHash, 'EVENTS_ROOT'),
+    observation.disputeFinalizationEvidenceHash
+      ? normalizeRoot(observation.disputeFinalizationEvidenceHash, 'EVIDENCE_ROOT')
+      : ethers.ZeroHash,
   ],
 ));
 
@@ -84,6 +90,14 @@ const normalizeRangeBlocks = (
       jHeight,
       jBlockHash: String(block.blockHash || '').trim().toLowerCase(),
       eventsHash: normalizeRoot(block.eventsHash, 'RANGE_EVENTS_ROOT'),
+      ...(block.disputeFinalizationEvidenceHash
+        ? {
+            disputeFinalizationEvidenceHash: normalizeRoot(
+              block.disputeFinalizationEvidenceHash,
+              'RANGE_EVIDENCE_ROOT',
+            ),
+          }
+        : {}),
     };
   });
 };

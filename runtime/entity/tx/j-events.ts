@@ -22,6 +22,7 @@ import {
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
   getJEventJurisdictionRef,
+  normalizeDisputeFinalizationEvidence,
 } from '../../jurisdiction/event-observation';
 import { verifyAccountSignature } from '../../account/crypto';
 import { markStorageEntityDirty } from '../../machine/env-events';
@@ -46,9 +47,8 @@ import { isDisputeStartedByLeft } from '../../account/consensus/dispute-policy';
 import {
   buildJEventRangeDigest,
   canonicalJEventRangeHash,
-  foldJHistoryRoot,
 } from '../../jurisdiction/history-consensus';
-import { finalizedJHistoryRoot } from '../../jurisdiction/local-history';
+import { reconcileJEventRangeWithFinalizedState } from '../../jurisdiction/local-history';
 import { getEntityLeaderState } from '../consensus/leader';
 import {
   applySignerEntityExternalWalletDelta,
@@ -113,7 +113,7 @@ const normalizeJEventRangeBlocks = (
     if (eventsHash !== String(block.eventsHash || '').trim().toLowerCase()) {
       throw new Error(`j_event rejected: events hash mismatch at ${blockNumber}`);
     }
-    const evidence = block.disputeFinalizationEvidence ?? [];
+    const evidence = normalizeDisputeFinalizationEvidence(block.disputeFinalizationEvidence ?? []);
     const evidenceHash = evidence.length > 0
       ? canonicalDisputeFinalizationEvidenceHash(evidence)
       : '';
@@ -165,18 +165,8 @@ export const applyJEvent = async (
   if (rangeHash !== String(data.rangeHash || '').trim().toLowerCase()) {
     throw new Error('j_event rejected: range body hash mismatch');
   }
-  const eventHistoryRoot = foldJHistoryRoot(
-    finalizedJHistoryRoot(entityState),
-    blocks.map((block) => ({
-      jurisdictionRef,
-      jHeight: block.blockNumber,
-      jBlockHash: block.blockHash,
-      eventsHash: block.eventsHash,
-    })),
-  );
-  if (eventHistoryRoot !== String(data.eventHistoryRoot || '').trim().toLowerCase()) {
-    throw new Error('j_event rejected: event history root mismatch');
-  }
+  const reconciled = reconcileJEventRangeWithFinalizedState(entityState, { ...data, blocks });
+  const eventHistoryRoot = String(data.eventHistoryRoot || '').trim().toLowerCase();
   const signature = String(data.signature || '').trim().toLowerCase();
   const digest = buildJEventRangeDigest({
     entityId: entityState.entityId,
@@ -192,25 +182,23 @@ export const applyJEvent = async (
     throw new Error(`j_event rejected: invalid proposer signature for ${signerId}`);
   }
 
-  if (scannedThroughHeight <= entityState.lastFinalizedJHeight) {
+  if (reconciled.kind === 'noop') {
     return { newState: entityState, mempoolOps: [], outputs: [], dirtyAccounts: [] };
-  }
-  if (baseHeight !== entityState.lastFinalizedJHeight) {
-    throw new Error(
-      `j_event rejected: non-current base expected=${entityState.lastFinalizedJHeight} got=${baseHeight}`,
-    );
   }
 
   let state = cloneEntityState(entityState);
   const mempoolOps: JEventMempoolOp[] = [];
   const outputs: EntityInput[] = [];
   const dirtyAccounts = new Set<string>();
-  for (const block of blocks) {
+  for (const block of reconciled.blocks) {
     state.jBlockChain.push({
       jurisdictionRef,
       jHeight: block.blockNumber,
       jBlockHash: block.blockHash,
       eventsHash: block.eventsHash,
+      ...(block.disputeFinalizationEvidenceHash
+        ? { disputeFinalizationEvidenceHash: block.disputeFinalizationEvidenceHash }
+        : {}),
       events: block.events,
       finalizedAt: state.timestamp,
       proposerSignerId: signerId,
@@ -253,8 +241,8 @@ export const applyJEvent = async (
   }
   mergeJEventClaimOps(mempoolOps);
   jEventLog.info('history.finalized_by_entity', {
-    range: `${baseHeight + 1}-${scannedThroughHeight}`,
-    eventBlocks: blocks.length,
+    range: `${reconciled.baseHeight + 1}-${scannedThroughHeight}`,
+    eventBlocks: reconciled.blocks.length,
     root: shortHash(eventHistoryRoot),
     proposer: shortId(signerId),
   });
@@ -533,6 +521,11 @@ function applyDisputeFinalizedJEvent(
     String(evidence.initialProofbodyHash).toLowerCase() === String(initialProofbodyHash).toLowerCase() &&
     String(evidence.finalProofbodyHash).toLowerCase() === finalProofbodyHash.toLowerCase()
   );
+  if (finalizationEvidence.length > 1) {
+    throw new Error(
+      `J_EVENT_DISPUTE_FINALIZATION_EVIDENCE_AMBIGUOUS:${senderStr}:${counterentityStr}:${String(initialNonce)}`,
+    );
+  }
   const primaryFinalizationEvidence = finalizationEvidence[0];
   const initialNonceNumber = Number(initialNonce || 0);
   const evidenceFinalNonce = Number(primaryFinalizationEvidence?.finalNonce ?? NaN);

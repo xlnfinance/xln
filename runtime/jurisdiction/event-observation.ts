@@ -47,9 +47,24 @@ export const canonicalDisputeFinalizationEvidenceKey = (evidence: DisputeFinaliz
   ]);
 };
 
+export const normalizeDisputeFinalizationEvidence = (
+  evidence: readonly DisputeFinalizationEvidence[] = [],
+): DisputeFinalizationEvidence[] => {
+  const ordered = evidence
+    .map((entry) => ({ key: canonicalDisputeFinalizationEvidenceKey(entry), entry: structuredClone(entry) }))
+    .sort((left, right) => left.key < right.key ? -1 : left.key > right.key ? 1 : 0);
+  for (let index = 1; index < ordered.length; index += 1) {
+    if (ordered[index - 1]!.key === ordered[index]!.key) {
+      throw new Error('J_DISPUTE_FINALIZATION_EVIDENCE_DUPLICATE');
+    }
+  }
+  return ordered.map(({ entry }) => entry);
+};
+
 export const canonicalDisputeFinalizationEvidenceHash = (
   evidence: readonly DisputeFinalizationEvidence[] = [],
 ): string => {
-  const keys = evidence.map(canonicalDisputeFinalizationEvidenceKey).sort();
+  const keys = normalizeDisputeFinalizationEvidence(evidence)
+    .map(canonicalDisputeFinalizationEvidenceKey);
   return ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(keys)));
 };

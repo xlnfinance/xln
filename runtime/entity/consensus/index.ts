@@ -88,6 +88,7 @@ import {
 import { buildQuorumHanko, signEntityHashes } from '../../hanko/signing';
 import {
   getJEventRangeValidationError,
+  isCertifiedJHistoryCorruption,
   pruneFinalizedValidatorJHistory,
 } from '../../jurisdiction/local-history';
 import { proposeAccountFrame } from '../../account/consensus/propose';
@@ -137,6 +138,7 @@ const getReplicaJRangeValidationError = (
       );
       if (error) return error;
     } catch (error) {
+      if (isCertifiedJHistoryCorruption(error)) throw error;
       return error instanceof Error ? error.message : String(error);
     }
   }

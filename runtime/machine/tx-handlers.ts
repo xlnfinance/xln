@@ -78,6 +78,21 @@ const rewindJHistoryRuntimeTx = (
   if (runtimeTx.data.conflictingHeight <= match.replica.state.lastFinalizedJHeight) {
     throw new Error(`J_HISTORY_FINALIZED_REORG:${runtimeTx.data.conflictingHeight}`);
   }
+  const signedRange = match.replica.lockedFrame?.txs.find((tx) =>
+    tx.type === 'j_event' &&
+    runtimeTx.data.conflictingHeight > Number(tx.data.baseHeight) &&
+    runtimeTx.data.conflictingHeight <= Number(tx.data.scannedThroughHeight));
+  if (signedRange && match.replica.lockedFrame) {
+    // A precommit cannot be revoked. Rewinding the watcher and later signing a
+    // different J prefix at the same Entity height would make this validator
+    // equivocate across settlement-chain forks. Preserve the lock and local
+    // evidence for forensics; an operator must resolve the chain-finality fault.
+    throw new Error(
+      `J_HISTORY_SIGNED_LOCK_REORG:entity=${entityId}:signer=${signerId}` +
+      `:frameHeight=${match.replica.lockedFrame.height}:frameHash=${match.replica.lockedFrame.hash}` +
+      `:jHeight=${runtimeTx.data.conflictingHeight}`,
+    );
+  }
   const rewound = rewindValidatorJHistory(match.replica.state, match.replica.jHistory);
   if (rewound) match.replica.jHistory = rewound;
   else delete match.replica.jHistory;
@@ -106,7 +121,7 @@ const observeJRangeRuntimeTx = (
     tipBlockHash: runtimeTx.data.tipBlockHash,
     ...(runtimeTx.data.headers ? { headers: runtimeTx.data.headers } : {}),
     blocks: runtimeTx.data.blocks,
-  });
+  }, match.replica.state);
   markStorageEntityDirty(env, entityId);
 };
 

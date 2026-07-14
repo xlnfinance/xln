@@ -88,6 +88,66 @@ const TRON_CHAIN_IDS = new Set<number>([728126428, 3448148188]);
 const TRON_FINALITY_DEPTH = 19;
 const rpcLog = createStructuredLogger('jadapter.rpc');
 
+type TxFinalizationEvidence = Omit<DisputeFinalizationEvidence, 'sender' | 'finalProofbodyHash'>;
+
+const toFinalizationDecimal = (value: unknown): string => {
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return value.toString();
+  if (typeof value === 'string' && /^(?:0|[1-9][0-9]*)$/.test(value.trim())) return value.trim();
+  throw new Error('J_DISPUTE_FINALIZATION_DECIMAL_INVALID');
+};
+
+const toFinalizationHex = (value: unknown): string => {
+  if (typeof value === 'string' && /^0x(?:[0-9a-fA-F]{2})*$/.test(value)) return value.toLowerCase();
+  throw new Error('J_DISPUTE_FINALIZATION_HEX_INVALID');
+};
+
+const depositoryTransactionInterface = Depository__factory.createInterface();
+
+/** Decode reducer sidecar data from a transaction that emitted DisputeFinalized. */
+export const decodeDisputeFinalizationEvidenceCalldata = (data: string): TxFinalizationEvidence[] => {
+  try {
+    const parsed = depositoryTransactionInterface.parseTransaction({ data });
+    if (!parsed) throw new Error('J_DISPUTE_FINALIZATION_CALLDATA_UNKNOWN');
+    if (parsed.name === 'processBatch') {
+      const encodedBatch = toFinalizationHex(parsed.args[0]);
+      if (encodedBatch === '0x') throw new Error('J_DISPUTE_FINALIZATION_BATCH_CALLDATA_MISSING');
+      const batch = decodeJBatch(encodedBatch);
+      return (batch.disputeFinalizations ?? []).map((finalization) => ({
+        counterentity: toFinalizationHex(finalization.counterentity),
+        initialNonce: toFinalizationDecimal(finalization.initialNonce),
+        finalNonce: toFinalizationDecimal(finalization.finalNonce),
+        initialProofbodyHash: toFinalizationHex(finalization.initialProofbodyHash),
+        leftArguments: toFinalizationHex(finalization.leftArguments),
+        rightArguments: toFinalizationHex(finalization.rightArguments),
+        starterInitialArguments: toFinalizationHex(finalization.starterInitialArguments),
+        starterIncrementedArguments: toFinalizationHex(finalization.starterIncrementedArguments),
+        sig: toFinalizationHex(finalization.sig),
+      }));
+    }
+    if (parsed.name === 'watchtowerCounterDispute') {
+      const proof = parsed.args[1] as unknown as Record<string, unknown>;
+      return [{
+        counterentity: toFinalizationHex(proof['counterentity']),
+        initialNonce: toFinalizationDecimal(proof['initialNonce']),
+        finalNonce: toFinalizationDecimal(proof['finalNonce']),
+        initialProofbodyHash: toFinalizationHex(proof['initialProofbodyHash']),
+        leftArguments: toFinalizationHex(proof['leftArguments']),
+        rightArguments: toFinalizationHex(proof['rightArguments']),
+        starterInitialArguments: toFinalizationHex(proof['starterInitialArguments']),
+        starterIncrementedArguments: toFinalizationHex(proof['starterIncrementedArguments']),
+        sig: toFinalizationHex(proof['sig']),
+      }];
+    }
+    throw new Error(`J_DISPUTE_FINALIZATION_CALLDATA_UNSUPPORTED:${parsed.name}`);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('J_DISPUTE_FINALIZATION_')) throw error;
+    throw new Error(
+      `J_DISPUTE_FINALIZATION_CALLDATA_DECODE_FAILED:${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+};
+
 const isTronChainId = (chainId: number): boolean => TRON_CHAIN_IDS.has(chainId);
 
 export const resolveWatcherPollToBlock = (
@@ -1994,9 +2054,6 @@ export async function createRpcAdapter(
         'event Transfer(address indexed from, address indexed to, uint256 value)',
         'event Approval(address indexed owner, address indexed spender, uint256 value)',
       ]);
-      const processBatchIface = new ethers.Interface([
-        'function processBatch(bytes encodedBatch, bytes hankoData, uint256 nonce)',
-      ]);
       let erc20WatchTokensCache: Array<{ tokenId: number; address: string }> = [];
       let erc20WatchTokensLoadedAt = 0;
       const normalizeEvmAddress = (value: unknown): string => {
@@ -2022,6 +2079,13 @@ export async function createRpcAdapter(
             event: 'j_watch_erc20_registry_read_failed',
             error: watcherErrorDetails(error),
           });
+          // The token set defines which log addresses belong to the canonical
+          // observation. Advancing the cursor with a stale/empty registry can
+          // permanently omit a newly registered token's Transfer/Approval.
+          // Abort this poll so the same block range is retried after RPC heals.
+          throw new Error(
+            `J_WATCH_ERC20_REGISTRY_READ_FAILED:${error instanceof Error ? error.message : String(error)}`,
+          );
         }
         erc20WatchTokensCache = tokens;
         erc20WatchTokensLoadedAt = now;
@@ -2098,81 +2162,70 @@ export async function createRpcAdapter(
           [...entityBlocks.values()].sort((left, right) => compareStableText(left.entityId, right.entityId)),
         ]));
       };
-      type TxFinalizationEvidence = Omit<DisputeFinalizationEvidence, 'sender' | 'finalProofbodyHash'>;
       const txFinalizationEvidenceCache = new Map<string, Promise<TxFinalizationEvidence[]>>();
-      const toDecimalString = (value: unknown): string => {
-        if (typeof value === 'bigint') return value.toString();
-        if (typeof value === 'number') return Number.isFinite(value) ? Math.floor(value).toString() : '';
-        if (typeof value === 'string') return value.trim();
-        return '';
-      };
-      const toHexString = (value: unknown): string => {
-        if (typeof value === 'string' && value.startsWith('0x')) return value;
-        return '0x';
-      };
-      const readTxFinalizationEvidence = (txHash: string): Promise<TxFinalizationEvidence[]> => {
+      const readTxFinalizationEvidence = async (txHash: string): Promise<TxFinalizationEvidence[]> => {
         const normalizedHash = String(txHash || '').toLowerCase();
-        if (!normalizedHash || normalizedHash === '0x') return Promise.resolve([]);
+        if (!normalizedHash || normalizedHash === '0x') {
+          throw new Error('J_DISPUTE_FINALIZATION_TX_HASH_MISSING');
+        }
         const cached = txFinalizationEvidenceCache.get(normalizedHash);
-        if (cached) return cached;
+        if (cached) return await cached;
         const promise = (async (): Promise<TxFinalizationEvidence[]> => {
-          try {
-            const txProvider = provider as Provider & {
-              getTransaction?: (hash: string) => Promise<{ data?: string } | null>;
-            };
-            if (typeof txProvider.getTransaction !== 'function') return [];
-            const tx = await txProvider.getTransaction(txHash);
-            const data = typeof tx?.data === 'string' ? tx.data : '';
-            if (!data || data === '0x') return [];
-            const parsed = processBatchIface.parseTransaction({ data });
-            if (!parsed || parsed.name !== 'processBatch') return [];
-            const encodedBatch = toHexString(parsed.args[0]);
-            if (encodedBatch === '0x') return [];
-            const batch = decodeJBatch(encodedBatch);
-            return (batch.disputeFinalizations ?? []).map((finalization) => ({
-              counterentity: toHexString(finalization.counterentity),
-              initialNonce: toDecimalString(finalization.initialNonce),
-              finalNonce: toDecimalString(finalization.finalNonce),
-              initialProofbodyHash: toHexString(finalization.initialProofbodyHash),
-              leftArguments: toHexString(finalization.leftArguments),
-              rightArguments: toHexString(finalization.rightArguments),
-              starterInitialArguments: toHexString(finalization.starterInitialArguments),
-              starterIncrementedArguments: toHexString(finalization.starterIncrementedArguments),
-              sig: toHexString(finalization.sig),
-            }));
-          } catch {
-            return [];
+          const txProvider = provider as Provider & {
+            getTransaction?: (hash: string) => Promise<{ data?: string } | null>;
+          };
+          if (typeof txProvider.getTransaction !== 'function') {
+            throw new Error('J_DISPUTE_FINALIZATION_TX_LOOKUP_UNAVAILABLE');
           }
+          const tx = await txProvider.getTransaction(txHash);
+          const data = typeof tx?.data === 'string' ? tx.data : '';
+          if (!data || data === '0x') {
+            throw new Error(`J_DISPUTE_FINALIZATION_TX_CALLDATA_MISSING:${normalizedHash}`);
+          }
+          return decodeDisputeFinalizationEvidenceCalldata(data);
         })();
         txFinalizationEvidenceCache.set(normalizedHash, promise);
         if (txFinalizationEvidenceCache.size > 2_000) {
           const oldest = txFinalizationEvidenceCache.keys().next().value;
           if (oldest) txFinalizationEvidenceCache.delete(oldest);
         }
-        return promise;
+        try {
+          return await promise;
+        } catch (error) {
+          // A transient RPC failure must be retryable on the next watcher poll;
+          // retaining a rejected Promise would permanently poison this tx hash.
+          if (txFinalizationEvidenceCache.get(normalizedHash) === promise) {
+            txFinalizationEvidenceCache.delete(normalizedHash);
+          }
+          throw error;
+        }
       };
       const findDisputeFinalizationEvidence = async (
         txHash: string,
         args: RawJEventArgs,
       ): Promise<DisputeFinalizationEvidence | undefined> => {
         const candidates = await readTxFinalizationEvidence(txHash);
-        if (candidates.length === 0) return undefined;
+        if (candidates.length === 0) {
+          throw new Error(`J_DISPUTE_FINALIZATION_EVIDENCE_EMPTY:${String(txHash).toLowerCase()}`);
+        }
         const counterentity = String(args['counterentity'] ?? '').toLowerCase();
-        const initialNonce = toDecimalString(args['initialNonce']);
+        const initialNonce = toFinalizationDecimal(args['initialNonce']);
         const initialProofbodyHash = String(args['initialProofbodyHash'] ?? '').toLowerCase();
         const matched = candidates.find((candidate) =>
           candidate.counterentity.toLowerCase() === counterentity &&
           candidate.initialNonce === initialNonce &&
           candidate.initialProofbodyHash.toLowerCase() === initialProofbodyHash
         );
-        if (!matched) return undefined;
+        if (!matched) {
+          throw new Error(`J_DISPUTE_FINALIZATION_EVIDENCE_NOT_FOUND:${String(txHash).toLowerCase()}`);
+        }
         return {
-          sender: toHexString(args['sender']),
+          sender: toFinalizationHex(args['sender']),
           counterentity: matched.counterentity,
           initialNonce: matched.initialNonce,
           finalNonce: matched.finalNonce,
           initialProofbodyHash: matched.initialProofbodyHash,
-          finalProofbodyHash: toHexString(args['finalProofbodyHash']),
+          finalProofbodyHash: toFinalizationHex(args['finalProofbodyHash']),
           leftArguments: matched.leftArguments,
           rightArguments: matched.rightArguments,
           starterInitialArguments: matched.starterInitialArguments,

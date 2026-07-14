@@ -952,7 +952,7 @@ export function buildRawJEventsRuntimeInput(
     runtimeTxs.push(observeTx);
 
     if (emitRange && isEntityActiveLeader(replica)) {
-      const tentativeHistory = recordValidatorJHistory(replica.jHistory, observeTx.data);
+      const tentativeHistory = recordValidatorJHistory(replica.jHistory, observeTx.data, replica.state);
       const unsignedRange = buildUnsignedJEventRange(replica.state, tentativeHistory);
       if (!unsignedRange) throw new Error(`J_HISTORY_RANGE_NOT_AHEAD:${entityId}:${blockNumber}`);
       const signature = signAccountFrame(env, signerId, buildJEventRangeDigest({
@@ -1091,7 +1091,7 @@ export function buildJHistoryRangeRuntimeInput(
     }
     let tentativeHistory = replica.jHistory;
     for (const observation of observations) {
-      tentativeHistory = recordValidatorJHistory(tentativeHistory, observation.data);
+      tentativeHistory = recordValidatorJHistory(tentativeHistory, observation.data, replica.state);
     }
     const normalizedTipBlockHash = String(tipBlockHash).toLowerCase();
     if (
@@ -1112,7 +1112,7 @@ export function buildJHistoryRangeRuntimeInput(
           blocks: [],
         },
       };
-      tentativeHistory = recordValidatorJHistory(tentativeHistory, scanTipObservation.data);
+      tentativeHistory = recordValidatorJHistory(tentativeHistory, scanTipObservation.data, replica.state);
       runtimeTxs.push(scanTipObservation);
     }
     replicaKeys.push(replicaKey);

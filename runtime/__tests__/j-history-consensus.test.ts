@@ -2,27 +2,40 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildJEventRangeDigest,
   canonicalJEventRangeHash,
+  canonicalJHistoryObservationLeaf,
   EMPTY_J_HISTORY_ROOT,
   foldJHistoryRoot,
   getJHistoryRegistrationBaseHeight,
 } from '../jurisdiction/history-consensus';
-import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
+import {
+  canonicalDisputeFinalizationEvidenceHash,
+  canonicalJurisdictionEventsHash,
+} from '../jurisdiction/event-observation';
 import { compareCanonicalJurisdictionEvents } from '../jurisdiction/event-normalization';
 import { createEntityFrameHash } from '../entity/consensus/frame';
 import { applyEntityInput } from '../entity/consensus/index';
 import { createEmptyEnv } from '../runtime';
+import {
+  deriveSignerAddressSync,
+  deriveSignerKeySync,
+  registerSignerKey,
+  signAccountFrame,
+  verifyAccountSignature,
+} from '../account/crypto';
 import { applyRuntimeTx } from '../machine/tx-handlers';
 import {
   buildUnsignedJEventRange,
   getValidatorJExpectedBlockHash,
   getJEventRangeValidationError,
   pruneFinalizedValidatorJHistory,
+  reconcileJEventRangeWithFinalizedState,
   recordValidatorJHistory,
   rewindValidatorJHistory,
 } from '../jurisdiction/local-history';
 import type { EntityReplica, EntityState, JurisdictionEvent, ValidatorJEventBlock } from '../types';
 
-const jurisdictionRef = 'eip155:31337:0xdepository';
+const depositoryAddress = `0x${'dd'.repeat(20)}`;
+const jurisdictionRef = `stack:31337:${depositoryAddress}`;
 const entityId = `0x${'ee'.repeat(32)}`;
 const leaderId = `0x${'11'.repeat(20)}`;
 const validatorId = `0x${'22'.repeat(20)}`;
@@ -60,6 +73,11 @@ const state = (): EntityState => ({
     threshold: 2n,
     validators: [leaderId, validatorId],
     shares: { [leaderId]: 1n, [validatorId]: 1n },
+    jurisdiction: {
+      name: 'JHistoryTestnet',
+      chainId: 31337,
+      depositoryAddress,
+    },
   },
   reserves: new Map(),
   accounts: new Map(),
@@ -86,6 +104,20 @@ describe('J validator-local history and Entity-finalized ranges', () => {
       first,
       { ...first, eventsHash: `0x${'22'.repeat(32)}` },
     ])).toThrow('J_HISTORY_EQUIVOCATION_AT_HEIGHT:7');
+  });
+
+  test('matches the independently fixed evidence-bound J-history leaf vector', () => {
+    const observation = {
+      jurisdictionRef: 'stack:31337:0x00000000000000000000000000000000000000dd',
+      jHeight: 7,
+      jBlockHash: `0x${'11'.repeat(32)}`,
+      eventsHash: `0x${'22'.repeat(32)}`,
+      disputeFinalizationEvidenceHash: `0x${'33'.repeat(32)}`,
+    };
+    expect(canonicalJHistoryObservationLeaf(observation))
+      .toBe('0x102170f17aafa712ef03a338733ddd7f690fb9888b9062ed91e3cf8d48b771bb');
+    expect(foldJHistoryRoot(EMPTY_J_HISTORY_ROOT, [observation]))
+      .toBe('0xee3695ffeafd31c849dd235ee631c09389a477eba163b82e22187857cb61e308');
   });
 
   test('range digest binds proposer, exact body, range and history root', () => {
@@ -194,6 +226,163 @@ describe('J validator-local history and Entity-finalized ranges', () => {
     substituted.blocks[0]!.eventsHash = `0x${'ff'.repeat(32)}`;
     expect(() => getJEventRangeValidationError(state(), validatorHistory, substituted, 'leader'))
       .toThrow('J_HISTORY_LOCAL_EVENTS_HASH_MISMATCH');
+  });
+
+  test('rejects validly signed proposer evidence that differs from the validator-local receipt evidence', () => {
+    const env = createEmptyEnv('j-evidence-prefix-agreement');
+    const signerId = deriveSignerAddressSync(env.runtimeSeed!, 'evidence-proposer').toLowerCase();
+    registerSignerKey(signerId, deriveSignerKeySync(env.runtimeSeed!, 'evidence-proposer'));
+    const finalizedEvent: JurisdictionEvent = {
+      blockNumber: 7,
+      blockHash: blockHash(7),
+      transactionHash: `0x${'a7'.repeat(32)}`,
+      logIndex: 0,
+      type: 'DisputeFinalized',
+      data: {
+        sender: entityId,
+        counterentity: `0x${'cc'.repeat(32)}`,
+        initialNonce: '1',
+        initialProofbodyHash: `0x${'31'.repeat(32)}`,
+        finalProofbodyHash: `0x${'32'.repeat(32)}`,
+      },
+    };
+    const localEvidence = [{
+      sender: entityId,
+      counterentity: `0x${'cc'.repeat(32)}`,
+      initialNonce: '1',
+      finalNonce: '2',
+      initialProofbodyHash: `0x${'31'.repeat(32)}`,
+      finalProofbodyHash: `0x${'32'.repeat(32)}`,
+      leftArguments: '0x',
+      rightArguments: '0x',
+      starterInitialArguments: '0x',
+      starterIncrementedArguments: '0x',
+      sig: '0x01',
+    }];
+    const localBlock: ValidatorJEventBlock = {
+      jurisdictionRef,
+      jHeight: 7,
+      jBlockHash: blockHash(7),
+      eventsHash: canonicalJurisdictionEventsHash([finalizedEvent]),
+      events: [finalizedEvent],
+      disputeFinalizationEvidence: localEvidence,
+      disputeFinalizationEvidenceHash: canonicalDisputeFinalizationEvidenceHash(localEvidence),
+    };
+    const history = recordValidatorJHistory(undefined, {
+      jurisdictionRef,
+      scannedThroughHeight: 7,
+      tipBlockHash: blockHash(7),
+      blocks: [localBlock],
+    });
+    const unsigned = buildUnsignedJEventRange(state(), history)!;
+    const forgedEvidence = [{
+      ...localEvidence[0]!,
+      finalNonce: '999999',
+      leftArguments: '0x1234',
+    }];
+    const forgedBlocks = structuredClone(unsigned.blocks);
+    forgedBlocks[0]!.disputeFinalizationEvidence = forgedEvidence;
+    forgedBlocks[0]!.disputeFinalizationEvidenceHash = canonicalDisputeFinalizationEvidenceHash(forgedEvidence);
+    const forgedUnsigned = {
+      ...unsigned,
+      eventHistoryRoot: foldJHistoryRoot(EMPTY_J_HISTORY_ROOT, [{
+        jurisdictionRef,
+        jHeight: 7,
+        jBlockHash: blockHash(7),
+        eventsHash: forgedBlocks[0]!.eventsHash,
+        disputeFinalizationEvidenceHash: forgedBlocks[0]!.disputeFinalizationEvidenceHash,
+      }]),
+      rangeHash: canonicalJEventRangeHash(jurisdictionRef, forgedBlocks),
+      blocks: forgedBlocks,
+    };
+    const digest = buildJEventRangeDigest({ entityId, signerId, ...forgedUnsigned });
+    const signature = signAccountFrame(env, signerId, digest);
+    expect(verifyAccountSignature(env, signerId, digest, signature)).toBe(true);
+
+    expect(getJEventRangeValidationError(
+      state(),
+      history,
+      { from: signerId, signature, observedAt: 7, ...forgedUnsigned },
+      signerId,
+    )).toBe('J_RANGE_EVENT_BLOCK_MISMATCH');
+
+    const certifiedState = state();
+    certifiedState.lastFinalizedJHeight = 7;
+    certifiedState.jBlockChain = [{
+      jurisdictionRef,
+      jHeight: 7,
+      jBlockHash: localBlock.jBlockHash,
+      eventsHash: localBlock.eventsHash,
+      disputeFinalizationEvidenceHash: localBlock.disputeFinalizationEvidenceHash,
+      events: localBlock.events,
+      finalizedAt: 100,
+      proposerSignerId: signerId,
+      proposerSignature: signature,
+    }];
+    certifiedState.jHistoryFinality = {
+      jurisdictionRef,
+      baseHeight: 0,
+      finalizedThroughHeight: 7,
+      tipBlockHash: blockHash(7),
+      eventHistoryRoot: unsigned.eventHistoryRoot,
+      proposerSignerId: signerId,
+      proposerSignature: signature,
+      entityHeight: certifiedState.height,
+    };
+    expect(() => reconcileJEventRangeWithFinalizedState(certifiedState, {
+      from: signerId,
+      signature,
+      observedAt: 7,
+      ...forgedUnsigned,
+    })).toThrow('J_RANGE_FINALIZED_PREFIX_CONFLICT:7');
+  });
+
+  test('stores reducer evidence in canonical order instead of watcher delivery order', () => {
+    const finalizedEvent: JurisdictionEvent = {
+      blockNumber: 7,
+      blockHash: blockHash(7),
+      transactionHash: `0x${'b7'.repeat(32)}`,
+      logIndex: 0,
+      type: 'DisputeFinalized',
+      data: {
+        sender: entityId,
+        counterentity: `0x${'cc'.repeat(32)}`,
+        initialNonce: '1',
+        initialProofbodyHash: `0x${'41'.repeat(32)}`,
+        finalProofbodyHash: `0x${'42'.repeat(32)}`,
+      },
+    };
+    const evidence = ['2', '999999'].map((finalNonce) => ({
+      sender: entityId,
+      counterentity: `0x${'cc'.repeat(32)}`,
+      initialNonce: '1',
+      finalNonce,
+      initialProofbodyHash: `0x${'41'.repeat(32)}`,
+      finalProofbodyHash: `0x${'42'.repeat(32)}`,
+      leftArguments: finalNonce === '2' ? '0x12' : '0x99',
+      rightArguments: '0x',
+      starterInitialArguments: '0x',
+      starterIncrementedArguments: '0x',
+      sig: '0x01',
+    }));
+    const makeHistory = (orderedEvidence: typeof evidence) => recordValidatorJHistory(undefined, {
+      jurisdictionRef,
+      scannedThroughHeight: 7,
+      tipBlockHash: blockHash(7),
+      blocks: [{
+        jurisdictionRef,
+        jHeight: 7,
+        jBlockHash: blockHash(7),
+        eventsHash: canonicalJurisdictionEventsHash([finalizedEvent]),
+        events: [finalizedEvent],
+        disputeFinalizationEvidence: orderedEvidence,
+        disputeFinalizationEvidenceHash: canonicalDisputeFinalizationEvidenceHash(orderedEvidence),
+      }],
+    });
+
+    const forward = makeHistory(evidence).eventBlocks.get(7)?.disputeFinalizationEvidence;
+    const reversed = makeHistory([...evidence].reverse()).eventBlocks.get(7)?.disputeFinalizationEvidence;
+    expect(reversed).toEqual(forward);
   });
 
   test('validator rejects a proposal that omits an eventful local J block before precommit', async () => {
@@ -317,6 +506,416 @@ describe('J validator-local history and Entity-finalized ranges', () => {
         conflictingBlockHash: blockHash(10),
       },
     })).rejects.toThrow('J_HISTORY_FINALIZED_REORG:10');
+  });
+
+  test('halts when a private-chain reorg crosses a locally signed Entity-frame lock', async () => {
+    const env = createEmptyEnv('j-signed-lock-reorg');
+    const entityState = state();
+    entityState.lastFinalizedJHeight = 10;
+    entityState.jHistoryFinality = {
+      jurisdictionRef,
+      baseHeight: 0,
+      finalizedThroughHeight: 10,
+      tipBlockHash: blockHash(10),
+      eventHistoryRoot: EMPTY_J_HISTORY_ROOT,
+      proposerSignerId: leaderId,
+      proposerSignature: '0xsig',
+      entityHeight: entityState.height,
+    };
+    const localHistory = recordValidatorJHistory(undefined, {
+      jurisdictionRef,
+      scannedThroughHeight: 12,
+      tipBlockHash: blockHash(12),
+      headers: [10, 11, 12].map((jHeight) => ({ jHeight, jBlockHash: blockHash(jHeight) })),
+      blocks: [eventBlock(12, '12')],
+    }, entityState);
+    const unsignedRange = buildUnsignedJEventRange(entityState, localHistory);
+    if (!unsignedRange) throw new Error('TEST_J_RANGE_MISSING');
+    const lockedFrame = {
+      height: entityState.height + 1,
+      txs: [{
+        type: 'j_event' as const,
+        data: { from: leaderId, signature: '0xsig', observedAt: 12, ...unsignedRange },
+      }],
+      hash: `0x${'ab'.repeat(32)}`,
+      newState: { ...entityState, height: entityState.height + 1 },
+      leader: { proposerSignerId: leaderId, view: 0 },
+      collectedSigs: new Map([[validatorId, ['0xprecommit']]]),
+    };
+    const replica: EntityReplica = {
+      entityId,
+      signerId: validatorId,
+      state: entityState,
+      mempool: [],
+      isProposer: false,
+      jHistory: localHistory,
+      lockedFrame,
+      validatorComputedState: lockedFrame.newState,
+    };
+    env.eReplicas.set(`${entityId}:${validatorId}`, replica);
+
+    await expect(applyRuntimeTx(env, {
+      type: 'rewindJHistory',
+      data: {
+        entityId,
+        signerId: validatorId,
+        jurisdictionRef,
+        conflictingHeight: 12,
+        conflictingBlockHash: `0x${'cc'.repeat(32)}`,
+      },
+    })).rejects.toThrow('J_HISTORY_SIGNED_LOCK_REORG');
+    expect(replica.jHistory?.scannedThroughHeight).toBe(12);
+    expect(replica.lockedFrame?.hash).toBe(lockedFrame.hash);
+    expect(replica.validatorComputedState?.height).toBe(entityState.height + 1);
+  });
+
+  test('treats the Entity-certified anchor as authoritative when local history is restored empty', async () => {
+    const env = createEmptyEnv('j-certified-anchor-authority');
+    const entityState = state();
+    entityState.lastFinalizedJHeight = 10;
+    entityState.jHistoryFinality = {
+      jurisdictionRef,
+      baseHeight: 0,
+      finalizedThroughHeight: 10,
+      tipBlockHash: blockHash(10),
+      eventHistoryRoot: EMPTY_J_HISTORY_ROOT,
+      proposerSignerId: leaderId,
+      proposerSignature: '0xsig',
+      entityHeight: entityState.height,
+    };
+    const replica: EntityReplica = {
+      entityId,
+      signerId: leaderId,
+      state: entityState,
+      mempool: [],
+      isProposer: true,
+    };
+    env.eReplicas.set(`${entityId}:${leaderId}`, replica);
+
+    await expect(applyRuntimeTx(env, {
+      type: 'observeJRange',
+      data: {
+        entityId,
+        signerId: leaderId,
+        jurisdictionRef,
+        scannedThroughHeight: 12,
+        tipBlockHash: blockHash(12),
+        headers: [
+          { jHeight: 10, jBlockHash: `0x${'bb'.repeat(32)}` },
+          { jHeight: 12, jBlockHash: blockHash(12) },
+        ],
+        blocks: [],
+      },
+    })).rejects.toThrow('J_HISTORY_FINALIZED_REORG:10');
+    expect(replica.jHistory).toBeUndefined();
+  });
+
+  test('rejects a restored local header conflicting with any certified event block in the prefix', async () => {
+    const env = createEmptyEnv('j-certified-prefix-authority');
+    const entityState = state();
+    const finalizedEvent = eventBlock(7, '7');
+    entityState.lastFinalizedJHeight = 10;
+    entityState.jBlockChain = [{
+      jurisdictionRef,
+      jHeight: finalizedEvent.jHeight,
+      jBlockHash: finalizedEvent.jBlockHash,
+      eventsHash: finalizedEvent.eventsHash,
+      events: structuredClone(finalizedEvent.events),
+      finalizedAt: entityState.timestamp,
+      proposerSignerId: leaderId,
+      proposerSignature: '0xsig',
+    }];
+    entityState.jHistoryFinality = {
+      jurisdictionRef,
+      baseHeight: 0,
+      finalizedThroughHeight: 10,
+      tipBlockHash: blockHash(10),
+      eventHistoryRoot: foldJHistoryRoot(EMPTY_J_HISTORY_ROOT, [finalizedEvent]),
+      proposerSignerId: leaderId,
+      proposerSignature: '0xsig',
+      entityHeight: entityState.height,
+    };
+    const replica: EntityReplica = {
+      entityId,
+      signerId: leaderId,
+      state: entityState,
+      mempool: [],
+      isProposer: true,
+    };
+    env.eReplicas.set(`${entityId}:${leaderId}`, replica);
+
+    await expect(applyRuntimeTx(env, {
+      type: 'observeJRange',
+      data: {
+        entityId,
+        signerId: leaderId,
+        jurisdictionRef,
+        scannedThroughHeight: 12,
+        tipBlockHash: blockHash(12),
+        headers: [{ jHeight: 7, jBlockHash: `0x${'cc'.repeat(32)}` }],
+        blocks: [],
+      },
+    })).rejects.toThrow('J_HISTORY_FINALIZED_REORG:7');
+    expect(replica.jHistory).toBeUndefined();
+  });
+
+  test('rejects a certified finality root inconsistent with the certified event chain', () => {
+    const entityState = state();
+    const finalizedEvent = eventBlock(7, '7');
+    const laterEvent = eventBlock(12, '12');
+    const corruptRoot = `0x${'ff'.repeat(32)}`;
+    entityState.lastFinalizedJHeight = 10;
+    entityState.jBlockChain = [{
+      jurisdictionRef,
+      jHeight: finalizedEvent.jHeight,
+      jBlockHash: finalizedEvent.jBlockHash,
+      eventsHash: finalizedEvent.eventsHash,
+      events: structuredClone(finalizedEvent.events),
+      finalizedAt: entityState.timestamp,
+      proposerSignerId: leaderId,
+      proposerSignature: '0xsig',
+    }];
+    entityState.jHistoryFinality = {
+      jurisdictionRef,
+      baseHeight: 0,
+      finalizedThroughHeight: 10,
+      tipBlockHash: blockHash(10),
+      eventHistoryRoot: corruptRoot,
+      proposerSignerId: leaderId,
+      proposerSignature: '0xsig',
+      entityHeight: entityState.height,
+    };
+    const blocks = [{
+      blockNumber: laterEvent.jHeight,
+      blockHash: laterEvent.jBlockHash,
+      eventsHash: laterEvent.eventsHash,
+      events: structuredClone(laterEvent.events),
+    }];
+
+    expect(() => reconcileJEventRangeWithFinalizedState(entityState, {
+      from: leaderId,
+      jurisdictionRef,
+      baseHeight: 10,
+      scannedThroughHeight: 12,
+      tipBlockHash: blockHash(12),
+      eventHistoryRoot: foldJHistoryRoot(corruptRoot, [laterEvent]),
+      rangeHash: canonicalJEventRangeHash(jurisdictionRef, blocks),
+      blocks,
+      signature: '0xsig',
+      observedAt: 12,
+    })).toThrow('J_HISTORY_FINALITY_ROOT_CORRUPTION');
+  });
+
+  test('requires certified finality once Entity state advances past its registration baseline', () => {
+    const entityState = state();
+    entityState.config.jurisdiction!.registrationBlock = 91;
+    entityState.lastFinalizedJHeight = 90;
+
+    expect(() => reconcileJEventRangeWithFinalizedState(entityState, {
+      from: leaderId,
+      jurisdictionRef,
+      baseHeight: 90,
+      scannedThroughHeight: 91,
+      tipBlockHash: blockHash(91),
+      eventHistoryRoot: EMPTY_J_HISTORY_ROOT,
+      rangeHash: canonicalJEventRangeHash(jurisdictionRef, []),
+      blocks: [],
+      signature: '0xsig',
+      observedAt: 91,
+    })).not.toThrow();
+
+    entityState.lastFinalizedJHeight = 91;
+    expect(() => reconcileJEventRangeWithFinalizedState(entityState, {
+      from: leaderId,
+      jurisdictionRef,
+      baseHeight: 91,
+      scannedThroughHeight: 92,
+      tipBlockHash: blockHash(92),
+      eventHistoryRoot: EMPTY_J_HISTORY_ROOT,
+      rangeHash: canonicalJEventRangeHash(jurisdictionRef, []),
+      blocks: [],
+      signature: '0xsig',
+      observedAt: 92,
+    })).toThrow('J_HISTORY_FINALITY_MISSING');
+  });
+
+  test('propagates certified-history corruption instead of classifying it as a proposer mismatch', async () => {
+    const entityState = state();
+    const finalizedEvent = eventBlock(7, '7');
+    entityState.lastFinalizedJHeight = 10;
+    entityState.jBlockChain = [{
+      jurisdictionRef,
+      jHeight: finalizedEvent.jHeight,
+      jBlockHash: finalizedEvent.jBlockHash,
+      eventsHash: finalizedEvent.eventsHash,
+      events: structuredClone(finalizedEvent.events),
+      finalizedAt: entityState.timestamp,
+      proposerSignerId: leaderId,
+      proposerSignature: '0xsig',
+    }];
+    entityState.jHistoryFinality = {
+      jurisdictionRef,
+      baseHeight: 0,
+      finalizedThroughHeight: 10,
+      tipBlockHash: blockHash(10),
+      eventHistoryRoot: `0x${'ff'.repeat(32)}`,
+      proposerSignerId: leaderId,
+      proposerSignature: '0xsig',
+      entityHeight: entityState.height,
+    };
+    const replica: EntityReplica = {
+      entityId,
+      signerId: validatorId,
+      state: entityState,
+      mempool: [],
+      isProposer: false,
+    };
+
+    await expect(applyEntityInput(createEmptyEnv('j-certified-corruption-fatal'), replica, {
+      entityId,
+      signerId: validatorId,
+      proposedFrame: {
+        height: entityState.height + 1,
+        txs: [{
+          type: 'j_event',
+          data: {
+            from: leaderId,
+            jurisdictionRef,
+            baseHeight: 10,
+            scannedThroughHeight: 11,
+            tipBlockHash: blockHash(11),
+            eventHistoryRoot: `0x${'aa'.repeat(32)}`,
+            rangeHash: canonicalJEventRangeHash(jurisdictionRef, []),
+            blocks: [],
+            signature: '0xsig',
+            observedAt: 11,
+          },
+        }],
+        hash: `0x${'11'.repeat(32)}`,
+        newState: {
+          ...entityState,
+          height: entityState.height + 1,
+          leaderState: { activeValidatorId: leaderId, view: 0, changedAtHeight: 0 },
+        },
+        leader: { proposerSignerId: leaderId, view: 0 },
+      },
+    })).rejects.toThrow('J_HISTORY_FINALITY_ROOT_CORRUPTION');
+    expect(replica.lockedFrame).toBeUndefined();
+  });
+
+  test('reconciles a matching signed overlap to its suffix and rejects a conflicting prefix', () => {
+    const entityState = state();
+    const first = eventBlock(7, '7');
+    entityState.lastFinalizedJHeight = 10;
+    entityState.jBlockChain = [{
+      jurisdictionRef,
+      jHeight: first.jHeight,
+      jBlockHash: first.jBlockHash,
+      eventsHash: first.eventsHash,
+      events: structuredClone(first.events),
+      finalizedAt: entityState.timestamp,
+      proposerSignerId: leaderId,
+      proposerSignature: '0xsig',
+    }];
+    entityState.jHistoryFinality = {
+      jurisdictionRef,
+      baseHeight: 0,
+      finalizedThroughHeight: 10,
+      tipBlockHash: blockHash(10),
+      eventHistoryRoot: foldJHistoryRoot(EMPTY_J_HISTORY_ROOT, [first]),
+      proposerSignerId: leaderId,
+      proposerSignature: '0xsig',
+      entityHeight: entityState.height,
+    };
+    const later = eventBlock(12, '12');
+    const blocks = [first, later].map((block) => ({
+      blockNumber: block.jHeight,
+      blockHash: block.jBlockHash,
+      eventsHash: block.eventsHash,
+      events: structuredClone(block.events),
+    }));
+    const matching = {
+      from: leaderId,
+      jurisdictionRef,
+      baseHeight: 0,
+      scannedThroughHeight: 12,
+      tipBlockHash: blockHash(12),
+      eventHistoryRoot: foldJHistoryRoot(EMPTY_J_HISTORY_ROOT, [first, later]),
+      rangeHash: canonicalJEventRangeHash(jurisdictionRef, blocks),
+      blocks,
+      signature: '0xsig',
+      observedAt: 12,
+    };
+
+    const reconciled = reconcileJEventRangeWithFinalizedState(entityState, matching);
+    expect(reconciled.kind).toBe('suffix');
+    if (reconciled.kind === 'suffix') {
+      expect(reconciled.baseHeight).toBe(10);
+      expect(reconciled.blocks.map((block) => block.blockNumber)).toEqual([12]);
+    }
+
+    const conflicting = structuredClone(matching);
+    conflicting.blocks[0]!.blockHash = `0x${'cc'.repeat(32)}`;
+    expect(() => reconcileJEventRangeWithFinalizedState(entityState, conflicting))
+      .toThrow('J_RANGE_FINALIZED_PREFIX_CONFLICT:7');
+  });
+
+  test('treats a fully finalized matching range as an idempotent no-op', () => {
+    const entityState = state();
+    const finalized = eventBlock(7, '7');
+    entityState.lastFinalizedJHeight = 10;
+    entityState.jBlockChain = [{
+      jurisdictionRef,
+      jHeight: finalized.jHeight,
+      jBlockHash: finalized.jBlockHash,
+      eventsHash: finalized.eventsHash,
+      events: structuredClone(finalized.events),
+      finalizedAt: entityState.timestamp,
+      proposerSignerId: leaderId,
+      proposerSignature: '0xsig',
+    }];
+    entityState.jHistoryFinality = {
+      jurisdictionRef,
+      baseHeight: 0,
+      finalizedThroughHeight: 10,
+      tipBlockHash: blockHash(10),
+      eventHistoryRoot: foldJHistoryRoot(EMPTY_J_HISTORY_ROOT, [finalized]),
+      proposerSignerId: leaderId,
+      proposerSignature: '0xsig',
+      entityHeight: entityState.height,
+    };
+    const blocks = [{
+      blockNumber: finalized.jHeight,
+      blockHash: finalized.jBlockHash,
+      eventsHash: finalized.eventsHash,
+      events: structuredClone(finalized.events),
+    }];
+    const result = reconcileJEventRangeWithFinalizedState(entityState, {
+      from: leaderId,
+      jurisdictionRef,
+      baseHeight: 0,
+      scannedThroughHeight: 10,
+      tipBlockHash: blockHash(10),
+      eventHistoryRoot: entityState.jHistoryFinality.eventHistoryRoot,
+      rangeHash: canonicalJEventRangeHash(jurisdictionRef, blocks),
+      blocks,
+      signature: '0xsig',
+      observedAt: 10,
+    });
+
+    expect(result).toEqual({ kind: 'noop' });
+    expect(() => reconcileJEventRangeWithFinalizedState(entityState, {
+      from: leaderId,
+      jurisdictionRef,
+      baseHeight: 0,
+      scannedThroughHeight: 7,
+      tipBlockHash: `0x${'ab'.repeat(32)}`,
+      eventHistoryRoot: entityState.jHistoryFinality!.eventHistoryRoot,
+      rangeHash: canonicalJEventRangeHash(jurisdictionRef, blocks),
+      blocks,
+      signature: '0xsig',
+      observedAt: 7,
+    })).toThrow('J_RANGE_FINALIZED_TIP_CONFLICT:7');
   });
 
   test('starts history at registration and orders events by EVM log position', () => {

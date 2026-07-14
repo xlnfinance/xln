@@ -85,6 +85,9 @@ export const buildJEventRangeData = (
       jHeight: data.blockNumber,
       jBlockHash: data.blockHash,
       eventsHash,
+      ...(data.disputeFinalizationEvidenceHash
+        ? { disputeFinalizationEvidenceHash: data.disputeFinalizationEvidenceHash }
+        : {}),
     }]),
     rangeHash: canonicalJEventRangeHash(jurisdictionRef, blocks),
     blocks,
