@@ -446,6 +446,22 @@ export const assertCertifiedOutputSemanticAuthority = (
       assertSemanticTarget(tx.type, target, routeBookOwner(route));
       return;
     }
+    case 'crossJurisdictionBookOrderRemoved': {
+      const route = requireSemanticRoute(currentState, tx.data.orderId, tx.data.route);
+      if (normalizeEntityRef(tx.data.sourceEntityId) !== normalizeEntityRef(route.source.entityId)) {
+        throw new Error(
+          `CONSENSUS_OUTPUT_BOOK_REMOVAL_SOURCE_MISMATCH:${tx.data.sourceEntityId}:${route.source.entityId}`,
+        );
+      }
+      if (normalizeEntityRef(tx.data.sourceAccountId) !== normalizeEntityRef(route.source.entityId)) {
+        throw new Error(
+          `CONSENSUS_OUTPUT_BOOK_REMOVAL_ACCOUNT_MISMATCH:${tx.data.sourceAccountId}:${route.source.entityId}`,
+        );
+      }
+      assertSemanticSource(tx.type, source, [routeBookOwner(route)]);
+      assertSemanticTarget(tx.type, target, route.source.counterpartyEntityId);
+      return;
+    }
     case 'requestCrossJurisdictionClear': {
       const route = requireSemanticRoute(currentState, tx.data.orderId, tx.data.route);
       assertSemanticSource(tx.type, source, [

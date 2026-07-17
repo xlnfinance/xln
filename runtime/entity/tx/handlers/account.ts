@@ -55,7 +55,11 @@ export {
   normalizeSwapOfferForOrderbook,
   sortSwapOffersForOrderbook,
 } from './account/orderbook-offers';
-export { processOrderbookCancels } from './account/orderbook-cancels';
+export {
+  collectCommittedCrossJurisdictionCancelAcks,
+  processOrderbookCancels,
+  routeRemoteCrossJurisdictionBookCancels,
+} from './account/orderbook-cancels';
 export { processOrderbookSwaps } from './account/orderbook-matching';
 export type {
   MatchResult,

@@ -147,6 +147,17 @@ export interface CrossJurisdictionBookAdmission {
   closedAt?: number;
   closeReason?: string;
   pendingFill?: CrossJurisdictionPendingFill;
+  /**
+   * Durable source-hub continuation for a committed Account cancel. The book
+   * row is removed before this continuation can queue the terminal Account ACK.
+   * A previously accepted fill still commits first and advances fillSeq.
+   */
+  pendingCancel?: {
+    sourceAccountId: string;
+    requestedAt: number;
+    bookRemovalCommittedAt?: number;
+    reason?: string;
+  };
   updatedAt: number;
 }
 

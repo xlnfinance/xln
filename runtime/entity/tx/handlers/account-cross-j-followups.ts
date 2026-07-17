@@ -13,6 +13,7 @@ import {
 import { deriveCanonicalCrossJurisdictionBookOwner } from '../../../extensions/cross-j/market';
 import {
   buildCrossJurisdictionBookAdmissionReceipt,
+  crossJurisdictionBookAdmissionKeyFor,
   getCrossJurisdictionBookReceiptError,
   markCrossJurisdictionBookAdmissionClosed,
 } from '../../../extensions/cross-j/orderbook';
@@ -686,7 +687,23 @@ const applyFillAckFollowup = (
     normalizeEntityRef(newState.entityId) === normalizeEntityRef(route.source.counterpartyEntityId)
   ) {
     if (ratio >= CROSS_J_MAX_FILL_RATIO || accountTx.data.cancelRemainder) {
-      removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'fill_ack_closed');
+      const admission = newState.crossJurisdictionBookAdmissions?.get(
+        crossJurisdictionBookAdmissionKeyFor(route.source.entityId, route.orderId),
+      );
+      const removalAlreadyCommitted = Boolean(
+        accountTx.data.cancelRemainder && admission?.pendingCancel?.bookRemovalCommittedAt,
+      );
+      if (removalAlreadyCommitted) {
+        markCrossJurisdictionBookAdmissionClosed(
+          newState,
+          route.source.entityId,
+          route.orderId,
+          Number(newState.timestamp || env.timestamp || 0),
+          'cancel_ack_committed',
+        );
+      } else {
+        removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'fill_ack_closed');
+      }
       const selfSignerId = String(newState.config.validators[0] || '').trim().toLowerCase();
       if (!selfSignerId) {
         throw new Error(`CROSS_J_SELF_SIGNER_MISSING:${route.orderId}:${newState.entityId}`);

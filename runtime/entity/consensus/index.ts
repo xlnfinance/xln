@@ -65,8 +65,10 @@ import { appendAccountMempoolTx } from '../../account/mempool';
 import { queueAccountMempoolTx } from './account-mempool-queue';
 import {
   normalizeSwapOfferForOrderbook,
+  collectCommittedCrossJurisdictionCancelAcks,
   processOrderbookSwaps,
   processOrderbookCancels,
+  routeRemoteCrossJurisdictionBookCancels,
   type SwapCancelEvent,
   type SwapCancelRequestEvent,
   type SwapOfferEvent,
@@ -1218,6 +1220,7 @@ const buildCrossJurisdictionAdmissionFillNoticeOutput = (
     entityId: sourceHubEntityId,
     signerId: hintedSignerRaw,
     entityTxs: [buildCrossJurisdictionFillNoticeTx(tx, accountId)],
+    localRuntimeProtocol: 'cross-j',
   };
 };
 
@@ -1347,6 +1350,26 @@ const drainPendingCrossJurisdictionFillAcks = (
     });
   }
   return drained;
+};
+
+const drainCommittedCrossJurisdictionCancelAcks = (
+  env: Env,
+  currentEntityState: EntityState,
+  proposableAccounts: Set<string>,
+): number => {
+  let queued = 0;
+  for (const { accountId, tx } of collectCommittedCrossJurisdictionCancelAcks(currentEntityState)) {
+    const account = currentEntityState.accounts.get(accountId);
+    if (!account) {
+      throw new Error(`CROSS_J_CANCEL_ACK_ACCOUNT_MISSING:account=${accountId}:offer=${tx.data.offerId}`);
+    }
+    if (!queueAccountMempoolTx(account, tx)) continue;
+    proposableAccounts.add(accountId);
+    markStorageAccountDirty(env, currentEntityState.entityId, accountId);
+    markStorageEntityDirty(env, currentEntityState.entityId);
+    queued += 1;
+  }
+  return queued;
 };
 
 const assertCommittedSwapOfferMatchesEvent = (
@@ -1655,6 +1678,18 @@ const validateEntityInput = (input: EntityInput): boolean => {
 /**
  * Validates entity replica to prevent corrupted state
  */
+const isCrossJurisdictionLocalRuntimeTx = (tx: EntityTx): boolean =>
+  tx.type === 'runtimeOutput' && tx.data.protocol === 'cross-j';
+
+const isSingleSignerEntity = (state: EntityState): boolean => {
+  if (state.config.validators.length !== 1) return false;
+  try {
+    return BigInt(state.config.threshold ?? 0) === 1n;
+  } catch {
+    return false;
+  }
+};
+
 const validateEntityReplica = (replica: EntityReplica): boolean => {
   try {
     if (!replica.entityId || !replica.signerId) {
@@ -1666,7 +1701,7 @@ const validateEntityReplica = (replica: EntityReplica): boolean => {
       return false;
     }
     if (replica.mempool.length > LIMITS.MEMPOOL_SIZE) {
-      log.error(`❌ Mempool overflow: ${replica.mempool.length} > ${LIMITS.MEMPOOL_SIZE}`);
+      log.error(`❌ External mempool overflow: ${replica.mempool.length} > ${LIMITS.MEMPOOL_SIZE}`);
       return false;
     }
     return true;
@@ -1676,10 +1711,20 @@ const validateEntityReplica = (replica: EntityReplica): boolean => {
   }
 };
 
-const getEntityMempoolAdmissionError = (replica: EntityReplica, input: EntityInput): string | null => {
+const getEntityMempoolAdmissionError = (
+  replica: EntityReplica,
+  input: EntityInput,
+  trustedLocalCrossJurisdiction = false,
+): string | null => {
   if (!Array.isArray(input.entityTxs) || input.entityTxs.length === 0) return null;
-  const existing = Array.isArray(replica.mempool) ? replica.mempool.length : 0;
   const incoming = input.entityTxs.length;
+  if (trustedLocalCrossJurisdiction) {
+    if (!input.entityTxs.every(isCrossJurisdictionLocalRuntimeTx)) {
+      return 'trusted local cross-j lane contains a non-cross-j runtime transaction';
+    }
+    return null;
+  }
+  const existing = Array.isArray(replica.mempool) ? replica.mempool.length : 0;
   if (incoming > LIMITS.MEMPOOL_SIZE) {
     return `entityTxs overflow: ${incoming} > ${LIMITS.MEMPOOL_SIZE}`;
   }
@@ -2866,8 +2911,18 @@ export const applyEntityInput = async (
   env: Env,
   entityReplica: EntityReplica,
   entityInput: EntityInput,
+  options: { trustedLocalRuntimeProtocol?: 'cross-j' } = {},
 ): Promise<ApplyEntityInputResult> => {
-  const admissionError = getEntityMempoolAdmissionError(entityReplica, entityInput);
+  const trustedLocalCrossJurisdiction = options.trustedLocalRuntimeProtocol === 'cross-j';
+  if (trustedLocalCrossJurisdiction && !isSingleSignerEntity(entityReplica.state)) {
+    throw new Error(`CROSS_J_LOCAL_COMMAND_SINGLE_SIGNER_REQUIRED:${entityReplica.entityId}`);
+  }
+  let trustedLocalEntityTxs: EntityTx[] = [];
+  const admissionError = getEntityMempoolAdmissionError(
+    entityReplica,
+    entityInput,
+    trustedLocalCrossJurisdiction,
+  );
   if (admissionError) {
     log.error(`❌ Entity mempool admission rejected for ${entityInput.entityId}: ${admissionError}`);
     return {
@@ -3022,15 +3077,30 @@ export const applyEntityInput = async (
         entityLog.trace('tx.payload', { type: tx.type, data: tx.data });
       }
     }
-    workingReplica.mempool = prioritizeScheduledWakeTransactions(
-      prepareLocallyAuthoredEntityTxs(env, workingReplica.state, workingReplica.signerId, [
-        ...workingReplica.mempool,
-        ...admittedEntityTxs,
-      ]),
-    );
+    if (trustedLocalCrossJurisdiction) {
+      if (!localCanPropose) {
+        throw new Error(
+          `CROSS_J_LOCAL_COMMAND_PROPOSER_REQUIRED:${workingReplica.entityId}:${workingReplica.signerId}`,
+        );
+      }
+      trustedLocalEntityTxs = prepareLocallyAuthoredEntityTxs(
+        env,
+        workingReplica.state,
+        workingReplica.signerId,
+        admittedEntityTxs,
+      );
+    } else {
+      workingReplica.mempool = prioritizeScheduledWakeTransactions(
+        prepareLocallyAuthoredEntityTxs(env, workingReplica.state, workingReplica.signerId, [
+          ...workingReplica.mempool,
+          ...admittedEntityTxs,
+        ]),
+      );
+    }
     entityLog.debug('mempool.added', {
       added: admittedEntityTxs.length,
-      total: workingReplica.mempool.length,
+      external: workingReplica.mempool.length,
+      localRuntime: trustedLocalEntityTxs.length,
     });
   }
 
@@ -3062,6 +3132,7 @@ export const applyEntityInput = async (
   if (hashPrecommitResult) return hashPrecommitResult;
 
   const hasLocalConsensusWork =
+    trustedLocalEntityTxs.length > 0 ||
     workingReplica.mempool.length > 0 ||
     Array.from(workingReplica.state.accounts.values()).some(account =>
       accountHasProposableMempool(account, workingReplica.state));
@@ -3078,19 +3149,16 @@ export const applyEntityInput = async (
       signer: shortId(workingReplica.signerId),
       proposer: workingReplica.isProposer,
       mempool: workingReplica.mempool.length,
+      localRuntimeMempool: trustedLocalEntityTxs.length,
       hasProposal: Boolean(workingReplica.proposal),
-      txs: workingReplica.mempool.map(tx => tx.type),
+      txs: [
+        ...trustedLocalEntityTxs,
+        ...workingReplica.mempool,
+      ].map(tx => tx.type),
     });
   }
 
-  const isSingleSigner = (() => {
-    if (workingReplica.state.config.validators.length !== 1) return false;
-    try {
-      return BigInt(workingReplica.state.config.threshold ?? 0) === 1n;
-    } catch {
-      return false;
-    }
-  })();
+  const isSingleSigner = isSingleSignerEntity(workingReplica.state);
   const hasProposableAccountMempool = Array.from(workingReplica.state.accounts.values()).some(
     account => accountHasProposableMempool(account, workingReplica.state),
   );
@@ -3130,7 +3198,11 @@ export const applyEntityInput = async (
   );
   const proposalSelection =
     localCanPropose && !jPrefixProposalBlocked
-      ? await selectProposableEntityTxs(env, workingReplica.state, workingReplica.mempool)
+      ? await selectProposableEntityTxs(
+          env,
+          workingReplica.state,
+          trustedLocalCrossJurisdiction ? trustedLocalEntityTxs : workingReplica.mempool,
+        )
       : {
           txs: [],
           currentAuthorityReady: false,
@@ -3141,6 +3213,15 @@ export const applyEntityInput = async (
   // state while an honest validator has an observed J event, so the queued
   // work remains untouched until the next (stronger) prefix certificate.
   const proposalTxs = shouldRollFrozenBaseJPrefixRound ? [] : proposalSelection.txs;
+  if (
+    trustedLocalCrossJurisdiction &&
+    proposalTxs.length !== trustedLocalEntityTxs.length
+  ) {
+    throw new Error(
+      `CROSS_J_LOCAL_COMMAND_PARTIAL_FRAME_FORBIDDEN:${workingReplica.entityId}:` +
+        `selected=${proposalTxs.length}:required=${trustedLocalEntityTxs.length}`,
+    );
+  }
   if (proposalSelection.reason) {
     entityLog.debug('proposal.authority_gate', {
       reason: proposalSelection.reason,
@@ -3510,6 +3591,13 @@ export const applyEntityInput = async (
     });
   });
 
+  if (trustedLocalCrossJurisdiction) {
+    throw new Error(
+      `CROSS_J_LOCAL_COMMAND_NOT_FINALIZED:${workingReplica.entityId}:` +
+        `proposal=${workingReplica.proposal?.hash ?? 'none'}:txs=${trustedLocalEntityTxs.length}`,
+    );
+  }
+
   return {
     outcome: { kind: 'committed' },
     newState: workingReplica.state,
@@ -3773,15 +3861,6 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
           continue;
         }
         if (account) {
-          if (
-            tx.type === 'swap_cancel_request' &&
-            account.swapOffers?.get(tx.data.offerId)?.crossJurisdiction &&
-            !currentEntityState.orderbookExt
-          ) {
-            throw new Error(
-              `CROSS_J_ORDERBOOK_EXT_REQUIRED: cancel for ${String(tx.data.offerId).slice(-8)} cannot use fallback swap_resolve`,
-            );
-          }
           if (!queueAccountMempoolTx(account, tx)) {
             continue;
           }
@@ -3819,14 +3898,32 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
 
     if (swapOffersCreated) {
       for (const offer of swapOffersCreated) {
-        // Cross-j account-level swap_offer is only the source intent. The shared
-        // book receives the order from admitCrossJurisdictionBookOrder after both
-        // source and target pull locks have committed.
-        if (offer.crossJurisdiction && entityTx.type !== 'admitCrossJurisdictionBookOrder') continue;
+        // Every cross-j offer still passes through the canonical admission gate
+        // in applyOrderbookMatching: non-owners are ignored and incomplete
+        // source/target receipts remain pending. Do not filter by the outer
+        // EntityTx type here. When the canonical source hub commits its Account
+        // pull, the second receipt and swap_offer can become authoritative in
+        // this accountInput itself; dropping that pure event leaves an admitted
+        // route permanently absent from the shared book.
         allSwapOffersCreated.push(offer);
       }
     }
-    if (swapCancelRequests) allSwapCancelRequests.push(...swapCancelRequests);
+    if (swapCancelRequests) {
+      for (const cancel of swapCancelRequests) {
+        const offer = currentEntityState.accounts.get(cancel.accountId)?.swapOffers?.get(cancel.offerId);
+        if (
+          offer?.crossJurisdiction &&
+          normalizeEntityRef(currentEntityState.entityId) !==
+            normalizeEntityRef(offer.crossJurisdiction.source.counterpartyEntityId)
+        ) {
+          // Both Account replicas observe the committed request, but only the
+          // source hub owns the order lifecycle. The source user must not run a
+          // local orderbook fallback or send a diagonal Entity message.
+          continue;
+        }
+        allSwapCancelRequests.push(cancel);
+      }
+    }
     if (swapOffersCancelled) allSwapOffersCancelled.push(...swapOffersCancelled);
 
     if (entityTx.type === 'accountInput' && entityTx.data) {
@@ -3860,6 +3957,7 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
       }
     }
     drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts);
+    drainCommittedCrossJurisdictionCancelAcks(env, currentEntityState, proposableAccounts);
     const txElapsedMs = Math.round(getPerfMs() - txProfileStartMs);
     const txProfile = frameProfileTxTotals.get(entityTx.type) ?? { count: 0, elapsedMs: 0 };
     txProfile.count += 1;
@@ -4345,14 +4443,37 @@ type ApplySwapCancelRequestsContext = {
   currentEntityState: EntityState;
   allSwapCancelRequests: SwapCancelRequestEvent[];
   proposableAccounts: Set<string>;
+  allOutputs: EntityInput[];
 };
 
 function applySwapCancelRequests(context: ApplySwapCancelRequestsContext): void {
-  const { env, currentEntityState, allSwapCancelRequests, proposableAccounts } = context;
+  const { env, currentEntityState, allSwapCancelRequests, proposableAccounts, allOutputs } = context;
   if (allSwapCancelRequests.length === 0) return;
 
+  const routedCancels = routeRemoteCrossJurisdictionBookCancels(
+    env,
+    currentEntityState,
+    allSwapCancelRequests,
+  );
+  allOutputs.push(...routedCancels.outputs);
+  for (const { accountId, tx } of routedCancels.mempoolOps) {
+    const account = currentEntityState.accounts.get(accountId);
+    if (!account) {
+      throw new Error(
+        `CROSS_J_CANCEL_ACK_ACCOUNT_MISSING:account=${accountId}:offer=${tx.data.offerId}`,
+      );
+    }
+    if (!queueAccountMempoolTx(account, tx)) continue;
+    proposableAccounts.add(accountId);
+    markStorageAccountDirty(env, currentEntityState.entityId, accountId);
+    markStorageEntityDirty(env, currentEntityState.entityId);
+  }
+
+  const localBookCancels = routedCancels.localBookCancels;
+  if (localBookCancels.length === 0) return;
+
   if (currentEntityState.orderbookExt) {
-    const cancelResult = processOrderbookCancels(currentEntityState, allSwapCancelRequests);
+    const cancelResult = processOrderbookCancels(currentEntityState, localBookCancels);
 
     for (const { accountId, tx } of cancelResult.mempoolOps) {
       const account = currentEntityState.accounts.get(accountId);
@@ -4378,7 +4499,7 @@ function applySwapCancelRequests(context: ApplySwapCancelRequestsContext): void 
   }
 
   // Fallback: counterparty resolves cancel directly when no orderbook extension is configured.
-  for (const { accountId, offerId } of allSwapCancelRequests) {
+  for (const { accountId, offerId } of localBookCancels) {
     const account = currentEntityState.accounts.get(accountId);
     if (!account?.swapOffers?.has(offerId)) continue;
     const offer = account.swapOffers.get(offerId);
@@ -4476,6 +4597,7 @@ export const applyEntityFrame = async (
   const proposableAccounts = new Set<string>();
   if (!authorityTransitionOnly) {
     drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts);
+    drainCommittedCrossJurisdictionCancelAcks(env, currentEntityState, proposableAccounts);
     for (const [accountId, accountMachine] of currentEntityState.accounts) {
       if (accountHasProposableMempool(accountMachine, currentEntityState)) {
         proposableAccounts.add(accountId);
@@ -4551,6 +4673,18 @@ export const applyEntityFrame = async (
     applyCommittedSwapCancelsToOrderbook(env, currentEntityState, allSwapOffersCancelled);
   }
 
+  // A committed cancel has priority over every offer created in the same
+  // Entity frame. Matching first permits a taker to fill liquidity after the
+  // maker's bilateral Account has already committed its cancellation.
+  applySwapCancelRequests({
+    env,
+    currentEntityState,
+    allSwapCancelRequests,
+    proposableAccounts,
+    allOutputs,
+  });
+  markFrameProfile('cancels');
+
   const orderbookStats = applyOrderbookMatching({
     env,
     currentEntityState,
@@ -4560,17 +4694,10 @@ export const applyEntityFrame = async (
   });
   markFrameProfile('orderbook');
 
-  applySwapCancelRequests({
-    env,
-    currentEntityState,
-    allSwapCancelRequests,
-    proposableAccounts,
-  });
-  markFrameProfile('cancels');
-
   // Hash before account proposals so proposer and validators commit to the same
   // deterministic entity state.
   drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts);
+  drainCommittedCrossJurisdictionCancelAcks(env, currentEntityState, proposableAccounts);
   materializeDeferredSettlementApprovals(
     env,
     currentEntityState,

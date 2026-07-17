@@ -249,6 +249,72 @@ export const markCrossJurisdictionBookAdmissionResolving = (
   admission.updatedAt = now;
 };
 
+export const markCrossJurisdictionBookCancelPending = (
+  currentEntityState: EntityState,
+  route: CrossJurisdictionSwapRoute,
+  sourceAccountId: string,
+  now: number,
+  reason = 'cancel_request',
+): CrossJurisdictionBookAdmission => {
+  const canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
+  const key = crossJurisdictionBookAdmissionKey(canonicalRoute);
+  const admission = currentEntityState.crossJurisdictionBookAdmissions?.get(key);
+  if (!admission) {
+    throw new Error(
+      `CROSS_J_CANCEL_ADMISSION_MISSING:order=${canonicalRoute.orderId}:source=${canonicalRoute.source.entityId}`,
+    );
+  }
+  if (normalizeEntityRef(admission.routeHash) !== normalizeEntityRef(canonicalRoute.routeHash)) {
+    throw new Error(
+      `CROSS_J_CANCEL_ADMISSION_ROUTE_MISMATCH:order=${canonicalRoute.orderId}:` +
+        `admission=${admission.routeHash}:route=${canonicalRoute.routeHash}`,
+    );
+  }
+  const normalizedAccountId = normalizeEntityRef(sourceAccountId);
+  if (!normalizedAccountId) {
+    throw new Error(`CROSS_J_CANCEL_SOURCE_ACCOUNT_MISSING:order=${canonicalRoute.orderId}`);
+  }
+  if (
+    admission.pendingCancel &&
+    normalizeEntityRef(admission.pendingCancel.sourceAccountId) !== normalizedAccountId
+  ) {
+    throw new Error(
+      `CROSS_J_CANCEL_SOURCE_ACCOUNT_MISMATCH:order=${canonicalRoute.orderId}:` +
+        `pending=${admission.pendingCancel.sourceAccountId}:received=${sourceAccountId}`,
+    );
+  }
+  admission.pendingCancel ??= {
+    sourceAccountId,
+    requestedAt: now,
+    reason,
+  };
+  if (admission.status !== 'closed') {
+    admission.status = 'resolving';
+    admission.resolvingAt ??= now;
+  }
+  admission.updatedAt = now;
+  return admission;
+};
+
+export const markCrossJurisdictionBookRemovalCommitted = (
+  currentEntityState: EntityState,
+  route: CrossJurisdictionSwapRoute,
+  sourceAccountId: string,
+  now: number,
+  reason = 'cancel_request',
+): CrossJurisdictionBookAdmission => {
+  const admission = markCrossJurisdictionBookCancelPending(
+    currentEntityState,
+    route,
+    sourceAccountId,
+    now,
+    reason,
+  );
+  admission.pendingCancel!.bookRemovalCommittedAt ??= now;
+  admission.updatedAt = now;
+  return admission;
+};
+
 export const markCrossJurisdictionBookAdmissionClosed = (
   currentEntityState: EntityState,
   sourceEntityId: string,
@@ -263,6 +329,7 @@ export const markCrossJurisdictionBookAdmissionClosed = (
   admission.closedAt = now;
   admission.closeReason = reason;
   delete admission.pendingFill;
+  delete admission.pendingCancel;
   admission.updatedAt = now;
 };
 

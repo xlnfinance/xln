@@ -1089,6 +1089,7 @@ export function cloneCrossJurisdictionBookAdmission(
   if (closedAt !== undefined) clone.closedAt = closedAt;
   if (closeReason) clone.closeReason = closeReason;
   if (admission.pendingFill) clone.pendingFill = cloneCrossJurisdictionPendingFill(admission.pendingFill);
+  if (admission.pendingCancel) clone.pendingCancel = { ...admission.pendingCancel };
   return clone;
 }
 

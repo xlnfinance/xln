@@ -89,6 +89,7 @@ import { handleOrderbookSweepCrossJurisdictionEntityTx } from './handlers/cross-
 import {
   handleApplyCrossJurisdictionBookProgressEntityTx,
   handleAdmitCrossJurisdictionBookOrderEntityTx,
+  handleCrossJurisdictionBookOrderRemovedEntityTx,
   handleRemoveCrossJurisdictionBookOrderEntityTx,
 } from './handlers/cross-j-book-order';
 import { handleScheduledWakeEntityTx } from './handlers/scheduled-wake';
@@ -300,6 +301,7 @@ const entityTxDispatchers: Record<string, EntityTxDispatcher> = {
   admitCrossJurisdictionBookOrder: (env, state, tx, options) => handleAdmitCrossJurisdictionBookOrderEntityTx(env, state, tx as Extract<EntityTx, { type: 'admitCrossJurisdictionBookOrder' }>, options),
   applyCrossJurisdictionBookProgress: (env, state, tx, options) => handleApplyCrossJurisdictionBookProgressEntityTx(env, state, tx as Extract<EntityTx, { type: 'applyCrossJurisdictionBookProgress' }>, options),
   removeCrossJurisdictionBookOrder: (env, state, tx, options) => handleRemoveCrossJurisdictionBookOrderEntityTx(env, state, tx as Extract<EntityTx, { type: 'removeCrossJurisdictionBookOrder' }>, options),
+  crossJurisdictionBookOrderRemoved: (env, state, tx, options) => handleCrossJurisdictionBookOrderRemovedEntityTx(env, state, tx as Extract<EntityTx, { type: 'crossJurisdictionBookOrderRemoved' }>, options),
   placeSwapOffer: (env, state, tx, options) => handlePlaceSwapOfferRequest(env, state, tx as Extract<EntityTx, { type: 'placeSwapOffer' }>, options),
   resolveSwap: (_env, state, tx, options) => handleResolveSwapRequest(state, tx as Extract<EntityTx, { type: 'resolveSwap' }>, options),
   proposeCancelSwap: (_env, state, tx, options) => handleCancelSwapRequest(state, tx as Extract<EntityTx, { type: 'proposeCancelSwap' }>, options),

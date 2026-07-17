@@ -1,4 +1,4 @@
-import { applyEntityInput, mergeEntityInputs } from '../entity/consensus/index';
+import { applyEntityInput } from '../entity/consensus/index';
 import type { EntityInputOutcome } from '../entity/consensus/index';
 import {
   entityInputHasCrossJurisdictionIntraRuntimeTx,
@@ -11,7 +11,8 @@ import {
   type RuntimeEntityRoutingDeps,
 } from './entity-routing';
 import { safeStringify } from '../protocol/serialization';
-import type { EntityInput, EntityReplica, Env, JInput, RoutedEntityInput } from '../types';
+import type { EntityInput, EntityReplica, EntityTx, Env, JInput, RoutedEntityInput } from '../types';
+import { resolveEntityProposerId } from '../state-helpers';
 import { validateEntityOutput } from '../validation-utils';
 import { nodeProcess } from './platform';
 import { DEBUG, getPerfMs } from '../utils';
@@ -33,9 +34,24 @@ const ENTITY_INPUT_SLOW_MS = Math.max(
 export interface RuntimeEntityInputApplyResult {
   entityOutbox: RoutedEntityInput[];
   appliedEntityInputs: RoutedEntityInput[];
+  localCrossJurisdictionEventTrace: RoutedEntityInput[];
+  localCrossJurisdictionEventFailures: Array<{
+    input: RoutedEntityInput;
+    outcome: Exclude<EntityInputOutcome, { kind: 'committed' }>;
+  }>;
   entityFrameCommitted: boolean;
   jOutbox: JInput[];
 }
+
+/**
+ * Runtime-private map/reduce command. This is deliberately not an EntityInput:
+ * it has no P2P routing fields, signer hint, or network serialization path.
+ */
+type CrossJCommand = {
+  sourceEntityId: string;
+  targetEntityId: string;
+  entityTxs: EntityTx[];
+};
 
 export interface RuntimeEntityInputApplyOptions {
   isReplay: boolean;
@@ -79,36 +95,62 @@ export const applyMergedEntityInputs = async (
 ): Promise<RuntimeEntityInputApplyResult> => {
   const entityOutbox: RoutedEntityInput[] = [];
   const appliedEntityInputs: RoutedEntityInput[] = [];
+  const localCrossJurisdictionEventTrace: RoutedEntityInput[] = [];
+  const localCrossJurisdictionEventFailures: RuntimeEntityInputApplyResult['localCrossJurisdictionEventFailures'] = [];
   let entityFrameCommitted = false;
   const jOutbox: JInput[] = [...initialJOutbox];
   const { isReplay, routingDeps } = options;
   const profileStartedAt = getPerfMs();
   const profiledInputs: Array<Record<string, unknown>> = [];
+  const crossJCommandQueue: CrossJCommand[] = [];
   let localEventCount = 0;
+
+  const routeCommittedEntityOutputs = (outputs: RoutedEntityInput[]): void => {
+    for (const output of outputs) {
+      if (isCrossJCommandEnvelope(output)) {
+        const command = decodeCrossJCommand(env, output);
+        const tail = crossJCommandQueue.at(-1);
+        if (
+          tail &&
+          tail.sourceEntityId === command.sourceEntityId &&
+          tail.targetEntityId === command.targetEntityId
+        ) {
+          tail.entityTxs.push(...command.entityTxs);
+        } else {
+          crossJCommandQueue.push(command);
+        }
+        continue;
+      }
+      if (output.localRuntimeProtocol === 'cross-j') {
+        throw new Error(`RUNTIME_CROSS_J_UNCOMMITTED_OUTPUT_FORBIDDEN:entity=${output.entityId}`);
+      }
+      entityOutbox.push(output);
+    }
+  };
 
   const drainImmediateCrossJurisdictionOutputs = async (): Promise<void> => {
     const localEventFingerprints = new Set<string>();
     let localEventRound = 0;
-    while (true) {
-      const immediateCrossJOutputs = entityOutbox.filter(output => isImmediateLocalCrossJurisdictionOutput(env, output));
-      if (immediateCrossJOutputs.length === 0) return;
+    while (crossJCommandQueue.length > 0) {
+      const command = crossJCommandQueue.shift()!;
       localEventRound += 1;
-      localEventCount += immediateCrossJOutputs.length;
+      localEventCount += 1;
       if (localEventRound > 64 || localEventCount > 1_000) {
         throw new Error(
           `RUNTIME_CROSS_J_EVENT_CASCADE_LIMIT:rounds=${localEventRound}:events=${localEventCount}`,
         );
       }
-      const deferredOutputs = entityOutbox.filter(output => !isImmediateLocalCrossJurisdictionOutput(env, output));
-      entityOutbox.length = 0;
-      entityOutbox.push(...deferredOutputs);
-
-      for (const entityInput of mergeEntityInputs(immediateCrossJOutputs)) {
-        const fingerprint = safeStringify({
-          entityId: entityInput.entityId.toLowerCase(),
-          signerId: entityInput.signerId.toLowerCase(),
-          entityTxs: entityInput.entityTxs,
-        });
+      const actualSignerId = resolveEntityProposerId(
+        env,
+        command.targetEntityId,
+        'cross-j local command',
+      ).trim();
+      const entityInput = crossJCommandToEntityInput(command, actualSignerId);
+      const fingerprint = safeStringify({
+        sourceEntityId: command.sourceEntityId,
+        targetEntityId: command.targetEntityId,
+        entityTxs: command.entityTxs,
+      });
         if (localEventFingerprints.has(fingerprint)) {
           throw new Error(
             `RUNTIME_CROSS_J_EVENT_CYCLE:round=${localEventRound}:entity=${entityInput.entityId}`,
@@ -116,7 +158,6 @@ export const applyMergedEntityInputs = async (
         }
         localEventFingerprints.add(fingerprint);
         const inputProfileStartedAt = getPerfMs();
-        const actualSignerId = entityInput.signerId.trim();
         const replicaKey = findReplicaKeyInsensitive(env, entityInput.entityId, actualSignerId);
         assertRuntimeIngress(
           replicaKey,
@@ -142,7 +183,27 @@ export const applyMergedEntityInputs = async (
           entityInput,
           actualSignerId,
           isReplay,
+          true,
         );
+        localCrossJurisdictionEventTrace.push(result.appliedInput);
+        if (result.outcome.kind !== 'committed') {
+          const outcomeDetail = result.outcome.kind === 'rejected'
+            ? result.outcome.code
+            : result.outcome.reason;
+          localCrossJurisdictionEventFailures.push({
+            input: result.appliedInput,
+            outcome: result.outcome,
+          });
+          entityInputLog.error('crossj.local_event_not_applied', {
+            entity: entityInput.entityId,
+            signer: actualSignerId,
+            outcome: result.outcome.kind,
+            detail: outcomeDetail,
+            localEventRound,
+            txTypes: (entityInput.entityTxs ?? []).map(tx => tx.type),
+          });
+          continue;
+        }
         entityFrameCommitted ||= result.entityFrameCommitted;
         const inputElapsedMs = Math.round(getPerfMs() - inputProfileStartedAt);
         if (ENTITY_INPUT_PROFILE || inputElapsedMs >= ENTITY_INPUT_SLOW_MS) {
@@ -160,9 +221,8 @@ export const applyMergedEntityInputs = async (
             jOutputs: result.jOutputs.length,
           });
         }
-        if (isCommittedEntityInput(result.outcome)) appliedEntityInputs.push(result.appliedInput);
         env.eReplicas.set(replicaKey, result.nextReplica);
-        entityOutbox.push(...result.outputs);
+        routeCommittedEntityOutputs(result.outputs);
         if (result.jOutputs.length > 0) {
           entityInputLog.debug('j_outputs.collected', {
             count: result.jOutputs.length,
@@ -170,11 +230,18 @@ export const applyMergedEntityInputs = async (
           });
           jOutbox.push(...result.jOutputs);
         }
-      }
     }
   };
 
   for (const entityInput of mergedInputs) {
+    if (
+      entityInput.localRuntimeProtocol === 'cross-j' ||
+      (entityInput.entityTxs ?? []).some(tx => tx.type === 'runtimeOutput')
+    ) {
+      throw new Error(
+        `RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN:entity=${entityInput.entityId}`,
+      );
+    }
     const inputProfileStartedAt = getPerfMs();
     if (isReplay) {
       entityInputLog.debug('replay.merged_input', {
@@ -308,7 +375,7 @@ export const applyMergedEntityInputs = async (
     }
     if (isCommittedEntityInput(result.outcome)) appliedEntityInputs.push(result.appliedInput);
     env.eReplicas.set(replicaKey, result.nextReplica);
-    entityOutbox.push(...result.outputs);
+    routeCommittedEntityOutputs(result.outputs);
     if (result.jOutputs.length > 0) {
       entityInputLog.debug('j_outputs.collected', {
         count: result.jOutputs.length,
@@ -337,7 +404,14 @@ export const applyMergedEntityInputs = async (
     });
   }
 
-  return { entityOutbox, appliedEntityInputs, entityFrameCommitted, jOutbox };
+  return {
+    entityOutbox,
+    appliedEntityInputs,
+    localCrossJurisdictionEventTrace,
+    localCrossJurisdictionEventFailures,
+    entityFrameCommitted,
+    jOutbox,
+  };
 };
 
 const didCommitEntityFrame = (
@@ -366,6 +440,7 @@ const applyEntityInputToReplica = async (
   entityInput: RoutedEntityInput,
   actualSignerId: string,
   isReplay: boolean,
+  trustedLocalCrossJurisdiction = false,
 ): Promise<{
   outcome: EntityInputOutcome;
   appliedInput: RoutedEntityInput;
@@ -406,6 +481,9 @@ const applyEntityInputToReplica = async (
     env,
     entityReplica,
     normalizedInput,
+    trustedLocalCrossJurisdiction
+      ? { trustedLocalRuntimeProtocol: 'cross-j' }
+      : undefined,
   );
   const appliedInput: RoutedEntityInput = {
     ...(canonicalAppliedInput ?? normalizedInput),
@@ -463,14 +541,67 @@ const findReplicaKeysForEntityInsensitive = (env: Env, entityId: string): string
 
 const normalizeRuntimeRef = (value: unknown): string => String(value || '').trim().toLowerCase();
 
-const isImmediateLocalCrossJurisdictionOutput = (env: Env, output: RoutedEntityInput): boolean => {
-  if (!entityInputHasCrossJurisdictionIntraRuntimeTx(output)) return false;
+const isCrossJCommandEnvelope = (output: RoutedEntityInput): boolean => (
+  !output.proposedFrame &&
+  !output.hashPrecommits &&
+  !output.leaderTimeoutVote &&
+  Array.isArray(output.entityTxs) &&
+  output.entityTxs.length === 1 &&
+  output.entityTxs[0]?.type === 'runtimeOutput' &&
+  output.entityTxs[0].data.protocol === 'cross-j'
+);
+
+const decodeCrossJCommand = (env: Env, output: RoutedEntityInput): CrossJCommand => {
+  if (!isCrossJCommandEnvelope(output)) {
+    throw new Error(`RUNTIME_CROSS_J_COMMAND_ENVELOPE_INVALID:entity=${output.entityId}`);
+  }
   const localRuntimeId = normalizeRuntimeRef(env.runtimeId);
   const outputRuntimeId = normalizeRuntimeRef(output.runtimeId);
-  if (outputRuntimeId && localRuntimeId && outputRuntimeId !== localRuntimeId) return false;
+  if (outputRuntimeId && localRuntimeId && outputRuntimeId !== localRuntimeId) {
+    throw new Error(`RUNTIME_CROSS_J_COMMAND_REMOTE_RUNTIME_FORBIDDEN:${outputRuntimeId}`);
+  }
   const fromRuntimeId = normalizeRuntimeRef(output.from);
-  if (fromRuntimeId && localRuntimeId && fromRuntimeId !== localRuntimeId) return false;
-  const signerId = String(output.signerId || '').trim();
-  if (!signerId) return false;
-  return Boolean(findReplicaKeyInsensitive(env, output.entityId, signerId));
+  if (fromRuntimeId && localRuntimeId && fromRuntimeId !== localRuntimeId) {
+    throw new Error(`RUNTIME_CROSS_J_COMMAND_REMOTE_SOURCE_FORBIDDEN:${fromRuntimeId}`);
+  }
+  const wrapper = output.entityTxs[0];
+  if (wrapper?.type !== 'runtimeOutput') {
+    throw new Error(`RUNTIME_CROSS_J_COMMAND_WRAPPER_MISSING:entity=${output.entityId}`);
+  }
+  const sourceEntityId = String(wrapper.data.sourceEntityId || '').trim().toLowerCase();
+  const targetEntityId = String(wrapper.data.targetEntityId || '').trim().toLowerCase();
+  if (!sourceEntityId || !targetEntityId || targetEntityId !== String(output.entityId || '').toLowerCase()) {
+    throw new Error(
+      `RUNTIME_CROSS_J_COMMAND_ROUTE_INVALID:source=${sourceEntityId || 'missing'}:` +
+        `target=${targetEntityId || 'missing'}:envelope=${output.entityId}`,
+    );
+  }
+  if (!findReplicaKeyInsensitive(env, targetEntityId, null)) {
+    throw new Error(`RUNTIME_CROSS_J_COMMAND_TARGET_NOT_LOCAL:${targetEntityId}`);
+  }
+  if (!Array.isArray(wrapper.data.entityTxs) || wrapper.data.entityTxs.length === 0) {
+    throw new Error(`RUNTIME_CROSS_J_COMMAND_TXS_MISSING:${targetEntityId}`);
+  }
+  return {
+    sourceEntityId,
+    targetEntityId,
+    entityTxs: structuredClone(wrapper.data.entityTxs),
+  };
 };
+
+const crossJCommandToEntityInput = (
+  command: CrossJCommand,
+  proposerSignerId: string,
+): RoutedEntityInput => ({
+  entityId: command.targetEntityId,
+  signerId: proposerSignerId,
+  entityTxs: [{
+    type: 'runtimeOutput',
+    data: {
+      protocol: 'cross-j',
+      sourceEntityId: command.sourceEntityId,
+      targetEntityId: command.targetEntityId,
+      entityTxs: structuredClone(command.entityTxs),
+    },
+  }],
+});

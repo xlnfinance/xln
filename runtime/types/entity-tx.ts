@@ -528,7 +528,21 @@ type EntityTxPayload =
       data: {
         orderId: string;
         sourceEntityId: string;
+        /** Present only for an Account cancel that requires a post-commit receipt. */
+        sourceAccountId?: string;
         route?: CrossJurisdictionSwapRoute;
+        reason?: string;
+      };
+    }
+  | {
+      /** Committed canonical-book receipt; never emitted before removal commits. */
+      type: 'crossJurisdictionBookOrderRemoved';
+      data: {
+        orderId: string;
+        sourceEntityId: string;
+        sourceAccountId: string;
+        route: CrossJurisdictionSwapRoute;
+        removedAt: number;
         reason?: string;
       };
     }

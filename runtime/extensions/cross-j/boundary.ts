@@ -24,6 +24,7 @@ export const CROSS_J_INTRA_RUNTIME_ENTITY_TX_TYPES = new Set<string>([
   'orderbookSweepCrossJurisdiction',
   'admitCrossJurisdictionBookOrder',
   'removeCrossJurisdictionBookOrder',
+  'crossJurisdictionBookOrderRemoved',
 ]);
 
 export const isCrossJurisdictionIntraRuntimeTx = (tx: EntityTx | { type?: unknown } | null | undefined): boolean =>

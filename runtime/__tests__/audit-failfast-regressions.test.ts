@@ -7573,6 +7573,7 @@ describe('audit fail-fast regressions', () => {
       output.entityTxs?.[0]?.type === 'crossJurisdictionFillNotice'
     );
     expect(sourceNotice?.signerId).toBe('committed-source-hub-route');
+    expect(sourceNotice?.localRuntimeProtocol).toBe('cross-j');
     expect(sourceNotice?.entityTxs?.[0]).toMatchObject({
       type: 'crossJurisdictionFillNotice',
       data: {
@@ -7589,7 +7590,15 @@ describe('audit fail-fast regressions', () => {
     const sourceApplied = await applyEntityFrame(
       env,
       sourceState,
-      await buildQuorumAuthorizedFrameTxs(env, sourceState, sourceNotice!.entityTxs!),
+      [{
+        type: 'runtimeOutput',
+        data: {
+          protocol: 'cross-j',
+          sourceEntityId: bookOwnerHub,
+          targetEntityId: sourceHub,
+          entityTxs: sourceNotice!.entityTxs!,
+        },
+      }],
     );
     const sourceAccount = sourceApplied.newState.accounts.get(remoteMaker);
     const queuedAck = [

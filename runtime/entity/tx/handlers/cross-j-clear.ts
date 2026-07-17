@@ -75,8 +75,7 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
   const mempoolOps: MempoolOp[] = [];
   let route = newState.crossJurisdictionSwaps?.get(orderId);
   if (!route) {
-    addMessage(newState, `❌ Cross-j clear ${orderId} missing route`);
-    return { newState, outputs, mempoolOps };
+    throw new Error(`CROSS_J_CLEAR_ROUTE_MISSING:${orderId}`);
   }
 
   const offerRoute = findCrossJurisdictionOfferRoute(newState, orderId);
@@ -91,16 +90,36 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
 
   const sourceHubId = normalizeEntityRef(route.source.counterpartyEntityId);
   if (normalizeEntityRef(newState.entityId) !== sourceHubId) {
-    pushCrossJOutput(env, outputs, route.source.counterpartyEntityId, [{
-      type: 'requestCrossJurisdictionClear',
-      data: { orderId, cancelRemainder, route: cloneCrossJurisdictionRoute(route) },
-    }], route.sourceHubSignerId);
+    const sourceUserId = normalizeEntityRef(route.source.entityId);
+    if (normalizeEntityRef(newState.entityId) !== sourceUserId) {
+      throw new Error(
+        `CROSS_J_CLEAR_SOURCE_PARTICIPANT_REQUIRED:${orderId}:${newState.entityId}:${sourceUserId}`,
+      );
+    }
+    const sourceAccountId = findAccountKey(newState, sourceHubId);
+    const sourceAccount = sourceAccountId ? newState.accounts.get(sourceAccountId) : undefined;
+    const sourceOffer = sourceAccount?.swapOffers?.get(orderId);
+    if (!sourceAccountId || !sourceAccount || !sourceOffer?.crossJurisdiction) {
+      throw new Error(`CROSS_J_CLEAR_SOURCE_OFFER_MISSING:${orderId}:${newState.entityId}:${sourceHubId}`);
+    }
+    if (!cancelRemainder && getCrossJurisdictionCommittedFillAmounts(route).fillRatio <= 0) {
+      addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: no pending fill`);
+      return { newState, outputs, mempoolOps };
+    }
+    // User and hub are on different Runtimes and communicate only through their
+    // bilateral Account. The committed cancel request makes the source hub
+    // close the book row and enqueue the cross-j fill ACK; an Entity message to
+    // the hub would be a forbidden diagonal Runtime hop.
+    mempoolOps.push({
+      accountId: sourceAccountId,
+      tx: { type: 'swap_cancel_request', data: { offerId: orderId } },
+    });
     const requestedAt = deterministicEntityTimestamp(newState, env);
     transitionCrossJurisdictionRouteStatus(route, 'clear_requested', requestedAt);
     route.pendingClearRequestedAt = requestedAt;
     route.clearingPolicy = cancelRemainder ? 'cancel_and_clear' : 'manual';
     newState.crossJurisdictionSwaps?.set(orderId, route);
-    addMessage(newState, `🌉 Cross-j clear ${orderId} requested from source hub`);
+    addMessage(newState, `🌉 Cross-j clear ${orderId} queued through source Account`);
     return { newState, outputs, mempoolOps };
   }
 
