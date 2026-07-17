@@ -265,3 +265,64 @@ export const findMissingRpcContractCode = async (
   }
   return missing;
 };
+
+const readRpcHexResult = async (
+  rpcUrl: string,
+  method: string,
+  params: unknown[],
+  context: string,
+  timeoutMs: number,
+): Promise<string> => {
+  const responses = await fetchRpcBatch(rpcUrl, [{
+    jsonrpc: '2.0', id: 1, method, params,
+  }], timeoutMs);
+  const entry = responses.get(1);
+  if (!entry || entry.error || typeof entry.result !== 'string' || !/^0x[0-9a-fA-F]*$/.test(entry.result)) {
+    throw new Error(`${context}_RESULT_INVALID:${String(entry?.error?.message || entry?.result || 'missing')}`);
+  }
+  return entry.result;
+};
+
+/**
+ * Recovers metadata after a process dies after the on-chain deployment commits
+ * but before jurisdictions.json is persisted. The adjacent-block checks are the
+ * evidence: using "latest" (or guessing block 1) would silently widen or truncate
+ * the authenticated EntityProvider event domain.
+ */
+export const findRpcContractDeploymentBlock = async (
+  rpcUrl: string,
+  address: string,
+  context: string,
+  timeoutMs = 2_000,
+): Promise<number> => {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+    throw new Error(`${context}_ADDRESS_INVALID:${address}`);
+  }
+  const latestHex = await readRpcHexResult(rpcUrl, 'eth_blockNumber', [], context, timeoutMs);
+  const latest = Number.parseInt(latestHex.slice(2), 16);
+  if (!Number.isSafeInteger(latest) || latest < 1) {
+    throw new Error(`${context}_LATEST_BLOCK_INVALID:${latestHex}`);
+  }
+  const codeAt = async (block: number): Promise<string> => await readRpcHexResult(
+    rpcUrl,
+    'eth_getCode',
+    [address, `0x${block.toString(16)}`],
+    `${context}_BLOCK_${String(block)}`,
+    timeoutMs,
+  );
+  if (await codeAt(latest) === '0x') {
+    throw new Error(`${context}_LATEST_CODE_MISSING:${address}`);
+  }
+
+  let lower = 0;
+  let upper = latest;
+  while (lower < upper) {
+    const middle = Math.floor((lower + upper) / 2);
+    if (await codeAt(middle) === '0x') lower = middle + 1;
+    else upper = middle;
+  }
+  if (lower < 1 || await codeAt(lower) === '0x' || await codeAt(lower - 1) !== '0x') {
+    throw new Error(`${context}_BOUNDARY_INVALID:${String(lower)}`);
+  }
+  return lower;
+};

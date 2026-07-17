@@ -5,6 +5,7 @@ import {
   cloneCrossJurisdictionRoute,
   CROSS_J_MAX_FILL_RATIO,
   applyCrossJurisdictionFillProgress,
+  assertCrossJurisdictionPriceImprovementMode,
   getCrossJurisdictionCommittedProofRatio,
   isCrossJurisdictionTerminalStatus,
   transitionCrossJurisdictionRouteStatus,
@@ -619,6 +620,10 @@ const applyFillAckFollowup = (
   accountTx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
   outputs: EntityInput[],
 ): boolean => {
+  assertCrossJurisdictionPriceImprovementMode(
+    accountTx.data.priceImprovementMode,
+    accountTx.data.offerId,
+  );
   const ratio = getCrossJurisdictionCommittedProofRatio({
     orderId: accountTx.data.offerId,
     cumulativeFillRatio: accountTx.data.cumulativeFillRatio,
@@ -659,13 +664,8 @@ const applyFillAckFollowup = (
     transitionCrossJurisdictionRouteStatus(route, nextRoute.status, newState.timestamp);
     Object.assign(route, nextRoute);
     if ((accountTx.data.priceImprovementAmount ?? 0n) > 0n) {
-      if (accountTx.data.priceImprovementMode === 'source_savings') {
-        route.priceImprovementSourceAmount =
-          (route.priceImprovementSourceAmount ?? 0n) + accountTx.data.priceImprovementAmount!;
-      } else if (accountTx.data.priceImprovementMode === 'target_bonus') {
-        route.priceImprovementTargetAmount =
-          (route.priceImprovementTargetAmount ?? 0n) + accountTx.data.priceImprovementAmount!;
-      }
+      route.priceImprovementSourceAmount =
+        (route.priceImprovementSourceAmount ?? 0n) + accountTx.data.priceImprovementAmount!;
     }
     if (accountTx.data.cancelRemainder) {
       transitionCrossJurisdictionRouteStatus(route, 'clear_requested', newState.timestamp);

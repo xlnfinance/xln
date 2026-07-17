@@ -541,7 +541,11 @@ const findReplicaKeysForEntityInsensitive = (env: Env, entityId: string): string
 
 const normalizeRuntimeRef = (value: unknown): string => String(value || '').trim().toLowerCase();
 
-const isCrossJCommandEnvelope = (output: RoutedEntityInput): boolean => (
+type CrossJCommandEnvelope = RoutedEntityInput & {
+  entityTxs: [Extract<EntityTx, { type: 'runtimeOutput' }>];
+};
+
+const isCrossJCommandEnvelope = (output: RoutedEntityInput): output is CrossJCommandEnvelope => (
   !output.proposedFrame &&
   !output.hashPrecommits &&
   !output.leaderTimeoutVote &&
@@ -565,9 +569,6 @@ const decodeCrossJCommand = (env: Env, output: RoutedEntityInput): CrossJCommand
     throw new Error(`RUNTIME_CROSS_J_COMMAND_REMOTE_SOURCE_FORBIDDEN:${fromRuntimeId}`);
   }
   const wrapper = output.entityTxs[0];
-  if (wrapper?.type !== 'runtimeOutput') {
-    throw new Error(`RUNTIME_CROSS_J_COMMAND_WRAPPER_MISSING:entity=${output.entityId}`);
-  }
   const sourceEntityId = String(wrapper.data.sourceEntityId || '').trim().toLowerCase();
   const targetEntityId = String(wrapper.data.targetEntityId || '').trim().toLowerCase();
   if (!sourceEntityId || !targetEntityId || targetEntityId !== String(output.entityId || '').toLowerCase()) {

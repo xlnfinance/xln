@@ -462,7 +462,7 @@ type EntityTxPayload =
         cumulativeFillRatio: number; // Coarse 0-65535 compatibility/dispute ratio.
         fillNumerator?: bigint;
         fillDenominator?: bigint;
-        priceImprovementMode?: 'source_savings' | 'target_bonus' | 'none';
+        priceImprovementMode?: 'source_savings';
         priceImprovementAmount?: bigint;
         priceImprovementTokenId?: number;
         cancelRemainder?: boolean;
@@ -516,7 +516,7 @@ type EntityTxPayload =
         cumulativeFillRatio: number; // Coarse 0-65535 compatibility/dispute ratio.
         fillNumerator?: bigint;
         fillDenominator?: bigint;
-        priceImprovementMode?: 'source_savings' | 'target_bonus' | 'none';
+        priceImprovementMode?: 'source_savings';
         priceImprovementAmount?: bigint;
         priceImprovementTokenId?: number;
         cancelRemainder?: boolean;

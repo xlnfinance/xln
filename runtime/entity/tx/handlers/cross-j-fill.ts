@@ -1,5 +1,6 @@
 import {
   CROSS_J_MAX_FILL_RATIO,
+  assertCrossJurisdictionPriceImprovementMode,
   getCrossJurisdictionCommittedFillAmounts,
   getCrossJurisdictionCommittedProofRatio,
   requireCrossJurisdictionFillProgress,
@@ -61,6 +62,7 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
     priceTicks,
     pairId,
   } = entityTx.data;
+  assertCrossJurisdictionPriceImprovementMode(priceImprovementMode, orderId);
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
@@ -144,12 +146,10 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
         cumulativeFillRatio: fill.nextRatio,
         ...(fill.fillNumerator !== undefined ? { fillNumerator: fill.fillNumerator } : {}),
         ...(fill.fillDenominator !== undefined ? { fillDenominator: fill.fillDenominator } : {}),
-        executionSourceAmount: priceImprovementMode === 'source_savings' && (priceImprovementAmount ?? 0n) > 0n
+        executionSourceAmount: (priceImprovementAmount ?? 0n) > 0n
           ? fill.incrementalSourceAmount - (priceImprovementAmount ?? 0n)
           : fill.incrementalSourceAmount,
-        executionTargetAmount: priceImprovementMode === 'target_bonus' && (priceImprovementAmount ?? 0n) > 0n
-          ? fill.incrementalTargetAmount + (priceImprovementAmount ?? 0n)
-          : fill.incrementalTargetAmount,
+        executionTargetAmount: fill.incrementalTargetAmount,
         ...(priceImprovementMode ? { priceImprovementMode } : {}),
         ...(priceImprovementAmount !== undefined ? { priceImprovementAmount } : {}),
         ...(priceImprovementTokenId !== undefined ? { priceImprovementTokenId } : {}),

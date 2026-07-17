@@ -2,6 +2,7 @@ import {
   cloneCrossJurisdictionRoute,
   compareCrossJurisdictionRouteStatus,
   applyCrossJurisdictionFillProgress,
+  assertCrossJurisdictionPriceImprovementMode,
   getCrossJurisdictionCommittedProofRatio,
   isCrossJurisdictionTerminalStatus,
   transitionCrossJurisdictionRouteStatus,
@@ -206,6 +207,7 @@ export const applyCrossJurisdictionBookProgressToState = (
   newState: EntityState,
   data: CrossJurisdictionBookProgressTx['data'],
 ): boolean => {
+  assertCrossJurisdictionPriceImprovementMode(data.priceImprovementMode, data.orderId);
   const now = deterministicEntityTimestamp(newState, env);
   const admissionKey = crossJurisdictionBookAdmissionKeyFor(data.sourceEntityId, data.orderId);
   const admission = newState.crossJurisdictionBookAdmissions?.get(admissionKey);
@@ -256,13 +258,8 @@ export const applyCrossJurisdictionBookProgressToState = (
     cumulativeTargetAmount: data.cumulativeTargetAmount,
   }, now, 'CROSS_J_BOOK_PROGRESS_INVALID');
   if ((data.priceImprovementAmount ?? 0n) > 0n) {
-    if (data.priceImprovementMode === 'source_savings') {
-      nextRoute.priceImprovementSourceAmount =
-        (nextRoute.priceImprovementSourceAmount ?? 0n) + data.priceImprovementAmount!;
-    } else if (data.priceImprovementMode === 'target_bonus') {
-      nextRoute.priceImprovementTargetAmount =
-        (nextRoute.priceImprovementTargetAmount ?? 0n) + data.priceImprovementAmount!;
-    }
+    nextRoute.priceImprovementSourceAmount =
+      (nextRoute.priceImprovementSourceAmount ?? 0n) + data.priceImprovementAmount!;
   }
   if (data.cancelRemainder) {
     transitionCrossJurisdictionRouteStatus(nextRoute, 'clear_requested', now);

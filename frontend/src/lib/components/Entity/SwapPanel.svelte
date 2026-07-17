@@ -228,7 +228,6 @@
   let showManualRouteRecommendation = false;
   let lastPriceContextSignature = '';
   let preservePriceOnNextContextChange = false;
-  let crossPriceImprovementMode: 'source_savings' | 'target_bonus' = 'target_bonus';
   let selectedSourceEntityValue = '';
   let routeDetailsOpen = false;
   let openTokenMenu: 'give' | 'want' | '' = '';
@@ -1897,11 +1896,6 @@
     }
   }
 
-  function withCrossTargetInboundBuffer(amount: bigint): bigint {
-    if (amount <= 0n) return amount;
-    return amount + ((amount + 99n) / 100n);
-  }
-
   function computeAutoInboundCreditTargetForReplica(
     candidate: EntityReplica | null | undefined,
     ownerEntityId: string,
@@ -1955,9 +1949,7 @@
     crossTargetInCapacity = selectedCrossTarget
       ? readInCapacityForReplica(selectedCrossTargetReplica, selectedCrossTarget.targetEntityId, selectedCrossTarget.targetHubEntityId, wantToken)
       : 0n;
-    crossDesiredInboundAmount = crossPriceImprovementMode === 'target_bonus'
-      ? withCrossTargetInboundBuffer(canonicalWantAmount)
-      : canonicalWantAmount;
+    crossDesiredInboundAmount = canonicalWantAmount;
     crossAutoInboundCreditTarget = selectedCrossTarget && crossTargetHasAccount
       ? computeAutoInboundCreditTargetForReplica(
           selectedCrossTargetReplica,
@@ -2993,9 +2985,7 @@
       );
       const targetRoute = selectedCrossTarget;
       const targetReplica = targetRoute ? findReplicaByEntityId(targetRoute.targetEntityId) : null;
-      const requiredTargetInboundAmount = crossPriceImprovementMode === 'target_bonus'
-        ? withCrossTargetInboundBuffer(effectiveWantAmount)
-        : effectiveWantAmount;
+      const requiredTargetInboundAmount = effectiveWantAmount;
       const requiredTargetInboundCreditLimit = targetRoute
         ? computeCrossTargetCreditLimit(targetRoute, targetReplica, wantToken, requiredTargetInboundAmount)
         : null;
@@ -3067,7 +3057,7 @@
             amount: effectiveWantAmount,
           },
           priceTicks: canonicalPriceTicks,
-          priceImprovementMode: crossPriceImprovementMode,
+          priceImprovementMode: 'source_savings',
           status: 'intent',
           createdAt: now,
           updatedAt: now,
@@ -3370,7 +3360,6 @@
       {routePathTargetLabel}
       {sourceRouteEntityLabel}
       {targetRouteEntityLabel}
-      bind:crossPriceImprovementMode
       {showManualRouteRecommendation}
       {routedRouteRecommendations}
       {manualRouteEstimateLabel}

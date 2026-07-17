@@ -154,7 +154,6 @@
   export let routePathTargetLabel = '';
   export let sourceRouteEntityLabel = '';
   export let targetRouteEntityLabel = '';
-  export let crossPriceImprovementMode: 'source_savings' | 'target_bonus' = 'target_bonus';
   export let showManualRouteRecommendation = false;
   export let routedRouteRecommendations: RoutedSwapRouteCandidate[] = [];
   export let manualRouteEstimateLabel: (route: RoutedSwapRouteCandidate) => string = () => '';
@@ -536,7 +535,6 @@
     {selectedRouteLabel}
     {sourceRouteEntityLabel}
     {targetRouteEntityLabel}
-    bind:crossPriceImprovementMode
     {showManualRouteRecommendation}
     {routedRouteRecommendations}
     {manualRouteEstimateLabel}

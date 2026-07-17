@@ -876,7 +876,6 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   const filledSourceAmount = optionalBigInt(route.filledSourceAmount);
   const filledTargetAmount = optionalBigInt(route.filledTargetAmount);
   const priceImprovementSourceAmount = optionalBigInt(route.priceImprovementSourceAmount);
-  const priceImprovementTargetAmount = optionalBigInt(route.priceImprovementTargetAmount);
   const pendingClearRequestedAt = optionalNumber(route.pendingClearRequestedAt);
   const domain = cloneCrossJurisdictionRouteDomain(route.domain);
   const settlementPolicy = cloneCrossJurisdictionSettlementPolicy(route.settlementPolicy);
@@ -910,7 +909,6 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   if (filledSourceAmount !== undefined) clone.filledSourceAmount = filledSourceAmount;
   if (filledTargetAmount !== undefined) clone.filledTargetAmount = filledTargetAmount;
   if (priceImprovementSourceAmount !== undefined) clone.priceImprovementSourceAmount = priceImprovementSourceAmount;
-  if (priceImprovementTargetAmount !== undefined) clone.priceImprovementTargetAmount = priceImprovementTargetAmount;
   if (pendingClearRequestedAt !== undefined) clone.pendingClearRequestedAt = pendingClearRequestedAt;
   if (domain) clone.domain = domain;
   if (settlementPolicy) clone.settlementPolicy = settlementPolicy;
@@ -1216,7 +1214,19 @@ export function withCrossJurisdictionVenueDefaults(route: CrossJurisdictionSwapR
   };
 }
 
+export function assertCrossJurisdictionPriceImprovementMode(
+  mode: unknown,
+  orderId: string,
+): void {
+  if (mode !== undefined && mode !== 'source_savings') {
+    throw new Error(
+      `CROSS_J_PRICE_IMPROVEMENT_MODE_UNSUPPORTED:${orderId}:${String(mode)}`,
+    );
+  }
+}
+
 export function withCanonicalCrossJurisdictionRouteHash(route: CrossJurisdictionSwapRoute): CrossJurisdictionSwapRoute {
+  assertCrossJurisdictionPriceImprovementMode(route.priceImprovementMode, route.orderId);
   const withDefaults = withCrossJurisdictionPolicyDefaults(withCrossJurisdictionVenueDefaults(route));
   assertCrossJurisdictionRiskPolicy(withDefaults);
   const routeHash = deriveCrossJurisdictionRouteHash(withDefaults);

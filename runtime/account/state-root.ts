@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 
 import type { AccountMachine, AccountStateDomain, JurisdictionConfig, SettlementWorkspace } from '../types';
+import { compareStableText } from '../protocol/serialization';
 import { buildHexKeyedMerkle } from '../storage/merkle';
 import { assertAccountJClaimAccumulatorState } from './j-claim-accumulator';
 
@@ -84,17 +85,18 @@ const canonicalRlpNode = (value: unknown): RlpNode => {
   if (Array.isArray(value)) return [textNode('array'), ...value.map(canonicalRlpNode)];
   if (value instanceof Map) {
     const entries = Array.from(value.entries()).map(([key, entry]) => [canonicalRlpNode(key), canonicalRlpNode(entry)] satisfies RlpNode[]);
-    entries.sort((left, right) => nodeSortKey(left[0]!).localeCompare(nodeSortKey(right[0]!)));
+    entries.sort((left, right) => compareStableText(nodeSortKey(left[0]!), nodeSortKey(right[0]!)));
     return [textNode('map'), ...entries];
   }
   if (value instanceof Set) {
-    const entries = Array.from(value.values()).map(canonicalRlpNode).sort((left, right) => nodeSortKey(left).localeCompare(nodeSortKey(right)));
+    const entries = Array.from(value.values()).map(canonicalRlpNode)
+      .sort((left, right) => compareStableText(nodeSortKey(left), nodeSortKey(right)));
     return [textNode('set'), ...entries];
   }
   if (typeof value === 'object' && value !== null) {
     const entries = Object.entries(value as Record<string, unknown>)
       .filter(([, entry]) => entry !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => compareStableText(left, right))
       .map(([key, entry]) => [textNode(key), canonicalRlpNode(entry)] satisfies RlpNode[]);
     return [textNode('object'), ...entries];
   }

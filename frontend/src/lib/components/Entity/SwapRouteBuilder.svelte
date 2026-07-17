@@ -25,7 +25,6 @@
   export let selectedRouteLabel = '';
   export let sourceRouteEntityLabel = '';
   export let targetRouteEntityLabel = '';
-  export let crossPriceImprovementMode: 'source_savings' | 'target_bonus' = 'target_bonus';
   export let showManualRouteRecommendation = false;
   export let routedRouteRecommendations: RoutedSwapRouteCandidate[] = [];
   export let manualRouteEstimateLabel: (route: RoutedSwapRouteCandidate) => string = () => '';
@@ -71,15 +70,6 @@
     <span title={`${sourceRouteEntityLabel} -> ${targetRouteEntityLabel}`}>{routePathLabel}</span>
     <em>via {routeVenueDisplayLabel}</em>
   </div>
-  {#if swapRouteMode === 'cross'}
-    <label class="route-select-row" data-testid="swap-cross-improvement-mode">
-      <span>Price improvement</span>
-      <select class="route-select" bind:value={crossPriceImprovementMode} title="Price improvement">
-        <option value="source_savings">Spend less source</option>
-        <option value="target_bonus">Receive more target</option>
-      </select>
-    </label>
-  {/if}
   {#if routeDetailsOpen}
     <div class="route-details">
       <span>Source account: {sourceRouteEntityLabel}</span>

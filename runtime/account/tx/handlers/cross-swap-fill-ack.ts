@@ -3,6 +3,7 @@ import type { SwapOfferEvent } from '../../../entity/tx/handlers/account';
 import { getSwapLotScale } from '../../../orderbook';
 import {
   CROSS_J_MAX_FILL_RATIO,
+  assertCrossJurisdictionPriceImprovementMode,
   buildCommittedCrossJurisdictionPullBinding,
   getCrossJurisdictionCommittedFillAmounts,
   getCrossJurisdictionCommittedProofRatio,
@@ -13,8 +14,6 @@ import {
 import { recordSwapClosedLifecycle, recordSwapResolveLifecycle } from './swap-history';
 
 type CrossSwapFillAckTx = Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
-const deterministicAccountTimestamp = (accountMachine: AccountMachine): number =>
-  Number(accountMachine.pendingFrame?.timestamp ?? accountMachine.currentFrame?.timestamp ?? 0);
 
 const syncSourcePullBinding = (accountMachine: AccountMachine, route: CrossJurisdictionSwapRoute): void => {
   const sourcePullId = route?.sourcePull?.pullId;
@@ -28,6 +27,7 @@ export async function handleCrossSwapFillAck(
   accountMachine: AccountMachine,
   accountTx: CrossSwapFillAckTx,
   byLeft: boolean,
+  currentTimestamp: number,
   currentHeight: number,
 ): Promise<{
   success: boolean;
@@ -36,6 +36,16 @@ export async function handleCrossSwapFillAck(
   swapOfferCreated?: SwapOfferEvent;
   swapOfferCancelled?: { offerId: string; accountId: string };
 }> {
+  const rawPriceImprovementMode = (accountTx.data as { priceImprovementMode?: unknown }).priceImprovementMode;
+  try {
+    assertCrossJurisdictionPriceImprovementMode(rawPriceImprovementMode, accountTx.data.offerId);
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+      events: [],
+    };
+  }
   const {
     offerId,
     routeHash,
@@ -50,7 +60,6 @@ export async function handleCrossSwapFillAck(
     executionTargetAmount,
     fillNumerator,
     fillDenominator,
-    priceImprovementMode = 'source_savings',
     priceImprovementAmount = 0n,
     priceImprovementTokenId,
     cancelRemainder = false,
@@ -107,7 +116,7 @@ export async function handleCrossSwapFillAck(
     if (cumulativeTargetAmount === undefined || cumulativeTargetAmount !== currentTarget) {
       return { success: false, error: `Cross-j cancel target mismatch: expected ${currentTarget}, got ${cumulativeTargetAmount}`, events };
     }
-    transitionCrossJurisdictionRouteStatus(route, 'clear_requested', deterministicAccountTimestamp(accountMachine));
+    transitionCrossJurisdictionRouteStatus(route, 'clear_requested', currentTimestamp);
     route.clearingPolicy = 'cancel_and_clear';
     offer.crossJurisdiction = route;
     syncSourcePullBinding(accountMachine, route);
@@ -150,23 +159,15 @@ export async function handleCrossSwapFillAck(
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error), events };
   }
-  const expectedExecutionSource = priceImprovementMode === 'source_savings' && priceImprovementAmount > 0n
+  const expectedExecutionSource = priceImprovementAmount > 0n
     ? fill.incrementalSourceAmount - priceImprovementAmount
     : fill.incrementalSourceAmount;
-  const expectedExecutionTarget = priceImprovementMode === 'target_bonus' && priceImprovementAmount > 0n
-    ? fill.incrementalTargetAmount + priceImprovementAmount
-    : fill.incrementalTargetAmount;
+  const expectedExecutionTarget = fill.incrementalTargetAmount;
   if (priceImprovementAmount < 0n) {
     return { success: false, error: `Cross-j price improvement must be non-negative`, events };
   }
-  if (priceImprovementAmount > 0n && priceImprovementMode === 'none') {
-    return { success: false, error: `Cross-j price improvement disabled`, events };
-  }
-  if (priceImprovementAmount > 0n && priceImprovementMode === 'source_savings' && priceImprovementTokenId !== route.source.tokenId) {
+  if (priceImprovementAmount > 0n && priceImprovementTokenId !== route.source.tokenId) {
     return { success: false, error: `Cross-j source savings token mismatch`, events };
-  }
-  if (priceImprovementAmount > 0n && priceImprovementMode === 'target_bonus' && priceImprovementTokenId !== route.target.tokenId) {
-    return { success: false, error: `Cross-j target bonus token mismatch`, events };
   }
   if (expectedExecutionSource <= 0n || expectedExecutionTarget <= 0n) {
     return { success: false, error: `Cross-j execution amount after improvement must be positive`, events };
@@ -182,15 +183,11 @@ export async function handleCrossSwapFillAck(
   const nextRoute = withCrossJurisdictionFillProgress(
     route,
     fill,
-    deterministicAccountTimestamp(accountMachine),
+    currentTimestamp,
   );
   Object.assign(route, nextRoute);
   if (priceImprovementAmount > 0n) {
-    if (priceImprovementMode === 'source_savings') {
-      route.priceImprovementSourceAmount = (route.priceImprovementSourceAmount ?? 0n) + priceImprovementAmount;
-    } else if (priceImprovementMode === 'target_bonus') {
-      route.priceImprovementTargetAmount = (route.priceImprovementTargetAmount ?? 0n) + priceImprovementAmount;
-    }
+    route.priceImprovementSourceAmount = (route.priceImprovementSourceAmount ?? 0n) + priceImprovementAmount;
   }
   if (priceTicks !== undefined) route.priceTicks = priceTicks;
   if (pairId) route.venueId ||= pairId;
@@ -212,7 +209,7 @@ export async function handleCrossSwapFillAck(
   );
   const terminalClose = shouldClose || closedByDust;
   if (terminalClose) {
-    transitionCrossJurisdictionRouteStatus(route, 'clear_requested', deterministicAccountTimestamp(accountMachine));
+    transitionCrossJurisdictionRouteStatus(route, 'clear_requested', currentTimestamp);
     route.clearingPolicy =
       cancelRemainder || closedByDust || fill.nextRatio < CROSS_J_MAX_FILL_RATIO
         ? 'cancel_and_clear'

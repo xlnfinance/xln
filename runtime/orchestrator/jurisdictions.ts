@@ -7,6 +7,7 @@ import { computeJurisdictionsNetworkVersion } from '../jurisdiction/jurisdiction
 import { normalizeLoopbackUrl, toPublicRpcUrl } from '../networking/loopback-url';
 import {
   assertCanonicalRpcContractStack,
+  findRpcContractDeploymentBlock,
   findMissingRpcContractCode,
   REQUIRED_RPC_CONTRACT_KEYS,
   type RpcContractAddresses,
@@ -266,18 +267,25 @@ export const provisionPrimaryRpcJurisdictionStack = async (
     throw new Error(`PRIMARY_RPC_PARTIAL_STACK_CORRUPTION:${missingCode.join(',')}`);
   }
   const deployed = missingCode.length > 0;
+  const configuredDeploymentBlockMissing = jurisdiction.entityProviderDeploymentBlock === undefined;
   const provisioned = deployed
     ? await deployRpcStack(rpcUrl, chainId)
     : {
         contracts: requireCompleteRpcContracts(jurisdiction.contracts, 'PRIMARY_RPC_CONFIGURED'),
-        entityProviderDeploymentBlock: requireEntityProviderDeploymentBlock(
-          jurisdiction.entityProviderDeploymentBlock,
-          'PRIMARY_RPC_CONFIGURED',
-        ),
+        entityProviderDeploymentBlock: configuredDeploymentBlockMissing
+          ? await findRpcContractDeploymentBlock(
+              rpcUrl,
+              String(jurisdiction.contracts?.entityProvider || ''),
+              'PRIMARY_RPC_ENTITY_PROVIDER_DEPLOYMENT',
+            )
+          : requireEntityProviderDeploymentBlock(
+              jurisdiction.entityProviderDeploymentBlock,
+              'PRIMARY_RPC_CONFIGURED',
+            ),
       };
   const { contracts, entityProviderDeploymentBlock } = provisioned;
   await assertCanonicalRpcContractStack(rpcUrl, contracts, 'PRIMARY_RPC');
-  if (deployed) {
+  if (deployed || configuredDeploymentBlockMissing) {
     persistPrimaryRpcStack(
       config,
       payload,
@@ -320,10 +328,16 @@ export const deployRpc2JurisdictionStack = async (config: OrchestratorJurisdicti
   const provisioned = missingCode.length === 0
     ? {
         contracts: requireCompleteRpcContracts(existing?.contracts, 'RPC2_CONFIGURED'),
-        entityProviderDeploymentBlock: requireEntityProviderDeploymentBlock(
-          existing?.entityProviderDeploymentBlock,
-          'RPC2_CONFIGURED',
-        ),
+        entityProviderDeploymentBlock: existing?.entityProviderDeploymentBlock === undefined
+          ? await findRpcContractDeploymentBlock(
+              config.rpc2Url,
+              String(existing?.contracts?.entityProvider || ''),
+              'RPC2_ENTITY_PROVIDER_DEPLOYMENT',
+            )
+          : requireEntityProviderDeploymentBlock(
+              existing.entityProviderDeploymentBlock,
+              'RPC2_CONFIGURED',
+            ),
       }
     : await deployRpcStack(config.rpc2Url, chainId);
   const { contracts, entityProviderDeploymentBlock } = provisioned;

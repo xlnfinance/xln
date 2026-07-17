@@ -353,13 +353,18 @@ test('secondary RPC stack reuses deterministic addresses across reset retries', 
     const primaryBlock = await rpcCall(primaryRpc, 'eth_blockNumber');
     const secondaryBlock = await rpcCall(secondaryRpc, 'eth_blockNumber');
 
-    // A real reset rewinds the shard metadata from its canonical seed while the
-    // Anvil processes retain the already-deployed deterministic stacks.
+    // Simulate SIGTERM after both deployments committed but before their metadata
+    // reached the canonical seed. A restart must recover the exact on-chain
+    // boundaries without redeploying either deterministic stack.
+    const interruptedPrimary = { ...first.jurisdictions.primary };
+    const interruptedTron = { ...first.jurisdictions.tron };
+    delete interruptedPrimary.entityProviderDeploymentBlock;
+    delete interruptedTron.entityProviderDeploymentBlock;
     await writeFile(jurisdictionsPath, `${JSON.stringify({
       version: first.version,
       jurisdictions: {
-        primary: first.jurisdictions.primary,
-        tron: first.jurisdictions.tron,
+        primary: interruptedPrimary,
+        tron: interruptedTron,
       },
     }, null, 2)}\n`, 'utf8');
     expect((await provisionPrimaryRpcJurisdictionStack(config)).deployed).toBe(false);

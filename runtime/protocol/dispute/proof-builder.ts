@@ -30,6 +30,7 @@ import { sortTransformerEntries } from '../transformer-ordering.ts';
 import { normalizeAccountWatchSeed } from '../../account/watch-seed.ts';
 import { HASHLADDER_MAX_FILL_RATIO } from '../htlc/hash-ladder.ts';
 import { assertDisputeProofBodyWithinContractLimits } from '../../jurisdiction/batch.ts';
+import { compareStableText } from '../serialization.ts';
 import {
   encodeDisputeProofHankoPayload,
   hashCooperativeDisputeProofHankoPayload,
@@ -265,7 +266,8 @@ export function buildAccountProofBody(
       allowances: buildTransformerAllowances(batch),
     });
   }
-  for (const [subcontractId, subcontract] of Array.from(accountMachine.subcontracts ?? []).sort(([left], [right]) => left.localeCompare(right))) {
+  for (const [subcontractId, subcontract] of Array.from(accountMachine.subcontracts ?? [])
+    .sort(([left], [right]) => compareStableText(left, right))) {
     const transformerAddress = requireContractAddress(`subcontract_${subcontractId}`, subcontract.transformerAddress);
     if (!ethers.isHexString(subcontract.encodedBatch)) {
       throw new Error(`SUBCONTRACT_ENCODED_BATCH_INVALID:${subcontractId}`);

@@ -188,13 +188,12 @@ export interface CrossJurisdictionSwapRoute {
   filledSourceAmount?: bigint;
   filledTargetAmount?: bigint;
   priceImprovementSourceAmount?: bigint;
-  priceImprovementTargetAmount?: bigint;
   pendingClearRequestedAt?: number;
   domain?: CrossJurisdictionRouteDomain;
   settlementPolicy?: CrossJurisdictionSettlementPolicy;
   timePolicy?: CrossJurisdictionTimePolicy;
   clearingPolicy?: 'manual' | 'full_fill' | 'cancel_and_clear';
-  priceImprovementMode?: 'source_savings' | 'target_bonus' | 'none';
+  priceImprovementMode?: 'source_savings';
   riskMode?: 'fully_collateralized' | 'partially_collateralized' | 'credit_line' | 'unsecured_internalized';
   claimedRatio?: number;
   sourceClaimed?: bigint;

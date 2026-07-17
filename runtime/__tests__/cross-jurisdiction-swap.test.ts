@@ -2421,6 +2421,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdHeight: 0,
       createdTimestamp: 1_000,
     }]]);
+    account.currentFrame.timestamp = 1_500;
+    account.pendingFrame = { ...account.currentFrame, height: 1, timestamp: 9_000 };
 
     const result = await applyAccountTx(account, {
       type: 'cross_swap_fill_ack',
@@ -2446,6 +2448,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(updatedRoute?.status).toBe('partially_filled');
     expect(updatedRoute?.fillSeq).toBe(1);
     expect(updatedRoute?.filledSourceAmount).toBe(500n);
+    expect(updatedRoute?.updatedAt).toBe(2_000);
     expect(account.mempool.some(tx => tx.type === 'pull_resolve')).toBe(false);
   });
 
@@ -2603,7 +2606,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         fillDenominator: 2n,
         executionSourceAmount: 500n,
         executionTargetAmount: 450n,
-        priceImprovementMode: 'none',
+        priceImprovementMode: 'source_savings',
         cancelRemainder: false,
         pairId: 'cross:ethereum:1/base:1',
       },

@@ -932,7 +932,7 @@ export type AccountTx =
 	        ackKind?: 'fill' | 'cancel';
 	        executionSourceAmount?: bigint;
         executionTargetAmount?: bigint;
-        priceImprovementMode?: 'source_savings' | 'target_bonus' | 'none';
+        priceImprovementMode?: 'source_savings';
         priceImprovementAmount?: bigint;
         priceImprovementTokenId?: number;
         cancelRemainder?: boolean;

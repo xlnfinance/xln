@@ -3380,10 +3380,10 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       const bobFullResolve = await timedStep('cross_j_swap.full.bob_price_improvement', () =>
         waitForLatestCrossResolveSnapshot(bobPage, bobRpc2.entityId, targetHubId, 1),
       );
-      expect(bobFullResolve.fillRatio, 'Bob target-bonus terminal fill may close before the coarse ratio reaches 65535').toBeLessThan(65_535);
-      expect(bobFullResolve.cancelRemainder, 'Bob target-bonus terminal fill must remove the terminal order').toBe(true);
-      expect(bobFullResolve.executionGiveAmount, 'Bob spends execution source, not his 78 USDC limit').toBe(tokenAmount(USDC, 75n).toString());
-      expect(bobFullResolve.executionWantAmount, 'Bob receives the full 0.03 WETH target').toBe((tokenAmount(WETH, 3n) / 100n).toString());
+      expect(bobFullResolve.fillRatio, 'Bob source-savings fill must consume the full target ratio').toBe(65_535);
+      expect(bobFullResolve.cancelRemainder, 'Bob source-savings terminal fill must remove the terminal order').toBe(true);
+      expect(bobFullResolve.executionGiveAmount, 'Bob spends the improved execution source, not his 78 USDC limit').toBe(tokenAmount(USDC, 75n).toString());
+      expect(bobFullResolve.executionWantAmount, 'Bob receives exactly the committed 0.03 WETH target').toBe((tokenAmount(WETH, 3n) / 100n).toString());
 
       await Promise.all([
         waitForOutCapAtLeast(alicePage, aliceRpc2.entityId, targetHubId, USDC, tokenAmount(USDC, 25n)),

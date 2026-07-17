@@ -7,6 +7,7 @@ import type { ConsensusConfig, EntityState, Env, HankoBoardDelays, HankoString }
 import { ethers } from 'ethers';
 import { encodeBoard, generateLazyEntityId, hashBoard } from '../entity/factory';
 import { recoverAddressFromDigestSignature, signDigestBytesWithPrivateKey } from '../account/crypto';
+import { compareStableText } from '../protocol/serialization';
 import {
   resolveUniqueCertifiedRegisteredBoardRecord,
   resolveSigningCertifiedBoardHash,
@@ -451,7 +452,8 @@ export async function buildQuorumHanko(
   }
   assertQuorumBoardBinding(env, entityId, config, validators, authorityState);
 
-  const byAddress = (left: QuorumValidator, right: QuorumValidator) => left.address.localeCompare(right.address);
+  const byAddress = (left: QuorumValidator, right: QuorumValidator) =>
+    compareStableText(left.address, right.address);
   const signingValidators = validators.filter((validator) => signaturesByKey.has(validator.signerKey)).sort(byAddress);
   const nonSigningValidators = validators.filter((validator) => !signaturesByKey.has(validator.signerKey)).sort(byAddress);
   const placeholders = nonSigningValidators.map((validator) => ethers.zeroPadValue(validator.address, 32).toLowerCase() as `0x${string}`);

@@ -1,7 +1,6 @@
 import {
   CROSS_J_MAX_FILL_RATIO,
   buildCrossJurisdictionCloseProof,
-  cloneCrossJurisdictionRoute,
   getCrossJurisdictionCommittedFillAmounts,
   transitionCrossJurisdictionRouteStatus,
   withCanonicalCrossJurisdictionRouteHash,
@@ -19,7 +18,6 @@ import {
   findCrossJurisdictionOfferRoute,
   mergeCrossJurisdictionRoute,
 } from '../cross-jurisdiction-helpers';
-import { pushCrossJurisdictionEntityOutput } from '../cross-j-outputs';
 import type { MempoolOp } from './account';
 
 type CrossJurisdictionClearTx = Extract<EntityTx, { type: 'requestCrossJurisdictionClear' }>;
@@ -53,16 +51,6 @@ const closeProofMatches = (
   left.cumulativeTargetAmount === right.cumulativeTargetAmount &&
   left.binaryHash.toLowerCase() === right.binaryHash.toLowerCase() &&
   left.closeMode === right.closeMode;
-
-const pushCrossJOutput = (
-  env: Env,
-  outputs: EntityInput[],
-  entityId: string,
-  entityTxs: EntityTx[],
-  signerIdHint?: string | null,
-): void => {
-  pushCrossJurisdictionEntityOutput(env, outputs, entityId, entityTxs, signerIdHint);
-};
 
 export const handleRequestCrossJurisdictionClearEntityTx = (
   env: Env,

@@ -264,7 +264,11 @@ export const markCrossJurisdictionBookCancelPending = (
       `CROSS_J_CANCEL_ADMISSION_MISSING:order=${canonicalRoute.orderId}:source=${canonicalRoute.source.entityId}`,
     );
   }
-  if (normalizeEntityRef(admission.routeHash) !== normalizeEntityRef(canonicalRoute.routeHash)) {
+  const canonicalRouteHash = canonicalRoute.routeHash;
+  if (!canonicalRouteHash) {
+    throw new Error(`CROSS_J_CANCEL_ROUTE_HASH_MISSING:order=${canonicalRoute.orderId}`);
+  }
+  if (normalizeEntityRef(admission.routeHash) !== normalizeEntityRef(canonicalRouteHash)) {
     throw new Error(
       `CROSS_J_CANCEL_ADMISSION_ROUTE_MISMATCH:order=${canonicalRoute.orderId}:` +
         `admission=${admission.routeHash}:route=${canonicalRoute.routeHash}`,
@@ -424,7 +428,7 @@ export interface CrossJurisdictionFillInstruction {
   targetAmount: bigint;
   executionSourceAmount: bigint;
   executionTargetAmount: bigint;
-  priceImprovementMode: 'source_savings' | 'target_bonus' | 'none';
+  priceImprovementMode: 'source_savings';
   priceImprovementAmount: bigint;
   priceImprovementTokenId: number | null;
   priceTicks: bigint;
@@ -579,18 +583,12 @@ export const buildCrossJurisdictionFillAck = (
   } = getCrossJurisdictionCommittedFillAmounts(meta.route);
   const priceImprovementMode = meta.route.priceImprovementMode ?? 'source_savings';
   // Hash-ledger ratio is the committed order-progress ratio. Price improvement
-  // is execution economics only: source_savings preserves target progress and
-  // spends less source, while target_bonus preserves source progress and pays
-  // more target. Never derive the ratio from the improved amount itself.
-  const exactFillRatio = priceImprovementMode === 'source_savings'
-    ? deriveExactSwapFillRatio(
-        targetTotal,
-        previousTargetClaimed + targetAmount >= targetTotal ? targetTotal : previousTargetClaimed + targetAmount,
-      )
-    : deriveExactSwapFillRatio(
-        sourceTotal,
-        previousSourceClaimed + sourceAmount >= sourceTotal ? sourceTotal : previousSourceClaimed + sourceAmount,
-      );
+  // always follows target progress. A better book price spends less source;
+  // cross-j never creates a second target-side payment lane.
+  const exactFillRatio = deriveExactSwapFillRatio(
+    targetTotal,
+    previousTargetClaimed + targetAmount >= targetTotal ? targetTotal : previousTargetClaimed + targetAmount,
+  );
   const fillRatio = exactFillRatioToUint16(exactFillRatio);
   if (fillRatio <= previousCumulativeRatio) return null;
 
@@ -611,25 +609,15 @@ export const buildCrossJurisdictionFillAck = (
   const settlementTargetAmount = exactCumulativeTarget - previousTargetClaimed;
   if (settlementSourceAmount <= 0n || settlementTargetAmount <= 0n) return null;
   const sourceSavings = settlementSourceAmount > sourceAmount ? settlementSourceAmount - sourceAmount : 0n;
-  const targetBonus = targetAmount > settlementTargetAmount ? targetAmount - settlementTargetAmount : 0n;
-  const priceImprovementAmount = priceImprovementMode === 'source_savings'
-    ? sourceSavings
-    : priceImprovementMode === 'target_bonus'
-      ? targetBonus
-      : 0n;
+  const priceImprovementAmount = sourceSavings;
   const priceImprovementTokenId = priceImprovementAmount > 0n
-    ? priceImprovementMode === 'source_savings'
-      ? Number(meta.route.source.tokenId)
-      : Number(meta.route.target.tokenId)
+    ? Number(meta.route.source.tokenId)
     : null;
-  const executionSourceAmount = priceImprovementMode === 'source_savings' && sourceSavings > 0n
+  const executionSourceAmount = sourceSavings > 0n
     ? settlementSourceAmount - sourceSavings
     : settlementSourceAmount;
-  const executionTargetAmount = priceImprovementMode === 'target_bonus' && targetBonus > 0n
-    ? settlementTargetAmount + targetBonus
-    : settlementTargetAmount;
-  const nextActualTargetAmount =
-    previousTargetClaimed + (meta.route.priceImprovementTargetAmount ?? 0n) + executionTargetAmount;
+  const executionTargetAmount = settlementTargetAmount;
+  const nextActualTargetAmount = previousTargetClaimed + executionTargetAmount;
   const terminalCancel =
     fillRatio >= CROSS_J_MAX_FILL_RATIO ||
     nextActualTargetAmount >= targetTotal;

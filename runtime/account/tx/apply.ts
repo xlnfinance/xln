@@ -299,6 +299,7 @@ export async function applyAccountTx(
         accountMachine,
         accountTx,
         byLeft,
+        currentTimestamp,
         currentHeight,
       );
 

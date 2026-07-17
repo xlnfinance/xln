@@ -1359,6 +1359,9 @@ const drainCommittedCrossJurisdictionCancelAcks = (
 ): number => {
   let queued = 0;
   for (const { accountId, tx } of collectCommittedCrossJurisdictionCancelAcks(currentEntityState)) {
+    if (tx.type !== 'cross_swap_fill_ack') {
+      throw new Error(`CROSS_J_CANCEL_ACK_TX_INVALID:account=${accountId}:type=${tx.type}`);
+    }
     const account = currentEntityState.accounts.get(accountId);
     if (!account) {
       throw new Error(`CROSS_J_CANCEL_ACK_ACCOUNT_MISSING:account=${accountId}:offer=${tx.data.offerId}`);
@@ -3166,6 +3169,7 @@ export const applyEntityInput = async (
     localCanPropose && workingReplica.jPrefixRound
       ? buildJPrefixCertificate(workingReplica.state, workingReplica.jPrefixRound.attestations)
       : null;
+  let proposalCertifiedJPrefixTx: Extract<EntityTx, { type: 'j_event' }> | null = null;
   if (proposalJPrefixCertificate && workingReplica.jPrefixRound) {
     workingReplica.jPrefixRound.certificate = proposalJPrefixCertificate;
     if (proposalJPrefixCertificate.selected.scannedThroughHeight > workingReplica.state.lastFinalizedJHeight) {
@@ -3175,10 +3179,13 @@ export const applyEntityInput = async (
         proposalJPrefixCertificate,
         getReplicaProposalLeader(workingReplica).activeValidatorId,
       );
-      workingReplica.mempool = prioritizeScheduledWakeTransactions([
-        certifiedRange,
-        ...workingReplica.mempool.filter(tx => tx.type !== 'j_event'),
-      ]);
+      proposalCertifiedJPrefixTx = certifiedRange;
+      if (!trustedLocalCrossJurisdiction) {
+        workingReplica.mempool = prioritizeScheduledWakeTransactions([
+          certifiedRange,
+          ...workingReplica.mempool.filter(tx => tx.type !== 'j_event'),
+        ]);
+      }
     }
   }
   const jPrefixProposalBlocked =
@@ -3196,12 +3203,15 @@ export const applyEntityInput = async (
     workingReplica,
     proposalJPrefixCertificate,
   );
+  const trustedLocalProposalTxs = proposalCertifiedJPrefixTx
+    ? [proposalCertifiedJPrefixTx, ...trustedLocalEntityTxs]
+    : trustedLocalEntityTxs;
   const proposalSelection =
     localCanPropose && !jPrefixProposalBlocked
       ? await selectProposableEntityTxs(
           env,
           workingReplica.state,
-          trustedLocalCrossJurisdiction ? trustedLocalEntityTxs : workingReplica.mempool,
+          trustedLocalCrossJurisdiction ? trustedLocalProposalTxs : workingReplica.mempool,
         )
       : {
           txs: [],
@@ -3215,11 +3225,11 @@ export const applyEntityInput = async (
   const proposalTxs = shouldRollFrozenBaseJPrefixRound ? [] : proposalSelection.txs;
   if (
     trustedLocalCrossJurisdiction &&
-    proposalTxs.length !== trustedLocalEntityTxs.length
+    proposalTxs.length !== trustedLocalProposalTxs.length
   ) {
     throw new Error(
       `CROSS_J_LOCAL_COMMAND_PARTIAL_FRAME_FORBIDDEN:${workingReplica.entityId}:` +
-        `selected=${proposalTxs.length}:required=${trustedLocalEntityTxs.length}`,
+        `selected=${proposalTxs.length}:required=${trustedLocalProposalTxs.length}`,
     );
   }
   if (proposalSelection.reason) {
@@ -4388,40 +4398,6 @@ function applyOrderbookMatching(context: ApplyOrderbookMatchingContext): Orderbo
           deterministicEntityTimestamp(currentEntityState, env),
         );
       }
-      if (
-        fill.priceImprovementMode !== 'target_bonus' ||
-        fill.priceImprovementAmount <= 0n ||
-        fill.priceImprovementTokenId === null
-      ) {
-        continue;
-      }
-      const targetHubEntityId = normalizeEntityRef(fill.route.target.entityId);
-      const targetSigner = String(fill.route.targetHubSignerId || '');
-      if (!targetHubEntityId || !normalizeEntityRef(targetSigner)) {
-        // target_bonus is owed value from the same firm fill, not an optional
-        // notification. If the target hub route is unavailable, committing the
-        // ACK/book progress would settle less than the matched economics.
-        throw new Error(
-          `CROSS_J_TARGET_BONUS_UNROUTABLE: offer=${shortOrder(fill.offerId, 8)} ` +
-            `targetHub=${shortId(fill.route.target.entityId, 8)}`,
-        );
-      }
-      allOutputs.push({
-        entityId: targetHubEntityId,
-        signerId: targetSigner,
-        entityTxs: [
-          {
-            type: 'directPayment',
-            data: {
-              targetEntityId: fill.route.target.counterpartyEntityId,
-              tokenId: fill.priceImprovementTokenId,
-              amount: fill.priceImprovementAmount,
-              route: [fill.route.target.entityId, fill.route.target.counterpartyEntityId],
-              description: `cross-j-target-bonus:${fill.offerId}`,
-            },
-          },
-        ],
-      });
     }
   }
 
@@ -4457,6 +4433,9 @@ function applySwapCancelRequests(context: ApplySwapCancelRequestsContext): void 
   );
   allOutputs.push(...routedCancels.outputs);
   for (const { accountId, tx } of routedCancels.mempoolOps) {
+    if (tx.type !== 'cross_swap_fill_ack') {
+      throw new Error(`CROSS_J_CANCEL_ACK_TX_INVALID:account=${accountId}:type=${tx.type}`);
+    }
     const account = currentEntityState.accounts.get(accountId);
     if (!account) {
       throw new Error(

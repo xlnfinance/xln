@@ -39,6 +39,41 @@ const account = (): AccountMachine => ({
 } as AccountMachine);
 
 describe('canonical account state root', () => {
+  test('is independent of host locale for map keys, object keys, and dispute subcontracts', () => {
+    const base = account();
+    base.lendingIntents = new Map([
+      ['0xaa12', 'fund'],
+      ['0xab34', 'fund'],
+    ]);
+    base.subcontracts = new Map([
+      ['0xaa12', {
+        transformerAddress: `0x${'66'.repeat(20)}`,
+        encodedBatch: '0x12',
+        allowances: [],
+      }],
+      ['0xab34', {
+        transformerAddress: `0x${'77'.repeat(20)}`,
+        encodedBatch: '0x34',
+        allowances: [],
+      }],
+    ]);
+    const originalLocaleCompare = String.prototype.localeCompare;
+    const underLocale = (locale: string): { root: string; proofBodyHash: string } => {
+      String.prototype.localeCompare = function localeCompare(that: string): number {
+        return originalLocaleCompare.call(this, that, locale);
+      };
+      return {
+        root: computeAccountStateRoot(base),
+        proofBodyHash: buildAccountProofBody(base, '').proofBodyHash,
+      };
+    };
+    try {
+      expect(underLocale('en')).toEqual(underLocale('da'));
+    } finally {
+      String.prototype.localeCompare = originalLocaleCompare;
+    }
+  });
+
   test('binds account domain and every financial delta field', () => {
     const base = account();
     const root = computeAccountStateRoot(base);
