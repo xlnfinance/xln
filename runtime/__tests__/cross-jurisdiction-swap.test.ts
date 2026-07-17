@@ -1221,31 +1221,46 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(account.pulls?.get(sourcePull.pullId)?.claimedAmount).toBe(500n);
   });
 
-  test('source hub committed pull resolve relays hash-ladder binary to target user', () => {
-    const env = createEmptyEnv('cross-source-hub-relay');
-    env.timestamp = 10_000;
-    env.quietRuntimeLogs = true;
+  test('source Account copies split book cleanup from the user-sibling close relay', () => {
+    const hubEnv = createEmptyEnv('cross-source-close-hub-runtime');
+    const userEnv = createEmptyEnv('cross-source-close-user-runtime');
+    hubEnv.timestamp = 10_000;
+    userEnv.timestamp = 10_000;
+    hubEnv.quietRuntimeLogs = true;
+    userEnv.quietRuntimeLogs = true;
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const base = makeJurisdiction('Base', 8453, '21', '22');
     const sourceUser = entity('a1');
     const sourceHub = entity('a2');
     const targetHub = entity('a3');
     const targetUser = entity('a4');
-    const sourceHubState = makeState(sourceHub, addr('a5'), eth, sourceUser);
+    const sourceHubSigner = addr('a5');
     const targetUserSigner = addr('a6');
-    addReplica(env, makeState(targetUser, targetUserSigner, base, targetHub), targetUserSigner);
+    const sourceUserSigner = addr('a7');
+    const targetHubSigner = addr('a8');
+    const sourceHubState = makeState(sourceHub, sourceHubSigner, eth, sourceUser);
+    const targetHubState = makeState(targetHub, targetHubSigner, base, targetUser);
+    const sourceUserState = makeState(sourceUser, sourceUserSigner, eth, sourceHub);
+    const targetUserState = makeState(targetUser, targetUserSigner, base, targetHub);
+    addReplica(hubEnv, sourceHubState, sourceHubSigner);
+    addReplica(hubEnv, targetHubState, targetHubSigner);
+    addReplica(userEnv, sourceUserState, sourceUserSigner);
+    addReplica(userEnv, targetUserState, targetUserSigner);
     const route = buildPreparedCrossJurisdictionRoute({
       orderId: 'cross-source-hub-relay',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
+      sourceSignerId: sourceUserSigner,
+      sourceHubSignerId: sourceHubSigner,
+      targetHubSignerId: targetHubSigner,
       targetSignerId: targetUserSigner,
       source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
       target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
       status: 'resting',
-      createdAt: env.timestamp,
-      updatedAt: env.timestamp,
+      createdAt: hubEnv.timestamp,
+      updatedAt: hubEnv.timestamp,
       expiresAt: 70_000,
-    }, { runtimeSeed: 'cross-source-hub-relay-seed', sourceDisputeDelayMs: 5_000, now: env.timestamp });
+    }, { runtimeSeed: 'cross-source-hub-relay-seed', sourceDisputeDelayMs: 5_000, now: hubEnv.timestamp });
     const filledRoute = {
       ...route,
       status: 'clear_requested' as const,
@@ -1257,33 +1272,55 @@ describe('cross-jurisdiction hashledger swap', () => {
       clearingPolicy: 'cancel_and_clear' as const,
     };
     sourceHubState.crossJurisdictionSwaps?.set(filledRoute.orderId, filledRoute);
+    sourceUserState.crossJurisdictionSwaps?.set(filledRoute.orderId, cloneCrossJurisdictionRoute(filledRoute));
     const privateSeed = deriveCrossJurisdictionPrivateSeed('cross-source-hub-relay-seed', filledRoute);
     const binary = buildCrossJurisdictionPullReveal(filledRoute, 0x8000, privateSeed).binary;
-    const outputs: any[] = [];
-
-    const handled = applyCommittedCrossJurisdictionAccountTxFollowup(env, sourceHubState, sourceUser, {
+    const hubOutputs: EntityInput[] = [];
+    const userOutputs: EntityInput[] = [];
+    const committedResolve: Extract<AccountTx, { type: 'pull_resolve' }> = {
       type: 'pull_resolve',
       data: {
         pullId: filledRoute.sourcePull!.pullId,
         binary,
       },
-    }, outputs);
+    };
 
-    expect(handled).toBe(true);
+    const hubHandled = applyCommittedCrossJurisdictionAccountTxFollowup(
+      hubEnv,
+      sourceHubState,
+      sourceUser,
+      committedResolve,
+      hubOutputs,
+      hubEnv.timestamp,
+      [],
+    );
+    const userHandled = applyCommittedCrossJurisdictionAccountTxFollowup(
+      userEnv,
+      sourceUserState,
+      sourceHub,
+      committedResolve,
+      userOutputs,
+      userEnv.timestamp,
+      [],
+    );
+
+    expect(hubHandled).toBe(true);
+    expect(userHandled).toBe(true);
     expect(sourceHubState.crossJurisdictionSwaps?.get(filledRoute.orderId)?.status).toBe('source_claimed');
-    expect(outputs.some(output =>
-      output.entityId === targetUser &&
-      output.entityTxs?.some((tx: any) =>
-        tx.type === 'crossPullClose' &&
-        tx.data.counterpartyEntityId === targetHub &&
-        tx.data.pullId === filledRoute.targetPull!.pullId &&
-        tx.data.binary === binary,
-      ),
-    )).toBe(true);
-    const targetOutput = outputs.find(output => output.entityId === targetUser);
+    expect(sourceUserState.crossJurisdictionSwaps?.get(filledRoute.orderId)?.status).toBe('source_claimed');
+    expect(hubOutputs).toEqual([]);
+    expect(userOutputs).toHaveLength(1);
+    const targetOutput = userOutputs[0];
+    expect(targetOutput?.entityId).toBe(targetUser);
     expect(targetOutput?.signerId).toBe(targetUserSigner);
-    expect(targetOutput?.entityTxs?.map((tx: any) => tx.type)).toEqual(['crossPullClose']);
-    expect((targetOutput?.entityTxs?.[0] as any)?.data.proof.fillRatio).toBe(0x8000);
+    expect(targetOutput?.localRuntimeProtocol).toBe('cross-j');
+    expect(targetOutput?.entityTxs?.map(tx => tx.type)).toEqual(['crossPullClose']);
+    const closeTx = targetOutput?.entityTxs?.[0];
+    if (closeTx?.type !== 'crossPullClose') throw new Error('TEST_CROSS_J_CLOSE_OUTPUT_REQUIRED');
+    expect(closeTx.data.counterpartyEntityId).toBe(targetHub);
+    expect(closeTx.data.pullId).toBe(filledRoute.targetPull!.pullId);
+    expect(closeTx.data.binary).toBe(binary);
+    expect(closeTx.data.proof.fillRatio).toBe(0x8000);
   });
 
   test('committed pull resolve rejects stale cross-j claim ratios', () => {
