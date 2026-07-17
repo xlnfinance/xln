@@ -37,10 +37,11 @@ describe('release source policy', () => {
     }
   });
 
-  test('requires signing for Foundation-era releases only', () => {
+  test('requires canonical v2 signing from 0.1.9 onward', () => {
     expect(() => assertReleaseSigningConfigured('0.1.6')).not.toThrow();
-    expect(() => assertReleaseSigningConfigured('0.1.7')).toThrow('RELEASE_SIGNING_KEYS_REQUIRED');
-    expect(() => assertReleaseSigningConfigured('0.1.8', '/secure/keys.json')).not.toThrow();
+    expect(() => assertReleaseSigningConfigured('0.1.8')).not.toThrow();
+    expect(() => assertReleaseSigningConfigured('0.1.9')).toThrow('RELEASE_SIGNING_KEYS_REQUIRED');
+    expect(() => assertReleaseSigningConfigured('0.1.9', '/secure/keys.json')).not.toThrow();
   });
 
   test('rejects a release label that does not match the committed source version', () => {
