@@ -1608,7 +1608,7 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
     await route.abort('blockedbyclient');
   });
 
-  await page.goto(`${API_BASE_URL}/health`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${APP_BASE_URL}/health`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('body')).toContainText('xln health admin', { timeout: REMOTE_E2E_WAIT_MS });
   await expect(page.locator('body')).toContainText('Runtime Events', { timeout: REMOTE_E2E_WAIT_MS });
   await expect(page.locator('body')).toContainText('Runtime Projection Entities', { timeout: REMOTE_E2E_WAIT_MS });
@@ -1657,7 +1657,7 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
     return /Entities\s+[1-9]/.test(text) && /Latest\s+[1-9]/.test(text);
   }, null, { timeout: REMOTE_E2E_WAIT_MS });
 
-  await page.goto(`${API_BASE_URL}/radapter?ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(readKey)}`, {
+  await page.goto(`${APP_BASE_URL}/radapter?ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(readKey)}`, {
     waitUntil: 'domcontentloaded',
   });
   await expect(page).toHaveURL(/\/app#accounts$/);
@@ -1681,7 +1681,7 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
   expect(appState.sessionKey).toBe(readKey);
   await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
 
-  await page.goto(`${API_BASE_URL}/admin`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${APP_BASE_URL}/admin`, { waitUntil: 'domcontentloaded' });
   await expect(page).toHaveURL(/\/health$/);
   await expect(page.getByRole('heading', { name: 'xln health admin' })).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
 });
