@@ -273,6 +273,9 @@ export const validateInboundP2PEntityInput = (
   let commandState = targetReplica?.state;
   for (const tx of input.entityTxs ?? []) {
     if (tx.type === 'consensusOutput') continue;
+    if (tx.type === 'runtimeOutput') {
+      throw new Error(`INBOUND_RUNTIME_OUTPUT_FORBIDDEN:entity=${input.entityId}:from=${from}`);
+    }
     if (tx.type !== 'entityCommand') {
       const payload = { fromRuntimeId: from, entityId: input.entityId, txType: tx.type };
       env.error?.('network', 'INBOUND_ENTITY_UNSIGNED_USER_COMMAND', payload, input.entityId);

@@ -163,6 +163,7 @@ import {
   buildCertifiedEntityOutputHashes,
   buildConsensusOutputOriginForState,
   hashCertifiedEntityOutput,
+  isLocalRuntimeProtocolOutput,
   isNonMutatingEntityWakeOutput,
   normalizeConsensusOutputOrigin,
   resolveConsensusOutputBoardAuthority,
@@ -192,6 +193,7 @@ import {
 } from '../command';
 import { isEntityCommandForbiddenTx } from '../command-codec';
 import {
+  assertRuntimeOutputAuthorization,
   isCollectiveEntityActionTx,
   isIndividualEntityCommandTx,
 } from '../authorization';
@@ -941,10 +943,35 @@ const wrapCertifiedEntityOutputs = (
   env: Env,
   hashesToSign: HashToSign[],
   hankos: HankoString[],
+  emitLocalRuntimeOutputs: boolean,
 ): EntityInput[] => {
   const outputHashes = buildCertifiedEntityOutputHashes(sourceState, env, frame.height, frame.hash, outputs);
-  return outputs.map((output, outputIndex) => {
-    if (isNonMutatingEntityWakeOutput(output)) return structuredClone(output);
+  return outputs.flatMap((output, outputIndex): EntityInput[] => {
+    if (isNonMutatingEntityWakeOutput(output)) return [structuredClone(output)];
+    if (isLocalRuntimeProtocolOutput(output)) {
+      if (!emitLocalRuntimeOutputs) return [];
+      const targetEntityId = output.entityId.trim().toLowerCase();
+      const localTarget = Array.from(env.eReplicas.values()).some(replica =>
+        replica.entityId.toLowerCase() === targetEntityId &&
+        replica.signerId.toLowerCase() === output.signerId.toLowerCase());
+      if (!localTarget) {
+        throw new Error(`RUNTIME_OUTPUT_TARGET_NOT_LOCAL:${targetEntityId}:${output.signerId}`);
+      }
+      if (!output.entityTxs?.length) throw new Error(`RUNTIME_OUTPUT_ENTITY_TXS_MISSING:index=${outputIndex}`);
+      return [{
+        entityId: targetEntityId,
+        signerId: output.signerId.toLowerCase(),
+        entityTxs: [{
+          type: 'runtimeOutput',
+          data: {
+            protocol: 'cross-j',
+            sourceEntityId: sourceState.entityId.toLowerCase(),
+            targetEntityId,
+            entityTxs: structuredClone(output.entityTxs),
+          },
+        }],
+      }];
+    }
     const outputHash = outputHashes.find(
       hashInfo => hashInfo.context === `entity-output:${frame.height}:${outputIndex}`,
     );
@@ -977,7 +1004,7 @@ const wrapCertifiedEntityOutputs = (
     if (!entityTxs) throw new Error(`CONSENSUS_OUTPUT_ENTITY_TXS_MISSING:index=${outputIndex}`);
     const routedOutput = structuredClone(output);
     delete routedOutput.certifiedOutputIdentity;
-    return {
+    return [{
       ...routedOutput,
       entityTxs: [
         {
@@ -990,7 +1017,7 @@ const wrapCertifiedEntityOutputs = (
           },
         },
       ],
-    };
+    }];
   });
 };
 
@@ -2234,6 +2261,10 @@ async function handleCommitNotification(context: ApplyEntityInputContext): Promi
     stateToApply,
   );
   pruneHankoWitnessToReachableState(stateToApply, workingReplica.hankoWitness);
+  const commitEmitterId =
+    proposedFrame.leader.relayCertificate?.preparedFrameHash === proposedFrame.hash
+      ? proposedFrame.leader.relayCertificate.nextLeaderId
+      : proposedFrame.leader.proposerSignerId;
   entityOutbox.push(
     ...wrapCertifiedEntityOutputs(
       execution.outputs,
@@ -2242,12 +2273,9 @@ async function handleCommitNotification(context: ApplyEntityInputContext): Promi
       env,
       expectedHashesToSign,
       committedHankos,
+      commitEmitterId.toLowerCase() === workingReplica.signerId.toLowerCase(),
     ),
   );
-  const commitEmitterId =
-    proposedFrame.leader.relayCertificate?.preparedFrameHash === proposedFrame.hash
-      ? proposedFrame.leader.relayCertificate.nextLeaderId
-      : proposedFrame.leader.proposerSignerId;
   if (commitEmitterId.toLowerCase() === workingReplica.signerId.toLowerCase()) {
     jOutbox.push(...execution.jOutputs);
   }
@@ -2761,6 +2789,7 @@ async function handleHashPrecommits(context: ApplyEntityInputContext): Promise<A
     env,
     execution.hashesToSign,
     committedHankos,
+    isFrameLeader,
   );
   entityOutbox.push(...commitOutputs);
   if (isFrameLeader) jOutbox.push(...execution.jOutputs);
@@ -3255,6 +3284,7 @@ export const applyEntityInput = async (
       env,
       hashesToSign,
       hankos,
+      true,
     );
 
     const preCommitState = workingReplica.state;
@@ -3515,6 +3545,28 @@ type ApplyEntityTxsInOrderContext = {
   authorizedCollective?: true | undefined;
   /** Exact source-board Hanko lane for cross-Entity certified outputs. */
   authorizedCertifiedOutput?: true | undefined;
+  /** Runtime-local proposer trust lane for cross-j sibling effects. */
+  authorizedRuntimeOutput?: true | undefined;
+};
+
+const applyRuntimeOutput = async (
+  context: ApplyEntityTxsInOrderContext,
+  currentEntityState: EntityState,
+  tx: Extract<EntityTx, { type: 'runtimeOutput' }>,
+): Promise<EntityState> => {
+  if (tx.data.protocol !== 'cross-j') throw new Error(`RUNTIME_OUTPUT_PROTOCOL_INVALID:${tx.data.protocol}`);
+  assertRuntimeOutputAuthorization(
+    tx.data.sourceEntityId,
+    tx.data.targetEntityId,
+    tx.data.entityTxs,
+    currentEntityState,
+  );
+  return applyEntityTxsInOrder({
+    ...context,
+    entityTxs: tx.data.entityTxs,
+    currentEntityState,
+    authorizedRuntimeOutput: true,
+  });
 };
 
 const applyCertifiedConsensusOutput = async (
@@ -3600,6 +3652,10 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
   // Reordering batched txs can change bilateral account state transitions
   // (e.g., openAccount + accountInput ACK in same frame).
   for (const entityTx of entityTxs) {
+    if (entityTx.type === 'runtimeOutput') {
+      currentEntityState = await applyRuntimeOutput(context, currentEntityState, entityTx);
+      continue;
+    }
     if (entityTx.type === 'consensusOutput') {
       currentEntityState = await applyCertifiedConsensusOutput(context, currentEntityState, entityTx);
       continue;
@@ -3623,7 +3679,12 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
       if (context.authorizedCollective && !isCollectiveEntityActionTx(entityTx)) {
         throw new Error(`ENTITY_COLLECTIVE_ACTION_TX_FORBIDDEN:${entityTx.type}`);
       }
-      if (!context.authorizedCommand && !context.authorizedCollective && !context.authorizedCertifiedOutput) {
+      if (
+        !context.authorizedCommand &&
+        !context.authorizedCollective &&
+        !context.authorizedCertifiedOutput &&
+        !context.authorizedRuntimeOutput
+      ) {
         throw new Error(`ENTITY_COMMAND_REQUIRED:${entityTx.type}`);
       }
     }
@@ -3667,6 +3728,7 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
         authorizedCommand: undefined,
         authorizedCollective: true,
         authorizedCertifiedOutput: undefined,
+        authorizedRuntimeOutput: undefined,
       });
     }
     for (const accountId of dirtyAccounts || []) {

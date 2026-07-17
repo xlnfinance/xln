@@ -52,6 +52,9 @@ const assertCertifiableOutput = (output: EntityInput, outputIndex: number): Enti
   return output.entityTxs;
 };
 
+export const isLocalRuntimeProtocolOutput = (output: EntityInput): boolean =>
+  output.localRuntimeProtocol === 'cross-j';
+
 export type NonMutatingEntityWakeOutput = EntityInput & { entityTxs: [] };
 
 /** Empty EntityInput wakes the already-addressed replica but carries no state mutation. */
@@ -464,6 +467,12 @@ export const assignCertifiedOutputIdentities = (
   for (let outputIndex = 0; outputIndex < outputs.length; outputIndex += 1) {
     const output = outputs[outputIndex]!;
     if (isNonMutatingEntityWakeOutput(output)) continue;
+    if (isLocalRuntimeProtocolOutput(output)) {
+      if (output.certifiedOutputIdentity) {
+        throw new Error(`RUNTIME_OUTPUT_CERTIFIED_IDENTITY_FORBIDDEN:index=${outputIndex}`);
+      }
+      continue;
+    }
     const entityTxs = assertCertifiableOutput(output, outputIndex);
     const targetEntityId = output.entityId.toLowerCase();
     const native = nativeOutputIdentity(entityTxs);
@@ -694,6 +703,7 @@ export const buildCertifiedEntityOutputHashes = (
   outputs: EntityInput[],
 ): HashToSign[] => outputs.flatMap((output, outputIndex) => {
   if (isNonMutatingEntityWakeOutput(output)) return [];
+  if (isLocalRuntimeProtocolOutput(output)) return [];
   const entityTxs = assertCertifiableOutput(output, outputIndex);
   const semanticIdentity = output.certifiedOutputIdentity;
   if (!semanticIdentity) throw new Error(`CONSENSUS_OUTPUT_SEMANTIC_IDENTITY_MISSING:index=${outputIndex}`);

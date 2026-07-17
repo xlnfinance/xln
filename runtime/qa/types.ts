@@ -239,6 +239,7 @@ export type QaFailureCapsule = {
 export type QaShardManifest = {
   shard: number;
   status: 'passed' | 'failed' | 'cancelled' | 'unknown';
+  resultClass?: 'passed' | 'playwright' | 'runtime-fatal' | 'startup' | 'runner' | 'cancelled';
   durationMs: number | null;
   handle: string | null;
   description: string | null;
@@ -281,6 +282,9 @@ export type QaRunManifest = {
   totalShards: number;
   passedShards: number;
   failedShards: number;
+  cancelledShards?: number;
+  primaryFailureShard?: number | null;
+  primaryFailureCapsule?: QaFailureCapsule | null;
   failureClasses?: QaFailureClass[];
   args?: Record<string, unknown> | null;
   shards: QaShardManifest[];

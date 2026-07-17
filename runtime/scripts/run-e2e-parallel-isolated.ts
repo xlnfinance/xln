@@ -1168,7 +1168,7 @@ const writeRunManifest = (
         hasVideo: artifacts.some(artifact => artifact.kind === 'video'),
         hasTrace: artifacts.some(artifact => artifact.kind === 'trace'),
       };
-    }) as unknown as QaRunManifest['shards'];
+    });
   const passedShards = shards.filter(shard => shard.status === 'passed').length;
   const failedShards = shards.filter(shard => shard.status === 'failed').length;
   const cancelledShards = shards.filter(shard => shard.status === 'cancelled').length;
@@ -1212,7 +1212,7 @@ const writeRunManifest = (
       strictBrowserHealth: args.strictBrowserHealth,
     },
     shards,
-  } as unknown as QaRunManifest);
+  });
   manifest.benchmark = compareQaRunWithHistory(manifest);
   manifest = applyQaRunSeverity(manifest);
   assertQaReleaseRunSeverity(manifest);
@@ -2840,6 +2840,8 @@ const runShard = async (
           XLN_SKIP_STALE_REAP: '1',
           XLN_RUNTIME_IMPORT_MANIFEST_PATH: runtimeImportManifestPath,
           XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(args.stackTimeoutMs),
+          MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS:
+            process.env['MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] ?? '15000',
           XLN_AUTO_PROVISION_EXTERNAL_FAUCET: process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] ?? '1',
           ...(process.env['XLN_MIN_DISK_FREE_BYTES']
             ? { XLN_MIN_DISK_FREE_BYTES: process.env['XLN_MIN_DISK_FREE_BYTES'] }

@@ -640,6 +640,8 @@ export interface EntityInput {
     sequence: bigint;
     semanticHash: string;
   };
+  /** Transient pre-commit marker; removed when wrapped as siblingOutput. */
+  localRuntimeProtocol?: 'cross-j';
   entityTxs?: EntityTx[];
   proposedFrame?: ProposedEntityFrame;
 

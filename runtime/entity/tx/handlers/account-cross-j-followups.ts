@@ -24,6 +24,8 @@ import {
   crossJurisdictionRouteSignerHint,
 } from '../cross-j-outputs';
 import { applyCrossJurisdictionBookProgressToState } from './cross-j-book-order';
+import { handleAdmitCrossJurisdictionBookOrderEntityTx } from './cross-j-book-order';
+import type { SwapOfferEvent } from './account';
 
 const crossJFollowupLog = createStructuredLogger('crossj.followup');
 
@@ -31,6 +33,37 @@ const normalizeEntityRef = (value: string): string => String(value || '').toLowe
 
 const committedCrossJurisdictionRatio = (route: CrossJurisdictionSwapRoute): number =>
   getCrossJurisdictionCommittedProofRatio(route);
+
+const applyIntentFollowup = (
+  newState: EntityState,
+  counterpartyId: string,
+  accountTx: Extract<AccountTx, { type: 'cross_j_intent' }>,
+  outputs: EntityInput[],
+): boolean => {
+  const route = cloneCrossJurisdictionRoute(accountTx.data.route);
+  const current = normalizeEntityRef(newState.entityId);
+  const counterparty = normalizeEntityRef(counterpartyId);
+  const sourceUser = normalizeEntityRef(route.source.entityId);
+  const sourceHub = normalizeEntityRef(route.source.counterpartyEntityId);
+  if (!(
+    (current === sourceUser && counterparty === sourceHub) ||
+    (current === sourceHub && counterparty === sourceUser)
+  )) {
+    throw new Error(`CROSS_J_INTENT_ACCOUNT_PARTICIPANTS_INVALID:${route.orderId}:${current}:${counterparty}`);
+  }
+  newState.crossJurisdictionSwaps ||= new Map();
+  const existing = newState.crossJurisdictionSwaps.get(route.orderId);
+  if (existing?.routeHash && route.routeHash && existing.routeHash.toLowerCase() !== route.routeHash.toLowerCase()) {
+    throw new Error(`CROSS_J_INTENT_ROUTE_CONFLICT:${route.orderId}`);
+  }
+  newState.crossJurisdictionSwaps.set(route.orderId, route);
+  if (current === sourceHub) {
+    const proposer = newState.config.validators[0];
+    if (!proposer) throw new Error(`CROSS_J_SOURCE_HUB_PROPOSER_MISSING:${route.orderId}`);
+    outputs.push({ entityId: newState.entityId, signerId: proposer, entityTxs: [] });
+  }
+  return true;
+};
 
 const assertPullResolveAllowed = (
   route: CrossJurisdictionSwapRoute,
@@ -241,7 +274,22 @@ const queueBookAdmissionOnCommittedPull = (
   counterpartyId: string,
   accountTx: Extract<AccountTx, { type: 'pull_lock' }>,
   outputs: EntityInput[],
+  committedAt: number,
+  swapOffersCreated: SwapOfferEvent[],
 ): boolean => {
+  const carriedRoute = accountTx.data.crossJurisdictionRoute;
+  if (accountTx.data.crossJurisdiction && !carriedRoute) {
+    throw new Error(`CROSS_J_COMMITTED_PULL_ROUTE_MISSING:${accountTx.data.pullId}`);
+  }
+  if (carriedRoute) {
+    const route = cloneCrossJurisdictionRoute(carriedRoute);
+    newState.crossJurisdictionSwaps ||= new Map();
+    const existing = newState.crossJurisdictionSwaps.get(route.orderId);
+    if (existing?.routeHash && route.routeHash && existing.routeHash.toLowerCase() !== route.routeHash.toLowerCase()) {
+      throw new Error(`CROSS_J_COMMITTED_PULL_ROUTE_CONFLICT:${route.orderId}`);
+    }
+    newState.crossJurisdictionSwaps.set(route.orderId, { ...existing, ...route });
+  }
   const currentEntityId = normalizeEntityRef(newState.entityId);
   const counterpartyEntityId = normalizeEntityRef(counterpartyId);
   let handled = false;
@@ -255,17 +303,24 @@ const queueBookAdmissionOnCommittedPull = (
       route.sourcePull?.pullId === accountTx.data.pullId &&
       currentEntityId === sourceHubId &&
       counterpartyEntityId === sourceUserId;
+    const sourceUserCommitted =
+      route.sourcePull?.pullId === accountTx.data.pullId &&
+      currentEntityId === sourceUserId &&
+      counterpartyEntityId === sourceHubId;
     const targetHubCommitted =
       route.targetPull?.pullId === accountTx.data.pullId &&
       currentEntityId === targetHubId &&
       counterpartyEntityId === targetUserId;
-    if (!sourceHubCommitted && !targetHubCommitted) continue;
+    const targetUserCommitted =
+      route.targetPull?.pullId === accountTx.data.pullId &&
+      currentEntityId === targetUserId &&
+      counterpartyEntityId === targetHubId;
+    if (!sourceHubCommitted && !sourceUserCommitted && !targetHubCommitted && !targetUserCommitted) continue;
 
-    const leg = sourceHubCommitted ? 'source' : 'target';
+    const leg = sourceHubCommitted || sourceUserCommitted ? 'source' : 'target';
     if (!committedPullMatchesRoute(accountTx, route, leg)) {
       throw new Error(`CROSS_J_COMMITTED_PULL_ROUTE_MISMATCH: route=${route.orderId} leg=${leg} pull=${accountTx.data.pullId}`);
     }
-    const committedAt = Number(newState.timestamp || env.timestamp || 0);
     const admissionRoute = cloneCrossJurisdictionRoute(route);
     if (leg === 'source') {
       const targetReceipt = accountTx.data.crossJurisdiction?.targetReceipt;
@@ -288,13 +343,17 @@ const queueBookAdmissionOnCommittedPull = (
       transitionCrossJurisdictionRouteStatus(admissionRoute, 'resting', committedAt);
       Object.assign(route, admissionRoute);
       newState.crossJurisdictionSwaps?.set(route.orderId, route);
+      if (sourceUserCommitted) {
+        handled = true;
+        continue;
+      }
     }
     const receipt = buildCrossJurisdictionBookAdmissionReceipt(
       admissionRoute,
       leg,
       accountTx,
-      newState.entityId,
-      counterpartyId,
+      leg === 'target' ? route.target.entityId : route.source.counterpartyEntityId,
+      leg === 'target' ? route.target.counterpartyEntityId : route.source.entityId,
       committedAt,
     );
     if (leg === 'target') {
@@ -307,24 +366,51 @@ const queueBookAdmissionOnCommittedPull = (
       transitionCrossJurisdictionRouteStatus(admissionRoute, 'target_locked', committedAt);
       Object.assign(route, admissionRoute);
       newState.crossJurisdictionSwaps?.set(route.orderId, route);
-      outputs.push(buildCrossJurisdictionEntityOutput(env, route.source.entityId, [{
-        type: 'commitCrossJurisdictionSwap',
-        data: {
-          route: cloneCrossJurisdictionRoute(admissionRoute),
-          targetReceipt: cloneCrossJurisdictionBookAdmissionReceipt(receipt),
-        },
-      }], requireRouteSignerHint(route, route.source.entityId)));
+      if (targetUserCommitted) {
+        outputs.push(buildCrossJurisdictionEntityOutput(env, route.source.entityId, [{
+          type: 'commitCrossJurisdictionSwap',
+          data: {
+            route: cloneCrossJurisdictionRoute(admissionRoute),
+            targetReceipt: cloneCrossJurisdictionBookAdmissionReceipt(receipt),
+          },
+        }], requireRouteSignerHint(route, route.source.entityId)));
+      } else {
+        outputs.push(buildCrossJurisdictionEntityOutput(env, route.source.counterpartyEntityId, [{
+          type: 'registerCrossJurisdictionSwap',
+          data: { route: cloneCrossJurisdictionRoute(admissionRoute) },
+        }], requireRouteSignerHint(route, route.source.counterpartyEntityId)));
+      }
     }
 
-    const bookOwnerEntityId = routeBookOwnerEntityId(route);
-    outputs.push(buildCrossJurisdictionEntityOutput(env, bookOwnerEntityId, [{
+    if (targetUserCommitted) {
+      handled = true;
+      continue;
+    }
+    const bookOwnerEntityId = routeBookOwnerEntityId(admissionRoute);
+    const admissionTx: Extract<EntityTx, { type: 'admitCrossJurisdictionBookOrder' }> = {
       type: 'admitCrossJurisdictionBookOrder',
       data: {
         route: cloneCrossJurisdictionRoute(admissionRoute),
         receipt: cloneCrossJurisdictionBookAdmissionReceipt(receipt),
         reason: `${leg}_pull_committed`,
       },
-    }], requireRouteSignerHint(route, bookOwnerEntityId)));
+    };
+    if (bookOwnerEntityId === currentEntityId) {
+      const local = handleAdmitCrossJurisdictionBookOrderEntityTx(
+        env,
+        newState,
+        admissionTx,
+        { mutableFrameState: true },
+      );
+      swapOffersCreated.push(...local.swapOffersCreated);
+    } else {
+      outputs.push(buildCrossJurisdictionEntityOutput(
+        env,
+        bookOwnerEntityId,
+        [admissionTx],
+        requireRouteSignerHint(route, bookOwnerEntityId),
+      ));
+    }
     handled = true;
   }
 
@@ -379,10 +465,11 @@ const applyPullResolveFollowup = (
       route.sourceCloseProof = proof;
       transitionCrossJurisdictionRouteStatus(route, 'source_claimed', newState.timestamp);
 
-      // The same account frame commits on both source participants. Only the hub
-      // side is allowed to relay the binary to the target leg; the user side
-      // still has to mirror the route lifecycle for local UI/storage convergence.
-      if (isSourceUserResolve) {
+      // The same Account frame commits on both source participants. Hub-source
+      // updates its sibling-owned book; user-source relays the proof only to its
+      // user-target sibling. No diagonal hub→user Entity message exists.
+      if (isSourceHubResolve) {
+        removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'source_claimed');
         continue;
       }
 
@@ -405,7 +492,6 @@ const applyPullResolveFollowup = (
         targetEntityTxs,
         requireRouteSignerHint(route, route.target.counterpartyEntityId),
       ));
-      removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'source_claimed');
       crossJFollowupLog.debug('pull.resolve.relay_target', {
         route: shortOrder(route.orderId, 12),
         target: shortId(route.target.counterpartyEntityId),
@@ -492,7 +578,9 @@ const applyCrossPullCloseFollowup = (
           requireRouteSignerHint(route, route.target.counterpartyEntityId),
         ));
       }
-      removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'source_claimed');
+      if (isSourceHubClose) {
+        removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'source_claimed');
+      }
       crossJFollowupLog.debug('pull.close.relay_target', {
         route: shortOrder(route.orderId, 12),
         target: shortId(route.target.counterpartyEntityId),
@@ -625,9 +713,22 @@ export function applyCommittedCrossJurisdictionAccountTxFollowup(
   counterpartyId: string,
   accountTx: AccountTx,
   outputs: EntityInput[],
+  committedAt: number,
+  swapOffersCreated: SwapOfferEvent[],
 ): boolean {
+  if (accountTx.type === 'cross_j_intent') {
+    return applyIntentFollowup(newState, counterpartyId, accountTx, outputs);
+  }
   if (accountTx.type === 'pull_lock') {
-    return queueBookAdmissionOnCommittedPull(env, newState, counterpartyId, accountTx, outputs);
+    return queueBookAdmissionOnCommittedPull(
+      env,
+      newState,
+      counterpartyId,
+      accountTx,
+      outputs,
+      committedAt,
+      swapOffersCreated,
+    );
   }
   if (accountTx.type === 'pull_resolve') {
     return applyPullResolveFollowup(env, newState, counterpartyId, accountTx, outputs);

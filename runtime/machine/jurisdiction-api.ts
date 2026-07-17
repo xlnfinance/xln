@@ -4,10 +4,11 @@ import type { JAdapter } from '../jadapter';
 import { withCanonicalCrossJurisdictionRouteHash } from '../extensions/cross-j/index';
 import { getJurisdictionStackId, requireEntityRuntimeJurisdictionConfig } from '../jurisdiction/jurisdiction-runtime';
 import { resolveEntityProposerId } from '../state-helpers';
-import type { CrossJurisdictionSwapRoute, EntityState, Env, RuntimeInput } from '../types';
+import type { AccountMachine, CrossJurisdictionSwapRoute, EntityState, Env, RuntimeInput } from '../types';
 import { getWallClockMs } from '../utils';
 import { buildDebtEnforcementRuntimeInputFromProjection } from '../protocol/payments/debt-enforcement';
 import type { DebtEnforcementProjectionRuntimeInputParams } from '../protocol/payments/debt-enforcement';
+import { deriveCanonicalCrossJurisdictionBookOwnerForLegs } from '../extensions/cross-j/market';
 
 export function getActiveJAdapter(env: Env): JAdapter | null {
   if (!env.activeJurisdiction) return null;
@@ -79,15 +80,15 @@ const findEntityStateForRuntime = (env: Env, entityId: string, signerId?: string
   return null;
 };
 
-const hasRuntimeAccountWith = (state: EntityState | null, counterpartyId: string): boolean => {
+const findRuntimeAccountWith = (state: EntityState | null, counterpartyId: string): AccountMachine | null => {
   const counterparty = normalizeRuntimeEntityId(counterpartyId);
-  if (!state || !counterparty) return false;
+  if (!state || !counterparty) return null;
   for (const [accountId, account] of state.accounts.entries()) {
-    if (normalizeRuntimeEntityId(accountId) === counterparty) return true;
-    if (normalizeRuntimeEntityId(account.leftEntity) === counterparty) return true;
-    if (normalizeRuntimeEntityId(account.rightEntity) === counterparty) return true;
+    if (normalizeRuntimeEntityId(accountId) === counterparty) return account;
+    if (normalizeRuntimeEntityId(account.leftEntity) === counterparty) return account;
+    if (normalizeRuntimeEntityId(account.rightEntity) === counterparty) return account;
   }
-  return false;
+  return null;
 };
 
 export function buildCrossJurisdictionSwapSubmission(
@@ -102,9 +103,19 @@ export function buildCrossJurisdictionSwapSubmission(
   const targetUserSignerId = params.targetUserSignerId || resolveEntityProposerId(env, params.targetUserEntityId, 'cross-swap.target-user');
 
   const sourceUserJ = requireEntityRuntimeJurisdictionConfig(env, params.sourceUserEntityId, sourceUserSignerId);
-  const sourceHubJ = requireEntityRuntimeJurisdictionConfig(env, params.sourceHubEntityId, sourceHubSignerId);
-  const targetHubJ = requireEntityRuntimeJurisdictionConfig(env, params.targetHubEntityId, targetHubSignerId);
   const targetUserJ = requireEntityRuntimeJurisdictionConfig(env, params.targetUserEntityId, targetUserSignerId);
+  const sourceUserState = findEntityStateForRuntime(env, params.sourceUserEntityId, sourceUserSignerId);
+  const targetUserState = findEntityStateForRuntime(env, params.targetUserEntityId, targetUserSignerId);
+  const sourceAccount = findRuntimeAccountWith(sourceUserState, params.sourceHubEntityId);
+  const targetAccount = findRuntimeAccountWith(targetUserState, params.targetHubEntityId);
+  if (!sourceAccount) {
+    throw new Error(`CROSS_SWAP_SOURCE_ACCOUNT_MISSING: user=${params.sourceUserEntityId} hub=${params.sourceHubEntityId}`);
+  }
+  if (!targetAccount) {
+    throw new Error(`CROSS_SWAP_TARGET_ACCOUNT_MISSING: user=${params.targetUserEntityId} hub=${params.targetHubEntityId}`);
+  }
+  const sourceHubJ = sourceUserJ;
+  const targetHubJ = targetUserJ;
   const sourceUserStackId = getJurisdictionStackId(sourceUserJ);
   const sourceHubStackId = getJurisdictionStackId(sourceHubJ);
   const targetHubStackId = getJurisdictionStackId(targetHubJ);
@@ -121,27 +132,41 @@ export function buildCrossJurisdictionSwapSubmission(
   if (sourceUserStackId === targetHubStackId) {
     throw new Error(`CROSS_SWAP_REQUIRES_DISTINCT_JURISDICTIONS: ${sourceUserJ.name}`);
   }
-  const sourceUserState = findEntityStateForRuntime(env, params.sourceUserEntityId, sourceUserSignerId);
-  const targetUserState = findEntityStateForRuntime(env, params.targetUserEntityId, targetUserSignerId);
-  if (!hasRuntimeAccountWith(sourceUserState, params.sourceHubEntityId)) {
-    throw new Error(`CROSS_SWAP_SOURCE_ACCOUNT_MISSING: user=${params.sourceUserEntityId} hub=${params.sourceHubEntityId}`);
+  if (getJurisdictionStackId(sourceAccount.domain) !== sourceUserStackId) {
+    throw new Error(`CROSS_SWAP_SOURCE_ACCOUNT_DOMAIN_MISMATCH:${params.sourceUserEntityId}:${params.sourceHubEntityId}`);
   }
-  if (!hasRuntimeAccountWith(targetUserState, params.targetHubEntityId)) {
-    throw new Error(`CROSS_SWAP_TARGET_ACCOUNT_MISSING: user=${params.targetUserEntityId} hub=${params.targetHubEntityId}`);
+  if (getJurisdictionStackId(targetAccount.domain) !== targetUserStackId) {
+    throw new Error(`CROSS_SWAP_TARGET_ACCOUNT_DOMAIN_MISMATCH:${params.targetUserEntityId}:${params.targetHubEntityId}`);
   }
 
   const expiresInMs = Math.max(30_000, Math.floor(params.expiresInMs ?? 120_000));
-  const sourceMarketKey = `${sourceUserStackId}:${Number(params.sourceTokenId)}`;
-  const targetMarketKey = `${targetHubStackId}:${Number(params.targetTokenId)}`;
-  const defaultBookHubEntityId = sourceMarketKey <= targetMarketKey
-    ? params.sourceHubEntityId
-    : params.targetHubEntityId;
-  const bookHubEntityId = params.bookHubEntityId || defaultBookHubEntityId;
-  const bookHubSignerId = params.bookHubSignerId || (
-    bookHubEntityId === params.sourceHubEntityId ? sourceHubSignerId :
-    bookHubEntityId === params.targetHubEntityId ? targetHubSignerId :
+  const canonicalBookHubEntityId = deriveCanonicalCrossJurisdictionBookOwnerForLegs(
+    sourceUserStackId,
+    Number(params.sourceTokenId),
+    params.sourceHubEntityId,
+    targetHubStackId,
+    Number(params.targetTokenId),
+    params.targetHubEntityId,
+  );
+  if (
+    params.bookHubEntityId &&
+    normalizeRuntimeEntityId(params.bookHubEntityId) !== normalizeRuntimeEntityId(canonicalBookHubEntityId)
+  ) {
+    throw new Error(`CROSS_SWAP_BOOK_OWNER_NON_CANONICAL:${params.bookHubEntityId}:${canonicalBookHubEntityId}`);
+  }
+  const bookHubEntityId = canonicalBookHubEntityId;
+  const canonicalBookHubSignerId = (
+    normalizeRuntimeEntityId(bookHubEntityId) === normalizeRuntimeEntityId(params.sourceHubEntityId) ? sourceHubSignerId :
+    normalizeRuntimeEntityId(bookHubEntityId) === normalizeRuntimeEntityId(params.targetHubEntityId) ? targetHubSignerId :
     ''
   );
+  if (
+    params.bookHubSignerId &&
+    normalizeRuntimeEntityId(params.bookHubSignerId) !== normalizeRuntimeEntityId(canonicalBookHubSignerId)
+  ) {
+    throw new Error(`CROSS_SWAP_BOOK_SIGNER_NON_CANONICAL:${params.bookHubSignerId}:${canonicalBookHubSignerId}`);
+  }
+  const bookHubSignerId = canonicalBookHubSignerId;
 
   const route: CrossJurisdictionSwapRoute = withCanonicalCrossJurisdictionRouteHash({
     orderId,

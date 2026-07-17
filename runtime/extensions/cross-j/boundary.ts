@@ -2,18 +2,15 @@ import type { CrossJurisdictionSwapRoute, EntityInput, EntityTx } from '../../ty
 import { getEffectiveEntityInputTxs } from '../../entity/consensus/output-envelope';
 
 /**
- * Cross-j swaps are a two-runtime system protocol.
+ * Cross-j Entity messages are runtime-local only. The only admissible edges are
+ * the two sibling pairs committed by the route:
  *
- * V1 deliberately supports exactly two runtime groups:
- * - user runtime: source user entity + target user sibling entity;
- * - hub runtime: source hub entity + target hub sibling entity/book owner.
+ *   source user <-> target user
+ *   source hub  <-> target hub / canonical book owner
  *
- * This is not generic P2P delivery between arbitrary entities. A cross-j system
- * tx may cross the network only when its route proves the sender/receiver are
- * the two paired runtimes above. Route-less cross-j maintenance txs stay local.
- *
- * The comments here are intentionally strict: allowing three or more runtimes
- * would require a separate signed inter-entity authorization and replay model.
+ * The two same-jurisdiction edges are bilateral Account machines, never Entity
+ * messages. Consequently no cross-j EntityTx is network-deliverable, even when
+ * all four route participants happen to form a known two-runtime topology.
  */
 export const CROSS_J_INTRA_RUNTIME_ENTITY_TX_TYPES = new Set<string>([
   'requestCrossJurisdictionSwap',
@@ -34,7 +31,10 @@ export const isCrossJurisdictionIntraRuntimeTx = (tx: EntityTx | { type?: unknow
 
 export const entityInputHasCrossJurisdictionIntraRuntimeTx = (
   input: Pick<EntityInput, 'entityTxs'> | null | undefined,
-): boolean => input ? getEffectiveEntityInputTxs(input).some(isCrossJurisdictionIntraRuntimeTx) : false;
+): boolean => input ? (
+  (input.entityTxs ?? []).some(tx => tx.type === 'runtimeOutput' && tx.data.protocol === 'cross-j') ||
+  getEffectiveEntityInputTxs(input).some(isCrossJurisdictionIntraRuntimeTx)
+) : false;
 
 const normalizeEntityRef = (value: unknown): string => String(value || '').trim().toLowerCase();
 const normalizeRuntimeRef = (value: unknown): string => String(value || '').trim().toLowerCase();
@@ -69,6 +69,26 @@ export const getCrossJurisdictionRouteEntityIds = (route: CrossJurisdictionSwapR
     route.hubEntityId,
   ].map(normalizeEntityRef).filter(Boolean);
   return [...new Set(ids)];
+};
+
+export const isCrossJurisdictionSiblingPair = (
+  route: CrossJurisdictionSwapRoute,
+  sourceEntityId: string,
+  targetEntityId: string,
+): boolean => {
+  const source = normalizeEntityRef(sourceEntityId);
+  const target = normalizeEntityRef(targetEntityId);
+  if (!source || !target || source === target) return false;
+  const sourceUser = normalizeEntityRef(route.source?.entityId);
+  const targetUser = normalizeEntityRef(route.target?.counterpartyEntityId);
+  const sourceHub = normalizeEntityRef(route.source?.counterpartyEntityId);
+  const targetHub = normalizeEntityRef(route.target?.entityId);
+  return (
+    (source === sourceUser && target === targetUser) ||
+    (source === targetUser && target === sourceUser) ||
+    (source === sourceHub && target === targetHub) ||
+    (source === targetHub && target === sourceHub)
+  );
 };
 
 export const resolveCrossJurisdictionRuntimeTopology = (
@@ -107,22 +127,12 @@ export const resolveCrossJurisdictionRuntimeTopology = (
 };
 
 export const isCrossJurisdictionRouteRemoteHopAllowed = (
-  route: CrossJurisdictionSwapRoute,
-  localRuntimeId: string | null | undefined,
-  remoteRuntimeId: string | null | undefined,
-  resolveRuntimeId: CrossJurisdictionRouteRuntimeResolver,
+  _route: CrossJurisdictionSwapRoute,
+  _localRuntimeId: string | null | undefined,
+  _remoteRuntimeId: string | null | undefined,
+  _resolveRuntimeId: CrossJurisdictionRouteRuntimeResolver,
 ): boolean => {
-  const local = normalizeRuntimeRef(localRuntimeId);
-  const remote = normalizeRuntimeRef(remoteRuntimeId);
-  if (!local || !remote || local === remote) return false;
-
-  const topology = resolveCrossJurisdictionRuntimeTopology(route, resolveRuntimeId);
-  if (!topology) return false;
-
-  return (
-    (local === topology.userRuntimeId && remote === topology.hubRuntimeId) ||
-    (local === topology.hubRuntimeId && remote === topology.userRuntimeId)
-  );
+  return false;
 };
 
 export const isCrossJurisdictionEntityInputRemoteHopAllowed = (

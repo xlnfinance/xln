@@ -17,7 +17,7 @@ import {
 import { resolveEntityCommandBoard } from '../../command';
 import { validateMessage } from '../validation';
 import { createStructuredLogger, shortHash, shortId } from '../../../infra/logger';
-import { buildCrossJurisdictionEntityOutput } from '../cross-j-outputs';
+import { buildCertifiedEntityOutput } from '../cross-j-outputs';
 import { hashCertifiedEntityOutputSemantic } from '../../consensus/output-certification';
 
 const basicLog = createStructuredLogger('entity.basic');
@@ -201,7 +201,7 @@ export const handleVoteEntityTx = (
 };
 
 export const handleReissueCertifiedOutputEntityTx = (
-  env: Env,
+  _env: Env,
   entityState: EntityState,
   entityTx: EntityTxOf<'reissueCertifiedOutput'>,
 ): BasicEntityTxResult => {
@@ -239,11 +239,10 @@ export const handleReissueCertifiedOutputEntityTx = (
   ) {
     throw new Error(`CONSENSUS_OUTPUT_REISSUE_IDENTITY_MISMATCH:${targetEntityId}`);
   }
-  const output = buildCrossJurisdictionEntityOutput(
-    env,
+  const output = buildCertifiedEntityOutput(
     targetEntityId,
-    structuredClone(entityTx.data.entityTxs),
     targetSignerId,
+    structuredClone(entityTx.data.entityTxs),
   );
   output.certifiedOutputIdentity = {
     lane: 'generic',

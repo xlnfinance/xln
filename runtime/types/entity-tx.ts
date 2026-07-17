@@ -75,6 +75,20 @@ type EntityTxPayload =
       };
     }
   | {
+      /**
+       * Runtime-local cross-j effect between jurisdiction siblings controlled
+       * by the same proposer runtime. It is never accepted from P2P and needs
+       * no source-board Hanko or cross-entity sequence.
+       */
+      type: 'runtimeOutput';
+      data: {
+        protocol: 'cross-j';
+        sourceEntityId: string;
+        targetEntityId: string;
+        entityTxs: EntityTx[];
+      };
+    }
+  | {
       /** Collective reissue of the exact bounded last generic source output. */
       type: 'reissueCertifiedOutput';
       data: {
@@ -292,6 +306,7 @@ type EntityTxPayload =
         counterpartyEntityId: string;
         lockId: string;
         secret: string;
+        crossJurisdictionRouteId?: string;
         description?: string;
       };
     }
@@ -309,6 +324,7 @@ type EntityTxPayload =
         fullHash: string;
         partialRoot: string;
         crossJurisdiction?: CrossJurisdictionPullBinding;
+        crossJurisdictionRoute?: CrossJurisdictionSwapRoute;
         description?: string;
       };
     }

@@ -3,10 +3,14 @@ import { deriveDelta } from '../../utils';
 import { FINANCIAL, LIMITS } from '../../../constants';
 import {
   buildCommittedCrossJurisdictionPullBinding,
+  buildCrossJurisdictionPullBinding,
   cloneCrossJurisdictionPullBinding,
   getCrossJurisdictionCommittedProofRatio,
   hashCrossJurisdictionCloseBinary,
+  withCanonicalCrossJurisdictionRouteHash,
 } from '../../../extensions/cross-j/index';
+import { getJurisdictionStackId } from '../../../jurisdiction/jurisdiction-stack';
+import { safeStringify } from '../../../protocol/serialization';
 import {
   HASHLADDER_MAX_FILL_RATIO,
   verifyHashLadderBinary,
@@ -138,6 +142,36 @@ const validateCrossJurisdictionPullResolve = (
   return null;
 };
 
+const validateCrossJurisdictionPullRoute = (account: AccountMachine, tx: PullLockTx): string | null => {
+  const binding = tx.data.crossJurisdiction;
+  const supplied = tx.data.crossJurisdictionRoute;
+  if (!binding && !supplied) return null;
+  if (!binding || !supplied) return 'Cross-j pull requires both route and binding';
+  let route: CrossJurisdictionSwapRoute;
+  try {
+    route = withCanonicalCrossJurisdictionRouteHash(supplied);
+  } catch (error) {
+    return `Cross-j pull route invalid: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  if (safeStringify(route) !== safeStringify(supplied)) return 'Cross-j pull route is not canonical';
+  if (safeStringify(binding) !== safeStringify(buildCrossJurisdictionPullBinding(route, binding.leg))) {
+    return 'Cross-j pull binding does not match route';
+  }
+  const leg = binding.leg === 'source' ? route.source : route.target;
+  const pull = binding.leg === 'source' ? route.sourcePull : route.targetPull;
+  if (!pull || tx.data.pullId !== pull.pullId || tx.data.tokenId !== pull.tokenId || tx.data.amount !== pull.signedAmount ||
+      tx.data.revealedUntilTimestamp !== pull.revealedUntilTimestamp ||
+      tx.data.fullHash.toLowerCase() !== pull.fullHash.toLowerCase() ||
+      tx.data.partialRoot.toLowerCase() !== pull.partialRoot.toLowerCase()) return 'Cross-j pull terms do not match route';
+  const endpoints = new Set([account.leftEntity.toLowerCase(), account.rightEntity.toLowerCase()]);
+  if (!endpoints.has(leg.entityId.toLowerCase()) || !endpoints.has(leg.counterpartyEntityId.toLowerCase())) {
+    return 'Cross-j pull Account endpoints do not match route leg';
+  }
+  return getJurisdictionStackId(account.domain) === leg.jurisdiction.toLowerCase()
+    ? null
+    : 'Cross-j pull jurisdiction does not match Account domain';
+};
+
 export async function handlePullLock(
   accountMachine: AccountMachine,
   accountTx: PullLockTx,
@@ -147,6 +181,9 @@ export async function handlePullLock(
 ): Promise<{ success: boolean; events: string[]; error?: string }> {
   const { pullId, tokenId, amount, revealedUntilTimestamp, fullHash, partialRoot, crossJurisdiction } = accountTx.data;
   const events: string[] = [];
+
+  const crossJurisdictionRouteError = validateCrossJurisdictionPullRoute(accountMachine, accountTx);
+  if (crossJurisdictionRouteError) return { success: false, error: crossJurisdictionRouteError, events };
 
   if (!pullId || pullId.includes(':')) {
     return { success: false, error: `Invalid pullId`, events };

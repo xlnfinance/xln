@@ -109,6 +109,7 @@ import { areMarketMakerHubTransportsReady } from './mm-transport';
 import { computeCanonicalEntityHashesFromEnv, computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import { MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS } from './orchestrator-config';
 import { requireDeliveryDelivered } from '../protocol/payments/delivery-result';
+import { getReliableOutputIdentity } from '../machine/output-routing';
 import {
   assertMarketMakerReadySnapshotParity,
   buildMarketMakerBootstrapEntityStateHashFromCanonicalHashes,
@@ -3389,6 +3390,93 @@ const run = async (): Promise<void> => {
     };
   };
 
+  const summarizeReliableIdentity = (identity: ReturnType<typeof getReliableOutputIdentity>): Record<string, unknown> | null =>
+    identity ? {
+      kind: identity.kind,
+      entityId: identity.entityId,
+      signerId: identity.signerId,
+      laneKey: identity.laneKey,
+      height: identity.height,
+      logIndex: identity.logIndex ?? null,
+      evidenceKind: identity.evidenceKind,
+      evidenceDigest: identity.evidenceDigest,
+    } : null;
+
+  const summarizeReceiptLedger = (
+    ledger: Map<string, import('../types').ReliableDeliveryReceipt> | undefined,
+  ): Record<string, unknown>[] => [...(ledger?.values() ?? [])]
+    .map(receipt => ({
+      coverage: receipt.body.coverage,
+      receiverRuntimeId: receipt.body.receiverRuntimeId,
+      appliedRuntimeHeight: receipt.body.appliedRuntimeHeight,
+      identity: {
+        kind: receipt.body.identity.kind,
+        entityId: receipt.body.identity.entityId,
+        laneKey: receipt.body.identity.laneKey,
+        height: receipt.body.identity.height,
+        logIndex: receipt.body.identity.logIndex ?? null,
+        evidenceKind: receipt.body.identity.evidenceKind,
+        evidenceDigest: receipt.body.identity.evidenceDigest,
+      },
+    }))
+    .sort((left, right) => compareStableText(safeStringify(left), safeStringify(right)));
+
+  const buildBootstrapCausalCheckpoint = (): Record<string, unknown> => {
+    const state = env.runtimeState;
+    return {
+      quiescence: summarizeRuntimeQuiescence(env),
+      pendingReliable: (env.pendingNetworkOutputs ?? [])
+        .map(output => ({
+          targetRuntimeId: output.runtimeId ?? null,
+          targetEntityId: output.entityId,
+          txTypes: (output.entityTxs ?? []).map(tx => tx.type),
+          txCount: output.entityTxs?.length ?? 0,
+          identity: summarizeReliableIdentity(getReliableOutputIdentity(output)),
+        }))
+        .filter(entry => entry.identity !== null),
+      senderReceipts: {
+        active: summarizeReceiptLedger(state?.receivedReliableReceiptLedger),
+        terminal: summarizeReceiptLedger(state?.receivedReliableTerminalWatermarks),
+      },
+      receiverReceipts: {
+        active: summarizeReceiptLedger(state?.reliableIngressReceiptLedger),
+        terminal: summarizeReceiptLedger(state?.reliableIngressTerminalWatermarks),
+        pending: [...(state?.pendingReliableIngress?.values() ?? [])]
+          .map(pending => ({
+            targetRuntimeIds: [...pending.targetRuntimeIds].sort(compareStableText),
+            identity: {
+              kind: pending.identity.kind,
+              entityId: pending.identity.entityId,
+              laneKey: pending.identity.laneKey,
+              height: pending.identity.height,
+              logIndex: pending.identity.logIndex ?? null,
+              evidenceKind: pending.identity.evidenceKind,
+              evidenceDigest: pending.identity.evidenceDigest,
+            },
+          }))
+          .sort((left, right) => compareStableText(safeStringify(left), safeStringify(right))),
+      },
+      entities: mmContexts.map(context => {
+        const replica = getEntityReplicaById(env, context.entityId);
+        return {
+          entityId: context.entityId,
+          jurisdiction: context.jurisdictionName,
+          height: replica?.state.height ?? null,
+          consumptionRoot: replica?.state.consumptionAccumulator?.root ?? null,
+          consumptionRelationships: replica?.state.consumptionAccumulator?.count ?? 0n,
+          accounts: [...(replica?.state.accounts.entries() ?? [])]
+            .map(([counterpartyEntityId, account]) => ({
+              counterpartyEntityId,
+              currentHeight: account.currentHeight,
+              pendingFrame: Boolean(account.pendingFrame),
+              mempool: account.mempool?.length ?? 0,
+            }))
+            .sort((left, right) => compareStableText(left.counterpartyEntityId, right.counterpartyEntityId)),
+        };
+      }),
+    };
+  };
+
   const emitBootstrapDebugEvent = (event: string, fields: Record<string, unknown> = {}): void => {
     emitMarketMakerBootstrapDebugEvent(event, {
       stage: startupPhase,
@@ -4599,18 +4687,26 @@ const run = async (): Promise<void> => {
   const waitForBootstrapOffers = async (): Promise<MarketMakerHealth | null> => {
     let lastProgressAt = Date.now();
     let lastProgressSignature = '';
+    let lastProgressReason = 'startup';
+    let lastProgressCheckpoint = buildBootstrapCausalCheckpoint();
     let lastBacklogLogAt = 0;
     let bootstrapCompletionCheckArmed = false;
     const markProgress = (reason: string, health: MarketMakerHealth | null = cachedMarketMakerHealth): void => {
       lastProgressAt = Date.now();
+      lastProgressReason = reason;
+      lastProgressCheckpoint = buildBootstrapCausalCheckpoint();
       emitBootstrapDebugEvent('progress', {
         reason,
         idleMs: 0,
         health: summarizeMarketMakerHealthForDebug(health),
+        checkpoint: lastProgressCheckpoint,
       });
     };
     const observeProgress = (reason: string, health: MarketMakerHealth | null): void => {
-      const signature = marketMakerBootstrapProgressSignature(health);
+      const signature = marketMakerBootstrapProgressSignature(
+        health,
+        buildBootstrapCausalCheckpoint(),
+      );
       if (signature === lastProgressSignature) return;
       lastProgressSignature = signature;
       markProgress(reason, health);
@@ -4619,15 +4715,44 @@ const run = async (): Promise<void> => {
       const idleMs = Date.now() - lastProgressAt;
       if (idleMs < MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS) return;
       const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryMmContext, profile));
+      const currentCheckpoint = buildBootstrapCausalCheckpoint();
+      const p2p = getP2PState(env);
+      const capsule = {
+        phase: startupPhase,
+        idleMs,
+        timeoutMs: MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS,
+        lastProgressReason,
+        lastProgressSignatureHash: createHash('sha256').update(lastProgressSignature).digest('hex'),
+        lastProgressCheckpoint,
+        currentCheckpoint,
+        health: summarizeMarketMakerHealthForDebug(health),
+        backlog: getMarketMakerRuntimeBacklogSnapshot(env, { includeQueuedEntityInputs: true }),
+        p2p: {
+          connected: p2p.connected,
+          reconnect: p2p.reconnect,
+          queue: p2p.queue,
+          directPeers: p2p.directPeers ?? [],
+        },
+        directInput: {
+          lastSeen: lastDirectEntityInput,
+          lastError: lastDirectEntityInputError,
+        },
+        visibleHubs: visibleHubs.map(profile => ({
+          name: profile.name,
+          entityId: profile.entityId,
+          runtimeId: profile.runtimeId,
+        })),
+      };
       console.error(
-        `[MESH-MM] BOOTSTRAP_STALLED idleMs=${idleMs} visibleHubs=${visibleHubs.length} offers=${safeStringify((health?.hubs ?? []).map(hub => ({ hubEntityId: hub.hubEntityId, offers: hub.offers })))} cross=${safeStringify({ expectedRoutes: health?.cross.expectedRoutes ?? 0, routes: (health?.cross.routes ?? []).map(route => ({ sourceHubEntityId: route.sourceHubEntityId, targetHubEntityId: route.targetHubEntityId, offers: route.offers, ready: route.ready, depthReady: route.depthReady })) })}`,
+        `[MESH-MM] BOOTSTRAP_STALLED capsule=${safeStringify(capsule)}`,
       );
       emitBootstrapDebugEvent('timeout', {
-        idleMs,
-        health: summarizeMarketMakerHealthForDebug(health),
-        visibleHubs: visibleHubs.length,
+        capsule,
       });
-      throw new Error(`MARKET_MAKER_BOOTSTRAP_STALLED idleMs=${idleMs}`);
+      throw new Error(
+        `MARKET_MAKER_BOOTSTRAP_STALLED:phase=${startupPhase}:idleMs=${idleMs}:` +
+        `pendingReliable=${summarizeRuntimeQuiescence(env).pendingReliableOutputs}`,
+      );
     };
     const refreshBootstrapPhase = (health: MarketMakerHealth | null): void => {
       if (isBootstrapDepthComplete(health)) return;

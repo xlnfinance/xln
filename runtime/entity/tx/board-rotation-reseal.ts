@@ -9,7 +9,7 @@ import type {
   JurisdictionEvent,
 } from '../../types';
 import { resolveObserverCertifiedAccountCounterpartyProposer } from '../../account/counterparty-route';
-import { buildCrossJurisdictionEntityOutput } from './cross-j-outputs';
+import { buildCertifiedEntityOutput } from './cross-j-outputs';
 
 type BoardActivatedEvent = Extract<JurisdictionEvent, { type: 'BoardActivated' }>;
 
@@ -180,7 +180,7 @@ const buildResealOutput = (
       counterpartyId,
     );
     if (!signerId) return undefined;
-    return buildCrossJurisdictionEntityOutput(env, counterpartyId, input, signerId);
+    return buildCertifiedEntityOutput(counterpartyId, signerId, input);
   } catch (error) {
     // An absent/non-authoritative bilateral witness is retryable. Corrupt
     // Account identity, frame hashes, or certified Patricia nodes remain loud.

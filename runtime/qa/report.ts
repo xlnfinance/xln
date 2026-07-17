@@ -263,9 +263,28 @@ export type QaRunCategory = 'unit' | 'contract' | 'e2e' | 'scenario' | 'benchmar
 export type QaTestCategory = 'functional' | 'resilience';
 export type QaRunTestCategory = QaTestCategory | 'mixed' | 'unknown';
 
+export type QaFailureCapsule = {
+  version: 1;
+  reportPath: string;
+  file: string;
+  title: string;
+  line: number;
+  column: number;
+  project: string;
+  error: string;
+  stack: string | null;
+  attachments: Array<{
+    name: string;
+    contentType: string;
+    path: string | null;
+  }>;
+  rerunCommand: string;
+};
+
 export type QaShardManifest = {
   shard: number;
   status: 'passed' | 'failed' | 'cancelled' | 'unknown';
+  resultClass?: 'passed' | 'playwright' | 'runtime-fatal' | 'startup' | 'runner' | 'cancelled';
   durationMs: number | null;
   handle: string | null;
   description: string | null;
@@ -278,6 +297,9 @@ export type QaShardManifest = {
   logRelativePath: string | null;
   logTail: string | null;
   error: string | null;
+  diagnostics?: string[];
+  failureCapsule?: QaFailureCapsule | null;
+  failureCapsuleRelativePath?: string | null;
   failureClass: QaFailureClass | null;
   phaseMs: QaPhaseTimings | null;
   perf?: QaPerfSummary;
@@ -305,10 +327,21 @@ export type QaRunManifest = {
   totalShards: number;
   passedShards: number;
   failedShards: number;
+  cancelledShards?: number;
+  primaryFailureShard?: number | null;
+  primaryFailureCapsule?: QaFailureCapsule | null;
   failureClasses?: QaFailureClass[];
   args?: Record<string, unknown> | null;
   shards: QaShardManifest[];
 } & QaSeveritySignal;
+
+type QaShardManifestDraft = Omit<QaShardManifest, keyof QaSeveritySignal> &
+  Partial<QaSeveritySignal>;
+
+type QaRunManifestDraft = Omit<QaRunManifest, keyof QaSeveritySignal | 'shards'> &
+  Partial<QaSeveritySignal> & {
+    shards: QaShardManifestDraft[];
+  };
 
 export type QaShardView = Omit<QaShardManifest, 'perf'> & {
   perf?: QaPerfSummaryView;
@@ -774,7 +807,9 @@ export const summarizeQaBrowserIssues = (issues: readonly QaBrowserIssue[], sinc
   };
 };
 
-export const summarizeQaRunBrowserHealth = (run: Pick<QaRunManifest, 'shards'>): QaBrowserHealthSummary =>
+export const summarizeQaRunBrowserHealth = (
+  run: { shards: readonly Pick<QaShardManifest, 'browserIssues'>[] },
+): QaBrowserHealthSummary =>
   summarizeQaBrowserIssues(run.shards.flatMap(shard => normalizeQaBrowserIssues(shard.browserIssues)));
 
 const classifyQaFailureText = (value: string): QaFailureClass | null => {
@@ -1761,7 +1796,7 @@ export const compareQaBenchmarkRuns = (
   };
 };
 
-const normalizeQaShardSeverity = (shard: QaShardManifest, since: number): QaShardManifest => {
+const normalizeQaShardSeverity = (shard: QaShardManifestDraft, since: number): QaShardManifest => {
   const fallback = buildQaShardSeveritySignal(shard, since);
   return {
     ...shard,
@@ -1781,7 +1816,7 @@ const normalizeQaBenchmarkSeverity = (
   };
 };
 
-export const applyQaRunSeverity = (run: QaRunManifest): QaRunManifest => {
+export const applyQaRunSeverity = (run: QaRunManifestDraft): QaRunManifest => {
   const since = run.createdAt;
   const shards = run.shards.map(shard => normalizeQaShardSeverity(shard, since));
   const browserHealth = normalizeQaBrowserHealthSummary(
@@ -1790,7 +1825,7 @@ export const applyQaRunSeverity = (run: QaRunManifest): QaRunManifest => {
   );
   const benchmark = normalizeQaBenchmarkSeverity(run.benchmark, since);
   const failureClasses = run.failureClasses ?? summarizeQaFailureClasses(shards);
-  const normalizedRun: QaRunManifest = {
+  const normalizedRun = {
     ...run,
     shards,
     browserHealth,

@@ -101,6 +101,25 @@ test('background runtime bookkeeping neither blocks quotes nor fakes semantic pr
   }
 });
 
+test('durable frontier movement is semantic bootstrap progress before book depth changes', () => {
+  const health = {
+    hubs: [{ hubEntityId: 'hub-1', offers: 60, depthReady: true, blockers: [] }],
+    cross: { expectedRoutes: 6, routes: [] },
+  };
+  const before = marketMakerBootstrapProgressSignature(health, {
+    pendingReliable: [{ lane: 'generic', sequence: 1n }],
+    terminalReceipts: [],
+    consumptionRoots: ['0xroot-1'],
+  });
+  const after = marketMakerBootstrapProgressSignature(health, {
+    pendingReliable: [],
+    terminalReceipts: [{ lane: 'generic', sequence: 1n }],
+    consumptionRoots: ['0xroot-2'],
+  });
+
+  expect(after).not.toBe(before);
+});
+
 test('queued entity inputs retain quote backpressure until the prior quote batch is admitted', () => {
   expect(runtimeBacklogBlocksMarketMakerQuotes({
     processing: true,

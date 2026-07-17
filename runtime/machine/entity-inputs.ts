@@ -229,13 +229,35 @@ export const applyMergedEntityInputs = async (
     }
   }
 
-  const immediateCrossJOutputs = entityOutbox.filter(output => isImmediateLocalCrossJurisdictionOutput(env, output));
-  if (immediateCrossJOutputs.length > 0) {
+  const localEventFingerprints = new Set<string>();
+  let localEventRounds = 0;
+  let localEventCount = 0;
+  while (true) {
+    const immediateCrossJOutputs = entityOutbox.filter(output => isImmediateLocalCrossJurisdictionOutput(env, output));
+    if (immediateCrossJOutputs.length === 0) break;
+    localEventRounds += 1;
+    localEventCount += immediateCrossJOutputs.length;
+    if (localEventRounds > 64 || localEventCount > 1_000) {
+      throw new Error(
+        `RUNTIME_CROSS_J_EVENT_CASCADE_LIMIT:rounds=${localEventRounds}:events=${localEventCount}`,
+      );
+    }
     const deferredOutputs = entityOutbox.filter(output => !isImmediateLocalCrossJurisdictionOutput(env, output));
     entityOutbox.length = 0;
     entityOutbox.push(...deferredOutputs);
 
     for (const entityInput of mergeEntityInputs(immediateCrossJOutputs)) {
+      const fingerprint = safeStringify({
+        entityId: entityInput.entityId.toLowerCase(),
+        signerId: entityInput.signerId.toLowerCase(),
+        entityTxs: entityInput.entityTxs,
+      });
+      if (localEventFingerprints.has(fingerprint)) {
+        throw new Error(
+          `RUNTIME_CROSS_J_EVENT_CYCLE:round=${localEventRounds}:entity=${entityInput.entityId}`,
+        );
+      }
+      localEventFingerprints.add(fingerprint);
       const inputProfileStartedAt = getPerfMs();
       const actualSignerId = entityInput.signerId.trim();
       const replicaKey = findReplicaKeyInsensitive(env, entityInput.entityId, actualSignerId);
@@ -276,6 +298,7 @@ export const applyMergedEntityInputs = async (
           proposedFrame: Boolean(entityInput.proposedFrame),
           hashPrecommits: Number(entityInput.hashPrecommits?.size || 0),
           immediateCrossJ: true,
+          localEventRound: localEventRounds,
           outputs: result.outputs.length,
           jOutputs: result.jOutputs.length,
         });

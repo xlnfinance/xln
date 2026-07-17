@@ -131,7 +131,10 @@ export const resolveMarketMakerReadySnapshotAction = (
   );
 };
 
-export const marketMakerBootstrapProgressSignature = (health: BootstrapHealthLike | null): string =>
+export const marketMakerBootstrapProgressSignature = (
+  health: BootstrapHealthLike | null,
+  causalCheckpoint: unknown = null,
+): string =>
   safeStringify({
     same: (health?.hubs ?? []).map(hub => ({
       hubEntityId: hub.hubEntityId,
@@ -150,4 +153,5 @@ export const marketMakerBootstrapProgressSignature = (health: BootstrapHealthLik
         blockers: route.blockers?.length ?? 0,
       })),
     },
+    causalCheckpoint,
   });

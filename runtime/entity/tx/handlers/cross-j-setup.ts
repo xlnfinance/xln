@@ -24,12 +24,15 @@ import { safeStringify } from '../../../protocol/serialization';
 import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env } from '../../../types';
 import { formatEntityId } from '../../../utils';
 import type { ApplyEntityTxOptions } from '../apply';
+import type { MempoolOp } from './account';
+import { findAccountKey } from '../account-key';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
 
 type CrossJSetupResult = {
   newState: EntityState;
   outputs: EntityInput[];
+  mempoolOps?: MempoolOp[];
 };
 
 const deterministicEntityTimestamp = (state: EntityState, env: Env): number =>
@@ -94,7 +97,8 @@ export const handleRequestCrossJurisdictionSwapEntityTx = (
     addMessage(newState, `❌ Cross-j request ${route.orderId} routed to wrong source entity`);
     return { newState, outputs };
   }
-  if (!newState.accounts.has(normalizeEntityRef(route.source.counterpartyEntityId))) {
+  const sourceAccountId = findAccountKey(newState, route.source.counterpartyEntityId);
+  if (!sourceAccountId) {
     addMessage(newState, `❌ Cross-j request ${route.orderId} blocked: no source account with ${formatEntityId(route.source.counterpartyEntityId)}`);
     return { newState, outputs };
   }
@@ -114,12 +118,15 @@ export const handleRequestCrossJurisdictionSwapEntityTx = (
     updatedAt: newState.timestamp || env.timestamp,
   };
   newState.crossJurisdictionSwaps.set(intentRoute.orderId, intentRoute);
-  pushCrossJOutput(env, outputs, intentRoute.source.counterpartyEntityId, [{
-    type: 'prepareCrossJurisdictionSwap',
-    data: { route: cloneCrossJurisdictionRoute(intentRoute) },
-  }], intentRoute.sourceHubSignerId);
   addMessage(newState, `🌉 Cross-j swap ${intentRoute.orderId} requested`);
-  return { newState, outputs };
+  return {
+    newState,
+    outputs,
+    mempoolOps: [{
+      accountId: sourceAccountId,
+      tx: { type: 'cross_j_intent', data: { route: cloneCrossJurisdictionRoute(intentRoute) } },
+    }],
+  };
 };
 
 export const handlePrepareCrossJurisdictionSwapEntityTx = (
@@ -224,13 +231,11 @@ export const handlePrepareCrossJurisdictionSwapEntityTx = (
           fullHash: publicPreparedRoute.targetPull!.fullHash,
           partialRoot: publicPreparedRoute.targetPull!.partialRoot,
           crossJurisdiction: buildCrossJurisdictionPullBinding(publicPreparedRoute, 'target'),
+          crossJurisdictionRoute: cloneCrossJurisdictionRoute(publicPreparedRoute),
           description: publicPreparedRoute.memo || `Cross-j target pull ${publicPreparedRoute.orderId}`,
         },
       },
     ], publicPreparedRoute.targetHubSignerId);
-  pushCrossJOutput(env, outputs, publicPreparedRoute.target.counterpartyEntityId, [
-    { type: 'registerCrossJurisdictionSwap', data: { route: publicPreparedRoute } },
-  ], publicPreparedRoute.targetSignerId);
   addMessage(newState, `🌉 Cross-j swap ${preparedRoute.orderId} target lock requested by hub`);
   return { newState, outputs };
 };
@@ -308,63 +313,62 @@ export const handleCommitCrossJurisdictionSwapEntityTx = (
   }
   const sourcePull = route.sourcePull;
   const targetPull = route.targetPull;
-  const restingRoute = {
+  const readyRoute = {
     ...cloneCrossJurisdictionRoute(route),
     sourcePull,
     targetPull,
     targetReceipt,
-    status: 'resting' as const,
+    status: 'target_locked' as const,
     updatedAt: newState.timestamp || env.timestamp,
   };
   newState.crossJurisdictionSwaps ||= new Map();
-  const existing = newState.crossJurisdictionSwaps.get(restingRoute.orderId);
-  const transitionError = validateCrossJurisdictionRouteTransition(existing, restingRoute);
+  const existing = newState.crossJurisdictionSwaps.get(readyRoute.orderId);
+  const transitionError = validateCrossJurisdictionRouteTransition(existing, readyRoute);
   if (transitionError) {
     addMessage(newState, `❌ Cross-j commit ${route.orderId} blocked: ${transitionError}`);
     return { newState, outputs };
   }
-  newState.crossJurisdictionSwaps.set(restingRoute.orderId, mergeCrossJurisdictionRoute(existing, restingRoute));
-  const firstValidator = entityState.config.validators[0];
-  if (!firstValidator) {
-    throw new Error(`CROSS_J_SOURCE_COMMIT_SIGNER_MISSING: entity=${newState.entityId} order=${restingRoute.orderId}`);
-  }
-  outputs.push({
-    entityId: newState.entityId,
-    signerId: firstValidator,
-    entityTxs: [
-      {
-        type: 'pullLock',
+  newState.crossJurisdictionSwaps.set(readyRoute.orderId, mergeCrossJurisdictionRoute(existing, readyRoute));
+  const accountId = findAccountKey(newState, readyRoute.source.counterpartyEntityId);
+  if (!accountId) throw new Error(`CROSS_J_SOURCE_ACCOUNT_MISSING:${readyRoute.orderId}`);
+  const restingAccountRoute = { ...cloneCrossJurisdictionRoute(readyRoute), status: 'resting' as const };
+  const mempoolOps: MempoolOp[] = [
+    {
+      accountId,
+      tx: {
+        type: 'pull_lock',
         data: {
-          counterpartyEntityId: restingRoute.source.counterpartyEntityId,
           pullId: sourcePull.pullId,
           tokenId: sourcePull.tokenId,
           amount: sourcePull.signedAmount,
-            revealedUntilTimestamp: sourcePull.revealedUntilTimestamp,
-            fullHash: sourcePull.fullHash,
-            partialRoot: sourcePull.partialRoot,
-            crossJurisdiction: buildCrossJurisdictionPullBinding(restingRoute, 'source'),
-            description: restingRoute.memo || `Cross-j source pull ${restingRoute.orderId}`,
-          },
-        },
-      {
-        type: 'placeSwapOffer',
-        data: {
-          counterpartyEntityId: restingRoute.source.counterpartyEntityId,
-          offerId: restingRoute.orderId,
-          giveTokenId: restingRoute.source.tokenId,
-          giveAmount: restingRoute.source.amount,
-          wantTokenId: restingRoute.target.tokenId,
-          wantAmount: restingRoute.target.amount,
-          ...(restingRoute.priceTicks !== undefined ? { priceTicks: restingRoute.priceTicks } : {}),
-          timeInForce: 0,
-          minFillRatio: 0,
-          crossJurisdiction: cloneCrossJurisdictionRoute(restingRoute),
+          revealedUntilTimestamp: sourcePull.revealedUntilTimestamp,
+          fullHash: sourcePull.fullHash,
+          partialRoot: sourcePull.partialRoot,
+          crossJurisdiction: buildCrossJurisdictionPullBinding(restingAccountRoute, 'source'),
+          crossJurisdictionRoute: cloneCrossJurisdictionRoute(restingAccountRoute),
         },
       },
-    ],
-  });
-  addMessage(newState, `🌉 Cross-j swap ${restingRoute.orderId} committed by source`);
-  return { newState, outputs };
+    },
+    {
+      accountId,
+      tx: {
+        type: 'swap_offer',
+        data: {
+          offerId: readyRoute.orderId,
+          giveTokenId: readyRoute.source.tokenId,
+          giveAmount: readyRoute.source.amount,
+          wantTokenId: readyRoute.target.tokenId,
+          wantAmount: readyRoute.target.amount,
+          ...(readyRoute.priceTicks !== undefined ? { priceTicks: readyRoute.priceTicks } : {}),
+          timeInForce: 0,
+          minFillRatio: 0,
+          crossJurisdiction: cloneCrossJurisdictionRoute(restingAccountRoute),
+        },
+      },
+    },
+  ];
+  addMessage(newState, `🌉 Cross-j swap ${readyRoute.orderId} target lock observed; source Account queued`);
+  return { newState, outputs, mempoolOps };
 };
 
 export const handleRegisterCrossJurisdictionSwapEntityTx = (

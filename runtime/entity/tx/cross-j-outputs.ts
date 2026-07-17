@@ -39,7 +39,18 @@ export const buildCrossJurisdictionEntityOutput = (
   if (hintedSignerId) {
     // Route signers are committed before consensus. Never consult local
     // topology when a committed route already identifies the recipient lane.
-    return { entityId: normalizedEntityId, signerId: hintedSignerId, entityTxs };
+    const replica = Array.from(env.eReplicas?.values?.() ?? []).find(candidate =>
+      normalizeEntityRef(candidate.entityId) === normalizedEntityId &&
+      normalizeEntityRef(candidate.signerId) === hintedSignerId);
+    if (!replica) {
+      throw new Error(`CROSS_J_SIBLING_TARGET_NOT_LOCAL:${normalizedEntityId}:${hintedSignerId}`);
+    }
+    return {
+      entityId: normalizedEntityId,
+      signerId: hintedSignerId,
+      entityTxs,
+      localRuntimeProtocol: 'cross-j',
+    };
   }
   const state = findLocalEntityState(env, normalizedEntityId);
   let signerId: string;
@@ -55,11 +66,23 @@ export const buildCrossJurisdictionEntityOutput = (
     entityId: state?.entityId || normalizedEntityId,
     signerId,
     entityTxs,
+    localRuntimeProtocol: 'cross-j',
   };
 };
 
+/** Generic certified E→E output. Cross-j sibling code must never call this. */
+export const buildCertifiedEntityOutput = (
+  entityId: string,
+  signerId: string,
+  entityTxs: EntityTx[],
+): EntityInput => ({
+  entityId: normalizeEntityRef(entityId),
+  signerId: normalizeEntityRef(signerId),
+  entityTxs,
+});
+
 export const pushCrossJurisdictionEntityOutput = (
-  _env: Env,
+  env: Env,
   outputs: EntityInput[],
   entityId: string,
   entityTxs: EntityTx[],
@@ -70,5 +93,10 @@ export const pushCrossJurisdictionEntityOutput = (
   if (!normalizedEntityId || !normalizedSignerId) {
     throw new Error(`CROSS_J_ENTITY_OUTPUT_SIGNER_MISSING: entity=${normalizedEntityId || 'missing'}`);
   }
-  outputs.push({ entityId: normalizedEntityId, signerId: normalizedSignerId, entityTxs });
+  outputs.push(buildCrossJurisdictionEntityOutput(
+    env,
+    normalizedEntityId,
+    entityTxs,
+    normalizedSignerId,
+  ));
 };

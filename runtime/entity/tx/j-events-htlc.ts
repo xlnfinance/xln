@@ -311,6 +311,7 @@ export function applyKnownHtlcSecret(
           counterpartyEntityId: relay.targetCounterpartyEntityId,
           lockId: relay.targetLockId,
           secret,
+          crossJurisdictionRouteId: relay.routeId,
           description: `Cross-j ${relay.routeId} target claim ${relay.fillRatio}/${CROSS_J_MAX_FILL_RATIO}`,
         },
       }], relay.targetSignerId);

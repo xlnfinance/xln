@@ -4,6 +4,7 @@ import { compareStableText } from '../../protocol/serialization';
 const NESTED_PROTOCOL_TXS = new Set<EntityTx['type']>([
   'entityCommand',
   'consensusOutput',
+  'runtimeOutput',
   'reissueCertifiedOutput',
   'scheduledWake',
 ]);
@@ -22,10 +23,22 @@ export const getCertifiedOutputNestedTxs = (
   return nested;
 };
 
+export const getRuntimeOutputNestedTxs = (
+  tx: EntityTx,
+): readonly EntityTx[] | null => {
+  if (tx.type !== 'runtimeOutput') return null;
+  const nested = tx.data.entityTxs;
+  if (!Array.isArray(nested) || nested.length === 0) throw new Error('RUNTIME_OUTPUT_ENTITY_TXS_MISSING');
+  if (nested.some(candidate => NESTED_PROTOCOL_TXS.has(candidate.type))) {
+    throw new Error('RUNTIME_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN');
+  }
+  return nested;
+};
+
 export const getEffectiveEntityInputTxs = (
   input: Pick<EntityInput, 'entityTxs'>,
 ): EntityTx[] => (input.entityTxs ?? []).flatMap((tx) =>
-  getCertifiedOutputNestedTxs(tx) ?? [tx]);
+  getCertifiedOutputNestedTxs(tx) ?? getRuntimeOutputNestedTxs(tx) ?? [tx]);
 
 /**
  * A target consumption frontier is contiguous per source/target/lane. Network

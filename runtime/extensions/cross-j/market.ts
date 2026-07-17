@@ -1,5 +1,6 @@
 import type { CrossJurisdictionSwapRoute } from '../../types';
 import { isLiquidSwapToken } from '../../account/utils';
+import { parseJurisdictionStackIdentity } from '../../jurisdiction/jurisdiction-stack';
 
 const normalizeEntityId = (value: string): string => String(value || '').toLowerCase();
 const normalizeJurisdiction = (value: string): string => String(value || '').trim().toLowerCase();
@@ -104,12 +105,25 @@ export function deriveCanonicalCrossJurisdictionBookOwnerForLegs(
   targetTokenId: number,
   targetHubEntityId: string,
 ): string {
-  const sourceKey = crossJurisdictionAssetKey(sourceJurisdiction, sourceTokenId);
-  const targetKey = crossJurisdictionAssetKey(targetJurisdiction, targetTokenId);
+  const sourceStack = parseJurisdictionStackIdentity(sourceJurisdiction);
+  const targetStack = parseJurisdictionStackIdentity(targetJurisdiction);
+  if (!sourceStack || !targetStack) {
+    throw new Error(
+      `CROSS_J_BOOK_JURISDICTION_INVALID:${normalizeJurisdiction(sourceJurisdiction)}:` +
+      `${normalizeJurisdiction(targetJurisdiction)}`,
+    );
+  }
   // Book ownership is a sequencing/storage decision and must stay independent
-  // from display price orientation. USD stables can be quote-side for prices
-  // without moving the book to a different hub.
-  const sourceOwnsBook = sourceKey <= targetKey;
+  // from display price orientation. Numeric chain id is the primary key; the
+  // depository and token form a total deterministic order for same-chain legs.
+  const sourceKey = [sourceStack.chainId, sourceStack.depositoryAddress, Math.floor(Number(sourceTokenId))] as const;
+  const targetKey = [targetStack.chainId, targetStack.depositoryAddress, Math.floor(Number(targetTokenId))] as const;
+  const sourceOwnsBook = sourceKey[0] < targetKey[0] || (
+    sourceKey[0] === targetKey[0] && (
+      sourceKey[1] < targetKey[1] ||
+      (sourceKey[1] === targetKey[1] && sourceKey[2] <= targetKey[2])
+    )
+  );
   return normalizeEntityId(
     sourceOwnsBook
       ? sourceHubEntityId

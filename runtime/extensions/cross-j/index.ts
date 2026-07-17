@@ -78,7 +78,7 @@ export function compareCrossJurisdictionRouteStatus(
 }
 
 const CROSS_J_ALLOWED_TRANSITIONS: Record<CrossJurisdictionSwapStatus, ReadonlySet<CrossJurisdictionSwapStatus>> = {
-  intent: new Set(['intent', 'target_prepared', 'resting', 'cancelled', 'expired', 'failed']),
+  intent: new Set(['intent', 'target_prepared', 'target_locked', 'resting', 'cancelled', 'expired', 'failed']),
   target_prepared: new Set(['target_prepared', 'source_committed', 'target_locked', 'resting', 'clearing', 'cancelled', 'expired', 'failed']),
   source_committed: new Set(['source_committed', 'source_locked', 'resting', 'cancelled', 'expired', 'failed']),
   target_locked: new Set(['target_locked', 'source_locked', 'resting', 'clearing', 'cancelled', 'expired', 'failed']),
@@ -1107,12 +1107,18 @@ export const cloneCrossJurisdictionSwapHistoryRoute = (entry: SwapOrderHistoryEn
   cloneCrossJurisdictionCarrierRoute({ ...entry });
 
 export function cloneCrossJurisdictionAccountTxRoute(tx: AccountTx): AccountTx {
+  if (tx.type === 'cross_j_intent') {
+    return { ...tx, data: { route: cloneCrossJurisdictionRoute(tx.data.route) } };
+  }
   if (tx.type === 'pull_lock' && tx.data.crossJurisdiction) {
     return {
       ...tx,
       data: {
         ...tx.data,
         crossJurisdiction: cloneCrossJurisdictionPullBinding(tx.data.crossJurisdiction),
+        ...(tx.data.crossJurisdictionRoute
+          ? { crossJurisdictionRoute: cloneCrossJurisdictionRoute(tx.data.crossJurisdictionRoute) }
+          : {}),
       },
     };
   }

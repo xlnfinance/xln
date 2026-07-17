@@ -18,6 +18,7 @@ import { handleCrossPullClose, handlePullCancel, handlePullLock, handlePullResol
 import { handleSwapOffer } from './handlers/swap-offer';
 import { handleSwapResolve } from './handlers/swap-resolve';
 import { handleCrossSwapFillAck } from './handlers/cross-swap-fill-ack';
+import { handleCrossJIntent } from './handlers/cross-j-intent';
 import { handleSwapCancelRequest } from './handlers/swap-cancel';
 import { getSignedSettlementWorkspaceTxError, handleSettleTransition } from './handlers/settle-transition';
 import { handleJEventClaim } from './handlers/j-event-claim';
@@ -115,6 +116,9 @@ export async function applyAccountTx(
 
   // Route to appropriate handler based on transaction type
   switch (accountTx.type) {
+    case 'cross_j_intent':
+      return handleCrossJIntent(accountMachine, accountTx, byLeft);
+
     case 'add_delta':
       return handleAddDelta(accountMachine, accountTx);
 

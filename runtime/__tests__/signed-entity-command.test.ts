@@ -20,7 +20,7 @@ import {
 } from '../entity/command-codec';
 import {
   assertCertifiedEntityOutputAuthorization,
-  assertCertifiedOutputSemanticAuthority,
+  assertRuntimeOutputAuthorization,
   buildCollectiveEntityProposalTx,
   buildEntityTransactionProposalAction,
   hashEntityProposalAction,
@@ -1106,28 +1106,27 @@ describe('signed Entity command admission', () => {
     expect(selectEntityFrameTxByteBudget(txs)).toEqual([txs[0]]);
   });
 
-  test('binds every cross-Entity certified-output variant to its exact semantic source role', () => {
+  test('binds trusted cross-j runtime outputs to the two exact sibling edges', () => {
     const sourceUser = entityId('11');
     const sourceHub = entityId('12');
     const targetHub = entityId('13');
     const targetUser = entityId('14');
-    const bookOwner = entityId('15');
     const attacker = entityId('16');
     const orderId = 'semantic-order';
     const route = withCanonicalCrossJurisdictionRouteHash({
       orderId,
-      bookOwnerEntityId: bookOwner,
+      bookOwnerEntityId: targetHub,
       makerEntityId: sourceUser,
-      hubEntityId: bookOwner,
+      hubEntityId: targetHub,
       source: {
-        jurisdiction: 'source-j',
+        jurisdiction: `stack:8453:0x${'11'.repeat(20)}`,
         entityId: sourceUser,
         counterpartyEntityId: sourceHub,
         tokenId: 1,
         amount: 10n,
       },
       target: {
-        jurisdiction: 'target-j',
+        jurisdiction: `stack:1:0x${'12'.repeat(20)}`,
         entityId: targetHub,
         counterpartyEntityId: targetUser,
         tokenId: 2,
@@ -1146,7 +1145,7 @@ describe('signed Entity command admission', () => {
       updatedAt: 1,
     } satisfies CrossJurisdictionSwapRoute);
     const routeHash = route.routeHash!;
-    const receipt = {
+    const sourceReceipt = {
       receiptHash: entityId('20'),
       leg: 'source' as const,
       orderId,
@@ -1161,19 +1160,43 @@ describe('signed Entity command admission', () => {
       partialRoot: entityId('19'),
       committedAt: 1,
     };
-    const state = structuredClone(setup('certified-semantic-roles').state);
-    state.entityId = bookOwner;
-    state.crossJurisdictionSwaps = new Map([[orderId, route]]);
-    state.crossJurisdictionBookAdmissions = new Map([['admission', {
+    const targetReceipt = {
+      receiptHash: entityId('22'),
+      leg: 'target' as const,
+      orderId,
+      routeHash,
+      hubEntityId: targetHub,
+      counterpartyEntityId: targetUser,
+      pullId: 'target-pull',
+      tokenId: 2,
+      signedAmount: 20n,
+      revealedUntilTimestamp: 10_000,
+      fullHash: entityId('1a'),
+      partialRoot: entityId('1b'),
+      committedAt: 1,
+    };
+    const targetLockedRoute = {
+      ...route,
+      status: 'target_locked' as const,
+      targetReceipt,
+    };
+    const baseState = structuredClone(setup('runtime-semantic-roles').state);
+    baseState.crossJurisdictionSwaps = new Map([[orderId, route]]);
+    baseState.crossJurisdictionBookAdmissions = new Map([['admission', {
       orderId,
       routeHash,
       sourceEntityId: sourceUser,
-      bookOwnerEntityId: bookOwner,
+      bookOwnerEntityId: targetHub,
       status: 'admitted',
       route,
-      sourceReceipt: receipt,
+      sourceReceipt,
       updatedAt: 1,
     }]]);
+    const stateFor = (entityIdValue: string) => {
+      const state = structuredClone(baseState);
+      state.entityId = entityIdValue;
+      return state;
+    };
     const closeProof = {
       orderId,
       routeHash,
@@ -1201,6 +1224,9 @@ describe('signed Entity command admission', () => {
     const targetRegistration: EntityTx = {
       type: 'registerCrossJurisdictionSwap', data: { route },
     };
+    const targetReceiptRegistration: EntityTx = {
+      type: 'registerCrossJurisdictionSwap', data: { route: targetLockedRoute },
+    };
     const forcedSourceDispute: EntityTx = {
       type: 'disputeStart',
       data: {
@@ -1208,43 +1234,41 @@ describe('signed Entity command admission', () => {
         crossJurisdictionRouteId: orderId,
       },
     };
-    const forcedSourceDisputeBatch = [forcedSourceDispute];
     const variants: Array<{
       source: string;
       target: string;
-      tx: EntityTx;
-      certifiedTxs?: EntityTx[];
+      txs: EntityTx[];
     }> = [
-      {
-        source: sourceUser,
-        target: bookOwner,
-        tx: {
-          type: 'accountInput',
-          data: {
-            kind: 'settle', fromEntityId: sourceUser, toEntityId: bookOwner,
-            settleAction: { type: 'reject' },
-          },
-        },
-      },
-      {
-        source: sourceUser,
-        target: sourceHub,
-        tx: { type: 'prepareCrossJurisdictionSwap', data: { route } },
-      },
-      { source: sourceHub, target: targetHub, tx: targetRegistration },
-      { source: sourceHub, target: targetUser, tx: targetRegistration },
       {
         source: sourceHub,
         target: targetHub,
-        tx: targetPullLock,
-        certifiedTxs: [targetRegistration, targetPullLock],
+        txs: [targetRegistration, targetPullLock],
       },
-      { source: targetHub, target: sourceUser, tx: { type: 'commitCrossJurisdictionSwap', data: { route, targetReceipt: receipt } } },
-      { source: sourceHub, target: bookOwner, tx: { type: 'admitCrossJurisdictionBookOrder', data: { route, receipt } } },
+      {
+        source: targetHub,
+        target: sourceHub,
+        txs: [targetReceiptRegistration],
+      },
+      {
+        source: targetUser,
+        target: sourceUser,
+        txs: [{
+          type: 'commitCrossJurisdictionSwap',
+          data: { route: targetLockedRoute, targetReceipt },
+        }],
+      },
       {
         source: sourceHub,
-        target: bookOwner,
-        tx: {
+        target: targetHub,
+        txs: [{
+          type: 'admitCrossJurisdictionBookOrder',
+          data: { route, receipt: sourceReceipt },
+        }],
+      },
+      {
+        source: sourceHub,
+        target: targetHub,
+        txs: [{
           type: 'applyCrossJurisdictionBookProgress',
           data: {
             orderId, sourceEntityId: sourceUser, fillSeq: 1,
@@ -1252,12 +1276,12 @@ describe('signed Entity command admission', () => {
             cumulativeSourceAmount: 1n, cumulativeTargetAmount: 2n,
             cumulativeFillRatio: 1,
           },
-        },
+        }],
       },
       {
-        source: bookOwner,
+        source: targetHub,
         target: sourceHub,
-        tx: {
+        txs: [{
           type: 'crossJurisdictionFillNotice',
           data: {
             orderId, routeHash, fillSeq: 1,
@@ -1265,36 +1289,36 @@ describe('signed Entity command admission', () => {
             cumulativeSourceAmount: 1n, cumulativeTargetAmount: 2n,
             cumulativeFillRatio: 1, pairId: '1/2',
           },
-        },
+        }],
       },
       {
-        source: sourceHub,
+        source: sourceUser,
         target: targetUser,
-        tx: {
+        txs: [{
           type: 'crossPullClose',
           data: {
             counterpartyEntityId: targetHub,
             pullId: 'target-pull', binary: '01', proof: closeProof, route,
           },
-        },
+        }],
       },
       {
         source: sourceHub,
-        target: bookOwner,
-        tx: {
+        target: targetHub,
+        txs: [{
           type: 'removeCrossJurisdictionBookOrder',
           data: { orderId, sourceEntityId: sourceUser, route },
-        },
+        }],
       },
       {
-        source: targetUser,
+        source: targetHub,
         target: sourceHub,
-        tx: { type: 'requestCrossJurisdictionClear', data: { orderId, route } },
+        txs: [{ type: 'requestCrossJurisdictionClear', data: { orderId, route } }],
       },
       {
         source: sourceUser,
         target: targetUser,
-        tx: {
+        txs: [{
           type: 'crossJurisdictionSalvage',
           data: {
             routeId: orderId,
@@ -1303,115 +1327,86 @@ describe('signed Entity command admission', () => {
             sourceEntityId: sourceUser,
             sourceCounterpartyEntityId: sourceHub,
           },
-        },
+        }],
       },
       {
         source: targetUser,
         target: sourceUser,
-        tx: forcedSourceDispute,
-        certifiedTxs: forcedSourceDisputeBatch,
+        txs: [forcedSourceDispute],
       },
     ];
     for (const variant of variants) {
-      expect(() => assertCertifiedOutputSemanticAuthority(
+      expect(() => assertRuntimeOutputAuthorization(
         variant.source,
         variant.target,
-        variant.tx,
-        state,
-        variant.certifiedTxs,
-      ), variant.tx.type).not.toThrow();
-      expect(() => assertCertifiedOutputSemanticAuthority(
+        variant.txs,
+        stateFor(variant.target),
+      ), variant.txs.map(tx => tx.type).join(',')).not.toThrow();
+      expect(() => assertRuntimeOutputAuthorization(
         attacker,
         variant.target,
-        variant.tx,
-        state,
-        variant.certifiedTxs,
-      ), variant.tx.type).toThrow('CONSENSUS_OUTPUT_SEMANTIC_SOURCE_MISMATCH');
+        variant.txs,
+        stateFor(variant.target),
+      ), variant.txs.map(tx => tx.type).join(',')).toThrow('RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN');
     }
+    const accountInput: EntityTx = {
+      type: 'accountInput',
+      data: {
+        kind: 'settle', fromEntityId: sourceUser, toEntityId: sourceHub,
+        settleAction: { type: 'reject' },
+      },
+    };
     expect(() => assertCertifiedEntityOutputAuthorization(
-      targetUser,
       sourceUser,
-      forcedSourceDisputeBatch,
-      state,
+      sourceHub,
+      [accountInput],
+      stateFor(sourceHub),
     )).not.toThrow();
     expect(() => assertCertifiedEntityOutputAuthorization(
-      targetUser,
-      sourceUser,
-      [forcedSourceDispute, { type: 'j_broadcast', data: {} }],
-      state,
-    )).toThrow('CONSENSUS_OUTPUT_CROSS_ENTITY_TX_FORBIDDEN:j_broadcast');
-    expect(() => assertCertifiedEntityOutputAuthorization(
-      sourceUser,
-      sourceUser,
-      [{ type: 'j_broadcast', data: {} }],
-      state,
-    )).not.toThrow();
-    expect(() => assertCertifiedEntityOutputAuthorization(
-      targetUser,
-      sourceUser,
-      [{
-        type: 'disputeStart',
-        data: { counterpartyEntityId: attacker, crossJurisdictionRouteId: orderId },
-      }],
-      state,
-    )).toThrow('CONSENSUS_OUTPUT_CROSS_J_DISPUTE_COUNTERPARTY_MISMATCH');
-    expect(() => assertCertifiedEntityOutputAuthorization(
-      targetUser,
-      sourceUser,
-      [{
-        type: 'disputeStart',
-        data: {
-          counterpartyEntityId: sourceHub,
-          crossJurisdictionRouteId: orderId,
-          starterInitialArguments: '0x01',
-        },
-      }],
-      state,
-    )).toThrow('CONSENSUS_OUTPUT_CROSS_J_DISPUTE_DATA_FORBIDDEN');
-    expect(() => assertCertifiedOutputSemanticAuthority(
-      sourceUser,
+      sourceHub,
       targetHub,
-      { type: 'prepareCrossJurisdictionSwap', data: { route } },
-      state,
-    )).toThrow('CONSENSUS_OUTPUT_SEMANTIC_TARGET_MISMATCH');
-    const sourceRoleTamper = structuredClone(route);
-    sourceRoleTamper.source.entityId = attacker;
-    expect(() => assertCertifiedOutputSemanticAuthority(
+      [targetRegistration],
+      stateFor(targetHub),
+    )).toThrow('CONSENSUS_OUTPUT_CROSS_ENTITY_TX_FORBIDDEN:registerCrossJurisdictionSwap');
+    expect(() => assertCertifiedEntityOutputAuthorization(
+      targetUser,
+      sourceUser,
+      [forcedSourceDispute],
+      stateFor(sourceUser),
+    )).toThrow('CONSENSUS_OUTPUT_CROSS_ENTITY_TX_FORBIDDEN:disputeStart');
+    expect(() => assertRuntimeOutputAuthorization(
       sourceUser,
       sourceHub,
-      { type: 'prepareCrossJurisdictionSwap', data: { route: sourceRoleTamper } },
-      state,
-    )).toThrow('CONSENSUS_OUTPUT_SEMANTIC_SOURCE_MISMATCH');
-    const targetRoleTamper = structuredClone(route);
-    targetRoleTamper.source.counterpartyEntityId = attacker;
-    expect(() => assertCertifiedOutputSemanticAuthority(
+      [targetRegistration],
+      stateFor(sourceHub),
+    )).toThrow('RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN');
+    expect(() => assertRuntimeOutputAuthorization(
       sourceUser,
-      sourceHub,
-      { type: 'prepareCrossJurisdictionSwap', data: { route: targetRoleTamper } },
-      state,
-    )).toThrow('CONSENSUS_OUTPUT_SEMANTIC_TARGET_MISMATCH');
-    expect(() => assertCertifiedOutputSemanticAuthority(
-      sourceHub,
-      attacker,
-      targetRegistration,
-      state,
-    )).toThrow('CONSENSUS_OUTPUT_SEMANTIC_TARGET_MISMATCH');
+      targetUser,
+      [{ type: 'prepareCrossJurisdictionSwap', data: { route } }],
+      stateFor(targetUser),
+    )).toThrow('RUNTIME_OUTPUT_CROSS_J_INTENT_MUST_USE_ACCOUNT');
+    expect(() => assertRuntimeOutputAuthorization(
+      sourceUser,
+      targetUser,
+      [accountInput],
+      stateFor(targetUser),
+    )).toThrow('RUNTIME_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN:accountInput');
+    expect(() => assertRuntimeOutputAuthorization(
+      targetHub,
+      targetHub,
+      [targetRegistration],
+      stateFor(targetHub),
+    )).toThrow('RUNTIME_OUTPUT_SELF_FORBIDDEN');
     const tamperedPull = structuredClone(targetPullLock);
     if (tamperedPull.type !== 'pullLock') throw new Error('TEST_TARGET_PULL_TYPE_INVALID');
     tamperedPull.data.amount += 1n;
-    expect(() => assertCertifiedOutputSemanticAuthority(
+    expect(() => assertRuntimeOutputAuthorization(
       sourceHub,
       targetHub,
-      tamperedPull,
-      state,
       [targetRegistration, tamperedPull],
+      stateFor(targetHub),
     )).toThrow('CONSENSUS_OUTPUT_CROSS_J_TARGET_PULL_MISMATCH');
-    expect(() => assertCertifiedOutputSemanticAuthority(
-      sourceUser,
-      bookOwner,
-      hubCommand(),
-      state,
-    )).toThrow('CONSENSUS_OUTPUT_SEMANTIC_VARIANT_FORBIDDEN:setHubConfig');
   });
 
   test('turns local raw user txs into a signed frame command and commits its nonce', async () => {

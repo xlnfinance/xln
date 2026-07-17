@@ -45,7 +45,17 @@ const resolveCounterparty = (result: PullResult, counterpartyEntityId: string, a
 
 export const handlePullLockEntityTx = (_env: Env, state: EntityState, tx: PullLockTx, options?: ApplyEntityTxOptions): PullResult => {
   const result = createResult(state, options);
-  const { counterpartyEntityId, pullId, tokenId, amount, revealedUntilTimestamp, fullHash, partialRoot, crossJurisdiction } = tx.data;
+  const {
+    counterpartyEntityId,
+    pullId,
+    tokenId,
+    amount,
+    revealedUntilTimestamp,
+    fullHash,
+    partialRoot,
+    crossJurisdiction,
+    crossJurisdictionRoute,
+  } = tx.data;
   const accountId = resolveCounterparty(result, counterpartyEntityId, 'lock');
   if (!accountId) return result;
   result.mempoolOps.push({
@@ -60,10 +70,16 @@ export const handlePullLockEntityTx = (_env: Env, state: EntityState, tx: PullLo
         fullHash,
         partialRoot,
         ...(crossJurisdiction ? { crossJurisdiction } : {}),
+        ...(crossJurisdictionRoute ? { crossJurisdictionRoute } : {}),
       },
     },
   });
-  requestFrame(state, result.outputs);
+  // Cross-j sibling delivery is already being applied inside a committed
+  // Entity frame. Its Account mempool op is proposed before that same frame
+  // completes, so a self-wake would create a redundant Runtime input. Ordinary
+  // user pull commands retain the historical wake until their wider flow is
+  // reviewed independently.
+  if (!crossJurisdiction) requestFrame(state, result.outputs);
   return result;
 };
 

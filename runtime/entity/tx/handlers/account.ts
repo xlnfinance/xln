@@ -107,8 +107,27 @@ export async function applyAccountInput(
   env: Env,
   options?: ApplyEntityTxOptions,
 ): Promise<AccountHandlerResult> {
+  // State is already cloned at the Entity-frame boundary.
+  const newState: EntityState = state;
   const incomingAck = accountInputAck(input);
   const incomingProposal = accountInputProposal(input);
+  for (const accountTx of incomingProposal?.frame.accountTxs ?? []) {
+    if (accountTx.type !== 'pull_lock' || accountTx.data.crossJurisdiction?.leg !== 'source') continue;
+    const binding = accountTx.data.crossJurisdiction;
+    const route = newState.crossJurisdictionSwaps?.get(binding.orderId);
+    const receipt = route?.targetReceipt;
+    if (
+      !route ||
+      !receipt ||
+      !binding.targetReceipt ||
+      route.routeHash?.toLowerCase() !== binding.routeHash.toLowerCase() ||
+      receipt.receiptHash.toLowerCase() !== binding.targetReceipt.receiptHash.toLowerCase()
+    ) {
+      throw new Error(
+        `CROSS_J_SOURCE_PULL_CAUSAL_PREREQUISITE_MISSING:${binding.orderId}:entity=${newState.entityId}`,
+      );
+    }
+  }
   accountHandlerLog.debug('input.apply', {
     from: shortId(input.fromEntityId),
     to: shortId(input.toEntityId),
@@ -117,8 +136,6 @@ export async function applyAccountInput(
     prevHanko: Boolean(incomingAck),
   });
 
-  // CRITICAL: Don't clone here - state already cloned at entity level (applyEntityTx)
-  const newState: EntityState = state;  // Use state directly
   if (normalizeEntityRef(input.toEntityId) !== normalizeEntityRef(newState.entityId)) {
     throw new Error(
       `ACCOUNT_INPUT_WRONG_TARGET: expected=${shortId(newState.entityId)} got=${shortId(input.toEntityId)}`,
@@ -480,6 +497,8 @@ export async function applyAccountInput(
             counterpartyId,
             accountTx,
             outputs,
+            committedFrame.timestamp,
+            allSwapOffersCreated,
           );
           if (!crossJurisdictionFollowupHandled) {
             await applyCommittedHtlcLockFollowup(

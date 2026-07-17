@@ -32,7 +32,7 @@ const ENTITY_TX_TYPES = [
   'reopenDisputedAccount', 'requestCollateral', 'requestCrossJurisdictionClear',
   'materializeCrossJurisdictionClear', 'materializeCrossJurisdictionSwap',
   'requestCrossJurisdictionSwap', 'resolveHtlcLock', 'resolvePull', 'resolveSwap',
-  'rollbackTimedOutFrames', 'scheduledWake', 'setHubConfig', 'setRebalancePolicy',
+  'rollbackTimedOutFrames', 'runtimeOutput', 'scheduledWake', 'setHubConfig', 'setRebalancePolicy',
   'settle_approve', 'settle_execute', 'settle_propose', 'settle_reject', 'settle_update', 'vote',
 ] as const satisfies readonly EntityTx['type'][];
 
@@ -110,6 +110,20 @@ const validateConsensusOutput = (value: unknown, code: string, depth: number): v
   if (data['consumptionProof'] !== undefined) {
     requireBoundaryRecord(data['consumptionProof'], `${code}_CONSUMPTION_PROOF`);
   }
+  validateNestedTxs(data['entityTxs'], `${code}_ENTITY_TXS`, depth + 1);
+};
+
+const validateRuntimeOutput = (value: unknown, code: string, depth: number): void => {
+  const data = requireBoundaryRecord(value, code);
+  requireExactBoundaryKeys(
+    data,
+    ['protocol', 'sourceEntityId', 'targetEntityId', 'entityTxs'],
+    [],
+    `${code}_FIELDS`,
+  );
+  if (data['protocol'] !== 'cross-j') throw new Error(`${code}_PROTOCOL`);
+  requireString(data['sourceEntityId'], `${code}_SOURCE`);
+  requireString(data['targetEntityId'], `${code}_TARGET`);
   validateNestedTxs(data['entityTxs'], `${code}_ENTITY_TXS`, depth + 1);
 };
 
@@ -276,6 +290,7 @@ const validateEntityTxRecord = (value: unknown, code: string, depth: number): En
   if (type === 'entityCommand') validateEntityCommand(tx['data'], `${code}_DATA`, depth);
   else if (type === 'propose') validateProposal(tx['data'], `${code}_DATA`, depth);
   else if (type === 'consensusOutput') validateConsensusOutput(tx['data'], `${code}_DATA`, depth);
+  else if (type === 'runtimeOutput') validateRuntimeOutput(tx['data'], `${code}_DATA`, depth);
   else if (type === 'reissueCertifiedOutput') validateReissue(tx['data'], `${code}_DATA`, depth);
   else if (type === 'scheduledWake') validateScheduledWake(tx['data'], `${code}_DATA`);
   else if (type === 'htlcPayment') validatePreparedHtlcPayment(tx['data'], `${code}_DATA`);
