@@ -16,7 +16,7 @@ import {
 } from '../runtime';
 import { buildCrossJurisdictionSwapSubmission } from '../machine/jurisdiction-api';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
-import type { AccountTx, EntityInput, EntityReplica, EntityTx, JurisdictionEvent } from '../types';
+import type { AccountTx, CrossJurisdictionSwapRoute, EntityInput, EntityReplica, EntityTx, JurisdictionEvent } from '../types';
 import { generateLazyEntityId } from '../entity/factory';
 import { createDefaultDelta } from '../validation-utils';
 import { cloneAccountMachine, cloneEntityState } from '../state-helpers';
@@ -778,7 +778,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const targetState = makeState(targetUser, targetSigner, targetJurisdiction, targetHub);
     addReplica(env, sourceState, sourceSigner);
     addReplica(env, targetState, targetSigner);
-    const staleRoute = withCanonicalCrossJurisdictionRouteHash({
+    const staleRoute: CrossJurisdictionSwapRoute = {
       orderId: 'cross-route-jurisdiction-canonical',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
@@ -788,7 +788,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdAt: env.timestamp,
       updatedAt: env.timestamp,
       expiresAt: env.timestamp + 60_000,
-    });
+    };
 
     const result = await applyEntityTx(env, sourceState, {
       type: 'requestCrossJurisdictionSwap',
@@ -796,7 +796,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     });
 
     expect(result.outputs).toHaveLength(0);
-    expect(result.newState.messages.at(-1)).toContain('route jurisdiction must be stack ref');
+    expect(result.newState.messages.at(-1)).toContain('CROSS_J_BOOK_JURISDICTION_INVALID:testnet:localanvil2');
   });
 
   test('prepared cross-j route keeps immutable routeHash through alias-named source commit and clear', async () => {
