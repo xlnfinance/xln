@@ -8,39 +8,10 @@
     qaScenarioTimelineMs,
     qaScenarioTitle,
     qaScenarioUsesVideoClock,
-    type QaScenarioMetadata,
     type QaScenarioCue,
-    type QaScenarioPhaseMs,
-    type QaScenarioStep,
   } from '$lib/qa/scenarioPlayer';
   import { fetchQaBlobUrl } from '$lib/qa/apiClient';
-
-  type QaArtifact = {
-    name: string;
-    relativePath: string;
-    sizeBytes: number;
-    kind: 'video' | 'image' | 'trace' | 'json' | 'text' | 'archive' | 'other';
-    sensitivity: 'public' | 'internal' | 'secret-bearing';
-    contentType: string;
-    url?: string;
-  };
-
-  type QaShard = {
-    shard: number;
-    status: 'passed' | 'failed' | 'unknown';
-    durationMs: number | null;
-    handle: string | null;
-    description: string | null;
-    scenario?: QaScenarioMetadata | null;
-    target: string | null;
-    title: string | null;
-    error?: string | null;
-    logTail?: string | null;
-    phaseMs: QaScenarioPhaseMs | null;
-    timelineSteps?: QaScenarioStep[];
-    slowSteps: QaScenarioStep[];
-    artifacts: QaArtifact[];
-  };
+  import type { QaArtifact, QaShard } from '$lib/qa/types';
 
   type Props = {
     runId: string;

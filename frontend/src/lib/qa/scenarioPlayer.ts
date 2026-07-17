@@ -1,3 +1,5 @@
+import type { QaShard } from './types';
+
 export type QaScenarioPhaseMs = {
   preflight: number;
   anvilBoot: number;
@@ -31,7 +33,7 @@ export type QaScenarioMetadata = {
 
 export type QaScenarioShardLike = {
   shard: number;
-  status: 'passed' | 'failed' | 'unknown';
+  status: QaShard['status'];
   durationMs: number | null;
   handle: string | null;
   description: string | null;
@@ -253,7 +255,12 @@ export function buildQaScenarioCues(shard: QaScenarioShardLike): QaScenarioCue[]
     for (const authored of authoredSteps.slice(videoSteps.length)) {
       pushAuthoredVideoCue(cues, authored);
     }
-    if (shard.status === 'failed') pushFailureCue(cues, shard);
+    if (shard.status === 'failed') {
+      pushFailureCue(cues, shard);
+    } else if (shard.status === 'cancelled') {
+      const startMs = cues[cues.length - 1]?.endMs ?? 0;
+      pushCue(cues, startMs, 1200, 'Cancelled', 'Runner stopped this shard before completion.', 'cancelled');
+    }
     return cues;
   }
 
@@ -313,9 +320,11 @@ export function buildQaScenarioCues(shard: QaScenarioShardLike): QaScenarioCue[]
       cues,
       cursorMs,
       1200,
-      shard.status === 'passed' ? 'Passed' : 'Finished',
+      shard.status === 'passed' ? 'Passed' : shard.status === 'cancelled' ? 'Cancelled' : 'Finished',
       shard.status === 'passed'
         ? 'Assertions passed and artifacts were captured for review.'
+        : shard.status === 'cancelled'
+        ? 'Runner stopped this shard before completion.'
         : 'Run completed with unknown shard status.',
       shard.status,
     );
