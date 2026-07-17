@@ -7,7 +7,7 @@ import { proposeAccountFrame } from '../account/consensus/propose';
 import { handlePullCancel } from '../account/tx/handlers/pull';
 import { computeAccountStateRoot } from '../account/state-root';
 import { processOrderbookCancels } from '../entity/tx/handlers/account';
-import { applyEntityInput } from '../entity/consensus/index';
+import { applyEntityInput, mergeEntityInputs } from '../entity/consensus/index';
 import { appendDefaultProposerCrossJMaterializations } from '../entity/cross-j-proposer-materialization';
 import {
   createEmptyEnv,
@@ -521,7 +521,7 @@ describe('cross-jurisdiction hashledger swap', () => {
   });
 
   test('ordered Account inputs drain the target receipt before the source pull in one Runtime pass', async () => {
-    const seed = 'cross-j-ordered-account-cascade';
+    const seed = 'cross-j-ordered-account-cascade-2';
     const userEnv = createEmptyEnv(`${seed}-user`);
     const hubEnv = createEmptyEnv(`${seed}-hub`);
     userEnv.timestamp = 10_000;
@@ -541,6 +541,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const sourceHub = generateLazyEntityId([sourceHubSigner], 1n).toLowerCase();
     const targetHub = generateLazyEntityId([targetHubSigner], 1n).toLowerCase();
     const targetUser = generateLazyEntityId([targetUserSigner], 1n).toLowerCase();
+    expect(sourceHub < targetHub).toBe(true);
     const sourceUserState = makeState(sourceUser, sourceUserSigner, sourceJ, sourceHub);
     const targetUserState = makeState(targetUser, targetUserSigner, targetJ, targetHub);
     const sourceHubState = makeState(sourceHub, sourceHubSigner, sourceJ, sourceUser);
@@ -657,7 +658,7 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     const pass = await applyMergedEntityInputs(
       hubEnv,
-      [targetAckOutput, sourceProposalOutput],
+      mergeEntityInputs([targetAckOutput, sourceProposalOutput]),
       [],
       { isReplay: false, routingDeps: makeLocalCrossJRoutingDeps() },
     );

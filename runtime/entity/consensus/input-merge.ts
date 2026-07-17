@@ -6,6 +6,7 @@ import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { hashEntityLeaderVoteBody } from './leader';
 import { hashJPrefixAttestation } from '../../jurisdiction/j-prefix-consensus';
 import { getEffectiveEntityInputTxs } from './output-envelope';
+import { accountInputProposal } from '../../account/consensus/flush';
 
 const entityInputMergeLog = createStructuredLogger('entity.input.merge');
 
@@ -100,6 +101,12 @@ const isProtocolEntityInput = (input: RoutedEntityInput): boolean =>
     input.jPrefixAttestations?.size,
   ) || getEffectiveEntityInputTxs(input).some(tx =>
     tx.type === 'accountInput' || tx.type === 'j_event');
+
+const hasCrossJurisdictionSourcePullProposal = (input: RoutedEntityInput): boolean =>
+  getEffectiveEntityInputTxs(input).some(tx =>
+    tx.type === 'accountInput' &&
+    accountInputProposal(tx.data)?.frame.accountTxs.some(accountTx =>
+      accountTx.type === 'pull_lock' && accountTx.data.crossJurisdiction?.leg === 'source') === true);
 
 /**
  * Keep account/Entity/J consensus responsive when a runtime also receives a
@@ -198,8 +205,12 @@ const entityInputMergeKey = (input: RoutedEntityInput): string => {
     // provenance and can make one sender appear to have authored another
     // sender's cross-j output. Local inputs still share the same empty-origin
     // lane and retain the normal same-frame merge behavior.
+    // A source pull may depend on a target ACK for a sibling Entity in this
+    // same Runtime batch. Keep that consumer in a separate Entity frame so the
+    // producer can commit and its trusted local event can run first.
+    const causalLane = hasCrossJurisdictionSourcePullProposal(input) ? ':cross-j-source-consumer' : '';
     return input.entityTxs?.length
-      ? `${base}:tx-origin:${String(input.from || '').trim().toLowerCase()}`
+      ? `${base}:tx-origin:${String(input.from || '').trim().toLowerCase()}${causalLane}`
       : base;
   }
   // Each timeout vote is its own signed consensus message. Collapsing several
@@ -243,6 +254,12 @@ const sortMergedEntityInputs = (
   hasVerifiedCommit: EntityCommitPriorityPredicate,
 ): RoutedEntityInput[] =>
   prioritizeEntityConsensusInputs([...inputs].sort((left, right) => {
+    // Entity ids are not causal clocks. A lexicographically smaller source
+    // Entity must not consume a source pull before a larger target Entity has
+    // committed the receipt that pull explicitly binds.
+    const causalOrder = Number(hasCrossJurisdictionSourcePullProposal(left)) -
+      Number(hasCrossJurisdictionSourcePullProposal(right));
+    if (causalOrder !== 0) return causalOrder;
     const entityOrder = compareStableText(left.entityId.toLowerCase(), right.entityId.toLowerCase());
     if (entityOrder !== 0) return entityOrder;
     const signerOrder = compareStableText(
