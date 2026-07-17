@@ -1,4 +1,10 @@
 import { devices, expect, test, type Browser, type Page, type TestInfo } from './global-setup';
+import { Wallet } from 'ethers';
+import { APP_BASE_URL } from './utils/e2e-baseline';
+import {
+  createRuntime as createSharedRuntime,
+  gotoApp as gotoSharedApp,
+} from './utils/e2e-demo-users';
 
 type BrowserIssue = Readonly<{ type: string; text: string }>;
 const REAL_AI = process.env['XLN_REAL_AI_E2E'] === '1';
@@ -22,8 +28,7 @@ function trackIssues(page: Page): BrowserIssue[] {
   return issues;
 }
 
-async function loadMascot(page: Page, theme: 'dark' | 'light', show = true): Promise<BrowserIssue[]> {
-  const issues = trackIssues(page);
+async function seedMascotSettings(page: Page, theme: 'dark' | 'light', show: boolean): Promise<void> {
   await page.addInitScript(({ selectedTheme, visible }) => {
     localStorage.setItem('xln-auth-scheme', selectedTheme);
     if (!localStorage.getItem('xln-settings')) {
@@ -34,6 +39,11 @@ async function loadMascot(page: Page, theme: 'dark' | 'light', show = true): Pro
       }));
     }
   }, { selectedTheme: theme, visible: show });
+}
+
+async function loadMascot(page: Page, theme: 'dark' | 'light', show = true): Promise<BrowserIssue[]> {
+  const issues = trackIssues(page);
+  await seedMascotSettings(page, theme, show);
   await page.goto('/app?locktest=1&scenarioPreview=1', { waitUntil: 'domcontentloaded' });
   await page.evaluate(selectedTheme => document.documentElement.setAttribute('data-theme', selectedTheme), theme);
   const authRoot = page.locator('.brainvault-wrapper');
@@ -167,32 +177,46 @@ test.describe('xln mascot assistant', () => {
   });
 
   test('fits the logo and open chat on iPhone in dark and light themes', { tag: '@functional' }, async ({ browser }, testInfo) => {
-    const darkContext = await browser.newContext({ ...devices['iPhone 15 Pro'], ignoreHTTPSErrors: true, colorScheme: 'dark' });
-    const darkPage = await darkContext.newPage();
-    const darkIssues = await loadMascot(darkPage, 'dark');
-    const toggle = darkPage.getByTestId('xln-mascot-toggle');
+    const context = await browser.newContext({ ...devices['iPhone 15 Pro'], ignoreHTTPSErrors: true, colorScheme: 'dark' });
+    const page = await context.newPage();
+    const issues = trackIssues(page);
+    await seedMascotSettings(page, 'dark', true);
+    await gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 30_000, settleMs: 500 });
+    await createSharedRuntime(page, `mascot-mobile-${Date.now()}`, Wallet.createRandom().mnemonic!.phrase);
+    await expect(page.locator('.brainvault-wrapper')).toHaveCount(0);
+    await expect(page.getByTestId('xln-mascot-root')).toBeVisible();
+    await assertInsideViewport(page, '[data-testid="xln-mascot-root"]');
+
+    const toggle = page.getByTestId('xln-mascot-toggle');
     const target = await toggle.boundingBox();
     expect(target!.width).toBeGreaterThanOrEqual(44);
     expect(target!.height).toBeGreaterThanOrEqual(44);
-    await capture(darkPage, testInfo, 'iphone-dark-mascot-right');
+    await capture(page, testInfo, 'iphone-dark-mascot-right');
     await toggle.click();
-    await expect(darkPage.getByTestId('xln-mascot-chat')).toBeVisible();
-    await assertInsideViewport(darkPage, '[data-testid="xln-mascot-chat"]');
-    await capture(darkPage, testInfo, 'iphone-dark-mascot-chat-open');
-    expect(darkIssues).toEqual([]);
-    await darkContext.close();
+    await expect(page.getByTestId('xln-mascot-chat')).toBeVisible();
+    await assertInsideViewport(page, '[data-testid="xln-mascot-chat"]');
+    await capture(page, testInfo, 'iphone-dark-mascot-chat-open');
+    await page.getByTestId('xln-mascot-close').click();
 
-    const lightContext = await browser.newContext({ ...devices['iPhone 15 Pro'], ignoreHTTPSErrors: true, colorScheme: 'light' });
-    const lightPage = await lightContext.newPage();
-    const lightIssues = await loadMascot(lightPage, 'light');
-    const lightToggle = lightPage.getByTestId('xln-mascot-toggle');
+    await page.evaluate(() => {
+      const settings = JSON.parse(localStorage.getItem('xln-settings') || '{}');
+      settings.theme = 'light';
+      localStorage.setItem('xln-settings', JSON.stringify(settings));
+    });
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
+    await expect(page.locator('.loading-screen')).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.getByTestId('tab-accounts')).toBeVisible({ timeout: 30_000 });
+    const lightToggle = page.getByTestId('xln-mascot-toggle');
+    await expect(lightToggle).toBeVisible();
     await lightToggle.focus();
     await lightToggle.press('Alt+ArrowUp');
-    await expect(lightPage.getByTestId('xln-mascot-root')).toHaveAttribute('data-dock-side', 'top');
-    await assertInsideViewport(lightPage, '[data-testid="xln-mascot-root"]');
-    await capture(lightPage, testInfo, 'iphone-light-mascot-top');
-    expect(lightIssues).toEqual([]);
-    await lightContext.close();
+    await expect(page.getByTestId('xln-mascot-root')).toHaveAttribute('data-dock-side', 'top');
+    await assertInsideViewport(page, '[data-testid="xln-mascot-root"]');
+    await capture(page, testInfo, 'iphone-light-mascot-top');
+    expect(issues).toEqual([]);
+    await context.close();
   });
 
   test('renders model Markdown without executable or malformed links', { tag: '@resilience' }, async ({ page }, testInfo) => {
