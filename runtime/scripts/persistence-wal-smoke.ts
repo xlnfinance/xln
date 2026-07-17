@@ -13,6 +13,7 @@ import {
 } from '../runtime.ts';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
+import { createJAdapter } from '../jadapter';
 import type { JReplica, JurisdictionConfig } from '../types';
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -46,9 +47,12 @@ async function main() {
 
   const entityA = generateLazyEntityId([signer1], 1n).toLowerCase();
   const entityB = generateLazyEntityId([signer2], 1n).toLowerCase();
-  const depositoryAddress = '0x000000000000000000000000000000000000dEaD';
-  const entityProviderAddress = '0x000000000000000000000000000000000000bEEF';
   const chainId = 31337;
+  const adapter = await createJAdapter({ mode: 'browservm', chainId });
+  const contracts = { ...adapter.addresses };
+  await adapter.close();
+  const depositoryAddress = contracts.depository;
+  const entityProviderAddress = contracts.entityProvider;
   const jurisdiction: JurisdictionConfig = {
     name: 'persistence-smoke',
     address: 'browservm://persistence-smoke',
@@ -68,10 +72,7 @@ async function main() {
     entityProviderAddress,
     chainId,
     position: { x: 0, y: 0, z: 0 },
-    contracts: {
-      depository: depositoryAddress,
-      entityProvider: entityProviderAddress,
-    },
+    contracts,
   };
   env.jReplicas.set(jurisdiction.name, jReplica);
 
@@ -161,7 +162,10 @@ async function main() {
   await closeInfraDb(restored);
 
   const verifyFromGenesis = await verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: 1 });
-  assert(verifyFromGenesis.ok, 'genesis replay verification passed');
+  assert(
+    verifyFromGenesis.ok,
+    `genesis replay verification passed (${JSON.stringify(verifyFromGenesis)})`,
+  );
   assert(
     verifyFromGenesis.restoredHeight === latestHeight,
     `genesis replay restored latest frame (${verifyFromGenesis.restoredHeight} == ${latestHeight})`,

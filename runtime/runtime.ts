@@ -358,6 +358,7 @@ import {
   readStorageOverlayRecordsFromDiffs,
   replaceRestoredStorageBase,
   saveRuntimeFrameToStorage,
+  type StorageFrameRecord,
   type StorageHead,
   verifyStorageSnapshotAtHeight,
 } from './storage';
@@ -2892,42 +2893,71 @@ export const restoreEnvFromCheckpointSnapshot = async (
   return env;
 };
 
-const RELIABLE_RECOVERY_STATE_KEYS = [
-  'reliableIngressReceiptLedger',
-  'reliableIngressTerminalWatermarks',
-  'receivedReliableReceiptLedger',
-  'receivedReliableTerminalWatermarks',
-] as const;
+const canonicalRecoveryMachine = (machine: Record<string, unknown>): string =>
+  safeStringify(canonicalizeStorageAuditValue(machine));
 
-const canonicalReliableRecoveryState = (machine: Record<string, unknown>): string => {
-  const rawState = machine['runtimeState'];
-  const runtimeState = rawState && typeof rawState === 'object'
-    ? rawState as Record<string, unknown>
-    : {};
-  const projection = Object.fromEntries(RELIABLE_RECOVERY_STATE_KEYS.map(key => [
-    key,
-    runtimeState[key] ?? new Map(),
-  ]));
-  return safeStringify(canonicalizeStorageAuditValue({
-    ...projection,
-    pendingNetworkOutputs: machine['pendingNetworkOutputs'] ?? [],
-  }));
+const recoveryMachineMismatchFields = (
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
+): string[] => {
+  const fields = new Set([...Object.keys(expected), ...Object.keys(actual)]);
+  const mismatches: string[] = [];
+  for (const field of [...fields].sort()) {
+    if (canonicalRecoveryMachine({ value: expected[field] }) === canonicalRecoveryMachine({ value: actual[field] })) continue;
+    if (field !== 'runtimeState') {
+      mismatches.push(field);
+      continue;
+    }
+    const expectedState = expected[field] && typeof expected[field] === 'object'
+      ? expected[field] as Record<string, unknown>
+      : {};
+    const actualState = actual[field] && typeof actual[field] === 'object'
+      ? actual[field] as Record<string, unknown>
+      : {};
+    const stateFields = new Set([...Object.keys(expectedState), ...Object.keys(actualState)]);
+    for (const stateField of [...stateFields].sort()) {
+      if (canonicalRecoveryMachine({ value: expectedState[stateField] }) !== canonicalRecoveryMachine({ value: actualState[stateField] })) {
+        mismatches.push(`runtimeState.${stateField}`);
+      }
+    }
+  }
+  return mismatches;
 };
 
-const assertRecoveryReliableStateMatches = (
+const readRecoveryMachineField = (
+  machine: Record<string, unknown>,
+  field: string,
+): unknown => {
+  if (!field.startsWith('runtimeState.')) return machine[field];
+  const runtimeState = machine['runtimeState'];
+  if (!runtimeState || typeof runtimeState !== 'object') return undefined;
+  return (runtimeState as Record<string, unknown>)[field.slice('runtimeState.'.length)];
+};
+
+const assertRecoveryRuntimeMachineMatches = (
   env: Env,
   expectedMachine: Record<string, unknown>,
   height: number,
+  options?: { includeIngressWorkingState?: boolean },
 ): void => {
   const actualMachine = buildDurableRuntimeMachineSnapshot(env, {
-    pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
+    includeIngressWorkingState: options?.includeIngressWorkingState === true,
   });
-  const actual = canonicalReliableRecoveryState(actualMachine);
-  const expected = canonicalReliableRecoveryState(expectedMachine);
+  const actual = canonicalRecoveryMachine(actualMachine);
+  const expected = canonicalRecoveryMachine(expectedMachine);
   if (actual !== expected) {
+    const expectedHash = ethers.keccak256(ethers.toUtf8Bytes(expected));
+    const actualHash = ethers.keccak256(ethers.toUtf8Bytes(actual));
+    const mismatchFields = recoveryMachineMismatchFields(expectedMachine, actualMachine);
+    const firstField = mismatchFields[0] || 'unknown';
+    const detail = canonicalRecoveryMachine({
+      expected: readRecoveryMachineField(expectedMachine, firstField),
+      actual: readRecoveryMachineField(actualMachine, firstField),
+    }).slice(0, 3_000);
     throw new Error(
-      `RECOVERY_JOURNAL_RELIABLE_STATE_MISMATCH:height=${height}:` +
-      `expected=${expected}:actual=${actual}`,
+      `RECOVERY_JOURNAL_RUNTIME_MACHINE_MISMATCH:height=${height}:` +
+      `fields=${mismatchFields.join(',') || 'unknown'}:` +
+      `expected=${expectedHash}:actual=${actualHash}:detail=${detail}`,
     );
   }
 };
@@ -2958,6 +2988,9 @@ const replayRecoveryFrameJournals = async (
         throw new Error(`RECOVERY_JOURNAL_REPLICA_META_DIGEST_MISSING:height=${frameHeight}`);
       }
       restoreDurableRuntimeSnapshot(env, frame.runtimeMachineBeforeApply);
+      assertRecoveryRuntimeMachineMatches(env, frame.runtimeMachineBeforeApply, frameHeight - 1, {
+        includeIngressWorkingState: true,
+      });
       env.timestamp = Math.max(0, Math.floor(Number(frame.timestamp || 0)));
       envRecord(env)[ENV_APPLY_ALLOWED_KEY] = true;
       try {
@@ -2965,6 +2998,19 @@ const replayRecoveryFrameJournals = async (
           env,
           frame.runtimeInput ?? { runtimeTxs: [], entityInputs: [] },
         );
+        const splitJOutbox = splitJOutboxForDurableSubmit(replayResult.jOutbox);
+        registerPendingCommittedJOutbox(env, splitJOutbox.durable);
+        refreshScheduledWakeIndex(
+          env,
+          new Set(replayResult.appliedRuntimeInput.entityInputs.map(input => input.entityId.toLowerCase())),
+        );
+        applyDeterministicRuntimeOutputPlan(
+          env,
+          replayResult.entityOutbox,
+          getRuntimeOutputRoutingDeps(),
+        );
+        generateHookPings(env);
+        peekPendingFrameDbRecords(env, env.height, env.timestamp);
         finalizeReliableIngressCommit(env, replayResult.reliableIngressCommits);
         const actualReplicaMetaDigest = buildStorageReplicaMetaCommitment(env).digest;
         if (actualReplicaMetaDigest !== frame.replicaMetaDigest) {
@@ -2973,8 +3019,7 @@ const replayRecoveryFrameJournals = async (
             `expected=${frame.replicaMetaDigest}:actual=${actualReplicaMetaDigest}`,
           );
         }
-        assertRecoveryReliableStateMatches(env, frame.runtimeMachine, frameHeight);
-        restoreDurableRuntimeSnapshot(env, frame.runtimeMachine);
+        assertRecoveryRuntimeMachineMatches(env, frame.runtimeMachine, frameHeight);
         const actualStateHash = computeCanonicalStateHashFromEnv(env);
         if (actualStateHash !== frame.runtimeStateHash) {
           throw new Error(
@@ -3385,6 +3430,31 @@ const queueLocalOutputsWithReliability = (
     receipts,
   );
   return retained;
+};
+
+const applyDeterministicRuntimeOutputPlan = (
+  env: Env,
+  entityOutbox: readonly RoutedEntityInput[],
+  outputRoutingDeps: RuntimeOutputRoutingDeps,
+) => {
+  const pendingBeforePlan = buildPendingNetworkOutputs(pruneReceiptedReliableOutputs(env, [
+    ...(env.pendingNetworkOutputs ?? []),
+    ...entityOutbox,
+  ]));
+  const { ready, waiting } = splitPendingOutputsByRetryWindow(
+    env,
+    pendingBeforePlan,
+    outputRoutingDeps,
+  );
+  const plan = planEntityOutputs(env, ready, outputRoutingDeps);
+  const retainedLocalReliableOutputs = queueLocalOutputsWithReliability(env, plan.localOutputs);
+  env.pendingNetworkOutputs = buildPendingNetworkOutputs([
+    ...waiting,
+    ...plan.deferredOutputs,
+    ...plan.remoteOutputs.map(({ output }) => output),
+    ...retainedLocalReliableOutputs,
+  ]);
+  return { ...plan, readyPendingOutputs: ready, waitingPendingOutputs: waiting, retainedLocalReliableOutputs };
 };
 
 const applyCommittedLocalReliableReceipts = (
@@ -4152,18 +4222,16 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       .length;
 
     const outputRoutingDeps = getRuntimeOutputRoutingDeps();
-    const pendingBeforePlan = buildPendingNetworkOutputs(pruneReceiptedReliableOutputs(env, [
-      ...(env.pendingNetworkOutputs ?? []),
-      ...entityOutbox,
-    ]));
-    const { ready: readyPendingOutputs, waiting: waitingPendingOutputs } = splitPendingOutputsByRetryWindow(
-      env,
-      pendingBeforePlan,
-      outputRoutingDeps,
-    );
-    const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(
-      env,
+    const {
+      localOutputs,
+      remoteOutputs,
+      deferredOutputs,
       readyPendingOutputs,
+      waitingPendingOutputs,
+      retainedLocalReliableOutputs,
+    } = applyDeterministicRuntimeOutputPlan(
+      env,
+      entityOutbox,
       outputRoutingDeps,
     );
     processProfileMetrics.localOutputs = localOutputs.length;
@@ -4171,13 +4239,6 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     processProfileMetrics.deferredOutputs = deferredOutputs.length;
     processProfileMetrics.jOutputs = jOutbox.length;
     markProcessProfile('planOutputs');
-    const retainedLocalReliableOutputs = queueLocalOutputsWithReliability(env, localOutputs);
-    env.pendingNetworkOutputs = buildPendingNetworkOutputs([
-      ...waitingPendingOutputs,
-      ...deferredOutputs,
-      ...remoteOutputs.map(({ output }) => output),
-      ...retainedLocalReliableOutputs,
-    ]);
     if (localOutputs.length > 0 && !quietRuntimeLogs) {
       runtimeLog.debug('tick.local_outputs.queued', {
         localOutputs: localOutputs.length,
@@ -5407,6 +5468,60 @@ export const readPersistedStorageHead = async (env: Env): Promise<StorageHead | 
   return readStorageHead(getFrameDb(env));
 };
 
+const buildRecoveryJournalFromStorageFrame = (
+  frame: StorageFrameRecord,
+  logs: FrameLogEntry[] = [],
+): PersistedFrameJournal => ({
+  height: frame.height,
+  timestamp: frame.timestamp,
+  replicaMetaDigest: frame.replicaMetaDigest,
+  runtimeInput: frame.runtimeInput,
+  ...(frame.runtimeOutputs?.length
+    ? { runtimeOutputs: cloneIsolatedRoutedEntityInputs(frame.runtimeOutputs) }
+    : {}),
+  ...(frame.runtimeMachineBeforeApply
+    ? { runtimeMachineBeforeApply: cloneIsolatedRuntimeSnapshot(frame.runtimeMachineBeforeApply) }
+    : {}),
+  ...(frame.runtimeMachine
+    ? { runtimeMachine: cloneIsolatedRuntimeSnapshot(frame.runtimeMachine) }
+    : {}),
+  ...(frame.runtimeStateHash ? { runtimeStateHash: frame.runtimeStateHash } : {}),
+  logs,
+});
+
+const verifyPersistedFrameState = (
+  env: Env,
+  persistedFrame: StorageFrameRecord,
+): {
+  expectedStateHash: string;
+  actualStateHash: string;
+  expectedCanonicalStateHash: string;
+  actualCanonicalStateHash: string;
+  ok: boolean;
+} => {
+  const expectedStateHash = persistedFrame.stateHash;
+  const storageHashMode = persistedFrame.hashMode === 'storage-merkle-v1';
+  const actualStateHash = storageHashMode && persistedFrame.materializedState === false
+    ? expectedStateHash
+    : storageHashMode && Array.isArray(persistedFrame.entityHashes)
+      ? computeStorageStateRoot(persistedFrame.entityHashes)
+      : computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(env));
+  const expectedCanonicalStateHash = storageHashMode
+    ? String(persistedFrame.canonicalStateHash || '')
+    : expectedStateHash;
+  const actualCanonicalStateHash = storageHashMode
+    ? (expectedCanonicalStateHash ? computeCanonicalStateHashFromEnv(env) : '')
+    : actualStateHash;
+  return {
+    expectedStateHash,
+    actualStateHash,
+    expectedCanonicalStateHash,
+    actualCanonicalStateHash,
+    ok: expectedStateHash === actualStateHash
+      && expectedCanonicalStateHash === actualCanonicalStateHash,
+  };
+};
+
 export const verifyRuntimeChain = async (
   runtimeId?: string | null,
   runtimeSeed?: string | null,
@@ -5420,6 +5535,11 @@ export const verifyRuntimeChain = async (
   const requestedFromHeight = Number.isFinite(Number(options?.fromSnapshotHeight))
     ? Math.max(1, Math.floor(Number(options?.fromSnapshotHeight)))
     : latestHeight;
+  if (requestedFromHeight > latestHeight) {
+    throw new Error(
+      `REPLAY_INVARIANT_FAILED: requested height ${requestedFromHeight} exceeds latest ${latestHeight}`,
+    );
+  }
   const selectedSnapshotHeight = await resolvePersistedSnapshotHeight(bootstrapEnv, requestedFromHeight);
   const checkpointHeight = await resolvePersistedSnapshotHeight(bootstrapEnv, latestHeight);
   let expectedStateHash = '';
@@ -5427,77 +5547,55 @@ export const verifyRuntimeChain = async (
   let expectedCanonicalStateHash = '';
   let actualCanonicalStateHash = '';
   let restoredHeight = selectedSnapshotHeight;
+  let replayed: Awaited<ReturnType<typeof loadEnvFromStorage>> = null;
   try {
     await closeRuntimeDb(bootstrapEnv);
     await closeInfraDb(bootstrapEnv);
-    for (let height = Math.max(1, requestedFromHeight); height <= latestHeight; height += 1) {
-      const replayed = await loadEnvFromStorage(runtimeId, runtimeSeed, height);
-      if (!replayed) {
-        throw new Error(`REPLAY_INVARIANT_FAILED: failed to restore persisted runtime at height ${height}`);
+    replayed = await loadEnvFromStorage(runtimeId, runtimeSeed, selectedSnapshotHeight);
+    if (!replayed) {
+      throw new Error(
+        `REPLAY_INVARIANT_FAILED: failed to restore checkpoint at height ${selectedSnapshotHeight}`,
+      );
+    }
+    for (let height = selectedSnapshotHeight; height <= latestHeight; height += 1) {
+      const persistedFrame = await readPersistedStorageFrameRecord(replayed.env, height);
+      if (!persistedFrame) {
+        throw new Error(`REPLAY_INVARIANT_FAILED: missing persisted frame at height ${height}`);
       }
-      try {
-        const persistedFrame = await readPersistedStorageFrameRecord(replayed.env, height);
-        if (!persistedFrame) {
-          throw new Error(`REPLAY_INVARIANT_FAILED: missing persisted frame at height ${height}`);
-        }
-        expectedStateHash = persistedFrame.stateHash;
-        const storageHashMode = persistedFrame.hashMode === 'storage-merkle-v1';
-        if (storageHashMode && persistedFrame.materializedState === false) {
-          actualStateHash = expectedStateHash;
-          expectedCanonicalStateHash = '';
-          actualCanonicalStateHash = '';
-          restoredHeight = height;
-          continue;
-        }
-        actualStateHash =
-          storageHashMode && Array.isArray(persistedFrame.entityHashes)
-            ? computeStorageStateRoot(persistedFrame.entityHashes)
-            : computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(replayed.env));
-        if (storageHashMode) {
-          if (persistedFrame.canonicalStateHash) {
-            expectedCanonicalStateHash = String(persistedFrame.canonicalStateHash);
-            actualCanonicalStateHash = computeCanonicalStateHashFromEnv(replayed.env);
-            if (expectedCanonicalStateHash !== actualCanonicalStateHash) {
-              return {
-                ok: false,
-                latestHeight,
-                checkpointHeight,
-                selectedSnapshotHeight,
-                restoredHeight: height,
-                expectedStateHash,
-                actualStateHash,
-                expectedCanonicalStateHash,
-                actualCanonicalStateHash,
-              };
-            }
-          } else {
-            expectedCanonicalStateHash = '';
-            actualCanonicalStateHash = '';
-          }
-        } else {
-          expectedCanonicalStateHash = expectedStateHash;
-          actualCanonicalStateHash = actualStateHash;
-        }
-        restoredHeight = height;
-        if (expectedStateHash !== actualStateHash) {
-          return {
-            ok: false,
-            latestHeight,
-            checkpointHeight,
-            selectedSnapshotHeight,
-            restoredHeight,
-            expectedStateHash,
-            actualStateHash,
-            expectedCanonicalStateHash,
-            actualCanonicalStateHash,
-          };
-        }
-      } finally {
-        await closeRuntimeDb(replayed.env);
-        await closeInfraDb(replayed.env);
+      if (height > selectedSnapshotHeight) {
+        await replayRecoveryFrameJournals(
+          replayed.env,
+          [buildRecoveryJournalFromStorageFrame(persistedFrame)],
+        );
+      }
+      if (height < requestedFromHeight) continue;
+      const verification = verifyPersistedFrameState(replayed.env, persistedFrame);
+      ({
+        expectedStateHash,
+        actualStateHash,
+        expectedCanonicalStateHash,
+        actualCanonicalStateHash,
+      } = verification);
+      restoredHeight = height;
+      if (!verification.ok) {
+        return {
+          ok: false,
+          latestHeight,
+          checkpointHeight,
+          selectedSnapshotHeight,
+          restoredHeight,
+          expectedStateHash,
+          actualStateHash,
+          expectedCanonicalStateHash,
+          actualCanonicalStateHash,
+        };
       }
     }
   } finally {
+    if (replayed) {
+      await closeRuntimeDb(replayed.env);
+      await closeInfraDb(replayed.env);
+    }
     await closeRuntimeDb(bootstrapEnv);
     await closeInfraDb(bootstrapEnv);
   }
@@ -5530,23 +5628,7 @@ export const readPersistedFrameJournal = async (env: Env, height: number): Promi
       );
     }
   }
-  return {
-    height: frame.height,
-    timestamp: frame.timestamp,
-    replicaMetaDigest: frame.replicaMetaDigest,
-    runtimeInput: frame.runtimeInput,
-    ...(frame.runtimeOutputs?.length
-      ? { runtimeOutputs: cloneIsolatedRoutedEntityInputs(frame.runtimeOutputs) }
-      : {}),
-    ...(frame.runtimeMachineBeforeApply
-      ? { runtimeMachineBeforeApply: cloneIsolatedRuntimeSnapshot(frame.runtimeMachineBeforeApply) }
-      : {}),
-    ...(frame.runtimeMachine
-      ? { runtimeMachine: cloneIsolatedRuntimeSnapshot(frame.runtimeMachine) }
-      : {}),
-    ...(frame.runtimeStateHash ? { runtimeStateHash: frame.runtimeStateHash } : {}),
-    logs,
-  };
+  return buildRecoveryJournalFromStorageFrame(frame, logs);
 };
 
 /**

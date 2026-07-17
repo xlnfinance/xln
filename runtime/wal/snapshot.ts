@@ -180,6 +180,29 @@ const hasDurableEntries = (value: unknown): boolean => {
   return Boolean(value && typeof value === 'object' && Object.keys(value).length > 0);
 };
 
+const DURABLE_RUNTIME_STATE_KEYS = [
+  'halted',
+  'fatalDebugPayload',
+  'maxEntityInputsPerFrame',
+  'maxEntityTxsPerFrame',
+  'pendingAuditEvents',
+  'quarantinedRuntimeInputs',
+  'pendingFrameDbRecords',
+  'deferredNetworkMeta',
+  'reliableIngressReceiptLedger',
+  'reliableIngressTerminalWatermarks',
+  'receivedReliableReceiptLedger',
+  'receivedReliableTerminalWatermarks',
+  'pendingReliableIngress',
+  'reliableIngressCommitting',
+  'verifiedProfileRoutes',
+  'runtimeAdapterCommandFrontiers',
+  'pendingCommittedJOutbox',
+  'pendingJurisdictionImports',
+  'numberedRegistrationIntents',
+  'certifiedRegistrationEvidence',
+] as const;
+
 const buildDurableRuntimeStateSnapshot = (
   env: Env,
   options?: {
@@ -375,12 +398,12 @@ export const restoreDurableRuntimeSnapshot = (
   if (snapshot['runtimeConfig'] && typeof snapshot['runtimeConfig'] === 'object') {
     env.runtimeConfig = structuredClone(snapshot['runtimeConfig']) as Env['runtimeConfig'];
   }
-  if (snapshot['runtimeState'] && typeof snapshot['runtimeState'] === 'object') {
-    env.runtimeState = {
-      ...(env.runtimeState ?? {}),
-      ...(structuredClone(snapshot['runtimeState']) as NonNullable<Env['runtimeState']>),
-    };
-  }
+  const retainedRuntimeState = { ...(env.runtimeState ?? {}) };
+  for (const key of DURABLE_RUNTIME_STATE_KEYS) delete retainedRuntimeState[key];
+  const restoredRuntimeState = snapshot['runtimeState'] && typeof snapshot['runtimeState'] === 'object'
+    ? structuredClone(snapshot['runtimeState']) as NonNullable<Env['runtimeState']>
+    : {};
+  env.runtimeState = { ...retainedRuntimeState, ...restoredRuntimeState };
   env.pendingOutputs = Array.isArray(snapshot['pendingOutputs'])
     ? cloneIsolatedRoutedEntityInputs(snapshot['pendingOutputs'] as RoutedEntityInput[])
     : [];

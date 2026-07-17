@@ -928,7 +928,13 @@ export const saveRuntimeFrameToStorage = async (options: {
     pendingBoardHistoryBytes +
     pendingConsumptionHistoryBytes +
     pendingAccountJClaimHistoryBytes;
-  const snapshotDue = options.env.height % config.snapshotPeriodFrames === 0;
+  // Frame 1 is the immutable recovery anchor for the first WAL suffix. Without
+  // a published snapshot here, its validator-local Entity metadata exists only
+  // at the live head and deterministic replay cannot start before the first
+  // periodic checkpoint.
+  const snapshotDue =
+    options.env.height === 1 ||
+    options.env.height % config.snapshotPeriodFrames === 0;
   const snapshotRequiredByBytes = projectedHistoryBytesWithoutFrame > config.epochMaxBytes;
   const shouldMaterialize =
     options.env.height === 1 ||
