@@ -4971,6 +4971,9 @@ describe('cross-jurisdiction hashledger swap', () => {
     const sourceSigner = addr('81');
     const targetSigner = addr('82');
     const state = makeState(targetUser, targetSigner, targetJ, targetHub);
+    const sourceState = makeState(sourceUser, sourceSigner, sourceJ, sourceHub);
+    addReplica(env, sourceState, sourceSigner);
+    addReplica(env, state, targetSigner);
     const buildRoute = (
       orderId: string,
       options: {
@@ -5124,6 +5127,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     const sourceSigner = addr('81');
     const targetSigner = registerTestSigner(env, 'cross-target-dispute-force-source', '1');
     const targetState = makeState(targetUser, targetSigner, base, targetHub);
+    const sourceState = makeState(sourceUser, sourceSigner, eth, sourceHub);
+    addReplica(env, sourceState, sourceSigner);
     addReplica(env, targetState, targetSigner);
     installJurisdictions(env, eth, base);
     const route = buildPreparedCrossJurisdictionRoute({
@@ -5291,9 +5296,11 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(market?.priceTicks).toBe(20_000n);
   });
 
-  test('cross-j market keeps USD stables as quote across jurisdictions', () => {
+  test('cross-j market keeps USD stables as quote independently from numeric-chain book ownership', () => {
     const sourceHub = entity('stable-source-hub');
     const targetHub = entity('stable-target-hub');
+    const tronRef = `stack:728126428:0x${'31'.repeat(20)}`;
+    const testnetRef = `stack:11155111:0x${'21'.repeat(20)}`;
 
     const sourceStableToTargetEth = deriveCanonicalCrossJurisdictionMarketForLegs('tron', 3, 'testnet', 2);
     expect(sourceStableToTargetEth.sourceIsBase).toBe(false);
@@ -5301,10 +5308,10 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(sourceStableToTargetEth.quoteKey).toBe('tron:3');
     expect(sourceStableToTargetEth.venueId).toBe('cross:testnet:2/tron:3');
     expect(deriveCanonicalCrossJurisdictionBookOwnerForLegs(
-      'tron',
+      tronRef,
       3,
       sourceHub,
-      'testnet',
+      testnetRef,
       2,
       targetHub,
     )).toBe(targetHub);
@@ -5315,10 +5322,10 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(sourceEthToTargetStable.quoteKey).toBe('tron:3');
     expect(sourceEthToTargetStable.venueId).toBe('cross:testnet:2/tron:3');
     expect(deriveCanonicalCrossJurisdictionBookOwnerForLegs(
-      'testnet',
+      testnetRef,
       2,
       targetHub,
-      'tron',
+      tronRef,
       3,
       sourceHub,
     )).toBe(targetHub);
@@ -5329,10 +5336,10 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(sourceTronEthToTargetStable.quoteKey).toBe('testnet:3');
     expect(sourceTronEthToTargetStable.venueId).toBe('cross:tron:2/testnet:3');
     expect(deriveCanonicalCrossJurisdictionBookOwnerForLegs(
-      'tron',
+      tronRef,
       2,
       sourceHub,
-      'testnet',
+      testnetRef,
       3,
       targetHub,
     )).toBe(targetHub);
@@ -5491,19 +5498,20 @@ describe('cross-jurisdiction hashledger swap', () => {
   });
 
   test('cross-j rejects same-jurisdiction same-token route before orderbook admission', () => {
+    const jurisdictionRef = `stack:31337:0x${'11'.repeat(20)}`;
     expect(() => buildPreparedCrossJurisdictionRoute({
       orderId: 'cross-same-chain-same-token-invalid',
       makerEntityId: entity('d1'),
       hubEntityId: entity('d2'),
       source: {
-        jurisdiction: 'stack:testnet:dep',
+        jurisdiction: jurisdictionRef,
         entityId: entity('d1'),
         counterpartyEntityId: entity('d2'),
         tokenId: 1,
         amount: 1_000n,
       },
       target: {
-        jurisdiction: 'stack:testnet:dep',
+        jurisdiction: jurisdictionRef,
         entityId: entity('d3'),
         counterpartyEntityId: entity('d4'),
         tokenId: 1,
