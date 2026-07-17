@@ -3925,7 +3925,7 @@ function materializeDeferredSettlementApprovals(
 ): void {
   const deferred = state.deferredAccountProposals;
   if (!deferred || deferred.size === 0) return;
-  for (const [accountId, approvedHash] of [...deferred.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+  for (const [accountId, approvedHash] of [...deferred.entries()].sort(([left], [right]) => compareStableText(left, right))) {
     const account = state.accounts.get(accountId);
     if (!account) throw new Error(`SETTLEMENT_DEFERRED_ACCOUNT_MISSING:${accountId}`);
     if (account.pendingFrame || hasPendingSettlementTransition(account)) continue;
