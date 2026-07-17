@@ -246,7 +246,9 @@ const useInheritedRunLock = (
     observed = { ...observed, pid: process.pid };
     writeTestArtifactRunLockAtomically(path, observed);
   }
-  if (observed.pid === process.pid) registerOwnedRunLock(path, token);
+  // Reclaiming a dead child's lease does not transfer ownership of the root
+  // run token. Only the process that created the lock may release it on exit;
+  // otherwise a nested runner deletes the lease between sequential gate steps.
   env[TEST_ARTIFACT_RUN_TOKEN_ENV] = token;
   return observed;
 };

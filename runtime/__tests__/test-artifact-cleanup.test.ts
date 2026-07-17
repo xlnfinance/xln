@@ -347,6 +347,43 @@ describe('test artifact cleanup', () => {
     }
   });
 
+  test('sequential nested runners preserve the root lease between sibling gate steps', () => {
+    const root = makeTempWorkspace();
+    const repoRoot = process.cwd();
+    const wrapperPath = join(repoRoot, 'runtime/scripts/run-with-test-cleanup.ts');
+    const cleanupModulePath = join(repoRoot, 'runtime/scripts/test-artifact-cleanup.ts');
+    const probe = [
+      "import { spawnSync } from 'node:child_process';",
+      "import { existsSync } from 'node:fs';",
+      `import { cleanupTestArtifactsBeforeRun, TEST_ARTIFACT_RUN_LOCK_PATH } from ${JSON.stringify(cleanupModulePath)};`,
+      `const root = ${JSON.stringify(root)};`,
+      `const repoRoot = ${JSON.stringify(repoRoot)};`,
+      `const wrapperPath = ${JSON.stringify(wrapperPath)};`,
+      "cleanupTestArtifactsBeforeRun({ cwd: root, env: process.env, reason: 'root-gate', log: () => undefined });",
+      "for (const reason of ['first-step', 'second-step']) {",
+      "  const result = spawnSync(process.execPath, [wrapperPath, `--cwd=${root}`, `--reason=${reason}`, '--', process.execPath, '-e', ''], { cwd: repoRoot, env: process.env, encoding: 'utf8' });",
+      "  if (result.status !== 0) throw new Error(`NESTED_STEP_FAILED:${reason}:${result.stderr}`);",
+      "  if (!existsSync(`${root}/${TEST_ARTIFACT_RUN_LOCK_PATH}`)) throw new Error(`ROOT_LEASE_REMOVED:${reason}`);",
+      "}",
+    ].join('\n');
+
+    try {
+      const result = spawnSync(process.execPath, ['-e', probe], {
+        cwd: repoRoot,
+        env: independentTestRunEnv({
+          XLN_FOUNDRY_HOME: join(root, '.foundry'),
+          XLN_MIN_DISK_FREE_BYTES: '1',
+        }),
+        encoding: 'utf8',
+      });
+
+      expect({ status: result.status, stderr: result.stderr }).toEqual({ status: 0, stderr: '' });
+      expect(existsSync(join(root, TEST_ARTIFACT_RUN_LOCK_PATH))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('SIGKILL of the wrapper cannot expose artifacts while its leased child is alive', async () => {
     const root = makeTempWorkspace();
     const repoRoot = process.cwd();
