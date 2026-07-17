@@ -18,13 +18,10 @@ describe('J watcher DisputeFinalized calldata evidence', () => {
       tokenIds: [1n, 2n],
       transformers: [],
     },
-    leftArguments: '0x1234',
-    rightArguments: '0xabcd',
-    starterInitialArguments: '0x5678',
-    starterIncrementedArguments: '0x9abc',
+    starterArguments: '0x5678',
+    otherArguments: '0xabcd',
     sig: '0x0102',
     startedByLeft: true,
-    disputeUntilBlock: 100n,
     cooperative: false,
   };
   const expectedEvidence = {
@@ -32,10 +29,9 @@ describe('J watcher DisputeFinalized calldata evidence', () => {
     initialNonce: '7',
     finalNonce: '11',
     initialProofbodyHash: params.initialProofbodyHash,
-    leftArguments: params.leftArguments,
-    rightArguments: params.rightArguments,
-    starterInitialArguments: params.starterInitialArguments,
-    starterIncrementedArguments: params.starterIncrementedArguments,
+    leftArguments: params.starterArguments,
+    rightArguments: params.otherArguments,
+    startedByLeft: params.startedByLeft,
     sig: params.sig,
   };
 
@@ -54,7 +50,6 @@ describe('J watcher DisputeFinalized calldata evidence', () => {
       ...params,
       initialNonce: Number(params.initialNonce),
       finalNonce: Number(params.finalNonce),
-      disputeUntilBlock: Number(params.disputeUntilBlock),
     });
     const calldata = Depository__factory.createInterface().encodeFunctionData(
       'processBatch',

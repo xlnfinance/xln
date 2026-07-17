@@ -12,12 +12,13 @@ const unwrapBrowserVM = (value: BrowserVMCarrier): BrowserVMProvider | null => {
   return value as BrowserVMProvider;
 };
 
-const buildBrowserVMJurisdiction = (
+export const buildBrowserVMJurisdiction = (
   depositoryAddress: string,
   entityProviderAddress: string,
+  chainId: number,
 ): JurisdictionConfig => ({
   name: 'Simnet',
-  chainId: 31337,
+  chainId,
   address: 'browservm://',
   depositoryAddress,
   entityProviderAddress,
@@ -26,9 +27,19 @@ const buildBrowserVMJurisdiction = (
 export const setBrowserVMJurisdiction = (
   env: Env | null,
   depositoryAddress: string,
+  chainId: number,
   browserVMInstance?: BrowserVMCarrier,
 ): void => {
   const browserVM = unwrapBrowserVM(browserVMInstance);
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+    throw new Error(`BROWSERVM_JURISDICTION_CHAIN_ID_INVALID:${String(chainId)}`);
+  }
+  const providerChainId = browserVM?.getChainId?.();
+  if (providerChainId !== undefined && BigInt(chainId) !== providerChainId) {
+    throw new Error(
+      `BROWSERVM_JURISDICTION_CHAIN_ID_MISMATCH:expected=${chainId}:actual=${providerChainId.toString()}`,
+    );
+  }
   if (browserVM && env) {
     (env as Env & { browserVM?: BrowserVMProvider | null }).browserVM = browserVM;
   }
@@ -41,6 +52,7 @@ export const setBrowserVMJurisdiction = (
   registeredBrowserVMJurisdiction = buildBrowserVMJurisdiction(
     requireUsableContractAddress('depository', depositoryAddress),
     entityProviderAddress,
+    chainId,
   );
 };
 

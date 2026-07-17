@@ -1791,7 +1791,7 @@ test.describe('E2E Swap Flow', () => {
     }));
   });
 
-  test('swap shows visible depth on all canonical pairs and selected books', async ({ page }) => {
+  test('swap shows visible depth on all canonical pairs and selected books', { tag: '@functional' }, async ({ page }) => {
     await timedStep('swap_pairs.goto_app', () => gotoApp(page));
     await timedStep('swap_pairs.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
     await timedStep('swap_pairs.create_runtime', () => createDemoRuntime(page, `swap-pairs-${Date.now()}`, randomMnemonic()));
@@ -1803,7 +1803,7 @@ test.describe('E2E Swap Flow', () => {
       expectSelectedBooksHaveVisibleLiquidity(page, CANONICAL_SWAP_PAIR_LABELS, runtimeRef.hubIds.slice(0, 3)));
   });
 
-	  test('swap orderbook shows terminal no-market state when relay stream never returns a snapshot', async ({ page }) => {
+	  test('swap orderbook shows terminal no-market state when relay stream never returns a snapshot', { tag: '@resilience' }, async ({ page }) => {
     await timedStep('swap_no_market.goto_app', () => gotoApp(page));
     await timedStep('swap_no_market.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
     await timedStep('swap_no_market.create_runtime', () => createDemoRuntime(page, `swap-no-market-${Date.now()}`, randomMnemonic()));
@@ -1854,7 +1854,7 @@ test.describe('E2E Swap Flow', () => {
       .toEqual({ asks: 0, bids: 0 });
 	  });
 
-  test('swap orderbook shows terminal error state when relay rejects the market subscription', async ({ page }) => {
+  test('swap orderbook shows terminal error state when relay rejects the market subscription', { tag: '@resilience' }, async ({ page }) => {
     await timedStep('swap_error.goto_app', () => gotoApp(page));
     await timedStep('swap_error.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
     await timedStep('swap_error.create_runtime', () => createDemoRuntime(page, `swap-error-${Date.now()}`, randomMnemonic()));
@@ -1899,7 +1899,7 @@ test.describe('E2E Swap Flow', () => {
       .toEqual({ asks: 0, bids: 0 });
   });
 
-  test('swap orderbook pair dropdown updates same-chain form tokens', async ({ page }) => {
+  test('swap orderbook pair dropdown updates same-chain form tokens', { tag: '@functional' }, async ({ page }) => {
     await timedStep('swap_pair_dropdown.goto_app', () => gotoApp(page));
     await timedStep('swap_pair_dropdown.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
     await timedStep('swap_pair_dropdown.create_runtime', () => createDemoRuntime(page, `swap-pair-dropdown-${Date.now()}`, randomMnemonic()));
@@ -1929,7 +1929,7 @@ test.describe('E2E Swap Flow', () => {
 
 	  // Scenario: place a valid non-marketable WETH/USDC offer through the visible swap UI
   // and verify the open order survives a reload.
-  test('swap place WETH/USDC offer survives reload', async ({ page }) => {
+  test('swap place WETH/USDC offer survives reload', { tag: '@resilience' }, async ({ page }) => {
     const accountRef = await timedStep('swap_auto.prepare_book', () => prepareOrderbookClickTest(page));
 
     const placeButton = page.getByTestId('swap-submit-order').first();
@@ -1995,7 +1995,7 @@ test.describe('E2E Swap Flow', () => {
 
   // Scenario: place a non-marketable order, cancel it from the UI, and verify both state machine
   // and rendered order table clear before and after reload.
-  test('swap place and cancel from UI updates state machine', async ({ page }) => {
+  test('swap place and cancel from UI updates state machine', { tag: '@functional' }, async ({ page }) => {
     const accountRef = await timedStep('swap.prepare_book', () => prepareOrderbookClickTest(page));
 
     await expect(page.getByTestId('swap-orderbook')).toBeVisible({ timeout: 20_000 });
@@ -2139,7 +2139,7 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     };
   }
 
-  test('swap orderbook lowest ask click fills immediately at displayed book price', async ({ page }) => {
+  test('swap orderbook lowest ask click fills immediately at displayed book price', { tag: '@functional' }, async ({ page }) => {
     const accountRef = await prepareOrderbookClickTest(page);
 
     await timedStep('swap_click.lowest_ask_fills', () =>
@@ -2147,7 +2147,7 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     );
   });
 
-  test('swap orderbook highest bid click fills immediately at displayed book price', async ({ page }) => {
+  test('swap orderbook highest bid click fills immediately at displayed book price', { tag: '@functional' }, async ({ page }) => {
     const accountRef = await prepareOrderbookClickTest(page);
 
     await timedStep('swap_click.highest_bid_fills', () =>
@@ -2155,14 +2155,14 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     );
   });
 
-  test('swap orderbook mid price click fills immediately at displayed book price', async ({ page }) => {
+  test('swap orderbook mid price click fills immediately at displayed book price', { tag: '@functional' }, async ({ page }) => {
     const accountRef = await prepareOrderbookClickTest(page);
     await timedStep('swap_click.mid_price_fills', () =>
       executeOrderbookClickFill(page, accountRef, 'mid-price'),
     );
   });
 
-  test('swap flip keeps the displayed receive amount as the next source amount', async ({ page }) => {
+  test('swap flip keeps the displayed receive amount as the next source amount', { tag: '@functional' }, async ({ page }) => {
     await prepareOrderbookClickTest(page);
     await ensureSwapScope(page, 'aggregated');
     await selectSwapPairSide(page, 'WETH/USDC', 'buy');
@@ -2191,7 +2191,7 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     expect(flippedReceiveAmount, 'flipped receive should stay near the original spend notional').toBeGreaterThan(spendBefore * 0.99);
   });
 
-  test('swap flip keeps the sell-side displayed receive amount as the next source amount', async ({ page }) => {
+  test('swap flip keeps the sell-side displayed receive amount as the next source amount', { tag: '@functional' }, async ({ page }) => {
     await prepareOrderbookClickTest(page);
     await ensureSwapScope(page, 'aggregated');
     await selectSwapPairSide(page, 'WETH/USDC', 'sell');
@@ -2220,7 +2220,7 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     expect(flippedReceiveAmount, 'sell-side flipped receive should stay near the original WETH spend').toBeGreaterThan(spendBefore * 0.99);
   });
 
-  test('swap can buy from asks and then sell back into bids on the same book', async ({ page }) => {
+  test('swap can buy from asks and then sell back into bids on the same book', { tag: '@functional' }, async ({ page }) => {
     const accountRef = await prepareOrderbookClickTest(page);
     const buyResult = await timedStep('swap_roundtrip.buy_fill', () =>
       executeOrderbookClickFill(page, accountRef, 'lowest-ask'));
@@ -2236,7 +2236,7 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
       }));
   });
 
-  test('swap manual price override after book click uses the edited limit price', async ({ page }) => {
+  test('swap manual price override after book click uses the edited limit price', { tag: '@functional' }, async ({ page }) => {
     const accountRef = await prepareOrderbookClickTest(page);
     await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
       preferredAccountId: accountRef.counterpartyId,
@@ -2286,7 +2286,7 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
       .toBe(0);
   });
 
-  test('swap rejects price beyond 30% from current orderbook', async ({ page }) => {
+  test('swap rejects price beyond 30% from current orderbook', { tag: '@resilience' }, async ({ page }) => {
     const accountRef = await prepareOrderbookClickTest(page);
     await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
       preferredAccountId: accountRef.counterpartyId,
@@ -2313,7 +2313,7 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     });
   });
 
-  test('swap rejects sell price beyond 30% from current orderbook', async ({ page }) => {
+  test('swap rejects sell price beyond 30% from current orderbook', { tag: '@resilience' }, async ({ page }) => {
     const accountRef = await prepareOrderbookClickTest(page);
     await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
       preferredAccountId: accountRef.counterpartyId,
@@ -2343,7 +2343,7 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     });
   });
 
-test('swap keeps a within-band wide limit as a resting order instead of filling immediately', async ({ page }, testInfo) => {
+test('swap keeps a within-band wide limit as a resting order instead of filling immediately', { tag: '@functional' }, async ({ page }, testInfo) => {
     const accountRef = await prepareOrderbookClickTest(page);
     const amountInput = page.getByTestId('swap-order-amount').first();
     const priceInput = page.getByTestId('swap-order-price').first();
@@ -2407,7 +2407,7 @@ test('swap keeps a within-band wide limit as a resting order instead of filling 
       .toBe(0);
   });
 
-  test('swap scope and account switching clears stale rows and stale book hint state', async ({ page }) => {
+  test('swap scope and account switching clears stale rows and stale book hint state', { tag: '@resilience' }, async ({ page }) => {
     const accountRef = await prepareOrderbookClickTest(page);
 
     await ensureSwapScope(page, 'selected');

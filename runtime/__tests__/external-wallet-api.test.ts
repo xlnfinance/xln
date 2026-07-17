@@ -10,6 +10,7 @@ import { createXlnJsonRpcProvider } from '../jadapter';
 import type { JAdapter } from '../jadapter/types';
 
 const USER_ADDRESS = new ethers.Wallet(`0x${'22'.repeat(32)}`).address;
+const USDC_ADDRESS = '0x1111111111111111111111111111111111111111';
 
 const makeFaucetRequest = (): Request => new Request('http://localhost/api/faucet/erc20', {
   method: 'POST',
@@ -43,7 +44,13 @@ const makeContext = (
 ): ExternalWalletApiContext => ({
   getJAdapter: () => adapter,
   getRuntimeId: () => 'runtime-test',
-  getTokenCatalog: async () => [],
+  getTokenCatalog: async () => [{
+    tokenId: 1,
+    symbol: 'USDC',
+    name: 'USD Coin',
+    address: USDC_ADDRESS,
+    decimals: 6,
+  }],
   jsonHeaders: { 'content-type': 'application/json' },
   faucetSeed: 'external-wallet-api-test-seed',
   faucetSignerLabel: 'faucet-1',
@@ -91,6 +98,27 @@ const createBlockingFaucetFund = () => {
 };
 
 describe('external wallet API faucet transaction gate', () => {
+  test('BrowserVM faucet targets only the requested token in its trusted raw units', async () => {
+    const provider = makeTestProvider();
+    const adapter = makeBrowserVmAdapter(provider);
+    const calls: Array<{ address: string; amount: bigint; tokenSymbol?: string }> = [];
+    try {
+      const api = createExternalWalletApi(makeContext(adapter, async (address, amount, tokenSymbol) => {
+        calls.push({ address, amount, ...(tokenSymbol ? { tokenSymbol } : {}) });
+        return true;
+      }));
+      const response = await api.handleErc20Faucet(makeFaucetRequest());
+      expect(response.status).toBe(200);
+      expect(calls).toEqual([{
+        address: USER_ADDRESS,
+        amount: 10n ** 6n,
+        tokenSymbol: 'USDC',
+      }]);
+    } finally {
+      provider.destroy();
+    }
+  });
+
   test('external wallet API uses structured logging instead of raw console output', () => {
     const source = readFileSync(join(process.cwd(), 'runtime/api/external-wallet-api.ts'), 'utf8');
     expect(source).toContain("createStructuredLogger('server.external_wallet')");
@@ -162,7 +190,7 @@ describe('external wallet API faucet transaction gate', () => {
     }
   });
 
-  test('wallet snapshot endpoint emits canonical external wallet observation', async () => {
+  test('wallet snapshot endpoint stays read-only and does not mutate the canonical J-prefix', async () => {
     const provider = makeTestProvider();
     Object.assign(provider, {
       getBlockNumber: async () => 77,
@@ -194,7 +222,6 @@ describe('external wallet API faucet transaction gate', () => {
         };
       },
     } as unknown as JAdapter;
-    const observed: unknown[] = [];
     const api = createExternalWalletApi({
       ...makeContext(adapter, async () => false),
       getTokenCatalog: async () => [{
@@ -203,7 +230,6 @@ describe('external wallet API faucet transaction gate', () => {
         decimals: 18,
         tokenId: 3,
       }],
-      observeExternalWalletSnapshot: (events) => observed.push(...events),
     });
 
     try {
@@ -232,29 +258,6 @@ describe('external wallet API faucet transaction gate', () => {
       expect(body.sourceHeight).toBe(76);
       expect(body.sourceHash).toBe(`0x${'76'.repeat(32)}`);
       expect(body.finalityDepth).toBe(1);
-      expect(observed).toHaveLength(1);
-      expect(observed[0]).toMatchObject({
-        name: 'ExternalWalletSnapshot',
-        args: {
-          owner: USER_ADDRESS.toLowerCase(),
-          sourceHeight: 76,
-          sourceHash: `0x${'76'.repeat(32)}`,
-          finalityDepth: 1,
-          nativeBalance: '5',
-          tokenBalances: [{
-            tokenAddress: '0x1111111111111111111111111111111111111111',
-            tokenId: 3,
-            balance: '9',
-          }],
-          allowances: [{
-            tokenAddress: '0x1111111111111111111111111111111111111111',
-            spender: '0x0000000000000000000000000000000000000002',
-            allowance: '7',
-          }],
-        },
-        blockNumber: 76,
-        blockHash: `0x${'76'.repeat(32)}`,
-      });
     } finally {
       provider.destroy();
     }
@@ -266,7 +269,6 @@ describe('external wallet API faucet transaction gate', () => {
       getBlockNumber: async () => 88,
       getBlock: async () => ({ hash: `0x${'88'.repeat(32)}` }),
     });
-    const observed: unknown[] = [];
     const makeApi = (snapshot: { nativeBalance: bigint | null; tokenBalances: bigint[]; allowances: bigint[] }) => {
       const adapter = {
         ...makeBrowserVmAdapter(provider),
@@ -280,7 +282,6 @@ describe('external wallet API faucet transaction gate', () => {
           decimals: 18,
           tokenId: 3,
         }],
-        observeExternalWalletSnapshot: (events) => observed.push(...events),
       });
     };
     const request = () => new Request('http://localhost/api/external-wallet/snapshot', {
@@ -314,7 +315,6 @@ describe('external wallet API faucet transaction gate', () => {
       const missingNativeBody = await missingNativeResponse.json() as { error?: string };
       expect(missingNativeResponse.status).toBe(500);
       expect(missingNativeBody.error).toContain('EXTERNAL_WALLET_SNAPSHOT_FIELD_MISSING:nativeBalance');
-      expect(observed).toHaveLength(0);
     } finally {
       provider.destroy();
     }
@@ -339,7 +339,6 @@ describe('external wallet API faucet transaction gate', () => {
         }],
       }),
     } as unknown as JAdapter;
-    const observed: unknown[] = [];
     const api = createExternalWalletApi({
       ...makeContext(adapter, async () => false),
       getTokenCatalog: async () => [
@@ -356,7 +355,6 @@ describe('external wallet API faucet transaction gate', () => {
           tokenId: 4,
         },
       ],
-      observeExternalWalletSnapshot: (events) => observed.push(...events),
     });
 
     try {
@@ -378,14 +376,6 @@ describe('external wallet API faucet transaction gate', () => {
       expect(body.tokenErrors?.[0]?.tokenAddress).toBe(badToken);
       expect(body.tokenBalances?.find((entry) => entry.tokenAddress === badToken)?.error)
         .toContain('EXTERNAL_WALLET_SNAPSHOT_RPC_INVALID_BIGINT');
-      expect(observed[0]).toMatchObject({
-        args: {
-          tokenBalances: [{
-            tokenAddress: '0x1111111111111111111111111111111111111111',
-            balance: '9',
-          }],
-        },
-      });
     } finally {
       provider.destroy();
     }

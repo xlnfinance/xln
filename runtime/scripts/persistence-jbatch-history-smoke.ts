@@ -45,8 +45,7 @@ async function main() {
 
   const signerId = deriveSignerAddressSync(seed, '1');
   const signerKey = deriveSignerKeySync(seed, '1');
-  registerSignerKey(signerId, signerKey);
-  registerSignerKey(signerId.slice(-4).toLowerCase(), signerKey);
+  registerSignerKey(env, signerId, signerKey);
 
   const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
   const otherEntityId = generateLazyEntityId(['0x0000000000000000000000000000000000000001'], 1n).toLowerCase();
@@ -78,7 +77,7 @@ async function main() {
         blocks: [{ jurisdictionRef, jHeight: blockNumber, jBlockHash: blockHash, eventsHash, events }],
       },
     };
-    const history = recordValidatorJHistory(replica.jHistory, observeTx.data);
+    const history = recordValidatorJHistory(replica.jHistory, observeTx.data, replica.state);
     const unsigned = buildUnsignedJEventRange(replica.state, history);
     if (!unsigned) throw new Error('J_EVENT_RANGE_EMPTY');
     const signature = signAccountFrame(env, signerId, buildJEventRangeDigest({ entityId, signerId, ...unsigned }));
@@ -169,6 +168,9 @@ async function main() {
       signerId,
       entityTxs: [{ type: 'j_broadcast', data: {} }],
     }]);
+    const broadcastReplica = Array.from(env.eReplicas.values()).find((candidate) => candidate.entityId === entityId);
+    const sentBatch = broadcastReplica?.state.jBatchState?.sentBatch;
+    assert(sentBatch, `sent batch exists for nonce ${nonce}`);
 
     const reserveUpdatedEvent = {
       type: 'ReserveUpdated' as const,
@@ -184,7 +186,7 @@ async function main() {
               type: 'HankoBatchProcessed',
               data: {
                 entityId,
-                hankoHash: `0x${String(nonce + 200).padStart(64, '0')}`,
+                batchHash: sentBatch.batchHash,
                 nonce,
                 success: true,
               },

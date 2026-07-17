@@ -8,6 +8,7 @@ export type DepositoryHankoDomain = Readonly<{
 export type EntityProviderHankoDomain = Readonly<{
   chainId: number | bigint;
   entityProviderAddress: string;
+  boardEpoch: number | bigint;
 }>;
 
 export type CooperativeUpdateDiff = Readonly<{
@@ -45,6 +46,28 @@ export type ReleaseControlSharesAuthorization = Readonly<{
   actionNonce: number | bigint;
 }>;
 
+export type CancelEntityProviderActionAuthorization = Readonly<{
+  entityNumber: number | bigint;
+  actionNonce: number | bigint;
+  cancelledActionHash: string;
+  cancelledActionKind: number | bigint;
+}>;
+
+export type BoardProposalAuthorization = Readonly<{
+  entityId: string;
+  newBoardHash: string;
+  authority: number | bigint;
+  actionNonce: number | bigint;
+}>;
+
+export type BoardProposalCancelAuthorization = Readonly<{
+  entityId: string;
+  proposedBoardHash: string;
+  proposedBy: number | bigint;
+  cancelledBy: number | bigint;
+  actionNonce: number | bigint;
+}>;
+
 export const DEPOSITORY_BATCH_HANKO_DOMAIN = ethers.keccak256(
   ethers.toUtf8Bytes('XLN_DEPOSITORY_HANKO_V1'),
 );
@@ -53,6 +76,23 @@ export const WATCHTOWER_COUNTER_DISPUTE_HANKO_DOMAIN = ethers.keccak256(
 );
 export const ENTITY_TRANSFER_HANKO_LABEL = 'ENTITY_TRANSFER';
 export const RELEASE_CONTROL_SHARES_HANKO_LABEL = 'RELEASE_CONTROL_SHARES';
+export const CANCEL_ENTITY_PROVIDER_ACTION_HANKO_LABEL = 'CANCEL_ENTITY_PROVIDER_ACTION';
+export const BOARD_PROPOSAL_HANKO_DOMAIN = ethers.keccak256(
+  ethers.toUtf8Bytes('XLN_ENTITY_PROVIDER_BOARD_PROPOSAL_V3'),
+);
+export const BOARD_PROPOSAL_CANCEL_HANKO_DOMAIN = ethers.keccak256(
+  ethers.toUtf8Bytes('XLN_ENTITY_PROVIDER_BOARD_PROPOSAL_CANCEL_V3'),
+);
+export const ENTITY_PROVIDER_ACTION_EXECUTED_EVENT =
+  'EntityProviderActionExecuted(bytes32,uint256,bytes32,uint8)';
+export const ENTITY_PROVIDER_ACTION_EXECUTED_TOPIC = ethers.id(ENTITY_PROVIDER_ACTION_EXECUTED_EVENT);
+export const ENTITY_PROVIDER_ACTION_CANCELLED_EVENT =
+  'EntityProviderActionCancelled(bytes32,uint256,bytes32,uint8,bytes32)';
+export const ENTITY_PROVIDER_ACTION_CANCELLED_TOPIC = ethers.id(ENTITY_PROVIDER_ACTION_CANCELLED_EVENT);
+export const ENTITY_PROVIDER_ACTION_KIND = Object.freeze({
+  entityTransfer: 0,
+  releaseControlShares: 1,
+} as const);
 
 const ABI_CODER = ethers.AbiCoder.defaultAbiCoder();
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
@@ -74,6 +114,12 @@ const requireAddress = (value: string, label: string): string => {
   return value;
 };
 
+const requireBoardAuthority = (value: number | bigint, label: string): bigint => {
+  const authority = requireUint(value, label);
+  if (authority > 3n) throw new Error(`INVALID_HANKO_${label}:${authority.toString()}`);
+  return authority;
+};
+
 const requireDepositoryDomain = (
   domain: DepositoryHankoDomain,
 ): readonly [chainId: bigint, depositoryAddress: string] => {
@@ -84,10 +130,14 @@ const requireDepositoryDomain = (
 
 const requireEntityProviderDomain = (
   domain: EntityProviderHankoDomain,
-): readonly [chainId: bigint, entityProviderAddress: string] => {
+): readonly [chainId: bigint, entityProviderAddress: string, boardEpoch: bigint] => {
   const chainId = requireUint(domain.chainId, 'DOMAIN_CHAIN_ID');
   if (chainId === 0n) throw new Error('INVALID_HANKO_DOMAIN_CHAIN_ID:0');
-  return [chainId, requireAddress(domain.entityProviderAddress, 'ENTITY_PROVIDER_ADDRESS')] as const;
+  return [
+    chainId,
+    requireAddress(domain.entityProviderAddress, 'ENTITY_PROVIDER_ADDRESS'),
+    requireUint(domain.boardEpoch, 'BOARD_EPOCH'),
+  ] as const;
 };
 
 export const encodeCooperativeUpdateHankoPayload = (
@@ -198,14 +248,15 @@ export const encodeEntityTransferHankoPayload = (
   domain: EntityProviderHankoDomain,
   authorization: EntityTransferAuthorization,
 ): string => {
-  const [chainId, entityProviderAddress] = requireEntityProviderDomain(domain);
+  const [chainId, entityProviderAddress, boardEpoch] = requireEntityProviderDomain(domain);
   return ethers.solidityPacked(
-    ['string', 'uint256', 'address', 'uint256', 'address', 'uint256', 'uint256', 'uint256'],
+    ['string', 'uint256', 'address', 'uint256', 'uint256', 'address', 'uint256', 'uint256', 'uint256'],
     [
       ENTITY_TRANSFER_HANKO_LABEL,
       chainId,
       entityProviderAddress,
       requireUint(authorization.entityNumber, 'ENTITY_NUMBER'),
+      boardEpoch,
       requireAddress(authorization.to, 'TRANSFER_RECIPIENT'),
       requireUint(authorization.tokenId, 'TOKEN_ID'),
       requireUint(authorization.amount, 'AMOUNT'),
@@ -218,18 +269,93 @@ export const encodeReleaseControlSharesHankoPayload = (
   domain: EntityProviderHankoDomain,
   authorization: ReleaseControlSharesAuthorization,
 ): string => {
-  const [chainId, entityProviderAddress] = requireEntityProviderDomain(domain);
+  const [chainId, entityProviderAddress, boardEpoch] = requireEntityProviderDomain(domain);
   return ethers.solidityPacked(
-    ['string', 'uint256', 'address', 'uint256', 'address', 'uint256', 'uint256', 'bytes32', 'uint256'],
+    ['string', 'uint256', 'address', 'uint256', 'uint256', 'address', 'uint256', 'uint256', 'bytes32', 'uint256'],
     [
       RELEASE_CONTROL_SHARES_HANKO_LABEL,
       chainId,
       entityProviderAddress,
       requireUint(authorization.entityNumber, 'ENTITY_NUMBER'),
+      boardEpoch,
       requireAddress(authorization.depositoryAddress, 'RELEASE_DEPOSITORY_ADDRESS'),
       requireUint(authorization.controlAmount, 'CONTROL_AMOUNT'),
       requireUint(authorization.dividendAmount, 'DIVIDEND_AMOUNT'),
       ethers.keccak256(ethers.toUtf8Bytes(authorization.purpose)),
+      requireUint(authorization.actionNonce, 'ACTION_NONCE'),
+    ],
+  );
+};
+
+export const encodeCancelEntityProviderActionHankoPayload = (
+  domain: EntityProviderHankoDomain,
+  authorization: CancelEntityProviderActionAuthorization,
+): string => {
+  const [chainId, entityProviderAddress, boardEpoch] = requireEntityProviderDomain(domain);
+  const cancelledActionKind = requireUint(
+    authorization.cancelledActionKind,
+    'CANCELLED_ACTION_KIND',
+  );
+  if (cancelledActionKind > 1n) {
+    throw new Error(`INVALID_HANKO_CANCELLED_ACTION_KIND:${cancelledActionKind.toString()}`);
+  }
+  if (
+    !/^0x[0-9a-fA-F]{64}$/.test(authorization.cancelledActionHash) ||
+    authorization.cancelledActionHash.toLowerCase() === `0x${'00'.repeat(32)}`
+  ) {
+    throw new Error(`INVALID_HANKO_CANCELLED_ACTION_HASH:${authorization.cancelledActionHash}`);
+  }
+  return ethers.solidityPacked(
+    ['string', 'uint256', 'address', 'uint256', 'uint256', 'uint256', 'bytes32', 'uint8'],
+    [
+      CANCEL_ENTITY_PROVIDER_ACTION_HANKO_LABEL,
+      chainId,
+      entityProviderAddress,
+      requireUint(authorization.entityNumber, 'ENTITY_NUMBER'),
+      boardEpoch,
+      requireUint(authorization.actionNonce, 'ACTION_NONCE'),
+      authorization.cancelledActionHash,
+      cancelledActionKind,
+    ],
+  );
+};
+
+export const encodeBoardProposalHankoPayload = (
+  domain: EntityProviderHankoDomain,
+  authorization: BoardProposalAuthorization,
+): string => {
+  const [chainId, entityProviderAddress, boardEpoch] = requireEntityProviderDomain(domain);
+  return ABI_CODER.encode(
+    ['bytes32', 'uint256', 'address', 'bytes32', 'uint256', 'bytes32', 'uint8', 'uint256'],
+    [
+      BOARD_PROPOSAL_HANKO_DOMAIN,
+      chainId,
+      entityProviderAddress,
+      authorization.entityId,
+      boardEpoch,
+      authorization.newBoardHash,
+      requireBoardAuthority(authorization.authority, 'BOARD_AUTHORITY'),
+      requireUint(authorization.actionNonce, 'ACTION_NONCE'),
+    ],
+  );
+};
+
+export const encodeBoardProposalCancelHankoPayload = (
+  domain: EntityProviderHankoDomain,
+  authorization: BoardProposalCancelAuthorization,
+): string => {
+  const [chainId, entityProviderAddress, boardEpoch] = requireEntityProviderDomain(domain);
+  return ABI_CODER.encode(
+    ['bytes32', 'uint256', 'address', 'bytes32', 'uint256', 'bytes32', 'uint8', 'uint8', 'uint256'],
+    [
+      BOARD_PROPOSAL_CANCEL_HANKO_DOMAIN,
+      chainId,
+      entityProviderAddress,
+      authorization.entityId,
+      boardEpoch,
+      authorization.proposedBoardHash,
+      requireBoardAuthority(authorization.proposedBy, 'PROPOSED_BY'),
+      requireBoardAuthority(authorization.cancelledBy, 'CANCELLED_BY'),
       requireUint(authorization.actionNonce, 'ACTION_NONCE'),
     ],
   );
@@ -266,3 +392,15 @@ export const hashEntityTransferHankoPayload = (
 export const hashReleaseControlSharesHankoPayload = (
   ...args: Parameters<typeof encodeReleaseControlSharesHankoPayload>
 ): string => ethers.keccak256(encodeReleaseControlSharesHankoPayload(...args));
+
+export const hashCancelEntityProviderActionHankoPayload = (
+  ...args: Parameters<typeof encodeCancelEntityProviderActionHankoPayload>
+): string => ethers.keccak256(encodeCancelEntityProviderActionHankoPayload(...args));
+
+export const hashBoardProposalHankoPayload = (
+  ...args: Parameters<typeof encodeBoardProposalHankoPayload>
+): string => ethers.keccak256(encodeBoardProposalHankoPayload(...args));
+
+export const hashBoardProposalCancelHankoPayload = (
+  ...args: Parameters<typeof encodeBoardProposalCancelHankoPayload>
+): string => ethers.keccak256(encodeBoardProposalCancelHankoPayload(...args));

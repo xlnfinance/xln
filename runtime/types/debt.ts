@@ -2,14 +2,7 @@ export type DebtStatus = 'open' | 'paid' | 'forgiven';
 
 export type DebtEventType = 'DebtCreated' | 'DebtEnforced' | 'DebtForgiven';
 
-export interface DebtUpdate {
-  eventType: DebtEventType;
-  blockNumber: number;
-  transactionHash: string;
-  amountDelta: bigint;
-  remainingAmount: bigint;
-}
-
+/** One active on-chain obligation. Terminal history lives in the bounded Runtime activity WAL. */
 export interface DebtEntry {
   debtId: string;
   tokenId: number;
@@ -20,14 +13,12 @@ export interface DebtEntry {
   createdAmount: bigint;
   paidAmount: bigint;
   remainingAmount: bigint;
-  forgivenAmount: bigint;
   createdDebtIndex: number;
-  currentDebtIndex?: number | null;
-  status: DebtStatus;
+  currentDebtIndex: number;
+  status: 'open';
   createdAtBlock: number;
   createdTxHash: string;
   lastUpdatedBlock: number;
   lastUpdatedTxHash: string;
   lastEventType: DebtEventType;
-  updates: DebtUpdate[];
 }

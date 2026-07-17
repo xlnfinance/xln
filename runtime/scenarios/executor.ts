@@ -5,6 +5,7 @@
  */
 
 import type { Env, EntityInput, RuntimeTx, ConsensusConfig } from '../types.js';
+import { ethers } from 'ethers';
 import type {
   ActionParam,
   Scenario,
@@ -16,13 +17,81 @@ import type {
 } from './types.js';
 import { mergeAndSortEvents } from './parser.js';
 import { namedParamsToObject, getPositionalParams } from './types.js';
-import { createNumberedEntity } from '../entity/factory.js';
-import { getAvailableJurisdictions } from '../jurisdiction/config.js';
+import { getSignerAddress, getSignerPrivateKey } from '../account/crypto.js';
+import {
+  getTrustedRegistrationAdapter,
+} from '../entity/factory.js';
+import {
+  buildNumberedRegistrationRequest,
+  runNumberedRegistrationIntent,
+} from '../entity/numbered-registration-intent.js';
+import { resolveRuntimeJurisdictionConfig } from '../jurisdiction/jurisdiction-runtime.js';
 import { safeStringify } from '../protocol/serialization.js';
-import { commitRuntimeInput, waitScenario } from './helpers';
+import { commitRuntimeInput, processJEvents, waitScenario } from './helpers';
 
 let payRandomCounter = 0;
 type ImportReplicaData = Extract<RuntimeTx, { type: 'importReplica' }>['data'];
+
+const scenarioBoardSigner = (env: Env, alias: string): string => {
+  const signer = getSignerAddress(env, alias)?.toLowerCase();
+  if (!signer) throw new Error(`SCENARIO_BOARD_SIGNER_UNAVAILABLE:${alias}`);
+  return signer;
+};
+
+export const resolveScenarioNumberedRegistrationContext = async (
+  env: Env,
+  jurisdiction: NonNullable<ConsensusConfig['jurisdiction']>,
+) => {
+  const payerSignerId = String(env.runtimeId || '').trim().toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(payerSignerId)) {
+    throw new Error(`SCENARIO_NUMBERED_REGISTRATION_PAYER_INVALID:${payerSignerId || 'missing'}`);
+  }
+  getSignerPrivateKey(env, payerSignerId);
+  const jadapter = getTrustedRegistrationAdapter(env, jurisdiction);
+  if (!jadapter.isWatching()) throw new Error('SCENARIO_NUMBERED_REGISTRATION_WATCHER_REQUIRED');
+  const nativeBalance = await jadapter.provider.getBalance(payerSignerId);
+  if (nativeBalance <= 0n) {
+    throw new Error(`SCENARIO_NUMBERED_REGISTRATION_PAYER_UNFUNDED:${payerSignerId}`);
+  }
+  return { jadapter, payerSignerId } as const;
+};
+
+type ScenarioRegistrationDefinition = Parameters<typeof buildNumberedRegistrationRequest>[1]['entities'][number];
+
+const scenarioRegistrationIntentId = (
+  context: ScenarioExecutionContext,
+  actionIndex: number,
+  kind: 'import' | 'grid',
+): string => ethers.id(`xln.scenario.numbered-registration.v1:${context.scenario.seed}:${actionIndex}:${kind}`);
+
+const registerScenarioEntities = async (
+  env: Env,
+  context: ScenarioExecutionContext,
+  actionIndex: number,
+  kind: 'import' | 'grid',
+  jurisdiction: NonNullable<ConsensusConfig['jurisdiction']>,
+  definitions: readonly ScenarioRegistrationDefinition[],
+) => {
+  const { jadapter, payerSignerId } = await resolveScenarioNumberedRegistrationContext(env, jurisdiction);
+  const request = buildNumberedRegistrationRequest(env, {
+    intentId: scenarioRegistrationIntentId(context, actionIndex, kind),
+    jurisdiction,
+    payerSignerId,
+    entities: definitions,
+  });
+  const results = await runNumberedRegistrationIntent(
+    env,
+    jadapter,
+    request,
+    runtimeTxs => commitRuntimeInput(env, { runtimeTxs, entityInputs: [] }).then(() => undefined),
+    () => processJEvents(env),
+  );
+  for (const result of results) {
+    const signerId = result.config.validators[0]!;
+    jadapter.registerEntityWallet?.(result.entityId, ethers.hexlify(getSignerPrivateKey(env, signerId)));
+  }
+  return results;
+};
 
 /**
  * Execute a scenario and generate runtime frames
@@ -43,6 +112,7 @@ export async function executeScenario(
   const context: ScenarioExecutionContext = {
     scenario,
     currentFrameIndex: 0,
+    currentActionIndex: 0,
     totalFrames: 0,
     elapsedTime: 0,
     entityMapping: new Map(), // scenario entity ID -> actual address
@@ -114,7 +184,8 @@ async function executeEvent(
   context: ScenarioExecutionContext
 ): Promise<void> {
   for (const action of event.actions) {
-    await executeAction(env, action, context);
+    const actionIndex = context.currentActionIndex++;
+    await executeAction(env, action, context, actionIndex);
   }
 
   // Apply narrative metadata to latest snapshot
@@ -145,17 +216,18 @@ async function executeEvent(
 async function executeAction(
   env: Env,
   action: ScenarioAction,
-  context: ScenarioExecutionContext
+  context: ScenarioExecutionContext,
+  actionIndex: number,
 ): Promise<void> {
   const { type, entityId, params } = action;
 
   switch (type) {
     case 'import':
-      await handleImport(params, context, env);
+      await handleImport(params, context, env, actionIndex);
       break;
 
     case 'grid':
-      await handleGrid(params, context, env);
+      await handleGrid(params, context, env, actionIndex);
       break;
 
     case 'payRandom':
@@ -193,32 +265,18 @@ async function executeAction(
  * Import entities (create numbered entities)
  *
  * This is the critical function that:
- * 1. Gets current max entity number
- * 2. Creates NEW entities continuing from that number
- * 3. Imports them into EXISTING runtime state (additive, not replacement)
- * 4. Creates snapshots with narrative metadata
+ * 1. Registers new entities through the Env's trusted jurisdiction adapter
+ * 2. Imports them into existing runtime state (additive, not replacement)
+ * 3. Creates snapshots with narrative metadata
  */
 async function handleImport(
   params: ActionParam[],
   context: ScenarioExecutionContext,
-  env: Env
+  env: Env,
+  actionIndex: number,
 ): Promise<void> {
-  const jurisdictions = await getAvailableJurisdictions();
-  if (!jurisdictions || jurisdictions.length === 0) {
-    throw new Error('No jurisdictions available');
-  }
-
-  const arrakis = jurisdictions.find(j => j.name.toLowerCase() === 'arrakis');
-  if (!arrakis) {
-    throw new Error('Arrakis jurisdiction not found');
-  }
-
-  // CRITICAL: Get current max entity number from the active jurisdiction adapter
-  const { connectJurisdictionAdapter } = await import('../jadapter');
-  const jadapter = await connectJurisdictionAdapter(arrakis);
-  const currentMaxNumber = Number(await jadapter.entityProvider.nextNumber());
-
-  console.log(`  🔢 Current max entity number: ${currentMaxNumber - 1}, next will be: ${currentMaxNumber}`);
+  const jurisdiction = resolveRuntimeJurisdictionConfig(env);
+  if (!jurisdiction) throw new Error('SCENARIO_NUMBERED_REGISTRATION_JURISDICTION_MISSING');
 
   // Separate entity IDs from position metadata
   const entityIds: string[] = [];
@@ -232,18 +290,6 @@ async function handleImport(
     }
   }
 
-  const runtimeTxs: RuntimeTx[] = [];
-  const scenarioIdToGlobalId = new Map<string, number>();
-
-  // Map scenario IDs (1,2,3...) to global entity numbers
-  for (let i = 0; i < entityIds.length; i++) {
-    const scenarioId = entityIds[i];
-    if (!scenarioId) continue;
-    const globalEntityNumber = currentMaxNumber + i;
-    scenarioIdToGlobalId.set(scenarioId, globalEntityNumber);
-  }
-
-  // Filter entities that need registration
   const entitiesToRegister = entityIds.filter(id => id && !context.entityMapping.has(id));
 
   if (entitiesToRegister.length === 0) {
@@ -251,45 +297,28 @@ async function handleImport(
     return;
   }
 
-  // OPTIMIZATION: Use batch registration for large imports (>= 10 entities)
-  let results: Array<{ config: ConsensusConfig; entityNumber: number; entityId: string }>;
+  const position = positionData && ('x' in positionData || 'y' in positionData || 'z' in positionData)
+    ? {
+        x: parseFloat(positionData['x'] || '0'),
+        y: parseFloat(positionData['y'] || '0'),
+        z: parseFloat(positionData['z'] || '0'),
+      }
+    : undefined;
+  const results = await registerScenarioEntities(
+    env,
+    context,
+    actionIndex,
+    'import',
+    jurisdiction,
+    entitiesToRegister.map(scenarioId => ({
+      name: `Entity-${scenarioId}`,
+      profileName: `Entity-${scenarioId}`,
+      validators: [scenarioBoardSigner(env, scenarioId)],
+      threshold: 1n,
+      ...(position ? { position } : {}),
+    })),
+  );
 
-  if (entitiesToRegister.length >= 10) {
-    console.log(`  🚀 Batch registering ${entitiesToRegister.length} entities in ONE transaction...`);
-
-    const { createNumberedEntitiesBatch } = await import('../entity/factory.js');
-    results = await createNumberedEntitiesBatch(
-      entitiesToRegister.map(scenarioId => {
-        const signerId = String(scenarioId);
-        return {
-          name: `Entity-${scenarioId}`,
-          validators: [signerId],
-          threshold: 1n,
-        };
-      }),
-      arrakis
-    );
-
-    console.log(`  ✅ Batch registered ${results.length} entities in single block!`);
-  } else {
-    console.log(`  🚀 Registering ${entitiesToRegister.length} entities (parallel)...`);
-
-    // For small batches, use parallel individual registration
-    const registrationPromises = entitiesToRegister.map(scenarioId => {
-      const signerId = String(scenarioId);
-      return createNumberedEntity(
-        `Entity-${scenarioId}`,
-        [signerId],
-        1n,
-        arrakis
-      );
-    });
-
-    results = await Promise.all(registrationPromises);
-    console.log(`  ✅ All ${results.length} entities registered`);
-  }
-
-  // Process results and build serverTxs
   for (let i = 0; i < results.length; i++) {
     const result = results[i];
     const scenarioId = entitiesToRegister[i];
@@ -298,40 +327,10 @@ async function handleImport(
     context.entityMapping.set(scenarioId, result.entityId);
     console.log(`  ✅ import scenario=${scenarioId} → entity#${result.entityNumber} (${result.entityId.slice(0, 10)}...)`);
 
-    let position: { x: number; y: number; z: number } | undefined;
-    if (positionData && ('x' in positionData || 'y' in positionData || 'z' in positionData)) {
-      position = {
-        x: parseFloat(positionData['x'] || '0'),
-        y: parseFloat(positionData['y'] || '0'),
-        z: parseFloat(positionData['z'] || '0'),
-      };
-      console.log(`  📍 Positioned at (${position.x}, ${position.y}, ${position.z})`);
-    }
-
-    // Add to batch for runtime import
-    runtimeTxs.push({
-      type: 'importReplica',
-      entityId: result.entityId,
-      signerId: String(scenarioId),
-      data: {
-        config: result.config,
-        isProposer: true,
-        profileName: `Entity-${scenarioId}`,
-        ...(position ? { position } : {}),
-      },
-    });
+    if (position) console.log(`  📍 Positioned at (${position.x}, ${position.y}, ${position.z})`);
   }
-
-  // Import all entities into EXISTING runtime state (additive!)
-  if (runtimeTxs.length > 0) {
-    await commitRuntimeInput(env, {
-      runtimeTxs,
-      entityInputs: [],
-    });
-
-    console.log(`  📦 Added ${runtimeTxs.length} entities to existing runtime state`);
-    console.log(`  🌐 Total entities now: ${env.eReplicas.size}`);
-  }
+  console.log(`  📦 Added ${results.length} entities to existing runtime state`);
+  console.log(`  🌐 Total entities now: ${env.eReplicas.size}`);
 }
 
 /**
@@ -341,7 +340,8 @@ async function handleImport(
 async function handleGrid(
   params: ActionParam[],
   context: ScenarioExecutionContext,
-  env: Env
+  env: Env,
+  _actionIndex: number,
 ): Promise<void> {
   const positional = getPositionalParams(params);
   const named = namedParamsToObject(params);
@@ -367,9 +367,9 @@ async function handleGrid(
     return handleLazyGrid(X, Y, Z, spacing, context, env);
   }
 
-  const jurisdictions = await getAvailableJurisdictions();
-  const arrakis = jurisdictions.find(j => j.name.toLowerCase() === 'arrakis');
-  if (!arrakis) throw new Error('Arrakis jurisdiction not found');
+  const jurisdiction = resolveRuntimeJurisdictionConfig(env);
+  if (!jurisdiction) throw new Error('SCENARIO_NUMBERED_REGISTRATION_JURISDICTION_MISSING');
+  const { payerSignerId } = await resolveScenarioNumberedRegistrationContext(env, jurisdiction);
 
   // Helper to compute entity ID from grid coordinates
   const gridId = (x: number, y: number, z: number) => `${x}_${y}_${z}`;
@@ -409,9 +409,10 @@ async function handleGrid(
           continue; // Already created in previous grid
         }
 
+        const signerAlias = String(1_000_001 + x + (y * 1_000) + (z * 1_000_000));
         entities.push({
           name: `Grid-${id}`,
-          validators: [`g${id}`],
+          validators: [scenarioBoardSigner(env, signerAlias)],
           threshold: 1n
         });
 
@@ -436,7 +437,7 @@ async function handleGrid(
 
   // Batch create all entities
   const { createNumberedEntitiesBatch } = await import('../entity/factory.js');
-  const results = await createNumberedEntitiesBatch(entities, arrakis);
+  const results = await createNumberedEntitiesBatch(entities, jurisdiction, env, payerSignerId);
 
   // Store mappings and build runtimeTxs with positions
   const runtimeTxs: RuntimeTx[] = [];
@@ -776,6 +777,19 @@ async function handlePayRandom(
     const amountRange = maxAmount - minAmount;
     const offset = amountRange > 0n ? BigInt(sequence) % amountRange : 0n;
     const amount = minAmount + offset;
+    const routes = await env.gossip.getNetworkGraph().findPaths(
+      sourceEntityId,
+      destEntityId,
+      amount,
+      token,
+    );
+    const route = routes.find((candidate) => {
+      const hops = candidate.path.length - 1;
+      return hops >= minHops && hops <= maxHops;
+    })?.path;
+    if (!route) {
+      throw new Error(`SCENARIO_PAYMENT_ROUTE_NOT_FOUND:${sourceEntityId}:${destEntityId}`);
+    }
 
     console.log(`  💸 Payment ${i + 1}/${count}: ${sourceEntityId.slice(0,8)} → ${destEntityId.slice(0,8)} (${amount} tokens)`);
 
@@ -788,7 +802,7 @@ async function handlePayRandom(
           targetEntityId: destEntityId,
           tokenId: token,
           amount: amount,
-          route: [], // Will be auto-calculated
+          route,
           description: `Random payment #${i + 1}`
         }
       }]

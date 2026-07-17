@@ -1,10 +1,16 @@
 import { ethers } from 'ethers';
+import { asHankoBytes32, encodeSignedHanko } from '../../../../runtime/hanko/codec';
+import {
+  hashHankoBoardClaim,
+  resolveHankoBoardDelays,
+  verifyCanonicalHanko,
+} from '../../../../runtime/hanko/claims';
+import type { HankoHex } from '../../../../runtime/types/hanko';
 
 export const RELEASE_SIGNATURE_DOMAIN = 'xln:foundation-release:v1';
 
-const BOARD_ABI = ['tuple(uint16 votingThreshold,bytes32[] entityIds,uint16[] votingPowers,uint32 boardChangeDelay,uint32 controlChangeDelay,uint32 dividendChangeDelay)'];
-const HANKO_ABI = ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'];
 const RELEASE_ENVELOPE_ABI = ['tuple(bytes32 domainHash,string version,string sourceCommit,bytes32 codeSnapshotRoot,bytes32 frozenCoreRoot,string generatedAt)'];
+const HANKO_BOARD_DELAYS = resolveHankoBoardDelays();
 
 export type FoundationReleaseMember = {
   label: string;
@@ -15,7 +21,7 @@ export type FoundationReleaseMember = {
 export type FoundationReleaseBoard = {
   schemaVersion: 1;
   name: 'xln Foundation';
-  providerCompatibility: 'EntityProvider.HankoBytes.v1';
+  providerCompatibility: 'EntityProvider.HankoBytes.v2';
   threshold: number;
   members: FoundationReleaseMember[];
   boardHash: string;
@@ -84,10 +90,10 @@ export type ReleaseManifestPolicyClaim = {
   releases: ReleaseManifestClaim[];
 };
 
-type DecodedClaim = readonly [string, readonly bigint[], readonly bigint[], bigint];
-type DecodedHanko = readonly [readonly [readonly string[], string, readonly DecodedClaim[]]];
-
-const addressEntityId = (address: string): string => ethers.zeroPadValue(ethers.getAddress(address), 32).toLowerCase();
+const addressEntityId = (address: string): HankoHex => asHankoBytes32(
+  ethers.zeroPadValue(ethers.getAddress(address), 32),
+  'RELEASE_MEMBER_ENTITY_ID',
+);
 
 // This compiled-in entity id is the trust anchor. Never default to attestation.board:
 // an attacker can create a fresh 2-of-3 board and produce a perfectly valid self-signature.
@@ -98,7 +104,7 @@ export const FOUNDATION_RELEASE_BOARD_ENTITY_ID = '0xca0c2edf3058b14ab9e7ac05aac
 // built from. A release-integrity test keeps this floor equal to the root VERSION.
 export const CURRENT_XLN_RELEASE_VERSION = '0.1.8';
 
-export function computeFoundationBoardHash(threshold: number, members: FoundationReleaseMember[]): string {
+export function computeFoundationBoardHash(threshold: number, members: FoundationReleaseMember[]): HankoHex {
   if (!Number.isInteger(threshold) || threshold <= 0 || threshold > 0xffff) throw new Error('RELEASE_BOARD_INVALID_THRESHOLD');
   if (!members.length) throw new Error('RELEASE_BOARD_EMPTY');
   const addresses = members.map((member) => addressEntityId(member.address));
@@ -106,7 +112,15 @@ export function computeFoundationBoardHash(threshold: number, members: Foundatio
     if (!Number.isInteger(member.weight) || member.weight <= 0 || member.weight > 0xffff) throw new Error(`RELEASE_BOARD_INVALID_WEIGHT:${member.label}`);
     return member.weight;
   });
-  return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(BOARD_ABI, [[threshold, addresses, weights, 0, 0, 0]])).toLowerCase();
+  return hashHankoBoardClaim({
+    entityId: asHankoBytes32(ethers.ZeroHash, 'RELEASE_LAZY_ENTITY_ID'),
+    members: addresses.map((entityId, index) => ({
+      entityId,
+      weight: BigInt(weights[index]!),
+    })),
+    threshold: BigInt(threshold),
+    delays: HANKO_BOARD_DELAYS,
+  });
 }
 
 export function createFoundationReleaseBoard(addresses: string[], threshold = 2): FoundationReleaseBoard {
@@ -115,7 +129,7 @@ export function createFoundationReleaseBoard(addresses: string[], threshold = 2)
   return {
     schemaVersion: 1,
     name: 'xln Foundation',
-    providerCompatibility: 'EntityProvider.HankoBytes.v1',
+    providerCompatibility: 'EntityProvider.HankoBytes.v2',
     threshold,
     members,
     boardHash,
@@ -216,12 +230,19 @@ function modulesEqual(left: Record<string, ReleaseMetricsClaim>, right: Record<s
 export function requiresFoundationAttestation(version: string): boolean {
   const parts = semverParts(version);
   if (!parts) return true;
-  const minimum = [0, 1, 7];
+  const minimum = [0, 1, 9];
   for (let index = 0; index < minimum.length; index += 1) {
     if (parts[index]! !== minimum[index]!) return parts[index]! > minimum[index]!;
   }
   return true;
 }
+
+const hasHistoricalHankoRecord = (version: string): boolean => {
+  const parts = semverParts(version);
+  if (!parts) return false;
+  return compareReleaseVersions(version, '0.1.7') >= 0 &&
+    compareReleaseVersions(version, '0.1.9') < 0;
+};
 
 function trustedBoardHash(expectedBoard: FoundationReleaseBoard | string): string {
   if (typeof expectedBoard === 'string') {
@@ -243,52 +264,38 @@ export function isCanonicalFoundationBoard(board: FoundationReleaseBoard): boole
   }
 }
 
-function packSignatures(signatures: ethers.Signature[]): string {
-  const rs = signatures.flatMap((signature) => [ethers.getBytes(signature.r), ethers.getBytes(signature.s)]);
-  const vBytes = new Uint8Array(Math.ceil(signatures.length / 8));
-  signatures.forEach((signature, index) => {
-    if (signature.yParity === 1) vBytes[Math.floor(index / 8)]! |= 1 << (index % 8);
-  });
-  return ethers.hexlify(ethers.concat([...rs, vBytes]));
-}
-
-function unpackSignatures(packed: string): ethers.Signature[] {
-  const bytes = ethers.getBytes(packed);
-  let count = 0;
-  for (let candidate = 1; candidate <= 16000; candidate += 1) {
-    const expected = candidate * 64 + Math.ceil(candidate / 8);
-    if (expected === bytes.length) { count = candidate; break; }
-    if (expected > bytes.length) break;
-  }
-  if (!count) throw new Error('RELEASE_HANKO_INVALID_PACKED_SIGNATURE_LENGTH');
-  const vOffset = count * 64;
-  return Array.from({ length: count }, (_, index) => {
-    const r = ethers.hexlify(bytes.slice(index * 64, index * 64 + 32));
-    const s = ethers.hexlify(bytes.slice(index * 64 + 32, index * 64 + 64));
-    const yParity = ((bytes[vOffset + Math.floor(index / 8)]! >> (index % 8)) & 1) as 0 | 1;
-    return ethers.Signature.from({ r, s, yParity });
-  });
-}
-
 export function buildReleaseHanko(envelopeHash: string, board: FoundationReleaseBoard, privateKeys: string[]): { hanko: string; signerCount: number } {
   const byAddress = new Map(privateKeys.map((privateKey) => {
-    const key = new ethers.SigningKey(privateKey);
-    return [ethers.computeAddress(key.publicKey).toLowerCase(), key] as const;
+    const address = ethers.computeAddress(new ethers.SigningKey(privateKey).publicKey).toLowerCase();
+    return [address, privateKey] as const;
   }));
-  const signers = board.members.filter((member) => byAddress.has(member.address.toLowerCase())).slice(0, board.threshold);
-  if (signers.reduce((sum, member) => sum + member.weight, 0) < board.threshold) throw new Error('RELEASE_HANKO_INSUFFICIENT_KEYS');
+  const signers: FoundationReleaseMember[] = [];
+  let signedPower = 0;
+  for (const member of board.members) {
+    if (signedPower >= board.threshold) break;
+    if (!byAddress.has(member.address.toLowerCase())) continue;
+    signers.push(member);
+    signedPower += member.weight;
+  }
+  if (signedPower < board.threshold) throw new Error('RELEASE_HANKO_INSUFFICIENT_KEYS');
   const nonSigners = board.members.filter((member) => !signers.includes(member));
-  const signatures = signers.map((member) => byAddress.get(member.address.toLowerCase())!.sign(envelopeHash));
   const placeholders = nonSigners.map((member) => addressEntityId(member.address));
   const signerIndexes = new Map(signers.map((member, index) => [member.address.toLowerCase(), placeholders.length + index]));
   const placeholderIndexes = new Map(nonSigners.map((member, index) => [member.address.toLowerCase(), index]));
   const entityIndexes = board.members.map((member) => signerIndexes.get(member.address.toLowerCase()) ?? placeholderIndexes.get(member.address.toLowerCase())!);
-  const hanko = ethers.AbiCoder.defaultAbiCoder().encode(HANKO_ABI, [[
+  const hanko = encodeSignedHanko({
+    digest: envelopeHash,
+    privateKeys: signers.map((member) => ethers.getBytes(byAddress.get(member.address.toLowerCase())!)),
     placeholders,
-    packSignatures(signatures),
-    [[board.entityId, entityIndexes, board.members.map((member) => member.weight), board.threshold]],
-  ]]);
-  return { hanko, signerCount: signatures.length };
+    claims: [{
+      entityId: asHankoBytes32(board.entityId, 'RELEASE_BOARD_ENTITY_ID'),
+      entityIndexes: entityIndexes.map((index) => BigInt(index)),
+      weights: board.members.map((member) => BigInt(member.weight)),
+      threshold: BigInt(board.threshold),
+      ...HANKO_BOARD_DELAYS,
+    }],
+  });
+  return { hanko, signerCount: signers.length };
 }
 
 export function verifyReleaseAttestation(
@@ -301,32 +308,21 @@ export function verifyReleaseAttestation(
     const expectedBoardHash = trustedBoardHash(expectedBoard);
     const boardHash = computeFoundationBoardHash(attestation.board.threshold, attestation.board.members);
     if (boardHash !== expectedBoardHash || boardHash !== attestation.board.boardHash.toLowerCase() || boardHash !== attestation.board.entityId.toLowerCase()) return false;
-    const decoded = ethers.AbiCoder.defaultAbiCoder().decode(HANKO_ABI, attestation.hanko) as unknown as DecodedHanko;
-    const [placeholdersRaw, packed, claims] = decoded[0];
-    if (claims.length !== 1) return false;
-    const [entityId, indexesRaw, weightsRaw, thresholdRaw] = claims[0]!;
-    const signatures = unpackSignatures(packed);
-    if (signatures.length !== attestation.signerCount) return false;
-    const recovered = signatures.map((signature) => ethers.recoverAddress(attestation.envelopeHash, signature).toLowerCase());
-    const placeholders = placeholdersRaw.map((value) => value.toLowerCase());
-    const indexes = indexesRaw.map(Number);
-    const weights = weightsRaw.map(Number);
-    const threshold = Number(thresholdRaw);
-    if (entityId.toLowerCase() !== boardHash || threshold !== attestation.board.threshold) return false;
-    if (indexes.length !== attestation.board.members.length || weights.length !== indexes.length) return false;
-    let eoaWeight = 0;
-    const reconstructed = indexes.map((index, boardIndex) => {
-      if (index < placeholders.length) return placeholders[index]!;
-      const signerIndex = index - placeholders.length;
-      const signer = recovered[signerIndex];
-      if (!signer) throw new Error('RELEASE_HANKO_INDEX_OUT_OF_BOUNDS');
-      eoaWeight += weights[boardIndex]!;
-      return addressEntityId(signer);
+    if (attestation.board.providerCompatibility !== 'EntityProvider.HankoBytes.v2') return false;
+    const verified = verifyCanonicalHanko({
+      digest: attestation.envelopeHash,
+      hanko: attestation.hanko,
+      expectedTargetEntityId: boardHash,
     });
+    if (verified.signatures.length !== attestation.signerCount || verified.claims.length !== 1) return false;
+    const claim = verified.claims[0]!;
     const expectedEntities = attestation.board.members.map((member) => addressEntityId(member.address));
-    return reconstructed.every((value, index) => value === expectedEntities[index]) &&
-      weights.every((value, index) => value === attestation.board.members[index]!.weight) &&
-      eoaWeight >= threshold;
+    return claim.members.length === expectedEntities.length &&
+      claim.members.every((member, index) => (
+        member.entityId === expectedEntities[index] &&
+        member.weight === BigInt(attestation.board.members[index]!.weight)
+      )) && claim.threshold === BigInt(attestation.board.threshold) &&
+      Object.values(claim.delays).every((delay) => delay === 0n);
   } catch {
     return false;
   }
@@ -352,12 +348,22 @@ export function verifyReleaseSnapshot(
     if (!hasCanonicalSnapshotIdentity(snapshot) ||
       !metricsEqual(snapshot.repository.metrics, snapshot.tree.metrics) ||
       !snapshotModules(snapshot)) return false;
-    // 0.1.5/0.1.6 predate Foundation Hanko. Every release from 0.1.7 onward fails closed.
-    if (!snapshot.attestation) return !requiresFoundationAttestation(snapshot.release.version);
-    if (!snapshot.frozenCore || !verifyReleaseAttestation(snapshot.attestation, expectedBoard)) return false;
+    if (!requiresFoundationAttestation(snapshot.release.version) &&
+      !hasHistoricalHankoRecord(snapshot.release.version)) return true;
     if (typeof snapshot.repository.merkleRoot !== 'string') return false;
     const computedRoot = computeCodeSnapshotRoot(snapshot.files);
     if (computedRoot !== snapshot.repository.merkleRoot.toLowerCase()) return false;
+    // Historical v1 attestations remain immutable catalog evidence, but the
+    // breaking v2 claim ABI never treats them as current authorization.
+    if (!requiresFoundationAttestation(snapshot.release.version)) {
+      return Boolean(snapshot.attestation && snapshot.frozenCore && envelopeMatches(snapshot.attestation, {
+        ...snapshot.release,
+        codeSnapshotRoot: computedRoot,
+        frozenCoreRoot: snapshot.frozenCore.rootHash,
+      }));
+    }
+    if (!snapshot.attestation || !snapshot.frozenCore ||
+      !verifyReleaseAttestation(snapshot.attestation, expectedBoard)) return false;
     return envelopeMatches(snapshot.attestation, {
       ...snapshot.release,
       codeSnapshotRoot: computedRoot,
@@ -375,8 +381,18 @@ export function verifyReleaseManifestEntry(
   try {
     if (!hasCanonicalManifestIdentity(entry) || !metricEntries(entry.metrics)) return false;
     if (!entry.modules || Object.values(entry.modules).some((metrics) => !metricEntries(metrics))) return false;
-    if (!entry.attestation) return !requiresFoundationAttestation(entry.version);
-    if (!entry.codeSnapshotRoot || !entry.frozenCore || !verifyReleaseAttestation(entry.attestation, expectedBoard)) return false;
+    if (!requiresFoundationAttestation(entry.version)) {
+      if (!hasHistoricalHankoRecord(entry.version)) return true;
+      return Boolean(entry.attestation && entry.codeSnapshotRoot && entry.frozenCore && envelopeMatches(entry.attestation, {
+        version: entry.version,
+        sourceCommit: entry.sourceCommit,
+        generatedAt: entry.generatedAt,
+        codeSnapshotRoot: entry.codeSnapshotRoot,
+        frozenCoreRoot: entry.frozenCore.rootHash,
+      }));
+    }
+    if (!entry.attestation || !entry.codeSnapshotRoot || !entry.frozenCore ||
+      !verifyReleaseAttestation(entry.attestation, expectedBoard)) return false;
     return envelopeMatches(entry.attestation, {
       version: entry.version,
       sourceCommit: entry.sourceCommit,
@@ -401,7 +417,8 @@ export function verifyReleaseManifestPolicy(
     const highest = [...versions].sort(compareReleaseVersions).at(-1);
     if (!highest || highest !== manifest.latest) return false;
     if (compareReleaseVersions(manifest.latest, minimumLatest) < 0) return false;
-    if (!manifest.releases.some((release) => requiresFoundationAttestation(release.version) && release.attestation)) return false;
+    const v2Releases = manifest.releases.filter((release) => requiresFoundationAttestation(release.version));
+    if (v2Releases.length > 0 && v2Releases.some((release) => !release.attestation)) return false;
     return manifest.releases.every((release) => verifyReleaseManifestEntry(release, expectedBoard));
   } catch {
     return false;

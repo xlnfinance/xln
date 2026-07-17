@@ -1,18 +1,16 @@
 import {
   CROSS_J_MAX_FILL_RATIO,
   buildCrossJurisdictionCloseProof,
-  buildCrossJurisdictionPullBinding,
-  buildCrossJurisdictionPullReveal,
   cloneCrossJurisdictionRoute,
   getCrossJurisdictionCommittedFillAmounts,
-  getCrossJurisdictionPrivateSeed,
   transitionCrossJurisdictionRouteStatus,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../extensions/cross-j/index';
+import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { buildCrossJurisdictionCancelAck } from '../../../extensions/cross-j/orderbook';
 import { removeBookOrderById } from '../../../orderbook/cross-j';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
-import type { AccountMachine, CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env } from '../../../types';
+import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env } from '../../../types';
 import { formatEntityId } from '../../../utils';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import {
@@ -25,6 +23,7 @@ import { pushCrossJurisdictionEntityOutput } from '../cross-j-outputs';
 import type { MempoolOp } from './account';
 
 type CrossJurisdictionClearTx = Extract<EntityTx, { type: 'requestCrossJurisdictionClear' }>;
+type CrossJurisdictionClearMaterializationTx = Extract<EntityTx, { type: 'materializeCrossJurisdictionClear' }>;
 
 type CrossJurisdictionClearResult = {
   newState: EntityState;
@@ -42,20 +41,18 @@ const cancelOrderbookOfferIfPresent = (
   offerId: string,
 ): boolean => removeBookOrderById(env, state, `${accountId}:${offerId}`);
 
-const syncSourcePullBinding = (
-  account: AccountMachine,
-  route: CrossJurisdictionSwapRoute,
-): void => {
-  const offer = account.swapOffers?.get(route.orderId);
-  if (offer?.crossJurisdiction) {
-    offer.crossJurisdiction = cloneCrossJurisdictionRoute(route);
-  }
-  const pullId = route.sourcePull?.pullId;
-  if (!pullId) return;
-  const pull = account.pulls?.get(pullId);
-  if (!pull) return;
-  pull.crossJurisdiction = buildCrossJurisdictionPullBinding(route, 'source');
-};
+const closeProofMatches = (
+  left: CrossJurisdictionClearMaterializationTx['data']['proof'],
+  right: CrossJurisdictionClearMaterializationTx['data']['proof'],
+): boolean => left.orderId === right.orderId &&
+  left.routeHash.toLowerCase() === right.routeHash.toLowerCase() &&
+  left.sourcePullId === right.sourcePullId &&
+  left.targetPullId === right.targetPullId &&
+  left.fillRatio === right.fillRatio &&
+  left.cumulativeSourceAmount === right.cumulativeSourceAmount &&
+  left.cumulativeTargetAmount === right.cumulativeTargetAmount &&
+  left.binaryHash.toLowerCase() === right.binaryHash.toLowerCase() &&
+  left.closeMode === right.closeMode;
 
 const pushCrossJOutput = (
   env: Env,
@@ -155,7 +152,6 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
     }
     const proof = buildCrossJurisdictionCloseProof(canonicalRoute, '0x');
     if (accountId && account?.pulls?.has(canonicalRoute.sourcePull.pullId)) {
-      syncSourcePullBinding(account, canonicalRoute);
       mempoolOps.push({
         accountId,
         tx: {
@@ -195,58 +191,111 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
     return { newState, outputs, mempoolOps };
   }
 
-  let reveal;
-  try {
-    reveal = buildCrossJurisdictionPullReveal(
-      canonicalRoute,
-      ratio,
-      getCrossJurisdictionPrivateSeed(env, canonicalRoute),
-    );
-  } catch (error) {
+  const closeRemainder = cancelRemainder || ratio < CROSS_J_MAX_FILL_RATIO;
+  const requestedAt = deterministicEntityTimestamp(newState, env);
+  transitionCrossJurisdictionRouteStatus(canonicalRoute, 'clear_requested', requestedAt);
+  canonicalRoute.pendingClearRequestedAt = requestedAt;
+  canonicalRoute.clearingPolicy = closeRemainder ? 'cancel_and_clear' : ratio >= CROSS_J_MAX_FILL_RATIO ? 'full_fill' : 'manual';
+  newState.crossJurisdictionSwaps?.set(orderId, canonicalRoute);
+  const firstValidator = entityState.config.validators[0];
+  if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
+  addMessage(newState, `🌉 Cross-j clear ${orderId} awaiting proposer reveal ratio=${ratio}/${CROSS_J_MAX_FILL_RATIO}`);
+  return { newState, outputs, mempoolOps };
+};
+
+/**
+ * Apply only proposer-authored public reveal bytes. The private ladder seed is
+ * deliberately absent from deterministic replay; every validator verifies the
+ * exact binary and proof against the already-committed source pull hashes.
+ */
+export const handleMaterializeCrossJurisdictionClearEntityTx = (
+  env: Env,
+  entityState: EntityState,
+  entityTx: CrossJurisdictionClearMaterializationTx,
+): CrossJurisdictionClearResult => {
+  const { orderId, binary, proof } = entityTx.data;
+  const expectedProposer = normalizeEntityRef(entityState.config.validators[0] || '');
+  const claimedProposer = normalizeEntityRef(entityTx.data.proposerSignerId);
+  if (!expectedProposer || claimedProposer !== expectedProposer) {
     throw new Error(
-      `CROSS_J_CLEAR_REVEAL_FAILED: order=${orderId} ${error instanceof Error ? error.message : String(error)}`,
+      `CROSS_J_CLEAR_MATERIALIZE_PROPOSER_INVALID:${claimedProposer || 'missing'}:${expectedProposer || 'missing'}`,
     );
   }
-  const closeRemainder = cancelRemainder || ratio < CROSS_J_MAX_FILL_RATIO;
-  const proof = buildCrossJurisdictionCloseProof(canonicalRoute, reveal.binary);
-  syncSourcePullBinding(account, canonicalRoute);
+  const newState = cloneEntityState(entityState);
+  const outputs: EntityInput[] = [];
+  const mempoolOps: MempoolOp[] = [];
+  const storedRoute = newState.crossJurisdictionSwaps?.get(orderId);
+  if (!storedRoute || storedRoute.status !== 'clear_requested') {
+    throw new Error(`CROSS_J_CLEAR_MATERIALIZE_INTENT_MISSING:${orderId}`);
+  }
+  const route = withCanonicalCrossJurisdictionRouteHash(storedRoute);
+  if (!route.sourcePull || !route.targetPull) {
+    throw new Error(`CROSS_J_CLEAR_MATERIALIZE_PULLS_MISSING:${orderId}`);
+  }
+  if (normalizeEntityRef(route.source.counterpartyEntityId) !== normalizeEntityRef(newState.entityId)) {
+    throw new Error(`CROSS_J_CLEAR_MATERIALIZE_SOURCE_HUB_MISMATCH:${orderId}`);
+  }
+  const { fillRatio } = getCrossJurisdictionCommittedFillAmounts(route);
+  if (fillRatio <= 0) throw new Error(`CROSS_J_CLEAR_MATERIALIZE_FILL_MISSING:${orderId}`);
+  let decodedRatio: number;
+  try {
+    decodedRatio = verifyHashLadderBinary({
+      fullHash: route.sourcePull.fullHash,
+      partialRoot: route.sourcePull.partialRoot,
+    }, binary).fillRatio;
+  } catch (error) {
+    throw new Error(
+      `CROSS_J_CLEAR_MATERIALIZE_BINARY_INVALID:${orderId}:` +
+        `${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (decodedRatio !== fillRatio) {
+    throw new Error(`CROSS_J_CLEAR_MATERIALIZE_RATIO_MISMATCH:${orderId}:${decodedRatio}:${fillRatio}`);
+  }
+  const expectedProof = buildCrossJurisdictionCloseProof(route, binary);
+  if (!closeProofMatches(proof, expectedProof)) {
+    throw new Error(`CROSS_J_CLEAR_MATERIALIZE_PROOF_MISMATCH:${orderId}`);
+  }
+  const accountId = findAccountKey(newState, route.source.entityId);
+  const account = accountId ? newState.accounts.get(accountId) : undefined;
+  if (!accountId || !account?.pulls?.has(route.sourcePull.pullId)) {
+    throw new Error(`CROSS_J_CLEAR_MATERIALIZE_SOURCE_PULL_MISSING:${orderId}`);
+  }
+  if (account.swapOffers?.has(orderId)) {
+    throw new Error(`CROSS_J_CLEAR_MATERIALIZE_OFFER_STILL_OPEN:${orderId}`);
+  }
+  if (accountHasPullResolveQueued(account, route.sourcePull.pullId)) {
+    throw new Error(`CROSS_J_CLEAR_MATERIALIZE_ALREADY_QUEUED:${orderId}`);
+  }
+
   mempoolOps.push({
     accountId,
     tx: {
       type: 'cross_pull_close',
-      data: {
-        pullId: canonicalRoute.sourcePull.pullId,
-        binary: reveal.binary,
-        proof,
-      },
+      data: { pullId: route.sourcePull.pullId, binary, proof: expectedProof },
     },
   });
-
-  const sourceSavingsAmount = canonicalRoute.priceImprovementSourceAmount ?? 0n;
+  const sourceSavingsAmount = route.priceImprovementSourceAmount ?? 0n;
   if (sourceSavingsAmount > 0n) {
     mempoolOps.push({
       accountId,
       tx: {
         type: 'direct_payment',
         data: {
-          tokenId: Number(canonicalRoute.source.tokenId),
+          tokenId: Number(route.source.tokenId),
           amount: sourceSavingsAmount,
           route: [],
           description: `cross-j-source-savings:${orderId}`,
-          fromEntityId: canonicalRoute.source.counterpartyEntityId,
-          toEntityId: canonicalRoute.source.entityId,
+          fromEntityId: route.source.counterpartyEntityId,
+          toEntityId: route.source.entityId,
         },
       },
     });
   }
-
-  const requestedAt = deterministicEntityTimestamp(newState, env);
-  transitionCrossJurisdictionRouteStatus(canonicalRoute, 'clearing', requestedAt);
-  canonicalRoute.pendingClearRequestedAt = requestedAt;
-  canonicalRoute.clearingPolicy = closeRemainder ? 'cancel_and_clear' : ratio >= CROSS_J_MAX_FILL_RATIO ? 'full_fill' : 'manual';
-  newState.crossJurisdictionSwaps?.set(orderId, canonicalRoute);
+  transitionCrossJurisdictionRouteStatus(route, 'clearing', deterministicEntityTimestamp(newState, env));
+  newState.crossJurisdictionSwaps?.set(orderId, route);
   const firstValidator = entityState.config.validators[0];
   if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
-  addMessage(newState, `🌉 Cross-j clear ${orderId} queued ratio=${ratio}/${CROSS_J_MAX_FILL_RATIO}`);
+  addMessage(newState, `🌉 Cross-j clear ${orderId} queued verified ratio=${fillRatio}/${CROSS_J_MAX_FILL_RATIO}`);
   return { newState, outputs, mempoolOps };
 };

@@ -21,13 +21,16 @@
   import { errorLog } from '../../stores/errorLogStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { toasts } from '$lib/stores/toastStore';
-  import { keccak256, AbiCoder, hexlify } from 'ethers';
+  import { runtimeCommandLatestReceipt } from '$lib/stores/runtimeCommandBus';
+  import { classifyRuntimeFailure } from '$lib/utils/runtimeFailure';
   import EntityInput from '../shared/EntityInput.svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
   import EntityIdentity from '../shared/EntityIdentity.svelte';
   import { parseXlnInvoice, type ParsedXlnInvoice } from '$lib/utils/xlnInvoice';
+  import { parseTokenAmountInput, tokenAmountInputErrorMessage } from './token-amount-input';
+  import { requireTokenDecimals } from './token-metadata';
   import {
-    extractEntityEncPubKey,
+    hasCertifiedEntityEncryptionManifest,
     findProfileByEntityId,
     getDirectionalEdgeCapacity,
     normalizeEntityId,
@@ -82,6 +85,9 @@
   let routes: RouteOption[] = [];
   let selectedRouteIndex = -1;
   let preflightError: string | null = null;
+  let pendingPaymentCommandId: string | null = null;
+  let paymentPendingMessage = '';
+  let paymentPendingToastId: string | null = null;
   let repeatIntervalMs = 0;
   let repeatArmed = false;
   let repeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -119,10 +125,7 @@
     direction: 'incoming' | 'outgoing';
   };
 
-  type SendPaymentResult = {
-    queued: boolean;
-    hashlock: string | null;
-  };
+  type SendPaymentResult = { queued: boolean };
   type BarcodeDetectorLike = {
     detect(source: CanvasImageSource): Promise<Array<{ rawValue?: string }>>;
   };
@@ -355,6 +358,7 @@
 
   onDestroy(() => {
     clearRepeatTimer();
+    if (paymentPendingToastId) toasts.remove(paymentPendingToastId);
     if (autoRouteRetryTimer) {
       clearTimeout(autoRouteRetryTimer);
       autoRouteRetryTimer = null;
@@ -444,7 +448,7 @@
     // Routeability is a transport/security property, not a display-metadata property.
     // A hop is routeable iff we can encrypt for it and it is hub-like when profile exists.
     if (paymentView.blockedCounterpartyIds.has(normalizeEntityId(entity))) return false;
-    if (!extractEntityEncPubKey(currentReplicas, getGossipProfiles(), entity)) return false;
+    if (!hasCertifiedEntityEncryptionManifest(currentReplicas, getGossipProfiles(), entity)) return false;
     const profile = getGossipProfileByEntityId(entity);
     if (!profile) return true; // allow local+gossip mixed discovery; key coverage is enforced above
     return profile.metadata.isHub === true;
@@ -502,16 +506,6 @@
     return `${negative ? '-' : ''}${body}`;
   }
 
-  // Generate HTLC secret/hashlock pair (browser-side, outside consensus)
-  function generateSecretHashlock(): { secret: string; hashlock: string } {
-    const bytes = new Uint8Array(32);
-    crypto.getRandomValues(bytes);
-    const secret = hexlify(bytes);
-    const abiCoder = AbiCoder.defaultAbiCoder();
-    const hashlock = keccak256(abiCoder.encode(['bytes32'], [secret]));
-    return { secret, hashlock };
-  }
-
   type AdjacencyBuildResult = {
     adjacency: Map<string, Set<string>>;
     canonicalIds: Map<string, string>;
@@ -566,36 +560,12 @@
     return { adjacency, canonicalIds };
   }
 
-  function parseAmountToWei(input: string, decimals = 18): bigint {
-    const normalized = input.trim();
-    if (!normalized) {
-      throw new Error('Amount must be a positive decimal number');
-    }
-    let dotCount = 0;
-    for (let index = 0; index < normalized.length; index += 1) {
-      const char = normalized[index]!;
-      const isDigit = char >= '0' && char <= '9';
-      if (isDigit) continue;
-      if (char === '.') {
-        dotCount += 1;
-        continue;
-      }
-      throw new Error('Amount must be a positive decimal number');
-    }
-    if (dotCount > 1 || normalized === '.' || normalized.startsWith('.') || normalized.endsWith('.')) {
-      throw new Error('Amount must be a positive decimal number');
-    }
-    const [wholeRaw = '0', fracRaw = ''] = normalized.split('.');
-    const whole = BigInt(wholeRaw);
-    const frac = fracRaw.slice(0, decimals).padEnd(decimals, '0');
-    const fracValue = frac.length > 0 ? BigInt(frac) : 0n;
-    return whole * (10n ** BigInt(decimals)) + fracValue;
-  }
-
   function getTokenDecimals(tokenIdValue: number): number {
-    const tokenInfo = activeXlnFunctions?.getTokenInfo?.(tokenIdValue);
-    const decimals = Number(tokenInfo?.decimals);
-    return Number.isFinite(decimals) && decimals >= 0 ? decimals : 18;
+    if (!activeXlnFunctions) throw new Error(`TOKEN_METADATA_READER_UNAVAILABLE:token:${tokenIdValue}`);
+    return requireTokenDecimals(
+      activeXlnFunctions.getTokenInfo(tokenIdValue).decimals,
+      `token:${tokenIdValue}`,
+    );
   }
 
   function hasOutboundCapacity(from: string, to: string, token: number): boolean {
@@ -774,7 +744,7 @@
       const msg = `Recipient ${targetEntityId} has no downloaded gossip profile`;
       return { code: 'PAYMENT_PREFLIGHT_PROFILE_MISSING', message: msg };
     }
-    if (!extractEntityEncPubKey(currentReplicas, profiles, targetEntityId)) {
+    if (!hasCertifiedEntityEncryptionManifest(currentReplicas, profiles, targetEntityId)) {
       const msg = `Recipient ${targetEntityId} profile has no encryption key`;
       return { code: 'PAYMENT_PREFLIGHT_KEY_MISSING', message: msg, details: { targetProfile } };
     }
@@ -831,7 +801,7 @@
   function getMissingRouteKeys(path: string[]): string[] {
     const missingSet = new Set<string>();
     for (const hopEntity of path.slice(1)) {
-      if (!extractEntityEncPubKey(currentReplicas, getGossipProfiles(), hopEntity)) {
+      if (!hasCertifiedEntityEncryptionManifest(currentReplicas, getGossipProfiles(), hopEntity)) {
         missingSet.add(hopEntity);
       }
     }
@@ -996,7 +966,7 @@
       await refreshGossipOnDemand('route-preflight', [entityId, targetEntityId]);
       await ensureRecipientProfileReady();
 
-      const amountInSmallestUnit = parseAmountToWei(amount, getTokenDecimals(tokenId));
+      const amountInSmallestUnit = parseTokenAmountInput(amount, getTokenDecimals(tokenId));
       if (amountInSmallestUnit <= 0n) {
         throw new Error('Amount must be greater than zero');
       }
@@ -1161,7 +1131,7 @@
       return routes.length > 0;
     } catch (error) {
       logPaymentDiagnostic('Payment route finding failed', error, { silent });
-      preflightError = (error as Error)?.message || 'Unknown route preflight error';
+      preflightError = tokenAmountInputErrorMessage(error);
       if (!silent) {
         toasts.error(`Route finding failed: ${preflightError}`);
       }
@@ -1233,19 +1203,20 @@
   }
 
   async function payNowCheapestTracked(): Promise<SendPaymentResult> {
-    if (sendingPayment || findingRoutes) return { queued: false, hashlock: null };
-    if (isSelfRecipient) return { queued: false, hashlock: null };
+    if (sendingPayment || findingRoutes) return { queued: false };
+    if (isSelfRecipient) return { queued: false };
     await findRoutes(false);
-    if (routes.length === 0) return { queued: false, hashlock: null };
+    if (routes.length === 0) return { queued: false };
     selectedRouteIndex = 0;
     return await sendPayment(true);
   }
 
   async function sendPayment(manual = true): Promise<SendPaymentResult> {
-    if (selectedRouteIndex < 0 || !routes[selectedRouteIndex]) return { queued: false, hashlock: null };
-    if (sendingPayment) return { queued: false, hashlock: null };
+    if (selectedRouteIndex < 0 || !routes[selectedRouteIndex]) return { queued: false };
+    if (sendingPayment) return { queued: false };
 
     sendingPayment = true;
+    const priorRuntimeReceiptId = $runtimeCommandLatestReceipt?.receiptId ?? null;
     let queued = false;
     try {
       if (!activeIsLive) throw new Error('Payments are only available in LIVE mode');
@@ -1273,8 +1244,6 @@
       if (isTrusted && !trustedGatewayEntityId) {
         throw new Error('Trusted delivery requires a route through a recipient gateway');
       }
-      const secretPair = isTrusted ? null : generateSecretHashlock();
-      const queuedHashlock: string | null = secretPair?.hashlock ?? null;
       const paymentInput: EntityInputPayload = {
         entityId,
         signerId: resolvedSignerId,
@@ -1298,8 +1267,6 @@
                 tokenId,
                 amount: route.recipientAmount,
                 route: route.path,
-                secret: secretPair!.secret,
-                hashlock: secretPair!.hashlock,
                 deliveryMode: conditionalDeliveryMode,
                 ...(descriptionValue ? { description: descriptionValue } : {}),
               },
@@ -1309,19 +1276,33 @@
       if (!submitRuntimeInput) throw new Error('Payment command path is not connected');
       await submitRuntimeInput({ runtimeTxs: [], entityInputs: [paymentInput], jInputs: [] });
       queued = true;
-      return { queued: true, hashlock: queuedHashlock };
+      return { queued: true };
     } catch (error) {
       logPaymentDiagnostic('Payment submission failed', error, {
         manual,
         selectedRouteIndex,
         selectedRoutePath: routes[selectedRouteIndex]?.path || [],
       });
-      preflightError = (error as Error)?.message || 'Unknown send error';
-      if (!manual) {
-        stopRepeatTimer(preflightError);
+      const failure = classifyRuntimeFailure(error);
+      const latestReceipt = $runtimeCommandLatestReceipt;
+      if (
+        failure.kind === 'defer'
+        && latestReceipt?.mode === 'remote'
+        && latestReceipt.failureRetryable
+        && latestReceipt.receiptId !== priorRuntimeReceiptId
+      ) {
+        pendingPaymentCommandId = latestReceipt.commandId;
+        paymentPendingMessage = 'Payment confirmation pending. Reconnect or unlock to resume the original payment; do not send a second payment.';
+        preflightError = null;
+        stopRepeatTimer(paymentPendingMessage);
+        if (paymentPendingToastId) toasts.remove(paymentPendingToastId);
+        paymentPendingToastId = toasts.warning(paymentPendingMessage, 0);
+      } else {
+        preflightError = failure.message || 'Unknown send error';
+        if (!manual) stopRepeatTimer(preflightError);
+        toasts.error(`Payment failed: ${preflightError}`);
       }
-      toasts.error(`Payment failed: ${preflightError}`);
-      return { queued: false, hashlock: null };
+      return { queued: false };
     } finally {
       sendingPayment = false;
       if (manual && queued && repeatIntervalMs > 0) {
@@ -1380,12 +1361,36 @@
     repeatStoppedReason = '';
   }
 
+  $: if (
+    pendingPaymentCommandId
+    && $runtimeCommandLatestReceipt?.commandId === pendingPaymentCommandId
+  ) {
+    const receipt = $runtimeCommandLatestReceipt;
+    if (receipt.status === 'observed' || receipt.status === 'committed') {
+      if (paymentPendingToastId) toasts.remove(paymentPendingToastId);
+      paymentPendingToastId = null;
+      pendingPaymentCommandId = null;
+      paymentPendingMessage = '';
+      preflightError = null;
+      flashPaySuccess(0);
+      toasts.success('Payment confirmed.');
+    } else if (receipt.status === 'error' && !receipt.failureRetryable) {
+      if (paymentPendingToastId) toasts.remove(paymentPendingToastId);
+      paymentPendingToastId = null;
+      pendingPaymentCommandId = null;
+      paymentPendingMessage = '';
+      preflightError = receipt.error || 'Payment was rejected';
+      toasts.error(`Payment failed: ${preflightError}`);
+    }
+  }
+
   $: canPayNow =
     !!targetEntityId &&
     !!amount &&
     activeIsLive &&
     !findingRoutes &&
     !sendingPayment &&
+    !pendingPaymentCommandId &&
     !paySuccess &&
     !preflightError &&
     (deliveryMode !== 'trusted' || !activeRoute || activeRoute.path.length >= 3) &&
@@ -1400,6 +1405,7 @@
 
   $: payButtonLabel = (() => {
     if (paySuccess) return '';
+    if (pendingPaymentCommandId) return 'Payment pending...';
     if (sendingPayment) return 'Sending...';
     if (findingRoutes) return 'Finding route...';
     if (activeRoute && amount) return `Pay ${amount} ${getTokenSymbol(tokenId)}`;
@@ -1467,7 +1473,9 @@
     </div>
   </div>
 
-  {#if invoiceError || preflightError}
+  {#if paymentPendingMessage}
+    <div class="form-pending" role="status">{paymentPendingMessage}</div>
+  {:else if invoiceError || preflightError}
     <div class="form-error">{invoiceError || preflightError}</div>
   {/if}
 
@@ -1621,16 +1629,20 @@
     <button
       class="btn-pay"
       class:success={paySuccess}
-      class:sending={sendingPayment}
+      class:sending={sendingPayment || Boolean(pendingPaymentCommandId)}
       class:finding={findingRoutes && !sendingPayment}
-      aria-label={paySuccess ? 'Payment complete' : 'Pay now'}
+      aria-label={paySuccess
+        ? 'Payment complete'
+        : pendingPaymentCommandId
+          ? 'Payment confirmation pending'
+          : 'Pay now'}
       on:click={() => void payUsingCurrentIntent()}
       disabled={!canPayNow}
     >
       {#if paySuccess}
         <Check size={20} strokeWidth={2.5} />
         <span>Paid{paySuccessMs ? ` in ${paySuccessMs}ms` : ''}</span>
-      {:else if sendingPayment || findingRoutes}
+      {:else if sendingPayment || findingRoutes || pendingPaymentCommandId}
         <span class="pay-spinner"></span>
         <span>{payButtonLabel}</span>
       {:else}
@@ -1802,6 +1814,15 @@
     border: 1px solid rgba(127, 29, 29, 0.5);
     background: rgba(69, 10, 10, 0.6);
     color: #fecaca;
+    border-radius: 10px;
+    padding: 8px 14px;
+    font-size: 12px;
+    margin: 4px 0;
+  }
+  .form-pending {
+    border: 1px solid rgba(180, 125, 20, 0.5);
+    background: rgba(70, 45, 8, 0.55);
+    color: #fde68a;
     border-radius: 10px;
     padding: 8px 14px;
     font-size: 12px;

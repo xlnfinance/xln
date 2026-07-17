@@ -1,5 +1,6 @@
 import type { JAdapter, JAdapterConfig } from './types';
 import { createJAdapter } from './index';
+import { classifyJAdapterFailure } from './failure';
 
 type RetryOptions = {
   attempts?: number;
@@ -8,9 +9,6 @@ type RetryOptions = {
   factory?: (config: JAdapterConfig) => Promise<JAdapter>;
   onRetry?: (attempt: number, attempts: number, error: unknown) => void;
 };
-
-const TRANSIENT_JADAPTER_STARTUP_RE =
-  /ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|Failed to fetch|NetworkError|Load failed/i;
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -26,7 +24,7 @@ const errorText = (error: unknown): string => {
 };
 
 export const isTransientJAdapterStartupError = (error: unknown): boolean =>
-  TRANSIENT_JADAPTER_STARTUP_RE.test(errorText(error));
+  classifyJAdapterFailure(error).category === 'transient';
 
 export async function createJAdapterWithRetry(
   config: JAdapterConfig,

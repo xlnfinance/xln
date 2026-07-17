@@ -1162,7 +1162,6 @@ xln/
       handlers/account.ts              ${fileSizes['runtime/entity/tx/handlers/account.ts'] || '?'} lines - Account operations
       handlers/r2c.ts                  ${fileSizes['runtime/entity/tx/handlers/r2c.ts'] || '?'} lines - R2C deposits
       handlers/htlc-payment.ts         ${fileSizes['runtime/entity/tx/handlers/htlc-payment.ts'] || '?'} lines - HTLC routing
-      handlers/create-settlement.ts    ${fileSizes['runtime/entity/tx/handlers/create-settlement.ts'] || '?'} lines - Settlement creation
       handlers/mint-reserves.ts        ${fileSizes['runtime/entity/tx/handlers/mint-reserves.ts'] || '?'} lines - Reserve minting
 
     account/tx/

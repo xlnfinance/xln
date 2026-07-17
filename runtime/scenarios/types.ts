@@ -119,6 +119,7 @@ export interface ScenarioWarning {
 export interface ScenarioExecutionContext {
   scenario: Scenario;
   currentFrameIndex: number;
+  currentActionIndex: number;
   totalFrames: number;
   elapsedTime: number; // Seconds
   entityMapping: Map<string, string>; // scenario ID -> actual entity address

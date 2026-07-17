@@ -6,7 +6,6 @@
 import type {
   AccountFrame,
   AccountMachine,
-  AccountSettleAction,
   AccountTx,
   DebtEntry,
   EntityReplica,
@@ -22,9 +21,19 @@ import type { ProofBodyStruct } from '../jurisdictions/typechain-types/contracts
 import { HEAVY_LOGS } from './utils';
 import { validateEntityReplica, validateEntityState } from './validation-utils';
 import { safeStringify } from './protocol/serialization';
+import {
+  cloneIsolatedEntityInput,
+  cloneIsolatedEntityLeaderCertificate,
+  cloneIsolatedEntityLeaderTimeoutVote,
+  cloneIsolatedProposedEntityFrame,
+} from './protocol/runtime-input-clone';
+import {
+  cloneIsolatedAccountFrame,
+  cloneIsolatedAccountInput,
+} from './protocol/account-input-clone';
 import { isLeftEntity } from './entity/id';
 import { getAccountFrameHistoryView, setAccountFrameHistoryView } from './machine/env-events';
-import { getCachedSignerPrivateKey } from './account/crypto';
+import { getLocalSignerPrivateKey } from './account/crypto';
 import { cloneJBatch, type CompletedBatch, type JBatchState } from './jurisdiction/batch';
 import {
   cloneCrossJurisdictionBookAdmission,
@@ -99,14 +108,21 @@ const cloneCrossJurisdictionRoutesInAccount = (account: AccountMachine, source: 
       cloneCrossJurisdictionSwapOfferRoute(offer),
     ]),
   );
-  account.pulls = new Map(
-    Array.from((source.pulls ?? new Map()).entries()).map(([id, pull]) => [
-      id,
-      pull.crossJurisdiction
-        ? { ...pull, crossJurisdiction: cloneCrossJurisdictionPullBinding(pull.crossJurisdiction) }
-        : { ...pull },
-    ]),
-  );
+  if (source.pulls instanceof Map) {
+    account.pulls = new Map(
+      Array.from(source.pulls.entries()).map(([id, pull]) => [
+        id,
+        pull.crossJurisdiction
+          ? { ...pull, crossJurisdiction: cloneCrossJurisdictionPullBinding(pull.crossJurisdiction) }
+          : { ...pull },
+      ]),
+    );
+  } else {
+    // `pulls` is optional consensus state. Turning absence into an empty Map
+    // during a snapshot changes the canonical Entity state root and can make a
+    // valid persisted H0 anchor conflict with its own freshly cloned replica.
+    delete account.pulls;
+  }
   if (source.swapOrderHistory instanceof Map) {
     account.swapOrderHistory = new Map(
       Array.from(source.swapOrderHistory.entries()).map(([id, entry]) => [
@@ -126,7 +142,7 @@ const cloneCrossJurisdictionRoutesInAccount = (account: AccountMachine, source: 
 };
 
 // Message size limit for snapshot efficiency
-const MESSAGE_LIMIT = 10;
+export const ENTITY_MESSAGE_HISTORY_LIMIT = 100;
 
 /**
  * CANONICAL ACCOUNT KEY: Bilateral accounts stored in sorted form (left < right)
@@ -160,7 +176,7 @@ export function getAccountPerspective(account: AccountMachine, myEntityId: strin
  */
 export function addMessage(state: EntityState, message: string): void {
   state.messages.push(message);
-  if (state.messages.length > MESSAGE_LIMIT) {
+  if (state.messages.length > ENTITY_MESSAGE_HISTORY_LIMIT) {
     state.messages.shift(); // Remove oldest message
   }
 }
@@ -180,7 +196,15 @@ type FingerprintableTx = {
 };
 
 export function txFingerprint(tx: FingerprintableTx): string {
-  return `${tx.type}:${safeStringify(tx.data)}`;
+  if (tx.type !== 'consensusOutput' || !tx.data || typeof tx.data !== 'object' || Array.isArray(tx.data)) {
+    return `${tx.type}:${safeStringify(tx.data)}`;
+  }
+  // consumptionProof is a target-proposer witness over the target pre-state.
+  // It is deliberately absent from the transported mempool item and added only
+  // to the proposed frame. Including it would make a committed output impossible
+  // to remove from the mempool, causing an endless idempotent replay loop.
+  const { consumptionProof: _targetWitness, ...certifiedOutput } = tx.data as Record<string, unknown>;
+  return `${tx.type}:${safeStringify(certifiedOutput)}`;
 }
 
 export function removeCommittedTxsFromMempool<T extends FingerprintableTx>(
@@ -221,17 +245,9 @@ const cloneJBatchState = (state: JBatchState): JBatchState => {
   if (state.entityNonce !== undefined) {
     cloned.entityNonce = state.entityNonce;
   }
-  return cloned;
-};
-
-const cloneAccountSettleAction = (action: AccountSettleAction): AccountSettleAction => {
-  const cloned: AccountSettleAction = { type: action.type };
-  if (action.ops) cloned.ops = action.ops.map((op) => ({ ...op }));
-  if (action.executorIsLeft !== undefined) cloned.executorIsLeft = action.executorIsLeft;
-  if (action.hanko !== undefined) cloned.hanko = action.hanko;
-  if (action.memo !== undefined) cloned.memo = action.memo;
-  if (action.version !== undefined) cloned.version = action.version;
-  if (action.nonceAtSign !== undefined) cloned.nonceAtSign = action.nonceAtSign;
+  if (state.autoBroadcastDraft !== undefined) {
+    cloned.autoBroadcastDraft = state.autoBroadcastDraft;
+  }
   return cloned;
 };
 
@@ -274,8 +290,8 @@ export function resolveEntityProposerId(env: Env, entityId: string, context: str
     if (replicaEntityId !== targetEntityId && keyEntityId !== targetEntityId) continue;
     const replicaSignerId = String(replica.signerId || keyParts[1] || '').trim();
     const configuredValidators = replica.state.config.validators || [];
-    if (isEntityActiveLeader(replica) && replicaSignerId && getCachedSignerPrivateKey(replicaSignerId)) return replicaSignerId;
-    if (!localKeyReplicaFallback && replicaSignerId && getCachedSignerPrivateKey(replicaSignerId)) {
+    if (isEntityActiveLeader(replica) && replicaSignerId && getLocalSignerPrivateKey(env, replicaSignerId)) return replicaSignerId;
+    if (!localKeyReplicaFallback && replicaSignerId && getLocalSignerPrivateKey(env, replicaSignerId)) {
       localKeyReplicaFallback = replicaSignerId;
     }
     if (!configFallback) {
@@ -295,7 +311,7 @@ export function resolveEntityProposerId(env: Env, entityId: string, context: str
   }
 
   if (localKeyReplicaFallback) return localKeyReplicaFallback;
-  if (configFallback && getCachedSignerPrivateKey(configFallback)) return configFallback;
+  if (configFallback && getLocalSignerPrivateKey(env, configFallback)) return configFallback;
   if (gossipFallback) return gossipFallback;
   if (configFallback) return configFallback;
 
@@ -325,7 +341,6 @@ const cloneExternalWalletState = (
 
 const cloneDebtEntry = (entry: DebtEntry): DebtEntry => ({
   ...entry,
-  updates: entry.updates.map((update) => ({ ...update })),
 });
 
 const cloneDebtLedger = (
@@ -365,18 +380,7 @@ const cloneLendingState = (lending: LendingState): LendingState => ({
 });
 
 export function cloneAccountFrame(frame: AccountFrame): AccountFrame {
-  try {
-    return structuredClone(frame);
-  } catch {
-    const accountTxs = frame.accountTxs.map(
-      (tx): AccountTx => ({ ...tx, data: tx.data ? structuredClone(tx.data) : tx.data }) as AccountTx,
-    );
-    return {
-      ...frame,
-      accountTxs,
-      deltas: frame.deltas.map((delta) => ({ ...delta })),
-    };
-  }
+  return cloneIsolatedAccountFrame(frame);
 }
 
 const isProofBodyStructLike = (value: unknown): value is ProofBodyStruct => {
@@ -538,6 +542,14 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
     ...entityState,
     entityId: entityState.entityId, // CRITICAL: Explicitly preserve entityId
     nonces: cloneMap(entityState.nonces),
+    ...(entityState.entityCommandNonces
+      ? {
+          entityCommandNonces: {
+            ...entityState.entityCommandNonces,
+            bySigner: cloneMap(entityState.entityCommandNonces.bySigner),
+          },
+        }
+      : {}),
     messages: cloneArray(entityState.messages),
     proposals: new Map(
       Array.from(entityState.proposals.entries()).map(([id, proposal]) => [
@@ -553,9 +565,16 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
       ]),
     ),
     ...(entityState.externalWallet ? { externalWallet: cloneExternalWalletState(entityState.externalWallet) } : {}),
-    deferredAccountProposals: cloneMap(entityState.deferredAccountProposals || new Map()),
-    accountInputQueue: cloneArray(entityState.accountInputQueue || []),
+    ...(entityState.deferredAccountProposals !== undefined
+      ? { deferredAccountProposals: cloneMap(entityState.deferredAccountProposals) }
+      : {}),
+    ...(entityState.accountInputQueue !== undefined
+      ? { accountInputQueue: cloneArray(entityState.accountInputQueue) }
+      : {}),
     ...(entityState.jBatchState ? { jBatchState: cloneJBatchState(entityState.jBatchState) } : {}),
+    ...(entityState.entityProviderActionState
+      ? { entityProviderActionState: structuredClone(entityState.entityProviderActionState) }
+      : {}),
     ...(Array.isArray(entityState.batchHistory)
       ? { batchHistory: entityState.batchHistory.map((entry) => cloneBatchHistoryEntry(entry as CompletedBatch)) }
       : {}),
@@ -564,6 +583,9 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
     jBlockChain: cloneArray(entityState.jBlockChain || []),
     ...(entityState.jHistoryFinality
       ? { jHistoryFinality: structuredClone(entityState.jHistoryFinality) }
+      : {}),
+    ...(entityState.certifiedBoardState
+      ? { certifiedBoardState: { ...entityState.certifiedBoardState } }
       : {}),
     // Crontab state is part of entity state, but it remains declarative:
     // task metadata + scheduled hooks only. Handlers are rebound from the static
@@ -616,6 +638,19 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
     ...(entityState.crossJurisdictionBookAdmissions
       ? { crossJurisdictionBookAdmissions: new Map(Array.from(entityState.crossJurisdictionBookAdmissions.entries()).map(([id, admission]) => [id, cloneCrossJurisdictionBookAdmission(admission)])) }
       : {}),
+    ...(entityState.consumptionAccumulator
+      ? { consumptionAccumulator: { ...entityState.consumptionAccumulator } }
+      : {}),
+    ...(entityState.certifiedOutputSequences
+      ? {
+          certifiedOutputSequences: new Map(
+            Array.from(entityState.certifiedOutputSequences, ([target, frontier]) => [
+              target,
+              { ...frontier },
+            ]),
+          ),
+        }
+      : {}),
   };
 }
 
@@ -655,6 +690,8 @@ function cloneScheduledHook(hook: ScheduledHook): ScheduledHook {
     case 'watchdog':
       return { ...hook, data: {} };
     case 'hub_rebalance_kick':
+      return { ...hook, data: { ...hook.data } };
+    case 'board_reseal':
       return { ...hook, data: { ...hook.data } };
     case 'cross_j_orderbook_sweep':
       return { ...hook, data: { ...hook.data } };
@@ -740,46 +777,50 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
     signerId: replica.signerId,
     state: cloneEntityState(replica.state, forSnapshot), // forSnapshot excludes clonedForValidation
     mempool: Array.isArray(replica.mempool) ? cloneArray(replica.mempool) : [],
-    ...(replica.proposal && {
-      proposal: {
-        height: replica.proposal.height,
-        txs: cloneArray(replica.proposal.txs),
-        hash: replica.proposal.hash,
-        newState: replica.proposal.newState,
-        leader: structuredClone(replica.proposal.leader),
-        // Stored outputs from proposal time (used at commit, NOT re-applied)
-        ...(replica.proposal.outputs && { outputs: [...replica.proposal.outputs] }),
-        ...(replica.proposal.jOutputs && { jOutputs: [...replica.proposal.jOutputs] }),
-        // Deep clone HashToSign objects (hash, type, context)
-        ...(replica.proposal.hashesToSign && { hashesToSign: replica.proposal.hashesToSign.map(h => ({ ...h })) }),
-        ...(replica.proposal.collectedSigs && { collectedSigs: new Map(Array.from(replica.proposal.collectedSigs.entries()).map(([k, v]) => [k, [...v]])) }),
-        ...(replica.proposal.hankos && { hankos: [...replica.proposal.hankos] }),
-      }
-    }),
-    ...(replica.lockedFrame && {
-      lockedFrame: {
-        height: replica.lockedFrame.height,
-        txs: cloneArray(replica.lockedFrame.txs),
-        hash: replica.lockedFrame.hash,
-        newState: replica.lockedFrame.newState,
-        leader: structuredClone(replica.lockedFrame.leader),
-        // Deep clone HashToSign objects (hash, type, context)
-        ...(replica.lockedFrame.hashesToSign && { hashesToSign: replica.lockedFrame.hashesToSign.map(h => ({ ...h })) }),
-        ...(replica.lockedFrame.collectedSigs && { collectedSigs: new Map(Array.from(replica.lockedFrame.collectedSigs.entries()).map(([k, v]) => [k, [...v]])) }),
-        ...(replica.lockedFrame.hankos && { hankos: [...replica.lockedFrame.hankos] }),
-      }
-    }),
+    ...(replica.proposal && { proposal: cloneIsolatedProposedEntityFrame(replica.proposal) }),
+    ...(replica.lockedFrame && { lockedFrame: cloneIsolatedProposedEntityFrame(replica.lockedFrame) }),
     isProposer: replica.isProposer,
     ...(replica.position && { position: { ...replica.position } }),
-    // SECURITY: Clone validator's computed state for state injection prevention
-    ...(replica.validatorComputedState && { validatorComputedState: cloneEntityState(replica.validatorComputedState) }),
-    ...(replica.leaderVotes && { leaderVotes: new Map(Array.from(replica.leaderVotes.entries()).map(([key, vote]) => [key, { ...vote }])) }),
-    ...(replica.pendingLeaderCertificate && { pendingLeaderCertificate: structuredClone(replica.pendingLeaderCertificate) }),
+    ...(replica.validatorExecution && {
+      validatorExecution: {
+        frameHash: replica.validatorExecution.frameHash,
+        height: replica.validatorExecution.height,
+        state: cloneEntityState(replica.validatorExecution.state),
+        outputs: replica.validatorExecution.outputs.map(cloneIsolatedEntityInput),
+        jOutputs: replica.validatorExecution.jOutputs.map(output => structuredClone(output)),
+        hashesToSign: replica.validatorExecution.hashesToSign.map(hash => ({ ...hash })),
+        ...(replica.validatorExecution.consumptionNodeChanges
+          ? { consumptionNodeChanges: structuredClone(replica.validatorExecution.consumptionNodeChanges) }
+          : {}),
+      },
+    }),
+    ...(replica.certifiedFrameLineage && {
+      certifiedFrameLineage: structuredClone(replica.certifiedFrameLineage),
+    }),
+    ...(replica.certifiedFrameAnchor && {
+      certifiedFrameAnchor: structuredClone(replica.certifiedFrameAnchor),
+    }),
+    ...(replica.hankoWitness && {
+      hankoWitness: new Map(Array.from(replica.hankoWitness.entries()).map(([hash, entry]) => [
+        hash,
+        { ...entry },
+      ])),
+    }),
+    ...(replica.leaderVotes && {
+      leaderVotes: new Map(Array.from(replica.leaderVotes.entries()).map(([key, vote]) => [
+        key,
+        cloneIsolatedEntityLeaderTimeoutVote(vote),
+      ])),
+    }),
+    ...(replica.pendingLeaderCertificate && {
+      pendingLeaderCertificate: cloneIsolatedEntityLeaderCertificate(replica.pendingLeaderCertificate),
+    }),
     ...(replica.lastConsensusProgressAt !== undefined && { lastConsensusProgressAt: replica.lastConsensusProgressAt }),
     ...(replica.jHistory && {
       jHistory: {
         jurisdictionRef: replica.jHistory.jurisdictionRef,
         scannedThroughHeight: replica.jHistory.scannedThroughHeight,
+        contiguousThroughHeight: replica.jHistory.contiguousThroughHeight,
         tipBlockHash: replica.jHistory.tipBlockHash,
         eventBlocks: new Map(Array.from(replica.jHistory.eventBlocks.entries()).map(([height, block]) => [
           height,
@@ -787,6 +828,11 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
         ])),
         blockHashes: new Map(replica.jHistory.blockHashes),
       },
+    }),
+    ...(replica.jPrefixRound && { jPrefixRound: structuredClone(replica.jPrefixRound) }),
+    ...(replica.jSubmitState && { jSubmitState: structuredClone(replica.jSubmitState) }),
+    ...(replica.entityProviderActionSubmitState && {
+      entityProviderActionSubmitState: structuredClone(replica.entityProviderActionSubmitState),
     }),
   }, 'cloneEntityReplica');
 };
@@ -883,20 +929,10 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
       deltas: Array.isArray(proofBody.deltas) ? [...proofBody.deltas] : [],
     },
     disputeConfig: { ...(account.disputeConfig ?? {}) },
-    leftJObservations: (Array.isArray(account.leftJObservations) ? account.leftJObservations : []).map(obs => ({
-      ...obs,
-      events: Array.isArray(obs.events) ? [...obs.events] : [],
-    })),
-    rightJObservations: (Array.isArray(account.rightJObservations) ? account.rightJObservations : []).map(obs => ({
-      ...obs,
-      events: Array.isArray(obs.events) ? [...obs.events] : [],
-    })),
-    jEventChain: (Array.isArray(account.jEventChain) ? account.jEventChain : []).map(entry => ({
-      ...entry,
-      events: Array.isArray(entry.events) ? [...entry.events] : [],
-    })),
+    leftPendingJClaims: { ...account.leftPendingJClaims },
+    rightPendingJClaims: { ...account.rightPendingJClaims },
     lastFinalizedJHeight: account.lastFinalizedJHeight,
-    jNonce: account.jNonce,
+    ...(account.jNonce !== undefined ? { jNonce: account.jNonce } : {}),
     pendingWithdrawals: new Map(account.pendingWithdrawals ?? []), // Phase 2: Clone withdrawal tracking
     requestedRebalance: new Map(account.requestedRebalance ?? []), // Phase 3: Clone rebalance hints
     requestedRebalanceFeeState: new Map(
@@ -905,6 +941,19 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
         { ...feeState },
       ]),
     ),
+    ...(account.rebalanceFeePolicies
+      ? {
+          rebalanceFeePolicies: new Map(
+            Array.from(account.rebalanceFeePolicies.entries()).map(([tokenId, policy]) => [
+              tokenId,
+              {
+                ...(policy.left ? { left: { ...policy.left } } : {}),
+                ...(policy.right ? { right: { ...policy.right } } : {}),
+              },
+            ]),
+          ),
+        }
+      : {}),
     shadow: {
       rebalance: {
         policy: new Map(account.shadow.rebalance.policy),
@@ -927,18 +976,7 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
   }
 
   if (account.pendingAccountInput) {
-    try {
-      result.pendingAccountInput = structuredClone(account.pendingAccountInput);
-    } catch {
-      if (account.pendingAccountInput.kind === 'settle') {
-        result.pendingAccountInput = {
-          ...account.pendingAccountInput,
-          settleAction: cloneAccountSettleAction(account.pendingAccountInput.settleAction),
-        };
-      } else {
-        result.pendingAccountInput = { ...account.pendingAccountInput };
-      }
-    }
+    result.pendingAccountInput = cloneIsolatedAccountInput(account.pendingAccountInput);
   }
 
   if (account.clonedForValidation && !skipClonedForValidation) {
@@ -990,6 +1028,12 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
   if (account.counterpartyFrameHanko) {
     result.counterpartyFrameHanko = account.counterpartyFrameHanko;
   }
+  if (account.boardResealMigration) {
+    result.boardResealMigration = { ...account.boardResealMigration };
+  }
+  if (account.counterpartyBoardReseal) {
+    result.counterpartyBoardReseal = { ...account.counterpartyBoardReseal };
+  }
   if (account.activeDispute) {
     result.activeDispute = { ...account.activeDispute };
   }
@@ -1002,6 +1046,9 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
       }),
       ...(account.settlementWorkspace.compiledForgiveTokenIds && {
         compiledForgiveTokenIds: [...account.settlementWorkspace.compiledForgiveTokenIds],
+      }),
+      ...(account.settlementWorkspace.postSettlementDisputeProof && {
+        postSettlementDisputeProof: { ...account.settlementWorkspace.postSettlementDisputeProof },
       }),
     };
   }

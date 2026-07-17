@@ -116,7 +116,15 @@ export interface IDeltaTransformerInterface extends Interface {
 
   encodeFunctionData(
     functionFragment: "applyBatch",
-    values: [BigNumberish[], BytesLike, BytesLike, BytesLike]
+    values: [
+      BigNumberish[],
+      BigNumberish[],
+      BytesLike,
+      BytesLike,
+      BytesLike,
+      BigNumberish,
+      BigNumberish
+    ]
   ): string;
   encodeFunctionData(
     functionFragment: "encodeBatch",
@@ -200,12 +208,15 @@ export interface IDeltaTransformer extends BaseContract {
   applyBatch: TypedContractMethod<
     [
       deltas: BigNumberish[],
+      tokenIds: BigNumberish[],
       encodedBatch: BytesLike,
       leftArguments: BytesLike,
-      rightArguments: BytesLike
+      rightArguments: BytesLike,
+      leftArgumentsTimestamp: BigNumberish,
+      rightArgumentsTimestamp: BigNumberish
     ],
     [bigint[]],
-    "nonpayable"
+    "view"
   >;
 
   encodeBatch: TypedContractMethod<
@@ -229,12 +240,15 @@ export interface IDeltaTransformer extends BaseContract {
   ): TypedContractMethod<
     [
       deltas: BigNumberish[],
+      tokenIds: BigNumberish[],
       encodedBatch: BytesLike,
       leftArguments: BytesLike,
-      rightArguments: BytesLike
+      rightArguments: BytesLike,
+      leftArgumentsTimestamp: BigNumberish,
+      rightArgumentsTimestamp: BigNumberish
     ],
     [bigint[]],
-    "nonpayable"
+    "view"
   >;
   getFunction(
     nameOrSignature: "encodeBatch"

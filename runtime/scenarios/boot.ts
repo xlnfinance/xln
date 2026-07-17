@@ -7,10 +7,12 @@ import type { Env, JReplica, JTx, JurisdictionConfig } from '../types';
 import type { JAdapter, JAdapterMode } from '../jadapter/types';
 import { ethers } from 'ethers';
 import { createXlnJsonRpcProvider } from '../jadapter';
-import { getCachedSignerPrivateKey } from '../account/crypto';
+import { getSignerPrivateKey, registerSignerKey } from '../account/crypto';
 import { ensureLocalDisputeDelayConfigured } from '../jadapter/local-config';
 import { isLoopbackUrl } from '../networking/loopback-url';
 import { commitRuntimeInput, ensureSignerKeysFromSeed, requireRuntimeSeed, processJEvents, converge, setScenarioStorageEnabled } from './helpers';
+import { getCertifiedBoardStackKey } from '../jurisdiction/board-registry';
+import { registrationEvidenceKey } from '../jurisdiction/registration-evidence';
 
 export type { JAdapterMode };
 
@@ -283,7 +285,7 @@ export async function ensureJAdapter(
     const browserVM = jadapter.getBrowserVM();
     if (browserVM) {
       env.browserVM = browserVM;
-      setBrowserVMJurisdiction(env, jadapter.addresses.depository, browserVM);
+      setBrowserVMJurisdiction(env, jadapter.addresses.depository, jadapter.chainId, browserVM);
     }
   }
 
@@ -321,22 +323,16 @@ export async function bootScenario(config: ScenarioConfig): Promise<ScenarioBoot
 
   // 4. Create jReplica
   const position = config.position ?? { x: 0, y: 600, z: 0 };
-  const jReplica = createJReplica(env, jReplicaName, jadapter.addresses.depository, position);
+  const jReplica = bindScenarioJReplica(
+    env,
+    createJReplica(env, jReplicaName, jadapter.addresses.depository, position),
+    jadapter,
+  );
   if (defaultDisputeDelayBlocks) {
     jReplica.defaultDisputeDelayBlocks = defaultDisputeDelayBlocks;
   }
 
   // 5. Attach jadapter to jReplica (all 4 contract addresses)
-  jReplica.jadapter = jadapter;
-  jReplica.depositoryAddress = jadapter.addresses.depository;
-  jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
-  jReplica.contracts = {
-    depository: jadapter.addresses.depository,
-    entityProvider: jadapter.addresses.entityProvider,
-    account: jadapter.addresses.account,
-    deltaTransformer: jadapter.addresses.deltaTransformer,
-  };
-
   // 6. Start watching (feeds events into env.runtimeInput.entityInputs)
   jadapter.startWatching(env);
 
@@ -361,17 +357,26 @@ export async function bootScenario(config: ScenarioConfig): Promise<ScenarioBoot
 // ENTITY REGISTRATION
 // ============================================================================
 
-/**
- * Compute board hash for entity registration (matches Solidity abi.encode(Board))
- */
-function computeBoardHash(signerId: string): string {
-  const privateKey = getCachedSignerPrivateKey(signerId);
-  if (!privateKey) {
-    throw new Error(`No private key for signer ${signerId} — register keys before entity registration`);
-  }
+type ScenarioBoardIdentity = Readonly<{
+  signer: string;
+  privateKey: Uint8Array;
+  boardHash: string;
+}>;
 
+export const resolveScenarioBoardSigner = (env: Env, signerId: string): string => {
+  const privateKey = getSignerPrivateKey(env, signerId);
+  const signer = new ethers.Wallet(ethers.hexlify(privateKey)).address.toLowerCase();
+  registerSignerKey(env, signer, privateKey);
+  return signer;
+};
+
+/** Resolve scenario aliases before the consensus boundary. Board member zero is
+ * always the literal EOA that Solidity will verify; aliases remain local UX only. */
+function computeBoardIdentity(env: Env, signerId: string): ScenarioBoardIdentity {
+  const privateKey = getSignerPrivateKey(env, signerId);
+  const signer = resolveScenarioBoardSigner(env, signerId);
   const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
-  const validatorEntityId = ethers.zeroPadValue(wallet.address, 32);
+  const validatorEntityId = ethers.zeroPadValue(signer, 32);
 
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   const encodedBoard = abiCoder.encode(
@@ -381,7 +386,7 @@ function computeBoardHash(signerId: string): string {
 
   const boardHash = ethers.keccak256(encodedBoard);
   console.log(`[Boot] computeBoardHash(signer=${signerId}): addr=${wallet.address}, entityId=${validatorEntityId.slice(0, 20)}..., boardHash=${boardHash.slice(0, 18)}...`);
-  return boardHash;
+  return { signer, privateKey, boardHash };
 }
 
 /**
@@ -401,7 +406,8 @@ export async function registerEntities(
   jurisdiction: JurisdictionConfig,
 ): Promise<RegisteredEntity[]> {
   // 1. Compute board hashes and register on-chain
-  const boardHashes = entities.map(e => computeBoardHash(e.signer));
+  const boardIdentities = entities.map(entity => computeBoardIdentity(env, entity.signer));
+  const boardHashes = boardIdentities.map(identity => identity.boardHash);
   const nextEntityNumber = await jadapter.entityProvider.nextNumber();
   const registerTx = await jadapter.entityProvider.registerNumberedEntitiesBatch(boardHashes);
   const registerReceipt = await registerTx.wait();
@@ -417,9 +423,41 @@ export async function registerEntities(
     return {
       id: '0x' + entityNumber.toString(16).padStart(64, '0'),
       name: e.name,
-      signer: e.signer,
+      signer: boardIdentities[i]!.signer,
     };
   });
+
+  // A numbered H0 must never share a Runtime frame with the evidence that
+  // authorizes it. Drain the authenticated watcher through the registration
+  // receipt first, commit that local authority evidence, then import replicas.
+  // This remains correct after a long watcher backlog and when ethers has a
+  // cached pre-receipt block number.
+  if (jadapter.isWatching()) {
+    await processJEvents(env);
+    const stackKey = getCertifiedBoardStackKey(jurisdiction);
+    const receiptBlock = Number(registerReceipt.blockNumber);
+    for (const [index, registered] of result.entries()) {
+      const evidence = env.runtimeState?.certifiedRegistrationEvidence?.get(
+        registrationEvidenceKey(stackKey, registered.id),
+      );
+      if (!evidence) {
+        throw new Error(`REGISTER_ENTITY_AUTHORITY_EVIDENCE_MISSING:${registered.id}:${stackKey}`);
+      }
+      if (
+        evidence.boardHash !== boardHashes[index]!.toLowerCase() ||
+        evidence.activationHeight !== receiptBlock
+      ) {
+        throw new Error(`REGISTER_ENTITY_AUTHORITY_EVIDENCE_MISMATCH:${registered.id}`);
+      }
+    }
+  }
+
+  for (const registered of result) {
+    jadapter.registerEntityWallet?.(
+      registered.id,
+      ethers.hexlify(getSignerPrivateKey(env, registered.signer)),
+    );
+  }
 
   // 3. Create eReplicas via importReplica
   await commitRuntimeInput(env, {
@@ -529,6 +567,29 @@ export function createJReplica(
   return jReplica;
 }
 
+/** Install the exact trusted adapter policy used by scenario J-authority checks. */
+export function bindScenarioJReplica(env: Env, replica: JReplica, adapter: JAdapter): JReplica {
+  const chainId = Number(adapter.chainId);
+  const confirmationDepth = adapter.getFinalityDepth?.();
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+    throw new Error(`SCENARIO_J_CHAIN_ID_INVALID:${String(adapter.chainId)}`);
+  }
+  if (!Number.isSafeInteger(confirmationDepth) || Number(confirmationDepth) < 0) {
+    throw new Error(`SCENARIO_J_CONFIRMATION_DEPTH_INVALID:${String(confirmationDepth)}`);
+  }
+  Object.assign(replica, {
+    jadapter: adapter,
+    chainId,
+    watcherConfirmationDepth: Number(confirmationDepth),
+    depositoryAddress: adapter.addresses.depository,
+    entityProviderAddress: adapter.addresses.entityProvider,
+    entityProviderDeploymentBlock: adapter.entityProviderDeploymentBlock,
+    contracts: { ...adapter.addresses },
+  });
+  env.jAdapter = adapter;
+  return replica;
+}
+
 /**
  * Create jurisdiction config for entity registration
  */
@@ -563,21 +624,26 @@ export async function createNumberedEntity(
   position: { x: number; y: number; z: number }
 ): Promise<string> {
   const signer = `${entityNumber}`;
-  const entityId = computeBoardHash(signer);
+  const boardIdentity = computeBoardIdentity(env, signer);
+  const entityId = boardIdentity.boardHash;
+  env.jAdapter?.registerEntityWallet?.(
+    entityId,
+    ethers.hexlify(boardIdentity.privateKey),
+  );
 
   await commitRuntimeInput(env, {
     runtimeTxs: [{
       type: 'importReplica' as const,
       entityId,
-      signerId: signer,
+      signerId: boardIdentity.signer,
       data: {
         isProposer: true,
         position,
         config: {
           mode: 'proposer-based' as const,
           threshold: 1n,
-          validators: [signer],
-          shares: { [signer]: 1n },
+          validators: [boardIdentity.signer],
+          shares: { [boardIdentity.signer]: 1n },
           jurisdiction
         }
       }

@@ -1,4 +1,5 @@
 import type { AccountFrame, AccountInput, AccountTx, HankoString } from '../../types';
+import type { AccountJClaimNodeChanges } from '../../types/account-j-claims';
 
 export type AccountConsensusHashToSign = {
   hash: string;
@@ -38,6 +39,8 @@ export type ProposeAccountFrameResult = AccountConsensusFrameResult & {
 };
 
 export type HandleAccountInputResult = AccountConsensusFrameResult & {
+  /** Validator-computed CAS delta for Account frames committed by this input. */
+  accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   response?: AccountInput;
   approvalNeeded?: AccountTx;
   timedOutHashlocks?: string[];

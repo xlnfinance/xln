@@ -20,8 +20,7 @@ export interface DisputeFinalizationEvidence {
   finalProofbodyHash: string;
   leftArguments: string;
   rightArguments: string;
-  starterInitialArguments: string;
-  starterIncrementedArguments: string;
+  startedByLeft: boolean;
   sig: string;
 }
 
@@ -30,6 +29,33 @@ export interface DisputeFinalizationEvidence {
  * Each on-chain event has its own typed data structure.
  */
 export type JurisdictionEvent =
+  | (JEventMetadata & {
+      type: 'FoundationBootstrapped';
+      data: {
+        recipient: string;
+        boardHash: string;
+        controlTokenId: string;
+        dividendTokenId: string;
+      };
+    })
+  | (JEventMetadata & {
+      type: 'EntityRegistered';
+      data: {
+        entityId: string;
+        entityNumber: string;
+        boardHash: string;
+      };
+    })
+  | (JEventMetadata & {
+      type: 'BoardActivated';
+      data: {
+        entityId: string;
+        previousBoardHash: string;
+        newBoardHash: string;
+        /** Exclusive Unix-second validity boundary emitted by EntityProvider. */
+        previousBoardValidUntil: string;
+      };
+    })
   | (JEventMetadata & {
       type: 'ReserveUpdated';
       data: {
@@ -102,9 +128,28 @@ export type JurisdictionEvent =
       type: 'HankoBatchProcessed';
       data: {
         entityId: string;
-        hankoHash: string;
+        batchHash: string;
         nonce: number;
         success: boolean;
+      };
+    })
+  | (JEventMetadata & {
+      type: 'EntityProviderActionExecuted';
+      data: {
+        entityId: string;
+        actionNonce: string;
+        actionHash: string;
+        actionKind: 0 | 1;
+      };
+    })
+  | (JEventMetadata & {
+      type: 'EntityProviderActionCancelled';
+      data: {
+        entityId: string;
+        actionNonce: string;
+        cancelledActionHash: string;
+        cancelledActionKind: 0 | 1;
+        cancelHash: string;
       };
     })
   | (JEventMetadata & {
@@ -127,6 +172,7 @@ export type JurisdictionEvent =
         watchSeed: string;
         starterInitialArguments: string;
         starterIncrementedArguments: string;
+        disputeTimeout: number;
         batchNonce?: number;
       };
     })
@@ -219,17 +265,75 @@ export interface ValidatorJBlockHeader {
 export interface ValidatorJHistory {
   jurisdictionRef: string;
   scannedThroughHeight: number;
+  /** Highest header present for every height after the certified anchor. */
+  contiguousThroughHeight: number;
   tipBlockHash: string;
   eventBlocks: Map<number, ValidatorJEventBlock>;
   blockHashes: Map<number, string>;
 }
 
-/** Entity-certified jurisdiction-history prefix. */
+/**
+ * Exact validator-local J prefix body authorized for one Entity frame round.
+ * A validator signs at most one claim per signer + target Entity height. A
+ * later local scan stays durable and becomes the vote for the next height
+ * after this round commits; it never mutates or supersedes this signed vote.
+ */
+export interface JPrefixClaim {
+  jurisdictionRef: string;
+  baseHeight: number;
+  scannedThroughHeight: number;
+  tipBlockHash: string;
+  eventHistoryRoot: string;
+  rangeHash: string;
+  blocks: JurisdictionEventBlock[];
+}
+
+/**
+ * One validator's signed, locally derived jurisdiction head.
+ *
+ * The contiguous headers make a longer head independently clip-able at a
+ * shorter validator tip. Signing only the longest tip would not prove that
+ * H14 and H12 share the exact H12 chain prefix when H12 is an empty block.
+ */
+export interface JPrefixAttestation extends JPrefixClaim {
+  version: 1;
+  entityId: string;
+  targetEntityHeight: number;
+  parentFrameHash: string;
+  validatorId: string;
+  headers: ValidatorJBlockHeader[];
+  signature: string;
+}
+
+/** Weighted certificate selecting the highest exact prefix common to its signed head set. */
+export interface JPrefixCertificate {
+  version: 1;
+  entityId: string;
+  targetEntityHeight: number;
+  parentFrameHash: string;
+  jurisdictionRef: string;
+  baseHeight: number;
+  selected: JPrefixClaim;
+  attestations: Map<string, JPrefixAttestation>;
+}
+
+/** Validator-private durable collection for one Entity-height J-prefix round. */
+export interface JPrefixRound {
+  targetEntityHeight: number;
+  parentFrameHash: string;
+  jurisdictionRef: string;
+  baseHeight: number;
+  attestations: Map<string, JPrefixAttestation>;
+  certificate?: JPrefixCertificate;
+}
+
+/** One current Entity-certified settlement-chain head. */
 export interface JHistoryFinality {
   jurisdictionRef: string;
   baseHeight: number;
   finalizedThroughHeight: number;
   tipBlockHash: string;
+  /** Rolling commitment advanced from the preceding certified root. */
   eventHistoryRoot: string;
   proposerSignerId: string;
   proposerSignature: string;

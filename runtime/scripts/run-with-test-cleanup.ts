@@ -5,6 +5,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
+  transferTestArtifactRunLease,
 } from './test-artifact-cleanup';
 import { sanitizeChildProcessEnv } from '../server/child-process-env';
 
@@ -120,6 +121,16 @@ const run = async (): Promise<number> => {
     }),
     stdio: 'inherit',
   });
+  if (!child.pid) {
+    child.kill('SIGKILL');
+    throw new Error('TEST_ARTIFACT_RUN_LEASE_CHILD_PID_MISSING');
+  }
+  try {
+    transferTestArtifactRunLease(parsed.cleanupCwd || process.cwd(), child.pid);
+  } catch (error) {
+    child.kill('SIGKILL');
+    throw error;
+  }
 
   return await new Promise<number>((resolve, reject) => {
     child.once('error', reject);

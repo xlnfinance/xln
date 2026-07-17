@@ -5,10 +5,21 @@ import type { RuntimeInput } from '@xln/runtime/xln-api';
 import {
   clearRuntimeCommandReceipts,
   recordRuntimeIngressReceipt,
+  replayRuntimeCommandIntentsInOrder,
   runtimeCommandLatestReceipt,
   runtimeCommandReceipts,
+  runtimeCommandRetryOptions,
   submitRuntimeCommand,
+  type CommandReceipt,
 } from '../../frontend/src/lib/stores/runtimeCommandBus';
+import { RuntimeAdapterError } from '../../runtime/radapter/errors';
+import { listUnresolvedRemoteRuntimeCommandIntents } from '../../frontend/src/lib/stores/runtimeCommandIntent';
+import {
+  findCommittedEmbeddedRuntimeInputHeight,
+  runtimeFrameContainsSubmittedInput,
+} from '../../frontend/src/lib/stores/embeddedRuntimeCommandCompletion';
+
+const SIGNED_SERVER_FINGERPRINT = '0x01fe56d4322ab531393851ee54e1f751c8358fc2fc3730a432963661e33f50d3';
 
 const frontendSourceFiles = (dir: string): string[] =>
   readdirSync(dir).flatMap((entry) => {
@@ -48,6 +59,20 @@ test('runtime command bus records pending accepted observed committed error rece
   expect(source).not.toContain('Math.random');
 });
 
+test('browser E2E mutations use the live runtime command bus instead of a detached view Env', () => {
+  const storeSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
+  const helperSource = readFileSync('tests/utils/e2e-runtime-input.ts', 'utf8');
+  const enqueueStart = helperSource.indexOf('export async function enqueueRuntimeInput');
+  const enqueueEnd = helperSource.indexOf('export async function enqueueEntityTxs', enqueueStart);
+  const enqueueSource = helperSource.slice(enqueueStart, enqueueEnd);
+
+  expect(storeSource).toContain("registerDebugSurface('runtimeIngress'");
+  expect(storeSource).toContain('submit: submitActiveRuntimeInput');
+  expect(enqueueSource).toContain('runtimeIngress.submit(input)');
+  expect(enqueueSource).not.toContain('isolatedEnv');
+  expect(enqueueSource).not.toContain('await import(');
+});
+
 test('runtime command bus transitions receipts from pending to accepted committed and error', async () => {
   clearRuntimeCommandReceipts();
   const input: RuntimeInput = {
@@ -63,9 +88,9 @@ test('runtime command bus transitions receipts from pending to accepted committe
     initialHeight: 4,
   }, async (progress) => {
     expect(readStore(runtimeCommandLatestReceipt)?.status).toBe('pending');
-    progress.accepted(5);
+    await progress.accepted(5);
     expect(readStore(runtimeCommandLatestReceipt)?.status).toBe('accepted');
-    progress.committed(6);
+    await progress.committed(6);
     expect(readStore(runtimeCommandLatestReceipt)?.status).toBe('committed');
     return 'ok';
   });
@@ -85,10 +110,11 @@ test('runtime command bus transitions receipts from pending to accepted committe
     input,
     runtimeId: 'runtime-remote',
     mode: 'remote',
+    serverFingerprint: SIGNED_SERVER_FINGERPRINT,
     initialHeight: 20,
   }, async (progress) => {
-    progress.accepted(21, { receiptId: 'upstream-1', statusUrl: '/api/control/runtime-input/upstream-1/status' });
-    progress.committed(22);
+    await progress.accepted(21, { receiptId: 'upstream-1', statusUrl: '/api/control/runtime-input/upstream-1/status' });
+    await progress.committed(22);
     return 'remote-ok';
   });
   expect(remoteAccepted.receipt.status).toBe('accepted');
@@ -100,10 +126,11 @@ test('runtime command bus transitions receipts from pending to accepted committe
     input,
     runtimeId: 'runtime-remote-observed',
     mode: 'remote',
+    serverFingerprint: SIGNED_SERVER_FINGERPRINT,
     initialHeight: 30,
   }, async (progress) => {
-    progress.accepted(31, { receiptId: 'upstream-observed', statusUrl: '/api/control/runtime-input/upstream-observed/status' });
-    progress.observed(32);
+    await progress.accepted(31, { receiptId: 'upstream-observed', statusUrl: '/api/control/runtime-input/upstream-observed/status' });
+    await progress.observed(32);
     return 'remote-observed';
   });
   expect(remoteObserved.receipt.status).toBe('observed');
@@ -116,7 +143,7 @@ test('runtime command bus transitions receipts from pending to accepted committe
     mode: 'embedded',
     initialHeight: 10,
   }, async (progress) => {
-    progress.accepted(10);
+    await progress.accepted(10);
     return 'accepted';
   });
   expect(acceptedOnly.receipt.status).toBe('accepted');
@@ -128,9 +155,10 @@ test('runtime command bus transitions receipts from pending to accepted committe
     input,
     runtimeId: 'runtime-c',
     mode: 'remote',
+    serverFingerprint: SIGNED_SERVER_FINGERPRINT,
     initialHeight: 1,
   }, async (progress) => {
-    progress.accepted(2);
+    await progress.accepted(2);
     throw new Error('boom');
   })).rejects.toThrow('boom');
   const latest = readStore(runtimeCommandLatestReceipt);
@@ -145,6 +173,7 @@ test('runtime command bus transitions receipts from pending to accepted committe
     input,
     runtimeId: 'runtime-d',
     mode: 'remote',
+    serverFingerprint: SIGNED_SERVER_FINGERPRINT,
     initialHeight: 1,
   }, async () => {
     throw new Error('fetch failed: ECONNREFUSED');
@@ -152,6 +181,273 @@ test('runtime command bus transitions receipts from pending to accepted committe
   const retryable = readStore(runtimeCommandLatestReceipt);
   expect(retryable?.failureKind).toBe('defer');
   expect(retryable?.failureRetryable).toBe(true);
+});
+
+test('runtime command pre-execution admission cancels before receipt publication or executor mutation', async () => {
+  clearRuntimeCommandReceipts();
+  let executorCalls = 0;
+
+  await expect(submitRuntimeCommand({
+    input: { runtimeTxs: [], entityInputs: [], jInputs: [] },
+    runtimeId: 'runtime-quiescing',
+    mode: 'embedded',
+    beforeExecute: () => {
+      throw new Error('EXTERNAL_WALLET_SNAPSHOT_INGRESS_CANCELLED:cancel-runtime-quiescing');
+    },
+  }, async () => {
+    executorCalls += 1;
+    return null;
+  })).rejects.toThrow('EXTERNAL_WALLET_SNAPSHOT_INGRESS_CANCELLED:cancel-runtime-quiescing');
+
+  expect(executorCalls).toBe(0);
+  expect(readStore(runtimeCommandReceipts)).toEqual([]);
+  expect(readStore(runtimeCommandLatestReceipt)).toBeNull();
+});
+
+test('terminal remote intent does not head-of-line block the next replay', async () => {
+  const attempted: string[] = [];
+  const completed = await replayRuntimeCommandIntentsInOrder(['terminal', 'next'], async (intent) => {
+    attempted.push(intent);
+    if (intent === 'terminal') {
+      throw new RuntimeAdapterError(
+        'E_BAD_QUERY',
+        'runtime adapter commandId was reused with a different payload',
+      );
+    }
+  });
+  expect(attempted).toEqual(['terminal', 'next']);
+  expect(completed).toBe(1);
+});
+
+test('remote command IDs identify UI intents, not identical payloads', async () => {
+  clearRuntimeCommandReceipts();
+  const input: RuntimeInput = {
+    runtimeTxs: [],
+    entityInputs: [],
+    jInputs: [],
+  };
+  const seenCommandIds: string[] = [];
+
+  await expect(submitRuntimeCommand({
+    input,
+    runtimeId: 'runtime-idempotency',
+    mode: 'remote',
+    serverFingerprint: SIGNED_SERVER_FINGERPRINT,
+    initialHeight: 1,
+  }, async (_progress, receipt) => {
+    seenCommandIds.push(receipt.commandId);
+    throw new Error('runtime adapter request timed out: send');
+  })).rejects.toThrow('timed out');
+
+  const retryableReceipt = readStore(runtimeCommandLatestReceipt);
+  expect(retryableReceipt?.failureRetryable).toBe(true);
+
+  const identicalNewIntent = await submitRuntimeCommand({
+    input: structuredClone(input),
+    runtimeId: 'runtime-idempotency',
+    mode: 'remote',
+    serverFingerprint: SIGNED_SERVER_FINGERPRINT,
+    initialHeight: 1,
+  }, async (progress, receipt) => {
+    seenCommandIds.push(receipt.commandId);
+    await progress.accepted(1, { receiptId: 'upstream-distinct-intent' });
+    await progress.observed(2);
+    return 'distinct-observed';
+  });
+
+  await expect(submitRuntimeCommand({
+    input: {
+      ...structuredClone(input),
+      runtimeTxs: [{ type: 'importReplica', entityId: 'different-payload' } as never],
+    },
+    runtimeId: 'runtime-idempotency',
+    mode: 'remote',
+    serverFingerprint: SIGNED_SERVER_FINGERPRINT,
+    initialHeight: 1,
+    commandId: seenCommandIds[0],
+  }, async () => 'must-not-run')).rejects.toThrow('RUNTIME_COMMAND_ID_PAYLOAD_MISMATCH');
+
+  if (!retryableReceipt) throw new Error('TEST_RETRYABLE_RECEIPT_MISSING');
+  const retry = await submitRuntimeCommand({
+    input: structuredClone(input),
+    runtimeId: 'runtime-idempotency',
+    mode: 'remote',
+    serverFingerprint: SIGNED_SERVER_FINGERPRINT,
+    initialHeight: 1,
+    ...runtimeCommandRetryOptions(retryableReceipt),
+  }, async (progress, receipt) => {
+    seenCommandIds.push(receipt.commandId);
+    await progress.accepted(1, { receiptId: 'upstream-idempotency' });
+    await progress.observed(2);
+    return 'observed';
+  });
+
+  expect(seenCommandIds[0]).toMatch(/^[A-Za-z0-9._:-]{16,128}$/);
+  expect(seenCommandIds[1]).not.toBe(seenCommandIds[0]);
+  expect(seenCommandIds[2]).toBe(seenCommandIds[0]);
+  expect(identicalNewIntent.receipt.commandId).toBe(seenCommandIds[1]);
+  expect(retry.receipt.commandId).toBe(seenCommandIds[0]);
+  expect(() => runtimeCommandRetryOptions(retry.receipt)).toThrow('RUNTIME_COMMAND_RECEIPT_NOT_RETRYABLE');
+});
+
+test('an explicit stale-tab retry cannot recreate a settled command intent', async () => {
+  const input: RuntimeInput = { runtimeTxs: [], entityInputs: [], jInputs: [] };
+  const first = await submitRuntimeCommand({
+    input,
+    runtimeId: 'runtime-stale-tab',
+    mode: 'remote',
+    serverFingerprint: SIGNED_SERVER_FINGERPRINT,
+  }, async (progress) => {
+    await progress.accepted(1);
+    await progress.observed(2);
+    return null;
+  });
+
+  await expect(submitRuntimeCommand({
+    input: structuredClone(input),
+    runtimeId: 'runtime-stale-tab',
+    mode: 'remote',
+    serverFingerprint: SIGNED_SERVER_FINGERPRINT,
+    commandId: first.receipt.commandId,
+  }, async () => null)).rejects.toThrow(`RUNTIME_COMMAND_INTENT_NOT_FOUND:${first.receipt.commandId}`);
+  expect(await listUnresolvedRemoteRuntimeCommandIntents(
+    'runtime-stale-tab',
+    SIGNED_SERVER_FINGERPRINT,
+  )).toEqual([]);
+});
+
+test('capability-lane one-shot Entity commands never create a durable journal intent', async () => {
+  const runtimeId = 'runtime-capability-only';
+  const input: RuntimeInput = {
+    runtimeTxs: [],
+    entityInputs: [{
+      entityId: 'entity-a',
+      signerId: 'signer-a',
+      entityTxs: [{
+        type: 'extendCredit',
+        data: { counterpartyEntityId: 'entity-b', tokenId: 1, amount: 1n },
+      }],
+    }],
+    jInputs: [],
+  };
+  const submitted = await submitRuntimeCommand({
+    input,
+    runtimeId,
+    mode: 'remote',
+    serverFingerprint: SIGNED_SERVER_FINGERPRINT,
+    nextCommandSequence: 7,
+    remoteJournalMode: 'one-shot',
+  }, async (progress, receipt) => {
+    expect(receipt.commandSequence).toBe(7);
+    await progress.accepted(3);
+    await progress.observed(4);
+    return null;
+  });
+
+  expect(submitted.receipt.status).toBe('observed');
+  expect(await listUnresolvedRemoteRuntimeCommandIntents(
+    runtimeId,
+    SIGNED_SERVER_FINGERPRINT,
+  )).toEqual([]);
+});
+
+test('capability-only one-shot response loss is not offered as a retryable payment-style intent', async () => {
+  await expect(submitRuntimeCommand({
+    input: { runtimeTxs: [], entityInputs: [], jInputs: [] },
+    runtimeId: 'runtime-capability-loss',
+    mode: 'remote',
+    serverFingerprint: SIGNED_SERVER_FINGERPRINT,
+    nextCommandSequence: 1,
+    remoteJournalMode: 'one-shot',
+  }, async () => {
+    throw new Error('runtime adapter request timed out: response lost');
+  })).rejects.toThrow('response lost');
+
+  const receipt = readStore(runtimeCommandLatestReceipt);
+  expect(receipt?.failureRetryable).toBe(false);
+  expect(() => runtimeCommandRetryOptions(receipt!)).toThrow('RUNTIME_COMMAND_RECEIPT_NOT_RETRYABLE');
+});
+
+test('remote command journal persists protected replayable intents outside localStorage', () => {
+  const intentSource = readFileSync('frontend/src/lib/stores/runtimeCommandIntent.ts', 'utf8');
+  const codecSource = readFileSync('frontend/src/lib/stores/runtimeCommandIntentCodec.ts', 'utf8');
+  const indexedDbSource = readFileSync('frontend/src/lib/stores/runtimeCommandJournalIndexedDb.ts', 'utf8');
+  const keyringSource = readFileSync('frontend/src/lib/stores/runtimeCommandJournalKeyring.ts', 'utf8');
+  const storageSource = readFileSync('frontend/src/lib/stores/runtimeCommandJournalStorage.ts', 'utf8');
+  const routeSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
+  const journalSource = `${intentSource}\n${codecSource}\n${indexedDbSource}\n${keyringSource}\n${storageSource}`;
+
+  expect(journalSource).not.toContain('localStorage');
+  expect(indexedDbSource).toContain('indexedDB');
+  expect(indexedDbSource).toContain('const DB_VERSION = 2');
+  expect(indexedDbSource).toContain("const LEGACY_META_STORE = 'meta'");
+  expect(indexedDbSource).toContain('db.deleteObjectStore(LEGACY_META_STORE)');
+  expect(storageSource).toContain('AES-GCM');
+  expect(storageSource).toContain('safeParse');
+  expect(storageSource).toContain("from './runtimeCommandJournalIndexedDb'");
+  expect(routeSource).toContain('resumeRemoteRuntimeCommandIntents');
+});
+
+test('remote command journal retains exact payload and status until observed', async () => {
+  const runtimeId = 'runtime-journal-roundtrip';
+  const input: RuntimeInput = {
+    runtimeTxs: [{ type: 'importReplica', entityId: 'journal-payload', amount: 7n } as never],
+    entityInputs: [],
+    jInputs: [],
+  };
+  let retryableReceipt: CommandReceipt | null;
+
+  await expect(submitRuntimeCommand({
+    input,
+    runtimeId,
+    mode: 'remote',
+    serverFingerprint: SIGNED_SERVER_FINGERPRINT,
+  }, async () => {
+    throw new Error('runtime adapter request timed out: response lost');
+  })).rejects.toThrow('response lost');
+  retryableReceipt = readStore(runtimeCommandLatestReceipt);
+  if (!retryableReceipt) throw new Error('TEST_RETRYABLE_RECEIPT_MISSING');
+
+  expect(await listUnresolvedRemoteRuntimeCommandIntents(runtimeId, SIGNED_SERVER_FINGERPRINT)).toMatchObject([{
+    commandId: retryableReceipt.commandId,
+    runtimeId,
+    input,
+    status: 'pending',
+  }]);
+
+  await expect(submitRuntimeCommand({
+    input: structuredClone(input),
+    runtimeId,
+    mode: 'remote',
+    serverFingerprint: SIGNED_SERVER_FINGERPRINT,
+    ...runtimeCommandRetryOptions(retryableReceipt),
+  }, async (progress) => {
+    await progress.accepted(9, { receiptId: 'journal-receipt', statusUrl: '/receipt/journal-receipt' });
+    throw new Error('runtime projection timed out after acceptance');
+  })).rejects.toThrow('timed out');
+  retryableReceipt = readStore(runtimeCommandLatestReceipt);
+  if (!retryableReceipt) throw new Error('TEST_ACCEPTED_RECEIPT_MISSING');
+
+  expect(await listUnresolvedRemoteRuntimeCommandIntents(runtimeId, SIGNED_SERVER_FINGERPRINT)).toMatchObject([{
+    commandId: retryableReceipt.commandId,
+    input,
+    status: 'accepted',
+    upstreamReceiptId: 'journal-receipt',
+    statusUrl: '/receipt/journal-receipt',
+  }]);
+
+  await submitRuntimeCommand({
+    input: structuredClone(input),
+    runtimeId,
+    mode: 'remote',
+    serverFingerprint: SIGNED_SERVER_FINGERPRINT,
+    ...runtimeCommandRetryOptions(retryableReceipt),
+  }, async (progress) => {
+    await progress.accepted(9, { receiptId: 'journal-receipt', statusUrl: '/receipt/journal-receipt' });
+    await progress.observed(10);
+    return null;
+  });
+  expect(await listUnresolvedRemoteRuntimeCommandIntents(runtimeId, SIGNED_SERVER_FINGERPRINT)).toEqual([]);
 });
 
 test('runtime command bus records server ingress receipts without fake RuntimeInput', () => {
@@ -214,8 +510,8 @@ test('runtime command bus records server ingress receipts without fake RuntimeIn
   });
   expect(expired.status).toBe('error');
   expect(expired.error).toBe('Runtime ingress receipt expired');
-  expect(expired.failureKind).toBe('drop');
-  expect(expired.failureRetryable).toBe(false);
+  expect(expired.failureKind).toBe('defer');
+  expect(expired.failureRetryable).toBe(true);
 });
 
 test('xlnStore routes RuntimeInput mutations through RuntimeCommandBus', () => {
@@ -226,11 +522,14 @@ test('xlnStore routes RuntimeInput mutations through RuntimeCommandBus', () => {
 
   expect(routeSource).toContain('submitRuntimeCommand');
 	  expect(routeSource).toContain('progress.accepted');
-	  expect(routeSource).toContain('receiptId: accepted.receipt?.id ?? null');
-	  expect(routeSource).toContain('statusUrl: accepted.statusUrl ?? null');
-	  expect(routeSource).toContain('waitForRemoteRuntimeReceiptObserved');
-	  expect(routeSource).toContain('progress.observed');
+	  expect(source).toContain('const observeRemoteRuntimeCommand');
+	  expect(routeSource).toContain('commandSequence: receipt.commandSequence');
+	  expect(routeSource).toContain('await observeRemoteRuntimeCommand(accepted, progress)');
+	  expect(source).toContain('statusUrl: accepted.statusUrl ?? null');
+	  expect(source).toContain('waitForRemoteRuntimeReceiptObserved');
+	  expect(source).toContain('progress.observed');
 	  expect(routeSource).toContain('progress.committed');
+	  expect(routeSource).toContain("runtimeAdapterSend(input, { commandId: receipt.commandId })");
 	  expect(routeSource).toContain('const usesRemoteAdapter = Boolean');
 	  expect(routeSource).toContain('REMOTE_RUNTIME_ENV_MISMATCH');
 	  expect(routeSource).toContain('!targetRuntimeId || !handleRuntimeId || targetRuntimeId === handleRuntimeId');
@@ -252,6 +551,83 @@ test('xlnStore routes RuntimeInput mutations through RuntimeCommandBus', () => {
 	  expect(source).toContain('export async function submitEntityInputs');
 	});
 
+test('embedded command completion follows the submitted input, not unrelated consensus backlog', () => {
+  const submitted: RuntimeInput = {
+    runtimeTxs: [],
+    entityInputs: [{
+      entityId: '0xentity-a',
+      signerId: '0xsigner-a',
+      entityTxs: [{
+        type: 'profile-update',
+        data: { profile: { entityId: '0xentity-a', name: 'Alice', bio: '', website: '' } },
+      } as never],
+    }],
+  };
+  const committedWithBackground: RuntimeInput = {
+    runtimeTxs: [],
+    entityInputs: [
+      structuredClone(submitted.entityInputs[0]!),
+      {
+        entityId: '0xentity-b',
+        signerId: '0xsigner-b',
+        entityTxs: [{ type: 'scheduledWake', data: { dueAt: 99n } } as never],
+      },
+    ],
+  };
+  const history = [{ height: 12, runtimeInput: committedWithBackground }] as never;
+
+  expect(runtimeFrameContainsSubmittedInput(committedWithBackground, submitted)).toBe(true);
+  expect(findCommittedEmbeddedRuntimeInputHeight(history, submitted, 11)).toBe(12);
+  expect(findCommittedEmbeddedRuntimeInputHeight(history, submitted, 12)).toBeNull();
+});
+
+test('embedded command completion is multiset-exact and accepts only derived HTLC fields', () => {
+  const profileTx = {
+    type: 'profile-update',
+    data: { profile: { entityId: '0xentity-a', name: 'Alice', bio: '', website: '' } },
+  } as never;
+  const duplicateSubmission: RuntimeInput = {
+    runtimeTxs: [],
+    entityInputs: [{ entityId: '0xentity-a', signerId: '0xsigner-a', entityTxs: [profileTx, profileTx] }],
+  };
+  const oneApplied: RuntimeInput = {
+    runtimeTxs: [],
+    entityInputs: [{ entityId: '0xentity-a', signerId: '0xsigner-a', entityTxs: [profileTx] }],
+  };
+  expect(runtimeFrameContainsSubmittedInput(oneApplied, duplicateSubmission)).toBe(false);
+
+  const rawPayment = {
+    type: 'htlcPayment',
+    data: { targetEntityId: '0xtarget', tokenId: 1, amount: 7n, description: 'rent' },
+  } as never;
+  const preparedPayment = {
+    type: 'htlcPayment',
+    data: {
+      targetEntityId: '0xtarget', tokenId: 1, amount: 7n, description: 'rent',
+      hashlock: '0xhash', route: ['0xhop'], envelope: { version: 1 },
+    },
+  } as never;
+  const input = (tx: typeof rawPayment): RuntimeInput => ({
+    runtimeTxs: [],
+    entityInputs: [{ entityId: '0xentity-a', signerId: '0xsigner-a', entityTxs: [tx] }],
+  });
+  expect(runtimeFrameContainsSubmittedInput(input(preparedPayment), input(rawPayment))).toBe(true);
+  expect(runtimeFrameContainsSubmittedInput(
+    input({ ...preparedPayment, data: { ...preparedPayment.data, amount: 8n } } as never),
+    input(rawPayment),
+  )).toBe(false);
+});
+
+test('runtime controller forwards caller-owned commandId to the remote adapter', () => {
+  const source = readFileSync('frontend/src/lib/stores/runtimeControllerStore.ts', 'utf8');
+  const sendIndex = source.indexOf('export const runtimeAdapterSend');
+  expect(sendIndex).toBeGreaterThan(0);
+  const sendSource = source.slice(sendIndex, source.indexOf('\n};', sendIndex) + 3);
+
+  expect(sendSource).toContain('options: RuntimeAdapterSendOptions = {}');
+  expect(sendSource).toContain('adapter.send(input, options)');
+});
+
 test('public mutation exports no longer accept caller-owned Env', () => {
   const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   expect(source).not.toContain('assertSubmittedEnvMatchesActiveRuntime');
@@ -264,8 +640,9 @@ test('public mutation exports no longer accept caller-owned Env', () => {
   expect(utilityFunctionsIndex).toBeGreaterThan(submitEntityIndex);
 
   const submitRuntimeSource = source.slice(submitRuntimeIndex, submitEntityIndex);
-  expect(submitRuntimeSource).toContain('export async function submitRuntimeInput(input: RuntimeInput)');
-  expect(submitRuntimeSource).toContain('return submitActiveRuntimeInput(input);');
+  expect(submitRuntimeSource).toContain('export async function submitRuntimeInput(');
+  expect(submitRuntimeSource).toContain('commandOptions: RuntimeCommandExecutionOptions = {}');
+  expect(submitRuntimeSource).toContain('return submitActiveRuntimeInput(input, commandOptions);');
   expect(submitRuntimeSource).not.toContain('env: Env');
   expect(submitRuntimeSource).not.toContain('assertSubmittedEnvMatchesActiveRuntime');
   expect(submitRuntimeSource).not.toContain('routeRuntimeInput(');
@@ -310,8 +687,8 @@ test('credit and collateral configure forms submit RuntimeInput through shared c
   expect(accountWorkspaceSource).toContain('<AccountConfigurePanel');
   expect(accountWorkspaceSource).toContain('{submitRuntimeInput}');
   expect(collateralSource).toContain('resolveProjectedCounterpartyPolicy');
-  expect(collateralSource).toContain('counterpartyRebalanceFeePolicy');
-  expect(resolverSource).toContain('compact.counterpartyRebalanceFeePolicy = doc.counterpartyRebalanceFeePolicy');
+  expect(collateralSource).toContain('rebalanceFeePolicies');
+  expect(resolverSource).toContain('compact.rebalanceFeePolicies = doc.rebalanceFeePolicies');
 });
 
 test('payment panel submits RuntimeInput through shared command path', () => {
@@ -320,6 +697,10 @@ test('payment panel submits RuntimeInput through shared command path', () => {
 
   expect(paymentSource).toContain('export let submitRuntimeInput');
   expect(paymentSource).toContain('await submitRuntimeInput({ runtimeTxs: [], entityInputs: [paymentInput], jInputs: [] })');
+  expect(paymentSource).toContain('pendingPaymentCommandId');
+  expect(paymentSource).toContain('Payment confirmation pending');
+  expect(paymentSource).toContain("failure.kind === 'defer'");
+  expect(paymentSource).toContain('latestReceipt.receiptId !== priorRuntimeReceiptId');
   expect(paymentSource).not.toContain('submitEntityInputs');
   expect(accountWorkspaceSource).toContain('{submitRuntimeInput}');
 });
@@ -369,24 +750,17 @@ test('entity workspace renders latest runtime command receipt status', () => {
   expect(source).toContain('runtimeCommandLatestReceipt');
   expect(source).toContain('data-testid="runtime-command-receipt"');
   expect(source).toContain('failureKind');
-	  expect(source).toContain('committedAtHeight');
-	  expect(source).toContain('acceptedAtHeight');
-	  expect(source).toContain('upstreamReceiptId');
-	});
+  expect(source).toContain('isActionableRuntimeReceipt');
+  expect(source).not.toContain('$runtimeCommandLatestReceipt.committedAtHeight');
+  expect(source).not.toContain('$runtimeCommandLatestReceipt.acceptedAtHeight');
+  expect(source).toContain('upstreamReceiptId');
+});
 
-test('entity panel j-event snapshots submit RuntimeInput instead of mutating Env directly', () => {
+test('entity panel never promotes UI reads or transaction responses into J-prefix inputs', () => {
   const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
-  const applyIndex = source.indexOf('async function applyCanonicalJEventsToActiveEnv');
-  expect(applyIndex).toBeGreaterThan(0);
-  const applySource = source.slice(applyIndex, source.indexOf('async function requestExternalWalletSnapshot', applyIndex));
-
-  expect(applySource).toContain('buildJEventsRuntimeInput');
-  expect(applySource).toContain('getRuntimeEnv(actionRuntimeEnv)');
-  expect(applySource).toContain('submitRuntimeCommandInput(runtimeInput)');
-  expect(applySource).not.toContain('submitRuntimeCommandInput(env, runtimeInput)');
-  expect(applySource).not.toContain('applyJEventsToEnv');
-  expect(applySource).not.toContain('xln.process');
-  expect(applySource).not.toContain('setXlnEnvironment');
+  expect(source).not.toContain('async function applyCanonicalJEventsToActiveEnv');
+  expect(source).not.toContain('buildJEventsRuntimeInput(env, events');
+  expect(source).not.toContain('applyJEventsToEnv');
 });
 
 test('entity panel pure RuntimeInput mutations do not require embedded Env on remote', () => {

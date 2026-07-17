@@ -18,7 +18,7 @@ const LONG_E2E = process.env.E2E_LONG === '1';
 test.describe('E2E Baseline Bootstrap', () => {
   // This test proves the shared cold-reset baseline is honest and minimal: three separate hubs
   // come back online, their mutual mesh credit is restored, and bootstrap reserves are ready.
-  test('cold reset provisions the 3-hub mesh baseline and reserves', async ({ page }) => {
+  test('cold reset provisions the 3-hub mesh baseline and reserves', { tag: '@functional' }, async ({ page }) => {
     test.setTimeout(LONG_E2E ? 240_000 : 180_000);
 
     const health = await resetProdServer(page, {

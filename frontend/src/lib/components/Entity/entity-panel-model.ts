@@ -112,11 +112,10 @@ function summaryProfile(summary: RuntimeAdapterEntitySummary | null | undefined)
     wsUrl: null,
     relays: [],
     metadata: {
-      entityEncPubKey: '',
       isHub: summary?.isHub === true,
       routingFeePPM: 0,
       baseFee: 0n,
-      board: { threshold: 0, validators: [] },
+      board: { threshold: 0, validators: [], encryptionAttestations: [] },
       ...(jurisdiction ? { jurisdiction } : {}),
     },
     accounts: [],

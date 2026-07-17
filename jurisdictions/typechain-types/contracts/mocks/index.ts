@@ -5,3 +5,5 @@ export type { EntityProviderSupplyHarness } from "./EntityProviderSupplyHarness"
 export type { HashLadderHarness } from "./HashLadderHarness";
 export type { MockEntityProvider } from "./MockEntityProvider";
 export type { NoReturnERC20Mock } from "./NoReturnERC20Mock";
+export type { SupplyLivenessHarness } from "./SupplyLivenessHarness";
+export type { TransformerLivenessHarness } from "./TransformerLivenessHarness";

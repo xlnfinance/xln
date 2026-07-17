@@ -180,6 +180,7 @@ export const buildAggregatedMarketMakerHealth = ({
     failure,
     entityId,
     startupPhase,
+    quiescence: marketMakerHealth?.marketMaker?.quiescence ?? null,
     expectedOffersPerHub,
     expectedOffersPerPair: Number(marketMakerHealth?.marketMaker?.expectedOffersPerPair || 0),
     cross,

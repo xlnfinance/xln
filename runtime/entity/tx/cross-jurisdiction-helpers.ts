@@ -6,7 +6,6 @@ import {
 import {
   getJurisdictionStackId,
   isJurisdictionStackRef,
-  requireRuntimeJurisdictionConfigByName,
 } from '../../jurisdiction/jurisdiction-runtime';
 import type { AccountTx, CrossJurisdictionSwapRoute, EntityState, Env } from '../../types';
 
@@ -147,21 +146,13 @@ const jurisdictionIdentityKey = (jurisdiction: { name?: string; chainId?: number
 };
 
 const routeJurisdictionMatchesLocal = (
-  env: Env,
   state: EntityState,
   routeJurisdictionName: string,
 ): boolean => {
   const local = state.config?.jurisdiction;
   if (!local) return false;
-  let routeJurisdiction: typeof local | undefined;
-  try {
-    routeJurisdiction = requireRuntimeJurisdictionConfigByName(env, routeJurisdictionName);
-  } catch {
-    routeJurisdiction = undefined;
-  }
   const localKey = jurisdictionIdentityKey(local);
-  const routeKey = jurisdictionIdentityKey(routeJurisdiction);
-  return Boolean(localKey && routeKey && localKey === routeKey);
+  return Boolean(localKey && localKey.toLowerCase() === routeJurisdictionName.trim().toLowerCase());
 };
 
 const routeSignerHintForLocalEntity = (
@@ -181,6 +172,7 @@ export const validateCrossJurisdictionLocalBinding = (
   state: EntityState,
   route: CrossJurisdictionSwapRoute,
 ): string | null => {
+  void env;
   const local = normalizeEntityRef(state.entityId);
   if (!state.config?.jurisdiction) return 'local jurisdiction unknown';
 
@@ -197,7 +189,7 @@ export const validateCrossJurisdictionLocalBinding = (
     : String(route.target.jurisdiction || '').trim();
   if (!expected) return 'route jurisdiction missing';
   if (!isJurisdictionStackRef(expected)) return `route jurisdiction must be stack ref, got ${expected}`;
-  if (!routeJurisdictionMatchesLocal(env, state, expected)) {
+  if (!routeJurisdictionMatchesLocal(state, expected)) {
     return `route jurisdiction ${expected} does not match local jurisdiction ${state.config.jurisdiction.name}`;
   }
   const signerHint = routeSignerHintForLocalEntity(state, route);

@@ -1,12 +1,20 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { getIndexedAccountPath, HDNodeWallet, Mnemonic, Wallet } from 'ethers';
 import { requireAppBaseUrl } from './e2e-base-url';
+import {
+  quiesceRuntimePage,
+  resetRuntimePageQuiescence,
+} from './e2e-runtime-shutdown';
 
 export const APP_BASE_URL = requireAppBaseUrl();
 export const DEFAULT_INIT_TIMEOUT = 30_000;
 const RUNTIME_READY_TIMEOUT = process.env.E2E_LONG === '1' ? 150_000 : 120_000;
 
 export type DemoUserName = 'alice' | 'bob' | 'carol' | 'dave';
+
+const DEMO_USER_NAMES = ['alice', 'bob', 'carol', 'dave'] as const;
+const DEFAULT_ANVIL_MNEMONIC = 'test test test test test test test test test test test junk';
+const ANVIL_INFRASTRUCTURE_SIGNER_COUNT = 3;
 
 export type DemoUserIdentity = {
   label: DemoUserName;
@@ -25,7 +33,7 @@ type CreateRuntimeOptions = {
 };
 
 const DEFAULT_DEMO_MNEMONICS: Record<DemoUserName, string> = {
-  alice: 'test test test test test test test test test test test junk',
+  alice: 'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong',
   bob: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
   carol: 'legal winner thank year wave sausage worth useful legal winner thank yellow',
   dave: 'letter advice cage absurd amount doctor acoustic avoid letter advice cage above',
@@ -54,6 +62,36 @@ export const deriveSignerAddressFromMnemonic = (mnemonic: string, index = 0): st
 const deriveRuntimeIdFromMnemonic = (mnemonic: string): string =>
   deriveSignerAddressFromMnemonic(mnemonic, 0);
 
+const resolveConfiguredDemoMnemonics = (): Record<DemoUserName, string> => {
+  const configured = { ...DEFAULT_DEMO_MNEMONICS };
+  for (const label of DEMO_USER_NAMES) {
+    const override = process.env[DEMO_MNEMONIC_ENV[label]];
+    if (typeof override === 'string' && override.trim().length > 0) {
+      configured[label] = override.trim();
+    }
+  }
+  return configured;
+};
+
+export function assertDemoSignerIdentities(mnemonics: Readonly<Record<DemoUserName, string>>): void {
+  const infrastructureMnemonic = process.env.ANVIL_MNEMONIC?.trim() || DEFAULT_ANVIL_MNEMONIC;
+  const reservedSigners = new Set(
+    Array.from({ length: ANVIL_INFRASTRUCTURE_SIGNER_COUNT }, (_, index) =>
+      deriveSignerAddressFromMnemonic(infrastructureMnemonic, index),
+    ),
+  );
+  const ownerBySigner = new Map<string, DemoUserName>();
+  for (const label of DEMO_USER_NAMES) {
+    const signer = deriveSignerAddressFromMnemonic(mnemonics[label]);
+    if (reservedSigners.has(signer)) {
+      throw new Error(`DEMO_SIGNER_RESERVED:${label}:${signer}`);
+    }
+    const owner = ownerBySigner.get(signer);
+    if (owner) throw new Error(`DEMO_SIGNER_DUPLICATE:${owner}:${label}:${signer}`);
+    ownerBySigner.set(signer, label);
+  }
+}
+
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 async function selectBrainvaultWorkFactor(page: Page, factor = 1): Promise<void> {
@@ -80,14 +118,14 @@ async function firstVisibleLocator(
   return null;
 }
 
-async function firstVisibleButtonByText(
+async function firstVisibleOnboardingButtonByText(
   page: Page,
   pattern: RegExp,
   timeoutMs = 1_000,
 ): Promise<Locator | null> {
   const deadline = Date.now() + timeoutMs;
   do {
-    const buttons = page.locator('button');
+    const buttons = page.locator('.onboarding button');
     const count = Math.min(await buttons.count().catch(() => 0), 40);
     for (let index = 0; index < count; index += 1) {
       const button = buttons.nth(index);
@@ -110,10 +148,50 @@ async function acceptOnboardingTermsIfVisible(page: Page): Promise<void> {
     const label = String(await checkbox.evaluate((input) => input.closest('label')?.textContent || '').catch(() => ''));
     if (!/testnet software|accept the risks/i.test(label)) continue;
     if (!await checkbox.isChecked().catch(() => false)) {
-      await checkbox.check({ force: true, timeout: 2_000 }).catch(() => null);
+      try {
+        await checkbox.check({ force: true, timeout: 2_000 });
+      } catch (error) {
+        const diagnostics = await collectProfileOnboardingSurfaceDiagnostics(page);
+        throw new Error(
+          `PROFILE_ONBOARDING_TERMS_ACCEPT_FAILED:${JSON.stringify(diagnostics)}`,
+          { cause: error },
+        );
+      }
     }
     return;
   }
+}
+
+async function collectProfileOnboardingSurfaceDiagnostics(page: Page): Promise<Record<string, unknown>> {
+  return await page.evaluate(() => {
+    const visible = (element: Element): boolean => (element as HTMLElement).offsetParent !== null;
+    const entityIds = Array.from(document.querySelectorAll('code'))
+      .map((node) => String(node.textContent || '').trim())
+      .filter((text) => /^0x[a-fA-F0-9]{64}$/.test(text));
+    const env = (window as typeof window & { isolatedEnv?: Record<string, any> }).isolatedEnv;
+    return {
+      href: window.location.href,
+      displayName: String((document.querySelector('#display-name') as HTMLInputElement | null)?.value || ''),
+      hubJoinPreference: String((document.querySelector('#hub-join-select') as HTMLSelectElement | null)?.value || ''),
+      entityIds,
+      buttons: Array.from(document.querySelectorAll('button')).filter(visible).map((button) => ({
+        label: String(button.textContent || '').trim(),
+        disabled: (button as HTMLButtonElement).disabled,
+      })),
+      checkboxes: Array.from(document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')).filter(visible).map((checkbox) => ({
+        label: String(checkbox.closest('label')?.textContent || '').trim(),
+        checked: checkbox.checked,
+        disabled: checkbox.disabled,
+      })),
+      visibleErrors: Array.from(document.querySelectorAll<HTMLElement>('.error-msg, .toast.error .message, [role="alert"]'))
+        .filter(visible)
+        .map((element) => String(element.textContent || '').trim()),
+      runtimeId: String(env?.runtimeId || ''),
+      runtimeHeight: Number(env?.height || 0),
+      replicaCount: Number(env?.eReplicas?.size || 0),
+      bodyText: String(document.body?.innerText || '').slice(0, 1_200),
+    };
+  }).catch((diagnosticError) => ({ diagnosticError: String(diagnosticError) }));
 }
 
 async function ensureVisibleInputValue(
@@ -519,35 +597,13 @@ async function waitForNextRuntimeReady(page: Page, previousRuntimeId: string | n
 }
 
 async function dismissOnboardingIfVisible(page: Page): Promise<void> {
-  const completed = await page.evaluate(() => {
-    const hasOnboarding =
-      Boolean(document.querySelector('#display-name')) ||
-      Array.from(document.querySelectorAll('button')).some((button) =>
-        /^(Start|Start using XLN|Continue)$/i.test(String(button.textContent || '').trim()),
-      );
-    if (!hasOnboarding) return false;
-    // Profile onboarding owns real setup side effects such as initial hub joins.
-    // Do not mark it complete through localStorage here; completeProfileOnboardingIfVisible()
-    // must press Start so the app runs the same finish() path a user does.
-    if (document.querySelector('#display-name')) return false;
-
-    const entityIds = Array.from(document.querySelectorAll('code'))
-      .map((node) => String(node.textContent || '').trim())
-      .filter((text) => /^0x[a-fA-F0-9]{64}$/.test(text));
-    if (entityIds.length === 0) return false;
-
-    const displayName = String((document.querySelector('#display-name') as HTMLInputElement | null)?.value || '').trim();
-    const hubJoinPreference = String((document.querySelector('#hub-join-select') as HTMLSelectElement | null)?.value || '').trim();
-    for (const id of entityIds) {
-      localStorage.setItem(`xln-onboarding-complete:${id.toLowerCase()}`, 'true');
-    }
-    if (displayName) localStorage.setItem('xln-display-name', displayName);
-    if (hubJoinPreference) localStorage.setItem('xln-hub-join-preference', hubJoinPreference);
-    return true;
-  }).catch(() => false);
-
-  if (completed) {
-    await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
+  const onboardingVisible = await page.evaluate(() => {
+    const onboarding = document.querySelector<HTMLElement>('.onboarding');
+    return Boolean(onboarding && onboarding.offsetParent !== null);
+  });
+  if (onboardingVisible) {
+    const diagnostics = await collectProfileOnboardingSurfaceDiagnostics(page);
+    throw new Error(`PROFILE_ONBOARDING_UNSUPPORTED_VISIBLE:${JSON.stringify(diagnostics)}`);
   }
 }
 
@@ -626,7 +682,7 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
     return null;
   };
   const finishButtonVisible = async (): Promise<boolean> =>
-    (await firstVisibleButtonByText(page, /^(Start|Starting\.\.\.|Start using XLN|Continue)$/i, 200)) !== null;
+    (await firstVisibleOnboardingButtonByText(page, /^(Start|Starting\.\.\.|Start using XLN|Continue)$/i, 200)) !== null;
   const onboardingGoneOrReady = async (): Promise<boolean> =>
     (await visibleDisplayNameInput() === null) && !await finishButtonVisible();
 
@@ -639,17 +695,43 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
 
   const displayNameInput = await visibleDisplayNameInput(15_000);
   if (displayNameInput && (await displayNameInput.inputValue().catch(() => '')).trim().length === 0) {
-    await displayNameInput.fill(label, { timeout: 5_000 }).catch(() => null);
+    try {
+      await displayNameInput.fill(label, { timeout: 5_000 });
+    } catch (error) {
+      const diagnostics = await collectProfileOnboardingSurfaceDiagnostics(page);
+      throw new Error(
+        `PROFILE_ONBOARDING_DISPLAY_NAME_FAILED:${JSON.stringify(diagnostics)}`,
+        { cause: error },
+      );
+    }
   }
 
   await acceptOnboardingTermsIfVisible(page);
-  const startButton = await firstVisibleButtonByText(page, /^(Start|Start using XLN|Continue)$/i, 1_000);
-  const submitted = Boolean(startButton && await startButton.isEnabled().catch(() => false));
-  if (startButton && submitted) {
+  const startButton = await firstVisibleOnboardingButtonByText(page, /^(Start|Start using XLN|Continue)$/i, 1_000);
+  if (!startButton) {
+    const diagnostics = await collectProfileOnboardingSurfaceDiagnostics(page);
+    throw new Error(`PROFILE_ONBOARDING_START_MISSING:${JSON.stringify(diagnostics)}`);
+  }
+  try {
+    await expect(startButton).toBeEnabled({ timeout: 15_000 });
+  } catch (error) {
+    const diagnostics = await collectProfileOnboardingSurfaceDiagnostics(page);
+    throw new Error(
+      `PROFILE_ONBOARDING_START_DISABLED:${JSON.stringify(diagnostics)}`,
+      { cause: error },
+    );
+  }
+  try {
     await startButton.click({ force: true, timeout: 2_000 });
+  } catch (error) {
+    const diagnostics = await collectProfileOnboardingSurfaceDiagnostics(page);
+    throw new Error(
+      `PROFILE_ONBOARDING_SUBMIT_FAILED:${JSON.stringify(diagnostics)}`,
+      { cause: error },
+    );
   }
 
-  if (submitted) {
+  try {
     await expect
       .poll(async () => {
         return await onboardingGoneOrReady();
@@ -658,36 +740,79 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
         intervals: [250, 500, 1000],
       })
       .toBe(true);
-    return;
+  } catch (error) {
+    const diagnostics = await page.evaluate(() => {
+      const env = (window as typeof window & { isolatedEnv?: Record<string, any> }).isolatedEnv;
+      const inputSummary = (input: any) => ({
+          runtimeTxs: (input?.runtimeTxs ?? []).map((tx: any) => String(tx?.type ?? '')),
+          jInputs: (input?.jInputs ?? []).map((entry: any) => ({
+            jurisdictionName: String(entry?.jurisdictionName ?? ''),
+            txs: (entry?.jTxs ?? []).map((tx: any) => String(tx?.type ?? '')),
+          })),
+          entityInputs: (input?.entityInputs ?? []).map((entry: any) => ({
+            entityId: String(entry?.entityId ?? ''),
+            signerId: String(entry?.signerId ?? ''),
+            txs: (entry?.entityTxs ?? []).map((tx: any) => String(tx?.type ?? '')),
+            proposal: Number(entry?.proposedFrame?.height ?? 0),
+            precommits: entry?.hashPrecommits instanceof Map ? entry.hashPrecommits.size : 0,
+            jPrefix: entry?.jPrefixAttestations instanceof Map ? entry.jPrefixAttestations.size : 0,
+          })),
+        });
+      return {
+          visibleErrors: [...document.querySelectorAll<HTMLElement>('.error-msg, .toast.error .message')]
+            .filter((element) => element.offsetParent !== null)
+            .map((element) => String(element.textContent ?? '').trim()),
+          runtimeId: String(env?.runtimeId ?? ''),
+          height: Number(env?.height ?? 0),
+          runtimeMempool: inputSummary(env?.runtimeMempool),
+          pendingOutputs: (env?.pendingOutputs ?? []).map(inputSummary),
+          networkInbox: (env?.networkInbox ?? []).map(inputSummary),
+          pendingNetworkOutputs: (env?.pendingNetworkOutputs ?? []).map((entry: any) => ({
+            attempts: Number(entry?.attempts ?? 0),
+            nextAttemptAt: Number(entry?.nextAttemptAt ?? 0),
+            output: inputSummary({ entityInputs: [entry?.output ?? entry] }),
+          })),
+          reliable: {
+            ingressPending: env?.runtimeState?.pendingReliableIngress?.size ?? 0,
+            ingressActive: env?.runtimeState?.reliableIngressReceiptLedger?.size ?? 0,
+            ingressTerminal: env?.runtimeState?.reliableIngressTerminalWatermarks?.size ?? 0,
+            senderActive: env?.runtimeState?.receivedReliableReceiptLedger?.size ?? 0,
+            senderTerminal: env?.runtimeState?.receivedReliableTerminalWatermarks?.size ?? 0,
+          },
+          replicas: Array.from(env?.eReplicas?.entries?.() ?? []).map(([key, replica]: [string, any]) => ({
+            key,
+            height: Number(replica?.state?.height ?? 0),
+            mempool: (replica?.mempool ?? []).map((tx: any) => String(tx?.type ?? '')),
+            proposal: Number(replica?.proposal?.height ?? 0),
+            locked: Number(replica?.lockedFrame?.height ?? 0),
+            jPrefixTarget: Number(replica?.jPrefixRound?.targetEntityHeight ?? 0),
+            accounts: Array.from(replica?.state?.accounts?.entries?.() ?? []).map(
+              ([counterpartyId, account]: [string, any]) => ({
+                counterpartyId,
+                height: Number(account?.currentHeight ?? 0),
+                mempool: (account?.mempool ?? []).map((tx: any) => String(tx?.type ?? '')),
+                pendingFrame: Number(account?.pendingFrame?.height ?? 0),
+              }),
+            ),
+          })),
+      };
+    }).catch((diagnosticError) => ({ diagnosticError: String(diagnosticError) }));
+    throw new Error(
+      `PROFILE_ONBOARDING_COMPLETION_TIMEOUT:${JSON.stringify(diagnostics)}`,
+      { cause: error },
+    );
   }
 
-  const fallbackState = await page.evaluate(() => {
-    const entityIds = Array.from(document.querySelectorAll('code'))
-      .map((node) => String(node.textContent || '').trim())
-      .filter((text) => /^0x[a-fA-F0-9]{64}$/.test(text));
-    const displayName = String((document.querySelector('#display-name') as HTMLInputElement | null)?.value || '').trim();
-    const hubJoinPreference = String((document.querySelector('#hub-join-select') as HTMLSelectElement | null)?.value || '').trim();
-    return { entityIds, displayName, hubJoinPreference };
+  const visibleErrors = await page.evaluate(() => {
+    return Array.from(document.querySelectorAll<HTMLElement>('.error-msg, .toast.error .message, [role="alert"]'))
+      .filter((element) => element.offsetParent !== null)
+      .map((element) => String(element.textContent || '').trim())
+      .filter(Boolean);
   });
-  if (fallbackState.entityIds.length > 0) {
-    await page.evaluate(({ ids, displayName, hubJoinPreference }) => {
-      for (const id of ids) {
-        localStorage.setItem(`xln-onboarding-complete:${String(id).trim().toLowerCase()}`, 'true');
-      }
-      if (displayName) localStorage.setItem('xln-display-name', displayName);
-      if (hubJoinPreference) localStorage.setItem('xln-hub-join-preference', hubJoinPreference);
-    }, { ids: fallbackState.entityIds, displayName: fallbackState.displayName, hubJoinPreference: fallbackState.hubJoinPreference });
-    await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
+  if (visibleErrors.length > 0) {
+    const diagnostics = await collectProfileOnboardingSurfaceDiagnostics(page);
+    throw new Error(`PROFILE_ONBOARDING_SUBMIT_FAILED:${JSON.stringify(diagnostics)}`);
   }
-
-  await expect
-    .poll(async () => {
-      return await onboardingGoneOrReady();
-    }, {
-      timeout: 30_000,
-      intervals: [250, 500, 1000],
-    })
-    .toBe(true);
 }
 
 async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
@@ -850,15 +975,12 @@ export async function gotoApp(
 }
 
 export function selectDemoMnemonic(label: DemoUserName): string {
-  const envKey = DEMO_MNEMONIC_ENV[label];
-  const override = process.env[envKey];
-  if (typeof override === 'string' && override.trim().length > 0) {
-    return override.trim();
-  }
+  const configured = resolveConfiguredDemoMnemonics();
   if (process.env.E2E_RANDOM_MNEMONICS === '1') {
-    return Wallet.createRandom().mnemonic!.phrase;
+    configured[label] = Wallet.createRandom().mnemonic!.phrase;
   }
-  return DEFAULT_DEMO_MNEMONICS[label];
+  assertDemoSignerIdentities(configured);
+  return configured[label];
 }
 
 export async function createRuntime(
@@ -1038,8 +1160,8 @@ export async function createRuntime(
     await waitForRuntimeReady(page, runtimeId);
   }
   runtimeIdsByLabel.set(label.toLowerCase(), runtimeId);
-  await dismissOnboardingIfVisible(page);
   await completeProfileOnboardingIfVisible(page, label);
+  await dismissOnboardingIfVisible(page);
   if (options.requireOnline !== false) {
     await ensureRuntimeOnline(page, `create-${label}`);
   }
@@ -1270,8 +1392,8 @@ export async function switchToRuntimeId(page: Page, runtimeId: string): Promise<
   });
   if (currentRuntimeId === normalizedRuntimeId) {
     await waitForRuntimeReady(page, normalizedRuntimeId);
-    await dismissOnboardingIfVisible(page);
     await completeProfileOnboardingIfVisible(page, `Runtime ${normalizedRuntimeId.slice(2, 6)}`);
+    await dismissOnboardingIfVisible(page);
     await ensureRuntimeOnline(page, `switch-id-${runtimeId.slice(0, 8)}`);
     return;
   }
@@ -1294,10 +1416,15 @@ export async function switchToRuntimeId(page: Page, runtimeId: string): Promise<
       throw new Error(`runtime ${targetRuntimeId} missing from xln-vaults`);
     }
   }, normalizedRuntimeId);
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await quiesceRuntimePage(page);
+  try {
+    await page.reload({ waitUntil: 'domcontentloaded' });
+  } finally {
+    resetRuntimePageQuiescence(page);
+  }
   await waitForActiveRuntimeId(page, normalizedRuntimeId);
   await waitForRuntimeReady(page, normalizedRuntimeId);
-  await dismissOnboardingIfVisible(page);
   await completeProfileOnboardingIfVisible(page, `Runtime ${normalizedRuntimeId.slice(2, 6)}`);
+  await dismissOnboardingIfVisible(page);
   await ensureRuntimeOnline(page, `switch-id-${runtimeId.slice(0, 8)}`);
 }

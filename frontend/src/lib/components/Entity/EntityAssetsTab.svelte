@@ -102,7 +102,7 @@
   export let moveAssetOptions: Array<{ symbol: string; tokenId?: number; decimals?: number }> = [];
   export let moveEndpointLabels: Record<string, string>;
   export let moveEndpoints: MoveEndpoint[] = [];
-  export let formatAmount: (amount: bigint, decimals?: number) => string;
+  export let formatAmount: (amount: bigint, decimals: number) => string;
   export let formatApproxUsd: (value: number) => string;
   export let getMovePrimaryActionLabel: () => string;
   export let setMoveVisualRoot: (node: HTMLDivElement | null) => void;

@@ -181,13 +181,14 @@ contract HankoCodec {
     uint256 chainId,
     address contractAddress,
     uint256 entityNumber,
+    uint256 boardEpoch,
     address to,
     uint256 tokenId,
     uint256 amount,
     uint256 actionNonce
   ) external pure returns (bytes memory) {
     return HankoEncoding.encodeEntityTransfer(
-      chainId, contractAddress, entityNumber, to, tokenId, amount, actionNonce
+      chainId, contractAddress, entityNumber, boardEpoch, to, tokenId, amount, actionNonce
     );
   }
 
@@ -195,13 +196,14 @@ contract HankoCodec {
     uint256 chainId,
     address contractAddress,
     uint256 entityNumber,
+    uint256 boardEpoch,
     address to,
     uint256 tokenId,
     uint256 amount,
     uint256 actionNonce
   ) external pure returns (bytes32) {
     return keccak256(HankoEncoding.encodeEntityTransfer(
-      chainId, contractAddress, entityNumber, to, tokenId, amount, actionNonce
+      chainId, contractAddress, entityNumber, boardEpoch, to, tokenId, amount, actionNonce
     ));
   }
 
@@ -209,6 +211,7 @@ contract HankoCodec {
     uint256 chainId,
     address contractAddress,
     uint256 entityNumber,
+    uint256 boardEpoch,
     address depository,
     uint256 controlAmount,
     uint256 dividendAmount,
@@ -219,6 +222,7 @@ contract HankoCodec {
       chainId,
       contractAddress,
       entityNumber,
+      boardEpoch,
       depository,
       controlAmount,
       dividendAmount,
@@ -231,6 +235,7 @@ contract HankoCodec {
     uint256 chainId,
     address contractAddress,
     uint256 entityNumber,
+    uint256 boardEpoch,
     address depository,
     uint256 controlAmount,
     uint256 dividendAmount,
@@ -241,10 +246,129 @@ contract HankoCodec {
       chainId,
       contractAddress,
       entityNumber,
+      boardEpoch,
       depository,
       controlAmount,
       dividendAmount,
       purpose,
+      actionNonce
+    ));
+  }
+
+  function encodeCancelEntityProviderActionHankoPayloadForDomain(
+    uint256 chainId,
+    address contractAddress,
+    uint256 entityNumber,
+    uint256 boardEpoch,
+    uint256 actionNonce,
+    bytes32 cancelledActionHash,
+    uint8 cancelledActionKind
+  ) external pure returns (bytes memory) {
+    return HankoEncoding.encodeCancelEntityProviderAction(
+      chainId,
+      contractAddress,
+      entityNumber,
+      boardEpoch,
+      actionNonce,
+      cancelledActionHash,
+      cancelledActionKind
+    );
+  }
+
+  function computeCancelEntityProviderActionHankoHashForDomain(
+    uint256 chainId,
+    address contractAddress,
+    uint256 entityNumber,
+    uint256 boardEpoch,
+    uint256 actionNonce,
+    bytes32 cancelledActionHash,
+    uint8 cancelledActionKind
+  ) external pure returns (bytes32) {
+    return keccak256(HankoEncoding.encodeCancelEntityProviderAction(
+      chainId,
+      contractAddress,
+      entityNumber,
+      boardEpoch,
+      actionNonce,
+      cancelledActionHash,
+      cancelledActionKind
+    ));
+  }
+
+  function encodeBoardProposalHankoPayloadForDomain(
+    bytes32 domainSeparator,
+    uint256 chainId,
+    address contractAddress,
+    bytes32 entityId,
+    uint256 boardEpoch,
+    bytes32 newBoardHash,
+    uint8 authority,
+    uint256 actionNonce
+  ) external pure returns (bytes memory) {
+    return HankoEncoding.encodeBoardProposal(
+      domainSeparator, chainId, contractAddress, entityId, boardEpoch, newBoardHash, authority, actionNonce
+    );
+  }
+
+  function computeBoardProposalHankoHashForDomain(
+    bytes32 domainSeparator,
+    uint256 chainId,
+    address contractAddress,
+    bytes32 entityId,
+    uint256 boardEpoch,
+    bytes32 newBoardHash,
+    uint8 authority,
+    uint256 actionNonce
+  ) external pure returns (bytes32) {
+    return keccak256(HankoEncoding.encodeBoardProposal(
+      domainSeparator, chainId, contractAddress, entityId, boardEpoch, newBoardHash, authority, actionNonce
+    ));
+  }
+
+  function encodeBoardProposalCancelHankoPayloadForDomain(
+    bytes32 domainSeparator,
+    uint256 chainId,
+    address contractAddress,
+    bytes32 entityId,
+    uint256 boardEpoch,
+    bytes32 proposedBoardHash,
+    uint8 proposedBy,
+    uint8 cancelledBy,
+    uint256 actionNonce
+  ) external pure returns (bytes memory) {
+    return HankoEncoding.encodeBoardProposalCancel(
+      domainSeparator,
+      chainId,
+      contractAddress,
+      entityId,
+      boardEpoch,
+      proposedBoardHash,
+      proposedBy,
+      cancelledBy,
+      actionNonce
+    );
+  }
+
+  function computeBoardProposalCancelHankoHashForDomain(
+    bytes32 domainSeparator,
+    uint256 chainId,
+    address contractAddress,
+    bytes32 entityId,
+    uint256 boardEpoch,
+    bytes32 proposedBoardHash,
+    uint8 proposedBy,
+    uint8 cancelledBy,
+    uint256 actionNonce
+  ) external pure returns (bytes32) {
+    return keccak256(HankoEncoding.encodeBoardProposalCancel(
+      domainSeparator,
+      chainId,
+      contractAddress,
+      entityId,
+      boardEpoch,
+      proposedBoardHash,
+      proposedBy,
+      cancelledBy,
       actionNonce
     ));
   }

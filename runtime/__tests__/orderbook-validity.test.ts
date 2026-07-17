@@ -1,15 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 
 import { applyCommand, createBook, type BookState } from '../orderbook/core';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { createOrderbookExtState, ORDERBOOK_PRICE_SCALE, replaceOrderbookPair, SWAP_LOT_SCALE } from '../orderbook/types';
 import { validateBookAgainstOffers, validateBookStructure, validateEntityOrderbooks } from '../orderbook/validity';
 import type { AccountMachine, EntityState, SwapOffer } from '../types';
 
 const makeOffer = (overrides: Partial<SwapOffer> = {}): SwapOffer => ({
   offerId: 'offer-1',
-  giveTokenId: 4,
+  giveTokenId: 2,
   giveAmount: SWAP_LOT_SCALE,
-  wantTokenId: 6,
+  wantTokenId: 1,
   wantAmount: (SWAP_LOT_SCALE * 1000n) / ORDERBOOK_PRICE_SCALE,
   priceTicks: 1000n,
   timeInForce: 0,
@@ -49,9 +50,8 @@ const makeAccount = (offerId: string, offer: SwapOffer): AccountMachine =>
     requestedRebalance: new Map(),
     requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftJObservations: [],
-    rightJObservations: [],
-    jEventChain: [],
+    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,
     disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
     jNonce: 0,
@@ -70,9 +70,9 @@ const makeState = (book: BookState, offerId = 'offer-1', offer = makeOffer()): E
     },
     referenceTokenId: 2,
     minTradeSize: 0n,
-    supportedPairs: ['4/6'],
+    supportedPairs: ['1/2'],
   });
-  replaceOrderbookPair(orderbookExt, '4/6', book);
+  replaceOrderbookPair(orderbookExt, '1/2', book);
 
   return ({
     entityId: 'hub',
@@ -235,7 +235,7 @@ describe('orderbook validity', () => {
       report.mismatched.some((item) =>
         item.swapKey === 'alice:offer-1'
         && item.field === 'pairIndex'
-        && item.expected === '4/6'
+        && item.expected === '1/2'
         && item.actual === '9/9',
       ),
     ).toBe(true);

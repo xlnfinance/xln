@@ -39,9 +39,9 @@ export class NobleCryptoProvider implements CryptoProvider {
       throw new Error('Recipient public key required for encryption');
     }
 
-    // Generate ephemeral key pair. Consensus paths pass deterministicSeed so
-    // identical HTLC txs produce identical ciphertext; external transport paths
-    // leave it unset and keep unlinkable random ephemeral keys.
+    // Generate an ephemeral key pair. Production HTLC admission leaves the
+    // seed unset; consensus replay only validates the already-sealed payload.
+    // Deterministic providers are reserved for explicit deterministic tests.
     const ephemeral = this.options.deterministicSeed
       ? await this.generateDeterministicKeyPair('encrypt-ephemeral')
       : x25519.keygen();

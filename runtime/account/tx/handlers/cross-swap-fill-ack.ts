@@ -1,6 +1,6 @@
 import type { AccountMachine, AccountTx, CrossJurisdictionSwapRoute } from '../../../types';
 import type { SwapOfferEvent } from '../../../entity/tx/handlers/account';
-import { SWAP_LOT_SCALE } from '../../../orderbook';
+import { getSwapLotScale } from '../../../orderbook';
 import {
   CROSS_J_MAX_FILL_RATIO,
   buildCommittedCrossJurisdictionPullBinding,
@@ -202,11 +202,13 @@ export async function handleCrossSwapFillAck(
   const shouldClose = full || cancelRemainder;
   const remainingSource = sourceTotal - fill.cumulativeSourceAmount;
   const remainingTarget = targetTotal - fill.cumulativeTargetAmount;
-  const lotSizedRoute = sourceTotal >= SWAP_LOT_SCALE && targetTotal >= SWAP_LOT_SCALE;
+  const sourceLotScale = getSwapLotScale(route.source.tokenId);
+  const targetLotScale = getSwapLotScale(route.target.tokenId);
+  const lotSizedRoute = sourceTotal >= sourceLotScale && targetTotal >= targetLotScale;
   const closedByDust = !shouldClose && (
     remainingSource <= 0n ||
     remainingTarget <= 0n ||
-    (lotSizedRoute && (remainingSource < SWAP_LOT_SCALE || remainingTarget < SWAP_LOT_SCALE))
+    (lotSizedRoute && (remainingSource < sourceLotScale || remainingTarget < targetLotScale))
   );
   const terminalClose = shouldClose || closedByDust;
   if (terminalClose) {

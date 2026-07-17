@@ -37,7 +37,7 @@ describe('mesh operator seed derivation', () => {
     expect(orchestrator).toContain("runtimeSeedFor('CUSTODY')");
     expect(startup).toContain('xln_read_or_create_operator_seed "$XLN_MESH_ROOT_SEED_FILE"');
     expect(devStartup).toContain('source "$REPO_ROOT/scripts/lib/start-common.sh"');
-    expect(devStartup).toContain('db/dev/secrets/mesh-root.seed');
+    expect(devStartup).toContain('$DEV_DATA_ROOT/secrets/mesh-root.seed');
     expect(devStartup).toContain('xln_read_or_create_operator_seed "$XLN_MESH_ROOT_SEED_FILE"');
   });
 });

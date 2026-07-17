@@ -1,4 +1,6 @@
 import type { AccountMachine, EntityReplica, EntityState } from '../types';
+import { assertAccountJClaimAccumulatorState } from '../account/j-claim-accumulator';
+import { cloneEntityState } from '../state-helpers';
 import {
   cloneCrossJurisdictionBookAdmission,
   cloneCrossJurisdictionAccountFrameRoute,
@@ -59,15 +61,13 @@ const publicSwapHistory = (history: AccountMachine['swapOrderHistory']): Account
 
 export const projectEntityCoreDoc = (
   state: EntityState,
-  replica?: Pick<EntityReplica, 'signerId' | 'isProposer'>,
 ): StorageEntityCoreDoc => ({
   entityId: state.entityId,
-  ...withProp('signerId', replica?.signerId ? normalizeEntityId(replica.signerId) : undefined),
-  ...withProp('isProposer', typeof replica?.isProposer === 'boolean' ? replica.isProposer : undefined),
   height: state.height,
   timestamp: state.timestamp,
   messages: state.messages,
   nonces: state.nonces,
+  ...withProp('entityCommandNonces', state.entityCommandNonces),
   proposals: state.proposals,
   config: state.config,
   reserves: state.reserves,
@@ -75,8 +75,8 @@ export const projectEntityCoreDoc = (
   lastFinalizedJHeight: state.lastFinalizedJHeight,
   jBlockChain: state.jBlockChain,
   ...withProp('jHistoryFinality', state.jHistoryFinality),
-  entityEncPubKey: state.entityEncPubKey,
-  entityEncPrivKey: state.entityEncPrivKey,
+  ...withProp('certifiedBoardState', state.certifiedBoardState),
+  ...withProp('profileEncryptionManifest', state.profileEncryptionManifest),
   profile: state.profile,
   htlcRoutes: state.htlcRoutes,
   htlcFeesEarned: state.htlcFeesEarned,
@@ -88,7 +88,9 @@ export const projectEntityCoreDoc = (
   ...withProp('crontabState', state.crontabState),
   ...withProp('batchHistory', state.batchHistory),
   ...withProp('jBatchState', state.jBatchState),
-  ...withProp('htlcNotes', state.htlcNotes),
+  ...withProp('entityProviderActionState', state.entityProviderActionState),
+  ...withProp('consumptionAccumulator', state.consumptionAccumulator),
+  ...withProp('certifiedOutputSequences', state.certifiedOutputSequences),
   ...withProp('outDebtsByToken', state.outDebtsByToken),
   ...withProp('inDebtsByToken', state.inDebtsByToken),
   ...withProp('swapTradingPairs', state.swapTradingPairs),
@@ -100,6 +102,31 @@ export const projectEntityCoreDoc = (
   ...withProp('orderbookHubProfile', state.orderbookExt?.hubProfile),
   ...withProp('orderbookReferrals', state.orderbookExt?.referrals),
   ...withProp('lending', state.lending),
+});
+
+export type EntityReplicaCoreViewDoc = StorageEntityCoreDoc & {
+  signerId: string;
+  isProposer: boolean;
+  entityEncPubKey: string;
+  entityEncPrivKey: '';
+  htlcNotes?: EntityState['htlcNotes'];
+};
+
+/**
+ * Live adapter view for one validator replica. This is deliberately separate
+ * from projectEntityCoreDoc so validator-local identity can never enter the
+ * shared storage document. Private encryption material is never projected.
+ */
+export const projectEntityReplicaCoreView = (
+  state: EntityState,
+  replica: Pick<EntityReplica, 'signerId' | 'isProposer'>,
+): EntityReplicaCoreViewDoc => ({
+  ...projectEntityCoreDoc(state),
+  signerId: normalizeEntityId(replica.signerId),
+  isProposer: replica.isProposer,
+  entityEncPubKey: state.entityEncPubKey,
+  entityEncPrivKey: '',
+  ...withProp('htlcNotes', state.htlcNotes),
 });
 
 const cloneHankoWitness = (hankoWitness?: EntityReplica['hankoWitness']): EntityReplica['hankoWitness'] | undefined => {
@@ -117,25 +144,46 @@ const cloneHankoWitness = (hankoWitness?: EntityReplica['hankoWitness']): Entity
   );
 };
 
-export const projectReplicaMeta = (replica: EntityReplica): StorageReplicaMeta => ({
+export const projectReplicaMeta = (
+  replica: EntityReplica,
+  options?: {
+    certifiedFrameLineage?: EntityReplica['certifiedFrameLineage'];
+    certifiedFrameAnchor?: EntityReplica['certifiedFrameAnchor'];
+  },
+): StorageReplicaMeta => ({
   entityId: normalizeEntityId(replica.entityId),
   signerId: normalizeEntityId(replica.signerId),
   isProposer: replica.isProposer,
-  ...withProp('mempool', replica.mempool),
+  // Snapshot now. Replica states continue mutating after projection, and
+  // Account clonedForValidation is an ephemeral replay cache, not recovery data.
+  state: cloneEntityState(replica.state, true),
+  mempool: structuredClone(replica.mempool),
   ...withProp('position', replica.position),
   ...withProp('proposal', replica.proposal),
   ...withProp('lockedFrame', replica.lockedFrame),
-  ...withProp('validatorComputedState', replica.validatorComputedState),
+  ...withProp('validatorExecution', replica.validatorExecution),
+  ...withProp(
+    'certifiedFrameLineage',
+    options ? options.certifiedFrameLineage : replica.certifiedFrameLineage,
+  ),
+  ...withProp(
+    'certifiedFrameAnchor',
+    options ? options.certifiedFrameAnchor : replica.certifiedFrameAnchor,
+  ),
   ...withProp('hankoWitness', cloneHankoWitness(replica.hankoWitness)),
   ...withProp('leaderVotes', replica.leaderVotes),
   ...withProp('pendingLeaderCertificate', replica.pendingLeaderCertificate),
   ...withProp('lastConsensusProgressAt', replica.lastConsensusProgressAt),
   ...withProp('jHistory', replica.jHistory),
+  ...withProp('jPrefixRound', replica.jPrefixRound),
+  ...withProp('jSubmitState', replica.jSubmitState),
+  ...withProp('entityProviderActionSubmitState', replica.entityProviderActionSubmitState),
 });
 
 const projectAccountDocFull = (account: AccountMachine): StorageAccountDoc => ({
   leftEntity: account.leftEntity,
   rightEntity: account.rightEntity,
+  domain: structuredClone(account.domain),
   watchSeed: account.watchSeed,
   status: account.status,
   mempool: account.mempool.map(cloneCrossJurisdictionAccountTxRoute),
@@ -150,9 +198,8 @@ const projectAccountDocFull = (account: AccountMachine): StorageAccountDoc => ({
   currentHeight: account.currentHeight,
   pendingSignatures: account.pendingSignatures,
   rollbackCount: account.rollbackCount,
-  leftJObservations: account.leftJObservations,
-  rightJObservations: account.rightJObservations,
-  jEventChain: account.jEventChain,
+  leftPendingJClaims: assertAccountJClaimAccumulatorState(account.leftPendingJClaims),
+  rightPendingJClaims: assertAccountJClaimAccumulatorState(account.rightPendingJClaims),
   lastFinalizedJHeight: account.lastFinalizedJHeight,
   proofHeader: account.proofHeader,
   proofBody: account.proofBody,
@@ -164,6 +211,7 @@ const projectAccountDocFull = (account: AccountMachine): StorageAccountDoc => ({
   shadow: account.shadow,
   ...withProp('pendingFrame', account.pendingFrame ? cloneCrossJurisdictionAccountFrameRoute(account.pendingFrame) : undefined),
   ...withProp('pendingAccountInput', account.pendingAccountInput ? cloneCrossJurisdictionAccountInputRoute(account.pendingAccountInput) : undefined),
+  ...withProp('pendingAccountInputSignerId', account.pendingAccountInputSignerId),
   ...withProp('lastOutboundFrameAck', account.lastOutboundFrameAck),
   ...withProp('pendingForward', account.pendingForward),
   ...withProp('hankoSignature', account.hankoSignature),
@@ -171,6 +219,8 @@ const projectAccountDocFull = (account: AccountMachine): StorageAccountDoc => ({
   ...withProp('abiProofBody', account.abiProofBody),
   ...withProp('currentFrameHanko', account.currentFrameHanko),
   ...withProp('counterpartyFrameHanko', account.counterpartyFrameHanko),
+  ...withProp('boardResealMigration', account.boardResealMigration),
+  ...withProp('counterpartyBoardReseal', account.counterpartyBoardReseal),
   ...withProp('currentDisputeProofHanko', account.currentDisputeProofHanko),
   ...withProp('currentDisputeProofNonce', account.currentDisputeProofNonce),
   ...withProp('currentDisputeProofBodyHash', account.currentDisputeProofBodyHash),
@@ -188,7 +238,7 @@ const projectAccountDocFull = (account: AccountMachine): StorageAccountDoc => ({
   ...withProp('activeDispute', account.activeDispute),
   ...withProp('swapOrderHistory', publicSwapHistory(account.swapOrderHistory)),
   ...withProp('swapClosedOrders', publicSwapHistory(account.swapClosedOrders)),
-  ...withProp('counterpartyRebalanceFeePolicy', account.counterpartyRebalanceFeePolicy),
+  ...withProp('rebalanceFeePolicies', account.rebalanceFeePolicies),
 });
 
 export const projectAccountDoc = (account: AccountMachine): StorageAccountDoc => {

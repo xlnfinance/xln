@@ -219,10 +219,9 @@ async function main() {
   env.quietRuntimeLogs = true;
 
   const signer1 = deriveSignerAddressSync(seed, '1');
-  registerSignerKey(signer1, deriveSignerKeySync(seed, '1'));
-  registerSignerKey(signer1.slice(-4).toLowerCase(), deriveSignerKeySync(seed, '1'));
+  registerSignerKey(env, signer1, deriveSignerKeySync(seed, '1'));
   const signer2 = deriveSignerAddressSync(seed, '2');
-  registerSignerKey(signer2, deriveSignerKeySync(seed, '2'));
+  registerSignerKey(env, signer2, deriveSignerKeySync(seed, '2'));
 
   const entityA = generateLazyEntityId([signer1], 1n).toLowerCase();
   const entityB = generateLazyEntityId([signer2], 1n).toLowerCase();

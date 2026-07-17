@@ -32,6 +32,19 @@ type DeadlineIndex = {
 
 const LOCAL_SCHEDULED_WAKE = Symbol.for('xln.runtime.scheduled-wake.local');
 
+export const copyLocalScheduledWakeAuthorization = (
+  source: EntityTx,
+  target: EntityTx,
+): void => {
+  if (
+    source.type === 'scheduledWake' &&
+    target.type === 'scheduledWake' &&
+    (source as EntityTx & { [LOCAL_SCHEDULED_WAKE]?: boolean })[LOCAL_SCHEDULED_WAKE] === true
+  ) {
+    Object.defineProperty(target, LOCAL_SCHEDULED_WAKE, { value: true, enumerable: false });
+  }
+};
+
 const replicaKey = (entityId: string, signerId: string): string =>
   `${entityId.toLowerCase()}:${signerId.toLowerCase()}`;
 

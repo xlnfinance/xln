@@ -1,3 +1,5 @@
+import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
+
 const USD_MICROS_BY_SYMBOL: Record<string, bigint> = {
   USDC: 1_000_000n,
   USDT: 1_000_000n,
@@ -19,10 +21,10 @@ export function getAssetUsdMicros(symbol: string): bigint {
 }
 
 export function amountToUsdMicros(amount: bigint, decimals: number, symbol: string): bigint {
+  const exactDecimals = requireTokenDecimals(decimals, `asset:${symbol}`);
   const priceMicros = getAssetUsdMicros(symbol);
   if (amount <= 0n || priceMicros <= 0n) return 0n;
-  const normalizedDecimals = Math.max(0, Math.min(18, Math.floor(decimals)));
-  const scale = 10n ** BigInt(normalizedDecimals);
+  const scale = 10n ** BigInt(exactDecimals);
   return (amount * priceMicros) / scale;
 }
 

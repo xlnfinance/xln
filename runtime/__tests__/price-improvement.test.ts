@@ -16,6 +16,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { createBook, applyCommand, type BookState, type BookEvent } from '../orderbook/core';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, computeSwapPriceTicks, deriveSide } from '../orderbook/types';
 import { handleSwapResolve } from '../account/tx/handlers/swap-resolve';
@@ -109,9 +110,8 @@ function makeAccountMachine(offer: SwapOffer): AccountMachine {
     requestedRebalance: new Map(),
     requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftJObservations: [],
-    rightJObservations: [],
-    jEventChain: [],
+    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,
     disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
     jNonce: 0,

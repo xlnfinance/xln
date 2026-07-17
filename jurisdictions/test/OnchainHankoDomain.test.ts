@@ -1,17 +1,25 @@
 import { loadFixture } from '@nomicfoundation/hardhat-toolbox/network-helpers.js';
 import { expect } from 'chai';
+import type { ContractTransactionReceipt, LogDescription } from 'ethers';
 import hre from 'hardhat';
 
 import {
+  ONCHAIN_HANKO_GOLDEN_ACTION_CANCEL_RECEIPT,
+  ONCHAIN_HANKO_GOLDEN_ACTION_RECEIPT,
   ONCHAIN_HANKO_GOLDEN_HASHES,
   ONCHAIN_HANKO_GOLDEN_PAYLOADS,
   ONCHAIN_HANKO_VECTOR,
 } from '../../tests/fixtures/onchain-hanko-golden.ts';
 
 import {
+  BOARD_PROPOSAL_CANCEL_HANKO_DOMAIN,
+  BOARD_PROPOSAL_HANKO_DOMAIN,
   DEPOSITORY_BATCH_HANKO_DOMAIN,
   WATCHTOWER_COUNTER_DISPUTE_HANKO_DOMAIN,
   encodeCooperativeDisputeProofHankoPayload,
+  encodeBoardProposalCancelHankoPayload,
+  encodeBoardProposalHankoPayload,
+  encodeCancelEntityProviderActionHankoPayload,
   encodeCooperativeUpdateHankoPayload,
   encodeDepositoryBatchHankoPayload,
   encodeDisputeProofHankoPayload,
@@ -20,6 +28,9 @@ import {
   encodeReleaseControlSharesHankoPayload,
   encodeWatchtowerCounterDisputeHankoPayload,
   hashCooperativeDisputeProofHankoPayload,
+  hashBoardProposalCancelHankoPayload,
+  hashBoardProposalHankoPayload,
+  hashCancelEntityProviderActionHankoPayload,
   hashCooperativeUpdateHankoPayload,
   hashDepositoryBatchHankoPayload,
   hashDisputeProofHankoPayload,
@@ -28,6 +39,7 @@ import {
   hashReleaseControlSharesHankoPayload,
   hashWatchtowerCounterDisputeHankoPayload,
 } from '../../runtime/hanko/onchain-domain.ts';
+import type { EntityProvider } from '../typechain-types/contracts/EntityProvider.ts';
 import {
   buildSingleSignerHanko,
   deriveHardhatPrivateKey,
@@ -51,15 +63,28 @@ const encodeSingleSignerBoard = (signerAddress: string): string =>
     0,
   ]]);
 
-const signRecoverEntityHash = (hash: string, privateKey: string): string => {
-  const signature = new ethers.SigningKey(privateKey).sign(ethers.getBytes(hash));
-  const vBit = signature.v === 28 ? 1 : 0;
-  const packed = ethers.concat([signature.r, signature.s, ethers.toBeHex(vBit, 1)]);
-  return ethers.AbiCoder.defaultAbiCoder().encode(['bytes[]'], [[packed]]);
-};
-
 const entityAddress = (entityNumber: bigint): string =>
   ethers.getAddress(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 20));
+
+const entityId = (entityNumber: bigint): string =>
+  ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
+
+const exactActionReceipt = (
+  entityProvider: EntityProvider,
+  receipt: ContractTransactionReceipt | null,
+): LogDescription => {
+  const providerAddress = String(entityProvider.target).toLowerCase();
+  const actionEvents = (receipt?.logs ?? [])
+    .filter((log) => log.address.toLowerCase() === providerAddress)
+    .map((log) => {
+      const parsed = entityProvider.interface.parseLog(log);
+      if (!parsed) throw new Error(`ENTITY_PROVIDER_ACTION_LOG_UNDECODABLE:${log.topics[0] ?? 'missing-topic'}`);
+      return parsed;
+    })
+    .filter((event) => event.name === 'EntityProviderActionExecuted');
+  expect(actionEvents).to.have.length(1);
+  return actionEvents[0]!;
+};
 
 describe('canonical on-chain Hanko domains', function () {
   async function deployFixture() {
@@ -200,6 +225,7 @@ describe('canonical on-chain Hanko domains', function () {
           vector.chainId,
           vector.entityProviderAddress,
           vector.entityTransfer.entityNumber,
+          vector.boardEpoch,
           vector.towerAddress,
           vector.entityTransfer.tokenId,
           vector.entityTransfer.amount,
@@ -209,6 +235,7 @@ describe('canonical on-chain Hanko domains', function () {
           vector.chainId,
           vector.entityProviderAddress,
           vector.entityTransfer.entityNumber,
+          vector.boardEpoch,
           vector.towerAddress,
           vector.entityTransfer.tokenId,
           vector.entityTransfer.amount,
@@ -222,6 +249,7 @@ describe('canonical on-chain Hanko domains', function () {
           vector.chainId,
           vector.entityProviderAddress,
           vector.releaseControlShares.entityNumber,
+          vector.boardEpoch,
           vector.depositoryAddress,
           vector.releaseControlShares.controlAmount,
           vector.releaseControlShares.dividendAmount,
@@ -232,6 +260,7 @@ describe('canonical on-chain Hanko domains', function () {
           vector.chainId,
           vector.entityProviderAddress,
           vector.releaseControlShares.entityNumber,
+          vector.boardEpoch,
           vector.depositoryAddress,
           vector.releaseControlShares.controlAmount,
           vector.releaseControlShares.dividendAmount,
@@ -240,6 +269,78 @@ describe('canonical on-chain Hanko domains', function () {
         ),
         expectedBytes: ONCHAIN_HANKO_GOLDEN_PAYLOADS.releaseControlShares,
         expectedHash: ONCHAIN_HANKO_GOLDEN_HASHES.releaseControlShares,
+      },
+      {
+        bytes: await hankoCodec.encodeCancelEntityProviderActionHankoPayloadForDomain(
+          vector.chainId,
+          vector.entityProviderAddress,
+          vector.cancelEntityProviderAction.entityNumber,
+          vector.boardEpoch,
+          vector.cancelEntityProviderAction.actionNonce,
+          vector.cancelEntityProviderAction.cancelledActionHash,
+          vector.cancelEntityProviderAction.cancelledActionKind,
+        ),
+        hash: await hankoCodec.computeCancelEntityProviderActionHankoHashForDomain(
+          vector.chainId,
+          vector.entityProviderAddress,
+          vector.cancelEntityProviderAction.entityNumber,
+          vector.boardEpoch,
+          vector.cancelEntityProviderAction.actionNonce,
+          vector.cancelEntityProviderAction.cancelledActionHash,
+          vector.cancelEntityProviderAction.cancelledActionKind,
+        ),
+        expectedBytes: ONCHAIN_HANKO_GOLDEN_PAYLOADS.cancelEntityProviderAction,
+        expectedHash: ONCHAIN_HANKO_GOLDEN_HASHES.cancelEntityProviderAction,
+      },
+      {
+        bytes: await hankoCodec.encodeBoardProposalHankoPayloadForDomain(
+          BOARD_PROPOSAL_HANKO_DOMAIN,
+          vector.chainId,
+          vector.entityProviderAddress,
+          vector.boardProposal.entityId,
+          vector.boardEpoch,
+          vector.boardProposal.newBoardHash,
+          vector.boardProposal.authority,
+          vector.boardProposal.actionNonce,
+        ),
+        hash: await hankoCodec.computeBoardProposalHankoHashForDomain(
+          BOARD_PROPOSAL_HANKO_DOMAIN,
+          vector.chainId,
+          vector.entityProviderAddress,
+          vector.boardProposal.entityId,
+          vector.boardEpoch,
+          vector.boardProposal.newBoardHash,
+          vector.boardProposal.authority,
+          vector.boardProposal.actionNonce,
+        ),
+        expectedBytes: ONCHAIN_HANKO_GOLDEN_PAYLOADS.boardProposal,
+        expectedHash: ONCHAIN_HANKO_GOLDEN_HASHES.boardProposal,
+      },
+      {
+        bytes: await hankoCodec.encodeBoardProposalCancelHankoPayloadForDomain(
+          BOARD_PROPOSAL_CANCEL_HANKO_DOMAIN,
+          vector.chainId,
+          vector.entityProviderAddress,
+          vector.boardProposalCancel.entityId,
+          vector.boardEpoch,
+          vector.boardProposalCancel.proposedBoardHash,
+          vector.boardProposalCancel.proposedBy,
+          vector.boardProposalCancel.cancelledBy,
+          vector.boardProposalCancel.actionNonce,
+        ),
+        hash: await hankoCodec.computeBoardProposalCancelHankoHashForDomain(
+          BOARD_PROPOSAL_CANCEL_HANKO_DOMAIN,
+          vector.chainId,
+          vector.entityProviderAddress,
+          vector.boardProposalCancel.entityId,
+          vector.boardEpoch,
+          vector.boardProposalCancel.proposedBoardHash,
+          vector.boardProposalCancel.proposedBy,
+          vector.boardProposalCancel.cancelledBy,
+          vector.boardProposalCancel.actionNonce,
+        ),
+        expectedBytes: ONCHAIN_HANKO_GOLDEN_PAYLOADS.boardProposalCancel,
+        expectedHash: ONCHAIN_HANKO_GOLDEN_HASHES.boardProposalCancel,
       },
     ];
     for (const item of fixedVectors) {
@@ -392,18 +493,37 @@ describe('canonical on-chain Hanko domains', function () {
       purpose: 'Series A',
       actionNonce: 1,
     };
-    const entityProviderDomain = { chainId, entityProviderAddress };
+    const entityProviderDomain = { chainId, entityProviderAddress, boardEpoch: 0n };
+    const cancelAuthorization = {
+      entityNumber: 2,
+      actionNonce: 1,
+      cancelledActionHash: hashEntityTransferHankoPayload(entityProviderDomain, transferAuthorization),
+      cancelledActionKind: 0,
+    };
+    const boardProposalAuthorization = {
+      entityId: left,
+      newBoardHash: `0x${'88'.repeat(32)}`,
+      authority: 1,
+      actionNonce: 7,
+    };
+    const boardProposalCancelAuthorization = {
+      entityId: left,
+      proposedBoardHash: boardProposalAuthorization.newBoardHash,
+      proposedBy: 3,
+      cancelledBy: 2,
+      actionNonce: 7,
+    };
     expect(await hankoCodec.encodeEntityTransferHankoPayloadForDomain(
-      chainId, entityProviderAddress, 2, recipient.address, 2, 100, 1,
+      chainId, entityProviderAddress, 2, 0, recipient.address, 2, 100, 1,
     )).to.equal(encodeEntityTransferHankoPayload(entityProviderDomain, transferAuthorization));
     expect(await hankoCodec.computeEntityTransferHankoHashForDomain(
-      chainId, entityProviderAddress, 2, recipient.address, 2, 100, 1,
+      chainId, entityProviderAddress, 2, 0, recipient.address, 2, 100, 1,
     )).to.equal(hashEntityTransferHankoPayload(entityProviderDomain, transferAuthorization));
     expect(await hankoCodec.encodeReleaseControlSharesHankoPayloadForDomain(
-      chainId, entityProviderAddress, 2, depositoryAddress, 100, 200, 'Series A', 1,
+      chainId, entityProviderAddress, 2, 0, depositoryAddress, 100, 200, 'Series A', 1,
     )).to.equal(encodeReleaseControlSharesHankoPayload(entityProviderDomain, releaseAuthorization));
     expect(await hankoCodec.computeReleaseControlSharesHankoHashForDomain(
-      chainId, entityProviderAddress, 2, depositoryAddress, 100, 200, 'Series A', 1,
+      chainId, entityProviderAddress, 2, 0, depositoryAddress, 100, 200, 'Series A', 1,
     )).to.equal(hashReleaseControlSharesHankoPayload(entityProviderDomain, releaseAuthorization));
     expect(await entityProvider.encodeEntityTransferHankoPayload(2, recipient.address, 2, 100, 1))
       .to.equal(encodeEntityTransferHankoPayload(entityProviderDomain, transferAuthorization));
@@ -413,6 +533,104 @@ describe('canonical on-chain Hanko domains', function () {
       .to.equal(encodeReleaseControlSharesHankoPayload(entityProviderDomain, releaseAuthorization));
     expect(await entityProvider.computeReleaseControlSharesHankoHash(2, depositoryAddress, 100, 200, 'Series A', 1))
       .to.equal(hashReleaseControlSharesHankoPayload(entityProviderDomain, releaseAuthorization));
+    expect(await hankoCodec.encodeCancelEntityProviderActionHankoPayloadForDomain(
+      chainId,
+      entityProviderAddress,
+      cancelAuthorization.entityNumber,
+      entityProviderDomain.boardEpoch,
+      cancelAuthorization.actionNonce,
+      cancelAuthorization.cancelledActionHash,
+      cancelAuthorization.cancelledActionKind,
+    )).to.equal(encodeCancelEntityProviderActionHankoPayload(entityProviderDomain, cancelAuthorization));
+    expect(await hankoCodec.computeCancelEntityProviderActionHankoHashForDomain(
+      chainId,
+      entityProviderAddress,
+      cancelAuthorization.entityNumber,
+      entityProviderDomain.boardEpoch,
+      cancelAuthorization.actionNonce,
+      cancelAuthorization.cancelledActionHash,
+      cancelAuthorization.cancelledActionKind,
+    )).to.equal(hashCancelEntityProviderActionHankoPayload(entityProviderDomain, cancelAuthorization));
+    expect(await entityProvider.encodeCancelEntityProviderActionHankoPayload(
+      cancelAuthorization.entityNumber,
+      cancelAuthorization.actionNonce,
+      cancelAuthorization.cancelledActionHash,
+      cancelAuthorization.cancelledActionKind,
+    )).to.equal(encodeCancelEntityProviderActionHankoPayload(entityProviderDomain, cancelAuthorization));
+    expect(await entityProvider.computeCancelEntityProviderActionHankoHash(
+      cancelAuthorization.entityNumber,
+      cancelAuthorization.actionNonce,
+      cancelAuthorization.cancelledActionHash,
+      cancelAuthorization.cancelledActionKind,
+    )).to.equal(hashCancelEntityProviderActionHankoPayload(entityProviderDomain, cancelAuthorization));
+    expect(await hankoCodec.encodeBoardProposalHankoPayloadForDomain(
+      BOARD_PROPOSAL_HANKO_DOMAIN,
+      chainId,
+      entityProviderAddress,
+      boardProposalAuthorization.entityId,
+      entityProviderDomain.boardEpoch,
+      boardProposalAuthorization.newBoardHash,
+      boardProposalAuthorization.authority,
+      boardProposalAuthorization.actionNonce,
+    )).to.equal(encodeBoardProposalHankoPayload(entityProviderDomain, boardProposalAuthorization));
+    expect(await hankoCodec.computeBoardProposalHankoHashForDomain(
+      BOARD_PROPOSAL_HANKO_DOMAIN,
+      chainId,
+      entityProviderAddress,
+      boardProposalAuthorization.entityId,
+      entityProviderDomain.boardEpoch,
+      boardProposalAuthorization.newBoardHash,
+      boardProposalAuthorization.authority,
+      boardProposalAuthorization.actionNonce,
+    )).to.equal(hashBoardProposalHankoPayload(entityProviderDomain, boardProposalAuthorization));
+    expect(await entityProvider.encodeBoardProposalHankoPayload(
+      boardProposalAuthorization.entityId,
+      boardProposalAuthorization.newBoardHash,
+      boardProposalAuthorization.authority,
+      boardProposalAuthorization.actionNonce,
+    )).to.equal(encodeBoardProposalHankoPayload(entityProviderDomain, boardProposalAuthorization));
+    expect(await entityProvider.computeBoardProposalHash(
+      boardProposalAuthorization.entityId,
+      boardProposalAuthorization.newBoardHash,
+      boardProposalAuthorization.authority,
+      boardProposalAuthorization.actionNonce,
+    )).to.equal(hashBoardProposalHankoPayload(entityProviderDomain, boardProposalAuthorization));
+    expect(await hankoCodec.encodeBoardProposalCancelHankoPayloadForDomain(
+      BOARD_PROPOSAL_CANCEL_HANKO_DOMAIN,
+      chainId,
+      entityProviderAddress,
+      boardProposalCancelAuthorization.entityId,
+      entityProviderDomain.boardEpoch,
+      boardProposalCancelAuthorization.proposedBoardHash,
+      boardProposalCancelAuthorization.proposedBy,
+      boardProposalCancelAuthorization.cancelledBy,
+      boardProposalCancelAuthorization.actionNonce,
+    )).to.equal(encodeBoardProposalCancelHankoPayload(entityProviderDomain, boardProposalCancelAuthorization));
+    expect(await hankoCodec.computeBoardProposalCancelHankoHashForDomain(
+      BOARD_PROPOSAL_CANCEL_HANKO_DOMAIN,
+      chainId,
+      entityProviderAddress,
+      boardProposalCancelAuthorization.entityId,
+      entityProviderDomain.boardEpoch,
+      boardProposalCancelAuthorization.proposedBoardHash,
+      boardProposalCancelAuthorization.proposedBy,
+      boardProposalCancelAuthorization.cancelledBy,
+      boardProposalCancelAuthorization.actionNonce,
+    )).to.equal(hashBoardProposalCancelHankoPayload(entityProviderDomain, boardProposalCancelAuthorization));
+    expect(await entityProvider.encodeBoardProposalCancelHankoPayload(
+      boardProposalCancelAuthorization.entityId,
+      boardProposalCancelAuthorization.proposedBoardHash,
+      boardProposalCancelAuthorization.proposedBy,
+      boardProposalCancelAuthorization.cancelledBy,
+      boardProposalCancelAuthorization.actionNonce,
+    )).to.equal(encodeBoardProposalCancelHankoPayload(entityProviderDomain, boardProposalCancelAuthorization));
+    expect(await entityProvider.computeBoardProposalCancelHash(
+      boardProposalCancelAuthorization.entityId,
+      boardProposalCancelAuthorization.proposedBoardHash,
+      boardProposalCancelAuthorization.proposedBy,
+      boardProposalCancelAuthorization.cancelledBy,
+      boardProposalCancelAuthorization.actionNonce,
+    )).to.equal(hashBoardProposalCancelHankoPayload(entityProviderDomain, boardProposalCancelAuthorization));
 
     const batch = emptyBatch();
     const encodedBatch = encodeBatch(batch);
@@ -425,22 +643,25 @@ describe('canonical on-chain Hanko domains', function () {
 
   it('executes entityTransferTokens and rejects replay, wrong-chain, and wrong-provider signatures', async function () {
     const fixture = await loadFixture(deployFixture);
-    const {
-      encodedBoard, entityNumber, entityPrivateKey, entityProvider,
-      otherEntityProvider, recipient,
-    } = fixture;
+    const { entityNumber, entityPrivateKey, entityProvider, otherEntityProvider, recipient } = fixture;
     const chainId = (await ethers.provider.getNetwork()).chainId;
     const tokenId = entityNumber;
     const amount = 100n;
     const source = entityAddress(entityNumber);
-    const domain = { chainId, entityProviderAddress: await entityProvider.getAddress() };
+    const domain = { chainId, entityProviderAddress: await entityProvider.getAddress(), boardEpoch: 0n };
     const authorization = { entityNumber, to: recipient.address, tokenId, amount, actionNonce: 1 };
-    const signature = signRecoverEntityHash(hashEntityTransferHankoPayload(domain, authorization), entityPrivateKey);
+    const transferHash = hashEntityTransferHankoPayload(domain, authorization);
+    const hanko = buildSingleSignerHanko(entityId(entityNumber), transferHash, entityPrivateKey);
 
     const sourceBefore = await entityProvider.balanceOf(source, tokenId);
-    await expect(entityProvider.entityTransferTokens(
-      entityNumber, recipient.address, tokenId, amount, encodedBoard, signature,
-    )).to.not.be.reverted;
+    const transferTx = await entityProvider.entityTransferTokens(
+      entityNumber, recipient.address, tokenId, amount, hanko,
+    );
+    const transferEvent = exactActionReceipt(entityProvider, await transferTx.wait());
+    expect(transferEvent.args.entityId).to.equal(entityId(entityNumber));
+    expect(transferEvent.args.actionNonce).to.equal(1n);
+    expect(transferEvent.args.actionHash).to.equal(transferHash);
+    expect(transferEvent.args.actionKind).to.equal(BigInt(ONCHAIN_HANKO_GOLDEN_ACTION_RECEIPT.kinds.entityTransfer));
     expect(await entityProvider.balanceOf(source, tokenId)).to.equal(sourceBefore - amount);
     expect(await entityProvider.balanceOf(recipient.address, tokenId)).to.equal(amount);
     expect(await entityProvider.entityActionNonces(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32))).to.equal(1);
@@ -455,33 +676,295 @@ describe('canonical on-chain Hanko domains', function () {
       expect(await entityProvider.balanceOf(recipient.address, tokenId)).to.equal(recipientBalance);
     };
     await assertPrimaryUnchanged(() => entityProvider.entityTransferTokens(
-      entityNumber, recipient.address, tokenId, amount, encodedBoard, signature,
+      entityNumber, recipient.address, tokenId, amount, hanko,
     ));
 
     const wrongChainAuthorization = { ...authorization, actionNonce: 2 };
-    const wrongChainSignature = signRecoverEntityHash(hashEntityTransferHankoPayload(
+    const wrongChainHanko = buildSingleSignerHanko(entityId(entityNumber), hashEntityTransferHankoPayload(
       { ...domain, chainId: chainId + 1n }, wrongChainAuthorization,
     ), entityPrivateKey);
     await assertPrimaryUnchanged(() => entityProvider.entityTransferTokens(
-      entityNumber, recipient.address, tokenId, amount, encodedBoard, wrongChainSignature,
+      entityNumber, recipient.address, tokenId, amount, wrongChainHanko,
     ));
 
     const otherSourceBefore = await otherEntityProvider.balanceOf(source, tokenId);
     const otherNonceBefore = await otherEntityProvider.entityActionNonces(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32));
     await expect(otherEntityProvider.entityTransferTokens(
-      entityNumber, recipient.address, tokenId, amount, encodedBoard, signature,
+      entityNumber, recipient.address, tokenId, amount, hanko,
     )).to.be.revertedWith('Invalid entity signature');
     expect(await otherEntityProvider.entityActionNonces(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32))).to.equal(otherNonceBefore);
     expect(await otherEntityProvider.balanceOf(source, tokenId)).to.equal(otherSourceBefore);
     expect(await otherEntityProvider.balanceOf(recipient.address, tokenId)).to.equal(0);
   });
 
+  it('publishes one exact action receipt identity for deterministic reconciliation', async function () {
+    const { entityProvider } = await loadFixture(deployFixture);
+    const event = entityProvider.interface.getEvent('EntityProviderActionExecuted');
+    expect(event.topicHash).to.equal(ONCHAIN_HANKO_GOLDEN_ACTION_RECEIPT.topic);
+    expect(event.inputs.map((input) => [input.name, input.type, input.indexed])).to.deep.equal([
+      ['entityId', 'bytes32', true],
+      ['actionNonce', 'uint256', true],
+      ['actionHash', 'bytes32', true],
+      ['actionKind', 'uint8', false],
+    ]);
+    const cancelled = entityProvider.interface.getEvent('EntityProviderActionCancelled');
+    expect(cancelled.topicHash).to.equal(ONCHAIN_HANKO_GOLDEN_ACTION_CANCEL_RECEIPT.topic);
+    expect(cancelled.inputs.map((input) => [input.name, input.type, input.indexed])).to.deep.equal([
+      ['entityId', 'bytes32', true],
+      ['actionNonce', 'uint256', true],
+      ['cancelledActionHash', 'bytes32', true],
+      ['cancelledActionKind', 'uint8', false],
+      ['cancelHash', 'bytes32', false],
+    ]);
+  });
+
+  it('keeps transfer and release in one replay-protected action nonce lane', async function () {
+    const { depository, entityNumber, entityPrivateKey, entityProvider, recipient } = await loadFixture(deployFixture);
+    const chainId = (await ethers.provider.getNetwork()).chainId;
+    const providerDomain = { chainId, entityProviderAddress: await entityProvider.getAddress(), boardEpoch: 0n };
+    const numberedEntityId = entityId(entityNumber);
+    const depositoryAddress = await depository.getAddress();
+    const transferAuthorization = {
+      entityNumber,
+      to: recipient.address,
+      tokenId: entityNumber,
+      amount: 1n,
+      actionNonce: 1n,
+    };
+    const releaseAuthorization = {
+      entityNumber,
+      depositoryAddress,
+      controlAmount: 1n,
+      dividendAmount: 0n,
+      purpose: 'nonce-lane',
+      actionNonce: 1n,
+    };
+    const transferHanko = buildSingleSignerHanko(
+      numberedEntityId,
+      hashEntityTransferHankoPayload(providerDomain, transferAuthorization),
+      entityPrivateKey,
+    );
+    const staleReleaseHanko = buildSingleSignerHanko(
+      numberedEntityId,
+      hashReleaseControlSharesHankoPayload(providerDomain, releaseAuthorization),
+      entityPrivateKey,
+    );
+
+    await expect(entityProvider.releaseControlShares(
+      entityNumber,
+      depositoryAddress,
+      releaseAuthorization.controlAmount,
+      releaseAuthorization.dividendAmount,
+      releaseAuthorization.purpose,
+      transferHanko,
+    )).to.be.revertedWith('Invalid entity signature');
+    expect(await entityProvider.entityActionNonces(numberedEntityId)).to.equal(0n);
+
+    await expect(entityProvider.entityTransferTokens(
+      entityNumber,
+      transferAuthorization.to,
+      transferAuthorization.tokenId,
+      transferAuthorization.amount,
+      transferHanko,
+    )).to.not.be.reverted;
+    expect(await entityProvider.entityActionNonces(numberedEntityId)).to.equal(1n);
+
+    await expect(entityProvider.releaseControlShares(
+      entityNumber,
+      depositoryAddress,
+      releaseAuthorization.controlAmount,
+      releaseAuthorization.dividendAmount,
+      releaseAuthorization.purpose,
+      staleReleaseHanko,
+    )).to.be.revertedWith('Invalid entity signature');
+    expect(await entityProvider.entityActionNonces(numberedEntityId)).to.equal(1n);
+
+    const nextReleaseAuthorization = { ...releaseAuthorization, actionNonce: 2n };
+    const nextReleaseHash = hashReleaseControlSharesHankoPayload(providerDomain, nextReleaseAuthorization);
+    const nextReleaseHanko = buildSingleSignerHanko(numberedEntityId, nextReleaseHash, entityPrivateKey);
+    const releaseTx = await entityProvider.releaseControlShares(
+      entityNumber,
+      depositoryAddress,
+      nextReleaseAuthorization.controlAmount,
+      nextReleaseAuthorization.dividendAmount,
+      nextReleaseAuthorization.purpose,
+      nextReleaseHanko,
+    );
+    const releaseEvent = exactActionReceipt(entityProvider, await releaseTx.wait());
+    expect(releaseEvent.args.actionNonce).to.equal(2n);
+    expect(releaseEvent.args.actionHash).to.equal(nextReleaseHash);
+    expect(releaseEvent.args.actionKind).to.equal(BigInt(ONCHAIN_HANKO_GOLDEN_ACTION_RECEIPT.kinds.releaseControlShares));
+  });
+
+  it('lets quorum cancel one exact pending action nonce and makes execute/cancel mutually exclusive', async function () {
+    const {
+      entityNumber,
+      entityPrivateKey,
+      entityProvider,
+      otherEntityProvider,
+      recipient,
+    } = await loadFixture(deployFixture);
+    const chainId = (await ethers.provider.getNetwork()).chainId;
+    const numberedEntityId = entityId(entityNumber);
+    const actionKind = 0;
+    const actionNonce = 1n;
+    const transferAuthorization = {
+      entityNumber,
+      to: recipient.address,
+      tokenId: entityNumber,
+      amount: 1n,
+      actionNonce,
+    };
+    const primaryDomain = {
+      chainId,
+      entityProviderAddress: await entityProvider.getAddress(),
+      boardEpoch: 0n,
+    };
+    const transferHash = hashEntityTransferHankoPayload(primaryDomain, transferAuthorization);
+    const transferHanko = buildSingleSignerHanko(numberedEntityId, transferHash, entityPrivateKey);
+    // Independent test oracle: do not derive the expected cancel preimage from
+    // the production TS/Solidity helper under test.
+    const cancelHash = ethers.keccak256(ethers.solidityPacked(
+      ['string', 'uint256', 'address', 'uint256', 'uint256', 'uint256', 'bytes32', 'uint8'],
+      [
+        'CANCEL_ENTITY_PROVIDER_ACTION',
+        chainId,
+        primaryDomain.entityProviderAddress,
+        entityNumber,
+        primaryDomain.boardEpoch,
+        actionNonce,
+        transferHash,
+        actionKind,
+      ],
+    ));
+    const cancelHanko = buildSingleSignerHanko(numberedEntityId, cancelHash, entityPrivateKey);
+    const wrongChainCancelHash = ethers.keccak256(ethers.solidityPacked(
+      ['string', 'uint256', 'address', 'uint256', 'uint256', 'uint256', 'bytes32', 'uint8'],
+      [
+        'CANCEL_ENTITY_PROVIDER_ACTION',
+        chainId + 1n,
+        primaryDomain.entityProviderAddress,
+        entityNumber,
+        primaryDomain.boardEpoch,
+        actionNonce,
+        transferHash,
+        actionKind,
+      ],
+    ));
+    const wrongChainCancelHanko = buildSingleSignerHanko(
+      numberedEntityId,
+      wrongChainCancelHash,
+      entityPrivateKey,
+    );
+    await expect((entityProvider as unknown as {
+      cancelEntityProviderAction: (
+        entityNumber: bigint,
+        actionHash: string,
+        actionKind: number,
+        hanko: string,
+      ) => Promise<unknown>;
+    }).cancelEntityProviderAction(
+      entityNumber,
+      transferHash,
+      actionKind,
+      wrongChainCancelHanko,
+    )).to.be.revertedWith('Invalid entity signature');
+    await expect((otherEntityProvider as unknown as {
+      cancelEntityProviderAction: (
+        entityNumber: bigint,
+        actionHash: string,
+        actionKind: number,
+        hanko: string,
+      ) => Promise<unknown>;
+    }).cancelEntityProviderAction(
+      entityNumber,
+      transferHash,
+      actionKind,
+      cancelHanko,
+    )).to.be.revertedWith('Invalid entity signature');
+    expect(await entityProvider.entityActionNonces(numberedEntityId)).to.equal(0n);
+    expect(await otherEntityProvider.entityActionNonces(numberedEntityId)).to.equal(0n);
+    const cancelTx = await (entityProvider as unknown as {
+      cancelEntityProviderAction: (
+        entityNumber: bigint,
+        actionHash: string,
+        actionKind: number,
+        hanko: string,
+      ) => Promise<{ wait: () => Promise<ContractTransactionReceipt | null> }>;
+    }).cancelEntityProviderAction(entityNumber, transferHash, actionKind, cancelHanko);
+    const cancelReceipt = await cancelTx.wait();
+    const cancelEvents = (cancelReceipt?.logs ?? [])
+      .filter((log) => log.address.toLowerCase() === String(entityProvider.target).toLowerCase())
+      .map((log) => entityProvider.interface.parseLog(log))
+      .filter((event): event is LogDescription => event?.name === 'EntityProviderActionCancelled');
+    expect(cancelEvents).to.have.length(1);
+    expect(cancelEvents[0]!.args.entityId).to.equal(numberedEntityId);
+    expect(cancelEvents[0]!.args.actionNonce).to.equal(actionNonce);
+    expect(cancelEvents[0]!.args.cancelledActionHash).to.equal(transferHash);
+    expect(cancelEvents[0]!.args.cancelledActionKind).to.equal(BigInt(actionKind));
+    expect(cancelEvents[0]!.args.cancelHash).to.equal(cancelHash);
+    expect(await entityProvider.entityActionNonces(numberedEntityId)).to.equal(actionNonce);
+
+    await expect(entityProvider.entityTransferTokens(
+      entityNumber,
+      recipient.address,
+      entityNumber,
+      1n,
+      transferHanko,
+    )).to.be.revertedWith('Invalid entity signature');
+    expect(await entityProvider.entityActionNonces(numberedEntityId)).to.equal(actionNonce);
+
+    const otherDomain = {
+      chainId,
+      entityProviderAddress: await otherEntityProvider.getAddress(),
+      boardEpoch: 0n,
+    };
+    const otherTransferHash = hashEntityTransferHankoPayload(otherDomain, transferAuthorization);
+    const otherTransferHanko = buildSingleSignerHanko(numberedEntityId, otherTransferHash, entityPrivateKey);
+    await expect(otherEntityProvider.entityTransferTokens(
+      entityNumber,
+      recipient.address,
+      entityNumber,
+      1n,
+      otherTransferHanko,
+    )).to.not.be.reverted;
+    const staleOtherCancelHash = ethers.keccak256(ethers.solidityPacked(
+      ['string', 'uint256', 'address', 'uint256', 'uint256', 'uint256', 'bytes32', 'uint8'],
+      [
+        'CANCEL_ENTITY_PROVIDER_ACTION',
+        chainId,
+        otherDomain.entityProviderAddress,
+        entityNumber,
+        otherDomain.boardEpoch,
+        actionNonce,
+        otherTransferHash,
+        actionKind,
+      ],
+    ));
+    const staleOtherCancelHanko = buildSingleSignerHanko(
+      numberedEntityId,
+      staleOtherCancelHash,
+      entityPrivateKey,
+    );
+    await expect((otherEntityProvider as unknown as {
+      cancelEntityProviderAction: (
+        entityNumber: bigint,
+        actionHash: string,
+        actionKind: number,
+        hanko: string,
+      ) => Promise<unknown>;
+    }).cancelEntityProviderAction(
+      entityNumber,
+      otherTransferHash,
+      actionKind,
+      staleOtherCancelHanko,
+    )).to.be.revertedWith('Invalid entity signature');
+    expect(await otherEntityProvider.entityActionNonces(numberedEntityId)).to.equal(actionNonce);
+  });
+
   it('executes releaseControlShares and rejects replay, wrong-chain, and wrong-provider signatures', async function () {
     const fixture = await loadFixture(deployFixture);
-    const {
-      depository, encodedBoard, entityNumber, entityPrivateKey,
-      entityProvider, otherEntityProvider,
-    } = fixture;
+    const { depository, entityNumber, entityPrivateKey, entityProvider, otherEntityProvider } = fixture;
     const chainId = (await ethers.provider.getNetwork()).chainId;
     const depositoryAddress = await depository.getAddress();
     const [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(entityNumber);
@@ -489,7 +972,7 @@ describe('canonical on-chain Hanko domains', function () {
     const controlAmount = 100n;
     const dividendAmount = 200n;
     const purpose = 'Series A';
-    const domain = { chainId, entityProviderAddress: await entityProvider.getAddress() };
+    const domain = { chainId, entityProviderAddress: await entityProvider.getAddress(), boardEpoch: 0n };
     const authorization = {
       entityNumber,
       depositoryAddress,
@@ -498,14 +981,20 @@ describe('canonical on-chain Hanko domains', function () {
       purpose,
       actionNonce: 1,
     };
-    const signature = signRecoverEntityHash(hashReleaseControlSharesHankoPayload(domain, authorization), entityPrivateKey);
+    const releaseHash = hashReleaseControlSharesHankoPayload(domain, authorization);
+    const hanko = buildSingleSignerHanko(entityId(entityNumber), releaseHash, entityPrivateKey);
 
     const controlBefore = await entityProvider.balanceOf(source, controlTokenId);
     const dividendBefore = await entityProvider.balanceOf(source, dividendTokenId);
-    await expect(entityProvider.releaseControlShares(
+    const releaseTx = await entityProvider.releaseControlShares(
       entityNumber, depositoryAddress, controlAmount, dividendAmount,
-      purpose, encodedBoard, signature,
-    )).to.not.be.reverted;
+      purpose, hanko,
+    );
+    const releaseEvent = exactActionReceipt(entityProvider, await releaseTx.wait());
+    expect(releaseEvent.args.entityId).to.equal(entityId(entityNumber));
+    expect(releaseEvent.args.actionNonce).to.equal(1n);
+    expect(releaseEvent.args.actionHash).to.equal(releaseHash);
+    expect(releaseEvent.args.actionKind).to.equal(BigInt(ONCHAIN_HANKO_GOLDEN_ACTION_RECEIPT.kinds.releaseControlShares));
     expect(await entityProvider.balanceOf(source, controlTokenId)).to.equal(controlBefore - controlAmount);
     expect(await entityProvider.balanceOf(source, dividendTokenId)).to.equal(dividendBefore - dividendAmount);
     expect(await entityProvider.balanceOf(depositoryAddress, controlTokenId)).to.equal(controlAmount);
@@ -527,16 +1016,16 @@ describe('canonical on-chain Hanko domains', function () {
     };
     await assertPrimaryUnchanged(() => entityProvider.releaseControlShares(
       entityNumber, depositoryAddress, controlAmount, dividendAmount,
-      purpose, encodedBoard, signature,
+      purpose, hanko,
     ));
 
     const wrongChainAuthorization = { ...authorization, actionNonce: 2 };
-    const wrongChainSignature = signRecoverEntityHash(hashReleaseControlSharesHankoPayload(
+    const wrongChainHanko = buildSingleSignerHanko(entityId(entityNumber), hashReleaseControlSharesHankoPayload(
       { ...domain, chainId: chainId + 1n }, wrongChainAuthorization,
     ), entityPrivateKey);
     await assertPrimaryUnchanged(() => entityProvider.releaseControlShares(
       entityNumber, depositoryAddress, controlAmount, dividendAmount,
-      purpose, encodedBoard, wrongChainSignature,
+      purpose, wrongChainHanko,
     ));
 
     const otherControlBefore = await otherEntityProvider.balanceOf(source, controlTokenId);
@@ -544,7 +1033,7 @@ describe('canonical on-chain Hanko domains', function () {
     const otherNonceBefore = await otherEntityProvider.entityActionNonces(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32));
     await expect(otherEntityProvider.releaseControlShares(
       entityNumber, depositoryAddress, controlAmount, dividendAmount,
-      purpose, encodedBoard, signature,
+      purpose, hanko,
     )).to.be.revertedWith('Invalid entity signature');
     expect(await otherEntityProvider.entityActionNonces(ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32))).to.equal(otherNonceBefore);
     expect(await otherEntityProvider.balanceOf(source, controlTokenId)).to.equal(otherControlBefore);

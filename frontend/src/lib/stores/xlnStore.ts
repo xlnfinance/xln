@@ -15,7 +15,21 @@ import {
   runtimeAdapterSend,
   runtimeControllerHandle,
 } from './runtimeControllerStore';
-import { submitRuntimeCommand } from './runtimeCommandBus';
+import {
+  replayRuntimeCommandIntentsInOrder,
+  submitRuntimeCommand,
+  type RuntimeCommandExecutionOptions,
+  type RuntimeCommandProgress,
+} from './runtimeCommandBus';
+import {
+  listUnresolvedRemoteRuntimeCommandIntents,
+  withRemoteRuntimeCommandReplayLease,
+} from './runtimeCommandIntent';
+import {
+  isRuntimeCommandJournalUnlocked,
+  signRuntimeAdapterOwnerBinding,
+} from './runtimeCommandJournalKeyring';
+import { findCommittedEmbeddedRuntimeInputHeight } from './embeddedRuntimeCommandCompletion';
 import {
   REMOTE_HISTORY_SCAN_CACHE_LIMIT,
   resetRuntimeHistoryFrames,
@@ -37,6 +51,7 @@ import {
 import { assertNetworkMachineIsLive, networkMachineRuntime } from './networkMachineRuntimeStore';
 import { normalizeWsConnectUrl, normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
 import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
+import { registerDebugSurface } from '$lib/utils/debugSurface';
 import {
   deleteVaultDeviceKey,
   protectVaultSecrets,
@@ -50,6 +65,7 @@ import {
   type RemoteRuntimeHubSummary,
 } from '$lib/utils/remoteRuntimeImport';
 import { waitForOpenAccountCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
+import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
 import { getXLN, xlnInstance } from './xlnRuntimeLoader';
 import type {
   XLNModule,
@@ -124,8 +140,10 @@ export interface FrontendXlnFunctions {
   getDefaultSwapTradingPairs: XLNModule['getDefaultSwapTradingPairs'];
   listOpenSwapOffers: XLNModule['listOpenSwapOffers'];
   computeSwapPriceTicks: XLNModule['computeSwapPriceTicks'];
+  getSwapLotScale: XLNModule['getSwapLotScale'];
   prepareSwapOrder: XLNModule['prepareSwapOrder'];
   quantizeSwapOrder: XLNModule['quantizeSwapOrder'];
+  requantizeRemainingSwapAtPrice: XLNModule['requantizeRemainingSwapAtPrice'];
   isLeft: XLNModule['isLeft'];
   createDemoDelta: XLNModule['createDemoDelta'];
   getDefaultCreditLimit: XLNModule['getDefaultCreditLimit'];
@@ -858,6 +876,10 @@ export const switchAppRuntimeAdapter = async (config: RuntimeAdapterConfig): Pro
         ...(config.runtimeId ? { runtimeId: normalizeRuntimeConfigId(config.runtimeId) } : {}),
         wsUrl: normalizeWsConnectUrl(config.wsUrl || defaultRemoteAdapterWsUrl()),
         ...(config.authKey ? { authKey: config.authKey } : {}),
+        ownerBindingSigner: config.ownerBindingSigner ?? (({ runtimeId, challenge, capability }) =>
+          isRuntimeCommandJournalUnlocked(runtimeId)
+            ? signRuntimeAdapterOwnerBinding(runtimeId, challenge, capability)
+            : null),
         reconnectMaxMs: config.reconnectMaxMs ?? FRONTEND_REMOTE_RECONNECT_MAX_MS,
         requestTimeoutMs: config.requestTimeoutMs ?? FRONTEND_REMOTE_REQUEST_TIMEOUT_MS,
       }
@@ -891,6 +913,9 @@ export const switchAppRuntimeAdapter = async (config: RuntimeAdapterConfig): Pro
       if (status === 'connected') scheduleRuntimeProjectionRefresh();
     });
 
+    const remoteRuntimeId = normalizeRuntimeConfigId(
+      adapter.runtimeId || remoteRuntimeIdFromConfig(normalizedConfig),
+    );
     try {
       await refreshCurrentRuntimeProjection();
     } catch (initialRemoteError) {
@@ -899,6 +924,11 @@ export const switchAppRuntimeAdapter = async (config: RuntimeAdapterConfig): Pro
       error.set(message);
       isLoading.set(false);
       throw initialRemoteError;
+    }
+    if (isRuntimeCommandJournalUnlocked(remoteRuntimeId)) {
+      await resumeRemoteRuntimeCommandIntents(remoteRuntimeId);
+    } else {
+      console.debug(`[xlnStore] remote command replay deferred until vault unlock: ${remoteRuntimeId}`);
     }
     error.set(null);
     isLoading.set(false);
@@ -1233,43 +1263,7 @@ export async function refreshPaymentRuntimeGossip(options: {
   return { profiles: Array.from(mergedProfiles.values()), announced };
 }
 
-const hasMeaningfulEntityInput = (input: RoutedEntityInput | null | undefined): boolean => Boolean(
-  input &&
-  (
-    (input.entityTxs?.length ?? 0) > 0 ||
-    Boolean(input.proposedFrame) ||
-    ((input.hashPrecommits as Map<unknown, unknown> | undefined)?.size ?? 0) > 0
-  ),
-);
-
-const hasMeaningfulRuntimeInputItems = (input: RuntimeInput | null | undefined): boolean => Boolean(
-  input &&
-  (
-    (input.runtimeTxs?.length ?? 0) > 0 ||
-    (input.jInputs?.length ?? 0) > 0 ||
-    (input.entityInputs ?? []).some(hasMeaningfulEntityInput)
-  ),
-);
-
-const hasMeaningfulQueuedLocalRuntimeWork = (env: Env): boolean => Boolean(
-  hasMeaningfulRuntimeInputItems(env.runtimeMempool) ||
-  (env.pendingOutputs ?? []).some(hasMeaningfulEntityInput) ||
-  (env.networkInbox ?? []).some(hasMeaningfulEntityInput) ||
-  (env.pendingNetworkOutputs ?? []).some(hasMeaningfulEntityInput) ||
-  Array.from(env.eReplicas?.values?.() ?? []).some((replica) =>
-    Array.from(replica?.state?.accounts?.values?.() ?? []).some((account) =>
-      (account?.mempool?.length ?? 0) > 0 && !account?.pendingFrame
-    )
-  )
-);
-
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-const hasQueuedLocalRuntimeWork = (xln: XLNModule, env: Env): boolean => (
-  typeof xln.hasRuntimeWork === 'function'
-    ? xln.hasRuntimeWork(env)
-    : hasMeaningfulQueuedLocalRuntimeWork(env)
-);
 
 const publishLocalRuntimeEnvIfActive = (env: Env): void => {
   const runtimeId = normalizeRuntimeIdentifier(env.runtimeId);
@@ -1279,24 +1273,38 @@ const publishLocalRuntimeEnvIfActive = (env: Env): void => {
   }
 };
 
-const drainLocalRuntimeInput = async (xln: XLNModule, env: Env, _label = 'runtime'): Promise<void> => {
+const drainLocalRuntimeInput = async (
+  xln: XLNModule,
+  env: Env,
+  input: RuntimeInput,
+  afterHeight: number,
+): Promise<number> => {
   const startedAt = Date.now();
-  for (let i = 0; i < 80 && hasQueuedLocalRuntimeWork(xln, env); i += 1) {
+  for (let i = 0; i < 80; i += 1) {
+    const committedHeight = findCommittedEmbeddedRuntimeInputHeight(env.history ?? [], input, afterHeight);
+    if (committedHeight !== null) return committedHeight;
     const beforeHeight = Number(env.height || 0);
     await xln.process(env, undefined, 0);
     publishLocalRuntimeEnvIfActive(env);
-    if (!hasQueuedLocalRuntimeWork(xln, env)) return;
+    const committedAfterProcess = findCommittedEmbeddedRuntimeInputHeight(env.history ?? [], input, afterHeight);
+    if (committedAfterProcess !== null) return committedAfterProcess;
     if (Number(env.height || 0) === beforeHeight) {
       await sleep(25);
     }
     if (Date.now() - startedAt > 4_000) break;
   }
-  if (hasQueuedLocalRuntimeWork(xln, env)) {
-    throw new Error('LOCAL_RUNTIME_DRAIN_TIMEOUT: submitted runtime input did not commit within 4s');
-  }
+  throw new Error(
+    `LOCAL_RUNTIME_INPUT_COMMIT_TIMEOUT: after=${afterHeight} latest=${Math.max(0, Number(env.height || 0))}`,
+  );
 };
 
 const normalizeRuntimeIdentifier = (value: unknown): string => String(value || '').trim().toLowerCase();
+
+const assertLocalRuntimeInputIngressOpen = (env: Env): void => {
+  if (env.runtimeState?.persistenceQuiescing && !env.scenarioMode) {
+    throw new Error(`LOCAL_RUNTIME_INPUT_INGRESS_QUIESCING:${env.runtimeId || '<unknown>'}`);
+  }
+};
 
 const embeddedAdapterTargetsRuntimeEnv = (targetEnv: Env): boolean => {
   const current = getEnv();
@@ -1355,40 +1363,97 @@ const waitForRemoteRuntimeReceiptObserved = async (
     const status = String(latest.status || '').toLowerCase();
     if (status === 'observed') return latest;
     if (status === 'expired') {
-      throw new Error(latest.note || 'REMOTE_RUNTIME_RECEIPT_EXPIRED');
+      throw new Error(`REMOTE_RUNTIME_RECEIPT_EXPIRED: ${latest.note || 'receipt expired'}`);
     }
     await sleep(REMOTE_RUNTIME_PROJECTION_WAIT_POLL_MS);
   }
   throw new Error(`REMOTE_RUNTIME_RECEIPT_STATUS_TIMEOUT: status=${String(latest?.status || 'unknown')}`);
 };
 
-const routeRemoteRuntimeInput = async (input: RuntimeInput): Promise<null> => {
+const observeRemoteRuntimeCommand = async (
+  accepted: Awaited<ReturnType<typeof runtimeAdapterSend>>,
+  progress: RuntimeCommandProgress,
+): Promise<void> => {
+  await progress.accepted(accepted.height, {
+    receiptId: accepted.receipt?.id ?? null,
+    statusUrl: accepted.statusUrl ?? null,
+  });
+  if (accepted.status === 'observed') {
+    const projectedHeight = await waitForRemoteRuntimeProjectionAtHeight(accepted.height);
+    await progress.observed(projectedHeight);
+    return;
+  }
+  const observed = await waitForRemoteRuntimeReceiptObserved(accepted.receipt?.id ?? null);
+  const observedHeight = Number(observed?.observedHeight ?? accepted.height);
+  const projectedHeight = await waitForRemoteRuntimeProjectionAtHeight(observedHeight);
+  await progress.observed(Number(observed?.observedHeight ?? projectedHeight));
+};
+
+const routeRemoteRuntimeInput = async (
+  input: RuntimeInput,
+  commandOptions: RuntimeCommandExecutionOptions = {},
+): Promise<null> => {
   const adapter = getRuntimeControllerAdapter();
   const handle = get(runtimeControllerHandle);
   if (!adapter || adapter.mode !== 'remote' || handle.mode !== 'remote') {
     throw new Error('RuntimeController remote adapter is not connected');
   }
   const runtimeId = normalizeRuntimeIdentifier(adapter.runtimeId || handle.runtimeId || handle.id) || 'remote';
+  const serverFingerprint = adapter.serverFingerprint;
+  if (!serverFingerprint) throw new Error('REMOTE_RUNTIME_SERVER_IDENTITY_REQUIRED');
+  const journalUnlocked = isRuntimeCommandJournalUnlocked(runtimeId);
+  if (journalUnlocked) {
+    await adapter.ensureOwnerCommandLane();
+    if (adapter.commandLaneKind !== 'owner') {
+      throw new Error(`REMOTE_COMMAND_OWNER_LANE_REQUIRED:${runtimeId}`);
+    }
+  }
   const submitted = await submitRuntimeCommand({
     input,
     runtimeId,
     mode: 'remote',
+    serverFingerprint,
+    nextCommandSequence: adapter.nextCommandSequence,
+    ...(!journalUnlocked ? { remoteJournalMode: 'one-shot' as const } : {}),
     initialHeight: Number(handle.height || 0),
-  }, async (progress) => {
-    const accepted = await runtimeAdapterSend(input);
-    progress.accepted(accepted.height, {
-      receiptId: accepted.receipt?.id ?? null,
-      statusUrl: accepted.statusUrl ?? null,
+    ...commandOptions,
+  }, async (progress, receipt) => {
+    if (receipt.commandSequence === null) throw new Error('RUNTIME_COMMAND_RECEIPT_SEQUENCE_MISSING');
+    const accepted = await runtimeAdapterSend(input, {
+      commandId: receipt.commandId,
+      commandSequence: receipt.commandSequence,
     });
-    const observed = await waitForRemoteRuntimeReceiptObserved(accepted.receipt?.id ?? null);
-    const projectedHeight = await waitForRemoteRuntimeProjectionAtHeight(observed?.observedHeight ?? accepted.height);
-    if (observed) progress.observed(Number(observed.observedHeight ?? projectedHeight));
+    await observeRemoteRuntimeCommand(accepted, progress);
     return null;
   });
   return submitted.result;
 };
 
-const routeRuntimeInput = async (xln: XLNModule, env: Env, input: RuntimeInput): Promise<Env | null> => {
+export const resumeRemoteRuntimeCommandIntents = async (runtimeId: string): Promise<number> => {
+  const normalizedRuntimeId = normalizeRuntimeIdentifier(runtimeId);
+  if (!normalizedRuntimeId) throw new Error('RUNTIME_COMMAND_RESUME_RUNTIME_ID_MISSING');
+  const adapter = getRuntimeControllerAdapter();
+  if (!adapter || adapter.mode !== 'remote') throw new Error('REMOTE_RUNTIME_RECEIPT_ADAPTER_MISSING');
+  const serverFingerprint = adapter.serverFingerprint;
+  if (!serverFingerprint) throw new Error('REMOTE_RUNTIME_SERVER_IDENTITY_REQUIRED');
+  return withRemoteRuntimeCommandReplayLease(normalizedRuntimeId, async () => {
+    const intents = await listUnresolvedRemoteRuntimeCommandIntents(normalizedRuntimeId, serverFingerprint);
+    await replayRuntimeCommandIntentsInOrder(intents, async (intent) => {
+      await routeRemoteRuntimeInput(intent.input, {
+        commandId: intent.commandId,
+        commandSequence: intent.commandSequence,
+      });
+    });
+    return intents.length;
+  });
+};
+
+const routeRuntimeInput = async (
+  xln: XLNModule,
+  env: Env,
+  input: RuntimeInput,
+  commandOptions: RuntimeCommandExecutionOptions = {},
+): Promise<Env | null> => {
   const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
   const adapter = getRuntimeControllerAdapter();
   const handle = get(runtimeControllerHandle);
@@ -1404,24 +1469,41 @@ const routeRuntimeInput = async (xln: XLNModule, env: Env, input: RuntimeInput):
     remoteAdapter &&
     (!targetRuntimeId || !handleRuntimeId || targetRuntimeId === handleRuntimeId),
   );
+  if (!usesRemoteAdapter) assertLocalRuntimeInputIngressOpen(runtimeEnv);
+  const serverFingerprint = usesRemoteAdapter ? remoteAdapter?.serverFingerprint : null;
+  if (usesRemoteAdapter && !serverFingerprint) throw new Error('REMOTE_RUNTIME_SERVER_IDENTITY_REQUIRED');
+  const runtimeId = targetRuntimeId || handle.id || 'embedded';
+  const remoteJournalUnlocked = usesRemoteAdapter
+    ? isRuntimeCommandJournalUnlocked(runtimeId)
+    : false;
+  if (usesRemoteAdapter && remoteJournalUnlocked) {
+    if (!remoteAdapter) throw new Error('RuntimeController remote adapter is not connected');
+    await remoteAdapter.ensureOwnerCommandLane();
+    if (remoteAdapter.commandLaneKind !== 'owner') {
+      throw new Error(`REMOTE_COMMAND_OWNER_LANE_REQUIRED:${runtimeId}`);
+    }
+  }
   const submitted = await submitRuntimeCommand({
     input,
-    runtimeId: targetRuntimeId || handle.id || 'embedded',
+    runtimeId,
     mode: usesRemoteAdapter ? 'remote' : 'embedded',
+    ...(serverFingerprint ? { serverFingerprint } : {}),
+    ...(remoteAdapter ? { nextCommandSequence: remoteAdapter.nextCommandSequence } : {}),
+    ...(usesRemoteAdapter && !remoteJournalUnlocked ? { remoteJournalMode: 'one-shot' as const } : {}),
     initialHeight: Number(runtimeEnv.height || 0),
-  }, async (progress) => {
+    ...commandOptions,
+  }, async (progress, receipt) => {
     if (usesRemoteAdapter) {
       if (!remoteAdapter) throw new Error('RuntimeController remote adapter is not connected');
-      const accepted = await runtimeAdapterSend(input);
-      progress.accepted(accepted.height, {
-        receiptId: accepted.receipt?.id ?? null,
-        statusUrl: accepted.statusUrl ?? null,
+      if (receipt.commandSequence === null) throw new Error('RUNTIME_COMMAND_RECEIPT_SEQUENCE_MISSING');
+      const accepted = await runtimeAdapterSend(input, {
+        commandId: receipt.commandId,
+        commandSequence: receipt.commandSequence,
       });
-      const observed = await waitForRemoteRuntimeReceiptObserved(accepted.receipt?.id ?? null);
-      const projectedHeight = await waitForRemoteRuntimeProjectionAtHeight(observed?.observedHeight ?? accepted.height);
-      if (observed) progress.observed(Number(observed.observedHeight ?? projectedHeight));
+      await observeRemoteRuntimeCommand(accepted, progress);
       return null;
     }
+    assertLocalRuntimeInputIngressOpen(runtimeEnv);
     if (!runtimeEnv.scenarioMode && typeof xln.startRuntimeLoop === 'function') {
       xln.startRuntimeLoop(runtimeEnv);
     }
@@ -1431,19 +1513,26 @@ const routeRuntimeInput = async (xln: XLNModule, env: Env, input: RuntimeInput):
         throw new Error('OPEN_ACCOUNT_COUNTERPARTY_PROFILE_NOT_READY: counterparty jurisdiction profile is not ready');
       }
     }
+    assertLocalRuntimeInputIngressOpen(runtimeEnv);
     let submittedRuntimeEnv = runtimeEnv;
+    const submittedAfterHeight = Math.max(0, Math.floor(Number(runtimeEnv.height || 0)));
     if (adapter?.mode === 'embedded' && embeddedAdapterTargetsRuntimeEnv(runtimeEnv)) {
-      const accepted = await runtimeAdapterSend(input);
-      progress.accepted(accepted.height);
+      const accepted = await runtimeAdapterSend(input, { commandId: receipt.commandId });
+      await progress.accepted(accepted.height);
       const currentEnv = getEnv();
       submittedRuntimeEnv = currentEnv ? (unwrapLiveRuntimeEnv(currentEnv) ?? currentEnv) : runtimeEnv;
     } else {
       xln.enqueueRuntimeInput(runtimeEnv, input);
-      progress.accepted(Number(runtimeEnv.height || 0));
+      await progress.accepted(Number(runtimeEnv.height || 0));
     }
-    await drainLocalRuntimeInput(xln, submittedRuntimeEnv, 'route');
+    const committedHeight = await drainLocalRuntimeInput(
+      xln,
+      submittedRuntimeEnv,
+      input,
+      submittedAfterHeight,
+    );
     setXlnEnvironment(submittedRuntimeEnv);
-    progress.committed(Number(submittedRuntimeEnv.height || 0));
+    await progress.committed(committedHeight);
     return submittedRuntimeEnv;
   });
   return submitted.result;
@@ -1476,32 +1565,69 @@ const resolveActiveRuntimeCommandEnv = async (xln: XLNModule): Promise<Env> => {
   throw new Error('ACTIVE_RUNTIME_ENV_NOT_READY: RuntimeController has no active runtime env');
 };
 
-export async function submitActiveRuntimeInput(input: RuntimeInput): Promise<Env | null> {
+/**
+ * Keeps the live Env and registration adapter behind the runtime-controller
+ * boundary. Formation UI supplies intent plus the unlocked vault identity; it
+ * must never reach into an embedded Env to choose registration authority.
+ */
+export const createActiveNumberedEntity = async (
+  name: Parameters<XLNModule['createNumberedEntity']>[0],
+  validators: Parameters<XLNModule['createNumberedEntity']>[1],
+  threshold: Parameters<XLNModule['createNumberedEntity']>[2],
+  jurisdiction: Parameters<XLNModule['createNumberedEntity']>[3],
+  registrationSignerId: Parameters<XLNModule['createNumberedEntity']>[5],
+  expectedRuntimeId: string,
+): ReturnType<XLNModule['createNumberedEntity']> => {
+  const xln = await getXLN();
+  const runtimeEnv = await resolveActiveRuntimeCommandEnv(xln);
+  const expected = String(expectedRuntimeId || '').trim().toLowerCase();
+  const actual = String(runtimeEnv.runtimeId || '').trim().toLowerCase();
+  if (!expected || !actual || expected !== actual) {
+    throw new Error(`NUMBERED_ENTITY_RUNTIME_VAULT_MISMATCH:vault=${expected || '<missing>'}:runtime=${actual || '<missing>'}`);
+  }
+  return xln.createNumberedEntity(
+    name,
+    validators,
+    threshold,
+    jurisdiction,
+    runtimeEnv,
+    registrationSignerId,
+  );
+};
+
+export async function submitActiveRuntimeInput(
+  input: RuntimeInput,
+  commandOptions: RuntimeCommandExecutionOptions = {},
+): Promise<Env | null> {
   assertRuntimeViewIsLive(get(runtimeView));
   assertNetworkMachineIsLive(get(networkMachineRuntime));
   const adapter = getRuntimeControllerAdapter();
   const handle = get(runtimeControllerHandle);
   if (adapter?.mode === 'remote' && handle.mode === 'remote') {
-    return routeRemoteRuntimeInput(input);
+    return routeRemoteRuntimeInput(input, commandOptions);
   }
   const xln = await getXLN();
   const env = await resolveActiveRuntimeCommandEnv(xln);
-  return routeRuntimeInput(xln, env, input);
+  return routeRuntimeInput(xln, env, input, commandOptions);
 }
 
 export async function dispatchRuntimeInputToRuntimeEnv(env: Env, input: RuntimeInput): Promise<Env | null> {
   assertRuntimeViewIsLive(get(runtimeView));
   assertNetworkMachineIsLive(get(networkMachineRuntime));
-  const xln = await getXLN();
   const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
+  assertLocalRuntimeInputIngressOpen(runtimeEnv);
+  const xln = await getXLN();
+  assertLocalRuntimeInputIngressOpen(runtimeEnv);
   if (input.entityInputs?.length) {
     const ready = await waitForOpenAccountCounterpartyProfiles(runtimeEnv, input.entityInputs, OPEN_ACCOUNT_PROFILE_WAIT_TIMEOUT_MS);
     if (!ready) {
       throw new Error('OPEN_ACCOUNT_COUNTERPARTY_PROFILE_NOT_READY: counterparty jurisdiction profile is not ready');
     }
   }
+  assertLocalRuntimeInputIngressOpen(runtimeEnv);
+  const submittedAfterHeight = Math.max(0, Math.floor(Number(runtimeEnv.height || 0)));
   xln.enqueueRuntimeInput(runtimeEnv, input);
-  await drainLocalRuntimeInput(xln, runtimeEnv, 'explicit');
+  await drainLocalRuntimeInput(xln, runtimeEnv, input, submittedAfterHeight);
   publishLocalRuntimeEnvIfActive(runtimeEnv);
   return runtimeEnv;
 }
@@ -1514,8 +1640,11 @@ export async function submitActiveEntityInputs(inputs: RoutedEntityInput[] = [])
   });
 }
 
-export async function submitRuntimeInput(input: RuntimeInput): Promise<Env | null> {
-  return submitActiveRuntimeInput(input);
+export async function submitRuntimeInput(
+  input: RuntimeInput,
+  commandOptions: RuntimeCommandExecutionOptions = {},
+): Promise<Env | null> {
+  return submitActiveRuntimeInput(input, commandOptions);
 }
 
 export async function submitEntityInputs(inputs: RoutedEntityInput[] = []): Promise<Env | null> {
@@ -1523,13 +1652,19 @@ export async function submitEntityInputs(inputs: RoutedEntityInput[] = []): Prom
   return submitActiveEntityInputs(inputs);
 }
 
+// Local browser QA must enter through the same command bus as production UI.
+// View snapshots are intentionally detached and are never mutation authority.
+registerDebugSurface('runtimeIngress', () => ({
+  submit: submitActiveRuntimeInput,
+}));
+
 // === FRONTEND UTILITY FUNCTIONS ===
 // Derived store that provides utility functions for components
 export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $settings]): FrontendXlnFunctions => {
   const clampPrecision = (value: number): number => Math.max(2, Math.min(18, Math.floor(Number(value) || 2)));
   const settingPrecision = clampPrecision(Number($settings?.tokenPrecision ?? 4));
   const formatRawAmount = (rawAmount: bigint, decimals: number, precisionLimit: number): string => {
-    const safeDecimals = Math.max(0, Math.floor(Number(decimals) || 18));
+    const safeDecimals = requireTokenDecimals(decimals, 'formatRawAmount');
     const negative = rawAmount < 0n;
     const abs = negative ? -rawAmount : rawAmount;
     const divisor = 10n ** BigInt(safeDecimals);
@@ -1566,8 +1701,10 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
       getDefaultSwapTradingPairs: failFn('getDefaultSwapTradingPairs'),
       listOpenSwapOffers: failFn('listOpenSwapOffers'),
       computeSwapPriceTicks: failFn('computeSwapPriceTicks'),
+      getSwapLotScale: failFn('getSwapLotScale'),
       prepareSwapOrder: failFn('prepareSwapOrder'),
       quantizeSwapOrder: failFn('quantizeSwapOrder'),
+      requantizeRemainingSwapAtPrice: failFn('requantizeRemainingSwapAtPrice'),
       isLeft: failFn('isLeft'),
       createDemoDelta: failFn('createDemoDelta'),
       getDefaultCreditLimit: failFn('getDefaultCreditLimit'),
@@ -1605,8 +1742,8 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
   }
 
   const formatTokenAmountUi = (tokenId: number, amount: bigint | null | undefined): string => {
-    const tokenInfo = $xlnInstance.getTokenInfo(tokenId) ?? { symbol: `T${tokenId}`, decimals: 18 };
-    const decimals = Number.isFinite(tokenInfo.decimals) ? tokenInfo.decimals : 18;
+    const tokenInfo = $xlnInstance.getTokenInfo(tokenId);
+    const decimals = requireTokenDecimals(tokenInfo.decimals, `token:${tokenId}`);
     const numeric = formatRawAmount(amount ?? 0n, decimals, settingPrecision);
     return `${numeric} ${tokenInfo.symbol}`;
   };
@@ -1625,8 +1762,10 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
     getDefaultSwapTradingPairs: $xlnInstance.getDefaultSwapTradingPairs,
     listOpenSwapOffers: $xlnInstance.listOpenSwapOffers,
     computeSwapPriceTicks: $xlnInstance.computeSwapPriceTicks,
+    getSwapLotScale: $xlnInstance.getSwapLotScale,
     prepareSwapOrder: $xlnInstance.prepareSwapOrder,
     quantizeSwapOrder: $xlnInstance.quantizeSwapOrder,
+    requantizeRemainingSwapAtPrice: $xlnInstance.requantizeRemainingSwapAtPrice,
     isLeft: $xlnInstance.isLeft,
     createDemoDelta: $xlnInstance.createDemoDelta,
     getDefaultCreditLimit: $xlnInstance.getDefaultCreditLimit,

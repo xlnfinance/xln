@@ -120,21 +120,6 @@ export function handleDirectPayment(
 
   const memoPolicy = decodeRebalancePolicyMemo(description);
   if (memoPolicy) {
-    const existingPolicy = accountMachine.counterpartyRebalanceFeePolicy;
-    if (!existingPolicy || memoPolicy.policyVersion >= existingPolicy.policyVersion) {
-      accountMachine.counterpartyRebalanceFeePolicy = {
-        policyVersion: memoPolicy.policyVersion,
-        baseFee: memoPolicy.baseFee,
-        liquidityFeeBps: memoPolicy.liquidityFeeBps,
-        gasFee: memoPolicy.gasFee,
-        updatedAt: accountMachine.currentFrame.timestamp || 0,
-      };
-      events.push(
-        `📣 Hub policy update observed: v${memoPolicy.policyVersion} ` +
-        `(base=${memoPolicy.baseFee},liqBps=${memoPolicy.liquidityFeeBps},gas=${memoPolicy.gasFee},reason=${memoPolicy.reason})`,
-      );
-    }
-
     // Clear local pending request when hub refunds prepaid fee.
     // Refund path is unilateral on hub side; requester must clear after refund payment commits.
     if (memoPolicy.reason === 'policy_mismatch' || memoPolicy.reason === 'timeout' || memoPolicy.reason === 'fee_too_low') {

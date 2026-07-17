@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { computeAccountShadowRoot, computeAccountStateRoot } from '../account/state-root';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
 import type { AccountMachine } from '../types';
 import { createDefaultDelta } from '../validation-utils';
@@ -12,6 +13,7 @@ const DOMAIN = { chainId: 31337, depositoryAddress: `0x${'33'.repeat(20)}` };
 const account = (): AccountMachine => ({
   leftEntity: LEFT,
   rightEntity: RIGHT,
+  domain: DOMAIN,
   watchSeed: `0x${'44'.repeat(32)}`,
   status: 'active',
   deltas: new Map([[1, createDefaultDelta(1)]]),
@@ -22,9 +24,8 @@ const account = (): AccountMachine => ({
   jNonce: 0,
   disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
   lastFinalizedJHeight: 0,
-  leftJObservations: [],
-  rightJObservations: [],
-  jEventChain: [],
+  leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+  rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
   requestedRebalance: new Map(),
   requestedRebalanceFeeState: new Map(),
   shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
@@ -40,12 +41,14 @@ const account = (): AccountMachine => ({
 describe('canonical account state root', () => {
   test('binds account domain and every financial delta field', () => {
     const base = account();
-    const root = computeAccountStateRoot(base, DOMAIN);
+    const root = computeAccountStateRoot(base);
 
     const otherParty = account();
     otherParty.rightEntity = `0x${'55'.repeat(32)}`;
-    expect(computeAccountStateRoot(otherParty, DOMAIN)).not.toBe(root);
-    expect(computeAccountStateRoot(base, { ...DOMAIN, chainId: 1 })).not.toBe(root);
+    expect(computeAccountStateRoot(otherParty)).not.toBe(root);
+    const otherDomain = structuredClone(base);
+    otherDomain.domain = { ...DOMAIN, chainId: 1 };
+    expect(computeAccountStateRoot(otherDomain)).not.toBe(root);
 
     for (const mutate of [
       (machine: AccountMachine) => { machine.deltas.get(1)!.collateral = 1n; },
@@ -57,29 +60,30 @@ describe('canonical account state root', () => {
     ]) {
       const changed = structuredClone(base);
       mutate(changed);
-      expect(computeAccountStateRoot(changed, DOMAIN)).not.toBe(root);
+      expect(computeAccountStateRoot(changed)).not.toBe(root);
     }
   });
 
   test('excludes mempool, signatures, pending frames, and proof caches', () => {
     const base = account();
-    const root = computeAccountStateRoot(base, DOMAIN);
+    const root = computeAccountStateRoot(base);
     base.mempool.push({ type: 'direct_payment', data: { tokenId: 1, amount: 5n } });
     base.pendingSignatures.push('0x1234');
     base.pendingFrame = { stateHash: '0xdead' } as never;
     base.currentDisputeProofHanko = '0xbeef';
     base.disputeProofBodiesByHash = { '0x01': { local: true } };
 
-    expect(computeAccountStateRoot(base, DOMAIN)).toBe(root);
+    expect(computeAccountStateRoot(base)).toBe(root);
   });
 
-  test('moves entity-owned lifecycle state out of the bilateral root', () => {
+  test('commits settlement authority bilaterally while keeping entity-only lifecycle state out', () => {
     const base = account();
-    const bilateralRoot = computeAccountStateRoot(base, DOMAIN);
+    const bilateralRoot = computeAccountStateRoot(base);
     const overlayRoot = computeAccountShadowRoot(new Map([[RIGHT, base]]));
 
     const settlement = structuredClone(base);
     settlement.settlementWorkspace = {
+      workspaceHash: `0x${'88'.repeat(32)}`,
       version: 1,
       status: 'awaiting_counterparty',
       lastModifiedByLeft: true,
@@ -87,8 +91,8 @@ describe('canonical account state root', () => {
       createdAt: 10,
       lastUpdatedAt: 10,
       executorIsLeft: true,
-    } as never;
-    expect(computeAccountStateRoot(settlement, DOMAIN)).toBe(bilateralRoot);
+    };
+    expect(computeAccountStateRoot(settlement)).not.toBe(bilateralRoot);
     expect(computeAccountShadowRoot(new Map([[RIGHT, settlement]]))).not.toBe(overlayRoot);
 
     const disputed = structuredClone(base);
@@ -102,7 +106,7 @@ describe('canonical account state root', () => {
       starterInitialArguments: '0x',
       starterIncrementedArguments: '0x',
     };
-    expect(computeAccountStateRoot(disputed, DOMAIN)).toBe(bilateralRoot);
+    expect(computeAccountStateRoot(disputed)).toBe(bilateralRoot);
     expect(computeAccountShadowRoot(new Map([[RIGHT, disputed]]))).not.toBe(overlayRoot);
 
     const withdrawal = structuredClone(base);
@@ -114,13 +118,14 @@ describe('canonical account state root', () => {
       direction: 'outgoing',
       status: 'pending',
     });
-    expect(computeAccountStateRoot(withdrawal, DOMAIN)).toBe(bilateralRoot);
+    expect(computeAccountStateRoot(withdrawal)).toBe(bilateralRoot);
     expect(computeAccountShadowRoot(new Map([[RIGHT, withdrawal]]))).not.toBe(overlayRoot);
   });
 
-  test('keeps hankos and signatures outside bilateral and entity overlay roots', () => {
+  test('commits settlement Hankos bilaterally while excluding post-consensus overlay signatures', () => {
     const base = account();
     base.settlementWorkspace = {
+      workspaceHash: `0x${'88'.repeat(32)}`,
       version: 1,
       status: 'ready_to_submit',
       lastModifiedByLeft: true,
@@ -142,7 +147,7 @@ describe('canonical account state root', () => {
       direction: 'outgoing',
       status: 'approved',
     });
-    const bilateralRoot = computeAccountStateRoot(base, DOMAIN);
+    const bilateralRoot = computeAccountStateRoot(base);
     const overlayRoot = computeAccountShadowRoot(new Map([[RIGHT, base]]));
 
     base.settlementWorkspace.leftHanko = '0x1234';
@@ -151,13 +156,18 @@ describe('canonical account state root', () => {
     base.settlementWorkspace.postSettlementDisputeProof!.rightHanko = '0xdef0';
     base.pendingWithdrawals.get('withdraw-1')!.signature = '0xbeef';
 
-    expect(computeAccountStateRoot(base, DOMAIN)).toBe(bilateralRoot);
+    const sealedBilateralRoot = computeAccountStateRoot(base);
+    expect(sealedBilateralRoot).not.toBe(bilateralRoot);
+    expect(computeAccountShadowRoot(new Map([[RIGHT, base]]))).toBe(overlayRoot);
+
+    base.pendingWithdrawals.get('withdraw-1')!.signature = '0xcafe';
+    expect(computeAccountStateRoot(base)).toBe(sealedBilateralRoot);
     expect(computeAccountShadowRoot(new Map([[RIGHT, base]]))).toBe(overlayRoot);
   });
 
   test('separates bilateral state from entity-private automation state', () => {
     const base = account();
-    const bilateralRoot = computeAccountStateRoot(base, DOMAIN);
+    const bilateralRoot = computeAccountStateRoot(base);
     const shadowRoot = computeAccountShadowRoot(new Map([[RIGHT, base]]));
 
     base.shadow.rebalance.policy.set(1, {
@@ -167,17 +177,17 @@ describe('canonical account state root', () => {
     });
     base.shadow.rebalance.submittedAtByToken.set(1, 123);
 
-    expect(computeAccountStateRoot(base, DOMAIN)).toBe(bilateralRoot);
+    expect(computeAccountStateRoot(base)).toBe(bilateralRoot);
     expect(computeAccountShadowRoot(new Map([[RIGHT, base]]))).not.toBe(shadowRoot);
   });
 
   test('commits bilateral lending receipts while excluding local lifecycle state', () => {
     const base = account();
-    const root = computeAccountStateRoot(base, DOMAIN);
+    const root = computeAccountStateRoot(base);
 
     base.lendingIntents = new Map([['lend-0123456789abcdef', 'fund']]);
 
-    expect(computeAccountStateRoot(base, DOMAIN)).not.toBe(root);
+    expect(computeAccountStateRoot(base)).not.toBe(root);
   });
 
   test('commits generic custom transformers and preserves opaque ProofBody batches', () => {
@@ -188,8 +198,8 @@ describe('canonical account state root', () => {
       allowances: [{ deltaIndex: 0, rightAllowance: 7n, leftAllowance: 9n }],
       leftArgumentsHash: `0x${'77'.repeat(32)}`,
     }]]);
-    const root = computeAccountStateRoot(base, DOMAIN);
-    const proof = buildAccountProofBody(base);
+    const root = computeAccountStateRoot(base);
+    const proof = buildAccountProofBody(base, '');
 
     expect(proof.proofBodyStruct.transformers).toContainEqual({
       transformerAddress: `0x${'66'.repeat(20)}`,
@@ -198,6 +208,6 @@ describe('canonical account state root', () => {
     });
     const changed = structuredClone(base);
     changed.subcontracts!.get('custom-risk-engine')!.encodedBatch = '0xabcd';
-    expect(computeAccountStateRoot(changed, DOMAIN)).not.toBe(root);
+    expect(computeAccountStateRoot(changed)).not.toBe(root);
   });
 });

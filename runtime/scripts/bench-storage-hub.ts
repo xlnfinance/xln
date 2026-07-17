@@ -225,6 +225,7 @@ const projectAccountDoc = (account: AccountMachine): Record<string, unknown> => 
   pendingFrame: account.pendingFrame,
   pendingSignatures: account.pendingSignatures,
   pendingAccountInput: account.pendingAccountInput,
+  pendingAccountInputSignerId: account.pendingAccountInputSignerId,
   rollbackCount: account.rollbackCount,
   lastRollbackFrameHash: account.lastRollbackFrameHash,
   lastFinalizedJHeight: account.lastFinalizedJHeight,
@@ -251,7 +252,7 @@ const projectAccountDoc = (account: AccountMachine): Record<string, unknown> => 
   pendingWithdrawals: account.pendingWithdrawals,
   requestedRebalance: account.requestedRebalance,
   requestedRebalanceFeeState: account.requestedRebalanceFeeState,
-  counterpartyRebalanceFeePolicy: account.counterpartyRebalanceFeePolicy,
+  rebalanceFeePolicies: account.rebalanceFeePolicies,
   shadow: account.shadow,
 });
 
@@ -295,7 +296,7 @@ const makeParticipant = (seed: string, slotNumber: number, name: string): Partic
   const slot = String(slotNumber);
   const signerId = deriveSignerAddressSync(seed, slot).toLowerCase();
   const signerKey = deriveSignerKeySync(seed, slot);
-  registerSignerKey(signerId, signerKey);
+  registerSignerKey(seed, signerId, signerKey);
   return {
     slot,
     signerId,
@@ -324,7 +325,7 @@ const paymentTxFor = (
         targetEntityId: hub.entityId,
         tokenId,
         amount,
-        route: [],
+        route: [user.entityId, hub.entityId],
         description,
       },
     };

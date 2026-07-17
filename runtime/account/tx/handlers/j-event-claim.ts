@@ -1,7 +1,9 @@
 import type { AccountMachine, AccountTx, Env } from '../../../types';
+import type { AccountJClaimSession } from '../../j-claim-session';
 import { getAccountPerspective } from '../../../state-helpers';
-import { canonicalJurisdictionEventKey, normalizeJurisdictionEvents } from '../../../jurisdiction/event-normalization';
-import { tryFinalizeAccountJEvents } from '../../../entity/tx/j-events-account';
+import { applyAccountJClaimTransition } from '../../j-claim-transition';
+import { applyFinalizedAccountJEvents } from '../../../entity/tx/j-events-account';
+import { getAccountStateDomain, requireAccountDeltaTransformerAddress } from '../../consensus/helpers';
 import { createStructuredLogger, shortHash } from '../../../infra/logger';
 
 const jEventClaimLog = createStructuredLogger('account.j_event');
@@ -10,107 +12,70 @@ export function handleJEventClaim(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'j_event_claim' }>,
   byLeft: boolean,
-  currentTimestamp: number,
+  _currentTimestamp: number,
   isValidation: boolean,
   myEntityId: string,
   emitRebalanceDebug: (payload: Record<string, unknown>) => void,
-  env?: Env,
+  env: Env,
+  session: AccountJClaimSession,
 ): { success: boolean; events: string[]; error?: string } {
-  const { jHeight, jBlockHash, events, observedAt } = accountTx.data;
+  const { jHeight, jBlockHash } = accountTx.data;
   jEventClaimLog.debug('claim.received', { jHeight, hash: shortHash(jBlockHash), byLeft });
-
-  if (!accountMachine.leftJObservations) accountMachine.leftJObservations = [];
-  if (!accountMachine.rightJObservations) accountMachine.rightJObservations = [];
-  if (!accountMachine.jEventChain) accountMachine.jEventChain = [];
-  if (accountMachine.lastFinalizedJHeight === undefined) accountMachine.lastFinalizedJHeight = 0;
-
-  if (jHeight <= accountMachine.lastFinalizedJHeight) {
-    jEventClaimLog.debug('claim.already_finalized', {
-      jHeight,
-      lastFinalized: accountMachine.lastFinalizedJHeight,
-    });
-    return { success: true, events: [`ℹ️ j_event_claim skipped (already finalized)`] };
-  }
-
-  const { counterparty: cpId } = getAccountPerspective(accountMachine, myEntityId);
-  const claimIsFromLeft = byLeft;
-  const normalizedEvents = normalizeJurisdictionEvents(events);
-  if (normalizedEvents.length === 0) {
+  const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
+  const transition = applyAccountJClaimTransition(
+    accountMachine,
+    accountTx,
+    byLeft,
+    getAccountStateDomain(accountMachine),
+    session,
+  );
+  if (transition.status === 'pending' || transition.status === 'idempotent' || transition.status === 'stale') {
+    accountMachine.leftPendingJClaims = transition.left;
+    accountMachine.rightPendingJClaims = transition.right;
     return {
-      success: false,
-      events: [`❌ j_event_claim non-canonical events payload`],
-      error: `j_event_claim rejected: non-canonical events for ${jHeight}:${String(jBlockHash).slice(0, 10)}`,
+      success: true,
+      events: [transition.status === 'pending'
+        ? '📥 J-event claim authenticated and retained'
+        : `ℹ️ j_event_claim ${transition.status}`],
     };
   }
 
-  const sideObservations = claimIsFromLeft ? accountMachine.leftJObservations : accountMachine.rightJObservations;
-  const existingObs = sideObservations.find(
-    (o) => Number(o?.jHeight) === Number(jHeight) && String(o?.jBlockHash || '') === String(jBlockHash || ''),
+  const staged = structuredClone(accountMachine);
+  staged.leftPendingJClaims = transition.left;
+  staged.rightPendingJClaims = transition.right;
+  applyFinalizedAccountJEvents(
+    staged,
+    counterparty,
+    transition.events,
+    requireAccountDeltaTransformerAddress(env, staged),
   );
+  staged.lastFinalizedJHeight = jHeight;
+  Object.assign(accountMachine, staged);
+  if (!staged.settlementWorkspace) delete accountMachine.settlementWorkspace;
 
-  if (existingObs) {
-    const existingNormalized = normalizeJurisdictionEvents(existingObs.events);
-    const existingKeys = new Set(existingNormalized.map(canonicalJurisdictionEventKey));
-    let merged = 0;
-    for (const ev of normalizedEvents) {
-      const key = canonicalJurisdictionEventKey(ev);
-      if (existingKeys.has(key)) continue;
-      existingObs.events.push(ev);
-      existingKeys.add(key);
-      merged += 1;
-    }
-    if (observedAt > (existingObs.observedAt || 0)) {
-      existingObs.observedAt = observedAt;
-    }
-    if (merged > 0) {
-      jEventClaimLog.debug('claim.merged', {
-        side: claimIsFromLeft ? 'left' : 'right',
-        jHeight,
-        added: merged,
-        total: existingObs.events.length,
-      });
-    } else {
-      jEventClaimLog.debug('claim.duplicate_ignored', {
-        side: claimIsFromLeft ? 'left' : 'right',
-        jHeight,
-        hash: shortHash(jBlockHash),
-      });
-    }
-  } else {
-    sideObservations.push({ jHeight, jBlockHash, events: normalizedEvents, observedAt });
-    jEventClaimLog.debug('claim.stored', {
-      side: claimIsFromLeft ? 'left' : 'right',
-      total: sideObservations.length,
-    });
-  }
-
-  const beforeFinalizedHeight = accountMachine.lastFinalizedJHeight || 0;
-  tryFinalizeAccountJEvents(accountMachine, cpId, { timestamp: currentTimestamp });
-  const afterFinalizedHeight = accountMachine.lastFinalizedJHeight || 0;
-  const settledTokenId = Number(normalizedEvents.find(e => e.type === 'AccountSettled')?.data?.tokenId ?? 1);
+  const settledTokenId = Number(
+    transition.events.find((event) => event.type === 'AccountSettled')?.data?.tokenId ?? 1,
+  );
   const delta = accountMachine.deltas.get(settledTokenId);
-  if (afterFinalizedHeight > beforeFinalizedHeight && !isValidation) {
-    if (env) {
-        env.emit('account_settled_finalized_bilateral', {
-          entityId: myEntityId,
-          accountId: cpId,
-          tokenId: settledTokenId,
-          jHeight: afterFinalizedHeight,
-          collateral: String(delta?.collateral ?? 0n),
-          ondelta: String(delta?.ondelta ?? 0n),
-        });
-    }
+  if (!isValidation) {
+    env.emit('account_settled_finalized_bilateral', {
+      entityId: myEntityId,
+      accountId: counterparty,
+      tokenId: settledTokenId,
+      jHeight,
+      collateral: String(delta?.collateral ?? 0n),
+      ondelta: String(delta?.ondelta ?? 0n),
+    });
     emitRebalanceDebug({
-        step: 5,
-        status: 'ok',
-        event: 'account_settled_finalized_bilateral',
-        jHeight: afterFinalizedHeight,
-        accountId: cpId,
-        tokenId: settledTokenId,
-        collateral: String(delta?.collateral ?? 0n),
-        ondelta: String(delta?.ondelta ?? 0n),
+      step: 5,
+      status: 'ok',
+      event: 'account_settled_finalized_bilateral',
+      jHeight,
+      accountId: counterparty,
+      tokenId: settledTokenId,
+      collateral: String(delta?.collateral ?? 0n),
+      ondelta: String(delta?.ondelta ?? 0n),
     });
   }
-
-  return { success: true, events: [`📥 J-event claim processed`] };
+  return { success: true, events: ['✅ J-event claim finalized bilaterally'] };
 }

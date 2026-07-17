@@ -1,8 +1,11 @@
-import type { Env, RoutedEntityInput } from '../types';
+import type { Env, ReliableDeliveryReceipt, RoutedEntityInput } from '../types';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import { RuntimeP2P, type P2PConfig } from '../networking/p2p';
 import { isRuntimeId } from '../networking/runtime-id';
 import { assertLocalEntityCryptoKeys } from '../entity/crypto';
+import type { RuntimeInboundEntityInputResult } from './entity-routing';
+import { isDeliveryDelivered } from '../protocol/payments/delivery-result';
+import { buildLocalProfileCertificationInput } from '../networking/local-profile-lifecycle';
 
 export type { P2PConfig } from '../networking/p2p';
 
@@ -14,7 +17,13 @@ export type RuntimeP2PLifecycleDeps = {
     from: string,
     input: RoutedEntityInput,
     ingressTimestamp?: number,
+  ) => RuntimeInboundEntityInputResult;
+  handleInboundReliableReceipt: (
+    env: Env,
+    from: string,
+    receipt: ReliableDeliveryReceipt,
   ) => void;
+  enqueueRuntimeInputs: (env: Env, inputs: RoutedEntityInput[]) => void;
 };
 
 export type P2PConnectionState = {
@@ -31,6 +40,7 @@ type P2Pish = {
   isConnecting?: () => boolean;
   connect?: () => void;
   close?: () => void;
+  closeAndWait?: (timeoutMs?: number) => Promise<void>;
 };
 
 const p2pLifecycleLog = createStructuredLogger('p2p.lifecycle');
@@ -103,7 +113,18 @@ export const startRuntimeP2P = (
     env,
     runtimeId: resolvedRuntimeId,
     onEntityInput: (from, input, ingressTimestamp) => {
-      deps.handleInboundP2PEntityInput(env, from, input, ingressTimestamp);
+      const result = deps.handleInboundP2PEntityInput(env, from, input, ingressTimestamp);
+      if (result.kind !== 'receipt') return;
+      const delivery = state.p2p?.enqueueReliableReceiptDelivery(from, result.receipt);
+      if (!delivery || !isDeliveryDelivered(delivery)) {
+        env.warn('network', 'RELIABLE_RECEIPT_SEND_DEFERRED', {
+          targetRuntimeId: from,
+          delivery: delivery ?? null,
+        });
+      }
+    },
+    onReliableReceipt: (from, receipt) => {
+      deps.handleInboundReliableReceipt(env, from, receipt);
     },
     onGossipProfiles: (_from, profiles) => {
       if (profiles.length === 0) return;
@@ -118,6 +139,17 @@ export const startRuntimeP2P = (
           entities: profiles.map(profile => shortId(profile.entityId, 6)),
         });
       }
+    },
+    onEncryptionManifestComplete: (entityId, encryptionAttestations) => {
+      const input = buildLocalProfileCertificationInput(env, entityId, encryptionAttestations);
+      if (!input) {
+        p2pLifecycleLog.debug('profile.certification_not_due', {
+          entity: shortId(entityId, 8),
+        });
+        return;
+      }
+      deps.enqueueRuntimeInputs(env, [input]);
+      deps.notifyEnvChange(env);
     },
   };
   if (config.signerId !== undefined) p2pOptions.signerId = config.signerId;
@@ -151,16 +183,40 @@ export const startPendingRuntimeP2PIfReady = (
   startRuntimeP2P(env, config, deps);
 };
 
+/**
+ * Initiate terminal shutdown without releasing transport ownership.
+ * Clearing the singleton here would make a later awaited drain blind to a
+ * socket that can still write into Vite's relay proxy during browser teardown.
+ */
 export const stopRuntimeP2P = (env: Env, deps: RuntimeP2PLifecycleDeps): void => {
   const state = deps.ensureRuntimeState(env);
+  state.pendingP2PConfig = null;
   if (state.p2p) {
     state.p2p.close();
-    const singleton = envRecord(env)[ENV_P2P_SINGLETON_KEY];
-    if (singleton === state.p2p) {
-      delete envRecord(env)[ENV_P2P_SINGLETON_KEY];
-    }
-    state.p2p = null;
+    return;
   }
+  state.lastP2PConfig = null;
+};
+
+export const stopRuntimeP2PAndWait = async (
+  env: Env,
+  deps: RuntimeP2PLifecycleDeps,
+  timeoutMs = 1_000,
+): Promise<void> => {
+  const state = deps.ensureRuntimeState(env);
+  const p2p = state.p2p;
+  state.pendingP2PConfig = null;
+  if (!p2p) {
+    state.lastP2PConfig = null;
+    return;
+  }
+  if (typeof p2p.closeAndWait !== 'function') {
+    throw new Error('P2P_CLOSE_AND_WAIT_UNAVAILABLE');
+  }
+  await p2p.closeAndWait(timeoutMs);
+  const singleton = envRecord(env)[ENV_P2P_SINGLETON_KEY];
+  if (singleton === p2p) delete envRecord(env)[ENV_P2P_SINGLETON_KEY];
+  if (state.p2p === p2p) state.p2p = null;
   state.lastP2PConfig = null;
 };
 

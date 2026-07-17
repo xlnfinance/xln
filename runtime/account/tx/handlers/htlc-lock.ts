@@ -16,6 +16,7 @@ import { deriveDelta } from '../../utils';
 import { FINANCIAL, LIMITS } from '../../../constants';
 import { ensureDelta } from '../delta-utils';
 import { addHold } from '../hold-utils';
+import { isHtlcTimelockExpired } from '../../htlc-deadline';
 
 export async function handleHtlcLock(
   accountMachine: AccountMachine,
@@ -46,7 +47,7 @@ export async function handleHtlcLock(
   }
 
   // 2. Validate expiry is in future - BOTH timelock AND revealBeforeHeight
-  if (timelock <= BigInt(currentTimestamp)) {
+  if (isHtlcTimelockExpired(currentTimestamp, timelock)) {
     return { success: false, error: `Timelock ${timelock} already expired (timestamp)`, events };
   }
 

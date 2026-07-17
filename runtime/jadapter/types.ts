@@ -6,7 +6,7 @@
 import type { Provider, Signer } from 'ethers';
 import type { Address } from '@ethereumjs/util';
 import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../jurisdictions/typechain-types/index.ts';
-import type { JReplica, JTx, BrowserVMState, Env } from '../types';
+import type { JAdapterFailure, JReplica, JTx, BrowserVMState, Env } from '../types';
 
 export type JAdapterMode = 'browservm' | 'anvil' | 'rpc';
 
@@ -89,6 +89,8 @@ export interface JAdapter {
   readonly entityProvider: EntityProvider;
   readonly deltaTransformer: DeltaTransformer;
   readonly addresses: JAdapterAddresses;
+  /** Trusted chain-derived first block containing EntityProvider bytecode. */
+  readonly entityProviderDeploymentBlock: number;
 
   // Lifecycle
   deployStack(): Promise<void>;
@@ -109,6 +111,10 @@ export interface JAdapter {
     disputeTimeout: bigint;
   }>;
   getEntityNonce(entityId: string): Promise<bigint>;
+  /** Trusted chain state for EntityProvider quorum-action reconciliation. */
+  getEntityProviderActionNonce?(entityId: string): Promise<bigint>;
+  /** Exact canonical receipt for one consumed EntityProvider action nonce. */
+  getEntityProviderActionReceipt?(entityId: string, actionNonce: bigint): Promise<JEvent | null>;
   isEntityRegistered(entityId: string): Promise<boolean>;
   getTokenRegistry(): Promise<JTokenInfo[]>;
   readWalletSnapshot(request: JWalletSnapshotRequest): Promise<JWalletSnapshot>;
@@ -159,7 +165,7 @@ export interface JAdapter {
     to: string,
     amount: bigint,
   ): Promise<string>;
-  fundSignerWallet?(address: string, amount?: bigint): Promise<void>;
+  fundSignerWallet?(address: string, amount?: bigint, tokenSymbol?: string): Promise<void>;
 
   // === High-level J-tx submission (unified interface for all modes) ===
   // Handles encoding, signing, and execution. Events arrive via j-watcher → next frame.
@@ -175,6 +181,8 @@ export interface JAdapter {
   startWatching(env: Env): void;
   isWatching(): boolean;
   stopWatching(): void;
+  /** Invalidates ingress synchronously, then waits for the current external poll to unwind. */
+  stopWatchingAndWait(): Promise<void>;
   // Immediate poll for scenarios (no-op if watcher not started)
   pollNow?(): Promise<void>;
 
@@ -205,6 +213,7 @@ export interface JSubmitResult {
   blockNumber?: number;
   events?: JEvent[];
   error?: string;
+  failure?: JAdapterFailure;
 }
 
 // Settlement diff structure matching Depository contract
@@ -229,6 +238,7 @@ export interface BrowserVMProvider {
   processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<unknown[]>;
   enforceDebts(entityId: string, tokenId: number, maxIterations?: number | bigint): Promise<void>;
   setBlockTimestamp(timestamp: number): void;
+  getChainId(): bigint;
   getDepositoryAddress(): string;
   getEntityProviderAddress(): string;
   getAccountAddress(): string;
@@ -255,10 +265,13 @@ export interface BrowserVMProvider {
 }
 
 export type BrowserVmEthersProviderTarget = {
+  runExclusiveVmOperation<T>(operation: () => Promise<T>): Promise<T>;
   vm: {
     stateManager: {
       getAccount(address: Address): Promise<{ nonce?: bigint; balance?: bigint } | null | undefined>;
       getCode(address: Address): Promise<Uint8Array>;
+      checkpoint(): Promise<void>;
+      revert(): Promise<void>;
     };
     evm: {
       runCall(request: {

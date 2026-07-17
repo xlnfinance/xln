@@ -116,6 +116,7 @@ const main = async (): Promise<void> => {
         CUSTODY_JURISDICTION_ID: custodyJurisdictionId,
         CUSTODY_DB_PATH: `${DB_ROOT}/custody.sqlite`,
       },
+      { daemonRuntimeSeed: `${SEED}:runtime` },
     );
   };
 

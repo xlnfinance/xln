@@ -2,15 +2,12 @@ import { AbiCoder, getAddress, keccak256, toUtf8Bytes, zeroPadValue } from 'ethe
 
 type LazyValidator = string | { name: string; weight: number };
 
-const resolveValidatorAddress = (validator: string): string => {
+const toBoardEntityId = (validator: string): string => {
 	const raw = String(validator || '').trim();
-	if (raw.startsWith('0x') && raw.length === 42) return getAddress(raw);
-	if (raw.startsWith('0x') && raw.length === 66) return getAddress(`0x${raw.slice(-40)}`);
+	if (raw.startsWith('0x') && raw.length === 42) return zeroPadValue(getAddress(raw), 32);
+	if (/^0x[0-9a-f]{64}$/i.test(raw)) return raw.toLowerCase();
 	throw new Error(`Cannot derive lazy entity id for non-address validator ${validator}`);
 };
-
-const toBoardEntityId = (validator: string): string =>
-	zeroPadValue(resolveValidatorAddress(validator), 32);
 
 const toUint16 = (value: bigint, label: string): number => {
 	if (value < 0n || value > 0xffffn) {
@@ -21,7 +18,11 @@ const toUint16 = (value: bigint, label: string): number => {
 
 const encodeBoard = (validators: string[], shares: Record<string, bigint>, threshold: bigint): string => {
 	const entityIds = validators.map(toBoardEntityId);
-	const votingPowers = validators.map((validator) => toUint16(shares[validator] || 1n, `weight(${validator})`));
+	const votingPowers = validators.map((validator) => {
+		const weight = shares[validator];
+		if (weight === undefined) throw new Error(`Board voting power missing: ${validator}`);
+		return toUint16(weight, `weight(${validator})`);
+	});
 	return AbiCoder.defaultAbiCoder().encode(
 		['tuple(uint16,bytes32[],uint16[],uint32,uint32,uint32)'],
 		[[toUint16(threshold, 'threshold'), entityIds, votingPowers, 0, 0, 0]],

@@ -264,6 +264,15 @@ describe('entity panel model helpers', () => {
     expect(source).not.toContain('isSameJurisdictionEntity(activeEnv');
   });
 
+  test('move validation and execution consume the same reactive balance snapshot shown to the user', () => {
+    const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+
+    expect(source).toContain('reserveToken: selectedMoveTransferToken');
+    expect(source).toContain('externalToken: selectedMoveExternalToken');
+    expect(source).toContain('sourceAvailableBalance: moveUiState.sourceAvailableBalance');
+    expect(source).not.toContain('getCurrentMoveSourceAvailableBalance');
+  });
+
   test('focused account display consumes projected entity names instead of full env', () => {
     const accountPanel = readFileSync('frontend/src/lib/components/Entity/AccountPanel.svelte', 'utf8');
     const focusedView = readFileSync('frontend/src/lib/components/Entity/EntityFocusedAccountView.svelte', 'utf8');

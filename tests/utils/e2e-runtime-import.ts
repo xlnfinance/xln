@@ -18,12 +18,6 @@ const manifestFromPayload = (payload: RuntimeImportPayload): unknown => {
 const hasImportEntries = (manifest: unknown): boolean =>
   isRecord(manifest) && Array.isArray(manifest.entries) && manifest.entries.length > 0;
 
-const localOrchestratorApiBase = (appBaseUrl: string): string | null => {
-  const url = new URL(appBaseUrl);
-  if (url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') return null;
-  return 'http://127.0.0.1:8082';
-};
-
 export const resolveRuntimeImportAppUrl = async (
   page: Page,
   options: {
@@ -36,8 +30,7 @@ export const resolveRuntimeImportAppUrl = async (
   const bases = [
     options.appBaseUrl,
     options.apiBaseUrl,
-    localOrchestratorApiBase(options.appBaseUrl),
-  ].filter((base): base is string => Boolean(base));
+  ];
   const candidates = Array.from(new Set(bases)).map((base) => {
     const url = new URL('/api/runtime-import', base);
     url.searchParams.set('access', access);

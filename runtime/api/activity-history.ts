@@ -1,4 +1,4 @@
-import type { FrameLogEntry, RuntimeInput } from '../types';
+import type { EntityTx, FrameLogEntry, JInput, RuntimeTx } from '../types';
 import { compareStableText } from '../protocol/serialization';
 
 export type ActivityKind = 'onchain' | 'offchain';
@@ -51,7 +51,11 @@ export type RuntimeActivityEvent = {
 export type PersistedActivityJournal = {
   height: number;
   timestamp: number;
-  runtimeInput?: RuntimeInput;
+  runtimeInput?: {
+    runtimeTxs?: RuntimeTx[];
+    entityInputs: Array<{ entityId: string; entityTxs?: EntityTx[] }>;
+    jInputs?: JInput[];
+  };
   logs?: FrameLogEntry[];
 };
 
@@ -557,9 +561,7 @@ const eventFromEntityTx = (
     case 'settle_update':
     case 'settle_approve':
     case 'settle_execute':
-    case 'settle_reject':
-    case 'settleDiffs':
-    case 'createSettlement': {
+    case 'settle_reject': {
       const counterpartyId = normalizeId(data['counterpartyEntityId']);
       return makeEvent(journal, index, {
         kind: 'offchain',
@@ -600,9 +602,12 @@ const eventFromLog = (
   }
   const message = String(log.message || 'Runtime event');
   const data = recordValue(log.data);
-  const sourceEntityId = normalizeId(data['fromEntity'] ?? data['entityId'] ?? log.entityId);
-  const targetEntityId = normalizeId(data['toEntity'] ?? data['targetEntityId']);
+  const sourceEntityId = normalizeId(data['fromEntity'] ?? data['debtor'] ?? data['entityId'] ?? log.entityId);
+  const targetEntityId = normalizeId(data['toEntity'] ?? data['creditor'] ?? data['targetEntityId']);
   const direction = inferDirection(sourceEntityId, targetEntityId, viewedEntityId);
+  const observedJEvent = message === 'JEventReceived'
+    ? String(data['eventType'] ?? '').trim()
+    : '';
   const type: ActivityType = message === 'HtlcInitiated' || message === 'HtlcReceived' || message === 'HtlcFinalized' || message === 'HtlcFailed'
     ? 'payment'
     : normalizeType(message);
@@ -619,7 +624,7 @@ const eventFromLog = (
           : message === 'JBatchQueued'
             ? 'J-batch queued'
             : message === 'JEventReceived'
-              ? 'On-chain event received'
+              ? observedJEvent || 'On-chain event received'
               : message;
   const status =
     message === 'HtlcInitiated'
@@ -641,15 +646,15 @@ const eventFromLog = (
     source: 'runtime_log',
     direction,
     title,
-    subtitle: `${log.category}/${log.level}${data['amount'] !== undefined ? `, ${bigintText(data['amount'])} token ${numberValue(data['tokenId']) ?? '?'}` : ''}`,
+    subtitle: `${log.category}/${log.level}${data['blockNumber'] !== undefined ? `, J#${numberValue(data['blockNumber'])}` : ''}${data['amount'] !== undefined || data['amountPaid'] !== undefined || data['amountForgiven'] !== undefined ? `, ${bigintText(data['amount'] ?? data['amountPaid'] ?? data['amountForgiven'])} token ${numberValue(data['tokenId']) ?? '?'}` : ''}`,
     status,
     entityId: viewedEntityId || sourceEntityId || normalizeId(log.entityId),
     counterpartyId: direction === 'in' ? sourceEntityId : targetEntityId || undefined,
     tokenId: numberValue(data['tokenId']),
-    amount: bigintText(data['amount']),
+    amount: bigintText(data['amount'] ?? data['amountPaid'] ?? data['amountForgiven']),
     orderId: typeof data['orderId'] === 'string' ? data['orderId'] : undefined,
     hash: typeof data['hashlock'] === 'string' ? data['hashlock'] : undefined,
-    rawType: message,
+    rawType: observedJEvent || message,
   });
 };
 

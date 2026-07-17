@@ -33,6 +33,7 @@ const ENTITY_INPUT_SLOW_MS = Math.max(
 export interface RuntimeEntityInputApplyResult {
   entityOutbox: RoutedEntityInput[];
   appliedEntityInputs: RoutedEntityInput[];
+  entityFrameCommitted: boolean;
   jOutbox: JInput[];
 }
 
@@ -78,6 +79,7 @@ export const applyMergedEntityInputs = async (
 ): Promise<RuntimeEntityInputApplyResult> => {
   const entityOutbox: RoutedEntityInput[] = [];
   const appliedEntityInputs: RoutedEntityInput[] = [];
+  let entityFrameCommitted = false;
   const jOutbox: JInput[] = [...initialJOutbox];
   const { isReplay, routingDeps } = options;
   const profileStartedAt = getPerfMs();
@@ -191,6 +193,7 @@ export const applyMergedEntityInputs = async (
     }
 
     const result = await applyEntityInputToReplica(env, entityReplica, replicaKey, entityInput, actualSignerId, isReplay);
+    entityFrameCommitted ||= result.entityFrameCommitted;
     if (isCommittedEntityInput(result.outcome) && entityInput.from) {
       const appliedRouteHints = new Set([
         ...collectAppliedAccountSenderHints(entityInput),
@@ -261,6 +264,7 @@ export const applyMergedEntityInputs = async (
         actualSignerId,
         isReplay,
       );
+      entityFrameCommitted ||= result.entityFrameCommitted;
       const inputElapsedMs = Math.round(getPerfMs() - inputProfileStartedAt);
       if (ENTITY_INPUT_PROFILE || inputElapsedMs >= ENTITY_INPUT_SLOW_MS) {
         profiledInputs.push({
@@ -304,7 +308,26 @@ export const applyMergedEntityInputs = async (
     });
   }
 
-  return { entityOutbox, appliedEntityInputs, jOutbox };
+  return { entityOutbox, appliedEntityInputs, entityFrameCommitted, jOutbox };
+};
+
+const didCommitEntityFrame = (
+  priorReplica: EntityReplica,
+  nextReplica: EntityReplica,
+  outcome: EntityInputOutcome,
+): boolean => {
+  if (!isCommittedEntityInput(outcome)) return false;
+  const priorHeight = Number(priorReplica.state.height);
+  const nextHeight = Number(nextReplica.state.height);
+  if (nextHeight === priorHeight) return false;
+  if (
+    !Number.isSafeInteger(priorHeight) ||
+    !Number.isSafeInteger(nextHeight) ||
+    nextHeight !== priorHeight + 1
+  ) {
+    throw new Error(`ENTITY_FRAME_HEIGHT_TRANSITION_INVALID:${priorHeight}:${nextHeight}`);
+  }
+  return true;
 };
 
 const applyEntityInputToReplica = async (
@@ -317,6 +340,7 @@ const applyEntityInputToReplica = async (
 ): Promise<{
   outcome: EntityInputOutcome;
   appliedInput: RoutedEntityInput;
+  entityFrameCommitted: boolean;
   nextReplica: EntityReplica;
   outputs: RoutedEntityInput[];
   jOutputs: JInput[];
@@ -335,11 +359,12 @@ const applyEntityInputToReplica = async (
     signerId: actualSignerId,
     ...(entityInput.entityTxs ? { entityTxs: entityInput.entityTxs } : {}),
     ...(entityInput.proposedFrame ? { proposedFrame: entityInput.proposedFrame } : {}),
+    ...(entityInput.hashPrecommitFrame ? { hashPrecommitFrame: entityInput.hashPrecommitFrame } : {}),
     ...(entityInput.hashPrecommits ? { hashPrecommits: entityInput.hashPrecommits } : {}),
-  };
-  const appliedInput: RoutedEntityInput = {
-    ...normalizedInput,
-    signerId: actualSignerId,
+    ...(entityInput.jPrefixAttestations
+      ? { jPrefixAttestations: entityInput.jPrefixAttestations }
+      : {}),
+    ...(entityInput.leaderTimeoutVote ? { leaderTimeoutVote: entityInput.leaderTimeoutVote } : {}),
   };
   if (isReplay) {
     entityInputLog.debug('replay.apply_input', {
@@ -348,30 +373,21 @@ const applyEntityInputToReplica = async (
     });
   }
 
-  const { outcome, newState, outputs, jOutputs, workingReplica } = await applyEntityInput(
+  const { outcome, newState, outputs, jOutputs, workingReplica, canonicalAppliedInput } = await applyEntityInput(
     env,
     entityReplica,
     normalizedInput,
   );
-  const {
-    proposal: _oldProposal,
-    lockedFrame: _oldLockedFrame,
-    hankoWitness: _oldHankoWitness,
-    validatorComputedState: _oldValidatorComputedState,
-    ...replicaBase
-  } = entityReplica;
+  const appliedInput: RoutedEntityInput = {
+    ...(canonicalAppliedInput ?? normalizedInput),
+    signerId: actualSignerId,
+  };
   const committed = isCommittedEntityInput(outcome);
   const nextReplica: EntityReplica = committed ? {
-    ...replicaBase,
+    ...workingReplica,
     state: newState,
-    mempool: workingReplica.mempool,
   } : entityReplica;
-  if (committed && workingReplica.proposal !== undefined) nextReplica.proposal = workingReplica.proposal;
-  if (committed && workingReplica.lockedFrame !== undefined) nextReplica.lockedFrame = workingReplica.lockedFrame;
-  if (committed && workingReplica.hankoWitness !== undefined) nextReplica.hankoWitness = workingReplica.hankoWitness;
-  if (committed && workingReplica.validatorComputedState !== undefined) {
-    nextReplica.validatorComputedState = workingReplica.validatorComputedState;
-  }
+  const entityFrameCommitted = didCommitEntityFrame(entityReplica, nextReplica, outcome);
 
   const routedOutputs: RoutedEntityInput[] = [];
   outputs.forEach((output, index) => {
@@ -386,7 +402,14 @@ const applyEntityInputToReplica = async (
     }
   });
 
-  return { outcome, appliedInput, nextReplica, outputs: routedOutputs, jOutputs: jOutputs || [] };
+  return {
+    outcome,
+    appliedInput,
+    entityFrameCommitted,
+    nextReplica,
+    outputs: routedOutputs,
+    jOutputs: jOutputs || [],
+  };
 };
 
 const findReplicaKeyInsensitive = (env: Env, entityId: string, signerId?: string | null): string | null => {

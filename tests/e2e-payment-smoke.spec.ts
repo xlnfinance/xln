@@ -17,7 +17,8 @@ import {
 const API_BASE_URL = requireApiBaseUrl();
 const TEST_TIMEOUT_MS = process.env.E2E_LONG === '1' ? 300_000 : 240_000;
 const CONSENSUS_TIMEOUT_MS = 60_000;
-const PAYMENT_AMOUNT = 7n * 10n ** 18n;
+const USDC_DECIMALS = 6n;
+const PAYMENT_AMOUNT = 7n * 10n ** USDC_DECIMALS;
 const USE_BASELINE = Boolean(process.env.E2E_RESET_BASE_URL);
 const HISTORY_SCREENSHOT_PATH = String(process.env.E2E_HISTORY_SCREENSHOT_PATH || '').trim();
 
@@ -79,10 +80,14 @@ function randomLabel(prefix: string): string {
 
 function logPage(page: Page, tag: string): string[] {
   const errors: string[] = [];
+  const watcherDebug = process.env.E2E_WATCHER_DEBUG === '1';
   page.on('console', (msg) => {
     const text = msg.text();
     if (msg.type() === 'error') errors.push(text);
-    if (msg.type() === 'error' || text.includes('HTLC') || text.includes('Payment') || text.includes('[E2E]')) {
+    if (
+      msg.type() === 'error' || text.includes('HTLC') || text.includes('Payment') || text.includes('[E2E]') ||
+      (watcherDebug && /jadapter|J_WATCH|j_watch/i.test(text))
+    ) {
       process.stdout.write(`[${tag}] ${text.slice(0, 300)}\n`);
     }
   });
@@ -522,7 +527,7 @@ async function verifyEntityActivityHistory(page: Page, entityId: string, options
 test.describe('Payment Smoke', () => {
   test.setTimeout(TEST_TIMEOUT_MS);
 
-  test('fresh runtimes can open accounts, faucet, pay, and reload persisted state', async ({ browser, page }) => {
+  test('fresh runtimes can open accounts, faucet, pay, and reload persisted state', { tag: '@functional' }, async ({ browser, page }) => {
     let senderContext: BrowserContext | null = null;
     let recipientContext: BrowserContext | null = null;
 
@@ -591,6 +596,7 @@ test.describe('Payment Smoke', () => {
       await submitUiPayment(senderPage, {
         recipientEntityId: recipient.entityId,
         amount: PAYMENT_AMOUNT,
+        tokenId: 1,
         routeEntityIds: [hubId, recipient.entityId],
       });
 
@@ -620,14 +626,14 @@ test.describe('Payment Smoke', () => {
         recipientPage,
         hubId,
         recipientBeforePayment,
-        Number(PAYMENT_AMOUNT / 10n ** 18n),
+        Number(PAYMENT_AMOUNT / 10n ** USDC_DECIMALS),
         { timeoutMs: CONSENSUS_TIMEOUT_MS },
       );
       const senderAfterPayment = await waitForSenderSpend(
         senderPage,
         hubId,
         senderAfterFaucet,
-        Number(PAYMENT_AMOUNT / 10n ** 18n),
+        Number(PAYMENT_AMOUNT / 10n ** USDC_DECIMALS),
       );
 
       await Promise.all([

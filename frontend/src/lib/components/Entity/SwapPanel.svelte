@@ -20,6 +20,7 @@
   import { unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
   import { prewarmCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
   import { amountToUsd } from '$lib/utils/assetPricing';
+  import { requireTokenDecimals } from './token-metadata';
   import { formatEntityId } from '$lib/utils/format';
   import {
     buildSwapPanelRuntimeView,
@@ -52,7 +53,6 @@
     FILLED_DISPLAY_PPM_THRESHOLD,
     MAX_PRICE_DEVIATION_BPS,
     MIN_ORDER_NOTIONAL_USD,
-    ORDERBOOK_LOT_SCALE,
     ORDERBOOK_PRICE_DECIMALS,
     ORDERBOOK_PRICE_SCALE,
     ORDERBOOK_SNAPSHOT_FRESH_MS,
@@ -61,7 +61,6 @@
     formatSwapTokenAmount,
     formatSwapTokenAmountForInput,
     parseSwapDisplayPriceTicks,
-    requantizeSwapOrderAtLimitPrice,
     type PreparedSwapOrderLike,
     type SwapFormValidationInput,
     validateSwapForm,
@@ -1734,8 +1733,10 @@
     return `${whole.toString()}.${frac}`;
   }
 
-  function lotsToBaseWei(sizeLots: bigint): bigint {
-    return sizeLots > 0n ? sizeLots * ORDERBOOK_LOT_SCALE : 0n;
+  function lotsToBaseWei(sizeLots: bigint, baseTokenId: number): bigint {
+    if (sizeLots <= 0n) return 0n;
+    if (!activeXlnFunctions?.isReady) return 0n;
+    return sizeLots * activeXlnFunctions.getSwapLotScale(baseTokenId);
   }
 
   function tokenSymbol(tokenIdValue: number): string {
@@ -2294,7 +2295,15 @@
     const explicitPriceTicks = selectedOrderLevel.inputPriceTicks > 0n
       ? selectedOrderLevel.inputPriceTicks
       : selectedOrderLevel.priceTicks;
-    const requantized = requantizeAtLimitPrice(rawGive, explicitPriceTicks);
+    const levelWantTokenId = selectedOrderLevel.side === 'ask'
+      ? selectedOrderLevel.baseTokenId
+      : selectedOrderLevel.quoteTokenId;
+    const requantized = requantizeAtLimitPrice(
+      levelGiveTokenId,
+      levelWantTokenId,
+      rawGive,
+      explicitPriceTicks,
+    );
     const fillGive = requantized?.effectiveGive ?? 0n;
 
     setOrderAmountInputValue(formatAmountForInput(fillGive, levelGiveTokenId));
@@ -2515,7 +2524,7 @@
     setSwapTokens(nextGiveToken, nextWantToken, swapRouteMode === 'cross');
 
     const priceTicks = parsedPriceTicks;
-    const sizeBaseWei = lotsToBaseWei(rawSize);
+    const sizeBaseWei = lotsToBaseWei(rawSize, pair.baseTokenId);
     selectedOrderLevel = {
       side,
       priceTicks,
@@ -2573,9 +2582,8 @@
   }
 
   function getTokenDecimals(tokenIdValue: number): number {
-    const info = activeXlnFunctions?.getTokenInfo?.(tokenIdValue);
-    const decimals = Number(info?.decimals);
-    return Number.isFinite(decimals) && decimals > 0 ? Math.floor(decimals) : 18;
+    if (!activeXlnFunctions) throw new Error(`TOKEN_METADATA_READER_UNAVAILABLE:token:${tokenIdValue}`);
+    return requireTokenDecimals(activeXlnFunctions.getTokenInfo(tokenIdValue).decimals, `token:${tokenIdValue}`);
   }
 
   function quoteFromBase(baseAmount: bigint, priceTicks: bigint, baseDecimals: number, quoteDecimals: number): bigint {
@@ -2601,7 +2609,12 @@
         ? selectedOrderLevel.inputPriceTicks
         : limitPriceTicks;
       if (explicitPriceTicks && explicitPriceTicks > 0n) {
-        const requantized = requantizeAtLimitPrice(rawGiveAmount, explicitPriceTicks);
+        const requantized = requantizeAtLimitPrice(
+          giveToken,
+          wantToken,
+          rawGiveAmount,
+          explicitPriceTicks,
+        );
         if (requantized && requantized.effectiveGive > 0n && requantized.effectiveWant > 0n) {
           return requantized;
         }
@@ -2904,7 +2917,12 @@
         throw new Error('Enter amount and limit price');
       }
       const clickedPrepared = selectedOrderLevel
-        ? requantizeAtLimitPrice(giveAmount, selectedOrderLevel.inputPriceTicks || selectedOrderLevel.priceTicks)
+        ? requantizeAtLimitPrice(
+            giveToken,
+            wantToken,
+            giveAmount,
+            selectedOrderLevel.inputPriceTicks || selectedOrderLevel.priceTicks,
+          )
         : null;
       const prepared = clickedPrepared ?? prepareCanonicalOrder(giveAmount, wantAmount);
       if (!prepared) throw new Error('Order does not fit canonical lot/tick constraints');
@@ -3196,13 +3214,25 @@
     return formatSwapTokenAmountForInput(amount, getTokenDecimals(tokenIdValue));
   }
 
-  function requantizeAtLimitPrice(remainingGiveAmount: bigint, priceTicks: bigint): PreparedSwapOrderLike | null {
-    return requantizeSwapOrderAtLimitPrice({
+  function requantizeAtLimitPrice(
+    activeGiveTokenId: number,
+    activeWantTokenId: number,
+    remainingGiveAmount: bigint,
+    priceTicks: bigint,
+  ): PreparedSwapOrderLike | null {
+    if (!activeXlnFunctions?.isReady) return null;
+    const quantized = activeXlnFunctions.requantizeRemainingSwapAtPrice(
+      activeGiveTokenId,
+      activeWantTokenId,
       remainingGiveAmount,
       priceTicks,
-      orderMode,
-      tradeSide,
-    });
+    );
+    return quantized ? {
+      priceTicks,
+      effectiveGive: quantized.effectiveGive,
+      effectiveWant: quantized.effectiveWant,
+      unspentGiveAmount: quantized.releasedGiveDust,
+    } : null;
   }
 
   function parseDisplayPriceTicks(displayPrice: string, fallbackPriceTicks: bigint): bigint {

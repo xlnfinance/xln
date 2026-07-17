@@ -3,12 +3,18 @@ set -euo pipefail
 
 echo "[dev:clean] xln clean slate: stopping stale processes and wiping local state"
 
-ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd -P)"
 cd "$ROOT_DIR"
 source "$ROOT_DIR/scripts/lib/port-layout.sh"
+source "$ROOT_DIR/scripts/dev/process-owner.sh"
 CANONICAL_J_PATH="$ROOT_DIR/jurisdictions/jurisdictions.json"
-DEV_J_PATH="$ROOT_DIR/db/dev/jurisdictions.json"
+DEV_DATA_ROOT="$ROOT_DIR/db/dev"
+DEV_RDB_ROOT="$DEV_DATA_ROOT/rdb"
+DEV_J_PATH="$DEV_RDB_ROOT/jurisdictions.json"
+DEV_PID_DIR="$DEV_DATA_ROOT/pids"
+DEV_OWNER_FILE="$DEV_DATA_ROOT/process-owner"
 RPC_PORT="$(xln_rpc_port)"
+RPC2_PORT="$(xln_rpc2_port)"
 API_PORT="$(xln_api_port)"
 WEB_PORT="$(xln_web_port)"
 WEB_HTTP_PORT="$(xln_web_http_port)"
@@ -16,17 +22,7 @@ CUSTODY_PORT="$(xln_custody_port)"
 CUSTODY_DAEMON_PORT="$(xln_custody_daemon_port)"
 WATCHTOWER_PORT="$(xln_watchtower_port)"
 
-kill_by_port() {
-  local port="$1"
-  local pids
-  pids="$(lsof -ti TCP:${port} -sTCP:LISTEN 2>/dev/null || true)"
-  if [ -n "$pids" ]; then
-    echo "[dev:clean] killing listeners on :${port} -> ${pids}"
-    echo "$pids" | xargs kill -9 2>/dev/null || true
-  fi
-}
-
-wait_for_port_clear() {
+assert_port_clear() {
   local port="$1"
   local attempts=50
   local pids=""
@@ -38,60 +34,31 @@ wait_for_port_clear() {
     sleep 0.1
     attempts=$((attempts - 1))
   done
-  echo "[dev:clean] port :${port} is still busy after cleanup -> ${pids}" >&2
+  local commands
+  commands="$(ps -p "$(echo "$pids" | tr '\n' ',')" -o pid=,command= 2>/dev/null || true)"
+  echo "DEV_PORT_BUSY_UNOWNED:port=${port} pids=$(echo "$pids" | tr '\n' ',') commands=${commands}" >&2
   return 1
 }
 
-echo "[dev:clean] killing known xln/anvil/dev processes"
-for pm2_app in anvil xln-server xln-custody; do
-  pm2 delete "$pm2_app" 2>/dev/null || true
-  pm2 stop "$pm2_app" 2>/dev/null || true
-done
-pkill -9 -f "anvil" 2>/dev/null || true
-pkill -9 -f "bash .*scripts/start-anvil.sh" 2>/dev/null || true
-pkill -9 -f "scripts/start-anvil.sh" 2>/dev/null || true
-pkill -9 -f "bun runtime/orchestrator/orchestrator.ts" 2>/dev/null || true
-pkill -9 -f "bun runtime/server/index.ts" 2>/dev/null || true
-pkill -9 -f "bun runtime/scripts/start-custody-dev.ts" 2>/dev/null || true
-pkill -9 -f "bun runtime/scripts/start-custody-prod.ts" 2>/dev/null || true
-pkill -9 -f "bun runtime/watchtower/standalone-server.ts" 2>/dev/null || true
-pkill -9 -f "bun runtime/orchestrator/hub-node.ts" 2>/dev/null || true
-pkill -9 -f "bun runtime/orchestrator/mm-node.ts" 2>/dev/null || true
-pkill -9 -f "bun custody/server.ts" 2>/dev/null || true
-pkill -9 -f "bun build runtime/runtime.ts" 2>/dev/null || true
-pkill -9 -f "vite dev" 2>/dev/null || true
-pkill -9 -f "node .*vite" 2>/dev/null || true
-pkill -9 -f "concurrently .*ANVIL" 2>/dev/null || true
+stop_owned_dev_processes "$DEV_OWNER_FILE" "$DEV_PID_DIR" "$ROOT_DIR"
 
-kill_by_port "$RPC_PORT"
-kill_by_port "$WEB_PORT"
-kill_by_port "$WEB_HTTP_PORT"
-kill_by_port "$API_PORT"
-kill_by_port "$CUSTODY_PORT"
-kill_by_port "$CUSTODY_DAEMON_PORT"
-kill_by_port "$WATCHTOWER_PORT"
-kill_by_port 8090
-kill_by_port 9000
-kill_by_port 5173
-kill_by_port 8787
+assert_port_clear "$RPC_PORT"
+assert_port_clear "$RPC2_PORT"
+assert_port_clear "$WEB_PORT"
+assert_port_clear "$WEB_HTTP_PORT"
+assert_port_clear "$API_PORT"
+assert_port_clear "$CUSTODY_PORT"
+assert_port_clear "$CUSTODY_DAEMON_PORT"
+assert_port_clear "$WATCHTOWER_PORT"
+assert_port_clear "$((API_PORT + 10))"
+assert_port_clear "$((API_PORT + 11))"
+assert_port_clear "$((API_PORT + 12))"
+assert_port_clear "$((API_PORT + 13))"
 
-wait_for_port_clear "$RPC_PORT"
-wait_for_port_clear "$WEB_PORT"
-wait_for_port_clear "$WEB_HTTP_PORT"
-wait_for_port_clear "$API_PORT"
-wait_for_port_clear "$CUSTODY_PORT"
-wait_for_port_clear "$CUSTODY_DAEMON_PORT"
-wait_for_port_clear "$WATCHTOWER_PORT"
+echo "[dev:clean] removing only the canonical dev shard"
+rm -rf "$DEV_DATA_ROOT"
 
-echo "[dev:clean] removing lock files and local runtime state"
-find db-tmp -name LOCK -type f -delete 2>/dev/null || true
-rm -rf db-tmp 2>/dev/null || true
-rm -rf db 2>/dev/null || true
-rm -rf db-relay 2>/dev/null || true
-rm -rf pids/*.pid 2>/dev/null || true
-rm -rf logs/*.log 2>/dev/null || true
-
-mkdir -p db-tmp/runtime db/dev logs pids
+mkdir -p "$DEV_RDB_ROOT" "$DEV_DATA_ROOT/jdb" "$DEV_PID_DIR"
 cp "$CANONICAL_J_PATH" "$DEV_J_PATH"
 
 echo "[dev:clean] clean slate ready"

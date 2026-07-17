@@ -25,6 +25,33 @@ export class BrowserVMEthersProvider extends ethers.AbstractProvider {
     return this._network;
   }
 
+  private async runReadOnlyCall(
+    request: Parameters<BrowserVmEthersProviderTarget['vm']['evm']['runCall']>[0],
+  ): ReturnType<BrowserVmEthersProviderTarget['vm']['evm']['runCall']> {
+    return this.browserVM.runExclusiveVmOperation(async () => {
+      const stateManager = this.browserVM.vm.stateManager;
+      await stateManager.checkpoint();
+      let result: Awaited<ReturnType<BrowserVmEthersProviderTarget['vm']['evm']['runCall']>> | undefined;
+      let primaryError: unknown;
+      try {
+        result = await this.browserVM.vm.evm.runCall(request);
+      } catch (error) {
+        primaryError = error;
+      }
+      try {
+        await stateManager.revert();
+      } catch (revertError) {
+        if (primaryError !== undefined) {
+          throw new AggregateError([primaryError, revertError], 'BROWSERVM_READ_CALL_AND_REVERT_FAILED');
+        }
+        throw revertError;
+      }
+      if (primaryError !== undefined) throw primaryError;
+      if (!result) throw new Error('BROWSERVM_READ_CALL_RESULT_MISSING');
+      return result;
+    });
+  }
+
   override async _perform<T = unknown>(req: ethers.PerformActionRequest): Promise<T> {
     const asResponse = (value: unknown): T => value as T;
     switch (req.method) {
@@ -49,28 +76,31 @@ export class BrowserVMEthersProvider extends ethers.AbstractProvider {
         });
 
       case 'getTransactionCount': {
-        const txCountAccount = await this.browserVM.vm.stateManager.getAccount(
-          createAddressFromString(ethers.getAddress(req.address))
-        );
+        const txCountAccount = await this.browserVM.runExclusiveVmOperation(() =>
+          this.browserVM.vm.stateManager.getAccount(
+            createAddressFromString(ethers.getAddress(req.address)),
+          ));
         return asResponse(Number(txCountAccount?.nonce || 0n));
       }
 
       case 'getBalance': {
-        const account = await this.browserVM.vm.stateManager.getAccount(
-          createAddressFromString(ethers.getAddress(req.address))
-        );
+        const account = await this.browserVM.runExclusiveVmOperation(() =>
+          this.browserVM.vm.stateManager.getAccount(
+            createAddressFromString(ethers.getAddress(req.address)),
+          ));
         return asResponse(account?.balance || 0n);
       }
 
       case 'getCode': {
-        const code = await this.browserVM.vm.stateManager.getCode(
-          createAddressFromString(ethers.getAddress(req.address))
-        );
+        const code = await this.browserVM.runExclusiveVmOperation(() =>
+          this.browserVM.vm.stateManager.getCode(
+            createAddressFromString(ethers.getAddress(req.address)),
+          ));
         return asResponse(ethers.hexlify(code));
       }
 
       case 'call': {
-        const result = await this.browserVM.vm.evm.runCall({
+        const result = await this.runReadOnlyCall({
           to: createAddressFromString(ethers.getAddress(req.transaction.to!)),
           caller: req.transaction.from
             ? createAddressFromString(ethers.getAddress(req.transaction.from))

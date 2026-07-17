@@ -22,7 +22,6 @@ import {
   usd,
   enableStrictScenario,
 } from './helpers';
-import { cancelHook as cancelCrontabHook } from '../entity/scheduler';
 
 const USDC = 1;
 
@@ -107,11 +106,11 @@ export async function runDisputeLifecycle(_existingEnv?: Env): Promise<Env> {
   const restoreStrict = enableStrictScenario(env, 'dispute-lifecycle');
 
   try {
-    const syncEntityTimestamps = (nextTs: number) => {
+    const advanceRuntimeTimestamp = (nextTs: number) => {
+      // Entity timestamps are consensus state and advance only inside a signed
+      // frame. The runtime clock makes scheduledWake due; its frame commits the
+      // matching Entity timestamp without mutating a certified state in place.
       env.timestamp = nextTs;
-      for (const [, replica] of env.eReplicas) {
-        replica.state.timestamp = nextTs;
-      }
     };
 
     const registered = await registerEntities(
@@ -251,13 +250,6 @@ export async function runDisputeLifecycle(_existingEnv?: Env): Promise<Env> {
       env,
     );
 
-    // Keep dispute finalize deterministic in this test:
-    // allow starter-side auto-finalize only, disable counterparty auto hook.
-    const hubReplicaState = findReplica(env, hub.id)[1].state;
-    if (hubReplicaState.crontabState) {
-      cancelCrontabHook(hubReplicaState.crontabState, `dispute-deadline:${alice.id.toLowerCase()}`);
-    }
-
     // Both sides must reject business traffic while disputed.
     const hubFrameBeforeBlockedTraffic = Number(hubAfterStart?.currentHeight || 0);
     await process(env, [{
@@ -341,7 +333,7 @@ export async function runDisputeLifecycle(_existingEnv?: Env): Promise<Env> {
 
     let autoFinalizeObserved = false;
     for (let i = 0; i < 40; i++) {
-      syncEntityTimestamps((env.timestamp || 0) + 1000);
+      advanceRuntimeTimestamp((env.timestamp || 0) + 1000);
       await process(env);
       await syncChain(env, 3);
       await processJEvents(env);

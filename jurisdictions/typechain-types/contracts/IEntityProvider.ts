@@ -3,12 +3,10 @@
 /* eslint-disable */
 import type {
   BaseContract,
-  BigNumberish,
   BytesLike,
   FunctionFragment,
   Result,
   Interface,
-  EventFragment,
   ContractRunner,
   ContractMethod,
   Listener,
@@ -17,213 +15,22 @@ import type {
   TypedContractEvent,
   TypedDeferredTopicFilter,
   TypedEventLog,
-  TypedLogDescription,
   TypedListener,
   TypedContractMethod,
 } from "../common";
 
-export declare namespace IEntityProvider {
-  export type EntityStruct = {
-    currentBoardHash: BytesLike;
-    proposedBoardHash: BytesLike;
-    activateAtBlock: BigNumberish;
-    registrationBlock: BigNumberish;
-    proposerType: BigNumberish;
-    articlesHash: BytesLike;
-  };
-
-  export type EntityStructOutput = [
-    currentBoardHash: string,
-    proposedBoardHash: string,
-    activateAtBlock: bigint,
-    registrationBlock: bigint,
-    proposerType: bigint,
-    articlesHash: string
-  ] & {
-    currentBoardHash: string;
-    proposedBoardHash: string;
-    activateAtBlock: bigint;
-    registrationBlock: bigint;
-    proposerType: bigint;
-    articlesHash: string;
-  };
-
-  export type BoardStruct = {
-    votingThreshold: BigNumberish;
-    entityIds: BytesLike[];
-    votingPowers: BigNumberish[];
-    boardChangeDelay: BigNumberish;
-    controlChangeDelay: BigNumberish;
-    dividendChangeDelay: BigNumberish;
-  };
-
-  export type BoardStructOutput = [
-    votingThreshold: bigint,
-    entityIds: string[],
-    votingPowers: bigint[],
-    boardChangeDelay: bigint,
-    controlChangeDelay: bigint,
-    dividendChangeDelay: bigint
-  ] & {
-    votingThreshold: bigint;
-    entityIds: string[];
-    votingPowers: bigint[];
-    boardChangeDelay: bigint;
-    controlChangeDelay: bigint;
-    dividendChangeDelay: bigint;
-  };
-
-  export type EntityArticlesStruct = {
-    controlDelay: BigNumberish;
-    dividendDelay: BigNumberish;
-    foundationDelay: BigNumberish;
-    controlThreshold: BigNumberish;
-  };
-
-  export type EntityArticlesStructOutput = [
-    controlDelay: bigint,
-    dividendDelay: bigint,
-    foundationDelay: bigint,
-    controlThreshold: bigint
-  ] & {
-    controlDelay: bigint;
-    dividendDelay: bigint;
-    foundationDelay: bigint;
-    controlThreshold: bigint;
-  };
-}
-
 export interface IEntityProviderInterface extends Interface {
-  getFunction(
-    nameOrSignature:
-      | "activateBoard"
-      | "getEntity"
-      | "proposeNewBoard"
-      | "recoverEntity"
-      | "registerEntity"
-      | "verifyHankoSignature"
-  ): FunctionFragment;
+  getFunction(nameOrSignature: "verifyHankoSignature"): FunctionFragment;
 
-  getEvent(
-    nameOrSignatureOrTopic:
-      | "BoardActivated"
-      | "BoardProposed"
-      | "EntityRegistered"
-      | "HankoVerified"
-  ): EventFragment;
-
-  encodeFunctionData(
-    functionFragment: "activateBoard",
-    values: [BytesLike]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "getEntity",
-    values: [BytesLike]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "proposeNewBoard",
-    values: [
-      BytesLike,
-      IEntityProvider.BoardStruct,
-      IEntityProvider.EntityArticlesStruct,
-      BigNumberish
-    ]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "recoverEntity",
-    values: [BytesLike, BytesLike, BytesLike]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "registerEntity",
-    values: [IEntityProvider.BoardStruct, IEntityProvider.EntityArticlesStruct]
-  ): string;
   encodeFunctionData(
     functionFragment: "verifyHankoSignature",
     values: [BytesLike, BytesLike]
   ): string;
 
   decodeFunctionResult(
-    functionFragment: "activateBoard",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(functionFragment: "getEntity", data: BytesLike): Result;
-  decodeFunctionResult(
-    functionFragment: "proposeNewBoard",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "recoverEntity",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "registerEntity",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "verifyHankoSignature",
     data: BytesLike
   ): Result;
-}
-
-export namespace BoardActivatedEvent {
-  export type InputTuple = [entityId: BytesLike, newBoardHash: BytesLike];
-  export type OutputTuple = [entityId: string, newBoardHash: string];
-  export interface OutputObject {
-    entityId: string;
-    newBoardHash: string;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace BoardProposedEvent {
-  export type InputTuple = [entityId: BytesLike, proposedBoardHash: BytesLike];
-  export type OutputTuple = [entityId: string, proposedBoardHash: string];
-  export interface OutputObject {
-    entityId: string;
-    proposedBoardHash: string;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace EntityRegisteredEvent {
-  export type InputTuple = [
-    entityId: BytesLike,
-    entityNumber: BigNumberish,
-    boardHash: BytesLike
-  ];
-  export type OutputTuple = [
-    entityId: string,
-    entityNumber: bigint,
-    boardHash: string
-  ];
-  export interface OutputObject {
-    entityId: string;
-    entityNumber: bigint;
-    boardHash: string;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace HankoVerifiedEvent {
-  export type InputTuple = [entityId: BytesLike, hash: BytesLike];
-  export type OutputTuple = [entityId: string, hash: string];
-  export interface OutputObject {
-    entityId: string;
-    hash: string;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
 }
 
 export interface IEntityProvider extends BaseContract {
@@ -269,48 +76,10 @@ export interface IEntityProvider extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
-  activateBoard: TypedContractMethod<
-    [entityId: BytesLike],
-    [void],
-    "nonpayable"
-  >;
-
-  getEntity: TypedContractMethod<
-    [entityId: BytesLike],
-    [IEntityProvider.EntityStructOutput],
-    "view"
-  >;
-
-  proposeNewBoard: TypedContractMethod<
-    [
-      entityId: BytesLike,
-      newBoard: IEntityProvider.BoardStruct,
-      articles: IEntityProvider.EntityArticlesStruct,
-      proposerType: BigNumberish
-    ],
-    [void],
-    "nonpayable"
-  >;
-
-  recoverEntity: TypedContractMethod<
-    [encodedBoard: BytesLike, encodedSignature: BytesLike, hash: BytesLike],
-    [bigint],
-    "view"
-  >;
-
-  registerEntity: TypedContractMethod<
-    [
-      board: IEntityProvider.BoardStruct,
-      articles: IEntityProvider.EntityArticlesStruct
-    ],
-    [string],
-    "nonpayable"
-  >;
-
   verifyHankoSignature: TypedContractMethod<
     [hankoData: BytesLike, hash: BytesLike],
-    [[string, boolean]],
-    "nonpayable"
+    [[string, boolean] & { entityId: string; success: boolean }],
+    "view"
   >;
 
   getFunction<T extends ContractMethod = ContractMethod>(
@@ -318,124 +87,12 @@ export interface IEntityProvider extends BaseContract {
   ): T;
 
   getFunction(
-    nameOrSignature: "activateBoard"
-  ): TypedContractMethod<[entityId: BytesLike], [void], "nonpayable">;
-  getFunction(
-    nameOrSignature: "getEntity"
-  ): TypedContractMethod<
-    [entityId: BytesLike],
-    [IEntityProvider.EntityStructOutput],
-    "view"
-  >;
-  getFunction(
-    nameOrSignature: "proposeNewBoard"
-  ): TypedContractMethod<
-    [
-      entityId: BytesLike,
-      newBoard: IEntityProvider.BoardStruct,
-      articles: IEntityProvider.EntityArticlesStruct,
-      proposerType: BigNumberish
-    ],
-    [void],
-    "nonpayable"
-  >;
-  getFunction(
-    nameOrSignature: "recoverEntity"
-  ): TypedContractMethod<
-    [encodedBoard: BytesLike, encodedSignature: BytesLike, hash: BytesLike],
-    [bigint],
-    "view"
-  >;
-  getFunction(
-    nameOrSignature: "registerEntity"
-  ): TypedContractMethod<
-    [
-      board: IEntityProvider.BoardStruct,
-      articles: IEntityProvider.EntityArticlesStruct
-    ],
-    [string],
-    "nonpayable"
-  >;
-  getFunction(
     nameOrSignature: "verifyHankoSignature"
   ): TypedContractMethod<
     [hankoData: BytesLike, hash: BytesLike],
-    [[string, boolean]],
-    "nonpayable"
+    [[string, boolean] & { entityId: string; success: boolean }],
+    "view"
   >;
 
-  getEvent(
-    key: "BoardActivated"
-  ): TypedContractEvent<
-    BoardActivatedEvent.InputTuple,
-    BoardActivatedEvent.OutputTuple,
-    BoardActivatedEvent.OutputObject
-  >;
-  getEvent(
-    key: "BoardProposed"
-  ): TypedContractEvent<
-    BoardProposedEvent.InputTuple,
-    BoardProposedEvent.OutputTuple,
-    BoardProposedEvent.OutputObject
-  >;
-  getEvent(
-    key: "EntityRegistered"
-  ): TypedContractEvent<
-    EntityRegisteredEvent.InputTuple,
-    EntityRegisteredEvent.OutputTuple,
-    EntityRegisteredEvent.OutputObject
-  >;
-  getEvent(
-    key: "HankoVerified"
-  ): TypedContractEvent<
-    HankoVerifiedEvent.InputTuple,
-    HankoVerifiedEvent.OutputTuple,
-    HankoVerifiedEvent.OutputObject
-  >;
-
-  filters: {
-    "BoardActivated(bytes32,bytes32)": TypedContractEvent<
-      BoardActivatedEvent.InputTuple,
-      BoardActivatedEvent.OutputTuple,
-      BoardActivatedEvent.OutputObject
-    >;
-    BoardActivated: TypedContractEvent<
-      BoardActivatedEvent.InputTuple,
-      BoardActivatedEvent.OutputTuple,
-      BoardActivatedEvent.OutputObject
-    >;
-
-    "BoardProposed(bytes32,bytes32)": TypedContractEvent<
-      BoardProposedEvent.InputTuple,
-      BoardProposedEvent.OutputTuple,
-      BoardProposedEvent.OutputObject
-    >;
-    BoardProposed: TypedContractEvent<
-      BoardProposedEvent.InputTuple,
-      BoardProposedEvent.OutputTuple,
-      BoardProposedEvent.OutputObject
-    >;
-
-    "EntityRegistered(bytes32,uint256,bytes32)": TypedContractEvent<
-      EntityRegisteredEvent.InputTuple,
-      EntityRegisteredEvent.OutputTuple,
-      EntityRegisteredEvent.OutputObject
-    >;
-    EntityRegistered: TypedContractEvent<
-      EntityRegisteredEvent.InputTuple,
-      EntityRegisteredEvent.OutputTuple,
-      EntityRegisteredEvent.OutputObject
-    >;
-
-    "HankoVerified(bytes32,bytes32)": TypedContractEvent<
-      HankoVerifiedEvent.InputTuple,
-      HankoVerifiedEvent.OutputTuple,
-      HankoVerifiedEvent.OutputObject
-    >;
-    HankoVerified: TypedContractEvent<
-      HankoVerifiedEvent.InputTuple,
-      HankoVerifiedEvent.OutputTuple,
-      HankoVerifiedEvent.OutputObject
-    >;
-  };
+  filters: {};
 }

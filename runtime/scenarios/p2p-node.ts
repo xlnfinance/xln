@@ -11,13 +11,14 @@ import { processUntil, converge } from './helpers';
 import { isLeft, deriveDelta } from '../account/utils';
 import { deriveSignerKeySync, registerSignerKey, getSignerPrivateKey } from '../account/crypto';
 import { loadJurisdictions } from '../jurisdiction/jurisdiction-loader';
-import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from '../jadapter/default-tokens';
+import { DEFAULT_TOKENS, TOKEN_REGISTRATION_AMOUNT, getDefaultTokenSupply } from '../jadapter/default-tokens';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import type { AccountMachine, Delta, EntityInput, Env, JurisdictionConfig } from '../types';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import type { Profile } from '../networking/gossip';
 import { ethers } from 'ethers';
+import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
 
 const args = globalThis.process.argv.slice(2);
 
@@ -55,7 +56,8 @@ type P2PScenarioEnv = Env;
 const resolveJurisdiction = (): {
   jurisdiction: JurisdictionConfig;
   rpcUrl: string;
-  contracts: { depository: string; entityProvider: string; account?: string; deltaTransformer?: string };
+  entityProviderDeploymentBlock: number;
+  contracts: { depository: string; entityProvider: string; account: string; deltaTransformer: string };
 } => {
   const data = loadJurisdictions();
   const entry = data.jurisdictions?.[jurisdictionName];
@@ -67,8 +69,12 @@ const resolveJurisdiction = (): {
   if (!rpcUrl) {
     throw new Error(`JURISDICTION_RPC_MISSING: ${jurisdictionName}`);
   }
-  if (!contracts.depository || !contracts.entityProvider) {
+  if (!contracts.depository || !contracts.entityProvider || !contracts.account || !contracts.deltaTransformer) {
     throw new Error(`JURISDICTION_CONTRACTS_MISSING: ${jurisdictionName}`);
+  }
+  const entityProviderDeploymentBlock = Number(entry.entityProviderDeploymentBlock);
+  if (!Number.isSafeInteger(entityProviderDeploymentBlock) || entityProviderDeploymentBlock < 1) {
+    throw new Error(`JURISDICTION_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_INVALID: ${jurisdictionName}`);
   }
   const jurisdiction: JurisdictionConfig = {
     name: jurisdictionName,
@@ -76,8 +82,9 @@ const resolveJurisdiction = (): {
     entityProviderAddress: contracts.entityProvider,
     depositoryAddress: contracts.depository,
     chainId: entry.chainId,
+    entityProviderDeploymentBlock,
   };
-  return { jurisdiction, rpcUrl, contracts };
+  return { jurisdiction, rpcUrl, contracts, entityProviderDeploymentBlock };
 };
 
 const deployDefaultTokensOnRpc = async (jadapter: JAdapter): Promise<void> => {
@@ -93,7 +100,12 @@ const deployDefaultTokensOnRpc = async (jadapter: JAdapter): Promise<void> => {
   console.log(`[P2P] Deploying default tokens on ${jurisdictionName}...`);
   const erc20Factory = new ERC20Mock__factory(jadapter.signer);
   for (const token of DEFAULT_TOKENS) {
-    const tokenContract = await erc20Factory.deploy(token.name, token.symbol, DEFAULT_TOKEN_SUPPLY);
+    const tokenContract = await erc20Factory.deploy(
+      token.name,
+      token.symbol,
+      token.decimals,
+      getDefaultTokenSupply(token.decimals),
+    );
     await tokenContract.waitForDeployment();
     const tokenAddress = await tokenContract.getAddress();
     console.log(`[P2P] ${token.symbol} deployed at ${tokenAddress}`);
@@ -623,20 +635,21 @@ const run = async () => {
   console.log('[P2P-NODE] Runtime event loop started');
   let jurisdiction: JurisdictionConfig | null = null;
   let rpcUrl: string | null = null;
-  let contracts: { depository: string; entityProvider: string; account?: string; deltaTransformer?: string } | null = null;
+  let contracts: { depository: string; entityProvider: string; account: string; deltaTransformer: string } | null = null;
 
   if (useRpc) {
     const resolved = resolveJurisdiction();
     jurisdiction = resolved.jurisdiction;
     rpcUrl = resolved.rpcUrl;
     contracts = resolved.contracts;
+    const entityProviderDeploymentBlock = resolved.entityProviderDeploymentBlock;
 
-    const importJContracts: { depository: string; entityProvider: string; account?: string; deltaTransformer?: string } = {
+    const importJContracts = {
       depository: contracts.depository,
       entityProvider: contracts.entityProvider,
+      account: contracts.account,
+      deltaTransformer: contracts.deltaTransformer,
     };
-    if (contracts.account !== undefined) importJContracts.account = contracts.account;
-    if (contracts.deltaTransformer !== undefined) importJContracts.deltaTransformer = contracts.deltaTransformer;
 
     enqueueRuntimeInput(env, {
       runtimeTxs: [
@@ -647,12 +660,14 @@ const run = async () => {
             chainId: jurisdiction.chainId ?? 0,
             ticker: 'XLN',
             rpcs: [rpcUrl],
+            entityProviderDeploymentBlock,
             contracts: importJContracts,
           },
         },
       ],
       entityInputs: [],
     });
+    await runtimeProcess(env);
     await runtimeProcess(env);
 
     // J-event watching is handled by JAdapter.startWatching() per-jReplica
@@ -672,6 +687,7 @@ const run = async () => {
       ],
       entityInputs: [],
     });
+    await runtimeProcess(env);
     await runtimeProcess(env);
 
     const browserReplica = env.jReplicas.get(jurisdictionName);
@@ -716,10 +732,10 @@ const run = async () => {
   // Otherwise resolveValidatorAddress will fail
   const seedBytes = new TextEncoder().encode(seed);
   const privateKey = deriveSignerKeySync(seedBytes, signerId);
-  registerSignerKey(signerId, privateKey);
+  registerSignerKey(env, signerId, privateKey);
 
-  const { config } = createLazyEntity(role, [signerId], 1n, jurisdiction ?? undefined);
-  const entityId = generateLazyEntityId([signerId], 1n);
+  const { config } = createLazyEntity(role, [signerId], 1n, jurisdiction ?? undefined, env);
+  const entityId = generateLazyEntityId([signerId], 1n, env);
 
   enqueueRuntimeInput(env, {
     runtimeTxs: [
@@ -1023,7 +1039,7 @@ const run = async () => {
         entityId,
         signerId,
         entityTxs: [
-          {
+          withDeterministicHtlcTestSecret({
             type: 'htlcPayment',
             data: {
               targetEntityId: bobProfile.entityId,
@@ -1031,10 +1047,9 @@ const run = async () => {
               amount: HTLC_AMOUNT,
               route: [entityId, hubProfile.entityId, bobProfile.entityId],
               description: 'p2p-htlc',
-              secret,
               hashlock,
             },
-          },
+          }, secret),
         ],
       },
     ]);

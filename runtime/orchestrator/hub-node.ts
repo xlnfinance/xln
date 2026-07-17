@@ -13,7 +13,8 @@ import { prewarmSignerLabels } from '../account/crypto';
 import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
-import { DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction } from '../jadapter/default-tokens';
+import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from '../jadapter/default-tokens';
+import { DEV_CHAIN_IDS } from '../jadapter';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import {
   normalizeJurisdictionKey as normalizePublicJurisdictionKey,
@@ -32,13 +33,18 @@ import {
 import { toPublicRpcUrl } from '../networking/loopback-url';
 import { startParentLivenessWatch } from './parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
+import { checkpointNodeRuntime, quiesceNodeRuntime } from './node-runtime-quiesce';
 import { applyJEventsToEnv } from '../jadapter/watcher';
+import { drainJWatcherBacklog } from '../jadapter/backlog-drain';
 import { createRelayStore } from '../relay/store';
 import { safeStringify } from '../protocol/serialization';
+import { requireDeliveryDelivered } from '../protocol/payments/delivery-result';
 import { createStructuredLogger } from '../infra/logger';
 import { handleMeshBootstrapLoopError } from './mesh-bootstrap-fail-fast';
+import { restoredRuntimeRouteRelocated } from './restored-gossip-route';
 import { readInheritedChildSecrets, resolveChildSecret } from './child-secrets';
 import { findMissingRpcContractCode } from './contract-readiness';
+import { readJurisdictionsFile } from './jurisdictions-file';
 import { getTokenIdsForJurisdiction } from '../account/utils';
 import { isLocalOperatorRequest, publicLocalHubHealth, resolveSocketPeerAddress } from '../server/health-redaction';
 import {
@@ -46,7 +52,7 @@ import {
   resolveRuntimeAdapterAuthAudience,
   resolveRuntimeAdapterAuthSeed,
 } from '../radapter/auth';
-import { decodeRuntimeAdapterMessage } from '../radapter/codec';
+import { decodeRuntimeAdapterRequest } from '../radapter/codec';
 import {
   getJReplicaByJurisdictionRef,
   getJurisdictionIdentityRef,
@@ -70,19 +76,17 @@ import { handleRuntimeInputStatus } from '../server/runtime-input-control';
 import {
   getActiveJAdapter,
   getP2PState,
+  clearGossip,
   closeInfraDb,
   closeRuntimeDb,
   main,
   process as runtimeProcess,
   enqueueRuntimeInput,
   handleInboundP2PEntityInput,
+  handleInboundReliableReceipt,
   startP2P,
-  stopP2P,
-  stopJurisdictionWatchers,
-  resumeRuntimeLoop,
+  startJurisdictionWatchers,
   startRuntimeLoop,
-  stopRuntimeLoopAndWait,
-  waitForRuntimeWorkDrained,
   persistRestoredEnvToDB,
   getEntityJAdapter,
   readPersistedStorageFrameRecord,
@@ -116,12 +120,14 @@ import {
   isCanonicalAccountOpener,
   settleRuntimeFor,
   sleep,
+  summarizeRuntimeQuiescence,
   waitUntil,
 } from './mesh-common';
 import {
   requireJurisdictionBlockTimeMs,
   resetMeshJurisdictionsCache,
   resolveMeshJurisdictionConfig,
+  resolveMeshJurisdictionRpcBindings,
   resolveSecondaryJurisdictions,
   type MeshJurisdictionConfig,
 } from './mesh-jurisdictions';
@@ -235,6 +241,7 @@ type LocalHealthResponse = {
   relayUrl: string;
   directWsUrl?: string;
   apiUrl: string;
+  quiescence: ReturnType<typeof summarizeRuntimeQuiescence>;
   p2p?: {
     directPeers: Array<{ runtimeId: string; endpoint: string; open: boolean }>;
   };
@@ -338,7 +345,7 @@ type JurisdictionImportDiagnostics = {
   usedContracts: boolean;
   probeRan: boolean;
   missingCode: string[];
-  mode: 'no-contracts' | 'connect-existing' | 'deploy-fresh' | 'dropped-stale';
+  mode: 'no-contracts' | 'connect-existing' | 'missing-contract-code';
 };
 
 const argsRaw = process.argv.slice(2);
@@ -506,9 +513,13 @@ const HUB_RUNTIME_TICK_DELAY_MS = Math.max(
   0,
   Number(process.env['HUB_RUNTIME_TICK_DELAY_MS'] || process.env['XLN_RUNTIME_TICK_DELAY_MS'] || '1'),
 );
+const HUB_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME = Math.max(
+  1,
+  Number(process.env['HUB_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || process.env['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '8'),
+);
 const HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME = Math.max(
   1,
-  Number(process.env['HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '1000'),
+  Number(process.env['HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '64'),
 );
 
 const envFlagEnabled = (value: unknown): boolean => {
@@ -641,54 +652,46 @@ const prepareJurisdictionForImport = async (jurisdiction: JurisdictionConfig): P
   jurisdictionImportDiagnostics.missingCode = missingCode;
   if (missingCode.length === 0) return jurisdiction;
 
-  // H1 is the dev/testnet deployer. If an isolated anvil starts from an empty
-  // state file while jurisdictions.json still contains canonical hardhat
-  // addresses, connect-only importJ would bind to dead contracts and kill the
-  // hub before it can bootstrap. Drop those stale addresses and let importJ
-  // deploy a fresh stack; ensureRpcStackReady writes the resulting addresses
-  // back for H2/H3/MM.
-  nodeLog.info('jurisdiction_contracts.stale_dropped', {
+  // RPC import is connect-only: the control plane must provision a real stack
+  // and publish its exact addresses before this runtime starts.
+  jurisdictionImportDiagnostics.mode = 'missing-contract-code';
+  nodeLog.error('jurisdiction_contracts.code_missing', {
     jurisdictionName: jurisdiction.name,
     chainId: jurisdiction.chainId,
     missingCode,
   });
-  jurisdictionImportDiagnostics.usedContracts = false;
-  jurisdictionImportDiagnostics.mode = 'dropped-stale';
-  const { contracts: _staleContracts, ...withoutContracts } = jurisdiction;
-  return withoutContracts;
+  throw new Error(`JURISDICTION_RPC_CONTRACT_CODE_MISSING:${missingCode.join(',')}`);
 };
 
 const resolveJurisdictionPaths = (): string[] => {
   return [resolveJurisdictionsJsonPath()];
 };
 
-const readCurrentJurisdictionsVersion = (): string => {
+const readCurrentJurisdictionsFile = (): JurisdictionsFile | null => {
   for (const filePath of resolveJurisdictionPaths()) {
-    if (!existsSync(filePath)) continue;
     try {
-      const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as JurisdictionsFile;
-      const version = String(parsed.version || '').trim();
-      if (version) return version;
-    } catch {
-      // Ignore malformed local file and keep falling back.
+      const parsed = readJurisdictionsFile<JurisdictionsFile>(filePath);
+      if (parsed) return parsed;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      nodeLog.error('jurisdictions_file.invalid', { path: filePath, error: message });
+      throw error;
     }
   }
-  return '1';
+  return null;
+};
+
+const readCurrentJurisdictionsVersion = (): string => {
+  const parsed = readCurrentJurisdictionsFile();
+  return String(parsed?.version || '').trim() || '1';
 };
 
 const readCurrentNetworkVersion = (): string => {
-  for (const filePath of resolveJurisdictionPaths()) {
-    if (!existsSync(filePath)) continue;
-    try {
-      const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as JurisdictionsFile;
-      const explicit = String(parsed.deployVersion || parsed.networkVersion || '').trim();
-      if (explicit) return explicit;
-      const lastUpdated = Date.parse(String(parsed.lastUpdated || ''));
-      if (Number.isFinite(lastUpdated)) return String(lastUpdated);
-    } catch {
-      // Ignore malformed local file and keep falling back.
-    }
-  }
+  const parsed = readCurrentJurisdictionsFile();
+  const explicit = String(parsed?.deployVersion || parsed?.networkVersion || '').trim();
+  if (explicit) return explicit;
+  const lastUpdated = Date.parse(String(parsed?.lastUpdated || ''));
+  if (Number.isFinite(lastUpdated)) return String(lastUpdated);
   return readCurrentJurisdictionsVersion();
 };
 
@@ -855,22 +858,15 @@ const ensureRpcStackReady = async (env: Env, jadapter: JAdapter): Promise<void> 
     }
     return;
   }
-  if (!resolvedArgs.deployTokens) {
-    throw new Error('RPC_STACK_ADDRESSES_MISSING');
-  }
-  console.log('Deploying fresh RPC contract stack');
-  if (jurisdictionImportDiagnostics) {
-    jurisdictionImportDiagnostics.usedContracts = false;
-    jurisdictionImportDiagnostics.mode = 'deploy-fresh';
-  }
-  await jadapter.deployStack();
-  syncEnvJurisdictionReplica(env, jadapter, resolvedArgs.rpcUrl);
-  await writeJurisdictionAddresses(jadapter, resolvedArgs.rpcUrl);
+  throw new Error('RPC_STACK_ADDRESSES_MISSING');
 };
 
 const deployDefaultTokensOnRpc = async (jadapter: JAdapter, jurisdictionName = ''): Promise<void> => {
   if (jadapter.mode === 'browservm') return;
-  const existing = await jadapter.getTokenRegistry().catch(() => []);
+  if (!DEV_CHAIN_IDS.has(jadapter.chainId)) {
+    throw new Error(`TOKEN_DEFAULT_DEPLOY_FORBIDDEN:${jadapter.chainId}`);
+  }
+  const existing = await jadapter.getTokenRegistry();
   const existingSymbols = new Set(
     existing
       .map(token => String(token.symbol || '').trim().toUpperCase())
@@ -893,7 +889,12 @@ const deployDefaultTokensOnRpc = async (jadapter: JAdapter, jurisdictionName = '
     if (existingSymbols.has(String(token.symbol || '').trim().toUpperCase())) {
       continue;
     }
-    const tokenContract = await erc20Factory.deploy(token.name, token.symbol, DEFAULT_TOKEN_SUPPLY);
+    const tokenContract = await erc20Factory.deploy(
+      token.name,
+      token.symbol,
+      token.decimals,
+      getDefaultTokenSupply(token.decimals),
+    );
     await tokenContract.waitForDeployment();
     const tokenAddress = await tokenContract.getAddress();
 
@@ -914,7 +915,7 @@ const deployDefaultTokensOnRpc = async (jadapter: JAdapter, jurisdictionName = '
 };
 
 const ensureTokenCatalog = async (jadapter: JAdapter, allowDeploy: boolean, jurisdictionName = ''): Promise<JTokenInfo[]> => {
-  const current = await jadapter.getTokenRegistry().catch(() => []);
+  const current = await jadapter.getTokenRegistry();
   const desiredTokens = defaultTokensForJurisdiction({
     name: jurisdictionName,
     chainId: Number((jadapter as { chainId?: number }).chainId),
@@ -930,14 +931,24 @@ const ensureTokenCatalog = async (jadapter: JAdapter, allowDeploy: boolean, juri
     await deployDefaultTokensOnRpc(jadapter, jurisdictionName);
     return await waitForTokenCatalog(jadapter);
   }
-  return [];
+  throw new Error(`TOKEN_CATALOG_INCOMPLETE required=${HUB_REQUIRED_TOKEN_COUNT} actual=${current.length}`);
 };
 
 const waitForTokenCatalog = async (jadapter: JAdapter, rounds = 80): Promise<JTokenInfo[]> => {
+  let lastReadError: unknown = null;
   for (let i = 0; i < rounds; i += 1) {
-    const tokens = await jadapter.getTokenRegistry().catch(() => []);
-    if (tokens.length >= HUB_REQUIRED_TOKEN_COUNT) return tokens;
+    try {
+      const tokens = await jadapter.getTokenRegistry();
+      if (tokens.length >= HUB_REQUIRED_TOKEN_COUNT) return tokens;
+      lastReadError = null;
+    } catch (error) {
+      lastReadError = error;
+    }
     await sleep(250);
+  }
+  if (lastReadError) {
+    const message = lastReadError instanceof Error ? lastReadError.message : String(lastReadError);
+    throw new Error(`TOKEN_CATALOG_READ_FAILED:${message}`, { cause: lastReadError });
   }
   throw new Error(`TOKEN_CATALOG_INCOMPLETE required=${HUB_REQUIRED_TOKEN_COUNT}`);
 };
@@ -1022,7 +1033,7 @@ const getReserveHealth = (env: Env, entityId: string, tokenCatalog: JTokenInfo[]
     jurisdictionName: getEntityJurisdictionName(env, entityId),
   }).map(token => {
     const tokenId = Number(token.tokenId);
-    const decimals = Number.isFinite(token.decimals) ? Number(token.decimals) : 18;
+    const decimals = Number(token.decimals);
     const current = replica?.state?.reserves?.get(tokenId) ?? 0n;
     const expectedMin = getBootstrapTokenAmount(tokenId, decimals);
     return {
@@ -1083,8 +1094,7 @@ const ensureBootstrapReserves = async (
   const reserveMismatches: string[] = [];
   for (const token of bootstrapTokens) {
     const tokenId = Number(token.tokenId);
-    if (!Number.isFinite(tokenId) || tokenId <= 0) continue;
-    const decimals = Number.isFinite(token.decimals) ? Number(token.decimals) : 18;
+    const decimals = Number(token.decimals);
     const target = getBootstrapTokenAmount(tokenId, decimals);
     const localCurrent = replica?.state?.reserves?.get(tokenId) ?? 0n;
     const chainCurrent = await jadapter.getReserves(entityId, tokenId);
@@ -1108,7 +1118,7 @@ const ensureBootstrapReserves = async (
 
   if (mints.length > 0) {
     const events = await jadapter.debugFundReservesBatch(mints);
-    await applyJEventsToEnv(env, events, `${resolvedArgs.name}-reserve-fund`);
+    await applyJEventsToEnv(env, events, `${resolvedArgs.name}-reserve-fund`, jadapter);
     await settleRuntimeFor(env, 30);
   }
   const reserveHealth = await refreshReserveStateFromWatcher(env, entityId, tokenCatalog);
@@ -1159,8 +1169,7 @@ const ensurePeerBootstrapReserves = async (
     for (const peer of profiles) {
       for (const token of bootstrapTokens) {
         const tokenId = Number(token.tokenId);
-        if (!Number.isFinite(tokenId) || tokenId <= 0) continue;
-        const decimals = Number.isFinite(token.decimals) ? Number(token.decimals) : 18;
+        const decimals = Number(token.decimals);
         const target = getBootstrapTokenAmount(tokenId, decimals);
         const current = await jadapter.getReserves(peer.entityId, tokenId);
         if (current >= target) continue;
@@ -1173,7 +1182,7 @@ const ensurePeerBootstrapReserves = async (
     }
     if (mints.length === 0) continue;
     const events = await jadapter.debugFundReservesBatch(mints);
-    await applyJEventsToEnv(env, events, `${resolvedArgs.name}-peer-reserve-fund-${replicaName}`);
+    await applyJEventsToEnv(env, events, `${resolvedArgs.name}-peer-reserve-fund-${replicaName}`, jadapter);
     await settleRuntimeFor(env, 20);
   }
 };
@@ -1399,6 +1408,7 @@ const buildLocalHealth = (
     relayUrl: resolvedArgs.relayUrl,
     directWsUrl,
     apiUrl,
+    quiescence: summarizeRuntimeQuiescence(env),
     p2p: {
       directPeers: getP2PState(env).directPeers || [],
     },
@@ -1430,7 +1440,20 @@ const run = async (): Promise<void> => {
   process.env['JADAPTER_DEV_PRIVATE_KEY'] = deriveAnvilDevPrivateKey(resolveHubSignerIndex(resolvedArgs.name));
 
   const runtimeBootStartedAt = startTiming('runtime_boot');
-  const env = await main(resolvedArgs.seed);
+  const env = await main(resolvedArgs.seed, {
+    trustedJurisdictionRpcBindings: resolveMeshJurisdictionRpcBindings(
+      resolvedArgs.rpcUrl,
+      resolveLocalApiUrl,
+    ),
+  });
+  if (restoredRuntimeRouteRelocated(env.gossip.getProfiles(), {
+    runtimeId: String(env.runtimeId || ''),
+    wsUrl: directWsUrl,
+    relayUrls: [resolvedArgs.relayUrl],
+  })) {
+    await clearGossip(env, { runtimeId: String(env.runtimeId || '') });
+    nodeLog.info('gossip.relocated_route_cache_cleared', { wsUrl: directWsUrl });
+  }
   const runtimeIngressReceipts = createRuntimeIngressReceiptStore();
   const faucetRelayStore = createRelayStore(`${resolvedArgs.name}-faucet`);
   const currentRuntimeHeight = (targetEnv: Env | null): number =>
@@ -1487,8 +1510,40 @@ const run = async (): Promise<void> => {
   };
   let activeJAdapter: JAdapter | null = null;
   let activeTokenCatalog: JTokenInfo[] = [];
+  let externalIngressReady = false;
   let meshLoop: ReturnType<typeof setInterval> | null = null;
+  let meshLoopInFlight = false;
+  let meshLoopStartedAt = 0;
+  let meshLoopStep = 'idle';
+  let meshLoopFatal = false;
+  let meshBootstrapPaused = false;
+  let startMeshBootstrapProducer: (() => void) | null = null;
+  let readySnapshotInFlight = false;
   let shuttingDown = false;
+
+  const pauseMeshBootstrapProducerAndWait = async (): Promise<void> => {
+    meshBootstrapPaused = true;
+    if (meshLoop) {
+      clearInterval(meshLoop);
+      meshLoop = null;
+    }
+    const idle = await waitUntil(
+      () => !meshLoopInFlight,
+      Math.ceil(MESH_BOOTSTRAP_TICK_TIMEOUT_MS / 100),
+      100,
+    );
+    if (!idle) {
+      throw new Error(
+        `HUB_MESH_BOOTSTRAP_QUIESCE_TIMEOUT step=${meshLoopStep} timeoutMs=${MESH_BOOTSTRAP_TICK_TIMEOUT_MS}`,
+      );
+    }
+  };
+
+  const resumeMeshBootstrapProducer = (): void => {
+    if (shuttingDown || meshLoopFatal) return;
+    meshBootstrapPaused = false;
+    startMeshBootstrapProducer?.();
+  };
   type DirectEntityInputDebug = {
     at: number;
     fromRuntimeId: string;
@@ -1516,7 +1571,6 @@ const run = async (): Promise<void> => {
     faucetTokenTargetUnits: FAUCET_TOKEN_TARGET_UNITS,
     emitDebugEvent: () => {},
     fundBrowserVmWallet: async () => false,
-    observeExternalWalletSnapshot: (events, label) => applyJEventsToEnv(env, events, label),
   });
 
   const directRuntimeWs = createDirectRuntimeWsRoute({
@@ -1525,6 +1579,7 @@ const run = async (): Promise<void> => {
     onRecoveryBundleRequest: async (_from, lookupKey) =>
       resolveRuntimeAdapterRead({ env }, `recovery/bundles/${encodeURIComponent(lookupKey)}`),
     onEntityInput: async (from, input, ingressTimestamp) => {
+      if (!externalIngressReady) throw new Error('RUNTIME_STARTUP_J_CATCHUP_PENDING');
       const debugEntry: DirectEntityInputDebug = {
         at: Date.now(),
         fromRuntimeId: String(from || ''),
@@ -1534,7 +1589,13 @@ const run = async (): Promise<void> => {
       };
       lastDirectEntityInput = debugEntry;
       try {
-        handleInboundP2PEntityInput(env, from, input, ingressTimestamp);
+        const inbound = handleInboundP2PEntityInput(env, from, input, ingressTimestamp);
+        if (inbound.kind === 'receipt') {
+          requireDeliveryDelivered(
+            directRuntimeWs.sendReliableReceiptDelivery(from, inbound.receipt),
+            delivery => `DIRECT_RELIABLE_RECEIPT_NOT_DELIVERED:${delivery.code}`,
+          );
+        }
       } catch (error) {
         lastDirectEntityInputError = {
           ...debugEntry,
@@ -1543,6 +1604,10 @@ const run = async (): Promise<void> => {
         throw error;
       }
     },
+    onReliableReceipt: (from, receipt) => {
+      if (!externalIngressReady) throw new Error('RUNTIME_STARTUP_J_CATCHUP_PENDING');
+      handleInboundReliableReceipt(env, from, receipt);
+    },
   });
   env.runtimeState = env.runtimeState ?? {};
   env.runtimeState.directEntityInputDispatch =
@@ -1550,10 +1615,12 @@ const run = async (): Promise<void> => {
       ? (targetRuntimeId, input, ingressTimestamp) =>
           directRuntimeWs.sendEntityInputDelivery(targetRuntimeId, input, ingressTimestamp)
       : null;
+  env.runtimeState.directReliableReceiptDispatch = (targetRuntimeId, receipt) =>
+    directRuntimeWs.sendReliableReceiptDelivery(targetRuntimeId, receipt);
   const handleRadapterWsMessage = (ws: HubServerSocket, raw: string | Buffer | ArrayBuffer): void => {
-    let msg: Record<string, unknown>;
+    let msg: import('../radapter/types').RuntimeAdapterRequest;
     try {
-      msg = decodeRuntimeAdapterMessage<Record<string, unknown>>(raw);
+      msg = decodeRuntimeAdapterRequest(raw);
     } catch (error) {
       closeInvalidRuntimeAdapterMessage(ws, error);
       return;
@@ -1564,6 +1631,7 @@ const run = async (): Promise<void> => {
 	      registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
 	      readReceipt: (id) => runtimeIngressReceipts.get(id),
 	      buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
+	      isMutatingIngressReady: () => externalIngressReady,
 	      readHead: (targetEnv) => readPersistedStorageHead(targetEnv),
       readFrame: (targetEnv, height) => readPersistedStorageFrameRecord(targetEnv, height),
       listCheckpoints: (targetEnv) => listPersistedCheckpointHeights(targetEnv),
@@ -1596,8 +1664,8 @@ const run = async (): Promise<void> => {
 	        return new Response('WebSocket upgrade failed', { status: 400 });
 	      }
 
-	      const upgraded = directRuntimeWs.maybeUpgrade(request, serverRef);
-	      if (upgraded !== undefined) return upgraded;
+	      const directUpgrade = directRuntimeWs.maybeUpgrade(request, serverRef);
+	      if (directUpgrade.handled) return directUpgrade.response;
 
       if (pathname === '/api/info') {
         return new Response(safeStringify({
@@ -1690,81 +1758,86 @@ const run = async (): Promise<void> => {
 
       if (pathname === '/api/control/p2p/stop' && request.method === 'POST') {
         shuttingDown = true;
-        if (meshLoop) clearInterval(meshLoop);
-        stopJurisdictionWatchers(env);
-        const drained = await waitForRuntimeWorkDrained(env, 10_000);
-        if (!drained) {
-          console.warn(`[${resolvedArgs.name}] p2p stop timed out waiting for runtime work to drain`);
+        try {
+          await pauseMeshBootstrapProducerAndWait();
+          const result = await quiesceNodeRuntime(env, {
+            workTimeoutMs: 10_000,
+            loopTimeoutMs: 5_000,
+          });
+          return new Response(safeStringify({ ok: true, ...result }), { headers });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`[${resolvedArgs.name}] p2p stop failed: ${message}`);
+          return new Response(safeStringify({ ok: false, error: message }), { status: 503, headers });
         }
-        const idle = await stopRuntimeLoopAndWait(env, 5_000);
-        stopP2P(env);
-        return new Response(safeStringify({ ok: true, runtimeDrained: drained, runtimeIdle: idle }), { headers });
       }
 
       if (pathname === '/api/control/runtime/quiesce' && request.method === 'POST') {
         shuttingDown = true;
-        if (meshLoop) clearInterval(meshLoop);
-        stopJurisdictionWatchers(env);
-        const drained = await waitForRuntimeWorkDrained(env, 20_000, 750);
-        if (!drained) {
-          console.warn(`[${resolvedArgs.name}] quiesce timed out waiting for runtime work to drain`);
+        try {
+          await pauseMeshBootstrapProducerAndWait();
+          const result = await quiesceNodeRuntime(env, {
+            workTimeoutMs: 20_000,
+            loopTimeoutMs: 5_000,
+            quietMs: 750,
+          });
+          return new Response(safeStringify({ ok: true, ...result }), { headers });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`[${resolvedArgs.name}] runtime quiesce failed: ${message}`);
+          return new Response(safeStringify({ ok: false, error: message }), { status: 503, headers });
         }
-        const idle = await stopRuntimeLoopAndWait(env, 5_000);
-        stopP2P(env);
-        return new Response(safeStringify({ ok: true, runtimeDrained: drained, runtimeIdle: idle }), { headers });
       }
 
       if (pathname === '/api/control/runtime/persist-ready-snapshot' && request.method === 'POST') {
-        env.runtimeState = env.runtimeState ?? {};
-        const previousPaused = Boolean(env.runtimeState.persistencePaused);
-        const wasLoopActive = Boolean(env.runtimeState.loopActive);
-        env.runtimeState.persistencePaused = true;
-        env.runtimeState.persistenceQuiescing = true;
-        const restoreRuntimeAfterSnapshotFailure = (): void => {
-          env.runtimeState = env.runtimeState ?? {};
-          env.runtimeState.persistencePaused = previousPaused;
-          if (wasLoopActive) {
-            resumeRuntimeLoop(env, {
-              tickDelayMs: HUB_RUNTIME_TICK_DELAY_MS,
-              maxEntityTxsPerFrame: HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
-            });
-          }
-        };
-        const runtimeIdle = await stopRuntimeLoopAndWait(env, 30_000);
-        if (!runtimeIdle) {
-          restoreRuntimeAfterSnapshotFailure();
+        if (readySnapshotInFlight) {
           return new Response(safeStringify({
             ok: false,
-            code: 'HUB_READY_SNAPSHOT_RUNTIME_NOT_IDLE',
-            runtimeHeight: Number(env.height ?? 0),
-          }), { status: 503, headers });
+            code: 'HUB_READY_SNAPSHOT_IN_PROGRESS',
+          }), { status: 409, headers });
         }
+        readySnapshotInFlight = true;
+        let checkpointSucceeded = false;
         try {
-          await persistRestoredEnvToDB(env);
-          env.runtimeState.persistencePaused = false;
-          resumeRuntimeLoop(env, {
-            tickDelayMs: HUB_RUNTIME_TICK_DELAY_MS,
-            maxEntityTxsPerFrame: HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
+          await pauseMeshBootstrapProducerAndWait();
+          const result = await checkpointNodeRuntime(env, {
+            workTimeoutMs: 30_000,
+            loopTimeoutMs: 30_000,
+            quietMs: 250,
+            resumePersistenceAfterCheckpoint: true,
+            persist: () => persistRestoredEnvToDB(env),
+            loopConfig: {
+              tickDelayMs: HUB_RUNTIME_TICK_DELAY_MS,
+              maxEntityInputsPerFrame: HUB_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
+              maxEntityTxsPerFrame: HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
+            },
           });
+          checkpointSucceeded = true;
           nodeLog.info('bootstrap_ready_snapshot.persisted', {
             height: env.height,
-            wasPaused: previousPaused,
+            wasPaused: result.wasPersistencePaused,
           });
           return new Response(safeStringify({
             ok: true,
-            runtimeIdle: true,
+            ...result,
             height: Number(env.height ?? 0),
-            wasPaused: previousPaused,
+            wasPaused: result.wasPersistencePaused,
             persistencePaused: Boolean(env.runtimeState?.persistencePaused),
           }), { headers });
         } catch (error) {
-          restoreRuntimeAfterSnapshotFailure();
+          const message = error instanceof Error ? error.message : String(error);
+          const quiesceFailed = message.startsWith('NODE_RUNTIME_QUIESCE_FAILED:');
           return new Response(safeStringify({
             ok: false,
-            code: 'HUB_READY_SNAPSHOT_PERSIST_FAILED',
-            error: error instanceof Error ? error.message : String(error),
+            code: quiesceFailed
+              ? 'HUB_READY_SNAPSHOT_QUIESCE_FAILED'
+              : 'HUB_READY_SNAPSHOT_PERSIST_FAILED',
+            error: message,
             runtimeHeight: Number(env.height ?? 0),
-          }), { status: 500, headers });
+          }), { status: quiesceFailed ? 503 : 500, headers });
+        } finally {
+          readySnapshotInFlight = false;
+          if (checkpointSucceeded) resumeMeshBootstrapProducer();
         }
       }
 
@@ -1969,12 +2042,14 @@ const run = async (): Promise<void> => {
         chainId: jurisdiction.chainId,
         ticker: 'XLN',
         rpcs: [jurisdiction.rpc],
+        entityProviderDeploymentBlock: jurisdiction.entityProviderDeploymentBlock,
         blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction),
         ...(jurisdiction.contracts ? { contracts: jurisdiction.contracts } : {}),
       },
     }],
     entityInputs: [],
   });
+  await runtimeProcess(env);
   await runtimeProcess(env);
   finishTiming('import_j', importJStartedAt);
 
@@ -1988,9 +2063,7 @@ const run = async (): Promise<void> => {
     baseFee: 0n,
     swapTakerFeeBps: 1,
     disputeAutoFinalizeMode: resolvedArgs.name.toLowerCase() === 'h2' ? 'ignore' : 'auto',
-    rebalanceBaseFee: 10n ** 17n,
     rebalanceLiquidityFeeBps: 1n,
-    rebalanceGasFee: 0n,
     rebalanceTimeoutMs: 10 * 60 * 1000,
     relayUrl: resolvedArgs.relayUrl,
     rpcUrl: jurisdiction.rpc,
@@ -2032,12 +2105,14 @@ const run = async (): Promise<void> => {
             chainId: secondary.chainId,
             ticker: 'XLN',
             rpcs: [secondaryRpcUrl],
+            entityProviderDeploymentBlock: secondary.entityProviderDeploymentBlock,
             blockTimeMs: requireJurisdictionBlockTimeMs(secondary),
             ...(secondary.contracts ? { contracts: secondary.contracts } : {}),
           },
         }],
         entityInputs: [],
       });
+      await runtimeProcess(env);
       await runtimeProcess(env);
     } else {
       nodeLog.debug('sibling_jurisdiction.reusing', {
@@ -2056,9 +2131,7 @@ const run = async (): Promise<void> => {
       baseFee: 0n,
       swapTakerFeeBps: 1,
       disputeAutoFinalizeMode: resolvedArgs.name.toLowerCase() === 'h2' ? 'ignore' : 'auto',
-      rebalanceBaseFee: 10n ** 17n,
       rebalanceLiquidityFeeBps: 1n,
-      rebalanceGasFee: 0n,
       rebalanceTimeoutMs: 10 * 60 * 1000,
       relayUrl: resolvedArgs.relayUrl,
       rpcUrl: secondaryRpcUrl,
@@ -2101,6 +2174,14 @@ const run = async (): Promise<void> => {
     tokenCatalogsByEntityId.set(normalizeEntityId(bootstrap.entityId), tokenCatalog);
   }
 
+  startJurisdictionWatchers(env);
+  const watcherDrain = await drainJWatcherBacklog(env, async currentEnv => runtimeProcess(currentEnv));
+  externalIngressReady = true;
+  nodeLog.info('startup.j_catchup_ready', {
+    jurisdictions: watcherDrain.length,
+    cursors: watcherDrain.map(status => `${status.chainId}:${status.committedCursor}/${status.targetBlock}`),
+  });
+
   const p2pConnectStartedAt = startTiming('p2p_connect');
   const p2p = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
@@ -2113,6 +2194,7 @@ const run = async (): Promise<void> => {
   if (!p2p) throw new Error('P2P_START_FAILED');
   startRuntimeLoop(env, {
     tickDelayMs: HUB_RUNTIME_TICK_DELAY_MS,
+    maxEntityInputsPerFrame: HUB_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
     maxEntityTxsPerFrame: HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
   });
   finishTiming('p2p_connect', p2pConnectStartedAt);
@@ -2123,9 +2205,6 @@ const run = async (): Promise<void> => {
   let creditReadyMarked = false;
   let reserveReadyMarked = false;
   let faucetProvisionPromise: Promise<void> | null = null;
-  let meshLoopInFlight = false;
-  let meshLoopStartedAt = 0;
-  let meshLoopStep = 'idle';
 
   const ensureExternalFaucetProvisionReady = async (): Promise<void> => {
     if (!resolvedArgs.deployTokens || !AUTO_PROVISION_EXTERNAL_FAUCET) return;
@@ -2141,7 +2220,7 @@ const run = async (): Promise<void> => {
   };
 
   const driveMeshBootstrap = async (): Promise<void> => {
-    if (!bootstrap) return;
+    if (!bootstrap || shuttingDown || meshBootstrapPaused) return;
     if (meshLoopInFlight) {
       const elapsedMs = Date.now() - meshLoopStartedAt;
       if (elapsedMs > MESH_BOOTSTRAP_TICK_TIMEOUT_MS) {
@@ -2344,25 +2423,33 @@ const run = async (): Promise<void> => {
     }
   };
 
-  let meshLoopFatal = false;
   const handleMeshBootstrapFatal = (error: unknown): void => {
     handleMeshBootstrapLoopError(error, {
       nodeName: resolvedArgs.name,
       isShuttingDown: () => shuttingDown || meshLoopFatal,
       clearLoop: () => {
         meshLoopFatal = true;
-        if (meshLoop) clearInterval(meshLoop);
+        if (meshLoop) {
+          clearInterval(meshLoop);
+          meshLoop = null;
+        }
       },
       exit: (code) => process.exit(code),
       logError: (...args) => console.error(...args),
     });
   };
 
-  meshLoop = setInterval(() => {
-    if (shuttingDown) return;
+  startMeshBootstrapProducer = () => {
+    if (shuttingDown || meshLoopFatal || meshBootstrapPaused) return;
+    if (!meshLoop) {
+      meshLoop = setInterval(() => {
+        if (shuttingDown || meshLoopFatal || meshBootstrapPaused) return;
+        void driveMeshBootstrap().catch(handleMeshBootstrapFatal);
+      }, BOOTSTRAP_POLL_MS);
+    }
     void driveMeshBootstrap().catch(handleMeshBootstrapFatal);
-  }, BOOTSTRAP_POLL_MS);
-  void driveMeshBootstrap().catch(handleMeshBootstrapFatal);
+  };
+  startMeshBootstrapProducer();
 
   nodeLog.info('runtime.ready', {
     name: resolvedArgs.name,
@@ -2393,23 +2480,24 @@ const run = async (): Promise<void> => {
     if (shutdownStarted) return;
     shutdownStarted = true;
     shuttingDown = true;
-    if (meshLoop) clearInterval(meshLoop);
-    try {
-      stopJurisdictionWatchers(env);
-      const drained = await waitForRuntimeWorkDrained(env, 10_000);
-      if (!drained) {
-        console.warn(`[${resolvedArgs.name}] shutdown timed out waiting for runtime work to drain`);
+    const failures: string[] = [];
+    const runCleanup = async (label: string, cleanup: () => Promise<unknown>): Promise<void> => {
+      try {
+        await cleanup();
+      } catch (error) {
+        failures.push(`${label}:${error instanceof Error ? error.message : String(error)}`);
       }
-      const idle = await stopRuntimeLoopAndWait(env, 10_000);
-      if (!idle) {
-        console.warn(`[${resolvedArgs.name}] shutdown timed out waiting for runtime loop to drain`);
-      }
-      stopP2P(env);
-      await stopServerGracefully(server, httpDrain, resolvedArgs.name, 5_000);
-      await closeRuntimeDb(env);
-      await closeInfraDb(env);
-    } catch (error) {
-      console.error(`[${resolvedArgs.name}] shutdown flush failed:`, error instanceof Error ? error.message : error);
+    };
+    await runCleanup('mesh_producer', pauseMeshBootstrapProducerAndWait);
+    await runCleanup('quiesce', () => quiesceNodeRuntime(env, {
+      workTimeoutMs: 10_000,
+      loopTimeoutMs: 10_000,
+    }));
+    await runCleanup('server', () => stopServerGracefully(server, httpDrain, resolvedArgs.name, 5_000));
+    await runCleanup('runtime_db', () => closeRuntimeDb(env));
+    await runCleanup('infra_db', () => closeInfraDb(env));
+    if (failures.length > 0) {
+      console.error(`[${resolvedArgs.name}] shutdown failed: ${failures.join('|')}`);
       process.exit(code || 1);
     }
     process.exit(code);

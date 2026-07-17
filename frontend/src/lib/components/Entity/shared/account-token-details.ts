@@ -1,4 +1,5 @@
 import type { AccountMachine, Delta, DerivedDelta } from '$lib/types/ui';
+import { requireTokenDecimals } from '../token-metadata';
 
 type TokenInfoLike = {
   symbol?: string;
@@ -39,22 +40,19 @@ export function buildAccountTokenDetails(
   xlnFunctions: XlnFunctionsLike | null | undefined,
 ): AccountTokenDetailRow[] {
   if (!xlnFunctions?.deriveDelta) return [];
+  if (!xlnFunctions.getTokenInfo) throw new Error('TOKEN_METADATA_READER_UNAVAILABLE:account');
   const isLeft = isAccountLeftPerspective(ownerEntityId, account);
   return Array.from(account.deltas?.entries() || []).map(([tokenId, delta]) => {
     const derived = xlnFunctions.deriveDelta!(delta, isLeft);
-    const tokenInfo = xlnFunctions.getTokenInfo?.(tokenId) || {
-      symbol: `TKN${tokenId}`,
-      color: '#999',
-      name: `Token ${tokenId}`,
-      decimals: 18,
-    };
+    const tokenInfo = xlnFunctions.getTokenInfo!(tokenId);
+    if (!tokenInfo) throw new Error(`TOKEN_METADATA_UNAVAILABLE:token:${tokenId}`);
     return {
       tokenId,
       tokenInfo: {
         symbol: String(tokenInfo.symbol || `TKN${tokenId}`),
         color: String(tokenInfo.color || '#999'),
         name: String(tokenInfo.name || `Token ${tokenId}`),
-        decimals: Number(tokenInfo.decimals ?? 18),
+        decimals: requireTokenDecimals(tokenInfo.decimals, `token:${tokenId}`),
       },
       delta,
       derived,

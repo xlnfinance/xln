@@ -1,4 +1,5 @@
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { applyAccountInput, proposeAccountFrame } from '../account/consensus/index';
 import { isLeft } from '../account/utils';
 import { spawn } from 'node:child_process';
@@ -11,7 +12,6 @@ import { buildCrossJurisdictionBookAdmissionReceipt } from '../extensions/cross-
 import { generateLazyEntityId } from '../entity/factory';
 import { MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
-import { setDeltaTransformerAddress } from '../protocol/dispute/proof-builder';
 import { createEmptyEnv } from '../runtime';
 import type {
   AccountInput,
@@ -207,7 +207,7 @@ const registerBenchIdentity = (
   slot: string,
 ): { entityId: string; signerId: string } => {
   const signerId = deriveSignerAddressSync(seed, slot);
-  registerSignerKey(signerId, deriveSignerKeySync(seed, slot));
+  registerSignerKey(seed, signerId, deriveSignerKeySync(seed, slot));
   const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
   return { entityId, signerId };
 };
@@ -215,7 +215,6 @@ const registerBenchIdentity = (
 const installJurisdiction = (env: Env, jurisdiction: JurisdictionConfig): void => {
   env.activeJurisdiction = jurisdiction.name;
   const deltaTransformer = addr('dd');
-  setDeltaTransformerAddress(deltaTransformer);
   env.jReplicas.set(jurisdiction.name, {
     name: jurisdiction.name,
     chainId: jurisdiction.chainId,
@@ -248,6 +247,7 @@ const makeAccount = (selfId: string, counterpartyId: string): AccountMachine => 
   return {
     leftEntity,
     rightEntity,
+    domain: { chainId: 999_001, depositoryAddress: addr('de') },
     watchSeed: `0x${'a2'.repeat(32)}`,
     status: 'active',
     mempool: [],
@@ -270,9 +270,8 @@ const makeAccount = (selfId: string, counterpartyId: string): AccountMachine => 
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
-    leftJObservations: [],
-    rightJObservations: [],
-    jEventChain: [],
+    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,
     proofHeader: { fromEntity: selfId, toEntity: counterpartyId, nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
@@ -503,7 +502,11 @@ const expectInput = (input: AccountInput | undefined, context: string): AccountI
 const runConsensusRoundTrip = async (benchCase: BenchAccountCase, stages?: StageTotals): Promise<void> => {
   benchCase.proposer.mempool.push(...benchCase.txs);
   const proposeStartedAt = getPerfMs();
-  const proposed = await proposeAccountFrame(benchCase.proposerEnv, benchCase.proposer);
+  const proposed = await proposeAccountFrame(
+    benchCase.proposerEnv,
+    benchCase.proposer,
+    benchCase.proposerEnv.timestamp,
+  );
   const receiveStartedAt = getPerfMs();
   if (!proposed.success) throw new Error(`${benchCase.kind}:propose_failed:${proposed.error}`);
   const received = await applyAccountInput(benchCase.receiverEnv, benchCase.receiver, expectInput(proposed.accountInput, benchCase.kind));

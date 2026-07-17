@@ -2,7 +2,7 @@ import type { Env, JTx } from '../types';
 import type { JAdapter } from '../jadapter/types';
 import type { JBatch } from '../jurisdiction/batch';
 import { getBatchSize } from '../jurisdiction/batch';
-import { getCachedSignerPrivateKey } from '../account/crypto';
+import { getSignerPrivateKey } from '../account/crypto';
 import { prepareSignedBatch } from '../hanko/batch';
 
 export async function submitSignedScenarioBatch(
@@ -13,10 +13,7 @@ export async function submitSignedScenarioBatch(
   batch: JBatch,
   errorPrefix: string,
 ): Promise<void> {
-  const signerPrivateKey = getCachedSignerPrivateKey(signerId);
-  if (!signerPrivateKey) {
-    throw new Error(`${errorPrefix}: missing signer private key for ${signerId}`);
-  }
+  const signerPrivateKey = getSignerPrivateKey(env, signerId);
 
   const currentNonce = await jadapter.getEntityNonce(entityId);
   const { encodedBatch, hankoData, nextNonce, batchHash } = prepareSignedBatch(

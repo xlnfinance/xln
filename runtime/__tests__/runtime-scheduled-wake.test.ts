@@ -1,8 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 
 import { initCrontab, scheduleHook } from '../entity/scheduler';
-import { applyEntityFrame } from '../entity/consensus/index';
-import { createEmptyEnv } from '../runtime';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
+import { buildSignedEntityCommand } from '../entity/command';
+import { signedEntityCommandTx } from '../entity/command-codec';
+import { generateLazyEntityId } from '../entity/factory';
+import { applyEntityFrame, applyEntityInput } from '../entity/consensus/index';
+import {
+  createEmptyEnv,
+  hasRuntimeWork,
+  process as processRuntime,
+  waitForRuntimeWorkDrained,
+} from '../runtime';
 import {
   assertScheduledWakeTxAuthorized,
   createDueScheduledWakeInputs,
@@ -13,11 +22,25 @@ import {
 } from '../machine/scheduled-wake';
 import { safeStringify } from '../protocol/serialization';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
+import { computeCanonicalEntityHash } from '../storage/canonical-hash';
 import type { EntityReplica, EntityState } from '../types';
 import { buildCanonicalRuntimeStateSnapshot, restoreDurableRuntimeSnapshot } from '../wal/snapshot';
+import {
+  collectLocalProfileEncryptionAnnouncements,
+  getCompleteProfileEncryptionManifest,
+} from '../networking/profile-encryption';
+import { buildLocalEntityProfile } from '../networking/gossip-helper';
+import { computeProfileHash } from '../networking/profile-signing';
 
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
 const signerId = (byte: string): string => `0x${byte.repeat(20)}`;
+const commandJurisdiction = {
+  name: 'ScheduledWakeCommandTest',
+  address: 'browservm://scheduled-wake-command-test',
+  chainId: 31_337,
+  depositoryAddress: signerId('91'),
+  entityProviderAddress: signerId('92'),
+};
 
 const makeState = (id: string, proposer: string, timestamp: number): EntityState => ({
   entityId: id,
@@ -31,6 +54,7 @@ const makeState = (id: string, proposer: string, timestamp: number): EntityState
     threshold: 1n,
     validators: [proposer],
     shares: { [proposer]: 1n },
+    jurisdiction: commandJurisdiction,
   },
   reserves: new Map(),
   accounts: new Map(),
@@ -58,6 +82,134 @@ const makeReplica = (state: EntityState, signer: string, isProposer: boolean): E
 });
 
 describe('runtime scheduled wake', () => {
+  test('quiesce preserves newly-due hooks without treating them as drainable work', async () => {
+    const env = createEmptyEnv('scheduled-wake-quiesce');
+    env.scenarioMode = false;
+    const id = entityId('29');
+    const proposer = signerId('39');
+    const state = makeState(id, proposer, Date.now() - 1_000);
+    scheduleHook(state.crontabState!, {
+      id: 'due-after-runtime-stopped',
+      triggerAt: Date.now() - 1,
+      type: 'watchdog',
+      data: {},
+    });
+    env.eReplicas.set(`${id}:${proposer}`, makeReplica(state, proposer, true));
+    env.runtimeState!.persistenceQuiescing = true;
+
+    expect(hasRuntimeWork(env)).toBe(false);
+    expect(await waitForRuntimeWorkDrained(env, 20, 1)).toBe(true);
+    expect(state.crontabState?.hooks.has('due-after-runtime-stopped')).toBe(true);
+  });
+
+  test('does not initialize consensus crontab state outside a committed Entity frame', async () => {
+    const env = createEmptyEnv('scheduled-wake-noop-state-test');
+    env.timestamp = 10_000;
+    env.scenarioMode = false;
+    const id = entityId('30');
+    const proposer = signerId('40');
+    const state = makeState(id, proposer, 9_000);
+    delete state.crontabState;
+    const replica = makeReplica(state, proposer, true);
+    const before = computeCanonicalEntityHash(replica).hash;
+
+    const result = await applyEntityInput(env, replica, {
+      entityId: id,
+      signerId: proposer,
+      entityTxs: [],
+    });
+
+    expect(computeCanonicalEntityHash(result.workingReplica).hash).toBe(before);
+    expect(result.workingReplica.state.crontabState).toBeUndefined();
+    expect(result.workingReplica.state.timestamp).toBe(9_000);
+  });
+
+  test('places a newly due wake before transactions already waiting in proposer mempool', async () => {
+    const seed = 'scheduled wake existing mempool ordering';
+    const env = createEmptyEnv(seed);
+    env.timestamp = 10_000;
+    env.scenarioMode = true;
+    const proposer = deriveSignerAddressSync(seed, '1').toLowerCase();
+    registerSignerKey(env, proposer, deriveSignerKeySync(seed, '1'));
+    const id = generateLazyEntityId([proposer], 1n).toLowerCase();
+    const state = makeState(id, proposer, 9_000);
+    scheduleHook(state.crontabState!, {
+      id: 'existing-mempool:due',
+      triggerAt: 9_000,
+      type: 'watchdog',
+      data: {},
+    });
+    const replica = makeReplica(state, proposer, true);
+    replica.mempool.push(signedEntityCommandTx(buildSignedEntityCommand(env, state, proposer, [{
+      type: 'chat',
+      data: { from: proposer, message: 'already waiting' },
+    }])));
+    const wake: ScheduledWakeTx = {
+      type: 'scheduledWake',
+      data: {
+        version: 1,
+        proposerSignerId: proposer,
+        dueAt: 9_000,
+        jobs: [{ kind: 'hook', id: 'existing-mempool:due', dueAt: 9_000 }],
+      },
+    };
+
+    const result = await applyEntityInput(env, replica, {
+      entityId: id,
+      signerId: proposer,
+      entityTxs: [wake],
+    });
+
+    expect(result.outcome.kind).toBe('committed');
+    expect(result.workingReplica.state.messages).toContain(`${proposer}: already waiting`);
+    expect(result.workingReplica.state.crontabState?.hooks.has('existing-mempool:due')).toBe(false);
+  });
+
+  test('drives an idle active proposer when committed work remains in Entity mempool', async () => {
+    const seed = 'entity mempool proposer wake';
+    const env = createEmptyEnv(seed);
+    env.timestamp = 1;
+    env.scenarioMode = true;
+    env.runtimeConfig = { storage: { enabled: false } };
+    const proposer = deriveSignerAddressSync(seed, '1').toLowerCase();
+    registerSignerKey(env, proposer, deriveSignerKeySync(seed, '1'));
+    const id = generateLazyEntityId([proposer], 1n).toLowerCase();
+    const replica = makeReplica(makeState(id, proposer, 1), proposer, true);
+    env.eReplicas.set(`${id}:${proposer}`, replica);
+    collectLocalProfileEncryptionAnnouncements(env);
+    const manifest = getCompleteProfileEncryptionManifest(env, replica.state);
+    if (!manifest) throw new Error('profile manifest fixture missing');
+    replica.state.profileEncryptionManifest = manifest;
+    const profileHash = computeProfileHash(buildLocalEntityProfile(env, replica.state, 1));
+    replica.hankoWitness = new Map([[profileHash, {
+      hanko: '0x01',
+      type: 'profile',
+      entityHeight: 0,
+      createdAt: 1,
+    }]]);
+    replica.mempool.push(signedEntityCommandTx(buildSignedEntityCommand(
+      env,
+      replica.state,
+      proposer,
+      [{
+        type: 'chat',
+        data: { from: proposer, message: 'left after prior commit' },
+      }],
+    )));
+    await processRuntime(env);
+
+    expect(env.height).toBe(1);
+    expect(env.eReplicas.get(`${id}:${proposer}`)?.state.height).toBe(1);
+    expect(env.eReplicas.get(`${id}:${proposer}`)?.state.messages)
+      .toContain(`${proposer}: left after prior commit`);
+    expect(env.eReplicas.get(`${id}:${proposer}`)?.mempool).toHaveLength(0);
+    expect(env.history.at(-1)?.runtimeInput.entityInputs).toEqual([{
+      entityId: id,
+      signerId: proposer,
+      entityTxs: [],
+    }]);
+  });
+
   test('creates a wake only for the explicit proposer replica', () => {
     const env = createEmptyEnv('scheduled-wake-proposer-test');
     env.timestamp = 10_000;

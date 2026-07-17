@@ -8,6 +8,30 @@ import type {
   RuntimeInput,
 } from '../types';
 import { cloneEntityReplica } from '../state-helpers';
+import { markRestoredJSubmitRuntimeTxs } from '../machine/j-submit-state';
+import { markRestoredJAuthorityRuntimeTxs } from '../jurisdiction/registration-evidence';
+import { markRestoredJImportResultRuntimeTxs } from '../machine/jurisdiction-import';
+import { markRestoredEntityProviderActionRuntimeTxs } from '../machine/entity-provider-action-submit-auth';
+import {
+  collectReachableCertifiedBoardNodes,
+  getCertifiedBoardNodeStore,
+} from '../jurisdiction/board-registry';
+import {
+  collectReachableConsumptionNodes,
+  getConsumptionNodeStore,
+  getLiveConsumptionAccumulatorStates,
+} from '../entity/consumption-store';
+import {
+  collectReachableAccountJClaimNodes,
+} from '../account/j-claim-accumulator';
+import {
+  getAccountJClaimNodeStore,
+  getLiveAccountJClaimAccumulatorStates,
+} from '../account/j-claim-store';
+import {
+  cloneIsolatedRoutedEntityInputs,
+  cloneIsolatedRuntimeInput,
+} from '../protocol/runtime-input-clone';
 
 const cloneHankoWitness = (
   hankoWitness?: EntityReplica['hankoWitness'],
@@ -44,12 +68,15 @@ const cloneJStateRoot = (
 };
 
 const normalizeJBlockNumber = (value: unknown): bigint => {
+  if (value === undefined || value === null || value === '') return 0n;
+  let blockNumber: bigint;
   try {
-    const blockNumber = BigInt(value as bigint | number | string);
-    return blockNumber >= 0n ? blockNumber : 0n;
-  } catch {
-    return 0n;
+    blockNumber = BigInt(value as bigint | number | string);
+  } catch (error) {
+    throw new Error(`RUNTIME_MACHINE_J_BLOCK_NUMBER_INVALID:${String(value)}`, { cause: error });
   }
+  if (blockNumber < 0n) throw new Error(`RUNTIME_MACHINE_J_BLOCK_NUMBER_NEGATIVE:${blockNumber}`);
+  return blockNumber;
 };
 
 const normalizeNonNegativeNumber = (value: unknown, fallback: number): number => {
@@ -72,7 +99,7 @@ export const buildCanonicalEntityReplicaSnapshot = (
     snapshot.mempool = [];
     delete snapshot.proposal;
     delete snapshot.lockedFrame;
-    delete snapshot.validatorComputedState;
+    delete snapshot.validatorExecution;
   }
   return {
     ...snapshot,
@@ -93,6 +120,9 @@ export const buildCanonicalJReplicaSnapshot = (jr: JReplica): JReplica => ({
   lastBlockTimestamp: normalizeNonNegativeNumber(jr.lastBlockTimestamp, 0),
   ...(jr.blockReady !== undefined ? { blockReady: jr.blockReady } : {}),
   ...(jr.defaultDisputeDelayBlocks !== undefined ? { defaultDisputeDelayBlocks: jr.defaultDisputeDelayBlocks } : {}),
+  ...(jr.watcherConfirmationDepth !== undefined
+    ? { watcherConfirmationDepth: jr.watcherConfirmationDepth }
+    : {}),
   ...(jr.rpcs ? { rpcs: [...jr.rpcs] } : {}),
   ...(jr.chainId !== undefined ? { chainId: jr.chainId } : {}),
   position: {
@@ -102,6 +132,9 @@ export const buildCanonicalJReplicaSnapshot = (jr: JReplica): JReplica => ({
   },
   ...(jr.depositoryAddress ? { depositoryAddress: jr.depositoryAddress } : {}),
   ...(jr.entityProviderAddress ? { entityProviderAddress: jr.entityProviderAddress } : {}),
+  ...((jr.entityProviderDeploymentBlock ?? jr.jadapter?.entityProviderDeploymentBlock) !== undefined
+    ? { entityProviderDeploymentBlock: jr.entityProviderDeploymentBlock ?? jr.jadapter!.entityProviderDeploymentBlock }
+    : {}),
   ...(jr.contracts
     ? {
         contracts: {
@@ -114,44 +147,46 @@ export const buildCanonicalJReplicaSnapshot = (jr: JReplica): JReplica => ({
     : {}),
 });
 
-const cloneEntityInput = <T extends RoutedEntityInput>(input: T): T => ({
-  ...input,
-  ...(input.entityTxs ? { entityTxs: [...input.entityTxs] } : {}),
-  ...(input.hashPrecommits
-    ? { hashPrecommits: new Map(Array.from(input.hashPrecommits.entries()).map(([key, value]) => [key, [...value]])) }
-    : {}),
-}) as T;
+const withoutEphemeralScheduledWake = (runtimeInput?: RuntimeInput): RuntimeInput => {
+  const cloned = cloneIsolatedRuntimeInput(runtimeInput ?? { runtimeTxs: [], entityInputs: [] });
+  return {
+    ...cloned,
+    entityInputs: cloned.entityInputs.flatMap(input => {
+      const originallyEmptyTrigger = Array.isArray(input.entityTxs) && input.entityTxs.length === 0;
+      const durableInput = {
+        ...input,
+        entityTxs: (input.entityTxs ?? []).filter(tx => tx.type !== 'scheduledWake'),
+      };
+      const keep =
+        originallyEmptyTrigger ||
+        durableInput.entityTxs.length > 0 ||
+        durableInput.proposedFrame !== undefined ||
+        (durableInput.hashPrecommits?.size ?? 0) > 0 ||
+        (durableInput.jPrefixAttestations?.size ?? 0) > 0;
+      return keep ? [durableInput] : [];
+    }),
+  };
+};
 
-const withoutEphemeralScheduledWake = (runtimeInput?: RuntimeInput): RuntimeInput => ({
-  ...runtimeInput,
-  runtimeTxs: [...(runtimeInput?.runtimeTxs ?? [])],
-  entityInputs: (runtimeInput?.entityInputs ?? [])
-    .map(input => ({
-      ...cloneEntityInput(input),
-      entityTxs: (input.entityTxs ?? []).filter(tx => tx.type !== 'scheduledWake'),
-    }))
-    .filter(input =>
-      (input.entityTxs?.length ?? 0) > 0 ||
-      input.proposedFrame !== undefined ||
-      (input.hashPrecommits?.size ?? 0) > 0),
-  ...(runtimeInput?.jInputs
-    ? { jInputs: runtimeInput.jInputs.map(input => ({ ...input, jTxs: [...input.jTxs] })) }
-    : {}),
-});
-
-const cloneRuntimeInput = (runtimeInput?: RuntimeInput): RuntimeInput => ({
-  ...runtimeInput,
-  runtimeTxs: [...(runtimeInput?.runtimeTxs ?? [])],
-  entityInputs: (runtimeInput?.entityInputs ?? []).map(input => cloneEntityInput(input)),
-  ...(runtimeInput?.jInputs
-    ? { jInputs: runtimeInput.jInputs.map(input => ({ ...input, jTxs: [...input.jTxs] })) }
-    : {}),
-});
+const cloneRuntimeInput = (runtimeInput?: RuntimeInput): RuntimeInput =>
+  cloneIsolatedRuntimeInput(runtimeInput ?? { runtimeTxs: [], entityInputs: [] });
 
 const cloneRuntimeOutputs = (runtimeOutputs: RoutedEntityInput[]): RoutedEntityInput[] =>
-  runtimeOutputs.map(output => cloneEntityInput(output));
+  cloneIsolatedRoutedEntityInputs(runtimeOutputs);
 
-const buildDurableRuntimeStateSnapshot = (env: Env): Record<string, unknown> | undefined => {
+const hasDurableEntries = (value: unknown): boolean => {
+  if (Array.isArray(value)) return value.length > 0;
+  if (value instanceof Map || value instanceof Set) return value.size > 0;
+  return Boolean(value && typeof value === 'object' && Object.keys(value).length > 0);
+};
+
+const buildDurableRuntimeStateSnapshot = (
+  env: Env,
+  options?: {
+    includeCertifiedBoardNodes?: boolean;
+    includeIngressWorkingState?: boolean;
+  },
+): Record<string, unknown> | undefined => {
   const state = env.runtimeState;
   if (!state) return undefined;
   const durable = {
@@ -159,25 +194,82 @@ const buildDurableRuntimeStateSnapshot = (env: Env): Record<string, unknown> | u
     ...(state.fatalDebugPayload ? { fatalDebugPayload: structuredClone(state.fatalDebugPayload) } : {}),
     ...(state.maxEntityInputsPerFrame !== undefined ? { maxEntityInputsPerFrame: state.maxEntityInputsPerFrame } : {}),
     ...(state.maxEntityTxsPerFrame !== undefined ? { maxEntityTxsPerFrame: state.maxEntityTxsPerFrame } : {}),
-    ...(state.pendingAuditEvents ? { pendingAuditEvents: structuredClone(state.pendingAuditEvents) } : {}),
-    ...(state.quarantinedRuntimeInputs ? { quarantinedRuntimeInputs: structuredClone(state.quarantinedRuntimeInputs) } : {}),
-    ...(state.pendingFrameDbRecords ? { pendingFrameDbRecords: structuredClone(state.pendingFrameDbRecords) } : {}),
-    ...(state.deferredNetworkMeta ? { deferredNetworkMeta: structuredClone(state.deferredNetworkMeta) } : {}),
-    ...(state.verifiedProfileRoutes ? { verifiedProfileRoutes: structuredClone(state.verifiedProfileRoutes) } : {}),
-    ...(state.runtimeAdapterCommandResults ? { runtimeAdapterCommandResults: structuredClone(state.runtimeAdapterCommandResults) } : {}),
+    ...(hasDurableEntries(state.pendingAuditEvents) ? { pendingAuditEvents: structuredClone(state.pendingAuditEvents) } : {}),
+    ...(hasDurableEntries(state.quarantinedRuntimeInputs) ? { quarantinedRuntimeInputs: structuredClone(state.quarantinedRuntimeInputs) } : {}),
+    ...(hasDurableEntries(state.pendingFrameDbRecords) ? { pendingFrameDbRecords: structuredClone(state.pendingFrameDbRecords) } : {}),
+    ...(hasDurableEntries(state.deferredNetworkMeta) ? { deferredNetworkMeta: structuredClone(state.deferredNetworkMeta) } : {}),
+    ...(hasDurableEntries(state.reliableIngressReceiptLedger)
+      ? { reliableIngressReceiptLedger: structuredClone(state.reliableIngressReceiptLedger) }
+      : {}),
+    ...(hasDurableEntries(state.reliableIngressTerminalWatermarks)
+      ? { reliableIngressTerminalWatermarks: structuredClone(state.reliableIngressTerminalWatermarks) }
+      : {}),
+    ...(hasDurableEntries(state.receivedReliableReceiptLedger)
+      ? { receivedReliableReceiptLedger: structuredClone(state.receivedReliableReceiptLedger) }
+      : {}),
+    ...(hasDurableEntries(state.receivedReliableTerminalWatermarks)
+      ? { receivedReliableTerminalWatermarks: structuredClone(state.receivedReliableTerminalWatermarks) }
+      : {}),
+    ...(options?.includeIngressWorkingState
+      ? {
+          pendingReliableIngress: structuredClone(state.pendingReliableIngress ?? new Map()),
+          reliableIngressCommitting: structuredClone(state.reliableIngressCommitting ?? new Set()),
+        }
+      : {}),
+    ...(hasDurableEntries(state.verifiedProfileRoutes) ? { verifiedProfileRoutes: structuredClone(state.verifiedProfileRoutes) } : {}),
+    ...(hasDurableEntries(state.runtimeAdapterCommandFrontiers)
+      ? { runtimeAdapterCommandFrontiers: structuredClone(state.runtimeAdapterCommandFrontiers) }
+      : {}),
+    ...(hasDurableEntries(state.pendingCommittedJOutbox) ? { pendingCommittedJOutbox: structuredClone(state.pendingCommittedJOutbox) } : {}),
+    ...(hasDurableEntries(state.pendingJurisdictionImports)
+      ? { pendingJurisdictionImports: structuredClone(state.pendingJurisdictionImports) }
+      : {}),
+    ...(hasDurableEntries(state.numberedRegistrationIntents)
+      ? { numberedRegistrationIntents: structuredClone(state.numberedRegistrationIntents) }
+      : {}),
+    ...(hasDurableEntries(state.certifiedRegistrationEvidence)
+      ? { certifiedRegistrationEvidence: structuredClone(state.certifiedRegistrationEvidence) }
+      : {}),
+    ...(options?.includeCertifiedBoardNodes
+      ? {
+          certifiedBoardNodes: collectReachableCertifiedBoardNodes(
+            getCertifiedBoardNodeStore(env),
+            [...env.eReplicas.values()]
+              .map((replica) => replica.state.certifiedBoardState?.boardRegistryRoot)
+              .filter((root): root is string => Boolean(root)),
+          ),
+          consumptionNodes: collectReachableConsumptionNodes(
+            getConsumptionNodeStore(env),
+            getLiveConsumptionAccumulatorStates(env),
+          ),
+          accountJClaimNodes: collectReachableAccountJClaimNodes(
+            getAccountJClaimNodeStore(env),
+            getLiveAccountJClaimAccumulatorStates(env),
+          ),
+        }
+      : {}),
   };
   return Object.keys(durable).length > 0 ? durable : undefined;
 };
 
 export const buildDurableRuntimeMachineSnapshot = (
   env: Env,
-  options?: { pendingNetworkOutputs?: RoutedEntityInput[] },
+  options?: {
+    pendingNetworkOutputs?: RoutedEntityInput[];
+    includeIngressWorkingState?: boolean;
+  },
 ): Record<string, unknown> => ({
   ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
   ...(env.activeJurisdiction ? { activeJurisdiction: env.activeJurisdiction } : {}),
   ...(env.browserVMState ? { browserVMState: structuredClone(env.browserVMState) } : {}),
   ...(env.runtimeConfig ? { runtimeConfig: structuredClone(env.runtimeConfig) } : {}),
-  ...(buildDurableRuntimeStateSnapshot(env) ? { runtimeState: buildDurableRuntimeStateSnapshot(env) } : {}),
+  ...(buildDurableRuntimeStateSnapshot(env, {
+    includeIngressWorkingState: options?.includeIngressWorkingState === true,
+  }) ? {
+      runtimeState: buildDurableRuntimeStateSnapshot(env, {
+        includeIngressWorkingState: options?.includeIngressWorkingState === true,
+      }),
+    } : {}),
   runtimeInput: withoutEphemeralScheduledWake(env.runtimeMempool ?? env.runtimeInput),
   ...(env.pendingOutputs?.length ? { pendingOutputs: cloneRuntimeOutputs(env.pendingOutputs) } : {}),
   ...(env.networkInbox?.length ? { networkInbox: cloneRuntimeOutputs(env.networkInbox) } : {}),
@@ -205,6 +297,7 @@ export const buildCanonicalRuntimeStateSnapshot = (
   options?: {
     browserVMState?: Env['browserVMState'];
     compactTransient?: boolean;
+    includeCertifiedBoardNodes?: boolean;
   },
 ): Record<string, unknown> => ({
   height: env.height,
@@ -213,7 +306,11 @@ export const buildCanonicalRuntimeStateSnapshot = (
   ...(env.activeJurisdiction ? { activeJurisdiction: env.activeJurisdiction } : {}),
   ...(options?.browserVMState ?? env.browserVMState ? { browserVMState: options?.browserVMState ?? env.browserVMState } : {}),
   ...(env.runtimeConfig ? { runtimeConfig: structuredClone(env.runtimeConfig) } : {}),
-  ...(buildDurableRuntimeStateSnapshot(env) ? { runtimeState: buildDurableRuntimeStateSnapshot(env) } : {}),
+  ...(buildDurableRuntimeStateSnapshot(env, {
+    includeCertifiedBoardNodes: options?.includeCertifiedBoardNodes === true,
+  }) ? { runtimeState: buildDurableRuntimeStateSnapshot(env, {
+    includeCertifiedBoardNodes: options?.includeCertifiedBoardNodes === true,
+  }) } : {}),
   runtimeInput: withoutEphemeralScheduledWake(env.runtimeMempool ?? env.runtimeInput),
   ...(env.pendingOutputs ? { pendingOutputs: cloneRuntimeOutputs(env.pendingOutputs) } : {}),
   ...(env.networkInbox ? { networkInbox: cloneRuntimeOutputs(env.networkInbox) } : {}),
@@ -233,11 +330,11 @@ export const buildCanonicalRuntimeStateSnapshot = (
 });
 
 export const buildRuntimeCheckpointSnapshot = (env: Env): Record<string, unknown> => {
-  return buildCanonicalRuntimeStateSnapshot(env);
+  return buildCanonicalRuntimeStateSnapshot(env, { includeCertifiedBoardNodes: true });
 };
 
 export const buildRuntimeRecoveryCheckpointSnapshot = (env: Env): Record<string, unknown> => {
-  const snapshot = buildCanonicalRuntimeStateSnapshot(env);
+  const snapshot = buildCanonicalRuntimeStateSnapshot(env, { includeCertifiedBoardNodes: true });
   const gossipProfiles = cloneProfiles(env.gossip?.getProfiles?.());
   return {
     ...snapshot,
@@ -249,6 +346,17 @@ export const restoreDurableRuntimeSnapshot = (
   env: Env,
   snapshot: Record<string, unknown>,
 ): void => {
+  if (env.runtimeState?.runtimeFrameIngressBuffer) {
+    throw new Error('RUNTIME_SNAPSHOT_RESTORE_DURING_ACTIVE_FRAME');
+  }
+  const snapshotRuntimeState = snapshot['runtimeState'];
+  if (
+    snapshotRuntimeState &&
+    typeof snapshotRuntimeState === 'object' &&
+    Object.prototype.hasOwnProperty.call(snapshotRuntimeState, 'runtimeFrameIngressBuffer')
+  ) {
+    throw new Error('RUNTIME_SNAPSHOT_EPHEMERAL_FRAME_INGRESS_FORBIDDEN');
+  }
   if (typeof snapshot['runtimeId'] === 'string') env.runtimeId = snapshot['runtimeId'];
   if (typeof snapshot['activeJurisdiction'] === 'string') env.activeJurisdiction = snapshot['activeJurisdiction'];
   if (snapshot['browserVMState']) {
@@ -256,7 +364,11 @@ export const restoreDurableRuntimeSnapshot = (
   }
   const runtimeInput = snapshot['runtimeInput'];
   if (runtimeInput && typeof runtimeInput === 'object') {
-    const restoredInput = withoutEphemeralScheduledWake(structuredClone(runtimeInput) as RuntimeInput);
+    const restoredInput = withoutEphemeralScheduledWake(runtimeInput as RuntimeInput);
+    markRestoredJSubmitRuntimeTxs(restoredInput.runtimeTxs);
+    markRestoredJAuthorityRuntimeTxs(restoredInput.runtimeTxs);
+    markRestoredJImportResultRuntimeTxs(restoredInput.runtimeTxs);
+    markRestoredEntityProviderActionRuntimeTxs(restoredInput.runtimeTxs);
     env.runtimeInput = restoredInput;
     env.runtimeMempool = restoredInput;
   }
@@ -270,13 +382,13 @@ export const restoreDurableRuntimeSnapshot = (
     };
   }
   env.pendingOutputs = Array.isArray(snapshot['pendingOutputs'])
-    ? structuredClone(snapshot['pendingOutputs']) as RoutedEntityInput[]
+    ? cloneIsolatedRoutedEntityInputs(snapshot['pendingOutputs'] as RoutedEntityInput[])
     : [];
   env.networkInbox = Array.isArray(snapshot['networkInbox'])
-    ? structuredClone(snapshot['networkInbox']) as RoutedEntityInput[]
+    ? cloneIsolatedRoutedEntityInputs(snapshot['networkInbox'] as RoutedEntityInput[])
     : [];
   env.pendingNetworkOutputs = Array.isArray(snapshot['pendingNetworkOutputs'])
-    ? structuredClone(snapshot['pendingNetworkOutputs']) as RoutedEntityInput[]
+    ? cloneIsolatedRoutedEntityInputs(snapshot['pendingNetworkOutputs'] as RoutedEntityInput[])
     : [];
   if (typeof snapshot['lockRuntimeSeed'] === 'boolean') {
     env.lockRuntimeSeed = snapshot['lockRuntimeSeed'];

@@ -86,7 +86,7 @@ assertFunctionAllowlist(depository, depositoryPath, [
   'onERC1155BatchReceived',
   'onERC1155Received',
   'processBatch',
-  'spendableReserve',
+  'registerExternalToken',
   'watchtowerCounterDispute',
 ]);
 
@@ -95,9 +95,16 @@ assertFunctionAllowlist(entityProvider, entityProviderPath, [
   'assignName',
   'batchVerifyHankoSignatures',
   'cancelBoardProposal',
+  'cancelEntityProviderAction',
+  'computeBoardProposalCancelHash',
+  'computeBoardProposalHash',
   'entityTransferTokens',
   'encodeEntityTransferHankoPayload',
+  'encodeBoardProposalCancelHankoPayload',
+  'encodeBoardProposalHankoPayload',
   'computeEntityTransferHankoHash',
+  'encodeCancelEntityProviderActionHankoPayload',
+  'computeCancelEntityProviderActionHankoHash',
   'encodeReleaseControlSharesHankoPayload',
   'computeReleaseControlSharesHankoHash',
   'foundationRegisterEntity',
@@ -106,7 +113,6 @@ assertFunctionAllowlist(entityProvider, entityProviderPath, [
   'getGovernanceInfo',
   'getTokenIds',
   'proposeBoard',
-  'recoverEntity',
   'registerNumberedEntitiesBatch',
   'registerNumberedEntity',
   'releaseControlShares',
@@ -147,18 +153,28 @@ for (const [name, required] of [
   assertFunctionHeaderIncludes(entityProvider, entityProviderPath, name, required);
 }
 for (const [name, requiredText] of [
-  ['proposeBoard', '_validateGovernanceCaller(entityId, msg.sender, articles, proposerType);'],
-  ['cancelBoardProposal', '_validateGovernanceCaller(entityId, msg.sender, articles, proposerType);'],
-  ['entityTransferTokens', 'uint256 recoveredEntityId = recoverEntity(encodedBoard, encodedSignature, transferHash);'],
-  ['releaseControlShares', 'uint256 recoveredEntityId = recoverEntity(encodedBoard, encodedSignature, releaseHash);'],
+  ['proposeBoard', '_requireBoardAuthority(entityId, proposerType, proposalHash, authorizations);'],
+  ['cancelBoardProposal', '_requireBoardAuthority(entityId, proposerType, cancelHash, authorizations);'],
+  ['entityTransferTokens', '(bytes32 recoveredEntityId, bool valid) = _verifyCurrentHankoSignature(hankoData, transferHash);'],
+  ['releaseControlShares', '(bytes32 recoveredEntityId, bool valid) = _verifyCurrentHankoSignature(hankoData, releaseHash);'],
+  ['cancelEntityProviderAction', '(bytes32 recoveredEntityId, bool valid) = _verifyCurrentHankoSignature(hankoData, cancelHash);'],
 ] as const) {
   assertIncludes(entityProvider, requiredText, `${entityProviderPath}:${name}`);
 }
 assertIncludes(entityProvider, 'require(block.number >= entities[entityId].activateAtBlock, "Delay period not met");', entityProviderPath);
 assertIncludes(entityProvider, 'if (signatureCount == 0)', entityProviderPath);
-assertIncludes(entityProvider, 'if (validSignerCount == 0) return (bytes32(0), false);', entityProviderPath);
-assertIncludes(entityProvider, 'if (eoaVotingPower < claim.threshold)', entityProviderPath);
+assertIncludes(entityProvider, 'if (signer == address(0)) return (bytes32(0), false);', entityProviderPath);
+assertIncludes(entityProvider, 'if (referencedClaimIndex >= claimIndex) revert InvalidHankoClaimOrder();', entityProviderPath);
+assertIncludes(entityProvider, 'revert DuplicateHankoClaimEntity();', entityProviderPath);
+assertNotIncludes(entityProvider, 'eoaVotingPower', entityProviderPath);
 assertIncludes(entityProvider, 'entityActionNonces[entityId] = actionNonce;', entityProviderPath);
+assertIncludes(entityProvider, 'event EntityProviderActionExecuted(', entityProviderPath);
+assertIncludes(entityProvider, 'event EntityProviderActionCancelled(', entityProviderPath);
+assertIncludes(entityProvider, 'EntityProviderActionKind.ENTITY_TRANSFER', entityProviderPath);
+assertIncludes(entityProvider, 'EntityProviderActionKind.RELEASE_CONTROL_SHARES', entityProviderPath);
+assertNotIncludes(entityProvider, 'boardHashToEntityId', entityProviderPath);
+assertNotIncludes(entityProvider, 'Board hash already registered', entityProviderPath);
+assertNotIncludes(entityProvider, 'function recoverEntity(', entityProviderPath);
 
 for (const marker of [
   '# Contract Governance And Access-Control Scan',

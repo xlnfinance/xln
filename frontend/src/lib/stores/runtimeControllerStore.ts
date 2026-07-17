@@ -7,6 +7,7 @@ import type {
   RuntimeAdapterStatus,
   RuntimeInput,
 } from '@xln/runtime/xln-api';
+import type { RuntimeAdapterSendOptions } from '@xln/runtime/radapter/types';
 import { RemoteRuntimeAdapter } from '../../../../runtime/radapter/remote';
 import { sameWsEndpoint } from '$lib/utils/wsUrl';
 
@@ -184,8 +185,11 @@ export const disconnectRuntimeAdapter = (): void => {
   publishRuntimeAdapterState(null);
 };
 
-export const runtimeAdapterSend = async (input: RuntimeInput): Promise<RuntimeAdapterSendResult> => {
+export const runtimeAdapterSend = async (
+  input: RuntimeInput,
+  options: RuntimeAdapterSendOptions = {},
+): Promise<RuntimeAdapterSendResult> => {
   const adapter = activeAdapter;
   if (!adapter) throw new Error('Runtime adapter is not connected');
-  return adapter.send(input);
+  return adapter.send(input, options);
 };

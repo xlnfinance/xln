@@ -1,4 +1,5 @@
 import { applyAccountTx } from '../account/tx/apply';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import {
   buildCrossJurisdictionPullBinding,
   buildPreparedCrossJurisdictionRoute,
@@ -58,6 +59,7 @@ const parseCli = (args: string[]): Cli => ({
 const makeAccount = (leftEntity: string, rightEntity: string): AccountMachine => ({
   leftEntity,
   rightEntity,
+  domain: { chainId: 31337, depositoryAddress: addr('de') },
   watchSeed: `0x${'a3'.repeat(32)}`,
   status: 'active',
   mempool: [],
@@ -80,9 +82,8 @@ const makeAccount = (leftEntity: string, rightEntity: string): AccountMachine =>
   currentHeight: 1,
   pendingSignatures: [],
   rollbackCount: 0,
-  leftJObservations: [],
-  rightJObservations: [],
-  jEventChain: [],
+  leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+  rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
   lastFinalizedJHeight: 0,
   proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nextProofNonce: 1 },
   proofBody: { tokenIds: [], deltas: [] },

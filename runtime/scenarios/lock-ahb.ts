@@ -17,13 +17,18 @@
 
 import type { Env, EntityInput } from '../types';
 import type { JAdapter } from '../jadapter/types';
-import { getProcess, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput } from './helpers';
-import { ensureJAdapter, registerEntities, createJReplica, createJurisdictionConfig, getScenarioJAdapter } from './boot';
+import { getProcess, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, processWithOffline, convergeWithOffline, advanceScenarioToNextNetworkRetry } from './helpers';
+import { bindScenarioJReplica, ensureJAdapter, registerEntities, createJReplica, createJurisdictionConfig, getScenarioJAdapter, resolveScenarioBoardSigner } from './boot';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { isLeft } from '../account/utils';
 import { ethers } from 'ethers';
 import { createRngFromEnv } from './seeded-rng';
-import { createEmptyBatch } from '../jurisdiction/batch';
+import { generateLazyEntityId } from '../entity/factory';
+import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
+import { drainJWatcherBacklog } from '../jadapter/backlog-drain';
+import { mineRpcToBlockExact } from './rpc-block-mining';
+import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
+import { htlcRouteConvergenceCycleBudget } from './test-economy';
 
 const USDC_TOKEN_ID = 1;
 const HUB_INITIAL_RESERVE = usd(10_000_000);
@@ -100,16 +105,11 @@ export async function lockAhb(env: Env): Promise<void> {
       // No jadapter attached — self-boot (browser path or direct CLI)
       jadapter = await ensureJAdapter(env);
       const jReplicaName = 'AHB Demo';
-      const jReplica = createJReplica(env, jReplicaName, jadapter.addresses.depository);
-      jReplica.jadapter = jadapter;
-      jReplica.depositoryAddress = jadapter.addresses.depository;
-      jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
-      jReplica.contracts = {
-        depository: jadapter.addresses.depository,
-        entityProvider: jadapter.addresses.entityProvider,
-        account: jadapter.addresses.account,
-        deltaTransformer: jadapter.addresses.deltaTransformer,
-      };
+      bindScenarioJReplica(
+        env,
+        createJReplica(env, jReplicaName, jadapter.addresses.depository),
+        jadapter,
+      );
       jadapter.startWatching(env);
       jurisdiction = createJurisdictionConfig(
         jReplicaName,
@@ -154,13 +154,12 @@ export async function lockAhb(env: Env): Promise<void> {
     }
 
     // Signer wallet helper (for real ERC20 deposit flow)
-    const { getCachedSignerPrivateKey } = await import('../account/crypto');
+    const { getSignerPrivateKey } = await import('../account/crypto');
     const signerWallets = new Map<string, { privateKey: Uint8Array; wallet: ethers.Wallet }>();
     const ensureSignerWallet = (signerId: string) => {
       const cached = signerWallets.get(signerId);
       if (cached) return cached;
-      const privateKey = getCachedSignerPrivateKey(signerId);
-      if (!privateKey) throw new Error(`Missing private key for signer ${signerId}`);
+      const privateKey = getSignerPrivateKey(env, signerId);
       const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
       const entry = { privateKey, wallet };
       signerWallets.set(signerId, entry);
@@ -686,7 +685,7 @@ export async function lockAhb(env: Env): Promise<void> {
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
-      entityTxs: [{
+      entityTxs: [withDeterministicHtlcTestSecret({
         type: 'htlcPayment',
         data: {
           targetEntityId: bob.id,
@@ -694,10 +693,9 @@ export async function lockAhb(env: Env): Promise<void> {
           amount: payment1,
           route: [alice.id, hub.id, bob.id],
           description: 'HTLC Payment 1 of 2',
-          secret: htlc1.secret,
           hashlock: htlc1.hashlock,
         }
-      }]
+      }, htlc1.secret)]
     }]);
     logPending();
 
@@ -1184,27 +1182,35 @@ export async function lockAhb(env: Env): Promise<void> {
     // Create HTLC that will timeout (Charlie doesn't reveal)
     console.log('📋 Creating test entity Charlie for timeout scenario...\n');
 
+    const charlieSigner = resolveScenarioBoardSigner(env, '6');
+    const charlieEntityId = generateLazyEntityId([charlieSigner], 1n, env).toLowerCase();
     await commitRuntimeInput(env, {
       runtimeTxs: [{
         type: 'importReplica' as const,
-        entityId: '0x' + '6'.padStart(64, '0'),
-        signerId: '6',
+        entityId: charlieEntityId,
+        signerId: charlieSigner,
         data: {
           isProposer: true,
           position: { x: 400, y: 0, z: 0 },
           config: {
             mode: 'proposer-based' as const,
             threshold: 1n,
-            validators: ['6'],
-            shares: { '6': 1n },
+            validators: [charlieSigner],
+            shares: { [charlieSigner]: 1n },
           },
         },
       }],
       entityInputs: []
     });
 
-    const charlie = { id: '0x' + '6'.padStart(64, '0'), signer: '6' };
+    const charlie = { id: charlieEntityId, signer: charlieSigner };
     console.log(`✅ Created Charlie ${charlie.id.slice(-4)}\n`);
+
+    // Late replicas must ingest the exact EntityProvider history before they
+    // accept registered counterparties. A local profile/config is never board
+    // authority, and opening an account before this catch-up must fail closed.
+    await processJEvents(env);
+    await converge(env);
 
     // Deposit collateral for Charlie
     await process(env, [{
@@ -1261,11 +1267,6 @@ export async function lockAhb(env: Env): Promise<void> {
     await converge(env);
 
     console.log('✅ Hub-Charlie account ready (both sides have credit)\n');
-
-    // Trigger J-event for Charlie to sync lastFinalizedJHeight
-    // Need Charlie to observe at least one J-block to have non-zero height
-    await processJEvents(env);
-    await converge(env);
 
     const [, charlieRepSynced] = findReplica(env, charlie.id);
     console.log(`   Charlie lastFinalizedJHeight after sync: ${charlieRepSynced.state.lastFinalizedJHeight || 0}\n`);
@@ -1382,27 +1383,34 @@ export async function lockAhb(env: Env): Promise<void> {
     // Create Hub2 for 4-hop test (Alice → Hub → Hub2 → Bob)
     console.log('📋 Creating Hub2 for 4-hop test...\n');
 
+    const hub2Signer = resolveScenarioBoardSigner(env, '5');
+    const hub2EntityId = generateLazyEntityId([hub2Signer], 1n, env).toLowerCase();
     await commitRuntimeInput(env, {
       runtimeTxs: [{
         type: 'importReplica' as const,
-        entityId: '0x' + '5'.padStart(64, '0'),
-        signerId: '5',
+        entityId: hub2EntityId,
+        signerId: hub2Signer,
         data: {
           isProposer: true,
           position: { x: 200, y: 0, z: 0 },
           config: {
             mode: 'proposer-based' as const,
             threshold: 1n,
-            validators: ['5'],
-            shares: { '5': 1n },
+            validators: [hub2Signer],
+            shares: { [hub2Signer]: 1n },
           },
         },
       }],
       entityInputs: []
     });
 
-    const hub2 = { id: '0x' + '5'.padStart(64, '0'), signer: '5' };
+    const hub2 = { id: hub2EntityId, signer: hub2Signer };
     console.log(`✅ Created Hub2 ${hub2.id.slice(-4)}\n`);
+
+    // Hub2 is imported after the watcher reached the chain tip. Replay the
+    // authenticated EntityProvider history before it accepts registered peers.
+    await processJEvents(env);
+    await converge(env);
 
     // Fund Hub2
     await process(env, [{
@@ -1498,7 +1506,7 @@ export async function lockAhb(env: Env): Promise<void> {
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
-      entityTxs: [{
+      entityTxs: [withDeterministicHtlcTestSecret({
         type: 'htlcPayment',
         data: {
           targetEntityId: bob.id,
@@ -1506,17 +1514,13 @@ export async function lockAhb(env: Env): Promise<void> {
           tokenId: USDC_TOKEN_ID,
           amount: payment4Hop,
           description: '4-hop onion routing test',
-          secret: htlc4.secret,
           hashlock: htlc4.hashlock,
         }
-      }]
+      }, htlc4.secret)]
     }]);
-    await converge(env);
-
-    // Extra processing for multi-hop (may need more cycles)
-    for (let i = 0; i < 5; i++) {
-      await process(env);
-    }
+    // Two intermediaries each need one upstream-secret propagation tick and
+    // one terminal reliable Account ACK tick before strict idle.
+    await converge(env, htlcRouteConvergenceCycleBudget(2));
 
     console.log('🔍 Verifying 4-hop settlement...\n');
 
@@ -1531,14 +1535,7 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log(`   Alice-Hub mempool: ${aliceHubAccount4Hop?.mempool.length || 0}`);
     console.log(`   Alice-Hub pendingFrame: ${aliceHubAccount4Hop?.pendingFrame?.height || 'none'}\n`);
 
-    if (aliceHubLockCount > 0) {
-      // HTLC still pending - this is OK for 4-hop (takes more cycles)
-      console.log(`   ⚠️  4-hop HTLC still settling (lock count: ${aliceHubLockCount})`);
-      console.log(`      This is expected - 4 hops need more bilateral consensus rounds`);
-      console.log(`      In production, this completes automatically\n`);
-    } else {
-      assert(aliceHubLockCount === 0, '4-hop: All locks cleared after reveal');
-    }
+    assert(aliceHubLockCount === 0, '4-hop: All locks cleared after reveal');
 
     // Check fees (Hub and Hub2 should have earned)
     const [, hubRep4Hop] = findReplica(env, hub.id);
@@ -1596,28 +1593,55 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log(`🔐 Hub-Bob locks: ${hubBobAccountHostage?.locks.size || 0}`);
     console.log(`🔐 Bob-Hub locks: ${bobHubAccountHostage?.locks.size || 0}`);
 
-    // Bob manually adds the secret to his htlcRoutes (simulating he learned it)
-    // In real flow, Bob would learn this via the HTLC envelope as final recipient
-    if (!bobRepHostage.state.htlcRoutes) {
-      bobRepHostage.state.htlcRoutes = new Map();
-    }
-    bobRepHostage.state.htlcRoutes.set(hostageSecret.hashlock, {
-      hashlock: hostageSecret.hashlock,
-      secret: hostageSecret.secret, // Bob knows the secret!
-      inboundEntity: hub.id, // Hub sent the HTLC to Bob
-      inboundLockId: hostageLockId,
-      createdTimestamp: env.timestamp,
-    });
-    console.log(`✅ Bob now has the secret in htlcRoutes\n`);
-
     // === HOSTAGE SCENARIO: Hub goes offline, Bob must dispute ===
     console.log(`🔒 HOSTAGE: Hub goes offline - Bob cannot reveal bilaterally`);
     console.log(`   Bob's only option: Dispute and reveal on-chain\n`);
 
+    // Bob submits the learned preimage through the real signed Entity path.
+    // The resulting Account proposal cannot reach the offline Hub, but the
+    // preimage is already part of Bob's certified Entity state for dispute use.
+    const bobHeightBeforeSecret = bobRepHostage.state.height;
+    await process(env, [{
+      entityId: bob.id,
+      signerId: bob.signer,
+      entityTxs: [{
+        type: 'resolveHtlcLock',
+        data: {
+          counterpartyEntityId: hub.id,
+          lockId: hostageLockId,
+          secret: hostageSecret.secret,
+          description: 'Hostage preimage learned out of band',
+        },
+      }],
+    }]);
+    const [, bobRepWithSecret] = findReplica(env, bob.id);
+    const certifiedSecretFrame = bobRepWithSecret.certifiedFrameLineage
+      ?.find(link => link.frame.height === bobRepWithSecret.state.height)
+      ?.frame;
+    const certifiedSecretAnchor = bobRepWithSecret.certifiedFrameAnchor?.height === bobRepWithSecret.state.height
+      ? bobRepWithSecret.certifiedFrameAnchor
+      : undefined;
+    const certifiedSecretRoot = certifiedSecretFrame?.stateRoot ?? certifiedSecretAnchor?.stateRoot;
+    const persistedSecret = bobRepWithSecret.state.htlcRoutes.get(hostageSecret.hashlock)?.secret;
+    const certifiedSecretStateRoot = computeCanonicalEntityConsensusStateHash(bobRepWithSecret.state);
+    assert(bobRepWithSecret.state.height === bobHeightBeforeSecret + 1, 'Secret persisted in one Entity frame');
+    assert(persistedSecret === hostageSecret.secret, 'Bob preimage persisted in certified Entity state');
+    assert(
+      certifiedSecretRoot !== undefined,
+      `Certified Entity frame/lineage anchor exists at Bob height ${bobRepWithSecret.state.height}`,
+    );
+    assert(
+      certifiedSecretRoot === certifiedSecretStateRoot,
+      `Certified Entity root includes hostage preimage (${certifiedSecretRoot} vs ${certifiedSecretStateRoot})`,
+    );
+    console.log(`✅ Bob persisted the secret in certified Entity state\n`);
+
+    const hostageOfflineSigners = new Set([hub.signer]);
+
 
     // Bob starts dispute on Hub-Bob account
     console.log(`⚔️  STEP 1: Bob calls disputeStart on Hub-Bob account...`);
-    await process(env, [{
+    await processWithOffline(env, [{
       entityId: bob.id,
       signerId: bob.signer,
       entityTxs: [{
@@ -1627,30 +1651,30 @@ export async function lockAhb(env: Env): Promise<void> {
           description: 'Hostage: Hub offline, revealing secret on-chain'
         }
       }]
-    }]);
-    await converge(env);
+    }], hostageOfflineSigners, 'hostage-hub-offline');
+    await convergeWithOffline(env, hostageOfflineSigners, 20, 'hostage-hub-offline');
 
     // STEP 2: Broadcast batch to J-machine (submit disputeStart to blockchain)
     console.log(`📡 STEP 2: Bob broadcasts jBatch to J-machine...`);
-    await process(env, [{
+    await processWithOffline(env, [{
       entityId: bob.id,
       signerId: bob.signer,
       entityTxs: [{
         type: 'j_broadcast',
         data: {}
       }]
-    }]);
+    }], hostageOfflineSigners, 'hostage-hub-offline');
 
     // STEP 3: Wait for J-machine processing + process DisputeStarted event
     console.log('⏳ STEP 3: Waiting for J-machine to process + events...');
     for (let i = 0; i < 20; i++) {
       env.timestamp += 350; // Advance past blockDelayMs
-      await converge(env);
+      await convergeWithOffline(env, hostageOfflineSigners, 20, 'hostage-hub-offline');
       const jRep = env.jReplicas?.get('AHB Demo');
       if (jRep && jRep.mempool.length === 0) break;
     }
     await processJEvents(env);
-    await converge(env);
+    await convergeWithOffline(env, hostageOfflineSigners, 20, 'hostage-hub-offline');
 
     // Verify dispute started (activeDispute set by DisputeStarted event)
     const [, bobRepAfterStart] = findReplica(env, bob.id);
@@ -1665,33 +1689,54 @@ export async function lockAhb(env: Env): Promise<void> {
     if (typeof providerAny.send !== 'function') {
       throw new Error('lock-ahb timeout mining requires RPC provider with evm_mine support');
     }
-    while (true) {
-      const currentBlock = BigInt(await jadapter.provider.getBlockNumber());
-      if (currentBlock >= targetBlock) {
-        console.log(`✅ Timeout reached at block ${currentBlock}`);
-        break;
-      }
-      await providerAny.send('evm_mine', []);
-      await process(env);
-    }
+    const timeoutBlock = BigInt(targetBlock);
+    const mining = await mineRpcToBlockExact(
+      { send: providerAny.send.bind(providerAny) },
+      timeoutBlock,
+    );
+    console.log(
+      `✅ Mined ${mining.minedBlocks} blocks via ${mining.method ?? 'already-satisfied'} ` +
+      `(provider ${mining.startBlock}→${mining.finalBlock})`,
+    );
 
-    // Initialize jBatchState if needed (for tracking revealSecrets)
-    const [, bobRepBeforeFinalize] = findReplica(env, bob.id);
-    if (!bobRepBeforeFinalize.state.jBatchState) {
-      bobRepBeforeFinalize.state.jBatchState = {
-        batch: createEmptyBatch(),
-        jurisdiction: null,
-        lastBroadcast: 0,
-        broadcastCount: 0,
-        failedAttempts: 0,
-        status: 'accumulating',
-      };
+    const watcherStatuses = await drainJWatcherBacklog(
+      env,
+      (frameEnv, inputs) => processWithOffline(
+        frameEnv,
+        inputs,
+        hostageOfflineSigners,
+        'hostage-hub-offline',
+      ),
+    );
+    await convergeWithOffline(env, hostageOfflineSigners, 20, 'hostage-hub-offline');
+
+    if (watcherStatuses.length === 0) {
+      throw new Error('HOSTAGE_TIMEOUT_WATCHER_MISSING');
     }
-    const secretsBefore = bobRepBeforeFinalize.state.jBatchState.batch.revealSecrets.length;
+    const bobReplicaKey = `${bob.id}:${bob.signer}`.toLowerCase();
+    const bobWatcherState = watcherStatuses
+      .flatMap(status => status.replicas.map(replica => ({ chainId: status.chainId, ...replica })))
+      .find(replica => replica.key.toLowerCase() === bobReplicaKey);
+    if (!bobWatcherState || BigInt(bobWatcherState.entityFinalizedThrough) < timeoutBlock) {
+      throw new Error(
+        `HOSTAGE_TIMEOUT_BOB_J_FINALITY_LAG:` +
+        `replica=${bobReplicaKey}:finalized=${bobWatcherState?.entityFinalizedThrough ?? 'missing'}:` +
+        `target=${timeoutBlock}`,
+      );
+    }
+    const runtimeVisibleJHeight = BigInt(env.jReplicas.get('AHB Demo')?.blockNumber ?? 0n);
+    assert(
+      mining.finalBlock >= timeoutBlock && runtimeVisibleJHeight >= timeoutBlock,
+      `Dispute timeout visible to provider/runtime (${mining.finalBlock}/${runtimeVisibleJHeight} >= ${timeoutBlock})`,
+    );
+
+    const [, bobRepBeforeFinalize] = findReplica(env, bob.id);
+    assert(!!bobRepBeforeFinalize.state.jBatchState, 'Dispute flow initialized Bob jBatch state');
+    const secretsBefore = bobRepBeforeFinalize.state.jBatchState!.batch.revealSecrets.length;
 
     // Bob finalizes dispute WITH useOnchainRegistry: true
     console.log(`📤 Bob calls disputeFinalize with useOnchainRegistry: true...`);
-    await process(env, [{
+    await processWithOffline(env, [{
       entityId: bob.id,
       signerId: bob.signer,
       entityTxs: [{
@@ -1702,37 +1747,49 @@ export async function lockAhb(env: Env): Promise<void> {
           description: 'Hostage reveal: secret goes to on-chain registry'
         }
       }]
-    }]);
-    await converge(env);
+    }], hostageOfflineSigners, 'hostage-hub-offline');
+    await convergeWithOffline(env, hostageOfflineSigners, 20, 'hostage-hub-offline');
 
-    // VERIFY: Secret should be in jBatchState.batch.revealSecrets
+    // The certified Entity frame may immediately move the batch from the
+    // accumulator into the durable submit slot. Inspect both representations:
+    // an empty active batch is success after publication, not missing evidence.
     const [, bobRepAfterFinalize] = findReplica(env, bob.id);
-    const secretsAfter = bobRepAfterFinalize.state.jBatchState?.batch.revealSecrets || [];
-    const secretRevealed = secretsAfter.some(
+    const bobJBatchState = bobRepAfterFinalize.state.jBatchState;
+    const secretsAfter = [
+      ...(bobJBatchState?.batch.revealSecrets ?? []),
+      ...(bobJBatchState?.sentBatch?.batch.revealSecrets ?? []),
+    ];
+    const secretQueued = secretsAfter.some(
       (r: { secret: string }) => r.secret === hostageSecret.secret
     );
 
-    console.log(`\n🔍 HOSTAGE REVEAL VERIFICATION:`);
+    console.log(`\n🔍 HOSTAGE REVEAL QUEUE VERIFICATION:`);
     console.log(`   Secrets before: ${secretsBefore}`);
-    console.log(`   Secrets after: ${secretsAfter.length}`);
-    console.log(`   Our secret revealed: ${secretRevealed}`);
+    console.log(`   Queued/sent secrets: ${secretsAfter.length}`);
+    assert(secretQueued, 'Hostage preimage queued in the certified/sent J-batch');
 
-    if (secretRevealed) {
-      console.log(`\n✅ HOSTAGE TEST PASSED: Secret revealed to on-chain registry!`);
-      console.log(`   Bob saved himself despite Hub being offline`);
-      console.log(`   On-chain transformer will unlock Bob's funds\n`);
-    } else {
-      // Check if dispute finalized (might have revealed via different path)
-      const bobHubAccountFinal = bobRepAfterFinalize.state.accounts.get(hub.id);
-      if (!bobHubAccountFinal?.activeDispute) {
-        console.log(`\n⚠️  Dispute finalized but secret not in revealSecrets`);
-        console.log(`   This may be expected if transformer address not set`);
-        console.log(`   The useOnchainRegistry code path was exercised\n`);
-      } else {
-        console.log(`\n❌ HOSTAGE TEST ISSUE: Secret NOT revealed to on-chain registry`);
-        console.log(`   Check: collectHtlcSecrets() and batchAddRevealSecret()`);
-      }
+    // Bring Hub back online at the exact durable retry boundary. The reliable
+    // Account lane must reach a terminal ACK; deleting/requeueing it would hide
+    // whether reconnect recovery actually works.
+    const reconnectRetryAt = advanceScenarioToNextNetworkRetry(env);
+    if (reconnectRetryAt !== null) {
+      console.log(`🔌 Hub reconnect: advancing logical time to retry ${reconnectRetryAt}`);
     }
+    await converge(env, 20);
+    assert(
+      !(env.pendingNetworkOutputs ?? []).some(output => output.signerId === hub.signer),
+      'Hub reliable Account lane reached terminal ACK after reconnect',
+    );
+    const [, bobRepAfterPublication] = findReplica(env, bob.id);
+    const publishedSecret = (bobRepAfterPublication.state.jBlockChain ?? [])
+      .flatMap(block => block.events ?? [])
+      .some(event =>
+        event.type === 'SecretRevealed'
+        && String(event.data.hashlock).toLowerCase() === hostageSecret.hashlock.toLowerCase()
+        && String(event.data.secret).toLowerCase() === hostageSecret.secret.toLowerCase()
+      );
+    assert(publishedSecret, 'Hostage preimage observed in Entity-finalized SecretRevealed event');
+    console.log(`\n✅ HOSTAGE TEST PASSED: Secret published and Entity-finalized on-chain\n`);
 
     // ============================================================================
     // PHASE 9: MINIMAL OFFLINE SIM (single-tick drop + recovery)

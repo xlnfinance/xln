@@ -29,8 +29,8 @@ const r2cLog = createStructuredLogger('entity.r2c');
 export async function handleR2C(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'r2c' }>,
-  currentTimestamp: number = 0
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs?: JInput[]; mempoolOps?: MempoolOp[] }> {
+  const currentTimestamp = entityState.timestamp;
   const { counterpartyId, receivingEntityId, tokenId, amount, rebalanceQuoteId, rebalanceFeeTokenId, rebalanceFeeAmount } = entityTx.data;
   const receivingEntity = String(receivingEntityId || entityState.entityId || '').trim().toLowerCase();
   const isLocalReceivingEntity = receivingEntity === String(entityState.entityId || '').trim().toLowerCase();

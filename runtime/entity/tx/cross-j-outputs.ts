@@ -35,8 +35,13 @@ export const buildCrossJurisdictionEntityOutput = (
   signerIdHint?: string | null,
 ): EntityInput => {
   const normalizedEntityId = normalizeEntityRef(entityId);
-  const state = findLocalEntityState(env, normalizedEntityId);
   const hintedSignerId = normalizeEntityRef(String(signerIdHint || ''));
+  if (hintedSignerId) {
+    // Route signers are committed before consensus. Never consult local
+    // topology when a committed route already identifies the recipient lane.
+    return { entityId: normalizedEntityId, signerId: hintedSignerId, entityTxs };
+  }
+  const state = findLocalEntityState(env, normalizedEntityId);
   let signerId: string;
   try {
     signerId = hintedSignerId || resolveEntityProposerId(env, state?.entityId || normalizedEntityId, 'cross-j entity output');
@@ -54,11 +59,16 @@ export const buildCrossJurisdictionEntityOutput = (
 };
 
 export const pushCrossJurisdictionEntityOutput = (
-  env: Env,
+  _env: Env,
   outputs: EntityInput[],
   entityId: string,
   entityTxs: EntityTx[],
   signerIdHint?: string | null,
 ): void => {
-  outputs.push(buildCrossJurisdictionEntityOutput(env, entityId, entityTxs, signerIdHint));
+  const normalizedEntityId = normalizeEntityRef(entityId);
+  const normalizedSignerId = normalizeEntityRef(String(signerIdHint || ''));
+  if (!normalizedEntityId || !normalizedSignerId) {
+    throw new Error(`CROSS_J_ENTITY_OUTPUT_SIGNER_MISSING: entity=${normalizedEntityId || 'missing'}`);
+  }
+  outputs.push({ entityId: normalizedEntityId, signerId: normalizedSignerId, entityTxs });
 };

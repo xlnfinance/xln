@@ -5,8 +5,11 @@ import {
   getMarketMakerHealth as getServerMarketMakerHealth,
 } from '../server/market-maker-health';
 import { buildDefaultEntitySwapPairs } from '../account/utils';
+import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
+import { deriveSameOrderbookMaterialization } from '../entity/tx/handlers/account/orderbook-matching-helpers';
 import { buildMarketSnapshotForReplica } from '../relay/market-snapshot';
 import { applyCommand, createBook } from '../orderbook';
+import { markWorkingOrderbookOffer } from '../orderbook/swap-execution';
 import {
   buildMarketMakerOfferSpecs,
   buildMarketMakerBootstrapFingerprint,
@@ -20,9 +23,10 @@ import {
   type MarketMakerHealth,
   type MarketMakerTokenIdsByContext,
 } from '../orchestrator/mm-node';
-import { getBootstrapCreditAmount } from '../orchestrator/mesh-common';
+import { getBootstrapCreditAmount, HUB_DEFAULT_MIN_TRADE_SIZE } from '../orchestrator/mesh-common';
 import { createEmptyEnv } from '../runtime';
 import type { AccountMachine, EntityReplica, Env } from '../types';
+import { createDefaultDelta } from '../validation-utils';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -156,7 +160,7 @@ test('market maker server health does not count pending offers as bootstrap-read
   expect(health.ok).toBe(false);
   expect(health.hubs[0]?.offers).toBe(0);
   expect(health.hubs[0]?.depthReady).toBe(false);
-  expect(health.hubs[0]?.blockers?.[0]?.reason).toBe('pending-frame');
+  expect(health.hubs[0]?.blockers).toEqual([]);
 });
 
 test('market snapshots expose order counts for aggregated price levels', () => {
@@ -209,6 +213,67 @@ const makeAccount = (
   swapOffers,
   deltas: new Map(),
 } as unknown as AccountMachine);
+
+test('five-token market maker depth remains canonical through Account and hub admission', async () => {
+  const mmEntityId = entity('a');
+  const hubEntityId = entity('b');
+  const account = makeAccount(mmEntityId, hubEntityId);
+  for (const tokenId of [1, 2, 3, 4, 5]) {
+    const delta = createDefaultDelta(tokenId);
+    delta.leftCreditLimit = getBootstrapCreditAmount(tokenId);
+    delta.rightCreditLimit = getBootstrapCreditAmount(tokenId);
+    account.deltas.set(tokenId, delta);
+  }
+
+  const specs = buildMarketMakerOfferSpecs([hubEntityId], [1, 2, 3, 4, 5]);
+  expect(specs).toHaveLength(200);
+  const rejected: string[] = [];
+
+  for (const spec of specs) {
+    const result = await handleSwapOffer(account, {
+      type: 'swap_offer',
+      data: {
+        offerId: spec.offerId,
+        giveTokenId: spec.giveTokenId,
+        giveAmount: spec.giveAmount,
+        wantTokenId: spec.wantTokenId,
+        wantAmount: spec.wantAmount,
+        priceTicks: spec.priceTicks,
+        minFillRatio: spec.minFillRatio,
+      },
+    }, true, 1);
+    expect(result.error).toBeUndefined();
+    expect(result.success).toBe(true);
+
+    const offer = account.swapOffers.get(spec.offerId)!;
+    expect(offer.priceTicks).toBe(spec.priceTicks);
+    const working = markWorkingOrderbookOffer({
+      offerId: offer.offerId,
+      accountId: hubEntityId,
+      makerIsLeft: offer.makerIsLeft,
+      fromEntity: account.leftEntity,
+      toEntity: account.rightEntity,
+      createdHeight: offer.createdHeight,
+      giveTokenId: offer.giveTokenId,
+      giveAmount: offer.giveAmount,
+      wantTokenId: offer.wantTokenId,
+      wantAmount: offer.wantAmount,
+      quantizedGive: offer.quantizedGive,
+      quantizedWant: offer.quantizedWant,
+      priceTicks: offer.priceTicks,
+      timeInForce: offer.timeInForce ?? 0,
+      minFillRatio: offer.minFillRatio,
+    });
+    if (working.orderbookKind !== 'same-jurisdiction') {
+      throw new Error(`MARKET_MAKER_SAME_CHAIN_SPEC_BECAME_CROSS_J:${spec.offerId}`);
+    }
+    const materialized = deriveSameOrderbookMaterialization(working, HUB_DEFAULT_MIN_TRADE_SIZE);
+    if (materialized.kind === 'reject') rejected.push(`${spec.offerId}:${materialized.reason}`);
+  }
+
+  expect(account.swapOffers.size).toBe(200);
+  expect(rejected).toEqual([]);
+});
 
 const addReplica = (
   env: Env,
@@ -413,7 +478,7 @@ test('runtime market maker health stays red when same-chain offers are committed
 
   expect(health.ok).toBe(false);
   expect(health.hubs[0]?.offers).toBe(health.expectedOffersPerHub);
-  expect(health.hubs[0]?.blockers[0]?.reason).toBe('pending-frame');
+  expect(health.hubs[0]?.blockers).toEqual([]);
   expect(pendingRoute?.offers).toBe(0);
   expect(pendingRoute?.depthReady).toBe(false);
 });

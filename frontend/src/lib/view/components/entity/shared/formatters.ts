@@ -8,7 +8,7 @@
  *
  * @param tokenId - The token identifier (reserved for future token-specific formatting)
  * @param amount - The amount in smallest units (e.g., wei for ETH)
- * @param decimals - Number of decimal places (default: 18)
+ * @param decimals - Exact decimal places from trusted token metadata
  * @returns Formatted string representation of the amount
  *
  * @example
@@ -18,7 +18,7 @@
 export function formatTokenAmount(
   tokenId: number,
   amount: bigint,
-  decimals: number = 18
+  decimals: number
 ): string {
   if (amount === null || amount === undefined) {
     return '0';
@@ -124,7 +124,7 @@ export function formatCurrency(value: number, currency: string = 'USD'): string 
  * Parse a user input string to BigInt amount
  *
  * @param str - String representation of the amount (e.g., "1.5", "0.001")
- * @param decimals - Number of decimal places to use (default: 18)
+ * @param decimals - Exact decimal places from trusted token metadata
  * @returns BigInt representation in smallest units
  * @throws Error if the input string is invalid
  *
@@ -133,7 +133,7 @@ export function formatCurrency(value: number, currency: string = 'USD'): string 
  * parseAmount("0.5", 18) // 500000000000000000n
  * parseAmount("123", 6) // 123000000n
  */
-export function parseAmount(str: string, decimals: number = 18): bigint {
+export function parseAmount(str: string, decimals: number): bigint {
   if (!str || typeof str !== 'string') {
     throw new Error('Invalid input: must be a non-empty string');
   }

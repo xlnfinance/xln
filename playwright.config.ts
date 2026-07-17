@@ -102,7 +102,7 @@ export default defineConfig({
   ...(PW_SKIP_WEBSERVER ? {} : {
     webServer: {
       // Prebuild runtime once (fresh artifact), then run dev pipeline with runtime --watch.
-      command: './scripts/build-runtime.sh && SKIP_TYPECHECK=1 bun run dev',
+      command: './scripts/build-runtime.sh && XLN_MESH_DEFER_INITIAL_RESET=1 SKIP_TYPECHECK=1 bun run dev',
       url: PW_BASE_URL,
       ignoreHTTPSErrors: true,  // Self-signed cert
       reuseExistingServer: true,

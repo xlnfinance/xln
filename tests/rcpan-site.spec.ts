@@ -156,7 +156,7 @@ async function newViewportPage(browser: Browser, width: number, height: number, 
 }
 
 test.describe('RCPAN dispute microscope', () => {
-  test('wide and laptop show all three deterministic dispute paths', async ({ browser }, testInfo) => {
+  test('wide and laptop show all three deterministic dispute paths', { tag: '@functional' }, async ({ browser }, testInfo) => {
     const wide = await newViewportPage(browser, 1920, 1080, 1);
     const wideIssues = await loadRcpan(wide.page, 'light');
     await assertCoreSurface(wide.page);
@@ -220,7 +220,7 @@ test.describe('RCPAN dispute microscope', () => {
     await laptop.close();
   });
 
-  test('iPhone stacks both worlds and keeps all controls usable', async ({ browser }, testInfo) => {
+  test('iPhone stacks both worlds and keeps all controls usable', { tag: '@functional' }, async ({ browser }, testInfo) => {
     const context = await browser.newContext({ ...devices['iPhone 15 Pro'], ignoreHTTPSErrors: true });
     const page = await context.newPage();
     const issues = await loadRcpan(page, 'dark');
@@ -252,7 +252,7 @@ test.describe('RCPAN dispute microscope', () => {
     await context.close();
   });
 
-  test('playground switches 1-4 tokens and all court placements', async ({ page }, testInfo) => {
+  test('playground switches 1-4 tokens and all court placements', { tag: '@functional' }, async ({ page }, testInfo) => {
     const issues = await loadRcpan(page, 'dark');
     const tokenSelect = page.locator('.rcpan-lab label', { hasText: /^Tokens/ }).locator('select');
     const courtSelect = page.locator('.rcpan-lab label', { hasText: /^Court position/ }).locator('select');

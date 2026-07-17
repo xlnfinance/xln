@@ -650,7 +650,7 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     await gotoApp(page, { appBaseUrl: APP_BASE_URL, settleMs: 600 });
   });
 
-  test('reload restores complex runtime WAL chain from genesis snapshot when #nosnapshot is set', async ({ page, browser }) => {
+  test('reload restores complex runtime WAL chain from genesis snapshot when #nosnapshot is set', { tag: '@resilience' }, async ({ page, browser }) => {
     const bobContext = await browser.newContext({ ignoreHTTPSErrors: true });
     const bobPage = await bobContext.newPage();
     const attachPersistenceConsole = (targetPage: Page, label: string) => targetPage.on('console', msg => {

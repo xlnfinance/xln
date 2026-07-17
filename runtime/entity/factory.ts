@@ -3,13 +3,13 @@
  * Entity creation, ID generation, and entity utility functions
  */
 
-import { ethers } from 'ethers';
+import { ethers, type TransactionReceipt } from 'ethers';
 
-import { getCachedSignerAddress } from '../account/crypto';
-import { createJAdapter } from '../jadapter';
-import { buildJAdapterConfigFromJurisdiction } from '../jadapter/jurisdiction';
+import { getSignerAddress, getSignerPrivateKey } from '../account/crypto';
+import { canonicalJStackAddress } from '../jadapter/stack-binding';
+import type { JAdapter } from '../jadapter/types';
 import { createStructuredLogger, shortHash, shortId } from '../infra/logger';
-import type { ConsensusConfig, EntityType, JurisdictionConfig } from '../types';
+import type { ConsensusConfig, EntityType, Env, JurisdictionConfig } from '../types';
 import { DEBUG } from '../utils';
 
 // Extend globalThis to include our entity counter
@@ -22,22 +22,69 @@ let namedRequestCounter = 0;
 const factoryLog = createStructuredLogger('entity.factory');
 
 // Entity encoding utilities
-const resolveValidatorAddress = (validator: string): string => {
+type BoardSignerContext = Pick<Env, 'runtimeSeed'>;
+
+export type BoardMemberInput = string | Readonly<{
+  name: string;
+  weight: number | bigint;
+}>;
+
+type NormalizedBoardMember = Readonly<{ name: string; weight: bigint }>;
+
+const normalizeBoardMembers = (members: readonly BoardMemberInput[]): NormalizedBoardMember[] => {
+  if (members.length === 0) throw new Error('Board must contain at least one member');
+  const seen = new Set<string>();
+  return members.map((member, index) => {
+    const name = (typeof member === 'string' ? member : member.name).trim();
+    const weight = typeof member === 'string' ? 1n : BigInt(member.weight);
+    const key = name.toLowerCase();
+    if (!name) throw new Error(`Board member missing: index=${index}`);
+    if (seen.has(key)) throw new Error(`Board member duplicate: ${name}`);
+    if (weight <= 0n || weight > 0xffffn) {
+      throw new Error(`Board voting power out of range: ${name}=${weight.toString()}`);
+    }
+    seen.add(key);
+    return { name, weight };
+  });
+};
+
+const boardConfig = (
+  members: readonly NormalizedBoardMember[],
+  threshold: bigint,
+  jurisdiction?: JurisdictionConfig,
+): ConsensusConfig => ({
+  mode: 'proposer-based',
+  threshold,
+  validators: members.map((member) => member.name),
+  shares: Object.fromEntries(members.map((member) => [member.name, member.weight])),
+  // Consensus configs are values, not alias graphs. Keeping the caller's
+  // object here lets Bun 1.3 corrupt a later repeated jurisdiction during a
+  // structured clone of a multi-entity registration request.
+  ...(jurisdiction ? { jurisdiction: structuredClone(jurisdiction) } : {}),
+});
+
+const resolveValidatorAddress = (validator: string, env?: BoardSignerContext): string => {
   if (validator.startsWith('0x') && validator.length === 42) {
     return ethers.getAddress(validator);
   }
-  if (validator.startsWith('0x') && validator.length === 66) {
-    return ethers.getAddress(`0x${validator.slice(-40)}`);
+  if (validator.startsWith('0x') && (validator.length === 68 || validator.length === 132)) {
+    return ethers.computeAddress(validator);
   }
-  const derived = getCachedSignerAddress(validator);
+  const derived = env ? getSignerAddress(env, validator) : null;
   if (!derived) {
-    throw new Error(`Cannot derive address for validator ${validator}`);
+    throw new Error(
+      `BOARD_VALIDATOR_ADDRESS_REQUIRED:${validator}` +
+        (env ? '' : ':numeric aliases require explicit Env'),
+    );
   }
   return ethers.getAddress(derived);
 };
 
-const toBoardEntityId = (validator: string): string => {
-  const address = resolveValidatorAddress(validator);
+const toBoardEntityId = (validator: string, env?: BoardSignerContext): string => {
+  if (/^0x[0-9a-f]{64}$/i.test(validator)) {
+    return validator.toLowerCase();
+  }
+  const address = resolveValidatorAddress(validator, env);
   return ethers.zeroPadValue(address, 32);
 };
 
@@ -48,9 +95,42 @@ const toUint16 = (value: bigint, label: string): number => {
   return Number(value);
 };
 
-export const encodeBoard = (config: ConsensusConfig): string => {
-  const entityIds = config.validators.map(toBoardEntityId);
-  const votingPowers = config.validators.map((validator) => toUint16(config.shares[validator] || 1n, `weight(${validator})`));
+export const encodeBoard = (config: ConsensusConfig, env?: BoardSignerContext): string => {
+  if (config.validators.length === 0) throw new Error('Board must contain at least one member');
+  const normalizedValidators = new Set<string>();
+  for (const validator of config.validators) {
+    const normalized = validator.trim().toLowerCase();
+    if (!normalized || normalizedValidators.has(normalized)) {
+      throw new Error(`Board validator duplicate or empty: ${validator}`);
+    }
+    normalizedValidators.add(normalized);
+  }
+  const proposer = config.validators[0]!;
+  if (!/^0x[0-9a-f]{40}$/i.test(proposer)) {
+    throw new Error(`BOARD_PROPOSER_EOA_REQUIRED:${proposer}`);
+  }
+  ethers.getAddress(proposer);
+  const normalizedShares = new Map<string, bigint>();
+  for (const [rawSignerId, share] of Object.entries(config.shares)) {
+    const signerId = rawSignerId.trim().toLowerCase();
+    if (!signerId || normalizedShares.has(signerId)) {
+      throw new Error(`Board share signer duplicate or empty: ${rawSignerId}`);
+    }
+    if (!normalizedValidators.has(signerId)) {
+      throw new Error(`Board share signer is not a validator: ${rawSignerId}`);
+    }
+    if (typeof share !== 'bigint' || share <= 0n) {
+      throw new Error(`Board voting power must be positive: ${rawSignerId}`);
+    }
+    normalizedShares.set(signerId, share);
+  }
+  const entityIds = config.validators.map((validator) => toBoardEntityId(validator, env));
+  const votingPowers = config.validators.map((validator) => {
+    const share = normalizedShares.get(validator.trim().toLowerCase());
+    if (share === undefined) throw new Error(`Board voting power missing: ${validator}`);
+    return toUint16(share, `weight(${validator})`);
+  });
+  if (config.threshold <= 0n) throw new Error(`Board threshold must be positive: ${config.threshold}`);
   const threshold = toUint16(config.threshold, 'threshold');
 
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
@@ -68,34 +148,12 @@ export const hashBoard = (encodedBoard: string): string => {
 };
 
 export const generateLazyEntityId = (
-  validators: { name: string; weight: number }[] | string[],
+  validators: readonly BoardMemberInput[],
   threshold: bigint,
+  env?: BoardSignerContext,
 ): string => {
-  // Create deterministic entity ID from quorum composition
-  let validatorData: { name: string; weight: bigint }[];
-
-  // Handle both formats: array of objects or array of strings (assume weight=1)
-  if (typeof validators[0] === 'string') {
-    validatorData = (validators as string[]).map(name => ({ name, weight: 1n }));
-  } else {
-    validatorData = (validators as { name: string; weight: number }[]).map(v => ({
-      name: v.name,
-      weight: BigInt(v.weight),
-    }));
-  }
-
-  const shares: { [validatorId: string]: bigint } = {};
-  const validatorIds = validatorData.map(v => v.name);
-  for (const validator of validatorData) {
-    shares[validator.name] = validator.weight;
-  }
-
-  const encodedBoard = encodeBoard({
-    mode: 'proposer-based',
-    threshold,
-    validators: validatorIds,
-    shares,
-  });
+  const members = normalizeBoardMembers(validators);
+  const encodedBoard = encodeBoard(boardConfig(members, threshold), env);
   return hashBoard(encodedBoard);
 };
 
@@ -198,33 +256,23 @@ export const extractNumberFromEntityId = (entityId: string): number => {
 // 1. LAZY ENTITIES (Free, instant)
 export const createLazyEntity = (
   name: string,
-  validators: string[],
+  validators: readonly BoardMemberInput[],
   threshold: bigint,
   jurisdiction?: JurisdictionConfig,
+  env?: BoardSignerContext,
 ): { config: ConsensusConfig; executionTimeMs: number } => {
-  const entityId = generateLazyEntityId(validators, threshold);
+  const members = normalizeBoardMembers(validators);
+  const config = boardConfig(members, threshold, jurisdiction);
+  const entityId = hashBoard(encodeBoard(config, env));
 
   if (DEBUG) {
     factoryLog.debug('lazy.create', {
       name,
       entity: shortId(entityId, 8),
-      validators: validators.map(validator => shortId(validator, 8)),
+      validators: members.map(member => shortId(member.name, 8)),
       threshold: threshold.toString(),
     });
   }
-
-  const shares: { [validatorId: string]: bigint } = {};
-  validators.forEach(validator => {
-    shares[validator] = 1n; // Equal voting power for simplicity
-  });
-
-  const config: ConsensusConfig = {
-    mode: 'proposer-based',
-    threshold,
-    validators,
-    shares,
-    ...(jurisdiction && { jurisdiction }),
-  };
 
   const executionTimeMs = 0;
   if (DEBUG) factoryLog.debug('lazy.created', { name, entity: shortId(entityId, 8), executionTimeMs });
@@ -232,26 +280,120 @@ export const createLazyEntity = (
   return { config, executionTimeMs };
 };
 
+export const getTrustedRegistrationAdapter = (
+  env: Env,
+  jurisdiction: JurisdictionConfig,
+): JAdapter => {
+  const expectedChainId = Number(jurisdiction.chainId);
+  if (!Number.isSafeInteger(expectedChainId) || expectedChainId <= 0) {
+    throw new Error(`NUMBERED_REGISTRATION_CHAIN_ID_INVALID:${String(jurisdiction.chainId)}`);
+  }
+  const expectedDepository = canonicalJStackAddress(
+    'numbered_registration:depository',
+    jurisdiction.depositoryAddress,
+  );
+  const expectedEntityProvider = canonicalJStackAddress(
+    'numbered_registration:entity_provider',
+    jurisdiction.entityProviderAddress,
+  );
+  const candidates = new Set<JAdapter>();
+  if (env.jAdapter) candidates.add(env.jAdapter);
+  for (const replica of env.jReplicas.values()) {
+    if (replica.jadapter) candidates.add(replica.jadapter);
+  }
+  const matches = [...candidates].filter((adapter) =>
+    adapter.chainId === expectedChainId &&
+    canonicalJStackAddress('numbered_registration:adapter_depository', adapter.addresses.depository) === expectedDepository &&
+    canonicalJStackAddress('numbered_registration:adapter_entity_provider', adapter.addresses.entityProvider) === expectedEntityProvider
+  );
+  if (matches.length !== 1) {
+    throw new Error(
+      `NUMBERED_REGISTRATION_TRUSTED_ADAPTER_${matches.length === 0 ? 'MISSING' : 'AMBIGUOUS'}` +
+      `:chainId=${expectedChainId}:depository=${expectedDepository}:entityProvider=${expectedEntityProvider}`,
+    );
+  }
+  return matches[0]!;
+};
+
+export const getNumberedRegistrationWallet = (
+  env: Env,
+  jadapter: JAdapter,
+  registrationSignerId: string,
+): ethers.Wallet => {
+  const normalizedSignerId = String(registrationSignerId || '').trim();
+  if (!normalizedSignerId) throw new Error('NUMBERED_REGISTRATION_SIGNER_REQUIRED');
+  const wallet = new ethers.Wallet(
+    ethers.hexlify(getSignerPrivateKey(env, normalizedSignerId)),
+    jadapter.provider,
+  );
+  if (ethers.isAddress(normalizedSignerId) && wallet.address.toLowerCase() !== normalizedSignerId.toLowerCase()) {
+    throw new Error(`NUMBERED_REGISTRATION_SIGNER_KEY_MISMATCH:${normalizedSignerId}:${wallet.address}`);
+  }
+  return wallet;
+};
+
+export type NumberedEntityRegistration = Readonly<{
+  entityNumber: number;
+  entityId: string;
+  logIndex: number;
+}>;
+
+export const parseNumberedEntityRegistrationReceipt = (
+  jadapter: JAdapter,
+  receipt: TransactionReceipt,
+  expectedBoardHashes: readonly string[],
+): NumberedEntityRegistration[] => {
+  if (receipt.status !== 1) throw new Error('NUMBERED_REGISTRATION_RECEIPT_FAILED');
+  const entityProviderAddress = canonicalJStackAddress(
+    'numbered_registration:receipt_entity_provider',
+    jadapter.addresses.entityProvider,
+  );
+  const events = receipt.logs
+    .filter((log) => ethers.getAddress(log.address) === entityProviderAddress)
+    .map((log) => ({ log, event: jadapter.entityProvider.interface.parseLog(log) }))
+    .filter(({ event }) => event?.name === 'EntityRegistered');
+  if (events.length !== expectedBoardHashes.length) {
+    throw new Error(
+      `NUMBERED_REGISTRATION_EVENT_COUNT_INVALID:expected=${expectedBoardHashes.length}:actual=${events.length}`,
+    );
+  }
+  return events.map(({ event, log }, index) => {
+    const expectedBoardHash = expectedBoardHashes[index]!;
+    if (String(event!.args['boardHash']).toLowerCase() !== expectedBoardHash.toLowerCase()) {
+      throw new Error(`NUMBERED_REGISTRATION_EVENT_BOARD_HASH_MISMATCH:index=${index}`);
+    }
+    const rawEntityNumber = event!.args['entityNumber'];
+    const entityNumber = Number(rawEntityNumber);
+    if (!Number.isSafeInteger(entityNumber) || entityNumber <= 0 || BigInt(entityNumber) !== BigInt(rawEntityNumber)) {
+      throw new Error(`NUMBERED_REGISTRATION_ENTITY_NUMBER_INVALID:${String(rawEntityNumber)}`);
+    }
+    if (index > 0 && entityNumber !== Number(events[index - 1]!.event!.args['entityNumber']) + 1) {
+      throw new Error(`NUMBERED_REGISTRATION_EVENT_ORDER_INVALID:index=${index}`);
+    }
+    const entityId = generateNumberedEntityId(entityNumber);
+    if (String(event!.args['entityId']).toLowerCase() !== entityId) {
+      throw new Error(`NUMBERED_REGISTRATION_EVENT_ENTITY_ID_MISMATCH:index=${index}`);
+    }
+    return { entityNumber, entityId, logIndex: log.index };
+  });
+};
+
 // 2. NUMBERED ENTITIES (Small gas cost)
 export const createNumberedEntity = async (
   name: string,
-  validators: string[],
+  validators: readonly BoardMemberInput[],
   threshold: bigint,
   jurisdiction: JurisdictionConfig,
+  env: Env,
+  registrationSignerId: string,
 ): Promise<{ config: ConsensusConfig; entityNumber: number; entityId: string }> => {
   if (!jurisdiction) {
     throw new Error('Jurisdiction required for numbered entity registration');
   }
 
-  const boardHash = hashBoard(
-    encodeBoard({
-      mode: 'proposer-based',
-      threshold,
-      validators,
-      shares: validators.reduce((acc, v) => ({ ...acc, [v]: 1n }), {}),
-      jurisdiction,
-    }),
-  );
+  const members = normalizeBoardMembers(validators);
+  const requestedConfig = boardConfig(members, threshold, jurisdiction);
+  const boardHash = hashBoard(encodeBoard(requestedConfig, env));
 
   if (DEBUG) {
     factoryLog.debug('numbered.create', {
@@ -262,31 +404,25 @@ export const createNumberedEntity = async (
   }
 
   try {
-    const jadapter = await createJAdapter(buildJAdapterConfigFromJurisdiction(jurisdiction));
-
-    const nextEntityNumber = await jadapter.entityProvider.nextNumber();
-    const tx = await jadapter.entityProvider.registerNumberedEntity(boardHash);
+    const jadapter = getTrustedRegistrationAdapter(env, jurisdiction);
+    const entityProvider = jadapter.entityProvider.connect(
+      getNumberedRegistrationWallet(env, jadapter, registrationSignerId),
+    );
+    const tx = await entityProvider.registerNumberedEntity(boardHash);
     const receipt = await tx.wait();
-    if (!receipt || receipt.status === 0) {
-      throw new Error('registerNumberedEntity failed');
-    }
-    const entityNumber = Number(nextEntityNumber);
-
-    const entityId = generateNumberedEntityId(entityNumber);
+    if (!receipt) throw new Error('registerNumberedEntity failed');
+    const registration = parseNumberedEntityRegistrationReceipt(jadapter, receipt, [boardHash])[0]!;
+    const { entityNumber, entityId } = registration;
 
     if (DEBUG) factoryLog.debug('numbered.registered', { name, entityNumber, entity: shortId(entityId, 8) });
 
-    const shares: { [validatorId: string]: bigint } = {};
-    validators.forEach(validator => {
-      shares[validator] = 1n;
-    });
-
     const config: ConsensusConfig = {
-      mode: 'proposer-based',
-      threshold,
-      validators,
-      shares,
-      jurisdiction: { ...jurisdiction, registrationBlock: receipt.blockNumber },
+      ...requestedConfig,
+      jurisdiction: {
+        ...jurisdiction,
+        entityProviderDeploymentBlock: jadapter.entityProviderDeploymentBlock,
+        registrationBlock: receipt.blockNumber,
+      },
     };
 
     return { config, entityNumber, entityId };
@@ -304,42 +440,45 @@ export const createNumberedEntity = async (
  * Optimized for scenarios importing many entities (e.g., PhantomGrid 1000 nodes)
  */
 export const createNumberedEntitiesBatch = async (
-  entities: Array<{ name: string; validators: string[]; threshold: bigint }>,
+  entities: readonly Readonly<{
+    name: string;
+    validators: readonly BoardMemberInput[];
+    threshold: bigint;
+  }>[],
   jurisdiction: JurisdictionConfig,
+  env: Env,
+  registrationSignerId: string,
 ): Promise<Array<{ config: ConsensusConfig; entityNumber: number; entityId: string }>> => {
   if (!jurisdiction) {
     throw new Error('Jurisdiction required for numbered entity registration');
   }
+  if (entities.length === 0) throw new Error('NUMBERED_REGISTRATION_BATCH_EMPTY');
 
   if (DEBUG) factoryLog.debug('numbered.batch_create', { count: entities.length });
 
-  // Build configs for all entities
-  const configs: ConsensusConfig[] = entities.map(e => ({
-    mode: 'proposer-based' as const,
-    threshold: e.threshold,
-    validators: e.validators,
-    shares: e.validators.reduce((acc, v) => ({ ...acc, [v]: 1n }), {}),
-    jurisdiction,
-  }));
+  const configs = entities.map((entity) =>
+    boardConfig(normalizeBoardMembers(entity.validators), entity.threshold, jurisdiction));
 
-  const boardHashes = configs.map((config) => hashBoard(encodeBoard(config)));
-  const jadapter = await createJAdapter(buildJAdapterConfigFromJurisdiction(jurisdiction));
-  const nextEntityNumber = await jadapter.entityProvider.nextNumber();
-  const tx = await jadapter.entityProvider.registerNumberedEntitiesBatch(boardHashes);
+  const boardHashes = configs.map((config) => hashBoard(encodeBoard(config, env)));
+  const jadapter = getTrustedRegistrationAdapter(env, jurisdiction);
+  const entityProvider = jadapter.entityProvider.connect(
+    getNumberedRegistrationWallet(env, jadapter, registrationSignerId),
+  );
+  const tx = await entityProvider.registerNumberedEntitiesBatch(boardHashes);
   const receipt = await tx.wait();
-  if (!receipt || receipt.status === 0) {
-    throw new Error('registerNumberedEntitiesBatch failed');
-  }
-  const entityNumbers = boardHashes.map((_, index) => Number(nextEntityNumber) + index);
+  if (!receipt) throw new Error('registerNumberedEntitiesBatch failed');
+  const registrations = parseNumberedEntityRegistrationReceipt(jadapter, receipt, boardHashes);
 
-  // Build results
-  return entityNumbers.map((entityNumber, i) => {
-    const entityId = generateNumberedEntityId(entityNumber);
+  return registrations.map(({ entityNumber, entityId }, i) => {
     const preparedConfig = configs[i];
     if (!preparedConfig) throw new Error(`Missing config for entity ${i}`);
     const config: ConsensusConfig = {
       ...preparedConfig,
-      jurisdiction: { ...jurisdiction, registrationBlock: receipt.blockNumber },
+      jurisdiction: {
+        ...jurisdiction,
+        entityProviderDeploymentBlock: jadapter.entityProviderDeploymentBlock,
+        registrationBlock: receipt.blockNumber,
+      },
     };
 
     if (DEBUG) {

@@ -14,6 +14,9 @@ const serverLog = createStructuredLogger('server');
 const normalizeJurisdictionDisplayName = (value: unknown): string =>
   String(value || '').trim();
 
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  isRecord(value) && !Array.isArray(value);
+
 export type UpdatedRuntimeJurisdiction = {
   key: string;
   name: string;
@@ -24,7 +27,14 @@ export const updateJurisdictionsJson = async (
   rpcUrl?: string,
   chainIdOverride?: number,
   targetKeyOverride?: string,
+  entityProviderDeploymentBlockOverride?: number,
 ): Promise<UpdatedRuntimeJurisdiction | null> => {
+  const entityProviderDeploymentBlock = Number(entityProviderDeploymentBlockOverride);
+  if (!Number.isSafeInteger(entityProviderDeploymentBlock) || entityProviderDeploymentBlock < 1) {
+    throw new Error(
+      `JURISDICTIONS_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_INVALID:${String(entityProviderDeploymentBlockOverride)}`,
+    );
+  }
   try {
     const canonicalPath = resolveJurisdictionsJsonPath();
     const publicRpc = toPublicRpcUrl(String(process.env['PUBLIC_RPC'] || rpcUrl || '/rpc'));
@@ -37,13 +47,18 @@ export const updateJurisdictionsJson = async (
     let data: MutableJurisdictionsJson = {};
     try {
       const parsed = JSON.parse(await readFile(canonicalPath, 'utf-8'));
-      data = isRecord(parsed) ? parsed as MutableJurisdictionsJson : {};
-    } catch {
+      if (!isPlainRecord(parsed)) throw new Error('JURISDICTIONS_ROOT_INVALID');
+      data = parsed as MutableJurisdictionsJson;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       data = {};
     }
     const updatedAt = new Date().toISOString();
     data['version'] = String(data['version'] || '').trim() || '1';
     data['lastUpdated'] = updatedAt;
+    if (data.defaults !== undefined && !isPlainRecord(data.defaults)) {
+      throw new Error('JURISDICTIONS_DEFAULTS_INVALID');
+    }
     const defaults = data.defaults ?? {
       timeout: 30000,
       retryAttempts: 3,
@@ -61,6 +76,9 @@ export const updateJurisdictionsJson = async (
     };
     data.defaults = defaults;
     if (data['testnet']) delete data['testnet'];
+    if (data.jurisdictions !== undefined && !isPlainRecord(data.jurisdictions)) {
+      throw new Error('JURISDICTIONS_MAP_INVALID');
+    }
     const jurisdictions: Record<string, WritableJurisdictionEntry> = data.jurisdictions ?? {};
     const rawTargetKeyOverride = String(targetKeyOverride || '').trim();
     const requestedTargetKey = rawTargetKeyOverride ? normalizeJurisdictionKey(rawTargetKeyOverride) : '';
@@ -76,6 +94,7 @@ export const updateJurisdictionsJson = async (
       primary: previous['primary'] ?? true,
       status: previous['status'] ?? 'active',
       chainId: chainIdOverride ?? 31337,
+      entityProviderDeploymentBlock,
       rpc: publicRpc,
       rebalancePolicyUsd: previous['rebalancePolicyUsd'] ?? defaults.rebalancePolicyUsd,
       contracts: {
@@ -95,8 +114,8 @@ export const updateJurisdictionsJson = async (
     serverLog.info('jurisdictions.updated', { path: canonicalPath });
     return { key: targetKey, name: displayName };
   } catch (err) {
-    serverLog.warn('jurisdictions.update_failed', { error: (err as Error).message });
-    return null;
+    serverLog.error('jurisdictions.update_failed', { error: (err as Error).message });
+    throw err;
   }
 };
 
@@ -134,6 +153,7 @@ export const buildRuntimeJurisdictionsJson = async (env?: Env | null): Promise<s
         rpcs?: string[];
         depositoryAddress?: string;
         entityProviderAddress?: string;
+        entityProviderDeploymentBlock?: number;
         contracts?: {
           account?: string;
           depository?: string;
@@ -141,6 +161,7 @@ export const buildRuntimeJurisdictionsJson = async (env?: Env | null): Promise<s
           deltaTransformer?: string;
         };
         jadapter?: {
+          entityProviderDeploymentBlock?: number;
           addresses?: {
             account?: string;
             depository?: string;
@@ -160,6 +181,14 @@ export const buildRuntimeJurisdictionsJson = async (env?: Env | null): Promise<s
     String(addresses.entityProvider || replica.entityProviderAddress || replica.contracts?.entityProvider || '').trim();
   const deltaTransformer = String(addresses.deltaTransformer || replica.contracts?.deltaTransformer || '').trim();
   if (!account || !depository || !entityProvider || !deltaTransformer) return null;
+  const entityProviderDeploymentBlock = Number(
+    replica.entityProviderDeploymentBlock ?? replica.jadapter?.entityProviderDeploymentBlock,
+  );
+  if (!Number.isSafeInteger(entityProviderDeploymentBlock) || entityProviderDeploymentBlock < 1) {
+    throw new Error(
+      `RUNTIME_JURISDICTION_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_INVALID:${String(entityProviderDeploymentBlock)}`,
+    );
+  }
 
   const version = await readCanonicalJurisdictionsVersion();
   const networkVersion = await readCanonicalNetworkVersion();
@@ -179,6 +208,7 @@ export const buildRuntimeJurisdictionsJson = async (env?: Env | null): Promise<s
         primary: true,
         status: 'active',
         chainId: Number(replica.chainId || 31337),
+        entityProviderDeploymentBlock,
         rpc: toPublicRpcUrl(String(process.env['PUBLIC_RPC'] || replica.rpcs?.[0] || '/rpc')),
         contracts: {
           account,

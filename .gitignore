@@ -88,10 +88,11 @@ nul
 
 
 # Development database
+.xln-db/
 db/
 db-*/
 db-tmp/
-data/anvil-state.json
+data/anvil*-state.json
 data/storage-health-history.json
 
 # Lock files (use bun.lock only)

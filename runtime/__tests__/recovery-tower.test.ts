@@ -1,10 +1,12 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { Wallet } from 'ethers';
+import { Wallet, getBytes, hexlify } from 'ethers';
 
 import { serializeTaggedJson, deserializeTaggedJson } from '../protocol/serialization';
 import {
+  closeInfraDb,
+  closeRuntimeDb,
   createEmptyEnv,
   enqueueRuntimeInput,
   process as processRuntime,
@@ -30,10 +32,41 @@ import { createWatchtowerStore } from '../watchtower/store';
 import { handleRecoveryDiscover, handleTowerAppointment, handleTowerRestore } from '../watchtower/http';
 import type { JReplica, JurisdictionConfig } from '../types';
 import type { Profile } from '../networking/gossip';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
+import { generateLazyEntityId } from '../entity/factory';
+import {
+  buildEntityFrameAuthority,
+  computeCanonicalEntityConsensusStateHash,
+  computeEntityFrameAuthorityRoot,
+} from '../entity/consensus/state-root';
+import { buildSingleSignerHanko } from '../hanko/batch';
+import { deriveEncryptionKeyPair, pubKeyToHex } from '../networking/p2p-crypto';
+import { computeProfileHash, signProfileRuntimeRoute } from '../networking/profile-signing';
+import { computeValidatorEncryptionAttestationDigest } from '../protocol/htlc/validator-encryption';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const x25519 = (byte: string): string => `0x${byte.repeat(32)}`;
 let runtimeCounter = 0;
+const trackedRuntimeEnvs = new Set<ReturnType<typeof createEmptyEnv>>();
+
+const trackRuntimeEnv = <T extends ReturnType<typeof createEmptyEnv>>(env: T): T => {
+  trackedRuntimeEnvs.add(env);
+  return env;
+};
+
+afterEach(async () => {
+  const errors: Error[] = [];
+  for (const env of Array.from(trackedRuntimeEnvs).reverse()) {
+    trackedRuntimeEnvs.delete(env);
+    const results = await Promise.allSettled([closeRuntimeDb(env), closeInfraDb(env)]);
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        errors.push(result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
+      }
+    }
+  }
+  if (errors.length > 0) throw new AggregateError(errors, 'RECOVERY_TOWER_TEST_ENV_CLEANUP_FAILED');
+});
 
 const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): JurisdictionConfig => {
   const jurisdiction: JurisdictionConfig = {
@@ -63,15 +96,17 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): Jurisdicti
 const buildRuntimeEnv = async () => {
   const runtimeSeed = 'recovery tower runtime seed';
   runtimeCounter += 1;
-  const wallet = Wallet.createRandom();
-  const runtimeId = wallet.address.toLowerCase();
-  const env = createEmptyEnv(runtimeSeed);
-  env.runtimeId = runtimeId;
+  const env = trackRuntimeEnv(createEmptyEnv(runtimeSeed));
+  const runtimeId = env.runtimeId!;
+  const wallet = new Wallet(hexlify(deriveSignerKeySync(runtimeSeed, '1')));
+  if (wallet.address.toLowerCase() !== runtimeId) {
+    throw new Error('RECOVERY_TEST_TRUSTED_RUNTIME_SIGNER_MISMATCH');
+  }
   env.dbNamespace = `${runtimeId}-${Date.now()}-${runtimeCounter}`;
   env.quietRuntimeLogs = true;
 
   const jurisdiction = installJurisdiction(env);
-  const entityId = `0x${'cd'.repeat(32)}`;
+  const entityId = generateLazyEntityId([runtimeId], 1n, env).toLowerCase();
 
   enqueueRuntimeInput(env, {
     runtimeTxs: [{
@@ -98,45 +133,65 @@ const buildRuntimeEnv = async () => {
   return { env, runtimeSeed, runtimeId, entityId, wallet, jurisdiction };
 };
 
-const buildRecoveryHubProfile = (
-  entityId: string,
-  runtimeId: string,
+const buildRecoveryHubProfile = async (
   jurisdiction: JurisdictionConfig,
-): Profile => ({
-  entityId,
-  name: 'Recovery Hub',
-  avatar: '',
-  bio: '',
-  website: '',
-  lastUpdated: 2,
-  runtimeId,
-  runtimeEncPubKey: x25519('66'),
-  publicAccounts: [],
-  wsUrl: null,
-  relays: [],
-  metadata: {
-    entityEncPubKey: x25519('77'),
-    isHub: true,
-    routingFeePPM: 1,
-    baseFee: 0n,
-    jurisdiction: {
-      name: jurisdiction.name,
-      chainId: jurisdiction.chainId,
-      entityProviderAddress: jurisdiction.entityProviderAddress,
-      depositoryAddress: jurisdiction.depositoryAddress,
+): Promise<Profile> => {
+  const wallet = new Wallet(`0x${'66'.repeat(32)}`);
+  const runtimeId = wallet.address.toLowerCase();
+  const entityId = generateLazyEntityId([runtimeId], 1n).toLowerCase();
+  const signingPublicKey = wallet.signingKey.publicKey.toLowerCase();
+  const encryptionPublicKey = pubKeyToHex(
+    deriveEncryptionKeyPair(`${wallet.privateKey}:${entityId}:htlc-v1`).publicKey,
+  );
+  const attestationBody = {
+    version: 'xln:validator-encryption-key:v1' as const,
+    entityId,
+    signerId: runtimeId,
+    signer: runtimeId,
+    publicKey: signingPublicKey,
+    weight: 1,
+    encryptionPublicKey,
+  };
+  const attestation = {
+    ...attestationBody,
+    signature: wallet.signingKey.sign(computeValidatorEncryptionAttestationDigest(attestationBody)).serialized,
+  };
+  const profile: Profile = {
+    entityId,
+    name: 'Recovery Hub',
+    avatar: '',
+    bio: '',
+    website: '',
+    lastUpdated: 2,
+    runtimeId,
+    runtimeEncPubKey: x25519('66'),
+    publicAccounts: [],
+    wsUrl: null,
+    relays: [],
+    metadata: {
+      isHub: true,
+      routingFeePPM: 1,
+      baseFee: 0n,
+      jurisdiction: {
+        name: jurisdiction.name,
+        chainId: jurisdiction.chainId,
+        entityProviderAddress: jurisdiction.entityProviderAddress,
+        depositoryAddress: jurisdiction.depositoryAddress,
+      },
+      board: {
+        threshold: 1,
+        validators: [{ signer: runtimeId, weight: 1, signerId: runtimeId, publicKey: signingPublicKey }],
+        encryptionAttestations: [attestation],
+      },
     },
-    board: {
-      threshold: 1,
-      validators: [{
-        signer: runtimeId,
-        weight: 1,
-        signerId: runtimeId,
-        publicKey: x25519('88'),
-      }],
-    },
-  },
-  accounts: [],
-});
+    accounts: [],
+  };
+  const profileHash = computeProfileHash(profile);
+  profile.metadata.profileHanko = buildSingleSignerHanko(entityId, profileHash, wallet.privateKey);
+  const signingEnv = createEmptyEnv('recovery-profile-route-fixture');
+  registerSignerKey(signingEnv, runtimeId, getBytes(wallet.privateKey));
+  return signProfileRuntimeRoute(signingEnv, profile, runtimeId);
+};
 
 describe('runtime recovery tower', () => {
   test('action lookup keys stay deterministic and separate from blind backup lookup keys', async () => {
@@ -193,10 +248,10 @@ describe('runtime recovery tower', () => {
 
     const encrypted = await encryptRuntimeRecoveryBundle(bundle, runtimeSeed);
     const decrypted = await decryptRuntimeRecoveryBundle(encrypted, runtimeSeed);
-    const restoredEnv = await restoreEnvFromCheckpointSnapshot(decrypted.checkpoint!, {
+    const restoredEnv = trackRuntimeEnv(await restoreEnvFromCheckpointSnapshot(decrypted.checkpoint!, {
       runtimeSeed,
       runtimeId,
-    });
+    }));
 
     const originalPersistedHash = computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(env));
     const restoredPersistedHash = computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(restoredEnv));
@@ -218,9 +273,10 @@ describe('runtime recovery tower', () => {
 
   test('recovery checkpoint carries gossip profiles needed for restored openAccount routing', async () => {
     const { env, runtimeSeed, runtimeId, entityId, jurisdiction } = await buildRuntimeEnv();
-    const hubEntityId = `0x${'45'.repeat(32)}`;
-    const hubRuntimeId = addr('66');
-    env.gossip!.announce(buildRecoveryHubProfile(hubEntityId, hubRuntimeId, jurisdiction));
+    const hubProfile = await buildRecoveryHubProfile(jurisdiction);
+    const hubEntityId = hubProfile.entityId;
+    const hubRuntimeId = hubProfile.runtimeId;
+    env.gossip!.announce(hubProfile);
 
     const bundle = buildRuntimeRecoveryBundle(env, {
       signers: [{
@@ -236,10 +292,10 @@ describe('runtime recovery tower', () => {
     const checkpointGossip = bundle.checkpoint?.['gossip'] as { profiles?: Array<{ entityId?: string }> } | undefined;
     expect(checkpointGossip?.profiles?.some((profile) => profile.entityId === hubEntityId)).toBe(true);
 
-    const restoredEnv = await restoreEnvFromRecoveryBundles([bundle], {
+    const restoredEnv = trackRuntimeEnv(await restoreEnvFromRecoveryBundles([bundle], {
       runtimeSeed,
       runtimeId,
-    });
+    }));
     const restoredHub = restoredEnv.gossip?.getProfiles?.()
       .find((profile) => profile.entityId === hubEntityId);
 
@@ -255,28 +311,33 @@ describe('runtime recovery tower', () => {
     const replica = env.eReplicas.get(replicaKey);
     expect(replica, 'test replica must exist').toBeTruthy();
     const bloatedState = structuredClone(replica!.state);
-    bloatedState.messages = Array.from({ length: 400 }, (_, index) => `transient-${index}-${'x'.repeat(512)}`);
-    replica!.proposal = {
-      height: Number(replica!.state.height || 0) + 1,
+    bloatedState.messages = Array.from({ length: 100 }, (_, index) => `transient-${index}-${'x'.repeat(512)}`);
+    const pendingHeight = Number(replica!.state.height || 0) + 1;
+    const pendingHash = `0x${'a1'.repeat(32)}`;
+    bloatedState.height = pendingHeight;
+    const pendingFrame = {
+      height: pendingHeight,
+      parentFrameHash: replica!.state.height === 0 ? 'genesis' : replica!.state.prevFrameHash!,
+      stateRoot: computeCanonicalEntityConsensusStateHash(bloatedState),
+      authorityRoot: computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(bloatedState)),
+      timestamp: replica!.state.timestamp,
       txs: [],
-      hash: `0x${'a1'.repeat(32)}`,
-      newState: bloatedState,
+      hash: pendingHash,
       leader: {
         proposerSignerId: replica!.signerId,
         view: replica!.state.leaderState?.view ?? 0,
       },
     };
-    replica!.lockedFrame = {
-      height: Number(replica!.state.height || 0) + 1,
-      txs: [],
-      hash: `0x${'b2'.repeat(32)}`,
-      newState: bloatedState,
-      leader: {
-        proposerSignerId: replica!.signerId,
-        view: replica!.state.leaderState?.view ?? 0,
-      },
+    replica!.proposal = pendingFrame;
+    replica!.lockedFrame = structuredClone(pendingFrame);
+    replica!.validatorExecution = {
+      frameHash: pendingHash,
+      height: pendingHeight,
+      state: bloatedState,
+      outputs: [],
+      jOutputs: [],
+      hashesToSign: [],
     };
-    replica!.validatorComputedState = bloatedState;
     env.browserVMState = {
       stateRoot: `0x${'c3'.repeat(32)}`,
       trieData: Array.from({ length: 2_000 }, (_, index) => [
@@ -304,7 +365,7 @@ describe('runtime recovery tower', () => {
     const checkpointReplica = (bundle.checkpoint!['eReplicas'] as Array<[string, Record<string, unknown>]>)[0]?.[1];
     expect(checkpointReplica?.proposal).toBeDefined();
     expect(checkpointReplica?.lockedFrame).toBeDefined();
-    expect(checkpointReplica?.validatorComputedState).toBeDefined();
+    expect(checkpointReplica?.validatorExecution).toBeDefined();
     expect(serializeTaggedJson(bundle).length, 'test fixture must exceed the tower JSON body cap before compression').toBeGreaterThan(128 * 1024);
 
     const encrypted = await encryptRuntimeRecoveryBundle(bundle, runtimeSeed);
@@ -358,19 +419,20 @@ describe('runtime recovery tower', () => {
     });
     const baseHeight = snapshotBundle.runtimeHeight;
     const baseHash = snapshotBundle.checkpointHash!;
-    const secondEntityId = `0x${'ef'.repeat(32)}`;
+    const secondSignerId = deriveSignerAddressSync(runtimeSeed, '2').toLowerCase();
+    const secondEntityId = generateLazyEntityId([secondSignerId], 1n, env).toLowerCase();
 
     enqueueRuntimeInput(env, {
       runtimeTxs: [{
         type: 'importReplica',
         entityId: secondEntityId,
-        signerId: runtimeId,
+        signerId: secondSignerId,
         data: {
           config: {
             mode: 'proposer-based',
             threshold: 1n,
-            validators: [runtimeId],
-            shares: { [runtimeId]: 1n },
+            validators: [secondSignerId],
+            shares: { [secondSignerId]: 1n },
             jurisdiction,
           },
           isProposer: true,
@@ -383,6 +445,12 @@ describe('runtime recovery tower', () => {
 
     const frame = await readPersistedFrameJournal(env, env.height);
     expect(frame, 'journal frame must be persisted before building tail bundle').toBeTruthy();
+    expect(
+      frame?.runtimeMachineBeforeApply,
+      'journal must carry the exact pre-apply durable R-machine',
+    ).toBeTruthy();
+    expect(frame?.runtimeMachine, 'journal must carry the exact durable R-machine').toBeTruthy();
+    expect(frame?.runtimeStateHash).toMatch(/^0x[0-9a-f]{64}$/);
     const tailBundle = buildRuntimeRecoveryBundle(env, {
       signers,
       kind: 'journal_tail',
@@ -391,10 +459,10 @@ describe('runtime recovery tower', () => {
       createdAt: 10_001,
     });
 
-    const restoredEnv = await restoreEnvFromRecoveryBundles([snapshotBundle, tailBundle], {
+    const restoredEnv = trackRuntimeEnv(await restoreEnvFromRecoveryBundles([snapshotBundle, tailBundle], {
       runtimeSeed,
       runtimeId,
-    });
+    }));
 
     const originalPersistedHash = computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(env));
     const restoredPersistedHash = computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(restoredEnv));

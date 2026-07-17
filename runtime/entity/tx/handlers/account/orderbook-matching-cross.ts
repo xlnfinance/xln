@@ -2,8 +2,8 @@ import type { EntityState } from '../../../../types';
 import {
   applyCommand,
   getBookOrder,
+  getSwapLotScale,
   MAX_ORDERBOOK_QTY_LOTS,
-  SWAP_LOT_SCALE,
   type BookState,
   type OrderbookExtState,
 } from '../../../../orderbook';
@@ -40,9 +40,10 @@ const orderbookCrossLog = createStructuredLogger('orderbook.cross');
 
 const cloneCrossBookForSimulation = (book: BookState): BookState => structuredClone(book) as BookState;
 
-const crossBookQtyLots = (baseAmount: bigint): bigint => {
+const crossBookQtyLots = (baseTokenId: number, baseAmount: bigint): bigint => {
   if (baseAmount <= 0n) return 0n;
-  return (baseAmount + SWAP_LOT_SCALE - 1n) / SWAP_LOT_SCALE;
+  const lotScale = getSwapLotScale(baseTokenId);
+  return (baseAmount + lotScale - 1n) / lotScale;
 };
 
 const isWorkingCrossRouteStatus = (status: string | undefined): boolean =>
@@ -233,7 +234,7 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
       // matcher stores whole lots. Use a ceiling lot count for the live row:
       // the route cap still prevents over-settlement, and dropping the final
       // fractional lot would silently remove working liquidity.
-      const canonicalQtyLots = crossBookQtyLots(meta.baseAmount);
+      const canonicalQtyLots = crossBookQtyLots(meta.baseTokenId, meta.baseAmount);
       if (pendingAck) {
         // A cross-j partial fill ACK is an in-flight account settlement, not a
         // book cancel. Keep the row as the canonical hot-cache remainder, but
@@ -283,7 +284,7 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
       rejectInvalidCrossOffer(currentAccountId, rawOffer.offerId, 'invalid-cross-j-route');
       continue;
     }
-    const qtyLots = crossBookQtyLots(marketOffer.baseAmount);
+    const qtyLots = crossBookQtyLots(marketOffer.baseTokenId, marketOffer.baseAmount);
     if (qtyLots <= 0n) {
       rejectInvalidCrossOffer(
         currentAccountId,

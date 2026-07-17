@@ -275,6 +275,17 @@ const startDaemon = async (): Promise<ManagedChild | null> => {
       XLN_RUNTIME_SEED: DAEMON_RUNTIME_SEED,
       XLN_DB_PATH: `${DB_ROOT}/daemon-db`,
     },
+    (() => {
+      const identity = deriveManagedEntityIdentity({
+        name: PROFILE_NAME,
+        seed: SEED,
+        signerLabel: SIGNER_LABEL,
+      });
+      return {
+        startupSignerId: identity.signerId,
+        startupSignerPrivateKey: identity.privateKeyHex,
+      };
+    })(),
   );
   mirrorChildLogs('custody-daemon', daemonChild);
   await waitForHttpReady(
@@ -356,6 +367,7 @@ const startCustodyService = async (identity: { entityId: string; signerId: strin
       CUSTODY_DB_PATH: `${DB_ROOT}/custody.sqlite`,
       CUSTODY_JURISDICTION_ID: JURISDICTION_ID,
     },
+    { daemonRuntimeSeed: DAEMON_RUNTIME_SEED },
   );
   mirrorChildLogs('custody', custodyChild);
   await waitForHttpReady(`http://127.0.0.1:${CUSTODY_PORT}/api/me`, custodyChild, 240_000);

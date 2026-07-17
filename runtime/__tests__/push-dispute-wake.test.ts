@@ -241,7 +241,7 @@ describe('runDisputeWatchSweep', () => {
     // Build a real DisputeStarted log via the same interface the engine uses.
     const { Interface, id } = await import('ethers');
     const iface = new Interface([
-      'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments)',
+      'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments, uint256 disputeTimeout)',
     ]);
     const topicHash = iface.getEvent('DisputeStarted')!.topicHash;
     const encoded = iface.encodeEventLog('DisputeStarted', [
@@ -252,6 +252,7 @@ describe('runDisputeWatchSweep', () => {
       id('seed'),
       '0x',
       '0x',
+      5_910,
     ]);
     const log = { topics: [...encoded.topics] as string[], data: encoded.data, blockNumber: 150 };
 

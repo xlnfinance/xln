@@ -15,6 +15,15 @@ describe('mainnet chain deployment wiring', () => {
     expect(pkg.scripts['deploy:mainnets']).toBe('bun run deploy:chains:mainnet');
   });
 
+  test('Base deploy pins configured USDC to tokenId 1 before publishing the stack', () => {
+    const script = readFileSync(join(repoRoot, 'jurisdictions/scripts/deploy-base.cjs'), 'utf8');
+    expect(script).not.toContain('ID will be assigned on first use');
+    expect(script).toMatch(/tokenToId\s*\(/);
+    expect(script).toMatch(/(?:usdc|token).*Id\s*!==\s*1n/i);
+    expect(script).toContain('await usdc.decimals()');
+    expect(script).toContain('USDC_DECIMALS_MISMATCH');
+  });
+
   test('hardhat has explicit Ethereum testnet and mainnet networks', () => {
     const config = readFileSync(join(repoRoot, 'jurisdictions/hardhat.config.ts'), 'utf8');
     expect(config).toContain('"ethereum-sepolia"');

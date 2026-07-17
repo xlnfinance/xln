@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { compareStableText, serializeTaggedJson } from '../protocol/serialization';
+import { compareStableText } from '../protocol/serialization';
 import type { Env } from '../types';
 import { buildDurableRuntimeMachineSnapshot } from '../wal/snapshot';
 import {
@@ -7,6 +7,7 @@ import {
   computeCanonicalRuntimeStateHash,
 } from './canonical-hash';
 import { encodeBuffer } from './codec';
+import { encodeBinaryPayload } from './binary-codec';
 import {
   docRefCellKey,
   docRefForDoc,
@@ -28,7 +29,12 @@ import {
   keyMerkleRootPrefix,
   normalizeEntityId,
 } from './keys';
-import { iterateKeys, readJsonOrNull, readRawOrNull } from './level';
+import { iterateKeys, readRawOrNull, readValidatedOrNull } from './level';
+import {
+  validateStorageMerkleBranchDocValue,
+  validateStorageMerkleLeafDocValue,
+  validateStorageMerkleRootDocValue,
+} from './authoritative-schema';
 import {
   buildHexKeyedMerkle,
   computeRadixMerkleBranchHash,
@@ -60,7 +66,32 @@ const ENTITY_MERKLE_NAMESPACE = 'runtime-roots' as const;
 const hashBuffer = (value: Buffer | Uint8Array): string =>
   ethers.keccak256(value instanceof Uint8Array ? value : Uint8Array.from(value));
 
-const hashStable = (value: unknown): string => ethers.keccak256(ethers.toUtf8Bytes(serializeTaggedJson(value)));
+const hashStable = (value: unknown): string => ethers.keccak256(encodeBinaryPayload(value, 'msgpack'));
+
+export type StorageReplicaMetaDigestEntry = {
+  key: Uint8Array;
+  value: Uint8Array;
+};
+
+/**
+ * Commits validator-local recovery state without making it Entity consensus
+ * state. Keys are sorted explicitly, and values are independently hashed so
+ * no key/value concatenation ambiguity can produce the same digest.
+ */
+export const computeStorageReplicaMetaDigest = (
+  entries: readonly StorageReplicaMetaDigestEntry[],
+): string => hashStable({
+  kind: 'xln.storage.replicaMeta.v1',
+  entries: entries
+    .map((entry) => ({
+      key: ethers.hexlify(entry.key).toLowerCase(),
+      valueHash: ethers.keccak256(entry.value),
+    }))
+    .sort((left, right) => {
+      const byKey = compareStableText(left.key, right.key);
+      return byKey !== 0 ? byKey : compareStableText(left.valueHash, right.valueHash);
+    }),
+});
 
 const hashToBytes = (hash: string): Buffer =>
   Buffer.from(String(hash || '').replace(/^0x/, '').padStart(64, '0'), 'hex');
@@ -203,7 +234,7 @@ export const computeStorageFrameHash = (record: StorageFrameRecord): string => {
   const stableRecord = { ...record };
   delete stableRecord.frameHash;
   return hashStable({
-    kind: 'xln.storage.frame.v1',
+    kind: 'xln.storage.frame.v2',
     ...stableRecord,
     entityHashes: (stableRecord.entityHashes ?? [])
       .map((entry) => ({
@@ -281,21 +312,19 @@ class PersistedEntityMerkleEditor {
     private readonly entityId: string,
     private readonly rootDoc: StorageMerkleRootDoc,
   ) {
-    this.leafCountValue = Math.max(0, Math.floor(Number(rootDoc.leafCount ?? 0)));
+    this.leafCountValue = rootDoc.leafCount;
   }
 
   static async open(db: RuntimeDbLike, entityId: string): Promise<PersistedEntityMerkleEditor | null> {
     const normalized = normalizeEntityId(entityId);
-    const rootDoc = await readJsonOrNull<StorageMerkleRootDoc>(db, keyMerkleRoot(normalized, ENTITY_MERKLE_NAMESPACE));
+    const rootDoc = await readValidatedOrNull(
+      db,
+      keyMerkleRoot(normalized, ENTITY_MERKLE_NAMESPACE),
+      validateStorageMerkleRootDocValue,
+    );
     if (!rootDoc) return null;
     if (rootDoc.rootKind === 'empty' || rootDoc.leafCount === 0) {
-      return new PersistedEntityMerkleEditor(db, normalized, {
-        ...rootDoc,
-        rootHash: rootDoc.rootHash || EMPTY_RADIX_MERKLE_ROOT,
-        rootKind: 'empty',
-        rootPath: [],
-        leafCount: 0,
-      });
+      return new PersistedEntityMerkleEditor(db, normalized, rootDoc);
     }
     if ((rootDoc.rootKind === 'branch' || rootDoc.rootKind === 'leaf') && Array.isArray(rootDoc.rootPath)) {
       return new PersistedEntityMerkleEditor(db, normalized, rootDoc);
@@ -414,9 +443,10 @@ class PersistedEntityMerkleEditor {
   }
 
   private async loadLeaf(path: number[]): Promise<PersistedMerkleLeafNode> {
-    const doc = await readJsonOrNull<StorageMerkleLeafDoc>(
+    const doc = await readValidatedOrNull(
       this.db,
       keyMerkleLeaf(this.entityId, ENTITY_MERKLE_NAMESPACE, packRadixMerklePath(DEFAULT_ACCOUNT_MERKLE_RADIX, path)),
+      validateStorageMerkleLeafDocValue,
     );
     if (!doc) throw new Error(`STORAGE_MERKLE_LEAF_MISSING: entity=${this.entityId} path=${path.join('.')}`);
     this.initialLeafPaths.add(merklePathKey(doc.path));
@@ -430,9 +460,10 @@ class PersistedEntityMerkleEditor {
   }
 
   private async loadBranch(path: number[]): Promise<PersistedMerkleBranchNode> {
-    const doc = await readJsonOrNull<StorageMerkleBranchDoc>(
+    const doc = await readValidatedOrNull(
       this.db,
       keyMerkleBranch(this.entityId, ENTITY_MERKLE_NAMESPACE, packRadixMerklePath(DEFAULT_ACCOUNT_MERKLE_RADIX, path)),
+      validateStorageMerkleBranchDocValue,
     );
     if (!doc) throw new Error(`STORAGE_MERKLE_BRANCH_MISSING: entity=${this.entityId} path=${path.join('.')}`);
     this.initialBranchPaths.add(merklePathKey(doc.path));
@@ -726,12 +757,12 @@ export const readAllEntityHashDocs = async (db: RuntimeDbLike): Promise<Map<stri
   const docs = new Map<string, StorageEntityHashDoc>();
   for await (const key of iterateKeys(db, { prefix: keyMerkleRootPrefix() })) {
     const entityId = decodeEntityId(key.subarray(1, 33));
-    const rootDoc = await readJsonOrNull<StorageMerkleRootDoc>(db, key);
+    const rootDoc = await readValidatedOrNull(db, key, validateStorageMerkleRootDocValue);
     if (!rootDoc || rootDoc.namespace !== ENTITY_MERKLE_NAMESPACE) continue;
     docs.set(normalizeEntityId(entityId), {
       entityId: normalizeEntityId(entityId),
-      hash: rootDoc.rootHash || EMPTY_RADIX_MERKLE_ROOT,
-      cellCount: Math.max(0, Math.floor(Number(rootDoc.leafCount ?? 0))),
+      hash: rootDoc.rootHash,
+      cellCount: rootDoc.leafCount,
     });
   }
 

@@ -17,10 +17,13 @@ export const UINT16_MAX = 0xffff;
 
 export const LIMITS = {
   /** Maximum messages stored per entity (memory limit) */
-  MESSAGE_HISTORY: 1000,
+  MESSAGE_HISTORY: 100,
 
   /** Maximum transactions in entity mempool before rejection */
   MEMPOOL_SIZE: 1000,
+
+  /** Maximum pending transactions in one bilateral Account mempool/frame. */
+  ACCOUNT_MEMPOOL_SIZE: 1000,
 
   /** Maximum size of a single frame in bytes. 1000 tx frames get a 10KB/tx budget. */
   MAX_FRAME_SIZE_BYTES: 10_000_000,
@@ -28,8 +31,14 @@ export const LIMITS = {
   /** Maximum number of accounts per entity (prevents state bloat) */
   MAX_ACCOUNTS_PER_ENTITY: 1000,
 
-  /** Maximum proposals per entity (prevents governance spam) */
-  MAX_PROPOSALS_PER_ENTITY: 1000,
+  /** Maximum live proposals per entity; at most one pending per board signer. */
+  MAX_PENDING_PROPOSALS_PER_ENTITY: 100,
+
+  /** Maximum retained terminal proposal receipts per entity. */
+  MAX_TERMINAL_PROPOSALS_PER_ENTITY: 100,
+
+  /** Aggregate proposal state bound (pending + terminal). */
+  MAX_PROPOSALS_PER_ENTITY: 200,
 
   /** Maximum validators per entity (BFT performance limit) */
   MAX_VALIDATORS: 100,
@@ -39,6 +48,21 @@ export const LIMITS = {
 
   /** Maximum active swap offers per bilateral account */
   MAX_ACCOUNT_SWAP_OFFERS: 1000,
+
+  /** Recent terminal swap lifecycle rows retained in the live Account projection. */
+  MAX_ACCOUNT_TERMINAL_SWAP_HISTORY: 100,
+
+  /** Recent partial-fill details retained per swap; full frames remain in frame DB. */
+  MAX_ACCOUNT_SWAP_RESOLVES_PER_ORDER: 100,
+
+  /** Maximum offer-id/comment characters retained in the live swap projection. */
+  MAX_ACCOUNT_SWAP_HISTORY_TEXT: 256,
+
+  /** Two lookup keys for every live HTLC across every allowed Entity account. */
+  MAX_ENTITY_HTLC_NOTES: 64_000,
+
+  /** Payment descriptions are UI metadata, never an unbounded storage blob. */
+  MAX_ENTITY_HTLC_NOTE_LENGTH: 256,
 
   /** Maximum resting orders per pair book */
   MAX_ORDERBOOK_ORDERS_PER_PAIR: 10_000,
@@ -72,6 +96,16 @@ export const FINANCIAL = {
 export const HTLC = {
   /** Minimum timelock delta per hop (simnet-optimized for speed) */
   MIN_TIMELOCK_DELTA_MS: 10_000, // 10 seconds per hop
+
+  /**
+   * Jurisdiction-block reserve between adjacent hops.
+   *
+   * One block is unsafe: the downstream Account can commit at its deadline
+   * while the watcher advances before the upstream Account can durably reveal.
+   * Three blocks match the 30-second Account network allowance without using a
+   * live wall clock or a chain-specific block-time estimate in consensus.
+   */
+  MIN_REVEAL_HEIGHT_DELTA_BLOCKS: 3,
 
   /** Minimum time remaining for the first forward (prevents TIMELOCK_TOO_TIGHT) */
   MIN_FORWARD_TIMELOCK_MS: 20_000, // 20 seconds minimum at first hop

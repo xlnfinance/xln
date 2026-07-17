@@ -13,34 +13,50 @@
  * 6. Events flow back to entities via j_event handlers
  */
 
-import { ethers } from 'ethers';
-import type { EntityState, EntityTx, EntityInput, Env, AccountMachine, AccountTx, SwapOffer } from '../../../types';
+import type { EntityState, EntityTx, EntityInput, Env, AccountMachine, SwapOffer } from '../../../types';
 import type { ProofBodyStruct } from '../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { isUsableContractAddress } from '../../../jurisdiction/contract-address';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
-import { initJBatch, batchAddRevealSecret, J_BATCH_CONTRACT_LIMITS, getBatchSize } from '../../../jurisdiction/batch';
-import { getDeltaTransformerAddress } from '../../../protocol/dispute/proof-builder';
-import { getRuntimeJurisdictionDefaultDisputeDelayBlocks, getRuntimeJurisdictionHeight } from '../../../jurisdiction/height';
 import {
-  buildAccountProofBody,
+  initJBatch,
+  batchAddRevealSecret,
+  J_BATCH_CONTRACT_LIMITS,
+  getBatchSize,
+  encodeJBatch,
+  assertDisputeArgumentsWithinContractLimits,
+  assertDisputeProofBodyWithinContractLimits,
+  sanitizeOptionalDisputeStarterArgumentPair,
+  type OptionalDisputeArgumentWarning,
+} from '../../../jurisdiction/batch';
+import { getEntityCertifiedJurisdictionHeight } from '../../../jurisdiction/height';
+import {
   createDisputeProofHashWithNonce,
+  hashProofBodyStruct,
   type DepositoryHankoDomain,
 } from '../../../protocol/dispute/proof-builder';
+import {
+  buildAccountProofBodyFromEnv,
+  requireAccountDeltaTransformerAddress,
+} from '../../../account/consensus/helpers';
 import { inspectHankoForHash, verifyHankoForHash } from '../../../hanko/signing';
-import { decodeHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
+import {
+  getCertifiedBoardNodeStore,
+  resolveObserverCertifiedBoardHash,
+} from '../../../jurisdiction/board-registry';
 import {
   buildDisputeArgumentsForSnapshot,
+  collectKnownDisputeSecretsForSnapshot,
   requireDisputeArgumentSnapshot,
   type DisputeArgumentSide,
 } from '../../../protocol/dispute/arguments';
 import { removeBookOrderById } from '../../../orderbook/cross-j';
 import { swapKey } from '../../../orderbook/swap-keys';
 import { crossJurisdictionBookOwnerRef } from '../../../extensions/cross-j/orderbook';
+import { isCrossJurisdictionTerminalStatus } from '../../../extensions/cross-j';
 import { createStructuredLogger, shouldLogFullPayloads, shortHash, shortId } from '../../../infra/logger';
-import { getFirstSignerForEntity } from '../../replica';
+import { crossJurisdictionRouteSignerHint } from '../cross-j-outputs';
 import {
   isAccountControlTx,
-  isArgumentChangingAccountTx,
   isDisputeStartedByLeft,
   isDisputeEvidenceAccountTx,
 } from '../../../account/consensus/dispute-policy';
@@ -54,6 +70,19 @@ const warnDisputeUnlessQuiet = (
 ): void => {
   if (env.quietRuntimeLogs === true) return;
   disputeLog.warn(message, fields);
+};
+
+const reportOptionalArgumentWarnings = (
+  env: Env,
+  counterpartyEntityId: string,
+  warnings: readonly OptionalDisputeArgumentWarning[],
+): void => {
+  for (const warning of warnings) {
+    warnDisputeUnlessQuiet(env, 'arguments.sanitized', {
+      counterparty: shortId(counterpartyEntityId),
+      ...warning,
+    });
+  }
 };
 
 const isProofBodyStruct = (value: unknown): value is ProofBodyStruct => {
@@ -101,7 +130,7 @@ const requireAddressLike = (value: unknown, label: string): string => {
   return value;
 };
 
-const canonicalizeProofBodyStruct = (
+export const canonicalizeProofBodyStruct = (
   value: ProofBodyStruct,
   entityId: string,
   counterpartyEntityId: string,
@@ -139,80 +168,6 @@ const canonicalizeProofBodyStruct = (
   };
 };
 
-function extractNonZeroPullArgumentBinaries(starterInitialArguments?: string): Set<string> {
-  const binaries = new Set<string>();
-  const raw = String(starterInitialArguments || '0x');
-  if (!raw || raw === '0x') return binaries;
-  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-  let argArray: string[];
-  try {
-    [argArray] = abiCoder.decode(['bytes[]'], raw) as unknown as [string[]];
-  } catch {
-    return binaries;
-  }
-  for (const arg of argArray) {
-    if (!arg || arg === '0x') continue;
-    try {
-      const [decoded] = abiCoder.decode(
-        ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
-        arg,
-      ) as unknown as [{ pulls?: Array<string> }];
-      for (const binary of decoded.pulls || []) {
-        try {
-          if (decodeHashLadderBinary(binary).fillRatio > 0) {
-            binaries.add(String(binary || '').toLowerCase());
-          }
-        } catch {
-          // Malformed pull evidence proves nothing. This mirrors the Solidity
-          // no-op rule and avoids treating attacker garbage as target safety.
-        }
-      }
-    } catch {
-      // Ignore non-DeltaTransformer argument payloads.
-    }
-  }
-  return binaries;
-}
-
-function hasNonZeroPullArgument(starterInitialArguments?: string): boolean {
-  return extractNonZeroPullArgumentBinaries(starterInitialArguments).size > 0;
-}
-
-function targetCrossPullRiskAmount(state: EntityState, counterpartyEntityId: string, account: AccountMachine): bigint {
-  const self = String(state.entityId || '').toLowerCase();
-  const counterparty = String(counterpartyEntityId || '').toLowerCase();
-  let total = 0n;
-  for (const route of state.crossJurisdictionSwaps?.values() ?? []) {
-    if (
-      String(route.target.counterpartyEntityId || '').toLowerCase() === self &&
-      String(route.target.entityId || '').toLowerCase() === counterparty &&
-      route.targetPull?.pullId &&
-      account.pulls?.has(route.targetPull.pullId)
-    ) {
-      total += BigInt(route.target.amount);
-    }
-  }
-  return total;
-}
-
-function collectHtlcSecrets(entityState: EntityState, counterpartyEntityId: string): string[] {
-  const secrets: string[] = [];
-  if (!entityState.htlcRoutes?.size) return secrets;
-  const seen = new Set<string>();
-
-  for (const route of entityState.htlcRoutes.values()) {
-    if (!route.secret) continue;
-    const involvesCounterparty =
-      route.inboundEntity === counterpartyEntityId ||
-      route.outboundEntity === counterpartyEntityId;
-    if (!involvesCounterparty) continue;
-    if (seen.has(route.secret)) continue;
-    seen.add(route.secret);
-    secrets.push(route.secret);
-  }
-  return secrets;
-}
-
 function resolveDepositoryHankoDomain(entityState: EntityState): DepositoryHankoDomain | null {
   const jurisdiction = entityState.config.jurisdiction;
   const address = jurisdiction?.depositoryAddress || '';
@@ -244,29 +199,6 @@ function hasQueuedDisputeFinalize(state: EntityState, counterpartyEntityId: stri
     draft.some((op) => String(op?.counterentity || '').toLowerCase() === target) ||
     sent.some((op) => String(op?.counterentity || '').toLowerCase() === target)
   );
-}
-
-function allowCrossJTargetDisputeWithoutPullArgs(
-  state: EntityState,
-  targetCrossRiskAmount: bigint,
-  hasStarterPullArgs: boolean,
-  allowUnsafeCrossJTargetDispute: boolean | undefined,
-  acceptedCrossJTargetLossAmount: bigint | number | string | undefined,
-): boolean {
-  if (targetCrossRiskAmount <= 0n || hasStarterPullArgs) return true;
-  const acceptedLoss = BigInt(acceptedCrossJTargetLossAmount ?? 0n);
-  if (!allowUnsafeCrossJTargetDispute || acceptedLoss < targetCrossRiskAmount) {
-    addMessage(
-      state,
-      `❌ Cross-j target dispute blocked: source pull arguments missing; accept possible loss up to ${targetCrossRiskAmount} or start source dispute first`,
-    );
-    return false;
-  }
-  addMessage(
-    state,
-    `⚠️ Unsafe cross-j target dispute accepted: pull arguments missing, possible loss up to ${targetCrossRiskAmount}`,
-  );
-  return true;
 }
 
 const removeOrderbookRowForDispute = (
@@ -303,10 +235,10 @@ const removeOrderbookRowForDispute = (
     };
   }
 
-  const signerId = getFirstSignerForEntity(env, bookOwnerEntityId);
+  const signerId = crossJurisdictionRouteSignerHint(route, bookOwnerEntityId);
   if (!signerId) {
     throw new Error(
-      `DISPUTE_CROSS_J_BOOK_OWNER_MISSING: order=${offerId} owner=${bookOwnerEntityId} source=${sourceEntityId}`,
+      `DISPUTE_CROSS_J_BOOK_OWNER_SIGNER_MISSING: order=${offerId} owner=${bookOwnerEntityId} source=${sourceEntityId}`,
     );
   }
   outputs.push({
@@ -348,66 +280,33 @@ const removeDisputedAccountOrdersFromBook = (
   return { localRemoved, remoteQueued };
 };
 
-const collectHtlcRoutesAwaitingSecrets = (state: EntityState, counterpartyEntityId: string): string[] => {
-  const counterparty = String(counterpartyEntityId || '').toLowerCase();
-  const pending: string[] = [];
-  for (const [hashlock, route] of state.htlcRoutes?.entries() ?? []) {
-    if (route.secret) continue;
-    if (
-      String(route.inboundEntity || '').toLowerCase() !== counterparty &&
-      String(route.outboundEntity || '').toLowerCase() !== counterparty
-    ) {
-        continue;
-    }
-    const hasLiveLock = Boolean(
-      (route.inboundLockId && state.lockBook?.has(route.inboundLockId)) ||
-      (route.outboundLockId && state.lockBook?.has(route.outboundLockId)),
-    );
-    if (!hasLiveLock) continue;
-    pending.push(hashlock);
-  }
-  return pending;
-};
-
-const accountTxCanBeFoldedIntoDisputeArguments = (tx: AccountTx): boolean =>
-  !isArgumentChangingAccountTx(tx.type) || isDisputeEvidenceAccountTx(tx);
-
-const pendingFrameBlocksDisputeArguments = (account: AccountMachine): boolean =>
-  Boolean(account.pendingFrame?.accountTxs?.some(
-    (tx) => !accountTxCanBeFoldedIntoDisputeArguments(tx),
-  ));
-
 const collectDisputeEvidenceReadinessIssues = (
-  state: EntityState,
-  counterpartyEntityId: string,
   account: AccountMachine,
   now: number,
-  options: { allowedPendingPullResolveBinaries?: ReadonlySet<string> } = {},
 ): string[] => {
   const issues: string[] = [];
   const readyAfter = Number(account.disputePrepare?.readyAfter ?? 0);
   if (readyAfter > now) issues.push(`cooldown:${readyAfter - now}ms`);
-  if (pendingFrameBlocksDisputeArguments(account)) issues.push(`pendingFrame:${account.pendingFrame!.height}`);
-  if (account.pendingAccountInput) issues.push('pendingAccountInput');
-  // Evidence txs are intentionally folded into dispute arguments by the builder
-  // from both pendingFrame and mempool. Only ordinary business txs make the
-  // proof/argument pair unstable.
-  const allowedPendingPullResolveBinaries = options.allowedPendingPullResolveBinaries ?? new Set<string>();
-  const argumentChangingMempool = (account.mempool ?? [])
-    .filter((tx) => {
-      if (!isArgumentChangingAccountTx(tx.type)) return false;
-      if (isDisputeEvidenceAccountTx(tx)) return false;
-      if (tx.type === 'pull_resolve') {
-        const binary = String(tx.data.binary || '').toLowerCase();
-        if (binary && allowedPendingPullResolveBinaries.has(binary)) return false;
-      }
-      return true;
-    })
-    .map((tx) => tx.type);
-  if (argumentChangingMempool.length > 0) issues.push(`argumentMempool:${argumentChangingMempool.join(',')}`);
-  const awaitingSecrets = collectHtlcRoutesAwaitingSecrets(state, counterpartyEntityId);
-  if (awaitingSecrets.length > 0) issues.push(`htlcAwaitingSecret:${awaitingSecrets.length}`);
   return issues;
+};
+
+const freezeOptimisticAccountTraffic = (
+  account: AccountMachine,
+  retainOptionalEvidence: boolean,
+): void => {
+  account.mempool = (account.mempool || []).filter((tx) => (
+    isAccountControlTx(tx.type) || (retainOptionalEvidence && isDisputeEvidenceAccountTx(tx))
+  ));
+  // A pending frame is an indivisible optimistic proposal. Applying only its
+  // evidence txs would invent a frame that neither side signed, so discard the
+  // whole proposal and build the dispute from the last committed account plus
+  // independently queued optional evidence.
+  delete account.pendingFrame;
+  delete account.pendingAccountInput;
+  delete account.pendingAccountInputSignerId;
+  delete account.clonedForValidation;
+  account.rollbackCount = 0;
+  delete account.lastRollbackFrameHash;
 };
 
 const markAccountDisputePreparing = (
@@ -428,14 +327,7 @@ const markAccountDisputePreparing = (
   // jurisdiction events can still be added to argument builders, but ordinary
   // bilateral proposals must not keep changing the proof/argument pair while
   // we are preparing an adversarial on-chain path.
-  account.mempool = (account.mempool || []).filter(
-    (tx) => isAccountControlTx(tx.type) || isDisputeEvidenceAccountTx(tx),
-  );
-  delete account.pendingFrame;
-  delete account.pendingAccountInput;
-  delete account.clonedForValidation;
-  account.rollbackCount = 0;
-  delete account.lastRollbackFrameHash;
+  freezeOptimisticAccountTraffic(account, true);
 };
 
 /**
@@ -467,7 +359,7 @@ export async function handlePrepareDispute(
   removeDisputedAccountOrdersFromBook(env, newState, outputs, counterpartyEntityId, account);
   markAccountDisputePreparing(newState, account, description, minCooldownMs);
 
-  const issues = collectDisputeEvidenceReadinessIssues(newState, counterpartyEntityId, account, Number(newState.timestamp ?? 0));
+  const issues = collectDisputeEvidenceReadinessIssues(account, Number(newState.timestamp ?? 0));
   addMessage(
     newState,
     issues.length > 0
@@ -489,13 +381,28 @@ export async function handleDisputeStart(
     counterpartyEntityId,
     description,
     starterInitialArguments: overrideStarterInitialArguments,
-    allowUnsafeCrossJTargetDispute,
-    acceptedCrossJTargetLossAmount,
   } = entityTx.data;
   const overrideInitialArguments = overrideStarterInitialArguments;
-  const explicitStarterPullBinaries = extractNonZeroPullArgumentBinaries(overrideInitialArguments);
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
+  const crossJurisdictionRouteId = entityTx.data.crossJurisdictionRouteId;
+  if (crossJurisdictionRouteId) {
+    const route = newState.crossJurisdictionSwaps?.get(crossJurisdictionRouteId);
+    if (!route || route.orderId !== crossJurisdictionRouteId) {
+      throw new Error(`DISPUTE_START_CROSS_J_ROUTE_MISSING:${crossJurisdictionRouteId}`);
+    }
+    if (
+      route.source.entityId.toLowerCase() !== newState.entityId.toLowerCase() ||
+      route.source.counterpartyEntityId.toLowerCase() !== counterpartyEntityId.toLowerCase()
+    ) {
+      throw new Error(`DISPUTE_START_CROSS_J_ROUTE_ROLE_MISMATCH:${crossJurisdictionRouteId}`);
+    }
+    if (isCrossJurisdictionTerminalStatus(route.status) || !route.targetPull) {
+      throw new Error(
+        `DISPUTE_START_CROSS_J_ROUTE_INACTIVE:${crossJurisdictionRouteId}:${route.status}`,
+      );
+    }
+  }
 
   if (entityTx.data.starterIncrementedArguments !== undefined) {
     throw new Error('DISPUTE_INCREMENTED_ARGUMENT_OVERRIDE_UNSUPPORTED');
@@ -532,12 +439,10 @@ export async function handleDisputeStart(
     addMessage(newState, `❌ Account with ${counterpartyEntityId.slice(-4)} is disputed - reopen required`);
     return { newState, outputs };
   }
+  freezeOptimisticAccountTraffic(account, true);
   const readinessIssues = collectDisputeEvidenceReadinessIssues(
-    newState,
-    counterpartyEntityId,
     account,
     Number(newState.timestamp ?? 0),
-    { allowedPendingPullResolveBinaries: explicitStarterPullBinaries },
   );
   if (readinessIssues.length > 0) {
     addMessage(
@@ -555,22 +460,6 @@ export async function handleDisputeStart(
   }
 
   removeDisputedAccountOrdersFromBook(env, newState, outputs, counterpartyEntityId, account);
-
-  const targetCrossRiskAmount = targetCrossPullRiskAmount(newState, counterpartyEntityId, account);
-  const explicitStarterPullArgs = hasNonZeroPullArgument(overrideInitialArguments);
-  const snapshotCanSupplyStarterArgs = Boolean(
-    account.counterpartyDisputeProofBodyHash &&
-    account.disputeArgumentSnapshotsByHash?.[account.counterpartyDisputeProofBodyHash],
-  );
-  if (!allowCrossJTargetDisputeWithoutPullArgs(
-    newState,
-    targetCrossRiskAmount,
-    explicitStarterPullArgs || snapshotCanSupplyStarterArgs,
-    allowUnsafeCrossJTargetDispute,
-    acceptedCrossJTargetLossAmount,
-  )) {
-    return { newState, outputs };
-  }
 
   // Use stored counterparty dispute hanko AND proofBodyHash (exchanged during bilateral consensus)
   // CRITICAL: Must use the SAME proofBodyHash that the hanko signed, not a fresh one!
@@ -597,6 +486,24 @@ export async function handleDisputeStart(
     return { newState, outputs };
   }
   const proofBodyHashToUse = storedProofBodyHash;
+  const initialProofbody = canonicalizeProofBodyStruct(
+    requireProofBodyStruct(
+      account.disputeProofBodiesByHash?.[proofBodyHashToUse],
+      entityState.entityId,
+      counterpartyEntityId,
+      'disputeStart.initial',
+    ),
+    entityState.entityId,
+    counterpartyEntityId,
+    'disputeStart.initial',
+  );
+  assertDisputeProofBodyWithinContractLimits(initialProofbody, 'disputeStart.initial');
+  const revealedProofbodyHash = hashProofBodyStruct(initialProofbody);
+  if (revealedProofbodyHash.toLowerCase() !== proofBodyHashToUse.toLowerCase()) {
+    throw new Error(
+      `DISPUTE_START_PROOFBODY_HASH_MISMATCH:${counterpartyEntityId}:${proofBodyHashToUse}:${revealedProofbodyHash}`,
+    );
+  }
   requireDisputeArgumentSnapshot(account, proofBodyHashToUse, 'disputeStart.initial');
   const starterIsLeft = account.leftEntity === newState.entityId;
   const starterSide: DisputeArgumentSide = starterIsLeft ? 'left' : 'right';
@@ -607,19 +514,10 @@ export async function handleDisputeStart(
     proofBodyHashToUse,
     { secretsSide: starterSide },
   );
-  const starterInitialArguments =
+  const rawStarterInitialArguments =
     overrideInitialArguments && overrideInitialArguments !== '0x'
       ? overrideInitialArguments
       : (starterIsLeft ? initialSnapshotArguments.leftArguments : initialSnapshotArguments.rightArguments);
-  if (!allowCrossJTargetDisputeWithoutPullArgs(
-    newState,
-    targetCrossRiskAmount,
-    hasNonZeroPullArgument(starterInitialArguments),
-    allowUnsafeCrossJTargetDispute,
-    acceptedCrossJTargetLossAmount,
-  )) {
-    return { newState, outputs };
-  }
   disputeLog.debug('start.proof_body_hash_loaded', {
     counterparty: shortId(counterpartyEntityId),
     proofBodyHash: shortHash(storedProofBodyHash),
@@ -656,17 +554,6 @@ export async function handleDisputeStart(
   }
 
   const jNonce = Number(account.jNonce ?? 0);
-  let currentJBlock = getRuntimeJurisdictionHeight(
-    env,
-    newState.lastFinalizedJHeight ?? 0,
-    entityState.config.jurisdiction?.name,
-  );
-  const defaultDisputeDelayBlocks = getRuntimeJurisdictionDefaultDisputeDelayBlocks(
-    env,
-    entityState.config.jurisdiction?.name,
-    5,
-  );
-
   disputeLog.debug('start.nonce', {
     counterparty: shortId(counterpartyEntityId),
     signedNonce,
@@ -697,19 +584,33 @@ export async function handleDisputeStart(
       `DISPUTE_START_IMPOSSIBLE_MULTIPLE_INCREMENTED_SNAPSHOTS:${counterpartyEntityId}:${localCounterCandidates.map((s) => `${s.nonce}:${s.proofbodyHash}`).join(',')}`,
     );
   }
-  const starterIncrementedArguments = localCounterCandidates.length === 1
-    ? (() => {
-        const candidate = localCounterCandidates[0]!;
-        const args = buildDisputeArgumentsForSnapshot(
-          account,
-          newState,
-          counterpartyEntityId,
-          candidate.proofbodyHash,
-          { secretsSide: starterSide },
-        );
-        return starterIsLeft ? args.leftArguments : args.rightArguments;
-      })()
-    : '0x';
+  const argumentWarnings = [...initialSnapshotArguments.warnings];
+  let rawStarterIncrementedArguments = '0x';
+  if (localCounterCandidates.length === 1) {
+    const candidate = localCounterCandidates[0]!;
+    const args = buildDisputeArgumentsForSnapshot(
+      account,
+      newState,
+      counterpartyEntityId,
+      candidate.proofbodyHash,
+      { secretsSide: starterSide },
+    );
+    rawStarterIncrementedArguments = starterIsLeft ? args.leftArguments : args.rightArguments;
+    argumentWarnings.push(...args.warnings);
+  }
+  const sanitizedStarterArguments = sanitizeOptionalDisputeStarterArgumentPair(
+    rawStarterInitialArguments,
+    rawStarterIncrementedArguments,
+    'disputeStart.starterArguments',
+  );
+  const starterInitialArguments = sanitizedStarterArguments.initial;
+  const starterIncrementedArguments = sanitizedStarterArguments.incremented;
+  argumentWarnings.push(...sanitizedStarterArguments.warnings);
+  reportOptionalArgumentWarnings(env, counterpartyEntityId, argumentWarnings);
+  assertDisputeArgumentsWithinContractLimits(
+    [starterInitialArguments, starterIncrementedArguments],
+    'disputeStart.starterArguments',
+  );
 
   const hankoDomain = resolveDepositoryHankoDomain(entityState);
   if (hankoDomain) {
@@ -764,14 +665,20 @@ export async function handleDisputeStart(
           : null,
       });
     }
+    const counterpartyBoardHash = resolveObserverCertifiedBoardHash(
+      entityState,
+      getCertifiedBoardNodeStore(env),
+      counterpartyEntityId,
+    );
     const exactDisputeVerify = await verifyHankoForHash(
       counterpartyDisputeHanko,
       exactDisputeHash,
       counterpartyEntityId,
       env,
+      counterpartyBoardHash ? { registeredBoardHash: counterpartyBoardHash } : undefined,
     );
     if (!exactDisputeVerify.valid) {
-      const currentProofResult = buildAccountProofBody(account);
+      const currentProofResult = buildAccountProofBodyFromEnv(env, account);
       const msg =
         `❌ Counterparty dispute proof invalid for current account snapshot; ` +
         `nonce=${signedNonce} onChain=${jNonce} source=${nonceSource}`;
@@ -822,39 +729,32 @@ export async function handleDisputeStart(
     counterentity: counterpartyEntityId,
     nonce: signedNonce,
     proofbodyHash: proofBodyHashToUse,
-    watchSeed: account.watchSeed,
+    initialProofbody,
+    watchSeed: String(initialProofbody.watchSeed),
     sig: counterpartyDisputeHanko,
     starterInitialArguments,
     starterIncrementedArguments,
   });
+  encodeJBatch(newState.jBatchState.batch);
+  if (crossJurisdictionRouteId) {
+    newState.jBatchState.autoBroadcastDraft = true;
+    if (!newState.jBatchState.sentBatch) {
+      const signerId = newState.config.validators[0];
+      if (!signerId) throw new Error('DISPUTE_START_CROSS_J_BROADCAST_SIGNER_MISSING');
+      outputs.push({
+        entityId: newState.entityId,
+        signerId,
+        entityTxs: [{ type: 'j_broadcast', data: {} }],
+      });
+    }
+  }
 
   // Freeze account immediately once disputeStart is queued.
   // This is unilateral safety state on the local entity: no further business
   // frames should progress on this account while dispute is in-flight.
   account.status = 'disputed';
   delete account.disputePrepare;
-  const beforeMempool = account.mempool?.length || 0;
-  if (beforeMempool > 0) {
-    account.mempool = (account.mempool || []).filter(
-      (tx) => isAccountControlTx(tx.type),
-    );
-    const dropped = beforeMempool - account.mempool.length;
-    if (dropped > 0) {
-      disputeLog.warn('start.freeze_mempool_dropped', { counterparty: shortId(counterpartyEntityId), dropped });
-    }
-  }
-  if (account.pendingFrame || account.pendingAccountInput) {
-    disputeLog.warn('start.freeze_pending_cleared', {
-      counterparty: shortId(counterpartyEntityId),
-      hadPendingFrame: Boolean(account.pendingFrame),
-      hadPendingAccountInput: Boolean(account.pendingAccountInput),
-    });
-  }
-  delete account.pendingFrame;
-  delete account.pendingAccountInput;
-  delete account.clonedForValidation;
-  account.rollbackCount = 0;
-  delete account.lastRollbackFrameHash;
+  freezeOptimisticAccountTraffic(account, false);
   // Local placeholder for UX continuity: account stays visible as "active dispute"
   // immediately after queueing disputeStart, before on-chain DisputeStarted event arrives.
   // On-chain event will overwrite this with authoritative timeout/nonce data.
@@ -863,7 +763,11 @@ export async function handleDisputeStart(
       startedByLeft: isDisputeStartedByLeft(entityState.entityId, account.leftEntity, account.rightEntity),
       initialProofbodyHash: proofBodyHashToUse,
       initialNonce: signedNonce,
-      disputeTimeout: currentJBlock + defaultDisputeDelayBlocks,
+      // The exact timeout is chosen by Depository at inclusion height and is
+      // certified back through DisputeStarted. A validator-local chain tip is
+      // neither authoritative nor deterministic, so pending state records the
+      // timeout as unknown until that canonical event is finalized.
+      disputeTimeout: 0,
       jNonce,
       starterInitialArguments,
       starterIncrementedArguments,
@@ -968,14 +872,13 @@ export async function handleDisputeFinalize(
     warnDisputeUnlessQuiet(env, 'finalize.cooperative_rejected', { counterparty: shortId(counterpartyEntityId) });
     return { newState, outputs };
   }
+  freezeOptimisticAccountTraffic(account, true);
 
   // Same readiness gate as disputeStart. If the counterparty starts first, we
   // still refuse to counter-finalize while evidence can change. Finalization
   // arguments are as security-critical as start arguments: both commit calldata
   // for a specific proof body, so pending secrets/fills must be settled first.
   const readinessIssues = collectDisputeEvidenceReadinessIssues(
-    newState,
-    counterpartyEntityId,
     account,
     Number(newState.timestamp ?? 0),
   );
@@ -988,7 +891,7 @@ export async function handleDisputeFinalize(
   }
 
   // Build current proof only to compare against the stored dispute body.
-  const currentProofResult = buildAccountProofBody(account);
+  const currentProofResult = buildAccountProofBodyFromEnv(env, account);
   const counterProofBodyHash = account.counterpartyDisputeProofBodyHash;
   const counterProofNonce = account.counterpartyDisputeProofNonce;
   const counterProofHanko = account.counterpartyDisputeProofHanko;
@@ -1098,15 +1001,28 @@ export async function handleDisputeFinalize(
     finalProofbodyHash,
     { secretsSide: callerSide },
   );
+  reportOptionalArgumentWarnings(env, counterpartyEntityId, builtArguments.warnings);
   const starterArgumentsForFinalProof = shouldUseCounterProof
     ? account.activeDispute.starterIncrementedArguments
     : account.activeDispute.starterInitialArguments;
-  const leftArguments = account.activeDispute.startedByLeft
-    ? starterArgumentsForFinalProof
-    : builtArguments.leftArguments;
-  const rightArguments = account.activeDispute.startedByLeft
+  const otherArgumentsForFinalProof = account.activeDispute.startedByLeft
     ? builtArguments.rightArguments
-    : starterArgumentsForFinalProof;
+    : builtArguments.leftArguments;
+  assertDisputeProofBodyWithinContractLimits(finalProofbody, 'disputeFinalize.final');
+  const recomputedFinalProofbodyHash = hashProofBodyStruct(finalProofbody);
+  if (recomputedFinalProofbodyHash.toLowerCase() !== finalProofbodyHash.toLowerCase()) {
+    throw new Error(
+      `DISPUTE_FINALIZE_PROOFBODY_HASH_MISMATCH:${counterpartyEntityId}:${finalProofbodyHash}:${recomputedFinalProofbodyHash}`,
+    );
+  }
+  assertDisputeArgumentsWithinContractLimits(
+    [starterArgumentsForFinalProof],
+    'disputeFinalize.starterArguments',
+  );
+  assertDisputeArgumentsWithinContractLimits(
+    [otherArgumentsForFinalProof],
+    'disputeFinalize.otherArguments',
+  );
 
   const finalProof = {
     counterentity: counterpartyEntityId,
@@ -1114,26 +1030,29 @@ export async function handleDisputeFinalize(
     finalNonce,
     initialProofbodyHash: account.activeDispute.initialProofbodyHash,  // From disputeStart (commit)
     finalProofbody,  // REVEAL
-    leftArguments,
-    rightArguments,
-    starterInitialArguments: account.activeDispute.starterInitialArguments,
-    starterIncrementedArguments: account.activeDispute.starterIncrementedArguments,
+    starterArguments: starterArgumentsForFinalProof,
+    otherArguments: otherArgumentsForFinalProof,
     sig: finalizeSig,
     startedByLeft: account.activeDispute.startedByLeft,  // From on-chain
-    disputeUntilBlock: account.activeDispute.disputeTimeout,  // From on-chain
     cooperative: false,
   };
 
-  // Optional fallback: on-chain HTLC registry (Sprites-style)
-  if (entityTx.data.useOnchainRegistry) {
-    const htlcSecrets = collectHtlcSecrets(newState, counterpartyEntityId);
-    const transformerAddress = getDeltaTransformerAddress();
-    if (!isUsableContractAddress(transformerAddress)) {
-      throw new Error('DISPUTE_FINALIZE_MISSING_DELTA_TRANSFORMER_ADDRESS');
-    }
-    for (const secret of htlcSecrets) {
-      batchAddRevealSecret(newState.jBatchState, transformerAddress, secret);
-    }
+  // Registry publication is optional evidence, but the selected set is bound
+  // to this exact signed ProofBody. Compute before timeout checks without
+  // mutating the batch; an early finalize remains a true no-op.
+  const registrySecrets = entityTx.data.useOnchainRegistry
+    ? collectKnownDisputeSecretsForSnapshot(
+        account,
+        newState,
+        counterpartyEntityId,
+        finalProofbodyHash,
+      )
+    : [];
+  const registryTransformerAddress = registrySecrets.length > 0
+    ? requireAccountDeltaTransformerAddress(env, account)
+    : '';
+  if (registrySecrets.length > 0 && !isUsableContractAddress(registryTransformerAddress)) {
+    throw new Error('DISPUTE_FINALIZE_MISSING_DELTA_TRANSFORMER_ADDRESS');
   }
 
   disputeLog.debug('finalize.proof_selected', {
@@ -1150,11 +1069,7 @@ export async function handleDisputeFinalize(
   // - counterparty may finalize immediately (same-proof path) without waiting
   const callerIsStarter = callerIsLeft === account.activeDispute.startedByLeft;
   if (!shouldUseCounterProof && callerIsStarter) {
-    const currentJBlock = getRuntimeJurisdictionHeight(
-      env,
-      newState.lastFinalizedJHeight ?? 0,
-      entityState.config.jurisdiction?.name,
-    );
+    const currentJBlock = getEntityCertifiedJurisdictionHeight(newState);
     if (currentJBlock < account.activeDispute.disputeTimeout) {
       addMessage(
         newState,
@@ -1176,7 +1091,11 @@ export async function handleDisputeFinalize(
   if (getBatchSize(newState.jBatchState.batch) + 1 > J_BATCH_CONTRACT_LIMITS.maxTotalOps) {
     throw new Error(`J_BATCH_LIMIT_EXCEEDED: disputeFinalize would exceed total ops ${getBatchSize(newState.jBatchState.batch) + 1}/${J_BATCH_CONTRACT_LIMITS.maxTotalOps}`);
   }
+  for (const secret of registrySecrets) {
+    batchAddRevealSecret(newState.jBatchState, registryTransformerAddress, secret);
+  }
   newState.jBatchState.batch.disputeFinalizations.push(finalProof);
+  encodeJBatch(newState.jBatchState.batch);
   account.activeDispute.finalizeQueued = true;
 
   disputeLog.debug('finalize.jbatch_queued', {

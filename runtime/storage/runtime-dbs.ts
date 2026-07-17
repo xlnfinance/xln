@@ -9,6 +9,10 @@ import {
   verifyStorageTailIntegrity,
 } from './';
 import { assertStorageSafetyOverridesAllowed } from './safety';
+import {
+  fsyncStorageParentDirectory,
+  writeDurableStorageMarkerFile,
+} from './fs-durability';
 
 type RuntimeState = NonNullable<Env['runtimeState']>;
 
@@ -82,6 +86,14 @@ export const resolveFrameDbPath = (env: Env): string => {
 
 export const STORAGE_WRITER_LOCK_TTL_MS = 30_000;
 
+export type StorageWriterLockBoundary =
+  | 'after-candidate-sync'
+  | 'after-canonical-link';
+
+export type StorageWriterLockOptions = {
+  onBoundary?: (boundary: StorageWriterLockBoundary) => void | Promise<void>;
+};
+
 export const resolveStorageWriterLockPath = (env: Env): string => {
   const base = resolveDbPath(env, 'core');
   return `${base}-writer.lock`;
@@ -123,13 +135,26 @@ const storageWriterLockHeldError = (lockPath: string, lock: StorageWriterLockBod
   return new Error(`STORAGE_WRITER_LOCK_HELD: path=${lockPath}${owner}${frame}`);
 };
 
+const storageWriterErrorCode = (error: unknown): string =>
+  typeof error === 'object' && error !== null && 'code' in error
+    ? String((error as { code?: unknown }).code || '')
+    : '';
+
 const storageWriterPidIsAlive = (pid: number | undefined): boolean => {
   if (!Number.isFinite(pid) || Number(pid) <= 0) return false;
   try {
     nodeProcess?.kill(Number(pid), 0);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    const code = storageWriterErrorCode(error);
+    if (code === 'ESRCH') return false;
+    // EPERM proves that a process owns the PID even though this runtime cannot
+    // signal it. Treating EPERM as death could delete a live contender's
+    // candidate before it publishes the canonical hard link.
+    if (code === 'EPERM') return true;
+    throw new Error(`STORAGE_WRITER_PID_PROBE_FAILED:pid=${pid}:code=${code || 'UNKNOWN'}`, {
+      cause: error,
+    });
   }
 };
 
@@ -139,13 +164,69 @@ const readStorageWriterLock = async (
   lockPath: string,
   fs: typeof import('fs/promises'),
 ): Promise<StorageWriterLockBody | null> => {
-  const raw = await fs.readFile(lockPath, 'utf8').catch(() => '');
-  return raw ? parseStorageWriterLock(raw) : null;
+  try {
+    const raw = await fs.readFile(lockPath, 'utf8');
+    return raw ? parseStorageWriterLock(raw) : null;
+  } catch (error) {
+    if (storageWriterErrorCode(error) === 'ENOENT') return null;
+    throw error;
+  }
 };
 
-const storageWriterLockIsReclaimable = (lock: StorageWriterLockBody | null): lock is StorageWriterLockBody => (
-  lock !== null && lock.expiresAt <= Date.now() && !storageWriterPidIsAlive(lock.pid)
-);
+const unlinkStorageFileIfPresent = async (
+  filePath: string,
+  fs: typeof import('fs/promises'),
+): Promise<void> => {
+  try {
+    await fs.unlink(filePath);
+  } catch (error) {
+    if (storageWriterErrorCode(error) !== 'ENOENT') throw error;
+  }
+};
+
+const cleanupDeadStorageWriterCandidates = async (
+  lockPath: string,
+  fs: typeof import('fs/promises'),
+  path: typeof import('path'),
+): Promise<void> => {
+  const directory = path.dirname(lockPath);
+  const candidatePrefix = `${path.basename(lockPath)}.candidate-`;
+  const candidateNames = (await fs.readdir(directory))
+    .filter(name => name.startsWith(candidatePrefix))
+    .sort();
+  let sawDeadCandidate = false;
+
+  for (const candidateName of candidateNames) {
+    const candidatePath = path.join(directory, candidateName);
+    const suffix = candidateName.slice(candidatePrefix.length);
+    const match = /^(\d+)-(\d+)-(\d+)$/.exec(suffix);
+    if (!match) {
+      throw new Error(`STORAGE_WRITER_CANDIDATE_NAME_INVALID:${candidatePath}`);
+    }
+    const ownerPid = Number(match[1]);
+    if (!Number.isSafeInteger(ownerPid) || ownerPid <= 0) {
+      throw new Error(`STORAGE_WRITER_CANDIDATE_PID_INVALID:${candidatePath}`);
+    }
+    // Candidate filenames are created before the body is written. The PID in
+    // the exclusive filename is therefore the only recovery evidence that is
+    // guaranteed to survive a kill at every write boundary. Never inspect or
+    // delete a candidate while that owner PID is alive.
+    if (storageWriterPidIsAlive(ownerPid)) continue;
+    await unlinkStorageFileIfPresent(candidatePath, fs);
+    sawDeadCandidate = true;
+  }
+
+  if (sawDeadCandidate) await fsyncStorageParentDirectory(lockPath);
+};
+
+const storageWriterLockIsReclaimable = (lock: StorageWriterLockBody | null): lock is StorageWriterLockBody => {
+  if (!lock) return false;
+  // A recorded local PID is a stronger liveness oracle than the lease clock.
+  // Reclaim a SIGKILL orphan immediately; never steal from a live process even
+  // if a long persistence operation outlives the advisory TTL.
+  if (typeof lock.pid === 'number') return !storageWriterPidIsAlive(lock.pid);
+  return lock.expiresAt <= Date.now();
+};
 
 const removeStorageLockIfOwned = async (
   lockPath: string,
@@ -170,8 +251,32 @@ const removeStorageLockIfOwned = async (
       if (storageWriterErrorCode(error) !== 'EEXIST') throw error;
     });
   }
-  await fs.unlink(movedPath).catch(() => undefined);
+  await unlinkStorageFileIfPresent(movedPath, fs);
   return moved?.owner === expectedOwner;
+};
+
+const removeMalformedStorageLock = async (
+  lockPath: string,
+  fs: typeof import('fs/promises'),
+): Promise<boolean> => {
+  staleStorageLockSequence += 1;
+  const movedPath = `${lockPath}.malformed-${nodeProcess?.pid ?? 'unknown'}-${Date.now()}-${staleStorageLockSequence}`;
+  try {
+    await fs.rename(lockPath, movedPath);
+  } catch (error) {
+    if (storageWriterErrorCode(error) === 'ENOENT') return false;
+    throw error;
+  }
+  const moved = await readStorageWriterLock(movedPath, fs);
+  if (moved) {
+    await fs.link(movedPath, lockPath).catch((error) => {
+      if (storageWriterErrorCode(error) !== 'EEXIST') throw error;
+    });
+    await unlinkStorageFileIfPresent(movedPath, fs);
+    return false;
+  }
+  await unlinkStorageFileIfPresent(movedPath, fs);
+  return true;
 };
 
 const tryReclaimExpiredStorageLock = async (
@@ -194,25 +299,16 @@ const acquireStorageRecoveryLock = async (
       return await tryAcquireStorageWriterLock(env, recoveryPath, fs, path);
     } catch (error) {
       if (storageWriterErrorCode(error) !== 'EEXIST') throw error;
-      if (!await tryReclaimExpiredStorageLock(recoveryPath, fs)) {
+      const observed = await readStorageWriterLock(recoveryPath, fs);
+      const reclaimed = observed
+        ? await tryReclaimExpiredStorageLock(recoveryPath, fs)
+        : await removeMalformedStorageLock(recoveryPath, fs);
+      if (!reclaimed) {
         throw storageWriterLockHeldError(recoveryPath, await readStorageWriterLock(recoveryPath, fs));
       }
     }
   }
   throw storageWriterLockHeldError(recoveryPath, await readStorageWriterLock(recoveryPath, fs));
-};
-
-const assertStorageLockOwnership = async (
-  lockPath: string,
-  owner: StorageWriterLockBody,
-  fs: typeof import('fs/promises'),
-): Promise<void> => {
-  const current = await readStorageWriterLock(lockPath, fs);
-  if (current?.owner !== owner.owner) {
-    throw new Error(
-      `STORAGE_WRITER_LOCK_OWNERSHIP_LOST: path=${lockPath} expected=${owner.owner} actual=${current?.owner ?? 'missing'}`,
-    );
-  }
 };
 
 const storageLockIsOwnedBy = async (
@@ -234,42 +330,101 @@ const tryAcquireStorageWriterLock = async (
   lockPath: string,
   fs: typeof import('fs/promises'),
   path: typeof import('path'),
+  options: StorageWriterLockOptions = {},
 ): Promise<StorageWriterLockBody> => {
   const now = Date.now();
+  staleStorageLockSequence += 1;
+  const ownerSequence = staleStorageLockSequence;
   const body: StorageWriterLockBody = {
-    owner: `${nodeProcess?.pid ?? 'unknown'}:${now}:${Math.max(0, Number(env.height || 0))}`,
+    owner: `${nodeProcess?.pid ?? 'unknown'}:${now}:${Math.max(0, Number(env.height || 0))}:${ownerSequence}`,
     ...(typeof nodeProcess?.pid === 'number' ? { pid: nodeProcess.pid } : {}),
     ...(typeof env.runtimeId === 'string' ? { runtimeId: env.runtimeId } : {}),
     frameHeight: Math.max(0, Number(env.height || 0)),
     acquiredAt: now,
     expiresAt: now + STORAGE_WRITER_LOCK_TTL_MS,
   };
-  await fs.mkdir(path.dirname(lockPath), { recursive: true });
-  const handle = await fs.open(lockPath, 'wx');
+  const directory = path.dirname(lockPath);
+  const candidatePath = `${lockPath}.candidate-${nodeProcess?.pid ?? 'unknown'}-${now}-${ownerSequence}`;
+  await fs.mkdir(directory, { recursive: true });
+  await cleanupDeadStorageWriterCandidates(lockPath, fs, path);
+  const handle = await fs.open(candidatePath, 'wx');
   try {
     await handle.writeFile(`${JSON.stringify(body)}\n`, 'utf8');
-    return body;
+    await handle.sync();
   } finally {
     await handle.close();
   }
+  let canonicalLinked = false;
+  try {
+    await options.onBoundary?.('after-candidate-sync');
+    // The canonical path becomes visible only after the complete owner body is
+    // fsynced. A crash leaves either no canonical lock or a fully parseable one.
+    await fs.link(candidatePath, lockPath);
+    canonicalLinked = true;
+    const directoryHandle = await fs.open(directory, 'r');
+    try {
+      await directoryHandle.sync();
+    } finally {
+      await directoryHandle.close();
+    }
+    await options.onBoundary?.('after-canonical-link');
+  } catch (error) {
+    if (canonicalLinked) {
+      await removeStorageLockIfOwned(lockPath, body.owner, 'release', fs);
+    }
+    await unlinkStorageFileIfPresent(candidatePath, fs);
+    throw error;
+  }
+  await unlinkStorageFileIfPresent(candidatePath, fs);
+  return body;
 };
-
-const storageWriterErrorCode = (error: unknown): string =>
-  typeof error === 'object' && error !== null && 'code' in error
-    ? String((error as { code?: unknown }).code || '')
-    : '';
 
 const releaseStorageWriterLock = async (
   lockPath: string,
   owner: StorageWriterLockBody,
   fs: typeof import('fs/promises'),
 ): Promise<void> => {
-  await assertStorageLockOwnership(lockPath, owner, fs);
-  await fs.unlink(lockPath);
+  if (!await removeStorageLockIfOwned(lockPath, owner.owner, 'release', fs)) {
+    throw new Error(
+      `STORAGE_WRITER_LOCK_OWNERSHIP_LOST: path=${lockPath} expected=${owner.owner} ` +
+      `actual=${(await readStorageWriterLock(lockPath, fs))?.owner ?? 'missing'}`,
+    );
+  }
 };
 
-export const withStorageWriterLock = async <T>(env: Env, fn: () => Promise<T>): Promise<T> => {
-  if (!nodeProcess) return await fn();
+type BrowserLockManager = {
+  request<T>(
+    name: string,
+    options: { mode: 'exclusive' },
+    callback: (lock: unknown) => Promise<T>,
+  ): Promise<T>;
+};
+
+const getBrowserLockManager = (): BrowserLockManager | null => {
+  const browserNavigator = (globalThis as typeof globalThis & {
+    navigator?: { locks?: BrowserLockManager };
+  }).navigator;
+  return browserNavigator?.locks ?? null;
+};
+
+const withBrowserStorageWriterLock = async <T>(env: Env, fn: () => Promise<T>): Promise<T> => {
+  const locks = getBrowserLockManager();
+  if (!locks) {
+    throw new Error(`STORAGE_BROWSER_WRITER_LOCK_UNAVAILABLE: namespace=${resolveDbNamespace({ env })}`);
+  }
+  const lockName = `xln:storage-writer:${resolveDbNamespace({ env })}`;
+  return locks.request(lockName, { mode: 'exclusive' }, async (lock) => {
+    if (!lock) throw new Error(`STORAGE_BROWSER_WRITER_LOCK_NOT_GRANTED: namespace=${resolveDbNamespace({ env })}`);
+    return fn();
+  });
+};
+
+export const withStorageWriterLock = async <T>(
+  env: Env,
+  fn: () => Promise<T>,
+  options: StorageWriterLockOptions = {},
+): Promise<T> => {
+  if (!nodeProcess) return withBrowserStorageWriterLock(env, fn);
 
   const lockPath = resolveStorageWriterLockPath(env);
   if (activeStorageWriterLocks.has(lockPath)) {
@@ -282,7 +437,7 @@ export const withStorageWriterLock = async <T>(env: Env, fn: () => Promise<T>): 
   let acquired: StorageWriterLockBody | null = null;
   try {
     try {
-      acquired = await tryAcquireStorageWriterLock(env, lockPath, fs, path);
+      acquired = await tryAcquireStorageWriterLock(env, lockPath, fs, path, options);
     } catch (error) {
       if (storageWriterErrorCode(error) !== 'EEXIST') throw error;
 
@@ -292,18 +447,31 @@ export const withStorageWriterLock = async <T>(env: Env, fn: () => Promise<T>): 
         recoveryOwner = await acquireStorageRecoveryLock(env, recoveryPath, fs, path);
 
         const existing = await readStorageWriterLock(lockPath, fs);
-        if (!storageWriterLockIsReclaimable(existing)) {
-          throw storageWriterLockHeldError(lockPath, existing);
-        }
         if (!await storageLockIsOwnedBy(recoveryPath, recoveryOwner, fs)) {
           throw storageWriterLockHeldError(recoveryPath, await readStorageWriterLock(recoveryPath, fs));
         }
-        await fs.unlink(lockPath);
+        if (!existing) {
+          if (!await removeMalformedStorageLock(lockPath, fs)) {
+            throw storageWriterLockHeldError(lockPath, await readStorageWriterLock(lockPath, fs));
+          }
+        } else {
+          if (!storageWriterLockIsReclaimable(existing)) {
+            throw storageWriterLockHeldError(lockPath, existing);
+          }
+          if (!await removeStorageLockIfOwned(lockPath, existing.owner, 'stale', fs)) {
+            throw storageWriterLockHeldError(lockPath, await readStorageWriterLock(lockPath, fs));
+          }
+        }
         try {
-          acquired = await tryAcquireStorageWriterLock(env, lockPath, fs, path);
+          acquired = await tryAcquireStorageWriterLock(env, lockPath, fs, path, options);
         } catch (acquireError) {
           if (storageWriterErrorCode(acquireError) !== 'EEXIST') throw acquireError;
-          const replacementRaw = await fs.readFile(lockPath, 'utf8').catch(() => '');
+          let replacementRaw = '';
+          try {
+            replacementRaw = await fs.readFile(lockPath, 'utf8');
+          } catch (readError) {
+            if (storageWriterErrorCode(readError) !== 'ENOENT') throw readError;
+          }
           throw storageWriterLockHeldError(
             lockPath,
             replacementRaw ? parseStorageWriterLock(replacementRaw) : null,
@@ -324,6 +492,17 @@ export const withStorageWriterLock = async <T>(env: Env, fn: () => Promise<T>): 
     activeStorageWriterLocks.delete(lockPath);
   }
 };
+
+/**
+ * Pin a multi-read recovery view against snapshot publication and replay
+ * pruning. Browser runtimes share the same Web Lock with frame writers; node
+ * readers use the durable writer lock and fail loudly on an external live
+ * contender instead of observing a torn history window.
+ */
+export const withStorageConsistentRead = async <T>(
+  env: Env,
+  fn: () => Promise<T>,
+): Promise<T> => withStorageWriterLock(env, fn);
 
 const resolveStorageRotationMarkerPath = (env: Env): string => {
   const base = resolveDbPath(env, 'core');
@@ -366,13 +545,13 @@ export const closeStorageDb = async (
   if (!db) return;
   try {
     await db.close();
-  } catch (error) {
-    storageLog.warn('storage_db.close_failed', { role, error: formatStorageError(error) });
-  } finally {
     state[fields.dbField] = null;
     state[fields.openField] = null;
     if (role === 'previous') delete state.storageVerifiedPreviousHeight;
     else delete state.storageVerifiedCurrentHeight;
+  } catch (error) {
+    storageLog.warn('storage_db.close_failed', { role, error: formatStorageError(error) });
+    throw error;
   }
 };
 
@@ -382,24 +561,9 @@ const storagePathExists = async (path: string): Promise<boolean> => {
   try {
     await fs.stat(path);
     return true;
-  } catch {
-    return false;
-  }
-};
-
-const fsyncParentDir = async (targetPath: string): Promise<void> => {
-  if (!nodeProcess) return;
-  const fs = await import('fs/promises');
-  const path = await import('path');
-  try {
-    const dir = await fs.open(path.dirname(targetPath), 'r');
-    try {
-      await dir.sync();
-    } finally {
-      await dir.close();
-    }
-  } catch {
-    // Best-effort on platforms/filesystems that do not support syncing dirs.
+  } catch (error) {
+    if (storageWriterErrorCode(error) === 'ENOENT') return false;
+    throw new Error(`STORAGE_PATH_STAT_FAILED:path=${path}`, { cause: error });
   }
 };
 
@@ -412,39 +576,42 @@ const readStorageRotationMarker = async (env: Env): Promise<StorageEpochRotation
   if (!nodeProcess) return null;
   const fs = await import('fs/promises');
   const markerPath = resolveStorageRotationMarkerPath(env);
+  let raw: string;
   try {
-    const raw = await fs.readFile(markerPath, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<StorageEpochRotationMarker>;
-    if (
-      typeof parsed.currentPath === 'string' &&
-      typeof parsed.previousPath === 'string' &&
-      typeof parsed.nextPath === 'string' &&
-      Number.isFinite(parsed.snapshotHeight)
-    ) {
-      return {
-        snapshotHeight: Number(parsed.snapshotHeight),
-        currentPath: parsed.currentPath,
-        previousPath: parsed.previousPath,
-        nextPath: parsed.nextPath,
-        createdAt: Number(parsed.createdAt || 0),
-      };
-    }
+    raw = await fs.readFile(markerPath, 'utf8');
   } catch (error) {
-    if (!isFsNotFound(error)) {
-      storageLog.warn('storage_epoch.marker_read_failed', { error: formatStorageError(error) });
-    }
+    if (isFsNotFound(error)) return null;
+    throw new Error(`STORAGE_EPOCH_MARKER_READ_FAILED:path=${markerPath}`, { cause: error });
   }
-  return null;
+
+  let parsed: Partial<StorageEpochRotationMarker>;
+  try {
+    parsed = JSON.parse(raw) as Partial<StorageEpochRotationMarker>;
+  } catch (error) {
+    throw new Error(`STORAGE_EPOCH_MARKER_INVALID:path=${markerPath}`, { cause: error });
+  }
+  if (
+    typeof parsed.currentPath !== 'string' || !parsed.currentPath ||
+    typeof parsed.previousPath !== 'string' || !parsed.previousPath ||
+    typeof parsed.nextPath !== 'string' || !parsed.nextPath ||
+    !Number.isSafeInteger(parsed.snapshotHeight) || Number(parsed.snapshotHeight) <= 0 ||
+    !Number.isFinite(Number(parsed.createdAt ?? 0))
+  ) {
+    throw new Error(`STORAGE_EPOCH_MARKER_INVALID:path=${markerPath}`);
+  }
+  return {
+    snapshotHeight: Number(parsed.snapshotHeight),
+    currentPath: parsed.currentPath,
+    previousPath: parsed.previousPath,
+    nextPath: parsed.nextPath,
+    createdAt: Number(parsed.createdAt ?? 0),
+  };
 };
 
 const writeStorageRotationMarker = async (env: Env, marker: StorageEpochRotationMarker): Promise<void> => {
   if (!nodeProcess) return;
-  const fs = await import('fs/promises');
   const markerPath = resolveStorageRotationMarkerPath(env);
-  const tmpPath = `${markerPath}.tmp`;
-  await fs.writeFile(tmpPath, `${JSON.stringify(marker)}\n`);
-  await fs.rename(tmpPath, markerPath);
-  await fsyncParentDir(markerPath);
+  await writeDurableStorageMarkerFile(markerPath, `${JSON.stringify(marker)}\n`);
 };
 
 const removeStorageRotationMarker = async (env: Env): Promise<void> => {
@@ -453,7 +620,7 @@ const removeStorageRotationMarker = async (env: Env): Promise<void> => {
   const markerPath = resolveStorageRotationMarkerPath(env);
   await fs.rm(markerPath, { force: true });
   await fs.rm(`${markerPath}.tmp`, { force: true });
-  await fsyncParentDir(markerPath);
+  await fsyncStorageParentDirectory(markerPath);
 };
 
 const recoverStorageEpochRotationOnce = async (env: Env): Promise<void> => {
@@ -464,6 +631,19 @@ const recoverStorageEpochRotationOnce = async (env: Env): Promise<void> => {
   const previousPath = resolveStorageDbPath(env, 'previous');
 
   if (marker) {
+    const expectedNextPath = `${currentPath}-next-${marker.snapshotHeight}`;
+    if (
+      marker.currentPath !== currentPath ||
+      marker.previousPath !== previousPath ||
+      marker.nextPath !== expectedNextPath
+    ) {
+      throw new Error(
+        `STORAGE_EPOCH_MARKER_PATH_MISMATCH:` +
+        `current=${marker.currentPath}:${currentPath}:` +
+        `previous=${marker.previousPath}:${previousPath}:` +
+        `next=${marker.nextPath}:${expectedNextPath}`,
+      );
+    }
     const currentExists = await storagePathExists(marker.currentPath);
     const nextExists = await storagePathExists(marker.nextPath);
     const previousExists = await storagePathExists(marker.previousPath);
@@ -471,15 +651,15 @@ const recoverStorageEpochRotationOnce = async (env: Env): Promise<void> => {
     if (!currentExists && nextExists) {
       storageLog.warn('storage_epoch.recover_complete_interrupted', { snapshotHeight: marker.snapshotHeight });
       await fs.rename(marker.nextPath, marker.currentPath);
-      await fsyncParentDir(marker.currentPath);
+      await fsyncStorageParentDirectory(marker.currentPath);
     } else if (!currentExists && previousExists) {
       storageLog.warn('storage_epoch.recover_rollback_interrupted', { snapshotHeight: marker.snapshotHeight });
       await fs.rename(marker.previousPath, marker.currentPath);
-      await fsyncParentDir(marker.currentPath);
+      await fsyncStorageParentDirectory(marker.currentPath);
     } else if (currentExists && nextExists) {
       storageLog.warn('storage_epoch.recover_remove_stale_next', { snapshotHeight: marker.snapshotHeight });
       await fs.rm(marker.nextPath, { recursive: true, force: true });
-      await fsyncParentDir(marker.nextPath);
+      await fsyncStorageParentDirectory(marker.nextPath);
     }
 
     await removeStorageRotationMarker(env);
@@ -489,7 +669,7 @@ const recoverStorageEpochRotationOnce = async (env: Env): Promise<void> => {
   if (!(await storagePathExists(currentPath)) && (await storagePathExists(previousPath))) {
     storageLog.warn('storage_epoch.recover_previous_as_current');
     await fs.rename(previousPath, currentPath);
-    await fsyncParentDir(currentPath);
+    await fsyncStorageParentDirectory(currentPath);
   }
 };
 
@@ -620,10 +800,10 @@ export const rotateStorageEpochDb = async (
     await fs.rm(previousPath, { recursive: true, force: true });
     if (await storagePathExists(currentPath)) {
       await fs.rename(currentPath, previousPath);
-      await fsyncParentDir(previousPath);
+      await fsyncStorageParentDirectory(previousPath);
     }
     await fs.rename(nextPath, currentPath);
-    await fsyncParentDir(currentPath);
+    await fsyncStorageParentDirectory(currentPath);
     await removeStorageRotationMarker(env);
     delete state.storageVerifiedCurrentHeight;
     delete state.storageVerifiedPreviousHeight;
@@ -680,12 +860,12 @@ export const closeFrameDb = async (env: Env): Promise<void> => {
   if (!db) return;
   try {
     await db.close();
-  } catch (error) {
-    storageLog.warn('frame_db.close_failed', { error: formatStorageError(error) });
-  } finally {
     state!.frameDb = null;
     state!.frameDbOpenPromise = null;
     delete state!.storageVerifiedHistoryHeight;
+  } catch (error) {
+    storageLog.warn('frame_db.close_failed', { error: formatStorageError(error) });
+    throw error;
   }
 };
 
@@ -694,11 +874,11 @@ export const closeInfraDb = async (env: Env): Promise<void> => {
   if (!state?.infraDb) return;
   try {
     await state.infraDb.close();
-  } catch (error) {
-    storageLog.warn('infra_db.close_failed', { error: formatStorageError(error) });
-  } finally {
     state.infraDb = null;
     state.infraDbOpenPromise = null;
+  } catch (error) {
+    storageLog.warn('infra_db.close_failed', { error: formatStorageError(error) });
+    throw error;
   }
 };
 

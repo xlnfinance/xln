@@ -165,13 +165,12 @@ export async function maybeApproveSettlement(
   const [, approverRep] = findReplica(env, approver.id);
   const account = approverRep.state.accounts.get(counterpartyId);
   const workspace = account?.settlementWorkspace;
-  if (workspace) {
-    const approverIsLeft = isLeft(approver.id, counterpartyId);
-    const myHanko = approverIsLeft ? workspace.leftHanko : workspace.rightHanko;
-    if (myHanko) {
-      console.log(`ℹ️ ${approver.name} already signed settlement with ${counterpartyId.slice(-4)} (skip duplicate settle_approve)`);
-      return false;
-    }
+  if (!workspace) throw new Error(`SETTLEMENT_WORKSPACE_MISSING:${approver.id}:${counterpartyId}`);
+  const approverIsLeft = isLeft(approver.id, counterpartyId);
+  const myHanko = approverIsLeft ? workspace.leftHanko : workspace.rightHanko;
+  if (myHanko) {
+    console.log(`ℹ️ ${approver.name} already signed settlement with ${counterpartyId.slice(-4)} (skip duplicate settle_approve)`);
+    return false;
   }
 
   const processRuntime = await getProcess();
@@ -180,7 +179,7 @@ export async function maybeApproveSettlement(
     signerId: approver.signer,
     entityTxs: [{
       type: 'settle_approve',
-      data: { counterpartyEntityId: counterpartyId },
+      data: { counterpartyEntityId: counterpartyId, workspaceHash: workspace.workspaceHash },
     }],
   }]);
   return true;

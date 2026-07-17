@@ -1,9 +1,12 @@
 import type { AccountMachine, Delta, EntityTx, Env } from '../types';
-import { deriveDelta } from '../account/utils';
+import { deriveDelta, getTokenInfo } from '../account/utils';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { compareStableText } from '../protocol/serialization';
 import { getBootstrapTokenAmount } from '../jurisdiction/bootstrap-economy';
 import { getEntityReplicaById } from '../entity/replica-lookup';
+import { assertEntityProposalAction } from '../entity/authorization';
+import { normalizeSignedEntityCommand } from '../entity/command-codec';
+import { getReliableOutputIdentity } from '../machine/output-routing';
 export { getEntityReplicaById } from '../entity/replica-lookup';
 export { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/default-tokens';
 export {
@@ -13,13 +16,16 @@ export {
 } from '../jurisdiction/bootstrap-economy';
 
 export const HUB_MESH_TOKEN_ID = 1;
-export const getBootstrapCreditAmount = (tokenId: number): bigint => getBootstrapTokenAmount(tokenId, 18);
+export const getBootstrapCreditAmount = (
+  tokenId: number,
+  decimals = getTokenInfo(tokenId).decimals,
+): bigint => getBootstrapTokenAmount(tokenId, decimals);
 
 export const HUB_MESH_CREDIT_AMOUNT = getBootstrapCreditAmount(HUB_MESH_TOKEN_ID);
-export const DEFAULT_USER_HUB_CREDIT_AMOUNT = 10_000n * 10n ** 18n;
+export const DEFAULT_USER_HUB_CREDIT_AMOUNT = 10_000n * 10n ** BigInt(getTokenInfo(HUB_MESH_TOKEN_ID).decimals);
 export const HUB_REQUIRED_TOKEN_COUNT = 3;
 export const HUB_DEFAULT_SUPPORTED_PAIRS = ['1/2', '1/3', '2/3'] as const;
-export const HUB_DEFAULT_MIN_TRADE_SIZE = 10n * 10n ** 18n;
+export const HUB_DEFAULT_MIN_TRADE_SIZE = 10n * 10n ** BigInt(getTokenInfo(HUB_MESH_TOKEN_ID).decimals);
 export const BOOTSTRAP_POLL_MS = Math.max(10, Number(process.env['BOOTSTRAP_POLL_MS'] || '50'));
 export const RUNTIME_SETTLE_POLL_MS = Math.max(5, Number(process.env['RUNTIME_SETTLE_POLL_MS'] || '10'));
 
@@ -39,6 +45,7 @@ export type MarketMakerEntityJurisdictionConfig = {
   entityProviderAddress: string;
   depositoryAddress: string;
   chainId: number;
+  blockTimeMs: number;
 };
 
 export const buildMarketMakerConsensusConfig = (
@@ -62,12 +69,18 @@ export const deriveMarketMakerEntityId = (
 ): string => hashBoard(encodeBoard(buildMarketMakerConsensusConfig(signerId, jurisdiction))).toLowerCase();
 
 export const hasPendingRuntimeWork = (env: Env): boolean => {
+  if (env.runtimeState?.processingPromise) return true;
   if (env.pendingOutputs?.length) return true;
   if (env.pendingNetworkOutputs?.length) return true;
   if (env.networkInbox?.length) return true;
-  if (env.runtimeInput?.runtimeTxs?.length) return true;
-  if (env.runtimeMempool?.entityInputs?.length) return true;
-  if (env.runtimeMempool?.runtimeTxs?.length) return true;
+  const queuedInputs = [env.runtimeMempool, env.runtimeInput]
+    .filter((input, index, all) => input && all.indexOf(input) === index);
+  for (const input of queuedInputs) {
+    if (input!.entityInputs?.length) return true;
+    if (input!.runtimeTxs?.length) return true;
+    if (input!.jInputs?.length) return true;
+    if (input!.reliableReceipts?.length) return true;
+  }
 
   if (env.jReplicas) {
     for (const replica of env.jReplicas.values()) {
@@ -76,6 +89,30 @@ export const hasPendingRuntimeWork = (env: Env): boolean => {
   }
 
   return false;
+};
+
+export type RuntimeQuiescenceHealth = {
+  pendingReliableOutputs: number;
+  pendingAccountFrames: number;
+  accountMempoolTxs: number;
+};
+
+/** Read-only bootstrap evidence; it never participates in consensus state. */
+export const summarizeRuntimeQuiescence = (env: Env): RuntimeQuiescenceHealth => {
+  let pendingAccountFrames = 0;
+  let accountMempoolTxs = 0;
+  for (const replica of env.eReplicas.values()) {
+    for (const account of replica.state.accounts.values()) {
+      if (account.pendingFrame) pendingAccountFrames += 1;
+      accountMempoolTxs += account.mempool?.length ?? 0;
+    }
+  }
+  return {
+    pendingReliableOutputs: (env.pendingNetworkOutputs ?? [])
+      .filter(output => getReliableOutputIdentity(output) !== null).length,
+    pendingAccountFrames,
+    accountMempoolTxs,
+  };
 };
 
 export const settleRuntimeFor = async (env: Env, rounds = 30): Promise<void> => {
@@ -135,26 +172,41 @@ export const hasAccount = (env: Env, entityId: string, counterpartyId: string): 
   return false;
 };
 
+const expandQueuedEntityTxs = (txs: readonly EntityTx[] | undefined): EntityTx[] => {
+  if (!Array.isArray(txs)) return [];
+  const expanded: EntityTx[] = [];
+  // Bootstrap dedup must inspect semantic work after local authorization wraps
+  // it as EntityCommand -> proposal -> entity_transaction. Looking only at the
+  // outer frame lets the next bootstrap poll enqueue the same financial action
+  // again. Parse only these two canonical wrappers; never crawl arbitrary data.
+  const appendProposal = (tx: EntityTx): void => {
+    expanded.push(tx);
+    if (tx.type !== 'propose') return;
+    const action = assertEntityProposalAction(tx.data.action);
+    if (action.type === 'entity_transaction') expanded.push(...action.data.txs);
+  };
+  for (const tx of txs) {
+    if (tx.type !== 'entityCommand') {
+      appendProposal(tx);
+      continue;
+    }
+    expanded.push(tx);
+    const command = normalizeSignedEntityCommand(tx.data);
+    for (const nested of command.txs) appendProposal(nested);
+  }
+  return expanded;
+};
+
 export const hasQueuedOpenAccount = (
   env: Env,
   entityId: string,
   counterpartyId: string,
 ): boolean => {
   const target = String(counterpartyId || '').toLowerCase();
-  const containsOpenAccount = (txs: readonly EntityTx[] | undefined): boolean =>
-    Array.isArray(txs) && txs.some((tx) =>
-      tx.type === 'openAccount' &&
-      String(tx.data.targetEntityId || '').toLowerCase() === target,
-    );
-
-  if (containsOpenAccount(queuedEntityTxsFor(env, entityId))) return true;
-
-  const replica = getEntityReplicaById(env, entityId);
-  if (!replica) return false;
-  if (containsOpenAccount(replica.mempool)) return true;
-  if (containsOpenAccount(replica.proposal?.txs)) return true;
-  if (containsOpenAccount(replica.lockedFrame?.txs)) return true;
-  return false;
+  return semanticQueuedEntityTxsFor(env, entityId).some((tx) =>
+    tx.type === 'openAccount' &&
+    String(tx.data.targetEntityId || '').toLowerCase() === target,
+  );
 };
 
 const queuedEntityTxsFor = (env: Env, targetEntityId: string): EntityTx[] => {
@@ -169,6 +221,16 @@ const queuedEntityTxsFor = (env: Env, targetEntityId: string): EntityTx[] => {
     }
   }
   return txs;
+};
+
+const semanticQueuedEntityTxsFor = (env: Env, entityId: string): EntityTx[] => {
+  const replica = getEntityReplicaById(env, entityId);
+  return [
+    queuedEntityTxsFor(env, entityId),
+    replica?.mempool,
+    replica?.proposal?.txs,
+    replica?.lockedFrame?.txs,
+  ].flatMap(expandQueuedEntityTxs);
 };
 
 const parseQueuedAmount = (value: unknown): bigint | null => {
@@ -187,29 +249,19 @@ export const hasQueuedExtendCredit = (
 ): boolean => {
   const target = String(counterpartyId || '').toLowerCase();
   const expectedTokenId = Number(tokenId);
-  const containsExtendCredit = (txs: readonly EntityTx[] | undefined): boolean =>
-    Array.isArray(txs) && txs.some((tx) => {
-      if (tx.type !== 'extendCredit') return false;
-      const data = tx.data as {
-        counterpartyEntityId?: string;
-        tokenId?: number;
-        amount?: unknown;
-      };
-      if (String(data.counterpartyEntityId || '').toLowerCase() !== target) return false;
-      if (Number(data.tokenId) !== expectedTokenId) return false;
-      if (minAmount <= 0n) return true;
-      const amount = parseQueuedAmount(data.amount);
-      return amount !== null && amount >= minAmount;
-    });
-
-  if (containsExtendCredit(queuedEntityTxsFor(env, entityId))) return true;
-
-  const replica = getEntityReplicaById(env, entityId);
-  if (!replica) return false;
-  if (containsExtendCredit(replica.mempool)) return true;
-  if (containsExtendCredit(replica.proposal?.txs)) return true;
-  if (containsExtendCredit(replica.lockedFrame?.txs)) return true;
-  return false;
+  return semanticQueuedEntityTxsFor(env, entityId).some((tx) => {
+    if (tx.type !== 'extendCredit') return false;
+    const data = tx.data as {
+      counterpartyEntityId?: string;
+      tokenId?: number;
+      amount?: unknown;
+    };
+    if (String(data.counterpartyEntityId || '').toLowerCase() !== target) return false;
+    if (Number(data.tokenId) !== expectedTokenId) return false;
+    if (minAmount <= 0n) return true;
+    const amount = parseQueuedAmount(data.amount);
+    return amount !== null && amount >= minAmount;
+  });
 };
 
 export const collectQueuedSwapOfferIds = (
@@ -219,7 +271,7 @@ export const collectQueuedSwapOfferIds = (
 ): Set<string> => {
   const target = String(counterpartyId || '').toLowerCase();
   const ids = new Set<string>();
-  for (const tx of queuedEntityTxsFor(env, entityId)) {
+  for (const tx of semanticQueuedEntityTxsFor(env, entityId)) {
     if (tx.type !== 'placeSwapOffer') continue;
     const data = tx.data as {
       counterpartyEntityId?: string;
@@ -289,14 +341,27 @@ export const getEntityOutCapacity = (
   return deriveDelta(delta, account.leftEntity === ownerEntityId).outCapacity;
 };
 
-export const isAccountConsensusReady = (account: AccountMachine | null): boolean => {
+/** A committed Account remains usable even while its peer is offline. */
+export const hasCommittedAccountState = (
+  account: AccountMachine | null,
+): account is AccountMachine => {
   if (!account) return false;
+  if (account.status !== 'active') return false;
   if (!account.currentFrame) return false;
   if (Number(account.currentHeight ?? 0) <= 0) return false;
+  return true;
+};
+
+/** Mutation producers use this stricter predicate to avoid overlapping writes. */
+export const isAccountWriteLaneIdle = (account: AccountMachine | null): boolean => {
+  if (!hasCommittedAccountState(account)) return false;
   if (account.pendingFrame) return false;
   if ((account.mempool?.length ?? 0) > 0) return false;
   return true;
 };
+
+/** @deprecated Prefer the explicit committed-state or write-lane predicate. */
+export const isAccountConsensusReady = isAccountWriteLaneIdle;
 
 export const hasPairMutualCredit = (
   env: Env,
@@ -308,7 +373,7 @@ export const hasPairMutualCredit = (
   const account =
     getAccountMachine(env, leftEntityId, rightEntityId)
     ?? getAccountMachine(env, rightEntityId, leftEntityId);
-  if (!account || !isAccountConsensusReady(account)) return false;
+  if (!hasCommittedAccountState(account)) return false;
   const grantedByLeft = getCreditGrantedByEntity(account, leftEntityId, tokenId);
   const grantedByRight = getCreditGrantedByEntity(account, rightEntityId, tokenId);
   return grantedByLeft >= amount && grantedByRight >= amount;

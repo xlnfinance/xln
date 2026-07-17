@@ -1,11 +1,23 @@
 import { describe, expect, test } from 'bun:test';
 
 import { createFrameHash } from '../account/consensus/frame';
-import { createEntityFrameHash } from '../entity/consensus/frame';
+import {
+  createEntityFrameHash,
+  createEntityFrameHashFromStateRoot,
+} from '../entity/consensus/frame';
+import {
+  buildEntityFrameAuthority,
+  computeCanonicalEntityConsensusStateHash,
+  computeEntityFrameAuthorityRoot,
+} from '../entity/consensus/state-root';
 import type { AccountFrame, EntityState, EntityTx } from '../types';
 
 const ACCOUNT_FRAME_GOLDEN_HASH = '0x24608c6f58a8ad49080c316a4e1d04fe272704cec4b6e091deadf5929e83ff79';
-const ENTITY_FRAME_GOLDEN_HASH = '0x29fafc439487af7a3bc0e52c9d483f7705400475b9f47e5541208e7393635ee6';
+// Independently calculated with a standalone tagged-tuple reference encoder.
+// Keep these literal so changing the production codec cannot bless itself.
+const ENTITY_STATE_ROOT_GOLDEN_HASH = '0x7ab7eb3612ad1f3c224c018120bb6c9a10fe41a204b7657c1e36eb6d8663b3eb';
+const ENTITY_AUTHORITY_ROOT_GOLDEN_HASH = '0x34ddecb744dd2cb805b0b6c1997b6002aedde64ac3f728d96feced6e37a96951';
+const ENTITY_FRAME_GOLDEN_HASH = '0x1c13997704122760c7fe8fd4fa8e37eb125ff14fb4d3699f4d527e7b316308a2';
 
 const makeAccountFrameFixture = (): AccountFrame => ({
   height: 7,
@@ -53,6 +65,7 @@ const makeEntityStateFixture = (accountHash: string): EntityState => ({
       status: 'active',
       currentHeight: 7,
       currentFrame: { stateHash: accountHash },
+      mempool: [],
       pendingWithdrawals: new Map(),
       shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
     } as any,
@@ -88,12 +101,32 @@ describe('frame hash golden fixtures', () => {
       },
     } as any];
 
-    await expect(createEntityFrameHash(
+    const entityState = makeEntityStateFixture(accountHash);
+    expect(computeCanonicalEntityConsensusStateHash(entityState)).toBe(ENTITY_STATE_ROOT_GOLDEN_HASH);
+    expect(computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(entityState))).toBe(
+      ENTITY_AUTHORITY_ROOT_GOLDEN_HASH,
+    );
+
+    const frameHash = await createEntityFrameHash(
       `0x${'22'.repeat(32)}`,
       4,
       1_700_000_000_456,
       entityTxs,
-      makeEntityStateFixture(accountHash),
-    )).resolves.toBe(ENTITY_FRAME_GOLDEN_HASH);
+      entityState,
+    );
+    expect(frameHash).toBe(ENTITY_FRAME_GOLDEN_HASH);
+
+    // Isolate the v4 authority commitment: the state root, tx bytes and
+    // every other frame field stay fixed while only authorityRoot is corrupt.
+    const authorityTamperedHash = createEntityFrameHashFromStateRoot(
+      `0x${'22'.repeat(32)}`,
+      4,
+      1_700_000_000_456,
+      entityTxs,
+      entityState.entityId,
+      ENTITY_STATE_ROOT_GOLDEN_HASH,
+      `0x${'ff'.repeat(32)}`,
+    );
+    expect(authorityTamperedHash).not.toBe(ENTITY_FRAME_GOLDEN_HASH);
   });
 });

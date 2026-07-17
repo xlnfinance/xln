@@ -3,6 +3,8 @@ import { createEmptyEnv, enqueueRuntimeInput, process } from '../runtime';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { buildLocalEntityProfile } from '../networking/gossip-helper';
+import { cloneEntityState } from '../state-helpers';
+import { handleSetHubConfigEntityTx } from '../entity/tx/handlers/account-admin';
 import type { ConsensusConfig, EntityState, HubRebalanceConfig } from '../types';
 
 const ENTITY_SEED = 'entity-hub-profile-test-seed';
@@ -45,9 +47,7 @@ const DEFAULT_HUB_CONFIG: HubRebalanceConfig = {
   policyVersion: 1,
   routingFeePPM: 1000,
   baseFee: 0n,
-  rebalanceBaseFee: 10n ** 17n,
   rebalanceLiquidityFeeBps: 1n,
-  rebalanceGasFee: 0n,
   rebalanceTimeoutMs: 10 * 60 * 1000,
 };
 
@@ -76,7 +76,7 @@ describe('entity hub profile classification', () => {
     });
     const signerKey = deriveSignerKeySync(ENTITY_SEED, SIGNER_LABEL);
     const signerId = deriveSignerAddressSync(ENTITY_SEED, SIGNER_LABEL).toLowerCase();
-    registerSignerKey(signerId, signerKey);
+    registerSignerKey(env, signerId, signerKey);
 
     const config = buildConsensusConfig(signerId);
     const entityId = hashBoard(encodeBoard(config));
@@ -100,8 +100,9 @@ describe('entity hub profile classification', () => {
     expect(stateBefore.profile.isHub).toBe(false);
     expect(buildLocalEntityProfile(env, stateBefore, 1).metadata.isHub).toBe(false);
 
-    stateBefore.hubRebalanceConfig = { ...DEFAULT_HUB_CONFIG };
-    expect(buildLocalEntityProfile(env, stateBefore, 2).metadata.isHub).toBe(false);
+    const configOnlyState = cloneEntityState(stateBefore);
+    configOnlyState.hubRebalanceConfig = { ...DEFAULT_HUB_CONFIG };
+    expect(buildLocalEntityProfile(env, configOnlyState, 2).metadata.isHub).toBe(false);
 
     enqueueRuntimeInput(env, {
       runtimeTxs: [],
@@ -118,8 +119,23 @@ describe('entity hub profile classification', () => {
 
     const stateAfter = findEntityState(env, entityId);
     expect(stateAfter.profile.isHub).toBe(true);
+    expect(stateAfter.hubRebalanceConfig).not.toHaveProperty('rebalanceBaseFee');
+    expect(stateAfter.hubRebalanceConfig).not.toHaveProperty('c2rWithdrawSoftLimit');
+    expect(stateAfter.hubRebalanceConfig).not.toHaveProperty('rebalanceGasFee');
     expect(buildLocalEntityProfile(env, stateAfter, 3).metadata.isHub).toBe(true);
     expect(env.gossip.getHubs().some((profile) => profile.entityId === entityId)).toBe(true);
+    expect(() => handleSetHubConfigEntityTx(env, stateAfter, {
+      type: 'setHubConfig',
+      data: { rebalanceBaseFee: 1n },
+    })).toThrow('HUB_REBALANCE_TOKENLESS_RAW_OVERRIDE_FORBIDDEN:rebalanceBaseFee');
+    expect(() => handleSetHubConfigEntityTx(env, stateAfter, {
+      type: 'setHubConfig',
+      data: { c2rWithdrawSoftLimit: 1n },
+    })).toThrow('HUB_REBALANCE_TOKENLESS_RAW_OVERRIDE_FORBIDDEN:c2rWithdrawSoftLimit');
+    expect(() => handleSetHubConfigEntityTx(env, stateAfter, {
+      type: 'setHubConfig',
+      data: { rebalanceGasFee: 0n },
+    })).toThrow('HUB_REBALANCE_TOKENLESS_RAW_OVERRIDE_FORBIDDEN:rebalanceGasFee');
   });
 
   test('hub gossip metadata carries stable hub name across display profile updates', async () => {
@@ -146,7 +162,7 @@ describe('entity hub profile classification', () => {
     });
     const signerKey = deriveSignerKeySync(`${ENTITY_SEED}-hub-name`, SIGNER_LABEL);
     const signerId = deriveSignerAddressSync(`${ENTITY_SEED}-hub-name`, SIGNER_LABEL).toLowerCase();
-    registerSignerKey(signerId, signerKey);
+    registerSignerKey(env, signerId, signerKey);
 
     const config = buildConsensusConfig(signerId);
     const entityId = hashBoard(encodeBoard(config));

@@ -3,6 +3,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { handleProposeEntityTx, handleVoteEntityTx } from '../entity/tx/handlers/basic';
+import { deriveSignerAddressSync } from '../account/crypto';
+import { generateLazyEntityId } from '../entity/factory';
+import { createEmptyEnv } from '../runtime';
 import type { EntityState, EntityTx } from '../types';
 
 test('basic entity proposal and vote traces stay behind structured logging', () => {
@@ -17,8 +20,8 @@ test('basic entity proposal and vote traces stay behind structured logging', () 
   expect(proposals).toContain('proposalLog.debug');
 });
 
-const makeEntityState = (): EntityState => ({
-  entityId: `0x${'aa'.repeat(32)}`,
+const makeEntityState = (validators: readonly [string, string], entityId: string): EntityState => ({
+  entityId,
   height: 0,
   timestamp: 123,
   nonces: new Map(),
@@ -26,8 +29,8 @@ const makeEntityState = (): EntityState => ({
   proposals: new Map(),
   config: {
     mode: 'proposer-based',
-    validators: ['alice', 'bob'],
-    shares: { alice: 1n, bob: 1n },
+    validators: [...validators],
+    shares: { [validators[0]]: 1n, [validators[1]]: 1n },
     threshold: 2n,
   },
   reserves: new Map(),
@@ -53,21 +56,26 @@ const makeEntityState = (): EntityState => ({
 });
 
 test('basic proposal and vote state transitions are unchanged', () => {
-  const initial = makeEntityState();
+  const env = createEmptyEnv('entity-basic-logging');
+  const validators = [
+    deriveSignerAddressSync(env.runtimeSeed!, '1').toLowerCase(),
+    deriveSignerAddressSync(env.runtimeSeed!, '2').toLowerCase(),
+  ] as const;
+  const initial = makeEntityState(validators, generateLazyEntityId([...validators], 2n, env).toLowerCase());
   const action = { type: 'collective_message' as const, data: { message: 'ship mainnet discipline' } };
-  const proposeTx = { type: 'propose' as const, data: { action, proposer: 'alice' } } satisfies EntityTx;
-  const proposed = handleProposeEntityTx(initial, proposeTx).newState;
+  const proposeTx = { type: 'propose' as const, data: { action, proposer: validators[0] } } satisfies EntityTx;
+  const proposed = handleProposeEntityTx(env, initial, proposeTx).newState;
   const [proposalId, proposal] = Array.from(proposed.proposals.entries())[0]!;
 
   expect(initial.proposals.size).toBe(0);
   expect(proposed.messages).toEqual([]);
   expect(proposal.status).toBe('pending');
-  expect(proposal.votes.get('alice')).toBe('yes');
+  expect(proposal.votes.get(validators[0])).toBe('yes');
 
-  const voteTx = { type: 'vote' as const, data: { proposalId, voter: 'bob', choice: 'yes' as const } } satisfies EntityTx;
-  const voted = handleVoteEntityTx(proposed, voteTx).newState;
+  const voteTx = { type: 'vote' as const, data: { proposalId, voter: validators[1], choice: 'yes' as const } } satisfies EntityTx;
+  const voted = handleVoteEntityTx(env, proposed, voteTx).newState;
 
   expect(voted.proposals.get(proposalId)?.status).toBe('executed');
   expect(voted.messages).toEqual(['[COLLECTIVE] ship mainnet discipline']);
-  expect(voted.proposals.get(proposalId)?.votes.get('bob')).toBe('yes');
+  expect(voted.proposals.get(proposalId)?.votes.get(validators[1])).toBe('yes');
 });

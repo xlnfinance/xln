@@ -26,7 +26,12 @@ export type Args = {
   walletUrl: string;
 };
 
-export type OrchestratorWebSocket = ServerWebSocket<{ type: 'relay'; clientIp: string }>;
+export type OrchestratorSocketType = 'relay' | 'market';
+
+export const resolveOrchestratorSocketType = (protocol: string | null): OrchestratorSocketType =>
+  protocol === 'market' ? 'market' : 'relay';
+
+export type OrchestratorWebSocket = ServerWebSocket<{ type: OrchestratorSocketType; clientIp: string }>;
 
 export type StageTiming = {
   startedAt: number | null;
@@ -127,6 +132,7 @@ export type HubHealthPayload = {
   relayUrl?: string;
   apiUrl?: string;
   directWsUrl?: string;
+  quiescence?: RuntimeQuiescenceHealth;
   p2p?: {
     directPeers?: Array<{ runtimeId: string; endpoint: string; open: boolean }>;
   };
@@ -221,6 +227,7 @@ export type HubInfoPayload = {
     readyHash?: string | null;
     runtimeStateHash?: string | null;
     entityStateHash?: string | null;
+    restoredEntityStateHash?: string | null;
     readyAt?: number | null;
   };
 };
@@ -279,6 +286,7 @@ export type MarketMakerHealthPayload = {
     enabled: boolean;
     ok: boolean;
     entityId: string | null;
+    quiescence?: RuntimeQuiescenceHealth;
     expectedOffersPerHub: number;
     expectedOffersPerPair?: number;
     cross?: MarketMakerCrossHealthPayload;
@@ -301,6 +309,7 @@ export type MarketMakerHealthPayload = {
     readyHash?: string | null;
     runtimeStateHash?: string | null;
     entityStateHash?: string | null;
+    restoredEntityStateHash?: string | null;
     readyAt?: number | null;
   };
 };
@@ -308,6 +317,12 @@ export type MarketMakerHealthPayload = {
 export type MarketMakerInfoPayload = HubInfoPayload;
 
 export type ManagedRuntimeRole = 'hub' | 'market-maker';
+
+export type RuntimeQuiescenceHealth = {
+  pendingReliableOutputs: number;
+  pendingAccountFrames: number;
+  accountMempoolTxs: number;
+};
 
 export type AggregatedHealth = {
   timestamp: number;
@@ -402,6 +417,7 @@ export type AggregatedHealth = {
     failure: RuntimeFailureSignal | null;
     entityId: string | null;
     startupPhase: string | null;
+    quiescence: RuntimeQuiescenceHealth | null;
     expectedOffersPerHub: number;
     expectedOffersPerPair?: number;
     cross: MarketMakerCrossHealthPayload;
@@ -467,6 +483,7 @@ export type AggregatedHealth = {
     exitCode: number | null;
     restartCount: number;
     lastErrorLine: string | null;
+    quiescence: RuntimeQuiescenceHealth | null;
   }>;
   timings: TimingMap;
 };

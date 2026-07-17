@@ -8,6 +8,7 @@
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import BigIntInput from '../Common/BigIntInput.svelte';
   import EntitySelect from './EntitySelect.svelte';
+  import { requireTokenDecimals } from './token-metadata';
 
   export let entityId: string;
   export let actionRuntimeEnv: Env | null = null;
@@ -28,14 +29,15 @@
   let creditAmountBigInt = 0n;
 
   $: effectiveCounterparty = counterpartyId || selectedCounterparty;
-  $: tokenList = [1, 2, 3].map(id => {
-    const info = activeXlnFunctions?.getTokenInfo?.(id);
-    return { id, symbol: info?.symbol || `TKN${id}` };
-  });
+  $: tokenList = activeXlnFunctions
+    ? [1, 2, 3].map((id) => ({ id, symbol: activeXlnFunctions.getTokenInfo(id).symbol }))
+    : [];
   $: selectedTokenDecimals = (() => {
-    const info = activeXlnFunctions?.getTokenInfo?.(selectedTokenId);
-    const decimals = Number(info?.decimals);
-    return Number.isFinite(decimals) && decimals >= 0 ? decimals : 18;
+    if (!activeXlnFunctions) return 0;
+    return requireTokenDecimals(
+      activeXlnFunctions.getTokenInfo(selectedTokenId).decimals,
+      `token:${selectedTokenId}`,
+    );
   })();
 
   type CreditEntityInput = {

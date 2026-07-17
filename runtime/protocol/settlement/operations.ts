@@ -10,7 +10,70 @@
  * Reference: types.ts SettlementOp / SettlementDiff
  */
 
-import type { SettlementOp, SettlementDiff } from '../../types';
+import type { AccountMachine, SettlementOp, SettlementDiff } from '../../types';
+
+const INT256_MIN = -(1n << 255n);
+const INT256_MAX = (1n << 255n) - 1n;
+const MAX_SETTLEMENT_DIFFS = 32;
+const MAX_SETTLEMENT_FORGIVENESS_IDS = 32;
+
+/**
+ * Cooperative settlement and both sides' dispute proofs share the Account
+ * contract nonce. Every bilateral replica therefore chooses above every
+ * locally-known signed proof, not merely above its own signing cursor.
+ */
+const assertSettlementNonceCursor = (value: number): number => {
+  if (!Number.isSafeInteger(value) || value < 0 || value >= Number.MAX_SAFE_INTEGER) {
+    throw new Error(`SETTLEMENT_NONCE_EXHAUSTED:${String(value)}`);
+  }
+  return value;
+};
+
+export const getMinimumSafeSettlementNonce = (account: AccountMachine): number =>
+  assertSettlementNonceCursor(Math.max(
+    Number(account.jNonce ?? 0) + 1,
+    Number(account.proofHeader?.nextProofNonce ?? 0),
+    Number(account.currentDisputeProofNonce ?? 0) + 1,
+    Number(account.counterpartyDisputeProofNonce ?? 0) + 1,
+  ));
+
+export const getNextSettlementNonce = (account: AccountMachine): number => {
+  // `nextProofNonce` is already the first unused bilateral proof nonce. Adding
+  // one here silently skipped a nonce on one replica and was the root cause of
+  // the settlement-seal divergence. The exact candidate must be derived from
+  // committed cursors only and then agreed byte-for-byte by both Account sides.
+  return getMinimumSafeSettlementNonce(account);
+};
+
+const assertInt256 = (value: bigint, field: keyof Omit<SettlementDiff, 'tokenId'>, tokenId: number): void => {
+  if (value < INT256_MIN || value > INT256_MAX) {
+    throw new Error(`SETTLEMENT_INT256_RANGE:${field}:token=${tokenId}`);
+  }
+};
+
+const checkedInt256Add = (left: bigint, right: bigint, tokenId: number): bigint => {
+  const result = left + right;
+  if (result < INT256_MIN || result > INT256_MAX) {
+    throw new Error(`SETTLEMENT_INT256_ADD_OVERFLOW:token=${tokenId}`);
+  }
+  return result;
+};
+
+const assertContractExecutableDiff = (diff: SettlementDiff): void => {
+  assertInt256(diff.leftDiff, 'leftDiff', diff.tokenId);
+  assertInt256(diff.rightDiff, 'rightDiff', diff.tokenId);
+  assertInt256(diff.collateralDiff, 'collateralDiff', diff.tokenId);
+  assertInt256(diff.ondeltaDiff, 'ondeltaDiff', diff.tokenId);
+  const partial = checkedInt256Add(diff.leftDiff, diff.rightDiff, diff.tokenId);
+  checkedInt256Add(partial, diff.collateralDiff, diff.tokenId);
+  for (const [field, value] of [
+    ['leftDiff', diff.leftDiff],
+    ['rightDiff', diff.rightDiff],
+    ['collateralDiff', diff.collateralDiff],
+  ] as const) {
+    if (value === INT256_MIN) throw new Error(`SETTLEMENT_INT256_NEGATION:${field}:token=${diff.tokenId}`);
+  }
+};
 
 /**
  * Compile typed settlement operations into canonical diffs.
@@ -126,6 +189,7 @@ export function compileOps(
   // Validate conservation law on each diff
   const diffs: SettlementDiff[] = [];
   for (const diff of diffMap.values()) {
+    assertContractExecutableDiff(diff);
     const sum = diff.leftDiff + diff.rightDiff + diff.collateralDiff;
     if (sum !== 0n) {
       throw new Error(
@@ -133,6 +197,15 @@ export function compileOps(
       );
     }
     diffs.push(diff);
+  }
+
+  if (diffs.length > MAX_SETTLEMENT_DIFFS) {
+    throw new Error(`SETTLEMENT_DIFF_LIMIT_EXCEEDED:${diffs.length}:${MAX_SETTLEMENT_DIFFS}`);
+  }
+  if (forgiveTokenIds.length > MAX_SETTLEMENT_FORGIVENESS_IDS) {
+    throw new Error(
+      `SETTLEMENT_FORGIVENESS_LIMIT_EXCEEDED:${forgiveTokenIds.length}:${MAX_SETTLEMENT_FORGIVENESS_IDS}`,
+    );
   }
 
   return { diffs, forgiveTokenIds };

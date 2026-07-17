@@ -87,10 +87,13 @@ export function buildExternalToReserveTx(params: {
   };
 }
 
-export function buildSettlementApproveTx(counterpartyEntityId: string): EntityTxOf<'settle_approve'> {
+export function buildSettlementApproveTx(
+  counterpartyEntityId: string,
+  workspaceHash: string,
+): EntityTxOf<'settle_approve'> {
   return {
     type: 'settle_approve',
-    data: { counterpartyEntityId },
+    data: { counterpartyEntityId, workspaceHash },
   };
 }
 

@@ -1,4 +1,4 @@
-import type { RoutedEntityInput } from '../types';
+import type { ReliableDeliveryReceipt, RoutedEntityInput } from '../types';
 import { deserializeWsMessage, hashHelloMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
 import { signDigest } from '../account/crypto';
 import { encryptJSON, decryptJSON, pubKeyToHex } from './p2p-crypto';
@@ -38,30 +38,49 @@ function isNodeWebSocket(ws: WebSocketLike): ws is NodeWebSocket {
   return 'on' in ws && typeof (ws as NodeWebSocket).on === 'function';
 }
 
+const readSocketReadyState = (ws: WebSocketLike): number => {
+  const readyState = 'readyState' in ws && typeof ws.readyState === 'number' ? ws.readyState : undefined;
+  if (readyState === undefined) throw new Error('WS_CLOSE_STATE_UNAVAILABLE');
+  return readyState;
+};
+
 const waitForSocketClose = async (ws: WebSocketLike | null, timeoutMs = 1_000): Promise<void> => {
   if (!ws) return;
-  const readyState = 'readyState' in ws && typeof ws.readyState === 'number' ? ws.readyState : undefined;
-  if (readyState === undefined || readyState >= 2) return;
+  if (readSocketReadyState(ws) === 3) return;
 
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolve, reject) => {
     let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const clearTimer = () => {
+      if (timer === null) return;
+      clearTimeout(timer);
+      timer = null;
+    };
     const finish = () => {
       if (settled) return;
       settled = true;
+      clearTimer();
       resolve();
     };
-    const timer = setTimeout(finish, timeoutMs);
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimer();
+      reject(error);
+    };
+    timer = setTimeout(
+      () => fail(new Error(`WS_CLOSE_TIMEOUT:${timeoutMs}:readyState=${readSocketReadyState(ws)}`)),
+      timeoutMs,
+    );
 
     if (isNodeWebSocket(ws)) {
-      ws.on('close', () => {
-        clearTimeout(timer);
-        finish();
-      });
+      ws.on('close', finish);
       try {
-        ws.close();
-      } catch {
-        clearTimeout(timer);
-        finish();
+        const readyState = readSocketReadyState(ws);
+        if (readyState === 3) finish();
+        else if (readyState !== 2) ws.close();
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error(String(error)));
       }
       return;
     }
@@ -69,7 +88,6 @@ const waitForSocketClose = async (ws: WebSocketLike | null, timeoutMs = 1_000): 
     const browserWs = ws as BrowserWebSocket;
     const prevOnClose = browserWs.onclose;
     browserWs.onclose = (event) => {
-      clearTimeout(timer);
       try {
         prevOnClose?.call(browserWs as unknown as WebSocket, event);
       } finally {
@@ -77,10 +95,11 @@ const waitForSocketClose = async (ws: WebSocketLike | null, timeoutMs = 1_000): 
       }
     };
     try {
-      browserWs.close();
-    } catch {
-      clearTimeout(timer);
-      finish();
+      const readyState = readSocketReadyState(browserWs);
+      if (readyState === 3) finish();
+      else if (readyState !== 2) browserWs.close();
+    } catch (error) {
+      fail(error instanceof Error ? error : new Error(String(error)));
     }
   });
 };
@@ -95,6 +114,7 @@ export type RuntimeWsClientOptions = {
   getTargetEncryptionKey?: (runtimeId: string) => Uint8Array | null; // Lookup target's pubkey
   onPeerEncryptionKey?: (runtimeId: string, pubKeyHex: string) => void;
   onEntityInput?: (from: string, input: RoutedEntityInput, timestamp?: number) => Promise<void> | void;
+  onReliableReceipt?: (from: string, receipt: ReliableDeliveryReceipt) => Promise<void> | void;
   onGossipRequest?: (from: string, payload: unknown) => Promise<void> | void;
   onGossipResponse?: (from: string, payload: unknown) => Promise<void> | void;
   onGossipAnnounce?: (from: string, payload: unknown) => Promise<void> | void;
@@ -119,14 +139,22 @@ const nextTimestamp = () => {
   return wsTimestampCounter;
 };
 
-const createWs = async (url: string): Promise<WebSocketLike> => {
+const createWs = async (
+  url: string,
+  shouldCreate: () => boolean,
+  onCreated: (socket: WebSocketLike) => void,
+): Promise<WebSocketLike | null> => {
+  if (!shouldCreate()) return null;
   if (isBrowser) {
     const ws = new WebSocket(url);
     ws.binaryType = 'arraybuffer';
+    onCreated(ws as BrowserWebSocket);
     return ws as BrowserWebSocket;
   }
   const ws = await import('ws');
+  if (!shouldCreate()) return null;
   const instance = new ws.default(url);
+  onCreated(instance as NodeWebSocket);
   return instance as NodeWebSocket;
 };
 
@@ -151,6 +179,10 @@ export class RuntimeWsClient {
   private ws: WebSocketLike | null = null;
   private closed = false;
   private connecting = false;
+  private lifecycleGeneration = 0;
+  private connectPromise: Promise<void> | null = null;
+  private closePromise: Promise<void> | null = null;
+  private terminalCloseTimeoutMs = 1_000;
   private options: RuntimeWsClientOptions;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
@@ -180,45 +212,95 @@ export class RuntimeWsClient {
     return this.options.url;
   }
 
-  async connect(): Promise<void> {
-    // Guard: no concurrent connections
-    if (this.connecting) {
-      return;
-    }
-    if (this.isOpen()) {
-      return;
-    }
-
-    this.closed = false;
+  connect(): Promise<void> {
+    if (this.closed) return Promise.reject(new Error('WS_CONNECT_AFTER_TERMINAL_CLOSE'));
+    if (this.connectPromise) return this.connectPromise;
+    if (this.isOpen()) return Promise.resolve();
+    if (this.connecting) return Promise.resolve();
     this.connecting = true;
     this.helloSent = false;
     this.helloAcknowledged = false;
+    this.suppressNextClose = false;
+    const generation = ++this.lifecycleGeneration;
+    const attempt = this.connectForGeneration(generation);
+    let tracked: Promise<void>;
+    tracked = attempt
+      .catch((error) => {
+        if (this.lifecycleGeneration === generation) this.connecting = false;
+        throw error;
+      })
+      .finally(() => {
+        if (this.connectPromise === tracked) this.connectPromise = null;
+      });
+    this.connectPromise = tracked;
+    return tracked;
+  }
 
+  private async connectForGeneration(generation: number): Promise<void> {
     // Close any stale WS before creating new one
     if (this.ws) {
       const staleWs = this.ws;
+      wsLog.debug('stale_socket.drain_start', {
+        generation,
+        readyState: readSocketReadyState(staleWs),
+        runtimeId: this.options.runtimeId,
+        url: this.options.url,
+      });
       this.suppressNextClose = true;
-      this.ws = null;
-      await waitForSocketClose(staleWs);
+      await waitForSocketClose(staleWs, this.terminalCloseTimeoutMs);
+      if (this.ws === staleWs) this.ws = null;
     }
+    if (this.closed || generation !== this.lifecycleGeneration) return;
 
-    this.ws = await createWs(this.options.url);
+    const isCurrent = () => !this.closed && generation === this.lifecycleGeneration;
+    const socket = await createWs(this.options.url, isCurrent, (created) => {
+      if (isCurrent()) this.ws = created;
+    });
+    if (!socket) return;
+    wsLog.debug('socket.created', {
+      generation,
+      readyState: readSocketReadyState(socket),
+      runtimeId: this.options.runtimeId,
+      url: this.options.url,
+    });
+    if (this.closed || generation !== this.lifecycleGeneration) {
+      if (this.ws === socket) return;
+      try {
+        await waitForSocketClose(socket, this.terminalCloseTimeoutMs);
+      } catch (error) {
+        if (!this.ws) this.ws = socket;
+        throw error;
+      }
+      return;
+    }
+    if (this.ws !== socket) throw new Error('WS_CONNECT_SOCKET_OWNERSHIP_LOST');
 
-    if ('on' in this.ws) {
-      this.ws.on('open', () => {
-        this.connecting = false;
-        this.reconnectAttempts = 0;
+    if ('on' in socket && typeof (socket as NodeWebSocket).on === 'function') {
+      const nodeSocket = socket as NodeWebSocket;
+      nodeSocket.on('open', () => {
+        if (this.closed || generation !== this.lifecycleGeneration) return;
         wsLog.debug('connected', {
           runtimeId: this.options.runtimeId,
           url: this.options.url,
         });
         if (!this.options.useHelloAuth) {
+          this.connecting = false;
+          this.reconnectAttempts = 0;
           if (!this.sendHello()) return;
           this.options.onOpen?.();
         }
       });
-      this.ws.on('message', (data: Buffer) => this.handleMessage(data));
-      this.ws.on('close', (code: number, reasonBuf: Buffer) => {
+      nodeSocket.on('message', (data: Buffer) => this.dispatchMessage(data, generation));
+      nodeSocket.on('close', (code: number, reasonBuf: Buffer) => {
+        wsLog.debug('socket.closed', {
+          code,
+          currentGeneration: this.lifecycleGeneration,
+          generation,
+          readyState: readSocketReadyState(nodeSocket),
+          runtimeId: this.options.runtimeId,
+          url: this.options.url,
+        });
+        if (generation !== this.lifecycleGeneration) return;
         this.connecting = false;
         this.rejectPendingRecoveryBundleRequests(new Error('RECOVERY_REQUEST_SOCKET_CLOSED'));
         if (this.suppressNextClose) {
@@ -240,7 +322,16 @@ export class RuntimeWsClient {
           console.warn(`[WS] ${summary} — reconnect disabled`);
         }
       });
-      this.ws.on('error', (err: Error) => {
+      nodeSocket.on('error', (err: Error) => {
+        wsLog.debug('socket.error', {
+          currentGeneration: this.lifecycleGeneration,
+          error: err.message,
+          generation,
+          readyState: readSocketReadyState(nodeSocket),
+          runtimeId: this.options.runtimeId,
+          url: this.options.url,
+        });
+        if (this.closed || generation !== this.lifecycleGeneration) return;
         this.connecting = false;
         this.options.onError?.(err);
         // Some WS handshake failures emit only "error" without a "close" callback.
@@ -251,20 +342,23 @@ export class RuntimeWsClient {
         }
       });
     } else {
-      this.ws.onopen = () => {
-        this.connecting = false;
-        this.reconnectAttempts = 0;
+      const browserSocket = socket as BrowserWebSocket;
+      browserSocket.onopen = () => {
+        if (this.closed || generation !== this.lifecycleGeneration) return;
         wsLog.debug('connected', {
           runtimeId: this.options.runtimeId,
           url: this.options.url,
         });
         if (!this.options.useHelloAuth) {
+          this.connecting = false;
+          this.reconnectAttempts = 0;
           if (!this.sendHello()) return;
           this.options.onOpen?.();
         }
       };
-      this.ws.onmessage = (event: MessageEvent) => this.handleMessage(event.data);
-      this.ws.onclose = (event: CloseEvent) => {
+      browserSocket.onmessage = (event: MessageEvent) => this.dispatchMessage(event.data, generation);
+      browserSocket.onclose = (event: CloseEvent) => {
+        if (generation !== this.lifecycleGeneration) return;
         this.connecting = false;
         this.rejectPendingRecoveryBundleRequests(new Error('RECOVERY_REQUEST_SOCKET_CLOSED'));
         if (this.suppressNextClose) {
@@ -287,7 +381,8 @@ export class RuntimeWsClient {
           console.warn(`[WS] ${summary} — reconnect disabled`);
         }
       };
-      this.ws.onerror = (event: Event) => {
+      browserSocket.onerror = (event: Event) => {
+        if (this.closed || generation !== this.lifecycleGeneration) return;
         this.connecting = false;
         this.options.onError?.(new Error(`WebSocket error: ${event.type}`));
         // Browser can also surface error before close in transient network failures.
@@ -438,7 +533,28 @@ export class RuntimeWsClient {
     return true;
   }
 
-  private async handleMessage(raw: string | Buffer | ArrayBuffer) {
+  private dispatchMessage(data: string | Buffer | ArrayBuffer, generation: number): void {
+    void this.handleMessage(data, generation).catch((error: unknown) => {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      // Socket event emitters do not await async listeners. Letting a rejected
+      // application callback escape here becomes an unhandled rejection and
+      // kills Bun. Report it loudly at the transport boundary instead. A
+      // reliable entity sender receives no ACK and therefore retries the exact
+      // same delivery after a quiescing receiver resumes.
+      this.sendDebugEvent({
+        level: 'error',
+        code: 'WS_MESSAGE_HANDLER_REJECTED',
+        failfast: asFailFastPayload(failure),
+      });
+      this.options.onError?.(failure);
+    });
+  }
+
+  private async handleMessage(
+    raw: string | Buffer | ArrayBuffer,
+    generation = this.lifecycleGeneration,
+  ) {
+    if (this.closed || generation !== this.lifecycleGeneration) return;
     let msg: RuntimeWsMessage;
     try {
       msg = deserializeWsMessage(raw);
@@ -470,6 +586,11 @@ export class RuntimeWsClient {
       }
       if (this.helloAcknowledged) return;
       this.helloAcknowledged = true;
+      this.connecting = false;
+      this.reconnectAttempts = 0;
+      if (typeof msg.from === 'string' && typeof msg.fromEncryptionPubKey === 'string') {
+        this.options.onPeerEncryptionKey?.(msg.from, msg.fromEncryptionPubKey);
+      }
       this.options.onOpen?.();
       return;
     }
@@ -531,6 +652,10 @@ export class RuntimeWsClient {
       }
 
       await this.options.onEntityInput?.(msg.from, entityInput, typeof msg.timestamp === 'number' ? msg.timestamp : undefined);
+      return;
+    }
+    if (msg.type === 'entity_input_receipt' && msg.payload && msg.from) {
+      await this.options.onReliableReceipt?.(msg.from, msg.payload as ReliableDeliveryReceipt);
       return;
     }
     if (msg.type === 'gossip_request' && msg.payload && msg.from) {
@@ -609,6 +734,17 @@ export class RuntimeWsClient {
       encrypted: true,
       entityId: input.entityId,
       txs: input.entityTxs?.length ?? 0,
+    });
+  }
+
+  sendReliableReceiptRaw(to: string, receipt: ReliableDeliveryReceipt): boolean {
+    return this.sendRaw({
+      type: 'entity_input_receipt',
+      id: makeMessageId(),
+      from: this.options.runtimeId,
+      to,
+      timestamp: nextTimestamp(),
+      payload: receipt,
     });
   }
 
@@ -737,6 +873,8 @@ export class RuntimeWsClient {
   }
 
   private sendRaw(msg: RuntimeWsMessage): boolean {
+    if (this.closed) return false;
+    if (this.connecting && msg.type !== 'hello') return false;
     if (!this.ws) return false;
     if ('readyState' in this.ws && this.ws.readyState !== 1) return false;
     const outboundMsg =
@@ -788,7 +926,8 @@ export class RuntimeWsClient {
   }
 
   isOpen(): boolean {
-    return !!this.ws && 'readyState' in this.ws && this.ws.readyState === 1;
+    const transportOpen = !!this.ws && 'readyState' in this.ws && this.ws.readyState === 1;
+    return transportOpen && (!this.options.useHelloAuth || this.helloAcknowledged);
   }
 
   isConnecting(): boolean {
@@ -796,23 +935,36 @@ export class RuntimeWsClient {
   }
 
   pause() {
-    this.connecting = false;
-    this.rejectPendingRecoveryBundleRequests(new Error('RECOVERY_REQUEST_SOCKET_PAUSED'));
-    this.suppressNextClose = true;
-    this.reconnectAttempts = 0;
-    this.nextReconnectAt = 0;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    this.ws?.close();
-    this.ws = null;
+    const socket = this.prepareSocketStop('RECOVERY_REQUEST_SOCKET_PAUSED', false);
+    socket?.close();
+    if (this.ws === socket) this.ws = null;
   }
 
   close() {
-    this.closed = true;
+    const socket = this.prepareSocketStop('RECOVERY_REQUEST_SOCKET_CLOSED', true);
+    // A synchronous stop may be followed by closeAndWait during DB/process
+    // teardown. Retain the exact socket until that drain observes CLOSED;
+    // dropping it here would turn an in-flight close into a false success.
+    if (socket && readSocketReadyState(socket) < 2) socket.close();
+  }
+
+  closeAndWait(timeoutMs = 1_000): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    const attempt = this.drainTerminalClose(timeoutMs);
+    let tracked: Promise<void>;
+    tracked = attempt.catch((error) => {
+      if (this.closePromise === tracked) this.closePromise = null;
+      throw error;
+    });
+    this.closePromise = tracked;
+    return tracked;
+  }
+
+  private prepareSocketStop(reason: string, terminal: boolean): WebSocketLike | null {
+    if (terminal) this.closed = true;
+    this.lifecycleGeneration += 1;
     this.connecting = false;
-    this.rejectPendingRecoveryBundleRequests(new Error('RECOVERY_REQUEST_SOCKET_CLOSED'));
+    this.rejectPendingRecoveryBundleRequests(new Error(reason));
     this.suppressNextClose = true;
     this.reconnectAttempts = 0;
     this.nextReconnectAt = 0;
@@ -820,7 +972,23 @@ export class RuntimeWsClient {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    this.ws?.close();
-    this.ws = null;
+    return this.ws;
+  }
+
+  private async drainTerminalClose(timeoutMs: number): Promise<void> {
+    this.terminalCloseTimeoutMs = timeoutMs;
+    const socket = this.prepareSocketStop('RECOVERY_REQUEST_SOCKET_CLOSED', true);
+    const connecting = this.connectPromise;
+    const results = await Promise.allSettled([
+      waitForSocketClose(socket, timeoutMs),
+      connecting ?? Promise.resolve(),
+    ]);
+    if (results[0]?.status === 'fulfilled' && this.ws === socket) this.ws = null;
+    const errors = results
+      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      .map(result => result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, 'WS_CLOSE_FAILED');
+    if (this.ws) throw new Error('WS_CLOSE_LATE_SOCKET_RETAINED');
   }
 }

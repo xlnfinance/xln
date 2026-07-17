@@ -14,6 +14,8 @@ export type { IERC721Errors } from "./@openzeppelin/contracts/interfaces/draft-I
 export { IERC721Errors__factory } from "./factories/@openzeppelin/contracts/interfaces/draft-IERC6093.sol/IERC721Errors__factory";
 export type { ERC1155 } from "./@openzeppelin/contracts/token/ERC1155/ERC1155";
 export { ERC1155__factory } from "./factories/@openzeppelin/contracts/token/ERC1155/ERC1155__factory";
+export type { ERC1155Supply } from "./@openzeppelin/contracts/token/ERC1155/extensions/ERC1155Supply";
+export { ERC1155Supply__factory } from "./factories/@openzeppelin/contracts/token/ERC1155/extensions/ERC1155Supply__factory";
 export type { IERC1155MetadataURI } from "./@openzeppelin/contracts/token/ERC1155/extensions/IERC1155MetadataURI";
 export { IERC1155MetadataURI__factory } from "./factories/@openzeppelin/contracts/token/ERC1155/extensions/IERC1155MetadataURI__factory";
 export type { IERC1155 } from "./@openzeppelin/contracts/token/ERC1155/IERC1155";
@@ -78,5 +80,9 @@ export type { MockEntityProvider } from "./contracts/mocks/MockEntityProvider";
 export { MockEntityProvider__factory } from "./factories/contracts/mocks/MockEntityProvider__factory";
 export type { NoReturnERC20Mock } from "./contracts/mocks/NoReturnERC20Mock";
 export { NoReturnERC20Mock__factory } from "./factories/contracts/mocks/NoReturnERC20Mock__factory";
+export type { SupplyLivenessHarness } from "./contracts/mocks/SupplyLivenessHarness";
+export { SupplyLivenessHarness__factory } from "./factories/contracts/mocks/SupplyLivenessHarness__factory";
+export type { TransformerLivenessHarness } from "./contracts/mocks/TransformerLivenessHarness";
+export { TransformerLivenessHarness__factory } from "./factories/contracts/mocks/TransformerLivenessHarness__factory";
 export type { Token } from "./contracts/Token";
 export { Token__factory } from "./factories/contracts/Token__factory";

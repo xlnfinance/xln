@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { Level } from 'level';
 
 import {
   closeInfraDb,
@@ -11,18 +12,20 @@ import {
   getRuntimeStorageDb,
   getPersistedLatestHeight,
   listPersistedCheckpointHeights,
+  loadEntityStateFromStorageDb,
   loadEnvFromDB,
   process as processRuntime,
   readPersistedAccountFrameHistory,
+  readPersistedCheckpointSnapshot,
   readPersistedFrameJournal,
   saveEnvToDB,
   verifyRuntimeChain,
 } from '../runtime.ts';
-import { markStorageEntityDirty } from '../machine/env-events';
 import {
   readFrameDbRuntimeActivity,
   readStorageFrameRecord,
   readStorageHead,
+  listStorageSnapshotReplicaMetas,
   readStorageOverlayRecordsFromDiffs,
   saveRuntimeFrameToStorage,
   verifyStorageTailIntegrity,
@@ -30,12 +33,27 @@ import {
 import { getPerfMs } from '../utils';
 import { decodeBuffer, encodeBuffer } from '../storage/codec';
 import { readRawOrNull } from '../storage/level';
-import { KEY_HEAD, keyDiff, keyFrame, keyLiveReplicaMeta, keySnapshotEntity, keySnapshotManifest } from '../storage/keys';
+import {
+  KEY_HEAD,
+  keyDiff,
+  keyFrame,
+  keyLiveReplicaMeta,
+  keySnapshotEntity,
+  keySnapshotManifest,
+  keySnapshotReplicaMeta,
+} from '../storage/keys';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
+import { buildRouteOutputKey } from '../machine/output-routing';
+import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import type { StorageEntityCoreDoc, StorageFrameRecord } from '../storage/types';
-import type { JReplica, JurisdictionConfig } from '../types';
-import { resolveStorageWriterLockPath, STORAGE_WRITER_LOCK_TTL_MS } from '../storage/runtime-dbs';
+import type { DeliverableEntityInput, JReplica, JurisdictionConfig } from '../types';
+import {
+  resolveFrameDbPath,
+  resolveStorageWriterLockPath,
+  STORAGE_WRITER_LOCK_TTL_MS,
+  withStorageWriterLock,
+} from '../storage/runtime-dbs';
 
 describe('storage frame journal retention', () => {
   const cleanupRuntimeStorage = (dbRoot: string, runtimeId: string): void => {
@@ -65,6 +83,316 @@ describe('storage frame journal retention', () => {
     return env;
   };
 
+  test('accounts full authoritative frame journals in retained history bytes', async () => {
+    const env = await createSavedEmptyEnv('frame-byte-accounting');
+    const db = getFrameDb(env);
+    const frameKey = keyFrame(1);
+    const diffKey = keyDiff(1);
+    const frame = await readRawOrNull(db, frameKey);
+    const diff = await readRawOrNull(db, diffKey);
+    const head = await readStorageHead(db);
+    if (!frame || !diff || !head) throw new Error('TEST_STORAGE_RECORD_MISSING');
+
+    expect(head.retainedHistoryBytes).toBe(
+      frameKey.byteLength + frame.byteLength + diffKey.byteLength + diff.byteLength,
+    );
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  });
+
+  test('returns null for a checkpoint view that was legitimately pruned by a newer snapshot', async () => {
+    const seed = `checkpoint-view-pruned ${Date.now()} alpha beta gamma`;
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    cleanupRuntimeStorage(dbRoot, runtimeId);
+
+    const env = createEmptyEnv(seed);
+    env.runtimeId = runtimeId;
+    env.dbNamespace = runtimeId;
+    env.quietRuntimeLogs = true;
+    env.runtimeConfig = {
+      ...(env.runtimeConfig || {}),
+      storage: {
+        ...(env.runtimeConfig?.storage || {}),
+        snapshotPeriodFrames: 1,
+        retainSnapshots: 1,
+      },
+    };
+
+    const signer = deriveSignerAddressSync(seed, '1');
+    registerSignerKey(env, signer, deriveSignerKeySync(seed, '1'));
+    const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
+    const jurisdiction = {
+      name: 'checkpoint-view-pruned-test',
+      address: 'browservm://checkpoint-view-pruned-test',
+      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
+      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      chainId: 31337,
+    };
+    installTestJurisdiction(env, jurisdiction);
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId,
+        signerId: signer,
+        data: {
+          isProposer: true,
+          config: {
+            mode: 'proposer-based',
+            threshold: 1n,
+            validators: [signer],
+            shares: { [signer]: 1n },
+            jurisdiction,
+          },
+        },
+      }],
+      entityInputs: [],
+    });
+    await processRuntime(env, []);
+    const prunedHeight = await getPersistedLatestHeight(env);
+
+    env.height = prunedHeight + 1;
+    env.timestamp += 1;
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    const retainedHeight = env.height;
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+
+    expect(await readPersistedCheckpointSnapshot(env, prunedHeight)).toBeNull();
+    expect(await readPersistedCheckpointSnapshot(env, retainedHeight)).toBeTruthy();
+  });
+
+  test('retained snapshots keep every replay diff after the oldest retained base', async () => {
+    const seed = `retained-snapshot-replay-window ${Date.now()} alpha beta gamma`;
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    cleanupRuntimeStorage(dbRoot, runtimeId);
+
+    const env = createEmptyEnv(seed);
+    env.runtimeId = runtimeId;
+    env.dbNamespace = runtimeId;
+    env.quietRuntimeLogs = true;
+    env.runtimeConfig = {
+      ...(env.runtimeConfig || {}),
+      storage: {
+        ...(env.runtimeConfig?.storage || {}),
+        snapshotPeriodFrames: 3,
+        retainSnapshots: 2,
+      },
+    };
+
+    const signer = deriveSignerAddressSync(seed, '1');
+    registerSignerKey(env, signer, deriveSignerKeySync(seed, '1'));
+    const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
+    const jurisdiction = {
+      name: 'retained-snapshot-replay-window-test',
+      address: 'browservm://retained-snapshot-replay-window-test',
+      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
+      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      chainId: 31337,
+    };
+    installTestJurisdiction(env, jurisdiction);
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId,
+        signerId: signer,
+        data: {
+          isProposer: true,
+          config: {
+            mode: 'proposer-based',
+            threshold: 1n,
+            validators: [signer],
+            shares: { [signer]: 1n },
+            jurisdiction,
+          },
+        },
+      }],
+      entityInputs: [],
+    });
+    await processRuntime(env, []);
+
+    const namesByHeight = new Map<number, string>();
+    for (let index = 0; index < 8; index += 1) {
+      const name = `retained-at-${env.height + 1}`;
+      enqueueRuntimeInput(env, {
+        runtimeTxs: [],
+        entityInputs: [{
+          entityId,
+          signerId: signer,
+          entityTxs: [{
+            type: 'profile-update',
+            data: { profile: { entityId, name } },
+          }],
+        }],
+      });
+      await processRuntime(env, []);
+      namesByHeight.set(env.height, name);
+    }
+
+    const checkpoints = await listPersistedCheckpointHeights(env);
+    expect(checkpoints).toHaveLength(2);
+    const oldestRetained = checkpoints[0]!;
+    const newestRetained = checkpoints[1]!;
+    const replayHeight = oldestRetained + 1;
+    expect(replayHeight).toBeLessThan(newestRetained);
+    const restored = await loadEntityStateFromStorageDb(env, entityId, replayHeight);
+    expect(restored?.profile.name).toBe(namesByHeight.get(replayHeight));
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  });
+
+  test('retained checkpoint preserves replica lineage metadata after the live head advances', async () => {
+    const seed = `checkpoint-replica-lineage ${Date.now()} alpha beta gamma`;
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    cleanupRuntimeStorage(dbRoot, runtimeId);
+
+    const env = createEmptyEnv(seed);
+    env.runtimeId = runtimeId;
+    env.dbNamespace = runtimeId;
+    env.quietRuntimeLogs = true;
+    env.runtimeConfig = {
+      ...(env.runtimeConfig || {}),
+      storage: {
+        ...(env.runtimeConfig?.storage || {}),
+        snapshotPeriodFrames: 1,
+        retainSnapshots: 3,
+      },
+    };
+    const jurisdiction = {
+      name: 'checkpoint-replica-lineage-test',
+      address: 'browservm://checkpoint-replica-lineage-test',
+      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
+      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      chainId: 31337,
+    };
+    installTestJurisdiction(env, jurisdiction);
+
+    const signer = deriveSignerAddressSync(seed, '1');
+    registerSignerKey(env, signer, deriveSignerKeySync(seed, '1'));
+    const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId,
+        signerId: signer,
+        data: {
+          isProposer: true,
+          config: {
+            mode: 'proposer-based',
+            threshold: 1n,
+            validators: [signer],
+            shares: { [signer]: 1n },
+            jurisdiction,
+          },
+        },
+      }],
+      entityInputs: [],
+    });
+    await processRuntime(env, []);
+    await processRuntime(env, []);
+    const checkpointHeight = env.height;
+    expect(env.eReplicas.get(`${entityId}:${signer.toLowerCase()}`)?.state.height).toBeGreaterThan(0);
+
+    const secondSigner = deriveSignerAddressSync(seed, '2');
+    registerSignerKey(env, secondSigner, deriveSignerKeySync(seed, '2'));
+    const secondEntityId = generateLazyEntityId([secondSigner], 1n).toLowerCase();
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId: secondEntityId,
+        signerId: secondSigner,
+        data: {
+          isProposer: true,
+          config: {
+            mode: 'proposer-based',
+            threshold: 1n,
+            validators: [secondSigner],
+            shares: { [secondSigner]: 1n },
+            jurisdiction,
+          },
+        },
+      }],
+      entityInputs: [],
+    });
+    await processRuntime(env, []);
+    expect(env.height).toBeGreaterThan(checkpointHeight);
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+    const checkpoint = await readPersistedCheckpointSnapshot(env, checkpointHeight);
+    expect(checkpoint).toBeTruthy();
+    const replicas = checkpoint?.['eReplicas'];
+    expect(replicas).toBeInstanceOf(Array);
+    const restoredReplica = (replicas as Array<[string, { certifiedFrameAnchor?: unknown }]>).find(
+      ([key]) => key.toLowerCase() === `${entityId}:${signer.toLowerCase()}`,
+    )?.[1];
+    expect(restoredReplica?.certifiedFrameAnchor).toBeTruthy();
+
+    const historyDb = new Level(resolveFrameDbPath(env), {
+      valueEncoding: 'buffer',
+      keyEncoding: 'binary',
+    }) as unknown as Level<Buffer, Buffer>;
+    await historyDb.open();
+    const snapshotMetaKey = keySnapshotReplicaMeta(checkpointHeight, entityId, signer);
+    const validMeta = await historyDb.get(snapshotMetaKey);
+    const corruptedMeta = decodeBuffer<Record<string, unknown>>(validMeta);
+    corruptedMeta['lastConsensusProgressAt'] = 987_654;
+    await historyDb.put(snapshotMetaKey, encodeBuffer(corruptedMeta));
+    await historyDb.close();
+
+    await expect(readPersistedCheckpointSnapshot(env, checkpointHeight)).rejects.toThrow(
+      'STORAGE_VERIFY_SNAPSHOT_REPLICA_META_DIGEST_MISMATCH',
+    );
+  });
+
+  test('preserves both the frame write failure and authoritative probe failure', async () => {
+    const seed = `frame-write-probe-double-failure ${process.pid} deterministic seed`;
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    cleanupRuntimeStorage(dbRoot, runtimeId);
+
+    const env = createEmptyEnv(seed);
+    env.runtimeId = runtimeId;
+    env.dbNamespace = runtimeId;
+    env.height = 1;
+    env.timestamp = 1_000;
+    env.quietRuntimeLogs = true;
+    const competingHistoryDb = new Level(resolveFrameDbPath(env), {
+      valueEncoding: 'buffer',
+      keyEncoding: 'binary',
+    }) as unknown as Level<Buffer, Buffer>;
+    await competingHistoryDb.open();
+
+    let failure: unknown;
+    try {
+      await withStorageWriterLock(env, async () => {
+        try {
+          await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+        } catch (error) {
+          failure = error;
+        }
+      });
+    } finally {
+      await competingHistoryDb.close();
+      await closeRuntimeDb(env);
+      await closeInfraDb(env);
+    }
+
+    expect(failure).toBeInstanceOf(Error);
+    const combined = (failure as Error & { cause?: unknown }).cause;
+    expect(combined).toBeInstanceOf(AggregateError);
+    const errors = (combined as AggregateError).errors;
+    expect(errors).toHaveLength(2);
+    expect(String((errors[0] as Error).message)).toContain('STORAGE_WRITER_LOCK_HELD');
+    expect(`${(errors[1] as Error).name}: ${(errors[1] as Error).message}`)
+      .toMatch(/LEVEL_LOCKED|Database (?:failed to open|is not open)|IO error.*lock/i);
+  });
+
   const installTestJurisdiction = (env: ReturnType<typeof createEmptyEnv>, jurisdiction: JurisdictionConfig): void => {
     env.activeJurisdiction = jurisdiction.name;
     env.jReplicas.set(jurisdiction.name, {
@@ -82,6 +410,8 @@ describe('storage frame journal retention', () => {
       contracts: {
         depository: jurisdiction.depositoryAddress,
         entityProvider: jurisdiction.entityProviderAddress,
+        account: '0x000000000000000000000000000000000000ac01',
+        deltaTransformer: '0x000000000000000000000000000000000000de17',
       },
     } as JReplica);
   };
@@ -212,7 +542,7 @@ describe('storage frame journal retention', () => {
     const lockPath = resolveStorageWriterLockPath(env);
     writeFileSync(lockPath, `${JSON.stringify({
       owner: 'test-writer',
-      pid: 999_999,
+      pid: process.pid,
       runtimeId: env.runtimeId,
       frameHeight: 2,
       acquiredAt: Date.now(),
@@ -261,7 +591,7 @@ describe('storage frame journal retention', () => {
     await closeInfraDb(env);
   });
 
-  test('latest restore preserves multi-validator signer/proposer identity and fails closed without its meta', async () => {
+  test('latest restore trusts authoritative history meta and rejects its deletion against the frame digest', async () => {
     const seed = `storage-restore-missing-multisig-meta ${Date.now()} alpha beta gamma`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
     const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
@@ -273,8 +603,8 @@ describe('storage frame journal retention', () => {
     env.quietRuntimeLogs = true;
     const signerA = deriveSignerAddressSync(seed, '1').toLowerCase();
     const signerB = deriveSignerAddressSync(seed, '2').toLowerCase();
-    registerSignerKey(signerA, deriveSignerKeySync(seed, '1'));
-    registerSignerKey(signerB, deriveSignerKeySync(seed, '2'));
+    registerSignerKey(env, signerA, deriveSignerKeySync(seed, '1'));
+    registerSignerKey(env, signerB, deriveSignerKeySync(seed, '2'));
     const entityId = generateLazyEntityId([signerA, signerB], 2n).toLowerCase();
     const jurisdiction = {
       name: 'storage-restore-missing-multisig-meta',
@@ -323,7 +653,19 @@ describe('storage frame journal retention', () => {
     await closeRuntimeDb(restored);
     await closeInfraDb(restored);
 
-    await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow('STORAGE_RESTORE_REPLICA_META_REQUIRED');
+    const restoredFromHistory = await loadEnvFromDB(runtimeId, seed);
+    if (!restoredFromHistory) throw new Error('test fixture failed to restore from authoritative history meta');
+    const identitiesFromHistory = Array.from(restoredFromHistory.eReplicas.values())
+      .filter((replica) => replica.entityId === entityId)
+      .map(({ signerId, isProposer }) => [signerId, isProposer])
+      .sort((left, right) => String(left[0]).localeCompare(String(right[0])));
+    expect(identitiesFromHistory).toEqual(expectedReplicas);
+    await getFrameDb(restoredFromHistory).del(keyLiveReplicaMeta(entityId, signerA));
+    await getFrameDb(restoredFromHistory).del(keyLiveReplicaMeta(entityId, signerB));
+    await closeRuntimeDb(restoredFromHistory);
+    await closeInfraDb(restoredFromHistory);
+
+    await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow('STORAGE_VERIFY_REPLICA_META_DIGEST_MISMATCH');
   });
 
   test('stores replay frames and diffs only in the history frame DB', async () => {
@@ -350,7 +692,7 @@ describe('storage frame journal retention', () => {
     env.dbNamespace = runtimeId;
     env.quietRuntimeLogs = true;
     const signer = deriveSignerAddressSync(seed, '1').toLowerCase();
-    registerSignerKey(signer, deriveSignerKeySync(seed, '1'));
+    registerSignerKey(env, signer, deriveSignerKeySync(seed, '1'));
     const localEntityId = generateLazyEntityId([signer], 1n).toLowerCase();
     const jurisdiction = {
       name: 'storage-transport-outbox',
@@ -384,19 +726,51 @@ describe('storage frame journal retention', () => {
       runtimeId: `0x${'71'.repeat(20)}`,
       entityId: `0x${'72'.repeat(32)}`,
       signerId: `0x${'73'.repeat(20)}`,
-      entityTxs: [],
-    };
+      proposedFrame: {
+        height: 22,
+        parentFrameHash: `0x${'74'.repeat(32)}`,
+        stateRoot: `0x${'75'.repeat(32)}`,
+        authorityRoot: `0x${'76'.repeat(32)}`,
+        timestamp: 22,
+        hash: `0x${'77'.repeat(32)}`,
+        txs: [],
+        leader: { proposerSignerId: `0x${'73'.repeat(20)}`, view: 0 },
+        collectedSigs: new Map(),
+      },
+    } satisfies DeliverableEntityInput;
+    const retryKey = buildRouteOutputKey(pendingOutput);
+    const persistedFutureRetryAt = 8_000_000_000_000;
+    env.pendingNetworkOutputs = [pendingOutput];
+    env.runtimeState ??= {};
+    env.runtimeState.deferredNetworkMeta = new Map([[
+      retryKey,
+      { attempts: 6, nextRetryAt: persistedFutureRetryAt },
+    ]]);
     env.height += 1;
     env.timestamp += 1;
     await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [pendingOutput]);
     const journal = await readPersistedFrameJournal(env, env.height);
     expect(journal?.runtimeOutputs).toEqual([pendingOutput]);
+    expect(journal?.runtimeMachineBeforeApply?.pendingNetworkOutputs).toEqual([pendingOutput]);
+    expect(journal?.runtimeMachine?.pendingNetworkOutputs).toEqual([pendingOutput]);
+    expect(journal?.runtimeStateHash).toMatch(/^0x[0-9a-f]{64}$/);
     await closeRuntimeDb(env);
     await closeInfraDb(env);
 
+    const verification = await verifyRuntimeChain(runtimeId, seed);
+    expect(verification.ok).toBe(true);
     const restored = await loadEnvFromDB(runtimeId, seed);
     expect(restored?.pendingNetworkOutputs).toEqual([pendingOutput]);
+    expect(restored?.runtimeState?.deferredNetworkMeta?.get(retryKey)).toEqual({
+      attempts: 6,
+      nextRetryAt: persistedFutureRetryAt,
+    });
     if (restored) {
+      expect(computeCanonicalStateHashFromEnv(restored)).toBe(journal?.runtimeStateHash);
+      await processRuntime(restored, []);
+      expect(restored.runtimeState?.deferredNetworkMeta?.get(retryKey)?.attempts).toBe(7);
+      expect(restored.runtimeState?.deferredNetworkMeta?.get(retryKey)?.nextRetryAt)
+        .toBeLessThan(persistedFutureRetryAt);
       await closeRuntimeDb(restored);
       await closeInfraDb(restored);
     }
@@ -435,7 +809,7 @@ describe('storage frame journal retention', () => {
     }
   });
 
-  test('production keeps canonical storage audit out of the hot path by default', async () => {
+  test('production commits the canonical replay oracle on every frame by default', async () => {
     const previousNodeEnv = process.env['NODE_ENV'];
     const previousPeriod = process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'];
     const previousVerify = process.env['XLN_STORAGE_VERIFY_CANONICAL'];
@@ -454,8 +828,8 @@ describe('storage frame journal retention', () => {
       await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
       const frame = await readStorageFrameRecord(getFrameDb(env), 1);
       expect(frame?.stateHash).toMatch(/^0x[0-9a-f]{64}$/);
-      expect(frame?.canonicalStateHash).toBeUndefined();
-      expect(frame?.canonicalEntityHashes).toBeUndefined();
+      expect(frame?.canonicalStateHash).toMatch(/^0x[0-9a-f]{64}$/);
+      expect(frame?.canonicalEntityHashes).toEqual([]);
     } finally {
       await closeRuntimeDb(env);
       await closeInfraDb(env);
@@ -497,8 +871,7 @@ describe('storage frame journal retention', () => {
     };
 
     const signer = deriveSignerAddressSync(seed, '1');
-    registerSignerKey(signer, deriveSignerKeySync(seed, '1'));
-    registerSignerKey(signer.slice(-4).toLowerCase(), deriveSignerKeySync(seed, '1'));
+    registerSignerKey(env, signer, deriveSignerKeySync(seed, '1'));
     const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
     const jurisdiction = {
       name: 'canonical-snapshot-restore-test',
@@ -542,7 +915,7 @@ describe('storage frame journal retention', () => {
     await closeRuntimeDb(env);
     await closeInfraDb(env);
 
-    await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow('STORAGE_RESTORE_CANONICAL_HASH_MISMATCH');
+    await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow('STORAGE_RESTORE_SHARED_STATE_MISMATCH');
   });
 
   test('fails closed when a replay diff is missing after the latest snapshot', async () => {
@@ -573,8 +946,7 @@ describe('storage frame journal retention', () => {
     };
 
     const signer = deriveSignerAddressSync(seed, '1');
-    registerSignerKey(signer, deriveSignerKeySync(seed, '1'));
-    registerSignerKey(signer.slice(-4).toLowerCase(), deriveSignerKeySync(seed, '1'));
+    registerSignerKey(env, signer, deriveSignerKeySync(seed, '1'));
     const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
     const jurisdiction = {
       name: 'storage-missing-replay-diff-test',
@@ -605,13 +977,19 @@ describe('storage frame journal retention', () => {
     });
     await processRuntime(env, []);
 
-    const replica = Array.from(env.eReplicas.values()).find((item) => item.entityId === entityId);
-    if (!replica) throw new Error('TEST_REPLICA_MISSING');
-    env.height = 2;
-    env.timestamp += 1;
-    replica.state.messages.push('requires replay diff');
-    markStorageEntityDirty(env, entityId);
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId,
+        signerId: signer,
+        entityTxs: [{
+          type: 'profile-update',
+          data: { profile: { entityId, name: 'requires replay diff' } },
+        }],
+      }],
+    });
+    await processRuntime(env, []);
+    expect(env.height).toBe(2);
 
     const historyDb = getFrameDb(env);
     expect(await readRawOrNull(historyDb, keyDiff(2))).toBeTruthy();
@@ -669,8 +1047,7 @@ describe('storage frame journal retention', () => {
     };
 
     const signer = deriveSignerAddressSync(seed, '1');
-    registerSignerKey(signer, deriveSignerKeySync(seed, '1'));
-    registerSignerKey(signer.slice(-4).toLowerCase(), deriveSignerKeySync(seed, '1'));
+    registerSignerKey(env, signer, deriveSignerKeySync(seed, '1'));
     const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
     const jurisdiction = {
       name: 'epoch-rotation-tail-test',
@@ -737,7 +1114,7 @@ describe('storage frame journal retention', () => {
     }
   });
 
-  test('keeps early frame journals readable after snapshots prune replay layers', async () => {
+  test('prunes finalized frame journals while compact account activity remains readable', async () => {
     const seed = `frame-retention ${Date.now()} alpha beta gamma`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
     const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
@@ -759,10 +1136,8 @@ describe('storage frame journal retention', () => {
 
     const signerA = deriveSignerAddressSync(seed, '1');
     const signerB = deriveSignerAddressSync(seed, '2');
-    registerSignerKey(signerA, deriveSignerKeySync(seed, '1'));
-    registerSignerKey(signerA.slice(-4).toLowerCase(), deriveSignerKeySync(seed, '1'));
-    registerSignerKey(signerB, deriveSignerKeySync(seed, '2'));
-    registerSignerKey(signerB.slice(-4).toLowerCase(), deriveSignerKeySync(seed, '2'));
+    registerSignerKey(env, signerA, deriveSignerKeySync(seed, '1'));
+    registerSignerKey(env, signerB, deriveSignerKeySync(seed, '2'));
 
     const entityA = generateLazyEntityId([signerA], 1n).toLowerCase();
     const entityB = generateLazyEntityId([signerB], 1n).toLowerCase();
@@ -781,10 +1156,13 @@ describe('storage frame journal retention', () => {
       contracts: {
         depository: jurisdiction.depositoryAddress,
         entityProvider: jurisdiction.entityProviderAddress,
+        account: '0x000000000000000000000000000000000000ac01',
+        deltaTransformer: '0x000000000000000000000000000000000000de17',
       },
     } as never);
 
     enqueueRuntimeInput(env, {
+      timestamp: env.timestamp,
       runtimeTxs: [
         {
           type: 'importReplica',
@@ -822,6 +1200,7 @@ describe('storage frame journal retention', () => {
     await processRuntime(env, []);
 
     enqueueRuntimeInput(env, {
+      timestamp: env.timestamp,
       runtimeTxs: [],
       entityInputs: [
         {
@@ -848,15 +1227,30 @@ describe('storage frame journal retention', () => {
     const latestHeight = await getPersistedLatestHeight(env);
     expect(latestHeight).toBeGreaterThanOrEqual(3);
 
-    const firstFrame = await readPersistedFrameJournal(env, 1);
-    expect(firstFrame).toBeTruthy();
-    expect(firstFrame?.height).toBe(1);
+    const checkpointHeights = await listPersistedCheckpointHeights(env);
+    expect(checkpointHeights.length).toBeGreaterThan(0);
+    expect(await readPersistedFrameJournal(env, 1)).toBeNull();
+    expect(await readPersistedFrameJournal(env, checkpointHeights.at(-1)!)).toBeTruthy();
+
+    env.runtimeConfig = {
+      ...(env.runtimeConfig || {}),
+      storage: {
+        ...(env.runtimeConfig?.storage || {}),
+        snapshotPeriodFrames: latestHeight + 100,
+      },
+    };
+    env.height = latestHeight + 1;
+    env.timestamp += 1;
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    const replayTailHeight = env.height;
+    expect(await readPersistedFrameJournal(env, replayTailHeight)).toBeTruthy();
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
 
     const restored = await loadEnvFromDB(runtimeId, seed);
     expect(restored).toBeTruthy();
+    expect(restored?.height).toBe(replayTailHeight);
     let restoredHistoryFrames = 0;
     for (const replica of restored?.eReplicas.values() ?? []) {
       for (const [counterpartyId, account] of replica.state.accounts.entries()) {
@@ -910,8 +1304,7 @@ describe('storage frame journal retention', () => {
     };
 
     const signer = deriveSignerAddressSync(seed, '1');
-    registerSignerKey(signer, deriveSignerKeySync(seed, '1'));
-    registerSignerKey(signer.slice(-4).toLowerCase(), deriveSignerKeySync(seed, '1'));
+    registerSignerKey(env, signer, deriveSignerKeySync(seed, '1'));
     const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
     const jurisdiction = {
       name: 'storage-crash-frame-db-loss-test',
@@ -959,7 +1352,7 @@ describe('storage frame journal retention', () => {
 
     const latestHeight = await getPersistedLatestHeight(env);
     const checkpointHeights = await listPersistedCheckpointHeights(env);
-    const replayFromHeight = checkpointHeights.find((height) => height > 0 && height < latestHeight) ?? 1;
+    const replayFromHeight = checkpointHeights.at(-1) ?? latestHeight;
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
@@ -1078,6 +1471,8 @@ describe('storage frame journal retention', () => {
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
+    await expect(readPersistedCheckpointSnapshot(env, 1))
+      .rejects.toThrow('STORAGE_VERIFY_SNAPSHOT_FRAME_MISSING');
   });
 
   test('rejects a snapshot manifest when the frame was not materialized', async () => {
@@ -1102,7 +1497,7 @@ describe('storage frame journal retention', () => {
     await closeInfraDb(env);
   });
 
-  test('rejects a snapshot manifest whose copied docs were torn', async () => {
+  test('rejects corrupted or torn replica metadata in a published snapshot', async () => {
     const seed = `storage-crash-torn-snapshot-docs ${Date.now()} alpha beta gamma`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
     const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
@@ -1130,8 +1525,7 @@ describe('storage frame journal retention', () => {
     };
 
     const signer = deriveSignerAddressSync(seed, '1');
-    registerSignerKey(signer, deriveSignerKeySync(seed, '1'));
-    registerSignerKey(signer.slice(-4).toLowerCase(), deriveSignerKeySync(seed, '1'));
+    registerSignerKey(env, signer, deriveSignerKeySync(seed, '1'));
     const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
     const jurisdiction = {
       name: 'storage-crash-torn-snapshot-docs-test',
@@ -1166,9 +1560,32 @@ describe('storage frame journal retention', () => {
     const head = await readStorageHead(db);
     const snapshotHeight = Number(head?.latestSnapshotHeight ?? 0);
     expect(snapshotHeight).toBeGreaterThan(0);
+    const snapshotMetaKey = keySnapshotReplicaMeta(snapshotHeight, entityId, signer);
+    const validMeta = await db.get(snapshotMetaKey);
+    const corruptedMeta = decodeBuffer<Record<string, unknown>>(validMeta);
+    corruptedMeta['hankoWitness'] = 'not-a-map';
+    await db.put(snapshotMetaKey, encodeBuffer(corruptedMeta));
+    await expect(listStorageSnapshotReplicaMetas(db, snapshotHeight, entityId))
+      .rejects.toThrow('hankoWitness must be a Map');
+
+    const missingMempoolMeta = decodeBuffer<Record<string, unknown>>(validMeta);
+    delete missingMempoolMeta['mempool'];
+    await db.put(snapshotMetaKey, encodeBuffer(missingMempoolMeta));
+    await expect(listStorageSnapshotReplicaMetas(db, snapshotHeight, entityId))
+      .rejects.toThrow('mempool must be an array');
+
+    const digestCorruptedMeta = decodeBuffer<Record<string, unknown>>(validMeta);
+    digestCorruptedMeta['lastConsensusProgressAt'] = 123_456;
+    await db.put(snapshotMetaKey, encodeBuffer(digestCorruptedMeta));
+
+    await expect(verifyStorageTailIntegrity(db)).rejects.toThrow(
+      'STORAGE_VERIFY_SNAPSHOT_REPLICA_META_DIGEST_MISMATCH',
+    );
+
+    await db.put(snapshotMetaKey, validMeta);
 
     const batch = db.batch();
-    batch.del?.(keySnapshotEntity(snapshotHeight, entityId));
+    batch.del?.(snapshotMetaKey);
     await batch.write({ sync: true });
 
     await expect(verifyStorageTailIntegrity(db)).rejects.toThrow('STORAGE_VERIFY_SNAPSHOT_DOC_COUNT_MISMATCH');
@@ -1205,8 +1622,7 @@ describe('storage frame journal retention', () => {
     };
 
     const signer = deriveSignerAddressSync(seed, '1');
-    registerSignerKey(signer, deriveSignerKeySync(seed, '1'));
-    registerSignerKey(signer.slice(-4).toLowerCase(), deriveSignerKeySync(seed, '1'));
+    registerSignerKey(env, signer, deriveSignerKeySync(seed, '1'));
     const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
     const jurisdiction = {
       name: 'storage-overlay-restart-test',
@@ -1237,13 +1653,19 @@ describe('storage frame journal retention', () => {
     });
     await processRuntime(env, []);
 
-    const replica = Array.from(env.eReplicas.values()).find((item) => item.entityId === entityId);
-    if (!replica) throw new Error('TEST_REPLICA_MISSING');
-    env.height = 2;
-    env.timestamp += 1;
-    replica.state.messages.push('non-materialized-message');
-    markStorageEntityDirty(env, entityId);
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId,
+        signerId: signer,
+        entityTxs: [{
+          type: 'profile-update',
+          data: { profile: { entityId, name: 'non-materialized-message' } },
+        }],
+      }],
+    });
+    await processRuntime(env, []);
+    expect(env.height).toBe(2);
     expect(env.overlay?.length ?? 0).toBeGreaterThan(0);
 
     await closeRuntimeDb(env);
@@ -1253,7 +1675,7 @@ describe('storage frame journal retention', () => {
     expect(restoredAtTwo?.height).toBe(2);
     const restoredReplica = Array.from(restoredAtTwo?.eReplicas.values() ?? [])
       .find((item) => item.entityId === entityId);
-    expect(restoredReplica?.state.messages).toContain('non-materialized-message');
+    expect(restoredReplica?.state.profile.name).toBe('non-materialized-message');
     expect(restoredAtTwo?.overlay?.length ?? 0).toBeGreaterThan(0);
     if (!restoredAtTwo || !restoredReplica) throw new Error('TEST_RESTORE_MISSING');
 
@@ -1277,7 +1699,7 @@ describe('storage frame journal retention', () => {
     const materializedReplica = Array.from(restoredAfterMaterialize?.eReplicas.values() ?? [])
       .find((item) => item.entityId === entityId);
     expect(restoredAfterMaterialize?.height).toBe(3);
-    expect(materializedReplica?.state.messages).toContain('non-materialized-message');
+    expect(materializedReplica?.state.profile.name).toBe('non-materialized-message');
     if (restoredAfterMaterialize) {
       await closeRuntimeDb(restoredAfterMaterialize);
       await closeInfraDb(restoredAfterMaterialize);

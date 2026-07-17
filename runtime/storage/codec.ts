@@ -1,4 +1,8 @@
-import { decodeBinaryPayload, encodeBinaryPayload, type XlnBinaryCodecName } from './binary-codec';
+import {
+  decodeBinaryPayload,
+  decodeValidatedBinaryPayload,
+  encodeBinaryPayload,
+} from './binary-codec';
 
 export const notFound = (error: unknown): boolean => {
   if (!error || typeof error !== 'object') return false;
@@ -7,21 +11,27 @@ export const notFound = (error: unknown): boolean => {
   return code === 'LEVEL_NOT_FOUND' || name === 'NotFoundError';
 };
 
-const storageCodecName = (): XlnBinaryCodecName => {
-  const raw = String(
-    typeof process !== 'undefined'
-      ? process.env['XLN_STORAGE_CODEC'] ?? ''
-      : '',
-  ).trim().toLowerCase();
-  return raw === 'json' ? 'json' : 'msgpack';
+export const encodeBuffer = (value: unknown): Buffer => {
+  return Buffer.from(encodeBinaryPayload(value, 'msgpack'));
 };
 
-export const encodeBuffer = (value: unknown): Buffer => {
-  return Buffer.from(encodeBinaryPayload(value, storageCodecName()));
+const requireStorageMsgpack = (buffer: Buffer): void => {
+  if (buffer[0] !== 0x01) {
+    throw new Error(`STORAGE_CODEC_MSGPACK_REQUIRED:magic=${buffer[0] ?? 'none'}`);
+  }
 };
 
 export const decodeBuffer = <T>(buffer: Buffer): T => {
+  requireStorageMsgpack(buffer);
   return decodeBinaryPayload<T>(buffer);
+};
+
+export const decodeValidatedBuffer = <T>(
+  buffer: Buffer,
+  validator: (value: unknown) => T,
+): T => {
+  requireStorageMsgpack(buffer);
+  return decodeValidatedBinaryPayload(buffer, validator);
 };
 
 const storageSyncWritesEnabled = (): boolean => {

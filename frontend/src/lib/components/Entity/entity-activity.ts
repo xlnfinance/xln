@@ -4,6 +4,7 @@ import type { EntityReplica } from '$lib/types/ui';
 import { entityAvatar as resolveEntityAvatar } from '$lib/utils/avatar';
 import { formatEntityId } from '$lib/utils/format';
 import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming';
+import { requireTokenDecimals } from './token-metadata';
 
 type GossipSource = Parameters<typeof resolveEntityName>[1];
 
@@ -50,7 +51,7 @@ type BuildEntityActivityRowsOptions = {
   activeEnv: GossipSource;
   activeXlnFunctions: FrontendXlnFunctions | null;
   getTokenInfo: (tokenId: number) => TokenInfo;
-  formatAmount: (amount: bigint, decimals?: number) => string;
+  formatAmount: (amount: bigint, decimals: number) => string;
 };
 
 function compareText(left: string, right: string): number {
@@ -188,8 +189,12 @@ function activityTokenAmount(
   if (tokenId > 0 && options.activeXlnFunctions?.formatTokenAmount) {
     return options.activeXlnFunctions.formatTokenAmount(tokenId, amount);
   }
-  const token = tokenId > 0 ? options.getTokenInfo(tokenId) : { symbol: 'TOKEN', decimals: 18 };
-  return `${options.formatAmount(amount, Number(token.decimals ?? 18))} ${token.symbol || `#${tokenId}`}`;
+  if (tokenId <= 0) return options.formatAmount(amount, 0);
+  const token = options.getTokenInfo(tokenId);
+  return `${options.formatAmount(
+    amount,
+    requireTokenDecimals(token.decimals, `token:${tokenId}`),
+  )} ${token.symbol || `#${tokenId}`}`;
 }
 
 function shortHash(value: unknown): string {
@@ -268,14 +273,8 @@ function summarizeAccountTx(
       return `Opened HTLC · ${activityTokenAmount(data['tokenId'], data['amount'], options)}`;
     case 'htlc_resolve':
       return `Resolved HTLC · ${String(data['outcome'] || 'unknown')}`;
-    case 'settle_hold': {
-      const diffs = Array.isArray(data['diffs']) ? data['diffs'].length : 0;
-      return `Placed settlement hold · ${diffs || 1} token${diffs === 1 ? '' : 's'}`;
-    }
-    case 'settle_release': {
-      const diffs = Array.isArray(data['diffs']) ? data['diffs'].length : 0;
-      return `Released settlement hold · ${diffs || 1} token${diffs === 1 ? '' : 's'}`;
-    }
+    case 'settle_transition':
+      return `Settlement workspace · ${String(data['kind'] || 'updated')} v${Number(data['version'] || 0)}`;
     case 'reopen_disputed':
       return 'Reopened disputed account';
     case 'j_event_claim':

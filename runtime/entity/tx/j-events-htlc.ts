@@ -8,7 +8,7 @@ import type {
 import { addMessage } from '../../state-helpers';
 import { decodeHashLadderBinary } from '../../protocol/htlc/hash-ladder';
 import { CROSS_J_MAX_FILL_RATIO, isCrossJurisdictionTerminalStatus } from '../../extensions/cross-j/index';
-import { createStructuredLogger, shortHash, shortId, shortOrder } from '../../infra/logger';
+import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { pushCrossJurisdictionEntityOutput } from './cross-j-outputs';
 import type { JEventMempoolOp } from './j-events-types';
 
@@ -90,49 +90,24 @@ function findCrossJurisdictionRouteForSourceDispute(
   return candidates[0] ?? null;
 }
 
-function findCrossJurisdictionRouteForTargetDispute(
+function findCrossJurisdictionRoutesForTargetDispute(
   state: EntityState,
   counterpartyId: string,
-): CrossJurisdictionSwapRoute | null {
+): CrossJurisdictionSwapRoute[] {
   const self = String(state.entityId || '').toLowerCase();
   const counterparty = String(counterpartyId || '').toLowerCase();
-  for (const route of state.crossJurisdictionSwaps?.values() ?? []) {
-    if (
+  return Array.from(state.crossJurisdictionSwaps?.values() ?? [])
+    .filter((route) =>
       String(route.target.counterpartyEntityId || '').toLowerCase() === self &&
-      String(route.target.entityId || '').toLowerCase() === counterparty
-    ) {
-      return route;
-    }
-  }
-  return null;
-}
-
-function findAccountByCounterparty(state: EntityState, counterpartyEntityId: string) {
-  const normalized = String(counterpartyEntityId || '').toLowerCase();
-  if (!normalized) return null;
-  return Array.from(state.accounts.entries()).find(([accountId, account]) =>
-    String(accountId || '').toLowerCase() === normalized ||
-    String(account.leftEntity || '').toLowerCase() === normalized ||
-    String(account.rightEntity || '').toLowerCase() === normalized,
-  )?.[1] ?? null;
-}
-
-function findEntityStateById(env: Env, entityId: string): EntityState | null {
-  const target = String(entityId || '').toLowerCase();
-  if (!target) return null;
-  return Array.from(env.eReplicas?.values?.() || [])
-    .map((replica) => replica?.state)
-    .find((state) => state && String(state.entityId || '').toLowerCase() === target) ?? null;
-}
-
-function hasQueuedDisputeStart(state: EntityState | null, counterpartyEntityId: string): boolean {
-  const target = String(counterpartyEntityId || '').toLowerCase();
-  const draft = state?.jBatchState?.batch?.disputeStarts || [];
-  const sent = state?.jBatchState?.sentBatch?.batch?.disputeStarts || [];
-  return (
-    draft.some((op) => String(op?.counterentity || '').toLowerCase() === target) ||
-    sent.some((op) => String(op?.counterentity || '').toLowerCase() === target)
-  );
+      String(route.target.entityId || '').toLowerCase() === counterparty &&
+      Boolean(route.targetPull) &&
+      !isCrossJurisdictionTerminalStatus(route.status),
+    )
+    .sort((left, right) => {
+      const leftId = String(left.orderId || '');
+      const rightId = String(right.orderId || '');
+      return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+    });
 }
 
 export function queueCrossJurisdictionSalvageFromDispute(
@@ -208,29 +183,30 @@ export function queueCrossJurisdictionSourceDisputeFromTargetDispute(
   starterInitialArgumentsRaw: unknown,
 ): boolean {
   if (decodeDisputeCrossPullBinaries(starterInitialArgumentsRaw).length > 0) return false;
-  const route = findCrossJurisdictionRouteForTargetDispute(state, counterpartyId);
-  if (!route) return false;
-
-  const sourceUserState = findEntityStateById(env, route.source.entityId);
-  const sourceAccount = sourceUserState
-    ? findAccountByCounterparty(sourceUserState, route.source.counterpartyEntityId)
-    : null;
-  if (!sourceUserState || !sourceAccount) {
-    jEventHtlcLog.warn('crossj.source_account_unavailable', { route: shortOrder(route.orderId), source: shortId(route.source.entityId), counterparty: shortId(route.source.counterpartyEntityId) });
+  const routes = findCrossJurisdictionRoutesForTargetDispute(state, counterpartyId);
+  if (routes.length === 0) return false;
+  if (routes.length > 1) {
+    const routeIds = routes.map((route) => route.orderId).join(',');
+    addMessage(
+      state,
+      `⚠️ Cross-j target dispute route ambiguous for ${counterpartyId.slice(-4)}: ${routeIds}; no source dispute queued`,
+    );
     return false;
   }
-  if ((sourceAccount.status ?? 'active') !== 'active' || sourceAccount.activeDispute) return false;
-  if (hasQueuedDisputeStart(sourceUserState, route.source.counterpartyEntityId)) return false;
+  const route = routes[0]!;
+
+  if (!route.sourceSignerId) {
+    throw new Error(`CROSS_J_SOURCE_DISPUTE_SIGNER_MISSING:${route.orderId}:${route.source.entityId}`);
+  }
 
   pushCrossJurisdictionEntityOutput(env, outputs, route.source.entityId, [
       {
         type: 'disputeStart',
         data: {
           counterpartyEntityId: route.source.counterpartyEntityId,
-          description: `Cross-j target dispute ${route.orderId} forces source pull reveal`,
+          crossJurisdictionRouteId: route.orderId,
         },
       },
-      { type: 'j_broadcast', data: {} },
     ], route.sourceSignerId);
   addMessage(
     state,

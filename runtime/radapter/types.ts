@@ -1,11 +1,18 @@
 import type { RuntimeActivityEvent, RuntimeActivityFilters } from '../api/activity-history';
 import type { RuntimeInput } from '../types';
+import type { XlnProtocolVersion } from '../protocol/version';
 import type { RuntimeIngressReceipt } from '../server/ingress-receipts';
 
 export type RuntimeAdapterMode = 'embedded' | 'remote';
 export type RuntimeAdapterStatus = 'connected' | 'connecting' | 'disconnected' | 'error';
 export type RuntimeAdapterAuthLevel = 'inspect' | 'admin';
 export type RuntimeAdapterAuthRole = RuntimeAdapterAuthLevel | 'read' | 'full';
+export type RuntimeAdapterCommandLaneKind = 'owner' | 'capability';
+export type RuntimeAdapterOwnerBindingSigner = (input: {
+  runtimeId: string;
+  challenge: string;
+  capability: string;
+}) => Promise<string | null> | string | null;
 
 export type RuntimeAdapterConfig = {
   mode: RuntimeAdapterMode;
@@ -15,6 +22,8 @@ export type RuntimeAdapterConfig = {
   seed?: string;
   reconnectMaxMs?: number;
   requestTimeoutMs?: number;
+  /** Memory-only signer supplied by an unlocked vault; never serialize it. */
+  ownerBindingSigner?: RuntimeAdapterOwnerBindingSigner;
 };
 
 export type RuntimeAdapterReadQuery = {
@@ -40,6 +49,54 @@ export type RuntimeAdapterReadQuery = {
   toTimestamp?: number;
   beforeHeight?: number;
   scanLimit?: number;
+  fromHeight?: number;
+  toHeight?: number;
+  eventNames?: string[] | string;
+  sourceEntityId?: string;
+  targetEntityId?: string;
+  tokenId?: number;
+  amount?: string;
+};
+
+export type RuntimeAdapterFrameLog = {
+  id: number;
+  timestamp: number;
+  level: string;
+  category: string;
+  message: string;
+  entityId?: string;
+  data?: Record<string, unknown>;
+};
+
+export type RuntimeAdapterFrameReceipt = {
+  height: number;
+  timestamp: number;
+  logs: RuntimeAdapterFrameLog[];
+};
+
+export type RuntimeAdapterFrameReceiptResponse = {
+  fromHeight: number;
+  toHeight: number;
+  returned: number;
+  receipts: RuntimeAdapterFrameReceipt[];
+};
+
+export type RuntimeAdapterPaymentRoute = {
+  path: string[];
+  hops: Array<{
+    from: string;
+    to: string;
+    fee: string;
+    feePPM: number;
+  }>;
+  totalFee: string;
+  senderAmount: string;
+  recipientAmount: string;
+  probability: number;
+};
+
+export type RuntimeAdapterPaymentRoutesResponse = {
+  routes: RuntimeAdapterPaymentRoute[];
 };
 
 export type RuntimeAdapterActivityPage = {
@@ -62,11 +119,17 @@ export type RuntimeAdapterSolvencySummary = {
   height: number;
   entityCount: number;
   accountViews: number;
-  m1: bigint;
-  m2: bigint;
-  m3: bigint;
-  total: bigint;
-  delta: bigint;
+  assets: Array<{
+    stackId: string;
+    chainId: number;
+    depositoryAddress: string;
+    tokenId: number;
+    reserves: bigint;
+    confirmedCollateral: bigint;
+    pendingCollateral: bigint;
+    delta: bigint;
+    isValid: boolean;
+  }>;
   isValid: boolean;
 };
 
@@ -89,21 +152,27 @@ export type RuntimeAdapterTimelineIndexPage = {
 
 export type RuntimeAdapterSendResult = {
   height: number;
+  status?: 'pending' | 'observed';
+  commandSequence?: number;
   receipt?: RuntimeIngressReceipt;
   statusUrl?: string;
 };
 
-export type RuntimeAdapterSendOptions = { commandId?: string };
+export type RuntimeAdapterSendOptions = { commandId?: string; commandSequence?: number };
 
 export interface RuntimeAdapter {
   readonly mode: RuntimeAdapterMode;
   readonly runtimeId: string;
+  readonly serverFingerprint: string | null;
   readonly status: RuntimeAdapterStatus;
   readonly currentHeight: number;
+  readonly nextCommandSequence: number | null;
+  readonly commandLaneKind: RuntimeAdapterCommandLaneKind | null;
   readonly authLevel: RuntimeAdapterAuthLevel | null;
 
   connect(config: RuntimeAdapterConfig): Promise<void>;
   disconnect(): void;
+  ensureOwnerCommandLane(): Promise<void>;
 
   read<T = unknown>(path: string, query?: RuntimeAdapterReadQuery): Promise<T>;
   send(input: RuntimeInput, options?: RuntimeAdapterSendOptions): Promise<RuntimeAdapterSendResult>;
@@ -117,6 +186,7 @@ export type RuntimeAdapterErrorCode =
   | 'E_BAD_PATH'
   | 'E_BAD_QUERY'
   | 'E_RATE_LIMITED'
+  | 'E_COMMAND_PENDING'
   | 'E_INTERNAL';
 
 export type RuntimeAdapterErrorPayload = {
@@ -127,16 +197,16 @@ export type RuntimeAdapterErrorPayload = {
 };
 
 export type RuntimeAdapterRequest =
-  | { v: 1; id: string; op: 'auth'; key?: string }
-  | { v: 1; id: string; op: 'read'; path: string; query?: RuntimeAdapterReadQuery }
-  | { v: 1; id: string; op: 'send'; commandId: string; input: RuntimeInput };
+  | { v: XlnProtocolVersion; id: string; op: 'auth'; key?: string; challenge: string; ownerSignature?: string }
+  | { v: XlnProtocolVersion; id: string; op: 'read'; path: string; query?: RuntimeAdapterReadQuery }
+  | { v: XlnProtocolVersion; id: string; op: 'send'; commandId: string; commandSequence: number; input: RuntimeInput };
 
 export type RuntimeAdapterResponse =
-  | { v: 1; inReplyTo: string; ok: true; payload: unknown }
-  | { v: 1; inReplyTo: string; ok: false; error: RuntimeAdapterErrorPayload };
+  | { v: XlnProtocolVersion; inReplyTo: string; ok: true; payload: unknown }
+  | { v: XlnProtocolVersion; inReplyTo: string; ok: false; error: RuntimeAdapterErrorPayload };
 
 export type RuntimeAdapterPush = {
-  v: 1;
+  v: XlnProtocolVersion;
   op: 'tick';
   height: number;
 };

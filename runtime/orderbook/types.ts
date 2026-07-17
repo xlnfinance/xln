@@ -32,11 +32,70 @@ export {
 
 // Import for local use
 import { MAX_FILL_RATIO } from './core';
-import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote } from '../account/utils';
+import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenInfo } from '../account/utils';
 
 // Price tick precision used for ratio encoding in orderbook flows.
 // 10000 = 4 decimals (e.g. 1.2345)
 export const ORDERBOOK_PRICE_SCALE = 10_000n;
+
+const tokenScale = (tokenId: number): bigint =>
+  10n ** BigInt(getTokenInfo(tokenId).decimals);
+
+/** Preserve six decimal places of base-asset precision in book quantities. */
+export const getSwapLotScale = (baseTokenId: number): bigint => {
+  const decimals = getTokenInfo(baseTokenId).decimals;
+  return 10n ** BigInt(Math.max(0, decimals - 6));
+};
+
+/** Convert a human-unit price into exact raw quote units, rounding down. */
+export const quoteAmountAtPrice = (
+  baseTokenId: number,
+  quoteTokenId: number,
+  baseAmount: bigint,
+  priceTicks: bigint,
+): bigint => {
+  if (baseAmount <= 0n || priceTicks <= 0n) return 0n;
+  return (baseAmount * priceTicks * tokenScale(quoteTokenId)) /
+    (ORDERBOOK_PRICE_SCALE * tokenScale(baseTokenId));
+};
+
+/** Inverse of quoteAmountAtPrice, rounding down before lot quantization. */
+export const baseAmountAtPrice = (
+  baseTokenId: number,
+  quoteTokenId: number,
+  quoteAmount: bigint,
+  priceTicks: bigint,
+): bigint => {
+  if (quoteAmount <= 0n || priceTicks <= 0n) return 0n;
+  return (quoteAmount * ORDERBOOK_PRICE_SCALE * tokenScale(baseTokenId)) /
+    (priceTicks * tokenScale(quoteTokenId));
+};
+
+export const baseAmountAtPriceCeil = (
+  baseTokenId: number,
+  quoteTokenId: number,
+  quoteAmount: bigint,
+  priceTicks: bigint,
+): bigint => {
+  if (quoteAmount <= 0n || priceTicks <= 0n) return 0n;
+  const numerator = quoteAmount * ORDERBOOK_PRICE_SCALE * tokenScale(baseTokenId);
+  const denominator = priceTicks * tokenScale(quoteTokenId);
+  return (numerator + denominator - 1n) / denominator;
+};
+
+export const baseAmountFromLots = (baseTokenId: number, qtyLots: bigint): bigint =>
+  qtyLots <= 0n ? 0n : qtyLots * getSwapLotScale(baseTokenId);
+
+export const quoteAmountFromWeightedLots = (
+  baseTokenId: number,
+  quoteTokenId: number,
+  weightedPriceTicks: bigint,
+): bigint => quoteAmountAtPrice(
+  baseTokenId,
+  quoteTokenId,
+  getSwapLotScale(baseTokenId),
+  weightedPriceTicks,
+);
 
 /** Canonical pair normalization */
 export function canonicalPair(tokenA: number, tokenB: number): { base: number; quote: number; pairId: string } {
@@ -77,12 +136,25 @@ export function computeSwapPriceTicks(
   if (rawBaseAmount <= 0n || rawQuoteAmount <= 0n) return 0n;
 
   const { base, quote } = canonicalPair(giveTokenId, wantTokenId);
-  const pairPolicy = getSwapPairPolicyByBaseQuote(base, quote);
+  return computePriceTicksForBaseQuote(side, base, quote, rawBaseAmount, rawQuoteAmount);
+}
+
+export function computePriceTicksForBaseQuote(
+  side: 0 | 1,
+  baseTokenId: number,
+  quoteTokenId: number,
+  rawBaseAmount: bigint,
+  rawQuoteAmount: bigint,
+): bigint {
+  if (rawBaseAmount <= 0n || rawQuoteAmount <= 0n) return 0n;
+
+  const pairPolicy = getSwapPairPolicyByBaseQuote(baseTokenId, quoteTokenId);
   const stepTicks = BigInt(Math.max(1, pairPolicy.priceStepTicks));
 
-  const scaledQuoteAmount = rawQuoteAmount * ORDERBOOK_PRICE_SCALE;
-  const remainder = scaledQuoteAmount % rawBaseAmount;
-  let priceTicks = scaledQuoteAmount / rawBaseAmount;
+  const numerator = rawQuoteAmount * tokenScale(baseTokenId) * ORDERBOOK_PRICE_SCALE;
+  const denominator = rawBaseAmount * tokenScale(quoteTokenId);
+  const remainder = numerator % denominator;
+  let priceTicks = numerator / denominator;
   if (side === 1) {
     if (remainder > 0n) {
       priceTicks += 1n;
@@ -98,7 +170,7 @@ export function computeSwapPriceTicks(
 // Internal orderbook lot granularity. User amounts stay in bigint token units;
 // the book compresses only the in-memory index, and qtyLots itself is bigint so
 // large orders do not hit JS number/uint32 ceilings.
-export const SWAP_LOT_SCALE = 10n ** 12n;
+export const SWAP_LOT_SCALE = getSwapLotScale(2);
 
 if (SWAP_LOT_SCALE % ORDERBOOK_PRICE_SCALE !== 0n) {
   throw new Error(
@@ -111,6 +183,7 @@ export interface PreparedSwapOrder {
   baseTokenId: number;
   quoteTokenId: number;
   priceTicks: bigint;
+  lotScale: bigint;
   rawBaseAmount: bigint;
   rawQuoteAmount: bigint;
   quantizedBaseAmount: bigint;
@@ -140,18 +213,19 @@ export function prepareSwapOrder(
   const side = deriveSide(giveTokenId, wantTokenId);
   const rawBaseAmount = side === 1 ? giveAmount : wantAmount;
   const rawQuoteAmount = side === 1 ? wantAmount : giveAmount;
-  if (rawBaseAmount < SWAP_LOT_SCALE || rawQuoteAmount <= 0n) return null;
+  const { base, quote } = canonicalPair(giveTokenId, wantTokenId);
+  const lotScale = getSwapLotScale(base);
+  if (rawBaseAmount < lotScale || rawQuoteAmount <= 0n) return null;
 
   const priceTicks = computeSwapPriceTicks(giveTokenId, wantTokenId, giveAmount, wantAmount);
   if (priceTicks <= 0n) return null;
 
-  const quantizedBaseAmount = (rawBaseAmount / SWAP_LOT_SCALE) * SWAP_LOT_SCALE;
+  const quantizedBaseAmount = (rawBaseAmount / lotScale) * lotScale;
   if (quantizedBaseAmount <= 0n) return null;
 
-  const quantizedQuoteAmount = (quantizedBaseAmount * priceTicks) / ORDERBOOK_PRICE_SCALE;
+  const quantizedQuoteAmount = quoteAmountAtPrice(base, quote, quantizedBaseAmount, priceTicks);
   if (quantizedQuoteAmount <= 0n) return null;
 
-  const { base, quote } = canonicalPair(giveTokenId, wantTokenId);
   const effectiveGive = side === 1 ? quantizedBaseAmount : quantizedQuoteAmount;
   const effectiveWant = side === 1 ? quantizedQuoteAmount : quantizedBaseAmount;
   const unspentGiveAmount = giveAmount > effectiveGive ? giveAmount - effectiveGive : 0n;
@@ -161,6 +235,7 @@ export function prepareSwapOrder(
     baseTokenId: base,
     quoteTokenId: quote,
     priceTicks,
+    lotScale,
     rawBaseAmount,
     rawQuoteAmount,
     quantizedBaseAmount,
@@ -205,10 +280,12 @@ export function requantizeRemainingSwapAtPrice(
   if (remainingGiveAmount <= 0n || priceTicks <= 0n) return null;
 
   const side = deriveSide(giveTokenId, wantTokenId);
+  const { base, quote } = canonicalPair(giveTokenId, wantTokenId);
+  const lotScale = getSwapLotScale(base);
   if (side === 1) {
-    const quantizedBaseAmount = (remainingGiveAmount / SWAP_LOT_SCALE) * SWAP_LOT_SCALE;
+    const quantizedBaseAmount = (remainingGiveAmount / lotScale) * lotScale;
     if (quantizedBaseAmount <= 0n) return null;
-    const quantizedQuoteAmount = (quantizedBaseAmount * priceTicks) / ORDERBOOK_PRICE_SCALE;
+    const quantizedQuoteAmount = quoteAmountAtPrice(base, quote, quantizedBaseAmount, priceTicks);
     if (quantizedQuoteAmount <= 0n) return null;
     return {
       effectiveGive: quantizedBaseAmount,
@@ -218,9 +295,10 @@ export function requantizeRemainingSwapAtPrice(
   }
 
   const remainingQuoteAmount = remainingGiveAmount;
-  const quantizedBaseAmount = (remainingQuoteAmount * ORDERBOOK_PRICE_SCALE / priceTicks / SWAP_LOT_SCALE) * SWAP_LOT_SCALE;
+  const rawBaseAmount = baseAmountAtPrice(base, quote, remainingQuoteAmount, priceTicks);
+  const quantizedBaseAmount = (rawBaseAmount / lotScale) * lotScale;
   if (quantizedBaseAmount <= 0n) return null;
-  const quantizedQuoteAmount = (quantizedBaseAmount * priceTicks) / ORDERBOOK_PRICE_SCALE;
+  const quantizedQuoteAmount = quoteAmountAtPrice(base, quote, quantizedBaseAmount, priceTicks);
   if (quantizedQuoteAmount <= 0n) return null;
   return {
     effectiveGive: quantizedQuoteAmount,

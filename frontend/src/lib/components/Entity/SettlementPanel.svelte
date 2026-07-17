@@ -8,6 +8,7 @@
   import { entityAvatar as resolveEntityAvatar } from '$lib/utils/avatar';
   import EntityInput from '../shared/EntityInput.svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
+  import { requireTokenDecimals } from './token-metadata';
 
   export let entityId: string;
   export let replica: EntityReplica | null = null;
@@ -92,8 +93,9 @@
   function parsePositiveAmount(raw: string, token: number): bigint {
     const trimmed = raw.trim();
     if (!trimmed) throw new Error('Amount is required');
-    const tokenInfo = activeXlnFunctions?.getTokenInfo?.(token);
-    const decimals = Number.isFinite(tokenInfo?.decimals) ? Number(tokenInfo.decimals) : 18;
+    if (!activeXlnFunctions) throw new Error(`TOKEN_METADATA_READER_UNAVAILABLE:token:${token}`);
+    const tokenInfo = activeXlnFunctions.getTokenInfo(token);
+    const decimals = requireTokenDecimals(tokenInfo.decimals, `token:${token}`);
     const parsed = parseDecimalToUnits(trimmed, decimals);
     if (parsed <= 0n) throw new Error('Amount must be greater than zero');
     return parsed;
@@ -109,8 +111,11 @@
   }
 
   function getTokenDecimals(currentTokenId: number): number {
-    const tokenInfo = activeXlnFunctions?.getTokenInfo?.(currentTokenId);
-    return Number.isFinite(tokenInfo?.decimals) ? Number(tokenInfo?.decimals) : 18;
+    if (!activeXlnFunctions) throw new Error(`TOKEN_METADATA_READER_UNAVAILABLE:token:${currentTokenId}`);
+    return requireTokenDecimals(
+      activeXlnFunctions.getTokenInfo(currentTokenId).decimals,
+      `token:${currentTokenId}`,
+    );
   }
 
   function formatInlineMaxHint(amountBig: bigint, currentTokenId: number): string {
@@ -417,7 +422,7 @@
             { label: 'Counterparty', value: entityName(String(op?.counterentity || '')) },
             { label: 'Initial Nonce', value: String(Number(op?.initialNonce || 0)) },
             { label: 'Final Nonce', value: String(Number(op?.finalNonce || 0)) },
-            { label: 'Dispute Until Block', value: String(Number(op?.disputeUntilBlock || 0)) },
+            { label: 'Starter Side', value: op?.startedByLeft ? 'Left' : 'Right' },
             { label: 'Initial Proof Hash', value: shortHex(op?.initialProofbodyHash) },
             { label: 'Cooperative', value: op?.cooperative ? 'Yes' : 'No' },
           ],
@@ -611,6 +616,10 @@
   }
 
   $: selectedAccount = counterpartyEntityId ? currentReplica?.state?.accounts?.get?.(counterpartyEntityId) : null;
+  $: selectedSettlementTransition = [
+    ...(selectedAccount?.mempool ?? []),
+    ...(selectedAccount?.pendingFrame?.accountTxs ?? []),
+  ].find((tx) => tx.type === 'settle_transition');
   $: selectedAccountActiveDispute = selectedAccount?.activeDispute ?? null;
   $: selectedAccountStatus = String(selectedAccount?.status || '');
   $: selectedDisputeTimeout = Number(selectedAccountActiveDispute?.disputeTimeout || 0);
@@ -1232,7 +1241,9 @@
       </div>
     </label>
 
-    {#if action === 'c2r' && selectedAccount?.settlementWorkspace?.status === 'awaiting_counterparty'}
+    {#if action === 'c2r' && selectedSettlementTransition}
+      <p class="dispute-state">Committing the settlement workspace in bilateral consensus.</p>
+    {:else if action === 'c2r' && selectedAccount?.settlementWorkspace?.status === 'awaiting_counterparty'}
       <p class="dispute-state">
         Waiting for counterparty signature.
       </p>
@@ -1244,7 +1255,7 @@
       data-testid={action === 'r2c' ? 'settle-queue-r2c' : 'settle-queue-c2r'}
       class="btn-submit"
       on:click={action === 'r2c' ? queueReserveToCollateral : queueCollateralToReserve}
-      disabled={sending || !counterpartyEntityId || !amount}
+      disabled={sending || Boolean(selectedSettlementTransition) || !counterpartyEntityId || !amount}
     >
       {#if sending}
         Processing...

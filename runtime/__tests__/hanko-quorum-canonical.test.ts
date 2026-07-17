@@ -9,10 +9,13 @@ import {
   signAccountFrame,
   verifyAccountSignature,
 } from '../account/crypto';
-import { generateLazyEntityId } from '../entity/factory';
+import { encodeBoard, generateLazyEntityId, hashBoard } from '../entity/factory';
 import { buildQuorumHanko, inspectHankoForHash, verifyHankoForHash } from '../hanko/signing';
+import { decodeHankoEnvelope, encodeHankoEnvelope } from '../hanko/codec';
 import { createEmptyEnv } from '../runtime';
-import type { ConsensusConfig, EntityReplica, Env } from '../types';
+import { createJReplica } from '../scenarios/boot';
+import type { ConsensusConfig, EntityReplica, Env, JurisdictionConfig } from '../types';
+import { installCanonicalRegisteredBoardAuthority } from './helpers/registration-evidence';
 
 type Fixture = {
   env: Env;
@@ -37,7 +40,7 @@ const createFixture = (threshold = 2n): Fixture => {
   const seed = 'hanko-quorum-canonical seed alpha beta gamma';
   const env = createEmptyEnv(seed);
   const signers = ['1', '2', '3'].map((slot) => deriveSignerAddressSync(seed, slot).toLowerCase());
-  signers.forEach((signer, index) => registerSignerKey(signer, deriveSignerKeySync(seed, String(index + 1))));
+  signers.forEach((signer, index) => registerSignerKey(env, signer, deriveSignerKeySync(seed, String(index + 1))));
   const config: ConsensusConfig = {
     mode: 'proposer-based',
     threshold,
@@ -62,7 +65,23 @@ const quorum = (
   config = fixture.config,
 ): Promise<string> => buildQuorumHanko(fixture.env, fixture.entityId, fixture.digest, entries, config);
 
-beforeEach(() => clearSignerKeys());
+const installRegisteredBoardAuthority = async (
+  fixture: Fixture,
+  entityId: string,
+  config: ConsensusConfig,
+): Promise<void> => {
+  const jurisdiction = config.jurisdiction!;
+  const jReplica = createJReplica(fixture.env, jurisdiction.name, jurisdiction.depositoryAddress);
+  jReplica.chainId = jurisdiction.chainId;
+  jReplica.depositoryAddress = jurisdiction.depositoryAddress;
+  jReplica.entityProviderAddress = jurisdiction.entityProviderAddress;
+  jReplica.watcherConfirmationDepth = 0;
+  const boardHash = hashBoard(encodeBoard(config)).toLowerCase();
+  const state = fixture.env.eReplicas.get(`${entityId}:${config.validators[0]}`)!.state;
+  await installCanonicalRegisteredBoardAuthority(fixture.env, jurisdiction, state, boardHash);
+};
+
+beforeEach(() => clearSignerKeys('hanko-quorum-canonical seed alpha beta gamma'));
 
 describe('canonical quorum Hanko construction', () => {
   test('packs valid signatures in config order regardless of arrival order', async () => {
@@ -237,16 +256,14 @@ describe('canonical quorum Hanko construction', () => {
       signerId: fixture.signers[0]!,
       signature: fixture.signatures[0]!,
     }]);
-    const abi = ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'];
-    const envelope = ethers.AbiCoder.defaultAbiCoder().decode(abi, hanko)[0];
-    const claim = envelope[2][0];
-    const unsafe = ethers.AbiCoder.defaultAbiCoder().encode(abi, [[
-      envelope[0],
-      envelope[1],
-      [[claim[0], [BigInt(Number.MAX_SAFE_INTEGER) + 1n], [claim[2][0]], claim[3]]],
-    ]]);
+    const envelope = decodeHankoEnvelope(hanko);
+    const claim = envelope.claims[0]!;
+    const unsafe = encodeHankoEnvelope({
+      ...envelope,
+      claims: [{ ...claim, entityIndexes: [BigInt(Number.MAX_SAFE_INTEGER) + 1n] }],
+    });
 
-    await expect(inspectHankoForHash(unsafe, fixture.digest)).rejects.toThrow(/INDEX.*UNSAFE/i);
+    await expect(inspectHankoForHash(unsafe, fixture.digest)).rejects.toThrow(/INDEX.*OOB/i);
   });
 
   test('binds lazy and registered entity ids to their canonical boards', async () => {
@@ -256,10 +273,24 @@ describe('canonical quorum Hanko construction', () => {
     await expect(buildQuorumHanko(fixture.env, `0x${'44'.repeat(32)}`, fixture.digest, [
       { signerId: a!, signature: sigA! },
       { signerId: b!, signature: sigB! },
-    ], fixture.config)).rejects.toThrow(/BOARD.*MISMATCH/i);
+    ], fixture.config)).rejects.toThrow('BUILD_QUORUM_HANKO_BOARD_UNAVAILABLE');
 
     const registeredId = ethers.toBeHex(42n, 32);
-    const authoritative = { ...fixture.config, validators: [a!, b!], shares: { [a!]: 1n, [b!]: 1n } };
+    const jurisdiction = {
+      name: 'Hanko registered board fixture',
+      address: 'http://127.0.0.1:8545',
+      chainId: 31_337,
+      depositoryAddress: `0x${'11'.repeat(20)}`,
+      entityProviderAddress: `0x${'22'.repeat(20)}`,
+      entityProviderDeploymentBlock: 4,
+      registrationBlock: 5,
+    } satisfies JurisdictionConfig;
+    const authoritative = {
+      ...fixture.config,
+      validators: [a!, b!],
+      shares: { [a!]: 1n, [b!]: 1n },
+      jurisdiction,
+    };
     fixture.env.eReplicas.set(`${registeredId}:${a}`, {
       entityId: registeredId,
       signerId: a!,
@@ -267,10 +298,11 @@ describe('canonical quorum Hanko construction', () => {
       isProposer: true,
       state: { entityId: registeredId, config: authoritative },
     } as unknown as EntityReplica);
+    await installRegisteredBoardAuthority(fixture, registeredId, authoritative);
     await expect(buildQuorumHanko(fixture.env, registeredId, fixture.digest, [
       { signerId: a!, signature: sigA! },
       { signerId: c!, signature: sigC! },
-    ], { ...fixture.config, validators: [a!, c!], shares: { [a!]: 1n, [c!]: 1n } }))
+    ], { ...authoritative, validators: [a!, c!], shares: { [a!]: 1n, [c!]: 1n } }))
       .rejects.toThrow(/BOARD.*MISMATCH/i);
   });
 

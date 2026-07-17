@@ -7,7 +7,7 @@ import type { Delta, DerivedDelta } from '../types';
 import { PERFORMANCE } from '../constants';
 import { validateDelta } from '../validation-utils';
 import { isLeftEntity } from '../entity/id';
-import { defaultTokensForJurisdiction } from '../jadapter/default-tokens';
+import { DEFAULT_TOKENS, TRON_ONLY_DEFAULT_TOKENS, defaultTokensForJurisdiction } from '../jadapter/default-tokens';
 import { logDebug } from '../infra/logger';
 
 /**
@@ -240,13 +240,14 @@ export function createDemoDelta(tokenId: number, collateral: bigint = 1000n, del
  * Get token information for display
  * USDC is primary token (1), ETH is secondary (2)
  */
-export const TOKEN_REGISTRY: Record<number, { symbol: string; name: string; decimals: number; color: string }> = {
-  1: { symbol: 'USDC', name: 'USD Coin', decimals: 18, color: '#2775ca' },
-  2: { symbol: 'WETH', name: 'Wrapped Ether', decimals: 18, color: '#627eea' },
-  3: { symbol: 'USDT', name: 'Tether USD', decimals: 18, color: '#26a17b' },
-  4: { symbol: 'TRX', name: 'Tron Native', decimals: 18, color: '#ef0027' },
-  5: { symbol: 'SUN', name: 'Sun Token', decimals: 18, color: '#f59e0b' },
-};
+const TOKEN_COLORS = ['#2775ca', '#627eea', '#26a17b', '#ef0027', '#f59e0b'] as const;
+export const TOKEN_REGISTRY: Record<number, { symbol: string; name: string; decimals: number; color: string }> =
+  Object.fromEntries(
+    [...DEFAULT_TOKENS, ...TRON_ONLY_DEFAULT_TOKENS].map((token, index) => [
+      index + 1,
+      { ...token, color: TOKEN_COLORS[index]! },
+    ]),
+  );
 
 const TOKEN_ID_BY_SYMBOL = new Map(
   Object.entries(TOKEN_REGISTRY).map(([tokenId, info]) => [info.symbol.toUpperCase(), Number(tokenId)] as const),
@@ -279,12 +280,11 @@ export type EntitySwapPairConfig = {
 };
 
 export function getTokenInfo(tokenId: number) {
-  return TOKEN_REGISTRY[tokenId] || { 
-    symbol: `TKN${tokenId}`, 
-    name: `Token ${tokenId}`, 
-    decimals: 18, 
-    color: '#999' 
-  };
+  const token = TOKEN_REGISTRY[tokenId];
+  if (!Number.isSafeInteger(tokenId) || tokenId <= 0 || !token) {
+    throw new Error(`TOKEN_METADATA_UNAVAILABLE:${String(tokenId)}`);
+  }
+  return token;
 }
 
 export function isLiquidSwapToken(tokenId: number): boolean {
@@ -432,7 +432,8 @@ export function getDefaultSwapTradingPairs(): EntitySwapPairConfig[] {
  * Default per-token credit limit scaled to token decimals (matches old account behavior)
  */
 export function getDefaultCreditLimit(tokenId: number): bigint {
-  const tokenInfo = getTokenInfo(tokenId);
-  const decimals = BigInt(tokenInfo.decimals ?? 18);
-  return BASE_CREDIT_LIMIT * 10n ** decimals;
+  if (!Number.isSafeInteger(tokenId) || tokenId <= 0) {
+    throw new Error(`TOKEN_ID_INVALID:${String(tokenId)}`);
+  }
+  return BASE_CREDIT_LIMIT;
 }

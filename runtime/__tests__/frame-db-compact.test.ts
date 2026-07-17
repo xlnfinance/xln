@@ -43,6 +43,60 @@ const makeMemoryDb = (entries: Array<[Buffer, Buffer]>): RuntimeDbLike => {
 };
 
 describe('frame DB compact values', () => {
+  test('account frame reader fetches only the newest bounded history window', async () => {
+    const entityId = `0x${'11'.repeat(32)}`;
+    const counterpartyId = `0x${'22'.repeat(32)}`;
+    const entries = Array.from({ length: 12 }, (_, index) => {
+      const accountHeight = index + 1;
+      const frame: AccountFrame = {
+        height: accountHeight,
+        timestamp: 100 + accountHeight,
+        jHeight: 7,
+        accountTxs: [],
+        prevFrameHash: zeroHash,
+        accountStateRoot: zeroHash,
+        stateHash: zeroHash,
+        byLeft: true,
+        deltas: [],
+      };
+      const accountPut = buildFrameDbPuts({
+        height: accountHeight,
+        timestamp: frame.timestamp,
+        runtimeInput: { runtimeTxs: [], entityInputs: [] },
+        logs: [],
+        touchedEntities: [entityId],
+        touchedAccounts: [{ entityId, counterpartyId }],
+        touchedBookEntities: [],
+        frameDbRecords: [{
+          kind: 'accountFrame',
+          entityId,
+          counterpartyId,
+          accountHeight,
+          source: 'ackCommit',
+          frame,
+        }],
+      }).find((put) => put.key[0] === FRAME_DB_ACCOUNT_FRAME);
+      if (!accountPut) throw new Error(`ACCOUNT_FRAME_PUT_MISSING:${accountHeight}`);
+      return [accountPut.key, accountPut.value] as [Buffer, Buffer];
+    });
+    const db = makeMemoryDb(entries);
+    const get = db.get;
+    let valueReads = 0;
+    db.get = async (key) => {
+      valueReads += 1;
+      return get(key);
+    };
+
+    const records = await readFrameDbAccountFrames(db, entityId, counterpartyId, {
+      limit: 3,
+      maxAccountHeight: 10,
+      maxRuntimeHeight: 10,
+    });
+
+    expect(records.map((record) => record.accountHeight)).toEqual([8, 9, 10]);
+    expect(valueReads).toBe(3);
+  });
+
   test('account frame values omit fields already encoded in the primary key', async () => {
     const entityId = `0x${'11'.repeat(32)}`;
     const counterpartyId = `0x${'22'.repeat(32)}`;
@@ -52,6 +106,7 @@ describe('frame DB compact values', () => {
       jHeight: 7,
       accountTxs: [],
       prevFrameHash: zeroHash,
+      accountStateRoot: zeroHash,
       stateHash: zeroHash,
       byLeft: true,
       deltas: [],
@@ -60,6 +115,7 @@ describe('frame DB compact values', () => {
     const puts = buildFrameDbPuts({
       height: 8,
       timestamp: 456,
+      runtimeInput: { runtimeTxs: [], entityInputs: [] },
       logs: [],
       touchedEntities: [entityId],
       touchedAccounts: [{ entityId, counterpartyId }],
@@ -103,6 +159,7 @@ describe('frame DB compact values', () => {
       jHeight: 7,
       accountTxs: [],
       prevFrameHash: zeroHash,
+      accountStateRoot: zeroHash,
       stateHash: zeroHash,
       byLeft: true,
       deltas: [],
@@ -110,6 +167,7 @@ describe('frame DB compact values', () => {
     const puts = buildFrameDbPuts({
       height: 8,
       timestamp: 456,
+      runtimeInput: { runtimeTxs: [], entityInputs: [] },
       logs: [],
       touchedEntities: [entityId],
       touchedAccounts: [{ entityId, counterpartyId }],
@@ -141,6 +199,7 @@ describe('frame DB compact values', () => {
     const puts = buildFrameDbPuts({
       height: 12,
       timestamp: 789,
+      runtimeInput: { runtimeTxs: [], entityInputs: [] },
       logs: [{ id: 1, category: 'consensus', level: 'info', message: 'ok', timestamp: 789, entityId }],
       touchedEntities: [entityId],
       touchedAccounts: [{ entityId, counterpartyId }],
@@ -162,5 +221,12 @@ describe('frame DB compact values', () => {
     expect(activity?.height).toBe(12);
     expect(activity?.timestamp).toBe(789);
     expect(activity?.touchedBookEntities).toEqual([entityId]);
+
+    const corrupted = decodeBuffer<Record<string, unknown>>(activityPut!.value);
+    delete corrupted['runtimeInput'];
+    await expect(readFrameDbRuntimeActivity(
+      makeMemoryDb([[activityPut!.key, encodeBuffer(corrupted)]]),
+      12,
+    )).rejects.toThrow('FRAME_DB_RUNTIME_ACTIVITY_FIELDS_INVALID:height=12');
   });
 });

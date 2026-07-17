@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +8,8 @@ import {
   cleanupTestArtifactsBeforeRun,
   DEFAULT_TEST_WORKSPACE_MAX_BYTES,
   KEEP_TEST_ARTIFACTS_ENV,
+  TEST_ARTIFACT_RUN_LOCK_PATH,
+  TEST_ARTIFACT_RUN_TOKEN_ENV,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
   TEST_WORKSPACE_MAX_BYTES_ENV,
   withoutTestArtifactCleanupDoneEnv,
@@ -20,6 +23,58 @@ const writeFile = (root: string, relativePath: string, body = 'x'): void => {
   const path = join(root, relativePath);
   mkdirSync(path.split('/').slice(0, -1).join('/'), { recursive: true });
   writeFileSync(path, body, 'utf8');
+};
+
+const waitForFile = async (path: string, timeoutMs = 5_000): Promise<void> => {
+  const deadline = Date.now() + timeoutMs;
+  while (!existsSync(path)) {
+    if (Date.now() >= deadline) throw new Error(`TEST_FILE_WAIT_TIMEOUT:path=${path}`);
+    await Bun.sleep(20);
+  }
+};
+
+const waitForProcessExit = async (child: ReturnType<typeof spawn>): Promise<void> => {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise<void>((resolve) => child.once('exit', () => resolve()));
+};
+
+const pidIsAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    throw error;
+  }
+};
+
+const waitForPidExit = async (pid: number, timeoutMs = 5_000): Promise<void> => {
+  const deadline = Date.now() + timeoutMs;
+  while (pidIsAlive(pid)) {
+    if (Date.now() >= deadline) throw new Error(`TEST_PID_WAIT_TIMEOUT:pid=${pid}`);
+    await Bun.sleep(20);
+  }
+};
+
+const killProcessIfAlive = (pid: number): void => {
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+  }
+};
+
+const independentTestRunEnv = (
+  overrides: Record<string, string | undefined>,
+): NodeJS.ProcessEnv => {
+  const env = sanitizeChildProcessEnv({ ...process.env, ...overrides });
+  // These probes deliberately start a new top-level run in a different
+  // workspace. A lease is scoped to its cleanup cwd, so inheriting the unit
+  // runner's repo-root token here would correctly fail closed on a missing
+  // lock instead of acquiring an independent fixture lease.
+  delete env[TEST_ARTIFACT_CLEANUP_DONE_ENV];
+  delete env[TEST_ARTIFACT_RUN_TOKEN_ENV];
+  return env;
 };
 
 describe('test artifact cleanup', () => {
@@ -126,11 +181,20 @@ describe('test artifact cleanup', () => {
   test('child runners skip cleanup after the parent runner did it', () => {
     const root = makeTempWorkspace();
     try {
+      const env: Record<string, string | undefined> = {};
+      cleanupTestArtifactsBeforeRun({
+        cwd: root,
+        env,
+        argv: [],
+        reason: 'unit-parent',
+        log: () => undefined,
+      });
       writeFile(root, '.logs/e2e-parallel/current-parent-run/log.txt');
+      env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1';
 
       const summary = cleanupTestArtifactsBeforeRun({
         cwd: root,
-        env: { [TEST_ARTIFACT_CLEANUP_DONE_ENV]: '1' },
+        env,
         argv: [],
         reason: 'unit-child',
         log: () => undefined,
@@ -144,17 +208,39 @@ describe('test artifact cleanup', () => {
     }
   });
 
+  test('cleanup marker without the matching inherited lease fails loud', () => {
+    const root = makeTempWorkspace();
+    try {
+      expect(() => cleanupTestArtifactsBeforeRun({
+        cwd: root,
+        env: { [TEST_ARTIFACT_CLEANUP_DONE_ENV]: '1' },
+        argv: [],
+        reason: 'orphan-child-marker',
+        log: () => undefined,
+      })).toThrow('TEST_ARTIFACT_RUN_LEASE_REQUIRED');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('child-runner skip still enforces the workspace budget', () => {
     const root = makeTempWorkspace();
     try {
+      const env: Record<string, string | undefined> = {};
+      cleanupTestArtifactsBeforeRun({
+        cwd: root,
+        env,
+        argv: [],
+        reason: 'unit-parent-budget',
+        log: () => undefined,
+      });
       writeFile(root, '.logs/e2e-parallel/current-parent-run/log.txt', 'too-large-for-budget');
+      env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1';
+      env[TEST_WORKSPACE_MAX_BYTES_ENV] = '1';
 
       expect(() => cleanupTestArtifactsBeforeRun({
         cwd: root,
-        env: {
-          [TEST_ARTIFACT_CLEANUP_DONE_ENV]: '1',
-          [TEST_WORKSPACE_MAX_BYTES_ENV]: '1',
-        },
+        env,
         argv: [],
         reason: 'unit-child-budget',
         log: () => undefined,
@@ -165,7 +251,171 @@ describe('test artifact cleanup', () => {
     }
   });
 
-  test('e2e scope can refresh isolated browser artifacts inside a parent gate', () => {
+  test('refuses to delete artifacts owned by another live top-level test run', () => {
+    const root = makeTempWorkspace();
+    const owner = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+      stdio: 'ignore',
+    });
+    try {
+      if (!owner.pid) throw new Error('TEST_ARTIFACT_LOCK_OWNER_PID_MISSING');
+      writeFile(root, TEST_ARTIFACT_RUN_LOCK_PATH, `${JSON.stringify({
+        pid: owner.pid,
+        reason: 'parallel-owner',
+        startedAt: new Date().toISOString(),
+        token: 'parallel-owner-token',
+      })}\n`);
+      writeFile(root, 'db-tmp/runtime/active.ldb', 'live-runtime-data');
+
+      expect(() => cleanupTestArtifactsBeforeRun({
+        cwd: root,
+        env: {},
+        argv: [],
+        reason: 'parallel-contender',
+        log: () => undefined,
+      })).toThrow(`TEST_ARTIFACT_CLEANUP_ACTIVE_RUN:pid=${owner.pid}:reason=parallel-owner`);
+      expect(existsSync(join(root, 'db-tmp/runtime/active.ldb'))).toBe(true);
+    } finally {
+      owner.kill('SIGKILL');
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('reclaims a run lock only after proving its owner is dead', () => {
+    const root = makeTempWorkspace();
+    try {
+      writeFile(root, TEST_ARTIFACT_RUN_LOCK_PATH, `${JSON.stringify({
+        pid: 2_147_483_647,
+        reason: 'dead-owner',
+        startedAt: '2000-01-01T00:00:00.000Z',
+        token: 'dead-owner-token',
+      })}\n`);
+      writeFile(root, 'db-tmp/runtime/stale.ldb', 'stale-runtime-data');
+
+      const summary = cleanupTestArtifactsBeforeRun({
+        cwd: root,
+        env: {},
+        argv: [],
+        reason: 'dead-owner-recovery',
+        log: () => undefined,
+      });
+
+      expect(summary.removed).toContain('db-tmp');
+      expect(existsSync(join(root, 'db-tmp/runtime/stale.ldb'))).toBe(false);
+      expect(existsSync(join(root, TEST_ARTIFACT_RUN_LOCK_PATH))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('nested runner can refresh e2e artifacts only through its inherited run lease', () => {
+    const root = makeTempWorkspace();
+    const repoRoot = process.cwd();
+    const wrapperPath = join(repoRoot, 'runtime/scripts/run-with-test-cleanup.ts');
+    const cleanupModulePath = join(repoRoot, 'runtime/scripts/test-artifact-cleanup.ts');
+    const nestedProbe = [
+      "import { existsSync, mkdirSync, writeFileSync } from 'node:fs';",
+      `import { cleanupTestArtifactsBeforeRun } from ${JSON.stringify(cleanupModulePath)};`,
+      "const root = String(process.env.XLN_TEST_LEASE_PROBE_ROOT || '');",
+      "const artifact = `${root}/.logs/e2e-parallel/nested/active.txt`;",
+      "mkdirSync(`${root}/.logs/e2e-parallel/nested`, { recursive: true });",
+      "writeFileSync(artifact, 'nested-run');",
+      "cleanupTestArtifactsBeforeRun({ cwd: root, reason: 'nested-e2e', scope: 'e2e', skipIfAlreadyDone: false });",
+      "if (existsSync(artifact)) throw new Error('NESTED_E2E_ARTIFACT_NOT_REMOVED');",
+    ].join('\n');
+
+    try {
+      const result = spawnSync(process.execPath, [
+        wrapperPath,
+        `--cwd=${root}`,
+        '--reason=outer-run',
+        '--',
+        process.execPath,
+        '-e',
+        nestedProbe,
+      ], {
+        cwd: repoRoot,
+        env: independentTestRunEnv({
+          XLN_TEST_LEASE_PROBE_ROOT: root,
+        }),
+        encoding: 'utf8',
+      });
+
+      expect({ status: result.status, stderr: result.stderr }).toEqual({ status: 0, stderr: '' });
+      expect(existsSync(join(root, TEST_ARTIFACT_RUN_LOCK_PATH))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('SIGKILL of the wrapper cannot expose artifacts while its leased child is alive', async () => {
+    const root = makeTempWorkspace();
+    const repoRoot = process.cwd();
+    const wrapperPath = join(repoRoot, 'runtime/scripts/run-with-test-cleanup.ts');
+    const cleanupPath = join(repoRoot, 'runtime/scripts/test-artifact-cleanup.ts');
+    const readyPath = join(root, 'child-ready.json');
+    const activeArtifact = join(root, 'db-tmp/runtime/active.ldb');
+    const childProbe = [
+      "import { mkdirSync, writeFileSync } from 'node:fs';",
+      "const root = String(process.env.XLN_TEST_LEASE_PROBE_ROOT || '');",
+      "mkdirSync(`${root}/db-tmp/runtime`, { recursive: true });",
+      "writeFileSync(`${root}/db-tmp/runtime/active.ldb`, 'live-runtime-data');",
+      "writeFileSync(`${root}/child-ready.json`, JSON.stringify({ pid: process.pid }));",
+      'setInterval(() => undefined, 1_000);',
+    ].join('\n');
+    const wrapper = spawn(process.execPath, [
+      wrapperPath,
+      `--cwd=${root}`,
+      '--reason=sigkill-owner',
+      '--',
+      process.execPath,
+      '-e',
+      childProbe,
+    ], {
+      cwd: repoRoot,
+      env: independentTestRunEnv({
+        XLN_TEST_LEASE_PROBE_ROOT: root,
+      }),
+      stdio: 'ignore',
+    });
+    let childPid = 0;
+
+    try {
+      await waitForFile(readyPath);
+      childPid = Number(JSON.parse(readFileSync(readyPath, 'utf8')).pid);
+      expect(Number.isSafeInteger(childPid) && childPid > 0).toBe(true);
+      wrapper.kill('SIGKILL');
+      await waitForProcessExit(wrapper);
+
+      const liveContender = spawnSync(process.execPath, [
+        cleanupPath,
+        `--cwd=${root}`,
+        '--reason=live-contender',
+      ], { cwd: repoRoot, env: independentTestRunEnv({}), encoding: 'utf8' });
+      expect(liveContender.status).toBe(1);
+      expect(liveContender.stderr).toContain(`TEST_ARTIFACT_CLEANUP_ACTIVE_RUN:pid=${childPid}`);
+      expect(existsSync(activeArtifact)).toBe(true);
+
+      process.kill(childPid, 'SIGKILL');
+      await waitForPidExit(childPid);
+      childPid = 0;
+      const deadOwnerRecovery = spawnSync(process.execPath, [
+        cleanupPath,
+        `--cwd=${root}`,
+        '--reason=dead-child-recovery',
+      ], { cwd: repoRoot, env: independentTestRunEnv({}), encoding: 'utf8' });
+      expect({ status: deadOwnerRecovery.status, stderr: deadOwnerRecovery.stderr }).toEqual({
+        status: 0,
+        stderr: '',
+      });
+      expect(existsSync(activeArtifact)).toBe(false);
+    } finally {
+      if (wrapper.exitCode === null && wrapper.signalCode === null) wrapper.kill('SIGKILL');
+      if (childPid > 0) killProcessIfAlive(childPid);
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  test('e2e scope refreshes isolated artifacts without deleting the live dev build', () => {
     const root = makeTempWorkspace();
     try {
       writeFile(root, '.logs/e2e-parallel/old-run/log.txt');
@@ -187,12 +437,12 @@ describe('test artifact cleanup', () => {
       expect(summary.skipped).toBe(false);
       expect(summary.removed).toContain('.logs/e2e-parallel');
       expect(summary.removed).toContain('frontend/.svelte-kit-e2e');
-      expect(summary.removed).toContain('frontend/build');
+      expect(summary.removed).not.toContain('frontend/build');
       expect(summary.removed).not.toContain('.logs/bootstrap-soundcheck');
       expect(summary.removed).not.toContain('native/dist');
       expect(existsSync(join(root, '.logs/e2e-parallel'))).toBe(false);
       expect(existsSync(join(root, 'frontend/.svelte-kit-e2e'))).toBe(false);
-      expect(existsSync(join(root, 'frontend/build'))).toBe(false);
+      expect(existsSync(join(root, 'frontend/build/index.html'))).toBe(true);
       expect(existsSync(join(root, 'native/dist/xln.dmg'))).toBe(true);
       expect(existsSync(join(root, '.logs/bootstrap-soundcheck/current/probe.log'))).toBe(true);
     } finally {
@@ -203,11 +453,13 @@ describe('test artifact cleanup', () => {
   test('child runtime env can drop the cleanup marker before browser builds', () => {
     const env = withoutTestArtifactCleanupDoneEnv({
       [TEST_ARTIFACT_CLEANUP_DONE_ENV]: '1',
+      [TEST_ARTIFACT_RUN_TOKEN_ENV]: 'parent-run-token',
       NO_COLOR: '1',
       KEEP_ME: 'yes',
     });
 
     expect(env[TEST_ARTIFACT_CLEANUP_DONE_ENV]).toBeUndefined();
+    expect(env[TEST_ARTIFACT_RUN_TOKEN_ENV]).toBe('parent-run-token');
     expect(env.NO_COLOR).toBeUndefined();
     expect(env.KEEP_ME).toBe('yes');
   });
@@ -285,15 +537,38 @@ describe('test artifact cleanup', () => {
   test('package test shortcuts run through cleanup before direct browser or hardhat tests', () => {
     const repoRoot = process.cwd();
     const rootPackage = readFileSync(join(repoRoot, 'package.json'), 'utf8');
+    const rootScripts = JSON.parse(rootPackage).scripts as Record<string, string>;
     const frontendPackage = readFileSync(join(repoRoot, 'frontend/package.json'), 'utf8');
     const contractsPackage = readFileSync(join(repoRoot, 'jurisdictions/package.json'), 'utf8');
     const scenarioRunner = readFileSync(join(repoRoot, 'runtime/scenarios/run.ts'), 'utf8');
 
-    expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=e2e-payment-smoke --scope=e2e');
     expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=e2e-prod-payment --scope=e2e');
     expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=contracts --child-cwd=jurisdictions');
     expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=governance --child-cwd=jurisdictions');
     expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=entity --child-cwd=jurisdictions');
+    expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=persistence-cli -- bun runtime/scripts/persistence-wal-smoke.ts');
+    expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=watchtower-smoke -- bun runtime/scripts/watchtower-smoke.ts');
+    expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=rpc-settlement -- bun runtime/scripts/rpc-settlement-parity.ts');
+    expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=p2p-relay -- bun runtime/scenarios/p2p-relay.ts');
+    expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=bootstrap-soundcheck -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=all');
+    expect(rootPackage).toContain('"check": "bun run check:src && bun run check:frontend-file-size && bun run check:frontend"');
+    expect(rootPackage).not.toContain('run-with-test-cleanup.ts --reason=check');
+    expect(rootPackage).not.toContain('test-artifact-cleanup.ts --reason=check &&');
+    for (const scriptName of [
+      'test:persistence:cli',
+      'test:watchtower:smoke',
+      'test:rpc-settlement',
+      'test:p2p:relay',
+      'prod:bootstrap:bench',
+      'prod:bootstrap:fresh',
+      'prod:bootstrap:template',
+      'prod:bootstrap:clone',
+      'prod:bootstrap:hydrate',
+      'prod:bootstrap:soundcheck',
+    ]) {
+      expect(rootScripts[scriptName]).toStartWith('bun runtime/scripts/run-with-test-cleanup.ts ');
+      expect(rootScripts[scriptName]).not.toContain('test-artifact-cleanup.ts');
+    }
     expect(rootPackage).toContain('"test:scenarios:parallel:isolated": "bun runtime/scenarios/run.ts"');
     expect(rootPackage).toContain('"test:feedback:20": "bun runtime/scenarios/run.ts --set=smoke --workers=2"');
     expect(scenarioRunner).toContain("cleanupTestArtifactsBeforeRun({ reason: 'scenarios', argv: process.argv.slice(2) })");

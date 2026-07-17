@@ -134,7 +134,9 @@ async function readBrowserExternalWalletDebug(page: Page, symbol: string, holder
   const tokenAddress = String(token?.address || '').trim().toLowerCase();
   const owner = String(holder || '').trim().toLowerCase();
   return page.evaluate(({ owner, tokenAddress }) => {
-    const env = (window as typeof window & { __xln_env?: any }).__xln_env;
+    const env = (window as typeof window & {
+      __xln?: { liveRuntimeSnapshot?: any };
+    }).__xln?.liveRuntimeSnapshot;
     const mapEntries = (value: unknown): Array<[unknown, unknown]> => {
       if (value instanceof Map) return [...value.entries()];
       if (value && typeof value === 'object') return Object.entries(value as Record<string, unknown>);
@@ -204,7 +206,7 @@ async function refreshExternalBalance(page: Page, symbol: string): Promise<numbe
   return getRenderedExternalBalance(page, symbol);
 }
 
-test('move external to external sends directly from signer wallet', async ({ page }) => {
+test('move external to external sends directly from signer wallet', { tag: '@functional' }, async ({ page }) => {
   test.setTimeout(LONG_E2E ? 180_000 : 180_000);
 
   await timedStep('move-direct.baseline', async () => {

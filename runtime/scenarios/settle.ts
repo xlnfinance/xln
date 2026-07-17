@@ -12,8 +12,8 @@
 
 import type { Env, SettlementDiff, SettlementOp } from '../types';
 import { compileOps } from '../protocol/settlement/operations';
-import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain as syncChainHelper, findReplica, setScenarioStorageEnabled } from './helpers';
-import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig, registerEntities as bootRegisterEntities } from './boot';
+import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain as syncChainHelper, findReplica, setScenarioStorageEnabled, converge, processUntil } from './helpers';
+import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig, registerEntities as bootRegisterEntities } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { createGossipLayer } from '../networking/gossip';
@@ -114,6 +114,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   console.log = quietLog;
   env.scenarioLogLevel = 'info'; // Allow info-level logs through strict scenario filter
   const cleanupStrictMode = enableStrictScenario(env, 'settle');
+  try {
 
   // Ensure signer keys BEFORE entity registration (needed to compute board hash)
   ensureSignerKeysFromSeed(env, ['2', '3'], 'settle');
@@ -124,10 +125,11 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
     jadapter = getScenarioJAdapter(env);
   } catch {
     jadapter = await ensureJAdapter(env);
-    const jReplica = createJReplica(env, JURISDICTION, jadapter.addresses.depository);
-    jReplica.jadapter = jadapter;
-    jReplica.depositoryAddress = jadapter.addresses.depository;
-    jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
+    bindScenarioJReplica(
+      env,
+      createJReplica(env, JURISDICTION, jadapter.addresses.depository),
+      jadapter,
+    );
     jadapter.startWatching(env);
   }
 
@@ -147,6 +149,8 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   assert(aliceRegistration && hubRegistration, 'Alice and Hub should be registered', env);
   const ALICE_ID = aliceRegistration.id;
   const HUB_ID = hubRegistration.id;
+  const ALICE_SIGNER = aliceRegistration.signer;
+  const HUB_SIGNER = hubRegistration.signer;
 
   ENTITY_NAME_MAP.set(ALICE_ID, 'Alice');
   ENTITY_NAME_MAP.set(HUB_ID, 'Hub');
@@ -161,13 +165,13 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   // Mint reserves
   await process(env, [{
     entityId: ALICE_ID,
-    signerId: '2',
+    signerId: ALICE_SIGNER,
     entityTxs: [{ type: 'mintReserves', data: { tokenId: USDC_TOKEN_ID, amount: usd(1000) } }]
   }]);
 
   await process(env, [{
     entityId: HUB_ID,
-    signerId: '3',
+    signerId: HUB_SIGNER,
     entityTxs: [{ type: 'mintReserves', data: { tokenId: USDC_TOKEN_ID, amount: usd(1000) } }]
   }]);
 
@@ -180,7 +184,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   // Open account between Alice and Hub
   await process(env, [{
     entityId: ALICE_ID,
-    signerId: '2',
+    signerId: ALICE_SIGNER,
     entityTxs: [{ type: 'openAccount', data: { targetEntityId: HUB_ID, creditAmount: 0n } }]
   }]);
 
@@ -191,6 +195,26 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   }
 
   console.log(`✅ Account opened between Alice and Hub`);
+
+  // Fund both directions with real bilateral credit so the manual settlement
+  // negotiation below can reserve either side without mutating Account state.
+  await process(env, [{
+    entityId: ALICE_ID,
+    signerId: ALICE_SIGNER,
+    entityTxs: [{
+      type: 'extendCredit',
+      data: { counterpartyEntityId: HUB_ID, tokenId: USDC_TOKEN_ID, amount: usd(100) },
+    }],
+  }]);
+  await process(env, [{
+    entityId: HUB_ID,
+    signerId: HUB_SIGNER,
+    entityTxs: [{
+      type: 'extendCredit',
+      data: { counterpartyEntityId: ALICE_ID, tokenId: USDC_TOKEN_ID, amount: usd(100) },
+    }],
+  }]);
+  await converge(env, 20);
 
   snap(env, 'Account Opened', {
     description: 'Bilateral account between Alice and Hub',
@@ -287,7 +311,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
 
   await process(env, [{
     entityId: ALICE_ID,
-    signerId: '2',
+    signerId: ALICE_SIGNER,
     entityTxs: [{
       type: 'settle_propose',
       data: {
@@ -298,11 +322,10 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
     }]
   }]);
 
-  // Process message delivery
-  for (let i = 0; i < 5; i++) {
-    advanceScenarioTime(env);
-    await process(env);
-  }
+  // Drain both Entity delivery and bilateral Account consensus. Reliable
+  // transport adds bounded hops; a fixed tick count can observe a valid h2
+  // proposal before the counterparty durably commits it.
+  await converge(env, 20);
 
   // Verify workspace created on both sides
   const [, aliceReplica] = findReplica(env, ALICE_ID);
@@ -340,44 +363,53 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
     keyMetrics: [`holdAmount=${expectedHold.toString()}`],
   });
 
-  // ══════════════════════════════════════════════════════════════════════════════
-  // RESET: clear the auto-approve workspace so update/approve tests start unsigned
-  // ══════════════════════════════════════════════════════════════════════════════
-  console.log('\n📋 RESET: Clear Proposal Before Manual Negotiation');
-
+  // A signed workspace is durable authorization and cannot be cleared as a
+  // test reset. Complete the real auto-approved path on-chain before starting
+  // a distinct manual negotiation on the now-settled Account.
+  assert(
+    aliceAccount.settlementWorkspace.status === 'ready_to_submit',
+    'Auto-approved workspace should be fully sealed before execution',
+    env,
+  );
   await process(env, [{
-    entityId: HUB_ID,
-    signerId: '3',
-    entityTxs: [{
-      type: 'settle_reject',
-      data: {
-        counterpartyEntityId: ALICE_ID,
-        reason: 'Reset for manual negotiation test'
-      }
-    }]
+    entityId: ALICE_ID,
+    signerId: ALICE_SIGNER,
+    entityTxs: [{ type: 'settle_execute', data: { counterpartyEntityId: HUB_ID } }],
   }]);
-
-  for (let i = 0; i < 5; i++) {
-    advanceScenarioTime(env);
-    await process(env);
-  }
-
+  await converge(env, 20);
+  await process(env, [{
+    entityId: ALICE_ID,
+    signerId: ALICE_SIGNER,
+    entityTxs: [{ type: 'j_broadcast', data: {} }],
+  }]);
+  await syncChainHelper(env, 5);
   const clearedAccount = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
-  assert(!clearedAccount?.settlementWorkspace, 'Workspace should be cleared before update test', env);
+  assert(!clearedAccount?.settlementWorkspace, 'Executed auto-approved workspace should finalize and clear', env);
 
   // ══════════════════════════════════════════════════════════════════════════════
   // TEST 4: SETTLEMENT WORKSPACE UPDATE
   // ══════════════════════════════════════════════════════════════════════════════
   console.log('\n📋 TEST 4: Settlement Workspace Update');
 
+  // Start with a real unsigned negotiation: Alice requests a reserve transfer
+  // from Hub, so Hub's safety predicate must require an explicit decision.
+  const manualOps: SettlementOp[] = [{
+    type: 'rawDiff',
+    tokenId: USDC_TOKEN_ID,
+    leftDiff: usd(25),
+    rightDiff: -usd(25),
+    collateralDiff: 0n,
+    ondeltaDiff: 0n,
+  }];
+
   await process(env, [{
     entityId: ALICE_ID,
-    signerId: '2',
+    signerId: ALICE_SIGNER,
     entityTxs: [{
       type: 'settle_propose',
       data: {
         counterpartyEntityId: HUB_ID,
-        ops: depositOps,
+        ops: manualOps,
         memo: 'Manual negotiation reset proposal'
       }
     }]
@@ -390,28 +422,22 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
 
   const manualProposalAccount = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
   assert(manualProposalAccount?.settlementWorkspace?.version === 1, 'Manual workspace should start at version 1', env);
-  if (manualProposalAccount.settlementWorkspace[hubHankoField]) {
-    const aliceManualWorkspace = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID)?.settlementWorkspace;
-    const hubManualWorkspace = findReplica(env, HUB_ID)[1].state.accounts.get(ALICE_ID)?.settlementWorkspace;
-    for (const workspace of [aliceManualWorkspace, hubManualWorkspace]) {
-      if (!workspace) continue;
-      delete workspace.leftHanko;
-      delete workspace.rightHanko;
-      delete workspace.compiledDiffs;
-      delete workspace.compiledForgiveTokenIds;
-      delete workspace.postSettlementDisputeProof;
-      delete workspace.nonceAtSign;
-      workspace.status = 'awaiting_counterparty';
-    }
-  }
   assert(!manualProposalAccount.settlementWorkspace[hubHankoField], 'Manual negotiation workspace should be unsigned before update', env);
 
-  // Hub counter-proposes: smaller collateral deposit
-  const counterOps: SettlementOp[] = [{ type: 'r2c', tokenId: USDC_TOKEN_ID, amount: usd(50) }];
+  // Hub counters by requesting a transfer from Alice. Alice's reserve falls,
+  // so this also remains unsigned until TEST 5 explicitly approves it.
+  const counterOps: SettlementOp[] = [{
+    type: 'rawDiff',
+    tokenId: USDC_TOKEN_ID,
+    leftDiff: -usd(50),
+    rightDiff: usd(50),
+    collateralDiff: 0n,
+    ondeltaDiff: 0n,
+  }];
 
   await process(env, [{
     entityId: HUB_ID,
-    signerId: '3',
+    signerId: HUB_SIGNER,
     entityTxs: [{
       type: 'settle_update',
       data: {
@@ -435,7 +461,8 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   const { diffs: compiledDiffs } = compileOps(aliceAccount2.settlementWorkspace.ops, aliceAccount2.settlementWorkspace.lastModifiedByLeft);
   const firstCompiledDiff = compiledDiffs[0];
   assert(firstCompiledDiff, 'Compiled settlement diff should exist', env);
-  assert(firstCompiledDiff.rightDiff === -usd(50), 'Compiled diff should reflect update (Hub rightDiff)');
+  assert(firstCompiledDiff.leftDiff === -usd(50), 'Compiled diff should reflect update (Alice leftDiff)');
+  assert(firstCompiledDiff.rightDiff === usd(50), 'Compiled diff should reflect update (Hub rightDiff)');
 
   console.log(`✅ Settlement updated by Hub`);
   console.log(`   New version: ${aliceAccount2.settlementWorkspace.version}`);
@@ -453,29 +480,81 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   // Alice approves (counterparty of Hub's update — only counterparty of lastModifier can approve)
   await process(env, [{
     entityId: ALICE_ID,
-    signerId: '2',
+    signerId: ALICE_SIGNER,
     entityTxs: [{
       type: 'settle_approve',
-      data: { counterpartyEntityId: HUB_ID }
+      data: {
+        counterpartyEntityId: HUB_ID,
+        workspaceHash: aliceAccount2.settlementWorkspace.workspaceHash,
+      }
     }]
   }]);
 
-  for (let i = 0; i < 5; i++) {
-    advanceScenarioTime(env);
-    await process(env);
-  }
+  const aliceHankoField3 = aliceIsLeft ? 'leftHanko' : 'rightHanko';
+  await processUntil(env, () => {
+    const aliceWorkspace = findReplica(env, ALICE_ID)[1].state.accounts
+      .get(HUB_ID)?.settlementWorkspace;
+    const hubWorkspace = findReplica(env, HUB_ID)[1].state.accounts
+      .get(ALICE_ID)?.settlementWorkspace;
+    return Boolean(
+      aliceWorkspace?.status === 'ready_to_submit' &&
+      hubWorkspace?.status === 'ready_to_submit' &&
+      aliceWorkspace.postSettlementDisputeProof?.[aliceHankoField3] &&
+      hubWorkspace.postSettlementDisputeProof?.[aliceHankoField3],
+    );
+  }, 20, 'settlement approval committed bilaterally', undefined, () => {
+    console.log(formatRuntime(env, { maxAccounts: 5, maxLocks: 20 }));
+    for (const entityId of [ALICE_ID, HUB_ID]) {
+      const replica = findReplica(env, entityId)[1];
+      const counterparty = entityId === ALICE_ID ? HUB_ID : ALICE_ID;
+      const account = replica.state.accounts.get(counterparty);
+      console.log(`SETTLEMENT_APPROVAL_TIMEOUT:${entityId.slice(-4)}:${JSON.stringify({
+        entityHeight: replica.state.height,
+        deferred: replica.state.deferredAccountProposals?.get(counterparty) ?? null,
+        accountHeight: account?.currentHeight ?? null,
+        mempool: account?.mempool.map(tx => tx.type) ?? [],
+        pendingFrame: account?.pendingFrame?.height ?? null,
+        pendingInput: account?.pendingAccountInput?.kind ?? null,
+        nextProofNonce: account?.proofHeader.nextProofNonce ?? null,
+        workspaceStatus: account?.settlementWorkspace?.status ?? null,
+        leftHanko: Boolean(account?.settlementWorkspace?.leftHanko),
+        rightHanko: Boolean(account?.settlementWorkspace?.rightHanko),
+      })}`);
+    }
+  });
 
   // Verify Alice's hanko is set on both sides (via bilateral frame consensus)
   const aliceAccount3 = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
-  const aliceHankoField3 = aliceIsLeft ? 'leftHanko' : 'rightHanko';
-  assert(aliceAccount3?.settlementWorkspace?.[aliceHankoField3], 'Alice should have signed', env);
+  assert(
+    aliceAccount3?.settlementWorkspace?.postSettlementDisputeProof?.[aliceHankoField3],
+    'Alice should have signed the exact post-settlement dispute proof',
+    env,
+  );
+  assert(
+    aliceAccount3.settlementWorkspace.status === 'ready_to_submit',
+    'Settlement should be ready after both role-aware seals',
+    env,
+  );
 
-  // Hub receives Alice's hanko
+  // Hub receives Alice's post-settlement recovery Hanko. Because Alice is the
+  // executor, her cooperative settlement Hanko is intentionally absent.
   const hubAccount3 = findReplica(env, HUB_ID)[1].state.accounts.get(ALICE_ID);
-  assert(hubAccount3?.settlementWorkspace?.[aliceHankoField3], 'Hub should have received Alice hanko', env);
+  assert(
+    hubAccount3?.settlementWorkspace?.postSettlementDisputeProof?.[aliceHankoField3],
+    'Hub should have received Alice post-settlement proof Hanko',
+    env,
+  );
+  assert(
+    !hubAccount3.settlementWorkspace[aliceHankoField3],
+    'Executor cooperative settlement Hanko must remain absent',
+    env,
+  );
 
   console.log(`✅ Alice approved settlement`);
-  console.log(`   Alice hanko (${aliceHankoField3}): ${aliceAccount3.settlementWorkspace[aliceHankoField3]?.slice(0, 20)}...`);
+  console.log(
+    `   Alice post-proof hanko (${aliceHankoField3}): ` +
+    `${aliceAccount3.settlementWorkspace.postSettlementDisputeProof[aliceHankoField3]?.slice(0, 20)}...`,
+  );
 
   snap(env, 'Settlement Approved', {
     description: 'Both parties signed - ready to submit',
@@ -487,13 +566,14 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   // ══════════════════════════════════════════════════════════════════════════════
   console.log('\n📋 TEST 6: Settlement Execute');
 
-  // Hub executes (lastModifier has counterparty's hanko → can submit to jBatch)
+  // The executor was pinned when Alice created v1. Hub's v2 edit cannot silently
+  // transfer execution authority, so Alice submits with Hub's Hanko.
   await process(env, [{
-    entityId: HUB_ID,
-    signerId: '3',
+    entityId: ALICE_ID,
+    signerId: ALICE_SIGNER,
     entityTxs: [{
       type: 'settle_execute',
-      data: { counterpartyEntityId: ALICE_ID }
+      data: { counterpartyEntityId: HUB_ID }
     }]
   }]);
 
@@ -504,8 +584,8 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
 
   // Broadcast the jBatch to chain
   await process(env, [{
-    entityId: HUB_ID,
-    signerId: '3',
+    entityId: ALICE_ID,
+    signerId: ALICE_SIGNER,
     entityTxs: [{ type: 'j_broadcast', data: {} }]
   }]);
 
@@ -527,15 +607,24 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   // ══════════════════════════════════════════════════════════════════════════════
   console.log('\n📋 TEST 7: Settlement Reject');
 
-  // Create another proposal
+  // Create a proposal that transfers reserve away from Hub. It is not locally
+  // safe for Hub, so it remains unsigned and can be explicitly rejected.
+  const rejectionOps: SettlementOp[] = [{
+    type: 'rawDiff',
+    tokenId: USDC_TOKEN_ID,
+    leftDiff: usd(1),
+    rightDiff: -usd(1),
+    collateralDiff: 0n,
+    ondeltaDiff: 0n,
+  }];
   await process(env, [{
     entityId: ALICE_ID,
-    signerId: '2',
+    signerId: ALICE_SIGNER,
     entityTxs: [{
       type: 'settle_propose',
       data: {
         counterpartyEntityId: HUB_ID,
-        ops: depositOps,
+        ops: rejectionOps,
         memo: 'Another proposal'
       }
     }]
@@ -549,7 +638,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   // Hub rejects
   await process(env, [{
     entityId: HUB_ID,
-    signerId: '3',
+    signerId: HUB_SIGNER,
     entityTxs: [{
       type: 'settle_reject',
       data: {
@@ -582,18 +671,17 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   // ══════════════════════════════════════════════════════════════════════════════
   // CLEANUP
   // ══════════════════════════════════════════════════════════════════════════════
-  // Restore console.log
-  console.log = originalLog;
   console.log('\n📋 CLEANUP');
-
-
-  cleanupStrictMode();
 
   console.log('\n═══════════════════════════════════════════════════════════════════════════════');
   console.log('                    ✅ ALL SETTLEMENT TESTS PASSED                              ');
   console.log('═══════════════════════════════════════════════════════════════════════════════\n');
 
   return env;
+  } finally {
+    cleanupStrictMode();
+    console.log = originalLog;
+  }
 }
 
 // Run if executed directly

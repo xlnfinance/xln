@@ -364,18 +364,16 @@ export const isBaselineReady = (health: E2EHealthResponse | null, options: Requi
   if (typeof health.timestamp !== 'number') return false;
   if (health.reset?.inProgress === true) return false;
   if (hasFatalFailure(health.failures)) return false;
-  if (health.marketMaker?.failure?.fatal === true) return false;
   if (options.requireHubMesh) {
     if (health.hubMesh?.ok !== true) return false;
     if (reportedHubMeshHubCount(health) < options.minHubCount) return false;
   }
   if (options.requireMarketMaker) {
+    if (health.marketMaker?.failure?.fatal === true) return false;
     if (health.systemOk !== true) return false;
     if (health.marketMaker?.enabled !== true) return false;
     if (health.marketMaker?.ok !== true) return false;
     if (health.marketMaker?.startupPhase !== 'offers-ready') return false;
-  } else if (health.marketMaker?.enabled === true && health.marketMaker?.ok !== true) {
-    return false;
   }
   if (options.requireCustody) {
     if (health.custody?.enabled !== true) return false;
@@ -389,8 +387,10 @@ export const buildE2EResetBody = (
   options: Pick<E2EResetOptions, 'requireMarketMaker' | 'requireCustody'> = {},
 ): Record<string, unknown> => ({
   confirm: RESET_CONFIRMATION,
+  enableMarketMaker: options.requireMarketMaker === true,
+  enableCustody: options.requireCustody === true,
   ...(options.requireMarketMaker === true
-    ? { requireMarketMaker: true, enableMarketMaker: true }
+    ? { requireMarketMaker: true }
     : {}),
   ...(options.requireCustody === true
     ? { requireCustody: true }
@@ -664,9 +664,12 @@ export const resetProdServer = async (
 
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
+        const requestTimeoutMs = deadline - Date.now();
+        if (requestTimeoutMs <= 0) break;
         const resetBody = buildE2EResetBody(options);
         const coldResponse = await api.post(`${resetBaseUrl}/api/reset`, {
           data: resetBody,
+          timeout: requestTimeoutMs,
           headers: {
             'Content-Type': 'application/json',
             'X-XLN-Reset-Confirm': RESET_CONFIRMATION,
@@ -699,7 +702,10 @@ export const resetProdServer = async (
     }
 
     expect(resetDone, `reset failed after retries: ${lastResetError}`).toBe(true);
-
-    return await waitForBaselineReadyWithApi(page, api, resolved, resolved.timeoutMs);
+    const readinessTimeoutMs = deadline - Date.now();
+    if (readinessTimeoutMs <= 0) {
+      throw new Error(`reset completed after the E2E baseline deadline: ${lastResetError}`);
+    }
+    return await waitForBaselineReadyWithApi(page, api, resolved, readinessTimeoutMs);
   });
 };

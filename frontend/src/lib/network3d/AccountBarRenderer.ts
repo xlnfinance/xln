@@ -11,6 +11,7 @@
 
 import * as THREE from 'three';
 import type { EntityData, DerivedAccountData } from './types';
+import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
 
 export interface AccountBarVisual {
   glowColor: string | null;
@@ -105,6 +106,10 @@ export function createAccountBars(
     // Derive capacity data for this token and convert BigInt to number
     const fromDerivedRaw = xlnFunctions.deriveDelta(delta, fromIsLeft);
     const toDerivedRaw = xlnFunctions.deriveDelta(delta, !fromIsLeft);
+    const tokenDecimals = requireTokenDecimals(
+      xlnFunctions.getTokenInfo?.(tokenId)?.decimals,
+      `token:${tokenId}`,
+    );
 
     // Convert BigInt values to numbers for 3D visualization
     const fromDerived: DerivedAccountData = {
@@ -154,6 +159,7 @@ export function createAccountBars(
       settings,
       getEntitySize,
       tokenId,
+      tokenDecimals,
       adjustedRadius,
       barHeight
     );
@@ -180,15 +186,15 @@ function createTokenBars(
   settings: AccountBarSettings,
   getEntitySize: (entityId: string, tokenId: number) => number,
   tokenId: number,
+  tokenDecimals: number,
   barRadius: number,
   barHeight: number
 ): THREE.Group {
   const tokenGroup = new THREE.Group();
 
   // Scale bars based on token value (1px = $1 invariant)
-  const decimals = 18;
   const tokensToVisualUnits = 0.00001; // 1M tokens → 10 visual units
-  const barScale = (tokensToVisualUnits / Math.pow(10, decimals)) * (settings.portfolioScale / 5000);
+  const barScale = (tokensToVisualUnits / Math.pow(10, tokenDecimals)) * (settings.portfolioScale / 5000);
 
   // Compute CREDIT DEBT segment (how much I borrowed from peer's CREDIT line)
   // RED = using peer's credit (actual debt, risky)

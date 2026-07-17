@@ -30,14 +30,13 @@ import {
 import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 import { timedStep } from './utils/e2e-timing';
+import { closeRuntimeContext } from './utils/e2e-runtime-shutdown';
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const LONG_E2E = process.env.E2E_LONG === '1';
 const ISOLATED_BASELINE_READY = process.env.E2E_ISOLATED_BASELINE_READY === '1';
 const TEST_TIMEOUT_MS = LONG_E2E ? 420_000 : 360_000;
-const TOKEN_SCALE = 10n ** 18n;
-
 type CustodyDashboardPayload = {
   headlineBalance?: {
     amountDisplay?: string;
@@ -116,6 +115,14 @@ type OffchainCapacitySnapshot = {
 type ApiTokenEntry = {
   symbol?: string;
   tokenId?: number;
+  decimals?: number;
+};
+
+type ApiToken = {
+  symbol: string;
+  tokenId: number;
+  decimals: number;
+  scale: bigint;
 };
 
 const getFreePort = async (): Promise<number> => {
@@ -154,14 +161,17 @@ const resolvePrimaryCustodyJurisdictionId = async (): Promise<string> => {
   return primary.key;
 };
 
-async function getApiTokenId(page: Page, symbol: string): Promise<number> {
+async function getApiToken(page: Page, symbol: string): Promise<ApiToken> {
   const response = await page.request.get(`${API_BASE_URL}/api/tokens`);
   expect(response.ok(), 'tokens endpoint must be available').toBe(true);
   const body = await response.json().catch(() => ({} as { tokens?: ApiTokenEntry[] }));
   const tokens = Array.isArray(body.tokens) ? body.tokens : [];
   const match = tokens.find((token) => String(token.symbol || '').toUpperCase() === symbol.toUpperCase());
   expect(typeof match?.tokenId === 'number', `Missing ${symbol} tokenId`).toBe(true);
-  return Number(match!.tokenId);
+  const tokenId = Number(match!.tokenId);
+  const decimals = Number(match!.decimals);
+  expect(Number.isSafeInteger(decimals) && decimals >= 0 && decimals <= 255, `Invalid ${symbol} decimals`).toBe(true);
+  return { symbol: symbol.toUpperCase(), tokenId, decimals, scale: 10n ** BigInt(decimals) };
 }
 
 const toWsUrl = (baseUrl: string, pathname: string): string => {
@@ -894,7 +904,7 @@ test.describe('E2E Custody Flow', () => {
   // Scenario: a new custody daemon joins the existing 3-hub mesh as a separate runtime, receives
   // a journal-backed deposit from a browser wallet, refuses to withdraw before funds exist, and
   // then sends a real HTLC withdrawal using only the custody service's locally credited balance.
-  test('separate custody daemon credits deposits and withdraws only from credited offchain balance', async ({ browser }) => {
+  test('separate custody daemon credits deposits and withdraws only from credited offchain balance', { tag: '@functional' }, async ({ browser }) => {
     test.setTimeout(TEST_TIMEOUT_MS);
 
     const tempRoot = await mkdtemp(join(tmpdir(), 'xln-custody-e2e-'));
@@ -958,7 +968,9 @@ test.describe('E2E Custody Flow', () => {
         'custody.wallet.create_runtime',
         () => createRuntimeIdentity(walletPage, 'alice', selectDemoMnemonic('alice')),
       );
-      const usdtTokenId = await timedStep('custody.wallet.read_usdt_token_id', () => getApiTokenId(walletPage, 'USDT'));
+      const usdcToken = await timedStep('custody.wallet.read_usdc_token', () => getApiToken(walletPage, 'USDC'));
+      const usdtToken = await timedStep('custody.wallet.read_usdt_token', () => getApiToken(walletPage, 'USDT'));
+      const usdtTokenId = usdtToken.tokenId;
       for (const [index, hubId] of senderHubIds.entries()) {
         await timedStep(
           `custody.wallet.connect_hub_${index + 1}`,
@@ -983,7 +995,7 @@ test.describe('E2E Custody Flow', () => {
       );
       await timedStep(
         'custody.wallet.wait_usdt_out_after_faucet',
-        () => waitForOffchainOutboundCapacity(walletPage, alice.entityId, fundingHubId, usdtTokenId, 30n * TOKEN_SCALE, 20_000),
+        () => waitForOffchainOutboundCapacity(walletPage, alice.entityId, fundingHubId, usdtTokenId, 30n * usdtToken.scale, 20_000),
       );
       await timedStep('custody.open_dashboard', () => custodyPage.goto(custodyBaseUrl));
       await expect(custodyPage.getByRole('heading', { name: 'Deposit' })).toBeVisible({ timeout: 15_000 });
@@ -991,10 +1003,30 @@ test.describe('E2E Custody Flow', () => {
       await expect(custodyPage.getByRole('button', { name: /^Local Wallet$/i })).toBeVisible({ timeout: 60_000 });
       await custodyPage.screenshot({ path: test.info().outputPath('custody-dashboard-initial.png'), fullPage: true });
 
+      let browserWithdrawalRequests = 0;
+      custodyPage.on('request', (request) => {
+        if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/withdraw') {
+          browserWithdrawalRequests += 1;
+        }
+      });
       await custodyPage.locator('input[name="amount"]').fill('1');
       await custodyPage.locator('input[name="targetEntityId"]').fill(alice.entityId);
       await custodyPage.getByRole('button', { name: /^Withdraw$/i }).click();
       await expect(custodyPage.getByText('Insufficient custody balance')).toBeVisible({ timeout: 15_000 });
+      expect(browserWithdrawalRequests, 'displayed zero balance must reject before browser POST').toBe(0);
+
+      const directWithdrawal = await context.request.post(`${custodyBaseUrl}/api/withdraw`, {
+        data: {
+          tokenId: usdcToken.tokenId,
+          amount: '1',
+          targetEntityId: alice.entityId,
+        },
+      });
+      expect(directWithdrawal.status(), 'server remains the authoritative fail-closed balance gate').toBe(400);
+      expect(await directWithdrawal.json()).toMatchObject({
+        ok: false,
+        error: 'Insufficient custody balance',
+      });
 
       let dashboard = await readCustodyDashboard(custodyPage, custodyBaseUrl);
       const custodyBalances = new Map<number, bigint>();
@@ -1005,8 +1037,8 @@ test.describe('E2E Custody Flow', () => {
         }
       }
       const depositCycles = [
-        { whole: 3n, tokenId: 1 },
-        { whole: 10n, tokenId: usdtTokenId },
+        { whole: 3n, tokenId: usdcToken.tokenId, scale: usdcToken.scale },
+        { whole: 10n, tokenId: usdtTokenId, scale: usdtToken.scale },
       ];
 
       for (const [cycleIndex, cycle] of depositCycles.entries()) {
@@ -1062,7 +1094,7 @@ test.describe('E2E Custody Flow', () => {
           );
         }
 
-        const depositMinor = cycle.whole * TOKEN_SCALE;
+        const depositMinor = cycle.whole * cycle.scale;
         const currentTokenBalance = custodyBalances.get(cycle.tokenId) ?? 0n;
         custodyBalances.set(cycle.tokenId, currentTokenBalance + depositMinor);
         await custodyPage.bringToFront();
@@ -1081,8 +1113,8 @@ test.describe('E2E Custody Flow', () => {
       }
 
       const withdrawCycles = [
-        { whole: 2n, tokenId: 1 },
-        { whole: 4n, tokenId: usdtTokenId },
+        { whole: 2n, tokenId: usdcToken.tokenId, scale: usdcToken.scale },
+        { whole: 4n, tokenId: usdtTokenId, scale: usdtToken.scale },
       ];
       for (const [cycleIndex, cycle] of withdrawCycles.entries()) {
         await walletPage.bringToFront();
@@ -1113,7 +1145,7 @@ test.describe('E2E Custody Flow', () => {
           `custody.withdraw_cycle_${cycleIndex + 1}.wait_finalized`,
           () => waitForActivityStatus(custodyPage, custodyBaseUrl, withdrawalActivity.id, 'finalized', 90_000),
         );
-        expect(BigInt(finalizedWithdrawal.requestedAmountMinor)).toBe(cycle.whole * TOKEN_SCALE);
+        expect(BigInt(finalizedWithdrawal.requestedAmountMinor)).toBe(cycle.whole * cycle.scale);
         expect(Number(finalizedWithdrawal.tokenId)).toBe(cycle.tokenId);
         expect(BigInt(finalizedWithdrawal.feeMinor)).toBeGreaterThan(0n);
 
@@ -1130,7 +1162,7 @@ test.describe('E2E Custody Flow', () => {
         );
       }
     } finally {
-      await context.close();
+      await closeRuntimeContext(context);
       await daemonClient?.close();
       await stopManagedChild(custodyChild);
       await stopManagedChild(daemonChild);

@@ -1,11 +1,13 @@
-import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
 import { deserializeTaggedJson } from '../protocol/serialization';
+import { deriveManagedEntityIdentity } from './daemon-control';
 import {
+  buildManagedRuntimeChildSecretEnv,
   childSecretFdEnv,
   type ChildSecrets,
   writeInheritedChildSecrets,
@@ -120,10 +122,19 @@ type DaemonControlCliResult = {
 
 export type ManagedChild = {
   name: string;
-  proc: ChildProcessByStdio<null, Readable, Readable>;
+  proc: ChildProcess & { stdout: Readable; stderr: Readable };
   stdoutLines: string[];
   stderrLines: string[];
+  startupSecretsWritten: Promise<void>;
 };
+
+function assertCapturedChildPipes(
+  proc: ChildProcess,
+): asserts proc is ChildProcess & { stdout: Readable; stderr: Readable } {
+  if (proc.stdout && proc.stderr) return;
+  proc.kill('SIGTERM');
+  throw new Error('MANAGED_CHILD_LOG_PIPE_MISSING');
+}
 
 export type StartCustodySupportOptions = {
   apiBaseUrl: string;
@@ -186,13 +197,25 @@ export const spawnBunChild = (
   name: string,
   args: string[],
   env: NodeJS.ProcessEnv,
+  startupSecrets?: ChildSecrets,
 ): ManagedChild => {
   const mirrorStdout = process.env['XLN_CHILD_MIRROR_STDOUT'] === '1';
+  const hasStartupSecrets = startupSecrets !== undefined;
   const proc = spawn('bun', args, {
     cwd: process.cwd(),
-    env: { ...process.env, ...env },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+      ...buildManagedRuntimeChildSecretEnv(process.env, false),
+      ...env,
+      ...(hasStartupSecrets ? childSecretFdEnv() : {}),
+      // Bun watch replaces the orchestrator without reaping grandchildren.
+      // The child must therefore fail closed when this exact parent exits.
+      XLN_MANAGED_PARENT_PID: String(process.pid),
+    },
+    stdio: hasStartupSecrets
+      ? ['pipe', 'pipe', 'pipe']
+      : ['ignore', 'pipe', 'pipe'],
   });
+  assertCapturedChildPipes(proc);
 
   const stdoutLines: string[] = [];
   const stderrLines: string[] = [];
@@ -209,7 +232,10 @@ export const spawnBunChild = (
   proc.stdout.on('data', chunk => pushLines(chunk, stdoutLines));
   proc.stderr.on('data', chunk => pushLines(chunk, stderrLines));
 
-  return { name, proc, stdoutLines, stderrLines };
+  const startupSecretsWritten = startupSecrets
+    ? writeInheritedChildSecrets(proc, startupSecrets)
+    : Promise.resolve();
+  return { name, proc, stdoutLines, stderrLines, startupSecretsWritten };
 };
 
 export const stopManagedChild = async (
@@ -246,6 +272,7 @@ export const waitForHttpReady = async (
   timeoutMs = DEFAULT_CHILD_READY_TIMEOUT_MS,
   isReady?: (response: Response, bodyText: string) => boolean | Promise<boolean>,
 ): Promise<void> => {
+  if (child) await child.startupSecretsWritten;
   const deadline = Date.now() + timeoutMs;
   let lastError = 'not-started';
   while (Date.now() < deadline) {
@@ -308,8 +335,12 @@ export const runDaemonControl = async (
 ): Promise<DaemonControlCliResult> => {
   const proc = spawn('bun', ['runtime/scripts/daemon-control.ts', ...args], {
     cwd: process.cwd(),
-    env: { ...process.env, ...env, ...childSecretFdEnv() },
-    stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
+    env: {
+      ...buildManagedRuntimeChildSecretEnv(process.env, false),
+      ...env,
+      ...childSecretFdEnv(),
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
   });
   if (!proc.stdout || !proc.stderr) {
     proc.kill('SIGTERM');
@@ -579,6 +610,11 @@ export const startCustodySupport = async (
   let daemonChild: ManagedChild | null = null;
   let custodyChild: ManagedChild | null = null;
   try {
+    const startupIdentity = deriveManagedEntityIdentity({
+      name: options.profileName,
+      seed: options.seed,
+      signerLabel: options.signerLabel,
+    });
     const shardJurisdictionsPath = join(options.dbRoot, 'jurisdictions.json');
     await mkdir(options.dbRoot, { recursive: true });
     await writeFile(shardJurisdictionsPath, await readFile(resolveCustodyJurisdictionsJsonPath(), 'utf8'), 'utf8');
@@ -616,6 +652,10 @@ export const startCustodySupport = async (
         XLN_RUNTIME_SEED: options.daemonRuntimeSeed || `${options.seed}:runtime`,
         XLN_DB_PATH: `${options.dbRoot}/daemon-db`,
         XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
+      },
+      {
+        startupSignerId: startupIdentity.signerId,
+        startupSignerPrivateKey: startupIdentity.privateKeyHex,
       },
     );
     const [, hubIds] = await Promise.all([
@@ -662,6 +702,7 @@ export const startCustodySupport = async (
         CUSTODY_JURISDICTION_ID: options.jurisdictionId,
         CUSTODY_DB_PATH: `${options.dbRoot}/custody.sqlite`,
       },
+      { daemonRuntimeSeed: options.daemonRuntimeSeed || `${options.seed}:runtime` },
     );
     const custodyReadyUrl = await waitForCustodyServiceReady(options.custodyPort, custodyChild, custodyHttps);
     const custodyBaseUrl = new URL(custodyReadyUrl).origin;

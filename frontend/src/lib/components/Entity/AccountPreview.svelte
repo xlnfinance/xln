@@ -99,7 +99,7 @@
       outHold += (typeof d.outTotalHold === 'bigint' ? d.outTotalHold : 0n);
       inHold += (typeof d.inTotalHold === 'bigint' ? d.inTotalHold : 0n);
       const symbol = String(tokenInfo.symbol || `T${tokenId}`);
-      const decimals = Number(tokenInfo.decimals ?? 18);
+      const decimals = tokenInfo.decimals;
       totalCollateralUsdMicros += amountToUsdMicros(d.outCollateral, decimals, symbol);
       totalDebtUsdMicros += amountToUsdMicros(d.outPeerCredit, decimals, symbol);
       if (
@@ -142,11 +142,7 @@
   $: coverageCollFmt = formatCoverageUsd(agg.totalCollateralUsdMicros);
   $: coverageDenomFmt = formatCoverageUsd(agg.totalCollateralUsdMicros + agg.totalDebtUsdMicros);
 
-  $: primaryTokenInfo = activeXlnFunctions?.getTokenInfo?.(agg.primaryTokenId) || {
-    symbol: String(agg.primarySymbol || '?'),
-    name: String(agg.primarySymbol || 'Token'),
-    decimals: 18,
-  };
+  $: primaryTokenInfo = tokenDetails.find((detail) => detail.tokenId === agg.primaryTokenId)?.tokenInfo ?? null;
   $: aggDerived = {
     outCapacity: agg.outCap,
     inCapacity: agg.inCap,
@@ -191,7 +187,7 @@
         tokenId,
         symbol: String(info.symbol || `T${tokenId}`),
         name: String(info.name || ''),
-        decimals: Number(info.decimals ?? 18),
+        decimals: info.decimals,
         derived,
         outAmount: activeXlnFunctions.formatTokenAmount(tokenId, derived.outCapacity),
         inAmount: activeXlnFunctions.formatTokenAmount(tokenId, derived.inCapacity),
@@ -200,7 +196,7 @@
         pendingOutDebtMode: (tokenRequested > 0n || tokenC2R > 0n)
           ? (hasPendingBatch ? 'settling' : 'pending')
           : 'none',
-        visualScale: buildTokenVisualScale(String(info.symbol || ''), Number(info.decimals ?? 18), derived),
+        visualScale: buildTokenVisualScale(String(info.symbol || ''), info.decimals, derived),
         actionLabel: faucetPending ? 'Funding...' : faucetLabel,
         actionDisabled: faucetPending,
       });
@@ -231,10 +227,8 @@
   $: statusDescription = getAccountUiStatusDescription(uiStatus);
   $: accountHeight = Number(account.currentFrame?.height ?? account.currentHeight ?? 0);
   $: jFinalizedHeight = Number(account.lastFinalizedJHeight ?? 0);
-  $: pendingLeftJClaim = Array.isArray(account.leftJObservations)
-    && account.leftJObservations.some(obs => Number(obs?.jHeight ?? 0) > jFinalizedHeight);
-  $: pendingRightJClaim = Array.isArray(account.rightJObservations)
-    && account.rightJObservations.some(obs => Number(obs?.jHeight ?? 0) > jFinalizedHeight);
+  $: pendingLeftJClaim = BigInt(account.leftPendingJClaims?.count ?? 0) > 0n;
+  $: pendingRightJClaim = BigInt(account.rightPendingJClaims?.count ?? 0) > 0n;
   $: jPendingSideSuffix = `${pendingLeftJClaim ? '+L' : ''}${pendingRightJClaim ? '+R' : ''}`;
   $: disputeTimeoutBlock = Number(account.activeDispute?.disputeTimeout || 0);
   $: disputeBlocksLeft = hasActiveDispute
@@ -333,7 +327,8 @@
 
   function handleSettleApprove(e: MouseEvent) {
     e.stopPropagation();
-    dispatch('settleApprove', { counterpartyId });
+    if (!workspace?.workspaceHash) throw new Error('SETTLEMENT_WORKSPACE_HASH_MISSING');
+    dispatch('settleApprove', { counterpartyId, workspaceHash: workspace.workspaceHash });
   }
 
   function formatFlowAmount(tokenId: number, amount: bigint): string {
@@ -507,7 +502,7 @@
   <!-- Row 2: Aggregate bar -->
   {#if showDeltaRows}
     <div class="delta-preview-list">
-      {#if accountDeltaViewMode === 'aggregated'}
+      {#if accountDeltaViewMode === 'aggregated' && primaryTokenInfo}
         <div class="delta-preview-toggle">
           <DeltaTokenSummary
             compact={true}
@@ -517,7 +512,7 @@
             outAmount={activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.outCap) || '0'}
             inAmount={activeXlnFunctions?.formatTokenAmount(agg.primaryTokenId, agg.inCap) || '0'}
             derived={aggDerived}
-            decimals={Number(primaryTokenInfo.decimals ?? 18)}
+            decimals={primaryTokenInfo.decimals}
             barHeight={6}
             visualScale={aggregateVisualScale}
             showBar={!liteMode}

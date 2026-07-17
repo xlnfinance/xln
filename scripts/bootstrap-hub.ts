@@ -14,6 +14,7 @@ import {
 } from '../runtime/account/crypto';
 import { encodeBoard, hashBoard } from '../runtime/entity/factory';
 import { createStructuredLogger } from '../runtime/infra/logger';
+import { requireJurisdictionBlockTimeMs } from '../runtime/orchestrator/mesh-jurisdictions';
 import type { ConsensusConfig, Env } from '../runtime/types';
 
 const args = process.argv.slice(2);
@@ -72,7 +73,7 @@ const DEFAULT_CONFIG: HubConfig = {
 const deriveHubSigner = (seed: string, signerLabel: string): { signerAddress: string; signerLabel: string } => {
   const privateKey = deriveSignerKeySync(seed, signerLabel);
   const signerAddress = deriveSignerAddressSync(seed, signerLabel);
-  registerSignerKey(signerAddress, privateKey);
+  registerSignerKey(seed, signerAddress, privateKey);
   return { signerAddress, signerLabel };
 };
 
@@ -92,12 +93,14 @@ const resolveJurisdiction = (env: Env, requestedName?: string) => {
   if (!name || !env.jReplicas) return null;
   const jr = env.jReplicas.get(name);
   if (!jr) return null;
+  const blockTimeMs = requireJurisdictionBlockTimeMs({ name, blockTimeMs: jr.blockTimeMs });
   return {
     name,
     chainId: Number(jr.jadapter?.chainId ?? jr.chainId ?? 0),
     address: jr.rpcs?.[0] ?? '',
     entityProviderAddress: jr.entityProviderAddress ?? jr.contracts?.entityProvider ?? '',
     depositoryAddress: jr.depositoryAddress ?? jr.contracts?.depository ?? '',
+    blockTimeMs,
   };
 };
 

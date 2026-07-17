@@ -33,7 +33,7 @@ async function dismissOnboardingIfVisible(page: Page): Promise<void> {
   }
 }
 
-test('settings theme select updates document theme and persists selected option', async ({ page }) => {
+test('settings theme select updates document theme and persists selected option', { tag: '@functional' }, async ({ page }) => {
   await gotoApp(page);
   await dismissOnboardingIfVisible(page);
   await createSharedRuntime(page, `theme-${Date.now()}`, randomMnemonic());
@@ -56,7 +56,7 @@ test('settings theme select updates document theme and persists selected option'
   await expect(select).toHaveValue('dark');
 });
 
-test('settings toggles the xln guide without leaving the workspace', async ({ page }, testInfo) => {
+test('settings toggles the xln guide without leaving the workspace', { tag: '@functional' }, async ({ page }, testInfo) => {
   await gotoApp(page);
   await dismissOnboardingIfVisible(page);
   await createSharedRuntime(page, `guide-${Date.now()}`, randomMnemonic());
@@ -103,4 +103,49 @@ test('settings toggles the xln guide without leaving the workspace', async ({ pa
     path: testInfo.outputPath('iphone-settings-guide-visible.png'),
     animations: 'disabled',
   });
+});
+
+test('settings separates Runtime, Entity, Account, and J consensus heights', { tag: '@functional' }, async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
+  await gotoApp(page);
+  await dismissOnboardingIfVisible(page);
+  await createSharedRuntime(page, `consensus-${Date.now()}`, randomMnemonic());
+
+  await page.goto(`${APP_BASE_URL}/app#settings/consensus`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('tab-settings')).toBeVisible({ timeout: INIT_TIMEOUT });
+  const consensus = page.getByTestId('settings-consensus-panel');
+  await expect(consensus).toBeVisible({ timeout: 20_000 });
+  await expect(consensus).toContainText('Runtime height');
+  await expect(consensus).toContainText('Entity height');
+  await expect(consensus).toContainText('J finalized / scanned');
+  await expect(consensus).toContainText('Account machines');
+  await expect(page.locator('.command-pill')).toHaveCount(0);
+  await expect(page.getByTestId('settings-consensus-board')).toBeVisible();
+  await expect(page.getByTestId('settings-consensus-accounts')).toBeVisible();
+  await expect(page.getByTestId('settings-consensus-proposals')).toBeVisible();
+  await expect(page.getByTestId('settings-consensus-hooks')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Display', exact: true }).click();
+  await expect(page.getByTestId('settings-time-machine-toggle')).toBeVisible();
+  await page.getByTestId('settings-consensus-tab').click();
+  await expect(consensus).toBeVisible();
+
+  for (const viewport of [
+    { name: 'wide', width: 1600, height: 1000 },
+    { name: 'laptop', width: 1280, height: 800 },
+    { name: 'iphone', width: 393, height: 852 },
+  ]) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await expect(consensus).toBeVisible();
+    const bounds = await consensus.boundingBox();
+    expect(bounds, `${viewport.name} consensus panel must have layout bounds`).not.toBeNull();
+    expect(bounds!.x, `${viewport.name} consensus panel must stay in the viewport`).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width, `${viewport.name} consensus panel must not overflow horizontally`)
+      .toBeLessThanOrEqual(viewport.width + 1);
+    await page.screenshot({
+      path: testInfo.outputPath(`${viewport.name}-settings-consensus.png`),
+      animations: 'disabled',
+      fullPage: true,
+    });
+  }
 });

@@ -6,7 +6,9 @@ import net from 'net';
 import http from 'node:http';
 import https from 'node:https';
 import { execSync } from 'node:child_process';
+import { resolve } from 'node:path';
 import { URL, fileURLToPath } from 'node:url';
+import { configureWsProxyLifecycle } from './vite-ws-proxy-lifecycle';
 
 /**
  * HTTPS CONFIGURATION (DEV-ONLY)
@@ -49,10 +51,17 @@ const DEV_HOST = '0.0.0.0';
 const DEV_PORT_RAW = Number(process.env['VITE_DEV_PORT'] || '8080');
 const DEV_PORT = Number.isFinite(DEV_PORT_RAW) && DEV_PORT_RAW > 0 ? Math.floor(DEV_PORT_RAW) : 8080;
 const API_PROXY_TARGET = process.env['VITE_API_PROXY_TARGET'] || 'http://localhost:8082';
+const API_PROXY_AGENT = API_PROXY_TARGET.startsWith('https:')
+	? new https.Agent({ keepAlive: true, maxSockets: 64, maxFreeSockets: 64 })
+	: new http.Agent({ keepAlive: true, maxSockets: 64, maxFreeSockets: 64 });
 const VITE_CACHE_DIR = process.env['VITE_CACHE_DIR'] || 'node_modules/.vite';
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
+const FRONTEND_ROOT = fileURLToPath(new URL('.', import.meta.url));
 const TYPECHAIN_INDEX = fileURLToPath(new URL('../jurisdictions/typechain-types/index.ts', import.meta.url));
-const RUNTIME_BUNDLE_PATH = fileURLToPath(new URL('./static/runtime.js', import.meta.url));
+const RUNTIME_BUNDLE_PATH = resolve(
+	FRONTEND_ROOT,
+	process.env['XLN_RUNTIME_BUNDLE_PATH'] || 'static/runtime.js',
+);
 const BUILD_NUMBER = (() => {
   const explicit = String(process.env['XLN_BUILD_NUMBER'] || '').trim();
   if (explicit) return explicit;
@@ -83,27 +92,34 @@ const hmrConfig = ENABLE_HMR ? {
 const proxyConfig = {
 	'/api': {
 		target: API_PROXY_TARGET,
+		agent: API_PROXY_AGENT,
 		changeOrigin: true,
 		secure: false,
 	},
 	// RPC Proxy - Forward JSON-RPC to runtime server (/rpc endpoint)
 	'/rpc': {
 		target: API_PROXY_TARGET,
+		agent: API_PROXY_AGENT,
 		ws: true,
 		changeOrigin: true,
 		secure: false,
+		configure: configureWsProxyLifecycle,
 	},
 	'/rpc2': {
 		target: API_PROXY_TARGET,
+		agent: API_PROXY_AGENT,
 		ws: true,
 		changeOrigin: true,
 		secure: false,
+		configure: configureWsProxyLifecycle,
 	},
 	// Relay Proxy - Forward WebSocket to relay server for P2P
 	'/relay': {
 		target: API_PROXY_TARGET,
+		agent: API_PROXY_AGENT,
 		ws: true,
 		changeOrigin: true,
+		configure: configureWsProxyLifecycle,
 	},
 };
 
@@ -123,6 +139,7 @@ function createPreviewHttpProxyMiddleware(targetBase: string) {
 		const targetUrl = new URL(requestUrl, upstream);
 		const proxyReq = transport.request(targetUrl, {
 			method: req.method,
+			agent: API_PROXY_AGENT,
 			headers: {
 				...req.headers,
 				host: upstream.host,

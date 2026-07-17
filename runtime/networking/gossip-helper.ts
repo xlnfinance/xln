@@ -8,16 +8,19 @@ import type { EntityState, Env } from '../types';
 import type {
   BoardMetadata,
   Profile,
-  ProfileAccount,
   ProfileJurisdiction,
   ProfileMirror,
-  ProfileTokenCapacity,
 } from './gossip';
-import { deriveDelta, isLeft } from '../account/utils';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { deriveSignerAddressSync, getSignerAddress, getSignerPrivateKey, getSignerPublicKey } from '../account/crypto';
 import { deriveEncryptionKeyPair, pubKeyToHex } from './p2p-crypto';
 import { UINT16_MAX } from '../constants';
+import { requireCompleteValidatorEncryptionManifest } from '../protocol/htlc/validator-encryption';
+import {
+  collectLocalProfileEncryptionAnnouncements,
+  getProfileEncryptionAttestations,
+} from './profile-encryption';
+import { buildEntityProfileDescriptor } from './profile-descriptor';
 
 type BuiltProfile = Omit<Profile, 'runtimeId' | 'runtimeEncPubKey'>;
 
@@ -26,14 +29,6 @@ const toUint16 = (value: bigint | number | undefined, fallback = 0): number => {
   if (!Number.isFinite(raw)) return fallback;
   if (raw <= 0) return 0;
   return Math.min(UINT16_MAX, Math.floor(raw));
-};
-
-const normalizeX25519Hex = (raw: unknown): string | null => {
-  if (typeof raw !== 'string') return null;
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-  const prefixed = trimmed.startsWith('0x') ? trimmed : `0x${trimmed}`;
-  return /^0x[0-9a-fA-F]{64}$/.test(prefixed) ? prefixed.toLowerCase() : null;
 };
 
 const buildProfileJurisdiction = (state: EntityState): ProfileJurisdiction | undefined => {
@@ -70,6 +65,8 @@ const buildProfileMirrors = (env: Env, entityState: EntityState): ProfileMirror[
 export type ProfileSignerResolver = {
   getSignerAddress: (signerId: string) => string | null;
   getSignerPublicKeyHex: (signerId: string) => string | null;
+  getValidatorEncryptionAttestations: (entityId: string) =>
+    import('../protocol/htlc/validator-encryption').ValidatorEncryptionAttestation[];
 };
 
 const normalizeSignerAddress = (raw: string): string => {
@@ -86,32 +83,49 @@ const buildBoardMetadata = (
   entityState: EntityState,
   signerResolver?: ProfileSignerResolver,
 ): BoardMetadata => {
+  const certifiedAttestations = entityState.profileEncryptionManifest?.attestations ?? [];
+  const certifiedBySigner = new Map(
+    certifiedAttestations.map((attestation) => [attestation.signerId.trim().toLowerCase(), attestation]),
+  );
   const validators = entityState.config.validators.map(validatorId => {
+    const canonicalSignerId = validatorId.trim().toLowerCase();
+    const certified = certifiedBySigner.get(canonicalSignerId);
     const weight = toUint16(entityState.config.shares[validatorId] ?? 1n, 1);
     const signer =
-      (validatorId.startsWith('0x') ? normalizeSignerAddress(validatorId) : null)
+      certified?.signer
+      ?? (validatorId.startsWith('0x') ? normalizeSignerAddress(validatorId) : null)
       ?? signerResolver?.getSignerAddress(validatorId)
       ?? null;
     if (!signer) {
       throw new Error(`GOSSIP_PROFILE_SIGNER_ADDRESS_REQUIRED: entity=${entityState.entityId} signerId=${validatorId}`);
     }
-    const publicKeyHex = signerResolver?.getSignerPublicKeyHex(validatorId) ?? null;
+    const canonicalSigner = signer.toLowerCase();
+    const publicKeyHex = certified?.publicKey
+      ?? signerResolver?.getSignerPublicKeyHex(validatorId)
+      ?? null;
     if (!publicKeyHex) {
       throw new Error(`GOSSIP_PROFILE_SIGNER_PUBLIC_KEY_REQUIRED: entity=${entityState.entityId} signerId=${validatorId}`);
     }
 
     return {
-      signer,
+      signer: canonicalSigner,
       weight,
-      signerId: validatorId,
+      signerId: canonicalSignerId,
       publicKey: publicKeyHex,
     };
   });
 
-  return {
-    threshold: toUint16(entityState.config.threshold, 1),
-    validators,
-  };
+  const threshold = toUint16(entityState.config.threshold, 1);
+  const manifest = requireCompleteValidatorEncryptionManifest(
+    { entityId: entityState.entityId, threshold, validators },
+    certifiedAttestations.length > 0
+      ? certifiedAttestations
+      : signerResolver?.getValidatorEncryptionAttestations(entityState.entityId) ?? [],
+  );
+  if (entityState.profileEncryptionManifest && entityState.profileEncryptionManifest.hash !== manifest.hash) {
+    throw new Error(`GOSSIP_PROFILE_CERTIFIED_MANIFEST_CORRUPTION: entity=${entityState.entityId}`);
+  }
+  return { threshold, validators, encryptionAttestations: [...manifest.attestations] };
 };
 
 /**
@@ -123,54 +137,8 @@ export function buildEntityProfile(
   timestamp: number = 0,
   signerResolver?: ProfileSignerResolver,
 ): BuiltProfile {
-  const accounts: ProfileAccount[] = [];
-  const publicAccounts: string[] = [];
-  const hubConfig = entityState.hubRebalanceConfig;
-  const isHub = entityState.profile.isHub === true;
-
-  // Build account capacities from all accounts
-  for (const [counterpartyId, accountMachine] of entityState.accounts.entries()) {
-    const tokenCapacities = new Map<number, ProfileTokenCapacity>();
-    let hasInboundCapacity = false;
-
-    // Calculate capacities for each token
-    for (const [tokenId, delta] of accountMachine.deltas.entries()) {
-      const isLeftEntity = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-      const derived = deriveDelta(delta, isLeftEntity);
-      tokenCapacities.set(tokenId, {
-        inCapacity: derived.inCapacity,
-        outCapacity: derived.outCapacity,
-      });
-      if (derived.inCapacity > 0n) {
-        hasInboundCapacity = true;
-      }
-    }
-
-    // Convert tokenCapacities Map to plain object for JSON serialization
-    const tokenCapacitiesObj: Record<string, { inCapacity: string; outCapacity: string }> = {};
-    for (const [tokenId, cap] of tokenCapacities.entries()) {
-      tokenCapacitiesObj[String(tokenId)] = {
-        inCapacity: cap.inCapacity.toString(),
-        outCapacity: cap.outCapacity.toString(),
-      };
-    }
-
-    accounts.push({
-      counterpartyId,
-      tokenCapacities: tokenCapacitiesObj,
-    });
-
-    if (hasInboundCapacity) {
-      publicAccounts.push(counterpartyId);
-    }
-  }
-
   const board = buildBoardMetadata(entityState, signerResolver);
-  // Include X25519 crypto key for HTLC envelope encryption (if available)
-  const entityEncPubKey = normalizeX25519Hex(entityState.entityEncPubKey);
-  if (!entityEncPubKey) {
-    throw new Error(`GOSSIP_PROFILE_MISSING_ENTITY_ENC_PUBKEY: entity=${entityState.entityId}`);
-  }
+  const descriptor = buildEntityProfileDescriptor(entityState, board);
   const profileName = String(entityState.profile.name || '').trim();
   if (!profileName) {
     throw new Error(`GOSSIP_PROFILE_NAME_REQUIRED: entity=${entityState.entityId}`);
@@ -178,46 +146,33 @@ export function buildEntityProfile(
 
   // Build profile
   const profile: BuiltProfile = {
-    entityId: entityState.entityId,
-    name: profileName,
-    avatar: entityState.profile.avatar,
-    bio: entityState.profile.bio,
-    website: entityState.profile.website,
+    entityId: descriptor.entityId,
+    name: descriptor.name,
+    avatar: descriptor.avatar,
+    bio: descriptor.bio,
+    website: descriptor.website,
     lastUpdated: timestamp,
-    publicAccounts,
+    publicAccounts: descriptor.publicAccounts,
     wsUrl: null,
     relays: [],
-    metadata: {
-      isHub,
-      routingFeePPM: hubConfig?.routingFeePPM ?? 1,
-      baseFee: hubConfig?.baseFee ?? 0n,
-      ...(hubConfig?.swapTakerFeeBps !== undefined ? { swapTakerFeeBps: hubConfig.swapTakerFeeBps } : {}),
-      ...(isHub && hubConfig
-        ? {
-            ...(hubConfig.hubName ? { hubName: hubConfig.hubName } : {}),
-            policyVersion: hubConfig.policyVersion,
-            rebalanceBaseFee: String(hubConfig.rebalanceBaseFee ?? 10n ** 17n),
-            rebalanceLiquidityFeeBps: String(hubConfig.rebalanceLiquidityFeeBps ?? hubConfig.minFeeBps ?? 1n),
-            rebalanceGasFee: String(hubConfig.rebalanceGasFee ?? 0n),
-            rebalanceTimeoutMs: hubConfig.rebalanceTimeoutMs ?? 10 * 60 * 1000,
-          }
-        : {}),
-      board,
-      entityEncPubKey,
-    },
-    accounts,
+    metadata: descriptor.metadata,
+    accounts: descriptor.accounts,
   };
 
   return profile;
 }
 
-export const createProfileSignerResolver = (env: Env): ProfileSignerResolver => ({
-  getSignerAddress: (signerId) => getSignerAddress(env, signerId),
-  getSignerPublicKeyHex: (signerId) => {
-    const publicKey = getSignerPublicKey(env, signerId);
-    return publicKey ? `0x${Buffer.from(publicKey).toString('hex')}` : null;
-  },
-});
+export const createProfileSignerResolver = (env: Env): ProfileSignerResolver => {
+  collectLocalProfileEncryptionAnnouncements(env);
+  return {
+    getSignerAddress: (signerId) => getSignerAddress(env, signerId),
+    getSignerPublicKeyHex: (signerId) => {
+      const publicKey = getSignerPublicKey(env, signerId);
+      return publicKey ? `0x${Buffer.from(publicKey).toString('hex')}` : null;
+    },
+    getValidatorEncryptionAttestations: (entityId) => getProfileEncryptionAttestations(env, entityId),
+  };
+};
 
 export const getNextProfileTimestamp = (env: Env, entityId: string, fallbackTimestamp?: number): number => {
   const existingProfile = env.gossip.getProfiles().find((profile) => profile.entityId === entityId);
@@ -343,7 +298,6 @@ export function buildEntityAdvertisedStateFingerprint(
       rebalanceLiquidityFeeBps: String(metadata.rebalanceLiquidityFeeBps ?? ''),
       rebalanceGasFee: String(metadata.rebalanceGasFee ?? ''),
       rebalanceTimeoutMs: Number(metadata.rebalanceTimeoutMs ?? 0),
-      entityEncPubKey: metadata.entityEncPubKey,
       board: metadata.board,
     },
   };

@@ -15,7 +15,7 @@
  */
 
 import type { Env, EntityInput } from '../types';
-import { ensureJAdapter, getScenarioJAdapter, createJReplica } from './boot';
+import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, createJReplica } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain, commitRuntimeInput } from './helpers';
 import { formatRuntime } from '../qa/runtime-ascii';
@@ -64,7 +64,7 @@ export async function ahb(env: Env): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'AHB');
 
   // Require real runtime seed and derive signer keys (no test keys)
-  const { lockRuntimeSeedUpdates, getCachedSignerPrivateKey } = await import('../account/crypto');
+  const { lockRuntimeSeedUpdates, getSignerPrivateKey } = await import('../account/crypto');
   requireRuntimeSeed(env, 'AHB');
   ensureSignerKeysFromSeed(env, ['1', '2', '3', '4'], 'AHB');
   lockRuntimeSeedUpdates(true);
@@ -74,10 +74,7 @@ export async function ahb(env: Env): Promise<void> {
     { label: 'hub', signerId: '2' },
     { label: 'bob', signerId: '3' },
   ].map(entry => {
-    const privateKey = getCachedSignerPrivateKey(entry.signerId);
-    if (!privateKey) {
-      throw new Error(`AHB: Missing private key for signer ${entry.signerId}`);
-    }
+    const privateKey = getSignerPrivateKey(env, entry.signerId);
     return { label: entry.label, wallet: new ethers.Wallet(ethers.hexlify(privateKey)) };
   }).sort((a, b) => compareStableText(a.wallet.address.toLowerCase(), b.wallet.address.toLowerCase()));
 
@@ -128,10 +125,11 @@ export async function ahb(env: Env): Promise<void> {
       jadapter = getScenarioJAdapter(env);
     } catch {
       jadapter = await ensureJAdapter(env);
-      const jReplica = createJReplica(env, 'AHB Demo', jadapter.addresses.depository);
-      jReplica.jadapter = jadapter;
-      jReplica.depositoryAddress = jadapter.addresses.depository;
-      jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
+      bindScenarioJReplica(
+        env,
+        createJReplica(env, 'AHB Demo', jadapter.addresses.depository),
+        jadapter,
+      );
       jadapter.startWatching(env);
     }
 
@@ -205,7 +203,7 @@ export async function ahb(env: Env): Promise<void> {
         shares: { [signer]: 1n },
         jurisdiction: arrakis!
       };
-      const encodedBoard = encodeBoard(config);
+      const encodedBoard = encodeBoard(config, env);
       const boardHash = hashBoard(encodedBoard);
 
       // LAZY ENTITY: entityId = boardHash (not wallet address!)
@@ -243,27 +241,21 @@ export async function ahb(env: Env): Promise<void> {
     }
     let carol: { id: string; signer: string; name: string; boardHash: string } | null = null;
 
-    // CRITICAL: Register public keys for signature validation
-    // Without this, verifyAccountSignature will fail in browser
-    const { getCachedSignerPublicKey, registerSignerPublicKey, getCachedSignerPrivateKey } = await import('../account/crypto');
+    const { getSignerPublicKey, getSignerPrivateKey } = await import('../account/crypto');
     const signerWallets = new Map<string, { privateKey: Uint8Array; wallet: ethers.Wallet }>();
     const ensureSignerWallet = (signerId: string) => {
       const cached = signerWallets.get(signerId);
       if (cached) return cached;
-      const privateKey = getCachedSignerPrivateKey(signerId);
-      if (!privateKey) {
-        throw new Error(`Missing private key for signer ${signerId}`);
-      }
+      const privateKey = getSignerPrivateKey(env, signerId);
       const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
       const entry = { privateKey, wallet };
       signerWallets.set(signerId, entry);
       return entry;
     };
     for (const entity of entities) {
-      const publicKey = getCachedSignerPublicKey(entity.signer);
+      const publicKey = getSignerPublicKey(env, entity.signer);
       if (publicKey) {
-        registerSignerPublicKey(entity.id, publicKey);
-        console.log(`✅ Registered public key for ${entity.name} (${entity.signer})`);
+        console.log(`✅ Resolved public key for ${entity.name} (${entity.signer})`);
       } else {
         throw new Error(`Missing public key for signer ${entity.signer}`);
       }
@@ -809,13 +801,13 @@ export async function ahb(env: Env): Promise<void> {
     console.log(`\n🔍 PRE-ASSERT STATE DUMP:`);
     console.log(`Alice account with Hub:`, aliceRepSync.state.accounts.get(hub.id)?.deltas.get(USDC_TOKEN_ID));
     console.log(`Alice LEFT/RIGHT obs:`, {
-      left: aliceRepSync.state.accounts.get(hub.id)?.leftJObservations?.length || 0,
-      right: aliceRepSync.state.accounts.get(hub.id)?.rightJObservations?.length || 0
+      left: aliceRepSync.state.accounts.get(hub.id)?.leftPendingJClaims.count ?? 0n,
+      right: aliceRepSync.state.accounts.get(hub.id)?.rightPendingJClaims.count ?? 0n,
     });
     console.log(`Hub account with Alice:`, hubRepSync.state.accounts.get(alice.id)?.deltas.get(USDC_TOKEN_ID));
     console.log(`Hub LEFT/RIGHT obs:`, {
-      left: hubRepSync.state.accounts.get(alice.id)?.leftJObservations?.length || 0,
-      right: hubRepSync.state.accounts.get(alice.id)?.rightJObservations?.length || 0
+      left: hubRepSync.state.accounts.get(alice.id)?.leftPendingJClaims.count ?? 0n,
+      right: hubRepSync.state.accounts.get(alice.id)?.rightPendingJClaims.count ?? 0n,
     });
     assertBilateralSync(env, alice.id, hub.id, USDC_TOKEN_ID, 'Frame 9 - Alice R2C Collateral');
 
@@ -2434,7 +2426,7 @@ export async function ahb(env: Env): Promise<void> {
       shares: { [carolSigner]: 1n },
       jurisdiction: arrakis
     };
-    const carolEncodedBoard = encodeBoard(carolConfig);
+    const carolEncodedBoard = encodeBoard(carolConfig, env);
     const carolBoardHash = hashBoard(carolEncodedBoard);
     carol = { id: carolBoardHash, signer: carolSigner, name: 'Carol', boardHash: carolBoardHash };
     await commitRuntimeInput(env, {
@@ -2451,10 +2443,9 @@ export async function ahb(env: Env): Promise<void> {
       entityInputs: []
     });
 
-    const carolPublicKey = getCachedSignerPublicKey(carol.signer);
+    const carolPublicKey = getSignerPublicKey(env, carol.signer);
     if (carolPublicKey) {
-      registerSignerPublicKey(carol.id, carolPublicKey);
-      console.log(`✅ Registered public key for ${carol.name} (${carol.signer})`);
+      console.log(`✅ Resolved public key for ${carol.name} (${carol.signer})`);
     } else {
       throw new Error(`Missing public key for signer ${carol.signer}`);
     }
@@ -2636,7 +2627,7 @@ export async function ahb(env: Env): Promise<void> {
     }];
 
     if (hubPaysOndelta > 0n) {
-      console.log(`ℹ️ Carol cooperative close skipped: current settle_hold policy requires reserve-side capacity for Hub payout (${formatUSD(hubPaysOndelta)})`);
+      console.log(`ℹ️ Carol cooperative close skipped: settlement hold policy requires reserve-side capacity for Hub payout (${formatUSD(hubPaysOndelta)})`);
     } else {
       // Step 1: Carol proposes cooperative close
       await process(env, [{

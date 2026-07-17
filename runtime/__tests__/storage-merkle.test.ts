@@ -19,6 +19,29 @@ import {
 const hexKey = (byte: number): string => `0x${byte.toString(16).padStart(2, '0').repeat(32)}`;
 const value = (text: string): Uint8Array => new TextEncoder().encode(text);
 
+test('storage radix merkle initializes in browsers without Node Buffer', () => {
+  const moduleUrl = new URL('../storage/merkle.ts', import.meta.url).href;
+  const child = Bun.spawnSync({
+    cmd: [process.execPath, '-e', `
+      globalThis.Buffer = undefined;
+      const { buildHexKeyedMerkle } = await import(${JSON.stringify(moduleUrl)});
+      const encode = (text) => new TextEncoder().encode(text);
+      const leaves = [
+        { hexKey: '0x${'ab'.repeat(30)}0011', value: encode('one') },
+        { hexKey: '0x${'ab'.repeat(30)}0022', value: encode('two') },
+        { hexKey: '0x${'ab'.repeat(30)}1033', value: encode('three') },
+      ];
+      process.stdout.write(buildHexKeyedMerkle(leaves, { radix: 16 }).root);
+    `],
+  });
+  if (child.exitCode !== 0) {
+    throw new Error(new TextDecoder().decode(child.stderr));
+  }
+  expect(new TextDecoder().decode(child.stdout)).toBe(
+    '0x5b78a4a1570459de98166be75630265d9ba2a14ccde51f7504d4a6d8a2639de0',
+  );
+});
+
 test('storage radix merkle is deterministic across leaf insertion order', () => {
   const leaves = [
     { hexKey: hexKey(0x22), value: value('bob') },

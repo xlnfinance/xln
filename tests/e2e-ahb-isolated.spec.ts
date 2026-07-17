@@ -161,8 +161,10 @@ function assertHtlcFinalizedPayload(
   expect(Number(event.data?.finalizedInMs || 0), 'finalized event should include finalizedInMs').toBeGreaterThan(0);
 }
 
-function toWei(n: number): bigint {
-  return BigInt(n) * 10n ** 18n;
+const USDC_DECIMALS = 6;
+
+function toUsdcUnits(n: number): bigint {
+  return BigInt(n) * 10n ** BigInt(USDC_DECIMALS);
 }
 
 function requiredInbound(desiredForward: bigint, feePPM: bigint, baseFee: bigint): bigint {
@@ -550,7 +552,7 @@ async function faucet(page: Page, entityId: string, hubEntityId: string): Promis
 }
 
 function toDisplayed(amount: bigint): number {
-  return Number(ethers.formatUnits(amount, 18));
+  return Number(ethers.formatUnits(amount, USDC_DECIMALS));
 }
 
 function expectRenderedDeltaClose(actualDelta: number, expectedDelta: number, label: string): void {
@@ -633,7 +635,7 @@ async function pay(
   const amountInput = page.locator('#payment-amount-input');
   await expect(amountInput).toBeVisible({ timeout: 10_000 });
   await amountInput.click();
-  await amountInput.fill(ethers.formatUnits(amount, 18));
+  await amountInput.fill(ethers.formatUnits(amount, USDC_DECIMALS));
 
   const findRoutesBtn = page.getByRole('button', { name: /^Find routes?$/i }).first();
   await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
@@ -653,7 +655,7 @@ async function attemptOverspend(page: Page, to: string, amount: bigint): Promise
   const amountInput = page.locator('#payment-amount-input');
   await expect(amountInput).toBeVisible({ timeout: 10_000 });
   await amountInput.click();
-  await amountInput.fill(ethers.formatUnits(amount, 18));
+  await amountInput.fill(ethers.formatUnits(amount, USDC_DECIMALS));
 
   const findRoutesBtn = page.getByRole('button', { name: /^Find routes?$/i }).first();
   await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
@@ -734,7 +736,7 @@ async function waitForRuntimeInputDrain(page: Page, label: string, timeoutMs = 1
 test.describe('E2E: Alice ↔ Hub ↔ Bob across isolated pages', () => {
   test.setTimeout(LONG_E2E ? 300_000 : 210_000);
 
-test('bidirectional payments survive across two isolated browser contexts', async ({ browser, page }, testInfo) => {
+test('bidirectional payments survive across two isolated browser contexts', { tag: '@functional' }, async ({ browser, page }, testInfo) => {
     if (testInfo.project.name === 'webkit-mobile') {
       testInfo.setTimeout(LONG_E2E ? 300_000 : 210_000);
     }
@@ -794,7 +796,7 @@ test('bidirectional payments survive across two isolated browser contexts', asyn
       const hubFee = await getHubFeeConfig(alicePage, hubId);
 
       console.log('[E2E] forward HTLC Alice -> Hub -> Bob');
-      const forwardAmount = toWei(10);
+      const forwardAmount = toUsdcUnits(10);
       const expectedForwardSpend = toDisplayed(requiredInbound(forwardAmount, hubFee.feePPM, hubFee.baseFee));
       const bobBeforeForward = await getRenderedOutboundForAccount(bobPage, hubId);
       const bobForwardCursor = await getPersistedReceiptCursor(bobPage);
@@ -834,7 +836,7 @@ test('bidirectional payments survive across two isolated browser contexts', asyn
       console.log('[E2E] reverse HTLC Bob -> Hub -> Alice');
       await waitForAccountIdle(bobPage, bob.entityId, hubId);
       await waitForAccountIdle(alicePage, alice.entityId, hubId);
-      const reverseAmount = toWei(5);
+      const reverseAmount = toUsdcUnits(5);
       const expectedReverseSpend = toDisplayed(requiredInbound(reverseAmount, hubFee.feePPM, hubFee.baseFee));
       const aliceBeforeReverse = await getRenderedOutboundForAccount(alicePage, hubId);
       const bobBeforeReverse = await getRenderedOutboundForAccount(bobPage, hubId);
@@ -907,7 +909,7 @@ test('bidirectional payments survive across two isolated browser contexts', asyn
 
         console.log('[E2E] second forward HTLC Alice -> Hub -> Bob');
 
-        const secondForwardAmount = toWei(3);
+        const secondForwardAmount = toUsdcUnits(3);
         const expectedSecondForwardSpend = requiredInbound(secondForwardAmount, hubFee.feePPM, hubFee.baseFee);
         const aliceBeforeSecondForward = await getRenderedOutboundForAccount(alicePage, hubId);
         const aliceBeforeSecondForwardRaw = await outCapRaw(alicePage, alice.entityId, hubId);
@@ -977,7 +979,7 @@ test('bidirectional payments survive across two isolated browser contexts', asyn
         await waitForAccountIdle(bobPage, bob.entityId, hubId);
         const aliceBeforeOverspend = aliceAfterSecondForward;
         const overspendUnits = Math.max(1, Math.ceil(aliceBeforeOverspend) + 1);
-        await attemptOverspend(alicePage, bob.entityId, toWei(overspendUnits));
+        await attemptOverspend(alicePage, bob.entityId, toUsdcUnits(overspendUnits));
         const aliceAfterOverspend = await getRenderedOutboundForAccount(alicePage, hubId);
         expect(aliceAfterOverspend, 'overspend should not change alice balance').toBe(aliceBeforeOverspend);
 

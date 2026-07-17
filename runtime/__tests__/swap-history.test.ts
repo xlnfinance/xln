@@ -4,6 +4,7 @@ import {
   recordSwapOfferLifecycle,
   recordSwapResolveLifecycle,
 } from '../account/tx/handlers/swap-history';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import type { AccountMachine, SwapOffer } from '../types';
 
 const makeAccount = (): AccountMachine => ({
@@ -35,9 +36,8 @@ const makeAccount = (): AccountMachine => ({
   requestedRebalance: new Map(),
   requestedRebalanceFeeState: new Map(),
   shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-  leftJObservations: [],
-  rightJObservations: [],
-  jEventChain: [],
+  leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+  rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
   lastFinalizedJHeight: 0,
   disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
   jNonce: 0,

@@ -1,6 +1,43 @@
 import type { RadixMerkleRadix } from './merkle';
 
-export const STORAGE_SCHEMA_VERSION = 1;
+/**
+ * Schema 4 makes validator-local replica metadata part of every retained
+ * checkpoint. Schema 3 snapshots can restore an Entity state above H0 without
+ * its certified lineage anchor and therefore are not valid recovery bundles.
+ */
+export const STORAGE_SCHEMA_VERSION = 5;
+
+export class StorageSchemaMismatchError extends Error {
+  readonly code = 'STORAGE_SCHEMA_MISMATCH' as const;
+
+  constructor(
+    readonly storedSchemaVersion: number,
+    readonly currentSchemaVersion: number,
+    readonly boundary: string,
+  ) {
+    super(
+      `STORAGE_SCHEMA_MISMATCH:stored=${storedSchemaVersion}:current=${currentSchemaVersion}:boundary=${boundary}`,
+    );
+    this.name = 'StorageSchemaMismatchError';
+  }
+}
+
+export const assertStorageSchemaVersion = (
+  value: unknown,
+  boundary: string,
+): number => {
+  if (!Number.isSafeInteger(value) || Number(value) < 1) {
+    throw new Error(
+      `STORAGE_SCHEMA_INVALID:stored=${value === undefined ? 'missing' : String(value)}:` +
+        `current=${STORAGE_SCHEMA_VERSION}:boundary=${boundary}`,
+    );
+  }
+  const stored = Number(value);
+  if (stored !== STORAGE_SCHEMA_VERSION) {
+    throw new StorageSchemaMismatchError(stored, STORAGE_SCHEMA_VERSION, boundary);
+  }
+  return stored;
+};
 export const DEFAULT_SNAPSHOT_PERIOD_FRAMES = 256;
 export const DEFAULT_RETAIN_SNAPSHOTS = 3;
 export const DEFAULT_EPOCH_MAX_BYTES = 256 * 1024 * 1024;
@@ -20,9 +57,13 @@ export const KEY_LIVE_REPLICA_META = 0x26;
 export const KEY_MERKLE_ROOT = 0x27;
 export const KEY_MERKLE_BRANCH = 0x28;
 export const KEY_MERKLE_LEAF = 0x29;
+export const KEY_CERTIFIED_BOARD_NODE = 0x2a;
+export const KEY_CONSUMPTION_NODE = 0x2b;
+export const KEY_ACCOUNT_J_CLAIM_NODE = 0x2c;
 export const KEY_SNAPSHOT_ENTITY = 0x31;
 export const KEY_SNAPSHOT_ACCOUNT = 0x32;
 export const KEY_SNAPSHOT_BOOK = 0x33;
+export const KEY_SNAPSHOT_REPLICA_META = 0x34;
 
 export const STORAGE_VERIFY_TAIL_FRAMES = 128;
 export const EPOCH_SEED_FRAME_TAIL = STORAGE_VERIFY_TAIL_FRAMES + 1;
@@ -86,6 +127,18 @@ export const keyLiveReplicaMetaPrefix = (entityId?: string): Buffer =>
 
 export const keyLiveReplicaMeta = (entityId: string, signerId: string): Buffer =>
   Buffer.concat([keyLiveReplicaMetaPrefix(entityId), hexBytes(signerId)]);
+
+export const keyCertifiedBoardNode = (hash: string): Buffer =>
+  Buffer.concat([Buffer.from([KEY_CERTIFIED_BOARD_NODE]), hexBytes(hash)]);
+export const keyCertifiedBoardNodePrefix = (): Buffer => Buffer.from([KEY_CERTIFIED_BOARD_NODE]);
+
+export const keyConsumptionNode = (hash: string): Buffer =>
+  Buffer.concat([Buffer.from([KEY_CONSUMPTION_NODE]), hexBytes(hash)]);
+export const keyConsumptionNodePrefix = (): Buffer => Buffer.from([KEY_CONSUMPTION_NODE]);
+
+export const keyAccountJClaimNode = (hash: string): Buffer =>
+  Buffer.concat([Buffer.from([KEY_ACCOUNT_J_CLAIM_NODE]), hexBytes(hash)]);
+export const keyAccountJClaimNodePrefix = (): Buffer => Buffer.from([KEY_ACCOUNT_J_CLAIM_NODE]);
 
 export type StorageMerkleNamespace =
   | 'runtime-roots'
@@ -197,6 +250,22 @@ export const keySnapshotBookPrefix = (height: number, entityId?: string): Buffer
   entityId
     ? Buffer.concat([Buffer.from([KEY_SNAPSHOT_BOOK]), encodeHeight(height), hexBytes(entityId)])
     : Buffer.concat([Buffer.from([KEY_SNAPSHOT_BOOK]), encodeHeight(height)]);
+
+export const keySnapshotReplicaMeta = (
+  height: number,
+  entityId: string,
+  signerId: string,
+): Buffer => Buffer.concat([
+  Buffer.from([KEY_SNAPSHOT_REPLICA_META]),
+  encodeHeight(height),
+  hexBytes(entityId),
+  hexBytes(signerId),
+]);
+
+export const keySnapshotReplicaMetaPrefix = (height: number, entityId?: string): Buffer =>
+  entityId
+    ? Buffer.concat([Buffer.from([KEY_SNAPSHOT_REPLICA_META]), encodeHeight(height), hexBytes(entityId)])
+    : Buffer.concat([Buffer.from([KEY_SNAPSHOT_REPLICA_META]), encodeHeight(height)]);
 
 export const prefixUpperBound = (prefix: Buffer): Buffer | undefined => {
   const out = Buffer.from(prefix);

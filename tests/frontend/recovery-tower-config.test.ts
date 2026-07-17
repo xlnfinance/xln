@@ -168,8 +168,9 @@ test('vault runtime recovery and restore diagnostics use persistent error log', 
   expect(recoverySource).toContain("errorLog.log('Runtime metadata snapshot persistence failed', 'Runtime Recovery', error)");
   expect(recoverySource).toContain('Tower recovery upload failed');
   expect(cleanupSource).toContain("errorLog.log('Faucet failed', 'Runtime Funding'");
-  expect(cleanupSource).toContain('DB clear failed during runtime cleanup');
-  expect(cleanupSource).toContain('Failed to stop J-watcher');
+  expect(cleanupSource).toContain('RUNTIME_CLEANUP_STORAGE_FAILED');
+  expect(cleanupSource).toContain("'Runtime Cleanup'");
+  expect(cleanupSource).toContain('throw err;');
   expect(restoreSource).toContain('Restored runtime ${runtime.id.slice(0, 12)} from tower after ${reason}');
   expect(restoreSource).toContain('Failed to restore env from tower; continuing with local recovery path');
   expect(restoreSource).toContain('Failed to load env from DB; falling back to fresh import');

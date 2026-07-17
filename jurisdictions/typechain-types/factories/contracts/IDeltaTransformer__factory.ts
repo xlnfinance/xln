@@ -17,6 +17,11 @@ const _abi = [
         type: "int256[]",
       },
       {
+        internalType: "uint256[]",
+        name: "tokenIds",
+        type: "uint256[]",
+      },
+      {
         internalType: "bytes",
         name: "encodedBatch",
         type: "bytes",
@@ -31,6 +36,16 @@ const _abi = [
         name: "rightArguments",
         type: "bytes",
       },
+      {
+        internalType: "uint256",
+        name: "leftArgumentsTimestamp",
+        type: "uint256",
+      },
+      {
+        internalType: "uint256",
+        name: "rightArgumentsTimestamp",
+        type: "uint256",
+      },
     ],
     name: "applyBatch",
     outputs: [
@@ -40,7 +55,7 @@ const _abi = [
         type: "int256[]",
       },
     ],
-    stateMutability: "nonpayable",
+    stateMutability: "view",
     type: "function",
   },
   {

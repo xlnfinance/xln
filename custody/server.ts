@@ -1,5 +1,4 @@
 import { formatUnits } from 'ethers';
-import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,15 +6,22 @@ import QRCode from 'qrcode';
 import { parseTokenAmount } from '../runtime/account/financial-utils';
 import { DEFAULT_TOKENS } from '../runtime/jadapter/default-tokens';
 import { deriveRuntimeAdapterCapabilityToken } from '../runtime/radapter/auth';
-import { serializeTaggedJson } from '../runtime/protocol/serialization';
+import { RuntimeAdapterError } from '../runtime/radapter/errors';
+import { createStructuredLogger } from '../runtime/infra/logger';
+import { deserializeTaggedJson, serializeTaggedJson } from '../runtime/protocol/serialization';
+import { readInheritedChildSecrets, resolveChildSecret } from '../runtime/orchestrator/child-secrets';
+import { startParentLivenessWatch } from '../runtime/orchestrator/parent-watch';
 import { DaemonRpcClient, type DaemonFrameLog } from './daemon-client';
-import { CustodyStore, type ActivityRecord, type SessionRecord } from './store';
+import { CustodyStore, type ActivityRecord, type SessionRecord, type WithdrawalRecord } from './store';
+
+const inheritedSecrets = readInheritedChildSecrets();
 
 const HOST = process.env['CUSTODY_HOST'] || 'localhost';
 const PORT = Number(process.env['CUSTODY_PORT'] || '8087');
 const DAEMON_WS_URL = process.env['CUSTODY_DAEMON_WS'] || 'ws://127.0.0.1:8088/rpc';
 const DAEMON_AUTH_SEED = String(process.env['CUSTODY_DAEMON_AUTH_SEED'] || '').trim();
 const DAEMON_AUTH_AUDIENCE = String(process.env['CUSTODY_DAEMON_AUTH_AUDIENCE'] || '').trim().toLowerCase();
+const DAEMON_RUNTIME_SEED = resolveChildSecret(inheritedSecrets, 'daemonRuntimeSeed', '');
 const WALLET_URL = process.env['CUSTODY_WALLET_URL'] || 'https://localhost:8080/app';
 const ENABLE_HTTPS = (() => {
   const raw = String(process.env['CUSTODY_HTTPS'] || '').trim().toLowerCase();
@@ -26,7 +32,7 @@ const ENABLE_HTTPS = (() => {
 const CUSTODY_NAME = String(process.env['CUSTODY_PROFILE_NAME'] || 'Custody').trim() || 'Custody';
 const CUSTODY_JURISDICTION = String(process.env['CUSTODY_JURISDICTION_ID'] || process.env['CUSTODY_JURISDICTION'] || '').trim();
 const CUSTODY_ENTITY_ID = String(process.env['CUSTODY_ENTITY_ID'] || '').trim().toLowerCase();
-const CUSTODY_SIGNER_ID = String(process.env['CUSTODY_SIGNER_ID'] || '').trim().toLowerCase() || undefined;
+const CUSTODY_SIGNER_ID = String(process.env['CUSTODY_SIGNER_ID'] || '').trim().toLowerCase();
 const CUSTODY_DB_PATH = process.env['CUSTODY_DB_PATH'] || './db-tmp/custody.sqlite';
 const SESSION_COOKIE = 'custody_session';
 const JOURNAL_CURSOR_KEY = 'journal_cursor';
@@ -43,6 +49,12 @@ if (!CUSTODY_JURISDICTION) {
 if (!DAEMON_AUTH_SEED || !DAEMON_AUTH_AUDIENCE) {
   throw new Error('CUSTODY_DAEMON_AUTH_SEED and CUSTODY_DAEMON_AUTH_AUDIENCE are required');
 }
+if (!DAEMON_RUNTIME_SEED) {
+  throw new Error('CUSTODY_DAEMON_RUNTIME_SEED is required through the inherited secret channel');
+}
+if (!/^0x[0-9a-f]{40}$/.test(CUSTODY_SIGNER_ID)) {
+  throw new Error('CUSTODY_SIGNER_ID must be an EOA address');
+}
 
 const TOKENS = DEFAULT_TOKENS.map((token, index) => ({
   tokenId: index + 1,
@@ -53,6 +65,7 @@ const TOKENS = DEFAULT_TOKENS.map((token, index) => ({
 }));
 
 const store = new CustodyStore(CUSTODY_DB_PATH);
+const custodyLog = createStructuredLogger('custody.service');
 const daemon = new DaemonRpcClient(DAEMON_WS_URL, () => deriveRuntimeAdapterCapabilityToken(
   DAEMON_AUTH_SEED,
   'full',
@@ -60,9 +73,9 @@ const daemon = new DaemonRpcClient(DAEMON_WS_URL, () => deriveRuntimeAdapterCapa
   {
     audience: DAEMON_AUTH_AUDIENCE,
     keyId: 'custody',
-    tokenId: randomUUID(),
+    tokenId: 'custody-service',
   },
-));
+), DAEMON_RUNTIME_SEED);
 
 let syncInFlight = false;
 let lastSyncOkAt = 0;
@@ -405,7 +418,130 @@ const scheduleJournalSync = (delayMs: number): void => {
   }, delayMs);
 };
 
-store.recoverSubmittingWithdrawals('Recovered after custody service restart before daemon confirmation');
+let activePaymentSubmission: Promise<void> | null = null;
+let resumeTimer: ReturnType<typeof setTimeout> | null = null;
+let resumeInFlight = false;
+
+const withPaymentSubmissionLock = async <T>(operation: () => Promise<T>): Promise<T> => {
+  while (activePaymentSubmission) await activePaymentSubmission;
+  let release!: () => void;
+  activePaymentSubmission = new Promise<void>(resolve => { release = resolve; });
+  try {
+    return await operation();
+  } finally {
+    activePaymentSubmission = null;
+    release();
+  }
+};
+
+const routeFromWithdrawal = (withdrawal: WithdrawalRecord): string[] => {
+  if (!withdrawal.routeJson) throw new Error(`CUSTODY_WITHDRAWAL_ROUTE_MISSING:${withdrawal.id}`);
+  const decoded = deserializeTaggedJson<unknown>(withdrawal.routeJson);
+  if (!Array.isArray(decoded) || decoded.some(entry => typeof entry !== 'string')) {
+    throw new Error(`CUSTODY_WITHDRAWAL_ROUTE_INVALID:${withdrawal.id}`);
+  }
+  return decoded;
+};
+
+const submitWithdrawal = async (withdrawal: WithdrawalRecord) => await withPaymentSubmissionLock(async () => {
+  const route = routeFromWithdrawal(withdrawal);
+  const queued = await daemon.queuePayment({
+    sourceEntityId: CUSTODY_ENTITY_ID,
+    signerId: CUSTODY_SIGNER_ID,
+    targetEntityId: withdrawal.targetEntityId,
+    tokenId: withdrawal.tokenId,
+    amount: withdrawal.requestedAmountMinor.toString(),
+    description: withdrawal.description,
+    route,
+    mode: 'htlc',
+    commandId: withdrawal.commandId,
+    ...(withdrawal.commandSequence !== null ? { commandSequence: withdrawal.commandSequence } : {}),
+    onCommandPrepared: commandSequence => {
+      store.setWithdrawalCommandSequence(withdrawal.id, withdrawal.commandId, commandSequence);
+    },
+  });
+  if (!queued.hashlock) throw new Error(`CUSTODY_WITHDRAWAL_COMMITTED_HASHLOCK_MISSING:${withdrawal.id}`);
+  const updated = store.markWithdrawalSent({
+    id: withdrawal.id,
+    hashlock: queued.hashlock,
+    routeJson: withdrawal.routeJson!,
+    updatedAt: Date.now(),
+  });
+  if (!updated || updated.status !== 'sent') {
+    throw new Error(`CUSTODY_WITHDRAWAL_SENT_WRITE_FAILED:${withdrawal.id}`);
+  }
+  return queued;
+});
+
+const isTerminalSubmissionRejection = (error: unknown): boolean =>
+  error instanceof RuntimeAdapterError && error.code === 'E_BAD_QUERY' && error.retryable !== true;
+
+const recordTerminalSubmissionRejection = (
+  withdrawalId: string,
+  error: unknown,
+): boolean => {
+  const current = store.getWithdrawalById(withdrawalId);
+  if (!current) throw new Error(`CUSTODY_WITHDRAWAL_DISAPPEARED:${withdrawalId}`);
+  const balanceRestored = current.commandSequence === null;
+  const withdrawal = store.failWithdrawalById({
+    id: withdrawalId,
+    error: error instanceof Error ? error.message : String(error),
+    updatedAt: Date.now(),
+    // A durable command sequence means network I/O may already have happened.
+    // Quarantine the reserved funds instead of risking an exact-once violation.
+    restoreBalance: balanceRestored,
+  });
+  if (!withdrawal) throw new Error(`CUSTODY_WITHDRAWAL_DISAPPEARED:${withdrawalId}`);
+  return balanceRestored;
+};
+
+const scheduleSubmittingResume = (delayMs: number): void => {
+  if (resumeTimer) clearTimeout(resumeTimer);
+  resumeTimer = setTimeout(() => {
+    resumeTimer = null;
+    void resumeSubmittingWithdrawals();
+  }, delayMs);
+};
+
+const resumeSubmittingWithdrawals = async (): Promise<void> => {
+  if (resumeInFlight) return;
+  resumeInFlight = true;
+  try {
+    for (const withdrawal of store.listSubmittingWithdrawals()) {
+      try {
+        await submitWithdrawal(withdrawal);
+        custodyLog.info('withdrawal.resume_committed', {
+          commandId: withdrawal.commandId,
+          commandSequence: withdrawal.commandSequence,
+          status: 'sent',
+        });
+      } catch (error) {
+        if (isTerminalSubmissionRejection(error)) {
+          const balanceRestored = recordTerminalSubmissionRejection(withdrawal.id, error);
+          custodyLog.error('withdrawal.resume_rejected', {
+            commandId: withdrawal.commandId,
+            commandSequence: withdrawal.commandSequence,
+            status: 'failed',
+            balanceRestored,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+          continue;
+        }
+        custodyLog.warn('withdrawal.resume_pending', {
+          commandId: withdrawal.commandId,
+          commandSequence: withdrawal.commandSequence,
+          status: 'submitting',
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  } finally {
+    resumeInFlight = false;
+  }
+  if (store.listSubmittingWithdrawals().length > 0) scheduleSubmittingResume(1_000);
+};
+
+void resumeSubmittingWithdrawals();
 void syncJournal();
 
 const server = Bun.serve({
@@ -429,6 +565,10 @@ const server = Bun.serve({
 
     if (pathname === '/app.js') {
       return asset('./app.js');
+    }
+
+    if (pathname === '/withdrawal-preflight.js') {
+      return asset('./withdrawal-preflight.js');
     }
 
     if (pathname === '/styles.css') {
@@ -536,9 +676,10 @@ const server = Bun.serve({
         }
 
         const withdrawalId = `wd_${compactUuid(crypto.randomUUID(), 20)}`;
+        const commandId = `custody:${withdrawalId}`;
         const startedAtMs = Date.now();
         const description = `custody-withdrawal:${withdrawalId} requested:${amountMinor.toString()} fee:${feeMinor.toString()}`;
-        store.reserveWithdrawal({
+        const withdrawal = store.reserveWithdrawal({
           id: withdrawalId,
           userId: session.userId,
           tokenId,
@@ -547,31 +688,14 @@ const server = Bun.serve({
           feeMinor,
           targetEntityId,
           description,
+          routeJson: serializeTaggedJson(selectedRoute.path),
+          commandId,
           createdAt: Date.now(),
           startedAtMs,
         });
 
         try {
-          const queued = await daemon.queuePayment({
-            sourceEntityId: CUSTODY_ENTITY_ID,
-            targetEntityId,
-            tokenId,
-            amount: amountMinor.toString(),
-            description,
-            startedAtMs,
-            route: selectedRoute.path,
-            mode: 'htlc',
-            ...(CUSTODY_SIGNER_ID !== undefined ? { signerId: CUSTODY_SIGNER_ID } : {}),
-          });
-          if (!queued.hashlock) {
-            throw new Error('Daemon did not return hashlock for queued withdrawal');
-          }
-          store.markWithdrawalSent({
-            id: withdrawalId,
-            hashlock: queued.hashlock,
-            routeJson: serializeTaggedJson(queued.route),
-            updatedAt: Date.now(),
-          });
+          const queued = await submitWithdrawal(withdrawal);
           return json(
             {
               ok: true,
@@ -588,15 +712,21 @@ const server = Bun.serve({
             setCookie,
           );
         } catch (error) {
-          store.failWithdrawalById({
-            id: withdrawalId,
-            error: error instanceof Error ? error.message : String(error),
-            updatedAt: Date.now(),
-            restoreBalance: true,
-          });
+          const terminal = isTerminalSubmissionRejection(error);
+          if (terminal) {
+            recordTerminalSubmissionRejection(withdrawalId, error);
+          } else {
+            scheduleSubmittingResume(1_000);
+          }
           return json(
-            { ok: false, error: error instanceof Error ? error.message : String(error), dashboard: buildDashboardPayload(session) },
-            { status: 502 },
+            {
+              ok: false,
+              pending: !terminal,
+              withdrawalId,
+              error: error instanceof Error ? error.message : String(error),
+              dashboard: buildDashboardPayload(session),
+            },
+            { status: terminal ? 400 : 202 },
             setCookie,
           );
         }
@@ -611,15 +741,25 @@ const server = Bun.serve({
 
 const shutdown = async (): Promise<void> => {
   if (syncTimer) clearTimeout(syncTimer);
+  if (resumeTimer) clearTimeout(resumeTimer);
   await daemon.close();
   store.close();
   server.stop(true);
 };
 
+const managedParentPid = process.env['XLN_MANAGED_PARENT_PID'];
+const stopParentWatch = managedParentPid
+  ? startParentLivenessWatch('custody-service', managedParentPid, () => {
+      process.kill(process.pid, 'SIGTERM');
+    }, 250)
+  : () => {};
+
 process.on('SIGINT', () => {
+  stopParentWatch();
   void shutdown().finally(() => process.exit(0));
 });
 process.on('SIGTERM', () => {
+  stopParentWatch();
   void shutdown().finally(() => process.exit(0));
 });
 

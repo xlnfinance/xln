@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import { compareStableText } from '../protocol/serialization';
 import type { EntityReplica, Env } from '../types';
 import { buildDurableRuntimeMachineSnapshot } from '../wal/snapshot';
+import { buildCertifiedEntityLineagePlan } from './entity-lineage';
 
 export type CanonicalFrameEntityHash = {
   entityId: string;
@@ -84,6 +85,13 @@ export const canonicalizeStorageAuditValue = (value: unknown, stack: object[] = 
 
 export const computeCanonicalEntityHash = (replica: EntityReplica): CanonicalFrameEntityHash => {
   const entityId = normalizeEntityId(replica.entityId || replica.state?.entityId || '');
+  // Remove only the top-level validator-local identity fields. A recursive
+  // name blacklist would also hide identically named fields nested inside
+  // signed txs or other consensus payloads.
+  const consensusState = { ...replica.state } as Partial<EntityReplica['state']>;
+  delete consensusState.entityEncPubKey;
+  delete consensusState.entityEncPrivKey;
+  delete consensusState.htlcNotes;
   return {
     entityId,
     cellCount: 1,
@@ -94,22 +102,14 @@ export const computeCanonicalEntityHash = (replica: EntityReplica): CanonicalFra
       // loadEnvFromStorage(height) can reconstruct for every height. In-flight
       // proposal/witness metadata is persisted for latest-height crash recovery
       // via replica meta, but it is not a per-height history source.
-      state: canonicalizeStorageAuditValue(replica.state),
+      state: canonicalizeStorageAuditValue(consensusState),
     }),
   };
 };
 
 export const computeCanonicalEntityHashesFromEnv = (env: Env): CanonicalFrameEntityHash[] => {
-  const hashesByEntity = new Map<string, CanonicalFrameEntityHash>();
-  for (const replica of env.eReplicas.values()) {
-    if (!replica?.state) continue;
-    const hash = computeCanonicalEntityHash(replica);
-    // Storage materializes one entity document per entityId today. Mirror that
-    // exact last-writer model so the replay oracle checks what restore can
-    // actually reconstruct, not transient per-validator replica metadata.
-    hashesByEntity.set(hash.entityId, hash);
-  }
-  return Array.from(hashesByEntity.values())
+  const lineagePlan = buildCertifiedEntityLineagePlan(env);
+  return Array.from(lineagePlan.lookup.values(), ({ replica }) => computeCanonicalEntityHash(replica))
     .sort((left, right) => compareStableText(left.entityId, right.entityId));
 };
 

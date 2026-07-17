@@ -1,6 +1,7 @@
 import type { AccountMachine } from '@xln/runtime/xln-api';
 import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
 import { amountToUsd, getAssetUsdPrice } from '$lib/utils/assetPricing';
+import { requireTokenDecimals } from './token-metadata';
 
 export type AssetTokenInfo = {
   symbol?: string;
@@ -23,7 +24,7 @@ export type AccountPortfolioData = {
 };
 
 export type EntityAssetValueFormatters = {
-  formatAmount: (amount: bigint, decimals?: number) => string;
+  formatAmount: (amount: bigint, decimals: number) => string;
   formatCompact: (value: number) => string;
   formatApproxUsd: (value: number) => string;
   formatUsdExact: (value: number) => string;
@@ -37,19 +38,20 @@ export function normalizeTokenPrecision(rawPrecision: unknown): number {
   return Math.max(0, Math.min(18, Math.floor(Number(rawPrecision ?? 4))));
 }
 
-export function formatTokenAmount(amount: bigint, decimals = 18, rawPrecision: unknown = 4): string {
+export function formatTokenAmount(amount: bigint, decimals: number, rawPrecision: unknown = 4): string {
+  const exactDecimals = requireTokenDecimals(decimals, 'formatTokenAmount');
   const precision = normalizeTokenPrecision(rawPrecision);
   const negative = amount < 0n;
   const abs = negative ? -amount : amount;
-  const divisor = BigInt(10) ** BigInt(decimals);
+  const divisor = BigInt(10) ** BigInt(exactDecimals);
   const whole = abs / divisor;
   const frac = abs % divisor;
   let text = whole.toLocaleString('en-US');
   if (precision > 0 && frac > 0n) {
     const fracStr = frac
       .toString()
-      .padStart(decimals, '0')
-      .slice(0, Math.min(decimals, precision))
+      .padStart(exactDecimals, '0')
+      .slice(0, Math.min(exactDecimals, precision))
       .replace(/0+$/, '');
     if (fracStr.length > 0) text = `${text}.${fracStr}`;
   }
@@ -106,11 +108,15 @@ export function getAssetPriceUsd(symbol: string): number {
 
 export function getAssetValueUsd(amount: bigint, info: AssetTokenInfo, symbolOverride?: string): number {
   const symbol = symbolOverride ?? info.symbol ?? 'UNK';
-  return amountToUsd(amount, info.decimals ?? 18, symbol);
+  return amountToUsd(amount, requireTokenDecimals(info.decimals, symbol), symbol);
 }
 
 export function getExternalTokenValueUsd(token: ExternalTokenValueInput): number {
-  return amountToUsd(token.balance, token.decimals ?? 18, token.symbol);
+  return amountToUsd(
+    token.balance,
+    requireTokenDecimals(token.decimals, token.symbol),
+    token.symbol,
+  );
 }
 
 export function calculatePortfolioValueUsd(
@@ -130,7 +136,7 @@ export function createEntityAssetValueFormatters(input: {
   compactNumbers: boolean;
 }): EntityAssetValueFormatters {
   return {
-    formatAmount: (amount, decimals = 18) => formatTokenAmount(amount, decimals, input.tokenPrecision),
+    formatAmount: (amount, decimals) => formatTokenAmount(amount, decimals, input.tokenPrecision),
     formatCompact: (value) => formatCompactUsd(value, input.compactNumbers),
     formatApproxUsd: (value) => formatApproxUsd(value, input.compactNumbers),
     formatUsdExact,

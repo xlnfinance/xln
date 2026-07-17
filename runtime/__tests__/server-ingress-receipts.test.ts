@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeInput } from '../types';
-import { createRuntimeIngressReceiptStore } from '../server/ingress-receipts';
+import {
+  createRuntimeIngressReceiptStore,
+  fingerprintRuntimeIngressInput,
+} from '../server/ingress-receipts';
 
 describe('runtime ingress receipts', () => {
   test('tracks pending enqueue until the exact runtime input commits', () => {
@@ -78,6 +81,70 @@ describe('runtime ingress receipts', () => {
       status: 'observed',
       observedHeight: 12,
     });
+  });
+
+  test('observes a raw HTLC command through its immutable server marker after proposer sealing', () => {
+    const store = createRuntimeIngressReceiptStore({ ttlMs: 10_000, now: () => 1_000 });
+    const marker = {
+      type: 'recordRuntimeAdapterCommand' as const,
+      data: {
+        laneId: `0x${'11'.repeat(32)}`,
+        sequence: 1,
+        commandId: 'custody-withdrawal-0001',
+        inputHash: `0x${'22'.repeat(32)}`,
+        expiresAtMs: null,
+      },
+    };
+    const rawPayment = {
+      type: 'htlcPayment' as const,
+      data: {
+        targetEntityId: `0x${'33'.repeat(32)}`,
+        tokenId: 1,
+        amount: 7n,
+        route: [`0x${'44'.repeat(32)}`, `0x${'33'.repeat(32)}`],
+      },
+    };
+    const sealedPayment = {
+      type: 'htlcPayment' as const,
+      data: {
+        ...rawPayment.data,
+        hashlock: `0x${'55'.repeat(32)}`,
+        preparedEnvelope: { nextHop: `0x${'33'.repeat(32)}`, innerEnvelope: { ciphertext: 'sealed' } },
+      },
+    };
+
+    store.register({
+      id: 'custody-marker-receipt',
+      kind: 'radapter-runtime-input',
+      counts: { runtimeTxs: 1, entityInputs: 1, jInputs: 0 },
+      enqueuedHeight: 10,
+      inputFingerprints: fingerprintRuntimeIngressInput({ runtimeTxs: [marker], entityInputs: [] }),
+    });
+    store.observeRuntimeInput(11, {
+      runtimeTxs: [marker],
+      entityInputs: [{
+        entityId: `0x${'44'.repeat(32)}`,
+        signerId: `0x${'66'.repeat(32)}`,
+        entityTxs: [sealedPayment],
+      }],
+    });
+
+    expect(fingerprintRuntimeIngressInput({
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: `0x${'44'.repeat(32)}`,
+        signerId: `0x${'66'.repeat(32)}`,
+        entityTxs: [rawPayment],
+      }],
+    })).not.toEqual(fingerprintRuntimeIngressInput({
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: `0x${'44'.repeat(32)}`,
+        signerId: `0x${'66'.repeat(32)}`,
+        entityTxs: [sealedPayment],
+      }],
+    }));
+    expect(store.get('custody-marker-receipt')).toMatchObject({ status: 'observed', observedHeight: 11 });
   });
 
   test('expires requests that never reach a later frame', () => {

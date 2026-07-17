@@ -32,6 +32,8 @@
   import AddJMachine from '$lib/components/Jurisdiction/AddJMachine.svelte';
   import type { JMachineCreateDetail } from '$lib/components/Jurisdiction/import-jmachine-runtime';
   import PushWakePanel from '$lib/components/Settings/PushWakePanel.svelte';
+  import EntityConsensusSettingsPanel from './EntityConsensusSettingsPanel.svelte';
+  import type { EntityConsensusSettingsView } from './entity-consensus-settings';
   import type { SettingsSubview } from './entity-panel-routing';
   import type { ThemeName } from '$lib/types/ui';
 
@@ -65,6 +67,7 @@
   export let isHub = false;
   export let activeIsLive = true;
   export let runtimeEnv: Env | null = null;
+  export let consensusView: EntityConsensusSettingsView;
   export let settingsSubview: SettingsSubview = 'wallet';
   export let onSaveProfile: (profile: ProfileDraft) => Promise<void> = async () => {};
   export let onImportJMachine: (detail: JMachineCreateDetail) => Promise<void> = async () => {};
@@ -354,10 +357,18 @@
   <nav class="settings-tabs" aria-label="Settings sections">
     <button
       type="button"
-      class:active={settingsSubview !== 'recovery' && settingsSubview !== 'display'}
+      class:active={settingsSubview === 'wallet'}
       on:click={() => settingsSubview = 'wallet'}
     >
       Wallet
+    </button>
+    <button
+      type="button"
+      data-testid="settings-consensus-tab"
+      class:active={settingsSubview === 'consensus'}
+      on:click={() => settingsSubview = 'consensus'}
+    >
+      Consensus
     </button>
     <button
       type="button"
@@ -375,7 +386,9 @@
     </button>
   </nav>
 
-  {#if settingsSubview === 'recovery'}
+  {#if settingsSubview === 'consensus'}
+    <EntityConsensusSettingsPanel view={consensusView} />
+  {:else if settingsSubview === 'recovery'}
     <section class="panel recovery-panel" data-testid="settings-recovery-panel">
       <div class="panel-title">
         <ShieldCheck size={15} />

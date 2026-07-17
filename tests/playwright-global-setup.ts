@@ -5,8 +5,10 @@ export const PLAYWRIGHT_ARTIFACT_CLEANUP_CWD = resolve(__dirname, '..');
 const PLAYWRIGHT_ARTIFACT_CLEANUP_SCRIPT = resolve(__dirname, '../runtime/scripts/test-artifact-cleanup.ts');
 
 export const runPlaywrightArtifactCleanup = (cwd = PLAYWRIGHT_ARTIFACT_CLEANUP_CWD): void => {
+  const inheritedParentLease = process.env['XLN_TEST_ARTIFACT_CLEANUP_DONE'] === '1';
   const result = spawnSync('bun', [
     PLAYWRIGHT_ARTIFACT_CLEANUP_SCRIPT,
+    ...(inheritedParentLease ? ['--validate-inherited-lease'] : []),
     '--reason',
     'playwright',
     '--scope',

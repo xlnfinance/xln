@@ -31,6 +31,8 @@ export type RuntimeRecoveryBundleV1 = {
   baseCheckpointHash?: string;
   frames?: PersistedFrameJournal[];
   meta?: RuntimeRecoveryMetaV1;
+  /** Index-1 runtime EOA signature over the canonical bundle with this field omitted. */
+  signature: string;
 };
 
 export type EncryptedRuntimeRecoveryBundleV1 = {
@@ -67,7 +69,6 @@ export type TowerFinalDisputeProof = {
   finalProofbody: Record<string, unknown>;
   leftArguments: string;
   rightArguments: string;
-  starterIncrementedArguments: string;
   sig: string;
 };
 

@@ -23,7 +23,7 @@ async function faucetOffchain(page: import('@playwright/test').Page, entityId: s
 test.describe('Invoice QR flow', () => {
   test.setTimeout(TEST_TIMEOUT_MS);
 
-  test('creates QR in Receive and scans it into Pay', async ({ browser }) => {
+  test('creates QR in Receive and scans it into Pay', { tag: '@functional' }, async ({ browser }) => {
     const aliceContext = await browser.newContext({ ignoreHTTPSErrors: true, acceptDownloads: true });
     const bobContext = await browser.newContext({ ignoreHTTPSErrors: true, acceptDownloads: true });
 

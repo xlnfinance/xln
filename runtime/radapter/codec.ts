@@ -1,5 +1,11 @@
-import { deserializeTaggedJson } from '../protocol/serialization';
-import { decodeBinaryPayload, encodeBinaryPayload } from '../storage/binary-codec';
+import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
+import { decodeValidatedBinaryPayload, encodeBinaryPayload } from '../storage/binary-codec';
+import type { Codec } from '../protocol/codec';
+import {
+  validateRuntimeAdapterWireMessage,
+  type RuntimeAdapterWireMessage,
+} from './wire-schema';
+import type { RuntimeAdapterRequest } from './types';
 
 const DEFAULT_MAX_MESSAGE_BYTES = 1_048_576;
 
@@ -29,14 +35,45 @@ export const assertRuntimeAdapterMessageSize = (raw: unknown): void => {
   }
 };
 
-export const encodeRuntimeAdapterMessage = (message: unknown): Uint8Array =>
-  encodeBinaryPayload(message, 'msgpack');
+const assertRuntimeAdapterMessagePack = (bytes: Uint8Array): void => {
+  const magic = bytes[0];
+  if (magic !== 0x01) throw new Error(`RADAPTER_WIRE_MESSAGEPACK_REQUIRED:magic=${magic ?? 'none'}`);
+};
 
-export const decodeRuntimeAdapterMessage = <T = unknown>(raw: unknown): T => {
+const runtimeAdapterWireCodec: Codec<RuntimeAdapterWireMessage> = {
+  encode: (message) => encodeBinaryPayload(validateRuntimeAdapterWireMessage(message), 'msgpack'),
+  decode: (bytes) => {
+    assertRuntimeAdapterMessagePack(bytes);
+    return decodeValidatedBinaryPayload(bytes, validateRuntimeAdapterWireMessage);
+  },
+};
+
+export const encodeRuntimeAdapterMessage = (message: RuntimeAdapterWireMessage): Uint8Array =>
+  runtimeAdapterWireCodec.encode(message);
+
+export const encodeRuntimeAdapterMessageForDebug = (message: unknown): string =>
+  serializeTaggedJson(message);
+
+export const encodeRuntimeAdapterMessageForBrowser = (message: RuntimeAdapterWireMessage): string =>
+  serializeTaggedJson(validateRuntimeAdapterWireMessage(message));
+
+export const decodeRuntimeAdapterBrowserMessage = (raw: unknown): RuntimeAdapterWireMessage => {
   assertRuntimeAdapterMessageSize(raw);
-  if (typeof raw === 'string') return deserializeTaggedJson<T>(raw);
+  if (typeof raw !== 'string') throw new Error('RADAPTER_BROWSER_JSON_REQUIRED');
+  return validateRuntimeAdapterWireMessage(deserializeTaggedJson<unknown>(raw));
+};
+
+export const decodeRuntimeAdapterMessage = (raw: unknown): RuntimeAdapterWireMessage => {
+  assertRuntimeAdapterMessageSize(raw);
+  if (typeof raw === 'string') throw new Error('RADAPTER_WIRE_BINARY_REQUIRED');
   if (raw instanceof ArrayBuffer || ArrayBuffer.isView(raw)) {
-    return decodeBinaryPayload<T>(asBytes(raw));
+    return runtimeAdapterWireCodec.decode(asBytes(raw));
   }
-  throw new Error(`RADAPTER_UNSUPPORTED_WIRE_MESSAGE: ${typeof raw}`);
+  throw new Error(`RADAPTER_WIRE_BINARY_REQUIRED:${typeof raw}`);
+};
+
+export const decodeRuntimeAdapterRequest = (raw: unknown): RuntimeAdapterRequest => {
+  const message = decodeRuntimeAdapterMessage(raw);
+  if (!('id' in message)) throw new Error('RADAPTER_CLIENT_REQUEST_REQUIRED');
+  return message;
 };

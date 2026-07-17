@@ -3,6 +3,8 @@ import {
   requireTrustedPaymentGateway,
   resolvePaymentDeadlineWindow,
 } from '../protocol/payments/delivery';
+import { HTLC } from '../constants';
+import { calculateHopRevealHeight } from '../protocol/htlc/utils';
 import { ASYNC_PAYMENT_EXPIRY_BLOCKS, ASYNC_PAYMENT_EXPIRY_MS } from '../types/payment';
 
 describe('payment delivery modes', () => {
@@ -26,6 +28,17 @@ describe('payment delivery modes', () => {
     });
     expect(deadline.baseTimelock).toBe(121_000n);
     expect(deadline.baseHeight).toBe(173);
+  });
+
+  test('reserves multiple jurisdiction blocks for every upstream reveal', () => {
+    const baseHeight = 100;
+    const upstream = calculateHopRevealHeight(baseHeight, 0, 3);
+    const intermediary = calculateHopRevealHeight(baseHeight, 1, 3);
+    const recipient = calculateHopRevealHeight(baseHeight, 2, 3);
+
+    expect(upstream - intermediary).toBe(HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS);
+    expect(intermediary - recipient).toBe(HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS);
+    expect(HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS).toBeGreaterThan(1);
   });
 
   test('trusted delivery binds the declared gateway to the penultimate hop', () => {

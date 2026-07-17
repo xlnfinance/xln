@@ -510,7 +510,7 @@
               outAmount={activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCapacity) || '0'}
               inAmount={activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCapacity) || '0'}
               derived={td.derived}
-              decimals={Number(td.tokenInfo.decimals ?? 18)}
+              decimals={td.tokenInfo.decimals}
               barHeight={12}
               showMetricLabels={true}
               expanded={isExpanded}

@@ -10,6 +10,9 @@ import { requireIsolatedBaseUrl } from './utils/e2e-isolated-env';
 
 const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
 const INIT_TIMEOUT = 30_000;
+const EXTRA_JURISDICTION_CHAIN_ID = 31_338;
+const EXTRA_JURISDICTION_DEV_KEY =
+  '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d';
 
 async function gotoApp(page: Page): Promise<void> {
   await gotoSharedApp(page, {
@@ -36,6 +39,9 @@ async function startExtraJurisdiction(name: string, port: number): Promise<{
   configJson: string;
 }> {
   const repoRoot = process.cwd();
+  // A watcher identity is chainId + Depository. Use the second local chain and
+  // a different funded Anvil deployer so this stack has a distinct Depository
+  // instead of reproducing the primary stack's intentionally ambiguous pair.
   const proc = spawn('bun', [
     'runtime/scripts/dev-anvil-stack.ts',
     '--spawn-anvil',
@@ -43,8 +49,13 @@ async function startExtraJurisdiction(name: string, port: number): Promise<{
     '--json-only',
     '--name', name,
     '--port', String(port),
+    '--chain-id', String(EXTRA_JURISDICTION_CHAIN_ID),
   ], {
     cwd: repoRoot,
+    env: {
+      ...process.env,
+      JADAPTER_DEV_PRIVATE_KEY: EXTRA_JURISDICTION_DEV_KEY,
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -88,7 +99,7 @@ async function startExtraJurisdiction(name: string, port: number): Promise<{
   return { proc, configJson };
 }
 
-test('settings can add custom jurisdiction from canonical JSON and import it into active runtime', async ({ page }) => {
+test('settings can add custom jurisdiction from canonical JSON and import it into active runtime', { tag: '@functional' }, async ({ page }) => {
   const port = 18600 + (process.pid % 500);
   const helperName = `Settings Test ${Date.now()}`;
   const extra = await startExtraJurisdiction(helperName, port);
@@ -148,7 +159,7 @@ test('settings can add custom jurisdiction from canonical JSON and import it int
   }
 });
 
-test('settings can add BrowserVM jurisdiction and keep Graph3D visual path alive', async ({ page }) => {
+test('settings can add BrowserVM jurisdiction and keep Graph3D visual path alive', { tag: '@functional' }, async ({ page }) => {
   const pageErrors: Error[] = [];
   page.on('pageerror', (error) => {
     pageErrors.push(error);

@@ -1,7 +1,8 @@
 import { ethers } from 'ethers';
 import type { JAdapter } from '../jadapter';
+import { DEV_CHAIN_IDS } from '../jadapter';
 import type { JTokenInfo } from '../jadapter/types';
-import { DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction } from '../jadapter/default-tokens';
+import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from '../jadapter/default-tokens';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import { HUB_REQUIRED_TOKEN_COUNT } from './hub-health';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
@@ -33,8 +34,12 @@ export const createTokenCatalogController = (input: {
 
   const deployDefaultTokensOnRpc = async (): Promise<void> => {
     const adapter = input.getAdapter();
-    if (!adapter || adapter.mode === 'browservm') return;
-    const existing = await adapter.getTokenRegistry().catch(() => []);
+    if (!adapter) throw new Error('TOKEN_CATALOG_ADAPTER_UNAVAILABLE');
+    if (adapter.mode === 'browservm') return;
+    if (!DEV_CHAIN_IDS.has(adapter.chainId)) {
+      throw new Error(`TOKEN_DEFAULT_DEPLOY_FORBIDDEN:${adapter.chainId}`);
+    }
+    const existing = await adapter.getTokenRegistry();
     const existingSymbols = new Set(
       existing
         .map(token => String(token.symbol || '').trim().toUpperCase())
@@ -61,7 +66,8 @@ export const createTokenCatalogController = (input: {
       const tokenContract = await erc20Factory.deploy(
         token.name,
         token.symbol,
-        DEFAULT_TOKEN_SUPPLY,
+        token.decimals,
+        getDefaultTokenSupply(token.decimals),
       ) as unknown as {
         waitForDeployment(): Promise<unknown>;
         getAddress(): Promise<string>;
@@ -91,36 +97,35 @@ export const createTokenCatalogController = (input: {
 
   const ensureTokenCatalog = async (): Promise<JTokenInfo[]> => {
     const adapter = input.getAdapter();
-    if (!adapter) return [];
+    if (!adapter) throw new Error('TOKEN_CATALOG_ADAPTER_UNAVAILABLE');
     const desiredTokens = defaultTokensForJurisdiction({ chainId: Number((adapter as { chainId?: number }).chainId) });
     const desiredSymbols = desiredTokens.map(token => token.symbol.trim().toUpperCase()).filter(Boolean);
     const hasDesiredTokens = (tokens: JTokenInfo[]): boolean => {
       const symbols = new Set(tokens.map(token => String(token.symbol || '').trim().toUpperCase()).filter(Boolean));
       return desiredSymbols.every(symbol => symbols.has(symbol));
     };
-    const fallbackTokens = tokenCatalogCache ?? [];
     const safeGetCode = async (address: string): Promise<string> => {
       try {
         return await withTimeout(
-          adapter.provider.getCode(address).catch(() => '0x'),
+          adapter.provider.getCode(address),
           TOKEN_CATALOG_TIMEOUT_MS,
           'provider.getCode',
         );
       } catch (error) {
-        serverLog.warn('token_catalog.get_code_failed', { error: (error as Error).message });
-        return '0x';
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`TOKEN_CATALOG_GET_CODE_FAILED:${address}:${message}`, { cause: error });
       }
     };
     const safeGetRegistry = async (): Promise<JTokenInfo[]> => {
       try {
         return await withTimeout(
-          adapter.getTokenRegistry().catch(() => []),
+          adapter.getTokenRegistry(),
           TOKEN_CATALOG_TIMEOUT_MS,
           'getTokenRegistry',
         );
       } catch (error) {
-        serverLog.warn('token_catalog.registry_failed', { error: (error as Error).message });
-        return fallbackTokens;
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`TOKEN_CATALOG_READ_FAILED:${message}`, { cause: error });
       }
     };
     if (tokenCatalogCache && tokenCatalogCache.length > 0) {
@@ -140,6 +145,7 @@ export const createTokenCatalogController = (input: {
 
     tokenCatalogPromise = (async () => {
       const current = await safeGetRegistry();
+      const canDeployDefaults = adapter.mode !== 'browservm' && DEV_CHAIN_IDS.has(adapter.chainId);
       const needsMoreDefaultTokens = adapter.mode !== 'browservm' && (
         current.length < HUB_REQUIRED_TOKEN_COUNT || !hasDesiredTokens(current)
       );
@@ -149,46 +155,36 @@ export const createTokenCatalogController = (input: {
         if (firstToken?.address) {
           const code = await safeGetCode(firstToken.address);
           if (code === '0x' || code.length < 10) {
-            serverLog.warn('token_catalog.token_code_missing', {
-              symbol: firstToken.symbol,
-              address: firstToken.address,
-            });
-            try {
-              await withTimeout(deployDefaultTokensOnRpc(), TOKEN_CATALOG_TIMEOUT_MS * 2, 'deployDefaultTokensOnRpc');
-            } catch (error) {
-              serverLog.warn('token_catalog.deploy_fallback_failed', { error: (error as Error).message });
-              return current;
-            }
-            return await safeGetRegistry();
+            throw new Error(`TOKEN_CATALOG_TOKEN_CODE_MISSING:${firstToken.tokenId}:${firstToken.address}`);
           }
         }
         if (needsMoreDefaultTokens) {
-          try {
-            await withTimeout(deployDefaultTokensOnRpc(), TOKEN_CATALOG_TIMEOUT_MS * 2, 'deployMissingDefaultTokensOnRpc');
-          } catch (error) {
-            serverLog.warn('token_catalog.deploy_missing_failed', { error: (error as Error).message });
-            return current;
+          if (!canDeployDefaults) {
+            throw new Error(
+              `TOKEN_CATALOG_INCOMPLETE:chainId=${adapter.chainId}:count=${current.length}`,
+            );
           }
+          await withTimeout(deployDefaultTokensOnRpc(), TOKEN_CATALOG_TIMEOUT_MS * 2, 'deployMissingDefaultTokensOnRpc');
           return await safeGetRegistry();
         }
         return current;
       }
 
       if (current.length > 0 || adapter.mode === 'browservm') return current;
-
-      try {
-        await withTimeout(deployDefaultTokensOnRpc(), TOKEN_CATALOG_TIMEOUT_MS * 2, 'deployDefaultTokensOnRpc');
-      } catch (error) {
-        serverLog.warn('token_catalog.deploy_fallback_failed', { error: (error as Error).message });
-        return current;
+      if (!canDeployDefaults) {
+        throw new Error(`TOKEN_CATALOG_EMPTY:chainId=${adapter.chainId}`);
       }
+      await withTimeout(deployDefaultTokensOnRpc(), TOKEN_CATALOG_TIMEOUT_MS * 2, 'deployDefaultTokensOnRpc');
       return await safeGetRegistry();
     })();
 
-    const tokens = await tokenCatalogPromise;
-    tokenCatalogPromise = null;
-    if (tokens.length > 0) tokenCatalogCache = tokens;
-    return tokens;
+    try {
+      const tokens = await tokenCatalogPromise;
+      if (tokens.length > 0) tokenCatalogCache = tokens;
+      return tokens;
+    } finally {
+      tokenCatalogPromise = null;
+    }
   };
 
   return { ensureTokenCatalog };

@@ -6,6 +6,7 @@
   import type { Env, RuntimeInput } from '@xln/runtime/xln-api';
   import { errorLog } from '../../stores/errorLogStore';
   import { runtimeControllerHandle } from '../../stores/runtimeControllerStore';
+  import { xlnFunctions } from '../../stores/xlnStore';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
   import {
     normalizeEntityId,
@@ -100,10 +101,6 @@
     try {
       const localHubs = hubDiscoveryProjection.localHubs;
       hubs = mergeHubs(localHubs, hubs);
-      if (hubs.filter((hub) => !isSameEntityId(entityId, hub.entityId)).length === 0) {
-        error = 'No projected hubs for this jurisdiction yet. Refresh after the active runtime projection advances.';
-      }
-
     } catch (err) {
       errorLog.log('Hub discovery failed', 'Hub Discovery', { entityId, err });
       error = (err as Error)?.message || 'Discovery failed';
@@ -139,9 +136,9 @@
         || (currentEnv ? requireSignerIdForEntity(currentEnv, entityId, 'hub-connect') : '');
       if (!signerId) throw new Error('No signer available for hub account setup');
 
-      // Default credit amount: 10,000 tokens (with 18 decimals)
-      const creditAmount = 10_000n * 10n ** 18n;
-      const rebalancePolicy = getOpenAccountRebalancePolicyData();
+      const tokenDecimals = $xlnFunctions.getTokenInfo(1).decimals;
+      const creditAmount = 10_000n * 10n ** BigInt(tokenDecimals);
+      const rebalancePolicy = getOpenAccountRebalancePolicyData(tokenDecimals);
 
       // Preload signed gossip/runtime routing metadata first so the initial
       // openAccount does not sit in the local pending queue waiting for pubkey discovery.

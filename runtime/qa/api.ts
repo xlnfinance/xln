@@ -17,6 +17,7 @@ import {
   listQaHistory,
   listQaRunSummaries,
   listQaStoryScreenshots,
+  listQaTestLedger,
   purgeQaRunsOlderThan,
   isQaTextArtifactPath,
   qaArtifactContentType,
@@ -638,6 +639,20 @@ export const listQaRestartAudit = (limit = 50): QaRestartAuditEntry[] => {
 
 const QA_TEST_CATALOG = [
   {
+    id: 'e2e-functional',
+    group: 'E2E',
+    label: 'Functional · Best Case',
+    command: 'bun run test:e2e:functional',
+    description: 'Valid user journeys first: the product works before deeper fault testing.',
+  },
+  {
+    id: 'e2e-resilience',
+    group: 'E2E',
+    label: 'Resilience · Worst Case',
+    command: 'bun run test:e2e:resilience',
+    description: 'Failures, recovery, limits, malformed input, concurrency, and degraded paths.',
+  },
+  {
     id: 'e2e-isolated',
     group: 'E2E',
     label: 'Isolated Browser E2E',
@@ -1213,7 +1228,10 @@ export async function maybeHandleQaRequest(
       const limitRaw = Number(url.searchParams.get('limit') || '20');
       const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(50, Math.floor(limitRaw))) : 20;
       const regressionLimit = Math.max(limit, 50);
-      const regressionRuns = await listQaRunSummaries(regressionLimit);
+      const [regressionRuns, testLedger] = await Promise.all([
+        listQaRunSummaries(regressionLimit),
+        listQaTestLedger(),
+      ]);
       const runs = regressionRuns.slice(0, limit);
       return jsonEtagResponse(
         request,
@@ -1222,6 +1240,7 @@ export async function maybeHandleQaRequest(
           qaAuth: authInfo,
           runs,
           ledger: buildQaRunLedger(runs),
+          testLedger,
           regression: buildQaRegressionReport(regressionRuns),
           verdict: buildQaSystemVerdict(runs),
         },
@@ -1246,7 +1265,7 @@ export async function maybeHandleQaRequest(
         {
           ok: true,
           qaAuth: authInfo,
-          run: stripQaRunPerfSamples(enrichQaRunUrls(run)),
+          run: stripQaRunPerfSamples(await enrichQaRunUrls(run)),
         },
         headers,
       );

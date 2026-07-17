@@ -1,10 +1,12 @@
-import { DEFAULT_SOFT_LIMIT, type AccountTx, type EntityInput, type EntityState, type EntityTx, type Env } from '../../../types';
+import type { AccountTx, EntityInput, EntityState, EntityTx, Env } from '../../../types';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 import { normalizeRebalanceMatchingStrategy } from '../../../extensions/rebalance/policy';
-import { announceLocalEntityProfile } from '../../../networking/gossip-helper';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
-import { resolveAutoRebalanceFeePolicy } from '../../../account/consensus/helpers';
 import { checkAutoRebalance } from '../../../account/tx/handlers/request-collateral';
+import {
+  assertNoTokenlessHubRawOverrides,
+  getDefaultRebalanceBaseFeeForToken,
+} from '../../../account/rebalance-defaults';
 import type { MempoolOp } from './account';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
@@ -23,6 +25,20 @@ const processingTrigger = (state: EntityState): EntityInput[] => {
     ? [{ entityId: state.entityId, signerId: firstValidator, entityTxs: [] }]
     : [];
 };
+
+export const buildHubRebalancePolicyTx = (
+  config: NonNullable<EntityState['hubRebalanceConfig']>,
+  tokenId: number,
+): Extract<AccountTx, { type: 'rebalance_policy' }> => ({
+  type: 'rebalance_policy',
+  data: {
+    tokenId,
+    policyVersion: config.policyVersion,
+    baseFee: getDefaultRebalanceBaseFeeForToken(tokenId),
+    liquidityFeeBps: config.rebalanceLiquidityFeeBps ?? config.minFeeBps ?? 1n,
+    gasFee: 0n,
+  },
+});
 
 export const handleExtendCreditEntityTx = (
   entityState: EntityState,
@@ -55,10 +71,11 @@ export const handleExtendCreditEntityTx = (
 };
 
 export const handleSetHubConfigEntityTx = (
-  env: Env,
+  _env: Env,
   entityState: EntityState,
   entityTx: EntityTxOf<'setHubConfig'>,
 ): AccountAdminResult => {
+  assertNoTokenlessHubRawOverrides(entityTx.data);
   const newState = cloneEntityState(entityState);
   const {
     hubName: hubNameRaw,
@@ -69,11 +86,8 @@ export const handleSetHubConfigEntityTx = (
     swapTakerFeeBps = 0,
     disputeAutoFinalizeMode = 'auto',
     minCollateralThreshold = 0n,
-    c2rWithdrawSoftLimit = DEFAULT_SOFT_LIMIT,
     minFeeBps = 1n,
-    rebalanceBaseFee = 10n ** 17n,
     rebalanceLiquidityFeeBps = 1n,
-    rebalanceGasFee = 0n,
     rebalanceTimeoutMs = 10 * 60 * 1000,
   } = entityTx.data;
 
@@ -84,22 +98,27 @@ export const handleSetHubConfigEntityTx = (
     : previousConfig?.hubName;
   const previousVersion = previousConfig?.policyVersion ?? 0;
   const feePolicyChanged = !previousConfig ||
-    (previousConfig.rebalanceBaseFee ?? 10n ** 17n) !== rebalanceBaseFee ||
-    (previousConfig.rebalanceLiquidityFeeBps ?? previousConfig.minFeeBps ?? 1n) !== rebalanceLiquidityFeeBps ||
-    (previousConfig.rebalanceGasFee ?? 0n) !== rebalanceGasFee;
-  const requestedPolicyVersion = Number.isFinite(policyVersionRaw as number) && Number(policyVersionRaw) > 0
-    ? Number(policyVersionRaw)
-    : undefined;
+    (previousConfig.rebalanceLiquidityFeeBps ?? previousConfig.minFeeBps ?? 1n) !== rebalanceLiquidityFeeBps;
+  if (
+    policyVersionRaw !== undefined &&
+    (!Number.isSafeInteger(policyVersionRaw) || Number(policyVersionRaw) <= 0)
+  ) {
+    throw new Error(`HUB_REBALANCE_POLICY_VERSION_INVALID:${String(policyVersionRaw)}`);
+  }
+  const requestedPolicyVersion = policyVersionRaw === undefined
+    ? undefined
+    : Number(policyVersionRaw);
+
+  if (rebalanceLiquidityFeeBps < 0n || rebalanceLiquidityFeeBps > 10_000n) {
+    throw new Error(`HUB_REBALANCE_LIQUIDITY_FEE_BPS_INVALID:${rebalanceLiquidityFeeBps}`);
+  }
 
   let policyVersion: number;
   if (requestedPolicyVersion !== undefined) {
     if (requestedPolicyVersion < previousVersion) {
-      log.warn('hub_config.policy_downgrade_blocked', {
-        entity: shortId(entityState.entityId),
-        requested: requestedPolicyVersion,
-        current: previousVersion,
-      });
-      policyVersion = previousVersion;
+      throw new Error(`HUB_REBALANCE_POLICY_VERSION_STALE:${requestedPolicyVersion}<${previousVersion}`);
+    } else if (requestedPolicyVersion === previousVersion && feePolicyChanged) {
+      throw new Error(`HUB_REBALANCE_POLICY_EQUIVOCATION:version=${requestedPolicyVersion}`);
     } else {
       policyVersion = requestedPolicyVersion;
     }
@@ -109,8 +128,6 @@ export const handleSetHubConfigEntityTx = (
     policyVersion = feePolicyChanged ? previousVersion + 1 : previousVersion;
   }
 
-  const effectiveC2RWithdrawSoftLimit =
-    c2rWithdrawSoftLimit < DEFAULT_SOFT_LIMIT ? DEFAULT_SOFT_LIMIT : c2rWithdrawSoftLimit;
   const normalizedSwapTakerFeeBps = Math.max(0, Math.min(10_000, Math.floor(Number(swapTakerFeeBps) || 0)));
 
   newState.hubRebalanceConfig = {
@@ -122,11 +139,8 @@ export const handleSetHubConfigEntityTx = (
     swapTakerFeeBps: normalizedSwapTakerFeeBps,
     disputeAutoFinalizeMode,
     minCollateralThreshold,
-    c2rWithdrawSoftLimit: effectiveC2RWithdrawSoftLimit,
     minFeeBps,
-    rebalanceBaseFee,
     rebalanceLiquidityFeeBps,
-    rebalanceGasFee,
     rebalanceTimeoutMs,
   };
   newState.profile = {
@@ -134,15 +148,12 @@ export const handleSetHubConfigEntityTx = (
     isHub: true,
   };
 
-  if (env.gossip) {
-    announceLocalEntityProfile(env, newState, env.timestamp);
-  }
-
   addMessage(
     newState,
     `🏦 Hub config activated: ${matchingStrategy} strategy v${policyVersion}, ${routingFeePPM}ppm routing fee, ` +
     `swapTakerFee=${normalizedSwapTakerFeeBps}bps, ` +
-    `rebalance(base=${rebalanceBaseFee}, liqBps=${rebalanceLiquidityFeeBps}, gas=${rebalanceGasFee}, c2rWithdrawSoftLimit=${effectiveC2RWithdrawSoftLimit})`,
+    `rebalance(base=token-default, liqBps=${rebalanceLiquidityFeeBps}, gas=token-default, ` +
+    'c2rWithdrawSoftLimit=token-default)',
   );
   log.info('hub_config.updated', {
     entity: shortId(newState.entityId),
@@ -153,11 +164,24 @@ export const handleSetHubConfigEntityTx = (
     feePolicyChanged,
   });
 
-  return { newState, outputs: [] };
+  const mempoolOps = Array.from(newState.accounts.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .flatMap(([accountId, account]) => Array.from(account.deltas.keys())
+      .sort((left, right) => left - right)
+      .map((tokenId) => ({
+        accountId,
+        tx: buildHubRebalancePolicyTx(newState.hubRebalanceConfig!, tokenId),
+      })));
+
+  return {
+    newState,
+    outputs: mempoolOps.length > 0 ? processingTrigger(newState) : [],
+    ...(mempoolOps.length > 0 ? { mempoolOps } : {}),
+  };
 };
 
 export const handleSetRebalancePolicyEntityTx = (
-  env: Env,
+  _env: Env,
   entityState: EntityState,
   entityTx: EntityTxOf<'setRebalancePolicy'>,
 ): AccountAdminResult => {
@@ -185,7 +209,6 @@ export const handleSetRebalancePolicyEntityTx = (
         account,
         newState.entityId,
         counterpartyEntityId,
-        resolveAutoRebalanceFeePolicy(env, account, counterpartyEntityId),
       );
 
   return {

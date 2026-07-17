@@ -1,17 +1,30 @@
 import { expect, test } from 'bun:test';
 
 import { computeCanonicalEntityHash, computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
+import { computeStorageFrameHash } from '../storage/hashes';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import { encodeBoard, hashBoard } from '../entity/factory';
 import { applyCommand, createBook, replaceOrderbookPair } from '../orderbook';
 import { hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc, projectReplicaMeta } from '../storage/projections';
+import { cloneEntityState } from '../state-helpers';
+import type { StorageFrameRecord } from '../storage/types';
 import type { AccountMachine, EntityReplica, Env } from '../types';
 
-const entityId = `0x${'11'.repeat(32)}`;
-const counterpartyId = `0x${'22'.repeat(32)}`;
+const signerIds = [`0x${'11'.repeat(20)}`, `0x${'12'.repeat(20)}`];
+const consensusConfig = {
+  mode: 'proposer-based' as const,
+  threshold: 2n,
+  validators: signerIds,
+  shares: Object.fromEntries(signerIds.map(signerId => [signerId, 1n])),
+};
+const entityId = hashBoard(encodeBoard(consensusConfig)).toLowerCase();
+const counterpartyId = `0x${'ff'.repeat(32)}`;
 
 const makeAccount = (frameStateHash: string): AccountMachine =>
   ({
     leftEntity: entityId,
     rightEntity: counterpartyId,
+    domain: { chainId: 31337, depositoryAddress: `0x${'de'.repeat(20)}` },
     status: 'active',
     mempool: [],
     currentFrame: {
@@ -20,6 +33,7 @@ const makeAccount = (frameStateHash: string): AccountMachine =>
       jHeight: 0,
       accountTxs: [],
       prevFrameHash: '0x0',
+      accountStateRoot: `0x${'00'.repeat(32)}`,
       stateHash: '0x1',
       deltas: [],
     },
@@ -47,6 +61,7 @@ const makeAccount = (frameStateHash: string): AccountMachine =>
       jHeight: 0,
       accountTxs: [],
       prevFrameHash: '0x0',
+      accountStateRoot: `0x${'00'.repeat(32)}`,
       stateHash: frameStateHash,
       deltas: [],
     }],
@@ -54,9 +69,8 @@ const makeAccount = (frameStateHash: string): AccountMachine =>
     requestedRebalance: new Map(),
     requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftJObservations: [],
-    rightJObservations: [],
-    jEventChain: [],
+    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,
     disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
     jNonce: 0,
@@ -67,19 +81,19 @@ const makeEnv = (account: AccountMachine, reserves: Array<[number, bigint]>): En
     height: 7,
     timestamp: 1234,
     eReplicas: new Map<string, EntityReplica>([
-      [`${entityId}:1`, {
+      [`${entityId}:${signerIds[0]}`, {
         entityId,
-        signerId: '1',
+        signerId: signerIds[0]!,
         mempool: [],
         isProposer: true,
         state: {
           entityId,
-          height: 7,
+          height: 0,
           timestamp: 1234,
           messages: [],
           nonces: new Map([['1', 1]]),
           proposals: new Map(),
-          config: { mode: 'proposer-based', threshold: 1n, validators: ['1'], shares: { '1': 1n } },
+          config: consensusConfig,
           reserves: new Map(reserves),
           accounts: new Map([[counterpartyId, account]]),
           deferredAccountProposals: new Map(),
@@ -137,6 +151,34 @@ test('canonical storage hash is deterministic across Map insertion order', () =>
   expect(left).toBe(right);
 });
 
+test('storage frame integrity commits every named runtime-machine field', () => {
+  const base: StorageFrameRecord = {
+    height: 1,
+    timestamp: 100,
+    replicaMetaDigest: `0x${'22'.repeat(32)}`,
+    stateHash: `0x${'33'.repeat(32)}`,
+    runtimeInput: { runtimeTxs: [], entityInputs: [] },
+    touchedEntities: [],
+    touchedAccounts: [],
+    touchedBookEntities: [],
+  };
+
+  const alpha = computeStorageFrameHash({ ...base, runtimeMachine: { provider: 'alpha' } });
+  const beta = computeStorageFrameHash({ ...base, runtimeMachine: { provider: 'beta' } });
+
+  // xln.storage.frame.v2 golden. Changing this requires a schema/domain bump and
+  // an independently reviewed preimage, never a mechanical fixture refresh.
+  expect(alpha).toBe('0x71cafe56cd8cfe4145cf0c760d98ad06db43fe4f518648fd0ac8ff34a1f24d87');
+  expect(alpha).not.toBe(beta);
+  const ownUndefined = computeStorageFrameHash({ ...base, runtimeMachine: { hidden: undefined } });
+  // Authoritative MessagePack preserves an explicitly named undefined field;
+  // it must therefore remain distinguishable from both an empty and an absent
+  // runtime-machine record in the WAL integrity preimage.
+  expect(ownUndefined).toBe('0x169386e99dbcdb6ef40f4b332967751296060064d6b3a8daf25667e25bf17910');
+  expect(ownUndefined).not.toBe(computeStorageFrameHash({ ...base, runtimeMachine: {} }));
+  expect(ownUndefined).not.toBe(computeStorageFrameHash(base));
+});
+
 test('canonical storage hash is deterministic across orderbook pair index insertion order', () => {
   const left = makeEnvWithOrderbookPairs(['b-pair', 'a-pair']);
   const right = makeEnvWithOrderbookPairs(['a-pair', 'b-pair']);
@@ -166,6 +208,7 @@ test('canonical Entity hash excludes validator-private J history', () => {
   replica.jHistory = {
     jurisdictionRef: 'testnet:1',
     scannedThroughHeight: 25,
+    contiguousThroughHeight: 0,
     tipBlockHash: `0x${'25'.repeat(32)}`,
     eventBlocks: new Map([[25, {
       jurisdictionRef: 'testnet:1',
@@ -178,6 +221,34 @@ test('canonical Entity hash excludes validator-private J history', () => {
   };
 
   expect(computeCanonicalEntityHash(replica).hash).toBe(before);
+});
+
+test('validator-local HTLC notes neither diverge shared storage nor leak into Entity core', () => {
+  const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
+  const first = Array.from(env.eReplicas.values())[0]!;
+  const second = structuredClone(first);
+  second.signerId = signerIds[1]!;
+  first.state.htlcNotes = new Map([[`lock:0x${'33'.repeat(32)}`, 'validator-one']]);
+  second.state.htlcNotes = new Map([[`lock:0x${'33'.repeat(32)}`, 'validator-two']]);
+  env.eReplicas.set(`${entityId}:${signerIds[1]}`, second);
+
+  expect(computeCanonicalEntityHash(first).hash).toBe(computeCanonicalEntityHash(second).hash);
+  expect(() => computeCanonicalStateHashFromEnv(env)).not.toThrow();
+  expect('htlcNotes' in projectEntityCoreDoc(first.state)).toBeFalse();
+  expect(projectReplicaMeta(first).state.htlcNotes).toEqual(first.state.htlcNotes);
+  expect(projectReplicaMeta(second).state.htlcNotes).toEqual(second.state.htlcNotes);
+});
+
+test('canonical storage rejects conflicting validator replicas of one Entity', () => {
+  const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
+  const first = Array.from(env.eReplicas.values())[0]!;
+  const conflicting = structuredClone(first);
+  conflicting.signerId = signerIds[1]!;
+  conflicting.state.messages = ['validator-local-conflict'];
+  env.eReplicas.set(`${entityId}:${signerIds[1]}`, conflicting);
+
+  expect(() => computeCanonicalStateHashFromEnv(env))
+    .toThrow('STORAGE_ENTITY_REPLICA_STATE_DIVERGENCE');
 });
 
 test('storage projection round-trip preserves canonical account optional-field shape', () => {
@@ -221,21 +292,44 @@ test('storage projection round-trip preserves canonical account optional-field s
     }]]),
     loans: new Map(),
   };
+  state.consumptionAccumulator = {
+    version: 2,
+    root: `0x${'44'.repeat(32)}`,
+    count: 1n,
+  };
+  state.profileEncryptionManifest = {
+    entityId,
+    threshold: 1,
+    attestations: [{
+      version: 'xln:validator-encryption-key:v1',
+      entityId,
+      signerId: '1',
+      signer: '0x0000000000000000000000000000000000000001',
+      publicKey: `0x04${'33'.repeat(64)}`,
+      weight: 1,
+      encryptionPublicKey: `0x${'55'.repeat(32)}`,
+      signature: `0x${'66'.repeat(65)}`,
+    }],
+    hash: `0x${'77'.repeat(32)}`,
+  };
 
   expect(account.pulls).toBeUndefined();
   expect(account.swapOrderHistory).toBeUndefined();
   expect(account.swapClosedOrders).toBeUndefined();
 
   const hydratedState = hydrateEntityStateFromStorage({
-    core: projectEntityCoreDoc(state, replica),
+    core: projectEntityCoreDoc(state),
     accounts: new Map([[counterpartyId, projectAccountDoc(account)]]),
     books: new Map(),
   });
+
+  expect(hydratedState.profileEncryptionManifest).toEqual(state.profileEncryptionManifest);
 
   const before = computeCanonicalEntityHash(replica);
   const after = computeCanonicalEntityHash({ ...replica, state: hydratedState });
 
   expect(hydratedState.accounts.get(counterpartyId)?.pulls).toBeUndefined();
+  expect(hydratedState.accounts.get(counterpartyId)?.domain).toEqual(account.domain);
   expect(hydratedState.accounts.get(counterpartyId)?.swapOrderHistory).toBeUndefined();
   expect(hydratedState.accounts.get(counterpartyId)?.swapClosedOrders).toBeUndefined();
   expect(hydratedState.accounts.get(counterpartyId)?.hankoSignature).toBe(account.hankoSignature);
@@ -244,6 +338,7 @@ test('storage projection round-trip preserves canonical account optional-field s
   expect(hydratedState.accounts.get(counterpartyId)?.subcontracts).toEqual(account.subcontracts);
   expect(hydratedState.accounts.get(counterpartyId)?.disputePrepare).toEqual(account.disputePrepare);
   expect(hydratedState.lending).toEqual(state.lending);
+  expect(hydratedState.consumptionAccumulator).toEqual(state.consumptionAccumulator);
   expect(after.hash).toBe(before.hash);
 });
 
@@ -255,6 +350,7 @@ test('replica metadata projection preserves in-flight consensus and layout state
   replica.jHistory = {
     jurisdictionRef: 'testnet:1',
     scannedThroughHeight: 7,
+    contiguousThroughHeight: 0,
     tipBlockHash: `0x${'07'.repeat(32)}`,
     eventBlocks: new Map(),
     blockHashes: new Map([[7, `0x${'07'.repeat(32)}`]]),
@@ -265,4 +361,6 @@ test('replica metadata projection preserves in-flight consensus and layout state
   expect(meta.mempool).toEqual(replica.mempool);
   expect(meta.position).toEqual(replica.position);
   expect(meta.jHistory).toEqual(replica.jHistory);
+  expect(meta.state).toEqual(cloneEntityState(replica.state, true));
+  expect(meta.state.accounts.get(counterpartyId)?.pulls).toBeUndefined();
 });

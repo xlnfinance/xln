@@ -38,7 +38,7 @@
  * Prereqs: localhost:8080, xln.finance with 3 hubs (H1/H2/H3)
  */
 
-import { allowBrowserIssue, test, expect, type BrowserContext, type Page } from './global-setup';
+import { test, expect, type BrowserContext, type Page } from './global-setup';
 import { ethers } from 'ethers';
 import { resetProdServer as resetSharedProdServer } from './utils/e2e-baseline';
 import { APP_BASE_URL, API_BASE_URL } from './utils/e2e-baseline';
@@ -56,6 +56,8 @@ import {
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-connect';
 import { enqueueEntityTxs } from './utils/e2e-runtime-input';
 import { HTLC_ENFORCEMENT_RESERVE_MS } from '../runtime/account/consensus/deadline-policy';
+import { getTokenInfo } from '../runtime/account/utils';
+import { closeRuntimeContext } from './utils/e2e-runtime-shutdown';
 
 const INIT_TIMEOUT = 30_000;
 
@@ -97,8 +99,9 @@ function calcSenderSpend(
   return amount;
 }
 
-function toWei(n: number): bigint { return BigInt(Math.round(n * 100)) * 10n ** 16n; }
-function formatUsd(wei: bigint): string { return `$${Number(wei / (10n ** 16n)) / 100}`; }
+const USDC_SCALE = 10n ** BigInt(getTokenInfo(1).decimals);
+function toWei(n: number): bigint { return BigInt(Math.round(n * 100)) * USDC_SCALE / 100n; }
+function formatUsd(amount: bigint): string { return `$${Number(amount * 100n / USDC_SCALE) / 100}`; }
 const MULTIROUTE_MNEMONICS: Record<UserName, string> = {
   alice: selectDemoMnemonic('alice'),
   bob: selectDemoMnemonic('bob'),
@@ -251,7 +254,6 @@ async function faucet(page: Page, entityId: string, hubEntityId: string) {
 }
 
 async function pay(page: Page, from: string, signerId: string, to: string, route: string[], amount: bigint) {
-  const secret = ethers.hexlify(ethers.randomBytes(32));
   await enqueueEntityTxs(page, from, signerId, [{
     type: 'htlcPayment',
     data: {
@@ -259,7 +261,6 @@ async function pay(page: Page, from: string, signerId: string, to: string, route
       tokenId: 1,
       amount,
       route,
-      secret,
     },
   }]);
 }
@@ -339,12 +340,7 @@ async function resetProdServer(page: Page) {
 test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
   test.setTimeout(600_000);
 
-  test('full mesh routing with diverse payment patterns', async ({ browser, page }) => {
-    allowBrowserIssue({
-      type: 'console',
-      severity: 'error',
-      message: /HTLC_PAYMENT.*Insufficient outbound capacity/,
-    });
+  test('full mesh routing with diverse payment patterns', { tag: '@functional' }, async ({ browser, page }) => {
     const userNames: UserName[] = ['alice', 'bob', 'carol', 'dave', 'eve', 'frank'];
     const userContexts: BrowserContext[] = [];
     const userPages: Record<UserName, Page> = {} as Record<UserName, Page>;
@@ -739,8 +735,6 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     console.log('[E2E] TC16: Overspend — send more than balance');
     const aliceCapBefore = await outCap(pageFor('alice'), users.alice!.entityId, h1!);
     const overAmount = aliceCapBefore + toWei(1); // more than Alice has
-    const overSecret = ethers.hexlify(ethers.randomBytes(32));
-    const overHash = ethers.keccak256(ethers.solidityPacked(['bytes32'], [overSecret]));
 
     await enqueueEntityTxs(pageFor('alice'), users.alice!.entityId, users.alice!.signerId, [{
       type: 'htlcPayment',
@@ -749,8 +743,6 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
         tokenId: 1,
         amount: overAmount,
         route: [users.alice!.entityId, h1!, users.dave!.entityId],
-        secret: overSecret,
-        hashlock: overHash,
       },
     }]);
 
@@ -844,9 +836,9 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
         counterpartyId: h1!,
         lockId: tcLockId,
         hashlock: tcHashlock,
-        timelock: String(BigInt(Date.now() + manualLockLifetimeMs)),
-        revealBeforeHeight: '999999999',
-        amount: String(BigInt(1) * BigInt(10) ** BigInt(18)),
+        timelock: BigInt(Date.now() + manualLockLifetimeMs),
+        revealBeforeHeight: 999_999_999,
+        amount: USDC_SCALE,
         tokenId: 1,
       },
     }]);
@@ -914,13 +906,14 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     console.log(`[E2E] TC19 hook diag after wait: ${JSON.stringify(hookDiag2)}`);
     expect(hookDiag2?.hookCount, 'TC19: timeout hook should be consumed').toBe(0);
 
+    await expect.poll(
+      () => getAccountLockCount(pageFor('alice'), users.alice!.entityId, h1!),
+      { timeout: 10_000, message: 'TC19: expired HTLC lock must be removed' },
+    ).toBe(lockCountBefore);
     const lockCountAfterTimeout = await getAccountLockCount(pageFor('alice'), users.alice!.entityId, h1!);
     console.log(`[E2E] Alice account locks after timeout: ${lockCountAfterTimeout}`);
-    expect(
-      lockCountAfterTimeout,
-      'TC19: timeout flow must not create extra lingering locks beyond the created manual lock',
-    ).toBeLessThanOrEqual(lockCountAfterCreate);
-    console.log('[E2E] TC19 PASS: HTLC timeout hook fired and lock state remained bounded');
+    expect(lockCountAfterTimeout, 'TC19: timeout flow must restore the prior lock count').toBe(lockCountBefore);
+    console.log('[E2E] TC19 PASS: HTLC timeout hook fired and removed the expired lock');
 
     // ═══════════════════════════════════════════════════════════════
     // PHASE K: PERSISTENCE (reload page, hard-assert balances survive)
@@ -989,7 +982,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     console.log('[E2E] ======================================================');
 
     for (const context of userContexts) {
-      await context.close().catch(() => undefined);
+      await closeRuntimeContext(context);
     }
     await resetProdServer(page); // cleanup
   });

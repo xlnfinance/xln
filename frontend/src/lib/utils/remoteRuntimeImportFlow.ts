@@ -89,7 +89,7 @@ export const writeRemoteRuntimeImportSummary = (
     ? { index: result.index, ok: true, ...summarizeStoredRemoteRuntimeEntry(result.stored) }
     : { ok: false, ...summarizeFailedRemoteRuntimeEntry(result) });
   sessionStorage.setItem(REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY, JSON.stringify({
-    ok: true,
+    ok: entries.length > 0,
     importedAt,
     count: entries.length,
     total,
@@ -163,11 +163,11 @@ export const importRemoteRuntimeEntries = async (
   });
   const validated = results.flatMap((result) => result.ok ? [result.stored] : []);
   const failed = results.flatMap((result) => result.ok ? [] : [{ entry: result.entry, reason: result.reason }]);
+  writeRemoteRuntimeImportSummary(results, entries.length, importedAt);
   if (validated.length === 0) {
     throw new Error(failed[0]?.reason || 'REMOTE_RUNTIME_IMPORT_EMPTY');
   }
   const persisted = runtimeOperations.upsertRemoteRuntimeImports(validated);
-  writeRemoteRuntimeImportSummary(results, entries.length, importedAt);
   if (options.activateFirst === true) {
     const first = validated[0]!;
     const activated = await runtimeOperations.activateRemoteRuntime(first.runtimeId, { href: '/app' });

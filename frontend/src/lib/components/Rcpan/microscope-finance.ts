@@ -141,7 +141,8 @@ export function deriveRcpanFinanceFrame(
     leftReserve: token.userReserve,
     rightReserve: hubReserve,
     collateral,
-    finalDelta: token.grossAmount,
+    ondelta: 0n,
+    offdelta: token.grossAmount,
   });
   const reserves = deriveCurrentReserves(
     timeline,

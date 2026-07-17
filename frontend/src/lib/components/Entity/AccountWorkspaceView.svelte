@@ -191,7 +191,7 @@
   export let openDisputedAccount: (counterpartyEntityId: string) => void;
   export let reopenDisputedAccount: (counterpartyEntityId: string) => void | Promise<void>;
   export let resolveSelfEntityId: () => string;
-  export let formatAmount: (amount: bigint, decimals?: number) => string;
+  export let formatAmount: (amount: bigint, decimals: number) => string;
   export let formatApproxUsd: (value: number) => string;
   export let getMovePrimaryActionLabel: () => string;
   export let onMoveVisualRoot: (node: HTMLDivElement | null) => void;

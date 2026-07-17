@@ -55,10 +55,8 @@ async function main() {
   const signerAKey = deriveSignerKeySync(seed, '1');
   const signerBKey = deriveSignerKeySync(seed, '2');
 
-  registerSignerKey(signerA, signerAKey);
-  registerSignerKey(signerA.slice(-4).toLowerCase(), signerAKey);
-  registerSignerKey(signerB, signerBKey);
-  registerSignerKey(signerB.slice(-4).toLowerCase(), signerBKey);
+  registerSignerKey(env, signerA, signerAKey);
+  registerSignerKey(env, signerB, signerBKey);
 
   const entityA = generateLazyEntityId([signerA], 1n).toLowerCase();
   const entityB = generateLazyEntityId([signerB], 1n).toLowerCase();

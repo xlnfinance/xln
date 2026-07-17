@@ -10,8 +10,15 @@ import {
   type TestInfo,
 } from '@playwright/test';
 import { appendFileSync, mkdirSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setE2ETimingOrigin } from './utils/e2e-timing';
+import {
+  quiesceRuntimePage,
+  wrapRuntimeContextClose,
+  wrapRuntimePageClose,
+} from './utils/e2e-runtime-shutdown';
+import { isBenignConsoleMessage } from './utils/browser-health-classification';
 
 type BrowserIssueType = 'console' | 'pageerror' | 'requestfailed' | 'http';
 type BrowserIssueSeverity = 'error' | 'warning';
@@ -45,6 +52,27 @@ const observedContexts = new Set<BrowserContext>();
 const patchedBrowsers = new Set<Browser>();
 const expectedBrowserIssuesByTestId = new Map<string, BrowserIssueExpectation[]>();
 let activeTestInfo: TestInfo | null = null;
+const FAILURE_HOOK_TIMEOUT_MS = 5_000;
+
+const asError = (value: unknown, label: string): Error =>
+  value instanceof Error ? value : new Error(`${label}: ${String(value)}`);
+
+const withFailureHookTimeout = async <T>(label: string, operation: () => Promise<T>): Promise<T> => {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`E2E_FAILURE_HOOK_TIMEOUT:${label}:${FAILURE_HOOK_TIMEOUT_MS}`)),
+          FAILURE_HOOK_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+};
 
 const eventPath = (): string => process.env['E2E_BROWSER_EVENTS_PATH']?.trim() ?? '';
 
@@ -108,9 +136,6 @@ const emitIssue = (
   });
 };
 
-const isBenignConsoleMessage = (message: string): boolean =>
-  message === 'Ignoring Event: localhost';
-
 const getConsoleResourceStatus = (message: string): number | null => {
   const match = message.match(/Failed to load resource: the server responded with a status of (\d{3})/);
   if (!match) return null;
@@ -131,6 +156,7 @@ const isBenignPageError = (url: string | null, message: string): boolean =>
 const observePage = (page: Page, testInfo: TestInfo | null): void => {
   if (observedPages.has(page)) return;
   observedPages.add(page);
+  wrapRuntimePageClose(page);
   page.on('close', () => observedPages.delete(page));
   page.on('console', (message) => {
     const type = message.type();
@@ -178,6 +204,7 @@ const observePage = (page: Page, testInfo: TestInfo | null): void => {
 const observeContext = (context: BrowserContext, testInfo: TestInfo | null): void => {
   if (observedContexts.has(context)) return;
   observedContexts.add(context);
+  wrapRuntimeContextClose(context);
   context.on('close', () => observedContexts.delete(context));
   for (const page of context.pages()) observePage(page, testInfo);
   context.on('page', (page) => observePage(page, testInfo));
@@ -196,6 +223,48 @@ const patchBrowser = (browser: Browser): void => {
   };
 };
 
+const captureFailedRuntimeSnapshots = async (testInfo: TestInfo, pages: Page[]): Promise<Error[]> => {
+  if (testInfo.status === testInfo.expectedStatus) return [];
+  const settled = await Promise.allSettled(pages.map(async (page, index) => {
+    const artifactName = `browser-runtime-${index + 1}.json`;
+    try {
+      const snapshot = await withFailureHookTimeout(`snapshot:${index + 1}`, async () => page.evaluate(() => {
+        const root = (window as Window & { __xln?: Record<string, unknown> }).__xln;
+        if (!root) throw new Error('E2E_FAILURE_DEBUG_SURFACE_MISSING');
+        const wire = root['wire'] as { stringifyJson?: (value: unknown) => string } | undefined;
+        if (typeof wire?.stringifyJson !== 'function') {
+          throw new Error('E2E_FAILURE_DEBUG_SERIALIZER_MISSING');
+        }
+        const runtimeSnapshot = root['liveRuntimeSnapshot'];
+        if (!runtimeSnapshot) throw new Error('E2E_FAILURE_RUNTIME_SNAPSHOT_MISSING');
+        return wire.stringifyJson(runtimeSnapshot);
+      }));
+      const artifactPath = testInfo.outputPath(artifactName);
+      await writeFile(artifactPath, snapshot, 'utf8');
+      await testInfo.attach(artifactName, { path: artifactPath, contentType: 'application/json' });
+    } catch (reason) {
+      const error = asError(reason, `snapshot:${index + 1}`);
+      const errorName = `browser-runtime-${index + 1}.error.txt`;
+      const errorPath = testInfo.outputPath(errorName);
+      await writeFile(errorPath, `url=${page.url()}\n${error.stack ?? error.message}\n`, 'utf8');
+      await testInfo.attach(errorName, { path: errorPath, contentType: 'text/plain' });
+      throw error;
+    }
+  }));
+  return settled.flatMap((result, index) =>
+    result.status === 'rejected' ? [asError(result.reason, `snapshot:${index + 1}`)] : []
+  );
+};
+
+const quiesceRuntimePages = async (pages: Page[]): Promise<Error[]> => {
+  const settled = await Promise.allSettled(pages.map((page, index) =>
+    withFailureHookTimeout(`quiesce:${index + 1}`, async () => quiesceRuntimePage(page))
+  ));
+  return settled.flatMap((result, index) =>
+    result.status === 'rejected' ? [asError(result.reason, `quiesce:${index + 1}`)] : []
+  );
+};
+
 export const test = base.extend({});
 
 test.beforeEach(async ({ browser, context, page }, testInfo) => {
@@ -207,10 +276,23 @@ test.beforeEach(async ({ browser, context, page }, testInfo) => {
   setE2ETimingOrigin();
 });
 
-test.afterEach(async () => {
-  const id = testId(activeTestInfo);
-  if (id) expectedBrowserIssuesByTestId.delete(id);
-  activeTestInfo = null;
+test.afterEach(async ({}, testInfo) => {
+  const pages = [...observedPages].filter((page) => !page.isClosed());
+  const secondaryErrors: Error[] = [];
+  try {
+    secondaryErrors.push(...await captureFailedRuntimeSnapshots(testInfo, pages));
+  } finally {
+    try {
+      secondaryErrors.push(...await quiesceRuntimePages(pages));
+    } finally {
+      const id = testId(activeTestInfo);
+      if (id) expectedBrowserIssuesByTestId.delete(id);
+      activeTestInfo = null;
+    }
+  }
+  if (secondaryErrors.length > 0) {
+    throw new AggregateError(secondaryErrors, 'E2E_FAILURE_HOOK_SECONDARY_ERRORS');
+  }
 });
 
 export const allowBrowserIssue = (rule: BrowserIssueExpectation): void => {

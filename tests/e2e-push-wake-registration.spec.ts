@@ -587,7 +587,7 @@ async function openRecoverySettings(page: Page): Promise<void> {
   await expect(page.getByTestId('push-wake-panel')).toBeVisible({ timeout: INIT_TIMEOUT });
 }
 
-test('settings registers and revokes signed push wake token through browser UI', async ({ page }) => {
+test('settings registers and revokes signed push wake token through browser UI', { tag: '@functional' }, async ({ page }) => {
   const capture = await startPushCaptureWebhook();
   let tower: Awaited<ReturnType<typeof startPushWatchtower>> | null = null;
 

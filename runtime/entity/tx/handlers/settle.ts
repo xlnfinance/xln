@@ -4,122 +4,169 @@
  * Ops-based settlement: propose/update with SettlementOp[], compile to diffs at approve.
  *
  * Flow:
- * 1. settle_propose: Either party creates workspace with ops[]
- * 2. settle_update: Either party replaces ops[] (clears hankos)
+ * 1. settle_propose: Queue an Account-frame workspace upsert
+ * 2. settle_update: Queue an exact previous-hash Account-frame replacement
  * 3. settle_approve: Counterparty of lastModifier compiles ops → diffs, signs
  * 4. settle_execute: Executor submits compiled diffs to jBatch
- * 5. settle_reject: Clears workspace without executing
+ * 5. settle_reject: Queue an exact Account-frame clear
  */
 
-import type { EntityState, EntityTx, EntityInput, SettlementWorkspace, SettlementDiff, SettlementOp, AccountSettleAction } from '../../../types';
-import { cloneEntityState, addMessage, getAccountPerspective, resolveEntityProposerId } from '../../../state-helpers';
+import type {
+  AccountFrame,
+  AccountSettleAction,
+  AccountTx,
+  EntityInput,
+  EntityState,
+  EntityTx,
+  SettlementDiff,
+  SettlementOp,
+  SettlementWorkspace,
+} from '../../../types';
+import { cloneEntityState, addMessage, getAccountPerspective } from '../../../state-helpers';
 import { initJBatch, batchAddSettlement } from '../../../jurisdiction/batch';
 import { isLeftEntity } from '../../id';
-import type { Env, HankoString } from '../../../types';
-import { createSettlementHashWithNonce, createDisputeProofHashWithNonce, buildAccountProofBody } from '../../../protocol/dispute/proof-builder';
-import { signEntityHashes, verifyHankoForHash } from '../../../hanko/signing';
-import { compileOps, userAutoApprove as userAutoApproveByDiff } from '../../../protocol/settlement/operations';
-import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../../protocol/dispute/arguments';
+import type { Env, HashToSign } from '../../../types';
+import { createSettlementHashWithNonce, createDisputeProofHashWithNonce } from '../../../protocol/dispute/proof-builder';
+import { verifyHankoForHash } from '../../../hanko/signing';
+import {
+  compileOps,
+  getNextSettlementNonce,
+  userAutoApprove as userAutoApproveByDiff,
+} from '../../../protocol/settlement/operations';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
+import {
+  getCertifiedBoardNodeStore,
+  resolveObserverCertifiedBoardHash,
+} from '../../../jurisdiction/board-registry';
+import {
+  assertCanonicalSettlementWorkspace,
+  hasPendingSettlementTransition,
+} from '../../../account/tx/handlers/settle-transition';
+import { projectAccountAfterSettlement } from '../../../protocol/settlement/projection';
+import { buildAccountProofBodyFromEnv } from '../../../account/consensus/helpers';
 
 import type { AccountMachine } from '../../../types';
 
 const settleLog = createStructuredLogger('entity.settle');
 
-/**
- * Settlement signatures must jump past both the on-chain nonce and the latest
- * off-chain proof nonce. Otherwise an older high-nonce dispute proof can still
- * outrank a fresh cooperative settlement on-chain.
- */
-const getNextSettlementNonce = (account: AccountMachine): number => {
-  const jNonce = account.jNonce ?? 0;
-  const proofNonce = account.proofHeader?.nextProofNonce ?? 0;
-  return Math.max(jNonce, proofNonce) + 1;
-};
-
-/**
- * Sign the next dispute proof after a cooperative settlement nonce.
- */
-async function signPostSettlementDisputeProof(
+const buildPostSettlementDisputeProof = (
   env: Env,
   entityState: EntityState,
   account: AccountMachine,
   settlementNonce: number,
-): Promise<{ hanko?: HankoString; proofBodyHash: string; disputeHash: string; nonce: number } | null> {
+  diffs: readonly SettlementDiff[],
+  forgiveTokenIds: readonly number[],
+): { proofBodyHash: string; disputeHash: string; nonce: number } => {
   const jurisdiction = entityState.config.jurisdiction;
-  if (!jurisdiction?.depositoryAddress) return null;
-  const signerId = entityState.config.validators[0];
-  if (!signerId) throw new Error('POST_SETTLEMENT_DISPUTE_SIGNER_MISSING');
-
-  const nonce = Math.max(
-    settlementNonce,
-    account.jNonce ?? 0,
-    account.proofHeader?.nextProofNonce ?? 0,
-  ) + 1;
-  const { proofBodyHash, proofBodyStruct } = buildAccountProofBody(account);
+  if (!jurisdiction?.depositoryAddress) throw new Error('POST_SETTLEMENT_JURISDICTION_MISSING');
+  const nonce = settlementNonce + 1;
+  const projected = projectAccountAfterSettlement(account, diffs, forgiveTokenIds);
+  const { proofBodyHash } = buildAccountProofBodyFromEnv(env, projected);
   const disputeHash = createDisputeProofHashWithNonce(
     account,
     proofBodyHash,
     { chainId: Number(jurisdiction.chainId), depositoryAddress: jurisdiction.depositoryAddress },
     nonce,
   );
-  let hanko: HankoString | undefined;
-  if (entityState.config.validators.length === 1) {
-    const hankos = await signEntityHashes(env, entityState.entityId, signerId, [disputeHash]);
-    hanko = hankos[0];
-    if (!hanko) throw new Error('POST_SETTLEMENT_DISPUTE_HANKO_MISSING');
-  }
-  account.disputeProofBodiesByHash ??= {};
-  account.disputeProofBodiesByHash[proofBodyHash] = proofBodyStruct;
-  account.disputeProofNoncesByHash ??= {};
-  account.disputeProofNoncesByHash[proofBodyHash] = nonce;
-  storeDisputeArgumentSnapshot(
-    account,
-    captureDisputeArgumentSnapshot(account, proofBodyHash, nonce, proofBodyStruct),
-  );
-  return { ...(hanko ? { hanko } : {}), proofBodyHash, disputeHash, nonce };
-}
+  return { proofBodyHash, disputeHash, nonce };
+};
 
-/**
- * Convert settlement diffs to hold format for accountTx
- */
-function diffsToHoldFormat(diffs: SettlementDiff[]): Array<{
-  tokenId: number;
-  leftWithdrawing: bigint;
-  rightWithdrawing: bigint;
-}> {
-  return diffs.map(diff => ({
-    tokenId: diff.tokenId,
-    leftWithdrawing: diff.leftDiff < 0n ? -diff.leftDiff : 0n,
-    rightWithdrawing: diff.rightDiff < 0n ? -diff.rightDiff : 0n,
-  }));
-}
+type SettlementSealTx = Extract<
+  Extract<AccountTx, { type: 'settle_transition' }>['data'],
+  { kind: 'seal' }
+>;
+
+type SettlementHashToSign = HashToSign & { type: 'settlement' | 'dispute' };
+
+type SettlementSealDraft = {
+  tx: Extract<AccountTx, { type: 'settle_transition' }>;
+  hashesToSign: SettlementHashToSign[];
+};
+
+export const buildSettlementSealDraft = (
+  account: AccountMachine,
+  entityState: EntityState,
+  counterpartyEntityId: string,
+  env: Env,
+): SettlementSealDraft => {
+  const workspace = account.settlementWorkspace;
+  if (!workspace) throw new Error('SETTLEMENT_WORKSPACE_MISSING');
+  const workspaceHash = assertCanonicalSettlementWorkspace(account, workspace);
+  if (workspace.status === 'submitted') throw new Error('SETTLEMENT_SEAL_SUBMITTED_FORBIDDEN');
+  const { iAmLeft } = getAccountPerspective(account, entityState.entityId);
+  const existingPostHanko = iAmLeft
+    ? workspace.postSettlementDisputeProof?.leftHanko
+    : workspace.postSettlementDisputeProof?.rightHanko;
+  if (existingPostHanko) throw new Error('SETTLEMENT_SIDE_ALREADY_SEALED');
+
+  const settlementNonce = workspace.nonceAtSign ?? getNextSettlementNonce(account);
+  if (!Number.isSafeInteger(settlementNonce) || settlementNonce < 1) {
+    throw new Error(`SETTLEMENT_SIGNED_NONCE_INVALID:${String(settlementNonce)}`);
+  }
+  const { diffs, forgiveTokenIds } = compileOps(workspace.ops, workspace.lastModifiedByLeft);
+  const jurisdiction = entityState.config.jurisdiction;
+  if (!jurisdiction?.depositoryAddress) throw new Error('SETTLEMENT_JURISDICTION_MISSING');
+  const settlementHash = createSettlementHashWithNonce(
+    account,
+    diffs,
+    forgiveTokenIds,
+    { chainId: Number(jurisdiction.chainId), depositoryAddress: jurisdiction.depositoryAddress },
+    settlementNonce,
+  );
+  if (workspace.settlementHash && workspace.settlementHash.toLowerCase() !== settlementHash.toLowerCase()) {
+    throw new Error(`SETTLEMENT_SIGNED_HASH_MISMATCH:${workspace.settlementHash}:${settlementHash}`);
+  }
+  const postProof = buildPostSettlementDisputeProof(
+    env,
+    entityState,
+    account,
+    settlementNonce,
+    diffs,
+    forgiveTokenIds,
+  );
+  const pinnedPostProof = workspace.postSettlementDisputeProof;
+  if (
+    pinnedPostProof &&
+    (
+      pinnedPostProof.nonce !== postProof.nonce ||
+      pinnedPostProof.proofBodyHash.toLowerCase() !== postProof.proofBodyHash.toLowerCase() ||
+      pinnedPostProof.disputeHash.toLowerCase() !== postProof.disputeHash.toLowerCase()
+    )
+  ) {
+    throw new Error('POST_SETTLEMENT_PROOF_PIN_MISMATCH');
+  }
+
+  const sourceIsExecutor = workspace.executorIsLeft === iAmLeft;
+  const data: SettlementSealTx = {
+    kind: 'seal',
+    version: workspace.version,
+    workspaceHash,
+    settlementNonce,
+    settlementHash,
+    postProof,
+  };
+  const hashesToSign: SettlementHashToSign[] = [
+    ...(!sourceIsExecutor
+      ? [{
+          hash: settlementHash,
+          type: 'settlement' as const,
+          context: `settlement:${counterpartyEntityId.slice(-8)}:nonce:${settlementNonce}`,
+        }]
+      : []),
+    {
+      hash: postProof.disputeHash,
+      type: 'dispute',
+      context: `settlement:${counterpartyEntityId.slice(-8)}:post-dispute:nonce:${postProof.nonce}`,
+    },
+  ];
+  return { tx: { type: 'settle_transition', data }, hashesToSign };
+};
 
 type MempoolOp = { accountId: string; tx: import('../../../types').AccountTx };
 
-/**
- * Create settle_hold or settle_release mempoolOp for frame-atomic application
- */
-function createSettlementHoldOp(
-  accountId: string,
-  diffs: SettlementDiff[],
-  workspaceVersion: number,
-  action: 'set' | 'release'
-): MempoolOp | null {
-  const holdDiffs = diffsToHoldFormat(diffs);
-  const hasWithdrawals = holdDiffs.some(d => d.leftWithdrawing > 0n || d.rightWithdrawing > 0n);
-  if (!hasWithdrawals) {
-    settleLog.debug('hold.no_withdrawals', { action, workspaceVersion });
-    return null;
-  }
-
-  const tx = action === 'set'
-    ? { type: 'settle_hold' as const, data: { workspaceVersion, diffs: holdDiffs } }
-    : { type: 'settle_release' as const, data: { workspaceVersion, diffs: holdDiffs } };
-
-  settleLog.debug('hold.mempool_op_created', { action, workspaceVersion, diffs: holdDiffs.length });
-  return { accountId, tx };
-}
+const assertNoPendingSettlementTransition = (account: AccountMachine): void => {
+  if (hasPendingSettlementTransition(account)) throw new Error('SETTLEMENT_TRANSITION_ALREADY_PENDING');
+};
 
 /**
  * Convert V1-compat diffs to rawDiff ops (auto-conversion for backward compat)
@@ -141,12 +188,12 @@ function diffsToOps(data: { ops?: SettlementOp[]; diffs?: SettlementDiff[]; forg
 }
 
 /**
- * settle_propose: Create a new settlement workspace with typed ops
+ * settle_propose: Queue a new settlement workspace for Account consensus
  */
 export async function handleSettlePropose(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_propose' }>,
-  env: Env
+  _env: Env
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] }> {
   const { counterpartyEntityId, executorIsLeft: execParam, memo } = entityTx.data;
   const ops = diffsToOps(entityTx.data);
@@ -164,67 +211,43 @@ export async function handleSettlePropose(
     settleLog.warn('propose.skip_workspace_exists', { counterparty: shortId(counterpartyEntityId), version });
     return { newState, outputs, mempoolOps };
   }
+  assertNoPendingSettlementTransition(account);
 
   const isLeft = isLeftEntity(entityState.entityId, counterpartyEntityId);
 
   // Validate: compileOps runs on proposer path (guard 1)
-  const { diffs } = compileOps(ops, isLeft);
-
-  const workspace: SettlementWorkspace = {
-    ops,
-    lastModifiedByLeft: isLeft,
-    status: 'awaiting_counterparty',
-    ...(memo && { memo }),
-    version: 1,
-    createdAt: newState.timestamp,
-    lastUpdatedAt: newState.timestamp,
-    executorIsLeft: execParam ?? !isLeft, // Default: counterparty executes
-  };
-
-  account.settlementWorkspace = workspace;
-
-  // Ring-fence using compiled diffs
-  const holdOp = createSettlementHoldOp(counterpartyEntityId, diffs, 1, 'set');
-  if (holdOp) mempoolOps.push(holdOp);
+  compileOps(ops, isLeft);
+  // The proposer executes by default. That makes the counterparty's approval
+  // the only settlement Hanko accepted on-chain; the executor never submits a
+  // signature it created itself.
+  const executorIsLeft = execParam ?? isLeft;
+  mempoolOps.push({
+    accountId: counterpartyEntityId,
+    tx: {
+      type: 'settle_transition',
+      data: {
+        kind: 'upsert',
+        version: 1,
+        ops,
+        executorIsLeft,
+        ...(memo !== undefined ? { memo } : {}),
+      },
+    },
+  });
 
   settleLog.debug('propose.created', { version: 1, ops: ops.length });
-  addMessage(newState, `⚖️ Settlement proposed to ${counterpartyEntityId.slice(-4)} - awaiting response`);
-
-  // Send ops to counterparty
-  const settleAction: AccountSettleAction = {
-    type: 'propose',
-    ops,
-    executorIsLeft: workspace.executorIsLeft,
-    ...(memo && { memo }),
-    version: 1,
-  };
-
-  outputs.push({
-    entityId: counterpartyEntityId,
-    signerId: resolveEntityProposerId(env, counterpartyEntityId, 'settle.propose.output'),
-    entityTxs: [{
-      type: 'accountInput',
-      data: {
-        kind: 'settle',
-        fromEntityId: entityState.entityId,
-        toEntityId: counterpartyEntityId,
-        settleAction,
-      }
-    }]
-  });
+  addMessage(newState, `⚖️ Settlement proposal queued for bilateral Account consensus`);
 
   return { newState, outputs, mempoolOps };
 }
 
 /**
- * settle_update: Update existing workspace ops
- * Guard 2: Clears signatures, compiledDiffs, postSettlementDisputeProof
- * Guard 7: Releases OLD holds before setting new holds
+ * settle_update: Queue an atomic old-release/new-add workspace replacement
  */
 export async function handleSettleUpdate(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_update' }>,
-  env: Env
+  _env: Env
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] }> {
   const { counterpartyEntityId, executorIsLeft: execParam, memo } = entityTx.data;
   const ops = diffsToOps(entityTx.data);
@@ -237,6 +260,7 @@ export async function handleSettleUpdate(
   const account = newState.accounts.get(counterpartyEntityId);
   if (!account) throw new Error(`No account with ${counterpartyEntityId.slice(-4)}`);
   if (!account.settlementWorkspace) throw new Error(`No settlement workspace to update. Use settle_propose first.`);
+  assertNoPendingSettlementTransition(account);
 
   // Guard 2: Cannot update after signing
   if (account.settlementWorkspace.leftHanko || account.settlementWorkspace.rightHanko) {
@@ -246,65 +270,28 @@ export async function handleSettleUpdate(
   const isLeft = isLeftEntity(entityState.entityId, counterpartyEntityId);
 
   // Validate new ops (guard 1: dual-side validation)
-  const { diffs: newDiffs } = compileOps(ops, isLeft);
-
-  // Guard 7: Release OLD holds using OLD compile context
-  const oldVersion = account.settlementWorkspace.version;
-  const oldOps = account.settlementWorkspace.ops;
-  const oldLastModifiedByLeft = account.settlementWorkspace.lastModifiedByLeft;
-  const { diffs: oldDiffs } = compileOps(oldOps, oldLastModifiedByLeft);
-  const releaseOp = createSettlementHoldOp(counterpartyEntityId, oldDiffs, oldVersion, 'release');
-  if (releaseOp) mempoolOps.push(releaseOp);
-
-  const newVersion = oldVersion + 1;
-
-  // Update workspace — clear all cached/signed state (guard 2)
-  account.settlementWorkspace.ops = ops;
-  account.settlementWorkspace.lastModifiedByLeft = isLeft;
-  if (memo) account.settlementWorkspace.memo = memo;
-  account.settlementWorkspace.version = newVersion;
-  account.settlementWorkspace.lastUpdatedAt = newState.timestamp;
-  account.settlementWorkspace.status = 'awaiting_counterparty';
-  delete account.settlementWorkspace.leftHanko;
-  delete account.settlementWorkspace.rightHanko;
-  delete account.settlementWorkspace.compiledDiffs;
-  delete account.settlementWorkspace.compiledForgiveTokenIds;
-  delete account.settlementWorkspace.postSettlementDisputeProof;
-
-  // Guard 3: executorIsLeft can change only if no hankos exist (already ensured above)
-  if (execParam !== undefined) {
-    account.settlementWorkspace.executorIsLeft = execParam;
-  }
-
-  // Set NEW holds using new compile context
-  const holdOp = createSettlementHoldOp(counterpartyEntityId, newDiffs, newVersion, 'set');
-  if (holdOp) mempoolOps.push(holdOp);
+  compileOps(ops, isLeft);
+  const workspace = account.settlementWorkspace;
+  const previousWorkspaceHash = assertCanonicalSettlementWorkspace(account, workspace);
+  const newVersion = workspace.version + 1;
+  const effectiveMemo = memo !== undefined ? memo : workspace.memo;
+  mempoolOps.push({
+    accountId: counterpartyEntityId,
+    tx: {
+      type: 'settle_transition',
+      data: {
+        kind: 'upsert',
+        version: newVersion,
+        previousWorkspaceHash,
+        ops,
+        executorIsLeft: execParam ?? workspace.executorIsLeft,
+        ...(effectiveMemo !== undefined ? { memo: effectiveMemo } : {}),
+      },
+    },
+  });
 
   settleLog.debug('update.applied', { version: newVersion, ops: ops.length });
-  addMessage(newState, `⚖️ Settlement updated (v${newVersion})`);
-
-  // Send update to counterparty
-  const settleAction: AccountSettleAction = {
-    type: 'update',
-    ops,
-    executorIsLeft: account.settlementWorkspace.executorIsLeft,
-    ...(account.settlementWorkspace.memo && { memo: account.settlementWorkspace.memo }),
-    version: newVersion,
-  };
-
-  outputs.push({
-    entityId: counterpartyEntityId,
-    signerId: resolveEntityProposerId(env, counterpartyEntityId, 'settle.update.output'),
-    entityTxs: [{
-      type: 'accountInput',
-      data: {
-        kind: 'settle',
-        fromEntityId: entityState.entityId,
-        toEntityId: counterpartyEntityId,
-        settleAction,
-      }
-    }]
-  });
+  addMessage(newState, `⚖️ Settlement update v${newVersion} queued for bilateral Account consensus`);
 
   return { newState, outputs, mempoolOps };
 }
@@ -318,9 +305,9 @@ export async function handleSettleUpdate(
 export async function handleSettleApprove(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_approve' }>,
-  env: Env
+  _env: Env
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[]; hashesToSign?: Array<{ hash: string; type: 'settlement' | 'dispute'; context: string }> }> {
-  const { counterpartyEntityId } = entityTx.data;
+  const { counterpartyEntityId, workspaceHash: requestedWorkspaceHash } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
@@ -330,131 +317,33 @@ export async function handleSettleApprove(
   const account = newState.accounts.get(counterpartyEntityId);
   if (!account) throw new Error(`No account with ${counterpartyEntityId.slice(-4)}`);
   if (!account.settlementWorkspace) throw new Error(`No settlement workspace to approve.`);
-
-  const workspace = account.settlementWorkspace;
-  if (workspace.status === 'submitted') {
+  assertNoPendingSettlementTransition(account);
+  if (account.settlementWorkspace.status === 'submitted') {
     addMessage(newState, `⏭️ settle_execute skipped: workspace already submitted`);
     settleLog.debug('execute.skip_already_submitted', { counterparty: shortId(counterpartyEntityId) });
     return { newState, outputs, mempoolOps };
   }
-  const { iAmLeft } = getAccountPerspective(account, entityState.entityId);
-
-  // Gate: Cannot approve your own proposal
-  if (workspace.lastModifiedByLeft === iAmLeft) {
-    throw new Error(`Cannot approve your own proposal - counterparty must approve first`);
-  }
-
-  // Check if we already signed
-  const myHanko = iAmLeft ? workspace.leftHanko : workspace.rightHanko;
-  if (myHanko) throw new Error(`Already signed this workspace.`);
-
-  // Compile ops → diffs (using lastModifiedByLeft as proposer perspective)
-  const { diffs, forgiveTokenIds } = compileOps(workspace.ops, workspace.lastModifiedByLeft);
-
-  // Cache compiled result
-  workspace.compiledDiffs = diffs;
-  workspace.compiledForgiveTokenIds = forgiveTokenIds;
-
-  const signedNonce = getNextSettlementNonce(account);
-  workspace.nonceAtSign = signedNonce;
-
-  settleLog.debug('approve.nonce_selected', {
-    nonce: signedNonce,
-    jNonce: account.jNonce ?? 0,
-    proofNonce: account.proofHeader?.nextProofNonce ?? 0,
-  });
-
-  const jurisdiction = entityState.config.jurisdiction;
-  if (!jurisdiction) throw new Error('No jurisdiction configured');
-
-  // Guard 5: Sign over compiled diffs (on-chain hash unchanged)
-  const settlementHash = createSettlementHashWithNonce(
+  const canonicalWorkspaceHash = assertCanonicalSettlementWorkspace(
     account,
-    diffs,
-    forgiveTokenIds,
-    { chainId: Number(jurisdiction.chainId), depositoryAddress: jurisdiction.depositoryAddress },
-    signedNonce,
+    account.settlementWorkspace,
   );
-
-  const signerId = entityState.config.validators[0];
-  if (!signerId) throw new Error('No validator configured for entity');
-
-  let hanko: HankoString | undefined;
-  if (entityState.config.validators.length === 1) {
-    const hankos = await signEntityHashes(env, entityState.entityId, signerId, [settlementHash]);
-    hanko = hankos[0];
-    if (!hanko) throw new Error(`Failed to generate settlement hanko for ${signerId.slice(-4)}`);
+  if (requestedWorkspaceHash !== canonicalWorkspaceHash) {
+    throw new Error(
+      `SETTLEMENT_APPROVAL_WORKSPACE_HASH_MISMATCH:${requestedWorkspaceHash}:${canonicalWorkspaceHash}`,
+    );
   }
-  workspace.settlementHash = settlementHash;
-
-  // Store our hanko
-  if (hanko) {
-    if (iAmLeft) workspace.leftHanko = hanko;
-    else workspace.rightHanko = hanko;
+  newState.deferredAccountProposals ??= new Map();
+  const existing = newState.deferredAccountProposals.get(counterpartyEntityId);
+  if (existing && existing !== canonicalWorkspaceHash) {
+    throw new Error(`SETTLEMENT_APPROVAL_ALREADY_DEFERRED:${existing}:${canonicalWorkspaceHash}`);
   }
-
-  // Post-settlement dispute proof
-  const disputeResult = await signPostSettlementDisputeProof(env, newState, account, signedNonce);
-  if (disputeResult) {
-    if (!workspace.postSettlementDisputeProof) {
-      workspace.postSettlementDisputeProof = {
-        disputeHash: disputeResult.disputeHash,
-        proofBodyHash: disputeResult.proofBodyHash,
-        nonce: disputeResult.nonce,
-      };
-    }
-    if (workspace.postSettlementDisputeProof.disputeHash !== disputeResult.disputeHash) {
-      throw new Error(
-        `POST_SETTLEMENT_DISPUTE_HASH_MISMATCH:${workspace.postSettlementDisputeProof.disputeHash}:${disputeResult.disputeHash}`,
-      );
-    }
-    if (disputeResult.hanko) {
-      if (iAmLeft) workspace.postSettlementDisputeProof.leftHanko = disputeResult.hanko;
-      else workspace.postSettlementDisputeProof.rightHanko = disputeResult.hanko;
-    }
-    settleLog.debug('approve.post_settlement_dispute_signed', { nonce: disputeResult.nonce });
-  }
-
-  // Update status — only one signature needed (counterparty's)
-  workspace.status = 'awaiting_counterparty';
-  settleLog.debug('approve.signed');
-  addMessage(newState, `⚖️ Settlement signed - ready for execution`);
-
-  // Send approval to counterparty
-  const settleAction: AccountSettleAction = {
-    type: 'approve',
-    ...(hanko ? { hanko } : {}),
-    settlementHash,
-    version: workspace.version,
-    nonceAtSign: workspace.nonceAtSign,
-  };
-
-  outputs.push({
-    entityId: counterpartyEntityId,
-    signerId: resolveEntityProposerId(env, counterpartyEntityId, 'settle.approve.output'),
-    entityTxs: [{
-      type: 'accountInput',
-      data: {
-        kind: 'settle',
-        fromEntityId: entityState.entityId,
-        toEntityId: counterpartyEntityId,
-        settleAction,
-      }
-    }]
+  newState.deferredAccountProposals.set(counterpartyEntityId, canonicalWorkspaceHash);
+  settleLog.debug('approve.deferred_until_account_idle', {
+    side: getAccountPerspective(account, entityState.entityId).iAmLeft ? 'left' : 'right',
+    workspaceHash: canonicalWorkspaceHash,
   });
-
-  const hashesToSign: Array<{ hash: string; type: 'settlement' | 'dispute'; context: string }> = [
-    { hash: settlementHash, type: 'settlement', context: `settlement:${counterpartyEntityId.slice(-8)}:nonce:${signedNonce}` },
-    ...(disputeResult
-      ? [{
-          hash: disputeResult.disputeHash,
-          type: 'dispute' as const,
-          context: `settlement:${counterpartyEntityId.slice(-8)}:post-dispute:nonce:${disputeResult.nonce}`,
-        }]
-      : []),
-  ];
-
-  return { newState, outputs, mempoolOps, hashesToSign };
+  addMessage(newState, `⚖️ Settlement approval accepted; waiting for prior Account work`);
+  return { newState, outputs, mempoolOps };
 }
 
 /**
@@ -463,7 +352,7 @@ export async function handleSettleApprove(
 export async function handleSettleExecute(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_execute' }>,
-  _env: Env
+  env: Env
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] }> {
   const { counterpartyEntityId, disableC2RShortcut = false } = entityTx.data;
   const newState = cloneEntityState(entityState);
@@ -485,6 +374,8 @@ export async function handleSettleExecute(
   }
 
   const workspace = account.settlementWorkspace;
+  assertNoPendingSettlementTransition(account);
+  const workspaceHash = assertCanonicalSettlementWorkspace(account, workspace);
   if (workspace.status === 'submitted') {
     addMessage(newState, `⏭️ settle_execute skipped: settlement already submitted`);
     settleLog.warn('execute.skip_already_submitted', { counterparty: shortId(counterpartyEntityId) });
@@ -493,6 +384,9 @@ export async function handleSettleExecute(
 
   // Need counterparty's hanko for on-chain validation
   const { iAmLeft } = getAccountPerspective(account, entityState.entityId);
+  if (workspace.executorIsLeft !== iAmLeft) {
+    throw new Error(`SETTLEMENT_EXECUTOR_MISMATCH:expected=${workspace.executorIsLeft ? 'left' : 'right'}`);
+  }
   const counterpartyHanko = iAmLeft ? workspace.rightHanko : workspace.leftHanko;
   if (!counterpartyHanko) {
     addMessage(newState, `⏭️ settle_execute skipped: missing counterparty signature`);
@@ -523,7 +417,70 @@ export async function handleSettleExecute(
     }
   }
 
-  // Initialize jBatch if needed
+  const signedNonce = workspace.nonceAtSign;
+  if (typeof signedNonce !== 'number' || !Number.isSafeInteger(signedNonce) || signedNonce < 1) {
+    throw new Error(`SETTLEMENT_SIGNED_NONCE_MISSING:${String(signedNonce)}`);
+  }
+  if (!workspace.settlementHash) throw new Error('SETTLEMENT_SIGNED_HASH_MISSING');
+  const jurisdiction = entityState.config.jurisdiction;
+  if (!jurisdiction?.depositoryAddress || !jurisdiction.entityProviderAddress) {
+    throw new Error('SETTLEMENT_JURISDICTION_MISSING');
+  }
+  const expectedSettlementHash = createSettlementHashWithNonce(
+    account,
+    diffs,
+    forgiveTokenIds,
+    { chainId: Number(jurisdiction.chainId), depositoryAddress: jurisdiction.depositoryAddress },
+    signedNonce,
+  );
+  if (expectedSettlementHash.toLowerCase() !== workspace.settlementHash.toLowerCase()) {
+    throw new Error(`SETTLEMENT_SIGNED_HASH_MISMATCH:${workspace.settlementHash}:${expectedSettlementHash}`);
+  }
+  if (workspace.status !== 'ready_to_submit') {
+    throw new Error(`SETTLEMENT_NOT_FULLY_SEALED:${workspace.status}`);
+  }
+  const postProof = workspace.postSettlementDisputeProof;
+  if (!postProof || postProof.nonce !== signedNonce + 1) {
+    throw new Error(`POST_SETTLEMENT_PROOF_NONCE_MISMATCH:${String(postProof?.nonce)}:${signedNonce + 1}`);
+  }
+  const expectedPostProof = buildPostSettlementDisputeProof(
+    env,
+    entityState,
+    account,
+    signedNonce,
+    diffs,
+    forgiveTokenIds,
+  );
+  if (
+    postProof.proofBodyHash.toLowerCase() !== expectedPostProof.proofBodyHash.toLowerCase() ||
+    postProof.disputeHash.toLowerCase() !== expectedPostProof.disputeHash.toLowerCase()
+  ) {
+    throw new Error('POST_SETTLEMENT_PROOF_HASH_MISMATCH');
+  }
+  if (!postProof.leftHanko || !postProof.rightHanko) {
+    throw new Error('POST_SETTLEMENT_PROOF_HANKO_MISSING');
+  }
+
+  const boardStore = getCertifiedBoardNodeStore(env);
+  const verifyExactHanko = async (hanko: string, hash: string, entityId: string, context: string) => {
+    const boardHash = resolveObserverCertifiedBoardHash(entityState, boardStore, entityId);
+    const verified = await verifyHankoForHash(
+      hanko as import('../../../types').HankoString,
+      hash,
+      entityId,
+      env,
+      boardHash ? { registeredBoardHash: boardHash } : undefined,
+    );
+    if (!verified.valid || verified.entityId?.toLowerCase() !== entityId.toLowerCase()) {
+      throw new Error(`${context}_HANKO_INVALID`);
+    }
+  };
+  await verifyExactHanko(counterpartyHanko, expectedSettlementHash, counterpartyEntityId, 'SETTLEMENT_NONEXECUTOR');
+  await verifyExactHanko(postProof.leftHanko, expectedPostProof.disputeHash, account.leftEntity, 'POST_SETTLEMENT_LEFT');
+  await verifyExactHanko(postProof.rightHanko, expectedPostProof.disputeHash, account.rightEntity, 'POST_SETTLEMENT_RIGHT');
+
+  // Initialize jBatch only after every signed invariant is proven. A rejected
+  // executor/hash/nonce must leave no empty or partially-filled J batch behind.
   if (!newState.jBatchState) {
     newState.jBatchState = initJBatch();
   }
@@ -541,7 +498,6 @@ export async function handleSettleExecute(
   const leftEntity = isLeft ? entityState.entityId : counterpartyEntityId;
   const rightEntity = isLeft ? counterpartyEntityId : entityState.entityId;
 
-  const jurisdiction = entityState.config.jurisdiction;
   if (!jurisdiction?.entityProviderAddress) {
     addMessage(newState, '⏭️ settle_execute skipped: no entityProvider configured');
     settleLog.warn('execute.skip_entity_provider_missing', { jurisdiction: jurisdiction?.name ?? 'unknown' });
@@ -558,7 +514,7 @@ export async function handleSettleExecute(
       counterpartyHanko!,
       jurisdiction.entityProviderAddress,
       '0x',
-      workspace.nonceAtSign ?? account.proofHeader.nextProofNonce,
+      signedNonce,
       entityState.entityId,
       disableC2RShortcut,
     );
@@ -574,23 +530,29 @@ export async function handleSettleExecute(
 
   settleLog.debug('execute.j_batch_added', { diffs: diffs.length });
 
-  // Release holds
-  const releaseOp = createSettlementHoldOp(counterpartyEntityId, diffs, workspace.version, 'release');
-  if (releaseOp) mempoolOps.push(releaseOp);
-
-  account.settlementWorkspace.status = 'submitted';
-  addMessage(newState, `✅ Settlement executed (${diffs.length} diffs) - use j_broadcast to commit`);
+  mempoolOps.push({
+    accountId: counterpartyEntityId,
+    tx: {
+      type: 'settle_transition',
+      data: {
+        kind: 'submit',
+        version: workspace.version,
+        workspaceHash,
+      },
+    },
+  });
+  addMessage(newState, `✅ Settlement submission queued (${diffs.length} diffs) - use j_broadcast to commit`);
 
   return { newState, outputs, mempoolOps };
 }
 
 /**
- * settle_reject: Clear workspace without executing
+ * settle_reject: Queue an exact workspace clear without executing
  */
 export async function handleSettleReject(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_reject' }>,
-  env: Env
+  _env: Env
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] }> {
   const { counterpartyEntityId, reason } = entityTx.data;
   const newState = cloneEntityState(entityState);
@@ -606,38 +568,100 @@ export async function handleSettleReject(
     settleLog.debug('reject.no_workspace', { counterparty: shortId(counterpartyEntityId) });
     return { newState, outputs, mempoolOps };
   }
-
-  // Release holds using compiled diffs
-  const { diffs } = compileOps(account.settlementWorkspace.ops, account.settlementWorkspace.lastModifiedByLeft);
-  const wsVersion = account.settlementWorkspace.version;
-  const releaseOp = createSettlementHoldOp(counterpartyEntityId, diffs, wsVersion, 'release');
-  if (releaseOp) mempoolOps.push(releaseOp);
-
-  delete account.settlementWorkspace;
-
-  settleLog.debug('reject.cleared');
-  addMessage(newState, `❌ Settlement rejected${reason ? `: ${reason}` : ''}`);
-
-  const settleAction: AccountSettleAction = {
-    type: 'reject',
-    ...(reason && { memo: reason }),
-  };
-
-  outputs.push({
-    entityId: counterpartyEntityId,
-    signerId: resolveEntityProposerId(env, counterpartyEntityId, 'settle.reject.output'),
-    entityTxs: [{
-      type: 'accountInput',
+  assertNoPendingSettlementTransition(account);
+  if (
+    account.settlementWorkspace.settlementHash ||
+    account.settlementWorkspace.leftHanko ||
+    account.settlementWorkspace.rightHanko ||
+    account.settlementWorkspace.postSettlementDisputeProof
+  ) {
+    throw new Error('SETTLEMENT_REJECT_SIGNED_FORBIDDEN');
+  }
+  const workspaceHash = assertCanonicalSettlementWorkspace(account, account.settlementWorkspace);
+  mempoolOps.push({
+    accountId: counterpartyEntityId,
+    tx: {
+      type: 'settle_transition',
       data: {
-        kind: 'settle',
-        fromEntityId: entityState.entityId,
-        toEntityId: counterpartyEntityId,
-        settleAction,
-      }
-    }]
+        kind: 'clear',
+        version: account.settlementWorkspace.version,
+        workspaceHash,
+      },
+    },
   });
 
+  settleLog.debug('reject.queued');
+  addMessage(newState, `❌ Settlement clear queued${reason ? `: ${reason}` : ''}`);
+
   return { newState, outputs, mempoolOps };
+}
+
+type CommittedSettlementFollowup = {
+  outputs: EntityInput[];
+  mempoolOps: MempoolOp[];
+  hashesToSign: SettlementHashToSign[];
+};
+
+/**
+ * An automatic counterparty approval is derived only after the upsert Account
+ * frame commits. Before that point the workspace is merely local mempool intent
+ * and must not be signed or used as canonical settlement state.
+ */
+export async function processCommittedSettlementTransitionFollowup(
+  account: AccountMachine,
+  accountTx: AccountTx,
+  committedFrame: AccountFrame,
+  counterpartyEntityId: string,
+  entityState: EntityState,
+  _env: Env,
+): Promise<CommittedSettlementFollowup> {
+  const empty = (): CommittedSettlementFollowup => ({ outputs: [], mempoolOps: [], hashesToSign: [] });
+  if (
+    accountTx.type !== 'settle_transition' ||
+    (accountTx.data.kind !== 'upsert' && accountTx.data.kind !== 'seal')
+  ) return empty();
+  const transitionIndex = committedFrame.accountTxs.indexOf(accountTx);
+  if (transitionIndex < 0) throw new Error('SETTLEMENT_COMMITTED_TX_NOT_IN_FRAME');
+  const hasLaterTransition = committedFrame.accountTxs
+    .slice(transitionIndex + 1)
+    .some((tx) => tx.type === 'settle_transition');
+  // Account transactions apply sequentially. A single valid frame may replace
+  // a workspace more than once; only its final transition describes committed
+  // post-state and may trigger a signature. Signing an earlier upsert against
+  // final post-state would either fail the Entity frame or authorize stale ops.
+  if (hasLaterTransition) return empty();
+  if (typeof committedFrame.byLeft !== 'boolean') throw new Error('SETTLEMENT_COMMITTED_FRAME_SIDE_MISSING');
+  const workspace = account.settlementWorkspace;
+  if (!workspace) throw new Error('SETTLEMENT_COMMITTED_WORKSPACE_MISSING');
+  const workspaceHash = assertCanonicalSettlementWorkspace(account, workspace);
+  if (workspace.version !== accountTx.data.version) {
+    throw new Error(`SETTLEMENT_COMMITTED_VERSION_MISMATCH:${workspace.version}:${accountTx.data.version}`);
+  }
+  const { iAmLeft } = getAccountPerspective(account, entityState.entityId);
+  if (committedFrame.byLeft === iAmLeft) return empty();
+  const localPostHanko = iAmLeft
+    ? workspace.postSettlementDisputeProof?.leftHanko
+    : workspace.postSettlementDisputeProof?.rightHanko;
+  if (localPostHanko || hasPendingSettlementTransition(account)) return empty();
+
+  // A side may seal automatically only when the exact ops are locally safe, or
+  // when that side authored the already-committed workspace body. Forgiveness
+  // therefore always waits for one explicit counterparty approval.
+  const locallyAuthored = workspace.lastModifiedByLeft === iAmLeft;
+  if (!locallyAuthored && !canAutoApproveWorkspace(workspace, iAmLeft)) return empty();
+
+  settleLog.debug('committed.auto_seal.start', {
+    from: shortId(counterpartyEntityId),
+    version: workspace.version,
+    workspaceHash,
+  });
+  entityState.deferredAccountProposals ??= new Map();
+  const existing = entityState.deferredAccountProposals.get(counterpartyEntityId);
+  if (existing && existing !== workspaceHash) {
+    throw new Error(`SETTLEMENT_APPROVAL_ALREADY_DEFERRED:${existing}:${workspaceHash}`);
+  }
+  entityState.deferredAccountProposals.set(counterpartyEntityId, workspaceHash);
+  return empty();
 }
 
 /**
@@ -646,237 +670,20 @@ export async function handleSettleReject(
  * Guard 1: compileOps runs on receive path too (dual-side validation)
  */
 export async function processSettleAction(
-  account: import('../../../types').AccountMachine,
+  _account: import('../../../types').AccountMachine,
   settleAction: AccountSettleAction,
-  fromEntityId: string,
-  myEntityId: string,
-  entityTimestamp: number,
-  env?: Env,
-  entityState?: EntityState,
+  _fromEntityId: string,
+  _myEntityId: string,
+  _entityTimestamp: number,
+  _env?: Env,
+  _entityState?: EntityState,
 ): Promise<{
   success: boolean;
   message: string;
   autoApproveOutput?: EntityInput;
   hashesToSign?: Array<{ hash: string; type: 'settlement' | 'dispute'; context: string }>;
 }> {
-  const { iAmLeft } = getAccountPerspective(account, myEntityId);
-  const theyAreLeft = !iAmLeft;
-
-  switch (settleAction.type) {
-    case 'propose': {
-      if (account.settlementWorkspace) {
-        return { success: false, message: 'Workspace already exists' };
-      }
-
-      const ops = settleAction.ops || [];
-
-      // Guard 1: Validate ops on receive path
-      compileOps(ops, theyAreLeft);
-
-      const workspace: SettlementWorkspace = {
-        ops,
-        lastModifiedByLeft: theyAreLeft,
-        status: 'awaiting_counterparty',
-        ...(settleAction.memo && { memo: settleAction.memo }),
-        version: settleAction.version || 1,
-        createdAt: entityTimestamp,
-        lastUpdatedAt: entityTimestamp,
-        executorIsLeft: settleAction.executorIsLeft ?? theyAreLeft,
-      };
-
-      account.settlementWorkspace = workspace;
-
-      settleLog.debug('receive.propose', { from: shortId(fromEntityId), ops: ops.length });
-
-      // Auto-approve: compile then check safety
-      let autoApproveOutput: EntityInput | undefined;
-      let autoApproveHashes: Array<{ hash: string; type: 'settlement' | 'dispute'; context: string }> | undefined;
-      if (env && entityState && canAutoApproveWorkspace(workspace, iAmLeft)) {
-        settleLog.debug('receive.auto_approve.start', { from: shortId(fromEntityId) });
-        const signedNonce = getNextSettlementNonce(account);
-        workspace.nonceAtSign = signedNonce;
-
-        const { diffs: compiledDiffs, forgiveTokenIds } = compileOps(ops, workspace.lastModifiedByLeft);
-        workspace.compiledDiffs = compiledDiffs;
-        workspace.compiledForgiveTokenIds = forgiveTokenIds;
-
-        const jurisdiction = entityState.config.jurisdiction;
-        if (!jurisdiction?.depositoryAddress) throw new Error('AUTO_APPROVE_JURISDICTION_MISSING');
-        const settlementHash = createSettlementHashWithNonce(
-          account,
-          compiledDiffs,
-          forgiveTokenIds,
-          { chainId: Number(jurisdiction.chainId), depositoryAddress: jurisdiction.depositoryAddress },
-          signedNonce,
-        );
-        workspace.settlementHash = settlementHash;
-
-        const signerId = entityState.config.validators[0];
-        if (!signerId) throw new Error('AUTO_APPROVE_SIGNER_MISSING');
-        let hanko: HankoString | undefined;
-        if (entityState.config.validators.length === 1) {
-          const hankos = await signEntityHashes(env, myEntityId, signerId, [settlementHash]);
-          hanko = hankos[0];
-          if (!hanko) throw new Error('AUTO_APPROVE_HANKO_MISSING');
-          if (iAmLeft) workspace.leftHanko = hanko;
-          else workspace.rightHanko = hanko;
-        }
-        workspace.status = 'awaiting_counterparty';
-
-        autoApproveOutput = {
-          entityId: fromEntityId,
-          signerId: resolveEntityProposerId(env, fromEntityId, 'settle.auto-approve.output'),
-          entityTxs: [{
-            type: 'accountInput',
-            data: {
-              kind: 'settle',
-              fromEntityId: myEntityId,
-              toEntityId: fromEntityId,
-              settleAction: {
-                type: 'approve' as const,
-                ...(hanko ? { hanko } : {}),
-                settlementHash,
-                version: workspace.version,
-                nonceAtSign: signedNonce,
-              },
-            }
-          }]
-        };
-        settleLog.debug('receive.auto_approve.drafted', { nonce: signedNonce });
-
-        const disputeResult = await signPostSettlementDisputeProof(env, entityState, account, signedNonce);
-        if (disputeResult) {
-          workspace.postSettlementDisputeProof = {
-            disputeHash: disputeResult.disputeHash,
-            proofBodyHash: disputeResult.proofBodyHash,
-            nonce: disputeResult.nonce,
-            ...(iAmLeft && disputeResult.hanko ? { leftHanko: disputeResult.hanko } : {}),
-            ...(!iAmLeft && disputeResult.hanko ? { rightHanko: disputeResult.hanko } : {}),
-          };
-        }
-        autoApproveHashes = [
-          { hash: settlementHash, type: 'settlement', context: `settlement:${fromEntityId.slice(-8)}:auto:nonce:${signedNonce}` },
-          ...(disputeResult
-            ? [{
-                hash: disputeResult.disputeHash,
-                type: 'dispute' as const,
-                context: `settlement:${fromEntityId.slice(-8)}:auto-post-dispute:nonce:${disputeResult.nonce}`,
-              }]
-            : []),
-        ];
-      }
-
-      return {
-        success: true,
-        message: `Settlement proposed by ${fromEntityId.slice(-4)}${autoApproveOutput ? ' (auto-approved)' : ''}`,
-        ...(autoApproveOutput ? { autoApproveOutput } : {}),
-        ...(autoApproveHashes ? { hashesToSign: autoApproveHashes } : {}),
-      };
-    }
-
-    case 'update': {
-      if (!account.settlementWorkspace) {
-        return { success: false, message: 'No workspace to update' };
-      }
-
-      if (account.settlementWorkspace.leftHanko || account.settlementWorkspace.rightHanko) {
-        return { success: false, message: 'Cannot update after signing' };
-      }
-
-      const ops = settleAction.ops || account.settlementWorkspace.ops;
-
-      // Guard 1: Validate on receive path
-      compileOps(ops, theyAreLeft);
-
-      account.settlementWorkspace.ops = ops;
-      account.settlementWorkspace.lastModifiedByLeft = theyAreLeft;
-      if (settleAction.memo) account.settlementWorkspace.memo = settleAction.memo;
-      account.settlementWorkspace.version = settleAction.version || account.settlementWorkspace.version + 1;
-      account.settlementWorkspace.lastUpdatedAt = entityTimestamp;
-      // Guard 2: Clear cached compiled state
-      delete account.settlementWorkspace.compiledDiffs;
-      delete account.settlementWorkspace.compiledForgiveTokenIds;
-      delete account.settlementWorkspace.postSettlementDisputeProof;
-      // Guard 3: executorIsLeft update OK since no hankos
-      if (settleAction.executorIsLeft !== undefined) {
-        account.settlementWorkspace.executorIsLeft = settleAction.executorIsLeft;
-      }
-
-      settleLog.debug('receive.update', { from: shortId(fromEntityId), version: account.settlementWorkspace.version });
-      return { success: true, message: `Settlement updated to v${account.settlementWorkspace.version}` };
-    }
-
-    case 'approve': {
-      if (!account.settlementWorkspace) {
-        return { success: false, message: 'No workspace to approve' };
-      }
-
-      if (!settleAction.hanko) {
-        return { success: false, message: 'No hanko provided' };
-      }
-      if (!settleAction.settlementHash || settleAction.nonceAtSign == null) {
-        return { success: false, message: 'Settlement authorization hash or nonce missing' };
-      }
-      const jurisdiction = entityState?.config.jurisdiction;
-      if (!jurisdiction?.depositoryAddress) {
-        return { success: false, message: 'Settlement jurisdiction missing' };
-      }
-      const { diffs, forgiveTokenIds } = compileOps(
-        account.settlementWorkspace.ops,
-        account.settlementWorkspace.lastModifiedByLeft,
-      );
-      const expectedHash = createSettlementHashWithNonce(
-        account,
-        diffs,
-        forgiveTokenIds,
-        { chainId: Number(jurisdiction.chainId), depositoryAddress: jurisdiction.depositoryAddress },
-        settleAction.nonceAtSign,
-      );
-      if (expectedHash.toLowerCase() !== settleAction.settlementHash.toLowerCase()) {
-        return { success: false, message: 'Settlement authorization hash mismatch' };
-      }
-      if (!env) return { success: false, message: 'Settlement verifier environment missing' };
-      const verified = await verifyHankoForHash(settleAction.hanko, expectedHash, fromEntityId, env);
-      if (!verified.valid || verified.entityId?.toLowerCase() !== fromEntityId.toLowerCase()) {
-        return { success: false, message: 'Settlement Hanko invalid' };
-      }
-
-      // Store their hanko + nonce
-      if (theyAreLeft) {
-        account.settlementWorkspace.leftHanko = settleAction.hanko;
-      } else {
-        account.settlementWorkspace.rightHanko = settleAction.hanko;
-      }
-      if (settleAction.nonceAtSign != null) {
-        account.settlementWorkspace.nonceAtSign = settleAction.nonceAtSign;
-      }
-
-      // Mark the workspace submit-ready only for the elected executor side.
-      // settle_execute submits the counterparty's signed proof into jBatch; it does not
-      // require a second local hanko on the executor path. If we gate on "my hanko exists"
-      // here, proposer-driven C2R flows get stuck forever after the counterparty approves.
-      const iAmExecutor = account.settlementWorkspace.executorIsLeft === iAmLeft;
-      if (iAmExecutor) {
-        account.settlementWorkspace.status = 'ready_to_submit';
-      }
-
-      settleLog.debug('receive.approve', { from: shortId(fromEntityId) });
-      return { success: true, message: `Counterparty signed settlement` };
-    }
-
-    case 'reject': {
-      delete account.settlementWorkspace;
-      settleLog.debug('receive.reject', { from: shortId(fromEntityId), memo: settleAction.memo || 'no reason' });
-      return { success: true, message: `Settlement rejected by ${fromEntityId.slice(-4)}` };
-    }
-
-    case 'execute': {
-      return { success: false, message: 'Execute is a local operation' };
-    }
-
-    default:
-      return { success: false, message: `Unknown settleAction type` };
-  }
+  throw new Error(`SETTLEMENT_DIRECT_ACTION_FORBIDDEN:${settleAction.type}`);
 }
 
 /**
@@ -890,6 +697,7 @@ export function userAutoApprove(diff: SettlementDiff, iAmLeft: boolean): boolean
  * Check if workspace ops are safe to auto-approve (compiles then checks)
  */
 export function canAutoApproveWorkspace(workspace: SettlementWorkspace, iAmLeft: boolean): boolean {
+  if (workspace.ops.some((op) => op.type === 'forgive')) return false;
   const { diffs } = compileOps(workspace.ops, workspace.lastModifiedByLeft);
   return diffs.every(diff => userAutoApprove(diff, iAmLeft));
 }

@@ -8,6 +8,8 @@
   import { errorLog } from '$lib/stores/errorLogStore';
   import { runtimeControllerHandle, runtimeAdapterHeight } from '$lib/stores/runtimeControllerStore';
   import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
+  import { settings } from '$lib/stores/settingsStore';
+  import { xlnFunctions } from '$lib/stores/xlnStore';
   import {
     Calendar,
     ChevronLeft,
@@ -19,6 +21,7 @@
   } from 'lucide-svelte';
   import {
     buildActivityHistoryReadQuery,
+    formatActivityTokenAmount,
     isTransientActivityReadError,
     normalizeActivityEntityId,
     normalizeActivityHistoryPage,
@@ -262,20 +265,13 @@
     return normalized.length > 14 ? `${normalized.slice(0, 6)}...${normalized.slice(-4)}` : normalized || 'n/a';
   }
 
-  function formatAmount(value: string | undefined): string {
-    if (!value) return '';
-    try {
-      const raw = BigInt(value);
-      const sign = raw < 0n ? '-' : '';
-      const abs = raw < 0n ? -raw : raw;
-      const base = 10n ** 18n;
-      if (abs < base) return `${sign}${abs.toString()}`;
-      const whole = abs / base;
-      const fraction = (abs % base).toString().padStart(18, '0').slice(0, 4).replace(/0+$/, '');
-      return `${sign}${whole.toString()}${fraction ? `.${fraction}` : ''}`;
-    } catch {
-      return value;
-    }
+  function formatAmount(value: string | undefined, tokenId: number | undefined): string {
+    return formatActivityTokenAmount(
+      value,
+      tokenId,
+      $xlnFunctions.getTokenInfo,
+      $settings.tokenPrecision,
+    );
   }
 
   function eventTone(event: ActivityEvent): string {
@@ -447,10 +443,10 @@
           </div>
           <div class="event-amount">
             {#if event.amount}
-              <strong data-testid="history-event-amount">{formatAmount(event.amount)}</strong>
+              <strong data-testid="history-event-amount">{formatAmount(event.amount, event.tokenId)}</strong>
               <span>token {event.tokenId ?? '?'}</span>
             {:else if event.quoteAmount}
-              <strong data-testid="history-event-amount">{formatAmount(event.quoteAmount)}</strong>
+              <strong data-testid="history-event-amount">{formatAmount(event.quoteAmount, event.quoteTokenId)}</strong>
               <span>token {event.quoteTokenId ?? '?'}</span>
             {:else}
               <strong data-testid="history-event-amount">{event.status}</strong>

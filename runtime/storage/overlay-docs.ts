@@ -1,7 +1,8 @@
 import { type RuntimeOverlayRecord, type Env } from '../types';
 import { docRefKey } from './doc-refs';
 import { keyDiff, normalizeEntityId } from './keys';
-import { readJsonOrNull } from './level';
+import { readValidatedOrNull } from './level';
+import { validateStorageDiffRecordValue } from './authoritative-schema';
 import { mergeStorageOverlayRecords, storageOverlayRecordKey } from './overlay';
 import { projectAccountDoc, projectEntityCoreDoc } from './projections';
 import { buildReplicaLookup, findReplicaForEntity } from './replicas';
@@ -9,7 +10,6 @@ import type {
   RuntimeDbLike,
   StorageAccountRef,
   StorageBookRef,
-  StorageDiffRecord,
   StorageDoc,
   StorageDocRef,
   StorageOverlayRefs,
@@ -77,8 +77,11 @@ export const readStorageOverlayRecordsFromDiffs = async (
   const start = Math.max(1, Math.floor(startHeight));
   const end = Math.floor(targetHeight);
   for (let height = start; height <= end; height += 1) {
-    const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(height));
+    const diff = await readValidatedOrNull(db, keyDiff(height), validateStorageDiffRecordValue);
     if (!diff) throw new Error(`STORAGE_DIFF_MISSING: height=${height} scope=overlay`);
+    if (diff.height !== height) {
+      throw new Error(`STORAGE_DIFF_KEY_HEIGHT_MISMATCH:key=${height}:value=${diff.height}:scope=overlay`);
+    }
     records = mergeStorageOverlayRecords(records, overlayRecordsFromDocs(diff.puts, diff.dels));
   }
   return records;
@@ -150,7 +153,7 @@ export const buildDocPuts = (
     puts.push({
       family: 'entity',
       entityId,
-      value: projectEntityCoreDoc(replica.state, replica.replica),
+      value: projectEntityCoreDoc(replica.state),
     });
   }
 

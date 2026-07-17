@@ -34,6 +34,7 @@ const LONG_E2E = process.env.E2E_LONG === '1';
 
 const DEFAULT_FEE_PPM = 10n;
 const FEE_DENOM = 1_000_000n;
+const USDC_DECIMALS = 6;
 const calcFee = (amount: bigint, feePPM: bigint, baseFee: bigint): bigint =>
   (amount * feePPM / FEE_DENOM) + baseFee;
 const afterFee = (amount: bigint, feePPM: bigint, baseFee: bigint): bigint =>
@@ -50,8 +51,8 @@ const requiredInbound = (desiredForward: bigint, feePPM: bigint, baseFee: bigint
   return low;
 };
 
-function toWei(n: number): bigint {
-  return BigInt(n) * 10n ** 18n;
+function toUsdcUnits(n: number): bigint {
+  return BigInt(n) * 10n ** BigInt(USDC_DECIMALS);
 }
 
 function assertHtlcReceivedPayload(event: { data?: Record<string, unknown> }, recipientEntityId: string, expectedFromEntity: string, expectedAmount: bigint) {
@@ -823,7 +824,7 @@ function parseRouteFeeText(rawText: string): bigint {
   const match = rawText.match(/Fee:?\s*([0-9][0-9,]*(?:\.[0-9]+)?)/i);
   if (!match?.[1]) return 0n;
   const normalized = match[1].replace(/,/g, '').trim();
-  return ethers.parseUnits(normalized, 18);
+  return ethers.parseUnits(normalized, USDC_DECIMALS);
 }
 
 async function pay(page: Page, from: string, signerId: string, to: string, route: string[], amount: bigint): Promise<bigint> {
@@ -833,6 +834,7 @@ async function pay(page: Page, from: string, signerId: string, to: string, route
   const { selectedRouteText } = await submitUiPayment(page, {
     recipientEntityId: to,
     amount,
+    tokenId: 1,
     routeEntityIds: normalizedRoute,
   });
   const quotedSenderSpend = amount + parseRouteFeeText(selectedRouteText);
@@ -903,7 +905,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     await gotoApp(page);
   });
 
-  test('bidirectional payments through hub', async ({ page }) => {
+  test('bidirectional payments through hub', { tag: '@functional' }, async ({ page }) => {
     // Scenario: bootstrap Alice and Bob on separate runtimes, route HTLCs through a hub,
     // verify sender debit plus recipient credit in both directions, then confirm persistence.
     page.on('console', msg => {
@@ -990,15 +992,15 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     await screenshot(page, '05-alice-after-faucet');
 
     // ── 6. Alice → Hub → Bob (10 USDC via HTLC) ─────────────────
-    const payAmount = toWei(10);
+    const payAmount = toUsdcUnits(10);
     const hubFee = await getHubFeeConfig(page, hubId);
     const expectedSenderSpend = requiredInbound(payAmount, hubFee.feePPM, hubFee.baseFee);
     const fee = expectedSenderSpend - payAmount;
     console.log(`[E2E] 6. Forward HTLC: Alice → Hub → Bob`);
-    console.log(`[E2E]    Recipient amount: ${payAmount} (${ethers.formatUnits(payAmount, 18)} USDC)`);
-    console.log(`[E2E]    Sender spend: ${expectedSenderSpend} (${ethers.formatUnits(expectedSenderSpend, 18)} USDC)`);
-    console.log(`[E2E]    Fee:    ${fee} (${ethers.formatUnits(fee, 18)} USDC)`);
-    console.log(`[E2E]    Received: ${payAmount} (${ethers.formatUnits(payAmount, 18)} USDC)`);
+    console.log(`[E2E]    Recipient amount: ${payAmount} (${ethers.formatUnits(payAmount, USDC_DECIMALS)} USDC)`);
+    console.log(`[E2E]    Sender spend: ${expectedSenderSpend} (${ethers.formatUnits(expectedSenderSpend, USDC_DECIMALS)} USDC)`);
+    console.log(`[E2E]    Fee:    ${fee} (${ethers.formatUnits(fee, USDC_DECIMALS)} USDC)`);
+    console.log(`[E2E]    Received: ${payAmount} (${ethers.formatUnits(payAmount, USDC_DECIMALS)} USDC)`);
 
     await switchToRuntime(page, 'bob');
     await waitForActiveRuntime(page, bobRuntimeId, 'switch-bob-forward-recv');
@@ -1064,7 +1066,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       page,
       hubId,
       bobForwardRendered,
-      Number(ethers.formatUnits(payAmount, 18)),
+      Number(ethers.formatUnits(payAmount, USDC_DECIMALS)),
     );
     const bobReceived = b1 - b0;
     console.log(`[E2E] Bob received: ${bobReceived} (OUT ${b0} → ${b1})`);
@@ -1081,11 +1083,11 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     }
 
     // ── 7. Reverse: Bob → Hub → Alice (5 USDC) ────────────────────
-    const reverseAmount = toWei(5);
+    const reverseAmount = toUsdcUnits(5);
     const reverseSenderSpend = requiredInbound(reverseAmount, hubFee.feePPM, hubFee.baseFee);
     const reverseFee = reverseSenderSpend - reverseAmount;
     console.log(`[E2E] 7. Reverse HTLC: Bob → Hub → Alice`);
-    console.log(`[E2E]    Amount: ${ethers.formatUnits(reverseAmount, 18)} USDC, fee: ${ethers.formatUnits(reverseFee, 18)} USDC`);
+    console.log(`[E2E]    Amount: ${ethers.formatUnits(reverseAmount, USDC_DECIMALS)} USDC, fee: ${ethers.formatUnits(reverseFee, USDC_DECIMALS)} USDC`);
 
     // Bob already received funds in step 6, so reverse payment should not depend on a second faucet call.
     const b2 = b1;
@@ -1163,7 +1165,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       page,
       hubId,
       aliceReverseRendered,
-      Number(ethers.formatUnits(reverseAmount, 18)),
+      Number(ethers.formatUnits(reverseAmount, USDC_DECIMALS)),
     );
     const aliceReceived = a4 - a3;
     console.log(`[E2E] Alice received: ${aliceReceived} (OUT ${a3} → ${a4})`);
@@ -1173,9 +1175,9 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log('[E2E] ✅ Reverse HTLC verified (fee on sender)');
 
     // ── 8. Second forward payment (state accumulates) ─────────────
-    const pay2Amount = toWei(3);
+    const pay2Amount = toUsdcUnits(3);
     const pay2SenderSpend = requiredInbound(pay2Amount, hubFee.feePPM, hubFee.baseFee);
-    console.log(`[E2E] 8. Second forward: Alice → Hub → Bob (${ethers.formatUnits(pay2Amount, 18)} USDC)`);
+    console.log(`[E2E] 8. Second forward: Alice → Hub → Bob (${ethers.formatUnits(pay2Amount, USDC_DECIMALS)} USDC)`);
 
     const a5 = await outCap(page, alice!.entityId, hubId);
     await switchToRuntime(page, 'bob');
@@ -1224,7 +1226,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       page,
       hubId,
       bobSecondForwardRendered,
-      Number(ethers.formatUnits(pay2Amount, 18)),
+      Number(ethers.formatUnits(pay2Amount, USDC_DECIMALS)),
     );
     console.log(`[E2E] 2nd: Bob OUT ${b4} → ${b5}, diff=${b5 - b4}, expected=${pay2Amount}`);
     expect(b5 - b4, '2nd payment: Bob receives exact recipient amount').toBe(pay2Amount);
@@ -1237,7 +1239,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     await waitForActiveRuntime(page, aliceRuntimeId, 'switch-alice-overspend');
     await assertP2PSingletonAndWsHealth(page, 'switch-alice-overspend');
     console.log('[E2E] 9. Overspend: Alice tries to send more than capacity');
-    const overAmount = a6 + toWei(1); // more than Alice has
+    const overAmount = a6 + toUsdcUnits(1); // more than Alice has
     await attemptOverspend(page, bob!.entityId, [alice!.entityId, hubId, bob!.entityId], overAmount);
     // Overspend should either throw or not change Alice's balance
     const a7 = await outCap(page, alice!.entityId, hubId);
@@ -1276,7 +1278,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     const selfBefore = await outCap(page, alice!.entityId, hubId);
     const selfAfter = await timedStep(`ahb.self_route_${selfRoute.length - 2}_hops.send_to_outcap`, async () => {
-      await pay(page, alice!.entityId, alice!.signerId, alice!.entityId, selfRoute, toWei(1));
+      await pay(page, alice!.entityId, alice!.signerId, alice!.entityId, selfRoute, toUsdcUnits(1));
       await expect.poll(async () => {
         const info = await page.evaluate((eid) => {
           const env = (window as any).isolatedEnv;
@@ -1346,10 +1348,10 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     // ── Summary ───────────────────────────────────────────────────
     console.log('\n[E2E] ══════ SUMMARY ══════');
     console.log(`[E2E] Route: Alice → H1 (1.00 bps) → Bob`);
-    console.log(`[E2E] Fee per hop: ${ethers.formatUnits(fee, 18)} USDC on 10 USDC (0.001%)`);
-    console.log(`[E2E] Forward:  Alice sent 10, Bob got ${ethers.formatUnits(payAmount, 18)}`);
-    console.log(`[E2E] Reverse:  Bob sent 5, Alice got ${ethers.formatUnits(reverseAmount, 18)}`);
-    console.log(`[E2E] 2nd fwd:  Alice sent 3, Bob got ${ethers.formatUnits(pay2Amount, 18)}`);
+    console.log(`[E2E] Fee per hop: ${ethers.formatUnits(fee, USDC_DECIMALS)} USDC on 10 USDC (0.001%)`);
+    console.log(`[E2E] Forward:  Alice sent 10, Bob got ${ethers.formatUnits(payAmount, USDC_DECIMALS)}`);
+    console.log(`[E2E] Reverse:  Bob sent 5, Alice got ${ethers.formatUnits(reverseAmount, USDC_DECIMALS)}`);
+    console.log(`[E2E] 2nd fwd:  Alice sent 3, Bob got ${ethers.formatUnits(pay2Amount, USDC_DECIMALS)}`);
     console.log(`[E2E] Overspend: correctly rejected`);
     console.log(`[E2E] Self route: ${selfRoute.map(r => r.slice(0, 6)).join(' -> ')}`);
     console.log('[E2E] Persistence: verified inline with page reload');

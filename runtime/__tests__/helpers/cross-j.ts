@@ -1,4 +1,5 @@
 import { deriveAccountWatchSeed } from '../../account/watch-seed';
+import { createEmptyAccountJClaimAccumulator } from '../../account/j-claim-accumulator';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../account/crypto';
 import { buildCrossJurisdictionPullBinding } from '../../extensions/cross-j/index';
 import { buildCrossJurisdictionBookAdmissionReceipt } from '../../extensions/cross-j/orderbook';
@@ -41,7 +42,7 @@ export const jref = (jurisdiction: JurisdictionConfig): string => getJurisdictio
 export const registerTestSigner = (env: Env, seed: string, slot = '1'): string => {
   env.runtimeSeed = seed;
   const signerId = deriveSignerAddressSync(seed, slot);
-  registerSignerKey(signerId, deriveSignerKeySync(seed, slot));
+  registerSignerKey(seed, signerId, deriveSignerKeySync(seed, slot));
   return signerId;
 };
 
@@ -81,7 +82,14 @@ export const makeConfig = (signerId: string, jurisdiction: JurisdictionConfig): 
   jurisdiction,
 });
 
-export const makeAccount = (selfId: string, counterpartyId: string): AccountMachine => {
+export const makeAccount = (
+  selfId: string,
+  counterpartyId: string,
+  jurisdiction: Pick<JurisdictionConfig, 'chainId' | 'depositoryAddress'> = {
+    chainId: 31_337,
+    depositoryAddress: addr('dd'),
+  },
+): AccountMachine => {
   const [leftEntity, rightEntity] = selfId.toLowerCase() < counterpartyId.toLowerCase()
     ? [selfId, counterpartyId]
     : [counterpartyId, selfId];
@@ -91,6 +99,10 @@ export const makeAccount = (selfId: string, counterpartyId: string): AccountMach
   return {
     leftEntity,
     rightEntity,
+    domain: {
+      chainId: jurisdiction.chainId,
+      depositoryAddress: jurisdiction.depositoryAddress,
+    },
     status: 'active',
     mempool: [],
     currentFrame: {
@@ -111,9 +123,8 @@ export const makeAccount = (selfId: string, counterpartyId: string): AccountMach
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
-    leftJObservations: [],
-    rightJObservations: [],
-    jEventChain: [],
+    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,
     watchSeed: deriveAccountWatchSeed({
       runtimeSeed: 'cross-j-test-helper',
@@ -137,28 +148,35 @@ export const makeState = (
   signerId: string,
   jurisdiction: JurisdictionConfig,
   counterpartyId?: string,
-): EntityState => ({
-  entityId,
-  height: 1,
-  timestamp: 1_000,
-  nonces: new Map(),
-  messages: [],
-  proposals: new Map(),
-  config: makeConfig(signerId, jurisdiction),
-  reserves: new Map(),
-  accounts: counterpartyId ? new Map([[counterpartyId, makeAccount(entityId, counterpartyId)]]) : new Map(),
-  lastFinalizedJHeight: 0,
-  jBlockChain: [],
-  entityEncPubKey: `0x${'aa'.repeat(32)}`,
-  entityEncPrivKey: `0x${'bb'.repeat(32)}`,
-  profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
-  crossJurisdictionSwaps: new Map(),
-  swapTradingPairs: [],
-  pendingSwapFillRatios: new Map(),
-});
+): EntityState => {
+  const accounts = new Map<string, AccountMachine>();
+  if (counterpartyId) {
+    const account = makeAccount(entityId, counterpartyId, jurisdiction);
+    accounts.set(counterpartyId, account);
+  }
+  return {
+    entityId,
+    height: 1,
+    timestamp: 1_000,
+    nonces: new Map(),
+    messages: [],
+    proposals: new Map(),
+    config: makeConfig(signerId, jurisdiction),
+    reserves: new Map(),
+    accounts,
+    lastFinalizedJHeight: 0,
+    jBlockChain: [],
+    entityEncPubKey: `0x${'aa'.repeat(32)}`,
+    entityEncPrivKey: `0x${'bb'.repeat(32)}`,
+    profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
+    htlcRoutes: new Map(),
+    htlcFeesEarned: 0n,
+    lockBook: new Map(),
+    crossJurisdictionSwaps: new Map(),
+    swapTradingPairs: [],
+    pendingSwapFillRatios: new Map(),
+  };
+};
 
 export const addReplica = (env: Env, state: EntityState, signerId: string, isProposer = true): void => {
   env.eReplicas.set(`${state.entityId}:${signerId}`, {
@@ -178,6 +196,12 @@ export const installJurisdictions = (env: Env, ...jurisdictions: JurisdictionCon
       rpcs: [jurisdiction.address],
       depositoryAddress: jurisdiction.depositoryAddress,
       entityProviderAddress: jurisdiction.entityProviderAddress,
+      contracts: {
+        depository: jurisdiction.depositoryAddress,
+        entityProvider: jurisdiction.entityProviderAddress,
+        account: addr('98'),
+        deltaTransformer: addr('99'),
+      },
       blockTimeMs: jurisdiction.blockTimeMs,
       defaultDisputeDelayBlocks: 5,
     } as any);

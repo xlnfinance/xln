@@ -2,6 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
 import { cloneAccountMachine, cloneEntityReplica, cloneEntityState } from '../state-helpers';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import {
+  computeCanonicalEntityConsensusStateHash,
+} from '../entity/consensus/state-root';
+import { buildCanonicalEntityReplicaSnapshot } from '../wal/snapshot';
 import { validateConsensusConfig, validateEntityReplica } from '../validation-utils';
 
 const makeCrossJurisdictionRoute = () => ({
@@ -51,6 +56,10 @@ const makeProofBodyStruct = () => ({
 const makeManualFallbackAccount = () => ({
   leftEntity: 'left',
   rightEntity: 'right',
+  domain: {
+    chainId: 31337,
+    depositoryAddress: `0x${'dd'.repeat(20)}`,
+  },
   watchSeed: `0x${'11'.repeat(32)}`,
   status: 'active',
   mempool: [{
@@ -90,9 +99,8 @@ const makeManualFallbackAccount = () => ({
   currentHeight: 0,
   pendingSignatures: [],
   rollbackCount: 0,
-  leftJObservations: [],
-  rightJObservations: [],
-  jEventChain: [],
+  leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+  rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
   lastFinalizedJHeight: 0,
   proofHeader: { fromEntity: 'left', toEntity: 'right', nextProofNonce: 0 },
   proofBody: { tokenIds: [1], deltas: [0n] },
@@ -200,13 +208,32 @@ describe('state helper cloning', () => {
     expect(clonedOfferRoute.target).toEqual(route.target);
   });
 
-  test('validates consensus config quorum shape', () => {
-    expect(validateConsensusConfig({
-      mode: 'proposer-based',
-      threshold: 2n,
-      validators: ['alice', 'bob'],
-      shares: { alice: 1n, bob: 1n },
-    })).toMatchObject({ threshold: 2n });
+  test('preserves the exact configured board threshold', () => {
+    const configuredBoards = [
+      {
+        mode: 'proposer-based' as const,
+        threshold: 1n,
+        validators: ['alice', 'bob'],
+        shares: { alice: 1n, bob: 1n },
+      },
+      {
+        mode: 'proposer-based' as const,
+        threshold: 2n,
+        validators: ['alice', 'bob', 'carol'],
+        shares: { alice: 1n, bob: 1n, carol: 1n },
+      },
+      {
+        mode: 'proposer-based' as const,
+        threshold: 3n,
+        validators: ['alice', 'bob', 'carol', 'dave'],
+        shares: { alice: 1n, bob: 1n, carol: 1n, dave: 1n },
+      },
+    ];
+    expect(configuredBoards.map((board) => validateConsensusConfig(board).threshold)).toEqual([
+      1n,
+      2n,
+      3n,
+    ]);
 
     expect(() => validateConsensusConfig({
       mode: 'proposer-based',
@@ -220,6 +247,11 @@ describe('state helper cloning', () => {
     const replica = { ...makeProjectionReplica(), mempool: [] };
     expect(validateEntityReplica(replica)).toBe(replica);
 
+    expect(() => validateEntityReplica({ ...replica, mempool: undefined }))
+      .toThrow('mempool must be an array');
+    expect(() => validateEntityReplica({ ...replica, hankoWitness: 'not-a-map' }))
+      .toThrow('hankoWitness must be a Map');
+
     const mismatched = {
       ...replica,
       state: {
@@ -231,9 +263,87 @@ describe('state helper cloning', () => {
     expect(() => validateEntityReplica(mismatched)).toThrow('state.entityId must match replica.entityId');
   });
 
+  test('rejects malformed validator-local submit receipts at the restore boundary', () => {
+    const replica = { ...makeProjectionReplica(), mempool: [] };
+    expect(() => validateEntityReplica({
+      ...replica,
+      jSubmitState: {
+        jurisdictionName: 'Testnet',
+        batchHash: `0x${'12'.repeat(32)}`,
+        entityNonce: 1,
+        batchGeneration: 1,
+        submitAttempts: 1,
+        lastSubmittedAt: 100,
+        terminalFailure: {
+          message: 'terminal',
+          failedAt: 101,
+          failure: {
+            category: 'Contradiction',
+            code: 'J_SUBMIT_FATAL',
+            message: 'terminal',
+            retryable: true,
+            fatal: true,
+          },
+        },
+      },
+    })).toThrow('must be canonical RuntimeFailureSignal');
+
+    expect(() => validateEntityReplica({
+      ...replica,
+      entityProviderActionSubmitState: {
+        jurisdictionName: 'Testnet',
+        actionHash: `0x${'34'.repeat(32)}`,
+        actionNonce: 1n,
+        generation: 1,
+        submitAttempts: 1,
+        lastSubmittedAt: 100,
+        resultFingerprints: { attempt1: 'fingerprint1' },
+        resultFingerprintOrder: ['attempt2'],
+      },
+    })).toThrow('contains unknown attempt2');
+  });
+
   test('clones projection-shaped replicas without a transient mempool', () => {
     const cloned = cloneEntityReplica(makeProjectionReplica() as any);
     expect(cloned.mempool).toEqual([]);
+  });
+
+  test('clones local Hanko witnesses without losing or aliasing committed proofs', () => {
+    const replica = { ...makeProjectionReplica(), mempool: [] } as any;
+    const hash = `0x${'ab'.repeat(32)}`;
+    replica.hankoWitness = new Map([[hash, {
+      hanko: '0x01',
+      type: 'profile',
+      entityHeight: 7,
+      createdAt: 123,
+    }]]);
+
+    const cloned = cloneEntityReplica(replica);
+    const clonedWitness = cloned.hankoWitness?.get(hash);
+    if (!clonedWitness) throw new Error('TEST_CLONED_HANKO_WITNESS_MISSING');
+    clonedWitness.createdAt = 456;
+
+    expect(cloned.hankoWitness).not.toBe(replica.hankoWitness);
+    expect(replica.hankoWitness.get(hash)?.createdAt).toBe(123);
+  });
+
+  test('runtime frame snapshot preserves the exact consensus root through manual clone fallback', () => {
+    for (const absentField of ['accountInputQueue', 'deferredAccountProposals'] as const) {
+      const replica = { ...makeProjectionReplica(), mempool: [] } as any;
+      const account = makeManualFallbackAccount() as any;
+      delete account.uncloneable;
+      account.provider = { getBlockNumber: () => 1 };
+      replica.state.accounts.set('left', account);
+      delete replica.state[absentField];
+
+      const before = computeCanonicalEntityConsensusStateHash(replica.state);
+      const snapshot = buildCanonicalEntityReplicaSnapshot(replica);
+      const afterAccount = snapshot.state.accounts.get('left') as unknown as Record<string, unknown>;
+
+      expect(Object.hasOwn(snapshot.state, absentField)).toBe(false);
+      expect(Object.hasOwn(afterAccount, 'jNonce')).toBe(false);
+      expect(computeCanonicalEntityConsensusStateHash(snapshot.state)).toBe(before);
+    }
   });
 
   test('clones validator-private J history without aliasing durable evidence', () => {
@@ -241,6 +351,7 @@ describe('state helper cloning', () => {
     replica.jHistory = {
       jurisdictionRef: 'testnet:1',
       scannedThroughHeight: 12,
+      contiguousThroughHeight: 0,
       tipBlockHash: `0x${'12'.repeat(32)}`,
       eventBlocks: new Map([[12, {
         jurisdictionRef: 'testnet:1',
@@ -282,6 +393,18 @@ describe('state helper cloning', () => {
     } as any);
 
     expect(cloned.mempool).toEqual([]);
+  });
+
+  test('account clones preserve absence of optional pulls consensus state', () => {
+    for (const forceManualFallback of [false, true]) {
+      const account = makeManualFallbackAccount() as any;
+      delete account.pulls;
+      if (!forceManualFallback) delete account.uncloneable;
+
+      const cloned = cloneAccountMachine(account);
+
+      expect(Object.hasOwn(cloned, 'pulls')).toBe(false);
+    }
   });
 
   test('manual account clone fallback isolates mempool, dispute evidence, and cross-j routes', () => {

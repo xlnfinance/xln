@@ -9,7 +9,11 @@ import {
   STORAGE_SCHEMA_VERSION,
   normalizeEntityId,
 } from '../storage/keys';
-import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
+import {
+  projectAccountDoc,
+  projectEntityCoreDoc,
+  projectEntityReplicaCoreView,
+} from '../storage/projections';
 import type {
   StorageAccountDoc,
   StorageEntityCoreDoc,
@@ -19,6 +23,7 @@ import type {
 import { compareAscii, sortedStringMapKeys, sortedStringMapStartIndex } from '../storage/sorted-index';
 import { RuntimeAdapterError } from './errors';
 import { encodeRuntimeAdapterMessage, runtimeAdapterMaxMessageBytes } from './codec';
+import { XLN_PROTOCOL_VERSION } from '../protocol/version';
 import { buildRuntimeRecoveryBundle } from '../recovery/bundle';
 import {
   deriveRuntimeRecoveryLookupKey,
@@ -32,12 +37,26 @@ import type { RuntimeActivityFilters } from '../api/activity-history';
 import type {
   RuntimeAdapterActivityPage,
   RuntimeAdapterEntitySummary,
+  RuntimeAdapterFrameReceiptResponse,
+  RuntimeAdapterPaymentRoutesResponse,
   RuntimeAdapterReadQuery,
   RuntimeAdapterSolvencySummary,
   RuntimeAdapterTimelineIndexPage,
 } from './types';
+
+type RuntimeAdapterEntityCoreDoc = StorageEntityCoreDoc & {
+  signerId?: string;
+  isProposer?: boolean;
+  entityEncPubKey?: string;
+  entityEncPrivKey?: '';
+  htlcNotes?: EntityState['htlcNotes'];
+};
 import type { Profile } from '../networking/gossip';
-import type { RuntimeIngressReceipt } from '../server/ingress-receipts';
+import {
+  projectRuntimeIngressReceiptForWire,
+  type RuntimeIngressReceipt,
+} from '../server/ingress-receipts';
+import { calculateSolvency } from '../account/solvency';
 
 export type RuntimeAdapterResolveContext = {
   env: Env;
@@ -51,7 +70,7 @@ export type RuntimeAdapterResolveContext = {
     height: number,
     query?: RuntimeAdapterReadQuery,
   ) => Promise<{
-    core: StorageEntityCoreDoc;
+    core: RuntimeAdapterEntityCoreDoc;
     accounts: RuntimeAdapterAccountPage;
     books: RuntimeAdapterBookPage;
   } | null>;
@@ -64,6 +83,8 @@ export type RuntimeAdapterResolveContext = {
     },
   ) => Promise<RuntimeAdapterActivityPage>;
   readReceipt?: (id: string) => Promise<RuntimeIngressReceipt | null> | RuntimeIngressReceipt | null;
+  readFrameReceipts?: (query?: RuntimeAdapterReadQuery) => Promise<RuntimeAdapterFrameReceiptResponse>;
+  findPaymentRoutes?: (query?: RuntimeAdapterReadQuery) => Promise<RuntimeAdapterPaymentRoutesResponse>;
 };
 
 export type RuntimeAdapterAccountPage = {
@@ -111,7 +132,7 @@ export type RuntimeAdapterAccountPageSummary = {
 
 export type RuntimeAdapterViewEntityFrame = {
   summary: RuntimeAdapterEntitySummary;
-  core: StorageEntityCoreDoc;
+  core: RuntimeAdapterEntityCoreDoc;
   accounts: RuntimeAdapterAccountPage;
   books: RuntimeAdapterBookPage;
 };
@@ -581,13 +602,36 @@ const resolveEntityState = async (
   return { state: replica.state, replica };
 };
 
+const listLiveEntitySummaries = (
+  ctx: RuntimeAdapterResolveContext,
+): RuntimeAdapterEntitySummary[] => {
+  const liveReplicas = Array.from(ctx.env.eReplicas?.values?.() ?? [])
+    .map((replica) => {
+      const isHub = isHubState(replica.state);
+      const jurisdiction = jurisdictionSummary(replica.state.config?.jurisdiction);
+      const runtimeId = normalizeEntityId(String(ctx.env.runtimeId || ''));
+      return {
+        entityId: normalizeEntityId(replica.entityId),
+        ...(runtimeId ? { runtimeId } : {}),
+        ...withDefinedProp('signerId', replica.signerId),
+        label: labelForState(replica.state),
+        height: Math.max(0, Math.floor(Number(replica.state.height ?? 0))),
+        ...(isHub ? { isHub: true } : {}),
+        ...(jurisdiction ? { jurisdiction } : {}),
+      };
+    });
+  return mergeEntitySummaries(liveReplicas, listLiveGossipProfileSummaries(ctx));
+};
+
 const listEntitySummaries = async (
   ctx: RuntimeAdapterResolveContext,
   query?: RuntimeAdapterReadQuery,
-  options: { allowPartial?: boolean } = {},
+  options: { allowPartial?: boolean; forceStorageAtHeight?: boolean } = {},
 ): Promise<RuntimeAdapterEntitySummary[]> => {
   const height = readAtHeight(query);
-  if (height !== null && height !== envHeight(ctx.env)) {
+  const useStorage = height !== null
+    && (options.forceStorageAtHeight === true || height !== envHeight(ctx.env));
+  if (useStorage) {
     if (ctx.readHead) {
       const head = await ctx.readHead();
       if (!head) throw new RuntimeAdapterError('E_NOT_FOUND', `storage head not found at height ${height}`);
@@ -631,22 +675,7 @@ const listEntitySummaries = async (
     return summaries.sort((left, right) => compareAscii(left.entityId, right.entityId));
   }
 
-  const liveReplicas = Array.from(ctx.env.eReplicas?.values?.() ?? [])
-    .map((replica) => {
-      const isHub = isHubState(replica.state);
-      const jurisdiction = jurisdictionSummary(replica.state.config?.jurisdiction);
-      const runtimeId = normalizeEntityId(String(ctx.env.runtimeId || ''));
-      return {
-        entityId: normalizeEntityId(replica.entityId),
-        ...(runtimeId ? { runtimeId } : {}),
-        ...withDefinedProp('signerId', replica.signerId),
-        label: labelForState(replica.state),
-        height: Math.max(0, Math.floor(Number(replica.state.height ?? 0))),
-        ...(isHub ? { isHub: true } : {}),
-        ...(jurisdiction ? { jurisdiction } : {}),
-      };
-    });
-  return mergeEntitySummaries(liveReplicas, listLiveGossipProfileSummaries(ctx));
+  return listLiveEntitySummaries(ctx);
 };
 
 const readPageIndex = (rawValue: unknown): number => {
@@ -760,14 +789,14 @@ const projectLiveEntityViewPage = (
   entityId: string,
   query?: RuntimeAdapterReadQuery,
 ): {
-  core: StorageEntityCoreDoc;
+  core: RuntimeAdapterEntityCoreDoc;
   accounts: RuntimeAdapterAccountPage;
   books: RuntimeAdapterBookPage;
 } => {
   const replica = findReplica(ctx.env, entityId);
   if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${normalizeEntityId(entityId)}`);
   return {
-    core: projectEntityCoreDoc(replica.state, replica),
+    core: projectEntityReplicaCoreView(replica.state, replica),
     accounts: projectLiveAccountsPage(replica.state, query),
     books: projectLiveBooksPage(replica.state, query),
   };
@@ -779,7 +808,7 @@ const loadRequiredEntityViewPage = async (
   height: number,
   query?: RuntimeAdapterReadQuery,
 ): Promise<{
-  core: StorageEntityCoreDoc;
+  core: RuntimeAdapterEntityCoreDoc;
   accounts: RuntimeAdapterAccountPage;
   books: RuntimeAdapterBookPage;
 }> => {
@@ -830,22 +859,11 @@ const compactAccountProofBodyForView = (proofBody: StorageAccountDoc['proofBody'
   ...withDefinedProp('htlcLocks', compactArrayTail(proofBody.htlcLocks, 20)),
 });
 
-const compactJurisdictionEventsForView = <T extends { events: unknown[] }>(
-  value: readonly T[] | undefined,
-  entryLimit = 20,
-  eventLimit = 10,
-): T[] | undefined =>
-  Array.isArray(value)
-    ? value.slice(-entryLimit).map((entry) => ({
-      ...entry,
-      events: Array.isArray(entry.events) ? entry.events.slice(-eventLimit) : [],
-    }) as T)
-    : undefined;
-
 const compactAccountDocForView = (doc: StorageAccountDoc): StorageAccountDoc => {
   const compact: StorageAccountDoc = {
     leftEntity: doc.leftEntity,
     rightEntity: doc.rightEntity,
+    domain: structuredClone(doc.domain),
     watchSeed: '',
     status: doc.status,
     mempool: [],
@@ -857,6 +875,8 @@ const compactAccountDocForView = (doc: StorageAccountDoc): StorageAccountDoc => 
     currentHeight: doc.currentHeight,
     pendingSignatures: [],
     rollbackCount: doc.rollbackCount,
+    leftPendingJClaims: doc.leftPendingJClaims,
+    rightPendingJClaims: doc.rightPendingJClaims,
     lastFinalizedJHeight: doc.lastFinalizedJHeight,
     proofHeader: doc.proofHeader,
     proofBody: compactAccountProofBodyForView(doc.proofBody),
@@ -882,14 +902,9 @@ const compactAccountDocForView = (doc: StorageAccountDoc): StorageAccountDoc => 
   if (doc.pendingForward) compact.pendingForward = doc.pendingForward;
   if (doc.hankoSignature) compact.hankoSignature = doc.hankoSignature;
   if (doc.lastRollbackFrameHash) compact.lastRollbackFrameHash = doc.lastRollbackFrameHash;
-  const leftJObservations = compactJurisdictionEventsForView(doc.leftJObservations);
-  if (leftJObservations) compact.leftJObservations = leftJObservations;
-  const rightJObservations = compactJurisdictionEventsForView(doc.rightJObservations);
-  if (rightJObservations) compact.rightJObservations = rightJObservations;
-  const jEventChain = compactJurisdictionEventsForView(doc.jEventChain);
-  if (jEventChain) compact.jEventChain = jEventChain;
   if (doc.currentFrameHanko) compact.currentFrameHanko = doc.currentFrameHanko;
   if (doc.counterpartyFrameHanko) compact.counterpartyFrameHanko = doc.counterpartyFrameHanko;
+  if (doc.boardResealMigration) compact.boardResealMigration = { ...doc.boardResealMigration };
   if (doc.currentDisputeProofHanko) compact.currentDisputeProofHanko = doc.currentDisputeProofHanko;
   if (doc.currentDisputeProofNonce !== undefined) compact.currentDisputeProofNonce = doc.currentDisputeProofNonce;
   if (doc.currentDisputeProofBodyHash) compact.currentDisputeProofBodyHash = doc.currentDisputeProofBodyHash;
@@ -901,7 +916,7 @@ const compactAccountDocForView = (doc: StorageAccountDoc): StorageAccountDoc => 
   if (doc.counterpartySettlementHanko) compact.counterpartySettlementHanko = doc.counterpartySettlementHanko;
   const disputeProofNoncesByHash = compactRecordTail(doc.disputeProofNoncesByHash, 20);
   if (disputeProofNoncesByHash) compact.disputeProofNoncesByHash = disputeProofNoncesByHash;
-  if (doc.counterpartyRebalanceFeePolicy) compact.counterpartyRebalanceFeePolicy = doc.counterpartyRebalanceFeePolicy;
+  if (doc.rebalanceFeePolicies) compact.rebalanceFeePolicies = doc.rebalanceFeePolicies;
   return compact;
 };
 
@@ -984,6 +999,7 @@ const compactJBatchForView = (batch: JBatch | undefined): JBatch | undefined => 
     })),
     disputeStarts: (compactArrayTail(batch.disputeStarts, BATCH_VIEW_OP_LIMIT) ?? []).map((op) => ({
       ...op,
+      initialProofbody: compactProofBodyForBatchView(op.initialProofbody) as typeof op.initialProofbody,
       watchSeed: '',
       sig: op.sig ? '[redacted]' : '',
       starterInitialArguments: op.starterInitialArguments ? '[redacted]' : '',
@@ -992,10 +1008,8 @@ const compactJBatchForView = (batch: JBatch | undefined): JBatch | undefined => 
     disputeFinalizations: (compactArrayTail(batch.disputeFinalizations, BATCH_VIEW_OP_LIMIT) ?? []).map((op) => ({
       ...op,
       finalProofbody: compactProofBodyForBatchView(op.finalProofbody) as typeof op.finalProofbody,
-      leftArguments: op.leftArguments ? '[redacted]' : '',
-      rightArguments: op.rightArguments ? '[redacted]' : '',
-      starterInitialArguments: op.starterInitialArguments ? '[redacted]' : '',
-      starterIncrementedArguments: op.starterIncrementedArguments ? '[redacted]' : '',
+      starterArguments: op.starterArguments ? '[redacted]' : '',
+      otherArguments: op.otherArguments ? '[redacted]' : '',
       sig: op.sig ? '[redacted]' : '',
     })),
     externalTokenToReserve: compactArrayTail(batch.externalTokenToReserve, BATCH_VIEW_OP_LIMIT) ?? [],
@@ -1037,15 +1051,15 @@ const compactJBatchStateForView = (state: JBatchState | undefined): JBatchState 
   return compactState;
 };
 
-const compactEntityCoreForRemote = (core: StorageEntityCoreDoc): StorageEntityCoreDoc => {
-  const compact: StorageEntityCoreDoc = {
+const compactEntityCoreForRemote = (core: RuntimeAdapterEntityCoreDoc): RuntimeAdapterEntityCoreDoc => {
+  const compact: RuntimeAdapterEntityCoreDoc = {
     entityId: core.entityId,
     ...withDefinedProp('signerId', core.signerId),
     ...withDefinedProp('isProposer', core.isProposer),
+    entityEncPrivKey: '',
     height: core.height,
     timestamp: core.timestamp,
-    entityEncPrivKey: '',
-    entityEncPubKey: core.entityEncPubKey,
+    ...(core.entityEncPubKey ? { entityEncPubKey: core.entityEncPubKey } : {}),
     profile: core.profile,
     config: core.config,
     nonces: compactMapTail(core.nonces, 100) ?? new Map(),
@@ -1234,11 +1248,11 @@ const compactBookStateForView = (book: BookState, maxLevelsPerSide = 5, maxOrder
 };
 
 const compactViewPageForRemote = (entityId: string, view: {
-  core: StorageEntityCoreDoc;
+  core: RuntimeAdapterEntityCoreDoc;
   accounts: RuntimeAdapterAccountPage;
   books: RuntimeAdapterBookPage;
 }): {
-  core: StorageEntityCoreDoc;
+  core: RuntimeAdapterEntityCoreDoc;
   accounts: RuntimeAdapterAccountPage;
   books: RuntimeAdapterBookPage;
 } => ({
@@ -1274,7 +1288,7 @@ const loadStorageViewPageIfAvailable = async (
   height: number,
   query?: RuntimeAdapterReadQuery,
 ): Promise<{
-  core: StorageEntityCoreDoc;
+  core: RuntimeAdapterEntityCoreDoc;
   accounts: RuntimeAdapterAccountPage;
   books: RuntimeAdapterBookPage;
 } | null> => {
@@ -1284,6 +1298,29 @@ const loadStorageViewPageIfAvailable = async (
   return stored ?? null;
 };
 
+type RuntimeAdapterReplicaLocalCoreOverlay = {
+  signerId: string;
+  isProposer: boolean;
+  entityEncPubKey: string;
+  entityEncPrivKey: '';
+  htlcNotes?: EntityState['htlcNotes'];
+};
+
+const snapshotReplicaLocalCoreOverlay = (
+  replica: EntityReplica | null | undefined,
+): RuntimeAdapterReplicaLocalCoreOverlay | null => {
+  if (!replica) return null;
+  return {
+    signerId: normalizeEntityId(replica.signerId),
+    isProposer: replica.isProposer,
+    entityEncPubKey: replica.state.entityEncPubKey,
+    entityEncPrivKey: '',
+    ...(replica.state.htlcNotes instanceof Map
+      ? { htlcNotes: new Map(replica.state.htlcNotes) }
+      : {}),
+  };
+};
+
 const loadViewPageForHeight = async (
   ctx: RuntimeAdapterResolveContext,
   entityId: string,
@@ -1291,13 +1328,17 @@ const loadViewPageForHeight = async (
   isCurrentHeight: boolean,
   query?: RuntimeAdapterReadQuery,
 ): Promise<{
-  core: StorageEntityCoreDoc;
+  core: RuntimeAdapterEntityCoreDoc;
   accounts: RuntimeAdapterAccountPage;
   books: RuntimeAdapterBookPage;
 }> => {
   if (isCurrentHeight) {
+    const localCore = snapshotReplicaLocalCoreOverlay(findReplica(ctx.env, entityId));
     const stored = await loadStorageViewPageIfAvailable(ctx, entityId, height, query);
-    return stored ?? projectLiveEntityViewPage(ctx, entityId, query);
+    if (!stored) return projectLiveEntityViewPage(ctx, entityId, query);
+    return localCore
+      ? { ...stored, core: { ...stored.core, ...localCore } }
+      : stored;
   }
   return await loadRequiredEntityViewPage(ctx, entityId, height, query);
 };
@@ -1412,7 +1453,7 @@ const projectViewFrame = async (
   };
 };
 
-const projectGraphEntityCore = (core: StorageEntityCoreDoc): RuntimeAdapterGraphEntityCore => ({
+const projectGraphEntityCore = (core: RuntimeAdapterEntityCoreDoc): RuntimeAdapterGraphEntityCore => ({
   entityId: core.entityId,
   ...withDefinedProp('signerId', core.signerId),
   height: core.height,
@@ -1485,7 +1526,7 @@ const projectGraphAccount = (doc: StorageAccountDoc): RuntimeAdapterGraphAccount
 
 export const assertRuntimeAdapterGraphFrameWireBudget = (frame: RuntimeAdapterGraphFrame): number => {
   const encoded = encodeRuntimeAdapterMessage({
-    v: 1,
+    v: XLN_PROTOCOL_VERSION,
     inReplyTo: 'graph-frame-budget',
     ok: true,
     payload: frame,
@@ -1506,24 +1547,87 @@ const projectGraphFrame = async (
 ): Promise<RuntimeAdapterGraphFrame> => {
   const requestedHeight = readAtHeight(query);
   const currentEnvHeight = envHeight(ctx.env);
-  const isCurrentHeight = requestedHeight === null || requestedHeight === currentEnvHeight;
-  if (!isCurrentHeight && !ctx.readHead) {
+  const isLiveQuery = requestedHeight === null;
+  const height = requestedHeight ?? currentEnvHeight;
+  const entityLimit = readBoundedLimit(query?.limit, 500);
+  const accountsLimit = readBoundedLimit(query?.accountsLimit, 500);
+  const capturedRuntimeId = normalizeEntityId(String(ctx.env.runtimeId || ''));
+  const capturedTimestamp = Math.max(0, Math.floor(Number(ctx.env.timestamp || 0)));
+
+  // A live graph read is a projection of the in-memory R-frame, not a
+  // historical storage query. Capture every graph DTO before the first await:
+  // snapshot publication may legitimately prune the old diff chain while this
+  // request is in flight, and the live Env is replaced at each committed frame.
+  const capturedLive = isLiveQuery ? (() => {
+    const summaries = listLiveEntitySummaries(ctx);
+    if (summaries.length > entityLimit) {
+      throw new RuntimeAdapterError(
+        'E_BAD_QUERY',
+        `graph-frame has ${summaries.length} entities; limit is ${entityLimit}. Select a runtime/filter before rendering`,
+      );
+    }
+    const localEntityIds = new Set(
+      Array.from(ctx.env.eReplicas?.values?.() ?? []).map((replica) => normalizeEntityId(replica.entityId)),
+    );
+    const entities: RuntimeAdapterGraphEntityFrame[] = [];
+    let accountObservationCount = 0;
+    for (const summary of summaries) {
+      const normalizedEntityId = normalizeEntityId(summary.entityId);
+      if (!localEntityIds.has(normalizedEntityId)) {
+        entities.push({
+          summary,
+          core: null,
+          accounts: { items: [], ...emptyPageMeta(accountsLimit) },
+        });
+        continue;
+      }
+      const replica = findReplica(ctx.env, normalizedEntityId);
+      if (!replica) throw new RuntimeAdapterError('E_INTERNAL', `live graph replica disappeared: ${normalizedEntityId}`);
+      const totalAccounts = replica.state.accounts.size;
+      if (totalAccounts > accountsLimit) {
+        throw new RuntimeAdapterError(
+          'E_BAD_QUERY',
+          `graph-frame entity ${summary.entityId} has ${totalAccounts} accounts; limit is ${accountsLimit}. Select a runtime/filter before rendering`,
+        );
+      }
+      const live = projectLiveEntityViewPage(ctx, normalizedEntityId, {
+        ...query,
+        accountsLimit,
+        booksLimit: 1,
+      });
+      accountObservationCount += live.accounts.items.length;
+      if (accountObservationCount > accountsLimit) {
+        throw new RuntimeAdapterError(
+          'E_BAD_QUERY',
+          `graph-frame has ${accountObservationCount} account observations; limit is ${accountsLimit}. Select a runtime/filter before rendering`,
+        );
+      }
+      const accountPage = { ...live.accounts };
+      delete accountPage.summary;
+      entities.push({
+        summary,
+        core: projectGraphEntityCore(live.core),
+        accounts: { ...accountPage, items: live.accounts.items.map(projectGraphAccount) },
+      });
+    }
+    return { summaries, entities };
+  })() : null;
+
+  if (!isLiveQuery && !ctx.readHead) {
     throw new RuntimeAdapterError('E_INTERNAL', 'storage head reader is required for historical graph reads');
   }
-  const persistedHead = !isCurrentHeight ? await ctx.readHead!() : null;
-  if (!isCurrentHeight && !persistedHead) {
+  const persistedHead = !isLiveQuery ? await ctx.readHead!() : null;
+  if (!isLiveQuery && !persistedHead) {
     throw new RuntimeAdapterError('E_NOT_FOUND', `storage head not found at height ${requestedHeight}`);
   }
-  if (!isCurrentHeight) assertRequestedHeightAvailable(requestedHeight!, persistedHead!, 'graph-frame');
+  if (!isLiveQuery) assertRequestedHeightAvailable(requestedHeight!, persistedHead!, 'graph-frame');
 
   const head = persistedHead ?? await readBestHead(ctx);
-  const height = requestedHeight ?? currentEnvHeight;
   const heightQuery = requestedHeight !== null && height > 0 ? { ...query, atHeight: height } : query;
-  const summaries = await listEntitySummaries(ctx, heightQuery, { allowPartial: false });
-  const localEntityIds = isCurrentHeight
-    ? new Set(Array.from(ctx.env.eReplicas?.values?.() ?? []).map((replica) => normalizeEntityId(replica.entityId)))
-    : null;
-  const entityLimit = readBoundedLimit(query?.limit, 500);
+  const summaries = capturedLive?.summaries ?? await listEntitySummaries(ctx, heightQuery, {
+    allowPartial: false,
+    forceStorageAtHeight: true,
+  });
   if (summaries.length > entityLimit) {
     throw new RuntimeAdapterError(
       'E_BAD_QUERY',
@@ -1531,44 +1635,37 @@ const projectGraphFrame = async (
     );
   }
 
-  const accountsLimit = readBoundedLimit(query?.accountsLimit, 500);
-  const entities: RuntimeAdapterGraphEntityFrame[] = [];
+  const entities: RuntimeAdapterGraphEntityFrame[] = capturedLive?.entities ?? [];
   let accountObservationCount = 0;
-  for (const summary of summaries) {
-    if (localEntityIds && !localEntityIds.has(normalizeEntityId(summary.entityId))) {
+  if (!capturedLive) {
+    for (const summary of summaries) {
+      const stored = await loadViewPageForHeight(ctx, summary.entityId, height, false, {
+        ...heightQuery,
+        accountsLimit,
+        booksLimit: 1,
+      });
+      const totalAccounts = Math.max(stored.accounts.items.length, Number(stored.accounts.totalItems ?? 0));
+      if (stored.accounts.nextCursor || totalAccounts > stored.accounts.items.length) {
+        throw new RuntimeAdapterError(
+          'E_BAD_QUERY',
+          `graph-frame entity ${summary.entityId} has ${totalAccounts} accounts; limit is ${accountsLimit}. Select a runtime/filter before rendering`,
+        );
+      }
+      accountObservationCount += stored.accounts.items.length;
+      if (accountObservationCount > accountsLimit) {
+        throw new RuntimeAdapterError(
+          'E_BAD_QUERY',
+          `graph-frame has ${accountObservationCount} account observations; limit is ${accountsLimit}. Select a runtime/filter before rendering`,
+        );
+      }
+      const accountPage = { ...stored.accounts };
+      delete accountPage.summary;
       entities.push({
         summary,
-        core: null,
-        accounts: { items: [], ...emptyPageMeta(accountsLimit) },
+        core: projectGraphEntityCore(stored.core),
+        accounts: { ...accountPage, items: stored.accounts.items.map(projectGraphAccount) },
       });
-      continue;
     }
-    const stored = await loadViewPageForHeight(ctx, summary.entityId, height, isCurrentHeight, {
-      ...heightQuery,
-      accountsLimit,
-      booksLimit: 1,
-    });
-    const totalAccounts = Math.max(stored.accounts.items.length, Number(stored.accounts.totalItems ?? 0));
-    if (stored.accounts.nextCursor || totalAccounts > stored.accounts.items.length) {
-      throw new RuntimeAdapterError(
-        'E_BAD_QUERY',
-        `graph-frame entity ${summary.entityId} has ${totalAccounts} accounts; limit is ${accountsLimit}. Select a runtime/filter before rendering`,
-      );
-    }
-    accountObservationCount += stored.accounts.items.length;
-    if (accountObservationCount > accountsLimit) {
-      throw new RuntimeAdapterError(
-        'E_BAD_QUERY',
-        `graph-frame has ${accountObservationCount} account observations; limit is ${accountsLimit}. Select a runtime/filter before rendering`,
-      );
-    }
-    const accountPage = { ...stored.accounts };
-    delete accountPage.summary;
-    entities.push({
-      summary,
-      core: projectGraphEntityCore(stored.core),
-      accounts: { ...accountPage, items: stored.accounts.items.map(projectGraphAccount) },
-    });
   }
 
   const knownEntityIds = new Set(entities.map((entity) => normalizeEntityId(entity.summary.entityId)));
@@ -1587,7 +1684,7 @@ const projectGraphFrame = async (
         entities.push({
           summary: {
             entityId: endpointId,
-            ...(ctx.env.runtimeId ? { runtimeId: normalizeEntityId(ctx.env.runtimeId) } : {}),
+            ...(capturedRuntimeId ? { runtimeId: capturedRuntimeId } : {}),
             label: endpointId,
             height,
           },
@@ -1602,7 +1699,7 @@ const projectGraphFrame = async (
   const record = ctx.readFrame ? await ctx.readFrame(height) : null;
   const fallbackTimestamp = entities.reduce(
     (latest, entity) => Math.max(latest, Number(entity.core?.timestamp || 0)),
-    isCurrentHeight ? Number(ctx.env.timestamp || 0) : 0,
+    isLiveQuery ? capturedTimestamp : 0,
   );
   const timestamp = Math.max(
     0,
@@ -1610,7 +1707,7 @@ const projectGraphFrame = async (
   );
   const frame: RuntimeAdapterGraphFrame = {
     head,
-    runtimeId: normalizeEntityId(String(ctx.env.runtimeId || '')),
+    runtimeId: capturedRuntimeId,
     height,
     timestamp,
     stateHash: String(record?.stateHash || ''),
@@ -1755,30 +1852,6 @@ const projectActivityPage = async (
   return ctx.readActivityPage(readActivityQuery(query));
 };
 
-const readAmount = (value: unknown, context: string): bigint => {
-  if (typeof value === 'bigint') return value;
-  if (typeof value === 'number' && Number.isSafeInteger(value)) return BigInt(value);
-  if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return BigInt(value.trim());
-  throw new RuntimeAdapterError('E_INTERNAL', `${context} must be a bigint-compatible amount`);
-};
-
-const addAmountMap = (values: Map<unknown, unknown> | null | undefined, context: string): bigint => {
-  if (!(values instanceof Map)) return 0n;
-  let total = 0n;
-  for (const [key, value] of values.entries()) {
-    total += readAmount(value, `${context}.${String(key)}`);
-  }
-  return total;
-};
-
-const deltaCollateralAmount = (
-  delta: { collateral?: unknown } | null | undefined,
-  context: string,
-): bigint => {
-  if (!delta || delta.collateral === undefined || delta.collateral === null) return 0n;
-  return readAmount(delta.collateral, context);
-};
-
 const projectSolvencySummary = (
   ctx: RuntimeAdapterResolveContext,
   query?: RuntimeAdapterReadQuery,
@@ -1789,42 +1862,17 @@ const projectSolvencySummary = (
     throw new RuntimeAdapterError('E_BAD_QUERY', 'historical solvency-summary reads are not available yet');
   }
 
-  let totalReserves = 0n;
-  let confirmedCollateral = 0n;
-  let pendingCollateral = 0n;
-  let accountViews = 0;
-
-  for (const [replicaKey, replica] of ctx.env.eReplicas.entries()) {
-    totalReserves += addAmountMap(replica.state.reserves, `replica.${String(replicaKey)}.reserves`);
-
-    for (const [accountKey, account] of replica.state.accounts.entries()) {
-      accountViews += 1;
-      const accountContext = `replica.${String(replicaKey)}.account.${String(accountKey)}`;
-      for (const [tokenId, delta] of account.deltas.entries()) {
-        confirmedCollateral += deltaCollateralAmount(delta, `${accountContext}.delta.${String(tokenId)}.collateral`);
-      }
-      for (const [index, delta] of (account.pendingFrame?.deltas ?? []).entries()) {
-        pendingCollateral += deltaCollateralAmount(delta, `${accountContext}.pendingDelta.${index}.collateral`);
-      }
-    }
-  }
-
-  confirmedCollateral /= 2n;
-  pendingCollateral /= 2n;
-  const total = confirmedCollateral + pendingCollateral;
-  const delta = totalReserves - total;
+  const solvency = calculateSolvency(ctx.env);
+  const assets = Array.from(solvency.byAsset.values())
+    .sort((left, right) => left.stackId.localeCompare(right.stackId) || left.tokenId - right.tokenId);
 
   return {
     ok: true,
     height: currentHeight,
-    entityCount: ctx.env.eReplicas.size,
-    accountViews,
-    m1: totalReserves,
-    m2: confirmedCollateral,
-    m3: pendingCollateral,
-    total,
-    delta,
-    isValid: delta === 0n,
+    entityCount: solvency.entityCount,
+    accountViews: solvency.accountViews,
+    assets,
+    isValid: solvency.isValid,
   };
 };
 
@@ -1874,6 +1922,20 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
     return await projectActivityPage(ctx, query) as T;
   }
 
+  if (parts.length === 1 && parts[0] === 'frame-receipts') {
+    if (!ctx.readFrameReceipts) {
+      throw new RuntimeAdapterError('E_BAD_QUERY', 'frame receipt reads are unavailable for this adapter');
+    }
+    return await ctx.readFrameReceipts(query) as T;
+  }
+
+  if (parts.length === 1 && parts[0] === 'payment-routes') {
+    if (!ctx.findPaymentRoutes) {
+      throw new RuntimeAdapterError('E_BAD_QUERY', 'payment route reads are unavailable for this adapter');
+    }
+    return await ctx.findPaymentRoutes(query) as T;
+  }
+
   if (parts.length === 1 && parts[0] === 'solvency-summary') {
     return projectSolvencySummary(ctx, query) as T;
   }
@@ -1890,7 +1952,7 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
     if (!receiptId) throw new RuntimeAdapterError('E_BAD_PATH', 'receipt id is required');
     const receipt = await ctx.readReceipt(receiptId);
     if (!receipt) throw new RuntimeAdapterError('E_NOT_FOUND', `receipt not found: ${receiptId}`);
-    return receipt as T;
+    return projectRuntimeIngressReceiptForWire(receipt) as T;
   }
 
   if (parts[0] === 'entity' && parts.length >= 2) {
@@ -1952,7 +2014,10 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
     const { state, replica } = await resolveEntityState(ctx, entityId, query);
 
     if (parts.length === 2) {
-      return compactEntityCoreForRemote(projectEntityCoreDoc(state, replica)) as StorageEntityCoreDoc as T;
+      const core = replica
+        ? projectEntityReplicaCoreView(state, replica)
+        : projectEntityCoreDoc(state);
+      return compactEntityCoreForRemote(core) as RuntimeAdapterEntityCoreDoc as T;
     }
   }
 

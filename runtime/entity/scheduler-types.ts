@@ -17,6 +17,7 @@ export type ScheduledHookType =
   | 'settlement_window'
   | 'watchdog'
   | 'hub_rebalance_kick'
+  | 'board_reseal'
   | 'cross_j_orderbook_sweep';
 
 type ScheduledHookBase<TType extends ScheduledHookType, TData extends Record<string, unknown>> = {
@@ -50,6 +51,12 @@ export type HubRebalanceKickHook = ScheduledHookBase<'hub_rebalance_kick', {
   counterpartyId: string;
 }>;
 
+export type BoardResealHook = ScheduledHookBase<'board_reseal', {
+  activationJHeight: number;
+  activationLogIndex: number;
+  afterCounterpartyId: string;
+}>;
+
 export type CrossJurisdictionOrderbookSweepHook = ScheduledHookBase<'cross_j_orderbook_sweep', {
   reason: string;
 }>;
@@ -61,6 +68,7 @@ export type ScheduledHook =
   | SettlementWindowHook
   | WatchdogHook
   | HubRebalanceKickHook
+  | BoardResealHook
   | CrossJurisdictionOrderbookSweepHook;
 
 export interface CrontabState {

@@ -1,7 +1,10 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 import { execSync } from 'node:child_process';
+import http from 'node:http';
+import https from 'node:https';
 import { fileURLToPath } from 'node:url';
+import { configureWsProxyLifecycle } from './vite-ws-proxy-lifecycle';
 
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const BUILD_NUMBER = (() => {
@@ -23,6 +26,9 @@ const BUILD_NUMBER = (() => {
 const DEV_PORT_RAW = Number(process.env['VITE_DEV_PORT'] || '8081');
 const DEV_PORT = Number.isFinite(DEV_PORT_RAW) && DEV_PORT_RAW > 0 ? Math.floor(DEV_PORT_RAW) : 8081;
 const API_PROXY_TARGET = process.env['VITE_API_PROXY_TARGET'] || 'http://localhost:8082';
+const API_PROXY_AGENT = API_PROXY_TARGET.startsWith('https:')
+  ? new https.Agent({ keepAlive: true, maxSockets: 64, maxFreeSockets: 64 })
+  : new http.Agent({ keepAlive: true, maxSockets: 64, maxFreeSockets: 64 });
 const VITE_CACHE_DIR = process.env['VITE_HTTP_CACHE_DIR'] || 'node_modules/.vite-http';
 const TYPECHAIN_INDEX = fileURLToPath(new URL('../jurisdictions/typechain-types/index.ts', import.meta.url));
 
@@ -64,25 +70,32 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: API_PROXY_TARGET,
+        agent: API_PROXY_AGENT,
         changeOrigin: true,
         secure: false,
       },
       '/rpc': {
         target: API_PROXY_TARGET,
+        agent: API_PROXY_AGENT,
         ws: true,
         changeOrigin: true,
         secure: false,
+        configure: configureWsProxyLifecycle,
       },
       '/rpc2': {
         target: API_PROXY_TARGET,
+        agent: API_PROXY_AGENT,
         ws: true,
         changeOrigin: true,
         secure: false,
+        configure: configureWsProxyLifecycle,
       },
       '/relay': {
         target: API_PROXY_TARGET,
+        agent: API_PROXY_AGENT,
         ws: true,
         changeOrigin: true,
+        configure: configureWsProxyLifecycle,
       },
     },
     headers: {

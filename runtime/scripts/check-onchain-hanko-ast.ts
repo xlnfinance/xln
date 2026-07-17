@@ -212,6 +212,9 @@ export const checkOnchainHankoAst = (): void => {
     'encodeWatchtowerCounterDisputeHankoPayloadForDomain', 'computeWatchtowerCounterDisputeHankoHashForDomain',
     'encodeEntityTransferHankoPayloadForDomain', 'computeEntityTransferHankoHashForDomain',
     'encodeReleaseControlSharesHankoPayloadForDomain', 'computeReleaseControlSharesHankoHashForDomain',
+    'encodeCancelEntityProviderActionHankoPayloadForDomain', 'computeCancelEntityProviderActionHankoHashForDomain',
+    'encodeBoardProposalHankoPayloadForDomain', 'computeBoardProposalHankoHashForDomain',
+    'encodeBoardProposalCancelHankoPayloadForDomain', 'computeBoardProposalCancelHankoHashForDomain',
   ];
   assertExact(codecFunctions.map((fn) => String(fn.name)), codecNames, 'HankoCodec surface');
   for (const fn of codecFunctions) {
@@ -236,8 +239,11 @@ export const checkOnchainHankoAst = (): void => {
 
   for (const [contractName, functionName, encodingName] of [
     ['Depository', '_encodeWatchtowerCounterDisputeHankoPayload', 'encodeWatchtowerCounterDispute'],
+    ['EntityProvider', 'encodeBoardProposalHankoPayload', 'encodeBoardProposal'],
+    ['EntityProvider', 'encodeBoardProposalCancelHankoPayload', 'encodeBoardProposalCancel'],
     ['EntityProvider', 'encodeEntityTransferHankoPayload', 'encodeEntityTransfer'],
     ['EntityProvider', 'encodeReleaseControlSharesHankoPayload', 'encodeReleaseControlShares'],
+    ['EntityProvider', 'encodeCancelEntityProviderActionHankoPayload', 'encodeCancelEntityProviderAction'],
   ] as const) {
     const fn = namedFunction(contracts[contractName], functionName);
     if (!hasChainId(fn) || !hasAddressThis(fn)) fail(`${contractName}.${functionName} must derive local domain`);
@@ -253,33 +259,80 @@ export const checkOnchainHankoAst = (): void => {
     'Account._encodeDisputeProofHankoPayload:encodeDisputeProof',
     'Account._encodeCooperativeDisputeProofHankoPayload:encodeCooperativeDisputeProof',
     'Depository._encodeWatchtowerCounterDisputeHankoPayload:encodeWatchtowerCounterDispute',
+    'EntityProvider.encodeBoardProposalHankoPayload:encodeBoardProposal',
+    'EntityProvider.encodeBoardProposalCancelHankoPayload:encodeBoardProposalCancel',
     'EntityProvider.encodeEntityTransferHankoPayload:encodeEntityTransfer',
     'EntityProvider.encodeReleaseControlSharesHankoPayload:encodeReleaseControlShares',
+    'EntityProvider.encodeCancelEntityProviderActionHankoPayload:encodeCancelEntityProviderAction',
   ], 'production HankoEncoding inventory');
 
   for (const [contractName, functionNames] of [
     ['Account', Object.keys(localEncoders)],
     ['Depository', ['processBatch', 'computeWatchtowerCounterDisputeHash', 'watchtowerCounterDispute']],
-    ['EntityProvider', ['entityTransferTokens', 'releaseControlShares']],
+    ['EntityProvider', ['entityTransferTokens', 'releaseControlShares', 'cancelEntityProviderAction']],
   ] as const) {
     for (const functionName of functionNames) {
-      const forbidden = parameterNames(namedFunction(contracts[contractName], functionName))
+      const names = parameterNames(namedFunction(contracts[contractName], functionName));
+      const forbidden = names
         .filter((name) => name === 'chainId' || name === 'contractAddress');
       if (forbidden.length) fail(`${contractName}.${functionName} accepts caller-controlled domain`);
+      if (contractName === 'EntityProvider') {
+        if (!names.includes('hankoData') || names.includes('encodedBoard') || names.includes('encodedSignature')) {
+          fail(`EntityProvider.${functionName} must accept one canonical Hanko envelope`);
+        }
+      }
     }
   }
 
-  const recoverConsumers = functions(contracts.EntityProvider)
-    .filter((fn) => calledNames(fn).includes('recoverEntity'))
-    .map((fn) => String(fn.name));
-  assertExact(recoverConsumers, ['entityTransferTokens', 'releaseControlShares'], 'recoverEntity consumers');
+  if (functions(contracts.EntityProvider).some((fn) => fn.name === 'recoverEntity')) {
+    fail('legacy EntityProvider.recoverEntity surface was reintroduced');
+  }
   for (const [consumer, hashCall] of [
     ['entityTransferTokens', 'computeEntityTransferHankoHash'],
     ['releaseControlShares', 'computeReleaseControlSharesHankoHash'],
+    ['cancelEntityProviderAction', 'computeCancelEntityProviderActionHankoHash'],
   ]) {
     const calls = calledNames(namedFunction(contracts.EntityProvider, consumer!));
-    if (!calls.includes(hashCall!) || !calls.includes('recoverEntity')) fail(`${consumer} hash/recovery wiring drift`);
+    if (!calls.includes(hashCall!) || !calls.includes('_verifyCurrentHankoSignature')) {
+      fail(`${consumer} hash/canonical-Hanko wiring drift`);
+    }
   }
+  for (const [consumer, hashCall] of [
+    ['proposeBoard', 'computeBoardProposalHash'],
+    ['cancelBoardProposal', 'computeBoardProposalCancelHash'],
+  ]) {
+    const fn = namedFunction(contracts.EntityProvider, consumer!);
+    const calls = calledNames(fn);
+    if (!calls.includes(hashCall!) || !calls.includes('_requireBoardAuthority')) {
+      fail(`${consumer} hash/authority wiring drift`);
+    }
+    const forbidden = parameterNames(fn)
+      .filter((name) => name === 'chainId' || name === 'contractAddress');
+    if (forbidden.length) fail(`EntityProvider.${consumer} accepts caller-controlled domain`);
+  }
+  for (const [hashFunction, encoder] of [
+    ['computeBoardProposalHash', 'encodeBoardProposalHankoPayload'],
+    ['computeBoardProposalCancelHash', 'encodeBoardProposalCancelHankoPayload'],
+  ]) {
+    if (!calledNames(namedFunction(contracts.EntityProvider, hashFunction!)).includes(encoder!)) {
+      fail(`${hashFunction} local-domain encoder wiring drift`);
+    }
+  }
+
+  const internalVerifyConsumers = functions(contracts.EntityProvider)
+    .filter((fn) => calledNames(fn).includes('_verifyHankoSignature'))
+    .map((fn) => String(fn.name));
+  assertExact(internalVerifyConsumers, [
+    'verifyHankoSignature', 'batchVerifyHankoSignatures',
+  ], 'EntityProvider canonical Hanko verifier consumers');
+
+  const currentVerifyConsumers = functions(contracts.EntityProvider)
+    .filter((fn) => calledNames(fn).includes('_verifyCurrentHankoSignature'))
+    .map((fn) => String(fn.name));
+  assertExact(currentVerifyConsumers, [
+    '_requireBoardAuthority',
+    'entityTransferTokens', 'cancelEntityProviderAction', 'releaseControlShares',
+  ], 'EntityProvider current-only Hanko verifier consumers');
 
   const verifyConsumers = (['Account', 'Depository', 'EntityProvider'] as const).flatMap((contractName) =>
     functions(contracts[contractName]!).filter((fn) => calledNames(fn).includes('verifyHankoSignature'))
@@ -288,7 +341,6 @@ export const checkOnchainHankoAst = (): void => {
     'Account.verifyDisputeProofHanko',
     'Account.verifyCooperativeProofHanko', 'Account.processC2R', 'Account._settleDiffs', 'Account._disputeStart',
     'Depository.processBatch', 'Depository.watchtowerCounterDispute',
-    'EntityProvider.batchVerifyHankoSignatures',
   ], 'verifyHankoSignature consumers');
 
   const finalProofConsumers = (['Account', 'Depository', 'EntityProvider'] as const).flatMap((contractName) =>

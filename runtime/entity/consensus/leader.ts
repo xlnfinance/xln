@@ -10,13 +10,26 @@ import type {
   EntityState,
   ProposedEntityFrame,
 } from '../../types';
+import { isFrozenBaseJPrefixRollAuthorized } from '../../jurisdiction/j-prefix-consensus';
 import { compareStableText, serializeTaggedJson } from '../../protocol/serialization';
+import { cloneIsolatedProposedEntityFrame } from '../../protocol/runtime-input-clone';
+import { encodeCanonicalEntityConsensusValue } from './state-root';
 
 export const ENTITY_LEADER_TIMEOUT_BASE_MS = 10_000;
 export const ENTITY_LEADER_TIMEOUT_MAX_MS = 60_000;
 export const ENTITY_J_SUBMIT_FALLBACK_MS = 60_000;
 
 const normalizeSignerId = (value: string): string => value.trim().toLowerCase();
+
+/**
+ * Exact pre-frame authority projection used by both live consensus and durable
+ * certificate verification. Keeping this projection explicit prevents storage
+ * restore from fabricating an otherwise complete historical EntityState.
+ */
+export type EntityLeaderStateView = Pick<
+  EntityState,
+  'entityId' | 'height' | 'prevFrameHash' | 'config' | 'leaderState'
+>;
 
 const validatorShares = (config: ConsensusConfig, normalizedId: string): bigint => {
   return Object.entries(config.shares)
@@ -36,7 +49,7 @@ export const getEntityLeaderOrder = (config: ConsensusConfig): string[] => {
   return [ceo, ...fallback];
 };
 
-export const getEntityLeaderState = (state: EntityState): EntityLeaderState => {
+export const getEntityLeaderState = (state: EntityLeaderStateView): EntityLeaderState => {
   const order = getEntityLeaderOrder(state.config);
   const ceo = order[0];
   if (!ceo) throw new Error(`ENTITY_LEADER_MISSING: entity=${state.entityId}`);
@@ -51,7 +64,7 @@ export const getEntityLeaderState = (state: EntityState): EntityLeaderState => {
   };
 };
 
-export const getNextEntityFallbackLeader = (state: EntityState): string => {
+export const getNextEntityFallbackLeader = (state: EntityLeaderStateView): string => {
   const order = getEntityLeaderOrder(state.config);
   if (order.length < 2) return order[0] ?? '';
   const activeIndex = order.indexOf(getEntityLeaderState(state).activeValidatorId);
@@ -80,7 +93,7 @@ export const isReplicaProposalLeader = (replica: EntityReplica): boolean =>
 export const getEntityLeaderTimeoutMs = (nextView: number): number =>
   Math.min(ENTITY_LEADER_TIMEOUT_MAX_MS, ENTITY_LEADER_TIMEOUT_BASE_MS * Math.max(1, Math.floor(nextView)));
 
-export const buildEntityLeaderVoteBody = (state: EntityState): EntityLeaderTimeoutVoteBody => {
+export const buildEntityLeaderVoteBody = (state: EntityLeaderStateView): EntityLeaderTimeoutVoteBody => {
   const leader = getEntityLeaderState(state);
   return {
     entityId: normalizeSignerId(state.entityId),
@@ -107,7 +120,7 @@ export const buildPreparedFrameEvidence = (
   frame: ProposedEntityFrame | undefined,
 ): ProposedEntityFrame | undefined => {
   if (!frame) return undefined;
-  const evidence = structuredClone(frame);
+  const evidence = cloneIsolatedProposedEntityFrame(frame);
   // Relay certificates do not participate in the prepared frame hash and must
   // not recursively nest in later view-change votes. The original proposal
   // certificate stays: it may be required to validate the frame's bound
@@ -120,18 +133,20 @@ export const buildPreparedFrameEvidence = (
 export const hashEntityLeaderVoteBody = (
   body: EntityLeaderTimeoutVoteBody & { preparedFrame?: ProposedEntityFrame },
 ): string =>
-  ethers.keccak256(ethers.toUtf8Bytes(serializeTaggedJson({
+  ethers.keccak256(ethers.toUtf8Bytes(encodeCanonicalEntityConsensusValue({
     domain: 'xln.entity.leader-timeout.v1',
     ...leaderVoteFields(body),
     preparedFrame: buildPreparedFrameEvidence(body.preparedFrame) ?? null,
   })));
 
 export const assertEntityLeaderVoteMatchesState = (
-  state: EntityState,
+  state: EntityLeaderStateView,
   vote: EntityLeaderTimeoutVoteBody,
 ): void => {
   const expected = buildEntityLeaderVoteBody(state);
-  if (serializeTaggedJson(leaderVoteFields(vote)) !== serializeTaggedJson(expected)) {
+  const receivedBody = encodeCanonicalEntityConsensusValue(leaderVoteFields(vote));
+  const expectedBody = encodeCanonicalEntityConsensusValue(expected);
+  if (receivedBody !== expectedBody) {
     throw new Error(`ENTITY_LEADER_VOTE_STALE_OR_INVALID: expected=${serializeTaggedJson(expected)}`);
   }
 };
@@ -147,6 +162,13 @@ export const markLocalEntityLeaderTimeoutVote = (vote: EntityLeaderTimeoutVote):
 
 export const isLocalEntityLeaderTimeoutVote = (vote: EntityLeaderTimeoutVote): boolean =>
   (vote as EntityLeaderTimeoutVote & { [LOCAL_LEADER_TIMEOUT_VOTE]?: boolean })[LOCAL_LEADER_TIMEOUT_VOTE] === true;
+
+export const copyLocalEntityLeaderTimeoutVoteAuthorization = (
+  source: EntityLeaderTimeoutVote,
+  target: EntityLeaderTimeoutVote,
+): void => {
+  if (isLocalEntityLeaderTimeoutVote(source)) markLocalEntityLeaderTimeoutVote(target);
+};
 
 export const buildEntityLeaderCertificate = (
   body: EntityLeaderTimeoutVoteBody,
@@ -183,11 +205,22 @@ export const getEntityQuorumSafetyWarning = (config: ConsensusConfig): string | 
 };
 
 export const hasEntityLeaderWork = (replica: EntityReplica): boolean => {
+  const certifiedJPrefixAhead = Boolean(
+    replica.jPrefixRound?.certificate &&
+    replica.jPrefixRound.certificate.selected.scannedThroughHeight > replica.state.lastFinalizedJHeight,
+  );
+  const frozenBaseJPrefixRoll = isFrozenBaseJPrefixRollAuthorized(
+    replica,
+    replica.jPrefixRound?.certificate,
+  );
   if (
     replica.mempool.length > 0 ||
+    (replica.state.deferredAccountProposals?.size ?? 0) > 0 ||
     replica.proposal ||
     replica.lockedFrame ||
-    replica.pendingLeaderCertificate
+    replica.pendingLeaderCertificate ||
+    certifiedJPrefixAhead ||
+    frozenBaseJPrefixRoll
   ) return true;
   for (const account of replica.state.accounts.values()) {
     if (account.mempool.length > 0 || account.pendingFrame || account.pendingAccountInput) return true;

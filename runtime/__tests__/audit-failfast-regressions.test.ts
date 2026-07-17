@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { x25519 } from '@noble/curves/ed25519.js';
 
 import {
@@ -10,20 +10,31 @@ import {
   validateAccountFrame,
 } from '../account/consensus/index';
 import { computeAccountStateRoot } from '../account/state-root';
+import { resolveCertifiedAccountCounterpartyProposer } from '../account/counterparty-route';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account/crypto';
 import { deriveAccountWatchSeed } from '../account/watch-seed';
 import { applyAccountTx } from '../account/tx/apply';
 import { isPullRevealExpired } from '../account/pull-deadline';
 import { handleHtlcLock } from '../account/tx/handlers/htlc-lock';
 import { handleHtlcResolve } from '../account/tx/handlers/htlc-resolve';
+import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { buildHashLadderProof, revealHashLadder } from '../protocol/htlc/hash-ladder';
 import { checkAutoRebalance, handleRequestCollateral } from '../account/tx/handlers/request-collateral';
 import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
 import { createFrameHash, MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame';
-import { LIMITS } from '../constants';
-import { ACCOUNT_PENDING_RESEND_AFTER_MS, executeCrontab, initCrontab } from '../entity/scheduler';
-import { generateLazyEntityId, generateNumberedEntityId } from '../entity/factory';
+import { resolveAutoRebalanceFeePolicy, runPostFrameAutoRebalanceCheck } from '../account/consensus/helpers';
+import { HTLC, LIMITS } from '../constants';
+import {
+  ACCOUNT_PENDING_RESEND_AFTER_MS,
+  ACCOUNT_TIMEOUT_MS,
+  emitCommittedPendingFrameWarnings,
+  executeCrontab,
+  HTLC_SECRET_ACK_TIMEOUT_MS,
+  initCrontab,
+} from '../entity/scheduler';
+import { encodeBoard, generateLazyEntityId, generateNumberedEntityId, hashBoard } from '../entity/factory';
 import { isLeftEntity } from '../entity/id';
 import {
   CROSS_J_PENDING_FILL_ACK_TTL_MS,
@@ -32,7 +43,16 @@ import {
   applyEntityInput,
 } from '../entity/consensus/index';
 import { createEntityFrameHash } from '../entity/consensus/frame';
+import { buildSignedEntityCommand, prepareLocallyAuthoredEntityTxs } from '../entity/command';
+import { signedEntityCommandTx } from '../entity/command-codec';
+import { buildCollectiveEntityProposalTx } from '../entity/authorization';
+import { generateProposalId } from '../entity/tx/proposals';
 import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
+import {
+  buildEntityFrameAuthority,
+  computeCanonicalEntityConsensusStateHash,
+  computeEntityFrameAuthorityRoot,
+} from '../entity/consensus/state-root';
 import {
   assertCrossJurisdictionOrderAdmissible,
   findCrossJurisdictionBookAdmissionForAck,
@@ -53,19 +73,26 @@ import {
 } from '../extensions/cross-j/index';
 import { applyEntityTx } from '../entity/tx/apply';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity/tx/handlers/account-cross-j-followups';
-import { applyCommittedHtlcLockFollowup } from '../entity/tx/handlers/account/committed-htlc-followups';
+import { buildCrossJurisdictionEntityOutput } from '../entity/tx/cross-j-outputs';
+import { handleHtlcOnionAdvance } from '../entity/tx/handlers/htlc-onion-advance';
 import { handleAdmitCrossJurisdictionBookOrderEntityTx } from '../entity/tx/handlers/cross-j-book-order';
 import { handleDisputeFinalize, handleDisputeStart, handlePrepareDispute } from '../entity/tx/handlers/dispute';
 import { handleJAbortSentBatch } from '../entity/tx/handlers/j-abort-sent-batch';
 import { handleJRebroadcast } from '../entity/tx/handlers/j-rebroadcast';
-import { handleSetRebalancePolicyEntityTx } from '../entity/tx/handlers/account-admin';
-import { processSettleAction } from '../entity/tx/handlers/settle';
+import {
+  handleSetHubConfigEntityTx,
+  handleSetRebalancePolicyEntityTx,
+} from '../entity/tx/handlers/account-admin';
+import {
+  buildSettlementSealDraft,
+  processCommittedSettlementTransitionFollowup,
+} from '../entity/tx/handlers/settle';
 import { applyJEvent } from '../entity/tx/j-events';
 import {
   applyJEventRange,
   buildJEventRangeData,
 } from './helpers/j-history';
-import { tryFinalizeAccountJEvents } from '../entity/tx/j-events-account';
+import { applyFinalizedAccountJEvents } from '../entity/tx/j-events-account';
 import { queueCrossJurisdictionSalvageFromArgumentList } from '../entity/tx/j-events-htlc';
 import {
   canonicalDisputeFinalizationEvidenceHash,
@@ -74,27 +101,60 @@ import {
 } from '../jurisdiction/event-observation';
 import { getRuntimeJurisdictionHeight } from '../jurisdiction/height';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
+import { buildLocalJPrefixAttestation } from '../jurisdiction/j-prefix-consensus';
 import { createEmptyBatch } from '../jurisdiction/batch';
-import { applyCommand, createBook, getBookOrder, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, type OrderbookExtState } from '../orderbook';
+import {
+  getCertifiedBoardNodeStore,
+  resolveCertifiedRegisteredBoardHash,
+  resolveObserverCertifiedBoardRecord,
+} from '../jurisdiction/board-registry';
+import { applyCommand, createBook, getBookOrder, getSwapLotScale, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, type OrderbookExtState } from '../orderbook';
 import { process, createEmptyEnv, registerEntityRuntimeHint, sendEntityInput, validateRuntimeInputAdmission } from '../runtime';
+import { createJReplica } from '../scenarios/boot';
 import { applyMergedEntityInputs } from '../machine/entity-inputs';
 import { submitRuntimeJOutbox } from '../machine/j-submit';
+import {
+  buildJSubmitAttemptId,
+  registerPendingCommittedJOutbox,
+} from '../machine/j-submit-state';
 import { safeStringify } from '../protocol/serialization';
+import type { ProofBodyStruct } from '../protocol/dispute/proof-body';
 import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/projections';
+import { validateStorageAccountDocValue } from '../storage/authoritative-schema';
+import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec';
 import { createDefaultDelta } from '../validation-utils';
 import {
   buildDisputeArgumentsForSnapshot,
   captureDisputeArgumentSnapshot,
   storeDisputeArgumentSnapshot,
 } from '../protocol/dispute/arguments';
-import { buildAccountProofBody, createDisputeProofHashWithNonce, setDeltaTransformerAddress } from '../protocol/dispute/proof-builder';
-import { buildRealHanko } from '../hanko/core';
+import {
+  buildAccountProofBody,
+  createDisputeProofHashWithNonce,
+  hashProofBodyStruct,
+} from '../protocol/dispute/proof-builder';
+import { encodeSignedHanko } from '../hanko/codec';
+import { resolveHankoBoardDelays } from '../hanko/claims';
 import { signEntityHashes, verifyHankoForHash } from '../hanko/signing';
 import { NobleCryptoProvider } from '../protocol/crypto/noble';
+import {
+  computeHtlcEnvelopeContextHash,
+  computeHtlcSecretOfferContextHash,
+} from '../protocol/htlc/envelope';
+import { encryptBytesForValidatorManifest } from '../protocol/htlc/multi-recipient';
+import { buildHtlcOnionAdvanceTx } from '../protocol/htlc/onion-advance';
+import { encodeHtlcSecretOffer, encodeOnionLayer } from '../protocol/htlc/onion-codec';
+import {
+  computeEntityProfileCertificationHash,
+  computeValidatorEncryptionAttestationDigest,
+  requireCompleteValidatorEncryptionManifest,
+} from '../protocol/htlc/validator-encryption';
 import { handleMeshBootstrapLoopError } from '../orchestrator/mesh-bootstrap-fail-fast';
 import { fitCrossAmountsToOrderbook } from '../orchestrator/mm-node';
 import { cloneAccountMachine, resolveEntityProposerId } from '../state-helpers';
-import type { AccountFrame, AccountInput, AccountMachine, AccountTx, ConsensusConfig, CrossJurisdictionSwapRoute, DisputeFinalizationEvidence, EntityInput, EntityReplica, EntityState, EntityTx, Env, JurisdictionEvent } from '../types';
+import { QUOTE_EXPIRY_MS } from '../types';
+import type { AccountFrame, AccountInput, AccountMachine, AccountTx, ConsensusConfig, CrossJurisdictionSwapRoute, DisputeFinalizationEvidence, EntityInput, EntityReplica, EntityState, EntityTx, Env, JInput, JurisdictionConfig, JurisdictionEvent, RuntimeTx } from '../types';
+import { installCanonicalRegisteredBoardAuthority } from './helpers/registration-evidence';
 import { ethers } from 'ethers';
 
 const makeSingleSignerConfig = (): EntityState['config'] => ({
@@ -123,10 +183,19 @@ const makeSingleSignerConfigFor = (signerId: string): EntityState['config'] => (
   },
 });
 
+const installSingleSignerBoard = (env: Env, state: EntityState, slot = '1'): string => {
+  const seed = env.runtimeSeed;
+  if (!seed) throw new Error('TEST_RUNTIME_SEED_REQUIRED');
+  const signerId = deriveSignerAddressSync(seed, slot).toLowerCase();
+  registerSignerKey(env, signerId, deriveSignerKeySync(seed, slot));
+  state.config = makeSingleSignerConfigFor(signerId);
+  return signerId;
+};
+
 const hex20 = (byte: string): string => `0x${byte.repeat(byte.length === 2 ? 20 : 40)}`;
 const hexBytes = (bytes: Uint8Array): string =>
   `0x${Array.from(bytes).map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
-const bufferFromHex = (value: string): Buffer => Buffer.from(value.replace(/^0x/, ''), 'hex');
+const HANKO_DELAYS = resolveHankoBoardDelays();
 const hashHankoBoard = (threshold: number, boardEntityIds: string[], weights: number[]): string => {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   return ethers.keccak256(abiCoder.encode(
@@ -134,22 +203,23 @@ const hashHankoBoard = (threshold: number, boardEntityIds: string[], weights: nu
     [[threshold, boardEntityIds, weights, 0, 0, 0]],
   )).toLowerCase();
 };
-const encodeHankoForTest = (hanko: Awaited<ReturnType<typeof buildRealHanko>>): string => {
-  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-  return abiCoder.encode(
-    ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'],
-    [[
-      hanko.placeholders.map(hexBytes),
-      hexBytes(hanko.packedSignatures),
-      hanko.claims.map((claim) => [
-        hexBytes(claim.entityId),
-        claim.entityIndexes,
-        claim.weights,
-        claim.threshold,
-      ]),
-    ]],
-  );
-};
+const signedHankoForTest = (
+  hash: string,
+  privateKeys: readonly Uint8Array[],
+  placeholders: readonly string[],
+  claims: readonly [string, readonly bigint[], readonly bigint[], bigint][],
+): string => encodeSignedHanko({
+  digest: hash,
+  privateKeys,
+  placeholders: placeholders.map((value) => value as `0x${string}`),
+  claims: claims.map(([entityId, entityIndexes, weights, threshold]) => ({
+    entityId: entityId as `0x${string}`,
+    entityIndexes,
+    weights,
+    threshold,
+    ...HANKO_DELAYS,
+  })),
+});
 const makeEmptyProofBody = () => ({
   watchSeed: `0x${'f1'.repeat(32)}`,
   offdeltas: [],
@@ -165,6 +235,7 @@ const makeProposalAccount = (
   return {
     leftEntity,
     rightEntity,
+    domain: { chainId: 31337, depositoryAddress: `0x${'dd'.repeat(20)}` },
     status: 'active',
     mempool: [...mempool],
     currentFrame: {
@@ -192,9 +263,8 @@ const makeProposalAccount = (
     requestedRebalance: new Map(),
     requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftJObservations: [],
-    rightJObservations: [],
-    jEventChain: [],
+    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,
     watchSeed: deriveAccountWatchSeed({
       runtimeSeed: 'audit-failfast-test-helper',
@@ -205,6 +275,31 @@ const makeProposalAccount = (
     disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
     jNonce: 0,
   } as AccountMachine;
+};
+
+const setSyntheticPendingAccountProposal = (
+  account: AccountMachine,
+  accountTxs: AccountTx[],
+  timestamp: number,
+  targetSignerId = 'fixture-counterparty-signer',
+): void => {
+  const pendingFrame = {
+    ...account.currentFrame,
+    height: account.currentHeight + 1,
+    timestamp,
+    accountTxs: structuredClone(accountTxs),
+    prevFrameHash: account.currentHeight === 0 ? 'genesis' : account.currentFrame.stateHash,
+    stateHash: `0x${'f0'.repeat(32)}`,
+  };
+  account.pendingFrame = pendingFrame;
+  account.pendingAccountInput = {
+    kind: 'frame',
+    fromEntityId: account.proofHeader.fromEntity,
+    toEntityId: account.proofHeader.toEntity,
+    domain: structuredClone(account.domain),
+    proposal: { frame: structuredClone(pendingFrame) },
+  };
+  account.pendingAccountInputSignerId = targetSignerId;
 };
 
 const makeIncomingAccountFrame = (
@@ -228,13 +323,29 @@ const attachSigningReplica = (
   signerId: string,
 ): void => {
   const browserDepository = (env.browserVM as { getDepositoryAddress?: () => string } | undefined)?.getDepositoryAddress?.();
-  if (browserDepository && !env.jReplicas.has('__audit_test__')) {
+  const config = makeSingleSignerConfigFor(signerId);
+  const jurisdiction = config.jurisdiction!;
+  const depository = browserDepository ?? jurisdiction.depositoryAddress;
+  if (!env.jReplicas.has('__audit_test__')) {
     env.jReplicas.set('__audit_test__', {
       name: '__audit_test__',
-      chainId: 31337,
+      chainId: jurisdiction.chainId,
       rpcs: [],
-      depositoryAddress: browserDepository,
-    } as never);
+      depositoryAddress: depository,
+      entityProviderAddress: jurisdiction.entityProviderAddress,
+      contracts: {
+        depository,
+        entityProvider: jurisdiction.entityProviderAddress,
+        account: hex20('98'),
+        deltaTransformer: hex20('99'),
+      },
+      blockNumber: 0n,
+      stateRoot: null,
+      mempool: [],
+      blockDelayMs: 0,
+      lastBlockTimestamp: 0,
+      position: { x: 0, y: 0, z: 0 },
+    });
   }
   env.eReplicas.set(
     `${entityId}:${signerId}`,
@@ -245,7 +356,7 @@ const attachSigningReplica = (
       isProposer: true,
       state: {
         ...makeEntityState(entityId),
-        config: makeSingleSignerConfigFor(signerId),
+        config,
       },
     } satisfies EntityReplica,
   );
@@ -257,11 +368,79 @@ const registerLazySigner = (
 ): { signerId: string; entityId: string } => {
   const signerId = deriveSignerAddressSync(seed, signerSlot);
   const privateKey = deriveSignerKeySync(seed, signerSlot);
-  registerSignerKey(signerId, privateKey);
+  registerSignerKey(seed, signerId, privateKey);
   return {
     signerId,
     entityId: generateLazyEntityId([signerId], 1n).toLowerCase(),
   };
+};
+
+const ensureCanonicalCommandBoardAuthority = async (
+  env: Env,
+  state: EntityState,
+): Promise<void> => {
+  const boardHash = hashBoard(encodeBoard(state.config, env)).toLowerCase();
+  if (state.entityId.toLowerCase() === boardHash) return;
+  const jurisdiction = state.config.jurisdiction;
+  if (!jurisdiction) throw new Error(`TEST_ENTITY_JURISDICTION_REQUIRED:${state.entityId}`);
+  const existing = resolveObserverCertifiedBoardRecord(
+    state,
+    getCertifiedBoardNodeStore(env),
+    state.entityId,
+  );
+  if (existing) {
+    if (existing.boardHash !== boardHash) {
+      throw new Error(`TEST_ENTITY_BOARD_AUTHORITY_CONFLICT:${existing.boardHash}:${boardHash}`);
+    }
+    return;
+  }
+  let replica = Array.from(env.jReplicas.values()).find(candidate => (
+    candidate.chainId === jurisdiction.chainId &&
+    candidate.depositoryAddress?.toLowerCase() === jurisdiction.depositoryAddress.toLowerCase() &&
+    candidate.entityProviderAddress?.toLowerCase() === jurisdiction.entityProviderAddress.toLowerCase()
+  ));
+  if (!replica) {
+    replica = createJReplica(env, jurisdiction.name, jurisdiction.depositoryAddress);
+    replica.chainId = jurisdiction.chainId;
+    replica.depositoryAddress = jurisdiction.depositoryAddress;
+    replica.entityProviderAddress = jurisdiction.entityProviderAddress;
+  }
+  replica.watcherConfirmationDepth = 0;
+  await installCanonicalRegisteredBoardAuthority(env, jurisdiction, state, boardHash);
+};
+
+const buildQuorumAuthorizedFrameTxs = async (
+  env: Env,
+  state: EntityState,
+  collectiveTxs: EntityTx[],
+  frameTimestamp: number = env.timestamp,
+): Promise<EntityTx[]> => {
+  await ensureCanonicalCommandBoardAuthority(env, state);
+  const [proposer, ...otherValidators] = state.config.validators;
+  if (!proposer) throw new Error('TEST_ENTITY_PROPOSER_REQUIRED');
+  const proposalTx = buildCollectiveEntityProposalTx(proposer, collectiveTxs);
+  if (proposalTx.type !== 'propose') throw new Error('TEST_ENTITY_PROPOSAL_TX_INVALID');
+  const proposalId = generateProposalId(
+    env,
+    proposalTx.data.action,
+    proposer.toLowerCase(),
+    { ...state, timestamp: frameTimestamp },
+  );
+  const frameTxs = [signedEntityCommandTx(buildSignedEntityCommand(env, state, proposer, [proposalTx]))];
+  let approvedPower = state.config.shares[proposer] ?? 0n;
+  for (const validator of otherValidators) {
+    if (approvedPower >= state.config.threshold) break;
+    const voteTx: EntityTx = {
+      type: 'vote',
+      data: { proposalId, voter: validator, choice: 'yes' },
+    };
+    frameTxs.push(signedEntityCommandTx(buildSignedEntityCommand(env, state, validator, [voteTx])));
+    approvedPower += state.config.shares[validator] ?? 0n;
+  }
+  if (approvedPower < state.config.threshold) {
+    throw new Error(`TEST_ENTITY_PROPOSAL_QUORUM_UNAVAILABLE:${approvedPower}:${state.config.threshold}`);
+  }
+  return frameTxs;
 };
 
 const prepareJEventInput = (
@@ -354,7 +533,133 @@ const makeEntityState = (entityId: string): EntityState => ({
   lockBook: new Map(),
   swapTradingPairs: [],
   pendingSwapFillRatios: new Map(),
+  crontabState: initCrontab(),
 });
+
+const makeDisputeFinalizedFixture = (
+  seed: string,
+  finalProofbody: ProofBodyStruct,
+  storeFinalProofbody: boolean,
+) => {
+  const entityId = `0x${'12'.repeat(32)}`;
+  const counterpartyId = `0x${'34'.repeat(32)}`;
+  const state = makeEntityState(entityId);
+  const account = makeProposalAccount([], entityId, counterpartyId);
+  const finalProofbodyHash = hashProofBodyStruct(finalProofbody);
+  if (storeFinalProofbody) {
+    account.disputeProofBodiesByHash = { [finalProofbodyHash]: finalProofbody };
+  }
+  account.activeDispute = {
+    startedByLeft: true,
+    disputeTimeout: 123,
+    initialProofbodyHash: finalProofbodyHash,
+    initialNonce: 7,
+    finalizeQueued: true,
+  } as AccountMachine['activeDispute'];
+  state.accounts.set(counterpartyId, account);
+  return {
+    account,
+    counterpartyId,
+    env: createEmptyEnv(seed),
+    event: {
+      type: 'DisputeFinalized',
+      data: {
+        sender: entityId,
+        counterentity: counterpartyId,
+        initialNonce: 7,
+        initialProofbodyHash: finalProofbodyHash,
+        finalProofbodyHash,
+      },
+    } satisfies JurisdictionEvent,
+    finalProofbodyHash,
+    state,
+  };
+};
+
+const applyDisputeFinalizedFixture = async (
+  fixture: ReturnType<typeof makeDisputeFinalizedFixture>,
+) => applyJEventRange(fixture.state, {
+  from: '1',
+  observedAt: 22,
+  blockNumber: 22,
+  blockHash: `0x${'99'.repeat(32)}`,
+  transactionHash: `0x${'88'.repeat(32)}`,
+  event: fixture.event,
+  jurisdictionRef: getJEventJurisdictionRef(fixture.state.config.jurisdiction),
+}, fixture.env);
+
+const sealAuditJSubmitAttempts = (env: Env, inputs: JInput[]): void => {
+  for (const input of inputs) {
+    for (const jTx of input.jTxs) {
+      if (jTx.type !== 'batch' || !jTx.data.runtimeSubmitAttempt) continue;
+      const signerId = String(jTx.data.signerId || '');
+      const batchGeneration = 1;
+      const attemptId = buildJSubmitAttemptId({
+        jurisdictionName: input.jurisdictionName,
+        entityId: jTx.entityId,
+        signerId,
+        entityNonce: Number(jTx.data.entityNonce),
+        batchGeneration,
+        batchHash: String(jTx.data.batchHash || ''),
+        attemptNumber: jTx.data.runtimeSubmitAttempt.attemptNumber,
+      });
+      jTx.data.batchGeneration = batchGeneration;
+      jTx.data.runtimeSubmitAttempt = {
+        ...jTx.data.runtimeSubmitAttempt,
+        attemptId,
+        batchGeneration,
+      };
+      const existing = Array.from(env.eReplicas.values()).find((replica) => (
+        replica.entityId.toLowerCase() === jTx.entityId.toLowerCase() &&
+        replica.signerId.toLowerCase() === signerId.toLowerCase()
+      ));
+      const state = existing?.state ?? makeEntityState(jTx.entityId);
+      state.jBatchState = {
+        batch: createEmptyBatch(),
+        jurisdiction: null,
+        lastBroadcast: jTx.timestamp,
+        broadcastCount: batchGeneration,
+        failedAttempts: 0,
+        status: 'sent',
+        sentBatch: {
+          batch: structuredClone(jTx.data.batch),
+          batchHash: String(jTx.data.batchHash || ''),
+          encodedBatch: String(jTx.data.encodedBatch || '0x'),
+          entityNonce: Number(jTx.data.entityNonce),
+          firstSubmittedAt: jTx.data.runtimeSubmitAttempt.attemptedAt,
+          lastSubmittedAt: jTx.data.runtimeSubmitAttempt.attemptedAt,
+          submitAttempts: jTx.data.runtimeSubmitAttempt.attemptNumber,
+        },
+      };
+      const replica = existing ?? {
+        entityId: jTx.entityId,
+        signerId,
+        mempool: [],
+        isProposer: true,
+        state,
+      } as EntityReplica;
+      replica.jSubmitState = {
+        jurisdictionName: input.jurisdictionName,
+        batchHash: String(jTx.data.batchHash || ''),
+        entityNonce: Number(jTx.data.entityNonce),
+        batchGeneration,
+        submitAttempts: jTx.data.runtimeSubmitAttempt.attemptNumber,
+        lastSubmittedAt: jTx.data.runtimeSubmitAttempt.attemptedAt,
+      };
+      env.eReplicas.set(`${jTx.entityId}:${signerId}`, replica);
+    }
+  }
+  registerPendingCommittedJOutbox(env, inputs);
+};
+
+const submitAuditRuntimeJOutbox = async (
+  env: Env,
+  inputs: JInput[],
+  deps: Parameters<typeof submitRuntimeJOutbox>[2],
+): Promise<void> => {
+  sealAuditJSubmitAttempts(env, inputs);
+  await submitRuntimeJOutbox(env, inputs, deps);
+};
 
 describe('audit fail-fast regressions', () => {
   test('jurisdiction-specific runtime height ignores higher sibling chain tip', () => {
@@ -387,6 +692,32 @@ describe('audit fail-fast regressions', () => {
       } as any],
     }])).rejects.toThrow('RUNTIME_CROSS_J_TOPOLOGY_INVALID');
 
+    await expect(process(env, [{
+      from: remoteRuntime,
+      entityId: `0x${'11'.repeat(32)}`,
+      signerId: `0x${'01'.repeat(20)}`,
+      entityTxs: [{
+        type: 'consensusOutput',
+        data: {
+          origin: {
+            sourceEntityId: `0x${'33'.repeat(32)}`,
+            lane: 'generic',
+            sequence: 1n,
+            semanticHash: `0x${'44'.repeat(32)}`,
+            height: 1,
+            frameHash: `0x${'55'.repeat(32)}`,
+            outputIndex: 0,
+          },
+          outputHanko: '0x01',
+          targetEntityId: `0x${'11'.repeat(32)}`,
+          entityTxs: [{
+            type: 'requestCrossJurisdictionSwap',
+            data: { route: {} },
+          }],
+        },
+      } as any],
+    }])).rejects.toThrow('RUNTIME_CROSS_J_TOPOLOGY_INVALID');
+
     expect(() => sendEntityInput(env, {
       entityId: `0x${'22'.repeat(32)}`,
       signerId: `0x${'02'.repeat(20)}`,
@@ -410,8 +741,8 @@ describe('audit fail-fast regressions', () => {
     const env = createEmptyEnv('stale-signer-retarget');
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
-    const entityId = `0x${'81'.repeat(32)}`;
     const actualSignerId = `0x${'83'.repeat(20)}`;
+    const entityId = generateLazyEntityId([actualSignerId], 1n).toLowerCase();
     const staleSignerId = `0xb262${'00'.repeat(18)}`;
     const state = makeEntityState(entityId);
     state.config = makeSingleSignerConfigFor(actualSignerId);
@@ -435,8 +766,8 @@ describe('audit fail-fast regressions', () => {
     const env = createEmptyEnv('stale-signer-tx-bearing');
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
-    const entityId = `0x${'84'.repeat(32)}`;
     const actualSignerId = `0x${'85'.repeat(20)}`;
+    const entityId = generateLazyEntityId([actualSignerId], 1n).toLowerCase();
     const staleSignerId = `0x${'86'.repeat(20)}`;
     const state = makeEntityState(entityId);
     state.config = makeSingleSignerConfigFor(actualSignerId);
@@ -466,8 +797,8 @@ describe('audit fail-fast regressions', () => {
     const env = createEmptyEnv('stale-signer-live-drop');
     env.scenarioMode = false;
     env.quietRuntimeLogs = true;
-    const entityId = `0x${'94'.repeat(32)}`;
     const actualSignerId = `0x${'95'.repeat(20)}`;
+    const entityId = generateLazyEntityId([actualSignerId], 1n).toLowerCase();
     const staleSignerId = `0x${'96'.repeat(20)}`;
     const state = makeEntityState(entityId);
     state.config = makeSingleSignerConfigFor(actualSignerId);
@@ -772,13 +1103,19 @@ describe('audit fail-fast regressions', () => {
     const env = createEmptyEnv('stale-signer-ambiguous');
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
-    const entityId = `0x${'82'.repeat(32)}`;
     const signerA = `0x${'a1'.repeat(20)}`;
     const signerB = `0x${'b1'.repeat(20)}`;
+    const entityId = generateLazyEntityId([signerA, signerB], 2n).toLowerCase();
     const staleSignerId = `0x${'cc'.repeat(20)}`;
+    const config: EntityState['config'] = {
+      ...makeSingleSignerConfigFor(signerA),
+      threshold: 2n,
+      validators: [signerA, signerB],
+      shares: { [signerA]: 1n, [signerB]: 1n },
+    };
     for (const signerId of [signerA, signerB]) {
       const state = makeEntityState(entityId);
-      state.config = makeSingleSignerConfigFor(signerId);
+      state.config = structuredClone(config);
       env.eReplicas.set(`${entityId}:${signerId}`, {
         entityId,
         signerId,
@@ -814,39 +1151,26 @@ describe('audit fail-fast regressions', () => {
     expect(() => safeStringify({ bad: new Date(Number.NaN) })).toThrow('SAFE_STRINGIFY_FAILED');
   });
 
-  test('hanko verification requires the target claim to meet EOA-only threshold', async () => {
+  test('hanko verification lets an already-verified child satisfy its parent threshold', async () => {
     const hash = `0x${'ab'.repeat(32)}`;
     const signerPrivateKey = deriveSignerKeySync('hanko-eoa-threshold-divergence', '1');
     const signerAddress = deriveSignerAddressSync('hanko-eoa-threshold-divergence', '1');
     const signerEntityId = ethers.zeroPadValue(signerAddress, 32).toLowerCase();
+    const proposerAddress = deriveSignerAddressSync('hanko-eoa-threshold-divergence', '2');
+    const proposerEntityId = ethers.zeroPadValue(proposerAddress, 32).toLowerCase();
     const nestedEntityId = hashHankoBoard(1, [signerEntityId], [1]);
-    const rootEntityId = hashHankoBoard(100, [signerEntityId, nestedEntityId], [40, 60]);
-    const hanko = await buildRealHanko(bufferFromHex(hash), {
-      noEntities: [],
-      privateKeys: [signerPrivateKey],
-      claims: [
-        {
-          entityId: bufferFromHex(nestedEntityId),
-          entityIndexes: [0],
-          weights: [1],
-          threshold: 1,
-        },
-        {
-          entityId: bufferFromHex(rootEntityId),
-          entityIndexes: [0, 1],
-          weights: [40, 60],
-          threshold: 100,
-        },
-      ],
-    });
+    const rootEntityId = hashHankoBoard(60, [proposerEntityId, nestedEntityId], [40, 60]);
+    const hanko = signedHankoForTest(hash, [signerPrivateKey], [proposerEntityId], [
+      [nestedEntityId, [1n], [1n], 1n],
+      [rootEntityId, [0n, 2n], [40n, 60n], 60n],
+    ]);
 
-    const result = await verifyHankoForHash(encodeHankoForTest(hanko), hash, rootEntityId);
+    const result = await verifyHankoForHash(hanko, hash, rootEntityId);
 
-    // Regression: the contract requires EOA signer weight to satisfy threshold
-    // independently. Nested assumed-yes weight can contribute to total power,
-    // but cannot make an unenforceable off-chain proof look valid.
-    expect(result.valid).toBe(false);
-    expect(result.entityId).toBeNull();
+    // The child claim independently reaches quorum from the real EOA. The
+    // ordered parent may therefore count the child's configured board weight.
+    expect(result.valid).toBe(true);
+    expect(result.entityId).toBe(rootEntityId);
   });
 
   test('registered hanko verification accepts a board that matches local registered config', async () => {
@@ -855,11 +1179,21 @@ describe('audit fail-fast regressions', () => {
     const signerPrivateKey = deriveSignerKeySync('registered-hanko-board-positive', '1');
     const signerAddress = deriveSignerAddressSync('registered-hanko-board-positive', '1').toLowerCase();
     const entityId = generateNumberedEntityId(42).toLowerCase();
+    const jurisdiction = {
+      name: 'Registered Hanko positive',
+      address: 'http://127.0.0.1:8545',
+      chainId: 31_337,
+      depositoryAddress: `0x${'31'.repeat(20)}`,
+      entityProviderAddress: `0x${'32'.repeat(20)}`,
+      entityProviderDeploymentBlock: 4,
+      registrationBlock: 5,
+    } satisfies JurisdictionConfig;
     const config: ConsensusConfig = {
       mode: 'proposer-based',
       threshold: 1n,
       validators: [signerAddress],
       shares: { [signerAddress]: 1n },
+      jurisdiction,
     };
     env.eReplicas.set(`${entityId}:${signerAddress}`, {
       entityId,
@@ -868,19 +1202,28 @@ describe('audit fail-fast regressions', () => {
       isProposer: true,
       state: { entityId, config },
     } as unknown as EntityReplica);
-    const hanko = await buildRealHanko(bufferFromHex(hash), {
-      noEntities: [],
-      privateKeys: [signerPrivateKey],
-      claims: [{
-        entityId: bufferFromHex(entityId),
-        entityIndexes: [0],
-        weights: [1],
-        threshold: 1,
-      }],
-    });
+    const jReplica = createJReplica(env, jurisdiction.name, jurisdiction.depositoryAddress);
+    jReplica.chainId = jurisdiction.chainId;
+    jReplica.depositoryAddress = jurisdiction.depositoryAddress;
+    jReplica.entityProviderAddress = jurisdiction.entityProviderAddress;
+    jReplica.watcherConfirmationDepth = 0;
+    const state = env.eReplicas.get(`${entityId}:${signerAddress}`)!.state;
+    const boardHash = hashHankoBoard(1, [ethers.zeroPadValue(signerAddress, 32)], [1]);
+    await installCanonicalRegisteredBoardAuthority(env, jurisdiction, state, boardHash);
+    const hanko = signedHankoForTest(hash, [signerPrivateKey], [], [
+      [entityId, [0n], [1n], 1n],
+    ]);
 
-    const result = await verifyHankoForHash(encodeHankoForTest(hanko), hash, entityId, env);
+    const registeredBoardHash = resolveCertifiedRegisteredBoardHash(env, entityId, jurisdiction);
+    const result = await verifyHankoForHash(
+      hanko,
+      hash,
+      entityId,
+      env,
+      registeredBoardHash ? { registeredBoardHash } : undefined,
+    );
 
+    expect(registeredBoardHash).toBe(boardHash);
     expect(result.valid).toBe(true);
     expect(result.entityId?.toLowerCase()).toBe(entityId);
   });
@@ -889,18 +1232,11 @@ describe('audit fail-fast regressions', () => {
     const hash = `0x${'bd'.repeat(32)}`;
     const signerPrivateKey = deriveSignerKeySync('registered-hanko-board-missing', '1');
     const entityId = generateNumberedEntityId(43).toLowerCase();
-    const hanko = await buildRealHanko(bufferFromHex(hash), {
-      noEntities: [],
-      privateKeys: [signerPrivateKey],
-      claims: [{
-        entityId: bufferFromHex(entityId),
-        entityIndexes: [0],
-        weights: [1],
-        threshold: 1,
-      }],
-    });
+    const hanko = signedHankoForTest(hash, [signerPrivateKey], [], [
+      [entityId, [0n], [1n], 1n],
+    ]);
 
-    const result = await verifyHankoForHash(encodeHankoForTest(hanko), hash, entityId);
+    const result = await verifyHankoForHash(hanko, hash, entityId);
 
     expect(result.valid).toBe(false);
     expect(result.entityId).toBeNull();
@@ -926,42 +1262,44 @@ describe('audit fail-fast regressions', () => {
       isProposer: true,
       state: { entityId, config },
     } as unknown as EntityReplica);
-    const forgedHanko = await buildRealHanko(bufferFromHex(hash), {
-      noEntities: [],
-      privateKeys: [signerPrivateKey],
-      claims: [{
-        entityId: bufferFromHex(entityId),
-        entityIndexes: [0],
-        weights: [1],
-        threshold: 1,
-      }],
-    });
+    const forgedHanko = signedHankoForTest(hash, [signerPrivateKey], [], [
+      [entityId, [0n], [1n], 1n],
+    ]);
 
-    const result = await verifyHankoForHash(encodeHankoForTest(forgedHanko), hash, entityId, env);
+    const result = await verifyHankoForHash(forgedHanko, hash, entityId, env);
 
     expect(result.valid).toBe(false);
     expect(result.entityId).toBeNull();
   });
 
   test('j_event rejects non-validator signer ids before observation aggregation', async () => {
-    const state = makeEntityState(`0x${'11'.repeat(32)}`);
-    const env = createEmptyEnv('j-event-non-validator');
-
-    await expect(applyJEvent(state, {
-      from: 'not-a-validator',
+    const seed = 'j-event-non-validator';
+    const env = createEmptyEnv(seed);
+    const { signerId, entityId } = registerLazySigner(seed, '1');
+    const state = makeEntityState(entityId);
+    state.config = makeSingleSignerConfigFor(signerId);
+    const event: JurisdictionEvent = {
+      type: 'ReserveUpdated',
+      data: {
+        entity: state.entityId,
+        tokenId: 1,
+        newBalance: '100',
+      },
+    };
+    const validRange = buildJEventRangeData(state, {
+      from: signerId,
+      jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
       observedAt: 1_000,
       blockNumber: 1,
       blockHash: `0x${'22'.repeat(32)}`,
       transactionHash: `0x${'33'.repeat(32)}`,
-      event: {
-        type: 'ReserveUpdated',
-        data: {
-          entity: state.entityId,
-          tokenId: 1,
-          newBalance: '100',
-        },
-      },
-    } as any, env)).rejects.toThrow('is not active proposer');
+      event,
+    }, env);
+
+    await expect(applyJEvent(state, {
+      ...validRange,
+      from: 'not-a-validator',
+    }, env)).rejects.toThrow('J_RANGE_NOT_ACTIVE_PROPOSER');
   });
 
   test('single-validator j_event observations must still be signed by the claimed signer', async () => {
@@ -1139,6 +1477,22 @@ describe('audit fail-fast regressions', () => {
     const missingNextHop = `0x${'67'.repeat(32)}`;
     const wrongEnd = `0x${'68'.repeat(32)}`;
     const state = makeEntityState(source);
+    const signerId = installSingleSignerBoard(env, state);
+
+    expect(() => prepareLocallyAuthoredEntityTxs(env, state, signerId, [{
+      type: 'directPayment',
+      data: { targetEntityId: target, tokenId: 1, amount: 100n, route: [] },
+    }])).toThrow('DIRECT_PAYMENT_ROUTE_REQUIRED');
+
+    await expect(applyEntityTx(env, state, {
+      type: 'directPayment',
+      data: {
+        targetEntityId: target,
+        tokenId: 1,
+        amount: 100n,
+        route: [],
+      },
+    } as any)).rejects.toThrow('DIRECT_PAYMENT_ROUTE_REQUIRED');
 
     await expect(applyEntityTx(env, state, {
       type: 'directPayment',
@@ -1175,13 +1529,14 @@ describe('audit fail-fast regressions', () => {
     const env = createEmptyEnv('entity-frame-atomicity');
     env.quietRuntimeLogs = true;
     const state = makeEntityState(`0x${'61'.repeat(32)}`);
-    const signer = 'atomic-signer';
+    const signer = installSingleSignerBoard(env, state);
+    const frameTimestamp = 1_000;
 
-    await expect(applyEntityFrame(env, state, [
+    await expect(applyEntityFrame(env, state, await buildQuorumAuthorizedFrameTxs(env, state, [
       { type: 'chatMessage', data: { message: 'first mutation' } } as any,
       { type: 'definitely_unknown_entity_tx', data: {} } as any,
       { type: 'chatMessage', data: { message: 'late mutation' } } as any,
-    ], 1_000)).rejects.toThrow('ENTITY_FRAME_TX_FAILED: type=definitely_unknown_entity_tx');
+    ], frameTimestamp), frameTimestamp)).rejects.toThrow('ENTITY_FRAME_TX_FAILED: type=definitely_unknown_entity_tx');
 
     expect(state.messages).toHaveLength(0);
     expect(state.nonces.has(signer)).toBe(false);
@@ -1194,17 +1549,19 @@ describe('audit fail-fast regressions', () => {
     const localRuntime = `0x${'10'.repeat(20)}`;
     const remoteRuntime = `0x${'20'.repeat(20)}`;
     env.runtimeId = localRuntime;
-    const sourceUserId = `0x${'31'.repeat(32)}`;
-    const targetUserId = `0x${'32'.repeat(32)}`;
+    const sourceSigner = `0x${'33'.repeat(20)}`;
+    const targetSigner = `0x${'34'.repeat(20)}`;
+    const sourceUserId = generateLazyEntityId([sourceSigner], 1n).toLowerCase();
+    const targetUserId = generateLazyEntityId([targetSigner], 1n).toLowerCase();
     const sourceHubId = `0x${'41'.repeat(32)}`;
     const targetHubId = `0x${'42'.repeat(32)}`;
-    attachSigningReplica(env, sourceUserId, '1');
-    attachSigningReplica(env, targetUserId, '1');
+    attachSigningReplica(env, sourceUserId, sourceSigner);
+    attachSigningReplica(env, targetUserId, targetSigner);
 
     await expect(process(env, [{
       from: remoteRuntime,
       entityId: sourceUserId,
-      signerId: '1',
+      signerId: sourceSigner,
       entityTxs: [{
         type: 'registerCrossJurisdictionSwap',
         data: {
@@ -1254,6 +1611,11 @@ describe('audit fail-fast regressions', () => {
       hubEntityId: sourceHub,
       bookOwnerEntityId: sourceHub,
       venueId: 'cross:test:1/target:2',
+      sourceSignerId: 'source-user-signer',
+      sourceHubSignerId: '1',
+      targetHubSignerId: 'target-hub-signer',
+      targetSignerId: 'target-user-signer',
+      bookHubSignerId: '1',
       source: {
         jurisdiction: 'test',
         entityId: sourceUser,
@@ -1394,6 +1756,9 @@ describe('audit fail-fast regressions', () => {
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
       bookOwnerEntityId: sourceHub,
+      sourceHubSignerId: '1',
+      targetHubSignerId: 'target-hub-signer',
+      bookHubSignerId: '1',
       venueId: 'cross:test:1/target:2',
       source: {
         jurisdiction: 'test',
@@ -1860,7 +2225,7 @@ describe('audit fail-fast regressions', () => {
     receiver.mempool = [];
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
 
-    const proposal = await proposeAccountFrame(env, proposer, 9);
+    const proposal = await proposeAccountFrame(env, proposer, env.timestamp, 9);
     if (!proposal.success || !proposal.accountInput) throw new Error(proposal.error || 'proposal failed');
     const result = await applyAccountInput(env, receiver, proposal.accountInput, {
       entityTimestamp: env.timestamp + 10 * 60_000,
@@ -1869,6 +2234,65 @@ describe('audit fail-fast regressions', () => {
 
     expect(result.success).toBe(true);
     expect(receiver.currentHeight).toBe(1);
+  });
+
+  test('peer J-claim commit can batch the local claim without publishing speculative CAS changes', async () => {
+    const seed = 'account-j-claim-overlay-batched-ack';
+    const env = createEmptyEnv(seed);
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const first = registerLazySigner(seed, '1');
+    const second = registerLazySigner(seed, '2');
+    const left = isLeftEntity(first.entityId, second.entityId) ? first : second;
+    const right = left === first ? second : first;
+    attachSigningReplica(env, left.entityId, left.signerId);
+    attachSigningReplica(env, right.entityId, right.signerId);
+    const claim: AccountTx = {
+      type: 'j_event_claim',
+      data: {
+        jHeight: 7,
+        jBlockHash: `0x${'73'.repeat(32)}`,
+        events: [{
+          type: 'AccountSettled',
+          data: {
+            leftEntity: left.entityId,
+            rightEntity: right.entityId,
+            tokenId: 1,
+            leftReserve: '0',
+            rightReserve: '0',
+            collateral: '5',
+            ondelta: '0',
+            nonce: 1,
+          },
+        }],
+      },
+    };
+    const proposer = makeProposalAccount([structuredClone(claim)], left.entityId, right.entityId);
+    const receiver = cloneAccountMachine(proposer);
+    receiver.mempool = [structuredClone(claim)];
+    receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
+
+    const proposed = await proposeAccountFrame(env, proposer, env.timestamp, 7);
+    if (!proposed.success || !proposed.accountInput) throw new Error(proposed.error || 'proposal failed');
+    const result = await applyAccountInput(env, receiver, proposed.accountInput, {
+      entityTimestamp: env.timestamp,
+      finalizedJHeight: 7,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.response?.kind).toBe('frame_ack');
+    if (result.response?.kind !== 'frame_ack') throw new Error('expected batched frame_ack');
+    expect(receiver.pendingAccountInput?.kind).toBe('frame_ack');
+    expect(receiver.pendingAccountInput).toEqual(result.response);
+    expect(result.response.proposal.frame.accountTxs.map((tx) => tx.type)).toEqual(['j_event_claim']);
+    expect(receiver.currentHeight).toBe(1);
+    expect(receiver.pendingFrame?.height).toBe(2);
+    expect(receiver.leftPendingJClaims.count).toBe(1n);
+    expect(receiver.rightPendingJClaims.count).toBe(0n);
+    expect(result.accountJClaimNodeChanges?.newNodes.map(({ hash }) => hash)).toEqual([
+      receiver.leftPendingJClaims.root,
+    ]);
+    expect(result.accountJClaimNodeChanges?.replacedNodeHashes).toEqual([]);
   });
 
   test('account frame freshness rejects future skew but permits old retransmission', () => {
@@ -1888,17 +2312,43 @@ describe('audit fail-fast regressions', () => {
   test('HTLC secret enforcement reserve closes on either entity time or finalized J-height', () => {
     const lock = { timelock: 100_000n, revealBeforeHeight: 20 };
     expect(isHtlcSecretEnforcementWindowClosed(lock, {
-      entityTimestamp: 70_000,
+      entityTimestamp: 69_999,
       finalizedJHeight: 20,
     })).toBe(false);
     expect(isHtlcSecretEnforcementWindowClosed(lock, {
-      entityTimestamp: 70_001,
+      entityTimestamp: 70_000,
       finalizedJHeight: 20,
     })).toBe(true);
     expect(isHtlcSecretEnforcementWindowClosed(lock, {
       entityTimestamp: 1,
       finalizedJHeight: 21,
     })).toBe(true);
+  });
+
+  test('late invalid HTLC preimage never becomes dispute evidence', () => {
+    const secret = `0x${'82'.repeat(32)}`;
+    const account = makeProposalAccount([], 'alice', 'hub');
+    account.locks.set('late-preimage-lock', {
+      lockId: 'late-preimage-lock',
+      hashlock: hashHtlcSecret(secret),
+      timelock: 10n,
+      revealBeforeHeight: 1,
+      amount: 1n,
+      tokenId: 1,
+      senderIsLeft: true,
+      createdHeight: 0,
+      createdTimestamp: 0,
+    });
+    const context = { entityTimestamp: 100, finalizedJHeight: 2 };
+    const frameFor = (candidate: string) => makeIncomingAccountFrame(account, {
+      type: 'htlc_resolve',
+      data: { lockId: 'late-preimage-lock', outcome: 'secret', secret: candidate },
+    }, false);
+
+    expect(getIncomingAccountDeadlineViolation(account, frameFor(`0x${'83'.repeat(32)}`), context))
+      .toBeUndefined();
+    expect(getIncomingAccountDeadlineViolation(account, frameFor(secret), context)?.evidenceSecrets)
+      .toEqual([{ hashlock: hashHtlcSecret(secret), secret }]);
   });
 
   test('late signed HTLC secret is retained as evidence and prepares a dispute', async () => {
@@ -1915,6 +2365,8 @@ describe('audit fail-fast regressions', () => {
     const secret = `0x${'91'.repeat(32)}`;
     const hashlock = hashHtlcSecret(secret);
     const lockId = 'late-secret-lock';
+    const upstreamEntityId = `0x${'73'.repeat(32)}`;
+    const upstreamLockId = 'late-secret-upstream-lock';
     const amount = 7n;
     const timelock = BigInt(env.timestamp + HTLC_ENFORCEMENT_RESERVE_MS - 1);
     const resolveTx: AccountTx = {
@@ -1927,7 +2379,7 @@ describe('audit fail-fast regressions', () => {
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
     for (const account of [proposer, receiver]) {
       const delta = createDefaultDelta(1);
-      delta.leftHold = amount;
+      delta.rightHold = amount;
       account.deltas.set(1, delta);
       account.locks.set(lockId, {
         lockId,
@@ -1936,12 +2388,12 @@ describe('audit fail-fast regressions', () => {
         revealBeforeHeight: 100,
         amount,
         tokenId: 1,
-        senderIsLeft: true,
+        senderIsLeft: false,
         createdHeight: 0,
         createdTimestamp: 0,
       });
     }
-    const proposal = await proposeAccountFrame(env, proposer, 1);
+    const proposal = await proposeAccountFrame(env, proposer, env.timestamp, 1);
     if (!proposal.success || !proposal.accountInput) throw new Error(proposal.error || 'proposal failed');
 
     const receiverState = makeEntityState(right.entityId);
@@ -1949,6 +2401,16 @@ describe('audit fail-fast regressions', () => {
     receiverState.timestamp = env.timestamp;
     receiverState.lastFinalizedJHeight = 1;
     receiverState.accounts.set(left.entityId, receiver);
+    receiverState.htlcRoutes.set(hashlock, {
+      hashlock,
+      tokenId: 1,
+      amount,
+      inboundEntity: upstreamEntityId,
+      inboundLockId: upstreamLockId,
+      outboundEntity: left.entityId,
+      outboundLockId: lockId,
+      createdTimestamp: env.timestamp,
+    });
     const applied = await applyEntityTx(env, receiverState, {
       type: 'accountInput',
       data: proposal.accountInput,
@@ -1960,8 +2422,30 @@ describe('audit fail-fast regressions', () => {
     expect(rejectedAccount.counterpartyFrameHanko).toBeUndefined();
     expect(applied.newState.htlcRoutes.get(hashlock)).toMatchObject({
       secret,
-      inboundEntity: left.entityId,
-      inboundLockId: lockId,
+      inboundEntity: upstreamEntityId,
+      inboundLockId: upstreamLockId,
+      outboundEntity: left.entityId,
+      outboundLockId: lockId,
+      secretAckPending: true,
+      secretAckStartedAt: env.timestamp,
+      secretAckDeadlineAt: env.timestamp + HTLC_SECRET_ACK_TIMEOUT_MS,
+    });
+    expect(applied.newState.crontabState?.hooks.get(`htlc-secret-ack:${hashlock}`)).toEqual({
+      id: `htlc-secret-ack:${hashlock}`,
+      triggerAt: env.timestamp + HTLC_SECRET_ACK_TIMEOUT_MS,
+      type: 'htlc_secret_ack_timeout',
+      data: {
+        hashlock,
+        counterpartyEntityId: upstreamEntityId,
+        inboundLockId: upstreamLockId,
+      },
+    });
+    expect(applied.mempoolOps).toContainEqual({
+      accountId: upstreamEntityId,
+      tx: {
+        type: 'htlc_resolve',
+        data: { lockId: upstreamLockId, outcome: 'secret', secret },
+      },
     });
 
     const proofbodyHash = `0x${'ab'.repeat(32)}`;
@@ -2013,6 +2497,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'frame',
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
+      domain: structuredClone(receiver.domain),
       proposal: { frame: invalidFrame, frameHanko },
     };
 
@@ -2207,6 +2692,15 @@ describe('audit fail-fast regressions', () => {
       }, true, 100_000, 11),
       { entityTimestamp: 100_000, finalizedJHeight: 5 },
     )?.reason).toContain('HTLC_PAYER_CANCEL_BEFORE_LOCAL_EXPIRY');
+
+    expect(getIncomingAccountDeadlineViolation(
+      account,
+      makeIncomingAccountFrame(account, {
+        type: 'htlc_resolve',
+        data: { lockId: 'lock-1', outcome: 'error', reason: 'timeout' },
+      }, true, 120_000, 5),
+      { entityTimestamp: 120_000, finalizedJHeight: 5 },
+    )).toBeUndefined();
   });
 
   test('receiver-local preflight follows HTLC transitions before checking reused ids', () => {
@@ -2326,7 +2820,7 @@ describe('audit fail-fast regressions', () => {
       rightHold: 0n,
     });
 
-    const result = await proposeAccountFrame(env, account);
+    const result = await proposeAccountFrame(env, account, env.timestamp);
 
     expect(result.success).toBe(true);
     expect(result.accountInput?.proposal.frame?.accountTxs.map((tx) => tx.type)).toEqual(['set_credit_limit']);
@@ -2342,7 +2836,6 @@ describe('audit fail-fast regressions', () => {
     env.timestamp = 1_000;
     const depositoryAddress = hex20('dd');
     env.browserVM = { getDepositoryAddress: () => depositoryAddress } as any;
-    setDeltaTransformerAddress(hex20('99'));
     const { signerId, entityId: left } = registerLazySigner('account-frame-timestamp-parity', '1');
     attachSigningReplica(env, left, signerId);
     const right = `0x${'ff'.repeat(32)}`;
@@ -2368,7 +2861,7 @@ describe('audit fail-fast regressions', () => {
     const receiver = cloneAccountMachine(proposer);
     receiver.proofHeader = { fromEntity: right, toEntity: left, nextProofNonce: 0 };
 
-    const proposed = await proposeAccountFrame(env, proposer);
+    const proposed = await proposeAccountFrame(env, proposer, env.timestamp);
     if (!proposed.success) throw new Error(proposed.error || 'proposal failed');
     const frame = proposed.accountInput!.proposal.frame;
     expect(frame.timestamp).toBe(env.timestamp + 1);
@@ -2383,7 +2876,164 @@ describe('audit fail-fast regressions', () => {
       env,
     );
     expect(replayed.success).toBe(true);
-    expect(computeAccountStateRoot(receiver, { chainId: 31337, depositoryAddress })).toBe(frame.accountStateRoot);
+    expect(computeAccountStateRoot(receiver)).toBe(frame.accountStateRoot);
+  });
+
+  test('nested Account proposal replays the committed Entity timestamp across different validator ticks', async () => {
+    const seed = 'account-frame-entity-timestamp-authority';
+    const proposerEnv = createEmptyEnv(seed);
+    const validatorEnv = createEmptyEnv(seed);
+    proposerEnv.timestamp = 1_000;
+    validatorEnv.timestamp = 1_100;
+    proposerEnv.browserVM = { getDepositoryAddress: () => hex20('dd') } as typeof proposerEnv.browserVM;
+    validatorEnv.browserVM = { getDepositoryAddress: () => hex20('dd') } as typeof validatorEnv.browserVM;
+    const left = registerLazySigner(seed, '1');
+    const right = registerLazySigner(seed, '2');
+    attachSigningReplica(proposerEnv, left.entityId, left.signerId);
+    attachSigningReplica(validatorEnv, left.entityId, left.signerId);
+    const base = makeProposalAccount([
+      { type: 'set_credit_limit', data: { tokenId: 1, amount: 100n } },
+    ], left.entityId, right.entityId);
+    base.deltas.set(1, createDefaultDelta(1));
+    const committedEntityTimestamp = 777;
+
+    const proposer = await proposeAccountFrame(
+      proposerEnv,
+      cloneAccountMachine(base),
+      committedEntityTimestamp,
+    );
+    const validator = await proposeAccountFrame(
+      validatorEnv,
+      cloneAccountMachine(base),
+      committedEntityTimestamp,
+    );
+
+    expect(proposer.success).toBe(true);
+    expect(validator.success).toBe(true);
+    expect(proposer.accountInput?.proposal.frame.timestamp).toBe(committedEntityTimestamp);
+    expect(validator.accountInput?.proposal.frame).toEqual(proposer.accountInput?.proposal.frame);
+  });
+
+  test('profile update preserves the committed Entity timestamp across validator ticks', async () => {
+    const entityId = `0x${'a7'.repeat(32)}`;
+    const proposerState = makeEntityState(entityId);
+    const validatorState = makeEntityState(entityId);
+    proposerState.timestamp = 777;
+    validatorState.timestamp = 777;
+    const proposerEnv = createEmptyEnv('profile-timestamp-proposer');
+    const validatorEnv = createEmptyEnv('profile-timestamp-validator');
+    proposerEnv.timestamp = 1_000;
+    validatorEnv.timestamp = 1_100;
+    const tx = {
+      type: 'profile-update',
+      data: { profile: { entityId, name: 'Committed timestamp' } },
+    } as const;
+
+    const proposer = await applyEntityTx(proposerEnv, proposerState, tx);
+    const validator = await applyEntityTx(validatorEnv, validatorState, tx);
+
+    expect(proposer.newState.timestamp).toBe(777);
+    expect(validator.newState).toEqual(proposer.newState);
+  });
+
+  test('r2c quote expiry uses the committed Entity timestamp across validator ticks', async () => {
+    const entityId = `0x${'a8'.repeat(32)}`;
+    const counterpartyId = `0x${'a9'.repeat(32)}`;
+    const quoteId = 1_000;
+    const makeState = (): EntityState => {
+      const state = makeEntityState(entityId);
+      state.timestamp = quoteId + QUOTE_EXPIRY_MS;
+      state.reserves.set(1, 100n);
+      const account = makeProposalAccount([], entityId, counterpartyId);
+      account.shadow.rebalance.activeQuote = {
+        quoteId,
+        tokenId: 1,
+        amount: 10n,
+        feeTokenId: 1,
+        feeAmount: 1n,
+        accepted: true,
+      };
+      state.accounts.set(counterpartyId, account);
+      return state;
+    };
+    const proposerEnv = createEmptyEnv('r2c-timestamp-proposer');
+    const validatorEnv = createEmptyEnv('r2c-timestamp-validator');
+    proposerEnv.timestamp = quoteId + QUOTE_EXPIRY_MS;
+    validatorEnv.timestamp = proposerEnv.timestamp + 1;
+    const tx = {
+      type: 'r2c',
+      data: {
+        counterpartyId,
+        tokenId: 1,
+        amount: 10n,
+        rebalanceQuoteId: quoteId,
+        rebalanceFeeTokenId: 1,
+        rebalanceFeeAmount: 1n,
+      },
+    } as const;
+
+    const proposer = await applyEntityTx(proposerEnv, makeState(), tx);
+    const validator = await applyEntityTx(validatorEnv, makeState(), tx);
+
+    expect(validator.newState).toEqual(proposer.newState);
+    expect(validator.newState.messages.some(message => message.includes('quote expired'))).toBe(false);
+  });
+
+  test('openAccount rejects an unmaterialized watch seed and replays the signed seed identically', async () => {
+    const seed = 'open-account-watch-seed-materialization';
+    const proposerEnv = createEmptyEnv(seed);
+    const validatorEnv = createEmptyEnv('different-validator-runtime-seed');
+    proposerEnv.timestamp = 1_000;
+    validatorEnv.timestamp = 1_100;
+    const author = registerLazySigner(seed, '1');
+    const targetEntityId = `0x${'b7'.repeat(32)}`;
+    const state = makeEntityState(author.entityId);
+    state.timestamp = 777;
+    state.config = makeSingleSignerConfigFor(author.signerId);
+    attachSigningReplica(proposerEnv, author.entityId, author.signerId);
+    const installTarget = (env: Env): void => {
+      const target = makeEntityState(targetEntityId);
+      target.config = state.config;
+      env.eReplicas.set(`${targetEntityId}:target-signer`, {
+        entityId: targetEntityId,
+        signerId: 'target-signer',
+        mempool: [],
+        isProposer: true,
+        state: target,
+      });
+    };
+    installTarget(proposerEnv);
+    installTarget(validatorEnv);
+    const rawTx = {
+      type: 'openAccount',
+      data: { targetEntityId },
+    } as const;
+
+    const rejected = await applyEntityTx(proposerEnv, state, rawTx);
+    expect(rejected.skippedError).toBe('OPEN_ACCOUNT_WATCH_SEED_REQUIRED');
+    expect(rejected.newState.accounts.size).toBe(0);
+
+    const [commandTx] = prepareLocallyAuthoredEntityTxs(
+      proposerEnv,
+      state,
+      author.signerId,
+      [rawTx],
+    );
+    if (commandTx?.type !== 'entityCommand') throw new Error('TEST_OPEN_ACCOUNT_COMMAND_MISSING');
+    const proposalTx = commandTx.data.txs[0];
+    if (proposalTx?.type !== 'propose' || proposalTx.data.action.type !== 'entity_transaction') {
+      throw new Error('TEST_OPEN_ACCOUNT_PROPOSAL_MISSING');
+    }
+    const materializedTx = proposalTx.data.action.data.txs[0];
+    if (materializedTx?.type !== 'openAccount') throw new Error('TEST_OPEN_ACCOUNT_TX_MISSING');
+    expect(materializedTx.data.watchSeed).toMatch(/^0x[0-9a-f]{64}$/);
+
+    const proposer = await applyEntityTx(proposerEnv, makeEntityState(author.entityId), materializedTx);
+    const validatorState = makeEntityState(author.entityId);
+    validatorState.config = state.config;
+    const validator = await applyEntityTx(validatorEnv, validatorState, materializedTx);
+    expect(validator.newState.accounts.get(targetEntityId)?.watchSeed)
+      .toBe(proposer.newState.accounts.get(targetEntityId)?.watchSeed);
   });
 
   test('proposeAccountFrame throws instead of dropping invalid cross-j fill ack', async () => {
@@ -2411,7 +3061,7 @@ describe('audit fail-fast regressions', () => {
       },
     ], left, right);
 
-    await expect(proposeAccountFrame(env, account)).rejects.toThrow(/CROSS_J_FILL_ACK_PROPOSAL_FAILED/);
+    await expect(proposeAccountFrame(env, account, env.timestamp)).rejects.toThrow(/CROSS_J_FILL_ACK_PROPOSAL_FAILED/);
     expect(account.mempool).toHaveLength(1);
   });
 
@@ -2452,7 +3102,7 @@ describe('audit fail-fast regressions', () => {
       }],
     ]);
 
-    await expect(proposeAccountFrame(env, account)).rejects.toThrow(/CROSS_J_PULL_RESOLVE_PROPOSAL_FAILED/);
+    await expect(proposeAccountFrame(env, account, env.timestamp)).rejects.toThrow(/CROSS_J_PULL_RESOLVE_PROPOSAL_FAILED/);
     expect(account.mempool).toHaveLength(1);
   });
 
@@ -2520,7 +3170,7 @@ describe('audit fail-fast regressions', () => {
       },
     ], left, right);
 
-    await expect(proposeAccountFrame(env, account)).rejects.toThrow(/CROSS_J_SWAP_OFFER_PROPOSAL_FAILED/);
+    await expect(proposeAccountFrame(env, account, env.timestamp)).rejects.toThrow(/CROSS_J_SWAP_OFFER_PROPOSAL_FAILED/);
     expect(account.mempool).toHaveLength(1);
   });
 
@@ -2595,7 +3245,7 @@ describe('audit fail-fast regressions', () => {
       quantizedWant: wantAmount,
     });
 
-    const result = await proposeAccountFrame(env, account);
+    const result = await proposeAccountFrame(env, account, env.timestamp);
 
     expect(result.success).toBe(true);
     expect(result.accountInput?.proposal.frame.accountTxs).toEqual([validTx]);
@@ -2743,8 +3393,10 @@ describe('audit fail-fast regressions', () => {
       expect(jTx.data.batchHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
       expect(jTx.data.encodedBatch).toMatch(/^0x/);
       expect(jTx.data.entityNonce).toBe(1);
+      expect(jTx.data.batchGeneration).toBe(1);
       expect(jTx.data.hankoSignature).toMatch(/^0x/);
     }
+    expect(result.workingReplica.state.jBatchState?.broadcastCount).toBe(1);
   });
 
   test('finalized j-events mark mutated account docs dirty for storage replay', async () => {
@@ -2763,9 +3415,12 @@ describe('audit fail-fast regressions', () => {
       entityIsLeft ? entityId : counterpartyId,
       entityIsLeft ? counterpartyId : entityId,
     );
+    const finalProofbody = makeEmptyProofBody();
+    const finalProofbodyHash = hashProofBodyStruct(finalProofbody);
+    account.disputeProofBodiesByHash = { [finalProofbodyHash]: finalProofbody };
     account.activeDispute = {
       startedByLeft: true,
-      initialProofbodyHash: `0x${'56'.repeat(32)}`,
+      initialProofbodyHash: finalProofbodyHash,
       initialNonce: 7,
       disputeTimeout: 22,
       jNonce: 7,
@@ -2787,8 +3442,8 @@ describe('audit fail-fast regressions', () => {
         sender: entityId,
         counterentity: counterpartyId,
         initialNonce: 7,
-        initialProofbodyHash: `0x${'56'.repeat(32)}`,
-        finalProofbodyHash: `0x${'57'.repeat(32)}`,
+        initialProofbodyHash: finalProofbodyHash,
+        finalProofbodyHash,
       },
     };
     const signed = prepareJEventInput(env, entityId, signerId, {
@@ -2813,7 +3468,15 @@ describe('audit fail-fast regressions', () => {
       jurisdictionRef: rangeData.jurisdictionRef,
       scannedThroughHeight: rangeData.scannedThroughHeight,
       tipBlockHash: rangeData.tipBlockHash,
-      headers: [{ jHeight: 22, jBlockHash: rangeData.tipBlockHash }],
+      headers: Array.from({ length: rangeData.scannedThroughHeight }, (_, index) => {
+        const jHeight = index + 1;
+        return {
+          jHeight,
+          jBlockHash: jHeight === 22
+            ? rangeData.tipBlockHash
+            : `0x${jHeight.toString(16).padStart(64, '0')}`,
+        };
+      }),
       blocks: rangeData.blocks.map((block) => ({
         jurisdictionRef: rangeData.jurisdictionRef,
         jHeight: block.blockNumber,
@@ -2826,15 +3489,15 @@ describe('audit fail-fast regressions', () => {
           : {}),
       })),
     });
-    await applyEntityInput(env, replica, {
+    const attestation = buildLocalJPrefixAttestation(env, replica);
+    if (!attestation) throw new Error('TEST_J_PREFIX_ATTESTATION_MISSING');
+    const applied = await applyEntityInput(env, replica, {
       entityId,
       signerId,
-      entityTxs: [{
-        type: 'j_event',
-        data: rangeData,
-      }],
+      jPrefixAttestations: new Map([[signerId, attestation]]),
     });
-
+    expect(applied.outcome).toEqual({ kind: 'committed' });
+    expect(applied.newState.lastFinalizedJHeight).toBe(rangeData.scannedThroughHeight);
     const marks = env.runtimeState?.currentStorageOverlayMarks ?? [];
     expect(marks.some((record) =>
       record.family === 'account' &&
@@ -2867,13 +3530,10 @@ describe('audit fail-fast regressions', () => {
               finalNonce: 3,
               initialProofbodyHash: `0x${'11'.repeat(32)}`,
               finalProofbody: makeEmptyProofBody(),
-              leftArguments: '0x',
-              rightArguments: '0x',
-              starterInitialArguments: '0x',
-              starterIncrementedArguments: '0x',
+              starterArguments: '0x',
+              otherArguments: '0x',
               sig: '0x',
               startedByLeft: true,
-              disputeUntilBlock: 123,
               cooperative: false,
             },
           ],
@@ -2932,13 +3592,10 @@ describe('audit fail-fast regressions', () => {
               finalNonce: 5,
               initialProofbodyHash: `0x${'44'.repeat(32)}`,
               finalProofbody: makeEmptyProofBody(),
-              leftArguments: '0x',
-              rightArguments: '0x',
-              starterInitialArguments: '0x',
-              starterIncrementedArguments: '0x',
+              starterArguments: '0x',
+              otherArguments: '0x',
               sig: '0x',
               startedByLeft: true,
-              disputeUntilBlock: 123,
               cooperative: false,
             },
           ],
@@ -2968,7 +3625,7 @@ describe('audit fail-fast regressions', () => {
     expect(result.newState.accounts.get(counterpartyId)?.activeDispute?.finalizeQueued).toBe(false);
   });
 
-  test('submitRuntimeJOutbox stops on transient submit failure without poisoning sentBatch', async () => {
+  test('submitRuntimeJOutbox queues a durable transient result without poisoning Entity consensus', async () => {
     const entityId = `0x${'ab'.repeat(32)}`;
     const signerId = `0x${'cd'.repeat(20)}`;
     const batchHash = `0x${'11'.repeat(32)}`;
@@ -3020,8 +3677,9 @@ describe('audit fail-fast regressions', () => {
       ],
     ]);
     const queuedInputs: EntityInput[] = [];
+    const queuedRuntimeTxs: RuntimeTx[] = [];
 
-    await expect(submitRuntimeJOutbox(
+    await submitAuditRuntimeJOutbox(
       env,
       [
         {
@@ -3045,6 +3703,7 @@ describe('audit fail-fast regressions', () => {
                 hankoSignature: '0x1234',
                 batchSize: 1,
                 signerId,
+                runtimeSubmitAttempt: { attemptId: 'transient-attempt-1', attemptNumber: 1, attemptedAt: 123 },
               },
               timestamp: env.timestamp,
             } as any,
@@ -3052,27 +3711,22 @@ describe('audit fail-fast regressions', () => {
         },
       ],
       {
-        enqueueRuntimeInputs: (_env, inputs) => {
+        enqueueRuntimeInputs: (_env, inputs, runtimeTxs) => {
           queuedInputs.push(...(inputs ?? []));
+          queuedRuntimeTxs.push(...(runtimeTxs ?? []));
         },
       },
-    )).rejects.toThrow(/J_SUBMIT_TRANSIENT: ECONNREFUSED/);
+    );
 
     expect(queuedInputs).toHaveLength(0);
+    expect(queuedRuntimeTxs).toMatchObject([{
+      type: 'recordJSubmitResult',
+      data: { outcome: 'transientFailure', message: 'ECONNREFUSED' },
+    }]);
     expect(state.jBatchState?.status).toBe('sent');
-    expect(state.jBatchState?.failedAttempts).toBe(1);
+    expect(state.jBatchState?.failedAttempts).toBe(0);
     expect(state.jBatchState?.sentBatch).toBeDefined();
-    expect(state.jBatchState?.sentBatch?.lastFailure).toMatchObject({
-      message: 'ECONNREFUSED',
-      failedAt: 123,
-      failure: {
-        category: 'TransientRace',
-        code: 'J_SUBMIT_TRANSIENT',
-        message: 'ECONNREFUSED',
-        retryable: true,
-        fatal: false,
-      },
-    });
+    expect(state.jBatchState?.sentBatch?.lastFailure).toBeUndefined();
     expect(state.jBatchState?.sentBatch?.terminalFailure).toBeUndefined();
   });
 
@@ -3087,13 +3741,10 @@ describe('audit fail-fast regressions', () => {
       finalNonce: 3,
       initialProofbodyHash: `0x${'14'.repeat(32)}`,
       finalProofbody: makeEmptyProofBody(),
-      leftArguments: '0x',
-      rightArguments: '0x',
-      starterInitialArguments: '0x',
-      starterIncrementedArguments: '0x',
+      starterArguments: '0x',
+      otherArguments: '0x',
       sig: '0x',
       startedByLeft: true,
-      disputeUntilBlock: 123,
       cooperative: false,
     };
     const batch = { ...createEmptyBatch(), disputeFinalizations: [disputeFinalize] };
@@ -3142,7 +3793,7 @@ describe('audit fail-fast regressions', () => {
     } as any]]);
     const queuedInputs: EntityInput[] = [];
 
-    await submitRuntimeJOutbox(env, [{
+    await submitAuditRuntimeJOutbox(env, [{
       jurisdictionName: 'Testnet',
       jTxs: [{
         type: 'batch',
@@ -3155,12 +3806,20 @@ describe('audit fail-fast regressions', () => {
           hankoSignature: '0x1234',
           batchSize: 1,
           signerId,
+          runtimeSubmitAttempt: { attemptId: 'reconcile-before-1', attemptNumber: 1, attemptedAt: 125 },
         },
         timestamp: env.timestamp,
       } as any, {
         type: 'batch',
         entityId: `0x${'19'.repeat(32)}`,
-        data: { batch: createEmptyBatch(), batchSize: 0 },
+        data: {
+          batch: createEmptyBatch(),
+          batchHash: `0x${'19'.repeat(32)}`,
+          entityNonce: 1,
+          signerId,
+          batchSize: 0,
+          runtimeSubmitAttempt: { attemptId: 'reconcile-before-2', attemptNumber: 1, attemptedAt: 125 },
+        },
         timestamp: env.timestamp,
       } as any],
     }], {
@@ -3215,18 +3874,15 @@ describe('audit fail-fast regressions', () => {
         finalNonce: 7,
         initialProofbodyHash,
         finalProofbody: makeEmptyProofBody(),
-        leftArguments: '0x',
-        rightArguments: '0x',
-        starterInitialArguments: '0x',
-        starterIncrementedArguments: '0x',
+        starterArguments: '0x',
+        otherArguments: '0x',
         sig: '0x',
         startedByLeft: true,
-        disputeUntilBlock: 123,
         cooperative: false,
       }],
     };
 
-    await submitRuntimeJOutbox(env, [{
+    await submitAuditRuntimeJOutbox(env, [{
       jurisdictionName: 'Testnet',
       jTxs: [{
         type: 'batch',
@@ -3239,12 +3895,20 @@ describe('audit fail-fast regressions', () => {
           hankoSignature: '0x1234',
           batchSize: 1,
           signerId,
+          runtimeSubmitAttempt: { attemptId: 'reconcile-after-1', attemptNumber: 1, attemptedAt: 126 },
         },
         timestamp: env.timestamp,
       } as any, {
         type: 'batch',
         entityId: `0x${'d3'.repeat(32)}`,
-        data: { batch: createEmptyBatch(), batchSize: 0 },
+        data: {
+          batch: createEmptyBatch(),
+          batchHash: `0x${'d3'.repeat(32)}`,
+          entityNonce: 1,
+          signerId,
+          batchSize: 0,
+          runtimeSubmitAttempt: { attemptId: 'reconcile-after-2', attemptNumber: 1, attemptedAt: 126 },
+        },
         timestamp: env.timestamp,
       } as any],
     }], {
@@ -3275,8 +3939,9 @@ describe('audit fail-fast regressions', () => {
         pollNow: async () => {},
       },
     } as any]]);
+    const queuedRuntimeTxs: RuntimeTx[] = [];
 
-    await expect(submitRuntimeJOutbox(env, [{
+    await submitAuditRuntimeJOutbox(env, [{
       jurisdictionName: 'Testnet',
       jTxs: [{
         type: 'batch',
@@ -3293,13 +3958,20 @@ describe('audit fail-fast regressions', () => {
           hankoSignature: '0x1234',
           batchSize: 1,
           signerId,
+          runtimeSubmitAttempt: { attemptId: 'fatal-e5-1', attemptNumber: 1, attemptedAt: 126 },
         },
         timestamp: env.timestamp,
       } as any],
-    }], { enqueueRuntimeInputs: () => {} })).rejects.toThrow(/J_SUBMIT_FATAL: staticCall revert: E5\(\)/);
+    }], {
+      enqueueRuntimeInputs: (_env, _inputs, runtimeTxs) => queuedRuntimeTxs.push(...(runtimeTxs ?? [])),
+    });
+    expect(queuedRuntimeTxs).toMatchObject([{
+      type: 'recordJSubmitResult',
+      data: { outcome: 'terminalFailure', message: 'staticCall revert: E5()' },
+    }]);
   });
 
-  test('submitRuntimeJOutbox marks staticCall revert as terminal before halting', async () => {
+  test('submitRuntimeJOutbox queues terminal staticCall result without mutating Entity consensus', async () => {
     const entityId = `0x${'ad'.repeat(32)}`;
     const signerId = `0x${'cd'.repeat(20)}`;
     const batchHash = `0x${'12'.repeat(32)}`;
@@ -3350,8 +4022,9 @@ describe('audit fail-fast regressions', () => {
         } as any,
       ],
     ]);
+    const queuedRuntimeTxs: RuntimeTx[] = [];
 
-    await expect(submitRuntimeJOutbox(
+    await submitAuditRuntimeJOutbox(
       env,
       [
         {
@@ -3375,29 +4048,24 @@ describe('audit fail-fast regressions', () => {
                 hankoSignature: '0x1234',
                 batchSize: 1,
                 signerId,
+                runtimeSubmitAttempt: { attemptId: 'fatal-e3-1', attemptNumber: 1, attemptedAt: 124 },
               },
               timestamp: env.timestamp,
             } as any,
           ],
         },
       ],
-      { enqueueRuntimeInputs: () => {} },
-    )).rejects.toThrow(/J_SUBMIT_FATAL: staticCall revert: E3\(\)/);
+      { enqueueRuntimeInputs: (_env, _inputs, runtimeTxs) => queuedRuntimeTxs.push(...(runtimeTxs ?? [])) },
+    );
 
-    expect(state.jBatchState?.status).toBe('failed');
-    expect(state.jBatchState?.failedAttempts).toBe(1);
-    expect(state.jBatchState?.sentBatch?.terminalFailure).toMatchObject({
-      message: 'staticCall revert: E3()',
-      failedAt: 124,
-      failure: {
-        category: 'Contradiction',
-        code: 'J_SUBMIT_FATAL',
-        message: 'staticCall revert: E3()',
-        retryable: false,
-        fatal: true,
-      },
-    });
-    expect(state.jBatchState?.sentBatch?.lastFailure).toMatchObject(state.jBatchState?.sentBatch?.terminalFailure ?? {});
+    expect(queuedRuntimeTxs).toMatchObject([{
+      type: 'recordJSubmitResult',
+      data: { outcome: 'terminalFailure', message: 'staticCall revert: E3()' },
+    }]);
+    expect(state.jBatchState?.status).toBe('sent');
+    expect(state.jBatchState?.failedAttempts).toBe(0);
+    expect(state.jBatchState?.sentBatch?.terminalFailure).toBeUndefined();
+    expect(state.jBatchState?.sentBatch?.lastFailure).toBeUndefined();
   });
 
   test('submitRuntimeJOutbox skips sealed batches owned by another runtime signer', async () => {
@@ -3422,8 +4090,9 @@ describe('audit fail-fast regressions', () => {
         } as any,
       ],
     ]);
+    const queuedRuntimeTxs: RuntimeTx[] = [];
 
-    await submitRuntimeJOutbox(
+    await submitAuditRuntimeJOutbox(
       env,
       [
         {
@@ -3447,27 +4116,27 @@ describe('audit fail-fast regressions', () => {
                 hankoSignature: '0x1234',
                 batchSize: 1,
                 signerId: remoteSignerId,
+                runtimeSubmitAttempt: { attemptId: 'non-local-1', attemptNumber: 1, attemptedAt: 125 },
               },
               timestamp: env.timestamp,
             } as any,
           ],
         },
       ],
-      { enqueueRuntimeInputs: () => {} },
+      { enqueueRuntimeInputs: (_env, _inputs, runtimeTxs) => queuedRuntimeTxs.push(...(runtimeTxs ?? [])) },
     );
 
     expect(adapterCalls).toBe(0);
+    expect(queuedRuntimeTxs).toMatchObject([{
+      type: 'recordJSubmitResult',
+      data: { outcome: 'terminalFailure' },
+    }]);
   });
 
-  test('submitRuntimeJOutbox submits cached local multi-signer batches even when runtimeId differs', async () => {
+  test('submitRuntimeJOutbox submits Env-local multi-signer batches even when runtimeId differs', async () => {
     const entityId = `0x${'af'.repeat(32)}`;
     const runtimeId = `0x${'33'.repeat(20)}`;
     const localScenarioSignerId = '97';
-    registerSignerKey(
-      localScenarioSignerId,
-      deriveSignerKeySync('j-submit-local-multi-signer', localScenarioSignerId),
-    );
-
     const env = createEmptyEnv('j-submit-local-multi-signer');
     env.runtimeId = runtimeId;
     env.timestamp = 126;
@@ -3489,7 +4158,7 @@ describe('audit fail-fast regressions', () => {
       ],
     ]);
 
-    await submitRuntimeJOutbox(
+    await submitAuditRuntimeJOutbox(
       env,
       [
         {
@@ -3513,6 +4182,7 @@ describe('audit fail-fast regressions', () => {
                 hankoSignature: '0x1234',
                 batchSize: 1,
                 signerId: localScenarioSignerId,
+                runtimeSubmitAttempt: { attemptId: 'local-multisig-1', attemptNumber: 1, attemptedAt: 126 },
               },
               timestamp: env.timestamp,
             } as any,
@@ -3543,8 +4213,9 @@ describe('audit fail-fast regressions', () => {
         } as any,
       ],
     ]);
+    const queuedRuntimeTxs: RuntimeTx[] = [];
 
-    await expect(submitRuntimeJOutbox(
+    await submitAuditRuntimeJOutbox(
       env,
       [
         {
@@ -3564,6 +4235,9 @@ describe('audit fail-fast regressions', () => {
                 },
                 batchSize: 1,
                 signerId: `0x${'cd'.repeat(20)}`,
+                batchHash: `0x${'15'.repeat(32)}`,
+                entityNonce: 1,
+                runtimeSubmitAttempt: { attemptId: 'missing-hanko-1', attemptNumber: 1, attemptedAt: 123 },
               },
               timestamp: env.timestamp,
             } as any,
@@ -3571,11 +4245,15 @@ describe('audit fail-fast regressions', () => {
         },
       ],
       {
-        enqueueRuntimeInputs: () => {},
+        enqueueRuntimeInputs: (_env, _inputs, runtimeTxs) => queuedRuntimeTxs.push(...(runtimeTxs ?? [])),
       },
-    )).rejects.toThrow(/J_BATCH_CONSENSUS_HANKO_MISSING/);
+    );
 
     expect(adapterCalls).toBe(0);
+    expect(queuedRuntimeTxs).toMatchObject([{
+      type: 'recordJSubmitResult',
+      data: { outcome: 'terminalFailure' },
+    }]);
   });
 
   test('request_collateral checks prepaid fee against derived outCapacity', () => {
@@ -3660,6 +4338,8 @@ describe('audit fail-fast regressions', () => {
   test('auto-rebalance allows pending request top-up during settlement', () => {
     const usd = 10n ** 18n;
     const accountMachine = {
+      leftEntity: `0x${'11'.repeat(32)}`,
+      rightEntity: `0x${'ff'.repeat(32)}`,
       settlementWorkspace: { status: 'sent' },
       mempool: [],
       pendingFrame: undefined,
@@ -3692,18 +4372,270 @@ describe('audit fail-fast regressions', () => {
         leftHold: 0n,
         rightHold: 0n,
       }]]),
+      rebalanceFeePolicies: new Map([[1, { right: {
+        policyVersion: 1, baseFee: 10n * usd, gasFee: 0n, liquidityFeeBps: 0n, updatedAt: 1,
+      } }]]),
     };
 
     const txs = checkAutoRebalance(
       accountMachine as Parameters<typeof checkAutoRebalance>[0],
       `0x${'11'.repeat(32)}`,
       `0x${'ff'.repeat(32)}`,
-      { policyVersion: 1, baseFee: 10n * usd, gasFee: 0n, liquidityFeeBps: 0n },
     );
 
     expect(txs).toHaveLength(1);
     expect(txs[0]?.type).toBe('request_collateral');
     expect(txs[0]?.data.amount).toBe(800n * usd);
+  });
+
+  test('auto-rebalance fee policy ignores live sibling topology', () => {
+    const env = createEmptyEnv('rebalance-policy-consensus-purity');
+    const entityId = `0x${'13'.repeat(32)}`;
+    const hubId = `0x${'14'.repeat(32)}`;
+    const account = makeProposalAccount([], entityId, hubId);
+    const hubState = makeEntityState(hubId);
+    hubState.hubRebalanceConfig = {
+      matchingStrategy: 'amount',
+      policyVersion: 9,
+      routingFeePPM: 0,
+      baseFee: 999n,
+      rebalanceLiquidityFeeBps: 88n,
+    };
+    env.eReplicas.set(`${hubId}:hub`, {
+      entityId: hubId,
+      signerId: 'hub',
+      state: hubState,
+    } as never);
+
+    expect(resolveAutoRebalanceFeePolicy(account, entityId, 1)).toBeUndefined();
+
+    account.rebalanceFeePolicies = new Map([[1, { right: {
+      policyVersion: 3, baseFee: 7n, liquidityFeeBps: 5n, gasFee: 11n, updatedAt: 1,
+    } }]]);
+    expect(resolveAutoRebalanceFeePolicy(account, entityId, 1)).toEqual({
+      policyVersion: 3,
+      baseFee: 7n,
+      liquidityFeeBps: 5n,
+      gasFee: 11n,
+    });
+  });
+
+  test('explicit rebalance policy AccountTx binds the snapshot to proposer side and token', async () => {
+    const leftId = `0x${'15'.repeat(32)}`;
+    const rightId = `0x${'f5'.repeat(32)}`;
+    const account = makeProposalAccount([], leftId, rightId);
+    account.deltas.set(1, createDefaultDelta(1));
+    const tx: AccountTx = {
+      type: 'rebalance_policy',
+      data: {
+        tokenId: 1,
+        policyVersion: 4,
+        baseFee: 7n,
+        liquidityFeeBps: 5n,
+        gasFee: 11n,
+      },
+    };
+
+    const result = await applyAccountTx(account, tx, true, 123, 0);
+
+    expect(result.success).toBe(true);
+    expect(account.rebalanceFeePolicies?.get(1)?.left).toEqual({
+      policyVersion: 4,
+      baseFee: 7n,
+      liquidityFeeBps: 5n,
+      gasFee: 11n,
+      updatedAt: 123,
+    });
+    expect(account.rebalanceFeePolicies?.get(1)?.right).toBeUndefined();
+
+    const retry = await applyAccountTx(account, tx, true, 999, 0);
+    expect(retry.success).toBe(true);
+    expect(account.rebalanceFeePolicies?.get(1)?.left?.updatedAt).toBe(123);
+
+    const beforeConflict = computeAccountStateRoot(account);
+    const conflict = await applyAccountTx(account, {
+      ...tx,
+      data: { ...tx.data, baseFee: 8n },
+    }, true, 999, 0);
+    expect(conflict).toMatchObject({ success: false, error: expect.stringContaining('REBALANCE_POLICY_EQUIVOCATION') });
+    expect(computeAccountStateRoot(account)).toBe(beforeConflict);
+
+    const stale = await applyAccountTx(account, {
+      ...tx,
+      data: { ...tx.data, policyVersion: 3 },
+    }, true, 999, 0);
+    expect(stale.success).toBe(true);
+    expect(computeAccountStateRoot(account)).toBe(beforeConflict);
+
+    const right = await applyAccountTx(account, {
+      ...tx,
+      data: { ...tx.data, policyVersion: 1, baseFee: 13n },
+    }, false, 456, 0);
+    expect(right.success).toBe(true);
+    expect(account.rebalanceFeePolicies?.get(1)?.right?.baseFee).toBe(13n);
+    expect(account.rebalanceFeePolicies?.get(1)?.left?.baseFee).toBe(7n);
+  });
+
+  test('rebalance policy rejects non-bigint fee terms before mutating Account state', async () => {
+    const leftId = `0x${'18'.repeat(32)}`;
+    const rightId = `0x${'f8'.repeat(32)}`;
+    const account = makeProposalAccount([], leftId, rightId);
+    account.deltas.set(1, createDefaultDelta(1));
+    const before = computeAccountStateRoot(account);
+    const malformed = {
+      type: 'rebalance_policy',
+      data: { tokenId: 1, policyVersion: 1, baseFee: 7, liquidityFeeBps: 5, gasFee: 11 },
+    } as unknown as AccountTx;
+
+    const result = await applyAccountTx(account, malformed, true, 123, 0);
+
+    expect(result).toMatchObject({ success: false, error: expect.stringContaining('invalid fee types') });
+    expect(computeAccountStateRoot(account)).toBe(before);
+    expect(account.rebalanceFeePolicies).toBeUndefined();
+  });
+
+  test('auto-rebalance output order survives compact storage map canonicalization', () => {
+    const entityId = `0x${'19'.repeat(32)}`;
+    const hubId = `0x${'f9'.repeat(32)}`;
+    const account = makeProposalAccount([], entityId, hubId);
+    for (const tokenId of [3, 1, 2]) {
+      const delta = createDefaultDelta(tokenId);
+      delta.offdelta = 1_000n;
+      delta.rightCreditLimit = 2_000n;
+      account.deltas.set(tokenId, delta);
+      account.shadow.rebalance.policy.set(tokenId, {
+        r2cRequestSoftLimit: 100n,
+        hardLimit: 2_000n,
+        maxAcceptableFee: 100n,
+      });
+      const policies = account.rebalanceFeePolicies ?? new Map();
+      policies.set(tokenId, { right: {
+        policyVersion: 1,
+        baseFee: 1n,
+        liquidityFeeBps: 0n,
+        gasFee: 0n,
+        updatedAt: 1,
+      } });
+      account.rebalanceFeePolicies = policies;
+    }
+    const restored = hydrateAccountDocFromStorage(decodeValidatedBuffer(
+      encodeBuffer(projectAccountDoc(account)),
+      validateStorageAccountDocValue,
+    ));
+
+    const liveTxs = checkAutoRebalance(account, entityId, hubId);
+    const restoredTxs = checkAutoRebalance(restored, entityId, hubId);
+
+    expect(liveTxs).toEqual(restoredTxs);
+    expect(liveTxs.map((tx) => tx.data.tokenId)).toEqual([1, 2, 3]);
+  });
+
+  test('setHubConfig publishes an explicit fee policy into every established Account lane', () => {
+    const env = createEmptyEnv('rebalance-policy-publish');
+    const hubId = `0x${'16'.repeat(32)}`;
+    const userId = `0x${'f6'.repeat(32)}`;
+    const state = makeEntityState(hubId);
+    const account = makeProposalAccount([], hubId, userId);
+    account.deltas.set(1, createDefaultDelta(1));
+    account.deltas.set(2, createDefaultDelta(2));
+    state.accounts.set(userId, account);
+
+    const result = handleSetHubConfigEntityTx(env, state, {
+      type: 'setHubConfig',
+      data: {
+        policyVersion: 4,
+        rebalanceLiquidityFeeBps: 5n,
+      },
+    });
+
+    expect(result.mempoolOps?.map(({ tx }) => tx)).toEqual([
+      {
+        type: 'rebalance_policy',
+        data: { tokenId: 1, policyVersion: 4, baseFee: 100_000n, liquidityFeeBps: 5n, gasFee: 0n },
+      },
+      {
+        type: 'rebalance_policy',
+        data: { tokenId: 2, policyVersion: 4, baseFee: 100_000_000_000_000_000n, liquidityFeeBps: 5n, gasFee: 0n },
+      },
+    ]);
+    expect(result.outputs).toHaveLength(1);
+    expect(() => handleSetHubConfigEntityTx(env, result.newState, {
+      type: 'setHubConfig',
+      data: { policyVersion: 4, rebalanceLiquidityFeeBps: 6n },
+    })).toThrow('HUB_REBALANCE_POLICY_EQUIVOCATION:version=4');
+    expect(() => handleSetHubConfigEntityTx(env, result.newState, {
+      type: 'setHubConfig',
+      data: { policyVersion: 3, rebalanceLiquidityFeeBps: 5n },
+    })).toThrow('HUB_REBALANCE_POLICY_VERSION_STALE:3<4');
+  });
+
+  test('bilateral rebalance policies survive compact storage decode with strict shape validation', () => {
+    const leftId = `0x${'17'.repeat(32)}`;
+    const rightId = `0x${'f7'.repeat(32)}`;
+    const account = makeProposalAccount([], leftId, rightId);
+    account.deltas.set(1, createDefaultDelta(1));
+    account.rebalanceFeePolicies = new Map([[1, {
+      left: { policyVersion: 2, baseFee: 3n, liquidityFeeBps: 4n, gasFee: 5n, updatedAt: 6 },
+      right: { policyVersion: 7, baseFee: 8n, liquidityFeeBps: 9n, gasFee: 10n, updatedAt: 11 },
+    }]]);
+    const root = computeAccountStateRoot(account);
+
+    const restored = hydrateAccountDocFromStorage(decodeValidatedBuffer(
+      encodeBuffer(projectAccountDoc(account)),
+      validateStorageAccountDocValue,
+    ));
+
+    expect(restored.rebalanceFeePolicies).toEqual(account.rebalanceFeePolicies);
+    expect(computeAccountStateRoot(restored)).toBe(root);
+
+    const corrupt = projectAccountDoc(account);
+    const left = corrupt.rebalanceFeePolicies?.get(1)?.left;
+    if (!left) throw new Error('TEST_REBALANCE_POLICY_REQUIRED');
+    (left as typeof left & { unexpected: boolean }).unexpected = true;
+    expect(() => decodeValidatedBuffer(
+      encodeBuffer(corrupt),
+      validateStorageAccountDocValue,
+    )).toThrow('contains unexpected fields');
+  });
+
+  test('post-frame auto-rebalance uses explicit owner role and committed exact fees', async () => {
+    const entityId = `0x${'15'.repeat(32)}`;
+    const hubId = `0x${'f5'.repeat(32)}`;
+    const account = makeProposalAccount([], entityId, hubId);
+    account.rebalanceFeePolicies = new Map([[1, { right: {
+      policyVersion: 4, baseFee: 7n, liquidityFeeBps: 5n, gasFee: 11n, updatedAt: 1,
+    } }]]);
+    account.shadow.rebalance.policy.set(1, {
+      r2cRequestSoftLimit: 500n,
+      hardLimit: 100_000n,
+      maxAcceptableFee: 1_000n,
+    });
+    const delta = createDefaultDelta(1);
+    delta.offdelta = 60_000n;
+    delta.rightCreditLimit = 100_000n;
+    account.deltas.set(1, delta);
+    const withSibling = createEmptyEnv('rebalance-explicit-role-with-sibling');
+    const withoutSibling = createEmptyEnv('rebalance-explicit-role-without-sibling');
+    const misleadingOwner = makeEntityState(entityId);
+    misleadingOwner.hubRebalanceConfig = {
+      matchingStrategy: 'amount',
+      policyVersion: 99,
+      routingFeePPM: 0,
+      baseFee: 999n,
+    };
+    withSibling.eReplicas.set(`${entityId}:misleading`, {
+      entityId,
+      signerId: 'misleading',
+      state: misleadingOwner,
+    } as never);
+
+    const [withResult, withoutResult] = await Promise.all([
+      runPostFrameAutoRebalanceCheck(withSibling, structuredClone(account), entityId, hubId, 1, false),
+      runPostFrameAutoRebalanceCheck(withoutSibling, structuredClone(account), entityId, hubId, 1, false),
+    ]);
+
+    expect(withResult).toEqual(withoutResult);
+    expect(withResult[0]?.data.feeAmount).toBe(48n);
   });
 
   test('private rebalance policy immediately queues collateral for existing exposure', () => {
@@ -3713,6 +4645,9 @@ describe('audit fail-fast regressions', () => {
     const usd = 10n ** 18n;
     const state = makeEntityState(entityId);
     const account = makeProposalAccount([], entityId, hubId);
+    account.rebalanceFeePolicies = new Map([[1, { right: {
+      policyVersion: 1, baseFee: 1n * usd, liquidityFeeBps: 1n, gasFee: 0n, updatedAt: 1,
+    } }]]);
     account.deltas.set(1, {
       tokenId: 1,
       collateral: 0n,
@@ -3741,6 +4676,7 @@ describe('audit fail-fast regressions', () => {
     expect(result.newState.accounts.get(hubId)?.shadow.rebalance.policy.get(1)?.r2cRequestSoftLimit).toBe(500n * usd);
     expect(result.mempoolOps).toHaveLength(1);
     expect(result.mempoolOps?.[0]?.tx.type).toBe('request_collateral');
+    expect(result.mempoolOps?.[0]?.tx.data.feeAmount).toBe(1_055_000_000_000_000_000n);
     expect(result.outputs).toHaveLength(1);
     expect('rebalancePolicy' in result.newState.accounts.get(hubId)!).toBe(false);
   });
@@ -3765,6 +4701,8 @@ describe('audit fail-fast regressions', () => {
       rightHold: 0n,
     };
     const accountMachine = {
+      leftEntity: `0x${'11'.repeat(32)}`,
+      rightEntity: `0x${'ff'.repeat(32)}`,
       settlementWorkspace: { status: 'sent' },
       mempool: [],
       pendingFrame: undefined,
@@ -3786,13 +4724,15 @@ describe('audit fail-fast regressions', () => {
         }]]),
         submittedAtByToken: new Map([[1, 123]]),
       } },
+      rebalanceFeePolicies: new Map([[1, { right: {
+        policyVersion: 1, baseFee: usd / 10n, gasFee: 0n, liquidityFeeBps: 1n, updatedAt: 1,
+      } }]]),
     };
 
     const txs = checkAutoRebalance(
       accountMachine as Parameters<typeof checkAutoRebalance>[0],
       `0x${'11'.repeat(32)}`,
       `0x${'ff'.repeat(32)}`,
-      { policyVersion: 1, baseFee: usd / 10n, gasFee: 0n, liquidityFeeBps: 1n },
     );
 
     expect(txs).toHaveLength(1);
@@ -3819,11 +4759,17 @@ describe('audit fail-fast regressions', () => {
   });
 
   test('entity proposal fails fast when prevFrameHash is missing above genesis', async () => {
-    const env = createEmptyEnv('audit-entity-seed');
+    const seed = 'audit-entity-missing-parent-seed';
+    const env = createEmptyEnv(seed);
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
 
     const replica = makeReplicaMissingPrevFrameHash();
+    const { signerId, entityId } = registerLazySigner(seed, '1');
+    replica.entityId = entityId;
+    replica.signerId = signerId;
+    replica.state.entityId = entityId;
+    replica.state.config = makeSingleSignerConfigFor(signerId);
     const entityInput: EntityInput = {
       entityId: replica.entityId,
       entityTxs: [
@@ -3903,14 +4849,14 @@ describe('audit fail-fast regressions', () => {
     expect(env.runtimeState.entityRuntimeHints.has(remoteEntityId)).toBe(false);
   });
 
-  test('entity commit catch-up does not apply unsigned proposed newState mutations', async () => {
+  test('entity commit catch-up derives committed state only from local replay', async () => {
     const seed = 'entity-commit-catch-up-state-binding seed alpha beta gamma';
     const env = createEmptyEnv(seed);
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
     env.timestamp = 42_000;
     const { signerId, entityId } = registerLazySigner(seed, '1');
-    const frameTxs: EntityTx[] = [{
+    const collectiveTxs: EntityTx[] = [{
       type: 'profile-update',
       data: {
         profile: {
@@ -3922,6 +4868,7 @@ describe('audit fail-fast regressions', () => {
 
     const honestBaseState = makeEntityState(entityId);
     honestBaseState.config = makeSingleSignerConfigFor(signerId);
+    const frameTxs = await buildQuorumAuthorizedFrameTxs(env, honestBaseState, collectiveTxs);
     const {
       newState: honestFrameState,
       collectedHashes = [],
@@ -3946,14 +4893,9 @@ describe('audit fail-fast regressions', () => {
       honestNewState,
     );
     const hashesToSign = buildEntityHashesToSign(entityId, 1, frameHash, collectedHashes);
+    const stateRoot = computeCanonicalEntityConsensusStateHash(honestNewState);
+    const authorityRoot = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(honestNewState));
     const frameSignatures = hashesToSign.map(({ hash }) => signAccountFrame(env, signerId, hash));
-    const tamperedNewState: EntityState = {
-      ...honestNewState,
-      profile: {
-        ...honestNewState.profile,
-        name: 'Injected Profile',
-      },
-    };
     const replica = {
       entityId,
       signerId,
@@ -3968,15 +4910,17 @@ describe('audit fail-fast regressions', () => {
       signerId,
       proposedFrame: {
         height: 1,
+        parentFrameHash: 'genesis',
+        stateRoot,
+        authorityRoot,
+        timestamp: env.timestamp,
         txs: frameTxs,
         hash: frameHash,
-        newState: tamperedNewState,
         leader: { proposerSignerId: signerId, view: 0 },
         hashesToSign,
         collectedSigs: new Map([[signerId, frameSignatures]]),
       },
     });
-
     expect(result.workingReplica.state.height).toBe(1);
     expect(result.workingReplica.state.profile.name).toBe('Signed Profile');
   });
@@ -3996,28 +4940,42 @@ describe('audit fail-fast regressions', () => {
       validators: [first.signerId, second.signerId],
       shares: { [first.signerId]: 1n, [second.signerId]: 1n },
     };
-    const frameTxs: EntityTx[] = [{
+    const collectiveTxs: EntityTx[] = [{
       type: 'profile-update',
       data: { profile: { entityId, name: 'Manifest Bound' } },
     } as any];
     const baseState = makeEntityState(entityId);
     baseState.config = config;
-    const { newState, deterministicState, collectedHashes = [] } = await applyEntityFrame(
+    const frameTxs = await buildQuorumAuthorizedFrameTxs(env, baseState, collectiveTxs);
+    const { newState: replayedState, collectedHashes = [] } = await applyEntityFrame(
       env,
       baseState,
       frameTxs,
       env.timestamp,
     );
     const leaderState = { activeValidatorId: first.signerId, view: 0, changedAtHeight: 0 };
-    const proposedNewState = { ...newState, entityId, height: 1, timestamp: env.timestamp, leaderState };
     const frameHash = await createEntityFrameHash(
       'genesis',
       1,
       env.timestamp,
       frameTxs,
-      { ...deterministicState, entityId, height: 1, timestamp: env.timestamp, leaderState },
+      { ...replayedState, entityId, height: 1, timestamp: env.timestamp, leaderState },
     );
     const localManifest = buildEntityHashesToSign(entityId, 1, frameHash, collectedHashes);
+    const stateRoot = computeCanonicalEntityConsensusStateHash({
+      ...replayedState,
+      entityId,
+      height: 1,
+      timestamp: env.timestamp,
+      leaderState,
+    });
+    const authorityRoot = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority({
+      ...replayedState,
+      entityId,
+      height: 1,
+      timestamp: env.timestamp,
+      leaderState,
+    }));
     const attackerHash = ethers.keccak256(ethers.toUtf8Bytes('attacker-selected-dispute-hash'));
     const validatorReplica: EntityReplica = {
       entityId,
@@ -4032,9 +4990,12 @@ describe('audit fail-fast regressions', () => {
       signerId: second.signerId,
       proposedFrame: {
         height: 1,
+        parentFrameHash: 'genesis',
+        stateRoot,
+        authorityRoot,
+        timestamp: env.timestamp,
         txs: frameTxs,
         hash: ethers.keccak256(ethers.toUtf8Bytes('proposer-selected-invalid-frame-hash')),
-        newState: proposedNewState,
         leader: { proposerSignerId: first.signerId, view: 0 },
         hashesToSign: localManifest,
       },
@@ -4051,9 +5012,9 @@ describe('audit fail-fast regressions', () => {
       signerId: second.signerId,
       proposedFrame: {
         height: 1,
+        timestamp: env.timestamp,
         txs: frameTxs,
         hash: frameHash,
-        newState: proposedNewState,
         leader: { proposerSignerId: first.signerId, view: 0 },
         hashesToSign: [
           ...localManifest,
@@ -4068,9 +5029,12 @@ describe('audit fail-fast regressions', () => {
 
     const honestProposal = {
       height: 1,
+      parentFrameHash: 'genesis',
+      stateRoot,
+      authorityRoot,
+      timestamp: env.timestamp,
       txs: frameTxs,
       hash: frameHash,
-      newState: proposedNewState,
       leader: { proposerSignerId: first.signerId, view: 0 },
       hashesToSign: localManifest,
     };
@@ -4145,7 +5109,7 @@ describe('audit fail-fast regressions', () => {
     env.quietRuntimeLogs = true;
     env.timestamp = 43_000;
     const { signerId, entityId } = registerLazySigner(seed, '1');
-    const frameTxs: EntityTx[] = [{
+    const collectiveTxs: EntityTx[] = [{
       type: 'profile-update',
       data: {
         profile: {
@@ -4157,6 +5121,7 @@ describe('audit fail-fast regressions', () => {
 
     const honestBaseState = makeEntityState(entityId);
     honestBaseState.config = makeSingleSignerConfigFor(signerId);
+    const frameTxs = await buildQuorumAuthorizedFrameTxs(env, honestBaseState, collectiveTxs);
     const { newState: honestFrameState } = await applyEntityFrame(
       env,
       honestBaseState,
@@ -4193,9 +5158,10 @@ describe('audit fail-fast regressions', () => {
       signerId,
       proposedFrame: {
         height: 1,
+        timestamp: env.timestamp,
         txs: frameTxs,
         hash: frameHash,
-        newState: honestNewState,
+        leader: { proposerSignerId: signerId, view: 0 },
         hashesToSign: [
           { hash: frameHash, type: 'entityFrame', context: 'entity-frame' },
           { hash: secondaryHash, type: 'accountFrame', context: 'account-frame' },
@@ -4250,14 +5216,17 @@ describe('audit fail-fast regressions', () => {
 
     const left = registerLazySigner(seed, '1');
     const right = registerLazySigner(seed, '2');
-    const mempool = Array.from({ length: MAX_ACCOUNT_FRAME_TXS }, (_, index) => ({
+    const mempool = Array.from({ length: MAX_ACCOUNT_FRAME_TXS }, () => ({
       type: 'add_delta' as const,
-      data: { tokenId: index + 1 },
+      // Exercise the 1000-tx frame cap without manufacturing a ProofBody that
+      // the jurisdiction rejects (>128 distinct token rows). add_delta is
+      // intentionally idempotent, so every tx still replays deterministically.
+      data: { tokenId: 1 },
     }));
     const accountMachine = makeProposalAccount(mempool, left.entityId, right.entityId);
     attachSigningReplica(env, accountMachine.proofHeader.fromEntity, left.signerId);
 
-    const result = await proposeAccountFrame(env, accountMachine);
+    const result = await proposeAccountFrame(env, accountMachine, env.timestamp);
 
     expect(result.success).toBe(true);
     expect(result.accountInput?.proposal.frame.accountTxs).toHaveLength(MAX_ACCOUNT_FRAME_TXS);
@@ -4291,12 +5260,16 @@ describe('audit fail-fast regressions', () => {
         kind: 'ack',
         fromEntityId: left.entityId,
         toEntityId: right.entityId,
-        ack: { height: 10, frameHanko: `0x${'cd'.repeat(65)}` },
+        ack: {
+          height: 10,
+          frameHash: accountMachine.currentFrame.stateHash,
+          frameHanko: `0x${'cd'.repeat(65)}`,
+        },
       },
     };
     attachSigningReplica(env, accountMachine.proofHeader.fromEntity, left.signerId);
 
-    const result = await proposeAccountFrame(env, accountMachine);
+    const result = await proposeAccountFrame(env, accountMachine, env.timestamp);
 
     expect(result.success).toBe(true);
     expect(result.accountInput?.kind).toBe('frame_ack');
@@ -4318,7 +5291,7 @@ describe('audit fail-fast regressions', () => {
       { type: 'set_credit_limit', data: { tokenId: 1, amount: 100n } },
     ], left.entityId, right.entityId);
     accountMachine.deltas.set(1, createDefaultDelta(1));
-    accountMachine.currentDisputeProofBodyHash = buildAccountProofBody(accountMachine).proofBodyHash;
+    accountMachine.currentDisputeProofBodyHash = buildAccountProofBody(accountMachine, '').proofBodyHash;
     accountMachine.currentDisputeProofNonce = 1;
     accountMachine.jNonce = 0;
     accountMachine.currentDisputeHash = createDisputeProofHashWithNonce(
@@ -4331,7 +5304,7 @@ describe('audit fail-fast regressions', () => {
     const nonceBefore = accountMachine.proofHeader.nextProofNonce;
     attachSigningReplica(env, left.entityId, left.signerId);
 
-    const result = await proposeAccountFrame(env, accountMachine);
+    const result = await proposeAccountFrame(env, accountMachine, env.timestamp);
 
     expect(result.success).toBe(true);
     expect(result.accountInput?.kind === 'frame' ? result.accountInput.proposal.disputeSeal : undefined).toEqual({
@@ -4343,9 +5316,41 @@ describe('audit fail-fast regressions', () => {
     expect(accountMachine.proofHeader.nextProofNonce).toBe(nonceBefore);
   });
 
-  test('account frame property matrix preserves explicit zero jHeight through receive, replay, and ACK commit', async () => {
-    setDeltaTransformerAddress(hex20('99'));
+  test('consumed dispute proof nonce opens a fresh persisted evidence epoch', async () => {
+    const seed = 'account-consumed-proof-opens-evidence-epoch';
+    const env = createEmptyEnv(seed);
+    env.quietRuntimeLogs = true;
+    env.browserVM = { getDepositoryAddress: () => hex20('dd') } as typeof env.browserVM;
+    const left = registerLazySigner(seed, '1');
+    const right = registerLazySigner(seed, '2');
+    const accountMachine = makeProposalAccount([
+      { type: 'set_credit_limit', data: { tokenId: 1, amount: 100n } },
+    ], left.entityId, right.entityId);
+    accountMachine.deltas.set(1, createDefaultDelta(1));
+    const proof = buildAccountProofBody(accountMachine, '');
+    accountMachine.currentDisputeProofBodyHash = proof.proofBodyHash;
+    accountMachine.currentDisputeProofNonce = 7;
+    accountMachine.jNonce = 8;
+    accountMachine.disputeProofBodiesByHash = undefined;
+    accountMachine.disputeProofNoncesByHash = undefined;
+    accountMachine.disputeArgumentSnapshotsByHash = undefined;
+    attachSigningReplica(env, left.entityId, left.signerId);
 
+    const result = await proposeAccountFrame(env, accountMachine, env.timestamp);
+
+    expect(result.success).toBe(true);
+    expect(result.accountInput?.kind === 'frame' ? result.accountInput.proposal.disputeSeal : undefined)
+      .toMatchObject({ proofBodyHash: proof.proofBodyHash, proofNonce: 9 });
+    expect(Object.keys(accountMachine.disputeProofBodiesByHash ?? {})).toEqual([proof.proofBodyHash]);
+    expect(accountMachine.disputeProofNoncesByHash).toEqual({ [proof.proofBodyHash]: 9 });
+    expect(Object.keys(accountMachine.disputeArgumentSnapshotsByHash ?? {})).toEqual([proof.proofBodyHash]);
+    const persisted = hydrateAccountDocFromStorage(structuredClone(projectAccountDoc(accountMachine)));
+    expect(Object.keys(persisted.disputeProofBodiesByHash ?? {})).toEqual([proof.proofBodyHash]);
+    expect(persisted.disputeProofNoncesByHash).toEqual({ [proof.proofBodyHash]: 9 });
+    expect(Object.keys(persisted.disputeArgumentSnapshotsByHash ?? {})).toEqual([proof.proofBodyHash]);
+  });
+
+  test('account frame property matrix preserves explicit zero jHeight through receive, replay, and ACK commit', async () => {
     const propertyCases = [1, 10, 100].flatMap(accountHeight =>
       [3, 11, 101].flatMap(finalizedJHeight =>
         [1, 2, 11].map(revealBeforeHeight => ({ accountHeight, finalizedJHeight, revealBeforeHeight })),
@@ -4395,7 +5400,7 @@ describe('audit fail-fast regressions', () => {
       };
       proposerAccount.deltas.set(1, makeFundedDelta());
 
-      const proposed = await proposeAccountFrame(env, proposerAccount, 0);
+      const proposed = await proposeAccountFrame(env, proposerAccount, env.timestamp, 0);
       if (!proposed.success) throw new Error(`ZERO_JHEIGHT_PROPOSAL_FAILED:${proposed.error}`);
       expect(proposed.success).toBe(true);
       expect(proposed.accountInput?.proposal.frame.jHeight).toBe(0);
@@ -4428,6 +5433,20 @@ describe('audit fail-fast regressions', () => {
       expect(replayResult.response).toEqual(result.response);
 
       if (!result.response) throw new Error('ZERO_JHEIGHT_ACK_MISSING');
+      if (accountHeight === 1 && finalizedJHeight === 3 && revealBeforeHeight === 1) {
+        const tamperedResponse = structuredClone(result.response);
+        if (tamperedResponse.kind !== 'ack' && tamperedResponse.kind !== 'frame_ack') {
+          throw new Error('ZERO_JHEIGHT_ACK_KIND_INVALID');
+        }
+        tamperedResponse.ack.frameHash = `0x${'ff'.repeat(32)}`;
+        const tamperedResult = await applyAccountInput(
+          env,
+          structuredClone(proposerAccount),
+          tamperedResponse,
+        );
+        expect(tamperedResult.success).toBe(false);
+        expect(tamperedResult.error).toContain('ACK frameHash mismatch');
+      }
       const ackResult = await applyAccountInput(env, proposerAccount, result.response);
       expect(ackResult.success).toBe(true);
       expect(proposerAccount.currentHeight).toBe(accountHeight + 1);
@@ -4446,7 +5465,7 @@ describe('audit fail-fast regressions', () => {
         kind: 'ack',
         fromEntityId: hex20('11'),
         toEntityId: hex20('22'),
-        ack: { height: 8, frameHanko: `0x${'aa'.repeat(65)}` },
+        ack: { height: 8, frameHash: `0x${'08'.repeat(32)}`, frameHanko: `0x${'aa'.repeat(65)}` },
       },
     };
     accountMachine.hankoSignature = `0x${'bb'.repeat(65)}`;
@@ -4498,9 +5517,10 @@ describe('audit fail-fast regressions', () => {
       kind: 'frame_ack',
       fromEntityId: replica.entityId,
       toEntityId: counterpartyId,
-      ack: { height: 10, frameHanko: `0x${'12'.repeat(65)}` },
+      ack: { height: 10, frameHash: pendingFrame.prevFrameHash, frameHanko: `0x${'12'.repeat(65)}` },
       proposal: { frame: pendingFrame, frameHanko: `0x${'34'.repeat(65)}` },
     };
+    accountMachine.pendingAccountInputSignerId = counterpartySignerId;
     replica.state.accounts.set(counterpartyId, accountMachine);
 
     const outputs = await executeCrontab(env, replica, replica.state.crontabState!, {
@@ -4513,6 +5533,195 @@ describe('audit fail-fast regressions', () => {
     expect(outputs[0]?.entityTxs).toEqual([
       { type: 'accountInput', data: accountMachine.pendingAccountInput },
     ]);
+  });
+
+  test('crontab rolls back a pending HTLC exactly at its timelock boundary', async () => {
+    const env = createEmptyEnv('pending-htlc-exact-timelock');
+    env.quietRuntimeLogs = true;
+    const replica = makeReplicaMissingPrevFrameHash();
+    replica.state.timestamp = 100_000;
+    const counterpartyId = hex20('22');
+    const accountMachine = makeProposalAccount([], replica.entityId, counterpartyId);
+    accountMachine.pendingFrame = {
+      height: 11,
+      timestamp: 90_000,
+      jHeight: 0,
+      accountTxs: [{
+        type: 'htlc_lock',
+        data: {
+          lockId: `0x${'45'.repeat(32)}`,
+          hashlock: `0x${'46'.repeat(32)}`,
+          timelock: 100_000n,
+          revealBeforeHeight: 100,
+          amount: 1n,
+          tokenId: 1,
+        },
+      }],
+      prevFrameHash: `0x${'ab'.repeat(32)}`,
+      accountStateRoot: `0x${'00'.repeat(32)}`,
+      deltas: [],
+      stateHash: `0x${'cd'.repeat(32)}`,
+      byLeft: true,
+    };
+    replica.state.accounts.set(counterpartyId, accountMachine);
+    const warning = spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    try {
+      const outputs = await executeCrontab(env, replica, replica.state.crontabState!, {
+        manualBroadcastInInput: false,
+      });
+      const rollback = outputs.flatMap(output => output.entityTxs ?? [])
+        .find(tx => tx.type === 'rollbackTimedOutFrames');
+      expect(rollback).toEqual({
+        type: 'rollbackTimedOutFrames',
+        data: { timedOutAccounts: [{ counterpartyId, frameHeight: 11 }] },
+      });
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test('restored Account resolves its counterparty proposer from the certified frame Hanko without gossip', async () => {
+    const counterpartySeed = 'account-certified-counterparty-route';
+    const counterpartySignerId = deriveSignerAddressSync(counterpartySeed, '1').toLowerCase();
+    const counterpartyId = generateLazyEntityId([counterpartySignerId], 1n).toLowerCase();
+    const localEntityId = `0x${'24'.repeat(32)}`;
+    const account = makeProposalAccount([], localEntityId, counterpartyId);
+    const frameHash = `0x${'bc'.repeat(32)}`;
+    account.currentHeight = 1;
+    account.currentFrame = {
+      ...account.currentFrame,
+      height: 1,
+      stateHash: frameHash,
+      accountStateRoot: frameHash,
+    };
+    account.counterpartyFrameHanko = signedHankoForTest(
+      frameHash,
+      [deriveSignerKeySync(counterpartySeed, '1')],
+      [],
+      [[counterpartyId, [0n], [1n], 1n]],
+    );
+    const env = createEmptyEnv('account-certified-counterparty-route-local');
+
+    expect(() => resolveEntityProposerId(env, counterpartyId, 'legacy-gossip-route')).toThrow(
+      'SIGNER_RESOLUTION_FAILED',
+    );
+    expect(await resolveCertifiedAccountCounterpartyProposer(env, account, counterpartyId)).toBe(
+      counterpartySignerId,
+    );
+  });
+
+  test('crontab resends a restored pending frame from its durable exact signer route', async () => {
+    const env = createEmptyEnv('account-frame-restored-resend');
+    env.quietRuntimeLogs = true;
+    const replica = makeReplicaMissingPrevFrameHash();
+    replica.state.timestamp = 100_000;
+    const counterpartyId = `0x${'25'.repeat(32)}`;
+    const counterpartySignerId = hex20('26');
+    const pendingFrame = {
+      height: 11,
+      timestamp: replica.state.timestamp - ACCOUNT_PENDING_RESEND_AFTER_MS - 1,
+      jHeight: 0,
+      accountTxs: [{ type: 'add_delta' as const, data: { tokenId: 1 } }],
+      prevFrameHash: `0x${'ab'.repeat(32)}`,
+      accountStateRoot: `0x${'00'.repeat(32)}`,
+      deltas: [],
+      stateHash: `0x${'cd'.repeat(32)}`,
+      byLeft: true,
+    };
+    const accountMachine = makeProposalAccount([], replica.entityId, counterpartyId);
+    accountMachine.pendingFrame = pendingFrame;
+    accountMachine.pendingAccountInput = {
+      kind: 'frame',
+      fromEntityId: replica.entityId,
+      toEntityId: counterpartyId,
+      domain: structuredClone(accountMachine.domain),
+      proposal: { frame: pendingFrame, frameHanko: `0x${'34'.repeat(65)}` },
+    };
+    accountMachine.pendingAccountInputSignerId = counterpartySignerId;
+    const persistedAccount = projectAccountDoc(accountMachine);
+    const restoredAccount = hydrateAccountDocFromStorage(decodeValidatedBuffer(
+      encodeBuffer(persistedAccount),
+      validateStorageAccountDocValue,
+    ));
+    const corruptFrameBinding = projectAccountDoc(accountMachine);
+    if (!corruptFrameBinding.pendingAccountInput || corruptFrameBinding.pendingAccountInput.kind !== 'frame') {
+      throw new Error('TEST_PENDING_ACCOUNT_INPUT_REQUIRED');
+    }
+    corruptFrameBinding.pendingAccountInput.proposal.frame.stateHash = `0x${'ff'.repeat(32)}`;
+    expect(() => decodeValidatedBuffer(
+      encodeBuffer(corruptFrameBinding),
+      validateStorageAccountDocValue,
+    )).toThrow('pendingAccountInput proposal must exactly match pendingFrame');
+    const corruptEndpointBinding = projectAccountDoc(accountMachine);
+    if (!corruptEndpointBinding.pendingAccountInput) throw new Error('TEST_PENDING_ACCOUNT_INPUT_REQUIRED');
+    corruptEndpointBinding.pendingAccountInput.fromEntityId = `0x${'ee'.repeat(32)}`;
+    expect(() => decodeValidatedBuffer(
+      encodeBuffer(corruptEndpointBinding),
+      validateStorageAccountDocValue,
+    )).toThrow('pendingAccountInput endpoints must match proofHeader');
+    const corruptDomainBinding = projectAccountDoc(accountMachine);
+    if (!corruptDomainBinding.pendingAccountInput) throw new Error('TEST_PENDING_ACCOUNT_INPUT_REQUIRED');
+    corruptDomainBinding.pendingAccountInput.domain = {
+      ...corruptDomainBinding.pendingAccountInput.domain,
+      chainId: 1,
+    };
+    expect(() => decodeValidatedBuffer(
+      encodeBuffer(corruptDomainBinding),
+      validateStorageAccountDocValue,
+    )).toThrow('pendingAccountInput domain must match Account domain');
+    replica.state.accounts.set(counterpartyId, restoredAccount);
+    const rootBeforeRouteChange = computeCanonicalEntityConsensusStateHash(replica.state);
+    restoredAccount.pendingAccountInputSignerId = hex20('27');
+    expect(computeCanonicalEntityConsensusStateHash(replica.state)).toBe(rootBeforeRouteChange);
+    restoredAccount.pendingAccountInputSignerId = counterpartySignerId;
+
+    const outputs = await executeCrontab(env, replica, replica.state.crontabState!, {
+      manualBroadcastInInput: false,
+    });
+
+    expect(outputs).toHaveLength(1);
+    expect(outputs[0]?.entityId).toBe(counterpartyId);
+    expect(outputs[0]?.signerId).toBe(counterpartySignerId);
+    expect(outputs[0]?.entityTxs).toEqual([
+      { type: 'accountInput', data: restoredAccount.pendingAccountInput },
+    ]);
+  });
+
+  test('pending-frame liveness warning is evaluated from committed post-frame state', () => {
+    const replica = makeReplicaMissingPrevFrameHash();
+    replica.state.timestamp = 100_000;
+    const counterpartyId = hex20('24');
+    const account = makeProposalAccount([], replica.entityId, counterpartyId);
+    account.pendingFrame = {
+      height: 11,
+      timestamp: replica.state.timestamp - ACCOUNT_TIMEOUT_MS - 1,
+      jHeight: 0,
+      accountTxs: [{ type: 'add_delta', data: { tokenId: 1 } }],
+      prevFrameHash: `0x${'ab'.repeat(32)}`,
+      accountStateRoot: `0x${'00'.repeat(32)}`,
+      deltas: [],
+      stateHash: `0x${'cd'.repeat(32)}`,
+      byLeft: true,
+    };
+    replica.state.accounts.set(counterpartyId, account);
+    const previousState = structuredClone(replica.state);
+    const committedPending = structuredClone(replica.state);
+    committedPending.crontabState!.tasks.get('checkAccountTimeouts')!.lastRun = committedPending.timestamp;
+    const committedAcked = structuredClone(committedPending);
+    delete committedAcked.accounts.get(counterpartyId)!.pendingFrame;
+    const warning = spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    try {
+      emitCommittedPendingFrameWarnings(previousState, committedPending);
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining('PENDING-FRAME-STALE'));
+      warning.mockClear();
+
+      emitCommittedPendingFrameWarnings(previousState, committedAcked);
+      expect(warning).not.toHaveBeenCalled();
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   test('applyAccountInput re-acks duplicate committed frames when the original ACK was lost', async () => {
@@ -4538,6 +5747,7 @@ describe('audit fail-fast regressions', () => {
         toEntityId: right.entityId,
         ack: {
           height: 10,
+          frameHash: accountMachine.currentFrame.stateHash,
           frameHanko: `0x${'12'.repeat(65)}`,
           disputeSeal: {
             hanko: `0x${'13'.repeat(65)}`,
@@ -4569,7 +5779,7 @@ describe('audit fail-fast regressions', () => {
     expect(result.response).toEqual(accountMachine.lastOutboundFrameAck.response);
   });
 
-  test('applyAccountInput retains the ACK after a bundled proposal is lost', async () => {
+  test('applyAccountInput retains a bundled ACK without mutating live Entity replicas', async () => {
     const seed = 'account-frame-bundled-proposal-lost';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
@@ -4582,6 +5792,12 @@ describe('audit fail-fast regressions', () => {
     const right = left === first ? second : first;
     attachSigningReplica(env, left.entityId, left.signerId);
     attachSigningReplica(env, right.entityId, right.signerId);
+    const liveHubTasks = [left, right].map(({ entityId, signerId }) => {
+      const task = env.eReplicas.get(`${entityId}:${signerId}`)?.state.crontabState?.tasks.get('hubRebalance');
+      if (!task) throw new Error(`TEST_HUB_REBALANCE_TASK_MISSING:${entityId}`);
+      task.lastRun = 500;
+      return task;
+    });
 
     const proposer = makeProposalAccount([
       { type: 'add_delta', data: { tokenId: 1 } },
@@ -4591,7 +5807,7 @@ describe('audit fail-fast regressions', () => {
     ], left.entityId, right.entityId);
     receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
 
-    const proposed = await proposeAccountFrame(env, proposer);
+    const proposed = await proposeAccountFrame(env, proposer, env.timestamp);
     if (!proposed.success || !proposed.accountInput) {
       throw new Error(`BUNDLED_ACK_SOURCE_PROPOSAL_FAILED:${proposed.error ?? 'missing input'}`);
     }
@@ -4602,6 +5818,7 @@ describe('audit fail-fast regressions', () => {
     expect(receiver.currentHeight).toBe(1);
     expect(receiver.pendingFrame?.height).toBe(2);
     expect(receiver.lastOutboundFrameAck?.height).toBe(1);
+    expect(liveHubTasks.map(task => task.lastRun)).toEqual([500, 500]);
     if (!accepted.response || accepted.response.kind !== 'frame_ack') {
       throw new Error('BUNDLED_ACK_RESPONSE_MISSING');
     }
@@ -4634,6 +5851,7 @@ describe('audit fail-fast regressions', () => {
     expect(new Set(accepted.hashesToSign?.map(({ hash }) => hash)).size).toBe(4);
     const committedBundled = await applyAccountInput(env, proposer, accepted.response);
     expect(committedBundled.success).toBe(true);
+    expect(liveHubTasks.map(task => task.lastRun)).toEqual([500, 500]);
     expect(proposer.currentHeight).toBe(2);
     expect(proposer.counterpartyDisputeProofBodyHash).toBe(proposalSeal?.proofBodyHash);
     expect(proposer.counterpartyDisputeProofHanko).toBe(proposalSeal?.hanko);
@@ -4676,9 +5894,14 @@ describe('audit fail-fast regressions', () => {
       kind: 'frame_ack',
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
-      ack: { height: 10, frameHanko: `0x${'12'.repeat(65)}` },
+      ack: {
+        height: 10,
+        frameHash: accountMachine.currentFrame.stateHash,
+        frameHanko: `0x${'12'.repeat(65)}`,
+      },
       proposal: { frame: pendingFrame, frameHanko: `0x${'34'.repeat(65)}` },
     };
+    accountMachine.pendingAccountInputSignerId = right.signerId;
     delete accountMachine.lastOutboundFrameAck;
 
     const result = await applyAccountInput(env, accountMachine, {
@@ -4759,7 +5982,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'ack',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
-      ack: { height: 9, frameHanko: `0x${'12'.repeat(65)}` },
+      ack: { height: 9, frameHash: `0x${'09'.repeat(32)}`, frameHanko: `0x${'12'.repeat(65)}` },
     });
 
     expect(result.success).toBe(true);
@@ -4789,7 +6012,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'ack',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
-      ack: { height: 20, frameHanko: `0x${'12'.repeat(65)}` },
+      ack: { height: 20, frameHash: `0x${'20'.repeat(32)}`, frameHanko: `0x${'12'.repeat(65)}` },
     });
 
     expect(result.success).toBe(true);
@@ -4942,17 +6165,19 @@ describe('audit fail-fast regressions', () => {
     const lateTx: AccountTx = { type: 'add_delta', data: { tokenId: 2 } };
     const accountMachine = makeProposalAccount([firstTx], left.entityId, right.entityId);
     attachSigningReplica(env, accountMachine.proofHeader.fromEntity, left.signerId);
-    const signingReplica = Array.from(env.eReplicas.values()).find(replica => replica.entityId === left.entityId);
-    if (signingReplica?.state.config) delete signingReplica.state.config.jurisdiction;
+    const signingJurisdiction = Array.from(env.jReplicas.values()).find(replica => (
+      replica.chainId === accountMachine.domain.chainId
+      && replica.contracts?.depository?.toLowerCase() === accountMachine.domain.depositoryAddress.toLowerCase()
+    ));
+    if (!signingJurisdiction?.contracts) throw new Error('TEST_SIGNING_JURISDICTION_MISSING');
+    delete signingJurisdiction.contracts.deltaTransformer;
 
     queueMicrotask(() => {
       accountMachine.mempool.push(lateTx);
     });
 
-    const result = await proposeAccountFrame(env, accountMachine);
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('ACCOUNT_STATE_ROOT_BUILD_FAILED');
+    await expect(proposeAccountFrame(env, accountMachine, env.timestamp))
+      .rejects.toThrow('DISPUTE_PROOF_BUILD_FAILED: JURISDICTION_DURABLE_STACK_DELTA_TRANSFORMER_MISSING');
     expect(accountMachine.pendingFrame).toBeUndefined();
     expect(accountMachine.mempool).toHaveLength(2);
     expect(accountMachine.mempool).toEqual([firstTx, lateTx]);
@@ -4993,7 +6218,13 @@ describe('audit fail-fast regressions', () => {
     const counterpartyId = `0x${'34'.repeat(32)}`;
     const state = makeEntityState(entityId);
     const account = makeProposalAccount([], entityId, counterpartyId);
-    const finalProofbodyHash = `0x${'57'.repeat(32)}`;
+    const finalProofbody: ProofBodyStruct = {
+      watchSeed: account.watchSeed,
+      offdeltas: [50n],
+      tokenIds: [1n],
+      transformers: [],
+    };
+    const finalProofbodyHash = hashProofBodyStruct(finalProofbody);
     account.deltas.set(1, {
       tokenId: 1,
       collateral: 100n,
@@ -5007,17 +6238,12 @@ describe('audit fail-fast regressions', () => {
       rightHold: 13n,
     });
     account.disputeProofBodiesByHash = {
-      [finalProofbodyHash]: {
-        watchSeed: account.watchSeed,
-        offdeltas: [50n],
-        tokenIds: [1n],
-        transformers: [],
-      },
+      [finalProofbodyHash]: finalProofbody,
     };
     account.activeDispute = {
       startedByLeft: true,
       disputeTimeout: 123,
-      initialProofbodyHash: `0x${'56'.repeat(32)}`,
+      initialProofbodyHash: finalProofbodyHash,
       initialNonce: 7,
       finalizeQueued: true,
     } as AccountMachine['activeDispute'];
@@ -5029,15 +6255,12 @@ describe('audit fail-fast regressions', () => {
           counterentity: counterpartyId,
           initialNonce: 7,
           finalNonce: 7,
-          initialProofbodyHash: `0x${'56'.repeat(32)}`,
-          finalProofbody: makeEmptyProofBody(),
-          leftArguments: '0x',
-              rightArguments: '0x',
-              starterInitialArguments: '0x',
-              starterIncrementedArguments: '0x',
+          initialProofbodyHash: finalProofbodyHash,
+          finalProofbody,
+          starterArguments: '0x',
+          otherArguments: '0x',
           sig: '0x',
           startedByLeft: true,
-          disputeUntilBlock: 123,
           cooperative: false,
         }],
       },
@@ -5053,15 +6276,12 @@ describe('audit fail-fast regressions', () => {
             counterentity: counterpartyId,
             initialNonce: 7,
             finalNonce: 7,
-            initialProofbodyHash: `0x${'56'.repeat(32)}`,
-            finalProofbody: makeEmptyProofBody(),
-            leftArguments: '0x',
-              rightArguments: '0x',
-              starterInitialArguments: '0x',
-              starterIncrementedArguments: '0x',
+            initialProofbodyHash: finalProofbodyHash,
+            finalProofbody,
+            starterArguments: '0x',
+            otherArguments: '0x',
             sig: '0x',
             startedByLeft: true,
-            disputeUntilBlock: 123,
             cooperative: false,
           }],
         },
@@ -5082,7 +6302,7 @@ describe('audit fail-fast regressions', () => {
           sender: entityId,
           counterentity: counterpartyId,
           initialNonce: 7,
-          initialProofbodyHash: `0x${'56'.repeat(32)}`,
+          initialProofbodyHash: finalProofbodyHash,
         finalProofbodyHash,
       },
     };
@@ -5091,7 +6311,7 @@ describe('audit fail-fast regressions', () => {
       counterentity: counterpartyId,
       initialNonce: '7',
       finalNonce: '7',
-      initialProofbodyHash: `0x${'56'.repeat(32)}`,
+      initialProofbodyHash: finalProofbodyHash,
       finalProofbodyHash,
       leftArguments: '0x',
       rightArguments: '0x',
@@ -5133,7 +6353,7 @@ describe('audit fail-fast regressions', () => {
       type: 'HankoBatchProcessed',
       data: {
         entityId,
-        hankoHash: `0x${'55'.repeat(32)}`,
+        batchHash: `0x${'78'.repeat(32)}`,
         nonce: 7,
         success: false,
       },
@@ -5158,12 +6378,152 @@ describe('audit fail-fast regressions', () => {
     expect(failed.newState.jBatchState?.batch.disputeFinalizations.length).toBe(0);
   });
 
+  test('DisputeFinalized rejects missing signed final body before mutating account state', async () => {
+    const finalProofbody: ProofBodyStruct = {
+      watchSeed: `0x${'f1'.repeat(32)}`,
+      offdeltas: [50n],
+      tokenIds: [1n],
+      transformers: [],
+    };
+    const fixture = makeDisputeFinalizedFixture('dispute-finalized-body-missing', finalProofbody, false);
+    fixture.account.deltas.set(1, { ...createDefaultDelta(1), collateral: 100n, offdelta: 50n });
+    const stateBefore = safeStringify(fixture.state);
+
+    await expect(applyDisputeFinalizedFixture(fixture)).rejects.toThrow(
+      'J_EVENT_DISPUTE_FINAL_PROOFBODY_MISSING',
+    );
+    expect(safeStringify(fixture.state)).toBe(stateBefore);
+  });
+
+  test('DisputeFinalized rejects a stored body whose hash does not match its key', async () => {
+    const finalProofbody: ProofBodyStruct = {
+      watchSeed: `0x${'f1'.repeat(32)}`,
+      offdeltas: [50n],
+      tokenIds: [1n],
+      transformers: [],
+    };
+    const fixture = makeDisputeFinalizedFixture('dispute-finalized-body-hash-mismatch', finalProofbody, true);
+    fixture.account.disputeProofBodiesByHash![fixture.finalProofbodyHash] = {
+      ...finalProofbody,
+      offdeltas: [51n],
+    };
+
+    await expect(applyDisputeFinalizedFixture(fixture)).rejects.toThrow(
+      'J_EVENT_DISPUTE_FINAL_PROOFBODY_HASH_MISMATCH',
+    );
+  });
+
+  test('DisputeFinalized rejects malformed token/offdelta shape instead of clearing every delta', async () => {
+    const malformedProofbody: ProofBodyStruct = {
+      watchSeed: `0x${'f1'.repeat(32)}`,
+      offdeltas: [],
+      tokenIds: [1n],
+      transformers: [],
+    };
+    const fixture = makeDisputeFinalizedFixture('dispute-finalized-body-shape', malformedProofbody, true);
+    fixture.account.deltas.set(1, { ...createDefaultDelta(1), collateral: 100n, offdelta: 50n });
+
+    await expect(applyDisputeFinalizedFixture(fixture)).rejects.toThrow(
+      'J_DISPUTE_PROOFBODY_LENGTH_MISMATCH',
+    );
+  });
+
+  test('DisputeFinalized clears only exact proof tokens and retires the consumed evidence epoch', async () => {
+    const finalProofbody: ProofBodyStruct = {
+      watchSeed: `0x${'f1'.repeat(32)}`,
+      offdeltas: [50n],
+      tokenIds: [1n],
+      transformers: [],
+    };
+    const fixture = makeDisputeFinalizedFixture('dispute-finalized-exact-token-cleanup', finalProofbody, true);
+    const staleHash = `0x${'ab'.repeat(32)}`;
+    fixture.account.disputeProofBodiesByHash![staleHash] = makeEmptyProofBody();
+    fixture.account.disputeProofNoncesByHash = { [fixture.finalProofbodyHash]: 7, [staleHash]: 6 };
+    fixture.account.disputeArgumentSnapshotsByHash = {
+      [fixture.finalProofbodyHash]: captureDisputeArgumentSnapshot(
+        fixture.account,
+        fixture.finalProofbodyHash,
+        7,
+        finalProofbody,
+      ),
+      [staleHash]: captureDisputeArgumentSnapshot(fixture.account, staleHash, 6, makeEmptyProofBody()),
+    };
+    fixture.account.deltas.set(1, { ...createDefaultDelta(1), collateral: 100n, offdelta: 50n });
+    fixture.account.deltas.set(2, { ...createDefaultDelta(2), collateral: 200n, offdelta: 75n });
+
+    const finalized = await applyDisputeFinalizedFixture(fixture);
+    const account = finalized.newState.accounts.get(fixture.counterpartyId)!;
+    expect(account.deltas.get(1)).toMatchObject({ collateral: 0n, ondelta: 0n, offdelta: 0n });
+    expect(account.deltas.get(2)).toMatchObject({ collateral: 200n, offdelta: 75n });
+    expect(account.disputeProofBodiesByHash).toBeUndefined();
+    expect(account.disputeProofNoncesByHash).toBeUndefined();
+    expect(account.disputeArgumentSnapshotsByHash).toBeUndefined();
+    expect(projectAccountDoc(account).disputeProofBodiesByHash).toBeUndefined();
+    expect(projectAccountDoc(account).disputeProofNoncesByHash).toBeUndefined();
+    expect(projectAccountDoc(account).disputeArgumentSnapshotsByHash).toBeUndefined();
+
+    const nextProofbody: ProofBodyStruct = { ...finalProofbody, offdeltas: [75n], tokenIds: [2n] };
+    const nextHash = hashProofBodyStruct(nextProofbody);
+    account.disputeProofBodiesByHash = { [nextHash]: nextProofbody };
+    account.disputeProofNoncesByHash = { [nextHash]: 8 };
+    storeDisputeArgumentSnapshot(
+      account,
+      captureDisputeArgumentSnapshot(account, nextHash, 8, nextProofbody),
+    );
+    const persisted = hydrateAccountDocFromStorage(structuredClone(projectAccountDoc(account)));
+    expect(Object.keys(persisted.disputeProofBodiesByHash ?? {})).toEqual([nextHash]);
+    expect(Object.keys(persisted.disputeProofNoncesByHash ?? {})).toEqual([nextHash]);
+    expect(Object.keys(persisted.disputeArgumentSnapshotsByHash ?? {})).toEqual([nextHash]);
+  });
+
+  test('DisputeFinalized invalidates a competing settlement workspace and its deferred retry', async () => {
+    const finalProofbody: ProofBodyStruct = {
+      watchSeed: `0x${'f2'.repeat(32)}`,
+      offdeltas: [50n],
+      tokenIds: [1n],
+      transformers: [],
+    };
+    const fixture = makeDisputeFinalizedFixture('dispute-finalized-settlement-race', finalProofbody, true);
+    fixture.account.deltas.set(1, {
+      ...createDefaultDelta(1),
+      collateral: 100n,
+      offdelta: 50n,
+      leftCreditLimit: 100n,
+      rightCreditLimit: 100n,
+    });
+    const upsertTx: AccountTx = {
+      type: 'settle_transition',
+      data: {
+        kind: 'upsert',
+        version: 1,
+        ops: [{ type: 'r2r', tokenId: 1, amount: 4n }],
+        executorIsLeft: true,
+      },
+    };
+    expect((await applyAccountTx(fixture.account, upsertTx, true, 1_000)).success).toBe(true);
+    fixture.account.settlementWorkspace!.leftHanko = '0x1234';
+    fixture.account.settlementWorkspace!.nonceAtSign = 8;
+    fixture.account.settlementWorkspace!.settlementHash = `0x${'81'.repeat(32)}`;
+    fixture.account.mempool.push(structuredClone(upsertTx));
+    fixture.state.deferredAccountProposals = new Map([
+      [fixture.counterpartyId, fixture.account.settlementWorkspace!.workspaceHash],
+    ]);
+    expect(fixture.account.deltas.get(1)?.leftHold).toBe(4n);
+
+    const finalized = await applyDisputeFinalizedFixture(fixture);
+    const account = finalized.newState.accounts.get(fixture.counterpartyId)!;
+    expect(account.settlementWorkspace).toBeUndefined();
+    expect(account.deltas.get(1)?.leftHold).toBe(0n);
+    expect(account.mempool.some((tx) => tx.type === 'settle_transition')).toBe(false);
+    expect(finalized.newState.deferredAccountProposals?.has(fixture.counterpartyId)).toBe(false);
+  });
+
   test('disputeFinalize waits for on-chain DisputeStarted before drafting a finalization', async () => {
     const starterId = `0x${'41'.repeat(32)}`;
     const finalizerId = `0x${'42'.repeat(32)}`;
     const state = makeEntityState(finalizerId);
     const account = makeProposalAccount([], starterId, finalizerId);
-    const initialProof = buildAccountProofBody(account);
+    const initialProof = buildAccountProofBody(account, '');
     account.disputeProofBodiesByHash = {
       [initialProof.proofBodyHash]: initialProof.proofBodyStruct,
     };
@@ -5212,17 +6572,18 @@ describe('audit fail-fast regressions', () => {
       },
     } as EntityState['config'];
     const account = makeProposalAccount([], starterId, finalizerId);
+    account.domain = { chainId: 31337, depositoryAddress };
     account.proofHeader = { fromEntity: starterId, toEntity: finalizerId, nextProofNonce: 2 };
     account.deltas.set(1, { ...createDefaultDelta(1), offdelta: 50n });
 
-    const initialProof = buildAccountProofBody(account);
+    const initialProof = buildAccountProofBody(account, '');
     storeDisputeArgumentSnapshot(
       account,
       captureDisputeArgumentSnapshot(account, initialProof.proofBodyHash, 1, initialProof.proofBodyStruct),
     );
 
     account.deltas.set(1, { ...createDefaultDelta(1), offdelta: 75n });
-    const counterProof = buildAccountProofBody(account);
+    const counterProof = buildAccountProofBody(account, '');
     storeDisputeArgumentSnapshot(
       account,
       captureDisputeArgumentSnapshot(account, counterProof.proofBodyHash, 2, counterProof.proofBodyStruct),
@@ -5256,6 +6617,25 @@ describe('audit fail-fast regressions', () => {
     const env = createEmptyEnv('counter-finalize-runtime');
     env.quietRuntimeLogs = true;
     env.lastJBlock = 1;
+    env.jReplicas.set('Testnet', {
+      name: 'Testnet',
+      blockNumber: 1n,
+      stateRoot: new Uint8Array(32),
+      mempool: [],
+      blockDelayMs: 0,
+      lastBlockTimestamp: 0,
+      position: { x: 0, y: 0, z: 0 },
+      depositoryAddress,
+      entityProviderAddress: hex20('2'),
+      contracts: {
+        account: hex20('3'),
+        depository: depositoryAddress,
+        entityProvider: hex20('2'),
+        deltaTransformer: hex20('4'),
+      },
+      rpcs: ['http://localhost:8545'],
+      chainId: 31337,
+    });
 
     const { newState } = await handleDisputeFinalize(
       state,
@@ -5274,10 +6654,8 @@ describe('audit fail-fast regressions', () => {
     expect(finalization?.initialProofbodyHash).toBe(initialProof.proofBodyHash);
     expect(finalization?.finalProofbody.offdeltas).toEqual([75n]);
     expect(finalization?.finalProofbody.tokenIds).toEqual([1n]);
-    expect(finalization?.leftArguments).toBe('0x2222');
-    expect(finalization?.rightArguments).toBe('0x');
-    expect(finalization?.starterInitialArguments).toBe('0x1111');
-    expect(finalization?.starterIncrementedArguments).toBe('0x2222');
+    expect(finalization?.starterArguments).toBe('0x2222');
+    expect(finalization?.otherArguments).toBe('0x');
     expect(newState.accounts.get(starterId)?.activeDispute?.finalizeQueued).toBe(true);
   });
 
@@ -5305,28 +6683,48 @@ describe('audit fail-fast regressions', () => {
     const account = makeProposalAccount([], user.entityId, hub.entityId);
     account.jNonce = 1;
     account.proofHeader = { fromEntity: user.entityId, toEntity: hub.entityId, nextProofNonce: 50 };
+    account.deltas.set(1, { ...createDefaultDelta(1), collateral: 10n });
 
-    const result = await processSettleAction(
-      account,
-      {
-        type: 'propose',
-        ops: [{ type: 'c2r', tokenId: 1, amount: 1n }],
+    const transition: AccountTx = {
+      type: 'settle_transition',
+      data: {
+        kind: 'upsert',
         version: 1,
+        ops: [{ type: 'c2r', tokenId: 1, amount: 1n }],
+        executorIsLeft: true,
+      },
+    };
+    const applied = await applyAccountTx(account, transition, false, 1_000);
+    expect(applied.success).toBe(true);
+    const result = await processCommittedSettlementTransitionFollowup(
+      account,
+      transition,
+      {
+        ...account.currentFrame,
+        height: 1,
+        timestamp: 1_000,
+        accountTxs: [transition],
+        byLeft: false,
       },
       hub.entityId,
-      user.entityId,
-      1_000,
-      env,
       userState,
+      env,
     );
 
-    expect(result.success).toBe(true);
-    expect(result.autoApproveOutput?.entityTxs?.[0]?.data?.settleAction?.nonceAtSign).toBe(51);
-    expect(account.settlementWorkspace?.nonceAtSign).toBe(51);
-    expect(account.settlementWorkspace?.postSettlementDisputeProof?.nonce).toBe(52);
-    expect(account.disputeProofNoncesByHash?.[
-      account.settlementWorkspace!.postSettlementDisputeProof!.proofBodyHash
-    ]).toBe(52);
+    expect(result.outputs).toEqual([]);
+    expect(result.mempoolOps).toEqual([]);
+    expect(userState.deferredAccountProposals?.get(hub.entityId))
+      .toBe(account.settlementWorkspace?.workspaceHash);
+    expect(buildSettlementSealDraft(account, userState, hub.entityId, env).tx).toMatchObject({
+      type: 'settle_transition',
+      data: {
+        kind: 'seal',
+        settlementNonce: 50,
+        postProof: { nonce: 51 },
+      },
+    });
+    expect(account.settlementWorkspace?.nonceAtSign).toBeUndefined();
+    expect(account.settlementWorkspace?.postSettlementDisputeProof).toBeUndefined();
   });
 
   test('settlement finalization activates post-settlement dispute hash atomically', () => {
@@ -5337,7 +6735,7 @@ describe('audit fail-fast regressions', () => {
     account.proofHeader = { fromEntity: leftId, toEntity: rightId, nextProofNonce: 2 };
     account.deltas.set(1, { ...createDefaultDelta(1), offdelta: 50n });
 
-    const postProof = buildAccountProofBody(account);
+    const postProof = buildAccountProofBody(account, '');
     const postDisputeHash = createDisputeProofHashWithNonce(
       account,
       postProof.proofBodyHash,
@@ -5346,6 +6744,7 @@ describe('audit fail-fast regressions', () => {
     );
     account.counterpartyDisputeHash = `0x${'aa'.repeat(32)}`;
     account.settlementWorkspace = {
+      workspaceHash: '',
       ops: [],
       lastModifiedByLeft: true,
       status: 'submitted',
@@ -5364,6 +6763,10 @@ describe('audit fail-fast regressions', () => {
         nonce: 2,
       },
     };
+    account.settlementWorkspace.workspaceHash = createSettlementWorkspaceHash(
+      account,
+      account.settlementWorkspace,
+    );
 
     const settledEvent: JurisdictionEvent = {
       type: 'AccountSettled',
@@ -5378,20 +6781,8 @@ describe('audit fail-fast regressions', () => {
         nonce: 1,
       },
     };
-    account.leftJObservations = [{
-      jHeight: 7,
-      jBlockHash: `0x${'77'.repeat(32)}`,
-      events: [settledEvent],
-      observedAt: 10,
-    }];
-    account.rightJObservations = [{
-      jHeight: 7,
-      jBlockHash: `0x${'77'.repeat(32)}`,
-      events: [settledEvent],
-      observedAt: 11,
-    }];
-
-    tryFinalizeAccountJEvents(account, rightId, { timestamp: 100 });
+    applyFinalizedAccountJEvents(account, rightId, [settledEvent], '');
+    account.lastFinalizedJHeight = 7;
 
     expect(account.settlementWorkspace).toBeUndefined();
     expect(account.currentDisputeHash).toBe(postDisputeHash);
@@ -5455,13 +6846,10 @@ describe('audit fail-fast regressions', () => {
             finalNonce: 3,
             initialProofbodyHash: `0x${'11'.repeat(32)}`,
             finalProofbody: makeEmptyProofBody(),
-            leftArguments: '0x',
-              rightArguments: '0x',
-              starterInitialArguments: '0x',
-              starterIncrementedArguments: '0x',
+            starterArguments: '0x',
+            otherArguments: '0x',
             sig: '0x',
             startedByLeft: true,
-            disputeUntilBlock: 123,
             cooperative: false,
           }],
         },
@@ -5520,9 +6908,9 @@ describe('audit fail-fast regressions', () => {
       batch: createEmptyBatch(),
       jurisdiction: null,
       lastBroadcast: 0,
-      broadcastCount: 0,
-      failedAttempts: 1,
-      status: 'failed',
+      broadcastCount: 1,
+      failedAttempts: 0,
+      status: 'sent',
       sentBatch: {
         batch: {
           ...createEmptyBatch(),
@@ -5538,19 +6926,48 @@ describe('audit fail-fast regressions', () => {
         firstSubmittedAt: 1000,
         lastSubmittedAt: 1000,
         submitAttempts: 1,
-        terminalFailure: {
-          message: 'J_SUBMIT_FATAL: staticCall revert: E3()',
-          failedAt: 1001,
-        },
       },
       entityNonce: 8,
     } as EntityState['jBatchState'];
-
-    await expect(handleJRebroadcast(
+    const signerId = state.config.validators[0]!;
+    const failure = {
+      message: 'J_SUBMIT_FATAL: staticCall revert: E3()',
+      failedAt: 1001,
+      failure: {
+        category: 'Contradiction' as const,
+        code: 'J_SUBMIT_FATAL',
+        message: 'J_SUBMIT_FATAL: staticCall revert: E3()',
+        retryable: false,
+        fatal: true,
+      },
+    };
+    const replica: EntityReplica = {
+      entityId,
+      signerId,
       state,
-      { type: 'j_rebroadcast', data: {} },
+      mempool: [],
+      isProposer: true,
+      jSubmitState: {
+        jurisdictionName: 'Testnet',
+        batchHash: state.jBatchState.sentBatch!.batchHash,
+        entityNonce: state.jBatchState.sentBatch!.entityNonce,
+        batchGeneration: state.jBatchState.broadcastCount,
+        submitAttempts: 1,
+        lastSubmittedAt: 1000,
+        lastFailure: failure,
+        terminalFailure: failure,
+        lastResultAttemptId: `0x${'33'.repeat(32)}`,
+        lastResultAt: 1001,
+        lastResultOutcome: 'terminalFailure',
+        lastResultFingerprint: 'terminal-result-fingerprint',
+      },
+    };
+
+    await expect(applyEntityInput(
       createEmptyEnv('j-rebroadcast-terminal-failure'),
-    )).rejects.toThrow(/Cannot rebroadcast failed sentBatch/);
+      replica,
+      { entityId, signerId, entityTxs: [{ type: 'j_rebroadcast', data: {} }] },
+    )).rejects.toThrow(/Cannot rebroadcast terminal J-submit/);
   });
 
   test('HankoBatchProcessed(false) drops stale dispute finalize when on-chain nonce already moved even before DisputeFinalized arrives', async () => {
@@ -5583,13 +7000,10 @@ describe('audit fail-fast regressions', () => {
             finalNonce: 7,
             initialProofbodyHash: `0x${'94'.repeat(32)}`,
             finalProofbody: makeEmptyProofBody(),
-            leftArguments: '0x',
-              rightArguments: '0x',
-              starterInitialArguments: '0x',
-              starterIncrementedArguments: '0x',
+            starterArguments: '0x',
+            otherArguments: '0x',
             sig: '0x',
             startedByLeft: true,
-            disputeUntilBlock: 123,
             cooperative: false,
           }],
         },
@@ -5608,7 +7022,7 @@ describe('audit fail-fast regressions', () => {
       type: 'HankoBatchProcessed',
       data: {
         entityId,
-        hankoHash: `0x${'98'.repeat(32)}`,
+        batchHash: `0x${'95'.repeat(32)}`,
         nonce: 7,
         success: false,
       },
@@ -5736,6 +7150,8 @@ describe('audit fail-fast regressions', () => {
 
   test('cross-j source fill ack routes book removal to canonical sibling owner', async () => {
     const env = createEmptyEnv('cross-book-owner-removal');
+    const sourceSigner = deriveSignerAddressSync('cross-book-owner-removal', 'source');
+    const targetSigner = deriveSignerAddressSync('cross-book-owner-removal', 'target');
     const sourceUser = `0x${'10'.repeat(32)}`;
     const sourceHub = `0x${'20'.repeat(32)}`;
     const targetHub = `0x${'30'.repeat(32)}`;
@@ -5744,13 +7160,15 @@ describe('audit fail-fast regressions', () => {
     const namespacedOrderId = `${sourceUser}:${orderId}`;
 
     const sourceState = makeEntityState(sourceHub);
-    sourceState.config = makeSingleSignerConfigFor('source-signer');
+    sourceState.config = makeSingleSignerConfigFor(sourceSigner);
     const route: CrossJurisdictionSwapRoute = {
       orderId,
       bookOwnerEntityId: targetHub,
       venueId: pairId,
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
+      targetHubSignerId: targetSigner,
+      bookHubSignerId: targetSigner,
       source: {
         jurisdiction: 'stack:2:0xdep',
         entityId: sourceUser,
@@ -5789,7 +7207,7 @@ describe('audit fail-fast regressions', () => {
       qtyLots: 1n,
     }).state;
     const targetState = makeEntityState(targetHub);
-    targetState.config = makeSingleSignerConfigFor('target-signer');
+    targetState.config = makeSingleSignerConfigFor(targetSigner);
     targetState.orderbookExt = {
       books: new Map([[pairId, book]]),
       orderPairs: new Map([[namespacedOrderId, [pairId]]]),
@@ -5803,21 +7221,13 @@ describe('audit fail-fast regressions', () => {
         supportedPairs: [pairId],
       },
     } satisfies OrderbookExtState;
-    env.eReplicas.set(`${sourceHub}:source-signer`, {
+    env.eReplicas.set(`${sourceHub}:${sourceSigner}`, {
       entityId: sourceHub,
-      signerId: 'source-signer',
+      signerId: sourceSigner,
       mempool: [],
       isProposer: true,
       state: sourceState,
     } satisfies EntityReplica);
-    env.eReplicas.set(`${targetHub}:target-signer`, {
-      entityId: targetHub,
-      signerId: 'target-signer',
-      mempool: [],
-      isProposer: true,
-      state: targetState,
-    } satisfies EntityReplica);
-
     const outputs: EntityInput[] = [];
     const ackTx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }> = {
       type: 'cross_swap_fill_ack',
@@ -5842,7 +7252,7 @@ describe('audit fail-fast regressions', () => {
 
     expect(applied).toBe(true);
     const removal = outputs.find(output => output.entityId === targetHub && output.entityTxs?.[0]?.type === 'removeCrossJurisdictionBookOrder');
-    expect(removal?.signerId).toBe('target-signer');
+    expect(removal?.signerId).toBe(targetSigner);
     expect(removal?.entityTxs?.[0]).toMatchObject({
       type: 'removeCrossJurisdictionBookOrder',
       data: {
@@ -5875,6 +7285,7 @@ describe('audit fail-fast regressions', () => {
     const sourceHubSigner = sourceHubIdentity.signerId;
     const bookOwnerSigner = bookOwnerIdentity.signerId;
     const collisionSigner = '3';
+    attachSigningReplica(env, sourceHub, sourceHubSigner);
     const makeCanonicalAccount = (selfId: string, counterpartyId: string): AccountMachine => {
       const [leftEntity, rightEntity] = selfId.toLowerCase() < counterpartyId.toLowerCase()
         ? [selfId, counterpartyId]
@@ -6126,8 +7537,7 @@ describe('audit fail-fast regressions', () => {
       state: bookOwnerState,
     } satisfies EntityReplica);
 
-    makerAdmission.route.sourceHubSignerId = 'stale-source-hub-signer';
-    await expect(applyEntityFrame(env, bookOwnerState, [
+    const takerAdmissionTxs: EntityTx[] = [
       {
         type: 'admitCrossJurisdictionBookOrder',
         data: { route: takerRoute, receipt: receipt(takerRoute, 'source'), reason: 'source_pull_committed' },
@@ -6136,25 +7546,20 @@ describe('audit fail-fast regressions', () => {
         type: 'admitCrossJurisdictionBookOrder',
         data: { route: takerRoute, receipt: receipt(takerRoute, 'target'), reason: 'target_pull_committed' },
       },
-    ])).rejects.toThrow(/CROSS_J_FILL_ACK_SOURCE_HUB_SIGNER_MISMATCH/);
-    makerAdmission.route.sourceHubSignerId = sourceHubSigner;
+    ];
+    makerAdmission.route.sourceHubSignerId = 'committed-source-hub-route';
 
-    const matched = await applyEntityFrame(env, bookOwnerState, [
-      {
-        type: 'admitCrossJurisdictionBookOrder',
-        data: { route: takerRoute, receipt: receipt(takerRoute, 'source'), reason: 'source_pull_committed' },
-      },
-      {
-        type: 'admitCrossJurisdictionBookOrder',
-        data: { route: takerRoute, receipt: receipt(takerRoute, 'target'), reason: 'target_pull_committed' },
-      },
-    ]);
+    const matched = await applyEntityFrame(
+      env,
+      bookOwnerState,
+      await buildQuorumAuthorizedFrameTxs(env, bookOwnerState, takerAdmissionTxs),
+    );
 
     const sourceNotice = matched.outputs.find(output =>
       output.entityId.toLowerCase() === sourceHub.toLowerCase() &&
       output.entityTxs?.[0]?.type === 'crossJurisdictionFillNotice'
     );
-    expect(sourceNotice?.signerId).toBe(sourceHubSigner);
+    expect(sourceNotice?.signerId).toBe('committed-source-hub-route');
     expect(sourceNotice?.entityTxs?.[0]).toMatchObject({
       type: 'crossJurisdictionFillNotice',
       data: {
@@ -6168,7 +7573,11 @@ describe('audit fail-fast regressions', () => {
     );
     expect(collisionNotice).toBeUndefined();
 
-    const sourceApplied = await applyEntityFrame(env, sourceState, sourceNotice!.entityTxs!);
+    const sourceApplied = await applyEntityFrame(
+      env,
+      sourceState,
+      await buildQuorumAuthorizedFrameTxs(env, sourceState, sourceNotice!.entityTxs!),
+    );
     const sourceAccount = sourceApplied.newState.accounts.get(remoteMaker);
     const queuedAck = [
       ...(sourceAccount?.mempool ?? []),
@@ -6223,7 +7632,7 @@ describe('audit fail-fast regressions', () => {
     }, { runtimeSeed: 'cross-local-fill-ack-admission-collision', sourceDisputeDelayMs: 5_000, now: env.timestamp });
     const restingRoute = { ...route, status: 'resting' as const, updatedAt: env.timestamp };
     const sourceState = makeEntityState(sourceHub);
-    sourceState.config = makeSingleSignerConfigFor('source-hub-signer');
+    installSingleSignerBoard(env, sourceState);
     sourceState.crossJurisdictionSwaps = new Map([[orderId, restingRoute]]);
     const account = makeProposalAccount([], sourceHub, user);
     account.swapOffers.set(orderId, {
@@ -6275,7 +7684,7 @@ describe('audit fail-fast regressions', () => {
     conflictingAdmission.status = 'admitted';
     conflictingAdmission.admittedAt = env.timestamp;
 
-    const applied = await applyEntityFrame(env, sourceState, [{
+    const fillNoticeTxs: EntityTx[] = [{
       type: 'crossJurisdictionFillNotice',
       data: {
         orderId,
@@ -6287,7 +7696,12 @@ describe('audit fail-fast regressions', () => {
         cumulativeFillRatio: 65_535,
         pairId,
       },
-    }]);
+    }];
+    const applied = await applyEntityFrame(
+      env,
+      sourceState,
+      await buildQuorumAuthorizedFrameTxs(env, sourceState, fillNoticeTxs),
+    );
 
     const wrongHubNotice = applied.outputs.find(output =>
       output.entityId.toLowerCase() === wrongHub.toLowerCase() &&
@@ -6345,7 +7759,7 @@ describe('audit fail-fast regressions', () => {
     route.status = 'resting';
 
     const sourceState = makeEntityState(sourceHub);
-    sourceState.config = makeSingleSignerConfigFor('source-hub-signer');
+    installSingleSignerBoard(env, sourceState);
     sourceState.crossJurisdictionSwaps = new Map([[orderId, route]]);
     sourceState.accounts.set(sourceUser, makeProposalAccount([], sourceHub, sourceUser));
 
@@ -6371,7 +7785,7 @@ describe('audit fail-fast regressions', () => {
         reason: 'test-cap',
       });
     }
-    const capped = await applyEntityFrame(env, cappedState, [
+    const fillNoticeTxs: EntityTx[] = [
       {
         type: 'crossJurisdictionFillNotice',
         data: {
@@ -6385,28 +7799,22 @@ describe('audit fail-fast regressions', () => {
           pairId,
         },
       },
-    ]);
-    const cappedPending = capped.newState.pendingCrossJurisdictionFillAcks;
-    expect(cappedPending?.size).toBe(MAX_PENDING_CROSS_J_FILL_ACKS);
-    expect(Array.from(cappedPending?.values() ?? []).some((entry) =>
+    ];
+    await expect(applyEntityFrame(
+      env,
+      cappedState,
+      await buildQuorumAuthorizedFrameTxs(env, cappedState, fillNoticeTxs),
+    )).rejects.toThrow('CROSS_J_FILL_ACK_PENDING_CAPACITY');
+    expect(cappedState.pendingCrossJurisdictionFillAcks.size).toBe(MAX_PENDING_CROSS_J_FILL_ACKS);
+    expect(Array.from(cappedState.pendingCrossJurisdictionFillAcks.values()).some((entry) =>
       entry.tx.data.offerId === orderId && entry.tx.data.fillSeq === 1
-    )).toBe(true);
+    )).toBe(false);
 
-    const first = await applyEntityFrame(env, sourceState, [
-      {
-        type: 'crossJurisdictionFillNotice',
-        data: {
-          orderId,
-          fillSeq: 1,
-          incrementalSourceAmount: 30n * lot,
-          incrementalTargetAmount: 75_000n * lot,
-          cumulativeSourceAmount: 30n * lot,
-          cumulativeTargetAmount: 75_000n * lot,
-          cumulativeFillRatio: 65_535,
-          pairId,
-        },
-      },
-    ]);
+    const first = await applyEntityFrame(
+      env,
+      sourceState,
+      await buildQuorumAuthorizedFrameTxs(env, sourceState, fillNoticeTxs),
+    );
 
     expect(first.newState.pendingCrossJurisdictionFillAcks?.size).toBe(1);
     const pendingAccount = first.newState.accounts.get(sourceUser);
@@ -6417,12 +7825,14 @@ describe('audit fail-fast regressions', () => {
     expect(prematurelyQueued).toBeUndefined();
 
     const expiredState = structuredClone(first.newState) as typeof first.newState;
-    const expiredEnv = createEmptyEnv('cross-fill-notice-pending-source-offer-expired');
-    expiredEnv.timestamp = env.timestamp + CROSS_J_PENDING_FILL_ACK_TTL_MS + 1;
+    const originalTimestamp = env.timestamp;
+    env.timestamp = originalTimestamp + CROSS_J_PENDING_FILL_ACK_TTL_MS + 1;
+    const expiredEnv = env;
     expiredState.timestamp = expiredEnv.timestamp;
     const preserved = await applyEntityFrame(expiredEnv, expiredState, []);
     const preservedAck = preserved.newState.pendingCrossJurisdictionFillAcks?.values().next().value;
     expect(preservedAck?.ttlExpiredAt).toBe(expiredEnv.timestamp);
+    env.timestamp = originalTimestamp;
 
     const stateWithOffer = first.newState;
     const sourceAccount = stateWithOffer.accounts.get(sourceUser)!;
@@ -6509,20 +7919,48 @@ describe('audit fail-fast regressions', () => {
     expect(findCrossJurisdictionBookAdmissionForAck(state, targetHub, orderId, routeHash)).toBe(admission);
   });
 
-  test('target-bonus fill fails closed when target hub route is unavailable', async () => {
+  test('committed cross-j signer makes output bytes independent of local topology', () => {
+    const empty = createEmptyEnv('cross-output-topology-empty');
+    const populated = createEmptyEnv('cross-output-topology-populated');
+    const target = `0x${'ab'.repeat(32)}`;
+    const committedSigner = `0x${'cd'.repeat(20)}`;
+    const staleSigner = `0x${'ef'.repeat(20)}`;
+    const txs: EntityTx[] = [{ type: 'j_broadcast', data: {} }];
+    populated.eReplicas.set('stale-topology', {
+      entityId: target.toUpperCase(),
+      signerId: staleSigner,
+      mempool: [],
+      isProposer: true,
+      state: {
+        ...makeEntityState(target.toUpperCase()),
+        config: makeSingleSignerConfigFor(staleSigner),
+      },
+    } satisfies EntityReplica);
+
+    expect(buildCrossJurisdictionEntityOutput(empty, target, txs, committedSigner)).toEqual(
+      buildCrossJurisdictionEntityOutput(populated, target, txs, committedSigner),
+    );
+  });
+
+  test('target-bonus fill routes from committed signer without a local target replica', async () => {
     const env = createEmptyEnv('cross-target-bonus-unroutable');
     env.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const hubId = `0x${'20'.repeat(32)}`;
-    const sourceMaker = `0x${'31'.repeat(32)}`;
-    const sourceTaker = `0x${'32'.repeat(32)}`;
+    const sourceMakerIdentity = registerLazySigner('cross-target-bonus-unroutable', '2');
+    const sourceTakerIdentity = registerLazySigner('cross-target-bonus-unroutable', '3');
+    const sourceMaker = sourceMakerIdentity.entityId;
+    const sourceTaker = sourceTakerIdentity.entityId;
     const makerTargetUser = `0x${'33'.repeat(32)}`;
     const missingTargetHub = `0x${'34'.repeat(32)}`;
     const takerTargetUser = `0x${'35'.repeat(32)}`;
     const pairId = 'cross:base:1/tron:1';
-    const lot = SWAP_LOT_SCALE;
+    const lot = getSwapLotScale(1);
     const hubState = makeEntityState(hubId);
-    hubState.config = makeSingleSignerConfigFor('hub-signer');
+    const hubSigner = installSingleSignerBoard(env, hubState);
+    attachSigningReplica(env, hubId, hubSigner);
+    attachSigningReplica(env, sourceMaker, sourceMakerIdentity.signerId);
+    attachSigningReplica(env, sourceTaker, sourceTakerIdentity.signerId);
     const makeHubAccount = (counterpartyId: string): AccountMachine => {
       const [left, right] = hubId.toLowerCase() < counterpartyId.toLowerCase()
         ? [hubId, counterpartyId]
@@ -6547,6 +7985,11 @@ describe('audit fail-fast regressions', () => {
         hubEntityId: hubId,
         bookOwnerEntityId: hubId,
         venueId: pairId,
+        sourceSignerId: `${orderId}-source-signer`,
+        sourceHubSignerId: hubSigner,
+        targetHubSignerId: 'committed-target-hub-signer',
+        targetSignerId: `${orderId}-target-signer`,
+        bookHubSignerId: hubSigner,
         source: {
           jurisdiction: sourceJurisdiction,
           entityId: sourceEntityId,
@@ -6709,7 +8152,7 @@ describe('audit fail-fast regressions', () => {
     });
     hubState.accounts.set(sourceTaker, takerAccount);
 
-    await expect(applyEntityFrame(env, hubState, [
+    const takerAdmissionTxs: EntityTx[] = [
       {
         type: 'admitCrossJurisdictionBookOrder',
         data: { route: takerRoute, receipt: sourceReceipt(takerRoute), reason: 'source_pull_committed' },
@@ -6718,7 +8161,30 @@ describe('audit fail-fast regressions', () => {
         type: 'admitCrossJurisdictionBookOrder',
         data: { route: takerRoute, receipt: targetReceipt(takerRoute), reason: 'target_pull_committed' },
       },
-    ])).rejects.toThrow('CROSS_J_TARGET_BONUS_UNROUTABLE');
+    ];
+    const frameTxs = await buildQuorumAuthorizedFrameTxs(env, hubState, takerAdmissionTxs);
+    expect(hubState.certifiedBoardState).toBeDefined();
+    env.eReplicas.set(`${hubId}:${hubSigner}`, {
+      entityId: hubId,
+      signerId: hubSigner,
+      mempool: [],
+      isProposer: true,
+      state: hubState,
+    } satisfies EntityReplica);
+    const applied = await applyEntityFrame(env, hubState, frameTxs);
+
+    const bonus = applied.outputs.find(output => (
+      output.entityId === missingTargetHub &&
+      output.entityTxs?.[0]?.type === 'directPayment'
+    ));
+    expect(bonus?.signerId).toBe('committed-target-hub-signer');
+    expect(bonus?.entityTxs?.[0]).toMatchObject({
+      type: 'directPayment',
+      data: {
+        targetEntityId: takerTargetUser,
+        route: [missingTargetHub, takerTargetUser],
+      },
+    });
 
     expect(getBookOrder(book, `${sourceMaker}:${makerRoute.orderId}`)).not.toBeNull();
   });
@@ -6776,6 +8242,77 @@ describe('audit fail-fast regressions', () => {
     const nextBook = result.newState.orderbookExt?.books.get(pairId);
     expect(nextBook ? getBookOrder(nextBook, namespacedOrderId) : null).toBeNull();
     expect(result.newState.messages.some((msg) => msg.includes('Dispute removed 1 local orderbook row'))).toBe(true);
+  });
+
+  test('disputeStart routes remote cross-j removal from the committed book signer', async () => {
+    const env = createEmptyEnv('dispute-start-cross-j-remote-book');
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const sourceHub = `0x${'92'.repeat(32)}`;
+    const sourceUser = `0x${'93'.repeat(32)}`;
+    const targetHub = `0x${'94'.repeat(32)}`;
+    const targetUser = `0x${'95'.repeat(32)}`;
+    const offerId = 'dispute-cross-j-remote-book';
+    const state = makeEntityState(sourceHub);
+    state.config = makeSingleSignerConfigFor('source-hub-signer');
+    const account = makeProposalAccount([], sourceHub, sourceUser);
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId: offerId,
+      makerEntityId: sourceUser,
+      hubEntityId: targetHub,
+      bookOwnerEntityId: targetHub,
+      sourceSignerId: 'source-user-signer',
+      sourceHubSignerId: 'source-hub-signer',
+      targetHubSignerId: 'committed-book-owner-signer',
+      targetSignerId: 'target-user-signer',
+      bookHubSignerId: 'committed-book-owner-signer',
+      source: {
+        jurisdiction: 'stack:source:depository',
+        entityId: sourceUser,
+        counterpartyEntityId: sourceHub,
+        tokenId: 1,
+        amount: 1_000n,
+      },
+      target: {
+        jurisdiction: 'stack:target:depository',
+        entityId: targetHub,
+        counterpartyEntityId: targetUser,
+        tokenId: 2,
+        amount: 2_000n,
+      },
+      status: 'resting',
+      createdAt: env.timestamp,
+      updatedAt: env.timestamp,
+      expiresAt: env.timestamp + 60_000,
+    }, { runtimeSeed: 'dispute-start-cross-j-remote-book', sourceDisputeDelayMs: 5_000, now: env.timestamp });
+    account.swapOffers.set(offerId, {
+      offerId,
+      giveTokenId: 1,
+      giveAmount: 1_000n,
+      wantTokenId: 2,
+      wantAmount: 2_000n,
+      makerIsLeft: false,
+      minFillRatio: 0,
+      createdHeight: 1,
+      crossJurisdiction: route,
+    });
+    state.accounts.set(sourceUser, account);
+
+    const result = await handleDisputeStart(
+      state,
+      { type: 'disputeStart', data: { counterpartyEntityId: sourceUser } },
+      env,
+    );
+
+    expect(result.outputs).toHaveLength(1);
+    expect(result.outputs[0]).toMatchObject({
+      entityId: targetHub,
+      signerId: 'committed-book-owner-signer',
+      entityTxs: [{
+        type: 'removeCrossJurisdictionBookOrder',
+        data: { orderId: offerId, sourceEntityId: sourceUser, reason: 'account_dispute_start' },
+      }],
+    });
   });
 
   test('prepareDispute freezes account and removes orderbook rows without queuing on-chain disputeStart', async () => {
@@ -6836,13 +8373,21 @@ describe('audit fail-fast regressions', () => {
     expect(result.newState.jBatchState?.batch.disputeStarts ?? []).toEqual([]);
   });
 
-  test('disputeStart waits when HTLC route can still reveal future dispute evidence', async () => {
+  test('disputeStart freezes optimistic traffic and treats an unknown HTLC secret as optional evidence', async () => {
     const env = createEmptyEnv('prepare-dispute-awaiting-secret');
     const hubId = `0x${'94'.repeat(32)}`;
     const userId = `0x${'95'.repeat(32)}`;
     const hubState = makeEntityState(hubId);
     hubState.config = makeSingleSignerConfigFor('hub-signer');
-    hubState.accounts.set(userId, makeProposalAccount([], hubId, userId));
+    const account = makeProposalAccount([{
+      type: 'set_credit_limit',
+      data: { tokenId: 1, amount: 5n },
+    } as AccountTx], hubId, userId);
+    setSyntheticPendingAccountProposal(account, [{
+      type: 'set_credit_limit',
+      data: { tokenId: 1, amount: 7n },
+    } as AccountTx], hubState.timestamp);
+    hubState.accounts.set(userId, account);
     const hashlock = `0x${'44'.repeat(32)}`;
     hubState.htlcRoutes.set(hashlock, {
       hashlock,
@@ -6872,8 +8417,12 @@ describe('audit fail-fast regressions', () => {
       env,
     );
 
+    const nextAccount = result.newState.accounts.get(userId)!;
     expect(result.newState.jBatchState?.batch.disputeStarts ?? []).toEqual([]);
-    expect(result.newState.messages.some((msg) => msg.includes('htlcAwaitingSecret:1'))).toBe(true);
+    expect(result.newState.messages.some((msg) => msg.includes('htlcAwaitingSecret'))).toBe(false);
+    expect(result.newState.messages.some((msg) => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
+    expect(nextAccount.pendingFrame).toBeUndefined();
+    expect(nextAccount.mempool).toEqual([]);
   });
 
   test('disputeStart ignores stale HTLC routes whose live lock is already gone', async () => {
@@ -6906,85 +8455,218 @@ describe('audit fail-fast regressions', () => {
   });
 
   test('committed HTLC forward enforces announced PPM fee, not only base fee', async () => {
-    const env = createEmptyEnv('htlc-forward-ppm-fee');
-    const hubId = `0x${'a0'.repeat(32)}`;
+    const seed = 'htlc-forward-ppm-fee';
+    const env = createEmptyEnv(seed);
+    const signerId = deriveSignerAddressSync(seed, 'hub');
+    const signerKey = deriveSignerKeySync(seed, 'hub');
+    const nextHopSignerId = deriveSignerAddressSync(seed, 'next-hop');
+    const nextHopSignerKey = deriveSignerKeySync(seed, 'next-hop');
+    registerSignerKey(env, signerId, signerKey);
+    registerSignerKey(env, nextHopSignerId, nextHopSignerKey);
+    const hubId = generateLazyEntityId([signerId], 1n).toLowerCase();
     const payerId = `0x${'a1'.repeat(32)}`;
-    const nextHopId = `0x${'a2'.repeat(32)}`;
+    const nextHopId = generateLazyEntityId([nextHopSignerId], 1n).toLowerCase();
     const hubState = makeEntityState(hubId);
-    hubState.config = makeSingleSignerConfigFor('hub-signer');
-    hubState.accounts.set(nextHopId, makeProposalAccount([], hubId, nextHopId));
-    env.gossip = {
-      getProfiles: () => [{
-        entityId: hubId,
-        metadata: {
-          routingFeePPM: 100_000,
-          baseFee: 10n,
-        },
-        accounts: [{
-          counterpartyId: nextHopId,
-          tokenCapacities: new Map([[1, { outCapacity: 1_000_000n, inCapacity: 0n }]]),
-        }],
-      }],
-    } as Env['gossip'];
+    hubState.config = makeSingleSignerConfigFor(signerId);
+    hubState.hubRebalanceConfig = {
+      matchingStrategy: 'amount',
+      policyVersion: 1,
+      routingFeePPM: 100_000,
+      baseFee: 10n,
+    };
+    hubState.accounts.set(
+      nextHopId,
+      isLeftEntity(hubId, nextHopId)
+        ? makeProposalAccount([], hubId, nextHopId)
+        : makeProposalAccount([], nextHopId, hubId),
+    );
     const crypto = new NobleCryptoProvider();
     const keyPair = x25519.keygen();
     hubState.entityEncPubKey = hexBytes(keyPair.publicKey);
     hubState.entityEncPrivKey = hexBytes(keyPair.secretKey);
+    const signerPublicKey = new ethers.SigningKey(hexBytes(signerKey)).publicKey.toLowerCase();
+    const attestationBody = {
+      version: 'xln:validator-encryption-key:v1' as const,
+      entityId: hubId,
+      signerId,
+      signer: signerId,
+      publicKey: signerPublicKey,
+      weight: 1,
+      encryptionPublicKey: hubState.entityEncPubKey,
+    };
+    const manifest = requireCompleteValidatorEncryptionManifest({
+      entityId: hubId,
+      threshold: 1,
+      validators: [{
+        signerId,
+        signer: signerId,
+        publicKey: signerPublicKey,
+        weight: 1,
+      }],
+    }, [{
+      ...attestationBody,
+      signature: signAccountFrame(
+        env,
+        signerId,
+        computeValidatorEncryptionAttestationDigest(attestationBody),
+      ),
+    }]);
+    hubState.profileEncryptionManifest = structuredClone(manifest);
     const lockId = 'ppm-fee-lock';
-    const hashlock = `0x${'a3'.repeat(32)}`;
-    const encryptedLayer = await crypto.encrypt(JSON.stringify({
-      nextHop: nextHopId,
-      innerEnvelope: 'opaque-next-hop-envelope',
-      forwardAmount: '999990',
-    }), hubState.entityEncPubKey);
-    const accountMachine = makeProposalAccount([], payerId, hubId);
+    const finalSecret = `0x${'a4'.repeat(32)}`;
+    const hashlock = hashHtlcSecret(finalSecret);
+    const timelock = BigInt(hubState.timestamp + 120_000);
+    const contextHash = computeHtlcEnvelopeContextHash({
+      entityId: hubId,
+      lockId,
+      hashlock,
+      tokenId: 1,
+      amount: 1_000_000n,
+      timelock,
+      revealBeforeHeight: 100,
+    });
+    const routingStateHash = ethers.keccak256(ethers.toUtf8Bytes('ppm-fee-routing-state'));
+    const profileHash = computeEntityProfileCertificationHash(manifest.hash, routingStateHash);
+    const [profileHanko] = await signEntityHashes(env, hubId, signerId, [profileHash], hubState);
+    if (!profileHanko) throw new Error('TEST_PROFILE_HANKO_MISSING');
+    const profileCertification = { profileHash, routingStateHash, hanko: profileHanko };
+
+    const nextHopState = makeEntityState(nextHopId);
+    nextHopState.config = makeSingleSignerConfigFor(nextHopSignerId);
+    const nextHopKeyPair = x25519.keygen();
+    const nextHopEncryptionPublicKey = hexBytes(nextHopKeyPair.publicKey);
+    const nextHopSignerPublicKey = new ethers.SigningKey(hexBytes(nextHopSignerKey)).publicKey.toLowerCase();
+    const nextHopAttestationBody = {
+      version: 'xln:validator-encryption-key:v1' as const,
+      entityId: nextHopId,
+      signerId: nextHopSignerId,
+      signer: nextHopSignerId,
+      publicKey: nextHopSignerPublicKey,
+      weight: 1,
+      encryptionPublicKey: nextHopEncryptionPublicKey,
+    };
+    const nextHopManifest = requireCompleteValidatorEncryptionManifest({
+      entityId: nextHopId,
+      threshold: 1,
+      validators: [{
+        signerId: nextHopSignerId,
+        signer: nextHopSignerId,
+        publicKey: nextHopSignerPublicKey,
+        weight: 1,
+      }],
+    }, [{
+      ...nextHopAttestationBody,
+      signature: signAccountFrame(
+        env,
+        nextHopSignerId,
+        computeValidatorEncryptionAttestationDigest(nextHopAttestationBody),
+      ),
+    }]);
+    const nextHopRoutingStateHash = ethers.keccak256(ethers.toUtf8Bytes('next-hop-routing-state'));
+    const nextHopProfileHash = computeEntityProfileCertificationHash(
+      nextHopManifest.hash,
+      nextHopRoutingStateHash,
+    );
+    const [nextHopProfileHanko] = await signEntityHashes(
+      env,
+      nextHopId,
+      nextHopSignerId,
+      [nextHopProfileHash],
+      nextHopState,
+    );
+    if (!nextHopProfileHanko) throw new Error('TEST_NEXT_HOP_PROFILE_HANKO_MISSING');
+    const forwardAmount = 999_990n;
+    const forwardTimelock = timelock - BigInt(HTLC.MIN_TIMELOCK_DELTA_MS);
+    const forwardRevealBeforeHeight = 100 - HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS;
+    const innerContextHash = computeHtlcEnvelopeContextHash({
+      entityId: nextHopId,
+      lockId: `${lockId}-fwd`,
+      hashlock,
+      tokenId: 1,
+      amount: forwardAmount,
+      timelock: forwardTimelock,
+      revealBeforeHeight: forwardRevealBeforeHeight,
+    });
+    const secretOffer = await encryptBytesForValidatorManifest(
+      encodeHtlcSecretOffer({ secret: finalSecret }),
+      manifest,
+      profileCertification,
+      computeHtlcSecretOfferContextHash({
+        entityId: nextHopId,
+        payerEntityId: hubId,
+        beneficiaryEntityId: nextHopId,
+        lockId: `${lockId}-fwd`,
+        hashlock,
+        tokenId: 1,
+        amount: forwardAmount,
+        timelock: forwardTimelock,
+        revealBeforeHeight: forwardRevealBeforeHeight,
+      }),
+      crypto,
+      signerId,
+    );
+    const innerEnvelope = await encryptBytesForValidatorManifest(
+      encodeOnionLayer({ finalRecipient: true, secretOffer }),
+      nextHopManifest,
+      {
+        profileHash: nextHopProfileHash,
+        routingStateHash: nextHopRoutingStateHash,
+        hanko: nextHopProfileHanko,
+      },
+      innerContextHash,
+      crypto,
+      nextHopSignerId,
+    );
+    const encryptedLayer = await encryptBytesForValidatorManifest(
+      encodeOnionLayer({
+        nextHop: nextHopId,
+        innerEnvelope,
+        forwardAmount: forwardAmount.toString(),
+      }),
+      manifest,
+      profileCertification,
+      contextHash,
+      crypto,
+      signerId,
+    );
+    const accountMachine = isLeftEntity(payerId, hubId)
+      ? makeProposalAccount([], payerId, hubId)
+      : makeProposalAccount([], hubId, payerId);
     accountMachine.locks.set(lockId, {
       lockId,
       hashlock,
-      timelock: BigInt(hubState.timestamp + 120_000),
+      timelock,
       revealBeforeHeight: 100,
       amount: 1_000_000n,
       tokenId: 1,
       senderIsLeft: true,
       createdHeight: 1,
       createdTimestamp: hubState.timestamp,
-      envelope: {
-        nextHop: hubId,
-        innerEnvelope: encryptedLayer,
-      },
+      envelope: encryptedLayer,
     });
-    const mempoolOps: Array<{ accountId: string; tx: AccountTx }> = [];
+    hubState.accounts.set(payerId, accountMachine);
+    const lock = accountMachine.locks.get(lockId);
+    if (!lock) throw new Error('TEST_HTLC_LOCK_MISSING');
+    const advanceTx = buildHtlcOnionAdvanceTx(
+      hubState,
+      payerId,
+      lock,
+      encryptedLayer,
+      { nextHop: nextHopId, innerEnvelope, forwardAmount: forwardAmount.toString() },
+    );
+    const result = await handleHtlcOnionAdvance(env, hubState, advanceTx);
 
-    await applyCommittedHtlcLockFollowup({
-      env,
-      state: hubState,
-      newState: hubState,
-      input: {
-        fromEntityId: payerId,
-        toEntityId: hubId,
-      } as AccountInput,
-      accountMachine,
-      outputs: [],
-      mempoolOps,
-    }, {
-      type: 'htlc_lock',
-      data: {
-        lockId,
-        hashlock,
-        timelock: BigInt(hubState.timestamp + 120_000),
-        revealBeforeHeight: 100,
-        amount: 1_000_000n,
-        tokenId: 1,
-      },
-    }, true);
-
-    expect(mempoolOps).toHaveLength(1);
-    expect(mempoolOps[0]?.accountId).toBe(payerId);
-    expect(mempoolOps[0]?.tx).toEqual({
+    expect(result.mempoolOps).toHaveLength(1);
+    expect(result.mempoolOps[0]?.accountId).toBe(payerId);
+    expect(result.mempoolOps[0]?.tx).toEqual({
       type: 'htlc_resolve',
       data: { lockId, outcome: 'error', reason: 'fee_below_ppm' },
     });
-    expect(hubState.htlcRoutes.has(hashlock)).toBe(false);
+    expect(result.newState.htlcRoutes.has(hashlock)).toBe(false);
+
+    const replay = await handleHtlcOnionAdvance(env, structuredClone(hubState), advanceTx);
+    expect(replay.mempoolOps).toEqual(result.mempoolOps);
+    expect(replay.newState.htlcRoutes).toEqual(result.newState.htlcRoutes);
   });
 
   test('disputeStart folds evidence tx mempool into dispute arguments instead of blocking', async () => {
@@ -7161,10 +8843,10 @@ describe('audit fail-fast regressions', () => {
     const delta = createDefaultDelta(route.sourcePull!.tokenId);
     delta.rightHold = BigInt(route.sourcePull!.amount);
     account.deltas.set(route.sourcePull!.tokenId, delta);
-    const proposed = await proposeAccountFrame(env, account);
+    const proposed = await proposeAccountFrame(env, account, env.timestamp);
     expect(proposed.success).toBe(true);
     const pendingHeight = proposed.accountInput!.proposal.frame.height;
-    delete account.pendingAccountInput;
+    account.pendingAccountInputSignerId = 'fixture-counterparty-signer';
     hubState.accounts.set(userId, account);
 
     const result = await handleDisputeStart(
@@ -7182,17 +8864,37 @@ describe('audit fail-fast regressions', () => {
     expect(result.newState.messages.some((msg) => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
   });
 
-  test('disputeFinalize waits when incoming dispute can still collect HTLC evidence', async () => {
+  test('disputeFinalize queues the exact proof despite unknown HTLC evidence and stale optimistic traffic', async () => {
     const env = createEmptyEnv('counter-dispute-awaiting-secret');
     const hubId = `0x${'98'.repeat(32)}`;
     const userId = `0x${'99'.repeat(32)}`;
     const hubState = makeEntityState(hubId);
     hubState.config = makeSingleSignerConfigFor('hub-signer');
+    attachSigningReplica(env, hubId, 'hub-signer');
     const account = makeProposalAccount([], hubId, userId);
+    account.deltas.set(1, createDefaultDelta(1));
+    account.locks.set('counter-await-secret-lock', {
+      lockId: 'counter-await-secret-lock',
+      hashlock: `0x${'55'.repeat(32)}`,
+      timelock: BigInt(hubState.timestamp + 60_000),
+      amount: 10n,
+      tokenId: 1,
+      senderIsLeft: false,
+      createdHeight: 1,
+      createdTimestamp: hubState.timestamp,
+    });
+    const initialProof = buildAccountProofBody(account, hex20('99'));
+    storeDisputeArgumentSnapshot(
+      account,
+      captureDisputeArgumentSnapshot(account, initialProof.proofBodyHash, 1, initialProof.proofBodyStruct),
+    );
+    account.disputeProofBodiesByHash = {
+      [initialProof.proofBodyHash]: initialProof.proofBodyStruct,
+    };
     account.status = 'disputed';
     account.activeDispute = {
       startedByLeft: false,
-      initialProofbodyHash: `0x${'aa'.repeat(32)}`,
+      initialProofbodyHash: initialProof.proofBodyHash,
       initialNonce: 1,
       disputeTimeout: 100,
       jNonce: 1,
@@ -7201,6 +8903,14 @@ describe('audit fail-fast regressions', () => {
       observedOnChain: true,
       finalizeQueued: false,
     };
+    setSyntheticPendingAccountProposal(account, [{
+      type: 'set_credit_limit',
+      data: { tokenId: 1, amount: 9n },
+    } as AccountTx], hubState.timestamp);
+    account.mempool = [{
+      type: 'set_credit_limit',
+      data: { tokenId: 1, amount: 11n },
+    } as AccountTx];
     hubState.accounts.set(userId, account);
     const hashlock = `0x${'55'.repeat(32)}`;
     hubState.htlcRoutes.set(hashlock, {
@@ -7231,7 +8941,15 @@ describe('audit fail-fast regressions', () => {
       env,
     );
 
-    expect(result.newState.jBatchState?.batch.disputeFinalizations ?? []).toEqual([]);
-    expect(result.newState.messages.some((msg) => msg.includes('htlcAwaitingSecret:1'))).toBe(true);
+    const finalization = result.newState.jBatchState?.batch.disputeFinalizations[0];
+    const nextAccount = result.newState.accounts.get(userId)!;
+    expect(finalization).toBeDefined();
+    expect(finalization?.initialProofbodyHash).toBe(initialProof.proofBodyHash);
+    expect(finalization?.finalProofbody).toEqual(initialProof.proofBodyStruct);
+    expect(finalization?.starterArguments).toBe('0x');
+    expect(finalization?.otherArguments).toBe('0x');
+    expect(result.newState.messages.some((msg) => msg.includes('htlcAwaitingSecret'))).toBe(false);
+    expect(nextAccount.pendingFrame).toBeUndefined();
+    expect(nextAccount.mempool).toEqual([]);
   });
 });

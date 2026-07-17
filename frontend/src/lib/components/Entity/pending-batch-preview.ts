@@ -7,6 +7,7 @@ import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
 import type { EntityReplica } from '$lib/types/ui';
 import { amountToUsd } from '$lib/utils/assetPricing';
 import { getEntityDisplayName } from '$lib/utils/entityNaming';
+import { requireTokenDecimals } from './token-metadata';
 
 type GossipSource = Parameters<typeof getEntityDisplayName>[1]['source'];
 
@@ -298,10 +299,11 @@ export function buildOpenOutgoingDebtTotals(options: OpenDebtTotalsOptions): {
       count += 1;
       tokenTotal += BigInt(debt.remainingAmount || 0);
       const tokenInfo = options.activeXlnFunctions?.getTokenInfo?.(tokenId);
+      if (!tokenInfo) throw new Error(`TOKEN_METADATA_READER_UNAVAILABLE:token:${tokenId}`);
       usdTotal += amountToUsd(
         BigInt(debt.remainingAmount || 0),
-        Number(tokenInfo?.decimals ?? 18),
-        String(tokenInfo?.symbol || `Token #${tokenId}`),
+        requireTokenDecimals(tokenInfo.decimals, `token:${tokenId}`),
+        String(tokenInfo.symbol),
       );
     }
     if (tokenTotal > 0n) byToken.set(tokenId, tokenTotal);

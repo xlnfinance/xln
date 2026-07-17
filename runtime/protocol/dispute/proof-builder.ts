@@ -29,6 +29,7 @@ import { PROOF_BODY_ABI, BATCH_ABI } from './proof-body.ts';
 import { sortTransformerEntries } from '../transformer-ordering.ts';
 import { normalizeAccountWatchSeed } from '../../account/watch-seed.ts';
 import { HASHLADDER_MAX_FILL_RATIO } from '../htlc/hash-ladder.ts';
+import { assertDisputeProofBodyWithinContractLimits } from '../../jurisdiction/batch.ts';
 import {
   encodeDisputeProofHankoPayload,
   hashCooperativeDisputeProofHankoPayload,
@@ -46,6 +47,14 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 const ABI_CODER = ethers.AbiCoder.defaultAbiCoder();
 const PROOF_BODY_PARAM = ethers.ParamType.from(PROOF_BODY_ABI);
 const DELTA_BATCH_PARAM = ethers.ParamType.from(BATCH_ABI);
+const INT256_MIN = -(1n << 255n);
+const INT256_MAX = (1n << 255n) - 1n;
+
+export const encodeProofBodyStruct = (proofBody: ProofBodyStruct): string =>
+  ABI_CODER.encode([PROOF_BODY_PARAM], [proofBody]);
+
+export const hashProofBodyStruct = (proofBody: ProofBodyStruct): string =>
+  ethers.keccak256(encodeProofBodyStruct(proofBody));
 
 const isUsableContractAddress = (address: string | null | undefined): address is string =>
   typeof address === 'string' && ethers.isAddress(address) && address !== ZERO_ADDRESS;
@@ -55,6 +64,29 @@ const requireContractAddress = (label: string, address: string | null | undefine
     throw new Error(`MISSING_${label.toUpperCase()}_ADDRESS`);
   }
   return address;
+};
+
+const assertFinalDeltaCanFinalize = (
+  tokenId: number,
+  ondelta: bigint,
+  offdelta: bigint,
+): void => {
+  if (
+    ondelta < INT256_MIN || ondelta > INT256_MAX ||
+    offdelta < INT256_MIN || offdelta > INT256_MAX
+  ) {
+    throw new Error(`DISPUTE_PROOFBODY_FINAL_DELTA_OVERFLOW:token=${tokenId}`);
+  }
+  const finalDelta = ondelta + offdelta;
+  if (finalDelta < INT256_MIN || finalDelta > INT256_MAX) {
+    throw new Error(`DISPUTE_PROOFBODY_FINAL_DELTA_OVERFLOW:token=${tokenId}`);
+  }
+  // Depository._applyAccountDelta negates negative final deltas. Solidity
+  // cannot negate int256.min, so a validator must never sign a ProofBody that
+  // is structurally valid yet impossible to finalize on-chain.
+  if (finalDelta === INT256_MIN) {
+    throw new Error(`DISPUTE_PROOFBODY_FINAL_DELTA_INT256_MIN:token=${tokenId}`);
+  }
 };
 
 const addDeltaAllowance = (
@@ -92,24 +124,6 @@ function buildTransformerAllowances(batch: RuntimeBatch): RuntimeAllowance[] {
     }));
 }
 
-// Set by BrowserVM / RPC adapter after real deployment or real connect.
-let deltaTransformerAddress = '';
-
-/**
- * Set the DeltaTransformer contract address
- * Called by BrowserVM after deploying the contract
- */
-export function setDeltaTransformerAddress(address: string): void {
-  deltaTransformerAddress = isUsableContractAddress(address) ? address : '';
-}
-
-/**
- * Get the current DeltaTransformer contract address
- */
-export function getDeltaTransformerAddress(): string {
-  return deltaTransformerAddress;
-}
-
 /**
  * Build ABI-encoded ProofBody from AccountMachine state
  *
@@ -117,9 +131,16 @@ export function getDeltaTransformerAddress(): string {
  * The resulting proofBodyHash is signed during bilateral consensus.
  *
  * @param accountMachine - Current bilateral account state
+ * @param deltaTransformerAddress - Exact address resolved by the caller from
+ *   this Account's trusted (chainId, Depository) jurisdiction replica. Keeping
+ *   it explicit prevents one runtime or chain from changing another runtime's
+ *   signed ProofBody through process-global configuration.
  * @returns ProofBodyResult with runtime, struct, encoded, and hash forms
  */
-export function buildAccountProofBody(accountMachine: AccountMachine): ProofBodyResult {
+export function buildAccountProofBody(
+  accountMachine: AccountMachine,
+  deltaTransformerAddress: string,
+): ProofBodyResult {
   const watchSeed = normalizeAccountWatchSeed(accountMachine.watchSeed, 'PROOF_BODY');
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -133,6 +154,7 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
   const offdeltas: bigint[] = [];
 
   for (const [tokenId, delta] of sortedDeltas) {
+    assertFinalDeltaCanFinalize(tokenId, delta.ondelta ?? 0n, delta.offdelta);
     tokenIds.push(tokenId);
     // proofbody.offdeltas = ONLY the off-chain component
     // Contract adds on-chain ondelta separately from storage
@@ -267,15 +289,17 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
 
   const proofBodyStruct = runtimeToProofBodyStruct(runtimeProofBody);
 
+  // This is the last boundary before proofBodyHash enters a validator's Hanko
+  // map. J-submit validation is necessarily later and cannot rescue a body
+  // that an honest board has already certified but the contract will reject.
+  assertDisputeProofBodyWithinContractLimits(proofBodyStruct, 'account.signing');
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Step 5: ABI-encode and hash
   // ═══════════════════════════════════════════════════════════════════════════
 
   // Encode ProofBody struct
-  const encodedProofBody = ABI_CODER.encode(
-    [PROOF_BODY_PARAM],
-    [proofBodyStruct]
-  );
+  const encodedProofBody = encodeProofBodyStruct(proofBodyStruct);
 
   // Hash for signing
   const proofBodyHash = ethers.keccak256(encodedProofBody);
@@ -340,41 +364,6 @@ function runtimeToProofBodyStruct(runtime: RuntimeProofBody): ProofBodyStruct {
     offdeltas: runtime.offdeltas,
     tokenIds: runtime.tokenIds.map(id => BigInt(id)),
     transformers,
-  };
-}
-
-/**
- * Build InitialDisputeProof for submitting to Account.sol
- *
- * @param accountMachine - Current bilateral account state
- * @param counterpartySignature - Counterparty's signature on proofBodyHash
- * @param starterInitialArguments - starter-side arguments for this proof body
- * @param starterIncrementedArguments - starter-side arguments for one known newer proof body
- */
-export function buildInitialDisputeProof(
-  accountMachine: AccountMachine,
-  counterpartySignature: string,
-  starterInitialArguments: string = '0x',
-  starterIncrementedArguments: string = '0x',
-): {
-  counterentity: string;
-  nonce: number;
-  proofbodyHash: string;
-  watchSeed: string;
-  sig: string;
-  starterInitialArguments: string;
-  starterIncrementedArguments: string;
-} {
-  const { proofBodyHash } = buildAccountProofBody(accountMachine);
-
-  return {
-    counterentity: accountMachine.proofHeader.toEntity,
-    nonce: accountMachine.proofHeader.nextProofNonce,
-    proofbodyHash: proofBodyHash,
-    watchSeed: accountMachine.watchSeed,
-    sig: counterpartySignature,
-    starterInitialArguments,
-    starterIncrementedArguments,
   };
 }
 

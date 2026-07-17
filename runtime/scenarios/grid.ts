@@ -23,6 +23,7 @@ import {
   ensureJAdapter,
   getScenarioJAdapter,
   createJReplica,
+  bindScenarioJReplica,
   createJurisdictionConfig,
   createGridEntities,
   createNumberedEntity,
@@ -136,10 +137,11 @@ export async function grid(env: Env): Promise<void> {
     jadapter = getScenarioJAdapter(env);
   } catch {
     jadapter = await ensureJAdapter(env);
-    const jReplica = createJReplica(env, 'Grid Demo', jadapter.addresses.depository, { x: 0, y: 600, z: 0 });
-    jReplica.jadapter = jadapter;
-    jReplica.depositoryAddress = jadapter.addresses.depository;
-    jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
+    bindScenarioJReplica(
+      env,
+      createJReplica(env, 'Grid Demo', jadapter.addresses.depository, { x: 0, y: 600, z: 0 }),
+      jadapter,
+    );
     jadapter.startWatching(env);
   }
 

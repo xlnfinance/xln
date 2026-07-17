@@ -291,7 +291,7 @@ async function measureAccountStateToDomLatency(
 }
 
 test.describe('E2E Faucet Latency', () => {
-  test('demo account single-hub UI USDC faucet finalizes as fast as possible', async ({ page }) => {
+  test('demo account single-hub UI USDC faucet finalizes as fast as possible', { tag: '@functional' }, async ({ page }) => {
     test.setTimeout(LONG_E2E ? 240_000 : 180_000);
     const appHost = new URL(APP_BASE_URL).hostname;
     const requireOnline = appHost === 'localhost' || appHost === '127.0.0.1' || appHost === '::1';

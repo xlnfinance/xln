@@ -10,6 +10,11 @@ import {
   storeVerifiedGossipProfile,
 } from '../relay/store';
 import type { Profile } from '../networking/gossip';
+import {
+  buildCryptographicProfileFixture,
+  certifySingleSignerProfileFixture,
+  deriveSingleSignerFixtureEntityId,
+} from './helpers/cryptographic-profile';
 
 const asRecords = (items: unknown[]): Array<Record<string, unknown>> => items as Array<Record<string, unknown>>;
 
@@ -22,30 +27,17 @@ test('relay send result predicate matches websocket failure contract', () => {
   expect(isRelaySendResultFailure()).toBe(false);
 });
 
-const makeProfile = (suffix: string, updatedAt = 1): Profile => ({
-  entityId: `0x${suffix.padStart(40, '0')}`,
-  name: `Entity ${suffix}`,
-  avatar: '',
-  bio: '',
-  website: '',
-  lastUpdated: updatedAt,
-  runtimeId: `0x${suffix.padStart(40, '1')}`,
-  runtimeEncPubKey: `0x${suffix.padStart(64, '2')}`,
-  publicAccounts: [],
-  wsUrl: null,
-  relays: [],
-  metadata: {
-    entityEncPubKey: `0x${suffix.padStart(64, '3')}`,
-    isHub: false,
-    routingFeePPM: 1,
-    baseFee: 0n,
-    board: {
-      threshold: 1,
-      validators: [{ signer: `0x${suffix.padStart(40, '4')}`, signerId: '1', publicKey: `0x${suffix.padStart(64, '5')}`, weight: 1 }],
-    },
-  },
-  accounts: [],
-});
+const makeProfile = (suffix: string, updatedAt = 1): Profile => {
+  const signingSeed = `relay-store-profile:${suffix}`;
+  const entityId = deriveSingleSignerFixtureEntityId(signingSeed);
+  const profile = buildCryptographicProfileFixture({
+    entityId,
+    signingSeed,
+    name: `Entity ${suffix}`,
+    lastUpdated: updatedAt,
+  });
+  return certifySingleSignerProfileFixture(profile, signingSeed);
+};
 
 test('relay pending queue enforces total bytes and target caps', () => {
   const store = createRelayStore('relay-test', {
@@ -131,6 +123,20 @@ test('relay delivery events expose typed retry and fatal semantics', () => {
     },
   });
   expect(classifyRelayDeliveryEvent({
+    status: 'rejected',
+    reason: 'ENTITY_INPUT_RECEIPT_TARGET_NOT_CONNECTED',
+  })).toMatchObject({
+    outcome: 'failed',
+    code: 'ENTITY_INPUT_RECEIPT_TARGET_NOT_CONNECTED',
+    retryable: true,
+    fatal: false,
+    terminal: false,
+    failure: {
+      category: 'TransientRace',
+      code: 'ENTITY_INPUT_RECEIPT_TARGET_NOT_CONNECTED',
+    },
+  });
+  expect(classifyRelayDeliveryEvent({
     status: 'local-delivery-failed',
     reason: 'NO_LOCAL_REPLICA: entityId=0xabc',
   })).toMatchObject({
@@ -160,13 +166,16 @@ test('relay delivery events expose typed retry and fatal semantics', () => {
 
 test('relay gossip profile cap rejects new profiles without evicting existing ones', () => {
   const store = createRelayStore('relay-test', { maxGossipProfiles: 2 });
+  const profileA = makeProfile('a', 1);
+  const profileB = makeProfile('b', 2);
+  const profileC = makeProfile('c', 3);
 
-  expect(storeVerifiedGossipProfile(store, makeProfile('a', 1))).toBe(true);
-  expect(storeVerifiedGossipProfile(store, makeProfile('b', 2))).toBe(true);
-  expect(storeVerifiedGossipProfile(store, makeProfile('c', 3))).toBe(false);
+  expect(storeVerifiedGossipProfile(store, profileA)).toBe(true);
+  expect(storeVerifiedGossipProfile(store, profileB)).toBe(true);
+  expect(storeVerifiedGossipProfile(store, profileC)).toBe(false);
 
-  expect(store.gossipProfiles.has('0x000000000000000000000000000000000000000a')).toBe(true);
-  expect(store.gossipProfiles.has('0x000000000000000000000000000000000000000b')).toBe(true);
-  expect(store.gossipProfiles.has('0x000000000000000000000000000000000000000c')).toBe(false);
+  expect(store.gossipProfiles.has(profileA.entityId)).toBe(true);
+  expect(store.gossipProfiles.has(profileB.entityId)).toBe(true);
+  expect(store.gossipProfiles.has(profileC.entityId)).toBe(false);
   expect(store.debugEvents.some(event => event.reason === 'GOSSIP_PROFILE_CAP_EXCEEDED')).toBe(true);
 });

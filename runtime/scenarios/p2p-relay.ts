@@ -11,7 +11,7 @@ import { deriveSignerAddressSync } from '../account/crypto';
 import { createJAdapter } from '../jadapter';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import { loadJurisdictions } from '../jurisdiction/jurisdiction-loader';
-import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from '../jadapter/default-tokens';
+import { DEFAULT_TOKENS, TOKEN_REGISTRATION_AMOUNT, getDefaultTokenSupply } from '../jadapter/default-tokens';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { ethers } from 'ethers';
 import type { JReplica } from '../types';
@@ -57,7 +57,12 @@ const ensureTokenCatalog = async (jadapter: JAdapter): Promise<JTokenInfo[]> => 
   console.log('[P2P] Deploying default tokens (prefund step)...');
   const erc20Factory = new ERC20Mock__factory(jadapter.signer);
   for (const token of DEFAULT_TOKENS) {
-    const tokenContract = await erc20Factory.deploy(token.name, token.symbol, DEFAULT_TOKEN_SUPPLY);
+    const tokenContract = await erc20Factory.deploy(
+      token.name,
+      token.symbol,
+      token.decimals,
+      getDefaultTokenSupply(token.decimals),
+    );
     await tokenContract.waitForDeployment();
     const tokenAddress = await tokenContract.getAddress();
     console.log(`[P2P] ${token.symbol} deployed at ${tokenAddress}`);
@@ -141,7 +146,7 @@ const prefundRpcWallets = async (): Promise<void> => {
   }
 
   for (const token of tokenCatalog) {
-    const decimals = BigInt(token.decimals ?? 18);
+    const decimals = BigInt(token.decimals);
     const target = 5_000n * 10n ** decimals;
     const erc20 = new ethers.Contract(
       token.address,

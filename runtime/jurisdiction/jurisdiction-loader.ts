@@ -16,6 +16,7 @@ interface JurisdictionConfig {
   name: string;
   chainId: number;
   blockTimeMs: number;
+  entityProviderDeploymentBlock: number;
   rpc: string;
   rebalancePolicyUsd?: {
     r2cRequestSoftLimit: number;
@@ -25,6 +26,8 @@ interface JurisdictionConfig {
   contracts: {
     entityProvider: string;
     depository: string;
+    account: string;
+    deltaTransformer: string;
   };
   explorer: string;
   currency: string;

@@ -1,11 +1,18 @@
-import type { EntityTx, JurisdictionEventData, RoutedEntityInput } from '../../types';
-import { hasEntityCommitCertificate, signatureMapSize } from '../../protocol/signatures';
+import type { EntityTx, JPrefixAttestation, JurisdictionEventData, RoutedEntityInput } from '../../types';
+import { signatureMapSize } from '../../protocol/signatures';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { HEAVY_LOGS } from '../../utils';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { hashEntityLeaderVoteBody } from './leader';
+import { hashJPrefixAttestation } from '../../jurisdiction/j-prefix-consensus';
+import { getEffectiveEntityInputTxs } from './output-envelope';
 
 const entityInputMergeLog = createStructuredLogger('entity.input.merge');
+
+const jPrefixAttestationHash = (attestation: JPrefixAttestation): string => {
+  const { signature: _signature, ...unsigned } = attestation;
+  return hashJPrefixAttestation(unsigned);
+};
 
 const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
   const merged: EntityTx[] = [];
@@ -36,7 +43,7 @@ const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
   return merged;
 };
 
-const prioritizeScheduledWake = (txs: EntityTx[]): EntityTx[] => {
+export const prioritizeScheduledWakeTransactions = (txs: EntityTx[]): EntityTx[] => {
   const wakes = txs.filter(tx => tx.type === 'scheduledWake');
   if (wakes.length === 0) return txs;
   const canonicalWake = safeStringify(wakes[0]);
@@ -60,6 +67,7 @@ const canonicalEntityInputSortKey = (input: RoutedEntityInput): string => safeSt
       }
     : null,
   hashPrecommitCount: signatureMapSize(input.hashPrecommits),
+  hashPrecommitFrame: input.hashPrecommitFrame ?? null,
   leaderTimeoutVote: input.leaderTimeoutVote
     ? {
         targetHeight: input.leaderTimeoutVote.targetHeight,
@@ -67,13 +75,133 @@ const canonicalEntityInputSortKey = (input: RoutedEntityInput): string => safeSt
         voteHash: hashEntityLeaderVoteBody(input.leaderTimeoutVote),
       }
     : null,
+  jPrefixAttestations: input.jPrefixAttestations
+    ? Array.from(input.jPrefixAttestations.entries()).map(([signerId, attestation]) => ({
+        signerId: signerId.toLowerCase(),
+        targetEntityHeight: attestation.targetEntityHeight,
+        hash: jPrefixAttestationHash(attestation),
+      }))
+    : null,
   entityTxs: input.entityTxs ?? [],
 });
 
+type ConsensusInputOrder = Readonly<{
+  targetHeight: number;
+  priority: number;
+}>;
+
+export type EntityCommitPriorityPredicate = (input: RoutedEntityInput) => boolean;
+
+const isProtocolEntityInput = (input: RoutedEntityInput): boolean =>
+  Boolean(
+    input.proposedFrame ||
+    input.leaderTimeoutVote ||
+    input.hashPrecommits?.size ||
+    input.jPrefixAttestations?.size,
+  ) || getEffectiveEntityInputTxs(input).some(tx =>
+    tx.type === 'accountInput' || tx.type === 'j_event');
+
+/**
+ * Keep account/Entity/J consensus responsive when a runtime also receives a
+ * bulk stream of ordinary certified outputs. The partition is stable and
+ * reorders whole authenticated inputs, so it cannot alter a command or the
+ * transaction order certified by its source Entity.
+ */
+export const prioritizeProtocolEntityInputs = <T extends RoutedEntityInput>(
+  inputs: readonly T[],
+): T[] => {
+  const protocol: T[] = [];
+  const ordinary: T[] = [];
+  for (const input of inputs) {
+    (isProtocolEntityInput(input) ? protocol : ordinary).push(input);
+  }
+  return protocol.length > 0 && ordinary.length > 0
+    ? [...protocol, ...ordinary]
+    : [...inputs];
+};
+
+const consensusInputOrder = (
+  input: RoutedEntityInput,
+  hasVerifiedCommit: EntityCommitPriorityPredicate,
+): ConsensusInputOrder | null => {
+  if (input.proposedFrame && hasVerifiedCommit(input)) {
+    return { targetHeight: input.proposedFrame.height, priority: 0 };
+  }
+  if (input.leaderTimeoutVote) {
+    return { targetHeight: input.leaderTimeoutVote.targetHeight, priority: 1 };
+  }
+  if (input.proposedFrame) {
+    return { targetHeight: input.proposedFrame.height, priority: 2 };
+  }
+  return null;
+};
+
+/**
+ * Reorder only the slots belonging to one Entity/signer/height consensus race.
+ * A due signed view change wins over every unverified network frame envelope.
+ * `hankos` are proposer-supplied bytes until consensus replays the frame and
+ * verifies the actual board quorum, so they must never influence pre-cap
+ * scheduling. A later valid commit remains authoritative. Unrelated lanes
+ * retain their exact order.
+ */
+export const prioritizeEntityConsensusInputs = <T extends RoutedEntityInput>(
+  inputs: readonly T[],
+  hasVerifiedCommit: EntityCommitPriorityPredicate = () => false,
+): T[] => {
+  const result = [...inputs];
+  const positionsByRound = new Map<string, number[]>();
+  result.forEach((input, index) => {
+    const order = consensusInputOrder(input, hasVerifiedCommit);
+    if (!order) return;
+    const key = `${input.entityId.trim().toLowerCase()}:` +
+      `${input.signerId.trim().toLowerCase()}:${order.targetHeight}`;
+    const positions = positionsByRound.get(key) ?? [];
+    positions.push(index);
+    positionsByRound.set(key, positions);
+  });
+  for (const positions of positionsByRound.values()) {
+    if (positions.length < 2) continue;
+    const ordered = positions
+      .map((position, stableIndex) => ({
+        input: result[position]!,
+        stableIndex,
+        priority: consensusInputOrder(result[position]!, hasVerifiedCommit)!.priority,
+      }))
+      .sort((left, right) => left.priority - right.priority || left.stableIndex - right.stableIndex)
+      .map(entry => entry.input);
+    positions.forEach((position, index) => {
+      result[position] = ordered[index]!;
+    });
+  }
+  return result;
+};
+
 const entityInputMergeKey = (input: RoutedEntityInput): string => {
   const base = `${input.entityId.toLowerCase()}:${String(input.signerId || '').toLowerCase()}`;
+  if (input.jPrefixAttestations) {
+    if (input.jPrefixAttestations.size !== 1) throw new Error('ENTITY_INPUT_J_PREFIX_MUST_BE_SPLIT');
+    const entry = input.jPrefixAttestations.entries().next().value;
+    if (!entry) throw new Error('ENTITY_INPUT_J_PREFIX_MISSING');
+    const [rawSignerId, attestation] = entry;
+    return `${base}:j-prefix:${rawSignerId.toLowerCase()}:` +
+      `${attestation.targetEntityHeight}:${jPrefixAttestationHash(attestation)}`;
+  }
   const vote = input.leaderTimeoutVote;
-  if (!vote) return base;
+  if (!vote && input.hashPrecommits && input.hashPrecommits.size > 0) {
+    const reference = input.hashPrecommitFrame;
+    if (!reference) throw new Error('ENTITY_INPUT_PRECOMMIT_FRAME_REFERENCE_MISSING');
+    return `${base}:precommit:${reference.height}:${reference.frameHash.toLowerCase()}`;
+  }
+  if (!vote) {
+    // `from` is the authenticated runtime provenance used by ingress policy.
+    // Combining transaction envelopes from different runtimes erases that
+    // provenance and can make one sender appear to have authored another
+    // sender's cross-j output. Local inputs still share the same empty-origin
+    // lane and retain the normal same-frame merge behavior.
+    return input.entityTxs?.length
+      ? `${base}:tx-origin:${String(input.from || '').trim().toLowerCase()}`
+      : base;
+  }
   // Each timeout vote is its own signed consensus message. Collapsing several
   // voters into the target replica's route key drops quorum evidence before
   // Entity consensus can validate it.
@@ -110,8 +238,11 @@ const mergePrecommitBundles = (
   return merged;
 };
 
-const sortMergedEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInput[] =>
-  [...inputs].sort((left, right) => {
+const sortMergedEntityInputs = (
+  inputs: RoutedEntityInput[],
+  hasVerifiedCommit: EntityCommitPriorityPredicate,
+): RoutedEntityInput[] =>
+  prioritizeEntityConsensusInputs([...inputs].sort((left, right) => {
     const entityOrder = compareStableText(left.entityId.toLowerCase(), right.entityId.toLowerCase());
     if (entityOrder !== 0) return entityOrder;
     const signerOrder = compareStableText(
@@ -122,10 +253,18 @@ const sortMergedEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInput[
     if (left.proposedFrame && right.proposedFrame && left.proposedFrame.height !== right.proposedFrame.height) {
       return left.proposedFrame.height - right.proposedFrame.height;
     }
+    if (
+      left.hashPrecommitFrame &&
+      right.hashPrecommitFrame &&
+      left.hashPrecommitFrame.height !== right.hashPrecommitFrame.height
+    ) return left.hashPrecommitFrame.height - right.hashPrecommitFrame.height;
     return compareStableText(canonicalEntityInputSortKey(left), canonicalEntityInputSortKey(right));
-  });
+  }), hasVerifiedCommit);
 
-export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInput[] => {
+export const mergeEntityInputs = (
+  inputs: RoutedEntityInput[],
+  hasVerifiedCommit: EntityCommitPriorityPredicate = () => false,
+): RoutedEntityInput[] => {
   const merged = new Map<string, RoutedEntityInput>();
   const conflicts: RoutedEntityInput[] = [];
   let duplicateCount = 0;
@@ -140,6 +279,15 @@ export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInpu
       if (input.leaderTimeoutVote || existing.leaderTimeoutVote) {
         if (safeStringify(input.leaderTimeoutVote) !== safeStringify(existing.leaderTimeoutVote)) {
           throw new Error(`ENTITY_LEADER_VOTE_EQUIVOCATION:${input.leaderTimeoutVote?.voterId ?? 'missing'}`);
+        }
+      }
+
+      if (input.jPrefixAttestations || existing.jPrefixAttestations) {
+        if (
+          safeStringify(input.jPrefixAttestations) !==
+          safeStringify(existing.jPrefixAttestations)
+        ) {
+          throw new Error('ENTITY_INPUT_J_PREFIX_EQUIVOCATION');
         }
       }
 
@@ -214,8 +362,8 @@ export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInpu
       }
 
       if (input.proposedFrame) {
-        const existingIsCommit = hasEntityCommitCertificate(existing.proposedFrame);
-        const incomingIsCommit = hasEntityCommitCertificate(input.proposedFrame);
+        const existingIsCommit = hasVerifiedCommit(existing);
+        const incomingIsCommit = hasVerifiedCommit(input);
         if (!existing.proposedFrame || (incomingIsCommit && !existingIsCommit)) {
           existing.proposedFrame = input.proposedFrame;
         }
@@ -246,6 +394,6 @@ export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInpu
   const mergedInputs = Array.from(merged.values());
   return sortMergedEntityInputs([...mergedInputs, ...conflicts].map(input => {
     if (!input.entityTxs || input.entityTxs.length === 0) return input;
-    return { ...input, entityTxs: prioritizeScheduledWake(mergeJEventTxs(input.entityTxs)) };
-  }));
+    return { ...input, entityTxs: prioritizeScheduledWakeTransactions(mergeJEventTxs(input.entityTxs)) };
+  }), hasVerifiedCommit);
 };

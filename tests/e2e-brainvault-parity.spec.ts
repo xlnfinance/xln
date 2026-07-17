@@ -1,7 +1,12 @@
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
 import { expect, test, type Page } from './global-setup';
+
+import {
+  normalizeBrainvaultMnemonic as normalizeMnemonic,
+  runBrainvaultCli,
+  type BrainvaultCliOutput,
+} from './utils/e2e-brainvault';
 
 import {
   APP_BASE_URL,
@@ -11,16 +16,34 @@ import {
   selectDemoMnemonic,
 } from './utils/e2e-demo-users';
 
-type BrainvaultCliOutput = {
-  mnemonic24: string;
-  mnemonic12: string;
-};
-
 type StoredRuntime = {
   id?: string;
   label?: string;
   seed?: string;
   mnemonic12?: string;
+};
+
+type CanonicalEntityProbe = {
+  runtimeId: string;
+  replicaKey: string;
+  entityId: string;
+  signerId: string;
+  height: number;
+  profileName: string;
+  accountCount: number;
+};
+
+type BrowserEntityEnv = {
+  runtimeId?: string;
+  eReplicas?: Map<string, {
+    entityId?: string;
+    state?: {
+      entityId?: string;
+      height?: number;
+      profile?: { name?: string };
+      accounts?: Map<string, unknown>;
+    };
+  }>;
 };
 
 const CASES = [
@@ -31,33 +54,6 @@ const CASES = [
 const APP_HOST = new URL(APP_BASE_URL).hostname;
 const REQUIRE_BROWSER_RUNTIME_GLOBALS =
   APP_HOST === 'localhost' || APP_HOST === '127.0.0.1' || APP_HOST === '::1';
-
-function normalizeMnemonic(value: string): string {
-  return value.trim().split(/\s+/).join(' ');
-}
-
-function runBrainvaultCli(name: string, passphrase: string, shards: number): BrainvaultCliOutput {
-  const output = execFileSync(
-    'bun',
-    ['brainvault/cli.ts', name, passphrase, String(shards), '--w=4'],
-    {
-      cwd: process.cwd(),
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        FORCE_COLOR: '0',
-        NO_COLOR: '1',
-      },
-    },
-  );
-  const jsonStart = output.lastIndexOf('\n{');
-  const payload = (jsonStart >= 0 ? output.slice(jsonStart + 1) : output.slice(output.indexOf('{'))).trim();
-  const parsed = JSON.parse(payload) as BrainvaultCliOutput;
-  return {
-    mnemonic24: normalizeMnemonic(parsed.mnemonic24),
-    mnemonic12: normalizeMnemonic(parsed.mnemonic12),
-  };
-}
 
 async function waitForBrainvaultCreateForm(page: Page): Promise<void> {
   const brainVaultTab = page.getByRole('button', { name: 'BrainVault', exact: true });
@@ -210,9 +206,140 @@ async function deriveBrainvaultInUi(page: Page, name: string, passphrase: string
   return recovery;
 }
 
+async function waitForCanonicalProfile(page: Page, expectedProfileName: string): Promise<CanonicalEntityProbe> {
+  const handle = await page.waitForFunction((profileName: string) => {
+    const error = [...document.querySelectorAll<HTMLElement>('.error-msg, .toast.error .message')]
+      .find((element) => element.offsetParent !== null)?.textContent?.trim();
+    if (error) throw new Error(`BRAINVAULT_START_FAILED:${error}`);
+    const env = (window as typeof window & { isolatedEnv?: BrowserEntityEnv }).isolatedEnv;
+    for (const [replicaKey, replica] of env?.eReplicas?.entries?.() ?? []) {
+      const [keyEntityId = '', signerId = ''] = String(replicaKey).split(':');
+      const entityId = String(replica?.state?.entityId || replica?.entityId || '').toLowerCase();
+      if (replica?.state?.profile?.name !== profileName || entityId !== keyEntityId.toLowerCase()) continue;
+      return {
+        runtimeId: String(env?.runtimeId || '').toLowerCase(),
+        replicaKey: String(replicaKey).toLowerCase(),
+        entityId,
+        signerId: signerId.toLowerCase(),
+        height: Number(replica?.state?.height || 0),
+        profileName: replica.state.profile.name,
+        accountCount: Number(replica?.state?.accounts?.size || 0),
+      };
+    }
+    return null;
+  }, expectedProfileName, { timeout: 90_000 });
+  return await handle.jsonValue() as CanonicalEntityProbe;
+}
+
+async function readOnboardingRuntimeDiagnostics(page: Page): Promise<Record<string, unknown>> {
+  return page.evaluate(() => {
+    const env = (window as typeof window & { isolatedEnv?: Record<string, any> }).isolatedEnv;
+    const summarizeInput = (input: any) => ({
+      entityInputs: (input?.entityInputs ?? []).map((candidate: any) => ({
+        entityId: candidate?.entityId,
+        signerId: candidate?.signerId,
+        entityTxs: (candidate?.entityTxs ?? []).map((tx: any) => tx?.type),
+        proposedHeight: candidate?.proposedFrame?.height ?? null,
+        hashPrecommitCount: candidate?.hashPrecommits instanceof Map ? candidate.hashPrecommits.size : 0,
+        jPrefixAttestationCount: candidate?.jPrefixAttestations instanceof Map
+          ? candidate.jPrefixAttestations.size
+          : 0,
+      })),
+      runtimeTxs: (input?.runtimeTxs ?? []).map((tx: any) => tx?.type),
+      jInputs: (input?.jInputs ?? []).map((input: any) => input?.jurisdictionName),
+    });
+    return {
+      runtimeHeight: env?.height ?? null,
+      runtimeMempool: summarizeInput(env?.runtimeMempool),
+      history: (env?.history ?? []).slice(-12).map((frame: any) => ({
+        height: frame?.height,
+        input: summarizeInput(frame?.runtimeInput),
+      })),
+      replicas: Array.from(env?.eReplicas?.entries?.() ?? []).map(([key, replica]: [string, any]) => ({
+        key,
+        entityId: replica?.state?.entityId,
+        height: replica?.state?.height,
+        profileName: replica?.state?.profile?.name,
+        accounts: Array.from(replica?.state?.accounts?.keys?.() ?? []),
+        mempool: (replica?.mempool ?? []).map((tx: any) => tx?.type),
+        proposalHeight: replica?.proposal?.height ?? null,
+        proposalTxs: (replica?.proposal?.entityTxs ?? []).map((tx: any) => tx?.type),
+        lockedHeight: replica?.lockedFrame?.height ?? null,
+        jPrefixTarget: replica?.jPrefixRound?.targetHeight ?? null,
+      })),
+    };
+  });
+}
+
+async function startBrainvaultWallet(page: Page, expectedProfileName: string): Promise<CanonicalEntityProbe> {
+  const configureHeading = page.getByRole('heading', { name: /Configure account/i });
+  await expect(configureHeading).toBeVisible({ timeout: 30_000 });
+  await page.locator('#display-name').fill(expectedProfileName);
+
+  const terms = page.locator('.confirm-section input[type="checkbox"]').first();
+  if (!await terms.isChecked()) await terms.check();
+  const startButton = page.getByRole('button', { name: /^Start$/i });
+  await expect(startButton).toBeEnabled({ timeout: 15_000 });
+  await startButton.click();
+
+  const completion = await page.waitForFunction(() => {
+    const visibleError = [...document.querySelectorAll<HTMLElement>('.error-msg, .toast.error .message')]
+      .find((element) => element.offsetParent !== null)?.textContent?.trim();
+    if (visibleError) return { status: 'error', error: visibleError };
+    const heading = [...document.querySelectorAll<HTMLElement>('h1, h2, h3')]
+      .find((element) => element.textContent?.trim() === 'Configure account' && element.offsetParent !== null);
+    return heading ? null : { status: 'complete', error: '' };
+  }, undefined, { timeout: 30_000 }).then((handle) => handle.jsonValue()) as {
+    status: 'complete' | 'error';
+    error: string;
+  };
+  if (completion.status === 'error') {
+    const work = await page.evaluate(() => {
+      const env = (window as typeof window & { isolatedEnv?: Record<string, any> }).isolatedEnv;
+      const summarizeInput = (input: any) => ({
+        runtimeTxs: (input?.runtimeTxs ?? []).map((tx: any) => tx?.type),
+        jInputs: (input?.jInputs ?? []).map((tx: any) => tx?.type),
+        entityInputs: (input?.entityInputs ?? []).map((candidate: any) => ({
+          entityId: candidate?.entityId,
+          signerId: candidate?.signerId,
+          txs: (candidate?.entityTxs ?? []).map((tx: any) => tx?.type),
+          proposedHeight: candidate?.proposedFrame?.height ?? null,
+          precommits: candidate?.hashPrecommits instanceof Map ? candidate.hashPrecommits.size : 0,
+        })),
+      });
+      return {
+        height: env?.height,
+        runtimeMempool: summarizeInput(env?.runtimeMempool),
+        pendingOutputs: (env?.pendingOutputs ?? []).length,
+        networkInbox: (env?.networkInbox ?? []).length,
+        pendingNetworkOutputs: (env?.pendingNetworkOutputs ?? []).length,
+        pendingCommittedJOutbox: env?.runtimeState?.pendingCommittedJOutbox?.length ?? 0,
+        pendingJurisdictionImports: env?.runtimeState?.pendingJurisdictionImports?.size ?? 0,
+        replicas: Array.from(env?.eReplicas?.entries?.() ?? []).map(([key, replica]: [string, any]) => ({
+          key,
+          height: replica?.state?.height,
+          profileName: replica?.state?.profile?.name,
+          mempool: (replica?.mempool ?? []).map((tx: any) => tx?.type),
+          proposal: replica?.proposal?.height ?? null,
+          locked: replica?.lockedFrame?.height ?? null,
+          jPrefixTarget: replica?.jPrefixRound?.targetHeight ?? null,
+          accountMempools: Array.from(replica?.state?.accounts?.values?.() ?? [])
+            .map((account: any) => (account?.mempool ?? []).map((tx: any) => tx?.type)),
+        })),
+      };
+    });
+    throw new Error(`BRAINVAULT_START_FAILED:${completion.error}:${JSON.stringify(work)}`);
+  }
+  await expect(page.locator('.error-msg:visible')).toHaveCount(0);
+  await expect(page.locator('.toast.error .message').filter({
+    hasText: /RUNTIME_INPUT_QUARANTINED|Runtime error/i,
+  })).toHaveCount(0);
+  return waitForCanonicalProfile(page, expectedProfileName);
+}
+
 test.describe('brainvault parity', () => {
   for (const currentCase of CASES) {
-    test(`browser brainvault matches local CLI for ${currentCase.shards} shards`, async ({ page }) => {
+    test(`browser brainvault matches local CLI for ${currentCase.shards} shards`, { tag: '@functional' }, async ({ page }) => {
       test.slow();
 
       await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 250 });
@@ -225,7 +352,7 @@ test.describe('brainvault parity', () => {
     });
   }
 
-  test('standalone BrainVault creates the XLN wallet with deterministic seed material', async ({ page }) => {
+  test('standalone BrainVault creates and starts the XLN wallet with deterministic seed material', { tag: '@functional' }, async ({ page }) => {
     test.slow();
 
     await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 250 });
@@ -254,9 +381,31 @@ test.describe('brainvault parity', () => {
     expect(recovery.runtimeId).toBe(expectedRuntimeId);
     expect(await readRuntimeCount(page)).toBe(1);
     await expectPostCreateBrainvaultRecovery(page);
+
+    const canonicalEntity = await startBrainvaultWallet(page, 'standalone live profile');
+    expect(canonicalEntity.runtimeId).toBe(expectedRuntimeId);
+    expect(canonicalEntity.profileName).toBe('standalone live profile');
+    expect(canonicalEntity.entityId).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(canonicalEntity.signerId).toMatch(/^0x[0-9a-f]{40}$/);
+    expect(canonicalEntity.signerId).toBe(expectedRuntimeId);
+    expect(canonicalEntity.replicaKey).toBe(`${canonicalEntity.entityId}:${canonicalEntity.signerId}`);
+    expect(canonicalEntity.height).toBeGreaterThan(0);
+    if (canonicalEntity.accountCount < 1) {
+      const diagnostic = await readOnboardingRuntimeDiagnostics(page);
+      throw new Error(`BRAINVAULT_AUTO_JOIN_NOT_FINALIZED:${JSON.stringify(diagnostic)}`);
+    }
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    const restoredEntity = await waitForCanonicalProfile(page, 'standalone live profile');
+    expect(restoredEntity.runtimeId).toBe(expectedRuntimeId);
+    expect(restoredEntity.entityId).toBe(canonicalEntity.entityId);
+    expect(restoredEntity.signerId).toBe(canonicalEntity.signerId);
+    expect(restoredEntity.height).toBeGreaterThanOrEqual(canonicalEntity.height);
+    expect(restoredEntity.accountCount).toBeGreaterThanOrEqual(1);
+    await expect(page.getByRole('heading', { name: /Configure account/i })).toHaveCount(0);
   });
 
-  test('embedded BrainVault add-runtime flow does not fall back to the active wallet', async ({ page }) => {
+  test('embedded BrainVault add-runtime flow does not fall back to the active wallet', { tag: '@functional' }, async ({ page }) => {
     test.slow();
 
     await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 250 });

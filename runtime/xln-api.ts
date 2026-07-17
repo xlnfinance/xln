@@ -43,7 +43,6 @@ export type {
   ConsensusConfig,
   HubRebalanceConfig,
   DebtEntry,
-  DebtUpdate,
   DebtStatus,
   RuntimeInput,
   EntityInput,
@@ -54,6 +53,8 @@ export type {
   PaymentDeliveryMode,
 } from './types';
 export type { PersistedFrameJournal } from './wal/store';
+export type { BoardMemberInput } from './entity/factory';
+export type { PersistedActivityJournal } from './api/activity-history';
 export type { StorageFrameRecord, StorageHead } from './storage/types';
 export type {
   EncryptedRuntimeRecoveryBundleV1,
@@ -165,6 +166,7 @@ import type {
   EntityState,
   AccountMachine,
 } from './types';
+import type { BoardMemberInput } from './entity/factory';
 import type {
   EncryptedRuntimeRecoveryBundleV1,
   RuntimeRecoveryBundleV1,
@@ -177,7 +179,7 @@ import type { JAdapter } from './jadapter/types';
 import type { PersistedFrameJournal } from './wal/store';
 import type { EmbeddedRuntimeAdapter } from './radapter/embedded';
 import type { RemoteRuntimeAdapter } from './radapter/remote';
-import type { RuntimeActivityFilters } from './api/activity-history';
+import type { PersistedActivityJournal, RuntimeActivityFilters } from './api/activity-history';
 import type { RuntimeEntityInputRoutingResult } from './machine/output-routing';
 import type {
   RuntimeAdapterAccountPage,
@@ -346,14 +348,23 @@ export interface XLNModule {
     params: import('./machine/jurisdiction-api').DebtEnforcementRuntimeInputParams,
   ) => RuntimeInput;
   processJBlockEvents?: (env: Env) => Promise<void>;
-  applyJEventsToEnv?: (env: Env, events: import('./jadapter/types').JEvent[], label?: string) => void;
-  buildJEventsRuntimeInput?: (env: Env, events: import('./jadapter/types').JEvent[], label?: string) => RuntimeInput | null;
+  applyJEventsToEnv?: (
+    env: Env,
+    events: import('./jadapter/types').JEvent[],
+    label: string,
+    source: JAdapter | import('./types').JReplica,
+  ) => void;
+  buildJEventsRuntimeInput?: (
+    env: Env,
+    events: import('./jadapter/types').JEvent[],
+    label: string,
+    source: JAdapter | import('./types').JReplica,
+  ) => RuntimeInput | null;
   queueEntityInput?: (env: Env, entityId: string, signerId: string, txData: QueueEntityInputPayload) => Promise<void>;
   submitCrossJurisdictionSwap?: (
     env: Env,
     params: CrossJurisdictionSwapSubmitParams,
   ) => Promise<CrossJurisdictionSwapSubmitResult>;
-  setDeltaTransformerAddress?: (address: string) => void;
   buildDisputeArgumentsForSnapshot?: (
     account: AccountMachine,
     entityState: EntityState,
@@ -386,9 +397,16 @@ export interface XLNModule {
   getSignerDisplayInfo: (signerId: string) => SignerDisplayInfo;
 
   // Crypto key management (for HD wallet integration)
-  registerSignerKey: (signerId: string, privateKey: Uint8Array) => void;
-  clearSignerKeys: () => void;
-  getCachedSignerPrivateKey: (signerId: string) => Uint8Array | null;
+  registerSignerKey: (
+    scope: import('./account/crypto').SignerKeyEnv | Uint8Array | string,
+    signerId: string,
+    privateKey: Uint8Array,
+  ) => void;
+  clearSignerKeys: (scope: import('./account/crypto').SignerKeyEnv | Uint8Array | string) => void;
+  getCachedSignerPrivateKey: (
+    scope: import('./account/crypto').SignerKeyEnv | Uint8Array | string,
+    signerId: string,
+  ) => Uint8Array | null;
   deriveSignerKey: (seed: Uint8Array | string, signerId: string) => Promise<Uint8Array>;
   deriveSignerKeySync: (seed: Uint8Array | string, signerId: string) => Uint8Array;
 
@@ -404,8 +422,15 @@ export interface XLNModule {
   getDefaultSwapTradingPairs: () => Array<{ baseTokenId: number; quoteTokenId: number; pairId: string }>;
   listOpenSwapOffers: (state: Pick<EntityState, 'accounts'>) => import('./types').SwapBookEntry[];
   computeSwapPriceTicks: (giveTokenId: number, wantTokenId: number, giveAmount: bigint, wantAmount: bigint) => bigint;
+  getSwapLotScale: (baseTokenId: number) => bigint;
   prepareSwapOrder: (giveTokenId: number, wantTokenId: number, giveAmount: bigint, wantAmount: bigint) => import('./orderbook').PreparedSwapOrder | null;
   quantizeSwapOrder: (giveTokenId: number, wantTokenId: number, giveAmount: bigint, wantAmount: bigint) => { effectiveGive: bigint; effectiveWant: bigint; priceTicks: bigint } | null;
+  requantizeRemainingSwapAtPrice: (
+    giveTokenId: number,
+    wantTokenId: number,
+    remainingGiveAmount: bigint,
+    priceTicks: bigint,
+  ) => { effectiveGive: bigint; effectiveWant: bigint; releasedGiveDust: bigint } | null;
   createDemoDelta: () => Delta;
   getDefaultCreditLimit: (tokenId: number) => bigint;
 
@@ -452,22 +477,50 @@ export interface XLNModule {
   getJurisdictionByAddress: (address: string) => JurisdictionConfig | undefined;
 
   // Entity creation
-  generateLazyEntityId: (validators: string[] | { name: string; weight: number }[], threshold: bigint) => string;
+  generateLazyEntityId: (validators: readonly BoardMemberInput[], threshold: bigint) => string;
   generateNumberedEntityId: (entityNumber: number) => string;
   generateNamedEntityId: (name: string) => string;
-  createLazyEntity: (name: string, validators: string[], threshold: bigint, jurisdiction?: JurisdictionConfig) => { config: ConsensusConfig; executionTimeMs: number };
-  createNumberedEntity: (name: string, validators: string[], threshold: bigint, jurisdiction: JurisdictionConfig) => Promise<{ config: ConsensusConfig; entityNumber: number; entityId: string }>;
-  createNumberedEntitiesBatch: (env: Env, jId: string, count: number) => Promise<Env>;
+  createLazyEntity: (name: string, validators: readonly BoardMemberInput[], threshold: bigint, jurisdiction?: JurisdictionConfig) => { config: ConsensusConfig; executionTimeMs: number };
+  createNumberedEntity: (
+    name: string,
+    validators: readonly BoardMemberInput[],
+    threshold: bigint,
+    jurisdiction: JurisdictionConfig,
+    env: Env,
+    registrationSignerId: string,
+  ) => Promise<{ config: ConsensusConfig; entityNumber: number; entityId: string }>;
+  createNumberedEntitiesBatch: (
+    entities: readonly Readonly<{
+      name: string;
+      validators: readonly BoardMemberInput[];
+      threshold: bigint;
+    }>[],
+    jurisdiction: JurisdictionConfig,
+    env: Env,
+    registrationSignerId: string,
+  ) => Promise<Array<{ config: ConsensusConfig; entityNumber: number; entityId: string }>>;
 
   // Runtime operations
   applyRuntimeInput: (env: Env, input: RuntimeInput) => Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }>;
   enqueueRuntimeInput: (env: Env, input: RuntimeInput) => void;
   startRuntimeLoop?: (env: Env) => () => void;
+  resumeRuntimeLoop: (env: Env) => () => void;
+  resumeRuntimeAfterPersistenceQuiesce: (env: Env) => () => void;
+  stopRuntimeLoopAndWait: (env: Env, timeoutMs?: number) => Promise<boolean>;
+  waitForRuntimeWorkDrained: (
+    env: Env,
+    timeoutMs?: number,
+    quietMs?: number,
+    options?: { allowPersistencePaused?: boolean },
+  ) => Promise<boolean>;
   closeRuntimeDb?: (env: Env) => Promise<void>;
   closeInfraDb?: (env: Env) => Promise<void>;
   startP2P: (env: Env, config?: P2PConfig) => unknown;
   startJurisdictionWatchers: (env: Env) => void;
+  stopJurisdictionWatchers: (env: Env) => void;
+  stopJurisdictionWatchersAndWait: (env: Env) => Promise<void>;
   stopP2P: (env: Env) => void;
+  stopP2PAndWait: (env: Env, timeoutMs?: number) => Promise<void>;
   getP2P: (env: Env) => unknown;
   getP2PState: (env: Env) => { connected: boolean; reconnect: { attempt: number; nextAt: number } | null; queue: { targetCount: number; totalMessages: number; oldestEntryAge: number; perTarget: Record<string, number> } };
   refreshGossip?: (env: Env) => void;
@@ -544,6 +597,7 @@ export interface XLNModule {
     options?: { fromSnapshotHeight?: number },
   ) => Promise<VerifyRuntimeChainResult>;
   readPersistedFrameJournal: (env: Env, height: number) => Promise<PersistedFrameJournal | null>;
+  readPersistedRuntimeActivityJournal: (env: Env, height: number) => Promise<PersistedActivityJournal | null>;
   readPersistedFrameJournals: (
     env: Env,
     opts?: {

@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
 import { clearSignerKeys, deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
-import { assertLocalEntityCryptoKeys, deriveLocalEntityCryptoKeys } from '../entity/crypto';
+import {
+  assertLocalEntityCryptoKeys,
+  assertPersistedLocalEntityCryptoKeys,
+  deriveLocalEntityCryptoKeys,
+} from '../entity/crypto';
 import { createEmptyEnv, generateLazyEntityId } from '../runtime';
 import { applyRuntimeTx } from '../machine/tx-handlers';
 
@@ -46,12 +50,12 @@ const addTestJurisdiction = (env: ReturnType<typeof createEmptyEnv>): void => {
 
 describe('runtime entity crypto', () => {
   test('canonicalizes stale local encryption private keys when public key still matches', () => {
-    clearSignerKeys();
     const seed = 'runtime-entity-crypto-canonical-local-private';
     const env = createEmptyEnv(seed);
+    clearSignerKeys(env);
     addTestJurisdiction(env);
     const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
-    registerSignerKey(signerId, deriveSignerKeySync(seed, '1'));
+    registerSignerKey(env, signerId, deriveSignerKeySync(seed, '1'));
     const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
     const keys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
 
@@ -76,11 +80,11 @@ describe('runtime entity crypto', () => {
   });
 
   test('rejects local replicas whose public encryption key belongs to another derivation', () => {
-    clearSignerKeys();
     const seed = 'runtime-entity-crypto-reject-wrong-public';
     const env = createEmptyEnv(seed);
+    clearSignerKeys(env);
     const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
-    registerSignerKey(signerId, deriveSignerKeySync(seed, '1'));
+    registerSignerKey(env, signerId, deriveSignerKeySync(seed, '1'));
     const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
 
     env.eReplicas.set(`${entityId}:${signerId}`, {
@@ -99,13 +103,28 @@ describe('runtime entity crypto', () => {
     expect(() => assertLocalEntityCryptoKeys(env)).toThrow('ENTITY_CRYPTO_KEY_MISMATCH');
   });
 
+  test('rejects persisted local private-key corruption instead of repairing it', () => {
+    const seed = 'runtime-entity-crypto-reject-persisted-private-corruption';
+    const env = createEmptyEnv(seed);
+    clearSignerKeys(env);
+    const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    registerSignerKey(env, signerId, deriveSignerKeySync(seed, '1'));
+    const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
+    const keys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
+
+    expect(() => assertPersistedLocalEntityCryptoKeys(env, entityId, signerId, {
+      entityEncPubKey: keys.publicKey,
+      entityEncPrivKey: `0x${'00'.repeat(32)}`,
+    })).toThrow('ENTITY_CRYPTO_KEY_MISMATCH');
+  });
+
   test('direct importReplica canonicalizes stale local private key when public key matches', async () => {
-    clearSignerKeys();
     const seed = 'runtime-entity-crypto-import-replica-canonical-local-private';
     const env = createEmptyEnv(seed);
+    clearSignerKeys(env);
     addTestJurisdiction(env);
     const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
-    registerSignerKey(signerId, deriveSignerKeySync(seed, '1'));
+    registerSignerKey(env, signerId, deriveSignerKeySync(seed, '1'));
     const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
     const keys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
 

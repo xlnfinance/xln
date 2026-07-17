@@ -74,6 +74,29 @@ test('entity factory auto-create uses injected runtime env and fails loud', () =
   expect(vaultStore).toContain('throw err;');
 });
 
+test('entity factory rechecks bootstrap ownership and dispatches only to its injected runtime', () => {
+  const source = readFileSync('frontend/src/lib/utils/entityFactory.ts', 'utf8');
+  const userMode = readFileSync('frontend/src/lib/view/UserModePanel.svelte', 'utf8');
+  const createStart = source.indexOf('export async function createEphemeralEntity(');
+  const createEnd = source.indexOf('\nfunction findReplicaBySigner(', createStart);
+  const createSource = source.slice(createStart, createEnd);
+  const loadRuntime = createSource.indexOf('const xln = await getXLN();');
+  const recheckReplica = createSource.indexOf(
+    'const readyReplica = findReplicaBySigner(runtimeEnv, signerId, jurisdictionName);',
+  );
+  const dispatch = createSource.indexOf(
+    'await dispatchRuntimeInputToRuntimeEnv(runtimeEnv, runtimeInput);',
+  );
+
+  expect(createStart).toBeGreaterThan(0);
+  expect(createEnd).toBeGreaterThan(createStart);
+  expect(recheckReplica).toBeGreaterThan(loadRuntime);
+  expect(dispatch).toBeGreaterThan(recheckReplica);
+  expect(createSource).not.toContain('submitRuntimeInput(runtimeInput)');
+  expect(userMode).not.toContain('createSelfEntity');
+  expect(userMode).not.toContain('ensureSelfEntities');
+});
+
 test('vault user token helpers use active RuntimeStore env and RuntimeInput command path', () => {
   const vaultStore = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
   const balanceStart = vaultStore.indexOf('async getEntityBalance');

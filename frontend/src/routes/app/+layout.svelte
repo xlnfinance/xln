@@ -25,6 +25,7 @@
   import { timeOperations } from '$lib/stores/timeStore';
   import { vaultOperations } from '$lib/stores/vaultStore';
   import { resetEverything } from '$lib/utils/resetEverything';
+  import { parseStorageSchemaMismatch } from '$lib/utils/storageSchemaRecovery';
   import {
     clearInactiveTabStandby,
     initializeActiveTabLock,
@@ -58,6 +59,8 @@
   let activeTabLockReady = $state(false);
   let embedBootReady = $state(false);
   let resettingEverything = $state(false);
+  let recoveringStorage = $state(false);
+  let storageRecoveryError = $state('');
   let bootGeneration = $state(0);
   const initialSearchParams = browser ? new URLSearchParams(window.location.search) : null;
   let lockTestMode = $state(initialSearchParams?.get('locktest') === '1' && canUseLockTestMode());
@@ -70,6 +73,7 @@
   let runtimeImportLocationInFlight = false;
   let releaseActiveTabLock: (() => void) | null = null;
   const pageSearch = $derived(browser ? $page.url.search : '');
+  const storageSchemaMismatch = $derived(parseStorageSchemaMismatch($error));
   const DEPLOY_VERSION_KEY = 'xln-deploy-version';
   type DeployVersionPayload = {
     version: string;
@@ -124,6 +128,25 @@
       await resetEverything({ confirmed: true, reason: 'loading-screen' });
     } finally {
       resettingEverything = false;
+    }
+  }
+
+  async function handleStorageSchemaRecovery(): Promise<void> {
+    if (recoveringStorage || resettingEverything) return;
+    recoveringStorage = true;
+    storageRecoveryError = '';
+    try {
+      await vaultOperations.recoverSchemaMismatchedRuntimesFromConfiguredBackups();
+      error.set(null);
+      isLoading.set(true);
+      await bootApp();
+    } catch (recoveryError) {
+      storageRecoveryError = recoveryError instanceof Error
+        ? recoveryError.message
+        : String(recoveryError);
+      logAppShellDiagnostic('Storage schema recovery failed', recoveryError);
+    } finally {
+      recoveringStorage = false;
     }
   }
 
@@ -450,6 +473,11 @@
   onMount(() => {
     let disposed = false;
 
+    const handlePageHide = (event: PageTransitionEvent) => {
+      if (event.persisted) return;
+      vaultOperations.beginRuntimePageUnload();
+    };
+
     const handleLocationChange = () => {
       syncHashLocation();
       void (async () => {
@@ -459,6 +487,7 @@
     };
 
     syncHashLocation();
+    window.addEventListener('pagehide', handlePageHide);
     window.addEventListener('hashchange', handleLocationChange);
 
     void (async () => {
@@ -508,6 +537,7 @@
 
     return () => {
       disposed = true;
+      window.removeEventListener('pagehide', handlePageHide);
       window.removeEventListener('hashchange', handleLocationChange);
       releaseActiveTabLock?.();
       releaseActiveTabLock = null;
@@ -519,7 +549,7 @@
   <title>xln - {$appState.mode === 'user' ? 'Wallet' : 'Network Workspace'}</title>
 </svelte:head>
 
-{#if activeTabLockReady && !hasActiveTabLock}
+{#if activeTabLockReady && !hasActiveTabLock && !$error}
   {#if pendingRemoteRuntime}
     <div class="remote-login-screen" data-testid="remote-runtime-login-screen">
       <section class="remote-login-card">
@@ -581,13 +611,49 @@
 {:else if lockTestMode}
   <main class="app-shell-ready app-shell-ready--empty" data-testid="app-runtime-ready"></main>
 {:else if $error}
-  <div class="error-screen">
-    <h2>❌ Initialization Failed</h2>
-    <p class="error-msg">{$error}</p>
-    <button onclick={() => initializeXLN()}>Retry</button>
-    <button onclick={handleResetEverything} disabled={resettingEverything}>
-      {resettingEverything ? 'Resetting...' : 'Reset local data'}
-    </button>
+  <div class="error-screen" data-testid="app-initialization-error">
+    {#if storageSchemaMismatch}
+      <h2>Local runtime needs recovery</h2>
+      <p class="schema-recovery-copy">
+        This device has storage schema {storageSchemaMismatch.storedVersion}, while this build requires
+        schema {storageSchemaMismatch.currentVersion}. No incompatible data was applied or deleted.
+      </p>
+      <p class="schema-recovery-copy">
+        Restore the latest authenticated encrypted backup first. Reset only if you intentionally want to
+        discard every local wallet and runtime on this device.
+      </p>
+      <div class="schema-recovery-actions">
+        <button
+          class="primary-recovery-action"
+          data-testid="storage-schema-recover"
+          onclick={handleStorageSchemaRecovery}
+          disabled={recoveringStorage || resettingEverything}
+        >
+          {recoveringStorage ? 'Restoring...' : 'Restore encrypted backup'}
+        </button>
+        <button
+          data-testid="storage-schema-reset"
+          onclick={handleResetEverything}
+          disabled={recoveringStorage || resettingEverything}
+        >
+          {resettingEverything ? 'Resetting...' : 'Reset local data'}
+        </button>
+      </div>
+      {#if storageRecoveryError}
+        <p class="schema-recovery-error" data-testid="storage-schema-recovery-error">{storageRecoveryError}</p>
+      {/if}
+      <details class="schema-recovery-details">
+        <summary>Technical details</summary>
+        <code>{$error}</code>
+      </details>
+    {:else}
+      <h2>❌ Initialization Failed</h2>
+      <p class="error-msg">{$error}</p>
+      <button onclick={() => initializeXLN()}>Retry</button>
+      <button onclick={handleResetEverything} disabled={resettingEverything}>
+        {resettingEverything ? 'Resetting...' : 'Reset local data'}
+      </button>
+    {/if}
   </div>
 {:else if !activeTabLockReady || $isLoading || !$xlnFunctions.isReady}
   <div class="loading-screen" data-testid="app-loading-screen">
@@ -872,6 +938,51 @@
     padding: 40px;
   }
 
+  .error-screen h2,
+  .schema-recovery-copy {
+    margin: 0;
+  }
+
+  .schema-recovery-copy {
+    max-width: 640px;
+    color: var(--theme-text-secondary, rgba(232, 232, 232, 0.76));
+    text-align: center;
+    line-height: 1.55;
+  }
+
+  .schema-recovery-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+  }
+
+  .error-screen .primary-recovery-action {
+    border-color: color-mix(in srgb, var(--theme-accent, #facc15) 52%, transparent);
+    background: color-mix(in srgb, var(--theme-accent, #facc15) 28%, var(--theme-background, #09090b));
+    color: var(--theme-text-primary, white);
+  }
+
+  .schema-recovery-error {
+    max-width: 640px;
+    margin: 0;
+    color: var(--theme-danger, #ef4444);
+    text-align: center;
+    overflow-wrap: anywhere;
+  }
+
+  .schema-recovery-details {
+    max-width: min(720px, calc(100vw - 48px));
+    color: var(--theme-text-muted, #a8a29e);
+    font-size: 12px;
+  }
+
+  .schema-recovery-details code {
+    display: block;
+    margin-top: 8px;
+    overflow-wrap: anywhere;
+  }
+
   .inactive-tab-screen {
     gap: 14px;
     padding: 40px;
@@ -903,6 +1014,11 @@
     color: color-mix(in srgb, var(--theme-accent, #facc15) 58%, white);
     font-weight: 700;
     cursor: pointer;
+  }
+
+  .error-screen button:disabled {
+    cursor: wait;
+    opacity: 0.55;
   }
 
   .error-msg {

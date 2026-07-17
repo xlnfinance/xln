@@ -6,6 +6,7 @@
   import { getEntityDisplayName } from '$lib/utils/entityNaming';
   import { compareStableText } from '$lib/utils/stableSort';
   import type { DebtEntry, EntityState } from '@xln/runtime/xln-api';
+  import { requireTokenDecimals } from './token-metadata';
 
   export let entityStateOverride: EntityState | null = null;
   export let entityNames: Map<string, string> = new Map();
@@ -44,9 +45,7 @@
     usdOutstanding: number;
     usdTotal: number;
   };
-  type DebtStatus = DebtEntry['status'];
   type DebtDirection = DebtEntry['direction'];
-  type DebtRowTone = DebtStatus | 'neutral';
 
   type DebtTotals = {
     entries: number;
@@ -95,10 +94,11 @@
   }
 
   function tokenMeta(tokenId: number): { symbol: string; decimals: number } {
-    const tokenInfo = activeXlnFunctions?.getTokenInfo?.(tokenId);
+    if (!activeXlnFunctions) throw new Error(`TOKEN_METADATA_READER_UNAVAILABLE:token:${tokenId}`);
+    const tokenInfo = activeXlnFunctions.getTokenInfo(tokenId);
     return {
-      symbol: tokenInfo?.symbol || `Token #${tokenId}`,
-      decimals: Number.isFinite(tokenInfo?.decimals) ? Number(tokenInfo.decimals) : 18,
+      symbol: tokenInfo.symbol,
+      decimals: requireTokenDecimals(tokenInfo.decimals, `token:${tokenId}`),
     };
   }
 
@@ -114,7 +114,7 @@
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: value >= 100 ? 0 : 2 }).format(value);
   }
 
-  function debtUsd(entry: DebtEntry, field: 'createdAmount' | 'paidAmount' | 'remainingAmount' | 'forgivenAmount'): number {
+  function debtUsd(entry: DebtEntry, field: 'createdAmount' | 'paidAmount' | 'remainingAmount'): number {
     const meta = tokenMeta(entry.tokenId);
     return amountToUsd(entry[field], meta.decimals, meta.symbol);
   }
@@ -132,15 +132,11 @@
     });
   }
 
-  function debtStatusClass(status: DebtEntry['status']): string {
-    if (status === 'paid') return 'paid';
-    if (status === 'forgiven') return 'forgiven';
+  function debtStatusClass(_status: DebtEntry['status']): string {
     return 'open';
   }
 
-  function debtStatusLabel(status: DebtEntry['status']): string {
-    if (status === 'paid') return 'Paid';
-    if (status === 'forgiven') return 'Forgiven';
+  function debtStatusLabel(_status: DebtEntry['status']): string {
     return 'Open';
   }
 
@@ -149,9 +145,6 @@
   }
 
   function compareDebtRows(left: DebtEntry, right: DebtEntry): number {
-    const leftOpen = left.status === 'open' ? 1 : 0;
-    const rightOpen = right.status === 'open' ? 1 : 0;
-    if (leftOpen !== rightOpen) return rightOpen - leftOpen;
     if (left.direction !== right.direction) return left.direction === 'out' ? -1 : 1;
     const blockDiff = Number(right.lastUpdatedBlock || 0) - Number(left.lastUpdatedBlock || 0);
     if (blockDiff !== 0) return blockDiff;
@@ -216,8 +209,8 @@
     });
   }
 
-  function debtTone(status: DebtStatus): DebtRowTone {
-    return status === 'open' ? 'open' : status;
+  function debtTone(_status: DebtEntry['status']): 'open' {
+    return 'open';
   }
 
   function debtIndexLabel(entry: DebtEntry | null): string {
@@ -350,7 +343,6 @@
                     <div class="debt-detail-grid">
                       <div><span>Opened</span><strong>{formatAmount(debt.tokenId, debt.createdAmount)} · {formatUsd(debtUsd(debt, 'createdAmount'))}</strong></div>
                       <div><span>Paid</span><strong>{formatAmount(debt.tokenId, debt.paidAmount)} · {formatUsd(debtUsd(debt, 'paidAmount'))}</strong></div>
-                      <div><span>Forgiven</span><strong>{formatAmount(debt.tokenId, debt.forgivenAmount)} · {formatUsd(debtUsd(debt, 'forgivenAmount'))}</strong></div>
                       <div><span>Left</span><strong>{formatAmount(debt.tokenId, debt.remainingAmount)} · {formatUsd(debtUsd(debt, 'remainingAmount'))}</strong></div>
                       <div><span>Debt ID</span><code>{debt.debtId}</code></div>
                       <div><span>Indexes</span><strong>{debt.createdDebtIndex} → {debt.currentDebtIndex ?? 'closed'}</strong></div>
@@ -358,17 +350,7 @@
                       <div><span>Updated</span><strong>J#{debt.lastUpdatedBlock} · {debt.lastUpdatedTxHash || '—'}</strong></div>
                     </div>
 
-                    <div class="debt-updates">
-                      <div class="debt-updates-title">Timeline</div>
-                      {#each debt.updates as update, index (`${debt.debtId}-${index}`)}
-                        <div class="debt-update-row">
-                          <span>{update.eventType}</span>
-                          <span>J#{update.blockNumber}</span>
-                          <span>Δ {formatAmount(debt.tokenId, update.amountDelta)}</span>
-                          <strong>Left {formatAmount(debt.tokenId, update.remainingAmount)}</strong>
-                        </div>
-                      {/each}
-                    </div>
+                    <p class="debt-history-source">Closed debt lifecycle is available in Activity → J-events.</p>
                   </div>
                 </article>
               {/each}
@@ -659,32 +641,10 @@
     overflow-wrap: anywhere;
   }
 
-  .debt-updates {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .debt-updates-title {
-    color: var(--theme-text-primary, #f5f5f5);
+  .debt-history-source {
+    margin: 0;
+    color: var(--theme-text-muted, #a1a1aa);
     font-size: 12px;
-    font-weight: 700;
-  }
-
-  .debt-update-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto auto;
-    gap: 12px;
-    align-items: center;
-    font-size: 12px;
-    color: var(--theme-text-secondary, #d4d4d8);
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--theme-background, #09090b) 78%, var(--theme-text-primary, #ffffff) 4%);
-    padding: 10px 12px;
-  }
-
-  .debt-update-row strong {
-    color: var(--theme-text-primary, #ffffff);
   }
 
   @media (max-width: 860px) {
@@ -707,8 +667,5 @@
       grid-template-columns: 1fr;
     }
 
-    .debt-update-row {
-      grid-template-columns: 1fr;
-    }
   }
 </style>

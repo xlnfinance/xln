@@ -6,6 +6,7 @@
   import { toasts } from '../../stores/toastStore';
   import BigIntInput from '../Common/BigIntInput.svelte';
   import EntitySelect from './EntitySelect.svelte';
+  import { requireTokenDecimals } from './token-metadata';
 
   export let entityId: string;
   export let replica: EntityReplica | null = null;
@@ -127,9 +128,8 @@
   }
 
   function tokenDecimals(tokenId: number): number {
-    const info = activeXlnFunctions?.getTokenInfo?.(tokenId);
-    const decimals = Number(info?.decimals);
-    return Number.isFinite(decimals) && decimals >= 0 ? decimals : 18;
+    if (!activeXlnFunctions) throw new Error(`TOKEN_METADATA_READER_UNAVAILABLE:token:${tokenId}`);
+    return requireTokenDecimals(activeXlnFunctions.getTokenInfo(tokenId).decimals, `token:${tokenId}`);
   }
 
   function parseAmount(value: string | bigint | null | undefined): bigint {

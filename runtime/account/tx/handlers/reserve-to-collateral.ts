@@ -13,12 +13,12 @@
  * PROPER FLOW:
  * Collateral updates MUST go through bilateral j_event consensus:
  * 1. Entity observes L1 event (AccountSettled) via JAdapter.startWatching
- * 2. Entity stores observation in leftJObservations/rightJObservations
+ * 2. Entity commits the claim in the left/right authenticated pending root
  * 3. Entity proposes j_event_claim tx to counterparty
  * 4. Both sides exchange j_event_claim → 2-of-2 agreement
- * 5. tryFinalizeAccountJEvents() applies state change ONLY after match
+ * 5. The proof-verified bilateral transition applies state ONLY after match
  *
- * See: entity/tx/j-events.ts:tryFinalizeAccountJEvents() for the safe implementation.
+ * See account/j-claim-transition.ts for the proof-verified implementation.
  *
  * Reference: Depository.sol reserveToCollateral (line 1035)
  * Reference: 2019src.txt lines 233-239 (reserveToCollateral pattern)
@@ -34,7 +34,7 @@ const reserveToCollateralLog = createStructuredLogger('account.reserve');
  *
  * Attackers could inject arbitrary collateral values without L1 proof.
  * All collateral updates MUST go through bilateral j_event consensus
- * via j_event_claim + tryFinalizeAccountJEvents.
+ * via j_event_claim + authenticated bilateral matching.
  */
 export function handleReserveToCollateral(
   _accountMachine: AccountMachine,

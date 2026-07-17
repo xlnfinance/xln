@@ -59,9 +59,9 @@
   let error = $state('');
 
   let selectedRelease = $derived(manifest?.releases.find((release) => release.version === selectedVersion) ?? null);
-  let selectedVerification = $derived(selectedRelease?.attestation
-    ? verifyReleaseManifestEntry(selectedRelease) ? 'verified' : 'invalid'
-    : selectedRelease && requiresFoundationAttestation(selectedRelease.version) ? 'invalid' : 'historical');
+  let selectedVerification = $derived(selectedRelease && !requiresFoundationAttestation(selectedRelease.version)
+    ? 'historical'
+    : selectedRelease?.attestation && verifyReleaseManifestEntry(selectedRelease) ? 'verified' : 'invalid');
   let scopes = $derived.by(() => {
     const names = new Set<string>();
     for (const release of manifest?.releases ?? []) Object.keys(release.modules).forEach((name) => names.add(name));
@@ -173,7 +173,7 @@
           {:else if selectedVerification === 'invalid'}
             <ShieldAlert size={14} /> Invalid signature
           {:else}
-            <History size={14} /> Historical unsigned
+            <History size={14} /> Pre-v2 historical · unverified
           {/if}
         </span>
       </div>

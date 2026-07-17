@@ -31,6 +31,7 @@ type TaggedEnvelope = TaggedBigInt | TaggedMap | TaggedSet | TaggedTypedArray | 
 
 type SerializeOptions = {
   excludeKeys?: ReadonlySet<string>;
+  includeVolatileKeys?: boolean;
   space?: number;
 };
 
@@ -217,7 +218,9 @@ const normalizeSerializableValue = (
     const source = input as Record<string, unknown>;
     const result: TaggedJsonRecord = {};
     const keys = Object.keys(source)
-      .filter((key) => !ALWAYS_EXCLUDED_KEYS.has(key) && !options.excludeKeys?.has(key))
+      .filter((key) =>
+        (options.includeVolatileKeys || !ALWAYS_EXCLUDED_KEYS.has(key)) &&
+        !options.excludeKeys?.has(key))
       .sort(compareStableText);
     for (const key of keys) {
       const value = normalizeSerializableValue(source[key], options, stack);
@@ -252,7 +255,9 @@ const decodeTaggedJson = (value: unknown): unknown => {
       return new ctor(cloneArrayBuffer(base64ToBytes(value.value)));
     }
     case 'Buffer':
-      return Buffer.from(value.value);
+      return typeof Buffer !== 'undefined'
+        ? Buffer.from(value.value)
+        : Uint8Array.from(value.value);
     case 'Date':
       return new Date(value.value);
     default:
@@ -275,6 +280,10 @@ export function safeStringify(obj: unknown, space?: number): string {
     throw new Error(`SAFE_STRINGIFY_FAILED: ${message}`, err instanceof Error ? { cause: err } : undefined);
   }
 }
+
+/** Authoritative codec variant: never drops a named field from the payload. */
+export const serializeCanonicalTaggedJson = (value: unknown): string =>
+  stringifyCanonical(value, { includeVolatileKeys: true });
 
 /**
  * BigInt-safe console logging for debugging.

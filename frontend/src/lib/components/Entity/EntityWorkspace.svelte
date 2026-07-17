@@ -58,6 +58,9 @@
     return !!frameEntityId && (!entityId || frameEntityId === entityId);
   };
 
+  const isActionableRuntimeReceipt = (status: string | null | undefined): boolean =>
+    status === 'pending' || status === 'error';
+
   async function refreshWorkspaceProjection(key: string, entityId: string): Promise<void> {
     const requestId = ++workspaceProjectionRequestId;
     try {
@@ -120,7 +123,7 @@
 </script>
 
 <div class="entity-workspace" data-testid="entity-workspace">
-  {#if workspaceProjectionError || $runtimeCommandLatestReceipt}
+  {#if workspaceProjectionError || isActionableRuntimeReceipt($runtimeCommandLatestReceipt?.status)}
     <div class="workspace-status">
     {#if workspaceProjectionError}
       <span
@@ -129,7 +132,7 @@
         title={workspaceProjectionError}
       >Projection error</span>
     {/if}
-    {#if $runtimeCommandLatestReceipt}
+    {#if $runtimeCommandLatestReceipt && isActionableRuntimeReceipt($runtimeCommandLatestReceipt.status)}
 	      <span
 	        class={`command-pill ${$runtimeCommandLatestReceipt.status}`}
 	        data-testid="runtime-command-receipt"
@@ -138,11 +141,6 @@
         {$runtimeCommandLatestReceipt.status}
         {#if $runtimeCommandLatestReceipt.failureKind}
           · {$runtimeCommandLatestReceipt.failureKind}
-        {/if}
-        {#if $runtimeCommandLatestReceipt.committedAtHeight !== null}
-          h{$runtimeCommandLatestReceipt.committedAtHeight}
-        {:else if $runtimeCommandLatestReceipt.acceptedAtHeight !== null}
-          h{$runtimeCommandLatestReceipt.acceptedAtHeight}
         {/if}
       </span>
     {/if}

@@ -5,7 +5,7 @@
 import { keccak256, toUtf8Bytes } from 'ethers';
 import type { Env, EntityReplica } from '@xln/runtime/xln-api';
 import { unwrapLiveRuntimeEnv } from './liveRuntimeEnv';
-import { getXLN, submitRuntimeInput } from '$lib/stores/xlnStore';
+import { dispatchRuntimeInputToRuntimeEnv, getXLN } from '$lib/stores/xlnStore';
 
 type JurisdictionConfig = {
   name: string;
@@ -78,6 +78,8 @@ export async function createEphemeralEntity(
   }
 
   const xln = await getXLN();
+  const readyReplica = findReplicaBySigner(runtimeEnv, signerId, jurisdictionName);
+  if (readyReplica?.entityId) return readyReplica.entityId;
 
   // Lazy entities are addressed by the EntityProvider board hash.
   const entityId = xln.generateLazyEntityId([signerId], 1n);
@@ -106,7 +108,7 @@ export async function createEphemeralEntity(
   };
 
   // Apply runtime input through the shared command path so receipts and permissions stay consistent.
-  await submitRuntimeInput(runtimeInput);
+  await dispatchRuntimeInputToRuntimeEnv(runtimeEnv, runtimeInput);
   await waitForCondition(
     () => {
       const expected = String(entityId).toLowerCase();

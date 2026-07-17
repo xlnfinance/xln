@@ -13,6 +13,7 @@ export type JMachineCreateDetail = {
   rpcs: string[];
   blockTimeMs: number;
   ticker: string;
+  entityProviderDeploymentBlock?: number;
   contracts?: JMachineConfig['contracts'];
   deploy?: boolean;
 };
@@ -44,6 +45,14 @@ const normalizeBlockTimeMs = (value: unknown): number => {
   return numeric;
 };
 
+const normalizeEntityProviderDeploymentBlock = (value: unknown): number => {
+  const numeric = Number(value);
+  if (!Number.isSafeInteger(numeric) || numeric < 1) {
+    throw new Error('J_MACHINE_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_INVALID');
+  }
+  return numeric;
+};
+
 const normalizeRpcList = (value: unknown): string[] =>
   Array.isArray(value)
     ? value
@@ -61,6 +70,13 @@ export const normalizeJMachineCreateDetail = (detail: JMachineCreateDetail): JMa
   if (!name) throw new Error('J_MACHINE_NAME_REQUIRED');
   if (!ticker) throw new Error('J_MACHINE_TICKER_REQUIRED');
   if (mode === 'rpc' && rpcs.length === 0) throw new Error('J_MACHINE_RPC_REQUIRED');
+  if (mode === 'rpc' && rpcs.length > 1) throw new Error('J_MACHINE_MULTIPLE_RPCS_UNSUPPORTED');
+  if (mode === 'rpc' && detail.entityProviderDeploymentBlock === undefined) {
+    throw new Error('J_MACHINE_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_REQUIRED');
+  }
+  if (mode === 'browservm' && detail.entityProviderDeploymentBlock !== undefined) {
+    throw new Error('J_MACHINE_BROWSERVM_DEPLOYMENT_BLOCK_UNEXPECTED');
+  }
   return {
     name,
     mode,
@@ -68,6 +84,13 @@ export const normalizeJMachineCreateDetail = (detail: JMachineCreateDetail): JMa
     ticker,
     rpcs,
     blockTimeMs,
+    ...(mode === 'rpc'
+      ? {
+          entityProviderDeploymentBlock: normalizeEntityProviderDeploymentBlock(
+            detail.entityProviderDeploymentBlock,
+          ),
+        }
+      : {}),
     ...(detail.contracts ? { contracts: detail.contracts } : {}),
     ...(detail.deploy ? { deploy: true } : {}),
   };
@@ -83,6 +106,9 @@ export const buildJMachineImportRuntimeInput = (detail: JMachineCreateDetail): R
         chainId: config.chainId,
         ticker: config.ticker,
         rpcs: config.rpcs,
+        ...(config.entityProviderDeploymentBlock !== undefined
+          ? { entityProviderDeploymentBlock: config.entityProviderDeploymentBlock }
+          : {}),
         blockTimeMs: config.blockTimeMs,
         ...(config.contracts ? { contracts: config.contracts } : {}),
       },
@@ -119,6 +145,7 @@ export const buildPersistedJMachineConfig = (
 ): JMachineConfig => {
   const config = normalizeJMachineCreateDetail(detail);
   const contracts = env ? readImportedContracts(env, config.name, config.contracts) : config.contracts;
+  const imported = env?.jReplicas?.get?.(config.name);
   return {
     name: config.name,
     mode: config.mode,
@@ -126,6 +153,11 @@ export const buildPersistedJMachineConfig = (
     ticker: config.ticker,
     rpcs: config.rpcs,
     blockTimeMs: config.blockTimeMs,
+    ...(imported?.entityProviderDeploymentBlock !== undefined
+      ? { entityProviderDeploymentBlock: imported.entityProviderDeploymentBlock }
+      : config.entityProviderDeploymentBlock !== undefined
+        ? { entityProviderDeploymentBlock: config.entityProviderDeploymentBlock }
+        : {}),
     ...(contracts ? { contracts } : {}),
     createdAt: existing?.createdAt ?? deriveJMachineCreatedAt(config),
   };

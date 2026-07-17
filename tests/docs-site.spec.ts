@@ -37,7 +37,7 @@ async function assertNoDocsFailures(failures: FailureEntry[]): Promise<void> {
 }
 
 test.describe('Docs site', () => {
-  test('main site exposes llms context as static text', async ({ page }) => {
+  test('main site exposes llms context as static text', { tag: '@functional' }, async ({ page }) => {
     const response = await page.request.get('/llms.txt');
     expect(response?.ok(), '/llms.txt should be served as a real static asset').toBe(true);
     expect(response?.headers()['content-type'] || '').toContain('text/plain');
@@ -49,7 +49,7 @@ test.describe('Docs site', () => {
     expect(body.includes('<!doctype html>')).toBe(false);
   });
 
-  test('main site exposes a working docs surface', async ({ page }, testInfo) => {
+  test('main site exposes a working docs surface', { tag: '@functional' }, async ({ page }, testInfo) => {
     await page.goto('/', { waitUntil: 'networkidle' });
     await expect(page.getByRole('link', { name: /^docs$/i })).toBeVisible();
 
@@ -83,7 +83,7 @@ test.describe('Docs site', () => {
     await assertNoDocsFailures(failures);
   });
 
-  test('mobile docs navigation stays usable', async ({ browser }, testInfo) => {
+  test('mobile docs navigation stays usable', { tag: '@functional' }, async ({ browser }, testInfo) => {
     const context: BrowserContext = await browser.newContext({
       ...devices['iPhone 15 Pro'],
       ignoreHTTPSErrors: true,

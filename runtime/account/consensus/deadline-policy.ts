@@ -1,6 +1,8 @@
 import { HASHLADDER_MAX_FILL_RATIO, verifyHashLadderBinary } from '../../protocol/htlc/hash-ladder';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
+import { hashEncryptedHtlcLayer } from '../../protocol/htlc/onion-advance';
 import type { AccountFrame, AccountMachine, HtlcLock, PullCommitment } from '../../types';
+import { isHtlcTimelockExpired } from '../htlc-deadline';
 import { isPullRevealExpired } from '../pull-deadline';
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from './constants';
 
@@ -9,6 +11,9 @@ export const HTLC_ENFORCEMENT_RESERVE_MS = ACCOUNT_NETWORK_ALLOWANCE_MS;
 export type AccountInputSecurityContext = {
   entityTimestamp: number;
   finalizedJHeight: number;
+  owningEntityIsHub: boolean;
+  /** Counterparty board from the consuming Entity's own finalized registry. */
+  counterpartyCertifiedBoardHash?: string;
 };
 
 export type IncomingDeadlineViolation = {
@@ -20,8 +25,10 @@ export function isHtlcSecretEnforcementWindowClosed(
   lock: Pick<HtlcLock, 'timelock' | 'revealBeforeHeight'>,
   securityContext: AccountInputSecurityContext,
 ): boolean {
-  const timestampTooLate =
-    BigInt(securityContext.entityTimestamp) + BigInt(HTLC_ENFORCEMENT_RESERVE_MS) > lock.timelock;
+  const timestampTooLate = isHtlcTimelockExpired(
+    securityContext.entityTimestamp + HTLC_ENFORCEMENT_RESERVE_MS,
+    lock.timelock,
+  );
   const finalizedHeightTooLate = securityContext.finalizedJHeight > lock.revealBeforeHeight;
   return timestampTooLate || finalizedHeightTooLate;
 }
@@ -90,19 +97,39 @@ export function getIncomingAccountDeadlineViolation(
     if (tx.type === 'htlc_resolve') {
       const lock = locks.get(tx.data.lockId);
       if (!lock) continue;
+      if (tx.data.outcome === 'offer') {
+        const proposerIsBeneficiary = proposerIsLeft !== lock.senderIsLeft;
+        if (!proposerIsBeneficiary) {
+          return deadlineViolation(`HTLC_SECRET_OFFER_NOT_BENEFICIARY: lock=${tx.data.lockId}`);
+        }
+        if (lock.secretOffer) {
+          if (hashEncryptedHtlcLayer(lock.secretOffer) !== hashEncryptedHtlcLayer(tx.data.offer)) {
+            return deadlineViolation(`HTLC_SECRET_OFFER_CONFLICT: lock=${tx.data.lockId}`);
+          }
+        } else {
+          lock.secretOffer = tx.data.offer;
+        }
+        continue;
+      }
       if (tx.data.outcome === 'secret') {
-        if (tx.data.secret && isHtlcSecretEnforcementWindowClosed(lock, context)) {
+        const rawSecret = 'secret' in tx.data ? tx.data.secret : undefined;
+        const acceptedOffer = 'offerHash' in tx.data
+          && Boolean(lock.secretOffer)
+          && tx.data.offerHash.toLowerCase() === hashEncryptedHtlcLayer(lock.secretOffer!);
+        const verifiedSecret = validHtlcSecret(lock, rawSecret);
+        if ((verifiedSecret || acceptedOffer) && isHtlcSecretEnforcementWindowClosed(lock, context)) {
           return {
             reason: `HTLC_SECRET_ENFORCEMENT_WINDOW_TOO_SHORT: lock=${tx.data.lockId} reserve=${HTLC_ENFORCEMENT_RESERVE_MS}ms localTimestamp=${context.entityTimestamp}`,
-            evidenceSecrets: [{ hashlock: lock.hashlock, secret: tx.data.secret }],
+            evidenceSecrets: rawSecret ? [{ hashlock: lock.hashlock, secret: rawSecret }] : [],
           };
         }
-        if (validHtlcSecret(lock, tx.data.secret)) locks.delete(tx.data.lockId);
+        if (verifiedSecret || acceptedOffer) locks.delete(tx.data.lockId);
         continue;
       }
       const proposerIsPayer = proposerIsLeft === lock.senderIsLeft;
       const locallyExpired =
-        context.finalizedJHeight > lock.revealBeforeHeight || BigInt(context.entityTimestamp) > lock.timelock;
+        context.finalizedJHeight > lock.revealBeforeHeight ||
+        isHtlcTimelockExpired(context.entityTimestamp, lock.timelock);
       if (proposerIsPayer && !locallyExpired) {
         return deadlineViolation(
           `HTLC_PAYER_CANCEL_BEFORE_LOCAL_EXPIRY: lock=${tx.data.lockId} localTimestamp=${context.entityTimestamp} localJHeight=${context.finalizedJHeight}`,

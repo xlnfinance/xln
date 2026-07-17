@@ -77,6 +77,47 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
   if (!type || !data) return null;
   const meta = normalizeMetadata(raw);
 
+  if (type === 'FoundationBootstrapped') {
+    const recipient = normalizeAddress(data['recipient']);
+    const boardHash = typeof data['boardHash'] === 'string' ? data['boardHash'].trim().toLowerCase() : '';
+    const controlTokenId = normalizeBigNumberish(data['controlTokenId']);
+    const dividendTokenId = normalizeBigNumberish(data['dividendTokenId']);
+    if (!recipient || !/^0x[0-9a-f]{64}$/.test(boardHash) || controlTokenId === null || dividendTokenId === null) {
+      return null;
+    }
+    return { ...meta, type, data: { recipient, boardHash, controlTokenId, dividendTokenId } };
+  }
+
+  if (type === 'EntityRegistered') {
+    const entityId = normalizeEntity(data['entityId']);
+    const entityNumber = normalizeBigNumberish(data['entityNumber']);
+    const boardHash = typeof data['boardHash'] === 'string' ? data['boardHash'].trim().toLowerCase() : '';
+    if (!entityId || !/^0x[0-9a-f]{64}$/.test(entityId) || entityNumber === null || !/^0x[0-9a-f]{64}$/.test(boardHash)) {
+      return null;
+    }
+    return { ...meta, type, data: { entityId, entityNumber, boardHash } };
+  }
+
+  if (type === 'BoardActivated') {
+    const entityId = normalizeEntity(data['entityId']);
+    const previousBoardHash = typeof data['previousBoardHash'] === 'string'
+      ? data['previousBoardHash'].trim().toLowerCase()
+      : '';
+    const newBoardHash = typeof data['newBoardHash'] === 'string' ? data['newBoardHash'].trim().toLowerCase() : '';
+    const previousBoardValidUntil = normalizeBigNumberish(data['previousBoardValidUntil']);
+    if (
+      !entityId ||
+      !/^0x[0-9a-f]{64}$/.test(entityId) ||
+      !/^0x[0-9a-f]{64}$/.test(previousBoardHash) ||
+      !/^0x[0-9a-f]{64}$/.test(newBoardHash) ||
+      previousBoardValidUntil === null ||
+      BigInt(previousBoardValidUntil) <= 0n
+    ) {
+      return null;
+    }
+    return { ...meta, type, data: { entityId, previousBoardHash, newBoardHash, previousBoardValidUntil } };
+  }
+
   if (type === 'ReserveUpdated') {
     const entity = normalizeEntity(data['entity']);
     const tokenId = normalizeInt(data['tokenId']);
@@ -228,7 +269,15 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
     const sender = normalizeEntity(data['sender']);
     const counterentity = normalizeEntity(data['counterentity']);
     const nonce = normalizeBigNumberish(data['nonce']);
-    if (!sender || !counterentity || nonce === null || typeof data['proofbodyHash'] !== 'string') {
+    const disputeTimeout = normalizeInt(data['disputeTimeout']);
+    if (
+      !sender ||
+      !counterentity ||
+      nonce === null ||
+      disputeTimeout === null ||
+      disputeTimeout <= 0 ||
+      typeof data['proofbodyHash'] !== 'string'
+    ) {
       return null;
     }
     const watchSeed = typeof data['watchSeed'] === 'string' ? data['watchSeed'] : '0x';
@@ -250,6 +299,7 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
         watchSeed,
         starterInitialArguments,
         starterIncrementedArguments,
+        disputeTimeout,
         ...(batchNonce !== null ? { batchNonce } : {}),
       },
     };
@@ -320,12 +370,66 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
 
   if (type === 'HankoBatchProcessed') {
     const entityId = normalizeEntity(data['entityId']);
+    const batchHash = typeof data['batchHash'] === 'string' ? data['batchHash'].trim().toLowerCase() : '';
     const nonce = normalizeInt(data['nonce']);
-    if (!entityId || typeof data['hankoHash'] !== 'string' || nonce === null || typeof data['success'] !== 'boolean') return null;
+    if (
+      !entityId ||
+      !/^0x[0-9a-f]{64}$/.test(entityId) ||
+      !/^0x[0-9a-f]{64}$/.test(batchHash) ||
+      nonce === null ||
+      nonce < 1 ||
+      typeof data['success'] !== 'boolean'
+    ) return null;
     return {
       ...meta,
       type,
-      data: { entityId, hankoHash: data['hankoHash'], nonce, success: data['success'] },
+      data: { entityId, batchHash, nonce, success: data['success'] },
+    };
+  }
+
+  if (type === 'EntityProviderActionExecuted') {
+    const entityId = normalizeEntity(data['entityId']);
+    const actionNonce = normalizeBigNumberish(data['actionNonce']);
+    const actionHash = typeof data['actionHash'] === 'string'
+      ? data['actionHash'].trim().toLowerCase()
+      : '';
+    const actionKind = normalizeInt(data['actionKind']);
+    if (
+      !entityId ||
+      !/^0x[0-9a-f]{64}$/.test(entityId) ||
+      actionNonce === null ||
+      BigInt(actionNonce) < 1n ||
+      BigInt(actionNonce) > (1n << 256n) - 1n ||
+      !/^0x[0-9a-f]{64}$/.test(actionHash) ||
+      (actionKind !== 0 && actionKind !== 1)
+    ) return null;
+    return { ...meta, type, data: { entityId, actionNonce, actionHash, actionKind } };
+  }
+
+  if (type === 'EntityProviderActionCancelled') {
+    const entityId = normalizeEntity(data['entityId']);
+    const actionNonce = normalizeBigNumberish(data['actionNonce']);
+    const cancelledActionHash = typeof data['cancelledActionHash'] === 'string'
+      ? data['cancelledActionHash'].trim().toLowerCase()
+      : '';
+    const cancelledActionKind = normalizeInt(data['cancelledActionKind']);
+    const cancelHash = typeof data['cancelHash'] === 'string'
+      ? data['cancelHash'].trim().toLowerCase()
+      : '';
+    if (
+      !entityId ||
+      !/^0x[0-9a-f]{64}$/.test(entityId) ||
+      actionNonce === null ||
+      BigInt(actionNonce) < 1n ||
+      BigInt(actionNonce) > (1n << 256n) - 1n ||
+      !/^0x[0-9a-f]{64}$/.test(cancelledActionHash) ||
+      (cancelledActionKind !== 0 && cancelledActionKind !== 1) ||
+      !/^0x[0-9a-f]{64}$/.test(cancelHash)
+    ) return null;
+    return {
+      ...meta,
+      type,
+      data: { entityId, actionNonce, cancelledActionHash, cancelledActionKind, cancelHash },
     };
   }
 

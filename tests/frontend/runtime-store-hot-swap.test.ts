@@ -50,7 +50,7 @@ test('runtime controller is the single adapter lifecycle owner', () => {
   expect(existsSync('frontend/src/lib/stores/runtimeAdapterStore.ts')).toBe(false);
   expect(xlnStoreSource).toContain('getRuntimeControllerAdapter');
   expect(xlnStoreSource).toContain('getRuntimeControllerConfig');
-  expect(xlnStoreSource).toContain('runtimeAdapterSend(input)');
+  expect(xlnStoreSource).toContain('runtimeAdapterSend(input, { commandId: receipt.commandId })');
   expect(xlnStoreSource).not.toContain('remoteAdapter.send(input)');
   expect(xlnStoreSource).not.toContain('adapter.send(input)');
   expect(xlnStoreSource).not.toContain('activeRuntimeAdapterConfig');
@@ -77,6 +77,23 @@ test('runtime controller is the single adapter lifecycle owner', () => {
   expect(runtimeStoreSource).toContain('$runtimes.has(controllerId)');
   expect(runtimeStoreSource).not.toContain('runtimeSelectionFallbackId');
   expect(runtimeStoreSource).not.toContain('export const activeRuntimeId = writable');
+});
+
+test('embedded RuntimeInput ingress rechecks the quiesce fence after every async boundary', () => {
+  const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
+  const routeStart = source.indexOf('const routeRuntimeInput = async');
+  const dispatchStart = source.indexOf('export async function dispatchRuntimeInputToRuntimeEnv');
+  const dispatchEnd = source.indexOf('export async function submitActiveEntityInputs', dispatchStart);
+  const routeSource = source.slice(routeStart, dispatchStart);
+  const dispatchSource = source.slice(dispatchStart, dispatchEnd);
+
+  expect(source).toContain('LOCAL_RUNTIME_INPUT_INGRESS_QUIESCING');
+  expect(routeSource.match(/assertLocalRuntimeInputIngressOpen\(runtimeEnv\)/g)).toHaveLength(3);
+  expect(routeSource.lastIndexOf('assertLocalRuntimeInputIngressOpen(runtimeEnv)'))
+    .toBeLessThan(routeSource.indexOf('runtimeAdapterSend(input, { commandId: receipt.commandId })'));
+  expect(dispatchSource.match(/assertLocalRuntimeInputIngressOpen\(runtimeEnv\)/g)).toHaveLength(3);
+  expect(dispatchSource.lastIndexOf('assertLocalRuntimeInputIngressOpen(runtimeEnv)'))
+    .toBeLessThan(dispatchSource.indexOf('xln.enqueueRuntimeInput(runtimeEnv, input)'));
 });
 
 test('embedded adapter binds to selected runtime env before bootstrap commands', () => {
@@ -262,10 +279,11 @@ test('remote RuntimeInput command waits for observed receipt before projection r
   expect(source).toContain('REMOTE_RUNTIME_PROJECTION_WAIT_TIMEOUT_MS');
   expect(source).toContain('REMOTE_RUNTIME_PROJECTION_TIMEOUT');
   expect(source).toContain('const observed = await waitForRemoteRuntimeReceiptObserved(accepted.receipt?.id ?? null);');
-  expect(source).toContain('const projectedHeight = await waitForRemoteRuntimeProjectionAtHeight(observed?.observedHeight ?? accepted.height);');
-  expect(source).toContain('progress.observed(Number(observed.observedHeight ?? projectedHeight));');
+  expect(source).toContain('const observedHeight = Number(observed?.observedHeight ?? accepted.height);');
+  expect(source).toContain('const projectedHeight = await waitForRemoteRuntimeProjectionAtHeight(observedHeight);');
+  expect(source).toContain('progress.observed(Number(observed?.observedHeight ?? projectedHeight));');
   expect(source.indexOf('const observed = await waitForRemoteRuntimeReceiptObserved(accepted.receipt?.id ?? null);'))
-    .toBeLessThan(source.indexOf('const projectedHeight = await waitForRemoteRuntimeProjectionAtHeight(observed?.observedHeight ?? accepted.height);'));
+    .toBeLessThan(source.indexOf('const projectedHeight = await waitForRemoteRuntimeProjectionAtHeight(observedHeight);'));
   expect(source).not.toContain('waitForRemoteRuntimeCommit');
   expect(source).toContain('latestHeight = Math.max(');
   expect(source).toContain('get(runtimeView).height');
@@ -539,6 +557,19 @@ test('vault restore rebinds RuntimeController to the restored embedded runtime',
   expect(syncIndex).toBeGreaterThan(controllerIndex);
 });
 
+test('vault explicitly removes the persistence fence before resuming a drained runtime', () => {
+  const source = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
+  const helperStart = source.indexOf('function ensureRuntimeLoopRunning');
+  const helperEnd = source.indexOf('async function buildOrRestoreRuntimeEnv', helperStart);
+  expect(helperStart).toBeGreaterThan(0);
+  expect(helperEnd).toBeGreaterThan(helperStart);
+  const helperSource = source.slice(helperStart, helperEnd);
+
+  expect(helperSource).toContain('xln.resumeRuntimeAfterPersistenceQuiesce(env)');
+  expect(helperSource).not.toContain('xln.resumeRuntimeLoop(env)');
+  expect(helperSource).not.toContain('xln.startRuntimeLoop(env)');
+});
+
 test('embedded env initialization publishes active runtime snapshot before app shell reads it', () => {
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const updateStart = xlnStoreSource.indexOf('const updateLocalEnvironmentStores =');
@@ -722,7 +753,7 @@ test('xlnStore boot diagnostics use persistent error log instead of raw console'
 test('xlnStore payment gossip diagnostics use persistent error log instead of raw console', () => {
   const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const debugStart = source.indexOf('export function sendRuntimeDebugEvent');
-  const inputStart = source.indexOf('const hasMeaningfulEntityInput', debugStart);
+  const inputStart = source.indexOf('const embeddedAdapterTargetsRuntimeEnv', debugStart);
   expect(debugStart).toBeGreaterThan(0);
   expect(inputStart).toBeGreaterThan(debugStart);
   const gossipSource = source.slice(debugStart, inputStart);

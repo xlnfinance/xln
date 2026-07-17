@@ -22,7 +22,10 @@ describe("Entity Control-Shares System", function () {
     dividendChangeDelay: 3000
   };
 
-  const mockSignature = "0x" + "00".repeat(65); // Mock signature
+  const mockHanko = ethers.AbiCoder.defaultAbiCoder().encode(
+    ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[])'],
+    [[[], `0x${'00'.repeat(65)}`, [[ethers.ZeroHash, [0], [1], 1, 0, 0, 0]]]],
+  );
 
   beforeEach(async function () {
     [owner, entity1, entity2, investor1, investor2] = await ethers.getSigners();
@@ -103,8 +106,8 @@ describe("Entity Control-Shares System", function () {
       const controlBalance = await entityProvider.balanceOf(entityAddress, controlTokenId);
       const dividendBalance = await entityProvider.balanceOf(entityAddress, dividendTokenId);
 
-      expect(controlBalance).to.equal(BigInt("1000000000000000")); // 1e15  
-      expect(dividendBalance).to.equal(BigInt("1000000000000000")); // 1e15
+      expect(controlBalance).to.equal(100_000_000_000n);
+      expect(dividendBalance).to.equal(100_000_000_000n);
     });
 
     it("Should track governance info correctly", async function () {
@@ -113,8 +116,8 @@ describe("Entity Control-Shares System", function () {
       
       const govInfo = await entityProvider.getGovernanceInfo(2);
       expect(govInfo.controlTokenId).to.equal(2);
-      expect(govInfo.controlSupply).to.equal(BigInt("1000000000000000"));
-      expect(govInfo.dividendSupply).to.equal(BigInt("1000000000000000"));
+      expect(govInfo.controlSupply).to.equal(100_000_000_000n);
+      expect(govInfo.dividendSupply).to.equal(100_000_000_000n);
       expect(govInfo.hasActiveProposal).to.be.false;
     });
   });
@@ -140,19 +143,6 @@ describe("Entity Control-Shares System", function () {
     });
 
     it("Should reject release without valid signature", async function () {
-      const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-      const encodedBoard = abiCoder.encode(
-        ["tuple(uint16,bytes32[],uint16[],uint32,uint32,uint32)"],
-        [[
-          mockBoard.votingThreshold,
-          [ethers.zeroPadValue(entity1.address, 32)],
-          [100],
-          mockBoard.boardChangeDelay,
-          mockBoard.controlChangeDelay,
-          mockBoard.dividendChangeDelay
-        ]]
-      );
-
       await expect(
         entityProvider.releaseControlShares(
           entityNumber,
@@ -160,8 +150,7 @@ describe("Entity Control-Shares System", function () {
           BigInt("1000000000000000"), // 1M control tokens
           0, // No dividend tokens
           "Series A Funding",
-          encodedBoard,
-          mockSignature
+          mockHanko,
         )
       ).to.be.revertedWith("Invalid entity signature");
     });
@@ -174,7 +163,6 @@ describe("Entity Control-Shares System", function () {
           0, // No control tokens
           0, // No dividend tokens
           "Invalid Release",
-          "0x",
           "0x"
         )
       ).to.be.revertedWith("Must release some tokens");
@@ -188,7 +176,6 @@ describe("Entity Control-Shares System", function () {
           BigInt("1000000000000000"),
           0,
           "Invalid Release",
-          "0x",
           "0x"
         )
       ).to.be.revertedWith("Invalid depository address");
@@ -202,7 +189,6 @@ describe("Entity Control-Shares System", function () {
           BigInt("1000000000000000"),
           0,
           "Invalid Release",
-          "0x",
           "0x"
         )
       ).to.be.revertedWith("Entity doesn't exist");

@@ -4,7 +4,12 @@ import type { JurisdictionEvent } from './jurisdiction-events';
 import type { PaymentDeliveryMode } from './payment';
 import type { LendingTermId } from './lending';
 import type { DisputeArgumentSnapshot } from '../protocol/dispute/arguments';
-import type { AccountRebalanceShadowState, RebalanceRequestFeeState } from './rebalance';
+import type {
+  AccountRebalanceShadowState,
+  BilateralRebalanceFeePolicy,
+  RebalanceRequestFeeState,
+} from './rebalance';
+import type { AccountJClaimAccumulatorState, AccountJClaimProof } from './account-j-claims';
 
 export interface AssetBalance {
   amount: bigint; // Balance in smallest unit (wei, cents, shares)
@@ -46,7 +51,11 @@ export interface HtlcLock {
   createdTimestamp: number;    // When lock was added (for logging)
 
   // Onion routing envelope (cleartext JSON in Phase 2, encrypted in Phase 3)
-  envelope?: import('../protocol/htlc/envelope').HtlcEnvelope | string;
+  envelope?: import('../protocol/htlc/envelope').HtlcEnvelope
+    | import('../protocol/htlc/multi-recipient').MultiRecipientCiphertext
+    | string;
+  /** Opaque beneficiary offer, decryptable only by the payer's default proposer. */
+  secretOffer?: import('../protocol/htlc/multi-recipient').MultiRecipientCiphertext;
 }
 
 export interface PullCommitment {
@@ -131,6 +140,10 @@ export interface HtlcRoute {
 
   // Resolution
   secret?: string;
+  /** Exact opaque offer accepted by a durable outbound Account frame. */
+  acceptedOfferHash?: string;
+  acceptedAccountFrameHash?: string;
+  acceptedAccountFrameHeight?: number;
   // Waiting for inbound counterparty to ACK secret-return (htlc_resolve(secret)).
   secretAckPending?: boolean;
   secretAckStartedAt?: number;
@@ -186,10 +199,17 @@ export type AccountLendingIntentKind =
   | 'close-request'
   | 'close-payout';
 
+/** Immutable jurisdiction-stack identity shared by both Account replicas. */
+export type AccountStateDomain = {
+  chainId: number;
+  depositoryAddress: string;
+};
+
 export interface AccountMachine {
   // CANONICAL REPRESENTATION (like Channel.ts - both entities store IDENTICAL structure)
   leftEntity: string;   // Lower entity ID (canonical left)
   rightEntity: string;  // Higher entity ID (canonical right)
+  domain: AccountStateDomain; // Committed locally, then carried by every bilateral input
   watchSeed: string;    // 32-byte shared account seed revealed only when a dispute starts
   status: AccountStatus; // Manual lifecycle gate for dispute freeze/reopen
 
@@ -229,7 +249,11 @@ export interface AccountMachine {
   currentHeight: number; // Renamed from currentFrameId for S/E/A consistency
   pendingFrame?: AccountFrame;
   pendingSignatures: string[];
-  pendingAccountInput?: AccountInput; // Cached outbound frame input for resend/nudge
+  pendingAccountInput?: Extract<AccountInput, { kind: 'frame' | 'frame_ack' }>; // Cached outbound frame input for resend/nudge
+  // Validator-local exact replica route chosen when pendingAccountInput was
+  // emitted. It is persisted for restart-safe resend but excluded from Entity
+  // consensus roots because local key/profile availability can differ.
+  pendingAccountInputSignerId?: string;
   lastOutboundFrameAck?: {
     height: number;
     counterpartyEntityId: string;
@@ -240,10 +264,10 @@ export interface AccountMachine {
   rollbackCount: number;
   lastRollbackFrameHash?: string; // Track last rollback to prevent duplicate increments
 
-  // Bilateral J-event consensus (2-of-2 agreement on jurisdiction events)
-  leftJObservations: Array<{ jHeight: number; jBlockHash: string; events: JurisdictionEvent[]; observedAt: number }>;
-  rightJObservations: Array<{ jHeight: number; jBlockHash: string; events: JurisdictionEvent[]; observedAt: number }>;
-  jEventChain: Array<{ jHeight: number; jBlockHash: string; events: JurisdictionEvent[]; finalizedAt: number }>;
+  // Bilateral J-event consensus. Only authenticated pending roots are state;
+  // finalized bodies have already been applied and belong in the frame DB UI view.
+  leftPendingJClaims: AccountJClaimAccumulatorState;
+  rightPendingJClaims: AccountJClaimAccumulatorState;
   lastFinalizedJHeight: number;
 
   // Removed isProposer - use isLeft() function like old_src Channel.ts instead
@@ -283,6 +307,14 @@ export interface AccountMachine {
   // HANKO SYSTEM: Frame consensus + Dispute proofs
   currentFrameHanko?: HankoString;           // My hanko on current frame (bilateral consensus)
   counterpartyFrameHanko?: HankoString;      // Their hanko on current frame (bilateral consensus)
+  /** One bounded, consensus-visible reminder that this Account still needs the active board seal. */
+  boardResealMigration?: AccountBoardResealMigration;
+  counterpartyBoardReseal?: {
+    activationJHeight: number;
+    activationLogIndex: number;
+    frameHeight: number;
+    frameHash: string;
+  };
 
   currentDisputeProofHanko?: HankoString;              // My hanko on dispute proof (for J-machine enforcement)
   currentDisputeProofNonce?: number;                    // Nonce used in currentDisputeProofHanko
@@ -359,13 +391,7 @@ export interface AccountMachine {
   // Rebalancing hints (Phase 3: Hub coordination)
   requestedRebalance: Map<number, bigint>; // tokenId → amount entity wants rebalanced (credit→collateral)
   requestedRebalanceFeeState: Map<number, RebalanceRequestFeeState>; // tokenId → prepaid fee metadata
-  counterpartyRebalanceFeePolicy?: {
-    policyVersion: number;
-    baseFee: bigint;
-    liquidityFeeBps: bigint;
-    gasFee: bigint;
-    updatedAt: number;
-  };
+  rebalanceFeePolicies?: Map<number, BilateralRebalanceFeePolicy>;
 
   // Entity-private automation state. It is persisted and committed by the
   // owning Entity machine, but excluded from the bilateral Account root and
@@ -375,6 +401,19 @@ export interface AccountMachine {
     rejectedFrameEvidence?: AccountRejectedFrameEvidence;
   };
 }
+
+export type AccountBoardResealMigration = {
+  activationJHeight: number;
+  activationLogIndex: number;
+  reason:
+    | 'pending'
+    | 'account-identity-invalid'
+    | 'bilateral-frame-uncertified'
+    | 'certified-frame-invalid'
+    | 'bilateral-dispute-uncertified'
+    | 'certified-dispute-invalid'
+    | 'output-route-unavailable';
+};
 
 // Account frame structure for bilateral consensus (renamed from AccountBlock)
 export interface AccountFrame {
@@ -423,6 +462,7 @@ export type AccountSettleAction = {
 type AccountInputBase = {
   fromEntityId: string;
   toEntityId: string;
+  domain: AccountStateDomain;
   watchSeed?: string;
 };
 
@@ -440,9 +480,22 @@ export type AccountDisputeSeal = {
 
 export type AccountFrameAck = {
   height: number;
+  /** Exact Account frame committed by this acknowledgement. */
+  frameHash: string;
   /** Internal Entity-consensus draft until the secondary hash reaches quorum. */
   frameHanko?: HankoString;
   disputeSeal?: AccountDisputeSeal;
+};
+
+/**
+ * Board rotation changes only who may authorize an already-committed Account
+ * state. It must never manufacture a new Account frame or consume a dispute
+ * nonce, so the exact certified hashes travel in a separate control input.
+ */
+export type AccountBoardReseal = AccountFrameAck & {
+  /** Exact ordered EVM log position of the on-chain board activation. */
+  boardActivationJHeight: number;
+  boardActivationLogIndex: number;
 };
 
 export type AccountFrameProposal = {
@@ -473,6 +526,10 @@ export type AccountInput =
   | (AccountInputBase & {
       kind: 'dispute';
       disputeSeal: AccountDisputeSeal;
+    })
+  | (AccountInputBase & {
+      kind: 'board_reseal';
+      reseal: AccountBoardReseal;
     })
   | (AccountInputBase & {
       kind: 'settle';
@@ -534,13 +591,14 @@ export type SettlementOp =
  * Settlement workspace - shared editing area per bilateral account
  *
  * Flow:
- * 1. Either party creates workspace via settle_propose (ops + lastModifiedByLeft)
- * 2. Both parties can update via settle_update (replaces ops)
- * 3. Counterparty approves via settle_approve (compiles ops, signs, caches diffs)
- * 4. Executor submits via settle_execute (uses cached compiled diffs)
- * 5. Execute or reject clears workspace
+ * 1. An Account settle_transition atomically creates/updates workspace + holds.
+ * 2. Each side seals the post-proof; only the non-executor seals settlementHash.
+ * 3. Executor submit is an exact hash/version Account transition.
+ * 4. Submit releases workspace holds; AccountSettled finality clears the body.
  */
 export interface SettlementWorkspace {
+  /** Canonical bilateral identity of the exact editable workspace body. */
+  workspaceHash: string;
   ops: SettlementOp[];                        // Typed operations (compiled to diffs at approve)
   compiledDiffs?: SettlementDiff[];           // Cached at approve time
   compiledForgiveTokenIds?: number[];         // Cached at approve time
@@ -574,7 +632,7 @@ export interface SettlementWorkspace {
     rightHanko?: HankoString;                 // Right's dispute hanko at nonce+1
     disputeHash: string;                      // Exact hash signed by both post-settlement hankos
     proofBodyHash: string;                    // Same as pre-settlement (offdelta unchanged)
-    nonce: number;                            // = jNonce + 1 (replaces cooperativeNonce)
+    nonce: number;                            // = nonceAtSign + 1 (replaces cooperativeNonce)
   };
 }
 
@@ -714,6 +772,16 @@ export type AccountTx =
         policyVersion: number; // Hub fee-policy version used to compute feeAmount
       };
     }
+  | {
+      type: 'rebalance_policy';
+      data: {
+        tokenId: number;
+        policyVersion: number;
+        baseFee: bigint;
+        liquidityFeeBps: bigint;
+        gasFee: bigint;
+      };
+    }
   // === HTLC TRANSACTION TYPES ===
   | {
       type: 'htlc_lock';
@@ -725,17 +793,35 @@ export type AccountTx =
         amount: bigint;
         tokenId: number;
         deliveryMode?: Exclude<PaymentDeliveryMode, 'trusted'>;
-        envelope?: import('../protocol/htlc/envelope').HtlcEnvelope | string | undefined; // Onion routing envelope (string when encrypted)
+        envelope?: import('../protocol/htlc/envelope').HtlcEnvelope
+          | import('../protocol/htlc/multi-recipient').MultiRecipientCiphertext
+          | string
+          | undefined;
       };
     }
   | {
       type: 'htlc_resolve';
-      data: {
-        lockId: string;
-        outcome: 'secret' | 'error';
-        secret?: string;  // required when outcome='secret'
-        reason?: string;  // when outcome='error': no_account, no_capacity, timeout, amount_too_small, etc.
-      };
+      data:
+        | {
+            lockId: string;
+            outcome: 'offer';
+            offer: import('../protocol/htlc/multi-recipient').MultiRecipientCiphertext;
+          }
+        | {
+            lockId: string;
+            outcome: 'secret';
+            secret: string;
+          }
+        | {
+            lockId: string;
+            outcome: 'secret';
+            offerHash: string;
+          }
+        | {
+            lockId: string;
+            outcome: 'error';
+            reason?: string;
+          };
     }
   | {
       type: 'pull_lock';
@@ -849,28 +935,42 @@ export type AccountTx =
         pairId?: string;
       };
     }
-  // === SETTLEMENT HOLD TYPES (ring-fencing via bilateral consensus) ===
+  // === ATOMIC SETTLEMENT WORKSPACE TRANSITION ===
   | {
-      type: 'settle_hold';
-      data: {
-        workspaceVersion: number;  // Which workspace version this hold is for
-        diffs: Array<{
-          tokenId: number;
-          leftWithdrawing: bigint;   // Amount left is withdrawing (from leftDiff < 0)
-          rightWithdrawing: bigint;  // Amount right is withdrawing (from rightDiff < 0)
-        }>;
-      };
-    }
-  | {
-      type: 'settle_release';
-      data: {
-        workspaceVersion: number;  // Which workspace version to release holds for
-        diffs: Array<{
-          tokenId: number;
-          leftWithdrawing: bigint;
-          rightWithdrawing: bigint;
-        }>;
-      };
+      type: 'settle_transition';
+      data:
+        | {
+            kind: 'upsert';
+            version: number;
+            previousWorkspaceHash?: string;
+            ops: SettlementOp[];
+            executorIsLeft: boolean;
+            memo?: string;
+          }
+        | {
+            kind: 'submit' | 'clear';
+            version: number;
+            workspaceHash: string;
+          }
+        | {
+            /**
+             * One side's exact authorization, ordered by bilateral Account
+             * consensus. The elected executor never signs settlementHash; it
+             * signs only the post-settlement dispute proof.
+             */
+            kind: 'seal';
+            version: number;
+            workspaceHash: string;
+            settlementNonce: number;
+            settlementHash: string;
+            settlementHanko?: HankoString;
+            postProof: {
+              nonce: number;
+              proofBodyHash: string;
+              disputeHash: string;
+              hanko?: HankoString;
+            };
+          };
     }
   | {
       type: 'reopen_disputed';
@@ -884,7 +984,9 @@ export type AccountTx =
         jHeight: number;
         jBlockHash: string;
         events: JurisdictionEvent[];
-        observedAt: number;
+        /** Deterministic Patricia witnesses added by the Account proposer. */
+        leftProof?: AccountJClaimProof;
+        rightProof?: AccountJClaimProof;
       };
     };
 

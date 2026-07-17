@@ -14,6 +14,7 @@ import { ethers } from 'ethers';
 import { createProviderScopedEntityId, normalizeEntityId } from '../entity/id';
 import { createEmptyBatch, batchAddReserveToReserve, encodeJBatch } from '../jurisdiction/batch';
 import { loadCliJurisdiction, type CliJurisdiction } from '../jurisdiction/cli-jurisdiction';
+import { getTokenInfo } from '../account/utils';
 
 const REMOTE_RPC = process.env['XLN_CLI_REMOTE_RPC'] || 'https://xln.finance/rpc';
 const LOCAL_RPC = process.env['XLN_CLI_LOCAL_RPC'] || 'http://localhost:8545';
@@ -131,7 +132,7 @@ Commands:
       if (!args[0]) { console.log('Usage: reserves <entityId>'); break; }
       const entityId = args[0].startsWith('0x') ? args[0] : '0x' + args[0].padStart(64, '0');
       const reserves = await jAdapter.getReserves(entityId, 1); // tokenId 1 = USDC
-      console.log(`Reserves: ${ethers.formatUnits(reserves, 18)} USDC`);
+      console.log(`Reserves: ${ethers.formatUnits(reserves, getTokenInfo(1).decimals)} USDC`);
       break;
     }
 
@@ -140,7 +141,7 @@ Commands:
       const [from, to, amountStr, nonceStr, hankoData, providerAddr] = args;
       const fromId = from!.startsWith('0x') ? from! : '0x' + from!.padStart(64, '0');
       const toId = to!.startsWith('0x') ? to! : '0x' + to!.padStart(64, '0');
-      const amount = ethers.parseUnits(amountStr!, 18);
+      const amount = ethers.parseUnits(amountStr!, getTokenInfo(1).decimals);
       const nonce = BigInt(nonceStr!);
       const provider = providerAddr || activeJurisdiction.contracts.entityProvider;
       console.log(`R2R: ${fromId.slice(0,10)}... -> ${toId.slice(0,10)}... : ${amountStr} USDC`);

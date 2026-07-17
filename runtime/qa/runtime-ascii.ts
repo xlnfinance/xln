@@ -452,8 +452,15 @@ export function formatAccount(account: AccountMachine, myEntityId: string, optio
       if (lock.envelope) {
         let envInfo = 'Unknown';
         if (typeof lock.envelope === 'object') {
-          envInfo = lock.envelope.finalRecipient ? 'Final recipient' :
-                   lock.envelope.nextHop ? `→ ${formatAddress(lock.envelope.nextHop)}` : 'Unknown';
+          if ('version' in lock.envelope && lock.envelope.version === 'xln:htlc-multi-recipient:v1') {
+            envInfo = `Encrypted for ${lock.envelope.recipients.length} validators`;
+          } else {
+            envInfo = 'finalRecipient' in lock.envelope && lock.envelope.finalRecipient
+              ? 'Final recipient'
+              : 'nextHop' in lock.envelope && typeof lock.envelope.nextHop === 'string'
+                ? `→ ${formatAddress(lock.envelope.nextHop)}`
+                : 'Unknown';
+          }
         } else {
           envInfo = `Encrypted: ${lock.envelope.slice(0, 20)}...`;
         }

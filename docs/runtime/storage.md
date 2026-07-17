@@ -9,6 +9,14 @@ This folder owns persistence, replay, and canonical restore verification.
 - restores state by snapshot + diff replay
 - verifies restore against canonical runtime-state hashes
 
+## Daemon checkpoint and restore
+
+1. **Load and decode.** The daemon reads the retained snapshot plus its frame/diff tail. Every Runtime, Entity, Account, replica metadata, Merkle node, and DAG node crosses a domain-local validator before entering memory.
+2. **Rebuild and verify.** Hydration reconstructs Maps and reachable immutable node stores, then checks replica lineage, J-history roots, materialized state, and the canonical runtime/entity hashes. Any missing or malformed authoritative record aborts restore.
+3. **Start live work.** Only after exact restore succeeds does the caller attach trusted RPC/network adapters and start the runtime loop. New J-events are admitted normally and the durable outbox is retried from its restored exact payload and signer route.
+
+Checkpoint publication uses one LevelDB batch for the changed materialized documents, immutable nodes, replica metadata, frame record, and published head. The head is never visible without the records it names. Historical account/J bodies used only for display may be pruned; consensus roots and live retry state may not.
+
 ## Main files
 
 - `index.ts`

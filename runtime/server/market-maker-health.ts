@@ -102,9 +102,7 @@ const accountReady = (
 ): boolean =>
   Boolean(account) &&
   String(account?.status || 'active') === 'active' &&
-  Number(account?.currentHeight ?? 0) > 0 &&
-  !account?.pendingFrame &&
-  Number(account?.mempool?.length || 0) === 0;
+  Number(account?.currentHeight ?? 0) > 0;
 
 export const getMarketMakerHealth = (
   env: Env | null,
@@ -203,8 +201,6 @@ export const getMarketMakerHealth = (
     if (!account) reason = 'missing-account';
     else if (String(account.status || 'active') !== 'active') reason = 'inactive-account';
     else if (Number(account.currentHeight ?? 0) <= 0) reason = 'height-zero';
-    else if (account.pendingFrame) reason = 'pending-frame';
-    else if (Number(account.mempool?.length || 0) > 0) reason = 'mempool';
     const offers = countMarketMakerOffersForHub(account, hubEntityId);
     const pairHealth = pairs.map(pair => {
       const pairOffers = countMarketMakerOffersForHubPair(account, hubEntityId, pair);

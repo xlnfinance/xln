@@ -9,17 +9,23 @@ import { deriveSignerAddressSync, signDigest } from '../account/crypto';
 import { encryptJSON, deriveEncryptionKeyPair } from '../networking/p2p-crypto';
 import { createLocalDeliveryHandler } from '../relay/local-delivery';
 import { createEmptyEnv } from '../runtime';
+import {
+  buildCryptographicProfileFixture,
+  certifySingleSignerProfileFixture,
+  deriveSingleSignerFixtureEntityId,
+} from './helpers/cryptographic-profile';
 
 const SERVER_RUNTIME_ID = '0x9999999999999999999999999999999999999999';
 const SEED_A = 'relay-router-test-seed-a';
 const SEED_B = 'relay-router-test-seed-b';
+const SEED_C = 'relay-router-test-seed-c';
 const RUNTIME_A = deriveSignerAddressSync(SEED_A, '1');
 const RUNTIME_B = deriveSignerAddressSync(SEED_B, '2');
 const KEY_A = '0x' + '11'.repeat(32);
 const KEY_B = '0x' + '22'.repeat(32);
-const ENTITY_A = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-const ENTITY_B = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
-const ENTITY_C = '0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+const ENTITY_A = deriveSingleSignerFixtureEntityId(SEED_A, '1');
+const ENTITY_B = deriveSingleSignerFixtureEntityId(SEED_B, '2');
+const ENTITY_C = deriveSingleSignerFixtureEntityId(SEED_C, '3');
 
 type FakeWs = { label: string; readyState?: number };
 
@@ -41,37 +47,32 @@ const buildProfile = (
   entityId: string,
   runtimeId: string,
   runtimeEncPubKey: string,
-  overrides: Partial<Profile> = {},
-): Profile => ({
-  entityId,
-  runtimeId,
-  name: entityId === ENTITY_A ? 'alice' : entityId === ENTITY_B ? 'hub-b' : 'leaf-c',
-  avatar: '',
-  bio: '',
-  website: '',
-  lastUpdated: 1,
-  runtimeEncPubKey,
-  publicAccounts: [],
-  wsUrl: null,
-  relays: [],
-  metadata: {
-    entityEncPubKey: runtimeEncPubKey,
-    isHub: false,
-    routingFeePPM: 100,
-    baseFee: 0n,
-    board: {
-      threshold: 1,
-      validators: [{
-        signer: runtimeId,
-        signerId: runtimeId,
-        weight: 1,
-        publicKey: `board:${entityId.slice(2, 10)}`,
-      }],
-    },
-  },
-  accounts: [],
-  ...overrides,
-});
+  overrides: Readonly<{
+    lastUpdated?: number;
+    name?: string;
+    isHub?: boolean;
+    certified?: boolean;
+  }> = {},
+): Profile => {
+  const signer = entityId === ENTITY_A
+    ? { seed: SEED_A, signerId: '1' }
+    : entityId === ENTITY_B
+      ? { seed: SEED_B, signerId: '2' }
+      : { seed: SEED_C, signerId: '3' };
+  const profile = buildCryptographicProfileFixture({
+    entityId,
+    signingSeed: signer.seed,
+    signerId: signer.signerId,
+    runtimeId,
+    runtimeEncPubKey,
+    name: overrides.name ?? (entityId === ENTITY_A ? 'alice' : entityId === ENTITY_B ? 'hub-b' : 'leaf-c'),
+    lastUpdated: overrides.lastUpdated,
+    isHub: overrides.isHub,
+  });
+  return overrides.certified === false
+    ? profile
+    : certifySingleSignerProfileFixture(profile, signer.seed, signer.signerId);
+};
 
 describe('relay-router gossip fanout', () => {
   test('relay router and local delivery verbose diagnostics use structured logging', () => {
@@ -81,9 +82,28 @@ describe('relay-router gossip fanout', () => {
     expect(routerSource).toContain("const relayRouterLog = createStructuredLogger('relay.router');");
     expect(routerSource).toContain("relayRouterLog.debug('verbose'");
     expect(routerSource).not.toContain('console.');
+    expect(routerSource).not.toContain('catch { size = 0; }');
+    expect(routerSource).toContain('safeStringify(msg)');
     expect(localDeliverySource).toContain("const relayLocalDeliveryLog = createStructuredLogger('relay.local_delivery');");
     expect(localDeliverySource).toContain("relayLocalDeliveryLog.debug('verbose'");
     expect(localDeliverySource).not.toContain('console.');
+  });
+
+  test('records a nonzero message size for tagged BigInt payloads', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const ws: FakeWs = { label: 'bigint' };
+    await relayRoute({
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: () => {},
+    }, ws, {
+      type: 'unsupported_bigint_probe',
+      amount: 1n,
+    });
+
+    const event = store.debugEvents.find((candidate) => candidate.event === 'message');
+    expect(event?.size).toBeGreaterThan(0);
   });
 
   test('broadcasts fresh gossip updates to other connected clients', async () => {
@@ -93,7 +113,6 @@ describe('relay-router gossip fanout', () => {
       store,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
-      verifyProfile: async () => ({ valid: true }),
       send: (ws: FakeWs, raw: Uint8Array) => {
         const bucket = sentBySocket.get(ws) ?? [];
         bucket.push(deserializeWsMessage(raw));
@@ -141,7 +160,6 @@ describe('relay-router gossip fanout', () => {
       store,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
-      verifyProfile: async () => ({ valid: true }),
       send: (ws: FakeWs, raw: Uint8Array) => {
         const bucket = sentBySocket.get(ws) ?? [];
         bucket.push(deserializeWsMessage(raw));
@@ -164,21 +182,7 @@ describe('relay-router gossip fanout', () => {
           buildProfile(ENTITY_B, RUNTIME_B, KEY_B, {
             lastUpdated: 200,
             name: 'hub-b',
-            metadata: {
-              entityEncPubKey: KEY_B,
-              isHub: true,
-              routingFeePPM: 100,
-              baseFee: 0n,
-              board: {
-                threshold: 1,
-                validators: [{
-                  signer: RUNTIME_B,
-                  signerId: RUNTIME_B,
-                  weight: 1,
-                  publicKey: `board:${ENTITY_B.slice(2, 10)}`,
-                }],
-              },
-            },
+            isHub: true,
           }),
           buildProfile(ENTITY_C, RUNTIME_B, KEY_B, { lastUpdated: 300, name: 'leaf-c' }),
         ],
@@ -328,11 +332,11 @@ describe('relay-router gossip fanout', () => {
     expect(store.pendingMessages.has(RUNTIME_A)).toBe(false);
   });
 
-  test('rejects duplicate hello without closing the existing runtime socket', async () => {
+  test('new authenticated hello atomically replaces the previous runtime socket', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();
-    let closeCount = 0;
-    let duplicateClose: { code?: number; reason?: string } | null = null;
+    let replacementClose: { code?: number; reason?: string } | null = null;
+    let freshCloseCount = 0;
     const config = {
       store,
       localRuntimeId: SERVER_RUNTIME_ID,
@@ -343,29 +347,33 @@ describe('relay-router gossip fanout', () => {
         sentBySocket.set(ws, bucket);
       },
     };
-    const wsA: FakeWs & { close: () => void } = { label: 'A', close: () => { closeCount += 1; } };
-    const attacker: FakeWs & { close: (code?: number, reason?: string) => void } = {
-      label: 'attacker',
+    const wsA: FakeWs & { close: (code?: number, reason?: string) => void } = {
+      label: 'A',
       close: (code?: number, reason?: string) => {
-        duplicateClose = { code, reason };
+        replacementClose = { code, reason };
       },
+    };
+    const fresh: FakeWs & { close: () => void } = {
+      label: 'fresh',
+      close: () => { freshCloseCount += 1; },
     };
 
     await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
-    await relayRoute(config, attacker, signedHello(RUNTIME_A, SEED_A, KEY_A));
-    await relayRoute(config, attacker, {
+    await relayRoute(config, fresh, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, wsA, {
       type: 'gossip_announce',
-      id: 'duplicate-followup',
+      id: 'superseded-followup',
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
       to: SERVER_RUNTIME_ID,
       payload: { profiles: [] },
     });
 
-    expect(store.clients.get(RUNTIME_A)?.ws).toBe(wsA);
-    expect(closeCount).toBe(0);
-    expect(duplicateClose).toEqual({ code: 4009, reason: 'duplicate-runtime' });
-    expect(sentBySocket.get(attacker) ?? []).toEqual([]);
+    expect(store.clients.get(RUNTIME_A)?.ws).toBe(fresh);
+    expect(replacementClose).toEqual({ code: 4009, reason: 'superseded-runtime' });
+    expect(freshCloseCount).toBe(0);
+    expect(sentBySocket.get(fresh)?.at(-1)).toEqual({ type: 'hello_ack', to: RUNTIME_A.toLowerCase() });
+    expect(sentBySocket.get(wsA)).toEqual([{ type: 'hello_ack', to: RUNTIME_A.toLowerCase() }]);
   });
 
   test('allows signed reconnect after the previous runtime socket is closed', async () => {
@@ -557,6 +565,51 @@ describe('relay-router gossip fanout', () => {
       (event.details as { entityId?: string; txs?: number } | undefined)?.entityId === ENTITY_B &&
       (event.details as { entityId?: string; txs?: number } | undefined)?.txs === 1,
     )).toBe(true);
+  });
+
+  test('forwards scoped application receipts live without relay persistence', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sentBySocket = new Map<FakeWs, unknown[]>();
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (ws: FakeWs, raw: Uint8Array) => {
+        const bucket = sentBySocket.get(ws) ?? [];
+        bucket.push(deserializeWsMessage(raw));
+        sentBySocket.set(ws, bucket);
+      },
+    };
+    const receiver: FakeWs = { label: 'receiver', readyState: 1 };
+    const sender: FakeWs = { label: 'sender', readyState: 1 };
+    await relayRoute(config, receiver, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, sender, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
+    const receipt = {
+      body: {
+        version: 1,
+        receiverRuntimeId: RUNTIME_A,
+        identity: { kind: 'entity-frame', height: 4, frameHash: '0xframe' },
+      },
+      signature: '0xsigned',
+    };
+
+    await relayRoute(config, receiver, {
+      type: 'entity_input_receipt',
+      id: 'receipt-live-1',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      to: RUNTIME_B,
+      payload: receipt,
+    });
+
+    expect(sentBySocket.get(sender)?.at(-1)).toMatchObject({
+      type: 'entity_input_receipt',
+      id: 'receipt-live-1',
+      from: RUNTIME_A,
+      to: RUNTIME_B,
+      payload: receipt,
+    });
+    expect(store.pendingMessages.get(RUNTIME_B)).toBeUndefined();
   });
 
   test('routes live recovery bundle request and response without queueing', async () => {
@@ -805,6 +858,7 @@ describe('relay-router gossip fanout', () => {
     };
 
     await expect(handler(RUNTIME_A, {
+      type: 'entity_input',
       to: env.runtimeId,
       encrypted: true,
       payload: encryptJSON(unknownEntityInput, deriveEncryptionKeyPair(env.runtimeSeed).publicKey),
@@ -859,7 +913,7 @@ describe('relay-router gossip fanout', () => {
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
       to: SERVER_RUNTIME_ID,
-      payload: { profiles: [buildProfile(ENTITY_A, RUNTIME_A, KEY_A)] },
+      payload: { profiles: [buildProfile(ENTITY_A, RUNTIME_A, KEY_A, { certified: false })] },
     });
 
     expect(store.gossipProfiles.size).toBe(0);

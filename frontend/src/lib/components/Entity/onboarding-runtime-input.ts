@@ -39,6 +39,12 @@ export type BuildOnboardingHubOpenInputRequest = {
   rebalancePolicy?: HubOpenAccountRebalancePolicy | null;
 };
 
+export type CommittedAutoJoinCount = {
+  requestedPerTarget: number;
+  targetCount: number;
+  committedCount: number;
+};
+
 const normalizeSignerId = (value: unknown): string =>
   String(value || '').trim().toLowerCase();
 
@@ -67,6 +73,19 @@ function uniqueTargets(targets: OnboardingRuntimeTarget[], context: string): Onb
   }
   if (out.length === 0) throw new Error(`${context}: at least one runtime target is required.`);
   return out;
+}
+
+export function assertCommittedAutoJoinCount(counts: CommittedAutoJoinCount): number {
+  const requestedPerTarget = Math.max(0, Math.floor(Number(counts.requestedPerTarget)));
+  const targetCount = Math.max(0, Math.floor(Number(counts.targetCount)));
+  const committedCount = Math.max(0, Math.floor(Number(counts.committedCount)));
+  const expectedCount = requestedPerTarget * targetCount;
+  if (committedCount !== expectedCount) {
+    throw new Error(
+      `ONBOARDING_AUTO_JOIN_INCOMPLETE:requested=${expectedCount}:committed=${committedCount}`,
+    );
+  }
+  return committedCount;
 }
 
 export function buildOnboardingProfileRuntimeInput(

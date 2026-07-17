@@ -15,6 +15,8 @@ import {
   shouldRejectOffchainFaucetForSettledCapacity,
 } from './offchain-faucet-admission';
 import { faucetFailureBody } from './faucet-failure';
+import { getTokenInfo } from '../account/utils';
+import { getDefaultRebalanceBaseFeeForToken } from '../account/rebalance-defaults';
 
 const faucetLog = createStructuredLogger('server.faucet');
 
@@ -245,7 +247,7 @@ export const handleOffchainFaucet = async (input: {
         },
       });
 
-      const amountWei = ethers.parseUnits(amount, 18);
+      const amountWei = ethers.parseUnits(amount, getTokenInfo(Number(tokenId)).decimals);
       const accountMachine = getAccountMachine(env, hubEntityId, normalizedUserEntityId);
       const hasHubAccount = hasAccount(env, hubEntityId, normalizedUserEntityId) || !!accountMachine;
       const buildAccountPresence = () => hubs.map(hub => ({
@@ -336,9 +338,9 @@ export const handleOffchainFaucet = async (input: {
             Number.isFinite(Number(hubPolicy?.policyVersion)) && Number(hubPolicy?.policyVersion) > 0
               ? Number(hubPolicy?.policyVersion)
               : 1,
-          baseFee: hubPolicy?.rebalanceBaseFee ?? 10n ** 17n,
+          baseFee: getDefaultRebalanceBaseFeeForToken(Number(tokenId)),
           liquidityFeeBps: hubPolicy?.rebalanceLiquidityFeeBps ?? hubPolicy?.minFeeBps ?? 1n,
-          gasFee: hubPolicy?.rebalanceGasFee ?? 0n,
+          gasFee: 0n,
         });
         const entityTxs: EntityTx[] = [{
           type: 'directPayment',

@@ -1,10 +1,12 @@
 import { clearJurisdictionsCache, loadJurisdictions } from '../jurisdiction/jurisdiction-loader';
+import { getJurisdictionIdentityRef } from '../jurisdiction/jurisdiction-runtime';
 import { normalizeLoopbackUrl, toPublicRpcUrl } from '../networking/loopback-url';
 
 export type MeshJurisdictionConfig = {
   name: string;
   chainId: number;
   rpc: string;
+  entityProviderDeploymentBlock: number;
   primary?: boolean;
   blockTimeMs?: number;
   contracts?: {
@@ -18,6 +20,8 @@ export type MeshJurisdictionConfig = {
 const hasRequiredContracts = (entry: unknown): entry is MeshJurisdictionConfig => {
   const jurisdiction = entry as MeshJurisdictionConfig | null | undefined;
   return Boolean(
+    Number.isSafeInteger(jurisdiction?.entityProviderDeploymentBlock) &&
+    Number(jurisdiction?.entityProviderDeploymentBlock) > 0 &&
     jurisdiction?.contracts?.account &&
     jurisdiction.contracts.depository &&
     jurisdiction.contracts.entityProvider &&
@@ -59,7 +63,9 @@ export const resolveMeshJurisdictionConfig = <T extends MeshJurisdictionConfig =
   } as unknown as T;
 };
 
-export const requireJurisdictionBlockTimeMs = (jurisdiction: MeshJurisdictionConfig): number => {
+export const requireJurisdictionBlockTimeMs = (
+  jurisdiction: { name: string; blockTimeMs?: number | undefined },
+): number => {
   const value = Number(jurisdiction.blockTimeMs);
   if (Number.isFinite(value) && value > 0) return Math.floor(value);
   throw new Error(`JURISDICTION_BLOCK_TIME_MISSING:${jurisdiction.name}`);
@@ -92,4 +98,17 @@ export const resolveSecondaryJurisdictions = <T extends MeshJurisdictionConfig =
     .filter(([, jurisdiction]) => Boolean(jurisdiction?.rpc && hasRequiredContracts(jurisdiction)))
     .filter(([key, jurisdiction]) => isSecondaryJurisdictionConfig(key, jurisdiction as MeshJurisdictionConfig, primaryRpc))
     .map(([, jurisdiction]) => jurisdiction as unknown as T);
+};
+
+export const resolveMeshJurisdictionRpcBindings = (
+  primaryRpc: string,
+  resolveRpcUrl: (rpcUrl: string) => string,
+): Array<{ jurisdictionRef: string; rpcUrl: string }> => {
+  const primary = resolveMeshJurisdictionConfig(primaryRpc);
+  return [primary, ...resolveSecondaryJurisdictions(primary.rpc)].map((jurisdiction) => {
+    const jurisdictionRef = getJurisdictionIdentityRef(jurisdiction);
+    const rpcUrl = resolveRpcUrl(jurisdiction.rpc).trim();
+    if (!jurisdictionRef || !rpcUrl) throw new Error('MESH_JURISDICTION_RPC_BINDING_INVALID');
+    return { jurisdictionRef, rpcUrl };
+  });
 };

@@ -18,9 +18,11 @@ import {
   graphEntityHasReserves,
   graphReserveValue,
   graphReserveValues,
-  graphTotalReserves,
   parseGraphScenarioSteps,
 } from '../../frontend/src/lib/view/panels/graph3d-helpers';
+
+const USDC_DECIMALS = 6;
+const getUsdcDecimals = (): number => USDC_DECIMALS;
 
 describe('graph3d helpers', () => {
   test('finds J replicas in canonical maps and legacy arrays', () => {
@@ -43,7 +45,6 @@ describe('graph3d helpers', () => {
     const reserveObject = { '1': '30n', '2': 40n };
     expect(graphReserveValues(reserveObject)).toEqual([30n, 40n]);
     expect(graphReserveValue(reserveObject, '1')).toBe(30n);
-    expect(graphTotalReserves({ state: { reserves: reserveObject } })).toBe(70n);
   });
 
   test('formats batch tx summaries for J-machine labels', () => {
@@ -60,7 +61,7 @@ describe('graph3d helpers', () => {
           ],
         },
       },
-    })).toBe('E9: 2R2R +1R2C -2W +1D');
+    }, getUsdcDecimals)).toBe('E9: 2R2R +1R2C -2W +1D');
   });
 
   test('formats generic tx labels with block height and coarse amount', () => {
@@ -68,28 +69,31 @@ describe('graph3d helpers', () => {
       type: 'payment',
       from: 'alice7',
       to: 'bob8',
-      amount: 5_000_000n * 10n ** 18n,
-    }, 12)).toBe('#12 PAYMENT: 7→8 $5M');
+      tokenId: 1,
+      amount: 5_000_000n * 10n ** 6n,
+    }, getUsdcDecimals, 12)).toBe('#12 PAYMENT: 7→8 5,000,000');
   });
 
   test('formats graph financial amounts and reserve badges', () => {
-    expect(formatGraphFinancialAmount(0n)).toBe('0');
-    expect(formatGraphFinancialAmount(1234567890000000000n)).toBe('1.2345');
-    expect(formatGraphFinancialAmount(-2_000000000000000000n)).toBe('-2');
-    expect(formatGraphReserveBadge(2_500_000n * 10n ** 18n)).toBe(' $2.5M');
-    expect(formatGraphReserveBadge(25_000n * 10n ** 18n)).toBe(' $25K');
+    expect(formatGraphFinancialAmount(0n, USDC_DECIMALS)).toBe('0');
+    expect(formatGraphFinancialAmount(1_234_567n, USDC_DECIMALS)).toBe('1.2345');
+    expect(formatGraphFinancialAmount(-2_000_000n, USDC_DECIMALS)).toBe('-2');
+    expect(formatGraphReserveBadge(2_500_000n * 10n ** 6n, USDC_DECIMALS, 'USDC')).toBe(' 2.5M USDC');
+    expect(formatGraphReserveBadge(25_000n * 10n ** 6n, USDC_DECIMALS, 'USDC')).toBe(' 25K USDC');
   });
 
   test('formats entity reserve tooltip lines', () => {
     expect(formatGraphEntityReserveBalances({
-      reserves: new Map<string, bigint>([['1', 1500n], ['2', 0n]]),
+      reserves: new Map<string, bigint>([['1', 1_500n * 10n ** 6n], ['2', 0n]]),
       selectedTokenId: 1,
       getTokenSymbol: (tokenId) => tokenId === 1 ? 'USDC' : 'ETH',
-    })).toBe('▸ USDC: 1.50k\n  ETH: 0.00k');
+      getTokenDecimals: getUsdcDecimals,
+    })).toBe('▸ USDC: 1,500\n  ETH: 0');
     expect(formatGraphEntityReserveBalances({
       reserves: new Map(),
       selectedTokenId: 1,
       getTokenSymbol: String,
+      getTokenDecimals: getUsdcDecimals,
     })).toBe('  No token reserves');
   });
 
@@ -123,12 +127,13 @@ describe('graph3d helpers', () => {
       selectedTokenId: 1,
       getAccountTokenDelta: (account, tokenId) => (account as typeof accountData).deltas.get(tokenId) ?? null,
       deriveEntry: (_delta, isLeft) => ({
-        delta: isLeft ? 2_000000000000000000 : -2_000000000000000000,
-        ownCreditLimit: isLeft ? 5_000000000000000000 : 6_000000000000000000,
-        peerCreditLimit: isLeft ? 7_000000000000000000 : 8_000000000000000000,
-        collateral: isLeft ? 3_000000000000000000 : 4_000000000000000000,
+        delta: isLeft ? 2_000_000 : -2_000_000,
+        ownCreditLimit: isLeft ? 5_000_000 : 6_000_000,
+        peerCreditLimit: isLeft ? 7_000_000 : 8_000_000,
+        collateral: isLeft ? 3_000_000 : 4_000_000,
       }),
       getEntityShortName: (entityId) => entityId.toUpperCase(),
+      getTokenDecimals: getUsdcDecimals,
     });
     expect(info).toEqual({
       left: 'Their Credit: 7\nCollateral: 3\nOur Credit: 5\nNet: 2',
@@ -144,7 +149,7 @@ describe('graph3d helpers', () => {
       ['bob:signer', {
         signerId: 'prod-JPM-signer',
         state: {
-          reserves: new Map<string, bigint>([['1', 2500n]]),
+          reserves: new Map<string, bigint>([['1', 2_500n * 10n ** 6n]]),
           accounts: new Map(),
         },
       }],
@@ -164,7 +169,8 @@ describe('graph3d helpers', () => {
       replicas,
       selectedTokenId: 1,
       getTokenSymbol: (tokenId) => tokenId === 1 ? 'USDC' : `TKN${tokenId}`,
-    })).toBe('▸ USDC: 2.50k');
+      getTokenDecimals: getUsdcDecimals,
+    })).toBe('▸ USDC: 2,500');
     expect(formatGraphEntityShortNameFromReplicas({
       entityId: 'bob',
       replicas,
@@ -177,12 +183,13 @@ describe('graph3d helpers', () => {
       selectedTokenId: 1,
       getAccountTokenDelta: (account, tokenId) => (account as { deltas: Map<number, unknown> }).deltas.get(tokenId) ?? null,
       deriveEntry: (_delta, isLeft) => ({
-        delta: isLeft ? 10_000000000000000000 : -10_000000000000000000,
-        ownCreditLimit: isLeft ? 20_000000000000000000 : 30_000000000000000000,
-        peerCreditLimit: isLeft ? 40_000000000000000000 : 50_000000000000000000,
-        collateral: isLeft ? 60_000000000000000000 : 70_000000000000000000,
+        delta: isLeft ? 10_000_000 : -10_000_000,
+        ownCreditLimit: isLeft ? 20_000_000 : 30_000_000,
+        peerCreditLimit: isLeft ? 40_000_000 : 50_000_000,
+        collateral: isLeft ? 60_000_000 : 70_000_000,
       }),
       getEntityShortName: (entityId) => entityId.toUpperCase(),
+      getTokenDecimals: getUsdcDecimals,
     })).toEqual({
       left: 'Their Credit: 40\nCollateral: 60\nOur Credit: 20\nNet: 10',
       right: 'Our Credit: 30\nCollateral: 70\nTheir Credit: 50\nNet: -10',

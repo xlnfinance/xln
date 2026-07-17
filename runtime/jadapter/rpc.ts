@@ -22,9 +22,9 @@ import {
   ERC20Mock__factory,
 } from '../../jurisdictions/typechain-types/index.ts';
 
-import type { BrowserVMState, DisputeFinalizationEvidence, JTx, Env } from '../types';
+import type { BrowserVMState, DisputeFinalizationEvidence, JTx, Env, RuntimeInput, RuntimeTx } from '../types';
 import { normalizeEntityId } from '../entity/id';
-import { compareStableText } from '../protocol/serialization';
+import { compareStableText, safeStringify } from '../protocol/serialization';
 import type {
   JAdapter,
   JAdapterAddresses,
@@ -39,6 +39,7 @@ import type {
   JWalletSnapshotRequest,
   SnapshotId,
 } from './types';
+import { classifyJAdapterFailure, makeJAdapterFailureResult } from './failure';
 import {
   buildExternalTokenToReserveBatch,
   computeAccountKey,
@@ -48,9 +49,11 @@ import {
 import { CANONICAL_J_EVENTS } from './helpers';
 import {
   applyJBlockHeadersIngressTransform,
-  enqueueJHistoryRewind,
+  enqueueJHistoryRewindForReplicaKeys,
   enqueueJHistoryRange,
   findWatcherJurisdictionReplica,
+  getMinimumScannedSignerJHeight,
+  isWatcherJHistoryRangeDurable,
   getWatcherStartBlock,
   isEntityReplicaRelevantToWatcher,
   processEventBatch,
@@ -59,19 +62,26 @@ import {
   updateWatcherJurisdictionCursor,
   type EventBatchCounter,
   type PendingWatcherJBlockMap,
+  type PendingWatcherJHistoryRange,
   type RawJEvent,
   type RawJEventArgs,
 } from './watcher';
-import { getValidatorJExpectedBlockHash } from '../jurisdiction/local-history';
+import {
+  getEntityCertifiedJAnchor,
+  getValidatorJExpectedBlockHash,
+} from '../jurisdiction/local-history';
 import { DEV_CHAIN_IDS } from './index';
+import {
+  extractCanonicalDepositoryEventArgs,
+  parseKnownDepositoryLog,
+} from './depository-event-codec';
 import { decodeJBatch, getBatchSize, isBatchEmpty, preflightBatchForE2 } from '../jurisdiction/batch';
 import { requireUsableContractAddress } from '../jurisdiction/contract-address';
-import { setDeltaTransformerAddress } from '../protocol/dispute/proof-builder';
 import { prepareSignedBatch } from '../hanko/batch';
 import { hashDisputeProofHankoPayload } from '../hanko/onchain-domain';
 import { resolveEntityProposerId } from '../state-helpers';
 import { BLOCKCHAIN } from '../constants';
-import { DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction } from './default-tokens';
+import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultTokenSupply } from './default-tokens';
 import { createStructuredLogger } from '../infra/logger';
 import {
   firstAddress,
@@ -83,6 +93,22 @@ import {
   type RpcBatchResponse,
 } from './rpc-utils';
 import { nodeProcess, runtimeIsBrowser } from '../machine/platform';
+import {
+  readAuthenticatedReceiptRange,
+  type AuthenticatedReceiptRange,
+  type ReceiptReadProfile,
+} from './receipt-root';
+import { normalizeReceiptHash, parseReceiptQuantity } from './receipt-codec';
+import { assertDepositoryEntityProviderBinding } from './stack-binding';
+import {
+  buildCertifiedRegistrationEvidence,
+  markLocalJAuthorityRuntimeTx,
+} from '../jurisdiction/registration-evidence';
+import { getCertifiedBoardStackKey } from '../jurisdiction/board-registry';
+import {
+  assertEntityProviderActionJTxBinding,
+  assertEntityProviderActionResolutionReceipt,
+} from '../entity/entity-provider-action';
 
 const TRON_CHAIN_IDS = new Set<number>([728126428, 3448148188]);
 const TRON_FINALITY_DEPTH = 19;
@@ -113,29 +139,35 @@ export const decodeDisputeFinalizationEvidenceCalldata = (data: string): TxFinal
       const encodedBatch = toFinalizationHex(parsed.args[0]);
       if (encodedBatch === '0x') throw new Error('J_DISPUTE_FINALIZATION_BATCH_CALLDATA_MISSING');
       const batch = decodeJBatch(encodedBatch);
-      return (batch.disputeFinalizations ?? []).map((finalization) => ({
-        counterentity: toFinalizationHex(finalization.counterentity),
-        initialNonce: toFinalizationDecimal(finalization.initialNonce),
-        finalNonce: toFinalizationDecimal(finalization.finalNonce),
-        initialProofbodyHash: toFinalizationHex(finalization.initialProofbodyHash),
-        leftArguments: toFinalizationHex(finalization.leftArguments),
-        rightArguments: toFinalizationHex(finalization.rightArguments),
-        starterInitialArguments: toFinalizationHex(finalization.starterInitialArguments),
-        starterIncrementedArguments: toFinalizationHex(finalization.starterIncrementedArguments),
-        sig: toFinalizationHex(finalization.sig),
-      }));
+      return (batch.disputeFinalizations ?? []).map((finalization) => {
+        const starterArguments = toFinalizationHex(finalization.starterArguments);
+        const otherArguments = toFinalizationHex(finalization.otherArguments);
+        const startedByLeft = Boolean(finalization.startedByLeft);
+        return {
+          counterentity: toFinalizationHex(finalization.counterentity),
+          initialNonce: toFinalizationDecimal(finalization.initialNonce),
+          finalNonce: toFinalizationDecimal(finalization.finalNonce),
+          initialProofbodyHash: toFinalizationHex(finalization.initialProofbodyHash),
+          leftArguments: startedByLeft ? starterArguments : otherArguments,
+          rightArguments: startedByLeft ? otherArguments : starterArguments,
+          startedByLeft,
+          sig: toFinalizationHex(finalization.sig),
+        };
+      });
     }
     if (parsed.name === 'watchtowerCounterDispute') {
       const proof = parsed.args[1] as unknown as Record<string, unknown>;
+      const starterArguments = toFinalizationHex(proof['starterArguments']);
+      const otherArguments = toFinalizationHex(proof['otherArguments']);
+      const startedByLeft = Boolean(proof['startedByLeft']);
       return [{
         counterentity: toFinalizationHex(proof['counterentity']),
         initialNonce: toFinalizationDecimal(proof['initialNonce']),
         finalNonce: toFinalizationDecimal(proof['finalNonce']),
         initialProofbodyHash: toFinalizationHex(proof['initialProofbodyHash']),
-        leftArguments: toFinalizationHex(proof['leftArguments']),
-        rightArguments: toFinalizationHex(proof['rightArguments']),
-        starterInitialArguments: toFinalizationHex(proof['starterInitialArguments']),
-        starterIncrementedArguments: toFinalizationHex(proof['starterIncrementedArguments']),
+        leftArguments: startedByLeft ? starterArguments : otherArguments,
+        rightArguments: startedByLeft ? otherArguments : starterArguments,
+        startedByLeft,
         sig: toFinalizationHex(proof['sig']),
       }];
     }
@@ -165,6 +197,83 @@ export const resolveWatcherPollToBlock = (
     throw new Error(`J_WATCHER_BLOCK_RANGE_INVALID:${String(maxBlocksPerPoll)}`);
   }
   return Math.min(safeToBlock, fromBlock + maxBlocksPerPoll - 1);
+};
+
+/**
+ * Verify the receipt/header binding before the determinism harness replaces
+ * external chain identities with its recorded ingress. Applying the replay
+ * transform first would mix a fresh receipt with a different run's header and,
+ * worse, could let a transform disguise an actually inconsistent RPC result.
+ */
+const assertAuthenticatedWatcherLogHeaders = (
+  authenticatedRange: Pick<AuthenticatedReceiptRange, 'headers' | 'logs'>,
+): Array<{ jHeight: number; jBlockHash: string }> => {
+  const authenticatedHeaders = authenticatedRange.headers.map(({ jHeight, jBlockHash }) => ({
+    jHeight,
+    jBlockHash,
+  }));
+  const authenticatedHeaderHashes = new Map(
+    authenticatedHeaders.map(header => [header.jHeight, header.jBlockHash]),
+  );
+  for (const log of authenticatedRange.logs) {
+    const headerHash = authenticatedHeaderHashes.get(log.blockNumber);
+    if (headerHash !== log.blockHash.toLowerCase()) {
+      throw new Error(
+        `J_RECEIPT_LOG_HEADER_MISMATCH:${log.blockNumber}:` +
+        `receipt=${log.blockHash}:header=${headerHash ?? 'missing'}`,
+      );
+    }
+  }
+  return authenticatedHeaders;
+};
+
+export const prepareAuthenticatedWatcherHeaders = (
+  authenticatedRange: Pick<AuthenticatedReceiptRange, 'headers' | 'logs'>,
+): Array<{ jHeight: number; jBlockHash: string }> =>
+  applyJBlockHeadersIngressTransform(assertAuthenticatedWatcherLogHeaders(authenticatedRange));
+
+export const prepareAuthenticatedWatcherIngress = (
+  authenticatedRange: AuthenticatedReceiptRange,
+  expectedParent?: NonNullable<ReceiptReadProfile['expectedParent']>,
+): {
+  headers: Array<{ jHeight: number; jBlockHash: string }>;
+  logs: AuthenticatedReceiptRange['logs'];
+  tipBlockHash: string;
+} => {
+  const authenticatedHeaders = assertAuthenticatedWatcherLogHeaders(authenticatedRange);
+  const ingressHeaders = authenticatedRange.anchor.jHeight === authenticatedHeaders[0]?.jHeight
+    ? authenticatedHeaders
+    : [{
+        jHeight: authenticatedRange.anchor.jHeight,
+        jBlockHash: authenticatedRange.anchor.jBlockHash,
+      }, ...authenticatedHeaders];
+  const replayHeaders = applyJBlockHeadersIngressTransform(ingressHeaders);
+  const replayHashByHeight = new Map(replayHeaders.map(header => [header.jHeight, header.jBlockHash]));
+  if (expectedParent) {
+    const actual = replayHashByHeight.get(expectedParent.height);
+    const expected = expectedParent.hash.toLowerCase();
+    if (actual !== expected) {
+      const code = expectedParent.finalized
+        ? 'J_RECEIPT_FINALIZED_PARENT_REORG'
+        : 'J_RECEIPT_RANGE_REORG';
+      throw new Error(
+        `${code}:height=${expectedParent.height}:expected=${expected}:actual=${actual ?? 'missing'}`,
+      );
+    }
+  }
+  const headers = authenticatedHeaders.map(({ jHeight }) => {
+    const jBlockHash = replayHashByHeight.get(jHeight);
+    if (!jBlockHash) throw new Error(`J_AUTHENTICATED_REPLAY_HEADER_MISSING:${jHeight}`);
+    return { jHeight, jBlockHash };
+  });
+  const logs = authenticatedRange.logs.map((log) => {
+    const blockHash = replayHashByHeight.get(log.blockNumber);
+    if (!blockHash) throw new Error(`J_AUTHENTICATED_LOG_REPLAY_HEADER_MISSING:${log.blockNumber}`);
+    return { ...log, blockHash };
+  });
+  const tipBlockHash = headers.at(-1)?.jBlockHash;
+  if (!tipBlockHash) throw new Error('J_AUTHENTICATED_RANGE_TIP_UNAVAILABLE');
+  return { headers, logs, tipBlockHash };
 };
 
 export const readRequiredRpcBatchBigInt = (
@@ -237,7 +346,7 @@ const rpcErrorText = (error: unknown): string => {
 };
 
 export const isTransientRpcUnavailableError = (error: unknown): boolean =>
-  /ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|Failed to fetch|NetworkError|Load failed|PROXY_UPSTREAM_TIMEOUT|50[0234] (Bad Gateway|Gateway Timeout|Service Unavailable|Internal Server Error)|server response 50[0234]|responseStatus["': ]+50[0234]/i
+  /J_HISTORY_HEADER_MISSING:height=\d+ error=none|J_RECEIPT_RANGE_REORG|J_RECEIPT_RANGE_PARENT_MISMATCH|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|Failed to fetch|NetworkError|Load failed|PROXY_UPSTREAM_TIMEOUT|RPC_BATCH_HTTP_50[0234]|50[0234] (Bad Gateway|Gateway Timeout|Service Unavailable|Internal Server Error)|server response 50[0234]|responseStatus["': ]+50[0234]/i
     .test(rpcErrorText(error));
 
 export const shouldEmitExternalWalletBalanceDelta = (
@@ -264,6 +373,64 @@ export const shouldEmitExternalWalletAllowanceDelta = (
   if (!tracked.allowanceAfterBlockByKey.has(key)) return false;
   const baselineBlock = tracked.allowanceAfterBlockByKey.get(key) ?? 0;
   return blockNumber > Math.max(baselineBlock, tracked.watchAfterBlock || 0);
+};
+
+type ApprovalReceiptLog = {
+  address?: string;
+  topics: readonly string[];
+  data: string;
+  index?: number;
+  logIndex?: number;
+};
+
+const approvalEventInterface = new ethers.Interface([
+  'event Approval(address indexed owner,address indexed spender,uint256 value)',
+]);
+const approvalEventFragment = approvalEventInterface.getEvent('Approval');
+if (!approvalEventFragment) throw new Error('APPROVAL_EVENT_FRAGMENT_MISSING');
+
+export const resolveApprovalReceiptLogIndex = (params: {
+  receiptHash: string;
+  logs: readonly ApprovalReceiptLog[];
+  tokenAddress: string;
+  owner: string;
+  spender: string;
+  allowance: bigint;
+}): number => {
+  const tokenAddress = ethers.getAddress(params.tokenAddress).toLowerCase();
+  const owner = ethers.getAddress(params.owner).toLowerCase();
+  const spender = ethers.getAddress(params.spender).toLowerCase();
+  const matchingIndices: number[] = [];
+
+  for (const log of params.logs) {
+    if (String(log.address || '').toLowerCase() !== tokenAddress) continue;
+    if (String(log.topics[0] || '').toLowerCase() !== approvalEventFragment.topicHash.toLowerCase()) continue;
+    const parsed = approvalEventInterface.parseLog({ topics: [...log.topics], data: log.data });
+    if (!parsed) throw new Error(`APPROVAL_EVENT_DECODE_FAILED:${params.receiptHash}`);
+    if (
+      ethers.getAddress(String(parsed.args[0])).toLowerCase() !== owner ||
+      ethers.getAddress(String(parsed.args[1])).toLowerCase() !== spender ||
+      BigInt(parsed.args[2]) !== params.allowance
+    ) continue;
+    if (
+      log.index !== undefined && log.logIndex !== undefined &&
+      log.index !== log.logIndex
+    ) {
+      throw new Error(
+        `APPROVAL_EVENT_LOG_INDEX_MISMATCH:${params.receiptHash}` +
+        `:index=${String(log.index)}:logIndex=${String(log.logIndex)}`,
+      );
+    }
+    const logIndex = log.index ?? log.logIndex;
+    if (!Number.isSafeInteger(logIndex) || Number(logIndex) < 0) {
+      throw new Error(`APPROVAL_EVENT_LOG_INDEX_INVALID:${params.receiptHash}:${String(logIndex)}`);
+    }
+    matchingIndices.push(Number(logIndex));
+  }
+  if (matchingIndices.length !== 1) {
+    throw new Error(`APPROVAL_EVENT_MATCH_COUNT_INVALID:${params.receiptHash}:${matchingIndices.length}`);
+  }
+  return matchingIndices[0]!;
 };
 
 /**
@@ -318,6 +485,9 @@ export async function createRpcAdapter(
   type UntypedNonPayableMethod = {
     estimateGas: (...args: unknown[]) => Promise<bigint>;
     (...args: unknown[]): Promise<unknown>;
+  };
+  type UntypedActionMethod = UntypedNonPayableMethod & {
+    staticCall: (...args: unknown[]) => Promise<unknown>;
   };
   const watcherErrorMessage = (error: unknown): string => (
     error instanceof Error ? error.message : String(error)
@@ -376,9 +546,12 @@ export async function createRpcAdapter(
   const makeErc20MockFactory = (runner: unknown): ERC20Mock__factory =>
     new (ERC20Mock__factory as unknown as new (runner: unknown) => ERC20Mock__factory)(runner);
   const eventCarriers = (
-    ...contracts: Array<{ interface: unknown }>
+    ...contracts: Array<{ interface: unknown; target: unknown }>
   ): Parameters<typeof parseReceiptLogsToJEvents>[1] =>
-    contracts.map((contract) => ({ interface: contract.interface as ethers.Interface }));
+    contracts.map((contract) => ({
+      address: String(contract.target),
+      interface: contract.interface as ethers.Interface,
+    }));
   const asRpcTxResponse = (tx: unknown): RpcTxResponse => tx as RpcTxResponse;
   const asRpcReceipt = (receipt: unknown): RpcReceipt => receipt as RpcReceipt;
 
@@ -558,6 +731,20 @@ export async function createRpcAdapter(
     return 2;
   };
 
+  const readCurrentRpcBlockNumber = async (): Promise<number> => {
+    const raw = await (provider as ethers.JsonRpcProvider).send('eth_blockNumber', []);
+    let blockNumber: number;
+    try {
+      blockNumber = Number(BigInt(String(raw)));
+    } catch {
+      throw new Error(`J_WATCHER_BLOCK_NUMBER_INVALID:${String(raw)}`);
+    }
+    if (!Number.isSafeInteger(blockNumber) || blockNumber < 0) {
+      throw new Error(`J_WATCHER_BLOCK_NUMBER_INVALID:${String(raw)}`);
+    }
+    return blockNumber;
+  };
+
   const readBlockHeadersAtHeights = async (
     heights: number[],
   ): Promise<Array<{ jHeight: number; jBlockHash: string }>> => {
@@ -574,26 +761,35 @@ export async function createRpcAdapter(
     const headers = requests.map(({ id }) => {
       const response = responses.get(id);
       const block = response?.result && typeof response.result === 'object'
-        ? response.result as { hash?: unknown; number?: unknown }
+        ? response.result as { hash?: unknown; number?: unknown; parentHash?: unknown }
         : null;
-      const hash = String(block?.hash || '').trim().toLowerCase();
-      if (response?.error || !hash) {
+      if (response?.error || !block) {
         throw new Error(
           `J_HISTORY_HEADER_MISSING:height=${id} error=${String(response?.error?.message || 'none')}`,
         );
       }
-      return { jHeight: id, jBlockHash: hash };
+      const number = Number(parseReceiptQuantity(block.number, 'HEADER_BLOCK_NUMBER'));
+      if (number !== id) throw new Error(`J_HISTORY_HEADER_NUMBER_MISMATCH:expected=${id}:actual=${number}`);
+      return {
+        jHeight: number,
+        jBlockHash: normalizeReceiptHash(block.hash, 'HEADER_BLOCK_HASH'),
+        parentHash: normalizeReceiptHash(block.parentHash, 'HEADER_PARENT_HASH'),
+      };
     });
-    return applyJBlockHeadersIngressTransform(headers);
-  };
-
-  const readFinalizedBlockHeaders = async (
-    fromBlock: number,
-    toBlock: number,
-  ): Promise<Array<{ jHeight: number; jBlockHash: string }>> => {
-    const heights: number[] = [];
-    for (let height = fromBlock; height <= toBlock; height += 1) heights.push(height);
-    return readBlockHeadersAtHeights(heights);
+    for (let index = 1; index < headers.length; index += 1) {
+      const parent = headers[index - 1]!;
+      const child = headers[index]!;
+      if (child.jHeight === parent.jHeight + 1 && child.parentHash !== parent.jBlockHash) {
+        throw new Error(
+          `J_HISTORY_HEADER_PARENT_MISMATCH:height=${child.jHeight}:` +
+          `expected=${parent.jBlockHash}:actual=${child.parentHash}`,
+        );
+      }
+    }
+    return applyJBlockHeadersIngressTransform(headers.map(({ jHeight, jBlockHash }) => ({
+      jHeight,
+      jBlockHash,
+    })));
   };
 
   // Serialize batch submissions per signer EOA to avoid nonce races across concurrent entity batches.
@@ -729,9 +925,21 @@ export async function createRpcAdapter(
   let entityProvider: EntityProvider;
   let deltaTransformer: DeltaTransformer;
   let deployed = false;
+  let stackBindingVerified = false;
+  let closePromise: Promise<void> | null = null;
+  let entityProviderDeploymentBlock = Number(config.fromReplica?.entityProviderDeploymentBlock ?? 0);
+
+  const verifyStackBinding = async (context: string): Promise<void> => {
+    stackBindingVerified = false;
+    await assertDepositoryEntityProviderBinding(context, depository, addresses.entityProvider);
+    stackBindingVerified = true;
+  };
 
   // If fromReplica provided, connect to existing contracts
   if (config.fromReplica) {
+    if (!Number.isSafeInteger(entityProviderDeploymentBlock) || entityProviderDeploymentBlock < 1) {
+      throw new Error('RPC_ENTITY_PROVIDER_DEPLOYMENT_BLOCK_REQUIRED');
+    }
     addresses.account = firstAddress(
       config.fromReplica.jadapter?.addresses?.account,
       config.fromReplica.contracts?.account,
@@ -804,10 +1012,10 @@ export async function createRpcAdapter(
       addresses.depository = await depository.getAddress();
       addresses.entityProvider = await entityProvider.getAddress();
       addresses.deltaTransformer = await deltaTransformer.getAddress();
+      await verifyStackBinding('rpc_from_replica');
       trace('fromReplica.getAddress:done', { addresses });
       deployed = true;
       trace('fromReplica.setDeltaTransformer:start');
-      setDeltaTransformerAddress(addresses.deltaTransformer);
       trace('fromReplica.setDeltaTransformer:done');
       rpcLog.info('contracts.connected', {
         chainId: config.chainId,
@@ -831,6 +1039,57 @@ export async function createRpcAdapter(
       entityProvider ? await entityProvider.getAddress() : addresses.entityProvider,
     );
 
+  const readEntityProviderActionReceipt = async (
+    entityId: string,
+    actionNonce: bigint,
+  ): Promise<JEvent | null> => {
+    const normalizedEntityId = normalizeEntityId(entityId);
+    if (actionNonce <= 0n || actionNonce > ethers.MaxUint256) {
+      throw new Error(`ENTITY_PROVIDER_ACTION_RECEIPT_NONCE_INVALID:${actionNonce.toString()}`);
+    }
+    if (!Number.isSafeInteger(entityProviderDeploymentBlock) || entityProviderDeploymentBlock < 1) {
+      throw new Error('ENTITY_PROVIDER_DEPLOYMENT_BLOCK_UNAVAILABLE');
+    }
+    const providerAddress = await getLiveEntityProviderAddress();
+    const logs = (await Promise.all(
+      (['EntityProviderActionExecuted', 'EntityProviderActionCancelled'] as const).map(async (eventName) => {
+        const event = entityProvider.interface.getEvent(eventName);
+        return await provider.getLogs({
+          address: providerAddress,
+          fromBlock: entityProviderDeploymentBlock,
+          toBlock: 'latest',
+          topics: [
+            event.topicHash,
+            ethers.zeroPadValue(normalizedEntityId, 32),
+            ethers.zeroPadValue(ethers.toBeHex(actionNonce), 32),
+          ],
+        });
+      }),
+    )).flat();
+    if (logs.length > 1) {
+      throw new Error(
+        `ENTITY_PROVIDER_ACTION_RECEIPT_DUPLICATE:${normalizedEntityId}:${actionNonce.toString()}`,
+      );
+    }
+    const log = logs[0];
+    if (!log) return null;
+    const parsed = entityProvider.interface.parseLog({ topics: [...log.topics], data: log.data });
+    if (
+      !parsed ||
+      (parsed.name !== 'EntityProviderActionExecuted' && parsed.name !== 'EntityProviderActionCancelled')
+    ) {
+      throw new Error(`ENTITY_PROVIDER_ACTION_RECEIPT_DECODE_FAILED:${log.transactionHash}`);
+    }
+    return {
+      name: parsed.name,
+      args: Object.fromEntries(parsed.fragment.inputs.map((input, index) => [input.name, parsed.args[index]])),
+      blockNumber: log.blockNumber,
+      blockHash: log.blockHash,
+      transactionHash: log.transactionHash,
+      logIndex: log.index,
+    };
+  };
+
   const adapter: JAdapter = {
     mode: config.mode,
     chainId: config.chainId,
@@ -842,11 +1101,17 @@ export async function createRpcAdapter(
     get entityProvider() { return entityProvider; },
     get deltaTransformer() { return deltaTransformer; },
     get addresses() { return addresses; },
+    get entityProviderDeploymentBlock() {
+      if (!Number.isSafeInteger(entityProviderDeploymentBlock) || entityProviderDeploymentBlock < 1) {
+        throw new Error('ENTITY_PROVIDER_DEPLOYMENT_BLOCK_UNAVAILABLE');
+      }
+      return entityProviderDeploymentBlock;
+    },
 
     async deployStack() {
       if (deployed) {
+        await verifyStackBinding('rpc_reuse_existing');
         rpcLog.info('contracts.reuse_existing', { chainId: config.chainId });
-        setDeltaTransformerAddress(addresses.deltaTransformer);
         return;
       }
 
@@ -866,6 +1131,11 @@ export async function createRpcAdapter(
       const foundationRecipient = await signer.getAddress();
       const entityProviderContract = await entityProviderFactory.deploy(foundationRecipient);
       await entityProviderContract.waitForDeployment();
+      const entityProviderReceipt = await entityProviderContract.deploymentTransaction()?.wait();
+      if (!entityProviderReceipt || !Number.isSafeInteger(entityProviderReceipt.blockNumber)) {
+        throw new Error('ENTITY_PROVIDER_DEPLOYMENT_RECEIPT_MISSING');
+      }
+      entityProviderDeploymentBlock = entityProviderReceipt.blockNumber;
       addresses.entityProvider = await entityProviderContract.getAddress();
       entityProvider = entityProviderContract;
       rpcLog.debug('contracts.deploy.entity_provider', {
@@ -905,6 +1175,7 @@ export async function createRpcAdapter(
       await depositoryContract.waitForDeployment();
       addresses.depository = await depositoryContract.getAddress();
       depository = Depository__factory.connect(addresses.depository, asFactoryRunner(signer));
+      await verifyStackBinding('rpc_deploy');
       rpcLog.debug('contracts.deploy.depository', { chainId: config.chainId, depository: addresses.depository });
 
       // Deploy DeltaTransformer
@@ -913,7 +1184,6 @@ export async function createRpcAdapter(
       await deltaTransformerContract.waitForDeployment();
       addresses.deltaTransformer = await deltaTransformerContract.getAddress();
       deltaTransformer = deltaTransformerContract;
-      setDeltaTransformerAddress(addresses.deltaTransformer);
       rpcLog.debug('contracts.deploy.delta_transformer', {
         chainId: config.chainId,
         deltaTransformer: addresses.deltaTransformer,
@@ -925,7 +1195,8 @@ export async function createRpcAdapter(
       const erc20Factory = makeErc20MockFactory(signer);
       const bootstrapTokens = defaultTokensForJurisdiction({ chainId: config.chainId });
       for (const token of bootstrapTokens) {
-        const erc20Contract = await erc20Factory.deploy(token.name, token.symbol, DEFAULT_TOKEN_SUPPLY);
+        const tokenSupply = getDefaultTokenSupply(token.decimals);
+        const erc20Contract = await erc20Factory.deploy(token.name, token.symbol, token.decimals, tokenSupply);
         await erc20Contract.waitForDeployment();
         const erc20Address = await erc20Contract.getAddress();
         rpcLog.debug('contracts.deploy.erc20', {
@@ -936,12 +1207,12 @@ export async function createRpcAdapter(
 
         // Pre-fund Depository with ERC20 so withdrawals (reserveToExternalToken) work.
         // mintToReserve only updates internal accounting — the Depository needs real ERC20 balance.
-        const prefundTx = await erc20Contract.mint(addresses.depository, DEFAULT_TOKEN_SUPPLY, await buildFeeOverrides());
+        const prefundTx = await erc20Contract.mint(addresses.depository, tokenSupply, await buildFeeOverrides());
         await waitForReceipt(prefundTx, `erc20.mint-to-depository.${token.symbol}`);
         rpcLog.debug('contracts.deploy.erc20_prefunded', {
           chainId: config.chainId,
           symbol: token.symbol,
-          amount: ethers.formatUnits(DEFAULT_TOKEN_SUPPLY, token.decimals),
+          amount: ethers.formatUnits(tokenSupply, token.decimals),
         });
 
         const approveTx = await erc20Contract.approve(addresses.depository, TOKEN_REGISTRATION_AMOUNT, await buildFeeOverrides());
@@ -989,12 +1260,17 @@ export async function createRpcAdapter(
     },
 
     async revert(snapshotId: SnapshotId): Promise<void> {
+      stackBindingVerified = false;
+      let reverted: unknown;
       try {
         const rpc = provider as ethers.JsonRpcProvider;
-        await rpc.send('evm_revert', [snapshotId]);
-      } catch {
-        throw new Error('Revert not supported by this RPC');
+        reverted = await rpc.send('evm_revert', [snapshotId]);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`RPC_REVERT_FAILED:${message}`);
       }
+      if (reverted !== true) throw new Error(`RPC_REVERT_REJECTED:${snapshotId}`);
+      await verifyStackBinding('rpc_revert');
     },
 
     async dumpState(): Promise<string> {
@@ -1012,12 +1288,14 @@ export async function createRpcAdapter(
       if (typeof state !== 'string') {
         throw new Error('RPC requires file path string');
       }
+      stackBindingVerified = false;
       try {
         const rpc = provider as ethers.JsonRpcProvider;
         await rpc.send('anvil_loadState', [state]);
       } catch {
         throw new Error('loadState not supported by this RPC');
       }
+      await verifyStackBinding('rpc_restore');
     },
 
     async processBlock(): Promise<JEvent[]> {
@@ -1058,6 +1336,14 @@ export async function createRpcAdapter(
       return depository.entityNonces(normalizeEntityId(entityId));
     },
 
+    async getEntityProviderActionNonce(entityId: string): Promise<bigint> {
+      return entityProvider.entityActionNonces(normalizeEntityId(entityId));
+    },
+
+    async getEntityProviderActionReceipt(entityId: string, actionNonce: bigint): Promise<JEvent | null> {
+      return await readEntityProviderActionReceipt(entityId, actionNonce);
+    },
+
     async isEntityRegistered(entityId: string): Promise<boolean> {
       const info = await entityProvider.entities(entityId);
       // registrationBlock > 0 means entity was registered
@@ -1067,6 +1353,9 @@ export async function createRpcAdapter(
     async getTokenRegistry(): Promise<JTokenInfo[]> {
       try {
         const length = Number(await depository.getTokensLength());
+        if (!Number.isSafeInteger(length) || length < 1) {
+          throw new Error(`TOKEN_REGISTRY_LENGTH_INVALID:${String(length)}`);
+        }
         const tokens: JTokenInfo[] = [];
         const erc20Interface = new ethers.Interface([
           'function symbol() view returns (string)',
@@ -1075,31 +1364,40 @@ export async function createRpcAdapter(
         ]);
 
         for (let tokenId = 1; tokenId < length; tokenId++) {
-          const [contractAddress, _externalTokenId, _tokenType] = await depository._tokens(tokenId);
-
-          // Skip zero/null addresses
-          if (contractAddress === ethers.ZeroAddress) continue;
-
-          // Try to read ERC20 metadata - if it has symbol(), treat as ERC20
+          const [rawContractAddress, _externalTokenId, rawTokenType] = await depository._tokens(tokenId);
+          if (Number(rawTokenType) !== 0) continue;
+          if (rawContractAddress === ethers.ZeroAddress) {
+            throw new Error(`TOKEN_REGISTRY_ENTRY_ADDRESS_INVALID:${tokenId}`);
+          }
+          const contractAddress = ethers.getAddress(rawContractAddress);
           const erc20 = new ethers.Contract(contractAddress, erc20Interface, provider);
           const symbolFn = erc20.getFunction('symbol') as () => Promise<string>;
           const nameFn = erc20.getFunction('name') as () => Promise<string>;
           const decimalsFn = erc20.getFunction('decimals') as () => Promise<bigint>;
-          let symbol = '';
-          let name = '';
-          let decimals = 18;
-          try { symbol = await symbolFn(); } catch { continue; } // Skip if no symbol (not ERC20)
-          try { name = await nameFn(); } catch { name = symbol; }
-          try { decimals = Number(await decimalsFn()); } catch { }
-
-          if (!symbol) continue;
-          tokens.push({ symbol, name: name || symbol, address: contractAddress, decimals, tokenId });
+          const readMetadata = async <T>(field: string, read: () => Promise<T>): Promise<T> => {
+            try {
+              return await read();
+            } catch (error) {
+              const reason = error instanceof Error ? error.message : String(error);
+              throw new Error(`TOKEN_METADATA_UNAVAILABLE:${tokenId}:${field}:${reason}`);
+            }
+          };
+          const symbol = String(await readMetadata('symbol', symbolFn)).trim();
+          const name = String(await readMetadata('name', nameFn)).trim();
+          const decimals = Number(await readMetadata('decimals', decimalsFn));
+          if (!symbol) throw new Error(`TOKEN_METADATA_INVALID:${tokenId}:symbol`);
+          if (!name) throw new Error(`TOKEN_METADATA_INVALID:${tokenId}:name`);
+          if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
+            throw new Error(`TOKEN_METADATA_INVALID:${tokenId}:decimals:${String(decimals)}`);
+          }
+          tokens.push({ symbol, name, address: contractAddress, decimals, tokenId });
         }
 
         return tokens;
       } catch (err) {
-        console.warn('[JAdapter:rpc] Token registry fetch failed:', (err as Error).message);
-        return [];
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.startsWith('TOKEN_')) throw err;
+        throw new Error(`TOKEN_REGISTRY_FETCH_FAILED:${message}`, { cause: err });
       }
     },
 
@@ -1540,6 +1838,7 @@ export async function createRpcAdapter(
       const erc20 = new ethers.Contract(tokenAddress, [
         'function allowance(address owner, address spender) view returns (uint256)',
         'function approve(address spender, uint256 amount) returns (bool)',
+        'event Approval(address indexed owner, address indexed spender, uint256 value)',
       ], signerWallet);
       const allowanceFn = erc20.getFunction('allowance') as (
         ownerAddress: string,
@@ -1566,6 +1865,14 @@ export async function createRpcAdapter(
         const entityId = normalizeEntityId(options?.entityId || '');
         const tokenId = Number(options?.tokenId);
         if (!entityId || !Number.isInteger(tokenId) || tokenId < 0) return [];
+        const logIndex = resolveApprovalReceiptLogIndex({
+          receiptHash: receipt.hash,
+          logs: receipt.logs,
+          tokenAddress,
+          owner: signerWallet.address,
+          spender,
+          allowance,
+        });
         return [{
           name: 'ExternalWalletDelta',
           args: {
@@ -1579,6 +1886,7 @@ export async function createRpcAdapter(
           blockNumber: receipt.blockNumber,
           blockHash: receipt.blockHash,
           transactionHash: receipt.hash,
+          logIndex,
         }];
       };
       try {
@@ -1676,7 +1984,120 @@ export async function createRpcAdapter(
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
           console.error(`❌ [JAdapter:rpc] Debt enforcement failed: ${msg}`);
-          return { success: false, error: msg };
+          return makeJAdapterFailureResult(error);
+        }
+      }
+
+      if (
+        jTx.type === 'entityProviderTransfer' ||
+        jTx.type === 'entityProviderReleaseControlShares' ||
+        jTx.type === 'entityProviderCancelAction'
+      ) {
+        const intent = jTx.data.intent;
+        if (!jTx.data.hankoSignature) {
+          return {
+            success: false,
+            error: `ENTITY_PROVIDER_ACTION_CONSENSUS_HANKO_MISSING:${normalizeEntityId(jTx.entityId)}`,
+          };
+        }
+        try {
+          assertEntityProviderActionJTxBinding(jTx, {
+            chainId: config.chainId,
+            entityProviderAddress: await getLiveEntityProviderAddress(),
+            depositoryAddress: await getLiveDepositoryAddress(),
+          });
+          return await runSerializedBatch(async (): Promise<JSubmitResult> => {
+            const chainNonce = await entityProvider.entityActionNonces(intent.entityId);
+            if (chainNonce >= intent.actionNonce) {
+              const exactReceipt = await readEntityProviderActionReceipt(intent.entityId, intent.actionNonce);
+              if (!exactReceipt) {
+                throw new Error(
+                  `ENTITY_PROVIDER_ACTION_NONCE_CONSUMED_WITHOUT_RECEIPT:` +
+                  `${intent.entityId}:${intent.actionNonce.toString()}:${chainNonce.toString()}`,
+                );
+              }
+              assertEntityProviderActionResolutionReceipt(intent, exactReceipt);
+              return {
+                success: true,
+                txHash: exactReceipt.transactionHash,
+                blockNumber: exactReceipt.blockNumber,
+                events: [exactReceipt],
+              };
+            }
+            if (chainNonce + 1n !== intent.actionNonce) {
+              throw new Error(
+                `ENTITY_PROVIDER_ACTION_CHAIN_NONCE_MISMATCH:` +
+                `${intent.actionNonce.toString()}:${(chainNonce + 1n).toString()}`,
+              );
+            }
+
+            const args: unknown[] = intent.payload.kind === 'entityTransferTokens'
+              ? [
+                  intent.entityNumber,
+                  intent.payload.transfer.to,
+                  intent.payload.transfer.tokenId,
+                  intent.payload.transfer.amount,
+                  jTx.data.hankoSignature,
+                ]
+              : intent.payload.kind === 'releaseControlShares'
+                ? [
+                    intent.entityNumber,
+                    intent.payload.release.depositoryAddress,
+                    intent.payload.release.controlAmount,
+                    intent.payload.release.dividendAmount,
+                    intent.payload.release.purpose,
+                    jTx.data.hankoSignature,
+                  ]
+                : [
+                    intent.entityNumber,
+                    intent.payload.cancel.cancelledActionHash,
+                    intent.payload.cancel.cancelledActionKind,
+                    jTx.data.hankoSignature,
+                  ];
+            const method = (intent.payload.kind === 'entityTransferTokens'
+              ? entityProvider.entityTransferTokens
+              : intent.payload.kind === 'releaseControlShares'
+                ? entityProvider.releaseControlShares
+                : entityProvider.cancelEntityProviderAction) as unknown as UntypedActionMethod;
+            try {
+              await method.staticCall(...args);
+            } catch (error) {
+              const classified = classifyJAdapterFailure(error);
+              return makeJAdapterFailureResult(error, {
+                category: classified.category === 'transient' ? 'transient' : 'terminal',
+                code: classified.code,
+                message: `EntityProvider action staticCall failed: ${classified.message}`,
+              });
+            }
+            const gasLimit = await estimateGasWithHeadroom(
+              () => method.estimateGas(...args),
+              1_500_000n,
+            );
+            const receipt = await sendSignerTxWithExplicitNonce(
+              signer,
+              `EntityProvider.${intent.payload.kind}`,
+              (nonce, feeOverrides) => method(...args, { gasLimit, nonce, ...feeOverrides }),
+            );
+            const events = parseReceiptLogsToJEvents(
+              receipt,
+              eventCarriers(depository, entityProvider),
+            );
+            const exact = events.filter((event) =>
+              event.name === 'EntityProviderActionExecuted' || event.name === 'EntityProviderActionCancelled');
+            if (exact.length !== 1) {
+              throw new Error(`ENTITY_PROVIDER_ACTION_RECEIPT_COUNT_INVALID:${exact.length}`);
+            }
+            const action = exact[0]!;
+            assertEntityProviderActionResolutionReceipt(intent, action);
+            return {
+              success: true,
+              txHash: receipt.hash,
+              blockNumber: receipt.blockNumber,
+              events,
+            };
+          });
+        } catch (error) {
+          return makeJAdapterFailureResult(error);
         }
       }
 
@@ -1829,7 +2250,7 @@ export async function createRpcAdapter(
                   : null,
               };
             }));
-            console.log(`🧾 [JAdapter:rpc] disputeStart.batch ${JSON.stringify(disputeStartDebug)}`);
+            console.log(`🧾 [JAdapter:rpc] disputeStart.batch ${safeStringify(disputeStartDebug)}`);
           }
 
           try {
@@ -1867,6 +2288,7 @@ export async function createRpcAdapter(
                 gasLimit,
               });
             } catch (simErr: unknown) {
+              const simFailure = classifyJAdapterFailure(simErr);
               // Decode revert data using contract ABI (typechain-connected interface).
               const revertSource =
                 typeof simErr === 'object' && simErr !== null
@@ -1917,7 +2339,7 @@ export async function createRpcAdapter(
                   !gasEstimate.usedFallback && isLocalLatestStateStaticCallRace(simErr);
               }
               if (!localSnapshotRaceAfterGasEstimate && disputeStartDebug.length > 0) {
-                errDetail += ` disputeStart=${JSON.stringify(disputeStartDebug)}`;
+                errDetail += ` disputeStart=${safeStringify(disputeStartDebug)}`;
               }
               if (localSnapshotRaceAfterGasEstimate) {
                 console.warn(
@@ -1926,7 +2348,14 @@ export async function createRpcAdapter(
                 );
               } else {
                 // Bail — do NOT submit a known-bad batch on-chain
-                return { success: false, error: `staticCall revert: ${errDetail}` };
+                if (!revertData && simFailure.category === 'transient') {
+                  return makeJAdapterFailureResult(simErr);
+                }
+                return makeJAdapterFailureResult(simErr, {
+                  category: 'terminal',
+                  code: simFailure.code === 'J_ADAPTER_TERMINAL' ? 'CALL_EXCEPTION' : simFailure.code,
+                  message: `staticCall revert: ${errDetail}`,
+                });
               }
             }
 
@@ -1964,14 +2393,14 @@ export async function createRpcAdapter(
                 await resetSerializedSignerNonce();
                 const msg = error instanceof Error ? error.message : String(error);
                 console.error(`❌ [JAdapter:rpc] processBatch failed: ${msg}`);
-                return { success: false, error: msg };
+                return makeJAdapterFailureResult(error);
               }
             }
             return { success: false, error: 'processBatch failed after nonce retry' };
           } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
             console.error(`❌ [JAdapter:rpc] processBatch failed: ${msg}`);
-            return { success: false, error: msg };
+            return makeJAdapterFailureResult(error);
           }
         });
       }
@@ -1995,7 +2424,7 @@ export async function createRpcAdapter(
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
           console.error(`❌ [JAdapter:rpc] Mint failed: ${msg}`);
-          return { success: false, error: msg };
+          return makeJAdapterFailureResult(error);
         }
       }
 
@@ -2005,6 +2434,9 @@ export async function createRpcAdapter(
 
     // === J-Watcher integration (RPC polling — uses shared event conversion from watcher.ts) ===
     startWatching(env: Env): void {
+      if (!stackBindingVerified) {
+        throw new Error(`J_STACK_BINDING_UNVERIFIED:rpc:chainId=${config.chainId}`);
+      }
       if (watcherEnv) {
         rpcLog.debug('watcher.already_running', { chainId: config.chainId });
         return;
@@ -2024,7 +2456,10 @@ export async function createRpcAdapter(
       txCounter.value = 0;
       txCounter._seenLogs = { set: new Set<string>(), order: [] as string[] };
       const pendingWatcherJBlocks: PendingWatcherJBlockMap = new Map();
+      let pendingWatcherJHistoryRange: PendingWatcherJHistoryRange | null = null;
+      let lastPendingHistoryWaitKey = '';
       let reorgRewindPendingReplicaKeys: string[] = [];
+      let lastAuthorityHeaderAuditKey = '';
       const watchPollMs = BLOCKCHAIN.J_WATCHER_POLL_INTERVAL_MS;
       const manualPolling = env.scenarioMode === true;
       const confirmationDepth = resolveFinalityDepth(!!env?.scenarioMode);
@@ -2037,19 +2472,7 @@ export async function createRpcAdapter(
         fromBlock: startBlock,
       });
 
-      // Depository ABI for queryFilter — must match CANONICAL_J_EVENTS
-      const depositoryABI = [
-        'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
-        'event SecretRevealed(bytes32 indexed hashlock, bytes32 indexed revealer, bytes32 secret)',
-        'event AccountSettled(tuple(bytes32 left, bytes32 right, tuple(uint256 tokenId, uint256 leftReserve, uint256 rightReserve, uint256 collateral, int256 ondelta)[] tokens, uint256 nonce)[] settled)',
-        'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments)',
-        'event DisputeFinalized(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed initialNonce, bytes32 initialProofbodyHash, bytes32 finalProofbodyHash)',
-        'event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex)',
-        'event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, uint256 remainingAmount, uint256 newDebtIndex)',
-        'event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex)',
-        'event HankoBatchProcessed(bytes32 indexed entityId, bytes32 indexed hankoHash, uint256 nonce, bool success)',
-      ];
-      const depositoryIface = new ethers.Interface(depositoryABI);
+      const entityProviderIface = EntityProvider__factory.createInterface();
       const erc20WatchIface = new ethers.Interface([
         'event Transfer(address indexed from, address indexed to, uint256 value)',
         'event Approval(address indexed owner, address indexed spender, uint256 value)',
@@ -2228,8 +2651,7 @@ export async function createRpcAdapter(
           finalProofbodyHash: toFinalizationHex(args['finalProofbodyHash']),
           leftArguments: matched.leftArguments,
           rightArguments: matched.rightArguments,
-          starterInitialArguments: matched.starterInitialArguments,
-          starterIncrementedArguments: matched.starterIncrementedArguments,
+          startedByLeft: matched.startedByLeft,
           sig: matched.sig,
         };
       };
@@ -2263,8 +2685,9 @@ export async function createRpcAdapter(
         if (reorgRewindPendingReplicaKeys.length > 0) {
           const stillPending = reorgRewindPendingReplicaKeys.some((replicaKey) => {
             const replica = activeEnv.eReplicas.get(replicaKey);
-            return replica?.jHistory &&
-              replica.jHistory.scannedThroughHeight > replica.state.lastFinalizedJHeight;
+            if (!replica?.jHistory) return false;
+            const certifiedAnchor = getEntityCertifiedJAnchor(replica.state);
+            return !certifiedAnchor || replica.jHistory.scannedThroughHeight > certifiedAnchor.height;
           });
           if (stillPending) return true;
           reorgRewindPendingReplicaKeys = [];
@@ -2272,9 +2695,112 @@ export async function createRpcAdapter(
         if (lastSyncedBlock <= 0) return false;
         const watcherReplica = findWatcherJurisdictionReplica(activeEnv, addresses.depository, config.chainId);
         if (!watcherReplica) return false;
-        const relevantReplicas = [...activeEnv.eReplicas.values()]
-          .filter((replica) => isEntityReplicaRelevantToWatcher(activeEnv, replica, watcherReplica));
+        const relevantReplicaEntries = [...activeEnv.eReplicas.entries()]
+          .filter(([, replica]) => isEntityReplicaRelevantToWatcher(activeEnv, replica, watcherReplica));
+        const relevantReplicas = relevantReplicaEntries.map(([, replica]) => replica);
         if (relevantReplicas.length === 0) return false;
+
+        const finalizedAnchors = new Map<number, string>();
+        for (const replica of relevantReplicas) {
+          const certifiedAnchor = getEntityCertifiedJAnchor(replica.state);
+          if (!certifiedAnchor) continue;
+          const existing = finalizedAnchors.get(certifiedAnchor.height);
+          if (existing && existing !== certifiedAnchor.hash) {
+            throw new Error(`J_HISTORY_FINALIZED_ANCHOR_DIVERGENCE:height=${certifiedAnchor.height}`);
+          }
+          finalizedAnchors.set(certifiedAnchor.height, certifiedAnchor.hash);
+        }
+        const localFrontiers = relevantReplicaEntries.flatMap(([replicaKey, replica]) => {
+          if (!replica.jHistory) return [];
+          const height = Number(replica.jHistory.scannedThroughHeight);
+          const hash = getValidatorJExpectedBlockHash(replica.state, replica.jHistory, height);
+          if (!hash) throw new Error(`J_HISTORY_LOCAL_TIP_UNKNOWN:${replicaKey}:${height}`);
+          return [{ replicaKey, replica, height, hash }];
+        });
+        const auditHeights = [...new Set([
+          lastSyncedBlock,
+          ...finalizedAnchors.keys(),
+          ...localFrontiers.map((frontier) => frontier.height),
+        ])].sort((left, right) => left - right);
+        const canonicalHeaders = new Map(
+          (await readBlockHeadersAtHeights(auditHeights))
+            .map((header) => [header.jHeight, header.jBlockHash] as const),
+        );
+        for (const [height, expectedAnchorHash] of finalizedAnchors) {
+          const canonicalAnchorHash = canonicalHeaders.get(height);
+          if (!canonicalAnchorHash) throw new Error(`J_HISTORY_HEADER_MISSING:height=${height}`);
+          if (expectedAnchorHash !== canonicalAnchorHash) {
+            const owners = relevantReplicas
+              .filter((replica) => getEntityCertifiedJAnchor(replica.state)?.height === height)
+              .map((replica) => {
+                const entityId = String(replica.entityId || replica.state.entityId || '').slice(0, 10);
+                const jurisdiction = replica.state.config.jurisdiction;
+                return `${entityId}/${String(jurisdiction?.name || 'unnamed')}/${String(jurisdiction?.chainId ?? 'missing')}`;
+              })
+              .join(',');
+            throw new Error(
+              `J_HISTORY_FINALIZED_REORG:${height}` +
+              `:chain=${config.chainId}` +
+              `:owners=${owners || 'unknown'}` +
+              `:expected=${expectedAnchorHash}:canonical=${canonicalAnchorHash}`,
+            );
+          }
+        }
+
+        const targetedRewinds = new Map<string, {
+          height: number;
+          canonicalHash: string;
+          replicaKeys: string[];
+        }>();
+        for (const frontier of localFrontiers) {
+          const canonicalHash = canonicalHeaders.get(frontier.height);
+          if (!canonicalHash) throw new Error(`J_HISTORY_HEADER_MISSING:height=${frontier.height}`);
+          if (frontier.hash === canonicalHash) continue;
+          const certifiedAnchor = getEntityCertifiedJAnchor(frontier.replica.state);
+          if (certifiedAnchor?.height === frontier.height) {
+            throw new Error(
+              `J_HISTORY_FINALIZED_REORG:${frontier.height}:chain=${config.chainId}` +
+              `:expected=${certifiedAnchor.hash}:canonical=${canonicalHash}`,
+            );
+          }
+          const key = `${frontier.height}:${canonicalHash}`;
+          const group = targetedRewinds.get(key) ?? {
+            height: frontier.height,
+            canonicalHash,
+            replicaKeys: [],
+          };
+          group.replicaKeys.push(frontier.replicaKey);
+          targetedRewinds.set(key, group);
+        }
+        if (targetedRewinds.size > 0) {
+          const rewoundReplicaKeys = new Set<string>();
+          for (const group of targetedRewinds.values()) {
+            for (const replicaKey of enqueueJHistoryRewindForReplicaKeys(
+              activeEnv,
+              group.height,
+              group.canonicalHash,
+              group.replicaKeys,
+              addresses.depository,
+              config.chainId,
+            )) rewoundReplicaKeys.add(replicaKey);
+          }
+          reorgRewindPendingReplicaKeys = [...rewoundReplicaKeys].sort();
+          for (const [height, replicaKeys] of pendingWatcherJBlocks) {
+            for (const replicaKey of rewoundReplicaKeys) replicaKeys.delete(replicaKey);
+            if (replicaKeys.size === 0) pendingWatcherJBlocks.delete(height);
+          }
+          txCounter._seenLogs = { set: new Set<string>(), order: [] };
+          emitWatcherDebug({
+            event: 'j_watch_local_frontier_rewind_enqueued',
+            replicaCount: reorgRewindPendingReplicaKeys.length,
+            frontiers: [...targetedRewinds.values()].map((group) => ({
+              height: group.height,
+              canonicalBlockHash: group.canonicalHash,
+              replicaCount: group.replicaKeys.length,
+            })),
+          });
+          return true;
+        }
 
         const expectedTipHashes = new Set(
           relevantReplicas
@@ -2285,49 +2811,23 @@ export async function createRpcAdapter(
         if (expectedTipHashes.size !== 1) {
           throw new Error(`J_HISTORY_LOCAL_TIP_DIVERGENCE:height=${lastSyncedBlock}`);
         }
-        const canonicalTip = (await readBlockHeadersAtHeights([lastSyncedBlock]))[0];
-        if (!canonicalTip) throw new Error(`J_HISTORY_HEADER_MISSING:height=${lastSyncedBlock}`);
+        const canonicalTipHash = canonicalHeaders.get(lastSyncedBlock);
+        if (!canonicalTipHash) throw new Error(`J_HISTORY_HEADER_MISSING:height=${lastSyncedBlock}`);
         const expectedTipHash = [...expectedTipHashes][0]!;
-        if (canonicalTip.jBlockHash === expectedTipHash) return false;
-
-        const finalizedAnchors = new Map<number, string>();
-        for (const replica of relevantReplicas) {
-          const height = Number(replica.state.lastFinalizedJHeight || 0);
-          if (height <= 0) continue;
-          const hash = getValidatorJExpectedBlockHash(replica.state, replica.jHistory, height);
-          if (!hash) continue;
-          const existing = finalizedAnchors.get(height);
-          if (existing && existing !== hash) {
-            throw new Error(`J_HISTORY_FINALIZED_ANCHOR_DIVERGENCE:height=${height}`);
-          }
-          finalizedAnchors.set(height, hash);
+        if (canonicalTipHash === expectedTipHash) return false;
+        const mismatchingReplicaKeys = relevantReplicaEntries.flatMap(([replicaKey, replica]) => (
+          getValidatorJExpectedBlockHash(replica.state, replica.jHistory, lastSyncedBlock) === expectedTipHash
+            ? [replicaKey]
+            : []
+        ));
+        if (mismatchingReplicaKeys.length === 0) {
+          throw new Error(`J_HISTORY_REORG_WITHOUT_REWINDABLE_SUFFIX:${lastSyncedBlock}`);
         }
-        const canonicalAnchors = await readBlockHeadersAtHeights([...finalizedAnchors.keys()]);
-        for (const anchor of canonicalAnchors) {
-          const expectedAnchorHash = finalizedAnchors.get(anchor.jHeight);
-          if (expectedAnchorHash !== anchor.jBlockHash) {
-            const owners = relevantReplicas
-              .filter((replica) => Number(replica.state.lastFinalizedJHeight || 0) === anchor.jHeight)
-              .map((replica) => {
-                const entityId = String(replica.entityId || replica.state.entityId || '').slice(0, 10);
-                const jurisdiction = replica.state.config.jurisdiction;
-                return `${entityId}/${String(jurisdiction?.name || 'unnamed')}/${String(jurisdiction?.chainId ?? 'missing')}`;
-              })
-              .join(',');
-            throw new Error(
-              `J_HISTORY_FINALIZED_REORG:${anchor.jHeight}` +
-              `:chain=${config.chainId}` +
-              `:owners=${owners || 'unknown'}` +
-              `:expected=${expectedAnchorHash || 'missing'}` +
-              `:canonical=${anchor.jBlockHash}`,
-            );
-          }
-        }
-
-        reorgRewindPendingReplicaKeys = enqueueJHistoryRewind(
+        reorgRewindPendingReplicaKeys = enqueueJHistoryRewindForReplicaKeys(
           activeEnv,
           lastSyncedBlock,
-          canonicalTip.jBlockHash,
+          canonicalTipHash,
+          mismatchingReplicaKeys,
           addresses.depository,
           config.chainId,
         );
@@ -2342,13 +2842,59 @@ export async function createRpcAdapter(
         );
         emitWatcherDebug({
           event: 'j_watch_reorg_rewind_enqueued',
-          conflictingHeight: canonicalTip.jHeight,
+          conflictingHeight: lastSyncedBlock,
           expectedBlockHash: expectedTipHash,
-          canonicalBlockHash: canonicalTip.jBlockHash,
+          canonicalBlockHash: canonicalTipHash,
           rewindToHeight: lastSyncedBlock,
           replicaCount: reorgRewindPendingReplicaKeys.length,
         });
         return true;
+      };
+      const assertAuthorityEvidenceCanonical = async (
+        activeEnv: Env,
+        currentHead: number,
+      ): Promise<void> => {
+        const stackKey = getCertifiedBoardStackKey({
+          chainId: config.chainId,
+          depositoryAddress: addresses.depository,
+          entityProviderAddress: addresses.entityProvider,
+        });
+        const evidence = Array.from(
+          activeEnv.runtimeState?.certifiedRegistrationEvidence?.values() ?? [],
+        ).filter(candidate => candidate.stackKey === stackKey);
+        const currentHeader = (await readBlockHeadersAtHeights([currentHead]))[0];
+        if (!currentHeader) throw new Error(`J_AUTHORITY_HEAD_HEADER_MISSING:${currentHead}`);
+        const auditKey = `${currentHead}:${currentHeader.jBlockHash}:${evidence.length}`;
+        if (lastAuthorityHeaderAuditKey === auditKey) return;
+        if (evidence.length === 0) {
+          lastAuthorityHeaderAuditKey = auditKey;
+          return;
+        }
+        const heights = evidence.flatMap(candidate => [
+          candidate.activationHeight,
+          candidate.observedThroughHeight,
+        ]);
+        const canonicalHeaders = new Map(
+          (await readBlockHeadersAtHeights(heights)).map(header => [header.jHeight, header.jBlockHash]),
+        );
+        for (const candidate of evidence) {
+          const activationHash = canonicalHeaders.get(candidate.activationHeight);
+          if (activationHash !== candidate.blockHash) {
+            throw new Error(
+              `J_AUTHORITY_FINALIZED_REORG:entity=${candidate.entityId}:height=${candidate.activationHeight}:` +
+              `expected=${candidate.blockHash}:canonical=${activationHash ?? 'missing'}`,
+            );
+          }
+          const tipHash = canonicalHeaders.get(candidate.observedThroughHeight);
+          if (tipHash !== candidate.observedTipBlockHash) {
+            throw new Error(
+              `J_AUTHORITY_FINALITY_TIP_REORG:entity=${candidate.entityId}:` +
+              `height=${candidate.observedThroughHeight}:expected=${candidate.observedTipBlockHash}:` +
+              `canonical=${tipHash ?? 'missing'}`,
+            );
+          }
+        }
+        lastAuthorityHeaderAuditKey = auditKey;
       };
       const isJEventIngressPaused = (activeEnv: Env): boolean =>
         !!activeEnv.runtimeState?.persistenceQuiescing && !activeEnv.scenarioMode;
@@ -2385,57 +2931,162 @@ export async function createRpcAdapter(
             return;
           }
           pollStep = 'eth_blockNumber';
-          const currentBlock = parseInt(await (provider as ethers.JsonRpcProvider).send('eth_blockNumber', []), 16);
+          const currentBlock = await readCurrentRpcBlockNumber();
           if (watcherPollCancelled()) return;
           const safeToBlock = currentBlock - confirmationDepth;
           if (safeToBlock <= 0) return;
+          pollStep = `verifyAuthorityEvidence:${currentBlock}`;
+          await assertAuthorityEvidenceCanonical(activeEnv, currentBlock);
           pollStep = `verifyCanonicalTip:${lastSyncedBlock}`;
-          if (await reconcileWatcherCanonicalTip(activeEnv)) return;
+          if (await reconcileWatcherCanonicalTip(activeEnv)) {
+            pendingWatcherJHistoryRange = null;
+            return;
+          }
+          if (pendingWatcherJHistoryRange) {
+            if (!isWatcherJHistoryRangeDurable(activeEnv, pendingWatcherJHistoryRange)) {
+              const waitKey = `${pendingWatcherJHistoryRange.fromBlock}:${pendingWatcherJHistoryRange.toBlock}`;
+              if (lastPendingHistoryWaitKey !== waitKey) {
+                lastPendingHistoryWaitKey = waitKey;
+                rpcLog.info('watcher.waiting_for_durable_history_range', {
+                  chainId: config.chainId,
+                  fromBlock: pendingWatcherJHistoryRange.fromBlock,
+                  toBlock: pendingWatcherJHistoryRange.toBlock,
+                  replicas: [...pendingWatcherJHistoryRange.replicaKeys],
+                });
+              }
+              return;
+            }
+            pendingWatcherJHistoryRange = null;
+            lastPendingHistoryWaitKey = '';
+          }
           commitScannedWatcherCursor(activeEnv, lastSyncedBlock);
-          if (lastSyncedBlock >= safeToBlock) return;
+          const watcherReplica = findWatcherJurisdictionReplica(
+            activeEnv,
+            addresses.depository,
+            config.chainId,
+          );
+          if (!watcherReplica) {
+            throw new Error(`J_WATCHER_JURISDICTION_NOT_FOUND:poll:${config.chainId}:${addresses.depository}`);
+          }
+          const minimumLocalScan = getMinimumScannedSignerJHeight(activeEnv, watcherReplica);
+          const nextGlobalBlock = lastSyncedBlock + 1;
+          // A replica imported after the watcher reached the tip has no local
+          // authenticated history yet. The global cursor must not hide that
+          // per-replica gap: rescan from the earliest local cursor while keeping
+          // lastSyncedBlock monotonic. Exact duplicate ranges reconcile as no-ops.
+          const nextReplicaCatchUpBlock = minimumLocalScan === null
+            ? nextGlobalBlock
+            : minimumLocalScan + 1;
+          const fromBlock = Math.min(nextGlobalBlock, nextReplicaCatchUpBlock);
+          if (fromBlock > safeToBlock) return;
 
-          const fromBlock = lastSyncedBlock + 1;
           const toBlock = resolveWatcherPollToBlock(fromBlock, safeToBlock);
           pollFromBlock = fromBlock;
           pollToBlock = toBlock;
+          const parentHeight = fromBlock - 1;
+          const relevantReplicas = [...activeEnv.eReplicas.values()]
+            .filter((replica) => isEntityReplicaRelevantToWatcher(activeEnv, replica, watcherReplica));
+          const expectedParentHashes = parentHeight > 0
+            ? new Set(relevantReplicas
+                .map(replica => getValidatorJExpectedBlockHash(replica.state, replica.jHistory, parentHeight))
+                .filter((hash): hash is string => Boolean(hash)))
+            : new Set<string>();
+          if (expectedParentHashes.size > 1) {
+            throw new Error(`J_HISTORY_RANGE_PARENT_DIVERGENCE:height=${parentHeight}`);
+          }
+          const expectedParentHash = [...expectedParentHashes][0];
+          const expectedParentFinalized = expectedParentHash !== undefined && relevantReplicas.some((replica) => {
+            const certifiedAnchor = getEntityCertifiedJAnchor(replica.state);
+            return certifiedAnchor?.height === parentHeight && certifiedAnchor.hash === expectedParentHash;
+          });
           // Commit the watcher cursor only after a successful poll+apply.
           // Advancing it before getLogs()/event processing can persist a speculative
           // blockNumber into WAL snapshots and permanently skip finalized J events.
           pollStep = 'resolveDepository';
-          const filter = { address: await getLiveDepositoryAddress(), fromBlock, toBlock };
-          pollStep = 'eth_getLogs';
-          const depositoryLogs = await provider.getLogs(filter);
-          pollStep = 'eth_getLogs:erc20';
+          const liveDepositoryAddress = (await getLiveDepositoryAddress()).toLowerCase();
+          pollStep = 'resolveEntityProvider';
+          const liveEntityProviderAddress = (await getLiveEntityProviderAddress()).toLowerCase();
+          pollStep = 'resolveErc20Registry';
           const watchedTokens = await readWatchedErc20Tokens();
-          const erc20Logs = watchedTokens.length > 0
-            ? await provider.getLogs({
-                address: watchedTokens.map(token => token.address),
-                fromBlock,
-                toBlock,
-              })
-            : [];
-          if (watcherPollCancelled()) return;
-          const tokenByAddress = new Map(watchedTokens.map(token => [token.address, token]));
-          const logs = [
-            ...depositoryLogs.map(log => ({ kind: 'depository' as const, log })),
-            ...erc20Logs.map(log => ({ kind: 'erc20' as const, log })),
-          ].sort((left, right) =>
-            Number(left.log.blockNumber || 0) - Number(right.log.blockNumber || 0) ||
-            Number(left.log.index || 0) - Number(right.log.index || 0)
+          pollStep = 'authenticatedReceipts';
+          const authenticatedRange = await readAuthenticatedReceiptRange(
+            (method, params) => (provider as ethers.JsonRpcProvider).send(method, params),
+            fromBlock,
+            toBlock,
+            [liveDepositoryAddress, liveEntityProviderAddress, ...watchedTokens.map((token) => token.address)],
+            {
+              commitment: isTronChainId(config.chainId)
+                ? 'tron-complete-receipts'
+                : 'ethereum-trie',
+            },
           );
+          if (watcherPollCancelled()) return;
+          const authenticatedIngress = prepareAuthenticatedWatcherIngress(
+            authenticatedRange,
+            expectedParentHash
+              ? {
+                  height: parentHeight,
+                  hash: expectedParentHash,
+                  finalized: expectedParentFinalized,
+                }
+              : undefined,
+          );
+          const headers = authenticatedIngress.headers;
+          const authenticatedLogs = authenticatedIngress.logs;
+          const rangeTipHash = authenticatedIngress.tipBlockHash;
+          const tokenByAddress = new Map(watchedTokens.map(token => [token.address, token]));
+          const logs = authenticatedLogs.map((log) => ({
+            kind: log.address.toLowerCase() === liveDepositoryAddress
+              ? 'depository' as const
+              : log.address.toLowerCase() === liveEntityProviderAddress
+                ? 'entityProvider' as const
+                : 'erc20' as const,
+            log,
+          }));
 
           if (logs.length > 0) {
             const rawEvents: RawJEvent[] = [];
+            const authorityTxsByBlock = new Map<number, RuntimeTx[]>();
             const trackedExternalOwners = buildTrackedExternalOwners(activeEnv);
             for (const { kind, log } of logs) {
               try {
                 const parsed = kind === 'depository'
-                  ? depositoryIface.parseLog({ topics: log.topics as string[], data: log.data })
-                  : erc20WatchIface.parseLog({ topics: log.topics as string[], data: log.data });
+                  ? parseKnownDepositoryLog(log)
+                  : kind === 'entityProvider'
+                    ? entityProviderIface.parseLog({ topics: log.topics as string[], data: log.data })
+                    : erc20WatchIface.parseLog({ topics: log.topics as string[], data: log.data });
                 if (!parsed) {
                   throw new Error(
                     `unrecognized ${kind} log at block=${String(log.blockNumber)} index=${String(log.index)}`,
                   );
+                }
+                if (
+                  kind === 'entityProvider' &&
+                  (parsed.name === 'EntityRegistered' || parsed.name === 'FoundationBootstrapped')
+                ) {
+                  // Receipt/header authentication already happened against the
+                  // fresh RPC range. From this boundary onward every consumer,
+                  // including authority evidence, uses the same replay identity.
+                  const evidence = buildCertifiedRegistrationEvidence(
+                    activeEnv,
+                    watcherReplica,
+                    parsed.name,
+                    log,
+                    {
+                      observedThroughHeight: toBlock,
+                      observedTipBlockHash: rangeTipHash,
+                      observedHeadHeight: currentBlock,
+                      confirmationDepth,
+                    },
+                  );
+                  const tx = markLocalJAuthorityRuntimeTx({
+                    type: 'recordAuthenticatedJAuthority',
+                    data: evidence,
+                  });
+                  authorityTxsByBlock.set(log.blockNumber, [
+                    ...(authorityTxsByBlock.get(log.blockNumber) ?? []),
+                    tx,
+                  ]);
                 }
                 if (kind === 'erc20') {
                   const tokenAddress = normalizeEvmAddress(log.address);
@@ -2502,13 +3153,17 @@ export async function createRpcAdapter(
                 if (!CANONICAL_J_EVENTS.some(name => name === parsed.name)) continue;
                 // Extract named args from ethers v6 Result (array-like, named keys
                 // not enumerable via Object.keys). Use positional fallback for unnamed params.
-                const args: RawJEventArgs = {};
-                for (let idx = 0; idx < parsed.fragment.inputs.length; idx++) {
-                  const input = parsed.fragment.inputs[idx];
-                  if (!input) continue;
-                  const key = input.name || String(idx);
-                  args[key] = parsed.args[idx]; // Use positional index (always works)
-                  if (input.name) args[input.name] = parsed.args[idx];
+                const args: RawJEventArgs = kind === 'depository'
+                  ? extractCanonicalDepositoryEventArgs(parsed)
+                  : {};
+                if (kind !== 'depository') {
+                  for (let idx = 0; idx < parsed.fragment.inputs.length; idx++) {
+                    const input = parsed.fragment.inputs[idx];
+                    if (!input) continue;
+                    const key = input.name || String(idx);
+                    args[key] = parsed.args[idx]; // Use positional index (always works)
+                    if (input.name) args[input.name] = parsed.args[idx];
+                  }
                 }
                 const disputeFinalizationEvidence = parsed.name === 'DisputeFinalized'
                   ? await findDisputeFinalizationEvidence(log.transactionHash, args)
@@ -2531,20 +3186,21 @@ export async function createRpcAdapter(
               }
             }
 
+            if (watcherPollCancelled()) {
+              emitWatcherDebug({
+                event: 'j_watch_shutdown_poll_aborted',
+                message: 'watcher cancellation observed before J-event ingress',
+                chainId: config.chainId,
+                rpcUrl: config.rpcUrl,
+                step: 'before-process-event-batch',
+                fromBlock,
+                toBlock,
+                lastSyncedBlock,
+              });
+              return;
+            }
+            const observedInputs: RuntimeInput[] = [];
             if (rawEvents.length > 0) {
-              if (watcherPollCancelled()) {
-                emitWatcherDebug({
-                  event: 'j_watch_shutdown_poll_aborted',
-                  message: 'watcher cancellation observed before J-event ingress',
-                  chainId: config.chainId,
-                  rpcUrl: config.rpcUrl,
-                  step: 'before-process-event-batch',
-                  fromBlock,
-                  toBlock,
-                  lastSyncedBlock,
-                });
-                return;
-              }
               if (isJEventIngressPaused(activeEnv)) {
                 pauseJEventWatcherForQuiesce({
                   step: 'before-process-event-batch',
@@ -2565,7 +3221,6 @@ export async function createRpcAdapter(
                 if (!byBlock.has(bn)) byBlock.set(bn, []);
                 byBlock.get(bn)!.push(e);
               }
-              const observedInputs = [];
               for (const [blockNum, events] of byBlock) {
                 const blockHash = events[0]?.blockHash ?? '0x0';
                 pollStep = `processEventBatch:${blockNum}`;
@@ -2580,24 +3235,11 @@ export async function createRpcAdapter(
                   true,
                   'chain',
                   config.chainId,
+                  fromBlock <= lastSyncedBlock,
+                  authorityTxsByBlock.get(blockNum) ?? [],
                 );
                 if (builtInput) observedInputs.push(builtInput);
               }
-              pollStep = `eth_getBlockHeaders:${fromBlock}-${toBlock}`;
-              const headers = await readFinalizedBlockHeaders(fromBlock, toBlock);
-              const rangeTipHash = headers[headers.length - 1]?.jBlockHash;
-              if (!rangeTipHash) throw new Error(`J_HISTORY_RANGE_TIP_UNAVAILABLE:${toBlock}`);
-              const rangeReplicaKeys = enqueueJHistoryRange(
-                activeEnv,
-                observedInputs,
-                toBlock,
-                rangeTipHash,
-                addresses.depository,
-                headers,
-                config.chainId,
-              );
-              rememberPendingWatcherJBlock(pendingWatcherJBlocks, toBlock, rangeReplicaKeys);
-
               emitWatcherDebug({
                 event: 'j_watch_batch',
                 fromBlock,
@@ -2609,7 +3251,43 @@ export async function createRpcAdapter(
                 eventCounts,
               });
             }
-            lastSyncedBlock = toBlock;
+            // Authenticated receipts may contain valid watched-address logs
+            // that are irrelevant to this Runtime (for example an ERC20
+            // transfer between untracked owners). Those blocks still extend
+            // every relevant validator's authenticated local J-prefix.
+            if (watcherPollCancelled()) return;
+            if (isJEventIngressPaused(activeEnv)) {
+              pauseJEventWatcherForQuiesce({
+                step: 'before-authenticated-history-range-ingress',
+                fromBlock,
+                toBlock,
+              });
+              return;
+            }
+            const rangeReplicaKeys = enqueueJHistoryRange(
+              activeEnv,
+              observedInputs,
+              toBlock,
+              rangeTipHash,
+              addresses.depository,
+              headers,
+              config.chainId,
+            );
+            rememberPendingWatcherJBlock(
+              pendingWatcherJBlocks,
+              toBlock,
+              rangeReplicaKeys.finalityReplicaKeys,
+            );
+            if (rangeReplicaKeys.scannedReplicaKeys.length > 0) {
+              if (pendingWatcherJHistoryRange) throw new Error('J_WATCHER_PENDING_SCAN_ALREADY_EXISTS');
+              pendingWatcherJHistoryRange = {
+                fromBlock,
+                toBlock,
+                tipBlockHash: rangeTipHash,
+                replicaKeys: new Set(rangeReplicaKeys.scannedReplicaKeys),
+              };
+            }
+            lastSyncedBlock = Math.max(lastSyncedBlock, toBlock);
             consecutiveTransientWatcherFailures = 0;
             commitScannedWatcherCursor(activeEnv, lastSyncedBlock);
             return;
@@ -2617,18 +3295,18 @@ export async function createRpcAdapter(
 
           if (watcherPollCancelled()) return;
 
-          // Do not permanently skip a single just-mined tail block on an empty poll.
-          // Some RPC backends briefly return no logs for the newest block even after the
-          // receipt is available. If we advance lastSyncedBlock here, that block is lost
-          // forever and the runtime never sees its J-events.
-          if (fromBlock === safeToBlock) {
+          if (isJEventIngressPaused(activeEnv)) {
+            pauseJEventWatcherForQuiesce({
+              step: 'before-authenticated-empty-range-ingress',
+              fromBlock,
+              toBlock,
+            });
             return;
           }
 
-          pollStep = `eth_getBlockHeaders:${fromBlock}-${toBlock}`;
-          const headers = await readFinalizedBlockHeaders(fromBlock, toBlock);
-          const rangeTipHash = headers[headers.length - 1]?.jBlockHash;
-          if (!rangeTipHash) throw new Error(`J_HISTORY_RANGE_TIP_UNAVAILABLE:${toBlock}`);
+          // `readAuthenticatedLogsForRange` verifies complete receipts against
+          // the canonical block commitment. An authenticated empty tail is final
+          // evidence, not a best-effort eth_getLogs result, so advancing is safe.
           const rangeReplicaKeys = enqueueJHistoryRange(
             activeEnv,
             [],
@@ -2638,9 +3316,22 @@ export async function createRpcAdapter(
             headers,
             config.chainId,
           );
-          rememberPendingWatcherJBlock(pendingWatcherJBlocks, toBlock, rangeReplicaKeys);
+          rememberPendingWatcherJBlock(
+            pendingWatcherJBlocks,
+            toBlock,
+            rangeReplicaKeys.finalityReplicaKeys,
+          );
+          if (rangeReplicaKeys.scannedReplicaKeys.length > 0) {
+            if (pendingWatcherJHistoryRange) throw new Error('J_WATCHER_PENDING_SCAN_ALREADY_EXISTS');
+            pendingWatcherJHistoryRange = {
+              fromBlock,
+              toBlock,
+              tipBlockHash: rangeTipHash,
+              replicaKeys: new Set(rangeReplicaKeys.scannedReplicaKeys),
+            };
+          }
 
-          lastSyncedBlock = toBlock;
+          lastSyncedBlock = Math.max(lastSyncedBlock, toBlock);
           consecutiveTransientWatcherFailures = 0;
           commitScannedWatcherCursor(activeEnv, lastSyncedBlock);
         })().catch((error: unknown) => {
@@ -2678,10 +3369,15 @@ export async function createRpcAdapter(
                 consecutiveFailures: consecutiveTransientWatcherFailures,
                 error: watcherErrorDetails(error),
               });
-              console.warn(
-                `[JAdapter:rpc] transient watcher RPC unavailable ` +
-                `(chain=${config.chainId}, failures=${consecutiveTransientWatcherFailures}): ${message}`,
-              );
+              // A single null header immediately after eth_blockNumber is a
+              // normal RPC read race. Keep the structured diagnostic, but only
+              // raise operator-visible severity once the inconsistency persists.
+              if (consecutiveTransientWatcherFailures >= 3) {
+                console.warn(
+                  `[JAdapter:rpc] transient watcher RPC unavailable ` +
+                  `(chain=${config.chainId}, failures=${consecutiveTransientWatcherFailures}): ${message}`,
+                );
+              }
             }
             return;
           }
@@ -2760,6 +3456,12 @@ export async function createRpcAdapter(
       rpcLog.info('watcher.stopped', { chainId: config.chainId });
     },
 
+    async stopWatchingAndWait(): Promise<void> {
+      const inFlightWatcherPoll = pollInFlight;
+      adapter.stopWatching();
+      if (inFlightWatcherPoll) await inFlightWatcherPoll;
+    },
+
     getBrowserVM(): BrowserVMProvider | null {
       return null;
     },
@@ -2781,7 +3483,10 @@ export async function createRpcAdapter(
     },
 
     async getCurrentBlockNumber(): Promise<number> {
-      return await provider.getBlockNumber();
+      // Explicit watcher drains are finality barriers. JsonRpcProvider may
+      // cache getBlockNumber() across a just-mined registration receipt, which
+      // would let bootstrap stop one block before its authority evidence.
+      return await readCurrentRpcBlockNumber();
     },
 
     getFinalityDepth(): number {
@@ -2792,17 +3497,19 @@ export async function createRpcAdapter(
       return null;
     },
 
-    async close(): Promise<void> {
-      const inFlightWatcherPoll = pollInFlight;
-      adapter.stopWatching();
-      if (inFlightWatcherPoll) {
-        await Promise.race([
-          inFlightWatcherPoll.catch(() => undefined),
-          new Promise<void>((resolve) => setTimeout(resolve, 2_500)),
-        ]);
-      }
-      depository?.removeAllListeners();
-      entityProvider?.removeAllListeners();
+    close(): Promise<void> {
+      closePromise ??= (async () => {
+        await adapter.stopWatchingAndWait();
+        depository?.removeAllListeners();
+        entityProvider?.removeAllListeners();
+        const lifecycleProvider = provider as Provider & {
+          destroy?: () => void | Promise<void>;
+        };
+        if (typeof lifecycleProvider.destroy === 'function') {
+          await lifecycleProvider.destroy();
+        }
+      })();
+      return closePromise;
     },
   };
 

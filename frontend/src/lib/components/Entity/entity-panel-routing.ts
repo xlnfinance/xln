@@ -1,5 +1,5 @@
 export type ViewTab = 'assets' | 'accounts' | 'settings';
-export type SettingsSubview = 'wallet' | 'recovery' | 'display' | 'network' | 'data' | 'log' | 'entity';
+export type SettingsSubview = 'wallet' | 'consensus' | 'recovery' | 'display' | 'network' | 'data' | 'log' | 'entity';
 export type AccountWorkspaceTab = 'send' | 'receive' | 'swap' | 'open' | 'activity' | 'move' | 'lending' | 'history' | 'configure' | 'appearance';
 export type AssetWorkspaceTab = 'move' | 'history';
 export type ConfigureWorkspaceTab = 'extend-credit' | 'request-credit' | 'collateral' | 'token' | 'dispute';
@@ -24,7 +24,7 @@ export type EntityPanelDeepLinkUpdate = Partial<EntityPanelRouteState & {
   selectedJurisdictionName: string | null;
 }>;
 
-const settingsSubviews: readonly SettingsSubview[] = ['wallet', 'recovery', 'display', 'network', 'data', 'log', 'entity'];
+const settingsSubviews: readonly SettingsSubview[] = ['wallet', 'consensus', 'recovery', 'display', 'network', 'data', 'log', 'entity'];
 const configureWorkspaceTabs: readonly ConfigureWorkspaceTab[] = ['extend-credit', 'request-credit', 'collateral', 'token', 'dispute'];
 
 export function getLocationHashRoute(location: Location): string | null {
@@ -115,6 +115,9 @@ export function canonicalizeEntityPanelRoute(routeRaw: string | null): string | 
     case 'recovery':
     case 'watchtowers':
       return 'settings/recovery';
+    case 'settings/consensus':
+    case 'consensus':
+      return 'settings/consensus';
     case 'settings/display':
     case 'display':
       return 'settings/display';
@@ -203,6 +206,10 @@ export function resolveEntityPanelDeepLink(input: EntityPanelDeepLinkRequest): E
     case 'settings/recovery':
       update.activeTab = 'settings';
       update.settingsSubview = 'recovery';
+      break;
+    case 'settings/consensus':
+      update.activeTab = 'settings';
+      update.settingsSubview = 'consensus';
       break;
     case 'settings/display':
       update.activeTab = 'settings';

@@ -1,3 +1,5 @@
+import type { ProposedEntityFrame } from '../types';
+
 export const normalizeSignatureMap = (value: unknown): Map<string, string[]> | undefined => {
   if (!value) return undefined;
   if (value instanceof Map) return value as Map<string, string[]>;
@@ -22,3 +24,11 @@ export const normalizeSignatureMap = (value: unknown): Map<string, string[]> | u
 
 export const signatureMapSize = (value: unknown): number =>
   normalizeSignatureMap(value)?.size ?? 0;
+
+/**
+ * Honest multi-validator commit notifications attach at least the Entity-frame
+ * quorum Hanko. This classifies transport envelopes only; consensus still
+ * verifies the collected signatures and voting power before applying a frame.
+ */
+export const hasEntityCommitCertificate = (frame: ProposedEntityFrame | undefined): boolean =>
+  Array.isArray(frame?.hankos) && frame.hankos.length > 0;

@@ -1,18 +1,18 @@
 <script lang="ts">
   import { get } from 'svelte/store';
-  import type { AccountMachine, Env, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/xln-api';
+  import type { AccountMachine, Env, RuntimeInput } from '@xln/runtime/xln-api';
   import { xlnFunctions, error } from '../../stores/xlnStore';
   import { errorLog } from '../../stores/errorLogStore';
   import { runtimeControllerHandle } from '../../stores/runtimeControllerStore';
   import {
     getCounterpartyAccount,
-    getReplicaForEntity,
     normalizeEntityId,
     requireSignerIdForEntity,
   } from '$lib/utils/entityReplica';
   import BigIntInput from '../Common/BigIntInput.svelte';
   import EntitySelect from './EntitySelect.svelte';
   import { amountToUsd } from '$lib/utils/assetPricing';
+  import { requireTokenDecimals } from './token-metadata';
 
   export let entityId: string;
   export let actionRuntimeEnv: Env | null = null;
@@ -44,10 +44,9 @@
   });
 
   $: effectiveCounterparty = counterpartyId || selectedCounterparty;
-  $: tokenList = [1, 2, 3].map(id => {
-    const info = activeXlnFunctions?.getTokenInfo?.(id);
-    return { id, symbol: info?.symbol || `TKN${id}` };
-  });
+  $: tokenList = activeXlnFunctions
+    ? [1, 2, 3].map((id) => ({ id, symbol: activeXlnFunctions.getTokenInfo(id).symbol }))
+    : [];
   $: userDerivedDelta = (() => {
     if (!effectiveCounterparty || !activeXlnFunctions) return null;
     const account = accountOverride ?? (
@@ -65,9 +64,11 @@
     }
   })();
   $: selectedTokenDecimals = (() => {
-    const info = activeXlnFunctions?.getTokenInfo?.(selectedTokenId);
-    const decimals = Number(info?.decimals);
-    return Number.isFinite(decimals) && decimals >= 0 ? decimals : 18;
+    if (!activeXlnFunctions) return 0;
+    return requireTokenDecimals(
+      activeXlnFunctions.getTokenInfo(selectedTokenId).decimals,
+      `token:${selectedTokenId}`,
+    );
   })();
   $: maxCollateralNeeded = (() => {
     if (!userDerivedDelta) return 0n;
@@ -113,17 +114,6 @@
     }
   }
 
-  function parseBigIntSafe(value: unknown, defaultValue = 0n): bigint {
-    try {
-      if (typeof value === 'bigint') return value;
-      if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.floor(value));
-      if (typeof value === 'string' && value.trim()) return BigInt(value.trim());
-      return defaultValue;
-    } catch {
-      return defaultValue;
-    }
-  }
-
   type CounterpartyFeePolicy = {
     policyVersion: number;
     baseFee: bigint;
@@ -131,55 +121,36 @@
     gasFee: bigint;
   };
 
-  function resolveCounterpartyPolicy(env: Env, ownerEntityId: string, cpEntityId: string): CounterpartyFeePolicy | null {
-    const ownerNorm = normalizeEntityId(ownerEntityId);
-    const cpNorm = normalizeEntityId(cpEntityId);
-    if (!ownerNorm || !cpNorm) return null;
-
-    const accountPolicy = getCounterpartyAccount(env, ownerEntityId, cpEntityId)?.account.counterpartyRebalanceFeePolicy;
-    const accountPolicyVersion = Number(accountPolicy?.policyVersion ?? 0);
-    if (Number.isFinite(accountPolicyVersion) && accountPolicyVersion > 0) {
-      return {
-        policyVersion: accountPolicyVersion,
-        baseFee: parseBigIntSafe(accountPolicy?.baseFee, 0n),
-        liquidityFeeBps: parseBigIntSafe(accountPolicy?.liquidityFeeBps, 0n),
-        gasFee: parseBigIntSafe(accountPolicy?.gasFee, 0n),
-      };
-    }
-
-    const hubConfig = getReplicaForEntity(env, cpEntityId)?.state?.hubRebalanceConfig;
-    const hubPolicyVersion = Number(hubConfig?.policyVersion ?? 0);
-    if (Number.isFinite(hubPolicyVersion) && hubPolicyVersion > 0) {
-      return {
-        policyVersion: hubPolicyVersion,
-        baseFee: parseBigIntSafe(hubConfig?.rebalanceBaseFee ?? hubConfig?.baseFee, 0n),
-        liquidityFeeBps: parseBigIntSafe(hubConfig?.rebalanceLiquidityFeeBps ?? hubConfig?.minFeeBps, 0n),
-        gasFee: parseBigIntSafe(hubConfig?.rebalanceGasFee, 0n),
-      };
-    }
-
-    const profile = env.gossip.getProfiles().find((candidate: GossipProfile) => normalizeEntityId(candidate.entityId) === cpNorm);
-    const md = profile?.metadata;
-    const policyVersion = Number(md?.policyVersion ?? 0);
-    if (!Number.isFinite(policyVersion) || policyVersion <= 0) return null;
-    if (!md) return null;
-    return {
-      policyVersion,
-      baseFee: parseBigIntSafe(md.rebalanceBaseFee ?? md.baseFee, 0n),
-      liquidityFeeBps: parseBigIntSafe(md.rebalanceLiquidityFeeBps, 0n),
-      gasFee: parseBigIntSafe(md.rebalanceGasFee, 0n),
-    };
+  function resolveCounterpartyPolicy(
+    env: Env,
+    ownerEntityId: string,
+    cpEntityId: string,
+    tokenId: number,
+  ): CounterpartyFeePolicy | null {
+    const account = getCounterpartyAccount(env, ownerEntityId, cpEntityId)?.account;
+    return resolveProjectedCounterpartyPolicy(account, ownerEntityId, tokenId);
   }
 
-  function resolveProjectedCounterpartyPolicy(account: AccountMachine | null | undefined): CounterpartyFeePolicy | null {
-    const policy = account?.counterpartyRebalanceFeePolicy;
-    const policyVersion = Number(policy?.policyVersion ?? 0);
-    if (!Number.isFinite(policyVersion) || policyVersion <= 0) return null;
+  function resolveProjectedCounterpartyPolicy(
+    account: AccountMachine | null | undefined,
+    ownerEntityId: string,
+    tokenId: number,
+  ): CounterpartyFeePolicy | null {
+    if (!account) return null;
+    const owner = normalizeEntityId(ownerEntityId);
+    const side = owner === normalizeEntityId(account.leftEntity)
+      ? 'right'
+      : owner === normalizeEntityId(account.rightEntity)
+        ? 'left'
+        : null;
+    if (!side) return null;
+    const policy = account.rebalanceFeePolicies?.get(tokenId)?.[side];
+    if (!policy) return null;
     return {
-      policyVersion,
-      baseFee: parseBigIntSafe(policy?.baseFee, 0n),
-      liquidityFeeBps: parseBigIntSafe(policy?.liquidityFeeBps, 0n),
-      gasFee: parseBigIntSafe(policy?.gasFee, 0n),
+      policyVersion: policy.policyVersion,
+      baseFee: policy.baseFee,
+      liquidityFeeBps: policy.liquidityFeeBps,
+      gasFee: policy.gasFee,
     };
   }
 
@@ -212,10 +183,10 @@
         || (env ? requireSignerIdForEntity(env, entityId, 'collateral-form') : '');
       if (!resolvedSigner) throw new Error('Signer is required for collateral command');
       const feePolicy = env
-        ? resolveCounterpartyPolicy(env, entityId, effectiveCounterparty)
-        : resolveProjectedCounterpartyPolicy(accountOverride);
+        ? resolveCounterpartyPolicy(env, entityId, effectiveCounterparty, selectedTokenId)
+        : resolveProjectedCounterpartyPolicy(accountOverride, entityId, selectedTokenId);
       if (!feePolicy) {
-        throw new Error('Missing counterparty rebalance fee policy. Sync gossip/profile first.');
+        throw new Error('Missing committed counterparty rebalance fee policy. Wait for the Account policy frame.');
       }
       if (feePolicy.baseFee < 0n || feePolicy.gasFee < 0n || feePolicy.liquidityFeeBps < 0n) {
         throw new Error('Counterparty rebalance fee policy contains negative values.');

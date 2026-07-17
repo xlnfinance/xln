@@ -1,3 +1,5 @@
+import { assertWithdrawalWithinDisplayedBalance } from './withdrawal-preflight.js';
+
 /**
  * @typedef {{
  *   userId: string,
@@ -780,6 +782,10 @@ async function handleWithdrawSubmit(event) {
     if (parsedIntent?.amount) {
       withdrawAmount = parsedIntent.amount;
     }
+    if (!state) throw new Error('Custody dashboard state unavailable');
+    const selectedToken = state.tokens.find((token) => token.tokenId === selectedTokenId);
+    if (!selectedToken) throw new Error(`Unknown custody token: ${selectedTokenId}`);
+    assertWithdrawalWithinDisplayedBalance(withdrawAmount, selectedToken);
     const response = await fetch('/api/withdraw', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

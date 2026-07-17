@@ -5,6 +5,7 @@ import type {
   SwapOrderResolveHistoryEntry,
 } from '../../../types';
 import { cloneCrossJurisdictionRoute } from '../../../extensions/cross-j/index';
+import { LIMITS } from '../../../constants';
 
 function ensureSwapOrderHistory(accountMachine: AccountMachine): Map<string, SwapOrderHistoryEntry> {
   if (!(accountMachine.swapOrderHistory instanceof Map)) {
@@ -38,10 +39,44 @@ const sameResolveHistoryEntry = (
   sameOptionalBigint(left.feeAmount, right.feeAmount) &&
   (left.comment ?? '') === (right.comment ?? '');
 
+const byOldestLifecycle = (
+  left: readonly [string, SwapOrderHistoryEntry],
+  right: readonly [string, SwapOrderHistoryEntry],
+): number => {
+  if (left[1].lastUpdatedHeight !== right[1].lastUpdatedHeight) {
+    return left[1].lastUpdatedHeight < right[1].lastUpdatedHeight ? -1 : 1;
+  }
+  return left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0;
+};
+
+function pruneTerminalSwapHistory(accountMachine: AccountMachine): void {
+  const terminalHistory = Array.from(ensureSwapOrderHistory(accountMachine).entries())
+    .filter(([offerId]) => !accountMachine.swapOffers.has(offerId))
+    .sort(byOldestLifecycle);
+  const excessHistory = terminalHistory.length - LIMITS.MAX_ACCOUNT_TERMINAL_SWAP_HISTORY;
+  for (const [offerId] of terminalHistory.slice(0, Math.max(0, excessHistory))) {
+    accountMachine.swapOrderHistory!.delete(offerId);
+  }
+
+  const closedOrders = ensureSwapClosedOrders(accountMachine);
+  const excessClosed = closedOrders.size - LIMITS.MAX_ACCOUNT_TERMINAL_SWAP_HISTORY;
+  if (excessClosed <= 0) return;
+  for (const [offerId] of Array.from(closedOrders.entries()).sort(byOldestLifecycle).slice(0, excessClosed)) {
+    closedOrders.delete(offerId);
+  }
+}
+
 export function recordSwapOfferLifecycle(
   accountMachine: AccountMachine,
   offer: SwapOffer,
 ): void {
+  if (
+    offer.offerId.length === 0 ||
+    offer.offerId.length > LIMITS.MAX_ACCOUNT_SWAP_HISTORY_TEXT ||
+    offer.offerId.includes(':')
+  ) {
+    throw new Error(`ACCOUNT_SWAP_HISTORY_OFFER_ID_INVALID:${offer.offerId.length}`);
+  }
   const history = ensureSwapOrderHistory(accountMachine);
   if (history.has(offer.offerId)) return;
   history.set(offer.offerId, {
@@ -86,6 +121,9 @@ export function recordSwapResolveLifecycle(
     createdHeight?: number;
   },
 ): void {
+  if ((resolve.comment?.length ?? 0) > LIMITS.MAX_ACCOUNT_SWAP_HISTORY_TEXT) {
+    throw new Error(`ACCOUNT_SWAP_HISTORY_COMMENT_TOO_LONG:${resolve.comment!.length}`);
+  }
   const history = ensureSwapOrderHistory(accountMachine);
   let entry = history.get(offerId);
   if (!entry) {
@@ -111,6 +149,8 @@ export function recordSwapResolveLifecycle(
   entry.lastUpdatedHeight = currentHeight;
   if (entry.resolves.some((existing) => sameResolveHistoryEntry(existing, resolve))) return;
   entry.resolves.push(resolve);
+  const excess = entry.resolves.length - LIMITS.MAX_ACCOUNT_SWAP_RESOLVES_PER_ORDER;
+  if (excess > 0) entry.resolves.splice(0, excess);
 }
 
 export function recordSwapClosedLifecycle(
@@ -126,4 +166,5 @@ export function recordSwapClosedLifecycle(
       ? historyEntry.resolves.map((resolve) => ({ ...resolve }))
       : [],
   });
+  pruneTerminalSwapHistory(accountMachine);
 }

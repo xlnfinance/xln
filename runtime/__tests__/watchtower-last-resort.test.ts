@@ -9,7 +9,7 @@ import type { TowerAppointmentV1 } from '../recovery/types';
 
 const makeLookupKey = (label: string): string => keccak256(toUtf8Bytes(label));
 const disputeStartedInterface = new Interface([
-  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments)',
+  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments, uint256 disputeTimeout)',
 ]);
 const abiCoder = AbiCoder.defaultAbiCoder();
 const proofBodyParam = ParamType.from(
@@ -39,18 +39,20 @@ const encodeDisputeHash = (
   startedByLeft: boolean,
   disputeTimeout: bigint,
   initialProofbodyHash: string,
+  disputeStartTimestamp: bigint,
   starterInitialArguments: string,
   starterIncrementedArguments: string,
 ): string => keccak256(
   solidityPacked(
-    ['uint256', 'bool', 'uint256', 'bytes32', 'bytes32', 'bytes32'],
+    ['uint256', 'bool', 'uint256', 'bytes32', 'uint256', 'bytes32', 'bytes32'],
     [
       BigInt(initialNonce),
       startedByLeft,
       disputeTimeout,
       initialProofbodyHash,
-      keccak256(starterInitialArguments),
-      keccak256(starterIncrementedArguments),
+      disputeStartTimestamp,
+      keccak256(abiCoder.encode(['bytes', 'bool', 'uint256'], [starterInitialArguments, startedByLeft, disputeStartTimestamp])),
+      keccak256(abiCoder.encode(['bytes', 'bool', 'uint256'], [starterIncrementedArguments, startedByLeft, disputeStartTimestamp])),
     ],
   ),
 );
@@ -110,7 +112,6 @@ describe('watchtower delayed last-resort sweep', () => {
             finalProofbody: makeProofBody(`0x${'ee'.repeat(32)}`),
             leftArguments: '0x',
             rightArguments: '0x',
-            starterIncrementedArguments: '0x',
             sig: '0xcafe',
           },
         }),
@@ -150,7 +151,24 @@ describe('watchtower delayed last-resort sweep', () => {
     const watchSeed = `0x${'ee'.repeat(32)}`;
     const finalProofbody = makeProofBody(watchSeed);
     const finalProofbodyHash = proofBodyHashOf(finalProofbody);
-    const disputeHash = encodeDisputeHash(1, true, 100n, initialProofbodyHash, starterInitialArguments, starterIncrementedArguments);
+    const disputeStartTimestamp = 90n;
+    const initialArgumentsCommitment = keccak256(abiCoder.encode(
+      ['bytes', 'bool', 'uint256'],
+      [starterInitialArguments, true, disputeStartTimestamp],
+    ));
+    const incrementedArgumentsCommitment = keccak256(abiCoder.encode(
+      ['bytes', 'bool', 'uint256'],
+      [starterIncrementedArguments, true, disputeStartTimestamp],
+    ));
+    const disputeHash = encodeDisputeHash(
+      1,
+      true,
+      100n,
+      initialProofbodyHash,
+      disputeStartTimestamp,
+      starterInitialArguments,
+      starterIncrementedArguments,
+    );
     const queriedFromBlocks: number[] = [];
     const queriedToBlocks: number[] = [];
     let submittedFinalization: Record<string, unknown> | null = null;
@@ -182,7 +200,6 @@ describe('watchtower delayed last-resort sweep', () => {
 	          finalProofbody,
 	          leftArguments: '0x',
 	          rightArguments: finalizerRightArguments,
-	          starterIncrementedArguments,
 	          sig: '0xcafe',
 	        },
       }),
@@ -248,6 +265,7 @@ describe('watchtower delayed last-resort sweep', () => {
               watchSeed,
               starterInitialArguments,
               starterIncrementedArguments,
+              100n,
             ],
           );
           return [{ topics: event.topics, data: event.data }];
@@ -259,6 +277,11 @@ describe('watchtower delayed last-resort sweep', () => {
           nonce: 1n,
           disputeHash,
           disputeTimeout: 100n,
+          disputeStartTimestamp,
+          disputeInitialProofbodyHash: initialProofbodyHash,
+          starterInitialArgumentsCommitment: initialArgumentsCommitment,
+          starterIncrementedArgumentsCommitment: incrementedArgumentsCommitment,
+          disputeStartedByLeft: true,
         }),
         defaultDisputeDelay: async () => 95n,
 	        watchtowerCounterDispute: async (_entityId, finalization) => {
@@ -284,8 +307,8 @@ describe('watchtower delayed last-resort sweep', () => {
 	    expect(receipts[0]?.txHash).toBe('0xtxhash');
 	    expect(queriedFromBlocks).toEqual([5, 5]);
 	    expect(queriedToBlocks).toEqual([95, 95]);
-	    expect(submittedFinalization?.['leftArguments']).toBe(starterIncrementedArguments);
-	    expect(submittedFinalization?.['rightArguments']).toBe(finalizerRightArguments);
+	    expect(submittedFinalization?.['starterArguments']).toBe(starterIncrementedArguments);
+	    expect(submittedFinalization?.['otherArguments']).toBe(finalizerRightArguments);
 	  });
 
   test('skips when dispute is inactive or still outside the last-resort window', async () => {
@@ -320,7 +343,6 @@ describe('watchtower delayed last-resort sweep', () => {
           finalProofbody: makeProofBody(watchSeed),
           leftArguments: '0x',
           rightArguments: '0x',
-          starterIncrementedArguments: '0x',
           sig: '0xcafe',
         },
       }),
@@ -380,6 +402,11 @@ describe('watchtower delayed last-resort sweep', () => {
           nonce: 1n,
           disputeHash: '0x9999999999999999999999999999999999999999999999999999999999999999',
           disputeTimeout: 100n,
+          disputeStartTimestamp: 1n,
+          disputeInitialProofbodyHash: `0x${'88'.repeat(32)}`,
+          starterInitialArgumentsCommitment: `0x${'77'.repeat(32)}`,
+          starterIncrementedArgumentsCommitment: `0x${'66'.repeat(32)}`,
+          disputeStartedByLeft: true,
         }),
         watchtowerCounterDispute: async () => {
           throw new Error('should not be called');
@@ -431,7 +458,6 @@ describe('watchtower delayed last-resort sweep', () => {
           finalProofbody: makeProofBody(watchSeed),
           leftArguments: '0x',
           rightArguments: '0x',
-          starterIncrementedArguments: '0x',
           sig: '0xcafe',
         },
       }),
@@ -529,14 +555,26 @@ describe('watchtower delayed last-resort sweep', () => {
           finalProofbody: remedyProofbody,
           leftArguments: '0x',
           rightArguments: '0x',
-          starterIncrementedArguments: '0x',
           sig: '0xcafe',
         },
       }),
       watchSeed,
     );
     const initialProofbodyHash = '0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
-    const disputeHash = encodeDisputeHash(1, true, 100n, initialProofbodyHash, '0x', '0x');
+    const disputeStartTimestamp = 90n;
+    const emptyArgumentsCommitment = keccak256(abiCoder.encode(
+      ['bytes', 'bool', 'uint256'],
+      ['0x', true, disputeStartTimestamp],
+    ));
+    const disputeHash = encodeDisputeHash(
+      1,
+      true,
+      100n,
+      initialProofbodyHash,
+      disputeStartTimestamp,
+      '0x',
+      '0x',
+    );
 
     await store.upsertAppointment({
       type: 'tower_appointment',
@@ -594,6 +632,7 @@ describe('watchtower delayed last-resort sweep', () => {
               watchSeed,
               '0x',
               '0x',
+              100n,
             ],
           );
           return [{ topics: event.topics, data: event.data }];
@@ -605,6 +644,11 @@ describe('watchtower delayed last-resort sweep', () => {
           nonce: 1n,
           disputeHash,
           disputeTimeout: 100n,
+          disputeStartTimestamp,
+          disputeInitialProofbodyHash: initialProofbodyHash,
+          starterInitialArgumentsCommitment: emptyArgumentsCommitment,
+          starterIncrementedArgumentsCommitment: emptyArgumentsCommitment,
+          disputeStartedByLeft: true,
         }),
         watchtowerCounterDispute: async () => {
           throw new Error('tx must not be submitted');
@@ -652,7 +696,6 @@ describe('watchtower delayed last-resort sweep', () => {
           finalProofbody: makeProofBody(`0x${'ee'.repeat(32)}`),
           leftArguments: '0x',
           rightArguments: '0x',
-          starterIncrementedArguments: '0x',
           sig: '0xcafe',
         },
       }),

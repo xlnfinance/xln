@@ -52,6 +52,72 @@ describe('vault runtime creation lock', () => {
       .toBeLessThan(functionSource.indexOf('newEnv = xln.createEmptyEnv(seed);'));
   });
 
+  test('fresh runtime starts its processor before asynchronous jurisdiction provisioning', () => {
+    const source = read('frontend/src/lib/stores/vaultStore.ts');
+    const functionStart = source.indexOf('async createRuntime(name: string, seed: string');
+    const functionSource = source.slice(functionStart, source.indexOf('\n  // Select runtime', functionStart));
+    const createEnv = functionSource.indexOf('newEnv = xln.createEmptyEnv(seed);');
+    // The recovery branch starts its restored loop before the fresh-create branch.
+    // Anchor this assertion after createEmptyEnv so a valid recovery call cannot
+    // masquerade as the fresh runtime processor ordering we are pinning here.
+    const startLoop = functionSource.indexOf(
+      'ensureRuntimeLoopRunning(newEnv, xln, `create-runtime:',
+      createEnv,
+    );
+    const importJurisdiction = functionSource.indexOf('`createRuntime.importJ(${primaryJurisdictionName})`');
+
+    expect(createEnv).toBeGreaterThan(0);
+    expect(startLoop).toBeGreaterThan(createEnv);
+    expect(importJurisdiction).toBeGreaterThan(startLoop);
+  });
+
+  test('runtime suspension closes ingress and drains accepted work before persistence quiesce', () => {
+    const source = read('frontend/src/lib/stores/vaultStore.ts');
+    const functionStart = source.indexOf('async function suspendRuntimeEnvActivity(');
+    const functionEnd = source.indexOf('\nasync function suspendInactiveRuntimeActivity(', functionStart);
+    expect(functionStart).toBeGreaterThan(0);
+    expect(functionEnd).toBeGreaterThan(functionStart);
+    const functionSource = source.slice(functionStart, functionEnd);
+
+    const stopWatchers = functionSource.indexOf('await xln.stopJurisdictionWatchersAndWait(env);');
+    const stopP2P = functionSource.indexOf('await xln.stopP2PAndWait(env);');
+    const drainWork = functionSource.indexOf('await xln.waitForRuntimeWorkDrained(env, 30_000);');
+    const pausePersistence = functionSource.indexOf('env.runtimeState.persistencePaused = true;');
+    const quiescePersistence = functionSource.indexOf('env.runtimeState.persistenceQuiescing = true;');
+    const stopLoop = functionSource.indexOf('await xln.stopRuntimeLoopAndWait(env, 30_000);');
+
+    expect(stopWatchers).toBeGreaterThan(0);
+    expect(quiescePersistence).toBeLessThan(stopWatchers);
+    expect(drainWork).toBeGreaterThan(quiescePersistence);
+    expect(pausePersistence).toBeGreaterThan(drainWork);
+    expect(stopLoop).toBeGreaterThan(quiescePersistence);
+    expect(stopP2P).toBeGreaterThan(stopLoop);
+  });
+
+  test('page unload synchronously fences external ingress before navigation aborts requests', () => {
+    const store = read('frontend/src/lib/stores/vaultStore.ts');
+    const layout = read('frontend/src/routes/app/+layout.svelte');
+    const operationStart = store.indexOf('beginRuntimePageUnload(): void');
+    const operationEnd = store.indexOf('\n  async suspendAllRuntimeActivity()', operationStart);
+
+    expect(operationStart).toBeGreaterThan(0);
+    expect(operationEnd).toBeGreaterThan(operationStart);
+    const operationSource = store.slice(operationStart, operationEnd);
+    expect(operationSource).toContain('xln.stopJurisdictionWatchers(env);');
+    expect(operationSource).toContain('xln.stopP2P(env);');
+
+    const mountStart = layout.indexOf('onMount(() => {');
+    const mountEnd = layout.indexOf('\n  });', mountStart);
+    const mountSource = layout.slice(mountStart, mountEnd);
+    const pageHideFence = mountSource.indexOf('vaultOperations.beginRuntimePageUnload();');
+    const lockInitialization = mountSource.indexOf('initializeActiveTabLock(');
+
+    expect(pageHideFence).toBeGreaterThan(0);
+    expect(lockInitialization).toBeGreaterThan(pageHideFence);
+    expect(mountSource).toContain("window.addEventListener('pagehide', handlePageHide);");
+    expect(mountSource).toContain("window.removeEventListener('pagehide', handlePageHide);");
+  });
+
   test('runtime restore does not rewrite legacy signer jurisdiction labels', () => {
     const source = read('frontend/src/lib/stores/vaultStore.ts');
     const restoreStart = source.indexOf('async function buildOrRestoreRuntimeEnv(runtime: Runtime');

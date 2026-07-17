@@ -10,7 +10,6 @@ export type DeriveDeltaFn = (delta: Delta, isLeftPerspective: boolean) => Derive
 
 export type LocalReplicaLike = {
   state: {
-    entityEncPubKey: string;
     accounts: Map<string, LocalAccountLike>;
   };
 };
@@ -167,24 +166,21 @@ export function getDirectionalEdgeCapacity(
   return fromOut > toIn ? fromOut : toIn;
 }
 
-export function extractEntityEncPubKey(
-  replicaMap: ReadonlyMap<string, LocalReplicaLike>,
+export function hasCertifiedEntityEncryptionManifest(
+  _replicaMap: ReadonlyMap<string, LocalReplicaLike>,
   profiles: readonly GossipProfile[],
   entityId: string,
-): string | null {
+): boolean {
   const targetId = normalizeEntityId(entityId);
-  if (!targetId) return null;
-
-  for (const [replicaKey, replica] of replicaMap.entries()) {
-    const [replicaEntityId] = replicaKey.split(':');
-    if (normalizeEntityId(replicaEntityId) !== targetId) continue;
-    const normalized = normalizeEnvelopeKey(replica.state.entityEncPubKey);
-    if (normalized) return normalized;
-  }
+  if (!targetId) return false;
 
   const profile = findProfileByEntityId(profiles, entityId);
-  if (!profile) return null;
-  return normalizeEnvelopeKey(profile.metadata.entityEncPubKey);
+  if (!profile?.metadata.profileHanko || !profile.runtimeSignature) return false;
+  const validators = profile.metadata.board.validators;
+  const attestations = profile.metadata.board.encryptionAttestations;
+  if (validators.length === 0 || attestations.length !== validators.length) return false;
+  const keys = attestations.map((attestation) => normalizeEnvelopeKey(attestation.encryptionPublicKey));
+  return keys.every((key): key is string => key !== null) && new Set(keys).size === validators.length;
 }
 
 export function quoteHop(

@@ -12,7 +12,7 @@
  * These tests exist to prove that rebalance is deterministic, visually correct, and replay-safe.
  */
 import { test, expect, type Browser, type BrowserContext, type Page } from './global-setup';
-import { deriveDelta } from '../runtime/account/utils';
+import { deriveDelta, getTokenInfo } from '../runtime/account/utils';
 import { ethers } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
 import { APP_BASE_URL, API_BASE_URL, resetProdServer, waitForNamedHubs } from './utils/e2e-baseline';
@@ -47,6 +47,11 @@ import { enqueueEntityTxs } from './utils/e2e-runtime-input';
  * and causes a new request_collateral on almost every small payment/faucet click.
  */
 const INIT_TIMEOUT = 30_000;
+const USDC_TOKEN_ID = 1;
+const USDC_DECIMALS = getTokenInfo(USDC_TOKEN_ID).decimals;
+const USDC_UNIT = 10n ** BigInt(USDC_DECIMALS);
+
+const usdcUnits = (wholeTokens: bigint): bigint => wholeTokens * USDC_UNIT;
 
 type RelayTimelineEvent = {
   ts: number;
@@ -540,10 +545,10 @@ async function setRebalancePolicy(
     type: 'setRebalancePolicy',
     data: {
       counterpartyEntityId: hubId,
-      tokenId: 1,
-      r2cRequestSoftLimit: softUsd * 10n ** 18n,
-      hardLimit: hardUsd * 10n ** 18n,
-      maxAcceptableFee: maxFeeUsd * 10n ** 18n,
+      tokenId: USDC_TOKEN_ID,
+      r2cRequestSoftLimit: usdcUnits(softUsd),
+      hardLimit: usdcUnits(hardUsd),
+      maxAcceptableFee: usdcUnits(maxFeeUsd),
     },
   }]);
   await page.waitForTimeout(600);
@@ -602,7 +607,7 @@ async function faucet(page: Page, userEntityId: string, hubEntityId: string): Pr
   let lastStatus = 0;
   while (Date.now() < deadline) {
     const resp = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
-      data: { userEntityId, userRuntimeId: runtimeId, hubEntityId, tokenId: 1, amount: '100' },
+      data: { userEntityId, userRuntimeId: runtimeId, hubEntityId, tokenId: USDC_TOKEN_ID, amount: '100' },
     });
     const body = await resp.json().catch(() => ({}));
     if (resp.ok()) {
@@ -635,7 +640,7 @@ async function faucetAmount(page: Page, userEntityId: string, hubEntityId: strin
   let lastStatus = 0;
   while (Date.now() < deadline) {
     const resp = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
-      data: { userEntityId, userRuntimeId: runtimeId, hubEntityId, tokenId: 1, amount: amountUsd },
+      data: { userEntityId, userRuntimeId: runtimeId, hubEntityId, tokenId: USDC_TOKEN_ID, amount: amountUsd },
     });
     const body = await resp.json().catch(() => ({}));
     if (resp.ok()) return;
@@ -674,8 +679,8 @@ async function sendRoutedHtlcPayment(
     type: 'htlcPayment',
     data: {
       targetEntityId,
-      tokenId: 1,
-      amount: amountUsd * 10n ** 18n,
+      tokenId: USDC_TOKEN_ID,
+      amount: usdcUnits(amountUsd),
       route,
       description,
       secret,
@@ -935,7 +940,8 @@ async function sendDirectPaymentToHub(
   void signerId;
   await submitUiPayment(page, {
     recipientEntityId: hubId,
-    amount: ethers.parseUnits(amountUsd.toString(), 18),
+    amount: ethers.parseUnits(amountUsd.toString(), USDC_DECIMALS),
+    tokenId: USDC_TOKEN_ID,
     routeEntityIds: [],
   });
 }
@@ -1105,7 +1111,7 @@ async function readRebalanceState(page: Page, hubId: string) {
   };
 }
 
-const DEFAULT_REBALANCE_SOFT_LIMIT_WEI = 500n * 10n ** 18n;
+const DEFAULT_REBALANCE_SOFT_LIMIT_UNITS = usdcUnits(500n);
 
 function requestCollateralCommitsForHub(steps: any[], hubId: string) {
   const lowerHub = hubId.toLowerCase();
@@ -1178,12 +1184,12 @@ async function driveFaucetsUntilRequestCollateralCommitted(
     entityId: string;
     hubId: string;
     scenarioStartedAt: number;
-    softLimitWei?: bigint;
+    softLimitUnits?: bigint;
     maxFaucets?: number;
     baselineCommitCount?: number;
   },
 ) {
-  const softLimitWei = opts.softLimitWei ?? DEFAULT_REBALANCE_SOFT_LIMIT_WEI;
+  const softLimitUnits = opts.softLimitUnits ?? DEFAULT_REBALANCE_SOFT_LIMIT_UNITS;
   const maxFaucets = opts.maxFaucets ?? 14;
   const baselineCommitCount = opts.baselineCommitCount ?? 0;
   let faucets = 0;
@@ -1207,7 +1213,7 @@ async function driveFaucetsUntilRequestCollateralCommitted(
       return { faucets: faucets + 1, snapshot: lastSnapshot, committed };
     }
 
-    if (BigInt(lastSnapshot.uncollateralized || '0') <= softLimitWei) {
+    if (BigInt(lastSnapshot.uncollateralized || '0') <= softLimitUnits) {
       continue;
     }
 
@@ -1223,13 +1229,13 @@ async function driveFaucetsUntilRequestCollateralCommitted(
     }
     throw new Error(
       `rebalance threshold crossed but request_collateral did not commit: ` +
-        `faucets=${faucets + 1} soft=${softLimitWei} snapshot=${JSON.stringify(lastSnapshot, null, 2)}`,
+        `faucets=${faucets + 1} soft=${softLimitUnits} snapshot=${JSON.stringify(lastSnapshot, null, 2)}`,
     );
   }
 
   throw new Error(
     `rebalance threshold did not commit within ${maxFaucets} faucet frames: ` +
-      `soft=${softLimitWei} last=${JSON.stringify(lastSnapshot, null, 2)}`,
+      `soft=${softLimitUnits} last=${JSON.stringify(lastSnapshot, null, 2)}`,
   );
 }
 
@@ -1246,7 +1252,7 @@ async function readRebalanceDiagnostics(page: Page, hubId: string) {
       if (!acc) continue;
       return {
         accountEntityId: String(rep.entityId || ''),
-        counterpartyRebalanceFeePolicy: acc.counterpartyRebalanceFeePolicy || null,
+        rebalanceFeePolicies: acc.rebalanceFeePolicies || null,
         profileFound: !!profile,
         profileIsHub: profile?.metadata?.isHub === true,
         profileFeeFields: {
@@ -1426,7 +1432,7 @@ test.describe('Rebalance E2E', () => {
 
   // Scenario: repeated faucet traffic should cross the soft limit, trigger request_collateral,
   // and end with a secured account bar and a second successful rebalance cycle.
-  test('faucet -> request_collateral -> secured bar', async ({ page }) => {
+  test('faucet -> request_collateral -> secured bar', { tag: '@functional' }, async ({ page }) => {
     let scenarioStartedAt = 0;
     const rebalanceConsole: string[] = [];
     const criticalConsole: string[] = [];
@@ -1775,7 +1781,7 @@ test.describe('Rebalance E2E', () => {
 
   // Scenario: once an account is secured, a reload must restore the same state and the watcher must
   // still drive the next rebalance cycle without manual repair.
-  test('persistence: secured rebalance survives reload and watcher resumes', async ({ page }) => {
+  test('persistence: secured rebalance survives reload and watcher resumes', { tag: '@resilience' }, async ({ page }) => {
     let scenarioStartedAt = 0;
     const rebalanceConsole: string[] = [];
     const criticalConsole: string[] = [];
@@ -2016,7 +2022,7 @@ test.describe('Rebalance E2E', () => {
 
   // Scenario: while one request_collateral batch is already submitted, extra debt may top up
   // the pending request, but it must not enqueue a second J batch before the first finalize.
-  test('edge: pending request_collateral must not duplicate J batch before first settlement finalize', async ({ page }) => {
+  test('edge: pending request_collateral must not duplicate J batch before first settlement finalize', { tag: '@resilience' }, async ({ page }) => {
     let scenarioStartedAt = 0;
     await timedStep('rebalance_edge.reset_server', () => resetProdServer(page));
     await page.addInitScript(() => {
@@ -2141,7 +2147,7 @@ test.describe('Rebalance E2E', () => {
 
   // Scenario: force a full R2C -> C2R -> R2C loop and verify the account transitions through each
   // collateral phase without breaking cadence or losing finalization signal.
-  test('cycle R2C -> C2R -> R2C (100ms action cadence)', async ({ page }) => {
+  test('cycle R2C -> C2R -> R2C (100ms action cadence)', { tag: '@functional' }, async ({ page }) => {
     let scenarioStartedAt = 0;
     await timedStep('rebalance_cycle.reset_server', () => resetProdServer(page));
     await page.addInitScript(() => {
@@ -2194,13 +2200,13 @@ test.describe('Rebalance E2E', () => {
     const r2cSnapshot1 = await waitForState(
       (s) =>
         BigInt(s.requested) === 0n &&
-        BigInt(s.collateral) > 500n * 10n ** 18n &&
+        BigInt(s.collateral) > usdcUnits(500n) &&
         Number(s.lastFinalizedJHeight || 0) > 0,
       180_000,
       'phase1-r2c',
     );
     const collateralAfterFirstR2C = BigInt(r2cSnapshot1.collateral);
-    const c2rSoftLimitWei = 500n * 10n ** 18n;
+    const c2rSoftLimitUnits = usdcUnits(500n);
 
     // Phase 2: C2R (user repays enough so collateral becomes excess and hub withdraws to reserve)
     const hubOwesUser = (snapshot: any): bigint => {
@@ -2209,12 +2215,12 @@ test.describe('Rebalance E2E', () => {
     };
     if (!hubIsLeft) {
       // When hub is on the right side, paying hub can free right-side outCollateral for C2R.
-      const c2rDebtTarget = 1n * 10n ** 18n; // ~1 USD residual tolerance
+      const c2rDebtTarget = usdcUnits(1n); // ~1 USD residual tolerance
       for (let i = 0; i < 25; i++) {
         const before = await readRebalanceState(page, hubId);
-        const debtWei = before ? hubOwesUser(before) : 0n;
-        if (debtWei <= c2rDebtTarget) break;
-        const paymentUsd = debtWei / 10n ** 18n;
+        const debtUnits = before ? hubOwesUser(before) : 0n;
+        if (debtUnits <= c2rDebtTarget) break;
+        const paymentUsd = debtUnits / USDC_UNIT;
         const payAmount = paymentUsd > 0n && paymentUsd < 100n ? paymentUsd : 100n;
         await sendDirectPaymentToHub(page, entityId, signerId, hubId, payAmount);
         await page.waitForTimeout(100);
@@ -2235,14 +2241,14 @@ test.describe('Rebalance E2E', () => {
     // Hold-aware C2R: hub must not withdraw ring-fenced collateral.
     // Wait until outbound holds clear (or become negligible) before expecting collateral pullback.
     await waitForState(
-      (s) => BigInt(s.outTotalHold || '0') <= 1n * 10n ** 18n,
+      (s) => BigInt(s.outTotalHold || '0') <= usdcUnits(1n),
       120_000,
       'phase2-hold-clear',
     );
     const preC2RSnapshot = await readRebalanceState(page, hubId);
     expect(preC2RSnapshot, 'phase2 pre-C2R snapshot must exist').toBeTruthy();
     const hubFreeOutBeforeC2R = BigInt(preC2RSnapshot?.hubFreeOutCollateral || '0');
-    const c2rShouldTrigger = hubFreeOutBeforeC2R > c2rSoftLimitWei;
+    const c2rShouldTrigger = hubFreeOutBeforeC2R > c2rSoftLimitUnits;
 
     let c2rSnapshot: any;
     if (c2rShouldTrigger) {
@@ -2267,8 +2273,8 @@ test.describe('Rebalance E2E', () => {
       ).toBe(true);
     } else {
       expect(
-        hubFreeOutAfterC2R <= c2rSoftLimitWei,
-        `C2R must not trigger when hub freeOutCollateral <= soft limit (freeOut=${hubFreeOutAfterC2R}, soft=${c2rSoftLimitWei})`,
+        hubFreeOutAfterC2R <= c2rSoftLimitUnits,
+        `C2R must not trigger when hub freeOutCollateral <= soft limit (freeOut=${hubFreeOutAfterC2R}, soft=${c2rSoftLimitUnits})`,
       ).toBe(true);
     }
 
@@ -2321,7 +2327,7 @@ test.describe('Rebalance E2E', () => {
 
   // Scenario: multi-hop routing through H1 and H2 should fail on the second 550 payment before H2
   // rebalances, then pass again after H2 completes R2C.
-  test('rt1->h1->h2->rt2: second 550 fails before rebalance, passes after H2 R2C', async ({ browser, page }) => {
+  test('rt1->h1->h2->rt2: second 550 fails before rebalance, passes after H2 R2C', { tag: '@resilience' }, async ({ browser, page }) => {
     let senderContext: BrowserContext | null = null;
     let recipientContext: BrowserContext | null = null;
     try {
@@ -2388,7 +2394,7 @@ test.describe('Rebalance E2E', () => {
       let afterP1: any = null;
       await expect.poll(async () => {
         afterP1 = await readPairState(recipientPage, h2, rt2.entityId);
-        return !!afterP1 && BigInt(afterP1.hubExposure || afterP1.hubDebt || '0') >= baselineDebt + 500n * 10n ** 18n;
+        return !!afterP1 && BigInt(afterP1.hubExposure || afterP1.hubDebt || '0') >= baselineDebt + usdcUnits(500n);
       }, { timeout: 30_000 }).toBe(true);
 
       const beforeP2Debt = BigInt(afterP1?.hubExposure || afterP1?.hubDebt || '0');
@@ -2443,7 +2449,7 @@ test.describe('Rebalance E2E', () => {
           afterP2,
           p2HashSeen,
           p2Received,
-          debtReachedFullPayment: BigInt(afterP2?.hubExposure || afterP2?.hubDebt || '0') >= beforeP2Debt + 500n * 10n ** 18n,
+          debtReachedFullPayment: BigInt(afterP2?.hubExposure || afterP2?.hubDebt || '0') >= beforeP2Debt + usdcUnits(500n),
           h2SettledDuringP2: h2SettledEarly || h2SettlesAfterP2 > h2SettlesBeforeP2,
           rt2P2Events,
         };
@@ -2473,7 +2479,7 @@ test.describe('Rebalance E2E', () => {
         ).toBe(true);
       } else {
         expect(
-          BigInt(afterP2?.hubExposure || afterP2?.hubDebt || '0') < beforeP2Debt + 500n * 10n ** 18n,
+          BigInt(afterP2?.hubExposure || afterP2?.hubDebt || '0') < beforeP2Debt + usdcUnits(500n),
           'payment#2 should not increase debt by full 550 in pre-rebalance window',
         ).toBe(true);
       }
@@ -2515,7 +2521,7 @@ test.describe('Rebalance E2E', () => {
       }
       if (p2PostRebalanceReceived) {
         expect(
-          BigInt(afterP2PostRebalance?.hubExposure || afterP2PostRebalance?.hubDebt || '0') >= beforeP2Debt + 500n * 10n ** 18n,
+          BigInt(afterP2PostRebalance?.hubExposure || afterP2PostRebalance?.hubDebt || '0') >= beforeP2Debt + usdcUnits(500n),
           `payment#2 should increase exposure after rebalance (before=${beforeP2Debt}, after=${afterP2PostRebalance?.hubExposure || afterP2PostRebalance?.hubDebt || 'n/a'})`,
         ).toBe(true);
         await recipientPage.screenshot({ path: 'test-results/rebalance-rt1-h1-h2-rt2.png', fullPage: true });
@@ -2539,7 +2545,7 @@ test.describe('Rebalance E2E', () => {
       let afterP3: any = null;
       await expect.poll(async () => {
         afterP3 = await readPairState(recipientPage, h2, rt2.entityId);
-        return !!afterP3 && BigInt(afterP3.hubExposure || afterP3.hubDebt || '0') >= debtBeforeP3 + 500n * 10n ** 18n;
+        return !!afterP3 && BigInt(afterP3.hubExposure || afterP3.hubDebt || '0') >= debtBeforeP3 + usdcUnits(500n);
       }, { timeout: 30_000 }).toBe(true);
       expect(afterP3, 'rt2-h2 state after payment#3').toBeTruthy();
       await waitForPairIdle(recipientPage, h2, 20_000, rt2.entityId);
@@ -2556,7 +2562,7 @@ test.describe('Rebalance E2E', () => {
 
   // Scenario: same routed-capacity cliff as above, but through H3 with asymmetric hub credit so we
   // prove the failure/recovery logic is not specific to one hub pair.
-  test('runtime2: H1=10k, H3=1k; second 550 via H3 fails before rebalance, passes after', async ({ browser, page }) => {
+  test('runtime2: H1=10k, H3=1k; second 550 via H3 fails before rebalance, passes after', { tag: '@resilience' }, async ({ browser, page }) => {
     let senderContext: BrowserContext | null = null;
     let recipientContext: BrowserContext | null = null;
     try {
@@ -2616,7 +2622,7 @@ test.describe('Rebalance E2E', () => {
       let afterP1: any = null;
       await expect.poll(async () => {
         afterP1 = await readPairState(recipientPage, h3, rt2.entityId);
-        return !!afterP1 && BigInt(afterP1.hubDebt || afterP1.hubExposure || '0') >= baselineDebt + 500n * 10n ** 18n;
+        return !!afterP1 && BigInt(afterP1.hubDebt || afterP1.hubExposure || '0') >= baselineDebt + usdcUnits(500n);
       }, { timeout: 60_000 }).toBe(true);
 
       const rt2P2Cursor = await getPersistedReceiptCursor(recipientPage);
@@ -2666,7 +2672,7 @@ test.describe('Rebalance E2E', () => {
         ).toBe(true);
       } else {
         expect(
-          BigInt(afterP2?.hubDebt || '0') <= 1_000n * 10n ** 18n + 20n * 10n ** 18n,
+          BigInt(afterP2?.hubDebt || '0') <= usdcUnits(1_000n) + usdcUnits(20n),
           `runtime2-H3 debt should remain around <=1k in pre-rebalance window, got ${afterP2?.hubDebt || 'n/a'}`,
         ).toBe(true);
       }
@@ -2677,7 +2683,7 @@ test.describe('Rebalance E2E', () => {
         sinceTs: scenarioStartedAt,
         localAccountId: rt2.entityId,
         hubAccountId: h3,
-        requiredInCapacity: 550n * 10n ** 18n,
+        requiredInCapacity: usdcUnits(550n),
         minLocalFinalizedJHeight: h3FinalizedJHeightBeforeRebalance,
       });
 
@@ -2700,8 +2706,8 @@ test.describe('Rebalance E2E', () => {
       await expect.poll(async () => {
         afterP3 = await readPairState(recipientPage, h3, rt2.entityId);
         if (!afterP3) return false;
-        const debtIncreased = BigInt(afterP3.hubDebt || afterP3.hubExposure || '0') >= debtBeforeP3 + 500n * 10n ** 18n;
-        const outCapacityIncreased = BigInt(afterP3.outCapacity || '0') >= outCapacityBeforeP3 + 500n * 10n ** 18n;
+        const debtIncreased = BigInt(afterP3.hubDebt || afterP3.hubExposure || '0') >= debtBeforeP3 + usdcUnits(500n);
+        const outCapacityIncreased = BigInt(afterP3.outCapacity || '0') >= outCapacityBeforeP3 + usdcUnits(500n);
         return debtIncreased || outCapacityIncreased;
       }, { timeout: 70_000 }).toBe(true);
       expect(afterP3, 'runtime2-h3 state after payment3').toBeTruthy();

@@ -62,12 +62,24 @@ async function main() {
       throw new Error("XLN_USDC_ADDRESS is required for Base mainnet deploy");
     }
     const ERC20Mock = await hre.ethers.getContractFactory("ERC20Mock");
-    const token = await ERC20Mock.deploy("USD Coin", "USDC", hre.ethers.parseUnits("1000000", 18));
+    const token = await ERC20Mock.deploy("USD Coin", "USDC", 6, hre.ethers.parseUnits("1000000", 6));
     await token.waitForDeployment();
     tokenAddress = await token.getAddress();
     tokenSource = "mock";
     console.log(`   ✅ Mock USDC deployed: ${tokenAddress}`);
   }
+
+  const usdc = new hre.ethers.Contract(
+    tokenAddress,
+    ["function decimals() external view returns (uint8)"],
+    deployer,
+  );
+  const tokenDecimals = Number(await usdc.decimals());
+  const expectedDecimals = 6;
+  if (!Number.isSafeInteger(tokenDecimals) || tokenDecimals !== expectedDecimals) {
+    throw new Error(`USDC_DECIMALS_MISMATCH expected=${expectedDecimals} actual=${tokenDecimals}`);
+  }
+  console.log(`   ✅ Live USDC decimals verified: ${tokenDecimals}`);
 
   // ═══════════════════════════════════════════════════════════════════
   // Step 2: Deploy EntityProvider
@@ -108,10 +120,19 @@ async function main() {
 
   console.log(`   ✅ Depository bound to immutable EntityProvider at deploy time`);
 
-  // Register USDC token
-  // Token ID 0 is reserved for ETH, so USDC gets ID 1
-  // Note: For real USDC, use the official Base USDC address
-  console.log(`   ✅ Token ready for registration (ID will be assigned on first use)`);
+  const registration = await depository.registerExternalToken(0, tokenAddress, 0);
+  await registration.wait();
+  const usdcReference = hre.ethers.keccak256(
+    hre.ethers.AbiCoder.defaultAbiCoder().encode(
+      ["uint8", "address", "uint96"],
+      [0, tokenAddress, 0],
+    ),
+  );
+  const usdcTokenId = await depository.tokenToId(usdcReference);
+  if (usdcTokenId !== 1n) {
+    throw new Error(`USDC_TOKEN_ID_MISMATCH expected=1 actual=${usdcTokenId}`);
+  }
+  console.log(`   ✅ USDC registered as tokenId ${usdcTokenId}`);
 
   // ═══════════════════════════════════════════════════════════════════
   // Step 5: Deploy DeltaTransformer (optional, for advanced features)
@@ -160,6 +181,13 @@ Explorer Links:`);
     deployer: deployer.address,
     foundationRecipient,
     tokenSource,
+    tokens: {
+      USDC: {
+        address: tokenAddress,
+        tokenId: Number(usdcTokenId),
+        decimals: tokenDecimals,
+      },
+    },
     deployedAt: new Date().toISOString(),
     contracts: {
       token: tokenAddress,
@@ -171,7 +199,9 @@ Explorer Links:`);
     explorer: explorerBase,
   };
 
-  const deploymentPath = path.join(__dirname, `../deployments/${network}.json`);
+  const deploymentPath = process.env.XLN_DEPLOY_OUTPUT
+    ? path.resolve(process.env.XLN_DEPLOY_OUTPUT)
+    : path.join(__dirname, `../deployments/${network}.json`);
   fs.mkdirSync(path.dirname(deploymentPath), { recursive: true });
   fs.writeFileSync(deploymentPath, JSON.stringify(deploymentInfo, null, 2));
   console.log(`\n📁 Deployment saved to: ${deploymentPath}`);

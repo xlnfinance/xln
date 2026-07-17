@@ -18,31 +18,24 @@ const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: str
   }
 };
 
-export async function readDefaultDisputeDelay(jadapter: JAdapter): Promise<number | null> {
-  try {
-    const delay = await withTimeout(
-      jadapter.depository.defaultDisputeDelay(),
-      DEFAULT_DISPUTE_DELAY_READ_TIMEOUT_MS,
-      'DEFAULT_DISPUTE_DELAY_READ',
-    );
-    const asNumber = Number(delay);
-    return Number.isFinite(asNumber) ? asNumber : null;
-  } catch {
-    return null;
+export async function readDefaultDisputeDelay(jadapter: JAdapter): Promise<number> {
+  const delay = await withTimeout(
+    jadapter.depository.defaultDisputeDelay(),
+    DEFAULT_DISPUTE_DELAY_READ_TIMEOUT_MS,
+    'DEFAULT_DISPUTE_DELAY_READ',
+  );
+  const asNumber = Number(delay);
+  if (!Number.isSafeInteger(asNumber) || asNumber < 0 || asNumber > 65_535) {
+    throw new Error(`DEFAULT_DISPUTE_DELAY_INVALID:${String(delay)}`);
   }
+  return asNumber;
 }
 
 export async function ensureLocalDisputeDelayConfigured(
   jadapter: JAdapter,
   jurisdictionName: string,
-): Promise<number | null> {
+): Promise<number> {
   const currentDelay = await readDefaultDisputeDelay(jadapter);
-  if (!Number.isFinite(currentDelay) || currentDelay === null) {
-    console.warn(
-      `[Runtime] ${jurisdictionName}: unable to read immutable Depository.defaultDisputeDelay`,
-    );
-    return null;
-  }
 
   localConfigLog.debug('default_dispute_delay.ready', {
     jurisdiction: jurisdictionName,

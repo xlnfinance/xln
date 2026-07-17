@@ -6,7 +6,6 @@ test('UserModePanel persists wallet-shell diagnostics instead of raw console out
 
   expect(source).toContain("import { errorLog } from '$lib/stores/errorLogStore';");
   expect(source).toContain("errorLog.log(message, 'User Mode', details)");
-  expect(source).toContain("logUserModeDiagnostic('Self-entity bootstrap failed'");
   expect(source).toContain("logUserModeDiagnostic('Failed to add signer: no active vault'");
   expect(source).toContain("logUserModeDiagnostic('J-Machine import failed'");
   expect(source).not.toContain('console.error');

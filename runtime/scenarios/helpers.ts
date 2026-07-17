@@ -2,12 +2,16 @@
  * Shared scenario helpers
  */
 
-import type { Env, EntityInput, EntityReplica, Delta, RuntimeInput } from '../types';
-import type { JAdapter } from '../jadapter/types';
+import type { Env, EntityInput, EntityReplica, Delta, RoutedEntityInput, RuntimeInput } from '../types';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { setFailFastErrors } from '../infra/logger';
-import { getCachedSignerPrivateKey, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
+import { deriveSignerAddressSync, getSignerPrivateKey } from '../account/crypto';
+import { getTokenInfo } from '../account/utils';
 import { createGossipLayer } from '../networking/gossip';
+import { normalizeRuntimeId } from '../networking/runtime-id';
+import { drainJWatcherBacklog } from '../jadapter/backlog-drain';
+import { buildRouteOutputKey } from '../machine/output-routing';
+import { releaseUncommittedReliableIngress } from '../machine/reliable-delivery';
 
 // Lazy-loaded process to avoid circular deps
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
@@ -52,13 +56,19 @@ export function requireRuntimeSeed(env: Env, label: string): string {
 }
 
 export function ensureSignerKeysFromSeed(env: Env, signerIds: string[], label: string): void {
-  const seed = requireRuntimeSeed(env, label);
+  const runtimeSeed = requireRuntimeSeed(env, label);
+  const derivedRuntimeId = deriveSignerAddressSync(runtimeSeed, '1').toLowerCase();
+  if (env.runtimeId && normalizeRuntimeId(env.runtimeId) !== derivedRuntimeId) {
+    throw new Error(`${label}: runtimeId does not match runtimeSeed`);
+  }
+  env.runtimeId = derivedRuntimeId;
+  // The runtime identity signs authenticated watcher evidence independently
+  // of whichever Entity validator aliases this scenario imports.
+  getSignerPrivateKey(env, '1');
   for (const signerId of signerIds) {
-    if (getCachedSignerPrivateKey(signerId)) {
-      continue;
-    }
-    const privateKey = deriveSignerKeySync(seed, signerId);
-    registerSignerKey(signerId, privateKey);
+    // Force exact Env-scoped derivation now. Never accept a same-named numeric
+    // alias left in process-global state by another scenario/runtime.
+    getSignerPrivateKey(env, signerId);
   }
 }
 
@@ -106,6 +116,24 @@ export const advanceScenarioTime = (env: Env, stepMs?: number, force: boolean = 
   const step = Math.max(1, stepMs ?? getScenarioTickMs(env));
   // env.timestamp is typed as number - add step directly
   env.timestamp = (env.timestamp || 0) + step;
+};
+
+export const advanceScenarioToNextNetworkRetry = (env: Env): number | null => {
+  const pending = env.pendingNetworkOutputs ?? [];
+  if (pending.length === 0) return null;
+  const retryMeta = env.runtimeState?.deferredNetworkMeta;
+  if (!retryMeta) return null;
+
+  let nextRetryAt = Infinity;
+  for (const output of pending) {
+    const retry = retryMeta.get(buildRouteOutputKey(output));
+    // Missing metadata means this envelope is ready now; do not jump past it.
+    if (!retry) return null;
+    nextRetryAt = Math.min(nextRetryAt, retry.nextRetryAt);
+  }
+  if (!Number.isFinite(nextRetryAt)) return null;
+  env.timestamp = Math.max(env.timestamp ?? 0, nextRetryAt);
+  return nextRetryAt;
 };
 
 export async function waitScenario(env: Env, ms: number): Promise<void> {
@@ -251,6 +279,47 @@ function filterOfflineInputs<T extends EntityInput>(
   return { filtered, dropped };
 }
 
+const isExplicitlyOfflineNetworkTarget = (
+  output: RoutedEntityInput,
+  offlineSigners: Set<string>,
+): boolean => {
+  if (!normalizeRuntimeId(output.runtimeId)) return false;
+  const signerId = output.signerId.trim().toLowerCase();
+  return [...offlineSigners].some(candidate => candidate.trim().toLowerCase() === signerId);
+};
+
+const countOnlinePendingNetworkOutputs = (env: Env, offlineSigners: Set<string>): number =>
+  (env.pendingNetworkOutputs ?? [])
+    .filter(output => !isExplicitlyOfflineNetworkTarget(output, offlineSigners))
+    .length;
+
+const boundedDiagnosticText = (value: unknown): string => {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) return 'missing';
+  return normalized.length <= 96 ? normalized : `${normalized.slice(0, 93)}...`;
+};
+
+const pendingNetworkLane = (output: RoutedEntityInput): string => {
+  if (output.leaderTimeoutVote) return 'leader-timeout-vote';
+  if (output.proposedFrame) return output.proposedFrame.collectedSigs?.size
+    ? 'entity-frame-commit'
+    : 'entity-frame-proposal';
+  if (output.hashPrecommits?.size) return 'hash-precommit';
+  if (output.jPrefixAttestations?.size) return 'j-prefix-attestation';
+  const txTypes = [...new Set((output.entityTxs ?? []).map(tx => boundedDiagnosticText(tx.type)))].slice(0, 4);
+  return txTypes.length > 0 ? `tx:${txTypes.join('+')}` : 'trigger';
+};
+
+const pendingNetworkDiagnostics = (env: Env): string => {
+  const outputs = env.pendingNetworkOutputs ?? [];
+  const visible = outputs.slice(0, 8).map(output =>
+    `${pendingNetworkLane(output)}@signer=${boundedDiagnosticText(output.signerId)},` +
+    `runtime=${boundedDiagnosticText(output.runtimeId)}`
+  );
+  if (outputs.length > visible.length) visible.push(`+${outputs.length - visible.length} more`);
+  return visible.join(';');
+};
+
 export async function processWithOffline(
   env: Env,
   inputs: EntityInput[] | undefined,
@@ -301,7 +370,35 @@ export async function processWithOffline(
     });
   }
 
-  return process(env, filteredInputs);
+  // Reliable local delivery registers an ingress owner before queueing the
+  // EntityInput. The scenario's offline filter models a transport drop before
+  // the receiver applies that input. Release the matching non-durable owner so
+  // the retained sender outbox can enqueue the exact body again on reconnect;
+  // otherwise registration reports `pending` forever and the test harness
+  // creates a deadlock that cannot occur across a real failed transport hop.
+  releaseUncommittedReliableIngress(
+    env,
+    [...droppedPending, ...droppedQueued, ...droppedInputs],
+    [],
+  );
+
+  const processed = await process(env, filteredInputs);
+  const postProcessInputs = processed.runtimeInput?.entityInputs ?? [];
+  const { filtered: retainedPostProcessInputs, dropped: droppedPostProcessInputs } =
+    filterOfflineInputs(postProcessInputs, offlineSigners);
+  if (droppedPostProcessInputs.length > 0) {
+    processed.info('network', 'OFFLINE_SIGNER_DROP', {
+      reason,
+      source: 'postProcess.runtimeInput',
+      signers: Array.from(new Set(droppedPostProcessInputs.map(input => input.signerId))),
+      count: droppedPostProcessInputs.length,
+      entities: Array.from(new Set(droppedPostProcessInputs.map(input => input.entityId))),
+    });
+    processed.runtimeInput!.entityInputs = retainedPostProcessInputs;
+    if (processed.runtimeMempool) processed.runtimeMempool.entityInputs = retainedPostProcessInputs;
+    releaseUncommittedReliableIngress(processed, droppedPostProcessInputs, []);
+  }
+  return processed;
 }
 
 /**
@@ -338,6 +435,7 @@ export async function converge(env: Env, maxCycles = 10): Promise<void> {
     }
     if (!hasWork) return;
   }
+  throwScenarioConvergenceTimeout(env, 'converge', maxCycles);
 }
 
 /**
@@ -389,7 +487,7 @@ export async function convergeWithOffline(
     advanceScenarioTime(env);
     let hasWork = false;
     const pendingOutputs = env.pendingOutputs?.length || 0;
-    const pendingNetwork = env.pendingNetworkOutputs?.length || 0;
+    const pendingNetwork = countOnlinePendingNetworkOutputs(env, offlineSigners);
     const pendingInbox = env.networkInbox?.length || 0;
     const pendingInputs = env.runtimeInput?.entityInputs?.length || 0;
     if (pendingOutputs > 0 || pendingNetwork > 0 || pendingInbox > 0 || pendingInputs > 0) {
@@ -412,7 +510,33 @@ export async function convergeWithOffline(
     }
     if (!hasWork) return;
   }
+  throwScenarioConvergenceTimeout(env, `convergeWithOffline:${reason}`, maxCycles);
 }
+
+const throwScenarioConvergenceTimeout = (
+  env: Env,
+  label: string,
+  maxCycles: number,
+): never => {
+  const entityBacklog = [...env.eReplicas.values()]
+    .flatMap(replica => {
+      const pendingAccounts = [...replica.state.accounts.values()]
+        .filter(account => account.mempool.length > 0 || account.pendingFrame)
+        .length;
+      if (!replica.mempool.length && !replica.proposal && !replica.lockedFrame && pendingAccounts === 0) return [];
+      const txTypes = replica.mempool.map(tx => tx.type).join(',');
+      return [`${replica.state.entityId.slice(0, 10)}@${replica.signerId}:h=${replica.state.height},` +
+        `mempool=${replica.mempool.length}[${txTypes}],proposal=${replica.proposal ? 1 : 0},` +
+        `lock=${replica.lockedFrame ? 1 : 0},accounts=${pendingAccounts}`];
+    })
+    .sort();
+  throw new Error(
+    `${label}: not converged after ${maxCycles} cycles; ` +
+    `outputs=${env.pendingOutputs?.length ?? 0},network=${env.pendingNetworkOutputs?.length ?? 0},` +
+    `inbox=${env.networkInbox?.length ?? 0},inputs=${env.runtimeInput?.entityInputs?.length ?? 0},` +
+    `networkLanes=[${pendingNetworkDiagnostics(env)}],entities=[${entityBacklog.join(';')}]`,
+  );
+};
 
 // ============================================================================
 // ASSERTION HELPERS
@@ -505,31 +629,29 @@ export function assertBilateralSync(
  * Call after any JAdapter write operation (debugFundReserves, processBatch, etc.)
  */
 export async function processJEvents(env: Env): Promise<void> {
-  // Poll all JAdapters first (required for RPC mode where events are fetched, not pushed).
-  for (const [, jReplica] of env.jReplicas) {
-    const ja = jReplica.jadapter;
-    if (ja?.pollNow) await ja.pollNow();
-  }
-
   const process = await getProcess();
-  const pendingInputs = env.runtimeInput?.entityInputs || [];
-  if (pendingInputs.length > 0) {
-    const toProcess = [...pendingInputs];
-    env.runtimeInput.entityInputs = [];
-    await process(env, toProcess);
-  }
+  await drainJWatcherBacklog(env, async currentEnv => {
+    // Scenario time is deterministic and does not advance while the drain is
+    // waiting inside one sync step. A validator that reconnects with durable
+    // reliable outputs in backoff would otherwise be retried forever at the
+    // same timestamp and falsely reported as a consensus stall. Advance only
+    // to the exact persisted retry boundary; production runtimes continue to
+    // use wall-clock/tick scheduling and no envelope or retry state is changed.
+    advanceScenarioToNextNetworkRetry(currentEnv);
+    return process(currentEnv);
+  });
 }
 
 // ============================================================================
 // TOKEN CONVERSION HELPERS
 // ============================================================================
 
-const DECIMALS = 18n;
-const ONE_TOKEN = 10n ** DECIMALS;
-export const usd = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
-export const eth = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
-export const btc = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
-export const dai = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
+const wholeTokenAmount = (amount: number | bigint, tokenId: number): bigint =>
+  BigInt(amount) * 10n ** BigInt(getTokenInfo(tokenId).decimals);
+
+export const usd = (amount: number | bigint) => wholeTokenAmount(amount, 1);
+export const eth = (amount: number | bigint) => wholeTokenAmount(amount, 2);
+export const dai = (amount: number | bigint) => wholeTokenAmount(amount, 3);
 
 // ============================================================================
 // CHAIN SYNC (poll JAdapter events + process through runtime)
@@ -542,46 +664,26 @@ export const dai = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
  */
 export async function syncChain(env: Env, rounds = 3): Promise<void> {
   const process = await getProcess();
-  const localRpcAdapters = Array.from(env.jReplicas?.values?.() || [])
-    .map((jReplica) => (jReplica as { jadapter?: JAdapter }).jadapter)
-    .filter((ja): ja is JAdapter => Boolean(ja && ja.mode === 'rpc' && Number(ja.chainId) === 31337));
 
-  // Local RPC scenarios can briefly hide logs on the newest submitted block.
-  // Mine at most one empty block per syncChain call so watchers read a stable tail
-  // without artificially fast-forwarding timeout logic by N extra blocks.
-  for (const ja of localRpcAdapters) {
-    await ja.processBlock();
-  }
-
-  // Poll every round, not just once.
-  // Scenario J-adapters are polling-based, so a single poll can miss the tail
-  // of a just-submitted tx lifecycle (submit -> watcher ingest -> runtime input).
-  // Re-polling here keeps scenario assertions aligned with the real persisted state.
+  // `rounds` advances explicit scenario time and may trigger new J submissions.
+  // Watcher completion is not coupled to this count: every tick captures the
+  // resulting trusted chain target and drains until cursor + Entity finality reach it.
   for (let i = 0; i < rounds; i++) {
-    for (const [, jReplica] of env.jReplicas) {
-      const ja = (jReplica as { jadapter?: JAdapter }).jadapter;
-      if (!ja) continue;
-      if (ja.pollNow) await ja.pollNow();
-      try {
-        const blockNumber = await ja.provider.getBlockNumber();
-        jReplica.blockNumber = BigInt(blockNumber);
-      } catch {
-        // Keep last known tip if adapter/provider cannot report current height.
-      }
-    }
     advanceScenarioTime(env, 350);
     await process(env);
     await processJEvents(env);
     await process(env);
   }
 
+  await processJEvents(env);
   await converge(env);
 }
 
 /** Format bigint as USD string (e.g. "$1,234.56") */
 export const formatUSD = (amount: bigint): string => {
-  const whole = amount / ONE_TOKEN;
-  const frac = (amount % ONE_TOKEN) * 100n / ONE_TOKEN;
+  const oneUsd = usd(1);
+  const whole = amount / oneUsd;
+  const frac = (amount % oneUsd) * 100n / oneUsd;
   return `$${whole.toLocaleString()}.${frac.toString().padStart(2, '0')}`;
 };
 

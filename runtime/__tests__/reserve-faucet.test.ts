@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { JAdapter } from '../jadapter';
-import { handleReserveFaucet } from '../server/reserve-faucet';
+import { handleReserveFaucet, parseReserveFaucetAmount } from '../server/reserve-faucet';
 import type { Env, RuntimeInput } from '../types';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -76,7 +76,7 @@ const callReserveFaucet = async (options: {
     headers: { 'content-type': 'application/json' },
     relayStore: { activeHubEntityIds: options.activeHubEntityIds ?? [HUB] },
     getJAdapter: () => options.adapter === undefined ? makeAdapter() : options.adapter,
-    ensureTokenCatalog: async () => options.tokenCatalog ?? [{ tokenId: 1, symbol: 'USDC', decimals: 18 }],
+    ensureTokenCatalog: async () => options.tokenCatalog ?? [{ tokenId: 1, symbol: 'USDC', decimals: 6 }],
     enqueueRuntimeInput: (_env, runtimeInput) => {
       enqueued.push(runtimeInput);
     },
@@ -85,6 +85,13 @@ const callReserveFaucet = async (options: {
 };
 
 describe('reserve faucet failures', () => {
+  test('parses human amounts with trusted token decimals', () => {
+    expect(parseReserveFaucetAmount('100', { tokenId: 1, decimals: 6 })).toBe(100n * 10n ** 6n);
+    expect(parseReserveFaucetAmount('100', { tokenId: 2, decimals: 18 })).toBe(100n * 10n ** 18n);
+    expect(() => parseReserveFaucetAmount('100', { tokenId: 9, decimals: null }))
+      .toThrow('FAUCET_TOKEN_DECIMALS_INVALID:9:null');
+  });
+
   test('reports typed transient failure when j-adapter is unavailable', async () => {
     const { response, body, enqueued } = await callReserveFaucet({ adapter: null });
 
@@ -133,7 +140,8 @@ describe('reserve faucet failures', () => {
 
   test('reports typed expected-empty failure when hub reserves are insufficient', async () => {
     const { response, body, enqueued } = await callReserveFaucet({
-      env: makeEnv({ hubReserve: 99n * 10n ** 18n }),
+      env: makeEnv({ hubReserve: 99n * 10n ** 6n }),
+      tokenCatalog: [{ tokenId: 1, symbol: 'USDC', decimals: 6 }],
     });
 
     expect(response.status).toBe(409);
@@ -142,8 +150,8 @@ describe('reserve faucet failures', () => {
     expect(body.category).toBe('ExpectedEmpty');
     expect(body.retryable).toBe(false);
     expect(body.fatal).toBe(false);
-    expect(body.have).toBe((99n * 10n ** 18n).toString());
-    expect(body.need).toBe((100n * 10n ** 18n).toString());
+    expect(body.have).toBe((99n * 10n ** 6n).toString());
+    expect(body.need).toBe((100n * 10n ** 6n).toString());
     expect(enqueued).toHaveLength(0);
   });
 });

@@ -6,9 +6,11 @@ import {
 } from '../machine/lifecycle';
 import {
   createEmptyEnv,
+  resumeRuntimeAfterPersistenceQuiesce,
   resumeRuntimeLoop,
   startRuntimeLoop,
   stopRuntimeLoopAndWait,
+  waitForRuntimeProcessingIdle,
 } from '../runtime';
 import type { Env } from '../types';
 
@@ -47,6 +49,55 @@ describe('runtime lifecycle', () => {
 
     expect(env.runtimeState?.lifecyclePhase).toBe('running');
     env.runtimeState?.stopLoop?.();
+  });
+
+  test('durable resume clears the persistence fence before restarting the loop', async () => {
+    const env = createEmptyEnv('runtime-durable-resume');
+    env.runtimeState ??= {};
+    env.runtimeState.lifecyclePhase = 'quiescing';
+    env.runtimeState.persistenceQuiescing = true;
+    env.runtimeState.persistencePaused = true;
+
+    resumeRuntimeAfterPersistenceQuiesce(env);
+
+    expect(env.runtimeState.persistencePaused).toBe(false);
+    expect(env.runtimeState.persistenceQuiescing).toBe(false);
+    expect(env.runtimeState.lifecyclePhase).toBe('running');
+    env.runtimeState.stopLoop?.();
+  });
+
+  test('durable resume fails loudly if a running loop still has a persistence fence', () => {
+    const env = createEmptyEnv('runtime-invalid-durable-resume');
+    env.runtimeState ??= {};
+    env.runtimeState.lifecyclePhase = 'running';
+    env.runtimeState.loopActive = true;
+    env.runtimeState.persistencePaused = true;
+
+    expect(() => resumeRuntimeAfterPersistenceQuiesce(env)).toThrow(
+      'RUNTIME_DURABLE_RESUME_RUNNING_WITH_PERSISTENCE_FENCE',
+    );
+  });
+
+  test('propagates a rejected runtime loop instead of treating shutdown as drained', async () => {
+    const env = createEmptyEnv('runtime-loop-rejection');
+    env.runtimeState = {
+      lifecyclePhase: 'running',
+      loopActive: true,
+      loopPromise: Promise.reject(new Error('LOOP_REJECTED_DURING_SHUTDOWN')),
+    };
+
+    await expect(stopRuntimeLoopAndWait(env, 20)).rejects.toThrow('LOOP_REJECTED_DURING_SHUTDOWN');
+  });
+
+  test('propagates a rejected processing task instead of reporting idle', async () => {
+    const env = createEmptyEnv('runtime-processing-rejection');
+    env.runtimeState = {
+      processingPromise: Promise.reject(new Error('PROCESSING_REJECTED_DURING_SHUTDOWN')),
+    };
+
+    await expect(waitForRuntimeProcessingIdle(env, 20)).rejects.toThrow(
+      'PROCESSING_REJECTED_DURING_SHUTDOWN',
+    );
   });
 
 });

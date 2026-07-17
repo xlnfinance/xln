@@ -6,7 +6,7 @@
  * 2. Create a wallet runtime, connect it to a hub, and wait until the recovery
  *    backup is durably stored off-device.
  * 3. Wipe all local browser/runtime state.
- * 4. Re-enter the same mnemonic and prove the wallet restores the prior runtime
+ * 4. Re-enter the same BrainVault credentials and prove the wallet restores the prior runtime
  *    state from the watchtower instead of booting as a fresh empty wallet.
  */
 
@@ -23,20 +23,23 @@ import {
   getRenderedOutboundForAccount,
   waitForRenderedOutboundForAccountDelta,
 } from './utils/e2e-account-ui';
+import { runBrainvaultCli } from './utils/e2e-brainvault';
 import { connectRuntimeToHub } from './utils/e2e-connect';
-import { gotoApp } from './utils/e2e-demo-users';
+import { deriveSignerAddressFromMnemonic, gotoApp } from './utils/e2e-demo-users';
 import { submitUiPayment } from './utils/e2e-pay-ui';
 import {
   getPersistedReceiptCursor,
   waitForPersistedFrameEventMatch,
 } from './utils/e2e-runtime-receipts';
+import { closeRuntimeContext, closeRuntimePage } from './utils/e2e-runtime-shutdown';
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const LONG_E2E = process.env.E2E_LONG === '1';
 const TEST_TIMEOUT_MS = LONG_E2E ? 240_000 : 180_000;
 const RECOVERY_LOOKUP_DOMAIN = 'xln:recovery:lookup:v1';
-const POST_RESTORE_PAYMENT_AMOUNT = 3n * 10n ** 18n;
+const USDC_DECIMALS = 6n;
+const POST_RESTORE_PAYMENT_AMOUNT = 3n * 10n ** USDC_DECIMALS;
 const CHANNEL_OP_TIMEOUT_MS = 75_000;
 
 type WatchtowerChild = {
@@ -45,7 +48,7 @@ type WatchtowerChild = {
   dbRoot: string;
 };
 
-function randomMnemonic(): string {
+function randomBrainvaultPassphrase(): string {
   return Wallet.createRandom().mnemonic!.phrase;
 }
 
@@ -474,19 +477,20 @@ async function waitForSenderSpend(
 async function createRuntimeViaUi(
   page: Page,
   label: string,
-  mnemonic: string,
+  passphrase: string,
   options: { requireOnline?: boolean } = {},
 ): Promise<{ entityId: string; signerId: string; runtimeId: string }> {
+  const brainvaultTab = page.getByRole('button', { name: 'BrainVault', exact: true }).first();
+  if (await brainvaultTab.isVisible({ timeout: 1_000 }).catch(() => false)) {
+    await brainvaultTab.click();
+  }
   const displayNameInput = page.locator('#name').first();
   await expect(displayNameInput).toBeVisible({ timeout: 20_000 });
   await displayNameInput.fill(label);
 
-  const mnemonicTab = page.getByRole('tab', { name: 'Mnemonic', exact: true }).first();
-  await expect(mnemonicTab).toBeVisible({ timeout: 15_000 });
-  await mnemonicTab.click();
-  const mnemonicInput = page.locator('#mnemonic').first();
-  await expect(mnemonicInput).toBeVisible({ timeout: 15_000 });
-  await mnemonicInput.fill(mnemonic);
+  const passphraseInput = page.locator('#passphrase').first();
+  await expect(passphraseInput).toBeVisible({ timeout: 15_000 });
+  await passphraseInput.fill(passphrase);
 
   let factorOneButton = page.getByRole('button', { name: /^1\s+/i }).first();
   if (!await factorOneButton.isVisible({ timeout: 1_000 }).catch(() => false)) {
@@ -638,72 +642,13 @@ async function waitForWatchtowerReceipt(
 }
 
 async function wipeBrowserRuntimeState(page: Page, context: BrowserContext, towerUrls: string[]): Promise<Page> {
-  await page.evaluate(async (urls) => {
-    const formatError = (error: unknown): string =>
-      error instanceof Error ? error.message : String(error);
+  await page.evaluate((urls) => {
     const view = window as typeof window & {
-      __xln?: {
-        instance?: {
-          stopP2P?: (env: unknown) => void;
-          closeRuntimeDb?: (env: unknown) => Promise<void>;
-          closeInfraDb?: (env: unknown) => Promise<void>;
-        };
-      };
       __XLN_WATCHTOWERS__?: string[];
-      isolatedEnv?: {
-        jReplicas?: Map<string, {
-          jadapter?: {
-            stopWatching?: () => void;
-          };
-        }>;
-        runtimeState?: {
-          stopLoop?: () => void;
-          loopActive?: boolean;
-        };
-      };
     };
-    const errors: string[] = [];
-    const env = view.isolatedEnv;
-    const xln = view.__xln?.instance;
-    if (!env) throw new Error('Cannot wipe runtime state: isolatedEnv missing');
-    if (typeof xln?.closeRuntimeDb !== 'function' || typeof xln.closeInfraDb !== 'function') {
-      throw new Error('Cannot wipe runtime state: DB close API missing');
-    }
-
-    // This is a real device wipe for the recovery test. Stop the live runtime
-    // before closing the tab. The browser releases any hidden bootstrap DB
-    // handles when the tab closes; /resetdb then performs the real storage wipe
-    // from a fresh page with no live runtime holding IndexedDB locks.
-    try {
-      for (const replica of env?.jReplicas?.values?.() || []) {
-        replica.jadapter?.stopWatching?.();
-      }
-    } catch (error) {
-      errors.push(`stop watchers: ${formatError(error)}`);
-    }
-    try {
-      xln?.stopP2P?.(env);
-    } catch (error) {
-      errors.push(`stop p2p: ${formatError(error)}`);
-    }
-    try {
-      await xln.closeRuntimeDb(env);
-      await xln.closeInfraDb(env);
-    } catch (error) {
-      errors.push(`close runtime db: ${formatError(error)}`);
-    }
-    try {
-      env?.runtimeState?.stopLoop?.();
-      if (env?.runtimeState) env.runtimeState.loopActive = false;
-    } catch (error) {
-      errors.push(`stop runtime loop: ${formatError(error)}`);
-    }
-    if (errors.length > 0) {
-      throw new Error(`Failed to stop runtime before wipe: ${errors.join(' | ')}`);
-    }
     view.__XLN_WATCHTOWERS__ = urls;
   }, towerUrls);
-  await page.close();
+  await closeRuntimePage(page);
   const nextPage = await context.newPage();
   await nextPage.addInitScript((urls: string[]) => {
     try {
@@ -775,7 +720,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout:
 test.describe('watchtower runtime recovery', () => {
   test.setTimeout(TEST_TIMEOUT_MS);
 
-  test('restores a wiped runtime from standalone tower backup and continues channel payments', async ({ page, context, browser }) => {
+  test('restores a wiped runtime from standalone tower backup and continues channel payments', { tag: '@resilience' }, async ({ page, context, browser }) => {
     allowBrowserIssue({
       type: 'http',
       severity: 'error',
@@ -819,15 +764,19 @@ test.describe('watchtower runtime recovery', () => {
 
       await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
 
-      const mnemonic = randomMnemonic();
+      const passphrase = randomBrainvaultPassphrase();
       const label = `tower-restore-${Date.now()}`;
+      const brainvault = runBrainvaultCli(label, passphrase, 1);
       const runtime = await withTimeout(
-        createRuntimeViaUi(page, label, mnemonic),
+        createRuntimeViaUi(page, label, passphrase),
         75_000,
         async () => await readRecoveryUiDiagnostics(page),
       );
+      expect(runtime.runtimeId.toLowerCase(), 'BrainVault UI must match the independent CLI oracle').toBe(
+        deriveSignerAddressFromMnemonic(brainvault.mnemonic24),
+      );
       await expectPersistedRuntimeSeedProtected(page, runtime.runtimeId);
-      const runtimeSeed = mnemonic;
+      const runtimeSeed = brainvault.mnemonic24;
 
       const lookupKey = deriveRuntimeRecoveryLookupKey(runtime.runtimeId, runtimeSeed);
       const preWipe = await waitForCommittedPrimaryLocalAccountState(page);
@@ -851,7 +800,7 @@ test.describe('watchtower runtime recovery', () => {
         .toBe(tower.baseUrl);
 
       const restored = await withTimeout(
-        createRuntimeViaUi(page, label, mnemonic, { requireOnline: false }),
+        createRuntimeViaUi(page, label, passphrase, { requireOnline: false }),
         75_000,
         async () => await readRecoveryUiDiagnostics(page),
       );
@@ -881,7 +830,12 @@ test.describe('watchtower runtime recovery', () => {
       const recipientPage = await recipientContext.newPage();
       await gotoApp(recipientPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
       const recipient = await withTimeout(
-        createRuntimeViaUi(recipientPage, randomLabel('tower-recipient'), randomMnemonic(), { requireOnline: false }),
+        createRuntimeViaUi(
+          recipientPage,
+          randomLabel('tower-recipient'),
+          randomBrainvaultPassphrase(),
+          { requireOnline: false },
+        ),
         75_000,
         async () => await readRecoveryUiDiagnostics(recipientPage),
       );
@@ -915,6 +869,7 @@ test.describe('watchtower runtime recovery', () => {
       await submitUiPayment(page, {
         recipientEntityId: recipient.entityId,
         amount: POST_RESTORE_PAYMENT_AMOUNT,
+        tokenId: 1,
         routeEntityIds: [hubId, recipient.entityId],
       });
 
@@ -939,17 +894,17 @@ test.describe('watchtower runtime recovery', () => {
         page,
         hubId,
         senderAfterFaucet,
-        Number(POST_RESTORE_PAYMENT_AMOUNT / 10n ** 18n),
+        Number(POST_RESTORE_PAYMENT_AMOUNT / 10n ** USDC_DECIMALS),
       );
       const recipientAfterPayment = await waitForRenderedOutboundForAccountDelta(
         recipientPage,
         hubId,
         recipientBeforePayment,
-        Number(POST_RESTORE_PAYMENT_AMOUNT / 10n ** 18n),
+        Number(POST_RESTORE_PAYMENT_AMOUNT / 10n ** USDC_DECIMALS),
         { timeoutMs: CHANNEL_OP_TIMEOUT_MS },
       );
 
-      await page.close();
+      await closeRuntimePage(page);
       const reopenedSenderPage = await context.newPage();
       await gotoApp(reopenedSenderPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
       await waitForRuntimeOnline(reopenedSenderPage, 'reopened restored sender');
@@ -969,9 +924,17 @@ test.describe('watchtower runtime recovery', () => {
         })
         .toBe(recipientAfterPayment);
     } finally {
-      await Promise.all(context.pages().map((openPage) => openPage.close().catch(() => undefined)));
-      await recipientContext?.close().catch(() => undefined);
-      await stopWatchtower(tower);
+      const cleanup = await Promise.allSettled([
+        closeRuntimeContext(context),
+        ...(recipientContext ? [closeRuntimeContext(recipientContext)] : []),
+        stopWatchtower(tower),
+      ]);
+      const failures = cleanup
+        .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+        .map((result) => result.reason);
+      if (failures.length > 0) {
+        throw new AggregateError(failures, 'WATCHTOWER_E2E_CLEANUP_FAILED');
+      }
     }
   });
 });

@@ -6,6 +6,7 @@ import {
   resolveStorageWriterLockPath,
   STORAGE_WRITER_LOCK_TTL_MS,
   withStorageWriterLock,
+  type StorageWriterLockBoundary,
 } from '../storage/runtime-dbs';
 import type { Env } from '../types';
 
@@ -18,6 +19,94 @@ const waitForReadyWorkers = async (directory: string, count: number): Promise<vo
     await Bun.sleep(10);
   }
 };
+
+const crashFixture = `${import.meta.dir}/fixtures/storage-writer-lock-crash-child.ts`;
+
+for (const boundary of [
+  'after-candidate-sync',
+  'after-canonical-link',
+] satisfies StorageWriterLockBoundary[]) {
+  test(`fresh process acquires immediately after SIGKILL ${boundary}`, async () => {
+    const namespace = `storage-writer-kill-${boundary}-${process.pid}-${Date.now()}`;
+    const env = { dbNamespace: namespace, runtimeId: namespace, height: 2 } as Env;
+    const lockPath = resolveStorageWriterLockPath(env);
+    const child = Bun.spawn({
+      cmd: [process.execPath, crashFixture, namespace, boundary],
+      cwd: process.cwd(),
+      env: process.env,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const exitCode = await child.exited;
+    const stderr = await new Response(child.stderr).text();
+    expect(exitCode, stderr).toBe(137);
+    expect(child.signalCode, stderr).toBe('SIGKILL');
+
+    let acquired = false;
+    try {
+      await withStorageWriterLock(env, async () => { acquired = true; });
+      expect(acquired).toBe(true);
+      expect(existsSync(lockPath)).toBe(false);
+      const directory = dirname(lockPath);
+      const prefix = lockPath.slice(directory.length + 1);
+      const residualLockArtifacts = readdirSync(directory)
+        .filter((entry) => entry.startsWith(prefix))
+        .sort();
+      expect(residualLockArtifacts).toEqual([]);
+    } finally {
+      const directory = dirname(lockPath);
+      const prefix = lockPath.slice(directory.length + 1);
+      for (const name of readdirSync(directory).filter((entry) => entry.startsWith(prefix))) {
+        rmSync(`${directory}/${name}`, { force: true });
+      }
+    }
+  });
+}
+
+test('candidate recovery preserves a candidate owned by a live process', async () => {
+  const namespace = `storage-writer-live-candidate-${process.pid}-${Date.now()}`;
+  const env = { dbNamespace: namespace, runtimeId: namespace, height: 3 } as Env;
+  const lockPath = resolveStorageWriterLockPath(env);
+  const candidatePath = `${lockPath}.candidate-${process.pid}-${Date.now()}-777`;
+  mkdirSync(dirname(lockPath), { recursive: true });
+  writeFileSync(candidatePath, `${JSON.stringify({
+    owner: `live-owner-${process.pid}`,
+    pid: process.pid,
+    runtimeId: namespace,
+    frameHeight: 2,
+    acquiredAt: Date.now(),
+    expiresAt: Date.now() + STORAGE_WRITER_LOCK_TTL_MS,
+  })}\n`, 'utf8');
+
+  try {
+    await withStorageWriterLock(env, async () => {});
+    expect(existsSync(candidatePath)).toBe(true);
+    expect(existsSync(lockPath)).toBe(false);
+  } finally {
+    rmSync(candidatePath, { force: true });
+    rmSync(lockPath, { force: true });
+  }
+});
+
+test('candidate recovery fails loud on an unparseable candidate owner', async () => {
+  const namespace = `storage-writer-invalid-candidate-${process.pid}-${Date.now()}`;
+  const env = { dbNamespace: namespace, runtimeId: namespace, height: 4 } as Env;
+  const lockPath = resolveStorageWriterLockPath(env);
+  const candidatePath = `${lockPath}.candidate-invalid-owner`;
+  mkdirSync(dirname(lockPath), { recursive: true });
+  writeFileSync(candidatePath, 'invalid candidate', 'utf8');
+
+  try {
+    await expect(withStorageWriterLock(env, async () => {})).rejects.toThrow(
+      `STORAGE_WRITER_CANDIDATE_NAME_INVALID:${candidatePath}`,
+    );
+    expect(existsSync(candidatePath)).toBe(true);
+    expect(existsSync(lockPath)).toBe(false);
+  } finally {
+    rmSync(candidatePath, { force: true });
+    rmSync(lockPath, { force: true });
+  }
+});
 
 test('concurrent processes cannot both reclaim the same expired writer lock', async () => {
   const namespace = `storage-writer-race-${process.pid}-${Date.now()}`;
@@ -129,5 +218,46 @@ test('a new writer reclaims expired writer and recovery locks after a crash', as
   } finally {
     rmSync(lockPath, { force: true });
     rmSync(recoveryPath, { force: true });
+  }
+});
+
+test('a new writer reclaims a non-expired lock immediately when the recorded pid is dead', async () => {
+  const namespace = `storage-writer-dead-pid-${process.pid}-${Date.now()}`;
+  const env = { dbNamespace: namespace, runtimeId: namespace, height: 8 } as Env;
+  const lockPath = resolveStorageWriterLockPath(env);
+  mkdirSync(dirname(lockPath), { recursive: true });
+  writeFileSync(lockPath, `${JSON.stringify({
+    owner: 'sigkill-orphan',
+    pid: 999_996,
+    runtimeId: namespace,
+    frameHeight: 7,
+    acquiredAt: Date.now(),
+    expiresAt: Date.now() + STORAGE_WRITER_LOCK_TTL_MS,
+  })}\n`, 'utf8');
+
+  let calls = 0;
+  try {
+    await withStorageWriterLock(env, async () => { calls += 1; });
+    expect(calls).toBe(1);
+    expect(existsSync(lockPath)).toBe(false);
+  } finally {
+    rmSync(lockPath, { force: true });
+  }
+});
+
+test('a malformed canonical lock cannot permanently fence the namespace', async () => {
+  const namespace = `storage-writer-malformed-${process.pid}-${Date.now()}`;
+  const env = { dbNamespace: namespace, runtimeId: namespace, height: 9 } as Env;
+  const lockPath = resolveStorageWriterLockPath(env);
+  mkdirSync(dirname(lockPath), { recursive: true });
+  writeFileSync(lockPath, '', 'utf8');
+
+  let calls = 0;
+  try {
+    await withStorageWriterLock(env, async () => { calls += 1; });
+    expect(calls).toBe(1);
+    expect(existsSync(lockPath)).toBe(false);
+  } finally {
+    rmSync(lockPath, { force: true });
   }
 });

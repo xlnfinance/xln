@@ -13,7 +13,13 @@
 import type { AccountMachine, AccountTx, SwapOffer } from '../../../types';
 import type { SwapOfferEvent } from '../../../entity/tx/handlers/account';
 import { deriveDelta, getSwapPairPolicyByBaseQuote } from '../../utils';
-import { deriveSide, SWAP_LOT_SCALE, ORDERBOOK_PRICE_SCALE, prepareSwapOrder } from '../../../orderbook';
+import {
+  computePriceTicksForBaseQuote,
+  deriveSide,
+  getSwapLotScale,
+  prepareSwapOrder,
+  quoteAmountAtPrice,
+} from '../../../orderbook';
 import { FINANCIAL, LIMITS } from '../../../constants';
 import { recordSwapOfferLifecycle } from './swap-history';
 import {
@@ -26,18 +32,6 @@ import { MAX_SWAP_FILL_RATIO } from '../../../orderbook/swap-execution';
 import { ensureDelta } from '../delta-utils';
 import { addHold } from '../hold-utils';
 
-const computePriceTicks = (side: 0 | 1, baseAmount: bigint, quoteAmount: bigint, stepTicks: bigint): bigint => {
-  if (baseAmount <= 0n || quoteAmount <= 0n || stepTicks <= 0n) return 0n;
-  const scaledQuoteAmount = quoteAmount * ORDERBOOK_PRICE_SCALE;
-  const remainder = scaledQuoteAmount % baseAmount;
-  let priceTicks = scaledQuoteAmount / baseAmount;
-  if (side === 1) {
-    if (remainder > 0n) priceTicks += 1n;
-    return ((priceTicks + stepTicks - 1n) / stepTicks) * stepTicks;
-  }
-  return (priceTicks / stepTicks) * stepTicks;
-};
-
 export async function handleSwapOffer(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'swap_offer' }>,
@@ -47,7 +41,6 @@ export async function handleSwapOffer(
 ): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCreated?: SwapOfferEvent }> {
   const { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks: inputPriceTicks, timeInForce, minFillRatio, crossJurisdiction } = accountTx.data;
   const events: string[] = [];
-  const LOT_SCALE = SWAP_LOT_SCALE;
 
   // Initialize swapOffers Map if not present
   if (!accountMachine.swapOffers) {
@@ -135,8 +128,16 @@ export async function handleSwapOffer(
   const rawQuoteAmount = side === 1 ? wantAmount : giveAmount;
   const baseTokenId = side === 1 ? giveTokenId : wantTokenId;
   const quoteTokenId = side === 1 ? wantTokenId : giveTokenId;
-  if (rawBaseAmount < LOT_SCALE) {
-    return { success: false, error: `Order too small for lot size (${LOT_SCALE.toString()} base wei)`, events };
+  const lotScale = getSwapLotScale(baseTokenId);
+  if (rawBaseAmount < lotScale) {
+    return { success: false, error: `Order too small for lot size (${lotScale.toString()} base units)`, events };
+  }
+  if (crossMarket && rawBaseAmount % lotScale !== 0n) {
+    return {
+      success: false,
+      error: `Cross-j base amount must align to lot size (${lotScale.toString()} base units)`,
+      events,
+    };
   }
   const pairPolicy = crossMarket ? null : getSwapPairPolicyByBaseQuote(baseTokenId, quoteTokenId);
   const stepTicks = BigInt(Math.max(1, pairPolicy?.priceStepTicks ?? 1));
@@ -177,13 +178,27 @@ export async function handleSwapOffer(
       priceTicks = inputPriceTicks;
     }
   } else {
-    priceTicks = computePriceTicks(side, rawBaseAmount, rawQuoteAmount, stepTicks);
+    priceTicks = computePriceTicksForBaseQuote(
+      side,
+      baseTokenId,
+      quoteTokenId,
+      rawBaseAmount,
+      rawQuoteAmount,
+    );
     if (priceTicks <= 0n) {
       return { success: false, error: `Invalid cross-j price ratio or order too small after canonical quantization`, events };
     }
   }
-  const quantizedBaseAmount = (rawBaseAmount / LOT_SCALE) * LOT_SCALE;
-  const recomputedQuote = (quantizedBaseAmount * priceTicks) / ORDERBOOK_PRICE_SCALE;
+  // A prepared cross-j route already commits both raw asset amounts through its
+  // pull receipts and route hash. The orderbook price is an index derived from
+  // those bytes; it is not authority to rewrite either amount. Same-chain user
+  // intent is still quantized normally before it becomes a resting offer.
+  const quantizedBaseAmount = crossMarket
+    ? rawBaseAmount
+    : (rawBaseAmount / lotScale) * lotScale;
+  const recomputedQuote = crossMarket
+    ? rawQuoteAmount
+    : quoteAmountAtPrice(baseTokenId, quoteTokenId, quantizedBaseAmount, priceTicks);
   const effectiveGiveAmount = side === 1 ? quantizedBaseAmount : recomputedQuote;
   const effectiveWantAmount = side === 1 ? recomputedQuote : quantizedBaseAmount;
   if (effectiveGiveAmount < FINANCIAL.MIN_PAYMENT_AMOUNT || effectiveGiveAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {

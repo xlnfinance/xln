@@ -46,6 +46,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   import EntityPanelHeroTabs from './EntityPanelHeroTabs.svelte';
   import EntitySelectionEmptyState from './EntitySelectionEmptyState.svelte';
   import EntitySettingsProjectionPanel from './EntitySettingsProjectionPanel.svelte';
+  import { buildEntityConsensusSettingsView } from './entity-consensus-settings';
   import {
     importJMachineViaRuntime,
     type JMachineCreateDetail,
@@ -196,6 +197,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     compareTokenSymbols,
     findAssetLedgerRowBySymbol as findAssetLedgerRowBySymbolInList,
     findExternalTokenBySymbol as findExternalTokenBySymbolInList,
+    getExternalTokenIdentityKey,
     getFaucetReserveTokenMeta as getFaucetReserveTokenMetaFromRows,
     isReserveTransferToken,
     requireExternalTokenBySymbol as requireExternalTokenBySymbolInList,
@@ -205,6 +207,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     type ExternalToken,
     type ReserveTransferAsset,
   } from './entity-asset-catalog';
+  import { requireTokenDecimals } from './token-metadata';
   import {
     buildOpenOutgoingDebtTotals,
     buildPendingBatchPreview,
@@ -562,15 +565,18 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       selfExternalAddress: resolveSelfEoaAddress(),
       reserveRecipientEntityId: moveReserveRecipientEntityId,
       externalRecipient: moveExternalRecipient,
-      reserveToken: findReserveTransferTokenBySymbol(moveAssetSymbol),
-      externalToken: findExternalTokenBySymbol(moveAssetSymbol),
-      sourceAvailableBalance: getCurrentMoveSourceAvailableBalance(),
+      reserveToken: selectedMoveTransferToken,
+      externalToken: selectedMoveExternalToken,
+      sourceAvailableBalance: moveUiState.sourceAvailableBalance,
       allowanceRequired: routeRequiresExplicitExternalAllowance(moveFromEndpoint, moveToEndpoint),
       allowanceLoading: moveAllowanceLoading,
       allowanceError: moveAllowanceError,
       allowanceRaw: moveAllowanceRaw,
     });
   }
+  let moveAllowanceToken: ExternalToken | null = null;
+  let moveAllowanceAssetIdentity = '';
+  let moveAllowanceMetadataLoading = false;
   $: moveAllowanceRouteEnabled = assetWorkspaceTab === 'move'
     && activeIsLive
     && routeRequiresExplicitExternalAllowance(moveFromEndpoint, moveToEndpoint);
@@ -599,17 +605,28 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     moveAllowanceLoading = false;
     moveAllowanceSubmittingMode = null;
   }
+  $: moveAllowanceAssetIdentity = String(moveAssetSymbol || '').trim().toUpperCase();
+  $: moveAllowanceToken = moveAllowanceAssetIdentity
+    ? findExternalTokenBySymbol(moveAllowanceAssetIdentity)
+    : null;
+  $: moveAllowanceMetadataLoading = moveAllowanceRouteEnabled
+    && Boolean(moveAllowanceAssetIdentity)
+    && externalTokensLoading
+    && !moveAllowanceToken;
   $: moveRequiredAllowanceAmount = getMoveRequiredAllowanceAmount({
     enabled: moveAllowanceRouteEnabled,
-    token: findExternalTokenBySymbol(moveAssetSymbol),
+    token: moveAllowanceToken,
     amountInput: moveAmount,
     sourceAvailableBalance: moveUiState.sourceAvailableBalance,
   });
   $: moveAllowanceSatisfied = isMoveAllowanceSatisfied(moveRequiredAllowanceAmount, moveAllowanceRaw);
   $: moveAllowanceStatusLabel = buildMoveAllowanceStatusLabel({
-    enabled: moveAllowanceRouteEnabled,
-    tokenSymbol: moveAssetSymbol,
-    tokenDecimals: Number(findExternalTokenBySymbol(moveAssetSymbol)?.decimals ?? 18),
+    enabled: moveAllowanceRouteEnabled && Boolean(moveAllowanceAssetIdentity),
+    tokenSymbol: moveAllowanceAssetIdentity,
+    tokenDecimals: moveAllowanceToken
+      ? requireTokenDecimals(moveAllowanceToken.decimals, `asset:${moveAllowanceAssetIdentity}`)
+      : null,
+    metadataLoading: moveAllowanceMetadataLoading,
     raw: moveAllowanceRaw,
     loading: moveAllowanceLoading,
     error: moveAllowanceError,
@@ -733,9 +750,6 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       sourceAccountId: getCurrentMoveSourceAccountId(),
       accountSpendable: getAccountSpendableCapacity,
     });
-  }
-  function getCurrentMoveSourceAvailableBalance(): bigint {
-    return computeMoveSourceAvailableBalance(moveUiState.ledgerRow, selectedMoveTransferToken);
   }
   function choosePreferredMoveAssetSymbol(): string {
     const sourceAccountId = getCurrentMoveSourceAccountId();
@@ -1130,7 +1144,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   let moveUiState: MoveUiState = {
     ledgerRow: null,
     displayBalances: { external: 0n, reserve: 0n, account: 0n },
-    displayDecimals: 18,
+    displayDecimals: 0,
     sourceAvailableBalance: 0n,
   };
   let lastMoveAmountContextKey = '';
@@ -1176,22 +1190,31 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     displayDecimals: number;
     sourceAvailableBalance: bigint;
   };
+  function nullOnAmbiguousAsset<T>(read: () => T): T | null {
+    try {
+      return read();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.startsWith('ASSET_SYMBOL_AMBIGUOUS:')) return null;
+      throw error;
+    }
+  }
   function findExternalTokenBySymbol(symbol: string): ExternalToken | null {
-    return findExternalTokenBySymbolInList(externalTokens, symbol);
+    return nullOnAmbiguousAsset(() => findExternalTokenBySymbolInList(externalTokens, symbol));
   }
   function findAssetLedgerRowBySymbol(symbol: string): AssetLedgerRow | null {
-    return findAssetLedgerRowBySymbolInList(assetLedgerRows, symbol);
+    return nullOnAmbiguousAsset(() => findAssetLedgerRowBySymbolInList(assetLedgerRows, symbol));
   }
   function findReserveTransferTokenBySymbol(symbol: string): ReserveTransferAsset | null {
-    return resolveReserveTransferTokenBySymbol({
+    return nullOnAmbiguousAsset(() => resolveReserveTransferTokenBySymbol({
       symbol,
       externalTokens,
       assetLedgerRows,
       resolveReserveTokenMeta,
-    });
+    }));
   }
   function getFaucetReserveTokenMeta(symbol: string): { tokenId: number; symbol: string } | null {
-    return getFaucetReserveTokenMetaFromRows(assetLedgerRows, symbol);
+    return nullOnAmbiguousAsset(() => getFaucetReserveTokenMetaFromRows(assetLedgerRows, symbol));
   }
   function requireExternalTokenBySymbol(symbol: string): ExternalToken {
     return requireExternalTokenBySymbolInList(externalTokens, symbol);
@@ -1281,11 +1304,10 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     try {
       await ensureMoveAllowanceOwnerGas(jadapter, owner);
       moveProgressLabel = `Approving ${token.symbol} allowance`;
-      const approvalEvents = await jadapter.approveErc20(privKey, token.address, spender, approvalAmount, {
+      await jadapter.approveErc20(privKey, token.address, spender, approvalAmount, {
         entityId,
         tokenId: token.tokenId,
       });
-      await applyCanonicalJEventsToActiveEnv(approvalEvents, `move-allowance-${token.symbol}`);
       await fetchExternalTokens(true);
       let confirmedAllowance = readObservedExternalAllowance(owner, token.address, spender) ?? moveAllowanceRaw;
       const confirmationDeadline = Date.now() + 5_000;
@@ -1364,7 +1386,8 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     const xln = await getXLN();
     const getCachedSignerPrivateKey = xln.getCachedSignerPrivateKey;
     if (!getCachedSignerPrivateKey) throw new Error('Cached signer key reader unavailable');
-    const privKey = getCachedSignerPrivateKey(signerId);
+    const runtimeEnv = requireRuntimeEnv(actionRuntimeEnv, 'resolve-current-external-address');
+    const privKey = getCachedSignerPrivateKey(runtimeEnv, signerId);
     if (!privKey) throw new Error(`No registered signer key for ${signerId}`);
     return new EthersWallet(hexlify(privKey)).address;
   }
@@ -1465,7 +1488,9 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
         throw new Error(result?.error || `Faucet failed (${response.status})`);
       }
       recordServerIngressReceipt(result);
-      await applyCanonicalJEventsToActiveEnv(result.events ?? [], `reserve-faucet-${tokenMeta.symbol}`);
+      // The HTTP response is an acknowledgement, not trusted J-chain evidence.
+      // The locally configured watcher observes the reserve log from its bound
+      // stack and is the only path allowed to advance Entity J-history.
       pendingReserveFaucets = [...pendingReserveFaucets, {
         tokenId: tokenMeta.tokenId,
         amount: amountWei,
@@ -1581,7 +1606,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   function handleAccountFaucet(event: CustomEvent<{ counterpartyId: string; tokenId: number }>) {
     faucetOffchain(event.detail.counterpartyId, event.detail.tokenId);
   }
-  async function handleQuickSettleApprove(event: CustomEvent<{ counterpartyId: string }>) {
+  async function handleQuickSettleApprove(event: CustomEvent<{ counterpartyId: string; workspaceHash: string }>) {
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) {
       notifyUserActionError('quick-settle-approve', 'Active entity missing for settlement approval');
@@ -1595,7 +1620,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       const signerId = resolveEntitySigner(entityId, 'quick-settle-approve');
       if (!signerId) throw new Error('No signer available');
       await submitEntityInputs([buildEntityInput(entityId, signerId, [
-        buildSettlementApproveTx(event.detail.counterpartyId),
+        buildSettlementApproveTx(event.detail.counterpartyId, event.detail.workspaceHash),
       ])]);
       toasts.info('Withdrawal signature sent');
     } catch (err) {
@@ -1619,18 +1644,34 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     if (cacheKey === externalTokenCatalogCacheKey && externalTokenCatalogCache !== null) {
       return cloneExternalTokenCatalog(externalTokenCatalogCache);
     }
-    let tokens = await fetchTokenCatalog();
+    let tokens: ExternalToken[] = [];
+    let apiError: unknown = null;
+    try {
+      tokens = await fetchTokenCatalog();
+    } catch (error) {
+      apiError = error;
+    }
     if (tokens.length === 0 && jadapter?.getTokenRegistry) {
       const registry = await jadapter.getTokenRegistry();
       if (registry?.length) {
-        tokens = registry.map((t: JTokenRegistryItem) => ({
-          symbol: t.symbol,
-          address: t.address,
-          balance: 0n,
-          decimals: typeof t.decimals === 'number' ? t.decimals : 18,
-          tokenId: normalizeOptionalTokenId(t.tokenId),
-        }));
+        tokens = registry.map((t: JTokenRegistryItem) => {
+          const decimals = Number(t.decimals);
+          if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
+            throw new Error(`TOKEN_CATALOG_DECIMALS_INVALID:${String(t.tokenId)}:${String(t.decimals)}`);
+          }
+          return {
+            symbol: t.symbol,
+            address: t.address,
+            balance: 0n,
+            decimals,
+            tokenId: normalizeOptionalTokenId(t.tokenId),
+          };
+        });
       }
+    }
+    if (tokens.length === 0) {
+      const reason = apiError instanceof Error ? apiError.message : String(apiError || 'empty catalog');
+      throw new Error(`TOKEN_CATALOG_UNAVAILABLE:${reason}`, { cause: apiError ?? undefined });
     }
     externalTokenCatalogCacheKey = cacheKey;
     externalTokenCatalogCache = tokens.map((token) => ({ ...token, balance: 0n }));
@@ -1816,7 +1857,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       const accountUsd = isReserveTransferToken(token)
         ? getAssetValue(token.tokenId, accountBalance, token.symbol)
         : 0;
-      rows.set(token.symbol, {
+      rows.set(getExternalTokenIdentityKey(token), {
         symbol: token.symbol,
         address: token.address,
         decimals: token.decimals,
@@ -1839,7 +1880,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       if (existing) continue;
       const info = resolveReserveTokenMeta(numericId);
       const reserveUsd = getAssetValue(numericId, reserveBalance, info.symbol);
-      rows.set(info.symbol, {
+      rows.set(`token:${numericId}`, {
         symbol: info.symbol,
         address: '',
         decimals: info.decimals,
@@ -1861,7 +1902,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       if (existing) continue;
       const info = resolveReserveTokenMeta(numericId);
       const accountUsd = getAssetValue(numericId, accountBalance, info.symbol);
-      rows.set(info.symbol, {
+      rows.set(`token:${numericId}`, {
         symbol: info.symbol,
         address: '',
         decimals: info.decimals,
@@ -1876,8 +1917,9 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
         totalUsd: accountUsd,
       });
     }
-    if (!rows.has('ETH')) {
-      rows.set('ETH', {
+    const nativeAssetKey = `address:${ZeroAddress.toLowerCase()}`;
+    if (!rows.has(nativeAssetKey)) {
+      rows.set(nativeAssetKey, {
         symbol: 'ETH',
         address: ZeroAddress,
         decimals: 18,
@@ -1905,10 +1947,12 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   );
   $: assetLedgerGrandTotal = assetLedgerTotals.externalUsd + assetLedgerTotals.reserveUsd + assetLedgerTotals.accountUsd;
   $: {
+    envRevision;
     const symbol = String(moveAssetSymbol || '').trim().toUpperCase();
-    const row = symbol
-      ? assetLedgerRows.find((candidate) => String(candidate.symbol || '').trim().toUpperCase() === symbol) ?? null
-      : null;
+    const row = symbol ? findAssetLedgerRowBySymbol(moveAssetSymbol) : null;
+    const selectedDecimals = row?.decimals
+      ?? selectedMoveExternalToken?.decimals
+      ?? selectedMoveTransferToken?.decimals;
     const nextState: MoveUiState = {
       ledgerRow: row,
       displayBalances: row
@@ -1918,10 +1962,9 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
             account: row.accountBalance,
           }
         : { external: 0n, reserve: 0n, account: 0n },
-      displayDecimals: row?.decimals
-        ?? selectedMoveExternalToken?.decimals
-        ?? selectedMoveTransferToken?.decimals
-        ?? 18,
+      displayDecimals: selectedDecimals === undefined
+        ? 0
+        : requireTokenDecimals(selectedDecimals, `asset:${moveAssetSymbol}`),
       sourceAvailableBalance: computeMoveSourceAvailableBalance(row, selectedMoveTransferToken),
     };
     moveUiState = nextState;
@@ -2000,25 +2043,29 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       pendingOffchainFaucets = remaining;
     }
   }
+  const EXTERNAL_WALLET_REQUEST_TIMEOUT_MS = 5_000;
   // Known token addresses for RPC mode (from deploy-tokens.cjs on anvil)
   async function fetchTokenCatalog(): Promise<ExternalToken[]> {
-    try {
-      const requestApiBase = resolveApiBase();
-      const response = await fetch(`${requestApiBase}/api/tokens`);
-      if (!response.ok) return [];
-      const data = await readJsonResponse<TokenCatalogResponse>(response);
-      const tokens = Array.isArray(data?.tokens) ? data.tokens : [];
-      if (tokens.length === 0) return [];
-      return tokens.map((t: TokenCatalogItem) => ({
+    const requestApiBase = resolveApiBase();
+    const response = await fetch(`${requestApiBase}/api/tokens`, {
+      signal: AbortSignal.timeout(EXTERNAL_WALLET_REQUEST_TIMEOUT_MS),
+    });
+    if (!response.ok) throw new Error(`TOKEN_CATALOG_HTTP_FAILED:${response.status}`);
+    const data = await readJsonResponse<TokenCatalogResponse>(response);
+    const tokens = Array.isArray(data?.tokens) ? data.tokens : [];
+    return tokens.map((t: TokenCatalogItem) => {
+      const decimals = Number(t.decimals);
+      if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
+        throw new Error(`TOKEN_CATALOG_DECIMALS_INVALID:${String(t.tokenId)}:${String(t.decimals)}`);
+      }
+      return {
         symbol: t.symbol,
         address: t.address,
         balance: 0n,
-        decimals: typeof t.decimals === 'number' ? t.decimals : 18,
+        decimals,
         tokenId: normalizeOptionalTokenId(t.tokenId),
-      }));
-    } catch {
-      return [];
-    }
+      };
+    });
   }
   function readExternalWalletState(
     tokenList: ExternalToken[],
@@ -2076,19 +2123,8 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     return normalized.includes('failed to fetch')
       || normalized.includes('load failed')
       || normalized.includes('networkerror')
-      || normalized.includes('network error');
-  }
-  async function applyCanonicalJEventsToActiveEnv(
-    events: NonNullable<FaucetApiResult['events']>,
-    label: string,
-  ): Promise<void> {
-    if (!events || events.length === 0) return;
-    const env = getRuntimeEnv(actionRuntimeEnv);
-    if (!env) return;
-    const xln = await getXLN();
-    const runtimeInput = xln.buildJEventsRuntimeInput?.(env, events, label);
-    if (!runtimeInput) return;
-    await submitRuntimeCommandInput(runtimeInput);
+      || normalized.includes('network error')
+      || normalized.includes('timeout');
   }
   async function requestExternalWalletSnapshot(
     entityId: string,
@@ -2096,7 +2132,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     tokenList: ExternalToken[],
     allowanceReads: ExternalAllowanceRead[],
     jadapter?: JAdapter | null,
-  ): Promise<ExternalWalletReadResult> {
+  ): Promise<ExternalWalletReadResult | null> {
     const tokenAddresses = tokenList.map((token) => token.address).filter((address) => isAddress(address));
     if (jadapter?.readWalletSnapshot && jadapter?.provider) {
       const source = await readExternalWalletSnapshotSource(jadapter);
@@ -2146,31 +2182,6 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
           ...(allowanceError ? { error: allowanceError } : {}),
         };
       });
-      const transactionHash = [
-        'external-wallet-snapshot',
-        source.sourceHeight,
-        entityId,
-        String(owner || '').trim().toLowerCase(),
-      ].join(':');
-      const env = getRuntimeEnv(actionRuntimeEnv);
-      if (env) {
-        await applyCanonicalJEventsToActiveEnv([{
-          name: 'ExternalWalletSnapshot',
-          args: {
-            entityId,
-            owner,
-            sourceHeight: source.sourceHeight,
-            sourceHash: source.sourceHash,
-            finalityDepth: source.finalityDepth,
-            nativeBalance: nativeBalance.toString(),
-            tokenBalances: tokenBalances.filter((entry) => !entry.error),
-            allowances: allowances.filter((entry) => !entry.error),
-          },
-          blockNumber: source.sourceHeight,
-          blockHash: source.sourceHash,
-          transactionHash,
-        }], 'external-wallet-snapshot-ui-local');
-      }
       const balanceByToken = new Map(tokenBalances.map((entry) => [entry.tokenAddress, BigInt(entry.balance)]));
       const allowanceByKey = new Map(allowances.map((entry) => [
         `${entry.tokenAddress}:${entry.spender}`,
@@ -2191,6 +2202,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     const response = await fetch(`${requestApiBase}/api/external-wallet/snapshot`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(EXTERNAL_WALLET_REQUEST_TIMEOUT_MS),
       body: JSON.stringify({
         entityId,
         owner,
@@ -2202,25 +2214,9 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     if (!response.ok || !data?.success) {
       throw new Error(data?.error || `External wallet snapshot failed (${response.status})`);
     }
-    const env = getRuntimeEnv(actionRuntimeEnv);
-    if (env && data.blockNumber !== undefined && data.blockHash && data.transactionHash) {
-      await applyCanonicalJEventsToActiveEnv([{
-        name: 'ExternalWalletSnapshot',
-        args: {
-          entityId: data.entityId ?? entityId,
-          owner: data.owner ?? owner,
-          sourceHeight: data.sourceHeight ?? data.blockNumber,
-          sourceHash: data.sourceHash ?? data.blockHash,
-          finalityDepth: data.finalityDepth ?? 0,
-          nativeBalance: String(data.nativeBalance ?? '0'),
-          tokenBalances: (data.tokenBalances ?? []).filter((entry) => !entry.error),
-          allowances: (data.allowances ?? []).filter((entry) => !entry.error),
-        },
-        blockNumber: Number(data.blockNumber),
-        blockHash: data.blockHash,
-        transactionHash: data.transactionHash,
-      }], 'external-wallet-snapshot-ui');
-    }
+    // Snapshot JSON is display data only. A point-in-time state read does not
+    // prove the complete log set for its block, so it must never close a
+    // consensus J-prefix. Canonical state changes arrive through the watcher.
     const balanceByToken = new Map(
       (data.tokenBalances ?? []).filter((entry) => !entry.error).map((entry) => [
         String(entry.tokenAddress || '').trim().toLowerCase(),
@@ -2354,7 +2350,18 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
             };
           }
         } else if (entityId) {
-          const snapshot = await requestExternalWalletSnapshot(entityId, owner, tokenList, allowanceReads, jadapter);
+          const snapshot = await requestExternalWalletSnapshot(
+            entityId,
+            owner,
+            tokenList,
+            allowanceReads,
+            jadapter,
+          );
+          if (!snapshot) {
+            externalTokensLoading = false;
+            if (moveAllowanceRouteEnabled) moveAllowanceLoading = false;
+            return;
+          }
           nativeBalance = snapshot.nativeBalance;
           balances = snapshot.balances;
           allowanceValues = snapshot.allowanceValues;
@@ -2450,7 +2457,8 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     const xln = await getXLN();
     const getCachedSignerPrivateKey = xln.getCachedSignerPrivateKey;
     if (!getCachedSignerPrivateKey) throw new Error('Cached signer key reader unavailable');
-    const privKey = getCachedSignerPrivateKey(signerId);
+    const runtimeEnv = requireRuntimeEnv(actionRuntimeEnv, 'active-signer-private-key');
+    const privKey = getCachedSignerPrivateKey(runtimeEnv, signerId);
     if (!privKey) throw new Error(`No registered signer key for ${signerId}`);
     return privKey;
   }
@@ -2708,7 +2716,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     const routeKey = getMoveRouteKey(moveFromEndpoint, moveToEndpoint);
     const externalToken = findExternalTokenBySymbol(moveAssetSymbol);
     const reserveToken = findReserveTransferTokenBySymbol(moveAssetSymbol);
-    const maxSourceAmount = getCurrentMoveSourceAvailableBalance();
+    const maxSourceAmount = moveUiState.sourceAvailableBalance;
     if (routeKey === 'external->reserve') {
       if (!externalToken || !isAddress(externalToken.address) || externalToken.address === ZeroAddress) {
         throw new Error('Select ERC20 asset first');
@@ -3012,7 +3020,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     }
     try {
       const env = getRuntimeEnv(actionRuntimeEnv);
-      const rebalancePolicy = getOpenAccountRebalancePolicyData();
+      const rebalancePolicy = getOpenAccountRebalancePolicyData(getTokenInfo(1).decimals);
       if (env) await prewarmCounterpartyProfiles(env, [trimmed]);
       await submitRuntimeInput(buildDirectOpenAccountRuntimeInput({
         sourceEntityId: entityId,
@@ -3373,6 +3381,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       resettingEverything = false;
     }
   }
+  const EXTERNAL_WALLET_REFRESH_MS = 5_000;
   let externalBalancePollKey = '';
   $: {
     if (typeof window === 'undefined') {
@@ -3381,8 +3390,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       const signerId = String(currentSignerId || '').trim();
       const runtimeId = String(panelView.runtimeId || '').trim();
       const jurisdiction = String(currentEntityJurisdictionName || panelView.activeJurisdictionName || '').trim();
-      const refreshMs = 5_000;
-      const nextKey = `${signerId}|${runtimeId}|${jurisdiction}|${activeIsLive ? 'live' : 'history'}|${refreshMs}`;
+      const nextKey = `${signerId}|${runtimeId}|${jurisdiction}|${activeIsLive ? 'live' : 'history'}|${EXTERNAL_WALLET_REFRESH_MS}`;
       if (nextKey !== externalBalancePollKey) {
         externalBalancePollKey = nextKey;
         if (signerId) {
@@ -3400,6 +3408,10 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   });
   onMount(() => {
     applyDeepLinkViewFromUrl();
+    const externalWalletRefresh = window.setInterval(() => {
+      if (document.visibilityState !== 'visible' || !activeIsLive || !String(currentSignerId || '').trim()) return;
+      void fetchExternalTokens(true);
+    }, EXTERNAL_WALLET_REFRESH_MS);
     const handleMovePointer = (event: PointerEvent | MouseEvent) => {
       if (!moveDragSource) return;
       const hovered = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('[data-move-side="to"]');
@@ -3423,6 +3435,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     window.addEventListener('hashchange', handleUrlNavigation);
     window.addEventListener('popstate', handleUrlNavigation);
     return () => {
+      window.clearInterval(externalWalletRefresh);
       window.removeEventListener('pointermove', handleMovePointer);
       window.removeEventListener('pointerup', handleMovePointerUp);
       window.removeEventListener('mousemove', handleMovePointer);
@@ -3433,7 +3446,25 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   });
   // Formatting
   function getTokenInfo(tokenId: number) {
-    return activeXlnFunctions?.getTokenInfo(tokenId) ?? { symbol: 'UNK', decimals: 18 };
+    const jurisdictionToken = externalTokens.find((token) => token.tokenId === tokenId);
+    if (jurisdictionToken) {
+      return {
+        symbol: jurisdictionToken.symbol,
+        name: jurisdictionToken.symbol,
+        color: '',
+        decimals: requireTokenDecimals(jurisdictionToken.decimals, `token:${tokenId}`),
+      };
+    }
+    if (!activeXlnFunctions) throw new Error(`TOKEN_METADATA_READER_UNAVAILABLE:token:${tokenId}`);
+    const info = activeXlnFunctions.getTokenInfo(tokenId);
+    return {
+      ...info,
+      decimals: requireTokenDecimals(info.decimals, `token:${tokenId}`),
+    };
+  }
+  function resolveConsensusTokenMetadata(tokenId: number): { symbol: string } | null {
+    const token = externalTokens.find((candidate) => candidate.tokenId === tokenId);
+    return token ? { symbol: token.symbol } : null;
   }
   let {
     formatAmount,
@@ -3927,6 +3958,12 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
             isHub={replica.state?.profile?.isHub === true || Boolean((replica.state as { orderbookHubProfile?: unknown })?.orderbookHubProfile)}
             {activeIsLive}
             runtimeEnv={getRuntimeEnv(actionRuntimeEnv)}
+            consensusView={buildEntityConsensusSettingsView(
+              replica,
+              panelView.height,
+              displayProjectionFrame === null,
+              { resolveTokenMetadata: resolveConsensusTokenMetadata },
+            )}
             {settingsSubview}
             onSaveProfile={saveSettingsProjectionProfile}
             onImportJMachine={importSettingsJMachine}
@@ -3990,7 +4027,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     color: var(--theme-text-muted, #71717a) !important;
   }
 
-  .content :global(button:not(.tab):not(.toggle):not(.back-btn):not(.btn-add):not(.btn-live):not(.c-delete):not(.account-workspace-tab):not(.configure-tab):not(.btn-add-token):not(.scope-btn):not(.primary-btn):not(.cancel-btn):not(.summary-action):not(.summary-action-inline):not(.delta-faucet):not(.delta-expand):not(.step-btn):not(.step-auto-btn):not(.move-node):not(.move-primary-cta):not(.refresh-btn):not(.hub-primary):not(.btn-connect):not(.expand-toggle):not(.closed-trigger):not(.dropdown-toggle):not(.dropdown-item):not(.settings-tab):not(.compact-btn):not(.pill):not(.theme-swatch):not(.icon-btn):not(.danger-icon):not(.close-btn):not(.file-btn):not(.danger-btn):not(.btn-table-action):not(.wallet-meta-copy)) {
+  .content :global(button:not(.tab):not(.toggle):not(.back-btn):not(.btn-add):not(.btn-live):not(.c-delete):not(.account-workspace-tab):not(.configure-tab):not(.btn-add-token):not(.scope-btn):not(.primary-btn):not(.cancel-btn):not(.summary-action):not(.summary-action-inline):not(.delta-capacity-bar):not(.delta-faucet):not(.delta-expand):not(.step-btn):not(.step-auto-btn):not(.move-node):not(.move-primary-cta):not(.refresh-btn):not(.hub-primary):not(.btn-connect):not(.expand-toggle):not(.closed-trigger):not(.dropdown-toggle):not(.dropdown-item):not(.settings-tab):not(.compact-btn):not(.pill):not(.theme-swatch):not(.icon-btn):not(.danger-icon):not(.close-btn):not(.file-btn):not(.danger-btn):not(.btn-table-action):not(.wallet-meta-copy)) {
     background: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent) !important;
     border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent) !important;
     border-radius: 6px !important;

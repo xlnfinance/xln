@@ -21,7 +21,7 @@ import type { AccountMachine, Env, EntityInput } from '../types';
 import { ethers } from 'ethers';
 import { getBestAsk, SWAP_LOT_SCALE } from '../orderbook';
 import { getOpenSwapOfferEntries } from '../orderbook/open-swap-offers';
-import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig } from './boot';
+import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRuntimeSeed, converge, commitRuntimeInput, findReplica } from './helpers';
@@ -143,14 +143,16 @@ function assert(condition: boolean, message: string, env?: Env): void {
   console.log(`[OK] ${message}`);
 }
 
-const registeredEntityIds: Record<string, string> = {};
+type RegisteredScenarioEntity = Readonly<{ id: string; signer: string }>;
 
-function getRegisteredEntityId(signerId: string): string {
-  const entityId = registeredEntityIds[signerId];
-  if (!entityId) {
-    throw new Error(`Missing registered entityId for signer ${signerId} - run swap() first`);
+const registeredEntitiesByAlias = new Map<string, RegisteredScenarioEntity>();
+
+function getRegisteredEntity(signerAlias: string): RegisteredScenarioEntity {
+  const registered = registeredEntitiesByAlias.get(signerAlias);
+  if (!registered) {
+    throw new Error(`Missing registered entity for signer alias ${signerAlias} - run swap() first`);
   }
-  return entityId;
+  return registered;
 }
 
 function requireAccount(account: AccountMachine | undefined, label: string): AccountMachine {
@@ -168,6 +170,7 @@ export async function swap(env: Env): Promise<void> {
   }
   requireRuntimeSeed(env, 'SWAP');
   ensureSignerKeysFromSeed(env, ['1', '2', '3', '4', '5'], 'SWAP');
+  registeredEntitiesByAlias.clear();
   const process = await getProcess();
 
   if (env.scenarioMode && env.height === 0) {
@@ -215,10 +218,11 @@ export async function swap(env: Env): Promise<void> {
     jadapter = getScenarioJAdapter(env);
   } catch {
     jadapter = await ensureJAdapter(env);
-    const jReplica = createJReplica(env, 'Swap Demo', jadapter.addresses.depository, J_MACHINE_POSITION);
-    jReplica.jadapter = jadapter;
-    jReplica.depositoryAddress = jadapter.addresses.depository;
-    jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
+    bindScenarioJReplica(
+      env,
+      createJReplica(env, 'Swap Demo', jadapter.addresses.depository, J_MACHINE_POSITION),
+      jadapter,
+    );
     jadapter.startWatching(env);
   }
   const jurisdiction = createJurisdictionConfig('Swap Demo', jadapter.addresses.depository, jadapter.addresses.entityProvider);
@@ -230,21 +234,23 @@ export async function swap(env: Env): Promise<void> {
   console.log('📦 Creating entities: Alice, Hub, Bob, Carol, Dave...');
 
   const { registerEntities: bootRegisterEntities } = await import('./boot');
-  const registered = await bootRegisterEntities(env, jadapter, [
+  const registrationInputs = [
     { name: 'Alice', signer: '1', position: SWAP_POSITIONS['Alice'] || { x: 0, y: 0, z: 0 } },
     { name: 'Hub',   signer: '2', position: SWAP_POSITIONS['Hub'] || { x: 0, y: 0, z: 0 } },
     { name: 'Bob',   signer: '3', position: SWAP_POSITIONS['Bob'] || { x: 0, y: 0, z: 0 } },
     { name: 'Carol', signer: '4', position: SWAP_POSITIONS['Carol'] || { x: 0, y: 0, z: 0 } },
     { name: 'Dave',  signer: '5', position: SWAP_POSITIONS['Dave'] || { x: 0, y: 0, z: 0 } },
-  ], jurisdiction);
-  // Populate module-level registeredEntityIds for cross-phase access
-  for (const r of registered) {
-    registeredEntityIds[r.signer] = r.id;
+  ];
+  const registered = await bootRegisterEntities(env, jadapter, registrationInputs, jurisdiction);
+  for (const [index, registration] of registered.entries()) {
+    const signerAlias = registrationInputs[index]?.signer;
+    if (!signerAlias) throw new Error(`SWAP_REGISTRATION_ALIAS_MISSING:${index}`);
+    registeredEntitiesByAlias.set(signerAlias, registration);
   }
 
   // registerEntities already created eReplicas — just build local aliases
-  const alice = { name: 'Alice', id: getRegisteredEntityId('1'), signer: '1' };
-  const hub = { name: 'Hub', id: getRegisteredEntityId('2'), signer: '2' };
+  const alice = { name: 'Alice', ...getRegisteredEntity('1') };
+  const hub = { name: 'Hub', ...getRegisteredEntity('2') };
   console.log(`  ✅ Created: ${alice.name}, ${hub.name}\n`);
 
   // ============================================================================
@@ -691,8 +697,8 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   console.log('═══════════════════════════════════════════════════════════════\n');
 
   // Reuse Alice & Hub from Phase 1
-  const alice = { id: getRegisteredEntityId('1'), signer: '1' };
-  const hub = { id: getRegisteredEntityId('2'), signer: '2' };
+  const alice = getRegisteredEntity('1');
+  const hub = getRegisteredEntity('2');
 
   // Initialize hub's orderbook extension (required for RJEA flow)
   const { DEFAULT_SPREAD_DISTRIBUTION } = await import('../orderbook');
@@ -724,7 +730,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
 
   // Add Bob
   console.log('📦 Adding Bob...');
-  const bob = { id: getRegisteredEntityId('3'), signer: '3' };
+  const bob = getRegisteredEntity('3');
 
   await commitRuntimeInput(env, { runtimeTxs: [{
     type: 'importReplica' as const,
@@ -1123,8 +1129,8 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   const hubAccountAfterStart = requireAccount(hubAfterStart.state.accounts.get(alice.id), 'hub/alice after dispute start');
   const hubActiveDispute = hubAccountAfterStart.activeDispute;
   if (!hubActiveDispute) throw new Error('SWAP_MISSING_HUB_ACTIVE_DISPUTE');
-  const { buildAccountProofBody } = await import('../protocol/dispute/proof-builder');
-  const hubProofAfterStart = buildAccountProofBody(hubAccountAfterStart);
+  const { buildAccountProofBodyFromEnv } = await import('../account/consensus/helpers');
+  const hubProofAfterStart = buildAccountProofBodyFromEnv(env, hubAccountAfterStart);
   assert(
     hubProofAfterStart.proofBodyHash === hubActiveDispute.initialProofbodyHash,
     'Hub dispute proofBodyHash matches on-chain start hash'
@@ -1133,7 +1139,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   const aliceAccountAfterStart = requireAccount(aliceAfterStart.state.accounts.get(hub.id), 'alice/hub after dispute start');
   const aliceActiveDispute = aliceAccountAfterStart.activeDispute;
   if (!aliceActiveDispute) throw new Error('SWAP_MISSING_ALICE_ACTIVE_DISPUTE');
-  const aliceProofAfterStart = buildAccountProofBody(aliceAccountAfterStart);
+  const aliceProofAfterStart = buildAccountProofBodyFromEnv(env, aliceAccountAfterStart);
   assert(
     aliceProofAfterStart.proofBodyHash === aliceActiveDispute.initialProofbodyHash,
     'Counterparty dispute proofBodyHash matches on-chain start hash'
@@ -1167,8 +1173,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
 
   const [, hubBeforeBroadcast] = findReplica(env, hub.id);
   const finalProof = hubBeforeBroadcast.state.jBatchState?.batch.disputeFinalizations?.[0];
-  const hubIsLeft = hubAccountAfterStart.leftEntity === hub.id;
-  const finalArgs = (hubIsLeft ? finalProof?.leftArguments : finalProof?.rightArguments) || '0x';
+  const finalArgs = finalProof?.starterArguments || '0x';
   assert(finalArgs !== '0x', 'Dispute caller-side arguments encoded');
 
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
@@ -1239,7 +1244,7 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
   console.log('         PHASE 3: MULTI-PARTY TRADING (Carol & Dave)           ');
   console.log('═══════════════════════════════════════════════════════════════\n');
 
-  const hub = { id: getRegisteredEntityId('2'), signer: '2' };
+  const hub = getRegisteredEntity('2');
   const [, hubRep] = findReplica(env, hub.id);
 
   // Reset hub orderbook + swap holds to isolate Phase 3 from earlier tests
@@ -1260,8 +1265,8 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
   }
 
   // Carol and Dave already registered in Phase 1 (registerEntities created all 5 eReplicas)
-  const carol = { id: getRegisteredEntityId('4'), signer: '4', name: 'Carol' };
-  const dave = { id: getRegisteredEntityId('5'), signer: '5', name: 'Dave' };
+  const carol = { ...getRegisteredEntity('4'), name: 'Carol' };
+  const dave = { ...getRegisteredEntity('5'), name: 'Dave' };
   console.log(`📦 Using Carol(${carol.id.slice(-4)}) and Dave(${dave.id.slice(-4)}) from Phase 1\n`);
 
   // Open accounts with Hub

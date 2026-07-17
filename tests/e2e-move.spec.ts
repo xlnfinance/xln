@@ -855,7 +855,7 @@ function expectExactDelta(
   }
 }
 
-test('asset faucet exposes correct modes and funds every supported token', async ({ page }) => {
+test('asset faucet exposes correct modes and funds every supported token', { tag: '@functional' }, async ({ page }) => {
   test.setTimeout(LONG_E2E ? 240_000 : 180_000);
 
   await timedStep('faucet.baseline', async () => {
@@ -942,7 +942,7 @@ test('asset faucet exposes correct modes and funds every supported token', async
   }
 });
 
-test('move tab covers all routed paths on isolated runtimes', async ({ page, browser }, testInfo) => {
+test('move tab covers all routed paths on isolated runtimes', { tag: '@functional' }, async ({ page, browser }, testInfo) => {
   test.setTimeout(LONG_E2E ? 420_000 : 300_000);
 
   await timedStep('move.baseline', async () => {

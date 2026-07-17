@@ -74,7 +74,7 @@
   export let moveAssetOptions: Array<{ symbol: string }> = [];
   export let moveEndpointLabels: Record<MoveEndpoint, string>;
   export let moveEndpoints: MoveEndpoint[] = ['external', 'reserve', 'account'];
-  export let formatAmount: (amount: bigint, decimals?: number) => string;
+  export let formatAmount: (amount: bigint, decimals: number) => string;
   export let onMoveVisualRoot: (node: HTMLDivElement | null) => void = () => undefined;
   export let toastMoveError: (error: unknown) => void = () => undefined;
 

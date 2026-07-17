@@ -46,17 +46,23 @@ interface IDeltaTransformer {
   /**
    * @notice Apply batch of subcontracts to delta array
    * @param deltas Current delta array
+   * @param tokenIds Depository token IDs aligned one-to-one with deltas
    * @param encodedBatch Encoded batch data
    * @param leftArguments Arguments from left entity
    * @param rightArguments Arguments from right entity
+   * @param leftArgumentsTimestamp Timestamp at which left arguments were fixed
+   * @param rightArgumentsTimestamp Timestamp at which right arguments were fixed
    * @return newDeltas Updated delta array
    */
   function applyBatch(
-    int[] memory deltas,
+    int[] calldata deltas,
+    uint[] calldata tokenIds,
     bytes calldata encodedBatch,
     bytes calldata leftArguments,
-    bytes calldata rightArguments
-  ) external returns (int[] memory);
+    bytes calldata rightArguments,
+    uint leftArgumentsTimestamp,
+    uint rightArgumentsTimestamp
+  ) external view returns (int[] memory);
 
   /**
    * @notice Encode batch for off-chain simulation

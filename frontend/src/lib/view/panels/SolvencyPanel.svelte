@@ -1,225 +1,84 @@
 <script lang="ts">
-  /**
-   * Solvency Panel - Basel-style Capital Adequacy Monitor
-   *
-   * Displays XLN's conservation law: Σ(reserves) = Σ(collateral)
-   * Uses Basel Committee terminology for institutional credibility
-   *
-   * @license AGPL-3.0
-   * Copyright (C) 2025 XLN Finance
-   */
-
   import { onDestroy } from 'svelte';
   import { readable, type Readable } from 'svelte/store';
-  import type { Env, RuntimeAdapterSolvencySummary } from '@xln/runtime/xln-api';
+  import type { Env } from '@xln/runtime/xln-api';
   import { createRuntimeQueryStore } from '$lib/stores/runtimeQueryClient';
   import { buildSolvencyProjection } from './solvency-panel-view';
 
   const emptyEnv = readable<Env | null>(null);
 
-  let {
-    runtimeFrameEnv = emptyEnv,
-  }: {
-    runtimeFrameEnv?: Readable<Env | null>;
-  } = $props();
+  let { runtimeFrameEnv = emptyEnv }: { runtimeFrameEnv?: Readable<Env | null> } = $props();
 
   const solvencyStore = createRuntimeQueryStore((client) => client.readSolvencySummary());
+  onDestroy(() => solvencyStore.destroy());
 
-  onDestroy(() => {
-    solvencyStore.destroy();
-  });
-
-  let solvencyData = $derived.by(() => {
-    return $solvencyStore.data ?? buildSolvencyProjection($runtimeFrameEnv);
-  });
-
+  let solvencyData = $derived.by(() =>
+    $solvencyStore.data ?? buildSolvencyProjection($runtimeFrameEnv));
   let solvencyError = $derived($solvencyStore.error);
 
-  function formatAmount(amount: bigint | RuntimeAdapterSolvencySummary['m1']): string {
-    const num = Number(amount) / 1e18;
-    if (num >= 1_000_000) return `$${(num / 1_000_000).toFixed(2)}M`;
-    if (num >= 1_000) return `$${(num / 1_000).toFixed(1)}K`;
-    return `$${num.toFixed(0)}`;
-  }
+  const formatRawAmount = (amount: bigint): string => amount.toLocaleString('en-US');
+  const shortAddress = (address: string): string => `${address.slice(0, 8)}…${address.slice(-6)}`;
 </script>
 
 <div class="solvency-panel glass-panel" data-testid="solvency-panel">
-  <!-- Hero status -->
   <div class="hero-status" class:valid={solvencyData?.isValid} data-testid="solvency-status">
-    <div class="status-icon">
-      {solvencyData?.isValid ? '✓' : '⚠'}
-    </div>
+    <div class="status-icon">{solvencyData?.isValid ? '✓' : '⚠'}</div>
     <div class="status-text text-tiny">
-      {solvencyData?.isValid ? 'SYSTEM SOLVENT' : 'IMBALANCE DETECTED'}
+      {solvencyData?.isValid ? 'ASSET CONSERVATION OK' : 'ASSET IMBALANCE DETECTED'}
     </div>
   </div>
 
-  {#if solvencyData}
-    <!-- Big beautiful reserves -->
-    <div class="hero-metric animate-fade-in">
-      <div class="metric-label">TOTAL RESERVES</div>
-      <div class="metric-value accent animate-glow" data-testid="solvency-m1">
-        {formatAmount(solvencyData.m1)}
-      </div>
-      <div class="metric-sublabel text-small">
-        M1 • On-chain liquidity
-      </div>
-    </div>
-
-    <!-- Collateral breakdown -->
-    <div class="collateral-grid">
-      <div class="glass-card metric-card">
-        <div class="metric-label">CONFIRMED</div>
-          <div class="metric-value" data-testid="solvency-m2">
-          {formatAmount(solvencyData.m2)}
-        </div>
-        <div class="text-tiny" style="color: var(--text-tertiary);">M2 • Finalized</div>
-      </div>
-
-      {#if solvencyData.m3 > 0n}
-        <div class="glass-card metric-card">
-          <div class="metric-label">PENDING</div>
-            <div class="metric-value" style="color: var(--accent-orange);" data-testid="solvency-m3">
-            {formatAmount(solvencyData.m3)}
+  {#if solvencyData?.assets.length}
+    <div class="asset-list">
+      {#each solvencyData.assets as asset (`${asset.stackId}:${asset.tokenId}`)}
+        <section class="glass-card asset-card" class:invalid={!asset.isValid} data-testid="solvency-asset">
+          <header>
+            <div class="metric-label">CHAIN {asset.chainId} · TOKEN #{asset.tokenId}</div>
+            <div class="text-tiny address">{shortAddress(asset.depositoryAddress)}</div>
+          </header>
+          <div class="metric-grid">
+            <div>
+              <div class="metric-label">RESERVES</div>
+              <div class="metric-value" data-testid="solvency-reserves">{formatRawAmount(asset.reserves)}</div>
+            </div>
+            <div>
+              <div class="metric-label">CONFIRMED COLLATERAL</div>
+              <div class="metric-value" data-testid="solvency-collateral">{formatRawAmount(asset.confirmedCollateral)}</div>
+            </div>
+            <div>
+              <div class="metric-label">PENDING, NOT COUNTED</div>
+              <div class="metric-value pending">{formatRawAmount(asset.pendingCollateral)}</div>
+            </div>
           </div>
-          <div class="text-tiny" style="color: var(--text-tertiary);">M3 • In consensus</div>
-        </div>
-      {/if}
+          {#if !asset.isValid}
+            <div class="delta-warning">Raw-unit delta: {formatRawAmount(asset.delta)}</div>
+          {/if}
+        </section>
+      {/each}
     </div>
-
-    <!-- Conservation law -->
-    <div class="conservation-law glass-card">
-      <div class="equation text-heading">
-        M1 = M2 {#if solvencyData.m3 > 0n}+ M3{/if}
-      </div>
-      <div class="law-description text-small">
-        Conservation law • Reserves equal total collateral
-      </div>
-
-      {#if solvencyData.delta !== 0n}
-        <div class="delta-warning">
-          <span class="metric-change" class:up={solvencyData.delta > 0n} class:down={solvencyData.delta < 0n}>
-            {solvencyData.delta > 0n ? '+' : ''}{formatAmount(solvencyData.delta)} imbalance
-          </span>
-        </div>
-      {/if}
-    </div>
-
   {:else if solvencyError}
     <div class="empty-state error text-small">
       <div>Solvency projection failed</div>
       <div class="error-text">{solvencyError}</div>
     </div>
   {:else}
-    <div class="empty-state text-small">
-      <div style="opacity: 0.4; font-size: 2rem;">∅</div>
-      <div>No solvency data</div>
-    </div>
+    <div class="empty-state text-small">No asset conservation data</div>
   {/if}
 </div>
 
 <style>
-  .solvency-panel {
-    padding: var(--space-4);
-    height: 100%;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-  }
-
-  /* Hero status indicator */
-  .hero-status {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
-    background: var(--glass-highlight);
-    border-radius: var(--radius-md);
-    border: 1px solid var(--glass-border);
-  }
-
-  .hero-status.valid {
-    border-color: rgba(48, 209, 88, 0.3);
-  }
-
-  .status-icon {
-    width: 32px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: var(--font-size-xl);
-    color: var(--accent-green);
-  }
-
-  .status-text {
-    color: var(--text-secondary);
-  }
-
-  .empty-state.error {
-    color: var(--accent-red);
-  }
-
-  .error-text {
-    color: var(--text-secondary);
-    overflow-wrap: anywhere;
-  }
-
-  /* Hero metric */
-  .hero-metric {
-    text-align: center;
-    padding: var(--space-5) var(--space-4);
-  }
-
-  .metric-sublabel {
-    color: var(--text-tertiary);
-    margin-top: var(--space-1);
-  }
-
-  /* Collateral grid */
-  .collateral-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: var(--space-3);
-  }
-
-  .metric-card {
-    padding: var(--space-3);
-    text-align: center;
-  }
-
-  /* Conservation law */
-  .conservation-law {
-    padding: var(--space-4);
-    text-align: center;
-  }
-
-  .equation {
-    font-size: var(--font-size-2xl);
-    font-weight: 700;
-    color: var(--accent-gold);
-    margin-bottom: var(--space-2);
-    font-family: 'Times New Roman', serif;
-    font-style: italic;
-  }
-
-  .law-description {
-    color: var(--text-tertiary);
-    margin-bottom: var(--space-3);
-  }
-
-  .delta-warning {
-    margin-top: var(--space-3);
-    display: flex;
-    justify-content: center;
-  }
-
-  /* Empty state */
-  .empty-state {
-    padding: var(--space-8) var(--space-4);
-    text-align: center;
-    color: var(--text-tertiary);
-  }
-
+  .solvency-panel { padding: var(--space-4); height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-4); }
+  .hero-status { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--glass-highlight); border-radius: var(--radius-md); border: 1px solid rgba(255, 69, 58, 0.4); }
+  .hero-status.valid { border-color: rgba(48, 209, 88, 0.3); }
+  .status-icon { width: 32px; height: 32px; display: grid; place-items: center; font-size: var(--font-size-xl); color: var(--accent-green); }
+  .status-text, .address, .empty-state { color: var(--text-secondary); }
+  .asset-list { display: grid; gap: var(--space-3); }
+  .asset-card { padding: var(--space-4); border: 1px solid var(--glass-border); }
+  .asset-card.invalid { border-color: rgba(255, 69, 58, 0.45); }
+  header { display: flex; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); }
+  .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--space-3); }
+  .metric-value { margin-top: var(--space-1); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .pending { color: var(--accent-orange); }
+  .delta-warning, .empty-state.error { margin-top: var(--space-3); color: var(--accent-red); }
+  .error-text { color: var(--text-secondary); overflow-wrap: anywhere; }
 </style>

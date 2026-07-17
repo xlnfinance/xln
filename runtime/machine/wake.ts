@@ -5,6 +5,14 @@ import {
   entityNeedsPeriodicWake,
   getNextScheduledWakeTimestamp,
 } from './scheduled-wake';
+import {
+  collectDueJSubmitRuntimeTxs,
+  getNextJSubmitRetryTimestamp,
+} from './j-submit-scheduler';
+import {
+  collectDueEntityProviderActionRuntimeTxs,
+  getNextEntityProviderActionRetryTimestamp,
+} from './entity-provider-action-submit-scheduler';
 
 type RuntimeState = NonNullable<Env['runtimeState']>;
 
@@ -30,17 +38,33 @@ export { entityNeedsPeriodicWake };
 
 export const hasDueEntityHooks = (env: Env, deps: RuntimeWakeDeps): boolean => {
   const dueAt = getNextScheduledWakeTimestamp(env);
-  return dueAt !== null && dueAt <= deps.getRuntimeNowMs(env);
+  const jDueAt = getNextJSubmitRetryTimestamp(env);
+  const actionDueAt = getNextEntityProviderActionRetryTimestamp(env);
+  const now = deps.getRuntimeNowMs(env);
+  return (dueAt !== null && dueAt <= now) ||
+    (jDueAt !== null && jDueAt <= now) ||
+    (actionDueAt !== null && actionDueAt <= now);
 };
 
 export const getEarliestWallClockDueTimestamp = (env: Env, _deps: RuntimeWakeDeps): number | null => {
   const wallClockNow = getWallClockMs();
-  const dueAt = getNextScheduledWakeTimestamp(env);
-  return dueAt !== null && dueAt <= wallClockNow ? dueAt : null;
+  const due = [
+    getNextScheduledWakeTimestamp(env),
+    getNextJSubmitRetryTimestamp(env),
+    getNextEntityProviderActionRetryTimestamp(env),
+  ]
+    .filter((value): value is number => value !== null && value <= wallClockNow);
+  return due.length > 0 ? Math.min(...due) : null;
 };
 
 export const getNextWallClockWakeTimestamp = (env: Env, _deps: RuntimeWakeDeps): number | null => {
-  return getNextScheduledWakeTimestamp(env);
+  const due = [
+    getNextScheduledWakeTimestamp(env),
+    getNextJSubmitRetryTimestamp(env),
+    getNextEntityProviderActionRetryTimestamp(env),
+  ]
+    .filter((value): value is number => value !== null);
+  return due.length > 0 ? Math.min(...due) : null;
 };
 
 /**
@@ -56,7 +80,15 @@ export const generateHookPings = (
 ): void => {
   deps.ensureRuntimeMempool(env);
   const pings: RoutedEntityInput[] = createDueScheduledWakeInputs(env, nowMs);
+  const jRetries = collectDueJSubmitRuntimeTxs(env, nowMs);
+  const actionRetries = collectDueEntityProviderActionRuntimeTxs(env, nowMs);
   if (pings.length > 0) {
     deps.enqueueRuntimeInputs(env, pings, undefined, undefined, queuedAt);
+  }
+  if (jRetries.length > 0) {
+    deps.enqueueRuntimeInputs(env, undefined, jRetries, undefined, queuedAt);
+  }
+  if (actionRetries.length > 0) {
+    deps.enqueueRuntimeInputs(env, undefined, actionRetries, undefined, queuedAt);
   }
 };

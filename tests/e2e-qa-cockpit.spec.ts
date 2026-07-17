@@ -676,6 +676,42 @@ const QA_REGRESSION_REPORT = {
   ],
 };
 
+const QA_TEST_LEDGER = [
+  {
+    testId: 'tests/e2e-wallet.spec.ts::creates a wallet',
+    category: 'functional',
+    target: 'tests/e2e-wallet.spec.ts',
+    title: 'creates a wallet',
+    description: 'Creates and unlocks a browser wallet.',
+    status: 'passed',
+    durationMs: 1_200,
+    lastRunId: QA_FAST_RUN_ID,
+    lastRunAt: Date.UTC(2026, 5, 23, 22, 59, 59),
+  },
+  {
+    testId: 'tests/e2e-account.spec.ts::opens a hub account',
+    category: 'functional',
+    target: 'tests/e2e-account.spec.ts',
+    title: 'opens a hub account',
+    description: 'Connects the wallet to a live hub.',
+    status: 'unknown',
+    durationMs: null,
+    lastRunId: QA_FAST_RUN_ID,
+    lastRunAt: Date.UTC(2026, 5, 23, 23, 29, 59),
+  },
+  {
+    testId: 'tests/e2e-recovery.spec.ts::restores after crash',
+    category: 'resilience',
+    target: 'tests/e2e-recovery.spec.ts',
+    title: 'restores after crash',
+    description: 'Kills and restores the persisted runtime.',
+    status: 'failed',
+    durationMs: 3_400,
+    lastRunId: QA_FIXTURE_RUN_ID,
+    lastRunAt: Date.UTC(2026, 5, 23, 23, 59, 59),
+  },
+] as const;
+
 const QA_CATALOG = [
   {
     id: 'e2e-isolated',
@@ -1302,7 +1338,7 @@ test.describe('QA cockpit scenario player', () => {
     });
   });
 
-  test('shows the standalone runs ledger across test surfaces', async ({ page }) => {
+  test('shows the standalone runs ledger across test surfaces', { tag: '@functional' }, async ({ page }) => {
     await page.route('**/api/qa/runs?**', async (route) => {
       await route.fulfill({
         status: 200,
@@ -1336,7 +1372,92 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('runs-open-qa')).toHaveAttribute('href', `/qa?runId=${QA_FIXTURE_RUN_ID}`);
   });
 
-  test('plays recorded scenario videos with short copy and synced transcript', async ({ page }) => {
+  test('shows and sorts the concrete Playwright test ledger', { tag: '@functional' }, async ({ page }, testInfo) => {
+    await page.route('**/api/qa/runs?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_AUTH,
+          runs: [],
+          ledger: [],
+          testLedger: QA_TEST_LEDGER,
+          regression: null,
+          verdict: QA_PASS_VERDICT,
+        }),
+      });
+    });
+    await page.route('**/api/qa/catalog', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, qaAuth: QA_AUTH, catalog: [], restart: { active: false }, restartAllowed: false }),
+      });
+    });
+    await page.route('**/api/qa/history?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, qaAuth: QA_AUTH, history: [], restart: { active: false }, restartAllowed: false }),
+      });
+    });
+    await page.route('**/api/qa/restart-audit?**', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, qaAuth: QA_AUTH, audit: [] }) });
+    });
+    await page.route('**/api/qa/stories?**', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, qaAuth: QA_AUTH, stories: [] }) });
+    });
+
+    await page.goto('/qa');
+    const ledger = page.getByTestId('qa-test-ledger');
+    await expect(ledger).toBeVisible({ timeout: 30_000 });
+    await expect(ledger.getByTestId('qa-test-ledger-row')).toHaveCount(3);
+    await expect(ledger.getByTestId('qa-test-ledger-summary')).toContainText('3 total · 1 failed · 4.6 s');
+    await expect(ledger.getByTestId('qa-test-ledger-summary')).toContainText('2 functional · 0 failed · 1.2 s');
+    await expect(ledger.getByTestId('qa-test-ledger-summary')).toContainText('1 resilience · 1 failed · 3.4 s');
+    await expect(ledger.locator('img')).toHaveCount(0);
+
+    await ledger.getByTestId('qa-test-ledger-filters').getByRole('button', { name: 'Resilience 1' }).click();
+    await expect(ledger.getByTestId('qa-test-ledger-row')).toHaveCount(1);
+    await expect(ledger.getByTestId('qa-test-ledger-row').first()).toContainText('restores after crash');
+
+    await ledger.getByTestId('qa-test-ledger-filters').getByRole('button', { name: 'Failed 1' }).click();
+    await expect(ledger.getByTestId('qa-test-ledger-row')).toHaveCount(1);
+    await expect(ledger.getByTestId('qa-test-ledger-row').first()).toHaveAttribute('data-status', 'failed');
+
+    await ledger.getByTestId('qa-test-ledger-filters').getByRole('button', { name: 'All 3' }).click();
+    await ledger.getByTestId('qa-test-sort-duration').click();
+    await expect(ledger.getByTestId('qa-test-ledger-row').first()).toContainText('restores after crash');
+    await ledger.getByTestId('qa-test-sort-duration').click();
+    await expect(ledger.getByTestId('qa-test-ledger-row').first()).toContainText('creates a wallet');
+
+    for (const column of ['category', 'test', 'description', 'status', 'last-run']) {
+      await ledger.getByTestId(`qa-test-sort-${column}`).click();
+      await expect(ledger.getByTestId(`qa-test-sort-${column}`).locator('..')).toHaveAttribute('aria-sort', /ascending|descending/);
+    }
+
+    for (const viewport of [
+      { name: 'wide', width: 1600, height: 1000 },
+      { name: 'laptop', width: 1280, height: 800 },
+      { name: 'iphone', width: 393, height: 852 },
+    ]) {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await expect(ledger).toBeVisible();
+      const bounds = await ledger.boundingBox();
+      expect(bounds, `${viewport.name} QA ledger must have layout bounds`).not.toBeNull();
+      expect(bounds!.x, `${viewport.name} QA ledger must stay in the viewport`).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width, `${viewport.name} QA ledger must not overflow horizontally`)
+        .toBeLessThanOrEqual(viewport.width + 1);
+      await page.screenshot({
+        path: testInfo.outputPath(`${viewport.name}-qa-test-ledger.png`),
+        animations: 'disabled',
+        fullPage: true,
+      });
+    }
+  });
+
+  test('plays recorded scenario videos with short copy and synced transcript', { tag: '@functional' }, async ({ page }) => {
     test.setTimeout(90_000);
     let runsPayload = {
       ok: true,
@@ -1790,7 +1911,7 @@ test.describe('QA cockpit scenario player', () => {
     expect(runtimeErrors).toEqual([]);
   });
 
-  test('keeps QA evidence visible but privileged actions disabled in read mode', async ({ page }) => {
+  test('keeps QA evidence visible but privileged actions disabled in read mode', { tag: '@resilience' }, async ({ page }) => {
     test.setTimeout(60_000);
     let restartPlanCalled = false;
     let historyBackfillCalled = false;
@@ -1921,7 +2042,7 @@ test.describe('QA cockpit scenario player', () => {
     expect(retentionPurgeCalled).toBe(false);
   });
 
-  test('enables restart run only after admin plan and typed confirmation', async ({ page }) => {
+  test('enables restart run only after admin plan and typed confirmation', { tag: '@resilience' }, async ({ page }) => {
     test.setTimeout(60_000);
     let runRestartCalled = false;
 
@@ -2050,7 +2171,7 @@ test.describe('QA cockpit scenario player', () => {
     expect(runRestartCalled).toBe(false);
   });
 
-  test('requires typed confirmation before aborting active restart', async ({ page }) => {
+  test('requires typed confirmation before aborting active restart', { tag: '@resilience' }, async ({ page }) => {
     test.setTimeout(60_000);
     let activeRestart = true;
     let abortConfirm = '';
@@ -2182,7 +2303,7 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-restart-abort-card')).toHaveCount(0);
   });
 
-  test('windows large shard and artifact lists behind show-more controls', async ({ page }) => {
+  test('windows large shard and artifact lists behind show-more controls', { tag: '@resilience' }, async ({ page }) => {
     test.setTimeout(60_000);
     const baseShard = QA_FIXTURE_RUN.shards[0]!;
     const largeArtifacts = Array.from({ length: 90 }, (_, index) => ({

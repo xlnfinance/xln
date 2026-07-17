@@ -3,7 +3,8 @@ import { deriveSignerAddressSync, signDigest } from '../account/crypto';
 import { createDirectRuntimeWsRoute } from '../networking/direct-runtime-bun';
 import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, pubKeyToHex } from '../networking/p2p-crypto';
 import { hashHelloMessage, serializeWsMessage, deserializeWsMessage, serializeWsMessageForDebug, type RuntimeWsMessage } from '../networking/ws-protocol';
-import type { RoutedEntityInput } from '../types';
+import { encodeBinaryPayload } from '../storage/binary-codec';
+import type { ReliableDeliveryReceipt, RoutedEntityInput } from '../types';
 
 const makeAuthedHello = (
   seed: string,
@@ -43,6 +44,29 @@ const makeFakeWs = () => {
 };
 
 describe('direct runtime websocket route', () => {
+  test('marks a successful websocket upgrade handled so HTTP dispatch cannot fall through', () => {
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: deriveSignerAddressSync('direct-upgrade-server', '1').toLowerCase(),
+      runtimeSeed: 'direct-upgrade-server',
+      onEntityInput: () => undefined,
+    });
+    const upgradedRequests: Request[] = [];
+    const server = {
+      upgrade(request: Request) {
+        upgradedRequests.push(request);
+        return true;
+      },
+    };
+
+    const decision = route.maybeUpgrade(
+      new Request('http://127.0.0.1/ws', { headers: { upgrade: 'websocket' } }),
+      server,
+    );
+
+    expect(decision).toEqual({ handled: true });
+    expect(upgradedRequests).toHaveLength(1);
+  });
+
   test('challenge binds authenticated hello to this socket and encryption key', async () => {
     const serverSeed = 'direct-challenge-server';
     const clientSeed = 'direct-challenge-client';
@@ -69,7 +93,11 @@ describe('direct runtime websocket route', () => {
     const acceptedChallenge = accepted.sent[0]?.challenge;
     const acceptedHello = makeAuthedHello(clientSeed, clientRuntimeId, '1', acceptedChallenge);
     await route.websocket.message(accepted.ws, serializeWsMessage(acceptedHello));
-    expect(accepted.sent.at(-1)?.type).toBe('hello');
+    expect(accepted.sent.at(-1)).toMatchObject({
+      type: 'hello_ack',
+      from: serverRuntimeId,
+      to: clientRuntimeId,
+    });
     route.websocket.close(accepted.ws);
 
     const replayed = makeFakeWs();
@@ -88,7 +116,35 @@ describe('direct runtime websocket route', () => {
     expect(binary).toBeInstanceOf(Uint8Array);
     expect(binary[0]).toBe(0x01);
     expect(deserializeWsMessage(binary)).toEqual(message);
-    expect(deserializeWsMessage(serializeWsMessageForDebug(message))).toEqual(message);
+    expect(serializeWsMessageForDebug(message)).toContain('debug_event');
+    expect(() => deserializeWsMessage(serializeWsMessageForDebug(message))).toThrow('WS_WIRE_BINARY_REQUIRED');
+  });
+
+  test('accepts a peer debug event without creating a second protocol error', async () => {
+    const serverSeed = 'direct-debug-server';
+    const clientSeed = 'direct-debug-client';
+    const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
+    const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: serverRuntimeId,
+      runtimeSeed: serverSeed,
+      requireHelloAuth: false,
+      onEntityInput: () => {},
+    });
+    const { ws, sent } = makeFakeWs();
+    route.websocket.open(ws);
+    await route.websocket.message(ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
+    expect(sent.at(-1)?.type).toBe('hello_ack');
+
+    const sentBeforeDebug = sent.length;
+    await route.websocket.message(ws, serializeWsMessage({
+      type: 'debug_event',
+      from: clientRuntimeId,
+      to: serverRuntimeId,
+      payload: { level: 'info', code: 'RECEIPT_DEFERRED' },
+    }));
+
+    expect(sent).toHaveLength(sentBeforeDebug);
   });
 
   test('routes encrypted entity input back through a live direct socket', async () => {
@@ -111,8 +167,9 @@ describe('direct runtime websocket route', () => {
     route.websocket.open(ws);
     await route.websocket.message(ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
 
-    expect(sent[0]?.type).toBe('hello');
+    expect(sent[0]?.type).toBe('hello_ack');
     expect(sent[0]?.from).toBe(serverRuntimeId);
+    expect(sent[0]?.to).toBe(clientRuntimeId);
     expect(route.getSessionState()).toEqual([
       expect.objectContaining({ runtimeId: clientRuntimeId, open: true }),
     ]);
@@ -168,6 +225,65 @@ describe('direct runtime websocket route', () => {
     ]);
   });
 
+  test('routes signed application receipts in both direct websocket directions', async () => {
+    const serverSeed = 'direct-receipt-server';
+    const clientSeed = 'direct-receipt-client';
+    const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
+    const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
+    const received: Array<{ from: string; receipt: ReliableDeliveryReceipt }> = [];
+    const receiptFor = (receiverRuntimeId: string): ReliableDeliveryReceipt => ({
+      body: {
+        version: 1,
+        receiverRuntimeId,
+        identity: {
+          kind: 'entity-frame',
+          entityId: `0x${'31'.repeat(32)}`,
+          signerId: clientRuntimeId,
+          laneKey: 'lane',
+          height: 3,
+          frameHash: `0x${'32'.repeat(32)}`,
+          logicalKey: 'logical',
+        },
+        appliedRuntimeHeight: 8,
+      },
+      signature: `0x${'33'.repeat(65)}`,
+    });
+    const outboundReceipt = receiptFor(serverRuntimeId);
+    const inboundReceipt = receiptFor(clientRuntimeId);
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: serverRuntimeId,
+      runtimeSeed: serverSeed,
+      requireHelloAuth: false,
+      onEntityInput: () => {},
+      onReliableReceipt: (from, inboundReceipt) => {
+        received.push({ from, receipt: inboundReceipt });
+      },
+    });
+    const { ws, sent } = makeFakeWs();
+    route.websocket.open(ws);
+    await route.websocket.message(ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
+
+    expect(route.sendReliableReceiptDelivery(clientRuntimeId, outboundReceipt)).toMatchObject({
+      outcome: 'delivered',
+      code: 'ROUTE_DIRECT_RECEIPT_DELIVERED',
+    });
+    expect(sent.at(-1)).toMatchObject({
+      type: 'entity_input_receipt',
+      from: serverRuntimeId,
+      to: clientRuntimeId,
+      payload: outboundReceipt,
+    });
+
+    await route.websocket.message(ws, encodeBinaryPayload({
+      v: 1,
+      type: 'entity_input_receipt',
+      from: clientRuntimeId,
+      to: serverRuntimeId,
+      payload: inboundReceipt,
+    }, 'msgpack'));
+    expect(received).toEqual([{ from: clientRuntimeId, receipt: inboundReceipt }]);
+  });
+
   test('rejects unencrypted entity input on a direct socket', async () => {
     const serverSeed = 'direct-route-server-plaintext';
     const clientSeed = 'direct-route-client-plaintext';
@@ -187,7 +303,8 @@ describe('direct runtime websocket route', () => {
     const { ws, sent } = makeFakeWs();
     route.websocket.open(ws);
     await route.websocket.message(ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
-    await route.websocket.message(ws, serializeWsMessage({
+    await route.websocket.message(ws, encodeBinaryPayload({
+      v: 1,
       type: 'entity_input',
       id: 'client-to-server-plaintext',
       from: clientRuntimeId,
@@ -201,11 +318,11 @@ describe('direct runtime websocket route', () => {
         signerId: serverRuntimeId,
         entityTxs: [],
       },
-    }));
+    }, 'msgpack'));
 
     expect(sent.at(-1)).toMatchObject({
       type: 'error',
-      error: 'Direct entity_input must be encrypted',
+      error: 'Invalid wire message: WS_MESSAGE_ENTITY_INPUT_ENCRYPTION_INVALID',
     });
     expect(received).toEqual([]);
   });
@@ -389,6 +506,44 @@ describe('direct runtime websocket route', () => {
       retryable: true,
       fatal: false,
       terminal: false,
+    });
+  });
+
+  test('preserves direct socket root errors in a retryable structured delivery result', async () => {
+    const serverSeed = 'direct-route-server-send-error';
+    const clientSeed = 'direct-route-client-send-error';
+    const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
+    const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: serverRuntimeId,
+      runtimeSeed: serverSeed,
+      requireHelloAuth: false,
+      onEntityInput: () => undefined,
+    });
+    const { ws } = makeFakeWs();
+    route.websocket.open(ws);
+    await route.websocket.message(ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
+    ws.send = () => {
+      throw new Error('socket write exploded');
+    };
+
+    const delivery = route.sendEntityInputDelivery(clientRuntimeId, {
+      entityId: `0x${'45'.repeat(32)}`,
+      runtimeId: clientRuntimeId,
+      signerId: clientRuntimeId,
+      entityTxs: [],
+    });
+
+    expect(delivery).toMatchObject({
+      outcome: 'failed',
+      code: 'ROUTE_DIRECT_SEND_FAILED',
+      retryable: true,
+      fatal: false,
+      terminal: false,
+      failure: {
+        category: 'TransientRace',
+        message: 'socket write exploded',
+      },
     });
   });
 });

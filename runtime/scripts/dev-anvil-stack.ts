@@ -177,6 +177,10 @@ const main = async (): Promise<void> => {
     chainId: args.chainId,
     ticker: args.ticker,
     rpcs: [rpcUrl],
+    // RPC imports replay EntityProvider history from the exact deployment anchor.
+    // The stack helper is the authority that deployed the contract, so its JSON
+    // must carry this value instead of making the wallet guess a start block.
+    entityProviderDeploymentBlock: jadapter.entityProviderDeploymentBlock,
     contracts: {
       account: jadapter.addresses.account,
       depository: jadapter.addresses.depository,

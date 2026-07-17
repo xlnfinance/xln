@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { RuntimeInput } from '../types';
 import { serializeTaggedJson } from '../protocol/serialization';
+import { requireBoundaryInteger } from '../protocol/boundary-validation';
 
 export type RuntimeIngressReceiptStatus = 'pending' | 'observed' | 'expired';
 
@@ -33,6 +34,52 @@ export type RegisterReceiptOptions = {
   inputHash?: string;
   inputFingerprints?: string[];
   note?: string;
+};
+
+export const projectRuntimeIngressReceiptForWire = (
+  receipt: RuntimeIngressReceipt,
+): RuntimeIngressReceipt => {
+  if (typeof receipt.id !== 'string' || receipt.id.length === 0) {
+    throw new Error('RUNTIME_INGRESS_RECEIPT_ID_INVALID');
+  }
+  if (typeof receipt.kind !== 'string' || receipt.kind.length === 0) {
+    throw new Error('RUNTIME_INGRESS_RECEIPT_KIND_INVALID');
+  }
+  if (receipt.status !== 'pending' && receipt.status !== 'observed' && receipt.status !== 'expired') {
+    throw new Error('RUNTIME_INGRESS_RECEIPT_STATUS_INVALID');
+  }
+  const counts = {
+    runtimeTxs: requireBoundaryInteger(receipt.counts?.runtimeTxs, 'RUNTIME_INGRESS_RECEIPT_RUNTIME_TXS_INVALID'),
+    entityInputs: requireBoundaryInteger(receipt.counts?.entityInputs, 'RUNTIME_INGRESS_RECEIPT_ENTITY_INPUTS_INVALID'),
+    jInputs: requireBoundaryInteger(receipt.counts?.jInputs, 'RUNTIME_INGRESS_RECEIPT_J_INPUTS_INVALID'),
+  };
+  if (receipt.inputHash !== undefined && typeof receipt.inputHash !== 'string') {
+    throw new Error('RUNTIME_INGRESS_RECEIPT_INPUT_HASH_INVALID');
+  }
+  if (
+    receipt.inputFingerprints !== undefined &&
+    (!Array.isArray(receipt.inputFingerprints) || receipt.inputFingerprints.some(value => typeof value !== 'string'))
+  ) {
+    throw new Error('RUNTIME_INGRESS_RECEIPT_FINGERPRINTS_INVALID');
+  }
+  if (receipt.note !== undefined && typeof receipt.note !== 'string') {
+    throw new Error('RUNTIME_INGRESS_RECEIPT_NOTE_INVALID');
+  }
+  return {
+    id: receipt.id,
+    kind: receipt.kind,
+    status: receipt.status,
+    counts,
+    enqueuedAt: requireBoundaryInteger(receipt.enqueuedAt, 'RUNTIME_INGRESS_RECEIPT_ENQUEUED_AT_INVALID'),
+    enqueuedHeight: requireBoundaryInteger(receipt.enqueuedHeight, 'RUNTIME_INGRESS_RECEIPT_ENQUEUED_HEIGHT_INVALID'),
+    ...(receipt.inputHash !== undefined ? { inputHash: receipt.inputHash } : {}),
+    ...(receipt.inputFingerprints !== undefined ? { inputFingerprints: [...receipt.inputFingerprints] } : {}),
+    ...(receipt.observedHeight !== undefined
+      ? { observedHeight: requireBoundaryInteger(receipt.observedHeight, 'RUNTIME_INGRESS_RECEIPT_OBSERVED_HEIGHT_INVALID') }
+      : {}),
+    expiresAt: requireBoundaryInteger(receipt.expiresAt, 'RUNTIME_INGRESS_RECEIPT_EXPIRES_AT_INVALID'),
+    ...(receipt.note !== undefined ? { note: receipt.note } : {}),
+  };
 };
 
 type RuntimeIngressReceiptStoreOptions = {
@@ -73,7 +120,13 @@ export const fingerprintRuntimeIngressInput = (input: RuntimeInput): string[] =>
       fingerprints.push(hashRuntimeIngressPart({ kind: 'proposedFrame', entityId, signerId, proposedFrame: entityInput.proposedFrame }));
     }
     if (entityInput.hashPrecommits && entityInput.hashPrecommits.size > 0) {
-      fingerprints.push(hashRuntimeIngressPart({ kind: 'hashPrecommits', entityId, signerId, hashPrecommits: entityInput.hashPrecommits }));
+      fingerprints.push(hashRuntimeIngressPart({
+        kind: 'hashPrecommits',
+        entityId,
+        signerId,
+        hashPrecommitFrame: entityInput.hashPrecommitFrame,
+        hashPrecommits: entityInput.hashPrecommits,
+      }));
     }
   }
   for (const jInput of normalized.jInputs ?? []) {

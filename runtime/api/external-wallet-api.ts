@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { deriveSignerKeySync } from '../account/crypto';
-import type { JAdapter, JEvent, JTokenInfo, JWalletAllowanceRead } from '../jadapter/types';
+import type { JAdapter, JTokenInfo, JWalletAllowanceRead } from '../jadapter/types';
 import { createStructuredLogger } from '../infra/logger';
 import { safeStringify } from '../protocol/serialization';
 
@@ -23,8 +23,7 @@ export type ExternalWalletApiContext = {
     reason: string;
     details: Record<string, unknown>;
   }) => void;
-  fundBrowserVmWallet: (address: string, amount: bigint) => Promise<boolean>;
-  observeExternalWalletSnapshot?: (events: JEvent[], label: string) => void;
+  fundBrowserVmWallet: (address: string, amount: bigint, tokenSymbol?: string) => Promise<boolean>;
 };
 
 type FaucetRequestBody = {
@@ -496,14 +495,23 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
         details: { requestId, userAddress, tokenSymbol, amount },
       });
 
+      const tokens = await context.getTokenCatalog();
+      const tokenInfo = tokens.find((token) => token.symbol.toUpperCase() === tokenSymbol);
+      if (!tokenInfo) {
+        return createJsonResponse(context.jsonHeaders, { error: `Token ${tokenSymbol} not found` }, 404);
+      }
+      if (!Number.isSafeInteger(tokenInfo.decimals) || tokenInfo.decimals < 0 || tokenInfo.decimals > 255) {
+        throw new Error(`FAUCET_TOKEN_DECIMALS_INVALID:${tokenInfo.symbol}:${String(tokenInfo.decimals)}`);
+      }
+      const amountWei = ethers.parseUnits(amount, tokenInfo.decimals);
+
       if (adapter.mode === 'browservm') {
         return await withFaucetWalletLock(context, adapter, async () => {
-          const amountWei = ethers.parseUnits(amount, 18);
           externalWalletLog.debug('faucet.erc20.browservm_fund', {
             requestId,
             amountWei: amountWei.toString(),
           });
-          const funded = await context.fundBrowserVmWallet(userAddress, amountWei);
+          const funded = await context.fundBrowserVmWallet(userAddress, amountWei, tokenInfo.symbol);
           if (!funded) {
             return createJsonResponse(context.jsonHeaders, { error: 'BrowserVM faucet unavailable' }, 503);
           }
@@ -526,14 +534,7 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
       }
 
       return await withFaucetWalletLock(context, adapter, async () => {
-        const tokens = await context.getTokenCatalog();
         externalWalletLog.debug('faucet.erc20.token_catalog', { requestId, tokenCount: tokens.length });
-        const tokenInfo = tokens.find((token) => token.symbol.toUpperCase() === tokenSymbol);
-        if (!tokenInfo) {
-          return createJsonResponse(context.jsonHeaders, { error: `Token ${tokenSymbol} not found` }, 404);
-        }
-
-        const amountWei = ethers.parseUnits(amount, tokenInfo.decimals);
         let ethTxHash = '';
         const userEth = await adapter.provider.getBalance(userAddress);
         const minBalance = ethers.parseEther('0.01');
@@ -701,25 +702,6 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
           ...(allowanceError ? { error: allowanceError } : {}),
         };
       });
-      const validTokenBalances = tokenBalances.filter((entry) => !entry.error);
-      const validAllowances = allowancePayload.filter((entry) => !entry.error);
-      const jEvent: JEvent = {
-        name: 'ExternalWalletSnapshot',
-        args: {
-          entityId,
-          owner: normalizedOwner,
-          sourceHeight: source.sourceHeight,
-          sourceHash: source.sourceHash,
-          finalityDepth: source.finalityDepth,
-          nativeBalance: nativeBalance.toString(),
-          tokenBalances: validTokenBalances,
-          allowances: validAllowances,
-        },
-        blockNumber: source.sourceHeight,
-        blockHash: source.sourceHash,
-        transactionHash,
-      };
-      context.observeExternalWalletSnapshot?.([jEvent], 'external-wallet-snapshot');
       return createJsonResponse(context.jsonHeaders, {
         success: true,
         entityId,

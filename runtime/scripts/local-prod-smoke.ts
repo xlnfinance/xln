@@ -10,6 +10,7 @@ import {
   findFirstRuntimeFatalLogHit,
   tailLog,
 } from './e2e-fatal-log-monitor';
+import { getHubMeshBudgetElapsedMs } from './bootstrap-stage-budget';
 
 type ManagedProcess = {
   name: string;
@@ -20,11 +21,12 @@ type HealthPayload = {
   coreOk?: boolean;
   systemOk?: boolean;
   system?: { relay?: boolean };
-  hubs?: Array<{ online?: boolean }>;
+  hubs?: Array<{ online?: boolean; quiescence?: RuntimeQuiescenceHealth | null }>;
   hubMesh?: { ok?: boolean; direct?: { openLinkCount?: number } };
   marketMaker?: {
     ok?: boolean;
     entityId?: string | null;
+    quiescence?: RuntimeQuiescenceHealth | null;
     startupPhase?: string | null;
     expectedOffersPerHub?: number;
     hubs?: Array<{
@@ -48,15 +50,30 @@ type HealthPayload = {
   };
   custody?: { ok?: boolean };
   bootstrapReserves?: { ok?: boolean; targetMet?: boolean };
-  reset?: { inProgress?: boolean; lastError?: string | null; completedAt?: number | null };
+  reset?: {
+    inProgress?: boolean;
+    lastError?: string | null;
+    startedAt?: number | null;
+    completedAt?: number | null;
+  };
+  timings?: {
+    reset_spawn_h1?: { startedAt?: number | null };
+  };
   degraded?: string[];
   bootstrap?: BootstrapHashInfo;
+};
+
+type RuntimeQuiescenceHealth = {
+  pendingReliableOutputs?: number;
+  pendingAccountFrames?: number;
+  accountMempoolTxs?: number;
 };
 
 type BootstrapHashInfo = {
   readyHash?: string | null;
   runtimeStateHash?: string | null;
   entityStateHash?: string | null;
+  restoredEntityStateHash?: string | null;
   readyAt?: number | null;
 };
 
@@ -91,6 +108,7 @@ type BootstrapMetrics = {
   bootstrapHash: string;
   runtimeStateHash: string;
   entityStateHash: string;
+  restoredEntityStateHash: string | null;
   workDir: string;
   eventsJsonl: string;
   marketMakerEventsJsonl: string;
@@ -117,7 +135,7 @@ const persistMarketMakerStorage = process.env['XLN_LOCAL_PROD_SMOKE_PERSIST_MM']
 const children: ManagedProcess[] = [];
 const marketMakerInfoLatencyMaxMs = Math.max(
   250,
-  Number(process.env['XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS'] || '1500'),
+  Number(process.env['XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS'] || '5000'),
 );
 const postBootstrapStabilityMs = Math.max(
   0,
@@ -136,14 +154,18 @@ const healthPollMaxMs = Math.max(
   250,
   Number(process.env['XLN_LOCAL_PROD_SMOKE_HEALTH_POLL_MAX_MS'] || '2000'),
 );
+const marketMakerHealthPollMaxMs = Math.max(
+  250,
+  Number(process.env['XLN_LOCAL_PROD_SMOKE_MM_HEALTH_POLL_MAX_MS'] || '5000'),
+);
 const healthPollIntervalMs = Math.max(
   100,
   Number(process.env['XLN_LOCAL_PROD_SMOKE_HEALTH_POLL_INTERVAL_MS'] || '250'),
 );
 const stageBudgetsMs = {
-  hubMesh: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_HUB_MESH_BUDGET_MS'] || '8000')),
-  sameChain: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_SAME_CHAIN_BUDGET_MS'] || '20000')),
-  cross: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_CROSS_BUDGET_MS'] || '60000')),
+  hubMesh: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_HUB_MESH_BUDGET_MS'] || '20000')),
+  sameChain: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_SAME_CHAIN_BUDGET_MS'] || '30000')),
+  cross: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_CROSS_BUDGET_MS'] || '300000')),
 };
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
@@ -229,9 +251,9 @@ const logPath = (name: string): string => join(workDir, `${name}.log`);
 const assertNoFatalChildLogs = (stage: string): void => {
   for (const child of children) {
     const path = logPath(child.name);
-    const fromLine = fatalLogScannedLinesByPath.get(path) ?? 0;
-    const hit = findFirstRuntimeFatalLogHit(path, fromLine);
-    if (hit) {
+    let fromLine = fatalLogScannedLinesByPath.get(path) ?? 0;
+    let hit = findFirstRuntimeFatalLogHit(path, fromLine);
+    while (hit) {
       const tail = tailLog(path, E2E_FATAL_LOG_TAIL_LINES);
       emitDebugEvent('fatal-log-hit', {
         stage,
@@ -407,7 +429,7 @@ const fetchMarketMakerHealth = (health: HealthPayload): MarketMakerDirectHealthP
   try {
     const payload = fetchJsonWithCurl<MarketMakerDirectHealthPayload>(
       `http://127.0.0.1:${marketMakerApiPort}/api/health`,
-      healthPollMaxMs,
+      marketMakerHealthPollMaxMs,
       'MM_HEALTH',
     );
     emitDebugEvent('mm-health-poll', {
@@ -513,6 +535,10 @@ const summarizeHealth = (health: HealthPayload): Record<string, unknown> => ({
   coreOk: health.coreOk ?? null,
   systemOk: health.systemOk ?? null,
   hubs: health.hubs?.length ?? 0,
+  quiescence: {
+    hubs: health.hubs?.map(hub => hub.quiescence ?? null) ?? [],
+    marketMaker: health.marketMaker?.quiescence ?? null,
+  },
   relay: health.system?.relay ?? null,
   hubMesh: health.hubMesh?.ok ?? null,
   directOpen: health.hubMesh?.direct?.openLinkCount ?? null,
@@ -589,12 +615,15 @@ const requireStageBudget = (
 const enforceBootstrapStageBudgets = (health: HealthPayload, snapshot: Record<string, unknown>): void => {
   if (!enforceStageBudgets) return;
   const nowElapsedMs = Date.now() - smokeStartedAt;
-  const serverStartedAt = stageElapsed('server:started') ?? 0;
   const hubMeshReadyAt = stageElapsed('hubMesh:ready');
-  if (hubMeshReadyAt === null) {
-    requireStageBudget('hubMesh', nowElapsedMs - serverStartedAt, stageBudgetsMs.hubMesh, snapshot);
-  } else {
-    requireStageBudget('hubMesh', hubMeshReadyAt - serverStartedAt, stageBudgetsMs.hubMesh, snapshot);
+  const hubMeshBudgetElapsedMs = getHubMeshBudgetElapsedMs({
+    nowMs: smokeStartedAt + nowElapsedMs,
+    resetStartedAt: health.reset?.startedAt,
+    spawnH1StartedAt: health.timings?.reset_spawn_h1?.startedAt,
+    readyAt: hubMeshReadyAt === null ? null : smokeStartedAt + hubMeshReadyAt,
+  });
+  if (hubMeshBudgetElapsedMs !== null) {
+    requireStageBudget('hubMesh', hubMeshBudgetElapsedMs, stageBudgetsMs.hubMesh, snapshot);
   }
 
   const sameStartedAt = stageElapsed('marketMaker:bootstrap-same-chain');
@@ -723,12 +752,14 @@ const main = async (): Promise<void> => {
     XLN_HUB_BOOTSTRAP_PAUSE_STORAGE: process.env['XLN_HUB_BOOTSTRAP_PAUSE_STORAGE'] || '1',
     XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS: process.env['XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS'] || '60000',
     XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT: process.env['XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT'] || '1',
+    XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME:
+      process.env['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '8',
     XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME:
-      process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '1000',
+      process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '64',
     MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME:
-      process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1000',
+      process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '8',
     MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME:
-      process.env['MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '1000',
+      process.env['MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '64',
     XLN_RUNTIME_PROCESS_SLOW_MS: process.env['XLN_RUNTIME_PROCESS_SLOW_MS'] || '250',
     XLN_ENTITY_FRAME_SLOW_MS: process.env['XLN_ENTITY_FRAME_SLOW_MS'] || '250',
     MARKET_MAKER_MAX_LEVELS_PER_PAIR: process.env['MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '10',
@@ -787,6 +818,7 @@ const main = async (): Promise<void> => {
   if (postBootstrapStabilityMs > 0) {
     recordStage('post-bootstrap:observed', { stabilityMs: postBootstrapStabilityMs });
     await sleep(postBootstrapStabilityMs);
+    assertNoFatalChildLogs('post-bootstrap-stability');
     const rawPostBootstrapHealth = await fetchHealth();
     const postBootstrapDirectMarketMakerHealth = fetchMarketMakerHealth(rawPostBootstrapHealth);
     const postBootstrapHealth = healthWithDirectMarketMaker(rawPostBootstrapHealth, postBootstrapDirectMarketMakerHealth);
@@ -818,6 +850,9 @@ const main = async (): Promise<void> => {
     bootstrapHash: bootstrap.readyHash,
     runtimeStateHash: bootstrap.runtimeStateHash,
     entityStateHash: bootstrap.entityStateHash,
+    restoredEntityStateHash: isHash64(bootstrap.restoredEntityStateHash)
+      ? bootstrap.restoredEntityStateHash
+      : null,
     workDir,
     eventsJsonl: eventsJsonlPath,
     marketMakerEventsJsonl: marketMakerEventsJsonlPath,

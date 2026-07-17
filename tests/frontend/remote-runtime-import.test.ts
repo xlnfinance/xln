@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 
 import {
   MAX_REMOTE_RUNTIME_IMPORTS,
+  REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY,
   REMOTE_RUNTIME_IMPORT_STORAGE_KEY,
   assertRemoteRuntimeTokenFresh,
   describeRemoteRuntimeImportError,
@@ -17,6 +18,7 @@ import {
   parseRemoteRuntimeImportSourcePayload,
   type StoredRemoteRuntimeImportEntry,
 } from '../../frontend/src/lib/utils/remoteRuntimeImport';
+import { writeRemoteRuntimeImportSummary } from '../../frontend/src/lib/utils/remoteRuntimeImportFlow';
 import {
   LIVE_RUNTIME_DISCOVERY_MAX_RETRIES,
   shouldRetryLiveRuntimeDiscovery,
@@ -99,6 +101,37 @@ const installMemoryWebStorage = (): void => {
 
 describe('remote runtime import manager utilities', () => {
   beforeEach(() => installMemoryWebStorage());
+
+  test('persists ordered failure evidence when every remote validation fails', () => {
+    const entries = parseRemoteRuntimeImportText([
+      makeEntry(1),
+      makeEntry(2),
+    ].join('\n'));
+    writeRemoteRuntimeImportSummary(entries.map((entry, index) => ({
+      ok: false as const,
+      index,
+      entry,
+      reason: `validation-${index + 1}`,
+    })), entries.length, 123);
+
+    expect(JSON.parse(sessionStorage.getItem(REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY) || '{}'))
+      .toEqual({
+        ok: false,
+        importedAt: 123,
+        count: 0,
+        total: 2,
+        failedCount: 2,
+        entries: [],
+        failed: [
+          { index: 0, label: 'H1', access: 'read', wsUrl: 'ws://127.0.0.1:8001/rpc', reason: 'validation-1' },
+          { index: 1, label: 'H2', access: 'read', wsUrl: 'ws://127.0.0.1:8002/rpc', reason: 'validation-2' },
+        ],
+        checked: [
+          { index: 0, ok: false, label: 'H1', access: 'read', wsUrl: 'ws://127.0.0.1:8001/rpc', reason: 'validation-1' },
+          { index: 1, ok: false, label: 'H2', access: 'read', wsUrl: 'ws://127.0.0.1:8002/rpc', reason: 'validation-2' },
+        ],
+      });
+  });
 
   test('accepts exactly 100 remote runtime capability lines', () => {
     const lines = Array.from({ length: MAX_REMOTE_RUNTIME_IMPORTS }, (_, index) => makeEntry(index + 1));

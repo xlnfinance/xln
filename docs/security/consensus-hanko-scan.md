@@ -1,6 +1,6 @@
 # Consensus And Hanko Production Scan
 
-Last refreshed: 2026-07-09.
+Last refreshed: 2026-07-14.
 
 Run:
 
@@ -20,9 +20,13 @@ tests, formal vectors, or independent review.
 - Receiver validation runs on a clone before committing the same frame on real
   state, and commit failure throws instead of silently accepting divergence.
 - Account frame hashes bind `jHeight`, canonical jurisdiction event bodies,
-  deltas, and tx data through `safeStringify()` plus `keccak256`.
+  deltas, and tx data through the domain-separated canonical Merkle codec.
 - Entity mempool admission is checked before cloning and before
-  `push(...entityTxs)`, so oversized batches fail before allocation.
+  immutable scheduled-wake prioritization, so oversized batches fail before
+  the working mempool is rebuilt.
+- Proposer-only HTLC reveal materialization and deterministic cross-J
+  materialization run before locally authored transactions receive their
+  command envelope; validators never authorize proposer-supplied side effects.
 - Entity frame commits verify precommit signature bundles before applying the
   signed frame, build quorum Hankos for signed hashes, attach Hanko witnesses to
   entity/J outputs, and remove committed txs from the mempool.
@@ -37,7 +41,8 @@ tests, formal vectors, or independent review.
   verification helpers. Current consensus callers are statically imported, but
   the helper internals should be reviewed before treating this path as fully
   static.
-- Frame hashes still use canonical JSON via `safeStringify()`. Binary canonical
-  encoding and golden vectors remain a separate consensus-root migration.
+- Entity-frame v4 payloads and consensus state roots still use the tagged
+  canonical JSON codec. Binary canonical encoding remains a separate protocol
+  migration.
 - Multi-validator M-of-N Hanko collection should still be adversarially tested
   against duplicate, reordered, invalid, and threshold-edge signature bundles.

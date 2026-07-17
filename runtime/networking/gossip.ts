@@ -6,26 +6,32 @@
  */
 
 import { logDebug } from '../infra/logger';
+import { computeAddress, getAddress } from 'ethers';
 import { buildNetworkGraph } from '../routing/graph';
 import { PathFinder } from '../routing/pathfinding';
 import { compareCanonicalText } from '../orderbook/swap-keys';
 import { UINT16_MAX } from '../constants';
 import type { PaymentRoute } from '../routing/pathfinding';
+import {
+  requireCompleteValidatorEncryptionManifest,
+  type ValidatorEncryptionAttestation,
+  type ValidatorEncryptionManifest,
+} from '../protocol/htlc/validator-encryption';
 
 export type BoardValidator = {
-  signer: string; // canonical signer address (0x...) or signerId fallback
+  signer: string; // canonical recovered signer address (0x...)
   weight: number; // uint16 voting power
-  signerId: string; // runtime signerId for routing/debug
+  signerId: string; // exact normalized consensus-board alias
   publicKey: string; // hex public key
 };
 
 export type BoardMetadata = {
   threshold: number; // uint16 voting threshold
   validators: BoardValidator[];
+  encryptionAttestations: ValidatorEncryptionAttestation[];
 };
 
 export type ProfileMetadata = {
-  entityEncPubKey: string;
   isHub: boolean;
   hubName?: string;
   routingFeePPM: number;
@@ -75,6 +81,8 @@ export type Profile = {
   lastUpdated: number;
   runtimeId: string; // Runtime identity (usually signer1 address)
   runtimeEncPubKey: string;
+  runtimeSignerId?: string;
+  runtimeSignature?: string;
   publicAccounts: string[]; // direct peers with inbound capacity
   wsUrl: string | null; // public direct websocket endpoint for this runtime
   relays: string[]; // preferred relay runtimes
@@ -142,6 +150,8 @@ const ALLOWED_PROFILE_KEYS = [
   'lastUpdated',
   'runtimeId',
   'runtimeEncPubKey',
+  'runtimeSignerId',
+  'runtimeSignature',
   'publicAccounts',
   'wsUrl',
   'relays',
@@ -150,7 +160,6 @@ const ALLOWED_PROFILE_KEYS = [
 ] as const;
 
 const ALLOWED_PROFILE_METADATA_KEYS = [
-  'entityEncPubKey',
   'isHub',
   'hubName',
   'routingFeePPM',
@@ -180,6 +189,18 @@ const ALLOWED_PROFILE_TOKEN_CAPACITY_KEYS = [
 const ALLOWED_BOARD_METADATA_KEYS = [
   'threshold',
   'validators',
+  'encryptionAttestations',
+] as const;
+
+const ALLOWED_ENCRYPTION_ATTESTATION_KEYS = [
+  'version',
+  'entityId',
+  'signerId',
+  'signer',
+  'publicKey',
+  'weight',
+  'encryptionPublicKey',
+  'signature',
 ] as const;
 
 const ALLOWED_BOARD_VALIDATOR_KEYS = [
@@ -325,14 +346,23 @@ const parseBoardValidator = (raw: unknown, entityId: string): BoardValidator => 
     throw new Error(`GOSSIP_PROFILE_BOARD_SIGNER_ID_REQUIRED: entity=${entityId}`);
   }
   const publicKey = typeof raw['publicKey'] === 'string' ? raw['publicKey'].trim() : '';
-  if (!publicKey) {
+  if (!/^0x(?:[0-9a-fA-F]{66}|[0-9a-fA-F]{130})$/.test(publicKey)) {
     throw new Error(`GOSSIP_PROFILE_BOARD_PUBLIC_KEY_REQUIRED: entity=${entityId}`);
   }
+  let normalizedSigner: string;
+  try {
+    normalizedSigner = getAddress(signer).toLowerCase();
+  } catch {
+    throw new Error(`GOSSIP_PROFILE_BOARD_SIGNER_INVALID: entity=${entityId}`);
+  }
+  if (computeAddress(publicKey).toLowerCase() !== normalizedSigner) {
+    throw new Error(`GOSSIP_PROFILE_BOARD_PUBLIC_KEY_MISMATCH: entity=${entityId}`);
+  }
   return {
-    signer,
+    signer: normalizedSigner,
     weight,
-    signerId,
-    publicKey,
+    signerId: signerId.toLowerCase(),
+    publicKey: publicKey.toLowerCase(),
   };
 };
 
@@ -345,11 +375,38 @@ const parseBoardMetadata = (raw: unknown, entityId: string): BoardMetadata => {
   if (!Array.isArray(validatorsRaw) || validatorsRaw.length === 0) {
     throw new Error(`GOSSIP_PROFILE_BOARD_VALIDATORS_REQUIRED: entity=${entityId}`);
   }
-  return {
-    threshold: parseUint16(raw['threshold'], 'GOSSIP_PROFILE_BOARD_THRESHOLD_INVALID', entityId),
-    validators: validatorsRaw.map((validator) => parseBoardValidator(validator, entityId)),
-  };
+  const threshold = parseUint16(raw['threshold'], 'GOSSIP_PROFILE_BOARD_THRESHOLD_INVALID', entityId);
+  const validators = validatorsRaw.map((validator) => parseBoardValidator(validator, entityId));
+  const attestationsRaw = raw['encryptionAttestations'];
+  if (!Array.isArray(attestationsRaw)) {
+    throw new Error(`GOSSIP_PROFILE_ENCRYPTION_ATTESTATIONS_REQUIRED: entity=${entityId}`);
+  }
+  const attestations = attestationsRaw.map((attestationRaw) => {
+    if (!isRecord(attestationRaw)) {
+      throw new Error(`GOSSIP_PROFILE_ENCRYPTION_ATTESTATION_INVALID: entity=${entityId}`);
+    }
+    assertOnlyAllowedKeys(
+      attestationRaw,
+      ALLOWED_ENCRYPTION_ATTESTATION_KEYS,
+      'GOSSIP_PROFILE_ENCRYPTION_ATTESTATION_UNKNOWN_FIELD',
+      entityId,
+    );
+    return attestationRaw as unknown as ValidatorEncryptionAttestation;
+  });
+  const manifest = requireCompleteValidatorEncryptionManifest(
+    { entityId, threshold, validators },
+    attestations,
+  );
+  return { threshold, validators, encryptionAttestations: [...manifest.attestations] };
 };
+
+export const getValidatorEncryptionManifestFromBoard = (
+  entityId: string,
+  board: BoardMetadata,
+): ValidatorEncryptionManifest => requireCompleteValidatorEncryptionManifest(
+  { entityId, threshold: board.threshold, validators: board.validators },
+  board.encryptionAttestations,
+);
 
 export const getBoardPrimaryPublicKey = (board: BoardMetadata, entityId: string): string => {
   const publicKey = typeof board.validators[0]?.publicKey === 'string' ? board.validators[0].publicKey.trim() : '';
@@ -488,10 +545,6 @@ export const parseProfile = (raw: unknown): Profile => {
     throw new Error(`GOSSIP_PROFILE_METADATA_REQUIRED: entity=${entityId}`);
   }
   assertNoLegacyProfileFields(raw, metadataRaw, entityId);
-  const entityEncPubKey = normalizeX25519Key(metadataRaw['entityEncPubKey']);
-  if (!entityEncPubKey) {
-    throw new Error(`GOSSIP_PROFILE_MISSING_ENTITY_ENC_PUBKEY: entity=${entityId}`);
-  }
   if (typeof raw['name'] !== 'string' || raw['name'].trim().length === 0) {
     throw new Error(`GOSSIP_PROFILE_NAME_REQUIRED: entity=${entityId}`);
   }
@@ -514,7 +567,6 @@ export const parseProfile = (raw: unknown): Profile => {
   const mirrors = parseProfileMirrors(metadataRaw['mirrors'], entityId);
   const hubName = typeof metadataRaw['hubName'] === 'string' ? metadataRaw['hubName'].trim() : '';
   const metadata: ProfileMetadata = {
-    entityEncPubKey,
     isHub: metadataRaw['isHub'] === true,
     ...(hubName ? { hubName } : {}),
     routingFeePPM: Math.max(
@@ -556,6 +608,12 @@ export const parseProfile = (raw: unknown): Profile => {
     lastUpdated,
     runtimeId,
     runtimeEncPubKey,
+    ...(typeof raw['runtimeSignerId'] === 'string' && raw['runtimeSignerId'].trim()
+      ? { runtimeSignerId: raw['runtimeSignerId'].trim().toLowerCase() }
+      : {}),
+    ...(typeof raw['runtimeSignature'] === 'string' && raw['runtimeSignature'].trim()
+      ? { runtimeSignature: raw['runtimeSignature'].trim().toLowerCase() }
+      : {}),
     publicAccounts,
     wsUrl,
     relays,
@@ -587,7 +645,6 @@ export const canonicalizeProfile = (
   const normalizedName = normalizeEntityName(profile.name, entityId);
   const incomingLastUpdated = parsePositiveTimestamp(profile.lastUpdated, entityId);
   const normalizedRuntimeEncPubKey = normalizeX25519Key(profile.runtimeEncPubKey);
-  const normalizedEntityEncPubKey = normalizeX25519Key(metadata['entityEncPubKey']);
 
   if (!normalizedRuntimeEncPubKey) {
     throw new Error(`GOSSIP_PROFILE_RUNTIME_ENC_PUBKEY_REQUIRED: entity=${entityId}`);
@@ -595,16 +652,10 @@ export const canonicalizeProfile = (
   if (profile.runtimeEncPubKey !== normalizedRuntimeEncPubKey) {
     throw new Error(`GOSSIP_PROFILE_RUNTIME_ENC_PUBKEY_NOT_NORMALIZED: entity=${entityId}`);
   }
-  if (!normalizedEntityEncPubKey) {
-    throw new Error(`GOSSIP_PROFILE_MISSING_ENTITY_ENC_PUBKEY: entity=${entityId}`);
-  }
   if (typeof profile.runtimeId !== 'string' || profile.runtimeId.trim().length === 0) {
     throw new Error(`GOSSIP_PROFILE_RUNTIME_ID_REQUIRED: entity=${entityId}`);
   }
   const normalizedRuntimeId = profile.runtimeId.trim();
-  if (typeof metadata['entityEncPubKey'] !== 'string' || metadata['entityEncPubKey'] !== normalizedEntityEncPubKey) {
-    throw new Error(`GOSSIP_PROFILE_ENTITY_ENC_PUBKEY_NOT_NORMALIZED: entity=${entityId}`);
-  }
   if (profile.name !== normalizedName) {
     throw new Error(`GOSSIP_PROFILE_NAME_NOT_NORMALIZED: entity=${entityId}`);
   }
@@ -632,6 +683,12 @@ export const canonicalizeProfile = (
     lastUpdated: incomingLastUpdated,
     runtimeId: normalizedRuntimeId,
     runtimeEncPubKey: normalizedRuntimeEncPubKey,
+    ...(typeof profile.runtimeSignerId === 'string' && profile.runtimeSignerId.trim()
+      ? { runtimeSignerId: profile.runtimeSignerId.trim().toLowerCase() }
+      : {}),
+    ...(typeof profile.runtimeSignature === 'string' && profile.runtimeSignature.trim()
+      ? { runtimeSignature: profile.runtimeSignature.trim().toLowerCase() }
+      : {}),
     publicAccounts,
     wsUrl,
     relays,
@@ -640,7 +697,6 @@ export const canonicalizeProfile = (
       tokenCapacities: parseProfileTokenCapacities(account.tokenCapacities, entityId, account.counterpartyId),
     })),
     metadata: {
-      entityEncPubKey: normalizedEntityEncPubKey,
       board,
       ...(hubName ? { hubName } : {}),
       routingFeePPM,

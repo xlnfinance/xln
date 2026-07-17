@@ -1,13 +1,24 @@
 import { ethers } from 'ethers';
-import type { AccountTx, EntityState, EntityTx } from '../../types';
+import type { AccountTx, EntityState, EntityTx, JPrefixCertificate } from '../../types';
 import { HEAVY_LOGS } from '../../utils';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
-import { safeStringify } from '../../protocol/serialization';
 import { compareCanonicalText } from '../../orderbook/swap-execution';
 import { canonicalJurisdictionEventsHash } from '../../jurisdiction/event-observation';
 import { normalizeJurisdictionEvents } from '../../jurisdiction/event-normalization';
 import { canonicalAccountTxForFrameHash } from '../../account/consensus/frame';
-import { computeAccountShadowRoot } from '../../account/state-root';
+import {
+  computeCanonicalEntityConsensusStateHash,
+  buildEntityFrameAuthority,
+  computeEntityFrameAuthorityRoot,
+  encodeCanonicalEntityConsensusValue,
+} from './state-root';
+import { LIMITS } from '../../constants';
+import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../../protocol/htlc/consensus-secret-guard';
+
+export const MAX_ENTITY_FRAME_TX_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
+
+export const isCanonicalEntityFrameDigest = (value: unknown): value is string =>
+  typeof value === 'string' && /^0x[0-9a-f]{64}$/.test(value);
 
 export type EntityFrameHashDebugRecord = {
   entityId: string;
@@ -28,18 +39,6 @@ export function setEntityFrameHashDebugRecorder(
     frameHashDebugRecorder = previous;
   };
 }
-
-const compareNumericKey = (
-  left: string | number,
-  right: string | number,
-): number => {
-  const leftNum = Number(left);
-  const rightNum = Number(right);
-  if (Number.isFinite(leftNum) && Number.isFinite(rightNum) && leftNum !== rightNum) {
-    return leftNum - rightNum;
-  }
-  return compareCanonicalText(String(left), String(right));
-};
 
 const toRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value)
@@ -140,46 +139,8 @@ const canonicalAccountInputForFrameHash = (value: unknown): Record<string, unkno
   };
 };
 
-const canonicalExternalWalletForFrameHash = (
-  wallet: NonNullable<EntityState['externalWallet']>,
-): Record<string, unknown> => ({
-  balances: Array.from(wallet.balances.entries())
-    .sort((a, b) => compareCanonicalText(a[0], b[0]))
-    .map(([owner, balances]) => [
-      owner,
-      Array.from(balances.entries())
-        .sort((a, b) => compareCanonicalText(a[0], b[0]))
-        .map(([key, record]) => [
-          key,
-          {
-            tokenAddress: String(record.tokenAddress || '').toLowerCase(),
-            ...(record.tokenId !== undefined ? { tokenId: Number(record.tokenId) } : {}),
-            balance: record.balance.toString(),
-            jHeight: Number(record.jHeight),
-            ...(record.transactionHash ? { transactionHash: record.transactionHash } : {}),
-          },
-        ]),
-    ]),
-  allowances: Array.from(wallet.allowances.entries())
-    .sort((a, b) => compareCanonicalText(a[0], b[0]))
-    .map(([owner, allowances]) => [
-      owner,
-      Array.from(allowances.entries())
-        .sort((a, b) => compareCanonicalText(a[0], b[0]))
-        .map(([key, record]) => [
-          key,
-          {
-            tokenAddress: String(record.tokenAddress || '').toLowerCase(),
-            spender: String(record.spender || '').toLowerCase(),
-            allowance: record.allowance.toString(),
-            jHeight: Number(record.jHeight),
-            ...(record.transactionHash ? { transactionHash: record.transactionHash } : {}),
-          },
-        ]),
-    ]),
-});
-
-const canonicalEntityTxForFrameHash = (tx: EntityTx): Record<string, unknown> => {
+export const canonicalEntityTxForFrameHash = (tx: EntityTx): Record<string, unknown> => {
+  assertNoConsensusVisibleHtlcPaymentSecrets([tx]);
   if (tx.type === 'j_event') {
     return { type: tx.type, data: canonicalJEventDataForFrameHash(tx.data) };
   }
@@ -195,14 +156,75 @@ const canonicalEntityTxForFrameHash = (tx: EntityTx): Record<string, unknown> =>
   };
 };
 
+export const getEntityFrameTxByteLength = (txs: EntityTx[]): number =>
+  new TextEncoder().encode(encodeCanonicalEntityConsensusValue({
+    domain: 'xln:entity-frame-txs:v1',
+    txs: txs.map(canonicalEntityTxForFrameHash),
+  })).byteLength;
+
+export const assertEntityFrameTxByteBudget = (txs: EntityTx[]): void => {
+  const byteLength = getEntityFrameTxByteLength(txs);
+  if (byteLength > MAX_ENTITY_FRAME_TX_BYTES) {
+    throw new Error(`ENTITY_FRAME_TX_BYTE_LIMIT_EXCEEDED:${byteLength}:${MAX_ENTITY_FRAME_TX_BYTES}`);
+  }
+};
+
+export const selectEntityFrameTxByteBudget = (txs: EntityTx[]): EntityTx[] => {
+  if (getEntityFrameTxByteLength(txs) <= MAX_ENTITY_FRAME_TX_BYTES) return txs;
+  let low = 0;
+  let high = txs.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (getEntityFrameTxByteLength(txs.slice(0, mid)) <= MAX_ENTITY_FRAME_TX_BYTES) low = mid;
+    else high = mid - 1;
+  }
+  if (low === 0 && txs.length > 0) {
+    throw new Error(
+      `ENTITY_FRAME_HEAD_TX_BYTE_LIMIT_EXCEEDED:${getEntityFrameTxByteLength([txs[0]!])}:${MAX_ENTITY_FRAME_TX_BYTES}`,
+    );
+  }
+  return txs.slice(0, low);
+};
+
 // Entity-frame hashes are BFT commitments. Validators recompute the frame from
 // txs and sign only if their locally derived state hashes to the proposal hash.
+export function createEntityFrameHashFromStateRoot(
+  prevFrameHash: string,
+  height: number,
+  timestamp: number,
+  txs: EntityTx[],
+  entityId: string,
+  stateRoot: string,
+  authorityRoot: string,
+  jPrefixCertificate?: JPrefixCertificate,
+): string {
+  if (!isCanonicalEntityFrameDigest(stateRoot)) {
+    throw new Error(`ENTITY_FRAME_STATE_ROOT_INVALID:${stateRoot}`);
+  }
+  if (!isCanonicalEntityFrameDigest(authorityRoot)) {
+    throw new Error(`ENTITY_FRAME_AUTHORITY_ROOT_INVALID:${authorityRoot}`);
+  }
+  const frameData = {
+    version: 'xln:entity-frame:v4',
+    prevFrameHash,
+    height,
+    timestamp,
+    txs: txs.map(canonicalEntityTxForFrameHash),
+    entityId,
+    stateRoot: stateRoot.toLowerCase(),
+    authorityRoot: authorityRoot.toLowerCase(),
+    jPrefixCertificate: jPrefixCertificate ?? null,
+  };
+  return ethers.keccak256(ethers.toUtf8Bytes(encodeCanonicalEntityConsensusValue(frameData)));
+}
+
 export async function createEntityFrameHash(
   prevFrameHash: string,
   height: number,
   timestamp: number,
   txs: EntityTx[],
   newState: EntityState,
+  jPrefixCertificate?: JPrefixCertificate,
 ): Promise<string> {
   if (HEAVY_LOGS) {
     const accountSnapshot = Array.from(newState.accounts.entries())
@@ -221,74 +243,30 @@ export async function createEntityFrameHash(
     });
   }
 
-  const frameData = {
+  const stateRoot = computeCanonicalEntityConsensusStateHash(newState);
+  const authorityRoot = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(newState));
+  const hash = createEntityFrameHashFromStateRoot(
     prevFrameHash,
     height,
     timestamp,
-    txs: txs.map(canonicalEntityTxForFrameHash),
-    entityId: newState.entityId,
-    leaderState: newState.leaderState ?? {
-      activeValidatorId: newState.config.validators[0],
-      view: 0,
-      changedAtHeight: 0,
-    },
-    reserves: Array.from(newState.reserves.entries())
-      .sort((a, b) => compareNumericKey(a[0], b[0]))
-      .map(([k, v]) => [k, v.toString()]),
-    ...(newState.externalWallet
-      ? {
-          externalWalletHash: ethers.keccak256(ethers.toUtf8Bytes(
-            safeStringify(canonicalExternalWalletForFrameHash(newState.externalWallet)),
-          )),
-        }
-      : {}),
-    lastFinalizedJHeight: newState.lastFinalizedJHeight,
-    jHistoryFinality: newState.jHistoryFinality ?? null,
-    accountHashes: Array.from(newState.accounts.entries())
-      .sort((a, b) => compareCanonicalText(a[0], b[0]))
-      .map(([cpId, acct]) => ({
-        cpId,
-        height: acct.currentHeight,
-        stateHash: acct.currentFrame?.stateHash || 'genesis',
-      })),
-    accountShadowRoot: computeAccountShadowRoot(newState.accounts),
-    lendingHash: newState.lending
-      ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(newState.lending)))
-      : null,
-    htlcRoutesHash: newState.htlcRoutes.size > 0
-      ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(
-          Array.from(newState.htlcRoutes.entries())
-            .sort((a, b) => compareCanonicalText(String(a[0]), String(b[0]))),
-        )))
-      : null,
-    htlcFeesEarned: newState.htlcFeesEarned.toString(),
-    lockBookHash: newState.lockBook.size > 0
-      ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(
-          Array.from(newState.lockBook.entries())
-            .sort((a, b) => compareCanonicalText(String(a[0]), String(b[0]))),
-        )))
-      : null,
-    orderbookHash: newState.orderbookExt
-      ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(newState.orderbookExt)))
-      : null,
-    swapTradingPairs: Array.isArray(newState.swapTradingPairs)
-      ? [...newState.swapTradingPairs]
-          .map(pair => ({
-            baseTokenId: Number(pair.baseTokenId),
-            quoteTokenId: Number(pair.quoteTokenId),
-            pairId: String(pair.pairId || ''),
-          }))
-          .sort((a, b) => {
-            if (a.quoteTokenId !== b.quoteTokenId) return a.quoteTokenId - b.quoteTokenId;
-            if (a.baseTokenId !== b.baseTokenId) return a.baseTokenId - b.baseTokenId;
-            return compareCanonicalText(a.pairId, b.pairId);
-          })
-      : [],
-  };
-
-  const encoded = safeStringify(frameData);
-  const hash = ethers.keccak256(ethers.toUtf8Bytes(encoded));
+    txs,
+    newState.entityId,
+    stateRoot,
+    authorityRoot,
+    jPrefixCertificate,
+  );
   if (frameHashDebugRecorder) {
+    const encoded = encodeCanonicalEntityConsensusValue({
+      version: 'xln:entity-frame:v4',
+      jPrefixCertificate: jPrefixCertificate ?? null,
+      prevFrameHash,
+      height,
+      timestamp,
+      txs: txs.map(canonicalEntityTxForFrameHash),
+      entityId: newState.entityId,
+      stateRoot,
+      authorityRoot,
+    });
     frameHashDebugRecorder({
       entityId: newState.entityId,
       height,

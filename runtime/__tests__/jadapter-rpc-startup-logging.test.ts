@@ -42,7 +42,8 @@ test('runtime dev startup status logs stay structured', () => {
 
   expect(runtime).not.toContain('console.log(`JAdapter watcher started for jReplica');
   expect(runtime).toContain("runtimeLog.debug('jadapter_watcher.started'");
-  expect(runtime).toContain("runtimeLog.warn('db.close.loop_drain_timeout'");
+  expect(runtime).toContain("throw new Error('RUNTIME_DB_CLOSE_LOOP_DRAIN_TIMEOUT')");
+  expect(runtime).toContain("throwSettledErrors(shutdown, 'RUNTIME_DB_CLOSE_QUIESCE_FAILED')");
   expect(runtime).toContain("runtimeLog.error('loop.error'");
   expect(runtimeConsoleLines).toEqual([
     "console.log(`\\n⏸️  FRAME STEPPING: Stopped at frame ${env.height}`);",
@@ -53,7 +54,9 @@ test('runtime dev startup status logs stay structured', () => {
   ]);
 
   expect(hubNode).not.toContain('RPC contracts have no code; deploying fresh stack instead of using stale addresses:');
-  expect(hubNode).toContain("nodeLog.info('jurisdiction_contracts.stale_dropped'");
+  expect(hubNode).toContain("nodeLog.error('jurisdiction_contracts.code_missing'");
+  expect(hubNode).toContain("nodeLog.error('jurisdictions_file.invalid'");
+  expect(hubNode).not.toContain('Ignore malformed local file and keep falling back');
   expect(hubNode).toContain("nodeLog.info('bootstrap_ready_snapshot.persisted'");
   expect(hubNode).not.toContain('console.log(`Importing sibling hub jurisdiction');
   expect(hubNode).not.toContain('console.log(`Sibling hub ready');

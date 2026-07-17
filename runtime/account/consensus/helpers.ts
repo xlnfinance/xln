@@ -1,9 +1,17 @@
 import type { AccountMachine, AccountTx, Delta, Env } from '../../types';
 import { createStructuredLogger } from '../../infra/logger';
 import { txFingerprint } from '../../state-helpers';
-import { getReplicaByEntityId } from '../../entity/replica';
-import { checkAutoRebalance } from '../tx/handlers/request-collateral';
-import { accountStateDomainFromJurisdiction, type AccountStateDomain } from '../state-root';
+import {
+  checkAutoRebalance,
+  resolveAutoRebalanceFeePolicy,
+} from '../tx/handlers/request-collateral';
+import { normalizeAccountStateDomain, type AccountStateDomain } from '../state-root';
+import { prependAccountMempoolTxs } from '../mempool';
+import {
+  firstUsableContractAddress,
+  requireDurableJurisdictionStack,
+} from '../../jurisdiction/contract-address';
+import { buildAccountProofBody } from '../../protocol/dispute/proof-builder';
 
 const accountConsensusHelperLog = createStructuredLogger('account.consensus');
 
@@ -34,43 +42,48 @@ export const summarizeDeltasForLog = (deltas: Map<number, Delta>) =>
     rightHold: delta.rightHold?.toString(),
   }));
 
-const normalizeEntityRef = (value: unknown): string => String(value || '').toLowerCase();
-
 type AccountDomainSubject = Readonly<{
-  proofHeader: Pick<AccountMachine['proofHeader'], 'fromEntity' | 'toEntity'>;
+  domain: AccountStateDomain;
 }>;
 
-const trustedAccountDomains = (env: Env, accountMachine: AccountDomainSubject): AccountStateDomain[] => {
-  const accountEntities = new Set([
-    normalizeEntityRef(accountMachine.proofHeader.fromEntity),
-    normalizeEntityRef(accountMachine.proofHeader.toEntity),
-  ]);
-  const domains: AccountStateDomain[] = [];
-  for (const replica of env.eReplicas.values()) {
-    const entityId = normalizeEntityRef(replica.state.entityId || replica.entityId);
-    if (!accountEntities.has(entityId)) continue;
-    const jurisdiction = replica.state.config?.jurisdiction;
-    if (!jurisdiction) throw new Error(`ACCOUNT_STATE_DOMAIN_REPLICA_MISSING:${entityId}`);
-    domains.push(accountStateDomainFromJurisdiction(jurisdiction));
-  }
-  return domains;
-};
-
-export function getAccountStateDomain(env: Env, accountMachine: AccountDomainSubject): AccountStateDomain {
-  const domains = trustedAccountDomains(env, accountMachine);
-  if (domains.length === 0) throw new Error('ACCOUNT_STATE_DOMAIN_TRUSTED_CONFIG_MISSING');
-  const first = domains[0]!;
-  const firstKey = `${first.chainId}:${first.depositoryAddress.toLowerCase()}`;
-  const conflict = domains.find((domain) =>
-    `${domain.chainId}:${domain.depositoryAddress.toLowerCase()}` !== firstKey,
-  );
-  if (conflict) {
-    throw new Error(
-      `ACCOUNT_STATE_DOMAIN_CONFLICT:${firstKey}:${conflict.chainId}:${conflict.depositoryAddress.toLowerCase()}`,
-    );
-  }
-  return first;
+export function getAccountStateDomain(accountMachine: AccountDomainSubject): AccountStateDomain {
+  return normalizeAccountStateDomain(accountMachine.domain);
 }
+
+/**
+ * Resolve the built-in DeltaTransformer from the exact durable jurisdiction
+ * selected by the Entity-certified Account domain. Names, active-J defaults,
+ * live adapters and peer payloads are deliberately ignored: only the imported
+ * `(chainId, Depository) -> contracts` record is proof authority.
+ */
+export function requireAccountDeltaTransformerAddress(
+  env: Env,
+  accountMachine: AccountDomainSubject,
+): string {
+  const domain = getAccountStateDomain(accountMachine);
+  const depository = domain.depositoryAddress.toLowerCase();
+  const matches = Array.from(env.jReplicas.values()).flatMap((replica) => {
+    if (Number(replica.chainId) !== domain.chainId) return [];
+    const canonicalDepository = firstUsableContractAddress(replica.contracts?.depository)?.toLowerCase();
+    const aliasDepository = firstUsableContractAddress(replica.depositoryAddress)?.toLowerCase();
+    if (canonicalDepository !== depository && aliasDepository !== depository) return [];
+    const stack = requireDurableJurisdictionStack(replica);
+    return stack.depository === depository ? [stack] : [];
+  });
+  if (matches.length === 0) {
+    throw new Error(`ACCOUNT_PROOF_JURISDICTION_NOT_FOUND:${domain.chainId}:${depository}`);
+  }
+  if (matches.length > 1) {
+    throw new Error(`ACCOUNT_PROOF_JURISDICTION_AMBIGUOUS:${domain.chainId}:${depository}`);
+  }
+  return matches[0]!.deltaTransformer;
+}
+
+export const buildAccountProofBodyFromEnv = (env: Env, accountMachine: AccountMachine) =>
+  buildAccountProofBody(
+    accountMachine,
+    requireAccountDeltaTransformerAddress(env, accountMachine),
+  );
 
 export function shouldIncludeToken(delta: Delta, totalDelta: bigint): boolean {
   const hasHolds =
@@ -101,7 +114,7 @@ export function prependUniqueMempoolTxs(accountMachine: AccountMachine, txs: Acc
     missing.push(tx);
   }
   if (missing.length > 0) {
-    accountMachine.mempool.unshift(...missing);
+    prependAccountMempoolTxs(accountMachine, missing, 'accountConsensus:rollbackRestore');
   }
   return missing.length;
 }
@@ -133,51 +146,7 @@ type TokenizedAccountTx = AccountTx & {
   };
 };
 
-const parseBigIntMaybe = (value: unknown): bigint | undefined => {
-  if (value === undefined || value === null) return undefined;
-  try {
-    if (typeof value === 'bigint') return value;
-    if (typeof value === 'number' && Number.isInteger(value)) return BigInt(value);
-    if (typeof value === 'string' && /^-?\d+$/.test(value)) return BigInt(value);
-    return undefined;
-  } catch {
-    return undefined;
-  }
-};
-
-const parseNumberMaybe = (value: unknown): number | undefined => {
-  if (value === undefined || value === null) return undefined;
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n : undefined;
-};
-
-export function resolveAutoRebalanceFeePolicy(
-  env: Env,
-  accountMachine: AccountMachine,
-  counterpartyEntityId: string,
-) {
-  const hubConfig = getReplicaByEntityId(env, counterpartyEntityId)?.state?.hubRebalanceConfig;
-  const accountPolicy = accountMachine.counterpartyRebalanceFeePolicy;
-  return {
-    policyVersion:
-      accountPolicy?.policyVersion ??
-      parseNumberMaybe(hubConfig?.policyVersion) ??
-      1,
-    baseFee:
-      accountPolicy?.baseFee ??
-      parseBigIntMaybe(hubConfig?.rebalanceBaseFee) ??
-      10n ** 17n,
-    liquidityFeeBps:
-      accountPolicy?.liquidityFeeBps ??
-      parseBigIntMaybe(hubConfig?.rebalanceLiquidityFeeBps) ??
-      parseBigIntMaybe(hubConfig?.minFeeBps) ??
-      1n,
-    gasFee:
-      accountPolicy?.gasFee ??
-      parseBigIntMaybe(hubConfig?.rebalanceGasFee) ??
-      0n,
-  };
-}
+export { resolveAutoRebalanceFeePolicy };
 
 export async function runPostFrameAutoRebalanceCheck(
   env: Env,
@@ -185,6 +154,7 @@ export async function runPostFrameAutoRebalanceCheck(
   ourEntityId: string,
   counterpartyEntityId: string,
   frameHeight: number,
+  owningEntityIsHub: boolean,
 ): Promise<AccountTx[]> {
   try {
     const p2p = env.runtimeState?.p2p;
@@ -200,8 +170,6 @@ export async function runPostFrameAutoRebalanceCheck(
         });
       }
     };
-    const ourReplica = getReplicaByEntityId(env, ourEntityId);
-    const ourIsHub = !!ourReplica?.state?.hubRebalanceConfig;
     const emitSkip = (reason: string) => {
       emitRebalanceDebug({
         status: 'skipped',
@@ -212,8 +180,15 @@ export async function runPostFrameAutoRebalanceCheck(
       });
     };
 
-    if (ourIsHub) {
+    if (owningEntityIsHub) {
       emitSkip('our-entity-is-hub');
+      return [];
+    }
+
+    const hasCounterpartyPolicy = Array.from(accountMachine.shadow.rebalance.policy.keys())
+      .some((tokenId) => resolveAutoRebalanceFeePolicy(accountMachine, ourEntityId, tokenId));
+    if (!hasCounterpartyPolicy) {
+      emitSkip('counterparty-fee-policy-missing');
       return [];
     }
 
@@ -221,7 +196,6 @@ export async function runPostFrameAutoRebalanceCheck(
       accountMachine,
       ourEntityId,
       counterpartyEntityId,
-      resolveAutoRebalanceFeePolicy(env, accountMachine, counterpartyEntityId),
     );
     if (rebalanceTxs.length > 0) {
       emitRebalanceDebug({
@@ -237,16 +211,9 @@ export async function runPostFrameAutoRebalanceCheck(
     emitSkip('fee-policy-or-threshold');
     return [];
   } catch (rebalanceErr) {
-    accountConsensusHelperLog.debug('auto_rebalance_check.failed', { error: (rebalanceErr as Error).message });
-    return [];
-  }
-}
-
-export function kickHubRebalanceAfterFrameFinalize(env: Env, hubEntityId: string): void {
-  for (const replica of env.eReplicas.values()) {
-    if (String(replica?.state?.entityId || '').toLowerCase() !== String(hubEntityId || '').toLowerCase()) continue;
-    const task = replica.state?.crontabState?.tasks?.get?.('hubRebalance');
-    if (!task) continue;
-    task.lastRun = 0;
+    accountConsensusHelperLog.error('auto_rebalance_check.failed', {
+      error: rebalanceErr instanceof Error ? rebalanceErr.message : String(rebalanceErr),
+    });
+    throw rebalanceErr;
   }
 }

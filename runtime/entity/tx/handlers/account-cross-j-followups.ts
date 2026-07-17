@@ -1,6 +1,7 @@
 import type { AccountTx, CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env } from '../../../types';
 import {
   buildCrossJurisdictionCloseProof,
+  cloneCrossJurisdictionBookAdmissionReceipt,
   cloneCrossJurisdictionRoute,
   CROSS_J_MAX_FILL_RATIO,
   applyCrossJurisdictionFillProgress,
@@ -18,11 +19,9 @@ import {
 import { decodeHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { createStructuredLogger, shortId, shortOrder } from '../../../infra/logger';
 import { removeCrossJurisdictionBookOrder } from '../../../orderbook/cross-j';
-import { resolveEntityProposerId } from '../../../state-helpers';
 import {
   buildCrossJurisdictionEntityOutput,
   crossJurisdictionRouteSignerHint,
-  findLocalEntityState,
 } from '../cross-j-outputs';
 import { applyCrossJurisdictionBookProgressToState } from './cross-j-book-order';
 
@@ -81,23 +80,24 @@ const routeBookOwnerEntityId = (route: CrossJurisdictionSwapRoute): string =>
   normalizeEntityRef(route.bookOwnerEntityId || deriveCanonicalCrossJurisdictionBookOwner(route));
 
 const resolveLocalBookOwner = (
-  env: Env,
   newState: EntityState,
   route: CrossJurisdictionSwapRoute,
-): { ownerId: string; ownerState: EntityState | null; signerId: string | null; isCurrent: boolean } => {
+): { ownerId: string; isCurrent: boolean } => {
   const ownerId = routeBookOwnerEntityId(route);
   const currentId = normalizeEntityRef(newState.entityId);
   if (!ownerId || ownerId === currentId) {
-    return {
-      ownerId: newState.entityId,
-      ownerState: newState,
-      signerId: newState.config?.validators?.[0] || null,
-      isCurrent: true,
-    };
+    return { ownerId: newState.entityId, isCurrent: true };
   }
-  const ownerState = findLocalEntityState(env, ownerId);
-  const signerId = ownerState?.config?.validators?.[0];
-  return { ownerId: ownerState?.entityId || ownerId, ownerState, signerId: signerId || null, isCurrent: false };
+  return { ownerId, isCurrent: false };
+};
+
+const requireRouteSignerHint = (
+  route: CrossJurisdictionSwapRoute,
+  entityId: string,
+): string => {
+  const signerId = crossJurisdictionRouteSignerHint(route, entityId);
+  if (!signerId) throw new Error(`CROSS_J_ROUTE_SIGNER_MISSING:${route.orderId}:${entityId}`);
+  return signerId;
 };
 
 const removeOrRouteCrossJurisdictionBookOrder = (
@@ -107,7 +107,7 @@ const removeOrRouteCrossJurisdictionBookOrder = (
   outputs: EntityInput[],
   reason: string,
 ): void => {
-  const owner = resolveLocalBookOwner(env, newState, route);
+  const owner = resolveLocalBookOwner(newState, route);
   if (owner.isCurrent) {
     removeCrossJurisdictionBookOrder(env, newState, route);
     markCrossJurisdictionBookAdmissionClosed(
@@ -128,7 +128,7 @@ const removeOrRouteCrossJurisdictionBookOrder = (
         route,
         reason,
       },
-  }], crossJurisdictionRouteSignerHint(route, owner.ownerId)));
+  }], requireRouteSignerHint(route, owner.ownerId)));
 };
 
 const requireCrossFillAckNumber = (
@@ -190,7 +190,7 @@ const applyOrRouteCrossJurisdictionBookProgress = (
   outputs: EntityInput[],
 ): void => {
   const tx = buildCrossJurisdictionBookProgressTx(route, accountTx, 'fill_ack_committed');
-  const owner = resolveLocalBookOwner(env, newState, route);
+  const owner = resolveLocalBookOwner(newState, route);
   if (owner.isCurrent) {
     // Source account consensus has committed the ACK in this same entity frame.
     // Apply the book-owner projection immediately; waiting for a self-output
@@ -202,7 +202,7 @@ const applyOrRouteCrossJurisdictionBookProgress = (
     env,
     owner.ownerId,
     [tx],
-    crossJurisdictionRouteSignerHint(route, owner.ownerId),
+    requireRouteSignerHint(route, owner.ownerId),
   ));
 };
 
@@ -310,21 +310,21 @@ const queueBookAdmissionOnCommittedPull = (
       outputs.push(buildCrossJurisdictionEntityOutput(env, route.source.entityId, [{
         type: 'commitCrossJurisdictionSwap',
         data: {
-          route: admissionRoute,
-          targetReceipt: receipt,
+          route: cloneCrossJurisdictionRoute(admissionRoute),
+          targetReceipt: cloneCrossJurisdictionBookAdmissionReceipt(receipt),
         },
-      }], route.sourceSignerId));
+      }], requireRouteSignerHint(route, route.source.entityId)));
     }
 
     const bookOwnerEntityId = routeBookOwnerEntityId(route);
     outputs.push(buildCrossJurisdictionEntityOutput(env, bookOwnerEntityId, [{
       type: 'admitCrossJurisdictionBookOrder',
       data: {
-        route: admissionRoute,
-        receipt,
+        route: cloneCrossJurisdictionRoute(admissionRoute),
+        receipt: cloneCrossJurisdictionBookAdmissionReceipt(receipt),
         reason: `${leg}_pull_committed`,
       },
-    }], crossJurisdictionRouteSignerHint(route, bookOwnerEntityId)));
+    }], requireRouteSignerHint(route, bookOwnerEntityId)));
     handled = true;
   }
 
@@ -403,7 +403,7 @@ const applyPullResolveFollowup = (
         env,
         route.target.counterpartyEntityId,
         targetEntityTxs,
-        route.targetSignerId,
+        requireRouteSignerHint(route, route.target.counterpartyEntityId),
       ));
       removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'source_claimed');
       crossJFollowupLog.debug('pull.resolve.relay_target', {
@@ -424,7 +424,6 @@ const applyPullResolveFollowup = (
       Object.assign(route, withCrossJurisdictionClaimProgress(route, fillRatio, newState.timestamp));
       transitionCrossJurisdictionRouteStatus(route, 'settled', newState.timestamp);
       route.settledAt = newState.timestamp;
-      removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'settled');
       crossJFollowupLog.debug('pull.resolve.settled', {
         route: shortOrder(route.orderId, 12),
         ratio: fillRatio,
@@ -490,7 +489,7 @@ const applyCrossPullCloseFollowup = (
               description: `Cross-j ${route.orderId} target close ${fillRatio}/${CROSS_J_MAX_FILL_RATIO}`,
             },
           }],
-          route.targetSignerId,
+          requireRouteSignerHint(route, route.target.counterpartyEntityId),
         ));
       }
       removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'source_claimed');
@@ -514,7 +513,6 @@ const applyCrossPullCloseFollowup = (
       route.targetCloseProof = accountTx.data.proof;
       transitionCrossJurisdictionRouteStatus(route, 'settled', newState.timestamp);
       route.settledAt = newState.timestamp;
-      removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'settled');
       crossJFollowupLog.debug('pull.close.settled', {
         route: shortOrder(route.orderId, 12),
         ratio: fillRatio,
@@ -599,9 +597,13 @@ const applyFillAckFollowup = (
   ) {
     if (ratio >= CROSS_J_MAX_FILL_RATIO || accountTx.data.cancelRemainder) {
       removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'fill_ack_closed');
+      const selfSignerId = String(newState.config.validators[0] || '').trim().toLowerCase();
+      if (!selfSignerId) {
+        throw new Error(`CROSS_J_SELF_SIGNER_MISSING:${route.orderId}:${newState.entityId}`);
+      }
       outputs.push({
         entityId: newState.entityId,
-        signerId: resolveEntityProposerId(env, newState.entityId, 'cross-j.clear-after-fill-ack'),
+        signerId: selfSignerId,
         entityTxs: [{
           type: 'requestCrossJurisdictionClear',
           data: {

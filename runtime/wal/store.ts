@@ -1,6 +1,11 @@
-import { deserializeTaggedJson } from '../protocol/serialization';
-import type { FrameLogEntry, RoutedEntityInput, RuntimeInput } from '../types';
-import { decodeBinaryPayload, encodeBinaryPayload } from '../storage/binary-codec';
+import { decodeValidatedBinaryPayload, encodeBinaryPayload } from '../storage/binary-codec';
+import {
+  parsePersistedPositiveInteger,
+  validatePersistedFrameJournal,
+  type PersistedFrameJournal,
+} from './schema';
+
+export type { PersistedFrameJournal } from './schema';
 
 export type RuntimeWalDb = {
   get: (key: Buffer) => Promise<Buffer>;
@@ -27,47 +32,20 @@ export type RuntimeWalPutOp = {
   value: Buffer;
 };
 
-export type PersistedFrameJournal = {
-  height: number;
-  timestamp: number;
-  runtimeInput: RuntimeInput;
-  runtimeOutputs?: RoutedEntityInput[];
-  runtimeStateHash?: string;
-  logs: FrameLogEntry[];
-};
-
 const makeDbKey = (namespace: string, key: string): Buffer => Buffer.from(`${namespace}:${key}`);
 
 export const encodePersistedFrameJournal = (frame: PersistedFrameJournal): Uint8Array =>
   encodeBinaryPayload(frame, 'msgpack');
 
 export const decodePersistedFrameJournal = (
-  payload: string | Uint8Array,
+  payload: Uint8Array,
   fallbackHeight: number,
 ): PersistedFrameJournal | null => {
-  const decoded = typeof payload === 'string'
-    ? deserializeTaggedJson<PersistedFrameJournal>(payload)
-    : decodeBinaryPayload<PersistedFrameJournal>(payload);
-  if (!decoded || typeof decoded !== 'object') return null;
-  const runtimeInput =
-    decoded.runtimeInput && typeof decoded.runtimeInput === 'object'
-      ? decoded.runtimeInput
-      : { runtimeTxs: [], entityInputs: [] };
-  const logs = Array.isArray(decoded.logs) ? decoded.logs : [];
-  const frame: PersistedFrameJournal = {
-    height:
-      Number.isFinite(Number(decoded.height)) && Number(decoded.height) > 0
-        ? Math.floor(Number(decoded.height))
-        : fallbackHeight,
-    timestamp: Number.isFinite(Number(decoded.timestamp)) ? Number(decoded.timestamp) : 0,
-    runtimeInput,
-    ...(Array.isArray(decoded.runtimeOutputs)
-      ? { runtimeOutputs: structuredClone(decoded.runtimeOutputs) }
-      : {}),
-    logs,
-  };
-  if (typeof decoded.runtimeStateHash === 'string') frame.runtimeStateHash = decoded.runtimeStateHash;
-  return frame;
+  if (payload[0] !== 0x01) {
+    throw new Error(`WAL_CODEC_MSGPACK_REQUIRED:magic=${payload[0] ?? 'none'}`);
+  }
+  return decodeValidatedBinaryPayload(payload, decoded =>
+    validatePersistedFrameJournal(decoded, fallbackHeight));
 };
 
 export const readPersistedSchemaVersion = async (
@@ -75,7 +53,7 @@ export const readPersistedSchemaVersion = async (
   namespace: string,
 ): Promise<number> => {
   const buffer = await db.get(makeDbKey(namespace, 'persistence_schema_version'));
-  return Number.parseInt(buffer.toString(), 10);
+  return parsePersistedPositiveInteger(buffer, 'WAL_SCHEMA_VERSION_INVALID');
 };
 
 export const readPersistedLatestHeight = async (
@@ -83,7 +61,7 @@ export const readPersistedLatestHeight = async (
   namespace: string,
 ): Promise<number> => {
   const buffer = await db.get(makeDbKey(namespace, 'latest_height'));
-  return Number.parseInt(buffer.toString(), 10);
+  return parsePersistedPositiveInteger(buffer, 'WAL_LATEST_HEIGHT_INVALID');
 };
 
 export const readPersistedCheckpointHeight = async (
@@ -91,7 +69,7 @@ export const readPersistedCheckpointHeight = async (
   namespace: string,
 ): Promise<number> => {
   const buffer = await db.get(makeDbKey(namespace, 'latest_checkpoint_height'));
-  return Number.parseInt(buffer.toString(), 10);
+  return parsePersistedPositiveInteger(buffer, 'WAL_CHECKPOINT_HEIGHT_INVALID');
 };
 
 export const readPersistedSnapshotBuffer = async (
@@ -120,10 +98,8 @@ export const listPersistedSnapshotHeightsFromDb = async (
           ? Buffer.from(rawKey).toString()
           : String(rawKey);
       const heightRaw = key.slice(prefix.length);
-      const height = Number.parseInt(heightRaw, 10);
-      if (Number.isFinite(height) && height > 0 && height <= latestHeight) {
-        heights.push(height);
-      }
+      const height = parsePersistedPositiveInteger(Buffer.from(heightRaw), 'WAL_SNAPSHOT_KEY_HEIGHT_INVALID');
+      if (height <= latestHeight) heights.push(height);
     }
     heights.sort((left, right) => left - right);
     return heights;

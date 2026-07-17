@@ -47,6 +47,9 @@ export interface HankoCodecInterface extends Interface {
   getFunction(
     nameOrSignature:
       | "computeBatchHankoHashForDomain"
+      | "computeBoardProposalCancelHankoHashForDomain"
+      | "computeBoardProposalHankoHashForDomain"
+      | "computeCancelEntityProviderActionHankoHashForDomain"
       | "computeCooperativeDisputeProofHankoHashForDomain"
       | "computeCooperativeUpdateHankoHashForDomain"
       | "computeDisputeProofHankoHashForDomain"
@@ -55,6 +58,9 @@ export interface HankoCodecInterface extends Interface {
       | "computeReleaseControlSharesHankoHashForDomain"
       | "computeWatchtowerCounterDisputeHankoHashForDomain"
       | "encodeBatchHankoPayloadForDomain"
+      | "encodeBoardProposalCancelHankoPayloadForDomain"
+      | "encodeBoardProposalHankoPayloadForDomain"
+      | "encodeCancelEntityProviderActionHankoPayloadForDomain"
       | "encodeCooperativeDisputeProofHankoPayloadForDomain"
       | "encodeCooperativeUpdateHankoPayloadForDomain"
       | "encodeDisputeProofHankoPayloadForDomain"
@@ -67,6 +73,45 @@ export interface HankoCodecInterface extends Interface {
   encodeFunctionData(
     functionFragment: "computeBatchHankoHashForDomain",
     values: [BytesLike, BigNumberish, AddressLike, BytesLike, BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "computeBoardProposalCancelHankoHashForDomain",
+    values: [
+      BytesLike,
+      BigNumberish,
+      AddressLike,
+      BytesLike,
+      BigNumberish,
+      BytesLike,
+      BigNumberish,
+      BigNumberish,
+      BigNumberish
+    ]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "computeBoardProposalHankoHashForDomain",
+    values: [
+      BytesLike,
+      BigNumberish,
+      AddressLike,
+      BytesLike,
+      BigNumberish,
+      BytesLike,
+      BigNumberish,
+      BigNumberish
+    ]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "computeCancelEntityProviderActionHankoHashForDomain",
+    values: [
+      BigNumberish,
+      AddressLike,
+      BigNumberish,
+      BigNumberish,
+      BigNumberish,
+      BytesLike,
+      BigNumberish
+    ]
   ): string;
   encodeFunctionData(
     functionFragment: "computeCooperativeDisputeProofHankoHashForDomain",
@@ -107,6 +152,7 @@ export interface HankoCodecInterface extends Interface {
       BigNumberish,
       AddressLike,
       BigNumberish,
+      BigNumberish,
       AddressLike,
       BigNumberish,
       BigNumberish,
@@ -122,6 +168,7 @@ export interface HankoCodecInterface extends Interface {
     values: [
       BigNumberish,
       AddressLike,
+      BigNumberish,
       BigNumberish,
       AddressLike,
       BigNumberish,
@@ -148,6 +195,45 @@ export interface HankoCodecInterface extends Interface {
   encodeFunctionData(
     functionFragment: "encodeBatchHankoPayloadForDomain",
     values: [BytesLike, BigNumberish, AddressLike, BytesLike, BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "encodeBoardProposalCancelHankoPayloadForDomain",
+    values: [
+      BytesLike,
+      BigNumberish,
+      AddressLike,
+      BytesLike,
+      BigNumberish,
+      BytesLike,
+      BigNumberish,
+      BigNumberish,
+      BigNumberish
+    ]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "encodeBoardProposalHankoPayloadForDomain",
+    values: [
+      BytesLike,
+      BigNumberish,
+      AddressLike,
+      BytesLike,
+      BigNumberish,
+      BytesLike,
+      BigNumberish,
+      BigNumberish
+    ]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "encodeCancelEntityProviderActionHankoPayloadForDomain",
+    values: [
+      BigNumberish,
+      AddressLike,
+      BigNumberish,
+      BigNumberish,
+      BigNumberish,
+      BytesLike,
+      BigNumberish
+    ]
   ): string;
   encodeFunctionData(
     functionFragment: "encodeCooperativeDisputeProofHankoPayloadForDomain",
@@ -188,6 +274,7 @@ export interface HankoCodecInterface extends Interface {
       BigNumberish,
       AddressLike,
       BigNumberish,
+      BigNumberish,
       AddressLike,
       BigNumberish,
       BigNumberish,
@@ -203,6 +290,7 @@ export interface HankoCodecInterface extends Interface {
     values: [
       BigNumberish,
       AddressLike,
+      BigNumberish,
       BigNumberish,
       AddressLike,
       BigNumberish,
@@ -229,6 +317,18 @@ export interface HankoCodecInterface extends Interface {
 
   decodeFunctionResult(
     functionFragment: "computeBatchHankoHashForDomain",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "computeBoardProposalCancelHankoHashForDomain",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "computeBoardProposalHankoHashForDomain",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "computeCancelEntityProviderActionHankoHashForDomain",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -261,6 +361,18 @@ export interface HankoCodecInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "encodeBatchHankoPayloadForDomain",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "encodeBoardProposalCancelHankoPayloadForDomain",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "encodeBoardProposalHankoPayloadForDomain",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "encodeCancelEntityProviderActionHankoPayloadForDomain",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -348,6 +460,51 @@ export interface HankoCodec extends BaseContract {
     "view"
   >;
 
+  computeBoardProposalCancelHankoHashForDomain: TypedContractMethod<
+    [
+      domainSeparator: BytesLike,
+      chainId: BigNumberish,
+      contractAddress: AddressLike,
+      entityId: BytesLike,
+      boardEpoch: BigNumberish,
+      proposedBoardHash: BytesLike,
+      proposedBy: BigNumberish,
+      cancelledBy: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+
+  computeBoardProposalHankoHashForDomain: TypedContractMethod<
+    [
+      domainSeparator: BytesLike,
+      chainId: BigNumberish,
+      contractAddress: AddressLike,
+      entityId: BytesLike,
+      boardEpoch: BigNumberish,
+      newBoardHash: BytesLike,
+      authority: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+
+  computeCancelEntityProviderActionHankoHashForDomain: TypedContractMethod<
+    [
+      chainId: BigNumberish,
+      contractAddress: AddressLike,
+      entityNumber: BigNumberish,
+      boardEpoch: BigNumberish,
+      actionNonce: BigNumberish,
+      cancelledActionHash: BytesLike,
+      cancelledActionKind: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+
   computeCooperativeDisputeProofHankoHashForDomain: TypedContractMethod<
     [
       chainId: BigNumberish,
@@ -392,6 +549,7 @@ export interface HankoCodec extends BaseContract {
       chainId: BigNumberish,
       contractAddress: AddressLike,
       entityNumber: BigNumberish,
+      boardEpoch: BigNumberish,
       to: AddressLike,
       tokenId: BigNumberish,
       amount: BigNumberish,
@@ -417,6 +575,7 @@ export interface HankoCodec extends BaseContract {
       chainId: BigNumberish,
       contractAddress: AddressLike,
       entityNumber: BigNumberish,
+      boardEpoch: BigNumberish,
       depository: AddressLike,
       controlAmount: BigNumberish,
       dividendAmount: BigNumberish,
@@ -451,6 +610,51 @@ export interface HankoCodec extends BaseContract {
       contractAddress: AddressLike,
       encodedBatch: BytesLike,
       nonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+
+  encodeBoardProposalCancelHankoPayloadForDomain: TypedContractMethod<
+    [
+      domainSeparator: BytesLike,
+      chainId: BigNumberish,
+      contractAddress: AddressLike,
+      entityId: BytesLike,
+      boardEpoch: BigNumberish,
+      proposedBoardHash: BytesLike,
+      proposedBy: BigNumberish,
+      cancelledBy: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+
+  encodeBoardProposalHankoPayloadForDomain: TypedContractMethod<
+    [
+      domainSeparator: BytesLike,
+      chainId: BigNumberish,
+      contractAddress: AddressLike,
+      entityId: BytesLike,
+      boardEpoch: BigNumberish,
+      newBoardHash: BytesLike,
+      authority: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+
+  encodeCancelEntityProviderActionHankoPayloadForDomain: TypedContractMethod<
+    [
+      chainId: BigNumberish,
+      contractAddress: AddressLike,
+      entityNumber: BigNumberish,
+      boardEpoch: BigNumberish,
+      actionNonce: BigNumberish,
+      cancelledActionHash: BytesLike,
+      cancelledActionKind: BigNumberish
     ],
     [string],
     "view"
@@ -500,6 +704,7 @@ export interface HankoCodec extends BaseContract {
       chainId: BigNumberish,
       contractAddress: AddressLike,
       entityNumber: BigNumberish,
+      boardEpoch: BigNumberish,
       to: AddressLike,
       tokenId: BigNumberish,
       amount: BigNumberish,
@@ -525,6 +730,7 @@ export interface HankoCodec extends BaseContract {
       chainId: BigNumberish,
       contractAddress: AddressLike,
       entityNumber: BigNumberish,
+      boardEpoch: BigNumberish,
       depository: AddressLike,
       controlAmount: BigNumberish,
       dividendAmount: BigNumberish,
@@ -565,6 +771,54 @@ export interface HankoCodec extends BaseContract {
       contractAddress: AddressLike,
       encodedBatch: BytesLike,
       nonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "computeBoardProposalCancelHankoHashForDomain"
+  ): TypedContractMethod<
+    [
+      domainSeparator: BytesLike,
+      chainId: BigNumberish,
+      contractAddress: AddressLike,
+      entityId: BytesLike,
+      boardEpoch: BigNumberish,
+      proposedBoardHash: BytesLike,
+      proposedBy: BigNumberish,
+      cancelledBy: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "computeBoardProposalHankoHashForDomain"
+  ): TypedContractMethod<
+    [
+      domainSeparator: BytesLike,
+      chainId: BigNumberish,
+      contractAddress: AddressLike,
+      entityId: BytesLike,
+      boardEpoch: BigNumberish,
+      newBoardHash: BytesLike,
+      authority: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "computeCancelEntityProviderActionHankoHashForDomain"
+  ): TypedContractMethod<
+    [
+      chainId: BigNumberish,
+      contractAddress: AddressLike,
+      entityNumber: BigNumberish,
+      boardEpoch: BigNumberish,
+      actionNonce: BigNumberish,
+      cancelledActionHash: BytesLike,
+      cancelledActionKind: BigNumberish
     ],
     [string],
     "view"
@@ -618,6 +872,7 @@ export interface HankoCodec extends BaseContract {
       chainId: BigNumberish,
       contractAddress: AddressLike,
       entityNumber: BigNumberish,
+      boardEpoch: BigNumberish,
       to: AddressLike,
       tokenId: BigNumberish,
       amount: BigNumberish,
@@ -645,6 +900,7 @@ export interface HankoCodec extends BaseContract {
       chainId: BigNumberish,
       contractAddress: AddressLike,
       entityNumber: BigNumberish,
+      boardEpoch: BigNumberish,
       depository: AddressLike,
       controlAmount: BigNumberish,
       dividendAmount: BigNumberish,
@@ -681,6 +937,54 @@ export interface HankoCodec extends BaseContract {
       contractAddress: AddressLike,
       encodedBatch: BytesLike,
       nonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "encodeBoardProposalCancelHankoPayloadForDomain"
+  ): TypedContractMethod<
+    [
+      domainSeparator: BytesLike,
+      chainId: BigNumberish,
+      contractAddress: AddressLike,
+      entityId: BytesLike,
+      boardEpoch: BigNumberish,
+      proposedBoardHash: BytesLike,
+      proposedBy: BigNumberish,
+      cancelledBy: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "encodeBoardProposalHankoPayloadForDomain"
+  ): TypedContractMethod<
+    [
+      domainSeparator: BytesLike,
+      chainId: BigNumberish,
+      contractAddress: AddressLike,
+      entityId: BytesLike,
+      boardEpoch: BigNumberish,
+      newBoardHash: BytesLike,
+      authority: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "encodeCancelEntityProviderActionHankoPayloadForDomain"
+  ): TypedContractMethod<
+    [
+      chainId: BigNumberish,
+      contractAddress: AddressLike,
+      entityNumber: BigNumberish,
+      boardEpoch: BigNumberish,
+      actionNonce: BigNumberish,
+      cancelledActionHash: BytesLike,
+      cancelledActionKind: BigNumberish
     ],
     [string],
     "view"
@@ -734,6 +1038,7 @@ export interface HankoCodec extends BaseContract {
       chainId: BigNumberish,
       contractAddress: AddressLike,
       entityNumber: BigNumberish,
+      boardEpoch: BigNumberish,
       to: AddressLike,
       tokenId: BigNumberish,
       amount: BigNumberish,
@@ -761,6 +1066,7 @@ export interface HankoCodec extends BaseContract {
       chainId: BigNumberish,
       contractAddress: AddressLike,
       entityNumber: BigNumberish,
+      boardEpoch: BigNumberish,
       depository: AddressLike,
       controlAmount: BigNumberish,
       dividendAmount: BigNumberish,

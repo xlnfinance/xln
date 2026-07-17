@@ -18,9 +18,9 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../../types';
-import { DEFAULT_SOFT_LIMIT } from '../../../types';
 import { isLeftEntity } from '../../../entity/id';
 import { deriveDelta } from '../../utils';
+import { getDefaultRebalanceBaseFeeForToken } from '../../rebalance-defaults';
 
 export function handleRequestCollateral(
   accountMachine: AccountMachine,
@@ -157,21 +157,44 @@ export function handleRequestCollateral(
  * @param accountMachine - The account after frame commit
  * @param ourEntityId - Our entity ID
  * @param counterpartyId - Counterparty entity ID
- * @param feePolicy - Hub fee policy (base + liquidity + gas), sourced from hub config/profile
+ * @param feePolicy - Exact bilateral fee policy already committed in Account state
  * @returns Array of accountTxs to queue in mempool (empty = no rebalance needed)
  */
 export interface RebalanceFeePolicy {
   policyVersion: number;
-  baseFee: bigint;
+  baseFee?: bigint;
   liquidityFeeBps: bigint;
   gasFee: bigint;
+}
+
+export function resolveAutoRebalanceFeePolicy(
+  accountMachine: AccountMachine,
+  ourEntityId: string,
+  tokenId: number,
+): RebalanceFeePolicy | undefined {
+  const ours = ourEntityId.toLowerCase();
+  const counterpartySide = ours === accountMachine.leftEntity.toLowerCase()
+    ? 'right'
+    : ours === accountMachine.rightEntity.toLowerCase()
+      ? 'left'
+      : undefined;
+  if (!counterpartySide) {
+    throw new Error(`REBALANCE_POLICY_ENTITY_NOT_IN_ACCOUNT:${ourEntityId}`);
+  }
+  const policy = accountMachine.rebalanceFeePolicies?.get(tokenId)?.[counterpartySide];
+  if (!policy) return undefined;
+  return {
+    policyVersion: policy.policyVersion,
+    baseFee: policy.baseFee,
+    liquidityFeeBps: policy.liquidityFeeBps,
+    gasFee: policy.gasFee,
+  };
 }
 
 export function checkAutoRebalance(
   accountMachine: AccountMachine,
   ourEntityId: string,
   counterpartyId: string,
-  feePolicy?: RebalanceFeePolicy,
 ): AccountTx[] {
   const result: AccountTx[] = [];
 
@@ -186,11 +209,11 @@ export function checkAutoRebalance(
   }
 
   const isLeft = isLeftEntity(ourEntityId, counterpartyId);
-  if (!feePolicy) {
-    return result;
-  }
-
-  for (const [tokenId, policy] of accountMachine.shadow.rebalance.policy.entries()) {
+  const orderedPolicies = [...accountMachine.shadow.rebalance.policy.entries()]
+    .sort(([leftTokenId], [rightTokenId]) => leftTokenId - rightTokenId);
+  for (const [tokenId, policy] of orderedPolicies) {
+    const feePolicy = resolveAutoRebalanceFeePolicy(accountMachine, ourEntityId, tokenId);
+    if (!feePolicy) continue;
     // Skip manual mode (r2cRequestSoftLimit === hardLimit convention)
     if (policy.r2cRequestSoftLimit === policy.hardLimit) continue;
 
@@ -208,10 +231,6 @@ export function checkAutoRebalance(
     // Using (outCollateral + outPeerCredit) here would over-trigger after a successful
     // top-up because outCollateral remains high even when risk is already covered.
     const rebalanceTrigger = outPeerCredit;
-    // Global safety floor: tiny balances should not trigger auto-rebalance noise.
-    const effectiveSoftLimit =
-      policy.r2cRequestSoftLimit < DEFAULT_SOFT_LIMIT ? DEFAULT_SOFT_LIMIT : policy.r2cRequestSoftLimit;
-
     // Also dedupe pre-commit queue: if request_collateral is already in account mempool
     // for this token, do not enqueue another copy in the same consensus window.
     const hasQueuedRequest = accountMachine.mempool.some(
@@ -226,9 +245,10 @@ export function checkAutoRebalance(
       continue;
     }
 
-    if (rebalanceTrigger > effectiveSoftLimit) {
+    if (rebalanceTrigger > policy.r2cRequestSoftLimit) {
       const liquidityFee = (outPeerCredit * feePolicy.liquidityFeeBps) / 10000n;
-      const feeAmount = feePolicy.baseFee + feePolicy.gasFee + liquidityFee;
+      const baseFee = feePolicy.baseFee ?? getDefaultRebalanceBaseFeeForToken(tokenId);
+      const feeAmount = baseFee + feePolicy.gasFee + liquidityFee;
 
       // Respect user policy ceiling for automated requests.
       if (feeAmount > policy.maxAcceptableFee) {

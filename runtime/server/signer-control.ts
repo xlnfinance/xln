@@ -3,9 +3,11 @@ import { registerSignerKey } from '../account/crypto';
 import { serializeTaggedJson } from '../protocol/serialization';
 import { getControlBodyErrorStatus } from './auth';
 import type { parseTaggedControlBody as parseTaggedControlBodyType } from './auth';
+import type { Env } from '../types';
 
 type SignerControlDeps = {
   parseTaggedControlBody: typeof parseTaggedControlBodyType;
+  env: Env;
 };
 
 export const handleSignerRegistration = async (
@@ -29,7 +31,7 @@ export const handleSignerRegistration = async (
         { status: 400, headers },
       );
     }
-    registerSignerKey(signerId, ethers.getBytes(privateKeyHex));
+    registerSignerKey(deps.env, signerId, ethers.getBytes(privateKeyHex));
     return new Response(
       serializeTaggedJson({
         ok: true,

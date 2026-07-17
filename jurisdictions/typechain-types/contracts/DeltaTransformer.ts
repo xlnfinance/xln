@@ -120,7 +120,6 @@ export interface DeltaTransformerInterface extends Interface {
   getFunction(
     nameOrSignature:
       | "applyBatch"
-      | "applyBatchWithArgumentTimestamps"
       | "cleanSecret"
       | "decodeArgumentsStrict"
       | "encodeBatch"
@@ -128,16 +127,12 @@ export interface DeltaTransformerInterface extends Interface {
       | "hashToBlock"
       | "hashToTimestamp"
       | "revealSecret"
-      | "supportsArgumentTimestamps"
   ): FunctionFragment;
 
   encodeFunctionData(
     functionFragment: "applyBatch",
-    values: [BigNumberish[], BytesLike, BytesLike, BytesLike]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "applyBatchWithArgumentTimestamps",
     values: [
+      BigNumberish[],
       BigNumberish[],
       BytesLike,
       BytesLike,
@@ -174,16 +169,8 @@ export interface DeltaTransformerInterface extends Interface {
     functionFragment: "revealSecret",
     values: [BytesLike]
   ): string;
-  encodeFunctionData(
-    functionFragment: "supportsArgumentTimestamps",
-    values?: undefined
-  ): string;
 
   decodeFunctionResult(functionFragment: "applyBatch", data: BytesLike): Result;
-  decodeFunctionResult(
-    functionFragment: "applyBatchWithArgumentTimestamps",
-    data: BytesLike
-  ): Result;
   decodeFunctionResult(
     functionFragment: "cleanSecret",
     data: BytesLike
@@ -210,10 +197,6 @@ export interface DeltaTransformerInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "revealSecret",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "supportsArgumentTimestamps",
     data: BytesLike
   ): Result;
 }
@@ -264,17 +247,7 @@ export interface DeltaTransformer extends BaseContract {
   applyBatch: TypedContractMethod<
     [
       deltas: BigNumberish[],
-      encodedBatch: BytesLike,
-      leftArguments: BytesLike,
-      rightArguments: BytesLike
-    ],
-    [bigint[]],
-    "view"
-  >;
-
-  applyBatchWithArgumentTimestamps: TypedContractMethod<
-    [
-      deltas: BigNumberish[],
+      tokenIds: BigNumberish[],
       encodedBatch: BytesLike,
       leftArguments: BytesLike,
       rightArguments: BytesLike,
@@ -307,8 +280,6 @@ export interface DeltaTransformer extends BaseContract {
 
   revealSecret: TypedContractMethod<[secret: BytesLike], [void], "nonpayable">;
 
-  supportsArgumentTimestamps: TypedContractMethod<[], [boolean], "view">;
-
   getFunction<T extends ContractMethod = ContractMethod>(
     key: string | FunctionFragment
   ): T;
@@ -318,18 +289,7 @@ export interface DeltaTransformer extends BaseContract {
   ): TypedContractMethod<
     [
       deltas: BigNumberish[],
-      encodedBatch: BytesLike,
-      leftArguments: BytesLike,
-      rightArguments: BytesLike
-    ],
-    [bigint[]],
-    "view"
-  >;
-  getFunction(
-    nameOrSignature: "applyBatchWithArgumentTimestamps"
-  ): TypedContractMethod<
-    [
-      deltas: BigNumberish[],
+      tokenIds: BigNumberish[],
       encodedBatch: BytesLike,
       leftArguments: BytesLike,
       rightArguments: BytesLike,
@@ -364,9 +324,6 @@ export interface DeltaTransformer extends BaseContract {
   getFunction(
     nameOrSignature: "revealSecret"
   ): TypedContractMethod<[secret: BytesLike], [void], "nonpayable">;
-  getFunction(
-    nameOrSignature: "supportsArgumentTimestamps"
-  ): TypedContractMethod<[], [boolean], "view">;
 
   filters: {};
 }

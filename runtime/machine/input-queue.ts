@@ -1,5 +1,12 @@
 import { TIMING } from '../constants';
-import type { EntityInput, Env, JInput, RuntimeInput, RuntimeTx } from '../types';
+import type {
+  EntityInput,
+  Env,
+  JInput,
+  ReliableDeliveryReceipt,
+  RuntimeInput,
+  RuntimeTx,
+} from '../types';
 import { getWallClockMs } from '../utils';
 import { createStructuredLogger } from '../infra/logger';
 
@@ -8,6 +15,11 @@ const runtimeInputQueueLog = createStructuredLogger('runtime.input_queue');
 export type RuntimeInputQueueDeps = {
   ensureRuntimeState: (env: Env) => NonNullable<Env['runtimeState']>;
   requestRuntimeLoopWake: (env: Env) => void;
+};
+
+export type RuntimeInputQueueOptions = {
+  /** Pre-fence work, including a deterministic continuation of that work. */
+  acceptedBeforeQuiesce?: boolean;
 };
 
 const shouldLogRuntimeInputDebug = (): boolean => {
@@ -48,9 +60,28 @@ export const enqueueRuntimeInputs = (
   runtimeTxs?: RuntimeTx[],
   jInputs?: JInput[],
   explicitTimestamp?: number,
+  reliableReceipts?: ReliableDeliveryReceipt[],
+  options: RuntimeInputQueueOptions = {},
 ): void => {
   const mempool = ensureRuntimeMempool(env);
-  deps.ensureRuntimeState(env);
+  const state = deps.ensureRuntimeState(env);
+  const hasIncomingWork = Boolean(
+    inputs?.length || runtimeTxs?.length || jInputs?.length || reliableReceipts?.length,
+  );
+  if (
+    hasIncomingWork &&
+    state.persistenceQuiescing &&
+    state.persistencePaused &&
+    options.acceptedBeforeQuiesce !== true
+  ) {
+    const runtimeTxTypes = (runtimeTxs ?? []).map((tx) => tx.type).join(',') || 'none';
+    throw new Error(
+      `RUNTIME_INPUT_INGRESS_AFTER_PERSISTENCE_PAUSE:` +
+      `runtime=${String(env.runtimeId || '<unknown>')}:runtimeTxs=${runtimeTxTypes}:` +
+      `entityInputs=${inputs?.length ?? 0}:jInputs=${jInputs?.length ?? 0}:` +
+      `reliableReceipts=${reliableReceipts?.length ?? 0}`,
+    );
+  }
   const normalizedTimestamp = normalizeIngressTimestamp(env, explicitTimestamp);
   if (runtimeTxs && runtimeTxs.length > 0) {
     mempool.runtimeTxs.push(...runtimeTxs);
@@ -60,6 +91,12 @@ export const enqueueRuntimeInputs = (
   }
   if (jInputs && jInputs.length > 0) {
     mempool.jInputs = [...(mempool.jInputs ?? []), ...jInputs];
+  }
+  if (reliableReceipts && reliableReceipts.length > 0) {
+    mempool.reliableReceipts = [
+      ...(mempool.reliableReceipts ?? []),
+      ...reliableReceipts,
+    ];
   }
   if (shouldLogRuntimeInputDebug()) {
     const interestingEntityInputs = (inputs || [])
@@ -79,7 +116,7 @@ export const enqueueRuntimeInputs = (
       });
     }
   }
-  if (inputs?.length || runtimeTxs?.length || jInputs?.length) {
+  if (inputs?.length || runtimeTxs?.length || jInputs?.length || reliableReceipts?.length) {
     const targetQueuedAt = normalizedTimestamp;
     mempool.queuedAt =
       mempool.queuedAt === undefined

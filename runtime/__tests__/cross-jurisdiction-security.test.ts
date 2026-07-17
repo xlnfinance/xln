@@ -198,7 +198,7 @@ describe('cross-jurisdiction security invariants', () => {
     })).rejects.toThrow('CROSS_J_CLEAR_CORRUPT_ROUTE');
   });
 
-  test('target-side disputeStart is blocked until source pull arguments are available', async () => {
+  test('target-side disputeStart reaches exact hanko preflight even when optional pull arguments are unavailable', async () => {
     const env = createEmptyEnv('cross-target-dispute-needs-source-args');
     env.timestamp = 2_000;
     env.quietRuntimeLogs = true;
@@ -228,7 +228,7 @@ describe('cross-jurisdiction security invariants', () => {
     });
 
     expect(result.newState.jBatchState?.batch.disputeStarts).toHaveLength(0);
-    expect(result.newState.messages.at(-1)).toContain('Cross-j target dispute blocked');
+    expect(result.newState.messages.at(-1)).toContain('Missing counterparty dispute hanko');
   });
 
   test('target-side disputeStart with pull arguments reaches normal hanko preflight', async () => {

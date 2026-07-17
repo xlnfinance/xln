@@ -1,121 +1,107 @@
-/**
- * Profile Signing & Verification for XLN Gossip
- *
- * Uses the same Hanko mechanism as accountFrames, disputeHash, and settlements.
- * This is NOT a custom signing scheme - it's the generalized XLN hash signing.
- *
- * ARCHITECTURE:
- * - Profile hash computed from canonical JSON representation
- * - Signed using signEntityHashes() (same as accountFrame signing)
- * - Verified using verifyHankoForHash() (same verification path)
- * - Hanko stored in profile.metadata.profileHanko (ABI-encoded HankoBytes)
- *
- * KEY BINDING:
- * - Hanko contains claim for entityId
- * - Verification checks signer against entity's board validators
- * - Same security model as all other entity operations
- */
-
-import { keccak256 } from 'ethers';
-import { canonicalizeProfile, getBoardPrimaryPublicKey, type Profile } from './gossip';
+import { Signature, keccak256, recoverAddress } from 'ethers';
+import { canonicalizeProfile, type Profile } from './gossip';
 import type { Env, HankoString } from '../types';
-import { inspectHankoForHash, signEntityHashes, verifyHankoForHash } from '../hanko/signing';
-import { getSignerAddress, getSignerPublicKey } from '../account/crypto';
+import { verifyHankoForHash } from '../hanko/signing';
+import { resolveCertifiedRegisteredBoardHash } from '../jurisdiction/board-registry';
+import { getSignerAddress, getSignerPublicKey, signAccountFrame } from '../account/crypto';
 import { serializeTaggedJson } from '../protocol/serialization';
+import {
+  computeEntityProfileDescriptorHash,
+  profileToEntityProfileDescriptor,
+} from './profile-descriptor';
 
-const PROFILE_SIGN_DOMAIN = 'xln-profile-v1';
-const bytesToHex = (bytes: Uint8Array): string =>
-  `0x${Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')}`;
+const PROFILE_ROUTE_DOMAIN = 'xln-profile-runtime-route-v1';
+const SECP256K1_HALF_ORDER = BigInt('0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0');
 
-/**
- * Canonical profile hash for signing
- * Excludes hanko field to avoid circular reference
- */
-export function computeProfileHash(profile: Profile): string {
-  const { metadata, ...rest } = profile;
-  const { profileHanko, ...metadataClean } = metadata || {};
+export const computeProfileHash = (profile: Profile): string => {
+  const canonicalProfile = canonicalizeProfile(profile);
+  return computeEntityProfileDescriptorHash(profileToEntityProfileDescriptor(canonicalProfile));
+};
 
-  const signable = {
-    ...rest,
-    metadata: metadataClean,
+export const computeProfileRouteHash = (profile: Profile): string => {
+  const canonicalProfile = canonicalizeProfile(profile);
+  const route = {
+    domain: PROFILE_ROUTE_DOMAIN,
+    profileHash: computeProfileHash(canonicalProfile),
+    entityId: canonicalProfile.entityId,
+    runtimeId: canonicalProfile.runtimeId,
+    runtimeSignerId: canonicalProfile.runtimeSignerId,
+    runtimeEncPubKey: canonicalProfile.runtimeEncPubKey,
+    lastUpdated: canonicalProfile.lastUpdated,
+    wsUrl: canonicalProfile.wsUrl,
+    relays: canonicalProfile.relays,
+    mirrors: canonicalProfile.metadata.mirrors ?? [],
   };
+  return keccak256(new TextEncoder().encode(serializeTaggedJson(route)));
+};
 
-  const json = serializeTaggedJson(signable);
-  const message = `${PROFILE_SIGN_DOMAIN}:${json}`;
+const boardValidatorFor = (profile: Profile, signerId: string) => {
+  const target = signerId.trim().toLowerCase();
+  return profile.metadata.board.validators.find(
+    (validator) => validator.signerId.trim().toLowerCase() === target,
+  );
+};
 
-  return keccak256(new TextEncoder().encode(message));
-}
+const resolveProfileCertifiedBoardHash = (env: Env, profile: Profile): string | null => {
+  const jurisdiction = profile.metadata.jurisdiction;
+  if (
+    !jurisdiction ||
+    !Number.isSafeInteger(Number(jurisdiction.chainId)) ||
+    Number(jurisdiction.chainId) <= 0 ||
+    typeof jurisdiction.depositoryAddress !== 'string' ||
+    typeof jurisdiction.entityProviderAddress !== 'string'
+  ) return null;
+  // A missing registration is represented by a null lookup. Any thrown error
+  // means the certified store or its authority claim is corrupt/ambiguous and
+  // must remain fatal. Falling back to the profile-embedded board in that case
+  // would turn local corruption into successful authentication.
+  return resolveCertifiedRegisteredBoardHash(env, profile.entityId, {
+    chainId: Number(jurisdiction.chainId),
+    depositoryAddress: jurisdiction.depositoryAddress,
+    entityProviderAddress: jurisdiction.entityProviderAddress,
+  });
+};
 
-/**
- * Sign a profile using Hanko mechanism (same as accountFrames)
- * Returns profile with hanko in metadata
- */
-export async function signProfile(
+const assertEntityCertification = async (env: Env, profile: Profile): Promise<void> => {
+  const hanko = profile.metadata.profileHanko as HankoString | undefined;
+  if (!hanko) throw new Error(`PROFILE_ENTITY_CERTIFICATION_REQUIRED: entity=${profile.entityId}`);
+  const registeredBoardHash = resolveProfileCertifiedBoardHash(env, profile);
+  const result = await verifyHankoForHash(
+    hanko,
+    computeProfileHash(profile),
+    profile.entityId,
+    env,
+    registeredBoardHash ? { registeredBoardHash } : undefined,
+  );
+  if (!result.valid) throw new Error(`PROFILE_ENTITY_CERTIFICATION_INVALID: entity=${profile.entityId}`);
+};
+
+export async function signProfileRuntimeRoute(
   env: Env,
   profile: Profile,
-  signerId: string
+  signerId: string,
 ): Promise<Profile> {
   const canonicalProfile = canonicalizeProfile(profile);
+  await assertEntityCertification(env, canonicalProfile);
+  const signerAddress = getSignerAddress(env, signerId)?.toLowerCase() ?? '';
+  // Select authority by its exact board alias, then bind that alias to the
+  // locally recovered EOA below. Matching by EOA here would erase the signed
+  // alias and recreate the restore divergence this manifest is meant to stop.
+  const validator = boardValidatorFor(canonicalProfile, signerId);
+  if (!validator) {
+    throw new Error(`PROFILE_ROUTE_SIGNER_NOT_ON_BOARD: entity=${profile.entityId} signerId=${signerId}`);
+  }
   const signerPublicKey = getSignerPublicKey(env, signerId);
-  if (!signerPublicKey) {
-    throw new Error(`PROFILE_SIGN_ENTITY_PUBLIC_KEY_REQUIRED: entity=${canonicalProfile.entityId} signerId=${signerId}`);
+  const publicKeyHex = signerPublicKey ? `0x${Buffer.from(signerPublicKey).toString('hex')}`.toLowerCase() : '';
+  if (!signerAddress || signerAddress.toLowerCase() !== validator.signer || publicKeyHex !== validator.publicKey) {
+    throw new Error(`PROFILE_ROUTE_SIGNER_IDENTITY_MISMATCH: entity=${profile.entityId} signerId=${signerId}`);
   }
-  const entityPublicKey = bytesToHex(signerPublicKey);
-  const boardPrimaryPublicKey = getBoardPrimaryPublicKey(canonicalProfile.metadata.board, canonicalProfile.entityId);
-  if (boardPrimaryPublicKey !== entityPublicKey) {
-    throw new Error(
-      `PROFILE_SIGN_ENTITY_PUBLIC_KEY_MISMATCH: entity=${canonicalProfile.entityId} signerId=${signerId}`,
-    );
-  }
-
-  const hash = computeProfileHash(canonicalProfile);
-
-  // Use same signing mechanism as accountFrames
-  const hankos = await signEntityHashes(
-    env,
-    canonicalProfile.entityId,
-    signerId,
-    [hash]
-  );
-
-  const profileHanko = hankos[0];
-  if (!profileHanko) {
-    throw new Error('PROFILE_SIGN_FAILED: No hanko returned');
-  }
-
-  // Fail fast if we just produced a non-canonical lazy-entity hanko.
-  // This catches wrong signer-key selection at the source runtime.
-  try {
-    const details = await inspectHankoForHash(profileHanko, hash);
-    const reconstructedBoardHash = details.claims[0]?.reconstructedBoardHash?.toLowerCase();
-    const expectedEntityId = canonicalProfile.entityId.toLowerCase();
-    if (reconstructedBoardHash && reconstructedBoardHash !== expectedEntityId) {
-      const recovered = details.recoveredAddresses[0] || 'none';
-      const envSignerAddress = getSignerAddress(env, signerId) || 'none';
-      throw new Error(
-        `PROFILE_SIGN_SOURCE_MISMATCH: entity=${expectedEntityId} signerId=${signerId} ` +
-        `envSigner=${envSignerAddress} recovered=${recovered} reconstructed=${reconstructedBoardHash}`,
-      );
-    }
-  } catch (error) {
-    throw error instanceof Error
-      ? error
-      : new Error(`PROFILE_SIGN_SOURCE_INSPECT_FAILED: ${String(error)}`);
-  }
-
-  return canonicalizeProfile({
-    ...canonicalProfile,
-    metadata: {
-      ...canonicalProfile.metadata,
-      profileHanko,
-    },
-  });
+  const { runtimeSignature: _previousSignature, ...withoutRuntimeSignature } = canonicalProfile;
+  const unsigned = canonicalizeProfile({ ...withoutRuntimeSignature, runtimeSignerId: validator.signerId });
+  const runtimeSignature = signAccountFrame(env, signerId, computeProfileRouteHash(unsigned));
+  return canonicalizeProfile({ ...unsigned, runtimeSignature });
 }
 
-/**
- * Verify profile using Hanko mechanism (same as accountFrame verification)
- * Self-contained: Hanko embeds the board, no external lookup needed
- */
 export type ProfileVerifyResult = {
   valid: boolean;
   reason?: string;
@@ -123,33 +109,48 @@ export type ProfileVerifyResult = {
   signerId?: string;
 };
 
-export async function verifyProfileSignature(
-  profile: Profile,
-  env?: Env
-): Promise<ProfileVerifyResult> {
-  const canonicalProfile = canonicalizeProfile(profile);
-  // Prefer Hanko verification
-  const hanko = canonicalProfile.metadata['profileHanko'] as HankoString | undefined;
-  if (hanko) {
-    const hash = computeProfileHash(canonicalProfile);
-    const result = await verifyHankoForHash(hanko, hash, canonicalProfile.entityId, env);
-    if (!result.valid) {
-      return {
-        valid: false,
-        reason: `hanko_invalid: entityId=${result.entityId?.slice(-8) || 'none'}`,
-        hash,
-      };
-    }
-    return { valid: true, hash };
+const hasCanonicalRouteSignature = (signature: string): boolean => {
+  if (!/^0x[0-9a-f]{128}0[01]$/i.test(signature)) return false;
+  try {
+    const parsed = Signature.from(signature);
+    return BigInt(parsed.s) > 0n && BigInt(parsed.s) <= SECP256K1_HALF_ORDER;
+  } catch {
+    return false;
   }
+};
 
-  return { valid: false, reason: 'no_signature' };
+const verifyRuntimeRouteSignature = (profile: Profile): ProfileVerifyResult => {
+  const signerId = String(profile.runtimeSignerId || '').trim().toLowerCase();
+  const signature = String(profile.runtimeSignature || '').trim().toLowerCase();
+  const validator = boardValidatorFor(profile, signerId);
+  if (!signerId || !validator) return { valid: false, reason: 'runtime_signer_not_on_board', signerId };
+  if (!hasCanonicalRouteSignature(signature)) return { valid: false, reason: 'runtime_signature_non_canonical', signerId };
+  const hash = computeProfileRouteHash(profile);
+  if (recoverAddress(hash, signature).toLowerCase() !== validator.signer) {
+    return { valid: false, reason: 'runtime_signature_invalid', hash, signerId };
+  }
+  return { valid: true, hash, signerId };
+};
+
+export async function verifyProfileSignature(profile: Profile, env?: Env): Promise<ProfileVerifyResult> {
+  const canonicalProfile = canonicalizeProfile(profile);
+  const hash = computeProfileHash(canonicalProfile);
+  const hanko = canonicalProfile.metadata.profileHanko as HankoString | undefined;
+  if (!hanko) return { valid: false, reason: 'entity_certification_missing', hash };
+  let registeredBoardHash: string | null = null;
+  if (env && canonicalProfile.metadata.jurisdiction) {
+    registeredBoardHash = resolveProfileCertifiedBoardHash(env, canonicalProfile);
+  }
+  const entityResult = await verifyHankoForHash(
+    hanko,
+    hash,
+    canonicalProfile.entityId,
+    env,
+    registeredBoardHash ? { registeredBoardHash } : undefined,
+  );
+  if (!entityResult.valid) return { valid: false, reason: 'entity_certification_invalid', hash };
+  return verifyRuntimeRouteSignature(canonicalProfile);
 }
 
-/**
- * Check if profile has a valid signature (sync check for filtering)
- * Note: For full Hanko verification, use async verifyProfileSignature()
- */
-export function hasValidProfileSignature(profile: Profile): boolean {
-  return !!profile.metadata.profileHanko;
-}
+export const hasValidProfileSignature = (profile: Profile): boolean =>
+  Boolean(profile.metadata.profileHanko && profile.runtimeSignerId && profile.runtimeSignature);

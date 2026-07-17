@@ -7,10 +7,12 @@ import { connectHub } from './utils/e2e-connect';
 import { getRenderedExternalBalance, getRenderedReserveBalance } from './utils/e2e-account-ui';
 import { startDisputeFromManageUi } from './utils/e2e-account-workspace';
 import { capturePageScreenshot } from './utils/e2e-screenshots';
-import { deriveDelta } from '../runtime/account/utils';
+import { enqueueEntityTxs, enqueueRuntimeInput } from './utils/e2e-runtime-input';
+import { deriveDelta, getTokenInfo } from '../runtime/account/utils';
 
 const TOKEN_ID_USDC = 1;
-const TOKEN_SCALE = 10n ** 18n;
+const TOKEN_DECIMALS = getTokenInfo(TOKEN_ID_USDC).decimals;
+const TOKEN_SCALE = 10n ** BigInt(TOKEN_DECIMALS);
 const USD_150 = (150n * TOKEN_SCALE).toString();
 const USD_100 = (100n * TOKEN_SCALE).toString();
 const USD_50 = (50n * TOKEN_SCALE).toString();
@@ -36,8 +38,6 @@ type DebtSnapshot = {
   createdAmount: bigint;
   paidAmount: bigint;
   remainingAmount: bigint;
-  forgivenAmount: bigint;
-  updates: string[];
 };
 
 async function newRuntimePage(browser: Browser, label: 'alice' | 'bob'): Promise<{ page: Page; runtime: RuntimeRef }> {
@@ -179,7 +179,18 @@ async function readAccountProgress(
   entityId: string,
   signerId: string,
   counterpartyId: string,
-): Promise<{ exists: boolean; pendingFrame: boolean; currentHeight: number }> {
+): Promise<{
+  exists: boolean;
+  pendingFrame: boolean;
+  currentHeight: number;
+  entityHeight?: number;
+  mempoolTxs?: string[];
+  pendingFrameTxs?: string[];
+  pendingInputKind?: string;
+  proposals?: Array<{ status: string; txs: string[] }>;
+  lastMessages?: string[];
+  lastQuarantine?: string;
+}> {
   return page.evaluate(({ entityId, signerId, counterpartyId }) => {
     const env = (window as any).isolatedEnv;
     if (!env?.eReplicas) return { exists: false, pendingFrame: false, currentHeight: 0 };
@@ -194,6 +205,26 @@ async function readAccountProgress(
       exists: !!account,
       pendingFrame: !!account?.pendingFrame,
       currentHeight: Number(account?.currentHeight || 0),
+      entityHeight: Number(rep?.state?.height || 0),
+      mempoolTxs: Array.isArray(account?.mempool)
+        ? account.mempool.map((tx: any) => String(tx?.type || 'unknown'))
+        : [],
+      pendingFrameTxs: Array.isArray(account?.pendingFrame?.accountTxs)
+        ? account.pendingFrame.accountTxs.map((tx: any) => String(tx?.type || 'unknown'))
+        : [],
+      pendingInputKind: String(account?.pendingAccountInput?.kind || ''),
+      proposals: rep?.state?.proposals instanceof Map
+        ? Array.from(rep.state.proposals.values()).map((proposal: any) => ({
+            status: String(proposal?.status || ''),
+            txs: Array.isArray(proposal?.action?.data?.txs)
+              ? proposal.action.data.txs.map((tx: any) => String(tx?.type || 'unknown'))
+              : [],
+          }))
+        : [],
+      lastMessages: Array.isArray(rep?.state?.messages)
+        ? rep.state.messages.slice(-5).map((message: unknown) => String(message))
+        : [],
+      lastQuarantine: String(env?.runtimeState?.quarantinedRuntimeInputs?.at?.(-1)?.message || ''),
     };
   }, { entityId, signerId, counterpartyId });
 }
@@ -223,39 +254,6 @@ async function ensurePrivateAccountOpenViaUi(
       return state.exists && !state.pendingFrame && state.currentHeight > 0;
     }, { timeout: 60_000, intervals: [500, 1000, 2000] })
     .toBe(true);
-}
-
-async function enqueueEntityTxs(
-  page: Page,
-  entityId: string,
-  signerId: string,
-  entityTxs: Array<{ type: string; data: Record<string, unknown> }>,
-): Promise<void> {
-  const result = await page.evaluate(async ({ entityId, signerId, entityTxs }) => {
-    const view = window as typeof window & {
-      isolatedEnv?: unknown;
-      __xln_env?: unknown;
-      XLN?: {
-        enqueueRuntimeInput?: (env: unknown, input: unknown) => void;
-      };
-      __xln_instance?: {
-        enqueueRuntimeInput?: (env: unknown, input: unknown) => void;
-      };
-    };
-    const env = view.isolatedEnv ?? view.__xln_env;
-    const XLN = view.XLN
-      ?? view.__xln_instance
-      ?? await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
-    if (!env || !XLN?.enqueueRuntimeInput) {
-      return { ok: false, error: 'isolatedEnv/XLN missing' };
-    }
-    XLN.enqueueRuntimeInput(env, {
-      runtimeTxs: [],
-      entityInputs: [{ entityId, signerId, entityTxs }],
-    });
-    return { ok: true };
-  }, { entityId, signerId, entityTxs });
-  expect(result.ok, result.error || 'failed to enqueue entity txs').toBe(true);
 }
 
 async function readJBatchSnapshot(
@@ -460,12 +458,23 @@ async function sendDirectPayment(
       description: 'debt-e2e-direct-bilateral',
     },
   }]);
-  await expect
-    .poll(async () => (await readAccountProgress(senderPage, senderEntityId, senderSignerId, recipientId)).currentHeight, {
-      timeout: 45_000,
-      intervals: [500, 1000, 1500],
-    })
-    .toBeGreaterThan(senderBefore.currentHeight);
+  try {
+    await expect
+      .poll(async () => (await readAccountProgress(senderPage, senderEntityId, senderSignerId, recipientId)).currentHeight, {
+        timeout: 45_000,
+        intervals: [500, 1000, 1500],
+      })
+      .toBeGreaterThan(senderBefore.currentHeight);
+  } catch (error) {
+    const [sender, recipient] = await Promise.all([
+      readAccountProgress(senderPage, senderEntityId, senderSignerId, recipientId),
+      readAccountProgress(recipientPage, recipientEntityId, recipientSignerId, senderEntityId),
+    ]);
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}\n` +
+      `Direct payment state: ${JSON.stringify({ sender, recipient })}`,
+    );
+  }
   await expect
     .poll(async () => (await readAccountProgress(recipientPage, recipientEntityId, recipientSignerId, senderEntityId)).currentHeight, {
       timeout: 45_000,
@@ -835,8 +844,6 @@ async function readDebtSnapshotsForCounterparty(
           createdAmount: BigInt(entry?.createdAmount || 0n),
           paidAmount: BigInt(entry?.paidAmount || 0n),
           remainingAmount: BigInt(entry?.remainingAmount || 0n),
-          forgivenAmount: BigInt(entry?.forgivenAmount || 0n),
-          updates: Array.isArray(entry?.updates) ? entry.updates.map((update: any) => String(update?.eventType || '')) : [],
         });
       }
     }
@@ -908,7 +915,7 @@ async function waitForMirroredDebtSnapshots(
 ): Promise<{ left: DebtSnapshot; right: DebtSnapshot }> {
   let latest: { left: DebtSnapshot | null; right: DebtSnapshot | null } = { left: null, right: null };
   const readUiDebtRow = async (page: Page): Promise<DebtSnapshot | null> =>
-    page.evaluate(() => {
+    page.evaluate((tokenDecimals) => {
       const panel = document.querySelector('[data-testid="debt-panel"]') as HTMLDetailsElement | null;
       if (!panel) return null;
       panel.open = true;
@@ -926,8 +933,10 @@ async function waitForMirroredDebtSnapshots(
         const digits = value.replace(/,/g, '');
         const [wholePartRaw, fractionalPartRaw = ''] = digits.split('.');
         const wholePart = wholePartRaw.trim() || '0';
-        const fractionalPart = fractionalPartRaw.trim().replace(/\D/g, '').slice(0, 18).padEnd(18, '0');
-        return BigInt(wholePart) * 10n ** 18n + BigInt(fractionalPart || '0');
+        const fractionalPart = fractionalPartRaw.trim().replace(/\D/g, '')
+          .slice(0, tokenDecimals)
+          .padEnd(tokenDecimals, '0');
+        return BigInt(wholePart) * 10n ** BigInt(tokenDecimals) + BigInt(fractionalPart || '0');
       };
       return {
         debtId: testId,
@@ -936,10 +945,8 @@ async function waitForMirroredDebtSnapshots(
         createdAmount: normalize(created),
         paidAmount: normalize(paid),
         remainingAmount: normalize(left),
-        forgivenAmount: 0n,
-        updates: text.includes('Open') ? ['DebtCreated'] : [],
       };
-    });
+    }, TOKEN_DECIMALS);
   const pickOpenDebt = (rows: DebtSnapshot[]): DebtSnapshot | null =>
     rows.find((row) =>
       row.status === 'open'
@@ -1038,34 +1045,27 @@ async function faucetReserve(page: Page, entityId: string, symbol = 'USDC'): Pro
 }
 
 async function enforceDebtDirect(page: Page, entityId: string, tokenId: number): Promise<void> {
-  const result = await page.evaluate(async ({ entityId, tokenId }) => {
+  const input = await page.evaluate(async ({ entityId, tokenId }) => {
     const view = window as typeof window & {
       isolatedEnv?: unknown;
       __xln_env?: unknown;
       XLN?: {
         buildDebtEnforcementRuntimeInput?: (env: unknown, params: { entityId: string; tokenId: number }) => unknown;
-        enqueueRuntimeInput?: (env: unknown, input: unknown) => void;
-        process?: (env: unknown) => Promise<unknown>;
       };
       __xln_instance?: {
         buildDebtEnforcementRuntimeInput?: (env: unknown, params: { entityId: string; tokenId: number }) => unknown;
-        enqueueRuntimeInput?: (env: unknown, input: unknown) => void;
-        process?: (env: unknown) => Promise<unknown>;
       };
     };
     const env = view.isolatedEnv ?? view.__xln_env;
     const XLN = view.XLN
       ?? view.__xln_instance
       ?? await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
-    if (!env || !XLN?.buildDebtEnforcementRuntimeInput || !XLN?.enqueueRuntimeInput || !XLN?.process) {
-      return { ok: false, error: 'isolatedEnv/XLN missing' };
+    if (!env || !XLN?.buildDebtEnforcementRuntimeInput) {
+      throw new Error('DEBT_ENFORCEMENT_BUILDER_MISSING');
     }
-    const input = XLN.buildDebtEnforcementRuntimeInput(env, { entityId, tokenId });
-    XLN.enqueueRuntimeInput(env, input);
-    await XLN.process(env);
-    return { ok: true };
+    return XLN.buildDebtEnforcementRuntimeInput(env, { entityId, tokenId });
   }, { entityId, tokenId });
-  expect(result.ok, result.error || 'failed to enforce debt').toBe(true);
+  await enqueueRuntimeInput(page, input as Parameters<typeof enqueueRuntimeInput>[1]);
 }
 
 async function enforceDebtUntilSettled(
@@ -1203,7 +1203,7 @@ async function openOutstandingDebtToken(page: Page, symbol = 'USDC'): Promise<vo
 }
 
 test.describe('debt ledger', () => {
-  test('creates one mirrored debt on both sides after dispute finalize', async ({ browser }, testInfo) => {
+  test('creates one mirrored debt on both sides after dispute finalize', { tag: '@resilience' }, async ({ browser }, testInfo) => {
     test.setTimeout(LONG_E2E ? 360_000 : 240_000);
     const step = (label: string) => console.log(`[debt-e2e] ${label}`);
 
@@ -1327,11 +1327,9 @@ test.describe('debt ledger', () => {
     expect(mirrored.left.createdAmount).toBe(BigInt(USD_150));
     expect(mirrored.left.remainingAmount).toBe(BigInt(USD_150));
     expect(mirrored.left.paidAmount).toBe(0n);
-    expect(mirrored.left.updates).toEqual(['DebtCreated']);
     expect(mirrored.right.createdAmount).toBe(BigInt(USD_150));
     expect(mirrored.right.remainingAmount).toBe(BigInt(USD_150));
     expect(mirrored.right.paidAmount).toBe(0n);
-    expect(mirrored.right.updates).toEqual(['DebtCreated']);
     expect(mirrored.left.direction).not.toBe(mirrored.right.direction);
 
     await Promise.all([

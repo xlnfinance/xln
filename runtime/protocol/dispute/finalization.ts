@@ -26,7 +26,8 @@ export type DisputeTokenFinalizationInput = Readonly<{
   leftReserve: bigint;
   rightReserve: bigint;
   collateral: bigint;
-  finalDelta: bigint;
+  ondelta: bigint;
+  offdelta: bigint;
   existingDebtOutstanding?: DisputeSideAmounts;
 }>;
 
@@ -78,10 +79,9 @@ function requireUint256(value: unknown, path: string): asserts value is bigint {
   if (value < 0n || value > UINT256_MAX) fail(path, 'must fit uint256');
 }
 
-function requireFinalDelta(value: unknown): asserts value is bigint {
-  if (typeof value !== 'bigint') fail('finalDelta', 'must be a bigint');
-  if (value < INT256_MIN || value > INT256_MAX) fail('finalDelta', 'must fit int256');
-  if (value === INT256_MIN) fail('finalDelta', 'cannot equal int256.min because Solidity negation reverts');
+function requireInt256(value: unknown, path: string): asserts value is bigint {
+  if (typeof value !== 'bigint') fail(path, 'must be a bigint');
+  if (value < INT256_MIN || value > INT256_MAX) fail(path, 'must fit int256');
 }
 
 function checkedAdd(left: bigint, right: bigint, path: string): bigint {
@@ -148,7 +148,15 @@ function validateInput(input: DisputeTokenFinalizationInput): void {
   requireUint256(input.leftReserve, 'leftReserve');
   requireUint256(input.rightReserve, 'rightReserve');
   requireUint256(input.collateral, 'collateral');
-  requireFinalDelta(input.finalDelta);
+  requireInt256(input.ondelta, 'ondelta');
+  requireInt256(input.offdelta, 'offdelta');
+  // Solidity represents the exact sum as sign + uint256 magnitude. The only
+  // mathematical result outside that domain is -2^256. Runtime never signs it
+  // and a later unilateral R2C can only increase ondelta, so rejecting it does
+  // not strand a proof that was valid when signed.
+  if (input.ondelta + input.offdelta < -UINT256_MAX) {
+    fail('finalDelta', 'magnitude exceeds uint256');
+  }
 }
 
 function deriveNewDebt(
@@ -163,6 +171,7 @@ function deriveNewDebt(
 
 function buildResult(
   input: DisputeTokenFinalizationInput,
+  finalDelta: bigint,
   debt: DisputeSideAmounts,
   allocation: DisputeSideAmounts,
   shortfall: DisputeDirectionAmounts,
@@ -175,7 +184,7 @@ function buildResult(
   const reserveIncrease = reserves.left + reserves.right - input.leftReserve - input.rightReserve;
   return {
     tokenId: input.tokenId,
-    finalDelta: input.finalDelta,
+    finalDelta,
     before: { reserves: { left: input.leftReserve, right: input.rightReserve }, collateral: input.collateral, debtOutstanding: debt, custodyTotal: beforeTotal },
     collateralAllocation: allocation,
     shortfall,
@@ -199,13 +208,14 @@ export function deriveDisputeTokenFinalization(
   input: DisputeTokenFinalizationInput,
 ): DisputeTokenFinalization {
   validateInput(input);
+  const finalDelta = input.ondelta + input.offdelta;
   const debt = resolveDebt(input);
-  const allocation = collateralAllocation(input.finalDelta, input.collateral);
-  const shortfall = deriveShortfall(input.finalDelta, input.collateral);
+  const allocation = collateralAllocation(finalDelta, input.collateral);
+  const shortfall = deriveShortfall(finalDelta, input.collateral);
   const paid = deriveReservePaid(input, debt, shortfall);
   const newDebt = deriveNewDebt(shortfall, paid);
   const reserves = derivePostReserves(input, allocation, paid);
-  return buildResult(input, debt, allocation, shortfall, paid, newDebt, reserves);
+  return buildResult(input, finalDelta, debt, allocation, shortfall, paid, newDebt, reserves);
 }
 
 export function deriveDisputeFinalization(

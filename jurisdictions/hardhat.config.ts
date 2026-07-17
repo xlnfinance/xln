@@ -8,6 +8,7 @@ const deployerAccounts = () => {
   return [key.startsWith("0x") ? key : `0x${key}`];
 };
 const requiredRpcPlaceholder = (envName: string) => process.env[envName] || "http://127.0.0.1:0";
+const typechainOutDir = process.env.XLN_TYPECHAIN_OUT_DIR || "typechain-types";
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -21,7 +22,7 @@ const config: HardhatUserConfig = {
     },
   },
   typechain: {
-    outDir: "typechain-types",
+    outDir: typechainOutDir,
     target: "ethers-v6",
   },
   networks: {

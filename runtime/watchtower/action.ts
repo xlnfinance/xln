@@ -12,9 +12,9 @@ import type { LastResortTowerAppointment, WatchtowerStore, StoredTowerActionRece
 const DEPOSITORY_MINIMAL_ABI = [
   'function accountKey(bytes32 e1, bytes32 e2) view returns (bytes)',
   'function defaultDisputeDelay() view returns (uint256)',
-  'function _accounts(bytes acctKey) view returns (uint256 nonce, bytes32 disputeHash, uint256 disputeTimeout, uint256 disputeStartTimestamp)',
-  'function watchtowerCounterDispute(bytes32 entityId, (bytes32 counterentity,uint256 initialNonce,uint256 finalNonce,bytes32 initialProofbodyHash,(bytes32 watchSeed,int256[] offdeltas,uint256[] tokenIds,(address transformerAddress,bytes encodedBatch,(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers) finalProofbody,bytes leftArguments,bytes rightArguments,bytes starterInitialArguments,bytes starterIncrementedArguments,bytes sig,bool startedByLeft,uint256 disputeUntilBlock,bool cooperative) params, uint256 lastResortWindowBlocks, uint256 appointmentSequence, bytes ownerAuthorizationHanko) returns (bool)',
-  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments)',
+  'function _accounts(bytes acctKey) view returns (uint256 nonce, bytes32 disputeHash, uint256 disputeTimeout, uint256 disputeStartTimestamp, bytes32 disputeInitialProofbodyHash, bytes32 starterInitialArgumentsCommitment, bytes32 starterIncrementedArgumentsCommitment, bool disputeStartedByLeft)',
+  'function watchtowerCounterDispute(bytes32 entityId, (bytes32 counterentity,uint256 initialNonce,uint256 finalNonce,bytes32 initialProofbodyHash,(bytes32 watchSeed,int256[] offdeltas,uint256[] tokenIds,(address transformerAddress,bytes encodedBatch,(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers) finalProofbody,bytes starterArguments,bytes otherArguments,bytes sig,bool startedByLeft,bool cooperative) params, uint256 lastResortWindowBlocks, uint256 appointmentSequence, bytes ownerAuthorizationHanko) returns (bool)',
+  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments, uint256 disputeTimeout)',
 ] as const;
 
 const DEPOSITORY_INTERFACE = new Interface(DEPOSITORY_MINIMAL_ABI);
@@ -67,7 +67,6 @@ const normalizeFinalDisputeProof = (value: unknown): TowerFinalDisputeProof => {
     finalProofbody: normalizedProofBody,
     leftArguments: isHexLike(candidate['leftArguments']) ? String(candidate['leftArguments']) : '0x',
     rightArguments: isHexLike(candidate['rightArguments']) ? String(candidate['rightArguments']) : '0x',
-    starterIncrementedArguments: isHexLike(candidate['starterIncrementedArguments']) ? String(candidate['starterIncrementedArguments']) : '0x',
     sig: isHexLike(candidate['sig']) ? String(candidate['sig']) : '0x',
   };
 };
@@ -161,7 +160,11 @@ type WatchtowerSweepOptions = {
       nonce: bigint;
       disputeHash: string;
       disputeTimeout: bigint;
-      disputeStartTimestamp?: bigint;
+      disputeStartTimestamp: bigint;
+      disputeInitialProofbodyHash: string;
+      starterInitialArgumentsCommitment: string;
+      starterIncrementedArgumentsCommitment: string;
+      disputeStartedByLeft: boolean;
     }>;
     defaultDisputeDelay?: () => Promise<bigint>;
     watchtowerCounterDispute: (
@@ -172,13 +175,10 @@ type WatchtowerSweepOptions = {
         finalNonce: number;
         initialProofbodyHash: string;
         finalProofbody: Record<string, unknown>;
-        leftArguments: string;
-        rightArguments: string;
-        starterInitialArguments: string;
-        starterIncrementedArguments: string;
+        starterArguments: string;
+        otherArguments: string;
         sig: string;
         startedByLeft: boolean;
-        disputeUntilBlock: number;
         cooperative: boolean;
       },
       lastResortWindowBlocks: number,
@@ -253,26 +253,47 @@ type ActiveDisputeContext = {
   starterInitialArguments: string;
   starterIncrementedArguments: string;
   startedByLeft: boolean;
-  disputeUntilBlock: number;
 };
+
+type OnchainDisputeAccount = {
+  nonce: bigint;
+  disputeHash: string;
+  disputeTimeout: bigint;
+  disputeStartTimestamp: bigint;
+  disputeInitialProofbodyHash: string;
+  starterInitialArgumentsCommitment: string;
+  starterIncrementedArgumentsCommitment: string;
+  disputeStartedByLeft: boolean;
+};
+
+const disputeArgumentCommitment = (
+  value: string,
+  startedByLeft: boolean,
+  disputeStartTimestamp: bigint,
+): string => ethers.keccak256(ABI_CODER.encode(
+  ['bytes', 'bool', 'uint256'],
+  [value, startedByLeft, disputeStartTimestamp],
+));
 
 const encodeDisputeHash = (
   initialNonce: number,
   startedByLeft: boolean,
   disputeTimeout: bigint,
   initialProofbodyHash: string,
-  starterInitialArguments: string,
-  starterIncrementedArguments: string,
+  disputeStartTimestamp: bigint,
+  starterInitialArgumentsCommitment: string,
+  starterIncrementedArgumentsCommitment: string,
 ): string => ethers.keccak256(
   ethers.solidityPacked(
-    ['uint256', 'bool', 'uint256', 'bytes32', 'bytes32', 'bytes32'],
+    ['uint256', 'bool', 'uint256', 'bytes32', 'uint256', 'bytes32', 'bytes32'],
     [
       BigInt(initialNonce),
       startedByLeft,
       disputeTimeout,
       initialProofbodyHash,
-      ethers.keccak256(starterInitialArguments),
-      ethers.keccak256(starterIncrementedArguments),
+      disputeStartTimestamp,
+      starterInitialArgumentsCommitment,
+      starterIncrementedArgumentsCommitment,
     ],
   ),
 );
@@ -280,15 +301,14 @@ const encodeDisputeHash = (
 const findActiveDisputeContext = async (
   provider: Pick<WatchtowerSweepProvider, 'getLogs'>,
   watch: TowerLastResortWatchV1,
-  disputeHash: string,
+  account: OnchainDisputeAccount,
   currentBlock: bigint,
-  disputeTimeout: bigint,
   fromBlockHint?: bigint,
 ): Promise<ActiveDisputeContext> => {
   if (typeof provider.getLogs !== 'function') {
     throw new Error('WATCHTOWER_PROVIDER_GET_LOGS_UNAVAILABLE');
   }
-  const latestBlock = Math.max(0, Math.min(Number(currentBlock), Number(disputeTimeout)));
+  const latestBlock = Math.max(0, Math.min(Number(currentBlock), Number(account.disputeTimeout)));
   const hintedFromBlock = Number(fromBlockHint || 0n);
   const fromBlock = Number.isFinite(hintedFromBlock) && hintedFromBlock > 0
     ? Math.max(0, Math.floor(hintedFromBlock))
@@ -322,15 +342,37 @@ const findActiveDisputeContext = async (
       const watchSeed = normalizeHex32(parsed.args[4], 'EVENT_WATCH_SEED');
       const starterInitialArguments = String(parsed.args[5] || '0x');
       const starterIncrementedArguments = String(parsed.args[6] || '0x');
+      const eventDisputeTimeout = BigInt(parsed.args[7]);
       const startedByLeft = sender < counterentity;
+      if (
+        initialNonce !== Number(account.nonce) ||
+        initialProofbodyHash !== account.disputeInitialProofbodyHash.toLowerCase() ||
+        eventDisputeTimeout !== account.disputeTimeout ||
+        startedByLeft !== account.disputeStartedByLeft
+      ) continue;
+      const initialCommitment = disputeArgumentCommitment(
+        starterInitialArguments,
+        startedByLeft,
+        account.disputeStartTimestamp,
+      );
+      const incrementedCommitment = disputeArgumentCommitment(
+        starterIncrementedArguments,
+        startedByLeft,
+        account.disputeStartTimestamp,
+      );
+      if (
+        initialCommitment.toLowerCase() !== account.starterInitialArgumentsCommitment.toLowerCase() ||
+        incrementedCommitment.toLowerCase() !== account.starterIncrementedArgumentsCommitment.toLowerCase()
+      ) continue;
       if (encodeDisputeHash(
         initialNonce,
         startedByLeft,
-        disputeTimeout,
+        account.disputeTimeout,
         initialProofbodyHash,
-        starterInitialArguments,
-        starterIncrementedArguments,
-      ) !== disputeHash.toLowerCase()) {
+        account.disputeStartTimestamp,
+        initialCommitment,
+        incrementedCommitment,
+      ) !== account.disputeHash.toLowerCase()) {
         continue;
       }
       matching.push({
@@ -340,7 +382,6 @@ const findActiveDisputeContext = async (
         starterInitialArguments,
         starterIncrementedArguments,
         startedByLeft,
-        disputeUntilBlock: Number(disputeTimeout),
       });
     }
   }
@@ -466,12 +507,7 @@ export const runWatchtowerSweep = async (
       const provider = providerFactory(rpcUrl, watch.chainId);
       const depository = contractFactory(watch, towerWallet, provider);
       const acctKey = await depository.accountKey(watch.watchedEntityId, watch.counterentity) as string;
-      const account = await depository._accounts(acctKey) as {
-        nonce: bigint;
-        disputeHash: string;
-        disputeTimeout: bigint;
-        disputeStartTimestamp?: bigint;
-      };
+      const account = await depository._accounts(acctKey) as OnchainDisputeAccount;
       const currentBlock = BigInt(await provider.getBlockNumber());
       const disputeTimeout = BigInt(account.disputeTimeout || 0n);
       const activeDispute = String(account.disputeHash || '').toLowerCase() !== ZERO_HASH;
@@ -505,9 +541,8 @@ export const runWatchtowerSweep = async (
       const disputeContext = await findActiveDisputeContext(
         provider,
         watch,
-        String(account.disputeHash || '0x'),
+        account,
         currentBlock,
-        disputeTimeout,
         disputeStartBlock,
       );
       const remedy = await decodeTowerCounterDisputeRemedy(
@@ -536,25 +571,19 @@ export const runWatchtowerSweep = async (
       // only the watched/finalizer side because the tower learns the actual
       // starter side from the event. Reusing remedy.left/right blindly can make a
       // valid transformer counter-dispute fail Account.requireStarterArguments.
-      const leftArguments = disputeContext.startedByLeft
-        ? disputeContext.starterIncrementedArguments
-        : remedy.latestProof.leftArguments;
-      const rightArguments = disputeContext.startedByLeft
+      const otherArguments = disputeContext.startedByLeft
         ? remedy.latestProof.rightArguments
-        : disputeContext.starterIncrementedArguments;
+        : remedy.latestProof.leftArguments;
       const finalization = {
         counterentity: remedy.latestProof.counterentity,
         initialNonce: disputeContext.initialNonce,
         finalNonce: remedy.latestProof.finalNonce,
         initialProofbodyHash: disputeContext.initialProofbodyHash,
         finalProofbody: remedy.latestProof.finalProofbody,
-        leftArguments,
-        rightArguments,
-        starterInitialArguments: disputeContext.starterInitialArguments,
-        starterIncrementedArguments: disputeContext.starterIncrementedArguments,
+        starterArguments: disputeContext.starterIncrementedArguments,
+        otherArguments,
         sig: remedy.latestProof.sig,
         startedByLeft: disputeContext.startedByLeft,
-        disputeUntilBlock: disputeContext.disputeUntilBlock,
         cooperative: false,
       };
 

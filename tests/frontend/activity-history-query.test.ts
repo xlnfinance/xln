@@ -4,6 +4,7 @@ import {
   FILTERED_ACTIVITY_SCAN_LIMIT,
   activityFiltersFromQuery,
   buildActivityHistoryReadQuery,
+  formatActivityTokenAmount,
   isTransientActivityReadError,
   normalizeActivityHistoryPage,
 } from '../../frontend/src/lib/components/Entity/activity-history-query';
@@ -19,6 +20,18 @@ const baseInput = {
   mode: 'paged' as const,
   beforeHeight: null,
 };
+
+test('activity history formats raw amounts with exact token metadata', () => {
+  const requestedTokenIds: number[] = [];
+  const getTokenInfo = (tokenId: number): { decimals: number } => {
+    requestedTokenIds.push(tokenId);
+    return { decimals: tokenId === 1 ? 6 : 18 };
+  };
+
+  expect(formatActivityTokenAmount('7000000', 1, getTokenInfo, 4)).toBe('7');
+  expect(formatActivityTokenAmount('-1250000', 1, getTokenInfo, 4)).toBe('-1.25');
+  expect(requestedTokenIds).toEqual([1, 1]);
+});
 
 test('activity history uses compact scan window for unfiltered reads', () => {
   expect(buildActivityHistoryReadQuery(baseInput)).toEqual({

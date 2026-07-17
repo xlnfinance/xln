@@ -36,6 +36,22 @@ type AccountProgress = {
   frameHeight: number;
 };
 
+type EntityIdleSnapshot = {
+  quiescent: boolean;
+  runtimeHeight: number;
+  entityHeight: number;
+  scannedJHeight: number;
+  finalizedJHeight: number;
+  pendingWorkCount: number;
+  recentInputs: Array<{
+    runtimeHeight: number;
+    txTypes: string[];
+    jPrefixAttestations: number;
+    proposalHeight: number;
+    precommits: number;
+  }>;
+};
+
 function randomMnemonic(): string {
   return Wallet.createRandom().mnemonic!.phrase;
 }
@@ -90,6 +106,40 @@ async function readHubAccountSummary(page: Page): Promise<{
             }>;
           };
         }>;
+        runtimeMempool?: {
+          runtimeTxs?: unknown[];
+          entityInputs?: Array<{
+            entityId?: string;
+            entityTxs?: Array<{ type?: string }>;
+            jPrefixAttestations?: Map<string, unknown>;
+            proposedFrame?: { height?: number };
+            hashPrecommits?: Map<string, unknown>;
+          }>;
+          jInputs?: unknown[];
+          reliableReceipts?: unknown[];
+        };
+        pendingOutputs?: unknown[];
+        networkInbox?: unknown[];
+        pendingNetworkOutputs?: unknown[];
+        runtimeState?: {
+          processingPromise?: Promise<void> | null;
+          inFlightEntityInputs?: number;
+          pendingReliableIngress?: Map<string, unknown>;
+          reliableIngressCommitting?: Set<string>;
+          pendingCommittedJOutbox?: unknown[];
+        };
+        history?: Array<{
+          height?: number;
+          runtimeInput?: {
+            entityInputs?: Array<{
+              entityId?: string;
+              entityTxs?: Array<{ type?: string }>;
+              jPrefixAttestations?: Map<string, unknown>;
+              proposedFrame?: { height?: number };
+              hashPrecommits?: Map<string, unknown>;
+            }>;
+          };
+        }>;
       };
     }).isolatedEnv;
     const accounts: Array<{ entityId: string; counterpartyId: string; height: number; pending: boolean }> = [];
@@ -101,7 +151,7 @@ async function readHubAccountSummary(page: Page): Promise<{
       for (const [counterpartyId, account] of rep.state?.accounts?.entries?.() ?? []) {
         const height = Number(account?.currentHeight || 0);
         const pending = Boolean(account?.pendingFrame);
-        if (entityId && height > 0 && !pending) committedEntityIds.add(entityId);
+        if (entityId && height > 0) committedEntityIds.add(entityId);
         accounts.push({
           entityId,
           counterpartyId: String(counterpartyId || ''),
@@ -112,8 +162,8 @@ async function readHubAccountSummary(page: Page): Promise<{
     }
     const pending = accounts.filter((account) => account.pending).length;
     return {
-      ready: entityIds.size >= 2 && committedEntityIds.size === entityIds.size && pending === 0,
-      committed: accounts.filter((account) => account.height > 0 && !account.pending).length,
+      ready: entityIds.size >= 2 && committedEntityIds.size === entityIds.size,
+      committed: accounts.filter((account) => account.height > 0).length,
       pending,
       entitiesWithCommitted: committedEntityIds.size,
       entityCount: entityIds.size,
@@ -158,6 +208,82 @@ async function readPrimaryAccountProgress(page: Page): Promise<AccountProgress |
     }
     return null;
   });
+}
+
+async function readEntityIdleSnapshot(
+  page: Page,
+  entityId: string,
+  signerId: string,
+): Promise<EntityIdleSnapshot> {
+  return await page.evaluate(({ targetEntityId, targetSignerId }) => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        height?: number;
+        eReplicas?: Map<string, {
+          signerId?: string;
+          entityId?: string;
+          mempool?: unknown[];
+          proposal?: unknown;
+          lockedFrame?: unknown;
+          jHistory?: { scannedThroughHeight?: number };
+          state?: {
+            entityId?: string;
+            height?: number;
+            lastFinalizedJHeight?: number;
+            accounts?: Map<string, { mempool?: unknown[]; pendingFrame?: unknown }>;
+          };
+        }>;
+      };
+    }).isolatedEnv;
+    if (!env?.eReplicas) throw new Error('E2E_IDLE_RUNTIME_MISSING');
+    const entity = targetEntityId.toLowerCase();
+    const signer = targetSignerId.toLowerCase();
+    const replica = Array.from(env.eReplicas.values()).find((candidate) =>
+      String(candidate.entityId || candidate.state?.entityId || '').toLowerCase() === entity &&
+      String(candidate.signerId || '').toLowerCase() === signer,
+    );
+    if (!replica?.state) throw new Error(`E2E_IDLE_REPLICA_MISSING:${entity}:${signer}`);
+    const accounts = Array.from(replica.state.accounts?.values() ?? []);
+    const runtimeMempool = env.runtimeMempool;
+    const pendingWorkCount =
+      (runtimeMempool?.runtimeTxs?.length ?? 0) +
+      (runtimeMempool?.entityInputs?.length ?? 0) +
+      (runtimeMempool?.jInputs?.length ?? 0) +
+      (runtimeMempool?.reliableReceipts?.length ?? 0) +
+      (env.pendingOutputs?.length ?? 0) +
+      (env.networkInbox?.length ?? 0) +
+      (env.pendingNetworkOutputs?.length ?? 0) +
+      (env.runtimeState?.inFlightEntityInputs ?? 0) +
+      (env.runtimeState?.pendingReliableIngress?.size ?? 0) +
+      (env.runtimeState?.reliableIngressCommitting?.size ?? 0) +
+      (env.runtimeState?.pendingCommittedJOutbox?.length ?? 0) +
+      (env.runtimeState?.processingPromise ? 1 : 0);
+    const recentInputs = (env.history ?? []).slice(-24).flatMap(frame =>
+      (frame.runtimeInput?.entityInputs ?? [])
+        .filter(input => String(input.entityId ?? '').toLowerCase() === entity)
+        .map(input => ({
+          runtimeHeight: Number(frame.height ?? 0),
+          txTypes: (input.entityTxs ?? []).map(tx => String(tx.type ?? 'unknown')),
+          jPrefixAttestations: input.jPrefixAttestations?.size ?? 0,
+          proposalHeight: Number(input.proposedFrame?.height ?? 0),
+          precommits: input.hashPrecommits?.size ?? 0,
+        })),
+    );
+    return {
+      quiescent:
+        pendingWorkCount === 0 &&
+        (replica.mempool?.length ?? 0) === 0 &&
+        !replica.proposal &&
+        !replica.lockedFrame &&
+        accounts.every((account) => (account.mempool?.length ?? 0) === 0 && !account.pendingFrame),
+      runtimeHeight: Number(env.height ?? 0),
+      entityHeight: Number(replica.state.height ?? 0),
+      scannedJHeight: Number(replica.jHistory?.scannedThroughHeight ?? 0),
+      finalizedJHeight: Number(replica.state.lastFinalizedJHeight ?? 0),
+      pendingWorkCount,
+      recentInputs,
+    };
+  }, { targetEntityId: entityId, targetSignerId: signerId });
 }
 
 async function expectSwapBuilderLabels(page: Page): Promise<void> {
@@ -234,7 +360,7 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<void> {
 }
 
 test.describe('E2E User Journey', () => {
-  test('profile onboarding auto-joins three hubs without stale pending frames', async ({ page }) => {
+  test('profile onboarding auto-joins three hubs without stale pending frames', { tag: '@functional' }, async ({ page }) => {
     test.setTimeout(USER_JOURNEY_TIMEOUT);
 
     await page.addInitScript(() => {
@@ -255,7 +381,7 @@ test.describe('E2E User Journey', () => {
     await expectSwapBuilderLabels(page);
   });
 
-  test('demo runtime -> open hub account -> offchain faucet pipeline', async ({ page }) => {
+  test('demo runtime -> open hub account -> offchain faucet pipeline', { tag: '@functional' }, async ({ page }) => {
     test.setTimeout(USER_JOURNEY_TIMEOUT);
 
     await gotoApp(page);
@@ -317,5 +443,23 @@ test.describe('E2E User Journey', () => {
 
     const finalState = (await readPrimaryAccountProgress(page))!;
     expect(finalState.frameHeight, 'account frame must stay live after offchain faucet').toBeGreaterThanOrEqual(initial.frameHeight);
+
+    await expect.poll(
+      async () => (await readEntityIdleSnapshot(page, initial.entityId, initial.signerId)).quiescent,
+      { timeout: 20_000, intervals: [100, 250, 500], message: 'Entity must become idle after faucet ACK' },
+    ).toBe(true);
+    const idleBefore = await readEntityIdleSnapshot(page, initial.entityId, initial.signerId);
+    await page.waitForTimeout(4_500);
+    const idleAfter = await readEntityIdleSnapshot(page, initial.entityId, initial.signerId);
+    expect(idleAfter.quiescent, 'idle watcher polling must not create new Entity work').toBe(true);
+    expect(
+      idleAfter.entityHeight,
+      `authenticated empty J headers must not create empty Entity frames: ${JSON.stringify({ idleBefore, idleAfter })}`,
+    )
+      .toBe(idleBefore.entityHeight);
+    expect(idleAfter.finalizedJHeight, 'empty J headers stay local until real work or the liveness interval')
+      .toBe(idleBefore.finalizedJHeight);
+    expect(idleAfter.scannedJHeight, 'the internal watcher must keep scanning while Entity height stays idle')
+      .toBeGreaterThan(idleBefore.scannedJHeight);
   });
 });

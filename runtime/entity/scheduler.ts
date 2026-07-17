@@ -47,20 +47,32 @@
  * method names to concrete handlers via a static registry.
  */
 
-import type { Env, EntityReplica, EntityInput, SettlementOp, EntityTx, AccountInput } from '../types';
+import type { Env, EntityReplica, EntityInput, SettlementOp, EntityTx, AccountInput, HashToSign } from '../types';
 import type { CrontabState, CrontabTaskMethod, CrontabTaskState, ScheduledHook } from './scheduler-types';
 import { isLeftEntity } from './id';
 import { deriveDelta } from '../account/utils';
+import { isHtlcTimelockExpired } from '../account/htlc-deadline';
 import { resolveEntityProposerId } from '../state-helpers';
 import { normalizeRebalanceMatchingStrategy } from '../extensions/rebalance/policy';
 import { TIMING } from '../constants';
-import { DEFAULT_SOFT_LIMIT } from '../types';
+import {
+  assertNoTokenlessHubRawOverrides,
+  getDefaultRebalanceBaseFeeForToken,
+  getDefaultRebalancePolicyForToken,
+} from '../account/rebalance-defaults';
 import { terminateHtlcRoute } from './tx/htlc-route-lifecycle';
-import { getRuntimeJurisdictionHeight } from '../jurisdiction/height';
+import { getEntityCertifiedJurisdictionHeight } from '../jurisdiction/height';
 import { markStorageAccountDirty, markStorageEntityDirty } from '../machine/env-events';
 import { createStructuredLogger, shortHash, shortId } from '../infra/logger';
 import { batchAddReserveToCollateral, initJBatch } from '../jurisdiction/batch';
 import { accountInputProposal, accountInputReferenceHeight } from '../account/consensus/flush';
+import { hasPendingSettlementTransition } from '../account/tx/handlers/settle-transition';
+import {
+  applyBoardRotationResealMigrations,
+  BOARD_RESEAL_HOOK_ID,
+  BOARD_RESEAL_RETRY_MS,
+  buildPendingBoardRotationResealDrafts,
+} from './tx/board-rotation-reseal';
 
 const crontabLog = createStructuredLogger('entity.crontab');
 
@@ -83,6 +95,37 @@ const accountInputProposedFrameHeight = (input: AccountInput): number => {
 
 type CrontabExecutionContext = {
   manualBroadcastInInput: boolean;
+  hashesToSign?: HashToSign[];
+};
+
+/** Emit liveness diagnostics only from the canonical post-frame state. */
+export const emitCommittedPendingFrameWarnings = (
+  previousState: EntityReplica['state'],
+  committedState: EntityReplica['state'],
+): void => {
+  const previousRun = previousState.crontabState?.tasks.get('checkAccountTimeouts')?.lastRun;
+  const committedRun = committedState.crontabState?.tasks.get('checkAccountTimeouts')?.lastRun;
+  if (
+    committedRun === undefined ||
+    committedRun !== committedState.timestamp ||
+    committedRun === previousRun
+  ) return;
+
+  for (const [counterpartyId, account] of committedState.accounts) {
+    const pending = account.pendingFrame;
+    if (!pending) continue;
+    const hasExpiredHtlc = pending.accountTxs.some(tx => tx.type === 'htlc_lock' && (
+      (getEntityCertifiedJurisdictionHeight(committedState) > 0 &&
+        getEntityCertifiedJurisdictionHeight(committedState) > tx.data.revealBeforeHeight) ||
+      isHtlcTimelockExpired(committedState.timestamp, tx.data.timelock)
+    ));
+    const frameAge = committedState.timestamp - pending.timestamp;
+    if (!hasExpiredHtlc && frameAge > ACCOUNT_TIMEOUT_MS) {
+      console.warn(
+        `⏰ PENDING-FRAME-STALE: Account with ${counterpartyId.slice(-4)} h${pending.height} for ${Math.floor(frameAge / 1000)}s — consider dispute`,
+      );
+    }
+  }
 };
 
 type DebugEventEmitter = {
@@ -246,11 +289,7 @@ async function processDueHooks(
   const disputeFinalizeCounterparties = new Set<string>();
   let shouldBroadcastQueuedDisputeFinalizations = false;
 
-  const currentJBlock = getRuntimeJurisdictionHeight(
-    env,
-    replica.state.lastFinalizedJHeight || 0,
-    replica.state.config.jurisdiction?.name,
-  );
+  const currentJBlock = getEntityCertifiedJurisdictionHeight(replica.state);
 
   for (const hook of hooks) {
     crontabLog.debug('hook.fired', { type: hook.type, id: shortHash(hook.id) });
@@ -414,6 +453,50 @@ async function processDueHooks(
         }
         break;
 
+      case 'board_reseal':
+        {
+          if (!context.hashesToSign) throw new Error('BOARD_RESEAL_HASH_COLLECTOR_MISSING');
+          const activation = {
+            entityId: replica.state.entityId.toLowerCase(),
+            jHeight: hook.data.activationJHeight,
+            logIndex: hook.data.activationLogIndex,
+          };
+          const drafts = buildPendingBoardRotationResealDrafts(
+            replica.state,
+            env,
+            activation,
+            hook.data.afterCounterpartyId,
+          );
+          applyBoardRotationResealMigrations(replica.state, drafts.accountMigrations);
+          outputs.push(...drafts.outputs);
+          context.hashesToSign.push(...drafts.hashesToSign);
+          for (const update of drafts.accountMigrations) {
+            markEntityAccountDirty(env, replica, update.counterpartyId);
+          }
+          const pendingForActivation = [...replica.state.accounts.values()].some(account =>
+            account.boardResealMigration?.activationJHeight === activation.jHeight &&
+            account.boardResealMigration.activationLogIndex === activation.logIndex);
+          if (drafts.hasMore || pendingForActivation) {
+            if (!replica.state.crontabState) throw new Error('BOARD_RESEAL_CRONTAB_MISSING');
+            scheduleHook(replica.state.crontabState, {
+              id: BOARD_RESEAL_HOOK_ID,
+              triggerAt: drafts.hasMore
+                ? replica.state.timestamp
+                : replica.state.timestamp + BOARD_RESEAL_RETRY_MS,
+              type: 'board_reseal',
+              data: {
+                activationJHeight: activation.jHeight,
+                activationLogIndex: activation.logIndex,
+                afterCounterpartyId: drafts.hasMore ? drafts.nextAfterCounterpartyId : '',
+              },
+            });
+          }
+          if (drafts.accountMigrations.length > 0 || drafts.hasMore || pendingForActivation) {
+            markEntityCrontabDirty(env, replica);
+          }
+        }
+        break;
+
       case 'cross_j_orderbook_sweep':
         outputs.push({
           entityId: replica.entityId,
@@ -464,6 +547,7 @@ async function processDueHooks(
       data: {
         counterpartyEntityId,
         description: 'auto-finalize-after-timeout',
+        useOnchainRegistry: true,
       },
     }));
     outputs.push({
@@ -505,7 +589,7 @@ async function checkAccountTimeoutsHandler(
 ): Promise<EntityInput[]> {
   const outputs: EntityInput[] = [];
   const now = replica.state.timestamp; // DETERMINISTIC: Use entity's own timestamp
-  const currentHeight = replica.state.lastFinalizedJHeight || 0;
+  const currentHeight = getEntityCertifiedJurisdictionHeight(replica.state);
   const firstValidator = replica.state.config.validators?.[0];
 
   // Collect accounts with expired HTLC locks in their pending frames
@@ -520,7 +604,7 @@ async function checkAccountTimeoutsHandler(
     for (const tx of accountMachine.pendingFrame.accountTxs) {
       if (tx.type === 'htlc_lock') {
         const heightExpired = currentHeight > 0 && currentHeight > tx.data.revealBeforeHeight;
-        const timestampExpired = now > Number(tx.data.timelock);
+        const timestampExpired = isHtlcTimelockExpired(now, tx.data.timelock);
         if (heightExpired || timestampExpired) {
           console.warn(
             `⏰ HTLC-IN-PENDING-EXPIRED: Account ${counterpartyId.slice(-4)} frame h${accountMachine.pendingFrame.height}, lock ${tx.data.lockId.slice(0, 12)}... expired`,
@@ -549,11 +633,14 @@ async function checkAccountTimeoutsHandler(
         accountMachine.pendingAccountInput &&
         cachedInputHeight === accountMachine.pendingFrame.height
       ) {
-        const targetSignerId = resolveEntityProposerId(
-          _env,
-          accountMachine.pendingAccountInput.toEntityId,
-          'account pending frame resend',
-        );
+        const targetSignerId = accountMachine.pendingAccountInputSignerId;
+        if (!targetSignerId) {
+          throw new Error(
+            `ACCOUNT_PENDING_INPUT_SIGNER_MISSING: entity=${replica.entityId}` +
+            ` counterparty=${accountMachine.pendingAccountInput.toEntityId}` +
+            ` height=${accountMachine.pendingFrame.height}`,
+          );
+        }
         outputs.push({
           entityId: accountMachine.pendingAccountInput.toEntityId,
           signerId: targetSignerId,
@@ -572,11 +659,9 @@ async function checkAccountTimeoutsHandler(
       }
 
       // Non-HTLC pending frames: dispute suggestion after 30s
-      if (frameAge > ACCOUNT_TIMEOUT_MS) {
-        console.warn(
-          `⏰ PENDING-FRAME-STALE: Account with ${counterpartyId.slice(-4)} h${accountMachine.pendingFrame.height} for ${Math.floor(frameAge / 1000)}s — consider dispute`,
-        );
-      }
+      // Observability is emitted only after this Entity frame commits. A valid
+      // ACK later in the same frame must clear the pending state before a
+      // liveness warning is evaluated.
     }
   }
 
@@ -655,21 +740,18 @@ async function hubRebalanceHandler(
 ): Promise<EntityInput[]> {
   // Only hubs should run the rebalance handler
   if (!replica.state.hubRebalanceConfig) return [];
+  assertNoTokenlessHubRawOverrides(replica.state.hubRebalanceConfig);
 
   const outputs: EntityInput[] = [];
   const localEntityTxs: EntityTx[] = [];
   const signerId = resolveEntityProposerId(_env, replica.entityId, 'hub-rebalance');
   const now = replica.state.timestamp; // DETERMINISTIC: use entity's own timestamp
   const strategy = normalizeRebalanceMatchingStrategy(replica.state.hubRebalanceConfig.matchingStrategy);
-  const rebalanceBaseFee = replica.state.hubRebalanceConfig.rebalanceBaseFee ?? 10n ** 17n;
   const rebalanceLiquidityFeeBps =
     replica.state.hubRebalanceConfig.rebalanceLiquidityFeeBps ??
     replica.state.hubRebalanceConfig.minFeeBps ??
     1n;
-  const rebalanceGasFee = replica.state.hubRebalanceConfig.rebalanceGasFee ?? 0n;
-  const c2rWithdrawSoftLimit = replica.state.hubRebalanceConfig.c2rWithdrawSoftLimit ?? DEFAULT_SOFT_LIMIT;
-  const effectiveC2RWithdrawSoftLimit =
-    c2rWithdrawSoftLimit < DEFAULT_SOFT_LIMIT ? DEFAULT_SOFT_LIMIT : c2rWithdrawSoftLimit;
+  const rebalanceGasFee = 0n;
   const currentPolicyVersion = Number.isFinite(replica.state.hubRebalanceConfig.policyVersion)
     && replica.state.hubRebalanceConfig.policyVersion > 0
     ? replica.state.hubRebalanceConfig.policyVersion
@@ -826,6 +908,7 @@ async function hubRebalanceHandler(
         });
       }
 
+      const rebalanceBaseFee = getDefaultRebalanceBaseFeeForToken(tokenId);
       const minFee =
         rebalanceBaseFee +
         rebalanceGasFee +
@@ -993,7 +1076,7 @@ async function hubRebalanceHandler(
   const c2rExecutableAccounts: string[] = [];
 
   for (const [counterpartyId, accountMachine] of replica.state.accounts.entries()) {
-    if (accountMachine.pendingFrame) continue;
+    if (accountMachine.pendingFrame || hasPendingSettlementTransition(accountMachine)) continue;
     const hubIsLeft = isLeftEntity(hubId, counterpartyId);
     const workspace = accountMachine.settlementWorkspace;
 
@@ -1006,7 +1089,7 @@ async function hubRebalanceHandler(
         hubProposedWorkspace &&
         pureC2RWorkspace &&
         workspace.executorIsLeft === hubIsLeft &&
-        workspace.status !== 'submitted' &&
+        workspace.status === 'ready_to_submit' &&
         !!counterpartyHanko
       ) {
         c2rExecutableAccounts.push(counterpartyId);
@@ -1028,7 +1111,8 @@ async function hubRebalanceHandler(
         throw new Error(`deriveDelta missing outTotalHold for token ${String(tokenId)} on ${counterpartyId}`);
       }
       const freeOutCollateral = hubOwnedCollateral > outHold ? hubOwnedCollateral - outHold : 0n;
-      if (freeOutCollateral <= effectiveC2RWithdrawSoftLimit) continue;
+      const c2rWithdrawSoftLimit = getDefaultRebalancePolicyForToken(tokenId).r2cRequestSoftLimit;
+      if (freeOutCollateral <= c2rWithdrawSoftLimit) continue;
 
       const withdrawAmount = freeOutCollateral;
       emitRebalanceDebug({
@@ -1040,7 +1124,7 @@ async function hubRebalanceHandler(
         outCollateral: String(hubOwnedCollateral),
         outHold: String(outHold),
         freeOutCollateral: String(freeOutCollateral),
-        c2rWithdrawSoftLimit: String(effectiveC2RWithdrawSoftLimit),
+        c2rWithdrawSoftLimit: String(c2rWithdrawSoftLimit),
         withdrawAmount: String(withdrawAmount),
       });
 

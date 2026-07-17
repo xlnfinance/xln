@@ -389,7 +389,8 @@ async function main() {
   process.exit(0);
 }
 
-main().catch(err => {
-  console.error('\nScenario FAILED:', err.message || err);
+main().catch((error: unknown) => {
+  const details = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  console.error('\nScenario FAILED:', details);
   process.exit(1);
 });

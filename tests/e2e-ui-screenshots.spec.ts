@@ -408,12 +408,12 @@ async function captureOnboardingScreens(page: Page, output: Parameters<typeof ca
   });
 }
 
-test('ui screenshot smoke captures onboarding screens', async ({ page }, testInfo) => {
+test('ui screenshot smoke captures onboarding screens', { tag: '@functional' }, async ({ page }, testInfo) => {
   test.setTimeout(120_000);
   await captureOnboardingScreens(page, testInfo);
 });
 
-test('ui screenshot smoke captures operator admin surfaces', async ({ page }, testInfo) => {
+test('ui screenshot smoke captures operator admin surfaces', { tag: '@functional' }, async ({ page }, testInfo) => {
   test.setTimeout(120_000);
 
   await page.goto(`${APP_BASE_URL}/qa`, { waitUntil: 'domcontentloaded' });
@@ -499,7 +499,7 @@ test('ui screenshot smoke captures operator admin surfaces', async ({ page }, te
   });
 });
 
-test('ui screenshot smoke captures desktop and mobile main tabs', async ({ browser, page }, testInfo) => {
+test('ui screenshot smoke captures desktop and mobile main tabs', { tag: '@functional' }, async ({ browser, page }, testInfo) => {
   test.setTimeout(240_000);
 
   await ensureE2EBaseline(page, {

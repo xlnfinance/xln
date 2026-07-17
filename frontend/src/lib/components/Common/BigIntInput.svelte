@@ -5,7 +5,7 @@
    */
 
   export let value: bigint = 0n;
-  export let decimals: number = 18;
+  export let decimals: number;
   export let placeholder: string = '0.0';
   export let disabled: boolean = false;
 

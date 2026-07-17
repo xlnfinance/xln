@@ -33,6 +33,7 @@ import { verifyProfileSignature, type ProfileVerifyResult } from '../networking/
 import { verifyHelloAuth } from '../networking/hello-auth';
 import { isDeliveryDelivered, type DeliveryResult } from '../protocol/payments/delivery-result';
 import { createStructuredLogger } from '../infra/logger';
+import { safeStringify } from '../protocol/serialization';
 
 const SOCKET_RUNTIME_ID = Symbol.for('xln.relay.socketRuntimeId');
 const SOCKET_DUPLICATE_CLOSING = Symbol.for('xln.relay.duplicateClosing');
@@ -92,8 +93,23 @@ const closeDuplicateRuntimeSocket = (ws: RelaySocketLike): void => {
   markDuplicateClosingSocket(ws);
   try {
     ws.close?.(4009, 'duplicate-runtime');
-  } catch {
-    // The live runtime socket remains registered; duplicate close failure is local to this socket.
+  } catch (error) {
+    relayRouterLog.warn('duplicate_socket.close_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+};
+
+const closeSupersededRuntimeSocket = (ws: RelaySocketLike): void => {
+  markDuplicateClosingSocket(ws);
+  try {
+    ws.close?.(4009, 'superseded-runtime');
+  } catch (error) {
+    // The newly authenticated session is already authoritative. Keep it live,
+    // but preserve a loud transport diagnostic for the stale socket.
+    relayRouterLog.warn('superseded_socket.close_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 };
 
@@ -104,7 +120,7 @@ const closeDuplicateRuntimeSocket = (ws: RelaySocketLike): void => {
 export type RelayRouterConfig = {
   store: RelayStore;
   localRuntimeId: string;
-  /** Called when an entity_input is addressed to this runtime. */
+  /** Called when an entity_input or its signed durable receipt targets this runtime. */
   localDeliver: (from: string | undefined, msg: RuntimeWsMessage) => Promise<void>;
   /** Thin wrapper over the binary production WebSocket codec. */
   send: (ws: RelaySocketLike, data: Uint8Array) => RelaySendResult;
@@ -269,8 +285,7 @@ export const relayRoute = async (
   const deliveryEntityId = typeof msg.entityId === 'string' && msg.entityId.length > 0 ? msg.entityId : undefined;
   const deliveryTxCount = typeof msg.txs === 'number' && Number.isFinite(msg.txs) ? msg.txs : undefined;
 
-  let size = 0;
-  try { size = JSON.stringify(msg).length; } catch { size = 0; }
+  const size = new TextEncoder().encode(safeStringify(msg)).byteLength;
 
   // Log non-gossip messages
   if (type !== 'gossip_request' && type !== 'gossip_response' && type !== 'gossip_announce') {
@@ -319,6 +334,23 @@ export const relayRoute = async (
         send(ws, serializeWsMessage({ type: 'error', error: authError }));
         return;
       }
+    }
+    const existingClient = store.clients.get(fromKey);
+    if (existingClient && existingClient.ws !== ws) {
+      // This hello passed a fresh relay challenge and a signature by the same
+      // runtime key. It is therefore a reconnect, not an unauthenticated
+      // displacement. Replace atomically before closing the stale transport:
+      // its later close callback is socket-scoped and cannot delete `ws`.
+      removeClient(store, existingClient.ws);
+      closeSupersededRuntimeSocket(existingClient.ws);
+      pushDebugEvent(store, {
+        event: 'ws_runtime_replaced',
+        runtimeId: fromKey,
+        from: fromKey,
+        msgType: type,
+        status: 'reconnected',
+        details: { traceId },
+      });
     }
     const registered = registerClient(store, from, ws);
     if (!registered) {
@@ -521,7 +553,12 @@ export const relayRoute = async (
   }
 
   // ----- routable messages -----
-  if (type === 'entity_input' || type === 'gossip_response' || LIVE_RECOVERY_MESSAGE_TYPES.has(type)) {
+  if (
+    type === 'entity_input' ||
+    type === 'entity_input_receipt' ||
+    type === 'gossip_response' ||
+    LIVE_RECOVERY_MESSAGE_TYPES.has(type)
+  ) {
     if (!toKey) {
       pushDebugEvent(store, {
         event: 'error',
@@ -596,8 +633,8 @@ export const relayRoute = async (
       });
     }
 
-    // Local delivery for entity_input addressed to this runtime
-    if (type === 'entity_input' && payload && isLocalTarget) {
+    // Local application delivery for scoped reliable protocol messages.
+    if ((type === 'entity_input' || type === 'entity_input_receipt') && payload && isLocalTarget) {
       try {
         await config.localDeliver(from, msg);
         return;
@@ -625,8 +662,11 @@ export const relayRoute = async (
       }
     }
 
-    if (type === 'entity_input') {
-      relayLog(`[RELAY] → rejected entity_input (target not connected)`);
+    if (type === 'entity_input' || type === 'entity_input_receipt') {
+      const unavailableCode = type === 'entity_input'
+        ? 'ENTITY_INPUT_TARGET_NOT_CONNECTED'
+        : 'ENTITY_INPUT_RECEIPT_TARGET_NOT_CONNECTED';
+      relayLog(`[RELAY] → rejected ${type} (target not connected)`);
       pushDebugEvent(store, {
         event: 'delivery',
         from,
@@ -634,7 +674,7 @@ export const relayRoute = async (
         msgType: type,
         encrypted: msg.encrypted === true,
         status: 'rejected',
-        reason: 'ENTITY_INPUT_TARGET_NOT_CONNECTED',
+        reason: unavailableCode,
         details: {
           traceId,
           ...(deliveryEntityId ? { entityId: deliveryEntityId } : {}),
@@ -643,7 +683,7 @@ export const relayRoute = async (
       });
       send(ws, serializeWsMessage({
         type: 'error',
-        error: 'ENTITY_INPUT_TARGET_NOT_CONNECTED',
+        error: unavailableCode,
         ...(id ? { inReplyTo: id } : {}),
         ...(to ? { to } : {}),
       }));

@@ -8,16 +8,14 @@ async function main() {
   console.log("🪙 Deploying ERC20 Mock Tokens...\n");
 
   const tokens = [
-    { name: "USD Coin", symbol: "USDC", decimals: 18 },
+    { name: "USD Coin", symbol: "USDC", decimals: 6 },
     { name: "Wrapped Ether", symbol: "WETH", decimals: 18 },
-    { name: "Tether USD", symbol: "USDT", decimals: 18 },
+    { name: "Tether USD", symbol: "USDT", decimals: 6 },
   ];
 
   const deployed = [];
 
   // Deploy with 10B supply (enough for all faucets)
-  const initialSupply = hre.ethers.parseUnits("10000000000", 18); // 10B tokens
-
   // Calculate hub wallet address (same as server.ts)
   const crypto = require('crypto');
   const hubSeed = 'xln-main-hub-2026';
@@ -33,12 +31,13 @@ async function main() {
   for (const token of tokens) {
     console.log(`📝 Deploying ${token.symbol}...`);
     const ERC20Mock = await hre.ethers.getContractFactory("ERC20Mock");
-    const erc20 = await ERC20Mock.deploy(token.name, token.symbol, initialSupply);
+    const initialSupply = hre.ethers.parseUnits("10000000000", token.decimals);
+    const erc20 = await ERC20Mock.deploy(token.name, token.symbol, token.decimals, initialSupply);
     await erc20.waitForDeployment();
     const addr = await erc20.getAddress();
 
     // Transfer 1B to hub wallet
-    const hubAmount = hre.ethers.parseUnits("1000000000", 18);
+    const hubAmount = hre.ethers.parseUnits("1000000000", token.decimals);
     const tx = await erc20.transfer(hubWallet, hubAmount);
     await tx.wait();
 

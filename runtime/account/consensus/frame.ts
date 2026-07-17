@@ -6,8 +6,9 @@ import { computeCanonicalMerkleRoot } from '../state-root';
 import { canonicalJurisdictionEventsHash } from '../../jurisdiction/event-observation';
 import { normalizeJurisdictionEvents } from '../../jurisdiction/event-normalization';
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from './constants';
+import { LIMITS } from '../../constants';
 
-export const MAX_ACCOUNT_FRAME_TXS = 1000;
+export const MAX_ACCOUNT_FRAME_TXS = LIMITS.ACCOUNT_MEMPOOL_SIZE;
 // A peer controls its proposed timestamp. Reject future time because it could
 // prematurely satisfy payer-side deadlines. Do not reject old signed frames:
 // exact retransmission must remain available after an arbitrary outage.
@@ -76,16 +77,16 @@ const canonicalJEventClaimForFrameHash = (value: unknown): Record<string, unknow
   const data = toRecord(value);
   const events = normalizeJurisdictionEvents(Array.isArray(data['events']) ? data['events'] : []);
 
-  // jBlockHash is external observation evidence, not bilateral account state.
-  // The account frame commits to jHeight + canonical event bodies + eventsHash;
-  // malformed or conflicting claims still fail in the j_event_claim handler
-  // before this frame hash can be accepted by the counterparty.
+  // The signed Account frame binds the exact chain block, full canonical body,
+  // and both independently verified Patricia witnesses. None are local hints.
   return {
-    version: 'xln:account-j-event-claim-frame:v1',
+    version: 'xln:account-j-event-claim-frame:v2',
     jHeight: toInt(data['jHeight']),
+    jBlockHash: String(data['jBlockHash'] ?? '').toLowerCase(),
     eventsHash: canonicalJurisdictionEventsHash(events),
-    events: events.map((event) => ({ type: event.type, data: event.data })),
-    observedAt: toInt(data['observedAt']),
+    events,
+    leftProof: data['leftProof'],
+    rightProof: data['rightProof'],
   };
 };
 

@@ -2,9 +2,13 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { handleCreateSettlement } from '../entity/tx/handlers/create-settlement';
+import { applyEntityTx } from '../entity/tx/apply';
 import { handleMintReserves } from '../entity/tx/handlers/mint-reserves';
 import { handleR2R } from '../entity/tx/handlers/r2r';
+import { cloneJBatch, initJBatch } from '../jurisdiction/batch';
+import { createEmptyEnv } from '../runtime';
+import { hydrateEntityStateFromStorage } from '../storage/hydration';
+import { projectEntityCoreDoc } from '../storage/projections';
 import type { EntityState, EntityTx, Env } from '../types';
 
 const entityId = `0x${'aa'.repeat(32)}`;
@@ -65,31 +69,67 @@ test('entity j-batch operation handler state transitions are unchanged', async (
     amount: 10n,
   }]);
 
-  const settlementTx = {
-    type: 'createSettlement',
-    data: {
-      counterpartyEntityId: counterpartyId,
-      diffs: [{ tokenId: 1, leftDiff: -1n, rightDiff: 1n, collateralDiff: 0n, ondeltaDiff: 0n }],
-      sig: '0x1234',
-    },
-  } satisfies EntityTx;
-  const settlementResult = await handleCreateSettlement(makeEntityState(), settlementTx);
-  const settlement = settlementResult.newState.jBatchState?.batch.settlements[0];
-  expect(settlement?.leftEntity).toBe(entityId);
-  expect(settlement?.rightEntity).toBe(counterpartyId);
-  expect(settlement?.diffs).toHaveLength(1);
-  expect(settlement?.sig).toBe('0x1234');
-
   const mintTx = { type: 'mintReserves', data: { tokenId: 1, amount: 5n } } satisfies EntityTx;
   const mintResult = await handleMintReserves(makeEntityState(), mintTx, {} as Env);
   expect(mintResult.jOutputs).toEqual([]);
   expect(mintResult.newState.messages.at(-1)).toContain('Jurisdiction unavailable for mint');
 });
 
+test('removed legacy settlement commands cannot mutate the jurisdiction batch', async () => {
+  const entityTxSource = readFileSync(join(process.cwd(), 'runtime/types/entity-tx.ts'), 'utf8');
+  const dispatcherSource = readFileSync(join(process.cwd(), 'runtime/entity/tx/apply.ts'), 'utf8');
+  expect(entityTxSource).not.toContain("type: 'createSettlement'");
+  expect(entityTxSource).not.toContain("type: 'settleDiffs'");
+  expect(dispatcherSource).not.toContain('createSettlement:');
+  expect(dispatcherSource).not.toContain('settleDiffs:');
+
+  for (const type of ['createSettlement', 'settleDiffs'] as const) {
+    const state = makeEntityState();
+    state.jBatchState = initJBatch();
+    const before = cloneJBatch(state.jBatchState.batch);
+    const rawLegacyTx = {
+      type,
+      data: {
+        counterpartyEntityId: counterpartyId,
+        diffs: [{ tokenId: 1, leftDiff: -1n, rightDiff: 1n, collateralDiff: 0n, ondeltaDiff: 0n }],
+        sig: '0x1234',
+      },
+    } as unknown as EntityTx;
+
+    const result = await applyEntityTx(createEmptyEnv(`legacy-${type}`), state, rawLegacyTx);
+
+    expect(result.skippedError).toBe(`ENTITY_TX_UNHANDLED: type=${type}`);
+    expect(result.newState.jBatchState?.batch).toEqual(before);
+  }
+});
+
+test('storage restore rejects an oversized settlement forgiveness list', () => {
+  const state = makeEntityState();
+  state.jBatchState = initJBatch();
+  state.jBatchState.batch.settlements.push({
+    leftEntity: entityId,
+    rightEntity: counterpartyId,
+    diffs: [],
+    forgiveDebtsInTokenIds: Array.from({ length: 33 }, (_, index) => index + 1),
+    sig: '0x1234',
+    entityProvider: `0x${'11'.repeat(20)}`,
+    hankoData: '0x',
+    nonce: 1,
+  });
+
+  expect(() => hydrateEntityStateFromStorage({
+    core: projectEntityCoreDoc(state),
+    accounts: new Map(),
+    books: new Map(),
+  })).toThrow(
+    'J_BATCH_LIMIT_EXCEEDED: storage.entity.jBatchState.batch: '
+    + 'settlements[0].forgiveDebtsInTokenIds 33/32',
+  );
+});
+
 test('entity j-batch operation handlers stay behind structured logging', () => {
   for (const path of [
     'runtime/entity/tx/handlers/r2r.ts',
-    'runtime/entity/tx/handlers/create-settlement.ts',
     'runtime/entity/tx/handlers/mint-reserves.ts',
     'runtime/entity/tx/handlers/j-broadcast.ts',
     'runtime/entity/tx/handlers/j-clear-batch.ts',

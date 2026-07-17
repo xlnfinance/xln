@@ -9,7 +9,8 @@ const { glob, runTypeChain } = rootRequire('typechain');
 
 async function main() {
   const cwd = path.resolve(__dirname, '..');
-  const outDir = path.join(cwd, 'typechain-types');
+  const outDirName = process.env.XLN_TYPECHAIN_OUT_DIR || 'typechain-types';
+  const outDir = path.resolve(cwd, outDirName);
   const artifactsDir = path.join(cwd, 'artifacts');
   const artifactPattern = 'artifacts/**/+([a-zA-Z0-9_]).json';
   const allFiles = glob(cwd, [artifactPattern]).filter((file) => {
@@ -43,7 +44,7 @@ async function main() {
     cwd,
     allFiles,
     filesToProcess: allFiles,
-    outDir: 'typechain-types',
+    outDir: outDirName,
     target: 'ethers-v6',
     flags: {
       alwaysGenerateOverloads: false,

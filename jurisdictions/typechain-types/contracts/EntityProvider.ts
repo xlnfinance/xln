@@ -28,38 +28,42 @@ export declare namespace EntityProvider {
     controlDelay: BigNumberish;
     dividendDelay: BigNumberish;
     foundationDelay: BigNumberish;
-    controlThreshold: BigNumberish;
   };
 
   export type EntityArticlesStructOutput = [
     controlDelay: bigint,
     dividendDelay: bigint,
-    foundationDelay: bigint,
-    controlThreshold: bigint
-  ] & {
-    controlDelay: bigint;
-    dividendDelay: bigint;
-    foundationDelay: bigint;
-    controlThreshold: bigint;
-  };
+    foundationDelay: bigint
+  ] & { controlDelay: bigint; dividendDelay: bigint; foundationDelay: bigint };
 }
 
 export interface EntityProviderInterface extends Interface {
   getFunction(
     nameOrSignature:
+      | "BOARD_GRACE_PERIOD"
+      | "BOARD_PROPOSAL_CANCEL_DOMAIN"
+      | "BOARD_PROPOSAL_DOMAIN"
       | "FOUNDATION_ENTITY"
+      | "MAX_SHARE_SUPPORTERS"
       | "TOTAL_CONTROL_SUPPLY"
       | "TOTAL_DIVIDEND_SUPPLY"
       | "activateBoard"
-      | "activeProposals"
       | "assignName"
       | "balanceOf"
       | "balanceOfBatch"
       | "batchVerifyHankoSignatures"
-      | "boardHashToEntityId"
+      | "boardActionNonces"
+      | "boardEpochs"
       | "cancelBoardProposal"
+      | "cancelEntityProviderAction"
+      | "computeBoardProposalCancelHash"
+      | "computeBoardProposalHash"
+      | "computeCancelEntityProviderActionHankoHash"
       | "computeEntityTransferHankoHash"
       | "computeReleaseControlSharesHankoHash"
+      | "encodeBoardProposalCancelHankoPayload"
+      | "encodeBoardProposalHankoPayload"
+      | "encodeCancelEntityProviderActionHankoPayload"
       | "encodeEntityTransferHankoPayload"
       | "encodeReleaseControlSharesHankoPayload"
       | "entities"
@@ -77,7 +81,6 @@ export interface EntityProviderInterface extends Interface {
       | "nextNumber"
       | "numberToName"
       | "proposeBoard"
-      | "recoverEntity"
       | "registerNumberedEntitiesBatch"
       | "registerNumberedEntity"
       | "releaseControlShares"
@@ -89,8 +92,6 @@ export interface EntityProviderInterface extends Interface {
       | "setNameQuota"
       | "setReservedName"
       | "supportsInterface"
-      | "totalControlSupply"
-      | "totalDividendSupply"
       | "transferName"
       | "uri"
       | "verifyHankoSignature"
@@ -102,6 +103,8 @@ export interface EntityProviderInterface extends Interface {
       | "BoardActivated"
       | "BoardProposed"
       | "ControlSharesReleased"
+      | "EntityProviderActionCancelled"
+      | "EntityProviderActionExecuted"
       | "EntityRegistered"
       | "FoundationBootstrapped"
       | "GovernanceEnabled"
@@ -114,7 +117,23 @@ export interface EntityProviderInterface extends Interface {
   ): EventFragment;
 
   encodeFunctionData(
+    functionFragment: "BOARD_GRACE_PERIOD",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "BOARD_PROPOSAL_CANCEL_DOMAIN",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "BOARD_PROPOSAL_DOMAIN",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
     functionFragment: "FOUNDATION_ENTITY",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "MAX_SHARE_SUPPORTERS",
     values?: undefined
   ): string;
   encodeFunctionData(
@@ -127,10 +146,6 @@ export interface EntityProviderInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "activateBoard",
-    values: [BytesLike]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "activeProposals",
     values: [BytesLike]
   ): string;
   encodeFunctionData(
@@ -150,12 +165,32 @@ export interface EntityProviderInterface extends Interface {
     values: [BytesLike[], BytesLike[]]
   ): string;
   encodeFunctionData(
-    functionFragment: "boardHashToEntityId",
+    functionFragment: "boardActionNonces",
+    values: [BytesLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "boardEpochs",
     values: [BytesLike]
   ): string;
   encodeFunctionData(
     functionFragment: "cancelBoardProposal",
-    values: [BytesLike, BigNumberish, EntityProvider.EntityArticlesStruct]
+    values: [BytesLike, BigNumberish, BytesLike[]]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "cancelEntityProviderAction",
+    values: [BigNumberish, BytesLike, BigNumberish, BytesLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "computeBoardProposalCancelHash",
+    values: [BytesLike, BytesLike, BigNumberish, BigNumberish, BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "computeBoardProposalHash",
+    values: [BytesLike, BytesLike, BigNumberish, BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "computeCancelEntityProviderActionHankoHash",
+    values: [BigNumberish, BigNumberish, BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "computeEntityTransferHankoHash",
@@ -177,6 +212,18 @@ export interface EntityProviderInterface extends Interface {
       string,
       BigNumberish
     ]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "encodeBoardProposalCancelHankoPayload",
+    values: [BytesLike, BytesLike, BigNumberish, BigNumberish, BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "encodeBoardProposalHankoPayload",
+    values: [BytesLike, BytesLike, BigNumberish, BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "encodeCancelEntityProviderActionHankoPayload",
+    values: [BigNumberish, BigNumberish, BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "encodeEntityTransferHankoPayload",
@@ -210,14 +257,7 @@ export interface EntityProviderInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "entityTransferTokens",
-    values: [
-      BigNumberish,
-      AddressLike,
-      BigNumberish,
-      BigNumberish,
-      BytesLike,
-      BytesLike
-    ]
+    values: [BigNumberish, AddressLike, BigNumberish, BigNumberish, BytesLike]
   ): string;
   encodeFunctionData(
     functionFragment: "foundationRegisterEntity",
@@ -261,16 +301,7 @@ export interface EntityProviderInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "proposeBoard",
-    values: [
-      BytesLike,
-      BytesLike,
-      BigNumberish,
-      EntityProvider.EntityArticlesStruct
-    ]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "recoverEntity",
-    values: [BytesLike, BytesLike, BytesLike]
+    values: [BytesLike, BytesLike, BigNumberish, BytesLike[]]
   ): string;
   encodeFunctionData(
     functionFragment: "registerNumberedEntitiesBatch",
@@ -288,7 +319,6 @@ export interface EntityProviderInterface extends Interface {
       BigNumberish,
       BigNumberish,
       string,
-      BytesLike,
       BytesLike
     ]
   ): string;
@@ -331,14 +361,6 @@ export interface EntityProviderInterface extends Interface {
     values: [BytesLike]
   ): string;
   encodeFunctionData(
-    functionFragment: "totalControlSupply",
-    values: [BytesLike]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "totalDividendSupply",
-    values: [BytesLike]
-  ): string;
-  encodeFunctionData(
     functionFragment: "transferName",
     values: [string, BigNumberish]
   ): string;
@@ -349,7 +371,23 @@ export interface EntityProviderInterface extends Interface {
   ): string;
 
   decodeFunctionResult(
+    functionFragment: "BOARD_GRACE_PERIOD",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "BOARD_PROPOSAL_CANCEL_DOMAIN",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "BOARD_PROPOSAL_DOMAIN",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "FOUNDATION_ENTITY",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "MAX_SHARE_SUPPORTERS",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -364,10 +402,6 @@ export interface EntityProviderInterface extends Interface {
     functionFragment: "activateBoard",
     data: BytesLike
   ): Result;
-  decodeFunctionResult(
-    functionFragment: "activeProposals",
-    data: BytesLike
-  ): Result;
   decodeFunctionResult(functionFragment: "assignName", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "balanceOf", data: BytesLike): Result;
   decodeFunctionResult(
@@ -379,11 +413,31 @@ export interface EntityProviderInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "boardHashToEntityId",
+    functionFragment: "boardActionNonces",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "boardEpochs",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
     functionFragment: "cancelBoardProposal",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "cancelEntityProviderAction",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "computeBoardProposalCancelHash",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "computeBoardProposalHash",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "computeCancelEntityProviderActionHankoHash",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -392,6 +446,18 @@ export interface EntityProviderInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "computeReleaseControlSharesHankoHash",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "encodeBoardProposalCancelHankoPayload",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "encodeBoardProposalHankoPayload",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "encodeCancelEntityProviderActionHankoPayload",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -454,10 +520,6 @@ export interface EntityProviderInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "recoverEntity",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "registerNumberedEntitiesBatch",
     data: BytesLike
   ): Result;
@@ -502,14 +564,6 @@ export interface EntityProviderInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "totalControlSupply",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "totalDividendSupply",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "transferName",
     data: BytesLike
   ): Result;
@@ -543,11 +597,23 @@ export namespace ApprovalForAllEvent {
 }
 
 export namespace BoardActivatedEvent {
-  export type InputTuple = [entityId: BytesLike, newBoardHash: BytesLike];
-  export type OutputTuple = [entityId: string, newBoardHash: string];
+  export type InputTuple = [
+    entityId: BytesLike,
+    previousBoardHash: BytesLike,
+    newBoardHash: BytesLike,
+    previousBoardValidUntil: BigNumberish
+  ];
+  export type OutputTuple = [
+    entityId: string,
+    previousBoardHash: string,
+    newBoardHash: string,
+    previousBoardValidUntil: bigint
+  ];
   export interface OutputObject {
     entityId: string;
+    previousBoardHash: string;
     newBoardHash: string;
+    previousBoardValidUntil: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -556,11 +622,26 @@ export namespace BoardActivatedEvent {
 }
 
 export namespace BoardProposedEvent {
-  export type InputTuple = [entityId: BytesLike, proposedBoardHash: BytesLike];
-  export type OutputTuple = [entityId: string, proposedBoardHash: string];
+  export type InputTuple = [
+    entityId: BytesLike,
+    proposedBoardHash: BytesLike,
+    authority: BigNumberish,
+    proposalNonce: BigNumberish,
+    activateAtBlock: BigNumberish
+  ];
+  export type OutputTuple = [
+    entityId: string,
+    proposedBoardHash: string,
+    authority: bigint,
+    proposalNonce: bigint,
+    activateAtBlock: bigint
+  ];
   export interface OutputObject {
     entityId: string;
     proposedBoardHash: string;
+    authority: bigint;
+    proposalNonce: bigint;
+    activateAtBlock: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -589,6 +670,59 @@ export namespace ControlSharesReleasedEvent {
     controlAmount: bigint;
     dividendAmount: bigint;
     purpose: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace EntityProviderActionCancelledEvent {
+  export type InputTuple = [
+    entityId: BytesLike,
+    actionNonce: BigNumberish,
+    cancelledActionHash: BytesLike,
+    cancelledActionKind: BigNumberish,
+    cancelHash: BytesLike
+  ];
+  export type OutputTuple = [
+    entityId: string,
+    actionNonce: bigint,
+    cancelledActionHash: string,
+    cancelledActionKind: bigint,
+    cancelHash: string
+  ];
+  export interface OutputObject {
+    entityId: string;
+    actionNonce: bigint;
+    cancelledActionHash: string;
+    cancelledActionKind: bigint;
+    cancelHash: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace EntityProviderActionExecutedEvent {
+  export type InputTuple = [
+    entityId: BytesLike,
+    actionNonce: BigNumberish,
+    actionHash: BytesLike,
+    actionKind: BigNumberish
+  ];
+  export type OutputTuple = [
+    entityId: string,
+    actionNonce: bigint,
+    actionHash: string,
+    actionKind: bigint
+  ];
+  export interface OutputObject {
+    entityId: string;
+    actionNonce: bigint;
+    actionHash: string;
+    actionKind: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -701,11 +835,26 @@ export namespace NameTransferredEvent {
 }
 
 export namespace ProposalCancelledEvent {
-  export type InputTuple = [entityId: BytesLike, cancelledBy: BigNumberish];
-  export type OutputTuple = [entityId: string, cancelledBy: bigint];
+  export type InputTuple = [
+    entityId: BytesLike,
+    proposedBoardHash: BytesLike,
+    proposedBy: BigNumberish,
+    cancelledBy: BigNumberish,
+    proposalNonce: BigNumberish
+  ];
+  export type OutputTuple = [
+    entityId: string,
+    proposedBoardHash: string,
+    proposedBy: bigint,
+    cancelledBy: bigint,
+    proposalNonce: bigint
+  ];
   export interface OutputObject {
     entityId: string;
+    proposedBoardHash: string;
+    proposedBy: bigint;
     cancelledBy: bigint;
+    proposalNonce: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -825,7 +974,15 @@ export interface EntityProvider extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
+  BOARD_GRACE_PERIOD: TypedContractMethod<[], [bigint], "view">;
+
+  BOARD_PROPOSAL_CANCEL_DOMAIN: TypedContractMethod<[], [string], "view">;
+
+  BOARD_PROPOSAL_DOMAIN: TypedContractMethod<[], [string], "view">;
+
   FOUNDATION_ENTITY: TypedContractMethod<[], [bigint], "view">;
+
+  MAX_SHARE_SUPPORTERS: TypedContractMethod<[], [bigint], "view">;
 
   TOTAL_CONTROL_SUPPLY: TypedContractMethod<[], [bigint], "view">;
 
@@ -835,20 +992,6 @@ export interface EntityProvider extends BaseContract {
     [entityId: BytesLike],
     [void],
     "nonpayable"
-  >;
-
-  activeProposals: TypedContractMethod<
-    [arg0: BytesLike],
-    [
-      [string, bigint, bigint, bigint, boolean] & {
-        proposedBoardHash: string;
-        proposerType: bigint;
-        proposeBlock: bigint;
-        activateBlock: bigint;
-        active: boolean;
-      }
-    ],
-    "view"
   >;
 
   assignName: TypedContractMethod<
@@ -875,16 +1018,63 @@ export interface EntityProvider extends BaseContract {
     "view"
   >;
 
-  boardHashToEntityId: TypedContractMethod<[arg0: BytesLike], [string], "view">;
+  boardActionNonces: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
+
+  boardEpochs: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
 
   cancelBoardProposal: TypedContractMethod<
     [
       entityId: BytesLike,
       proposerType: BigNumberish,
-      articles: EntityProvider.EntityArticlesStruct
+      authorizations: BytesLike[]
     ],
     [void],
     "nonpayable"
+  >;
+
+  cancelEntityProviderAction: TypedContractMethod<
+    [
+      entityNumber: BigNumberish,
+      cancelledActionHash: BytesLike,
+      cancelledActionKind: BigNumberish,
+      hankoData: BytesLike
+    ],
+    [void],
+    "nonpayable"
+  >;
+
+  computeBoardProposalCancelHash: TypedContractMethod<
+    [
+      entityId: BytesLike,
+      proposedBoardHash: BytesLike,
+      proposedBy: BigNumberish,
+      cancelledBy: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+
+  computeBoardProposalHash: TypedContractMethod<
+    [
+      entityId: BytesLike,
+      newBoardHash: BytesLike,
+      authority: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+
+  computeCancelEntityProviderActionHankoHash: TypedContractMethod<
+    [
+      entityNumber: BigNumberish,
+      actionNonce: BigNumberish,
+      cancelledActionHash: BytesLike,
+      cancelledActionKind: BigNumberish
+    ],
+    [string],
+    "view"
   >;
 
   computeEntityTransferHankoHash: TypedContractMethod<
@@ -907,6 +1097,40 @@ export interface EntityProvider extends BaseContract {
       dividendAmount: BigNumberish,
       purpose: string,
       actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+
+  encodeBoardProposalCancelHankoPayload: TypedContractMethod<
+    [
+      entityId: BytesLike,
+      proposedBoardHash: BytesLike,
+      proposedBy: BigNumberish,
+      cancelledBy: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+
+  encodeBoardProposalHankoPayload: TypedContractMethod<
+    [
+      entityId: BytesLike,
+      newBoardHash: BytesLike,
+      authority: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+
+  encodeCancelEntityProviderActionHankoPayload: TypedContractMethod<
+    [
+      entityNumber: BigNumberish,
+      actionNonce: BigNumberish,
+      cancelledActionHash: BytesLike,
+      cancelledActionKind: BigNumberish
     ],
     [string],
     "view"
@@ -940,13 +1164,24 @@ export interface EntityProvider extends BaseContract {
   entities: TypedContractMethod<
     [arg0: BytesLike],
     [
-      [string, string, bigint, bigint, bigint, string] & {
+      [
+        string,
+        string,
+        bigint,
+        string,
+        bigint,
+        bigint,
+        bigint,
+        EntityProvider.EntityArticlesStructOutput
+      ] & {
         currentBoardHash: string;
+        previousBoardHash: string;
+        previousBoardValidUntil: bigint;
         proposedBoardHash: string;
         activateAtBlock: bigint;
         registrationBlock: bigint;
         proposerType: bigint;
-        articlesHash: string;
+        articles: EntityProvider.EntityArticlesStructOutput;
       }
     ],
     "view"
@@ -962,8 +1197,7 @@ export interface EntityProvider extends BaseContract {
       to: AddressLike,
       tokenId: BigNumberish,
       amount: BigNumberish,
-      encodedBoard: BytesLike,
-      encodedSignature: BytesLike
+      hankoData: BytesLike
     ],
     [void],
     "nonpayable"
@@ -1035,16 +1269,10 @@ export interface EntityProvider extends BaseContract {
       entityId: BytesLike,
       newBoardHash: BytesLike,
       proposerType: BigNumberish,
-      articles: EntityProvider.EntityArticlesStruct
+      authorizations: BytesLike[]
     ],
     [void],
     "nonpayable"
-  >;
-
-  recoverEntity: TypedContractMethod<
-    [encodedBoard: BytesLike, encodedSignature: BytesLike, hash: BytesLike],
-    [bigint],
-    "view"
   >;
 
   registerNumberedEntitiesBatch: TypedContractMethod<
@@ -1066,8 +1294,7 @@ export interface EntityProvider extends BaseContract {
       controlAmount: BigNumberish,
       dividendAmount: BigNumberish,
       purpose: string,
-      encodedBoard: BytesLike,
-      encodedSignature: BytesLike
+      hankoData: BytesLike
     ],
     [void],
     "nonpayable"
@@ -1125,10 +1352,6 @@ export interface EntityProvider extends BaseContract {
     "view"
   >;
 
-  totalControlSupply: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
-
-  totalDividendSupply: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
-
   transferName: TypedContractMethod<
     [name: string, newEntityNumber: BigNumberish],
     [void],
@@ -1148,7 +1371,19 @@ export interface EntityProvider extends BaseContract {
   ): T;
 
   getFunction(
+    nameOrSignature: "BOARD_GRACE_PERIOD"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "BOARD_PROPOSAL_CANCEL_DOMAIN"
+  ): TypedContractMethod<[], [string], "view">;
+  getFunction(
+    nameOrSignature: "BOARD_PROPOSAL_DOMAIN"
+  ): TypedContractMethod<[], [string], "view">;
+  getFunction(
     nameOrSignature: "FOUNDATION_ENTITY"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "MAX_SHARE_SUPPORTERS"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
     nameOrSignature: "TOTAL_CONTROL_SUPPLY"
@@ -1159,21 +1394,6 @@ export interface EntityProvider extends BaseContract {
   getFunction(
     nameOrSignature: "activateBoard"
   ): TypedContractMethod<[entityId: BytesLike], [void], "nonpayable">;
-  getFunction(
-    nameOrSignature: "activeProposals"
-  ): TypedContractMethod<
-    [arg0: BytesLike],
-    [
-      [string, bigint, bigint, bigint, boolean] & {
-        proposedBoardHash: string;
-        proposerType: bigint;
-        proposeBlock: bigint;
-        activateBlock: bigint;
-        active: boolean;
-      }
-    ],
-    "view"
-  >;
   getFunction(
     nameOrSignature: "assignName"
   ): TypedContractMethod<
@@ -1203,18 +1423,70 @@ export interface EntityProvider extends BaseContract {
     "view"
   >;
   getFunction(
-    nameOrSignature: "boardHashToEntityId"
-  ): TypedContractMethod<[arg0: BytesLike], [string], "view">;
+    nameOrSignature: "boardActionNonces"
+  ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "boardEpochs"
+  ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
   getFunction(
     nameOrSignature: "cancelBoardProposal"
   ): TypedContractMethod<
     [
       entityId: BytesLike,
       proposerType: BigNumberish,
-      articles: EntityProvider.EntityArticlesStruct
+      authorizations: BytesLike[]
     ],
     [void],
     "nonpayable"
+  >;
+  getFunction(
+    nameOrSignature: "cancelEntityProviderAction"
+  ): TypedContractMethod<
+    [
+      entityNumber: BigNumberish,
+      cancelledActionHash: BytesLike,
+      cancelledActionKind: BigNumberish,
+      hankoData: BytesLike
+    ],
+    [void],
+    "nonpayable"
+  >;
+  getFunction(
+    nameOrSignature: "computeBoardProposalCancelHash"
+  ): TypedContractMethod<
+    [
+      entityId: BytesLike,
+      proposedBoardHash: BytesLike,
+      proposedBy: BigNumberish,
+      cancelledBy: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "computeBoardProposalHash"
+  ): TypedContractMethod<
+    [
+      entityId: BytesLike,
+      newBoardHash: BytesLike,
+      authority: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "computeCancelEntityProviderActionHankoHash"
+  ): TypedContractMethod<
+    [
+      entityNumber: BigNumberish,
+      actionNonce: BigNumberish,
+      cancelledActionHash: BytesLike,
+      cancelledActionKind: BigNumberish
+    ],
+    [string],
+    "view"
   >;
   getFunction(
     nameOrSignature: "computeEntityTransferHankoHash"
@@ -1239,6 +1511,43 @@ export interface EntityProvider extends BaseContract {
       dividendAmount: BigNumberish,
       purpose: string,
       actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "encodeBoardProposalCancelHankoPayload"
+  ): TypedContractMethod<
+    [
+      entityId: BytesLike,
+      proposedBoardHash: BytesLike,
+      proposedBy: BigNumberish,
+      cancelledBy: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "encodeBoardProposalHankoPayload"
+  ): TypedContractMethod<
+    [
+      entityId: BytesLike,
+      newBoardHash: BytesLike,
+      authority: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "encodeCancelEntityProviderActionHankoPayload"
+  ): TypedContractMethod<
+    [
+      entityNumber: BigNumberish,
+      actionNonce: BigNumberish,
+      cancelledActionHash: BytesLike,
+      cancelledActionKind: BigNumberish
     ],
     [string],
     "view"
@@ -1275,13 +1584,24 @@ export interface EntityProvider extends BaseContract {
   ): TypedContractMethod<
     [arg0: BytesLike],
     [
-      [string, string, bigint, bigint, bigint, string] & {
+      [
+        string,
+        string,
+        bigint,
+        string,
+        bigint,
+        bigint,
+        bigint,
+        EntityProvider.EntityArticlesStructOutput
+      ] & {
         currentBoardHash: string;
+        previousBoardHash: string;
+        previousBoardValidUntil: bigint;
         proposedBoardHash: string;
         activateAtBlock: bigint;
         registrationBlock: bigint;
         proposerType: bigint;
-        articlesHash: string;
+        articles: EntityProvider.EntityArticlesStructOutput;
       }
     ],
     "view"
@@ -1300,8 +1620,7 @@ export interface EntityProvider extends BaseContract {
       to: AddressLike,
       tokenId: BigNumberish,
       amount: BigNumberish,
-      encodedBoard: BytesLike,
-      encodedSignature: BytesLike
+      hankoData: BytesLike
     ],
     [void],
     "nonpayable"
@@ -1380,17 +1699,10 @@ export interface EntityProvider extends BaseContract {
       entityId: BytesLike,
       newBoardHash: BytesLike,
       proposerType: BigNumberish,
-      articles: EntityProvider.EntityArticlesStruct
+      authorizations: BytesLike[]
     ],
     [void],
     "nonpayable"
-  >;
-  getFunction(
-    nameOrSignature: "recoverEntity"
-  ): TypedContractMethod<
-    [encodedBoard: BytesLike, encodedSignature: BytesLike, hash: BytesLike],
-    [bigint],
-    "view"
   >;
   getFunction(
     nameOrSignature: "registerNumberedEntitiesBatch"
@@ -1407,8 +1719,7 @@ export interface EntityProvider extends BaseContract {
       controlAmount: BigNumberish,
       dividendAmount: BigNumberish,
       purpose: string,
-      encodedBoard: BytesLike,
-      encodedSignature: BytesLike
+      hankoData: BytesLike
     ],
     [void],
     "nonpayable"
@@ -1470,12 +1781,6 @@ export interface EntityProvider extends BaseContract {
     nameOrSignature: "supportsInterface"
   ): TypedContractMethod<[interfaceId: BytesLike], [boolean], "view">;
   getFunction(
-    nameOrSignature: "totalControlSupply"
-  ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
-  getFunction(
-    nameOrSignature: "totalDividendSupply"
-  ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
-  getFunction(
     nameOrSignature: "transferName"
   ): TypedContractMethod<
     [name: string, newEntityNumber: BigNumberish],
@@ -1520,6 +1825,20 @@ export interface EntityProvider extends BaseContract {
     ControlSharesReleasedEvent.InputTuple,
     ControlSharesReleasedEvent.OutputTuple,
     ControlSharesReleasedEvent.OutputObject
+  >;
+  getEvent(
+    key: "EntityProviderActionCancelled"
+  ): TypedContractEvent<
+    EntityProviderActionCancelledEvent.InputTuple,
+    EntityProviderActionCancelledEvent.OutputTuple,
+    EntityProviderActionCancelledEvent.OutputObject
+  >;
+  getEvent(
+    key: "EntityProviderActionExecuted"
+  ): TypedContractEvent<
+    EntityProviderActionExecutedEvent.InputTuple,
+    EntityProviderActionExecutedEvent.OutputTuple,
+    EntityProviderActionExecutedEvent.OutputObject
   >;
   getEvent(
     key: "EntityRegistered"
@@ -1597,7 +1916,7 @@ export interface EntityProvider extends BaseContract {
       ApprovalForAllEvent.OutputObject
     >;
 
-    "BoardActivated(bytes32,bytes32)": TypedContractEvent<
+    "BoardActivated(bytes32,bytes32,bytes32,uint256)": TypedContractEvent<
       BoardActivatedEvent.InputTuple,
       BoardActivatedEvent.OutputTuple,
       BoardActivatedEvent.OutputObject
@@ -1608,7 +1927,7 @@ export interface EntityProvider extends BaseContract {
       BoardActivatedEvent.OutputObject
     >;
 
-    "BoardProposed(bytes32,bytes32)": TypedContractEvent<
+    "BoardProposed(bytes32,bytes32,uint8,uint256,uint256)": TypedContractEvent<
       BoardProposedEvent.InputTuple,
       BoardProposedEvent.OutputTuple,
       BoardProposedEvent.OutputObject
@@ -1628,6 +1947,28 @@ export interface EntityProvider extends BaseContract {
       ControlSharesReleasedEvent.InputTuple,
       ControlSharesReleasedEvent.OutputTuple,
       ControlSharesReleasedEvent.OutputObject
+    >;
+
+    "EntityProviderActionCancelled(bytes32,uint256,bytes32,uint8,bytes32)": TypedContractEvent<
+      EntityProviderActionCancelledEvent.InputTuple,
+      EntityProviderActionCancelledEvent.OutputTuple,
+      EntityProviderActionCancelledEvent.OutputObject
+    >;
+    EntityProviderActionCancelled: TypedContractEvent<
+      EntityProviderActionCancelledEvent.InputTuple,
+      EntityProviderActionCancelledEvent.OutputTuple,
+      EntityProviderActionCancelledEvent.OutputObject
+    >;
+
+    "EntityProviderActionExecuted(bytes32,uint256,bytes32,uint8)": TypedContractEvent<
+      EntityProviderActionExecutedEvent.InputTuple,
+      EntityProviderActionExecutedEvent.OutputTuple,
+      EntityProviderActionExecutedEvent.OutputObject
+    >;
+    EntityProviderActionExecuted: TypedContractEvent<
+      EntityProviderActionExecutedEvent.InputTuple,
+      EntityProviderActionExecutedEvent.OutputTuple,
+      EntityProviderActionExecutedEvent.OutputObject
     >;
 
     "EntityRegistered(bytes32,uint256,bytes32)": TypedContractEvent<
@@ -1685,7 +2026,7 @@ export interface EntityProvider extends BaseContract {
       NameTransferredEvent.OutputObject
     >;
 
-    "ProposalCancelled(bytes32,uint8)": TypedContractEvent<
+    "ProposalCancelled(bytes32,bytes32,uint8,uint8,uint256)": TypedContractEvent<
       ProposalCancelledEvent.InputTuple,
       ProposalCancelledEvent.OutputTuple,
       ProposalCancelledEvent.OutputObject

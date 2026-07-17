@@ -18,6 +18,7 @@ const HUB_SIGNER = signer('33');
 const USER_RUNTIME_ID = signer('44');
 const SECONDARY_HUB = entity('55');
 const SECONDARY_HUB_SIGNER = signer('66');
+const USDC_UNIT = 10n ** 6n;
 
 const makeFrame = (height: number): AccountFrame => ({
   height,
@@ -162,7 +163,7 @@ describe('offchain faucet admission', () => {
       data: {
         targetEntityId: USER,
         tokenId: 1,
-        amount: 100n * 10n ** 18n,
+        amount: 100n * USDC_UNIT,
         route: [HUB, USER],
       },
     });
@@ -226,7 +227,7 @@ describe('offchain faucet admission', () => {
   test('reports typed expected-empty failure for settled insufficient capacity', async () => {
     const account = makeAccount({
       currentHeight: 1,
-      outCapacity: 99n * 10n ** 18n,
+      outCapacity: 99n * USDC_UNIT,
     });
 
     const { response, body, enqueued } = await callFaucet(account);
@@ -243,21 +244,21 @@ describe('offchain faucet admission', () => {
       retryable: false,
       fatal: false,
     });
-    expect(body.senderOutCapacity).toBe((99n * 10n ** 18n).toString());
+    expect(body.senderOutCapacity).toBe((99n * USDC_UNIT).toString());
     expect(enqueued).toBeNull();
   });
 
   test('still rejects insufficient capacity from a settled account snapshot', () => {
     const account = makeAccount({
       currentHeight: 1,
-      outCapacity: 99n * 10n ** 18n,
+      outCapacity: 99n * USDC_UNIT,
     });
 
     expect(describeOffchainFaucetAccountState(account).settledCapacitySnapshot).toBe(true);
     expect(shouldRejectOffchainFaucetForSettledCapacity({
       account,
-      senderOutCapacity: 99n * 10n ** 18n,
-      amount: 100n * 10n ** 18n,
+      senderOutCapacity: 99n * USDC_UNIT,
+      amount: 100n * USDC_UNIT,
     })).toBe(true);
   });
 });

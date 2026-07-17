@@ -52,6 +52,7 @@ describe('move allowance helpers', () => {
       enabled: false,
       tokenSymbol: 'USDC',
       tokenDecimals: 6,
+      metadataLoading: false,
       raw: null,
       loading: false,
       error: null,
@@ -62,6 +63,7 @@ describe('move allowance helpers', () => {
       enabled: true,
       tokenSymbol: 'USDC',
       tokenDecimals: 6,
+      metadataLoading: false,
       raw: null,
       loading: true,
       error: null,
@@ -72,11 +74,29 @@ describe('move allowance helpers', () => {
       enabled: true,
       tokenSymbol: 'USDC',
       tokenDecimals: 6,
+      metadataLoading: false,
       raw: 1_000_000n,
       loading: false,
       error: null,
       required: 2_000_000n,
       formatAmount: fmt,
     })).toBe('Current allowance 1 USDC · required 2 USDC');
+  });
+
+  test('waits for exact token metadata and then fails loud if it never arrives', () => {
+    const base = {
+      enabled: true,
+      tokenSymbol: 'USDC',
+      tokenDecimals: null,
+      raw: null,
+      loading: false,
+      error: null,
+      required: null,
+      formatAmount: fmt,
+    };
+    expect(buildMoveAllowanceStatusLabel({ ...base, metadataLoading: true }))
+      .toBe('Loading asset metadata...');
+    expect(() => buildMoveAllowanceStatusLabel({ ...base, metadataLoading: false }))
+      .toThrow('MOVE_ALLOWANCE_TOKEN_METADATA_MISSING:USDC');
   });
 });

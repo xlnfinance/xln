@@ -22,6 +22,8 @@ import { timedStep } from './utils/e2e-timing';
 
 const CONSENSUS_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
+const USDC_DECIMALS = 6n;
+const PAYMENT_AMOUNT = 25n * 10n ** USDC_DECIMALS;
 
 async function getConnectedHubEntityId(page: Page): Promise<string | null> {
   return page.evaluate(() => {
@@ -40,7 +42,7 @@ async function getConnectedHubEntityId(page: Page): Promise<string | null> {
 test.describe('E2E HTLC Payment Flow', () => {
   // Scenario: a fresh runtime connects to the baseline hub mesh, receives offchain funds,
   // sends one HTLC payment through the current Pay UI, and proves reload restores the same account state.
-  test('full HTLC bilateral payment through hub', async ({ page }) => {
+  test('full HTLC bilateral payment through hub', { tag: '@functional' }, async ({ page }) => {
     test.setTimeout(LONG_E2E ? 240_000 : 180_000);
 
     // Log errors for debugging
@@ -133,7 +135,7 @@ test.describe('E2E HTLC Payment Flow', () => {
       });
     });
 
-    expect(String(finalizedEvent.data?.amount || ''), 'sender finalized event should include amount').toBe('25000000000000000000');
+    expect(String(finalizedEvent.data?.amount || ''), 'sender finalized event should include amount').toBe(PAYMENT_AMOUNT.toString());
     expect(String(finalizedEvent.data?.fromEntity || '').toLowerCase(), 'sender finalized event should include fromEntity').toBe(alice.entityId.toLowerCase());
     expect(String(finalizedEvent.data?.toEntity || '').toLowerCase(), 'sender finalized event should include toEntity').toBe(String(connectedHubId || '').toLowerCase());
     expect(String(finalizedEvent.data?.hashlock || ''), 'sender finalized event should include hashlock').toMatch(/^0x[0-9a-f]{64}$/i);

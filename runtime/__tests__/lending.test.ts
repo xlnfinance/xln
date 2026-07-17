@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { applyAccountTx } from '../account/tx/apply';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { createEntityFrameHash } from '../entity/consensus/frame';
 import { applyCommittedAccountFrameFollowups, type MempoolOp } from '../entity/tx/handlers/account';
 import type { AccountFrame, AccountMachine, AccountTx, ConsensusConfig, EntityState } from '../types';
@@ -85,9 +86,8 @@ const makeAccount = (counterparty: string): AccountMachine => {
     pulls: new Map(),
     swapOrderHistory: new Map(),
     swapClosedOrders: new Map(),
-    leftJObservations: [],
-    rightJObservations: [],
-    jEventChain: [],
+    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,
     jNonce: 0,
   };

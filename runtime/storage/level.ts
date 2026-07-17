@@ -1,4 +1,4 @@
-import { decodeBuffer, notFound, writeBatch } from './codec';
+import { decodeBuffer, decodeValidatedBuffer, notFound, writeBatch } from './codec';
 import { prefixUpperBound } from './keys';
 import type { NamespaceBytes, RuntimeDbLike } from './types';
 
@@ -33,6 +33,19 @@ const keyIteratorOptions = (range: KeyRangeOptions): { gte?: Buffer; lt?: Buffer
 export const readJsonOrNull = async <T>(db: RuntimeDbLike, key: Buffer): Promise<T | null> => {
   try {
     return decodeBuffer<T>(await db.get(key));
+  } catch (error) {
+    if (notFound(error)) return null;
+    throw error;
+  }
+};
+
+export const readValidatedOrNull = async <T>(
+  db: RuntimeDbLike,
+  key: Buffer,
+  validator: (value: unknown) => T,
+): Promise<T | null> => {
+  try {
+    return decodeValidatedBuffer(await db.get(key), validator);
   } catch (error) {
     if (notFound(error)) return null;
     throw error;
@@ -111,6 +124,7 @@ export const copyKeyRange = async (
   targetDb: RuntimeDbLike,
   range: KeyRangeOptions,
   mapKey: (key: Buffer) => Buffer | null = (key) => key,
+  onBatchCommitted?: () => void | Promise<void>,
 ): Promise<{ bytes: number; count: number }> => {
   let bytes = 0;
   let count = 0;
@@ -120,6 +134,7 @@ export const copyKeyRange = async (
   const flush = async (): Promise<void> => {
     if (batchCount <= 0) return;
     await writeBatch(batch);
+    await onBatchCommitted?.();
     batch = targetDb.batch();
     batchCount = 0;
   };
@@ -138,7 +153,11 @@ export const copyKeyRange = async (
   return { bytes, count };
 };
 
-export const deleteKeys = async (db: RuntimeDbLike, keys: Buffer[]): Promise<number> => {
+export const deleteKeys = async (
+  db: RuntimeDbLike,
+  keys: Buffer[],
+  onBatchCommitted?: () => void | Promise<void>,
+): Promise<number> => {
   let removedBytes = 0;
   for (let offset = 0; offset < keys.length; offset += STORAGE_BATCH_CHUNK_SIZE) {
     const batch = db.batch();
@@ -148,6 +167,7 @@ export const deleteKeys = async (db: RuntimeDbLike, keys: Buffer[]): Promise<num
       if (typeof batch.del === 'function') batch.del(key);
     }
     await writeBatch(batch);
+    await onBatchCommitted?.();
   }
   return removedBytes;
 };
@@ -156,6 +176,7 @@ export const deleteKeyRange = async (
   db: RuntimeDbLike,
   range: KeyRangeOptions,
   shouldDelete: (key: Buffer) => boolean | Promise<boolean> = () => true,
+  onBatchCommitted?: () => void | Promise<void>,
 ): Promise<{ removedBytes: number; removedKeys: number }> => {
   let removedBytes = 0;
   let removedKeys = 0;
@@ -165,6 +186,7 @@ export const deleteKeyRange = async (
   const flush = async (): Promise<void> => {
     if (batchCount <= 0) return;
     await writeBatch(batch);
+    await onBatchCommitted?.();
     batch = db.batch();
     batchCount = 0;
   };

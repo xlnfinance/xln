@@ -6,7 +6,7 @@ node_modules
 .netlify
 .wrangler
 /.svelte-kit
-/.svelte-kit-e2e
+/.svelte-kit-*
 # /build - commented out for GitHub Pages deployment
 
 # OS

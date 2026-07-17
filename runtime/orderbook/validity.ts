@@ -2,9 +2,9 @@ import {
   canonicalPair,
   computeSwapPriceTicks,
   deriveSide,
+  getSwapLotScale,
   getBookOrders,
   MAX_ORDERBOOK_QTY_LOTS,
-  SWAP_LOT_SCALE,
   type BookOrderState,
   type BookState,
   type OrderbookExtState,
@@ -119,10 +119,11 @@ const normalizeOpenOfferForBook = (
 
   const baseAmount = side === 1 ? offer.giveAmount : offer.wantAmount;
   const quoteAmount = side === 1 ? offer.wantAmount : offer.giveAmount;
+  const lotScale = getSwapLotScale(base);
   if (baseAmount <= 0n || quoteAmount <= 0n) return { invalid: { swapKey: key, reason: 'zero-amount' } };
-  if (baseAmount % SWAP_LOT_SCALE !== 0n) return { invalid: { swapKey: key, reason: 'lot-misaligned' } };
+  if (baseAmount % lotScale !== 0n) return { invalid: { swapKey: key, reason: 'lot-misaligned' } };
 
-  const qtyLots = baseAmount / SWAP_LOT_SCALE;
+  const qtyLots = baseAmount / lotScale;
   if (qtyLots <= 0n || qtyLots > MAX_ORDERBOOK_QTY_LOTS) return { invalid: { swapKey: key, reason: 'invalid-order' } };
 
   const priceTicks =

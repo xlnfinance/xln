@@ -15,6 +15,7 @@ import { assertRuntimeIdle } from './helpers';
 import { setEntityFrameHashDebugRecorder, type EntityFrameHashDebugRecord } from '../entity/consensus/frame';
 import { stopManagedScenarioAnvil } from './boot';
 import { buildCanonicalJReplicaSnapshot } from '../wal/snapshot';
+import { startRuntimeHistoryTraceForTesting } from '../history-retention';
 import {
   setAccountStateRootDebugRecorder,
   type AccountStateRootDebugRecord,
@@ -291,10 +292,11 @@ const buildFrameHashTrace = (records: EntityFrameHashDebugRecord[]): unknown[] =
 
 const buildOracle = (
   env: Env,
+  history: readonly Env['history'][number][],
   frameHashRecords: EntityFrameHashDebugRecord[],
   accountStateRootRecords: AccountStateRootDebugRecord[],
 ): ScenarioOracle => {
-  const frameValues = (env.history ?? []).map((snapshot) => toOracleValue(snapshotProjection(snapshot)));
+  const frameValues = history.map((snapshot) => toOracleValue(snapshotProjection(snapshot)));
   const frameHashes = frameValues.map((snapshot) => hashOracleValue(snapshot, 24));
   const frameHashTrace = buildFrameHashTrace(frameHashRecords);
   const accountStateRootTrace = accountStateRootRecords.map((record) => toDebugTraceValue(record));
@@ -465,6 +467,8 @@ const runScenarioOnce = async (
   const previousForceFreshAnvil = process.env['XLN_FORCE_FRESH_ANVIL'];
   let env: Env | null = null;
   let activeEnv: Env | null = null;
+  let stopHistoryTrace: (() => void) | null = null;
+  let fullHistory: readonly Env['history'][number][] = [];
   const frameHashRecords: EntityFrameHashDebugRecord[] = [];
   const accountStateRootRecords: AccountStateRootDebugRecord[] = [];
   const restoreFrameHashRecorder = setEntityFrameHashDebugRecorder((record) => {
@@ -488,14 +492,18 @@ const runScenarioOnce = async (
     process.env['ANVIL_RPC'] = rpcUrl;
     process.env['XLN_FORCE_FRESH_ANVIL'] = '1';
 
-    clearSignerKeys();
+    clearSignerKeys(SEED);
     env = createEmptyEnv(SEED);
     activeEnv = env;
+    const historyTrace = startRuntimeHistoryTraceForTesting(env);
+    stopHistoryTrace = historyTrace.stop;
+    fullHistory = historyTrace.snapshots;
     env.dbNamespace = `determinism-${scenario.key}-${runIndex}`;
     env.gossip = createGossipLayer();
     env.scenarioMode = true;
-    env.quietRuntimeLogs = true;
-    env.scenarioLogLevel = 'error';
+    const verboseScenarioLogs = process.env['XLN_DETERMINISM_VERBOSE'] === '1';
+    env.quietRuntimeLogs = !verboseScenarioLogs;
+    env.scenarioLogLevel = verboseScenarioLogs ? 'debug' : 'error';
     env.timestamp = INITIAL_TIMESTAMP;
     env.runtimeConfig = {
       ...env.runtimeConfig,
@@ -533,8 +541,9 @@ const runScenarioOnce = async (
         `total=${jEventTrace.headerReads.length}`,
       );
     }
-    return buildOracle(activeEnv, frameHashRecords, accountStateRootRecords);
+    return buildOracle(activeEnv, fullHistory, frameHashRecords, accountStateRootRecords);
   } finally {
+    stopHistoryTrace?.();
     restoreFrameHashRecorder();
     restoreAccountStateRootRecorder();
     restoreJEventIngressTransform();

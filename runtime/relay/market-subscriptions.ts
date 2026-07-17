@@ -7,7 +7,11 @@ import {
   type MarketSnapshotPayload,
 } from './market-snapshot';
 import { MarketSubscriptionLimiter, type MarketSubscriptionLimiterSnapshot } from './market-subscription-limiter';
-import { safeStringify } from '../protocol/serialization';
+import {
+  encodeMarketWireMessage,
+  isMarketMessageType,
+  type MarketWireRequest,
+} from './market-wire';
 
 export type MarketSubscription = {
   hubIds: Set<string>;
@@ -28,34 +32,34 @@ export type MarketSubscriptionStackOptions<WS extends MarketSocket> = {
   fetchSnapshots: (hubEntityId: string, pairIds: string[], depth: number) => Promise<MarketSnapshotPayload[]> | MarketSnapshotPayload[];
   isReady?: () => boolean;
   readyError?: string;
-  onHandlerError?: (error: unknown, msg: Record<string, unknown>) => void;
+  onHandlerError?: (error: unknown, msg: MarketWireRequest | { type: 'market_publish' }) => void;
 };
 
 export type MarketSubscriptionStack<WS extends MarketSocket> = {
   cleanup: (ws: WS) => void;
   clear: () => void;
-  handleMessage: (ws: WS, msg: Record<string, unknown>) => Promise<void>;
-  isMarketMessageType: (type: unknown) => type is MarketMessageType;
+  handleMessage: (ws: WS, msg: MarketWireRequest) => Promise<void>;
+  isMarketMessageType: typeof isMarketMessageType;
   snapshot: () => MarketSubscriptionLimiterSnapshot;
 };
 
-type MarketMessageType = 'market_subscribe' | 'market_unsubscribe' | 'market_snapshot_request';
+export { isMarketMessageType } from './market-wire';
 
-const marketMessageTypes = new Set<unknown>(['market_subscribe', 'market_unsubscribe', 'market_snapshot_request']);
-
-export const isMarketMessageType = (type: unknown): type is MarketMessageType => marketMessageTypes.has(type);
-
-const valuesFor = (msg: Record<string, unknown>, pluralKey: string, singleKey: string): unknown[] => {
-  const plural = msg[pluralKey];
+const valuesFor = (msg: MarketWireRequest, kind: 'hub' | 'pair'): unknown[] => {
+  const plural = kind === 'hub'
+    ? ('hubEntityIds' in msg ? msg.hubEntityIds : undefined)
+    : ('pairs' in msg ? msg.pairs : undefined);
   if (Array.isArray(plural)) return plural;
-  const single = msg[singleKey];
+  const single = kind === 'hub'
+    ? ('hubEntityId' in msg ? msg.hubEntityId : undefined)
+    : ('pairId' in msg ? msg.pairId : undefined);
   return single ? [single] : [];
 };
 
-const sendError = (ws: MarketSocket, inReplyTo: unknown, error: string, code?: string): void => {
-  ws.send(safeStringify({
+const sendError = (ws: MarketSocket, inReplyTo: string | undefined, error: string, code?: string): void => {
+  ws.send(encodeMarketWireMessage({
     type: 'error',
-    inReplyTo,
+    ...(inReplyTo ? { inReplyTo } : {}),
     ...(code ? { code } : {}),
     error,
   }));
@@ -82,6 +86,35 @@ export const createMarketSubscriptionStack = <WS extends MarketSocket>(
   );
   let publisherTimer: ReturnType<typeof setInterval> | null = null;
   let publisherInFlight = false;
+
+  const reportHandlerError = (
+    error: unknown,
+    msg: MarketWireRequest | { type: 'market_publish' },
+  ): void => {
+    if (!options.onHandlerError) {
+      console.error('MARKET_HANDLER_EXCEPTION', error);
+      return;
+    }
+    try {
+      options.onHandlerError(error, msg);
+    } catch (reportingError) {
+      console.error('MARKET_HANDLER_ERROR_REPORT_FAILED', reportingError);
+    }
+  };
+
+  const sendErrorOrReport = (
+    ws: WS,
+    inReplyTo: string | undefined,
+    error: string,
+    code: string | undefined,
+    msg: MarketWireRequest | { type: 'market_publish' },
+  ): void => {
+    try {
+      sendError(ws, inReplyTo, error, code);
+    } catch (sendErrorFailure) {
+      reportHandlerError(sendErrorFailure, msg);
+    }
+  };
 
   const cleanup = (ws: WS): void => {
     const existing = subscriptions.get(ws);
@@ -112,7 +145,7 @@ export const createMarketSubscriptionStack = <WS extends MarketSocket>(
       const snapshots = await options.fetchSnapshots(hubEntityId, pairIds, subscription.depth);
       for (const payload of snapshots) {
         subscription.seq += 1;
-        ws.send(safeStringify({
+        ws.send(encodeMarketWireMessage({
           type: 'market_snapshot',
           id: `market_${Date.now()}_${subscription.seq}`,
           timestamp: Date.now(),
@@ -124,10 +157,10 @@ export const createMarketSubscriptionStack = <WS extends MarketSocket>(
     return sentAny;
   };
 
-  const sendNoMarketStatus = (ws: WS, subscription: MarketSubscription, inReplyTo: unknown): void => {
-    ws.send(safeStringify({
+  const sendNoMarketStatus = (ws: WS, subscription: MarketSubscription, inReplyTo?: string): void => {
+    ws.send(encodeMarketWireMessage({
       type: 'market_status',
-      inReplyTo,
+      ...(inReplyTo ? { inReplyTo } : {}),
       status: 'no_market',
       data: {
         hubEntityIds: Array.from(subscription.hubIds),
@@ -145,14 +178,15 @@ export const createMarketSubscriptionStack = <WS extends MarketSocket>(
         try {
           await sendSnapshot(ws, subscription);
         } catch (error) {
-          sendError(
+          cleanup(ws);
+          reportHandlerError(error, { type: 'market_publish' });
+          sendErrorOrReport(
             ws,
             undefined,
             marketErrorMessage(error, 'Failed to send market snapshot'),
             marketErrorCode(error),
+            { type: 'market_publish' },
           );
-          cleanup(ws);
-          options.onHandlerError?.(error, { type: 'market_publish' });
         }
       }
     } finally {
@@ -167,10 +201,9 @@ export const createMarketSubscriptionStack = <WS extends MarketSocket>(
     }, RPC_MARKET_PUBLISH_MS);
   };
 
-  const handleMessage = async (ws: WS, msg: Record<string, unknown>): Promise<void> => {
-    const type = msg['type'];
-    const id = msg['id'];
-    if (!isMarketMessageType(type)) return;
+  const handleMessage = async (ws: WS, msg: MarketWireRequest): Promise<void> => {
+    const type = msg.type;
+    const id = msg.id;
 
     if (type === 'market_subscribe') {
       if (options.isReady && !options.isReady()) {
@@ -178,8 +211,8 @@ export const createMarketSubscriptionStack = <WS extends MarketSocket>(
         return;
       }
 
-      const hubIds = Array.from(new Set(valuesFor(msg, 'hubEntityIds', 'hubEntityId').map(normalizeMarketEntityId).filter(Boolean))) as string[];
-      const pairIds = Array.from(new Set(valuesFor(msg, 'pairs', 'pairId').map(normalizeMarketPairId).filter(Boolean))) as string[];
+      const hubIds = Array.from(new Set(valuesFor(msg, 'hub').map(normalizeMarketEntityId).filter(Boolean))) as string[];
+      const pairIds = Array.from(new Set(valuesFor(msg, 'pair').map(normalizeMarketPairId).filter(Boolean))) as string[];
       if (hubIds.length === 0 || pairIds.length === 0) {
         sendError(ws, id, 'market_subscribe requires valid hubEntityId(s) and pair(s)');
         return;
@@ -194,8 +227,8 @@ export const createMarketSubscriptionStack = <WS extends MarketSocket>(
         }
       }
 
-      const replace = msg['replace'] === true;
-      const depthRaw = Number(msg['depth']);
+      const replace = msg.replace === true;
+      const depthRaw = Number(msg.depth);
       const depth = Number.isFinite(depthRaw)
         ? Math.max(1, Math.min(Math.floor(depthRaw), RPC_MARKET_MAX_DEPTH))
         : RPC_MARKET_DEFAULT_DEPTH;
@@ -218,7 +251,7 @@ export const createMarketSubscriptionStack = <WS extends MarketSocket>(
       subscriptions.set(ws, subscription);
       ensurePublisher();
 
-      ws.send(safeStringify({
+      ws.send(encodeMarketWireMessage({
         type: 'ack',
         inReplyTo: id,
         status: 'market_subscribed',
@@ -234,14 +267,15 @@ export const createMarketSubscriptionStack = <WS extends MarketSocket>(
         const sentAny = await sendSnapshot(ws, subscription);
         if (!sentAny) sendNoMarketStatus(ws, subscription, id);
       } catch (error) {
-        sendError(
+        cleanup(ws);
+        reportHandlerError(error, msg);
+        sendErrorOrReport(
           ws,
           id,
           marketErrorMessage(error, 'Failed to send market snapshot'),
           marketErrorCode(error),
+          msg,
         );
-        cleanup(ws);
-        options.onHandlerError?.(error, msg);
       }
       return;
     }
@@ -249,22 +283,22 @@ export const createMarketSubscriptionStack = <WS extends MarketSocket>(
     if (type === 'market_unsubscribe') {
       const existing = subscriptions.get(ws);
       if (!existing) {
-        ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'market_unsubscribed' }));
+        ws.send(encodeMarketWireMessage({ type: 'ack', inReplyTo: id, status: 'market_unsubscribed' }));
         return;
       }
 
-      const hubIds = Array.from(new Set(valuesFor(msg, 'hubEntityIds', 'hubEntityId').map(normalizeMarketEntityId).filter(Boolean))) as string[];
-      const pairIds = Array.from(new Set(valuesFor(msg, 'pairs', 'pairId').map(normalizeMarketPairId).filter(Boolean))) as string[];
+      const hubIds = Array.from(new Set(valuesFor(msg, 'hub').map(normalizeMarketEntityId).filter(Boolean))) as string[];
+      const pairIds = Array.from(new Set(valuesFor(msg, 'pair').map(normalizeMarketPairId).filter(Boolean))) as string[];
       if (hubIds.length === 0 && pairIds.length === 0) {
         cleanup(ws);
-        ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'market_unsubscribed' }));
+        ws.send(encodeMarketWireMessage({ type: 'ack', inReplyTo: id, status: 'market_unsubscribed' }));
         return;
       }
 
       for (const hubEntityId of hubIds) existing.hubIds.delete(hubEntityId);
       for (const pairId of pairIds) existing.pairIds.delete(pairId);
       if (existing.hubIds.size === 0 || existing.pairIds.size === 0) cleanup(ws);
-      ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'market_unsubscribed' }));
+      ws.send(encodeMarketWireMessage({ type: 'ack', inReplyTo: id, status: 'market_unsubscribed' }));
       return;
     }
 
@@ -276,16 +310,17 @@ export const createMarketSubscriptionStack = <WS extends MarketSocket>(
     try {
       const sentAny = await sendSnapshot(ws, existing);
       if (!sentAny) sendNoMarketStatus(ws, existing, id);
-      ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'market_snapshot_sent' }));
+      ws.send(encodeMarketWireMessage({ type: 'ack', inReplyTo: id, status: 'market_snapshot_sent' }));
     } catch (error) {
       cleanup(ws);
-      sendError(
+      reportHandlerError(error, msg);
+      sendErrorOrReport(
         ws,
         id,
         marketErrorMessage(error, 'Failed to send market snapshot'),
         marketErrorCode(error),
+        msg,
       );
-      options.onHandlerError?.(error, msg);
     }
   };
 

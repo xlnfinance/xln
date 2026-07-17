@@ -51,9 +51,12 @@ test('dev-anvil-stack one-shot mode deploys and exits after stopping spawned anv
   const config = JSON.parse(jsonLine) as {
     chainId: number;
     ticker: string;
+    entityProviderDeploymentBlock: number;
     contracts: Record<string, string>;
   };
   expect(config.chainId).toBe(31338);
   expect(config.ticker).toBe('TRX');
+  expect(Number.isSafeInteger(config.entityProviderDeploymentBlock)).toBe(true);
+  expect(config.entityProviderDeploymentBlock).toBeGreaterThan(0);
   expect(config.contracts.depository).toMatch(/^0x[0-9a-fA-F]{40}$/);
 });

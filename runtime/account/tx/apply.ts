@@ -10,6 +10,7 @@ import { handleSetCreditLimit } from './handlers/set-credit-limit';
 import { handleDirectPayment } from './handlers/direct-payment';
 import { handleReserveToCollateral } from './handlers/reserve-to-collateral';
 import { handleRequestCollateral } from './handlers/request-collateral';
+import { handleRebalancePolicy } from './handlers/rebalance-policy';
 import { handleReopenDisputed } from './handlers/reopen-disputed';
 import { handleHtlcLock } from './handlers/htlc-lock';
 import { handleHtlcResolve } from './handlers/htlc-resolve';
@@ -18,11 +19,12 @@ import { handleSwapOffer } from './handlers/swap-offer';
 import { handleSwapResolve } from './handlers/swap-resolve';
 import { handleCrossSwapFillAck } from './handlers/cross-swap-fill-ack';
 import { handleSwapCancelRequest } from './handlers/swap-cancel';
-import { handleSettleHold, handleSettleRelease } from './handlers/settle-hold';
+import { getSignedSettlementWorkspaceTxError, handleSettleTransition } from './handlers/settle-transition';
 import { handleJEventClaim } from './handlers/j-event-claim';
 import { handleLendingAccountTx } from './handlers/lending';
 import { canProcessAccountTxForDisputeStatus } from '../consensus/dispute-policy';
 import { createStructuredLogger } from '../../infra/logger';
+import type { AccountJClaimSession } from '../j-claim-session';
 
 const accountTxLog = createStructuredLogger('account.tx');
 
@@ -83,6 +85,8 @@ export async function applyAccountTx(
   currentHeight: number = 0,
   isValidation: boolean = false,
   env?: Env,
+  jClaimSession?: AccountJClaimSession,
+  counterpartyCertifiedBoardHash?: string,
 ): Promise<ApplyAccountTxResult> {
   // Derive counterparty from canonical left/right using proofHeader's fromEntity as "me"
   const myEntityId = accountMachine.proofHeader.fromEntity;
@@ -103,6 +107,10 @@ export async function applyAccountTx(
   if (!canProcessAccountTxForDisputeStatus(accountMachine.status, accountTx.type)) {
     const error = `Account is ${accountMachine.status}; tx ${accountTx.type} rejected until dispute/reopen flow completes`;
     return { success: false, events: [error], error };
+  }
+  const settlementFreezeError = getSignedSettlementWorkspaceTxError(accountMachine, accountTx);
+  if (settlementFreezeError) {
+    return { success: false, events: [settlementFreezeError], error: settlementFreezeError };
   }
 
   // Route to appropriate handler based on transaction type
@@ -177,10 +185,14 @@ export async function applyAccountTx(
       return result;
       }
 
+    case 'rebalance_policy':
+      return handleRebalancePolicy(accountMachine, accountTx, byLeft, currentTimestamp);
+
     case 'reopen_disputed':
       return handleReopenDisputed(accountMachine, accountTx);
 
     case 'j_event_claim':
+      if (!env || !jClaimSession) throw new Error('ACCOUNT_J_CLAIM_EXECUTION_CONTEXT_REQUIRED');
       return handleJEventClaim(
         accountMachine,
         accountTx,
@@ -190,6 +202,7 @@ export async function applyAccountTx(
         myEntityId,
         emitRebalanceDebug,
         env,
+        jClaimSession,
       );
 
     // === HTLC HANDLERS ===
@@ -294,12 +307,16 @@ export async function applyAccountTx(
         isValidation,
       );
 
-    // === SETTLEMENT HOLD HANDLERS ===
-    case 'settle_hold':
-      return await handleSettleHold(accountMachine, accountTx);
-
-    case 'settle_release':
-      return await handleSettleRelease(accountMachine, accountTx);
+    // Workspace and holds share one Account-frame authority.
+    case 'settle_transition':
+      return await handleSettleTransition(
+        accountMachine,
+        accountTx,
+        byLeft,
+        currentTimestamp,
+        env,
+        counterpartyCertifiedBoardHash,
+      );
 
     case 'account_frame':
       // This should never be called - frames are handled by frame-level consensus

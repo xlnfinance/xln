@@ -276,6 +276,7 @@ describe('watchtower rpc last-resort integration', () => {
       counterentity: counterparty.entityId,
       nonce: disputeNonce,
       proofbodyHash: initialProofbodyHash,
+      initialProofbody,
       watchSeed,
       sig: startSig,
       starterInitialArguments,
@@ -324,7 +325,6 @@ describe('watchtower rpc last-resort integration', () => {
         finalProofbody,
         leftArguments: starterIncrementedArguments,
         rightArguments: '0x',
-        starterIncrementedArguments,
         sig: finalSig,
       },
     };
@@ -564,6 +564,7 @@ describe('watchtower rpc last-resort integration', () => {
       counterentity: counterparty.entityId,
       nonce: disputeNonce,
       proofbodyHash: initialProofbodyHash,
+      initialProofbody,
       watchSeed,
       sig: startSig,
       starterInitialArguments,
@@ -612,7 +613,6 @@ describe('watchtower rpc last-resort integration', () => {
         finalProofbody: towerProofbody,
         leftArguments: starterIncrementedArguments,
         rightArguments: '0x',
-        starterIncrementedArguments,
         sig: towerFinalSig,
       },
     };
@@ -703,13 +703,10 @@ describe('watchtower rpc last-resort integration', () => {
       finalNonce: userFinalNonce,
       initialProofbodyHash,
       finalProofbody: userProofbody,
-      leftArguments: starterIncrementedArguments,
-      rightArguments: '0x',
-      starterInitialArguments,
-      starterIncrementedArguments,
+      starterArguments: starterIncrementedArguments,
+      otherArguments: '0x',
       sig: userFinalSig,
       startedByLeft: true,
-      disputeUntilBlock: 0,
       cooperative: false,
     });
     const userFinalizeSigned = await signDepositoryBatch(depository, watched.entityId, watched.privateKey, userFinalizeBatch);

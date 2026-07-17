@@ -22,9 +22,24 @@ type NativeSecp256k1 = {
   ecdsaVerify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array): boolean;
 };
 
-type SignerKeyEnv = {
+export type SignerKeyEnv = {
   runtimeSeed?: Uint8Array | string | null | undefined;
   quietRuntimeLogs?: boolean | undefined;
+};
+
+type SignerKeyScope = SignerKeyEnv | Uint8Array | string;
+
+type SignerKeyStore = {
+  privateKeys: Map<string, Uint8Array>;
+  publicKeys: Map<string, Uint8Array>;
+  addresses: Map<string, string>;
+  externalPublicKeys: Map<string, Uint8Array>;
+  numericKeys: Map<string, {
+    privateKey: Uint8Array;
+    publicKey: Uint8Array;
+    address: string;
+  }>;
+  mnemonic?: string;
 };
 
 let nativeSecp256k1: NativeSecp256k1 | null | undefined;
@@ -78,21 +93,14 @@ const installHmacSync = () => {
 installHmacSync();
 // Browser: deriveSignerKeySync uses noble hashes (no async required)
 
-// Global key cache (signerId → private/public key)
-// Populated by runtime when BrainVault seed is provided
-const signerKeys = new Map<string, Uint8Array>();
-const signerPublicKeys = new Map<string, Uint8Array>();
-const signerAddresses = new Map<string, string>();
-const externalPublicKeys = new Map<string, Uint8Array>();
-const seedScopedNumericSignerKeys = new Map<string, {
-  privateKey: Uint8Array;
-  publicKey: Uint8Array;
-  address: string;
-}>();
+// Key material is scoped by the owning vault seed fingerprint. Multiple Env
+// instances may coexist in one JS process, so a process-global address map
+// would let one runtime sign or submit as another runtime's validator. The raw
+// seed is never used as a map key and clearing one vault cannot affect another.
+const signerKeyStores = new Map<string, SignerKeyStore>();
 let runtimeSeedLocked = false;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
-const mnemonicCache = new Map<string, string>();
 const bytesToHex = (bytes: Uint8Array): string =>
   Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
 // Ensure a full Buffer implementation exists before bip39 (Buffer.isBuffer is required).
@@ -107,8 +115,44 @@ const toSeedBytes = (seed: Uint8Array | string): Uint8Array =>
   typeof seed === 'string' ? textEncoder.encode(seed) : seed;
 const toSeedText = (seed: Uint8Array | string): string =>
   typeof seed === 'string' ? seed : textDecoder.decode(seed);
-const seedScopedNumericSignerCacheKey = (seed: Uint8Array | string, signerId: string): string =>
-  `${bytesToHex(sha256(toSeedBytes(seed)))}:${signerId.toLowerCase()}`;
+
+const seedFromScope = (scope: SignerKeyScope): Uint8Array | string | null => {
+  if (typeof scope === 'string' || scope instanceof Uint8Array) return scope;
+  return scope?.runtimeSeed ?? null;
+};
+
+const optionalScopeKey = (scope: SignerKeyScope): string | null => {
+  const seed = seedFromScope(scope);
+  if (seed === null || seed === undefined || toSeedBytes(seed).length === 0) return null;
+  return bytesToHex(sha256(toSeedBytes(seed)));
+};
+
+const scopeKey = (scope: SignerKeyScope): string => {
+  const key = optionalScopeKey(scope);
+  if (!key) throw new Error('SIGNER_KEY_SCOPE_REQUIRED: non-empty runtimeSeed/vault identity is required');
+  return key;
+};
+
+const createSignerKeyStore = (): SignerKeyStore => ({
+  privateKeys: new Map(),
+  publicKeys: new Map(),
+  addresses: new Map(),
+  externalPublicKeys: new Map(),
+  numericKeys: new Map(),
+});
+
+const getSignerKeyStore = (scope: SignerKeyScope, create = false): SignerKeyStore | null => {
+  const key = optionalScopeKey(scope);
+  if (!key) {
+    if (create) scopeKey(scope);
+    return null;
+  }
+  const existing = signerKeyStores.get(key);
+  if (existing || !create) return existing ?? null;
+  const created = createSignerKeyStore();
+  signerKeyStores.set(key, created);
+  return created;
+};
 
 const parseSignerIndex = (signerId: string): number | null => {
   const trimmed = signerId.trim();
@@ -125,19 +169,19 @@ const parseSignerIndex = (signerId: string): number | null => {
 
 const resolveMnemonic = (seed: Uint8Array | string): string => {
   ensureGlobalBuffer();
+  const store = getSignerKeyStore(seed, true)!;
   const seedText = toSeedText(seed).trim();
-  const cached = mnemonicCache.get(seedText);
-  if (cached) return cached;
+  if (store.mnemonic) return store.mnemonic;
 
   const normalized = seedText.toLowerCase().replace(/\s+/g, ' ');
   if (bip39.validateMnemonic(normalized)) {
-    mnemonicCache.set(seedText, normalized);
+    store.mnemonic = normalized;
     return normalized;
   }
 
   const entropy = sha256(toSeedBytes(seedText));
   const mnemonic = bip39.entropyToMnemonic(bytesToHex(entropy));
-  mnemonicCache.set(seedText, mnemonic);
+  store.mnemonic = mnemonic;
   return mnemonic;
 };
 
@@ -168,13 +212,15 @@ export function deriveSignerKeySync(masterSeed: Uint8Array | string, signerId: s
 }
 
 export function prewarmSignerKeyCache(seed: Uint8Array | string, count = 20): string[] {
+  if (!Number.isSafeInteger(count) || count <= 0) {
+    throw new Error(`SIGNER_CACHE_PREWARM_COUNT_INVALID:${String(count)}`);
+  }
   const warmed: string[] = [];
-  const max = Math.max(1, Math.floor(count));
-  for (let i = 1; i <= max; i++) {
+  for (let i = 1; i <= count; i++) {
     const indexId = String(i);
     const privateKey = deriveSignerKeySync(seed, indexId);
     const address = deriveSignerAddressSync(seed, indexId).toLowerCase();
-    registerSignerKey(address, privateKey);
+    registerSignerKey(seed, address, privateKey);
     warmed.push(address);
   }
   return warmed;
@@ -189,23 +235,18 @@ export function prewarmSignerLabels(seed: Uint8Array | string, signerLabels: rea
     seen.add(signerLabel);
     const privateKey = deriveSignerKeySync(seed, signerLabel);
     const address = deriveSignerAddressSync(seed, signerLabel).toLowerCase();
-    registerSignerKey(address, privateKey);
+    registerSignerKey(seed, address, privateKey);
     warmed.push(address);
   }
   return warmed;
 }
 
-export function setRuntimeSeed(_seed: Uint8Array | string | null): void {
+export function setRuntimeSeed(seed: Uint8Array | string | null): void {
   if (runtimeSeedLocked) {
     console.warn('⚠️ Runtime seed update ignored (crypto lock enabled)');
     return;
   }
-  signerKeys.clear();
-  signerPublicKeys.clear();
-  signerAddresses.clear();
-  externalPublicKeys.clear();
-  seedScopedNumericSignerKeys.clear();
-  mnemonicCache.clear();
+  if (seed !== null) clearSignerKeys(seed);
 }
 
 export function lockRuntimeSeedUpdates(locked: boolean): void {
@@ -239,14 +280,14 @@ const assertSignerKeyMatchesId = (signerId: string, privateKey: Uint8Array, cont
 
 const cacheNumericSigner = (seed: Uint8Array | string, signerId: string): Uint8Array => {
   const key = signerId.toLowerCase();
-  const cacheKey = seedScopedNumericSignerCacheKey(seed, key);
-  const cached = seedScopedNumericSignerKeys.get(cacheKey);
+  const store = getSignerKeyStore(seed, true)!;
+  const cached = store.numericKeys.get(key);
   if (cached) return cached.privateKey;
   const privateKey = deriveSignerKeySync(seed, signerId);
   const address = deriveSignerAddressSync(seed, signerId).toLowerCase();
   const publicKey = secp256k1.getPublicKey(privateKey);
-  seedScopedNumericSignerKeys.set(cacheKey, { privateKey, publicKey, address });
-  registerSignerKey(address, privateKey);
+  store.numericKeys.set(key, { privateKey, publicKey, address });
+  registerSignerKey(seed, address, privateKey);
   return privateKey;
 };
 
@@ -260,7 +301,8 @@ const getOrDeriveKey = (envSeed: Uint8Array | string, signerId: string): Uint8Ar
     return cacheNumericSigner(envSeed, canonicalSignerId);
   }
 
-  const cached = signerKeys.get(signerId) || signerKeys.get(canonicalSignerId);
+  const store = getSignerKeyStore(envSeed);
+  const cached = store?.privateKeys.get(signerId) || store?.privateKeys.get(canonicalSignerId);
   if (cached) {
     assertSignerKeyMatchesId(canonicalSignerId, cached, 'getOrDeriveKey(cache)');
     return cached;
@@ -286,45 +328,77 @@ const getOrDeriveKey = (envSeed: Uint8Array | string, signerId: string): Uint8Ar
  * Get cached signer private key (no derivation, cache-only)
  * Used by components like BrowserVM that don't have env access
  */
-export function getCachedSignerPrivateKey(signerId: string): Uint8Array | null {
+export function getCachedSignerPrivateKey(scope: SignerKeyScope, signerId: string): Uint8Array | null {
   const key = signerId.toLowerCase();
-  const cached = signerKeys.get(key) || null;
+  if (parseSignerIndex(key) !== null) {
+    throw new Error(`NUMERIC_SIGNER_CACHE_LOOKUP_FORBIDDEN: signerId=${key}`);
+  }
+  const cached = getSignerKeyStore(scope)?.privateKeys.get(key) || null;
   if (cached) {
     assertSignerKeyMatchesId(key, cached, 'getCachedSignerPrivateKey(cache)');
   }
   return cached;
 }
 
-const getExactRegisteredSignerPrivateKey = (signerId: string): Uint8Array | null => {
+/**
+ * Resolve a key owned by this exact runtime. Numeric aliases are derived from
+ * the caller's seed and can never select process-global state from another
+ * Env. Address-shaped signer ids remain explicit cache entries and return null
+ * when this process does not own their private key.
+ */
+export function getLocalSignerPrivateKey(env: SignerKeyEnv, signerId: string): Uint8Array | null {
   const key = signerId.toLowerCase();
-  const cached = signerKeys.get(key) || null;
+  if (parseSignerIndex(key) !== null) {
+    if (env?.runtimeSeed === undefined || env.runtimeSeed === null) {
+      throw new Error(`CRYPTO_DETERMINISM_VIOLATION: numeric signer ${key} requires env.runtimeSeed`);
+    }
+    return getOrDeriveKey(env.runtimeSeed, key);
+  }
+  if (isHexAddress(key)) return getExactRegisteredSignerPrivateKey(env, key);
+  throw new Error(`UNSUPPORTED_SIGNER_ID: "${signerId}" is not numeric or an EOA address.`);
+}
+
+const getExactRegisteredSignerPrivateKey = (
+  scope: SignerKeyScope,
+  signerId: string,
+): Uint8Array | null => {
+  const key = signerId.toLowerCase();
+  const cached = getSignerKeyStore(scope)?.privateKeys.get(key) || null;
   if (cached) {
     assertSignerKeyMatchesId(key, cached, 'getExactRegisteredSignerPrivateKey(cache)');
   }
   return cached;
 };
 
-const getExactRegisteredSignerPublicKey = (signerId: string): Uint8Array | null => {
+const getExactRegisteredSignerPublicKey = (
+  scope: SignerKeyScope,
+  signerId: string,
+): Uint8Array | null => {
   const key = signerId.toLowerCase();
-  const cachedPrivateKey = getExactRegisteredSignerPrivateKey(key);
+  const store = getSignerKeyStore(scope);
+  const cachedPrivateKey = getExactRegisteredSignerPrivateKey(scope, key);
   if (cachedPrivateKey) {
-    const cachedPublicKey = signerPublicKeys.get(key);
+    const cachedPublicKey = store?.publicKeys.get(key);
     if (cachedPublicKey) return cachedPublicKey;
     const publicKey = secp256k1.getPublicKey(cachedPrivateKey);
-    signerPublicKeys.set(key, publicKey);
+    store!.publicKeys.set(key, publicKey);
     return publicKey;
   }
   return null;
 };
 
-const getExactRegisteredSignerAddress = (signerId: string): string | null => {
+const getExactRegisteredSignerAddress = (
+  scope: SignerKeyScope,
+  signerId: string,
+): string | null => {
   const key = signerId.toLowerCase();
-  const cachedPrivateKey = getExactRegisteredSignerPrivateKey(key);
+  const store = getSignerKeyStore(scope);
+  const cachedPrivateKey = getExactRegisteredSignerPrivateKey(scope, key);
   if (!cachedPrivateKey) return null;
-  const cachedAddress = signerAddresses.get(key);
+  const cachedAddress = store?.addresses.get(key);
   if (cachedAddress) return cachedAddress;
   const address = privateKeyToAddress(cachedPrivateKey);
-  signerAddresses.set(key, address);
+  store!.addresses.set(key, address);
   return address;
 };
 
@@ -332,17 +406,21 @@ const getExactRegisteredSignerAddress = (signerId: string): string | null => {
  * Get cached signer public key (no derivation, cache-only)
  * Used by components that don't have env access
  */
-export function getCachedSignerPublicKey(signerId: string): Uint8Array | null {
+export function getCachedSignerPublicKey(scope: SignerKeyScope, signerId: string): Uint8Array | null {
   const key = signerId.toLowerCase();
-  const external = externalPublicKeys.get(key);
+  if (parseSignerIndex(key) !== null) {
+    throw new Error(`NUMERIC_SIGNER_CACHE_LOOKUP_FORBIDDEN: signerId=${key}`);
+  }
+  const store = getSignerKeyStore(scope);
+  const external = store?.externalPublicKeys.get(key);
   if (external) return external;
-  const cached = signerPublicKeys.get(key);
+  const cached = store?.publicKeys.get(key);
   if (cached) return cached;
   // Try deriving from cached private key
-  const privateKey = signerKeys.get(key);
+  const privateKey = store?.privateKeys.get(key);
   if (!privateKey) return null;
   const publicKey = secp256k1.getPublicKey(privateKey);
-  signerPublicKeys.set(key, publicKey);
+  store!.publicKeys.set(key, publicKey);
   return publicKey;
 }
 
@@ -350,15 +428,19 @@ export function getCachedSignerPublicKey(signerId: string): Uint8Array | null {
  * Get cached signer address (no derivation, cache-only)
  * Used by components that don't have env access
  */
-export function getCachedSignerAddress(signerId: string): string | null {
+export function getCachedSignerAddress(scope: SignerKeyScope, signerId: string): string | null {
   const key = signerId.toLowerCase();
-  const cached = signerAddresses.get(key);
+  if (parseSignerIndex(key) !== null) {
+    throw new Error(`NUMERIC_SIGNER_CACHE_LOOKUP_FORBIDDEN: signerId=${key}`);
+  }
+  const store = getSignerKeyStore(scope);
+  const cached = store?.addresses.get(key);
   if (cached) return cached;
   // Try deriving from cached private key
-  const privateKey = signerKeys.get(key);
+  const privateKey = store?.privateKeys.get(key);
   if (!privateKey) return null;
   const address = privateKeyToAddress(privateKey);
-  signerAddresses.set(key, address);
+  store!.addresses.set(key, address);
   return address;
 }
 
@@ -371,7 +453,7 @@ export function getSignerPrivateKey(env: SignerKeyEnv, signerId: string): Uint8A
     }
     return getOrDeriveKey(env.runtimeSeed, key);
   }
-  const exactRegistered = getExactRegisteredSignerPrivateKey(key);
+  const exactRegistered = getExactRegisteredSignerPrivateKey(env, key);
   if (exactRegistered) {
     return exactRegistered;
   }
@@ -393,11 +475,12 @@ export function getSignerPublicKey(env: SignerKeyEnv, signerId: string): Uint8Ar
     const privateKey = getOrDeriveKey(env.runtimeSeed, key);
     return secp256k1.getPublicKey(privateKey);
   }
-  const exactRegistered = getExactRegisteredSignerPublicKey(key);
+  const store = getSignerKeyStore(env);
+  const exactRegistered = getExactRegisteredSignerPublicKey(env, key);
   if (exactRegistered) return exactRegistered;
-  const external = externalPublicKeys.get(key);
+  const external = store?.externalPublicKeys.get(key);
   if (external) return external;
-  const cached = signerPublicKeys.get(key);
+  const cached = store?.publicKeys.get(key);
   if (cached) return cached;
 
   return null;
@@ -417,7 +500,7 @@ export function getSignerAddress(env: SignerKeyEnv, signerId: string): string | 
     const privateKey = getOrDeriveKey(env.runtimeSeed, key);
     return privateKeyToAddress(privateKey);
   }
-  const exactRegistered = getExactRegisteredSignerAddress(key);
+  const exactRegistered = getExactRegisteredSignerAddress(env, key);
   if (exactRegistered) return exactRegistered;
   return isHexAddress(key) ? key : null;
 }
@@ -436,10 +519,10 @@ export async function registerSeededKeys(
     const privateKey = await deriveSignerKey(seed, signerId);
     const signerIndex = parseSignerIndex(signerId);
     if (signerIndex !== null) {
-      registerSignerKey(deriveSignerAddressSync(seed, signerId).toLowerCase(), privateKey);
+      registerSignerKey(seed, deriveSignerAddressSync(seed, signerId).toLowerCase(), privateKey);
       continue;
     }
-    registerSignerKey(signerId, privateKey);
+    registerSignerKey(seed, signerId, privateKey);
   }
 
   console.log(`🔑 Registered ${signerIds.length} keys from seed`);
@@ -448,10 +531,21 @@ export async function registerSeededKeys(
 /**
  * Register signer keys (called when BrainVault unlocked)
  */
-export function registerSignerKey(signerId: string, privateKey: Uint8Array): void {
+export function registerSignerKey(
+  scope: SignerKeyScope,
+  signerId: string,
+  privateKey: Uint8Array,
+): void {
   const key = signerId.toLowerCase();
+  if (parseSignerIndex(key) !== null) {
+    throw new Error(`NUMERIC_SIGNER_REGISTRATION_FORBIDDEN: signerId=${key}`);
+  }
+  if (!isHexAddress(key)) {
+    throw new Error(`SIGNER_ID_NOT_EOA: signerId=${key}`);
+  }
   assertSignerKeyMatchesId(key, privateKey, 'registerSignerKey');
-  const existing = signerKeys.get(key);
+  const store = getSignerKeyStore(scope, true)!;
+  const existing = store.privateKeys.get(key);
   if (existing && !equalBytes(existing, privateKey)) {
     const currentAddress = privateKeyToAddress(existing);
     const nextAddress = privateKeyToAddress(privateKey);
@@ -459,21 +553,46 @@ export function registerSignerKey(signerId: string, privateKey: Uint8Array): voi
       `SIGNER_KEY_CONFLICT: signerId=${key} current=${currentAddress} next=${nextAddress}`
     );
   }
-  signerKeys.set(key, privateKey);
-  signerPublicKeys.set(key, secp256k1.getPublicKey(privateKey));
-  signerAddresses.set(key, privateKeyToAddress(privateKey));
-  externalPublicKeys.delete(key);
+  store.privateKeys.set(key, privateKey);
+  store.publicKeys.set(key, secp256k1.getPublicKey(privateKey));
+  store.addresses.set(key, privateKeyToAddress(privateKey));
+  store.externalPublicKeys.delete(key);
 }
 
-export function registerSignerPublicKey(signerId: string, publicKey: Uint8Array | string): void {
+export function registerSignerPublicKey(
+  scope: SignerKeyScope,
+  signerId: string,
+  publicKey: Uint8Array | string,
+): void {
   const key = signerId.toLowerCase();
-  if (signerKeys.has(key)) return; // Already has private key
+  if (parseSignerIndex(key) !== null) {
+    throw new Error(`NUMERIC_SIGNER_REGISTRATION_FORBIDDEN: signerId=${key}`);
+  }
+  if (!isHexAddress(key)) {
+    throw new Error(`SIGNER_PUBLIC_KEY_ID_NOT_EOA: signerId=${key}`);
+  }
   const bytes =
     typeof publicKey === 'string'
       ? Uint8Array.from(Buffer.from(publicKey.replace(/^0x/, ''), 'hex'))
       : publicKey;
-  externalPublicKeys.set(key, bytes);
-  signerPublicKeys.delete(key);
+  const derivedAddress = addressFromPublicKey(bytes);
+  if (!derivedAddress) {
+    throw new Error(`SIGNER_PUBLIC_KEY_INVALID: signerId=${key}`);
+  }
+  if (isHexAddress(key) && derivedAddress !== key) {
+    throw new Error(
+      `SIGNER_PUBLIC_KEY_MISMATCH: signerId=${key} derived=${derivedAddress}`
+    );
+  }
+  const canonicalBytes = secp256k1.Point.fromHex(bytes).toRawBytes(true);
+  const store = getSignerKeyStore(scope, true)!;
+  if (store.privateKeys.has(key)) return; // Local private key already proves the same EOA binding.
+  const existing = store.externalPublicKeys.get(key);
+  if (existing && !equalBytes(existing, canonicalBytes)) {
+    throw new Error(`SIGNER_PUBLIC_KEY_CONFLICT: signerId=${key}`);
+  }
+  store.externalPublicKeys.set(key, canonicalBytes);
+  store.publicKeys.delete(key);
 }
 
 /**
@@ -487,12 +606,8 @@ export async function registerTestKeys(_signerIds: string[]): Promise<void> {
 /**
  * Clear all registered keys (for testing isolation)
  */
-export function clearSignerKeys(): void {
-  signerKeys.clear();
-  signerPublicKeys.clear();
-  signerAddresses.clear();
-  externalPublicKeys.clear();
-  seedScopedNumericSignerKeys.clear();
+export function clearSignerKeys(scope: SignerKeyScope): void {
+  signerKeyStores.delete(scopeKey(scope));
 }
 
 /**
@@ -511,10 +626,14 @@ export function signAccountFrame(
   // CRITICAL: Sign raw hash - NO double hashing
   // On-chain _recoverSigner expects ecrecover(hash, sig) where hash is the raw 32-byte message
   // frameHash is already keccak256 output, sign it directly
-  return signDigest(env.runtimeSeed, signerId, frameHash);
+  return signDigest(env, signerId, frameHash);
 }
 
-export function signDigest(seed: Uint8Array | string, signerId: string, digestHex: string): string {
+export function signDigest(scope: SignerKeyScope, signerId: string, digestHex: string): string {
+  const seed = seedFromScope(scope);
+  if (seed === null) {
+    throw new Error(`CRYPTO_DETERMINISM_VIOLATION: signDigest called without runtimeSeed for signer ${signerId}`);
+  }
   const privateKey = getOrDeriveKey(seed, signerId);
   const messageBytes = Buffer.from(digestHex.replace('0x', ''), 'hex');
   const { signature, recovery } = signDigestBytesWithPrivateKey(privateKey, messageBytes);
@@ -626,10 +745,11 @@ export function verifyAccountSignature(
       }
     }
 
-    console.warn(`⚠️ Cannot verify - no public key for signerId=${key.slice(-4)}`);
+    if (!quiet) console.warn(`⚠️ Cannot verify - no public key for signerId=${key.slice(-4)}`);
     if (!quiet) {
-      console.warn(`⚠️ Available keys:`, Array.from(signerPublicKeys.keys()).map(k => k.slice(-4)));
-      console.warn(`⚠️ Available external keys:`, Array.from(externalPublicKeys.keys()).map(k => k.slice(-4)));
+      const store = getSignerKeyStore(env);
+      console.warn(`⚠️ Available keys:`, Array.from(store?.publicKeys.keys() ?? []).map(k => k.slice(-4)));
+      console.warn(`⚠️ Available external keys:`, Array.from(store?.externalPublicKeys.keys() ?? []).map(k => k.slice(-4)));
     }
     return false;
   }
@@ -642,6 +762,7 @@ export function verifyAccountSignature(
     );
     const expectedAddress = addressFromPublicKey(publicKey);
     if (!recovered || !expectedAddress || recovered !== expectedAddress) return false;
+    if (/^0x[a-f0-9]{40}$/i.test(key) && expectedAddress !== key) return false;
 
     const native = getNativeSecp256k1();
     return native

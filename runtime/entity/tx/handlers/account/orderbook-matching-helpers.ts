@@ -1,12 +1,14 @@
 import { LIMITS, SWAP as SWAP_CONSTANTS } from '../../../../constants';
 import {
+  baseAmountFromLots,
   canonicalPair,
   createBook,
   deriveSide,
   getBookOrder,
+  getSwapLotScale,
   MAX_ORDERBOOK_QTY_LOTS,
-  ORDERBOOK_PRICE_SCALE,
-  SWAP_LOT_SCALE,
+  quoteAmountAtPrice,
+  quoteAmountFromWeightedLots,
   type BookEvent,
   type BookState,
 } from '../../../../orderbook';
@@ -187,6 +189,7 @@ export const deriveSameOrderbookMaterialization = (
 
   const baseAmount = isSellBase ? offer.giveAmount : offer.wantAmount;
   const quoteAmount = isSellBase ? offer.wantAmount : offer.giveAmount;
+  const lotScale = getSwapLotScale(base);
   if (baseAmount <= 0n || quoteAmount <= 0n) {
     return {
       kind: 'reject',
@@ -205,7 +208,7 @@ export const deriveSameOrderbookMaterialization = (
     };
   }
 
-  if (baseAmount % SWAP_LOT_SCALE !== 0n) {
+  if (baseAmount % lotScale !== 0n) {
     return {
       kind: 'reject',
       reason: `lot-misaligned:${baseAmount.toString()}`,
@@ -214,7 +217,7 @@ export const deriveSameOrderbookMaterialization = (
   }
 
   const priceTicks = offer.priceTicks;
-  const qtyLots = baseAmount / SWAP_LOT_SCALE;
+  const qtyLots = baseAmount / lotScale;
   if (qtyLots === 0n || qtyLots > MAX_ORDERBOOK_QTY_LOTS || priceTicks <= 0n) {
     return {
       kind: 'reject',
@@ -368,9 +371,10 @@ const materializeCanonicalRestingOffer = (
   priceTicks: bigint,
   qtyLots: bigint,
 ): CanonicalRestingOffer => {
-  const baseAmount = qtyLots * SWAP_LOT_SCALE;
+  const { base, quote } = canonicalPair(giveTokenId, wantTokenId);
+  const baseAmount = baseAmountFromLots(base, qtyLots);
   const side = deriveSide(giveTokenId, wantTokenId);
-  const quoteAmount = (baseAmount * priceTicks) / ORDERBOOK_PRICE_SCALE;
+  const quoteAmount = quoteAmountAtPrice(base, quote, baseAmount, priceTicks);
   if (side === 1) {
     return {
       giveTokenId,
@@ -505,15 +509,27 @@ export const buildSameFillResolvePlan = (input: {
     );
   }
 
-  const executionBaseWei = filledBig * SWAP_LOT_SCALE;
-  const executionQuoteWei = (weightedCost * SWAP_LOT_SCALE) / ORDERBOOK_PRICE_SCALE;
-  const restingPriceTicks = weightedCost / filledBig;
   if (!isCurrentTakerOrder && !input.batchOffer && !input.accountOffer) {
     throw new Error(
       `ORDERBOOK_FILL_SOURCE_MISSING: order=${input.namespacedOrderId} pair=${input.bookKey} ` +
         `account=${input.accountId} offer=${input.offerId}`,
     );
   }
+
+  const executionTerms = isCurrentTakerOrder
+    ? input.currentOffer
+    : input.batchOffer ?? input.accountOffer!;
+  const { base: executionBaseTokenId, quote: executionQuoteTokenId } = canonicalPair(
+    executionTerms.giveTokenId,
+    executionTerms.wantTokenId,
+  );
+  const executionBaseWei = baseAmountFromLots(executionBaseTokenId, filledBig);
+  const executionQuoteWei = quoteAmountFromWeightedLots(
+    executionBaseTokenId,
+    executionQuoteTokenId,
+    weightedCost,
+  );
+  const restingPriceTicks = weightedCost / filledBig;
 
   const offerForExecution = isCurrentTakerOrder
     ? {

@@ -6,11 +6,15 @@ const bootstrapWholeTokens = (tokenId: number): bigint =>
     ? BOOTSTRAP_USD_NOTIONAL / BOOTSTRAP_WETH_USD_RATE
     : BOOTSTRAP_USD_NOTIONAL;
 
-export const getBootstrapTokenAmount = (tokenId: number, decimals = 18): bigint => {
-  const normalizedDecimals = Math.max(0, Math.floor(Number(decimals)));
-  if (!Number.isFinite(normalizedDecimals)) throw new Error('BOOTSTRAP_TOKEN_DECIMALS_INVALID');
-  return bootstrapWholeTokens(tokenId) * 10n ** BigInt(normalizedDecimals);
+export const getBootstrapTokenAmount = (tokenId: number, decimals: number): bigint => {
+  if (!Number.isSafeInteger(tokenId) || tokenId <= 0) {
+    throw new Error(`BOOTSTRAP_TOKEN_ID_INVALID:${String(tokenId)}`);
+  }
+  if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
+    throw new Error(`BOOTSTRAP_TOKEN_DECIMALS_INVALID:${String(decimals)}`);
+  }
+  return bootstrapWholeTokens(tokenId) * 10n ** BigInt(decimals);
 };
 
-export const getBootstrapTokenAmountBySymbol = (symbol: string, decimals = 18): bigint =>
+export const getBootstrapTokenAmountBySymbol = (symbol: string, decimals: number): bigint =>
   getBootstrapTokenAmount(String(symbol || '').trim().toUpperCase() === 'WETH' ? 2 : 1, decimals);

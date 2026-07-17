@@ -6,9 +6,10 @@ import { join } from 'path';
 import { Level } from 'level';
 import type { ServerWebSocket } from 'bun';
 import { ethers } from 'ethers';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
-import { decodeRuntimeAdapterMessage } from '../radapter/codec';
+import { decodeRuntimeAdapterRequest } from '../radapter/codec';
 import { RemoteRuntimeAdapter } from '../radapter/remote';
 import type { RuntimeAdapterReadQuery } from '../radapter/types';
 import { createBook, createOrderbookExtState, DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
@@ -227,6 +228,7 @@ const hubEntityId = (seed: string): string =>
 const makeAccount = (leftEntity: string, rightEntity: string, height: number, timestamp: number): AccountMachine => ({
   leftEntity,
   rightEntity,
+  domain: { chainId: 31337, depositoryAddress: '0x1111111111111111111111111111111111111111' },
   watchSeed: `0x${'a1'.repeat(32)}`,
   status: 'active',
   mempool: [],
@@ -247,9 +249,8 @@ const makeAccount = (leftEntity: string, rightEntity: string, height: number, ti
   currentHeight: height,
   pendingSignatures: [],
   rollbackCount: 0,
-  leftJObservations: [],
-  rightJObservations: [],
-  jEventChain: [],
+  leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+  rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
   lastFinalizedJHeight: 0,
   proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nextProofNonce: height },
   proofBody: { tokenIds: [], deltas: [] },
@@ -437,7 +438,7 @@ const seedHubBulk = async (
   appendDoc({
     family: 'entity',
     entityId,
-    value: projectEntityCoreDoc(state, { signerId: 'bench-signer', isProposer: true }),
+    value: projectEntityCoreDoc(state),
   });
   for (let offset = 0; offset < cli.accounts; offset += cli.chunk) {
     const end = Math.min(cli.accounts, offset + cli.chunk);
@@ -527,7 +528,7 @@ const seedHub = async (
   entityHashDocs = await writeDocs(db, [{
     family: 'entity',
     entityId,
-    value: projectEntityCoreDoc(state, { signerId: 'bench-signer', isProposer: true }),
+    value: projectEntityCoreDoc(state),
   }], entityHashDocs, height);
   trace.mark('seed.core', { height });
 
@@ -560,7 +561,7 @@ const seedHub = async (
   entityHashDocs = await writeDocs(db, [{
     family: 'entity',
     entityId,
-    value: projectEntityCoreDoc(state, { signerId: 'bench-signer', isProposer: true }),
+    value: projectEntityCoreDoc(state),
   }], entityHashDocs, state.height);
   trace.mark('seed.final-core', { height: state.height, inMemoryAccounts: state.accounts.size });
   return entityHashDocs;
@@ -593,7 +594,7 @@ const touchAccounts = async (
   docs.push({
     family: 'entity',
     entityId,
-    value: projectEntityCoreDoc(state, { signerId: 'bench-signer', isProposer: true }),
+    value: projectEntityCoreDoc(state),
   });
   const writeStarted = nowMs();
   entityHashDocsRef.current = await writeDocs(db, docs, entityHashDocsRef.current, env.height);
@@ -627,7 +628,7 @@ const insertNewAccountsAfterRead = async (
   docs.push({
     family: 'entity',
     entityId,
-    value: projectEntityCoreDoc(state, { signerId: 'bench-signer', isProposer: true }),
+    value: projectEntityCoreDoc(state),
   });
   const writeStarted = nowMs();
   entityHashDocsRef.current = await writeDocs(db, docs, entityHashDocsRef.current, env.height);
@@ -858,7 +859,7 @@ async function main() {
       websocket: {
         async message(ws: ServerWebSocket<unknown>, message: string | Buffer) {
           try {
-            const decoded = decodeRuntimeAdapterMessage<Record<string, unknown>>(message);
+            const decoded = decodeRuntimeAdapterRequest(message);
             await handleRuntimeAdapterMessage(ws, decoded, env, {
               readHead,
               loadEntityAccountDoc: async (
@@ -1050,6 +1051,9 @@ async function main() {
           signerId: 'bench-signer',
           entityTxs: [{ type: 'benchTouchAccounts', data: { start, count: cli.touchPerRound } } as never],
         }],
+      }, {
+        commandId: `benchmark-touch-command:${round.toString().padStart(8, '0')}`,
+        commandSequence: adapter.nextCommandSequence ?? round + 1,
       });
       const wireMs = nowMs() - sendStarted;
       const durableMs = await pendingWrite;

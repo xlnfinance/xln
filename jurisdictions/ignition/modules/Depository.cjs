@@ -21,7 +21,7 @@ const DepositoryModule = buildModule("DepositoryModule", (m) => {
   console.log("🔍 IGNITION: Depository deployed with immutable EP");
 
   // 4. Deploy test tokens
-  const erc20Mock = m.contract('ERC20Mock', ["ERC20Mock", "ERC20", 1000000]);
+  const erc20Mock = m.contract('ERC20Mock', ["ERC20Mock", "ERC20", 18, 1000000]);
   const erc721Mock = m.contract('ERC721Mock', ["ERC721Mock", "ERC721"]);
   const erc1155Mock = m.contract('ERC1155Mock');
 

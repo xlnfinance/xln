@@ -136,16 +136,15 @@ export function calculateHopTimelock(
  * Calculate revealBeforeHeight for hop
  * Alice gets most blocks (highest deadline)
  *
- * Alice: baseHeight + 3
- * Hub:   baseHeight + 2
- * Bob:   baseHeight + 1
+ * Adjacent hops are separated by a fixed multi-block enforcement reserve.
+ * A one-block ladder is unsafe when the watcher advances between downstream
+ * commit and the upstream Account reveal.
  */
 export function calculateHopRevealHeight(
   baseHeight: number,
   hopIndex: number,  // 0 = Alice, 1 = Hub, 2 = Bob
   totalHops: number
 ): number {
-  // Alice (first hop) gets most time
-  // Each subsequent hop gets 1 block less
-  return baseHeight + (totalHops - hopIndex);
+  return baseHeight
+    + (totalHops - hopIndex) * HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS;
 }

@@ -11,26 +11,29 @@
  * - Each hop unwraps one layer, forwards innerEnvelope to next hop
  * - Final recipient sees finalRecipient=true, extracts secret
  *
- * PHASE 2 (Current): RSA-OAEP encryption via Web Crypto API
- * - Each innerEnvelope encrypted with recipient's public key
- * - Zero dependencies, native browser/Bun support
- * - Prevents route/secret tampering by intermediaries
- * PHASE 3 (Future): Upgrade to post-quantum (Kyber) when available
+ * Each layer uses one authenticated content ciphertext. The content key is
+ * wrapped only for the receiving Entity's certified default proposer
+ * (`board.validators[0]`). Other validators replay only the later signed
+ * advance action; proposer loss follows the ordinary timeout/dispute path.
  */
 
+import { keccak256 } from 'ethers';
 import type { CryptoProvider } from '../crypto/provider';
-import { HTLC } from '../../constants';
+import { HTLC, LIMITS } from '../../constants';
 import { safeStringify } from '../serialization';
+import { encryptBytesForValidatorManifest, type MultiRecipientCiphertext } from './multi-recipient';
+import { decodeOnionLayer, encodeHtlcSecretOffer, encodeOnionLayer } from './onion-codec';
+import type { CertifiedValidatorEncryptionManifest } from './validator-encryption';
 
-const MAX_ENVELOPE_SERIALIZED_BYTES = 10_000;
+const MAX_ENVELOPE_SERIALIZED_BYTES = LIMITS.MAX_FRAME_SIZE_BYTES;
 
 export interface HtlcEnvelope {
   nextHop?: string;           // Next entity to forward to (undefined if final)
   finalRecipient?: boolean;   // Is this the last hop?
-  secret?: string;            // Only in final recipient's envelope
+  secretOffer?: MultiRecipientCiphertext; // Opaque return offer for the payer proposer
   description?: string;       // Optional payment note (final recipient envelope only)
   startedAtMs?: number;       // Sender-side first lock timestamp
-  innerEnvelope?: string;     // Encoded envelope for next hop (encrypted or JSON)
+  innerEnvelope?: MultiRecipientCiphertext;
   forwardAmount?: string;     // Exact amount this hop must forward to next hop
 }
 
@@ -38,6 +41,87 @@ export interface HtlcRoutingContext {
   route: string[];            // Full route (used by sender to create envelopes)
   currentHopIndex: number;    // Which hop we're at (for debugging)
 }
+
+export type HtlcEnvelopeBinding = Readonly<{
+  rootLockId: string;
+  hashlock: string;
+  tokenId: number;
+  senderLockAmount: bigint;
+  timelock: bigint;
+  revealBeforeHeight: number;
+}>;
+
+export type HtlcEnvelopeContext = Readonly<{
+  entityId: string;
+  lockId: string;
+  hashlock: string;
+  tokenId: number;
+  amount: bigint;
+  timelock: bigint;
+  revealBeforeHeight: number;
+}>;
+
+export type HtlcSecretOfferContext = HtlcEnvelopeContext & Readonly<{
+  payerEntityId: string;
+  beneficiaryEntityId: string;
+}>;
+
+export const computeHtlcEnvelopeContextHash = (context: HtlcEnvelopeContext): string =>
+  keccak256(new TextEncoder().encode(safeStringify({
+    version: 'xln:htlc-envelope-context:v1',
+    entityId: context.entityId.toLowerCase(),
+    lockId: context.lockId,
+    hashlock: context.hashlock.toLowerCase(),
+    tokenId: context.tokenId,
+    amount: context.amount,
+    timelock: context.timelock,
+    revealBeforeHeight: context.revealBeforeHeight,
+  })));
+
+export const computeHtlcSecretOfferContextHash = (context: HtlcSecretOfferContext): string =>
+  keccak256(new TextEncoder().encode(safeStringify({
+    version: 'xln:htlc-secret-offer-context:v1',
+    payerEntityId: context.payerEntityId.toLowerCase(),
+    beneficiaryEntityId: context.beneficiaryEntityId.toLowerCase(),
+    lockId: context.lockId,
+    hashlock: context.hashlock.toLowerCase(),
+    tokenId: context.tokenId,
+    amount: context.amount,
+    timelock: context.timelock,
+    revealBeforeHeight: context.revealBeforeHeight,
+  })));
+
+const inboundLockIdAt = (rootLockId: string, hopIndex: number): string =>
+  `${rootLockId}${'-fwd'.repeat(Math.max(0, hopIndex - 1))}`;
+
+const inboundAmountAt = (
+  route: string[],
+  hopIndex: number,
+  senderLockAmount: bigint,
+  hopForwardAmounts: Map<string, bigint>,
+): bigint => {
+  if (hopIndex === 1) return senderLockAmount;
+  const previousHop = route[hopIndex - 1];
+  const amount = previousHop ? hopForwardAmounts.get(previousHop) : undefined;
+  if (amount === undefined) throw new Error(`Missing inbound amount for route hop ${hopIndex}`);
+  return amount;
+};
+
+const contextAt = (
+  route: string[],
+  hopIndex: number,
+  binding: HtlcEnvelopeBinding,
+  hopForwardAmounts: Map<string, bigint>,
+): HtlcEnvelopeContext => ({
+  entityId: route[hopIndex]!,
+  lockId: inboundLockIdAt(binding.rootLockId, hopIndex),
+  hashlock: binding.hashlock,
+  tokenId: binding.tokenId,
+  amount: inboundAmountAt(route, hopIndex, binding.senderLockAmount, hopForwardAmounts),
+  timelock: binding.timelock - BigInt(hopIndex - 1) * BigInt(HTLC.MIN_TIMELOCK_DELTA_MS),
+  revealBeforeHeight: binding.revealBeforeHeight
+    - (hopIndex - 1) * HTLC.MIN_REVEAL_HEIGHT_DELTA_BLOCKS,
+});
 
 /**
  * Create layered onion envelopes from route
@@ -59,18 +143,19 @@ export interface HtlcRoutingContext {
  *
  * @param route - Full path [sender, hop1, hop2, ..., recipient]
  * @param secret - Preimage for final recipient
- * @param entityPubKeys - Optional public keys for encryption
- * @param crypto - Optional crypto provider (if undefined, uses cleartext)
+ * @param entityManifests - Complete certified validator key manifest per receiving Entity
+ * @param crypto - Content/wrapping crypto provider
  * @returns Outermost envelope (for first hop)
  */
 export async function createOnionEnvelopes(
   route: string[],
   secret: string,
-  entityPubKeys?: Map<string, string>,
+  entityManifests?: Map<string, CertifiedValidatorEncryptionManifest>,
   crypto?: CryptoProvider,
   hopForwardAmounts?: Map<string, bigint>,
   description?: string,
   startedAtMs?: number,
+  binding?: HtlcEnvelopeBinding,
 ): Promise<HtlcEnvelope> {
   if (route.length < 2) {
     throw new Error('Route must have at least sender and recipient');
@@ -102,30 +187,55 @@ export async function createOnionEnvelopes(
   } else if (uniqueEntities.size !== route.length) {
     throw new Error(`Route contains loops: ${route.length} entities but only ${uniqueEntities.size} unique`);
   }
+  if (!crypto || !entityManifests || !hopForwardAmounts || !binding) {
+    throw new Error('Onion envelope encryption requires crypto, certified manifests, amounts, and lock binding');
+  }
 
   // Build onion layers (2024 User.ts pattern: encrypt innermost first, wrap outward)
-  // Step 1: Encrypt final payload FOR final recipient
+  // Only the final payer needs a private preimage offer. Once that exact
+  // Account unlock is ACK-committed, the ordinary lockbook phase-2 propagation
+  // may reveal the preimage upstream: every intermediary then already owns an
+  // enforceable downstream claim. Building one encrypted offer per hop adds
+  // latency without improving that invariant.
+  const beneficiaryIndex = route.length - 1;
+  const payerEntityId = route[beneficiaryIndex - 1]!;
+  const beneficiaryEntityId = route[beneficiaryIndex]!;
+  const payerManifest = entityManifests.get(payerEntityId);
+  if (!payerManifest) throw new Error(`Missing validator encryption manifest for payer ${payerEntityId}`);
+  const edge = contextAt(route, beneficiaryIndex, binding, hopForwardAmounts);
+  const secretOffer = await encryptBytesForValidatorManifest(
+    encodeHtlcSecretOffer({ secret }),
+    payerManifest.manifest,
+    payerManifest.profileCertification,
+    computeHtlcSecretOfferContextHash({ ...edge, payerEntityId, beneficiaryEntityId }),
+    crypto,
+    payerManifest.recipientSignerId,
+  );
+
+  // Step 1: Encrypt final payload FOR final recipient. It contains no preimage;
+  // the recipient can only commit the opaque offer to the payer's Account.
   const finalRecipient = route[route.length - 1];
   if (!finalRecipient) {
     throw new Error('Route must have at least one recipient');
   }
-  if (!crypto || !entityPubKeys) {
-    throw new Error('Onion envelope encryption requires crypto provider and recipient keys');
+  const finalCertifiedManifest = entityManifests.get(finalRecipient);
+  if (!finalCertifiedManifest) {
+    throw new Error(`Missing validator encryption manifest for final recipient ${finalRecipient}`);
   }
-  const finalRecipientKey = entityPubKeys.get(finalRecipient);
-  if (!finalRecipientKey) {
-    throw new Error(`Missing encryption key for final recipient ${finalRecipient}`);
-  }
-  const finalPayload = safeStringify({
+  const finalPayload = encodeOnionLayer({
     finalRecipient: true,
-    secret,
+    secretOffer,
     ...(description ? { description } : {}),
     ...(startedAtMs !== undefined ? { startedAtMs } : {}),
   });
-  if (finalPayload.length > MAX_ENVELOPE_SERIALIZED_BYTES) {
-    throw new Error(`Final HTLC envelope exceeds ${MAX_ENVELOPE_SERIALIZED_BYTES} bytes`);
-  }
-  let encryptedBlob = await crypto.encrypt(finalPayload, finalRecipientKey);
+  let encryptedBlob = await encryptBytesForValidatorManifest(
+    finalPayload,
+    finalCertifiedManifest.manifest,
+    finalCertifiedManifest.profileCertification,
+    computeHtlcEnvelopeContextHash(contextAt(route, route.length - 1, binding, hopForwardAmounts)),
+    crypto,
+    finalCertifiedManifest.recipientSignerId,
+  );
 
   // Step 2: Wrap each hop's layer (from final backwards to first)
   // Each hop encrypts: {nextHop: X, encryptedBlob: Y} FOR themselves
@@ -140,22 +250,28 @@ export async function createOnionEnvelopes(
       throw new Error(`Invalid route segment at index ${i}`);
     }
 
-    const layerPayload = safeStringify({
+    const forwardAmount = hopForwardAmounts.get(currentHop);
+    if (forwardAmount === undefined) {
+      throw new Error(`Missing forward amount for route hop ${currentHop}`);
+    }
+    const layerPayload = encodeOnionLayer({
       nextHop,
       innerEnvelope: encryptedBlob,
-      ...(hopForwardAmounts?.has(currentHop)
-        ? { forwardAmount: hopForwardAmounts.get(currentHop)!.toString() }
-        : {})
+      forwardAmount: forwardAmount.toString(),
     });
-    if (layerPayload.length > MAX_ENVELOPE_SERIALIZED_BYTES) {
-      throw new Error(`Intermediary HTLC envelope exceeds ${MAX_ENVELOPE_SERIALIZED_BYTES} bytes`);
-    }
 
-    const currentHopKey = entityPubKeys.get(currentHop);
-    if (!currentHopKey) {
-      throw new Error(`Missing encryption key for hop ${currentHop}`);
+    const currentHopManifest = entityManifests.get(currentHop);
+    if (!currentHopManifest) {
+      throw new Error(`Missing validator encryption manifest for hop ${currentHop}`);
     }
-    encryptedBlob = await crypto.encrypt(layerPayload, currentHopKey);
+    encryptedBlob = await encryptBytesForValidatorManifest(
+      layerPayload,
+      currentHopManifest.manifest,
+      currentHopManifest.profileCertification,
+      computeHtlcEnvelopeContextHash(contextAt(route, i, binding, hopForwardAmounts)),
+      crypto,
+      currentHopManifest.recipientSignerId,
+    );
   }
 
   // Step 3: Build final envelope for first hop (cleartext wrapper)
@@ -174,12 +290,12 @@ export async function createOnionEnvelopes(
 /**
  * Unwrap one layer of onion envelope
  *
- * @param encoded - JSON-encoded envelope string
+ * @param encoded - canonical length-delimited binary layer
  * @returns Parsed envelope
  */
-export function unwrapEnvelope(encoded: string): HtlcEnvelope {
+export function unwrapEnvelope(encoded: Uint8Array): HtlcEnvelope {
   try {
-    return JSON.parse(encoded);
+    return decodeOnionLayer(encoded);
   } catch (e) {
     throw new Error(`Failed to unwrap envelope: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -193,15 +309,15 @@ export function unwrapEnvelope(encoded: string): HtlcEnvelope {
  */
 export function validateEnvelope(envelope: HtlcEnvelope): boolean {
   const serialized = safeStringify(envelope);
-  if (serialized.length > MAX_ENVELOPE_SERIALIZED_BYTES) {
+  if (new TextEncoder().encode(serialized).byteLength > MAX_ENVELOPE_SERIALIZED_BYTES) {
     throw new Error(`Envelope exceeds ${MAX_ENVELOPE_SERIALIZED_BYTES} bytes`);
   }
   if (envelope.description !== undefined && envelope.description.length > 256) {
     throw new Error('Envelope description exceeds 256 characters');
   }
   if (envelope.finalRecipient) {
-    if (!envelope.secret) {
-      throw new Error('Final recipient envelope must have secret');
+    if (!envelope.secretOffer) {
+      throw new Error('Final recipient envelope must have secret offer');
     }
     if (envelope.description !== undefined && typeof envelope.description !== 'string') {
       throw new Error('Final recipient envelope description must be string');
@@ -211,7 +327,7 @@ export function validateEnvelope(envelope: HtlcEnvelope): boolean {
         throw new Error('Final recipient envelope startedAtMs must be positive number');
       }
     }
-    if (envelope.nextHop || envelope.innerEnvelope) {
+    if (envelope.nextHop || envelope.innerEnvelope || 'secret' in envelope) {
       throw new Error('Final recipient envelope must not have nextHop or innerEnvelope');
     }
   } else {
@@ -238,7 +354,7 @@ export function validateEnvelope(envelope: HtlcEnvelope): boolean {
     } catch {
       throw new Error('Intermediary envelope forwardAmount must be a valid bigint string');
     }
-    if (envelope.secret) {
+    if ('secret' in envelope || envelope.secretOffer) {
       throw new Error('Intermediary envelope must not have secret (privacy leak!)');
     }
   }

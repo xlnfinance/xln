@@ -11,6 +11,10 @@ import {
   normalizeQaSeveritySignal,
   type QaSeveritySignal,
 } from './severity';
+import {
+  qaRunTestCategory as categoryFromTests,
+  qaTestCategoryFromTags,
+} from './test-categories';
 
 export type { QaSeverity, QaSeverityEvidence, QaSeveritySignal } from './severity';
 
@@ -256,16 +260,20 @@ export type QaFatalMarker = {
 };
 
 export type QaRunCategory = 'unit' | 'contract' | 'e2e' | 'scenario' | 'benchmark' | 'release' | 'unknown';
+export type QaTestCategory = 'functional' | 'resilience';
+export type QaRunTestCategory = QaTestCategory | 'mixed' | 'unknown';
 
 export type QaShardManifest = {
   shard: number;
-  status: 'passed' | 'failed' | 'unknown';
+  status: 'passed' | 'failed' | 'cancelled' | 'unknown';
   durationMs: number | null;
   handle: string | null;
   description: string | null;
   scenario: QaScenarioMetadata | null;
   target: string | null;
   title: string | null;
+  tags?: string[];
+  testCategory?: QaTestCategory;
   requireMarketMaker: boolean | null;
   logRelativePath: string | null;
   logTail: string | null;
@@ -288,6 +296,7 @@ export type QaRunManifest = {
   createdAt: number;
   completedAt: number | null;
   status: 'passed' | 'failed' | 'unknown';
+  testCategory?: QaRunTestCategory;
   totalMs: number | null;
   code?: QaCodeFingerprint;
   perf?: QaPerfSummary;
@@ -317,6 +326,7 @@ export type QaRunSummary = Omit<QaRunManifest, 'perf' | 'shards'> & {
   suiteKey: string;
   suiteLabel: string;
   category: QaRunCategory;
+  testCategory: QaRunTestCategory;
   failingTargets: string[];
   fatalMarkers: QaFatalMarker[];
   artifactBytes: number;
@@ -346,6 +356,7 @@ export type QaRunLedgerEntry = QaSeveritySignal & {
   completedAt: number | null;
   status: QaRunManifest['status'];
   category: QaRunCategory;
+  testCategory: QaRunTestCategory;
   suiteKey: string;
   suiteLabel: string;
   gitHead: string | null;
@@ -368,6 +379,18 @@ export type QaRunLedgerEntry = QaSeveritySignal & {
   benchmarkDeltaPct: number | null;
   benchmarkComparedRunId: string | null;
   auditAction: string | null;
+};
+
+export type QaTestLedgerEntry = {
+  testId: string;
+  category: QaTestCategory | 'unknown';
+  target: string;
+  title: string;
+  description: string;
+  status: QaShardManifest['status'];
+  durationMs: number | null;
+  lastRunId: string;
+  lastRunAt: number;
 };
 
 type QaShardFailureInput = Pick<QaShardManifest, 'status' | 'error' | 'logTail'> & {
@@ -871,6 +894,15 @@ const buildQaShardSeveritySignal = (shard: {
       evidence,
     });
   }
+  if (shard.status === 'cancelled') {
+    return makeQaSeveritySignal({
+      severity: 'UNKNOWN',
+      reason: `${label} was cancelled after another shard failed`,
+      since,
+      owner: 'qa-shard',
+      evidence,
+    });
+  }
   if (shard.status === 'unknown') {
     return makeQaSeveritySignal({
       severity: 'UNKNOWN',
@@ -1129,6 +1161,7 @@ export const buildQaRunLedger = (runs: readonly QaRunSummary[]): QaRunLedgerEntr
       completedAt: run.completedAt,
       status: run.status,
       category: run.category,
+      testCategory: run.testCategory,
       suiteKey: run.suiteKey,
       suiteLabel: run.suiteLabel,
       gitHead: run.code?.gitHead ?? null,
@@ -1399,7 +1432,31 @@ const runShardIdentity = (shard: QaShardManifest): string =>
     normalizeSuiteText(shard.handle),
   ].filter(Boolean).join('::') || `shard-${shard.shard}`;
 
-export const qaRunSuiteKey = (run: Pick<QaRunManifest, 'args' | 'shards'>): string => {
+const explicitRunTestCategory = (value: unknown): QaRunTestCategory | null =>
+  value === 'functional' || value === 'resilience' || value === 'mixed' || value === 'unknown'
+    ? value
+    : null;
+
+export const qaRunTestCategory = (
+  run: Pick<QaRunManifest, 'testCategory' | 'args' | 'shards'>,
+): QaRunTestCategory => {
+  const explicit = explicitRunTestCategory(run.testCategory);
+  if (explicit) return explicit;
+  const shardCategories = run.shards.map((shard) =>
+    shard.testCategory ?? qaTestCategoryFromTags(shard.tags ?? []));
+  if (shardCategories.length > 0 && shardCategories.every(Boolean)) {
+    return categoryFromTests(shardCategories as QaTestCategory[]);
+  }
+  const args = run.args ?? {};
+  const argCategory = explicitRunTestCategory(args['qaCategory'] ?? args['testCategory']);
+  if (argCategory === 'functional' || argCategory === 'resilience') return argCategory;
+  const grep = normalizeSuiteText(args['pwGrep']);
+  if (grep === '@functional') return 'functional';
+  if (grep === '@resilience') return 'resilience';
+  return 'unknown';
+};
+
+export const qaRunSuiteKey = (run: Pick<QaRunManifest, 'testCategory' | 'args' | 'shards'>): string => {
   const args = run.args ?? {};
   const source = {
     pwProject: normalizeSuiteText(args['pwProject']),
@@ -1407,22 +1464,26 @@ export const qaRunSuiteKey = (run: Pick<QaRunManifest, 'args' | 'shards'>): stri
     pwFiles: Array.isArray(args['pwFiles'])
       ? args['pwFiles'].map(normalizeSuiteText).sort(compareStableText)
       : normalizeSuiteText(args['pwFiles']),
+    testCategory: qaRunTestCategory(run),
     shards: run.shards.map(runShardIdentity).sort(compareStableText),
   };
   return createHash('sha256').update(JSON.stringify(source)).digest('hex').slice(0, 24);
 };
 
-export const qaRunSuiteLabel = (run: Pick<QaRunManifest, 'args' | 'shards'>): string => {
+export const qaRunSuiteLabel = (run: Pick<QaRunManifest, 'testCategory' | 'args' | 'shards'>): string => {
+  const testCategory = qaRunTestCategory(run);
+  const prefix = testCategory === 'unknown' ? '' : `${testCategory} · `;
   if (run.shards.length === 1) {
     const shard = run.shards[0]!;
-    return normalizeSuiteText(shard.handle) || normalizeSuiteText(shard.title) || normalizeSuiteText(shard.target) || 'single shard';
+    const label = normalizeSuiteText(shard.handle) || normalizeSuiteText(shard.title) || normalizeSuiteText(shard.target) || 'single shard';
+    return `${prefix}${label}`;
   }
   const args = run.args ?? {};
   const pwGrep = normalizeSuiteText(args['pwGrep']);
-  if (pwGrep) return `grep:${pwGrep}`;
+  if (pwGrep) return `${prefix}grep:${pwGrep}`;
   const pwFiles = Array.isArray(args['pwFiles']) ? args['pwFiles'].map(normalizeSuiteText).filter(Boolean) : [];
-  if (pwFiles.length > 0) return pwFiles.length === 1 ? pwFiles[0]! : `${pwFiles.length} files`;
-  return `${run.shards.length} shards`;
+  if (pwFiles.length > 0) return `${prefix}${pwFiles.length === 1 ? pwFiles[0]! : `${pwFiles.length} files`}`;
+  return `${prefix}${run.shards.length} shards`;
 };
 
 const normalizeArgsArray = (value: unknown): string[] => {
@@ -1750,6 +1811,14 @@ export const assertQaReleaseRunSeverity = (run: QaRunManifest): void => {
   }
   if (run.benchmark) assertQaSeveritySignal(run.benchmark, 'QA_BENCHMARK');
   if (run.browserHealth) assertQaSeveritySignal(run.browserHealth, 'QA_BROWSER_HEALTH');
+  if (run.manifestVersion < 4) return;
+  const shardCategories = run.shards.map((shard) =>
+    shard.testCategory ?? qaTestCategoryFromTags(shard.tags ?? []));
+  if (shardCategories.some((category) => category === null)) {
+    throw new Error('QA_RUN_TEST_CATEGORY_REQUIRED');
+  }
+  const derived = categoryFromTests(shardCategories as QaTestCategory[]);
+  if (run.testCategory !== derived) throw new Error('QA_RUN_TEST_CATEGORY_MISMATCH');
 };
 
 const parseManifestJson = (value: unknown): QaRunManifest | null => {
@@ -1758,6 +1827,28 @@ const parseManifestJson = (value: unknown): QaRunManifest | null => {
     return applyQaRunSeverity(JSON.parse(value) as QaRunManifest);
   } catch {
     return null;
+  }
+};
+
+const readQaHistoryManifest = (runId: string): QaRunManifest | null => {
+  if (!existsSync(QA_HISTORY_DB_PATH)) return null;
+  const db = openQaHistoryDb();
+  try {
+    const row = db.query(`
+      SELECT manifest_json
+      FROM qa_runs
+      WHERE run_id = $runId
+      LIMIT 1
+    `).get({ $runId: runId }) as Record<string, unknown> | null;
+    if (!row) return null;
+    const run = parseManifestJson(row['manifest_json']);
+    if (!run || run.runId !== runId || !Array.isArray(run.shards)) {
+      throw new Error('QA_RUN_HISTORY_MANIFEST_INVALID');
+    }
+    assertQaReleaseRunSeverity(run);
+    return run;
+  } finally {
+    db.close();
   }
 };
 
@@ -2297,6 +2388,28 @@ export const listQaRunSummaries = async (limit = 20): Promise<QaRunSummary[]> =>
   return runs.map(summarizeQaRun);
 };
 
+export const listQaTestLedger = async (limit = 500): Promise<QaTestLedgerEntry[]> => {
+  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(2_000, Math.floor(limit))) : 500;
+  const db = openQaHistoryDb();
+  try {
+    const rows = db.query(`
+      SELECT manifest_json
+      FROM qa_runs
+      WHERE manifest_json IS NOT NULL
+      ORDER BY
+        CASE WHEN created_at > $latestRealCreatedAt THEN 1 ELSE 0 END ASC,
+        created_at DESC
+      LIMIT $limit
+    `).all({ $limit: safeLimit, $latestRealCreatedAt: Date.now() + FUTURE_RUN_SKEW_MS }) as Array<Record<string, unknown>>;
+    const runs = rows
+      .map((row) => parseManifestJson(row['manifest_json']))
+      .filter((run): run is QaRunManifest => run !== null);
+    return buildQaTestLedger(runs);
+  } finally {
+    db.close();
+  }
+};
+
 export const backfillQaHistoryFromLogs = async (limit = 500): Promise<QaHistoryBackfillResult> => {
   const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(2_000, Math.floor(limit))) : 500;
   const runIds = await listQaRunIds(safeLimit);
@@ -2501,6 +2614,37 @@ export const deriveQaTestDescription = (
   const text = String(title || target || '').trim();
   if (!text) return 'No test description recorded.';
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
+};
+
+const shortQaTestDescription = (description: string): string => {
+  const words = description.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  return words.length <= 9 ? words.join(' ') : `${words.slice(0, 9).join(' ')}…`;
+};
+
+export const buildQaTestLedger = (runs: readonly QaRunManifest[]): QaTestLedgerEntry[] => {
+  const latest = new Map<string, QaTestLedgerEntry>();
+  const ordered = [...runs].sort((a, b) => b.createdAt - a.createdAt || b.runId.localeCompare(a.runId));
+  for (const run of ordered) {
+    for (const shard of run.shards) {
+      const target = String(shard.target ?? '').trim();
+      const title = String(shard.title ?? shard.handle ?? '').trim();
+      if (!target || !title) continue;
+      const testId = `${target}::${title}`;
+      if (latest.has(testId)) continue;
+      latest.set(testId, {
+        testId,
+        category: shard.testCategory ?? qaTestCategoryFromTags(shard.tags ?? []) ?? 'unknown',
+        target,
+        title,
+        description: shortQaTestDescription(shard.description ?? deriveQaTestDescription(target, title)),
+        status: shard.status,
+        durationMs: shard.durationMs,
+        lastRunId: run.runId,
+        lastRunAt: run.createdAt,
+      });
+    }
+  }
+  return [...latest.values()].sort((a, b) => a.title.localeCompare(b.title) || a.target.localeCompare(b.target));
 };
 
 type QaTargetMetadata = {
@@ -2891,6 +3035,8 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
   const runDir = join(QA_LOGS_ROOT, runId);
   const runStat = await stat(runDir).catch(() => null);
   if (!runStat?.isDirectory()) {
+    const archivedRun = readQaHistoryManifest(runId);
+    if (archivedRun) return archivedRun;
     throw new Error('QA_RUN_NOT_FOUND');
   }
 
@@ -3006,19 +3152,32 @@ export const resolveQaArtifactPath = async (runId: string, relativePath: string)
 export const makeQaArtifactUrl = (runId: string, relativePath: string): string =>
   `/api/qa/artifact?runId=${encodeURIComponent(runId)}&path=${encodeURIComponent(relativePath)}`;
 
-export const enrichQaRunUrls = (run: QaRunManifest): QaRunManifest => ({
+const enrichQaArtifactUrl = async (runId: string, artifact: QaArtifact): Promise<QaArtifact> => {
+  const normalized = {
+    ...artifact,
+    sensitivity: artifact.sensitivity ?? classifyQaArtifactSensitivity(artifact),
+  };
+  try {
+    await resolveQaArtifactPath(runId, artifact.relativePath);
+    return {
+      ...normalized,
+      url: makeQaArtifactUrl(runId, artifact.relativePath),
+    };
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'QA_ARTIFACT_NOT_FOUND') throw error;
+    const { url: _missingUrl, ...withoutUrl } = normalized;
+    return withoutUrl;
+  }
+};
+
+export const enrichQaRunUrls = async (run: QaRunManifest): Promise<QaRunManifest> => ({
   ...run,
-  shards: run.shards.map(shard => ({
+  shards: await Promise.all(run.shards.map(async shard => ({
     ...shard,
-    artifacts: sortArtifacts([...(shard.artifacts ?? [])]).map(artifact => {
-      const sensitivity = artifact.sensitivity ?? classifyQaArtifactSensitivity(artifact);
-      return {
-        ...artifact,
-        sensitivity,
-        url: makeQaArtifactUrl(run.runId, artifact.relativePath),
-      };
-    }),
-  })),
+    artifacts: await Promise.all(
+      sortArtifacts([...(shard.artifacts ?? [])]).map(artifact => enrichQaArtifactUrl(run.runId, artifact)),
+    ),
+  }))),
 });
 
 export const summarizeQaPerf = (perf: QaPerfSummary): QaPerfSummaryView => ({
@@ -3129,6 +3288,7 @@ export const summarizeQaRun = (run: QaRunManifest): QaRunSummary => ({
   suiteKey: qaRunSuiteKey(run),
   suiteLabel: qaRunSuiteLabel(run),
   category: qaRunCategory(run),
+  testCategory: qaRunTestCategory(run),
   ...(run.code ? { code: run.code } : {}),
   ...(run.perf ? { perf: summarizeQaPerf(run.perf) } : {}),
   browserHealth: run.browserHealth ?? summarizeQaRunBrowserHealth(run),

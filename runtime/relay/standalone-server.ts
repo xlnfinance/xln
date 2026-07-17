@@ -26,19 +26,8 @@ export type StandaloneRelayServer = {
 
 const relayStandaloneLog = createStructuredLogger('relay.standalone');
 
-const normalizeMessage = (raw: string | Buffer | ArrayBuffer): RuntimeWsMessage => {
-  try {
-    return deserializeWsMessage(raw);
-  } catch {
-    const text =
-      typeof raw === 'string'
-        ? raw
-        : raw instanceof ArrayBuffer
-          ? new TextDecoder().decode(new Uint8Array(raw))
-          : Buffer.from(raw).toString('utf8');
-    return JSON.parse(text) as RuntimeWsMessage;
-  }
-};
+const normalizeMessage = (raw: string | Buffer | ArrayBuffer): RuntimeWsMessage =>
+  deserializeWsMessage(raw);
 
 export const startStandaloneRelayServer = (options: StandaloneRelayOptions): StandaloneRelayServer => {
   const store = createRelayStore(options.serverId);

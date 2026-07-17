@@ -77,8 +77,16 @@ export async function getPersistedRuntimeDbMeta(page: Page): Promise<PersistedDb
 }
 
 export async function getPersistedReceiptCursor(page: Page): Promise<PersistedReceiptCursor> {
-  const meta = await readRuntimeDbMeta(page);
-  return { nextHeight: meta.latestHeight + 1 };
+  const latestHeight = await page.evaluate(async () => {
+    const view = window as RuntimeWindow;
+    const env = view.isolatedEnv;
+    const XLN = (window as any).XLN
+      || await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
+    if (!env) throw new Error('PERSISTED_RUNTIME_ENV_UNAVAILABLE');
+    if (!XLN?.getPersistedLatestHeight) throw new Error('PERSISTED_RUNTIME_API_UNAVAILABLE');
+    return Number(await XLN.getPersistedLatestHeight(env) || 0);
+  });
+  return { nextHeight: latestHeight + 1 };
 }
 
 async function readPersistedFrameEvents(
@@ -99,7 +107,10 @@ async function readPersistedFrameEvents(
     const latestHeight = Number(await XLN.getPersistedLatestHeight(env) || 0);
 
     for (let height = Math.max(1, nextHeight); height <= latestHeight; height += 1) {
-      const frame = await XLN.readPersistedFrameJournal(env, height) as PersistedFrameJournalView;
+      if (!XLN?.readPersistedRuntimeActivityJournal) {
+        throw new Error('PERSISTED_RUNTIME_ACTIVITY_JOURNAL_API_UNAVAILABLE');
+      }
+      const frame = await XLN.readPersistedRuntimeActivityJournal(env, height) as PersistedFrameJournalView;
       const logs = Array.isArray(frame?.logs) ? frame.logs : [];
       for (const entry of logs) {
         const message = typeof entry?.message === 'string' ? entry.message : '';

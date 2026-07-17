@@ -1133,6 +1133,7 @@ export function cloneCrossJurisdictionAccountFrameRoute(frame: AccountFrame): Ac
   };
 }
 
+export function cloneCrossJurisdictionAccountInputRoute<T extends AccountInput>(input: T): T;
 export function cloneCrossJurisdictionAccountInputRoute(input: AccountInput): AccountInput {
   if (input.kind !== 'frame' && input.kind !== 'frame_ack') return input;
   return {
@@ -1236,7 +1237,11 @@ export function deriveCrossJurisdictionHashLadderProof(
   return buildHashLadderProof(seed);
 }
 
-function signedAmountForBeneficiary(beneficiaryEntityId: string, counterpartyEntityId: string, amount: bigint): bigint {
+export function signedCrossJurisdictionAmountForBeneficiary(
+  beneficiaryEntityId: string,
+  counterpartyEntityId: string,
+  amount: bigint,
+): bigint {
   return isLeftEntity(normalizeEntityId(beneficiaryEntityId), normalizeEntityId(counterpartyEntityId))
     ? amount
     : -amount;
@@ -1290,7 +1295,11 @@ export function buildPreparedCrossJurisdictionRoute(
       pullId: sourcePullId,
       tokenId: Number(route.source.tokenId),
       amount: sourceAmount,
-      signedAmount: signedAmountForBeneficiary(route.source.counterpartyEntityId, route.source.entityId, sourceAmount),
+      signedAmount: signedCrossJurisdictionAmountForBeneficiary(
+        route.source.counterpartyEntityId,
+        route.source.entityId,
+        sourceAmount,
+      ),
       revealedUntilTimestamp: sourceRevealUntilTimestamp,
       fullHash: proof.fullHash,
       partialRoot: proof.partialRoot,
@@ -1299,7 +1308,11 @@ export function buildPreparedCrossJurisdictionRoute(
       pullId: targetPullId,
       tokenId: Number(route.target.tokenId),
       amount: targetAmount,
-      signedAmount: signedAmountForBeneficiary(route.target.counterpartyEntityId, route.target.entityId, targetAmount),
+      signedAmount: signedCrossJurisdictionAmountForBeneficiary(
+        route.target.counterpartyEntityId,
+        route.target.entityId,
+        targetAmount,
+      ),
       revealedUntilTimestamp: targetRevealUntilTimestamp,
       fullHash: proof.fullHash,
       partialRoot: proof.partialRoot,

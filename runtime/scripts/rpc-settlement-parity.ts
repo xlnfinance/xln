@@ -210,13 +210,18 @@ const main = async (): Promise<void> => {
     blockHash: minedReceipt.blockHash,
   });
   const fetchedEvents = parseReceiptLogsToJEvents({
-    logs: fetchedLogs.map(log => ({ topics: log.topics, data: log.data })),
+    logs: fetchedLogs.map(log => ({
+      address: log.address,
+      topics: log.topics,
+      data: log.data,
+      index: log.index,
+    })),
     blockNumber: minedReceipt.blockNumber,
     blockHash: minedReceipt.blockHash,
     hash: receipt.txHash,
   }, [
-    { interface: adapter.depository.interface },
-    { interface: adapter.entityProvider.interface },
+    { address: adapter.addresses.depository, interface: adapter.depository.interface },
+    { address: adapter.addresses.entityProvider, interface: adapter.entityProvider.interface },
   ]);
 
   const receiptHash = toJurisdictionHash(receipt.events, sourceEntity);

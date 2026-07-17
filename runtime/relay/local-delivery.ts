@@ -5,9 +5,18 @@
  * here via a callback so the router itself stays transport/crypto-agnostic.
  */
 
-import { enqueueRuntimeInput } from '../runtime.ts';
+import {
+  handleInboundP2PEntityInput,
+  handleInboundReliableReceipt,
+} from '../runtime.ts';
 import { deriveEncryptionKeyPair, decryptJSON, type P2PKeyPair } from '../networking/p2p-crypto';
-import type { Env, EntityInput, EntityReplica, RoutedEntityInput } from '../types';
+import type {
+  Env,
+  EntityInput,
+  EntityReplica,
+  ReliableDeliveryReceipt,
+  RoutedEntityInput,
+} from '../types';
 import { validateDeliverableEntityInput } from '../validation-utils';
 import {
   type RelayStore,
@@ -15,6 +24,7 @@ import {
   pushDebugEvent,
 } from './store';
 import { createStructuredLogger } from '../infra/logger';
+import { isDeliveryDelivered } from '../protocol/payments/delivery-result';
 
 const relayLocalDeliveryLog = createStructuredLogger('relay.local_delivery');
 const relayLog = process.env['RELAY_VERBOSE_LOGS'] === '1'
@@ -29,7 +39,13 @@ export const createLocalDeliveryHandler = (
   env: Env,
   store: RelayStore,
   getEntityReplicaById: (env: Env, entityId: string) => EntityReplica | null,
-): ((from: string | undefined, msg: { payload?: unknown; to?: unknown; encrypted?: boolean }) => Promise<void>) => {
+): ((from: string | undefined, msg: {
+  type?: unknown;
+  payload?: unknown;
+  to?: unknown;
+  encrypted?: boolean;
+  timestamp?: unknown;
+}) => Promise<void>) => {
   let serverKeyPair: P2PKeyPair | null = null;
   let serverKeySeedFingerprint: string | null = null;
 
@@ -53,12 +69,38 @@ export const createLocalDeliveryHandler = (
     return serverKeyPair;
   };
 
-  return async (from: string | undefined, msg: { payload?: unknown; to?: unknown; encrypted?: boolean }): Promise<void> => {
+  return async (from: string | undefined, msg: {
+    type?: unknown;
+    payload?: unknown;
+    to?: unknown;
+    encrypted?: boolean;
+    timestamp?: unknown;
+  }): Promise<void> => {
     const { payload } = msg;
     const to = typeof msg.to === 'string' ? msg.to : undefined;
     const toKey = normalizeRuntimeKey(to);
     if (!toKey) {
       throw new Error('Invalid target runtimeId for local delivery');
+    }
+    if (!from) throw new Error('Missing source runtimeId for local delivery');
+
+    if (msg.type === 'entity_input_receipt') {
+      const receiptResult = handleInboundReliableReceipt(env, from, payload as ReliableDeliveryReceipt);
+      pushDebugEvent(store, {
+        event: 'delivery',
+        from,
+        to: toKey,
+        msgType: 'entity_input_receipt',
+        status: receiptResult === 'queued'
+          ? 'delivered-local-queued'
+          : receiptResult === 'duplicate'
+            ? 'delivered-local-duplicate'
+            : 'deferred-local-quiescing',
+      });
+      return;
+    }
+    if (msg.type !== 'entity_input') {
+      throw new Error(`Unsupported local delivery type: ${String(msg.type)}`);
     }
 
     let input: RoutedEntityInput;
@@ -89,18 +131,32 @@ export const createLocalDeliveryHandler = (
       throw new Error(`NO_LOCAL_REPLICA: entityId=${entityId || 'unknown'} runtimeId=${toKey}`);
     }
 
-    // Enqueue to runtime
-    const routedInput: RoutedEntityInput = from ? { ...input, from } : { ...input };
-    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [routedInput] });
+    // Enqueue to runtime only after receiver-side reliable ingress registration.
+    const routedInput: RoutedEntityInput = { ...input, from };
+    const result = handleInboundP2PEntityInput(
+      env,
+      from,
+      routedInput,
+      typeof msg.timestamp === 'number' ? msg.timestamp : undefined,
+    );
+    if (result.kind === 'receipt') {
+      const delivery = env.runtimeState?.p2p?.enqueueReliableReceiptDelivery(from, result.receipt);
+      if (!delivery || !isDeliveryDelivered(delivery)) {
+        throw new Error(`RELIABLE_RECEIPT_SEND_DEFERRED:${delivery?.code ?? 'P2P_UNAVAILABLE'}`);
+      }
+    }
+    if (result.kind === 'ignored') {
+      throw new Error('INBOUND_ENTITY_INPUT_IGNORED');
+    }
     const queueSize = env.runtimeMempool?.entityInputs?.length ?? env.runtimeInput?.entityInputs?.length ?? 0;
-    relayLog(`[RELAY] → enqueued to runtime (queue=${queueSize})`);
+    relayLog(`[RELAY] → local entity_input result=${result.kind} (queue=${queueSize})`);
     pushDebugEvent(store, {
       event: 'delivery',
       from,
       to: toKey,
       msgType: 'entity_input',
       encrypted: msg.encrypted === true,
-      status: 'delivered-local-queued',
+      status: result.kind === 'pending' ? 'delivered-local-pending' : 'delivered-local-queued',
       details: { entityId: input.entityId, txs: input.entityTxs?.length ?? 0, queueSize },
     });
   };

@@ -3,6 +3,8 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { Wallet, ethers } from 'ethers';
 
+import { deriveSignerKeySync } from '../account/crypto';
+import { generateLazyEntityId } from '../entity/factory';
 import { createEmptyEnv, enqueueRuntimeInput, process as processRuntime } from '../runtime.ts';
 import { buildRuntimeRecoveryBundle } from '../recovery/bundle';
 import {
@@ -55,14 +57,13 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>, name = 'Tow
 
 const createBackupAppointment = async () => {
   const runtimeSeed = 'watchtower-restart-seed';
-  const wallet = Wallet.createRandom();
-  const runtimeId = wallet.address.toLowerCase();
   const env = createEmptyEnv(runtimeSeed);
-  env.runtimeId = runtimeId;
+  const runtimeId = env.runtimeId!;
+  const wallet = new Wallet(ethers.hexlify(deriveSignerKeySync(runtimeSeed, '1')));
   env.dbNamespace = `${runtimeId}-${Date.now()}-restart`;
   env.quietRuntimeLogs = true;
   const jurisdiction = installJurisdiction(env);
-  const entityId = `0x${'ab'.repeat(32)}`;
+  const entityId = generateLazyEntityId([runtimeId], 1n, env).toLowerCase();
   enqueueRuntimeInput(env, {
     runtimeTxs: [{
       type: 'importReplica',
@@ -172,7 +173,6 @@ describe('watchtower restart resilience', () => {
         finalProofbody: { watchSeed, tokenIds: [1], offdeltas: [-5n], transformers: [] },
         leftArguments: '0x',
         rightArguments: '0x',
-        starterIncrementedArguments: '0x',
         sig: '0x5678',
       },
     });

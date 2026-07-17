@@ -12,6 +12,7 @@
   import { activeRuntime, allRuntimes } from '$lib/stores/vaultStore';
   import { settings } from '$lib/stores/settingsStore';
   import { xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
+  import { loadJurisdictionTokenRegistry } from './jurisdiction-token-registry';
 
   // Props
   interface Props {
@@ -56,6 +57,8 @@
 
   let selectedTokenIdText = $state('');
   let browserVmTokens = $state<BrowserVMTokenInfo[]>([]);
+  let tokenRegistryError = $state<string | null>(null);
+  let tokenRegistryRequestId = 0;
   let externalBalances = $state<Array<{ address: string; label: string; balance: bigint }>>([]);
   let externalEthBalances = $state<Array<{ address: string; label: string; balance: bigint }>>([]);
   let externalBalancesLoading = $state(false);
@@ -320,21 +323,59 @@
   $effect(() => {
     const xln = $xlnInstance;
     if (!xln?.getEnv || !xln?.getActiveJAdapter) {
+      tokenRegistryRequestId += 1;
       browserVmTokens = [];
+      tokenRegistryError = null;
       return;
     }
-    const env = get(runtimeFrameEnv);
+    const env = $runtimeFrameEnv;
     if (!env) {
+      tokenRegistryRequestId += 1;
       browserVmTokens = [];
+      tokenRegistryError = null;
       return;
     }
     const jadapter = xln.getActiveJAdapter(env);
     if (!jadapter?.getTokenRegistry) {
+      tokenRegistryRequestId += 1;
       browserVmTokens = [];
+      tokenRegistryError = 'JURISDICTION_TOKEN_REGISTRY_ADAPTER_UNAVAILABLE';
       return;
     }
-    const registry = jadapter.getTokenRegistry();
-    browserVmTokens = Array.isArray(registry) ? registry : [];
+    const requestId = ++tokenRegistryRequestId;
+    void loadJurisdictionTokenRegistry(jadapter).then(
+      (tokens) => {
+        if (requestId !== tokenRegistryRequestId) return;
+        try {
+          browserVmTokens = tokens.map((token) => {
+            const tokenId = Number(token.tokenId);
+            const decimals = Number(token.decimals);
+            if (!Number.isSafeInteger(tokenId) || tokenId <= 0) {
+              throw new Error(`TOKEN_REGISTRY_TOKEN_ID_INVALID:${String(token.tokenId)}`);
+            }
+            if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
+              throw new Error(`TOKEN_REGISTRY_DECIMALS_INVALID:${tokenId}:${String(token.decimals)}`);
+            }
+            return {
+              tokenId,
+              symbol: token.symbol,
+              decimals,
+              ...(token.address ? { address: token.address } : {}),
+              ...(token.name ? { name: token.name } : {}),
+            };
+          });
+          tokenRegistryError = null;
+        } catch (error) {
+          browserVmTokens = [];
+          tokenRegistryError = error instanceof Error ? error.message : String(error);
+        }
+      },
+      (error: unknown) => {
+        if (requestId !== tokenRegistryRequestId) return;
+        browserVmTokens = [];
+        tokenRegistryError = error instanceof Error ? error.message : String(error);
+      },
+    );
   });
 
   let tokenOptions = $derived.by(() => {
@@ -345,7 +386,7 @@
       options.set(token.tokenId, {
         tokenId: token.tokenId,
         symbol: token.symbol,
-        decimals: token.decimals ?? 18,
+        decimals: token.decimals,
         address: token.address,
         name: token.name
       });
@@ -356,10 +397,10 @@
       const info = $xlnFunctions.getTokenInfo(tokenId);
       options.set(tokenId, {
         tokenId,
-        symbol: info?.symbol || `T${tokenId}`,
-        decimals: info?.decimals ?? 18,
+        symbol: info.symbol,
+        decimals: info.decimals,
         address: undefined,
-        name: info?.name
+        name: info.name
       });
     };
 
@@ -395,10 +436,10 @@
     const info = $xlnFunctions.getTokenInfo(selectedTokenId);
     return {
       tokenId: selectedTokenId,
-      symbol: info?.symbol || `T${selectedTokenId}`,
-      decimals: info?.decimals ?? 18,
+      symbol: info.symbol,
+      decimals: info.decimals,
       address: undefined,
-      name: info?.name
+      name: info.name
     };
   });
 
@@ -692,8 +733,8 @@
   function getTokenInfoFor(tokenId: number): { symbol: string; decimals: number } {
     const info = $xlnFunctions.getTokenInfo(tokenId);
     return {
-      symbol: info?.symbol || `T${tokenId}`,
-      decimals: info?.decimals ?? 18
+      symbol: info.symbol,
+      decimals: info.decimals
     };
   }
 
@@ -776,6 +817,12 @@
       {/if}
     </div>
   </div>
+
+  {#if tokenRegistryError}
+    <div class="empty error token-registry-error" role="alert" data-testid="jurisdiction-token-registry-error">
+      Token registry unavailable: {tokenRegistryError}
+    </div>
+  {/if}
 
   <!-- Tabs -->
   <div class="tabs">

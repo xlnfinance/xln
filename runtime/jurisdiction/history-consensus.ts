@@ -11,9 +11,15 @@ export const EMPTY_J_HISTORY_ROOT = ethers.keccak256(ethers.toUtf8Bytes(HISTORY_
 
 export const getJHistoryRegistrationBaseHeight = (jurisdiction: unknown): number => {
   if (!jurisdiction || typeof jurisdiction !== 'object') return 0;
-  const registrationBlock = Number((jurisdiction as { registrationBlock?: unknown }).registrationBlock ?? 0);
-  if (!Number.isSafeInteger(registrationBlock) || registrationBlock <= 1) return 0;
-  return registrationBlock - 1;
+  const deploymentBlock = Number(
+    (jurisdiction as { entityProviderDeploymentBlock?: unknown }).entityProviderDeploymentBlock ?? 0,
+  );
+  // Registered-board authority is global to the exact stack, so an Entity must
+  // certify EntityProvider history from deployment, not merely from its own
+  // registration. Missing discovery metadata deliberately falls back to genesis;
+  // a later starting point could silently omit an older active board.
+  if (!Number.isSafeInteger(deploymentBlock) || deploymentBlock <= 1) return 0;
+  return deploymentBlock - 1;
 };
 
 const textHash = (value: unknown): string =>

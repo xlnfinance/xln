@@ -1,245 +1,228 @@
 import type { AccountMachine, JurisdictionEvent } from '../../types';
 import { getDefaultCreditLimit } from '../../account/utils';
-import { canonicalJurisdictionEventKey, normalizeJurisdictionEvents } from '../../jurisdiction/event-normalization';
-import { createStructuredLogger, shortHash } from '../../infra/logger';
+import {
+  canonicalJurisdictionEventKey,
+  compareCanonicalJurisdictionEvents,
+  normalizeJurisdictionEvents,
+} from '../../jurisdiction/event-normalization';
 import type { JEventClaimTx, JEventMempoolOp } from './j-events-types';
-
-const accountJEventLog = createStructuredLogger('j.event.account');
-
-type AccountJObservation = AccountMachine['leftJObservations'][number];
+import { clearFinalizedSettlementWorkspace } from '../../account/tx/handlers/settle-transition';
+import { buildAccountProofBody } from '../../protocol/dispute/proof-builder';
 
 const isJEventClaimOp = (op: JEventMempoolOp): op is { accountId: string; tx: JEventClaimTx } =>
   op.tx.type === 'j_event_claim';
 
-const normalizeObsEvents = (obs: AccountJObservation): JurisdictionEvent[] => {
-  const raw = obs?.events;
-  if (!Array.isArray(raw)) return [];
-  return normalizeJurisdictionEvents(raw);
+const normalizedEntityId = (value: unknown): string => String(value ?? '').trim().toLowerCase();
+
+const assertAccountSettledEvent = (
+  account: AccountMachine,
+  event: Extract<JurisdictionEvent, { type: 'AccountSettled' }>,
+): number => {
+  const left = normalizedEntityId(event.data.leftEntity);
+  const right = normalizedEntityId(event.data.rightEntity);
+  if (left !== account.leftEntity.toLowerCase() || right !== account.rightEntity.toLowerCase()) {
+    throw new Error(
+      `ACCOUNT_SETTLED_PAIR_MISMATCH:${left}:${right}:${account.leftEntity.toLowerCase()}:${account.rightEntity.toLowerCase()}`,
+    );
+  }
+  const nonce = event.data.nonce;
+  if (typeof nonce !== 'number' || !Number.isSafeInteger(nonce) || nonce < 0) {
+    throw new Error(`ACCOUNT_SETTLED_NONCE_INVALID:${String(nonce)}`);
+  }
+  const tokenId = Number(event.data.tokenId);
+  if (!Number.isSafeInteger(tokenId) || tokenId < 0) {
+    throw new Error(`ACCOUNT_SETTLED_TOKEN_INVALID:${String(event.data.tokenId)}`);
+  }
+  return nonce;
 };
 
-const sameEventMultiset = (a: JurisdictionEvent[], b: JurisdictionEvent[]): boolean => {
-  if (a.length !== b.length) return false;
-  const counts = new Map<string, number>();
-  for (const event of a) {
-    const key = canonicalJurisdictionEventKey(event);
-    counts.set(key, (counts.get(key) || 0) + 1);
-  }
-  for (const event of b) {
-    const key = canonicalJurisdictionEventKey(event);
-    const current = counts.get(key) || 0;
-    if (current <= 0) return false;
-    counts.set(key, current - 1);
-  }
-  return Array.from(counts.values()).every((remaining) => remaining === 0);
-};
-
-function applyAccountSettledEvent(account: AccountMachine, event: JurisdictionEvent): void {
+const applyAccountSettledEvent = (account: AccountMachine, event: JurisdictionEvent): void => {
   if (event.type !== 'AccountSettled') return;
   const { tokenId, collateral, ondelta } = event.data;
   const tokenIdNum = Number(tokenId);
-
   let delta = account.deltas.get(tokenIdNum);
   if (!delta) {
-    const defaultCreditLimit = getDefaultCreditLimit(tokenIdNum);
+    const limit = getDefaultCreditLimit(tokenIdNum);
     delta = {
       tokenId: tokenIdNum,
       collateral: 0n,
       ondelta: 0n,
       offdelta: 0n,
-      leftCreditLimit: defaultCreditLimit,
-      rightCreditLimit: defaultCreditLimit,
+      leftCreditLimit: limit,
+      rightCreditLimit: limit,
       leftAllowance: 0n,
       rightAllowance: 0n,
     };
     account.deltas.set(tokenIdNum, delta);
   }
-
-  const oldColl = delta.collateral;
+  const previousCollateral = delta.collateral;
   delta.collateral = BigInt(collateral);
   delta.ondelta = BigInt(ondelta);
-
-  const pendingRequest = account.requestedRebalance?.get(tokenIdNum) ?? 0n;
-  if (pendingRequest > 0n) {
-    const collateralIncrease = delta.collateral > oldColl ? delta.collateral - oldColl : 0n;
-    if (collateralIncrease > 0n) {
-      const fulfilledAmount = pendingRequest > collateralIncrease ? collateralIncrease : pendingRequest;
-      const remaining = pendingRequest - fulfilledAmount;
-      if (remaining > 0n) {
-        account.requestedRebalance.set(tokenIdNum, remaining);
-        account.shadow.rebalance.submittedAtByToken.delete(tokenIdNum);
-      } else {
-        account.requestedRebalance.delete(tokenIdNum);
-        account.requestedRebalanceFeeState?.delete(tokenIdNum);
-        account.shadow.rebalance.submittedAtByToken.delete(tokenIdNum);
-      }
+  const requested = account.requestedRebalance?.get(tokenIdNum) ?? 0n;
+  const increase = delta.collateral > previousCollateral ? delta.collateral - previousCollateral : 0n;
+  if (requested > 0n && increase > 0n) {
+    const remaining = requested > increase ? requested - increase : 0n;
+    if (remaining > 0n) account.requestedRebalance.set(tokenIdNum, remaining);
+    else {
+      account.requestedRebalance.delete(tokenIdNum);
+      account.requestedRebalanceFeeState?.delete(tokenIdNum);
     }
+    account.shadow.rebalance.submittedAtByToken.delete(tokenIdNum);
   }
+};
 
-  const eventNonce = event.data.nonce;
-  if (eventNonce != null) {
-    const eventNonceNum = Number(eventNonce);
-    const prev = account.jNonce ?? 0;
-    if (eventNonceNum > prev) account.jNonce = eventNonceNum;
-  }
-}
-
-function activatePostSettlementProof(account: AccountMachine, counterpartyId: string, leftEvents: JurisdictionEvent[]): void {
-  const ws = account.settlementWorkspace;
-  if (!ws || (!ws.leftHanko && !ws.rightHanko)) return;
-
-  const postProof = ws.postSettlementDisputeProof;
-  if (postProof?.leftHanko && postProof?.rightHanko) {
-    if (!postProof.disputeHash) {
-      throw new Error(`POST_SETTLEMENT_DISPUTE_HASH_MISSING:${counterpartyId}`);
-    }
-    const iAmLeftHere = account.leftEntity !== counterpartyId;
-    account.currentDisputeProofHanko = iAmLeftHere ? postProof.leftHanko : postProof.rightHanko;
-    account.counterpartyDisputeProofHanko = iAmLeftHere ? postProof.rightHanko : postProof.leftHanko;
-    account.currentDisputeProofNonce = postProof.nonce;
-    account.currentDisputeProofBodyHash = postProof.proofBodyHash;
-    account.currentDisputeHash = postProof.disputeHash;
-    account.counterpartyDisputeProofNonce = postProof.nonce;
-    account.counterpartyDisputeProofBodyHash = postProof.proofBodyHash;
-    account.counterpartyDisputeHash = postProof.disputeHash;
-    account.disputeProofNoncesByHash ??= {};
-    account.disputeProofNoncesByHash[postProof.proofBodyHash] = postProof.nonce;
-  }
-
-  const firstSettled = leftEvents.find((event) => event.type === 'AccountSettled');
-  const eventNonce = firstSettled?.data?.nonce;
-  account.jNonce = typeof eventNonce === 'number'
-    ? eventNonce
-    : ws.nonceAtSign ?? ((account.jNonce || 0) + 1);
-  delete account.settlementWorkspace;
-}
-
-export function tryFinalizeAccountJEvents(account: AccountMachine, counterpartyId: string, opts: { timestamp: number }): void {
-  const leftMap = new Map<string, AccountJObservation>();
-  const rightMap = new Map<string, AccountJObservation>();
-
-  for (const obs of account.leftJObservations) leftMap.set(`${obs.jHeight}:${obs.jBlockHash}`, obs);
-  for (const obs of account.rightJObservations) rightMap.set(`${obs.jHeight}:${obs.jBlockHash}`, obs);
-
-  const matches = Array.from(leftMap.keys()).filter((key) => rightMap.has(key));
-  if (matches.length === 0) return;
-
-  const finalizedKeys = new Set<string>();
-  for (const key of matches) {
-    const leftObs = leftMap.get(key)!;
-    const rightObs = rightMap.get(key)!;
-    const jHeight = leftObs.jHeight;
-
-    if (account.lastFinalizedJHeight >= jHeight) continue;
-    if (account.jEventChain.some((block) => block.jHeight === jHeight)) continue;
-
-    const leftRawLen = Array.isArray(leftObs?.events) ? leftObs.events.length : 0;
-    const rightRawLen = Array.isArray(rightObs?.events) ? rightObs.events.length : 0;
-    const leftEvents = normalizeObsEvents(leftObs);
-    const rightEvents = normalizeObsEvents(rightObs);
-    if (leftEvents.length === 0 || rightEvents.length === 0) {
-      accountJEventLog.warn('bilateral.empty_events', { height: jHeight, block: shortHash(leftObs.jBlockHash) });
-      continue;
-    }
-    if (leftEvents.length !== leftRawLen || rightEvents.length !== rightRawLen) {
-      accountJEventLog.warn('bilateral.malformed_events', { height: jHeight, block: shortHash(leftObs.jBlockHash), leftRawLen, leftNormLen: leftEvents.length, rightRawLen, rightNormLen: rightEvents.length });
-      continue;
-    }
-    if (!sameEventMultiset(leftEvents, rightEvents)) {
-      accountJEventLog.warn('bilateral.event_mismatch', {
-        height: jHeight,
-        block: shortHash(leftObs.jBlockHash),
-        leftKeys: leftEvents.map(canonicalJurisdictionEventKey),
-        rightKeys: rightEvents.map(canonicalJurisdictionEventKey),
-      });
-      accountJEventLog.trace('bilateral.event_mismatch_payload', { height: jHeight, leftRaw: leftObs.events, rightRaw: rightObs.events });
-      continue;
-    }
-
-    for (const event of leftEvents) applyAccountSettledEvent(account, event);
-
-    account.jEventChain.push({ jHeight, jBlockHash: leftObs.jBlockHash, events: leftEvents, finalizedAt: opts.timestamp });
-    account.lastFinalizedJHeight = Math.max(account.lastFinalizedJHeight, jHeight);
-    finalizedKeys.add(key);
-    activatePostSettlementProof(account, counterpartyId, leftEvents);
-  }
-
-  account.leftJObservations = account.leftJObservations.filter(
-    (obs) => !finalizedKeys.has(`${obs.jHeight}:${obs.jBlockHash}`),
+const activatePostSettlementProof = (
+  account: AccountMachine,
+  counterpartyId: string,
+  finalizedNonce: number,
+  deltaTransformerAddress: string,
+): void => {
+  const workspace = account.settlementWorkspace;
+  if (!workspace) return;
+  const isSigned = Boolean(
+    workspace.settlementHash || workspace.leftHanko || workspace.rightHanko || workspace.postSettlementDisputeProof,
   );
-  account.rightJObservations = account.rightJObservations.filter(
-    (obs) => !finalizedKeys.has(`${obs.jHeight}:${obs.jBlockHash}`),
-  );
-}
-
-export function mergeAccountJObservations(
-  observations: Array<{ jHeight: number; jBlockHash: string; events: JurisdictionEvent[] }>,
-): boolean {
-  if (observations.length <= 1) return false;
-  const groups = new Map<string, number>();
-  let changed = false;
-  let i = 0;
-  while (i < observations.length) {
-    const obs = observations[i];
-    if (!obs) {
-      observations.splice(i, 1);
-      changed = true;
-      continue;
-    }
-    const key = `${obs.jHeight}:${obs.jBlockHash}`;
-    const existing = groups.get(key);
-    if (existing !== undefined) {
-      const target = observations[existing];
-      if (!target) {
-        groups.delete(key);
-        i++;
-        continue;
-      }
-      const normalizedEvents = normalizeJurisdictionEvents(obs.events);
-      for (const ev of normalizedEvents) {
-        const evKey = canonicalJurisdictionEventKey(ev);
-        const alreadyHas = target.events.some((event) => canonicalJurisdictionEventKey(event) === evKey);
-        if (!alreadyHas) {
-          target.events.push(ev);
-          changed = true;
-        }
-      }
-      observations.splice(i, 1);
-      changed = true;
-    } else {
-      groups.set(key, i);
-      i++;
-    }
+  if (!isSigned) {
+    clearFinalizedSettlementWorkspace(account);
+    return;
   }
-  return changed;
-}
+  const signedNonce = workspace.nonceAtSign;
+  if (typeof signedNonce !== 'number' || !Number.isSafeInteger(signedNonce) || signedNonce < 1) {
+    throw new Error(`SETTLEMENT_SIGNED_NONCE_MISSING:${String(signedNonce)}`);
+  }
+  if (finalizedNonce < signedNonce) return;
+  if (finalizedNonce > signedNonce) {
+    clearFinalizedSettlementWorkspace(account);
+    return;
+  }
+
+  const proof = workspace.postSettlementDisputeProof;
+  if (!proof) throw new Error(`POST_SETTLEMENT_PROOF_MISSING:${counterpartyId}`);
+  if (proof.nonce !== signedNonce + 1) {
+    throw new Error(`POST_SETTLEMENT_PROOF_NONCE_MISMATCH:${proof.nonce}:${signedNonce + 1}`);
+  }
+  if (!proof.leftHanko || !proof.rightHanko) throw new Error(`POST_SETTLEMENT_PROOF_HANKO_MISSING:${counterpartyId}`);
+  if (!proof.disputeHash) throw new Error(`POST_SETTLEMENT_DISPUTE_HASH_MISSING:${counterpartyId}`);
+  if (!proof.proofBodyHash) throw new Error(`POST_SETTLEMENT_PROOF_BODY_HASH_MISSING:${counterpartyId}`);
+  const finalizedProofBodyHash = buildAccountProofBody(account, deltaTransformerAddress).proofBodyHash;
+  if (finalizedProofBodyHash.toLowerCase() !== proof.proofBodyHash.toLowerCase()) {
+    throw new Error(
+      `POST_SETTLEMENT_FINALIZED_PROOF_BODY_MISMATCH:${proof.proofBodyHash}:${finalizedProofBodyHash}`,
+    );
+  }
+
+  const localIsLeft = account.proofHeader.fromEntity.toLowerCase() === account.leftEntity.toLowerCase();
+  const localHanko = localIsLeft ? proof.leftHanko : proof.rightHanko;
+  const counterpartyHanko = localIsLeft ? proof.rightHanko : proof.leftHanko;
+  const localNonce = Number(account.currentDisputeProofNonce ?? 0);
+  const counterpartyNonce = Number(account.counterpartyDisputeProofNonce ?? 0);
+  if (localNonce === proof.nonce) {
+    if (
+      account.currentDisputeProofBodyHash?.toLowerCase() !== proof.proofBodyHash.toLowerCase() ||
+      account.currentDisputeHash?.toLowerCase() !== proof.disputeHash.toLowerCase()
+    ) throw new Error(`POST_SETTLEMENT_LOCAL_PROOF_EQUIVOCATION:${proof.nonce}`);
+  } else if (localNonce < proof.nonce) {
+    account.currentDisputeProofHanko = localHanko;
+    account.currentDisputeProofNonce = proof.nonce;
+    account.currentDisputeProofBodyHash = proof.proofBodyHash;
+    account.currentDisputeHash = proof.disputeHash;
+  }
+  if (counterpartyNonce === proof.nonce) {
+    if (
+      account.counterpartyDisputeProofBodyHash?.toLowerCase() !== proof.proofBodyHash.toLowerCase() ||
+      account.counterpartyDisputeHash?.toLowerCase() !== proof.disputeHash.toLowerCase()
+    ) throw new Error(`POST_SETTLEMENT_COUNTERPARTY_PROOF_EQUIVOCATION:${proof.nonce}`);
+  } else if (counterpartyNonce < proof.nonce) {
+    account.counterpartyDisputeProofHanko = counterpartyHanko;
+    account.counterpartyDisputeProofNonce = proof.nonce;
+    account.counterpartyDisputeProofBodyHash = proof.proofBodyHash;
+    account.counterpartyDisputeHash = proof.disputeHash;
+  }
+  // Account settlement and dispute proofs share one on-chain nonce namespace.
+  // Once the N+1 recovery proof becomes active, no later settlement may reuse
+  // N+1 or an older locally reserved value.
+  account.proofHeader.nextProofNonce = Math.max(
+    Number(account.proofHeader.nextProofNonce ?? 0),
+    proof.nonce + 1,
+    Number(account.currentDisputeProofNonce ?? 0) + 1,
+    Number(account.counterpartyDisputeProofNonce ?? 0) + 1,
+    finalizedNonce + 1,
+  );
+  account.disputeProofNoncesByHash ??= {};
+  account.disputeProofNoncesByHash[proof.proofBodyHash] = proof.nonce;
+  clearFinalizedSettlementWorkspace(account);
+};
+
+export const applyFinalizedAccountJEvents = (
+  account: AccountMachine,
+  counterpartyId: string,
+  events: readonly JurisdictionEvent[],
+  deltaTransformerAddress: string,
+): void => {
+  const settledEvents = events.filter(
+    (event): event is Extract<JurisdictionEvent, { type: 'AccountSettled' }> => event.type === 'AccountSettled',
+  );
+  if (settledEvents.length === 0) return;
+
+  let previousNonce = account.jNonce ?? 0;
+  let finalizedNonce = previousNonce;
+  for (const event of settledEvents) {
+    const nonce = assertAccountSettledEvent(account, event);
+    if (nonce < previousNonce) {
+      throw new Error(`ACCOUNT_SETTLED_NONCE_REGRESSION:${previousNonce}:${nonce}`);
+    }
+    previousNonce = nonce;
+    finalizedNonce = Math.max(finalizedNonce, nonce);
+  }
+
+  // J-claim finality is atomic: malformed structural proof data must not leave
+  // reserves changed while the workspace/proof transition is rejected.
+  const staged = structuredClone(account);
+  for (const event of settledEvents) applyAccountSettledEvent(staged, event);
+  activatePostSettlementProof(staged, counterpartyId, finalizedNonce, deltaTransformerAddress);
+  staged.jNonce = finalizedNonce;
+  Object.assign(account, staged);
+  if (!staged.settlementWorkspace) delete account.settlementWorkspace;
+};
 
 export function mergeJEventClaimOps(ops: JEventMempoolOp[]): void {
   const groups = new Map<string, number>();
-  let i = 0;
-  while (i < ops.length) {
-    const op = ops[i];
+  for (let index = 0; index < ops.length;) {
+    const op = ops[index];
     if (!op) {
-      ops.splice(i, 1);
+      ops.splice(index, 1);
       continue;
     }
     if (!isJEventClaimOp(op)) {
-      i++;
+      index += 1;
       continue;
     }
-    const key = `${op.accountId}:${op.tx.data.jHeight}:${op.tx.data.jBlockHash}`;
-    const existing = groups.get(key);
-    if (existing !== undefined) {
-      const target = ops[existing];
-      if (!target || !isJEventClaimOp(target)) {
-        groups.delete(key);
-        i++;
-        continue;
-      }
-      target.tx.data.events.push(...normalizeJurisdictionEvents(op.tx.data.events));
-      ops.splice(i, 1);
-    } else {
-      groups.set(key, i);
-      i++;
+    const key = `${op.accountId.toLowerCase()}:${op.tx.data.jHeight}:${op.tx.data.jBlockHash.toLowerCase()}`;
+    const targetIndex = groups.get(key);
+    if (targetIndex === undefined) {
+      groups.set(key, index);
+      index += 1;
+      continue;
     }
+    const target = ops[targetIndex];
+    if (!target || !isJEventClaimOp(target)) throw new Error(`ACCOUNT_J_CLAIM_MERGE_TARGET_MISSING:${key}`);
+    target.tx.data.events.push(...normalizeJurisdictionEvents(op.tx.data.events));
+    ops.splice(index, 1);
+  }
+  for (const op of ops) {
+    if (!isJEventClaimOp(op)) continue;
+    const events = normalizeJurisdictionEvents(op.tx.data.events).sort(compareCanonicalJurisdictionEvents);
+    const keys = events.map(canonicalJurisdictionEventKey);
+    if (new Set(keys).size !== keys.length) throw new Error('ACCOUNT_J_CLAIM_EVENT_DUPLICATE');
+    op.tx.data.events = events;
+  }
+  const claims = ops.filter(isJEventClaimOp).sort((left, right) => (
+    left.accountId.localeCompare(right.accountId)
+      || left.tx.data.jHeight - right.tx.data.jHeight
+      || left.tx.data.jBlockHash.localeCompare(right.tx.data.jBlockHash)
+  ));
+  let claimIndex = 0;
+  for (let index = 0; index < ops.length; index += 1) {
+    if (isJEventClaimOp(ops[index]!)) ops[index] = claims[claimIndex++]!;
   }
 }

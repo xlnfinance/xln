@@ -5,10 +5,6 @@ type RuntimeEnv = {
   eReplicas: Map<string, unknown>;
 };
 
-type RuntimeModule = {
-  enqueueRuntimeInput: (env: RuntimeEnv, input: RuntimeTxEnqueueInput) => void;
-};
-
 type EntityTxInput = {
   entityId: string;
   signerId: string;
@@ -36,6 +32,16 @@ async function waitForRuntimeWindow(page: Page): Promise<void> {
   await page.waitForFunction(() => Boolean((window as typeof window & { isolatedEnv?: unknown }).isolatedEnv), undefined, {
     timeout: 10_000,
   }).catch(() => {});
+}
+
+async function waitForRuntimeIngress(page: Page): Promise<void> {
+  await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => {});
+  await page.waitForFunction(() => {
+    const target = window as typeof window & {
+      __xln?: { runtimeIngress?: { submit?: unknown } };
+    };
+    return typeof target.__xln?.runtimeIngress?.submit === 'function';
+  }, undefined, { timeout: 10_000 });
 }
 
 async function evaluateWithRuntimeRetry<TResult, TArg>(
@@ -69,7 +75,7 @@ export async function enqueueRuntimeInput(page: Page, input: RuntimeTxEnqueueInp
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
-      await waitForRuntimeWindow(page);
+      await waitForRuntimeIngress(page);
       const result = await page.evaluate(async ({ input, storageKey }) => {
         const priorStatus = sessionStorage.getItem(storageKey);
         if (priorStatus === 'committed') return { ok: true, alreadyCommitted: true };
@@ -78,17 +84,17 @@ export async function enqueueRuntimeInput(page: Page, input: RuntimeTxEnqueueInp
         }
 
         const runtimeWindow = window as typeof window & {
-          isolatedEnv?: RuntimeEnv;
+          __xln?: {
+            runtimeIngress?: {
+              submit: (input: RuntimeTxEnqueueInput) => Promise<unknown>;
+            };
+          };
         };
-        const env = runtimeWindow.isolatedEnv;
-        if (!env) return { ok: false, error: 'isolatedEnv missing' };
-
-        const runtimeModule = await import(
-          /* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href
-        ) as RuntimeModule;
+        const runtimeIngress = runtimeWindow.__xln?.runtimeIngress;
+        if (!runtimeIngress) return { ok: false, error: 'live runtime ingress missing' };
 
         sessionStorage.setItem(storageKey, 'started');
-        runtimeModule.enqueueRuntimeInput(env, input);
+        await runtimeIngress.submit(input);
         sessionStorage.setItem(storageKey, 'committed');
         return { ok: true };
       }, { input, storageKey });

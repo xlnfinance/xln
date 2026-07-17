@@ -70,6 +70,7 @@ export type QaCodeFingerprint = {
   gitStatus: string;
   dirty: boolean;
   codeHash: string;
+  buildInputHash?: string;
   computedAt: number;
   trackedFileCount: number;
   trackedBytes: number;
@@ -214,20 +215,45 @@ export type QaFatalMarker = {
 };
 
 export type QaRunCategory = 'unit' | 'contract' | 'e2e' | 'scenario' | 'benchmark' | 'release' | 'unknown';
+export type QaTestCategory = 'functional' | 'resilience';
+export type QaRunTestCategory = QaTestCategory | 'mixed' | 'unknown';
+
+export type QaFailureCapsule = {
+  version: 1;
+  reportPath: string;
+  file: string;
+  title: string;
+  line: number;
+  column: number;
+  project: string;
+  error: string;
+  stack: string | null;
+  attachments: Array<{
+    name: string;
+    contentType: string;
+    path: string | null;
+  }>;
+  rerunCommand: string;
+};
 
 export type QaShardManifest = {
   shard: number;
-  status: 'passed' | 'failed' | 'unknown';
+  status: 'passed' | 'failed' | 'cancelled' | 'unknown';
   durationMs: number | null;
   handle: string | null;
   description: string | null;
   scenario: QaScenarioMetadata | null;
   target: string | null;
   title: string | null;
+  tags?: string[];
+  testCategory?: QaTestCategory;
   requireMarketMaker: boolean | null;
   logRelativePath: string | null;
   logTail: string | null;
   error: string | null;
+  diagnostics?: string[];
+  failureCapsule?: QaFailureCapsule | null;
+  failureCapsuleRelativePath?: string | null;
   failureClass: QaFailureClass | null;
   phaseMs: QaPhaseTimings | null;
   perf?: QaPerfSummary;
@@ -246,6 +272,7 @@ export type QaRunManifest = {
   createdAt: number;
   completedAt: number | null;
   status: 'passed' | 'failed' | 'unknown';
+  testCategory?: QaRunTestCategory;
   totalMs: number | null;
   code?: QaCodeFingerprint;
   perf?: QaPerfSummary;
@@ -275,6 +302,7 @@ export type QaRunSummary = Omit<QaRunManifest, 'perf' | 'shards'> & {
   suiteKey: string;
   suiteLabel: string;
   category: QaRunCategory;
+  testCategory: QaRunTestCategory;
   failingTargets: string[];
   fatalMarkers: QaFatalMarker[];
   artifactBytes: number;
@@ -304,6 +332,7 @@ export type QaRunLedgerEntry = QaSeveritySignal & {
   completedAt: number | null;
   status: QaRunManifest['status'];
   category: QaRunCategory;
+  testCategory: QaRunTestCategory;
   suiteKey: string;
   suiteLabel: string;
   gitHead: string | null;
@@ -326,6 +355,18 @@ export type QaRunLedgerEntry = QaSeveritySignal & {
   benchmarkDeltaPct: number | null;
   benchmarkComparedRunId: string | null;
   auditAction: string | null;
+};
+
+export type QaTestLedgerEntry = {
+  testId: string;
+  category: QaTestCategory | 'unknown';
+  target: string;
+  title: string;
+  description: string;
+  status: QaShardManifest['status'];
+  durationMs: number | null;
+  lastRunId: string;
+  lastRunAt: number;
 };
 
 export type QaHistoryEntry = {

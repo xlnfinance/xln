@@ -2,36 +2,52 @@ import { get, writable } from 'svelte/store';
 import type { RuntimeInput } from '@xln/runtime/xln-api';
 import { registerDebugSurface } from '$lib/utils/debugSurface';
 import {
+  createRuntimeCommandId,
+  markRemoteRuntimeCommandIntentAccepted,
+  normalizeRuntimeCommandId,
+  resolveRemoteRuntimeCommandIntent,
+  settleRemoteRuntimeCommandIntent,
+  type RuntimeCommandIntentOptions,
+} from './runtimeCommandIntent';
+import { normalizeRuntimeCommandSequence } from './runtimeCommandIntentCodec';
+export type { RuntimeCommandIntentOptions } from './runtimeCommandIntent';
+export type RuntimeCommandExecutionOptions = RuntimeCommandIntentOptions & {
+  beforeExecute?: () => void;
+};
+import {
   classifyRuntimeFailure,
   type RuntimeFailureKind,
 } from '$lib/utils/runtimeFailure';
 
 export type RuntimeCommandStatus = 'pending' | 'accepted' | 'observed' | 'committed' | 'error';
 
-	export type CommandReceipt = {
-	  receiptId: string;
-	  upstreamReceiptId: string | null;
-	  status: RuntimeCommandStatus;
-	  runtimeId: string;
-	  mode: 'embedded' | 'remote';
+export type CommandReceipt = {
+  receiptId: string;
+  commandId: string;
+  commandSequence: number | null;
+  serverFingerprint: string | null;
+  upstreamReceiptId: string | null;
+  status: RuntimeCommandStatus;
+  runtimeId: string;
+  mode: 'embedded' | 'remote';
   inputSummary: {
     runtimeTxs: number;
     jInputs: number;
     entityInputs: number;
     entityTxs: number;
   };
-	  acceptedAtHeight: number | null;
-	  committedAtHeight: number | null;
-	  statusUrl: string | null;
-	  error: string | null;
+  acceptedAtHeight: number | null;
+  committedAtHeight: number | null;
+  statusUrl: string | null;
+  error: string | null;
   failureKind: RuntimeFailureKind | null;
   failureRetryable: boolean;
-	};
+};
 
 export type RuntimeCommandProgress = {
-  accepted: (height?: number | null, upstream?: { receiptId?: string | null; statusUrl?: string | null }) => void;
-  committed: (height?: number | null) => void;
-  observed: (height?: number | null) => void;
+  accepted: (height?: number | null, upstream?: { receiptId?: string | null; statusUrl?: string | null }) => Promise<void>;
+  committed: (height?: number | null) => Promise<void>;
+  observed: (height?: number | null) => Promise<void>;
 };
 
 export type RuntimeIngressReceiptLike = {
@@ -47,11 +63,14 @@ export type RuntimeIngressReceiptLike = {
   note?: string | null;
 };
 
-type RuntimeCommandSubmitOptions = {
+type RuntimeCommandSubmitOptions = RuntimeCommandExecutionOptions & {
   input: RuntimeInput;
   runtimeId: string;
   mode: 'embedded' | 'remote';
+  serverFingerprint?: string;
+  nextCommandSequence?: number | null;
   initialHeight?: number | null;
+  remoteJournalMode?: 'durable' | 'one-shot';
 };
 
 const MAX_RECEIPTS = 100;
@@ -59,6 +78,19 @@ let receiptSequence = 0;
 
 export const runtimeCommandReceipts = writable<CommandReceipt[]>([]);
 export const runtimeCommandLatestReceipt = writable<CommandReceipt | null>(null);
+
+export const runtimeCommandRetryOptions = (
+  receipt: CommandReceipt,
+): RuntimeCommandIntentOptions => {
+  if (receipt.mode !== 'remote' || receipt.status !== 'error' || !receipt.failureRetryable) {
+    throw new Error(`RUNTIME_COMMAND_RECEIPT_NOT_RETRYABLE: receiptId=${receipt.receiptId}`);
+  }
+  if (receipt.commandSequence === null) throw new Error('RUNTIME_COMMAND_RECEIPT_SEQUENCE_MISSING');
+  return {
+    commandId: normalizeRuntimeCommandId(receipt.commandId),
+    commandSequence: receipt.commandSequence,
+  };
+};
 
 const normalizeHeight = (height: number | null | undefined): number | null => {
   if (height === null || height === undefined) return null;
@@ -74,20 +106,32 @@ export const summarizeRuntimeInput = (input: RuntimeInput): CommandReceipt['inpu
     sum + (Array.isArray(entityInput?.entityTxs) ? entityInput.entityTxs.length : 0), 0),
 });
 
-export const createRuntimeCommandReceipt = (options: RuntimeCommandSubmitOptions): CommandReceipt => ({
-	  receiptId: `runtime-command-${++receiptSequence}`,
-	  upstreamReceiptId: null,
-	  status: 'pending',
+export const createRuntimeCommandReceipt = async (options: RuntimeCommandSubmitOptions): Promise<CommandReceipt> => {
+  const durableRemoteIntent = options.mode === 'remote' && options.remoteJournalMode !== 'one-shot';
+  const remoteIntent = durableRemoteIntent
+    ? await resolveRemoteRuntimeCommandIntent(options)
+    : null;
+  const oneShotSequence = options.mode === 'remote' && !durableRemoteIntent
+    ? normalizeRuntimeCommandSequence(options.commandSequence ?? options.nextCommandSequence)
+    : null;
+  return {
+  receiptId: `runtime-command-${++receiptSequence}`,
+  commandId: remoteIntent?.commandId ?? normalizeRuntimeCommandId(options.commandId ?? createRuntimeCommandId()),
+  commandSequence: remoteIntent?.commandSequence ?? oneShotSequence,
+  serverFingerprint: options.mode === 'remote' ? options.serverFingerprint ?? null : null,
+  upstreamReceiptId: null,
+  status: 'pending',
   runtimeId: options.runtimeId || 'embedded',
   mode: options.mode,
   inputSummary: summarizeRuntimeInput(options.input),
-	  acceptedAtHeight: normalizeHeight(options.initialHeight),
-	  committedAtHeight: null,
-	  statusUrl: null,
-	  error: null,
+  acceptedAtHeight: normalizeHeight(options.initialHeight),
+  committedAtHeight: null,
+  statusUrl: null,
+  error: null,
   failureKind: null,
   failureRetryable: false,
-	});
+  };
+};
 
 const publishReceipt = (receipt: CommandReceipt): void => {
   runtimeCommandLatestReceipt.set(receipt);
@@ -110,19 +154,24 @@ export const submitRuntimeCommand = async <T>(
   options: RuntimeCommandSubmitOptions,
   executor: (progress: RuntimeCommandProgress, receipt: CommandReceipt) => Promise<T>,
 ): Promise<{ receipt: CommandReceipt; result: T }> => {
-  let receipt = createRuntimeCommandReceipt(options);
+  const durableRemoteIntent = options.mode === 'remote' && options.remoteJournalMode !== 'one-shot';
+  let receipt = await createRuntimeCommandReceipt(options);
+  options.beforeExecute?.();
   publishReceipt(receipt);
 
   const progress: RuntimeCommandProgress = {
-	    accepted: (height, upstream) => {
-	      receipt = updateReceipt(receipt, {
-	        status: 'accepted',
-	        acceptedAtHeight: normalizeHeight(height) ?? receipt.acceptedAtHeight,
-	        upstreamReceiptId: upstream?.receiptId ?? receipt.upstreamReceiptId,
-	        statusUrl: upstream?.statusUrl ?? receipt.statusUrl,
-	      });
+    accepted: async (height, upstream) => {
+      receipt = updateReceipt(receipt, {
+        status: 'accepted',
+        acceptedAtHeight: normalizeHeight(height) ?? receipt.acceptedAtHeight,
+        upstreamReceiptId: upstream?.receiptId ?? receipt.upstreamReceiptId,
+        statusUrl: upstream?.statusUrl ?? receipt.statusUrl,
+      });
+      if (durableRemoteIntent) {
+        await markRemoteRuntimeCommandIntentAccepted(receipt.commandId, upstream ?? {});
+      }
     },
-    committed: (height) => {
+    committed: async (height) => {
       if (receipt.mode === 'remote') return;
       receipt = updateReceipt(receipt, {
         status: 'committed',
@@ -130,7 +179,7 @@ export const submitRuntimeCommand = async <T>(
         committedAtHeight: normalizeHeight(height) ?? receipt.committedAtHeight ?? receipt.acceptedAtHeight,
       });
     },
-    observed: (height) => {
+    observed: async (height) => {
       receipt = updateReceipt(receipt, {
         status: receipt.mode === 'remote' ? 'observed' : 'committed',
         acceptedAtHeight: receipt.acceptedAtHeight ?? normalizeHeight(height),
@@ -141,6 +190,9 @@ export const submitRuntimeCommand = async <T>(
 
   try {
     const result = await executor(progress, receipt);
+    if (durableRemoteIntent && (receipt.status === 'observed' || receipt.status === 'committed')) {
+      await settleRemoteRuntimeCommandIntent(receipt.commandId);
+    }
     return { receipt, result };
   } catch (error) {
     const failure = classifyRuntimeFailure(error);
@@ -148,10 +200,37 @@ export const submitRuntimeCommand = async <T>(
       status: 'error',
       error: failure.message,
       failureKind: failure.kind,
-      failureRetryable: failure.retryable,
+      failureRetryable: options.remoteJournalMode === 'one-shot' ? false : failure.retryable,
     });
+    // Only an explicit terminal rejection may erase retry identity. A generic
+    // E_INTERNAL can happen after the server enqueued the command but before
+    // its response; deleting here would turn the next user attempt into a new ID.
+    if (durableRemoteIntent && failure.kind === 'drop') {
+      try {
+        await settleRemoteRuntimeCommandIntent(receipt.commandId);
+      } catch (journalError) {
+        throw new AggregateError([error, journalError], 'RUNTIME_COMMAND_TERMINAL_SETTLEMENT_FAILED');
+      }
+    }
     throw error;
   }
+};
+
+export const replayRuntimeCommandIntentsInOrder = async <T>(
+  intents: readonly T[],
+  replay: (intent: T) => Promise<void>,
+): Promise<number> => {
+  let completed = 0;
+  for (const intent of intents) {
+    try {
+      await replay(intent);
+      completed += 1;
+    } catch (error) {
+      if (classifyRuntimeFailure(error).kind === 'drop') continue;
+      throw error;
+    }
+  }
+  return completed;
 };
 
 export const recordRuntimeIngressReceipt = (options: {
@@ -171,6 +250,9 @@ export const recordRuntimeIngressReceipt = (options: {
     'accepted';
   const receipt: CommandReceipt = {
     receiptId: `runtime-command-${++receiptSequence}`,
+    commandId: createRuntimeCommandId(),
+    commandSequence: null,
+    serverFingerprint: null,
     upstreamReceiptId: options.receipt.id ?? null,
     status,
     runtimeId: options.runtimeId || 'remote',

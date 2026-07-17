@@ -6,11 +6,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ethers } from 'ethers';
 
+import { registerSignerKey, signAccountFrame } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
 import { buildSingleSignerHanko } from '../hanko/batch';
+import {
+  hashBoardProposalCancelHankoPayload,
+  hashBoardProposalHankoPayload,
+  hashCancelEntityProviderActionHankoPayload,
+  hashEntityTransferHankoPayload,
+} from '../hanko/onchain-domain';
+import { buildQuorumHanko } from '../hanko/signing';
 import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../jadapter';
 import { computeBatchHankoHash, createEmptyBatch, encodeJBatch } from '../jurisdiction/batch';
 import { createSettlementHashWithNonce } from '../protocol/dispute/proof-builder';
+import { createEmptyEnv } from '../runtime';
 
 const CHAIN_A = 31_337;
 const CHAIN_B = 31_338;
@@ -108,8 +117,8 @@ afterAll(async () => {
   await Promise.all(managedAnvils.splice(0).map(stopAnvil));
 });
 
-describe('Account Hanko cross-chain replay protection', () => {
-  test('rejects a chain-A bilateral Hanko on chain B at identical contract addresses', async () => {
+describe('On-chain Hanko cross-chain replay protection', () => {
+  test('rejects chain-A Account and EntityProvider Hankos on chain B at identical addresses', async () => {
     const [anvilA, anvilB] = await Promise.all([startAnvil(CHAIN_A), startAnvil(CHAIN_B)]);
     const [adapterA, adapterB] = await Promise.all([
       createJAdapter({ mode: 'rpc', chainId: CHAIN_A, rpcUrl: anvilA.rpcUrl }),
@@ -122,15 +131,19 @@ describe('Account Hanko cross-chain replay protection', () => {
     expect(adapterA.addresses.account).not.toBe(adapterA.addresses.depository);
     const parties = PRIVATE_KEYS.map((privateKey) => {
       const address = new ethers.Wallet(privateKey).address;
-      return { privateKey, entityId: generateLazyEntityId([address], 1n).toLowerCase() };
+      return { address, privateKey, entityId: generateLazyEntityId([address], 1n).toLowerCase() };
     }).sort((left, right) => left.entityId.localeCompare(right.entityId));
     const initiator = parties[0]!;
     const counterparty = parties[1]!;
     const account = { leftEntity: initiator.entityId, rightEntity: counterparty.entityId };
     const domainA = { chainId: CHAIN_A, depositoryAddress: adapterA.addresses.depository };
     const domainB = { chainId: CHAIN_B, depositoryAddress: adapterB.addresses.depository };
-    const hashA = createSettlementHashWithNonce(account, [], [], domainA, 1);
-    const hashB = createSettlementHashWithNonce(account, [], [], domainB, 1);
+    // Pure forgiveness is a valid observable settlement even with no existing
+    // debt. An empty settlement is rejected before Hanko verification and
+    // therefore cannot prove the cross-chain/address(this) domain invariant.
+    const forgivenessTokenIds = [1];
+    const hashA = createSettlementHashWithNonce(account, [], forgivenessTokenIds, domainA, 1);
+    const hashB = createSettlementHashWithNonce(account, [], forgivenessTokenIds, domainB, 1);
     expect(hashA).not.toBe(hashB);
 
     // A linked Account function executes by DELEGATECALL. This negative vector
@@ -139,7 +152,7 @@ describe('Account Hanko cross-chain replay protection', () => {
     const libraryAddressHash = createSettlementHashWithNonce(
       account,
       [],
-      [],
+      forgivenessTokenIds,
       { chainId: CHAIN_A, depositoryAddress: adapterA.addresses.account },
       1,
     );
@@ -148,7 +161,7 @@ describe('Account Hanko cross-chain replay protection', () => {
       leftEntity: initiator.entityId,
       rightEntity: counterparty.entityId,
       diffs: [],
-      forgiveDebtsInTokenIds: [],
+      forgiveDebtsInTokenIds: forgivenessTokenIds,
       sig: buildSingleSignerHanko(counterparty.entityId, libraryAddressHash, counterparty.privateKey),
       entityProvider: adapterA.addresses.entityProvider,
       hankoData: '0x',
@@ -172,7 +185,7 @@ describe('Account Hanko cross-chain replay protection', () => {
       leftEntity: initiator.entityId,
       rightEntity: counterparty.entityId,
       diffs: [],
-      forgiveDebtsInTokenIds: [],
+      forgiveDebtsInTokenIds: forgivenessTokenIds,
       sig: buildSingleSignerHanko(counterparty.entityId, hashA, counterparty.privateKey),
       entityProvider: adapterA.addresses.entityProvider,
       hankoData: '0x',
@@ -232,5 +245,310 @@ describe('Account Hanko cross-chain replay protection', () => {
     expect(await adapterB.depository.processBatch.staticCall(encodedBatchB, correctOuterB, 1n)).toBe(true);
     await adapterB.processBatch(encodedBatchB, correctOuterB, 1n);
     expect((await adapterB.getAccountInfo(initiator.entityId, counterparty.entityId)).nonce).toBe(1n);
+
+    const actionEntityId = generateLazyEntityId([initiator.address], 1n).toLowerCase();
+    await Promise.all([
+      adapterA.entityProvider.registerNumberedEntity(actionEntityId).then((tx) => tx.wait()),
+      adapterB.entityProvider.registerNumberedEntity(actionEntityId).then((tx) => tx.wait()),
+    ]);
+    const numberedEntityId = ethers.zeroPadValue(ethers.toBeHex(2n), 32);
+    const actionEntityAddress = ethers.getAddress(`0x${actionEntityId.slice(-40)}`);
+    const fundingAuthorization = {
+      entityNumber: 2n,
+      to: actionEntityAddress,
+      tokenId: 2n,
+      amount: 100n,
+      actionNonce: 1n,
+    };
+    const fundingHashA = hashEntityTransferHankoPayload({
+      chainId: CHAIN_A,
+      entityProviderAddress: adapterA.addresses.entityProvider,
+      boardEpoch: 0n,
+    }, fundingAuthorization);
+    const fundingHashB = hashEntityTransferHankoPayload({
+      chainId: CHAIN_B,
+      entityProviderAddress: adapterB.addresses.entityProvider,
+      boardEpoch: 0n,
+    }, fundingAuthorization);
+    await Promise.all([
+      adapterA.entityProvider.entityTransferTokens(
+        fundingAuthorization.entityNumber,
+        fundingAuthorization.to,
+        fundingAuthorization.tokenId,
+        fundingAuthorization.amount,
+        buildSingleSignerHanko(numberedEntityId, fundingHashA, initiator.privateKey),
+      ).then((tx) => tx.wait()),
+      adapterB.entityProvider.entityTransferTokens(
+        fundingAuthorization.entityNumber,
+        fundingAuthorization.to,
+        fundingAuthorization.tokenId,
+        fundingAuthorization.amount,
+        buildSingleSignerHanko(numberedEntityId, fundingHashB, initiator.privateKey),
+      ).then((tx) => tx.wait()),
+    ]);
+    expect(await adapterA.entityProvider.balanceOf(actionEntityAddress, 2n)).toBe(100n);
+    expect(await adapterB.entityProvider.balanceOf(actionEntityAddress, 2n)).toBe(100n);
+
+    const entityNumber = BigInt(actionEntityId);
+    const transferAuthorization = {
+      entityNumber,
+      to: counterparty.address,
+      tokenId: 2n,
+      amount: 100n,
+      actionNonce: 1n,
+    };
+    const actionHashA = hashEntityTransferHankoPayload({
+      chainId: CHAIN_A,
+      entityProviderAddress: adapterA.addresses.entityProvider,
+      boardEpoch: 0n,
+    }, transferAuthorization);
+    const actionHashB = hashEntityTransferHankoPayload({
+      chainId: CHAIN_B,
+      entityProviderAddress: adapterB.addresses.entityProvider,
+      boardEpoch: 0n,
+    }, transferAuthorization);
+    expect(actionHashA).not.toBe(actionHashB);
+    const actionEnv = createEmptyEnv('two-anvil-entityprovider-quorum');
+    const actionSigner = initiator.address.toLowerCase();
+    registerSignerKey(actionEnv, actionSigner, ethers.getBytes(initiator.privateKey));
+    const actionConfig = {
+      mode: 'proposer-based' as const,
+      threshold: 1n,
+      validators: [actionSigner],
+      shares: { [actionSigner]: 1n },
+    };
+    const buildActionQuorumHanko = async (hash: string): Promise<string> => buildQuorumHanko(
+      actionEnv,
+      actionEntityId,
+      hash,
+      [{ signerId: actionSigner, signature: signAccountFrame(actionEnv, actionSigner, hash) }],
+      actionConfig,
+    );
+    const actionHankoA = await buildActionQuorumHanko(actionHashA);
+    await (await adapterA.entityProvider.entityTransferTokens(
+      entityNumber,
+      transferAuthorization.to,
+      transferAuthorization.tokenId,
+      transferAuthorization.amount,
+      actionHankoA,
+    )).wait();
+    expect(await adapterA.entityProvider.entityActionNonces(actionEntityId)).toBe(1n);
+    expect(await adapterA.entityProvider.balanceOf(actionEntityAddress, 2n)).toBe(0n);
+    expect(await adapterA.entityProvider.balanceOf(counterparty.address, 2n)).toBe(100n);
+
+    const actionReplayFailure = await adapterB.entityProvider.entityTransferTokens.staticCall(
+      entityNumber,
+      transferAuthorization.to,
+      transferAuthorization.tokenId,
+      transferAuthorization.amount,
+      actionHankoA,
+    ).then(() => null, (error: unknown) => error);
+    expect(actionReplayFailure).toBeInstanceOf(Error);
+    expect(actionReplayFailure instanceof Error ? actionReplayFailure.message : '')
+      .toContain('Invalid entity signature');
+    expect(await adapterB.entityProvider.entityActionNonces(actionEntityId)).toBe(0n);
+    expect(await adapterB.entityProvider.balanceOf(actionEntityAddress, 2n)).toBe(100n);
+    expect(await adapterB.entityProvider.balanceOf(counterparty.address, 2n)).toBe(0n);
+
+    const actionHankoB = await buildActionQuorumHanko(actionHashB);
+    await (await adapterB.entityProvider.entityTransferTokens(
+      entityNumber,
+      transferAuthorization.to,
+      transferAuthorization.tokenId,
+      transferAuthorization.amount,
+      actionHankoB,
+    )).wait();
+    expect(await adapterB.entityProvider.entityActionNonces(actionEntityId)).toBe(1n);
+    expect(await adapterB.entityProvider.balanceOf(actionEntityAddress, 2n)).toBe(0n);
+    expect(await adapterB.entityProvider.balanceOf(counterparty.address, 2n)).toBe(100n);
+
+    const cancelAuthorization = {
+      entityNumber,
+      actionNonce: 2n,
+      cancelledActionHash: `0x${'77'.repeat(32)}`,
+      cancelledActionKind: 0 as const,
+    };
+    const cancelHashA = hashCancelEntityProviderActionHankoPayload({
+      chainId: CHAIN_A,
+      entityProviderAddress: adapterA.addresses.entityProvider,
+      boardEpoch: 0n,
+    }, cancelAuthorization);
+    const cancelHashB = hashCancelEntityProviderActionHankoPayload({
+      chainId: CHAIN_B,
+      entityProviderAddress: adapterB.addresses.entityProvider,
+      boardEpoch: 0n,
+    }, cancelAuthorization);
+    expect(cancelHashA).not.toBe(cancelHashB);
+    const cancelHankoA = await buildActionQuorumHanko(cancelHashA);
+    const cancelIntentA = {
+      version: 1 as const,
+      entityId: actionEntityId,
+      entityNumber,
+      chainId: BigInt(CHAIN_A),
+      entityProviderAddress: adapterA.addresses.entityProvider,
+      boardEpoch: 0n,
+      actionNonce: cancelAuthorization.actionNonce,
+      actionHash: cancelHashA,
+      generation: 2,
+      createdAt: 1,
+      payload: {
+        kind: 'cancelPendingAction' as const,
+        cancel: {
+          cancelledActionHash: cancelAuthorization.cancelledActionHash,
+          cancelledActionKind: cancelAuthorization.cancelledActionKind,
+        },
+      },
+    };
+    const cancelSubmittedA = await adapterA.submitTx({
+      type: 'entityProviderCancelAction',
+      entityId: actionEntityId,
+      data: { intent: cancelIntentA, signerId: actionSigner, hankoSignature: cancelHankoA },
+      timestamp: 1,
+    }, { env: actionEnv, signerId: actionSigner, timestamp: 1 });
+    expect(cancelSubmittedA.success).toBe(true);
+    expect(cancelSubmittedA.events?.filter((event) => event.name === 'EntityProviderActionCancelled'))
+      .toHaveLength(1);
+    expect(await adapterA.entityProvider.entityActionNonces(actionEntityId)).toBe(2n);
+
+    const cancelReconciledA = await adapterA.submitTx({
+      type: 'entityProviderCancelAction',
+      entityId: actionEntityId,
+      data: { intent: cancelIntentA, signerId: actionSigner, hankoSignature: cancelHankoA },
+      timestamp: 2,
+    }, { env: actionEnv, signerId: actionSigner, timestamp: 2 });
+    expect(cancelReconciledA.success).toBe(true);
+    expect(cancelReconciledA.events?.filter((event) => event.name === 'EntityProviderActionCancelled'))
+      .toHaveLength(1);
+
+    const cancelReplayFailure = await adapterB.entityProvider.cancelEntityProviderAction.staticCall(
+      entityNumber,
+      cancelAuthorization.cancelledActionHash,
+      cancelAuthorization.cancelledActionKind,
+      cancelHankoA,
+    ).then(() => null, (error: unknown) => error);
+    expect(cancelReplayFailure).toBeInstanceOf(Error);
+    expect(cancelReplayFailure instanceof Error ? cancelReplayFailure.message : '')
+      .toContain('Invalid entity signature');
+    expect(await adapterB.entityProvider.entityActionNonces(actionEntityId)).toBe(1n);
+
+    const cancelHankoB = await buildActionQuorumHanko(cancelHashB);
+    const cancelIntentB = {
+      ...cancelIntentA,
+      chainId: BigInt(CHAIN_B),
+      entityProviderAddress: adapterB.addresses.entityProvider,
+      actionHash: cancelHashB,
+    };
+    const cancelSubmittedB = await adapterB.submitTx({
+      type: 'entityProviderCancelAction',
+      entityId: actionEntityId,
+      data: { intent: cancelIntentB, signerId: actionSigner, hankoSignature: cancelHankoB },
+      timestamp: 3,
+    }, { env: actionEnv, signerId: actionSigner, timestamp: 3 });
+    expect(cancelSubmittedB.success).toBe(true);
+    expect(await adapterB.entityProvider.entityActionNonces(actionEntityId)).toBe(2n);
+
+    const unusedBoardSigner = new ethers.Wallet(ethers.zeroPadValue('0x03', 32));
+    const proposedBoardHash = generateLazyEntityId([unusedBoardSigner.address], 1n).toLowerCase();
+    const proposalAuthorization = {
+      entityId: numberedEntityId,
+      newBoardHash: proposedBoardHash,
+      authority: 3,
+      actionNonce: 1n,
+    };
+    const proposalHashA = hashBoardProposalHankoPayload({
+      chainId: CHAIN_A,
+      entityProviderAddress: adapterA.addresses.entityProvider,
+      boardEpoch: 0n,
+    }, proposalAuthorization);
+    const proposalHashB = hashBoardProposalHankoPayload({
+      chainId: CHAIN_B,
+      entityProviderAddress: adapterB.addresses.entityProvider,
+      boardEpoch: 0n,
+    }, proposalAuthorization);
+    expect(proposalHashA).not.toBe(proposalHashB);
+    const foundationId = ethers.zeroPadValue(ethers.toBeHex(1n), 32);
+    const proposalHankoA = buildSingleSignerHanko(foundationId, proposalHashA, PRIVATE_KEYS[0]);
+    await (await adapterA.entityProvider.proposeBoard(
+      numberedEntityId,
+      proposedBoardHash,
+      proposalAuthorization.authority,
+      [proposalHankoA],
+    )).wait();
+    expect(await adapterA.entityProvider.boardActionNonces(numberedEntityId)).toBe(1n);
+
+    const proposalReplayFailure = await adapterB.entityProvider.proposeBoard.staticCall(
+      numberedEntityId,
+      proposedBoardHash,
+      proposalAuthorization.authority,
+      [proposalHankoA],
+    ).then(() => null, (error: unknown) => error);
+    expect(proposalReplayFailure).toBeInstanceOf(Error);
+    expect(proposalReplayFailure instanceof Error ? proposalReplayFailure.message : '')
+      .toContain('InvalidAuthorityAuthorization');
+    expect(await adapterB.entityProvider.boardActionNonces(numberedEntityId)).toBe(0n);
+
+    const proposalHankoB = buildSingleSignerHanko(foundationId, proposalHashB, PRIVATE_KEYS[0]);
+    await (await adapterB.entityProvider.proposeBoard(
+      numberedEntityId,
+      proposedBoardHash,
+      proposalAuthorization.authority,
+      [proposalHankoB],
+    )).wait();
+    expect(await adapterB.entityProvider.boardActionNonces(numberedEntityId)).toBe(1n);
+
+    const proposalCancelAuthorization = {
+      entityId: numberedEntityId,
+      proposedBoardHash,
+      proposedBy: 3,
+      cancelledBy: 0,
+      actionNonce: 1n,
+    };
+    const proposalCancelHashA = hashBoardProposalCancelHankoPayload({
+      chainId: CHAIN_A,
+      entityProviderAddress: adapterA.addresses.entityProvider,
+      boardEpoch: 0n,
+    }, proposalCancelAuthorization);
+    const proposalCancelHashB = hashBoardProposalCancelHankoPayload({
+      chainId: CHAIN_B,
+      entityProviderAddress: adapterB.addresses.entityProvider,
+      boardEpoch: 0n,
+    }, proposalCancelAuthorization);
+    expect(proposalCancelHashA).not.toBe(proposalCancelHashB);
+    const proposalCancelHankoA = buildSingleSignerHanko(
+      numberedEntityId,
+      proposalCancelHashA,
+      initiator.privateKey,
+    );
+    await (await adapterA.entityProvider.cancelBoardProposal(
+      numberedEntityId,
+      proposalCancelAuthorization.cancelledBy,
+      [proposalCancelHankoA],
+    )).wait();
+    expect((await adapterA.entityProvider.entities(numberedEntityId)).proposedBoardHash)
+      .toBe(ethers.ZeroHash);
+
+    const proposalCancelReplayFailure = await adapterB.entityProvider.cancelBoardProposal.staticCall(
+      numberedEntityId,
+      proposalCancelAuthorization.cancelledBy,
+      [proposalCancelHankoA],
+    ).then(() => null, (error: unknown) => error);
+    expect(proposalCancelReplayFailure).toBeInstanceOf(Error);
+    expect(proposalCancelReplayFailure instanceof Error ? proposalCancelReplayFailure.message : '')
+      .toContain('InvalidAuthorityAuthorization');
+    expect((await adapterB.entityProvider.entities(numberedEntityId)).proposedBoardHash)
+      .toBe(proposedBoardHash);
+
+    const proposalCancelHankoB = buildSingleSignerHanko(
+      numberedEntityId,
+      proposalCancelHashB,
+      initiator.privateKey,
+    );
+    await (await adapterB.entityProvider.cancelBoardProposal(
+      numberedEntityId,
+      proposalCancelAuthorization.cancelledBy,
+      [proposalCancelHankoB],
+    )).wait();
+    expect((await adapterB.entityProvider.entities(numberedEntityId)).proposedBoardHash)
+      .toBe(ethers.ZeroHash);
   }, 120_000);
 });

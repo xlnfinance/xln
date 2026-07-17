@@ -20,7 +20,7 @@ import {
   mergeCrossJurisdictionBookAdmission,
 } from '../../../extensions/cross-j/orderbook';
 import type { EntityState, EntityTx, Env } from '../../../types';
-import { SWAP_LOT_SCALE } from '../../../orderbook';
+import { getSwapLotScale } from '../../../orderbook';
 import {
   removeCrossJurisdictionBookOrderByRouteId,
   resizeCrossJurisdictionBookOrderByRouteId,
@@ -43,8 +43,11 @@ const stateForEntityTx = (entityState: EntityState, options?: ApplyEntityTxOptio
   options?.mutableFrameState ? entityState : cloneEntityState(entityState);
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
-const crossBookQtyLots = (baseAmount: bigint): bigint =>
-  baseAmount <= 0n ? 0n : (baseAmount + SWAP_LOT_SCALE - 1n) / SWAP_LOT_SCALE;
+const crossBookQtyLots = (baseTokenId: number, baseAmount: bigint): bigint => {
+  if (baseAmount <= 0n) return 0n;
+  const lotScale = getSwapLotScale(baseTokenId);
+  return (baseAmount + lotScale - 1n) / lotScale;
+};
 
 type CrossJurisdictionBookProgressTx = Extract<EntityTx, { type: 'applyCrossJurisdictionBookProgress' }>;
 
@@ -264,7 +267,7 @@ export const applyCrossJurisdictionBookProgressToState = (
       newState.entityId,
     );
     if (!marketOffer) throw new Error(`CROSS_J_BOOK_PROGRESS_MARKET_INVALID: order=${route.orderId}`);
-    const qtyLots = crossBookQtyLots(marketOffer.baseAmount);
+    const qtyLots = crossBookQtyLots(marketOffer.baseTokenId, marketOffer.baseAmount);
     const resized = resizeCrossJurisdictionBookOrderByRouteId(
       env,
       newState,

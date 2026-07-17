@@ -21,11 +21,14 @@ import {
   startRuntimeLoop,
   ensureGossipProfiles,
   registerEnvChangeCallback,
+  closeRuntimeDb,
+  closeInfraDb,
+  registerSignerKey,
 } from '../runtime.ts';
+import { readFileSync } from 'node:fs';
 import { safeStringify, serializeTaggedJson } from '../protocol/serialization';
 import type { DeliverableEntityInput, Env } from '../types';
 import { createExternalWalletApi } from '../api/external-wallet-api';
-import { applyJEventsToEnv } from '../jadapter/watcher';
 import { maybeHandleQaRequest } from '../qa/api';
 import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../jadapter';
 import type { JAdapterConfig } from '../jadapter/types';
@@ -53,11 +56,17 @@ import { createHelloChallengeRegistry } from '../networking/hello-challenge';
 import { createLocalDeliveryHandler } from '../relay/local-delivery';
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path';
 import { createStructuredLogger, shortId } from '../infra/logger';
+import { startParentLivenessWatch } from '../orchestrator/parent-watch';
 import {
   buildMarketSnapshotForReplica,
   type MarketSnapshotPayload,
 } from '../relay/market-snapshot';
-import { createMarketSubscriptionStack, isMarketMessageType } from '../relay/market-subscriptions';
+import { createMarketSubscriptionStack } from '../relay/market-subscriptions';
+import {
+  decodeMarketWireRequest,
+  encodeMarketWireMessage,
+  type MarketWireRequest,
+} from '../relay/market-wire';
 import {
   JSON_HEADERS,
   getErrorMessage,
@@ -69,7 +78,7 @@ import {
   closeInvalidRuntimeAdapterMessage,
   forgetRuntimeAdapterClient,
 } from '../radapter/server';
-import { decodeRuntimeAdapterMessage, runtimeAdapterMessageByteLength } from '../radapter/codec';
+import { decodeRuntimeAdapterRequest, runtimeAdapterMessageByteLength } from '../radapter/codec';
 import {
   getRelayClientIp,
   hasConnectedEncryptedRelayClient as hasConnectedEncryptedRelayClientInStore,
@@ -104,7 +113,9 @@ import {
   resolveAssistantDirectClientIp,
   resolveAssistantRateClientId,
 } from './assistant-proxy';
-import { normalizeLoopbackUrl, toPublicRpcUrl } from '../networking/loopback-url';
+import { selectPredeployedJurisdiction } from './predeployed-jurisdiction';
+import { getJurisdictionIdentityRef } from '../jurisdiction/jurisdiction-runtime';
+import { readInheritedChildSecrets } from '../orchestrator/child-secrets';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -126,49 +137,12 @@ const tokenCatalogController = createTokenCatalogController({
   getAdapter: () => globalJAdapter,
 });
 
-type PredeployedJurisdictionEntry = {
-  rpc?: unknown;
-  chainId?: unknown;
-  primary?: unknown;
-  contracts?: Record<string, unknown>;
-};
-
-const hasPredeployedContracts = (entry: unknown): entry is PredeployedJurisdictionEntry => {
-  const contracts = (entry as PredeployedJurisdictionEntry | null | undefined)?.contracts;
-  return Boolean(contracts?.['depository'] && contracts['entityProvider']);
-};
-
-const samePredeployedRpc = (left: unknown, right: unknown): boolean => {
-  const leftRaw = String(left || '').trim();
-  const rightRaw = String(right || '').trim();
-  if (!leftRaw || !rightRaw) return false;
-  if (leftRaw === rightRaw) return true;
-  if (normalizeLoopbackUrl(leftRaw) === normalizeLoopbackUrl(rightRaw)) return true;
-  return leftRaw === toPublicRpcUrl(rightRaw, '/rpc') || rightRaw === toPublicRpcUrl(leftRaw, '/rpc');
-};
-
-const selectPredeployedJurisdiction = (
-  payload: unknown,
-  rpcUrl: string,
-  preferredKey?: string,
-): PredeployedJurisdictionEntry | null => {
-  const jurisdictions = (payload as { jurisdictions?: unknown } | null | undefined)?.jurisdictions;
-  if (!jurisdictions || typeof jurisdictions !== 'object' || Array.isArray(jurisdictions)) return null;
-  const keyedEntries = Object.entries(jurisdictions as Record<string, unknown>);
-  const preferred = String(preferredKey || '').trim().toLowerCase();
-  if (preferred) {
-    const match = keyedEntries.find(([key]) => key.trim().toLowerCase() === preferred);
-    if (!match) throw new Error(`PREDEPLOYED_JURISDICTION_NOT_FOUND:${preferred}`);
-    if (!hasPredeployedContracts(match[1])) throw new Error(`PREDEPLOYED_JURISDICTION_INCOMPLETE:${preferred}`);
-    return match[1];
+const requireWatcherConfirmationDepth = (adapter: JAdapter): number => {
+  const depth = adapter.getFinalityDepth?.();
+  if (typeof depth !== 'number' || !Number.isSafeInteger(depth) || depth < 0) {
+    throw new Error(`JADAPTER_WATCHER_CONFIRMATION_DEPTH_INVALID:${String(depth)}`);
   }
-  const entries = keyedEntries.map(([, entry]) => entry).filter(hasPredeployedContracts);
-  return (
-    entries.find(entry => samePredeployedRpc(entry.rpc, rpcUrl)) ??
-    entries.find(entry => entry.primary === true) ??
-    entries[0] ??
-    null
-  );
+  return depth;
 };
 
 const STARTUP_STEP_TIMEOUT_MS = Math.max(
@@ -218,11 +192,34 @@ const SERVER_RUNTIME_SEED = (() => {
   }
   return seed;
 })();
+const STARTUP_SIGNER_SECRET = (() => {
+  const secrets = readInheritedChildSecrets();
+  const signerId = String(secrets['startupSignerId'] || '').trim().toLowerCase();
+  const privateKey = String(secrets['startupSignerPrivateKey'] || '').trim();
+  if (Boolean(signerId) !== Boolean(privateKey)) {
+    throw new Error('STARTUP_SIGNER_SECRET_INCOMPLETE');
+  }
+  return signerId && privateKey ? { signerId, privateKey } : null;
+})();
 const FAUCET_SIGNER_LABEL = process.env['FAUCET_SIGNER_LABEL'] ?? 'faucet-1';
 const FAUCET_SEED = process.env['FAUCET_SEED'] ?? `${SERVER_RUNTIME_SEED}:faucet`;
 const FAUCET_WALLET_ETH_TARGET = ethers.parseEther('100');
 const FAUCET_TOKEN_TARGET_UNITS = 1_000_000n;
 const SKIP_SERVER_BOOTSTRAP = /^(1|true)$/i.test(process.env['XLN_SKIP_SERVER_BOOTSTRAP'] ?? '');
+const resolveTrustedServerRestoreRpcBindings = (): Array<{
+  jurisdictionRef: string;
+  rpcUrl: string;
+}> => {
+  if (process.env['USE_ANVIL'] !== 'true' || process.env['XLN_USE_PREDEPLOYED_ADDRESSES'] !== 'true') return [];
+  const rpcUrl = resolveRequiredAnvilRpc();
+  const preferredKey = String(process.env['XLN_PREDEPLOYED_JURISDICTION_KEY'] || '').trim();
+  const jurisdictions = JSON.parse(readFileSync(resolveJurisdictionsJsonPath(), 'utf8')) as unknown;
+  const selected = selectPredeployedJurisdiction(jurisdictions, rpcUrl, preferredKey);
+  if (!selected) throw new Error('PREDEPLOYED_JURISDICTION_CONFIG_MISSING');
+  const jurisdictionRef = getJurisdictionIdentityRef(selected);
+  if (!jurisdictionRef) throw new Error('PREDEPLOYED_JURISDICTION_IDENTITY_MISSING');
+  return [{ jurisdictionRef, rpcUrl }];
+};
 const readPositiveIntEnv = (name: string, fallback: number): number => {
   const value = Number(process.env[name] || '');
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
@@ -244,14 +241,10 @@ const externalWalletApi = createExternalWalletApi({
   emitDebugEvent: (entry) => {
     pushDebugEvent(relayStore, entry);
   },
-  fundBrowserVmWallet: async (address: string, amount: bigint): Promise<boolean> => {
+  fundBrowserVmWallet: async (address: string, amount: bigint, tokenSymbol?: string): Promise<boolean> => {
     if (!globalJAdapter?.fundSignerWallet) return false;
-    await globalJAdapter.fundSignerWallet(address, amount);
+    await globalJAdapter.fundSignerWallet(address, amount, tokenSymbol);
     return true;
-  },
-  observeExternalWalletSnapshot: (events, label) => {
-    if (!serverEnv) throw new Error('Runtime env not initialized');
-    applyJEventsToEnv(serverEnv, events, label);
   },
 });
 
@@ -366,7 +359,6 @@ const marketSubscriptionStack = createMarketSubscriptionStack<RelaySocket>({
 const cleanupRpcMarketSubscription = (ws: RelaySocket): void => marketSubscriptionStack.cleanup(ws);
 
 const handleRpcMessage = createServerRpcMessageHandler({
-  getRelayStore: () => relayStore,
   validateRuntimeInputAdmission,
   registerRuntimeInputReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
   readRuntimeInputReceipt: (id) => runtimeIngressReceipts.get(id),
@@ -408,7 +400,10 @@ const handleApi = async (
   if (pathname === '/api/control/signers/register' && req.method === 'POST') {
     const authError = requireDaemonControlAuth(req, env);
     if (authError) return authError;
-    return handleSignerRegistration(req, headers, { parseTaggedControlBody });
+    if (!env) {
+      return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), { status: 503, headers });
+    }
+    return handleSignerRegistration(req, headers, { parseTaggedControlBody, env });
   }
 
   if (pathname === '/api/control/runtime-input' && req.method === 'POST') {
@@ -872,34 +867,61 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       message(ws: RelaySocket, message) {
         const data = ws.data;
         try {
-          let msg: RuntimeWsMessage | Record<string, unknown>;
           if (data.type === 'rpc') {
-            msg = decodeRuntimeAdapterMessage<Record<string, unknown>>(message);
-          } else {
+            const request = decodeRuntimeAdapterRequest(message);
+            Promise.resolve(handleRpcMessage(ws, request, env)).catch(error => {
+              const reason = getErrorMessage(error);
+              serverLog.error('ws.rpc_handler_error', { reason, op: request.op });
+              pushDebugEvent(relayStore, {
+                event: 'error',
+                reason: 'RPC_HANDLER_EXCEPTION',
+                details: { error: reason, op: request.op },
+              });
+              closeInvalidRuntimeAdapterMessage(ws, error);
+            });
+            return;
+          }
+          let peerMessage: RuntimeWsMessage | null = null;
+          let marketMessage: MarketWireRequest | null = null;
+          try {
+            peerMessage = deserializeWsMessage(message as string | Buffer | ArrayBuffer);
+          } catch (binaryError) {
             try {
-              msg = deserializeWsMessage(message as string | Buffer | ArrayBuffer);
-            } catch (binaryError) {
-              const candidate = JSON.parse(message.toString()) as Record<string, unknown>;
-              if (!isMarketMessageType(candidate['type'])) throw binaryError;
-              msg = candidate;
+              marketMessage = decodeMarketWireRequest(message.toString());
+            } catch {
+              throw binaryError;
             }
           }
+          if (marketMessage) {
+            Promise.resolve(marketSubscriptionStack.handleMessage(ws, marketMessage)).catch(error => {
+              const reason = getErrorMessage(error);
+              serverLog.error('ws.market_handler_error', { reason, type: marketMessage?.type });
+              pushDebugEvent(relayStore, {
+                event: 'error',
+                reason: 'MARKET_HANDLER_EXCEPTION',
+                details: { error: reason, msgType: marketMessage?.type },
+              });
+              ws.send(encodeMarketWireMessage({ type: 'error', error: reason }));
+            });
+            return;
+          }
+          if (!peerMessage) throw new Error('RELAY_MESSAGE_DECODE_INVARIANT');
           const routeRelayMessage = () => {
             if (!routerConfig) {
               ws.send(serializeWsMessage({ type: 'error', error: 'Runtime transport not ready' }));
               return;
             }
-            Promise.resolve(relayRoute(routerConfig, ws, msg as RuntimeWsMessage)).catch(error => {
+            Promise.resolve(relayRoute(routerConfig, ws, peerMessage)).catch(error => {
               const reason = (error as Error).message || 'relay handler error';
-              serverLog.error('ws.relay_handler_error', { reason, type: msg?.type });
+              serverLog.error('ws.relay_handler_error', { reason, type: peerMessage?.type });
               pushDebugEvent(relayStore, {
                 event: 'error',
                 reason: 'RELAY_HANDLER_EXCEPTION',
                 details: {
                   error: reason,
-                  msgType: msg?.type,
-                  from: msg?.from,
-                  to: msg?.to,
+                  msgType: peerMessage?.type,
+                  from: peerMessage?.from,
+                  to: peerMessage?.to,
                 },
               });
               try {
@@ -910,21 +932,6 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
             });
           };
           if (data.type === 'relay') {
-            if (isMarketMessageType(msg?.type)) {
-              Promise.resolve(marketSubscriptionStack.handleMessage(ws, msg as Record<string, unknown>)).catch(error => {
-                const reason = (error as Error).message || 'market handler error';
-                serverLog.error('ws.market_handler_error', { reason, type: msg?.type });
-                pushDebugEvent(relayStore, {
-                  event: 'error',
-                  reason: 'MARKET_HANDLER_EXCEPTION',
-                  details: { error: reason, msgType: msg?.type },
-                });
-                try {
-                  ws.send(safeStringify({ type: 'error', error: reason }));
-                } catch {}
-              });
-              return;
-            }
             if (!routerConfig) {
               if (isServerBootInProgress()) {
                 void serverStartupBarrier.then(() => {
@@ -936,21 +943,6 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
               return;
             }
             routeRelayMessage();
-          } else if (data.type === 'rpc') {
-            Promise.resolve(handleRpcMessage(ws, msg as Record<string, unknown>, env)).catch(error => {
-              const reason = (error as Error).message || 'rpc handler error';
-              serverLog.error('ws.rpc_handler_error', { reason, type: msg?.type });
-              pushDebugEvent(relayStore, {
-                event: 'error',
-                reason: 'RPC_HANDLER_EXCEPTION',
-                details: { error: reason, msgType: msg?.type },
-              });
-              try {
-                ws.send(safeStringify({ type: 'error', error: 'RPC handler exception' }));
-              } catch {
-                // Socket may already be closed; ignore.
-              }
-            });
           }
         } catch (error) {
           const byteLength = data.type === 'rpc' ? runtimeAdapterMessageByteLength(message) : message.toString().length;
@@ -1007,12 +999,44 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     },
   });
   const server = createHttpServer();
-  void server;
+
+  const closeFailedStartup = async (startupError: unknown): Promise<never> => {
+    stopMarketMakerLoop();
+    const original = startupError instanceof Error ? startupError : new Error(String(startupError));
+    const cleanup = await Promise.allSettled([
+      globalJAdapter?.close() ?? Promise.resolve(),
+      env ? closeRuntimeDb(env) : Promise.resolve(),
+      env ? closeInfraDb(env) : Promise.resolve(),
+      server.stop(true),
+    ]);
+    globalJAdapter = null;
+    serverEnv = null;
+    routerConfig = null;
+    const cleanupErrors = cleanup
+      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      .map(result => result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError([original, ...cleanupErrors], 'SERVER_STARTUP_FAILED_WITH_CLEANUP_ERRORS');
+    }
+    throw original;
+  };
 
   try {
     serverBootPhase = 'runtime';
     serverLog.info('runtime.init.start');
-    env = await main(SERVER_RUNTIME_SEED);
+    env = await main(SERVER_RUNTIME_SEED, {
+      trustedJurisdictionRpcBindings: resolveTrustedServerRestoreRpcBindings(),
+    });
+    if (STARTUP_SIGNER_SECRET) {
+      registerSignerKey(
+        env,
+        STARTUP_SIGNER_SECRET.signerId,
+        ethers.getBytes(STARTUP_SIGNER_SECRET.privateKey),
+      );
+      serverLog.info('runtime.startup_signer.registered', {
+        signerId: shortId(STARTUP_SIGNER_SECRET.signerId, 10),
+      });
+    }
     serverEnv = env;
     registerEnvChangeCallback(env, (nextEnv) => {
       runtimeIngressReceipts.observeLatestRuntimeFrame(nextEnv);
@@ -1053,24 +1077,24 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         const jurisdictionsData = await fs.readFile(jurisdictionsPath, 'utf-8');
         const jurisdictions = JSON.parse(jurisdictionsData);
         const predeployedConfig = selectPredeployedJurisdiction(jurisdictions, anvilRpc, predeployedJurisdictionKey);
-
-        if (predeployedConfig?.contracts) {
-          const contracts = predeployedConfig.contracts;
-          fromReplica = {
-            depositoryAddress: String(contracts['depository']),
-            entityProviderAddress: String(contracts['entityProvider']),
-            contracts: {
-              account: String(contracts['account'] || ''),
-              depository: String(contracts['depository']),
-              entityProvider: String(contracts['entityProvider']),
-              deltaTransformer: String(contracts['deltaTransformer'] || ''),
-            },
-            chainId: Number(predeployedConfig.chainId ?? 31337),
-          } as JAdapterConfig['fromReplica'];
-          serverLog.info('anvil.predeployed.loaded');
-        }
+        if (!predeployedConfig) throw new Error('PREDEPLOYED_JURISDICTION_CONFIG_MISSING');
+        const contracts = predeployedConfig.contracts;
+        fromReplica = {
+          depositoryAddress: String(contracts['depository']),
+          entityProviderAddress: String(contracts['entityProvider']),
+          contracts: {
+            account: String(contracts['account'] || ''),
+            depository: String(contracts['depository']),
+            entityProvider: String(contracts['entityProvider']),
+            deltaTransformer: String(contracts['deltaTransformer'] || ''),
+          },
+          chainId: Number(predeployedConfig.chainId ?? 31337),
+          entityProviderDeploymentBlock: Number(predeployedConfig.entityProviderDeploymentBlock),
+        } as JAdapterConfig['fromReplica'];
+        serverLog.info('anvil.predeployed.loaded');
       } catch (err) {
-        serverLog.warn('anvil.predeployed.load_failed', { error: (err as Error).message });
+        serverLog.error('anvil.predeployed.load_failed', { error: (err as Error).message });
+        throw err;
       }
     } else {
       serverLog.info('anvil.fresh_deploy_mode');
@@ -1125,13 +1149,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       );
       serverLog.info('anvil.predeployed.precheck.complete');
       if (depositoryCode === '0x' || entityProviderCode === '0x') {
-        serverLog.warn('anvil.predeployed.stale_code', {
-          depository: fromReplicaDepositoryAddress,
-          depositoryCode,
-          entityProvider: fromReplicaEntityProviderAddress,
-          entityProviderCode,
-        });
-        fromReplica = undefined;
+        throw new Error(`PREDEPLOYED_CONTRACT_CODE_MISSING:${fromReplicaDepositoryAddress}:${fromReplicaEntityProviderAddress}`);
       }
     }
 
@@ -1149,8 +1167,11 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     );
 
     const deployFreshLocalStack = async (reason: string): Promise<void> => {
+      if (usePredeployedAddresses) {
+        throw new Error(`PREDEPLOYED_STACK_DEPLOY_FORBIDDEN:${reason}`);
+      }
       serverLog.warn('anvil.stack_incompatible', { reason });
-      await globalJAdapter?.close().catch(() => undefined);
+      await globalJAdapter?.close();
       globalJAdapter = await withStartupStepTimeout(
         'createJAdapter(rpc:fresh)',
         createJAdapter({
@@ -1180,7 +1201,6 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         serverLog.info('anvil.contracts.use_existing');
       }
     }
-
     const block = await withStartupStepTimeout('provider.getBlockNumber', globalJAdapter.provider.getBlockNumber());
     serverLog.info('anvil.connected', { block });
 
@@ -1188,7 +1208,13 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     if (globalJAdapter.addresses?.depository && globalJAdapter.addresses?.entityProvider) {
       updatedRuntimeJurisdiction = await withStartupStepTimeout(
         'updateJurisdictionsJson',
-        updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc, detectedChainId, predeployedJurisdictionKey),
+        updateJurisdictionsJson(
+          globalJAdapter.addresses,
+          anvilRpc,
+          detectedChainId,
+          predeployedJurisdictionKey,
+          globalJAdapter.entityProviderDeploymentBlock,
+        ),
       );
     }
 
@@ -1196,11 +1222,10 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     if (globalJAdapter && env) {
       if (!env.jReplicas) env.jReplicas = new Map();
       const jName = updatedRuntimeJurisdiction?.key || 'primary';
-      const jDisplayName = updatedRuntimeJurisdiction?.name || jName;
       if (!env.jReplicas.has(jName)) {
         const stateRoot = await (globalJAdapter.captureStateRoot?.() ?? Promise.resolve(null));
         env.jReplicas.set(jName, {
-          name: jDisplayName,
+          name: jName,
           blockNumber: 0n,
           stateRoot,
           mempool: [],
@@ -1209,6 +1234,8 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
           position: { x: 0, y: 50, z: 0 },
           depositoryAddress: globalJAdapter.addresses.depository,
           entityProviderAddress: globalJAdapter.addresses.entityProvider,
+          entityProviderDeploymentBlock: globalJAdapter.entityProviderDeploymentBlock,
+          watcherConfirmationDepth: requireWatcherConfirmationDepth(globalJAdapter),
           contracts: globalJAdapter.addresses,
           rpcs: [anvilRpc],
           chainId: globalJAdapter.chainId,
@@ -1246,6 +1273,8 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
             position: { x: 0, y: 50, z: 0 },
             depositoryAddress: globalJAdapter.addresses.depository,
             entityProviderAddress: globalJAdapter.addresses.entityProvider,
+            entityProviderDeploymentBlock: globalJAdapter.entityProviderDeploymentBlock,
+            watcherConfirmationDepth: requireWatcherConfirmationDepth(globalJAdapter),
             contracts: globalJAdapter.addresses,
             rpcs: [],
             chainId: globalJAdapter.chainId,
@@ -1309,7 +1338,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     serverBootCompletedAt = Date.now();
     serverBootError = (error as Error)?.message || String(error);
     serverLog.error('startup.failed_after_bind', { error: getErrorMessage(error) });
-    return;
+    return closeFailedStartup(error);
   } finally {
     resolveServerStartupBarrier?.();
     resolveServerStartupBarrier = null;
@@ -1325,6 +1354,13 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 }
 
 if (import.meta.main) {
+  const managedParentPid = process.env['XLN_MANAGED_PARENT_PID'];
+  const stopParentWatch = managedParentPid
+    ? startParentLivenessWatch('runtime-server', managedParentPid, () => {
+        process.kill(process.pid, 'SIGTERM');
+      }, 250)
+    : () => {};
+  process.once('exit', stopParentWatch);
   const args = process.argv.slice(2);
 
   const getArg = (name: string, fallback?: string): string | undefined => {
@@ -1348,14 +1384,7 @@ if (import.meta.main) {
 
   startXlnServer(options)
     .then(() => {
-      if (serverBootPhase === 'ready') {
-        serverLog.info('cli.ready');
-        return;
-      }
-      serverLog.warn('cli.http_listening_startup_not_ready', {
-        phase: serverBootPhase,
-        error: serverBootError,
-      });
+      serverLog.info('cli.ready');
     })
     .catch(error => {
       serverLog.error('cli.failed', { error: getErrorMessage(error), stack: error.stack });

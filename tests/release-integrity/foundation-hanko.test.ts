@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ethers } from 'ethers';
+import { decodeHankoEnvelope } from '../../runtime/hanko/codec.ts';
 
 import {
   buildReleaseHanko,
@@ -47,14 +48,11 @@ describe('Foundation release Hanko', () => {
   test('produces an EntityProvider-compatible 2-of-3 lazy entity proof', () => {
     const board = createFoundationReleaseBoard(ADDRESSES, 2);
     const attestation = signReleaseEnvelope(ENVELOPE, board, PRIVATE_KEYS);
-    const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
-      ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'],
-      attestation.hanko,
-    );
+    const decoded = decodeHankoEnvelope(attestation.hanko);
 
     expect(board.entityId).toBe(board.boardHash);
     expect(attestation.signerCount).toBe(2);
-    expect(decoded[0][0]).toHaveLength(1);
+    expect(decoded.placeholders).toHaveLength(1);
     expect(verifyReleaseAttestation(attestation, board)).toBe(true);
   });
 
@@ -87,7 +85,7 @@ describe('Foundation release Hanko', () => {
     expect(isCanonicalFoundationBoard(attackerBoard)).toBe(false);
     expect(verifyReleaseAttestation(attackerAttestation)).toBe(false);
     expect(verifyReleaseAttestation(attackerAttestation, attackerBoard)).toBe(true);
-    expect(verifyReleaseAttestation(RELEASE_017.attestation!)).toBe(true);
+    expect(verifyReleaseAttestation(RELEASE_017.attestation!)).toBe(false);
 
     const mismatchedEntity = structuredClone(RELEASE_017.attestation!);
     mismatchedEntity.board.entityId = `0x${'77'.repeat(32)}`;
@@ -114,7 +112,7 @@ describe('Foundation release Hanko', () => {
     }
   });
 
-  test('binds manifest claims, requires Hanko from 0.1.7, and preserves historical unsigned releases', () => {
+  test('keeps pre-v2 Hanko immutable but unverified and requires canonical v2 from 0.1.9', () => {
     expect(CURRENT_XLN_RELEASE_VERSION).toBe(readFileSync(resolve(ROOT, 'VERSION'), 'utf8').trim());
     expect(verifyReleaseManifestPolicy(MANIFEST)).toBe(true);
     expect(verifyReleaseManifestEntry(MANIFEST_017)).toBe(true);

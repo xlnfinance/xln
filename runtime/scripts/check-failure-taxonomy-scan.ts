@@ -118,6 +118,7 @@ const readinessHealth: Parameters<typeof resolveRuntimeImportReadiness>[0] = {
     failure: null,
     entityId: null,
     startupPhase: null,
+    quiescence: null,
     expectedOffersPerHub: 0,
     expectedOffersPerPair: 0,
     cross: {
@@ -313,9 +314,12 @@ for (const [path, markers] of [
   ['runtime/entity/tx/handlers/direct-payment.ts', [
     "createStructuredLogger('entity.payment')",
     'DIRECT_PAYMENT_${code}:${detail}',
+    "'NEXT_HOP_ACCOUNT_MISSING'",
+  ]],
+  ['runtime/protocol/payments/route.ts', [
+    'requireCommittedDirectPaymentRoute',
     "'ROUTE_START_INVALID'",
     "'ROUTE_END_INVALID'",
-    "'NEXT_HOP_ACCOUNT_MISSING'",
   ]],
   ['runtime/entity/tx/handlers/basic.ts', ["createStructuredLogger('entity.basic')"]],
   ['runtime/entity/tx/proposals.ts', ["createStructuredLogger('entity.basic')"]],
@@ -334,9 +338,9 @@ for (const [path, markers] of [
   ['runtime/account/consensus/propose.ts', ["createStructuredLogger('account')", 'frame.validation_failed', 'proposal.profile']],
   ['runtime/account/tx/apply.ts', ["createStructuredLogger('account.tx')", 'account_frame.rejected']],
   ['runtime/entity/tx/handlers/account/orderbook-matching-same.ts', ["createStructuredLogger('orderbook.same')"]],
-  ['runtime/machine/tx-handlers.ts', ["createStructuredLogger('runtime.tx')", 'jurisdiction.import_failed', 'replica.wallet_registration_skipped']],
+  ['runtime/machine/tx-handlers.ts', ["createStructuredLogger('runtime.tx')", 'replica.import_start']],
+  ['runtime/machine/jurisdiction-import.ts', ["createStructuredLogger('runtime.jurisdiction_import')", 'jurisdiction.import_failed', 'jurisdiction.import_retry']],
   ['runtime/entity/tx/handlers/r2r.ts', ["createStructuredLogger('entity.jbatch')"]],
-  ['runtime/entity/tx/handlers/create-settlement.ts', ["createStructuredLogger('entity.jbatch')"]],
   ['runtime/entity/tx/handlers/mint-reserves.ts', ["createStructuredLogger('entity.jbatch')"]],
   ['runtime/entity/tx/handlers/j-broadcast.ts', ["createStructuredLogger('entity.jbatch')"]],
   ['runtime/entity/tx/handlers/j-clear-batch.ts', ["createStructuredLogger('entity.jbatch')"]],
@@ -349,7 +353,7 @@ for (const [path, markers] of [
   ['runtime/account/utils.ts', ["logDebug('ACCOUNT_STATE'", 'deriveDelta.return']],
   ['runtime/validation-utils.ts', ['ACCOUNT_DELTAS_MISSING', 'ACCOUNT_DELTAS_INVALID_TOKEN_ID']],
   ['runtime/runtime.ts', ["createStructuredLogger('runtime')", 'apply.profile', 'process.profile', 'joutbox.incoming']],
-  ['runtime/machine/infra.ts', ["createStructuredLogger('runtime.infra')", 'jadapter.restore_retry', 'browservm.restore_failed']],
+  ['runtime/machine/infra.ts', ["createStructuredLogger('runtime.infra')", 'jadapter.restore_retry', 'jadapter.restore_failed']],
   ['runtime/machine/infra-gossip-store.ts', ["createStructuredLogger('runtime.infra_gossip')", 'profile.restore_failed']],
   ['runtime/storage/runtime-dbs.ts', ["createStructuredLogger('runtime.storage')", 'storage_db.blocked', 'runtime_db.open_failed']],
   ['runtime/storage/index.ts', ["createStructuredLogger('runtime.storage')", 'persist.frame']],
@@ -362,7 +366,8 @@ for (const [path, markers] of [
   ['runtime/jurisdiction/jurisdiction-loader.ts', ["createStructuredLogger('runtime.jurisdiction_loader')", 'config_missing_using_defaults', 'DEFAULT_LAST_UPDATED']],
   ['runtime/radapter/server.ts', ["createStructuredLogger('runtime.radapter')", 'response_too_large']],
   ['runtime/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],
-  ['runtime/machine/j-submit.ts', ["createStructuredLogger('runtime.jsubmit')", 'classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL', 'tx.submit_failed']],
+  ['runtime/machine/j-submit.ts', ["createStructuredLogger('runtime.jsubmit')", 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL', 'tx.submit_failed']],
+  ['runtime/machine/j-submit-result.ts', ['classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL']],
   ['runtime/orchestrator/market-maker-aggregated-health.ts', ['classifyRuntimeMarketMakerFailure', 'failure,']],
   ['runtime/protocol/payments/delivery-result.ts', ['export type DeliveryResult', 'failure?: RuntimeFailureSignal', 'deliveryFailure']],
 ] as const) {
@@ -545,7 +550,6 @@ assertNotIncludes(runtimeAdapterServer, '[RADAPTER] RESPONSE_TOO_LARGE', runtime
 
 for (const jBatchHandlerPath of [
   'runtime/entity/tx/handlers/r2r.ts',
-  'runtime/entity/tx/handlers/create-settlement.ts',
   'runtime/entity/tx/handlers/mint-reserves.ts',
   'runtime/entity/tx/handlers/j-broadcast.ts',
   'runtime/entity/tx/handlers/j-clear-batch.ts',

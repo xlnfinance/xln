@@ -23,7 +23,7 @@ async function faucetOffchain(page: Page, entityId: string, hubId: string): Prom
 test.describe('Canonical /app#pay deep link', () => {
   test.setTimeout(TEST_TIMEOUT_MS);
 
-  test('restores runtime and opens the pay screen from hash params', async ({ browser }) => {
+  test('restores runtime and opens the pay screen from hash params', { tag: '@functional' }, async ({ browser }) => {
     let aliceContext: BrowserContext | null = null;
     let bobContext: BrowserContext | null = null;
 
@@ -67,10 +67,11 @@ test.describe('Canonical /app#pay deep link', () => {
       const paymentCursor = await getPersistedReceiptCursor(bobPage);
       const findRoutesBtn = payPage.getByRole('button', { name: /^Find routes?$/i });
       const firstRoute = payPage.locator('.route-option').first();
-      if (await firstRoute.isVisible().catch(() => false)) {
-        await firstRoute.scrollIntoViewIfNeeded().catch(() => undefined);
-      } else {
-        await expect(findRoutesBtn).toBeVisible({ timeout: 30_000 });
+      // Restored invoices auto-route. Wait for either transition outcome instead
+      // of sampling once and then waiting only for the button that auto-routing
+      // intentionally removes when a route becomes ready.
+      await expect(firstRoute.or(findRoutesBtn).first()).toBeVisible({ timeout: 30_000 });
+      if (!(await firstRoute.isVisible().catch(() => false))) {
         await findRoutesBtn.scrollIntoViewIfNeeded().catch(() => undefined);
         await findRoutesBtn.click();
         await expect(firstRoute).toBeVisible({ timeout: 30_000 });

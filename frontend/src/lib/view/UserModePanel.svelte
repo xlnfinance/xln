@@ -28,7 +28,6 @@
   import type { Tab } from '$lib/types/ui';
   import type { Env } from '@xln/runtime/xln-api';
   import type { EnvSnapshot, EntityReplica } from '$types';
-  import { createSelfEntity } from '$lib/utils/entityFactory';
   import {
     readAnyOnboardingComplete,
     readOnboardingComplete,
@@ -164,9 +163,6 @@
   // Inline panels - NO POPUPS! All panels are inline for desktop/mobile
   type InlinePanel = 'none' | 'formation' | 'add-jmachine';
   let activeInlinePanel = $state<InlinePanel>('none');
-  const selfEntityChecked = new Set<string>();
-  const selfEntityInFlight = new Set<string>();
-  let ensureSelfEntitiesEpoch = 0;
   let onboardingComplete = $state(false);
 
   let selectedInitialAction = $state<import('$lib/view/utils/panelBridge').EntityOpenAction | undefined>(undefined);
@@ -226,8 +222,6 @@
       selectedSignerId = null;
       selectedAccountId = null;
       selectedJurisdictionName = null;
-      selfEntityChecked.clear();
-      selfEntityInFlight.clear();
       isCreatingJMachine = false;
       jMachineCreateError = '';
     }
@@ -242,8 +236,6 @@
       selectedSignerId = null;
       selectedAccountId = null;
       selectedJurisdictionName = null;
-      selfEntityChecked.clear();
-      selfEntityInFlight.clear();
       isCreatingJMachine = false;
       jMachineCreateError = '';
     }
@@ -649,117 +641,6 @@
     }
     return null;
   }
-
-  async function ensureSelfEntities() {
-    const runEpoch = ++ensureSelfEntitiesEpoch;
-    const env = get(runtimeFrameEnv);
-    const vault = get(activeRuntimeStore);
-
-    if (!env || !vault?.signers?.length) return;
-
-    const names = listJMachineNames(env);
-
-    // VaultStore imports the default jurisdiction set; this can be briefly empty
-    // while runtime restore is still wiring the embedded adapter.
-    if (names.length === 0) {
-      return;
-    }
-
-    const selectedSignerLower = String(selectedSignerId || '').trim().toLowerCase();
-    const activeSignerIndex = Number(vault.activeSignerIndex ?? 0);
-    const selectedJurisdictionKey = String(selectedJurisdictionName || '').trim().toLowerCase();
-    const jurisdictionSigner = selectedJurisdictionKey
-      ? vault.signers.find((entry) => String(entry?.jurisdiction || '').trim().toLowerCase() === selectedJurisdictionKey)
-      : null;
-    const targetSigners = selectedSignerLower
-      ? vault.signers.filter((entry) => String(entry.address || '').trim().toLowerCase() === selectedSignerLower)
-      : [jurisdictionSigner || vault.signers[activeSignerIndex] || vault.signers[0]].filter(
-        (entry): entry is NonNullable<typeof entry> => Boolean(entry),
-      );
-
-    for (const signerEntry of targetSigners) {
-      if (runEpoch !== ensureSelfEntitiesEpoch) return;
-      const signerAddress = signerEntry.address;
-      const selectedJurisdiction = resolveJMachineName(names, selectedJurisdictionName);
-      const signerJurisdiction = resolveJMachineName(names, signerEntry.jurisdiction);
-      const activeJurisdiction = resolveJMachineName(names, env.activeJurisdiction);
-      const jurisdiction = signerJurisdiction || selectedJurisdiction || names[0] || activeJurisdiction;
-
-      if (!signerAddress || !jurisdiction) continue;
-      const selfEntityKey = `${signerAddress.toLowerCase()}:${jurisdiction}`;
-      if (selfEntityChecked.has(selfEntityKey) || selfEntityInFlight.has(selfEntityKey)) continue;
-
-      const existing = findReplicaBySigner(env, signerAddress, jurisdiction);
-      if (existing) {
-        if (!signerEntry.entityId && existing.entityId) {
-          vaultOperations.setSignerEntity(signerEntry.index, existing.entityId);
-        }
-        selfEntityChecked.add(selfEntityKey);
-
-        // Auto-select first entity if none selected
-        if (!selectedEntityId && existing.entityId) {
-          viewMode = 'entity';
-          selectedEntityId = existing.entityId;
-          selectedSignerId = signerAddress;
-        }
-        continue;
-      }
-
-      selfEntityInFlight.add(selfEntityKey);
-      try {
-        // Re-check right before creation to avoid duplicate create on reactive races.
-        const alreadyNow = findReplicaBySigner(env, signerAddress, jurisdiction);
-        if (alreadyNow?.entityId) {
-          if (!signerEntry.entityId) {
-            vaultOperations.setSignerEntity(signerEntry.index, alreadyNow.entityId);
-          }
-          selfEntityChecked.add(selfEntityKey);
-          if (!selectedEntityId) {
-            viewMode = 'entity';
-            selectedEntityId = alreadyNow.entityId;
-            selectedSignerId = signerAddress;
-          }
-          continue;
-        }
-
-        const entityId = await createSelfEntity(env, signerAddress, jurisdiction ?? undefined);
-        if (runEpoch !== ensureSelfEntitiesEpoch) return;
-        if (entityId) {
-          // Resolve canonical entity by signer after create to prevent duplicate/late-selection drift.
-          const canonical = findReplicaBySigner(env, signerAddress, jurisdiction);
-          const finalEntityId = canonical?.entityId || entityId;
-          vaultOperations.setSignerEntity(signerEntry.index, finalEntityId);
-          publishRuntimeFrameEnv(env);
-          selfEntityChecked.add(selfEntityKey);
-
-          // Auto-select entity after creation
-          viewMode = 'entity';
-          selectedEntityId = finalEntityId;
-          selectedSignerId = signerAddress;
-        } else {
-          logUserModeDiagnostic('Self-entity creation returned no entity id', {
-            signer: signerAddress,
-            jurisdiction,
-          });
-        }
-      } catch (err) {
-        logUserModeDiagnostic('Self-entity bootstrap failed', {
-          signer: signerAddress,
-          jurisdiction,
-          err,
-        });
-      } finally {
-        selfEntityInFlight.delete(selfEntityKey);
-      }
-    }
-  }
-
-  // Trigger entity creation when env becomes available OR vault changes
-  $effect(() => {
-    if (!isRemoteRuntime && !!$runtimeFrameEnv && !!$activeRuntimeStore) {
-      void ensureSelfEntities();
-    }
-  });
 
   const signerNetworkEnabled = $derived.by(() => {
     const jurisdictionName =

@@ -11,7 +11,7 @@
   export let outAmount: string;
   export let inAmount: string;
   export let derived: DeltaParts;
-  export let decimals: number = 18;
+  export let decimals: number;
   export let barHeight: number = 9;
   export let compact: boolean = false;
   export let barLayout: 'center' | 'sides' = 'center';

@@ -7,7 +7,7 @@
 import type { Env } from '../types';
 import { createEconomy, connectEconomy, testHtlcRoute, type EconomyEntity } from './test-economy';
 import { usd, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica } from './helpers';
-import { ensureJAdapter, createJReplica, getScenarioJAdapter } from './boot';
+import { bindScenarioJReplica, ensureJAdapter, createJReplica, getScenarioJAdapter } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { createRngFromEnv } from './seeded-rng';
 
@@ -47,10 +47,11 @@ export async function htlc4hop(env: Env): Promise<void> {
     jadapter = getScenarioJAdapter(env);
   } catch {
     jadapter = await ensureJAdapter(env);
-    const jReplica = createJReplica(env, '4-Hop Demo', jadapter.addresses.depository);
-    jReplica.jadapter = jadapter;
-    jReplica.depositoryAddress = jadapter.addresses.depository;
-    jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
+    bindScenarioJReplica(
+      env,
+      createJReplica(env, '4-Hop Demo', jadapter.addresses.depository),
+      jadapter,
+    );
     jadapter.startWatching(env);
   }
 

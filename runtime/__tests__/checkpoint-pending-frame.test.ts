@@ -50,10 +50,8 @@ describe('checkpoint persistence with pending bilateral state', () => {
 
     const signerA = deriveSignerAddressSync(seed, '1');
     const signerB = deriveSignerAddressSync(seed, '2');
-    registerSignerKey(signerA, deriveSignerKeySync(seed, '1'));
-    registerSignerKey(signerA.slice(-4).toLowerCase(), deriveSignerKeySync(seed, '1'));
-    registerSignerKey(signerB, deriveSignerKeySync(seed, '2'));
-    registerSignerKey(signerB.slice(-4).toLowerCase(), deriveSignerKeySync(seed, '2'));
+    registerSignerKey(env, signerA, deriveSignerKeySync(seed, '1'));
+    registerSignerKey(env, signerB, deriveSignerKeySync(seed, '2'));
 
     const entityA = generateLazyEntityId([signerA], 1n).toLowerCase();
     const entityB = generateLazyEntityId([signerB], 1n).toLowerCase();
@@ -72,6 +70,8 @@ describe('checkpoint persistence with pending bilateral state', () => {
       contracts: {
         depository: jurisdiction.depositoryAddress,
         entityProvider: jurisdiction.entityProviderAddress,
+        account: '0x000000000000000000000000000000000000ac01',
+        deltaTransformer: '0x000000000000000000000000000000000000de17',
       },
     } as never);
 

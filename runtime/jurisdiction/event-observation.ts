@@ -41,8 +41,7 @@ export const canonicalDisputeFinalizationEvidenceKey = (evidence: DisputeFinaliz
     normHex(evidence.finalProofbodyHash),
     normHex(evidence.leftArguments),
     normHex(evidence.rightArguments),
-    normHex(evidence.starterInitialArguments),
-    normHex(evidence.starterIncrementedArguments),
+    evidence.startedByLeft,
     normHex(evidence.sig),
   ]);
 };

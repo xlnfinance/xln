@@ -4,8 +4,10 @@ import "./HashLadder.sol";
 
 /* 
 Subcontracts - Programmable Delta Transformers
-  function applyBatch(int[] memory deltas, bytes calldata encodedBatch,
-                      bytes calldata leftArguments, bytes calldata rightArguments)
+  function applyBatch(int[] memory deltas, uint[] memory tokenIds,
+                      bytes calldata encodedBatch, bytes calldata leftArguments,
+                      bytes calldata rightArguments, uint leftArgumentsTimestamp,
+                      uint rightArgumentsTimestamp)
     → int[] memory newDeltas
 
   What you can do:
@@ -20,7 +22,7 @@ Subcontracts - Programmable Delta Transformers
   */
 contract DeltaTransformer {
   error InvalidDeltaIndex();
-  error AlreadyRevealed();
+  error ContextLengthMismatch();
   mapping(bytes32 => uint) public hashToBlock;
   mapping(bytes32 => uint) public hashToTimestamp;
   mapping(bytes32 => bool) public hashRevealed;
@@ -72,27 +74,20 @@ contract DeltaTransformer {
 
 
   // applies arbitrary changes to deltas
+  /// @notice Canonical transformer boundary used by Depository.
+  /// @dev tokenIds are aligned 1:1 with deltas. Chain and Depository identity
+  ///      are intentionally not duplicated in calldata; a transformer that
+  ///      needs token metadata can read the calling Depository registry.
   function applyBatch(
-    int[] memory deltas,
-    bytes calldata encodedBatch,
-    bytes calldata leftArguments,
-    bytes calldata rightArguments
-  ) public view returns (int[] memory) {
-    return _applyBatch(deltas, encodedBatch, leftArguments, rightArguments, block.timestamp, block.timestamp);
-  }
-
-  function supportsArgumentTimestamps() external pure returns (bool) {
-    return true;
-  }
-
-  function applyBatchWithArgumentTimestamps(
-    int[] memory deltas,
+    int[] calldata deltas,
+    uint[] calldata tokenIds,
     bytes calldata encodedBatch,
     bytes calldata leftArguments,
     bytes calldata rightArguments,
     uint leftArgumentsTimestamp,
     uint rightArgumentsTimestamp
   ) external view returns (int[] memory) {
+    if (tokenIds.length != deltas.length) revert ContextLengthMismatch();
     return _applyBatch(deltas, encodedBatch, leftArguments, rightArguments, leftArgumentsTimestamp, rightArgumentsTimestamp);
   }
 
@@ -104,8 +99,9 @@ contract DeltaTransformer {
     uint leftArgumentsTimestamp,
     uint rightArgumentsTimestamp
   ) private view returns (int[] memory) {
-    // `encodedBatch` is part of the signed ProofBody. If it is malformed, the
-    // signed state itself is invalid and the dispute must fail loudly.
+    // This implementation rejects malformed signed clause data locally. The
+    // Depository catches that clause failure, emits forensic evidence, and
+    // continues finalization with the pre-clause deltas.
     Batch memory decodedBatch = abi.decode(encodedBatch, (Batch));
 
     Arguments memory left = _decodeArguments(leftArguments);
@@ -298,7 +294,11 @@ contract DeltaTransformer {
 
   function revealSecret(bytes32 secret) public {
     bytes32 hash = keccak256(abi.encode(secret));
-    if (hashRevealed[hash]) revert AlreadyRevealed();
+    // Exact retries are expected after response loss or crash recovery. A
+    // revert here would abort the whole Depository batch before its dispute
+    // finalizations execute. Returning preserves the first-seen evidence and
+    // makes delivery idempotent; a different preimage has a different hash.
+    if (hashRevealed[hash]) return;
     hashRevealed[hash] = true;
     hashToBlock[hash] = block.number;
     hashToTimestamp[hash] = block.timestamp;

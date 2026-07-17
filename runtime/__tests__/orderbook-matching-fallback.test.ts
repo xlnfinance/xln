@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import {
   createBook,
   applyCommand,
@@ -7,7 +8,12 @@ import {
   getBookOrder,
   getBookSideLevels,
 } from '../orderbook/core';
-import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook/types';
+import {
+  getSwapLotScale,
+  ORDERBOOK_PRICE_SCALE,
+  quoteAmountAtPrice,
+  SWAP_LOT_SCALE,
+} from '../orderbook/types';
 import { processOrderbookCancels, processOrderbookSwaps } from '../entity/tx/handlers/account';
 import { applyCrossJurisdictionBookProgressToState } from '../entity/tx/handlers/cross-j-book-order';
 import { handleSwapResolve } from '../account/tx/handlers/swap-resolve';
@@ -74,9 +80,8 @@ function makeAccountMachine(offer: SwapOffer): AccountMachine {
     requestedRebalance: new Map(),
     requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftJObservations: [],
-    rightJObservations: [],
-    jEventChain: [],
+    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,
     disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
     jNonce: 0,
@@ -167,9 +172,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'alice',
       accountId: 'alice',
-      giveTokenId: 6,
+      giveTokenId: 5,
       giveAmount: quoteAmount,
-      wantTokenId: 4,
+      wantTokenId: 2,
       wantAmount: baseQty,
       createdHeight: 1,
       minFillRatio: 0,
@@ -182,9 +187,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'maker1',
       accountId: 'maker1',
-      giveTokenId: 4,
+      giveTokenId: 2,
       giveAmount: lot,
-      wantTokenId: 6,
+      wantTokenId: 5,
       wantAmount: (1000n * lot) / 10_000n,
       createdHeight: 1,
       minFillRatio: 0,
@@ -197,9 +202,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'maker2',
       accountId: 'maker2',
-      giveTokenId: 4,
+      giveTokenId: 2,
       giveAmount: lot,
-      wantTokenId: 6,
+      wantTokenId: 5,
       wantAmount: (1100n * lot) / 10_000n,
       createdHeight: 1,
       minFillRatio: 0,
@@ -227,9 +232,9 @@ describe('orderbook matching fallback execution mapping', () => {
             takerReferrerBps: 0,
           },
           referenceTokenId: 2,
-          supportedPairs: ['4/6'],
+          supportedPairs: ['2/5'],
         },
-        books: new Map([['4/6', book]]),
+        books: new Map([['2/5', book]]),
         pairConfig: new Map(),
       } as any,
     } as any;
@@ -257,9 +262,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'maker-entity',
       accountId: 'maker-account',
-      giveTokenId: 4,
+      giveTokenId: 2,
       giveAmount: makerBaseQty,
-      wantTokenId: 6,
+      wantTokenId: 5,
       wantAmount: makerQuoteQty,
       createdHeight: 1,
       minFillRatio: 0,
@@ -273,9 +278,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'taker-entity',
       accountId: 'taker-account',
-      giveTokenId: 6,
+      giveTokenId: 5,
       giveAmount: takerQuoteQty,
-      wantTokenId: 4,
+      wantTokenId: 2,
       wantAmount: makerBaseQty,
       createdHeight: 2,
       minFillRatio: 0,
@@ -302,7 +307,7 @@ describe('orderbook matching fallback execution mapping', () => {
             takerReferrerBps: 0,
           },
           referenceTokenId: 2,
-          supportedPairs: ['4/6'],
+          supportedPairs: ['2/5'],
         },
         books: new Map(),
         pairConfig: new Map(),
@@ -345,9 +350,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'maker-entity',
       accountId: 'maker-account',
-      giveTokenId: 4,
+      giveTokenId: 2,
       giveAmount: makerBaseQty,
-      wantTokenId: 6,
+      wantTokenId: 5,
       wantAmount: makerQuoteQty,
       createdHeight: 1,
       minFillRatio: 0,
@@ -361,9 +366,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'taker-entity',
       accountId: 'taker-account',
-      giveTokenId: 6,
+      giveTokenId: 5,
       giveAmount: takerQuoteQty,
-      wantTokenId: 4,
+      wantTokenId: 2,
       wantAmount: takerBaseQty,
       createdHeight: 2,
       minFillRatio: 0,
@@ -390,7 +395,7 @@ describe('orderbook matching fallback execution mapping', () => {
             takerReferrerBps: 0,
           },
           referenceTokenId: 2,
-          supportedPairs: ['4/6'],
+          supportedPairs: ['2/5'],
         },
         books: new Map(),
         pairConfig: new Map(),
@@ -430,9 +435,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'maker-1',
       accountId: 'maker-account-1',
-      giveTokenId: 4,
+      giveTokenId: 2,
       giveAmount: 2n * lot,
-      wantTokenId: 6,
+      wantTokenId: 5,
       wantAmount: (2n * lot * 10_000n) / 10_000n,
       createdHeight: 1,
       minFillRatio: 0,
@@ -446,9 +451,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'maker-2',
       accountId: 'maker-account-2',
-      giveTokenId: 4,
+      giveTokenId: 2,
       giveAmount: lot,
-      wantTokenId: 6,
+      wantTokenId: 5,
       wantAmount: (lot * 10_100n) / 10_000n,
       createdHeight: 2,
       minFillRatio: 0,
@@ -462,9 +467,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'taker-entity',
       accountId: 'taker-account',
-      giveTokenId: 6,
+      giveTokenId: 5,
       giveAmount: (3n * lot * 10_100n) / 10_000n,
-      wantTokenId: 4,
+      wantTokenId: 2,
       wantAmount: 3n * lot,
       createdHeight: 3,
       minFillRatio: 0,
@@ -492,7 +497,7 @@ describe('orderbook matching fallback execution mapping', () => {
             takerReferrerBps: 0,
           },
           referenceTokenId: 2,
-          supportedPairs: ['4/6'],
+          supportedPairs: ['2/5'],
         },
         books: new Map(),
         pairConfig: new Map(),
@@ -540,9 +545,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'alice',
       accountId: 'alice-maker-account',
-      giveTokenId: 4,
+      giveTokenId: 2,
       giveAmount: selfAskBaseQty,
-      wantTokenId: 6,
+      wantTokenId: 5,
       wantAmount: selfAskQuoteQty,
       createdHeight: 1,
       minFillRatio: 0,
@@ -556,9 +561,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'bob',
       accountId: 'bob-maker-account',
-      giveTokenId: 4,
+      giveTokenId: 2,
       giveAmount: otherAskBaseQty,
-      wantTokenId: 6,
+      wantTokenId: 5,
       wantAmount: otherAskQuoteQty,
       createdHeight: 2,
       minFillRatio: 0,
@@ -572,9 +577,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'alice',
       accountId: 'alice-taker-account',
-      giveTokenId: 6,
+      giveTokenId: 5,
       giveAmount: takerQuoteQty,
-      wantTokenId: 4,
+      wantTokenId: 2,
       wantAmount: takerBaseQty,
       createdHeight: 3,
       minFillRatio: 0,
@@ -602,7 +607,7 @@ describe('orderbook matching fallback execution mapping', () => {
             takerReferrerBps: 0,
           },
           referenceTokenId: 2,
-          supportedPairs: ['4/6'],
+          supportedPairs: ['2/5'],
         },
         books: new Map(),
         pairConfig: new Map(),
@@ -640,9 +645,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'ask-maker',
       accountId: 'ask-maker-account',
-      giveTokenId: 4,
+      giveTokenId: 2,
       giveAmount: 3n * lot,
-      wantTokenId: 6,
+      wantTokenId: 5,
       wantAmount: (3n * lot * makerAskPriceTicks) / 10_000n,
       createdHeight: 1,
       minFillRatio: 0,
@@ -656,9 +661,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'bid-maker',
       accountId: 'bid-maker-account',
-      giveTokenId: 6,
+      giveTokenId: 5,
       giveAmount: (2n * lot * makerBidPriceTicks) / 10_000n,
-      wantTokenId: 4,
+      wantTokenId: 2,
       wantAmount: 2n * lot,
       createdHeight: 2,
       minFillRatio: 0,
@@ -685,7 +690,7 @@ describe('orderbook matching fallback execution mapping', () => {
             takerReferrerBps: 0,
           },
           referenceTokenId: 2,
-          supportedPairs: ['4/6'],
+          supportedPairs: ['2/5'],
         },
         books: new Map(),
         pairConfig: new Map(),
@@ -707,9 +712,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'bid-maker',
       accountId: 'bid-maker-account',
-      giveTokenId: 6,
+      giveTokenId: 5,
       giveAmount: (1000n * lot) / 10_000n,
-      wantTokenId: 4,
+      wantTokenId: 2,
       wantAmount: lot,
       createdHeight: 1,
       minFillRatio: 0,
@@ -723,9 +728,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'ask-maker',
       accountId: 'ask-maker-account',
-      giveTokenId: 4,
+      giveTokenId: 2,
       giveAmount: lot,
-      wantTokenId: 6,
+      wantTokenId: 5,
       wantAmount: (1200n * lot) / 10_000n,
       createdHeight: 2,
       minFillRatio: 0,
@@ -739,9 +744,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'taker',
       accountId: 'taker-account',
-      giveTokenId: 6,
+      giveTokenId: 5,
       giveAmount: (1400n * 2n * lot) / 10_000n,
-      wantTokenId: 4,
+      wantTokenId: 2,
       wantAmount: 2n * lot,
       createdHeight: 3,
       minFillRatio: 0,
@@ -769,7 +774,7 @@ describe('orderbook matching fallback execution mapping', () => {
             takerReferrerBps: 0,
           },
           referenceTokenId: 2,
-          supportedPairs: ['4/6'],
+          supportedPairs: ['2/5'],
         },
         books: new Map(),
         pairConfig: new Map(),
@@ -798,9 +803,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'bid-maker',
       accountId: 'bid-maker-account',
-      giveTokenId: 6,
+      giveTokenId: 5,
       giveAmount: (1000n * lot) / 10_000n,
-      wantTokenId: 4,
+      wantTokenId: 2,
       wantAmount: lot,
       createdHeight: 1,
       minFillRatio: 0,
@@ -814,9 +819,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'ask-maker',
       accountId: 'ask-maker-account',
-      giveTokenId: 4,
+      giveTokenId: 2,
       giveAmount: lot,
-      wantTokenId: 6,
+      wantTokenId: 5,
       wantAmount: (1200n * lot) / 10_000n,
       createdHeight: 2,
       minFillRatio: 0,
@@ -830,9 +835,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'taker',
       accountId: 'taker-account',
-      giveTokenId: 4,
+      giveTokenId: 2,
       giveAmount: 2n * lot,
-      wantTokenId: 6,
+      wantTokenId: 5,
       wantAmount: (800n * 2n * lot) / 10_000n,
       createdHeight: 3,
       minFillRatio: 0,
@@ -860,7 +865,7 @@ describe('orderbook matching fallback execution mapping', () => {
             takerReferrerBps: 0,
           },
           referenceTokenId: 2,
-          supportedPairs: ['4/6'],
+          supportedPairs: ['2/5'],
         },
         books: new Map(),
         pairConfig: new Map(),
@@ -906,9 +911,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'taker',
       accountId: 'taker-account',
-      giveTokenId: 6,
+      giveTokenId: 5,
       giveAmount: (1250n * 2n * lot) / 10_000n,
-      wantTokenId: 4,
+      wantTokenId: 2,
       wantAmount: 2n * lot,
       createdHeight: 3,
       minFillRatio: 0,
@@ -929,9 +934,9 @@ describe('orderbook matching fallback execution mapping', () => {
                 'maker-ask-historical',
                 {
                   offerId: 'maker-ask-historical',
-                  giveTokenId: 4,
+                  giveTokenId: 2,
                   giveAmount: lot,
-                  wantTokenId: 6,
+                  wantTokenId: 5,
                   wantAmount: (1000n * lot) / 10_000n,
                   makerIsLeft: false,
                   minFillRatio: 0,
@@ -959,9 +964,9 @@ describe('orderbook matching fallback execution mapping', () => {
             takerReferrerBps: 0,
           },
           referenceTokenId: 2,
-          supportedPairs: ['4/6'],
+          supportedPairs: ['2/5'],
         },
-        books: new Map([['4/6', historicalBook]]),
+        books: new Map([['2/5', historicalBook]]),
         pairConfig: new Map(),
       } as any,
     } as any;
@@ -984,9 +989,9 @@ describe('orderbook matching fallback execution mapping', () => {
     const makerOffer = {
       offerId: 'maker-snapped',
       makerIsLeft: true,
-      giveTokenId: 4,
+      giveTokenId: 2,
       giveAmount: 2n * lot,
-      wantTokenId: 6,
+      wantTokenId: 5,
       wantAmount: (2006n * lot) / 10_000n,
       minFillRatio: 0,
       createdHeight: 1,
@@ -1030,9 +1035,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'alice',
       accountId: 'alice',
-      giveTokenId: 4,
+      giveTokenId: 2,
       giveAmount: lot,
-      wantTokenId: 6,
+      wantTokenId: 5,
       wantAmount: (hugePriceTicks * lot) / 10_000n,
       createdHeight: 1,
       minFillRatio: 0,
@@ -1058,7 +1063,7 @@ describe('orderbook matching fallback execution mapping', () => {
             takerReferrerBps: 0,
           },
           referenceTokenId: 2,
-          supportedPairs: ['4/6'],
+          supportedPairs: ['2/5'],
         },
         books: new Map(),
         pairConfig: new Map(),
@@ -1066,7 +1071,7 @@ describe('orderbook matching fallback execution mapping', () => {
     } as any;
 
     const result = processCommittedOrderbookSwaps(entityState, [hugePriceOffer] as any);
-    const book = result.bookUpdates.find(item => item.pairId === '4/6')?.book;
+    const book = result.bookUpdates.find(item => item.pairId === '2/5')?.book;
 
     expect(result.mempoolOps.some((item: any) => item.tx?.type === 'swap_resolve')).toBe(false);
     expect(book).toBeDefined();
@@ -1085,9 +1090,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'taker-entity',
       accountId: 'taker-account',
-      giveTokenId: 6,
+      giveTokenId: 5,
       giveAmount: makerQuoteQty,
-      wantTokenId: 4,
+      wantTokenId: 2,
       wantAmount: makerBaseQty,
       createdHeight: 2,
       minFillRatio: 0,
@@ -1103,7 +1108,6 @@ describe('orderbook matching fallback execution mapping', () => {
         routingFeePPM: 1,
         baseFee: 0n,
         swapTakerFeeBps: 1,
-        rebalanceBaseFee: 10n ** 17n,
         rebalanceLiquidityFeeBps: 1n,
         rebalanceGasFee: 0n,
         rebalanceTimeoutMs: 10 * 60 * 1000,
@@ -1125,7 +1129,7 @@ describe('orderbook matching fallback execution mapping', () => {
             takerReferrerBps: 0,
           },
           referenceTokenId: 2,
-          supportedPairs: ['4/6'],
+          supportedPairs: ['2/5'],
         },
         books: new Map(),
         pairConfig: new Map(),
@@ -1138,9 +1142,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'maker-entity',
       accountId: 'maker-account',
-      giveTokenId: 4,
+      giveTokenId: 2,
       giveAmount: makerBaseQty,
-      wantTokenId: 6,
+      wantTokenId: 5,
       wantAmount: makerQuoteQty,
       createdHeight: 1,
       minFillRatio: 0,
@@ -1159,15 +1163,15 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(takerResolve).toBeDefined();
     expect(takerResolve!.tx.data.executionGiveAmount).toBe(makerQuoteQty);
     expect(takerResolve!.tx.data.executionWantAmount).toBe(makerBaseQty);
-    expect(takerResolve!.tx.data.feeTokenId).toBe(4);
+    expect(takerResolve!.tx.data.feeTokenId).toBe(2);
     expect(takerResolve!.tx.data.feeAmount).toBe(makerBaseQty / 10_000n);
 
     const accountMachine = makeAccountMachine({
       offerId: 'taker-buy-with-fee',
       makerIsLeft: false,
-      giveTokenId: 6,
+      giveTokenId: 5,
       giveAmount: makerQuoteQty,
-      wantTokenId: 4,
+      wantTokenId: 2,
       wantAmount: makerBaseQty,
       minFillRatio: 0,
       createdHeight: 2,
@@ -1183,8 +1187,8 @@ describe('orderbook matching fallback execution mapping', () => {
     );
 
     expect(resolveResult.success).toBe(true);
-    const quoteDelta = accountMachine.deltas.get(6)!;
-    const baseDelta = accountMachine.deltas.get(4)!;
+    const quoteDelta = accountMachine.deltas.get(5)!;
+    const baseDelta = accountMachine.deltas.get(2)!;
     expect(quoteDelta.offdelta).toBe(makerQuoteQty);
     expect(baseDelta.offdelta).toBe(-(makerBaseQty - makerBaseQty / 10_000n));
   });
@@ -1194,9 +1198,9 @@ describe('orderbook matching fallback execution mapping', () => {
     const accountMachine = makeAccountMachine({
       offerId: 'maker-legacy-no-price',
       makerIsLeft: true,
-      giveTokenId: 4,
+      giveTokenId: 2,
       giveAmount: 2n * lot,
-      wantTokenId: 6,
+      wantTokenId: 5,
       wantAmount: (2000n * lot) / 10_000n,
       minFillRatio: 0,
       createdHeight: 1,
@@ -1242,9 +1246,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'maker-entity',
       accountId: 'maker-account',
-      giveTokenId: 4,
+      giveTokenId: 2,
       giveAmount: makerBaseQty,
-      wantTokenId: 6,
+      wantTokenId: 5,
       wantAmount: makerQuoteQty,
       createdHeight: 1,
       minFillRatio: 0,
@@ -1258,9 +1262,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'taker-entity',
       accountId: 'taker-account',
-      giveTokenId: 6,
+      giveTokenId: 5,
       giveAmount: takerQuoteQty,
-      wantTokenId: 4,
+      wantTokenId: 2,
       wantAmount: takerBaseQty,
       createdHeight: 2,
       minFillRatio: 0,
@@ -1287,7 +1291,7 @@ describe('orderbook matching fallback execution mapping', () => {
             takerReferrerBps: 0,
           },
           referenceTokenId: 2,
-          supportedPairs: ['4/6'],
+          supportedPairs: ['2/5'],
         },
         books: new Map(),
         pairConfig: new Map(),
@@ -1440,9 +1444,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'maker-entity',
       toEntity: 'hub-entity',
       accountId: 'maker-account',
-      giveTokenId: 4,
+      giveTokenId: 2,
       giveAmount: SWAP_LOT_SCALE,
-      wantTokenId: 6,
+      wantTokenId: 5,
       wantAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
       createdHeight: 1,
       minFillRatio: 0,
@@ -1458,9 +1462,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'taker-entity',
       accountId: 'taker-account',
-      giveTokenId: 6,
+      giveTokenId: 5,
       giveAmount: (1400n * SWAP_LOT_SCALE) / 10_000n,
-      wantTokenId: 4,
+      wantTokenId: 2,
       wantAmount: SWAP_LOT_SCALE,
       createdHeight: 2,
       minFillRatio: 0,
@@ -1494,7 +1498,7 @@ describe('orderbook matching fallback execution mapping', () => {
             takerReferrerBps: 0,
           },
           referenceTokenId: 2,
-          supportedPairs: ['4/6'],
+          supportedPairs: ['2/5'],
         },
         books: new Map(),
         pairConfig: new Map(),
@@ -1548,7 +1552,7 @@ describe('orderbook matching fallback execution mapping', () => {
             takerReferrerBps: 0,
           },
           referenceTokenId: 2,
-          supportedPairs: ['4/6'],
+          supportedPairs: ['2/5'],
         },
         books: new Map(),
         pairConfig: new Map(),
@@ -1563,9 +1567,9 @@ describe('orderbook matching fallback execution mapping', () => {
         toEntity: 'bob',
         accountId: 'bob',
         createdHeight: 7,
-        giveTokenId: 4,
+        giveTokenId: 2,
         giveAmount: SWAP_LOT_SCALE,
-        wantTokenId: 6,
+        wantTokenId: 5,
         wantAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
         minFillRatio: 0,
         timeInForce: 0,
@@ -1578,9 +1582,9 @@ describe('orderbook matching fallback execution mapping', () => {
         toEntity: 'alice',
         accountId: 'alice',
         createdHeight: 3,
-        giveTokenId: 4,
+        giveTokenId: 2,
         giveAmount: SWAP_LOT_SCALE,
-        wantTokenId: 6,
+        wantTokenId: 5,
         wantAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
         minFillRatio: 0,
         timeInForce: 0,
@@ -1615,7 +1619,7 @@ describe('orderbook matching fallback execution mapping', () => {
             takerReferrerBps: 0,
           },
           referenceTokenId: 2,
-          supportedPairs: ['4/6'],
+          supportedPairs: ['2/5'],
         },
         books: new Map(),
         pairConfig: new Map(),
@@ -1630,9 +1634,9 @@ describe('orderbook matching fallback execution mapping', () => {
         toEntity: 'alice',
         accountId: 'alice',
         createdHeight: 1,
-        giveTokenId: 4,
+        giveTokenId: 2,
         giveAmount: SWAP_LOT_SCALE,
-        wantTokenId: 6,
+        wantTokenId: 5,
         wantAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
         minFillRatio: 0,
         timeInForce: 0,
@@ -1645,9 +1649,9 @@ describe('orderbook matching fallback execution mapping', () => {
         toEntity: 'bob',
         accountId: 'bob',
         createdHeight: 2,
-        giveTokenId: 6,
+        giveTokenId: 5,
         giveAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
-        wantTokenId: 4,
+        wantTokenId: 2,
         wantAmount: SWAP_LOT_SCALE,
         minFillRatio: 0,
         timeInForce: 0,
@@ -1954,9 +1958,9 @@ describe('orderbook matching fallback execution mapping', () => {
   test('keeps a canonical cross-j book order after a committed partial fill ack without refreshing it', () => {
     const lot = SWAP_LOT_SCALE;
     const sourceTotal = 40_000n * lot;
-    const targetTotal = 100_000_000n * lot;
-    const filledSourceAmount = 10000152590218966n;
-    const filledTargetAmount = (targetTotal * 16384n) / 65_535n;
+    const targetTotal = quoteAmountAtPrice(2, 1, sourceTotal, 25_000_000n);
+    const filledSourceAmount = 10_000n * lot;
+    const filledTargetAmount = quoteAmountAtPrice(2, 1, filledSourceAmount, 25_000_000n);
     const remainingSource = sourceTotal - filledSourceAmount;
     const remainingTarget = targetTotal - filledTargetAmount;
     const pairId = 'cross:testnet:2/tron:1';
@@ -2059,9 +2063,9 @@ describe('orderbook matching fallback execution mapping', () => {
   test('does not persist speculative cross-j post-trade book before fill ack commits', () => {
     const lot = SWAP_LOT_SCALE;
     const sourceTotal = 40_000n * lot;
-    const targetTotal = 100_000_000n * lot;
+    const targetTotal = quoteAmountAtPrice(2, 1, sourceTotal, 25_000_000n);
     const fillSource = 10_000n * lot;
-    const fillTarget = 25_000_000n * lot;
+    const fillTarget = quoteAmountAtPrice(2, 1, fillSource, 25_000_000n);
     const pairId = 'cross:testnet:2/tron:1';
     const makerOrderId = 'maker-account:maker-cross-partial-live';
     let book = createBook({
@@ -2200,11 +2204,11 @@ describe('orderbook matching fallback execution mapping', () => {
   test('fails fast when cross-j trade cannot produce a monotonic fill ack', () => {
     const lot = SWAP_LOT_SCALE;
     const sourceTotal = 1_000_000n * lot;
-    const targetTotal = 1_000_000n * lot;
+    const targetTotal = quoteAmountAtPrice(2, 1, sourceTotal, ORDERBOOK_PRICE_SCALE);
     const previousRatio = 1_000n;
     const makerQtyLots = sourceTotal / lot;
     const fillSource = lot;
-    const fillTarget = lot;
+    const fillTarget = quoteAmountAtPrice(2, 1, fillSource, ORDERBOOK_PRICE_SCALE);
     const pairId = 'cross:testnet:2/tron:1';
     const makerOrderId = 'maker-account:maker-cross-tiny-fill';
     let book = createBook({
@@ -2376,7 +2380,7 @@ describe('orderbook matching fallback execution mapping', () => {
         entityId: 'old-maker',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
-        amount: 2_500n * lot,
+        amount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
       },
       status: 'source_claimed',
       createdAt: 1,
@@ -2391,7 +2395,7 @@ describe('orderbook matching fallback execution mapping', () => {
         entityId: 'new-taker',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
-        amount: 2_500n * lot,
+        amount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
       },
       target: {
         jurisdiction: 'testnet',
@@ -2410,8 +2414,8 @@ describe('orderbook matching fallback execution mapping', () => {
       accountId: 'new-taker-account',
       createdHeight: 2,
       giveTokenId: 1,
-      giveAmount: 2_500n * lot,
-      quantizedGive: 2_500n * lot,
+      giveAmount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
+      quantizedGive: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
       wantTokenId: 2,
       wantAmount: lot,
       quantizedWant: lot,
@@ -2503,7 +2507,7 @@ describe('orderbook matching fallback execution mapping', () => {
         entityId: 'old-maker',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
-        amount: 2_500n * lot,
+        amount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
       },
       status: 'resting',
       createdAt: 1,
@@ -2520,8 +2524,8 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: lot,
       quantizedGive: lot,
       wantTokenId: 1,
-      wantAmount: 2_500n * lot,
-      quantizedWant: 2_500n * lot,
+      wantAmount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
+      quantizedWant: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
       minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 25_000_000n,
@@ -2536,7 +2540,7 @@ describe('orderbook matching fallback execution mapping', () => {
         entityId: 'new-taker',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
-        amount: 2_500n * lot,
+        amount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
       },
       target: {
         jurisdiction: 'testnet',
@@ -2554,8 +2558,8 @@ describe('orderbook matching fallback execution mapping', () => {
       accountId: 'new-taker-account',
       createdHeight: 2,
       giveTokenId: 1,
-      giveAmount: 2_500n * lot,
-      quantizedGive: 2_500n * lot,
+      giveAmount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
+      quantizedGive: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
       wantTokenId: 2,
       wantAmount: lot,
       quantizedWant: lot,
@@ -2615,9 +2619,9 @@ describe('orderbook matching fallback execution mapping', () => {
   test('validates a remote cross-j book order from admitted route without refreshing it', () => {
     const lot = SWAP_LOT_SCALE;
     const sourceTotal = 40_000n * lot;
-    const targetTotal = 100_000_000n * lot;
-    const filledSourceAmount = 10000152590218966n;
-    const filledTargetAmount = (targetTotal * 16384n) / 65_535n;
+    const targetTotal = quoteAmountAtPrice(2, 1, sourceTotal, 25_000_000n);
+    const filledSourceAmount = 10_000n * lot;
+    const filledTargetAmount = quoteAmountAtPrice(2, 1, filledSourceAmount, 25_000_000n);
     const remainingSource = sourceTotal - filledSourceAmount;
     const pairId = 'cross:testnet:2/tron:1';
     const namespacedOrderId = 'maker-entity:maker-cross-partial';
@@ -2717,9 +2721,9 @@ describe('orderbook matching fallback execution mapping', () => {
     env.timestamp = 2;
     const lot = SWAP_LOT_SCALE;
     const sourceTotal = 40_000n * lot;
-    const targetTotal = 100_000_000n * lot;
+    const targetTotal = quoteAmountAtPrice(2, 1, sourceTotal, 25_000_000n);
     const filledSourceAmount = 10_000n * lot;
-    const filledTargetAmount = 25_000_000n * lot;
+    const filledTargetAmount = quoteAmountAtPrice(2, 1, filledSourceAmount, 25_000_000n);
     const pairId = 'cross:testnet:2/tron:1';
     const namespacedOrderId = 'maker-entity:maker-cross-progress';
     let book = createBook({
@@ -2857,9 +2861,9 @@ describe('orderbook matching fallback execution mapping', () => {
   test('suspends a cross-j order while its partial fill ack is pending', () => {
     const lot = SWAP_LOT_SCALE;
     const sourceTotal = 40_000n * lot;
-    const targetTotal = 100_000n * lot;
+    const targetTotal = quoteAmountAtPrice(2, 1, sourceTotal, 25_000_000n);
     const filledSourceAmount = 10000152590218966n;
-    const filledTargetAmount = (targetTotal * 16384n) / 65_535n;
+    const filledTargetAmount = quoteAmountAtPrice(2, 1, filledSourceAmount, 25_000_000n);
     const remainingSource = sourceTotal - filledSourceAmount;
     const pairId = 'cross:testnet:2/tron:1';
     const makerOrderId = 'maker-account:maker-cross-pending';
@@ -3018,9 +3022,9 @@ describe('orderbook matching fallback execution mapping', () => {
   test('fails fast when pending cross-j ack has no swapOffer or admitted route to validate the row', () => {
     const lot = SWAP_LOT_SCALE;
     const sourceTotal = 40_000n * lot;
-    const targetTotal = 100_000n * lot;
+    const targetTotal = quoteAmountAtPrice(2, 1, sourceTotal, 25_000_000n);
     const filledSourceAmount = 10000152590218966n;
-    const filledTargetAmount = (targetTotal * 16384n) / 65_535n;
+    const filledTargetAmount = quoteAmountAtPrice(2, 1, filledSourceAmount, 25_000_000n);
     const remainingSource = sourceTotal - filledSourceAmount;
     const pairId = 'cross:testnet:2/tron:1';
     const makerOrderId = 'maker-account:maker-cross-pending';
@@ -3137,7 +3141,7 @@ describe('orderbook matching fallback execution mapping', () => {
   });
 
   test('keeps matching committed cross-j orders while another order has a pending fill ack', () => {
-    const lot = SWAP_LOT_SCALE;
+    const lot = getSwapLotScale(1);
     const pairId = 'cross:base:1/tron:1';
     const pendingOrderId = 'maker-pending-account:maker-cross-pending';
     const committedOrderId = 'maker-committed-account:maker-cross-committed';
@@ -3386,7 +3390,7 @@ describe('orderbook matching fallback execution mapping', () => {
         entityId: 'hub-entity',
         counterpartyEntityId: 'remote-target-user',
         tokenId: 1,
-        amount: 75_000n * lot,
+        amount: quoteAmountAtPrice(2, 1, 30n * lot, 25_000_000n),
       },
       status: 'resting',
       createdAt: 1,
@@ -3401,7 +3405,7 @@ describe('orderbook matching fallback execution mapping', () => {
         entityId: 'local-taker',
         counterpartyEntityId: 'local-source-hub',
         tokenId: 1,
-        amount: 75_000n * lot,
+        amount: quoteAmountAtPrice(2, 1, 30n * lot, 25_000_000n),
       },
       target: {
         jurisdiction: 'base',
@@ -3419,7 +3423,7 @@ describe('orderbook matching fallback execution mapping', () => {
       accountId: 'local-taker-account',
       createdHeight: 2,
       giveTokenId: 1,
-      giveAmount: 75_000n * lot,
+      giveAmount: quoteAmountAtPrice(2, 1, 30n * lot, 25_000_000n),
       wantTokenId: 2,
       wantAmount: 30n * lot,
       minFillRatio: 0,
@@ -3512,7 +3516,7 @@ describe('orderbook matching fallback execution mapping', () => {
         entityId: 'hub-entity',
         counterpartyEntityId: 'remote-target-user',
         tokenId: 1,
-        amount: 75_000n * lot,
+        amount: quoteAmountAtPrice(2, 1, 30n * lot, 25_000_000n),
       },
       status: 'resting',
       createdAt: 1,
@@ -3527,7 +3531,7 @@ describe('orderbook matching fallback execution mapping', () => {
         entityId: 'local-taker',
         counterpartyEntityId: 'local-source-hub',
         tokenId: 1,
-        amount: 75_000n * lot,
+        amount: quoteAmountAtPrice(2, 1, 30n * lot, 25_000_000n),
       },
       target: {
         jurisdiction: 'base',
@@ -3545,7 +3549,7 @@ describe('orderbook matching fallback execution mapping', () => {
       accountId: 'local-taker-account',
       createdHeight: 2,
       giveTokenId: 1,
-      giveAmount: 75_000n * lot,
+      giveAmount: quoteAmountAtPrice(2, 1, 30n * lot, 25_000_000n),
       wantTokenId: 2,
       wantAmount: 30n * lot,
       minFillRatio: 0,
@@ -3649,7 +3653,7 @@ describe('orderbook matching fallback execution mapping', () => {
         entityId: 'hub-entity',
         counterpartyEntityId: 'remote-target-user',
         tokenId: 1,
-        amount: 75_000n * lot,
+        amount: quoteAmountAtPrice(2, 1, 30n * lot, 25_000_000n),
       },
       status: 'resting',
       createdAt: 1,
@@ -3664,7 +3668,7 @@ describe('orderbook matching fallback execution mapping', () => {
         entityId: 'local-taker',
         counterpartyEntityId: 'local-source-hub',
         tokenId: 1,
-        amount: 75_000n * lot,
+        amount: quoteAmountAtPrice(2, 1, 30n * lot, 25_000_000n),
       },
       target: {
         jurisdiction: 'base',
@@ -3682,7 +3686,7 @@ describe('orderbook matching fallback execution mapping', () => {
       accountId: 'local-taker-account',
       createdHeight: 2,
       giveTokenId: 1,
-      giveAmount: 75_000n * lot,
+      giveAmount: quoteAmountAtPrice(2, 1, 30n * lot, 25_000_000n),
       wantTokenId: 2,
       wantAmount: 30n * lot,
       minFillRatio: 0,
@@ -4329,9 +4333,9 @@ describe('orderbook matching fallback execution mapping', () => {
             takerReferrerBps: 0,
           },
           referenceTokenId: 2,
-          supportedPairs: ['4/6'],
+          supportedPairs: ['2/5'],
         },
-        books: new Map([['4/6', createBook({ bucketWidthTicks: 10_000n, maxOrders, stpPolicy: 1 })]]),
+        books: new Map([['2/5', createBook({ bucketWidthTicks: 10_000n, maxOrders, stpPolicy: 1 })]]),
         pairConfig: new Map(),
       } as any,
     } as any;
@@ -4344,9 +4348,9 @@ describe('orderbook matching fallback execution mapping', () => {
       toEntity: 'alice',
       accountId: 'alice',
       createdHeight: index + 1,
-      giveTokenId: 4,
+      giveTokenId: 2,
       giveAmount: SWAP_LOT_SCALE,
-      wantTokenId: 6,
+      wantTokenId: 5,
       wantAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
       minFillRatio: 0,
       timeInForce: 0,
@@ -4375,9 +4379,9 @@ describe('orderbook matching fallback execution mapping', () => {
       toEntity: 'maker-entity',
       accountId: 'maker-account',
       createdHeight: 1,
-      giveTokenId: 4,
+      giveTokenId: 2,
       giveAmount: lot,
-      wantTokenId: 6,
+      wantTokenId: 5,
       wantAmount: (lot * 10_000n) / 10_000n,
       minFillRatio: 0,
       timeInForce: 0,
@@ -4390,9 +4394,9 @@ describe('orderbook matching fallback execution mapping', () => {
       toEntity: 'taker-entity',
       accountId: 'taker-account',
       createdHeight: 2,
-      giveTokenId: 6,
+      giveTokenId: 5,
       giveAmount: (lot * 10_000n) / 10_000n,
-      wantTokenId: 4,
+      wantTokenId: 2,
       wantAmount: lot,
       minFillRatio: 0,
       timeInForce: 0,
@@ -4444,9 +4448,9 @@ describe('orderbook matching fallback execution mapping', () => {
             takerReferrerBps: 0,
           },
           referenceTokenId: 2,
-          supportedPairs: ['4/6'],
+          supportedPairs: ['2/5'],
         },
-        books: new Map([['4/6', corruptedBook]]),
+        books: new Map([['2/5', corruptedBook]]),
         pairConfig: new Map(),
       } as any,
     } as any;
@@ -4624,9 +4628,9 @@ describe('orderbook matching fallback execution mapping', () => {
       fromEntity: 'hub-entity',
       toEntity: 'taker',
       accountId: 'taker-account',
-      giveTokenId: 6,
+      giveTokenId: 5,
       giveAmount: (lot * 10_000n) / 10_000n,
-      wantTokenId: 4,
+      wantTokenId: 2,
       wantAmount: lot,
       createdHeight: 1,
       minFillRatio: 0,
@@ -4653,9 +4657,9 @@ describe('orderbook matching fallback execution mapping', () => {
             takerReferrerBps: 0,
           },
           referenceTokenId: 2,
-          supportedPairs: ['4/6'],
+          supportedPairs: ['2/5'],
         },
-        books: new Map([['4/6', book]]),
+        books: new Map([['2/5', book]]),
         pairConfig: new Map(),
       } as any,
     } as any;

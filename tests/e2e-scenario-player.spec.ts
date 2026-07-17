@@ -1,7 +1,7 @@
 import { expect, test } from './global-setup';
 
 test.describe('visual scenario player', () => {
-  test('opens hub-collapse player, scrubs time, switches scenarios, and previews in wallet', async ({ page }) => {
+  test('opens hub-collapse player, scrubs time, switches scenarios, and previews in wallet', { tag: '@functional' }, async ({ page }) => {
     test.setTimeout(120_000);
     const runtimeErrors: string[] = [];
     page.on('pageerror', (error) => runtimeErrors.push(error.message));

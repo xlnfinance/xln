@@ -43,11 +43,11 @@ describe("EntityProvider with Automatic Governance", function () {
       const entity = await entityProvider.entities(ethers.zeroPadValue(ethers.toBeHex(1), 32));
       expect(entity.currentBoardHash).to.equal(singleSignerBoardHash(owner.address));
       expect(entity.registrationBlock).to.be.gt(0);
-      expect(entity.articlesHash).to.not.equal(ethers.ZeroHash);
+      expect(entity.articles.controlDelay).to.equal(1000);
       
       // Check foundation governance tokens are controlled by a real deploy-time recipient.
       const [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(1);
-      const expectedSupply = 10n**15n; // 1 quadrillion
+      const expectedSupply = 100_000_000_000n;
       
       expect(await entityProvider.balanceOf(owner.address, controlTokenId)).to.equal(expectedSupply);
       expect(await entityProvider.balanceOf(owner.address, dividendTokenId)).to.equal(expectedSupply);
@@ -56,7 +56,7 @@ describe("EntityProvider with Automatic Governance", function () {
     it("Should allow foundation token holders to use foundation functions", async function () {
       // Owner has foundation tokens directly from constructor bootstrap.
       const [foundationControlTokenId] = await entityProvider.getTokenIds(1);
-      expect(await entityProvider.balanceOf(owner.address, foundationControlTokenId)).to.equal(10n ** 15n);
+      expect(await entityProvider.balanceOf(owner.address, foundationControlTokenId)).to.equal(100_000_000_000n);
       
       // Should be able to assign names
       const boardHash = ethers.keccak256(ethers.toUtf8Bytes("test_board"));
@@ -86,12 +86,12 @@ describe("EntityProvider with Automatic Governance", function () {
       const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
       const entity = await entityProvider.entities(entityId);
       expect(entity.currentBoardHash).to.equal(boardHash);
-      expect(entity.articlesHash).to.not.equal(ethers.ZeroHash);
+      expect(entity.articles.controlDelay).to.equal(1000);
       
       // Check governance tokens were created with fixed supply
       const [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(entityNumber);
       const entityAddress = ethers.getAddress(`0x${entityNumber.toString(16).padStart(40, '0')}`);
-      const expectedSupply = 10n**15n; // 1 quadrillion
+      const expectedSupply = 100_000_000_000n;
       
       expect(await entityProvider.balanceOf(entityAddress, controlTokenId)).to.equal(expectedSupply);
       expect(await entityProvider.balanceOf(entityAddress, dividendTokenId)).to.equal(expectedSupply);
@@ -102,8 +102,7 @@ describe("EntityProvider with Automatic Governance", function () {
       const customArticles = {
         controlDelay: 500,
         dividendDelay: 1500,
-        foundationDelay: 5000,
-        controlThreshold: 67
+        foundationDelay: 5000
       };
       
       await expect(entityProvider.connect(owner).foundationRegisterEntity(boardHash, customArticles)).to.not.be.reverted;
@@ -112,10 +111,11 @@ describe("EntityProvider with Automatic Governance", function () {
       const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
       const entity = await entityProvider.entities(entityId);
       expect(entity.currentBoardHash).to.equal(boardHash);
-      expect(entity.articlesHash).to.equal(ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-        ["tuple(uint32,uint32,uint32,uint16)"],
-        [[customArticles.controlDelay, customArticles.dividendDelay, customArticles.foundationDelay, customArticles.controlThreshold]]
-      )));
+      expect(entity.articles).to.deep.equal([
+        500n,
+        1500n,
+        5000n,
+      ]);
     });
   });
 
@@ -148,7 +148,7 @@ describe("EntityProvider with Automatic Governance", function () {
       // Note: In real usage, tokens would be distributed via Depository.sol using entity hanko signatures
       // For testing, we'll just verify tokens exist in entity address
       const entityAddress = ethers.getAddress(`0x${entityNumber.toString(16).padStart(40, '0')}`);
-      const expectedSupply = ethers.parseUnits("1", 15); // 1 quadrillion
+      const expectedSupply = 100_000_000_000n;
       
       expect(await entityProvider.balanceOf(entityAddress, controlTokenId)).to.equal(expectedSupply);
       expect(await entityProvider.balanceOf(entityAddress, dividendTokenId)).to.equal(expectedSupply);
@@ -223,7 +223,7 @@ describe("EntityProvider with Automatic Governance", function () {
       const [controlTokenId, dividendTokenId, controlSupply, dividendSupply, hasActiveProposal, articlesHash] = 
         await entityProvider.getGovernanceInfo(entityNumber);
       
-      const expectedSupply = ethers.parseUnits("1", 15); // 1 quadrillion
+      const expectedSupply = 100_000_000_000n;
       expect(controlTokenId).to.equal(entityNumber);
       expect(controlSupply).to.equal(expectedSupply);
       expect(dividendSupply).to.equal(expectedSupply);
@@ -231,97 +231,6 @@ describe("EntityProvider with Automatic Governance", function () {
       expect(articlesHash).to.not.equal(ethers.ZeroHash);
     });
 
-    it("tracks governance supply through the ERC1155 update hook", async function () {
-      const EntityProviderSupplyHarness = await ethers.getContractFactory("EntityProviderSupplyHarness");
-      const harness = await EntityProviderSupplyHarness.deploy(owner.address);
-      await harness.waitForDeployment();
-
-      const boardHash = ethers.keccak256(ethers.toUtf8Bytes("supply_hook_board"));
-      await harness.registerNumberedEntity(boardHash);
-
-      const entityNumber = 2;
-      const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
-      const [controlTokenId, dividendTokenId] = await harness.getTokenIds(entityNumber);
-      const expectedSupply = ethers.parseUnits("1", 15);
-
-      expect(await harness.totalControlSupply(entityId)).to.equal(expectedSupply);
-      expect(await harness.totalDividendSupply(entityId)).to.equal(expectedSupply);
-
-      await harness.harnessMint(alice.address, controlTokenId, 123);
-      await harness.harnessMint(alice.address, dividendTokenId, 456);
-
-      expect(await harness.totalControlSupply(entityId)).to.equal(expectedSupply + 123n);
-      expect(await harness.totalDividendSupply(entityId)).to.equal(expectedSupply + 456n);
-
-      await harness.harnessBurn(alice.address, controlTokenId, 23);
-      await harness.harnessBurn(alice.address, dividendTokenId, 56);
-
-      expect(await harness.totalControlSupply(entityId)).to.equal(expectedSupply + 100n);
-      expect(await harness.totalDividendSupply(entityId)).to.equal(expectedSupply + 400n);
-    });
-  });
-
-  describe("Board proposal permissions", function () {
-    const defaultArticles = {
-      controlDelay: 1000,
-      dividendDelay: 3000,
-      foundationDelay: 10000,
-      controlThreshold: 51
-    };
-
-    async function registerGovernedEntity() {
-      const boardHash = ethers.keccak256(ethers.toUtf8Bytes("proposal_board"));
-      await entityProvider.registerNumberedEntity(boardHash);
-
-      const entityNumber = 2;
-      const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
-      const entityAddress = ethers.getAddress(`0x${entityNumber.toString(16).padStart(40, '0')}`);
-      const [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(entityNumber);
-
-      await ethers.provider.send("hardhat_impersonateAccount", [entityAddress]);
-      const entitySigner = await ethers.getSigner(entityAddress);
-      await owner.sendTransaction({ to: entityAddress, value: ethers.parseEther("1.0") });
-      await entityProvider.connect(entitySigner).safeTransferFrom(entityAddress, alice.address, dividendTokenId, 100, "0x");
-      await entityProvider.connect(entitySigner).safeTransferFrom(entityAddress, alice.address, controlTokenId, 1, "0x");
-      await entityProvider.connect(entitySigner).safeTransferFrom(entityAddress, bob.address, controlTokenId, (10n ** 15n * 60n) / 100n, "0x");
-      await ethers.provider.send("hardhat_stopImpersonatingAccount", [entityAddress]);
-
-      return { entityId };
-    }
-
-    it("rejects board proposer type until board Hanko authorization exists", async function () {
-      const { entityId } = await registerGovernedEntity();
-      const newBoardHash = ethers.keccak256(ethers.toUtf8Bytes("new_board"));
-
-      await expect(
-        entityProvider.connect(alice).proposeBoard(entityId, newBoardHash, 0, defaultArticles)
-      ).to.be.revertedWith("Board proposer disabled");
-    });
-
-    it("requires real governance tokens before cancelling another proposal", async function () {
-      const { entityId } = await registerGovernedEntity();
-      const dividendBoardHash = ethers.keccak256(ethers.toUtf8Bytes("dividend_board"));
-
-      await expect(
-        entityProvider.connect(alice).proposeBoard(entityId, dividendBoardHash, 2, defaultArticles)
-      ).to.not.be.reverted;
-
-      await expect(
-        entityProvider.connect(carol).cancelBoardProposal(entityId, 1, defaultArticles)
-      ).to.be.revertedWith("No control tokens");
-
-      await expect(
-        entityProvider.connect(alice).cancelBoardProposal(entityId, 1, defaultArticles)
-      ).to.be.revertedWith("Insufficient control tokens");
-
-      await expect(
-        entityProvider.connect(carol).cancelBoardProposal(entityId, 0, defaultArticles)
-      ).to.be.revertedWith("Board proposer disabled");
-
-      await expect(
-        entityProvider.connect(bob).cancelBoardProposal(entityId, 1, defaultArticles)
-      ).to.not.be.reverted;
-    });
   });
 
   describe("Foundation Access Control", function () {
@@ -336,8 +245,8 @@ describe("EntityProvider with Automatic Governance", function () {
     });
   });
 
-  describe("Entity Signature Recovery", function () {
-    it("Should recover entity ID from hanko signature", async function () {
+  describe("Entity Hanko Verification", function () {
+    it("Should verify a canonical Hanko for a registered entity", async function () {
         // The message hash MUST be prepared according to EIP-191.
         // ethers.hashMessage() automatically prepends the required prefix.
         const testHash = ethers.hashMessage(ethers.toUtf8Bytes("test message"));
@@ -359,16 +268,31 @@ describe("EntityProvider with Automatic Governance", function () {
             [[board.votingThreshold, board.entityIds, board.votingPowers, board.boardChangeDelay, board.controlChangeDelay, board.dividendChangeDelay]]
         );
 
-        const encodedSignature = ethers.AbiCoder.defaultAbiCoder().encode(['bytes[]'], [[signature]]);
-        
-        // CRITICAL FIX: The boardHash used to register the entity MUST be identical
-        // to the one reconstructed from the signature data.
         const boardHash = ethers.keccak256(encodedBoard);
         await entityProvider.registerNumberedEntity(boardHash); // This creates Entity #2
 
-        // Now, when we try to recover, the hashes will match.
-        const recoveredEntityId = await entityProvider.recoverEntity(encodedBoard, encodedSignature, testHash);
-        expect(recoveredEntityId).to.equal(2);
+        const parsedSignature = ethers.Signature.from(signature);
+        const packedSignature = ethers.concat([
+          parsedSignature.r,
+          parsedSignature.s,
+          ethers.toBeHex(parsedSignature.v === 28 ? 1 : 0, 1),
+        ]);
+        const entityId = ethers.zeroPadValue(ethers.toBeHex(2), 32);
+        const hanko = ethers.AbiCoder.defaultAbiCoder().encode(
+          ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[])'],
+          [[[], packedSignature, [[
+            entityId,
+            [0],
+            [1],
+            1,
+            board.boardChangeDelay,
+            board.controlChangeDelay,
+            board.dividendChangeDelay,
+          ]]]],
+        );
+        const [recoveredEntityId, valid] = await entityProvider.verifyHankoSignature(hanko, testHash);
+        expect(valid).to.equal(true);
+        expect(recoveredEntityId).to.equal(entityId);
     });
   });
 

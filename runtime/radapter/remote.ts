@@ -1,18 +1,29 @@
 import type { RuntimeInput } from '../types';
-import { decodeRuntimeAdapterMessage, encodeRuntimeAdapterMessage } from './codec';
+import {
+  decodeRuntimeAdapterBrowserMessage,
+  decodeRuntimeAdapterMessage,
+  encodeRuntimeAdapterMessage,
+} from './codec';
 import type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
+  RuntimeAdapterCommandLaneKind,
   RuntimeAdapterConfig,
-	  RuntimeAdapterReadQuery,
-	  RuntimeAdapterRequest,
-	  RuntimeAdapterResponse,
-	  RuntimeAdapterSendResult,
-	  RuntimeAdapterSendOptions,
-	  RuntimeAdapterStatus,
-	  RuntimeAdapterPush,
-	} from './types';
+  RuntimeAdapterReadQuery,
+  RuntimeAdapterRequest,
+  RuntimeAdapterResponse,
+  RuntimeAdapterSendResult,
+  RuntimeAdapterSendOptions,
+  RuntimeAdapterStatus,
+  RuntimeAdapterPush,
+} from './types';
 import { RuntimeAdapterError } from './errors';
+import {
+  createRuntimeAdapterIdentityChallenge,
+  verifyRuntimeAdapterServerIdentity,
+  type RuntimeAdapterServerIdentityProof,
+} from './server-identity';
+import { XLN_PROTOCOL_VERSION } from '../protocol/version';
 
 type PendingRequest = {
   op: RuntimeAdapterRequestBody['op'];
@@ -24,9 +35,9 @@ type PendingRequest = {
 };
 
 type RuntimeAdapterRequestBody =
-  | { op: 'auth'; key?: string }
+  | { op: 'auth'; key?: string; challenge: string; ownerSignature?: string }
   | { op: 'read'; path: string; query?: RuntimeAdapterReadQuery }
-  | { op: 'send'; commandId: string; input: RuntimeInput };
+  | { op: 'send'; commandId: string; commandSequence: number; input: RuntimeInput };
 
 const nextBackoff = (attempt: number, maxMs: number): number =>
   Math.min(maxMs, Math.max(1_000, 2 ** Math.min(attempt, 5) * 250));
@@ -69,6 +80,9 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
   private height = 0;
   private level: RuntimeAdapterAuthLevel | null = null;
   private id = '';
+  private fingerprint: string | null = null;
+  private nextSequence: number | null = null;
+  private laneKind: RuntimeAdapterCommandLaneKind | null = null;
 
   get status(): RuntimeAdapterStatus {
     return this.currentStatus;
@@ -78,8 +92,20 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     return this.id || String(this.config?.runtimeId || '').trim().toLowerCase();
   }
 
+  get serverFingerprint(): string | null {
+    return this.fingerprint;
+  }
+
   get currentHeight(): number {
     return this.height;
+  }
+
+  get nextCommandSequence(): number | null {
+    return this.nextSequence;
+  }
+
+  get commandLaneKind(): RuntimeAdapterCommandLaneKind | null {
+    return this.laneKind;
   }
 
   get authLevel(): RuntimeAdapterAuthLevel | null {
@@ -91,6 +117,9 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     if (!config.wsUrl) throw new RuntimeAdapterError('E_BAD_QUERY', 'wsUrl is required');
     this.config = config;
     this.id = String(config.runtimeId || '').trim().toLowerCase();
+    this.fingerprint = null;
+    this.nextSequence = null;
+    this.laneKind = null;
     this.intentionalClose = false;
     this.terminalAuthFailure = false;
     try {
@@ -99,12 +128,16 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       this.setStatus('connected');
     } catch (error) {
       this.handleConnectionFailure(error);
+      throw error;
     }
   }
 
   disconnect(): void {
     this.intentionalClose = true;
     this.terminalAuthFailure = false;
+    this.fingerprint = null;
+    this.nextSequence = null;
+    this.laneKind = null;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -119,10 +152,26 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     return this.request<T>({ op: 'read', path, ...(query ? { query } : {}) });
   }
 
-	  send(input: RuntimeInput, options: RuntimeAdapterSendOptions = {}): Promise<RuntimeAdapterSendResult> {
-	    const commandId = String(options.commandId || globalThis.crypto.randomUUID()).trim();
-	    return this.request<RuntimeAdapterSendResult>({ op: 'send', commandId, input });
-	  }
+  async ensureOwnerCommandLane(): Promise<void> {
+    if (this.laneKind === 'owner') return;
+    await this.authenticateIfNeeded(true);
+  }
+
+  send(input: RuntimeInput, options: RuntimeAdapterSendOptions = {}): Promise<RuntimeAdapterSendResult> {
+    const commandId = String(options.commandId || '').trim();
+    if (!/^[A-Za-z0-9._:-]{16,128}$/.test(commandId)) {
+      throw new RuntimeAdapterError('E_BAD_QUERY', 'remote runtime send requires a caller-owned commandId');
+    }
+    const commandSequence = Number(options.commandSequence);
+    if (!Number.isSafeInteger(commandSequence) || commandSequence <= 0) {
+      throw new RuntimeAdapterError('E_BAD_QUERY', 'remote runtime send requires a positive commandSequence');
+    }
+    return this.request<RuntimeAdapterSendResult>({ op: 'send', commandId, commandSequence, input })
+      .then((result) => {
+        this.nextSequence = Math.max(this.nextSequence ?? 1, commandSequence + 1);
+        return result;
+      });
+  }
 
   onChange(cb: (height: number) => void): () => void {
     this.changeCbs.add(cb);
@@ -172,6 +221,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
   private handleClose(): void {
     this.ws = null;
     this.level = null;
+    this.laneKind = null;
     this.failPending(new RuntimeAdapterError('E_INTERNAL', 'runtime adapter socket closed', true));
     this.setStatus(this.terminalAuthFailure ? 'error' : this.intentionalClose ? 'disconnected' : 'error');
     this.scheduleReconnect();
@@ -195,6 +245,8 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       this.terminalAuthFailure = true;
       this.intentionalClose = true;
       this.level = null;
+      this.nextSequence = null;
+      this.laneKind = null;
       this.failPending(error);
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer);
@@ -210,18 +262,75 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     this.scheduleReconnect();
   }
 
-  private async authenticateIfNeeded(): Promise<void> {
-    if (!this.config?.authKey) return;
-    const response = await this.request<{ authLevel: RuntimeAdapterAuthLevel; currentHeight?: number; runtimeId?: string }>({ op: 'auth', key: this.config.authKey });
+  private async authenticateIfNeeded(requireOwner = false): Promise<void> {
+    if (!this.config?.authKey) {
+      if (requireOwner) {
+        throw new RuntimeAdapterError('E_UNAUTHORIZED', 'runtime owner binding requires an admin capability');
+      }
+      return;
+    }
+    const challenge = createRuntimeAdapterIdentityChallenge();
+    const expectedRuntimeId = this.id || String(this.config.runtimeId || '').trim().toLowerCase();
+    const ownerSignature = this.config.ownerBindingSigner
+      ? await this.config.ownerBindingSigner({
+          runtimeId: expectedRuntimeId,
+          challenge,
+          capability: this.config.authKey,
+        })
+      : null;
+    if (requireOwner && !ownerSignature) {
+      throw new RuntimeAdapterError('E_UNAUTHORIZED', 'runtime owner binding requires an unlocked matching vault');
+    }
+    const response = await this.request<RuntimeAdapterServerIdentityProof & {
+      authLevel: RuntimeAdapterAuthLevel;
+      commandLaneKind: RuntimeAdapterCommandLaneKind;
+      currentHeight?: number;
+      nextCommandSequence?: number;
+    }>({
+      op: 'auth',
+      key: this.config.authKey,
+      challenge,
+      ...(ownerSignature ? { ownerSignature } : {}),
+    });
+    let verified: RuntimeAdapterServerIdentityProof;
+    try {
+      verified = verifyRuntimeAdapterServerIdentity(
+        response,
+        challenge,
+        this.id || this.config.runtimeId,
+      );
+    } catch (error) {
+      throw new RuntimeAdapterError(
+        'E_UNAUTHORIZED',
+        `runtime adapter server identity verification failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     this.level = response.authLevel;
-    this.id = String(response.runtimeId || this.id || this.config.runtimeId || '').trim().toLowerCase();
+    this.id = verified.runtimeId;
+    this.fingerprint = verified.identityFingerprint;
+    if (response.commandLaneKind !== 'owner' && response.commandLaneKind !== 'capability') {
+      throw new RuntimeAdapterError('E_UNAUTHORIZED', 'runtime adapter server returned an invalid command lane kind');
+    }
+    if (requireOwner && response.commandLaneKind !== 'owner') {
+      throw new RuntimeAdapterError('E_UNAUTHORIZED', 'runtime adapter server did not bind the vault-owner lane');
+    }
+    this.laneKind = response.commandLaneKind;
+    const nextCommandSequence = Number(response.nextCommandSequence);
+    if (!Number.isSafeInteger(nextCommandSequence) || nextCommandSequence <= 0) {
+      throw new RuntimeAdapterError('E_UNAUTHORIZED', 'runtime adapter server returned an invalid command frontier');
+    }
+    this.nextSequence = nextCommandSequence;
     this.noteHeight(response.currentHeight, { allowDecrease: true });
   }
 
   private handleMessage(raw: unknown): void {
     let message: RuntimeAdapterResponse | RuntimeAdapterPush;
     try {
-      message = decodeRuntimeAdapterMessage<RuntimeAdapterResponse | RuntimeAdapterPush>(raw);
+      const decoded = typeof raw === 'string'
+        ? decodeRuntimeAdapterBrowserMessage(raw)
+        : decodeRuntimeAdapterMessage(raw);
+      if ('id' in decoded) throw new Error('RADAPTER_SERVER_MESSAGE_REQUEST_FORBIDDEN');
+      message = decoded;
     } catch (error) {
       this.setStatus('error');
       this.failPending(error);
@@ -257,7 +366,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       return Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'runtime adapter is not connected', true));
     }
     const id = `r-${++this.requestId}`;
-    const payload = { v: 1 as const, id, ...body } as RuntimeAdapterRequest;
+    const payload = { v: XLN_PROTOCOL_VERSION, id, ...body } as RuntimeAdapterRequest;
     return new Promise<T>((resolve, reject) => {
       const timeoutMs = Math.max(1_000, Number(this.config?.requestTimeoutMs ?? 15_000));
       const timer = setTimeout(() => {

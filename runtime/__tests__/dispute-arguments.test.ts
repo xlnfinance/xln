@@ -1,12 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 
 import {
   buildDisputeArgumentsForSnapshot,
   captureDisputeArgumentSnapshot,
   storeDisputeArgumentSnapshot,
 } from '../protocol/dispute/arguments';
-import { buildAccountProofBody, setDeltaTransformerAddress } from '../protocol/dispute/proof-builder';
+import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
+import {
+  sanitizeOptionalDisputeArgument,
+  sanitizeOptionalDisputeStarterArgumentPair,
+} from '../jurisdiction/batch';
 import type { AccountMachine, AccountTx, EntityState, SwapOffer } from '../types';
 
 const DELTA_TRANSFORMER = '0x1111111111111111111111111111111111111111';
@@ -62,9 +67,8 @@ function accountWithSwaps(swaps: Array<[string, SwapOffer]>): AccountMachine {
     requestedRebalance: new Map(),
     requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftJObservations: [],
-    rightJObservations: [],
-    jEventChain: [],
+    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,
     disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
     jNonce: 0,
@@ -83,13 +87,54 @@ function decodeFirstRatio(wrapped: string): number {
 }
 
 describe('dispute argument snapshots', () => {
+  test('sanitizes malformed optional transformer arguments with a structured warning', () => {
+    const result = sanitizeOptionalDisputeArgument('0x1234', 'dispute.test');
+
+    expect(result.value).toBe('0x');
+    expect(result.warnings).toEqual([{
+      code: 'DISPUTE_OPTIONAL_ARGUMENT_MALFORMED',
+      context: 'dispute.test',
+      originalBytes: 2,
+      limitBytes: 64 * 1024,
+    }]);
+  });
+
+  test('sanitizes oversized optional transformer arguments instead of blocking dispute', () => {
+    const oversized = ethers.AbiCoder.defaultAbiCoder().encode(
+      ['bytes[]'],
+      [[`0x${'ab'.repeat(64 * 1024)}`]],
+    );
+    const result = sanitizeOptionalDisputeArgument(oversized, 'dispute.test');
+
+    expect(result.value).toBe('0x');
+    expect(result.warnings[0]).toMatchObject({
+      code: 'DISPUTE_OPTIONAL_ARGUMENT_OVERSIZED',
+      context: 'dispute.test',
+      limitBytes: 64 * 1024,
+    });
+  });
+
+  test('keeps the initial evidence and drops only the suffix when starter arguments exceed their aggregate cap', () => {
+    const abi = ethers.AbiCoder.defaultAbiCoder();
+    const initial = abi.encode(['bytes[]'], [[`0x${'11'.repeat(40 * 1024)}`]]);
+    const incremented = abi.encode(['bytes[]'], [[`0x${'22'.repeat(40 * 1024)}`]]);
+    const result = sanitizeOptionalDisputeStarterArgumentPair(initial, incremented, 'dispute.test');
+
+    expect(result.initial).toBe(initial);
+    expect(result.incremented).toBe('0x');
+    expect(result.warnings.at(-1)).toMatchObject({
+      code: 'DISPUTE_OPTIONAL_ARGUMENT_AGGREGATE_OVERSIZED',
+      context: 'dispute.test.incremented',
+      limitBytes: 64 * 1024,
+    });
+  });
+
   test('builds positional swap args from the signed snapshot, not live swap maps', () => {
-    setDeltaTransformerAddress(DELTA_TRANSFORMER);
     const account = accountWithSwaps([
       ['z-right-owned', offer('z-right-owned', false, 2, 1)],
       ['a-left-owned', offer('a-left-owned', true, 1, 2)],
     ]);
-    const proof = buildAccountProofBody(account);
+    const proof = buildAccountProofBody(account, DELTA_TRANSFORMER);
     storeDisputeArgumentSnapshot(
       account,
       captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct),
@@ -113,7 +158,6 @@ describe('dispute argument snapshots', () => {
   });
 
   test('does not reapply a pending swap fill to the proof body that already contains it', () => {
-    setDeltaTransformerAddress(DELTA_TRANSFORMER);
     const secondFill = {
       type: 'swap_resolve',
       data: {
@@ -146,7 +190,7 @@ describe('dispute argument snapshots', () => {
       byLeft: false,
       deltas: [],
     };
-    const initialProof = buildAccountProofBody(afterFirstFill);
+    const initialProof = buildAccountProofBody(afterFirstFill, DELTA_TRANSFORMER);
     storeDisputeArgumentSnapshot(
       afterFirstFill,
       captureDisputeArgumentSnapshot(afterFirstFill, initialProof.proofBodyHash, 1, initialProof.proofBodyStruct),
@@ -171,7 +215,7 @@ describe('dispute argument snapshots', () => {
       }],
     ]);
     afterSecondFill.pendingFrame = structuredClone(afterFirstFill.pendingFrame);
-    const incrementedProof = buildAccountProofBody(afterSecondFill);
+    const incrementedProof = buildAccountProofBody(afterSecondFill, DELTA_TRANSFORMER);
     storeDisputeArgumentSnapshot(
       afterSecondFill,
       captureDisputeArgumentSnapshot(afterSecondFill, incrementedProof.proofBodyHash, 2, incrementedProof.proofBodyStruct, {
@@ -191,7 +235,6 @@ describe('dispute argument snapshots', () => {
   });
 
   test('does not suppress an identical swap fill when it belongs to a later pending frame', () => {
-    setDeltaTransformerAddress(DELTA_TRANSFORMER);
     const repeatedFill = {
       type: 'swap_resolve',
       data: {
@@ -223,7 +266,7 @@ describe('dispute argument snapshots', () => {
       byLeft: false,
       deltas: [],
     };
-    const proof = buildAccountProofBody(account);
+    const proof = buildAccountProofBody(account, DELTA_TRANSFORMER);
     storeDisputeArgumentSnapshot(
       account,
       captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct, {
@@ -242,8 +285,7 @@ describe('dispute argument snapshots', () => {
     expect(decodeFirstRatio(args.rightArguments)).toBe(32768);
   });
 
-  test('fails fast when applied fill identity is missing the frame height', () => {
-    setDeltaTransformerAddress(DELTA_TRANSFORMER);
+  test('treats applied fill metadata without a frame height as optional no-op evidence', () => {
     const fill = {
       type: 'swap_resolve',
       data: {
@@ -269,7 +311,7 @@ describe('dispute argument snapshots', () => {
       byLeft: false,
       deltas: [],
     };
-    const proof = buildAccountProofBody(account);
+    const proof = buildAccountProofBody(account, DELTA_TRANSFORMER);
     storeDisputeArgumentSnapshot(
       account,
       captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct, {
@@ -277,21 +319,21 @@ describe('dispute argument snapshots', () => {
       }),
     );
 
-    expect(() => buildDisputeArgumentsForSnapshot(
+    const args = buildDisputeArgumentsForSnapshot(
       account,
       { entityId: 'left' } as unknown as EntityState,
       'right',
       proof.proofBodyHash,
       { secretsSide: 'left' },
-    )).toThrow('DISPUTE_ARGUMENT_APPLIED_FRAME_HEIGHT_MISSING');
+    );
+    expect(args.rightArguments).toBe('0x');
   });
 
-  test('derives dispute uint16 fill projection from exact ratio and rejects coarse drift', () => {
-    setDeltaTransformerAddress(DELTA_TRANSFORMER);
+  test('derives exact fill projection and turns coarse drift into a per-offer no-op', () => {
     const account = accountWithSwaps([
       ['left-owned', offer('left-owned', true, 1, 2)],
     ]);
-    const proof = buildAccountProofBody(account);
+    const proof = buildAccountProofBody(account, DELTA_TRANSFORMER);
     storeDisputeArgumentSnapshot(
       account,
       captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct),
@@ -328,12 +370,126 @@ describe('dispute argument snapshots', () => {
       },
     } as AccountTx];
 
-    expect(() => buildDisputeArgumentsForSnapshot(
+    const mismatched = buildDisputeArgumentsForSnapshot(
       account,
       { entityId: 'left' } as unknown as EntityState,
       'right',
       proof.proofBodyHash,
       { secretsSide: 'left' },
-    )).toThrow(/DISPUTE_ARGUMENT_SWAP_FILL_RATIO_MISMATCH/);
+    );
+    expect(mismatched.rightArguments).toBe('0x');
+  });
+
+  test('isolates duplicate and partial swap evidence to the affected offer', () => {
+    const account = accountWithSwaps([
+      ['ambiguous', offer('ambiguous', true, 1, 2)],
+      ['valid', offer('valid', true, 1, 2)],
+    ]);
+    const proof = buildAccountProofBody(account, DELTA_TRANSFORMER);
+    storeDisputeArgumentSnapshot(
+      account,
+      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct),
+    );
+    account.mempool = [
+      {
+        type: 'swap_resolve',
+        data: { offerId: 'ambiguous', fillRatio: 10_000, cancelRemainder: false },
+      } as AccountTx,
+      {
+        type: 'swap_resolve',
+        data: { offerId: 'ambiguous', fillRatio: 20_000, cancelRemainder: false },
+      } as AccountTx,
+      {
+        type: 'swap_resolve',
+        data: {
+          offerId: 'valid',
+          fillRatio: 32_768,
+          fillNumerator: 1n,
+          fillDenominator: 2n,
+          cancelRemainder: false,
+        },
+      } as AccountTx,
+    ];
+
+    const duplicateArgs = buildDisputeArgumentsForSnapshot(
+      account,
+      { entityId: 'left' } as unknown as EntityState,
+      'right',
+      proof.proofBodyHash,
+      { secretsSide: 'left' },
+    );
+    const abi = ethers.AbiCoder.defaultAbiCoder();
+    const [wrapped] = abi.decode(['bytes[]'], duplicateArgs.rightArguments) as unknown as [string[]];
+    const [decoded] = abi.decode(
+      ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
+      wrapped[0]!,
+    ) as unknown as [{ fillRatios: bigint[] }];
+    expect(Array.from(decoded.fillRatios, Number)).toEqual([0, 32_768]);
+
+    account.mempool = [{
+      type: 'swap_resolve',
+      data: {
+        offerId: 'ambiguous',
+        fillRatio: 10_000,
+        fillNumerator: 1n,
+        cancelRemainder: false,
+      },
+    } as AccountTx];
+    const partialArgs = buildDisputeArgumentsForSnapshot(
+      account,
+      { entityId: 'left' } as unknown as EntityState,
+      'right',
+      proof.proofBodyHash,
+      { secretsSide: 'left' },
+    );
+    expect(partialArgs.rightArguments).toBe('0x');
+  });
+
+  test('ignores malformed optional HTLC secrets but still requires the exact proof snapshot', () => {
+    const account = accountWithSwaps([]);
+    account.locks.set('lock', {
+      lockId: 'lock',
+      hashlock: `0x${'ab'.repeat(32)}`,
+      timelock: 100_000n,
+      amount: 1n,
+      tokenId: 1,
+      senderIsLeft: true,
+      createdHeight: 1,
+      createdTimestamp: 1,
+    });
+    account.pulls.set('pull', {
+      pullId: 'pull',
+      tokenId: 1,
+      amount: 1n,
+      revealedUntilTimestamp: 100,
+      fullHash: `0x${'cd'.repeat(32)}`,
+      partialRoot: `0x${'ef'.repeat(32)}`,
+      createdHeight: 1,
+      createdTimestamp: 1,
+    });
+    const proof = buildAccountProofBody(account, DELTA_TRANSFORMER);
+    storeDisputeArgumentSnapshot(
+      account,
+      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct),
+    );
+    const state = {
+      entityId: 'left',
+      htlcRoutes: new Map([['bad-secret', {
+        secret: '0x1234',
+        inboundEntity: 'right',
+      }]]),
+    } as unknown as EntityState;
+    account.mempool = [
+      { type: 'pull_resolve', data: { pullId: 'pull', binary: '0x1234' } } as AccountTx,
+      { type: 'pull_resolve', data: { pullId: 'pull', binary: '0x5678' } } as AccountTx,
+    ];
+
+    const args = buildDisputeArgumentsForSnapshot(account, state, 'right', proof.proofBodyHash, {
+      secretsSide: 'left',
+    });
+    expect(args.leftArguments).toBe('0x');
+    expect(() => buildDisputeArgumentsForSnapshot(account, state, 'right', `0x${'ff'.repeat(32)}`, {
+      secretsSide: 'left',
+    })).toThrow('DISPUTE_ARGUMENT_SNAPSHOT_MISSING');
   });
 });

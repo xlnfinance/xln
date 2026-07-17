@@ -1,8 +1,12 @@
 import { expect, type Page } from '@playwright/test';
+import { getTokenInfo } from '../../runtime/account/utils';
 import { enqueueEntityTxs } from './e2e-runtime-input';
 
 const DEFAULT_TOKEN_IDS = [1] as const;
-const DEFAULT_OPEN_TIMEOUT_MS = 75_000;
+const diagnosticOpenTimeoutMs = Number(process.env.E2E_DIAGNOSTIC_OPEN_TIMEOUT_MS || 75_000);
+const DEFAULT_OPEN_TIMEOUT_MS = Number.isSafeInteger(diagnosticOpenTimeoutMs) && diagnosticOpenTimeoutMs >= 1_000
+  ? diagnosticOpenTimeoutMs
+  : 75_000;
 const DEFAULT_CREDIT_AMOUNT_DISPLAY = '10000';
 
 type ConnectRuntimeOptions = {
@@ -423,6 +427,12 @@ async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
             return false;
           }
 
+          const inlineError = panel.locator('.error-banner').first();
+          if (await inlineError.isVisible().catch(() => false)) {
+            const message = String(await inlineError.textContent().catch(() => '') || '').trim();
+            if (message) throw new Error(`HUB_CONNECT_UI_ERROR:${message}`);
+          }
+
           const dataState = String(await hubCard.getAttribute('data-connection-state').catch(() => '') || '').toLowerCase();
           if (connectClicked) {
             lastUiState = `connect-clicked-awaiting-state:${dataState || 'unknown'}`;
@@ -511,15 +521,53 @@ async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Pro
           halted?: boolean;
           fatalDebugPayload?: unknown;
           loopActive?: boolean;
+          quarantinedRuntimeInputs?: Array<unknown>;
         };
         runtimeInput?: { entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> };
         runtimeMempool?: { entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> };
+        history?: Array<{
+          height?: number;
+          runtimeInput?: {
+            runtimeTxs?: Array<{ type?: string; data?: Record<string, unknown> }>;
+            entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }>;
+          };
+        }>;
+        jReplicas?: Map<string, {
+          blockNumber?: bigint;
+          chainId?: number;
+          depositoryAddress?: string;
+          jadapter?: { mode?: string; chainId?: number; isWatching?: () => boolean };
+        }>;
         eReplicas?: Map<string, {
           entityId?: string;
           signerId?: string;
+          isProposer?: boolean;
+          mempool?: Array<{ type?: string; data?: unknown }>;
+          proposal?: { height?: number; txs?: Array<{ type?: string }> };
+          jHistory?: {
+            scannedThroughHeight?: number;
+            contiguousThroughHeight?: number;
+            eventBlocks?: Map<number, { events?: Array<{ type?: string }> }>;
+            blockHashes?: Map<number, string>;
+          };
+          jPrefixRound?: {
+            targetEntityHeight?: number;
+            attestations?: Map<string, unknown>;
+            certificate?: { selected?: { scannedThroughHeight?: number } };
+          };
           state?: {
             entityId?: string;
+            height?: number;
+            lastFinalizedJHeight?: number;
+            jHistoryFinality?: { scannedThroughHeight?: number; eventHistoryRoot?: string };
+            config?: {
+              threshold?: bigint;
+              validators?: string[];
+              shares?: Record<string, bigint>;
+              jurisdiction?: { name?: string; chainId?: number };
+            };
             messages?: string[];
+            proposals?: Map<string, { status?: string; action?: { type?: string } }>;
             accounts?: Map<string, {
               currentHeight?: number;
               pendingFrame?: { height?: number };
@@ -545,7 +593,57 @@ async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Pro
         key,
         entityId: replica.state?.entityId ?? replica.entityId ?? null,
         signerId: replica.signerId ?? null,
+        stateHeight: Number(replica.state?.height || 0),
+        config: replica.state?.config ? {
+          threshold: String(replica.state.config.threshold ?? ''),
+          validators: replica.state.config.validators ?? [],
+          shares: Object.fromEntries(Object.entries(replica.state.config.shares || {}).map(([id, shares]) => [id, String(shares)])),
+          jurisdiction: replica.state.config.jurisdiction ?? null,
+        } : null,
+        isProposer: Boolean(replica.isProposer),
+        mempool: (replica.mempool || []).map((tx) => String(tx?.type || '')),
+        proposal: replica.proposal ? {
+          height: Number(replica.proposal.height || 0),
+          txs: (replica.proposal.txs || []).map((tx) => String(tx?.type || '')),
+        } : null,
+        jHistory: replica.jHistory ? {
+          scannedThroughHeight: Number(replica.jHistory.scannedThroughHeight || 0),
+          contiguousThroughHeight: Number(replica.jHistory.contiguousThroughHeight || 0),
+          eventBlockCount: replica.jHistory.eventBlocks instanceof Map ? replica.jHistory.eventBlocks.size : 0,
+          eventBlocks: replica.jHistory.eventBlocks instanceof Map
+            ? Array.from(replica.jHistory.eventBlocks.entries()).slice(-10).map(([height, block]) => ({
+                height,
+                events: (block.events || []).map((event) => String(event?.type || '')),
+              }))
+            : [],
+          blockHashCount: replica.jHistory.blockHashes instanceof Map ? replica.jHistory.blockHashes.size : 0,
+          firstBlockHashHeight: replica.jHistory.blockHashes instanceof Map
+            ? Number(replica.jHistory.blockHashes.keys().next().value || 0)
+            : 0,
+        } : null,
+        jPrefixRound: replica.jPrefixRound ? {
+          targetEntityHeight: Number(replica.jPrefixRound.targetEntityHeight || 0),
+          attestationCount: replica.jPrefixRound.attestations instanceof Map
+            ? replica.jPrefixRound.attestations.size
+            : 0,
+          certifiedThroughHeight: Number(replica.jPrefixRound.certificate?.selected?.scannedThroughHeight || 0),
+        } : null,
+        lastFinalizedJHeight: Number(replica.state?.lastFinalizedJHeight || 0),
+        jHistoryFinality: replica.state?.jHistoryFinality ? {
+          scannedThroughHeight: Number(replica.state.jHistoryFinality.scannedThroughHeight || 0),
+          eventHistoryRoot: replica.state.jHistoryFinality.eventHistoryRoot ?? null,
+        } : null,
         messages: (replica.state?.messages || []).slice(-10),
+        accountIds: replica.state?.accounts instanceof Map
+          ? Array.from(replica.state.accounts.keys())
+          : [],
+        proposals: replica.state?.proposals instanceof Map
+          ? Array.from(replica.state.proposals.entries()).slice(-10).map(([id, proposal]) => ({
+              id,
+              status: proposal?.status ?? null,
+              actionType: proposal?.action?.type ?? null,
+            }))
+          : [],
         hubAccount: account ? {
           currentHeight: Number(account.currentHeight || 0),
           pendingFrameHeight: account.pendingFrame ? Number(account.pendingFrame.height || 0) : null,
@@ -562,9 +660,43 @@ async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Pro
         halted: Boolean(env.runtimeState.halted),
         loopActive: Boolean(env.runtimeState.loopActive),
         fatalDebugPayload: env.runtimeState.fatalDebugPayload ?? null,
+        quarantinedRuntimeInputs: (env.runtimeState.quarantinedRuntimeInputs || []).slice(-10),
       } : null,
+      uiErrors: Array.from(document.querySelectorAll('.hub-panel .error-banner, [role="alert"], .toast'))
+        .map((entry) => String(entry.textContent || '').trim())
+        .filter(Boolean)
+        .slice(-10),
       runtimeInput: summarizeInputs(env?.runtimeInput?.entityInputs),
       runtimeMempool: summarizeInputs(env?.runtimeMempool?.entityInputs),
+      recentFrames: (env?.history || []).slice(-100).map((frame) => ({
+        height: Number(frame.height || 0),
+        runtimeTxs: (frame.runtimeInput?.runtimeTxs || []).map((tx) => {
+          const type = String(tx?.type || '');
+          if (type !== 'observeJRange') return { type };
+          const headers = Array.isArray(tx.data?.headers)
+            ? tx.data.headers as Array<{ jHeight?: number }>
+            : [];
+          return {
+            type,
+            entityId: String(tx.data?.entityId || '').slice(-8),
+            signerId: String(tx.data?.signerId || '').slice(-8),
+            jurisdictionRef: String(tx.data?.jurisdictionRef || ''),
+            scannedThroughHeight: Number(tx.data?.scannedThroughHeight || 0),
+            headerCount: headers.length,
+            firstHeader: Number(headers[0]?.jHeight || 0),
+            lastHeader: Number(headers.at(-1)?.jHeight || 0),
+          };
+        }),
+        entityInputs: summarizeInputs(frame.runtimeInput?.entityInputs),
+      })),
+      jurisdictions: Array.from(env?.jReplicas?.entries?.() || []).map(([name, replica]) => ({
+        name,
+        blockNumber: String(replica.blockNumber ?? ''),
+        chainId: Number(replica.chainId ?? replica.jadapter?.chainId ?? 0),
+        depositoryAddress: replica.depositoryAddress ?? null,
+        adapterMode: replica.jadapter?.mode ?? null,
+        watching: replica.jadapter?.isWatching?.() ?? null,
+      })),
       replicas,
     };
   }, { hubId });
@@ -834,7 +966,7 @@ async function enqueueOpenAccount(
     type: 'openAccount',
     data: {
       targetEntityId: hubId,
-      creditAmount: 10_000n * 10n ** 18n,
+      creditAmount: 10_000n * 10n ** BigInt(getTokenInfo(1).decimals),
       tokenId: 1,
     },
   }]);
@@ -901,7 +1033,8 @@ async function extendCreditToken(
   if (!hubBaseStatus.hasAccount || !hubBaseStatus.ready) {
     await waitForHubBaseAccountReady(page, identity, hubId, `extendCredit token=${tokenId}`);
   }
-  const amount = BigInt(amountDisplay) * 10n ** 18n;
+  const before = await getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId);
+  const amount = BigInt(amountDisplay) * 10n ** BigInt(getTokenInfo(tokenId).decimals);
   await enqueueEntityTxs(page, identity.entityId, identity.signerId, [{
     type: 'extendCredit',
     data: {
@@ -914,6 +1047,8 @@ async function extendCreditToken(
   try {
     await expect.poll(
       async () => {
+        const status = await getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId);
+        if (status.currentHeight <= before.currentHeight || status.pendingHeight) return false;
         return await isAccountReady(page, identity.entityId, identity.signerId, hubId, [tokenId], 0);
       },
       {
@@ -922,6 +1057,7 @@ async function extendCreditToken(
         message: `extendCredit should activate token ${tokenId} for ${hubId.slice(0, 10)}`,
       },
     ).toBe(true);
+    await waitForHubAccountReady(page, identity.entityId, hubId, [tokenId]);
   } catch (error) {
     const [localStatus, hubStatus, debugState, relayDebug] = await Promise.all([
       getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId).catch((statusError) => ({
@@ -930,7 +1066,7 @@ async function extendCreditToken(
       readHubAccountStatus(page, identity.entityId, hubId, [tokenId]).catch((statusError) => ({
         error: statusError instanceof Error ? statusError.message : String(statusError),
       })),
-      getConnectDebugState(page, identity, hubId).catch((debugError) => ({
+      readLocalConnectRuntimeDiagnostic(page, hubId).catch((debugError) => ({
         error: debugError instanceof Error ? debugError.message : String(debugError),
       })),
       readRelayDebugEvents(page, 20).catch((debugError) => ({

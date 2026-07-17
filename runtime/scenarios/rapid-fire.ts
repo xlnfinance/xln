@@ -19,7 +19,7 @@
 
 import type { Env, EntityInput } from '../types';
 import { getPerfMs } from '../utils';
-import { ensureJAdapter, getJAdapterMode, createJReplica } from './boot';
+import { bindScenarioJReplica, ensureJAdapter, getJAdapterMode, createJReplica } from './boot';
 import { commitRuntimeInput, getOffdelta, converge, assert, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
@@ -63,16 +63,11 @@ export async function rapidFire(env: Env): Promise<void> {
 
   const jMode = getJAdapterMode();
   const jadapter = await ensureJAdapter(env, jMode);
-  const jReplica = createJReplica(env, 'RapidFire', jadapter.addresses.depository, { x: 0, y: 600, z: 0 }); // Match ahb.ts positioning
-  jReplica.jadapter = jadapter;
-  jReplica.depositoryAddress = jadapter.addresses.depository;
-  jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
-  jReplica.contracts = {
-    depository: jadapter.addresses.depository,
-    entityProvider: jadapter.addresses.entityProvider,
-    account: jadapter.addresses.account,
-    deltaTransformer: jadapter.addresses.deltaTransformer,
-  };
+  bindScenarioJReplica(
+    env,
+    createJReplica(env, 'RapidFire', jadapter.addresses.depository, { x: 0, y: 600, z: 0 }),
+    jadapter,
+  );
 
   const alice = { name: 'Alice', id: '0x' + '1'.padStart(64, '0'), signer: '1' };
   const hub = { name: 'Hub', id: '0x' + '2'.padStart(64, '0'), signer: '2' };

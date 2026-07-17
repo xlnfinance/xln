@@ -7,10 +7,11 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import type { ConsensusConfig } from '@xln/runtime/xln-api';
-  import { getXLN, submitRuntimeInput } from '../../stores/xlnStore';
+  import { createActiveNumberedEntity, getXLN, submitRuntimeInput } from '../../stores/xlnStore';
   import { errorLog } from '../../stores/errorLogStore';
   import { activeRuntime, vaultOperations } from '../../stores/vaultStore';
   import { tabOperations } from '../../stores/tabStore';
+  import { generateLazyEntityIdPreview } from '../../utils/lazyEntityId';
   import { Plus, X, Download, Upload, Shield, Hash, Tag, Zap } from 'lucide-svelte';
   import {
     emptyFormationRuntimeProjection,
@@ -30,7 +31,8 @@
   let entityName = 'ACME';
   let selectedJurisdiction = '';
   let threshold = 1;
-  let validators: Array<{ name: string; weight: number }> = [{ name: '1', weight: 1 }];
+  let validators: Array<{ name: string; weight: number }> = [{ name: '', weight: 1 }];
+  let seededSignerAddress = '';
   let creating = false;
   let error = '';
   let success = '';
@@ -48,7 +50,16 @@
   }
 
   // My signer address
-  $: mySignerAddress = vault?.signers?.[0]?.address || '';
+  $: mySignerAddress = vault?.signers?.[vault.activeSignerIndex]?.address || '';
+  $: if (mySignerAddress && mySignerAddress !== seededSignerAddress) {
+    if (
+      validators.length === 1 &&
+      (!validators[0]?.name || validators[0]?.name === seededSignerAddress)
+    ) {
+      validators = [{ name: mySignerAddress, weight: validators[0]?.weight || 1 }];
+    }
+    seededSignerAddress = mySignerAddress;
+  }
 
   // Total weight calculation
   $: totalWeight = validators.reduce((sum, v) => sum + v.weight, 0);
@@ -64,31 +75,29 @@
     }
   }
 
-  // Quorum hash for lazy entities
-  $: quorumHash = entityType === 'lazy' ? calculateQuorumHash(validators, threshold) : '';
+  let quorumHash = '';
+  let previewError = '';
+  $: {
+    try {
+      quorumHash = entityType === 'lazy'
+        ? generateLazyEntityIdPreview(validators, BigInt(threshold))
+        : '';
+      previewError = '';
+    } catch (cause) {
+      quorumHash = '';
+      previewError = cause instanceof Error ? cause.message : String(cause);
+    }
+  }
 
   // Expected entity ID preview
   $: expectedEntityId = (() => {
-    if (entityType === 'lazy') return `0x${quorumHash}`;
+    if (entityType === 'lazy') return quorumHash || 'Invalid board';
     if (entityType === 'numbered') return '#(next)';
     return entityName.toLowerCase().replace(/\s+/g, '-');
   })();
 
-  function calculateQuorumHash(vals: Array<{name: string; weight: number}>, thresh: number): string {
-    const validatorString = vals.map(v => `${v.name}:${v.weight}`).sort().join(',');
-    const hashInput = `${validatorString}|${thresh}`;
-    let hash = 0;
-    for (let i = 0; i < hashInput.length; i++) {
-      const char = hashInput.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
-    }
-    return Math.abs(hash).toString(16).padStart(8, '0');
-  }
-
   function addValidator() {
-    const nextNum = validators.length + 1;
-    validators = [...validators, { name: String(nextNum), weight: 1 }];
+    validators = [...validators, { name: '', weight: 1 }];
     if (!userModifiedThreshold) {
       threshold = validators.reduce((sum, v) => sum + v.weight, 0);
     }
@@ -129,8 +138,17 @@
       const xln = await getXLN();
       if (!xln) throw new Error('XLN not initialized');
 
-      const validatorNames = validators.map(v => v.name);
+      const boardMembers = validators.map((validator) => ({
+        name: validator.name.trim(),
+        weight: Number(validator.weight),
+      }));
       const thresholdBigInt = BigInt(threshold);
+      if (boardMembers.some((member) => !Number.isInteger(member.weight) || member.weight <= 0 || member.weight > 0xffff)) {
+        throw new Error('Every board weight must be an integer from 1 to 65535');
+      }
+      if (!Number.isInteger(threshold) || threshold <= 0 || threshold > totalWeight) {
+        throw new Error(`Board threshold must be between 1 and ${totalWeight}`);
+      }
 
       // Get jurisdiction config
       const jurisdictionReplica = jurisdictions.find(j => j.name === selectedJurisdiction);
@@ -143,18 +161,30 @@
 
       if (entityType === 'lazy') {
         // Lazy entity - ID is hash of quorum
-        entityId = xln.generateLazyEntityId(validatorNames, thresholdBigInt);
+        entityId = xln.generateLazyEntityId(boardMembers, thresholdBigInt);
 
         // Check for duplicates
         if (hasProjectedEntityId(runtimeProjection, entityId)) {
           throw new Error(`This validator configuration already exists! Entity ${formatShortId(entityId)} is in use.`);
         }
 
-        const result = xln.createLazyEntity(entityName, validatorNames, thresholdBigInt, jurisdictionReplica);
+        const result = xln.createLazyEntity(entityName, boardMembers, thresholdBigInt, jurisdictionReplica);
         config = result.config;
       } else if (entityType === 'numbered') {
         // Numbered entity - on-chain registration
-        const creation = await xln.createNumberedEntity(entityName, validatorNames, thresholdBigInt, jurisdictionReplica);
+        const registrationSignerId = mySignerAddress.trim().toLowerCase();
+        if (!registrationSignerId) {
+          throw new Error('NUMBERED_ENTITY_ACTIVE_WALLET_SIGNER_REQUIRED');
+        }
+        const vaultRuntimeId = String(vault?.id || '').trim().toLowerCase();
+        const creation = await createActiveNumberedEntity(
+          entityName,
+          boardMembers,
+          thresholdBigInt,
+          jurisdictionReplica,
+          registrationSignerId,
+          vaultRuntimeId,
+        );
         config = creation.config;
         entityId = creation.entityId;
       } else {
@@ -162,29 +192,28 @@
         throw new Error('Named entities require admin approval (not yet implemented)');
       }
 
-      // Create serverTxs to import replicas
-      const serverTxs = validatorNames.map((signerId, index) => ({
-        type: 'importReplica' as const,
-        entityId,
-        signerId,
-        data: {
-          config,
-          isProposer: index === 0,
-          profileName: entityName,
-        }
-      }));
-
-      // Apply to runtime
-      await submitRuntimeInput({
-        runtimeTxs: serverTxs,
-        entityInputs: []
-      });
-
-      success = `Entity created: ${formatShortId(entityId)}`;
-
-      // Auto-create panels for each validator
-      for (const signerId of validatorNames) {
-        tabOperations.addTab(entityId, signerId, selectedJurisdiction);
+      const localSignerId = mySignerAddress.toLowerCase();
+      const localBoardIndex = config.validators.findIndex(
+        (member) => member.toLowerCase() === localSignerId,
+      );
+      if (localBoardIndex >= 0) {
+        await submitRuntimeInput({
+          runtimeTxs: [{
+            type: 'importReplica',
+            entityId,
+            signerId: localSignerId,
+            data: {
+              config,
+              isProposer: localBoardIndex === 0,
+              profileName: entityName,
+            },
+          }],
+          entityInputs: [],
+        });
+        tabOperations.addTab(entityId, localSignerId, selectedJurisdiction);
+        success = `Entity created: ${formatShortId(entityId)}`;
+      } else {
+        success = `Board created: ${formatShortId(entityId)}. Import this configuration in a member wallet.`;
       }
 
       // Callback
@@ -205,7 +234,7 @@
   function resetForm() {
     entityName = 'ACME';
     entityType = 'numbered';
-    validators = [{ name: '1', weight: 1 }];
+    validators = [{ name: mySignerAddress, weight: 1 }];
     threshold = 1;
     userModifiedThreshold = false;
   }
@@ -241,7 +270,7 @@
       importJson = '';
       success = 'Config imported';
     } catch (err) {
-      error = 'Invalid JSON config';
+      error = err instanceof Error ? `Invalid entity config: ${err.message}` : 'Invalid entity config';
     }
   }
 </script>
@@ -340,19 +369,18 @@
   </div>
 
   <div class="field">
-    <div class="field-label">Validators ({validators.length})</div>
+    <div class="field-label">Ordered board ({validators.length})</div>
     <div class="validators-list">
       {#each validators as v, idx}
         <div class="validator-row">
           <span class="v-index">{idx + 1}</span>
-          <select bind:value={v.name} class="v-name">
-            <option value="">Select...</option>
-            <option value="1">1 (Default)</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
-            <option value="5">5</option>
-          </select>
+          <input
+            type="text"
+            bind:value={v.name}
+            class="v-name"
+            placeholder="EOA address or Entity ID"
+            aria-label={`Board member ${idx + 1}`}
+          />
           <input
             type="number"
             bind:value={v.weight}
@@ -367,8 +395,9 @@
       {/each}
     </div>
     <button class="btn-add-validator" on:click={addValidator}>
-      <Plus size={14} /> Add Validator
+      <Plus size={14} /> Add Board Member
     </button>
+    <p class="field-hint">Member 1 proposes. Order, weights and threshold are part of the Entity ID.</p>
   </div>
 
   {#if validators.length > 1}
@@ -392,10 +421,14 @@
 
   {#if entityType === 'lazy'}
     <div class="preview-box">
-      <div class="preview-label">Quorum Hash</div>
+      <div class="preview-label">Canonical Board Hash</div>
       <code>{quorumHash}</code>
       <small>This hash becomes your entity ID</small>
     </div>
+  {/if}
+
+  {#if previewError}
+    <div class="message error">{previewError}</div>
   {/if}
 
   <div class="preview-box">
@@ -415,7 +448,7 @@
     <button
       class="btn-create"
       on:click={createEntity}
-      disabled={creating || !selectedJurisdiction || validators.some(v => !v.name)}
+      disabled={creating || !selectedJurisdiction || validators.some(v => !v.name) || Boolean(previewError)}
     >
       {creating ? 'Creating...' : 'Create Entity'}
     </button>
@@ -507,8 +540,7 @@
     letter-spacing: 0.03em;
   }
 
-  .field input[type="text"],
-  .field select {
+  .field input[type="text"] {
     padding: 10px 12px;
     background: color-mix(in srgb, var(--theme-input-bg, #09090b) 88%, transparent);
     border: 1px solid color-mix(in srgb, var(--theme-input-border, #27272a) 82%, transparent);
@@ -517,8 +549,7 @@
     font-size: 13px;
   }
 
-  .field input:focus,
-  .field select:focus {
+  .field input:focus {
     outline: none;
     border-color: var(--theme-input-focus, #fbbf24);
   }

@@ -3,9 +3,9 @@
 
   Supports:
   - BrowserVM mode (local simulation, chainId 31337)
-  - RPC mode (real chain via RPC URLs)
+  - RPC mode (real chain via one RPC URL)
   - Network presets from networks.ts
-  - Custom RPC URLs (textarea, one per line)
+  - Custom RPC URL
   - Auto-deploy contracts if not found
 -->
 <script lang="ts">
@@ -25,6 +25,7 @@
     ticker: string;
     rpcs: string[];
     blockTimeMs: number;
+    entityProviderDeploymentBlock?: number;
     contracts?: JMachineConfig['contracts'];
   };
 
@@ -36,6 +37,7 @@
       rpcs: string[];
       blockTimeMs: number;
       ticker: string;
+      entityProviderDeploymentBlock?: number;
       contracts?: JMachineConfig['contracts'];
       deploy?: boolean;
     };
@@ -56,6 +58,7 @@
   let advancedError = '';
   let advancedJsonDirty = false;
   let advancedContracts: JMachineConfig['contracts'] | undefined;
+  let advancedEntityProviderDeploymentBlock: number | undefined;
   let deploySelectedNetworkId: number | null = null;
   let deployNotice = '';
   $: submitBusy = isCreating || busy;
@@ -101,6 +104,9 @@
     ticker: fields.ticker,
     rpcs: fields.rpcs,
     blockTimeMs: fields.blockTimeMs,
+    ...(fields.entityProviderDeploymentBlock !== undefined
+      ? { entityProviderDeploymentBlock: fields.entityProviderDeploymentBlock }
+      : {}),
     ...(fields.contracts ? { contracts: fields.contracts } : {}),
     createdAt: deriveJMachineCreatedAt({
       name: fields.name.trim() || fields.defaultName,
@@ -125,7 +131,10 @@
     ticker,
     rpcs,
     blockTimeMs,
-    contracts: advancedContracts,
+    ...(advancedEntityProviderDeploymentBlock !== undefined
+      ? { entityProviderDeploymentBlock: advancedEntityProviderDeploymentBlock }
+      : {}),
+    ...(advancedContracts ? { contracts: advancedContracts } : {}),
   });
 
   $: if (!advancedJsonDirty) advancedJson = stringifyDraftConfig(fieldDraftConfig);
@@ -167,6 +176,7 @@
     rpcTextarea = net.rpcs.join('\n');
     name = net.name.toLowerCase().replace(/\s+/g, '-');
     advancedContracts = undefined;
+    advancedEntityProviderDeploymentBlock = undefined;
     deploySelectedNetworkId = net.chainId;
     advancedJsonDirty = false;
     error = '';
@@ -183,6 +193,7 @@
       name = parsed.name;
       // Custom advanced JSON can carry a chain-specific value even when no preset exists.
       advancedContracts = parsed.contracts;
+      advancedEntityProviderDeploymentBlock = parsed.entityProviderDeploymentBlock;
       advancedError = '';
       advancedJsonDirty = false;
     } catch (err) {
@@ -205,6 +216,10 @@
     // Validation
     if (config.mode === 'rpc' && config.rpcs.length === 0) {
       error = 'At least one RPC URL is required';
+      return;
+    }
+    if (config.mode === 'rpc' && config.rpcs.length > 1) {
+      error = 'Only one RPC URL is supported until failover is implemented';
       return;
     }
     if (!config.name.trim()) {
@@ -232,6 +247,9 @@
         rpcs: config.rpcs,
         blockTimeMs: config.blockTimeMs,
         ticker: config.ticker,
+        ...(config.entityProviderDeploymentBlock !== undefined
+          ? { entityProviderDeploymentBlock: config.entityProviderDeploymentBlock }
+          : {}),
         ...(config.contracts ? { contracts: config.contracts } : {}),
         ...(deployRequested ? { deploy: true } : {}),
       });
@@ -349,15 +367,15 @@
     </div>
 
     <div class="field">
-      <div class="field-label">RPC URLs <span class="hint">(one per line)</span></div>
-      <textarea
+      <div class="field-label">RPC URL</div>
+      <input
+        type="url"
         bind:value={rpcTextarea}
-        placeholder="https://rpc.example.com&#10;https://backup.example.com"
-        rows="4"
+        placeholder="https://rpc.example.com"
         data-testid="add-jmachine-rpcs"
-      ></textarea>
+      />
       {#if rpcs.length > 0}
-        <span class="rpc-count">{rpcs.length} valid URL{rpcs.length > 1 ? 's' : ''}</span>
+        <span class="rpc-count">Valid RPC URL</span>
       {/if}
     </div>
   {:else}
@@ -448,11 +466,6 @@
     font-size: 0.8rem;
     color: var(--text-secondary, #888);
     margin-bottom: 0.4rem;
-  }
-
-  .hint {
-    opacity: 0.6;
-    font-weight: normal;
   }
 
   .mode-toggle {

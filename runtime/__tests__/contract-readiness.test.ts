@@ -1,4 +1,6 @@
 import { expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   findMissingRpcContractCode,
   type RpcContractAddresses,
@@ -10,6 +12,34 @@ const addresses: RpcContractAddresses = {
   entityProvider: `0x${'33'.repeat(20)}`,
   deltaTransformer: `0x${'44'.repeat(20)}`,
 };
+
+test('portable contract artifacts carry bounded immutable metadata without build-info', () => {
+  const root = join(import.meta.dir, '..', '..');
+  const immutableGroupCounts = new Map<string, number>();
+
+  for (const contractName of ['Account', 'Depository', 'EntityProvider', 'DeltaTransformer']) {
+    const artifact = JSON.parse(readFileSync(
+      join(root, 'frontend', 'static', 'contracts', `${contractName}.json`),
+      'utf8',
+    ));
+    expect(artifact.immutableReferences).toBeDefined();
+    const deployedBytes = (String(artifact.deployedBytecode).length - 2) / 2;
+    for (const references of Object.values(artifact.immutableReferences) as Array<
+      Array<{ start: number; length: number }>
+    >) {
+      expect(references.length).toBeGreaterThan(0);
+      for (const reference of references) {
+        expect(reference.length).toBe(32);
+        expect(reference.start).toBeGreaterThanOrEqual(0);
+        expect(reference.start + reference.length).toBeLessThanOrEqual(deployedBytes);
+      }
+    }
+    immutableGroupCounts.set(contractName, Object.keys(artifact.immutableReferences).length);
+  }
+
+  expect(immutableGroupCounts.get('Account')).toBe(1);
+  expect(immutableGroupCounts.get('Depository')).toBeGreaterThan(0);
+});
 
 test('contract readiness checks every required address in one bounded RPC batch', async () => {
   const seenMethods: string[] = [];

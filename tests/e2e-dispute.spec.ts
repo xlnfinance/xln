@@ -1349,7 +1349,7 @@ test.describe('E2E Dispute Flow', () => {
 
   // Scenario: trigger a dispute from the entity workspace, observe reserve returning after finalize,
   // then continue with post-dispute R2R/R2C/C2R coverage and confirm reload restores the final state.
-  test('entity workspace dispute lifecycle returns reserve', async ({ page }, testInfo) => {
+  test('entity workspace dispute lifecycle returns reserve', { tag: '@resilience' }, async ({ page }, testInfo) => {
     test.setTimeout(LONG_E2E ? 420_000 : 300_000);
     page.on('console', (msg) => {
       if (msg.type() === 'error') {
@@ -1570,7 +1570,7 @@ test.describe('E2E Dispute Flow', () => {
 
   // Scenario: the entity settle workspace must be able to sign and broadcast the queued dispute batch,
   // and history must reflect the dispute lifecycle without entering account panel UI.
-  test('entity settle workspace Sign & Broadcast submits dispute batch', async ({ page }) => {
+  test('entity settle workspace Sign & Broadcast submits dispute batch', { tag: '@resilience' }, async ({ page }) => {
     test.setTimeout(LONG_E2E ? 240_000 : 120_000);
     page.on('console', (msg) => {
       if (msg.type() === 'error') {

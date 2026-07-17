@@ -1,11 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { deriveSignerAddressSync } from '../account/crypto';
+import { deriveSignerAddressSync, signAccountFrame } from '../account/crypto';
 import { applyEntityInput } from '../entity/consensus';
 import { generateLazyEntityId } from '../entity/factory';
 import { applyJEvent } from '../entity/tx/j-events';
 import { buildJHistoryRangeRuntimeInput } from '../jadapter/helpers';
 import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
+import { buildJEventRangeDigest, canonicalJEventRangeHash } from '../jurisdiction/history-consensus';
+import { assertFrameJPrefix, buildLocalJPrefixAttestation } from '../jurisdiction/j-prefix-consensus';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
+import { markLocalJAuthorityRuntimeTx } from '../jurisdiction/registration-evidence';
 import { applyRuntimeTx } from '../machine/tx-handlers';
 import { createEmptyEnv } from '../runtime';
 import type { EntityInput, EntityReplica, EntityState } from '../types';
@@ -113,9 +116,23 @@ describe('overlapping finalized J-range consensus', () => {
         height,
         blockHash(height),
       );
-      if (!built || built.input.entityInputs.length !== 1) throw new Error('TEST_J_RANGE_NOT_BUILT');
-      await applyRuntimeTx(env, observation);
+      await applyRuntimeTx(env, markLocalJAuthorityRuntimeTx(observation));
+      if (!built) {
+        return {
+          outcome: { kind: 'committed' as const },
+          workingReplica: env.eReplicas.get(leaderKey)!,
+          outputs: [] as EntityInput[],
+        };
+      }
       for (const runtimeTx of built.input.runtimeTxs) await applyRuntimeTx(env, runtimeTx);
+      if (built.input.entityInputs.length === 0) {
+        return {
+          outcome: { kind: 'committed' as const },
+          workingReplica: env.eReplicas.get(leaderKey)!,
+          outputs: [] as EntityInput[],
+        };
+      }
+      if (built.input.entityInputs.length !== 1) throw new Error('TEST_J_RANGE_INPUT_COUNT_INVALID');
       const result = await applyEntityInput(
         env,
         env.eReplicas.get(leaderKey)!,
@@ -124,10 +141,6 @@ describe('overlapping finalized J-range consensus', () => {
       env.eReplicas.set(leaderKey, result.workingReplica);
       return result;
     };
-
-    const firstPoll = await applyWatcherPoll(7, '7', 1);
-    const firstProposal = frameAtHeight(firstPoll.outputs, 1);
-    await applyWatcherPoll(12, '12', 8);
 
     const initialValidatorHistory = recordValidatorJHistory(undefined, {
       jurisdictionRef,
@@ -147,7 +160,36 @@ describe('overlapping finalized J-range consensus', () => {
       isProposer: false,
       jHistory: initialValidatorHistory,
     };
-    const firstValidation = await applyEntityInput(env, initialValidator, {
+    const firstPoll = await applyWatcherPoll(7, '7', 1);
+    const validatorHead = buildLocalJPrefixAttestation(env, initialValidator);
+    if (!validatorHead) throw new Error('TEST_VALIDATOR_PREFIX_HEAD_MISSING');
+    const firstQuorum = await applyEntityInput(env, firstPoll.workingReplica, {
+      entityId,
+      signerId: leaderId,
+      jPrefixAttestations: new Map([[validatorId, validatorHead]]),
+    });
+    env.eReplicas.set(leaderKey, firstQuorum.workingReplica);
+    const firstProposal = frameAtHeight(firstQuorum.outputs, 1);
+    await applyWatcherPoll(12, '12', 8);
+
+    const validatorHistoryThroughTwelve = recordValidatorJHistory(
+      initialValidator.jHistory,
+      {
+        jurisdictionRef,
+        scannedThroughHeight: 12,
+        tipBlockHash: blockHash(12),
+        headers: Array.from({ length: 5 }, (_, index) => ({
+          jHeight: index + 8,
+          jBlockHash: blockHash(index + 8),
+        })),
+        blocks: [eventBlock(12, '12')],
+      },
+      initialValidator.state,
+    );
+    const firstValidation = await applyEntityInput(env, {
+      ...initialValidator,
+      jHistory: validatorHistoryThroughTwelve,
+    }, {
       entityId,
       signerId: validatorId,
       proposedFrame: firstProposal,
@@ -161,39 +203,70 @@ describe('overlapping finalized J-range consensus', () => {
       firstPrecommit,
     );
     env.eReplicas.set(leaderKey, firstCommit.workingReplica);
-    const committedFirstFrame = frameAtHeight(firstCommit.outputs, 1);
-    const secondProposalResult = await applyEntityInput(env, firstCommit.workingReplica, {
-      entityId,
-      signerId: leaderId,
-    });
-    env.eReplicas.set(leaderKey, secondProposalResult.workingReplica);
-    const secondProposal = frameAtHeight(secondProposalResult.outputs, 2);
-
-    const validatorAfterFirstCommit = await applyEntityInput(
-      env,
-      firstValidation.workingReplica,
-      { entityId, signerId: validatorId, proposedFrame: committedFirstFrame },
-    );
+    frameAtHeight(firstCommit.outputs, 1);
+    const validatorAfterFirstCommit = firstValidation;
     expect(validatorAfterFirstCommit.workingReplica.state.lastFinalizedJHeight).toBe(7);
     expect(validatorAfterFirstCommit.workingReplica.state.reserves.get(1)).toBe(7n);
+    const validatorSuffixHead = validatorAfterFirstCommit.outputs.find((output) =>
+      output.signerId === leaderId && output.jPrefixAttestations?.has(validatorId)
+    );
+    if (!validatorSuffixHead) throw new Error('TEST_VALIDATOR_SUFFIX_HEAD_MISSING');
+    const secondProposalResult = await applyEntityInput(
+      env,
+      firstCommit.workingReplica,
+      validatorSuffixHead,
+    );
+    env.eReplicas.set(leaderKey, secondProposalResult.workingReplica);
+    const secondProposal = frameAtHeight(secondProposalResult.outputs, 2);
+    const validatorReadyForSuffix = validatorAfterFirstCommit.workingReplica;
 
-    const validatorReadyForSuffix: EntityReplica = {
-      ...validatorAfterFirstCommit.workingReplica,
-      jHistory: recordValidatorJHistory(
-        validatorAfterFirstCommit.workingReplica.jHistory,
-        {
-          jurisdictionRef,
-          scannedThroughHeight: 12,
-          tipBlockHash: blockHash(12),
-          headers: Array.from({ length: 5 }, (_, index) => ({
-            jHeight: index + 8,
-            jBlockHash: blockHash(index + 8),
-          })),
-          blocks: [eventBlock(12, '12')],
-        },
-        validatorAfterFirstCommit.workingReplica.state,
-      ),
+    const firstRange = firstProposal.txs.find((tx) => tx.type === 'j_event');
+    const secondRange = secondProposal.txs.find((tx) => tx.type === 'j_event');
+    if (!firstRange || firstRange.type !== 'j_event' || !secondRange || secondRange.type !== 'j_event') {
+      throw new Error('TEST_J_RANGE_MISSING');
+    }
+    const crossingBlocks = [...firstRange.data.blocks, ...secondRange.data.blocks];
+    const crossingRangeHash = canonicalJEventRangeHash(jurisdictionRef, crossingBlocks);
+    const crossingUnsigned = {
+      jurisdictionRef,
+      baseHeight: firstRange.data.baseHeight,
+      scannedThroughHeight: secondRange.data.scannedThroughHeight,
+      tipBlockHash: secondRange.data.tipBlockHash,
+      eventHistoryRoot: secondRange.data.eventHistoryRoot,
+      rangeHash: crossingRangeHash,
+      blocks: crossingBlocks,
     };
+    const crossingProposal = structuredClone(secondProposal);
+    const crossingTx = crossingProposal.txs.find((tx) => tx.type === 'j_event');
+    if (!crossingTx || crossingTx.type !== 'j_event') throw new Error('TEST_CROSSING_J_RANGE_MISSING');
+    crossingTx.data = {
+      ...crossingTx.data,
+      ...crossingUnsigned,
+      signature: signAccountFrame(env, leaderId, buildJEventRangeDigest({
+        entityId,
+        signerId: leaderId,
+        ...crossingUnsigned,
+      })),
+    };
+    expect(() => assertFrameJPrefix(env, validatorReadyForSuffix, crossingProposal)).not.toThrow();
+
+    const observedAtMismatch = structuredClone(secondProposal);
+    const mismatchedRange = observedAtMismatch.txs.find((tx) => tx.type === 'j_event');
+    if (!mismatchedRange || mismatchedRange.type !== 'j_event') {
+      throw new Error('TEST_SECOND_J_RANGE_MISSING');
+    }
+    // observedAt is deliberately outside the signed digest. Preflight must
+    // still reject it before reducer replay can throw and halt the replica.
+    mismatchedRange.data.observedAt -= 1;
+    const mismatchResult = await applyEntityInput(env, validatorReadyForSuffix, {
+      entityId,
+      signerId: validatorId,
+      proposedFrame: observedAtMismatch,
+    });
+    expect(mismatchResult.outcome).toEqual({ kind: 'rejected', code: 'PROPOSAL_J_RANGE_MISMATCH' });
+    expect(mismatchResult.outputs).toEqual([]);
+    expect(mismatchResult.workingReplica.state.lastFinalizedJHeight).toBe(7);
+    expect(mismatchResult.workingReplica.lockedFrame).toBeUndefined();
 
     const conflictingProposal = structuredClone(secondProposal);
     const conflictingRange = conflictingProposal.txs.find((tx) => tx.type === 'j_event');
@@ -234,8 +307,6 @@ describe('overlapping finalized J-range consensus', () => {
     expect(secondCommit.workingReplica.state.reserves.get(1)).toBe(12n);
     expect(secondCommit.workingReplica.state.jBlockChain.map((block) => block.jHeight)).toEqual([7, 12]);
 
-    const firstRange = firstProposal.txs.find((tx) => tx.type === 'j_event');
-    if (!firstRange || firstRange.type !== 'j_event') throw new Error('TEST_FIRST_J_RANGE_MISSING');
     const replay = await applyJEvent(secondCommit.workingReplica.state, firstRange.data, env);
     expect(replay.newState).toBe(secondCommit.workingReplica.state);
     expect(replay.mempoolOps).toEqual([]);

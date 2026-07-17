@@ -33,16 +33,37 @@ export const runtimeFailureMessage = (error: unknown): string => {
 export function classifyRuntimeFailure(error: unknown): RuntimeFailureClassification {
   const message = runtimeFailureMessage(error);
   const lower = message.toLowerCase();
+  const explicitlyRetryable = typeof error === 'object' && error !== null
+    && (error as { retryable?: unknown }).retryable === true;
+  const adapterCode = typeof error === 'object' && error !== null
+    && typeof (error as { code?: unknown }).code === 'string'
+    ? String((error as { code: string }).code)
+    : null;
 
   if (/\b(assert|assertion|invariant|unreachable|should never|debug[-_ ]?assert|panic)\b/.test(lower)) {
     return { kind: 'debug-assert', retryable: false, message };
   }
 
-  if (/\b(expired|stale|duplicate|already processed|forbidden|unauthorized|bad request|malformed|invalid input|invalid runtime input|rejected)\b/.test(lower)) {
+  if (adapterCode === 'E_BAD_QUERY' || adapterCode === 'E_BAD_PATH' || adapterCode === 'E_NOT_FOUND') {
+    return { kind: 'drop', retryable: false, message };
+  }
+  if (adapterCode === 'E_COMMAND_PENDING' || adapterCode === 'E_RATE_LIMITED') {
+    return { kind: 'defer', retryable: true, message };
+  }
+  if (adapterCode === 'E_INTERNAL') {
+    return explicitlyRetryable
+      ? { kind: 'defer', retryable: true, message }
+      : { kind: 'fatal', retryable: false, message };
+  }
+  if (adapterCode === 'E_UNAUTHORIZED') {
+    return { kind: 'fatal', retryable: false, message };
+  }
+
+  if (/\b(stale|duplicate|already processed|forbidden|unauthorized|bad request|malformed|invalid input|invalid runtime input|rejected)\b/.test(lower)) {
     return { kind: 'drop', retryable: false, message };
   }
 
-  if (/\b(timeout|timed out|aborterror|econnrefused|econnreset|enotfound|eai_again|network|fetch failed|not ready|busy|locked|retry|rate limit|429|503|504)\b/.test(lower)) {
+  if (explicitlyRetryable || /\b(expired|timeout|timed out|aborterror|econnrefused|econnreset|enotfound|eai_again|network|fetch failed|not ready|busy|locked|retry|rate limit|429|503|504)\b/.test(lower)) {
     return { kind: 'defer', retryable: true, message };
   }
 

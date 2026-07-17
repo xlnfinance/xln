@@ -10,7 +10,11 @@ import {
   isCrossJurisdictionRouteExpired,
   withCanonicalCrossJurisdictionRouteHash,
 } from './index';
-import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../../orderbook';
+import {
+  baseAmountFromLots,
+  computePriceTicksForBaseQuote,
+  quoteAmountFromWeightedLots,
+} from '../../orderbook';
 import {
   deriveExactSwapFillRatio,
   exactFillRatioToUint16,
@@ -366,6 +370,8 @@ export type CrossMarketOffer = {
   route: CrossJurisdictionSwapRoute;
   pairId: string;
   side: 0 | 1;
+  baseTokenId: number;
+  quoteTokenId: number;
   baseAmount: bigint;
   quoteAmount: bigint;
   priceTicks: bigint;
@@ -423,16 +429,17 @@ export const getCrossJurisdictionRouteRemainingAmounts = (
 
 export const computeCrossJurisdictionPriceTicks = (
   side: 0 | 1,
+  baseTokenId: number,
+  quoteTokenId: number,
   baseAmount: bigint,
   quoteAmount: bigint,
-): bigint => {
-  if (baseAmount <= 0n || quoteAmount <= 0n) return 0n;
-  const scaledQuote = quoteAmount * ORDERBOOK_PRICE_SCALE;
-  const remainder = scaledQuote % baseAmount;
-  let priceTicks = scaledQuote / baseAmount;
-  if (side === 1 && remainder > 0n) priceTicks += 1n;
-  return priceTicks > 0n ? priceTicks : 0n;
-};
+): bigint => computePriceTicksForBaseQuote(
+  side,
+  baseTokenId,
+  quoteTokenId,
+  baseAmount,
+  quoteAmount,
+);
 
 export const buildCrossJurisdictionMarketOffer = (
   offer: NormalizedOrderbookOffer,
@@ -447,18 +454,28 @@ export const buildCrossJurisdictionMarketOffer = (
   if (!market.sourceKey || !market.targetKey || market.sourceKey === market.targetKey) return null;
   const side: 0 | 1 = market.sourceIsBase ? 1 : 0;
   const remaining = getCrossJurisdictionRouteRemainingAmounts(route);
+  const baseTokenId = Number(market.sourceIsBase ? route.source.tokenId : route.target.tokenId);
+  const quoteTokenId = Number(market.sourceIsBase ? route.target.tokenId : route.source.tokenId);
   const baseAmount = market.sourceIsBase ? remaining.sourceRemaining : remaining.targetRemaining;
   const quoteAmount = market.sourceIsBase ? remaining.targetRemaining : remaining.sourceRemaining;
   // Cross-j books are keyed by jurisdiction+token assets, not by token id alone.
   // Route amounts are the committed economic intent, so derive book price from
   // the committed route remainder instead of trusting the account offer view.
-  const priceTicks = computeCrossJurisdictionPriceTicks(side, baseAmount, quoteAmount);
+  const priceTicks = computeCrossJurisdictionPriceTicks(
+    side,
+    baseTokenId,
+    quoteTokenId,
+    baseAmount,
+    quoteAmount,
+  );
   if (baseAmount <= 0n || quoteAmount <= 0n || priceTicks <= 0n) return null;
   return {
     offer,
     route,
     pairId: market.venueId,
     side,
+    baseTokenId,
+    quoteTokenId,
     baseAmount,
     quoteAmount,
     priceTicks,
@@ -476,8 +493,12 @@ export const buildCrossJurisdictionFillAck = (
   const filledLotsBig = BigInt(fill.filledLots);
   if (filledLotsBig <= 0n || fill.weightedCost <= 0n) return null;
 
-  const executionBaseWei = filledLotsBig * SWAP_LOT_SCALE;
-  const executionQuoteWei = (fill.weightedCost * SWAP_LOT_SCALE) / ORDERBOOK_PRICE_SCALE;
+  const executionBaseWei = baseAmountFromLots(meta.baseTokenId, filledLotsBig);
+  const executionQuoteWei = quoteAmountFromWeightedLots(
+    meta.baseTokenId,
+    meta.quoteTokenId,
+    fill.weightedCost,
+  );
   const sourceAmount = meta.side === 1 ? executionBaseWei : executionQuoteWei;
   const targetAmount = meta.side === 1 ? executionQuoteWei : executionBaseWei;
   if (sourceAmount <= 0n || targetAmount <= 0n) return null;

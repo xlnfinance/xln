@@ -40,15 +40,21 @@ const SILENT_RELAY_WEBSOCKET_SCRIPT = `
         const NativeWebSocket = window.WebSocket;
         const normalizeSyntheticLevels = (levels) => {
           let runningTotal = 0;
-          return (Array.isArray(levels) ? levels : []).map((level) => {
+          return (Array.isArray(levels) ? levels : []).flatMap((level) => {
             const size = Number(level && level.size || 0);
-            runningTotal += Number.isFinite(size) && size > 0 ? size : 0;
-            return {
+            if (!Number.isSafeInteger(size) || size <= 0) return [];
+            runningTotal += size;
+            const configuredTotal = Number(level && level.total);
+            const total = Number.isSafeInteger(configuredTotal) && configuredTotal > 0
+              ? configuredTotal
+              : runningTotal;
+            const normalized = {
               price: String(level && level.price || '0'),
-              size,
-              total: Number.isFinite(Number(level && level.total)) ? Number(level.total) : runningTotal,
+              size: String(size),
+              total: String(total),
             };
-          }).filter((level) => Number.isFinite(level.size) && level.size > 0 && /^\\d+$/.test(level.price));
+            return /^[0-9]+$/.test(normalized.price) && normalized.price !== '0' ? [normalized] : [];
+          });
         };
         const pickSyntheticSnapshot = (hubEntityId, pairId) => {
           const snapshots = Array.isArray(window.__syntheticRelayMarketSnapshots)
@@ -67,6 +73,7 @@ const SILENT_RELAY_WEBSOCKET_SCRIPT = `
 	          bumpStat('noMarketDispatches');
 	          socket.dispatchEvent(new MessageEvent('message', {
             data: JSON.stringify({
+              v: 1,
               type: 'market_status',
               inReplyTo: subscribeMessage.id || 'market_subscribe',
               status: 'no_market',
@@ -96,8 +103,10 @@ const SILENT_RELAY_WEBSOCKET_SCRIPT = `
 	              bumpStat('snapshotDispatches');
 	              socket.dispatchEvent(new MessageEvent('message', {
                 data: JSON.stringify({
+                  v: 1,
                   type: 'market_snapshot',
                   id: 'synthetic_market_snapshot',
+                  timestamp: now,
                   payload: {
                     format: 'exact-price-levels',
                     hubEntityId: String(hubEntityId || '').toLowerCase(),
@@ -219,6 +228,7 @@ const SILENT_RELAY_WEBSOCKET_SCRIPT = `
               socket.sentMessages.push(rawData);
               if (window.__relayErrorOnSubscribe && rawData.includes('"market_subscribe"')) {
                 const errorMessage = {
+                  v: 1,
                   type: 'error',
                   inReplyTo: 'market_subscribe',
                   code: 'E_UNKNOWN_HUB',

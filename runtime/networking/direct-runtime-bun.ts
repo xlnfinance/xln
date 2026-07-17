@@ -1,7 +1,8 @@
-import type { RoutedEntityInput } from '../types';
+import type { ReliableDeliveryReceipt, RoutedEntityInput } from '../types';
 import {
   deliveryAccepted,
   deliveryDeferred,
+  deliveryFailure,
   type DeliveryResult,
 } from '../protocol/payments/delivery-result';
 import { compareCanonicalText } from '../orderbook/swap-keys';
@@ -18,6 +19,7 @@ type DirectRuntimeWsOptions = {
   requireHelloAuth?: boolean;
   helloSkewMs?: number;
   onEntityInput: (from: string, input: RoutedEntityInput, timestamp?: number) => Promise<void> | void;
+  onReliableReceipt?: (from: string, receipt: ReliableDeliveryReceipt) => Promise<void> | void;
   onRecoveryBundleRequest?: (from: string, lookupKey: string) => Promise<unknown> | unknown;
 };
 
@@ -30,6 +32,10 @@ export type DirectWebSocket = {
 type DirectUpgradeServer = {
   upgrade(request: Request, options: { data: { type: 'direct-runtime' } }): boolean;
 };
+
+type DirectUpgradeDecision =
+  | { handled: false }
+  | { handled: true; response?: Response };
 
 type DirectWsSession = {
   runtimeId: string | null;
@@ -69,14 +75,21 @@ const send = (ws: DirectWebSocket, msg: RuntimeWsMessage): void => {
   ws.send(serializeWsMessage(msg));
 };
 
-const trySend = (ws: DirectWebSocket, msg: RuntimeWsMessage): boolean => {
-  if (!isSocketOpen(ws)) return false;
+type DirectSendAttempt =
+  | { sent: true }
+  | { sent: false; error?: string };
+
+const trySend = (ws: DirectWebSocket, msg: RuntimeWsMessage): DirectSendAttempt => {
+  if (!isSocketOpen(ws)) return { sent: false };
   try {
     const result = ws.send(serializeWsMessage(msg));
-    if (result === false) return false;
-    return !(typeof result === 'number' && result < 0);
-  } catch {
-    return false;
+    if (result === false || (typeof result === 'number' && result < 0)) return { sent: false };
+    return { sent: true };
+  } catch (error) {
+    return {
+      sent: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 };
 
@@ -207,29 +220,83 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
           entityId: input.entityId,
           txs: input.entityTxs?.length ?? 0,
         };
-        const sent = trySend(session.ws, msg);
-        if (!sent) forgetSession(session.ws);
-        return sent
+        const sendAttempt = trySend(session.ws, msg);
+        if (!sendAttempt.sent) forgetSession(session.ws);
+        return sendAttempt.sent
           ? deliveryAccepted('ROUTE_DIRECT_DELIVERED')
+          : sendAttempt.error !== undefined
+            ? deliveryFailure({
+              category: 'TransientRace',
+              code: 'ROUTE_DIRECT_SEND_FAILED',
+              message: sendAttempt.error,
+              terminal: false,
+            })
           : deliveryDeferred({
             outcome: 'deferred',
             code: 'ROUTE_DIRECT_SEND_FAILED',
           });
-      } catch {
-        return deliveryDeferred({
-          outcome: 'deferred',
+      } catch (error) {
+        return deliveryFailure({
+          category: 'TransientRace',
           code: 'ROUTE_DIRECT_SEND_FAILED',
+          message: error instanceof Error ? error.message : String(error),
+          terminal: false,
         });
       }
     },
-    maybeUpgrade(request: Request, serverRef: DirectUpgradeServer): Response | undefined {
+    sendReliableReceiptDelivery(
+      targetRuntimeId: string,
+      receipt: ReliableDeliveryReceipt,
+    ): DeliveryResult {
+      const targetKey = normalizeRuntimeId(targetRuntimeId);
+      if (!targetKey) {
+        return deliveryDeferred({
+          outcome: 'deferred',
+          code: 'ROUTE_DIRECT_RECEIPT_TARGET_RUNTIME_INVALID',
+        });
+      }
+      const session = sessionsByRuntime.get(targetKey);
+      if (!session || !session.handshakeDone || !isSocketOpen(session.ws)) {
+        if (session && !isSocketOpen(session.ws)) forgetSession(session.ws);
+        return deliveryDeferred({
+          outcome: 'deferred',
+          code: 'ROUTE_DIRECT_RECEIPT_MISS_FALLBACK',
+        });
+      }
+      const sendAttempt = trySend(session.ws, {
+        type: 'entity_input_receipt',
+        id: makeMessageId(),
+        from: serverRuntimeId,
+        to: targetKey,
+        timestamp: nextTimestamp(),
+        payload: receipt,
+      });
+      if (!sendAttempt.sent) forgetSession(session.ws);
+      return sendAttempt.sent
+        ? deliveryAccepted('ROUTE_DIRECT_RECEIPT_DELIVERED')
+        : sendAttempt.error !== undefined
+          ? deliveryFailure({
+            category: 'TransientRace',
+            code: 'ROUTE_DIRECT_RECEIPT_SEND_FAILED',
+            message: sendAttempt.error,
+            terminal: false,
+          })
+        : deliveryDeferred({
+          outcome: 'deferred',
+          code: 'ROUTE_DIRECT_RECEIPT_SEND_FAILED',
+        });
+    },
+    maybeUpgrade(request: Request, serverRef: DirectUpgradeServer): DirectUpgradeDecision {
       const url = new URL(request.url);
       if (request.headers.get('upgrade') !== 'websocket' || url.pathname !== routePath) {
-        return undefined;
+        return { handled: false };
       }
       const upgraded = serverRef.upgrade(request, { data: { type: 'direct-runtime' } });
-      if (upgraded) return undefined;
-      return new Response('WebSocket upgrade failed', { status: 400 });
+      if (upgraded) return { handled: true };
+      return {
+        handled: true,
+        response: new Response('WebSocket upgrade failed', { status: 400 }),
+      };
     },
     websocket: {
       open(ws: DirectWebSocket) {
@@ -243,7 +310,7 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
         try {
           msg = deserializeWsMessage(raw);
         } catch (error) {
-          send(ws, { type: 'error', error: `Bad JSON: ${(error as Error).message}` });
+          send(ws, { type: 'error', error: `Invalid wire message: ${(error as Error).message}` });
           return;
         }
 
@@ -288,9 +355,10 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
             return;
           }
           send(ws, {
-            type: 'hello',
+            type: 'hello_ack',
             from: serverRuntimeId,
             fromEncryptionPubKey: pubKeyToHex(keyPair.publicKey),
+            to: normalizedFrom,
           });
           return;
         }
@@ -301,6 +369,13 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
           return;
         }
         if (msg.type === 'hello') {
+          return;
+        }
+        // RuntimeWsClient reports rejected application callbacks as a typed
+        // diagnostic frame. It carries no authority and needs no response;
+        // treating it as an unsupported command creates a second, misleading
+        // protocol error for the original failure.
+        if (msg.type === 'debug_event') {
           return;
         }
         session.lastSeen = Date.now();
@@ -336,6 +411,34 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
             sendRecoveryBundleResponse(ws, fromRuntimeId, msg.id, {
               error: `Recovery bundle request failed: ${(error as Error).message}`,
             });
+          }
+          return;
+        }
+        if (msg.type === 'entity_input_receipt') {
+          const fromRuntimeId = normalizeRuntimeId(session.runtimeId || '');
+          if (!fromRuntimeId) {
+            send(ws, { type: 'error', error: 'Missing source runtimeId' });
+            return;
+          }
+          if (msg.from && normalizeRuntimeId(msg.from) !== fromRuntimeId) {
+            send(ws, { type: 'error', error: 'Direct receipt source runtimeId mismatch' });
+            return;
+          }
+          if (normalizeRuntimeId(msg.to || '') !== serverRuntimeId) {
+            send(ws, { type: 'error', error: 'Direct receipt target runtimeId mismatch' });
+            return;
+          }
+          if (!options.onReliableReceipt) {
+            send(ws, { type: 'error', error: 'Direct reliable receipt handler unavailable' });
+            return;
+          }
+          try {
+            await options.onReliableReceipt(
+              fromRuntimeId,
+              msg.payload as ReliableDeliveryReceipt,
+            );
+          } catch (error) {
+            send(ws, { type: 'error', error: `Direct receipt failed: ${(error as Error).message}` });
           }
           return;
         }

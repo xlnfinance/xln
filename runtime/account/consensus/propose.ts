@@ -8,15 +8,17 @@ import { cloneAccountFrame, cloneAccountMachine, getAccountPerspective, removeCo
 import { isLeft } from '../utils';
 import { getPerfMs, HEAVY_LOGS } from '../../utils';
 import { safeStringify } from '../../protocol/serialization';
+import { cloneIsolatedAccountInput } from '../../protocol/account-input-clone';
 import { validateAccountFrame as validateAccountFrameStrict } from '../../validation-utils';
 import { applyAccountTx } from '../tx/apply';
 import { markStorageAccountDirty } from '../../machine/env-events';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { createFrameHash, MAX_ACCOUNT_FRAME_TXS, MAX_FRAME_SIZE_BYTES } from './frame';
-import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
+import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
 import { signEntityHashes } from '../../hanko/signing';
 import {
   assertNoUnilateralSettlementMutation,
+  buildAccountProofBodyFromEnv,
   captureSettlementVector,
   getAccountStateDomain,
   isEntityId32,
@@ -26,7 +28,10 @@ import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '..
 import { MEMPOOL_LIMIT } from './constants';
 import type { AccountConsensusHashToSign, AccountSwapOfferCreated, ProposeAccountFrameResult } from './types';
 import { getReplicaByEntityId } from '../../entity/replica';
-import { computeAccountStateRoot } from '../state-root';
+import { computeAccountStateRoot, computeAccountStateSectionHashes } from '../state-root';
+import { createAccountJClaimSession } from '../j-claim-session';
+import { prepareAccountJClaimTx } from '../j-claim-transition';
+import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
 
 const accountLog = createStructuredLogger('account');
 const ACCOUNT_PROPOSAL_PROFILE =
@@ -60,10 +65,15 @@ const isCrossJurisdictionPullResolveTx = (
   return false;
 };
 
+const isRetryableAccountProposalError = (error: string | undefined): boolean =>
+  Boolean(error?.startsWith('SETTLEMENT_SIGNED_ACCOUNT_FROZEN:'));
+
 export async function proposeAccountFrame(
   env: Env,
   accountMachine: AccountMachine,
+  entityFrameTimestamp: number,
   entityJHeight?: number, // Optional: J-height from entity state for HTLC consensus
+  accountJClaimNodeStore?: AccountJClaimNodeStore,
 ): Promise<ProposeAccountFrameResult> {
   const profileStartMs = getPerfMs();
   // Derive counterparty from canonical left/right
@@ -102,9 +112,9 @@ export async function proposeAccountFrame(
   // Correct model:
   // 1. Each side may observe the same J-event independently.
   // 2. Each side is allowed to propose its own j_event_claim account frame.
-  // 3. Those claims are stored in account state as left/right observations.
-  // 4. tryFinalizeAccountJEvents() is the ONLY place that may require 2-of-2
-  //    agreement and finalize the unilateral settlement fields.
+  // 3. Those claims are committed in separate left/right Patricia roots.
+  // 4. The proof-verified transition is the ONLY place that may require 2-of-2
+  //    agreement and finalize the settlement fields.
   //
   // If proposal logic blocks one side until the other side's claim is already
   // committed, bilateral rebalance can deadlock at "Waiting for LEFT claim":
@@ -143,7 +153,10 @@ export async function proposeAccountFrame(
   // publishing previous+1 later makes proposer and receiver commit different
   // Account state roots.
   const previousTimestamp = accountMachine.currentFrame?.timestamp ?? 0;
-  const frameTimestamp = Math.max(env.timestamp, previousTimestamp + 1);
+  if (!Number.isSafeInteger(entityFrameTimestamp) || entityFrameTimestamp < 0) {
+    throw new Error(`ACCOUNT_PROPOSAL_ENTITY_TIMESTAMP_INVALID:${String(entityFrameTimestamp)}`);
+  }
+  const frameTimestamp = Math.max(entityFrameTimestamp, previousTimestamp + 1);
 
   const allEvents: string[] = [];
   const revealedSecrets: Array<{ secret: string; hashlock: string }> = [];
@@ -160,32 +173,41 @@ export async function proposeAccountFrame(
   }
 
   const validTxs: typeof accountMachine.mempool = [];
+  const validMempoolTxs: typeof accountMachine.mempool = [];
   const failedHtlcLocks: Array<{ hashlock: string; reason: string }> = [];
   const txsToRemove: typeof accountMachine.mempool = [];
+  let deferredTxCount = 0;
   const proposerByLeft = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
+  const jClaimSession = createAccountJClaimSession(env, accountJClaimNodeStore);
 
   const processOnMachine = async (machine: AccountMachine, accountTx: AccountTx) => {
+    const preparedTx = accountTx.type === 'j_event_claim'
+      ? prepareAccountJClaimTx(machine, accountTx, getAccountStateDomain(machine), jClaimSession)
+      : accountTx;
     const beforeSettlement = captureSettlementVector(machine);
     const result = await applyAccountTx(
       machine,
-      accountTx,
+      preparedTx,
       proposerByLeft,
       frameTimestamp,
       frameJHeight, // Entity's synced J-height
       true, // isValidation = true (on clone, skip persistent state updates)
       env,
+      jClaimSession,
     );
     if (result.success) {
-      assertNoUnilateralSettlementMutation(machine, beforeSettlement, accountTx, 'propose/validate');
+      assertNoUnilateralSettlementMutation(machine, beforeSettlement, preparedTx, 'propose/validate');
     }
-    return result;
+    return { result, preparedTx };
   };
 
   const collectSuccessfulTx = (
     accountTx: AccountTx,
+    preparedTx: AccountTx,
     result: Awaited<ReturnType<typeof applyAccountTx>>,
   ): void => {
-    validTxs.push(accountTx);
+    validTxs.push(preparedTx);
+    validMempoolTxs.push(accountTx);
     allEvents.push(...result.events);
 
     if (HEAVY_LOGS) {
@@ -219,19 +241,23 @@ export async function proposeAccountFrame(
   let optimisticBatchFailed = false;
   if (canOptimisticallyValidateBatch) {
     const optimisticMachine = cloneAccountMachine(accountMachine);
-    const optimisticResults: Array<{ tx: AccountTx; result: Awaited<ReturnType<typeof applyAccountTx>> }> = [];
+    const optimisticResults: Array<{
+      tx: AccountTx;
+      preparedTx: AccountTx;
+      result: Awaited<ReturnType<typeof applyAccountTx>>;
+    }> = [];
     for (const accountTx of proposalWindow) {
       if (HEAVY_LOGS) accountLog.debug('batch.optimistic_tx', { type: accountTx.type });
-      const result = await processOnMachine(optimisticMachine, accountTx);
+      const { result, preparedTx } = await processOnMachine(optimisticMachine, accountTx);
       if (!result.success) {
         optimisticBatchFailed = true;
         break;
       }
-      optimisticResults.push({ tx: accountTx, result });
+      optimisticResults.push({ tx: accountTx, preparedTx, result });
     }
     if (!optimisticBatchFailed) {
       clonedMachine = optimisticMachine;
-      for (const { tx, result } of optimisticResults) collectSuccessfulTx(tx, result);
+      for (const { tx, preparedTx, result } of optimisticResults) collectSuccessfulTx(tx, preparedTx, result);
     }
   }
   if (!canOptimisticallyValidateBatch || optimisticBatchFailed) {
@@ -241,9 +267,24 @@ export async function proposeAccountFrame(
     for (const accountTx of proposalWindow) {
       if (HEAVY_LOGS) accountLog.debug('tx.process', { type: accountTx.type });
       const txMachine = cloneAccountMachine(clonedMachine);
-      const result = await processOnMachine(txMachine, accountTx);
+      const { result, preparedTx } = await processOnMachine(txMachine, accountTx);
 
       if (!result.success) {
+        if (isRetryableAccountProposalError(result.error)) {
+          deferredTxCount += 1;
+          allEvents.push(...result.events);
+          accountLog.info('tx.deferred', {
+            type: accountTx.type,
+            reason: result.error,
+          });
+          continue;
+        }
+        if (accountTx.type === 'settle_transition') {
+          throw new Error(
+            `SETTLEMENT_TRANSITION_PROPOSAL_FAILED:${accountTx.data.kind}:` +
+              `${result.error || 'validation_failed'}`,
+          );
+        }
         if (accountTx.type === 'cross_swap_fill_ack') {
           throw new Error(
             `CROSS_J_FILL_ACK_PROPOSAL_FAILED: offer=${accountTx.data.offerId} ` +
@@ -268,6 +309,12 @@ export async function proposeAccountFrame(
               `error=${result.error || 'validation_failed'}`,
           );
         }
+        if (accountTx.type === 'cross_pull_close') {
+          throw new Error(
+            `CROSS_J_PULL_CLOSE_PROPOSAL_FAILED: pull=${accountTx.data.pullId} ` +
+              `error=${result.error || 'validation_failed'}`,
+          );
+        }
         txsToRemove.push(accountTx);
         accountLog.debug('tx.skipped', { type: accountTx.type, error: result.error || 'unknown' });
 
@@ -281,7 +328,7 @@ export async function proposeAccountFrame(
         continue; // Skip to next tx
       }
       clonedMachine = txMachine;
-      collectSuccessfulTx(accountTx, result);
+      collectSuccessfulTx(accountTx, preparedTx, result);
     }
   }
 
@@ -296,7 +343,9 @@ export async function proposeAccountFrame(
       failedHtlcLocks?: Array<{ hashlock: string; reason: string }>;
     } = {
       success: false,
-      error: 'All transactions failed validation',
+      error: deferredTxCount > 0
+        ? `Transactions deferred until signed settlement finalizes: ${deferredTxCount}`
+        : 'All transactions failed validation',
       events: allEvents,
     };
     if (failedHtlcLocks.length > 0) earlyResult.failedHtlcLocks = failedHtlcLocks;
@@ -339,7 +388,7 @@ export async function proposeAccountFrame(
   const accountTxsCopy = structuredClone([...validTxs]);
   let accountStateRoot: string;
   try {
-    accountStateRoot = computeAccountStateRoot(clonedMachine, getAccountStateDomain(env, accountMachine));
+    accountStateRoot = computeAccountStateRoot(clonedMachine);
   } catch (error) {
     return {
       success: false,
@@ -361,6 +410,14 @@ export async function proposeAccountFrame(
   };
 
   frameData.stateHash = await createFrameHash(frameData as AccountFrame);
+
+  accountLog.debug('proposal.frame_built', {
+    height: frameData.height,
+    stateHash: frameData.stateHash,
+    accountStateRoot: frameData.accountStateRoot,
+    accountStateSectionHashes: computeAccountStateSectionHashes(clonedMachine),
+    txs: frameData.accountTxs.map(tx => tx.type),
+  });
 
   let newFrame: AccountFrame;
   try {
@@ -419,11 +476,11 @@ export async function proposeAccountFrame(
     };
   }
 
-  let proofResult: ReturnType<typeof buildAccountProofBody>;
+  let proofResult: ReturnType<typeof buildAccountProofBodyFromEnv>;
   let disputeHash: string | undefined;
   let signedProofNonce = 0;
   try {
-    proofResult = buildAccountProofBody(clonedMachine);
+    proofResult = buildAccountProofBodyFromEnv(env, clonedMachine);
     const proofBodyChanged =
       proofResult.proofBodyHash.toLowerCase() !== accountMachine.currentDisputeProofBodyHash?.toLowerCase();
     const proofNonceConsumed =
@@ -436,16 +493,15 @@ export async function proposeAccountFrame(
       disputeHash = createDisputeProofHashWithNonce(
         clonedMachine,
         proofResult.proofBodyHash,
-        getAccountStateDomain(env, accountMachine),
+        getAccountStateDomain(accountMachine),
         signedProofNonce,
       );
     }
   } catch (error) {
-    return {
-      success: false,
-      error: `DISPUTE_PROOF_BUILD_FAILED: ${(error as Error).message}`,
-      events,
-    };
+    // A proof-construction failure is not a user-level rejected Account tx.
+    // Continuing would leave a committed Entity frame with an Account mempool
+    // that can never produce the on-chain recovery proof it promises.
+    throw new Error(`DISPUTE_PROOF_BUILD_FAILED: ${(error as Error).message}`, { cause: error });
   }
 
   const proofChanged = disputeHash !== undefined;
@@ -496,7 +552,7 @@ export async function proposeAccountFrame(
   // Remove only the transactions that actually made it into the proposed frame.
   // This function is async and can yield while hashing/signing; late arrivals must
   // remain queued for the next frame instead of being silently wiped by position.
-  accountMachine.mempool = removeCommittedTxsFromMempool(accountMachine.mempool, newFrame.accountTxs);
+  accountMachine.mempool = removeCommittedTxsFromMempool(accountMachine.mempool, validMempoolTxs);
 
   events.push(`🚀 Proposed frame ${newFrame.height} with ${newFrame.accountTxs.length} transactions`);
 
@@ -530,10 +586,11 @@ export async function proposeAccountFrame(
     ...(frameHanko ? { frameHanko } : {}),
     ...(disputeSeal ? { disputeSeal } : {}),
   };
-  const accountInput: AccountInput = shouldBundlePreviousAck ? {
+  const accountInput: Extract<AccountInput, { kind: 'frame' | 'frame_ack' }> = shouldBundlePreviousAck ? {
     kind: 'frame_ack',
     fromEntityId: accountMachine.proofHeader.fromEntity,
     toEntityId: accountMachine.proofHeader.toEntity,
+    domain: structuredClone(accountMachine.domain),
     watchSeed: accountMachine.watchSeed,
     ack: structuredClone(reusableAck.response.ack),
     proposal,
@@ -541,6 +598,7 @@ export async function proposeAccountFrame(
     kind: 'frame',
     fromEntityId: accountMachine.proofHeader.fromEntity,
     toEntityId: accountMachine.proofHeader.toEntity,
+    domain: structuredClone(accountMachine.domain),
     watchSeed: accountMachine.watchSeed,
     proposal,
   };
@@ -548,7 +606,7 @@ export async function proposeAccountFrame(
     delete accountMachine.lastOutboundFrameAck;
   }
   if (proofChanged) accountMachine.proofHeader.nextProofNonce = signedProofNonce + 1;
-  accountMachine.pendingAccountInput = structuredClone(accountInput);
+  accountMachine.pendingAccountInput = cloneIsolatedAccountInput(accountInput);
 
   // Collect hashes for entity-quorum signing (multi-signer support)
   const hashesToSign: AccountConsensusHashToSign[] = [

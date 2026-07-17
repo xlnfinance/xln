@@ -51,23 +51,43 @@ export type RadixMerkleMaterializedResult = RadixMerkleResult & {
 
 export const EMPTY_RADIX_MERKLE_ROOT = `0x${'00'.repeat(32)}`;
 
-const domainBytes = (tag: string): Buffer => {
-  const raw = Buffer.from(tag, 'utf8');
-  const len = Buffer.allocUnsafe(2);
-  len.writeUInt16BE(raw.length);
-  return Buffer.concat([len, raw]);
+const UTF8_ENCODER = new TextEncoder();
+
+const concatBytes = (...parts: Uint8Array[]): Uint8Array => {
+  const joined = new Uint8Array(parts.reduce((length, part) => length + part.length, 0));
+  let offset = 0;
+  for (const part of parts) {
+    joined.set(part, offset);
+    offset += part.length;
+  }
+  return joined;
+};
+
+const uint16Bytes = (value: number): Uint8Array => {
+  if (!Number.isInteger(value) || value < 0 || value > 0xffff) {
+    throw new Error(`RADIX_MERKLE_UINT16_OUT_OF_RANGE: ${value}`);
+  }
+  return Uint8Array.of(value >>> 8, value & 0xff);
+};
+
+const bytesToHex = (bytes: Uint8Array): string => ethers.hexlify(bytes).slice(2);
+
+const domainBytes = (tag: string): Uint8Array => {
+  const raw = UTF8_ENCODER.encode(tag);
+  return concatBytes(uint16Bytes(raw.length), raw);
 };
 
 const LEAF_DOMAIN = domainBytes('xln.storage.merkle.leaf.v1');
 const BRANCH_DOMAIN = domainBytes('xln.storage.merkle.branch.v1');
 const EXTENSION_DOMAIN = domainBytes('xln.storage.merkle.extension.v1');
 
-const hashParts = (domain: Buffer, parts: Uint8Array[]): string => {
-  return ethers.keccak256(Buffer.concat([domain, ...parts.map((part) => Buffer.from(part))]));
+const hashParts = (domain: Uint8Array, parts: Uint8Array[]): string => {
+  return ethers.keccak256(concatBytes(domain, ...parts));
 };
 
 const hexToBytes = (hex: string): Uint8Array => {
-  return Uint8Array.from(Buffer.from(String(hex).replace(/^0x/, ''), 'hex'));
+  const normalized = String(hex).replace(/^0x/, '');
+  return ethers.getBytes(`0x${normalized}`);
 };
 
 const pathSlots = (key: Uint8Array, radix: RadixMerkleRadix): number[] => {
@@ -100,11 +120,10 @@ export const computeRadixMerkleBranchHash = (
 ): string => branchHash(radix, children);
 
 const encodePathSegment = (radix: RadixMerkleRadix, path: number[]): Uint8Array => {
-  const header = Buffer.allocUnsafe(2);
-  header.writeUInt16BE(path.length);
-  if (radix === 256) return Buffer.concat([header, Buffer.from(path)]);
+  const header = uint16Bytes(path.length);
+  if (radix === 256) return concatBytes(header, Uint8Array.from(path));
 
-  const packed = Buffer.alloc(Math.ceil(path.length / 2));
+  const packed = new Uint8Array(Math.ceil(path.length / 2));
   for (let index = 0; index < path.length; index += 1) {
     const slot = path[index] ?? 0;
     if (slot < 0 || slot > 0x0f) throw new Error(`RADIX_MERKLE_INVALID_NIBBLE: ${slot}`);
@@ -112,11 +131,11 @@ const encodePathSegment = (radix: RadixMerkleRadix, path: number[]): Uint8Array 
     if (index % 2 === 0) packed[byteIndex] = (packed[byteIndex] ?? 0) | (slot << 4);
     else packed[byteIndex] = (packed[byteIndex] ?? 0) | slot;
   }
-  return Buffer.concat([header, packed]);
+  return concatBytes(header, packed);
 };
 
-export const packRadixMerklePath = (radix: RadixMerkleRadix, path: number[]): Buffer =>
-  Buffer.from(encodePathSegment(radix, path));
+export const packRadixMerklePath = (radix: RadixMerkleRadix, path: number[]): Uint8Array =>
+  encodePathSegment(radix, path);
 
 const extensionHash = (radix: RadixMerkleRadix, path: number[], childHash: string): string =>
   hashParts(EXTENSION_DOMAIN, [
@@ -231,7 +250,7 @@ export const buildRadixMerkleMaterialized = (
 
   const deduped = new Map<string, MerkleItem>();
   for (const leaf of leaves) {
-    const keyHex = Buffer.from(leaf.key).toString('hex');
+    const keyHex = bytesToHex(leaf.key);
     deduped.set(keyHex, {
       keyHex,
       key: leaf.key,
@@ -303,7 +322,7 @@ export const buildRadixMerkleMaterialized = (
         kind: 'leaf',
         path: [...item.path],
         keyHex: `0x${item.keyHex}`,
-        valueHash: `0x${Buffer.from(item.value).toString('hex')}`,
+        valueHash: `0x${bytesToHex(item.value)}`,
         hash: item.hash,
       };
       materializedLeaves.push({

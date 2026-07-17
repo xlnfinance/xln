@@ -5,6 +5,7 @@
 
 import { toSvg } from 'jdenticon';
 import { Buffer as BufferPolyfill } from 'buffer';
+import { sha256 } from '@noble/hashes/sha2.js';
 
 import { extractNumberFromEntityId } from './entity/factory';
 
@@ -67,42 +68,30 @@ declare global {
 // Environment detection and compatibility layer
 export const isBrowser = typeof window !== 'undefined';
 
-// Simplified crypto compatibility
-export const createHash = isBrowser
-  ? (_algorithm: string) => ({
-      update: (data: string) => ({
-        digest: (encoding?: string) => {
-          // Create proper 32-byte hash for browser demo using Web Crypto API
-          const encoder = new TextEncoder();
-          void encoder; // Available for future crypto implementation
+class XlnSha256Hash {
+  private readonly hash = sha256.create();
 
-          // Simple deterministic hash that produces 32 bytes
-          let hash = 0;
-          for (let i = 0; i < data.length; i++) {
-            const char = data.charCodeAt(i);
-            hash = (hash << 5) - hash + char;
-            hash = hash & hash; // Convert to 32bit integer
-          }
+  update(data: string | Uint8Array): XlnSha256Hash {
+    this.hash.update(typeof data === 'string' ? new TextEncoder().encode(data) : data);
+    return this;
+  }
 
-          // Create a 32-byte buffer by repeating and expanding the hash
-          const baseHash = Math.abs(hash).toString(16).padStart(8, '0');
-          const fullHash = (baseHash + baseHash + baseHash + baseHash).slice(0, 64); // 32 bytes = 64 hex chars
+  digest(): Buffer;
+  digest(encoding: 'hex'): string;
+  digest(encoding?: 'hex'): Buffer | string {
+    const digest = BufferPolyfill.from(this.hash.digest());
+    return encoding === 'hex' ? digest.toString('hex') : digest;
+  }
+}
 
-          if (encoding === 'hex') {
-            return fullHash;
-          } else {
-            // Return as Buffer (Uint8Array)
-            const bytes = new Uint8Array(32);
-            for (let i = 0; i < 32; i++) {
-              bytes[i] = parseInt(fullHash.substr(i * 2, 2), 16);
-            }
-            return Buffer.from(bytes);
-          }
-        },
-      }),
-    })
-  : // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require('crypto').createHash;
+/** Synchronous SHA-256 with identical bytes in Bun and browser runtimes. */
+export const createHash = (algorithm: string): XlnSha256Hash => {
+  const normalizedAlgorithm = String(algorithm || '').trim().toLowerCase();
+  if (normalizedAlgorithm !== 'sha256' && normalizedAlgorithm !== 'sha-256') {
+    throw new Error(`HASH_ALGORITHM_UNSUPPORTED:${algorithm}`);
+  }
+  return new XlnSha256Hash();
+};
 
 export const randomBytes = isBrowser
   ? (size: number): Uint8Array => {

@@ -37,9 +37,21 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
     return String(this.resolveEnv()?.runtimeId || this.configuredRuntimeId || 'embedded').trim().toLowerCase();
   }
 
+  get serverFingerprint(): null {
+    return null;
+  }
+
   get currentHeight(): number {
     const env = this.resolveEnv();
     return Math.max(0, Math.floor(Number(env?.height ?? 0)));
+  }
+
+  get nextCommandSequence(): null {
+    return null;
+  }
+
+  get commandLaneKind(): 'owner' {
+    return 'owner';
   }
 
   get authLevel(): RuntimeAdapterAuthLevel | null {
@@ -68,6 +80,10 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
     this.unregister = null;
     this.env = null;
     this.setStatus('disconnected');
+  }
+
+  ensureOwnerCommandLane(): Promise<void> {
+    return Promise.resolve();
   }
 
   read<T = unknown>(path: string, query?: RuntimeAdapterReadQuery): Promise<T> {

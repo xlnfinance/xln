@@ -1,5 +1,6 @@
 import type { AccountMachine } from '$lib/types/ui';
 import { amountToUsd } from '$lib/utils/assetPricing';
+import { requireTokenDecimals } from './token-metadata';
 import type { SwapBookEntry } from '@xln/runtime/xln-api';
 import { toBigIntSafe } from './swap-formatting';
 
@@ -129,7 +130,7 @@ export function remainingOfferUsd(offer: SwapBookEntry, getTokenInfo: TokenInfoR
   const giveAmountValue = toBigIntSafe(offer.giveAmount) ?? 0n;
   if (!Number.isFinite(giveToken) || giveToken <= 0 || giveAmountValue <= 0n) return 0;
   const info = getTokenInfo(giveToken);
-  const decimals = Number(info?.decimals ?? 18);
+  const decimals = requireTokenDecimals(info?.decimals, `token:${giveToken}`);
   const symbol = String(info?.symbol || '');
   return amountToUsd(giveAmountValue, decimals, symbol);
 }

@@ -104,6 +104,42 @@ describe('runtime activity history', () => {
     });
   });
 
+  test('projects bounded debt J-event logs with exact direction and amount', () => {
+    const events = buildRuntimeActivityEvents({
+      height: 16,
+      timestamp: 1_700_000_021_000,
+      runtimeInput: { runtimeTxs: [], entityInputs: [] },
+      logs: [{
+        id: 2,
+        timestamp: 1_700_000_021_000,
+        level: 'info',
+        category: 'system',
+        message: 'JEventReceived',
+        data: {
+          entityId: alice,
+          eventType: 'DebtEnforced',
+          debtor: alice,
+          creditor: bob,
+          tokenId: 1,
+          amountPaid: '17',
+          blockNumber: 55,
+        },
+      }],
+    }, { entityId: alice, kind: 'onchain' });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: 'j_event',
+      title: 'DebtEnforced',
+      rawType: 'DebtEnforced',
+      direction: 'out',
+      counterpartyId: bob,
+      amount: '17',
+      tokenId: 1,
+    });
+    expect(events[0]?.subtitle).toContain('J#55');
+  });
+
   test('exposes htlc receipts as payments while preserving htlc filter alias', () => {
     const journal = {
       height: 21,

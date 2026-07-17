@@ -6,7 +6,7 @@ import { dirname } from 'node:path';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { createStructuredLogger } from '../infra/logger';
 import { readInheritedChildSecrets, resolveChildSecret } from './child-secrets';
-import { decodeRuntimeAdapterMessage } from '../radapter/codec';
+import { decodeRuntimeAdapterRequest } from '../radapter/codec';
 import { deriveAccountWatchSeed } from '../account/watch-seed';
 import { deriveSignerAddressSync, deriveSignerKeySync, prewarmSignerLabels, registerSignerKey } from '../account/crypto';
 import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
@@ -21,22 +21,20 @@ import {
 import { resolveRuntimeAdapterRead } from '../radapter/resolve';
 import { createRuntimeIngressReceiptStore } from '../server/ingress-receipts';
 import { handleRuntimeInputStatus } from '../server/runtime-input-control';
+import { drainJWatcherBacklog } from '../jadapter/backlog-drain';
 import {
-  getActiveJAdapter,
   getP2PState,
   closeInfraDb,
   closeRuntimeDb,
   main,
+  process as runtimeProcess,
   enqueueRuntimeInput,
   validateRuntimeInputAdmission,
   handleInboundP2PEntityInput,
+  handleInboundReliableReceipt,
   startP2P,
-  stopP2P,
-  stopJurisdictionWatchers,
-  resumeRuntimeLoop,
+  startJurisdictionWatchers,
   startRuntimeLoop,
-  stopRuntimeLoopAndWait,
-  waitForRuntimeWorkDrained,
   persistRestoredEnvToDB,
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
@@ -53,7 +51,6 @@ import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import {
   BOOTSTRAP_POLL_MS,
   DEFAULT_ACCOUNT_TOKEN_IDS,
-  HUB_DEFAULT_MIN_TRADE_SIZE,
   HUB_REQUIRED_TOKEN_COUNT,
   buildMarketMakerConsensusConfig,
   deriveMarketMakerEntityId,
@@ -66,16 +63,26 @@ import {
   hasQueuedOpenAccount,
   hasQueuedExtendCredit,
   hasPairMutualCredit,
+  hasCommittedAccountState,
   isCanonicalAccountOpener,
   isAccountConsensusReady,
   settleRuntimeFor,
   sleep,
+  summarizeRuntimeQuiescence,
   waitUntil,
   type MarketMakerEntityJurisdictionConfig,
 } from './mesh-common';
-import { buildDefaultEntitySwapPairs, getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenIdsForJurisdiction } from '../account/utils';
+import { buildDefaultEntitySwapPairs, getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenIdsForJurisdiction, getTokenInfo } from '../account/utils';
 import { LIMITS, SWAP as SWAP_CONSTANTS } from '../constants';
-import { MAX_ORDERBOOK_QTY_LOTS, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
+import {
+  baseAmountAtPrice,
+  baseAmountAtPriceCeil,
+  computePriceTicksForBaseQuote,
+  getSwapLotScale,
+  MAX_ORDERBOOK_QTY_LOTS,
+  ORDERBOOK_PRICE_SCALE,
+  quoteAmountAtPrice,
+} from '../orderbook';
 import { hasCrossJurisdictionBookOrder } from '../orderbook/cross-j';
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
@@ -88,17 +95,27 @@ import { getJurisdictionStackId } from '../jurisdiction/jurisdiction-stack';
 import { getJurisdictionIdentityRef } from '../jurisdiction/jurisdiction-runtime';
 import { startParentLivenessWatch } from './parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
+import { checkpointNodeRuntime, quiesceNodeRuntime } from './node-runtime-quiesce';
 import {
   formatJurisdictionDisplayName,
   requireJurisdictionBlockTimeMs,
   resetMeshJurisdictionsCache,
   resolveMeshJurisdictionConfig,
+  resolveMeshJurisdictionRpcBindings,
   resolveSecondaryJurisdictions,
   type MeshJurisdictionConfig,
 } from './mesh-jurisdictions';
 import { areMarketMakerHubTransportsReady } from './mm-transport';
 import { computeCanonicalEntityHashesFromEnv, computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import { MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS } from './orchestrator-config';
+import { requireDeliveryDelivered } from '../protocol/payments/delivery-result';
+import {
+  assertMarketMakerReadySnapshotParity,
+  buildMarketMakerBootstrapEntityStateHashFromCanonicalHashes,
+  marketMakerBootstrapProgressSignature,
+  resolveMarketMakerReadySnapshotAction,
+  runtimeBacklogBlocksMarketMakerQuotes,
+} from './mm-bootstrap-progress';
 
 type Args = {
   name: string;
@@ -141,6 +158,7 @@ export type MarketMakerOfferSpec = {
   giveAmount: bigint;
   wantTokenId: number;
   wantAmount: bigint;
+  priceTicks: bigint;
   minFillRatio: number;
   crossJurisdiction?: CrossJurisdictionSwapRoute;
 };
@@ -283,11 +301,11 @@ const MARKET_MAKER_RUNTIME_TICK_DELAY_MS = Math.max(
 );
 const MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1000'),
+  Number(process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '8'),
 );
 const MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '1000'),
+  Number(process.env['MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '64'),
 );
 const MARKET_MAKER_API_YIELD_MS = Math.max(
   1,
@@ -408,7 +426,19 @@ const MARKET_MAKER_CROSS_EXPIRY_MS = Math.max(
 const yieldMarketMakerApi = async (): Promise<void> => {
   await new Promise<void>(resolve => setTimeout(resolve, MARKET_MAKER_API_YIELD_MS));
 };
-const ORDERBOOK_MAX_BASE_AMOUNT = MAX_ORDERBOOK_QTY_LOTS * SWAP_LOT_SCALE;
+const DEFAULT_AMOUNT_SCALE = 10n ** 18n;
+const scaleDefaultAmountForToken = (tokenId: number, amountAt18Decimals: bigint): bigint => {
+  const tokenUnit = 10n ** BigInt(getTokenInfo(tokenId).decimals);
+  const numerator = amountAt18Decimals * tokenUnit;
+  if (numerator % DEFAULT_AMOUNT_SCALE !== 0n) {
+    throw new Error(`MARKET_MAKER_TOKEN_SCALE_INEXACT:token=${tokenId}:amount=${amountAt18Decimals}`);
+  }
+  return numerator / DEFAULT_AMOUNT_SCALE;
+};
+const minimumTradeAmount = (tokenId: number): bigint =>
+  10n * 10n ** BigInt(getTokenInfo(tokenId).decimals);
+const orderbookMaxBaseAmount = (baseTokenId: number): bigint =>
+  MAX_ORDERBOOK_QTY_LOTS * getSwapLotScale(baseTokenId);
 // All resting offers on one bilateral account share the same collateral limit.
 // Size the complete default ladder, not each quote independently, so same-chain
 // plus cross-j depth fits $1M credit even on the five-token jurisdiction.
@@ -580,9 +610,6 @@ const configureMarketMakerRuntimeLogging = (env: Env): void => {
   env.quietRuntimeLogs = true;
 };
 
-const shouldStartJWatcherAtCurrentBlock = (): boolean =>
-  !envFlagEnabled(process.env['XLN_MARKET_MAKER_REPLAY_HISTORICAL_J_EVENTS']);
-
 const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig =>
   resolveMeshJurisdictionConfig<JurisdictionConfig>(rpcUrlOverride);
 
@@ -595,6 +622,7 @@ const toEntityJurisdictionConfig = (jurisdiction: JurisdictionConfig): MarketMak
   entityProviderAddress: jurisdiction.contracts.entityProvider,
   depositoryAddress: jurisdiction.contracts.depository,
   chainId: jurisdiction.chainId,
+  blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction),
 });
 
 const sameImportedJurisdiction = (target: JurisdictionConfig, replica: unknown): boolean => {
@@ -633,14 +661,16 @@ const importJurisdictionIfNeeded = async (
         chainId: jurisdiction.chainId,
         ticker: 'XLN',
         rpcs: [resolveImportedJurisdictionRpc(jurisdiction)],
+        entityProviderDeploymentBlock: jurisdiction.entityProviderDeploymentBlock,
         blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction),
         contracts: jurisdiction.contracts,
-        startAtCurrentBlock: shouldStartJWatcherAtCurrentBlock(),
+        startAtCurrentBlock: false,
       },
     }],
     entityInputs: [],
   });
   await settleRuntimeFor(env, rounds);
+  await waitForJurisdictionAdapter(env, jurisdiction);
 };
 
 const createMarketMakerEntityContext = async (
@@ -652,7 +682,7 @@ const createMarketMakerEntityContext = async (
 ): Promise<MarketMakerEntityContext> => {
   const privateKey = deriveSignerKeySync(resolvedArgs.seed, signerLabel);
   const signerId = deriveSignerAddressSync(resolvedArgs.seed, signerLabel).toLowerCase();
-  registerSignerKey(signerId, privateKey);
+  registerSignerKey(env, signerId, privateKey);
   const entityJurisdiction = toEntityJurisdictionConfig(jurisdiction);
   const consensusConfig = buildMarketMakerConsensusConfig(signerId, entityJurisdiction);
   const entityId = deriveMarketMakerEntityId(signerId, entityJurisdiction);
@@ -688,23 +718,48 @@ const createMarketMakerEntityContext = async (
 };
 
 const waitForTokenCatalog = async (jadapter: JAdapter, rounds = 80): Promise<JTokenInfo[]> => {
+  let lastReadError: unknown = null;
   for (let i = 0; i < rounds; i += 1) {
-    const tokens = await jadapter.getTokenRegistry().catch(() => []);
-    if (tokens.length >= HUB_REQUIRED_TOKEN_COUNT) return tokens;
+    try {
+      const tokens = await jadapter.getTokenRegistry();
+      if (tokens.length >= HUB_REQUIRED_TOKEN_COUNT) return tokens;
+      lastReadError = null;
+    } catch (error) {
+      lastReadError = error;
+    }
     await sleep(250);
+  }
+  if (lastReadError) {
+    const message = lastReadError instanceof Error ? lastReadError.message : String(lastReadError);
+    throw new Error(`TOKEN_CATALOG_READ_FAILED:${message}`, { cause: lastReadError });
   }
   throw new Error('TOKEN_CATALOG_EMPTY');
 };
 
-const waitForActiveJAdapter = async (env: Env, jurisdictionName: string, rounds = 1200): Promise<JAdapter> => {
+const findJurisdictionAdapters = (
+  env: Env,
+  jurisdiction: JurisdictionConfig,
+): JAdapter[] => [...(env.jReplicas?.values?.() ?? [])]
+  .filter(replica => sameImportedJurisdiction(jurisdiction, replica) && Boolean(replica.jadapter))
+  .map(replica => replica.jadapter!);
+
+export const waitForJurisdictionAdapter = async (
+  env: Env,
+  jurisdiction: JurisdictionConfig,
+  rounds = 1200,
+): Promise<JAdapter> => {
   for (let i = 0; i < rounds; i += 1) {
-    const jadapter = getActiveJAdapter(env);
-    if (jadapter) return jadapter;
+    const matches = findJurisdictionAdapters(env, jurisdiction);
+    if (matches.length > 1) {
+      throw new Error(`JURISDICTION_ADAPTER_AMBIGUOUS:${getJurisdictionIdentityRef(jurisdiction) || jurisdiction.name}`);
+    }
+    if (matches[0]) return matches[0];
     await settleRuntimeFor(env, 5);
     await sleep(50);
   }
   throw new Error(
-    `ACTIVE_JADAPTER_NOT_READY name=${jurisdictionName} ` +
+    `JURISDICTION_ADAPTER_NOT_READY name=${jurisdiction.name} ` +
+    `stack=${getJurisdictionIdentityRef(jurisdiction) || 'invalid'} ` +
     `active=${String(env.activeJurisdiction || 'none')} ` +
     `jReplicas=${Array.from(env.jReplicas?.keys?.() || []).join(',') || 'none'} ` +
     `runtimeMempool=${Number(env.runtimeMempool?.runtimeTxs?.length || 0)}`,
@@ -794,12 +849,14 @@ const getMarketMakerLevelProfile = (baseTokenId: number, quoteTokenId: number): 
   if (baseTokenId === 1 && quoteTokenId === 3) {
     return {
       offsetsBps: MARKET_MAKER_STABLE_LEVEL_OFFSETS_BPS,
-      baseSizes: MARKET_MAKER_STABLE_LEVEL_BASE_SIZES,
+      baseSizes: MARKET_MAKER_STABLE_LEVEL_BASE_SIZES.map(amount =>
+        scaleDefaultAmountForToken(baseTokenId, amount)),
     };
   }
   return {
     offsetsBps: MARKET_MAKER_LEVEL_OFFSETS_BPS,
-    baseSizes: MARKET_MAKER_LEVEL_BASE_SIZES,
+    baseSizes: MARKET_MAKER_LEVEL_BASE_SIZES.map(amount =>
+      scaleDefaultAmountForToken(baseTokenId, amount)),
   };
 };
 
@@ -832,29 +889,61 @@ const ceilDiv = (numerator: bigint, denominator: bigint): bigint => {
   return (numerator + denominator - 1n) / denominator;
 };
 
-const alignUpToLot = (amount: bigint): bigint => {
+const alignUpToLot = (baseTokenId: number, amount: bigint): bigint => {
   if (amount <= 0n) return 0n;
-  return ceilDiv(amount, SWAP_LOT_SCALE) * SWAP_LOT_SCALE;
+  const lotScale = getSwapLotScale(baseTokenId);
+  return ceilDiv(amount, lotScale) * lotScale;
 };
 
-const minBaseAmountForQuoteNotional = (priceTicks: bigint): bigint => {
+const minBaseAmountForQuoteNotional = (
+  baseTokenId: number,
+  quoteTokenId: number,
+  priceTicks: bigint,
+): bigint => {
   if (priceTicks <= 0n) return 0n;
-  return alignUpToLot(ceilDiv(HUB_DEFAULT_MIN_TRADE_SIZE * ORDERBOOK_PRICE_SCALE, priceTicks));
+  return alignUpToLot(
+    baseTokenId,
+    baseAmountAtPriceCeil(
+      baseTokenId,
+      quoteTokenId,
+      minimumTradeAmount(quoteTokenId),
+      priceTicks,
+    ),
+  );
 };
 
-const withMinQuoteNotionalBaseSize = (baseSize: bigint, priceTicks: bigint): bigint => {
-  const minBaseSize = minBaseAmountForQuoteNotional(priceTicks);
+const withMinQuoteNotionalBaseSize = (
+  baseTokenId: number,
+  quoteTokenId: number,
+  baseSize: bigint,
+  priceTicks: bigint,
+): bigint => {
+  const minBaseSize = minBaseAmountForQuoteNotional(baseTokenId, quoteTokenId, priceTicks);
   const desiredBaseSize = baseSize >= minBaseSize ? baseSize : minBaseSize;
-  return desiredBaseSize <= ORDERBOOK_MAX_BASE_AMOUNT ? desiredBaseSize : ORDERBOOK_MAX_BASE_AMOUNT;
+  const maxBaseAmount = orderbookMaxBaseAmount(baseTokenId);
+  return desiredBaseSize <= maxBaseAmount ? desiredBaseSize : maxBaseAmount;
 };
 
 const withCrossMinQuoteNotionalSourceAmount = (
-  sourceAmount: bigint,
+  sourceTokenId: number,
+  baseTokenId: number,
+  quoteTokenId: number,
+  desiredBaseAmount: bigint,
   sourceIsBase: boolean,
   priceTicks: bigint,
 ): bigint => {
-  if (sourceIsBase) return withMinQuoteNotionalBaseSize(sourceAmount, priceTicks);
-  return sourceAmount >= HUB_DEFAULT_MIN_TRADE_SIZE ? sourceAmount : HUB_DEFAULT_MIN_TRADE_SIZE;
+  const baseAmount = withMinQuoteNotionalBaseSize(
+    baseTokenId,
+    quoteTokenId,
+    desiredBaseAmount,
+    priceTicks,
+  );
+  if (sourceIsBase) {
+    return baseAmount;
+  }
+  const quoteAmount = quoteAmountAtPrice(baseTokenId, quoteTokenId, baseAmount, priceTicks);
+  const minimumSourceAmount = minimumTradeAmount(sourceTokenId);
+  return quoteAmount >= minimumSourceAmount ? quoteAmount : minimumSourceAmount;
 };
 
 const getCrossSourceToTargetMidTicks = (sourceTokenId: number, targetTokenId: number): bigint => {
@@ -867,33 +956,31 @@ const getCrossSourceToTargetMidTicks = (sourceTokenId: number, targetTokenId: nu
 };
 
 const computeCrossTargetAmount = (
+  baseTokenId: number,
+  quoteTokenId: number,
   sourceAmount: bigint,
   sourceIsBase: boolean,
   priceTicks: bigint,
 ): bigint => {
   if (sourceAmount <= 0n || priceTicks <= 0n) return 0n;
   return sourceIsBase
-    ? (sourceAmount * priceTicks) / ORDERBOOK_PRICE_SCALE
-    : (sourceAmount * ORDERBOOK_PRICE_SCALE) / priceTicks;
+    ? quoteAmountAtPrice(baseTokenId, quoteTokenId, sourceAmount, priceTicks)
+    : baseAmountAtPrice(baseTokenId, quoteTokenId, sourceAmount, priceTicks);
 };
 
 const computeCrossOrderbookPriceTicks = (
   sourceIsBase: boolean,
+  baseTokenId: number,
+  quoteTokenId: number,
   baseAmount: bigint,
   quoteAmount: bigint,
-  stepTicks: number,
-): bigint => {
-  if (baseAmount <= 0n || quoteAmount <= 0n) return 0n;
-  const step = BigInt(Math.max(1, stepTicks));
-  const scaledQuoteAmount = quoteAmount * ORDERBOOK_PRICE_SCALE;
-  const remainder = scaledQuoteAmount % baseAmount;
-  let ticks = scaledQuoteAmount / baseAmount;
-  if (sourceIsBase) {
-    if (remainder > 0n) ticks += 1n;
-    return ((ticks + step - 1n) / step) * step;
-  }
-  return (ticks / step) * step;
-};
+): bigint => computePriceTicksForBaseQuote(
+  sourceIsBase ? 1 : 0,
+  baseTokenId,
+  quoteTokenId,
+  baseAmount,
+  quoteAmount,
+);
 
 const snapPriceTicks = (ticks: bigint, stepTicks: number, mode: 'up' | 'down'): bigint => {
   const step = BigInt(Math.max(1, stepTicks));
@@ -920,39 +1007,35 @@ export const fitCrossAmountsToOrderbook = (
   const oriented = sourceTokenId === targetTokenId
     ? { baseTokenId: sourceTokenId, quoteTokenId: targetTokenId }
     : getSwapPairOrientation(sourceTokenId, targetTokenId);
-  const pairPolicy = getSwapPairPolicyByBaseQuote(oriented.baseTokenId, oriented.quoteTokenId);
   const requestedBaseAmount = market.sourceIsBase ? sourceAmount : targetAmount;
-  const cappedBaseAmount = requestedBaseAmount <= ORDERBOOK_MAX_BASE_AMOUNT
+  const maxBaseAmount = orderbookMaxBaseAmount(oriented.baseTokenId);
+  const cappedBaseAmount = requestedBaseAmount <= maxBaseAmount
     ? requestedBaseAmount
-    : ORDERBOOK_MAX_BASE_AMOUNT;
-  const quantizedBaseAmount = (cappedBaseAmount / SWAP_LOT_SCALE) * SWAP_LOT_SCALE;
+    : maxBaseAmount;
+  const lotScale = getSwapLotScale(oriented.baseTokenId);
+  const quantizedBaseAmount = (cappedBaseAmount / lotScale) * lotScale;
   if (quantizedBaseAmount <= 0n) return null;
 
-  const requestedQuoteAmount = (quantizedBaseAmount * priceTicks) / ORDERBOOK_PRICE_SCALE;
+  const requestedQuoteAmount = quoteAmountAtPrice(
+    oriented.baseTokenId,
+    oriented.quoteTokenId,
+    quantizedBaseAmount,
+    priceTicks,
+  );
   if (requestedQuoteAmount <= 0n) return null;
   const effectivePriceTicks = computeCrossOrderbookPriceTicks(
     market.sourceIsBase,
+    oriented.baseTokenId,
+    oriented.quoteTokenId,
     quantizedBaseAmount,
     requestedQuoteAmount,
-    pairPolicy.priceStepTicks,
   );
   if (effectivePriceTicks <= 0n) return null;
-
-  const effectiveQuoteAmount = (quantizedBaseAmount * effectivePriceTicks) / ORDERBOOK_PRICE_SCALE;
-  if (effectiveQuoteAmount <= 0n) return null;
-  // Account cross swap_offer recomputes ticks with step=1 from final amounts.
-  // Keep this assert so future wider MM book steps cannot silently diverge.
-  const accountCrossPriceTicks = computeCrossOrderbookPriceTicks(
-    market.sourceIsBase,
-    quantizedBaseAmount,
-    effectiveQuoteAmount,
-    1,
-  );
-  if (accountCrossPriceTicks !== effectivePriceTicks) {
-    throw new Error(
-      `MARKET_MAKER_CROSS_ACCOUNT_PRICE_DIVERGENCE priceTicks=${effectivePriceTicks.toString()} accountTicks=${accountCrossPriceTicks.toString()}`,
-    );
-  }
+  // The raw amounts are authoritative. Re-encoding the already-rounded price
+  // into a second quote amount can cross a one-tick boundary for mixed-decimal
+  // pairs. Keep the original quote and publish the price derived from those
+  // exact bytes; Account then recomputes the identical tick one-for-one.
+  const effectiveQuoteAmount = requestedQuoteAmount;
   return market.sourceIsBase
     ? { sourceAmount: quantizedBaseAmount, targetAmount: effectiveQuoteAmount, priceTicks: effectivePriceTicks }
     : { sourceAmount: effectiveQuoteAmount, targetAmount: quantizedBaseAmount, priceTicks: effectivePriceTicks };
@@ -1088,10 +1171,30 @@ export const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: num
         }
         if (!isWithinPairBand(entry.midPriceTicks, askPriceTicks)) continue;
         if (!isWithinPairBand(entry.midPriceTicks, bidPriceTicks)) continue;
-        const askBaseSize = withMinQuoteNotionalBaseSize(baseSize, askPriceTicks);
-        const bidBaseSize = withMinQuoteNotionalBaseSize(baseSize, bidPriceTicks);
-        const askWantAmount = (askBaseSize * askPriceTicks) / ORDERBOOK_PRICE_SCALE;
-        const bidGiveAmount = (bidBaseSize * bidPriceTicks) / ORDERBOOK_PRICE_SCALE;
+        const askBaseSize = withMinQuoteNotionalBaseSize(
+          entry.pair.baseTokenId,
+          entry.pair.quoteTokenId,
+          baseSize,
+          askPriceTicks,
+        );
+        const bidBaseSize = withMinQuoteNotionalBaseSize(
+          entry.pair.baseTokenId,
+          entry.pair.quoteTokenId,
+          baseSize,
+          bidPriceTicks,
+        );
+        const askWantAmount = quoteAmountAtPrice(
+          entry.pair.baseTokenId,
+          entry.pair.quoteTokenId,
+          askBaseSize,
+          askPriceTicks,
+        );
+        const bidGiveAmount = quoteAmountAtPrice(
+          entry.pair.baseTokenId,
+          entry.pair.quoteTokenId,
+          bidBaseSize,
+          bidPriceTicks,
+        );
         const levelId = level + 1;
 
         if (askWantAmount > 0n) {
@@ -1103,6 +1206,7 @@ export const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: num
             giveAmount: askBaseSize,
             wantTokenId: entry.pair.quoteTokenId,
             wantAmount: askWantAmount,
+            priceTicks: askPriceTicks,
             // Resting MM quotes must be ordinary GTC orders. A non-zero minFillRatio on
             // a resting book order creates AON-like semantics that the matcher cannot
             // honor safely across bilateral state channels, so keep it at zero here.
@@ -1118,6 +1222,7 @@ export const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: num
             giveAmount: bidGiveAmount,
             wantTokenId: entry.pair.baseTokenId,
             wantAmount: bidBaseSize,
+            priceTicks: bidPriceTicks,
             // Same rule for resting bids: keep them plain GTC so they are always
             // eligible to rest on book and match incrementally.
             minFillRatio: 0,
@@ -1256,11 +1361,20 @@ export const buildMarketMakerCrossOfferSpecs = (
         const priceTicks = snapPriceTicks(rawPriceTicks, pairPolicy.priceStepTicks, market.sourceIsBase ? 'up' : 'down');
         if (!isWithinPairBand(canonicalMidTicks, priceTicks)) continue;
         const sourceAmount = withCrossMinQuoteNotionalSourceAmount(
+          pair.sourceTokenId,
+          oriented.baseTokenId,
+          oriented.quoteTokenId,
           levelProfile.baseSizes[level]!,
           market.sourceIsBase,
           priceTicks,
         );
-        const targetAmount = computeCrossTargetAmount(sourceAmount, market.sourceIsBase, priceTicks);
+        const targetAmount = computeCrossTargetAmount(
+          oriented.baseTokenId,
+          oriented.quoteTokenId,
+          sourceAmount,
+          market.sourceIsBase,
+          priceTicks,
+        );
         const levelId = level + 1;
         const bookOwnerEntityId = deriveCanonicalCrossJurisdictionBookOwnerForLegs(
           sourceJurisdictionRef,
@@ -1299,7 +1413,7 @@ export const buildMarketMakerCrossOfferSpecs = (
         );
         if (amounts) {
           const quoteAmount = market.sourceIsBase ? amounts.targetAmount : amounts.sourceAmount;
-          if (quoteAmount < HUB_DEFAULT_MIN_TRADE_SIZE) continue;
+          if (quoteAmount < minimumTradeAmount(oriented.quoteTokenId)) continue;
           if (!isWithinPairBand(canonicalMidTicks, amounts.priceTicks)) continue;
           const offerId = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${pair.sourceTokenId}-${pair.targetTokenId}-sell-${levelId}`;
           const route = canonicalizeLocalCrossJurisdictionRoute(env, {
@@ -1330,6 +1444,7 @@ export const buildMarketMakerCrossOfferSpecs = (
             giveAmount: amounts.sourceAmount,
             wantTokenId: pair.targetTokenId,
             wantAmount: amounts.targetAmount,
+            priceTicks: amounts.priceTicks,
             minFillRatio: 0,
             crossJurisdiction: route,
           });
@@ -1381,7 +1496,7 @@ const countCommittedMarketMakerOffersForHub = (env: Env, mmEntityId: string, hub
 
 const isSameQuoteJobDepthReady = (env: Env, job: SameQuoteJob): boolean => {
   const account = getAccountMachine(env, job.context.entityId, job.hub.entityId);
-  if (!isAccountConsensusReady(account)) return false;
+  if (!hasCommittedAccountState(account)) return false;
   const specs = buildMarketMakerOfferSpecs([job.hub.entityId], job.tokenIds);
   if (specs.length === 0) return true;
   const expectedByPair = new Map<string, number>();
@@ -1589,7 +1704,7 @@ const isMarketMakerConnectivityReady = (
   tokenIds: number[],
 ): boolean => hubEntityIds.every((hubEntityId) => {
   const account = getAccountMachine(env, mmEntityId, hubEntityId);
-  if (!isAccountConsensusReady(account)) return false;
+  if (!hasCommittedAccountState(account)) return false;
   return tokenIds.every((tokenId) =>
     hasPairMutualCredit(env, mmEntityId, hubEntityId, tokenId, getBootstrapCreditAmount(tokenId)),
   );
@@ -1685,6 +1800,7 @@ const maintainMarketMakerQuotes = async (
             giveAmount: spec.giveAmount,
             wantTokenId: spec.wantTokenId,
             wantAmount: spec.wantAmount,
+            priceTicks: spec.priceTicks,
             minFillRatio: spec.minFillRatio,
           },
         },
@@ -1878,8 +1994,6 @@ const describeMarketMakerAccountBlocker = (
   if (!account) reason = 'missing-account';
   else if (status !== 'active') reason = 'inactive-account';
   else if (Number(currentHeight ?? 0) <= 0) reason = 'height-zero';
-  else if (pendingFrame) reason = 'pending-frame';
-  else if (mempoolLength > 0) reason = 'mempool';
   if (!reason) return null;
   return {
     role,
@@ -1909,8 +2023,6 @@ const describeMarketMakerSameHubBlocker = (
   if (!account) reason = 'missing-account';
   else if (status !== 'active') reason = 'inactive-account';
   else if (Number(currentHeight ?? 0) <= 0) reason = 'height-zero';
-  else if (pendingFrame) reason = 'pending-frame';
-  else if (mempoolLength > 0) reason = 'mempool';
   if (!reason) return null;
   return {
     entityId,
@@ -2725,7 +2837,7 @@ export const getMarketMakerHealth = (
   const hubs = hubEntityIds.map((hubEntityId) => {
     const account = getAccountMachine(env, mmEntityId, hubEntityId);
     const blocker = describeMarketMakerSameHubBlocker(env, mmEntityId, hubEntityId);
-    const accountReady = !blocker && isAccountConsensusReady(account);
+    const accountReady = !blocker && hasCommittedAccountState(account);
     const offers = countCommittedMarketMakerOffersForHub(env, mmEntityId, hubEntityId);
     const expectedHubOffers = expectedOffersByHub.get(hubEntityId) || 0;
     const pairHealth = pairs.map((pair) => {
@@ -3080,13 +3192,10 @@ export const buildMarketMakerBootstrapFingerprint = (
   };
 };
 
-export const buildMarketMakerBootstrapEntityStateHash = (env: Env): string => {
-  const payload = {
-    schema: 'market-maker-bootstrap-entity-state-v1',
-    entities: computeCanonicalEntityHashesFromEnv(env),
-  };
-  return createHash('sha256').update(safeStringify(payload)).digest('hex');
-};
+export const buildMarketMakerBootstrapEntityStateHash = (env: Env): string =>
+  buildMarketMakerBootstrapEntityStateHashFromCanonicalHashes(
+    computeCanonicalEntityHashesFromEnv(env),
+  );
 
 const assertMarketMakerBootstrapFinalized = (
   env: Env,
@@ -3161,9 +3270,13 @@ const hasMarketMakerAccountBacklog = (
 
 const hasMarketMakerRuntimeBacklog = (env: Env): boolean => {
   const runtimeMempool = env.runtimeMempool;
-  return Boolean(env.runtimeState?.processingPromise) ||
-    Number(runtimeMempool?.runtimeTxs?.length || 0) > 0 ||
-    Number(runtimeMempool?.entityInputs?.length || 0) > 0;
+  return runtimeBacklogBlocksMarketMakerQuotes({
+    processing: Boolean(env.runtimeState?.processingPromise),
+    runtimeTxs: Number(runtimeMempool?.runtimeTxs?.length || 0),
+    entityInputs: Number(runtimeMempool?.entityInputs?.length || 0),
+    inFlightEntityInputs: Number(env.runtimeState?.inFlightEntityInputs || 0),
+    jInputs: Number(runtimeMempool?.jInputs?.length || 0),
+  });
 };
 
 const getMarketMakerRuntimeBacklogSnapshot = (
@@ -3174,6 +3287,7 @@ const getMarketMakerRuntimeBacklogSnapshot = (
     processing: Boolean(env.runtimeState?.processingPromise),
     runtimeTxs: Number(env.runtimeMempool?.runtimeTxs?.length || 0),
     entityInputs: Number(env.runtimeMempool?.entityInputs?.length || 0),
+    inFlightEntityInputs: Number(env.runtimeState?.inFlightEntityInputs || 0),
     jInputs: Number(env.runtimeMempool?.jInputs?.length || 0),
   };
   if (options.includeQueuedEntityInputs === true) {
@@ -3189,7 +3303,19 @@ const getMarketMakerRuntimeBacklogSnapshot = (
 const run = async (): Promise<void> => {
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
 
-	  const env = await main(resolvedArgs.seed);
+	  const env = await main(resolvedArgs.seed, {
+	    trustedJurisdictionRpcBindings: resolveMeshJurisdictionRpcBindings(
+	      resolvedArgs.rpcUrl,
+	      resolveLocalApiUrl,
+	    ),
+	  });
+	  // Capture the persistence oracle before the runtime loop or jurisdiction
+	  // watchers can apply new, legitimate inputs. A post-startup raw Entity hash
+	  // is not a restore oracle: even an empty finalized J range advances the
+	  // certified anchor, Entity height, timestamp, and frame hash.
+	  const restoredEntityStateHash = env.eReplicas.size > 0
+	    ? buildMarketMakerBootstrapEntityStateHash(env)
+	    : null;
 	  const runtimeIngressReceipts = createRuntimeIngressReceiptStore();
 	  const currentRuntimeHeight = (targetEnv: Env | null): number =>
 	    Math.max(0, Math.floor(Number(targetEnv?.height ?? 0)));
@@ -3210,6 +3336,7 @@ const run = async (): Promise<void> => {
     maxEntityTxsPerFrame: MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
   });
   let startupPhase = 'boot';
+  let externalIngressReady = false;
   let activeMmEntityId: string | null = null;
   let mmContexts: MarketMakerEntityContext[] = [];
   let mmTokenIdsByContext: Map<string, number[]> = new Map();
@@ -3323,6 +3450,7 @@ const run = async (): Promise<void> => {
         readyHash: bootstrapReadyHash,
         runtimeStateHash: bootstrapRuntimeStateHash,
         entityStateHash: bootstrapEntityStateHash,
+	        restoredEntityStateHash,
         readyAt: bootstrapReadyAt,
       },
       currentHealth: currentHealth ? {
@@ -3428,9 +3556,13 @@ const run = async (): Promise<void> => {
         readyHash: bootstrapReadyHash,
         runtimeStateHash: bootstrapRuntimeStateHash,
         entityStateHash: bootstrapEntityStateHash,
+	        restoredEntityStateHash,
         readyAt: bootstrapReadyAt,
       },
-      marketMaker: marketMakerHealth,
+      marketMaker: {
+        ...marketMakerHealth,
+        quiescence: summarizeRuntimeQuiescence(env),
+      },
     });
     rebuildCachedInfoResponseJson();
   };
@@ -3534,6 +3666,7 @@ const run = async (): Promise<void> => {
     onRecoveryBundleRequest: async (_from, lookupKey) =>
       resolveRuntimeAdapterRead({ env }, `recovery/bundles/${encodeURIComponent(lookupKey)}`),
     onEntityInput: async (from, input, ingressTimestamp) => {
+      if (!externalIngressReady) throw new Error('RUNTIME_STARTUP_J_CATCHUP_PENDING');
       const debugEntry: DirectEntityInputDebug = {
         at: Date.now(),
         fromRuntimeId: String(from || ''),
@@ -3543,7 +3676,13 @@ const run = async (): Promise<void> => {
       };
       lastDirectEntityInput = debugEntry;
       try {
-        handleInboundP2PEntityInput(env, from, input, ingressTimestamp);
+        const inbound = handleInboundP2PEntityInput(env, from, input, ingressTimestamp);
+        if (inbound.kind === 'receipt') {
+          requireDeliveryDelivered(
+            directRuntimeWs.sendReliableReceiptDelivery(from, inbound.receipt),
+            delivery => `DIRECT_RELIABLE_RECEIPT_NOT_DELIVERED:${delivery.code}`,
+          );
+        }
       } catch (error) {
         lastDirectEntityInputError = {
           ...debugEntry,
@@ -3552,6 +3691,10 @@ const run = async (): Promise<void> => {
         throw error;
       }
     },
+    onReliableReceipt: (from, receipt) => {
+      if (!externalIngressReady) throw new Error('RUNTIME_STARTUP_J_CATCHUP_PENDING');
+      handleInboundReliableReceipt(env, from, receipt);
+    },
   });
   env.runtimeState = env.runtimeState ?? {};
   env.runtimeState.directEntityInputDispatch =
@@ -3559,10 +3702,12 @@ const run = async (): Promise<void> => {
       ? (targetRuntimeId, input, ingressTimestamp) =>
           directRuntimeWs.sendEntityInputDelivery(targetRuntimeId, input, ingressTimestamp)
       : null;
+  env.runtimeState.directReliableReceiptDispatch = (targetRuntimeId, receipt) =>
+    directRuntimeWs.sendReliableReceiptDelivery(targetRuntimeId, receipt);
   const handleRadapterWsMessage = (ws: MarketMakerServerSocket, raw: string | Buffer | ArrayBuffer): void => {
-    let msg: Record<string, unknown>;
+    let msg: import('../radapter/types').RuntimeAdapterRequest;
     try {
-      msg = decodeRuntimeAdapterMessage<Record<string, unknown>>(raw);
+      msg = decodeRuntimeAdapterRequest(raw);
     } catch (error) {
       closeInvalidRuntimeAdapterMessage(ws, error);
       return;
@@ -3573,6 +3718,7 @@ const run = async (): Promise<void> => {
 	      registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
 	      readReceipt: (id) => runtimeIngressReceipts.get(id),
 	      buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
+	      isMutatingIngressReady: () => externalIngressReady,
 	      readHead: (targetEnv) => readPersistedStorageHead(targetEnv),
       readFrame: (targetEnv, height) => readPersistedStorageFrameRecord(targetEnv, height),
       listCheckpoints: (targetEnv) => listPersistedCheckpointHeights(targetEnv),
@@ -3584,10 +3730,17 @@ const run = async (): Promise<void> => {
     })).catch(error => {
       ws.send(safeStringify({ type: 'error', error: `Runtime adapter failed: ${(error as Error).message}` }));
     });
-  };
+	  };
 
-  const httpDrain = createHttpDrainTracker();
-  const server = Bun.serve({
+	  // Bun exposes fetch handlers as soon as Bun.serve returns. Teardown may
+	  // therefore arrive while jurisdiction/bootstrap initialization below is
+	  // still awaiting. Keep every lifecycle handle used by control routes
+	  // initialized before the server becomes reachable.
+	  let shuttingDown = false;
+	  let loop: ReturnType<typeof setInterval> | null = null;
+	  let healthRefreshLoop: ReturnType<typeof setInterval> | null = null;
+	  const httpDrain = createHttpDrainTracker();
+	  const server = Bun.serve({
     hostname: resolvedArgs.apiHost,
     port: resolvedArgs.apiPort,
     idleTimeout: 120,
@@ -3603,8 +3756,8 @@ const run = async (): Promise<void> => {
           return new Response('WebSocket upgrade failed', { status: 400 });
         }
 
-        const upgraded = directRuntimeWs.maybeUpgrade(request, serverRef);
-        if (upgraded !== undefined) return upgraded;
+        const directUpgrade = directRuntimeWs.maybeUpgrade(request, serverRef);
+        if (directUpgrade.handled) return directUpgrade.response;
 
         if (pathname === '/api/account/status' && request.method === 'GET') {
           const entityId = String(
@@ -3665,32 +3818,41 @@ const run = async (): Promise<void> => {
           shuttingDown = true;
           if (loop) clearInterval(loop);
           if (healthRefreshLoop) clearInterval(healthRefreshLoop);
-          stopJurisdictionWatchers(env);
-          const drained = await waitForRuntimeWorkDrained(env, 10_000);
-          if (!drained) {
-            console.warn(`[${resolvedArgs.name}] p2p stop timed out waiting for runtime work to drain`);
+          try {
+            const result = await quiesceNodeRuntime(env, {
+              workTimeoutMs: 10_000,
+              loopTimeoutMs: 5_000,
+            });
+            return new Response(safeStringify({ ok: true, ...result }), { headers: JSON_HEADERS });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.error(`[${resolvedArgs.name}] p2p stop failed: ${message}`);
+            return new Response(safeStringify({ ok: false, error: message }), {
+              status: 503,
+              headers: JSON_HEADERS,
+            });
           }
-          const idle = await stopRuntimeLoopAndWait(env, 5_000);
-          stopP2P(env);
-          return new Response(safeStringify({ ok: true, runtimeDrained: drained, runtimeIdle: idle }), {
-            headers: JSON_HEADERS,
-          });
         }
 
         if (pathname === '/api/control/runtime/quiesce' && request.method === 'POST') {
           shuttingDown = true;
           if (loop) clearInterval(loop);
           if (healthRefreshLoop) clearInterval(healthRefreshLoop);
-          stopJurisdictionWatchers(env);
-          const drained = await waitForRuntimeWorkDrained(env, 20_000, 750);
-          if (!drained) {
-            console.warn(`[${resolvedArgs.name}] quiesce timed out waiting for runtime work to drain`);
+          try {
+            const result = await quiesceNodeRuntime(env, {
+              workTimeoutMs: 20_000,
+              loopTimeoutMs: 5_000,
+              quietMs: 750,
+            });
+            return new Response(safeStringify({ ok: true, ...result }), { headers: JSON_HEADERS });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.error(`[${resolvedArgs.name}] runtime quiesce failed: ${message}`);
+            return new Response(safeStringify({ ok: false, error: message }), {
+              status: 503,
+              headers: JSON_HEADERS,
+            });
           }
-          const idle = await stopRuntimeLoopAndWait(env, 5_000);
-          stopP2P(env);
-          return new Response(safeStringify({ ok: true, runtimeDrained: drained, runtimeIdle: idle }), {
-            headers: JSON_HEADERS,
-          });
         }
 
         return new Response(safeStringify({ error: 'Not found' }), {
@@ -3735,16 +3897,17 @@ const run = async (): Promise<void> => {
         chainId: jurisdiction.chainId,
         ticker: 'XLN',
         rpcs: [resolveImportedJurisdictionRpc(jurisdiction)],
+        entityProviderDeploymentBlock: jurisdiction.entityProviderDeploymentBlock,
         blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction),
         contracts: jurisdiction.contracts,
-        startAtCurrentBlock: shouldStartJWatcherAtCurrentBlock(),
+        startAtCurrentBlock: false,
       },
     }],
     entityInputs: [],
   });
   await settleRuntimeFor(env, 35);
 
-  const jadapter = await waitForActiveJAdapter(env, jurisdiction.name);
+  const jadapter = await waitForJurisdictionAdapter(env, jurisdiction);
   ensureJurisdictionReplica(env, jadapter, resolveImportedJurisdictionRpc(jurisdiction));
   startupPhase = 'token-catalog';
   const tokenCatalog = await waitForTokenCatalog(jadapter);
@@ -3788,6 +3951,15 @@ const run = async (): Promise<void> => {
     })),
   });
 
+  startupPhase = 'j-catchup';
+  startJurisdictionWatchers(env);
+  const watcherDrain = await drainJWatcherBacklog(env, async currentEnv => runtimeProcess(currentEnv));
+  externalIngressReady = true;
+  nodeLog.info('startup.j_catchup_ready', {
+    jurisdictions: watcherDrain.length,
+    cursors: watcherDrain.map(status => `${status.chainId}:${status.committedCursor}/${status.targetBlock}`),
+  });
+
   startupPhase = 'start-p2p';
   const p2p = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
@@ -3799,8 +3971,7 @@ const run = async (): Promise<void> => {
   });
   if (!p2p) throw new Error('P2P_START_FAILED');
 
-  let shuttingDown = false;
-  let loopInFlight = false;
+	  let loopInFlight = false;
   let bootstrapSameCursor = 0;
   let bootstrapCrossCursor = 0;
   let steadyCrossCursor = 0;
@@ -4228,45 +4399,14 @@ const run = async (): Promise<void> => {
     }
   };
 
-  const persistBootstrapReadySnapshotIfRequested = async (): Promise<void> => {
-    if (bootstrapReadySnapshotPersisted) return;
-    if (!envFlagEnabled(process.env['XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT'])) return;
-    const previousRuntimeConfig = env.runtimeConfig;
-    const wasLoopActive = Boolean(env.runtimeState?.loopActive);
-    const restartRuntimeLoopIfNeeded = (): void => {
-      if (!wasLoopActive) return;
-      resumeRuntimeLoop(env, {
-        tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS,
-        maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
-        maxEntityTxsPerFrame: MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
-      });
-    };
-    env.runtimeConfig = {
-      ...(env.runtimeConfig || {}),
-      storage: {
-        ...(env.runtimeConfig?.storage || {}),
-        enabled: true,
-      },
-    };
-    env.runtimeState = env.runtimeState ?? {};
-    env.runtimeState.persistenceQuiescing = true;
-    try {
-      const runtimeIdle = await stopRuntimeLoopAndWait(env, 30_000);
-      if (!runtimeIdle) {
-        throw new Error(`MARKET_MAKER_READY_SNAPSHOT_RUNTIME_NOT_IDLE: height=${Number(env.height ?? 0)}`);
-      }
-      await persistRestoredEnvToDB(env);
-      bootstrapReadySnapshotPersisted = true;
-      nodeLog.info('bootstrap.ready_snapshot.persisted', { height: env.height });
-    } finally {
-      env.runtimeConfig = previousRuntimeConfig;
-      restartRuntimeLoopIfNeeded();
-    }
+  type MarketMakerBootstrapFinalization = {
+    health: MarketMakerHealth;
+    fingerprint: ReturnType<typeof buildMarketMakerBootstrapFingerprint>;
+    runtimeStateHash: string;
+    entityStateHash: string;
   };
 
-  const markOffersReady = async (finalizedHealth?: MarketMakerHealth | null): Promise<void> => {
-    if (startupPhase === 'offers-ready') return;
-    const finalizeStartedAt = Date.now();
+  const buildMarketMakerBootstrapFinalization = (): MarketMakerBootstrapFinalization => {
     const visibleHubs = readVisibleHubProfiles(env, true);
     if (!isAllSameQuoteDepthReady(visibleHubs)) {
       throw new Error(`MARKET_MAKER_BOOTSTRAP_INCOMPLETE: ${safeStringify({
@@ -4286,13 +4426,12 @@ const run = async (): Promise<void> => {
     const assertStartedAt = Date.now();
     const health = assertMarketMakerBootstrapFinalized(
       env,
-      finalizedHealth ?? publishMarketMakerHealthSnapshot({ includeCross: true }),
+      publishMarketMakerHealthSnapshot({ includeCross: true }),
     );
     emitBootstrapDebugEvent('finalize-step', {
       step: 'assert-finalized',
       durationMs: Date.now() - assertStartedAt,
     });
-    await yieldMarketMakerApi();
     const fingerprintStartedAt = Date.now();
     const fingerprint = buildMarketMakerBootstrapFingerprint(
       env,
@@ -4305,7 +4444,6 @@ const run = async (): Promise<void> => {
       step: 'fingerprint',
       durationMs: Date.now() - fingerprintStartedAt,
     });
-    await yieldMarketMakerApi();
     const hashStartedAt = Date.now();
     const runtimeStateHash = computeCanonicalStateHashFromEnv(env);
     const entityStateHash = buildMarketMakerBootstrapEntityStateHash(env);
@@ -4313,20 +4451,127 @@ const run = async (): Promise<void> => {
       step: 'canonical-hashes',
       durationMs: Date.now() - hashStartedAt,
     });
-    bootstrapReadyHash = fingerprint.hash;
-    bootstrapRuntimeStateHash = runtimeStateHash;
-    bootstrapEntityStateHash = entityStateHash;
+    return { health, fingerprint, runtimeStateHash, entityStateHash };
+  };
+
+  const publishMarketMakerBootstrapFinalization = (
+    finalization: MarketMakerBootstrapFinalization,
+  ): void => {
+    bootstrapReadyHash = finalization.fingerprint.hash;
+    bootstrapRuntimeStateHash = finalization.runtimeStateHash;
+    bootstrapEntityStateHash = finalization.entityStateHash;
     bootstrapReadyAt = Date.now();
+    startupPhase = 'offers-ready';
+    cachedMarketMakerHealth = finalization.health;
+    rebuildCachedHealthResponseJson();
+  };
+
+  /**
+   * The ready fingerprint, canonical hashes, and recovery snapshot must all
+   * describe one runtime state. Computing them around event-loop yields lets
+   * a P2P input land between those artifacts. When persistence is enabled,
+   * build and publish every artifact inside the same checkpoint fence.
+   */
+  const finalizeMarketMakerBootstrapState = async (): Promise<MarketMakerBootstrapFinalization | null> => {
+    const shouldPersist =
+      !bootstrapReadySnapshotPersisted &&
+      envFlagEnabled(process.env['XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT']);
+    if (!shouldPersist) {
+      const finalization = buildMarketMakerBootstrapFinalization();
+      publishMarketMakerBootstrapFinalization(finalization);
+      return finalization;
+    }
+
+    const previousRuntimeConfig = env.runtimeConfig;
+    let finalization: MarketMakerBootstrapFinalization | null = null;
+    let retryAfterCheckpoint = false;
+    await checkpointNodeRuntime(env, {
+      workTimeoutMs: 30_000,
+      loopTimeoutMs: 30_000,
+      quietMs: 250,
+      loopConfig: {
+        tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS,
+        maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
+        maxEntityTxsPerFrame: MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
+      },
+      persist: async () => {
+        const quiescedCompletionHealth = buildMarketMakerHealthSnapshot({ includeCross: true });
+        if (
+          !canCheckBootstrapCompletion() ||
+          !isBootstrapDepthComplete(quiescedCompletionHealth)
+        ) {
+          retryAfterCheckpoint = true;
+          emitBootstrapDebugEvent('finalize-retry', {
+            reason: 'quiesced-depth-changed',
+            health: summarizeMarketMakerHealthForDebug(quiescedCompletionHealth),
+          });
+          return;
+        }
+        finalization = buildMarketMakerBootstrapFinalization();
+        // Storage stays disabled until every producer and the runtime loop are
+        // stopped. Enabling it earlier lets an in-flight frame enter the
+        // append path before this checkpoint has seeded its recovery base.
+        env.runtimeConfig = {
+          ...(env.runtimeConfig || {}),
+          storage: {
+            ...(env.runtimeConfig?.storage || {}),
+            enabled: true,
+          },
+        };
+        try {
+          const persistedHead = await readPersistedStorageHead(env);
+          const snapshotAction = resolveMarketMakerReadySnapshotAction(
+            Number(env.height ?? 0),
+            Number(persistedHead?.latestHeight ?? 0),
+          );
+          if (snapshotAction === 'seed-recovery-base') {
+            await persistRestoredEnvToDB(env);
+          }
+          const persistedFrame = await readPersistedStorageFrameRecord(env, Number(env.height ?? 0));
+          const persistedRuntimeStateHash = assertMarketMakerReadySnapshotParity({
+            height: Number(env.height ?? 0),
+            entityStateHash: finalization.entityStateHash,
+          }, persistedFrame);
+          finalization = { ...finalization, runtimeStateHash: persistedRuntimeStateHash };
+          bootstrapReadySnapshotPersisted = true;
+          nodeLog.info(
+            snapshotAction === 'already-persisted'
+              ? 'bootstrap.ready_snapshot.already_persisted'
+              : 'bootstrap.ready_snapshot.persisted',
+            { height: env.height },
+          );
+        } catch (error) {
+          env.runtimeConfig = previousRuntimeConfig;
+          throw error;
+        }
+        publishMarketMakerBootstrapFinalization(finalization);
+      },
+    });
+    if (retryAfterCheckpoint) return null;
+    if (!finalization) {
+      throw new Error('MARKET_MAKER_BOOTSTRAP_FINALIZATION_MISSING');
+    }
+    return finalization;
+  };
+
+  const markOffersReady = async (): Promise<boolean> => {
+    if (startupPhase === 'offers-ready') return true;
+    if (!canCheckBootstrapCompletion()) return false;
+    // Let already-accepted ingress declare itself before erecting the final
+    // checkpoint fence. A transient backlog means "drain and retry", not a
+    // corrupt bootstrap and not a reason to terminate the market maker.
     await yieldMarketMakerApi();
+    if (!canCheckBootstrapCompletion()) return false;
+
+    const finalizeStartedAt = Date.now();
     const persistStartedAt = Date.now();
-    await persistBootstrapReadySnapshotIfRequested();
+    const finalization = await finalizeMarketMakerBootstrapState();
+    if (!finalization) return false;
+    const { health, fingerprint, runtimeStateHash, entityStateHash } = finalization;
     emitBootstrapDebugEvent('finalize-step', {
       step: 'persist-ready-snapshot',
       durationMs: Date.now() - persistStartedAt,
     });
-    startupPhase = 'offers-ready';
-    cachedMarketMakerHealth = health;
-    rebuildCachedHealthResponseJson();
     emitBootstrapDebugEvent('ready-hash', {
       hash: fingerprint.hash,
       runtimeStateHash,
@@ -4348,6 +4593,7 @@ const run = async (): Promise<void> => {
       api: apiUrl,
       relay: resolvedArgs.relayUrl,
     });
+    return true;
   };
 
   const waitForBootstrapOffers = async (): Promise<MarketMakerHealth | null> => {
@@ -4355,26 +4601,6 @@ const run = async (): Promise<void> => {
     let lastProgressSignature = '';
     let lastBacklogLogAt = 0;
     let bootstrapCompletionCheckArmed = false;
-    const buildProgressSignature = (health: MarketMakerHealth | null): string => safeStringify({
-      backlog: getMarketMakerRuntimeBacklogSnapshot(env),
-      same: (health?.hubs ?? []).map(hub => ({
-        hubEntityId: hub.hubEntityId,
-        offers: hub.offers,
-        depthReady: hub.depthReady,
-        blockers: hub.blockers?.length ?? 0,
-      })),
-      cross: {
-        expectedRoutes: health?.cross.expectedRoutes ?? 0,
-        routeCount: health?.cross.routeCount ?? health?.cross.routes?.length ?? 0,
-        routes: (health?.cross.routes ?? []).map(route => ({
-          sourceHubEntityId: route.sourceHubEntityId,
-          targetHubEntityId: route.targetHubEntityId,
-          offers: route.offers,
-          depthReady: route.depthReady,
-          blockers: route.blockers?.length ?? 0,
-        })),
-      },
-    });
     const markProgress = (reason: string, health: MarketMakerHealth | null = cachedMarketMakerHealth): void => {
       lastProgressAt = Date.now();
       emitBootstrapDebugEvent('progress', {
@@ -4384,7 +4610,7 @@ const run = async (): Promise<void> => {
       });
     };
     const observeProgress = (reason: string, health: MarketMakerHealth | null): void => {
-      const signature = buildProgressSignature(health);
+      const signature = marketMakerBootstrapProgressSignature(health);
       if (signature === lastProgressSignature) return;
       lastProgressSignature = signature;
       markProgress(reason, health);
@@ -4470,13 +4696,15 @@ const run = async (): Promise<void> => {
         });
         observeProgress('completion-health', completionHealth);
         await yieldMarketMakerApi();
-        if (isBootstrapDepthComplete(completionHealth)) return completionHealth;
+        if (
+          isBootstrapDepthComplete(completionHealth) &&
+          canCheckBootstrapCompletion()
+        ) return completionHealth;
         bootstrapCompletionCheckArmed = false;
       }
       const enqueued = await driveQuotes('bootstrap');
       await yieldMarketMakerApi();
       if (enqueued) {
-        markProgress('enqueue');
         bootstrapCompletionCheckArmed = false;
       }
       if (hasMarketMakerRuntimeBacklog(env)) {
@@ -4507,9 +4735,7 @@ const run = async (): Promise<void> => {
     throw new Error('MARKET_MAKER_BOOTSTRAP_STOPPED_WITHOUT_SHUTDOWN');
   };
 
-  let loop: ReturnType<typeof setInterval> | null = null;
-  let healthRefreshLoop: ReturnType<typeof setInterval> | null = null;
-  let healthRefreshInFlight = false;
+	  let healthRefreshInFlight = false;
   const refreshCachedHealth = (): void => {
     if (shuttingDown || healthRefreshInFlight) return;
     if (hasMarketMakerRuntimeBacklog(env)) return;
@@ -4539,7 +4765,7 @@ const run = async (): Promise<void> => {
     if (startupPhase !== 'offers-ready' && !enqueued && canCheckBootstrapCompletion()) {
       const completionHealth = buildBootstrapCompletionHealth();
       if (isBootstrapDepthComplete(completionHealth)) {
-        await markOffersReady(completionHealth);
+        await markOffersReady();
       }
     }
   };
@@ -4586,11 +4812,15 @@ const run = async (): Promise<void> => {
     startupPhase = 'bootstrap-same-chain';
     publishBootstrapHealthSnapshot();
     emitBootstrapDebugEvent('phase', { phase: startupPhase });
-    const bootstrapHealth = await waitForBootstrapOffers();
-    if (bootstrapHealth) {
-      await markOffersReady(bootstrapHealth);
-      startQuoteLoop();
-    } else if (!shuttingDown) {
+    while (!shuttingDown) {
+      const bootstrapHealth = await waitForBootstrapOffers();
+      if (!bootstrapHealth) break;
+      if (await markOffersReady()) {
+        startQuoteLoop();
+        return;
+      }
+    }
+    if (!shuttingDown) {
       throw new Error('MARKET_MAKER_BOOTSTRAP_STOPPED_WITHOUT_READY');
     }
   })().catch(failQuoteLoop);
@@ -4602,22 +4832,23 @@ const run = async (): Promise<void> => {
     shuttingDown = true;
     if (loop) clearInterval(loop);
     if (healthRefreshLoop) clearInterval(healthRefreshLoop);
-    try {
-      stopJurisdictionWatchers(env);
-      const drained = await waitForRuntimeWorkDrained(env, 10_000);
-      if (!drained) {
-        console.warn(`[${resolvedArgs.name}] shutdown timed out waiting for runtime work to drain`);
+    const failures: string[] = [];
+    const runCleanup = async (label: string, cleanup: () => Promise<unknown>): Promise<void> => {
+      try {
+        await cleanup();
+      } catch (error) {
+        failures.push(`${label}:${error instanceof Error ? error.message : String(error)}`);
       }
-      const idle = await stopRuntimeLoopAndWait(env, 10_000);
-      if (!idle) {
-        console.warn(`[${resolvedArgs.name}] shutdown timed out waiting for runtime loop to drain`);
-      }
-      stopP2P(env);
-      await stopServerGracefully(server, httpDrain, resolvedArgs.name, 5_000);
-      await closeRuntimeDb(env);
-      await closeInfraDb(env);
-    } catch (error) {
-      console.error(`[${resolvedArgs.name}] shutdown flush failed:`, error instanceof Error ? error.message : error);
+    };
+    await runCleanup('quiesce', () => quiesceNodeRuntime(env, {
+      workTimeoutMs: 10_000,
+      loopTimeoutMs: 10_000,
+    }));
+    await runCleanup('server', () => stopServerGracefully(server, httpDrain, resolvedArgs.name, 5_000));
+    await runCleanup('runtime_db', () => closeRuntimeDb(env));
+    await runCleanup('infra_db', () => closeInfraDb(env));
+    if (failures.length > 0) {
+      console.error(`[${resolvedArgs.name}] shutdown failed: ${failures.join('|')}`);
       process.exit(code || 1);
     }
     process.exit(code);

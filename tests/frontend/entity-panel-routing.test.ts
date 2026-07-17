@@ -11,6 +11,7 @@ describe('entity panel routing helpers', () => {
     expect(canonicalizeEntityPanelRoute('pay/0xabc')).toBe('accounts/send');
     expect(canonicalizeEntityPanelRoute('borrow')).toBe('accounts/lending');
     expect(canonicalizeEntityPanelRoute('/settings/recovery/')).toBe('settings/recovery');
+    expect(canonicalizeEntityPanelRoute('/settings/consensus/')).toBe('settings/consensus');
   });
 
   test('resolves hash routes into tab state updates', () => {
@@ -35,6 +36,10 @@ describe('entity panel routing helpers', () => {
     });
     expect(resolveEntityPanelDeepLink({ view: 'configure', subview: 'credit' })).toEqual({
       configureWorkspaceTab: 'extend-credit',
+    });
+    expect(resolveEntityPanelDeepLink({ view: 'settings', subview: 'consensus' })).toEqual({
+      activeTab: 'settings',
+      settingsSubview: 'consensus',
     });
   });
 
@@ -62,5 +67,11 @@ describe('entity panel routing helpers', () => {
       settingsSubview: 'network',
       accountWorkspaceTab: 'open',
     })).toBe('settings/network');
+    expect(buildEntityPanelHashRouteFromState({
+      activeTab: 'settings',
+      assetWorkspaceTab: 'move',
+      settingsSubview: 'consensus',
+      accountWorkspaceTab: 'open',
+    })).toBe('settings/consensus');
   });
 });

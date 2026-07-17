@@ -5,6 +5,8 @@ import type { Profile } from '../networking/gossip';
 import { parseProfile } from '../networking/gossip';
 import { buildNetworkGraph } from '../routing/graph';
 import { PathFinder } from '../routing/pathfinding';
+import { SigningKey, computeAddress } from 'ethers';
+import { computeValidatorEncryptionAttestationDigest } from '../protocol/htlc/validator-encryption';
 
 const TOKEN_ID = 1;
 const AMOUNT = 555_000_000_000_000_000_000n;
@@ -21,6 +23,29 @@ const caps = (out: bigint, inn: bigint) => ({
     inCapacity: inn.toString(),
   },
 });
+
+const boardFor = (entityId: string, privateKey: string): Profile['metadata']['board'] => {
+  const key = new SigningKey(privateKey);
+  const publicKey = key.publicKey.toLowerCase();
+  const signer = computeAddress(publicKey).toLowerCase();
+  const body = {
+    version: 'xln:validator-encryption-key:v1' as const,
+    entityId,
+    signerId: signer,
+    signer,
+    publicKey,
+    weight: 1,
+    encryptionPublicKey: `0x${'12'.repeat(32)}`,
+  };
+  return {
+    threshold: 1,
+    validators: [{ signer, signerId: signer, weight: 1, publicKey }],
+    encryptionAttestations: [{
+      ...body,
+      signature: key.sign(computeValidatorEncryptionAttestationDigest(body)).serialized,
+    }],
+  };
+};
 
 function profile(
   entityId: string,
@@ -96,14 +121,10 @@ describe('Routing metadata hard requirements', () => {
       wsUrl: 'wss://xln.finance:8090/ws',
       relays: ['wss://xln.finance/relay'],
       metadata: {
-        entityEncPubKey: `0x${'12'.repeat(32)}`,
         routingFeePPM: 10_000,
         baseFee: '0',
         isHub: true,
-        board: {
-          threshold: 1,
-          validators: [{ signer: H1.slice(0, 42), signerId: H1.slice(0, 42), weight: 1, publicKey: 'board:h1' }],
-        },
+        board: boardFor(H1, `0x${'31'.repeat(32)}`),
       },
       accounts: [],
     });

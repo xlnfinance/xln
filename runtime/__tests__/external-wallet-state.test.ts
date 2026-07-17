@@ -13,11 +13,25 @@ import {
 import { applySignerEntityExternalWalletSnapshot } from '../entity/signer-wallet';
 import { cloneEntityState } from '../state-helpers';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
-import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionEvent } from '../types';
+import type {
+  ConsensusConfig,
+  EntityReplica,
+  EntityState,
+  JReplica,
+  JurisdictionConfig,
+  JurisdictionEvent,
+} from '../types';
 
 const TOKEN = '0x2222222222222222222222222222222222222222';
 const SPENDER = '0x3333333333333333333333333333333333333333';
 const NATIVE = '0x0000000000000000000000000000000000000000';
+const JURISDICTION: JurisdictionConfig = {
+  name: 'ExternalWalletObserved',
+  address: 'rpc://external-wallet-observed',
+  chainId: 31_337,
+  depositoryAddress: '0x4444444444444444444444444444444444444444',
+  entityProviderAddress: '0x5555555555555555555555555555555555555555',
+};
 type ExternalWalletSnapshotEvent = Extract<JurisdictionEvent, { type: 'ExternalWalletSnapshot' }>;
 
 const makeConfig = (signerId: string): ConsensusConfig => ({
@@ -25,7 +39,32 @@ const makeConfig = (signerId: string): ConsensusConfig => ({
   threshold: 1n,
   validators: [signerId],
   shares: { [signerId]: 1n },
+  jurisdiction: JURISDICTION,
 });
+
+const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): JReplica => {
+  env.activeJurisdiction = JURISDICTION.name;
+  const replica = {
+    name: JURISDICTION.name,
+    blockNumber: 0n,
+    stateRoot: null,
+    mempool: [],
+    blockDelayMs: 0,
+    lastBlockTimestamp: 0,
+    rpcs: [JURISDICTION.address!],
+    chainId: JURISDICTION.chainId,
+    watcherConfirmationDepth: 0,
+    depositoryAddress: JURISDICTION.depositoryAddress,
+    entityProviderAddress: JURISDICTION.entityProviderAddress,
+    contracts: {
+      depository: JURISDICTION.depositoryAddress,
+      entityProvider: JURISDICTION.entityProviderAddress,
+    },
+    position: { x: 0, y: 0, z: 0 },
+  } satisfies JReplica;
+  env.jReplicas.set(JURISDICTION.name, replica);
+  return replica;
+};
 
 const makeState = (entityId: string, signerId: string): EntityState => ({
   entityId,
@@ -67,7 +106,7 @@ const signJEventInput = (
   transactionHash: string,
 ) => {
   const eventsHash = canonicalJurisdictionEventsHash(events);
-  const jurisdictionRef = getJEventJurisdictionRef(undefined);
+  const jurisdictionRef = getJEventJurisdictionRef(JURISDICTION);
   return { jurisdictionRef, eventsHash };
 };
 
@@ -121,9 +160,10 @@ describe('external wallet observed state', () => {
   test('applies finalized wallet snapshot and preserves it through clone/storage projection', async () => {
     const seed = 'external-wallet-state';
     const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
-    registerSignerKey(signerId, deriveSignerKeySync(seed, '1'));
     const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
     const env = createEmptyEnv(seed);
+    registerSignerKey(env, signerId, deriveSignerKeySync(seed, '1'));
+    installJurisdiction(env);
     env.quietRuntimeLogs = true;
 
     const event: JurisdictionEvent = {
@@ -229,9 +269,10 @@ describe('external wallet observed state', () => {
   test('applies wallet snapshot to a projection-shaped replica through canonical runtime input', async () => {
     const seed = 'external-wallet-runtime-input';
     const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
-    registerSignerKey(signerId, deriveSignerKeySync(seed, '1'));
     const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
     const env = createEmptyEnv(seed);
+    registerSignerKey(env, signerId, deriveSignerKeySync(seed, '1'));
+    const source = installJurisdiction(env);
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
     const seededReplica: EntityReplica = {
@@ -241,6 +282,18 @@ describe('external wallet observed state', () => {
       state: makeState(entityId, signerId),
       mempool: [],
       hankoWitness: new Map(),
+    };
+    const headerHash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
+    seededReplica.jHistory = {
+      jurisdictionRef: getJEventJurisdictionRef(JURISDICTION),
+      scannedThroughHeight: 41,
+      contiguousThroughHeight: 41,
+      tipBlockHash: headerHash(41),
+      eventBlocks: new Map(),
+      blockHashes: new Map(Array.from({ length: 41 }, (_, index) => {
+        const height = index + 1;
+        return [height, headerHash(height)];
+      })),
     };
     env.eReplicas.set(`${entityId}:${signerId}`, seededReplica);
 
@@ -256,7 +309,7 @@ describe('external wallet observed state', () => {
       blockNumber: 42,
       blockHash: `0x${'42'.repeat(32)}`,
       transactionHash: 'external-wallet-snapshot:42:runtime-input',
-    }], 'external-wallet-runtime-input');
+    }], 'external-wallet-runtime-input', source);
 
     expect(input).not.toBeNull();
     await applyRuntimeInput(env, input!);
@@ -270,9 +323,10 @@ describe('external wallet observed state', () => {
   test('applies ERC20 transfer and approval deltas only on top of a snapshot baseline', async () => {
     const seed = 'external-wallet-delta';
     const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
-    registerSignerKey(signerId, deriveSignerKeySync(seed, '1'));
     const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
     const env = createEmptyEnv(seed);
+    registerSignerKey(env, signerId, deriveSignerKeySync(seed, '1'));
+    installJurisdiction(env);
     env.quietRuntimeLogs = true;
 
     const snapshot: JurisdictionEvent = {
@@ -313,9 +367,10 @@ describe('external wallet observed state', () => {
     const seed = 'external-wallet-non-signer-owner';
     const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
     const foreignOwner = deriveSignerAddressSync(seed, 'foreign').toLowerCase();
-    registerSignerKey(signerId, deriveSignerKeySync(seed, '1'));
     const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
     const env = createEmptyEnv(seed);
+    registerSignerKey(env, signerId, deriveSignerKeySync(seed, '1'));
+    installJurisdiction(env);
     env.quietRuntimeLogs = true;
 
     const snapshot: JurisdictionEvent = {
@@ -364,9 +419,10 @@ describe('external wallet observed state', () => {
   test('rejects ERC20 delta without a committed wallet baseline', async () => {
     const seed = 'external-wallet-delta-missing';
     const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
-    registerSignerKey(signerId, deriveSignerKeySync(seed, '1'));
     const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
     const env = createEmptyEnv(seed);
+    registerSignerKey(env, signerId, deriveSignerKeySync(seed, '1'));
+    installJurisdiction(env);
     env.quietRuntimeLogs = true;
     const delta: JurisdictionEvent = {
       type: 'ExternalWalletDelta',

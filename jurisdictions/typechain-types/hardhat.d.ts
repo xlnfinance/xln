@@ -30,6 +30,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.ERC1155__factory>;
     getContractFactory(
+      name: "ERC1155Supply",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.ERC1155Supply__factory>;
+    getContractFactory(
       name: "IERC1155MetadataURI",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.IERC1155MetadataURI__factory>;
@@ -166,6 +170,14 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.NoReturnERC20Mock__factory>;
     getContractFactory(
+      name: "SupplyLivenessHarness",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.SupplyLivenessHarness__factory>;
+    getContractFactory(
+      name: "TransformerLivenessHarness",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.TransformerLivenessHarness__factory>;
+    getContractFactory(
       name: "Token",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.Token__factory>;
@@ -191,6 +203,11 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.ERC1155>;
     getContractAt(
+      name: "ERC1155Supply",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.ERC1155Supply>;
+    getContractAt(
       name: "IERC1155MetadataURI",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -360,6 +377,16 @@ declare module "hardhat/types/runtime" {
       address: string | ethers.Addressable,
       signer?: ethers.Signer
     ): Promise<Contracts.NoReturnERC20Mock>;
+    getContractAt(
+      name: "SupplyLivenessHarness",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.SupplyLivenessHarness>;
+    getContractAt(
+      name: "TransformerLivenessHarness",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.TransformerLivenessHarness>;
     getContractAt(
       name: "Token",
       address: string | ethers.Addressable,
@@ -383,6 +410,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.ERC1155>;
     deployContract(
+      name: "ERC1155Supply",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.ERC1155Supply>;
+    deployContract(
       name: "IERC1155MetadataURI",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.IERC1155MetadataURI>;
@@ -518,6 +549,14 @@ declare module "hardhat/types/runtime" {
       name: "NoReturnERC20Mock",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.NoReturnERC20Mock>;
+    deployContract(
+      name: "SupplyLivenessHarness",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.SupplyLivenessHarness>;
+    deployContract(
+      name: "TransformerLivenessHarness",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.TransformerLivenessHarness>;
     deployContract(
       name: "Token",
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -544,6 +583,11 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.ERC1155>;
     deployContract(
+      name: "ERC1155Supply",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.ERC1155Supply>;
+    deployContract(
       name: "IERC1155MetadataURI",
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -713,6 +757,16 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.NoReturnERC20Mock>;
+    deployContract(
+      name: "SupplyLivenessHarness",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.SupplyLivenessHarness>;
+    deployContract(
+      name: "TransformerLivenessHarness",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.TransformerLivenessHarness>;
     deployContract(
       name: "Token",
       args: any[],

@@ -1,6 +1,7 @@
-import type { FrameLogEntry, RuntimeFrameDbRecord } from '../types';
-import { decodeBuffer, encodeBuffer, writeBatch } from './codec';
-import { deleteKeyRange, deleteKeys, iterateKeys, readJsonOrNull } from './level';
+import type { EntityTx, FrameLogEntry, JInput, RuntimeFrameDbRecord, RuntimeInput } from '../types';
+import { cloneIsolatedEntityTxs } from '../protocol/runtime-input-clone';
+import { decodeValidatedBuffer, encodeBuffer, writeBatch } from './codec';
+import { deleteKeyRange, deleteKeys, iterateKeys, readRawOrNull } from './level';
 import {
   FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME,
   FRAME_DB_RUNTIME_ACTIVITY,
@@ -16,7 +17,18 @@ import {
   parseFrameDbAccountFrameKey,
   parseFrameDbAccountFrameRuntimeIndexKey,
 } from './keys';
-import type { FrameDbPut, RuntimeFrameDbLike, StorageFrameDbHead, StorageRuntimeConfig } from './types';
+import {
+  validateFrameDbHeadValue,
+  validateStoredAccountFrameValue,
+  validateStoredRuntimeActivityValue,
+} from './frame-db-schema';
+import type {
+  FrameDbPut,
+  RuntimeFrameDbLike,
+  StorageFrameDbHead,
+  StoragePersistenceBoundaryHook,
+  StorageRuntimeConfig,
+} from './types';
 
 type RuntimeFrameDbBatch = ReturnType<RuntimeFrameDbLike['batch']>;
 
@@ -34,10 +46,20 @@ export type StoredAccountFrameValue = {
 
 export type StoredRuntimeActivityValue = {
   timestamp: number;
+  runtimeInput: {
+    entityInputs: Array<{ entityId: string; entityTxs?: EntityTx[] }>;
+    jInputs?: JInput[];
+  };
   logs: FrameLogEntry[];
   touchedEntities: string[];
   touchedAccounts: Array<{ entityId: string; counterpartyId: string }>;
   touchedBookEntities: string[];
+};
+
+export type ReadFrameDbAccountFramesOptions = {
+  limit?: number;
+  maxAccountHeight?: number;
+  maxRuntimeHeight?: number;
 };
 
 export type StoredRuntimeActivityRecord = StoredRuntimeActivityValue & {
@@ -48,6 +70,7 @@ export type StoredRuntimeActivityRecord = StoredRuntimeActivityValue & {
 export const buildFrameDbPuts = (options: {
   height: number;
   timestamp: number;
+  runtimeInput: RuntimeInput;
   logs: FrameLogEntry[];
   touchedEntities: string[];
   touchedAccounts: Array<{ entityId: string; counterpartyId: string }>;
@@ -55,28 +78,43 @@ export const buildFrameDbPuts = (options: {
   frameDbRecords?: RuntimeFrameDbRecord[];
 }): FrameDbPut[] => {
   const puts: FrameDbPut[] = [];
+  const runtimeInput: StoredRuntimeActivityValue['runtimeInput'] = {
+    entityInputs: options.runtimeInput.entityInputs.map((input) => ({
+      entityId: input.entityId,
+      ...(input.entityTxs ? { entityTxs: cloneIsolatedEntityTxs(input.entityTxs) } : {}),
+    })),
+    ...(options.runtimeInput.jInputs
+      ? { jInputs: options.runtimeInput.jInputs.map(input => structuredClone(input)) }
+      : {}),
+  };
   const runtimeActivity: StoredRuntimeActivityValue = {
     timestamp: options.timestamp,
+    runtimeInput,
     logs: options.logs,
     touchedEntities: options.touchedEntities,
     touchedAccounts: options.touchedAccounts,
     touchedBookEntities: options.touchedBookEntities,
   };
+  validateStoredRuntimeActivityValue(runtimeActivity, options.height);
   puts.push({ key: keyFrameDbRuntimeActivity(options.height), value: encodeBuffer(runtimeActivity) });
 
   for (const record of options.frameDbRecords ?? []) {
     const entityId = normalizeEntityId(record.entityId);
     const counterpartyId = normalizeEntityId(record.counterpartyId);
-    const accountHeight = Number(record.accountHeight || record.frame?.height || 0);
-    if (!entityId || !counterpartyId || !Number.isFinite(accountHeight) || accountHeight <= 0) continue;
-    const recordHeight = Math.max(1, Math.floor(Number(record.runtimeHeight ?? options.height)));
-    const recordTimestamp = Math.max(0, Math.floor(Number(record.timestamp ?? options.timestamp)));
+    const accountHeight = record.accountHeight;
+    if (!entityId || !counterpartyId) throw new Error('FRAME_DB_ACCOUNT_FRAME_ENTITY_ID_INVALID');
+    if (!Number.isSafeInteger(accountHeight) || accountHeight <= 0) {
+      throw new Error(`FRAME_DB_ACCOUNT_FRAME_HEIGHT_INVALID:${String(accountHeight)}`);
+    }
+    const recordHeight = record.runtimeHeight ?? options.height;
+    const recordTimestamp = record.timestamp ?? options.timestamp;
     const stored: StoredAccountFrameValue = {
       source: record.source,
       frame: structuredClone(record.frame),
       runtimeHeight: recordHeight,
       timestamp: recordTimestamp,
     };
+    validateStoredAccountFrameValue(stored, accountHeight);
     puts.push({
       key: keyFrameDbAccountFrame(entityId, counterpartyId, Math.floor(accountHeight)),
       value: encodeBuffer(stored),
@@ -94,21 +132,27 @@ export const readFrameDbHead = async (
   db: RuntimeFrameDbLike,
   config: Required<StorageRuntimeConfig>,
 ): Promise<StorageFrameDbHead> => {
-  const raw = await readJsonOrNull<StorageFrameDbHead>(db, KEY_FRAME_DB_HEAD);
+  const raw = await readRawOrNull(db, KEY_FRAME_DB_HEAD);
+  const decoded = raw ? decodeValidatedBuffer(raw, validateFrameDbHeadValue) : null;
   return {
     schemaVersion: STORAGE_SCHEMA_VERSION,
-    latestHeight: Math.max(0, Math.floor(Number(raw?.latestHeight ?? 0))),
-    latestPrunedRuntimeHeight: Math.max(0, Math.floor(Number(raw?.latestPrunedRuntimeHeight ?? 0))),
-    retainedBytes: Math.max(0, Math.floor(Number(raw?.retainedBytes ?? 0))),
+    latestHeight: decoded?.latestHeight ?? 0,
+    latestPrunedRuntimeHeight: decoded?.latestPrunedRuntimeHeight ?? 0,
+    retainedBytes: decoded?.retainedBytes ?? 0,
     maxBytes: config.frameDbMaxBytes,
     retainFrames: config.frameDbRetainFrames,
   };
 };
 
-const writeFrameDbHead = async (db: RuntimeFrameDbLike, head: StorageFrameDbHead): Promise<void> => {
+const writeFrameDbHead = async (
+  db: RuntimeFrameDbLike,
+  head: StorageFrameDbHead,
+  onPersistenceBoundary?: StoragePersistenceBoundaryHook,
+): Promise<void> => {
   const batch = db.batch();
   batch.put(KEY_FRAME_DB_HEAD, encodeBuffer(head));
   await writeBatch(batch);
+  await onPersistenceBoundary?.('after-frame-db-prune');
 };
 
 export type FrameDbCommitPlan = {
@@ -151,16 +195,25 @@ export const putFrameDbCommit = (batch: RuntimeFrameDbBatch, plan: FrameDbCommit
 const pruneFrameDbBeforeRuntimeHeight = async (
   db: RuntimeFrameDbLike,
   heightInclusive: number,
+  onPersistenceBoundary?: StoragePersistenceBoundaryHook,
 ): Promise<{ removedBytes: number; removedKeys: number }> => {
   const cutoff = Math.max(0, Math.floor(Number(heightInclusive)));
   if (cutoff <= 0) return { removedBytes: 0, removedKeys: 0 };
 
   let removedBytes = 0;
   let removedKeys = 0;
-  const runtimeActivityPruned = await deleteKeyRange(db, {
-    gte: Buffer.from([FRAME_DB_RUNTIME_ACTIVITY]),
-    lt: Buffer.concat([Buffer.from([FRAME_DB_RUNTIME_ACTIVITY]), encodeHeight(cutoff + 1)]),
-  });
+  const onPruneBatch = async (): Promise<void> => {
+    await onPersistenceBoundary?.('after-frame-db-prune');
+  };
+  const runtimeActivityPruned = await deleteKeyRange(
+    db,
+    {
+      gte: Buffer.from([FRAME_DB_RUNTIME_ACTIVITY]),
+      lt: Buffer.concat([Buffer.from([FRAME_DB_RUNTIME_ACTIVITY]), encodeHeight(cutoff + 1)]),
+    },
+    () => true,
+    onPruneBatch,
+  );
   removedBytes += runtimeActivityPruned.removedBytes;
   removedKeys += runtimeActivityPruned.removedKeys;
 
@@ -175,13 +228,13 @@ const pruneFrameDbBeforeRuntimeHeight = async (
     accountFrameKeysByHex.set(primaryKey.toString('hex'), primaryKey);
     if (accountFrameKeysByHex.size >= 512) {
       const keysToDelete = Array.from(accountFrameKeysByHex.values());
-      removedBytes += await deleteKeys(db, keysToDelete);
+      removedBytes += await deleteKeys(db, keysToDelete, onPruneBatch);
       removedKeys += keysToDelete.length;
       accountFrameKeysByHex.clear();
     }
   }
   const accountFrameKeysToDelete = Array.from(accountFrameKeysByHex.values());
-  removedBytes += await deleteKeys(db, accountFrameKeysToDelete);
+  removedBytes += await deleteKeys(db, accountFrameKeysToDelete, onPruneBatch);
   removedKeys += accountFrameKeysToDelete.length;
 
   return { removedBytes, removedKeys };
@@ -233,6 +286,7 @@ export const pruneFrameDbRetention = async (options: {
   height: number;
   head: StorageFrameDbHead;
   config: Required<StorageRuntimeConfig>;
+  onPersistenceBoundary?: StoragePersistenceBoundaryHook;
 }): Promise<{
   prunedBytes: number;
   retainedBytes: number;
@@ -251,13 +305,17 @@ export const pruneFrameDbRetention = async (options: {
   }
 
   const cutoff = height - options.config.frameDbRetainFrames;
-  const pruned = await pruneFrameDbBeforeRuntimeHeight(options.db, cutoff);
+  const pruned = await pruneFrameDbBeforeRuntimeHeight(
+    options.db,
+    cutoff,
+    options.onPersistenceBoundary,
+  );
   const finalHead: StorageFrameDbHead = {
     ...nextHead,
     latestPrunedRuntimeHeight: Math.max(nextHead.latestPrunedRuntimeHeight, cutoff),
     retainedBytes: Math.max(0, nextHead.retainedBytes - pruned.removedBytes),
   };
-  await writeFrameDbHead(options.db, finalHead);
+  await writeFrameDbHead(options.db, finalHead, options.onPersistenceBoundary);
   return {
     prunedBytes: pruned.removedBytes,
     retainedBytes: finalHead.retainedBytes,
@@ -272,16 +330,27 @@ export const readFrameDbRuntimeActivity = async (
 ): Promise<StoredRuntimeActivityRecord | null> => {
   const targetHeight = Number.isFinite(height) ? Math.max(1, Math.floor(height)) : 0;
   if (targetHeight <= 0) return null;
-  const value = await readJsonOrNull<StoredRuntimeActivityValue>(db, keyFrameDbRuntimeActivity(targetHeight));
-  if (!value) return null;
+  const raw = await readRawOrNull(db, keyFrameDbRuntimeActivity(targetHeight));
+  if (!raw) return null;
+  const value = decodeValidatedBuffer(raw, decoded =>
+    validateStoredRuntimeActivityValue(decoded, targetHeight));
   return {
     kind: 'runtimeActivity',
     height: targetHeight,
-    timestamp: Math.max(0, Math.floor(Number(value.timestamp ?? 0))),
-    logs: Array.isArray(value.logs) ? value.logs : [],
-    touchedEntities: Array.isArray(value.touchedEntities) ? value.touchedEntities : [],
-    touchedAccounts: Array.isArray(value.touchedAccounts) ? value.touchedAccounts : [],
-    touchedBookEntities: Array.isArray(value.touchedBookEntities) ? value.touchedBookEntities : [],
+    timestamp: value.timestamp,
+    runtimeInput: {
+      entityInputs: value.runtimeInput.entityInputs.map(input => ({
+        entityId: input.entityId,
+        ...(input.entityTxs ? { entityTxs: cloneIsolatedEntityTxs(input.entityTxs) } : {}),
+      })),
+      ...(value.runtimeInput.jInputs
+        ? { jInputs: value.runtimeInput.jInputs.map(input => structuredClone(input)) }
+        : {}),
+    },
+    logs: value.logs,
+    touchedEntities: value.touchedEntities,
+    touchedAccounts: value.touchedAccounts,
+    touchedBookEntities: value.touchedBookEntities,
   };
 };
 
@@ -289,14 +358,35 @@ export const readFrameDbAccountFrames = async (
   db: RuntimeFrameDbLike,
   entityId: string,
   counterpartyId: string,
+  options: ReadFrameDbAccountFramesOptions = {},
 ): Promise<StoredAccountFrameRecord[]> => {
+  const limit = options.limit ?? Number.POSITIVE_INFINITY;
+  if (limit !== Number.POSITIVE_INFINITY && (!Number.isSafeInteger(limit) || limit <= 0)) {
+    throw new Error(`FRAME_DB_ACCOUNT_FRAME_LIMIT_INVALID:${String(limit)}`);
+  }
+  const maxAccountHeight = options.maxAccountHeight ?? Number.MAX_SAFE_INTEGER;
+  const maxRuntimeHeight = options.maxRuntimeHeight ?? Number.MAX_SAFE_INTEGER;
+  if (!Number.isSafeInteger(maxAccountHeight) || maxAccountHeight < 0) {
+    throw new Error(`FRAME_DB_ACCOUNT_FRAME_MAX_ACCOUNT_HEIGHT_INVALID:${String(maxAccountHeight)}`);
+  }
+  if (!Number.isSafeInteger(maxRuntimeHeight) || maxRuntimeHeight < 0) {
+    throw new Error(`FRAME_DB_ACCOUNT_FRAME_MAX_RUNTIME_HEIGHT_INVALID:${String(maxRuntimeHeight)}`);
+  }
+  if (maxAccountHeight === 0 || maxRuntimeHeight === 0) return [];
+
   const prefix = keyFrameDbAccountFramePrefix(entityId, counterpartyId);
+  const range = maxAccountHeight < Number.MAX_SAFE_INTEGER
+    ? { gte: prefix, lt: keyFrameDbAccountFrame(entityId, counterpartyId, maxAccountHeight + 1), reverse: true }
+    : { prefix, reverse: true };
   const records: StoredAccountFrameRecord[] = [];
-  for await (const key of iterateKeys(db, { prefix })) {
+  for await (const key of iterateKeys(db, range)) {
     const parsed = parseFrameDbAccountFrameKey(key);
-    const record = decodeBuffer<StoredAccountFrameValue>(await db.get(key));
-    const accountHeight = Math.max(1, Math.floor(Number(parsed.accountHeight)));
-    const frameHeight = Math.max(0, Math.floor(Number(record.frame?.height ?? 0)));
+    const accountHeight = parsed.accountHeight;
+    if (accountHeight > maxAccountHeight) continue;
+    const record = decodeValidatedBuffer(await db.get(key), decoded =>
+      validateStoredAccountFrameValue(decoded, accountHeight));
+    if (record.runtimeHeight > maxRuntimeHeight) continue;
+    const frameHeight = record.frame.height;
     if (frameHeight !== accountHeight) {
       throw new Error(`FRAME_DB_ACCOUNT_FRAME_HEIGHT_MISMATCH: key=${accountHeight} frame=${frameHeight}`);
     }
@@ -307,9 +397,10 @@ export const readFrameDbAccountFrames = async (
       accountHeight,
       source: record.source,
       frame: record.frame,
-      runtimeHeight: Math.max(0, Math.floor(Number(record.runtimeHeight ?? 0))),
-      timestamp: Math.max(0, Math.floor(Number(record.timestamp ?? 0))),
+      runtimeHeight: record.runtimeHeight,
+      timestamp: record.timestamp,
     });
+    if (records.length >= limit) break;
   }
   return records.sort((left, right) => left.accountHeight - right.accountHeight);
 };

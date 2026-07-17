@@ -17,7 +17,7 @@ import { createStructuredLogger } from '../infra/logger';
 import type { DisputeWakeEvent, PushSender, StoredPushRegistration } from '../push/types';
 
 const DISPUTE_STARTED_ABI = [
-  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments)',
+  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments, uint256 disputeTimeout)',
 ] as const;
 const DISPUTE_INTERFACE = new Interface(DISPUTE_STARTED_ABI);
 const DISPUTE_STARTED_TOPIC = DISPUTE_INTERFACE.getEvent('DisputeStarted')!.topicHash;

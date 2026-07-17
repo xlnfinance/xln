@@ -161,7 +161,7 @@ function runtimeIngressGuardSatisfied(snapshot: {
 test.describe('runtime ingress debug loop guards', () => {
   test.setTimeout(TEST_TIMEOUT_MS);
 
-  test('bad entity inputs produce one debug event and do not requeue into a runtime error loop', async ({ page }) => {
+  test('bad entity inputs produce one debug event and do not requeue into a runtime error loop', { tag: '@resilience' }, async ({ page }) => {
     allowBrowserIssue({
       type: 'console',
       severity: 'error',

@@ -1,14 +1,49 @@
 import { hexToBytes } from '@ethereumjs/util';
 
 // Increment when contract ABI/encoding changes to invalidate cached BrowserVM state.
-// 2025-02-03: v3 - Token reference hashing + ExternalTokenToReserve struct update.
-export const BROWSERVM_CONTRACT_VERSION = 3;
+// v6 gives BrowserVM a deployment nonce namespace and persists its chain domain.
+export const BROWSERVM_CONTRACT_VERSION = 6;
+
+export type BrowserVmStoredReceipt = {
+  transactionHash: string;
+  blockNumber: number;
+  blockHash: string;
+  from: string;
+  to: string | null;
+  contractAddress: string | null;
+  status: number;
+  type: number;
+  transactionIndex: number;
+  cumulativeGasUsed: string;
+  logsBloom: string;
+  logs: Array<{
+    address: string;
+    topics: string[];
+    data: string;
+    blockNumber: number;
+    transactionHash: string;
+    logIndex: number;
+  }>;
+};
+
+export type BrowserVmChainCheckpoint = {
+  blockHeight: number;
+  blockHash: string;
+  blockTimestamp: number;
+  entityProviderDeploymentBlock: number;
+  blockHashes: Array<[number, string]>;
+  blockReceiptRoots: Array<[number, string]>;
+  txReceipts: Array<[string, BrowserVmStoredReceipt]>;
+};
 
 export type BrowserVmSerializedState = {
   version?: number;
+  chainId: number;
   stateRoot: string;
   trieData: Array<[string, string]>;
   nonce: string;
+  entityProviderDeploymentBlock?: number;
+  chain: BrowserVmChainCheckpoint;
   addresses: {
     depository: string;
     entityProvider: string;

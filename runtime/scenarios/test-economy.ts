@@ -4,6 +4,12 @@
  */
 
 import type { Env, EntityInput } from '../types';
+import {
+  createJurisdictionConfig,
+  getScenarioJAdapter,
+  registerEntities,
+} from './boot';
+import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
 
 export interface EconomyEntity {
   id: string;
@@ -37,7 +43,7 @@ export async function createEconomy(
   env: Env,
   config: EconomyConfig
 ): Promise<{ hubs: EconomyEntity[]; users: EconomyEntity[][]; all: EconomyEntity[] }> {
-  const { commitRuntimeInput, getProcess } = await import('./helpers');
+  const { getProcess } = await import('./helpers');
   const process = await getProcess();
 
   console.log(`🏗️  Creating economy: ${config.numHubs} hubs × ${config.usersPerHub} users/hub\n`);
@@ -45,20 +51,19 @@ export async function createEconomy(
   const hubs: EconomyEntity[] = [];
   const usersByHub: EconomyEntity[][] = [];
   const all: EconomyEntity[] = [];
-
-  let entityNumber = 1;
+  let signerNumber = 1;
 
   // Create hubs
   for (let h = 0; h < config.numHubs; h++) {
     const hub: EconomyEntity = {
-      id: '0x' + entityNumber.toString(16).padStart(64, '0'),
-      signer: String(entityNumber),
+      id: '',
+      signer: String(signerNumber),
       name: `Hub${h + 1}`,
       type: 'hub'
     };
     hubs.push(hub);
     all.push(hub);
-    entityNumber++;
+    signerNumber += 1;
   }
 
   // Create users for each hub
@@ -66,38 +71,45 @@ export async function createEconomy(
     const users: EconomyEntity[] = [];
     for (let u = 0; u < config.usersPerHub; u++) {
       const user: EconomyEntity = {
-        id: '0x' + entityNumber.toString(16).padStart(64, '0'),
-        signer: String(entityNumber),
+        id: '',
+        signer: String(signerNumber),
         name: `User${h + 1}.${u + 1}`,
         type: 'user'
       };
       users.push(user);
       all.push(user);
-      entityNumber++;
+      signerNumber += 1;
     }
     usersByHub.push(users);
   }
 
-  // Batch import all entities
+  // Numbered Entity ids are chain-issued identities. Register the exact signer
+  // boards first so the watcher can certify EntityRegistered evidence before H0
+  // reaches durable storage; synthetic 0x01.. ids would fail the authority fence.
   console.log(`   Creating ${all.length} entities...`);
-  await commitRuntimeInput(env, {
-    runtimeTxs: all.map(e => ({
-      type: 'importReplica' as const,
-      entityId: e.id,
-      signerId: e.signer,
-      data: {
-        isProposer: true,
-        position: { x: 0, y: 0, z: 0 },
-        config: {
-          mode: 'proposer-based' as const,
-          threshold: 1n,
-          validators: [e.signer],
-          shares: { [e.signer]: 1n },
-        },
-      },
+  const jadapter = getScenarioJAdapter(env);
+  const jurisdiction = createJurisdictionConfig(
+    config.jurisdictionName,
+    jadapter.addresses.depository,
+    jadapter.addresses.entityProvider,
+  );
+  const registered = await registerEntities(
+    env,
+    jadapter,
+    all.map(entity => ({
+      name: entity.name,
+      signer: entity.signer,
+      position: { x: 0, y: 0, z: 0 },
     })),
-    entityInputs: []
-  });
+    jurisdiction,
+  );
+  for (let index = 0; index < all.length; index += 1) {
+    const entity = all[index];
+    const registration = registered[index];
+    if (!entity || !registration) throw new Error(`ECONOMY_REGISTRATION_MISSING:${index}`);
+    entity.id = registration.id;
+    entity.signer = registration.signer;
+  }
 
   console.log(`   ✅ Created ${hubs.length} hubs, ${all.length - hubs.length} users\n`);
 
@@ -229,6 +241,38 @@ async function converge(env: Env, maxCycles = 10): Promise<void> {
   return helperConverge(env, maxCycles);
 }
 
+export const htlcRouteConvergenceCycleBudget = (intermediaryCount: number): number => {
+  if (!Number.isSafeInteger(intermediaryCount) || intermediaryCount < 0) {
+    throw new Error(`HTLC_ROUTE_INTERMEDIARY_COUNT_INVALID:${intermediaryCount}`);
+  }
+  const accountHops = intermediaryCount + 1;
+  const forwardAccountCommits = accountHops;
+  // Each encrypted layer is advanced by the recipient Entity's default
+  // proposer in a separate signed frame. Plaintext is never part of the
+  // preceding Account commit replay.
+  const proposerOnionAdvanceFrames = accountHops;
+  const reverseSecretCommits = accountHops;
+  // Each intermediary learns the downstream preimage only when that Account
+  // resolve commits. Its upstream resolve is queued in the same Entity replay,
+  // then needs one subsequent Runtime tick to become the next Account proposal.
+  const intermediarySecretPropagationFrames = intermediaryCount;
+  const recipientRevealFrame = 1;
+  const sourceResolutionFrame = 1;
+  // Reverse settlement can commit adjacent Accounts in the same Runtime tick,
+  // but their reliable ACKs still arrive one-by-one. Keep enough budget for
+  // every intermediary boundary to drain before asserting strict idle.
+  const terminalAccountAckCascadeFrames = intermediaryCount;
+  const terminalReceiptFrame = 1;
+  return forwardAccountCommits
+    + proposerOnionAdvanceFrames
+    + recipientRevealFrame
+    + reverseSecretCommits
+    + intermediarySecretPropagationFrames
+    + sourceResolutionFrame
+    + terminalAccountAckCascadeFrames
+    + terminalReceiptFrame;
+};
+
 /**
  * Test HTLC payment through economy
  */
@@ -248,23 +292,30 @@ export async function testHtlcRoute(
   console.log(`🔒 Testing HTLC: ${from.name} → ${route.map(e => e.name).join(' → ')} → ${to.name}`);
   console.log(`   Amount: ${amount}, Hops: ${route.length}\n`);
 
+  const rawPayment = {
+    type: 'htlcPayment' as const,
+    data: {
+      targetEntityId: to.id,
+      route: [from.id, ...route.map(e => e.id), to.id],
+      tokenId,
+      amount,
+      description,
+      ...(opts?.hashlock ? { hashlock: opts.hashlock } : {}),
+    },
+  };
+  const payment = opts?.secret
+    ? withDeterministicHtlcTestSecret(rawPayment, opts.secret)
+    : rawPayment;
   await process(env, [{
     entityId: from.id,
     signerId: from.signer,
-    entityTxs: [{
-      type: 'htlcPayment',
-      data: {
-        targetEntityId: to.id,
-        route: [from.id, ...route.map(e => e.id), to.id],
-        tokenId,
-        amount,
-        description,
-        ...(opts?.secret && { secret: opts.secret }),
-        ...(opts?.hashlock && { hashlock: opts.hashlock }),
-      }
-    }]
+    entityTxs: [payment],
   }]);
 
-  await converge(env);
+  // Each Account hop commits once outward and once on secret return. The
+  // recipient reveal, source resolution, and final reliable receipt are three
+  // distinct durable R-frames. Budget the bounded pipeline by route depth;
+  // productive frames must not look like a stuck transport.
+  await converge(env, Math.max(10, htlcRouteConvergenceCycleBudget(route.length)));
   console.log(`   ✅ HTLC complete\n`);
 }

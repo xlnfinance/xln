@@ -1,10 +1,25 @@
-import type { EntityInput, Env, JInput, RoutedEntityInput, RuntimeTx } from '../types';
+import type {
+  EntityInput,
+  Env,
+  JInput,
+  ReliableDeliveryReceipt,
+  RoutedEntityInput,
+  RuntimeTx,
+} from '../types';
 import type { Profile } from '../networking/gossip';
 import type { RuntimeOutputRoutingDeps } from './output-routing';
 import { extractCrossJurisdictionRouteFromTx } from '../extensions/cross-j/boundary';
+import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
 import { normalizeRuntimeId } from '../networking/runtime-id';
+import { registerReliableIngress } from './reliable-delivery';
+import { advanceEntityCommandNonce, assertSignedEntityCommand } from '../entity/command';
 
 type RuntimeState = NonNullable<Env['runtimeState']>;
+
+export type RuntimeInboundEntityInputOptions = {
+  /** The transport accepted this exact input before persistence quiescing began. */
+  acceptedBeforeQuiesce?: boolean;
+};
 
 export type RuntimeEntityRoutingDeps = {
   ensureRuntimeState(env: Env): RuntimeState;
@@ -14,6 +29,7 @@ export type RuntimeEntityRoutingDeps = {
     runtimeTxs?: RuntimeTx[],
     jInputs?: JInput[],
     ingressTimestamp?: number,
+    options?: RuntimeInboundEntityInputOptions,
   ): void;
   extractEntityId(replicaKey: string): string;
   hasLocalSignerForEntity(env: Env, entityId: string): boolean;
@@ -21,6 +37,16 @@ export type RuntimeEntityRoutingDeps = {
   resolveSoleLocalSignerForEntity(env: Env, entityId: string): string | null;
   getP2P: RuntimeOutputRoutingDeps['getP2P'];
 };
+
+export type RuntimeInboundEntityInputResult =
+  | { kind: 'queued' }
+  | { kind: 'pending' }
+  | { kind: 'ignored' }
+  | { kind: 'receipt'; receipt: ReliableDeliveryReceipt };
+
+export type RuntimeInboundEntityInputValidation =
+  | { kind: 'accepted' }
+  | { kind: 'ignored' };
 
 const normalizeEntityKey = (value: string): string => String(value || '').toLowerCase();
 const RUNTIME_HINT_TTL_MS = 60_000;
@@ -129,7 +155,7 @@ export const collectCrossJurisdictionRemoteEntityHints = (
   const from = normalizeRuntimeId(fromRuntimeId);
   if (!localRuntimeId || !from || localRuntimeId === from) return [];
   const hints = new Set<string>();
-  for (const tx of input.entityTxs || []) {
+  for (const tx of getEffectiveEntityInputTxs(input)) {
     const route = extractCrossJurisdictionRouteFromTx(tx);
     if (!route) continue;
     const sourceUserId = String(route.source?.entityId || '').toLowerCase();
@@ -150,13 +176,13 @@ export const collectCrossJurisdictionRemoteEntityHints = (
   return [...hints];
 };
 
-export const handleInboundP2PEntityInput = (
+export const validateInboundP2PEntityInput = (
   env: Env,
   from: string,
   input: RoutedEntityInput,
   deps: RuntimeEntityRoutingDeps,
-  ingressTimestamp?: number,
-): void => {
+  options: RuntimeInboundEntityInputOptions = {},
+): RuntimeInboundEntityInputValidation => {
   const txTypes = input.entityTxs?.map(tx => tx.type).join(',') || 'none';
   const targetEntityId = String(input.entityId || '').toLowerCase();
   const localReplicaExists = Array.from(env.eReplicas.keys()).some(key => {
@@ -176,7 +202,7 @@ export const handleInboundP2PEntityInput = (
       );
     }
     env.warn('network', 'INBOUND_ENTITY_UNKNOWN_TARGET', payload, input.entityId);
-    return;
+    return { kind: 'ignored' };
   }
   if (!deps.hasLocalSignerForEntitySigner(env, input.entityId, input.signerId)) {
     if ((input.entityTxs?.length ?? 0) > 0) {
@@ -206,11 +232,8 @@ export const handleInboundP2PEntityInput = (
       },
       input.entityId,
     );
-    return;
+    return { kind: 'ignored' };
   }
-
-  // Never learn sender routes from raw payload fields. The authenticated
-  // account/entity transition registers them only after successful apply.
 
   const runtimeState = deps.ensureRuntimeState(env);
   if (runtimeState.halted && !env.scenarioMode) {
@@ -222,24 +245,77 @@ export const handleInboundP2PEntityInput = (
       );
     }
     env.warn?.('network', 'INBOUND_ENTITY_RUNTIME_HALTED', payload, input.entityId);
-    return;
+    return { kind: 'ignored' };
   }
 
-  if (runtimeState.persistenceQuiescing && !env.scenarioMode) {
+  if (
+    runtimeState.persistenceQuiescing &&
+    !env.scenarioMode &&
+    options.acceptedBeforeQuiesce !== true
+  ) {
     const payload = { fromRuntimeId: from, entityId: input.entityId, txTypes };
     if ((input.entityTxs?.length ?? 0) > 0) {
-      env.error?.('network', 'INBOUND_ENTITY_RUNTIME_QUIESCING', payload, input.entityId);
+      // Persistence quiesce is bounded transport backpressure, not state
+      // corruption. The sender receives the explicit failure and its durable
+      // lane retries the same input after publication completes.
+      env.info?.('network', 'INBOUND_ENTITY_RUNTIME_QUIESCING', payload, input.entityId);
       throw new Error(
         `INBOUND_ENTITY_RUNTIME_QUIESCING: entity=${input.entityId} signer=${input.signerId} txTypes=${txTypes}`,
       );
     }
     env.warn?.('network', 'INBOUND_ENTITY_RUNTIME_QUIESCING', payload, input.entityId);
-    return;
+    return { kind: 'ignored' };
   }
 
-  deps.enqueueRuntimeInputs(env, [input], undefined, undefined, ingressTimestamp);
-  env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
+  const targetReplica = Array.from(env.eReplicas.values()).find(replica =>
+    String(replica.entityId || '').toLowerCase() === targetEntityId &&
+    String(replica.signerId || '').toLowerCase() === String(input.signerId || '').toLowerCase());
+  let commandState = targetReplica?.state;
+  for (const tx of input.entityTxs ?? []) {
+    if (tx.type === 'consensusOutput') continue;
+    if (tx.type !== 'entityCommand') {
+      const payload = { fromRuntimeId: from, entityId: input.entityId, txType: tx.type };
+      env.error?.('network', 'INBOUND_ENTITY_UNSIGNED_USER_COMMAND', payload, input.entityId);
+      throw new Error(`INBOUND_ENTITY_UNSIGNED_USER_COMMAND:entity=${input.entityId}:txType=${tx.type}`);
+    }
+    if (!commandState) throw new Error(`INBOUND_ENTITY_COMMAND_STATE_MISSING:${input.entityId}:${input.signerId}`);
+    const command = assertSignedEntityCommand(env, commandState, tx.data);
+    commandState = advanceEntityCommandNonce(commandState, command);
+  }
 
+  // Never learn sender routes from raw payload fields. The authenticated
+  // account/entity transition registers them only after successful apply.
+
+  return { kind: 'accepted' };
+};
+
+export const handleInboundP2PEntityInput = (
+  env: Env,
+  from: string,
+  input: RoutedEntityInput,
+  deps: RuntimeEntityRoutingDeps,
+  ingressTimestamp?: number,
+  options: RuntimeInboundEntityInputOptions = {},
+): RuntimeInboundEntityInputResult => {
+  const validation = validateInboundP2PEntityInput(env, from, input, deps, options);
+  if (validation.kind === 'ignored') return validation;
+
+  const reliableIngress = registerReliableIngress(env, from, input);
+  if (reliableIngress.kind === 'pending') return { kind: 'pending' };
+  if (reliableIngress.kind === 'receipt') {
+    return { kind: 'receipt', receipt: reliableIngress.receipt };
+  }
+  // `from` is trusted transport provenance. Never retain a peer-supplied value.
+  deps.enqueueRuntimeInputs(
+    env,
+    [{ ...input, from }],
+    undefined,
+    undefined,
+    ingressTimestamp,
+    options,
+  );
+  env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
+  return { kind: 'queued' };
 };
 
 export const createRuntimeOutputRoutingDeps = (

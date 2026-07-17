@@ -1,40 +1,54 @@
 // Hanko in string format (hex-encoded ABI bytes).
 export type HankoString = string;
 
-// === HANKO BYTES SYSTEM (Final Design) ===
-export interface HankoBytes {
-  placeholders: Buffer[];
-  packedSignatures: Buffer;
-  claims: HankoClaim[];
+export type HankoHex = `0x${string}`;
+
+export interface HankoBoardDelays {
+  readonly boardChangeDelay: bigint;
+  readonly controlChangeDelay: bigint;
+  readonly dividendChangeDelay: bigint;
 }
 
-export interface HankoClaim {
-  entityId: Buffer;
-  entityIndexes: number[];
-  weights: number[];
-  threshold: number;
+export interface HankoWireClaim extends HankoBoardDelays {
+  readonly entityId: HankoHex;
+  readonly entityIndexes: readonly bigint[];
+  readonly weights: readonly bigint[];
+  readonly threshold: bigint;
 }
 
-export interface HankoVerificationResult {
-  valid: boolean;
-  entityId: Buffer;
-  signedHash: Buffer;
-  yesEntities: Buffer[];
-  noEntities: Buffer[];
-  completionPercentage: number;
-  errors?: string[];
+export interface HankoEnvelope {
+  readonly placeholders: readonly HankoHex[];
+  readonly packedSignatures: HankoHex;
+  readonly claims: readonly HankoWireClaim[];
 }
 
-export interface HankoMergeResult {
-  merged: HankoBytes;
-  addedSignatures: number;
-  completionBefore: number;
-  completionAfter: number;
-  log: string[];
+export interface HankoRecoveredSignature {
+  readonly signerEntityId: HankoHex;
+  readonly signature: HankoHex;
 }
 
-export interface HankoContext {
-  timestamp: number;
-  blockNumber?: number;
-  networkId?: number;
+export interface HankoBoardMemberClaim {
+  readonly entityId: HankoHex;
+  readonly weight: bigint;
 }
+
+export interface HankoSemanticClaim {
+  readonly entityId: HankoHex;
+  readonly members: readonly HankoBoardMemberClaim[];
+  readonly threshold: bigint;
+  readonly delays: HankoBoardDelays;
+}
+
+export type CanonicalHankoMergeResult =
+  | Readonly<{
+      complete: false;
+      targetEntityId: HankoHex;
+      power: bigint;
+      threshold: bigint;
+      missingEntityIds: readonly HankoHex[];
+    }>
+  | Readonly<{
+      complete: true;
+      targetEntityId: HankoHex;
+      hanko: HankoString;
+    }>;

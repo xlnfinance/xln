@@ -8,6 +8,7 @@
   import { panelBridge } from '../utils/panelBridge';
   import { PerformanceMonitor, type PerfMetrics } from '../utils/perfMonitor';
   import { submitRuntimeInput, entityPositions, type RelativeEntityPosition } from '$lib/stores/xlnStore';
+  import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
   import Graph3DViewport from '../components/Graph3DViewport.svelte';
   import { HandGesturePaymentController } from '../utils/handGesturePayments';
   import { compareStableText } from '$lib/utils/stableSort';
@@ -69,7 +70,6 @@
     getGraphSignerIdForEntity,
     graphEntityHasReserves,
     graphReserveValue,
-    graphTotalReserves,
     parseGraphScenarioSteps,
     type GraphPaymentRoute,
   } from './graph3d-helpers';
@@ -366,6 +366,9 @@
     const tokenInfo = XLN?.getTokenInfo?.(tokenId);
     return tokenInfo?.symbol || `TKN${tokenId}`;
   }
+  function getTokenDecimals(tokenId: number): number {
+    return requireTokenDecimals(XLN?.getTokenInfo?.(tokenId)?.decimals, `token:${tokenId}`);
+  }
   let paymentFrom: string = '';
   let paymentTo: string = '';
   let paymentAmount: string = '200000';
@@ -592,7 +595,7 @@
       -halfGrid + zIndex * spacing
     );
     if (tx) {
-      const label = formatGraphMempoolTxLabel(tx, blockHeight);
+      const label = formatGraphMempoolTxLabel(tx, getTokenDecimals, blockHeight);
       const labelSprite = createTxLabelSprite(label);
       labelSprite.position.set(0, -(cubeSize + 0.3), 0); // Below the cube
       group.add(labelSprite);
@@ -1486,7 +1489,9 @@
       },
     }));
     if (entityData.length === 0) {
-      debug.warn(`⚠️ No entity data found at frame ${timeIndex} - clearing network`);
+      if (timeIndex >= 0) {
+        debug.warn(`⚠️ No entity data found at frame ${timeIndex} - clearing network`);
+      }
       clearNetwork(); // Proper clear - entities will be recreated on next frame with data
       return;
     }
@@ -2454,8 +2459,12 @@
     const flag = getGraphEntityFlag(replica?.signerId);
     let balanceStr = '';
     if (replica?.state?.reserves) {
-      const totalReserves = graphTotalReserves(replica);
-      balanceStr = formatGraphReserveBadge(totalReserves);
+      const reserve = graphReserveValue(replica.state.reserves, String(selectedTokenId));
+      balanceStr = formatGraphReserveBadge(
+        reserve,
+        getTokenDecimals(selectedTokenId),
+        getTokenSymbol(selectedTokenId),
+      );
     }
     return {
       flag,
@@ -3056,7 +3065,7 @@
               const derived = XLN?.deriveDelta(tokenDelta, entityA.id < entityB.id);
               if (!derived) continue;
               const globalScale = settings.portfolioScale || 5000;
-              const decimals = 18;
+              const decimals = getTokenDecimals(selectedTokenId);
               const tokensToVisualUnits = 0.00001;
               const barScale = (tokensToVisualUnits / Math.pow(10, decimals)) * (globalScale / 5000);
               totalBarsLength = (Number(derived.peerCreditLimit) + Number(derived.collateral) + Number(derived.ownCreditLimit)) * barScale;
@@ -3619,7 +3628,7 @@
   function scaleEntityRadius(reserveRadius: number): number {
     return reserveRadius * GRAPH_ENTITY_DISPLAY_SCALE * entitySizeMultiplier;
   }
-  function getEntitySizeForToken(entityId: string, _tokenId: number): number {
+  function getEntitySizeForToken(entityId: string, tokenId: number): number {
     const currentReplicas = getTimeAwareReplicas();
     for (const [key, replica] of currentReplicas) {
       const replicaEntityId = key.split(':')[0] || key;
@@ -3627,8 +3636,8 @@
       if (!replica?.state?.reserves) {
         return scaleEntityRadius(EMPTY_SIZE);
       }
-      const totalReserves = graphTotalReserves(replica);
-      const reserveValueUSD = Number(totalReserves) / 1e18;
+      const reserve = graphReserveValue(replica.state.reserves, String(tokenId));
+      const reserveValueUSD = Number(reserve) / 10 ** getTokenDecimals(tokenId);
       if (reserveValueUSD <= 0) {
         return scaleEntityRadius(EMPTY_SIZE);
       }
@@ -3677,6 +3686,7 @@
         id: jobId,
         from: paymentFrom,
         to: paymentTo,
+        tokenId: selectedTokenId,
         amount: paymentAmount,
         tps: paymentTPS,
         sentCount: 0,
@@ -3718,13 +3728,13 @@
       const hasDirectAccount = ourReplica?.state?.accounts?.has(job.to);
       if (!hasDirectAccount) {
       }
-      const decimals = 18;
+      const decimals = getTokenDecimals(job.tokenId);
       const amountStr = String(job.amount);
       const amountParts = amountStr.split('.');
       const wholePart = BigInt(amountParts[0] || 0);
       const decimalPart = amountParts[1] || '';
       const paddedDecimal = decimalPart.padEnd(decimals, '0').slice(0, decimals);
-      const amountInSmallestUnit = wholePart * BigInt(10 ** decimals) + BigInt(paddedDecimal || 0);
+      const amountInSmallestUnit = wholePart * 10n ** BigInt(decimals) + BigInt(paddedDecimal || 0);
       const selectedRoute = availableRoutes[selectedRouteIndex];
       if (!selectedRoute) {
         throw new Error('No route selected');
@@ -3750,7 +3760,7 @@
           type: 'directPayment' as const,
           data: {
             targetEntityId: job.to,
-            tokenId: selectedTokenId,
+            tokenId: job.tokenId,
             amount: amountInSmallestUnit, // Use the converted amount
             route: routePath,  // Path array
             description: `Bird view payment: ${job.amount}`,
@@ -3884,6 +3894,7 @@
       replicas: getTimeAwareReplicas(),
       selectedTokenId,
       getTokenSymbol,
+      getTokenDecimals,
     });
   }
   function getEntityShortName(entityId: string): string {
@@ -3902,6 +3913,7 @@
       getAccountTokenDelta,
       deriveEntry,
       getEntityShortName,
+      getTokenDecimals,
     });
   }
   function onWindowResize() {

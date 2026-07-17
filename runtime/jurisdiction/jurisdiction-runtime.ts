@@ -1,6 +1,5 @@
 import type { ConsensusConfig, Env, EntityReplica, JReplica, JurisdictionConfig } from '../types';
 import { firstUsableContractAddress } from './contract-address';
-import { formatEntityId } from '../utils';
 import {
   getJurisdictionStackId,
   isJurisdictionStackRef,
@@ -145,6 +144,11 @@ export function resolveRuntimeJurisdictionConfig(
     typeof rawChainId === 'bigint'
       ? Number(rawChainId)
       : (typeof rawChainId === 'number' && Number.isFinite(rawChainId) ? rawChainId : undefined);
+  const entityProviderDeploymentBlock = firstDefined<number>(
+    replica?.jadapter?.entityProviderDeploymentBlock,
+    replica?.entityProviderDeploymentBlock,
+    current?.entityProviderDeploymentBlock,
+  );
 
   const currentName = current?.name?.trim() || undefined;
   const currentAddress = current?.address?.trim() || undefined;
@@ -168,6 +172,7 @@ export function resolveRuntimeJurisdictionConfig(
     entityProviderAddress,
     depositoryAddress,
     ...(chainId !== undefined ? { chainId } : {}),
+    ...(entityProviderDeploymentBlock !== undefined ? { entityProviderDeploymentBlock } : {}),
   };
 }
 
@@ -214,6 +219,13 @@ export function requireRuntimeJurisdictionConfigByName(
     ),
     ...(current?.blockTimeMs !== undefined ? { blockTimeMs: current.blockTimeMs } : {}),
     ...(current?.registrationBlock !== undefined ? { registrationBlock: current.registrationBlock } : {}),
+    ...(current?.entityProviderDeploymentBlock !== undefined
+      ? { entityProviderDeploymentBlock: current.entityProviderDeploymentBlock }
+      : replica.jadapter?.entityProviderDeploymentBlock !== undefined
+        ? { entityProviderDeploymentBlock: replica.jadapter.entityProviderDeploymentBlock }
+        : replica.entityProviderDeploymentBlock !== undefined
+          ? { entityProviderDeploymentBlock: replica.entityProviderDeploymentBlock }
+          : {}),
     ...(current?.rebalancePolicyUsd ? { rebalancePolicyUsd: current.rebalancePolicyUsd } : {}),
   };
 
@@ -301,8 +313,6 @@ export function backfillEntityJurisdictionBinding(
   }
 }
 
-const normalizeEntityRef = (value: unknown): string => String(value || '').toLowerCase();
-
 const readStrictJurisdictionStackId = (jurisdiction: unknown): string => {
   if (!jurisdiction || typeof jurisdiction !== 'object') return '';
   const chainId = normalizeStackChainId((jurisdiction as { chainId?: unknown }).chainId);
@@ -317,64 +327,6 @@ function sameAccountJurisdiction(sourceJurisdiction: unknown, targetJurisdiction
   const sourceStackId = readStrictJurisdictionStackId(sourceJurisdiction);
   const targetStackId = readStrictJurisdictionStackId(targetJurisdiction);
   return Boolean(sourceStackId && targetStackId && sourceStackId === targetStackId);
-}
-
-const findLocalEntityJurisdiction = (env: Env, entityId: string): { found: boolean; jurisdiction: unknown | null } => {
-  const target = normalizeEntityRef(entityId);
-  for (const [replicaKey, replica] of env.eReplicas?.entries?.() || []) {
-    const replicaEntityId = normalizeEntityRef(replica?.state?.entityId || replica?.entityId || replicaKey);
-    if (replicaEntityId === target) {
-      return { found: true, jurisdiction: replica?.state?.config?.jurisdiction ?? null };
-    }
-  }
-  return { found: false, jurisdiction: null };
-};
-
-const findProfileJurisdiction = (env: Env, entityId: string): unknown | null => {
-  const target = normalizeEntityRef(entityId);
-  const profile = env.gossip?.getProfiles?.().find((candidate) =>
-    normalizeEntityRef(candidate?.entityId || '') === target,
-  );
-  return profile?.metadata?.jurisdiction ?? null;
-};
-
-export function assertSameJurisdictionAccount(
-  env: Env,
-  sourceEntityId: string,
-  sourceJurisdiction: JurisdictionConfig | unknown | null | undefined,
-  counterpartyEntityId: string,
-): void {
-  if (!sourceJurisdiction) {
-    throw new Error(
-      `ACCOUNT_SOURCE_JURISDICTION_UNKNOWN: entity=${formatEntityId(sourceEntityId)} ` +
-      `counterparty=${formatEntityId(counterpartyEntityId)}`,
-    );
-  }
-
-  const localTarget = findLocalEntityJurisdiction(env, counterpartyEntityId);
-  if (localTarget.found && !localTarget.jurisdiction) {
-    throw new Error(
-      `ACCOUNT_JURISDICTION_UNKNOWN: entity=${formatEntityId(sourceEntityId)} ` +
-      `counterparty=${formatEntityId(counterpartyEntityId)}`,
-    );
-  }
-  const targetJurisdiction = localTarget.found
-    ? localTarget.jurisdiction
-    : findProfileJurisdiction(env, counterpartyEntityId);
-
-  if (!targetJurisdiction) {
-    throw new Error(
-      `ACCOUNT_JURISDICTION_UNKNOWN: entity=${formatEntityId(sourceEntityId)} ` +
-      `counterparty=${formatEntityId(counterpartyEntityId)}`,
-    );
-  }
-
-  if (!sameAccountJurisdiction(sourceJurisdiction, targetJurisdiction)) {
-    throw new Error(
-      `ACCOUNT_CROSS_JURISDICTION_FORBIDDEN: entity=${formatEntityId(sourceEntityId)} ` +
-      `counterparty=${formatEntityId(counterpartyEntityId)}`,
-    );
-  }
 }
 
 export function requireEntityRuntimeJurisdictionConfig(

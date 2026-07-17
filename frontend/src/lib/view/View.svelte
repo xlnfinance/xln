@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { writable, get } from 'svelte/store';
   import { formatUnits } from 'ethers';
+  import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
   import type { Env } from '@xln/runtime/xln-api';
   import type { EnvSnapshot } from '$types';
   import { toasts } from '$lib/stores/toastStore';
@@ -160,12 +161,12 @@
     const tokenId = Number(tokenIdRaw || 0);
     const amountMinor = String(amountRaw || '').trim();
     if (!tokenId || !amountMinor) return 'Payment settled';
-    try {
-      const token = get(xlnInstance)?.getTokenInfo?.(tokenId) ?? { symbol: `T${tokenId}`, decimals: 18 };
-      return `${formatUnits(BigInt(amountMinor), token.decimals ?? 18)} ${token.symbol || `T${tokenId}`}`;
-    } catch {
-      return 'Payment settled';
-    }
+    const token = get(xlnInstance)?.getTokenInfo(tokenId);
+    if (!token) throw new Error(`TOKEN_METADATA_READER_UNAVAILABLE:token:${tokenId}`);
+    return `${formatUnits(
+      BigInt(amountMinor),
+      requireTokenDecimals(token.decimals, `token:${tokenId}`),
+    )} ${token.symbol}`;
   };
 
   const shouldSurfaceLogAsToast = (entry: RuntimeLogEntry): boolean => {

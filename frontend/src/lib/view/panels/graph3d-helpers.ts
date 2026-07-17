@@ -116,14 +116,6 @@ export function graphReserveValues(reserves: ReserveMapLike): bigint[] {
   return [];
 }
 
-export function graphTotalReserves(replica: { state?: { reserves?: ReserveMapLike } } | null | undefined): bigint {
-  let total = 0n;
-  for (const amount of graphReserveValues(replica?.state?.reserves)) {
-    total += amount;
-  }
-  return total;
-}
-
 export function graphReserveValue(reserves: ReserveMapLike, key: string): bigint {
   if (!reserves) return 0n;
   if (reserves instanceof Map) {
@@ -138,7 +130,11 @@ export function graphReserveValue(reserves: ReserveMapLike, key: string): bigint
   return 0n;
 }
 
-export function formatGraphMempoolTxLabel(tx: any, blockHeight?: number): string {
+export function formatGraphMempoolTxLabel(
+  tx: any,
+  getTokenDecimals: (tokenId: number) => number,
+  blockHeight?: number,
+): string {
   if (!tx) return 'batch';
   if (tx.type === 'batch' && tx.data?.batch) {
     const batch = tx.data.batch;
@@ -166,11 +162,14 @@ export function formatGraphMempoolTxLabel(tx: any, blockHeight?: number): string
   const type = (tx.type || 'tx').toUpperCase();
   const from = tx.from?.slice(-1) || '?';
   const to = tx.to?.slice(-1) || '?';
-  const amount = tx.amount ? `$${Number(tx.amount / (10n ** 18n) / 1_000_000n)}M` : '';
+  const tokenId = Number(tx.tokenId ?? tx.data?.tokenId);
+  const amount = tx.amount
+    ? `${formatGraphFinancialAmount(BigInt(tx.amount), getTokenDecimals(tokenId))}`
+    : '';
   return `${blockPrefix}${type}: ${from}→${to} ${amount}`.trim();
 }
 
-export function formatGraphFinancialAmount(amount: bigint, decimals: number = 18): string {
+export function formatGraphFinancialAmount(amount: bigint, decimals: number): string {
   if (amount === 0n) return '0';
   const isNegative = amount < 0n;
   const absoluteAmount = isNegative ? -amount : amount;
@@ -186,21 +185,23 @@ export function formatGraphFinancialAmount(amount: bigint, decimals: number = 18
   return `${isNegative ? '-' : ''}${wholePart.toLocaleString()}.${formatted}`;
 }
 
-export function formatGraphReserveBadge(totalReserves: bigint): string {
-  const reserveValue = Number(totalReserves) / 1e18;
+export function formatGraphReserveBadge(amount: bigint, decimals: number, symbol: string): string {
+  const reserveValue = Number(amount) / 10 ** decimals;
+  const suffix = ` ${symbol}`;
   if (reserveValue >= 1000000) {
     const millions = reserveValue / 1000000;
-    return ` $${millions % 1 === 0 ? millions.toFixed(0) : millions.toFixed(1)}M`;
+    return ` ${millions % 1 === 0 ? millions.toFixed(0) : millions.toFixed(1)}M${suffix}`;
   }
-  if (reserveValue >= 1000) return ` $${(reserveValue / 1000).toFixed(0)}K`;
-  if (reserveValue > 0) return ` $${reserveValue.toFixed(0)}`;
-  return ' $0';
+  if (reserveValue >= 1000) return ` ${(reserveValue / 1000).toFixed(0)}K${suffix}`;
+  if (reserveValue > 0) return ` ${reserveValue.toFixed(0)}${suffix}`;
+  return ` 0 ${symbol}`;
 }
 
 export function formatGraphEntityReserveBalances(input: {
   reserves: ReserveMapLike;
   selectedTokenId: number;
   getTokenSymbol: (tokenId: number) => string;
+  getTokenDecimals: (tokenId: number) => number;
 }): string {
   if (!input.reserves) return '  Reserves loading...';
   const entries = input.reserves instanceof Map
@@ -211,9 +212,9 @@ export function formatGraphEntityReserveBalances(input: {
   for (const [tokenIdKey, amount] of entries) {
     const tokenId = Number(tokenIdKey);
     if (Number.isNaN(tokenId)) continue;
-    const formattedAmount = (Number(amount) / 1000).toFixed(2);
+    const formattedAmount = formatGraphFinancialAmount(BigInt(amount), input.getTokenDecimals(tokenId));
     const marker = tokenId === input.selectedTokenId ? '▸ ' : '  ';
-    balanceLines.push(`${marker}${input.getTokenSymbol(tokenId)}: ${formattedAmount}k`);
+    balanceLines.push(`${marker}${input.getTokenSymbol(tokenId)}: ${formattedAmount}`);
   }
   return balanceLines.join('\n') || '  No token reserves';
 }
@@ -289,12 +290,14 @@ export function formatGraphEntityBalanceInfo(input: {
   replicas: Map<string, GraphReplicaLike>;
   selectedTokenId: number;
   getTokenSymbol: (tokenId: number) => string;
+  getTokenDecimals: (tokenId: number) => number;
 }): string {
   const replica = findGraphReplicaByEntityId(input.replicas, input.entityId);
   return formatGraphEntityReserveBalances({
     reserves: replica?.state?.reserves,
     selectedTokenId: input.selectedTokenId,
     getTokenSymbol: input.getTokenSymbol,
+    getTokenDecimals: input.getTokenDecimals,
   });
 }
 
@@ -373,6 +376,7 @@ export function formatGraphDualConnectionAccountInfo(input: {
   getAccountTokenDelta: (accountData: unknown, tokenId: number) => unknown | null;
   deriveEntry: (tokenDelta: unknown, isLeft: boolean) => GraphDerivedAccountData;
   getEntityShortName: (entityId: string) => string;
+  getTokenDecimals: (tokenId: number) => number;
 }): GraphDualConnectionAccountInfo {
   const leftEntity = input.getEntityShortName(input.leftId);
   const rightEntity = input.getEntityShortName(input.rightId);
@@ -397,14 +401,15 @@ export function formatGraphDualConnectionAccountInfo(input: {
   }
   const leftDerived = input.deriveEntry(tokenDelta, true);
   const rightDerived = input.deriveEntry(tokenDelta, false);
-  const leftCollateral = formatGraphFinancialAmount(BigInt(Math.floor(leftDerived.collateral)));
-  const leftNet = formatGraphFinancialAmount(BigInt(Math.floor(leftDerived.delta)));
-  const leftPeerCredit = formatGraphFinancialAmount(BigInt(Math.floor(leftDerived.peerCreditLimit)));
-  const leftOwnCredit = formatGraphFinancialAmount(BigInt(Math.floor(leftDerived.ownCreditLimit)));
-  const rightCollateral = formatGraphFinancialAmount(BigInt(Math.floor(rightDerived.collateral)));
-  const rightNet = formatGraphFinancialAmount(BigInt(Math.floor(rightDerived.delta)));
-  const rightPeerCredit = formatGraphFinancialAmount(BigInt(Math.floor(rightDerived.peerCreditLimit)));
-  const rightOwnCredit = formatGraphFinancialAmount(BigInt(Math.floor(rightDerived.ownCreditLimit)));
+  const decimals = input.getTokenDecimals(displayTokenId);
+  const leftCollateral = formatGraphFinancialAmount(BigInt(Math.floor(leftDerived.collateral)), decimals);
+  const leftNet = formatGraphFinancialAmount(BigInt(Math.floor(leftDerived.delta)), decimals);
+  const leftPeerCredit = formatGraphFinancialAmount(BigInt(Math.floor(leftDerived.peerCreditLimit)), decimals);
+  const leftOwnCredit = formatGraphFinancialAmount(BigInt(Math.floor(leftDerived.ownCreditLimit)), decimals);
+  const rightCollateral = formatGraphFinancialAmount(BigInt(Math.floor(rightDerived.collateral)), decimals);
+  const rightNet = formatGraphFinancialAmount(BigInt(Math.floor(rightDerived.delta)), decimals);
+  const rightPeerCredit = formatGraphFinancialAmount(BigInt(Math.floor(rightDerived.peerCreditLimit)), decimals);
+  const rightOwnCredit = formatGraphFinancialAmount(BigInt(Math.floor(rightDerived.ownCreditLimit)), decimals);
   return {
     left: `Their Credit: ${leftPeerCredit}\nCollateral: ${leftCollateral}\nOur Credit: ${leftOwnCredit}\nNet: ${leftNet}`,
     right: `Our Credit: ${rightOwnCredit}\nCollateral: ${rightCollateral}\nTheir Credit: ${rightPeerCredit}\nNet: ${rightNet}`,
@@ -421,6 +426,7 @@ export function formatGraphDualConnectionAccountInfoFromReplicas(input: {
   getAccountTokenDelta: (accountData: unknown, tokenId: number) => unknown | null;
   deriveEntry: (tokenDelta: unknown, isLeft: boolean) => GraphDerivedAccountData;
   getEntityShortName: (entityId: string) => string;
+  getTokenDecimals: (tokenId: number) => number;
 }): GraphDualConnectionAccountInfo {
   const isALeft = input.entityA < input.entityB;
   const leftId = isALeft ? input.entityA : input.entityB;
@@ -444,6 +450,7 @@ export function formatGraphDualConnectionAccountInfoFromReplicas(input: {
     getAccountTokenDelta: input.getAccountTokenDelta,
     deriveEntry: input.deriveEntry,
     getEntityShortName: input.getEntityShortName,
+    getTokenDecimals: input.getTokenDecimals,
   });
 }
 

@@ -122,6 +122,7 @@ export async function handleJBroadcast(
   const batchSize = getBatchSize(newState.jBatchState.batch);
   const opCount = batchOpCount(newState.jBatchState.batch);
   const jurisdictionName = jurisdiction.name;
+  const batchGeneration = newState.jBatchState.broadcastCount + 1;
 
   jBatchActionLog.debug('broadcast.submit', {
     entity: shortId(entityState.entityId),
@@ -141,6 +142,7 @@ export async function handleJBroadcast(
       batchHash,
       encodedBatch,
       entityNonce: Number(nextNonce),
+      batchGeneration,
       ...(entityTx.data?.feeOverrides ? { feeOverrides: { ...entityTx.data.feeOverrides } } : {}),
       batchSize,
       signerId,
@@ -161,13 +163,17 @@ export async function handleJBroadcast(
     encodedBatch,
     entityNonce: Number(nextNonce),
     firstSubmittedAt,
-    lastSubmittedAt: firstSubmittedAt,
-    submitAttempts: 1,
+    // External submission is a validator-local side effect. The replayable
+    // retryJSubmit RuntimeTx records attempt count/time before I/O.
+    lastSubmittedAt: 0,
+    submitAttempts: 0,
+    ...(entityTx.data?.feeOverrides ? { feeOverrides: { ...entityTx.data.feeOverrides } } : {}),
   };
   newState.jBatchState.batch = createEmptyBatch();
+  delete newState.jBatchState.autoBroadcastDraft;
 
   // ── Update batch state metadata ──
-  newState.jBatchState.broadcastCount++;
+  newState.jBatchState.broadcastCount = batchGeneration;
   newState.jBatchState.lastBroadcast = newState.timestamp;
   newState.jBatchState.status = 'sent';
   // IMPORTANT: do not advance entityNonce optimistically here.

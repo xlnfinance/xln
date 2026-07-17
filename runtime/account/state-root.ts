@@ -1,12 +1,10 @@
 import { ethers } from 'ethers';
 
-import type { AccountMachine, JurisdictionConfig, SettlementWorkspace } from '../types';
+import type { AccountMachine, AccountStateDomain, JurisdictionConfig, SettlementWorkspace } from '../types';
 import { buildHexKeyedMerkle } from '../storage/merkle';
+import { assertAccountJClaimAccumulatorState } from './j-claim-accumulator';
 
-export type AccountStateDomain = {
-  chainId: number;
-  depositoryAddress: string;
-};
+export type { AccountStateDomain } from '../types';
 
 export const EMPTY_ACCOUNT_STATE_ROOT = `0x${'00'.repeat(32)}`;
 
@@ -15,6 +13,8 @@ export type AccountStateRootDebugRecord = {
   root: string;
   entries: ReadonlyArray<readonly [path: string, value: unknown]>;
 };
+
+export type AccountStateSectionHashes = Readonly<Record<string, string>>;
 
 let accountStateRootDebugRecorder: ((record: AccountStateRootDebugRecord) => void) | null = null;
 
@@ -30,13 +30,31 @@ export const setAccountStateRootDebugRecorder = (
 
 export const accountStateDomainFromJurisdiction = (
   jurisdiction: JurisdictionConfig,
+): AccountStateDomain => normalizeAccountStateDomain({
+  chainId: Number(jurisdiction.chainId),
+  depositoryAddress: String(jurisdiction.depositoryAddress || ''),
+}, 'ACCOUNT_STATE_DOMAIN');
+
+export const normalizeAccountStateDomain = (
+  domain: AccountStateDomain,
+  code = 'ACCOUNT_STATE_DOMAIN',
 ): AccountStateDomain => {
-  const chainId = Number(jurisdiction.chainId);
-  const depositoryAddress = String(jurisdiction.depositoryAddress || '');
+  const chainId = Number(domain?.chainId);
+  const depositoryAddress = String(domain?.depositoryAddress || '');
   if (!Number.isSafeInteger(chainId) || chainId <= 0 || !ethers.isAddress(depositoryAddress)) {
-    throw new Error(`ACCOUNT_STATE_DOMAIN_INVALID: chainId=${String(jurisdiction.chainId)} depository=${depositoryAddress || 'missing'}`);
+    throw new Error(`${code}_INVALID: chainId=${String(domain?.chainId)} depository=${depositoryAddress || 'missing'}`);
   }
-  return { chainId, depositoryAddress };
+  return { chainId, depositoryAddress: depositoryAddress.toLowerCase() };
+};
+
+export const sameAccountStateDomain = (
+  left: AccountStateDomain,
+  right: AccountStateDomain,
+): boolean => {
+  const canonicalLeft = normalizeAccountStateDomain(left);
+  const canonicalRight = normalizeAccountStateDomain(right);
+  return canonicalLeft.chainId === canonicalRight.chainId &&
+    canonicalLeft.depositoryAddress === canonicalRight.depositoryAddress;
 };
 
 type RlpNode = string | RlpNode[];
@@ -99,11 +117,11 @@ export const computeCanonicalMerkleRoot = (
   value: encodeRlpValue(value),
 }))).root;
 
-export const computeAccountStateRoot = (
+const accountStateRootEntries = (
   account: AccountMachine,
-  domain: AccountStateDomain,
-): string => {
-  const entries = [
+): ReadonlyArray<readonly [path: string, value: unknown]> => {
+  const domain = normalizeAccountStateDomain(account.domain);
+  return [
     ['identity', {
     chainId: domain.chainId,
     depositoryAddress: domain.depositoryAddress.toLowerCase(),
@@ -123,19 +141,38 @@ export const computeAccountStateRoot = (
     swapOffers: account.swapOffers,
     subcontracts: account.subcontracts,
     lendingIntents: account.lendingIntents ?? new Map(),
+    // Settlement is bilateral Account state, not an Entity-local UI overlay.
+    // Bind the full sealed workspace, including its exact Hankos, so every
+    // later Account frame proves the same executable authorization. Undefined
+    // is omitted by canonicalRlpNode, preserving roots for accounts without one.
+    settlementWorkspace: account.settlementWorkspace,
     }],
     ['jurisdiction', {
     lastFinalizedJHeight: account.lastFinalizedJHeight,
-    leftJObservations: account.leftJObservations,
-    rightJObservations: account.rightJObservations,
-    jEventChain: account.jEventChain,
+    leftPendingJClaims: assertAccountJClaimAccumulatorState(account.leftPendingJClaims),
+    rightPendingJClaims: assertAccountJClaimAccumulatorState(account.rightPendingJClaims),
     }],
     ['rebalance', {
     requestedRebalance: account.requestedRebalance,
     requestedRebalanceFeeState: account.requestedRebalanceFeeState,
-    counterpartyRebalanceFeePolicy: account.counterpartyRebalanceFeePolicy,
+    rebalanceFeePolicies: account.rebalanceFeePolicies,
     }],
   ] as const satisfies ReadonlyArray<readonly [path: string, value: unknown]>;
+};
+
+export const computeAccountStateSectionHashes = (
+  account: AccountMachine,
+): AccountStateSectionHashes => Object.fromEntries(
+  accountStateRootEntries(account).map(([path, value]) => [
+    path,
+    ethers.keccak256(encodeRlpValue(value)),
+  ]),
+);
+
+export const computeAccountStateRoot = (
+  account: AccountMachine,
+): string => {
+  const entries = accountStateRootEntries(account);
   const root = buildHexKeyedMerkle(entries.map(([path, value]) => stateLeaf(path, value))).root;
   if (accountStateRootDebugRecorder) {
     accountStateRootDebugRecorder({

@@ -74,10 +74,10 @@ export async function handleJAbortSentBatch(
             signedNonce: c2r.nonce,
             jNonce,
           });
-          // Also clear the workspace so user can re-propose
-          if (account?.settlementWorkspace) {
-            delete account.settlementWorkspace;
-          }
+          // AccountSettled finality is the sole authority that clears the
+          // workspace. The stale batch may refer to an older workspace than
+          // the account's current one, and deleting here could both erase the
+          // newer proposal and strand its exact workspace holds.
           return false;
         }
         return true;

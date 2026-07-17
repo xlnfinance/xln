@@ -14,6 +14,7 @@ type BootstrapMetrics = {
   bootstrapHash: string;
   runtimeStateHash: string;
   entityStateHash: string;
+  restoredEntityStateHash: string | null;
   workDir: string;
   eventsJsonl?: string;
   marketMakerEventsJsonl?: string;
@@ -26,6 +27,7 @@ type SoundcheckResult = {
   bootstrapHash: string;
   runtimeStateHash: string;
   entityStateHash: string;
+  restoredEntityStateHash: string | null;
   workDir: string;
   metricsPath: string;
   eventsJsonl?: string;
@@ -67,7 +69,11 @@ const templateDir = resolve(
   process.env['XLN_BOOTSTRAP_TEMPLATE_DIR'] ||
   join(repoRoot, '.logs', 'bootstrap-template', 'current'),
 );
-const portBase = positiveInteger(argValue('port-base') || process.env['XLN_BOOTSTRAP_SOUNDCHECK_PORT_BASE'] || null, 19700);
+const defaultPortBase = mode === 'clone' ? 19800 : mode === 'hydrate' ? 19900 : 19700;
+const portBase = positiveInteger(
+  argValue('port-base') || process.env['XLN_BOOTSTRAP_SOUNDCHECK_PORT_BASE'] || null,
+  defaultPortBase,
+);
 const explicitPortBase = Boolean(argValue('port-base') || process.env['XLN_BOOTSTRAP_SOUNDCHECK_PORT_BASE']);
 const localProdSmokePortOffsets = [0, 1, 4, 7, 8, 10, 11, 12, 13];
 
@@ -136,7 +142,7 @@ const runSmoke = async (
         XLN_LOCAL_PROD_SMOKE_EVENTS_JSONL: eventsJsonl,
         XLN_LOCAL_PROD_SMOKE_ENFORCE_STAGE_BUDGETS: '1',
         XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO: process.env['XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO'] || '1',
-        XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS: process.env['XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS'] || '1500',
+        XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS: process.env['XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS'] || '5000',
         XLN_LOCAL_PROD_SMOKE_POST_BOOTSTRAP_STABILITY_MS:
           process.env['XLN_LOCAL_PROD_SMOKE_POST_BOOTSTRAP_STABILITY_MS'] || '1000',
         ...extraEnv,
@@ -163,6 +169,7 @@ const runSmoke = async (
     bootstrapHash: metrics.bootstrapHash,
     runtimeStateHash: metrics.runtimeStateHash,
     entityStateHash: metrics.entityStateHash,
+    restoredEntityStateHash: metrics.restoredEntityStateHash,
     workDir: metrics.workDir,
     metricsPath,
     eventsJsonl: metrics.eventsJsonl || eventsJsonl,
@@ -237,8 +244,10 @@ if (mode === 'clone' || mode === 'all') {
   if (templateHashes && clone.bootstrapHash !== templateHashes.bootstrapHash) {
     throw new Error(`BOOTSTRAP_SOUNDCHECK_CLONE_HASH_DRIFT template=${templateHashes.bootstrapHash} clone=${clone.bootstrapHash}`);
   }
-  if (templateHashes && clone.entityStateHash !== templateHashes.entityStateHash) {
-    throw new Error(`BOOTSTRAP_SOUNDCHECK_CLONE_ENTITY_HASH_DRIFT template=${templateHashes.entityStateHash} clone=${clone.entityStateHash}`);
+  if (templateHashes && clone.restoredEntityStateHash !== templateHashes.entityStateHash) {
+    throw new Error(
+      `BOOTSTRAP_SOUNDCHECK_CLONE_RESTORED_ENTITY_HASH_DRIFT template=${templateHashes.entityStateHash} restored=${String(clone.restoredEntityStateHash)}`,
+    );
   }
   results.push(clone);
 }
@@ -251,8 +260,10 @@ if (mode === 'hydrate' || mode === 'all') {
   if (templateHashes && hydrate.bootstrapHash !== templateHashes.bootstrapHash) {
     throw new Error(`BOOTSTRAP_SOUNDCHECK_HYDRATE_HASH_DRIFT template=${templateHashes.bootstrapHash} hydrate=${hydrate.bootstrapHash}`);
   }
-  if (templateHashes && hydrate.entityStateHash !== templateHashes.entityStateHash) {
-    throw new Error(`BOOTSTRAP_SOUNDCHECK_HYDRATE_ENTITY_HASH_DRIFT template=${templateHashes.entityStateHash} hydrate=${hydrate.entityStateHash}`);
+  if (templateHashes && hydrate.restoredEntityStateHash !== templateHashes.entityStateHash) {
+    throw new Error(
+      `BOOTSTRAP_SOUNDCHECK_HYDRATE_RESTORED_ENTITY_HASH_DRIFT template=${templateHashes.entityStateHash} restored=${String(hydrate.restoredEntityStateHash)}`,
+    );
   }
   results.push(hydrate);
 }

@@ -48,4 +48,10 @@ export {
 export type { P2PKeyPair } from './p2p-crypto';
 
 // Profile signing (uses same Hanko mechanism as accountFrames)
-export { signProfile, verifyProfileSignature, hasValidProfileSignature, computeProfileHash } from './profile-signing';
+export {
+  signProfileRuntimeRoute,
+  verifyProfileSignature,
+  hasValidProfileSignature,
+  computeProfileHash,
+  computeProfileRouteHash,
+} from './profile-signing';

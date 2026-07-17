@@ -40,6 +40,7 @@ const stack = (
 ) => ({
   name,
   chainId: Number.parseInt(depository.slice(2, 4), 16) || 1,
+  entityProviderDeploymentBlock: 2,
   rpc,
   contracts: {
     depository,

@@ -20,6 +20,11 @@
   import { onMount, onDestroy, createEventDispatcher } from 'svelte';
   import { formatEntityId } from '$lib/utils/format';
   import { resolveOrderbookRelayWsUrl } from './orderbook-relay-url';
+  import {
+    decodeMarketWireResponse,
+    encodeMarketWireMessage,
+    type MarketWireResponse,
+  } from '@xln/runtime/relay/market-wire';
 
   export let hubId: string = '';
   export let hubIds: string[] = [];
@@ -69,20 +74,8 @@
     updatedAt: number;
   };
   type StreamMarketSnapshotPayload = MarketSnapshotPayload & { receivedAt: number };
-  type MarketWsMessage = {
-    type?: string;
-    id?: string;
-    inReplyTo?: string;
-    status?: string;
-    data?: {
-      hubEntityIds?: unknown[];
-      pairs?: unknown[];
-      depth?: unknown;
-    };
-    payload?: MarketSnapshotPayload;
-    error?: string;
-    code?: string;
-  };
+  type MarketErrorMessage = Extract<MarketWireResponse, { type: 'error' }>;
+  type MarketStatusMessage = Extract<MarketWireResponse, { type: 'market_status' }>;
   const dispatch = createEventDispatcher<{ levelclick: LevelClickDetail; snapshot: SnapshotDetail }>();
   interface OrderLevel {
     price: bigint;
@@ -174,13 +167,17 @@
     return canonicalPair;
   }
 
+  function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  }
+
   function loadPriceStepOverrides(): void {
     if (typeof window === 'undefined') return;
     try {
       const raw = window.localStorage.getItem(PRICE_STEP_STORAGE_KEY);
       if (!raw) return;
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      if (!parsed || typeof parsed !== 'object') return;
+      const parsed: unknown = JSON.parse(raw);
+      if (!isUnknownRecord(parsed)) throw new Error('ORDERBOOK_PRICE_STEP_STORAGE_INVALID');
       const next: Record<string, string> = {};
       for (const [pair, step] of Object.entries(parsed)) {
         if (!normalizePairId(pair)) continue;
@@ -190,7 +187,8 @@
         }
       }
       priceStepOverrides = next;
-    } catch {
+    } catch (error) {
+      console.warn('ORDERBOOK_PRICE_STEP_STORAGE_READ_FAILED', error);
       priceStepOverrides = {};
     }
   }
@@ -199,8 +197,8 @@
     if (typeof window === 'undefined') return;
     try {
       window.localStorage.setItem(PRICE_STEP_STORAGE_KEY, JSON.stringify(priceStepOverrides));
-    } catch {
-      // ignore storage errors
+    } catch (error) {
+      console.warn('ORDERBOOK_PRICE_STEP_STORAGE_WRITE_FAILED', error);
     }
   }
 
@@ -384,16 +382,16 @@
     return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
   }
 
-  function isMarketScopedError(msg: MarketWsMessage): boolean {
-    const ref = String(msg.inReplyTo || msg.id || '');
+  function isMarketScopedError(msg: MarketErrorMessage): boolean {
+    const ref = String(msg.inReplyTo || '');
     return !ref || ref.startsWith('market_');
   }
 
-  function marketErrorText(msg: MarketWsMessage): string {
+  function marketErrorText(msg: MarketErrorMessage): string {
     return `${msg.code || ''} ${msg.error || ''}`.trim();
   }
 
-  function marketStatusAppliesToCurrentView(msg: MarketWsMessage): boolean {
+  function marketStatusAppliesToCurrentView(msg: MarketStatusMessage): boolean {
     const pair = normalizePairId(canonicalPairId());
     const sources = uniqueSourceHubIds();
     if (!pair || sources.length === 0) return false;
@@ -888,7 +886,7 @@
     }
     updateView([], [], normalizedPair, [], sources, Date.now(), 'syncing');
     armMarketSyncTimer(normalizedPair, sources);
-    marketWs.send(JSON.stringify({
+    marketWs.send(encodeMarketWireMessage({
       type: 'market_subscribe',
       id: wsMessageId('market_sub'),
       replace,
@@ -901,7 +899,7 @@
 
   function requestMarketSnapshot(): void {
     if (!marketWs || marketWs.readyState !== 1) return;
-    marketWs.send(JSON.stringify({ type: 'market_snapshot_request', id: wsMessageId('market_req_manual') }));
+    marketWs.send(encodeMarketWireMessage({ type: 'market_snapshot_request', id: wsMessageId('market_req_manual') }));
   }
 
   function refreshOrderbookNow(): void {
@@ -939,20 +937,24 @@
       if (closingMarketSockets.has(ws) || marketWs !== ws || !mounted) {
         try {
           ws.close();
-        } catch {
-          // Socket is already being torn down.
+        } catch (error) {
+          console.debug('MARKET_WIRE_TEARDOWN_CLOSE_FAILED', error);
         }
         return;
       }
       sendMarketSubscribe(true);
-      marketWs?.send(JSON.stringify({ type: 'market_snapshot_request', id: wsMessageId('market_req') }));
+      marketWs?.send(encodeMarketWireMessage({ type: 'market_snapshot_request', id: wsMessageId('market_req') }));
     };
     ws.onmessage = (event: MessageEvent) => {
       if (closingMarketSockets.has(ws) || marketWs !== ws) return;
-      let msg: MarketWsMessage;
+      let msg: MarketWireResponse;
       try {
-        msg = JSON.parse(String(event.data || '{}')) as MarketWsMessage;
-      } catch {
+        msg = decodeMarketWireResponse(String(event.data || ''));
+      } catch (error) {
+        console.error('MARKET_WIRE_DECODE_FAILED', error);
+        sourceErrorLabel = error instanceof Error ? error.message : String(error);
+        updateView([], [], canonicalPairId(), [], uniqueSourceHubIds(), Date.now(), 'error');
+        ws.close(4003, 'Invalid market wire message');
         return;
       }
       if (msg?.type === 'error') {
@@ -980,10 +982,10 @@
         return;
       }
       if (msg?.type !== 'market_snapshot') return;
-      const payload = msg?.payload as MarketSnapshotPayload | undefined;
-      const hubEntityId = payload?.hubEntityId ? String(payload.hubEntityId).toLowerCase() : '';
-      const streamPairId = normalizePairId(String(payload?.pairId || ''));
-      if (!hubEntityId || !streamPairId || !payload) return;
+      const payload = msg.payload;
+      const hubEntityId = payload.hubEntityId.toLowerCase();
+      const streamPairId = normalizePairId(payload.pairId);
+      if (!streamPairId) throw new Error('MARKET_WIRE_CANONICAL_PAIR_INVARIANT');
       streamSnapshots.set(streamKey(hubEntityId, streamPairId), {
         ...payload,
         hubEntityId,
@@ -1021,13 +1023,13 @@
     closingMarketSockets.add(ws);
     try {
       if (ws.readyState === 1) {
-        ws.send(JSON.stringify({ type: 'market_unsubscribe', id: wsMessageId('market_unsub') }));
+        ws.send(encodeMarketWireMessage({ type: 'market_unsubscribe', id: wsMessageId('market_unsub') }));
         ws.close();
       } else if (ws.readyState !== 0) {
         ws.close();
       }
-    } catch {
-      // ignore
+    } catch (error) {
+      console.warn('MARKET_WIRE_DISCONNECT_FAILED', error);
     }
     marketWs = null;
     marketWsUrl = '';

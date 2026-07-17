@@ -1,5 +1,42 @@
 import type { JAdapter } from '../jadapter/types';
 import type { JBatch } from '../jurisdiction/batch';
+import type { EntityProviderActionJTxData } from './entity-provider-actions';
+
+export type CertifiedRegistrationEvidence = {
+  version: 1;
+  source: 'FoundationBootstrapped' | 'EntityRegistered';
+  stackKey: string;
+  entityId: string;
+  boardHash: string;
+  activationHeight: number;
+  blockHash: string;
+  transactionHash: string;
+  transactionIndex: number;
+  logIndex: number;
+  emitter: string;
+  topics: string[];
+  data: string;
+  rawLogDigest: string;
+  receiptsRoot: string;
+  encodedReceipt: string;
+  receiptProofNodes: string[];
+  receiptLogIndex: number;
+  observedThroughHeight: number;
+  observedTipBlockHash: string;
+  observedHeadHeight: number;
+  confirmationDepth: number;
+  witnessRuntimeId: string;
+  witnessSignature: string;
+};
+
+export type JAdapterFailureCategory = 'transient' | 'terminal';
+
+/** Structured external-adapter failure retained across Runtime WAL replay. */
+export type JAdapterFailure = {
+  category: JAdapterFailureCategory;
+  code: string;
+  message: string;
+};
 
 /**
  * JReplica = Jurisdiction replica (J-Machine EVM state)
@@ -28,6 +65,8 @@ export interface JReplica {
   chainId?: number;
   // Persisted local view of depository.defaultDisputeDelay for deterministic handlers.
   defaultDisputeDelayBlocks?: number;
+  /** Trusted watcher finality policy persisted with validator-local receipt evidence. */
+  watcherConfirmationDepth?: number;
 
   // Visual position (for 3D rendering)
   position: { x: number; y: number; z: number };
@@ -35,6 +74,7 @@ export interface JReplica {
   // Contract addresses (primary)
   depositoryAddress?: string; // Primary depository address (for replay protection)
   entityProviderAddress?: string; // Primary entity provider address
+  entityProviderDeploymentBlock?: number;
 
   // Additional deployed contract addresses.
   contracts?: {
@@ -56,6 +96,8 @@ export type JTx =
         batchHash?: string; // Hash of encoded batch (for hanko signing)
         encodedBatch?: string; // ABI-encoded batch (for on-chain submission)
         entityNonce?: number; // Entity nonce used for this batch
+        /** Deterministic Entity broadcast generation; never ABI-encoded. */
+        batchGeneration?: number;
         feeOverrides?: {
           gasBumpBps?: number;
           maxFeePerGasWei?: string;
@@ -63,6 +105,13 @@ export type JTx =
         };
         batchSize: number;
         signerId?: string;
+        /** Runtime-local WAL attempt metadata. Never ABI-encoded. */
+        runtimeSubmitAttempt?: {
+          attemptId: string;
+          attemptNumber: number;
+          attemptedAt: number;
+          batchGeneration: number;
+        };
       };
       timestamp: number;
       expectedJBlock?: number; // Expected j-block height (for replay protection)
@@ -85,5 +134,23 @@ export type JTx =
         maxIterations: bigint;
         signerId?: string;
       };
+      timestamp: number;
+    }
+  | {
+      type: 'entityProviderTransfer';
+      entityId: string;
+      data: EntityProviderActionJTxData;
+      timestamp: number;
+    }
+  | {
+      type: 'entityProviderReleaseControlShares';
+      entityId: string;
+      data: EntityProviderActionJTxData;
+      timestamp: number;
+    }
+  | {
+      type: 'entityProviderCancelAction';
+      entityId: string;
+      data: EntityProviderActionJTxData;
       timestamp: number;
     };

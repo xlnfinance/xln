@@ -1,6 +1,5 @@
 import {
   buildCrossJurisdictionCloseProof,
-  buildCrossJurisdictionPullBinding,
   CROSS_J_MAX_FILL_RATIO,
   getCrossJurisdictionCommittedProofRatio,
   hashCrossJurisdictionCloseBinary,
@@ -82,24 +81,6 @@ const findCrossTargetRoute = (state: EntityState, pullId: string, counterpartyEn
     normalizeEntityRef(route.target.entityId) === normalizeEntityRef(counterpartyEntityId),
   );
 
-const syncTargetPullBinding = (
-  result: PullResult,
-  accountId: string,
-  pullId: string,
-  route: NonNullable<ReturnType<typeof findCrossTargetRoute>>,
-  fillRatio: number,
-): void => {
-  const pull = result.newState.accounts.get(accountId)?.pulls?.get(pullId);
-  if (!pull) return;
-  const committedRatio = getCrossJurisdictionCommittedProofRatio(route);
-  pull.crossJurisdiction = buildCrossJurisdictionPullBinding({
-    ...route,
-    ...(route.sourceCloseProof ? { sourceCloseProof: route.sourceCloseProof } : {}),
-    cumulativeFillRatio: Math.max(committedRatio, fillRatio),
-    claimedRatio: Math.max(committedRatio, fillRatio),
-  }, 'target');
-};
-
 const closeProofsMatch = (
   left: CrossPullCloseTx['data']['proof'] | undefined,
   right: CrossPullCloseTx['data']['proof'] | undefined,
@@ -173,7 +154,6 @@ const proofRouteError = (
 const validateCrossTargetResolve = (
   result: PullResult,
   env: Env,
-  accountId: string,
   pullId: string,
   counterpartyEntityId: string,
   binary: string,
@@ -216,10 +196,6 @@ const validateCrossTargetResolve = (
   }
   route.pendingClearRequestedAt ||= now(result.newState, env);
   transitionCrossJurisdictionRouteStatus(route, 'clearing', result.newState.timestamp || env.timestamp);
-  // Entity-level resolvePull is the gate that verifies the target has the same
-  // hashladder binary relayed after source claim. Keep the account pull binding
-  // in lockstep before the account frame validates pull_resolve; no rehydration.
-  syncTargetPullBinding(result, accountId, pullId, route, decodedRatio);
   result.newState.crossJurisdictionSwaps?.set(route.orderId, route);
   return null;
 };
@@ -233,9 +209,16 @@ export const handleResolvePullEntityTx = (env: Env, state: EntityState, tx: Reso
   if (sourceRoute && sourceRoute.status !== 'clearing') {
     return fail(result, `❌ Cross-j source pull ${pullId.slice(0, 8)} resolve blocked: use requestCrossJurisdictionClear`);
   }
-  const blocked = validateCrossTargetResolve(result, env, accountId, pullId, counterpartyEntityId, binary);
+  const blocked = validateCrossTargetResolve(result, env, pullId, counterpartyEntityId, binary);
   if (blocked) return blocked;
-  result.mempoolOps.push({ accountId, tx: { type: 'pull_resolve', data: { pullId, binary } } });
+  const targetRoute = findCrossTargetRoute(result.newState, pullId, counterpartyEntityId);
+  const targetProof = targetRoute?.sourceCloseProof;
+  result.mempoolOps.push({
+    accountId,
+    tx: targetProof
+      ? { type: 'cross_pull_close', data: { pullId, binary, proof: targetProof } }
+      : { type: 'pull_resolve', data: { pullId, binary } },
+  });
   requestFrame(state, result.outputs);
   return result;
 };
@@ -272,7 +255,6 @@ export const handleCrossPullCloseEntityTx = (env: Env, state: EntityState, tx: C
       return fail(result, `❌ Cross-j target pull close ${pullId.slice(0, 8)} blocked: route ${route.status}->clearing`);
     }
     transitionCrossJurisdictionRouteStatus(route, 'clearing', result.newState.timestamp || env.timestamp);
-    syncTargetPullBinding(result, accountId, pullId, route, proof.fillRatio);
   }
   result.newState.crossJurisdictionSwaps?.set(route.orderId, route);
   result.mempoolOps.push({ accountId, tx: { type: 'cross_pull_close', data: { pullId, binary, proof } } });

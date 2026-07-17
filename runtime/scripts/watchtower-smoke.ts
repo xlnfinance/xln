@@ -3,8 +3,10 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { Wallet } from 'ethers';
+import { Wallet, hexlify } from 'ethers';
 
+import { deriveSignerKeySync } from '../account/crypto';
+import { generateLazyEntityId } from '../entity/factory';
 import {
   closeInfraDb,
   closeRuntimeDb,
@@ -49,14 +51,13 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>, name = 'Tow
 
 const createBackupAppointment = async () => {
   const runtimeSeed = 'watchtower-smoke-seed';
-  const wallet = Wallet.createRandom();
-  const runtimeId = wallet.address.toLowerCase();
   const env = createEmptyEnv(runtimeSeed);
-  env.runtimeId = runtimeId;
+  const runtimeId = env.runtimeId!;
+  const wallet = new Wallet(hexlify(deriveSignerKeySync(runtimeSeed, '1')));
   env.dbNamespace = `${runtimeId}-${Date.now()}-watchtower-smoke`;
   env.quietRuntimeLogs = true;
   const jurisdiction = installJurisdiction(env);
-  const entityId = `0x${'ab'.repeat(32)}`;
+  const entityId = generateLazyEntityId([runtimeId], 1n, env).toLowerCase();
   enqueueRuntimeInput(env, {
     runtimeTxs: [{
       type: 'importReplica',

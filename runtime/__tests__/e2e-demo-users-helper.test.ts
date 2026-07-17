@@ -23,6 +23,28 @@ describe('e2e demo user helper', () => {
     expect(createRuntime).toContain('onboardingLabel: label');
   });
 
+  test('never bypasses visible profile onboarding through browser storage', () => {
+    const helper = readFileSync(join(repoRoot, 'tests/utils/e2e-demo-users.ts'), 'utf8');
+    const dismissStart = helper.indexOf('async function dismissOnboardingIfVisible');
+    const dismissEnd = helper.indexOf('async function waitForReadyAfterCreate');
+    const completeStart = helper.indexOf('async function completeProfileOnboardingIfVisible');
+    const completeEnd = helper.indexOf('async function ensureRuntimeOnline');
+    expect(dismissStart).toBeGreaterThanOrEqual(0);
+    expect(dismissEnd).toBeGreaterThan(dismissStart);
+    expect(completeStart).toBeGreaterThanOrEqual(0);
+    expect(completeEnd).toBeGreaterThan(completeStart);
+
+    const dismissBody = helper.slice(dismissStart, dismissEnd);
+    expect(dismissBody).not.toContain('localStorage.setItem');
+    expect(dismissBody).toContain('PROFILE_ONBOARDING_UNSUPPORTED_VISIBLE');
+
+    const completeBody = helper.slice(completeStart, completeEnd);
+    expect(completeBody).not.toContain('localStorage.setItem');
+    expect(completeBody).toContain('PROFILE_ONBOARDING_START_MISSING');
+    expect(completeBody).toContain('PROFILE_ONBOARDING_START_DISABLED');
+    expect(completeBody).toContain('PROFILE_ONBOARDING_SUBMIT_FAILED');
+  });
+
   test('waits for hub gossip profile hydration through a connected p2p client', () => {
     const helper = readFileSync(join(repoRoot, 'tests/utils/e2e-connect.ts'), 'utf8');
     const waitForProfileStart = helper.indexOf('async function waitForHubRuntimeProfile');

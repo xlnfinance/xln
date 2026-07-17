@@ -1,9 +1,10 @@
 import { ethers } from 'ethers';
 import { TextDecoder, TextEncoder } from 'util';
+import { deriveSignerAddressSync } from '../account/crypto';
 import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
 import {
+  assertRuntimeRecoveryBundleAuthenticity,
   computeRuntimeRecoveryBundleHash,
-  validateRuntimeRecoveryBundle,
 } from './bundle';
 import type {
   EncryptedRuntimeRecoveryBundleV1,
@@ -183,8 +184,9 @@ export const encryptRuntimeRecoveryBundle = async (
   bundle: RuntimeRecoveryBundleV1,
   runtimeSeed: string,
 ): Promise<EncryptedRuntimeRecoveryBundleV1> => {
-  const validated = validateRuntimeRecoveryBundle(bundle);
-  const key = await importAesKey(validated.runtimeId, runtimeSeed);
+  const validated = assertRuntimeRecoveryBundleAuthenticity(bundle, runtimeSeed);
+  const trustedRuntimeId = deriveSignerAddressSync(runtimeSeed, '1').toLowerCase();
+  const key = await importAesKey(trustedRuntimeId, runtimeSeed);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const rawPlaintext = encoder.encode(serializeTaggedJson(validated));
   const gzippedPlaintext = await gzipBytes(rawPlaintext);
@@ -218,7 +220,13 @@ export const decryptRuntimeRecoveryBundle = async (
   if (!encrypted || encrypted.version !== 1) {
     throw new Error(`RECOVERY_BUNDLE_ENCRYPTED_VERSION_UNSUPPORTED: ${String(encrypted?.version ?? 'unknown')}`);
   }
-  const key = await importAesKey(encrypted.runtimeId, runtimeSeed);
+  const trustedRuntimeId = deriveSignerAddressSync(runtimeSeed, '1').toLowerCase();
+  if (String(encrypted.runtimeId || '').trim().toLowerCase() !== trustedRuntimeId) {
+    throw new Error(
+      `RECOVERY_BUNDLE_TRUSTED_RUNTIME_ID_MISMATCH:derived=${trustedRuntimeId}:encrypted=${encrypted.runtimeId}`,
+    );
+  }
+  const key = await importAesKey(trustedRuntimeId, runtimeSeed);
   const encryptedPlaintext = new Uint8Array(
     await crypto.subtle.decrypt(
       { name: 'AES-GCM', iv: toOwnedArrayBuffer(ethers.getBytes(encrypted.iv)) },
@@ -230,7 +238,7 @@ export const decryptRuntimeRecoveryBundle = async (
     ? await gunzipBytes(encryptedPlaintext)
     : encryptedPlaintext;
   const parsed = deserializeTaggedJson<RuntimeRecoveryBundleV1>(decoder.decode(plaintext));
-  const validated = validateRuntimeRecoveryBundle(parsed);
+  const validated = assertRuntimeRecoveryBundleAuthenticity(parsed, runtimeSeed, trustedRuntimeId);
   const bundleHash = computeRuntimeRecoveryBundleHash(validated);
   if (bundleHash !== encrypted.bundleHash) {
     throw new Error(`RECOVERY_BUNDLE_HASH_MISMATCH: expected=${encrypted.bundleHash} actual=${bundleHash}`);

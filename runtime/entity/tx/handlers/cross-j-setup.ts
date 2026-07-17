@@ -1,13 +1,15 @@
 import {
   buildCrossJurisdictionPullBinding,
-  buildPreparedCrossJurisdictionRoute,
   cloneCrossJurisdictionRoute,
   isCrossJurisdictionPullExpired,
   isCrossJurisdictionRouteExpired,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../extensions/cross-j/index';
 import { getCrossJurisdictionBookReceiptError } from '../../../extensions/cross-j/orderbook';
-import { requireRuntimeJurisdictionDisputeDelayMs } from '../../../jurisdiction/height';
+import {
+  committedCrossJSourceDisputeDelayMs,
+  validatePreparedCrossJurisdictionRoute,
+} from '../../../extensions/cross-j/prepared-route';
 import { pushCrossJurisdictionEntityOutput } from '../cross-j-outputs';
 import {
   canonicalizeCrossJurisdictionRouteForKnownEntities,
@@ -18,6 +20,7 @@ import {
 } from '../cross-jurisdiction-helpers';
 import { normalizeEntityRef } from '../account-key';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
+import { safeStringify } from '../../../protocol/serialization';
 import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env } from '../../../types';
 import { formatEntityId } from '../../../utils';
 import type { ApplyEntityTxOptions } from '../apply';
@@ -34,6 +37,21 @@ const deterministicEntityTimestamp = (state: EntityState, env: Env): number =>
 
 const stateForEntityTx = (entityState: EntityState, options?: ApplyEntityTxOptions): EntityState =>
   options?.mutableFrameState ? entityState : cloneEntityState(entityState);
+
+const exactRouteBytes = (route: CrossJurisdictionSwapRoute): string =>
+  safeStringify(cloneCrossJurisdictionRoute(route));
+
+const materializedIntentBytes = (
+  route: CrossJurisdictionSwapRoute,
+  existing: CrossJurisdictionSwapRoute,
+): string => {
+  const intent = cloneCrossJurisdictionRoute(route);
+  delete intent.sourcePull;
+  delete intent.targetPull;
+  intent.status = existing.status;
+  intent.updatedAt = existing.updatedAt;
+  return exactRouteBytes(intent);
+};
 
 const pushCrossJOutput = (
   env: Env,
@@ -80,6 +98,10 @@ export const handleRequestCrossJurisdictionSwapEntityTx = (
     addMessage(newState, `❌ Cross-j request ${route.orderId} blocked: no source account with ${formatEntityId(route.source.counterpartyEntityId)}`);
     return { newState, outputs };
   }
+  if (route.sourcePull || route.targetPull) {
+    addMessage(newState, `❌ Cross-j request ${route.orderId} must not contain proposer commitments`);
+    return { newState, outputs };
+  }
   newState.crossJurisdictionSwaps ||= new Map();
   const existing = newState.crossJurisdictionSwaps.get(route.orderId);
   if (existing) {
@@ -94,7 +116,7 @@ export const handleRequestCrossJurisdictionSwapEntityTx = (
   newState.crossJurisdictionSwaps.set(intentRoute.orderId, intentRoute);
   pushCrossJOutput(env, outputs, intentRoute.source.counterpartyEntityId, [{
     type: 'prepareCrossJurisdictionSwap',
-    data: { route: intentRoute },
+    data: { route: cloneCrossJurisdictionRoute(intentRoute) },
   }], intentRoute.sourceHubSignerId);
   addMessage(newState, `🌉 Cross-j swap ${intentRoute.orderId} requested`);
   return { newState, outputs };
@@ -126,15 +148,59 @@ export const handlePrepareCrossJurisdictionSwapEntityTx = (
     addMessage(newState, `❌ Cross-j prepare ${route.orderId} blocked: ${bindingError}`);
     return { newState, outputs };
   }
-  const preparedRoute = buildPreparedCrossJurisdictionRoute(route, {
-    runtimeSeed: (env as { runtimeSeed?: string }).runtimeSeed,
-    sourceDisputeDelayMs: requireRuntimeJurisdictionDisputeDelayMs(env, route.source.jurisdiction),
-    now: newState.timestamp || env.timestamp,
-  });
-  if (!preparedRoute.targetPull || !preparedRoute.sourcePull) {
-    addMessage(newState, `❌ Cross-j prepare ${route.orderId} failed: pull commitments missing`);
+  const hasSourcePull = route.sourcePull !== undefined;
+  const hasTargetPull = route.targetPull !== undefined;
+  if (hasSourcePull !== hasTargetPull) {
+    throw new Error(`CROSS_J_PREPARED_PAYLOAD_PARTIAL:${route.orderId}`);
+  }
+  if (!hasSourcePull) {
+    if (route.status !== 'intent') {
+      throw new Error(`CROSS_J_RAW_PREPARE_STATUS_INVALID:${route.orderId}:${route.status}`);
+    }
+    const now = deterministicEntityTimestamp(newState, env);
+    if (isCrossJurisdictionRouteExpired(route, now)) {
+      addMessage(newState, `❌ Cross-j prepare ${route.orderId} expired`);
+      return { newState, outputs };
+    }
+    if (
+      String(route.source.jurisdiction).trim().toLowerCase() ===
+        String(route.target.jurisdiction).trim().toLowerCase() &&
+      Number(route.source.tokenId) === Number(route.target.tokenId)
+    ) {
+      addMessage(newState, `❌ Cross-j prepare ${route.orderId} must cross a jurisdiction or asset boundary`);
+      return { newState, outputs };
+    }
+    try {
+      // Validate every public prerequisite before making the intent durable.
+      // The private seed remains untouched until the default proposer signs
+      // the later materialization command.
+      committedCrossJSourceDisputeDelayMs(newState, route);
+    } catch (error) {
+      addMessage(
+        newState,
+        `❌ Cross-j prepare ${route.orderId} blocked: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return { newState, outputs };
+    }
+    newState.crossJurisdictionSwaps ||= new Map();
+    const existing = newState.crossJurisdictionSwaps.get(route.orderId);
+    if (existing?.sourcePull || existing?.targetPull) {
+      throw new Error(`CROSS_J_RAW_PREPARE_AFTER_MATERIALIZATION:${route.orderId}`);
+    }
+    if (existing) {
+      if (exactRouteBytes(existing) !== exactRouteBytes(route)) {
+        throw new Error(`CROSS_J_RAW_PREPARE_CONFLICT:${route.orderId}`);
+      }
+      return { newState, outputs };
+    }
+    newState.crossJurisdictionSwaps.set(route.orderId, cloneCrossJurisdictionRoute(route));
+    const firstValidator = newState.config.validators[0];
+    if (!firstValidator) throw new Error(`CROSS_J_SOURCE_HUB_PROPOSER_MISSING:${route.orderId}`);
+    outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
+    addMessage(newState, `🌉 Cross-j swap ${route.orderId} awaiting source-hub proposer commitments`);
     return { newState, outputs };
   }
+  const preparedRoute = validatePreparedCrossJurisdictionRoute(newState, route);
   newState.crossJurisdictionSwaps ||= new Map();
   const existing = newState.crossJurisdictionSwaps.get(preparedRoute.orderId);
   const transitionError = validateCrossJurisdictionRouteTransition(existing, preparedRoute);
@@ -167,6 +233,32 @@ export const handlePrepareCrossJurisdictionSwapEntityTx = (
   ], publicPreparedRoute.targetSignerId);
   addMessage(newState, `🌉 Cross-j swap ${preparedRoute.orderId} target lock requested by hub`);
   return { newState, outputs };
+};
+
+export const handleMaterializeCrossJurisdictionSwapEntityTx = (
+  env: Env,
+  entityState: EntityState,
+  entityTx: EntityTxOf<'materializeCrossJurisdictionSwap'>,
+  options?: ApplyEntityTxOptions,
+): CrossJSetupResult => {
+  const expectedProposer = normalizeEntityRef(entityState.config.validators[0] || '');
+  const claimedProposer = normalizeEntityRef(entityTx.data.proposerSignerId);
+  if (!expectedProposer || claimedProposer !== expectedProposer) {
+    throw new Error(
+      `CROSS_J_MATERIALIZE_PROPOSER_INVALID:${claimedProposer || 'missing'}:${expectedProposer || 'missing'}`,
+    );
+  }
+  const existing = entityState.crossJurisdictionSwaps?.get(entityTx.data.route.orderId);
+  if (!existing || existing.sourcePull || existing.targetPull || existing.status !== 'intent') {
+    throw new Error(`CROSS_J_MATERIALIZE_INTENT_MISSING:${entityTx.data.route.orderId}`);
+  }
+  if (materializedIntentBytes(entityTx.data.route, existing) !== exactRouteBytes(existing)) {
+    throw new Error(`CROSS_J_MATERIALIZE_INTENT_MISMATCH:${entityTx.data.route.orderId}`);
+  }
+  return handlePrepareCrossJurisdictionSwapEntityTx(env, entityState, {
+    type: 'prepareCrossJurisdictionSwap',
+    data: { route: entityTx.data.route },
+  }, options);
 };
 
 export const handleCommitCrossJurisdictionSwapEntityTx = (

@@ -3,6 +3,7 @@ import { normalizeLoopbackUrl } from '../networking/loopback-url';
 export type HubJurisdictionEntry = Record<string, unknown> & {
   name?: string;
   chainId?: number;
+  entityProviderDeploymentBlock?: number;
   rpc?: unknown;
   contracts?: Record<string, unknown> & {
     depository?: string;

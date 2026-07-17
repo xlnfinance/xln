@@ -4,6 +4,7 @@ import {
   classifyRuntimeFailure,
   runtimeFailureMessage,
 } from '../../frontend/src/lib/utils/runtimeFailure';
+import { RuntimeAdapterError } from '../../runtime/radapter/errors';
 
 test('runtime failure classifier fail-closes unknown errors as fatal', () => {
   expect(classifyRuntimeFailure(new Error('unexpected frame projection fault'))).toEqual({
@@ -15,8 +16,8 @@ test('runtime failure classifier fail-closes unknown errors as fatal', () => {
 
 test('runtime failure classifier separates drop defer and debug assert classes', () => {
   expect(classifyRuntimeFailure(new Error('Runtime ingress receipt expired'))).toMatchObject({
-    kind: 'drop',
-    retryable: false,
+    kind: 'defer',
+    retryable: true,
   });
   expect(classifyRuntimeFailure(new Error('fetch failed: ECONNREFUSED'))).toMatchObject({
     kind: 'defer',
@@ -26,6 +27,18 @@ test('runtime failure classifier separates drop defer and debug assert classes',
     kind: 'debug-assert',
     retryable: false,
   });
+});
+
+test('runtime adapter terminal codes settle while ordered pending stays retryable', () => {
+  expect(classifyRuntimeFailure(new RuntimeAdapterError(
+    'E_BAD_QUERY',
+    'runtime adapter commandId was reused with a different payload',
+  ))).toMatchObject({ kind: 'drop', retryable: false });
+  expect(classifyRuntimeFailure(new RuntimeAdapterError(
+    'E_COMMAND_PENDING',
+    'runtime adapter command 1 is not durable yet',
+    true,
+  ))).toMatchObject({ kind: 'defer', retryable: true });
 });
 
 test('runtime failure message compacts object errors without hiding codes', () => {

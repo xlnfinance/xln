@@ -1,4 +1,4 @@
-import type { JAdapter } from '@xln/runtime/xln-api';
+import type { Env, JAdapter } from '@xln/runtime/xln-api';
 import type { ExternalWalletSnapshotSource } from './asset-ledger';
 
 export type { ExternalWalletSnapshotSource } from './asset-ledger';
@@ -41,6 +41,29 @@ export type ResolvedExternalWalletSnapshotSource = ExternalWalletSnapshotSource 
   finalityDepth: number;
   headBlockNumber: number;
 };
+
+export type ExternalWalletSnapshotIngressDecision =
+  | 'apply'
+  | 'cancel-runtime-changed'
+  | 'cancel-runtime-quiescing';
+
+export function resolveExternalWalletSnapshotIngress(
+  expectedRuntimeId: string,
+  currentEnv: Env | null,
+): ExternalWalletSnapshotIngressDecision {
+  const expected = expectedRuntimeId.trim().toLowerCase();
+  if (!expected) throw new Error('EXTERNAL_WALLET_SNAPSHOT_RUNTIME_ID_MISSING');
+  if (String(currentEnv?.runtimeId || '').trim().toLowerCase() !== expected) {
+    return 'cancel-runtime-changed';
+  }
+  if (
+    currentEnv?.runtimeState?.persistenceQuiescing === true ||
+    currentEnv?.runtimeState?.lifecyclePhase === 'quiescing'
+  ) {
+    return 'cancel-runtime-quiescing';
+  }
+  return 'apply';
+}
 
 export function requireExternalSnapshotBigInt(value: bigint | null | undefined, label: string): bigint {
   if (typeof value !== 'bigint') {

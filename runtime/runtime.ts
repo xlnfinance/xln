@@ -28,19 +28,40 @@ const RUNTIME_PROCESS_SLOW_MS = Math.max(
   0,
   Number(nodeProcess?.env?.['XLN_RUNTIME_PROCESS_SLOW_MS'] || '1000'),
 );
-
 import { getPerfMs, getWallClockMs } from './utils';
-import { listOpenSwapOffers } from './orderbook/open-swap-offers';
-import { setDeltaTransformerAddress } from './protocol/dispute/proof-builder';
 import {
+  cloneIsolatedEntityInput,
+  cloneIsolatedRoutedEntityInputs,
+  cloneIsolatedRuntimeInput,
+  cloneIsolatedRuntimeSnapshot,
+} from './protocol/runtime-input-clone';
+import { listOpenSwapOffers } from './orderbook/open-swap-offers';
+import { requireDurableJurisdictionStack } from './jurisdiction/contract-address';
+import {
+  buildCanonicalEntityReplicaSnapshot,
   buildCanonicalEnvSnapshot,
+  buildCanonicalJReplicaSnapshot,
   buildDurableRuntimeMachineSnapshot,
   buildRuntimeCheckpointSnapshot,
   normalizePersistedSnapshotInPlace,
   restoreDurableRuntimeSnapshot,
 } from './wal/snapshot';
 import { computePersistedEnvStateHash } from './wal/hash';
-import { mergeEntityInputs } from './entity/consensus/index';
+import {
+  appendRecentRuntimeSnapshot,
+  recordRuntimeHistoryTraceForTesting,
+} from './history-retention';
+import {
+  mergeEntityInputs,
+  prioritizeEntityConsensusInputs,
+  prioritizeProtocolEntityInputs,
+} from './entity/consensus/index';
+import { accountHasProposableMempool } from './entity/consensus/account-mempool-eligibility';
+import { hasVerifiedEntityCommitPrecertificate } from './entity/consensus/commit-precheck';
+import {
+  copyLocalEntityLeaderTimeoutVoteAuthorization,
+  isEntityActiveLeader,
+} from './entity/consensus/leader';
 import type { JAdapter } from './jadapter';
 import {
   createLazyEntity,
@@ -56,6 +77,7 @@ import {
   requestNamedEntity,
   resolveEntityIdentifier,
 } from './entity/factory';
+import { assertPersistedLocalEntityCryptoKeys } from './entity/crypto';
 import {
   assignNameOnChain,
   getBrowserVMInstance,
@@ -67,6 +89,25 @@ import {
   transferNameBetweenEntities,
 } from './jadapter';
 import { getAvailableJurisdictions } from './jurisdiction/config';
+import {
+  assertCertifiedBoardRootsAvailable,
+  collectReachableCertifiedBoardNodes,
+  getCertifiedBoardNodeStore,
+} from './jurisdiction/board-registry';
+import {
+  assertConsumptionRootsAvailable,
+  collectReachableConsumptionNodes,
+  getConsumptionNodeStore,
+  getLiveConsumptionAccumulatorStates,
+} from './entity/consumption-store';
+import {
+  collectReachableAccountJClaimNodes,
+} from './account/j-claim-accumulator';
+import {
+  assertAccountJClaimRootsAvailable,
+  getAccountJClaimNodeStore,
+  getLiveAccountJClaimAccumulatorStates,
+} from './account/j-claim-store';
 import { createGossipLayer } from './networking/gossip';
 import {
   attachEventEmitters,
@@ -79,6 +120,7 @@ import {
 } from './machine/env-events';
 import {
   deriveSignerAddressSync,
+  getLocalSignerPrivateKey,
   getSignerPrivateKey,
   prewarmSignerKeyCache,
 } from './account/crypto';
@@ -90,7 +132,6 @@ import {
 import type { Profile } from './networking/gossip';
 import { normalizeRuntimeId } from './networking/runtime-id';
 import {
-  detachRuntimeP2P,
   ensureRuntimeGossipProfiles,
   getRuntimeP2P,
   getRuntimeP2PState,
@@ -98,6 +139,7 @@ import {
   startPendingRuntimeP2PIfReady,
   startRuntimeP2P,
   stopRuntimeP2P,
+  stopRuntimeP2PAndWait,
   type P2PConfig,
   type P2PConnectionState,
   type RuntimeP2PLifecycleDeps,
@@ -160,7 +202,13 @@ import {
   createDemoDelta,
   getDefaultCreditLimit,
 } from './account/utils';
-import { computeSwapPriceTicks, prepareSwapOrder, quantizeSwapOrder } from './orderbook';
+import {
+  computeSwapPriceTicks,
+  getSwapLotScale,
+  prepareSwapOrder,
+  quantizeSwapOrder,
+  requantizeRemainingSwapAtPrice,
+} from './orderbook';
 import {
   buildCrossJurisdictionSwapSubmission,
   type CrossJurisdictionSwapSubmitParams,
@@ -169,10 +217,13 @@ import {
 import {
   buildPendingNetworkOutputs,
   dispatchEntityOutputs,
+  getReliableOutputIdentity,
   getNextNetworkRetryTimestamp,
   hasReadyPendingNetworkOutputs,
+  markRestoredReliableOutputsDue,
   MAX_PENDING_NETWORK_OUTPUTS,
   planEntityOutputs,
+  pruneReceiptedReliableOutputs,
   rescheduleDeferredOutputs,
   sendEntityInputWithRouting,
   splitPendingOutputsByRetryWindow,
@@ -180,10 +231,19 @@ import {
   type RuntimeOutputRoutingDeps,
 } from './machine/output-routing';
 import { runtimeInputRequiresOutboxCapacity } from './machine/admission';
+import { isDeliveryDelivered } from './protocol/payments/delivery-result';
+import { prepareHtlcPaymentEntityInputs } from './protocol/htlc/payment-admission';
+import { copyDeterministicHtlcTestSecretCapability } from './protocol/htlc/test-secret-capability';
+import {
+  announceCertifiedLocalProfiles,
+  collectDueLocalProfileCertificationInputs,
+} from './networking/local-profile-lifecycle';
 import {
   createRuntimeOutputRoutingDeps,
   handleInboundP2PEntityInput as routeInboundP2PEntityInput,
   registerEntityRuntimeHint as registerEntityRuntimeHintForRouting,
+  validateInboundP2PEntityInput,
+  type RuntimeInboundEntityInputOptions,
   type RuntimeEntityRoutingDeps,
 } from './machine/entity-routing';
 import {
@@ -196,6 +256,7 @@ import {
 } from './machine/wake';
 import {
   assertScheduledWakeTxAuthorized,
+  copyLocalScheduledWakeAuthorization,
   deleteScheduledWakeIndex,
   rebuildScheduledWakeIndex,
   refreshScheduledWakeIndex,
@@ -208,8 +269,29 @@ import {
   enqueueRuntimeInputs as enqueueRuntimeInputsWithDeps,
   ensureRuntimeMempool,
   type RuntimeInputQueueDeps,
+  type RuntimeInputQueueOptions,
 } from './machine/input-queue';
+import {
+  applyReliableDeliveryReceipts,
+  captureReliableReceiptSenderCheckpoint,
+  commitReliableIngress,
+  finalizeReliableIngressCommit,
+  registerReliableIngress,
+  registerReliableReceiptIngress,
+  reliableReceiptMatchesOutput,
+  releaseUncommittedReliableIngress,
+  rollbackReliableDeliveryReceipts,
+  rollbackReliableIngressCommit,
+  type ReliableIngressCommit,
+  type ReliableReceiptSenderCheckpoint,
+} from './machine/reliable-delivery';
 import { submitRuntimeJOutbox } from './machine/j-submit';
+import {
+  copyLocalJSubmitRuntimeTxAuthorization,
+  registerPendingCommittedJOutbox,
+  splitJOutboxForDurableSubmit,
+} from './machine/j-submit-state';
+import { copyLocalEntityProviderActionRuntimeTxAuthorization } from './machine/entity-provider-action-submit-auth';
 import {
   clearRuntimeCleanLogs,
   copyRuntimeCleanLogs,
@@ -217,7 +299,9 @@ import {
   type RuntimeCleanLogDeps,
 } from './machine/clean-logs';
 import { applyRuntimeTx } from './machine/tx-handlers';
+import { copyLocalRuntimeAdapterCommandAuthorization } from './radapter/command-frontier-auth';
 import { applyMergedEntityInputs } from './machine/entity-inputs';
+import { applyEntityHeightDurabilityBarrier } from './machine/entity-height-barrier';
 import { classifyBilateralState, getAccountBarVisual } from './account/view-state';
 import { calculateSolvency, verifySolvency } from './account/solvency';
 import {
@@ -233,45 +317,80 @@ import {
 import { cloneEntityState, resolveEntityProposerId } from './state-helpers';
 import { getEntityShortId, formatEntityId } from './utils';
 import { safeStringify } from './protocol/serialization';
-import { computeCanonicalEntityHashesFromEnv, computeCanonicalStateHashFromEnv } from './storage/canonical-hash';
-import { encodeBuffer, writeBatch } from './storage/codec';
-import { docValueKey, liveKeyForDoc } from './storage/doc-refs';
-import { computeStorageFrameHash, prepareStorageStateHashes } from './storage/hashes';
+import {
+  canonicalizeStorageAuditValue,
+  computeCanonicalEntityHash,
+  computeCanonicalEntityHashesFromEnv,
+  computeCanonicalRuntimeStateHash,
+  computeCanonicalStateHashFromEnv,
+} from './storage/canonical-hash';
+import {
+  applyCertifiedEntityLineagePlan,
+  buildCertifiedEntityLineagePlan,
+} from './storage/entity-lineage';
+import {
+  assertCertifiedRegistrationEvidenceStore,
+  copyLocalJAuthorityRuntimeTxAuthorization,
+} from './jurisdiction/registration-evidence';
+import {
+  copyLocalJImportResultRuntimeTxAuthorization,
+  materializePendingJurisdictionImportResults,
+} from './machine/jurisdiction-import';
 import {
   computeStorageStateRoot,
   findStorageLatestSnapshotAtOrBelow,
+  hydrateAccountJClaimRootNodesFromStorage,
+  hydrateCertifiedBoardRootNodesFromStorage,
+  hydrateConsumptionRootNodesFromStorage,
   inspectStorage,
   listStorageSnapshotEntityIds,
   listStorageSnapshotHeights,
+  listStorageSnapshotReplicaMetas,
   listStorageReplicaMetas,
   loadEntityAccountDocFromStorage,
   loadEntityStateFromStorage,
+  loadEntityStatesAtHeightFromStorage,
   loadEntityViewPageFromStorage,
   readFrameDbAccountFrames,
   readFrameDbRuntimeActivity,
   readStorageFrameRecord,
   readStorageHead,
   readStorageOverlayRecordsFromDiffs,
+  replaceRestoredStorageBase,
   saveRuntimeFrameToStorage,
   type StorageHead,
+  verifyStorageSnapshotAtHeight,
 } from './storage';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
   DEFAULT_EPOCH_MAX_BYTES,
   DEFAULT_RETAIN_SNAPSHOTS,
   DEFAULT_SNAPSHOT_PERIOD_FRAMES,
-  keyLiveReplicaMeta,
-  KEY_HEAD,
-  keyFrame,
-  ZERO_FRAME_HASH,
   STORAGE_SCHEMA_VERSION,
 } from './storage/keys';
-import { createSnapshot } from './storage/lifecycle';
-import { projectAccountDoc, projectEntityCoreDoc, projectReplicaMeta } from './storage/projections';
+import {
+  hydrateEntityStateFromStorage,
+  projectAccountDoc,
+  projectEntityCoreDoc,
+} from './storage/projections';
+import { buildStorageReplicaMetaCommitment } from './storage/replicas';
 import { assertStorageSafetyOverridesAllowed } from './storage/safety';
 import { storageOverlayRecordKey } from './storage/overlay';
-import type { StorageDoc, StorageFrameRecord } from './storage/types';
+import type { StorageDoc, StoragePersistenceBoundaryHook } from './storage/types';
 import type { RuntimeAdapterReadQuery } from './radapter';
+import {
+  assertCertifiedJHistoryIntegrity,
+  assertValidatorJHistoryMatchesCertifiedAnchor,
+  assertValidatorJHistoryIntegrity,
+} from './jurisdiction/local-history';
+import {
+  entityRequiresJPrefixCertificate,
+  getLocalJPrefixAttestableHeight,
+  hasCurrentRoundJPrefixAttestation,
+  hasPendingLocalJEvent,
+  isFrozenBaseJPrefixRollAuthorized,
+  restoreJPrefixRound,
+} from './jurisdiction/j-prefix-consensus';
 export {
   resolveRuntimeAdapterRead,
   EmbeddedRuntimeAdapter,
@@ -294,13 +413,16 @@ import {
 import type {
   AccountFrame,
   EntityInput,
+  EntityReplica,
   EntityState,
   EntityTx,
   Env,
   FrameLogEntry,
   JInput,
   JReplica,
+  ReliableDeliveryReceipt,
   RoutedEntityInput,
+  RuntimeFrameIngressBuffer,
   RuntimeOverlayRecord,
   RuntimeInput,
   RuntimeTx,
@@ -322,12 +444,18 @@ import type { PersistedFrameJournal } from './wal/store';
 import {
   buildRuntimeActivityEvents,
   dedupeRuntimeActivityEvents,
+  type PersistedActivityJournal,
   type RuntimeActivityEvent,
   type RuntimeActivityFilters,
 } from './api/activity-history';
-import { validateRuntimeRecoveryBundle as validateRecoveryBundle } from './recovery/bundle';
+import { assertRuntimeRecoveryBundleAuthenticity } from './recovery/bundle';
 import type { RuntimeRecoveryBundleV1 } from './recovery/types';
-import { rehydrateRestoredRuntimeInfra } from './machine/infra';
+import {
+  ensureLiveJAdapterForReplica,
+  rehydrateRestoredRuntimeInfra,
+  type TrustedJurisdictionRpcBinding,
+} from './machine/infra';
+import { findWatcherJurisdictionReplica } from './jadapter/helpers';
 import {
   clearInfraGossipProfiles,
   loadGossipProfilesFromInfraDb,
@@ -349,6 +477,7 @@ import {
   tryOpenDb as tryOpenDbStorage,
   tryOpenFrameDb as tryOpenFrameDbStorage,
   tryOpenStorageDb as tryOpenStorageDbStorage,
+  withStorageConsistentRead,
   withStorageWriterLock,
   type RuntimeStorageDbDeps,
   type StorageDbRole,
@@ -407,10 +536,12 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
       stopLoop: null,
       wakeLoop: null,
       wakeRequested: false,
+      inFlightEntityInputs: 0,
       p2p: null,
       pendingP2PConfig: null,
       lastP2PConfig: null,
       directEntityInputDispatch: null,
+      directReliableReceiptDispatch: null,
       canUseConnectedRelayFallback: null,
       recoveryBackupBarrier: null,
     };
@@ -458,26 +589,42 @@ export const tryOpenDb = (env: Env): Promise<boolean> =>
 export const tryOpenFrameDb = (env: Env): Promise<boolean> =>
   tryOpenFrameDbStorage(env, getRuntimeStorageDbDeps());
 
-export const closeRuntimeDb = async (env: Env): Promise<void> => {
-  stopJurisdictionWatchers(env);
-  const stopped = await stopRuntimeLoopAndWait(env, 10_000);
-  if (!stopped) {
-    runtimeLog.warn('db.close.loop_drain_timeout');
-  }
-  detachRuntimeEnv(env);
-  await closeStorageDb(env, 'current');
-  await closeStorageDb(env, 'previous');
-  await closeFrameDb(env);
+const throwSettledErrors = (results: PromiseSettledResult<unknown>[], code: string): void => {
+  const errors = results
+    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+    .map(result => result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) throw new AggregateError(errors, code);
+};
+
+const closeLegacyRuntimeDb = async (env: Env): Promise<void> => {
   const state = env.runtimeState;
-  if (!state?.db) return;
-  try {
-    await state.db.close();
-  } catch (error) {
-    runtimeLog.warn('db.close.failed', { error: error instanceof Error ? error.message : String(error) });
-  } finally {
+  const db = state?.db;
+  if (!state || !db) return;
+  await db.close();
+  if (state.db === db) {
     state.db = null;
     state.dbOpenPromise = null;
   }
+};
+
+export const closeRuntimeDb = async (env: Env): Promise<void> => {
+  await stopJurisdictionWatchersAndWait(env);
+  const shutdown = await Promise.allSettled([
+    stopRuntimeLoopAndWait(env, 10_000).then((stopped) => {
+      if (!stopped) throw new Error('RUNTIME_DB_CLOSE_LOOP_DRAIN_TIMEOUT');
+    }),
+    stopP2PAndWait(env, 10_000),
+  ]);
+  throwSettledErrors(shutdown, 'RUNTIME_DB_CLOSE_QUIESCE_FAILED');
+  detachRuntimeEnv(env);
+  const closed = await Promise.allSettled([
+    closeStorageDb(env, 'current'),
+    closeStorageDb(env, 'previous'),
+    closeFrameDb(env),
+    closeLegacyRuntimeDb(env),
+  ]);
+  throwSettledErrors(closed, 'RUNTIME_DB_CLOSE_FAILED');
 };
 
 export const closeInfraDb = async (env: Env): Promise<void> => {
@@ -597,9 +744,38 @@ const enqueueRuntimeInputs = (
   runtimeTxs?: RuntimeTx[],
   jInputs?: JInput[],
   explicitTimestamp?: number,
+  reliableReceipts?: ReliableDeliveryReceipt[],
+  options: RuntimeInputQueueOptions = {},
 ): void => {
-  enqueueRuntimeInputsWithDeps(env, getRuntimeInputQueueDeps(), inputs, runtimeTxs, jInputs, explicitTimestamp);
+  enqueueRuntimeInputsWithDeps(
+    env,
+    getRuntimeInputQueueDeps(),
+    inputs,
+    runtimeTxs,
+    jInputs,
+    explicitTimestamp,
+    reliableReceipts,
+    options,
+  );
 };
+
+/** Queue only deterministic work derived from an already-accepted transition. */
+const enqueueRuntimeContinuation = (
+  env: Env,
+  inputs?: EntityInput[],
+  runtimeTxs?: RuntimeTx[],
+  jInputs?: JInput[],
+  explicitTimestamp?: number,
+  reliableReceipts?: ReliableDeliveryReceipt[],
+): void => enqueueRuntimeInputs(
+  env,
+  inputs,
+  runtimeTxs,
+  jInputs,
+  explicitTimestamp,
+  reliableReceipts,
+  { acceptedBeforeQuiesce: true },
+);
 
 function getRuntimeInputQueueDeps(): RuntimeInputQueueDeps {
   return {
@@ -666,20 +842,27 @@ export const enqueueRuntimeInput = (env: Env, runtimeInput: RuntimeInput): void 
     runtimeInput.runtimeTxs,
     runtimeInput.jInputs,
     ingressTimestamp,
+    runtimeInput.reliableReceipts,
   );
 };
 
 export const hasRuntimeWork = (env: Env): boolean => {
   const mempool = ensureRuntimeMempool(env);
+  if ((env.runtimeState?.pendingCommittedJOutbox?.length ?? 0) > 0) return true;
+  if ((env.runtimeState?.pendingJurisdictionImports?.size ?? 0) > 0) return true;
   if (mempool.runtimeTxs.length > 0 || mempool.entityInputs.length > 0) return true;
   if ((mempool.jInputs?.length ?? 0) > 0) return true;
+  if ((mempool.reliableReceipts?.length ?? 0) > 0) return true;
   if ((mempool.queuedAt ?? 0) > (env.timestamp ?? 0)) return true;
   if (env.pendingOutputs && env.pendingOutputs.length > 0) return true;
   if (env.networkInbox && env.networkInbox.length > 0) return true;
   if (hasReadyPendingNetworkOutputs(env, getRuntimeOutputRoutingDeps(), getWallClockMs())) return true;
+  if (hasEntityMempoolWakeInput(env)) return true;
   if (hasAccountMempoolWakeInput(env)) return true;
-  // Check for due scheduled hooks (setTimeout-like entity pings)
-  if (hasDueEntityHooks(env)) return true;
+  // Quiesce drains work accepted before the ingress fence. Timers remain
+  // durable and fire after an explicit resume; materializing a newly-due hook
+  // while the loop is stopping makes repeated shutdown impossible.
+  if (!env.runtimeState?.persistenceQuiescing && hasDueEntityHooks(env)) return true;
   return false;
 };
 
@@ -692,7 +875,7 @@ const collectAccountMempoolWakeInputs = (env: Env): EntityInput[] => {
     const accounts = replica?.state?.accounts;
     if (!(accounts instanceof Map)) continue;
     const hasAccountMempool = Array.from(accounts.values()).some((account) =>
-      account.mempool.length > 0 && !account.pendingFrame
+      accountHasProposableMempool(account, replica.state)
     );
     if (!hasAccountMempool) continue;
     wakeInputs.push({ entityId, signerId, entityTxs: [] });
@@ -700,10 +883,54 @@ const collectAccountMempoolWakeInputs = (env: Env): EntityInput[] => {
   return wakeInputs;
 };
 
+const entityJPrefixReadyForWake = (replica: EntityReplica): boolean => {
+  const prefixNeeded = entityRequiresJPrefixCertificate(replica.state) ||
+    hasPendingLocalJEvent(replica.state, replica.jHistory);
+  if (!prefixNeeded || replica.jPrefixRound?.certificate) return true;
+  if (hasCurrentRoundJPrefixAttestation(replica)) return false;
+  return Boolean(
+    replica.jHistory &&
+    getLocalJPrefixAttestableHeight(replica.state, replica.jHistory) !== null,
+  );
+};
+
+const entityMempoolNeedsWake = (replica: EntityReplica): boolean =>
+  isEntityActiveLeader(replica) &&
+  entityJPrefixReadyForWake(replica) &&
+  (
+    replica.mempool.length > 0 ||
+    Boolean(
+      replica.jPrefixRound?.certificate &&
+      replica.jPrefixRound.certificate.selected.scannedThroughHeight > replica.state.lastFinalizedJHeight,
+    ) ||
+    isFrozenBaseJPrefixRollAuthorized(replica, replica.jPrefixRound?.certificate)
+  ) &&
+  !replica.proposal &&
+  !replica.lockedFrame;
+
+const collectEntityMempoolWakeInputs = (env: Env): EntityInput[] => {
+  const wakeInputs: EntityInput[] = [];
+  for (const replica of env.eReplicas?.values?.() ?? []) {
+    if (!entityMempoolNeedsWake(replica)) continue;
+    const entityId = String(replica.entityId || replica.state?.entityId || '').trim().toLowerCase();
+    const signerId = String(replica.signerId || '').trim().toLowerCase();
+    if (!entityId || !signerId) continue;
+    wakeInputs.push({ entityId, signerId, entityTxs: [] });
+  }
+  return wakeInputs;
+};
+
+const hasEntityMempoolWakeInput = (env: Env): boolean => {
+  for (const replica of env.eReplicas?.values?.() ?? []) {
+    if (entityMempoolNeedsWake(replica)) return true;
+  }
+  return false;
+};
+
 const hasAccountMempoolWakeInput = (env: Env): boolean => {
   for (const replica of env.eReplicas?.values?.() ?? []) {
     for (const account of replica.state?.accounts?.values?.() ?? []) {
-      if (account.mempool.length > 0 && !account.pendingFrame) return true;
+      if (accountHasProposableMempool(account, replica.state)) return true;
     }
   }
   return false;
@@ -723,7 +950,9 @@ const prioritizeJEventFrame = (
     const otherTxs = entityTxs.filter((tx) => tx?.type !== 'j_event');
     const hasNonTxPayload =
       !!input.proposedFrame ||
-      (!!input.hashPrecommits && input.hashPrecommits.size > 0);
+      (!!input.hashPrecommits && input.hashPrecommits.size > 0) ||
+      (!!input.jPrefixAttestations && input.jPrefixAttestations.size > 0) ||
+      !!input.leaderTimeoutVote;
 
     if (jEventTxs.length > 0) {
       priorityInputs.push({ ...input, entityTxs: jEventTxs });
@@ -767,7 +996,12 @@ const applyEntityInputFrameCap = (
 };
 
 const entityInputHasNonTxPayload = (input: EntityInput): boolean =>
-  Boolean(input.proposedFrame || (input.hashPrecommits && input.hashPrecommits.size > 0));
+  Boolean(
+    input.proposedFrame ||
+    (input.hashPrecommits && input.hashPrecommits.size > 0) ||
+    (input.jPrefixAttestations && input.jPrefixAttestations.size > 0) ||
+    input.leaderTimeoutVote,
+  );
 
 const applyEntityTxFrameCap = (
   runtimeInput: RuntimeInput,
@@ -860,6 +1094,9 @@ const getNextWallClockWakeTimestamp = (env: Env): number | null => {
 };
 
 const generateHookPings = (env: Env, nowMs = getRuntimeNowMs(env), queuedAt = env.timestamp ?? 0): void => {
+  // Quiesce drains only work accepted before its ingress fence. Scheduled
+  // hooks remain durable for resume and must not extend the shutdown drain.
+  if (env.runtimeState?.persistenceQuiescing) return;
   generateRuntimeHookPings(env, getRuntimeWakeDeps(), nowMs, queuedAt);
 };
 
@@ -925,7 +1162,8 @@ const getRuntimeInputErrorMessage = (error: unknown): string =>
 const runtimeInputHasWork = (runtimeInput: RuntimeInput): boolean =>
   runtimeInput.runtimeTxs.length > 0 ||
   runtimeInput.entityInputs.length > 0 ||
-  (runtimeInput.jInputs?.length ?? 0) > 0;
+  (runtimeInput.jInputs?.length ?? 0) > 0 ||
+  (runtimeInput.reliableReceipts?.length ?? 0) > 0;
 
 const getRuntimeInputQuarantineReason = (message: string): string | null =>
   QUARANTINABLE_RUNTIME_INPUT_ERROR_MARKERS.find(marker => message.includes(marker)) ?? null;
@@ -1155,6 +1393,23 @@ export function startRuntimeLoop(env: Env, config?: RuntimeLoopConfig): () => vo
   return state.stopLoop;
 }
 
+const waitForPromiseBeforeTimeout = <T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<boolean> => new Promise((resolve, reject) => {
+  const timer = setTimeout(() => resolve(false), Math.max(0, timeoutMs));
+  promise.then(
+    () => {
+      clearTimeout(timer);
+      resolve(true);
+    },
+    (error) => {
+      clearTimeout(timer);
+      reject(error);
+    },
+  );
+});
+
 export const stopRuntimeLoopAndWait = async (env: Env, timeoutMs = 10_000): Promise<boolean> => {
   const state = env.runtimeState;
   if (state && inferRuntimeLifecyclePhase(state) !== 'halted') {
@@ -1164,10 +1419,7 @@ export const stopRuntimeLoopAndWait = async (env: Env, timeoutMs = 10_000): Prom
   const startedAt = Date.now();
   const loopPromise = state?.loopPromise ?? null;
   if (loopPromise) {
-    const loopDone = await Promise.race([
-      loopPromise.then(() => true, () => true),
-      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), Math.max(0, timeoutMs))),
-    ]);
+    const loopDone = await waitForPromiseBeforeTimeout(loopPromise, timeoutMs);
     if (!loopDone) return false;
   }
   const remaining = Math.max(0, timeoutMs - (Date.now() - startedAt));
@@ -1188,10 +1440,36 @@ export const resumeRuntimeLoop = (env: Env, config?: RuntimeLoopConfig): (() => 
   return startRuntimeLoop(env, config);
 };
 
+/**
+ * Resume a runtime that was fully drained and persistence-fenced for a wallet
+ * switch. The persistence fence must be removed before the loop can accept new
+ * work; otherwise process() advances memory while saveRuntimeFrameToStorage()
+ * intentionally skips the durable write.
+ */
+export const resumeRuntimeAfterPersistenceQuiesce = (
+  env: Env,
+  config?: RuntimeLoopConfig,
+): (() => void) => {
+  const state = ensureRuntimeState(env);
+  const phase = inferRuntimeLifecyclePhase(state);
+  if (phase === 'halted') throw new Error('RUNTIME_RESUME_HALTED');
+  if (phase === 'running' && (state.persistencePaused || state.persistenceQuiescing)) {
+    throw new Error('RUNTIME_DURABLE_RESUME_RUNNING_WITH_PERSISTENCE_FENCE');
+  }
+  if (phase === 'running') return state.stopLoop ?? (() => {});
+  if (state.processingPromise || state.loopPromise) {
+    throw new Error('RUNTIME_DURABLE_RESUME_BEFORE_QUIESCE_DRAINED');
+  }
+  state.persistencePaused = false;
+  state.persistenceQuiescing = false;
+  return resumeRuntimeLoop(env, config);
+};
+
 export const waitForRuntimeWorkDrained = async (
   env: Env,
   timeoutMs = 10_000,
   quietMs = 250,
+  options: { allowPersistencePaused?: boolean } = {},
 ): Promise<boolean> => {
   const startedAt = Date.now();
   let idleSince: number | null = null;
@@ -1220,12 +1498,36 @@ export const waitForRuntimeWorkDrained = async (
     }
 
     idleSince = null;
+    const state = ensureRuntimeState(env);
+    if (state.persistencePaused && !options.allowPersistencePaused) {
+      throw new Error('RUNTIME_WORK_DRAIN_PERSISTENCE_PAUSED');
+    }
+    if (inferRuntimeLifecyclePhase(state) === 'halted') {
+      throw new Error('RUNTIME_WORK_DRAIN_HALTED');
+    }
+    if (!state.loopPromise && !state.processingPromise) {
+      const remainingDelayMs = getRemainingRuntimeFrameDelayMs(env);
+      if (remainingDelayMs > 0) {
+        await sleep(Math.min(remaining, remainingDelayMs, 25));
+        continue;
+      }
+      // An inactive runtime can still contain work accepted before the
+      // persistence fence (for example, a J observation queued immediately
+      // before a wallet switch). Drain it through the one canonical runtime
+      // transition instead of dropping it or resurrecting external ingress.
+      await process(env);
+      continue;
+    }
     requestRuntimeLoopWake(env);
     await sleep(10);
   }
 };
 
 export const startJurisdictionWatchers = (env: Env): void => {
+  // Quiesce closes ingress before it drains accepted work. The still-running
+  // runtime loop may reach this function once more while draining; it must not
+  // resurrect a watcher that quiesce has already stopped.
+  if (env.runtimeState?.persistenceQuiescing) return;
   if (!env.jReplicas || env.jReplicas.size === 0) return;
   const watcherOwners = new Map<string, JAdapter>();
   const providerUrlOf = (adapter: JAdapter, replica: JReplica): string => {
@@ -1284,11 +1586,39 @@ export const stopJurisdictionWatchers = (env: Env): void => {
   }
 };
 
+export const stopJurisdictionWatchersAndWait = async (env: Env): Promise<void> => {
+  if (!env.jReplicas || env.jReplicas.size === 0) return;
+  const adapters = new Map<JAdapter, string[]>();
+  for (const [name, jReplica] of env.jReplicas.entries()) {
+    const adapter = jReplica.jadapter;
+    if (!adapter) continue;
+    const names = adapters.get(adapter) ?? [];
+    names.push(name);
+    adapters.set(adapter, names);
+  }
+
+  const stops = Array.from(adapters, ([adapter, names]) => {
+    const wrapFailure = (error: unknown): Error =>
+      new Error(
+        `JADAPTER_WATCHER_DRAIN_FAILED:${names.join(',')}:${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    try {
+      return adapter.stopWatchingAndWait().catch((error: unknown) => {
+        throw wrapFailure(error);
+      });
+    } catch (error) {
+      return Promise.reject(wrapFailure(error));
+    }
+  });
+  const settled = await Promise.allSettled(stops);
+  throwSettledErrors(settled, 'JADAPTER_WATCHER_DRAIN_FAILED');
+};
+
 const detachRuntimeEnv = (env: Env): void => {
   const state = env.runtimeState;
   stopJurisdictionWatchers(env);
   state?.stopLoop?.();
-  detachRuntimeP2P(env, getRuntimeP2PLifecycleDeps());
   if (state) {
     try {
       state.runtimeSyncChannel?.close();
@@ -1366,13 +1696,210 @@ export const registerEntityRuntimeHint = (env: Env, entityId: string, runtimeId:
   registerEntityRuntimeHintForRouting(env, entityId, runtimeId, getRuntimeEntityRoutingDeps());
 };
 
+export const MAX_RUNTIME_FRAME_INGRESS_ENTRIES = 1_024;
+export const MAX_RUNTIME_FRAME_INGRESS_BYTES = 4 * 1024 * 1024;
+
+type AccountedRuntimeFrameIngressBuffer = RuntimeFrameIngressBuffer & { byteLength: number };
+type RuntimeFrameIngressEntry = RuntimeFrameIngressBuffer['entries'][number];
+
+const beginRuntimeFrameIngressBuffer = (env: Env): AccountedRuntimeFrameIngressBuffer => {
+  const state = ensureRuntimeState(env);
+  if (state.runtimeFrameIngressBuffer) {
+    throw new Error(
+      `RUNTIME_FRAME_INGRESS_BUFFER_ALREADY_ACTIVE:${state.runtimeFrameIngressBuffer.status}`,
+    );
+  }
+  const buffer: AccountedRuntimeFrameIngressBuffer = {
+    status: 'active',
+    entries: [],
+    byteLength: 0,
+  };
+  state.runtimeFrameIngressBuffer = buffer;
+  return buffer;
+};
+
+const getRuntimeFrameIngressBuffer = (env: Env): AccountedRuntimeFrameIngressBuffer | undefined => {
+  const buffer = env.runtimeState?.runtimeFrameIngressBuffer;
+  if (buffer && buffer.status !== 'active') {
+    throw new Error(`RUNTIME_FRAME_INGRESS_BUFFER_INVALID_LIFECYCLE:${buffer.status}`);
+  }
+  if (!buffer) return undefined;
+  const accounted = buffer as AccountedRuntimeFrameIngressBuffer;
+  if (!Number.isSafeInteger(accounted.byteLength) || accounted.byteLength < 0) {
+    throw new Error(
+      `RUNTIME_FRAME_INGRESS_BUFFER_BYTE_LENGTH_INVALID:${String(accounted.byteLength)}`,
+    );
+  }
+  return accounted;
+};
+
+const appendRuntimeFrameIngress = (
+  buffer: AccountedRuntimeFrameIngressBuffer,
+  entry: RuntimeFrameIngressEntry,
+): void => {
+  const currentCount = buffer.entries.length;
+  if (currentCount >= MAX_RUNTIME_FRAME_INGRESS_ENTRIES) {
+    throw new Error(
+      `RUNTIME_FRAME_INGRESS_CAPACITY_EXCEEDED:dimension=count:` +
+        `current=${currentCount}:incoming=1:max=${MAX_RUNTIME_FRAME_INGRESS_ENTRIES}`,
+    );
+  }
+  const incomingBytes = new TextEncoder().encode(safeStringify(entry)).byteLength;
+  if (
+    incomingBytes > MAX_RUNTIME_FRAME_INGRESS_BYTES ||
+    buffer.byteLength > MAX_RUNTIME_FRAME_INGRESS_BYTES - incomingBytes
+  ) {
+    throw new Error(
+      `RUNTIME_FRAME_INGRESS_CAPACITY_EXCEEDED:dimension=bytes:` +
+        `current=${buffer.byteLength}:incoming=${incomingBytes}:max=${MAX_RUNTIME_FRAME_INGRESS_BYTES}`,
+    );
+  }
+  const cloned = structuredClone(entry);
+  buffer.entries.push(cloned);
+  buffer.byteLength += incomingBytes;
+};
+
 export const handleInboundP2PEntityInput = (
   env: Env,
   from: string,
   input: RoutedEntityInput,
   ingressTimestamp?: number,
+) => {
+  const deps = getRuntimeEntityRoutingDeps();
+  const buffered = getRuntimeFrameIngressBuffer(env);
+  if (!buffered) return routeInboundP2PEntityInput(env, from, input, deps, ingressTimestamp);
+  const validation = validateInboundP2PEntityInput(env, from, input, deps);
+  if (validation.kind === 'ignored') return validation;
+  appendRuntimeFrameIngress(buffered, {
+    kind: 'entity',
+    from,
+    input,
+    ...(ingressTimestamp === undefined ? {} : { ingressTimestamp }),
+  });
+  return { kind: 'queued' } as const;
+};
+
+export const handleInboundReliableReceipt = (
+  env: Env,
+  from: string,
+  receipt: ReliableDeliveryReceipt,
+  options: RuntimeInboundEntityInputOptions = {},
+): 'queued' | 'duplicate' | 'deferred' => {
+  const sourceRuntimeId = normalizeRuntimeId(from);
+  if (!sourceRuntimeId || sourceRuntimeId !== receipt?.body?.receiverRuntimeId) {
+    throw new Error('RELIABLE_RECEIPT_TRANSPORT_SOURCE_MISMATCH');
+  }
+  if (
+    env.runtimeState?.persistenceQuiescing &&
+    !env.scenarioMode &&
+    options.acceptedBeforeQuiesce !== true
+  ) {
+    // This is a normal persistence boundary, not malformed peer input. The
+    // original reliable output remains pending and will recreate this exact
+    // signed receipt on retry, so rejecting it as a transport error only
+    // creates false browser noise (and a useless debug-event/error loop).
+    env.info('network', 'RELIABLE_RECEIPT_DEFERRED_QUIESCING', {
+      sourceRuntimeId,
+      receiverRuntimeId: receipt.body.receiverRuntimeId,
+      identity: receipt.body.identity,
+    });
+    return 'deferred';
+  }
+  if (registerReliableReceiptIngress(env, receipt) === 'duplicate') return 'duplicate';
+  const buffered = getRuntimeFrameIngressBuffer(env);
+  if (buffered) {
+    appendRuntimeFrameIngress(buffered, { kind: 'receipt', from, receipt });
+    return 'queued';
+  }
+  enqueueRuntimeInputs(
+    env,
+    undefined,
+    undefined,
+    undefined,
+    env.timestamp,
+    [receipt],
+    options,
+  );
+  return 'queued';
+};
+
+const dispatchRuntimeReliableReceipt = (
+  env: Env,
+  runtimeId: string,
+  receipt: ReliableDeliveryReceipt,
 ): void => {
-  routeInboundP2PEntityInput(env, from, input, getRuntimeEntityRoutingDeps(), ingressTimestamp);
+  const state = ensureRuntimeState(env);
+  const directResult = state.directReliableReceiptDispatch?.(runtimeId, receipt);
+  const result = directResult && isDeliveryDelivered(directResult)
+    ? directResult
+    : getP2P(env)?.enqueueReliableReceiptDelivery(runtimeId, receipt) ?? directResult;
+  if (!result || !isDeliveryDelivered(result)) {
+    env.warn('network', 'RELIABLE_RECEIPT_SEND_DEFERRED', {
+      targetRuntimeId: runtimeId,
+      delivery: result ?? null,
+    });
+  }
+};
+
+export const describeRuntimeFrameIngressErrors = (errors: readonly Error[]): string =>
+  errors
+    .map((error, index) => `${index + 1}/${errors.length}:${error.name}:${error.message}`)
+    .join('|');
+
+const drainRuntimeFrameIngressBuffer = (transaction: RuntimeFrameTransaction): void => {
+  const env = transaction.liveEnv;
+  const state = ensureRuntimeState(env);
+  const buffered = transaction.ingressBuffer;
+  if (state.runtimeFrameIngressBuffer !== buffered) {
+    throw new Error('RUNTIME_FRAME_INGRESS_BUFFER_OWNERSHIP_MISMATCH');
+  }
+  if (buffered.status !== 'active') {
+    throw new Error(`RUNTIME_FRAME_INGRESS_BUFFER_INVALID_DRAIN:${buffered.status}`);
+  }
+  buffered.status = 'draining';
+  delete state.runtimeFrameIngressBuffer;
+  const entries = buffered.entries;
+  buffered.entries = [];
+  (buffered as AccountedRuntimeFrameIngressBuffer).byteLength = 0;
+  const deps = getRuntimeEntityRoutingDeps();
+  const errors: Error[] = [];
+  try {
+    for (const ingress of entries) {
+      try {
+        if (ingress.kind === 'receipt') {
+          handleInboundReliableReceipt(
+            env,
+            ingress.from,
+            ingress.receipt,
+            { acceptedBeforeQuiesce: true },
+          );
+          continue;
+        }
+        const result = routeInboundP2PEntityInput(
+          env,
+          ingress.from,
+          ingress.input,
+          deps,
+          ingress.ingressTimestamp,
+          { acceptedBeforeQuiesce: true },
+        );
+        if (result.kind === 'receipt') {
+          dispatchRuntimeReliableReceipt(env, ingress.from, result.receipt);
+        }
+      } catch (error) {
+        errors.push(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
+  } finally {
+    buffered.status = 'closed';
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) {
+    throw new AggregateError(
+      errors,
+      `RUNTIME_FRAME_INGRESS_DRAIN_FAILED:${describeRuntimeFrameIngressErrors(errors)}`,
+    );
+  }
 };
 
 const getRuntimeNowMs = (env: Env): number => env.timestamp ?? 0;
@@ -1436,11 +1963,21 @@ export const validateRuntimeInputAdmission = (env: Env, runtimeInput: RuntimeInp
   if (!Array.isArray(runtimeInput.entityInputs)) {
     throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: Invalid entityInputs: expected array, got ${typeof runtimeInput.entityInputs}`);
   }
+  if (runtimeInput.reliableReceipts !== undefined && !Array.isArray(runtimeInput.reliableReceipts)) {
+    throw new Error(
+      `RUNTIME_INPUT_ADMISSION_REJECTED: Invalid reliableReceipts: expected array, got ${typeof runtimeInput.reliableReceipts}`,
+    );
+  }
   if (runtimeInput.runtimeTxs.length > 1000) {
     throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: Too many runtime transactions: ${runtimeInput.runtimeTxs.length} > 1000`);
   }
   if (runtimeInput.entityInputs.length > 10000) {
     throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: Too many entity inputs: ${runtimeInput.entityInputs.length} > 10000`);
+  }
+  if ((runtimeInput.reliableReceipts?.length ?? 0) > 10000) {
+    throw new Error(
+      `RUNTIME_INPUT_ADMISSION_REJECTED: Too many reliable receipts: ${runtimeInput.reliableReceipts!.length} > 10000`,
+    );
   }
   const pendingNetworkOutputs = env.pendingNetworkOutputs?.length ?? 0;
   const hasNewLocalFinancialCommand = runtimeInputRequiresOutboxCapacity(runtimeInput.entityInputs);
@@ -1501,7 +2038,16 @@ export const validateRuntimeInputAdmission = (env: Env, runtimeInput: RuntimeInp
 function getRuntimeEntityRoutingDeps(): RuntimeEntityRoutingDeps {
   return {
     ensureRuntimeState,
-    enqueueRuntimeInputs,
+    enqueueRuntimeInputs: (env, inputs, runtimeTxs, jInputs, ingressTimestamp, options) =>
+      enqueueRuntimeInputs(
+        env,
+        inputs,
+        runtimeTxs,
+        jInputs,
+        ingressTimestamp,
+        undefined,
+        options,
+      ),
     extractEntityId,
     hasLocalSignerForEntity,
     hasLocalSignerForEntitySigner,
@@ -1518,7 +2064,9 @@ function getRuntimeP2PLifecycleDeps(): RuntimeP2PLifecycleDeps {
   return {
     ensureRuntimeState,
     notifyEnvChange,
+    enqueueRuntimeInputs: (env, inputs) => enqueueRuntimeInputs(env, inputs),
     handleInboundP2PEntityInput,
+    handleInboundReliableReceipt,
   };
 }
 
@@ -1535,6 +2083,9 @@ export const startP2P = (env: Env, config: P2PConfig = {}) =>
 export const stopP2P = (env: Env): void =>
   stopRuntimeP2P(env, getRuntimeP2PLifecycleDeps());
 
+export const stopP2PAndWait = (env: Env, timeoutMs?: number): Promise<void> =>
+  stopRuntimeP2PAndWait(env, getRuntimeP2PLifecycleDeps(), timeoutMs);
+
 export const getP2P = (env: Env) =>
   getRuntimeP2P(env, getRuntimeP2PLifecycleDeps());
 
@@ -1547,12 +2098,25 @@ export const refreshGossip = (env: Env): void =>
 export const ensureGossipProfiles = async (env: Env, entityIds: string[]): Promise<boolean> =>
   ensureRuntimeGossipProfiles(env, getRuntimeP2PLifecycleDeps(), entityIds);
 
-export const clearGossip = (env: Env): void => {
-  if (!env.gossip?.profiles) return;
-  env.gossip.profiles.clear();
-  void clearInfraGossipProfiles(env, infraGossipDbAccess).catch((error) => {
-    runtimeLog.warn('infra_db.gossip_clear_failed', { error: error instanceof Error ? error.message : String(error) });
-  });
+export const clearGossip = async (
+  env: Env,
+  options: { runtimeId?: string } = {},
+): Promise<void> => {
+  // Restoring infra gossip announces every loaded profile and queues its
+  // LevelDB write. Drain those puts before deleting the relocated route or a
+  // late put can resurrect the old signed endpoint after the clear completes.
+  await drainInfraDbWrites(env);
+  await clearInfraGossipProfiles(env, infraGossipDbAccess, options);
+  const targetRuntimeId = String(options.runtimeId || '').trim().toLowerCase();
+  if (!targetRuntimeId) {
+    env.gossip?.profiles?.clear();
+  } else {
+    for (const [entityId, profile] of env.gossip?.profiles ?? []) {
+      if (String(profile.runtimeId || '').trim().toLowerCase() === targetRuntimeId) {
+        env.gossip.profiles.delete(entityId);
+      }
+    }
+  }
   notifyEnvChange(env);
 };
 
@@ -1601,6 +2165,7 @@ const applyRuntimeInput = async (
   mergedInputs: RoutedEntityInput[];
   jOutbox: JInput[];
   appliedRuntimeInput: RuntimeInput;
+  reliableIngressCommits: ReliableIngressCommit[];
 }> => {
   failfastAssert(
     env.scenarioMode === true || envRecord(env)[ENV_APPLY_ALLOWED_KEY] === true,
@@ -1636,6 +2201,11 @@ const applyRuntimeInput = async (
     if (!Array.isArray(runtimeInput.entityInputs)) {
       rejectRuntimeInput(`Invalid entityInputs: expected array, got ${typeof runtimeInput.entityInputs}`);
     }
+    if (runtimeInput.reliableReceipts !== undefined && !Array.isArray(runtimeInput.reliableReceipts)) {
+      rejectRuntimeInput(
+        `Invalid reliableReceipts: expected array, got ${typeof runtimeInput.reliableReceipts}`,
+      );
+    }
 
     // Collect incoming J-inputs into early jOutbox (will be merged with handler jOutputs later)
     // These are NOT pushed to jReplica.mempool — they go to jOutbox → JAdapter post-save
@@ -1667,6 +2237,11 @@ const applyRuntimeInput = async (
     if (runtimeInput.entityInputs.length > 10000) {
       rejectRuntimeInput(`Too many entity inputs: ${runtimeInput.entityInputs.length} > 10000`);
     }
+    if ((runtimeInput.reliableReceipts?.length ?? 0) > 10000) {
+      rejectRuntimeInput(
+        `Too many reliable receipts: ${runtimeInput.reliableReceipts!.length} > 10000`,
+      );
+    }
 
     const validatedRuntimeTxs = [...runtimeInput.runtimeTxs];
     const validatedEntityInputs = runtimeInput.entityInputs.map((input, i) => {
@@ -1684,21 +2259,50 @@ const applyRuntimeInput = async (
     });
 
     const mergedRuntimeTxs = [...validatedRuntimeTxs];
-    const mergedInputs = mergeEntityInputs([...validatedEntityInputs]);
-
-    // RuntimeTxs are infra bootstrap commands. Keep the tick engine focused on
-    // ordering and persistence; the per-command details live in runtime-tx-handlers.
-    for (const runtimeTx of mergedRuntimeTxs) {
-      await applyRuntimeTx(env, runtimeTx, { onJurisdictionImported: startJurisdictionWatchers });
-    }
+    const mergedInputs = mergeEntityInputs(
+      [...validatedEntityInputs],
+      input => hasVerifiedEntityCommitPrecertificate(env, input),
+    );
 
     const isReplay = envRecord(env)[ENV_REPLAY_MODE_KEY] === true;
-    const { entityOutbox, appliedEntityInputs, jOutbox } = await applyMergedEntityInputs(
+    if (runtimeInput.reliableReceipts && runtimeInput.reliableReceipts.length > 0) {
+      applyReliableDeliveryReceipts(env, runtimeInput.reliableReceipts);
+    }
+    const runtimeTxJOutbox: JInput[] = [];
+    // RuntimeTxs are replayable R-machine commands. Most are local metadata
+    // transitions; retryJSubmit additionally materializes a sealed post-commit
+    // J side effect whose attempt record is persisted before external I/O.
+    for (const runtimeTx of mergedRuntimeTxs) {
+      runtimeTxJOutbox.push(...await applyRuntimeTx(env, runtimeTx, {
+        isReplay,
+      }));
+    }
+
+    // Seal every certified H0 anchor before an Entity input can advance that
+    // replica to H1. Storage is intentionally written from the post-state, so
+    // attempting to reconstruct the anchor only at commit time would have
+    // already lost the only authoritative H0 state. This also covers an entity
+    // imported and advanced in the same Runtime frame.
+    applyCertifiedEntityLineagePlan(env, buildCertifiedEntityLineagePlan(env));
+
+    const { entityOutbox, appliedEntityInputs, entityFrameCommitted, jOutbox } = await applyMergedEntityInputs(
       env,
       mergedInputs,
-      earlyJOutbox,
+      [...earlyJOutbox, ...runtimeTxJOutbox],
       { isReplay, routingDeps: getRuntimeEntityRoutingDeps() },
     );
+
+    // Reliable receiver authority is part of the R-machine post-state, not a
+    // transport side effect. Plan it before deciding whether this tick owns a
+    // WAL height. Otherwise a terminal receipt-only transition can ACK/GC an
+    // input while no replayable frame records the new frontier.
+    const reliableIngressCommits = commitReliableIngress(env, appliedEntityInputs);
+    applyCommittedLocalReliableReceipts(env, reliableIngressCommits);
+    releaseUncommittedReliableIngress(env, validatedEntityInputs, appliedEntityInputs);
+    // Releasing a rejected/deferred ingress mutates only the live transport
+    // waiter set. It is deliberately absent from snapshots and cannot own a
+    // WAL height. Durable active/terminal frontier commits remain replayable.
+    const reliableIngressStateChanged = reliableIngressCommits.length > 0;
 
     if (jOutbox.length > 0) {
       for (const jInput of jOutbox) {
@@ -1718,18 +2322,36 @@ const applyRuntimeInput = async (
       const hasEntityTxs = (input.entityTxs?.length || 0) > 0;
       const hasProposal = !!input.proposedFrame;
       const hasHashPrecommits = !!input.hashPrecommits && input.hashPrecommits.size > 0;
-      return count + (hasEntityTxs || hasProposal || hasHashPrecommits ? 1 : 0);
+      const hasJPrefixAttestations = !!input.jPrefixAttestations && input.jPrefixAttestations.size > 0;
+      const hasLeaderTimeoutVote = !!input.leaderTimeoutVote;
+      return count + (
+        hasEntityTxs || hasProposal || hasHashPrecommits || hasJPrefixAttestations || hasLeaderTimeoutVote ? 1 : 0
+      );
     }, 0);
-    const hasEntityInputs = meaningfulEntityInputCount > 0;
+    // A local empty tick may commit work already held in the Entity/Account
+    // mempools. Input shape cannot detect that transition. The authoritative
+    // signal is the validated Entity height advancing exactly H -> H+1.
+    const runtimeEntityInputCount = entityFrameCommitted
+      ? Math.max(meaningfulEntityInputCount, appliedEntityInputs.length)
+      : meaningfulEntityInputCount;
+    const hasEntityInputs = runtimeEntityInputCount > 0;
+    const hasReliableReceipts = (runtimeInput.reliableReceipts?.length ?? 0) > 0;
     const hasOutputs = entityOutbox.length > 0;
     const hasJOutputs = jOutbox.length > 0;
 
-    if (hasRuntimeTxs || hasEntityInputs || hasOutputs || hasJOutputs) {
+    if (
+      hasRuntimeTxs ||
+      hasEntityInputs ||
+      hasReliableReceipts ||
+      hasOutputs ||
+      hasJOutputs ||
+      reliableIngressStateChanged
+    ) {
       // Emit runtime tick event
       env.emit('RuntimeTick', {
         height: env.height + 1,
         runtimeTxs: mergedRuntimeTxs.length,
-        entityInputs: meaningfulEntityInputCount,
+        entityInputs: runtimeEntityInputCount,
         outputs: entityOutbox.length,
       });
 
@@ -1756,10 +2378,6 @@ const applyRuntimeInput = async (
       runtimeLog.info('gossip.recreated', { height: env.height });
     }
 
-    if (envRecord(env)[ENV_REPLAY_MODE_KEY] !== true) {
-      notifyEnvChange(env);
-    }
-
     const endTime = getPerfMs();
     const applyElapsedMs = Math.round(endTime - startTime);
     if (RUNTIME_APPLY_PROFILE || applyElapsedMs >= RUNTIME_APPLY_SLOW_MS) {
@@ -1784,16 +2402,26 @@ const applyRuntimeInput = async (
       runtimeTxs: mergedRuntimeTxs,
       entityInputs: appliedEntityInputs,
       ...(runtimeInput.jInputs && runtimeInput.jInputs.length > 0 ? { jInputs: runtimeInput.jInputs } : {}),
+      ...(runtimeInput.reliableReceipts && runtimeInput.reliableReceipts.length > 0
+        ? { reliableReceipts: runtimeInput.reliableReceipts }
+        : {}),
     };
-    return { entityOutbox, mergedInputs, jOutbox, appliedRuntimeInput };
+    return { entityOutbox, mergedInputs, jOutbox, appliedRuntimeInput, reliableIngressCommits };
   } catch (error) {
+    // Strict scenarios already surface the thrown value at their outer boundary.
+    // Logging directly to process stderr here would make the strict console trap throw a
+    // second Error and erase the original stack, hiding the actual failing reducer.
+    if (env.strictScenario) throw error;
     runtimeLog.error('apply_input.failed', { error: error instanceof Error ? error.message : String(error) });
     throw error; // Don't swallow - fail fast and loud
   }
 };
 
 // Runtime bootstrap
-const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
+const main = async (
+  runtimeSeedOverride?: string | null,
+  options?: { trustedJurisdictionRpcBindings?: readonly TrustedJurisdictionRpcBinding[] },
+): Promise<Env> => {
   const baseEnv = createEmptyEnv(runtimeSeedOverride ?? null);
 
   let env = baseEnv;
@@ -1803,7 +2431,11 @@ const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
     !!nodeProcess &&
     /^(1|true)$/i.test(String(nodeProcess.env['XLN_DISABLE_RUNTIME_RESTORE'] ?? ''));
   if (!restoreDisabled) {
-    const loaded = await loadEnvFromDB(baseEnv.runtimeId, baseEnv.runtimeSeed);
+    const loaded = await loadEnvFromDB(baseEnv.runtimeId, baseEnv.runtimeSeed, {
+      ...(options?.trustedJurisdictionRpcBindings
+        ? { trustedJurisdictionRpcBindings: options.trustedJurisdictionRpcBindings }
+        : {}),
+    });
     if (loaded) {
       const loadedState = ensureRuntimeState(loaded);
       const baseState = ensureRuntimeState(baseEnv);
@@ -1966,8 +2598,10 @@ export {
   getDefaultSwapTradingPairs,
   listOpenSwapOffers,
   computeSwapPriceTicks,
+  getSwapLotScale,
   prepareSwapOrder,
   quantizeSwapOrder,
+  requantizeRemainingSwapAtPrice,
   formatTokenAmount,
   createDemoDelta,
   getDefaultCreditLimit,
@@ -2060,6 +2694,17 @@ export type {
 // Runtime is a pure library - no auto-execution side effects.
 // Browser and server entrypoints call xln.main() explicitly.
 
+export const prewarmRuntimeSignerCache = (seedText: string, count = 20): string[] => {
+  try {
+    return prewarmSignerKeyCache(seedText, count);
+  } catch (error) {
+    runtimeLog.error('signer_cache.prewarm_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+};
+
 export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
   const normalizedSeed = Array.isArray(seed) ? new Uint8Array(seed) : seed;
   const seedText =
@@ -2143,11 +2788,7 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
   ensureRuntimeConfig(env);
   ensureRuntimeState(env);
   if (seedText) {
-    try {
-      prewarmSignerKeyCache(seedText, 20);
-    } catch (error) {
-      runtimeLog.warn('signer_cache.prewarm_failed', { error: error instanceof Error ? error.message : String(error) });
-    }
+    prewarmRuntimeSignerCache(seedText, 20);
   }
 
   return env;
@@ -2177,7 +2818,7 @@ export const restoreEnvFromCheckpointSnapshot = async (
     throw new Error('RECOVERY_CHECKPOINT_INVALID');
   }
 
-  const normalizedSnapshot = structuredClone(snapshot);
+  const normalizedSnapshot = cloneIsolatedRuntimeSnapshot(snapshot);
   normalizePersistedSnapshotInPlace(normalizedSnapshot, {
     normalizeReplicaMap: normalizeCheckpointReplicaMap,
     normalizeJReplicaMap: normalizeCheckpointReplicaMap,
@@ -2228,6 +2869,14 @@ export const restoreEnvFromCheckpointSnapshot = async (
   env.pendingNetworkOutputs = [];
   env.overlay = [];
   restoreDurableRuntimeSnapshot(env, normalizedSnapshot);
+  for (const replica of env.eReplicas.values()) {
+    assertCertifiedJHistoryIntegrity(replica.state);
+    assertValidatorJHistoryMatchesCertifiedAnchor(replica.state, replica.jHistory);
+  }
+  assertCertifiedBoardRootsAvailable(env);
+  assertConsumptionRootsAvailable(env);
+  assertAccountJClaimRootsAvailable(env);
+  await assertCertifiedRegistrationEvidenceStore(env);
 
   await rehydrateRestoredRuntimeInfra(env, {
     isBrowser: runtimeIsBrowser,
@@ -2235,11 +2884,52 @@ export const restoreEnvFromCheckpointSnapshot = async (
     assertPersistedContractConfigReady,
     setBrowserVMJurisdiction,
   });
+  registerCommittedSingleSignerWallets(env);
   for (const profile of snapshotGossipProfiles) {
     env.gossip?.announce?.(profile);
   }
 
   return env;
+};
+
+const RELIABLE_RECOVERY_STATE_KEYS = [
+  'reliableIngressReceiptLedger',
+  'reliableIngressTerminalWatermarks',
+  'receivedReliableReceiptLedger',
+  'receivedReliableTerminalWatermarks',
+] as const;
+
+const canonicalReliableRecoveryState = (machine: Record<string, unknown>): string => {
+  const rawState = machine['runtimeState'];
+  const runtimeState = rawState && typeof rawState === 'object'
+    ? rawState as Record<string, unknown>
+    : {};
+  const projection = Object.fromEntries(RELIABLE_RECOVERY_STATE_KEYS.map(key => [
+    key,
+    runtimeState[key] ?? new Map(),
+  ]));
+  return safeStringify(canonicalizeStorageAuditValue({
+    ...projection,
+    pendingNetworkOutputs: machine['pendingNetworkOutputs'] ?? [],
+  }));
+};
+
+const assertRecoveryReliableStateMatches = (
+  env: Env,
+  expectedMachine: Record<string, unknown>,
+  height: number,
+): void => {
+  const actualMachine = buildDurableRuntimeMachineSnapshot(env, {
+    pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
+  });
+  const actual = canonicalReliableRecoveryState(actualMachine);
+  const expected = canonicalReliableRecoveryState(expectedMachine);
+  if (actual !== expected) {
+    throw new Error(
+      `RECOVERY_JOURNAL_RELIABLE_STATE_MISMATCH:height=${height}:` +
+      `expected=${expected}:actual=${actual}`,
+    );
+  }
 };
 
 const replayRecoveryFrameJournals = async (
@@ -2255,11 +2945,43 @@ const replayRecoveryFrameJournals = async (
       if (frameHeight !== expectedHeight) {
         throw new Error(`RECOVERY_JOURNAL_REPLAY_GAP: expected=${expectedHeight} actual=${frameHeight}`);
       }
+      if (!frame.runtimeMachine || typeof frame.runtimeMachine !== 'object') {
+        throw new Error(`RECOVERY_JOURNAL_RUNTIME_MACHINE_MISSING:height=${frameHeight}`);
+      }
+      if (!frame.runtimeMachineBeforeApply || typeof frame.runtimeMachineBeforeApply !== 'object') {
+        throw new Error(`RECOVERY_JOURNAL_PRE_RUNTIME_MACHINE_MISSING:height=${frameHeight}`);
+      }
+      if (!/^0x[0-9a-f]{64}$/i.test(String(frame.runtimeStateHash ?? ''))) {
+        throw new Error(`RECOVERY_JOURNAL_STATE_HASH_MISSING:height=${frameHeight}`);
+      }
+      if (!/^0x[0-9a-f]{64}$/i.test(String(frame.replicaMetaDigest ?? ''))) {
+        throw new Error(`RECOVERY_JOURNAL_REPLICA_META_DIGEST_MISSING:height=${frameHeight}`);
+      }
+      restoreDurableRuntimeSnapshot(env, frame.runtimeMachineBeforeApply);
       env.timestamp = Math.max(0, Math.floor(Number(frame.timestamp || 0)));
       envRecord(env)[ENV_APPLY_ALLOWED_KEY] = true;
       try {
-        await applyRuntimeInput(env, frame.runtimeInput ?? { runtimeTxs: [], entityInputs: [] });
-        env.pendingNetworkOutputs = structuredClone(frame.runtimeOutputs ?? []);
+        const replayResult = await applyRuntimeInput(
+          env,
+          frame.runtimeInput ?? { runtimeTxs: [], entityInputs: [] },
+        );
+        finalizeReliableIngressCommit(env, replayResult.reliableIngressCommits);
+        const actualReplicaMetaDigest = buildStorageReplicaMetaCommitment(env).digest;
+        if (actualReplicaMetaDigest !== frame.replicaMetaDigest) {
+          throw new Error(
+            `RECOVERY_JOURNAL_REPLICA_META_DIGEST_MISMATCH:height=${frameHeight}:` +
+            `expected=${frame.replicaMetaDigest}:actual=${actualReplicaMetaDigest}`,
+          );
+        }
+        assertRecoveryReliableStateMatches(env, frame.runtimeMachine, frameHeight);
+        restoreDurableRuntimeSnapshot(env, frame.runtimeMachine);
+        const actualStateHash = computeCanonicalStateHashFromEnv(env);
+        if (actualStateHash !== frame.runtimeStateHash) {
+          throw new Error(
+            `RECOVERY_JOURNAL_STATE_HASH_MISMATCH:height=${frameHeight}:` +
+            `expected=${frame.runtimeStateHash}:actual=${actualStateHash}`,
+          );
+        }
       } finally {
         envRecord(env)[ENV_APPLY_ALLOWED_KEY] = false;
       }
@@ -2275,6 +2997,24 @@ const replayRecoveryFrameJournals = async (
   }
 };
 
+const failRecoveryRestoreAfterCleanup = async (env: Env, error: unknown): Promise<never> => {
+  const originalError = error instanceof Error ? error : new Error(String(error));
+  const cleanup = await Promise.allSettled([
+    closeRuntimeDb(env),
+    closeInfraDb(env),
+  ]);
+  const cleanupErrors = cleanup
+    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+    .map(result => result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(
+      [originalError, ...cleanupErrors],
+      'RECOVERY_RESTORE_FAILED_WITH_CLEANUP_ERRORS',
+    );
+  }
+  throw originalError;
+};
+
 export const restoreEnvFromRecoveryBundles = async (
   bundles: RuntimeRecoveryBundleV1[],
   options?: {
@@ -2282,7 +3022,13 @@ export const restoreEnvFromRecoveryBundles = async (
     runtimeId?: string | null;
   },
 ): Promise<Env> => {
-  const validated = (bundles || []).map(validateRecoveryBundle);
+  const trustedRuntimeSeed = options?.runtimeSeed;
+  if (!trustedRuntimeSeed) throw new Error('RECOVERY_BUNDLE_TRUSTED_SEED_REQUIRED');
+  const validated = (bundles || []).map(bundle => assertRuntimeRecoveryBundleAuthenticity(
+    bundle,
+    trustedRuntimeSeed,
+    options?.runtimeId,
+  ));
   const snapshots = validated.filter((bundle) => (bundle.kind ?? 'snapshot') === 'snapshot');
   if (snapshots.length === 0) {
     throw new Error('RECOVERY_BUNDLE_SNAPSHOT_REQUIRED');
@@ -2309,51 +3055,56 @@ export const restoreEnvFromRecoveryBundles = async (
   const best = candidates[0]!;
   const env = await restoreEnvFromCheckpointSnapshot(best.snapshot.checkpoint!, options);
   if (best.tail) {
-    await replayRecoveryFrameJournals(env, best.tail.frames || []);
+    try {
+      await replayRecoveryFrameJournals(env, best.tail.frames || []);
+    } catch (error) {
+      return failRecoveryRestoreAfterCleanup(env, error);
+    }
   }
+  markRestoredReliableOutputsDue(env);
   return env;
 };
 
-const collectAllStorageDocsFromEnv = (env: Env): StorageDoc[] => {
+const collectCertifiedStorageDocs = (
+  lineagePlan: ReturnType<typeof buildCertifiedEntityLineagePlan>,
+): { docs: StorageDoc[]; canonicalEntityHashes: ReturnType<typeof computeCanonicalEntityHash>[] } => {
   const docs: StorageDoc[] = [];
-  const seenEntities = new Set<string>();
-  const seenAccounts = new Set<string>();
-  const seenBooks = new Set<string>();
+  const canonicalEntityHashes: ReturnType<typeof computeCanonicalEntityHash>[] = [];
 
-  for (const replica of env.eReplicas.values()) {
-    if (!replica?.state) continue;
-    const entityId = String(replica.entityId || replica.state.entityId || '').toLowerCase();
-    if (!entityId) continue;
-
-    if (!seenEntities.has(entityId)) {
-      seenEntities.add(entityId);
-      docs.push({
-        family: 'entity',
-        entityId,
-        value: projectEntityCoreDoc(replica.state, replica),
-      });
+  for (const [entityId, selected] of lineagePlan.lookup.entries()) {
+    const core = projectEntityCoreDoc(selected.state);
+    const accounts = new Map(Array.from(selected.state.accounts.entries(), ([counterpartyId, account]) => (
+      [String(counterpartyId || '').toLowerCase(), projectAccountDoc(account)] as const
+    )));
+    const books = new Map(Array.from(selected.state.orderbookExt?.books?.entries?.() ?? [], ([pairId, book]) => (
+      [String(pairId || '').trim(), book] as const
+    )));
+    const projectedState = hydrateEntityStateFromStorage({ core, accounts, books });
+    const expectedHash = computeCanonicalEntityHash(selected.replica);
+    const projectedHash = computeCanonicalEntityHash({ ...selected.replica, state: projectedState });
+    if (projectedHash.hash !== expectedHash.hash) {
+      throw new Error(
+        `RECOVERY_IMPORT_PROJECTED_ENTITY_HASH_MISMATCH:entity=${entityId}:` +
+        `expected=${expectedHash.hash}:projected=${projectedHash.hash}`,
+      );
     }
+    canonicalEntityHashes.push(expectedHash);
+    docs.push({ family: 'entity', entityId, value: core });
 
-    for (const [counterpartyId, account] of replica.state.accounts.entries()) {
+    for (const [counterpartyId, account] of accounts.entries()) {
       const normalizedCounterparty = String(counterpartyId || '').toLowerCase();
       if (!normalizedCounterparty || !account) continue;
-      const accountKey = `${entityId}:${normalizedCounterparty}`;
-      if (seenAccounts.has(accountKey)) continue;
-      seenAccounts.add(accountKey);
       docs.push({
         family: 'account',
         entityId,
         counterpartyId: normalizedCounterparty,
-        value: projectAccountDoc(account),
+        value: account,
       });
     }
 
-    for (const [pairId, book] of replica.state.orderbookExt?.books?.entries?.() ?? []) {
+    for (const [pairId, book] of books.entries()) {
       const normalizedPairId = String(pairId || '').trim();
       if (!normalizedPairId || !book) continue;
-      const bookKey = `${entityId}:${normalizedPairId}`;
-      if (seenBooks.has(bookKey)) continue;
-      seenBooks.add(bookKey);
       docs.push({
         family: 'book',
         entityId,
@@ -2363,17 +3114,50 @@ const collectAllStorageDocsFromEnv = (env: Env): StorageDoc[] => {
     }
   }
 
-  return docs;
+  return { docs, canonicalEntityHashes };
 };
 
 // Recovery checkpoint imports are not an append to the local WAL. They seed a new
 // local persistence base at the recovered runtime height, anchored by a materialized
 // snapshot and a synthetic frame at that same height.
-export const persistRestoredEnvToDB = async (env: Env): Promise<void> => {
-  const restoredHeight = Math.max(1, Math.floor(Number(env.height || 0)));
-  if (restoredHeight <= 0) {
+const persistRestoredEnvToDBUnlocked = async (
+  env: Env,
+  options: { onPersistenceBoundary?: StoragePersistenceBoundaryHook } = {},
+): Promise<void> => {
+  const restoredHeight = Number(env.height);
+  const restoredTimestamp = Number(env.timestamp);
+  if (!Number.isSafeInteger(restoredHeight) || restoredHeight <= 0) {
     throw new Error('RECOVERY_PERSIST_HEIGHT_REQUIRED');
   }
+  if (!Number.isSafeInteger(restoredTimestamp) || restoredTimestamp < 0) {
+    throw new Error('RECOVERY_PERSIST_TIMESTAMP_INVALID');
+  }
+  for (const replica of env.eReplicas.values()) {
+    assertCertifiedJHistoryIntegrity(replica.state);
+    assertValidatorJHistoryMatchesCertifiedAnchor(replica.state, replica.jHistory);
+  }
+  const lineagePlan = buildCertifiedEntityLineagePlan(env);
+  const materialized = collectCertifiedStorageDocs(lineagePlan);
+  const certifiedBoardNodes = collectReachableCertifiedBoardNodes(
+    getCertifiedBoardNodeStore(env),
+    Array.from(env.eReplicas.values(), ({ state }) => state.certifiedBoardState?.boardRegistryRoot)
+      .filter((root): root is string => Boolean(root)),
+  );
+  const consumptionNodes = collectReachableConsumptionNodes(
+    getConsumptionNodeStore(env),
+    getLiveConsumptionAccumulatorStates(env),
+  );
+  const accountJClaimNodes = collectReachableAccountJClaimNodes(
+    getAccountJClaimNodeStore(env),
+    getLiveAccountJClaimAccumulatorStates(env),
+  );
+  const runtimeMachine = buildDurableRuntimeMachineSnapshot(env);
+  const canonicalStateHash = computeCanonicalRuntimeStateHash(
+    restoredHeight,
+    restoredTimestamp,
+    materialized.canonicalEntityHashes,
+    runtimeMachine,
+  );
 
   if (!(await tryOpenStorageDb(env, 'current'))) {
     throw new Error('RECOVERY_PERSIST_STORAGE_OPEN_FAILED');
@@ -2384,169 +3168,564 @@ export const persistRestoredEnvToDB = async (env: Env): Promise<void> => {
 
   const currentDb = getStorageDb(env, 'current');
   const frameDb = getFrameDb(env);
-
-  await clearDatabase(currentDb);
-  await clearDatabase(frameDb);
-  try {
-    if (await tryOpenStorageDb(env, 'previous')) {
-      await clearDatabase(getStorageDb(env, 'previous'));
-    }
-  } catch {
-    // Previous-epoch storage is optional. Recovery import only needs a clean
-    // current epoch; stale previous data is ignored if the store does not open.
-  }
-
-  const puts = collectAllStorageDocsFromEnv(env);
-  const preparedHashes = await prepareStorageStateHashes({
-    db: currentDb,
-    puts,
-    dels: [],
+  const puts = materialized.docs;
+  const replicaMetas = buildStorageReplicaMetaCommitment(env, lineagePlan).entries;
+  const replacement = await replaceRestoredStorageBase({
+    currentDb,
+    historyDb: frameDb,
+    height: restoredHeight,
+    timestamp: restoredTimestamp,
+    docs: puts,
+    replicaMetas,
+    headConfig: {
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      snapshotPeriodFrames: Math.max(1, Number(env.runtimeConfig?.storage?.snapshotPeriodFrames ?? DEFAULT_SNAPSHOT_PERIOD_FRAMES)),
+      retainSnapshots: Math.max(1, Number(env.runtimeConfig?.storage?.retainSnapshots ?? DEFAULT_RETAIN_SNAPSHOTS)),
+      epochMaxBytes: Math.max(1, Number(env.runtimeConfig?.storage?.epochMaxBytes ?? DEFAULT_EPOCH_MAX_BYTES)),
+      accountMerkleRadix: env.runtimeConfig?.storage?.accountMerkleRadix === 256 ? 256 : DEFAULT_ACCOUNT_MERKLE_RADIX,
+    },
+    canonicalEntityHashes: materialized.canonicalEntityHashes,
+    canonicalStateHash,
+    runtimeMachine,
+    certifiedBoardNodes: Array.from(certifiedBoardNodes, ([hash, node]) => ({ hash, node })),
+    consumptionNodes: Array.from(consumptionNodes, ([hash, node]) => ({ hash, node })),
+    accountJClaimNodes: Array.from(accountJClaimNodes, ([hash, node]) => ({ hash, node })),
+    ...(options.onPersistenceBoundary
+      ? { onPersistenceBoundary: options.onPersistenceBoundary }
+      : {}),
   });
 
-  const currentBatch = currentDb.batch();
-  for (const doc of puts) {
-    currentBatch.put(
-      liveKeyForDoc(doc),
-      preparedHashes.docValueBuffers.get(docValueKey(doc)) ?? encodeBuffer(doc.value),
-    );
+  if (await tryOpenStorageDb(env, 'previous')) {
+    await clearDatabase(getStorageDb(env, 'previous'));
   }
-  for (const item of preparedHashes.merklePuts) {
-    currentBatch.put(item.key, item.value);
-  }
-  for (const replica of env.eReplicas.values()) {
-    if (!replica?.state) continue;
-    const entityId = String(replica.entityId || replica.state.entityId || '').toLowerCase();
-    if (!entityId) continue;
-    const signerId = String(replica.signerId || '').toLowerCase();
-    if (!signerId) throw new Error(`STORAGE_REPLICA_SIGNER_MISSING:${entityId}`);
-    currentBatch.put(keyLiveReplicaMeta(entityId, signerId), encodeBuffer(projectReplicaMeta(replica)));
-  }
-
-  const retainedHistoryBytes = keyFrame(restoredHeight).byteLength + encodeBuffer({}).byteLength;
-  const head: StorageHead = {
-    schemaVersion: STORAGE_SCHEMA_VERSION,
-    latestHeight: restoredHeight,
-    latestMaterializedHeight: restoredHeight,
-    latestSnapshotHeight: restoredHeight,
-    snapshotPeriodFrames: Math.max(1, Number(env.runtimeConfig?.storage?.snapshotPeriodFrames ?? DEFAULT_SNAPSHOT_PERIOD_FRAMES)),
-    retainSnapshots: Math.max(1, Number(env.runtimeConfig?.storage?.retainSnapshots ?? DEFAULT_RETAIN_SNAPSHOTS)),
-    epochMaxBytes: Math.max(1, Number(env.runtimeConfig?.storage?.epochMaxBytes ?? DEFAULT_EPOCH_MAX_BYTES)),
-    accountMerkleRadix: env.runtimeConfig?.storage?.accountMerkleRadix === 256 ? 256 : DEFAULT_ACCOUNT_MERKLE_RADIX,
-    retainedHistoryBytes,
-  };
-  currentBatch.put(KEY_HEAD, encodeBuffer(head));
-  await writeBatch(currentBatch);
-
-  const snapshotResult = await createSnapshot(currentDb, frameDb, restoredHeight, env.timestamp);
-  const canonicalEntityHashes = computeCanonicalEntityHashesFromEnv(env);
-  const canonicalStateHash = computeCanonicalStateHashFromEnv(env);
-  const runtimeMachine = buildDurableRuntimeMachineSnapshot(env);
-  const frameRecordBase: StorageFrameRecord = {
-    height: restoredHeight,
-    timestamp: env.timestamp,
-    prevFrameHash: ZERO_FRAME_HASH,
-    stateHash: preparedHashes.stateHash,
-    hashMode: 'storage-merkle-v1',
-    materializedState: true,
-    entityHashes: preparedHashes.entityHashes,
-    canonicalStateHash,
-    canonicalEntityHashes,
-    runtimeMachine,
-    runtimeInput: { runtimeTxs: [], entityInputs: [] },
-    touchedEntities: Array.from(new Set(puts.map((doc) => doc.entityId))).sort(),
-    touchedAccounts: puts
-      .filter((doc): doc is Extract<StorageDoc, { family: 'account' }> => doc.family === 'account')
-      .map((doc) => ({ entityId: doc.entityId, counterpartyId: doc.counterpartyId })),
-    touchedBookEntities: Array.from(
-      new Set(
-        puts
-          .filter((doc): doc is Extract<StorageDoc, { family: 'book' }> => doc.family === 'book')
-          .map((doc) => doc.entityId),
-      ),
-    ).sort(),
-  };
-  const frameRecord: StorageFrameRecord = {
-    ...frameRecordBase,
-    frameHash: computeStorageFrameHash(frameRecordBase),
-  };
-
-  const frameBatch = frameDb.batch();
-  frameBatch.put(keyFrame(restoredHeight), encodeBuffer(frameRecord));
-  frameBatch.put(
-    KEY_HEAD,
-    encodeBuffer({
-      ...head,
-      retainedHistoryBytes:
-        retainedHistoryBytes + snapshotResult.bytes + encodeBuffer(frameRecord).byteLength + keyFrame(restoredHeight).byteLength,
-    } satisfies StorageHead),
-  );
-  await writeBatch(frameBatch);
-
-  const updatedHead: StorageHead = {
-    ...head,
-    retainedHistoryBytes:
-      retainedHistoryBytes + snapshotResult.bytes + encodeBuffer(frameRecord).byteLength + keyFrame(restoredHeight).byteLength,
-  };
-  const finalizeCurrentBatch = currentDb.batch();
-  finalizeCurrentBatch.put(KEY_HEAD, encodeBuffer(updatedHead));
-  await writeBatch(finalizeCurrentBatch);
 
   const state = ensureRuntimeState(env);
-  state.storageEntityHashDocs = preparedHashes.entityHashDocs;
+  state.storageEntityHashDocs = replacement.entityHashDocs;
   state.currentStorageOverlayMarks = [];
 };
 
-const requirePersistedContractAddress = (
-  jReplicas: Map<string, JReplica>,
-  label: string,
-  contractName: 'depository' | 'entityProvider' | 'deltaTransformer',
-): string => {
-  for (const [, jReplica] of jReplicas.entries()) {
-    const rawAddress =
-      contractName === 'depository'
-        ? jReplica.depositoryAddress ?? jReplica.contracts?.depository
-        : contractName === 'entityProvider'
-          ? jReplica.entityProviderAddress ?? jReplica.contracts?.entityProvider
-          : jReplica.contracts?.deltaTransformer;
-    const restoredAddress = String(rawAddress ?? '').trim();
-    if (restoredAddress && ethers.isAddress(restoredAddress)) {
-      return restoredAddress;
-    }
+export const persistRestoredEnvToDB = async (
+  env: Env,
+  options: { onPersistenceBoundary?: StoragePersistenceBoundaryHook } = {},
+): Promise<void> => {
+  if (!Number.isSafeInteger(Number(env.height)) || Number(env.height) <= 0) {
+    throw new Error('RECOVERY_PERSIST_HEIGHT_REQUIRED');
   }
-  throw new Error(`MISSING_${contractName.toUpperCase()}_ADDRESS: ${label}`);
-};
-
-const findPersistedContractAddress = (
-  jReplicas: Map<string, JReplica>,
-  contractName: 'depository' | 'entityProvider' | 'deltaTransformer',
-): string => {
-  for (const [, jReplica] of jReplicas.entries()) {
-    const rawAddress =
-      contractName === 'depository'
-        ? jReplica.depositoryAddress ?? jReplica.contracts?.depository
-        : contractName === 'entityProvider'
-          ? jReplica.entityProviderAddress ?? jReplica.contracts?.entityProvider
-          : jReplica.contracts?.deltaTransformer;
-    const restoredAddress = String(rawAddress ?? '').trim();
-    if (restoredAddress && ethers.isAddress(restoredAddress)) {
-      return restoredAddress;
-    }
+  if (!Number.isSafeInteger(Number(env.timestamp)) || Number(env.timestamp) < 0) {
+    throw new Error('RECOVERY_PERSIST_TIMESTAMP_INVALID');
   }
-  return '';
+  await withStorageWriterLock(env, () => persistRestoredEnvToDBUnlocked(env, options));
 };
 
 const assertPersistedContractConfigReady = (env: Env, label: string): void => {
-  if (env.jReplicas && env.jReplicas.size > 0) {
-    requirePersistedContractAddress(env.jReplicas, label, 'depository');
-    requirePersistedContractAddress(env.jReplicas, label, 'entityProvider');
-    setDeltaTransformerAddress(findPersistedContractAddress(env.jReplicas, 'deltaTransformer'));
+  for (const [name, replica] of env.jReplicas.entries()) {
+    try {
+      requireDurableJurisdictionStack(replica);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`${reason}:${label}:${name}`, { cause: error });
+    }
   }
+};
+
+const findJurisdictionEntryByName = (
+  env: Env,
+  name: string,
+): [string, JReplica] | null => {
+  const normalized = String(name || '').trim().toLowerCase();
+  for (const entry of env.jReplicas.entries()) {
+    if (String(entry[0] || '').trim().toLowerCase() === normalized) return entry;
+  }
+  return null;
+};
+
+const registerCommittedSingleSignerWallet = (
+  env: Env,
+  replica: EntityReplica,
+): void => {
+  const validators = replica.state.config.validators;
+  if (validators.length !== 1 || replica.state.config.threshold !== 1n) return;
+  const signerId = String(validators[0] || '').trim().toLowerCase();
+  if (!signerId) throw new Error(`ENTITY_SINGLE_SIGNER_MISSING:${replica.entityId}`);
+  if (String(replica.signerId || '').trim().toLowerCase() !== signerId) {
+    throw new Error(
+      `ENTITY_SINGLE_SIGNER_REPLICA_MISMATCH:${replica.entityId}:${replica.signerId}:${signerId}`,
+    );
+  }
+  const privateKey = getLocalSignerPrivateKey(env, signerId);
+  if (privateKey === null) return;
+  const jurisdiction = replica.state.config.jurisdiction;
+  if (!jurisdiction?.depositoryAddress || !jurisdiction.chainId) {
+    throw new Error(`ENTITY_JURISDICTION_BINDING_INCOMPLETE:${replica.entityId}`);
+  }
+  const jurisdictionReplica = findWatcherJurisdictionReplica(
+    env,
+    jurisdiction.depositoryAddress,
+    jurisdiction.chainId,
+  );
+  if (!jurisdictionReplica) {
+    throw new Error(
+      `ENTITY_JURISDICTION_REPLICA_MISSING:${replica.entityId}:${jurisdiction.chainId}:${jurisdiction.depositoryAddress}`,
+    );
+  }
+  const hasExternalRpc = (jurisdictionReplica.rpcs ?? []).some((rpc) => {
+    const normalized = String(rpc || '').trim().toLowerCase();
+    return normalized.length > 0 && !normalized.startsWith('browservm:');
+  });
+  const liveAdapter = jurisdictionReplica.jadapter;
+  if (!liveAdapter) {
+    if (hasExternalRpc) {
+      // RPC submission carries an already assembled Hanko and is signed by the
+      // jurisdiction transaction sender. Entity private keys never belong in
+      // the RPC adapter, whose registerEntityWallet implementation is a no-op.
+      return;
+    }
+    runtimeLog.debug('browservm.wallet_bind_deferred', {
+      entityId: replica.entityId,
+      chainId: jurisdiction.chainId,
+      depositoryAddress: jurisdiction.depositoryAddress,
+    });
+    return;
+  }
+  if (liveAdapter.mode !== 'browservm' && hasExternalRpc) return;
+  const registerWallet = liveAdapter.registerEntityWallet;
+  if (!registerWallet) {
+    throw new Error(`ENTITY_JURISDICTION_WALLET_BINDER_MISSING:${replica.entityId}`);
+  }
+  registerWallet(replica.entityId, ethers.hexlify(privateKey));
+};
+
+const registerCommittedSingleSignerWallets = (
+  env: Env,
+  entityIds?: ReadonlySet<string>,
+): void => {
+  for (const replica of env.eReplicas.values()) {
+    if (entityIds && !entityIds.has(replica.entityId.toLowerCase())) continue;
+    registerCommittedSingleSignerWallet(env, replica);
+  }
+};
+
+const reconcileCommittedRuntimeInfraEffects = async (
+  env: Env,
+  runtimeTxs: readonly RuntimeTx[],
+): Promise<void> => {
+  const jurisdictionNames = new Set<string>();
+  const importedEntityIds = new Set<string>();
+  for (const runtimeTx of runtimeTxs) {
+    if (runtimeTx.type === 'completeImportJ') jurisdictionNames.add(runtimeTx.data.name);
+    if (runtimeTx.type === 'importJ' && findJurisdictionEntryByName(env, runtimeTx.data.name)) {
+      jurisdictionNames.add(runtimeTx.data.name);
+    }
+    if (runtimeTx.type === 'importReplica') {
+      importedEntityIds.add(runtimeTx.entityId.toLowerCase());
+    }
+  }
+  for (const name of jurisdictionNames) {
+    const entry = findJurisdictionEntryByName(env, name);
+    if (!entry) throw new Error(`COMMITTED_JURISDICTION_REPLICA_MISSING:${name}`);
+    const adapter = await ensureLiveJAdapterForReplica(env, entry[0], {
+      allowBrowserVm: true,
+      context: `postcommit:${entry[0]}`,
+      attempts: typeof window !== 'undefined' ? 5 : 3,
+    });
+    if (!adapter) throw new Error(`COMMITTED_JURISDICTION_ADAPTER_MISSING:${entry[0]}`);
+    if (adapter.mode === 'browservm') {
+      const browserVM = adapter.getBrowserVM();
+      if (!browserVM) throw new Error(`COMMITTED_BROWSERVM_MISSING:${entry[0]}`);
+      setBrowserVMJurisdiction(env, adapter.addresses.depository, adapter.chainId, browserVM);
+    }
+  }
+  if (jurisdictionNames.size > 0) {
+    assertPersistedContractConfigReady(env, 'postcommit jurisdiction import');
+    registerCommittedSingleSignerWallets(env);
+    startJurisdictionWatchers(env);
+  } else if (importedEntityIds.size > 0) {
+    registerCommittedSingleSignerWallets(env, importedEntityIds);
+  }
+};
+
+const hasPendingLocalReliableOutput = (env: Env): boolean => {
+  const runtimeId = normalizeRuntimeId(env.runtimeId);
+  if (!runtimeId) return false;
+  return (env.pendingNetworkOutputs ?? []).some(output =>
+    normalizeRuntimeId(output.runtimeId) === runtimeId && getReliableOutputIdentity(output) !== null);
+};
+
+const queueLocalOutputsWithReliability = (
+  env: Env,
+  localOutputs: readonly RoutedEntityInput[],
+): RoutedEntityInput[] => {
+  const runtimeId = normalizeRuntimeId(env.runtimeId);
+  if (!runtimeId && localOutputs.some(output => getReliableOutputIdentity(output) !== null)) {
+    throw new Error('RELIABLE_LOCAL_RUNTIME_ID_MISSING');
+  }
+  const inputs: RoutedEntityInput[] = [];
+  const receipts: ReliableDeliveryReceipt[] = [];
+  const retained: RoutedEntityInput[] = [];
+  for (const output of localOutputs) {
+    if (!getReliableOutputIdentity(output)) {
+      inputs.push(output);
+      continue;
+    }
+    const deliverable = { ...output, runtimeId: runtimeId! };
+    retained.push(deliverable);
+    const registration = registerReliableIngress(env, runtimeId!, deliverable);
+    if (registration.kind === 'enqueue') inputs.push(deliverable);
+    if (registration.kind === 'receipt') {
+      registerReliableReceiptIngress(env, registration.receipt);
+      receipts.push(registration.receipt);
+    }
+  }
+  enqueueRuntimeContinuation(
+    env,
+    inputs,
+    undefined,
+    undefined,
+    env.timestamp,
+    receipts,
+  );
+  return retained;
+};
+
+const applyCommittedLocalReliableReceipts = (
+  env: Env,
+  commits: ReliableIngressCommit[],
+): void => {
+  const runtimeId = normalizeRuntimeId(env.runtimeId);
+  if (!runtimeId) return;
+  const receipts = new Map<string, ReliableDeliveryReceipt>();
+  for (const commit of commits) {
+    if (!commit.receipt || !commit.targetRuntimeIds.includes(runtimeId)) continue;
+    if (!(env.pendingNetworkOutputs ?? []).some(output =>
+      reliableReceiptMatchesOutput(output, commit.receipt!))) continue;
+    receipts.set(commit.receipt.signature, commit.receipt);
+    commit.targetRuntimeIds = commit.targetRuntimeIds.filter(target => target !== runtimeId);
+  }
+  if (receipts.size > 0) applyReliableDeliveryReceipts(env, [...receipts.values()]);
+};
+
+const RUNTIME_FRAME_SHARED_STATE_KEYS = new Set<string>([
+  'loopActive',
+  'loopPromise',
+  'stopLoop',
+  'wakeLoop',
+  'processingPromise',
+  'p2p',
+  'envChangeCallbacks',
+  'db',
+  'dbOpenPromise',
+  'storageDb',
+  'storageDbOpenPromise',
+  'storagePreviousDb',
+  'storagePreviousDbOpenPromise',
+  'storageEpochRotatePromise',
+  'frameDb',
+  'frameDbOpenPromise',
+  'infraDb',
+  'infraDbOpenPromise',
+  'infraDbPendingWrites',
+  'runtimeSyncChannel',
+  'directEntityInputDispatch',
+  'directReliableReceiptDispatch',
+  'canUseConnectedRelayFallback',
+  'recoveryBackupBarrier',
+  'watcherDedupCounter',
+  'runtimeFrameIngressBuffer',
+]);
+
+const RUNTIME_FRAME_CONCURRENT_STATE_KEYS = new Set<string>([
+  'lifecyclePhase',
+  'halted',
+  'fatalDebugPayload',
+  'wakeRequested',
+  'persistencePaused',
+  'persistenceQuiescing',
+  'pendingP2PConfig',
+  'lastP2PConfig',
+  'logState',
+  'cleanLogs',
+  'pendingAuditEvents',
+  'recentJEvents',
+  'recentReserveUpdatedEvents',
+  'verifiedProfileRoutes',
+  'externalWalletWatchOwners',
+  'infraDbClosing',
+  'inFlightEntityInputs',
+]);
+
+type RuntimeFrameTransaction = {
+  liveEnv: Env;
+  workingEnv: Env;
+  ingressBuffer: RuntimeFrameIngressBuffer;
+  liveFrameLogBaseLength: number;
+  workingCleanLogBaseLength: number;
+  liveAdapters: Set<JAdapter>;
+  published: boolean;
+};
+
+const cloneRuntimeFrameState = (env: Env): NonNullable<Env['runtimeState']> => {
+  const cloned: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(env.runtimeState ?? {})) {
+    if (key === 'scheduledWakeIndex') continue;
+    if (RUNTIME_FRAME_SHARED_STATE_KEYS.has(key)) {
+      cloned[key] = value;
+      continue;
+    }
+    try {
+      cloned[key] = structuredClone(value);
+    } catch (error) {
+      throw new Error(`RUNTIME_FRAME_STATE_CLONE_FAILED:${key}`, { cause: error });
+    }
+  }
+  return cloned as NonNullable<Env['runtimeState']>;
+};
+
+export const cloneRuntimeFrameMempool = (input: RuntimeInput): RuntimeInput => {
+  const cloned = cloneIsolatedRuntimeInput(input);
+  input.runtimeTxs.forEach((source, index) => {
+    const target = cloned.runtimeTxs[index];
+    if (!target) throw new Error(`RUNTIME_FRAME_RUNTIME_TX_CLONE_MISSING:${index}`);
+    copyLocalJAuthorityRuntimeTxAuthorization(source, target);
+    copyLocalJSubmitRuntimeTxAuthorization(source, target);
+    copyLocalJImportResultRuntimeTxAuthorization(source, target);
+    copyLocalEntityProviderActionRuntimeTxAuthorization(source, target);
+    copyLocalRuntimeAdapterCommandAuthorization(source, target);
+  });
+  input.entityInputs.forEach((source, inputIndex) => {
+    const target = cloned.entityInputs[inputIndex];
+    if (!target) throw new Error(`RUNTIME_FRAME_ENTITY_INPUT_CLONE_MISSING:${inputIndex}`);
+    if ((target.entityTxs?.length ?? 0) !== (source.entityTxs?.length ?? 0)) {
+      throw new Error(`RUNTIME_FRAME_ENTITY_TX_CLONE_SHAPE_MISMATCH:${inputIndex}`);
+    }
+    source.entityTxs?.forEach((sourceTx, txIndex) => {
+      const targetTx = target.entityTxs?.[txIndex];
+      if (!targetTx) throw new Error(`RUNTIME_FRAME_ENTITY_TX_CLONE_MISSING:${inputIndex}:${txIndex}`);
+      copyLocalScheduledWakeAuthorization(sourceTx, targetTx);
+      copyDeterministicHtlcTestSecretCapability(sourceTx, targetTx);
+    });
+    if (source.leaderTimeoutVote) {
+      if (!target.leaderTimeoutVote) {
+        throw new Error(`RUNTIME_FRAME_LEADER_VOTE_CLONE_MISSING:${inputIndex}`);
+      }
+      copyLocalEntityLeaderTimeoutVoteAuthorization(
+        source.leaderTimeoutVote,
+        target.leaderTimeoutVote,
+      );
+    }
+  });
+  return cloned;
+};
+
+const createRuntimeFrameGossipSnapshot = (env: Env): Env['gossip'] => {
+  const gossip = createGossipLayer();
+  gossip.setProfiles?.((env.gossip?.getProfiles?.() ?? []).map(profile => structuredClone(profile)));
+  return gossip;
+};
+
+const createRuntimeFrameTransaction = (liveEnv: Env): RuntimeFrameTransaction => {
+  const liveMempool = ensureRuntimeMempool(liveEnv);
+  const workingMempool = cloneRuntimeFrameMempool(liveMempool);
+  const workingState = cloneRuntimeFrameState(liveEnv);
+  const workingEnv: Env = {
+    ...liveEnv,
+    eReplicas: new Map(Array.from(liveEnv.eReplicas.entries(), ([key, replica]) => [
+      key,
+      buildCanonicalEntityReplicaSnapshot(replica),
+    ])),
+    jReplicas: new Map<string, JReplica>(Array.from(liveEnv.jReplicas.entries(), ([key, replica]) => [
+      key,
+      {
+        ...buildCanonicalJReplicaSnapshot(replica),
+        ...(replica.jadapter ? { jadapter: replica.jadapter } : {}),
+      },
+    ])),
+    runtimeState: workingState,
+    runtimeMempool: workingMempool,
+    runtimeInput: workingMempool,
+    ...(liveEnv.runtimeConfig ? { runtimeConfig: structuredClone(liveEnv.runtimeConfig) } : {}),
+    ...(liveEnv.browserVMState ? { browserVMState: structuredClone(liveEnv.browserVMState) } : {}),
+    ...(liveEnv.overlay ? { overlay: structuredClone(liveEnv.overlay) } : {}),
+    ...(liveEnv.pendingOutputs
+      ? { pendingOutputs: cloneIsolatedRoutedEntityInputs(liveEnv.pendingOutputs) }
+      : {}),
+    ...(liveEnv.networkInbox
+      ? { networkInbox: cloneIsolatedRoutedEntityInputs(liveEnv.networkInbox) }
+      : {}),
+    ...(liveEnv.pendingNetworkOutputs
+      ? { pendingNetworkOutputs: cloneIsolatedRoutedEntityInputs(liveEnv.pendingNetworkOutputs) }
+      : {}),
+    frameLogs: structuredClone(liveEnv.frameLogs),
+    history: [...liveEnv.history],
+    gossip: createRuntimeFrameGossipSnapshot(liveEnv),
+    evms: new Map(liveEnv.evms),
+    ...(liveEnv.extra ? { extra: structuredClone(liveEnv.extra) } : {}),
+  };
+  attachEventEmitters(workingEnv);
+  if (liveEnv.runtimeState?.scheduledWakeIndex !== undefined) rebuildScheduledWakeIndex(workingEnv);
+
+  const concurrentMempool: RuntimeInput = { runtimeTxs: [], entityInputs: [] };
+  const ingressBuffer = beginRuntimeFrameIngressBuffer(liveEnv);
+  // Operational producers read the live Env while this private working Env is
+  // executing. Preserve the detached Entity count until publish or rollback;
+  // processingPromise alone also covers harmless runtime-only bookkeeping.
+  ensureRuntimeState(liveEnv).inFlightEntityInputs = workingMempool.entityInputs.length;
+  liveEnv.runtimeMempool = concurrentMempool;
+  liveEnv.runtimeInput = concurrentMempool;
+  return {
+    liveEnv,
+    workingEnv,
+    ingressBuffer,
+    liveFrameLogBaseLength: liveEnv.frameLogs.length,
+    workingCleanLogBaseLength: workingState.cleanLogs?.length ?? 0,
+    liveAdapters: new Set(Array.from(liveEnv.jReplicas.values())
+      .flatMap(replica => replica.jadapter ? [replica.jadapter] : [])),
+    published: false,
+  };
+};
+
+const closeUncommittedJAdapters = async (
+  transaction: RuntimeFrameTransaction,
+): Promise<Error[]> => {
+  const uncommitted = new Set(Array.from(transaction.workingEnv.jReplicas.values())
+    .flatMap(replica => replica.jadapter && !transaction.liveAdapters.has(replica.jadapter)
+      ? [replica.jadapter]
+      : []));
+  const settled = await Promise.allSettled(Array.from(uncommitted, adapter => adapter.close()));
+  return settled
+    .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+    .map(result => result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
+};
+
+const runtimeInputHasQueuedWork = (input: RuntimeInput): boolean =>
+  input.runtimeTxs.length > 0 ||
+  input.entityInputs.length > 0 ||
+  (input.jInputs?.length ?? 0) > 0 ||
+  (input.reliableReceipts?.length ?? 0) > 0;
+
+const mergeRuntimeFrameMempools = (frame: RuntimeInput, concurrent: RuntimeInput): RuntimeInput => {
+  const merged: RuntimeInput = {
+    runtimeTxs: [...frame.runtimeTxs, ...concurrent.runtimeTxs],
+    entityInputs: [...frame.entityInputs, ...concurrent.entityInputs],
+    ...((frame.jInputs?.length ?? 0) + (concurrent.jInputs?.length ?? 0) > 0
+      ? { jInputs: [...(frame.jInputs ?? []), ...(concurrent.jInputs ?? [])] }
+      : {}),
+    ...((frame.reliableReceipts?.length ?? 0) + (concurrent.reliableReceipts?.length ?? 0) > 0
+      ? { reliableReceipts: [...(frame.reliableReceipts ?? []), ...(concurrent.reliableReceipts ?? [])] }
+      : {}),
+  };
+  const queuedAt = [frame.queuedAt, concurrent.queuedAt]
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+    .reduce<number | undefined>((latest, value) => latest === undefined ? value : Math.max(latest, value), undefined);
+  if (runtimeInputHasQueuedWork(merged) && queuedAt !== undefined) merged.queuedAt = queuedAt;
+  return merged;
+};
+
+const mergeRuntimeEntityHints = (
+  working: NonNullable<Env['runtimeState']>['entityRuntimeHints'],
+  live: NonNullable<Env['runtimeState']>['entityRuntimeHints'],
+): NonNullable<Env['runtimeState']>['entityRuntimeHints'] => {
+  const merged = new Map(working ?? []);
+  for (const [entityId, candidate] of live ?? []) {
+    const current = merged.get(entityId);
+    if (!current || candidate.seenAt > current.seenAt) merged.set(entityId, candidate);
+  }
+  return merged;
+};
+
+const publishRuntimeFrameTransaction = (transaction: RuntimeFrameTransaction): Env => {
+  if (transaction.published) return transaction.liveEnv;
+  const { liveEnv, workingEnv } = transaction;
+  const committedHistorySnapshot = workingEnv.height !== liveEnv.height
+    ? workingEnv.history.at(-1)
+    : undefined;
+  const liveState = ensureRuntimeState(liveEnv);
+  const workingState = ensureRuntimeState(workingEnv);
+  const concurrentMempool = ensureRuntimeMempool(liveEnv);
+  const workingMempool = ensureRuntimeMempool(workingEnv);
+  const liveOnlyState = new Map<string, unknown>();
+  for (const key of new Set([...RUNTIME_FRAME_SHARED_STATE_KEYS, ...RUNTIME_FRAME_CONCURRENT_STATE_KEYS])) {
+    if (Object.prototype.hasOwnProperty.call(liveState, key)) {
+      liveOnlyState.set(key, (liveState as Record<string, unknown>)[key]);
+    }
+  }
+  const mergedHints = mergeRuntimeEntityHints(workingState.entityRuntimeHints, liveState.entityRuntimeHints);
+  for (const key of Object.keys(liveState)) delete (liveState as Record<string, unknown>)[key];
+  for (const [key, value] of Object.entries(workingState)) {
+    if (!RUNTIME_FRAME_SHARED_STATE_KEYS.has(key) && !RUNTIME_FRAME_CONCURRENT_STATE_KEYS.has(key)) {
+      (liveState as Record<string, unknown>)[key] = value;
+    } else if (RUNTIME_FRAME_SHARED_STATE_KEYS.has(key) && !liveOnlyState.has(key)) {
+      // Infra handles opened by this frame (notably LevelDB on the first
+      // persisted frame) must remain attached after publish. Existing live
+      // handles still win below so concurrent infra cannot be overwritten.
+      (liveState as Record<string, unknown>)[key] = value;
+    }
+  }
+  for (const [key, value] of liveOnlyState) (liveState as Record<string, unknown>)[key] = value;
+  if (mergedHints) liveState.entityRuntimeHints = mergedHints;
+
+  const workingCleanLogTail = (workingState.cleanLogs ?? []).slice(transaction.workingCleanLogBaseLength);
+  if (workingCleanLogTail.length > 0) {
+    liveState.cleanLogs = [...(liveState.cleanLogs ?? []), ...workingCleanLogTail].slice(-2_000);
+  }
+  liveState.logState ??= { nextId: 0, mirrorToConsole: true };
+  liveState.logState.nextId = Math.max(
+    liveState.logState.nextId,
+    workingState.logState?.nextId ?? 0,
+  );
+
+  liveEnv.height = workingEnv.height;
+  liveEnv.timestamp = workingEnv.timestamp;
+  liveEnv.eReplicas = workingEnv.eReplicas;
+  liveEnv.jReplicas = workingEnv.jReplicas;
+  if (workingEnv.activeJurisdiction === undefined) delete liveEnv.activeJurisdiction;
+  else liveEnv.activeJurisdiction = workingEnv.activeJurisdiction;
+  if (workingEnv.browserVM === undefined) delete liveEnv.browserVM;
+  else liveEnv.browserVM = workingEnv.browserVM;
+  if (workingEnv.browserVMState === undefined) delete liveEnv.browserVMState;
+  else liveEnv.browserVMState = workingEnv.browserVMState;
+  if (workingEnv.jAdapter === undefined) delete liveEnv.jAdapter;
+  else liveEnv.jAdapter = workingEnv.jAdapter;
+  liveEnv.evms = workingEnv.evms;
+  if (workingEnv.overlay === undefined) delete liveEnv.overlay;
+  else liveEnv.overlay = workingEnv.overlay;
+  if (workingEnv.pendingOutputs === undefined) delete liveEnv.pendingOutputs;
+  else liveEnv.pendingOutputs = workingEnv.pendingOutputs;
+  if (workingEnv.networkInbox === undefined) delete liveEnv.networkInbox;
+  else liveEnv.networkInbox = workingEnv.networkInbox;
+  if (workingEnv.pendingNetworkOutputs === undefined) delete liveEnv.pendingNetworkOutputs;
+  else liveEnv.pendingNetworkOutputs = workingEnv.pendingNetworkOutputs;
+  liveEnv.history = workingEnv.history;
+  if (committedHistorySnapshot) {
+    recordRuntimeHistoryTraceForTesting(liveEnv, committedHistorySnapshot);
+  }
+  if (workingEnv.extra === undefined) delete liveEnv.extra;
+  else liveEnv.extra = workingEnv.extra;
+  liveEnv.frameLogs = liveEnv.frameLogs.slice(transaction.liveFrameLogBaseLength);
+  const mergedMempool = mergeRuntimeFrameMempools(workingMempool, concurrentMempool);
+  liveEnv.runtimeMempool = mergedMempool;
+  liveEnv.runtimeInput = mergedMempool;
+  liveState.wakeRequested = liveState.wakeRequested === true || runtimeInputHasQueuedWork(mergedMempool);
+  rebuildScheduledWakeIndex(liveEnv);
+  for (const jReplica of liveEnv.jReplicas.values()) jReplica.jadapter?.setBlockTimestamp(liveEnv.timestamp);
+  transaction.published = true;
+  return liveEnv;
+};
+
+const abortRuntimeFrameTransaction = async (
+  transaction: RuntimeFrameTransaction,
+): Promise<Error[]> => {
+  const cleanupErrors = await closeUncommittedJAdapters(transaction);
+  for (const jReplica of transaction.liveEnv.jReplicas.values()) {
+    jReplica.jadapter?.setBlockTimestamp(transaction.liveEnv.timestamp);
+  }
+  return cleanupErrors;
 };
 
 // === CONSENSUS PROCESSING ===
 // ONE TICK = ONE ITERATION. No cascade. E→E communication always requires new tick.
 
 export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0) => {
+  const liveEnv = env;
   const processState = ensureRuntimeState(env);
   while (processState.processingPromise) {
     await processState.processingPromise;
@@ -2572,6 +3751,20 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     frameAdvanced: false,
   };
   let processProfileOutcome = 'unknown';
+  let reliableIngressCommits: ReliableIngressCommit[] = [];
+  let reliableReceiptSenderCheckpoint: ReliableReceiptSenderCheckpoint | undefined;
+  let reliableReceiptDeliveries: Array<{
+    runtimeId: string;
+    receipt: ReliableDeliveryReceipt;
+  }> = [];
+  let reliableReceiptStateDurable = false;
+  let frameCommitDisposition: 'undurable' | 'committed' | 'unknown' = 'undurable';
+  let frameRollbackHandled = false;
+  let frameTransaction: RuntimeFrameTransaction | undefined;
+  let rollbackUndurableFrame: ((
+    error: unknown,
+    options?: { quarantine?: boolean; requeue?: boolean },
+  ) => Promise<Error>) | undefined;
   const markProcessProfile = (label: string): void => {
     processProfileMarks[label] = Math.round(getPerfMs() - processProfileStartMs);
   };
@@ -2600,6 +3793,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     // If captured before waiting on an in-flight tick, we can mis-detect
     // frame advancement and overwrite WAL entries with empty runtime input.
     const frameHeightBeforeTick = env.height;
+    const frameTimestampBeforeTick = env.timestamp;
     env.lastProcessEnteredAt = Date.now();
 
     if (!env.emit) {
@@ -2621,12 +3815,36 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       enqueueRuntimeInputs(env, inputs, undefined, undefined, ingressNow);
     }
     if (env.pendingOutputs && env.pendingOutputs.length > 0) {
-      enqueueRuntimeInputs(env, env.pendingOutputs, undefined, undefined, ingressNow);
+      enqueueRuntimeContinuation(env, env.pendingOutputs, undefined, undefined, ingressNow);
       env.pendingOutputs = [];
     }
     if (env.networkInbox && env.networkInbox.length > 0) {
-      enqueueRuntimeInputs(env, env.networkInbox, undefined, undefined, ingressNow);
+      enqueueRuntimeContinuation(env, env.networkInbox, undefined, undefined, ingressNow);
       env.networkInbox = [];
+    }
+    await materializePendingJurisdictionImportResults(env, (runtimeTx) => {
+      enqueueRuntimeContinuation(
+        env,
+        undefined,
+        [runtimeTx],
+        undefined,
+        env.scenarioMode ? env.timestamp : getWallClockMs(),
+      );
+    });
+    const profileCertificationInputs = collectDueLocalProfileCertificationInputs(env);
+    if (profileCertificationInputs.length > 0) {
+      // Derived local work belongs to the already-open ingress boundary. Do
+      // not replace an explicit queued timestamp with the wall clock observed
+      // later by process(); that would make the same signed input hash
+      // differently depending on scheduler latency.
+      const profileIngressTimestamp = ensureRuntimeMempool(env).queuedAt ?? ingressNow;
+      enqueueRuntimeContinuation(
+        env,
+        profileCertificationInputs,
+        undefined,
+        undefined,
+        profileIngressTimestamp,
+      );
     }
     markProcessProfile('enqueue');
 
@@ -2642,10 +3860,12 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     }
     markProcessProfile('frameReady');
 
-    const state = ensureRuntimeState(env);
-    const mempool = ensureRuntimeMempool(env);
-    const mempoolQueuedAt = mempool.queuedAt;
+    const mempoolQueuedAt = ensureRuntimeMempool(env).queuedAt;
     const quietRuntimeLogs = env.quietRuntimeLogs === true;
+    frameTransaction = createRuntimeFrameTransaction(env);
+    env = frameTransaction.workingEnv;
+    let state = ensureRuntimeState(env);
+    const mempool = ensureRuntimeMempool(env);
     for (const jReplica of env.jReplicas?.values?.() ?? []) {
       jReplica.jadapter?.setQuietLogs?.(quietRuntimeLogs);
     }
@@ -2671,19 +3891,75 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     // Inject pings for entities with due scheduled hooks (setTimeout-like)
     generateHookPings(env);
 
-    const accountWakeInputs = collectAccountMempoolWakeInputs(env);
+    const automaticWakeInputs = [
+      ...collectEntityMempoolWakeInputs(env),
+      ...collectAccountMempoolWakeInputs(env),
+    ];
     const explicitEntityInputKeys = new Set(
       mempool.entityInputs.map((input) =>
         `${String(input.entityId || '').toLowerCase()}:${String(input.signerId || '').toLowerCase()}`
       ),
     );
-    const dedupedAccountWakeInputs = accountWakeInputs.filter((input) =>
-      !explicitEntityInputKeys.has(`${input.entityId.toLowerCase()}:${input.signerId.toLowerCase()}`)
-    );
+    const dedupedAutomaticWakeInputs = automaticWakeInputs.filter((input) => {
+      const key = `${input.entityId.toLowerCase()}:${input.signerId.toLowerCase()}`;
+      if (explicitEntityInputKeys.has(key)) return false;
+      explicitEntityInputKeys.add(key);
+      return true;
+    });
     const runtimeInput: RuntimeInput = {
       runtimeTxs: [...mempool.runtimeTxs],
-      entityInputs: [...mempool.entityInputs, ...dedupedAccountWakeInputs],
+      entityInputs: [...mempool.entityInputs, ...dedupedAutomaticWakeInputs],
       ...(mempool.jInputs && mempool.jInputs.length > 0 ? { jInputs: [...mempool.jInputs] } : {}),
+      ...(mempool.reliableReceipts && mempool.reliableReceipts.length > 0
+        ? { reliableReceipts: [...mempool.reliableReceipts] }
+        : {}),
+    };
+    // Automatic Entity/account wakes join after the live mempool is detached.
+    // Publish their exact count before the first await in frame processing.
+    processState.inFlightEntityInputs = runtimeInput.entityInputs.length;
+    let runtimeInputDrained = false;
+    let runtimeInputForRequeue: RuntimeInput | undefined;
+    rollbackUndurableFrame = async (
+      error: unknown,
+      options: { quarantine?: boolean; requeue?: boolean } = {},
+    ): Promise<Error> => {
+      const originalError = error instanceof Error ? error : new Error(String(error));
+      const workingMempoolAfterAttempt = frameTransaction
+        ? ensureRuntimeMempool(frameTransaction.workingEnv)
+        : ensureRuntimeMempool(env);
+      const rollbackErrors = frameTransaction
+        ? await abortRuntimeFrameTransaction(frameTransaction)
+        : [];
+      env = liveEnv;
+      state = ensureRuntimeState(env);
+      reliableIngressCommits = [];
+      reliableReceiptSenderCheckpoint = undefined;
+      const quarantineResult = options.quarantine === false
+        ? null
+        : quarantineLiveRuntimeInput(liveEnv, runtimeInput, originalError, quietRuntimeLogs);
+      if (!quarantineResult && options.requeue !== false) {
+        const retry = runtimeInputDrained
+          ? (() => {
+              const attempted = runtimeInputForRequeue ?? cloneRuntimeFrameMempool(runtimeInput);
+              if (attempted.queuedAt === undefined) {
+                attempted.queuedAt = mempoolQueuedAt ?? frameTimestampBeforeTick;
+              }
+              return mergeRuntimeFrameMempools(attempted, workingMempoolAfterAttempt);
+            })()
+          : workingMempoolAfterAttempt;
+        const restoredMempool = mergeRuntimeFrameMempools(retry, ensureRuntimeMempool(liveEnv));
+        liveEnv.runtimeMempool = restoredMempool;
+        liveEnv.runtimeInput = restoredMempool;
+      }
+      try {
+        if (!frameTransaction) throw new Error('RUNTIME_FRAME_TRANSACTION_MISSING_AT_ROLLBACK_DRAIN');
+        drainRuntimeFrameIngressBuffer(frameTransaction);
+      } catch (drainError) {
+        rollbackErrors.push(drainError instanceof Error ? drainError : new Error(String(drainError)));
+      }
+      return rollbackErrors.length > 0
+        ? new AggregateError([originalError, ...rollbackErrors], 'RUNTIME_APPLY_ROLLBACK_FAILED')
+        : originalError;
     };
     processProfileMetrics.runtimeTxs = runtimeInput.runtimeTxs.length;
     processProfileMetrics.entityInputs = runtimeInput.entityInputs.length;
@@ -2695,9 +3971,22 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     mempool.runtimeTxs = [];
     mempool.entityInputs = [];
     if (mempool.jInputs) mempool.jInputs = [];
+    if (mempool.reliableReceipts) mempool.reliableReceipts = [];
     mempool.queuedAt = undefined;
+    runtimeInputDrained = true;
 
     const jEventFramePrioritized = prioritizeJEventFrame(
+      runtimeInput,
+      mempool,
+      mempoolQueuedAt ?? (env.timestamp ?? 0),
+    );
+    runtimeInput.entityInputs = prioritizeEntityConsensusInputs(
+      runtimeInput.entityInputs,
+      input => hasVerifiedEntityCommitPrecertificate(env, input),
+    );
+    runtimeInput.entityInputs = prioritizeProtocolEntityInputs(runtimeInput.entityInputs);
+    applyEntityHeightDurabilityBarrier(
+      env,
       runtimeInput,
       mempool,
       mempoolQueuedAt ?? (env.timestamp ?? 0),
@@ -2714,6 +4003,8 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       state.maxEntityInputsPerFrame ?? 0,
       mempoolQueuedAt ?? (env.timestamp ?? 0),
     );
+    runtimeInput.entityInputs = await prepareHtlcPaymentEntityInputs(env, runtimeInput.entityInputs);
+    runtimeInputForRequeue = cloneRuntimeFrameMempool(runtimeInput);
     processProfileMetrics.entityInputs = runtimeInput.entityInputs.length;
     processProfileMetrics.entityTxs = runtimeInput.entityInputs.reduce(
       (sum, input) => sum + Number(input.entityTxs?.length || 0),
@@ -2723,11 +4014,26 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     const hasRuntimeInput =
       runtimeInput.runtimeTxs.length > 0 ||
       runtimeInput.entityInputs.length > 0 ||
-      (runtimeInput.jInputs?.length ?? 0) > 0;
+      (runtimeInput.jInputs?.length ?? 0) > 0 ||
+      (runtimeInput.reliableReceipts?.length ?? 0) > 0;
+    const runtimeMachineBeforeApply = hasRuntimeInput
+      ? buildDurableRuntimeMachineSnapshot(env, {
+          pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
+          includeIngressWorkingState: true,
+        })
+      : undefined;
     let appliedRuntimeInputForPersistence: RuntimeInput | undefined;
+
+    if (
+      (runtimeInput.reliableReceipts?.length ?? 0) > 0 ||
+      hasPendingLocalReliableOutput(env)
+    ) {
+      reliableReceiptSenderCheckpoint = captureReliableReceiptSenderCheckpoint(env);
+    }
 
     let entityOutbox: RoutedEntityInput[] = [];
     let jOutbox: JInput[] = [];
+    let queuedJSubmitRetries: RuntimeTx[] = [];
     const changedEntityIds = new Set<string>();
     const getLocallySignableEntityIds = (): Set<string> => {
       const localEntityIds = new Set<string>();
@@ -2768,7 +4074,8 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       return input.entityTxs.some(
         tx =>
           tx.type === 'openAccount' ||
-          tx.type === 'profile-update',
+          tx.type === 'profile-update' ||
+          tx.type === 'certifyProfile',
       );
     };
     if (hasRuntimeInput) {
@@ -2795,8 +4102,17 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
           });
         }
         entityOutbox = result.entityOutbox;
-        jOutbox = [...jOutbox, ...result.jOutbox];
-        appliedRuntimeInputForPersistence = result.appliedRuntimeInput;
+        const splitJOutbox = splitJOutboxForDurableSubmit(result.jOutbox);
+        registerPendingCommittedJOutbox(env, splitJOutbox.durable);
+        queuedJSubmitRetries = splitJOutbox.retries;
+        jOutbox = splitJOutbox.immediate;
+        // Local authorization symbols prove that a command entered through a
+        // trusted in-process adapter. They are neither deterministic protocol
+        // data nor needed on replay (replay is authorized by the committed
+        // frame). Persisting them would make an otherwise valid frame depend
+        // on process-local object metadata, so strip them at this boundary.
+        appliedRuntimeInputForPersistence = cloneIsolatedRuntimeInput(result.appliedRuntimeInput);
+        reliableIngressCommits = result.reliableIngressCommits;
         refreshScheduledWakeIndex(
           env,
           new Set(runtimeInput.entityInputs.map(input => input.entityId.toLowerCase())),
@@ -2818,57 +4134,56 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
           }
         }
         markProcessProfile('fingerprints');
-      } catch (error) {
-        const quarantineResult = quarantineLiveRuntimeInput(env, runtimeInput, error, quietRuntimeLogs);
-        if (quarantineResult) {
-          clearPendingAuditEvents(env);
-          throw error;
-        }
-        // Failed apply never becomes durable. We restore ingress back to the
-        // mempool and abort this tick; only saveEnvToDB() below makes a frame
-        // restartable / committed.
-        mempool.runtimeTxs = [...runtimeInput.runtimeTxs, ...mempool.runtimeTxs];
-        mempool.entityInputs = [...runtimeInput.entityInputs, ...mempool.entityInputs];
-        if (runtimeInput.jInputs) {
-          mempool.jInputs = [...runtimeInput.jInputs, ...(mempool.jInputs ?? [])];
-        }
-        if (mempool.queuedAt === undefined) {
-          mempool.queuedAt = mempoolQueuedAt ?? (env.timestamp ?? 0);
-        }
-        clearPendingAuditEvents(env);
-        throw error;
       } finally {
         envRecord(env)[ENV_APPLY_ALLOWED_KEY] = false;
       }
     }
 
+    jOutbox = [
+      ...(state.pendingCommittedJOutbox ?? []),
+      ...jOutbox,
+    ];
+    const jSideEffectIntentCount = jOutbox.length + queuedJSubmitRetries.length;
+    const runtimeInfraEffectCount = (appliedRuntimeInputForPersistence?.runtimeTxs ?? [])
+      .filter(runtimeTx =>
+        runtimeTx.type === 'importJ' ||
+        runtimeTx.type === 'completeImportJ' ||
+        runtimeTx.type === 'importReplica')
+      .length;
+
     const outputRoutingDeps = getRuntimeOutputRoutingDeps();
-    const pendingBeforePlan = env.pendingNetworkOutputs ?? [];
+    const pendingBeforePlan = buildPendingNetworkOutputs(pruneReceiptedReliableOutputs(env, [
+      ...(env.pendingNetworkOutputs ?? []),
+      ...entityOutbox,
+    ]));
     const { ready: readyPendingOutputs, waiting: waitingPendingOutputs } = splitPendingOutputsByRetryWindow(
       env,
       pendingBeforePlan,
       outputRoutingDeps,
     );
-    const outputsToPlan = readyPendingOutputs.length > 0 ? [...readyPendingOutputs, ...entityOutbox] : entityOutbox;
-    const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, outputsToPlan, outputRoutingDeps);
+    const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(
+      env,
+      readyPendingOutputs,
+      outputRoutingDeps,
+    );
     processProfileMetrics.localOutputs = localOutputs.length;
     processProfileMetrics.remoteOutputs = remoteOutputs.length;
     processProfileMetrics.deferredOutputs = deferredOutputs.length;
     processProfileMetrics.jOutputs = jOutbox.length;
     markProcessProfile('planOutputs');
+    const retainedLocalReliableOutputs = queueLocalOutputsWithReliability(env, localOutputs);
     env.pendingNetworkOutputs = buildPendingNetworkOutputs([
       ...waitingPendingOutputs,
       ...deferredOutputs,
       ...remoteOutputs.map(({ output }) => output),
+      ...retainedLocalReliableOutputs,
     ]);
-    if (localOutputs.length > 0) {
-      enqueueRuntimeInputs(env, localOutputs, undefined, undefined, env.timestamp);
-      if (!quietRuntimeLogs) {
-        runtimeLog.debug('tick.local_outputs.queued', {
-          localOutputs: localOutputs.length,
-          entityIds: localOutputs.map(o => o.entityId.slice(-4)),
-        });
-      }
+    if (localOutputs.length > 0 && !quietRuntimeLogs) {
+      runtimeLog.debug('tick.local_outputs.queued', {
+        localOutputs: localOutputs.length,
+        reliableRetained: retainedLocalReliableOutputs.length,
+        entityIds: localOutputs.map(o => o.entityId.slice(-4)),
+      });
     }
     // Re-check due crontab work after apply. Hooks scheduled at the current
     // logical timestamp should run on the next tick without importing wall
@@ -2896,11 +4211,10 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
         gossipProfiles: env.gossip?.getProfiles ? env.gossip.getProfiles() : [],
       });
 
-      if (!env.history) env.history = [];
       // History is a local/debug timeline, not the durable source of truth.
       // If the process crashes before WAL save, this in-memory tail is expected
       // to disappear; replay always trusts persisted frames, not env.history.
-      env.history.push(snapshot);
+      env.history = appendRecentRuntimeSnapshot(env.history ?? [], snapshot);
 
       if (!quietRuntimeLogs) {
         runtimeLog.debug('history.snapshot', {
@@ -2935,39 +4249,104 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
           env,
           appliedRuntimeInputForPersistence,
           env.pendingNetworkOutputs,
+          runtimeMachineBeforeApply,
         );
         if (saveOutcome.staleWriterStopped) {
+          frameRollbackHandled = true;
+          const rollbackError = await rollbackUndurableFrame(
+            new Error('STALE_RUNTIME_WRITER_STOPPED'),
+            { quarantine: false, requeue: false },
+          );
+          env = liveEnv;
+          state = ensureRuntimeState(env);
+          const haltedState = state;
+          transitionRuntimeLifecycle(haltedState, 'halted');
+          haltedState.fatalDebugPayload = {
+            message:
+              `STALE_RUNTIME_WRITER_STOPPED: frame=${frameHeightBeforeTick + 1} ` +
+              `runtime=${String(env.runtimeId || '').slice(0, 12)}`,
+            height: Math.max(0, env.height ?? 0),
+            timestamp: Math.max(0, env.timestamp ?? 0),
+          };
+          haltedState.stopLoop?.();
           processProfileOutcome = 'stale-writer-stopped';
-          clearPendingAuditEvents(env);
+          if (rollbackError.message !== 'STALE_RUNTIME_WRITER_STOPPED') throw rollbackError;
           return env;
         }
+        frameCommitDisposition = 'committed';
+        reliableReceiptStateDurable = true;
         flushPendingAuditEvents(env);
         env.frameLogs = [];
+        if (!frameTransaction) throw new Error('RUNTIME_FRAME_TRANSACTION_MISSING_AT_COMMIT');
+        env = publishRuntimeFrameTransaction(frameTransaction);
+        state = ensureRuntimeState(env);
+        drainRuntimeFrameIngressBuffer(frameTransaction);
         if (!quietRuntimeLogs) {
           runtimeLog.debug('storage.save.done', { height: env.height });
         }
         markProcessProfile('save');
       } catch (error) {
-        clearPendingAuditEvents(env);
+        if (
+          error instanceof RuntimeFrameStorageError &&
+          error.commitStatus !== 'not-committed'
+        ) {
+          frameCommitDisposition = error.commitStatus === 'committed' ? 'committed' : 'unknown';
+          reliableReceiptStateDurable = true;
+          clearPendingAuditEvents(env);
+          if (
+            frameTransaction &&
+            (error.commitStatus === 'committed' || error.commitStatus === 'unknown')
+          ) {
+            env = publishRuntimeFrameTransaction(frameTransaction);
+          } else {
+            env = liveEnv;
+          }
+          state = ensureRuntimeState(env);
+          if (!frameTransaction) throw new Error('RUNTIME_FRAME_TRANSACTION_MISSING_AT_STORAGE_ERROR_DRAIN');
+          drainRuntimeFrameIngressBuffer(frameTransaction);
+          const haltedState = state;
+          transitionRuntimeLifecycle(haltedState, 'halted');
+          haltedState.fatalDebugPayload = {
+            message: error.message,
+            height: Math.max(0, env.height ?? 0),
+            timestamp: Math.max(0, env.timestamp ?? 0),
+          };
+          haltedState.stopLoop?.();
+        } else {
+          clearPendingAuditEvents(env);
+        }
         throw error;
       }
     } else {
+      frameCommitDisposition = 'committed';
       clearPendingAuditEvents(env);
+      if (!frameTransaction) throw new Error('RUNTIME_FRAME_TRANSACTION_MISSING_AT_EMPTY_COMMIT');
+      env = publishRuntimeFrameTransaction(frameTransaction);
+      state = ensureRuntimeState(env);
+      drainRuntimeFrameIngressBuffer(frameTransaction);
     }
 
     const recoveryBarrier = state.recoveryBackupBarrier;
-    if (recoveryBarrier && (remoteOutputs.length > 0 || jOutbox.length > 0)) {
+    const pendingReliableReceiptDeliveryCount = reliableIngressCommits.reduce(
+      (count, commit) => count + commit.targetRuntimeIds.length,
+      0,
+    );
+    const recoveryRemoteOutputCount = remoteOutputs.length + pendingReliableReceiptDeliveryCount;
+    if (
+      recoveryBarrier &&
+      (recoveryRemoteOutputCount > 0 || jSideEffectIntentCount > 0 || runtimeInfraEffectCount > 0)
+    ) {
       try {
         await recoveryBarrier(env, {
           height: env.height,
-          remoteOutputCount: remoteOutputs.length,
-          jInputCount: jOutbox.length,
+          remoteOutputCount: recoveryRemoteOutputCount,
+          jInputCount: jSideEffectIntentCount + runtimeInfraEffectCount,
         });
       } catch (error) {
         env.error('system', 'RECOVERY_BACKUP_BARRIER_FAILED', {
           height: env.height,
-          remoteOutputCount: remoteOutputs.length,
-          jInputCount: jOutbox.length,
+          remoteOutputCount: recoveryRemoteOutputCount,
+          jInputCount: jSideEffectIntentCount + runtimeInfraEffectCount,
           reason: error instanceof Error ? error.message : String(error),
         });
         throw error;
@@ -2975,14 +4354,60 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     }
     markProcessProfile('recoveryBackup');
 
+    await reconcileCommittedRuntimeInfraEffects(
+      env,
+      appliedRuntimeInputForPersistence?.runtimeTxs ?? [],
+    );
+    await materializePendingJurisdictionImportResults(env, (runtimeTx) => {
+      enqueueRuntimeContinuation(
+        env,
+        undefined,
+        [runtimeTx],
+        undefined,
+        env.scenarioMode ? env.timestamp : getWallClockMs(),
+      );
+    });
+    markProcessProfile('runtimeInfra');
+
+    reliableReceiptDeliveries = finalizeReliableIngressCommit(env, reliableIngressCommits);
+
+    if (reliableReceiptDeliveries.length > 0) {
+      const receiptP2P = getP2P(env);
+      for (const delivery of reliableReceiptDeliveries) {
+        const directResult = state.directReliableReceiptDispatch?.(
+          delivery.runtimeId,
+          delivery.receipt,
+        );
+        const result = directResult && isDeliveryDelivered(directResult)
+          ? directResult
+          : receiptP2P?.enqueueReliableReceiptDelivery(
+              delivery.runtimeId,
+              delivery.receipt,
+            ) ?? directResult;
+        if (!result || !isDeliveryDelivered(result)) {
+          env.warn('network', 'RELIABLE_RECEIPT_SEND_DEFERRED', {
+            targetRuntimeId: delivery.runtimeId,
+            delivery: result ?? null,
+          });
+        }
+      }
+    }
+
+    if (queuedJSubmitRetries.length > 0) {
+      enqueueRuntimeContinuation(env, undefined, queuedJSubmitRetries, undefined, env.timestamp);
+    }
+
     // === SIDE EFFECTS (safe to fail — bilateral consensus retries) ===
 
     // A fresh account frame can reference a brand-new user entity. Publish the
     // sender profile before remote delivery so the counterparty can enforce the
     // same-jurisdiction invariant without racing gossip.
     const p2p = getP2P(env);
-    const localEntityIds = p2p ? getLocallySignableEntityIds() : new Set<string>();
+    const localEntityIds = getLocallySignableEntityIds();
     const changedLocalEntityIds = [...changedEntityIds].filter(entityId => localEntityIds.has(entityId));
+    if (changedLocalEntityIds.length > 0) {
+      await announceCertifiedLocalProfiles(env, changedLocalEntityIds);
+    }
     if (p2p && changedLocalEntityIds.length > 0) {
       if (remoteOutputs.length > 0 && typeof p2p.announceProfilesForEntitiesNow === 'function') {
         await p2p.announceProfilesForEntitiesNow(changedLocalEntityIds, 'pre-output-profile-refresh');
@@ -2999,17 +4424,23 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     const dispatchDeferred = dispatchEntityOutputs(env, remoteOutputs, outputRoutingDeps);
 
     const allDeferred = [...deferredOutputs, ...dispatchDeferred];
-    env.pendingNetworkOutputs = rescheduleDeferredOutputs(
+    const rescheduledNetworkOutputs = rescheduleDeferredOutputs(
       env,
       readyPendingOutputs,
       allDeferred,
       waitingPendingOutputs,
       outputRoutingDeps,
     );
+    env.pendingNetworkOutputs = buildPendingNetworkOutputs([
+      ...rescheduledNetworkOutputs,
+      ...retainedLocalReliableOutputs,
+    ]);
     markProcessProfile('dispatchOutputs');
 
     // 2. Execute J-batches via JAdapter.submitTx (events arrive next frame via j-watcher)
-    await submitRuntimeJOutbox(env, jOutbox, { enqueueRuntimeInputs });
+    await submitRuntimeJOutbox(env, jOutbox, {
+      enqueueRuntimeInputs: enqueueRuntimeContinuation,
+    });
     markProcessProfile('jOutbox');
 
     state.lastFrameAt = getWallClockMs();
@@ -3027,11 +4458,60 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
 
     processProfileOutcome = 'completed';
     return env;
+  } catch (error) {
+    if (
+      frameCommitDisposition === 'undurable' &&
+      !frameRollbackHandled &&
+      rollbackUndurableFrame
+    ) {
+      frameRollbackHandled = true;
+      const rollbackError = await rollbackUndurableFrame(error, {
+        quarantine: !(error instanceof RuntimeFrameStorageError),
+      });
+      throw rollbackError;
+    }
+    if (
+      frameCommitDisposition === 'undurable' &&
+      !frameRollbackHandled &&
+      frameTransaction &&
+      !frameTransaction.published
+    ) {
+      frameRollbackHandled = true;
+      const workingMempool = ensureRuntimeMempool(frameTransaction.workingEnv);
+      const cleanupErrors = await abortRuntimeFrameTransaction(frameTransaction);
+      const restoredMempool = mergeRuntimeFrameMempools(
+        workingMempool,
+        ensureRuntimeMempool(liveEnv),
+      );
+      liveEnv.runtimeMempool = restoredMempool;
+      liveEnv.runtimeInput = restoredMempool;
+      env = liveEnv;
+      try {
+        drainRuntimeFrameIngressBuffer(frameTransaction);
+      } catch (drainError) {
+        cleanupErrors.push(drainError instanceof Error ? drainError : new Error(String(drainError)));
+      }
+      if (cleanupErrors.length > 0) {
+        const originalError = error instanceof Error ? error : new Error(String(error));
+        throw new AggregateError(
+          [originalError, ...cleanupErrors],
+          'RUNTIME_FRAME_TRANSACTION_ABORT_FAILED',
+        );
+      }
+    }
+    throw error;
   } finally {
+    if (!reliableReceiptStateDurable) {
+      rollbackReliableIngressCommit(env, reliableIngressCommits);
+      if (reliableReceiptSenderCheckpoint) {
+        rollbackReliableDeliveryReceipts(env, reliableReceiptSenderCheckpoint);
+      }
+    }
     if (processProfileOutcome === 'unknown') {
       processProfileOutcome = 'thrown';
     }
     logProcessProfile();
+    processState.inFlightEntityInputs = 0;
     processState.processingPromise = null;
     releaseProcessLock();
   }
@@ -3044,10 +4524,7 @@ export const waitForRuntimeProcessingIdle = async (env: Env, timeoutMs = 5_000):
     if (!pending) return true;
     const remaining = timeoutMs - (Date.now() - startedAt);
     if (remaining <= 0) return false;
-    const completed = await Promise.race([
-      pending.then(() => true, () => true),
-      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), remaining)),
-    ]);
+    const completed = await waitForPromiseBeforeTimeout(pending, remaining);
     if (!completed) return false;
   }
 };
@@ -3078,6 +4555,30 @@ const resolveStorageWriteTimeoutMs = (): number => {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
 };
 
+type RuntimeFrameCommitStatus = 'committed' | 'not-committed' | 'conflict' | 'unknown';
+
+class RuntimeStorageWriteTimeoutError extends Error {
+  constructor(
+    readonly timeoutMs: number,
+    readonly frameHeight: number,
+    readonly runtimeId: string,
+  ) {
+    super(`STORAGE_WRITE_TIMEOUT:frame=${frameHeight}:runtime=${runtimeId}:timeoutMs=${timeoutMs}`);
+    this.name = 'RuntimeStorageWriteTimeoutError';
+  }
+}
+
+class RuntimeFrameStorageError extends Error {
+  constructor(
+    readonly commitStatus: RuntimeFrameCommitStatus,
+    cause: unknown,
+  ) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    super(`RUNTIME_FRAME_STORAGE_${commitStatus.toUpperCase()}:${message}`, { cause });
+    this.name = 'RuntimeFrameStorageError';
+  }
+}
+
 const withStorageWriteTimeout = async <T>(
   env: Env,
   promise: Promise<T>,
@@ -3091,8 +4592,11 @@ const withStorageWriteTimeout = async <T>(
       promise,
       new Promise<T>((_resolve, reject) => {
         timer = setTimeout(() => {
-          const message = `STORAGE_WRITE_TIMEOUT frame=${env.height} runtime=${String(env.runtimeId || '')} timeoutMs=${timeoutMs}`;
-          reject(new Error(message));
+          reject(new RuntimeStorageWriteTimeoutError(
+            timeoutMs,
+            env.height,
+            String(env.runtimeId || ''),
+          ));
         }, timeoutMs);
       }),
     ]);
@@ -3101,33 +4605,92 @@ const withStorageWriteTimeout = async <T>(
   }
 };
 
+const resolveAuthoritativeFrameCommitStatus = async (
+  env: Env,
+  expectedInput: RuntimeInput | undefined,
+): Promise<RuntimeFrameCommitStatus> => {
+  if (!(await tryOpenFrameDb(env))) return 'unknown';
+  const historyDb = getFrameDb(env);
+  const head = await readStorageHead(historyDb);
+  const frame = await readStorageFrameRecord(historyDb, env.height);
+  if (frame) {
+    const expectedStateHash = computeCanonicalStateHashFromEnv(env);
+    const expectedInputValue = expectedInput ?? { runtimeTxs: [], entityInputs: [] };
+    const stateMatches = frame.runtimeStateHash === expectedStateHash;
+    const inputMatches = safeStringify(frame.runtimeInput) === safeStringify(expectedInputValue);
+    return stateMatches && inputMatches ? 'committed' : 'conflict';
+  }
+  if (!head) return 'unknown';
+  if (head.latestHeight >= env.height) return 'conflict';
+  if (head.latestHeight === env.height - 1) return 'not-committed';
+  return 'unknown';
+};
+
 // === LEVELDB PERSISTENCE ===
 export const saveEnvToDB = async (
   env: Env,
   currentFrameInput?: RuntimeInput,
   currentFrameOutputs?: RoutedEntityInput[],
+  currentFrameRuntimeMachineBeforeApply?: Record<string, unknown>,
 ): Promise<{ staleWriterStopped: boolean }> => {
   if (envRecord(env)[ENV_REPLAY_MODE_KEY] === true) {
     throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
   }
-  const pendingFrameDbRecords = peekPendingFrameDbRecords(env, env.height, env.timestamp);
-  const saveResult = await withStorageWriteTimeout(
-    env,
-    withStorageWriterLock(env, () => saveRuntimeFrameToStorage({
-      env,
-      tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
-      getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
-      tryOpenFrameDb,
-      getFrameDb,
-      rotateEpochDb: rotateStorageEpochDb,
-      getPerfMs,
-      formatPerfMs,
-      frameDbRecords: pendingFrameDbRecords,
-      stopStaleWriterOnHeadAhead: runtimeIsBrowser && !env.scenarioMode,
-      ...(currentFrameInput === undefined ? {} : { currentFrameInput }),
-      ...(currentFrameOutputs === undefined ? {} : { currentFrameOutputs }),
-    })),
+  const runtimeMachineBeforeApply = currentFrameRuntimeMachineBeforeApply ?? (
+    !currentFrameInput || !runtimeInputHasWork(currentFrameInput)
+      ? buildDurableRuntimeMachineSnapshot(env, {
+          pendingNetworkOutputs: currentFrameOutputs ?? env.pendingNetworkOutputs ?? [],
+        })
+      : undefined
   );
+  const pendingFrameDbRecords = peekPendingFrameDbRecords(env, env.height, env.timestamp);
+  let saveResult: Awaited<ReturnType<typeof saveRuntimeFrameToStorage>>;
+  try {
+    saveResult = await withStorageWriteTimeout(
+      env,
+      withStorageWriterLock(env, () => saveRuntimeFrameToStorage({
+        env,
+        tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
+        getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
+        tryOpenFrameDb,
+        getFrameDb,
+        rotateEpochDb: rotateStorageEpochDb,
+        getPerfMs,
+        formatPerfMs,
+        frameDbRecords: pendingFrameDbRecords,
+        stopStaleWriterOnHeadAhead: runtimeIsBrowser && !env.scenarioMode,
+        ...(currentFrameInput === undefined ? {} : { currentFrameInput }),
+        ...(currentFrameOutputs === undefined ? {} : { currentFrameOutputs }),
+        ...(runtimeMachineBeforeApply === undefined
+          ? {}
+          : { currentFrameRuntimeMachineBeforeApply: runtimeMachineBeforeApply }),
+      })),
+    );
+  } catch (error) {
+    let commitStatus: RuntimeFrameCommitStatus = 'unknown';
+    if (!(error instanceof RuntimeStorageWriteTimeoutError)) {
+      try {
+        commitStatus = await resolveAuthoritativeFrameCommitStatus(env, currentFrameInput);
+      } catch (probeError) {
+        const writeFailure = error instanceof Error ? error : new Error(String(error));
+        const probeFailure = probeError instanceof Error ? probeError : new Error(String(probeError));
+        const combined = new AggregateError(
+          [writeFailure, probeFailure],
+          `STORAGE_WRITE_AND_AUTHORITATIVE_PROBE_FAILED:` +
+            `write=${writeFailure.name}:${writeFailure.message}:` +
+            `probe=${probeFailure.name}:${probeFailure.message}`,
+        );
+        throw new RuntimeFrameStorageError('unknown', combined);
+      }
+    }
+    throw new RuntimeFrameStorageError(commitStatus, error);
+  }
+  if (!saveResult.frameDbCommitted && !saveResult.staleWriterStopped) {
+    throw new RuntimeFrameStorageError(
+      'not-committed',
+      new Error(`STORAGE_AUTHORITATIVE_FRAME_NOT_COMMITTED:height=${env.height}`),
+    );
+  }
   if (saveResult.staleWriterStopped) {
     const state = ensureRuntimeState(env);
     transitionRuntimeLifecycle(state, 'halted');
@@ -3205,7 +4768,8 @@ const listPersistedStorageHandles = async (env: Env): Promise<PersistedStorageHa
       Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? 0)),
     ),
     latestSnapshotHeight: head.latestSnapshotHeight,
-    snapshotHeights: await listStorageSnapshotHeights(db),
+    snapshotHeights: (await listStorageSnapshotHeights(db))
+      .filter((height) => height <= head.latestSnapshotHeight),
   }];
 };
 
@@ -3273,8 +4837,24 @@ const readPersistedStorageReplicaMetas = async (
 ): Promise<Awaited<ReturnType<typeof listStorageReplicaMetas>>> => {
   const normalizedEntityId = String(entityId || '').toLowerCase();
   if (!normalizedEntityId) return [];
-  if (!(await tryOpenStorageDb(env, 'current'))) return [];
-  return listStorageReplicaMetas(getStorageDb(env, 'current'), normalizedEntityId);
+  if (!(await tryOpenFrameDb(env))) return [];
+  const historyDb = getFrameDb(env);
+  return listStorageReplicaMetas(historyDb, normalizedEntityId);
+};
+
+const readPersistedStorageSnapshotReplicaMetas = async (
+  env: Env,
+  snapshotHeight: number,
+  entityId: string,
+): Promise<Awaited<ReturnType<typeof listStorageSnapshotReplicaMetas>>> => {
+  const normalizedEntityId = String(entityId || '').toLowerCase();
+  if (!normalizedEntityId || snapshotHeight <= 0) return [];
+  if (!(await tryOpenFrameDb(env))) return [];
+  return listStorageSnapshotReplicaMetas(
+    getFrameDb(env),
+    snapshotHeight,
+    normalizedEntityId,
+  );
 };
 
 const resolvePersistedSnapshotHeight = async (env: Env, targetHeight: number): Promise<number> => {
@@ -3381,17 +4961,36 @@ const loadEnvFromStorage = async (
   runtimeId?: string | null,
   runtimeSeed?: string | null,
   targetHeightOverride?: number,
+  options: { prunedTargetReturnsNull?: boolean } = {},
 ): Promise<{
   env: Env;
   latestHeight: number;
   checkpointHeight: number;
   selectedSnapshotHeight: number;
 } | null> => {
+  /**
+   * Authoritative daemon restore has three deliberately separate phases:
+   *
+   * 1. Read compact snapshot/frame records and decode every Runtime, Entity,
+   *    Account, replica-meta and immutable DAG node through its strict schema.
+   * 2. Rebuild Maps and reachable node stores in memory, then verify lineage,
+   *    J-history roots and the canonical state hash before returning any Env.
+   * 3. Only the caller may attach live RPC/network infrastructure and start the
+   *    runtime loop. New J-events and durable outbox retries therefore cannot
+   *    mutate state until the restored checkpoint has passed every check.
+   *
+   * Keep external I/O out of phases 1-2. A restore failure must close the probe
+   * databases and fail loud; it must never expose a partially hydrated Env.
+   */
   const env = createPersistedStorageEnv(runtimeId, runtimeSeed);
   assertStorageSafetyOverridesAllowed();
   let returningEnv = false;
   try {
-    const latestHeight = await resolvePersistedLatestHeight(env);
+    const persistedHandles = await listPersistedStorageHandles(env);
+    const latestHeight = persistedHandles.reduce(
+      (max, handle) => Math.max(max, handle.latestHeight),
+      0,
+    );
     if (latestHeight <= 0) return null;
     const targetHeight = Math.max(
       1,
@@ -3400,51 +4999,165 @@ const loadEnvFromStorage = async (
         Number.isFinite(Number(targetHeightOverride)) ? Math.floor(Number(targetHeightOverride)) : latestHeight,
       ),
     );
-    const selectedSnapshotHeight = await resolvePersistedSnapshotHeight(env, targetHeight);
-    const entityIds = await listPersistedEntityIdsAtHeight(env, targetHeight);
-    const restoredStates = new Map<string, EntityState>();
-
-    for (const entityId of entityIds) {
-      const state = await loadEntityStateFromStorageDb(env, entityId, targetHeight);
-      if (state) restoredStates.set(entityId, state);
+    const frame = await readPersistedStorageFrameRecord(env, targetHeight);
+    if (!frame) {
+      const latestSnapshotHeight = persistedHandles.reduce(
+        (max, handle) => Math.max(max, handle.latestSnapshotHeight),
+        0,
+      );
+      const retainedCheckpoint = persistedHandles.some(
+        (handle) => handle.snapshotHeights.includes(targetHeight),
+      );
+      if (
+        options.prunedTargetReturnsNull &&
+        targetHeight < latestSnapshotHeight &&
+        !retainedCheckpoint
+      ) return null;
+      throw new Error(`STORAGE_RESTORE_FRAME_MISSING: height=${targetHeight}`);
     }
-    if (restoredStates.size === 0) return null;
+    const selectedSnapshotHeight = await resolvePersistedSnapshotHeight(env, targetHeight);
+    if (selectedSnapshotHeight > 0) {
+      const snapshotHandle = persistedHandles.find(
+        (handle) => handle.snapshotHeights.includes(selectedSnapshotHeight),
+      );
+      if (!snapshotHandle) {
+        throw new Error(`STORAGE_RESTORE_SNAPSHOT_HANDLE_MISSING:height=${selectedSnapshotHeight}`);
+      }
+      await verifyStorageSnapshotAtHeight(
+        snapshotHandle.db,
+        snapshotHandle.head,
+        selectedSnapshotHeight,
+      );
+    }
+    const restoredStates = await loadEntityStatesAtHeightFromStorage({
+      env,
+      tryOpenDb: tryOpenFrameDb,
+      getRuntimeDb: getFrameDb,
+      height: targetHeight,
+    });
+    for (const state of restoredStates.values()) assertCertifiedJHistoryIntegrity(state);
+
+    if (frame.runtimeMachine) restoreDurableRuntimeSnapshot(env, frame.runtimeMachine);
 
     env.eReplicas = new Map();
-    env.activeJurisdiction = undefined;
     for (const [entityId, state] of restoredStates.entries()) {
       const persistedMetas = targetHeight === latestHeight
         ? await readPersistedStorageReplicaMetas(env, entityId)
-        : [];
+        : targetHeight === selectedSnapshotHeight
+          ? await readPersistedStorageSnapshotReplicaMetas(env, selectedSnapshotHeight, entityId)
+          : [];
       const metas = persistedMetas.length > 0 ? persistedMetas : [null];
       for (const meta of metas) {
-        const { signerId, isProposer } = resolvePersistedReplicaIdentity(entityId, state, meta, targetHeight, latestHeight);
-        const hankoWitness = meta?.hankoWitness instanceof Map ? meta.hankoWitness : new Map();
-        env.eReplicas.set(formatReplicaKey(createReplicaKey(entityId, signerId)), {
+        const isLatestRestore = targetHeight === latestHeight;
+        const isCheckpointRestore = targetHeight === selectedSnapshotHeight;
+        const requiresExactReplica = isLatestRestore || isCheckpointRestore;
+        if (requiresExactReplica && (!meta || !meta.state || typeof meta.state !== 'object')) {
+          throw new Error(
+            `STORAGE_RESTORE_REPLICA_STATE_REQUIRED:entity=${entityId}:height=${targetHeight}:` +
+            `source=${isLatestRestore ? 'head' : 'checkpoint'}`,
+          );
+        }
+        const persistedReplicaState = requiresExactReplica ? meta!.state : state;
+        if (String(persistedReplicaState.entityId || '').toLowerCase() !== entityId.toLowerCase()) {
+          throw new Error(
+            `STORAGE_RESTORE_REPLICA_STATE_ENTITY_MISMATCH: expected=${entityId.toLowerCase()} ` +
+            `actual=${String(persistedReplicaState.entityId || '').toLowerCase()}`,
+          );
+        }
+        assertCertifiedJHistoryIntegrity(persistedReplicaState);
+        const { signerId, isProposer } = resolvePersistedReplicaIdentity(
+          entityId,
+          persistedReplicaState,
+          meta,
+          targetHeight,
+          latestHeight,
+        );
+        const hankoWitness = meta?.hankoWitness ?? new Map();
+        assertValidatorJHistoryIntegrity(persistedReplicaState, meta?.jHistory);
+        const replicaState = cloneEntityState(persistedReplicaState, true);
+        if (requiresExactReplica) {
+          assertPersistedLocalEntityCryptoKeys(env, entityId, signerId, replicaState);
+        }
+        const restoredReplica: EntityReplica = {
           entityId,
           signerId,
-          state: cloneEntityState(state, true),
-          mempool: meta?.mempool ?? [],
+          state: replicaState,
+          mempool: requiresExactReplica ? meta!.mempool : [],
           isProposer,
           hankoWitness,
           ...(meta?.proposal ? { proposal: meta.proposal } : {}),
           ...(meta?.lockedFrame ? { lockedFrame: meta.lockedFrame } : {}),
-          ...(meta?.validatorComputedState ? { validatorComputedState: meta.validatorComputedState } : {}),
+          ...(meta?.validatorExecution ? { validatorExecution: meta.validatorExecution } : {}),
+          ...(meta?.certifiedFrameLineage
+            ? { certifiedFrameLineage: meta.certifiedFrameLineage }
+            : {}),
+          ...(meta?.certifiedFrameAnchor
+            ? { certifiedFrameAnchor: meta.certifiedFrameAnchor }
+            : {}),
           ...(meta?.position ? { position: meta.position } : {}),
           ...(meta?.jHistory ? { jHistory: meta.jHistory } : {}),
-        });
+          ...(meta?.jSubmitState ? { jSubmitState: meta.jSubmitState } : {}),
+          ...(meta?.entityProviderActionSubmitState
+            ? { entityProviderActionSubmitState: meta.entityProviderActionSubmitState }
+            : {}),
+          ...(meta?.leaderVotes ? { leaderVotes: meta.leaderVotes } : {}),
+          ...(meta?.pendingLeaderCertificate ? { pendingLeaderCertificate: meta.pendingLeaderCertificate } : {}),
+          ...(meta?.lastConsensusProgressAt !== undefined
+            ? { lastConsensusProgressAt: meta.lastConsensusProgressAt }
+            : {}),
+        };
+        if (meta?.jPrefixRound) {
+          restoredReplica.jPrefixRound = restoreJPrefixRound(env, replicaState, meta.jPrefixRound);
+        }
+        env.eReplicas.set(formatReplicaKey(createReplicaKey(entityId, signerId)), restoredReplica);
       }
     }
 
-    const frame = await readPersistedStorageFrameRecord(env, targetHeight);
-    if (!frame) {
-      throw new Error(`STORAGE_RESTORE_FRAME_MISSING: height=${targetHeight}`);
+    const historyDb = getFrameDb(env);
+    for (const root of new Set(Array.from(env.eReplicas.values(), (replica) => (
+      replica.state.certifiedBoardState?.boardRegistryRoot
+    )).filter((value): value is string => Boolean(value)))) {
+      await hydrateCertifiedBoardRootNodesFromStorage(env, historyDb, root);
     }
+    for (const state of getLiveConsumptionAccumulatorStates(env)) {
+      await hydrateConsumptionRootNodesFromStorage(env, historyDb, state);
+    }
+    await hydrateAccountJClaimRootNodesFromStorage(
+      env,
+      historyDb,
+      getLiveAccountJClaimAccumulatorStates(env),
+    );
+
+    if (env.jReplicas.size === 0) rebuildPersistedJurisdictions(env);
+    await assertCertifiedRegistrationEvidenceStore(env);
+
+    if (targetHeight === latestHeight) {
+      const lineagePlan = buildCertifiedEntityLineagePlan(env);
+      for (const [entityId, sharedState] of restoredStates) {
+        const selected = lineagePlan.lookup.get(entityId.toLowerCase());
+        if (!selected) {
+          throw new Error(`STORAGE_RESTORE_LINEAGE_ENTITY_MISSING:${entityId}`);
+        }
+        const selectedHash = computeCanonicalEntityHash(selected.replica).hash;
+        const sharedHash = computeCanonicalEntityHash({
+          ...selected.replica,
+          state: sharedState,
+        }).hash;
+        if (selectedHash !== sharedHash) {
+          throw new Error(
+            `STORAGE_RESTORE_SHARED_STATE_MISMATCH:entity=${entityId}:` +
+            `selected=${selectedHash}:shared=${sharedHash}`,
+          );
+        }
+      }
+      applyCertifiedEntityLineagePlan(env, lineagePlan);
+    }
+
     env.height = targetHeight;
     env.timestamp = frame.timestamp;
     env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
     env.runtimeMempool = undefined;
-    env.pendingNetworkOutputs = structuredClone(frame.runtimeOutputs ?? []);
+    env.pendingNetworkOutputs = cloneIsolatedRoutedEntityInputs(frame.runtimeOutputs ?? []);
     await restoreOverlayFromFrameLog(env, targetHeight);
     await hydrateAccountFrameHistoryViews(env);
     let restoredFrameLogs: FrameLogEntry[] = [];
@@ -3453,12 +5166,19 @@ const loadEnvFromStorage = async (
         const activity = await readFrameDbRuntimeActivity(getFrameDb(env), targetHeight);
         if (activity?.logs) restoredFrameLogs = activity.logs.map((entry) => ({ ...entry }));
       }
-    } catch {
-      // Activity logs are secondary; state restore must not depend on them.
+    } catch (error) {
+      // Activity logs are secondary; classify the failure without hiding it or
+      // making authoritative state restore depend on an auxiliary index.
+      runtimeLog.warn('storage.activity_restore_failed', {
+        height: targetHeight,
+        error: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+      });
     }
     env.frameLogs = restoredFrameLogs;
-    rebuildPersistedJurisdictions(env);
-    if (frame.runtimeMachine) restoreDurableRuntimeSnapshot(env, frame.runtimeMachine);
+    if (frame.runtimeMachine) {
+      restoreDurableRuntimeSnapshot(env, frame.runtimeMachine);
+      await assertCertifiedRegistrationEvidenceStore(env);
+    }
     const shouldVerifyCanonicalAudit = Boolean(frame.canonicalStateHash) || shouldRequireCanonicalStorageAudit();
     if (shouldVerifyCanonicalAudit && !frame.canonicalStateHash) {
       throw new Error(`STORAGE_RESTORE_CANONICAL_HASH_MISSING: height=${targetHeight}`);
@@ -3529,11 +5249,11 @@ const hydrateAccountFrameHistoryViews = async (env: Env, limit = 50): Promise<vo
       if (!entityId || !replica?.state?.accounts) continue;
       for (const [counterpartyId, account] of replica.state.accounts.entries()) {
         const accountCurrentHeight = Math.max(0, Math.floor(Number(account.currentHeight ?? 0)));
-        const records = (await readFrameDbAccountFrames(db, entityId, String(counterpartyId).toLowerCase()))
-          .filter((record) =>
-            Math.max(0, Math.floor(Number(record.runtimeHeight ?? 0))) <= env.height &&
-            Math.max(0, Math.floor(Number(record.accountHeight ?? 0))) <= accountCurrentHeight
-          );
+        const records = await readFrameDbAccountFrames(db, entityId, String(counterpartyId).toLowerCase(), {
+          limit,
+          maxRuntimeHeight: env.height,
+          maxAccountHeight: accountCurrentHeight,
+        });
         setAccountFrameHistoryView(account, records.map((record) => record.frame), limit);
       }
     }
@@ -3551,7 +5271,7 @@ export const loadEntityStateFromStorageDb = async (
   entityId: string,
   height?: number,
 ): Promise<EntityState | null> => {
-  return loadEntityStateFromStorage({
+  const state = await loadEntityStateFromStorage({
     env,
     tryOpenDb: tryOpenFrameDb,
     getRuntimeDb: getFrameDb,
@@ -3559,6 +5279,8 @@ export const loadEntityStateFromStorageDb = async (
     ...(height === undefined ? {} : { height }),
     liveStateReadable: false,
   });
+  if (state) assertCertifiedJHistoryIntegrity(state);
+  return state;
 };
 
 export const loadEntityAccountDocFromStorageDb = async (
@@ -3797,22 +5519,79 @@ export const readPersistedFrameJournal = async (env: Env, height: number): Promi
   const frame = await readPersistedStorageFrameRecord(env, height);
   if (!frame) return null;
   let logs: FrameLogEntry[] = [];
-  try {
-    if (await tryOpenFrameDb(env)) {
+  if (await tryOpenFrameDb(env)) {
+    try {
       const activity = await readFrameDbRuntimeActivity(getFrameDb(env), height);
       if (activity?.logs) logs = activity.logs;
+    } catch (error) {
+      throw new Error(
+        `STORAGE_ACTIVITY_JOURNAL_READ_FAILED:height=${height}:` +
+        `${error instanceof Error ? error.message : String(error)}`,
+      );
     }
-  } catch {
-    // Frame DB is a secondary activity index. Keep state replay independent
-    // from activity history availability.
   }
   return {
     height: frame.height,
     timestamp: frame.timestamp,
+    replicaMetaDigest: frame.replicaMetaDigest,
     runtimeInput: frame.runtimeInput,
-    ...(frame.runtimeOutputs?.length ? { runtimeOutputs: structuredClone(frame.runtimeOutputs) } : {}),
+    ...(frame.runtimeOutputs?.length
+      ? { runtimeOutputs: cloneIsolatedRoutedEntityInputs(frame.runtimeOutputs) }
+      : {}),
+    ...(frame.runtimeMachineBeforeApply
+      ? { runtimeMachineBeforeApply: cloneIsolatedRuntimeSnapshot(frame.runtimeMachineBeforeApply) }
+      : {}),
+    ...(frame.runtimeMachine
+      ? { runtimeMachine: cloneIsolatedRuntimeSnapshot(frame.runtimeMachine) }
+      : {}),
+    ...(frame.runtimeStateHash ? { runtimeStateHash: frame.runtimeStateHash } : {}),
     logs,
   };
+};
+
+/**
+ * Read the bounded display/activity journal without depending on replay frames.
+ * Snapshot publication intentionally prunes non-checkpoint replay frames; the
+ * compact activity row is the authoritative source for user-facing receipts.
+ */
+type StoredPersistedActivityJournal = PersistedActivityJournal & {
+  logs: FrameLogEntry[];
+};
+
+export const readPersistedRuntimeActivityJournal = async (
+  env: Env,
+  height: number,
+): Promise<StoredPersistedActivityJournal | null> => {
+  const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
+  if (targetHeight <= 0) {
+    throw new Error(`STORAGE_ACTIVITY_JOURNAL_HEIGHT_INVALID:${String(height)}`);
+  }
+  if (!(await tryOpenFrameDb(env))) {
+    throw new Error(`STORAGE_ACTIVITY_JOURNAL_DB_OPEN_FAILED:height=${targetHeight}`);
+  }
+  try {
+    const activity = await readFrameDbRuntimeActivity(getFrameDb(env), targetHeight);
+    if (!activity) return null;
+    return {
+      height: targetHeight,
+      timestamp: activity.timestamp,
+      runtimeInput: {
+        runtimeTxs: [],
+        entityInputs: activity.runtimeInput.entityInputs.map(input =>
+          cloneIsolatedEntityInput(input as EntityInput)),
+        ...(activity.runtimeInput.jInputs
+          ? { jInputs: activity.runtimeInput.jInputs.map(input => structuredClone(input)) }
+          : {}),
+      },
+      logs: activity.logs.map((entry) => ({ ...entry })),
+    };
+  } catch (error) {
+    throw new Error(
+      `STORAGE_ACTIVITY_JOURNAL_READ_FAILED:height=${targetHeight}:` +
+      `${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
 };
 
 export const readPersistedAccountFrameHistory = async (
@@ -3829,13 +5608,13 @@ export const readPersistedAccountFrameHistory = async (
   const maxAccountHeight = Number.isFinite(Number(opts?.maxAccountHeight))
     ? Math.max(0, Math.floor(Number(opts?.maxAccountHeight)))
     : Number.POSITIVE_INFINITY;
-  const records = (await readFrameDbAccountFrames(getFrameDb(env), entityId, counterpartyId))
-    .filter((record) =>
-      Math.max(0, Math.floor(Number(record.runtimeHeight ?? 0))) <= maxRuntimeHeight &&
-      Math.max(0, Math.floor(Number(record.accountHeight ?? 0))) <= maxAccountHeight
-    );
   const boundedLimit = Math.max(1, Math.min(1000, Math.floor(Number(limit || 50))));
-  return records.slice(-boundedLimit).map((record) => structuredClone(record.frame));
+  const records = await readFrameDbAccountFrames(getFrameDb(env), entityId, counterpartyId, {
+    limit: boundedLimit,
+    ...(Number.isSafeInteger(maxRuntimeHeight) ? { maxRuntimeHeight } : {}),
+    ...(Number.isSafeInteger(maxAccountHeight) ? { maxAccountHeight } : {}),
+  });
+  return records.map((record) => structuredClone(record.frame));
 };
 
 export const readPersistedFrameJournals = async (
@@ -3916,10 +5695,10 @@ export const readPersistedRuntimeActivityPage = async (
   let height = startHeight;
   let uniqueEventCount = 0;
   for (; height >= 1 && scannedFrames < scanLimit && uniqueEventCount < limit; height -= 1) {
-    const journal = await readPersistedFrameJournal(env, height);
+    const activity = await readPersistedRuntimeActivityJournal(env, height);
     scannedFrames += 1;
-    if (!journal) continue;
-    events.push(...buildRuntimeActivityEvents(journal, opts));
+    if (!activity) continue;
+    events.push(...buildRuntimeActivityEvents(activity, opts));
     uniqueEventCount = dedupeRuntimeActivityEvents(events).length;
   }
 
@@ -3950,22 +5729,32 @@ export const readPersistedCheckpointSnapshot = async (
 ): Promise<Record<string, unknown> | null> => {
   const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
   if (targetHeight <= 0) return null;
-  const restored = await loadEnvFromStorage(env.runtimeId, env.runtimeSeed, targetHeight);
-  if (!restored || restored.env.height !== targetHeight) {
-    if (restored?.env) await closeRuntimeDb(restored.env);
-    return null;
-  }
-  try {
-    return buildRuntimeCheckpointSnapshot(restored.env);
-  } finally {
-    await closeRuntimeDb(restored.env);
-  }
+  return withStorageConsistentRead(env, async () => {
+    const restored = await loadEnvFromStorage(
+      env.runtimeId,
+      env.runtimeSeed,
+      targetHeight,
+      { prunedTargetReturnsNull: true },
+    );
+    if (!restored || restored.env.height !== targetHeight) {
+      if (restored?.env) await closeRuntimeDb(restored.env);
+      return null;
+    }
+    try {
+      return buildRuntimeCheckpointSnapshot(restored.env);
+    } finally {
+      await closeRuntimeDb(restored.env);
+    }
+  });
 };
 
 export const loadEnvFromDB = async (
   runtimeId?: string | null,
   runtimeSeed?: string | null,
-  options?: { fromSnapshotHeight?: number },
+  options?: {
+    fromSnapshotHeight?: number;
+    trustedJurisdictionRpcBindings?: readonly TrustedJurisdictionRpcBinding[];
+  },
 ): Promise<Env | null> => {
   try {
     const restored = await loadEnvFromStorage(
@@ -3976,12 +5765,20 @@ export const loadEnvFromDB = async (
     const latestEnv = restored?.env ?? null;
 
     if (latestEnv) {
+      // Persisted payloads and retry evidence are verified byte-for-byte by
+      // loadEnvFromStorage. Only after that boundary may a new transport
+      // session discard stale wall-clock deadlines and retry reliable heads.
+      markRestoredReliableOutputsDue(latestEnv);
       await rehydrateRestoredRuntimeInfra(latestEnv, {
         isBrowser: runtimeIsBrowser,
         loadGossipProfiles: (targetEnv) => loadGossipProfilesFromInfraDb(targetEnv, infraGossipDbAccess),
         assertPersistedContractConfigReady,
         setBrowserVMJurisdiction,
+        ...(options?.trustedJurisdictionRpcBindings
+          ? { trustedJurisdictionRpcBindings: options.trustedJurisdictionRpcBindings }
+          : {}),
       });
+      registerCommittedSingleSignerWallets(latestEnv);
     }
 
     return latestEnv;
@@ -4005,6 +5802,7 @@ export const clearDB = async (env?: Env): Promise<void> => {
       runtimeLog.info('db.clear_root_complete', { path: dbRootPath });
     } catch (err) {
       runtimeLog.error('db.clear_root_failed', { path: dbRootPath, error: err instanceof Error ? err.message : String(err) });
+      throw err;
     }
     return;
   }
@@ -4040,6 +5838,7 @@ export const clearDB = async (env?: Env): Promise<void> => {
     runtimeLog.info('db.clear_complete');
   } catch (err) {
     runtimeLog.error('db.clear_failed', { error: err instanceof Error ? err.message : String(err) });
+    throw err;
   }
 };
 
@@ -4153,8 +5952,6 @@ export async function submitCrossJurisdictionSwap(
   enqueueRuntimeInput(env, input);
   return { route };
 }
-
-export { setDeltaTransformerAddress } from './protocol/dispute/proof-builder';
 
 // Entity ID utilities - universal parsing, provider-scoping, comparison
 export {

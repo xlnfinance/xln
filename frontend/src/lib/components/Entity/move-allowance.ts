@@ -43,7 +43,8 @@ export function isMoveAllowanceSatisfied(required: bigint | null, raw: bigint | 
 export function buildMoveAllowanceStatusLabel(input: {
   enabled: boolean;
   tokenSymbol: string;
-  tokenDecimals: number;
+  tokenDecimals: number | null;
+  metadataLoading: boolean;
   raw: bigint | null;
   loading: boolean;
   error: string | null;
@@ -51,6 +52,10 @@ export function buildMoveAllowanceStatusLabel(input: {
   formatAmount: (amount: bigint, decimals: number) => string;
 }): string {
   if (!input.enabled) return '';
+  if (input.metadataLoading) return 'Loading asset metadata...';
+  if (input.tokenDecimals === null) {
+    throw new Error(`MOVE_ALLOWANCE_TOKEN_METADATA_MISSING:${input.tokenSymbol}`);
+  }
   const available = typeof input.raw === 'bigint'
     ? input.formatAmount(input.raw, input.tokenDecimals)
     : '—';

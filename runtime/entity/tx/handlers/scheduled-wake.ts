@@ -1,4 +1,4 @@
-import type { EntityReplica, EntityState, EntityTx, Env } from '../../../types';
+import type { EntityReplica, EntityState, EntityTx, Env, HashToSign } from '../../../types';
 import { executeCrontab } from '../../scheduler';
 import { assertScheduledWakeMatchesState } from '../../../machine/scheduled-wake';
 
@@ -19,8 +19,14 @@ export const handleScheduledWakeEntityTx = async (
     mempool: [],
     isProposer: true,
   };
+  const hashesToSign: HashToSign[] = [];
   const outputs = await executeCrontab(env, replica, state.crontabState, {
     manualBroadcastInInput,
+    hashesToSign,
   });
-  return { newState: replica.state, outputs };
+  return {
+    newState: replica.state,
+    outputs,
+    ...(hashesToSign.length > 0 ? { hashesToSign } : {}),
+  };
 };

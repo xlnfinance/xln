@@ -13,7 +13,8 @@ const token = (
   leftReserve: partial.leftReserve ?? 100n,
   rightReserve: partial.rightReserve ?? 100n,
   collateral: partial.collateral ?? 100n,
-  finalDelta: partial.finalDelta ?? 50n,
+  ondelta: partial.ondelta ?? 0n,
+  offdelta: partial.offdelta ?? 50n,
   ...(partial.existingDebtOutstanding
     ? { existingDebtOutstanding: partial.existingDebtOutstanding }
     : {}),
@@ -25,7 +26,7 @@ describe('deriveDisputeTokenFinalization', () => {
       leftReserve: 700n,
       rightReserve: 0n,
       collateral: 300n,
-      finalDelta: 100n,
+      offdelta: 100n,
     }));
 
     expect(result.collateralAllocation).toEqual({ left: 100n, right: 200n });
@@ -37,7 +38,7 @@ describe('deriveDisputeTokenFinalization', () => {
   });
 
   test('splits a fully collateralized delta without reserve transfers', () => {
-    const result = deriveDisputeTokenFinalization(token({ collateral: 100n, finalDelta: 70n }));
+    const result = deriveDisputeTokenFinalization(token({ collateral: 100n, offdelta: 70n }));
 
     expect(result.collateralAllocation).toEqual({ left: 70n, right: 30n });
     expect(result.shortfall).toEqual({ leftToRight: 0n, rightToLeft: 0n });
@@ -59,7 +60,7 @@ describe('deriveDisputeTokenFinalization', () => {
       leftReserve: 10n,
       rightReserve: 60n,
       collateral: 70n,
-      finalDelta: 100n,
+      offdelta: 100n,
     }));
 
     expect(result.collateralAllocation).toEqual({ left: 70n, right: 0n });
@@ -75,7 +76,7 @@ describe('deriveDisputeTokenFinalization', () => {
       leftReserve: 10n,
       rightReserve: 5n,
       collateral: 70n,
-      finalDelta: -30n,
+      offdelta: -30n,
     }));
 
     expect(result.collateralAllocation).toEqual({ left: 0n, right: 70n });
@@ -92,7 +93,7 @@ describe('deriveDisputeTokenFinalization', () => {
       leftReserve: 100n,
       rightReserve: 0n,
       collateral: 0n,
-      finalDelta: -50n,
+      offdelta: -50n,
       existingDebtOutstanding: { left: 80n, right: 0n },
     }));
 
@@ -105,18 +106,56 @@ describe('deriveDisputeTokenFinalization', () => {
   test('fails fast on non-bigint money and Solidity overflow edges', () => {
     expect(() => deriveDisputeTokenFinalization({ ...token(), leftReserve: 1 as never }))
       .toThrow('leftReserve must be a bigint');
-    expect(() => deriveDisputeTokenFinalization({ ...token(), finalDelta: -(1n << 255n) }))
-      .toThrow('finalDelta cannot equal int256.min');
+    expect(() => deriveDisputeTokenFinalization({ ...token(), ondelta: 1 as never }))
+      .toThrow('ondelta must be a bigint');
+    expect(() => deriveDisputeTokenFinalization({
+      ...token(),
+      ondelta: -(1n << 255n),
+      offdelta: -(1n << 255n),
+    })).toThrow('finalDelta magnitude exceeds uint256');
+  });
+
+  test('matches Solidity wide-delta finalization after same-nonce R2C crosses int256.max', () => {
+    const int256Max = (1n << 255n) - 1n;
+    const result = deriveDisputeTokenFinalization(token({
+      leftReserve: 0n,
+      rightReserve: 0n,
+      collateral: int256Max - 9n,
+      ondelta: int256Max - 9n,
+      offdelta: 10n,
+    }));
+
+    expect(result.finalDelta).toBe(int256Max + 1n);
+    expect(result.collateralAllocation).toEqual({ left: int256Max - 9n, right: 0n });
+    expect(result.newDebt).toEqual({ leftToRight: 0n, rightToLeft: 10n });
+    expect(result.after.reserves).toEqual({ left: int256Max - 9n, right: 0n });
+    expect(result.conservation.conserved).toBe(true);
+  });
+
+  test('mirrors Solidity int256.min signed-magnitude settlement without negation', () => {
+    const result = deriveDisputeTokenFinalization(token({
+      leftReserve: 0n,
+      rightReserve: 0n,
+      collateral: 100n,
+      ondelta: 0n,
+      offdelta: -(1n << 255n),
+    }));
+
+    expect(result.finalDelta).toBe(-(1n << 255n));
+    expect(result.collateralAllocation).toEqual({ left: 0n, right: 100n });
+    expect(result.newDebt).toEqual({ leftToRight: 1n << 255n, rightToLeft: 0n });
+    expect(result.after.reserves).toEqual({ left: 0n, right: 100n });
+    expect(result.conservation.conserved).toBe(true);
   });
 });
 
 describe('deriveDisputeFinalization', () => {
   test('composes four independent token rows with both delta signs', () => {
     const result = deriveDisputeFinalization([
-      token({ tokenId: 1, collateral: 100n, finalDelta: 70n }),
-      token({ tokenId: 2, collateral: 70n, finalDelta: 100n }),
-      token({ tokenId: 3, collateral: 70n, finalDelta: -30n }),
-      token({ tokenId: 4, collateral: 0n, finalDelta: 0n }),
+      token({ tokenId: 1, collateral: 100n, offdelta: 70n }),
+      token({ tokenId: 2, collateral: 70n, offdelta: 100n }),
+      token({ tokenId: 3, collateral: 70n, offdelta: -30n }),
+      token({ tokenId: 4, collateral: 0n, offdelta: 0n }),
     ]);
 
     expect(result.tokenCount).toBe(4);

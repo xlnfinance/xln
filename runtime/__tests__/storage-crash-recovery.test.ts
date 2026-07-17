@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   recoverStorageDbFromHistory,
+  hydrateConsumptionRootNodesFromStorage,
 } from '../storage';
 import {
   buildFrameDbPuts,
@@ -16,6 +17,8 @@ import { prepareStorageStateHashes } from '../storage/hashes';
 import {
   KEY_HEAD,
   STORAGE_SCHEMA_VERSION,
+  keyCertifiedBoardNode,
+  keyConsumptionNode,
   keyDiff,
 } from '../storage/keys';
 import type {
@@ -27,6 +30,20 @@ import type {
   StorageHead,
   StorageRuntimeConfig,
 } from '../storage/types';
+import {
+  EMPTY_CERTIFIED_BOARD_ROOT,
+  getCertifiedBoardStackKey,
+  putCertifiedBoardRecord,
+} from '../jurisdiction/board-registry';
+import {
+  applyConsumptionOutput,
+  createConsumptionProof,
+  createEmptyConsumptionAccumulator,
+  getConsumptionKey,
+  verifyConsumptionProof,
+} from '../entity/consumption-accumulator';
+import { getConsumptionNodeStore } from '../entity/consumption-store';
+import { createEmptyEnv } from '../runtime';
 
 const entityId = `0x${'11'.repeat(32)}`;
 type PreparedStorageHashes = Awaited<ReturnType<typeof prepareStorageStateHashes>>;
@@ -86,13 +103,22 @@ const entityDoc = (height: number): StorageEntityCoreDoc => ({
   messages: [],
   nonces: new Map(),
   proposals: new Map(),
-  config: { validators: [entityId] } as StorageEntityCoreDoc['config'],
+  config: {
+    mode: 'proposer-based',
+    threshold: 1n,
+    validators: [entityId],
+    shares: { [entityId]: 1n },
+  },
   reserves: new Map([[1, BigInt(height)]]),
   lastFinalizedJHeight: 0,
   jBlockChain: [],
-  entityEncPubKey: '',
-  entityEncPrivKey: '',
-  profile: { name: `entity-${height}` } as StorageEntityCoreDoc['profile'],
+  profile: {
+    name: `entity-${height}`,
+    isHub: false,
+    avatar: '',
+    bio: '',
+    website: '',
+  },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
   lockBook: new Map(),
@@ -143,7 +169,7 @@ const head = (latestHeight: number, latestMaterializedHeight: number): StorageHe
   schemaVersion: STORAGE_SCHEMA_VERSION,
   latestHeight,
   latestMaterializedHeight,
-  latestSnapshotHeight: latestMaterializedHeight,
+  latestSnapshotHeight: 0,
   snapshotPeriodFrames: config.snapshotPeriodFrames,
   retainSnapshots: config.retainSnapshots,
   epochMaxBytes: config.epochMaxBytes,
@@ -152,6 +178,130 @@ const head = (latestHeight: number, latestMaterializedHeight: number): StorageHe
 });
 
 describe('storage crash recovery', () => {
+  test('copies immutable certified-board nodes before publishing recovered current head', async () => {
+    const stackKey = getCertifiedBoardStackKey({
+      chainId: 31_337,
+      depositoryAddress: `0x${'11'.repeat(20)}`,
+      entityProviderAddress: `0x${'22'.repeat(20)}`,
+    });
+    const update = putCertifiedBoardRecord(new Map(), EMPTY_CERTIFIED_BOARD_ROOT, {
+      stackKey,
+      entityId,
+      boardHash: `0x${'33'.repeat(32)}`,
+      boardEpoch: 0,
+      previousBoardHash: `0x${'00'.repeat(32)}`,
+      previousBoardValidUntil: 0,
+      activatedAtJHeight: 1,
+      logIndex: 0,
+      blockHash: `0x${'44'.repeat(32)}`,
+      transactionHash: `0x${'55'.repeat(32)}`,
+      source: 'EntityRegistered',
+    });
+    const [nodeHash, node] = [...update.newNodes][0]!;
+    const currentDb = makeMemoryDb();
+    const historyDb = makeMemoryDb([
+      [KEY_HEAD, encodeBuffer(head(1, 0))],
+      [keyCertifiedBoardNode(nodeHash), encodeBuffer(node)],
+    ]);
+    await recoverStorageDbFromHistory({ db: currentDb, historyDb, config });
+    expect(decodeBuffer(await currentDb.get(keyCertifiedBoardNode(nodeHash)))).toEqual(node);
+    expect(decodeBuffer<StorageHead>(await currentDb.get(KEY_HEAD)).latestHeight).toBe(1);
+  });
+
+  test('recovers committed consumption witnesses before publishing current head', async () => {
+    const inserted = applyConsumptionOutput(createEmptyConsumptionAccumulator(), {
+      targetEntityId: entityId,
+      sourceEntityId: `0x${'22'.repeat(32)}`,
+      lane: 'generic',
+      sequence: 1,
+      semanticHash: `0x${'33'.repeat(32)}`,
+      outputHash: `0x${'44'.repeat(32)}`,
+      outputHanko: '0x01',
+    }, { version: 2, nodes: [] });
+    const node = inserted.newNodes[0]!;
+    const stale = applyConsumptionOutput(createEmptyConsumptionAccumulator(), {
+      targetEntityId: entityId,
+      sourceEntityId: `0x${'55'.repeat(32)}`,
+      lane: 'generic',
+      sequence: 1,
+      semanticHash: `0x${'66'.repeat(32)}`,
+      outputHash: `0x${'77'.repeat(32)}`,
+      outputHanko: '0x02',
+    }, { version: 2, nodes: [] }).newNodes[0]!;
+    const currentDb = makeMemoryDb([[keyConsumptionNode(stale.hash), encodeBuffer(stale.node)]]);
+    const core = entityDoc(1);
+    core.consumptionAccumulator = inserted.state;
+    const historyDb = makeMemoryDb([
+      [KEY_HEAD, encodeBuffer(head(1, 1))],
+      [keyDiff(1), encodeBuffer({
+        height: 1,
+        puts: [{ family: 'entity', entityId, value: core }],
+        dels: [],
+      } satisfies StorageDiffRecord)],
+      [keyConsumptionNode(node.hash), encodeBuffer(node.node)],
+    ]);
+
+    await recoverStorageDbFromHistory({ db: currentDb, historyDb, config });
+    expect(decodeBuffer(await currentDb.get(keyConsumptionNode(node.hash)))).toEqual(node.node);
+    await expect(currentDb.get(keyConsumptionNode(stale.hash))).rejects.toMatchObject({
+      code: 'LEVEL_NOT_FOUND',
+    });
+    expect(decodeBuffer<StorageHead>(await currentDb.get(KEY_HEAD)).latestHeight).toBe(1);
+  });
+
+  test('hydrates the complete reachable consumption DAG and rejects an incomplete restore', async () => {
+    const firstIdentity = {
+      targetEntityId: entityId,
+      sourceEntityId: `0x${'22'.repeat(32)}`,
+      lane: 'generic' as const,
+      sequence: 1,
+      semanticHash: `0x${'33'.repeat(32)}`,
+      outputHash: `0x${'44'.repeat(32)}`,
+      outputHanko: '0x01',
+    };
+    const first = applyConsumptionOutput(
+      createEmptyConsumptionAccumulator(),
+      firstIdentity,
+      { version: 2, nodes: [] },
+    );
+    const firstStore = new Map(first.newNodes.map(({ hash, node }) => [hash, node]));
+    const secondIdentity = {
+      ...firstIdentity,
+      sourceEntityId: `0x${'55'.repeat(32)}`,
+      semanticHash: `0x${'66'.repeat(32)}`,
+      outputHash: `0x${'77'.repeat(32)}`,
+      outputHanko: '0x02',
+    };
+    const second = applyConsumptionOutput(
+      first.state,
+      secondIdentity,
+      createConsumptionProof(firstStore, first.state.root, getConsumptionKey(secondIdentity)),
+    );
+    const nodes = [...first.newNodes, ...second.newNodes];
+    const db = makeMemoryDb(nodes.map(({ hash, node }) => [keyConsumptionNode(hash), encodeBuffer(node)]));
+    const env = createEmptyEnv('consumption storage hydrate');
+
+    await hydrateConsumptionRootNodesFromStorage(env, db, second.state);
+    expect(getConsumptionNodeStore(env).size).toBe(3);
+    const membership = createConsumptionProof(
+      getConsumptionNodeStore(env),
+      second.state.root,
+      getConsumptionKey(firstIdentity),
+    );
+    expect(verifyConsumptionProof(second.state.root, getConsumptionKey(firstIdentity), membership).status)
+      .toBe('member');
+
+    const incompleteDb = makeMemoryDb(nodes.slice(1).map(({ hash, node }) => [
+      keyConsumptionNode(hash),
+      encodeBuffer(node),
+    ]));
+    await expect(hydrateConsumptionRootNodesFromStorage(
+      createEmptyEnv('consumption storage missing'),
+      incompleteDb,
+      second.state,
+    )).rejects.toThrow('CONSUMPTION_NODE_MISSING');
+  });
+
   test('replays materialized diffs into current DB and catches up head from history DB', async () => {
     const diff1 = entityDiff(1);
     const diff2 = entityDiff(2);
@@ -187,6 +337,7 @@ describe('storage crash recovery', () => {
     const puts = buildFrameDbPuts({
       height: 7,
       timestamp: 700,
+      runtimeInput: { runtimeTxs: [], entityInputs: [] },
       logs: [{ id: 1, category: 'system', level: 'info', message: 'durable', timestamp: 700 }],
       touchedEntities: [entityId],
       touchedAccounts: [],

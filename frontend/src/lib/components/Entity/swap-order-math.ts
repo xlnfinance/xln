@@ -7,7 +7,6 @@ import {
 export const AGGREGATED_ORDERBOOK_DEPTH = 10;
 export const SELECTED_ORDERBOOK_DEPTH = 10;
 export const ORDERBOOK_PRICE_SCALE = 10_000n;
-export const ORDERBOOK_LOT_SCALE = 10n ** 12n;
 export const ORDERBOOK_SNAPSHOT_FRESH_MS = 10_000;
 export const ORDERBOOK_PRICE_DECIMALS = decimalPlacesFromScale(ORDERBOOK_PRICE_SCALE);
 export const MAX_PRICE_DEVIATION_BPS = 3000n;
@@ -18,7 +17,6 @@ export type SwapOrderMode = 'buy-base' | 'sell-base' | 'none';
 export type SwapTradeSide = 'buy-base' | 'sell-base';
 
 export type PreparedSwapOrderLike = {
-  side: 0 | 1;
   priceTicks: bigint;
   effectiveGive: bigint;
   effectiveWant: bigint;
@@ -62,41 +60,6 @@ export function formatSwapTokenAmountForInput(amount: bigint, tokenDecimals: num
   const whole = full.slice(0, dotIndex);
   const frac = full.slice(dotIndex + 1, dotIndex + 1 + maxDecimals).replace(/0+$/, '');
   return frac.length > 0 ? `${whole}.${frac}` : whole;
-}
-
-export function requantizeSwapOrderAtLimitPrice(input: {
-  remainingGiveAmount: bigint;
-  priceTicks: bigint;
-  orderMode: SwapOrderMode;
-  tradeSide: SwapTradeSide;
-}): PreparedSwapOrderLike | null {
-  if (input.remainingGiveAmount <= 0n || input.priceTicks <= 0n) return null;
-  const activeMode = input.orderMode !== 'none' ? input.orderMode : input.tradeSide;
-  const side = activeMode === 'sell-base' ? 1 : 0;
-  if (side === 1) {
-    const quantizedBaseAmount = (input.remainingGiveAmount / ORDERBOOK_LOT_SCALE) * ORDERBOOK_LOT_SCALE;
-    if (quantizedBaseAmount <= 0n) return null;
-    const quantizedQuoteAmount = (quantizedBaseAmount * input.priceTicks) / ORDERBOOK_PRICE_SCALE;
-    if (quantizedQuoteAmount <= 0n) return null;
-    return {
-      side,
-      priceTicks: input.priceTicks,
-      effectiveGive: quantizedBaseAmount,
-      effectiveWant: quantizedQuoteAmount,
-      unspentGiveAmount: input.remainingGiveAmount - quantizedBaseAmount,
-    };
-  }
-  const quantizedBaseAmount = ((input.remainingGiveAmount * ORDERBOOK_PRICE_SCALE) / input.priceTicks / ORDERBOOK_LOT_SCALE) * ORDERBOOK_LOT_SCALE;
-  if (quantizedBaseAmount <= 0n) return null;
-  const quantizedQuoteAmount = (quantizedBaseAmount * input.priceTicks) / ORDERBOOK_PRICE_SCALE;
-  if (quantizedQuoteAmount <= 0n) return null;
-  return {
-    side,
-    priceTicks: input.priceTicks,
-    effectiveGive: quantizedQuoteAmount,
-    effectiveWant: quantizedBaseAmount,
-    unspentGiveAmount: input.remainingGiveAmount > quantizedQuoteAmount ? input.remainingGiveAmount - quantizedQuoteAmount : 0n,
-  };
 }
 
 export function parseSwapDisplayPriceTicks(displayPrice: string, fallbackPriceTicks: bigint): bigint {

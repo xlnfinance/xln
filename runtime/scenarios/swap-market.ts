@@ -16,8 +16,15 @@
  */
 
 import type { Env, EntityInput } from '../types';
-import { ensureJAdapter, getJAdapterMode, createJReplica } from './boot';
-import { commitRuntimeInput, findReplica, converge, assert, assertRuntimeIdle, processUntil, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
+import {
+  bindScenarioJReplica,
+  createJurisdictionConfig,
+  createJReplica,
+  ensureJAdapter,
+  getJAdapterMode,
+  registerEntities,
+} from './boot';
+import { findReplica, converge, assert, assertRuntimeIdle, processUntil, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 import { createGossipLayer } from '../networking/gossip';
 import { getAccountFrameHistoryView } from '../machine/env-events';
 import { getBookOrders } from '../orderbook/core';
@@ -145,16 +152,12 @@ export async function swapMarket(env: Env): Promise<void> {
   const jMode = getJAdapterMode();
   const jadapter = await ensureJAdapter(env, jMode);
   const J_MACHINE_POSITION = { x: 0, y: 600, z: 0 };
-  const jReplica = createJReplica(env, 'Market', jadapter.addresses.depository, J_MACHINE_POSITION); // Match ahb.ts positioning
-  jReplica.jadapter = jadapter;
-  jReplica.depositoryAddress = jadapter.addresses.depository;
-  jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
-  jReplica.contracts = {
-    depository: jadapter.addresses.depository,
-    entityProvider: jadapter.addresses.entityProvider,
-    account: jadapter.addresses.account,
-    deltaTransformer: jadapter.addresses.deltaTransformer,
-  };
+  bindScenarioJReplica(
+    env,
+    createJReplica(env, 'Market', jadapter.addresses.depository, J_MACHINE_POSITION),
+    jadapter,
+  );
+  jadapter.startWatching(env);
   console.log('✅ JAdapter J-Machine created\n');
 
   // ============================================================================
@@ -163,19 +166,19 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log('📦 Creating 10 market participants (3 hubs + 7 traders)...');
 
   const hubs: MarketHub[] = [
-    { name: 'HubETH', id: '0x' + '1'.padStart(64, '0'), signer: '1', role: 'hub', pairs: [ETH_USDC_PAIR] }, // ETH/USDC
-    { name: 'HubWBTC', id: '0x' + '2'.padStart(64, '0'), signer: '2', role: 'hub', pairs: [WBTC_USDC_PAIR] }, // WBTC/USDC
-    { name: 'HubDAI', id: '0x' + '3'.padStart(64, '0'), signer: '3', role: 'hub', pairs: [DAI_USDC_PAIR] }, // DAI/USDC
+    { name: 'HubETH', id: '', signer: '1', role: 'hub', pairs: [ETH_USDC_PAIR] }, // ETH/USDC
+    { name: 'HubWBTC', id: '', signer: '2', role: 'hub', pairs: [WBTC_USDC_PAIR] }, // WBTC/USDC
+    { name: 'HubDAI', id: '', signer: '3', role: 'hub', pairs: [DAI_USDC_PAIR] }, // DAI/USDC
   ];
 
   const traders: MarketTrader[] = [
-    { name: 'Alice', id: '0x' + '4'.padStart(64, '0'), signer: '4', role: 'maker' },
-    { name: 'Bob', id: '0x' + '5'.padStart(64, '0'), signer: '5', role: 'maker' },
-    { name: 'Carol', id: '0x' + '6'.padStart(64, '0'), signer: '6', role: 'taker' },
-    { name: 'Dave', id: '0x' + '7'.padStart(64, '0'), signer: '7', role: 'taker' },
-    { name: 'Eve', id: '0x' + '8'.padStart(64, '0'), signer: '8', role: 'maker' },
-    { name: 'Frank', id: '0x' + '9'.padStart(64, '0'), signer: '9', role: 'taker' },
-    { name: 'Grace', id: '0x' + 'a'.padStart(64, '0'), signer: '10', role: 'maker' },
+    { name: 'Alice', id: '', signer: '4', role: 'maker' },
+    { name: 'Bob', id: '', signer: '5', role: 'maker' },
+    { name: 'Carol', id: '', signer: '6', role: 'taker' },
+    { name: 'Dave', id: '', signer: '7', role: 'taker' },
+    { name: 'Eve', id: '', signer: '8', role: 'maker' },
+    { name: 'Frank', id: '', signer: '9', role: 'taker' },
+    { name: 'Grace', id: '', signer: '10', role: 'maker' },
   ];
 
   const entities = [...hubs, ...traders];
@@ -210,23 +213,28 @@ export async function swapMarket(env: Env): Promise<void> {
     ]),
   );
 
-  const createEntityTxs = entities.map(e => ({
-    type: 'importReplica' as const,
-    entityId: e.id,
-    signerId: e.signer,
-    data: {
-      isProposer: true,
-      position: MARKET_POSITIONS[e.name] || { x: 0, y: -80, z: 0 },
-      config: {
-        mode: 'proposer-based' as const,
-        threshold: 1n,
-        validators: [e.signer],
-        shares: { [e.signer]: 1n },
-      },
-    },
-  }));
-
-  await commitRuntimeInput(env, { runtimeTxs: createEntityTxs, entityInputs: [] });
+  const jurisdiction = createJurisdictionConfig(
+    'Market',
+    jadapter.addresses.depository,
+    jadapter.addresses.entityProvider,
+  );
+  const registered = await registerEntities(
+    env,
+    jadapter,
+    entities.map(entity => ({
+      name: entity.name,
+      signer: entity.signer,
+      position: MARKET_POSITIONS[entity.name] || { x: 0, y: -80, z: 0 },
+    })),
+    jurisdiction,
+  );
+  for (let index = 0; index < entities.length; index += 1) {
+    const entity = entities[index];
+    const registration = registered[index];
+    if (!entity || !registration) throw new Error(`SWAP_MARKET_REGISTRATION_MISSING:${index}`);
+    entity.id = registration.id;
+    entity.signer = registration.signer;
+  }
   console.log(`  ✅ Created: ${entities.map(e => e.name).join(', ')}\n`);
 
   const hubEth = requireDefined(hubs[0], 'HubETH');
@@ -851,48 +859,49 @@ export async function swapMarketStress(env: Env): Promise<void> {
   const jMode = getJAdapterMode();
   const jadapter = await ensureJAdapter(env, jMode);
   const J_MACHINE_POSITION = { x: 0, y: 600, z: 0 };
-  const jReplica = createJReplica(env, 'StressTest', jadapter.addresses.depository, J_MACHINE_POSITION);
-  jReplica.jadapter = jadapter;
-  jReplica.depositoryAddress = jadapter.addresses.depository;
-  jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
-  jReplica.contracts = {
-    depository: jadapter.addresses.depository,
-    entityProvider: jadapter.addresses.entityProvider,
-    account: jadapter.addresses.account,
-    deltaTransformer: jadapter.addresses.deltaTransformer,
-  };
+  bindScenarioJReplica(
+    env,
+    createJReplica(env, 'StressTest', jadapter.addresses.depository, J_MACHINE_POSITION),
+    jadapter,
+  );
+  jadapter.startWatching(env);
   console.log('✅ JAdapter J-Machine created\n');
 
   // Create 1 hub + 10 traders
-  const hub = { name: 'Hub', id: '0x' + '1'.padStart(64, '0'), signer: '1' };
+  const hub = { name: 'Hub', id: '', signer: '1' };
   const traders: Array<{ name: string; id: string; signer: string }> = [];
   for (let i = 0; i < 10; i++) {
     traders.push({
       name: `Trader${i}`,
-      id: '0x' + (i + 2).toString(16).padStart(64, '0'),
+      id: '',
       signer: String(i + 2),
     });
   }
 
   // Create entities
   const allEntities = [hub, ...traders];
-  const createEntityTxs = allEntities.map((e, idx) => ({
-    type: 'importReplica' as const,
-    entityId: e.id,
-    signerId: e.signer,
-    data: {
-      isProposer: true,
-      position: { x: (idx - 5) * 30, y: -80, z: 0 },
-      config: {
-        mode: 'proposer-based' as const,
-        threshold: 1n,
-        validators: [e.signer],
-        shares: { [e.signer]: 1n },
-      },
-    },
-  }));
-
-  await commitRuntimeInput(env, { runtimeTxs: createEntityTxs, entityInputs: [] });
+  const jurisdiction = createJurisdictionConfig(
+    'StressTest',
+    jadapter.addresses.depository,
+    jadapter.addresses.entityProvider,
+  );
+  const registered = await registerEntities(
+    env,
+    jadapter,
+    allEntities.map((entity, index) => ({
+      name: entity.name,
+      signer: entity.signer,
+      position: { x: (index - 5) * 30, y: -80, z: 0 },
+    })),
+    jurisdiction,
+  );
+  for (let index = 0; index < allEntities.length; index += 1) {
+    const entity = allEntities[index];
+    const registration = registered[index];
+    if (!entity || !registration) throw new Error(`SWAP_MARKET_STRESS_REGISTRATION_MISSING:${index}`);
+    entity.id = registration.id;
+    entity.signer = registration.signer;
+  }
   console.log(`✅ Created ${allEntities.length} entities\n`);
 
   // Initialize hub orderbook

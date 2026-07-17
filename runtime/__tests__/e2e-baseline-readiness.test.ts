@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 
 const loadBaselineHelpers = async () => {
   process.env['E2E_BASE_URL'] = process.env['E2E_BASE_URL'] || 'https://localhost:1';
@@ -98,16 +99,49 @@ describe('e2e baseline readiness', () => {
     expect(resolveE2EBaselineInitialWaitMs({ ...readyOptions, allowAutoReset: true })).toBe(5_000);
   });
 
-  test('default baseline accepts ready market maker and reset body does not disable it', async () => {
+  test('non-market-maker baseline ignores an enabled but unready market maker', async () => {
     const { buildE2EResetBody, isBaselineReady } = await loadBaselineHelpers();
 
     const defaultOptions = { ...readyOptions, requireMarketMaker: false, requireCustody: false };
-    expect(isBaselineReady(readyHealth, defaultOptions)).toBe(true);
-    expect(buildE2EResetBody(defaultOptions)).toEqual({ confirm: 'RESET_MESH_STATE' });
+    expect(isBaselineReady({
+      ...readyHealth,
+      systemOk: false,
+      degraded: ['marketMaker'],
+      marketMaker: {
+        ...readyHealth.marketMaker,
+        ok: false,
+        startupPhase: 'bootstrap-cross',
+      },
+    }, defaultOptions)).toBe(true);
+    expect(buildE2EResetBody(defaultOptions)).toEqual({
+      confirm: 'RESET_MESH_STATE',
+      enableMarketMaker: false,
+      enableCustody: false,
+    });
     expect(buildE2EResetBody({ ...defaultOptions, requireMarketMaker: true })).toEqual({
       confirm: 'RESET_MESH_STATE',
+      enableCustody: false,
       requireMarketMaker: true,
       enableMarketMaker: true,
     });
+    expect(buildE2EResetBody({ ...defaultOptions, requireCustody: true })).toEqual({
+      confirm: 'RESET_MESH_STATE',
+      enableMarketMaker: false,
+      enableCustody: true,
+      requireCustody: true,
+    });
+  });
+
+  test('playwright owns the first reset so its exact baseline options win', () => {
+    const config = readFileSync('playwright.config.ts', 'utf8');
+    expect(config).toContain('XLN_MESH_DEFER_INITIAL_RESET=1 SKIP_TYPECHECK=1 bun run dev');
+  });
+
+  test('orchestrator health and runtime imports use the successfully active reset capabilities', () => {
+    const orchestrator = readFileSync('runtime/orchestrator/orchestrator.ts', 'utf8');
+    expect(orchestrator).toContain('resolveResetCapabilityHealth(activeResetOptions');
+    expect(orchestrator).toContain('mmEnabled: capabilityHealth.marketMakerEnabled');
+    expect(orchestrator).toContain('enabled: capabilityHealth.custodyEnabled');
+    expect(orchestrator).toContain('activeResetOptions = resolveActiveResetOptions(configuredResetOptions, options)');
   });
 });

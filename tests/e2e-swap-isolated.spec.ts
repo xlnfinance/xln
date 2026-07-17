@@ -25,6 +25,15 @@ const INIT_TIMEOUT = 30_000;
 const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
 const API_BASE_URL = requireIsolatedBaseUrl('E2E_API_BASE_URL');
 const SWAP_CONNECT_TOKEN_IDS = [1, 2] as const;
+const SWAP_TOKEN_METADATA = {
+  1: { symbol: 'USDC', decimals: 6 },
+  2: { symbol: 'WETH', decimals: 18 },
+} as const;
+type SwapTokenId = keyof typeof SWAP_TOKEN_METADATA;
+
+const wholeSwapTokenUnits = (tokenId: SwapTokenId, amount: bigint): bigint =>
+  amount * 10n ** BigInt(SWAP_TOKEN_METADATA[tokenId].decimals);
+
 const SWAP_TOKEN_BY_SYMBOL: Record<string, string> = {
   USDC: '1',
   WETH: '2',
@@ -976,7 +985,12 @@ async function readSwapHistoryCount(
 test.describe('E2E Swap Isolated Flow', () => {
   test.setTimeout(240_000);
 
-  test('relay orderbook publishes new resting ask and bid to both subscribed users', async ({ browser, page }) => {
+  test('swap fixtures use canonical token decimals', { tag: '@functional' }, () => {
+    expect(wholeSwapTokenUnits(1, 1n), 'USDC uses six decimals').toBe(1_000_000n);
+    expect(wholeSwapTokenUnits(2, 1n), 'WETH uses eighteen decimals').toBe(1_000_000_000_000_000_000n);
+  });
+
+  test('relay orderbook publishes new resting ask and bid to both subscribed users', { tag: '@functional' }, async ({ browser, page }) => {
     let aliceContext: BrowserContext | null = null;
     let bobContext: BrowserContext | null = null;
 
@@ -1023,7 +1037,7 @@ test.describe('E2E Swap Isolated Flow', () => {
 
       await Promise.all([
         waitForOutCapAtLeast(alicePage, alice.entityId, hubId, 2, 1n * 10n ** 18n),
-        waitForOutCapAtLeast(bobPage, bob.entityId, hubId, 1, 10n * 10n ** 18n),
+        waitForOutCapAtLeast(bobPage, bob.entityId, hubId, 1, wholeSwapTokenUnits(1, 10n)),
       ]);
 
       await Promise.all([
@@ -1157,7 +1171,7 @@ test.describe('E2E Swap Isolated Flow', () => {
     }
   });
 
-  test('self-trade protection cancels a user taker before matching their own resting order', async ({ browser, page }) => {
+  test('self-trade protection cancels a user taker before matching their own resting order', { tag: '@resilience' }, async ({ browser, page }) => {
     let aliceContext: BrowserContext | null = null;
 
     try {
@@ -1188,7 +1202,7 @@ test.describe('E2E Swap Isolated Flow', () => {
       ]);
       await Promise.all([
         waitForOutCapAtLeast(alicePage, alice.entityId, hubId, 2, 1n * 10n ** 18n),
-        waitForOutCapAtLeast(alicePage, alice.entityId, hubId, 1, 75n * 10n ** 18n),
+        waitForOutCapAtLeast(alicePage, alice.entityId, hubId, 1, wholeSwapTokenUnits(1, 75n)),
       ]);
 
       await openSwapWorkspace(alicePage);
@@ -1229,7 +1243,7 @@ test.describe('E2E Swap Isolated Flow', () => {
     }
   });
 
-  test('two isolated users trade against each other through one hub orderbook without market maker liquidity', async ({ browser, page }) => {
+  test('two isolated users trade against each other through one hub orderbook without market maker liquidity', { tag: '@functional' }, async ({ browser, page }) => {
     let aliceContext: BrowserContext | null = null;
     let bobContext: BrowserContext | null = null;
 
@@ -1278,7 +1292,7 @@ test.describe('E2E Swap Isolated Flow', () => {
       ]);
 
       const aliceToken2Before = await waitForOutCapAtLeast(alicePage, alice.entityId, hubId, 2, 1n * 10n ** 18n);
-      const bobToken1Before = await waitForOutCapAtLeast(bobPage, bob.entityId, hubId, 1, 10n * 10n ** 18n);
+      const bobToken1Before = await waitForOutCapAtLeast(bobPage, bob.entityId, hubId, 1, wholeSwapTokenUnits(1, 10n));
       const aliceToken1Before = await outCap(alicePage, alice.entityId, hubId, 1);
       const bobToken2Before = await outCap(bobPage, bob.entityId, hubId, 2);
       await openSwapWorkspace(alicePage);
@@ -1316,14 +1330,17 @@ test.describe('E2E Swap Isolated Flow', () => {
 
       const aliceResolve = await waitForLatestSwapResolveSnapshot(alicePage, alice.entityId, hubId, 1);
       expect(aliceResolve.executionGiveAmount, 'maker gives exactly 0.03 WETH').toBe('30000000000000000');
-      expect(aliceResolve.executionWantAmount, 'maker receives execution quote at resting ask, not taker limit').toBe('75000000000000000000');
+      expect(aliceResolve.executionWantAmount, 'maker receives execution quote at resting ask, not taker limit')
+        .toBe(wholeSwapTokenUnits(1, 75n).toString());
       expect(aliceResolve.fillRatio, 'maker order is fully filled').toBe(65_535);
       expect(aliceResolve.cancelRemainder, 'maker order closes after full fill').toBe(true);
 
       const bobResolve = await waitForLatestSwapResolveSnapshot(bobPage, bob.entityId, hubId, 1);
-      expect(bobResolve.executionGiveAmount, 'buyer spends execution quote at 2500, not the 2600 limit').toBe('75000000000000000000');
+      expect(bobResolve.executionGiveAmount, 'buyer spends execution quote at 2500, not the 2600 limit')
+        .toBe(wholeSwapTokenUnits(1, 75n).toString());
       expect(bobResolve.executionWantAmount, 'buyer receives full 0.03 WETH target').toBe('30000000000000000');
-      expect(BigInt(bobResolve.executionGiveAmount), 'buyer source savings must be positive').toBeLessThan(78n * 10n ** 18n);
+      expect(BigInt(bobResolve.executionGiveAmount), 'buyer source savings must be positive')
+        .toBeLessThan(wholeSwapTokenUnits(1, 78n));
       expect(BigInt(bobResolve.fillNumerator), 'source-savings exact ratio should be below full source spend').toBeLessThan(BigInt(bobResolve.fillDenominator));
       expect(bobResolve.cancelRemainder, 'current taker closes unused source remainder after price improvement').toBe(true);
 
@@ -1337,7 +1354,7 @@ test.describe('E2E Swap Isolated Flow', () => {
     }
   });
 
-  test('resting maker order can fill partially, stay open, then cancel remainder', async ({ browser, page }) => {
+  test('resting maker order can fill partially, stay open, then cancel remainder', { tag: '@functional' }, async ({ browser, page }) => {
     let aliceContext: BrowserContext | null = null;
     let bobContext: BrowserContext | null = null;
 
@@ -1379,7 +1396,7 @@ test.describe('E2E Swap Isolated Flow', () => {
       ]);
 
       await waitForOutCapAtLeast(alicePage, alice.entityId, hubId, 2, 1n * 10n ** 18n);
-      await waitForOutCapAtLeast(bobPage, bob.entityId, hubId, 1, 10n * 10n ** 18n);
+      await waitForOutCapAtLeast(bobPage, bob.entityId, hubId, 1, wholeSwapTokenUnits(1, 10n));
 
       await openSwapWorkspace(alicePage);
       await selectCounterpartyInSwap(alicePage, hubId);
@@ -1458,7 +1475,7 @@ test.describe('E2E Swap Isolated Flow', () => {
     }
   });
 
-  test('one resting maker order can be matched by two isolated takers until fully closed', async ({ browser, page }) => {
+  test('one resting maker order can be matched by two isolated takers until fully closed', { tag: '@functional' }, async ({ browser, page }) => {
     test.setTimeout(240_000);
     let aliceContext: BrowserContext | null = null;
     let bobContext: BrowserContext | null = null;
@@ -1509,8 +1526,8 @@ test.describe('E2E Swap Isolated Flow', () => {
 
       await Promise.all([
         waitForOutCapAtLeast(alicePage, alice.entityId, hubId, 2, 1n * 10n ** 18n),
-        waitForOutCapAtLeast(bobPage, bob.entityId, hubId, 1, 10n * 10n ** 18n),
-        waitForOutCapAtLeast(carolPage, carol.entityId, hubId, 1, 10n * 10n ** 18n),
+        waitForOutCapAtLeast(bobPage, bob.entityId, hubId, 1, wholeSwapTokenUnits(1, 10n)),
+        waitForOutCapAtLeast(carolPage, carol.entityId, hubId, 1, wholeSwapTokenUnits(1, 10n)),
       ]);
 
       await openSwapWorkspace(alicePage);
@@ -1587,7 +1604,7 @@ test.describe('E2E Swap Isolated Flow', () => {
     }
   });
 
-  test('repeated maker and taker cycles accumulate closed swap rows', async ({ browser, page }) => {
+  test('repeated maker and taker cycles accumulate closed swap rows', { tag: '@functional' }, async ({ browser, page }) => {
     let aliceContext: BrowserContext | null = null;
     let bobContext: BrowserContext | null = null;
 
@@ -1630,7 +1647,7 @@ test.describe('E2E Swap Isolated Flow', () => {
 
       await Promise.all([
         waitForOutCapAtLeast(alicePage, alice.entityId, hubId, 2, 1n * 10n ** 18n),
-        waitForOutCapAtLeast(bobPage, bob.entityId, hubId, 1, 10n * 10n ** 18n),
+        waitForOutCapAtLeast(bobPage, bob.entityId, hubId, 1, wholeSwapTokenUnits(1, 10n)),
       ]);
 
       await Promise.all([
@@ -1672,7 +1689,7 @@ test.describe('E2E Swap Isolated Flow', () => {
     }
   });
 
-  test('swap round-trip both directions clears holds and updates closed history on both peers', async ({ browser, page }) => {
+  test('swap round-trip both directions clears holds and updates closed history on both peers', { tag: '@functional' }, async ({ browser, page }) => {
     let aliceContext: BrowserContext | null = null;
     let bobContext: BrowserContext | null = null;
 
@@ -1717,7 +1734,7 @@ test.describe('E2E Swap Isolated Flow', () => {
 
       await Promise.all([
         waitForOutCapAtLeast(alicePage, alice.entityId, hubId, 2, 1n * 10n ** 18n),
-        waitForOutCapAtLeast(bobPage, bob.entityId, hubId, 1, 10n * 10n ** 18n),
+        waitForOutCapAtLeast(bobPage, bob.entityId, hubId, 1, wholeSwapTokenUnits(1, 10n)),
       ]);
 
       await Promise.all([
@@ -1755,7 +1772,7 @@ test.describe('E2E Swap Isolated Flow', () => {
 
       await Promise.all([
         waitForOutCapAtLeast(bobPage, bob.entityId, hubId, 2, 1n * 10n ** 15n),
-        waitForOutCapAtLeast(alicePage, alice.entityId, hubId, 1, 20n * 10n ** 18n),
+        waitForOutCapAtLeast(alicePage, alice.entityId, hubId, 1, wholeSwapTokenUnits(1, 20n)),
       ]);
 
       await placeAliceSellOffer(bobPage, '0.0095', '2600');

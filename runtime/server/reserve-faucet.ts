@@ -26,6 +26,17 @@ type TokenCatalogEntry = {
 
 const faucetLog = createStructuredLogger('server.faucet');
 
+export const parseReserveFaucetAmount = (
+  amount: string,
+  tokenMeta: Pick<TokenCatalogEntry, 'tokenId' | 'decimals'>,
+): bigint => {
+  const decimals = tokenMeta.decimals;
+  if (typeof decimals !== 'number' || !Number.isSafeInteger(decimals) || decimals < 0 || decimals > 255) {
+    throw new Error(`FAUCET_TOKEN_DECIMALS_INVALID:${String(tokenMeta.tokenId)}:${String(tokenMeta.decimals)}`);
+  }
+  return ethers.parseUnits(amount, decimals);
+};
+
 export const waitForRecentReserveUpdatedEvent = async (
   env: Env,
   entityId: string,
@@ -242,8 +253,7 @@ export const handleReserveFaucet = async (input: {
         headers,
       });
     }
-    const decimals = typeof tokenMeta.decimals === 'number' ? tokenMeta.decimals : 18;
-    const amountWei = ethers.parseUnits(amount, decimals);
+    const amountWei = parseReserveFaucetAmount(amount, tokenMeta);
     const requestStartedAt = Date.now();
     faucetLog.info('reserve.request', {
       requestId,

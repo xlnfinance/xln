@@ -6,6 +6,7 @@ import {
   normalizeOptionalTokenId,
   readExternalWalletSnapshotSource,
   requireExternalSnapshotBigInt,
+  resolveExternalWalletSnapshotIngress,
   resolveExternalWalletFinalityDepth,
 } from '../../frontend/src/lib/components/Entity/external-wallet-snapshot';
 
@@ -65,6 +66,25 @@ describe('external wallet snapshot helpers', () => {
       .rejects.toThrow('EXTERNAL_WALLET_SNAPSHOT_BLOCK_HASH_MISSING:2');
   });
 
+  test('cancels an in-flight local observation after runtime switch or quiesce', () => {
+    const running = {
+      runtimeId: '0xAbC',
+      runtimeState: { lifecyclePhase: 'running', persistenceQuiescing: false },
+    } as any;
+    const quiescing = {
+      runtimeId: '0xabc',
+      runtimeState: { lifecyclePhase: 'quiescing', persistenceQuiescing: true },
+    } as any;
+
+    expect(resolveExternalWalletSnapshotIngress('0xabc', running)).toBe('apply');
+    expect(resolveExternalWalletSnapshotIngress('0xabc', quiescing)).toBe('cancel-runtime-quiescing');
+    expect(resolveExternalWalletSnapshotIngress('0xabc', { ...running, runtimeId: '0xdef' })).toBe('cancel-runtime-changed');
+    expect(resolveExternalWalletSnapshotIngress('0xabc', null)).toBe('cancel-runtime-changed');
+    expect(() => resolveExternalWalletSnapshotIngress('', running)).toThrow(
+      'EXTERNAL_WALLET_SNAPSHOT_RUNTIME_ID_MISSING',
+    );
+  });
+
   test('remote projection sessions read external wallet snapshots through API without live Env', () => {
     const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
     const fetchStart = source.indexOf('async function fetchExternalTokens');
@@ -78,7 +98,29 @@ describe('external wallet snapshot helpers', () => {
     expect(fetchSource).toContain("const jadapter = envAtStart && xln ? getCurrentEntityJAdapter(xln, envAtStart, 'fetch-external-tokens') : null;");
     expect(fetchSource).toContain('const tokenList = await getTokenList(jadapter, runtimeId, jurisdiction);');
     expect(fetchSource).toContain('const spender = resolveExternalWalletSpender(jadapter, jurisdiction);');
-    expect(source).toContain('const snapshot = await requestExternalWalletSnapshot(entityId, owner, tokenList, allowanceReads, jadapter);');
+    expect(source).toContain('const snapshot = await requestExternalWalletSnapshot(');
+    expect(source).toContain("if (!snapshot) {");
+  });
+
+  test('local wallet reads never certify an incomplete jurisdiction block', () => {
+    const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+    const start = source.indexOf('async function requestExternalWalletSnapshot');
+    const end = source.indexOf('function buildExternalWalletStateSyncSignature', start);
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const requestSource = source.slice(start, end);
+    expect(requestSource).not.toContain("'ExternalWalletSnapshot'");
+    expect(requestSource).not.toContain("'external-wallet-snapshot-ui-local'");
+  });
+
+  test('live wallet balances refresh through read-only snapshots without producing consensus input', () => {
+    const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+    expect(source).toContain('signal: AbortSignal.timeout(EXTERNAL_WALLET_REQUEST_TIMEOUT_MS)');
+    expect(source).toContain('const externalWalletRefresh = window.setInterval(() => {');
+    expect(source).toContain("document.visibilityState !== 'visible' || !activeIsLive");
+    expect(source).toContain('void fetchExternalTokens(true);');
+    expect(source).toContain('window.clearInterval(externalWalletRefresh);');
+    expect(source).not.toContain("'external-wallet-snapshot-ui-local'");
   });
 
   test('external wallet snapshot transport failures are non-fatal persistent diagnostics', () => {

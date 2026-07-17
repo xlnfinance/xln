@@ -1,11 +1,24 @@
-import type { EntityInput, Env, JInput, JTx, RuntimeTx } from '../types';
-import { getCachedSignerPrivateKey } from '../account/crypto';
+import type { EntityInput, Env, JAdapterFailure, JInput, JTx, RuntimeTx } from '../types';
+import { getLocalSignerPrivateKey } from '../account/crypto';
 import { isBatchEmpty } from '../jurisdiction/batch';
 import { rememberRecentJEvents } from '../jurisdiction/event-evidence';
-import { getEntityReplicaById } from '../entity/replica-lookup';
+import { classifyJAdapterFailure } from '../jadapter/failure';
 import { ensureLiveJAdapterForReplica } from './infra';
-import { classifyRuntimeJBatchFailure } from '../protocol/failure-taxonomy';
 import { createStructuredLogger, shortId } from '../infra/logger';
+import {
+  findJSubmitReplica,
+  isMatchingJSubmitBatch,
+  makeJSubmitResultRuntimeTx,
+} from './j-submit-state';
+import {
+  findEntityProviderActionReplica,
+  isEntityProviderActionJTx,
+  normalizeEntityProviderActionId,
+  requireCanonicalEntityProviderActionAttempt,
+  type ActionJTx,
+} from './entity-provider-action-submit-state';
+import { makeEntityProviderActionResultRuntimeTx } from './entity-provider-action-submit-result';
+import { isEntityActiveLeader } from '../entity/consensus/leader';
 
 const jSubmitLog = createStructuredLogger('runtime.jsubmit');
 
@@ -115,8 +128,7 @@ const reconcileFinalizedDispute = async (
     return false;
   }
 
-  const replica = getEntityReplicaById(env, jTx.entityId);
-  const signerId = normalizedEntityId(jTx.data.signerId || replica?.signerId);
+  const signerId = normalizedEntityId(jTx.data.signerId);
   if (!signerId) throw new Error(`J_SUBMIT_FATAL: STALE_DISPUTE_FINALIZE_SIGNER_MISSING:${jTx.entityId}`);
   deps.enqueueRuntimeInputs(env, [{
     entityId: jTx.entityId,
@@ -160,82 +172,26 @@ const validateSealedBatchJTx = (jTx: JTx): void => {
   );
 };
 
+const validateDurableEntityProviderAction = (jurisdictionName: string, jTx: JTx): void => {
+  if (!isEntityProviderActionJTx(jTx)) return;
+  if (!jTx.data.runtimeSubmitAttempt) {
+    throw new Error(`ENTITY_PROVIDER_ACTION_UNDURABLE_SUBMIT_REJECTED:${jTx.entityId}`);
+  }
+  if (!jTx.data.hankoSignature) {
+    throw new Error(`ENTITY_PROVIDER_ACTION_CONSENSUS_HANKO_MISSING:${jTx.entityId}`);
+  }
+  requireCanonicalEntityProviderActionAttempt(jurisdictionName, jTx);
+};
+
 export const isTransientJSubmitFailure = (error: unknown): boolean => {
-  const message = error instanceof Error ? error.message : String(error);
-  const code = error instanceof Error && 'code' in error
-    ? String((error as Error & { code?: unknown }).code || '')
-    : '';
-  return [
-    code,
-    message,
-  ].some((value) => (
-    /ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND/i.test(value) ||
-    /transaction was not mined|timeout exceeded|request timeout|gateway timeout|503|504|rate limit/i.test(value)
-  ));
-};
-
-const markSentBatchTerminalFailure = (env: Env, jTx: JTx, message: string): void => {
-  if (jTx.type !== 'batch') return;
-  const replica = getEntityReplicaById(env, jTx.entityId);
-  const jBatchState = replica?.state?.jBatchState;
-  const sentBatch = jBatchState?.sentBatch;
-  if (!sentBatch) return;
-  const submittedNonce = typeof jTx.data?.entityNonce === 'number' ? jTx.data.entityNonce : null;
-  const submittedHash = String(jTx.data?.batchHash || '');
-  if (submittedNonce !== null && Number(sentBatch.entityNonce) !== submittedNonce) return;
-  if (submittedHash && sentBatch.batchHash && submittedHash !== sentBatch.batchHash) return;
-  const failure = classifyRuntimeJBatchFailure('J_SUBMIT_FATAL', message);
-  sentBatch.terminalFailure = {
-    message,
-    failedAt: env.timestamp,
-    failure,
-  };
-  sentBatch.lastFailure = {
-    message,
-    failedAt: env.timestamp,
-    failure,
-  };
-  jBatchState.status = 'failed';
-  jBatchState.failedAttempts = (jBatchState.failedAttempts || 0) + 1;
-};
-
-const markSentBatchTransientFailure = (env: Env, jTx: JTx, message: string): void => {
-  if (jTx.type !== 'batch') return;
-  const replica = getEntityReplicaById(env, jTx.entityId);
-  const jBatchState = replica?.state?.jBatchState;
-  const sentBatch = jBatchState?.sentBatch;
-  if (!jBatchState || !sentBatch) return;
-  sentBatch.lastFailure = {
-    message,
-    failedAt: env.timestamp,
-    failure: classifyRuntimeJBatchFailure('J_SUBMIT_TRANSIENT', message),
-  };
-  jBatchState.failedAttempts = (jBatchState.failedAttempts || 0) + 1;
-  jBatchState.status = 'sent';
-};
-
-const markSentBatchStaleNonceSkipped = (env: Env, jTx: JTx, chainNonce: bigint): boolean => {
-  if (jTx.type !== 'batch') return false;
-  const replica = getEntityReplicaById(env, jTx.entityId);
-  const jBatchState = replica?.state?.jBatchState;
-  const sentBatch = jBatchState?.sentBatch;
-  if (!jBatchState || !sentBatch) return false;
-  const submittedNonce = typeof jTx.data?.entityNonce === 'number' ? jTx.data.entityNonce : null;
-  const submittedHash = String(jTx.data?.batchHash || '');
-  if (submittedNonce === null) return false;
-  if (Number(sentBatch.entityNonce) !== submittedNonce) return false;
-  if (submittedHash && sentBatch.batchHash && submittedHash !== sentBatch.batchHash) return false;
-
-  jBatchState.entityNonce = Math.max(Number(jBatchState.entityNonce || 0), Number(chainNonce));
-  delete jBatchState.sentBatch;
-  jBatchState.status = isBatchEmpty(jBatchState.batch) ? 'empty' : 'accumulating';
-  return true;
+  return classifyJAdapterFailure(error).category === 'transient';
 };
 
 const skipAlreadyConsumedSealedBatch = async (
   env: Env,
   jAdapter: { getEntityNonce?: (entityId: string) => Promise<bigint> },
   jTx: JTx,
+  deps: RuntimeJSubmitDeps,
 ): Promise<boolean> => {
   if (jTx.type !== 'batch') return false;
   if (typeof jTx.data?.entityNonce !== 'number') return false;
@@ -252,23 +208,68 @@ const skipAlreadyConsumedSealedBatch = async (
   }
   const submittedNonce = BigInt(jTx.data.entityNonce);
   if (chainNonce < submittedNonce) return false;
-  const skipped = markSentBatchStaleNonceSkipped(env, jTx, chainNonce);
+  const signerId = normalizedEntityId(jTx.data.signerId);
+  if (!signerId) throw new Error(`J_SUBMIT_FATAL: STALE_NONCE_SIGNER_MISSING:${jTx.entityId}`);
+  deps.enqueueRuntimeInputs(env, [{
+    entityId: jTx.entityId,
+    signerId,
+    entityTxs: [{
+      type: 'j_abort_sent_batch',
+      data: { reason: `chain-nonce-consumed:${chainNonce.toString()}`, requeueToCurrent: false },
+    }],
+  }], undefined, undefined, env.timestamp);
   jSubmitLog.warn('sealed_batch.stale_skipped', {
     entityId: shortId(jTx.entityId),
     submittedNonce: submittedNonce.toString(),
     chainNonce: chainNonce.toString(),
-    clearedSentBatch: skipped,
+    reconciliationQueued: true,
   });
   return true;
 };
 
+const queueBatchResult = (
+  env: Env,
+  deps: RuntimeJSubmitDeps,
+  jurisdictionName: string,
+  jTx: Extract<JTx, { type: 'batch' }>,
+  outcome: Extract<RuntimeTx, { type: 'recordJSubmitResult' }>['data']['outcome'],
+  extra: { message?: string; txHash?: string; adapterFailure?: JAdapterFailure } = {},
+): void => {
+  const resultTx = makeJSubmitResultRuntimeTx(jTx, jurisdictionName, outcome, extra);
+  deps.enqueueRuntimeInputs(env, undefined, [resultTx], undefined, env.timestamp);
+  jSubmitLog.info('tx.result_queued', {
+    entityId: shortId(jTx.entityId),
+    jurisdictionName,
+    attemptId: resultTx.data.attemptId,
+    outcome,
+  });
+};
+
+const queueEntityProviderActionResult = (
+  env: Env,
+  deps: RuntimeJSubmitDeps,
+  jurisdictionName: string,
+  jTx: ActionJTx,
+  outcome: Extract<RuntimeTx, { type: 'recordEntityProviderActionSubmitResult' }>['data']['outcome'],
+  extra: { message?: string; txHash?: string; adapterFailure?: JAdapterFailure } = {},
+): void => {
+  const resultTx = makeEntityProviderActionResultRuntimeTx(jTx, jurisdictionName, outcome, extra);
+  deps.enqueueRuntimeInputs(env, undefined, [resultTx], undefined, env.timestamp);
+  jSubmitLog.info('entity_provider_action.result_queued', {
+    entityId: shortId(jTx.entityId),
+    jurisdictionName,
+    attemptId: resultTx.data.attemptId,
+    outcome,
+  });
+};
+
 const shouldSubmitFromThisRuntime = (env: Env, jTx: JTx): boolean => {
-  if (jTx.type !== 'batch') return true;
+  if (jTx.type !== 'batch' && !isEntityProviderActionJTx(jTx)) return true;
   const signerId = typeof jTx.data?.signerId === 'string' ? jTx.data.signerId.toLowerCase() : '';
   const runtimeId = typeof env.runtimeId === 'string' ? env.runtimeId.toLowerCase() : '';
   if (!signerId || !runtimeId) return true;
   if (signerId === runtimeId) return true;
-  if (getCachedSignerPrivateKey(signerId)) return true;
+  if (getLocalSignerPrivateKey(env, signerId)) return true;
   jSubmitLog.warn('sealed_batch.non_local_skipped', {
     entityId: shortId(jTx.entityId),
     signer: shortId(signerId, 8),
@@ -277,13 +278,74 @@ const shouldSubmitFromThisRuntime = (env: Env, jTx: JTx): boolean => {
   return false;
 };
 
+const reconcileDurablyStaleEntityProviderAction = (
+  env: Env,
+  deps: RuntimeJSubmitDeps,
+  jurisdictionName: string,
+  jTx: JTx,
+): boolean => {
+  if (!isEntityProviderActionJTx(jTx) || !jTx.data.runtimeSubmitAttempt) return false;
+  const replica = findEntityProviderActionReplica(env, jTx.entityId, jTx.data.signerId);
+  if (!replica) {
+    throw new Error(`ENTITY_PROVIDER_ACTION_LOCAL_REPLICA_MISSING:${jTx.entityId}:${jTx.data.signerId}`);
+  }
+  const pending = replica.state.entityProviderActionState?.pending;
+  if (
+    pending &&
+    isEntityActiveLeader(replica) &&
+    normalizeEntityProviderActionId(pending.actionHash) === normalizeEntityProviderActionId(jTx.data.intent.actionHash) &&
+    pending.actionNonce === jTx.data.intent.actionNonce &&
+    pending.generation === jTx.data.intent.generation
+  ) return false;
+  queueEntityProviderActionResult(env, deps, jurisdictionName, jTx, 'reconciled', {
+    message: pending ? 'entity-provider-action-leader-changed-before-submit' : 'entity-provider-action-finalized-before-submit',
+  });
+  return true;
+};
+
+const reconcileDurablyAbortedBatch = (
+  env: Env,
+  deps: RuntimeJSubmitDeps,
+  jurisdictionName: string,
+  jTx: JTx,
+): boolean => {
+  if (jTx.type !== 'batch' || !jTx.data.runtimeSubmitAttempt) return false;
+  const signerId = normalizedEntityId(jTx.data.signerId);
+  const replica = findJSubmitReplica(env, jTx.entityId, signerId);
+  if (!replica) {
+    throw new Error(`J_SUBMIT_FATAL: LOCAL_REPLICA_MISSING:${jTx.entityId}:${signerId}`);
+  }
+  const sent = replica.state.jBatchState?.sentBatch;
+  if (
+    sent &&
+    !sent.terminalFailure &&
+    isMatchingJSubmitBatch(sent, String(jTx.data.batchHash || ''), Number(jTx.data.entityNonce)) &&
+    replica.state.jBatchState?.broadcastCount === jTx.data.runtimeSubmitAttempt.batchGeneration
+  ) {
+    return false;
+  }
+
+  // The Entity abort/rebuild or finalized nonce-collision quarantine is already
+  // durable while this exact external attempt was paused. Its absence or
+  // terminal marker is the authoritative tombstone: submitting the stale
+  // payload after restore would resurrect an operator-aborted/impossible batch.
+  queueBatchResult(env, deps, jurisdictionName, jTx, 'reconciled', {
+    message: 'committed-batch-cancelled-before-submit',
+  });
+  jSubmitLog.warn('sealed_batch.durable_abort_reconciled', {
+    entityId: shortId(jTx.entityId),
+    jurisdictionName,
+    attemptId: jTx.data.runtimeSubmitAttempt.attemptId,
+  });
+  return true;
+};
+
 /**
  * Submit post-commit J batches after the R-frame is durable.
  *
- * This is deliberately outside consensus. Permanent/protocol submit failures
- * mark the sent batch terminal before halting. Transient transport failures
- * still halt the current loop with a debug payload, but must not poison the
- * batch: a valid batch remains rebroadcastable after the operator fixes RPC.
+ * This is deliberately outside Entity consensus. Every batch attempt was
+ * committed by retryJSubmit before this function runs; every result is queued
+ * as recordJSubmitResult so restart/replay cannot lose failure classification.
  */
 export async function submitRuntimeJOutbox(
   env: Env,
@@ -296,32 +358,103 @@ export async function submitRuntimeJOutbox(
   jSubmitLog.debug('outbox.submit_start', { jTxs: totalJTxs, jInputs: jOutbox.length });
 
   for (const jInput of jOutbox) {
+    const activeJTxs: JTx[] = [];
+    for (const jTx of jInput.jTxs) {
+      if (
+        !reconcileDurablyAbortedBatch(env, deps, jInput.jurisdictionName, jTx) &&
+        !reconcileDurablyStaleEntityProviderAction(env, deps, jInput.jurisdictionName, jTx)
+      ) {
+        activeJTxs.push(jTx);
+      }
+    }
+    if (activeJTxs.length === 0) continue;
+
     const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
     if (!jReplica) {
-      throw new Error(`J_SUBMIT_FATAL: missing_jReplica:${jInput.jurisdictionName}`);
+      const message = `missing_jReplica:${jInput.jurisdictionName}`;
+      const failure = classifyJAdapterFailure(message, {
+        category: 'transient',
+        code: 'J_SUBMIT_MISSING_JREPLICA',
+      });
+      for (const jTx of activeJTxs) {
+        if (jTx.type === 'batch') {
+          queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'transientFailure', { message, adapterFailure: failure });
+        } else if (isEntityProviderActionJTx(jTx)) {
+          queueEntityProviderActionResult(env, deps, jInput.jurisdictionName, jTx, 'transientFailure', { message, adapterFailure: failure });
+        } else throw new Error(`J_SUBMIT_FATAL: ${message}`);
+      }
+      continue;
     }
 
-    const jAdapter = typeof jReplica.jadapter?.submitTx === 'function'
-      ? jReplica.jadapter
-      : await ensureLiveJAdapterForReplica(env, jInput.jurisdictionName, {
-          allowBrowserVm: typeof window !== 'undefined',
-          context: `j-submit:${jInput.jurisdictionName}`,
-        });
+    let jAdapter = typeof jReplica.jadapter?.submitTx === 'function' ? jReplica.jadapter : null;
+    try {
+      jAdapter ??= await ensureLiveJAdapterForReplica(env, jInput.jurisdictionName, {
+        allowBrowserVm: typeof window !== 'undefined',
+        context: `j-submit:${jInput.jurisdictionName}`,
+      });
+    } catch (error) {
+      const failure = classifyJAdapterFailure(error);
+      const outcome = failure.category === 'transient' ? 'transientFailure' : 'terminalFailure';
+      for (const jTx of activeJTxs) {
+        if (jTx.type === 'batch') {
+          queueBatchResult(env, deps, jInput.jurisdictionName, jTx, outcome, { message: failure.message, adapterFailure: failure });
+        } else if (isEntityProviderActionJTx(jTx)) {
+          queueEntityProviderActionResult(env, deps, jInput.jurisdictionName, jTx, outcome, { message: failure.message, adapterFailure: failure });
+        } else throw error;
+      }
+      continue;
+    }
     if (!jAdapter) {
-      throw new Error(`J_SUBMIT_FATAL: missing_jAdapter:${jInput.jurisdictionName}`);
+      const message = `missing_jAdapter:${jInput.jurisdictionName}`;
+      const failure = classifyJAdapterFailure(message, {
+        category: 'transient',
+        code: 'J_SUBMIT_MISSING_JADAPTER',
+      });
+      for (const jTx of activeJTxs) {
+        if (jTx.type === 'batch') {
+          queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'transientFailure', { message, adapterFailure: failure });
+        } else if (isEntityProviderActionJTx(jTx)) {
+          queueEntityProviderActionResult(env, deps, jInput.jurisdictionName, jTx, 'transientFailure', { message, adapterFailure: failure });
+        } else throw new Error(`J_SUBMIT_FATAL: ${message}`);
+      }
+      continue;
     }
 
-    for (const jTx of jInput.jTxs) {
+    for (const jTx of activeJTxs) {
       jSubmitLog.debug('tx.submit_start', {
         type: jTx.type,
         entityId: shortId(jTx.entityId),
         jurisdictionName: jInput.jurisdictionName,
       });
-      validateSealedBatchJTx(jTx);
-      if (!shouldSubmitFromThisRuntime(env, jTx)) {
+      try {
+        validateSealedBatchJTx(jTx);
+        validateDurableEntityProviderAction(jInput.jurisdictionName, jTx);
+      } catch (error) {
+        if (jTx.type === 'batch') {
+          queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'terminalFailure', {
+            message: error instanceof Error ? error.message : String(error),
+          });
+        } else if (isEntityProviderActionJTx(jTx) && jTx.data.runtimeSubmitAttempt) {
+          queueEntityProviderActionResult(env, deps, jInput.jurisdictionName, jTx, 'terminalFailure', {
+            message: error instanceof Error ? error.message : String(error),
+          });
+        } else throw error;
         continue;
       }
-      if (await skipAlreadyConsumedSealedBatch(env, jAdapter, jTx)) {
+      if (!shouldSubmitFromThisRuntime(env, jTx)) {
+        if (jTx.type === 'batch') {
+          queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'terminalFailure', {
+            message: 'sealed_batch_non_local_submitter',
+          });
+        } else if (isEntityProviderActionJTx(jTx)) {
+          queueEntityProviderActionResult(env, deps, jInput.jurisdictionName, jTx, 'terminalFailure', {
+            message: 'entity_provider_action_non_local_submitter',
+          });
+        }
+        continue;
+      }
+      if (await skipAlreadyConsumedSealedBatch(env, jAdapter, jTx, deps)) {
+        if (jTx.type === 'batch') queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'reconciled');
         continue;
       }
       if (await reconcileFinalizedDispute(
@@ -331,12 +464,13 @@ export async function submitRuntimeJOutbox(
         deps,
         'counterparty-finalized-before-submit',
       )) {
+        if (jTx.type === 'batch') queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'reconciled');
         continue;
       }
 
       const submitData = jTx.data as { signerId?: unknown } | undefined;
       const submitSignerId = typeof submitData?.signerId === 'string' ? submitData.signerId : undefined;
-      const submitSignerPrivateKey = submitSignerId ? getCachedSignerPrivateKey(submitSignerId) : null;
+      const submitSignerPrivateKey = submitSignerId ? getLocalSignerPrivateKey(env, submitSignerId) : null;
       let result;
       try {
         result = await jAdapter.submitTx(jTx, {
@@ -346,19 +480,49 @@ export async function submitRuntimeJOutbox(
           timestamp: jTx.timestamp ?? env.timestamp,
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const failure = classifyJAdapterFailure(error);
+        const message = failure.message;
         jSubmitLog.error('tx.submit_threw', {
           type: jTx.type,
           entityId: shortId(jTx.entityId),
           jurisdictionName: jInput.jurisdictionName,
           error: message,
         });
-        if (isTransientJSubmitFailure(error)) {
-          markSentBatchTransientFailure(env, jTx, message);
+        if (failure.category === 'transient') {
+          if (jTx.type === 'batch') {
+            queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'transientFailure', {
+              message,
+              adapterFailure: failure,
+            });
+            continue;
+          }
+          if (isEntityProviderActionJTx(jTx)) {
+            queueEntityProviderActionResult(env, deps, jInput.jurisdictionName, jTx, 'transientFailure', {
+              message,
+              adapterFailure: failure,
+            });
+            continue;
+          }
           throw new Error(`J_SUBMIT_TRANSIENT: ${message}`);
         }
-        if (await reconcilePermanentSubmitFailure(env, jAdapter, jTx, deps)) continue;
-        markSentBatchTerminalFailure(env, jTx, message);
+        if (await reconcilePermanentSubmitFailure(env, jAdapter, jTx, deps)) {
+          if (jTx.type === 'batch') queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'reconciled');
+          continue;
+        }
+        if (jTx.type === 'batch') {
+          queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'terminalFailure', {
+            message,
+            adapterFailure: failure,
+          });
+          continue;
+        }
+        if (isEntityProviderActionJTx(jTx)) {
+          queueEntityProviderActionResult(env, deps, jInput.jurisdictionName, jTx, 'terminalFailure', {
+            message,
+            adapterFailure: failure,
+          });
+          continue;
+        }
         throw error;
       }
 
@@ -372,20 +536,59 @@ export async function submitRuntimeJOutbox(
           txHash: result.txHash ?? null,
         });
         await pollSubmittedJEventsBeforeFollowups(env, jAdapter);
+        if (jTx.type === 'batch') {
+          queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'submitted', {
+            ...(result.txHash ? { txHash: result.txHash } : {}),
+          });
+        } else if (isEntityProviderActionJTx(jTx)) {
+          queueEntityProviderActionResult(env, deps, jInput.jurisdictionName, jTx, 'submitted', {
+            ...(result.txHash ? { txHash: result.txHash } : {}),
+          });
+        }
       } else {
         const message = result.error || 'unknown';
+        const failure = result.failure ?? classifyJAdapterFailure(message);
         jSubmitLog.error('tx.submit_failed', {
           type: jTx.type,
           entityId: shortId(jTx.entityId),
           jurisdictionName: jInput.jurisdictionName,
           error: message,
         });
-        if (isTransientJSubmitFailure(message)) {
-          markSentBatchTransientFailure(env, jTx, message);
+        if (failure.category === 'transient') {
+          if (jTx.type === 'batch') {
+            queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'transientFailure', {
+              message,
+              adapterFailure: failure,
+            });
+            continue;
+          }
+          if (isEntityProviderActionJTx(jTx)) {
+            queueEntityProviderActionResult(env, deps, jInput.jurisdictionName, jTx, 'transientFailure', {
+              message,
+              adapterFailure: failure,
+            });
+            continue;
+          }
           throw new Error(`J_SUBMIT_TRANSIENT: ${message}`);
         }
-        if (await reconcilePermanentSubmitFailure(env, jAdapter, jTx, deps)) continue;
-        markSentBatchTerminalFailure(env, jTx, message);
+        if (await reconcilePermanentSubmitFailure(env, jAdapter, jTx, deps)) {
+          if (jTx.type === 'batch') queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'reconciled');
+          continue;
+        }
+        if (jTx.type === 'batch') {
+          queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'terminalFailure', {
+            message,
+            adapterFailure: failure,
+          });
+          continue;
+        }
+        if (isEntityProviderActionJTx(jTx)) {
+          queueEntityProviderActionResult(env, deps, jInput.jurisdictionName, jTx, 'terminalFailure', {
+            message,
+            adapterFailure: failure,
+          });
+          continue;
+        }
         throw new Error(`J_SUBMIT_FATAL: ${message}`);
       }
     }

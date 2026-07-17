@@ -1,5 +1,5 @@
 import { test, expect, type Page } from './global-setup';
-import { deriveDelta } from '../runtime/account/utils';
+import { deriveDelta, getTokenInfo } from '../runtime/account/utils';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline } from './utils/e2e-baseline';
 import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';
 import {
@@ -27,7 +27,8 @@ type LendingStateResponse = {
 
 const TOKEN_ID = 1;
 
-const tokenAmount = (whole: bigint): string => (whole * 10n ** 18n).toString();
+const tokenAmount = (whole: bigint): string =>
+  (whole * 10n ** BigInt(getTokenInfo(TOKEN_ID).decimals)).toString();
 
 type DeltaSnapshot = {
   ondelta: string;
@@ -188,7 +189,7 @@ async function openLendingWorkspace(page: Page): Promise<void> {
 }
 
 test.describe('E2E Lending Flow', () => {
-  test('funds hub pool, borrows from it, and repays from the Lending tab', async ({ page }) => {
+  test('funds hub pool, borrows from it, and repays from the Lending tab', { tag: '@functional' }, async ({ page }) => {
     test.setTimeout(180_000);
 
     const health = await ensureE2EBaseline(page, {

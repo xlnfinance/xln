@@ -1,10 +1,26 @@
 import type { DebtEntry, DebtEventType, EntityState, JurisdictionEvent } from '../../types';
-import { addMessage } from '../../state-helpers';
 import { createStructuredLogger, shortId } from '../../infra/logger';
 
 const debtLog = createStructuredLogger('entity.debt');
 
 const normalizeDebtEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
+
+const debtLedgerDivergence = (
+  kind: DebtEventType,
+  debtor: string,
+  creditor: string,
+  tokenId: number,
+  detail: string,
+): Error => {
+  debtLog.error('ledger.divergence', {
+    kind,
+    tokenId,
+    debtor: shortId(debtor, 8),
+    creditor: shortId(creditor, 8),
+    detail,
+  });
+  return new Error(`DEBT_LEDGER_DIVERGENCE:${kind}:${detail}:${tokenId}:${debtor}:${creditor}`);
+};
 
 function ensureDebtMaps(state: EntityState, direction: 'out' | 'in'): Map<number, Map<string, DebtEntry>> {
   const key = direction === 'out' ? 'outDebtsByToken' : 'inDebtsByToken';
@@ -41,6 +57,18 @@ function appendDebtEntry(state: EntityState, direction: 'out' | 'in', entry: Deb
   ensureDebtBucket(state, direction, entry.tokenId).set(entry.debtId, entry);
 }
 
+function retireDebtEntry(state: EntityState, direction: 'out' | 'in', entry: DebtEntry): void {
+  const ledger = direction === 'out' ? state.outDebtsByToken : state.inDebtsByToken;
+  const bucket = ledger?.get(entry.tokenId);
+  if (!bucket?.delete(entry.debtId)) {
+    throw new Error(`DEBT_LEDGER_RETIRE_MISSING:${entry.debtId}`);
+  }
+  if (bucket.size === 0) ledger!.delete(entry.tokenId);
+  if (ledger!.size > 0) return;
+  if (direction === 'out') delete state.outDebtsByToken;
+  else delete state.inDebtsByToken;
+}
+
 function findEarliestOutstandingDebt(
   state: EntityState,
   direction: 'out' | 'in',
@@ -62,7 +90,7 @@ function findEarliestOutstandingDebt(
 
   if (preferredDebtIndex != null) {
     const preferred = candidates.find((entry) => Number(entry.currentDebtIndex ?? -1) === preferredDebtIndex);
-    if (preferred) return preferred;
+    return preferred ?? null;
   }
 
   candidates.sort((left, right) =>
@@ -73,28 +101,12 @@ function findEarliestOutstandingDebt(
   return candidates[0] ?? null;
 }
 
-function noteDebtLedgerDivergence(
-  state: EntityState,
-  kind: DebtEventType,
-  debtor: string,
-  creditor: string,
-  tokenId: number,
-  detail: string,
-): void {
-  const message = `⚠️ DEBT_LEDGER_DIVERGENCE ${kind} token=${tokenId} debtor=${debtor.slice(-8)} creditor=${creditor.slice(-8)} ${detail}`;
-  debtLog.debug('ledger.divergence', {
-    kind,
-    tokenId,
-    debtor: shortId(debtor, 8),
-    creditor: shortId(creditor, 8),
-    detail,
-  });
-  addMessage(state, message);
-}
-
 export function applyDebtCreated(state: EntityState, event: Extract<JurisdictionEvent, { type: 'DebtCreated' }>): void {
   const { debtor, creditor, tokenId, amount, debtIndex } = event.data;
   const debtAmount = BigInt(amount);
+  if (debtAmount <= 0n) throw new Error(`DEBT_CREATED_AMOUNT_INVALID:${amount}`);
+  if (!Number.isSafeInteger(tokenId) || tokenId < 0) throw new Error(`DEBT_CREATED_TOKEN_INVALID:${tokenId}`);
+  if (!Number.isSafeInteger(debtIndex) || debtIndex < 0) throw new Error(`DEBT_CREATED_INDEX_INVALID:${debtIndex}`);
   const block = Number(event.blockNumber || 0);
   const txHash = String(event.transactionHash || '');
   const debtId = buildDebtId(debtor, tokenId, debtIndex, block, txHash);
@@ -104,7 +116,16 @@ export function applyDebtCreated(state: EntityState, event: Extract<Jurisdiction
   const direction = entityId === normalizeDebtEntityId(debtor) ? 'out' : 'in';
   const counterparty = direction === 'out' ? creditor : debtor;
   const bucket = ensureDebtBucket(state, direction, tokenId);
-  if (bucket.has(debtId)) return;
+  const existing = bucket.get(debtId);
+  if (existing) {
+    const exactDuplicate =
+      existing.lastEventType === 'DebtCreated' &&
+      existing.createdAmount === debtAmount &&
+      existing.remainingAmount === debtAmount &&
+      existing.paidAmount === 0n;
+    if (!exactDuplicate) throw new Error(`DEBT_CREATED_ID_CONFLICT:${debtId}`);
+    return;
+  }
 
   appendDebtEntry(state, direction, {
     debtId,
@@ -116,7 +137,6 @@ export function applyDebtCreated(state: EntityState, event: Extract<Jurisdiction
     createdAmount: debtAmount,
     paidAmount: 0n,
     remainingAmount: debtAmount,
-    forgivenAmount: 0n,
     createdDebtIndex: debtIndex,
     currentDebtIndex: debtIndex,
     status: 'open',
@@ -125,13 +145,6 @@ export function applyDebtCreated(state: EntityState, event: Extract<Jurisdiction
     lastUpdatedBlock: block,
     lastUpdatedTxHash: txHash,
     lastEventType: 'DebtCreated',
-    updates: [{
-      eventType: 'DebtCreated',
-      blockNumber: block,
-      transactionHash: txHash,
-      amountDelta: debtAmount,
-      remainingAmount: debtAmount,
-    }],
   });
 }
 
@@ -143,28 +156,34 @@ export function applyDebtEnforced(state: EntityState, event: Extract<Jurisdictio
   const direction = entityId === normalizeDebtEntityId(debtor) ? 'out' : 'in';
   const debt = findEarliestOutstandingDebt(state, direction, tokenId, debtor, creditor);
   if (!debt) {
-    noteDebtLedgerDivergence(state, 'DebtEnforced', debtor, creditor, tokenId, `missing-open-debt amountPaid=${amountPaid} remaining=${remainingAmount}`);
-    return;
+    throw debtLedgerDivergence('DebtEnforced', debtor, creditor, tokenId, 'missing-open-debt');
   }
 
   const paidDelta = BigInt(amountPaid);
   const nextRemaining = BigInt(remainingAmount);
+  if (paidDelta <= 0n || nextRemaining < 0n || paidDelta + nextRemaining !== debt.remainingAmount) {
+    throw new Error(
+      `DEBT_ENFORCED_AMOUNT_MISMATCH:${debt.debtId}:before=${debt.remainingAmount}:paid=${paidDelta}:after=${nextRemaining}`,
+    );
+  }
+  const expectedDebtIndex = nextRemaining === 0n ? debt.currentDebtIndex + 1 : debt.currentDebtIndex;
+  if (!Number.isSafeInteger(newDebtIndex) || newDebtIndex !== expectedDebtIndex) {
+    throw new Error(
+      `DEBT_ENFORCED_INDEX_MISMATCH:${debt.debtId}:expected=${expectedDebtIndex}:actual=${newDebtIndex}`,
+    );
+  }
   const block = Number(event.blockNumber || 0);
   const txHash = String(event.transactionHash || '');
+  if (nextRemaining === 0n) {
+    retireDebtEntry(state, direction, debt);
+    return;
+  }
   debt.paidAmount += paidDelta;
   debt.remainingAmount = nextRemaining;
-  debt.currentDebtIndex = nextRemaining > 0n ? newDebtIndex : null;
-  debt.status = nextRemaining === 0n ? 'paid' : 'open';
+  debt.currentDebtIndex = newDebtIndex;
   debt.lastUpdatedBlock = block;
   debt.lastUpdatedTxHash = txHash;
   debt.lastEventType = 'DebtEnforced';
-  debt.updates.push({
-    eventType: 'DebtEnforced',
-    blockNumber: block,
-    transactionHash: txHash,
-    amountDelta: paidDelta,
-    remainingAmount: nextRemaining,
-  });
 }
 
 export function applyDebtForgiven(state: EntityState, event: Extract<JurisdictionEvent, { type: 'DebtForgiven' }>): void {
@@ -175,37 +194,14 @@ export function applyDebtForgiven(state: EntityState, event: Extract<Jurisdictio
   const direction = entityId === normalizeDebtEntityId(debtor) ? 'out' : 'in';
   const debt = findEarliestOutstandingDebt(state, direction, tokenId, debtor, creditor, debtIndex);
   if (!debt) {
-    noteDebtLedgerDivergence(state, 'DebtForgiven', debtor, creditor, tokenId, `missing-open-debt forgiven=${amountForgiven} debtIndex=${debtIndex}`);
-    return;
+    throw debtLedgerDivergence('DebtForgiven', debtor, creditor, tokenId, `missing-open-debt:index=${debtIndex}`);
   }
 
   const requestedForgiven = BigInt(amountForgiven);
-  const forgivenDelta = debt.remainingAmount;
   if (requestedForgiven !== debt.remainingAmount) {
-    noteDebtLedgerDivergence(
-      state,
-      'DebtForgiven',
-      debtor,
-      creditor,
-      tokenId,
-      `forgive-mismatch requested=${requestedForgiven} remaining=${debt.remainingAmount} debtIndex=${debtIndex}`,
+    throw new Error(
+      `DEBT_FORGIVEN_AMOUNT_MISMATCH:${debt.debtId}:expected=${debt.remainingAmount}:actual=${requestedForgiven}`,
     );
   }
-  const nextRemaining = 0n;
-  const block = Number(event.blockNumber || 0);
-  const txHash = String(event.transactionHash || '');
-  debt.forgivenAmount += forgivenDelta;
-  debt.remainingAmount = nextRemaining;
-  debt.currentDebtIndex = nextRemaining > 0n ? debtIndex : null;
-  debt.status = nextRemaining === 0n ? 'forgiven' : 'open';
-  debt.lastUpdatedBlock = block;
-  debt.lastUpdatedTxHash = txHash;
-  debt.lastEventType = 'DebtForgiven';
-  debt.updates.push({
-    eventType: 'DebtForgiven',
-    blockNumber: block,
-    transactionHash: txHash,
-    amountDelta: forgivenDelta,
-    remainingAmount: nextRemaining,
-  });
+  retireDebtEntry(state, direction, debt);
 }

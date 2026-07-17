@@ -77,6 +77,7 @@ export type GraphPaymentJob = {
   id: string;
   from: string;
   to: string;
+  tokenId: number;
   amount: string;
   tps: number;
   sentCount: number;

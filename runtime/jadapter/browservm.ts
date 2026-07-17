@@ -8,7 +8,7 @@
  * EVM details.
  */
 
-import type { Provider, Signer } from 'ethers';
+import type { LogDescription, Provider, Signer } from 'ethers';
 import {
   Account__factory,
   Depository__factory,
@@ -18,9 +18,18 @@ import {
 
 import { normalizeEntityId } from '../entity/id';
 import { getBatchSize, isBatchEmpty } from '../jurisdiction/batch';
-import { setDeltaTransformerAddress } from '../protocol/dispute/proof-builder';
-import type { BrowserVMState, Env, JTx } from '../types';
-import { normalizeAdapterEvents, processEventBatch, type EventBatchCounter, type RawJEvent } from './helpers';
+import type { BrowserVMState, Env, JTx, RuntimeTx } from '../types';
+import {
+  CANONICAL_J_EVENTS,
+  enqueueJHistoryRange,
+  findWatcherJurisdictionReplica,
+  getMinimumScannedSignerJHeight,
+  normalizeAdapterEvents,
+  processEventBatch,
+  updateWatcherJurisdictionCursor,
+  type EventBatchCounter,
+  type RawJEvent,
+} from './helpers';
 import type {
   JAdapter,
   JAdapterConfig,
@@ -33,20 +42,21 @@ import type {
   JWalletSnapshotRequest,
   SnapshotId,
 } from './types';
-import type { BrowserVMProvider } from './browservm-provider';
+import { makeJAdapterFailureResult } from './failure';
+import type { BrowserVmChainCheckpoint, BrowserVMProvider } from './browservm-provider';
+import type { AuthenticatedRpcLog } from './receipt-codec';
+import {
+  assertDepositoryEntityProviderBinding,
+  assertJStackAddressMatch,
+} from './stack-binding';
+import {
+  buildCertifiedRegistrationEvidence,
+  markLocalJAuthorityRuntimeTx,
+} from '../jurisdiction/registration-evidence';
+import { assertEntityProviderActionJTxBinding } from '../entity/entity-provider-action';
 
 const asFactoryRunner = (runner: unknown): Parameters<typeof Account__factory.connect>[1] =>
   runner as Parameters<typeof Account__factory.connect>[1];
-
-const eventsToRaw = (events: JEvent[]): RawJEvent[] =>
-  events.map((event) => ({
-    name: event.name,
-    args: event.args as RawJEvent['args'],
-    blockNumber: event.blockNumber,
-    blockHash: event.blockHash,
-    transactionHash: event.transactionHash,
-    ...(event.logIndex !== undefined ? { logIndex: event.logIndex } : {}),
-  }));
 
 const receiptFromEvents = (events: JEvent[]): JBatchReceipt => ({
   txHash: events.find((event) => event.transactionHash && event.transactionHash !== '0x')?.transactionHash ?? '0x',
@@ -85,10 +95,29 @@ export async function createBrowserVMAdapter(
   const entityProvider = EntityProvider__factory.connect(addresses.entityProvider, asFactoryRunner(signer));
   const deltaTransformer = DeltaTransformer__factory.connect(addresses.deltaTransformer, asFactoryRunner(signer));
 
+  let stackBindingVerified = false;
+  const verifyStackBinding = async (context: string): Promise<void> => {
+    stackBindingVerified = false;
+    assertJStackAddressMatch(
+      `${context}:depository`,
+      addresses.depository,
+      browserVM.getDepositoryAddress(),
+    );
+    assertJStackAddressMatch(
+      `${context}:entity_provider`,
+      addresses.entityProvider,
+      browserVM.getEntityProviderAddress(),
+    );
+    await assertDepositoryEntityProviderBinding(context, depository, addresses.entityProvider);
+    stackBindingVerified = true;
+  };
+  await verifyStackBinding('browservm_connect');
+
   let watcherUnsubscribe: (() => void) | null = null;
   let watcherEnv: Env | null = null;
+  let pollInFlight: Promise<void> | null = null;
   let snapshotCounter = 0;
-  const snapshots = new Map<SnapshotId, Uint8Array>();
+  const snapshots = new Map<SnapshotId, { root: Uint8Array; chain: BrowserVmChainCheckpoint }>();
   const txCounter: EventBatchCounter = { value: 0 };
 
   const toJEvents = (events: Array<{
@@ -100,6 +129,169 @@ export async function createBrowserVMAdapter(
     logIndex?: number;
   }>): JEvent[] => normalizeAdapterEvents(events);
 
+  const decodeHistoricalLog = (log: AuthenticatedRpcLog): RawJEvent | null => {
+    const address = log.address.toLowerCase();
+    const carrier = address === addresses.depository.toLowerCase()
+      ? depository
+      : address === addresses.entityProvider.toLowerCase()
+        ? entityProvider
+        : null;
+    if (!carrier) {
+      throw new Error(`BROWSERVM_HISTORICAL_LOG_ADDRESS_UNEXPECTED:${address}`);
+    }
+    let parsed: LogDescription | null;
+    try {
+      parsed = carrier.interface.parseLog({ topics: log.topics, data: log.data });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `BROWSERVM_HISTORICAL_LOG_DECODE_FAILED:block=${log.blockNumber}` +
+        `:tx=${log.transactionHash}:index=${log.logIndex}:${message}`,
+      );
+    }
+    if (!parsed || !CANONICAL_J_EVENTS.some((name) => name === parsed?.name)) return null;
+    const args: Record<string, unknown> = {};
+    for (let index = 0; index < parsed.fragment.inputs.length; index += 1) {
+      const input = parsed.fragment.inputs[index];
+      if (!input) continue;
+      args[input.name || String(index)] = parsed.args[index];
+    }
+    return {
+      name: parsed.name,
+      args,
+      blockNumber: log.blockNumber,
+      blockHash: log.blockHash,
+      transactionHash: log.transactionHash,
+      logIndex: log.index,
+    };
+  };
+
+  const pollBrowserVmHistory = async (): Promise<void> => {
+    const activeEnv = watcherEnv;
+    if (!activeEnv) return;
+    const watcherReplica = findWatcherJurisdictionReplica(
+      activeEnv,
+      addresses.depository,
+      config.chainId,
+    );
+    if (!watcherReplica) {
+      throw new Error(`BROWSERVM_WATCHER_JURISDICTION_MISSING:${config.chainId}:${addresses.depository}`);
+    }
+    const targetBlock = Number(browserVM.getBlockNumber());
+    const committedCursor = Number(watcherReplica.blockNumber ?? 0n);
+    const minimumLocalScan = getMinimumScannedSignerJHeight(activeEnv, watcherReplica);
+    if (!Number.isSafeInteger(targetBlock) || targetBlock < 0) {
+      throw new Error(`BROWSERVM_WATCHER_TARGET_INVALID:${String(targetBlock)}`);
+    }
+    if (!Number.isSafeInteger(committedCursor) || committedCursor < 0) {
+      throw new Error(`BROWSERVM_WATCHER_CURSOR_INVALID:${String(committedCursor)}`);
+    }
+    const nextGlobalBlock = committedCursor + 1;
+    const nextReplicaBlock = minimumLocalScan === null ? nextGlobalBlock : minimumLocalScan + 1;
+    const fromBlock = Math.max(
+      browserVM.getEntityProviderDeploymentBlock(),
+      Math.min(nextGlobalBlock, nextReplicaBlock),
+    );
+    if (fromBlock > targetBlock) return;
+
+    const tipBlockHash = browserVM.getBlockHashAt(targetBlock);
+    const headers = Array.from(
+      { length: targetBlock - fromBlock + 1 },
+      (_, index) => {
+        const jHeight = fromBlock + index;
+        return { jHeight, jBlockHash: browserVM.getBlockHashAt(jHeight) };
+      },
+    );
+    const logs = await browserVM.getAuthenticatedLogsForRange(
+      fromBlock,
+      targetBlock,
+      [addresses.depository, addresses.entityProvider],
+    );
+    const byBlock = new Map<number, RawJEvent[]>();
+    const authorityTxsByBlock = new Map<number, RuntimeTx[]>();
+    for (const log of logs) {
+      const decoded = decodeHistoricalLog(log);
+      if (!decoded) continue;
+      const block = decoded.blockNumber;
+      if (!Number.isSafeInteger(block) || Number(block) < fromBlock || Number(block) > targetBlock) {
+        throw new Error(`BROWSERVM_HISTORICAL_LOG_HEIGHT_INVALID:${String(block)}`);
+      }
+      const events = byBlock.get(Number(block)) ?? [];
+      events.push(decoded);
+      byBlock.set(Number(block), events);
+      if (
+        log.address.toLowerCase() === addresses.entityProvider.toLowerCase() &&
+        (decoded.name === 'EntityRegistered' || decoded.name === 'FoundationBootstrapped')
+      ) {
+        const evidence = buildCertifiedRegistrationEvidence(
+          activeEnv,
+          watcherReplica,
+          decoded.name,
+          log,
+          {
+            observedThroughHeight: targetBlock,
+            observedTipBlockHash: tipBlockHash,
+            observedHeadHeight: targetBlock,
+            confirmationDepth: 0,
+          },
+        );
+        const tx = markLocalJAuthorityRuntimeTx({
+          type: 'recordAuthenticatedJAuthority',
+          data: evidence,
+        });
+        authorityTxsByBlock.set(Number(block), [
+          ...(authorityTxsByBlock.get(Number(block)) ?? []),
+          tx,
+        ]);
+      }
+    }
+
+    const observedInputs = [];
+    const historicalReplicaCatchUp = fromBlock <= committedCursor;
+    for (const [blockNumber, events] of [...byBlock.entries()].sort(([left], [right]) => left - right)) {
+      events.sort((left, right) => Number(left.logIndex) - Number(right.logIndex));
+      const blockHash = events[0]?.blockHash;
+      if (!blockHash) throw new Error(`BROWSERVM_HISTORICAL_BLOCK_HASH_MISSING:${blockNumber}`);
+      const input = processEventBatch(
+        events,
+        activeEnv,
+        blockNumber,
+        blockHash,
+        txCounter,
+        'browservm',
+        addresses.depository,
+        true,
+        'chain',
+        config.chainId,
+        historicalReplicaCatchUp,
+        authorityTxsByBlock.get(blockNumber) ?? [],
+      );
+      if (input) observedInputs.push(input);
+    }
+
+    enqueueJHistoryRange(
+      activeEnv,
+      observedInputs,
+      targetBlock,
+      tipBlockHash,
+      addresses.depository,
+      headers,
+      config.chainId,
+    );
+    updateWatcherJurisdictionCursor(activeEnv, targetBlock, addresses.depository, config.chainId);
+  };
+
+  const pollBrowserVmHistorySerialized = async (): Promise<void> => {
+    if (pollInFlight) return await pollInFlight;
+    const poll = pollBrowserVmHistory();
+    pollInFlight = poll;
+    try {
+      await poll;
+    } finally {
+      if (pollInFlight === poll) pollInFlight = null;
+    }
+  };
+
   const adapter: JAdapter = {
     mode: 'browservm',
     chainId: config.chainId,
@@ -110,22 +302,29 @@ export async function createBrowserVMAdapter(
     entityProvider,
     deltaTransformer,
     addresses,
+    get entityProviderDeploymentBlock() { return browserVM.getEntityProviderDeploymentBlock(); },
 
     async deployStack(): Promise<void> {
-      setDeltaTransformerAddress(addresses.deltaTransformer);
+      await verifyStackBinding('browservm_deploy');
     },
 
     async snapshot(): Promise<SnapshotId> {
       const root = await browserVM.captureStateRoot();
       const id = `browservm:${++snapshotCounter}:${Buffer.from(root).toString('hex')}`;
-      snapshots.set(id, new Uint8Array(root));
+      snapshots.set(id, {
+        root: new Uint8Array(root),
+        chain: browserVM.captureChainCheckpoint(),
+      });
       return id;
     },
 
     async revert(snapshotId: SnapshotId): Promise<void> {
-      const root = snapshots.get(snapshotId);
-      if (!root) throw new Error(`BrowserVM snapshot not found: ${snapshotId}`);
-      await browserVM.timeTravel(root);
+      const snapshot = snapshots.get(snapshotId);
+      if (!snapshot) throw new Error(`BrowserVM snapshot not found: ${snapshotId}`);
+      stackBindingVerified = false;
+      await browserVM.timeTravel(snapshot.root);
+      await browserVM.restoreChainCheckpoint(snapshot.chain);
+      await verifyStackBinding('browservm_revert');
     },
 
     async dumpState(): Promise<BrowserVMState> {
@@ -133,7 +332,9 @@ export async function createBrowserVMAdapter(
     },
 
     async loadState(state: BrowserVMState | string): Promise<void> {
+      stackBindingVerified = false;
       await browserVM.restoreState(requireBrowserVmState(state));
+      await verifyStackBinding('browservm_restore');
     },
 
     async processBlock(): Promise<JEvent[]> {
@@ -155,6 +356,15 @@ export async function createBrowserVMAdapter(
 
     async getEntityNonce(entityId: string): Promise<bigint> {
       return await browserVM.getEntityNonce(normalizeEntityId(entityId));
+    },
+
+    async getEntityProviderActionNonce(entityId: string): Promise<bigint> {
+      return await browserVM.getEntityProviderActionNonce(normalizeEntityId(entityId));
+    },
+
+    async getEntityProviderActionReceipt(entityId: string, actionNonce: bigint): Promise<JEvent | null> {
+      const receipt = browserVM.getEntityProviderActionReceipt(normalizeEntityId(entityId), actionNonce);
+      return receipt ? toJEvents([receipt])[0] ?? null : null;
     },
 
     async isEntityRegistered(entityId: string): Promise<boolean> {
@@ -239,8 +449,8 @@ export async function createBrowserVMAdapter(
       return await browserVM.transferNative(signerPrivateKey, to, amount);
     },
 
-    async fundSignerWallet(address: string, amount?: bigint): Promise<void> {
-      await browserVM.fundSignerWallet(address, amount);
+    async fundSignerWallet(address: string, amount?: bigint, tokenSymbol?: string): Promise<void> {
+      await browserVM.fundSignerWallet(address, amount, tokenSymbol);
     },
 
     async submitTx(jTx: JTx, options: { env: Env; signerId?: string; signerPrivateKey?: Uint8Array; timestamp?: number }): Promise<JSubmitResult> {
@@ -266,6 +476,47 @@ export async function createBrowserVMAdapter(
         }
         await adapter.enforceDebts(entityId, tokenId, maxIterations);
         return { success: true };
+      }
+
+      if (
+        jTx.type === 'entityProviderTransfer' ||
+        jTx.type === 'entityProviderReleaseControlShares' ||
+        jTx.type === 'entityProviderCancelAction'
+      ) {
+        if (!jTx.data.hankoSignature) {
+          return {
+            success: false,
+            error: `ENTITY_PROVIDER_ACTION_CONSENSUS_HANKO_MISSING:${normalizeEntityId(jTx.entityId)}`,
+          };
+        }
+        try {
+          assertEntityProviderActionJTxBinding(jTx, {
+            chainId: config.chainId,
+            entityProviderAddress: addresses.entityProvider,
+            depositoryAddress: addresses.depository,
+          });
+          const events = toJEvents(await browserVM.submitEntityProviderAction(
+            jTx.data.intent,
+            jTx.data.hankoSignature,
+            {
+              entityId: normalizeEntityId(jTx.entityId),
+              kind: jTx.type === 'entityProviderTransfer'
+                ? 'entityTransferTokens'
+                : jTx.type === 'entityProviderReleaseControlShares'
+                  ? 'releaseControlShares'
+                  : 'cancelPendingAction',
+            },
+          ));
+          const receipt = receiptFromEvents(events);
+          return {
+            success: true,
+            txHash: receipt.txHash,
+            blockNumber: receipt.blockNumber,
+            events,
+          };
+        } catch (error) {
+          return makeJAdapterFailureResult(error);
+        }
       }
 
       if (jTx.type === 'batch') {
@@ -303,7 +554,7 @@ export async function createBrowserVMAdapter(
           console.log(`✅ [JAdapter:browservm] Batch executed (${getBatchSize(batch)} ops) block=${receipt.blockNumber}`);
           return { success: true, txHash: receipt.txHash, blockNumber: receipt.blockNumber, events };
         } catch (error) {
-          return { success: false, error: error instanceof Error ? error.message : String(error) };
+          return makeJAdapterFailureResult(error);
         }
       }
 
@@ -312,16 +563,14 @@ export async function createBrowserVMAdapter(
     },
 
     startWatching(env: Env): void {
+      if (!stackBindingVerified) {
+        throw new Error(`J_STACK_BINDING_UNVERIFIED:browservm:chainId=${config.chainId}`);
+      }
       if (watcherUnsubscribe) return;
       watcherEnv = env;
-      watcherUnsubscribe = browserVM.onAny((events) => {
-        const activeEnv = watcherEnv;
-        if (!activeEnv) return;
-        const normalized = toJEvents(events);
-        if (normalized.length === 0) return;
-        const blockNumber = normalized[0]?.blockNumber ?? Number(browserVM.getBlockNumber());
-        const blockHash = normalized[0]?.blockHash ?? browserVM.getBlockHash();
-        processEventBatch(eventsToRaw(normalized), activeEnv, blockNumber, blockHash, txCounter, 'browservm', undefined, false, 'chain');
+      watcherUnsubscribe = browserVM.onAny(async () => {
+        if (!watcherEnv) return;
+        await pollBrowserVmHistorySerialized();
       });
     },
 
@@ -335,8 +584,14 @@ export async function createBrowserVMAdapter(
       watcherEnv = null;
     },
 
+    async stopWatchingAndWait(): Promise<void> {
+      adapter.stopWatching();
+      const inFlight = pollInFlight;
+      if (inFlight) await inFlight;
+    },
+
     async pollNow(): Promise<void> {
-      // BrowserVM pushes events synchronously from each transaction.
+      await pollBrowserVmHistorySerialized();
     },
 
     getBrowserVM(): BrowserVMProvider {
@@ -375,7 +630,7 @@ export async function createBrowserVMAdapter(
     },
 
     async close(): Promise<void> {
-      adapter.stopWatching();
+      await adapter.stopWatchingAndWait();
     },
   };
 

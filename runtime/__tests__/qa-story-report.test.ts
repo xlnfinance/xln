@@ -229,6 +229,29 @@ const benchmarkRun = (
   }],
 } as QaRunManifest);
 
+test('qa severity never reports a fail-fast cancelled shard as passed', () => {
+  const passed = benchmarkRun('cancelled-shard', 1_000, 800);
+  const normalizedShard = passed.shards[0];
+  if (!normalizedShard) throw new Error('TEST_QA_SHARD_REQUIRED');
+  const {
+    severity: _severity,
+    reason: _reason,
+    since: _since,
+    owner: _owner,
+    evidence: _evidence,
+    ...rawShard
+  } = normalizedShard;
+  const cancelled = applyQaRunSeverity({
+    ...passed,
+    status: 'unknown',
+    passedShards: 0,
+    shards: [{ ...rawShard, status: 'cancelled' }],
+  });
+
+  expect(cancelled.shards[0]?.severity).toBe('UNKNOWN');
+  expect(cancelled.shards[0]?.reason).toContain('cancelled after another shard failed');
+});
+
 test('qa benchmark comparison flags sharp runtime deltas', () => {
   const baseline = benchmarkRun('baseline', 1000, 800);
   const slower = compareQaBenchmarkRuns(benchmarkRun('slower', 1300, 1100, 'new-code', 'new-head'), baseline);
@@ -1813,6 +1836,28 @@ test('qa runs endpoint reads SQLite summaries without requiring run logs', async
       expect(payload.regression?.latestRunId).toBe(runId);
       expect(payload.regression?.status).toBe('insufficient');
       expect(payload.regression?.comparisons?.length).toBe(4);
+
+      const detailResponse = await maybeHandleQaRequest(
+        qaRequest(`http://127.0.0.1:8080/api/qa/run?runId=${runId}`),
+        '/api/qa/run',
+        JSON_HEADERS,
+      );
+      expect(detailResponse?.status).toBe(200);
+      const detailPayload = await detailResponse!.json() as {
+        ok?: boolean;
+        run?: QaRunManifest;
+      };
+      expect(detailPayload.ok).toBe(true);
+      expect(detailPayload.run?.runId).toBe(runId);
+      expect(detailPayload.run?.shards[0]?.artifacts).toHaveLength(1);
+      expect(detailPayload.run?.shards[0]?.artifacts[0]?.url).toBeUndefined();
+
+      const artifactResponse = await maybeHandleQaRequest(
+        qaRequest(`http://127.0.0.1:8080/api/qa/artifact?runId=${runId}&path=video.webm`),
+        '/api/qa/artifact',
+        JSON_HEADERS,
+      );
+      expect(artifactResponse?.status).toBe(404);
     });
   } finally {
     deleteQaHistoryRows([runId]);

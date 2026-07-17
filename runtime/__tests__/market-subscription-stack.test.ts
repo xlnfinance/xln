@@ -71,7 +71,7 @@ test('market subscription stack subscribes, sends snapshots, and cleans up count
   expect(stack.snapshot().total).toBe(1);
 
   await stack.handleMessage(ws, { type: 'market_unsubscribe', id: 'unsub-1' });
-  expect(ws.sent.at(-1)).toEqual({ type: 'ack', inReplyTo: 'unsub-1', status: 'market_unsubscribed' });
+  expect(ws.sent.at(-1)).toEqual({ v: 1, type: 'ack', inReplyTo: 'unsub-1', status: 'market_unsubscribed' });
   expect(stack.snapshot().total).toBe(0);
   stack.clear();
 });
@@ -167,6 +167,7 @@ test('market subscription stack reports terminal no-market when a valid subscrip
     status: 'market_subscribed',
   });
   expect(ws.sent[1]).toEqual({
+    v: 1,
     type: 'market_status',
     inReplyTo: 'sub-empty',
     status: 'no_market',
@@ -194,6 +195,7 @@ test('market subscription stack rejects overbroad subscriptions', async () => {
 
   expect(ws.sent).toEqual([
     {
+      v: 1,
       type: 'error',
       inReplyTo: 'sub-wide',
       code: 'E_BAD_QUERY',
@@ -235,6 +237,7 @@ test('market subscription stack reports snapshot fetch errors instead of leaving
     status: 'market_subscribed',
   });
   expect(ws.sent[1]).toEqual({
+    v: 1,
     type: 'error',
     inReplyTo: 'sub-unknown-hub',
     code: 'E_UNKNOWN_HUB',
@@ -277,8 +280,8 @@ test('market subscription publisher removes failing subscribers instead of repea
 
   await wait(1_150);
   expect(ws.sent.at(-1)).toEqual({
+    v: 1,
     type: 'error',
-    inReplyTo: undefined,
     code: 'E_SNAPSHOT_FAILED',
     error: 'snapshot builder failed',
   });
@@ -290,5 +293,41 @@ test('market subscription publisher removes failing subscribers instead of repea
   await wait(1_150);
   expect(ws.sent).toHaveLength(sentAfterCleanup);
   expect(handlerErrors).toHaveLength(errorsAfterCleanup);
+  stack.clear();
+});
+
+test('market subscription cleanup survives failure to send the structured socket error', async () => {
+  const handlerErrors: unknown[] = [];
+  let sends = 0;
+  const ws = {
+    ip: '10.0.0.6',
+    sent: [] as unknown[],
+    send(payload: string) {
+      sends += 1;
+      if (sends > 1) throw new Error('market socket closed');
+      this.sent.push(JSON.parse(payload));
+    },
+  };
+  const stack = createMarketSubscriptionStack<typeof ws>({
+    maxSubscriptions: 2,
+    maxSubscriptionsPerIp: 1,
+    maxCellsPerSubscription: 4,
+    getClientIp: socket => socket.ip,
+    fetchSnapshots: (hubEntityId, pairIds, depth) =>
+      pairIds.map(pairId => makeSnapshot(hubEntityId, pairId, depth)),
+    onHandlerError: error => handlerErrors.push(error),
+  });
+
+  await expect(stack.handleMessage(ws, {
+    type: 'market_subscribe',
+    id: 'sub-send-fail',
+    hubEntityId: HUB_ID,
+    pairs: ['1/2'],
+    depth: 5,
+  })).resolves.toBeUndefined();
+
+  expect(stack.snapshot().total).toBe(0);
+  expect(handlerErrors.map(error => error instanceof Error ? error.message : String(error)))
+    .toEqual(['market socket closed', 'market socket closed']);
   stack.clear();
 });

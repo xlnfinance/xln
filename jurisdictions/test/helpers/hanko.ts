@@ -11,8 +11,8 @@ export const BATCH_ABI = [
     'tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral,' +
     'tuple(bytes32 counterparty, uint256 tokenId, uint256 amount, uint256 nonce, bytes sig)[] collateralToReserve,' +
     'tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig, address entityProvider, bytes hankoData, uint256 nonce)[] settlements,' +
-    'tuple(bytes32 counterentity, uint256 nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes sig, bytes starterInitialArguments, bytes starterIncrementedArguments)[] disputeStarts,' +
-    'tuple(bytes32 counterentity, uint256 initialNonce, uint256 finalNonce, bytes32 initialProofbodyHash, tuple(bytes32 watchSeed, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes leftArguments, bytes rightArguments, bytes starterInitialArguments, bytes starterIncrementedArguments, bytes sig, bool startedByLeft, uint256 disputeUntilBlock, bool cooperative)[] disputeFinalizations,' +
+    'tuple(bytes32 counterentity, uint256 nonce, bytes32 proofbodyHash, tuple(bytes32 watchSeed, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) initialProofbody, bytes32 watchSeed, bytes sig, bytes starterInitialArguments, bytes starterIncrementedArguments)[] disputeStarts,' +
+    'tuple(bytes32 counterentity, uint256 initialNonce, uint256 finalNonce, bytes32 initialProofbodyHash, tuple(bytes32 watchSeed, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes starterArguments, bytes otherArguments, bytes sig, bool startedByLeft, bool cooperative)[] disputeFinalizations,' +
     'tuple(bytes32 entity, address contractAddress, uint96 externalTokenId, uint8 tokenType, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve,' +
     'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken,' +
     'tuple(address transformer, bytes32 secret)[] revealSecrets,' +
@@ -20,7 +20,9 @@ export const BATCH_ABI = [
   ')'
 ];
 
-const HANKO_ABI = ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'];
+const HANKO_ABI = [
+  'tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[])',
+];
 const BOARD_ABI = [
   'tuple(uint16 votingThreshold, bytes32[] entityIds, uint16[] votingPowers, uint32 boardChangeDelay, uint32 controlChangeDelay, uint32 dividendChangeDelay)'
 ];
@@ -76,13 +78,46 @@ export const computeDepositoryBatchHash = async (
 };
 
 export const buildSingleSignerHanko = (entityId: string, hash: string, privateKey: string): string => {
-  const signingKey = new ethers.SigningKey(privateKey);
-  const signature = signingKey.sign(ethers.getBytes(hash));
-  const vBit = signature.v === 28 ? 1 : 0;
-  const packedSig = ethers.concat([signature.r, signature.s, ethers.toBeHex(vBit, 1)]);
+  return buildClaimsHanko(hash, [privateKey], [], [[
+    ethers.zeroPadValue(entityId, 32),
+    [0],
+    [1],
+    1,
+  ]]);
+};
+
+export const buildClaimsHanko = (
+  hash: string,
+  privateKeys: string[],
+  placeholders: string[],
+  claims: Array<[
+    entityId: string,
+    entityIndexes: Array<number | bigint>,
+    weights: Array<number | bigint>,
+    threshold: number | bigint,
+    delays?: readonly [number | bigint, number | bigint, number | bigint],
+  ]>,
+): string => {
+  const signatures = privateKeys.map((privateKey) =>
+    new ethers.SigningKey(privateKey).sign(ethers.getBytes(hash))
+  );
+  const recoveryBits = new Uint8Array(Math.ceil(signatures.length / 8));
+  signatures.forEach((signature, index) => {
+    if (signature.v === 28) recoveryBits[Math.floor(index / 8)]! |= 1 << (index % 8);
+  });
+  const packedSignatures = ethers.concat([
+    ...signatures.flatMap((signature) => [signature.r, signature.s]),
+    ethers.hexlify(recoveryBits),
+  ]);
   return ethers.AbiCoder.defaultAbiCoder().encode(HANKO_ABI, [[
-    [],
-    packedSig,
-    [[ethers.zeroPadValue(entityId, 32), [0], [1], 1]],
+    placeholders.map((entityId) => ethers.zeroPadValue(entityId, 32)),
+    packedSignatures,
+    claims.map(([entityId, entityIndexes, weights, threshold, delays = [0, 0, 0]]) => [
+      ethers.zeroPadValue(entityId, 32),
+      entityIndexes,
+      weights,
+      threshold,
+      ...delays,
+    ]),
   ]]);
 };

@@ -29,7 +29,12 @@ const isTrustedBrowserRelayUrl = (parsed: URL, pageLocation: BrowserLocationLike
 
 const defaultRelayWsUrl = (pageLocation: BrowserLocationLike): string => {
   const protocol = pageLocation.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${pageLocation.host}/relay`;
+  return `${protocol}//${pageLocation.host}/relay?protocol=market`;
+};
+
+const marketRelayUrl = (parsed: URL): string => {
+  parsed.searchParams.set('protocol', 'market');
+  return parsed.toString();
 };
 
 export const resolveOrderbookRelayWsUrl = (
@@ -58,11 +63,11 @@ export const resolveOrderbookRelayWsUrl = (
       };
     }
     if (parsed.protocol === 'ws:' || parsed.protocol === 'wss:') {
-      return { url: parsed.toString(), explicit: true, usedDefault: false, unavailableReason: '' };
+      return { url: marketRelayUrl(parsed), explicit: true, usedDefault: false, unavailableReason: '' };
     }
     if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
       parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
-      return { url: parsed.toString(), explicit: true, usedDefault: false, unavailableReason: '' };
+      return { url: marketRelayUrl(parsed), explicit: true, usedDefault: false, unavailableReason: '' };
     }
     return {
       url: null,

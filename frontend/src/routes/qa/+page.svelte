@@ -3,6 +3,7 @@
   import QaAdminEvidenceBoard from '$lib/components/QA/QaAdminEvidenceBoard.svelte';
   import QaProtectedImage from '$lib/components/QA/QaProtectedImage.svelte';
   import QaScenarioPlayer from '$lib/components/QA/QaScenarioPlayer.svelte';
+  import QaTestLedgerTable from '$lib/components/QA/QaTestLedgerTable.svelte';
   import {
     qaScenarioDescription,
     qaScenarioSummary,
@@ -80,6 +81,7 @@
     QaStoryScreenshot,
     QaSummary,
     QaSystemVerdict,
+    QaTestLedgerEntry,
     QaUxReleasePackAudit,
     QaVerdictStatus,
     QaVerdictSummary,
@@ -96,6 +98,7 @@
   let uxGalleryGroupFilter = $state('all');
   let history = $state<QaHistoryEntry[]>([]);
   let ledger = $state<QaRunLedgerEntry[]>([]);
+  let testLedger = $state<QaTestLedgerEntry[]>([]);
   let regression = $state<QaRegressionReport | null>(null);
   let restartAudit = $state<QaRestartAuditEntry[]>([]);
   let restart = $state<RestartStatus>({ active: false });
@@ -627,6 +630,7 @@
         qaAuth?: QaAuthInfo;
         runs?: QaSummary[];
         ledger?: QaRunLedgerEntry[];
+        testLedger?: QaTestLedgerEntry[];
         regression?: QaRegressionReport;
         verdict?: QaSystemVerdict;
         error?: string;
@@ -637,6 +641,7 @@
       }
       runs = payload.runs;
       ledger = payload.ledger ?? [];
+      testLedger = payload.testLedger ?? [];
       regression = payload.regression ?? null;
       systemVerdict = payload.verdict ?? null;
       const requestedRunId = requestedRunIdFromUrl();
@@ -1141,6 +1146,8 @@
         <button class="mini-action ghost" onclick={forgetQaToken}>Clear</button>
       {/if}
     </section>
+
+    <QaTestLedgerTable rows={testLedger} />
 
     <nav class="qa-tabs" data-testid="qa-test-tabs">
       <button class:active={activeView === 'gallery'} onclick={() => (activeView = 'gallery')}>UX Gallery</button>

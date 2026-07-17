@@ -11,31 +11,32 @@ type InfraDbAccess = {
 };
 
 const INFRA_GOSSIP_INDEX_KEY = 'gossip:index';
+const INFRA_GOSSIP_PROFILE_PREFIX = 'gossip:profile:';
 const makeInfraGossipProfileKey = (entityId: string): string => `gossip:profile:${String(entityId).toLowerCase()}`;
 const infraGossipLog = createStructuredLogger('runtime.infra_gossip');
 
-const readInfraStringArray = async (db: Level<Buffer, Buffer>, key: string): Promise<string[]> => {
-  try {
-    const raw = await db.get(Buffer.from(key));
-    const parsed = deserializeTaggedJson<unknown>(raw.toString());
-    return Array.isArray(parsed) ? parsed.map((value) => String(value || '').toLowerCase()).filter(Boolean) : [];
-  } catch {
-    return [];
+const listInfraGossipEntityIds = async (db: Level<Buffer, Buffer>): Promise<string[]> => {
+  const ids = new Set<string>();
+  for await (const rawKey of db.keys({
+    gte: Buffer.from(INFRA_GOSSIP_PROFILE_PREFIX),
+    lt: Buffer.from('gossip:profile;'),
+  })) {
+    const key = rawKey.toString();
+    const entityId = key.slice(INFRA_GOSSIP_PROFILE_PREFIX.length).toLowerCase();
+    if (!/^0x[0-9a-f]{64}$/.test(entityId)) {
+      throw new Error(`INFRA_GOSSIP_PROFILE_KEY_INVALID:${key}`);
+    }
+    ids.add(entityId);
   }
+  return [...ids].sort();
 };
 
 const pruneInfraGossipProfile = async (db: Level<Buffer, Buffer>, entityId: string): Promise<void> => {
   const normalizedEntityId = String(entityId || '').toLowerCase();
   if (!normalizedEntityId) return;
-  const existingIds = await readInfraStringArray(db, INFRA_GOSSIP_INDEX_KEY);
-  const nextIds = existingIds.filter((value) => value !== normalizedEntityId);
   const batch = db.batch();
   batch.del(Buffer.from(makeInfraGossipProfileKey(normalizedEntityId)));
-  if (nextIds.length > 0) {
-    batch.put(Buffer.from(INFRA_GOSSIP_INDEX_KEY), Buffer.from(serializeTaggedJson(nextIds)));
-  } else {
-    batch.del(Buffer.from(INFRA_GOSSIP_INDEX_KEY));
-  }
+  batch.del(Buffer.from(INFRA_GOSSIP_INDEX_KEY));
   await batch.write();
 };
 
@@ -52,11 +53,11 @@ export const persistGossipProfileToInfraDb = async (
   if (!entityId) {
     throw new Error('INFRA_GOSSIP_ENTITY_ID_REQUIRED');
   }
-  const existingIds = await readInfraStringArray(db, INFRA_GOSSIP_INDEX_KEY);
-  const nextIds = existingIds.includes(entityId) ? existingIds : [...existingIds, entityId];
+  // Profile keys are the authoritative index. A separate read/modify/write
+  // array loses ids when different profile announcements commit concurrently.
   const batch = db.batch();
   batch.put(Buffer.from(makeInfraGossipProfileKey(entityId)), Buffer.from(serializeTaggedJson(canonicalProfile)));
-  batch.put(Buffer.from(INFRA_GOSSIP_INDEX_KEY), Buffer.from(serializeTaggedJson(nextIds.sort())));
+  batch.del(Buffer.from(INFRA_GOSSIP_INDEX_KEY));
   await batch.write();
 };
 
@@ -67,7 +68,7 @@ export const loadGossipProfilesFromInfraDb = async (
   const dbReady = await dbAccess.tryOpenInfraDb(env);
   if (!dbReady) return;
   const db = dbAccess.getInfraDb(env);
-  const entityIds = await readInfraStringArray(db, INFRA_GOSSIP_INDEX_KEY);
+  const entityIds = await listInfraGossipEntityIds(db);
   if (entityIds.length === 0) return;
   for (const entityId of entityIds) {
     try {
@@ -82,18 +83,28 @@ export const loadGossipProfilesFromInfraDb = async (
       await pruneInfraGossipProfile(db, entityId);
     }
   }
+  const migration = db.batch();
+  migration.del(Buffer.from(INFRA_GOSSIP_INDEX_KEY));
+  await migration.write();
 };
 
 export const clearInfraGossipProfiles = async (
   env: Env,
   dbAccess: InfraDbAccess,
+  options: { runtimeId?: string } = {},
 ): Promise<void> => {
   const dbReady = await dbAccess.tryOpenInfraDb(env);
   if (!dbReady) return;
   const db = dbAccess.getInfraDb(env);
-  const entityIds = await readInfraStringArray(db, INFRA_GOSSIP_INDEX_KEY);
+  const entityIds = await listInfraGossipEntityIds(db);
+  const targetRuntimeId = String(options.runtimeId || '').trim().toLowerCase();
   const batch = db.batch();
   for (const entityId of entityIds) {
+    if (targetRuntimeId) {
+      const raw = await db.get(Buffer.from(makeInfraGossipProfileKey(entityId)));
+      const profile = parseProfile(deserializeTaggedJson<unknown>(raw.toString()));
+      if (String(profile.runtimeId || '').trim().toLowerCase() !== targetRuntimeId) continue;
+    }
     batch.del(Buffer.from(makeInfraGossipProfileKey(entityId)));
   }
   batch.del(Buffer.from(INFRA_GOSSIP_INDEX_KEY));

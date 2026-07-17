@@ -1,4 +1,5 @@
 import type { CrossJurisdictionSwapRoute, EntityInput, EntityTx } from '../../types';
+import { getEffectiveEntityInputTxs } from '../../entity/consensus/output-envelope';
 
 /**
  * Cross-j swaps are a two-runtime system protocol.
@@ -33,7 +34,7 @@ export const isCrossJurisdictionIntraRuntimeTx = (tx: EntityTx | { type?: unknow
 
 export const entityInputHasCrossJurisdictionIntraRuntimeTx = (
   input: Pick<EntityInput, 'entityTxs'> | null | undefined,
-): boolean => (input?.entityTxs || []).some(isCrossJurisdictionIntraRuntimeTx);
+): boolean => input ? getEffectiveEntityInputTxs(input).some(isCrossJurisdictionIntraRuntimeTx) : false;
 
 const normalizeEntityRef = (value: unknown): string => String(value || '').trim().toLowerCase();
 const normalizeRuntimeRef = (value: unknown): string => String(value || '').trim().toLowerCase();
@@ -131,10 +132,9 @@ export const isCrossJurisdictionEntityInputRemoteHopAllowed = (
   resolveRuntimeId: CrossJurisdictionRouteRuntimeResolver,
 ): boolean => {
   let sawCrossJ = false;
-  for (const tx of input.entityTxs || []) {
+  for (const tx of getEffectiveEntityInputTxs(input)) {
     if (!isCrossJurisdictionIntraRuntimeTx(tx)) continue;
     sawCrossJ = true;
-    if (tx.type === 'crossPullClose') return false;
     const route = extractCrossJurisdictionRouteFromTx(tx);
     if (!route) return false;
     if (!isCrossJurisdictionRouteRemoteHopAllowed(route, localRuntimeId, remoteRuntimeId, resolveRuntimeId)) {

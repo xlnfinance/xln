@@ -1,12 +1,91 @@
 import type { JurisdictionEvent, JurisdictionEventData } from './jurisdiction-events';
-import type { AccountInput, CrossJurisdictionSecretRelay, SettlementDiff, SettlementOp } from './account';
+import type { AccountInput, AccountStateDomain, CrossJurisdictionSecretRelay, SettlementDiff, SettlementOp } from './account';
 import type { CrossJurisdictionBookAdmissionReceipt, CrossJurisdictionCloseProof, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
 import type { LendingTermId } from './lending';
 import type { ProfileUpdateTx } from './profile';
 import type { ProposalAction } from '../types';
 import type { PaymentDeliveryMode } from './payment';
+import type { ValidatorEncryptionAttestation } from '../protocol/htlc/validator-encryption';
+import type { EntityProfileDescriptor } from '../networking/profile-descriptor';
+import type { CertifiedBoardAuthorityBinding } from './entity-board-registry';
+import type { ConsumptionProof } from '../entity/consumption-accumulator-types';
+import type { MultiRecipientCiphertext } from '../protocol/htlc/multi-recipient';
 
-export type EntityTx =
+export type SignedEntityCommandV2 = Readonly<{
+  version: 2;
+  entityId: string;
+  /** Trusted jurisdiction-stack commitment, recomputed from EntityState. */
+  stackKey: string;
+  /** Exact current board encoded as on-chain validator EOAs + weights. */
+  boardHash: string;
+  /** Trusted activation epoch from the local certified board registry; lazy entities stay at zero. */
+  boardEpoch: number;
+  /** Consensus board identity. Numeric aliases stay aliases. */
+  authorSignerId: string;
+  /** EOA bound to authorSignerId by the certified manifest/current board. */
+  authorSigner: string;
+  /** Strictly sequential inside the exact current boardHash + boardEpoch namespace. */
+  nonce: bigint;
+  txsHash: string;
+  txs: EntityTx[];
+  signature: string;
+}>;
+
+export type EntityCommandNonceState = {
+  version: 2;
+  boardHash: string;
+  boardEpoch: number;
+  /** One bounded retry/equivocation fence per current board alias. */
+  bySigner: Map<string, {
+    nonce: bigint;
+    commandHash: string;
+  }>;
+};
+
+export type ConsensusOutputOrigin = {
+  sourceEntityId: string;
+  lane: 'generic' | 'account-frame' | 'account-ack' | 'account-dispute' | 'account-settlement';
+  /** Lifetime-monotonic for this exact source→target relationship. */
+  sequence: bigint;
+  /** Stable payload commitment preserved across a current-board reissue. */
+  semanticHash: string;
+  height: number;
+  frameHash: string;
+  outputIndex: number;
+  /** Required for a source whose id is certified in a jurisdiction registry. */
+  boardAuthority?: CertifiedBoardAuthorityBinding;
+};
+
+type EntityTxPayload =
+  | {
+      /** Independently authored board-member command; validators replay and verify it. */
+      type: 'entityCommand';
+      data: SignedEntityCommandV2;
+    }
+  | {
+      /** Quorum-certified source-frame output, deduplicated in target consensus state. */
+      type: 'consensusOutput';
+      data: {
+        origin: ConsensusOutputOrigin;
+        outputHanko: string;
+        targetEntityId: string;
+        entityTxs: EntityTx[];
+        /** Target-proposer witness against the target's pre-frame accumulator root. */
+        consumptionProof?: ConsumptionProof;
+      };
+    }
+  | {
+      /** Collective reissue of the exact bounded last generic source output. */
+      type: 'reissueCertifiedOutput';
+      data: {
+        targetEntityId: string;
+        /** Committed recipient lane; transport must never derive it from local topology during replay. */
+        targetSignerId: string;
+        sequence: bigint;
+        semanticHash: string;
+        entityTxs: EntityTx[];
+      };
+    }
   | {
       /**
        * Consensus-visible scheduler marker. The local runtime may create it
@@ -63,6 +142,13 @@ export type EntityTx =
       };
     }
   | {
+      /** Public validator key manifest proposed only after gossip convergence. */
+      type: 'certifyProfile';
+      data: {
+        encryptionAttestations: ValidatorEncryptionAttestation[];
+      };
+    }
+  | {
       type: 'j_event';
       data: JurisdictionEventData;
     }
@@ -74,6 +160,7 @@ export type EntityTx =
       type: 'openAccount';
       data: {
         targetEntityId: string;
+        accountDomain?: AccountStateDomain; // Materialized from committed Entity jurisdiction before signing
         watchSeed?: string;    // Generated at runtime ingress; fixed for this bilateral account
         creditAmount?: bigint;  // Optional: extend credit in same frame as add_delta
         tokenId?: number;       // Token for credit (default: 1 = USDC)
@@ -116,15 +203,69 @@ export type EntityTx =
         description?: string;
         deliveryMode?: Exclude<PaymentDeliveryMode, 'trusted'>;
         startedAtMs?: number;
-        secret?: string;   // Optional - generated if not provided
-        hashlock?: string; // Optional - generated if not provided
-        // Deterministic replay payload captured on first execution.
+        /** Raw local-ingress hint only. Stripped before command/frame/WAL. */
+        secret?: string;
+        hashlock?: string;
+        // Opaque onion and independently verifiable public commitments frozen
+        // at local ingress before any multisig voting delay.
         preparedEnvelope?: unknown;
         preparedSenderLockAmount?: bigint | string;
         preparedTotalFee?: bigint | string;
         preparedLockId?: string;
         preparedTimelock?: bigint | string;
         preparedRevealBeforeHeight?: number;
+        preparedAtEntityHeight?: number;
+        preparedAtJHeight?: number;
+        preparedRouteProfiles?: Array<{ descriptor: EntityProfileDescriptor; profileHanko: string }>;
+        preparedHopForwardAmounts?: Array<{ entityId: string; amount: bigint | string }>;
+      };
+    }
+  | {
+      /**
+       * Default-proposer-authored reveal of exactly one committed onion layer.
+       * The encrypted layer remains the binding authority; this action exposes
+       * only the deterministic effect that every validator can replay.
+       */
+      type: 'htlcOnionAdvance';
+      data: {
+        version: 1;
+        proposerSignerId: string;
+        inboundEntityId: string;
+        inboundLockId: string;
+        encryptedLayerHash: string;
+        hashlock: string;
+        tokenId: number;
+        amount: bigint;
+        timelock: bigint;
+        revealBeforeHeight: number;
+        advance:
+          | {
+              kind: 'final';
+              secretOffer: MultiRecipientCiphertext;
+              description?: string;
+              startedAtMs?: number;
+            }
+          | {
+              kind: 'acceptOffer';
+              offerHash: string;
+            }
+          | {
+              /**
+               * Plaintext becomes consensus-visible only after the exact
+               * Account ACK below has durably committed the final unlock.
+               */
+              kind: 'revealAccepted';
+              offerHash: string;
+              accountFrameHash: string;
+              accountFrameHeight: number;
+              secret: string;
+            }
+          | {
+              kind: 'forward';
+              nextHop: string;
+              forwardAmount: bigint;
+              innerEnvelope: MultiRecipientCiphertext;
+            };
       };
     }
   | {
@@ -228,21 +369,6 @@ export type EntityTx =
       };
     }
   | {
-      type: 'settleDiffs';
-      data: {
-        counterpartyEntityId: string;
-        diffs: Array<{
-          tokenId: number;
-          leftDiff: bigint;   // Positive = credit, Negative = debit
-          rightDiff: bigint;
-          collateralDiff: bigint;
-          ondeltaDiff: bigint;
-        }>;
-        sig: string; // Hanko signature from counterparty
-        description?: string; // e.g., "Fund collateral from reserve"
-      };
-    }
-  | {
       type: 'prepareDispute';
       data: {
         counterpartyEntityId: string;
@@ -254,6 +380,8 @@ export type EntityTx =
       type: 'disputeStart';
       data: {
         counterpartyEntityId: string;
+        /** Exact committed route authorizing a target user to force its source-side dispute. */
+        crossJurisdictionRouteId?: string;
         starterInitialArguments?: string;
         starterIncrementedArguments?: string;
         description?: string;
@@ -277,6 +405,24 @@ export type EntityTx =
       type: 'prepareCrossJurisdictionSwap';
       data: {
         route: CrossJurisdictionSwapRoute;
+      };
+    }
+  | {
+      /** Source-hub default proposer publishes public ladder commitments; its seed stays local. */
+      type: 'materializeCrossJurisdictionSwap';
+      data: {
+        proposerSignerId: string;
+        route: CrossJurisdictionSwapRoute;
+      };
+    }
+  | {
+      /** Source-hub default proposer reveals only the committed fill; validators verify the public proof. */
+      type: 'materializeCrossJurisdictionClear';
+      data: {
+        proposerSignerId: string;
+        orderId: string;
+        binary: string;
+        proof: CrossJurisdictionCloseProof;
       };
     }
   | {
@@ -432,6 +578,31 @@ export type EntityTx =
           maxFeePerGasWei?: string;
           maxPriorityFeePerGasWei?: string;
         };
+      };
+    }
+  | {
+      /** Collective-only transfer from this numbered Entity's ERC1155 balance. */
+      type: 'entityProviderTransfer';
+      data: {
+        to: string;
+        tokenId: bigint;
+        amount: bigint;
+      };
+    }
+  | {
+      /** Collective-only release to the exact Depository in trusted stack config. */
+      type: 'entityProviderReleaseControlShares';
+      data: {
+        controlAmount: bigint;
+        dividendAmount: bigint;
+        purpose: string;
+      };
+    }
+  | {
+      /** Collective-only cancellation of the exact current EntityProvider action. */
+      type: 'entityProviderCancelAction';
+      data: {
+        actionHash: string;
       };
     }
   | {
@@ -604,21 +775,6 @@ export type EntityTx =
         amount: bigint;
       };
     }
-  | {
-      // Create settlement batch (builds settlement in jBatch)
-      type: 'createSettlement';
-      data: {
-        counterpartyEntityId: string;
-        diffs: Array<{
-          tokenId: number;
-          leftDiff: bigint;
-          rightDiff: bigint;
-          collateralDiff: bigint;
-          ondeltaDiff: bigint;
-        }>;
-        sig: string; // Hanko signature from counterparty (required for cooperative settlement)
-      };
-    }
   // ═══════════════════════════════════════════════════════════════
   // SETTLEMENT WORKSPACE OPERATIONS
   // ═══════════════════════════════════════════════════════════════
@@ -651,6 +807,7 @@ export type EntityTx =
       type: 'settle_approve';
       data: {
         counterpartyEntityId: string;
+        workspaceHash: string;
       };
     }
   | {
@@ -719,3 +876,5 @@ export type EntityTx =
         amount: bigint;
       };
     };
+
+export type EntityTx = EntityTxPayload;

@@ -99,11 +99,10 @@ function projectSummaryProfile(summary: RuntimeAdapterEntitySummary): GossipProf
     wsUrl: null,
     relays: [],
     metadata: {
-      entityEncPubKey: '',
       isHub: summary.isHub === true,
       routingFeePPM: 0,
       baseFee: 0n,
-      board: { threshold: 0, validators: [] },
+      board: { threshold: 0, validators: [], encryptionAttestations: [] },
       ...(jurisdiction ? { jurisdiction } : {}),
     },
     accounts: [],
@@ -142,7 +141,6 @@ export function buildPaymentPanelViewFromRuntimeView(input: {
     const signerId = String(active.core.signerId || active.summary.entityId || activeEntityId).trim().toLowerCase();
     replicaMap.set(`${activeEntityId}:${signerId}`, {
       state: {
-        entityEncPubKey: String(active.core.entityEncPubKey || ''),
         accounts,
         lockBook: active.core.lockBook instanceof Map ? new Map(active.core.lockBook) : new Map(),
       },
@@ -165,7 +163,6 @@ function projectReplica(replica: EntityReplica): PaymentReplicaView {
   }
   return {
     state: {
-      entityEncPubKey: String(replica.state.entityEncPubKey || ''),
       accounts,
       lockBook: replica.state.lockBook instanceof Map ? new Map(replica.state.lockBook) : new Map(),
     },

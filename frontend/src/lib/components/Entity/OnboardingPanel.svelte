@@ -47,6 +47,7 @@
     type RuntimeRecoveryDiscoveryStatus,
   } from '../../utils/recoveryDiscoveryStatus';
   import {
+    assertCommittedAutoJoinCount,
     buildOnboardingHubOpenRuntimeInput,
     buildOnboardingProfileRuntimeInput,
     emptyOnboardingRuntimeProjection,
@@ -73,6 +74,7 @@
   let autoJoinHubs: HubJoinPreference = '1';
   let submitting = false;
   let error = '';
+  let policyDefaultsNotice = '';
   let hasPersistedPolicy = false;
   let avatar = '';
   let revealBrainVaultSeed = false;
@@ -446,8 +448,9 @@
         hardLimitUsd = defaults.hardLimitUsd;
         maxFeeUsd = defaults.maxFeeUsd;
       }
-    } catch {
-      // Keep local defaults if /api/jurisdictions isn't available yet.
+    } catch (policyError) {
+      const reason = policyError instanceof Error ? policyError.message : String(policyError);
+      policyDefaultsNotice = `Jurisdiction defaults unavailable; using built-in safe defaults. ${reason}`;
     }
   });
 
@@ -498,8 +501,9 @@
       const url = new URL('/api/hubs', apiBase);
       url.searchParams.set('ts', String(Date.now()));
       const response = await fetch(url.toString(), { cache: 'no-store', signal: controller.signal });
-      if (!response.ok) return [];
+      if (!response.ok) throw new Error(`HTTP_${response.status}`);
       const payload = await response.json() as PublicHubResponse;
+      if (payload.ok !== true) throw new Error('RESPONSE_NOT_OK');
       const out: string[] = [];
       for (const hub of payload.hubs || []) {
         if (!hub?.entityId || hub.metadata?.isHub !== true) continue;
@@ -518,8 +522,6 @@
         if (!out.some(existing => normalizeEntityId(existing) === normalized)) out.push(hub.entityId);
       }
       return out;
-    } catch {
-      return [];
     } finally {
       clearTimeout(timer);
     }
@@ -533,12 +535,21 @@
       const pollMs = 100;
       const startedAt = Date.now();
       let best: string[] = [];
+      let discoveryFailure = '';
 
       while (Date.now() - startedAt < timeoutMs) {
-        const ids = [
-          ...getHubEntityIds(target),
-          ...await fetchPublicHubEntityIds(target),
-        ];
+        const ids = getHubEntityIds(target);
+        const localCandidateCount = new Set(ids.map(normalizeEntityId).filter(Boolean)).size;
+        if (localCandidateCount < joinCount) {
+          try {
+            ids.push(...await fetchPublicHubEntityIds(target));
+            discoveryFailure = '';
+          } catch (discoveryError) {
+            discoveryFailure = discoveryError instanceof Error
+              ? discoveryError.message
+              : String(discoveryError);
+          }
+        }
         const currentCandidates = Array.from(new Map(ids.map(id => [normalizeEntityId(id), id])).values())
           .filter((hubId) => !hasProjectedCounterpartyAccount(target.entityId, hubId));
         if (currentCandidates.length > best.length) best = currentCandidates;
@@ -546,10 +557,21 @@
         await sleep(pollMs);
       }
 
+      if (best.length < joinCount) {
+        if (discoveryFailure) {
+          throw new Error(
+            `ONBOARDING_HUB_DISCOVERY_FAILED:requested=${joinCount}:found=${best.length}:cause=${discoveryFailure}`,
+          );
+        }
+        throw new Error(
+          `ONBOARDING_HUB_CAPACITY_INSUFFICIENT:requested=${joinCount}:found=${best.length}`,
+        );
+      }
       return best.slice(0, joinCount);
     };
 
-    const rebalancePolicy = getOpenAccountRebalancePolicyData();
+    const tokenDecimals = $xlnFunctions.getTokenInfo(1).decimals;
+    const rebalancePolicy = getOpenAccountRebalancePolicyData(tokenDecimals);
     if (!rebalancePolicy) return 0;
 
     const candidates = await waitForCandidates();
@@ -557,7 +579,7 @@
     const readyCandidates = candidates.filter((hubId) => !hasProjectedCounterpartyAccount(target.entityId, hubId));
     if (readyCandidates.length === 0) return 0;
 
-    const creditAmount = 10_000n * 10n ** 18n;
+    const creditAmount = 10_000n * 10n ** BigInt(tokenDecimals);
     await submitRuntimeInput(buildOnboardingHubOpenRuntimeInput({
       target,
       hubEntityIds: readyCandidates,
@@ -635,6 +657,11 @@
         ? targets.filter((target) => !hasAnyCounterpartyAccount(target.entityId))
         : targets;
       const autoJoinedCount = await queueAutoHubJoins(autoJoinCount, autoJoinTargets);
+      assertCommittedAutoJoinCount({
+        requestedPerTarget: autoJoinCount,
+        targetCount: autoJoinTargets.length,
+        committedCount: autoJoinedCount,
+      });
 
       const completedEntityIds = allTargets.map((target) => target.entityId);
       writeOnboardingCompleteForEntities(completedEntityIds.length > 0 ? completedEntityIds : [entityId], true);
@@ -820,6 +847,11 @@
         hard <strong>{defaultHardLimitUsd.toLocaleString()}</strong>,
         fee <strong>{defaultMaxFeeUsd.toLocaleString()}</strong>.
       </p>
+      {#if policyDefaultsNotice}
+        <div class="recovery-note compact" data-testid="onboarding-policy-defaults-notice">
+          {policyDefaultsNotice}
+        </div>
+      {/if}
       <div class="hub-join-inline">
         <label class="form-label" for="hub-join-select">Initial hub join</label>
         <select id="hub-join-select" class="hub-join-select" bind:value={autoJoinHubs}>

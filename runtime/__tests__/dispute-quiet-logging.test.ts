@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { handleDisputeFinalize } from '../entity/tx/handlers/dispute';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import type { EntityState, EntityTx, Env } from '../types';
 
 const ALICE = `0x${'11'.repeat(32)}`;
@@ -12,11 +13,16 @@ const makeEntityState = (): EntityState => ({
   timestamp: 1,
   lastFinalizedJHeight: 0,
   messages: [],
+  proposals: new Map(),
   accounts: new Map([
     [HUB, {
       status: 'disputed',
       leftEntity: ALICE,
       rightEntity: HUB,
+      domain: {
+        chainId: 31337,
+        depositoryAddress: `0x${'dd'.repeat(20)}`,
+      },
       mempool: [],
       deltas: new Map(),
       locks: new Map(),
@@ -24,9 +30,8 @@ const makeEntityState = (): EntityState => ({
       globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
       currentHeight: 1,
       rollbackCount: 0,
-      leftJObservations: [],
-      rightJObservations: [],
-      jEventChain: [],
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
       pendingWithdrawals: new Map(),
       requestedRebalance: new Map(),

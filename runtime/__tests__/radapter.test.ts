@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { expect, test } from 'bun:test';
 import { createHmac } from 'crypto';
+import { computeAddress, hexlify, keccak256, recoverAddress, SigningKey, toUtf8Bytes } from 'ethers';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 
 import {
   deriveRuntimeAdapterCapabilityToken,
@@ -9,12 +11,18 @@ import {
   verifyRuntimeAdapterAuthKey,
 } from '../radapter/auth';
 import {
+  decodeRuntimeAdapterBrowserMessage,
   decodeRuntimeAdapterMessage,
   encodeRuntimeAdapterMessage,
   runtimeAdapterMaxMessageBytes,
 } from '../radapter/codec';
 import { EmbeddedRuntimeAdapter } from '../radapter/embedded';
 import { RemoteRuntimeAdapter } from '../radapter/remote';
+import {
+  verifyRuntimeAdapterServerIdentity,
+} from '../radapter/server-identity';
+import { buildRuntimeAdapterOwnerBindingDigest } from '../radapter/owner-binding';
+import { signRuntimeAdapterServerIdentity } from '../radapter/server-identity-signer';
 import {
   assertRuntimeAdapterGraphFrameWireBudget,
   resolveRuntimeAdapterRead,
@@ -25,10 +33,15 @@ import {
   deriveRuntimeRecoveryLookupKey,
 } from '../recovery/crypto';
 import { broadcastRuntimeAdapterTick, handleRuntimeAdapterMessage } from '../radapter/server';
+import {
+  applyRuntimeAdapterCommandMarker,
+  MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES,
+} from '../radapter/command-frontier';
 import { decodeBuffer, encodeBuffer } from '../storage/codec';
 import { prepareStorageStateHashes } from '../storage/hashes';
 import {
   KEY_HEAD,
+  STORAGE_SCHEMA_VERSION,
   hexBytes,
   keyLiveAccount,
   keyLiveEntity,
@@ -41,7 +54,7 @@ import {
   normalizeEntityId,
   textBytes,
 } from '../storage/keys';
-import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
+import { projectAccountDoc, projectEntityCoreDoc, projectEntityReplicaCoreView } from '../storage/projections';
 import { loadEntityAccountDocFromStorage, loadEntityStateFromStorage, loadEntityViewPageFromStorage } from '../storage/read';
 import type {
   RuntimeDbLike,
@@ -56,47 +69,37 @@ import type { AccountTx, Delta, EntityReplica, Env, RuntimeInput } from '../type
 import type { BookState } from '../orderbook';
 import { DEFAULT_SPREAD_DISTRIBUTION, type OrderbookExtState } from '../orderbook/types';
 import { createGossipLayer, type Profile } from '../networking/gossip';
+import { deriveSignerAddressSync, deriveSignerKeySync } from '../account/crypto';
+import { buildCryptographicProfileFixture } from './helpers/cryptographic-profile';
 
 const entityId = `0x${'aa'.repeat(32)}`;
 const counterpartyId = `0x${'bb'.repeat(32)}`;
+const adapterAuthChallenge = `0x${'41'.repeat(32)}`;
 
 process.env['XLN_RADAPTER_AUTH_SEED'] = process.env['XLN_RADAPTER_AUTH_SEED'] || 'seed';
 
-const makeHubProfile = (id: string, name: string, lastUpdated = 7): Profile => ({
-  entityId: id,
-  name,
-  avatar: '',
-  bio: '',
-  website: '',
-  lastUpdated,
-  runtimeId: `runtime:${name.toLowerCase()}`,
-  runtimeEncPubKey: `0x${'11'.repeat(32)}`,
-  publicAccounts: [],
-  wsUrl: null,
-  relays: [],
-  metadata: {
-    entityEncPubKey: `0x${'22'.repeat(32)}`,
+const decodeTestRuntimeAdapterMessage = <T>(raw: unknown): T => (
+  typeof raw === 'string'
+    ? decodeRuntimeAdapterBrowserMessage(raw)
+    : decodeRuntimeAdapterMessage(raw)
+) as unknown as T;
+
+const makeHubProfile = (id: string, name: string, lastUpdated = 7): Profile =>
+  buildCryptographicProfileFixture({
+    entityId: id,
+    signingSeed: `radapter-live-profile:${id}:${name}`,
+    name,
+    lastUpdated,
+    runtimeId: `runtime:${name.toLowerCase()}`,
+    runtimeEncPubKey: `0x${'11'.repeat(32)}`,
     isHub: true,
-    routingFeePPM: 0,
-    baseFee: 0n,
-    board: {
-      threshold: 1,
-      validators: [{
-        signer: `0x${'33'.repeat(20)}`,
-        weight: 1,
-        signerId: `0x${'33'.repeat(20)}`,
-        publicKey: `0x${'44'.repeat(32)}`,
-      }],
-    },
     jurisdiction: {
       name: 'Testnet',
       chainId: 31337,
       entityProviderAddress: '0x0000000000000000000000000000000000000001',
       depositoryAddress: '0x0000000000000000000000000000000000000002',
     },
-  },
-  accounts: [],
-});
+  });
 
 const makeEnv = (): Env => ({
   height: 7,
@@ -115,12 +118,26 @@ const makeEnv = (): Env => ({
         messages: [],
         nonces: new Map(),
         proposals: new Map(),
-        config: { mode: 'proposer-based', threshold: 1n, validators: ['signer'], shares: { signer: 1n } },
+        config: {
+          mode: 'proposer-based', threshold: 1n, validators: ['signer'], shares: { signer: 1n },
+          jurisdiction: {
+            address: '0x0000000000000000000000000000000000000002',
+            name: 'Testnet',
+            chainId: 31337,
+            entityProviderAddress: '0x0000000000000000000000000000000000000001',
+            depositoryAddress: '0x0000000000000000000000000000000000000002',
+          },
+        },
         reserves: new Map([[1, 100n]]),
         accounts: new Map([
           [counterpartyId, {
             leftEntity: entityId,
             rightEntity: counterpartyId,
+            domain: {
+              chainId: 31337,
+              depositoryAddress: '0x0000000000000000000000000000000000000002',
+            },
+            watchSeed: `0x${'34'.repeat(32)}`,
             status: 'active',
             mempool: [],
             currentFrame: {
@@ -146,9 +163,8 @@ const makeEnv = (): Env => ({
             requestedRebalance: new Map(),
             requestedRebalanceFeeState: new Map(),
             shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-            leftJObservations: [],
-            rightJObservations: [],
-            jEventChain: [],
+            leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+            rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
             lastFinalizedJHeight: 0,
             disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
             jNonce: 0,
@@ -171,13 +187,13 @@ const makeEnv = (): Env => ({
   ]),
 }) as Env;
 
-const makeBook = (price: bigint): BookState => ({
+const makeBook = (_price: bigint): BookState => ({
   params: { bucketWidthTicks: 1n, maxOrders: 100, stpPolicy: 0 },
   orders: new Map(),
-  bidBuckets: new Map([[price.toString(), { bucketId: price, pricesAsc: [price], levels: new Map() }]]),
-  askBuckets: new Map([[(price + 1n).toString(), { bucketId: price + 1n, pricesAsc: [price + 1n], levels: new Map() }]]),
-  bidBucketIdsDesc: [price],
-  askBucketIdsAsc: [price + 1n],
+  bidBuckets: new Map(),
+  askBuckets: new Map(),
+  bidBucketIdsDesc: [],
+  askBucketIdsAsc: [],
   nextSeq: 1,
   tradeCount: 0,
   tradeQtySum: 0n,
@@ -210,6 +226,7 @@ const makeCrowdedBidLevelBook = (price: bigint, orderCount: number): BookState =
         totalQtyLots: BigInt(orderCount),
       }]]),
     }]]),
+    bidBucketIdsDesc: [price],
     nextSeq: orderCount + 1,
   };
 };
@@ -239,7 +256,7 @@ const makeTestDelta = (tokenId: number, value: bigint): Delta => ({
   rightAllowance: 0n,
 });
 
-test('runtime adapter solvency-summary returns compact aggregate metrics only', async () => {
+test('runtime adapter solvency-summary returns per-stack asset conservation', async () => {
   const env = makeEnv();
   const replica = Array.from(env.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)!;
@@ -256,12 +273,18 @@ test('runtime adapter solvency-summary returns compact aggregate metrics only', 
     height: 7,
     entityCount: 1,
     accountViews: 1,
-    m1: 100n,
-    m2: 50n,
-    m3: 25n,
-    total: 75n,
-    delta: 25n,
-    isValid: false,
+    assets: [{
+      stackId: '31337:0x0000000000000000000000000000000000000002',
+      chainId: 31337,
+      depositoryAddress: '0x0000000000000000000000000000000000000002',
+      tokenId: 1,
+      reserves: 100n,
+      confirmedCollateral: 100n,
+      pendingCollateral: 50n,
+      delta: 0n,
+      isValid: true,
+    }],
+    isValid: true,
   });
   expect(summary).not.toHaveProperty('eReplicas');
   expect(summary).not.toHaveProperty('accounts');
@@ -304,7 +327,7 @@ const makeTestViewPageLoader = (env: Env) => async (
   const bookOffset = bookCursor ? Math.max(0, bookPairs.findIndex(([pairId]) => pairId === bookCursor) + 1) : 0;
   const visibleBooks = bookPairs.slice(bookOffset, bookOffset + bookLimit);
   return {
-    core: projectEntityCoreDoc(replica.state, replica),
+    core: projectEntityReplicaCoreView(replica.state, replica),
     accounts: {
       items: visibleAccountIds.map((id) => {
         const account = replica.state.accounts.get(id);
@@ -393,6 +416,14 @@ const oldStaticAuthKey = (seed: string, level: 'inspect' | 'admin'): string =>
     .digest('hex');
 
 const inspectToken = (): string => deriveRuntimeAdapterCapabilityToken('seed', 'read', Date.now() + 60_000);
+
+const ownerBindingSignature = (
+  runtimeId: string,
+  challenge: string,
+  capability: string,
+): string => new SigningKey(hexlify(deriveSignerKeySync('seed', '1')))
+  .sign(buildRuntimeAdapterOwnerBindingDigest(runtimeId, challenge, capability))
+  .serialized.toLowerCase();
 
 test('runtime adapter server diagnostics use structured logging only', () => {
   const source = readFileSync(new URL('../radapter/server.ts', import.meta.url), 'utf8');
@@ -536,7 +567,19 @@ test('runtime adapter resolver reads live head and entity paths', async () => {
   );
 
   expect(head.latestHeight).toBe(7);
-  expect(entities).toEqual([{ entityId, signerId: 'signer', label: 'Adapter Test', height: 7 }]);
+  expect(entities).toEqual([{
+    entityId,
+    signerId: 'signer',
+    label: 'Adapter Test',
+    height: 7,
+    jurisdiction: {
+      address: '0x0000000000000000000000000000000000000002',
+      name: 'Testnet',
+      chainId: 31337,
+      entityProviderAddress: '0x0000000000000000000000000000000000000001',
+      depositoryAddress: '0x0000000000000000000000000000000000000002',
+    },
+  }]);
   expect(entity.entityId).toBe(entityId);
   expect(entity.profile.name).toBe('Adapter Test');
   expect(accounts.items).toHaveLength(1);
@@ -686,6 +729,74 @@ test('runtime adapter resolver returns a bounded view frame for the app shell', 
   expect(frame.activeEntity?.books.items).toEqual([]);
 });
 
+test('current stored view frame overlays local identity without mixing a later live frame', async () => {
+  const env = makeEnv();
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  replica.state.prevFrameHash = 'frame-h7';
+  replica.state.htlcNotes = new Map([['hashlock:local-h7', 'local note h7']]);
+  const storedCore = structuredClone(projectEntityCoreDoc(replica.state));
+  const frame = await resolveRuntimeAdapterRead<{
+    height: number;
+    activeEntity: {
+      core: {
+        signerId?: string;
+        isProposer?: boolean;
+        entityEncPubKey?: string;
+        entityEncPrivKey?: string;
+        height: number;
+        timestamp: number;
+        prevFrameHash?: string;
+        profile: { name: string };
+        reserves: Map<number, bigint>;
+        htlcNotes?: Map<string, string>;
+      };
+    } | null;
+  }>({
+    env,
+    readHead: async () => ({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      latestHeight: env.height,
+      latestMaterializedHeight: env.height,
+      latestSnapshotHeight: 0,
+      snapshotPeriodFrames: 256,
+      retainSnapshots: 3,
+      epochMaxBytes: 1,
+      accountMerkleRadix: 16,
+      retainedHistoryBytes: 0,
+    }),
+    loadEntityViewPage: async () => {
+      await Promise.resolve();
+      env.height = 8;
+      env.timestamp = 800;
+      replica.isProposer = false;
+      replica.state.height = 8;
+      replica.state.timestamp = 800;
+      replica.state.prevFrameHash = 'frame-h8';
+      replica.state.profile = { ...replica.state.profile, name: 'Later live frame' };
+      replica.state.reserves = new Map([[1, 800n]]);
+      replica.state.entityEncPubKey = 'pub-h8';
+      replica.state.htlcNotes = new Map([['hashlock:local-h8', 'local note h8']]);
+      return {
+        core: storedCore,
+        accounts: { items: [], nextCursor: null },
+        books: { items: [], nextCursor: null },
+      };
+    },
+  }, 'view-frame');
+
+  expect(frame.height).toBe(7);
+  expect(frame.activeEntity?.core.height).toBe(7);
+  expect(frame.activeEntity?.core.timestamp).toBe(700);
+  expect(frame.activeEntity?.core.prevFrameHash).toBe('frame-h7');
+  expect(frame.activeEntity?.core.profile.name).toBe('Adapter Test');
+  expect(frame.activeEntity?.core.reserves.get(1)).toBe(100n);
+  expect(frame.activeEntity?.core.signerId).toBe(replica.signerId);
+  expect(frame.activeEntity?.core.isProposer).toBe(true);
+  expect(frame.activeEntity?.core.entityEncPubKey).toBe('pub');
+  expect(frame.activeEntity?.core.entityEncPrivKey).toBe('');
+  expect(frame.activeEntity?.core.htlcNotes).toEqual(new Map([['hashlock:local-h7', 'local note h7']]));
+});
+
 test('runtime adapter view-frame includes live gossip summaries for visible account peers', async () => {
   const env = makeEnv();
   env.gossip = createGossipLayer();
@@ -780,7 +891,6 @@ test('runtime adapter graph-frame keeps gossip peers and complete local account 
     'pendingWithdrawals',
     'rebalancePolicy',
     'globalCreditLimits',
-    'jEventChain',
   ]) {
     expect(local?.accounts.items[0]).not.toHaveProperty(heavyAccountField);
   }
@@ -793,6 +903,89 @@ test('runtime adapter graph-frame keeps gossip peers and complete local account 
     limit: 1,
     accountsLimit: 10,
   })).rejects.toThrow('graph-frame has 2 entities; limit is 1');
+});
+
+test('runtime adapter live graph-frame never reads a prunable storage generation', async () => {
+  const env = makeEnv();
+  env.runtimeId = 'runtime:h1';
+  let storagePageReads = 0;
+
+  const frame = await resolveRuntimeAdapterRead<RuntimeAdapterGraphFrame>({
+    env,
+    readHead: async () => ({
+      schemaVersion: STORAGE_SCHEMA_VERSION,
+      latestHeight: env.height,
+      latestMaterializedHeight: env.height,
+      latestSnapshotHeight: Math.max(0, env.height - 1),
+      snapshotPeriodFrames: 5,
+      retainSnapshots: 3,
+      epochMaxBytes: 1,
+      accountMerkleRadix: 16,
+      retainedHistoryBytes: 0,
+    }),
+    loadEntityViewPage: async () => {
+      storagePageReads += 1;
+      throw new Error(`STORAGE_DIFF_MISSING: height=${env.height} scope=entity:${entityId}`);
+    },
+  }, 'graph-frame', { limit: 10, accountsLimit: 10 });
+
+  expect(storagePageReads).toBe(0);
+  expect(frame.height).toBe(env.height);
+  expect(frame.entities.some((entry) => entry.summary.entityId === entityId)).toBe(true);
+});
+
+test('runtime adapter explicit graph-frame height uses exact RDB state even at the live height', async () => {
+  const env = makeEnv();
+  const livePage = await makeTestViewPageLoader(env)(entityId, env.height, {
+    accountsLimit: 10,
+    booksLimit: 1,
+  });
+  if (!livePage) throw new Error('test storage page is required');
+  const storedPage = {
+    ...livePage,
+    core: {
+      ...livePage.core,
+      timestamp: 601,
+      profile: { ...livePage.core.profile, name: 'Persisted H7' },
+    },
+  };
+  let storagePageReads = 0;
+  const head = {
+    schemaVersion: STORAGE_SCHEMA_VERSION,
+    latestHeight: env.height,
+    latestMaterializedHeight: env.height,
+    latestSnapshotHeight: env.height,
+    snapshotPeriodFrames: 5,
+    retainSnapshots: 3,
+    epochMaxBytes: 1,
+    accountMerkleRadix: 16,
+    retainedHistoryBytes: 0,
+  };
+
+  const frame = await resolveRuntimeAdapterRead<RuntimeAdapterGraphFrame>({
+    env,
+    readHead: async () => head,
+    listEntityIdsAtHeight: async () => [entityId],
+    loadEntityViewPage: async () => {
+      storagePageReads += 1;
+      return storedPage;
+    },
+  }, 'graph-frame', { atHeight: env.height, limit: 10, accountsLimit: 10 });
+
+  const storedEntity = frame.entities.find((entry) => entry.summary.entityId === entityId);
+  expect(storagePageReads).toBeGreaterThan(0);
+  expect(storedEntity?.summary.label).toBe('Persisted H7');
+  expect(storedEntity?.core?.timestamp).toBe(601);
+
+  await expect(resolveRuntimeAdapterRead({
+    env,
+    readHead: async () => head,
+    listEntityIdsAtHeight: async () => [entityId],
+    loadEntityViewPage: async () => {
+      throw new Error(`STORAGE_DIFF_MISSING: height=${env.height} scope=entity:${entityId}`);
+    },
+  }, 'graph-frame', { atHeight: env.height, limit: 10, accountsLimit: 10 }))
+    .rejects.toThrow(`STORAGE_DIFF_MISSING: height=${env.height} scope=entity:${entityId}`);
 });
 
 test('runtime adapter graph-frame wire DTO stays below budget near topology limits', () => {
@@ -873,7 +1066,7 @@ test('runtime adapter graph-frame wire DTO stays below budget near topology limi
 
   const frame: RuntimeAdapterGraphFrame = {
     head: {
-      schemaVersion: 1,
+      schemaVersion: STORAGE_SCHEMA_VERSION,
       latestHeight: 42,
       latestMaterializedHeight: 42,
       latestSnapshotHeight: 40,
@@ -1127,7 +1320,7 @@ test('runtime adapter historical batch without entityId defaults to live entity 
   }>({
     env,
     readHead: async () => ({
-      schemaVersion: 1,
+      schemaVersion: STORAGE_SCHEMA_VERSION,
       latestHeight: 9,
       latestMaterializedHeight: 8,
       latestSnapshotHeight: 8,
@@ -1146,7 +1339,7 @@ test('runtime adapter historical batch without entityId defaults to live entity 
       if (!replica) return null;
       const account = replica.state.accounts.get(counterpartyId);
       return {
-        core: projectEntityCoreDoc(replica.state, replica),
+        core: projectEntityReplicaCoreView(replica.state, replica),
         accounts: {
           items: account ? [projectAccountDoc(account)] : [],
           nextCursor: null,
@@ -1235,7 +1428,7 @@ test('runtime adapter timeline-index returns a bounded compact timestamp page', 
   }>({
     env,
     readHead: async () => ({
-      schemaVersion: 1,
+      schemaVersion: STORAGE_SCHEMA_VERSION,
       latestHeight: 7,
       latestSnapshotHeight: 6,
       snapshotPeriodFrames: 2,
@@ -1268,7 +1461,7 @@ test('runtime adapter receipt read returns ingress receipt status over websocket
           counts: { runtimeTxs: 0, entityInputs: 1, jInputs: 0 },
           enqueuedHeight: 7,
           observedHeight: 8,
-          createdAt: 1,
+          enqueuedAt: 1,
           expiresAt: 2,
         }
       : null,
@@ -1281,8 +1474,8 @@ test('runtime adapter receipt read returns ingress receipt status over websocket
 
 test('runtime adapter recovery bundle read is gated by seed-derived lookup key', async () => {
   const env = makeEnv();
-  env.runtimeId = `0x${'12'.repeat(20)}`;
   env.runtimeSeed = 'test test test test test test test test test test test junk';
+  env.runtimeId = deriveSignerAddressSync(env.runtimeSeed, '1').toLowerCase();
   const lookupKey = deriveRuntimeRecoveryLookupKey(env.runtimeId, env.runtimeSeed);
 
   const response = await resolveRuntimeAdapterRead<{
@@ -1395,7 +1588,7 @@ test('runtime adapter historical view frame uses paged storage loader instead of
   }>({
     env,
     readHead: async () => ({
-      schemaVersion: 1,
+      schemaVersion: STORAGE_SCHEMA_VERSION,
       latestHeight: 9,
       latestMaterializedHeight: 8,
       latestSnapshotHeight: 8,
@@ -1413,7 +1606,7 @@ test('runtime adapter historical view frame uses paged storage loader instead of
     loadEntityViewPage: async () => {
       pagedLoadCalled = true;
       return {
-        core: projectEntityCoreDoc(replica.state, replica),
+        core: projectEntityReplicaCoreView(replica.state, replica),
         accounts: { items: [projectAccountDoc(account)], nextCursor: null },
         books: { items: [], nextCursor: null },
       };
@@ -1438,7 +1631,7 @@ test('runtime adapter historical view frame skips missing non-active summaries w
   }>({
     env,
     readHead: async () => ({
-      schemaVersion: 1,
+      schemaVersion: STORAGE_SCHEMA_VERSION,
       latestHeight: 9,
       latestMaterializedHeight: 8,
       latestSnapshotHeight: 8,
@@ -1453,7 +1646,7 @@ test('runtime adapter historical view frame skips missing non-active summaries w
     loadEntityViewPage: async (requestedEntityId) => {
       if (normalizeEntityId(requestedEntityId) !== entityId) return null;
       return {
-        core: projectEntityCoreDoc(replica.state, replica),
+        core: projectEntityReplicaCoreView(replica.state, replica),
         accounts: { items: [], nextCursor: null },
         books: { items: [], nextCursor: null },
       };
@@ -1467,7 +1660,7 @@ test('runtime adapter historical view frame skips missing non-active summaries w
   await expect(resolveRuntimeAdapterRead({
     env,
     readHead: async () => ({
-      schemaVersion: 1,
+      schemaVersion: STORAGE_SCHEMA_VERSION,
       latestHeight: 9,
       latestMaterializedHeight: 8,
       latestSnapshotHeight: 8,
@@ -1501,7 +1694,7 @@ test('runtime adapter live view-frame stays live if env height advances during p
       env.height = 9;
       replica.state.height = 9;
       return {
-        schemaVersion: 1,
+        schemaVersion: STORAGE_SCHEMA_VERSION,
         latestHeight: 9,
         latestMaterializedHeight: 8,
         latestSnapshotHeight: 8,
@@ -1517,7 +1710,7 @@ test('runtime adapter live view-frame stays live if env height advances during p
       return [`0x${'de'.repeat(32)}`, entityId];
     },
     loadEntityViewPage: async () => ({
-      core: projectEntityCoreDoc(replica.state, replica),
+      core: projectEntityReplicaCoreView(replica.state, replica),
       accounts: { items: [], nextCursor: null },
       books: { items: [], nextCursor: null },
     }),
@@ -1545,7 +1738,7 @@ test('runtime adapter history-frame-batch returns bounded historical view frames
   }>({
     env,
     readHead: async () => ({
-      schemaVersion: 1,
+      schemaVersion: STORAGE_SCHEMA_VERSION,
       latestHeight: 9,
       latestMaterializedHeight: 8,
       latestSnapshotHeight: 8,
@@ -1559,7 +1752,7 @@ test('runtime adapter history-frame-batch returns bounded historical view frames
     loadEntityViewPage: async (_entityId, height) => {
       loadedHeights.push(height);
       return {
-        core: projectEntityCoreDoc(replica.state, replica),
+        core: projectEntityReplicaCoreView(replica.state, replica),
         accounts: { items: [projectAccountDoc(account)], nextCursor: null },
         books: { items: [], nextCursor: null },
       };
@@ -1592,7 +1785,7 @@ test('runtime adapter history-frame-batch marks missing storage diffs unavailabl
   }>({
     env,
     readHead: async () => ({
-      schemaVersion: 1,
+      schemaVersion: STORAGE_SCHEMA_VERSION,
       latestHeight: 9,
       latestMaterializedHeight: 8,
       latestSnapshotHeight: 8,
@@ -1606,7 +1799,7 @@ test('runtime adapter history-frame-batch marks missing storage diffs unavailabl
     loadEntityViewPage: async (_entityId, height) => {
       if (height === 8) throw new Error(`STORAGE_DIFF_MISSING: height=${height} scope=entity:${entityId}`);
       return {
-        core: projectEntityCoreDoc(replica.state, replica),
+        core: projectEntityReplicaCoreView(replica.state, replica),
         accounts: { items: [projectAccountDoc(account)], nextCursor: null },
         books: { items: [], nextCursor: null },
       };
@@ -1802,7 +1995,7 @@ test('runtime adapter historical head reads persisted storage head', async () =>
   const head = await resolveRuntimeAdapterRead<{ latestHeight: number; latestSnapshotHeight: number }>({
     env,
     readHead: async () => ({
-      schemaVersion: 1,
+      schemaVersion: STORAGE_SCHEMA_VERSION,
       latestHeight: 42,
       latestMaterializedHeight: 41,
       latestSnapshotHeight: 40,
@@ -1822,7 +2015,7 @@ test('runtime adapter current head exposes persisted snapshot cadence when stora
   const env = makeEnv();
   env.height = 45;
   const storedHead: StorageHead = {
-    schemaVersion: 1,
+    schemaVersion: STORAGE_SCHEMA_VERSION,
     latestHeight: 45,
     latestMaterializedHeight: 45,
     latestSnapshotHeight: 40,
@@ -1855,7 +2048,7 @@ test('runtime adapter current head preserves persisted snapshot cadence when sto
   const env = makeEnv();
   env.height = 19;
   const storedHead: StorageHead = {
-    schemaVersion: 1,
+    schemaVersion: STORAGE_SCHEMA_VERSION,
     latestHeight: 16,
     latestMaterializedHeight: 16,
     latestSnapshotHeight: 16,
@@ -1881,7 +2074,7 @@ test('runtime adapter rejects historical reads beyond the persisted storage head
   const env = makeEnv();
   env.height = 20;
   const persistedHead: StorageHead = {
-    schemaVersion: 1,
+    schemaVersion: STORAGE_SCHEMA_VERSION,
     latestHeight: 8,
     latestMaterializedHeight: 8,
     latestSnapshotHeight: 8,
@@ -1975,7 +2168,7 @@ test('runtime adapter current view frame prefers storage page loader when curren
   }>({
     env,
     readHead: async () => ({
-      schemaVersion: 1,
+      schemaVersion: STORAGE_SCHEMA_VERSION,
       latestHeight: env.height,
       latestMaterializedHeight: env.height,
       latestSnapshotHeight: 0,
@@ -1988,7 +2181,7 @@ test('runtime adapter current view frame prefers storage page loader when curren
     loadEntityViewPage: async (requestedEntityId, height) => {
       pagedLoadCalled = { entityId: requestedEntityId, height };
       return {
-        core: projectEntityCoreDoc(replica.state, replica),
+        core: projectEntityReplicaCoreView(replica.state, replica),
         accounts: {
           items: [storedDoc],
           nextCursor: 'next-page',
@@ -2052,7 +2245,7 @@ test('runtime adapter 1M account view-frame stays aggregate-first and under wire
   }>({
     env,
     readHead: async () => ({
-      schemaVersion: 1,
+      schemaVersion: STORAGE_SCHEMA_VERSION,
       latestHeight: env.height,
       latestMaterializedHeight: env.height,
       latestSnapshotHeight: env.height,
@@ -2065,7 +2258,7 @@ test('runtime adapter 1M account view-frame stays aggregate-first and under wire
     loadEntityViewPage: async () => {
       loaderCalls += 1;
       return {
-        core: projectEntityCoreDoc(replica.state, replica),
+        core: projectEntityReplicaCoreView(replica.state, replica),
         accounts: {
           items: visibleDocs,
           nextCursor: visibleDocs[visibleDocs.length - 1]!.rightEntity,
@@ -2227,6 +2420,11 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
   const replica = Array.from(env.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)! as any;
   account.watchSeed = `0x${'11'.repeat(32)}`;
+  account.boardResealMigration = {
+    activationJHeight: 9,
+    activationLogIndex: 2,
+    reason: 'bilateral-frame-uncertified',
+  };
   account.currentFrame = {
     ...account.currentFrame,
     accountTxs: Array.from({ length: 30_000 }, (_, index) => ({
@@ -2253,24 +2451,6 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
     data: { index, note: 'z'.repeat(160) },
   }));
   account.pendingSignatures = Array.from({ length: 30_000 }, (_, index) => `sig-${index}-${'a'.repeat(80)}`);
-  account.leftJObservations = Array.from({ length: 5_000 }, (_, index) => ({
-    jHeight: index,
-    jBlockHash: `0x${index.toString(16).padStart(64, '0')}`,
-    events: [{ kind: 'left', payload: 'l'.repeat(160) }],
-    observedAt: index,
-  }));
-  account.rightJObservations = Array.from({ length: 5_000 }, (_, index) => ({
-    jHeight: index,
-    jBlockHash: `0x${index.toString(16).padStart(64, '0')}`,
-    events: [{ kind: 'right', payload: 'r'.repeat(160) }],
-    observedAt: index,
-  }));
-  account.jEventChain = Array.from({ length: 5_000 }, (_, index) => ({
-    jHeight: index,
-    jBlockHash: `0x${index.toString(16).padStart(64, '0')}`,
-    events: [{ kind: 'final', payload: 'f'.repeat(160) }],
-    finalizedAt: index,
-  }));
   account.abiProofBody = {
     encodedProofBody: `0x${'ab'.repeat(500_000)}`,
     proofBodyHash: `0x${'cd'.repeat(32)}`,
@@ -2309,6 +2489,13 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
           settlementWorkspace?: unknown;
           swapOrderHistory?: Map<string, unknown>;
           swapClosedOrders?: Map<string, unknown>;
+          leftPendingJClaims: { root: string; count: bigint };
+          rightPendingJClaims: { root: string; count: bigint };
+          boardResealMigration?: {
+            activationJHeight: number;
+            activationLogIndex: number;
+            reason: string;
+          };
         }>;
       };
     } | null;
@@ -2330,6 +2517,9 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
   expect(compact?.settlementWorkspace).toBeUndefined();
   expect(compact?.swapOrderHistory).toBeUndefined();
   expect(compact?.swapClosedOrders).toBeUndefined();
+  expect(compact?.leftPendingJClaims).toEqual(createEmptyAccountJClaimAccumulator());
+  expect(compact?.rightPendingJClaims).toEqual(createEmptyAccountJClaimAccumulator());
+  expect(compact?.boardResealMigration).toEqual(account.boardResealMigration);
 });
 
 test('storage-backed historical view pages support desc account and book cursors', async () => {
@@ -2338,9 +2528,10 @@ test('storage-backed historical view pages support desc account and book cursors
   const baseAccount = replica.state.accounts.get(counterpartyId)!;
   const snapshotHeight = 4;
   const latestHeight = 5;
-  const accountIds = [1, 2, 3, 4].map((value) => `0x${value.toString(16).padStart(64, '0')}`);
+  const accountIds = [1, 2, 3, 4].map((value) =>
+    `0x${(0xc0 + value).toString(16).padEnd(64, '0')}`);
   const head: StorageHead = {
-    schemaVersion: 1,
+    schemaVersion: STORAGE_SCHEMA_VERSION,
     latestHeight,
     latestMaterializedHeight: latestHeight,
     latestSnapshotHeight: snapshotHeight,
@@ -2351,7 +2542,7 @@ test('storage-backed historical view pages support desc account and book cursors
     retainedHistoryBytes: 0,
   };
   const manifest: StorageSnapshotManifest = { height: snapshotHeight, createdAt: 400, docCount: 7 };
-  const core = projectEntityCoreDoc(replica.state, replica);
+  const core = projectEntityCoreDoc(replica.state);
   const db = makeMemoryDb([
     [KEY_HEAD, encodeBuffer(head)],
     [keySnapshotManifest(snapshotHeight), encodeBuffer(manifest)],
@@ -2402,7 +2593,7 @@ test('storage readers reject requested heights beyond the persisted head', async
   const replica = Array.from(env.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)!;
   const head: StorageHead = {
-    schemaVersion: 1,
+    schemaVersion: STORAGE_SCHEMA_VERSION,
     latestHeight: env.height,
     latestMaterializedHeight: env.height,
     latestSnapshotHeight: 0,
@@ -2414,7 +2605,7 @@ test('storage readers reject requested heights beyond the persisted head', async
   };
   const db = makeMemoryDb([
     [KEY_HEAD, encodeBuffer(head)],
-    [keyLiveEntity(entityId), encodeBuffer(projectEntityCoreDoc(replica.state, replica))],
+    [keyLiveEntity(entityId), encodeBuffer(projectEntityCoreDoc(replica.state))],
     [keyLiveAccount(entityId, counterpartyId), encodeBuffer(projectAccountDoc(account))],
   ]);
   const futureHeight = env.height + 1;
@@ -2453,7 +2644,7 @@ test('storage live recovery verifies doc values through merkle leaves', async ()
     const replica = Array.from(env.eReplicas.values())[0]!;
     const account = replica.state.accounts.get(counterpartyId)!;
     const head: StorageHead = {
-      schemaVersion: 1,
+      schemaVersion: STORAGE_SCHEMA_VERSION,
       latestHeight: env.height,
       latestMaterializedHeight: env.height,
       latestSnapshotHeight: 0,
@@ -2463,7 +2654,7 @@ test('storage live recovery verifies doc values through merkle leaves', async ()
       accountMerkleRadix: 16,
       retainedHistoryBytes: 0,
     };
-    const coreDoc = projectEntityCoreDoc(replica.state, replica);
+    const coreDoc = projectEntityCoreDoc(replica.state);
     const accountDoc = projectAccountDoc(account);
     const prepared = await prepareStorageStateHashes({
       db: makeMemoryDb([]),
@@ -2501,7 +2692,7 @@ test('storage live recovery rejects live docs that do not match merkle leaf valu
     const replica = Array.from(env.eReplicas.values())[0]!;
     const account = replica.state.accounts.get(counterpartyId)!;
     const head: StorageHead = {
-      schemaVersion: 1,
+      schemaVersion: STORAGE_SCHEMA_VERSION,
       latestHeight: env.height,
       latestMaterializedHeight: env.height,
       latestSnapshotHeight: 0,
@@ -2511,7 +2702,7 @@ test('storage live recovery rejects live docs that do not match merkle leaf valu
       accountMerkleRadix: 16,
       retainedHistoryBytes: 0,
     };
-    const coreDoc = projectEntityCoreDoc(replica.state, replica);
+    const coreDoc = projectEntityCoreDoc(replica.state);
     const accountDoc = projectAccountDoc(account);
     const prepared = await prepareStorageStateHashes({
       db: makeMemoryDb([]),
@@ -2548,7 +2739,7 @@ test('storage live recovery can deep verify merkle side records', async () => {
     const env = makeEnv();
     const replica = Array.from(env.eReplicas.values())[0]!;
     const account = replica.state.accounts.get(counterpartyId)!;
-    const coreDoc = projectEntityCoreDoc(replica.state, replica);
+    const coreDoc = projectEntityCoreDoc(replica.state);
     const accountDoc = projectAccountDoc(account);
     const prepared = await prepareStorageStateHashes({
       db: makeMemoryDb([]),
@@ -2559,7 +2750,7 @@ test('storage live recovery can deep verify merkle side records', async () => {
       dels: [],
     });
     const head: StorageHead = {
-      schemaVersion: 1,
+      schemaVersion: STORAGE_SCHEMA_VERSION,
       latestHeight: env.height,
       latestMaterializedHeight: env.height,
       latestSnapshotHeight: 0,
@@ -2676,6 +2867,7 @@ test('runtime adapter binary codec preserves structured payloads', () => {
     id: 'send-1',
     op: 'send',
     commandId: 'binary-command-0001',
+    commandSequence: 1,
     input: {
       runtimeTxs: [],
       entityInputs: [{
@@ -2696,7 +2888,7 @@ test('runtime adapter binary codec preserves structured payloads', () => {
       }],
     },
   });
-  const decoded = decodeRuntimeAdapterMessage<{
+  const decoded = decodeTestRuntimeAdapterMessage<{
     input: { entityInputs: Array<{ entityTxs: Array<{ data: { amount: bigint; metadata: Map<string, string>; tags: Set<string>; bytes: Uint8Array } }> }> };
   }>(encoded);
 
@@ -2729,21 +2921,21 @@ test('runtime adapter websocket handler gates reads behind inspect auth', async 
   await handleRuntimeAdapterMessage(socket, { v: 1, id: 'read-1', op: 'read', path: 'head' }, env, {
     enqueueRuntimeInput: () => {},
   });
-  const denied = decodeRuntimeAdapterMessage<{ ok: false; error: { code: string } }>(messages.pop());
+  const denied = decodeTestRuntimeAdapterMessage<{ ok: false; error: { code: string } }>(messages.pop());
   expect(denied.ok).toBe(false);
   expect(denied.error.code).toBe('E_UNAUTHORIZED');
 
-  await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth-1', op: 'auth', key: inspectToken() }, env, {
+  await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth-1', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge }, env, {
     enqueueRuntimeInput: () => {},
   });
-  const authed = decodeRuntimeAdapterMessage<{ ok: true; payload: { authLevel: string } }>(messages.pop());
+  const authed = decodeTestRuntimeAdapterMessage<{ ok: true; payload: { authLevel: string } }>(messages.pop());
   expect(authed.ok).toBe(true);
   expect(authed.payload.authLevel).toBe('inspect');
 
   await handleRuntimeAdapterMessage(socket, { v: 1, id: 'read-2', op: 'read', path: 'head' }, env, {
     enqueueRuntimeInput: () => {},
   });
-  const read = decodeRuntimeAdapterMessage<{ ok: true; payload: { latestHeight: number } }>(messages.pop());
+  const read = decodeTestRuntimeAdapterMessage<{ ok: true; payload: { latestHeight: number } }>(messages.pop());
   expect(read.ok).toBe(true);
   expect(read.payload.latestHeight).toBe(7);
 });
@@ -2754,12 +2946,12 @@ test('runtime adapter websocket handler rejects send under inspect auth', async 
   const env = makeEnv();
   let enqueued = 0;
 
-  await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth-1', op: 'auth', key: inspectToken() }, env, {
+  await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth-1', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge }, env, {
     enqueueRuntimeInput: () => {
       enqueued += 1;
     },
   });
-  const authed = decodeRuntimeAdapterMessage<{ ok: true; payload: { authLevel: string } }>(messages.pop());
+  const authed = decodeTestRuntimeAdapterMessage<{ ok: true; payload: { authLevel: string } }>(messages.pop());
   expect(authed.ok).toBe(true);
   expect(authed.payload.authLevel).toBe('inspect');
 
@@ -2768,6 +2960,7 @@ test('runtime adapter websocket handler rejects send under inspect auth', async 
     id: 'send-1',
     op: 'send',
     commandId: 'inspect-command-0001',
+    commandSequence: 1,
     input: {
       runtimeTxs: [],
       entityInputs: [],
@@ -2778,11 +2971,59 @@ test('runtime adapter websocket handler rejects send under inspect auth', async 
     },
   });
 
-  const denied = decodeRuntimeAdapterMessage<{ ok: false; error: { code: string; message: string } }>(messages.pop());
+  const denied = decodeTestRuntimeAdapterMessage<{ ok: false; error: { code: string; message: string } }>(messages.pop());
   expect(denied.ok).toBe(false);
   expect(denied.error.code).toBe('E_UNAUTHORIZED');
   expect(denied.error.message).toContain('admin auth required');
   expect(enqueued).toBe(0);
+});
+
+test('runtime adapter keeps one command retryable until startup J catch-up completes', async () => {
+  const messages: unknown[] = [];
+  const socket = { send: (message: unknown) => { messages.push(message); } };
+  const env = makeEnv();
+  let ready = false;
+  let enqueued = 0;
+  const deps = {
+    enqueueRuntimeInput: () => { enqueued += 1; },
+    isMutatingIngressReady: () => ready,
+  };
+  await handleRuntimeAdapterMessage(socket, {
+    v: 1,
+    id: 'auth-admin',
+    op: 'auth',
+    key: deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000),
+    challenge: adapterAuthChallenge,
+  }, env, deps);
+  messages.length = 0;
+  const command = {
+    v: 1 as const,
+    op: 'send' as const,
+    commandId: 'startup-catchup-command-0001',
+    commandSequence: 1,
+    input: { runtimeTxs: [], entityInputs: [] },
+  };
+
+  await handleRuntimeAdapterMessage(socket, { ...command, id: 'send-before-catchup' }, env, deps);
+  const pending = decodeTestRuntimeAdapterMessage<{
+    ok: false;
+    error: { code: string; message: string; retryable: boolean };
+  }>(messages.pop());
+  expect(pending).toEqual(expect.objectContaining({
+    ok: false,
+    error: expect.objectContaining({
+      code: 'E_COMMAND_PENDING',
+      message: 'RUNTIME_STARTUP_J_CATCHUP_PENDING',
+      retryable: true,
+    }),
+  }));
+  expect(enqueued).toBe(0);
+
+  ready = true;
+  await handleRuntimeAdapterMessage(socket, { ...command, id: 'send-after-catchup' }, env, deps);
+  const accepted = decodeTestRuntimeAdapterMessage<{ ok: boolean }>(messages.pop());
+  expect(accepted.ok).toBe(true);
+  expect(enqueued).toBe(1);
 });
 
 test('runtime adapter send commandId deduplicates retries and rejects payload changes', async () => {
@@ -2798,32 +3039,458 @@ test('runtime adapter send commandId deduplicates retries and rejects payload ch
     id: 'auth-admin',
     op: 'auth',
     key: deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000),
+    challenge: adapterAuthChallenge,
   }, env, deps);
   messages.length = 0;
   const command = {
     v: 1 as const,
     op: 'send' as const,
     commandId: 'retry-command-0001',
+    commandSequence: 1,
     input: { runtimeTxs: [], entityInputs: [] },
   };
 
   await handleRuntimeAdapterMessage(socket, { ...command, id: 'send-first' }, env, deps);
-  const first = decodeRuntimeAdapterMessage<{ ok: true; payload: { height: number } }>(messages.pop());
+  const first = decodeTestRuntimeAdapterMessage<{ ok: true; payload: { height: number } }>(messages.pop());
   await handleRuntimeAdapterMessage(socket, { ...command, id: 'send-retry' }, env, deps);
-  const retried = decodeRuntimeAdapterMessage<{ ok: true; payload: { height: number } }>(messages.pop());
+  const retried = decodeTestRuntimeAdapterMessage<{ ok: true; payload: { height: number } }>(messages.pop());
   await handleRuntimeAdapterMessage(socket, {
     ...command,
     id: 'send-conflict',
     input: { runtimeTxs: [{ type: 'importReplica', entityId: 'different' } as never], entityInputs: [] },
   }, env, deps);
-  const conflict = decodeRuntimeAdapterMessage<{ ok: false; error: { code: string } }>(messages.pop());
+  const conflict = decodeTestRuntimeAdapterMessage<{ ok: false; error: { code: string } }>(messages.pop());
 
   expect(first.ok).toBe(true);
   expect(retried.payload).toEqual(first.payload);
   expect(conflict.ok).toBe(false);
-  expect(conflict.error.code).toBe('E_BAD_QUERY');
+  expect(conflict.error.code).toBe('E_COMMAND_PENDING');
   expect(enqueued).toBe(1);
-  expect(env.runtimeState?.runtimeAdapterCommandResults?.size).toBe(1);
+  expect(env.runtimeState?.runtimeAdapterCommandFrontiers).toBeUndefined();
+});
+
+test('vault-owner command retry survives capability token rotation without a second enqueue', async () => {
+  const env = makeEnv();
+  const runtimeId = deriveSignerAddressSync(String(env.runtimeSeed), '1').toLowerCase();
+  env.runtimeId = runtimeId;
+  const challenge = `0x${'51'.repeat(32)}`;
+  const input: RuntimeInput = { runtimeTxs: [], entityInputs: [], jInputs: [] };
+  let enqueued = 0;
+  const deps = {
+    enqueueRuntimeInput: (_env: Env, marked: RuntimeInput) => {
+      const marker = marked.runtimeTxs.find(tx => tx.type === 'recordRuntimeAdapterCommand');
+      if (!marker || marker.type !== 'recordRuntimeAdapterCommand') {
+        throw new Error('TEST_RUNTIME_ADAPTER_COMMAND_MARKER_MISSING');
+      }
+      applyRuntimeAdapterCommandMarker(env, marker.data);
+      enqueued += 1;
+    },
+  };
+  const authenticateAndSend = async (tokenId: string, suffix: string) => {
+    const messages: unknown[] = [];
+    const socket = { send: (message: unknown) => { messages.push(message); } };
+    const key = deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000, {
+      audience: runtimeId,
+      keyId: 'rotating-owner-capability',
+      tokenId,
+    });
+    await handleRuntimeAdapterMessage(socket, {
+      v: 1,
+      id: `auth-owner-${suffix}`,
+      op: 'auth',
+      key,
+      challenge,
+      ownerSignature: ownerBindingSignature(runtimeId, challenge, key),
+    }, env, deps);
+    const auth = decodeTestRuntimeAdapterMessage<{
+      ok: true;
+      payload: { commandLaneKind: string; nextCommandSequence: number };
+    }>(messages.pop());
+    await handleRuntimeAdapterMessage(socket, {
+      v: 1,
+      id: `send-owner-${suffix}`,
+      op: 'send',
+      commandId: 'owner-rotation-command-0001',
+      commandSequence: 1,
+      input,
+    }, env, deps);
+    return {
+      auth,
+      send: decodeTestRuntimeAdapterMessage<{
+        ok: true;
+        payload: { status: string; commandSequence: number };
+      }>(messages.pop()),
+    };
+  };
+
+  const first = await authenticateAndSend('owner-token-a', 'a');
+  const retried = await authenticateAndSend('owner-token-b', 'b');
+
+  expect(first.auth.payload.commandLaneKind).toBe('owner');
+  expect(retried.auth.payload.commandLaneKind).toBe('owner');
+  expect(retried.auth.payload.nextCommandSequence).toBe(2);
+  expect(retried.send.payload.status).toBe('observed');
+  expect(enqueued).toBe(1);
+  expect(env.runtimeState?.runtimeAdapterCommandFrontiers?.size).toBe(1);
+});
+
+test('vault-owner command frontier survives capability expiry and durable restore', async () => {
+  const now = Date.now();
+  let env = makeEnv();
+  const runtimeId = deriveSignerAddressSync(String(env.runtimeSeed), '1').toLowerCase();
+  env.runtimeId = runtimeId;
+  env.timestamp = now;
+  const challenge = `0x${'52'.repeat(32)}`;
+  const input: RuntimeInput = { runtimeTxs: [], entityInputs: [], jInputs: [] };
+  let enqueued = 0;
+  const send = async (expiresAtMs: number, suffix: string) => {
+    const messages: unknown[] = [];
+    const socket = { send: (message: unknown) => { messages.push(message); } };
+    const key = deriveRuntimeAdapterCapabilityToken('seed', 'full', expiresAtMs, {
+      audience: runtimeId,
+      keyId: 'renewed-owner-capability',
+      tokenId: 'same-renewed-owner-token',
+    });
+    const deps = {
+      enqueueRuntimeInput: (_env: Env, marked: RuntimeInput) => {
+        const marker = marked.runtimeTxs.find(tx => tx.type === 'recordRuntimeAdapterCommand');
+        if (!marker || marker.type !== 'recordRuntimeAdapterCommand') {
+          throw new Error('TEST_RUNTIME_ADAPTER_COMMAND_MARKER_MISSING');
+        }
+        applyRuntimeAdapterCommandMarker(env, marker.data);
+        enqueued += 1;
+      },
+    };
+    await handleRuntimeAdapterMessage(socket, {
+      v: 1,
+      id: `auth-owner-expiry-${suffix}`,
+      op: 'auth',
+      key,
+      challenge,
+      ownerSignature: ownerBindingSignature(runtimeId, challenge, key),
+    }, env, deps);
+    messages.pop();
+    await handleRuntimeAdapterMessage(socket, {
+      v: 1,
+      id: `send-owner-expiry-${suffix}`,
+      op: 'send',
+      commandId: 'owner-expiry-command-0001',
+      commandSequence: 1,
+      input,
+    }, env, deps);
+    return decodeTestRuntimeAdapterMessage<{ ok: true; payload: { status: string } }>(messages.pop());
+  };
+
+  await send(now + 60_000, 'before');
+  const durableRuntimeState = structuredClone(env.runtimeState);
+  env = makeEnv();
+  env.runtimeId = runtimeId;
+  env.timestamp = now + 61_000;
+  env.runtimeState = durableRuntimeState;
+  const retried = await send(now + 120_000, 'after');
+
+  expect(retried.payload.status).toBe('observed');
+  expect(enqueued).toBe(1);
+  expect(env.runtimeState?.runtimeAdapterCommandFrontiers?.size).toBe(1);
+});
+
+test('invalid vault-owner proof rejects auth instead of falling back to a capability lane', async () => {
+  const env = makeEnv();
+  const runtimeId = deriveSignerAddressSync(String(env.runtimeSeed), '1').toLowerCase();
+  env.runtimeId = runtimeId;
+  const challenge = `0x${'53'.repeat(32)}`;
+  const key = deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000, {
+    audience: runtimeId,
+    tokenId: 'invalid-owner-proof-token',
+  });
+  const attacker = new SigningKey(`0x${'77'.repeat(32)}`);
+  const messages: unknown[] = [];
+  const socket = { send: (message: unknown) => { messages.push(message); } };
+  let enqueued = 0;
+  const deps = { enqueueRuntimeInput: () => { enqueued += 1; } };
+
+  await handleRuntimeAdapterMessage(socket, {
+    v: 1,
+    id: 'auth-invalid-owner-proof',
+    op: 'auth',
+    key,
+    challenge,
+    ownerSignature: attacker.sign(
+      buildRuntimeAdapterOwnerBindingDigest(runtimeId, challenge, key),
+    ).serialized,
+  }, env, deps);
+  const auth = decodeTestRuntimeAdapterMessage<{
+    ok: false;
+    error: { code: string };
+  }>(messages.pop());
+  await handleRuntimeAdapterMessage(socket, {
+    v: 1,
+    id: 'send-after-invalid-owner-proof',
+    op: 'send',
+    commandId: 'invalid-owner-proof-command-0001',
+    commandSequence: 1,
+    input: { runtimeTxs: [], entityInputs: [] },
+  }, env, deps);
+  const send = decodeTestRuntimeAdapterMessage<{
+    ok: false;
+    error: { code: string };
+  }>(messages.pop());
+
+  expect(auth.error.code).toBe('E_UNAUTHORIZED');
+  expect(send.error.code).toBe('E_UNAUTHORIZED');
+  expect(enqueued).toBe(0);
+});
+
+test('runtime adapter command replay stays rejected after the bounded result cache horizon', async () => {
+  const previousBurst = process.env['XLN_RADAPTER_SEND_BURST'];
+  const previousRate = process.env['XLN_RADAPTER_SEND_PER_SEC'];
+  const previousControlBurst = process.env['XLN_RADAPTER_CONTROL_BURST'];
+  const previousControlRate = process.env['XLN_RADAPTER_CONTROL_PER_SEC'];
+  process.env['XLN_RADAPTER_SEND_BURST'] = '2048';
+  process.env['XLN_RADAPTER_SEND_PER_SEC'] = '2048';
+  process.env['XLN_RADAPTER_CONTROL_BURST'] = '2048';
+  process.env['XLN_RADAPTER_CONTROL_PER_SEC'] = '2048';
+  try {
+    const messages: unknown[] = [];
+    const socket = { send: (message: unknown) => { messages.push(message); } };
+    const env = makeEnv();
+    let enqueued = 0;
+    const deps = {
+      enqueueRuntimeInput: (_env: Env, input: RuntimeInput) => {
+        const marker = input.runtimeTxs.find((tx) => tx.type === 'recordRuntimeAdapterCommand');
+        if (!marker || marker.type !== 'recordRuntimeAdapterCommand') {
+          throw new Error('TEST_RUNTIME_ADAPTER_COMMAND_MARKER_MISSING');
+        }
+        applyRuntimeAdapterCommandMarker(env, marker.data);
+        enqueued += 1;
+      },
+    };
+    await handleRuntimeAdapterMessage(socket, {
+      v: 1,
+      id: 'auth-frontier-horizon',
+      op: 'auth',
+      key: deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000, {
+        tokenId: 'frontier-horizon-token',
+      }),
+      challenge: adapterAuthChallenge,
+    }, env, deps);
+    messages.length = 0;
+
+    for (let sequence = 1; sequence <= 1_025; sequence += 1) {
+      await handleRuntimeAdapterMessage(socket, {
+        v: 1,
+        id: `send-frontier-${sequence}`,
+        op: 'send',
+        commandId: `frontier-command-${String(sequence).padStart(6, '0')}`,
+        commandSequence: sequence,
+        input: { runtimeTxs: [], entityInputs: [] },
+      }, env, deps);
+      messages.pop();
+    }
+    await handleRuntimeAdapterMessage(socket, {
+      v: 1,
+      id: 'send-frontier-replay',
+      op: 'send',
+      commandId: 'frontier-command-000001',
+      commandSequence: 1,
+      input: { runtimeTxs: [], entityInputs: [] },
+    }, env, deps);
+    const replay = decodeTestRuntimeAdapterMessage<{ ok: true; payload: { status: string } }>(messages.pop());
+
+    expect(replay.ok).toBe(true);
+    expect(replay.payload.status).toBe('observed');
+    expect(enqueued).toBe(1_025);
+  } finally {
+    if (previousBurst === undefined) delete process.env['XLN_RADAPTER_SEND_BURST'];
+    else process.env['XLN_RADAPTER_SEND_BURST'] = previousBurst;
+    if (previousRate === undefined) delete process.env['XLN_RADAPTER_SEND_PER_SEC'];
+    else process.env['XLN_RADAPTER_SEND_PER_SEC'] = previousRate;
+    if (previousControlBurst === undefined) delete process.env['XLN_RADAPTER_CONTROL_BURST'];
+    else process.env['XLN_RADAPTER_CONTROL_BURST'] = previousControlBurst;
+    if (previousControlRate === undefined) delete process.env['XLN_RADAPTER_CONTROL_PER_SEC'];
+    else process.env['XLN_RADAPTER_CONTROL_PER_SEC'] = previousControlRate;
+  }
+});
+
+test('runtime adapter command sequence rejects equivocation and gaps before enqueue', async () => {
+  const messages: unknown[] = [];
+  const socket = { send: (message: unknown) => { messages.push(message); } };
+  const env = makeEnv();
+  let enqueued = 0;
+  const deps = { enqueueRuntimeInput: () => { enqueued += 1; } };
+  await handleRuntimeAdapterMessage(socket, {
+    v: 1,
+    id: 'auth-frontier-order',
+    op: 'auth',
+    key: deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000, {
+      tokenId: 'frontier-order-token',
+    }),
+    challenge: adapterAuthChallenge,
+  }, env, deps);
+  messages.length = 0;
+
+  await handleRuntimeAdapterMessage(socket, {
+    v: 1,
+    id: 'send-sequence-one',
+    op: 'send',
+    commandId: 'frontier-order-command-0001',
+    commandSequence: 1,
+    input: { runtimeTxs: [], entityInputs: [] },
+  }, env, deps);
+  messages.pop();
+  await handleRuntimeAdapterMessage(socket, {
+    v: 1,
+    id: 'send-sequence-equivocation',
+    op: 'send',
+    commandId: 'frontier-order-command-0001',
+    commandSequence: 1,
+    input: { runtimeTxs: [{ type: 'importReplica', entityId: 'different' } as never], entityInputs: [] },
+  }, env, deps);
+  const equivocation = decodeTestRuntimeAdapterMessage<{
+    ok: false;
+    error: { code: string; retryable: boolean };
+  }>(messages.pop());
+  await handleRuntimeAdapterMessage(socket, {
+    v: 1,
+    id: 'send-sequence-gap',
+    op: 'send',
+    commandId: 'frontier-order-command-0003',
+    commandSequence: 3,
+    input: { runtimeTxs: [], entityInputs: [] },
+  }, env, deps);
+  const gap = decodeTestRuntimeAdapterMessage<{
+    ok: false;
+    error: { code: string; retryable: boolean };
+  }>(messages.pop());
+
+  expect(equivocation.ok).toBe(false);
+  expect(equivocation.error).toMatchObject({ code: 'E_COMMAND_PENDING', retryable: true });
+  expect(gap.ok).toBe(false);
+  expect(gap.error).toMatchObject({ code: 'E_COMMAND_PENDING', retryable: true });
+  expect(enqueued).toBe(1);
+});
+
+test('runtime adapter rejects a new command lane before enqueue when active capacity is full', async () => {
+  const messages: unknown[] = [];
+  const socket = { send: (message: unknown) => { messages.push(message); } };
+  const env = makeEnv();
+  const expiresAtMs = Date.now() + 60_000;
+  env.runtimeState ??= {};
+  env.runtimeState.runtimeAdapterCommandFrontiers = new Map(Array.from(
+    { length: MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES },
+    (_, index) => [`0x${(index + 1).toString(16).padStart(64, '0')}`, {
+      lastContiguousSequence: 1,
+      lastInputHash: `0x${'11'.repeat(32)}`,
+      lastCommandId: `capacity-command-${String(index).padStart(6, '0')}`,
+      observedHeight: env.height,
+      expiresAtMs,
+    }],
+  ));
+  let enqueued = 0;
+  const deps = { enqueueRuntimeInput: () => { enqueued += 1; } };
+  await handleRuntimeAdapterMessage(socket, {
+    v: 1,
+    id: 'auth-frontier-capacity',
+    op: 'auth',
+    key: deriveRuntimeAdapterCapabilityToken('seed', 'full', expiresAtMs, {
+      tokenId: 'frontier-capacity-token',
+    }),
+    challenge: adapterAuthChallenge,
+  }, env, deps);
+  messages.length = 0;
+
+  await handleRuntimeAdapterMessage(socket, {
+    v: 1,
+    id: 'send-frontier-capacity',
+    op: 'send',
+    commandId: 'frontier-capacity-command-0001',
+    commandSequence: 1,
+    input: { runtimeTxs: [], entityInputs: [] },
+  }, env, deps);
+  const rejected = decodeTestRuntimeAdapterMessage<{
+    ok: false;
+    error: { code: string; retryable: boolean };
+  }>(messages.pop());
+
+  expect(rejected.ok).toBe(false);
+  expect(rejected.error.code).toBe('E_RATE_LIMITED');
+  expect(rejected.error.retryable).toBe(true);
+  expect(enqueued).toBe(0);
+});
+
+test('runtime adapter auth proves the runtime identity against a client challenge', async () => {
+  const messages: unknown[] = [];
+  const socket = { send: (message: unknown) => { messages.push(message); } };
+  const env = makeEnv();
+  const runtimeId = deriveSignerAddressSync(String(env.runtimeSeed), '1').toLowerCase();
+  env.runtimeId = runtimeId;
+  const challenge = `0x${'42'.repeat(32)}`;
+
+  await handleRuntimeAdapterMessage(socket, {
+    v: 1,
+    id: 'auth-identity',
+    op: 'auth',
+    key: deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000, { audience: runtimeId }),
+    challenge,
+  }, env, { enqueueRuntimeInput: () => {} });
+
+  const response = decodeTestRuntimeAdapterMessage<{
+    ok: true;
+    payload: {
+      runtimeId: string;
+      identityPublicKey: string;
+      identitySignature: string;
+      identityFingerprint: string;
+    };
+  }>(messages.pop());
+  expect(response.ok).toBe(true);
+  expect(response.payload.runtimeId).toBe(runtimeId);
+  expect(computeAddress(response.payload.identityPublicKey).toLowerCase()).toBe(runtimeId);
+  expect(response.payload.identityFingerprint).toBe(
+    keccak256(response.payload.identityPublicKey).toLowerCase(),
+  );
+  const digest = keccak256(toUtf8Bytes([
+    'xln-radapter-server-identity-v1',
+    runtimeId,
+    response.payload.identityPublicKey.toLowerCase(),
+    challenge,
+  ].join(':')));
+  expect(recoverAddress(digest, response.payload.identitySignature).toLowerCase()).toBe(runtimeId);
+  expect(() => verifyRuntimeAdapterServerIdentity(
+    response.payload,
+    `0x${'43'.repeat(32)}`,
+    runtimeId,
+  )).toThrow('RADAPTER_SERVER_IDENTITY_SIGNATURE_MISMATCH');
+  expect(() => verifyRuntimeAdapterServerIdentity(
+    response.payload,
+    challenge,
+    `0x${'11'.repeat(20)}`,
+  )).toThrow('RADAPTER_SERVER_IDENTITY_EXPECTED_RUNTIME_MISMATCH');
+});
+
+test('runtime adapter rejects auth without a client challenge before granting access', async () => {
+  const messages: unknown[] = [];
+  const socket = { send: (message: unknown) => { messages.push(message); } };
+  const env = makeEnv();
+
+  await handleRuntimeAdapterMessage(socket, {
+    v: 1,
+    id: 'auth-without-challenge',
+    op: 'auth',
+    key: inspectToken(),
+  }, env, { enqueueRuntimeInput: () => {} });
+  const rejected = decodeTestRuntimeAdapterMessage<{ ok: false; error: { code: string } }>(messages.pop());
+  expect(rejected.ok).toBe(false);
+  expect(rejected.error.code).toBe('E_BAD_QUERY');
+
+  await handleRuntimeAdapterMessage(socket, {
+    v: 1,
+    id: 'read-after-rejected-auth',
+    op: 'read',
+    path: 'head',
+  }, env, { enqueueRuntimeInput: () => {} });
+  const denied = decodeTestRuntimeAdapterMessage<{ ok: false; error: { code: string } }>(messages.pop());
+  expect(denied.error.code).toBe('E_UNAUTHORIZED');
 });
 
 test('runtime adapter read rate limit is configurable', async () => {
@@ -2835,7 +3502,7 @@ test('runtime adapter read rate limit is configurable', async () => {
   const socket = { send: (message: unknown) => { messages.push(message); } };
   const env = makeEnv();
   try {
-    await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth', op: 'auth', key: inspectToken() }, env, {
+    await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge }, env, {
       enqueueRuntimeInput: () => {},
     });
     messages.length = 0;
@@ -2847,8 +3514,8 @@ test('runtime adapter read rate limit is configurable', async () => {
       enqueueRuntimeInput: () => {},
     });
 
-    const first = decodeRuntimeAdapterMessage<{ ok: boolean }>(messages[0]);
-    const second = decodeRuntimeAdapterMessage<{ ok: false; error: { code: string; retryAfterMs?: number } }>(messages[1]);
+    const first = decodeTestRuntimeAdapterMessage<{ ok: boolean }>(messages[0]);
+    const second = decodeTestRuntimeAdapterMessage<{ ok: false; error: { code: string; retryAfterMs?: number } }>(messages[1]);
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(false);
     expect(second.error.code).toBe('E_RATE_LIMITED');
@@ -2879,7 +3546,7 @@ test('runtime adapter ticks only go to authenticated clients', async () => {
   });
   unauthMessages.length = 0;
 
-  await handleRuntimeAdapterMessage(inspectSocket, { v: 1, id: 'auth-inspect', op: 'auth', key: inspectToken() }, env, {
+  await handleRuntimeAdapterMessage(inspectSocket, { v: 1, id: 'auth-inspect', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge }, env, {
     enqueueRuntimeInput: () => {},
   });
   inspectMessages.length = 0;
@@ -2888,7 +3555,7 @@ test('runtime adapter ticks only go to authenticated clients', async () => {
 
   expect(unauthMessages).toHaveLength(0);
   expect(inspectMessages).toHaveLength(1);
-  const tick = decodeRuntimeAdapterMessage<{ op: string; height: number }>(inspectMessages[0]);
+  const tick = decodeTestRuntimeAdapterMessage<{ op: string; height: number }>(inspectMessages[0]);
   expect(tick.op).toBe('tick');
   expect(tick.height).toBe(7);
 });
@@ -2899,14 +3566,14 @@ test('runtime adapter drops expired clients before broadcasting ticks', async ()
   const socket = { send: (message: unknown) => { messages.push(message); } };
   const expiredToken = capabilityTokenUnchecked('seed', 'read', Date.now() - 1);
 
-  await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth-expired', op: 'auth', key: expiredToken }, env, {
+  await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth-expired', op: 'auth', key: expiredToken, challenge: adapterAuthChallenge }, env, {
     enqueueRuntimeInput: () => {},
   });
-  const denied = decodeRuntimeAdapterMessage<{ ok: false; error: { code: string } }>(messages.pop());
+  const denied = decodeTestRuntimeAdapterMessage<{ ok: false; error: { code: string } }>(messages.pop());
   expect(denied.error.code).toBe('E_UNAUTHORIZED');
 
   const liveToken = deriveRuntimeAdapterCapabilityToken('seed', 'read', Date.now() + 5);
-  await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth-live', op: 'auth', key: liveToken }, env, {
+  await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth-live', op: 'auth', key: liveToken, challenge: adapterAuthChallenge }, env, {
     enqueueRuntimeInput: () => {},
   });
   messages.length = 0;
@@ -2930,14 +3597,14 @@ test('runtime adapter caps outgoing responses and closes oversized sockets', asy
   const replica = Array.from(env.eReplicas.values())[0]!;
   replica.state.profile = { ...replica.state.profile, bio: 'x'.repeat(4_000) };
   try {
-    await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth', op: 'auth', key: inspectToken() }, env, {
+    await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth', op: 'auth', key: inspectToken(), challenge: adapterAuthChallenge }, env, {
       enqueueRuntimeInput: () => {},
     });
     messages.length = 0;
     await handleRuntimeAdapterMessage(socket, { v: 1, id: 'big-read', op: 'read', path: `entity/${entityId}` }, env, {
       enqueueRuntimeInput: () => {},
     });
-    const response = decodeRuntimeAdapterMessage<{ ok: false; error: { code: string } }>(messages[0]);
+    const response = decodeTestRuntimeAdapterMessage<{ ok: false; error: { code: string } }>(messages[0]);
     expect(response.ok).toBe(false);
     expect(response.error.code).toBe('E_INTERNAL');
     expect(closeCode).toBe(1009);
@@ -2996,9 +3663,13 @@ test('embedded adapter sends to the latest active env after runtime switch', asy
 test('remote adapter can inspect and control a hub over the rpc wire', async () => {
   const previousWebSocket = globalThis.WebSocket;
   const env = makeEnv();
+  const runtimeId = deriveSignerAddressSync(String(env.runtimeSeed), '1').toLowerCase();
+  env.runtimeId = runtimeId;
   const replica = Array.from(env.eReplicas.values())[0]!;
   replica.state.profile = { ...replica.state.profile, name: 'H1 Hub', isHub: true };
-	  const token = deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000);
+	  const token = deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000, {
+      audience: runtimeId,
+    });
 	  const enqueued: RuntimeInput[] = [];
 	  const receipts: unknown[] = [];
 	  let constructed = 0;
@@ -3034,7 +3705,7 @@ test('remote adapter can inspect and control a hub over the rpc wire', async () 
     }
 
     send(raw: unknown): void {
-      const request = decodeRuntimeAdapterMessage<Record<string, unknown>>(raw);
+      const request = decodeTestRuntimeAdapterMessage<Record<string, unknown>>(raw);
 	      void handleRuntimeAdapterMessage(this.serverSocket, request, env, {
 	        validateRuntimeInputAdmission: (_targetEnv, input) => {
 	          if (!Array.isArray(input.entityInputs)) throw new Error('entityInputs required');
@@ -3056,7 +3727,7 @@ test('remote adapter can inspect and control a hub over the rpc wire', async () 
 	        },
 	        buildRuntimeInputStatusUrl: (id) => `/api/control/runtime-input/${id}/status`,
 	        loadEntityViewPage: async () => ({
-          core: projectEntityCoreDoc(replica.state, replica),
+          core: projectEntityReplicaCoreView(replica.state, replica),
           accounts: {
             items: Array.from(replica.state.accounts.values()).slice(0, 10).map((account) => projectAccountDoc(account)),
             nextCursor: null,
@@ -3081,7 +3752,10 @@ test('remote adapter can inspect and control a hub over the rpc wire', async () 
     await adapter.connect({
       mode: 'remote',
       wsUrl: 'ws://127.0.0.1:8092/rpc',
+      runtimeId,
       authKey: token,
+      ownerBindingSigner: ({ runtimeId: expectedRuntimeId, challenge, capability }) =>
+        ownerBindingSignature(expectedRuntimeId, challenge, capability),
       requestTimeoutMs: 1_000,
       reconnectMaxMs: 1_000,
     });
@@ -3089,6 +3763,7 @@ test('remote adapter can inspect and control a hub over the rpc wire', async () 
     expect(constructed).toBe(1);
     expect(adapter.status).toBe('connected');
     expect(adapter.authLevel).toBe('admin');
+    expect(adapter.commandLaneKind).toBe('owner');
     expect(adapter.currentHeight).toBe(7);
     const changesAfterAuth = heights.length;
     broadcastRuntimeAdapterTick(env);
@@ -3127,9 +3802,13 @@ test('remote adapter can inspect and control a hub over the rpc wire', async () 
       runtimeTxs: [],
       entityInputs: [{ entityId, signerId: 'signer', entityTxs: [] }],
     };
-	    const sent = await adapter.send(input);
+	    const sent = await adapter.send(input, {
+      commandId: 'remote-control-command-0001',
+      commandSequence: 1,
+    });
 	    expect(enqueued).toHaveLength(1);
-	    expect(enqueued[0]).toEqual(input);
+	    expect(enqueued[0]?.entityInputs).toEqual(input.entityInputs);
+      expect(enqueued[0]?.runtimeTxs.map(tx => tx.type)).toEqual(['recordRuntimeAdapterCommand']);
 	    expect(sent.height).toBe(7);
 	    expect(sent.receipt?.id).toBe('receipt-1');
 	    expect(sent.receipt?.kind).toBe('radapter-runtime-input');
@@ -3152,6 +3831,12 @@ test('remote adapter can inspect and control a hub over the rpc wire', async () 
   } finally {
     globalThis.WebSocket = previousWebSocket;
   }
+});
+
+test('remote adapter rejects send without a caller-owned commandId before transport', () => {
+  const adapter = new RemoteRuntimeAdapter();
+  expect(() => adapter.send({ runtimeTxs: [], entityInputs: [], jInputs: [] }))
+    .toThrow('remote runtime send requires a caller-owned commandId');
 });
 
 test('storage entity hash docs persist root metadata only', async () => {
@@ -3343,6 +4028,7 @@ test('storage entity hash docs persist root metadata only', async () => {
 test('remote runtime adapter reports connected only after auth and accepts lower remote ticks', async () => {
   const previousWebSocket = globalThis.WebSocket;
   let socket: { onmessage: ((event: { data: unknown }) => void) | null } | null = null;
+  const identityEnv = makeEnv();
 
   class DelayedAuthWebSocket {
     static readonly OPEN = 1;
@@ -3363,8 +4049,9 @@ test('remote runtime adapter reports connected only after auth and accepts lower
     }
 
     send(raw: unknown): void {
-      const request = decodeRuntimeAdapterMessage<{ id: string; op: string }>(raw);
+      const request = decodeTestRuntimeAdapterMessage<{ id: string; op: string; challenge?: string }>(raw);
       if (request.op !== 'auth') return;
+      const identity = signRuntimeAdapterServerIdentity(identityEnv, request.challenge || '');
       setTimeout(() => {
         this.onmessage?.({
           data: encodeRuntimeAdapterMessage({
@@ -3373,7 +4060,10 @@ test('remote runtime adapter reports connected only after auth and accepts lower
             ok: true,
             payload: {
               authLevel: 'inspect',
+              commandLaneKind: 'capability',
               currentHeight: 10,
+              nextCommandSequence: 1,
+              ...identity,
             },
           }),
         });
@@ -3426,6 +4116,73 @@ test('remote runtime adapter reports connected only after auth and accepts lower
   }
 });
 
+test('remote runtime adapter rejects a tampered server identity proof', async () => {
+  const previousWebSocket = globalThis.WebSocket;
+  const identityEnv = makeEnv();
+
+  class TamperedIdentityWebSocket {
+    static readonly OPEN = 1;
+
+    binaryType = 'arraybuffer';
+    readyState = 0;
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: unknown }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+
+    constructor(_url: string) {
+      setTimeout(() => {
+        this.readyState = TamperedIdentityWebSocket.OPEN;
+        this.onopen?.();
+      }, 0);
+    }
+
+    send(raw: unknown): void {
+      const request = decodeTestRuntimeAdapterMessage<{ id: string; op: string; challenge?: string }>(raw);
+      if (request.op !== 'auth') return;
+      const identity = signRuntimeAdapterServerIdentity(identityEnv, request.challenge || '');
+      const firstByte = identity.identitySignature.slice(2, 4) === '00' ? '01' : '00';
+      identity.identitySignature = `0x${firstByte}${identity.identitySignature.slice(4)}`;
+      setTimeout(() => this.onmessage?.({
+        data: encodeRuntimeAdapterMessage({
+          v: 1,
+          inReplyTo: request.id,
+          ok: true,
+          payload: {
+            authLevel: 'admin',
+            commandLaneKind: 'capability',
+            currentHeight: 10,
+            nextCommandSequence: 1,
+            ...identity,
+          },
+        }),
+      }), 0);
+    }
+
+    close(): void {
+      this.readyState = 3;
+      this.onclose?.();
+    }
+  }
+
+  globalThis.WebSocket = TamperedIdentityWebSocket as unknown as typeof WebSocket;
+  try {
+    const adapter = new RemoteRuntimeAdapter();
+    await expect(adapter.connect({
+      mode: 'remote',
+      wsUrl: 'ws://runtime-adapter.invalid/rpc',
+      authKey: 'token',
+      reconnectMaxMs: 1_000,
+      requestTimeoutMs: 1_000,
+    })).rejects.toThrow('runtime adapter server identity verification failed');
+    expect(adapter.status).toBe('error');
+    expect(adapter.authLevel).toBe(null);
+    expect(adapter.serverFingerprint).toBe(null);
+  } finally {
+    globalThis.WebSocket = previousWebSocket;
+  }
+});
+
 test('remote runtime adapter does not reconnect after unauthorized auth', async () => {
   const previousWebSocket = globalThis.WebSocket;
   let constructed = 0;
@@ -3449,7 +4206,7 @@ test('remote runtime adapter does not reconnect after unauthorized auth', async 
     }
 
     send(raw: unknown): void {
-      const request = decodeRuntimeAdapterMessage<{ id: string; op: string }>(raw);
+      const request = decodeTestRuntimeAdapterMessage<{ id: string; op: string }>(raw);
       if (request.op !== 'auth') return;
       setTimeout(() => {
         this.onmessage?.({
@@ -3476,13 +4233,13 @@ test('remote runtime adapter does not reconnect after unauthorized auth', async 
   (globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = RejectingAuthWebSocket as unknown as typeof WebSocket;
   try {
     const adapter = new RemoteRuntimeAdapter();
-    await adapter.connect({
+    await expect(adapter.connect({
       mode: 'remote',
       wsUrl: 'ws://runtime-adapter.invalid/rpc',
       authKey: 'wrong',
       reconnectMaxMs: 1_000,
       requestTimeoutMs: 1_000,
-    });
+    })).rejects.toThrow('bad auth');
     await new Promise((resolve) => setTimeout(resolve, 1_100));
     expect(adapter.status).toBe('error');
     expect(adapter.authLevel).toBe(null);

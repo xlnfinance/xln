@@ -13,10 +13,8 @@ import type {
   EntityState,
   EntitySwapPair,
   HtlcLock,
-  HtlcNoteKey,
   HtlcRoute,
   HubRebalanceConfig,
-  JurisdictionEvent,
   LockBookEntry,
   Proposal,
   RebalanceRequestFeeState,
@@ -61,10 +59,31 @@ export type StorageRuntimeConfig = {
   accountMerkleRadix?: RadixMerkleRadix;
 };
 
+export type StoragePersistenceBoundary =
+  | 'after-authoritative-history-commit'
+  | 'after-current-cache-commit'
+  | 'after-frame-db-prune'
+  | 'after-snapshot-chunk'
+  | 'after-snapshot-manifest'
+  | 'after-snapshot-history-publish'
+  | 'after-snapshot-retention-prune'
+  | 'after-replay-prune'
+  | 'after-snapshot-history-head'
+  | 'after-snapshot-current-head'
+  | 'after-restore-current-fence'
+  | 'after-restore-current-clear-chunk'
+  | 'after-restore-current-body'
+  | 'after-restore-authoritative-swap'
+  | 'after-restore-current-head';
+
+export type StoragePersistenceBoundaryHook = (
+  boundary: StoragePersistenceBoundary,
+) => void | Promise<void>;
+
 export type StorageHead = {
   schemaVersion: number;
   latestHeight: number;
-  latestMaterializedHeight?: number;
+  latestMaterializedHeight: number;
   latestSnapshotHeight: number;
   snapshotPeriodFrames: number;
   retainSnapshots: number;
@@ -75,32 +94,33 @@ export type StorageHead = {
 
 export type StorageEntityCoreDoc = {
   entityId: string;
-  signerId?: string;
-  isProposer?: boolean;
   height: number;
   timestamp: number;
   messages: EntityState['messages'];
   nonces: Map<string, number>;
+  entityCommandNonces?: EntityState['entityCommandNonces'];
   proposals: Map<string, Proposal>;
   config: ConsensusConfig;
   prevFrameHash?: string;
   leaderState?: EntityState['leaderState'];
   reserves: Map<number, bigint>;
   externalWallet?: EntityState['externalWallet'];
-  deferredAccountProposals?: Map<string, true>;
+  deferredAccountProposals?: Map<string, string>;
   lastFinalizedJHeight: number;
   jBlockChain: EntityState['jBlockChain'];
   jHistoryFinality?: EntityState['jHistoryFinality'];
+  certifiedBoardState?: EntityState['certifiedBoardState'];
   batchHistory?: EntityState['batchHistory'];
   accountInputQueue?: AccountInput[];
   crontabState?: CrontabState;
   jBatchState?: JBatchState;
-  entityEncPubKey: string;
-  entityEncPrivKey: string;
+  entityProviderActionState?: EntityState['entityProviderActionState'];
+  profileEncryptionManifest?: EntityState['profileEncryptionManifest'];
   profile: EntityState['profile'];
   htlcRoutes: Map<string, HtlcRoute>;
   htlcFeesEarned: bigint;
-  htlcNotes?: Map<HtlcNoteKey, string>;
+  consumptionAccumulator?: EntityState['consumptionAccumulator'];
+  certifiedOutputSequences?: EntityState['certifiedOutputSequences'];
   outDebtsByToken?: Map<number, Map<string, DebtEntry>>;
   inDebtsByToken?: Map<number, Map<string, DebtEntry>>;
   lockBook: Map<string, LockBookEntry>;
@@ -118,6 +138,7 @@ export type StorageEntityCoreDoc = {
 export type StorageAccountDoc = {
   leftEntity: string;
   rightEntity: string;
+  domain: AccountMachine['domain'];
   watchSeed: string;
   status: AccountStatus;
   mempool: AccountMachine['mempool'];
@@ -133,14 +154,14 @@ export type StorageAccountDoc = {
   pendingFrame?: AccountMachine['pendingFrame'];
   pendingSignatures: string[];
   pendingAccountInput?: AccountMachine['pendingAccountInput'];
+  pendingAccountInputSignerId?: AccountMachine['pendingAccountInputSignerId'];
   lastOutboundFrameAck?: AccountMachine['lastOutboundFrameAck'];
   pendingForward?: AccountMachine['pendingForward'];
   hankoSignature?: AccountMachine['hankoSignature'];
   rollbackCount: number;
   lastRollbackFrameHash?: string;
-  leftJObservations?: Array<{ jHeight: number; jBlockHash: string; events: JurisdictionEvent[]; observedAt: number }>;
-  rightJObservations?: Array<{ jHeight: number; jBlockHash: string; events: JurisdictionEvent[]; observedAt: number }>;
-  jEventChain?: AccountMachine['jEventChain'];
+  leftPendingJClaims: AccountMachine['leftPendingJClaims'];
+  rightPendingJClaims: AccountMachine['rightPendingJClaims'];
   lastFinalizedJHeight: number;
   proofHeader: AccountMachine['proofHeader'];
   proofBody: AccountMachine['proofBody'];
@@ -148,6 +169,8 @@ export type StorageAccountDoc = {
   disputeConfig: AccountMachine['disputeConfig'];
   currentFrameHanko?: AccountMachine['currentFrameHanko'];
   counterpartyFrameHanko?: AccountMachine['counterpartyFrameHanko'];
+  boardResealMigration?: AccountMachine['boardResealMigration'];
+  counterpartyBoardReseal?: AccountMachine['counterpartyBoardReseal'];
   currentDisputeProofHanko?: AccountMachine['currentDisputeProofHanko'];
   currentDisputeProofNonce?: number;
   currentDisputeProofBodyHash?: string;
@@ -177,7 +200,7 @@ export type StorageAccountDoc = {
   }>;
   requestedRebalance: Map<number, bigint>;
   requestedRebalanceFeeState: Map<number, RebalanceRequestFeeState>;
-  counterpartyRebalanceFeePolicy?: AccountMachine['counterpartyRebalanceFeePolicy'];
+  rebalanceFeePolicies?: AccountMachine['rebalanceFeePolicies'];
   shadow: AccountMachine['shadow'];
 };
 
@@ -196,6 +219,8 @@ export type StorageFrameRecord = {
   timestamp: number;
   prevFrameHash?: string;
   frameHash?: string;
+  /** Commits the exact validator-local recovery metadata published with this frame. */
+  replicaMetaDigest: string;
   stateHash: string;
   hashMode?: 'storage-merkle-v1';
   materializedState?: boolean;
@@ -208,7 +233,15 @@ export type StorageFrameRecord = {
    */
   canonicalStateHash?: string;
   canonicalEntityHashes?: StorageFrameEntityHash[];
+  /** Per-frame canonical Entity + durable R-machine replay oracle. */
+  runtimeStateHash?: string;
   runtimeInput: RuntimeInput;
+  /**
+   * Exact durable-machine state immediately before runtimeInput was applied.
+   * This retains transport ingress provenance created by a side-effect-only
+   * tick so journal replay can independently reproduce local self-receipts.
+   */
+  runtimeMachineBeforeApply?: Record<string, unknown>;
   runtimeMachine?: Record<string, unknown>;
   /**
    * Transport envelopes not yet terminally delivered after this committed
@@ -232,8 +265,8 @@ export type StorageMerkleRootDoc = {
   namespace: StorageMerkleNamespace;
   radix: RadixMerkleRadix;
   rootHash: string;
-  rootKind?: RadixMerkleRootKind;
-  rootPath?: number[];
+  rootKind: RadixMerkleRootKind;
+  rootPath: number[];
   leafCount: number;
 };
 
@@ -269,24 +302,36 @@ export type StorageFrameEntityHash = {
 
 export type StorageReplicaMeta = {
   entityId: string;
-  signerId?: string;
-  isProposer?: boolean;
-  mempool?: EntityReplica['mempool'];
+  signerId: string;
+  isProposer: boolean;
+  /** Exact validator-local Entity state at the authoritative R-frame boundary. */
+  state: EntityState;
+  mempool: EntityReplica['mempool'];
   position?: EntityReplica['position'];
   proposal?: EntityReplica['proposal'];
   lockedFrame?: EntityReplica['lockedFrame'];
-  validatorComputedState?: EntityReplica['validatorComputedState'];
+  validatorExecution?: EntityReplica['validatorExecution'];
+  certifiedFrameLineage?: EntityReplica['certifiedFrameLineage'];
+  certifiedFrameAnchor?: EntityReplica['certifiedFrameAnchor'];
   hankoWitness?: EntityReplica['hankoWitness'];
   leaderVotes?: EntityReplica['leaderVotes'];
   pendingLeaderCertificate?: EntityReplica['pendingLeaderCertificate'];
   lastConsensusProgressAt?: EntityReplica['lastConsensusProgressAt'];
   jHistory?: EntityReplica['jHistory'];
+  jPrefixRound?: EntityReplica['jPrefixRound'];
+  jSubmitState?: EntityReplica['jSubmitState'];
+  entityProviderActionSubmitState?: EntityReplica['entityProviderActionSubmitState'];
 };
 
 type AssertNoUnclassifiedPersistenceKeys<T extends never> = T;
 type AccountPersistenceCacheKeys = 'clonedForValidation';
-type EntityPersistenceSplitKeys = 'accounts' | 'orderbookExt';
-type ReplicaPersistenceSplitKeys = 'state';
+type EntityPersistenceSplitKeys =
+  | 'accounts'
+  | 'orderbookExt'
+  | 'entityEncPubKey'
+  | 'entityEncPrivKey'
+  | 'htlcNotes';
+type ReplicaPersistenceSplitKeys = never;
 
 export type AccountPersistenceCoverage = AssertNoUnclassifiedPersistenceKeys<
   Exclude<keyof AccountMachine, keyof StorageAccountDoc | AccountPersistenceCacheKeys>
@@ -321,6 +366,12 @@ export type StorageDebugStats = {
   merkleRootCount?: number;
   merkleBranchCount?: number;
   merkleLeafCount?: number;
+  certifiedBoardNodeCount?: number;
+  consumptionNodeCount?: number;
+  accountJClaimNodeCount?: number;
+  certifiedBoardNodeBytes?: number;
+  consumptionNodeBytes?: number;
+  accountJClaimNodeBytes?: number;
   frameBytes: number;
   diffBytes: number;
   snapshotBytes: number;

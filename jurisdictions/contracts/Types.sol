@@ -13,6 +13,10 @@ struct AccountInfo {
   bytes32 disputeHash;
   uint256 disputeTimeout;
   uint256 disputeStartTimestamp;
+  bytes32 disputeInitialProofbodyHash;
+  bytes32 starterInitialArgumentsCommitment;
+  bytes32 starterIncrementedArgumentsCommitment;
+  bool disputeStartedByLeft;
 }
 
 struct AccountCollateral {
@@ -81,6 +85,9 @@ struct InitialDisputeProof {
   bytes32 counterentity;
   uint nonce;              // Unified nonce at time of signing
   bytes32 proofbodyHash;
+  // Reveal the exact signed body at start. A hash-only start can otherwise
+  // commit an arbitrarily large body that no block can later carry to finalize.
+  ProofBody initialProofbody;
   bytes32 watchSeed;       // Shared bilateral account seed revealed when dispute starts
   bytes sig;
   // Starter-side transformer args for the proof body at `nonce`.
@@ -110,18 +117,15 @@ struct FinalDisputeProof {
   uint finalNonce;         // Used for signed finalize paths; unilateral timeout path may keep this equal to initialNonce
   bytes32 initialProofbodyHash;
   ProofBody finalProofbody;
-  // Side-normalized transformer args consumed by DeltaTransformer. The
-  // contract checks that the starter side equals one of the precommitted
-  // starter blobs above; the other side is supplied by the finalizer.
+  // Exactly one precommitted starter blob plus the finalizer's optional side.
+  // Repeating both start blobs and duplicating the selected side made a start
+  // transaction possible whose mandatory finalize calldata exceeded block gas.
   // Malformed args are adversarial evidence and should be treated as empty by
   // transformers. Malformed ProofBody remains fatal because it is signed state.
-  bytes leftArguments;
-  bytes rightArguments;
-  bytes starterInitialArguments;
-  bytes starterIncrementedArguments;
+  bytes starterArguments;
+  bytes otherArguments;
   bytes sig;
   bool startedByLeft;
-  uint disputeUntilBlock;  // Legacy/off-chain field; on-chain finalize uses stored account timeout
   bool cooperative;        // if true, skip timeout (mutual agreement)
 }
 

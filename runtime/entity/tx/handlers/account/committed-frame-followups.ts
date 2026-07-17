@@ -3,7 +3,7 @@ import { HEAVY_LOGS } from '../../../../utils';
 import { swapKey } from '../../../../orderbook/swap-execution';
 import { cancelHook as cancelScheduledHook } from '../../../scheduler';
 import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../../htlc-route-lifecycle';
-import { buildHtlcFinalizedEventPayload } from '../../../../protocol/htlc/events';
+import { buildHtlcFinalizedEventPayload, buildHtlcReceivedEventPayload } from '../../../../protocol/htlc/events';
 import {
   buildLendingLoanId,
   ensureLendingState,
@@ -40,7 +40,7 @@ function emitOriginatedHtlcFinalized(
       fromEntity: state.entityId,
       ...(route.outboundEntity ? { toEntity: route.outboundEntity } : {}),
       hashlock: route.hashlock,
-      ...(accountTx.data.secret ? { secret: accountTx.data.secret } : {}),
+      ...('secret' in accountTx.data ? { secret: accountTx.data.secret } : {}),
       lockId: accountTx.data.lockId,
       ...(route.amount !== undefined ? { amount: route.amount } : {}),
       ...(route.tokenId !== undefined ? { tokenId: route.tokenId } : {}),
@@ -280,6 +280,7 @@ export function applyCommittedAccountFrameFollowups(
     // Account frames are canonical once committed; keep entity-local indexes in
     // sync here instead of mutating them while the account proposal is still tentative.
     if (accountTx.type === 'htlc_resolve') {
+      if (accountTx.data.outcome === 'offer') continue;
       const account = newState.accounts.get(counterpartyId);
       if (account?.mempool?.length) {
         account.mempool = account.mempool.filter((mempoolTx) =>
@@ -295,7 +296,44 @@ export function applyCommittedAccountFrameFollowups(
           const resolvesInbound = route.inboundLockId === accountTx.data.lockId;
           const resolvesOriginatedOutbound =
             route.outboundLockId === accountTx.data.lockId && !route.inboundEntity;
-          if (!resolvesInbound && !resolvesOriginatedOutbound) continue;
+          const resolvesForwardedOutbound = route.outboundLockId === accountTx.data.lockId && Boolean(route.inboundEntity);
+          if (!resolvesInbound && !resolvesOriginatedOutbound && !resolvesForwardedOutbound) continue;
+          if ('offerHash' in accountTx.data) {
+            if (resolvesForwardedOutbound || resolvesOriginatedOutbound) {
+              route.acceptedOfferHash = accountTx.data.offerHash.toLowerCase();
+              route.acceptedAccountFrameHash = committedFrame.stateHash.toLowerCase();
+              route.acceptedAccountFrameHeight = committedFrame.height;
+              continue;
+            }
+            if (resolvesInbound) {
+              const description =
+                newState.htlcNotes?.get(`lock:${accountTx.data.lockId}`)
+                ?? newState.htlcNotes?.get(`hashlock:${hashlock}`);
+              env?.emit('HtlcReceived', {
+                ...buildHtlcReceivedEventPayload({
+                  entityId: newState.entityId,
+                  fromEntity: counterpartyId,
+                  toEntity: newState.entityId,
+                  hashlock,
+                  lockId: accountTx.data.lockId,
+                  ...(route.amount !== undefined ? { amount: route.amount } : {}),
+                  ...(route.tokenId !== undefined ? { tokenId: route.tokenId } : {}),
+                  ...(route.startedAtMs !== undefined ? { startedAtMs: route.startedAtMs } : {}),
+                  ...(description ? { description } : {}),
+                  ...(jurisdictionIdFor(newState, env) ? { jurisdictionId: jurisdictionIdFor(newState, env) } : {}),
+                  receivedAtMs: newState.timestamp,
+                }),
+              });
+            }
+          }
+          if (resolvesForwardedOutbound) {
+            // This commit reveals the downstream preimage, but the forwarded
+            // route is not terminal until applyHtlcSecretFollowups queues the
+            // exact upstream resolve in this same Entity-frame replay. Deleting
+            // it here loses the inbound lock reference and lets the post-commit
+            // onion hook recreate the downstream lock forever.
+            continue;
+          }
           emitOriginatedHtlcFinalized(env, newState, route, accountTx);
           terminateHtlcRoute(newState, hashlock, newState.timestamp);
         }

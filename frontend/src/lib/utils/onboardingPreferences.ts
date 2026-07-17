@@ -17,7 +17,6 @@ type PolicyDefaults = {
 const COLLATERAL_POLICY_KEY = 'xln-collateral-policy';
 const HUB_JOIN_PREF_KEY = 'xln-hub-join-preference';
 
-const USD_SCALE = 10n ** 18n;
 const DEFAULT_POLICY: PolicyDefaults = {
   softLimitUsd: 500,
   hardLimitUsd: 10_000,
@@ -34,7 +33,12 @@ const toUsdInt = (value: unknown, fallback: number): number => {
   return Math.max(0, Math.floor(raw));
 };
 
-const usdToWei = (value: number): bigint => BigInt(toUsdInt(value, 0)) * USD_SCALE;
+const usdToRawTokenAmount = (value: number, tokenDecimals: number): bigint => {
+  if (!Number.isSafeInteger(tokenDecimals) || tokenDecimals < 0 || tokenDecimals > 255) {
+    throw new Error(`ONBOARDING_TOKEN_DECIMALS_INVALID:${String(tokenDecimals)}`);
+  }
+  return BigInt(toUsdInt(value, 0)) * 10n ** BigInt(tokenDecimals);
+};
 
 const normalizeHubJoinPreference = (value: unknown): HubJoinPreference => {
   const normalized = String(value || '').trim();
@@ -169,16 +173,16 @@ export const writeHubJoinPreference = (value: HubJoinPreference): HubJoinPrefere
   return normalized;
 };
 
-export const getOpenAccountRebalancePolicyData = (): {
+export const getOpenAccountRebalancePolicyData = (tokenDecimals: number): {
   r2cRequestSoftLimit: bigint;
   hardLimit: bigint;
   maxAcceptableFee: bigint;
 } | null => {
   const policy = readSavedCollateralPolicy();
   if (policy.mode === 'manual') return null;
-  const r2cRequestSoftLimit = usdToWei(policy.softLimitUsd);
-  const hardLimit = usdToWei(policy.hardLimitUsd);
-  const maxAcceptableFee = usdToWei(policy.maxFeeUsd);
+  const r2cRequestSoftLimit = usdToRawTokenAmount(policy.softLimitUsd, tokenDecimals);
+  const hardLimit = usdToRawTokenAmount(policy.hardLimitUsd, tokenDecimals);
+  const maxAcceptableFee = usdToRawTokenAmount(policy.maxFeeUsd, tokenDecimals);
   if (r2cRequestSoftLimit <= 0n || hardLimit < r2cRequestSoftLimit || maxAcceptableFee < 0n) return null;
   return { r2cRequestSoftLimit, hardLimit, maxAcceptableFee };
 };

@@ -1,8 +1,3 @@
-import type { JAdapter, JAdapterConfig } from '../jadapter/types';
-import { ensureLocalDisputeDelayConfigured } from '../jadapter/local-config';
-import { setBrowserVMJurisdiction } from '../jadapter';
-import { createJAdapterWithRetry } from '../jadapter/retry';
-import { getSignerPrivateKey } from '../account/crypto';
 import { buildDefaultEntitySwapPairs, getTokenIdsForJurisdiction } from '../account/utils';
 import { markStorageEntityDirty } from './env-events';
 import {
@@ -10,54 +5,150 @@ import {
   resolveReplicaEntityCryptoKeys,
 } from '../entity/crypto';
 import { normalizeEntitySwapTradingPairs } from './swap-pairs';
+import { initCrontab } from '../entity/scheduler';
+import {
+  buildEntityFrameAuthority,
+  computeEntityFrameAuthorityRoot,
+} from '../entity/consensus/state-root';
 import {
   backfillEntityJurisdictionBinding,
   requireBoundEntityConfig,
 } from '../jurisdiction/jurisdiction-runtime';
 import { getJHistoryRegistrationBaseHeight } from '../jurisdiction/history-consensus';
-import { recordValidatorJHistory, rewindValidatorJHistory } from '../jurisdiction/local-history';
+import {
+  assertValidatorJHistoryMatchesCertifiedAnchor,
+  getEntityCertifiedJAnchor,
+  recordValidatorJHistory,
+  rewindValidatorJHistory,
+} from '../jurisdiction/local-history';
 import { getJEventJurisdictionRef } from '../jurisdiction/event-observation';
-import { announceLocalEntityProfile } from '../networking/gossip-helper';
 import { normalizeRuntimeId } from '../networking/runtime-id';
-import type { EntityReplica, Env, JReplica, RuntimeTx } from '../types';
+import type { EntityReplica, EntityState, Env, JInput, RuntimeTx } from '../types';
+import { applyRuntimeAdapterCommandMarker } from '../radapter/command-frontier';
+import { assertRuntimeAdapterCommandTxAuthorized } from '../radapter/command-frontier-auth';
+import {
+  applyRetryJSubmitRuntimeTx,
+  assertJSubmitRuntimeTxAuthorized,
+} from './j-submit-state';
+import { applyRecordJSubmitResultRuntimeTx } from './j-submit-result';
+import {
+  applyRetryEntityProviderActionRuntimeTx,
+} from './entity-provider-action-submit-state';
+import { assertEntityProviderActionRuntimeTxAuthorized } from './entity-provider-action-submit-auth';
+import { applyRecordEntityProviderActionResultRuntimeTx } from './entity-provider-action-submit-result';
 import {
   DEBUG,
   formatEntityDisplay,
   formatSignerDisplay,
 } from '../utils';
 import { createStructuredLogger } from '../infra/logger';
+import { cloneEntityState } from '../state-helpers';
+import { buildCertifiedEntityLineagePlan } from '../storage/entity-lineage';
+import {
+  assertCertifiedRegistrationEvidence,
+  assertJAuthorityRuntimeTxAuthorized,
+  computeRegistrationEvidenceClaimHash,
+  freezeCertifiedRegistrationEvidence,
+  registrationEvidenceKey,
+} from '../jurisdiction/registration-evidence';
+import {
+  applyCompleteImportJurisdiction,
+  applyImportJurisdictionIntent,
+  assertJImportResultRuntimeTxAuthorized,
+} from './jurisdiction-import';
+import { applyWatcherJurisdictionCursor } from '../jadapter/helpers';
+import {
+  applyNumberedRegistrationIntent,
+  applyNumberedRegistrationResolution,
+} from '../entity/numbered-registration-intent';
 
 const runtimeTxLog = createStructuredLogger('runtime.tx');
 
-type ImportJRuntimeTx = Extract<RuntimeTx, { type: 'importJ' }>;
 type ImportReplicaRuntimeTx = Extract<RuntimeTx, { type: 'importReplica' }>;
 
-const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
-
 export interface RuntimeTxHandlerDeps {
-  onJurisdictionImported?: (env: Env) => void;
+  isReplay?: boolean;
 }
 
 export const applyRuntimeTx = async (
   env: Env,
   runtimeTx: RuntimeTx,
   deps: RuntimeTxHandlerDeps = {},
-): Promise<void> => {
+): Promise<JInput[]> => {
+  assertJSubmitRuntimeTxAuthorized(runtimeTx, deps.isReplay === true);
+  assertJAuthorityRuntimeTxAuthorized(runtimeTx, deps.isReplay === true);
+  assertJImportResultRuntimeTxAuthorized(runtimeTx, deps.isReplay === true);
+  assertEntityProviderActionRuntimeTxAuthorized(runtimeTx, deps.isReplay === true);
+  assertRuntimeAdapterCommandTxAuthorized(runtimeTx, deps.isReplay === true);
+  if (runtimeTx.type === 'recordRuntimeAdapterCommand') {
+    applyRuntimeAdapterCommandMarker(env, runtimeTx.data);
+    return [];
+  }
+  if (runtimeTx.type === 'recordNumberedRegistrationIntent') {
+    applyNumberedRegistrationIntent(env, runtimeTx.data);
+    return [];
+  }
+  if (runtimeTx.type === 'resolveNumberedRegistrationIntent') {
+    applyNumberedRegistrationResolution(env, runtimeTx.data);
+    return [];
+  }
+  if (runtimeTx.type === 'recordAuthenticatedJAuthority') {
+    await assertCertifiedRegistrationEvidence(env, runtimeTx.data);
+    const key = registrationEvidenceKey(runtimeTx.data.stackKey, runtimeTx.data.entityId);
+    env.runtimeState ??= {};
+    env.runtimeState.certifiedRegistrationEvidence ??= new Map();
+    const existing = env.runtimeState.certifiedRegistrationEvidence.get(key);
+    if (existing) {
+      const existingClaimHash = computeRegistrationEvidenceClaimHash(existing);
+      const incomingClaimHash = computeRegistrationEvidenceClaimHash(runtimeTx.data);
+      if (existingClaimHash !== incomingClaimHash) {
+        throw new Error(`J_AUTHORITY_EVIDENCE_CONFLICT:${key}:${existingClaimHash}:${incomingClaimHash}`);
+      }
+      return [];
+    }
+    env.runtimeState.certifiedRegistrationEvidence.set(
+      key,
+      freezeCertifiedRegistrationEvidence(structuredClone(runtimeTx.data)),
+    );
+    return [];
+  }
   if (runtimeTx.type === 'importJ') {
-    await importJurisdictionRuntimeTx(env, runtimeTx, deps);
-    return;
+    applyImportJurisdictionIntent(env, runtimeTx);
+    return [];
+  }
+  if (runtimeTx.type === 'completeImportJ') {
+    applyCompleteImportJurisdiction(env, runtimeTx);
+    return [];
   }
   if (runtimeTx.type === 'importReplica') {
     importReplicaRuntimeTx(env, runtimeTx);
-    return;
+    return [];
   }
   if (runtimeTx.type === 'observeJRange') {
     observeJRangeRuntimeTx(env, runtimeTx);
-    return;
+    return [];
+  }
+  if (runtimeTx.type === 'advanceJWatcherCursor') {
+    applyWatcherJurisdictionCursor(env, runtimeTx.data);
+    return [];
   }
   if (runtimeTx.type === 'rewindJHistory') {
     rewindJHistoryRuntimeTx(env, runtimeTx);
-    return;
+    return [];
+  }
+  if (runtimeTx.type === 'retryJSubmit') {
+    return applyRetryJSubmitRuntimeTx(env, runtimeTx);
+  }
+  if (runtimeTx.type === 'recordJSubmitResult') {
+    applyRecordJSubmitResultRuntimeTx(env, runtimeTx);
+    return [];
+  }
+  if (runtimeTx.type === 'retryEntityProviderAction') {
+    return applyRetryEntityProviderActionRuntimeTx(env, runtimeTx);
+  }
+  if (runtimeTx.type === 'recordEntityProviderActionSubmitResult') {
+    applyRecordEntityProviderActionResultRuntimeTx(env, runtimeTx);
+    return [];
   }
   const exhaustive: never = runtimeTx;
   throw new Error(`RUNTIME_TX_UNKNOWN: ${(exhaustive as { type?: string }).type ?? 'unknown'}`);
@@ -75,7 +166,8 @@ const rewindJHistoryRuntimeTx = (
   if (String(match.replica.jHistory?.jurisdictionRef || '').trim().toLowerCase() !== jurisdictionRef) {
     throw new Error(`J_HISTORY_REWIND_JURISDICTION_MISMATCH:${entityId}:${signerId}`);
   }
-  if (runtimeTx.data.conflictingHeight <= match.replica.state.lastFinalizedJHeight) {
+  const certifiedAnchor = getEntityCertifiedJAnchor(match.replica.state);
+  if (certifiedAnchor && runtimeTx.data.conflictingHeight <= certifiedAnchor.height) {
     throw new Error(`J_HISTORY_FINALIZED_REORG:${runtimeTx.data.conflictingHeight}`);
   }
   const signedRange = match.replica.lockedFrame?.txs.find((tx) =>
@@ -115,164 +207,63 @@ const observeJRangeRuntimeTx = (
       `:expected=${expectedJurisdictionRef}:observed=${observedJurisdictionRef || 'missing'}`,
     );
   }
-  match.replica.jHistory = recordValidatorJHistory(match.replica.jHistory, {
+  const observation = {
     jurisdictionRef: runtimeTx.data.jurisdictionRef,
     scannedThroughHeight: runtimeTx.data.scannedThroughHeight,
     tipBlockHash: runtimeTx.data.tipBlockHash,
     ...(runtimeTx.data.headers ? { headers: runtimeTx.data.headers } : {}),
     blocks: runtimeTx.data.blocks,
-  }, match.replica.state);
+  };
+  const certifiedAnchor = getEntityCertifiedJAnchor(match.replica.state);
+  if (certifiedAnchor && observation.scannedThroughHeight < certifiedAnchor.height) {
+    // A watcher page can be queued against an older live Env while another
+    // Runtime frame advances this Entity's certified J head. Validate the
+    // discarded page independently, then prove the retained local cache has
+    // not corrupted the newer certified anchor. Never let staleness hide bad
+    // bytes, and never rewind Entity-certified authority to accept old input.
+    recordValidatorJHistory(undefined, observation);
+    assertValidatorJHistoryMatchesCertifiedAnchor(match.replica.state, match.replica.jHistory);
+    runtimeTxLog.info('jurisdiction.observation_superseded', {
+      entity: formatEntityDisplay(entityId),
+      signer: formatSignerDisplay(signerId),
+      observedThrough: observation.scannedThroughHeight,
+      certifiedThrough: certifiedAnchor.height,
+    });
+    return;
+  }
+  match.replica.jHistory = recordValidatorJHistory(
+    match.replica.jHistory,
+    observation,
+    match.replica.state,
+  );
   markStorageEntityDirty(env, entityId);
 };
 
-const importJurisdictionRuntimeTx = async (
+const resolveImportCheckpointState = (
   env: Env,
-  runtimeTx: ImportJRuntimeTx,
-  deps: RuntimeTxHandlerDeps,
-): Promise<void> => {
-  runtimeTxLog.info('jurisdiction.import_start', {
-    name: runtimeTx.data.name,
-    chainId: runtimeTx.data.chainId,
-  });
-
-  try {
-    const isBrowserVM = runtimeTx.data.rpcs.length === 0;
-    const fromReplica = runtimeTx.data.contracts
-      ? ({
-          depositoryAddress: runtimeTx.data.contracts.depository,
-          entityProviderAddress: runtimeTx.data.contracts.entityProvider,
-          contracts: runtimeTx.data.contracts,
-          chainId: runtimeTx.data.chainId,
-        } as JReplica)
-      : undefined;
-
-    const adapterConfig: JAdapterConfig = {
-      mode: isBrowserVM ? 'browservm' : 'rpc',
-      chainId: runtimeTx.data.chainId,
-    };
-    if (!isBrowserVM) {
-      const rpcUrl = runtimeTx.data.rpcs[0];
-      if (!rpcUrl) throw new Error(`IMPORT_J_RPC_MISSING: name=${runtimeTx.data.name}`);
-      adapterConfig.rpcUrl = rpcUrl;
-      if (!fromReplica) {
-        const deployerPrivateKey =
-          globalThis.process?.env?.['JADAPTER_DEPLOYER_PRIVATE_KEY'] ||
-          globalThis.process?.env?.['DEPLOYER_PRIVATE_KEY'];
-        if (deployerPrivateKey) adapterConfig.privateKey = deployerPrivateKey;
-      }
-    }
-    if (fromReplica) adapterConfig.fromReplica = fromReplica;
-
-    const jadapter = await createJAdapterWithRetry(adapterConfig, {
-      context: `importJ:${runtimeTx.data.name}`,
-      attempts: typeof window !== 'undefined' ? 5 : 3,
-      onRetry: (attempt, attempts, retryError) => {
-        runtimeTxLog.warn('jurisdiction.import_retry', {
-          name: runtimeTx.data.name,
-          chainId: runtimeTx.data.chainId,
-          attempt,
-          attempts,
-          error: errorMessage(retryError),
-        });
-      },
-    });
-    if (!fromReplica) {
-      await jadapter.deployStack();
-    }
-    const defaultDisputeDelayBlocks = await ensureLocalDisputeDelayConfigured(jadapter, runtimeTx.data.name);
-
-    if (isBrowserVM) {
-      const browserVM = jadapter.getBrowserVM();
-      if (browserVM) {
-        setBrowserVMJurisdiction(env, jadapter.addresses.depository, browserVM);
-      }
-    }
-
-    if (!env.jReplicas) {
-      env.jReplicas = new Map();
-    }
-
-    const resolvedDepositoryAddress = jadapter.addresses.depository || '';
-    const resolvedEntityProviderAddress = jadapter.addresses.entityProvider || '';
-    const resolvedAccountAddress =
-      jadapter.addresses.account || runtimeTx.data.contracts?.account || '';
-    const resolvedDeltaTransformerAddress =
-      jadapter.addresses.deltaTransformer || runtimeTx.data.contracts?.deltaTransformer || '';
-    const resolvedContracts = {
-      account: resolvedAccountAddress,
-      depository: resolvedDepositoryAddress,
-      entityProvider: resolvedEntityProviderAddress,
-      deltaTransformer: resolvedDeltaTransformerAddress,
-    };
-
-    if (!resolvedDepositoryAddress || !resolvedEntityProviderAddress) {
-      throw new Error(
-        `IMPORT_J_ADDRESSES_MISSING: name=${runtimeTx.data.name} ` +
-          `depository=${resolvedDepositoryAddress || 'none'} ` +
-          `entityProvider=${resolvedEntityProviderAddress || 'none'} ` +
-          `adapterAddresses=${JSON.stringify(jadapter.addresses || {})} ` +
-          `contracts=${JSON.stringify(runtimeTx.data.contracts || {})}`,
-      );
-    }
-
-    const stateRoot = await (jadapter.captureStateRoot?.() ?? Promise.resolve(null));
-    if (isBrowserVM && !(stateRoot instanceof Uint8Array && stateRoot.length === 32)) {
-      throw new Error(`IMPORT_J_STATE_ROOT_UNAVAILABLE: name=${runtimeTx.data.name} mode=browservm`);
-    }
-
-    const initialBlockNumber = await resolveInitialJBlockNumber(jadapter, runtimeTx);
-
-    const jReplica: JReplica = {
-      name: runtimeTx.data.name,
-      blockNumber: initialBlockNumber,
-      stateRoot,
-      mempool: [],
-      blockDelayMs: 300,
-      ...(runtimeTx.data.blockTimeMs ? { blockTimeMs: runtimeTx.data.blockTimeMs } : {}),
-      lastBlockTimestamp: env.timestamp,
-      position: { x: 0, y: 50, z: 0 },
-      depositoryAddress: resolvedDepositoryAddress,
-      entityProviderAddress: resolvedEntityProviderAddress,
-      contracts: resolvedContracts,
-      rpcs: runtimeTx.data.rpcs,
-      chainId: runtimeTx.data.chainId,
-      ...(defaultDisputeDelayBlocks ? { defaultDisputeDelayBlocks } : {}),
-      jadapter,
-    };
-    env.jReplicas.set(runtimeTx.data.name, jReplica);
-
-    if (!env.activeJurisdiction) {
-      env.activeJurisdiction = runtimeTx.data.name;
-    }
-
-    deps.onJurisdictionImported?.(env);
-    runtimeTxLog.info('jurisdiction.ready', {
-      name: runtimeTx.data.name,
-      chainId: runtimeTx.data.chainId,
-    });
-  } catch (error) {
-    runtimeTxLog.error('jurisdiction.import_failed', {
-      name: runtimeTx.data.name,
-      chainId: runtimeTx.data.chainId,
-      error: errorMessage(error),
-    });
-    throw error;
+  entityId: string,
+  signerId: string,
+  config: EntityState['config'],
+): EntityState => {
+  const selected = buildCertifiedEntityLineagePlan(env).lookup.get(entityId);
+  if (!selected) throw new Error(`IMPORT_REPLICA_CERTIFIED_CHECKPOINT_MISSING:${entityId}`);
+  if (!selected.state.config.validators.some(validator => (
+    String(validator).toLowerCase() === signerId
+  ))) {
+    throw new Error(`IMPORT_REPLICA_SIGNER_NOT_IN_CERTIFIED_BOARD:entity=${entityId}:signer=${signerId}`);
   }
-};
-
-const resolveInitialJBlockNumber = async (
-  jadapter: JAdapter,
-  runtimeTx: ImportJRuntimeTx,
-): Promise<bigint> => {
-  if (!runtimeTx.data.startAtCurrentBlock) return 0n;
-  if (!jadapter.getCurrentBlockNumber) {
-    throw new Error(`IMPORT_J_CURRENT_BLOCK_UNAVAILABLE: name=${runtimeTx.data.name}`);
+  const suppliedAuthorityRoot = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority({
+    ...selected.state,
+    config,
+  }));
+  const certifiedAuthorityRoot = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(selected.state));
+  if (suppliedAuthorityRoot !== certifiedAuthorityRoot) {
+    throw new Error(
+      `IMPORT_REPLICA_CONFIG_CHECKPOINT_MISMATCH:entity=${entityId}:` +
+      `certified=${certifiedAuthorityRoot}:supplied=${suppliedAuthorityRoot}`,
+    );
   }
-  const currentBlock = await jadapter.getCurrentBlockNumber();
-  if (!Number.isFinite(currentBlock) || currentBlock < 0) {
-    throw new Error(`IMPORT_J_CURRENT_BLOCK_INVALID: name=${runtimeTx.data.name} block=${String(currentBlock)}`);
-  }
-  return BigInt(Math.floor(currentBlock));
+  return selected.state;
 };
 
 const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): void => {
@@ -294,10 +285,34 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): vo
   const replicaKey = `${importedEntityId}:${importedSignerId}`;
   const existingMatch = findExistingReplicaCaseInsensitive(env, importedEntityId, importedSignerId);
   const config = requireBoundEntityConfig(env, importedEntityId, runtimeTx.data.config);
-  backfillEntityJurisdictionBinding(env, importedEntityId, config.jurisdiction!);
+  const liveSiblings = Array.from(env.eReplicas.values()).filter(candidate => (
+    String(candidate.entityId || candidate.state.entityId).toLowerCase() === importedEntityId
+  ));
+  const hasCertifiedCheckpoint = liveSiblings.some(candidate => (
+    candidate.state.height > 0 ||
+    Boolean(candidate.certifiedFrameAnchor) ||
+    Boolean(candidate.certifiedFrameLineage?.length)
+  ));
 
   if (existingMatch) {
     const { key: existingReplicaKey, replica: existingReplica } = existingMatch;
+    if (hasCertifiedCheckpoint) {
+      resolveImportCheckpointState(env, importedEntityId, importedSignerId, config);
+      // Re-import is local routing metadata, never an Entity state transition.
+      // Re-normalizing swap pairs or replacing config here changes a certified
+      // state root without a quorum frame and poisons the lineage on this very
+      // RuntimeTx. Crypto keys are explicitly excluded validator-local state.
+      existingReplica.isProposer = runtimeTx.data.isProposer;
+      existingReplica.entityId = importedEntityId;
+      existingReplica.signerId = importedSignerId;
+      canonicalizeLocalEntityCryptoKeys(env, importedEntityId, importedSignerId, existingReplica.state);
+      if (existingReplicaKey !== replicaKey) env.eReplicas.delete(existingReplicaKey);
+      env.eReplicas.set(replicaKey, existingReplica);
+      markStorageEntityDirty(env, importedEntityId);
+      return;
+    }
+
+    backfillEntityJurisdictionBinding(env, importedEntityId, config.jurisdiction!);
     existingReplica.isProposer = runtimeTx.data.isProposer;
     existingReplica.entityId = importedEntityId;
     existingReplica.signerId = importedSignerId;
@@ -327,6 +342,42 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): vo
   }
 
   const replicaKeys = resolveReplicaEntityCryptoKeys(env, importedEntityId, importedSignerId);
+  if (liveSiblings.length > 0) {
+    const checkpointState = cloneEntityState(
+      resolveImportCheckpointState(env, importedEntityId, importedSignerId, config),
+      true,
+    );
+    checkpointState.entityEncPubKey = replicaKeys.publicKey;
+    checkpointState.entityEncPrivKey = replicaKeys.privateKey;
+    checkpointState.htlcNotes = new Map();
+    const checkpointReplica: EntityReplica = {
+      entityId: importedEntityId,
+      signerId: importedSignerId,
+      mempool: [],
+      isProposer: runtimeTx.data.isProposer,
+      state: checkpointState,
+      ...(runtimeTx.data.position
+        ? {
+            position: {
+              ...runtimeTx.data.position,
+              ...((runtimeTx.data.position.jurisdiction || config.jurisdiction?.name)
+                ? { jurisdiction: runtimeTx.data.position.jurisdiction || config.jurisdiction!.name }
+                : {}),
+            },
+          }
+        : {}),
+    };
+    env.eReplicas.set(replicaKey, checkpointReplica);
+    markStorageEntityDirty(env, importedEntityId);
+    runtimeTxLog.info('replica.imported_from_certified_checkpoint', {
+      entity: formatEntityDisplay(importedEntityId),
+      signer: formatSignerDisplay(importedSignerId),
+      height: checkpointState.height,
+      head: checkpointState.prevFrameHash ?? 'genesis',
+    });
+    return;
+  }
+  backfillEntityJurisdictionBinding(env, importedEntityId, config.jurisdiction!);
   const replica: EntityReplica = {
     entityId: importedEntityId,
     signerId: importedSignerId,
@@ -361,6 +412,7 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): vo
       htlcFeesEarned: 0n,
       htlcNotes: new Map(),
       lockBook: new Map(),
+      crontabState: initCrontab(),
       swapTradingPairs: buildDefaultEntitySwapPairs(getTokenIdsForJurisdiction(config.jurisdiction)),
       pendingSwapFillRatios: new Map(),
       pendingCrossJurisdictionFillAcks: new Map(),
@@ -382,47 +434,14 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): vo
 
   env.eReplicas.set(replicaKey, replica);
   markStorageEntityDirty(env, replica.state.entityId);
-  registerSingleSignerEntityWallet(env, runtimeTx, importedEntityId, importedSignerId);
 
   const createdReplica = env.eReplicas.get(replicaKey);
   const actualJBlock = createdReplica?.state.lastFinalizedJHeight;
-  if (env.gossip && createdReplica && replicaKeys.isLocal) {
-    announceLocalEntityProfile(env, createdReplica.state, env.timestamp);
-  }
-
   if (typeof actualJBlock !== 'number') {
     throw new Error(
       `ENTITY_CREATION_INVALID_J_HEIGHT: replica=${replicaKey} ` +
         `expected=number actualType=${typeof actualJBlock} actual=${String(actualJBlock)}`,
     );
-  }
-};
-
-const registerSingleSignerEntityWallet = (
-  env: Env,
-  runtimeTx: ImportReplicaRuntimeTx,
-  importedEntityId: string,
-  importedSignerId: string,
-): void => {
-  const validators = runtimeTx.data.config.validators;
-  const threshold = runtimeTx.data.config.threshold;
-  if (validators.length !== 1 || threshold !== 1n) return;
-
-  const signerId = normalizeRuntimeId(String(validators[0] || '')) || importedSignerId;
-  if (!signerId) return;
-  try {
-    const privateKey = getSignerPrivateKey(env, signerId);
-    const privateKeyHex = `0x${Array.from(privateKey)
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('')}`;
-    for (const jReplica of env.jReplicas?.values?.() ?? []) {
-      jReplica.jadapter?.registerEntityWallet?.(importedEntityId, privateKeyHex);
-    }
-  } catch (_error) {
-    runtimeTxLog.warn('replica.wallet_registration_skipped', {
-      signer: formatSignerDisplay(signerId),
-      reason: 'signer_private_key_unavailable',
-    });
   }
 };
 

@@ -99,6 +99,7 @@ test('entity workspace has no separate audit ops or liquidity projection lenses 
 test('entity settings workspace is a projection command surface, not the legacy Env panel', () => {
   const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
   const settings = readFileSync('frontend/src/lib/components/Entity/EntitySettingsProjectionPanel.svelte', 'utf8');
+  const consensusSettings = readFileSync('frontend/src/lib/components/Entity/EntityConsensusSettingsPanel.svelte', 'utf8');
 
   expect(tabs).toContain("import EntitySettingsProjectionPanel from './EntitySettingsProjectionPanel.svelte'");
   expect(tabs).toContain('<EntitySettingsProjectionPanel');
@@ -118,6 +119,9 @@ test('entity settings workspace is a projection command surface, not the legacy 
   expect(settings).toContain('settingsSubview: SettingsSubview');
   expect(settings).toContain('data-testid="settings-theme-select"');
   expect(settings).toContain('data-testid="settings-time-machine-toggle"');
+  expect(settings).toContain('data-testid="settings-consensus-tab"');
+  expect(settings).toContain('<EntityConsensusSettingsPanel');
+  expect(consensusSettings).toContain('data-testid="settings-consensus-panel"');
   expect(settings).toContain('settingsOperations.setTheme');
   expect(settings).toContain('settingsOperations.setShowTimeMachine');
   expect(settings).toContain('data-testid="entity-settings-projection-panel"');
@@ -130,6 +134,14 @@ test('entity settings workspace is a projection command surface, not the legacy 
   expect(settings).not.toContain('IndexedDbInspector');
   expect(settings).not.toContain('FormationPanel');
   expect(settings).not.toContain('GossipPanel');
+});
+
+test('normal wallet hides terminal runtime receipt heights and keeps actionable receipt states', () => {
+  const workspace = readFileSync('frontend/src/lib/components/Entity/EntityWorkspace.svelte', 'utf8');
+
+  expect(workspace).toContain('isActionableRuntimeReceipt');
+  expect(workspace).not.toContain('$runtimeCommandLatestReceipt.committedAtHeight');
+  expect(workspace).not.toContain('$runtimeCommandLatestReceipt.acceptedAtHeight');
 });
 
 test('entity panel routing is owned by the existing wallet app tabs', () => {

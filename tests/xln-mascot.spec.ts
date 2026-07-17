@@ -78,7 +78,7 @@ async function newPage(browser: Browser, width: number, height: number, theme: '
 }
 
 test.describe('xln mascot assistant', () => {
-  test('drags, docks, persists, and exposes an honest assistant state', async ({ browser }, testInfo) => {
+  test('drags, docks, persists, and exposes an honest assistant state', { tag: '@functional' }, async ({ browser }, testInfo) => {
     const wide = await newPage(browser, 1920, 1080, 'light');
     const issues = await loadMascot(wide.page, 'light');
     const root = wide.page.getByTestId('xln-mascot-root');
@@ -127,7 +127,7 @@ test.describe('xln mascot assistant', () => {
     await wide.close();
   });
 
-  test('supports keyboard docking, hidden persistence, and reduced motion', async ({ browser }, testInfo) => {
+  test('supports keyboard docking, hidden persistence, and reduced motion', { tag: '@functional' }, async ({ browser }, testInfo) => {
     const reducedContext = await browser.newContext({
       viewport: { width: 1440, height: 900 },
       ignoreHTTPSErrors: true,
@@ -166,7 +166,7 @@ test.describe('xln mascot assistant', () => {
     await reducedContext.close();
   });
 
-  test('fits the logo and open chat on iPhone in dark and light themes', async ({ browser }, testInfo) => {
+  test('fits the logo and open chat on iPhone in dark and light themes', { tag: '@functional' }, async ({ browser }, testInfo) => {
     const darkContext = await browser.newContext({ ...devices['iPhone 15 Pro'], ignoreHTTPSErrors: true, colorScheme: 'dark' });
     const darkPage = await darkContext.newPage();
     const darkIssues = await loadMascot(darkPage, 'dark');
@@ -195,7 +195,7 @@ test.describe('xln mascot assistant', () => {
     await lightContext.close();
   });
 
-  test('renders model Markdown without executable or malformed links', async ({ page }, testInfo) => {
+  test('renders model Markdown without executable or malformed links', { tag: '@resilience' }, async ({ page }, testInfo) => {
     await page.route('**/api/assistant/models', route => route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -229,7 +229,7 @@ test.describe('xln mascot assistant', () => {
     expect(issues).toEqual([]);
   });
 
-  test('streams a real docs-grounded answer through the production proxy', async ({ page }, testInfo) => {
+  test('streams a real docs-grounded answer through the production proxy', { tag: '@functional' }, async ({ page }, testInfo) => {
     // XLN_ALLOW_SKIP: requires the explicitly enabled external local AI service.
     test.skip(!REAL_AI, 'Set XLN_REAL_AI_E2E=1 with the local xln AI service running.');
     const issues = await loadMascot(page, 'dark');

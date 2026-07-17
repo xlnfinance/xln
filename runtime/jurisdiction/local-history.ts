@@ -9,6 +9,7 @@ import type {
 import {
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
+  getJEventJurisdictionRef,
   normalizeDisputeFinalizationEvidence,
 } from './event-observation';
 import {
@@ -21,8 +22,21 @@ import {
   foldJHistoryRoot,
   getJHistoryRegistrationBaseHeight,
 } from './history-consensus';
+import {
+  type JEventRangeSignatureVerifier,
+  validateJEventRangeEnvelope,
+} from './j-event-range-validation';
+
+/** Bounded UI/audit cache. It is never consulted as consensus authority. */
+export const MAX_CERTIFIED_J_EVENT_BLOCKS = 256;
 
 const normalizedText = (value: unknown): string => String(value ?? '').trim().toLowerCase();
+
+const normalizedHistoryRoot = (value: unknown, errorCode: string): string => {
+  const root = normalizedText(value);
+  if (!/^0x[0-9a-f]{64}$/.test(root)) throw new Error(errorCode);
+  return root;
+};
 
 const normalizeEventBlock = (
   jurisdictionRef: string,
@@ -58,13 +72,7 @@ type ExactJBlockIdentity = Pick<
   'jBlockHash' | 'eventsHash' | 'disputeFinalizationEvidenceHash'
 >;
 
-/**
- * Reducer-semantic block identity. `eventsHash` commits the receipt logs, but a
- * DisputeFinalized reducer also consumes finalNonce and transformer arguments
- * reconstructed from transaction calldata. Comparing only the log hash lets a
- * proposer substitute those values, re-sign its own range, and make validators
- * replay a state transition they never observed.
- */
+/** Reducer identity also commits calldata evidence that is absent from logs. */
 const blockIdentity = (block: ExactJBlockIdentity): string =>
   `${normalizedText(block.jBlockHash)}:${normalizedText(block.eventsHash)}:` +
   normalizedText(block.disputeFinalizationEvidenceHash);
@@ -74,7 +82,18 @@ export const isCertifiedJHistoryCorruption = (error: unknown): boolean => {
   return /^J_HISTORY_(?:FINALITY|FINALIZED)_/.test(message);
 };
 
-const certifiedAnchor = (state: EntityState): { height: number; hash: string; jurisdictionRef: string } | null => {
+export type EntityCertifiedJAnchor = {
+  height: number;
+  hash: string;
+  jurisdictionRef: string;
+  eventHistoryRoot: string;
+};
+
+/**
+ * Entity consensus needs one settlement-chain anchor, not historical leaves.
+ * Once a range commits, its events are already reflected in Entity state.
+ */
+export const getEntityCertifiedJAnchor = (state: EntityState): EntityCertifiedJAnchor | null => {
   const finality = state.jHistoryFinality;
   const stateHeight = Number(state.lastFinalizedJHeight || 0);
   if (!Number.isSafeInteger(stateHeight) || stateHeight < 0) {
@@ -82,10 +101,6 @@ const certifiedAnchor = (state: EntityState): { height: number; hash: string; ju
   }
   if (!finality) {
     const registrationBase = getJHistoryRegistrationBaseHeight(state.config.jurisdiction);
-    // Before the first post-registration range there is intentionally no
-    // certificate. Once state advances—or retains any certified leaf—silently
-    // treating the local watcher as authoritative would let restore corruption
-    // erase the Entity-certified anchor.
     if (stateHeight !== registrationBase || state.jBlockChain.length !== 0) {
       throw new Error(
         `J_HISTORY_FINALITY_MISSING:state=${stateHeight}:registrationBase=${registrationBase}:blocks=${state.jBlockChain.length}`,
@@ -95,136 +110,171 @@ const certifiedAnchor = (state: EntityState): { height: number; hash: string; ju
   }
   const height = Number(finality.finalizedThroughHeight);
   if (!Number.isSafeInteger(height) || height <= 0 || height !== stateHeight) {
-    throw new Error(`J_HISTORY_FINALITY_HEIGHT_CORRUPTION:state=${stateHeight}:anchor=${String(finality.finalizedThroughHeight)}`);
+    throw new Error(
+      `J_HISTORY_FINALITY_HEIGHT_CORRUPTION:state=${stateHeight}:anchor=${String(finality.finalizedThroughHeight)}`,
+    );
   }
   const hash = normalizedText(finality.tipBlockHash);
-  if (!hash) throw new Error('J_HISTORY_FINALITY_HASH_CORRUPTION');
+  if (!/^0x[0-9a-f]{64}$/.test(hash)) throw new Error('J_HISTORY_FINALITY_HASH_CORRUPTION');
   const jurisdictionRef = normalizedText(finality.jurisdictionRef);
   if (!jurisdictionRef) throw new Error('J_HISTORY_FINALITY_JURISDICTION_CORRUPTION');
-  return { height, hash, jurisdictionRef };
+  const eventHistoryRoot = normalizedHistoryRoot(
+    finality.eventHistoryRoot,
+    'J_HISTORY_FINALITY_ROOT_CORRUPTION:certified-root-invalid',
+  );
+  return { height, hash, jurisdictionRef, eventHistoryRoot };
 };
 
-type CertifiedJHistoryView = {
-  anchor: ReturnType<typeof certifiedAnchor>;
-  blocks: ValidatorJEventBlock[];
-  byHeight: Map<number, ValidatorJEventBlock>;
-  prefixRoots: Array<{ height: number; root: string }>;
-  root: string;
+const assertDisplayBlockIntegrity = (
+  block: EntityState['jBlockChain'][number],
+  anchor: EntityCertifiedJAnchor,
+  previousHeight: number,
+): number => {
+  const height = Number(block.jHeight);
+  if (!Number.isSafeInteger(height) || height <= previousHeight || height > anchor.height) {
+    const code = height === previousHeight
+      ? 'J_HISTORY_FINALITY_DUPLICATE_BLOCK'
+      : 'J_HISTORY_FINALITY_BLOCK_HEIGHT_CORRUPTION';
+    throw new Error(`${code}:${String(height)}`);
+  }
+  if (normalizedText(block.jurisdictionRef) !== anchor.jurisdictionRef) {
+    throw new Error(`J_HISTORY_FINALITY_BLOCK_JURISDICTION_CORRUPTION:${height}`);
+  }
+  const blockHash = normalizedText(block.jBlockHash);
+  if (!/^0x[0-9a-f]{64}$/.test(blockHash)) {
+    throw new Error(`J_HISTORY_FINALITY_BLOCK_HASH_CORRUPTION:${height}`);
+  }
+  const normalizedEvents = normalizeJurisdictionEvents(block.events);
+  if (!Array.isArray(block.events) || normalizedEvents.length !== block.events.length) {
+    throw new Error(`J_HISTORY_FINALITY_EVENT_BODY_CORRUPTION:${height}`);
+  }
+  if (normalizedEvents.length === 0) throw new Error(`J_HISTORY_FINALITY_EMPTY_EVENT_BLOCK:${height}`);
+  const orderedEvents = [...normalizedEvents].sort(compareCanonicalJurisdictionEvents);
+  for (let index = 0; index < orderedEvents.length; index += 1) {
+    if (
+      canonicalJurisdictionEventsHash([normalizedEvents[index]!]) !==
+      canonicalJurisdictionEventsHash([orderedEvents[index]!])
+    ) {
+      throw new Error(`J_HISTORY_FINALITY_EVENT_ORDER_CORRUPTION:${height}`);
+    }
+    const event = orderedEvents[index]!;
+    if (Number(event.blockNumber) !== height || normalizedText(event.blockHash) !== blockHash) {
+      throw new Error(`J_HISTORY_FINALITY_EVENT_BLOCK_CORRUPTION:${height}`);
+    }
+  }
+  if (canonicalJurisdictionEventsHash(orderedEvents) !== normalizedText(block.eventsHash)) {
+    throw new Error(`J_HISTORY_FINALITY_EVENTS_HASH_CORRUPTION:${height}`);
+  }
+  if (height === anchor.height && blockHash !== anchor.hash) {
+    throw new Error(`J_HISTORY_FINALITY_TIP_CORRUPTION:${height}`);
+  }
+  return height;
 };
 
-const buildCertifiedJHistoryView = (state: EntityState): CertifiedJHistoryView => {
-  const anchor = certifiedAnchor(state);
-  if (!anchor) {
-    return {
-      anchor: null,
-      blocks: [],
-      byHeight: new Map(),
-      prefixRoots: [],
-      root: EMPTY_J_HISTORY_ROOT,
-    };
+/**
+ * Restore validates the current anchor plus the bounded display cache. The
+ * cache may be deleted without changing authority; it is never folded to
+ * reconstruct the certified root.
+ */
+export const assertCertifiedJHistoryIntegrity = (state: EntityState): void => {
+  const anchor = getEntityCertifiedJAnchor(state);
+  if (!anchor) return;
+  if (state.jBlockChain.length > MAX_CERTIFIED_J_EVENT_BLOCKS) {
+    throw new Error(`J_HISTORY_FINALITY_DISPLAY_OVERFLOW:${state.jBlockChain.length}`);
   }
-  const seenHeights = new Set<number>();
-  const blocks = state.jBlockChain
-    .map((block) => ({
-      jurisdictionRef: normalizedText(block.jurisdictionRef),
-      jHeight: Number(block.jHeight),
-      jBlockHash: normalizedText(block.jBlockHash),
-      eventsHash: normalizedText(block.eventsHash),
-      ...(block.disputeFinalizationEvidenceHash
-        ? { disputeFinalizationEvidenceHash: normalizedText(block.disputeFinalizationEvidenceHash) }
-        : {}),
-      events: block.events,
-    }))
-    .sort((left, right) => left.jHeight - right.jHeight);
-  for (const block of blocks) {
-    if (!Number.isSafeInteger(block.jHeight) || block.jHeight <= 0 || block.jHeight > anchor.height) {
-      throw new Error(`J_HISTORY_FINALITY_BLOCK_HEIGHT_CORRUPTION:${String(block.jHeight)}`);
-    }
-    if (block.jurisdictionRef !== anchor.jurisdictionRef) {
-      throw new Error(`J_HISTORY_FINALITY_BLOCK_JURISDICTION_CORRUPTION:${block.jHeight}`);
-    }
-    if (seenHeights.has(block.jHeight)) {
-      throw new Error(`J_HISTORY_FINALITY_DUPLICATE_BLOCK:${block.jHeight}`);
-    }
-    seenHeights.add(block.jHeight);
+  let previousHeight = 0;
+  for (const block of state.jBlockChain) {
+    previousHeight = assertDisplayBlockIntegrity(block, anchor, previousHeight);
   }
-  let computedRoot = EMPTY_J_HISTORY_ROOT;
-  const prefixRoots: Array<{ height: number; root: string }> = [];
-  for (const block of blocks) {
-    computedRoot = foldJHistoryRoot(computedRoot, [block]);
-    prefixRoots.push({ height: block.jHeight, root: computedRoot });
-  }
-  const certifiedRoot = normalizedText(state.jHistoryFinality?.eventHistoryRoot);
-  if (computedRoot !== certifiedRoot) {
-    throw new Error(`J_HISTORY_FINALITY_ROOT_CORRUPTION:expected=${computedRoot}:certified=${certifiedRoot || 'missing'}`);
-  }
-  const eventAtAnchor = blocks.find((block) => block.jHeight === anchor.height);
-  if (eventAtAnchor && eventAtAnchor.jBlockHash !== anchor.hash) {
-    throw new Error(`J_HISTORY_FINALITY_TIP_CORRUPTION:${anchor.height}`);
-  }
-  return {
-    anchor,
-    blocks,
-    byHeight: new Map(blocks.map((block) => [block.jHeight, block])),
-    prefixRoots,
-    root: computedRoot,
-  };
 };
 
-const certifiedRootAtHeight = (
-  state: EntityState,
-  view: CertifiedJHistoryView,
-  height: number,
-): string => {
-  if (!Number.isSafeInteger(height) || height < 0 || height > state.lastFinalizedJHeight) {
-    throw new Error(`J_RANGE_BASE_HEIGHT_INVALID:${height}`);
-  }
-  let low = 0;
-  let high = view.prefixRoots.length - 1;
-  let match = -1;
-  while (low <= high) {
-    const middle = Math.floor((low + high) / 2);
-    if (view.prefixRoots[middle]!.height <= height) {
-      match = middle;
-      low = middle + 1;
-    } else {
-      high = middle - 1;
-    }
-  }
-  return match < 0 ? EMPTY_J_HISTORY_ROOT : view.prefixRoots[match]!.root;
-};
-
-const assertValidatorJHistoryMatchesView = (
-  view: CertifiedJHistoryView,
+const assertValidatorJHistoryMatchesAnchor = (
+  anchor: EntityCertifiedJAnchor | null,
   history: ValidatorJHistory | undefined,
 ): void => {
-  const { anchor } = view;
-  if (!anchor) return;
   if (!history) return;
+  const scannedThroughHeight = Number(history.scannedThroughHeight);
+  const contiguousThroughHeight = Number(history.contiguousThroughHeight);
+  if (!Number.isSafeInteger(scannedThroughHeight) || scannedThroughHeight <= 0) {
+    throw new Error(`J_HISTORY_LOCAL_SCANNED_HEIGHT_CORRUPTION:${String(history.scannedThroughHeight)}`);
+  }
+  if (
+    !Number.isSafeInteger(contiguousThroughHeight) ||
+    contiguousThroughHeight < 0 ||
+    contiguousThroughHeight > scannedThroughHeight
+  ) {
+    throw new Error(
+      `J_HISTORY_LOCAL_CONTIGUOUS_HEIGHT_CORRUPTION:${String(history.contiguousThroughHeight)}:${scannedThroughHeight}`,
+    );
+  }
+  const localTipHash = history.blockHashes.get(scannedThroughHeight);
+  if (!localTipHash || normalizedText(localTipHash) !== normalizedText(history.tipBlockHash)) {
+    throw new Error(`J_HISTORY_LOCAL_TIP_CORRUPTION:${scannedThroughHeight}`);
+  }
+  if (!anchor) return;
   if (normalizedText(history.jurisdictionRef) !== anchor.jurisdictionRef) {
     throw new Error('J_HISTORY_FINALITY_JURISDICTION_CONFLICT');
   }
-  for (const [height, localHash] of history.blockHashes) {
-    const certifiedHash = height === anchor.height
-      ? anchor.hash
-      : view.byHeight.get(height)?.jBlockHash;
-    if (certifiedHash && normalizedText(localHash) !== certifiedHash) {
-      throw new Error(`J_HISTORY_FINALIZED_REORG:${height}`);
-    }
+  const localAnchorHash = history.blockHashes.get(anchor.height);
+  if (localAnchorHash && normalizedText(localAnchorHash) !== anchor.hash) {
+    throw new Error(`J_HISTORY_FINALIZED_REORG:${anchor.height}`);
   }
-  for (const [height, localBlock] of history.eventBlocks) {
-    if (height > anchor.height) continue;
-    const certified = view.byHeight.get(height);
-    if (!certified || blockIdentity(localBlock) !== blockIdentity(certified)) {
-      throw new Error(`J_HISTORY_FINALIZED_EVENT_CONFLICT:${height}`);
-    }
+  const localAnchorBlock = history.eventBlocks.get(anchor.height);
+  if (localAnchorBlock && normalizedText(localAnchorBlock.jBlockHash) !== anchor.hash) {
+    throw new Error(`J_HISTORY_FINALIZED_REORG:${anchor.height}`);
   }
 };
 
 export const assertValidatorJHistoryMatchesCertifiedAnchor = (
   state: EntityState,
   history: ValidatorJHistory | undefined,
-): void => assertValidatorJHistoryMatchesView(buildCertifiedJHistoryView(state), history);
+): void => assertValidatorJHistoryMatchesAnchor(getEntityCertifiedJAnchor(state), history);
+
+/** Full persisted-history check. Hot-path recording only needs the O(1) checks above. */
+export const assertValidatorJHistoryIntegrity = (
+  state: EntityState,
+  history: ValidatorJHistory | undefined,
+): void => {
+  const anchor = getEntityCertifiedJAnchor(state);
+  assertValidatorJHistoryMatchesAnchor(anchor, history);
+  if (!history) return;
+  const baseHeight = Number(state.lastFinalizedJHeight);
+  for (
+    let height = baseHeight + 1;
+    height <= Math.max(baseHeight, history.contiguousThroughHeight);
+    height += 1
+  ) {
+    if (!history.blockHashes.has(height)) {
+      throw new Error(`J_HISTORY_LOCAL_CONTIGUOUS_HEADER_MISSING:${height}`);
+    }
+  }
+};
+
+/**
+ * Resolve the cached frontier against the Entity-certified base. The base can
+ * advance when a frame commits, so an older cache value below it is harmless;
+ * the certified anchor itself supplies that prefix authority.
+ */
+export const getValidatorJContiguousThroughHeight = (
+  state: EntityState,
+  history: ValidatorJHistory,
+): number => {
+  assertValidatorJHistoryMatchesAnchor(getEntityCertifiedJAnchor(state), history);
+  const baseHeight = Number(state.lastFinalizedJHeight || 0);
+  if (history.scannedThroughHeight < baseHeight) {
+    throw new Error(
+      `J_HISTORY_LOCAL_BEHIND_FINALIZED_ANCHOR:${history.scannedThroughHeight}:${baseHeight}`,
+    );
+  }
+  let contiguousThroughHeight = Math.max(baseHeight, history.contiguousThroughHeight);
+  while (
+    contiguousThroughHeight < history.scannedThroughHeight &&
+    history.blockHashes.has(contiguousThroughHeight + 1)
+  ) {
+    contiguousThroughHeight += 1;
+  }
+  return contiguousThroughHeight;
+};
 
 export const recordValidatorJHistory = (
   current: ValidatorJHistory | undefined,
@@ -249,24 +299,24 @@ export const recordValidatorJHistory = (
     throw new Error('J_HISTORY_LOCAL_JURISDICTION_REBIND');
   }
 
-  const eventBlocks = new Map(current?.eventBlocks ?? []);
-  const blockHashes = new Map(current?.blockHashes ?? []);
-  const certifiedView = state ? buildCertifiedJHistoryView(state) : null;
-  const anchor = certifiedView?.anchor ?? null;
-  const certifiedByHeight = certifiedView?.byHeight ?? new Map<number, ValidatorJEventBlock>();
-  if (anchor) {
-    if (anchor.jurisdictionRef !== jurisdictionRef) {
-      throw new Error('J_HISTORY_FINALITY_JURISDICTION_CONFLICT');
-    }
-    const existingAnchorHash = blockHashes.get(anchor.height);
-    if (existingAnchorHash && normalizedText(existingAnchorHash) !== anchor.hash) {
-      throw new Error(`J_HISTORY_FINALIZED_REORG:${anchor.height}`);
-    }
-    // Certified Entity state is the source of truth. Seeding the missing local
-    // anchor makes a restored validator compare every crossing scan against it.
-    blockHashes.set(anchor.height, anchor.hash);
-    assertValidatorJHistoryMatchesView(certifiedView!, current);
+  const anchor = state ? getEntityCertifiedJAnchor(state) : null;
+  if (anchor && anchor.jurisdictionRef !== jurisdictionRef) {
+    throw new Error('J_HISTORY_FINALITY_JURISDICTION_CONFLICT');
   }
+  if (anchor && scannedThroughHeight < anchor.height) {
+    throw new Error(`J_HISTORY_LOCAL_BEHIND_FINALIZED_ANCHOR:${scannedThroughHeight}:${anchor.height}`);
+  }
+  assertValidatorJHistoryMatchesAnchor(anchor, current);
+
+  const minimumRetainedHeight = state ? Number(state.lastFinalizedJHeight) : 0;
+  const eventBlocks = new Map(
+    [...(current?.eventBlocks ?? [])].filter(([height]) => height >= minimumRetainedHeight),
+  );
+  const blockHashes = new Map(
+    [...(current?.blockHashes ?? [])].filter(([height]) => height >= minimumRetainedHeight),
+  );
+  if (anchor) blockHashes.set(anchor.height, anchor.hash);
+
   for (const header of input.headers ?? []) {
     const jHeight = Number(header.jHeight);
     const jBlockHash = normalizedText(header.jBlockHash);
@@ -274,10 +324,8 @@ export const recordValidatorJHistory = (
       throw new Error('J_HISTORY_LOCAL_HEADER_HEIGHT_INVALID');
     }
     if (!jBlockHash) throw new Error('J_HISTORY_LOCAL_HEADER_HASH_MISSING');
-    const certifiedHash = jHeight === anchor?.height
-      ? anchor.hash
-      : certifiedByHeight.get(jHeight)?.jBlockHash;
-    if (certifiedHash && certifiedHash !== jBlockHash) {
+    if (anchor && jHeight < anchor.height) continue;
+    if (anchor && jHeight === anchor.height && jBlockHash !== anchor.hash) {
       throw new Error(`J_HISTORY_FINALIZED_REORG:${jHeight}`);
     }
     const existingHash = blockHashes.get(jHeight);
@@ -287,14 +335,13 @@ export const recordValidatorJHistory = (
     }
     blockHashes.set(jHeight, jBlockHash);
   }
+
   for (const rawBlock of input.blocks) {
     const block = normalizeEventBlock(jurisdictionRef, rawBlock);
     if (block.jHeight > scannedThroughHeight) throw new Error('J_HISTORY_LOCAL_BLOCK_ABOVE_SCAN_TIP');
-    if (anchor && block.jHeight <= anchor.height) {
-      const certified = certifiedByHeight.get(block.jHeight);
-      if (!certified || blockIdentity(certified) !== blockIdentity(block)) {
-        throw new Error(`J_HISTORY_FINALIZED_EVENT_CONFLICT:${block.jHeight}`);
-      }
+    if (anchor && block.jHeight < anchor.height) continue;
+    if (anchor && block.jHeight === anchor.height && block.jBlockHash !== anchor.hash) {
+      throw new Error(`J_HISTORY_FINALIZED_REORG:${block.jHeight}`);
     }
     const existing = eventBlocks.get(block.jHeight);
     if (existing && blockIdentity(existing) !== blockIdentity(block)) {
@@ -319,26 +366,31 @@ export const recordValidatorJHistory = (
   }
   blockHashes.set(scannedThroughHeight, tipBlockHash);
   const previousScanned = current?.scannedThroughHeight ?? 0;
-  const recorded = {
+  const nextScannedThroughHeight = Math.max(previousScanned, scannedThroughHeight);
+  let contiguousThroughHeight = Math.max(
+    current?.contiguousThroughHeight ?? minimumRetainedHeight,
+    minimumRetainedHeight,
+  );
+  while (
+    contiguousThroughHeight < nextScannedThroughHeight &&
+    blockHashes.has(contiguousThroughHeight + 1)
+  ) {
+    contiguousThroughHeight += 1;
+  }
+  const recorded: ValidatorJHistory = {
     jurisdictionRef,
-    scannedThroughHeight: Math.max(previousScanned, scannedThroughHeight),
+    scannedThroughHeight: nextScannedThroughHeight,
+    contiguousThroughHeight,
     tipBlockHash: scannedThroughHeight >= previousScanned ? tipBlockHash : current!.tipBlockHash,
     eventBlocks,
     blockHashes,
   };
-  if (certifiedView) assertValidatorJHistoryMatchesView(certifiedView, recorded);
+  assertValidatorJHistoryMatchesAnchor(anchor, recorded);
   return recorded;
 };
 
-export const finalizedJHistoryRoot = (state: EntityState): string => {
-  return buildCertifiedJHistoryView(state).root;
-};
-
-const finalizedJHistoryRootAtHeight = (
-  state: EntityState,
-  height: number,
-  view = buildCertifiedJHistoryView(state),
-): string => certifiedRootAtHeight(state, view, height);
+export const finalizedJHistoryRoot = (state: EntityState): string =>
+  getEntityCertifiedJAnchor(state)?.eventHistoryRoot ?? EMPTY_J_HISTORY_ROOT;
 
 export type ReconciledJEventRange =
   | { kind: 'noop' }
@@ -352,56 +404,38 @@ export type ReconciledJEventRange =
     };
 
 /**
- * Reconcile an authenticated older observation with the current certified
- * Entity prefix. Matching finalized blocks are idempotent; only the unseen
- * suffix may execute. Any differing or omitted finalized event block is
- * corruption/equivocation and must stop before state mutation.
+ * The settlement chain is a linked list. A committed range is applied once;
+ * any fully stale authenticated delivery is therefore a no-op regardless of
+ * its body. A delayed crossing delivery is rebased onto the one current
+ * Entity-certified head. The discarded body is never replayed or trusted;
+ * the signed resulting root must still equal current certified root + suffix.
  */
-const reconcileJEventRangeWithCertifiedView = (
+export const reconcileJEventRangeWithFinalizedState = (
   state: EntityState,
   data: JurisdictionEventData,
-  certifiedView: CertifiedJHistoryView,
 ): ReconciledJEventRange => {
   const baseHeight = Number(data.baseHeight);
   const scannedThroughHeight = Number(data.scannedThroughHeight);
   const finalizedHeight = Number(state.lastFinalizedJHeight || 0);
-  if (!Number.isSafeInteger(baseHeight) || baseHeight < 0 || baseHeight > finalizedHeight) {
-    throw new Error(`J_RANGE_BASE_HEIGHT_AHEAD:${baseHeight}`);
+  if (!Number.isSafeInteger(baseHeight) || baseHeight < 0) {
+    throw new Error(`J_RANGE_BASE_HEIGHT_INVALID:${String(data.baseHeight)}`);
   }
   if (!Number.isSafeInteger(scannedThroughHeight) || scannedThroughHeight <= baseHeight) {
     throw new Error('J_RANGE_HEIGHT_INVALID');
   }
+  if (scannedThroughHeight <= finalizedHeight) return { kind: 'noop' };
+  if (baseHeight > finalizedHeight) {
+    throw new Error(`J_RANGE_BASE_HEIGHT_AHEAD:${baseHeight}:${finalizedHeight}`);
+  }
+  const anchor = getEntityCertifiedJAnchor(state);
   const jurisdictionRef = normalizedText(data.jurisdictionRef);
-  const { anchor } = certifiedView;
-  const allCertifiedBlocks = certifiedView.blocks;
-  const overlapEnd = Math.min(scannedThroughHeight, finalizedHeight);
-  const proposedPrefix = data.blocks.filter((block) =>
-    Number(block.blockNumber) > baseHeight && Number(block.blockNumber) <= overlapEnd);
-  const certifiedPrefix = allCertifiedBlocks
-    .filter((block) =>
-      normalizedText(block.jurisdictionRef) === jurisdictionRef &&
-      block.jHeight > baseHeight &&
-      block.jHeight <= overlapEnd)
-    .sort((left, right) => left.jHeight - right.jHeight);
-  if (proposedPrefix.length !== certifiedPrefix.length) {
-    throw new Error(`J_RANGE_FINALIZED_PREFIX_COUNT_CONFLICT:${overlapEnd}`);
+  if (anchor && jurisdictionRef !== anchor.jurisdictionRef) {
+    throw new Error('J_HISTORY_FINALITY_JURISDICTION_CONFLICT');
   }
-  for (let index = 0; index < certifiedPrefix.length; index += 1) {
-    const proposed = proposedPrefix[index]!;
-    const certified = certifiedPrefix[index]!;
-    if (
-      Number(proposed.blockNumber) !== certified.jHeight ||
-      normalizedText(proposed.blockHash) !== normalizedText(certified.jBlockHash) ||
-      normalizedText(proposed.eventsHash) !== normalizedText(certified.eventsHash) ||
-      normalizedText(proposed.disputeFinalizationEvidenceHash) !==
-        normalizedText(certified.disputeFinalizationEvidenceHash)
-    ) {
-      throw new Error(`J_RANGE_FINALIZED_PREFIX_CONFLICT:${certified.jHeight}`);
-    }
-  }
-  const expectedOriginalRoot = foldJHistoryRoot(
-    finalizedJHistoryRootAtHeight(state, baseHeight, certifiedView),
-    data.blocks.map((block) => ({
+  const suffixBlocks = data.blocks.filter((block) => Number(block.blockNumber) > finalizedHeight);
+  const eventHistoryRoot = foldJHistoryRoot(
+    finalizedJHistoryRoot(state),
+    suffixBlocks.map((block) => ({
       jurisdictionRef,
       jHeight: Number(block.blockNumber),
       jBlockHash: normalizedText(block.blockHash),
@@ -411,36 +445,18 @@ const reconcileJEventRangeWithCertifiedView = (
         : {}),
     })),
   );
-  if (expectedOriginalRoot !== normalizedText(data.eventHistoryRoot)) {
+  if (eventHistoryRoot !== normalizedText(data.eventHistoryRoot)) {
     throw new Error('J_RANGE_HISTORY_ROOT_MISMATCH');
-  }
-  if (scannedThroughHeight <= finalizedHeight) {
-    const certifiedTipHash = scannedThroughHeight === anchor?.height
-      ? anchor.hash
-      : allCertifiedBlocks.find((block) => block.jHeight === scannedThroughHeight)?.jBlockHash;
-    if (certifiedTipHash && normalizedText(data.tipBlockHash) !== certifiedTipHash) {
-      throw new Error(`J_RANGE_FINALIZED_TIP_CONFLICT:${scannedThroughHeight}`);
-    }
-    return { kind: 'noop' };
   }
   return {
     kind: 'suffix',
     baseHeight: finalizedHeight,
     scannedThroughHeight,
     tipBlockHash: normalizedText(data.tipBlockHash),
-    eventHistoryRoot: normalizedText(data.eventHistoryRoot),
-    blocks: data.blocks.filter((block) => Number(block.blockNumber) > finalizedHeight),
+    eventHistoryRoot,
+    blocks: suffixBlocks,
   };
 };
-
-export const reconcileJEventRangeWithFinalizedState = (
-  state: EntityState,
-  data: JurisdictionEventData,
-): ReconciledJEventRange => reconcileJEventRangeWithCertifiedView(
-  state,
-  data,
-  buildCertifiedJHistoryView(state),
-);
 
 const toWireBlock = (block: ValidatorJEventBlock): JurisdictionEventBlock => ({
   blockNumber: block.jHeight,
@@ -455,14 +471,20 @@ const toWireBlock = (block: ValidatorJEventBlock): JurisdictionEventBlock => ({
     : {}),
 });
 
-export const buildUnsignedJEventRange = (
+export const buildUnsignedJEventRangeAtHeight = (
   state: EntityState,
   history: ValidatorJHistory,
+  scannedThroughHeight: number,
 ): Omit<JurisdictionEventData, 'from' | 'signature' | 'observedAt'> | null => {
   const baseHeight = state.lastFinalizedJHeight;
-  if (history.scannedThroughHeight <= baseHeight) return null;
+  if (!Number.isSafeInteger(scannedThroughHeight) || scannedThroughHeight <= baseHeight) return null;
+  if (scannedThroughHeight > history.scannedThroughHeight) {
+    throw new Error(`J_PREFIX_LOCAL_HISTORY_BEHIND:${history.scannedThroughHeight}:${scannedThroughHeight}`);
+  }
+  const tipBlockHash = history.blockHashes.get(scannedThroughHeight);
+  if (!tipBlockHash) throw new Error(`J_PREFIX_LOCAL_TIP_HASH_MISSING:${scannedThroughHeight}`);
   const blocks = [...history.eventBlocks.values()]
-    .filter((block) => block.jHeight > baseHeight && block.jHeight <= history.scannedThroughHeight)
+    .filter((block) => block.jHeight > baseHeight && block.jHeight <= scannedThroughHeight)
     .sort((left, right) => left.jHeight - right.jHeight)
     .map(toWireBlock);
   const eventHistoryRoot = foldJHistoryRoot(finalizedJHistoryRoot(state), blocks.map((block) => ({
@@ -477,12 +499,46 @@ export const buildUnsignedJEventRange = (
   return {
     jurisdictionRef: history.jurisdictionRef,
     baseHeight,
-    scannedThroughHeight: history.scannedThroughHeight,
-    tipBlockHash: history.tipBlockHash,
+    scannedThroughHeight,
+    tipBlockHash,
     eventHistoryRoot,
     rangeHash: canonicalJEventRangeHash(history.jurisdictionRef, blocks),
     blocks,
   };
+};
+
+export const buildUnsignedJEventRange = (
+  state: EntityState,
+  history: ValidatorJHistory,
+): Omit<JurisdictionEventData, 'from' | 'signature' | 'observedAt'> | null =>
+  buildUnsignedJEventRangeAtHeight(state, history, history.scannedThroughHeight);
+
+export const buildValidatorJPrefixHeaders = (
+  state: EntityState,
+  history: ValidatorJHistory,
+  scannedThroughHeight: number,
+): ValidatorJBlockHeader[] => {
+  const baseHeight = state.lastFinalizedJHeight;
+  if (!Number.isSafeInteger(scannedThroughHeight) || scannedThroughHeight <= baseHeight) return [];
+  if (scannedThroughHeight > history.scannedThroughHeight) {
+    throw new Error(`J_PREFIX_LOCAL_HISTORY_BEHIND:${history.scannedThroughHeight}:${scannedThroughHeight}`);
+  }
+  return Array.from({ length: scannedThroughHeight - baseHeight }, (_, index) => {
+    const jHeight = baseHeight + index + 1;
+    const jBlockHash = history.blockHashes.get(jHeight);
+    if (!jBlockHash) throw new Error(`J_PREFIX_LOCAL_HEADER_MISSING:${jHeight}`);
+    return { jHeight, jBlockHash };
+  });
+};
+
+export const hasCompleteValidatorJPrefixHeaders = (
+  state: EntityState,
+  history: ValidatorJHistory,
+  scannedThroughHeight: number = history.scannedThroughHeight,
+): boolean => {
+  const baseHeight = state.lastFinalizedJHeight;
+  if (!Number.isSafeInteger(scannedThroughHeight) || scannedThroughHeight < baseHeight) return false;
+  return scannedThroughHeight <= getValidatorJContiguousThroughHeight(state, history);
 };
 
 export const getJEventRangeValidationError = (
@@ -490,59 +546,71 @@ export const getJEventRangeValidationError = (
   history: ValidatorJHistory | undefined,
   data: JurisdictionEventData,
   activeProposerId: string,
+  verifySignature: JEventRangeSignatureVerifier,
 ): string | null => {
-  if (normalizedText(data.from) !== normalizedText(activeProposerId)) return 'J_RANGE_NOT_ACTIVE_PROPOSER';
-  const jurisdictionRef = normalizedText(data.jurisdictionRef);
-  const certifiedView = buildCertifiedJHistoryView(state);
-  const normalizedProposedBlocks = data.blocks.map((proposed) => normalizeEventBlock(jurisdictionRef, {
+  // Certified state is local authority. Corruption must halt independently of
+  // whether the incoming proposer envelope is valid or attacker-controlled.
+  const anchor = getEntityCertifiedJAnchor(state);
+  const validated = validateJEventRangeEnvelope({
+    entityId: state.entityId,
+    expectedJurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
+    activeProposerId,
+    data,
+    verifySignature,
+  });
+  if (!validated.ok) return validated.code;
+  const canonicalData = validated.range.data;
+  const jurisdictionRef = validated.range.jurisdictionRef;
+  if (anchor && anchor.jurisdictionRef !== jurisdictionRef) return 'J_RANGE_JURISDICTION_MISMATCH';
+  const normalizedProposedBlocks = canonicalData.blocks.map((proposed): ValidatorJEventBlock => ({
     jurisdictionRef,
     jHeight: proposed.blockNumber,
     jBlockHash: proposed.blockHash,
     eventsHash: proposed.eventsHash,
     events: proposed.events,
-    ...(proposed.disputeFinalizationEvidence ? { disputeFinalizationEvidence: proposed.disputeFinalizationEvidence } : {}),
+    ...(proposed.disputeFinalizationEvidence
+      ? { disputeFinalizationEvidence: proposed.disputeFinalizationEvidence }
+      : {}),
     ...(proposed.disputeFinalizationEvidenceHash
       ? { disputeFinalizationEvidenceHash: proposed.disputeFinalizationEvidenceHash }
       : {}),
   }));
-  const reconciliation = reconcileJEventRangeWithCertifiedView(state, data, certifiedView);
-  if (history) assertValidatorJHistoryMatchesView(certifiedView, history);
-  if (data.scannedThroughHeight > state.lastFinalizedJHeight) {
-    if (!history || normalizedText(history.jurisdictionRef) !== jurisdictionRef) return 'J_RANGE_LOCAL_HISTORY_MISSING';
+  const reconciliation = reconcileJEventRangeWithFinalizedState(state, canonicalData);
+  if (reconciliation.kind === 'noop') return null;
+  if (!history || normalizedText(history.jurisdictionRef) !== jurisdictionRef) {
+    return 'J_RANGE_LOCAL_HISTORY_MISSING';
   }
-  if (!Number.isSafeInteger(data.scannedThroughHeight) || data.scannedThroughHeight <= data.baseHeight) {
-    return 'J_RANGE_HEIGHT_INVALID';
-  }
-  if (history && history.scannedThroughHeight < data.scannedThroughHeight) return 'J_RANGE_LOCAL_HISTORY_BEHIND';
-  const certifiedBlocks = certifiedView.blocks
-    .filter((block) =>
-      normalizedText(block.jurisdictionRef) === jurisdictionRef &&
-      block.jHeight > data.baseHeight &&
-      block.jHeight <= Math.min(state.lastFinalizedJHeight, data.scannedThroughHeight));
-  const localSuffixBlocks = [...(history?.eventBlocks.values() ?? [])]
-    .filter((block) => block.jHeight > state.lastFinalizedJHeight && block.jHeight <= data.scannedThroughHeight);
-  const localBlocks = [...certifiedBlocks, ...localSuffixBlocks]
+  assertValidatorJHistoryMatchesAnchor(anchor, history);
+  if (history.scannedThroughHeight < canonicalData.scannedThroughHeight) return 'J_RANGE_LOCAL_HISTORY_BEHIND';
+  const normalizedSuffixBlocks = normalizedProposedBlocks.filter(
+    block => block.jHeight > reconciliation.baseHeight,
+  );
+  const localBlocks = [...history.eventBlocks.values()]
+    .filter((block) => block.jHeight > reconciliation.baseHeight && block.jHeight <= canonicalData.scannedThroughHeight)
     .sort((left, right) => left.jHeight - right.jHeight);
-  if (localBlocks.length !== data.blocks.length) return 'J_RANGE_EVENT_BLOCK_COUNT_MISMATCH';
-  for (let index = 0; index < data.blocks.length; index += 1) {
-    const normalized = normalizedProposedBlocks[index]!;
+  if (localBlocks.length !== normalizedSuffixBlocks.length) return 'J_RANGE_EVENT_BLOCK_COUNT_MISMATCH';
+  for (let index = 0; index < normalizedSuffixBlocks.length; index += 1) {
+    const normalized = normalizedSuffixBlocks[index]!;
     const local = localBlocks[index]!;
     if (normalized.jHeight !== local.jHeight || blockIdentity(normalized) !== blockIdentity(local)) {
       return 'J_RANGE_EVENT_BLOCK_MISMATCH';
     }
   }
-  const knownTipHash = history?.blockHashes.get(data.scannedThroughHeight);
-  if (reconciliation.kind === 'suffix' && !knownTipHash) return 'J_RANGE_LOCAL_TIP_UNKNOWN';
-  if (knownTipHash && normalizedText(knownTipHash) !== normalizedText(data.tipBlockHash)) {
+  const knownTipHash = history.blockHashes.get(canonicalData.scannedThroughHeight);
+  if (!knownTipHash) return 'J_RANGE_LOCAL_TIP_UNKNOWN';
+  if (normalizedText(knownTipHash) !== canonicalData.tipBlockHash) {
     return 'J_RANGE_TIP_HASH_MISMATCH';
   }
-  if (canonicalJEventRangeHash(jurisdictionRef, data.blocks) !== normalizedText(data.rangeHash)) {
-    return 'J_RANGE_BODY_HASH_MISMATCH';
-  }
-  // Reconciliation already verified eventHistoryRoot over the proposed body;
-  // the exact block-by-block comparison above proves that body is the local
-  // canonical range. Folding the same N blocks again adds no safety property.
   return null;
+};
+
+/** Drop old display bodies; the current head/root live in jHistoryFinality. */
+export const pruneCertifiedJHistory = (state: EntityState): EntityState => {
+  if (state.jBlockChain.length <= MAX_CERTIFIED_J_EVENT_BLOCKS) return state;
+  return {
+    ...state,
+    jBlockChain: state.jBlockChain.slice(-MAX_CERTIFIED_J_EVENT_BLOCKS),
+  };
 };
 
 export const pruneFinalizedValidatorJHistory = (
@@ -550,12 +618,19 @@ export const pruneFinalizedValidatorJHistory = (
   finalizedThroughHeight: number,
 ): ValidatorJHistory | undefined => {
   if (!history) return undefined;
+  if (
+    !Number.isSafeInteger(finalizedThroughHeight) ||
+    finalizedThroughHeight < 0 ||
+    finalizedThroughHeight > history.scannedThroughHeight
+  ) {
+    throw new Error(
+      `J_HISTORY_LOCAL_PRUNE_HEIGHT_INVALID:${String(finalizedThroughHeight)}:${history.scannedThroughHeight}`,
+    );
+  }
   return {
     ...history,
+    contiguousThroughHeight: Math.max(history.contiguousThroughHeight, finalizedThroughHeight),
     eventBlocks: new Map([...history.eventBlocks].filter(([height]) => height > finalizedThroughHeight)),
-    // Keep the finalized anchor itself. It lets the watcher distinguish a
-    // recoverable reorg in the private suffix from a settlement-chain finality
-    // violation, without retaining the full finalized header history.
     blockHashes: new Map([...history.blockHashes].filter(([height]) => height >= finalizedThroughHeight)),
   };
 };
@@ -565,38 +640,37 @@ export const getValidatorJExpectedBlockHash = (
   history: ValidatorJHistory | undefined,
   jHeight: number,
 ): string | null => {
-  const finality = state.jHistoryFinality;
-  if (finality?.finalizedThroughHeight === jHeight) {
-    const certifiedHash = normalizedText(finality.tipBlockHash);
+  const anchor = getEntityCertifiedJAnchor(state);
+  if (anchor && jHeight === anchor.height) {
     const localHash = history?.blockHashes.get(jHeight);
-    if (localHash && normalizedText(localHash) !== certifiedHash) {
+    if (localHash && normalizedText(localHash) !== anchor.hash) {
       throw new Error(`J_HISTORY_FINALIZED_REORG:${jHeight}`);
     }
-    return certifiedHash;
+    return anchor.hash;
   }
+  if (anchor && jHeight < anchor.height) return null;
   const localHash = history?.blockHashes.get(jHeight);
-  if (localHash) return normalizedText(localHash);
-  return null;
+  return localHash ? normalizedText(localHash) : null;
 };
 
-/** Drop only validator-private evidence above the last E-certified J height. */
+/** Drop validator-private suffix and resume from the one Entity-certified head. */
 export const rewindValidatorJHistory = (
   state: EntityState,
   history: ValidatorJHistory | undefined,
 ): ValidatorJHistory | undefined => {
   if (!history) return undefined;
-  const finalizedHeight = Number(state.lastFinalizedJHeight || 0);
-  if (!Number.isSafeInteger(finalizedHeight) || finalizedHeight < 0) {
-    throw new Error('J_HISTORY_REWIND_FINALIZED_HEIGHT_INVALID');
+  const anchor = getEntityCertifiedJAnchor(state);
+  if (!anchor) return undefined;
+  const localAnchorHash = history.blockHashes.get(anchor.height);
+  if (localAnchorHash && normalizedText(localAnchorHash) !== anchor.hash) {
+    throw new Error(`J_HISTORY_FINALIZED_REORG:${anchor.height}`);
   }
-  const jurisdictionRef = normalizedText(history.jurisdictionRef);
-  const finalizedHash = getValidatorJExpectedBlockHash(state, history, finalizedHeight);
-  if (finalizedHeight === 0 || !finalizedHash) return undefined;
   return {
-    jurisdictionRef,
-    scannedThroughHeight: finalizedHeight,
-    tipBlockHash: finalizedHash,
+    jurisdictionRef: normalizedText(history.jurisdictionRef),
+    scannedThroughHeight: anchor.height,
+    contiguousThroughHeight: anchor.height,
+    tipBlockHash: anchor.hash,
     eventBlocks: new Map(),
-    blockHashes: new Map([[finalizedHeight, finalizedHash]]),
+    blockHashes: new Map([[anchor.height, anchor.hash]]),
   };
 };

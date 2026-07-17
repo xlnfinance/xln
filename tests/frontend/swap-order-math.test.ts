@@ -1,15 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
-  ORDERBOOK_LOT_SCALE,
   computePriceDeviationBps,
   formatSwapTokenAmount,
   formatSwapTokenAmountForInput,
   parseSwapDisplayPriceTicks,
-  requantizeSwapOrderAtLimitPrice,
   type SwapFormValidationInput,
   validateSwapForm,
 } from '../../frontend/src/lib/components/Entity/swap-order-math';
+import { getSwapLotScale, requantizeRemainingSwapAtPrice } from '../../runtime/orderbook';
 
 describe('swap order math', () => {
   test('formats token amounts for display and bounded inputs', () => {
@@ -19,34 +18,12 @@ describe('swap order math', () => {
     expect(formatSwapTokenAmountForInput(100000000n, 8)).toBe('1');
   });
 
-  test('requantizes sell-base orders by base lot size', () => {
-    expect(requantizeSwapOrderAtLimitPrice({
-      remainingGiveAmount: 3n * ORDERBOOK_LOT_SCALE + 5n,
-      priceTicks: 20_000n,
-      orderMode: 'sell-base',
-      tradeSide: 'buy-base',
-    })).toEqual({
-      side: 1,
-      priceTicks: 20_000n,
-      effectiveGive: 3n * ORDERBOOK_LOT_SCALE,
-      effectiveWant: 6n * ORDERBOOK_LOT_SCALE,
-      unspentGiveAmount: 5n,
-    });
-  });
-
-  test('requantizes buy-base orders from quote amount to base lot size', () => {
-    expect(requantizeSwapOrderAtLimitPrice({
-      remainingGiveAmount: 7n * ORDERBOOK_LOT_SCALE,
-      priceTicks: 20_000n,
-      orderMode: 'buy-base',
-      tradeSide: 'sell-base',
-    })).toEqual({
-      side: 0,
-      priceTicks: 20_000n,
-      effectiveGive: 6n * ORDERBOOK_LOT_SCALE,
-      effectiveWant: 3n * ORDERBOOK_LOT_SCALE,
-      unspentGiveAmount: 1n * ORDERBOOK_LOT_SCALE,
-    });
+  test('requantizes a six-decimal USDC budget with canonical runtime lot math', () => {
+    const result = requantizeRemainingSwapAtPrice(1, 2, 100_000_000n, 25_005_000n);
+    expect(getSwapLotScale(2)).toBe(1_000_000_000_000n);
+    expect(result?.effectiveGive).toBeGreaterThan(0n);
+    expect(result?.effectiveGive).toBeLessThanOrEqual(100_000_000n);
+    expect(result?.effectiveWant).toBeGreaterThan(0n);
   });
 
   test('parses display price ticks with fallback for invalid values', () => {

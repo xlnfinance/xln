@@ -99,6 +99,10 @@ test('account input without frame or settlement action fails fast', async () => 
       fromEntityId: counterpartyId,
       toEntityId: entityId,
       watchSeed,
+      domain: {
+        chainId: jurisdiction.chainId!,
+        depositoryAddress: jurisdiction.depositoryAddress,
+      },
     }, env)).rejects.toThrow('ACCOUNT_INPUT_EMPTY');
     expect(state.messages.at(-1)).toContain('ACCOUNT_INPUT_EMPTY');
   } finally {

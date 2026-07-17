@@ -12,7 +12,7 @@ import { createStructuredLogger } from '../infra/logger';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
 import { sanitizeChildProcessEnv } from '../server/child-process-env';
-import { childSecretFdEnv, writeInheritedChildSecrets } from './child-secrets';
+import { buildManagedRuntimeChildSecretEnv, writeInheritedChildSecrets } from './child-secrets';
 import {
   startCustodySupport,
   stopManagedChild,
@@ -29,7 +29,12 @@ import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '
 import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
 import { createHelloChallengeRegistry } from '../networking/hello-challenge';
 import { type MarketSnapshotPayload } from '../relay/market-snapshot';
-import { createMarketSubscriptionStack, isMarketMessageType } from '../relay/market-subscriptions';
+import { createMarketSubscriptionStack } from '../relay/market-subscriptions';
+import {
+  decodeMarketWireRequest,
+  encodeMarketWireMessage,
+  type MarketWireRequest,
+} from '../relay/market-wire';
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync, type StorageHealth } from './storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';
 import { serveRuntimeBundle, serveStatic } from '../server/static-assets';
@@ -47,18 +52,19 @@ import {
   resolveRuntimeImportAccessForRequest,
   type RuntimeImportAccess,
 } from './runtime-import-access';
-import type {
-  AggregatedHealth,
-  CustodySupportState,
-  HubChild,
-  HubHealthPayload,
-  HubInfoPayload,
-  ManagedRuntimeSpec,
-  MarketMakerChild,
-  MarketMakerHealthPayload,
-  OrchestratorWebSocket,
-  ResetState,
-  TimingMap,
+import {
+  resolveOrchestratorSocketType,
+  type AggregatedHealth,
+  type CustodySupportState,
+  type HubChild,
+  type HubHealthPayload,
+  type HubInfoPayload,
+  type ManagedRuntimeSpec,
+  type MarketMakerChild,
+  type MarketMakerHealthPayload,
+  type OrchestratorWebSocket,
+  type ResetState,
+  type TimingMap,
 } from './orchestrator-types';
 import {
   CHILD_HEALTH_TIMEOUT_MS,
@@ -94,6 +100,7 @@ import {
 import {
   deployRpc2JurisdictionStack,
   hasShardRpc2Jurisdiction,
+  provisionPrimaryRpcJurisdictionStack,
   readShardJurisdictions,
   resolvePrimaryHubJurisdictionFallback,
   seedShardJurisdictions,
@@ -113,6 +120,7 @@ import {
   type MarketMakerEntityJurisdictionConfig,
 } from './mesh-common';
 import {
+  requireJurisdictionBlockTimeMs,
   resolveMeshJurisdictionConfig,
   resolveSecondaryJurisdictions,
   type MeshJurisdictionConfig,
@@ -131,6 +139,12 @@ import {
   readMeshSeedOverrides,
   requireMeshRootSeed,
 } from './mesh-seeds';
+import {
+  createResetCoordinator,
+  resolveActiveResetOptions,
+  resolveResetCapabilityHealth,
+  type OrchestratorResetOptions,
+} from './reset-coordinator';
 
 const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
   const totalBytes = Number(storage.disk.totalBytes || 0);
@@ -243,6 +257,14 @@ const resetState: ResetState = {
   completedAt: null,
   failedAt: null,
   resolvedAt: null,
+};
+const configuredResetOptions: OrchestratorResetOptions = {
+  enableMarketMaker: args.mmEnabled,
+  enableCustody: args.custodyEnabled,
+};
+let activeResetOptions: OrchestratorResetOptions = {
+  enableMarketMaker: false,
+  enableCustody: false,
 };
 
 const meshRootSeed = requireMeshRootSeed();
@@ -436,7 +458,7 @@ const buildRuntimeImportManifest = (access: RuntimeImportAccess = runtimeImportA
     });
   }
   const marketMakerRuntimeId = runtimeIdFromChild(marketMakerChild);
-  if (args.mmEnabled && marketMakerRuntimeId) {
+  if (activeResetOptions.enableMarketMaker && marketMakerRuntimeId) {
     entries.push({
       label: marketMakerChild.name,
       access,
@@ -444,7 +466,7 @@ const buildRuntimeImportManifest = (access: RuntimeImportAccess = runtimeImportA
       token: deriveRuntimeImportToken(marketMakerChild.authSeed, access, marketMakerRuntimeId, 'mm', expiresAt),
     });
   }
-  if (args.custodyEnabled && custodySupport?.daemonAuthSeed && custodySupport.daemonAuthAudience) {
+  if (activeResetOptions.enableCustody && custodySupport?.daemonAuthSeed && custodySupport.daemonAuthAudience) {
     const custodyWsUrl = buildCustodyRpcUrl(args.custodyDaemonPort);
     if (custodyWsUrl) {
       entries.push({
@@ -517,7 +539,6 @@ const scheduleRuntimeImportManifestRefresh = (manifest: RuntimeImportManifest | 
   }, delayMs);
 };
 
-let resetPromise: Promise<void> | null = null;
 const CHILD_GRACEFUL_SHUTDOWN_MS = 20_000;
 const CHILD_RESET_QUIESCE_TIMEOUT_MS = 45_000;
 const CHILD_SHUTDOWN_QUIESCE_TIMEOUT_MS = Math.max(
@@ -955,6 +976,7 @@ const toMarketMakerEntityJurisdictionConfig = (
     entityProviderAddress: jurisdiction.contracts.entityProvider,
     depositoryAddress: jurisdiction.contracts.depository,
     chainId: Number(jurisdiction.chainId || 0),
+    blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction),
   };
 };
 
@@ -1111,10 +1133,9 @@ const spawnHub = async (child: HubChild): Promise<void> => {
   child.recentStderr = [];
   const proc = spawn('bun', cmd, {
     cwd: process.cwd(),
-    stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
     env: sanitizeChildProcessEnv({
-      ...process.env,
-      ...childSecretFdEnv(),
+      ...buildManagedRuntimeChildSecretEnv(process.env),
       XLN_DB_PATH: child.dbPath,
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
       ...buildRpcChildEnv(),
@@ -1192,10 +1213,9 @@ const spawnMarketMaker = async (): Promise<void> => {
   marketMakerChild.recentStderr = [];
   const proc = spawn('bun', cmd, {
     cwd: process.cwd(),
-    stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
     env: sanitizeChildProcessEnv({
-      ...process.env,
-      ...childSecretFdEnv(),
+      ...buildManagedRuntimeChildSecretEnv(process.env),
       XLN_DB_PATH: marketMakerChild.dbPath,
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
       ...buildRpcChildEnv(),
@@ -1206,7 +1226,7 @@ const spawnMarketMaker = async (): Promise<void> => {
       XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(STARTUP_TIMEOUT_MS),
       XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '1',
       XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000',
-      XLN_STORAGE_SYNC_WRITES: process.env['XLN_STORAGE_SYNC_WRITES'] ?? '0',
+      XLN_STORAGE_SYNC_WRITES: process.env['XLN_STORAGE_SYNC_WRITES'] ?? '1',
       XLN_MARKET_MAKER_DISABLE_STORAGE: process.env['XLN_MARKET_MAKER_DISABLE_STORAGE'] ?? '1',
       XLN_DISABLE_RUNTIME_RESTORE: process.env['XLN_MARKET_MAKER_DISABLE_RESTORE'] ?? process.env['XLN_DISABLE_RUNTIME_RESTORE'] ?? '1',
       XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT: process.env['XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT'] ?? '1',
@@ -1676,6 +1696,7 @@ const computeAggregatedHealth = (options: {
       exitCode: child.exitCode,
       restartCount: child.restartCount,
       lastErrorLine: child.recentStderr.at(-1) ?? null,
+      quiescence: child.lastHealth?.quiescence ?? null,
     };
   });
 
@@ -1742,7 +1763,16 @@ const computeAggregatedHealth = (options: {
     .filter((value): value is NonNullable<typeof value> => value !== null);
 
   const marketMakerOnline = marketMakerChild.proc?.exitCode === null && marketMakerChild.exitCode === null && marketMakerChild.exitSignal === null;
-  const marketMakerActive = args.mmEnabled && marketMakerOnline;
+  const custodyOnline = Boolean(
+    custodySupport?.identity.entityId
+    && custodySupport.daemonChild.proc.exitCode === null
+    && custodySupport.custodyChild.proc.exitCode === null,
+  );
+  const capabilityHealth = resolveResetCapabilityHealth(activeResetOptions, {
+    marketMakerOnline,
+    custodyOnline,
+  });
+  const marketMakerActive = capabilityHealth.marketMakerActive;
   const marketMakerBootstrapEvent = readLastMarketMakerBootstrapEvent();
   const eventStartupPhase = String(marketMakerBootstrapEvent?.stage || '').trim() || null;
   const mmStartupPhase = eventStartupPhase || marketMakerChild.lastStartupPhase;
@@ -1750,7 +1780,7 @@ const computeAggregatedHealth = (options: {
     ? String(marketMakerChild.lastInfo?.entityId || marketMakerHealth?.entityId || '').trim() || null
     : null;
   const aggregatedMarketMakerHealth = buildAggregatedMarketMakerHealth({
-    mmEnabled: args.mmEnabled,
+    mmEnabled: capabilityHealth.marketMakerEnabled,
     marketMakerActive,
     marketMakerHealth,
     hubEntityIds: hubIds,
@@ -1767,9 +1797,7 @@ const computeAggregatedHealth = (options: {
     hubsOnline &&
     hubIds.length === HUB_NAMES.length &&
     hubChildren.every((child) => child.lastHealth?.mesh?.ready === true);
-  const custodyOk = args.custodyEnabled
-    ? Boolean(custodySupport?.identity.entityId && custodySupport?.daemonChild.proc.exitCode === null && custodySupport?.custodyChild.proc.exitCode === null)
-    : true;
+  const custodyOk = capabilityHealth.custodyOk;
   const bootstrapReservesOk =
     reserveEntities.length >= HUB_NAMES.length &&
     reserveEntities.every((entity) => entity.ready);
@@ -1803,9 +1831,9 @@ const computeAggregatedHealth = (options: {
   ].filter(height => Number.isFinite(height) && height > 0);
   const mmOfferTotal = mmHubs.reduce((sum, hub) => sum + Number(hub.offers || 0), 0);
   const mmExpectedTotal = mmExpectedOffersPerHub * Math.max(1, mmHubs.length || HUB_NAMES.length);
-  const sameChainOk = !args.mmEnabled ||
+  const sameChainOk = !capabilityHealth.marketMakerEnabled ||
     (mmHubs.length === HUB_NAMES.length && mmHubs.every((hub) => hub.depthReady === true));
-  const crossOk = !args.mmEnabled || !mmCross.applicable || mmCross.ok === true;
+  const crossOk = !capabilityHealth.marketMakerEnabled || !mmCross.applicable || mmCross.ok === true;
   const bootstrapTimeline = buildBootstrapTimeline({
     storageOk: storage.ok,
     resetOk,
@@ -1814,7 +1842,7 @@ const computeAggregatedHealth = (options: {
     totalHubs: hubs.length,
     hubMeshOk,
     directOpenLinks: directLinkMap.size,
-    mmEnabled: args.mmEnabled,
+    mmEnabled: capabilityHealth.marketMakerEnabled,
     marketMakerActive,
     sameChainOk,
     crossOk,
@@ -1824,7 +1852,7 @@ const computeAggregatedHealth = (options: {
     mmExpectedTotal,
     crossRouteCount: Number(mmCross.routeCount || 0),
     expectedCrossRoutes: mmCross.expectedRoutes,
-    custodyEnabled: args.custodyEnabled,
+    custodyEnabled: capabilityHealth.custodyEnabled,
     custodyOk,
     bootstrapReservesOk,
     bootstrapReserveTargetsMet,
@@ -1872,11 +1900,11 @@ const computeAggregatedHealth = (options: {
     marketMaker: aggregatedMarketMakerHealth,
     bootstrapTimeline,
     custody: {
-      enabled: args.custodyEnabled,
+      enabled: capabilityHealth.custodyEnabled,
       ok: custodyOk,
       entityId: custodySupport?.identity.entityId ?? null,
-      daemonPort: args.custodyEnabled ? args.custodyDaemonPort : null,
-      servicePort: args.custodyEnabled ? args.custodyPort : null,
+      daemonPort: capabilityHealth.custodyEnabled ? args.custodyDaemonPort : null,
+      servicePort: capabilityHealth.custodyEnabled ? args.custodyPort : null,
     },
     bootstrapReserves: {
       ok: bootstrapReservesOk,
@@ -1951,7 +1979,7 @@ const recomputeHealthWithMarketMaker = (
 
 const enrichMarketMakerCrossFromHubSnapshots = async (health: AggregatedHealth): Promise<AggregatedHealth> => {
   const cross = health.marketMaker.cross;
-  if (!args.mmEnabled || cross.routes.length === 0) return health;
+  if (!health.marketMaker.enabled || cross.routes.length === 0) return health;
 
   const routes = await Promise.all(cross.routes.map(async (route) => {
     const pairIds = Array.from(new Set((route.pairs ?? []).map(pair => String(pair.pairId || '')).filter(Boolean)));
@@ -2242,13 +2270,20 @@ const persistHubReadySnapshots = async (): Promise<void> => {
   }
 };
 
-const runReset = async (options: { enableMarketMaker: boolean } = { enableMarketMaker: args.mmEnabled }): Promise<void> => {
+const runReset = async (options: OrchestratorResetOptions = configuredResetOptions): Promise<void> => {
+  if (options.enableMarketMaker && !configuredResetOptions.enableMarketMaker) {
+    throw new Error('RESET_MARKET_MAKER_NOT_CONFIGURED');
+  }
+  if (options.enableCustody && !configuredResetOptions.enableCustody) {
+    throw new Error('RESET_CUSTODY_NOT_CONFIGURED');
+  }
   resetState.inProgress = true;
   resetState.lastError = null;
   resetState.startedAt = Date.now();
   resetState.completedAt = null;
   resetState.failedAt = null;
   resetState.resolvedAt = null;
+  activeResetOptions = { enableMarketMaker: false, enableCustody: false };
   clearRuntimeImportManifestFile();
   const preserveState = process.env['XLN_MESH_PRESERVE_STATE_ON_RESET'] === '1';
 
@@ -2274,6 +2309,12 @@ const runReset = async (options: { enableMarketMaker: boolean } = { enableMarket
     mkdirSync(args.dbRoot, { recursive: true });
     if (!preserveState) {
       seedShardJurisdictions(jurisdictionsConfig);
+      const primaryProvision = await provisionPrimaryRpcJurisdictionStack(jurisdictionsConfig);
+      meshLog.info('primary_jurisdiction.ready', {
+        chainId: primaryProvision.chainId,
+        deployed: primaryProvision.deployed,
+        jurisdiction: primaryProvision.key,
+      });
       await deployRpc2JurisdictionStack(jurisdictionsConfig);
       syncCanonicalJurisdictionsFromShard(jurisdictionsConfig);
     }
@@ -2321,7 +2362,7 @@ const runReset = async (options: { enableMarketMaker: boolean } = { enableMarket
     if (marketMakerBootstrapError) throw marketMakerBootstrapError;
 
     let custodyBootstrapError: unknown = null;
-    if (args.custodyEnabled) {
+    if (args.custodyEnabled && options.enableCustody) {
       const custodyStartedAt = startTiming('reset_custody');
       try {
         const primaryJurisdiction = resolvePrimaryHubJurisdictionFallback(jurisdictionsConfig);
@@ -2353,6 +2394,7 @@ const runReset = async (options: { enableMarketMaker: boolean } = { enableMarket
 
     await persistHubReadySnapshots();
 
+    activeResetOptions = resolveActiveResetOptions(configuredResetOptions, options);
     finishTiming('reset_total', resetTotalStartedAt);
     resetState.completedAt = Date.now();
   } catch (error) {
@@ -2366,26 +2408,13 @@ const runReset = async (options: { enableMarketMaker: boolean } = { enableMarket
   await publishRuntimeImportManifest();
 };
 
-const ensureReset = async (): Promise<void> => {
-  if (resetPromise) {
-    await resetPromise;
-    if (!resetState.lastError || resetState.resolvedAt) {
-      return;
-    }
-  }
-  resetPromise = runReset().finally(() => {
-    resetPromise = null;
-  });
-  await resetPromise;
-};
+const resetCoordinator = createResetCoordinator(runReset);
 
-const ensureResetWithOptions = async (options: { enableMarketMaker: boolean }): Promise<void> => {
-  if (resetPromise) await resetPromise;
-  resetPromise = runReset(options).finally(() => {
-    resetPromise = null;
-  });
-  await resetPromise;
-};
+const ensureReset = (): Promise<void> =>
+  resetCoordinator.ensure(configuredResetOptions);
+
+const ensureResetWithOptions = (options: OrchestratorResetOptions): Promise<void> =>
+  resetCoordinator.ensure(options);
 const {
   proxyAnyHubGet,
   proxyAnyHubRequest,
@@ -2433,7 +2462,12 @@ const server = Bun.serve({
     if (assistantResponse) return assistantResponse;
 
     if (request.headers.get('upgrade') === 'websocket' && pathname === '/relay') {
-      const upgraded = serverRef.upgrade(request, { data: { type: 'relay', clientIp: resolveRequestClientIp(request) } });
+      const upgraded = serverRef.upgrade(request, {
+        data: {
+          type: resolveOrchestratorSocketType(url.searchParams.get('protocol')),
+          clientIp: resolveRequestClientIp(request),
+        },
+      });
       if (upgraded) return undefined;
       return new Response('WebSocket upgrade failed', { status: 400 });
     }
@@ -2550,7 +2584,9 @@ const server = Bun.serve({
     if (pathname === '/api/health/full' || (pathname === '/api/health' && url.searchParams.get('full') === '1')) {
       void getStorageHealth().catch(() => {});
       await refreshChildHealthForResponse();
-      const marketMakerHealthOverride = args.mmEnabled ? await fetchMarketMakerFullHealthForResponse() : null;
+      const marketMakerHealthOverride = activeResetOptions.enableMarketMaker
+        ? await fetchMarketMakerFullHealthForResponse()
+        : null;
       const health = await buildAggregatedHealthResponse({
         marketMakerHealthOverride,
         includeMarketSnapshots: url.searchParams.get('marketSnapshots') === '1',
@@ -2693,7 +2729,11 @@ const server = Bun.serve({
         const enableMarketMaker = typeof requestedMarketMaker === 'boolean'
           ? requestedMarketMaker
           : args.mmEnabled;
-        await ensureResetWithOptions({ enableMarketMaker });
+        const requestedCustody = body?.enableCustody ?? body?.requireCustody;
+        const enableCustody = typeof requestedCustody === 'boolean'
+          ? requestedCustody
+          : args.custodyEnabled;
+        await ensureResetWithOptions({ enableMarketMaker, enableCustody });
         await pollAllHubHealth();
         if (enableMarketMaker) await pollMarketMakerHealth();
         return new Response(safeStringify(await buildAggregatedHealthResponse()), { headers });
@@ -2800,46 +2840,60 @@ const server = Bun.serve({
   },
   websocket: {
     open(ws) {
-      relayHelloChallenges.issue(ws as OrchestratorWebSocket);
+      const relayWs = ws as OrchestratorWebSocket;
+      if (relayWs.data.type === 'relay') relayHelloChallenges.issue(relayWs);
       pushDebugEvent(relayStore, {
         event: 'ws_open',
-        details: { wsType: 'relay' },
+        details: { wsType: relayWs.data.type },
       });
     },
     message(ws, raw) {
       try {
-        let msg: RuntimeWsMessage | Record<string, unknown>;
+        let peerMessage: RuntimeWsMessage | null = null;
+        let marketMessage: MarketWireRequest | null = null;
         try {
-          msg = deserializeWsMessage(raw as string | Buffer | ArrayBuffer);
+          peerMessage = deserializeWsMessage(raw as string | Buffer | ArrayBuffer);
         } catch (binaryError) {
-          const candidate = JSON.parse(raw.toString()) as Record<string, unknown>;
-          if (!isMarketMessageType(candidate['type'])) throw binaryError;
-          msg = candidate;
+          try {
+            marketMessage = decodeMarketWireRequest(raw.toString());
+          } catch {
+            throw binaryError;
+          }
         }
-        if (isMarketMessageType(msg?.type)) {
-          Promise.resolve(marketSubscriptionStack.handleMessage(ws as OrchestratorWebSocket, msg as Record<string, unknown>)).catch(error => {
+        if (marketMessage) {
+          Promise.resolve(marketSubscriptionStack.handleMessage(ws as OrchestratorWebSocket, marketMessage)).catch(error => {
             const reason = serializeError(error);
             pushDebugEvent(relayStore, {
               event: 'error',
               reason: 'MARKET_HANDLER_EXCEPTION',
-              details: { error: reason, msgType: msg?.type },
+              details: { error: reason, msgType: marketMessage?.type },
             });
             try {
-              ws.send(safeStringify({ type: 'error', error: reason }));
-            } catch {}
+              ws.send(encodeMarketWireMessage({ type: 'error', error: reason }));
+            } catch (sendError) {
+              meshLog.warn('relay.market_error_send_failed', { error: serializeError(sendError) });
+            }
           });
           return;
         }
-        Promise.resolve(relayRoute(routerConfig, ws as OrchestratorWebSocket, msg as RuntimeWsMessage)).catch(error => {
+        if (!peerMessage) throw new Error('RELAY_MESSAGE_DECODE_INVARIANT');
+        Promise.resolve(relayRoute(routerConfig, ws as OrchestratorWebSocket, peerMessage)).catch(error => {
           const reason = serializeError(error);
           pushDebugEvent(relayStore, {
             event: 'error',
             reason: 'RELAY_HANDLER_EXCEPTION',
-            details: { error: reason, msgType: msg?.type, from: msg?.from, to: msg?.to },
+            details: {
+              error: reason,
+              msgType: peerMessage?.type,
+              from: peerMessage?.from,
+              to: peerMessage?.to,
+            },
           });
           try {
             ws.send(serializeWsMessage({ type: 'error', error: reason }));
-          } catch {}
+          } catch (sendError) {
+            meshLog.warn('relay.error_send_failed', { error: serializeError(sendError) });
+          }
         });
       } catch (error) {
         pushDebugEvent(relayStore, {
@@ -2849,7 +2903,9 @@ const server = Bun.serve({
         });
         try {
           ws.send(serializeWsMessage({ type: 'error', error: 'Invalid relay message' }));
-        } catch {}
+        } catch (sendError) {
+          meshLog.warn('relay.invalid_message_send_failed', { error: serializeError(sendError) });
+        }
       }
     },
     close(ws) {

@@ -10,6 +10,8 @@ export type OrchestratorResetBody = {
   confirm?: unknown;
   requireMarketMaker?: unknown;
   enableMarketMaker?: unknown;
+  requireCustody?: unknown;
+  enableCustody?: unknown;
 };
 
 export class OrchestratorResetRejectedError extends Error {

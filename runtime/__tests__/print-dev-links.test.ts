@@ -106,8 +106,10 @@ test('bun run dev does not print token-bearing runtime import URLs by default', 
   const runtimeWatcher = readFileSync(join(repoRoot, 'scripts/dev/watch-runtime-build.sh'), 'utf8');
 
   expect(runDev).not.toContain('XLN_RUNTIME_IMPORT_LOG_URL=1');
-  expect(runDev).toContain('./scripts/dev/run-dev-child.sh mesh');
-  expect(runDev).toContain('./scripts/dev/run-dev-child.sh vite-http');
+  expect(runDev).toContain('DEV_CHILD_COMMAND="\\"$REPO_ROOT/scripts/dev/run-dev-child.sh\\""');
+  expect(runDev).toContain('"${DEV_CHILD_COMMAND} stack"');
+  expect(devChild).toContain('"${DEV_CHILD_COMMAND} mesh"');
+  expect(devChild).toContain('"${DEV_CHILD_COMMAND} vite-http"');
   expect(runDev).not.toContain('USE_ANVIL=true RUNTIME_VERBOSE_LOGS=');
   expect(runDev).not.toContain('exec concurrently');
   expect(runDev).toContain('sawSigtermFanout++');
@@ -118,7 +120,7 @@ test('bun run dev does not print token-bearing runtime import URLs by default', 
   expect(devChild).toContain('set -euo pipefail');
   expect(devChild).toContain('VITE_DEV_SERVER_START port=${port}');
   expect(devChild).toContain('XLN_AUTO_PROVISION_EXTERNAL_FAUCET="${XLN_AUTO_PROVISION_EXTERNAL_FAUCET:-1}"');
-  expect(runDev).toContain('./scripts/dev/watch-runtime-build.sh');
+  expect(devChild).toContain('./scripts/dev/watch-runtime-build.sh');
   expect(runDev).not.toContain('bun build runtime/runtime.ts');
   expect(runDev).toContain('MESH_LOG_LEVEL="${XLN_LOG_LEVEL:-warn}"');
   expect(devChild).toContain('XLN_LOG_LEVEL="$MESH_LOG_LEVEL"');

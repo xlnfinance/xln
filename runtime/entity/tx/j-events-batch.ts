@@ -1,4 +1,4 @@
-import type { EntityState, JurisdictionEvent } from '../../types';
+import type { EntityInput, EntityState, JurisdictionEvent } from '../../types';
 import {
   batchOpBreakdown,
   batchOpCount,
@@ -14,6 +14,14 @@ import { findAccountEntryByCounterparty } from './j-events-account-lookup';
 import { createStructuredLogger } from '../../infra/logger';
 
 const jEventBatchLog = createStructuredLogger('j.event.batch');
+
+const normalizeBatchHash = (value: unknown, label: string): string => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(normalized)) {
+    throw new Error(`J_BATCH_EVENT_${label}_INVALID:${normalized || 'missing'}`);
+  }
+  return normalized;
+};
 
 const syncEntityNonce = (state: EntityState, nonce: number): void => {
   if (!state.jBatchState) return;
@@ -54,10 +62,13 @@ export async function applyHankoBatchProcessedEvent(opts: {
   transactionHash: string;
   blockNumber: number;
   dirtyAccounts: Set<string>;
+  outputs?: EntityInput[];
 }): Promise<void> {
   const { newState, event, transactionHash, blockNumber, dirtyAccounts } = opts;
-  const { entityId: batchEntityId, nonce, success } = event.data as {
+  const outputs = opts.outputs ?? [];
+  const { entityId: batchEntityId, batchHash, nonce, success } = event.data as {
     entityId: string;
+    batchHash: string;
     nonce: number;
     success: boolean;
   };
@@ -66,18 +77,63 @@ export async function applyHankoBatchProcessedEvent(opts: {
     return;
   }
 
+  const eventBatchHash = normalizeBatchHash(batchHash, 'BATCH_HASH');
+  if (!Number.isSafeInteger(nonce) || nonce < 1) {
+    throw new Error(`J_BATCH_EVENT_NONCE_INVALID:${String(nonce)}`);
+  }
+
+  const sentBatch = newState.jBatchState?.sentBatch;
+  const matchesPending = !!sentBatch &&
+    sentBatch.entityNonce === nonce &&
+    normalizeBatchHash(sentBatch.batchHash, 'PENDING_BATCH_HASH') === eventBatchHash;
+
+  // A batch can be aborted locally and rebuilt with the same not-yet-observed
+  // nonce. The old transaction may still land afterwards. Nonce-only matching
+  // would then confirm/requeue the replacement batch even though validators
+  // never authorized that payload. The on-chain signed batch hash is the exact
+  // identity. A finalized event at or beyond the pending nonce also proves the
+  // replacement can never execute: Depository nonces are strictly sequential.
+  // Preserve that payload for forensic/operator review, but quarantine it so
+  // validator-local retry machinery cannot keep submitting an impossible tx.
+  if (!matchesPending) {
+    if (newState.jBatchState) syncEntityNonce(newState, nonce);
+    if (sentBatch && nonce >= sentBatch.entityNonce) {
+      const failureMessage =
+        `J_BATCH_NONCE_CONSUMED_BY_DIFFERENT_HASH:${eventBatchHash}:` +
+        `pending=${normalizeBatchHash(sentBatch.batchHash, 'PENDING_BATCH_HASH')}:` +
+        `pendingNonce=${sentBatch.entityNonce}:finalizedNonce=${nonce}`;
+      sentBatch.terminalFailure = {
+        message: failureMessage,
+        failedAt: newState.timestamp,
+      };
+      if (newState.jBatchState) newState.jBatchState.status = 'failed';
+      jEventBatchLog.error('pending_batch_nonce_consumed', {
+        nonce,
+        batchHash: eventBatchHash,
+        pendingNonce: sentBatch.entityNonce,
+        pendingBatchHash: sentBatch.batchHash,
+      });
+      addMessage(
+        newState,
+        `❌ Pending jBatch nonce ${sentBatch.entityNonce} quarantined: ` +
+          `chain finalized different batch ${eventBatchHash} at nonce ${nonce}`,
+      );
+      return;
+    }
+    jEventBatchLog.warn('non_pending_batch_observed', {
+      nonce,
+      batchHash: eventBatchHash,
+      pendingNonce: sentBatch?.entityNonce,
+      pendingBatchHash: sentBatch?.batchHash,
+      success,
+    });
+    return;
+  }
+
   if (success) {
     if (newState.jBatchState) {
-      const sentBatch = newState.jBatchState.sentBatch;
       const opCount = sentBatch ? batchOpCount(sentBatch.batch) : 0;
       const opBreakdown = sentBatch ? batchOpBreakdown(sentBatch.batch) : undefined;
-      const wasPending = !!sentBatch;
-
-      if (!wasPending && opCount === 0) {
-        syncEntityNonce(newState, nonce);
-        jEventBatchLog.debug('duplicate_ignored', { nonce, opCount, pending: false });
-        return;
-      }
 
       appendSelfBatchHistory({
         state: newState,
@@ -93,13 +149,21 @@ export async function applyHankoBatchProcessedEvent(opts: {
       delete newState.jBatchState.sentBatch;
       newState.jBatchState.status = isBatchEmpty(newState.jBatchState.batch) ? 'empty' : 'accumulating';
       syncEntityNonce(newState, nonce);
+      if (newState.jBatchState.autoBroadcastDraft && !isBatchEmpty(newState.jBatchState.batch)) {
+        const signerId = newState.config.validators[0];
+        if (!signerId) throw new Error('J_BATCH_AUTO_BROADCAST_SIGNER_MISSING');
+        outputs.push({
+          entityId: newState.entityId,
+          signerId,
+          entityTxs: [{ type: 'j_broadcast', data: {} }],
+        });
+      }
     }
     addMessage(newState, `✅ jBatch finalized (nonce ${nonce}) | Block ${blockNumber}`);
     return;
   }
 
   if (newState.jBatchState) {
-    const sentBatch = newState.jBatchState.sentBatch;
     const opCount = sentBatch ? batchOpCount(sentBatch.batch) : 0;
     const opBreakdown = sentBatch ? batchOpBreakdown(sentBatch.batch) : undefined;
     newState.jBatchState.status = 'failed';

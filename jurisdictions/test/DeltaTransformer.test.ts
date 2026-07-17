@@ -2,7 +2,7 @@ import { loadFixture, time } from "@nomicfoundation/hardhat-toolbox/network-help
 import { expect } from "chai";
 import hre from "hardhat";
 import type { DeltaTransformer } from "../typechain-types/index.js";
-import { buildAccountProofBody, setDeltaTransformerAddress } from "../../runtime/protocol/dispute/proof-builder.ts";
+import { buildAccountProofBody } from "../../runtime/protocol/dispute/proof-builder.ts";
 import { buildPositionalSwapFillRatioBuckets } from "../../runtime/protocol/transformer-ordering.ts";
 import { asOfferId } from "../../runtime/orderbook/swap-keys.ts";
 import type { AccountMachine, SwapOffer } from "../../runtime/types.ts";
@@ -164,6 +164,28 @@ describe("DeltaTransformer", function () {
     return { transformer: transformer as DeltaTransformer };
   }
 
+  async function applyCanonical(
+    transformer: DeltaTransformer,
+    deltas: Array<bigint | number>,
+    encodedBatch: string,
+    leftArguments: string,
+    rightArguments: string,
+    leftArgumentsTimestamp?: number,
+    rightArgumentsTimestamp?: number,
+    tokenIds: Array<bigint | number> = deltas.map((_, index) => index + 1),
+  ) {
+    const currentTimestamp = await time.latest();
+    return transformer.applyBatch.staticCall(
+      deltas,
+      tokenIds,
+      encodedBatch,
+      leftArguments,
+      rightArguments,
+      leftArgumentsTimestamp ?? currentTimestamp,
+      rightArgumentsTimestamp ?? currentTimestamp,
+    );
+  }
+
   it("decodes swap fill ratios from uint16 calldata arguments", async function () {
     const { transformer } = await loadFixture(deployFixture);
 
@@ -183,7 +205,7 @@ describe("DeltaTransformer", function () {
     const encodedBatch = await transformer.encodeBatch(batch);
     const rightArguments = encodeTransformerArguments([32767]);
 
-    const result = await transformer.applyBatch.staticCall([0, 0], encodedBatch, "0x", rightArguments);
+    const result = await applyCanonical(transformer, [0, 0], encodedBatch, "0x", rightArguments);
 
     expect(result[0]).to.equal(499);
     expect(result[1]).to.equal(-999);
@@ -207,10 +229,20 @@ describe("DeltaTransformer", function () {
     };
     const encodedBatch = await transformer.encodeBatch(batch);
 
-    const result = await transformer.applyBatch.staticCall([0, 0], encodedBatch, "0x", "0x1234");
+    const result = await applyCanonical(transformer, [0, 0], encodedBatch, "0x", "0x1234");
 
     expect(result[0]).to.equal(0);
     expect(result[1]).to.equal(0);
+  });
+
+  it("requires token IDs to stay aligned one-to-one with deltas", async function () {
+    const { transformer } = await loadFixture(deployFixture);
+    const encodedBatch = await transformer.encodeBatch({ payment: [], swap: [], pull: [] });
+    const timestamp = await time.latest();
+
+    await expect(
+      transformer.applyBatch.staticCall([0n, 0n], [1n], encodedBatch, "0x", "0x", timestamp, timestamp),
+    ).to.be.revertedWithCustomError(transformer, "ContextLengthMismatch");
   });
 
   it("reverts on out-of-bounds swap delta indices", async function () {
@@ -233,7 +265,7 @@ describe("DeltaTransformer", function () {
     const rightArguments = encodeTransformerArguments([65535]);
 
     await expect(
-      transformer.applyBatch.staticCall([0], encodedBatch, "0x", rightArguments),
+      applyCanonical(transformer, [0], encodedBatch, "0x", rightArguments),
     ).to.be.reverted;
   });
 
@@ -270,12 +302,13 @@ describe("DeltaTransformer", function () {
     const leftArguments = encodeTransformerArguments([], [], [encodePartialPullBinary(partialRatio, partialProof.reveals)]);
     const rightArguments = encodeTransformerArguments([], [], [fullProof.fullSecret]);
 
-    const result = await transformer.applyBatch.staticCall([0, 0], encodedBatch, leftArguments, rightArguments);
+    const result = await applyCanonical(transformer, [0, 0], encodedBatch, leftArguments, rightArguments);
 
     expect(result[0]).to.equal(BigInt(partialRatio));
     expect(result[1]).to.equal(-1234n);
 
-    const atDeadline = await transformer.applyBatchWithArgumentTimestamps.staticCall(
+    const atDeadline = await applyCanonical(
+      transformer,
       [0, 0],
       encodedBatch,
       leftArguments,
@@ -286,7 +319,8 @@ describe("DeltaTransformer", function () {
     expect(atDeadline[0]).to.equal(BigInt(partialRatio));
     expect(atDeadline[1]).to.equal(-1234n);
 
-    const afterDeadline = await transformer.applyBatchWithArgumentTimestamps.staticCall(
+    const afterDeadline = await applyCanonical(
+      transformer,
       [0, 0],
       encodedBatch,
       leftArguments,
@@ -310,7 +344,7 @@ describe("DeltaTransformer", function () {
       }],
     };
     const encodedCumulativeBatch = await transformer.encodeBatch(cumulativeBatch);
-    const cumulative = await transformer.applyBatch.staticCall([0], encodedCumulativeBatch, leftArguments, "0x");
+    const cumulative = await applyCanonical(transformer, [0], encodedCumulativeBatch, leftArguments, "0x");
     expect(cumulative[0]).to.equal(BigInt(partialRatio - previouslyClaimed));
   });
 
@@ -333,7 +367,8 @@ describe("DeltaTransformer", function () {
     const encodedBatch = await transformer.encodeBatch(batch);
     const leftArguments = encodeTransformerArguments([], [secretValue]);
 
-    const beforeDeadline = await transformer.applyBatchWithArgumentTimestamps.staticCall(
+    const beforeDeadline = await applyCanonical(
+      transformer,
       [0],
       encodedBatch,
       leftArguments,
@@ -343,7 +378,8 @@ describe("DeltaTransformer", function () {
     );
     expect(beforeDeadline[0]).to.equal(7n);
 
-    const afterDeadline = await transformer.applyBatchWithArgumentTimestamps.staticCall(
+    const afterDeadline = await applyCanonical(
+      transformer,
       [0],
       encodedBatch,
       leftArguments,
@@ -358,7 +394,8 @@ describe("DeltaTransformer", function () {
     expect(revealedAt > 0n).to.equal(true);
     expect(revealedAt <= BigInt(deadline)).to.equal(true);
 
-    const onChainReveal = await transformer.applyBatchWithArgumentTimestamps.staticCall(
+    const onChainReveal = await applyCanonical(
+      transformer,
       [0],
       encodedBatch,
       "0x",
@@ -369,7 +406,7 @@ describe("DeltaTransformer", function () {
     expect(onChainReveal[0]).to.equal(7n);
   });
 
-  it("stores the first secret reveal block and rejects later overwrites", async function () {
+  it("stores the first secret reveal block and treats exact retries as no-ops", async function () {
     const { transformer } = await loadFixture(deployFixture);
 
     const secret = ethers.encodeBytes32String("secret");
@@ -381,7 +418,7 @@ describe("DeltaTransformer", function () {
     expect(firstRevealBlock > 0n).to.equal(true);
     expect((await transformer.hashToTimestamp(hash)) > 0n).to.equal(true);
     expect(await transformer.hashRevealed(hash)).to.equal(true);
-    await expect(transformer.revealSecret(secret)).to.be.revertedWithCustomError(transformer, "AlreadyRevealed");
+    await expect(transformer.revealSecret(secret)).not.to.be.reverted;
     expect(await transformer.hashToBlock(hash)).to.equal(firstRevealBlock);
   });
 
@@ -444,7 +481,7 @@ describe("DeltaTransformer", function () {
     const leftArguments = encodeTransformerArguments(leftFillRatios);
     const rightArguments = encodeTransformerArguments(rightFillRatios);
 
-    const result = await transformer.applyBatch.staticCall([0, 0], encodedBatch, leftArguments, rightArguments);
+    const result = await applyCanonical(transformer, [0, 0], encodedBatch, leftArguments, rightArguments);
 
     let expected0 = 0n;
     let expected1 = 0n;
@@ -467,7 +504,7 @@ describe("DeltaTransformer", function () {
 
   it("keeps proof body swaps, positional fill ratios, wrapped dispute args, and contract deltas aligned end-to-end", async function () {
     const { transformer } = await loadFixture(deployFixture);
-    setDeltaTransformerAddress(await transformer.getAddress());
+    const transformerAddress = await transformer.getAddress();
 
     const accountMachine = makeProofAccountMachine([
       ["b2", makeSwapOffer("b2", false, 2, 400n, 1, 800n)],
@@ -483,7 +520,7 @@ describe("DeltaTransformer", function () {
       [asOfferId("b2"), 8192],
     ]);
 
-    const proofBody = buildAccountProofBody(accountMachine);
+    const proofBody = buildAccountProofBody(accountMachine, transformerAddress);
     const proofTransformer = proofBody.proofBodyStruct.transformers[0];
     const runtimeTransformer = proofBody.runtimeProofBody.transformers[0];
     if (!proofTransformer || !runtimeTransformer) {
@@ -508,13 +545,45 @@ describe("DeltaTransformer", function () {
       rightFillRatios,
     );
 
-    const result = await transformer.applyBatch.staticCall(
+    const result = await applyCanonical(
+      transformer,
       [...initialDeltas],
       proofTransformer.encodedBatch,
       leftArguments,
       rightArguments,
+      undefined,
+      undefined,
+      [...proofBody.runtimeProofBody.tokenIds],
     );
 
     expect([...result]).to.deep.equal(expected);
+  });
+
+  it("fits the runtime maximum swap book inside the canonical transformer gas budget", async function () {
+    const { transformer } = await loadFixture(deployFixture);
+    const swap = {
+      ownerIsLeft: true,
+      addDeltaIndex: 0,
+      addAmount: 1n,
+      subDeltaIndex: 1,
+      subAmount: 1n,
+    };
+    const encodedBatch = await transformer.encodeBatch({
+      payment: [],
+      swap: Array.from({ length: 1_000 }, () => swap),
+      pull: [],
+    });
+    const rightArguments = encodeTransformerArguments(Array.from({ length: 1_000 }, () => 65_535));
+    const timestamp = await time.latest();
+    const gas = await transformer.applyBatch.estimateGas(
+      [0n, 0n],
+      [1n, 2n],
+      encodedBatch,
+      "0x",
+      rightArguments,
+      timestamp,
+      timestamp,
+    );
+    expect(gas).to.be.lessThanOrEqual(4_000_000n);
   });
 });

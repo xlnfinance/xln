@@ -1,23 +1,23 @@
 import { ethers } from 'ethers';
 import { deriveSignerAddressSync, deriveSignerKeySync } from '../account/crypto';
+import { getTokenInfo } from '../account/utils';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
 import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
 import type { RuntimeIngressReceipt } from '../server/ingress-receipts';
 import type { ConsensusConfig, RoutedEntityInput, RuntimeInput } from '../types';
+import { scaleWholeTokenAmount } from '../types';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const WAIT_POLL_MS = 100;
 const DEFAULT_ROUTING_FEE_PPM = 1;
 const DEFAULT_ROUTING_BASE_FEE = 0n;
 const DEFAULT_SWAP_TAKER_FEE_BPS = 1;
-const DEFAULT_REBALANCE_BASE_FEE = 10n ** 17n;
 const DEFAULT_REBALANCE_LIQUIDITY_FEE_BPS = 1n;
-const DEFAULT_REBALANCE_GAS_FEE = 0n;
 const DEFAULT_REBALANCE_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_ORDERBOOK_MIN_TRADE_SIZE = 10n * 10n ** 18n;
 const DEFAULT_ORDERBOOK_SUPPORTED_PAIRS = ['1/2', '1/3', '2/3'] as const;
-const DEFAULT_CUSTODY_CREDIT_AMOUNT = 100_000_000_000n * 10n ** 18n;
+const DEFAULT_CUSTODY_CREDIT_WHOLE = 100_000_000_000n;
 const DEFAULT_CUSTODY_CREDIT_TOKEN_IDS = [1, 2, 3] as const;
 
 export type ControlEntitySummary = {
@@ -355,9 +355,7 @@ const buildEnableRoutingEntityInput = (
         routingFeePPM: config.routingFeePPM ?? DEFAULT_ROUTING_FEE_PPM,
         baseFee: config.baseFee ?? DEFAULT_ROUTING_BASE_FEE,
         swapTakerFeeBps: config.swapTakerFeeBps ?? DEFAULT_SWAP_TAKER_FEE_BPS,
-        rebalanceBaseFee: DEFAULT_REBALANCE_BASE_FEE,
         rebalanceLiquidityFeeBps: DEFAULT_REBALANCE_LIQUIDITY_FEE_BPS,
-        rebalanceGasFee: DEFAULT_REBALANCE_GAS_FEE,
         rebalanceTimeoutMs: DEFAULT_REBALANCE_TIMEOUT_MS,
       },
     },
@@ -383,7 +381,6 @@ const buildCustodyConnectivityInput = (
 ): RuntimeInput | null => {
   const hubEntityIds = (config.hubEntityIds || []).map(id => id.trim().toLowerCase()).filter(Boolean);
   if (hubEntityIds.length === 0) return null;
-  const creditAmount = config.creditAmount ?? DEFAULT_CUSTODY_CREDIT_AMOUNT;
   const creditTokenIds = (config.creditTokenIds && config.creditTokenIds.length > 0
     ? config.creditTokenIds
     : [...DEFAULT_CUSTODY_CREDIT_TOKEN_IDS]
@@ -399,6 +396,10 @@ const buildCustodyConnectivityInput = (
   }
   for (const hubEntityId of hubEntityIds) {
     for (const tokenId of creditTokenIds) {
+      const creditAmount = config.creditAmount ?? scaleWholeTokenAmount(
+        DEFAULT_CUSTODY_CREDIT_WHOLE,
+        getTokenInfo(tokenId).decimals,
+      );
       entityTxs.push({
         type: 'extendCredit',
         data: {

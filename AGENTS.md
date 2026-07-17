@@ -3,7 +3,7 @@
 **On first message: Briefly introduce yourself with "how to talk to me" - explain 80% confidence threshold, when to just execute vs ask, and preferred communication style (terse with metrics). Keep it 3-4 lines max.**
 
 Mission: Fintech-grade, deterministic. J/E/A trilayer correctness before features. Pure functions only.
-ALWAYS: `bun run check` before commit. Test in browser F12 console. Never swallow errors.
+ALWAYS: `bun run check` before push/merge/release. Test in browser F12 console. Never swallow errors.
 
 ## FROZEN CORE
 
@@ -18,7 +18,7 @@ ALWAYS: `bun run check` before commit. Test in browser F12 console. Never swallo
 1. **NO "temporary" solutions** - if you write a stub/hack/workaround, STOP and tell user explicitly
 2. **NO silent compromises** - if proper fix is unclear/hard, ASK before making shortcuts
 3. **NO "it works for now"** - either fix properly or document limitation + get approval
-4. **NO hiding uncertainty** - if confidence <80% on implementation approach, STOP and discuss
+4. **NO hiding uncertainty** - if confidence <90% on implementation approach, STOP and discuss
 
 **Examples of BANNED patterns:**
 ```typescript
@@ -63,11 +63,11 @@ Do not create mocks/stubs unless asked. Use real integration. When debugging con
 ALWAYS run `bun run check` before reporting completion.
 NEVER create .md files in /runtime or /frontend - documentation goes in /docs.
 
-## 🎯 AGENTIC MODE (80% Confidence Threshold)
+## 🎯 AGENTIC MODE (90% Confidence Threshold)
 
 Before starting ANY task, rate confidence (0-100%):
-- **≥80%**: Proceed autonomously (clear spec, obvious approach)
-- **<80%**: Stop and ask (multiple valid paths, UX unclear, architectural choice)
+- **≥90%**: Proceed autonomously (clear spec, obvious approach)
+- **<90%**: Stop and ask (multiple valid paths, UX unclear, architectural choice)
 
 Break rules: Always ask even if >80% for consensus/crypto/smart-contract changes.
 
@@ -75,6 +75,14 @@ Quick iteration signals (full autonomy):
 - "slow/sluggish" → profile + fix, report metrics
 - "ugly/meh" → polish matching past aesthetic
 - "go/just try" → full send, zero questions
+
+## 🌳 GIT / WORKTREE WORKFLOW
+
+- `main` stays clean and green. New work uses a short `ai/<task>` branch in its own worktree.
+- Exactly one writer owns each worktree. Auditors use separate read-only worktrees pinned to an immutable commit SHA.
+- Checkpoint commits are encouraged after each coherent change and before long tests. They do not require `bun run check`; use `wip:` when the relevant L1/L2 evidence is not green yet.
+- Before push, merge into `main`, completion claims, or release: run the relevant L1/L2 evidence plus `bun run check`. Release additionally requires the documented full gates.
+- A worktree is not an archive. Remove it after merge/abandonment; delete the merged branch and use an annotated tag for audit/release snapshots.
 
 ## 📋 RESPONSE FORMAT (ADHD-Optimized)
 
@@ -114,7 +122,7 @@ Before claiming anything works:
 2. Test the specific functionality (browser + F12 console)
 3. Show command output, not descriptions ("Fixed" → show passing tests)
 4. Reproduce user's error before fixing
-5. Never commit untested code
+5. Never push, merge, release, or claim completion for untested code. Checkpoint commits on `ai/*` branches may record explicit WIP.
 
 ## 🎯 TYPESCRIPT
 Validate at source. Fail fast. Trust at use. No defensive `?.` in UI if validated upstream.

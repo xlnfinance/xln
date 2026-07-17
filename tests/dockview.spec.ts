@@ -51,7 +51,7 @@ const selectLastNetworkFrame = async (page: import('@playwright/test').Page): Pr
 };
 
 test.describe('dockview', () => {
-  test('Dock workspace, NetworkMachine H1-H3 merge, tools, graph gestures and user return path', async ({ page }, testInfo) => {
+  test('Dock workspace, NetworkMachine H1-H3 merge, tools, graph gestures and user return path', { tag: '@functional' }, async ({ page }, testInfo) => {
     test.setTimeout(360_000);
     await page.setViewportSize({ width: 1600, height: 900 });
 

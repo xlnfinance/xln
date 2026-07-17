@@ -3,6 +3,8 @@ import type {
   RuntimeAdapterReadQuery,
   RuntimeActivityFilters,
 } from '@xln/runtime/xln-api';
+import { formatTokenAmount } from './entity-asset-values';
+import { requireTokenDecimals } from './token-metadata';
 
 export type ActivityHistoryQueryInput = {
   entityId: string;
@@ -21,6 +23,22 @@ export const FILTERED_ACTIVITY_SCAN_LIMIT = 1000;
 export const TRANSIENT_ACTIVITY_READ_ERROR_PATTERN = /Database is not open|Iterator is not open|cannot call next\(\) after close/i;
 
 export const normalizeActivityEntityId = (value: string): string => value.trim().toLowerCase();
+
+export const formatActivityTokenAmount = (
+  value: string | undefined,
+  tokenId: number | undefined,
+  getTokenInfo: (tokenId: number) => { decimals?: number },
+  precision: unknown,
+): string => {
+  if (!value) return '';
+  const amount = BigInt(value);
+  if (tokenId === undefined) return amount.toString();
+  if (!Number.isSafeInteger(tokenId) || tokenId <= 0) {
+    throw new Error(`ACTIVITY_TOKEN_ID_INVALID:${String(tokenId)}`);
+  }
+  const decimals = requireTokenDecimals(getTokenInfo(tokenId).decimals, `activity-token:${tokenId}`);
+  return formatTokenAmount(amount, decimals, precision);
+};
 
 export const isTransientActivityReadError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : String(error || '');

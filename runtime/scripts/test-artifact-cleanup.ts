@@ -2,9 +2,12 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
+  readdirSync,
+  renameSync,
   rmSync,
+  unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -18,11 +21,23 @@ export const DEFAULT_TEST_WORKSPACE_MAX_BYTES = 50 * 1024 * 1024 * 1024;
 export const FOUNDRY_HOME_ENV = 'XLN_FOUNDRY_HOME';
 export const FOUNDRY_MAX_BYTES_ENV = 'XLN_FOUNDRY_MAX_BYTES';
 export const DEFAULT_FOUNDRY_MAX_BYTES = 50 * 1024 * 1024 * 1024;
+export const TEST_ARTIFACT_RUN_LOCK_PATH = '.logs/.test-artifact-run-lock.json';
+export const TEST_ARTIFACT_RUN_TOKEN_ENV = 'XLN_TEST_ARTIFACT_RUN_TOKEN';
+
+type TestArtifactRunLock = {
+  pid: number;
+  reason: string;
+  startedAt: string;
+  token: string;
+};
+
+const ownedRunLocks = new Map<string, string>();
+let runLockSequence = 0;
+let exitCleanupRegistered = false;
 
 const E2E_TEST_ARTIFACT_DIRS = [
   '.logs/e2e-parallel',
   'frontend/.svelte-kit-e2e',
-  'frontend/build',
   'frontend/test-results',
   'frontend/playwright-report',
   'tests/test-results',
@@ -35,6 +50,7 @@ const E2E_TEST_ARTIFACT_DIRS = [
 
 const GENERATED_TEST_ARTIFACT_DIRS = [
   ...E2E_TEST_ARTIFACT_DIRS,
+  'frontend/build',
   '.logs/scenarios-parallel',
   '.logs/bootstrap-soundcheck',
   '.logs/bootstrap-benchmark',
@@ -136,9 +152,191 @@ const pidIsAlive = (pid: number): boolean => {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ESRCH') return false;
+    if (code === 'EPERM') return true;
+    throw error;
   }
+};
+
+const readTestArtifactRunLock = (path: string): TestArtifactRunLock => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'));
+  } catch (error) {
+    throw new Error(
+      `TEST_ARTIFACT_RUN_LOCK_MALFORMED:path=${path}:` +
+      `${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const body = parsed as Partial<TestArtifactRunLock>;
+  const pid = Number(body.pid);
+  const reason = String(body.reason || '').trim();
+  const startedAt = String(body.startedAt || '').trim();
+  const token = String(body.token || '').trim();
+  if (!Number.isSafeInteger(pid) || pid <= 0 || !reason || !startedAt || !token) {
+    throw new Error(`TEST_ARTIFACT_RUN_LOCK_MALFORMED:path=${path}:shape`);
+  }
+  return { pid, reason, startedAt, token };
+};
+
+const writeTestArtifactRunLockAtomically = (path: string, body: TestArtifactRunLock): void => {
+  const tempPath = `${path}.${process.pid}-${body.pid}-${++runLockSequence}.tmp`;
+  writeFileSync(tempPath, `${JSON.stringify(body)}\n`, { encoding: 'utf8', flag: 'wx' });
+  try {
+    renameSync(tempPath, path);
+  } finally {
+    if (existsSync(tempPath)) unlinkSync(tempPath);
+  }
+};
+
+const registerOwnedRunLock = (path: string, token: string): void => {
+  ownedRunLocks.set(path, token);
+  if (exitCleanupRegistered) return;
+  exitCleanupRegistered = true;
+  process.once('exit', removeOwnedTestArtifactRunLocks);
+};
+
+const removeOwnedTestArtifactRunLocks = (): void => {
+  for (const [path, token] of ownedRunLocks) {
+    if (!existsSync(path)) continue;
+    try {
+      const observed = readTestArtifactRunLock(path);
+      if (
+        observed.token === token &&
+        (observed.pid === process.pid || !pidIsAlive(observed.pid))
+      ) {
+        unlinkSync(path);
+      }
+    } catch (error) {
+      // Exit cleanup must not replace the original process result. A malformed
+      // or foreign lock remains as forensic evidence for the next fail-loud run.
+      process.stderr.write(
+        `TEST_ARTIFACT_RUN_LOCK_RELEASE_FAILED:path=${path}:` +
+        `${error instanceof Error ? error.message : String(error)}\n`,
+      );
+    }
+  }
+  ownedRunLocks.clear();
+};
+
+const useOwnedRunLock = (
+  path: string,
+  token: string,
+  env: Record<string, string | undefined>,
+): TestArtifactRunLock => {
+  const observed = readTestArtifactRunLock(path);
+  if (observed.token !== token) {
+    throw new Error(`TEST_ARTIFACT_RUN_LOCK_OWNERSHIP_LOST:path=${path}`);
+  }
+  env[TEST_ARTIFACT_RUN_TOKEN_ENV] = token;
+  return observed;
+};
+
+const useInheritedRunLock = (
+  path: string,
+  token: string,
+  env: Record<string, string | undefined>,
+): TestArtifactRunLock => {
+  if (!existsSync(path)) throw new Error(`TEST_ARTIFACT_RUN_LEASE_MISSING:path=${path}`);
+  let observed = readTestArtifactRunLock(path);
+  if (observed.token !== token) throw new Error(`TEST_ARTIFACT_RUN_LEASE_MISMATCH:path=${path}`);
+  if (observed.pid !== process.pid && !pidIsAlive(observed.pid)) {
+    observed = { ...observed, pid: process.pid };
+    writeTestArtifactRunLockAtomically(path, observed);
+  }
+  if (observed.pid === process.pid) registerOwnedRunLock(path, token);
+  env[TEST_ARTIFACT_RUN_TOKEN_ENV] = token;
+  return observed;
+};
+
+const createTestArtifactRunLock = (
+  path: string,
+  reason: string,
+  env: Record<string, string | undefined>,
+): TestArtifactRunLock => {
+  const token = `${process.pid}-${Date.now()}-${++runLockSequence}`;
+  const body = { pid: process.pid, reason, startedAt: new Date().toISOString(), token };
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      writeFileSync(path, `${JSON.stringify(body)}\n`, { encoding: 'utf8', flag: 'wx' });
+      registerOwnedRunLock(path, token);
+      env[TEST_ARTIFACT_RUN_TOKEN_ENV] = token;
+      return body;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const observed = readTestArtifactRunLock(path);
+      if (observed.pid !== process.pid && pidIsAlive(observed.pid)) {
+        throw new Error(
+          `TEST_ARTIFACT_CLEANUP_ACTIVE_RUN:pid=${observed.pid}:reason=${observed.reason}:` +
+          `startedAt=${observed.startedAt}:path=${path}`,
+        );
+      }
+      unlinkSync(path);
+    }
+  }
+  throw new Error(`TEST_ARTIFACT_RUN_LOCK_ACQUIRE_FAILED:path=${path}`);
+};
+
+const claimTestArtifactRunLock = (
+  cwd: string,
+  reason: string,
+  env: Record<string, string | undefined>,
+): TestArtifactRunLock => {
+  const path = join(cwd, TEST_ARTIFACT_RUN_LOCK_PATH);
+  const ownedToken = ownedRunLocks.get(path);
+  if (ownedToken) return useOwnedRunLock(path, ownedToken, env);
+
+  mkdirSync(join(cwd, '.logs'), { recursive: true });
+  const inheritedToken = String(env[TEST_ARTIFACT_RUN_TOKEN_ENV] || '').trim();
+  return inheritedToken
+    ? useInheritedRunLock(path, inheritedToken, env)
+    : createTestArtifactRunLock(path, reason, env);
+};
+
+export const transferTestArtifactRunLease = (
+  cwd: string,
+  childPid: number,
+  env: Record<string, string | undefined> = process.env,
+): void => {
+  if (!Number.isSafeInteger(childPid) || childPid <= 0) {
+    throw new Error(`TEST_ARTIFACT_RUN_LEASE_CHILD_PID_INVALID:pid=${childPid}`);
+  }
+  const path = join(resolve(cwd), TEST_ARTIFACT_RUN_LOCK_PATH);
+  const token = String(env[TEST_ARTIFACT_RUN_TOKEN_ENV] || '').trim();
+  if (!token) throw new Error(`TEST_ARTIFACT_RUN_LEASE_TOKEN_REQUIRED:path=${path}`);
+  const observed = readTestArtifactRunLock(path);
+  if (observed.token !== token) {
+    throw new Error(`TEST_ARTIFACT_RUN_LEASE_MISMATCH:path=${path}`);
+  }
+  writeTestArtifactRunLockAtomically(path, { ...observed, pid: childPid });
+};
+
+/**
+ * Playwright targets inherit a cleanup lease from the top-level E2E runner.
+ * The parent already performed deletion plus the expensive workspace/Foundry
+ * budget scans. Validate the exact token-bound lock here without repeating
+ * those scans once per Playwright target.
+ */
+export const validateInheritedTestArtifactRunLease = (options: {
+  cwd?: string;
+  env?: Record<string, string | undefined>;
+  reason: string;
+  log?: (message: string) => void;
+}): void => {
+  const cwd = resolve(options.cwd || process.cwd());
+  const env = options.env || process.env;
+  if (env[TEST_ARTIFACT_CLEANUP_DONE_ENV] !== '1') {
+    throw new Error('TEST_ARTIFACT_RUN_LEASE_MARKER_REQUIRED');
+  }
+  if (!String(env[TEST_ARTIFACT_RUN_TOKEN_ENV] || '').trim()) {
+    throw new Error('TEST_ARTIFACT_RUN_LEASE_REQUIRED: parent cleanup marker has no run token');
+  }
+  claimTestArtifactRunLock(cwd, options.reason, env);
+  (options.log || ((message: string) => console.log(message)))(
+    `test artifact cleanup (${options.reason}): inherited parent lease validated`,
+  );
 };
 
 const assertNoLiveE2eRunnerLock = (cwd: string): void => {
@@ -283,6 +481,14 @@ export const cleanupTestArtifactsBeforeRun = (options: CleanupOptions): TestArti
   const env = options.env || process.env;
   const log = options.log || ((message: string) => console.log(message));
   const maxBytes = parseMaxBytes(env);
+  if (
+    options.skipIfAlreadyDone !== false &&
+    env[TEST_ARTIFACT_CLEANUP_DONE_ENV] === '1' &&
+    !String(env[TEST_ARTIFACT_RUN_TOKEN_ENV] || '').trim()
+  ) {
+    throw new Error('TEST_ARTIFACT_RUN_LEASE_REQUIRED: parent cleanup marker has no run token');
+  }
+  claimTestArtifactRunLock(cwd, options.reason, env);
   // Explicit test environments without XLN_FOUNDRY_HOME are isolated fixtures;
   // never let a unit test unexpectedly inspect or mutate the developer's home.
   const foundry = options.env && !(FOUNDRY_HOME_ENV in env)
@@ -337,11 +543,18 @@ const cliFlagValue = (argv: string[], name: string): string | undefined => {
 
 if (import.meta.main) {
   try {
-    cleanupTestArtifactsBeforeRun({
-      cwd: cliFlagValue(process.argv.slice(2), 'cwd') || process.cwd(),
-      reason: cliFlagValue(process.argv.slice(2), 'reason') || 'manual',
-      scope: cliFlagValue(process.argv.slice(2), 'scope') === 'e2e' ? 'e2e' : 'all',
-    });
+    const argv = process.argv.slice(2);
+    const cwd = cliFlagValue(argv, 'cwd') || process.cwd();
+    const reason = cliFlagValue(argv, 'reason') || 'manual';
+    if (hasFlag(argv, 'validate-inherited-lease')) {
+      validateInheritedTestArtifactRunLease({ cwd, reason });
+    } else {
+      cleanupTestArtifactsBeforeRun({
+        cwd,
+        reason,
+        scope: cliFlagValue(argv, 'scope') === 'e2e' ? 'e2e' : 'all',
+      });
+    }
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);

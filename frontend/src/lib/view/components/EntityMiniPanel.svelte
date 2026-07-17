@@ -9,6 +9,7 @@
   import type { Writable } from 'svelte/store';
   import type { Env, EnvSnapshot } from '@xln/runtime/xln-api';
   import { formatTokenAmount } from './entity/shared/formatters';
+  import { getTokenInfo } from '@xln/runtime/account/utils';
 
   type MapRecord<T> = Map<string, T> | Record<string, T>;
   type DeltaLike = { collateral?: bigint | number | string; ondelta?: bigint | number | string };
@@ -101,7 +102,7 @@
 
   // Use shared formatter with token ID 1 (USDC default)
   function formatAmount(amount: bigint): string {
-    return formatTokenAmount(1, amount);
+    return formatTokenAmount(1, amount, getTokenInfo(1).decimals);
   }
 
   function openFullPanel() {

@@ -1,10 +1,12 @@
 import { expect, type Page } from '@playwright/test';
 import { ethers } from 'ethers';
+import { getTokenInfo } from '../../runtime/account/utils';
 import { openAccountWorkspaceTab } from './e2e-account-workspace';
 
 export type UiPaymentIntent = {
   recipientEntityId: string;
   amount: bigint;
+  tokenId: number;
   routeEntityIds: string[];
 };
 
@@ -23,6 +25,7 @@ export async function fillUiPaymentIntent(
   page: Page,
   recipientEntityId: string,
   amount: bigint,
+  tokenId: number,
 ): Promise<void> {
   const invoiceInput = page.locator('#payment-invoice-input').first();
   const invoiceVisible = await invoiceInput.isVisible().catch(() => false);
@@ -41,7 +44,7 @@ export async function fillUiPaymentIntent(
   const amountInput = page.locator('#payment-amount-input');
   await expect(amountInput).toBeVisible({ timeout: 10_000 });
   await amountInput.click();
-  await amountInput.fill(ethers.formatUnits(amount, 18));
+  await amountInput.fill(ethers.formatUnits(amount, getTokenInfo(tokenId).decimals));
 }
 
 export async function chooseVisibleRoute(
@@ -180,7 +183,7 @@ export async function prepareUiPayment(
   await expect(asyncMode).toBeVisible({ timeout: 10_000 });
   await expect(trustedMode).toBeVisible({ timeout: 10_000 });
   await expect(asyncMode).toHaveAttribute('aria-pressed', 'true');
-  await fillUiPaymentIntent(page, intent.recipientEntityId, intent.amount);
+  await fillUiPaymentIntent(page, intent.recipientEntityId, intent.amount, intent.tokenId);
 
   const findRoutesBtn = page.getByRole('button', { name: /^Find routes?$/i }).first();
   await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
@@ -204,7 +207,7 @@ export async function expectUiPaymentNoRoute(
   expectedMessage = 'No route has enough real capacity for this amount',
 ): Promise<string> {
   await openPayWorkspace(page);
-  await fillUiPaymentIntent(page, intent.recipientEntityId, intent.amount);
+  await fillUiPaymentIntent(page, intent.recipientEntityId, intent.amount, intent.tokenId);
 
   const findRoutesBtn = page.getByRole('button', { name: /^Find routes?$/i }).first();
   await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });

@@ -1,5 +1,5 @@
 import { getTokenInfo } from '../account/utils';
-import type { Env } from '../types';
+import { scaleWholeTokenAmount, type Env } from '../types';
 import type { JTokenInfo } from '../jadapter/types';
 import { getBootstrapTokenAmount } from '../jurisdiction/bootstrap-economy';
 import {
@@ -10,16 +10,17 @@ import {
 } from './entity-lookup';
 
 export const HUB_MESH_TOKEN_ID = 1;
-export const HUB_MESH_CREDIT_AMOUNT = 1_000_000n * 10n ** 18n;
+export const HUB_MESH_CREDIT_AMOUNT = getBootstrapTokenAmount(
+  HUB_MESH_TOKEN_ID,
+  getTokenInfo(HUB_MESH_TOKEN_ID).decimals,
+);
 export const HUB_MESH_REQUIRED_HUBS = 3;
 export const HUB_REQUIRED_TOKEN_COUNT = 3;
 
 const REQUEST_CREDIT_CAP_WHOLE = 1_000n;
 
 export const getRequestCreditCap = (tokenId: number): bigint => {
-  const decimals = Number(getTokenInfo(tokenId).decimals);
-  const normalizedDecimals = Number.isFinite(decimals) && decimals >= 0 ? Math.floor(decimals) : 18;
-  return REQUEST_CREDIT_CAP_WHOLE * 10n ** BigInt(normalizedDecimals);
+  return scaleWholeTokenAmount(REQUEST_CREDIT_CAP_WHOLE, getTokenInfo(tokenId).decimals);
 };
 
 export const getHubMeshHealth = (env: Env | null, activeHubEntityIds: readonly string[]) => {
@@ -138,15 +139,19 @@ export const getBootstrapReserveHealth = async (
     };
   }
 
-  const tokenCatalog = await options.loadTokenCatalog().catch(() => []);
+  const tokenCatalog = await options.loadTokenCatalog();
   const bootstrapTokens = tokenCatalog
     .slice(0, HUB_REQUIRED_TOKEN_COUNT)
-    .map((token) => ({
-      tokenId: Number(token.tokenId),
-      symbol: String(token.symbol || `token-${token.tokenId}`),
-      decimals: Number.isFinite(token.decimals) ? Number(token.decimals) : 18,
-    }))
-    .filter((token) => Number.isFinite(token.tokenId) && token.tokenId > 0);
+    .map((token) => {
+      const tokenId = Number(token.tokenId);
+      const decimals = Number(token.decimals);
+      return {
+        tokenId,
+        symbol: String(token.symbol || `token-${token.tokenId}`),
+        decimals,
+        expectedMin: getBootstrapTokenAmount(tokenId, decimals),
+      };
+    });
 
   const marketMakerEntityId = options.marketMakerEntityId?.toLowerCase() ?? null;
   const entityIds = Array.from(
@@ -164,14 +169,13 @@ export const getBootstrapReserveHealth = async (
       marketMakerEntityId && entityId === marketMakerEntityId ? 'market-maker' : 'hub';
     const tokens = bootstrapTokens.map<BootstrapReserveTokenHealth>((token) => {
       const current = replica?.state?.reserves?.get(token.tokenId) ?? 0n;
-      const expectedMin = getBootstrapTokenAmount(token.tokenId, token.decimals);
       return {
         tokenId: token.tokenId,
         symbol: token.symbol,
         decimals: token.decimals,
         current: current.toString(),
-        expectedMin: expectedMin.toString(),
-        ready: current >= expectedMin,
+        expectedMin: token.expectedMin.toString(),
+        ready: current >= token.expectedMin,
       };
     });
     return {

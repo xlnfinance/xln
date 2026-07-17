@@ -20,12 +20,20 @@ import {
 import { createDefaultDelta } from '../../runtime/validation-utils';
 import type { AccountMachine } from '../../runtime/types';
 import { runWatchtowerSweep } from '../../runtime/watchtower/action';
+import { dbRootPath } from '../../runtime/machine/platform';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const servers: StandaloneWatchtowerServer[] = [];
 const tempRoots: string[] = [];
+const resetRuntimeStorage = async (namespace: string): Promise<void> => {
+  const basePath = join(dbRootPath, namespace);
+  const paths = ['', '-storage-current', '-storage-previous', '-frames', '-events', '-infra']
+    .map((suffix) => `${basePath}${suffix}`);
+  await Promise.all(paths.map((path) => rm(path, { recursive: true, force: true })));
+  tempRoots.push(...paths);
+};
 const disputeStartedInterface = new Interface([
-  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments)',
+  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments, uint256 disputeTimeout)',
 ]);
 const abiCoder = AbiCoder.defaultAbiCoder();
 const proofBodyParam = ParamType.from(
@@ -69,8 +77,14 @@ const installJurisdiction = (env: ReturnType<typeof xln.createEmptyEnv>, name = 
   env.activeJurisdiction = jurisdiction.name;
   env.jReplicas.set(jurisdiction.name, {
     name: jurisdiction.name,
+    blockNumber: 0n,
+    stateRoot: null,
+    mempool: [],
+    blockDelayMs: 0,
+    lastBlockTimestamp: 0,
     rpcs: [jurisdiction.address],
     chainId: jurisdiction.chainId,
+    watcherConfirmationDepth: 0,
     depositoryAddress: jurisdiction.depositoryAddress,
     entityProviderAddress: jurisdiction.entityProviderAddress,
     contracts: {
@@ -79,7 +93,8 @@ const installJurisdiction = (env: ReturnType<typeof xln.createEmptyEnv>, name = 
       account: addr('13'),
       deltaTransformer: addr('14'),
     },
-  } as JReplica);
+    position: { x: 0, y: 0, z: 0 },
+  } satisfies JReplica);
   return jurisdiction;
 };
 
@@ -133,21 +148,31 @@ const encodeDisputeHash = (
   startedByLeft: boolean,
   disputeTimeout: bigint,
   initialProofbodyHash: string,
+  disputeStartTimestamp: bigint,
   starterInitialArguments: string,
   starterIncrementedArguments: string,
-): string => keccak256(
-  solidityPacked(
-    ['uint256', 'bool', 'uint256', 'bytes32', 'bytes32', 'bytes32'],
+): string => {
+  const starterInitialArgumentsCommitment = keccak256(abiCoder.encode(
+    ['bytes', 'bool', 'uint256'],
+    [starterInitialArguments, startedByLeft, disputeStartTimestamp],
+  ));
+  const starterIncrementedArgumentsCommitment = keccak256(abiCoder.encode(
+    ['bytes', 'bool', 'uint256'],
+    [starterIncrementedArguments, startedByLeft, disputeStartTimestamp],
+  ));
+  return keccak256(solidityPacked(
+    ['uint256', 'bool', 'uint256', 'bytes32', 'uint256', 'bytes32', 'bytes32'],
     [
       BigInt(initialNonce),
       startedByLeft,
       disputeTimeout,
       initialProofbodyHash,
-      keccak256(starterInitialArguments),
-      keccak256(starterIncrementedArguments),
+      disputeStartTimestamp,
+      starterInitialArgumentsCommitment,
+      starterIncrementedArgumentsCommitment,
     ],
-  ),
-);
+  ));
+};
 
 describe('watchtower recovery full flow', () => {
   test('localhost defaults do not require an implicit tower unless configured explicitly', () => {
@@ -191,10 +216,13 @@ describe('watchtower recovery full flow', () => {
     const runtimeId = wallet.address.toLowerCase();
     const env = xln.createEmptyEnv(runtimeSeed);
     env.runtimeId = runtimeId;
-    env.dbNamespace = `${runtimeId}-${Date.now()}-restore-flow`;
+    const sourceDbNamespace = `${runtimeId}-${Date.now()}-restore-flow`;
+    env.dbNamespace = sourceDbNamespace;
+    await resetRuntimeStorage(runtimeId);
+    await resetRuntimeStorage(sourceDbNamespace);
     env.quietRuntimeLogs = true;
     const jurisdictionName = 'RestoreFlow';
-    const entityId = `0x${'ab'.repeat(32)}`;
+    const entityId = xln.generateLazyEntityId([runtimeId], 1n).toLowerCase();
 
     xln.enqueueRuntimeInput(env, {
       runtimeTxs: [{
@@ -209,6 +237,7 @@ describe('watchtower recovery full flow', () => {
       }],
       entityInputs: [],
     });
+    await xln.process(env);
     await xln.process(env);
     const restoredJReplica = env.jReplicas.get(jurisdictionName);
     if (!restoredJReplica?.depositoryAddress || !restoredJReplica.entityProviderAddress) {
@@ -301,6 +330,7 @@ describe('watchtower recovery full flow', () => {
       activeSignerIndex: 0,
       createdAt: Date.now(),
       recovery: {
+        useDefaultTowers: false,
         towers: [{ url: `http://127.0.0.1:${towerServer.server.port}`, towerMode: 'blind_backup', enabled: true }],
         minSuccessfulTowers: 1,
       },
@@ -320,14 +350,18 @@ describe('watchtower recovery full flow', () => {
     expect(reloaded?.runtimeId).toBe(runtimeId);
     expect(reloaded?.height).toBe(bundle.runtimeHeight);
     expect(reloaded?.eReplicas.size).toBe(env.eReplicas.size);
+    await xln.closeRuntimeDb(reloaded!);
+    await xln.closeInfraDb(reloaded!);
+    await xln.closeRuntimeDb(env);
+    await xln.closeInfraDb(env);
   }, 30_000);
 
   test('frontend last-resort builder emits a tower-bound appointment for dispute-capable accounts', async () => {
     const runtimeSeed = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
     const rootWallet = new Wallet(hexlify(xln.deriveSignerKeySync(runtimeSeed, '1')));
     const signerAddress = rootWallet.address.toLowerCase();
-    const entityId = `0x${'44'.repeat(32)}`;
-    const counterpartyId = `0x${'55'.repeat(32)}`;
+    const entityId = xln.generateLazyEntityId([signerAddress], 1n).toLowerCase();
+    const counterpartyId = xln.generateLazyEntityId([addr('55')], 1n).toLowerCase();
     const watchSeed = `0x${'46'.repeat(32)}`;
     const proofBody = makeProofBody(watchSeed, -123n);
     const proofBodyHash = proofBodyHashOf(proofBody);
@@ -437,8 +471,8 @@ describe('watchtower recovery full flow', () => {
     const runtimeSeed = 'legal winner thank year wave sausage worth useful legal winner thank yellow';
     const rootWallet = new Wallet(hexlify(xln.deriveSignerKeySync(runtimeSeed, '1')));
     const signerAddress = rootWallet.address.toLowerCase();
-    const entityId = `0x${'88'.repeat(32)}`;
-    const counterpartyId = `0x${'99'.repeat(32)}`;
+    const entityId = xln.generateLazyEntityId([signerAddress], 1n).toLowerCase();
+    const counterpartyId = xln.generateLazyEntityId([addr('99')], 1n).toLowerCase();
     const watchSeed = `0x${'89'.repeat(32)}`;
     const proofBody = makeProofBody(watchSeed, -123n);
     const proofBodyHash = proofBodyHashOf(proofBody);
@@ -544,7 +578,24 @@ describe('watchtower recovery full flow', () => {
     const initialProofbodyHash = `0x${'cc'.repeat(32)}`;
     const initialArguments = '0x1234';
     const incrementedArguments = '0x';
-    const disputeHash = encodeDisputeHash(7, true, 100n, initialProofbodyHash, initialArguments, incrementedArguments);
+    const disputeStartTimestamp = 1_234n;
+    const starterInitialArgumentsCommitment = keccak256(abiCoder.encode(
+      ['bytes', 'bool', 'uint256'],
+      [initialArguments, true, disputeStartTimestamp],
+    ));
+    const starterIncrementedArgumentsCommitment = keccak256(abiCoder.encode(
+      ['bytes', 'bool', 'uint256'],
+      [incrementedArguments, true, disputeStartTimestamp],
+    ));
+    const disputeHash = encodeDisputeHash(
+      7,
+      true,
+      100n,
+      initialProofbodyHash,
+      disputeStartTimestamp,
+      initialArguments,
+      incrementedArguments,
+    );
     const result = await runWatchtowerSweep(towerServer.store, {
       lookupKey: upload.lookupKey,
       towerPrivateKey: towerWallet.privateKey,
@@ -561,6 +612,7 @@ describe('watchtower recovery full flow', () => {
               watchSeed,
               initialArguments,
               incrementedArguments,
+              100n,
             ],
           );
           return [{ topics: event.topics, data: event.data }];
@@ -572,6 +624,11 @@ describe('watchtower recovery full flow', () => {
           nonce: 7n,
           disputeHash,
           disputeTimeout: 100n,
+          disputeStartTimestamp,
+          disputeInitialProofbodyHash: initialProofbodyHash,
+          starterInitialArgumentsCommitment,
+          starterIncrementedArgumentsCommitment,
+          disputeStartedByLeft: true,
         }),
         watchtowerCounterDispute: async () => ({
           hash: '0xwatchtowerflow',

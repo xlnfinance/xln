@@ -7,14 +7,49 @@ import "./HankoEncoding.sol";
 contract EntityProvider is ERC1155 { 
   error InvalidHankoWeight();
   error InvalidHankoThreshold();
+  error DuplicateHankoSigner();
+  error DuplicateHankoEntityIndex();
+  error DuplicateHankoBoardMember();
+  error DuplicateHankoClaimEntity();
+  error DuplicateHankoPlaceholder();
+  error InvalidHankoClaimOrder();
+  error InvalidHankoClaimShape();
+  error InvalidHankoFirstMember();
+  error InvalidHankoPackedSignatureLength();
+  error InvalidHankoPackedSignaturePadding();
+  error NonCanonicalHankoPlaceholder();
+  error UnusedHankoPlaceholder();
+  error UnusedHankoSignature();
+  error UnusedHankoClaim();
+  error DuplicateShareSupporter();
+  error ShareSupportersNotSorted();
+  error InvalidShareSupportSignature();
+  error ShareSupporterHasNoShares();
+  error InvalidAuthorityAuthorization();
+  error BoardProposalPriority();
+  error CancellationPriority();
+  error DividendAuthorityDisabled();
+  error FoundationAuthorityDisabled();
+  error InvalidHankoAuthorizationCount();
+  error MissingShareSupport();
+  error TooManyShareSupporters();
+  error InsufficientShareSupport();
+
+  struct EntityArticles {
+    uint32 controlDelay;
+    uint32 dividendDelay;
+    uint32 foundationDelay;
+  }
 
   struct Entity {
     bytes32 currentBoardHash;    // 0x0 = lazy entity (entityId == boardHash)
+    bytes32 previousBoardHash;   // Immediate predecessor only
+    uint256 previousBoardValidUntil; // Exclusive Unix-second Hanko deadline
     bytes32 proposedBoardHash;   // Pending board transition
     uint256 activateAtBlock;     // When proposed board becomes active
     uint256 registrationBlock;   // When entity was registered (0 for lazy)
     ProposerType proposerType;   // Who proposed the current transition
-    bytes32 articlesHash;        // Governance config hash
+    EntityArticles articles;     // Immutable, packed into one storage slot
   }
 
   struct Board {
@@ -26,29 +61,14 @@ contract EntityProvider is ERC1155 {
     uint32 dividendChangeDelay; // Dividend → Board transitions (blocks)
   }
 
-  struct EntityArticles {
-    uint32 controlDelay;      // Delay for control shareholders (X blocks)
-    uint32 dividendDelay;     // Delay for dividend shareholders (X*3 blocks)  
-    uint32 foundationDelay;   // Delay for foundation (X*10 blocks, 0=disabled)
-    uint16 controlThreshold;  // % of control tokens needed for quorum replacement
-  }
-
-  enum ProposerType { BOARD, CONTROL, DIVIDEND }
-
-  struct BoardProposal {
-    bytes32 proposedBoardHash;
-    ProposerType proposerType;
-    uint256 proposeBlock;
-    uint256 activateBlock;
-    bool active;
-  }
+  enum ProposerType { BOARD, CONTROL, DIVIDEND, FOUNDATION }
+  enum EntityProviderActionKind { ENTITY_TRANSFER, RELEASE_CONTROL_SHARES }
 
   // Core entity storage - single mapping for all entities
   mapping(bytes32 => Entity) public entities;
   
   // Sequential numbering for registered entities
   uint256 public nextNumber = 1;
-  mapping(bytes32 => bytes32) public boardHashToEntityId;
   mapping(bytes32 => uint256) public entityIdToNumber;
   
 
@@ -62,14 +82,17 @@ contract EntityProvider is ERC1155 {
   mapping(address => uint8) public nameQuota;      // User name allowances
   
   // Governance system
-  mapping(bytes32 => BoardProposal) public activeProposals;  // entityId => proposal
-  mapping(bytes32 => uint256) public totalControlSupply;      // entityId => total control tokens
-  mapping(bytes32 => uint256) public totalDividendSupply;     // entityId => total dividend tokens
   mapping(bytes32 => uint256) public entityActionNonces;       // entity-authorized ERC1155 actions
+  mapping(bytes32 => uint256) public boardActionNonces;        // board proposal/cancel replay fence
+  mapping(bytes32 => uint256) public boardEpochs;              // increments only on BoardActivated
   
   // Fixed token supplies for all entities (immutable and fair)
-  uint256 public constant TOTAL_CONTROL_SUPPLY = 1e15;   // 1 quadrillion (max granularity)
-  uint256 public constant TOTAL_DIVIDEND_SUPPLY = 1e15;  // 1 quadrillion (max granularity)
+  uint256 public constant TOTAL_CONTROL_SUPPLY = 100_000_000_000;
+  uint256 public constant TOTAL_DIVIDEND_SUPPLY = 100_000_000_000;
+  uint256 public constant BOARD_GRACE_PERIOD = 7 days;
+  uint256 public constant MAX_SHARE_SUPPORTERS = 256;
+  bytes32 public constant BOARD_PROPOSAL_DOMAIN = keccak256("XLN_ENTITY_PROVIDER_BOARD_PROPOSAL_V3");
+  bytes32 public constant BOARD_PROPOSAL_CANCEL_DOMAIN = keccak256("XLN_ENTITY_PROVIDER_BOARD_PROPOSAL_CANCEL_V3");
 
   // Foundation entity (always #1)
   uint256 public constant FOUNDATION_ENTITY = 1;
@@ -78,8 +101,19 @@ contract EntityProvider is ERC1155 {
   event EntityRegistered(bytes32 indexed entityId, uint256 indexed entityNumber, bytes32 boardHash);
   event NameAssigned(string indexed name, uint256 indexed entityNumber);
   event NameTransferred(string indexed name, uint256 indexed fromNumber, uint256 indexed toNumber);
-  event BoardProposed(bytes32 indexed entityId, bytes32 proposedBoardHash);
-  event BoardActivated(bytes32 indexed entityId, bytes32 newBoardHash);
+  event BoardProposed(
+    bytes32 indexed entityId,
+    bytes32 indexed proposedBoardHash,
+    ProposerType authority,
+    uint256 proposalNonce,
+    uint256 activateAtBlock
+  );
+  event BoardActivated(
+    bytes32 indexed entityId,
+    bytes32 previousBoardHash,
+    bytes32 newBoardHash,
+    uint256 previousBoardValidUntil
+  );
   event GovernanceEnabled(bytes32 indexed entityId, uint256 controlTokenId, uint256 dividendTokenId);
   event FoundationBootstrapped(
     address indexed recipient,
@@ -87,11 +121,31 @@ contract EntityProvider is ERC1155 {
     uint256 controlTokenId,
     uint256 dividendTokenId
   );
+  event EntityProviderActionExecuted(
+    bytes32 indexed entityId,
+    uint256 indexed actionNonce,
+    bytes32 indexed actionHash,
+    EntityProviderActionKind actionKind
+  );
 
-  event ProposalCancelled(bytes32 indexed entityId, ProposerType cancelledBy);
+  event EntityProviderActionCancelled(
+    bytes32 indexed entityId,
+    uint256 indexed actionNonce,
+    bytes32 indexed cancelledActionHash,
+    EntityProviderActionKind cancelledActionKind,
+    bytes32 cancelHash
+  );
+
+  event ProposalCancelled(
+    bytes32 indexed entityId,
+    bytes32 indexed proposedBoardHash,
+    ProposerType proposedBy,
+    ProposerType cancelledBy,
+    uint256 proposalNonce
+  );
 
   function _asUint16Weight(uint256 value) internal pure returns (uint16) {
-    if (value > type(uint16).max) revert InvalidHankoWeight();
+    if (value == 0 || value > type(uint16).max) revert InvalidHankoWeight();
     return uint16(value);
   }
 
@@ -123,25 +177,25 @@ contract EntityProvider is ERC1155 {
     reservedNames["ethereum"] = true;
     reservedNames["bitcoin"] = true;
     reservedNames["uniswap"] = true;
-    
+
     // Create foundation entity #1 with governance
     bytes32 foundationQuorum = _singleSignerBoardHash(foundationRecipient);
     bytes32 foundationId = bytes32(FOUNDATION_ENTITY);
-    
+
     entities[foundationId] = Entity({
       currentBoardHash: foundationQuorum,
+      previousBoardHash: bytes32(0),
+      previousBoardValidUntil: 0,
       proposedBoardHash: bytes32(0),
       activateAtBlock: 0,
       registrationBlock: block.number,
       proposerType: ProposerType.BOARD,
-      articlesHash: keccak256(abi.encode(EntityArticles({
+      articles: EntityArticles({
         controlDelay: 1000,
         dividendDelay: 3000,
-        foundationDelay: 0, // Foundation can't replace itself
-        controlThreshold: 51
-      })))
+        foundationDelay: 0 // Foundation can't replace itself
+      })
     });
-    boardHashToEntityId[foundationQuorum] = foundationId;
     entityIdToNumber[foundationId] = FOUNDATION_ENTITY;
     
     // Setup governance for foundation entity
@@ -171,7 +225,6 @@ contract EntityProvider is ERC1155 {
    */
   function registerNumberedEntity(bytes32 boardHash) external returns (uint256 entityNumber) {
     require(boardHash != bytes32(0), "Invalid board hash");
-    require(boardHashToEntityId[boardHash] == bytes32(0), "Board hash already registered");
 
     entityNumber = nextNumber++;
     bytes32 entityId = bytes32(entityNumber);
@@ -180,17 +233,18 @@ contract EntityProvider is ERC1155 {
     EntityArticles memory defaultArticles = EntityArticles({
       controlDelay: 1000,     // Default 1000 blocks for control
       dividendDelay: 3000,    // Default 3000 blocks for dividend
-      foundationDelay: 10000, // Default 10000 blocks for foundation
-      controlThreshold: 51    // Default 51% threshold
+      foundationDelay: 10000  // Default 10000 blocks for foundation
     });
 
     entities[entityId] = Entity({
       currentBoardHash: boardHash,
+      previousBoardHash: bytes32(0),
+      previousBoardValidUntil: 0,
       proposedBoardHash: bytes32(0),
       activateAtBlock: 0,
       registrationBlock: block.number,
       proposerType: ProposerType.BOARD,
-      articlesHash: keccak256(abi.encode(defaultArticles))
+      articles: defaultArticles
     });
 
     // Automatically setup governance with fixed supply
@@ -200,7 +254,6 @@ contract EntityProvider is ERC1155 {
     _mint(entityAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
     _mint(entityAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
 
-    boardHashToEntityId[boardHash] = entityId;
     entityIdToNumber[entityId] = entityNumber;
 
     emit EntityRegistered(entityId, entityNumber, boardHash);
@@ -221,25 +274,23 @@ contract EntityProvider is ERC1155 {
     EntityArticles memory defaultArticles = EntityArticles({
       controlDelay: 1000,
       dividendDelay: 3000,
-      foundationDelay: 10000,
-      controlThreshold: 51
+      foundationDelay: 10000
     });
-    bytes32 articlesHash = keccak256(abi.encode(defaultArticles));
-
     for (uint256 i = 0; i < boardHashes.length; i++) {
       require(boardHashes[i] != bytes32(0), "Invalid board hash");
-      require(boardHashToEntityId[boardHashes[i]] == bytes32(0), "Board hash already registered");
 
       uint256 entityNumber = nextNumber++;
       bytes32 entityId = bytes32(entityNumber);
 
       entities[entityId] = Entity({
         currentBoardHash: boardHashes[i],
+        previousBoardHash: bytes32(0),
+        previousBoardValidUntil: 0,
         proposedBoardHash: bytes32(0),
         activateAtBlock: 0,
         registrationBlock: block.number,
         proposerType: ProposerType.BOARD,
-        articlesHash: articlesHash
+        articles: defaultArticles
       });
 
       // Setup governance
@@ -249,7 +300,6 @@ contract EntityProvider is ERC1155 {
       _mint(entityAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
       _mint(entityAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
 
-      boardHashToEntityId[boardHashes[i]] = entityId;
       entityIdToNumber[entityId] = entityNumber;
 
       emit EntityRegistered(entityId, entityNumber, boardHashes[i]);
@@ -304,41 +354,100 @@ contract EntityProvider is ERC1155 {
     emit NameTransferred(name, oldEntityNumber, newEntityNumber);
   }
 
+  function computeBoardProposalHash(
+    bytes32 entityId,
+    bytes32 newBoardHash,
+    ProposerType authority,
+    uint256 actionNonce
+  ) public view returns (bytes32) {
+    return keccak256(encodeBoardProposalHankoPayload(entityId, newBoardHash, authority, actionNonce));
+  }
+
+  function encodeBoardProposalHankoPayload(
+    bytes32 entityId,
+    bytes32 newBoardHash,
+    ProposerType authority,
+    uint256 actionNonce
+  ) public view returns (bytes memory) {
+    return HankoEncoding.encodeBoardProposal(
+      BOARD_PROPOSAL_DOMAIN,
+      block.chainid,
+      address(this),
+      entityId,
+      boardEpochs[entityId],
+      newBoardHash,
+      uint8(authority),
+      actionNonce
+    );
+  }
+
+  function computeBoardProposalCancelHash(
+    bytes32 entityId,
+    bytes32 proposedBoardHash,
+    ProposerType proposedBy,
+    ProposerType cancelledBy,
+    uint256 actionNonce
+  ) public view returns (bytes32) {
+    return keccak256(encodeBoardProposalCancelHankoPayload(
+      entityId, proposedBoardHash, proposedBy, cancelledBy, actionNonce
+    ));
+  }
+
+  function encodeBoardProposalCancelHankoPayload(
+    bytes32 entityId,
+    bytes32 proposedBoardHash,
+    ProposerType proposedBy,
+    ProposerType cancelledBy,
+    uint256 actionNonce
+  ) public view returns (bytes memory) {
+    return HankoEncoding.encodeBoardProposalCancel(
+      BOARD_PROPOSAL_CANCEL_DOMAIN,
+      block.chainid,
+      address(this),
+      entityId,
+      boardEpochs[entityId],
+      proposedBoardHash,
+      uint8(proposedBy),
+      uint8(cancelledBy),
+      actionNonce
+    );
+  }
+
   /**
-   * @notice Propose a new board with proper BCD governance
-   * @param entityId The entity ID  
-   * @param newBoardHash The proposed new board hash
-   * @param proposerType Who is proposing (BOARD, CONTROL, DIVIDEND)
-   * @param articles Current governance articles (for verification)
+   * @notice Propose a board replacement through one of the configured authority lanes.
+   * @dev A pending proposal can only be replaced by a strictly higher authority:
+   *      CONTROL > BOARD > DIVIDEND > FOUNDATION. Board Hankos are deliberately
+   *      current-only; the seven-day previous-board grace applies to account
+   *      finalization, never to creation of a new governance epoch.
    */
   function proposeBoard(
     bytes32 entityId, 
     bytes32 newBoardHash,
     ProposerType proposerType,
-    EntityArticles memory articles
+    bytes[] calldata authorizations
   ) external {
     require(entities[entityId].currentBoardHash != bytes32(0), "Entity doesn't exist");
     require(newBoardHash != bytes32(0), "Invalid board hash");
-    bytes32 existingEntityForBoard = boardHashToEntityId[newBoardHash];
-    require(existingEntityForBoard == bytes32(0) || existingEntityForBoard == entityId, "Board hash already registered");
-    require(keccak256(abi.encode(articles)) == entities[entityId].articlesHash, "Invalid articles");
-    
-    uint32 delay = _getDelayForProposer(articles, proposerType);
-    _validateGovernanceCaller(entityId, msg.sender, articles, proposerType);
-    
-    // Cancel any existing proposal that can be overridden
-    if (entities[entityId].proposedBoardHash != bytes32(0)) {
-      require(_canCancelProposal(proposerType, entities[entityId].proposerType), 
-              "Cannot override existing proposal");
+    require(newBoardHash != entities[entityId].currentBoardHash, "Board already active");
+    Entity storage entity = entities[entityId];
+    EntityArticles memory articles = entity.articles;
+    _requireAuthorityEnabled(articles, proposerType);
+    if (entity.proposedBoardHash != bytes32(0)) {
+      if (!_hasHigherPriority(proposerType, entity.proposerType)) revert BoardProposalPriority();
     }
+
+    uint256 actionNonce = boardActionNonces[entityId] + 1;
+    bytes32 proposalHash = computeBoardProposalHash(entityId, newBoardHash, proposerType, actionNonce);
+    _requireBoardAuthority(entityId, proposerType, proposalHash, authorizations);
+
+    uint256 activateAtBlock = block.number + _authorityDelay(articles, proposerType);
+
+    boardActionNonces[entityId] = actionNonce;
+    entity.proposedBoardHash = newBoardHash;
+    entity.activateAtBlock = activateAtBlock;
+    entity.proposerType = proposerType;
     
-    uint256 activateAtBlock = block.number + delay;
-    
-    entities[entityId].proposedBoardHash = newBoardHash;
-    entities[entityId].activateAtBlock = activateAtBlock;
-    entities[entityId].proposerType = proposerType;
-    
-    emit BoardProposed(entityId, newBoardHash);
+    emit BoardProposed(entityId, newBoardHash, proposerType, actionNonce, activateAtBlock);
   }
 
   /**
@@ -350,117 +459,54 @@ contract EntityProvider is ERC1155 {
     require(entities[entityId].proposedBoardHash != bytes32(0), "No proposed board");
     require(block.number >= entities[entityId].activateAtBlock, "Delay period not met");
     bytes32 proposedBoardHash = entities[entityId].proposedBoardHash;
-    bytes32 existingEntityForBoard = boardHashToEntityId[proposedBoardHash];
-    require(existingEntityForBoard == bytes32(0) || existingEntityForBoard == entityId, "Board hash already registered");
     
-    delete boardHashToEntityId[entities[entityId].currentBoardHash];
-    entities[entityId].currentBoardHash = proposedBoardHash;
-    boardHashToEntityId[proposedBoardHash] = entityId;
-    entities[entityId].proposedBoardHash = bytes32(0);
-    entities[entityId].activateAtBlock = 0;
-    
-    emit BoardActivated(entityId, entities[entityId].currentBoardHash);
+    Entity storage entity = entities[entityId];
+    bytes32 previousBoardHash = entity.currentBoardHash;
+    uint256 previousBoardValidUntil = block.timestamp + BOARD_GRACE_PERIOD;
+    entity.previousBoardHash = previousBoardHash;
+    entity.previousBoardValidUntil = previousBoardValidUntil;
+    entity.currentBoardHash = proposedBoardHash;
+    boardEpochs[entityId] += 1;
+    entity.proposedBoardHash = bytes32(0);
+    entity.activateAtBlock = 0;
+
+    emit BoardActivated(entityId, previousBoardHash, proposedBoardHash, previousBoardValidUntil);
   }
 
   /**
    * @notice Cancel a pending board proposal
    * @param entityId The entity ID
    * @param proposerType Who is cancelling (BOARD, CONTROL, DIVIDEND)
-   * @param articles Current governance articles (for verification)
+   * @param authorizations Authority-specific signatures or one Hanko
    */
   function cancelBoardProposal(
     bytes32 entityId,
     ProposerType proposerType,
-    EntityArticles memory articles
+    bytes[] calldata authorizations
   ) external {
     require(entities[entityId].currentBoardHash != bytes32(0), "Entity doesn't exist");
     require(entities[entityId].proposedBoardHash != bytes32(0), "No proposed board");
-    require(keccak256(abi.encode(articles)) == entities[entityId].articlesHash, "Invalid articles");
-    
-    _validateGovernanceCaller(entityId, msg.sender, articles, proposerType);
+    Entity storage entity = entities[entityId];
+    EntityArticles memory articles = entity.articles;
+    ProposerType proposedBy = entity.proposerType;
+    if (!_hasHigherPriority(proposerType, proposedBy)) revert CancellationPriority();
+    _requireAuthorityEnabled(articles, proposerType);
+    uint256 actionNonce = boardActionNonces[entityId];
+    bytes32 cancelHash = computeBoardProposalCancelHash(
+      entityId,
+      entity.proposedBoardHash,
+      proposedBy,
+      proposerType,
+      actionNonce
+    );
+    _requireBoardAuthority(entityId, proposerType, cancelHash, authorizations);
 
-    require(_canCancelProposal(proposerType, entities[entityId].proposerType), 
-            "Cannot cancel this proposal");
+    bytes32 proposedBoardHash = entity.proposedBoardHash;
+    entity.proposedBoardHash = bytes32(0);
+    entity.activateAtBlock = 0;
     
-    entities[entityId].proposedBoardHash = bytes32(0);
-    entities[entityId].activateAtBlock = 0;
-    
-    emit ProposalCancelled(entityId, proposerType);
+    emit ProposalCancelled(entityId, proposedBoardHash, proposedBy, proposerType, actionNonce);
   }
-
-
-
-  /**
-   * @notice Recover entity ID from hanko signature (improved version of isValidSignature)
-   * @param encodedBoard The entity's board data
-   * @param encodedSignature The entity's signatures  
-   * @param hash The hash that was signed
-   * @return entityId The entity ID that signed this hash (0 if invalid)
-   */
-  function recoverEntity(
-    bytes calldata encodedBoard, 
-    bytes calldata encodedSignature, 
-    bytes32 hash
-  ) public view returns (uint256 entityId) {
-    bytes32 boardHash = keccak256(encodedBoard);
-    
-    bytes32 registeredEntityId = boardHashToEntityId[boardHash];
-    if (registeredEntityId != bytes32(0)) {
-      uint16 boardResult = _verifyBoard(hash, encodedBoard, encodedSignature);
-      if (boardResult > 0) {
-        return entityIdToNumber[registeredEntityId];
-      }
-      return 0;
-    }
-    
-    // If no registered entity found, try as lazy entity
-    uint16 lazyResult = _verifyBoard(hash, encodedBoard, encodedSignature);
-    if (lazyResult > 0) {
-      return uint256(boardHash); // Return board hash as entity ID for lazy entities
-    }
-    
-    return 0; // Invalid signature
-  }
-
-  /**
-   * @notice Simplified board verification (calldata version)
-   */
-  function _verifyBoard(
-    bytes32 _hash,
-    bytes calldata encodedBoard,
-    bytes calldata encodedSignature
-  ) internal pure returns (uint16) {
-    Board memory board = abi.decode(encodedBoard, (Board));
-    bytes[] memory signatures = abi.decode(encodedSignature, (bytes[]));
-    
-    require(board.entityIds.length == board.votingPowers.length, "Board arrays length mismatch");
-    
-    uint16 voteYes = 0;
-    uint16 totalVotes = 0;
-    
-    for (uint i = 0; i < board.entityIds.length && i < signatures.length; i++) {
-      bytes32 entityId = board.entityIds[i];
-      uint16 votingPower = board.votingPowers[i];
-      
-      // Check if this is an EOA (20 bytes when cast to address)
-      if (uint256(entityId) <= type(uint160).max) {
-        // Simple EOA verification
-        address signer = address(uint160(uint256(entityId)));
-        if (signer == _recoverSigner(_hash, signatures[i])) {
-          voteYes += votingPower;
-        }
-        totalVotes += votingPower;
-      }
-      // Note: Nested entity verification handled by Hanko system
-    }
-    
-    if (totalVotes == 0) return 0;
-    if (voteYes < board.votingThreshold) return 0;
-    
-    return (voteYes * 100) / totalVotes;
-  }
-
-
 
   /**
    * @notice Recover signer from signature
@@ -494,12 +540,26 @@ contract EntityProvider is ERC1155 {
    * @return isLazy Whether this is a lazy entity
    */
   function _validateEntity(bytes32 entityId, bytes32 boardHash) internal view returns (bool isLazy) {
-    bool isLazyEntity = entities[entityId].currentBoardHash == bytes32(0);
+    return _validateEntityBoard(entityId, boardHash, false);
+  }
+
+  function _validateEntityBoard(
+    bytes32 entityId,
+    bytes32 boardHash,
+    bool currentOnly
+  ) internal view returns (bool isLazy) {
+    Entity storage entity = entities[entityId];
+    bool isLazyEntity = entity.currentBoardHash == bytes32(0);
 
     if (isLazyEntity) {
       return entityId == boardHash;
     }
-    return boardHash == entities[entityId].currentBoardHash;
+    if (boardHash == entity.currentBoardHash) return true;
+    if (currentOnly) return false;
+    return
+      boardHash == entity.previousBoardHash &&
+      boardHash != bytes32(0) &&
+      block.timestamp < entity.previousBoardValidUntil;
   }
 
 
@@ -543,24 +603,12 @@ contract EntityProvider is ERC1155 {
 
   // === HANKO SIGNATURE VERIFICATION ===
   //
-  // 🚨 FLASHLOAN GOVERNANCE: "ASSUME YES" WITH SAFETY BOUNDS 🚨
-  //
-  // This system allows entities to reference each other optimistically (circular refs allowed).
-  // BUT: We require ≥1 EOA signature to anchor the verification chain to a real signer.
-  //
-  // EXAMPLE ALLOWED:
-  // EntityA (threshold: 100) = [EOA_Alice: 50, EntityB: 50]
-  // EntityB (threshold: 50) = [EOA_Bob: 50]
-  // → EntityA signs → verifies EOA_Alice (50) + assumes EntityB (50) → passes ✓
-  //
-  // EXAMPLE BLOCKED:
-  // EntityA (threshold: 100) = [EntityB: 100]
-  // EntityB (threshold: 100) = [EntityA: 100]
-  // → Zero EOA signatures → REJECTED ✗
-  //
-  // WHY: At least one real human must authorize. Circular entity refs are fine for
-  // composition (Corp A owns Corp B owns Corp C), but ultimate authority must trace
-  // to EOA private key holder.
+  // Claims form one bottom-up authorization proof. EOA signatures are leaves;
+  // each later claim may count only an earlier claim that already passed its
+  // exact lazy/registered board binding and threshold. This permits recursive
+  // Entity membership without allowing self/future references to bootstrap a
+  // quorum. A configured board back-edge may still appear as a zero-power
+  // placeholder when the remaining board members independently reach quorum.
 
   struct HankoBytes {
     bytes32[] placeholders;    // Entity IDs that failed to sign (index 0..N-1)  
@@ -573,6 +621,9 @@ contract EntityProvider is ERC1155 {
     uint256[] entityIndexes;   // Indexes into placeholders + yesEntities + claims arrays
     uint256[] weights;         // Voting weights for each entity  
     uint256 threshold;         // Required voting power
+    uint32 boardChangeDelay;   // Exact Board hash field
+    uint32 controlChangeDelay; // Exact Board hash field
+    uint32 dividendChangeDelay;// Exact Board hash field
   }
   
   // Events
@@ -593,24 +644,12 @@ contract EntityProvider is ERC1155 {
   function _detectSignatureCount(bytes memory packedSignatures) internal pure returns (uint256 signatureCount) {
     if (packedSignatures.length == 0) return 0;
     
-    // Try different signature counts until we find the right one
-    // Formula: length = count * 64 + ceil(count / 8)
-    for (uint256 count = 1; count <= 16000; count++) {
-      uint256 expectedRSBytes = count * 64;
-      uint256 expectedVBytes = (count + 7) / 8; // Ceiling division
-      uint256 expectedTotal = expectedRSBytes + expectedVBytes;
-      
-      if (packedSignatures.length == expectedTotal) {
-        return count;
-      }
-      
-      // Early exit if we've exceeded possible length
-      if (expectedTotal > packedSignatures.length) {
-        break;
-      }
+    uint256 candidate = packedSignatures.length * 8 / 513;
+    uint256 expectedLength = candidate * 64 + (candidate + 7) / 8;
+    if (candidate == 0 || expectedLength != packedSignatures.length) {
+      revert InvalidHankoPackedSignatureLength();
     }
-    
-    revert("Invalid packed signature length - cannot detect count");
+    return candidate;
   }
 
   /**
@@ -628,7 +667,10 @@ contract EntityProvider is ERC1155 {
     }
     
     uint256 expectedRSBytes = signatureCount * 64;
-    // uint256 expectedVBytes = (signatureCount + 7) / 8; // Ceiling division - unused
+    uint256 usedBits = signatureCount % 8;
+    if (usedBits != 0 && uint8(packedSignatures[packedSignatures.length - 1]) >> usedBits != 0) {
+      revert InvalidHankoPackedSignaturePadding();
+    }
     
     signatures = new bytes[](signatureCount);
     
@@ -667,8 +709,9 @@ contract EntityProvider is ERC1155 {
     address[] memory actualSigners,
     HankoClaim memory claim
   ) internal pure returns (bytes32 boardHash) {
-    // entityIndexes and weights must match (one entry per board member)
-    require(claim.entityIndexes.length == claim.weights.length, "Claim indexes/weights length mismatch");
+    if (claim.entityIndexes.length == 0 || claim.entityIndexes.length != claim.weights.length) {
+      revert InvalidHankoClaimShape();
+    }
 
     uint256 boardSize = claim.entityIndexes.length;
     uint256 placeholderCount = hanko.placeholders.length;
@@ -685,6 +728,9 @@ contract EntityProvider is ERC1155 {
     //   >= placeholderCount+signerCount → entity claim (authorized via nested hanko)
     for (uint256 i = 0; i < boardSize; i++) {
       uint256 idx = claim.entityIndexes[i];
+      for (uint256 j = 0; j < i; j++) {
+        if (claim.entityIndexes[j] == idx) revert DuplicateHankoEntityIndex();
+      }
 
       if (idx < placeholderCount) {
         // Zone 1: Placeholder - board member who didn't authorize (EOA or entity)
@@ -703,6 +749,25 @@ contract EntityProvider is ERC1155 {
         entityIds[i] = hanko.claims[claimIdx].entityId;
       }
 
+      // Index zero is the default proposer anchor. It must be a direct EOA
+      // identity (signed or placeholder), never an Entity claim. A placeholder
+      // may be unsigned when another branch independently reaches threshold.
+      if (
+        i == 0 &&
+        (
+          idx >= placeholderCount + signerCount ||
+          entityIds[i] == bytes32(0) ||
+          uint256(entityIds[i]) > type(uint160).max
+        )
+      ) revert InvalidHankoFirstMember();
+
+      // A board member is one authority, regardless of whether the same ID was
+      // supplied through two placeholders, two nested claims, or mixed zones.
+      // Counting repeated member slots would let one authority multiply power.
+      for (uint256 j = 0; j < i; j++) {
+        if (entityIds[j] == entityIds[i]) revert DuplicateHankoBoardMember();
+      }
+
       votingPowers[i] = _asUint16Weight(claim.weights[i]);
     }
 
@@ -711,9 +776,9 @@ contract EntityProvider is ERC1155 {
       votingThreshold: _asUint16Threshold(claim.threshold),
       entityIds: entityIds,
       votingPowers: votingPowers,
-      boardChangeDelay: 0,      // Default delays for hanko verification
-      controlChangeDelay: 0,
-      dividendChangeDelay: 0
+      boardChangeDelay: claim.boardChangeDelay,
+      controlChangeDelay: claim.controlChangeDelay,
+      dividendChangeDelay: claim.dividendChangeDelay
     });
 
     // Hash the reconstructed board (same as entity registration)
@@ -740,12 +805,12 @@ contract EntityProvider is ERC1155 {
   - Account abstraction requires pre-registration
   - Hanko: Pure cryptographic verification, ephemeral entities, hierarchical M-of-N
 
-  This is genuinely novel. The recoverEntity() function (line 361) finds which entity signed a hash by iterating registered entities and checking boardHash
-   matches. Unregistered entities can still sign via claims.
+  Registered entities bind claims to their current board hash. Unregistered
+  entities can still sign when their entity ID is the reconstructed board hash.
    */
 
   /**
-   * @notice Verify hanko signature with flashloan governance (optimistic verification)
+   * @notice Verify an ordered recursive Hanko proof
    * @param hankoData ABI-encoded hanko bytes
    * @param hash The hash that was signed
    * @return entityId The verified entity (0 if invalid)
@@ -755,14 +820,42 @@ contract EntityProvider is ERC1155 {
     bytes calldata hankoData,
     bytes32 hash
   ) external view returns (bytes32 entityId, bool success) {
+    return _verifyHankoSignature(hankoData, hash);
+  }
+
+  function _verifyHankoSignature(
+    bytes calldata hankoData,
+    bytes32 hash
+  ) internal view returns (bytes32 entityId, bool success) {
+    return _verifyHankoSignatureMode(hankoData, hash, false);
+  }
+
+  function _verifyCurrentHankoSignature(
+    bytes calldata hankoData,
+    bytes32 hash
+  ) internal view returns (bytes32 entityId, bool success) {
+    return _verifyHankoSignatureMode(hankoData, hash, true);
+  }
+
+  function _verifyHankoSignatureMode(
+    bytes calldata hankoData,
+    bytes32 hash,
+    bool currentOnly
+  ) internal view returns (bytes32 entityId, bool success) {
     HankoBytes memory hanko = abi.decode(hankoData, (HankoBytes));
+
+    for (uint256 i = 0; i < hanko.placeholders.length; i++) {
+      for (uint256 j = 0; j < i; j++) {
+        if (hanko.placeholders[i] == hanko.placeholders[j]) revert DuplicateHankoPlaceholder();
+      }
+    }
 
     // Unpack signatures (with automatic count detection)
     bytes[] memory signatures = _unpackSignatures(hanko.packedSignatures);
     uint256 signatureCount = signatures.length;
 
-    // SECURITY: Require at least one EOA signature to prevent circular reference fake governance
-    // Without this, EntityA→EntityB→EntityA circular refs pass with 0 real signatures
+    // Every valid proof bottoms out in an EOA signature. Nested Entity claims
+    // can then build upward, but may reference only claims already verified.
     if (signatureCount == 0) {
       return (bytes32(0), false); // Reject hanko with no EOA signatures
     }
@@ -773,52 +866,47 @@ contract EntityProvider is ERC1155 {
     // Recover EOA signers by original signature slot. Invalid signatures stay
     // as address(0), so a bad signature cannot shift later signers or earn votes.
     address[] memory actualSigners = new address[](signatureCount);
-    uint256 validSignerCount = 0;
-    
     for (uint256 i = 0; i < signatures.length; i++) {
-      if (signatures[i].length == 65) {
-        address signer = _recoverSigner(hash, signatures[i]);
-        if (signer != address(0)) {
-          actualSigners[i] = signer;
-          validSignerCount++;
-        }
+      address signer = _recoverSigner(hash, signatures[i]);
+      if (signer == address(0)) return (bytes32(0), false);
+      for (uint256 j = 0; j < i; j++) {
+        if (signer == actualSigners[j]) revert DuplicateHankoSigner();
+      }
+      actualSigners[i] = signer;
+      bytes32 signerId = bytes32(uint256(uint160(signer)));
+      for (uint256 j = 0; j < hanko.placeholders.length; j++) {
+        if (hanko.placeholders[j] == signerId) revert NonCanonicalHankoPlaceholder();
       }
     }
-    if (validSignerCount == 0) return (bytes32(0), false);
-    
-    // 🔥 FLASHLOAN GOVERNANCE: in rare 0.001% of self-harmed entities
-    // KEY INSIGHT: When processing claim X that references claim Y:
-    // - We DON'T wait for Y to be verified first
-    // - We OPTIMISTICALLY assume Y will say "YES" 
-    // - If ANY claim fails its threshold → entire Hanko fails IMMEDIATELY
-    //
-    // CONCRETE EXAMPLE - Circular Reference:
-    // Claim 0: EntityA needs EntityB (index 3) at weight 100, threshold 100
-    // Claim 1: EntityB needs EntityA (index 2) at weight 100, threshold 100
-    // 
-    // Processing:
-    // 1. Claim 0 processing: Assume EntityB=YES → 100 power ≥ 100 → CONTINUE
-    // 2. Claim 1 processing: Assume EntityA=YES → 100 power ≥ 100 → CONTINUE
-    // 3. All claims passed → Hanko succeeds!
-    //
-    // ⚡ OPTIMIZATION: Fail immediately on threshold failure - no need to store results!
-    //
-    // This is INTENDED BEHAVIOR enabling flexible governance!
-    // There is NO alternative. 1) EVM fundamentally cannot prohibit recurisve boards
-    // 2) once recursive board happens you either choose assume=YES/NO, equally bad strategies
-    // 3) assume NO may lock treasuries behind such entity forever. So we choose YES. It's unavoidable.
+
+    bool[] memory usedPlaceholders = new bool[](hanko.placeholders.length);
+    bool[] memory usedSignatures = new bool[](signatureCount);
     
     for (uint256 claimIndex = 0; claimIndex < hanko.claims.length; claimIndex++) {
       HankoClaim memory claim = hanko.claims[claimIndex];
       uint256 placeholderCount = hanko.placeholders.length;
 
+      for (uint256 priorClaimIndex = 0; priorClaimIndex < claimIndex; priorClaimIndex++) {
+        if (hanko.claims[priorClaimIndex].entityId == claim.entityId) {
+          revert DuplicateHankoClaimEntity();
+        }
+      }
+
       for (uint256 i = 0; i < claim.entityIndexes.length; i++) {
         uint256 entityIndex = claim.entityIndexes[i];
         require(entityIndex < totalEntities, "Entity index out of bounds");
-        if (entityIndex >= placeholderCount && entityIndex < placeholderCount + signatureCount) {
-          if (actualSigners[entityIndex - placeholderCount] == address(0)) {
-            return (bytes32(0), false);
+        if (entityIndex < placeholderCount) {
+          usedPlaceholders[entityIndex] = true;
+          for (uint256 priorClaimIndex = 0; priorClaimIndex < claimIndex; priorClaimIndex++) {
+            if (hanko.claims[priorClaimIndex].entityId == hanko.placeholders[entityIndex]) {
+              revert NonCanonicalHankoPlaceholder();
+            }
           }
+        } else if (entityIndex < placeholderCount + signatureCount) {
+          usedSignatures[entityIndex - placeholderCount] = true;
+        } else if (entityIndex >= placeholderCount + signatureCount) {
+          uint256 referencedClaimIndex = entityIndex - placeholderCount - signatureCount;
+          if (referencedClaimIndex >= claimIndex) revert InvalidHankoClaimOrder();
         }
       }
 
@@ -827,14 +915,11 @@ contract EntityProvider is ERC1155 {
       bytes32 reconstructedBoardHash = _buildBoardHash(hanko, actualSigners, claim);
 
       // Validate entity exists (registered or lazy) and verify board hash
-      if (!_validateEntity(claim.entityId, reconstructedBoardHash)) {
+      if (!_validateEntityBoard(claim.entityId, reconstructedBoardHash, currentOnly)) {
         return (bytes32(0), false);
       }
 
       uint256 totalVotingPower = 0;
-      
-      // Calculate voting power with flashloan assumptions
-      uint256 eoaVotingPower = 0; // Track EOA-only power separately
 
       for (uint256 i = 0; i < claim.entityIndexes.length; i++) {
         uint256 entityIndex = claim.entityIndexes[i];
@@ -848,28 +933,40 @@ contract EntityProvider is ERC1155 {
         } else if (entityIndex < placeholderCount + signatureCount) {
           // Index N..M-1: EOA signature - verified, contributes full weight
           totalVotingPower += claim.weights[i];
-          eoaVotingPower += claim.weights[i]; // Count toward EOA power
         } else {
-          // Index M..∞: Entity claim - ASSUME YES! (flashloan governance)
+          // Index M..∞: an earlier claim which already passed board + quorum.
           uint256 referencedClaimIndex = entityIndex - placeholderCount - signatureCount;
-          require(referencedClaimIndex < hanko.claims.length, "Referenced claim index out of bounds");
-
-          // Entity refs add voting power but don't count toward EOA requirement
+          if (referencedClaimIndex >= claimIndex) revert InvalidHankoClaimOrder();
           totalVotingPower += claim.weights[i];
         }
       }
 
-      // 🔒 SECURITY: EOA voting power ALONE must meet threshold
-      // This prevents 1% EOA + 99% circular entity ref attacks
-      // Entity refs can ADD governance flexibility but cannot BE primary control
-      if (eoaVotingPower < claim.threshold) {
-        return (bytes32(0), false); // EOAs insufficient - reject even if total > threshold
-      }
-
-      // 💥 IMMEDIATE FAILURE: Check total threshold (redundant but kept for clarity)
       if (totalVotingPower < claim.threshold) {
         return (bytes32(0), false);
       }
+    }
+
+    bool[] memory reachableClaims = new bool[](hanko.claims.length);
+    if (hanko.claims.length > 0) reachableClaims[hanko.claims.length - 1] = true;
+    for (uint256 cursor = hanko.claims.length; cursor > 0; cursor--) {
+      uint256 claimIndex = cursor - 1;
+      if (!reachableClaims[claimIndex]) continue;
+      HankoClaim memory claim = hanko.claims[claimIndex];
+      for (uint256 i = 0; i < claim.entityIndexes.length; i++) {
+        uint256 entityIndex = claim.entityIndexes[i];
+        if (entityIndex >= hanko.placeholders.length + signatureCount) {
+          reachableClaims[entityIndex - hanko.placeholders.length - signatureCount] = true;
+        }
+      }
+    }
+    for (uint256 i = 0; i < reachableClaims.length; i++) {
+      if (!reachableClaims[i]) revert UnusedHankoClaim();
+    }
+    for (uint256 i = 0; i < usedPlaceholders.length; i++) {
+      if (!usedPlaceholders[i]) revert UnusedHankoPlaceholder();
+    }
+    for (uint256 i = 0; i < usedSignatures.length; i++) {
+      if (!usedSignatures[i]) revert UnusedHankoSignature();
     }
     
     // All claims passed - return final entity
@@ -898,7 +995,7 @@ contract EntityProvider is ERC1155 {
     results = new bool[](hankoDataArray.length);
     
     for (uint256 i = 0; i < hankoDataArray.length; i++) {
-      (entityIds[i], results[i]) = this.verifyHankoSignature(hankoDataArray[i], hashes[i]);
+      (entityIds[i], results[i]) = _verifyHankoSignature(hankoDataArray[i], hashes[i]);
     }
   }
 
@@ -938,74 +1035,86 @@ contract EntityProvider is ERC1155 {
 
   // === INTERNAL HELPER FUNCTIONS ===
 
-  function _getDelayForProposer(EntityArticles memory articles, ProposerType proposerType) internal pure returns (uint32) {
-    if (proposerType == ProposerType.CONTROL) return articles.controlDelay;
-    if (proposerType == ProposerType.DIVIDEND) return articles.dividendDelay;
-    revert("Board proposer disabled");
-  }
-
-  function _canCancelProposal(ProposerType canceller, ProposerType existing) internal pure returns (bool) {
-    // Priority: CONTROL > BOARD > DIVIDEND (BCD model)
-    if (canceller == ProposerType.CONTROL) return existing != ProposerType.CONTROL;
-    if (canceller == ProposerType.BOARD) return existing == ProposerType.DIVIDEND;
-    return false; // DIVIDEND cannot cancel anyone
-  }
-
-  function _validateControlProposer(bytes32 entityId, address proposer, EntityArticles memory articles) internal view {
-    (uint256 controlTokenId,) = getTokenIds(uint256(entityId));
-    uint256 proposerBalance = balanceOf(proposer, controlTokenId);
-    require(proposerBalance > 0, "No control tokens");
-
-    uint256 required = (totalControlSupply[entityId] * articles.controlThreshold) / 100;
-    require(proposerBalance >= required, "Insufficient control tokens");
-  }
-
-  function _validateDividendProposer(bytes32 entityId, address proposer) internal view {
-    (, uint256 dividendTokenId) = getTokenIds(uint256(entityId));
-    uint256 proposerBalance = balanceOf(proposer, dividendTokenId);
-    require(proposerBalance > 0, "No dividend tokens");
-  }
-
-  function _validateGovernanceCaller(
+  function _requireStrictShareMajority(
     bytes32 entityId,
-    address proposer,
-    EntityArticles memory articles,
-    ProposerType proposerType
+    bytes32 digest,
+    bool control,
+    bytes[] calldata signatures
   ) internal view {
-    if (proposerType == ProposerType.CONTROL) {
-      _validateControlProposer(entityId, proposer, articles);
-      return;
+    if (signatures.length == 0) revert MissingShareSupport();
+    if (signatures.length > MAX_SHARE_SUPPORTERS) revert TooManyShareSupporters();
+    (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(uint256(entityId));
+    uint256 tokenId = control ? controlTokenId : dividendTokenId;
+    uint256 totalSupport = 0;
+    address previousSigner = address(0);
+    for (uint256 i = 0; i < signatures.length; i++) {
+      address signer = _recoverSigner(digest, signatures[i]);
+      if (signer == address(0)) revert InvalidShareSupportSignature();
+      if (i > 0) {
+        if (signer == previousSigner) revert DuplicateShareSupporter();
+        if (signer < previousSigner) revert ShareSupportersNotSorted();
+      }
+      uint256 balance = balanceOf(signer, tokenId);
+      if (balance == 0) revert ShareSupporterHasNoShares();
+      totalSupport += balance;
+      previousSigner = signer;
     }
-    if (proposerType == ProposerType.DIVIDEND) {
-      _validateDividendProposer(entityId, proposer);
-      return;
-    }
-    revert("Board proposer disabled");
+
+    uint256 fixedSupply = control ? TOTAL_CONTROL_SUPPLY : TOTAL_DIVIDEND_SUPPLY;
+    if (totalSupport <= fixedSupply / 2) revert InsufficientShareSupport();
   }
 
-  function _validateControlSupport(bytes32 entityId, address[] memory supporters, EntityArticles memory articles) internal view {
-    (uint256 controlTokenId,) = getTokenIds(uint256(entityId));
-    
-    uint256 totalSupport = 0;
-    for (uint i = 0; i < supporters.length; i++) {
-      totalSupport += balanceOf(supporters[i], controlTokenId);
+  function _requireBoardAuthority(
+    bytes32 entityId,
+    ProposerType authority,
+    bytes32 digest,
+    bytes[] calldata authorizations
+  ) internal view {
+    if (authority == ProposerType.CONTROL || authority == ProposerType.DIVIDEND) {
+      _requireStrictShareMajority(entityId, digest, authority == ProposerType.CONTROL, authorizations);
+      return;
     }
-    
-    uint256 required = (totalControlSupply[entityId] * articles.controlThreshold) / 100;
-    require(totalSupport >= required, "Insufficient control support");
+
+    if (authorizations.length != 1) revert InvalidHankoAuthorizationCount();
+    bytes32 expectedEntityId = authority == ProposerType.BOARD
+      ? entityId
+      : bytes32(FOUNDATION_ENTITY);
+    (bytes32 recoveredEntityId, bool valid) = _verifyCurrentHankoSignature(authorizations[0], digest);
+    if (!valid || recoveredEntityId != expectedEntityId) revert InvalidAuthorityAuthorization();
   }
 
-  function _validateDividendSupport(bytes32 entityId, address[] memory supporters) internal view {
-    (, uint256 dividendTokenId) = getTokenIds(uint256(entityId));
-    
-    uint256 totalSupport = 0;
-    for (uint i = 0; i < supporters.length; i++) {
-      totalSupport += balanceOf(supporters[i], dividendTokenId);
+  function _requireAuthorityEnabled(
+    EntityArticles memory articles,
+    ProposerType authority
+  ) internal pure {
+    if (authority == ProposerType.DIVIDEND) {
+      if (articles.dividendDelay == 0) revert DividendAuthorityDisabled();
+    } else if (authority == ProposerType.FOUNDATION) {
+      if (articles.foundationDelay == 0) revert FoundationAuthorityDisabled();
     }
-    
-    // Require majority of dividend tokens
-    uint256 required = (totalDividendSupply[entityId] * 51) / 100;
-    require(totalSupport >= required, "Insufficient dividend support");
+  }
+
+  function _authorityDelay(
+    EntityArticles memory articles,
+    ProposerType authority
+  ) internal pure returns (uint32) {
+    if (authority == ProposerType.DIVIDEND) return articles.dividendDelay;
+    if (authority == ProposerType.FOUNDATION) return articles.foundationDelay;
+    return articles.controlDelay;
+  }
+
+  function _hasHigherPriority(
+    ProposerType challenger,
+    ProposerType incumbent
+  ) internal pure returns (bool) {
+    return _authorityPriority(challenger) > _authorityPriority(incumbent);
+  }
+
+  function _authorityPriority(ProposerType authority) internal pure returns (uint8) {
+    if (authority == ProposerType.CONTROL) return 4;
+    if (authority == ProposerType.BOARD) return 3;
+    if (authority == ProposerType.DIVIDEND) return 2;
+    return 1;
   }
 
   // === VIEW FUNCTIONS ===
@@ -1023,44 +1132,11 @@ contract EntityProvider is ERC1155 {
   ) {
     bytes32 entityId = bytes32(entityNumber);
     (controlTokenId, dividendTokenId) = getTokenIds(entityNumber);
-    controlSupply = totalControlSupply[entityId];
-    dividendSupply = totalDividendSupply[entityId];
+    bool exists = entities[entityId].currentBoardHash != bytes32(0);
+    controlSupply = exists ? TOTAL_CONTROL_SUPPLY : 0;
+    dividendSupply = exists ? TOTAL_DIVIDEND_SUPPLY : 0;
     hasActiveProposal = entities[entityId].proposedBoardHash != bytes32(0);
-    articlesHash = entities[entityId].articlesHash;
-  }
-
-  function _update(
-    address from,
-    address to,
-    uint256[] memory ids,
-    uint256[] memory amounts
-  ) internal override {
-    super._update(from, to, ids, amounts);
-
-    for (uint i = 0; i < ids.length; i++) {
-      if (from != address(0) && to != address(0)) continue;
-
-      uint256 entityNumber = getEntityFromToken(ids[i]);
-      bytes32 entityId = bytes32(entityNumber);
-
-      if (entities[entityId].currentBoardHash != bytes32(0)) {
-        (uint256 controlTokenId,) = getTokenIds(entityNumber);
-
-        if (ids[i] == controlTokenId) {
-          if (from == address(0)) {
-            totalControlSupply[entityId] += amounts[i];
-          } else if (to == address(0)) {
-            totalControlSupply[entityId] -= amounts[i];
-          }
-        } else {
-          if (from == address(0)) {
-            totalDividendSupply[entityId] += amounts[i];
-          } else if (to == address(0)) {
-            totalDividendSupply[entityId] -= amounts[i];
-          }
-        }
-      }
-    }
+    articlesHash = keccak256(abi.encode(entities[entityId].articles));
   }
 
   /**
@@ -1074,18 +1150,19 @@ contract EntityProvider is ERC1155 {
     EntityArticles memory articles
   ) external onlyFoundation returns (uint256 entityNumber) {
     require(boardHash != bytes32(0), "Invalid board hash");
-    require(boardHashToEntityId[boardHash] == bytes32(0), "Board hash already registered");
 
     entityNumber = nextNumber++;
     bytes32 entityId = bytes32(entityNumber);
     
     entities[entityId] = Entity({
       currentBoardHash: boardHash,
+      previousBoardHash: bytes32(0),
+      previousBoardValidUntil: 0,
       proposedBoardHash: bytes32(0),
       activateAtBlock: 0,
       registrationBlock: block.number,
       proposerType: ProposerType.BOARD,
-      articlesHash: keccak256(abi.encode(articles))
+      articles: articles
     });
     
     // Automatically setup governance with fixed supply
@@ -1095,7 +1172,6 @@ contract EntityProvider is ERC1155 {
     _mint(entityAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
     _mint(entityAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
 
-    boardHashToEntityId[boardHash] = entityId;
     entityIdToNumber[entityId] = entityNumber;
     
     emit EntityRegistered(entityId, entityNumber, boardHash);
@@ -1104,7 +1180,7 @@ contract EntityProvider is ERC1155 {
     return entityNumber;
   }
 
-  // === ENTITY SIGNATURE RECOVERY ===
+  // === ENTITY HANKO ACTIONS ===
 
   // The contract domain is always derived locally. Never accept chainId or the
   // EntityProvider address as calldata: deterministic deployments may reuse an
@@ -1120,6 +1196,7 @@ contract EntityProvider is ERC1155 {
       block.chainid,
       address(this),
       entityNumber,
+      boardEpochs[bytes32(entityNumber)],
       to,
       tokenId,
       amount,
@@ -1149,16 +1226,14 @@ contract EntityProvider is ERC1155 {
    * @param to Recipient address  
    * @param tokenId Token ID (control or dividend)
    * @param amount Amount to transfer
-   * @param encodedBoard Entity's board data
-   * @param encodedSignature Entity's signatures authorizing this transfer
+   * @param hankoData Canonical entity quorum Hanko authorizing this transfer
    */
   function entityTransferTokens(
     uint256 entityNumber,
     address to,
     uint256 tokenId,
     uint256 amount,
-    bytes calldata encodedBoard,
-    bytes calldata encodedSignature
+    bytes calldata hankoData
   ) external {
     bytes32 entityId = bytes32(entityNumber);
     uint256 actionNonce = entityActionNonces[entityId] + 1;
@@ -1171,14 +1246,19 @@ contract EntityProvider is ERC1155 {
       actionNonce
     );
     
-    // Verify entity signature
-    uint256 recoveredEntityId = recoverEntity(encodedBoard, encodedSignature, transferHash);
-    require(recoveredEntityId == entityNumber, "Invalid entity signature");
+    (bytes32 recoveredEntityId, bool valid) = _verifyCurrentHankoSignature(hankoData, transferHash);
+    require(valid && recoveredEntityId == entityId, "Invalid entity signature");
     entityActionNonces[entityId] = actionNonce;
     
     // Execute transfer
     address entityAddress = address(uint160(uint256(entityId)));
     _safeTransferFrom(entityAddress, to, tokenId, amount, "");
+    emit EntityProviderActionExecuted(
+      entityId,
+      actionNonce,
+      transferHash,
+      EntityProviderActionKind.ENTITY_TRANSFER
+    );
   }
 
   // === CONTROL SHARES RELEASE TO DEPOSITORY ===
@@ -1203,6 +1283,7 @@ contract EntityProvider is ERC1155 {
       block.chainid,
       address(this),
       entityNumber,
+      boardEpochs[bytes32(entityNumber)],
       depository,
       controlAmount,
       dividendAmount,
@@ -1229,6 +1310,69 @@ contract EntityProvider is ERC1155 {
     ));
   }
 
+  function encodeCancelEntityProviderActionHankoPayload(
+    uint256 entityNumber,
+    uint256 actionNonce,
+    bytes32 cancelledActionHash,
+    EntityProviderActionKind cancelledActionKind
+  ) public view returns (bytes memory) {
+    return HankoEncoding.encodeCancelEntityProviderAction(
+      block.chainid,
+      address(this),
+      entityNumber,
+      boardEpochs[bytes32(entityNumber)],
+      actionNonce,
+      cancelledActionHash,
+      uint8(cancelledActionKind)
+    );
+  }
+
+  function computeCancelEntityProviderActionHankoHash(
+    uint256 entityNumber,
+    uint256 actionNonce,
+    bytes32 cancelledActionHash,
+    EntityProviderActionKind cancelledActionKind
+  ) public view returns (bytes32) {
+    return keccak256(encodeCancelEntityProviderActionHankoPayload(
+      entityNumber,
+      actionNonce,
+      cancelledActionHash,
+      cancelledActionKind
+    ));
+  }
+
+  /**
+   * @notice Consume the next EntityProvider action nonce without executing its action.
+   * @dev Execute and cancel share one nonce lane. The first mined transaction wins;
+   *      the other Hanko becomes invalid because its payload commits the old nonce.
+   */
+  function cancelEntityProviderAction(
+    uint256 entityNumber,
+    bytes32 cancelledActionHash,
+    EntityProviderActionKind cancelledActionKind,
+    bytes calldata hankoData
+  ) external {
+    require(cancelledActionHash != bytes32(0), "Invalid action hash");
+    bytes32 entityId = bytes32(entityNumber);
+    uint256 actionNonce = entityActionNonces[entityId] + 1;
+    bytes32 cancelHash = computeCancelEntityProviderActionHankoHash(
+      entityNumber,
+      actionNonce,
+      cancelledActionHash,
+      cancelledActionKind
+    );
+    (bytes32 recoveredEntityId, bool valid) = _verifyCurrentHankoSignature(hankoData, cancelHash);
+    require(valid && recoveredEntityId == entityId, "Invalid entity signature");
+    entityActionNonces[entityId] = actionNonce;
+    emit EntityProviderActionCancelled(
+      entityId,
+      actionNonce,
+      cancelledActionHash,
+      cancelledActionKind,
+      cancelHash
+    );
+  }
+
   /**
    * @notice Release entity's control and/or dividend shares to depository for trading
    * @dev This mirrors real corporate stock issuance - entity manages its own share releases
@@ -1237,8 +1381,7 @@ contract EntityProvider is ERC1155 {
    * @param controlAmount Amount of control tokens to release (0 to skip)
    * @param dividendAmount Amount of dividend tokens to release (0 to skip) 
    * @param purpose Human-readable purpose (e.g., "Series A", "Employee Pool", "Public Sale")
-   * @param encodedBoard Entity's board data
-   * @param encodedSignature Entity's Hanko signatures authorizing this release
+   * @param hankoData Canonical entity quorum Hanko authorizing this release
    */
   function releaseControlShares(
     uint256 entityNumber,
@@ -1246,8 +1389,7 @@ contract EntityProvider is ERC1155 {
     uint256 controlAmount,
     uint256 dividendAmount,
     string calldata purpose,
-    bytes calldata encodedBoard,
-    bytes calldata encodedSignature
+    bytes calldata hankoData
   ) external {
     require(depository != address(0), "Invalid depository address");
     require(controlAmount > 0 || dividendAmount > 0, "Must release some tokens");
@@ -1265,9 +1407,8 @@ contract EntityProvider is ERC1155 {
       actionNonce
     );
     
-    // Verify entity signature authorization
-    uint256 recoveredEntityId = recoverEntity(encodedBoard, encodedSignature, releaseHash);
-    require(recoveredEntityId == entityNumber, "Invalid entity signature");
+    (bytes32 recoveredEntityId, bool valid) = _verifyCurrentHankoSignature(hankoData, releaseHash);
+    require(valid && recoveredEntityId == entityId, "Invalid entity signature");
     entityActionNonces[entityId] = actionNonce;
     
     address entityAddress = address(uint160(uint256(entityId)));
@@ -1288,6 +1429,12 @@ contract EntityProvider is ERC1155 {
     }
     
     emit ControlSharesReleased(entityId, depository, controlAmount, dividendAmount, purpose);
+    emit EntityProviderActionExecuted(
+      entityId,
+      actionNonce,
+      releaseHash,
+      EntityProviderActionKind.RELEASE_CONTROL_SHARES
+    );
   }
 
 }

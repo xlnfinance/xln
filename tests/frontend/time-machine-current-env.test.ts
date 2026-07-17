@@ -251,6 +251,8 @@ describe('frontend time-machine current env contract', () => {
     expect(graph).not.toContain('$runtimeFrameEnv?.runtimeInput');
     expect(graph).not.toContain('$runtimeFrameEnv.runtimeInput');
     expect(graph).not.toContain('get(runtimeFrameEnv)?.eReplicas');
+    expect(graph).toContain('if (timeIndex >= 0) {');
+    expect(graph).toContain('debug.warn(`⚠️ No entity data found at frame ${timeIndex} - clearing network`)');
     expect(dock).toContain('runtimeFrameIsLive,');
   });
 

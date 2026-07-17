@@ -5,3 +5,5 @@ export { EntityProviderSupplyHarness__factory } from "./EntityProviderSupplyHarn
 export { HashLadderHarness__factory } from "./HashLadderHarness__factory";
 export { MockEntityProvider__factory } from "./MockEntityProvider__factory";
 export { NoReturnERC20Mock__factory } from "./NoReturnERC20Mock__factory";
+export { SupplyLivenessHarness__factory } from "./SupplyLivenessHarness__factory";
+export { TransformerLivenessHarness__factory } from "./TransformerLivenessHarness__factory";

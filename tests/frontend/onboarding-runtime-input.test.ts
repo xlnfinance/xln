@@ -2,9 +2,11 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
 import {
+  assertCommittedAutoJoinCount,
   buildOnboardingHubOpenRuntimeInput,
   buildOnboardingProfileRuntimeInput,
 } from '../../frontend/src/lib/components/Entity/onboarding-runtime-input';
+import { getOpenAccountRebalancePolicyData } from '../../frontend/src/lib/utils/onboardingPreferences';
 
 const ENTITY = `0x${'11'.repeat(32)}`;
 const SIGNER = `0x${'22'.repeat(20)}`;
@@ -15,6 +17,21 @@ const REBALANCE_POLICY = {
   hardLimit: 200n,
   maxAcceptableFee: 3n,
 };
+
+test('onboarding policy converts human defaults to trusted token raw units', () => {
+  expect(getOpenAccountRebalancePolicyData(6)).toEqual({
+    r2cRequestSoftLimit: 500n * 10n ** 6n,
+    hardLimit: 10_000n * 10n ** 6n,
+    maxAcceptableFee: 15n * 10n ** 6n,
+  });
+  expect(getOpenAccountRebalancePolicyData(18)).toEqual({
+    r2cRequestSoftLimit: 500n * 10n ** 18n,
+    hardLimit: 10_000n * 10n ** 18n,
+    maxAcceptableFee: 15n * 10n ** 18n,
+  });
+  expect(() => getOpenAccountRebalancePolicyData(Number.NaN))
+    .toThrow('ONBOARDING_TOKEN_DECIMALS_INVALID:NaN');
+});
 
 test('onboarding profile setup builds explicit RuntimeInput batches', () => {
   const input = buildOnboardingProfileRuntimeInput({
@@ -100,6 +117,26 @@ test('onboarding RuntimeInput builders reject malformed setup commands', () => {
   })).toThrow('credit amount must be positive');
 });
 
+test('onboarding completion requires every requested hub account to commit', () => {
+  expect(assertCommittedAutoJoinCount({
+    requestedPerTarget: 1,
+    targetCount: 2,
+    committedCount: 2,
+  })).toBe(2);
+
+  expect(assertCommittedAutoJoinCount({
+    requestedPerTarget: 0,
+    targetCount: 2,
+    committedCount: 0,
+  })).toBe(0);
+
+  expect(() => assertCommittedAutoJoinCount({
+    requestedPerTarget: 2,
+    targetCount: 2,
+    committedCount: 3,
+  })).toThrow('ONBOARDING_AUTO_JOIN_INCOMPLETE:requested=4:committed=3');
+});
+
 test('OnboardingPanel uses injected runtime projection and RuntimeInput helpers', () => {
   const source = readFileSync('frontend/src/lib/components/Entity/OnboardingPanel.svelte', 'utf8');
   const parent = readFileSync('frontend/src/lib/view/UserModePanel.svelte', 'utf8');
@@ -126,12 +163,23 @@ test('OnboardingPanel uses injected runtime projection and RuntimeInput helpers'
   expect(parent).toContain('const hubCandidates: OnboardingHubCandidate[] = [];');
 });
 
+test('OnboardingPanel never hides hub discovery or policy fallback failures', () => {
+  const source = readFileSync('frontend/src/lib/components/Entity/OnboardingPanel.svelte', 'utf8');
+
+  expect(source).toContain('ONBOARDING_HUB_DISCOVERY_FAILED');
+  expect(source).toContain('ONBOARDING_HUB_CAPACITY_INSUFFICIENT');
+  expect(source).toContain('policyDefaultsNotice');
+  expect(source).toContain('data-testid="onboarding-policy-defaults-notice"');
+  expect(source).not.toContain("catch {\n      // Keep local defaults if /api/jurisdictions isn't available yet.\n    }");
+});
+
 test('FormationPanel uses injected runtime projection instead of xlnEnvironment', () => {
   const source = readFileSync('frontend/src/lib/components/Entity/FormationPanel.svelte', 'utf8');
   const parent = readFileSync('frontend/src/lib/view/UserModePanel.svelte', 'utf8');
 
   expect(source).toContain('export let runtimeProjection: FormationRuntimeProjection');
   expect(source).toContain('emptyFormationRuntimeProjection');
+  expect(source).toContain('createActiveNumberedEntity(');
   expect(source).not.toContain('export let runtimeEnv');
   expect(source).not.toContain('$: env = runtimeEnv');
   expect(source).not.toContain('Env');

@@ -5,6 +5,10 @@ import { asOfferId, type OfferId } from '../../orderbook/swap-keys';
 import { exactFillRatioToUint16, reduceExactFillRatio } from '../../orderbook/swap-execution';
 import { sortTransformerEntries } from '../transformer-ordering';
 import { decodeHashLadderBinary } from '../htlc/hash-ladder';
+import {
+  sanitizeOptionalDisputeArgument,
+  type OptionalDisputeArgumentWarning,
+} from '../../jurisdiction/batch';
 
 const MAX_FILL_RATIO = 0xffff;
 
@@ -99,27 +103,27 @@ const collectAppliedSwapFillFingerprints = (accountTxs: readonly AccountTx[] | u
   return fingerprints;
 };
 
-const committedSwapResolveFillRatio = (tx: Extract<AccountTx, { type: 'swap_resolve' }>): number => {
+const optionalSwapResolveFillRatio = (
+  tx: Extract<AccountTx, { type: 'swap_resolve' }>,
+): number | null => {
   const data = tx.data;
   const hasExactNumerator = data.fillNumerator !== undefined;
   const hasExactDenominator = data.fillDenominator !== undefined;
-  if (hasExactNumerator !== hasExactDenominator) {
-    throw new Error(`DISPUTE_ARGUMENT_SWAP_FILL_EXACT_PARTIAL:${data.offerId}`);
-  }
+  if (hasExactNumerator !== hasExactDenominator) return null;
   if (!hasExactNumerator || !hasExactDenominator) {
     return clampFillRatio(data.fillRatio);
   }
+  if (
+    typeof data.fillNumerator !== 'bigint' ||
+    typeof data.fillDenominator !== 'bigint' ||
+    data.fillDenominator <= 0n
+  ) return null;
 
   const projected = exactFillRatioToUint16(
     reduceExactFillRatio(data.fillNumerator!, data.fillDenominator!),
   );
   const committed = clampFillRatio(data.fillRatio);
-  if (committed !== projected) {
-    throw new Error(
-      `DISPUTE_ARGUMENT_SWAP_FILL_RATIO_MISMATCH:${data.offerId}:coarse=${committed}:exact=${projected}`,
-    );
-  }
-  return projected;
+  return committed === projected ? projected : null;
 };
 
 const buildPendingSwapFillRatios = (
@@ -127,6 +131,7 @@ const buildPendingSwapFillRatios = (
   snapshot: DisputeArgumentSnapshot,
 ): Map<OfferId, number> => {
   const ratios = new Map<OfferId, number>();
+  const invalidOffers = new Set<OfferId>();
   const { plan } = snapshot;
   const planned = new Set([...plan.leftSwapOfferIds, ...plan.rightSwapOfferIds]);
   if (planned.size === 0) return ratios;
@@ -136,33 +141,41 @@ const buildPendingSwapFillRatios = (
   const shouldSkipAppliedPendingFrame =
     snapshot.appliedFrameHeight !== undefined &&
     pendingFrameHeight === snapshot.appliedFrameHeight;
-  for (const tx of pendingFrameTxs) {
-    if (tx.type !== 'swap_resolve') continue;
-    if (!planned.has(tx.data.offerId)) continue;
+  const recordOptionalFill = (
+    tx: Extract<AccountTx, { type: 'swap_resolve' }>,
+    fromAppliedPendingFrame: boolean,
+  ): void => {
+    if (!planned.has(tx.data.offerId)) return;
+    const offerId = asOfferId(tx.data.offerId);
+    const fingerprint = swapFillFingerprint(tx);
+    if (fromAppliedPendingFrame && alreadyApplied.has(fingerprint)) return;
     if (
       snapshot.appliedFrameHeight === undefined &&
-      alreadyApplied.has(swapFillFingerprint(tx))
+      alreadyApplied.has(fingerprint)
     ) {
-      throw new Error(`DISPUTE_ARGUMENT_APPLIED_FRAME_HEIGHT_MISSING:${snapshot.proofbodyHash}`);
+      invalidOffers.add(offerId);
+      ratios.delete(offerId);
+      return;
     }
-    if (shouldSkipAppliedPendingFrame && alreadyApplied.has(swapFillFingerprint(tx))) continue;
-    const offerId = asOfferId(tx.data.offerId);
-    if (ratios.has(offerId)) {
-      // Two unresolved fills for the same positional offer are ambiguous. Do
-      // not guess "last wins": a dispute argument must correspond to one exact
-      // signed proof body, or we fail before producing unsafe calldata.
-      throw new Error(`DISPUTE_ARGUMENT_SWAP_FILL_AMBIGUOUS:${tx.data.offerId}`);
+    const ratio = optionalSwapResolveFillRatio(tx);
+    if (ratio === null || invalidOffers.has(offerId) || ratios.has(offerId)) {
+      // Optional evidence for one offer must never hold the whole account
+      // hostage. Partial exact ratios, coarse/exact drift, or two competing
+      // fills prove nothing for this offer. Other positional offers remain
+      // usable, while the signed ProofBody itself is still required verbatim.
+      invalidOffers.add(offerId);
+      ratios.delete(offerId);
+      return;
     }
-    ratios.set(offerId, committedSwapResolveFillRatio(tx));
+    ratios.set(offerId, ratio);
+  };
+  for (const tx of pendingFrameTxs) {
+    if (tx.type !== 'swap_resolve') continue;
+    recordOptionalFill(tx, shouldSkipAppliedPendingFrame);
   }
   for (const tx of account.mempool ?? []) {
     if (tx.type !== 'swap_resolve') continue;
-    if (!planned.has(tx.data.offerId)) continue;
-    const offerId = asOfferId(tx.data.offerId);
-    if (ratios.has(offerId)) {
-      throw new Error(`DISPUTE_ARGUMENT_SWAP_FILL_AMBIGUOUS:${tx.data.offerId}`);
-    }
-    ratios.set(offerId, committedSwapResolveFillRatio(tx));
+    recordOptionalFill(tx, false);
   }
   return ratios;
 };
@@ -178,6 +191,7 @@ const collectKnownSecrets = (
   const secrets: string[] = [];
   for (const route of entityState.htlcRoutes.values()) {
     if (!route.secret) continue;
+    if (!/^0x[0-9a-fA-F]{64}$/.test(route.secret)) continue;
     const involvesCounterparty =
       route.inboundEntity === counterpartyEntityId ||
       route.outboundEntity === counterpartyEntityId;
@@ -190,10 +204,33 @@ const collectKnownSecrets = (
   return secrets;
 };
 
+/**
+ * Return only preimages committed by the exact signed ProofBody snapshot.
+ *
+ * Counterexample: publishing every secret ever learned from one counterparty
+ * lets 32 unrelated completed routes exhaust the jurisdiction batch cap and
+ * prevent an otherwise valid dispute from closing. The snapshot hash is the
+ * authority; live route state is only optional evidence for its hashlocks.
+ */
+export const collectKnownDisputeSecretsForSnapshot = (
+  account: AccountMachine,
+  entityState: EntityState,
+  counterpartyEntityId: string,
+  proofbodyHash: string,
+): string[] => {
+  const snapshot = requireDisputeArgumentSnapshot(account, proofbodyHash, 'secrets');
+  return collectKnownSecrets(entityState, counterpartyEntityId, snapshot.plan.paymentHashlocks);
+};
+
 const collectPullResolves = (account: AccountMachine): Map<string, string> => {
   const resolves = new Map<string, string>();
   for (const tx of [...(account.pendingFrame?.accountTxs ?? []), ...(account.mempool ?? [])]) {
-    if (tx.type === 'pull_resolve') resolves.set(tx.data.pullId, tx.data.binary || '0x');
+    if (tx.type !== 'pull_resolve') continue;
+    if (resolves.has(tx.data.pullId)) {
+      resolves.set(tx.data.pullId, '0x');
+      continue;
+    }
+    resolves.set(tx.data.pullId, typeof tx.data.binary === 'string' ? tx.data.binary : '0x');
   }
   return resolves;
 };
@@ -290,7 +327,11 @@ export function buildDisputeArgumentsForSnapshot(
   counterpartyEntityId: string,
   proofbodyHash: string,
   options: { secretsSide: DisputeArgumentSide | 'none' },
-): { leftArguments: string; rightArguments: string } {
+): {
+  leftArguments: string;
+  rightArguments: string;
+  warnings: readonly OptionalDisputeArgumentWarning[];
+} {
   // Fail closed when the exact signed proof body has no argument snapshot. A
   // live rebuild would be a rehydration bug and can pair wrong positional
   // swap/pull arguments with an old proof body.
@@ -303,15 +344,29 @@ export function buildDisputeArgumentsForSnapshot(
   const resolves = collectPullResolves(account);
   const leftFillRatios = snapshot.plan.leftSwapOfferIds.map((offerId) => fillRatios.get(asOfferId(offerId)) ?? 0);
   const rightFillRatios = snapshot.plan.rightSwapOfferIds.map((offerId) => fillRatios.get(asOfferId(offerId)) ?? 0);
-  const secrets = collectKnownSecrets(entityState, counterpartyEntityId, snapshot.plan.paymentHashlocks);
+  const secrets = collectKnownDisputeSecretsForSnapshot(
+    account,
+    entityState,
+    counterpartyEntityId,
+    proofbodyHash,
+  );
   const leftSecrets = options.secretsSide === 'left' ? secrets : [];
   const rightSecrets = options.secretsSide === 'right' ? secrets : [];
   const leftPulls = buildPullBuckets(snapshot.plan.leftPullIds, resolves);
   const rightPulls = buildPullBuckets(snapshot.plan.rightPullIds, resolves);
   const leftArgs = encodeDeltaTransformerArgs(leftFillRatios, leftSecrets, leftPulls);
   const rightArgs = encodeDeltaTransformerArgs(rightFillRatios, rightSecrets, rightPulls);
+  const left = sanitizeOptionalDisputeArgument(
+    hasArgumentData(leftFillRatios, leftSecrets, leftPulls) ? wrapTransformerArgs(leftArgs) : '0x',
+    'dispute.snapshot.left',
+  );
+  const right = sanitizeOptionalDisputeArgument(
+    hasArgumentData(rightFillRatios, rightSecrets, rightPulls) ? wrapTransformerArgs(rightArgs) : '0x',
+    'dispute.snapshot.right',
+  );
   return {
-    leftArguments: hasArgumentData(leftFillRatios, leftSecrets, leftPulls) ? wrapTransformerArgs(leftArgs) : '0x',
-    rightArguments: hasArgumentData(rightFillRatios, rightSecrets, rightPulls) ? wrapTransformerArgs(rightArgs) : '0x',
+    leftArguments: left.value,
+    rightArguments: right.value,
+    warnings: [...left.warnings, ...right.warnings],
   };
 }

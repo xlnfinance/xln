@@ -1,4 +1,5 @@
-const WAD = 10n ** 18n;
+import { getTokenInfo } from '@xln/runtime/account/utils';
+
 const USD_MICROS = 1_000_000n;
 
 export type RcpanMicroscopeToken = Readonly<{
@@ -13,51 +14,62 @@ export type RcpanMicroscopeToken = Readonly<{
   hubReserve: bigint;
 }>;
 
+const buildMicroscopeToken = (options: {
+  tokenId: number;
+  color: string;
+  usdPriceMicros: bigint;
+  grossWhole: bigint;
+  userReserveWhole: bigint;
+  hubReserveWhole: bigint;
+}): RcpanMicroscopeToken => {
+  const metadata = getTokenInfo(options.tokenId);
+  const scale = 10n ** BigInt(metadata.decimals);
+  return {
+    tokenId: options.tokenId,
+    symbol: metadata.symbol,
+    name: metadata.name,
+    decimals: metadata.decimals,
+    color: options.color,
+    usdPriceMicros: options.usdPriceMicros,
+    grossAmount: options.grossWhole * scale,
+    userReserve: options.userReserveWhole * scale,
+    hubReserve: options.hubReserveWhole * scale,
+  };
+};
+
 export const RCPAN_MICROSCOPE_TOKENS: readonly RcpanMicroscopeToken[] = [
-  {
+  buildMicroscopeToken({
     tokenId: 1,
-    symbol: 'USDC',
-    name: 'USD Coin',
-    decimals: 18,
     color: '#2775ca',
     usdPriceMicros: USD_MICROS,
-    grossAmount: 1_000_000n * WAD,
-    userReserve: 400_000n * WAD,
-    hubReserve: 2_000_000n * WAD,
-  },
-  {
+    grossWhole: 1_000_000n,
+    userReserveWhole: 400_000n,
+    hubReserveWhole: 2_000_000n,
+  }),
+  buildMicroscopeToken({
     tokenId: 2,
-    symbol: 'WETH',
-    name: 'Wrapped Ether',
-    decimals: 18,
     color: '#8b8df8',
     usdPriceMicros: 3_500n * USD_MICROS,
-    grossAmount: 400n * WAD,
-    userReserve: 200n * WAD,
-    hubReserve: 800n * WAD,
-  },
-  {
+    grossWhole: 400n,
+    userReserveWhole: 200n,
+    hubReserveWhole: 800n,
+  }),
+  buildMicroscopeToken({
     tokenId: 3,
-    symbol: 'USDT',
-    name: 'Tether USD',
-    decimals: 18,
     color: '#26a17b',
     usdPriceMicros: USD_MICROS,
-    grossAmount: 800_000n * WAD,
-    userReserve: 300_000n * WAD,
-    hubReserve: 1_600_000n * WAD,
-  },
-  {
+    grossWhole: 800_000n,
+    userReserveWhole: 300_000n,
+    hubReserveWhole: 1_600_000n,
+  }),
+  buildMicroscopeToken({
     tokenId: 4,
-    symbol: 'TRX',
-    name: 'TRON',
-    decimals: 18,
     color: '#ef445d',
     usdPriceMicros: 250_000n,
-    grossAmount: 6_000_000n * WAD,
-    userReserve: 2_000_000n * WAD,
-    hubReserve: 12_000_000n * WAD,
-  },
+    grossWhole: 6_000_000n,
+    userReserveWhole: 2_000_000n,
+    hubReserveWhole: 12_000_000n,
+  }),
 ];
 
 export function microscopeTokens(count: number): readonly RcpanMicroscopeToken[] {

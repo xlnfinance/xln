@@ -5,7 +5,7 @@ import {
   getBestAsk,
   getBestBid,
   getBookOrder,
-  SWAP_LOT_SCALE,
+  getSwapLotScale,
   type BookState,
   type OrderbookExtState,
 } from '../../../../orderbook';
@@ -228,11 +228,13 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
       }
       orderbookOfferMeta.set(orderId, meta);
       const metaSide = deriveSide(meta.giveTokenId, meta.wantTokenId);
+      const metaBaseTokenId = metaSide === 1 ? meta.giveTokenId : meta.wantTokenId;
+      const metaLotScale = getSwapLotScale(metaBaseTokenId);
       const metaBaseAmount = metaSide === 1 ? (meta.quantizedGive ?? meta.giveAmount) : meta.wantAmount;
       if (
         order.priceTicks !== meta.priceTicks ||
         order.ownerId !== (meta.makerIsLeft ? meta.fromEntity : meta.toEntity) ||
-        order.qtyLots !== metaBaseAmount / SWAP_LOT_SCALE
+        order.qtyLots !== metaBaseAmount / metaLotScale
       ) {
         throw new Error(
           `ORDERBOOK_CACHE_MISMATCH: pair=${pairId} order=${orderId} ` +

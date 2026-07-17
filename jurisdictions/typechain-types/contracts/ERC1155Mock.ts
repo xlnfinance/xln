@@ -28,12 +28,15 @@ export interface ERC1155MockInterface extends Interface {
     nameOrSignature:
       | "balanceOf"
       | "balanceOfBatch"
+      | "exists"
       | "isApprovedForAll"
       | "mint"
       | "safeBatchTransferFrom"
       | "safeTransferFrom"
       | "setApprovalForAll"
       | "supportsInterface"
+      | "totalSupply()"
+      | "totalSupply(uint256)"
       | "uri"
   ): FunctionFragment;
 
@@ -52,6 +55,10 @@ export interface ERC1155MockInterface extends Interface {
   encodeFunctionData(
     functionFragment: "balanceOfBatch",
     values: [AddressLike[], BigNumberish[]]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "exists",
+    values: [BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "isApprovedForAll",
@@ -83,6 +90,14 @@ export interface ERC1155MockInterface extends Interface {
     functionFragment: "supportsInterface",
     values: [BytesLike]
   ): string;
+  encodeFunctionData(
+    functionFragment: "totalSupply()",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "totalSupply(uint256)",
+    values: [BigNumberish]
+  ): string;
   encodeFunctionData(functionFragment: "uri", values: [BigNumberish]): string;
 
   decodeFunctionResult(functionFragment: "balanceOf", data: BytesLike): Result;
@@ -90,6 +105,7 @@ export interface ERC1155MockInterface extends Interface {
     functionFragment: "balanceOfBatch",
     data: BytesLike
   ): Result;
+  decodeFunctionResult(functionFragment: "exists", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "isApprovedForAll",
     data: BytesLike
@@ -109,6 +125,14 @@ export interface ERC1155MockInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "supportsInterface",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "totalSupply()",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "totalSupply(uint256)",
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "uri", data: BytesLike): Result;
@@ -260,6 +284,8 @@ export interface ERC1155Mock extends BaseContract {
     "view"
   >;
 
+  exists: TypedContractMethod<[id: BigNumberish], [boolean], "view">;
+
   isApprovedForAll: TypedContractMethod<
     [account: AddressLike, operator: AddressLike],
     [boolean],
@@ -308,6 +334,14 @@ export interface ERC1155Mock extends BaseContract {
     "view"
   >;
 
+  "totalSupply()": TypedContractMethod<[], [bigint], "view">;
+
+  "totalSupply(uint256)": TypedContractMethod<
+    [id: BigNumberish],
+    [bigint],
+    "view"
+  >;
+
   uri: TypedContractMethod<[arg0: BigNumberish], [string], "view">;
 
   getFunction<T extends ContractMethod = ContractMethod>(
@@ -328,6 +362,9 @@ export interface ERC1155Mock extends BaseContract {
     [bigint[]],
     "view"
   >;
+  getFunction(
+    nameOrSignature: "exists"
+  ): TypedContractMethod<[id: BigNumberish], [boolean], "view">;
   getFunction(
     nameOrSignature: "isApprovedForAll"
   ): TypedContractMethod<
@@ -378,6 +415,12 @@ export interface ERC1155Mock extends BaseContract {
   getFunction(
     nameOrSignature: "supportsInterface"
   ): TypedContractMethod<[interfaceId: BytesLike], [boolean], "view">;
+  getFunction(
+    nameOrSignature: "totalSupply()"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "totalSupply(uint256)"
+  ): TypedContractMethod<[id: BigNumberish], [bigint], "view">;
   getFunction(
     nameOrSignature: "uri"
   ): TypedContractMethod<[arg0: BigNumberish], [string], "view">;

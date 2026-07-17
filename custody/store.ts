@@ -40,6 +40,8 @@ export type WithdrawalRecord = {
   status: WithdrawalStatus;
   hashlock: string | null;
   routeJson: string | null;
+  commandId: string;
+  commandSequence: number | null;
   daemonError: string | null;
   createdAt: number;
   updatedAt: number;
@@ -112,6 +114,8 @@ export class CustodyStore {
         status TEXT NOT NULL,
         hashlock TEXT,
         route_json TEXT,
+        command_id TEXT,
+        command_sequence INTEGER,
         daemon_error TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
@@ -129,6 +133,8 @@ export class CustodyStore {
     this.ensureWithdrawalColumn('requested_amount_minor', "ALTER TABLE withdrawals ADD COLUMN requested_amount_minor TEXT NOT NULL DEFAULT '0'");
     this.ensureWithdrawalColumn('fee_minor', "ALTER TABLE withdrawals ADD COLUMN fee_minor TEXT NOT NULL DEFAULT '0'");
     this.ensureWithdrawalColumn('started_at_ms', 'ALTER TABLE withdrawals ADD COLUMN started_at_ms INTEGER');
+    this.ensureWithdrawalColumn('command_id', 'ALTER TABLE withdrawals ADD COLUMN command_id TEXT');
+    this.ensureWithdrawalColumn('command_sequence', 'ALTER TABLE withdrawals ADD COLUMN command_sequence INTEGER');
   }
 
   private ensureDepositColumn(columnName: string, alterSql: string): void {
@@ -274,6 +280,8 @@ export class CustodyStore {
     feeMinor: bigint;
     targetEntityId: string;
     description: string;
+    routeJson: string;
+    commandId: string;
     createdAt: number;
     startedAtMs?: number | null;
   }): WithdrawalRecord {
@@ -287,8 +295,9 @@ export class CustodyStore {
         .query(`
           INSERT INTO withdrawals (
             id, user_id, token_id, amount_minor, requested_amount_minor, fee_minor, target_entity_id, description, status,
-            hashlock, route_json, daemon_error, created_at, updated_at, finalized_at, frame_height, started_at_ms
-          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'submitting', NULL, NULL, NULL, ?9, ?9, NULL, NULL, ?10)
+            hashlock, route_json, command_id, command_sequence, daemon_error, created_at, updated_at, finalized_at,
+            frame_height, started_at_ms
+          ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'submitting', NULL, ?9, ?10, NULL, NULL, ?11, ?11, NULL, NULL, ?12)
         `)
         .run(
           input.id,
@@ -299,6 +308,8 @@ export class CustodyStore {
           input.feeMinor.toString(),
           input.targetEntityId,
           input.description,
+          input.routeJson,
+          input.commandId,
           input.createdAt,
           input.startedAtMs ?? null,
         );
@@ -310,6 +321,43 @@ export class CustodyStore {
       throw new Error('Failed to create withdrawal');
     }
     return withdrawal;
+  }
+
+  setWithdrawalCommandSequence(id: string, commandId: string, commandSequence: number): WithdrawalRecord {
+    if (!Number.isSafeInteger(commandSequence) || commandSequence <= 0) {
+      throw new Error(`CUSTODY_WITHDRAWAL_COMMAND_SEQUENCE_INVALID:${String(commandSequence)}`);
+    }
+    const withdrawal = this.getWithdrawalById(id);
+    if (!withdrawal || withdrawal.status !== 'submitting') {
+      throw new Error(`CUSTODY_WITHDRAWAL_NOT_SUBMITTING:${id}`);
+    }
+    if (withdrawal.commandId !== commandId) {
+      throw new Error(`CUSTODY_WITHDRAWAL_COMMAND_ID_CONFLICT:${id}`);
+    }
+    if (withdrawal.commandSequence !== null && withdrawal.commandSequence !== commandSequence) {
+      throw new Error(`CUSTODY_WITHDRAWAL_COMMAND_SEQUENCE_CONFLICT:${id}`);
+    }
+    this.db.query(
+      `UPDATE withdrawals SET command_sequence = ?2, updated_at = ?3
+       WHERE id = ?1 AND status = 'submitting' AND command_id = ?4
+         AND (command_sequence IS NULL OR command_sequence = ?2)`,
+    ).run(id, commandSequence, now(), commandId);
+    const updated = this.getWithdrawalById(id);
+    if (!updated || updated.commandSequence !== commandSequence) {
+      throw new Error(`CUSTODY_WITHDRAWAL_COMMAND_SEQUENCE_WRITE_FAILED:${id}`);
+    }
+    return updated;
+  }
+
+  listSubmittingWithdrawals(): WithdrawalRecord[] {
+    const rows = this.db.query<{ id: string }>(
+      `SELECT id FROM withdrawals WHERE status = 'submitting' ORDER BY created_at ASC, id ASC`,
+    ).all();
+    return rows.map(row => {
+      const withdrawal = this.getWithdrawalById(row.id);
+      if (!withdrawal) throw new Error(`CUSTODY_WITHDRAWAL_DISAPPEARED:${row.id}`);
+      return withdrawal;
+    });
   }
 
   markWithdrawalSent(params: {
@@ -337,18 +385,35 @@ export class CustodyStore {
     const txn = this.db.transaction((input: typeof params) => {
       const withdrawal = this.getWithdrawalById(input.id);
       if (!withdrawal) return null;
-      if (input.restoreBalance && withdrawal.status === 'submitting') {
+      if (withdrawal.status === 'failed') return withdrawal;
+      if (withdrawal.status !== 'submitting') {
+        throw new Error(`CUSTODY_WITHDRAWAL_TERMINAL_CONFLICT:${input.id}:${withdrawal.status}->failed`);
+      }
+      // The sequence is persisted immediately before network I/O. Once it
+      // exists, a lost response cannot prove whether the daemon committed the
+      // payment, so an automatic refund could pay both the user and recipient.
+      if (input.restoreBalance && withdrawal.commandSequence !== null) {
+        throw new Error(`CUSTODY_WITHDRAWAL_PREPARED_REFUND_FORBIDDEN:${input.id}`);
+      }
+      if (input.restoreBalance) {
         const current = this.getBalanceAmount(withdrawal.userId, withdrawal.tokenId);
         this.setBalanceAmount(withdrawal.userId, withdrawal.tokenId, current + withdrawal.amountMinor, input.updatedAt);
       }
-      this.db
+      const updated = this.db
         .query(
           `UPDATE withdrawals
            SET status = 'failed', daemon_error = ?2, updated_at = ?3, finalized_at = ?3
-           WHERE id = ?1`,
+           WHERE id = ?1 AND status = 'submitting'`,
         )
         .run(input.id, input.error, input.updatedAt);
-      return this.getWithdrawalById(input.id);
+      if (Number(updated.changes) !== 1) {
+        throw new Error(`CUSTODY_WITHDRAWAL_FAILED_WRITE_CONFLICT:${input.id}`);
+      }
+      const failed = this.getWithdrawalById(input.id);
+      if (!failed || failed.status !== 'failed') {
+        throw new Error(`CUSTODY_WITHDRAWAL_FAILED_WRITE_FAILED:${input.id}`);
+      }
+      return failed;
     });
     return txn(params);
   }
@@ -377,47 +442,29 @@ export class CustodyStore {
     const txn = this.db.transaction((input: typeof params) => {
       const withdrawal = this.getWithdrawalByHashlock(input.hashlock);
       if (!withdrawal) return null;
-      if (withdrawal.status !== 'failed') {
-        const current = this.getBalanceAmount(withdrawal.userId, withdrawal.tokenId);
-        this.setBalanceAmount(withdrawal.userId, withdrawal.tokenId, current + withdrawal.amountMinor, input.updatedAt);
+      if (withdrawal.status === 'failed') return withdrawal;
+      if (withdrawal.status === 'finalized') {
+        throw new Error(`CUSTODY_WITHDRAWAL_TERMINAL_CONFLICT:${withdrawal.id}:finalized->failed`);
       }
-      this.db
+      const current = this.getBalanceAmount(withdrawal.userId, withdrawal.tokenId);
+      this.setBalanceAmount(withdrawal.userId, withdrawal.tokenId, current + withdrawal.amountMinor, input.updatedAt);
+      const updated = this.db
         .query(
           `UPDATE withdrawals
            SET status = 'failed', daemon_error = ?2, frame_height = ?3, updated_at = ?4, finalized_at = ?4
-           WHERE hashlock = ?1`,
+           WHERE hashlock = ?1 AND status IN ('submitting', 'sent')`,
         )
         .run(input.hashlock, input.error, input.frameHeight, input.updatedAt);
-      return this.getWithdrawalByHashlock(input.hashlock);
+      if (Number(updated.changes) !== 1) {
+        throw new Error(`CUSTODY_WITHDRAWAL_FAILED_WRITE_CONFLICT:${withdrawal.id}`);
+      }
+      const failed = this.getWithdrawalByHashlock(input.hashlock);
+      if (!failed || failed.status !== 'failed') {
+        throw new Error(`CUSTODY_WITHDRAWAL_FAILED_WRITE_FAILED:${withdrawal.id}`);
+      }
+      return failed;
     });
     return txn(params);
-  }
-
-  recoverSubmittingWithdrawals(errorMessage: string): number {
-    const withdrawals = this.db
-      .query<{ id: string; user_id: string; token_id: number; amount_minor: string }>(
-        `SELECT id, user_id, token_id, amount_minor FROM withdrawals WHERE status = 'submitting'`,
-      )
-      .all();
-    if (withdrawals.length === 0) return 0;
-
-    const txn = this.db.transaction((rows: typeof withdrawals) => {
-      const touchedAt = now();
-      for (const row of rows) {
-        const current = this.getBalanceAmount(row.user_id, row.token_id);
-        this.setBalanceAmount(row.user_id, row.token_id, current + toBigInt(row.amount_minor), touchedAt);
-        this.db
-          .query(
-            `UPDATE withdrawals
-             SET status = 'failed', daemon_error = ?2, updated_at = ?3, finalized_at = ?3
-             WHERE id = ?1`,
-          )
-          .run(row.id, errorMessage, touchedAt);
-      }
-    });
-
-    txn(withdrawals);
-    return withdrawals.length;
   }
 
   getWithdrawalById(id: string): WithdrawalRecord | null {
@@ -434,6 +481,8 @@ export class CustodyStore {
         status: WithdrawalStatus;
         hashlock: string | null;
         route_json: string | null;
+        command_id: string | null;
+        command_sequence: number | null;
         daemon_error: string | null;
         created_at: number;
         updated_at: number;
@@ -442,7 +491,7 @@ export class CustodyStore {
         started_at_ms: number | null;
       }>(
         `SELECT id, user_id, token_id, amount_minor, requested_amount_minor, fee_minor, target_entity_id, description, status, hashlock,
-                route_json, daemon_error, created_at, updated_at, finalized_at, frame_height, started_at_ms
+                route_json, command_id, command_sequence, daemon_error, created_at, updated_at, finalized_at, frame_height, started_at_ms
          FROM withdrawals WHERE id = ?1`,
       )
       .get(id);
@@ -459,6 +508,8 @@ export class CustodyStore {
       status: row.status,
       hashlock: row.hashlock,
       routeJson: row.route_json,
+      commandId: row.command_id || `custody:${row.id}`,
+      commandSequence: row.command_sequence,
       daemonError: row.daemon_error,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -507,6 +558,8 @@ export class CustodyStore {
         status: WithdrawalStatus;
         hashlock: string | null;
         route_json: string | null;
+        command_id: string | null;
+        command_sequence: number | null;
         daemon_error: string | null;
         created_at: number;
         updated_at: number;
@@ -515,7 +568,7 @@ export class CustodyStore {
         started_at_ms: number | null;
       }>(
         `SELECT id, user_id, token_id, amount_minor, requested_amount_minor, fee_minor, target_entity_id, description, status, hashlock,
-                route_json, daemon_error, created_at, updated_at, finalized_at, frame_height, started_at_ms
+                route_json, command_id, command_sequence, daemon_error, created_at, updated_at, finalized_at, frame_height, started_at_ms
          FROM withdrawals WHERE user_id = ?1 ORDER BY created_at DESC LIMIT ?2`,
       )
       .all(userId, limit);
@@ -547,6 +600,8 @@ export class CustodyStore {
         status: row.status,
         hashlock: row.hashlock,
         routeJson: row.route_json,
+        commandId: row.command_id || `custody:${row.id}`,
+        commandSequence: row.command_sequence,
         daemonError: row.daemon_error,
         createdAt: row.created_at,
         updatedAt: row.updated_at,

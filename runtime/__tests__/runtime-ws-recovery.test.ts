@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { deriveEncryptionKeyPair } from '../networking/p2p-crypto';
 import { RuntimeWsClient } from '../networking/ws-client';
+import { deserializeWsMessage, serializeWsMessage } from '../networking/ws-protocol';
 import { startStandaloneRelayServer, type StandaloneRelayServer } from '../relay/standalone-server';
 
 const SERVER_RUNTIME_ID = '0x9999999999999999999999999999999999999999';
@@ -41,6 +42,8 @@ const makeClient = (options: {
   runtimeId: string;
   signerId: string;
   onOpen?: () => void;
+  getTargetEncryptionKey?: (runtimeId: string) => Uint8Array | null;
+  onEntityInput?: (from: string) => Promise<void> | void;
   onRecoveryBundleRequest?: (from: string, lookupKey: string) => Promise<unknown> | unknown;
   onError?: (error: Error) => void;
 }): RuntimeWsClient => {
@@ -51,6 +54,8 @@ const makeClient = (options: {
     seed: options.seed,
     useHelloAuth: true,
     encryptionKeyPair: deriveEncryptionKeyPair(options.seed),
+    getTargetEncryptionKey: options.getTargetEncryptionKey,
+    onEntityInput: options.onEntityInput,
     onOpen: options.onOpen,
     onRecoveryBundleRequest: options.onRecoveryBundleRequest,
     onError: options.onError,
@@ -95,6 +100,51 @@ describe('runtime websocket recovery requests', () => {
 
     expect(registeredWhenOpened).toBe(true);
     expect(errors).toEqual([]);
+  });
+
+  test('authenticated socket cannot send gossip before hello acknowledgement', async () => {
+    let socket: { send: (payload: string | ArrayBufferView | ArrayBuffer) => number } | null = null;
+    const receivedTypes: string[] = [];
+    let rawServer: ReturnType<typeof Bun.serve> | null = null;
+    rawServer = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch(request, server) {
+        if (request.headers.get('upgrade') === 'websocket' && server.upgrade(request)) return;
+        return new Response('websocket only', { status: 400 });
+      },
+      websocket: {
+        open(ws) {
+          socket = ws;
+          ws.send(serializeWsMessage({
+            type: 'hello_challenge',
+            challenge: 'runtime-ws-auth-readiness',
+          }));
+        },
+        message(_ws, raw) {
+          receivedTypes.push(deserializeWsMessage(raw).type);
+        },
+      },
+    });
+    rawServers.push(rawServer);
+    const client = makeClient({
+      url: `ws://127.0.0.1:${rawServer.port}`,
+      seed: SEED_A,
+      runtimeId: RUNTIME_A,
+      signerId: '1',
+    });
+
+    await client.connect();
+    await waitUntil(() => receivedTypes.includes('hello'), 'client hello');
+
+    expect(client.isConnecting()).toBe(true);
+    expect(client.isOpen()).toBe(false);
+    expect(client.sendGossipAnnounce(RUNTIME_A, { profiles: [] })).toBe(false);
+    expect(receivedTypes).toEqual(['hello']);
+
+    socket?.send(serializeWsMessage({ type: 'hello_ack', to: RUNTIME_A }));
+    await waitUntil(() => client.isOpen(), 'authenticated client ready');
+    expect(client.isConnecting()).toBe(false);
   });
 
   test('requestRecoveryBundles resolves a correlated peer response through relay', async () => {
@@ -159,6 +209,47 @@ describe('runtime websocket recovery requests', () => {
     expect(requesterErrors).toEqual([]);
   });
 
+  test('reports a retryable inbound entity rejection without killing the websocket consumer', async () => {
+    const relay = startRelay();
+    const url = `ws://127.0.0.1:${relay.server.port}`;
+    const receiverErrors: string[] = [];
+    let received = 0;
+    const sender = makeClient({
+      url,
+      seed: SEED_A,
+      runtimeId: RUNTIME_A,
+      signerId: '1',
+      getTargetEncryptionKey: runtimeId => (
+        runtimeId === RUNTIME_B ? deriveEncryptionKeyPair(SEED_B).publicKey : null
+      ),
+    });
+    const receiver = makeClient({
+      url,
+      seed: SEED_B,
+      runtimeId: RUNTIME_B,
+      signerId: '2',
+      onEntityInput: () => {
+        received += 1;
+        throw new Error('INBOUND_ENTITY_RUNTIME_QUIESCING');
+      },
+      onError: error => receiverErrors.push(error.message),
+    });
+    await sender.connect();
+    await receiver.connect();
+    await waitUntil(() => relay.store.clients.has(RUNTIME_A) && relay.store.clients.has(RUNTIME_B), 'relay clients');
+
+    expect(sender.sendEntityInputRaw(RUNTIME_B, {
+      entityId: `0x${'44'.repeat(32)}`,
+      signerId: '2',
+      runtimeId: RUNTIME_B,
+      entityTxs: [],
+    })).toBe(true);
+    await waitUntil(() => receiverErrors.includes('INBOUND_ENTITY_RUNTIME_QUIESCING'), 'retryable rejection reported');
+
+    expect(received).toBe(1);
+    expect(receiver.isOpen()).toBe(true);
+  });
+
   test('requestRecoveryBundles times out when a connected peer never answers', async () => {
     let rawServer: ReturnType<typeof Bun.serve> | null = null;
     rawServer = Bun.serve({
@@ -171,7 +262,18 @@ describe('runtime websocket recovery requests', () => {
         return new Response('websocket only', { status: 400 });
       },
       websocket: {
-        message() {},
+        open(ws) {
+          ws.send(serializeWsMessage({
+            type: 'hello_challenge',
+            challenge: 'runtime-ws-recovery-timeout',
+          }));
+        },
+        message(ws, raw) {
+          const message = deserializeWsMessage(raw);
+          if (message.type === 'hello') {
+            ws.send(serializeWsMessage({ type: 'hello_ack', to: RUNTIME_A }));
+          }
+        },
       },
     });
     rawServers.push(rawServer);

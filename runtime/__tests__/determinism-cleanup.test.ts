@@ -31,8 +31,8 @@ describe('determinism cleanup lifecycle', () => {
 
     expect(source).toContain('const inFlightWatcherPoll = pollInFlight;');
     expect(source).toContain('adapter.stopWatching();');
-    expect(source).toContain('inFlightWatcherPoll.catch(() => undefined)');
-    expect(source).toContain('setTimeout(resolve, 2_500)');
+    expect(source).toContain('if (inFlightWatcherPoll) await inFlightWatcherPoll;');
+    expect(source).not.toContain('inFlightWatcherPoll.catch(() => undefined)');
   });
 
   test('rpc watcher cancellation keeps in-flight poll tracked and blocks late event ingress', () => {
@@ -44,6 +44,12 @@ describe('determinism cleanup lifecycle', () => {
     expect(source).toContain('const watcherPollCancelled = (): boolean =>');
     expect(source).toContain('if (watcherPollCancelled()) return;');
     expect(source).toContain("step: 'before-process-event-batch'");
+    expect(source).toContain("step: 'before-authenticated-history-range-ingress'");
+    expect(source).toContain("step: 'before-authenticated-empty-range-ingress'");
+    const historyIngress = source.indexOf('const rangeReplicaKeys = enqueueJHistoryRange(');
+    const emptyIngress = source.indexOf('const rangeReplicaKeys = enqueueJHistoryRange(', historyIngress + 1);
+    expect(source.lastIndexOf('if (isJEventIngressPaused(activeEnv)) {', historyIngress)).toBeGreaterThan(0);
+    expect(source.lastIndexOf('if (isJEventIngressPaused(activeEnv)) {', emptyIngress)).toBeGreaterThan(historyIngress);
     expect(stopSource).not.toContain('pollInFlight = null;');
   });
 

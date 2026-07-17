@@ -19,7 +19,7 @@
 
 import type { Env, SettlementDiff, SettlementOp } from '../types';
 import {
-  getProcess, advanceScenarioTime, enableStrictScenario, converge, syncChain,
+  getProcess, advanceScenarioTime, enableStrictScenario, converge as convergeRuntime, syncChain,
   assert, findReplica, usd, snap,
 } from './helpers';
 import { bootScenario, registerEntities, type RegisteredEntity } from './boot';
@@ -27,9 +27,11 @@ import { userAutoApprove } from '../entity/tx/handlers/settle';
 import { deriveDelta } from '../account/utils';
 import { isLeftEntity } from '../entity/id';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
+import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
 import { ethers } from 'ethers';
 
 const USDC = 1;
+const converge = (env: Env, maxCycles = 15): Promise<void> => convergeRuntime(env, maxCycles);
 
 const requireRegisteredEntity = (
   entity: RegisteredEntity | undefined,
@@ -48,12 +50,7 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
   console.log('='.repeat(80));
 
   const process = await getProcess();
-  const advanceTime = (ms: number) => {
-    env.timestamp += ms;
-    for (const [, replica] of env.eReplicas) {
-      replica.state.timestamp = env.timestamp;
-    }
-  };
+  const advanceTime = (ms: number) => advanceScenarioTime(env, ms, true);
 
   // ══════════════════════════════════════════════════════════════════════════
   // PHASE 0: SETUP
@@ -80,6 +77,7 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
   };
   console.log = quietLog;
   const cleanupStrictMode = enableStrictScenario(env, 'settle-rebalance');
+  try {
 
   const registered = await registerEntities(env, jadapter, [
     { name: 'Hub',     signer: '2', position: { x: 0, y: 0, z: 0 } },
@@ -244,7 +242,7 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
     entityId: alice.id, signerId: alice.signer,
     entityTxs: [{ type: 'settle_propose', data: { counterpartyEntityId: hub.id, ops: depositOps, memo: 'deposit' } }]
   }]);
-  for (let i = 0; i < 5; i++) { advanceScenarioTime(env); await process(env); }
+  await converge(env);
 
   const aliceWs1 = findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.settlementWorkspace;
   assert(aliceWs1?.version === 1, 'Workspace should be version 1', env);
@@ -296,13 +294,21 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
   console.log('\n--- TEST 4: Settle Reject ---');
   console.log = quietLog;
 
-  // Hub proposes a new settlement, then Alice rejects it to clear workspace + holds.
-  const hubDepositOps: SettlementOp[] = [{ type: 'r2c', tokenId: USDC, amount: usd(50) }];
+  // Hub proposes taking Alice's reserve. That cannot auto-seal on Alice's
+  // behalf, so the unsigned workspace remains explicitly rejectable.
+  const hubTakeOps: SettlementOp[] = [{
+    type: 'rawDiff',
+    tokenId: USDC,
+    leftDiff: usd(50),
+    rightDiff: -usd(50),
+    collateralDiff: 0n,
+    ondeltaDiff: 0n,
+  }];
   await process(env, [{
     entityId: hub.id, signerId: hub.signer,
-    entityTxs: [{ type: 'settle_propose', data: { counterpartyEntityId: alice.id, ops: hubDepositOps, memo: 'reject me' } }]
+    entityTxs: [{ type: 'settle_propose', data: { counterpartyEntityId: alice.id, ops: hubTakeOps, memo: 'reject me' } }]
   }]);
-  for (let i = 0; i < 5; i++) { advanceScenarioTime(env); await process(env); }
+  await converge(env);
 
   // Workspace must exist on Alice side before explicit reject.
   const aliceWsReject = findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.settlementWorkspace;
@@ -312,7 +318,7 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
     entityId: alice.id, signerId: alice.signer,
     entityTxs: [{ type: 'settle_reject', data: { counterpartyEntityId: hub.id, reason: 'nope' } }]
   }]);
-  for (let i = 0; i < 5; i++) { advanceScenarioTime(env); await process(env); }
+  await converge(env);
 
   const aliceAccAfterReject = findReplica(env, alice.id)[1].state.accounts.get(hub.id);
   assert(!aliceAccAfterReject?.settlementWorkspace, 'Workspace should be cleared after reject', env);
@@ -401,7 +407,9 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
     entityId: hub.id, signerId: hub.signer,
     entityTxs: [{ type: 'setHubConfig', data: { matchingStrategy: 'amount', routingFeePPM: 100, baseFee: 0n } }]
   }]);
-  await converge(env);
+  // Hub activation releases two independent Account rebalance lanes plus
+  // their shared on-chain batch/finality round; keep the bound explicit.
+  await converge(env, 30);
 
   const hubConfig = findReplica(env, hub.id)[1].state.hubRebalanceConfig;
   assert(hubConfig, 'Hub config should be set', env);
@@ -430,7 +438,7 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
   await process(env, [{
     entityId: hub.id,
     signerId: hub.signer,
-    entityTxs: [{
+    entityTxs: [withDeterministicHtlcTestSecret({
       type: 'htlcPayment',
       data: {
         targetEntityId: dave.id,
@@ -438,10 +446,9 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
         amount: usd(2_000),
         route: [hub.id, dave.id],
         description: 'hub->dave htlc rebalance trigger',
-        secret: htlcSecret,
         hashlock: htlcHashlock,
       },
-    }],
+    }, htlcSecret)],
   }]);
   let daveAccountAfterHtlc = findReplica(env, dave.id)[1].state.accounts.get(hub.id);
   let daveRequestedAfterHtlc = 0n;
@@ -513,12 +520,11 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
   console.log('\n--- TEST 7: Hub Crontab Rebalance ---');
   console.log = quietLog;
 
-  const rebalanceEvidenceBefore = new Map<string, { collateral: bigint; jEventChainLen: number }>();
+  const rebalanceEvidenceBefore = new Map<string, { collateral: bigint }>();
   for (const user of users) {
     const account = findReplica(env, hub.id)[1].state.accounts.get(user.id);
     const coll = account?.deltas.get(USDC)?.collateral || 0n;
-    const jEventChainLen = account?.jEventChain?.length || 0;
-    rebalanceEvidenceBefore.set(user.id, { collateral: coll, jEventChainLen });
+    rebalanceEvidenceBefore.set(user.id, { collateral: coll });
   }
 
   // Cycle 1: Hub detects C→R (Alice, Charlie) + R→C (Bob, Dave)
@@ -658,7 +664,7 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
   const collateralDecreasedUsers: string[] = [];
   const collateralIncreasedUsers: string[] = [];
   for (const user of users) {
-    const before = rebalanceEvidenceBefore.get(user.id) || { collateral: 0n, jEventChainLen: 0 };
+    const before = rebalanceEvidenceBefore.get(user.id) || { collateral: 0n };
     const hubAccount = hubFinal.accounts.get(user.id);
     const afterCollateral = hubAccount?.deltas.get(USDC)?.collateral || 0n;
     if (afterCollateral < before.collateral) collateralDecreasedUsers.push(user.name);
@@ -688,14 +694,19 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
   // ══════════════════════════════════════════════════════════════════════════
   // CLEANUP
   // ══════════════════════════════════════════════════════════════════════════
-  cleanupStrictMode();
-  await jadapter.close();
-
   console.log('\n' + '='.repeat(80));
   console.log('  ALL SETTLE + REBALANCE TESTS PASSED');
   console.log('='.repeat(80) + '\n');
 
   return env;
+  } finally {
+    try {
+      await jadapter.close();
+    } finally {
+      cleanupStrictMode();
+      console.log = originalLog;
+    }
+  }
 }
 
 // Run if executed directly

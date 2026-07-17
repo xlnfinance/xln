@@ -51,38 +51,11 @@ export const applyCommittedSwapCancelsToOrderbook = (
   }
 };
 
-export const findEntityStateById = (env: Env, entityId: string): EntityState | null => {
-  const target = normalizeEntityRef(entityId);
-  for (const replica of env.eReplicas?.values?.() || []) {
-    const candidate = normalizeEntityRef(replica?.state?.entityId || replica?.entityId || '');
-    if (candidate === target) return replica.state;
-  }
-  return null;
-};
-
 export const findAccountByCounterparty = (state: EntityState | null | undefined, counterpartyId: string) => {
   if (!state?.accounts) return null;
   const target = normalizeEntityRef(counterpartyId);
   for (const [accountId, account] of state.accounts.entries()) {
     if (normalizeEntityRef(accountId) === target) return account;
-  }
-  return null;
-};
-
-export const findSwapOfferOwnerState = (
-  env: Env,
-  currentEntityState: EntityState,
-  accountId: string,
-  offerId: string,
-): EntityState | null => {
-  const account = findAccountByCounterparty(currentEntityState, accountId);
-  if (account?.swapOffers?.has(offerId)) return currentEntityState;
-  const currentId = normalizeEntityRef(currentEntityState.entityId);
-  for (const replica of env.eReplicas?.values?.() || []) {
-    const state = replica?.state;
-    if (!state || normalizeEntityRef(state.entityId) === currentId) continue;
-    const remoteAccount = findAccountByCounterparty(state, accountId);
-    if (remoteAccount?.swapOffers?.has(offerId)) return state;
   }
   return null;
 };

@@ -6,6 +6,7 @@ import {
   compareTokenSymbols,
   findAssetLedgerRowBySymbol,
   findExternalTokenBySymbol,
+  getExternalTokenIdentityKey,
   getFaucetReserveTokenMeta,
   isReserveTransferToken,
   requireExternalTokenBySymbol,
@@ -46,18 +47,31 @@ describe('entity asset catalog helpers', () => {
       .toEqual(['ETH', 'USDT', 'USDC', 'ABC', 'ZZZ']);
   });
 
-  test('dedupes external tokens and keeps the highest observed balance', () => {
+  test('retains distinct registered assets even when their symbols collide', () => {
     const sorted = sortExternalTokens([
-      token({ symbol: 'USDC', balance: 1n, tokenId: undefined }),
+      token({ symbol: 'USDC', address: '0xusdc1', balance: 1n, tokenId: 1 }),
       token({ symbol: 'ETH', balance: 2n }),
-      token({ symbol: 'usdc', address: '0xusdc2', balance: 5n, tokenId: 1 }),
+      token({ symbol: 'usdc', address: '0xusdc2', balance: 5n, tokenId: 2 }),
     ]);
 
-    expect(sorted.map((entry) => [entry.symbol, entry.balance, entry.tokenId])).toEqual([
-      ['ETH', 2n, undefined],
-      ['USDC', 5n, 1],
+    expect(sorted.map((entry) => [entry.symbol, entry.address, entry.balance, entry.tokenId])).toEqual([
+      ['ETH', '0xeth', 2n, undefined],
+      ['USDC', '0xusdc1', 1n, 1],
+      ['usdc', '0xusdc2', 5n, 2],
     ]);
     expect(choosePreferredAssetSymbol(sorted)).toBe('ETH');
+    expect(() => findExternalTokenBySymbol(sorted, 'USDC')).toThrow(
+      'ASSET_SYMBOL_AMBIGUOUS:USDC:token:1,token:2',
+    );
+  });
+
+  test('rejects duplicate canonical identities instead of merging observations', () => {
+    const first = token({ symbol: 'USDC', address: '0xusdc1', tokenId: 1 });
+    expect(getExternalTokenIdentityKey(first)).toBe('token:1');
+    expect(() => sortExternalTokens([
+      first,
+      token({ symbol: 'SPOOF', address: '0xattacker', tokenId: 1 }),
+    ])).toThrow('ASSET_IDENTITY_DUPLICATE:token:1');
   });
 
   test('finds external tokens and ledger rows case-insensitively', () => {

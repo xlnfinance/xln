@@ -1,21 +1,27 @@
 import { isLeftEntity } from '../../id';
-import { announceLocalEntityProfile } from '../../../networking/gossip-helper';
-import { DEFAULT_HARD_LIMIT, DEFAULT_MAX_FEE, DEFAULT_SOFT_LIMIT } from '../../../types';
 import type { Delta, EntityInput, EntityState, EntityTx, Env } from '../../../types';
+import { scaleWholeTokenAmount } from '../../../types';
 import { formatEntityId } from '../../../utils';
 import { markStorageAccountDirty, markStorageEntityDirty } from '../../../machine/env-events';
 import { upsertSortedStringMapEntry } from '../../../storage/sorted-index';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
-import { assertSameJurisdictionAccount } from '../../../jurisdiction/jurisdiction-runtime';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../../account/default-tokens';
-import { deriveAccountWatchSeed, normalizeAccountWatchSeed } from '../../../account/watch-seed';
+import { normalizeAccountWatchSeed } from '../../../account/watch-seed';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 import {
   accountStateDomainFromJurisdiction,
   computeAccountStateRoot,
   EMPTY_ACCOUNT_STATE_ROOT,
+  normalizeAccountStateDomain,
+  sameAccountStateDomain,
 } from '../../../account/state-root';
+import { appendAccountMempoolTxs } from '../../../account/mempool';
+import { assertEntityAccountInsertionCapacity } from '../../account-capacity';
+import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claim-accumulator';
+import { getDefaultRebalancePolicyForToken } from '../../../account/rebalance-defaults';
+import { getTokenInfo } from '../../../account/utils';
+import { buildHubRebalancePolicyTx } from './account-admin';
 
 type OpenAccountEntityTx = Extract<EntityTx, { type: 'openAccount' }>;
 
@@ -28,31 +34,39 @@ const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 const isEntityId32 = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
 const openAccountLog = createStructuredLogger('account.open');
 
-const USD_SCALE = 10n ** 18n;
-const toUsdWei = (value: number): bigint => BigInt(Math.max(0, Math.floor(value))) * USD_SCALE;
+const scaleWholePolicyAmount = (tokenId: number, value: number): bigint => {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`REBALANCE_POLICY_USD_INVALID:token=${tokenId}:value=${String(value)}`);
+  }
+  return scaleWholeTokenAmount(BigInt(Math.floor(value)), getTokenInfo(tokenId).decimals);
+};
 
 const resolveJurisdictionRebalanceDefaults = (
   entityState: EntityState,
+  tokenId: number,
 ): { r2cRequestSoftLimit: bigint; hardLimit: bigint; maxAcceptableFee: bigint } => {
   const raw = entityState.config?.jurisdiction?.rebalancePolicyUsd;
-  if (!raw) {
-    return {
-      r2cRequestSoftLimit: DEFAULT_SOFT_LIMIT,
-      hardLimit: DEFAULT_HARD_LIMIT,
-      maxAcceptableFee: DEFAULT_MAX_FEE,
-    };
-  }
-  const r2cRequestSoftLimit = toUsdWei(raw.r2cRequestSoftLimit);
-  const hardLimit = toUsdWei(raw.hardLimit);
-  const maxAcceptableFee = toUsdWei(raw.maxFee);
+  if (!raw) return getDefaultRebalancePolicyForToken(tokenId);
+  const r2cRequestSoftLimit = scaleWholePolicyAmount(tokenId, raw.r2cRequestSoftLimit);
+  const hardLimit = scaleWholePolicyAmount(tokenId, raw.hardLimit);
+  const maxAcceptableFee = scaleWholePolicyAmount(tokenId, raw.maxFee);
   if (r2cRequestSoftLimit <= 0n || hardLimit < r2cRequestSoftLimit) {
-    return {
-      r2cRequestSoftLimit: DEFAULT_SOFT_LIMIT,
-      hardLimit: DEFAULT_HARD_LIMIT,
-      maxAcceptableFee: DEFAULT_MAX_FEE,
-    };
+    throw new Error(`REBALANCE_POLICY_USD_INVALID:token=${tokenId}`);
   }
   return { r2cRequestSoftLimit, hardLimit, maxAcceptableFee };
+};
+
+const assertRequestedRebalancePolicy = (
+  tokenId: number,
+  policy: NonNullable<OpenAccountEntityTx['data']['rebalancePolicy']>,
+): void => {
+  if (
+    policy.r2cRequestSoftLimit <= 0n ||
+    policy.hardLimit < policy.r2cRequestSoftLimit ||
+    policy.maxAcceptableFee < 0n
+  ) {
+    throw new Error(`REBALANCE_POLICY_INVALID:token=${tokenId}`);
+  }
 };
 
 export const handleOpenAccountEntityTx = (
@@ -69,16 +83,15 @@ export const handleOpenAccountEntityTx = (
 
   const counterpartyId = normalizeEntityRef(targetEntityId);
   const isLeft = isLeftEntity(entityState.entityId, targetEntityId);
-  const watchSeed = entityTx.data.watchSeed !== undefined
-    ? normalizeAccountWatchSeed(entityTx.data.watchSeed, 'OPEN_ACCOUNT')
-    : deriveAccountWatchSeed({
-        runtimeSeed: env.runtimeSeed ?? '',
-        runtimeId: env.runtimeId ?? null,
-        entityId: entityState.entityId,
-        counterpartyId,
-        timestamp: env.timestamp,
-      });
-  assertSameJurisdictionAccount(env, entityState.entityId, entityState.config?.jurisdiction, targetEntityId);
+  if (entityTx.data.watchSeed === undefined) throw new Error('OPEN_ACCOUNT_WATCH_SEED_REQUIRED');
+  const watchSeed = normalizeAccountWatchSeed(entityTx.data.watchSeed, 'OPEN_ACCOUNT');
+  if (entityTx.data.accountDomain === undefined) throw new Error('OPEN_ACCOUNT_DOMAIN_REQUIRED');
+  const accountDomain = normalizeAccountStateDomain(entityTx.data.accountDomain, 'OPEN_ACCOUNT_DOMAIN');
+  const jurisdiction = entityState.config?.jurisdiction;
+  if (!jurisdiction) throw new Error(`ACCOUNT_STATE_DOMAIN_MISSING: entity=${formatEntityId(entityState.entityId)}`);
+  if (!sameAccountStateDomain(accountDomain, accountStateDomainFromJurisdiction(jurisdiction))) {
+    throw new Error('OPEN_ACCOUNT_DOMAIN_MISMATCH');
+  }
 
   if (findAccountKey(entityState, counterpartyId)) {
     const error =
@@ -90,6 +103,11 @@ export const handleOpenAccountEntityTx = (
     });
     throw new Error(error);
   }
+  assertEntityAccountInsertionCapacity(
+    entityState.accounts,
+    counterpartyId,
+    `openAccount:${entityState.entityId}`,
+  );
 
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
@@ -112,6 +130,7 @@ export const handleOpenAccountEntityTx = (
     upsertSortedStringMapEntry(newState.accounts, accountKey, {
       leftEntity,
       rightEntity,
+      domain: accountDomain,
       watchSeed,
       status: 'active',
       mempool: [],
@@ -158,9 +177,8 @@ export const handleOpenAccountEntityTx = (
       pulls: new Map(),
       swapOrderHistory: new Map(),
       swapClosedOrders: new Map(),
-      leftJObservations: [],
-      rightJObservations: [],
-      jEventChain: [],
+      leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+      rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
       lastFinalizedJHeight: 0,
       jNonce: 0,
     });
@@ -172,14 +190,7 @@ export const handleOpenAccountEntityTx = (
   if (!localAccount) {
     throw new Error(`CRITICAL: Account machine not found after creation`);
   }
-  const jurisdiction = entityState.config?.jurisdiction;
-  if (!jurisdiction) {
-    throw new Error(`ACCOUNT_STATE_DOMAIN_MISSING: entity=${formatEntityId(entityState.entityId)}`);
-  }
-  localAccount.currentFrame.accountStateRoot = computeAccountStateRoot(
-    localAccount,
-    accountStateDomainFromJurisdiction(jurisdiction),
-  );
+  localAccount.currentFrame.accountStateRoot = computeAccountStateRoot(localAccount);
   localAccount.currentFrame.stateHash = localAccount.currentFrame.accountStateRoot;
 
   const tokenId = entityTx.data.tokenId ?? 1;
@@ -194,34 +205,30 @@ export const handleOpenAccountEntityTx = (
     );
   }
 
-  for (const deltaTokenId of defaultTokenIds) {
-    localAccount.mempool.push({ type: 'add_delta', data: { tokenId: deltaTokenId } });
-  }
-  if (creditAmount && creditAmount > 0n) {
-    localAccount.mempool.push({ type: 'set_credit_limit', data: { tokenId, amount: creditAmount } });
-  }
+  appendAccountMempoolTxs(localAccount, [
+    ...defaultTokenIds.map((deltaTokenId) => ({
+      type: 'add_delta' as const,
+      data: { tokenId: deltaTokenId },
+    })),
+    ...(newState.hubRebalanceConfig
+      ? defaultTokenIds.map((policyTokenId) =>
+          buildHubRebalancePolicyTx(newState.hubRebalanceConfig!, policyTokenId))
+      : []),
+    ...(creditAmount && creditAmount > 0n
+      ? [{ type: 'set_credit_limit' as const, data: { tokenId, amount: creditAmount } }]
+      : []),
+  ], `openAccount:init:${entityState.entityId}:${counterpartyId}`);
 
   const requestedPolicy = entityTx.data.rebalancePolicy;
-  const jurisdictionPolicyDefaults = resolveJurisdictionRebalanceDefaults(newState);
-  let autopilotSoftLimit = requestedPolicy?.r2cRequestSoftLimit ?? jurisdictionPolicyDefaults.r2cRequestSoftLimit;
-  let autopilotHardLimit = requestedPolicy?.hardLimit ?? jurisdictionPolicyDefaults.hardLimit;
-  let autopilotMaxFee = requestedPolicy?.maxAcceptableFee ?? jurisdictionPolicyDefaults.maxAcceptableFee;
-  if (autopilotSoftLimit <= 0n) autopilotSoftLimit = jurisdictionPolicyDefaults.r2cRequestSoftLimit;
-  if (autopilotHardLimit < autopilotSoftLimit) autopilotHardLimit = autopilotSoftLimit;
-  if (autopilotMaxFee < 0n) autopilotMaxFee = jurisdictionPolicyDefaults.maxAcceptableFee;
+  if (requestedPolicy) assertRequestedRebalancePolicy(tokenId, requestedPolicy);
   for (const policyTokenId of defaultTokenIds) {
-    localAccount.shadow.rebalance.policy.set(policyTokenId, {
-      r2cRequestSoftLimit: autopilotSoftLimit,
-      hardLimit: autopilotHardLimit,
-      maxAcceptableFee: autopilotMaxFee,
-    });
+    const policy = requestedPolicy && policyTokenId === tokenId
+      ? requestedPolicy
+      : resolveJurisdictionRebalanceDefaults(newState, policyTokenId);
+    localAccount.shadow.rebalance.policy.set(policyTokenId, { ...policy });
   }
 
   addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(counterpartyId)}`);
-
-  if (env.gossip) {
-    announceLocalEntityProfile(env, newState, env.timestamp);
-  }
 
   return { newState, outputs };
 };

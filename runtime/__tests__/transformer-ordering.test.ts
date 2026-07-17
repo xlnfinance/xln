@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { buildAccountProofBody, setDeltaTransformerAddress } from '../protocol/dispute/proof-builder';
+import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
 import { buildPositionalSwapFillRatioBuckets, sortTransformerEntries } from '../protocol/transformer-ordering';
 import { asOfferId } from '../orderbook/swap-keys';
 import type { AccountMachine, SwapOffer } from '../types';
@@ -64,9 +65,8 @@ function makeProofAccountMachine(swaps: Array<[string, SwapOffer]>): AccountMach
     requestedRebalance: new Map(),
     requestedRebalanceFeeState: new Map(),
     shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-    leftJObservations: [],
-    rightJObservations: [],
-    jEventChain: [],
+    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
     lastFinalizedJHeight: 0,
     disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
     jNonce: 0,
@@ -129,8 +129,6 @@ describe('transformer ordering', () => {
   });
 
   test('proof-body swap order stays aligned with positional fill ratios for mixed sides', () => {
-    setDeltaTransformerAddress(DELTA_TRANSFORMER);
-
     const accountMachine = makeProofAccountMachine([
       ['b2', makeSwapOffer('b2', false, 2, 400n, 1, 800n)],
       ['a10', makeSwapOffer('a10', true, 1, 100n, 2, 200n)],
@@ -145,7 +143,7 @@ describe('transformer ordering', () => {
       [asOfferId('b2'), 8192],
     ]);
 
-    const proofBody = buildAccountProofBody(accountMachine);
+    const proofBody = buildAccountProofBody(accountMachine, DELTA_TRANSFORMER);
     const transformer = proofBody.runtimeProofBody.transformers[0];
     expect(transformer).toBeDefined();
     const swaps = transformer.batch.swaps;

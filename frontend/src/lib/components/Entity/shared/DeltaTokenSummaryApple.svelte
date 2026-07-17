@@ -8,7 +8,7 @@
   export let outAmount: string;
   export let inAmount: string;
   export let derived: DeltaParts;
-  export let decimals: number = 18;
+  export let decimals: number;
   export let actionLabel = '';
   export let actionTokenId: number | null = null;
   export let actionDisabled = false;

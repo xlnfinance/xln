@@ -13,18 +13,25 @@
  * outCollateral is already secured value and must not inflate trigger metric.
  */
 
-import type { Env, AccountMachine, JReplica } from '../types';
-import { commitRuntimeInput, getProcess, usd, ensureSignerKeysFromSeed, converge as _converge, findReplica } from './helpers';
+import type { Env, AccountMachine } from '../types';
+import {
+  getProcess,
+  usd,
+  ensureSignerKeysFromSeed,
+  converge as _converge,
+  findReplica,
+  processJEvents,
+  setScenarioStorageEnabled,
+} from './helpers';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { deriveDelta } from '../account/utils';
 import { isLeftEntity } from '../entity/id';
-import { ensureJAdapter, getJAdapterMode } from './boot';
-import { encodeBoard, hashBoard } from '../entity/factory';
+import { bindScenarioJReplica, ensureJAdapter, getJAdapterMode, registerEntities } from './boot';
 
 const USDC_TOKEN_ID = 1;
 const HUB_INITIAL_RESERVE = usd(200_000); // $200K
 const USER_RESERVE = usd(25_000); // $25K each
-const INITIAL_COLLATERAL = usd(5_000); // $5K per account (deliberately low to create deficits)
+const INITIAL_COLLATERAL = usd(500); // Exact default C→R keep threshold; payments create the later imbalance.
 
 function assert(condition: unknown, message: string, env?: Env): asserts condition {
   if (!condition) {
@@ -39,7 +46,6 @@ function assert(condition: unknown, message: string, env?: Env): asserts conditi
 }
 
 type Entity = { id: string; signer: string; name: string };
-type AccountJEventBlock = { events?: Array<{ type?: string }> };
 
 const requireEntity = (entity: Entity | undefined, name: string): Entity => {
   if (!entity) {
@@ -50,50 +56,15 @@ const requireEntity = (entity: Entity | undefined, name: string): Entity => {
 
 const converge = (env: Env, maxCycles = 15) => _converge(env, maxCycles);
 
-async function processJEvents(env: Env): Promise<void> {
-  const process = await getProcess();
-  const pendingInputs = env.runtimeInput?.entityInputs || [];
-  if (pendingInputs.length > 0) {
-    const toProcess = [...pendingInputs];
-    env.runtimeInput.entityInputs = [];
-    await process(env, toProcess);
-  }
-}
-
 type AccountJProgress = {
-  chainLen: number;
-  settledEvents: number;
   lastFinalizedJHeight: number;
-  staleObservationCount: number;
+  pendingClaimCount: bigint;
 };
-
-function getAccountSettledEventCount(account: AccountMachine | undefined): number {
-  if (!account?.jEventChain) return 0;
-  let count = 0;
-  for (const block of account.jEventChain) {
-    const blockEvents = (block as AccountJEventBlock).events;
-    const events = Array.isArray(blockEvents) ? blockEvents : [];
-    for (const event of events) {
-      if (event?.type === 'AccountSettled') count++;
-    }
-  }
-  return count;
-}
-
-function getStaleObservationCount(account: AccountMachine | undefined): number {
-  if (!account) return 0;
-  const last = account.lastFinalizedJHeight || 0;
-  const leftStale = (account.leftJObservations || []).filter(o => o.jHeight <= last).length;
-  const rightStale = (account.rightJObservations || []).filter(o => o.jHeight <= last).length;
-  return leftStale + rightStale;
-}
 
 function snapshotAccountJProgress(account: AccountMachine | undefined): AccountJProgress {
   return {
-    chainLen: account?.jEventChain?.length || 0,
-    settledEvents: getAccountSettledEventCount(account),
     lastFinalizedJHeight: account?.lastFinalizedJHeight || 0,
-    staleObservationCount: getStaleObservationCount(account),
+    pendingClaimCount: (account?.leftPendingJClaims.count ?? 0n) + (account?.rightPendingJClaims.count ?? 0n),
   };
 }
 
@@ -118,6 +89,7 @@ export async function runRebalanceScenario(): Promise<void> {
   let env = createEmptyEnv('rebalance-scenario-seed-2026');
   env.timestamp = 1000000;
   env.scenarioMode = true;
+  setScenarioStorageEnabled(env, false);
 
   ensureSignerKeysFromSeed(env, ['2','3','4','5','6'], 'rebalance');
 
@@ -125,29 +97,9 @@ export async function runRebalanceScenario(): Promise<void> {
   const jadapter = await ensureJAdapter(env, jMode, { deployStack: true });
   console.log(`✅ JAdapter created, depository: ${jadapter.addresses.depository}`);
 
-  // Register 5 entities on-chain via EntityProvider
-  const boardHashes: string[] = [];
-  for (let i = 2; i <= 6; i++) {
-    const config = {
-      mode: 'proposer-based' as const,
-      threshold: 1n,
-      validators: [String(i)],
-      shares: { [String(i)]: 1n },
-    };
-    boardHashes.push(hashBoard(encodeBoard(config)));
-  }
-  const nextEntityNumber = await jadapter.entityProvider.nextNumber();
-  const registerTx = await jadapter.entityProvider.registerNumberedEntitiesBatch(boardHashes);
-  const registerReceipt = await registerTx.wait();
-  if (!registerReceipt || registerReceipt.status === 0) {
-    throw new Error('registerNumberedEntitiesBatch failed');
-  }
-  const entityNumbers = boardHashes.map((_, index) => Number(nextEntityNumber) + index);
-  console.log(`✅ Registered entities on-chain: [${entityNumbers.join(', ')}]`);
-
   // Create jReplica + attach jadapter
   const jReplicaName = 'Rebalance Demo';
-  const jReplica: JReplica = {
+  const jReplica = {
     name: jReplicaName,
     blockNumber: 0n,
     stateRoot: new Uint8Array(32),
@@ -166,13 +118,10 @@ export async function runRebalanceScenario(): Promise<void> {
   env.jReplicas.set(jReplicaName, jReplica);
   env.activeJurisdiction = jReplicaName;
 
-  // Attach jadapter to jReplica + start watching for events
-  jReplica.jadapter = jadapter;
-  jReplica.depositoryAddress = jadapter.addresses.depository;
-  jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
+  // Attach the same trusted local policy used by Runtime jurisdiction import.
+  bindScenarioJReplica(env, jReplica, jadapter);
   jadapter.startWatching(env);
   console.log('✅ JAdapter attached + watching');
-  await process(env);
 
   // Jurisdiction config for entity creation
   const jurisdictionConfig = {
@@ -190,37 +139,16 @@ export async function runRebalanceScenario(): Promise<void> {
   console.log('\n📦 Creating 5 entities...');
 
   const entityNames = ['Hub', 'Alice', 'Bob', 'Charlie', 'Dave'] as const;
-  const entities: Entity[] = [];
-  const createEntityTxs = [];
-
-  for (let i = 0; i < 5; i++) {
-    const name = entityNames[i];
-    if (!name) {
-      throw new Error(`REBALANCE_SCENARIO_MISSING_ENTITY_NAME:${i}`);
-    }
-    const signer = String(i + 2);
-    const entityNumber = i + 2;
-    const entityId = '0x' + entityNumber.toString(16).padStart(64, '0');
-    entities.push({ id: entityId, signer, name });
-
-    createEntityTxs.push({
-      type: 'importReplica' as const,
-      entityId,
-      signerId: signer,
-      data: {
-        isProposer: true,
-        config: {
-          mode: 'proposer-based' as const,
-          threshold: 1n,
-          validators: [signer],
-          shares: { [signer]: 1n },
-          jurisdiction: jurisdictionConfig
-        }
-      }
-    });
-  }
-
-  await commitRuntimeInput(env, { runtimeTxs: createEntityTxs, entityInputs: [] });
+  const entities: Entity[] = await registerEntities(
+    env,
+    jadapter,
+    entityNames.map((name, index) => ({
+      name,
+      signer: String(index + 2),
+      position: { x: 0, y: 0, z: 0 },
+    })),
+    jurisdictionConfig,
+  );
   const hub = requireEntity(entities[0], 'Hub');
   const alice = requireEntity(entities[1], 'Alice');
   const bob = requireEntity(entities[2], 'Bob');
@@ -236,7 +164,6 @@ export async function runRebalanceScenario(): Promise<void> {
 
   // Helper: poll on-chain events and feed into runtime
   const syncChain = async () => {
-    if (jadapter.pollNow) await jadapter.pollNow();
     env.timestamp += 150;
     await process(env);
     await processJEvents(env);
@@ -267,7 +194,7 @@ export async function runRebalanceScenario(): Promise<void> {
   // Verify reserves (Hub: $200K)
   const hubReserve = findReplica(env, hub.id)[1].state.reserves.get(USDC_TOKEN_ID) || 0n;
   assert(hubReserve === HUB_INITIAL_RESERVE, `Hub reserve wrong: ${hubReserve}, expected ${HUB_INITIAL_RESERVE}`, env);
-  console.log(`✅ Funding complete: Hub=$${hubReserve / 10n**18n}K, Users=$${USER_RESERVE / 10n**18n}K each`);
+  console.log(`✅ Funding complete: Hub=$${hubReserve / usd(1_000)}K, Users=$${USER_RESERVE / usd(1_000)}K each`);
 
   // ══════════════════════════════════════════════════════════════
   // OPEN BILATERAL ACCOUNTS (each user ↔ Hub)
@@ -305,9 +232,7 @@ export async function runRebalanceScenario(): Promise<void> {
         routingFeePPM: 1,
         baseFee: 0n,
         minCollateralThreshold: 0n,
-        rebalanceBaseFee: 10n ** 17n,
         rebalanceLiquidityFeeBps: 1n,
-        rebalanceGasFee: 0n,
         rebalanceTimeoutMs: 10 * 60 * 1000,
       },
     }],
@@ -360,9 +285,9 @@ export async function runRebalanceScenario(): Promise<void> {
   console.log('✅ Users extended $50K credit to Hub');
 
   // ══════════════════════════════════════════════════════════════
-  // INITIAL R→C: Deposit $20K collateral per account
+  // INITIAL R→C: Deposit $500 collateral per account
   // ══════════════════════════════════════════════════════════════
-  console.log('\n🏦 Depositing initial collateral ($20K per account)...');
+  console.log('\n🏦 Depositing initial collateral ($500 per account)...');
 
   const r2cTxs = users.map(user => ({
     type: 'r2c' as const,
@@ -398,17 +323,13 @@ export async function runRebalanceScenario(): Promise<void> {
   for (const user of users) {
     await waitForHubCollateral(user.id, INITIAL_COLLATERAL, `${user.name} collateral`);
   }
-  console.log('✅ All accounts have $20K collateral');
+  console.log('✅ All accounts have $500 collateral');
 
   // ══════════════════════════════════════════════════════════════
   // PAYMENTS: Create imbalances via directPayment (entity-level)
   // Alice→Hub→Bob: $8K (Hub gains $8K from Alice, owes $8K to Bob)
   // Charlie→Hub→Dave: $12K (Hub gains $12K from Charlie, owes $12K to Dave)
-  // After:
-  //   Hub↔Alice: totalDelta=$13K → outCollateral=$5K (all excess)
-  //   Hub↔Bob: totalDelta=-$3K → outCollateral=$0 (deficit!)
-  //   Hub↔Charlie: totalDelta=$17K → outCollateral=$5K (all excess)
-  //   Hub↔Dave: totalDelta=-$7K → outCollateral=$0 (deficit!)
+  // After: source accounts become over-collateralized while Bob and Dave need R→C top-ups.
   // ══════════════════════════════════════════════════════════════
   console.log('\n💸 Creating payment imbalances...');
 
@@ -537,12 +458,9 @@ export async function runRebalanceScenario(): Promise<void> {
     }
   }
 
-  // Helper: advance time + sync all entity timestamps
+  // Entity timestamps advance only through committed frames.
   function advanceTime(ms: number) {
     env.timestamp += ms;
-    for (const [, replica] of env.eReplicas) {
-      replica.state.timestamp = env.timestamp;
-    }
   }
 
   // ── Cycle 1: Trigger hub crontab and process bilateral frames ──
@@ -675,16 +593,6 @@ export async function runRebalanceScenario(): Promise<void> {
       `Expected user-side lastFinalizedJHeight > 0 for ${userId.slice(-4)} (got ${userPost.lastFinalizedJHeight})`,
       env,
     );
-    assert(
-      hubPost.chainLen > 0,
-      `Expected hub-side jEventChain non-empty for ${userId.slice(-4)} (got ${hubPost.chainLen})`,
-      env,
-    );
-    assert(
-      userPost.chainLen > 0,
-      `Expected user-side jEventChain non-empty for ${userId.slice(-4)} (got ${userPost.chainLen})`,
-      env,
-    );
     if (rebalanceExecuted) {
       assert(
         hubPost.lastFinalizedJHeight > preHub.lastFinalizedJHeight,
@@ -722,10 +630,10 @@ export async function runRebalanceScenario(): Promise<void> {
       env,
     );
 
-    if (hubPost.staleObservationCount > 0 || userPost.staleObservationCount > 0) {
+    if (hubPost.pendingClaimCount > 0n || userPost.pendingClaimCount > 0n) {
       console.warn(
-        `  ⚠️ Stale J-observations remain for ${userId.slice(-4)} ` +
-        `(hub=${hubPost.staleObservationCount}, user=${userPost.staleObservationCount})`,
+        `  ⚠️ Pending authenticated J-claims remain for ${userId.slice(-4)} ` +
+        `(hub=${hubPost.pendingClaimCount}, user=${userPost.pendingClaimCount})`,
       );
     }
   }
@@ -738,7 +646,7 @@ export async function runRebalanceScenario(): Promise<void> {
   let hubFinal = findReplica(env, hub.id)[1].state;
   const hubFinalReserve = hubFinal.reserves.get(USDC_TOKEN_ID) || 0n;
 
-  console.log(`\n  Hub final reserve: $${hubFinalReserve / 10n**18n}`);
+  console.log(`\n  Hub final reserve: $${hubFinalReserve / usd(1)}`);
 
   for (const user of users) {
     const acc = hubFinal.accounts.get(user.id);

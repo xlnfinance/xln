@@ -116,6 +116,7 @@ library HankoEncoding {
     uint256 chainId,
     address contractAddress,
     uint256 entityNumber,
+    uint256 boardEpoch,
     address to,
     uint256 tokenId,
     uint256 amount,
@@ -126,6 +127,7 @@ library HankoEncoding {
       chainId,
       contractAddress,
       entityNumber,
+      boardEpoch,
       to,
       tokenId,
       amount,
@@ -137,6 +139,7 @@ library HankoEncoding {
     uint256 chainId,
     address contractAddress,
     uint256 entityNumber,
+    uint256 boardEpoch,
     address depository,
     uint256 controlAmount,
     uint256 dividendAmount,
@@ -148,10 +151,78 @@ library HankoEncoding {
       chainId,
       contractAddress,
       entityNumber,
+      boardEpoch,
       depository,
       controlAmount,
       dividendAmount,
       keccak256(bytes(purpose)),
+      actionNonce
+    );
+  }
+
+  function encodeCancelEntityProviderAction(
+    uint256 chainId,
+    address contractAddress,
+    uint256 entityNumber,
+    uint256 boardEpoch,
+    uint256 actionNonce,
+    bytes32 cancelledActionHash,
+    uint8 cancelledActionKind
+  ) internal pure returns (bytes memory) {
+    return abi.encodePacked(
+      "CANCEL_ENTITY_PROVIDER_ACTION",
+      chainId,
+      contractAddress,
+      entityNumber,
+      boardEpoch,
+      actionNonce,
+      cancelledActionHash,
+      cancelledActionKind
+    );
+  }
+
+  function encodeBoardProposal(
+    bytes32 domainSeparator,
+    uint256 chainId,
+    address contractAddress,
+    bytes32 entityId,
+    uint256 boardEpoch,
+    bytes32 newBoardHash,
+    uint8 authority,
+    uint256 actionNonce
+  ) internal pure returns (bytes memory) {
+    return abi.encode(
+      domainSeparator,
+      chainId,
+      contractAddress,
+      entityId,
+      boardEpoch,
+      newBoardHash,
+      authority,
+      actionNonce
+    );
+  }
+
+  function encodeBoardProposalCancel(
+    bytes32 domainSeparator,
+    uint256 chainId,
+    address contractAddress,
+    bytes32 entityId,
+    uint256 boardEpoch,
+    bytes32 proposedBoardHash,
+    uint8 proposedBy,
+    uint8 cancelledBy,
+    uint256 actionNonce
+  ) internal pure returns (bytes memory) {
+    return abi.encode(
+      domainSeparator,
+      chainId,
+      contractAddress,
+      entityId,
+      boardEpoch,
+      proposedBoardHash,
+      proposedBy,
+      cancelledBy,
       actionNonce
     );
   }

@@ -1,5 +1,6 @@
 import { expect, test, type BrowserContext, type Page } from './global-setup';
 import { APP_BASE_URL, ensureE2EBaseline } from './utils/e2e-baseline';
+import { closeRuntimeContext } from './utils/e2e-runtime-shutdown';
 
 async function openApp(page: Page, path: string): Promise<void> {
   await page.goto(`${APP_BASE_URL}${path}`, { waitUntil: 'domcontentloaded' });
@@ -25,7 +26,7 @@ function inactiveTabScreen(page: Page) {
 }
 
 test.describe('Active tab lock handoff', () => {
-  test('second /app tab takes ownership and first becomes inactive', async ({ browser }) => {
+  test('second /app tab takes ownership and first becomes inactive', { tag: '@resilience' }, async ({ browser }) => {
     const context: BrowserContext = await browser.newContext({ ignoreHTTPSErrors: true });
     const first = await context.newPage();
     const second = await context.newPage();
@@ -40,11 +41,11 @@ test.describe('Active tab lock handoff', () => {
       await expect(inactiveTabScreen(first)).toBeVisible({ timeout: 30_000 });
       await expect(inactiveTabScreen(second)).toHaveCount(0);
     } finally {
-      await context.close();
+      await closeRuntimeContext(context);
     }
   });
 
-  test('inactive tab stays inert until explicit active-lock claim', async ({ browser }) => {
+  test('inactive tab stays inert until explicit active-lock claim', { tag: '@resilience' }, async ({ browser }) => {
     const context: BrowserContext = await browser.newContext({ ignoreHTTPSErrors: true });
     const first = await context.newPage();
     const second = await context.newPage();
@@ -68,11 +69,11 @@ test.describe('Active tab lock handoff', () => {
       await expect(inactiveTabScreen(second)).toBeVisible({ timeout: 30_000 });
       await expect(inactiveTabScreen(first)).toHaveCount(0);
     } finally {
-      await context.close();
+      await closeRuntimeContext(context);
     }
   });
 
-  test('pay deeplink path also participates in ownership handoff', async ({ browser }) => {
+  test('pay deeplink path also participates in ownership handoff', { tag: '@resilience' }, async ({ browser }) => {
     const context: BrowserContext = await browser.newContext({ ignoreHTTPSErrors: true });
     const first = await context.newPage();
     const second = await context.newPage();
@@ -91,7 +92,7 @@ test.describe('Active tab lock handoff', () => {
       await expect(inactiveTabScreen(first)).toBeVisible({ timeout: 30_000 });
       await expect(inactiveTabScreen(second)).toHaveCount(0);
     } finally {
-      await context.close();
+      await closeRuntimeContext(context);
     }
   });
 });

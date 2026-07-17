@@ -28,6 +28,8 @@ const accountFramePath = 'runtime/account/consensus/frame.ts';
 const entityConsensusPath = 'runtime/entity/consensus/index.ts';
 const entityFramePath = 'runtime/entity/consensus/frame.ts';
 const hankoSigningPath = 'runtime/hanko/signing.ts';
+const hankoCodecPath = 'runtime/hanko/codec.ts';
+const hankoClaimsPath = 'runtime/hanko/claims.ts';
 const hankoBatchPath = 'runtime/hanko/batch.ts';
 const onchainHankoDomainPath = 'runtime/hanko/onchain-domain.ts';
 const jBatchPath = 'runtime/jurisdiction/batch.ts';
@@ -42,6 +44,8 @@ const accountFrame = readText(accountFramePath);
 const entityConsensus = readText(entityConsensusPath);
 const entityFrame = readText(entityFramePath);
 const hankoSigning = readText(hankoSigningPath);
+const hankoCodec = readText(hankoCodecPath);
+const hankoClaims = readText(hankoClaimsPath);
 const hankoBatch = readText(hankoBatchPath);
 const onchainHankoDomain = readText(onchainHankoDomainPath);
 const jBatch = readText(jBatchPath);
@@ -67,10 +71,10 @@ assertOrder(accountConsensus, accountConsensusPath, [
   'true,',
   "assertNoUnilateralSettlementMutation(clonedMachine, beforeSettlement, accountTx, 'receiver/validate');",
   'const frameHashMismatch = await verifySenderFrameHash',
-  'accountStateRoot: computeAccountStateRoot(clonedMachine, getAccountStateDomain(env, accountMachine)),',
+  'accountStateRoot: computeAccountStateRoot(clonedMachine),',
   'const localStateHash = await createFrameHash(localFrame);',
   'if (localStateHash !== receivedFrame.stateHash)',
-  'const localProofBodyHash = buildAccountProofBody(clonedMachine).proofBodyHash;',
+  'const localProofBodyHash = buildAccountProofBodyFromEnv(env, clonedMachine).proofBodyHash;',
   'const frameSealError = disputeSealRequirementError(',
 ]);
 
@@ -91,15 +95,27 @@ assertOrder(entityConsensus, entityConsensusPath, [
   'if (next > LIMITS.MEMPOOL_SIZE)',
   'const admissionError = getEntityMempoolAdmissionError(entityReplica, entityInput);',
   'if (admissionError) {',
+  'const ingressEntityInput = entityInput;',
   'const workingReplica = cloneEntityReplica(entityReplica);',
-  'workingReplica.mempool.push(...entityInput.entityTxs);',
+  'if (!validateEntityInput(ingressEntityInput)) {',
+  'entityInput = cloneIsolatedEntityInput(ingressEntityInput);',
+  'const suppliedEntityTxs = entityInput.entityTxs ?? [];',
+  'const secretAwareEntityTxs = localCanPropose && suppliedEntityTxs.length > 0',
+  '? await appendDefaultProposerAcceptedHtlcReveals(env, workingReplica, suppliedEntityTxs)',
+  ': suppliedEntityTxs;',
+  'const admittedEntityTxs = appendDefaultProposerCrossJMaterializations(',
+  'secretAwareEntityTxs,',
+  'workingReplica.mempool = prioritizeScheduledWakeTransactions(',
+  'prepareLocallyAuthoredEntityTxs(env, workingReplica.state, workingReplica.signerId, [',
+  '...workingReplica.mempool,',
+  '...admittedEntityTxs,',
 ]);
 assertIncludes(entityConsensus, 'if (!verifyHashPrecommitSignatures(', entityConsensusPath);
 assertIncludes(entityConsensus, 'const committedHankos: HankoString[] = [];', entityConsensusPath);
 assertIncludes(entityConsensus, 'const hanko = await buildQuorumHanko(', entityConsensusPath);
 assertIncludes(entityConsensus, 'attachHankoWitnessToOutputs(', entityConsensusPath);
 assertIncludes(entityConsensus, 'entityOutbox.push(...commitOutputs);', entityConsensusPath);
-assertIncludes(entityConsensus, 'jOutbox.push(...commitJOutputs);', entityConsensusPath);
+assertIncludes(entityConsensus, 'if (isFrameLeader) jOutbox.push(...execution.jOutputs);', entityConsensusPath);
 
 assertIncludes(accountFrame, 'canonicalJurisdictionEventsHash(events)', accountFramePath);
 assertOrder(accountFrame, accountFramePath, [
@@ -109,17 +125,31 @@ assertOrder(accountFrame, accountFramePath, [
   "['deltas', frame.deltas],",
   "['accountStateRoot', frame.accountStateRoot],",
 ]);
-assertIncludes(entityFrame, 'const encoded = safeStringify(frameData);', entityFramePath);
-assertIncludes(entityFrame, 'const hash = ethers.keccak256(ethers.toUtf8Bytes(encoded));', entityFramePath);
-assertIncludes(entityFrame, 'lastFinalizedJHeight: newState.lastFinalizedJHeight,', entityFramePath);
+assertOrder(entityFrame, entityFramePath, [
+  'const frameData = {',
+  "version: 'xln:entity-frame:v4',",
+  'txs: txs.map(canonicalEntityTxForFrameHash),',
+  'stateRoot: stateRoot.toLowerCase(),',
+  'authorityRoot: authorityRoot.toLowerCase(),',
+  'return ethers.keccak256(ethers.toUtf8Bytes(encodeCanonicalEntityConsensusValue(frameData)));',
+]);
+assertOrder(entityFrame, entityFramePath, [
+  'const stateRoot = computeCanonicalEntityConsensusStateHash(newState);',
+  'const authorityRoot = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(newState));',
+  'const hash = createEntityFrameHashFromStateRoot(',
+]);
 
 assertIncludes(hankoSigning, 'throw new Error(`CRYPTO_DETERMINISM_VIOLATION: signEntityHashes called without env.runtimeSeed', hankoSigningPath);
+assertIncludes(hankoSigning, 'const normalizedEntityId = encodeQuorumEntityId(entityId);', hankoSigningPath);
 assertIncludes(hankoSigning, 'const reconstructedEntityId = generateLazyEntityId([signerAddress], 1n).toLowerCase();', hankoSigningPath);
-assertIncludes(hankoSigning, 'if (reconstructedEntityId !== entityId.toLowerCase())', hankoSigningPath);
-assertIncludes(hankoSigning, 'const eoaSignatures = unpackRealSignatures(hanko.packedSignatures);', hankoSigningPath);
-assertIncludes(hankoSigning, 'if (eoaSignatures.length === 0)', hankoSigningPath);
-assertIncludes(hankoSigning, 'if (reconstructedBoardHash !== expectedEntityId.toLowerCase())', hankoSigningPath);
-assertIncludes(hankoSigning, 'const targetRecovered = recovered.yesEntities.some((entity) =>', hankoSigningPath);
+assertIncludes(hankoSigning, 'if (reconstructedEntityId !== normalizedEntityId)', hankoSigningPath);
+assertIncludes(hankoSigning, 'const verified = verifyCanonicalHanko({', hankoSigningPath);
+assertIncludes(hankoSigning, 'validateBoardAuthority: (entityId, reconstructedBoardHash) => {', hankoSigningPath);
+assertIncludes(hankoCodec, 'HANKO_PACKED_SIGNATURE_PADDING_NONZERO', hankoCodecPath);
+assertIncludes(hankoCodec, 'if (encodeHankoEnvelope(envelope).toLowerCase() !== canonicalInput)', hankoCodecPath);
+assertIncludes(hankoClaims, 'HANKO_FIRST_MEMBER_EOA_REQUIRED', hankoClaimsPath);
+assertIncludes(hankoClaims, "if (reachable.size !== claims.length) throw new Error('HANKO_UNUSED_CLAIM');", hankoClaimsPath);
+assertIncludes(hankoClaims, 'claim.delays.boardChangeDelay', hankoClaimsPath);
 
 assertIncludes(onchainHankoDomain, "ethers.toUtf8Bytes('XLN_DEPOSITORY_HANKO_V1')", onchainHankoDomainPath);
 assertIncludes(onchainHankoDomain, '[DEPOSITORY_BATCH_HANKO_DOMAIN, chainId, depositoryAddress, encodedBatch, requireUint(nonce,', onchainHankoDomainPath);
@@ -143,7 +173,7 @@ assertNotMatches(
 
 for (const marker of [
   '# Consensus And Hanko Production Scan',
-  'Last refreshed: 2026-07-09',
+  'Last refreshed: 2026-07-14',
   'bun run security:consensus-hanko',
   'Account frame receive keeps `jHeight=0` valid',
   'Receiver validation runs on a clone before committing',

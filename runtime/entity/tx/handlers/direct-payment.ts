@@ -6,6 +6,7 @@ import { createStructuredLogger, logError, shortId } from '../../../infra/logger
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import type { MempoolOp } from './account';
 import { requireTrustedPaymentGateway } from '../../../protocol/payments/delivery';
+import { requireCommittedDirectPaymentRoute } from '../../../protocol/payments/route';
 
 type DirectPaymentEntityTx = Extract<EntityTx, { type: 'directPayment' }>;
 
@@ -28,19 +29,24 @@ export const handleDirectPaymentEntityTx = async (
   const trace = (message: string, fields: Record<string, unknown> = {}): void => {
     if (env.quietRuntimeLogs !== true) directPaymentLog.debug(message, fields);
   };
+  const route = requireCommittedDirectPaymentRoute({
+    sourceEntityId: entityState.entityId,
+    targetEntityId: entityTx.data.targetEntityId,
+    route: entityTx.data.route,
+  });
   env.emit('HtlcInitiated', {
     fromEntity: entityState.entityId,
     toEntity: entityTx.data.targetEntityId,
     tokenId: entityTx.data.tokenId,
     amount: entityTx.data.amount.toString(),
-    route: entityTx.data.route,
+    route,
   });
   trace('start', {
     from: shortId(entityState.entityId),
     target: shortId(entityTx.data.targetEntityId),
     tokenId: entityTx.data.tokenId,
     amount: entityTx.data.amount.toString(),
-    route: entityTx.data.route?.map((entityId) => shortId(entityId)) ?? [],
+    route: route.map((entityId) => shortId(entityId)),
     hasDescription: Boolean(entityTx.data.description),
   });
 
@@ -49,7 +55,7 @@ export const handleDirectPaymentEntityTx = async (
   const mempoolOps: MempoolOp[] = [];
   trace('initialized');
 
-  let { targetEntityId, tokenId, amount, route, description } = entityTx.data;
+  const { targetEntityId, tokenId, amount, description } = entityTx.data;
   const deliveryMode = entityTx.data.deliveryMode;
   const trustedGatewayEntityId = entityTx.data.trustedGatewayEntityId;
   if (deliveryMode && deliveryMode !== 'trusted') {
@@ -62,48 +68,6 @@ export const handleDirectPaymentEntityTx = async (
     );
     addMessage(newState, `❌ Payment failed: amount out of bounds`);
     return { newState, outputs: [] };
-  }
-
-  if (!route || route.length === 0) {
-    if (newState.accounts.has(targetEntityId)) {
-      trace('route.direct_account', { target: shortId(targetEntityId) });
-      route = [entityState.entityId, targetEntityId];
-    } else if (env.gossip) {
-      trace('route.discovery_start', { target: shortId(targetEntityId) });
-      const networkGraph = env.gossip.getNetworkGraph();
-      const paths = await networkGraph.findPaths(entityState.entityId, targetEntityId, amount, tokenId);
-
-      if (paths.length > 0) {
-        const firstPath = paths[0];
-        if (!firstPath) {
-          throw new Error('ROUTE_DISCOVERY_INVARIANT: paths.length > 0 but paths[0] is missing');
-        }
-        route = firstPath.path;
-        trace('route.discovery_found', { route: route.map((entityId) => shortId(entityId)) });
-      } else {
-        logError('ENTITY_TX', `❌ No route found to ${formatEntityId(targetEntityId)}`);
-        addMessage(newState, `❌ Payment failed: No route to ${formatEntityId(targetEntityId)}`);
-        return { newState, outputs: [] };
-      }
-    } else {
-      logError('ENTITY_TX', `❌ Cannot find route: Gossip layer not available`);
-      addMessage(newState, `❌ Payment failed: Network routing unavailable`);
-      return { newState, outputs: [] };
-    }
-  }
-
-  if (route.length < 1 || route[0] !== entityState.entityId) {
-    throw directPaymentInvariant(
-      'ROUTE_START_INVALID',
-      `entity=${entityState.entityId}:route0=${route[0] ?? ''}:target=${targetEntityId}`,
-    );
-  }
-
-  if (route[route.length - 1] !== targetEntityId) {
-    throw directPaymentInvariant(
-      'ROUTE_END_INVALID',
-      `entity=${entityState.entityId}:last=${route[route.length - 1] ?? ''}:target=${targetEntityId}`,
-    );
   }
 
   if (deliveryMode === 'trusted') {

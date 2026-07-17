@@ -4,33 +4,26 @@ import { createRelayStore, storeVerifiedGossipProfile } from '../relay/store';
 import { createEmptyEnv } from '../runtime';
 import { handleRuntimeHealth, type RuntimeHealthCacheEntry, type RuntimeHealthDeps } from '../server/health-api';
 import { createMarketMakerServerState } from '../server/market-maker-health';
+import {
+  buildCryptographicProfileFixture,
+  certifySingleSignerProfileFixture,
+  deriveSingleSignerFixtureEntityId,
+} from './helpers/cryptographic-profile';
 
 const runtimeSecret = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
-const makeHubProfile = (suffix: string, updatedAt = 1): Profile => ({
-  entityId: `0x${suffix.padStart(40, '0')}`,
-  name: `Hub ${suffix}`,
-  avatar: '',
-  bio: '',
-  website: '',
-  lastUpdated: updatedAt,
-  runtimeId: `0x${suffix.padStart(40, '1')}`,
-  runtimeEncPubKey: `0x${suffix.padStart(64, '2')}`,
-  publicAccounts: [],
-  wsUrl: null,
-  relays: [],
-  metadata: {
-    entityEncPubKey: `0x${suffix.padStart(64, '3')}`,
+const makeHubProfile = (suffix: string, updatedAt = 1): Profile => {
+  const signingSeed = `runtime-health-profile:${suffix}`;
+  const entityId = deriveSingleSignerFixtureEntityId(signingSeed);
+  const profile = buildCryptographicProfileFixture({
+    entityId,
+    signingSeed,
+    name: `Hub ${suffix}`,
+    lastUpdated: updatedAt,
     isHub: true,
-    routingFeePPM: 1,
-    baseFee: 0n,
-    board: {
-      threshold: 1,
-      validators: [{ signer: `0x${suffix.padStart(40, '4')}`, signerId: '1', publicKey: `0x${suffix.padStart(64, '5')}`, weight: 1 }],
-    },
-  },
-  accounts: [],
-});
+  });
+  return certifySingleSignerProfileFixture(profile, signingSeed);
+};
 
 const createHealthDeps = () => {
   let inFlightSetCount = 0;

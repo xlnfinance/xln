@@ -1,69 +1,88 @@
 import { describe, expect, test } from 'bun:test';
 
 import { handleHtlcResolve } from '../account/tx/handlers/htlc-resolve';
-import { handleSettleRelease } from '../account/tx/handlers/settle-hold';
+import {
+  createSettlementWorkspaceHash,
+  handleSettleTransition,
+} from '../account/tx/handlers/settle-transition';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { createDefaultDelta } from '../validation-utils';
+import { entity, makeAccount } from './helpers/cross-j';
 
 describe('hold underflow guards', () => {
-  test('settle_release fails closed without partially mutating earlier token holds', async () => {
+  test('htlc timeout expires exactly at its timelock boundary', async () => {
+    const lockId = 'lock-timeout-boundary';
+    const accountMachine = makeAccount(entity('11'), entity('22'));
+    const delta = createDefaultDelta(1);
+    delta.leftHold = 7n;
+    accountMachine.deltas = new Map([[1, delta]]);
+    accountMachine.locks.set(lockId, {
+      lockId,
+      tokenId: 1,
+      amount: 7n,
+      senderIsLeft: true,
+      hashlock: `0x${'21'.repeat(32)}`,
+      revealBeforeHeight: 100,
+      timelock: 1_000n,
+      createdHeight: 0,
+      createdTimestamp: 0,
+    });
+
+    const result = await handleHtlcResolve(
+      accountMachine,
+      {
+        type: 'htlc_resolve',
+        data: { lockId, outcome: 'error', reason: 'timeout' },
+      },
+      true,
+      1,
+      1_000,
+    );
+
+    expect(result.success).toBe(true);
+    expect(accountMachine.locks.has(lockId)).toBe(false);
+    expect(delta.leftHold).toBe(0n);
+  });
+
+  test('settle clear fails closed without partially releasing earlier token holds', async () => {
+    const accountMachine = makeAccount(entity('11'), entity('22'));
     const deltaA = createDefaultDelta(1);
     deltaA.leftHold = 5n;
     const deltaB = createDefaultDelta(2);
     deltaB.rightHold = 1n;
+    accountMachine.deltas = new Map([[1, deltaA], [2, deltaB]]);
+    accountMachine.settlementWorkspace = {
+      workspaceHash: '',
+      ops: [
+        { type: 'rawDiff', tokenId: 1, leftDiff: -2n, rightDiff: 2n, collateralDiff: 0n, ondeltaDiff: 0n },
+        { type: 'rawDiff', tokenId: 2, leftDiff: 2n, rightDiff: -2n, collateralDiff: 0n, ondeltaDiff: 0n },
+      ],
+      lastModifiedByLeft: true,
+      status: 'awaiting_counterparty',
+      version: 1,
+      createdAt: 1,
+      lastUpdatedAt: 1,
+      executorIsLeft: true,
+    };
+    accountMachine.settlementWorkspace.workspaceHash = createSettlementWorkspaceHash(
+      accountMachine,
+      accountMachine.settlementWorkspace,
+    );
 
-    const accountMachine = {
-      deltas: new Map([
-        [1, deltaA],
-        [2, deltaB],
-      ]),
-    } as any;
-
-    const result = await handleSettleRelease(accountMachine, {
-      type: 'settle_release',
+    const result = await handleSettleTransition(accountMachine, {
+      type: 'settle_transition',
       data: {
-        workspaceVersion: 1,
-        diffs: [
-          { tokenId: 1, leftWithdrawing: 2n, rightWithdrawing: 0n },
-          { tokenId: 2, leftWithdrawing: 0n, rightWithdrawing: 2n },
-        ],
+        kind: 'clear',
+        version: 1,
+        workspaceHash: accountMachine.settlementWorkspace.workspaceHash,
       },
-    } as any);
+    }, true, 2);
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('SETTLE_RELEASE_HOLD_UNDERFLOW:right');
+    expect(result.error).toContain('SETTLEMENT_HOLD_UNDERFLOW:right');
     expect(deltaA.leftHold).toBe(5n);
     expect(deltaB.rightHold).toBe(1n);
-  });
-
-  test('settle_release rejects negative release amounts without increasing holds', async () => {
-    const deltaA = createDefaultDelta(1);
-    deltaA.leftHold = 5n;
-    const deltaB = createDefaultDelta(2);
-    deltaB.rightHold = 9n;
-
-    const accountMachine = {
-      deltas: new Map([
-        [1, deltaA],
-        [2, deltaB],
-      ]),
-    } as any;
-
-    const result = await handleSettleRelease(accountMachine, {
-      type: 'settle_release',
-      data: {
-        workspaceVersion: 1,
-        diffs: [
-          { tokenId: 1, leftWithdrawing: 2n, rightWithdrawing: 0n },
-          { tokenId: 2, leftWithdrawing: 0n, rightWithdrawing: -3n },
-        ],
-      },
-    } as any);
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe('HOLD_RELEASE_NEGATIVE:right amount=-3');
-    expect(deltaA.leftHold).toBe(5n);
-    expect(deltaB.rightHold).toBe(9n);
+    expect(accountMachine.settlementWorkspace).toBeDefined();
   });
 
   test('htlc_resolve(secret) fails closed on hold underflow before mutating delta or deleting the lock', async () => {

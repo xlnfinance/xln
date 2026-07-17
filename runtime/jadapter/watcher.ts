@@ -8,14 +8,18 @@
 
 export {
   applyJEventsToEnv,
+  applyWatcherJurisdictionCursor,
   applyJBlockHeadersIngressTransform,
   buildJEventsRuntimeInput,
   buildRawJEventsRuntimeInput,
   collectRelevantJEventReplicaKeys,
   enqueueJHistoryRewind,
+  enqueueJHistoryRewindForReplicaKeys,
   getWatcherStartBlock,
   findWatcherJurisdictionReplica,
   getMinimumCommittedSignerJHeight,
+  getMinimumScannedSignerJHeight,
+  isWatcherJHistoryRangeDurable,
   enqueueJHistoryRange,
   isEntityReplicaRelevantToWatcher,
   processEventBatch,
@@ -32,6 +36,7 @@ export {
   type JHistoryRangeIngress,
   type JEventsRuntimeInputBuildResult,
   type PendingWatcherJBlockMap,
+  type PendingWatcherJHistoryRange,
   type RawJEvent,
   type RawJEventArgs,
 } from './helpers';

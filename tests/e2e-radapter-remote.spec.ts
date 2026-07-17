@@ -7,10 +7,11 @@ import {
 } from './utils/e2e-baseline';
 import { openAccountWorkspaceTab } from './utils/e2e-account-workspace';
 import { resolveRuntimeImportAppUrl } from './utils/e2e-runtime-import';
+import { closeRuntimeContext } from './utils/e2e-runtime-shutdown';
 
 const REMOTE_RUNTIME_IMPORT_STORAGE_KEY = 'xln-remote-runtime-imports';
 const REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY = 'xln-remote-runtime-import-last-result';
-const HUB_MESH_CREDIT_AMOUNT = '1000000000000000000000000';
+const HUB_MESH_CREDIT_AMOUNT = '1000000000000';
 const REMOTE_E2E_WAIT_MS = 15_000;
 
 type RuntimeImportSummary = {
@@ -567,7 +568,7 @@ const expectMarketMakerBooksHealthy = (health: E2EHealthSnapshot): void => {
 
 test.setTimeout(240_000);
 
-test('remote /app opens an existing hub runtime through radapter', async ({ page }) => {
+test('remote /app opens an existing hub runtime through radapter', { tag: '@functional' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const hubs = await waitForNamedHubs(page, ['h1'], { apiBaseUrl: API_BASE_URL });
   const h1 = String(hubs.h1 || '').toLowerCase();
@@ -681,7 +682,7 @@ test('remote /app opens an existing hub runtime through radapter', async ({ page
   await expect(page.locator('.settlement-panel')).not.toContainText('Settlement history requires a runtime frame');
 });
 
-test('dev DockRoot entity panel resolves seed through remote RuntimeView projection', async ({ page }) => {
+test('dev DockRoot entity panel resolves seed through remote RuntimeView projection', { tag: '@functional' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
   const wsUrl = h1Endpoint.wsUrl;
@@ -786,7 +787,7 @@ test('dev DockRoot entity panel resolves seed through remote RuntimeView project
   expect(panelState.bodyText).toContain(opened.entityId);
 });
 
-test('dev DockRoot Solvency panel reads remote radapter solvency-summary', async ({ page }) => {
+test('dev DockRoot Solvency panel reads remote radapter solvency-summary', { tag: '@functional' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
   const key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
@@ -841,11 +842,14 @@ test('dev DockRoot Solvency panel reads remote radapter solvency-summary', async
       height?: number;
       entityCount?: number;
       accountViews?: number;
-      m1?: bigint;
-      m2?: bigint;
-      m3?: bigint;
-      total?: bigint;
-      delta?: bigint;
+      assets?: Array<{
+        stackId?: string;
+        tokenId?: number;
+        reserves?: bigint;
+        confirmedCollateral?: bigint;
+        pendingCollateral?: bigint;
+        delta?: bigint;
+      }>;
       isValid?: boolean;
       eReplicas?: unknown;
       accounts?: unknown;
@@ -863,11 +867,14 @@ test('dev DockRoot Solvency panel reads remote radapter solvency-summary', async
       accountViews: Number(summary.accountViews || 0),
       hasFullEnv: 'eReplicas' in summary,
       hasFullAccounts: 'accounts' in summary,
-      m1Type: typeof summary.m1,
-      m2Type: typeof summary.m2,
-      m3Type: typeof summary.m3,
-      totalType: typeof summary.total,
-      deltaType: typeof summary.delta,
+      assetCount: summary.assets?.length ?? 0,
+      assetAmountsAreBigInt: (summary.assets ?? []).every((asset) =>
+        typeof asset.reserves === 'bigint' &&
+        typeof asset.confirmedCollateral === 'bigint' &&
+        typeof asset.pendingCollateral === 'bigint' &&
+        typeof asset.delta === 'bigint'),
+      assetIdentitiesAreScoped: (summary.assets ?? []).every((asset) =>
+        typeof asset.stackId === 'string' && Number.isSafeInteger(asset.tokenId)),
       isValidType: typeof summary.isValid,
     };
   });
@@ -878,16 +885,14 @@ test('dev DockRoot Solvency panel reads remote radapter solvency-summary', async
   expect(probe.accountViews).toBeGreaterThan(0);
   expect(probe.hasFullEnv).toBe(false);
   expect(probe.hasFullAccounts).toBe(false);
-  expect(probe.m1Type).toBe('bigint');
-  expect(probe.m2Type).toBe('bigint');
-  expect(probe.m3Type).toBe('bigint');
-  expect(probe.totalType).toBe('bigint');
-  expect(probe.deltaType).toBe('bigint');
+  expect(probe.assetCount).toBeGreaterThan(0);
+  expect(probe.assetAmountsAreBigInt).toBe(true);
+  expect(probe.assetIdentitiesAreScoped).toBe(true);
   expect(probe.isValidType).toBe('boolean');
 
-  await expect(page.getByTestId('solvency-status')).toContainText(/SYSTEM SOLVENT|IMBALANCE DETECTED/, { timeout: REMOTE_E2E_WAIT_MS });
-  await expect(page.getByTestId('solvency-m1')).toContainText(/\$/);
-  await expect(page.getByTestId('solvency-m2')).toContainText(/\$/);
+  await expect(page.getByTestId('solvency-status')).toContainText(/ASSET CONSERVATION OK|ASSET IMBALANCE DETECTED/, { timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.getByTestId('solvency-reserves').first()).toContainText(/\d/);
+  await expect(page.getByTestId('solvency-collateral').first()).toContainText(/\d/);
 
   const bodyText = await page.locator('body').innerText();
   expect(bodyText).not.toContain('Solvency projection failed');
@@ -897,7 +902,7 @@ test('dev DockRoot Solvency panel reads remote radapter solvency-summary', async
   ).toEqual([]);
 });
 
-test('remote /app pasted capability connects without reloading the page', async ({ page }) => {
+test('remote /app pasted capability connects without reloading the page', { tag: '@functional' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
   const wsUrl = h1Endpoint.wsUrl;
@@ -950,7 +955,7 @@ test('remote /app pasted capability connects without reloading the page', async 
   expect(state.loginVisible).toBe(false);
 });
 
-test('local runtime creation while remote is active switches controller to embedded', async ({ page }) => {
+test('local runtime creation while remote is active switches controller to embedded', { tag: '@functional' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
   const wsUrl = h1Endpoint.wsUrl;
@@ -1029,7 +1034,7 @@ test('local runtime creation while remote is active switches controller to embed
   expect(result.sessionKey).toBe('');
 });
 
-test('context dropdown groups H1 H2 H3 remote runtimes', async ({ page }) => {
+test('context dropdown groups H1 H2 H3 remote runtimes', { tag: '@functional' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const specs = [
     { name: 'H1' },
@@ -1212,7 +1217,7 @@ test('context dropdown groups H1 H2 H3 remote runtimes', async ({ page }) => {
   await waitForRuntime(switchTarget);
 });
 
-test('admin remote runtime opens swap workspace from RuntimeView projection', async ({ page }) => {
+test('admin remote runtime opens swap workspace from RuntimeView projection', { tag: '@functional' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const hubs = await waitForNamedHubs(page, ['h1'], { apiBaseUrl: API_BASE_URL });
   const h1 = String(hubs.h1 || '').toLowerCase();
@@ -1268,7 +1273,7 @@ test('admin remote runtime opens swap workspace from RuntimeView projection', as
   ).toEqual([]);
 });
 
-test('read remote runtime opens normal app workspace', async ({ page }) => {
+test('read remote runtime opens normal app workspace', { tag: '@functional' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
   const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
@@ -1334,7 +1339,7 @@ test('read remote runtime opens normal app workspace', async ({ page }) => {
   ).toEqual([]);
 });
 
-test('inspect remote runtime does not expose RuntimeInput send and keeps account projection readable', async ({ page }) => {
+test('inspect remote runtime does not expose RuntimeInput send and keeps account projection readable', { tag: '@resilience' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const hubs = await waitForNamedHubs(page, ['h1'], { apiBaseUrl: API_BASE_URL });
   const h1 = String(hubs.h1 || '').toLowerCase();
@@ -1444,7 +1449,7 @@ test('inspect remote runtime does not expose RuntimeInput send and keeps account
   ).toEqual([]);
 });
 
-test('address explorer bootstraps remote runtime projection outside app shell', async ({ page }) => {
+test('address explorer bootstraps remote runtime projection outside app shell', { tag: '@functional' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
   const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
@@ -1521,7 +1526,7 @@ test('address explorer bootstraps remote runtime projection outside app shell', 
   ).toEqual([]);
 });
 
-test('admin remote runtime opens settings projection without legacy Env settings', async ({ page }) => {
+test('admin remote runtime opens settings projection without legacy Env settings', { tag: '@functional' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
   const adminKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
@@ -1578,7 +1583,7 @@ test('admin remote runtime opens settings projection without legacy Env settings
   ).toEqual([]);
 });
 
-test('health admin keeps QA evidence link-only and runtime adapter local', async ({ page }) => {
+test('health admin keeps QA evidence link-only and runtime adapter local', { tag: '@resilience' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
   const wsUrl = h1Endpoint.wsUrl;
@@ -1681,7 +1686,7 @@ test('health admin keeps QA evidence link-only and runtime adapter local', async
   await expect(page.getByRole('heading', { name: 'xln health admin' })).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
 });
 
-test('health runtime adapter renders 1M aggregate snapshot without freezing', async ({ page }) => {
+test('health runtime adapter renders 1M aggregate snapshot without freezing', { tag: '@resilience' }, async ({ page }) => {
   await installOneMillionRuntimeAdapterSocket(page);
 
   await page.goto(`${API_BASE_URL}/health`, { waitUntil: 'domcontentloaded' });
@@ -1728,7 +1733,7 @@ test('health runtime adapter renders 1M aggregate snapshot without freezing', as
   expect(stats?.maxAccountItems).toBe(10);
 });
 
-test('admin remote runtime control advances live state and exposes past frames', async ({ page }) => {
+test('admin remote runtime control advances live state and exposes past frames', { tag: '@functional' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const hubs = await waitForNamedHubs(page, ['h1'], { apiBaseUrl: API_BASE_URL });
   const h1 = String(hubs.h1 || '').toLowerCase();
@@ -2025,7 +2030,6 @@ test('admin remote runtime control advances live state and exposes past frames',
   const extendCreditButton = creditPanel.getByRole('button', { name: /Extend Credit/i }).first();
   await expect(extendCreditButton).toBeEnabled({ timeout: REMOTE_E2E_WAIT_MS });
   await extendCreditButton.click();
-  await expect(page.getByTestId('runtime-command-receipt')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
   await expect.poll(async () => page.evaluate(() => {
     const receipt = (window as any).__xln?.commands?.latest as {
       status?: string;
@@ -2091,7 +2095,6 @@ test('admin remote runtime control advances live state and exposes past frames',
   await settingsPanel.getByLabel('Name').fill(nextProfileName);
   await settingsPanel.getByLabel('Bio').fill('admin-e2e-control');
   await settingsPanel.getByRole('button', { name: /Save Profile/i }).click();
-  await expect(page.getByTestId('runtime-command-receipt')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
   await expect.poll(async () => page.evaluate(() => {
     const receipt = (window as any).__xln?.commands?.latest as {
       status?: string;
@@ -2146,7 +2149,9 @@ test('admin remote runtime control advances live state and exposes past frames',
   expect(controlResult.receipt?.upstreamReceiptId).toBeTruthy();
   expect(controlResult.receipt?.statusUrl).toContain('/api/control/runtime-input/');
   expect(['accepted', 'observed']).toContain(controlResult.receipt?.status);
-  await expect(page.getByTestId('runtime-command-receipt')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  // The normal wallet intentionally hides accepted/observed terminal receipts;
+  // the durable receipt remains inspectable through the command debug surface.
+  await expect(page.getByTestId('runtime-command-receipt')).toBeHidden();
 
   const after = await waitForAdminControlProbe(
     page,
@@ -2386,7 +2391,7 @@ test('admin remote runtime control advances live state and exposes past frames',
   expect(liveProjectionHeight).toBeGreaterThanOrEqual(after.envHeight);
 });
 
-test('runtime dropdown switches app-imported remote runtimes without manager route', async ({ page }) => {
+test('runtime dropdown switches app-imported remote runtimes without manager route', { tag: '@functional' }, async ({ page }) => {
   test.setTimeout(480_000);
   const baseline = await ensureE2EBaseline(page, {
     requireHubMesh: true,
@@ -2563,7 +2568,7 @@ test('runtime dropdown switches app-imported remote runtimes without manager rou
   expect(adminProjectionProbe.afterHeight).toBeGreaterThanOrEqual(adminProjectionProbe.beforeHeight);
 });
 
-test('pre-wallet live runtime selector connects suggested H1 runtime through the app UX', async ({ page }) => {
+test('pre-wallet live runtime selector connects suggested H1 runtime through the app UX', { tag: '@functional' }, async ({ page }) => {
   test.setTimeout(480_000);
   const baseline = await ensureE2EBaseline(page, {
     requireHubMesh: true,
@@ -2625,7 +2630,7 @@ test('pre-wallet live runtime selector connects suggested H1 runtime through the
   expect(activeRemote.url).not.toContain('/radapter/manage');
 });
 
-test('bulk remote runtime import link validates mesh, custody, and market maker runtimes in browser', async ({ browser }) => {
+test('bulk remote runtime import link validates mesh, custody, and market maker runtimes in browser', { tag: '@functional' }, async ({ browser }) => {
   test.setTimeout(480_000);
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
@@ -2664,16 +2669,16 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
       (storageKey) => sessionStorage.getItem(storageKey),
       REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY,
     ), { timeout: 120_000 }).not.toBeNull();
-    await page.waitForFunction((storageKey) => {
+    const initialImportSummary = await page.evaluate((storageKey) => {
       const raw = sessionStorage.getItem(storageKey);
-      if (!raw) return false;
-      try {
-        const parsed = JSON.parse(raw) as { ok?: boolean; count?: number };
-        return parsed.ok === true && Number(parsed.count || 0) >= 5;
-      } catch {
-        return false;
-      }
-    }, REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY, { timeout: 120_000 });
+      if (!raw) throw new Error('REMOTE_RUNTIME_IMPORT_SUMMARY_MISSING');
+      return JSON.parse(raw) as RuntimeImportSummary;
+    }, REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY);
+    expect(
+      initialImportSummary.ok,
+      `remote runtime validation failed: ${JSON.stringify(initialImportSummary.failed ?? [])}`,
+    ).toBe(true);
+    expect(initialImportSummary.entries.length).toBeGreaterThanOrEqual(5);
 
     const importSummary = await readRuntimeImportSummary(page);
     await expect(page.getByTestId('remote-runtime-bulk-import-screen')).toHaveCount(0);
@@ -2773,6 +2778,6 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
       }
     }
   } finally {
-    await context.close();
+    await closeRuntimeContext(context);
   }
 });
