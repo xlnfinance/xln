@@ -286,6 +286,16 @@ async function readEntityIdleSnapshot(
   }, { targetEntityId: entityId, targetSignerId: signerId });
 }
 
+async function mineEmptyJurisdictionBlock(page: Page): Promise<void> {
+  const response = await page.request.post(`${APP_BASE_URL}/api/rpc`, {
+    data: { jsonrpc: '2.0', id: 1, method: 'evm_mine', params: [] },
+  });
+  const body = await response.json().catch(async () => ({ error: (await response.text()).slice(0, 500) }));
+  if (!response.ok() || body?.error) {
+    throw new Error(`E2E_EMPTY_BLOCK_MINE_FAILED:${response.status()}:${JSON.stringify(body?.error ?? body)}`);
+  }
+}
+
 async function expectSwapBuilderLabels(page: Page): Promise<void> {
   await openAccountWorkspaceTab(page, 'swap');
   await expect(page.getByTestId('swap-from-token-label')).toHaveText(/^(USDC|USDT|WETH)$/);
@@ -449,7 +459,15 @@ test.describe('E2E User Journey', () => {
       { timeout: 20_000, intervals: [100, 250, 500], message: 'Entity must become idle after faucet ACK' },
     ).toBe(true);
     const idleBefore = await readEntityIdleSnapshot(page, initial.entityId, initial.signerId);
-    await page.waitForTimeout(4_500);
+    await mineEmptyJurisdictionBlock(page);
+    await expect.poll(
+      async () => (await readEntityIdleSnapshot(page, initial.entityId, initial.signerId)).scannedJHeight,
+      {
+        timeout: 10_000,
+        intervals: [100, 250, 500, 1000],
+        message: 'the internal watcher must authenticate the newly mined empty J block',
+      },
+    ).toBeGreaterThan(idleBefore.scannedJHeight);
     const idleAfter = await readEntityIdleSnapshot(page, initial.entityId, initial.signerId);
     expect(idleAfter.quiescent, 'idle watcher polling must not create new Entity work').toBe(true);
     expect(
