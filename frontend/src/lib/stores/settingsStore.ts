@@ -51,7 +51,7 @@ const defaultSettings: Settings = {
   tokenPrecision: 4, // 2..18 digits after decimal for token amounts (18 = full)
   showTokenIcons: true,
   showTimeMachine: false, // Off by default to reduce visual noise in wallet mode
-  showXlnMascot: true,
+  showXlnMascot: false,
   xlnMascotDock: DEFAULT_XLN_MASCOT_DOCK,
   dropdownMode: 'signer-first',
   runtimeDelay: 0, // 0 = no artificial frame delay (controls env.runtimeConfig.minFrameDelayMs)

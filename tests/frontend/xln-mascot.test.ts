@@ -18,11 +18,17 @@ import {
   parseAssistantChatRequest,
   sanitizeAssistantCatalog,
 } from '../../runtime/server/assistant-proxy-input';
+import { normalizeImportedUiSettings } from '../../frontend/src/lib/utils/ui-style';
 
 const desktop = { width: 1440, height: 900 };
 const phone = { width: 393, height: 852, insetTop: 47, insetBottom: 34 };
 
 describe('xln mascot geometry', () => {
+  test('defaults imported settings to hidden while preserving explicit opt-in', () => {
+    expect(normalizeImportedUiSettings({ version: 1 }).showXlnMascot).toBe(false);
+    expect(normalizeImportedUiSettings({ version: 1, showXlnMascot: true }).showXlnMascot).toBe(true);
+  });
+
   test('normalizes corrupt placement and clamps offsets', () => {
     expect(normalizeXlnMascotDock(null)).toEqual(DEFAULT_XLN_MASCOT_DOCK);
     expect(normalizeXlnMascotDock({ version: 2, side: 'center', offsetRatio: 99 })).toEqual(DEFAULT_XLN_MASCOT_DOCK);

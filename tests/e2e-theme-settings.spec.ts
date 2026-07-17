@@ -65,23 +65,20 @@ test('settings toggles the xln guide without leaving the workspace', { tag: '@fu
   await expect(page.getByTestId('tab-settings')).toBeVisible({ timeout: INIT_TIMEOUT });
   const toggle = page.getByTestId('settings-xln-mascot-toggle');
   await expect(toggle).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByTestId('xln-mascot-root')).toBeVisible();
+  await expect(toggle).not.toBeChecked();
+  await expect(page.getByTestId('xln-mascot-root')).toHaveCount(0);
   await page.screenshot({
-    path: testInfo.outputPath('laptop-settings-guide-visible.png'),
+    path: testInfo.outputPath('laptop-settings-guide-default-hidden.png'),
     animations: 'disabled',
   });
 
-  await toggle.uncheck();
-  await expect(toggle).not.toBeChecked();
-  await expect(page.getByTestId('xln-mascot-root')).toHaveCount(0);
-  await page.waitForTimeout(200);
-  await page.screenshot({
-    path: testInfo.outputPath('laptop-settings-guide-hidden.png'),
-    animations: 'disabled',
-  });
   await toggle.check();
   await expect(toggle).toBeChecked();
   await expect(page.getByTestId('xln-mascot-root')).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath('laptop-settings-guide-enabled.png'),
+    animations: 'disabled',
+  });
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('settings-xln-mascot-toggle')).toBeChecked({ timeout: 20_000 });

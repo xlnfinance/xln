@@ -200,7 +200,7 @@ export function normalizeImportedUiSettings(input: unknown): Partial<Settings> {
     compactNumbers: !!value.compactNumbers,
     showTokenIcons: !!value.showTokenIcons,
     showTimeMachine: !!value.showTimeMachine,
-    showXlnMascot: value.showXlnMascot !== false,
+    showXlnMascot: value.showXlnMascot === true,
     xlnMascotDock: value.xlnMascotDock
       ? normalizeXlnMascotDock(value.xlnMascotDock)
       : { ...DEFAULT_XLN_MASCOT_DOCK },
