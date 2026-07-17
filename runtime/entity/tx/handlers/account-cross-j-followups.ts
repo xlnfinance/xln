@@ -19,6 +19,7 @@ import {
 import { decodeHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { createStructuredLogger, shortId, shortOrder } from '../../../infra/logger';
 import { removeCrossJurisdictionBookOrder } from '../../../orderbook/cross-j';
+import { addMessage } from '../../../state-helpers';
 import {
   buildCrossJurisdictionEntityOutput,
   crossJurisdictionRouteSignerHint,
@@ -343,6 +344,7 @@ const queueBookAdmissionOnCommittedPull = (
       transitionCrossJurisdictionRouteStatus(admissionRoute, 'resting', committedAt);
       Object.assign(route, admissionRoute);
       newState.crossJurisdictionSwaps?.set(route.orderId, route);
+      addMessage(newState, `🌉 Cross-j swap ${route.orderId} committed by source Account`);
       if (sourceUserCommitted) {
         handled = true;
         continue;

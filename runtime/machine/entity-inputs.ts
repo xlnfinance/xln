@@ -84,6 +84,95 @@ export const applyMergedEntityInputs = async (
   const { isReplay, routingDeps } = options;
   const profileStartedAt = getPerfMs();
   const profiledInputs: Array<Record<string, unknown>> = [];
+  let localEventCount = 0;
+
+  const drainImmediateCrossJurisdictionOutputs = async (): Promise<void> => {
+    const localEventFingerprints = new Set<string>();
+    let localEventRound = 0;
+    while (true) {
+      const immediateCrossJOutputs = entityOutbox.filter(output => isImmediateLocalCrossJurisdictionOutput(env, output));
+      if (immediateCrossJOutputs.length === 0) return;
+      localEventRound += 1;
+      localEventCount += immediateCrossJOutputs.length;
+      if (localEventRound > 64 || localEventCount > 1_000) {
+        throw new Error(
+          `RUNTIME_CROSS_J_EVENT_CASCADE_LIMIT:rounds=${localEventRound}:events=${localEventCount}`,
+        );
+      }
+      const deferredOutputs = entityOutbox.filter(output => !isImmediateLocalCrossJurisdictionOutput(env, output));
+      entityOutbox.length = 0;
+      entityOutbox.push(...deferredOutputs);
+
+      for (const entityInput of mergeEntityInputs(immediateCrossJOutputs)) {
+        const fingerprint = safeStringify({
+          entityId: entityInput.entityId.toLowerCase(),
+          signerId: entityInput.signerId.toLowerCase(),
+          entityTxs: entityInput.entityTxs,
+        });
+        if (localEventFingerprints.has(fingerprint)) {
+          throw new Error(
+            `RUNTIME_CROSS_J_EVENT_CYCLE:round=${localEventRound}:entity=${entityInput.entityId}`,
+          );
+        }
+        localEventFingerprints.add(fingerprint);
+        const inputProfileStartedAt = getPerfMs();
+        const actualSignerId = entityInput.signerId.trim();
+        const replicaKey = findReplicaKeyInsensitive(env, entityInput.entityId, actualSignerId);
+        assertRuntimeIngress(
+          replicaKey,
+          'RUNTIME_CROSS_J_LOCAL_REPLICA_NOT_FOUND',
+          'Immediate cross-j local output target replica disappeared',
+          {
+            entityId: entityInput.entityId,
+            signerId: actualSignerId,
+            txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
+          },
+        );
+        const entityReplica = env.eReplicas.get(replicaKey);
+        assertRuntimeIngress(
+          entityReplica,
+          'RUNTIME_CROSS_J_LOCAL_REPLICA_EMPTY',
+          'Immediate cross-j local output target replica missing state',
+          { replicaKey },
+        );
+        const result = await applyEntityInputToReplica(
+          env,
+          entityReplica,
+          replicaKey,
+          entityInput,
+          actualSignerId,
+          isReplay,
+        );
+        entityFrameCommitted ||= result.entityFrameCommitted;
+        const inputElapsedMs = Math.round(getPerfMs() - inputProfileStartedAt);
+        if (ENTITY_INPUT_PROFILE || inputElapsedMs >= ENTITY_INPUT_SLOW_MS) {
+          profiledInputs.push({
+            elapsedMs: inputElapsedMs,
+            entity: String(entityInput.entityId || '').slice(-8),
+            signer: actualSignerId.slice(-8),
+            txs: Number(entityInput.entityTxs?.length || 0),
+            txTypes: Array.from(new Set((entityInput.entityTxs || []).map(tx => tx.type))).slice(0, 8),
+            proposedFrame: Boolean(entityInput.proposedFrame),
+            hashPrecommits: Number(entityInput.hashPrecommits?.size || 0),
+            immediateCrossJ: true,
+            localEventRound,
+            outputs: result.outputs.length,
+            jOutputs: result.jOutputs.length,
+          });
+        }
+        if (isCommittedEntityInput(result.outcome)) appliedEntityInputs.push(result.appliedInput);
+        env.eReplicas.set(replicaKey, result.nextReplica);
+        entityOutbox.push(...result.outputs);
+        if (result.jOutputs.length > 0) {
+          entityInputLog.debug('j_outputs.collected', {
+            count: result.jOutputs.length,
+            replica: shortId(replicaKey, 10),
+          });
+          jOutbox.push(...result.jOutputs);
+        }
+      }
+    }
+  };
 
   for (const entityInput of mergedInputs) {
     const inputProfileStartedAt = getPerfMs();
@@ -227,93 +316,10 @@ export const applyMergedEntityInputs = async (
       });
       jOutbox.push(...result.jOutputs);
     }
-  }
-
-  const localEventFingerprints = new Set<string>();
-  let localEventRounds = 0;
-  let localEventCount = 0;
-  while (true) {
-    const immediateCrossJOutputs = entityOutbox.filter(output => isImmediateLocalCrossJurisdictionOutput(env, output));
-    if (immediateCrossJOutputs.length === 0) break;
-    localEventRounds += 1;
-    localEventCount += immediateCrossJOutputs.length;
-    if (localEventRounds > 64 || localEventCount > 1_000) {
-      throw new Error(
-        `RUNTIME_CROSS_J_EVENT_CASCADE_LIMIT:rounds=${localEventRounds}:events=${localEventCount}`,
-      );
-    }
-    const deferredOutputs = entityOutbox.filter(output => !isImmediateLocalCrossJurisdictionOutput(env, output));
-    entityOutbox.length = 0;
-    entityOutbox.push(...deferredOutputs);
-
-    for (const entityInput of mergeEntityInputs(immediateCrossJOutputs)) {
-      const fingerprint = safeStringify({
-        entityId: entityInput.entityId.toLowerCase(),
-        signerId: entityInput.signerId.toLowerCase(),
-        entityTxs: entityInput.entityTxs,
-      });
-      if (localEventFingerprints.has(fingerprint)) {
-        throw new Error(
-          `RUNTIME_CROSS_J_EVENT_CYCLE:round=${localEventRounds}:entity=${entityInput.entityId}`,
-        );
-      }
-      localEventFingerprints.add(fingerprint);
-      const inputProfileStartedAt = getPerfMs();
-      const actualSignerId = entityInput.signerId.trim();
-      const replicaKey = findReplicaKeyInsensitive(env, entityInput.entityId, actualSignerId);
-      assertRuntimeIngress(
-        replicaKey,
-        'RUNTIME_CROSS_J_LOCAL_REPLICA_NOT_FOUND',
-        'Immediate cross-j local output target replica disappeared',
-        {
-          entityId: entityInput.entityId,
-          signerId: actualSignerId,
-          txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
-        },
-      );
-      const entityReplica = env.eReplicas.get(replicaKey);
-      assertRuntimeIngress(
-        entityReplica,
-        'RUNTIME_CROSS_J_LOCAL_REPLICA_EMPTY',
-        'Immediate cross-j local output target replica missing state',
-        { replicaKey },
-      );
-      const result = await applyEntityInputToReplica(
-        env,
-        entityReplica,
-        replicaKey,
-        entityInput,
-        actualSignerId,
-        isReplay,
-      );
-      entityFrameCommitted ||= result.entityFrameCommitted;
-      const inputElapsedMs = Math.round(getPerfMs() - inputProfileStartedAt);
-      if (ENTITY_INPUT_PROFILE || inputElapsedMs >= ENTITY_INPUT_SLOW_MS) {
-        profiledInputs.push({
-          elapsedMs: inputElapsedMs,
-          entity: String(entityInput.entityId || '').slice(-8),
-          signer: actualSignerId.slice(-8),
-          txs: Number(entityInput.entityTxs?.length || 0),
-          txTypes: Array.from(new Set((entityInput.entityTxs || []).map(tx => tx.type))).slice(0, 8),
-          proposedFrame: Boolean(entityInput.proposedFrame),
-          hashPrecommits: Number(entityInput.hashPrecommits?.size || 0),
-          immediateCrossJ: true,
-          localEventRound: localEventRounds,
-          outputs: result.outputs.length,
-          jOutputs: result.jOutputs.length,
-        });
-      }
-      if (isCommittedEntityInput(result.outcome)) appliedEntityInputs.push(result.appliedInput);
-      env.eReplicas.set(replicaKey, result.nextReplica);
-      entityOutbox.push(...result.outputs);
-      if (result.jOutputs.length > 0) {
-        entityInputLog.debug('j_outputs.collected', {
-          count: result.jOutputs.length,
-          replica: shortId(replicaKey, 10),
-        });
-        jOutbox.push(...result.jOutputs);
-      }
-    }
+    // A later top-level Account input may causally depend on a trusted sibling
+    // event emitted by this commit. Consume that local event chain before
+    // advancing the ordered Runtime batch; remote outputs remain deferred.
+    await drainImmediateCrossJurisdictionOutputs();
   }
 
   const elapsedMs = Math.round(getPerfMs() - profileStartedAt);
