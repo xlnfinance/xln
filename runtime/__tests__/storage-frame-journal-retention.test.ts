@@ -88,13 +88,17 @@ describe('storage frame journal retention', () => {
     const db = getFrameDb(env);
     const frameKey = keyFrame(1);
     const diffKey = keyDiff(1);
+    const manifestKey = keySnapshotManifest(1);
     const frame = await readRawOrNull(db, frameKey);
     const diff = await readRawOrNull(db, diffKey);
+    const manifest = await readRawOrNull(db, manifestKey);
     const head = await readStorageHead(db);
-    if (!frame || !diff || !head) throw new Error('TEST_STORAGE_RECORD_MISSING');
+    if (!frame || !diff || !manifest || !head) throw new Error('TEST_STORAGE_RECORD_MISSING');
 
     expect(head.retainedHistoryBytes).toBe(
-      frameKey.byteLength + frame.byteLength + diffKey.byteLength + diff.byteLength,
+      frameKey.byteLength + frame.byteLength +
+      diffKey.byteLength + diff.byteLength +
+      manifestKey.byteLength + manifest.byteLength,
     );
 
     await closeRuntimeDb(env);
@@ -746,9 +750,28 @@ describe('storage frame journal retention', () => {
       retryKey,
       { attempts: 6, nextRetryAt: persistedFutureRetryAt },
     ]]);
-    env.height += 1;
-    env.timestamp += 1;
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [pendingOutput]);
+    const secondSigner = deriveSignerAddressSync(seed, '2').toLowerCase();
+    registerSignerKey(env, secondSigner, deriveSignerKeySync(seed, '2'));
+    const secondEntityId = generateLazyEntityId([secondSigner], 1n).toLowerCase();
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId: secondEntityId,
+        signerId: secondSigner,
+        data: {
+          isProposer: true,
+          config: {
+            mode: 'proposer-based',
+            threshold: 1n,
+            validators: [secondSigner],
+            shares: { [secondSigner]: 1n },
+            jurisdiction,
+          },
+        },
+      }],
+      entityInputs: [],
+    });
+    await processRuntime(env, []);
     const journal = await readPersistedFrameJournal(env, env.height);
     expect(journal?.runtimeOutputs).toEqual([pendingOutput]);
     expect(journal?.runtimeMachineBeforeApply?.pendingNetworkOutputs).toEqual([pendingOutput]);
@@ -1335,11 +1358,8 @@ describe('storage frame journal retention', () => {
     });
     await processRuntime(env, []);
 
-    const firstManualHeight = env.height + 1;
-    const lastManualHeight = env.height + 4;
-    for (let height = firstManualHeight; height <= lastManualHeight; height += 1) {
-      env.height = height;
-      env.timestamp += 1;
+    for (let signerIndex = 2; signerIndex <= 5; signerIndex += 1) {
+      const height = env.height + 1;
       env.frameLogs = [{
         id: height,
         timestamp: env.timestamp,
@@ -1347,7 +1367,28 @@ describe('storage frame journal retention', () => {
         category: 'system',
         message: `storage-crash-frame-db-loss-${height}`,
       }];
-      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+      const nextSigner = deriveSignerAddressSync(seed, String(signerIndex));
+      registerSignerKey(env, nextSigner, deriveSignerKeySync(seed, String(signerIndex)));
+      const nextEntityId = generateLazyEntityId([nextSigner], 1n).toLowerCase();
+      enqueueRuntimeInput(env, {
+        runtimeTxs: [{
+          type: 'importReplica',
+          entityId: nextEntityId,
+          signerId: nextSigner,
+          data: {
+            isProposer: true,
+            config: {
+              mode: 'proposer-based',
+              threshold: 1n,
+              validators: [nextSigner],
+              shares: { [nextSigner]: 1n },
+              jurisdiction,
+            },
+          },
+        }],
+        entityInputs: [],
+      });
+      await processRuntime(env, []);
     }
 
     const latestHeight = await getPersistedLatestHeight(env);
@@ -1401,6 +1442,7 @@ describe('storage frame journal retention', () => {
     const head = await readStorageHead(db);
     if (!head) throw new Error('TEST_HEAD_MISSING');
     const batch = db.batch();
+    batch.del(keySnapshotManifest(1));
     batch.put(KEY_HEAD, encodeBuffer({
       ...head,
       latestSnapshotHeight: 1,
