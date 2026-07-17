@@ -1382,6 +1382,18 @@ export const planEntityOutputs = (
       runtime: targetRuntimeId ? shortId(targetRuntimeId, 8) : 'unknown',
     });
     if (!targetRuntimeId) {
+      if (entityInputHasCrossJurisdictionIntraRuntimeTx(outputToRoute)) {
+        const txTypes = (outputToRoute.entityTxs || []).map(tx => tx.type);
+        env.error?.('network', 'ROUTE_TARGET_RUNTIME_UNKNOWN', {
+          entityId: outputToRoute.entityId,
+          txTypes,
+          protocol: 'cross-j',
+        });
+        throw new Error(
+          `ROUTE_TARGET_RUNTIME_UNKNOWN: cross-j sibling entity=${outputToRoute.entityId} ` +
+          `txTypes=${txTypes.join(',')}`,
+        );
+      }
       reportRetryableRouteDefer(env, deps, outputToRoute, {
         entityId: outputToRoute.entityId,
         reason: 'target-runtime-unknown',

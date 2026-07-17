@@ -76,6 +76,7 @@ import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity/tx/h
 import { buildCrossJurisdictionEntityOutput } from '../entity/tx/cross-j-outputs';
 import { handleHtlcOnionAdvance } from '../entity/tx/handlers/htlc-onion-advance';
 import { handleAdmitCrossJurisdictionBookOrderEntityTx } from '../entity/tx/handlers/cross-j-book-order';
+import type { SwapOfferEvent } from '../entity/tx/handlers/account';
 import { handleDisputeFinalize, handleDisputeStart, handlePrepareDispute } from '../entity/tx/handlers/dispute';
 import { handleJAbortSentBatch } from '../entity/tx/handlers/j-abort-sent-batch';
 import { handleJRebroadcast } from '../entity/tx/handlers/j-rebroadcast';
@@ -1032,6 +1033,7 @@ describe('audit fail-fast regressions', () => {
     const sourceState = makeEntityState(sourceUser);
     sourceState.config = makeSingleSignerConfigFor(sourceSigner);
     sourceState.crossJurisdictionSwaps = new Map();
+    attachSigningReplica(env, targetUser, targetSigner);
     (env as Env & { gossip?: { getProfiles: () => unknown[] } }).gossip = {
       getProfiles: () => [{
         entityId: targetUser,
@@ -1802,6 +1804,12 @@ describe('audit fail-fast regressions', () => {
     sourceHubState.crossJurisdictionSwaps = new Map([[route.orderId, route]]);
     attachSigningReplica(env, sourceHub, '1');
     const outputs: EntityInput[] = [];
+    const swapOffersCreated: SwapOfferEvent[] = [];
+    const committedRoute = {
+      ...route,
+      targetReceipt,
+      status: 'resting' as const,
+    };
 
     applyCommittedCrossJurisdictionAccountTxFollowup(env, sourceHubState, sourceUser, {
       type: 'pull_lock',
@@ -1812,20 +1820,18 @@ describe('audit fail-fast regressions', () => {
         revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
         fullHash: route.sourcePull!.fullHash,
         partialRoot: route.sourcePull!.partialRoot,
-        crossJurisdiction: buildCrossJurisdictionPullBinding({
-          ...route,
-          targetReceipt,
-          status: 'resting',
-        }, 'source'),
+        crossJurisdiction: buildCrossJurisdictionPullBinding(committedRoute, 'source'),
+        crossJurisdictionRoute: committedRoute,
       },
-    }, outputs);
+    }, outputs, env.timestamp, swapOffersCreated);
 
     const sourceRoute = sourceHubState.crossJurisdictionSwaps.get(route.orderId);
     expect(sourceRoute?.status).toBe('resting');
     expect(sourceRoute?.targetReceipt?.receiptHash).toBe(targetReceipt.receiptHash);
-    expect(outputs.some((output) =>
-      output.entityTxs?.some((tx) => tx.type === 'admitCrossJurisdictionBookOrder'),
-    )).toBe(true);
+    expect(outputs).toHaveLength(0);
+    expect(sourceHubState.crossJurisdictionBookAdmissions?.size).toBe(1);
+    expect(sourceHubState.crossJurisdictionBookAdmissions?.values().next().value?.status).toBe('pending');
+    expect(swapOffersCreated).toHaveLength(0);
   });
 
   test('cross-j same-token swap_offer quantizes by jurisdiction market side', async () => {
@@ -3118,14 +3124,14 @@ describe('audit fail-fast regressions', () => {
       makerEntityId: left,
       hubEntityId: right,
       source: {
-        jurisdiction: 'stack:testnet',
+        jurisdiction: `stack:1:0x${'c1'.repeat(20)}`,
         entityId: left,
         counterpartyEntityId: right,
         tokenId: 1,
         amount,
       },
       target: {
-        jurisdiction: 'stack:tron',
+        jurisdiction: `stack:2:0x${'c2'.repeat(20)}`,
         entityId: right,
         counterpartyEntityId: left,
         tokenId: 2,
@@ -7228,6 +7234,13 @@ describe('audit fail-fast regressions', () => {
       isProposer: true,
       state: sourceState,
     } satisfies EntityReplica);
+    env.eReplicas.set(`${targetHub}:${targetSigner}`, {
+      entityId: targetHub,
+      signerId: targetSigner,
+      mempool: [],
+      isProposer: true,
+      state: targetState,
+    } satisfies EntityReplica);
     const outputs: EntityInput[] = [];
     const ackTx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }> = {
       type: 'cross_swap_fill_ack',
@@ -7919,13 +7932,16 @@ describe('audit fail-fast regressions', () => {
     expect(findCrossJurisdictionBookAdmissionForAck(state, targetHub, orderId, routeHash)).toBe(admission);
   });
 
-  test('committed cross-j signer makes output bytes independent of local topology', () => {
-    const empty = createEmptyEnv('cross-output-topology-empty');
+  test('committed cross-j signer requires its local sibling and ignores unrelated topology', () => {
+    const missing = createEmptyEnv('cross-output-topology-missing');
+    const minimal = createEmptyEnv('cross-output-topology-minimal');
     const populated = createEmptyEnv('cross-output-topology-populated');
     const target = `0x${'ab'.repeat(32)}`;
     const committedSigner = `0x${'cd'.repeat(20)}`;
     const staleSigner = `0x${'ef'.repeat(20)}`;
     const txs: EntityTx[] = [{ type: 'j_broadcast', data: {} }];
+    attachSigningReplica(minimal, target, committedSigner);
+    attachSigningReplica(populated, target, committedSigner);
     populated.eReplicas.set('stale-topology', {
       entityId: target.toUpperCase(),
       signerId: staleSigner,
@@ -7937,7 +7953,9 @@ describe('audit fail-fast regressions', () => {
       },
     } satisfies EntityReplica);
 
-    expect(buildCrossJurisdictionEntityOutput(empty, target, txs, committedSigner)).toEqual(
+    expect(() => buildCrossJurisdictionEntityOutput(missing, target, txs, committedSigner))
+      .toThrow('CROSS_J_SIBLING_TARGET_NOT_LOCAL');
+    expect(buildCrossJurisdictionEntityOutput(minimal, target, txs, committedSigner)).toEqual(
       buildCrossJurisdictionEntityOutput(populated, target, txs, committedSigner),
     );
   });
