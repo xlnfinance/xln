@@ -9,8 +9,10 @@ type BootstrapProgress = {
 type BootstrapHub = {
   bootstrapProgress?: BootstrapProgress | null;
   exitCode?: unknown;
+  exitSignal?: unknown;
   name?: unknown;
   online?: unknown;
+  recoveryInProgress?: unknown;
   selfRelayPresence?: unknown;
 };
 
@@ -58,8 +60,11 @@ export const findProductionBootstrapFatal = (
 
   for (const hub of health.hubs ?? []) {
     const name = String(hub.name || 'unknown');
-    if (finiteNumber(hub.exitCode) !== null) {
-      return `PROD_BOOTSTRAP_HUB_EXITED:${name}:code=${hub.exitCode}`;
+    if (hub.recoveryInProgress !== true && (
+      finiteNumber(hub.exitCode) !== null || String(hub.exitSignal || '').length > 0
+    )) {
+      const signal = String(hub.exitSignal || '');
+      return `PROD_BOOTSTRAP_HUB_EXITED:${name}:code=${String(hub.exitCode)}${signal ? `:signal=${signal}` : ''}`;
     }
     const progress = hub.bootstrapProgress;
     const idleMs = finiteNumber(progress?.idleMs);
@@ -94,6 +99,7 @@ export const summarizeProductionBootstrap = (health: BootstrapHealth): Record<st
     name: String(hub.name || 'unknown'),
     online: hub.online === true,
     relay: hub.selfRelayPresence === true,
+    recovering: hub.recoveryInProgress === true,
     step: String(hub.bootstrapProgress?.step || 'unreported'),
     idleMs: finiteNumber(hub.bootstrapProgress?.idleMs),
     totalMs: finiteNumber(hub.bootstrapProgress?.totalMs),
@@ -127,14 +133,14 @@ const fetchHealth = async (url: string): Promise<BootstrapHealth> => {
 
 const main = async (): Promise<void> => {
   const url = String(process.argv[2] || 'http://127.0.0.1:8080/api/health');
-  const timeoutMs = Number(process.argv[3] || 1_800_000);
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error(`PROD_BOOTSTRAP_TIMEOUT_INVALID:${timeoutMs}`);
+  const timeoutMs = Number(process.argv[3] || 0);
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0) throw new Error(`PROD_BOOTSTRAP_TIMEOUT_INVALID:${timeoutMs}`);
   const startedAt = Date.now();
   let lastAvailableAt = 0;
   let lastSignature = '';
   let lastFetchError = '';
 
-  while (Date.now() - startedAt <= timeoutMs) {
+  while (timeoutMs === 0 || Date.now() - startedAt <= timeoutMs) {
     try {
       const health = await fetchHealth(url);
       lastAvailableAt = Date.now();

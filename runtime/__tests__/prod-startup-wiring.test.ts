@@ -290,6 +290,9 @@ describe('production startup wiring', () => {
     expect(script).toContain('export XLN_MESH_BOOTSTRAP_STALL_TIMEOUT_MS=${XLN_MESH_BOOTSTRAP_STALL_TIMEOUT_MS:-120000}');
     expect(script).toContain('export XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS=${XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS:-600000}');
     expect(script).toContain('export XLN_HUB_BASELINE_TIMEOUT_MS=${XLN_HUB_BASELINE_TIMEOUT_MS:-600000}');
+    expect(script).toContain('export MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS=${MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS:-600000}');
+    expect(script).toContain('export MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS=${MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS:-120000}');
+    expect(script).toContain('export XLN_MARKET_MAKER_READY_TIMEOUT_MS=${XLN_MARKET_MAKER_READY_TIMEOUT_MS:-600000}');
     expect(script).toContain('export XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT=${XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT:-1}');
     expect(script).toContain('export XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME=${XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME:-8}');
     expect(script).toContain('export XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME=${XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME:-64}');
@@ -620,7 +623,10 @@ describe('production startup wiring', () => {
       "readPositiveIntEnv('MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS', 1_500_000)",
     );
     expect(orchestratorConfig).toContain('Math.max(MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS, STARTUP_TIMEOUT_MS)');
-    expect(mmNode).toContain("import { MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS } from './orchestrator-config';");
+    expect(mmNode).toContain("import { MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS } from './orchestrator-config';");
+    expect(orchestratorConfig).toContain(
+      "readPositiveIntEnv('MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS', 120_000)",
+    );
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_START_DELAY_MS'] || '0'");
     expect(mmNode).toContain("MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'");
@@ -1053,7 +1059,15 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('location ~ ^/rpc[2-8]$');
     expect(deploy).toContain('public /rpc must proxy through orchestrator safety filter');
     expect(deploy).toContain('fail_deploy_with_debug "anvil2 did not become ready on :8546"');
-    expect(deploy).toContain('bun scripts/watch-prod-bootstrap.ts http://127.0.0.1:8080/api/health 1800000');
+    expect(deploy).toContain('bun scripts/watch-prod-bootstrap.ts http://127.0.0.1:8080/api/health 0');
+    expect(deploy).not.toContain('truncate -s 0');
+    expect(deploy).toContain('local expected_version="${XLN_FOUNDRY_VERSION:-v1.7.1}"');
+    expect(deploy).toContain('foundryup --install "$expected_version"');
+    expect(deploy).toContain('pm2 stop "$service"');
+    expect(deploy).toContain('FOUNDRY_UPGRADE_ANVIL_STOP_TIMEOUT');
+    expect(deploy).toContain('pm2 set pm2-logrotate:max_size 20M');
+    expect(deploy).toContain('pm2 set pm2-logrotate:retain 5');
+    expect(deploy).toContain('pm2 set pm2-logrotate:compress true');
     expect(deploy).toContain('RESET_PRODUCTION_MESH=0');
     expect(deploy).toContain('--reset-mesh');
     expect(deploy).toContain('--code-only');

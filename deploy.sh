@@ -140,6 +140,51 @@ wait_for_anvil_state_checkpoint() {
   return 1
 }
 
+ensure_production_foundry() {
+  local expected_version="${XLN_FOUNDRY_VERSION:-v1.7.1}"
+  local expected_number="${expected_version#v}"
+  export PATH="$HOME/.foundry/bin:$PATH"
+
+  if anvil --version 2>/dev/null | head -1 | grep -Fq "Version: ${expected_number}"; then
+    echo "[deploy] Foundry already pinned at ${expected_version}"
+    return 0
+  fi
+  if ! command -v foundryup >/dev/null 2>&1; then
+    echo "FOUNDRYUP_MISSING:expected=${expected_version}" >&2
+    return 1
+  fi
+
+  if command -v pm2 >/dev/null 2>&1; then
+    for service in anvil anvil2; do
+      local service_pid
+      service_pid="$(pm2 pid "$service" 2>/dev/null | tail -1 | tr -d '[:space:]')"
+      if [[ "$service_pid" =~ ^[1-9][0-9]*$ ]]; then
+        echo "[deploy] stopping ${service} pid=${service_pid} for Foundry upgrade"
+        pm2 stop "$service" >/dev/null
+        local stop_deadline=$((SECONDS + 60))
+        while kill -0 "$service_pid" 2>/dev/null && [ "$SECONDS" -lt "$stop_deadline" ]; do
+          sleep 1
+        done
+        if kill -0 "$service_pid" 2>/dev/null; then
+          echo "FOUNDRY_UPGRADE_ANVIL_STOP_TIMEOUT:service=${service}:pid=${service_pid}" >&2
+          return 1
+        fi
+      fi
+    done
+  fi
+
+  echo "[deploy] upgrading Foundry to immutable release ${expected_version}"
+  foundryup --install "$expected_version"
+  hash -r
+  for binary in anvil cast forge; do
+    if ! "$binary" --version 2>/dev/null | head -1 | grep -Fq "${expected_number}"; then
+      echo "FOUNDRY_VERSION_MISMATCH:binary=${binary}:expected=${expected_version}" >&2
+      return 1
+    fi
+  done
+  echo "[deploy] Foundry verified at ${expected_version}"
+}
+
 wait_for_public_rpc_chain() {
   local path="$1"
   local expected_chain_hex="$2"
@@ -180,7 +225,7 @@ wait_for_public_rpc_placeholder() {
 }
 
 wait_for_main_stack() {
-  bun scripts/watch-prod-bootstrap.ts http://127.0.0.1:8080/api/health 1800000
+  bun scripts/watch-prod-bootstrap.ts http://127.0.0.1:8080/api/health 0
 }
 
 wait_for_http_status() {
@@ -783,6 +828,7 @@ ensure_production_host_hygiene() {
   echo "[deploy] enforcing production log and memory hygiene"
 
   install -d -m 700 /var/lib/xln /var/lib/xln/jdb /var/lib/xln/jdb/tmp /var/lib/xln/rdb
+  ensure_production_foundry
 
   if command -v crontab >/dev/null 2>&1; then
     crontab -l 2>/dev/null | grep -v '/root/xln/auto-redeploy.sh' | crontab - 2>/dev/null || true
@@ -803,23 +849,21 @@ EOF
 
   if command -v pm2 >/dev/null 2>&1; then
     if ! pm2 ls --no-color 2>/dev/null | grep -q 'pm2-logrotate'; then
-      pm2 install pm2-logrotate || true
+      pm2 install pm2-logrotate
     fi
-    pm2 set pm2-logrotate:max_size 5M >/dev/null || true
-    pm2 set pm2-logrotate:retain 1 >/dev/null || true
-    pm2 set pm2-logrotate:compress false >/dev/null || true
-    pm2 set pm2-logrotate:workerInterval 900 >/dev/null || true
-    pm2 set pm2-logrotate:rotateInterval '0 0 * * *' >/dev/null || true
-    pm2 set pm2-logrotate:rotateModule true >/dev/null || true
+    pm2 set pm2-logrotate:max_size 20M >/dev/null
+    pm2 set pm2-logrotate:retain 5 >/dev/null
+    pm2 set pm2-logrotate:compress true >/dev/null
+    pm2 set pm2-logrotate:workerInterval 900 >/dev/null
+    pm2 set pm2-logrotate:rotateInterval '0 0 * * *' >/dev/null
+    pm2 set pm2-logrotate:rotateModule true >/dev/null
   fi
 
   install -d /etc/cron.hourly
   cat > /etc/cron.hourly/xln-log-hygiene <<'EOF'
 #!/bin/sh
-find /root/.pm2/logs -type f -name '*.log' -size +5M -exec truncate -s 0 {} \; 2>/dev/null || true
-find /root/xln/logs -type f -name '*.log' -size +5M -exec truncate -s 0 {} \; 2>/dev/null || true
-find /root/.pm2/logs -type f -mtime +1 -delete 2>/dev/null || true
-find /root/xln/logs -type f -mtime +1 -delete 2>/dev/null || true
+find /root/.pm2/logs -type f -mtime +7 -delete 2>/dev/null || true
+find /root/xln/logs -type f -mtime +7 -delete 2>/dev/null || true
 find /root/xln/.logs -mindepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
 find /root/xln/playwright-report -mindepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
 find /root/xln/test-results -mindepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
@@ -853,16 +897,16 @@ EOF
   cat > /etc/logrotate.d/xln-runtime-logs <<'EOF'
 /root/xln/logs/*.log {
   daily
-  rotate 1
+  rotate 5
   missingok
   notifempty
   copytruncate
-  maxsize 5M
+  compress
+  delaycompress
+  maxsize 20M
 }
 EOF
 
-find /root/.pm2/logs -type f -name '*.log' -exec truncate -s 0 {} \; 2>/dev/null || true
-find /root/xln/logs -type f -name '*.log' -exec truncate -s 0 {} \; 2>/dev/null || true
 find /root/.foundry/anvil/tmp -mindepth 1 -mmin +180 -exec rm -rf {} + 2>/dev/null || true
 find /var/lib/xln/jdb/tmp -mindepth 1 -mmin +180 -exec rm -rf {} + 2>/dev/null || true
 if [ -d /root/.foundry/anvil/tmp ]; then

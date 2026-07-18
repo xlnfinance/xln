@@ -132,6 +132,12 @@ import {
 import { createMarketMakerChildPoller } from './market-maker-child-poll';
 import { buildAggregatedMarketMakerHealth } from './market-maker-aggregated-health';
 import { resolveRuntimeImportReadiness } from './runtime-import-readiness';
+import { persistChildFailureReceipt, type ChildFailureReceipt } from './child-failure-diagnostics';
+import {
+  decideChildFailure,
+  type ChildFailureDecision,
+  type ChildFailureObservation,
+} from './child-recovery-policy';
 import { buildRuntimeHealthFailures, classifyRuntimeBootstrapStageFailure } from '../protocol/failure-taxonomy';
 import { STORAGE_WRITER_LOCK_TTL_MS } from '../storage/runtime-dbs';
 import {
@@ -217,6 +223,7 @@ const HUB_READY_SNAPSHOT_TIMEOUT_MS = Math.max(
 const relayUrl = args.relayUrl;
 const shardJurisdictionsPath = join(args.dbRoot, 'jurisdictions.json');
 const controlPlaneDir = join(args.dbRoot, '.control-plane');
+const childDiagnosticsDir = join(controlPlaneDir, 'diagnostics');
 const managedRuntimeLeases = createManagedRuntimeLeaseManager({
   controlPlaneDir,
   ownerId: orchestratorOwnerId,
@@ -295,8 +302,11 @@ const hubChildren: HubChild[] = HUB_NAMES.map((name, index) => ({
   startedAt: null,
   exitedAt: null,
   exitCode: null,
+  exitSignal: null,
   restartTimer: null,
   restartCount: 0,
+  recoveryInProgress: false,
+  failureCounts: {},
   lastHealth: null,
   lastInfo: null,
   recentStdout: [],
@@ -318,6 +328,7 @@ const marketMakerChild: MarketMakerChild = {
   exitSignal: null,
   restartTimer: null,
   restartCount: 0,
+  failureCounts: {},
   lastHealth: null,
   lastInfo: null,
   lastStartupPhase: null,
@@ -673,23 +684,23 @@ const resolveRequestClientIp = (request: Request): string => {
 };
 
 const stopProcess = async (proc: ChildProcess | null): Promise<void> => {
-  if (!proc || proc.exitCode !== null) return;
+  if (!proc || proc.exitCode !== null || proc.signalCode !== null) return;
   proc.kill('SIGTERM');
   const deadline = Date.now() + CHILD_GRACEFUL_SHUTDOWN_MS;
-  while (proc.exitCode === null && Date.now() < deadline) {
+  while (proc.exitCode === null && proc.signalCode === null && Date.now() < deadline) {
     await delay(100);
   }
-  if (proc.exitCode === null) {
+  if (proc.exitCode === null && proc.signalCode === null) {
     meshLog.warn('child.stop_timeout_sigkill', {
       pid: proc.pid ?? null,
       timeoutMs: CHILD_GRACEFUL_SHUTDOWN_MS,
     });
     proc.kill('SIGKILL');
     const killDeadline = Date.now() + CHILD_GRACEFUL_SHUTDOWN_MS;
-    while (proc.exitCode === null && Date.now() < killDeadline) {
+    while (proc.exitCode === null && proc.signalCode === null && Date.now() < killDeadline) {
       await delay(100);
     }
-    if (proc.exitCode === null) {
+    if (proc.exitCode === null && proc.signalCode === null) {
       throw new Error(`CHILD_STOP_TIMEOUT pid=${proc.pid ?? 'unknown'}`);
     }
   }
@@ -802,10 +813,15 @@ const getHubChildByEntityId = (hubEntityId: string): HubChild | null => {
 };
 
 const getHealthyHubChild = (): HubChild | null =>
-  hubChildren.find((candidate) => candidate.proc?.exitCode === null && candidate.lastHealth) || null;
+  hubChildren.find((candidate) =>
+    candidate.proc?.exitCode === null && candidate.proc?.signalCode === null && candidate.lastHealth
+  ) || null;
 
 const getExitedHubChild = (): HubChild | null =>
-  hubChildren.find((child) => child.exitCode !== null || child.proc?.exitCode !== null) || null;
+  hubChildren.find((child) =>
+    !child.recoveryInProgress &&
+    (child.exitCode !== null || child.exitSignal !== null || child.proc?.exitCode !== null || child.proc?.signalCode !== null)
+  ) || null;
 
 const fetchHubMarketSnapshots = async (
   child: HubChild,
@@ -875,13 +891,19 @@ const cleanupRpcMarketSubscription = (ws: OrchestratorWebSocket): void => market
 
 const pollHubHealth = async (child: HubChild): Promise<void> => {
   const proc = child.proc;
-  if (!proc || child.exitCode !== null || proc.exitCode !== null) return;
+  if (!proc || child.exitCode !== null || child.exitSignal !== null || proc.exitCode !== null || proc.signalCode !== null) return;
   const apiBase = `http://${args.host}:${child.apiPort}`;
   const [info, health] = await Promise.all([
     fetchJson<HubInfoPayload>(`${apiBase}/api/info`, CHILD_HEALTH_TIMEOUT_MS),
     fetchJson<HubHealthPayload>(`${apiBase}/api/health`, CHILD_HEALTH_TIMEOUT_MS),
   ]);
-  if (child.proc !== proc || child.exitCode !== null || proc.exitCode !== null) return;
+  if (
+    child.proc !== proc ||
+    child.exitCode !== null ||
+    child.exitSignal !== null ||
+    proc.exitCode !== null ||
+    proc.signalCode !== null
+  ) return;
   if (info) child.lastInfo = info;
   if (health) child.lastHealth = health;
   const entityIds = new Set<string>();
@@ -1069,7 +1091,7 @@ const consumeControlledStop = (pid: number | null | undefined): boolean => (
 );
 
 const failFastUnexpectedChildExit = (message: string): void => {
-  if (resetState.inProgress || fatalOrchestratorShutdownStarted) return;
+  if (fatalOrchestratorShutdownStarted) return;
   fatalOrchestratorShutdownStarted = true;
   meshLog.error('child.unexpected_exit', { message });
   void (async () => {
@@ -1081,6 +1103,106 @@ const failFastUnexpectedChildExit = (message: string): void => {
       process.exit(1);
     }
   })();
+};
+
+type RecoverableChild = HubChild | MarketMakerChild;
+
+const persistManagedChildFailure = (
+  child: RecoverableChild,
+  observation: ChildFailureObservation,
+  decision: ChildFailureDecision,
+  action: ChildFailureReceipt['action'] = decision.action,
+): string => {
+  const receipt: ChildFailureReceipt = {
+    schema: 'xln-child-failure-v1',
+    recordedAt: new Date().toISOString(),
+    role: observation.role,
+    name: observation.name,
+    pid: child.proc?.pid ?? null,
+    code: observation.code,
+    signal: observation.signal,
+    reason: observation.reason,
+    reasonCode: decision.reasonCode,
+    fingerprint: decision.fingerprint,
+    identicalFailureCount: decision.count,
+    action,
+    backoffMs: action === 'recover' ? decision.backoffMs : 0,
+    startedAt: child.startedAt,
+    exitedAt: child.exitedAt ?? Date.now(),
+    reset: { ...resetState },
+    codeFingerprint: orchestratorCodeFingerprint,
+    lastHealth: child.lastHealth,
+    lastInfo: child.lastInfo,
+    recentStdout: [...child.recentStdout],
+    recentStderr: [...child.recentStderr],
+  };
+  return persistChildFailureReceipt(childDiagnosticsDir, receipt, randomUUID()).receiptPath;
+};
+
+const handleUnexpectedHubFailure = (
+  child: HubChild,
+  observation: ChildFailureObservation,
+): void => {
+  if (fatalOrchestratorShutdownStarted) return;
+  const decision = decideChildFailure(child.failureCounts, observation);
+  child.failureCounts = decision.counts;
+  let receiptPath: string;
+  try {
+    receiptPath = persistManagedChildFailure(child, observation, decision);
+  } catch (error) {
+    const diagnosticError = serializeError(error);
+    meshLog.error('child.failure_receipt_write_failed', {
+      child: child.name,
+      error: diagnosticError,
+      originalFailure: observation.reason,
+    });
+    failFastUnexpectedChildExit(`${child.name} diagnostics persistence failed: ${diagnosticError}`);
+    return;
+  }
+  meshLog.error('child.unexpected_exit', {
+    child: child.name,
+    code: observation.code,
+    signal: observation.signal,
+    reasonCode: decision.reasonCode,
+    fingerprint: decision.fingerprint,
+    identicalFailureCount: decision.count,
+    action: decision.action,
+    receiptPath,
+  });
+  if (decision.action === 'fail-stop') {
+    failFastUnexpectedChildExit(
+      `${child.name} repeated ${decision.reasonCode} ${decision.count} times; receipt=${receiptPath}`,
+    );
+    return;
+  }
+
+  child.recoveryInProgress = true;
+  child.restartTimer = setTimeout(() => {
+    child.restartTimer = null;
+    void spawnHub(child).then(() => {
+      child.recoveryInProgress = false;
+      meshLog.info('child.respawned_from_checkpoint', {
+        child: child.name,
+        fingerprint: decision.fingerprint,
+        identicalFailureCount: decision.count,
+        receiptPath,
+      });
+    }).catch(async (error) => {
+      if (child.recoveryInProgress && child.restartTimer) return;
+      const failedProc = child.proc;
+      child.proc = null;
+      rememberControlledStop(failedProc);
+      await stopProcess(failedProc);
+      child.recoveryInProgress = false;
+      handleUnexpectedHubFailure(child, {
+        role: 'hub',
+        name: child.name,
+        code: null,
+        signal: null,
+        reason: `HUB_RECOVERY_SPAWN_FAILED:${serializeError(error)}`,
+      });
+    });
+  }, decision.backoffMs);
 };
 
 const buildSecondaryRpcArgs = (): string[] => {
@@ -1124,8 +1246,10 @@ const spawnHub = async (child: HubChild): Promise<void> => {
     ...(child.deployTokens ? ['--deploy-tokens'] : []),
   ];
   child.startedAt = Date.now();
+  child.recoveryInProgress = false;
   child.exitedAt = null;
   child.exitCode = null;
+  child.exitSignal = null;
   child.restartCount += 1;
   child.lastHealth = null;
   child.lastInfo = null;
@@ -1165,7 +1289,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
     pushChildLogLines(child.recentStderr, chunk);
     writePrefixedLogChunk(process.stderr, `[${child.name}:err]`, stderrPrefixState, chunk);
   });
-  proc.once('exit', code => {
+  proc.once('exit', (code, signal) => {
     flushPrefixedLogChunk(process.stdout, `[${child.name}]`, stdoutPrefixState);
     flushPrefixedLogChunk(process.stderr, `[${child.name}:err]`, stderrPrefixState);
     const pid = proc.pid ?? null;
@@ -1174,10 +1298,18 @@ const spawnHub = async (child: HubChild): Promise<void> => {
     managedRuntimeLeases.removeLease(spec, pid);
     if (isCurrentProc) {
       child.exitedAt = Date.now();
-      child.exitCode = code;
+      child.exitCode = code ?? null;
+      child.exitSignal = signal ?? null;
     }
-    if (!controlledStop && isCurrentProc && !resetState.inProgress && code !== 0) {
-      failFastUnexpectedChildExit(`${child.name} exited unexpectedly with code=${String(code)}`);
+    if (!controlledStop && isCurrentProc) {
+      handleUnexpectedHubFailure(child, {
+        role: 'hub',
+        name: child.name,
+        code: code ?? null,
+        signal: signal ?? null,
+        reason: child.recentStderr.at(-1) ?? child.recentStdout.at(-1) ??
+          `${child.name}_UNEXPECTED_EXIT code=${String(code)} signal=${String(signal)}`,
+      });
     }
   });
   await writeInheritedChildSecrets(proc, { runtimeSeed: child.seed });
@@ -1263,20 +1395,65 @@ const spawnMarketMaker = async (): Promise<void> => {
       marketMakerChild.exitCode = code ?? null;
       marketMakerChild.exitSignal = signal ?? null;
     }
-    if (!controlledStop && isCurrentProc && !resetState.inProgress && code !== 0) {
-      failFastUnexpectedChildExit(
-        `MM exited unexpectedly code=${String(code)} signal=${String(signal)} phase=${String(marketMakerChild.lastStartupPhase)}`,
-      );
+    if (!controlledStop && isCurrentProc) {
+      const observation: ChildFailureObservation = {
+        role: 'market-maker',
+        name: marketMakerChild.name,
+        code: code ?? null,
+        signal: signal ?? null,
+        reason: marketMakerChild.recentStderr.at(-1) ?? marketMakerChild.recentStdout.at(-1) ??
+          `MM_UNEXPECTED_EXIT code=${String(code)} signal=${String(signal)} phase=${String(marketMakerChild.lastStartupPhase)}`,
+      };
+      const decision = decideChildFailure(marketMakerChild.failureCounts, observation);
+      marketMakerChild.failureCounts = decision.counts;
+      let receiptPath: string;
+      try {
+        receiptPath = persistManagedChildFailure(
+          marketMakerChild,
+          observation,
+          decision,
+          resetState.inProgress && decision.action === 'recover' ? 'recover' : 'fail-stop',
+        );
+      } catch (error) {
+        const diagnosticError = serializeError(error);
+        meshLog.error('child.failure_receipt_write_failed', {
+          child: marketMakerChild.name,
+          error: diagnosticError,
+          originalFailure: observation.reason,
+        });
+        failFastUnexpectedChildExit(`MM diagnostics persistence failed: ${diagnosticError}`);
+        return;
+      }
+      meshLog.error('child.failure_captured', {
+        child: marketMakerChild.name,
+        reasonCode: decision.reasonCode,
+        identicalFailureCount: decision.count,
+        receiptPath,
+      });
+      if (!resetState.inProgress || decision.action === 'fail-stop') {
+        failFastUnexpectedChildExit(
+          `MM exited unexpectedly code=${String(code)} signal=${String(signal)} phase=${String(marketMakerChild.lastStartupPhase)} receipt=${receiptPath}`,
+        );
+      }
     }
   });
   await writeInheritedChildSecrets(proc, { runtimeSeed: marketMakerChild.seed });
 };
 
 const stopAllChildren = async (options: StopAllChildrenOptions = {}): Promise<void> => {
-  for (const child of hubChildren) clearChildRestartTimer(child);
+  for (const child of hubChildren) {
+    clearChildRestartTimer(child);
+    child.recoveryInProgress = false;
+  }
   clearChildRestartTimer(marketMakerChild);
-  const ownedLiveChildren = hubChildren.filter((child) => child.proc && child.proc.exitCode === null);
-  const ownedLiveMarketMaker = marketMakerChild.proc && marketMakerChild.proc.exitCode === null ? marketMakerChild : null;
+  const ownedLiveChildren = hubChildren.filter((child) =>
+    child.proc && child.proc.exitCode === null && child.proc.signalCode === null
+  );
+  const ownedLiveMarketMaker = marketMakerChild.proc &&
+    marketMakerChild.proc.exitCode === null &&
+    marketMakerChild.proc.signalCode === null
+    ? marketMakerChild
+    : null;
   const quiesceRounds = options.quiesceRounds ?? 2;
   const quiesceTimeoutMs = options.quiesceTimeoutMs ?? CHILD_RESET_QUIESCE_TIMEOUT_MS;
   const quiescePauseMs = options.quiescePauseMs ?? 150;
@@ -1326,8 +1503,9 @@ const buildChildProcessHealth = (): AggregatedHealth['process']['children'] => {
       pid: child.proc?.pid ?? null,
       leasePid: lease?.pid ?? null,
       leaseOwnerId: lease?.ownerId ?? null,
-      online: child.proc?.exitCode === null,
+      online: child.proc?.exitCode === null && child.proc?.signalCode === null,
       exitCode: child.exitCode,
+      exitSignal: child.exitSignal,
       startedAt: child.startedAt,
       exitedAt: child.exitedAt,
       restartCount: child.restartCount,
@@ -1348,7 +1526,7 @@ const buildChildProcessHealth = (): AggregatedHealth['process']['children'] => {
       pid: marketMakerChild.proc?.pid ?? null,
       leasePid: mmLease?.pid ?? null,
       leaseOwnerId: mmLease?.ownerId ?? null,
-      online: marketMakerChild.proc?.exitCode === null,
+      online: marketMakerChild.proc?.exitCode === null && marketMakerChild.proc?.signalCode === null,
       exitCode: marketMakerChild.exitCode,
       exitSignal: marketMakerChild.exitSignal,
       startedAt: marketMakerChild.startedAt,
@@ -1677,7 +1855,7 @@ const computeAggregatedHealth = (options: {
     const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
     const relayOnline = normalizedRuntimeId ? relayStore.clients.has(normalizedRuntimeId) : false;
     const hubRuntimeHealth = deriveHubRuntimeHealth({
-      processExitCode: child.proc?.exitCode,
+      processExitCode: child.exitSignal !== null ? 1 : child.proc?.exitCode,
       hasHealth: Boolean(child.lastHealth),
       hasSelfRelayPresence: relayOnline,
     });
@@ -1694,6 +1872,8 @@ const computeAggregatedHealth = (options: {
       startedAt: child.startedAt,
       exitedAt: child.exitedAt,
       exitCode: child.exitCode,
+      exitSignal: child.exitSignal,
+      recoveryInProgress: child.recoveryInProgress,
       restartCount: child.restartCount,
       lastErrorLine: child.recentStderr.at(-1) ?? null,
       quiescence: child.lastHealth?.quiescence ?? null,
@@ -1763,7 +1943,10 @@ const computeAggregatedHealth = (options: {
     })
     .filter((value): value is NonNullable<typeof value> => value !== null);
 
-  const marketMakerOnline = marketMakerChild.proc?.exitCode === null && marketMakerChild.exitCode === null && marketMakerChild.exitSignal === null;
+  const marketMakerOnline = marketMakerChild.proc?.exitCode === null &&
+    marketMakerChild.proc?.signalCode === null &&
+    marketMakerChild.exitCode === null &&
+    marketMakerChild.exitSignal === null;
   const custodyOnline = Boolean(
     custodySupport?.identity.entityId
     && custodySupport.daemonChild.proc.exitCode === null
@@ -1934,7 +2117,7 @@ const fetchRouteMarketSnapshots = async (
 ): Promise<Map<string, number>> => {
   const child = getHubChildByEntityId(hubEntityId);
   if (!child || pairIds.length === 0) return new Map();
-  if (child.proc?.exitCode !== null || !child.lastHealth) return new Map();
+  if (child.proc?.exitCode !== null || child.proc?.signalCode !== null || !child.lastHealth) return new Map();
   let snapshots: MarketSnapshotPayload[];
   try {
     snapshots = await fetchHubMarketSnapshots(child, hubEntityId, pairIds, 20);
@@ -2136,7 +2319,9 @@ const waitForHubProfilesReady = async (): Promise<void> => {
       child.name,
       child.lastHealth?.gossip?.visibleHubNames ?? [],
     ]));
-    if (hubChildren.some((child) => child.proc?.exitCode !== null)) {
+    if (hubChildren.some((child) => !child.recoveryInProgress && (
+      child.proc?.exitCode !== null || child.proc?.signalCode !== null
+    ))) {
       throw new Error(`HUB_PROFILES_READY_EXIT ${safeStringify(computeAggregatedHealth().hubs)}`);
     }
     await delay(250);
@@ -2199,7 +2384,7 @@ const waitForHubSelfReady = async (child: HubChild): Promise<void> => {
     if (child.lastInfo !== null || child.lastHealth !== null) {
       return;
     }
-    if (child.proc?.exitCode !== null) {
+    if (!child.recoveryInProgress && (child.proc?.exitCode !== null || child.proc?.signalCode !== null)) {
       throw new Error(`${child.name}_SELF_READY_EXITED_EARLY code=${String(child.proc?.exitCode)} stderr=${safeStringify(child.recentStderr.slice(-8))}`);
     }
     await delay(250);
@@ -2237,7 +2422,7 @@ const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {
     if (hasRpc2 && missingCode.length === 0 && !probeError) {
       return;
     }
-    if (child.proc?.exitCode !== null) {
+    if (!child.recoveryInProgress && (child.proc?.exitCode !== null || child.proc?.signalCode !== null)) {
       throw new Error(
         `${child.name}_EXITED_BEFORE_JURISDICTIONS code=${String(child.proc?.exitCode)} status=${safeStringify(lastStatus)}`,
       );

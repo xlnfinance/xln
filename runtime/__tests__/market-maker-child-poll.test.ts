@@ -28,6 +28,7 @@ const createChild = (): MarketMakerChild => {
     exitSignal: null,
     restartTimer: null,
     restartCount: 1,
+    failureCounts: {},
     lastHealth: null,
     lastInfo: null,
     lastStartupPhase: null,

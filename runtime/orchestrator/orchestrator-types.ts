@@ -115,8 +115,11 @@ export type HubChild = HubProcessSpec & {
   startedAt: number | null;
   exitedAt: number | null;
   exitCode: number | null;
+  exitSignal: NodeJS.Signals | null;
   restartTimer: ReturnType<typeof setTimeout> | null;
   restartCount: number;
+  recoveryInProgress: boolean;
+  failureCounts: Record<string, number>;
   lastHealth: HubHealthPayload | null;
   lastInfo: HubInfoPayload | null;
   recentStdout: string[];
@@ -490,6 +493,8 @@ export type AggregatedHealth = {
     startedAt: number | null;
     exitedAt: number | null;
     exitCode: number | null;
+    exitSignal: NodeJS.Signals | null;
+    recoveryInProgress: boolean;
     restartCount: number;
     lastErrorLine: string | null;
     quiescence: RuntimeQuiescenceHealth | null;
@@ -513,6 +518,7 @@ export type MarketMakerChild = {
   exitSignal: NodeJS.Signals | null;
   restartTimer: ReturnType<typeof setTimeout> | null;
   restartCount: number;
+  failureCounts: Record<string, number>;
   lastHealth: MarketMakerHealthPayload | null;
   lastInfo: MarketMakerInfoPayload | null;
   lastStartupPhase: string | null;

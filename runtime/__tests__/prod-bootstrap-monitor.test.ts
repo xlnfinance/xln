@@ -21,6 +21,8 @@ const healthy = () => ({
     online: true,
     selfRelayPresence: true,
     exitCode: null,
+    exitSignal: null,
+    recoveryInProgress: false,
     bootstrapProgress: { active: false, step: 'idle', idleMs: 0, totalMs: 1, stallTimeoutMs: 120_000 },
   })),
 });
@@ -39,6 +41,19 @@ describe('production bootstrap monitor', () => {
     health.hubs[0]!.online = false;
     health.hubs[0]!.exitCode = 1;
     expect(findProductionBootstrapFatal(health, 1_000)).toBe('PROD_BOOTSTRAP_HUB_EXITED:H1:code=1');
+  });
+
+  test('allows the bounded local recovery window for an exited hub', () => {
+    const health = healthy();
+    health.systemOk = false;
+    health.hubs[0]!.online = false;
+    health.hubs[0]!.exitCode = 1;
+    health.hubs[0]!.recoveryInProgress = true;
+    expect(findProductionBootstrapFatal(health, 1_000)).toBeNull();
+    expect(summarizeProductionBootstrap(health)['hubs']).toContainEqual(expect.objectContaining({
+      name: 'H1',
+      recovering: true,
+    }));
   });
 
   test('fails the reported step as soon as its stall budget is exceeded', () => {

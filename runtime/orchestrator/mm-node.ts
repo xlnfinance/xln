@@ -107,7 +107,7 @@ import {
 } from './mesh-jurisdictions';
 import { areMarketMakerHubTransportsReady } from './mm-transport';
 import { computeCanonicalEntityHashesFromEnv, computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
-import { MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS } from './orchestrator-config';
+import { MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS } from './orchestrator-config';
 import { requireDeliveryDelivered } from '../protocol/payments/delivery-result';
 import { getReliableOutputIdentity } from '../machine/output-routing';
 import {
@@ -4713,14 +4713,14 @@ const run = async (): Promise<void> => {
     };
     const assertBootstrapNotStalled = (health: MarketMakerHealth | null): void => {
       const idleMs = Date.now() - lastProgressAt;
-      if (idleMs < MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS) return;
+      if (idleMs < MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS) return;
       const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryMmContext, profile));
       const currentCheckpoint = buildBootstrapCausalCheckpoint();
       const p2p = getP2PState(env);
       const capsule = {
         phase: startupPhase,
         idleMs,
-        timeoutMs: MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS,
+        timeoutMs: MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS,
         lastProgressReason,
         lastProgressSignatureHash: createHash('sha256').update(lastProgressSignature).digest('hex'),
         lastProgressCheckpoint,

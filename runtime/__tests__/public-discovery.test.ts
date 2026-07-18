@@ -21,8 +21,11 @@ const makeHubChild = (): HubChild => ({
   startedAt: 1,
   exitedAt: null,
   exitCode: null,
+  exitSignal: null,
   restartTimer: null,
   restartCount: 0,
+  recoveryInProgress: false,
+  failureCounts: {},
   recentStdout: [],
   recentStderr: [],
   lastHealth: {
