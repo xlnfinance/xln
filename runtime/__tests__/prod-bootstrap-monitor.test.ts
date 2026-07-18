@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  findDeployScopedChildFatal,
   findProductionBootstrapFatal,
   isProductionBootstrapReady,
   summarizeProductionBootstrap,
@@ -94,5 +95,24 @@ describe('production bootstrap monitor', () => {
       budgetMs: 600_000,
     }];
     expect(findProductionBootstrapFatal(health, 700_000)).toBeNull();
+  });
+
+  test('latches a deploy-scoped child fatal across a later green restart', () => {
+    const deployStartedAt = Date.parse('2026-07-18T15:00:00.000Z');
+    const receipt = {
+      recordedAt: '2026-07-18T15:00:01.000Z',
+      name: 'MM',
+      reasonCode: 'MARKET_MAKER_BOOTSTRAP_STALLED',
+      fingerprint: 'fatal-1',
+    };
+
+    expect(findDeployScopedChildFatal(receipt, deployStartedAt)).toBe(
+      'PROD_BOOTSTRAP_CHILD_FATAL_RECEIPT:MM:MARKET_MAKER_BOOTSTRAP_STALLED:fatal-1',
+    );
+    expect(isProductionBootstrapReady(healthy())).toBe(true);
+    expect(findDeployScopedChildFatal({
+      ...receipt,
+      recordedAt: '2026-07-18T14:59:59.000Z',
+    }, deployStartedAt)).toBeNull();
   });
 });

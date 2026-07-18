@@ -14,10 +14,16 @@ const crash = (reason: string) => ({
 });
 
 describe('managed child recovery policy', () => {
-  test('recovers twice and fail-stops on the third identical failure', () => {
-    const first = decideChildFailure({}, crash('MESH_BOOTSTRAP_STALLED idleMs=120001'));
-    const second = decideChildFailure(first.counts, crash('MESH_BOOTSTRAP_STALLED idleMs=130000'));
-    const third = decideChildFailure(second.counts, crash('MESH_BOOTSTRAP_STALLED idleMs=140000'));
+  test('fail-stops a declared bootstrap stall on its first occurrence', () => {
+    const decision = decideChildFailure({}, crash('MESH_BOOTSTRAP_STALLED idleMs=60001'));
+
+    expect(decision).toMatchObject({ action: 'fail-stop', count: 1, backoffMs: 0 });
+  });
+
+  test('recovers transient failures twice and fail-stops on the third identical failure', () => {
+    const first = decideChildFailure({}, crash('RPC_RESPONSE_JSON_TRUNCATED'));
+    const second = decideChildFailure(first.counts, crash('RPC_RESPONSE_JSON_TRUNCATED'));
+    const third = decideChildFailure(second.counts, crash('RPC_RESPONSE_JSON_TRUNCATED'));
 
     expect(first).toMatchObject({ action: 'recover', count: 1, backoffMs: 2_000 });
     expect(second).toMatchObject({ action: 'recover', count: 2, backoffMs: 4_000 });

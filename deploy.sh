@@ -1046,6 +1046,7 @@ run_local_deploy() {
       run_or_fail_deploy "primary Anvil did not persist a valid checkpoint" wait_for_anvil_state_checkpoint "$XLN_JDB_ROOT/anvil-state.json"
       run_or_fail_deploy "secondary Anvil did not persist a valid checkpoint" wait_for_anvil_state_checkpoint "$XLN_JDB_ROOT/anvil2-state.json"
 
+      export XLN_PROD_DEPLOY_STARTED_AT_MS="$(bun -e 'console.log(Date.now())')"
       run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M
       run_or_fail_deploy "failed to start xln-watchtower via pm2" pm2 start scripts/start-watchtower.sh --name xln-watchtower --interpreter bash --max-memory-restart 256M
       if ! wait_for_watchtower; then

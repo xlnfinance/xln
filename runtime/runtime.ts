@@ -11,7 +11,7 @@ import {
 } from './machine/platform';
 
 // Bump this on runtime bundle changes that must be reflected in frontend immediately.
-const RUNTIME_BUILD_ID = '2026-03-23-19:35Z';
+const RUNTIME_BUILD_ID = '2026-07-18-16:00Z';
 // Bump this only on breaking persistence/replay format or invariants.
 export const RUNTIME_SCHEMA_VERSION = 5;
 export const RUNTIME_BUILD = RUNTIME_BUILD_ID;
@@ -35,6 +35,7 @@ import {
   cloneIsolatedRuntimeInput,
   cloneIsolatedRuntimeSnapshot,
 } from './protocol/runtime-input-clone';
+import { requireBoundaryInteger } from './protocol/boundary-validation';
 import { listOpenSwapOffers } from './orderbook/open-swap-offers';
 import { requireDurableJurisdictionStack } from './jurisdiction/contract-address';
 import {
@@ -2840,8 +2841,14 @@ export const restoreEnvFromCheckpointSnapshot = async (
 
   env.runtimeId = snapshotRuntimeId;
   env.dbNamespace = normalizeDbNamespace(snapshotRuntimeId);
-  env.height = Math.max(0, Math.floor(Number(normalizedSnapshot['height'] || 0)));
-  env.timestamp = Math.max(0, Math.floor(Number(normalizedSnapshot['timestamp'] || 0)));
+  env.height = requireBoundaryInteger(
+    normalizedSnapshot['height'],
+    'RECOVERY_CHECKPOINT_HEIGHT_INVALID',
+  );
+  env.timestamp = requireBoundaryInteger(
+    normalizedSnapshot['timestamp'],
+    'RECOVERY_CHECKPOINT_TIMESTAMP_INVALID',
+  );
   env.eReplicas = normalizedSnapshot['eReplicas'] instanceof Map
     ? new Map(Array.from(normalizedSnapshot['eReplicas'].entries()).map(([key, value]) => [String(key), value as never]))
     : new Map();
@@ -2969,9 +2976,15 @@ const replayRecoveryFrameJournals = async (
   const previousReplayMode = envRecord(env)[ENV_REPLAY_MODE_KEY];
   envRecord(env)[ENV_REPLAY_MODE_KEY] = true;
   try {
-    let expectedHeight = Math.max(0, Math.floor(Number(env.height || 0))) + 1;
+    let expectedHeight = requireBoundaryInteger(
+      requireBoundaryInteger(env.height, 'RECOVERY_JOURNAL_BASE_HEIGHT_INVALID') + 1,
+      'RECOVERY_JOURNAL_HEIGHT_OVERFLOW',
+    );
     for (const frame of frames) {
-      const frameHeight = Math.max(0, Math.floor(Number(frame.height || 0)));
+      const frameHeight = requireBoundaryInteger(
+        frame.height,
+        'RECOVERY_JOURNAL_HEIGHT_INVALID',
+      );
       if (frameHeight !== expectedHeight) {
         throw new Error(`RECOVERY_JOURNAL_REPLAY_GAP: expected=${expectedHeight} actual=${frameHeight}`);
       }
@@ -2991,7 +3004,10 @@ const replayRecoveryFrameJournals = async (
       assertRecoveryRuntimeMachineMatches(env, frame.runtimeMachineBeforeApply, frameHeight - 1, {
         includeIngressWorkingState: true,
       });
-      env.timestamp = Math.max(0, Math.floor(Number(frame.timestamp || 0)));
+      env.timestamp = requireBoundaryInteger(
+        frame.timestamp,
+        `RECOVERY_JOURNAL_TIMESTAMP_INVALID:height=${frameHeight}`,
+      );
       envRecord(env)[ENV_APPLY_ALLOWED_KEY] = true;
       try {
         const replayResult = await applyRuntimeInput(
@@ -3033,7 +3049,10 @@ const replayRecoveryFrameJournals = async (
       if (env.height !== frameHeight) {
         throw new Error(`RECOVERY_JOURNAL_REPLAY_HEIGHT_MISMATCH: expected=${frameHeight} actual=${env.height}`);
       }
-      expectedHeight += 1;
+      expectedHeight = requireBoundaryInteger(
+        expectedHeight + 1,
+        'RECOVERY_JOURNAL_HEIGHT_OVERFLOW',
+      );
     }
   } finally {
     if (previousReplayMode === undefined) delete envRecord(env)[ENV_REPLAY_MODE_KEY];
@@ -3941,16 +3960,25 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     }
 
     if (env.scenarioMode) {
-      env.timestamp = (env.timestamp ?? 0) + 100;
+      env.timestamp = requireBoundaryInteger(
+        requireBoundaryInteger(env.timestamp, 'RUNTIME_TIMESTAMP_INVALID') + 100,
+        'RUNTIME_TIMESTAMP_OVERFLOW',
+      );
     } else {
       const liveNow = getWallClockMs();
-      const previousTimestamp = Math.max(0, Math.floor(Number(env.timestamp ?? 0)));
+      const previousTimestamp = requireBoundaryInteger(
+        env.timestamp,
+        'RUNTIME_TIMESTAMP_INVALID',
+      );
       if (previousTimestamp > liveNow + TIMING.TIMESTAMP_DRIFT_MS) {
         throw new Error(
           `RUNTIME_CLOCK_AHEAD: env.timestamp=${previousTimestamp} wall=${liveNow}`,
         );
       }
-      const ingressTimestamp = Math.max(0, Math.floor(Number(mempoolQueuedAt ?? liveNow)));
+      const ingressTimestamp = requireBoundaryInteger(
+        mempoolQueuedAt ?? liveNow,
+        'RUNTIME_MEMPOOL_TIMESTAMP_INVALID',
+      );
       const boundedIngressTimestamp = Math.min(ingressTimestamp, liveNow + TIMING.TIMESTAMP_DRIFT_MS);
       env.timestamp = Math.max(previousTimestamp, boundedIngressTimestamp);
     }
@@ -5215,7 +5243,10 @@ const loadEnvFromStorage = async (
     }
 
     env.height = targetHeight;
-    env.timestamp = frame.timestamp;
+    env.timestamp = requireBoundaryInteger(
+      frame.timestamp,
+      `STORAGE_RESTORE_TIMESTAMP_INVALID:height=${targetHeight}`,
+    );
     env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
     env.runtimeMempool = undefined;
     env.pendingNetworkOutputs = cloneIsolatedRoutedEntityInputs(frame.runtimeOutputs ?? []);

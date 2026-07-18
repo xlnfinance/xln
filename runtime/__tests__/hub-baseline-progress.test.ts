@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { buildHubBaselineProgressSignature } from '../orchestrator/hub-baseline-progress';
+import {
+  buildHubBaselineProgressSignature,
+  evaluateHubBaselineDeadlines,
+} from '../orchestrator/hub-baseline-progress';
 import type { HubHealthPayload } from '../orchestrator/orchestrator-types';
+import { validateHubHealthPayload } from '../orchestrator/bootstrap-health-validation';
 
 const health = (overrides: Partial<HubHealthPayload> = {}): HubHealthPayload => ({
   height: 1,
@@ -27,6 +31,17 @@ const p2pReady = {
 } as HubHealthPayload['timings'];
 
 describe('hub baseline progress', () => {
+  test('rejects malformed observed collections before they can fabricate progress', () => {
+    expect(() => validateHubHealthPayload({
+      height: 1,
+      gossip: { visibleHubNames: { H1: true } },
+    })).toThrow('BOOTSTRAP_HEALTH_PAYLOAD_INVALID:path=gossip.visibleHubNames:expected=array');
+    expect(() => validateHubHealthPayload({
+      height: 1.5,
+      mesh: { pairs: [] },
+    })).toThrow('BOOTSTRAP_HEALTH_PAYLOAD_INVALID:path=health.height:expected=nonnegative-safe-integer');
+  });
+
   test('counts runtime frames while startup catch-up is still forming', () => {
     expect(signature(health({ height: 2 }))).not.toBe(signature(health({ height: 1 })));
   });
@@ -38,7 +53,7 @@ describe('hub baseline progress', () => {
     );
   });
 
-  test('counts causal account and bootstrap-step changes after P2P', () => {
+  test('counts causal account changes after P2P', () => {
     const gossip = { visibleHubNames: ['H1', 'H2', 'H3'], visibleHubIds: ['h1', 'h2', 'h3'], ready: true };
     const before = health({ height: 2, gossip, timings: p2pReady });
     const accountProgress = health({
@@ -58,5 +73,96 @@ describe('hub baseline progress', () => {
       },
     });
     expect(signature(accountProgress)).not.toBe(signature(before));
+  });
+
+  test('ignores mesh-loop clocks and labels after P2P', () => {
+    const before = health({ timings: p2pReady });
+    const after = health({
+      timings: p2pReady,
+      bootstrapProgress: {
+        ...before.bootstrapProgress!,
+        idleMs: 50_000,
+        lastProgressAtMs: 51_000,
+        step: 'idle',
+        totalMs: 50_000,
+      },
+    });
+    expect(signature(after)).toBe(signature(before));
+  });
+
+  test('canonicalizes pair, reserve entity, and token order', () => {
+    const pair = (counterpartyId: string) => ({
+      counterpartyId,
+      counterpartyName: counterpartyId,
+      hasAccount: true,
+      grantedByMe: '1',
+      grantedByPeer: '1',
+      ready: true,
+    });
+    const token = (tokenId: number) => ({
+      tokenId,
+      symbol: `T${tokenId}`,
+      decimals: 6,
+      current: '1',
+      expectedMin: '1',
+      ready: true,
+      targetMet: true,
+    });
+    const entity = (entityId: string) => ({
+      entityId,
+      ready: true,
+      targetMet: true,
+      tokens: [token(2), token(1)],
+    });
+    const before = health({
+      timings: p2pReady,
+      mesh: { ready: false, pairs: [pair('h2'), pair('h1')] },
+      bootstrapReserves: {
+        ok: false,
+        targetMet: false,
+        tokens: [token(2), token(1)],
+        entities: [entity('e2'), entity('e1')],
+      },
+    });
+    const after = health({
+      ...before,
+      mesh: { ready: false, pairs: [...before.mesh!.pairs!].reverse() },
+      bootstrapReserves: {
+        ...before.bootstrapReserves!,
+        tokens: [...before.bootstrapReserves!.tokens].reverse(),
+        entities: [...before.bootstrapReserves!.entities!]
+          .reverse()
+          .map(value => ({ ...value, tokens: [...value.tokens].reverse() })),
+      },
+    });
+    expect(signature(after)).toBe(signature(before));
+  });
+
+  test('tracks each incomplete hub deadline independently', () => {
+    const h1 = health({ timings: p2pReady });
+    const h2 = health({ timings: p2pReady });
+    const initial = evaluateHubBaselineDeadlines([
+      { name: 'H1', health: h1 },
+      { name: 'H2', health: h2 },
+    ], {}, 0, 60_000);
+    const h2Progress = health({
+      timings: p2pReady,
+      mesh: { ready: false, pairs: [{
+        counterpartyId: 'h1',
+        counterpartyName: 'H1',
+        hasAccount: true,
+        grantedByMe: '0',
+        grantedByPeer: '0',
+        ready: false,
+      }] },
+    });
+    const after = evaluateHubBaselineDeadlines([
+      { name: 'H1', health: h1 },
+      { name: 'H2', health: h2Progress },
+    ], initial.state, 60_000, 60_000);
+
+    expect(after.stalledNames).toEqual(['H1']);
+    expect(after.evaluations['H1']?.stalled).toBe(true);
+    expect(after.evaluations['H2']?.stalled).toBe(false);
   });
 });

@@ -2,11 +2,11 @@ import { expect, test } from 'bun:test';
 import {
   assertMarketMakerReadySnapshotParity,
   buildMarketMakerBootstrapEntityStateHashFromCanonicalHashes,
-  evaluateMarketMakerBootstrapDeadline,
   marketMakerBootstrapProgressSignature,
   resolveMarketMakerReadySnapshotAction,
   runtimeBacklogBlocksMarketMakerQuotes,
 } from '../orchestrator/mm-bootstrap-progress';
+import { evaluateBootstrapProgressDeadline } from '../orchestrator/bootstrap-progress-deadline';
 import { computeCanonicalRuntimeStateHash } from '../storage/canonical-hash';
 import { computeStorageFrameHash } from '../storage/hashes';
 import type { StorageFrameRecord } from '../storage/types';
@@ -121,6 +121,32 @@ test('durable frontier movement is semantic bootstrap progress before book depth
   expect(after).not.toBe(before);
 });
 
+test('market-maker health collection order does not fabricate progress', () => {
+  const hub = (hubEntityId: string) => ({
+    hubEntityId,
+    offers: 60,
+    depthReady: true,
+    blockers: [],
+  });
+  const route = (sourceHubEntityId: string, targetHubEntityId: string) => ({
+    sourceHubEntityId,
+    targetHubEntityId,
+    offers: 20,
+    depthReady: true,
+    blockers: [],
+  });
+  const before = marketMakerBootstrapProgressSignature({
+    hubs: [hub('h2'), hub('h1')],
+    cross: { expectedRoutes: 2, routes: [route('h2', 'h1'), route('h1', 'h2')] },
+  });
+  const after = marketMakerBootstrapProgressSignature({
+    hubs: [hub('h1'), hub('h2')],
+    cross: { expectedRoutes: 2, routes: [route('h1', 'h2'), route('h2', 'h1')] },
+  });
+
+  expect(after).toBe(before);
+});
+
 test('queued entity inputs retain quote backpressure until the prior quote batch is admitted', () => {
   expect(runtimeBacklogBlocksMarketMakerQuotes({
     processing: true,
@@ -142,7 +168,7 @@ test('entity inputs captured by an in-flight runtime frame retain quote backpres
 });
 
 test('causal progress completed after the old deadline is observed before stall rejection', () => {
-  const afterLongFrame = evaluateMarketMakerBootstrapDeadline(
+  const afterLongFrame = evaluateBootstrapProgressDeadline(
     { signature: 'height-89', lastProgressAt: 1_000 },
     'height-90',
     62_000,
@@ -156,17 +182,17 @@ test('causal progress completed after the old deadline is observed before stall 
     stalled: false,
   });
 
-  expect(evaluateMarketMakerBootstrapDeadline(
+  expect(evaluateBootstrapProgressDeadline(
     { signature: afterLongFrame.signature, lastProgressAt: afterLongFrame.lastProgressAt },
     'height-90',
     122_000,
     60_000,
   ).stalled).toBe(true);
 
-  expect(() => evaluateMarketMakerBootstrapDeadline(
+  expect(() => evaluateBootstrapProgressDeadline(
     { signature: 'height-90', lastProgressAt: 62_000 },
     'height-91',
     61_999,
     60_000,
-  )).toThrow('MARKET_MAKER_BOOTSTRAP_PROGRESS_CLOCK_REGRESSION');
+  )).toThrow('BOOTSTRAP_PROGRESS_CLOCK_REGRESSION');
 });

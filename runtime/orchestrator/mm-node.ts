@@ -113,11 +113,11 @@ import { getReliableOutputIdentity } from '../machine/output-routing';
 import {
   assertMarketMakerReadySnapshotParity,
   buildMarketMakerBootstrapEntityStateHashFromCanonicalHashes,
-  evaluateMarketMakerBootstrapDeadline,
   marketMakerBootstrapProgressSignature,
   resolveMarketMakerReadySnapshotAction,
   runtimeBacklogBlocksMarketMakerQuotes,
 } from './mm-bootstrap-progress';
+import { evaluateBootstrapProgressDeadline } from './bootstrap-progress-deadline';
 
 type Args = {
   name: string;
@@ -3434,7 +3434,8 @@ const run = async (): Promise<void> => {
           txCount: output.entityTxs?.length ?? 0,
           identity: summarizeReliableIdentity(getReliableOutputIdentity(output)),
         }))
-        .filter(entry => entry.identity !== null),
+        .filter(entry => entry.identity !== null)
+        .sort((left, right) => compareStableText(safeStringify(left), safeStringify(right))),
       senderReceipts: {
         active: summarizeReceiptLedger(state?.receivedReliableReceiptLedger),
         terminal: summarizeReceiptLedger(state?.receivedReliableTerminalWatermarks),
@@ -3457,24 +3458,25 @@ const run = async (): Promise<void> => {
           }))
           .sort((left, right) => compareStableText(safeStringify(left), safeStringify(right))),
       },
-      entities: mmContexts.map(context => {
-        const replica = getEntityReplicaById(env, context.entityId);
-        return {
-          entityId: context.entityId,
-          jurisdiction: context.jurisdictionName,
-          height: replica?.state.height ?? null,
-          consumptionRoot: replica?.state.consumptionAccumulator?.root ?? null,
-          consumptionRelationships: replica?.state.consumptionAccumulator?.count ?? 0n,
-          accounts: [...(replica?.state.accounts.entries() ?? [])]
-            .map(([counterpartyEntityId, account]) => ({
-              counterpartyEntityId,
-              currentHeight: account.currentHeight,
-              pendingFrame: Boolean(account.pendingFrame),
-              mempool: account.mempool?.length ?? 0,
-            }))
-            .sort((left, right) => compareStableText(left.counterpartyEntityId, right.counterpartyEntityId)),
-        };
-      }),
+      entities: mmContexts
+        .map(context => {
+          const replica = getEntityReplicaById(env, context.entityId);
+          return {
+            entityId: context.entityId,
+            jurisdiction: context.jurisdictionName,
+            consumptionRoot: replica?.state.consumptionAccumulator?.root ?? null,
+            consumptionRelationships: replica?.state.consumptionAccumulator?.count ?? 0n,
+            accounts: [...(replica?.state.accounts.entries() ?? [])]
+              .map(([counterpartyEntityId, account]) => ({
+                counterpartyEntityId,
+                currentHeight: account.currentHeight,
+                pendingFrame: Boolean(account.pendingFrame),
+                mempool: account.mempool?.length ?? 0,
+              }))
+              .sort((left, right) => compareStableText(left.counterpartyEntityId, right.counterpartyEntityId)),
+          };
+        })
+        .sort((left, right) => compareStableText(left.entityId, right.entityId)),
     };
   };
 
@@ -4711,13 +4713,13 @@ const run = async (): Promise<void> => {
     const observeProgress = (
       reason: string,
       health: MarketMakerHealth | null,
-    ): ReturnType<typeof evaluateMarketMakerBootstrapDeadline> => {
+    ): ReturnType<typeof evaluateBootstrapProgressDeadline> => {
       const checkpoint = buildBootstrapCausalCheckpoint();
       const signature = marketMakerBootstrapProgressSignature(
         health,
         checkpoint,
       );
-      const evaluation = evaluateMarketMakerBootstrapDeadline(
+      const evaluation = evaluateBootstrapProgressDeadline(
         { signature: lastProgressSignature, lastProgressAt },
         signature,
         Date.now(),

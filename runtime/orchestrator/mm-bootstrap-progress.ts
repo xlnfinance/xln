@@ -136,68 +136,29 @@ export const marketMakerBootstrapProgressSignature = (
   causalCheckpoint: unknown = null,
 ): string =>
   safeStringify({
-    same: (health?.hubs ?? []).map(hub => ({
-      hubEntityId: hub.hubEntityId,
-      offers: hub.offers,
-      depthReady: hub.depthReady,
-      blockers: hub.blockers?.length ?? 0,
-    })),
+    same: (health?.hubs ?? [])
+      .map(hub => ({
+        hubEntityId: hub.hubEntityId,
+        offers: hub.offers,
+        depthReady: hub.depthReady,
+        blockers: hub.blockers?.length ?? 0,
+      }))
+      .sort((left, right) => compareStableText(left.hubEntityId, right.hubEntityId)),
     cross: {
       expectedRoutes: health?.cross?.expectedRoutes ?? 0,
       routeCount: health?.cross?.routeCount ?? health?.cross?.routes?.length ?? 0,
-      routes: (health?.cross?.routes ?? []).map(route => ({
-        sourceHubEntityId: route.sourceHubEntityId,
-        targetHubEntityId: route.targetHubEntityId,
-        offers: route.offers,
-        depthReady: route.depthReady,
-        blockers: route.blockers?.length ?? 0,
-      })),
+      routes: (health?.cross?.routes ?? [])
+        .map(route => ({
+          sourceHubEntityId: route.sourceHubEntityId,
+          targetHubEntityId: route.targetHubEntityId,
+          offers: route.offers,
+          depthReady: route.depthReady,
+          blockers: route.blockers?.length ?? 0,
+        }))
+        .sort((left, right) => compareStableText(
+          `${left.sourceHubEntityId}:${left.targetHubEntityId}`,
+          `${right.sourceHubEntityId}:${right.targetHubEntityId}`,
+        )),
     },
     causalCheckpoint,
   });
-
-export type MarketMakerBootstrapDeadlineEvaluation = Readonly<{
-  progressed: boolean;
-  signature: string;
-  lastProgressAt: number;
-  idleMs: number;
-  stalled: boolean;
-}>;
-
-/**
- * Observe the current causal signature before deciding whether its deadline
- * expired. A long in-flight Runtime frame can complete after the old deadline;
- * rejecting it before comparing the new checkpoint would report a false stall.
- */
-export const evaluateMarketMakerBootstrapDeadline = (
-  previous: Readonly<{ signature: string; lastProgressAt: number }>,
-  currentSignature: string,
-  now: number,
-  timeoutMs: number,
-): MarketMakerBootstrapDeadlineEvaluation => {
-  if (!Number.isSafeInteger(now) || now < 0) {
-    throw new Error(`MARKET_MAKER_BOOTSTRAP_PROGRESS_NOW_INVALID:${now}`);
-  }
-  if (!Number.isSafeInteger(previous.lastProgressAt) || previous.lastProgressAt < 0) {
-    throw new Error(`MARKET_MAKER_BOOTSTRAP_PROGRESS_LAST_AT_INVALID:${previous.lastProgressAt}`);
-  }
-  if (now < previous.lastProgressAt) {
-    throw new Error(
-      `MARKET_MAKER_BOOTSTRAP_PROGRESS_CLOCK_REGRESSION:` +
-      `previous=${previous.lastProgressAt}:now=${now}`,
-    );
-  }
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
-    throw new Error(`MARKET_MAKER_BOOTSTRAP_PROGRESS_TIMEOUT_INVALID:${timeoutMs}`);
-  }
-  const progressed = currentSignature !== previous.signature;
-  const lastProgressAt = progressed ? now : previous.lastProgressAt;
-  const idleMs = now - lastProgressAt;
-  return {
-    progressed,
-    signature: currentSignature,
-    lastProgressAt,
-    idleMs,
-    stalled: idleMs >= timeoutMs,
-  };
-};

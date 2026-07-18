@@ -30,6 +30,13 @@ type BootstrapHealth = {
   systemOk?: unknown;
 };
 
+type ChildFailureReceipt = {
+  recordedAt?: unknown;
+  reasonCode?: unknown;
+  name?: unknown;
+  fingerprint?: unknown;
+};
+
 const finiteNumber = (value: unknown): number | null => {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
@@ -85,6 +92,20 @@ export const findProductionBootstrapFatal = (
   return null;
 };
 
+export const findDeployScopedChildFatal = (
+  receipt: ChildFailureReceipt | null,
+  deployStartedAtMs: number,
+): string | null => {
+  if (!receipt) return null;
+  const recordedAtMs = Date.parse(String(receipt.recordedAt ?? ''));
+  if (!Number.isFinite(recordedAtMs)) return 'PROD_BOOTSTRAP_FATAL_RECEIPT_INVALID';
+  if (recordedAtMs < deployStartedAtMs) return null;
+  return `PROD_BOOTSTRAP_CHILD_FATAL_RECEIPT:` +
+    `${String(receipt.name || 'unknown')}:` +
+    `${String(receipt.reasonCode || 'unknown')}:` +
+    `${String(receipt.fingerprint || 'unknown')}`;
+};
+
 export const summarizeProductionBootstrap = (health: BootstrapHealth): Record<string, unknown> => ({
   reset: health.reset?.['inProgress'] === true ? 'running' : health.reset?.['completedAt'] ? 'done' : 'pending',
   stages: (health.bootstrapTimeline?.stages ?? [])
@@ -126,17 +147,37 @@ const fetchHealth = async (url: string): Promise<BootstrapHealth> => {
   return payload as BootstrapHealth;
 };
 
+const readChildFailureReceipt = async (path: string): Promise<ChildFailureReceipt | null> => {
+  const file = Bun.file(path);
+  if (!await file.exists()) return null;
+  const payload = await file.json();
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('PROD_BOOTSTRAP_FATAL_RECEIPT_INVALID');
+  }
+  return payload as ChildFailureReceipt;
+};
+
 const main = async (): Promise<void> => {
   const url = String(process.argv[2] || 'http://127.0.0.1:8080/api/health');
   const timeoutMs = Number(process.argv[3] || 0);
   if (!Number.isFinite(timeoutMs) || timeoutMs < 0) throw new Error(`PROD_BOOTSTRAP_TIMEOUT_INVALID:${timeoutMs}`);
   const startedAt = Date.now();
+  const deployStartedAtMs = finiteNumber(process.env['XLN_PROD_DEPLOY_STARTED_AT_MS']) ?? startedAt;
+  const childFailureReceiptPath = String(
+    process.env['XLN_CHILD_FAILURE_RECEIPT_PATH'] ||
+    '/var/lib/xln/rdb/runtime/prod-mesh/.control-plane/diagnostics/last-fatal.json',
+  );
   let lastAvailableAt = 0;
   let lastSignature = '';
   let lastFetchError = '';
 
   while (timeoutMs === 0 || Date.now() - startedAt <= timeoutMs) {
     try {
+      const receiptFatal = findDeployScopedChildFatal(
+        await readChildFailureReceipt(childFailureReceiptPath),
+        deployStartedAtMs,
+      );
+      if (receiptFatal) throw new Error(receiptFatal);
       const health = await fetchHealth(url);
       lastAvailableAt = Date.now();
       lastFetchError = '';

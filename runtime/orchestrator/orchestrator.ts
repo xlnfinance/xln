@@ -57,8 +57,6 @@ import {
   type AggregatedHealth,
   type CustodySupportState,
   type HubChild,
-  type HubHealthPayload,
-  type HubInfoPayload,
   type ManagedRuntimeSpec,
   type MarketMakerChild,
   type MarketMakerHealthPayload,
@@ -76,7 +74,6 @@ import {
   HUB_NAMES,
   HUB_PROFILES_READY_TIMEOUT_MS,
   HUB_REQUIRED_TOKEN_COUNT,
-  HUB_SELF_READY_TIMEOUT_MS,
   MARKET_MAKER_READY_TIMEOUT_MS,
   RELAY_MARKET_MAX_SUBSCRIPTION_CELLS,
   RELAY_MARKET_MAX_SUBSCRIPTIONS,
@@ -84,6 +81,8 @@ import {
   STARTUP_TIMEOUT_MS,
   parseArgs,
 } from './orchestrator-config';
+import { evaluateBootstrapProgressDeadline } from './bootstrap-progress-deadline';
+import { validateHubHealthPayload, validateHubInfoPayload } from './bootstrap-health-validation';
 import {
   createManagedRuntimeLeaseManager,
   readManagedProcessTable,
@@ -132,7 +131,10 @@ import {
 } from './market-maker-health-payload';
 import { createMarketMakerChildPoller } from './market-maker-child-poll';
 import { buildAggregatedMarketMakerHealth } from './market-maker-aggregated-health';
-import { buildHubBaselineProgressSignature } from './hub-baseline-progress';
+import {
+  evaluateHubBaselineDeadlines,
+  type HubBaselineProgressState,
+} from './hub-baseline-progress';
 import { resolveRuntimeImportReadiness } from './runtime-import-readiness';
 import { persistChildFailureReceipt, type ChildFailureReceipt } from './child-failure-diagnostics';
 import {
@@ -730,25 +732,56 @@ const clearRelayState = (): void => {
   marketSubscriptionStack.clear();
 };
 
+const fetchFailureLog = new Map<string, { fingerprint: string; loggedAt: number }>();
+
+const recordFetchFailure = (
+  url: string,
+  kind: 'http' | 'transport' | 'decode' | 'payload',
+  detail: string,
+): void => {
+  const now = Date.now();
+  const fingerprint = `${kind}:${detail}`;
+  const previous = fetchFailureLog.get(url);
+  if (previous?.fingerprint === fingerprint && now - previous.loggedAt < 5_000) return;
+  fetchFailureLog.set(url, { fingerprint, loggedAt: now });
+  meshLog.warn('health_fetch.failed', { url, kind, detail });
+};
+
 const fetchJson = async <T>(url: string, timeoutMs = 2_000): Promise<T | null> => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const insecureLocalHttps = url.startsWith('https://localhost:') || url.startsWith('https://127.0.0.1:');
+  const previousTlsReject = process.env['NODE_TLS_REJECT_UNAUTHORIZED'];
   try {
-    const insecureLocalHttps = url.startsWith('https://localhost:') || url.startsWith('https://127.0.0.1:');
-    const prevTlsReject = process.env['NODE_TLS_REJECT_UNAUTHORIZED'];
     if (insecureLocalHttps) {
       process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
     }
     const response = await fetch(url, { signal: controller.signal });
-    if (insecureLocalHttps) {
-      if (prevTlsReject === undefined) delete process.env['NODE_TLS_REJECT_UNAUTHORIZED'];
-      else process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = prevTlsReject;
+    if (!response.ok) {
+      recordFetchFailure(url, 'http', `status=${response.status}`);
+      return null;
     }
-    if (!response.ok) return null;
-    return await response.json() as T;
-  } catch {
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      recordFetchFailure(url, 'decode', serializeError(error));
+      return null;
+    }
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      recordFetchFailure(url, 'payload', `type=${Array.isArray(payload) ? 'array' : typeof payload}`);
+      return null;
+    }
+    fetchFailureLog.delete(url);
+    return payload as T;
+  } catch (error) {
+    recordFetchFailure(url, 'transport', serializeError(error));
     return null;
   } finally {
+    if (insecureLocalHttps) {
+      if (previousTlsReject === undefined) delete process.env['NODE_TLS_REJECT_UNAUTHORIZED'];
+      else process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = previousTlsReject;
+    }
     clearTimeout(timer);
   }
 };
@@ -898,9 +931,11 @@ const pollHubHealth = async (child: HubChild): Promise<void> => {
   const proc = child.proc;
   if (!proc || child.exitCode !== null || child.exitSignal !== null || proc.exitCode !== null || proc.signalCode !== null) return;
   const apiBase = `http://${args.host}:${child.apiPort}`;
-  const [info, health] = await Promise.all([
-    fetchJson<HubInfoPayload>(`${apiBase}/api/info`, CHILD_HEALTH_TIMEOUT_MS),
-    fetchJson<HubHealthPayload>(`${apiBase}/api/health`, CHILD_HEALTH_TIMEOUT_MS),
+  const infoUrl = `${apiBase}/api/info`;
+  const healthUrl = `${apiBase}/api/health`;
+  const [rawInfo, rawHealth] = await Promise.all([
+    fetchJson<unknown>(infoUrl, CHILD_HEALTH_TIMEOUT_MS),
+    fetchJson<unknown>(healthUrl, CHILD_HEALTH_TIMEOUT_MS),
   ]);
   if (
     child.proc !== proc ||
@@ -909,8 +944,20 @@ const pollHubHealth = async (child: HubChild): Promise<void> => {
     proc.exitCode !== null ||
     proc.signalCode !== null
   ) return;
-  if (info) child.lastInfo = info;
-  if (health) child.lastHealth = health;
+  if (rawInfo) {
+    try {
+      child.lastInfo = validateHubInfoPayload(rawInfo);
+    } catch (error) {
+      recordFetchFailure(infoUrl, 'payload', serializeError(error));
+    }
+  }
+  if (rawHealth) {
+    try {
+      child.lastHealth = validateHubHealthPayload(rawHealth);
+    } catch (error) {
+      recordFetchFailure(healthUrl, 'payload', serializeError(error));
+    }
+  }
   const entityIds = new Set<string>();
   const primaryEntityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').trim().toLowerCase();
   if (primaryEntityId) entityIds.add(primaryEntityId);
@@ -2284,18 +2331,15 @@ const waitForHubBaseline = async (): Promise<void> => {
   let directGraceStartedAt = 0;
   let lastStatus: Record<string, unknown> | null = null;
   let warnedDirectGrace = false;
-  let lastProgressAt = Date.now();
-  let lastProgressSignature = '';
+  let progressState: HubBaselineProgressState = {};
   while (true) {
     await pollAllHubHealth();
-    const progressSignature = buildHubBaselineProgressSignature(hubChildren.map(child => ({
+    const now = Date.now();
+    const progress = evaluateHubBaselineDeadlines(hubChildren.map(child => ({
       name: child.name,
       health: child.lastHealth,
-    })));
-    if (progressSignature !== lastProgressSignature) {
-      lastProgressSignature = progressSignature;
-      lastProgressAt = Date.now();
-    }
+    })), progressState, now, HUB_BASELINE_STALL_TIMEOUT_MS);
+    progressState = progress.state;
     const health = computeAggregatedHealth();
     const coreReady =
       health.hubMesh.ok &&
@@ -2331,10 +2375,14 @@ const waitForHubBaseline = async (): Promise<void> => {
         return;
       }
     }
-    const idleMs = Date.now() - lastProgressAt;
-    if (idleMs > HUB_BASELINE_STALL_TIMEOUT_MS) {
+    if (progress.stalledNames.length > 0) {
+      const stalled = Object.fromEntries(progress.stalledNames.map(name => [
+        name,
+        progress.evaluations[name],
+      ]));
       throw new Error(
-        `HUB_BASELINE_STALLED idleMs=${idleMs} timeoutMs=${HUB_BASELINE_STALL_TIMEOUT_MS} ` +
+        `HUB_BASELINE_STALLED hubs=${progress.stalledNames.join(',')} ` +
+        `timeoutMs=${HUB_BASELINE_STALL_TIMEOUT_MS} progress=${safeStringify(stalled)} ` +
         `status=${safeStringify(lastStatus)} health=${safeStringify(health)}`,
       );
     }
@@ -2416,8 +2464,8 @@ const waitForMarketMakerReady = async (): Promise<void> => {
 };
 
 const waitForHubSelfReady = async (child: HubChild): Promise<void> => {
-  const deadline = Date.now() + HUB_SELF_READY_TIMEOUT_MS;
-  while (Date.now() < deadline) {
+  const startedAt = Date.now();
+  while (true) {
     await pollHubHealth(child);
     if (child.lastInfo !== null || child.lastHealth !== null) {
       return;
@@ -2425,15 +2473,21 @@ const waitForHubSelfReady = async (child: HubChild): Promise<void> => {
     if (!child.recoveryInProgress && (child.proc?.exitCode !== null || child.proc?.signalCode !== null)) {
       throw new Error(`${child.name}_SELF_READY_EXITED_EARLY code=${String(child.proc?.exitCode)} stderr=${safeStringify(child.recentStderr.slice(-8))}`);
     }
+    const idleMs = Date.now() - startedAt;
+    if (idleMs >= HUB_BASELINE_STALL_TIMEOUT_MS) {
+      throw new Error(
+        `${child.name}_SELF_READY_STALLED idleMs=${idleMs} ` +
+        `timeoutMs=${HUB_BASELINE_STALL_TIMEOUT_MS} stderr=${safeStringify(child.recentStderr.slice(-8))}`,
+      );
+    }
     await delay(250);
   }
-  throw new Error(`${child.name}_SELF_READY_TIMEOUT ${safeStringify({ health: child.lastHealth, stderr: child.recentStderr.slice(-8) })}`);
 };
 
 const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {
-  const deadline = Date.now() + HUB_SELF_READY_TIMEOUT_MS;
+  let progress = { signature: '', lastProgressAt: Date.now() };
   let lastStatus: Record<string, unknown> = {};
-  while (Date.now() < deadline) {
+  while (true) {
     const hasRpc2 = hasShardRpc2Jurisdiction(jurisdictionsConfig);
     const primary = resolvePrimaryHubJurisdictionFallback(jurisdictionsConfig);
     let contracts: RpcContractAddresses | null = null;
@@ -2456,6 +2510,7 @@ const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {
         probeError = serializeError(error);
       }
     }
+    missingCode = [...missingCode].sort(compareStableText);
     lastStatus = { hasRpc2, primary: primary?.key ?? null, missingCode, probeError };
     if (hasRpc2 && missingCode.length === 0 && !probeError) {
       return;
@@ -2465,11 +2520,30 @@ const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {
         `${child.name}_EXITED_BEFORE_JURISDICTIONS code=${String(child.proc?.exitCode)} status=${safeStringify(lastStatus)}`,
       );
     }
+    const signature = safeStringify({
+      hasRpc2,
+      primary: primary?.key ?? null,
+      missingCode,
+    });
+    const evaluation = evaluateBootstrapProgressDeadline(
+      progress,
+      signature,
+      Date.now(),
+      HUB_BASELINE_STALL_TIMEOUT_MS,
+    );
+    progress = {
+      signature: evaluation.signature,
+      lastProgressAt: evaluation.lastProgressAt,
+    };
+    if (evaluation.stalled) {
+      throw new Error(
+        `${child.name}_JURISDICTIONS_STALLED idleMs=${evaluation.idleMs} ` +
+        `timeoutMs=${HUB_BASELINE_STALL_TIMEOUT_MS} path=${shardJurisdictionsPath} ` +
+        `status=${safeStringify(lastStatus)}`,
+      );
+    }
     await delay(250);
   }
-  throw new Error(
-    `${child.name}_JURISDICTIONS_TIMEOUT path=${shardJurisdictionsPath} status=${safeStringify(lastStatus)}`,
-  );
 };
 
 const persistHubReadySnapshots = async (): Promise<void> => {

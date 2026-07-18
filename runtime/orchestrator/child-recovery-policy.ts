@@ -27,6 +27,9 @@ const stableReasonCode = (reason: string): string => {
   return clean.slice(-512) || 'UNREPORTED_CHILD_FAILURE';
 };
 
+export const isTerminalBootstrapFailureReasonCode = (reasonCode: string): boolean =>
+  /(?:BOOTSTRAP_STALLED|WATCHER_DRAIN_STALLED)$/.test(reasonCode);
+
 export const selectChildFailureReason = (
   recentStderr: readonly string[],
   recentStdout: readonly string[],
@@ -58,9 +61,10 @@ export const decideChildFailure = (
   const fingerprint = createHash('sha256').update(identity).digest('hex');
   const count = (counts[fingerprint] ?? 0) + 1;
   const nextCounts = { ...counts, [fingerprint]: count };
+  const terminalBootstrapFailure = isTerminalBootstrapFailureReasonCode(reasonCode);
   return {
-    action: count >= MAX_IDENTICAL_CHILD_FAILURES ? 'fail-stop' : 'recover',
-    backoffMs: Math.min(10_000, count * 2_000),
+    action: terminalBootstrapFailure || count >= MAX_IDENTICAL_CHILD_FAILURES ? 'fail-stop' : 'recover',
+    backoffMs: terminalBootstrapFailure ? 0 : Math.min(10_000, count * 2_000),
     count,
     fingerprint,
     reasonCode,

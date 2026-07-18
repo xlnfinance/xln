@@ -979,7 +979,7 @@ describe('audit fail-fast regressions', () => {
     expect(exits).toEqual([1]);
     expect(String(logs[0]?.[0] || '')).toContain('mesh bootstrap tick fatal');
 
-    const ignored = handleMeshBootstrapLoopError(new Error('fetch failed'), {
+    const ignored = handleMeshBootstrapLoopError(new Error('ECONNRESET: response ended prematurely'), {
       nodeName: 'H1',
       clearLoop: () => { cleared += 1; },
       exit: (code) => { exits.push(code); },
@@ -989,6 +989,7 @@ describe('audit fail-fast regressions', () => {
     expect(ignored).toBe(false);
     expect(cleared).toBe(1);
     expect(exits).toEqual([1]);
+    expect(String(logs.at(-1)?.[0] || '')).toContain('mesh bootstrap transport retry');
   });
 
   test('runtime input admission accounts for importReplica earlier in the same batch', () => {
