@@ -1860,9 +1860,14 @@ describe('production startup wiring', () => {
     expect(driveMeshBootstrap).toContain('getEntityJurisdiction(env, bootstrap.entityId)');
     expect(driveMeshBootstrap).toContain('readVisibleHubProfiles(env, bootstrapJurisdiction)');
     expect(driveMeshBootstrap).not.toContain('readVisibleHubProfiles(env, jurisdiction)');
+    expect(driveMeshBootstrap).toContain('if (requiredHubProfiles.length !== resolvedArgs.meshHubNames.length) return;');
     expect(driveMeshBootstrap).toContain('const expectedPeerProfiles = Math.max(0, resolvedArgs.meshHubNames.length - 1) * hubBootstraps.length;');
     expect(driveMeshBootstrap).toContain('peerReservesReady = allPeerProfiles.length >= expectedPeerProfiles;');
     expect(driveMeshBootstrap).toContain('reserveReadyMarked = reserveHealth.targetMet === true && peerReservesReady;');
+    const creditFence = driveMeshBootstrap.indexOf('if (!allCreditReady) return;');
+    const reserveProvision = driveMeshBootstrap.indexOf('if (!reserveReadyMarked) {');
+    expect(creditFence).toBeGreaterThan(0);
+    expect(reserveProvision).toBeGreaterThan(creditFence);
     expect(driveMeshBootstrap).not.toContain('assertBootstrapNotStalled');
     expect(driveMeshBootstrap).not.toContain('meshLoopProgress = beginBootstrapProgress(Date.now())');
     expect(driveMeshBootstrap).not.toContain("markMeshBootstrapProgress('idle')");

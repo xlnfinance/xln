@@ -2292,6 +2292,7 @@ const run = async (): Promise<void> => {
       } else if (!gossipReadyMarked) {
         startTiming('gossip_ready');
       }
+      if (requiredHubProfiles.length !== resolvedArgs.meshHubNames.length) return;
 
       const peers = requiredHubProfiles.filter(profile => profile.entityId !== bootstrap.entityId.toLowerCase());
       markMeshBootstrapProgress('direct-peers');
@@ -2425,6 +2426,17 @@ const run = async (): Promise<void> => {
         await settleRuntimeFor(env, 45);
       }
 
+      const allCreditReady =
+        peers.length === Math.max(0, resolvedArgs.meshHubNames.length - 1) &&
+        peers.every(peer =>
+          hasPairMutualCredits(env, bootstrap.entityId, peer.entityId, DEFAULT_ACCOUNT_TOKEN_IDS, getBootstrapCreditAmount),
+        );
+      if (!allCreditReady) return;
+      if (!creditReadyMarked) {
+        finishTiming('mesh_credit', startedAtFor('mesh_credit') ?? startTiming('mesh_credit'));
+        creditReadyMarked = true;
+      }
+
       if (!reserveReadyMarked) {
         let peerReservesReady = true;
         if (resolvedArgs.deployTokens) {
@@ -2452,16 +2464,7 @@ const run = async (): Promise<void> => {
         reserveReadyMarked = reserveHealth.targetMet === true && peerReservesReady;
       }
 
-      const allCreditReady =
-        peers.length === Math.max(0, resolvedArgs.meshHubNames.length - 1) &&
-        peers.every(peer =>
-          hasPairMutualCredits(env, bootstrap.entityId, peer.entityId, DEFAULT_ACCOUNT_TOKEN_IDS, getBootstrapCreditAmount),
-        );
-      if (allCreditReady && !creditReadyMarked) {
-        finishTiming('mesh_credit', startedAtFor('mesh_credit') ?? startTiming('mesh_credit'));
-        creditReadyMarked = true;
-      }
-      if (allCreditReady && reserveReadyMarked && (timings['mesh_ready_total']?.ms ?? null) === null) {
+      if (reserveReadyMarked && (timings['mesh_ready_total']?.ms ?? null) === null) {
         markMeshBootstrapProgress('external-faucet-provision');
         await ensureExternalFaucetProvisionReady();
         finishTiming('mesh_ready_total', totalMeshStartedAt);
