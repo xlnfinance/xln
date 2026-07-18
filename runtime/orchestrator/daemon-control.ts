@@ -10,6 +10,7 @@ import { scaleWholeTokenAmount } from '../types';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const WAIT_POLL_MS = 100;
+export const CONTROL_RUNTIME_INPUT_OBSERVATION_TIMEOUT_MS = 60_000;
 const DEFAULT_ROUTING_FEE_PPM = 1;
 const DEFAULT_ROUTING_BASE_FEE = 0n;
 const DEFAULT_SWAP_TAKER_FEE_BPS = 1;
@@ -291,7 +292,7 @@ const waitForQueuedRuntimeInputObserved = async (
   client: DaemonControlClient,
   response: ControlQueueResponse,
   label: string,
-  timeoutMs = 15_000,
+  timeoutMs = CONTROL_RUNTIME_INPUT_OBSERVATION_TIMEOUT_MS,
 ): Promise<void> => {
   const statusUrl = response.statusUrl;
   if (!statusUrl) {
