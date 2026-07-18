@@ -39,6 +39,26 @@ export const evaluateBootstrapProgressDeadline = (
   };
 };
 
+/** Track each contiguous Runtime-work segment, including remotely delivered follow-ups. */
+export const updateBootstrapWorkStartedAt = (
+  previousStartedAt: number | null,
+  hasWork: boolean,
+  now: number,
+): number | null => {
+  if (!Number.isSafeInteger(now) || now < 0) {
+    throw new Error(`BOOTSTRAP_WORK_NOW_INVALID:${now}`);
+  }
+  if (!hasWork) return null;
+  if (previousStartedAt === null) return now;
+  if (!Number.isSafeInteger(previousStartedAt) || previousStartedAt < 0) {
+    throw new Error(`BOOTSTRAP_WORK_STARTED_AT_INVALID:${previousStartedAt}`);
+  }
+  if (now < previousStartedAt) {
+    throw new Error(`BOOTSTRAP_WORK_CLOCK_INVALID:started=${previousStartedAt}:now=${now}`);
+  }
+  return previousStartedAt;
+};
+
 /**
  * A detached bootstrap batch is not semantic progress, but it owns a separate
  * bounded execution window. This prevents the semantic idle deadline from

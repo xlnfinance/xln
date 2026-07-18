@@ -9,6 +9,7 @@ import {
 import {
   evaluateBootstrapProgressDeadline,
   isBootstrapWorkWithinDeadline,
+  updateBootstrapWorkStartedAt,
 } from '../orchestrator/bootstrap-progress-deadline';
 import { computeCanonicalRuntimeStateHash } from '../storage/canonical-hash';
 import { computeStorageFrameHash } from '../storage/hashes';
@@ -212,4 +213,16 @@ test('active bootstrap frame gets its own bounded window without fabricating pro
   expect(isBootstrapWorkWithinDeadline(41_000, 96_000, 60_000)).toBe(true);
   expect(isBootstrapWorkWithinDeadline(36_000, 96_000, 60_000)).toBe(false);
   expect(isBootstrapWorkWithinDeadline(null, 96_000, 60_000)).toBe(false);
+});
+
+test('remote follow-up work starts a fresh bounded window after a quiescent gap', () => {
+  const localBatchStartedAt = updateBootstrapWorkStartedAt(null, true, 10_000);
+  expect(updateBootstrapWorkStartedAt(localBatchStartedAt, true, 20_000)).toBe(10_000);
+
+  const quiescent = updateBootstrapWorkStartedAt(localBatchStartedAt, false, 30_000);
+  expect(quiescent).toBeNull();
+
+  const remoteFollowUpStartedAt = updateBootstrapWorkStartedAt(quiescent, true, 65_000);
+  expect(remoteFollowUpStartedAt).toBe(65_000);
+  expect(isBootstrapWorkWithinDeadline(remoteFollowUpStartedAt, 100_000, 60_000)).toBe(true);
 });

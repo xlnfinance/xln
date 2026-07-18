@@ -120,6 +120,7 @@ import {
 import {
   evaluateBootstrapProgressDeadline,
   isBootstrapWorkWithinDeadline,
+  updateBootstrapWorkStartedAt,
 } from './bootstrap-progress-deadline';
 
 type Args = {
@@ -4833,6 +4834,11 @@ const run = async (): Promise<void> => {
       if (startupPhase !== previousPhase) rebuildCachedHealthResponseJson();
     };
     while (!shuttingDown) {
+      bootstrapWorkStartedAt = updateBootstrapWorkStartedAt(
+        bootstrapWorkStartedAt,
+        hasMarketMakerRuntimeBacklog(env),
+        Date.now(),
+      );
       assertBootstrapNotStalled(cachedMarketMakerHealth);
       if (hasMarketMakerRuntimeBacklog(env)) {
         observeProgress('runtime-backlog', cachedMarketMakerHealth);
@@ -4864,7 +4870,11 @@ const run = async (): Promise<void> => {
       const enqueued = await driveQuotes('bootstrap');
       await yieldMarketMakerApi();
       if (enqueued) {
-        bootstrapWorkStartedAt = Date.now();
+        bootstrapWorkStartedAt = updateBootstrapWorkStartedAt(
+          bootstrapWorkStartedAt,
+          true,
+          Date.now(),
+        );
         bootstrapCompletionCheckArmed = false;
       }
       if (hasMarketMakerRuntimeBacklog(env)) {
@@ -4873,7 +4883,11 @@ const run = async (): Promise<void> => {
         await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
         continue;
       }
-      bootstrapWorkStartedAt = null;
+      bootstrapWorkStartedAt = updateBootstrapWorkStartedAt(
+        bootstrapWorkStartedAt,
+        false,
+        Date.now(),
+      );
       const health = publishBootstrapHealthSnapshot();
       observeProgress('health', health);
       refreshBootstrapPhase(health);
