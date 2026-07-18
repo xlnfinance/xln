@@ -126,6 +126,12 @@ const fetchWithTimeout = async (url: string, timeoutMs: number): Promise<Respons
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { signal: controller.signal });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    if (controller.signal.aborted) {
+      throw new Error(`PROD_HEALTH_FETCH_TIMEOUT:url=${url}:timeoutMs=${timeoutMs}:cause=${detail}`);
+    }
+    throw new Error(`PROD_HEALTH_FETCH_FAILED:url=${url}:cause=${detail}`);
   } finally {
     clearTimeout(timer);
   }

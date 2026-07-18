@@ -10,6 +10,7 @@ import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumula
 
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
 import { decodeRuntimeAdapterRequest } from '../radapter/codec';
+import { applyRuntimeAdapterCommandMarker } from '../radapter/command-frontier';
 import { RemoteRuntimeAdapter } from '../radapter/remote';
 import type { RuntimeAdapterReadQuery } from '../radapter/types';
 import { createBook, createOrderbookExtState, DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
@@ -25,6 +26,7 @@ import { prepareStorageStateHashes, storageMerkleCellHexKey } from '../storage/h
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
   KEY_HEAD,
+  STORAGE_SCHEMA_VERSION,
   normalizeEntityId,
   keyMerkleBranch,
   keyMerkleLeaf,
@@ -34,6 +36,7 @@ import { inspectStorage } from '../storage/inspect';
 import { createSnapshot, seedFreshStorageEpoch } from '../storage/lifecycle';
 import { buildHexKeyedMerkleMaterialized, packRadixMerklePath } from '../storage/merkle';
 import { projectEntityCoreDoc } from '../storage/projections';
+import { deriveRuntimeIdFromSeed } from '../storage/runtime-dbs';
 import {
   listStorageLiveEntityIds,
   loadEntityAccountDocFromStorage,
@@ -225,42 +228,48 @@ const randomEntityId = (seed: string, index: number): string =>
 const hubEntityId = (seed: string): string =>
   `0x${createHash('sha256').update(seed).update(':hub').digest('hex')}`;
 
-const makeAccount = (leftEntity: string, rightEntity: string, height: number, timestamp: number): AccountMachine => ({
-  leftEntity,
-  rightEntity,
-  domain: { chainId: 31337, depositoryAddress: '0x1111111111111111111111111111111111111111' },
-  watchSeed: `0x${'a1'.repeat(32)}`,
-  status: 'active',
-  mempool: [],
-  currentFrame: {
-    height,
-    timestamp,
-    jHeight: 0,
-    accountTxs: [],
-    prevFrameHash: 'genesis',
-    accountStateRoot: `0x${'00'.repeat(32)}`,
-    stateHash: `0x${'00'.repeat(32)}`,
-    deltas: [],
-  },
-  deltas: new Map(),
-  locks: new Map(),
-  swapOffers: new Map(),
-  globalCreditLimits: { ownLimit: 1_000_000_000n, peerLimit: 1_000_000_000n },
-  currentHeight: height,
-  pendingSignatures: [],
-  rollbackCount: 0,
-  leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
-  rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
-  lastFinalizedJHeight: 0,
-  proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nextProofNonce: height },
-  proofBody: { tokenIds: [], deltas: [] },
-  disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-  jNonce: 0,
-  pendingWithdrawals: new Map(),
-  requestedRebalance: new Map(),
-  requestedRebalanceFeeState: new Map(),
-  shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
-});
+const makeAccount = (firstEntity: string, secondEntity: string, height: number, timestamp: number): AccountMachine => {
+  if (firstEntity === secondEntity) throw new Error(`BENCH_SELF_ACCOUNT_FORBIDDEN:${firstEntity}`);
+  const [leftEntity, rightEntity] = firstEntity < secondEntity
+    ? [firstEntity, secondEntity]
+    : [secondEntity, firstEntity];
+  return {
+    leftEntity,
+    rightEntity,
+    domain: { chainId: 31337, depositoryAddress: '0x1111111111111111111111111111111111111111' },
+    watchSeed: `0x${'a1'.repeat(32)}`,
+    status: 'active',
+    mempool: [],
+    currentFrame: {
+      height,
+      timestamp,
+      jHeight: 0,
+      accountTxs: [],
+      prevFrameHash: 'genesis',
+      accountStateRoot: `0x${'00'.repeat(32)}`,
+      stateHash: `0x${'00'.repeat(32)}`,
+      deltas: [],
+    },
+    deltas: new Map(),
+    locks: new Map(),
+    swapOffers: new Map(),
+    globalCreditLimits: { ownLimit: 1_000_000_000n, peerLimit: 1_000_000_000n },
+    currentHeight: height,
+    pendingSignatures: [],
+    rollbackCount: 0,
+    leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+    lastFinalizedJHeight: 0,
+    proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nextProofNonce: height },
+    proofBody: { tokenIds: [], deltas: [] },
+    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
+    jNonce: 0,
+    pendingWithdrawals: new Map(),
+    requestedRebalance: new Map(),
+    requestedRebalanceFeeState: new Map(),
+    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
+  };
+};
 
 const makeAccountDoc = (leftEntity: string, rightEntity: string, height: number, timestamp: number): StorageAccountDoc =>
   makeAccount(leftEntity, rightEntity, height, timestamp) as StorageAccountDoc;
@@ -318,25 +327,29 @@ const seedBooks = (state: EntityState, count: number): void => {
   });
 };
 
-const makeEnv = (seed: string, entityId: string, state: EntityState): Env => ({
-  height: state.height,
-  timestamp: state.timestamp,
-  runtimeSeed: seed,
-  runtimeId: `radapter-hub-1m-${entityId.slice(2, 10)}`,
-  eReplicas: new Map<string, EntityReplica>([
-    [`${entityId}:bench-signer`, {
-      entityId,
-      signerId: 'bench-signer',
-      mempool: [],
-      isProposer: true,
-      state,
-    } as EntityReplica],
-  ]),
-  runtimeState: {},
-} as Env);
+const makeEnv = (seed: string, entityId: string, state: EntityState): Env => {
+  const runtimeId = deriveRuntimeIdFromSeed(seed);
+  if (!runtimeId) throw new Error('BENCH_RUNTIME_ID_DERIVATION_FAILED');
+  return {
+    height: state.height,
+    timestamp: state.timestamp,
+    runtimeSeed: seed,
+    runtimeId,
+    eReplicas: new Map<string, EntityReplica>([
+      [`${entityId}:bench-signer`, {
+        entityId,
+        signerId: 'bench-signer',
+        mempool: [],
+        isProposer: true,
+        state,
+      } as EntityReplica],
+    ]),
+    runtimeState: {},
+  } as Env;
+};
 
 const makeHead = (height: number): StorageHead => ({
-  schemaVersion: 1,
+  schemaVersion: STORAGE_SCHEMA_VERSION,
   latestHeight: height,
   latestMaterializedHeight: height,
   latestSnapshotHeight: 0,
@@ -878,12 +891,17 @@ async function main() {
               loadEntityViewPage,
               listEntityIdsAtHeight: async () => listStorageLiveEntityIds(db),
               enqueueRuntimeInput: (_targetEnv, input: RuntimeInput) => {
+                const commandMarker = input.runtimeTxs.find((tx) => tx.type === 'recordRuntimeAdapterCommand');
+                if (!commandMarker || commandMarker.type !== 'recordRuntimeAdapterCommand') {
+                  throw new Error('BENCH_RUNTIME_ADAPTER_COMMAND_MARKER_MISSING');
+                }
                 const data = ((input.entityInputs?.[0]?.entityTxs?.[0] as { data?: { start?: number; count?: number } } | undefined)?.data ?? {});
                 const start = Math.max(0, Math.floor(Number(data.start ?? 0))) % Math.max(1, cli.hotAccounts);
                 const count = Math.max(1, Math.floor(Number(data.count ?? cli.touchPerRound)));
                 pendingWrite = pendingWrite
                   .then(() => touchAccounts(cli, db, env, entityHashDocsRef, entityId, start, count))
                   .then(async (durableMs) => {
+                    applyRuntimeAdapterCommandMarker(env, commandMarker.data);
                     await broadcastRuntimeAdapterTick(env);
                     return durableMs;
                   });
@@ -970,7 +988,7 @@ async function main() {
     }
     readStarted = nowMs();
     const coldAccount = await adapter.read<{
-      items: Array<{ rightEntity: string; currentHeight: number }>;
+      items: Array<{ leftEntity: string; rightEntity: string; currentHeight: number }>;
       totalItems?: number;
     }>(`entity/${entityId}/accounts`, {
       accountId: coldAccountId,
@@ -978,7 +996,11 @@ async function main() {
       atHeight: storageReadHeight,
     });
     readLatencyMs.push(nowMs() - readStarted);
-    if (coldAccount.items[0]?.rightEntity !== coldAccountId) {
+    const coldStoredAccount = coldAccount.items[0];
+    const coldParticipants = coldStoredAccount
+      ? new Set([coldStoredAccount.leftEntity, coldStoredAccount.rightEntity])
+      : new Set<string>();
+    if (!coldParticipants.has(entityId) || !coldParticipants.has(coldAccountId)) {
       throw new Error(`COLD_ACCOUNT_LOOKUP_MISSING: ${coldAccountId}`);
     }
     trace.mark('adapter.read.storage.cold-account-id', {
