@@ -296,7 +296,13 @@ const startManaged = (name: string, command: string, args: string[], env: Record
 };
 
 const copySnapshotTemplate = (sourceDir: string, targetDir: string): void => {
-  const requiredEntries = ['anvil-state.json', 'anvil2-state.json', 'prod-main', 'prod-mesh'] as const;
+  const requiredEntries = [
+    'anvil-state.json',
+    'anvil2-state.json',
+    'secrets',
+    'prod-main',
+    'prod-mesh',
+  ] as const;
   for (const entry of requiredEntries) {
     const source = join(sourceDir, entry);
     if (!existsSync(source)) {
@@ -714,6 +720,11 @@ const main = async (): Promise<void> => {
   if (useSnapshotTemplate) {
     copySnapshotTemplate(templateDir, workDir);
     recordStage('snapshot:copied', { templateDir, workDir });
+  } else {
+    const resetMarker = join(workDir, 'runtime', '.mesh-reset-once');
+    mkdirSync(join(workDir, 'runtime'), { recursive: true });
+    writeFileSync(resetMarker, 'local-prod-smoke fresh bootstrap\n');
+    recordStage('reset:armed', { resetMarker });
   }
   startManaged('anvil', 'scripts/start-anvil.sh', useSnapshotTemplate ? [] : ['--reset'], {
     XLN_PORT_BASE: String(portBase),
@@ -734,6 +745,7 @@ const main = async (): Promise<void> => {
   startManaged('server', 'scripts/start-server.sh', [], {
     XLN_PORT_BASE: String(portBase),
     XLN_SERVER_PORT: String(apiPort),
+    XLN_RDB_ROOT: workDir,
     XLN_DB_PATH: join(workDir, 'prod-main'),
     XLN_JURISDICTIONS_PATH: join(workDir, 'prod-main', 'jurisdictions.json'),
     XLN_MESH_DB_ROOT: join(workDir, 'prod-mesh'),
@@ -782,8 +794,13 @@ const main = async (): Promise<void> => {
     XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL: marketMakerEventsJsonlPath,
     ...(useSnapshotTemplate ? { XLN_MESH_PRESERVE_STATE_ON_RESET: '1' } : {}),
     ...(useSnapshotTemplate ? {
-      XLN_MARKET_MAKER_DISABLE_STORAGE: '0',
-      XLN_MARKET_MAKER_DISABLE_RESTORE: '0',
+      // Default clone/hydrate runs keep steady-state WAL enabled, while an
+      // explicit override lets the restart proof exercise the production
+      // memory-only catch-up followed by one finalized checkpoint advance.
+      XLN_MARKET_MAKER_DISABLE_STORAGE:
+        process.env['XLN_MARKET_MAKER_DISABLE_STORAGE'] || '0',
+      XLN_MARKET_MAKER_DISABLE_RESTORE:
+        process.env['XLN_MARKET_MAKER_DISABLE_RESTORE'] || '0',
     } : {}),
     ...(persistMarketMakerStorage ? {
       XLN_MARKET_MAKER_DISABLE_STORAGE: '0',
