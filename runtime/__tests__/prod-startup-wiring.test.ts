@@ -1408,6 +1408,12 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('let bootstrapCompletionCheckArmed = false;');
     expect(mmNode).toContain('let lastProgressAt = Date.now();');
     expect(mmNode).toContain("emitBootstrapDebugEvent('progress'");
+    const progressEvent = mmNode.slice(
+      mmNode.indexOf("emitBootstrapDebugEvent('progress'"),
+      mmNode.indexOf("emitBootstrapDebugEvent('progress'") + 300,
+    );
+    expect(progressEvent).not.toContain('checkpoint:');
+    expect(mmNode).toContain('lastProgressCheckpoint,');
     expect(mmNode).toContain('MARKET_MAKER_BOOTSTRAP_STALLED');
     expect(mmNode).not.toContain("markProgress('enqueue');");
     expect(mmNode).toContain("observeProgress('runtime-backlog', cachedMarketMakerHealth);");

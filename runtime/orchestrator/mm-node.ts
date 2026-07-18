@@ -4712,7 +4712,6 @@ const run = async (): Promise<void> => {
         reason,
         idleMs: 0,
         health: summarizeMarketMakerHealthForDebug(health),
-        checkpoint: lastProgressCheckpoint,
       });
     };
     const observeProgress = (
