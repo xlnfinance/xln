@@ -41,6 +41,12 @@ import { safeStringify } from '../protocol/serialization';
 import { requireDeliveryDelivered } from '../protocol/payments/delivery-result';
 import { createStructuredLogger } from '../infra/logger';
 import { handleMeshBootstrapLoopError } from './mesh-bootstrap-fail-fast';
+import {
+  advanceBootstrapProgress,
+  assertBootstrapNotStalled,
+  beginBootstrapProgress,
+  type BootstrapProgress,
+} from './bootstrap-progress-watchdog';
 import { restoredRuntimeRouteRelocated } from './restored-gossip-route';
 import { readInheritedChildSecrets, resolveChildSecret } from './child-secrets';
 import { findMissingRpcContractCode } from './contract-readiness';
@@ -503,9 +509,9 @@ if (!directWsUrl) {
   throw new Error(`[MESH-HUB] Missing required --direct-ws-url for ${resolvedArgs.name}`);
 }
 const AUTO_PROVISION_EXTERNAL_FAUCET = process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] !== '0';
-const MESH_BOOTSTRAP_TICK_TIMEOUT_MS = Math.max(
+const MESH_BOOTSTRAP_STALL_TIMEOUT_MS = Math.max(
   5_000,
-  Math.floor(Number(process.env['XLN_MESH_BOOTSTRAP_TICK_TIMEOUT_MS'] || '30000')),
+  Math.floor(Number(process.env['XLN_MESH_BOOTSTRAP_STALL_TIMEOUT_MS'] || '30000')),
 );
 const nodeLog = createStructuredLogger('mesh.hub', { hub: resolvedArgs.name });
 let jurisdictionImportDiagnostics: JurisdictionImportDiagnostics | null = null;
@@ -1075,6 +1081,7 @@ const ensureBootstrapReserves = async (
   env: Env,
   entityId: string,
   tokenCatalog: JTokenInfo[],
+  reportProgress: (step: string) => void,
 ): Promise<LocalHealthResponse['bootstrapReserves']> => {
   const startedAt = startTiming('reserve_funding');
   const jadapter = requireJAdapterForEntity(env, entityId, 'RESERVE_FUNDING');
@@ -1082,7 +1089,9 @@ const ensureBootstrapReserves = async (
   const bootstrapTokens = tokenCatalogForHubJurisdiction(tokenCatalog, {
     jurisdictionName: getEntityJurisdictionName(env, entityId),
   });
+  reportProgress('watcher-refresh:start');
   await refreshReserveStateFromWatcher(env, entityId, tokenCatalog);
+  reportProgress('watcher-refresh:done');
   if (!resolvedArgs.deployTokens) {
     const reserveHealth = getReserveHealth(env, entityId, tokenCatalog);
     finishTiming('reserve_funding', startedAt);
@@ -1097,7 +1106,9 @@ const ensureBootstrapReserves = async (
     const decimals = Number(token.decimals);
     const target = getBootstrapTokenAmount(tokenId, decimals);
     const localCurrent = replica?.state?.reserves?.get(tokenId) ?? 0n;
+    reportProgress(`chain-reserve:${tokenId}:start`);
     const chainCurrent = await jadapter.getReserves(entityId, tokenId);
+    reportProgress(`chain-reserve:${tokenId}:done`);
     if (chainCurrent !== localCurrent) {
       reserveMismatches.push(`token=${tokenId} local=${localCurrent.toString()} chain=${chainCurrent.toString()}`);
       continue;
@@ -1117,11 +1128,17 @@ const ensureBootstrapReserves = async (
   }
 
   if (mints.length > 0) {
+    reportProgress('fund-batch:start');
     const events = await jadapter.debugFundReservesBatch(mints);
+    reportProgress('fund-batch:done');
     await applyJEventsToEnv(env, events, `${resolvedArgs.name}-reserve-fund`, jadapter);
+    reportProgress('fund-events:applied');
     await settleRuntimeFor(env, 30);
+    reportProgress('fund-runtime:settled');
   }
+  reportProgress('final-watcher-refresh:start');
   const reserveHealth = await refreshReserveStateFromWatcher(env, entityId, tokenCatalog);
+  reportProgress('complete');
 
   finishTiming('reserve_funding', startedAt);
   return reserveHealth;
@@ -1131,6 +1148,7 @@ const ensurePeerBootstrapReserves = async (
   env: Env,
   peerProfiles: VisibleHubProfile[],
   tokenCatalog: JTokenInfo[],
+  reportProgress: (step: string) => void,
 ): Promise<void> => {
   if (!resolvedArgs.deployTokens || peerProfiles.length === 0) return;
   const profilesByJurisdiction = new Map<string, { jurisdiction: VisibleHubProfile; profiles: VisibleHubProfile[] }>();
@@ -1164,6 +1182,7 @@ const ensurePeerBootstrapReserves = async (
     const catalog = sameJurisdictionRef(jurisdiction, activeJurisdiction)
       ? tokenCatalog
       : await ensureTokenCatalog(jadapter, true, replicaName);
+    reportProgress(`catalog:${replicaName}:ready`);
     const bootstrapTokens = tokenCatalogForHubJurisdiction(catalog, { jurisdictionName });
     const mints: Array<{ entityId: string; tokenId: number; amount: bigint }> = [];
     for (const peer of profiles) {
@@ -1171,7 +1190,9 @@ const ensurePeerBootstrapReserves = async (
         const tokenId = Number(token.tokenId);
         const decimals = Number(token.decimals);
         const target = getBootstrapTokenAmount(tokenId, decimals);
+        reportProgress(`chain-reserve:${replicaName}:${tokenId}:start`);
         const current = await jadapter.getReserves(peer.entityId, tokenId);
+        reportProgress(`chain-reserve:${replicaName}:${tokenId}:done`);
         if (current >= target) continue;
         mints.push({
           entityId: peer.entityId,
@@ -1181,9 +1202,13 @@ const ensurePeerBootstrapReserves = async (
       }
     }
     if (mints.length === 0) continue;
+    reportProgress(`fund-batch:${replicaName}:start`);
     const events = await jadapter.debugFundReservesBatch(mints);
+    reportProgress(`fund-batch:${replicaName}:done`);
     await applyJEventsToEnv(env, events, `${resolvedArgs.name}-peer-reserve-fund-${replicaName}`, jadapter);
+    reportProgress(`fund-events:${replicaName}:applied`);
     await settleRuntimeFor(env, 20);
+    reportProgress(`runtime:${replicaName}:settled`);
   }
 };
 
@@ -1271,13 +1296,21 @@ const buildHubBootstrapReserveHealth = (
 const ensureHubBootstrapReserves = async (
   env: Env,
   hubEntities: HubBootstrapEntry[],
+  reportProgress: (step: string) => void,
 ): Promise<BootstrapReserveHealth> => {
   const entities: BootstrapReserveEntityHealth[] = [];
   let primaryHealth: BootstrapReserveHealth | null = null;
 
   for (const entry of hubEntities) {
+    reportProgress(`${entry.name}:catalog:start`);
     const catalog = await resolveEntityTokenCatalog(env, entry.entityId);
-    const health = await ensureBootstrapReserves(env, entry.entityId, catalog);
+    reportProgress(`${entry.name}:catalog:done`);
+    const health = await ensureBootstrapReserves(
+      env,
+      entry.entityId,
+      catalog,
+      (step) => reportProgress(`${entry.name}:${step}`),
+    );
     const entityHealth: BootstrapReserveEntityHealth = {
       entityId: entry.entityId,
       jurisdictionName: entry.jurisdictionName,
@@ -1513,13 +1546,16 @@ const run = async (): Promise<void> => {
   let externalIngressReady = false;
   let meshLoop: ReturnType<typeof setInterval> | null = null;
   let meshLoopInFlight = false;
-  let meshLoopStartedAt = 0;
-  let meshLoopStep = 'idle';
+  let meshLoopProgress: BootstrapProgress = beginBootstrapProgress(Date.now());
   let meshLoopFatal = false;
   let meshBootstrapPaused = false;
   let startMeshBootstrapProducer: (() => void) | null = null;
   let readySnapshotInFlight = false;
   let shuttingDown = false;
+
+  const markMeshBootstrapProgress = (step: string): void => {
+    meshLoopProgress = advanceBootstrapProgress(meshLoopProgress, step, Date.now());
+  };
 
   const pauseMeshBootstrapProducerAndWait = async (): Promise<void> => {
     meshBootstrapPaused = true;
@@ -1527,15 +1563,9 @@ const run = async (): Promise<void> => {
       clearInterval(meshLoop);
       meshLoop = null;
     }
-    const idle = await waitUntil(
-      () => !meshLoopInFlight,
-      Math.ceil(MESH_BOOTSTRAP_TICK_TIMEOUT_MS / 100),
-      100,
-    );
-    if (!idle) {
-      throw new Error(
-        `HUB_MESH_BOOTSTRAP_QUIESCE_TIMEOUT step=${meshLoopStep} timeoutMs=${MESH_BOOTSTRAP_TICK_TIMEOUT_MS}`,
-      );
+    while (meshLoopInFlight) {
+      assertBootstrapNotStalled(meshLoopProgress, Date.now(), MESH_BOOTSTRAP_STALL_TIMEOUT_MS);
+      await sleep(100);
     }
   };
 
@@ -2222,17 +2252,11 @@ const run = async (): Promise<void> => {
   const driveMeshBootstrap = async (): Promise<void> => {
     if (!bootstrap || shuttingDown || meshBootstrapPaused) return;
     if (meshLoopInFlight) {
-      const elapsedMs = Date.now() - meshLoopStartedAt;
-      if (elapsedMs > MESH_BOOTSTRAP_TICK_TIMEOUT_MS) {
-        throw new Error(
-          `MESH_BOOTSTRAP_TICK_TIMEOUT step=${meshLoopStep} elapsedMs=${elapsedMs} timeoutMs=${MESH_BOOTSTRAP_TICK_TIMEOUT_MS}`,
-        );
-      }
+      assertBootstrapNotStalled(meshLoopProgress, Date.now(), MESH_BOOTSTRAP_STALL_TIMEOUT_MS);
       return;
     }
     meshLoopInFlight = true;
-    meshLoopStartedAt = Date.now();
-    meshLoopStep = 'start';
+    meshLoopProgress = beginBootstrapProgress(Date.now());
     try {
       const bootstrapJurisdiction =
         getEntityJurisdiction(env, bootstrap.entityId) ||
@@ -2253,7 +2277,7 @@ const run = async (): Promise<void> => {
       }
 
       const peers = requiredHubProfiles.filter(profile => profile.entityId !== bootstrap.entityId.toLowerCase());
-      meshLoopStep = 'direct-peers';
+      markMeshBootstrapProgress('direct-peers');
       if (!directHubPeersReady(env, peers)) {
         return;
       }
@@ -2360,7 +2384,7 @@ const run = async (): Promise<void> => {
       }
 
       if (openInputs.length > 0) {
-        meshLoopStep = `open-accounts:${openInputs.length}`;
+        markMeshBootstrapProgress(`open-accounts:${openInputs.length}`);
         startTiming('mesh_accounts');
         enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: openInputs });
         await settleRuntimeFor(env, 35);
@@ -2378,7 +2402,7 @@ const run = async (): Promise<void> => {
       }
 
       if (creditInputs.length > 0) {
-        meshLoopStep = `extend-credit:${creditInputs.length}`;
+        markMeshBootstrapProgress(`extend-credit:${creditInputs.length}`);
         startTiming('mesh_credit');
         enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: creditInputs });
         await settleRuntimeFor(env, 45);
@@ -2387,18 +2411,27 @@ const run = async (): Promise<void> => {
       if (!reserveReadyMarked) {
         let peerReservesReady = true;
         if (resolvedArgs.deployTokens) {
-          meshLoopStep = 'peer-reserve-funding';
+          markMeshBootstrapProgress('peer-reserve-funding');
           const localHubEntityIds = new Set(hubBootstraps.map(entry => normalizeEntityId(entry.entityId)));
           const allPeerProfiles = readVisibleHubProfiles(env, '')
             .filter(profile => !localHubEntityIds.has(normalizeEntityId(profile.entityId)));
           const expectedPeerProfiles = Math.max(0, resolvedArgs.meshHubNames.length - 1) * hubBootstraps.length;
           peerReservesReady = allPeerProfiles.length >= expectedPeerProfiles;
           if (peerReservesReady) {
-            await ensurePeerBootstrapReserves(env, allPeerProfiles, tokenCatalog);
+            await ensurePeerBootstrapReserves(
+              env,
+              allPeerProfiles,
+              tokenCatalog,
+              (step) => markMeshBootstrapProgress(`peer-reserve:${step}`),
+            );
           }
         }
-        meshLoopStep = 'local-reserve-funding';
-        const reserveHealth = await ensureHubBootstrapReserves(env, hubBootstraps);
+        markMeshBootstrapProgress('local-reserve-funding');
+        const reserveHealth = await ensureHubBootstrapReserves(
+          env,
+          hubBootstraps,
+          (step) => markMeshBootstrapProgress(`local-reserve:${step}`),
+        );
         reserveReadyMarked = reserveHealth.targetMet === true && peerReservesReady;
       }
 
@@ -2412,14 +2445,13 @@ const run = async (): Promise<void> => {
         creditReadyMarked = true;
       }
       if (allCreditReady && reserveReadyMarked && (timings['mesh_ready_total']?.ms ?? null) === null) {
-        meshLoopStep = 'external-faucet-provision';
+        markMeshBootstrapProgress('external-faucet-provision');
         await ensureExternalFaucetProvisionReady();
         finishTiming('mesh_ready_total', totalMeshStartedAt);
       }
     } finally {
       meshLoopInFlight = false;
-      meshLoopStartedAt = 0;
-      meshLoopStep = 'idle';
+      markMeshBootstrapProgress('idle');
     }
   };
 
