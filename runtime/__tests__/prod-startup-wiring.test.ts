@@ -403,6 +403,8 @@ describe('production startup wiring', () => {
     const waitForMarketMakerReadyBody = waitForMarketMakerReady.slice(0, waitForMarketMakerReadyEnd);
     expect(waitForMarketMakerReadyBody).toContain('const health = computeAggregatedHealth();');
     expect(waitForMarketMakerReadyBody).not.toContain('buildAggregatedHealthResponse()');
+    expect(waitForMarketMakerReadyBody).toContain('while (true)');
+    expect(waitForMarketMakerReadyBody).not.toContain('const deadline =');
     expect(waitForMarketMakerReady.indexOf('if (marketMakerChild.exitCode !== null || marketMakerChild.exitSignal !== null)')).toBeLessThan(
       waitForMarketMakerReady.indexOf('health.marketMaker.ok'),
     );

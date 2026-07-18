@@ -2354,9 +2354,11 @@ const waitForHubProfilesReady = async (): Promise<void> => {
 };
 
 const waitForMarketMakerReady = async (): Promise<void> => {
-  const deadline = Date.now() + MARKET_MAKER_READY_TIMEOUT_MS;
   let restartAttempts = 0;
-  while (Date.now() < deadline) {
+  // The MM child owns the progress-aware bootstrap watchdog. A second absolute
+  // deadline here used to kill healthy bootstraps that were still advancing,
+  // discard their in-memory work, and restart the same phase from zero.
+  while (true) {
     await pollMarketMakerHealth();
     const health = computeAggregatedHealth();
     const exitedHub = getExitedHubChild();
@@ -2394,9 +2396,6 @@ const waitForMarketMakerReady = async (): Promise<void> => {
     }
     await delay(250);
   }
-  throw new Error(
-    `MM_READY_TIMEOUT phase=${String(marketMakerChild.lastStartupPhase)} marketMaker=${safeStringify(computeAggregatedHealth().marketMaker)}`,
-  );
 };
 
 const waitForHubSelfReady = async (child: HubChild): Promise<void> => {

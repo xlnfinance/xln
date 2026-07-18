@@ -50,7 +50,7 @@ export const isProductionBootstrapReady = (health: BootstrapHealth): boolean =>
 
 export const findProductionBootstrapFatal = (
   health: BootstrapHealth,
-  nowMs: number,
+  _nowMs: number,
 ): string | null => {
   if (health.reset?.['hasError'] === true || finiteNumber(health.reset?.['failedAt']) !== null) {
     return 'PROD_BOOTSTRAP_RESET_FAILED';
@@ -80,12 +80,6 @@ export const findProductionBootstrapFatal = (
     const failure = stage['failure'];
     if (failure && typeof failure === 'object' && (failure as Record<string, unknown>)['fatal'] === true) {
       return `PROD_BOOTSTRAP_STAGE_FATAL:${String(stage['key'] || 'unknown')}:${String((failure as Record<string, unknown>)['code'] || 'unknown')}`;
-    }
-    const startedAt = finiteNumber(stage['startedAt']);
-    const completedAt = finiteNumber(stage['completedAt']);
-    const budgetMs = finiteNumber(stage['budgetMs']);
-    if (completedAt === null && startedAt !== null && budgetMs !== null && nowMs - startedAt > budgetMs) {
-      return `PROD_BOOTSTRAP_STAGE_BUDGET_EXCEEDED:${String(stage['key'] || 'unknown')}:elapsedMs=${nowMs - startedAt}:budgetMs=${budgetMs}`;
     }
   }
   return null;

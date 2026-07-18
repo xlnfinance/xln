@@ -82,4 +82,17 @@ describe('production bootstrap monitor', () => {
     }];
     expect(findProductionBootstrapFatal(health, 700_000)).toBeNull();
   });
+
+  test('does not kill an active stage that exceeds its diagnostic budget', () => {
+    const health = healthy();
+    health.systemOk = false;
+    health.bootstrapTimeline.stages = [{
+      key: 'same-chain',
+      status: 'active',
+      startedAt: 1_000,
+      completedAt: null,
+      budgetMs: 600_000,
+    }];
+    expect(findProductionBootstrapFatal(health, 700_000)).toBeNull();
+  });
 });
