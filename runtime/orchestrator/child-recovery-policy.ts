@@ -23,7 +23,10 @@ const stableReasonCode = (reason: string): string => {
   const clean = reason.replaceAll(/\x1B\[[0-?]*[ -/]*[@-~]/g, '').trim();
   if (/Unexpected end of JSON input/i.test(clean)) return 'RPC_RESPONSE_JSON_TRUNCATED';
   const codes = clean.match(/\b(?:[A-Z][A-Z0-9]*_)+[A-Z0-9]+\b/g);
-  if (codes?.length) return codes.at(-1)!;
+  // Parent failures include full nested health JSON for diagnosis. The first
+  // stable code is the thrown top-level cause; later codes describe children
+  // and must never reclassify the receipt or its fail-stop policy.
+  if (codes?.length) return codes[0]!;
   return clean.slice(-512) || 'UNREPORTED_CHILD_FAILURE';
 };
 

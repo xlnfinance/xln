@@ -86,6 +86,11 @@ describe('managed child recovery policy', () => {
     expect(decideChildFailure({}, crash(reason)).reasonCode).toBe('RPC_RESPONSE_JSON_TRUNCATED');
   });
 
+  test('classifies the parent cause before nested health failure codes', () => {
+    const reason = 'HUB_BASELINE_STALLED hubs=H1 health={"failures":["MARKET_MAKER_CHILD_INACTIVE"]}';
+    expect(decideChildFailure({}, crash(reason)).reasonCode).toBe('HUB_BASELINE_STALLED');
+  });
+
   test('atomically preserves both historical and latest fatal diagnostics', () => {
     const root = mkdtempSync(join(tmpdir(), 'xln-child-failure-'));
     const receipt: ChildFailureReceipt = {

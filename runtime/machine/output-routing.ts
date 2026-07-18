@@ -1356,7 +1356,18 @@ export const planEntityOutputs = (
     const verifiedTargetRuntimeId = normalizeRuntimeId(
       deps.getP2P(env)?.getVerifiedRuntimeRoute?.(outputToRoute.entityId)?.runtimeId ?? '',
     );
-    if (
+    // A verified profile is transport-authenticated current routing metadata.
+    // It must supersede both a durable output destination and a short-lived
+    // hint: after a runtime restart those two stale values can agree and would
+    // otherwise route the bilateral message to the retired runtime forever.
+    if (verifiedTargetRuntimeId && persistedTargetRuntimeId !== verifiedTargetRuntimeId) {
+      env.warn?.('network', 'ROUTE_TARGET_RUNTIME_REBOUND', {
+        entityId: outputToRoute.entityId,
+        persistedRuntimeId: persistedTargetRuntimeId || null,
+        resolvedRuntimeId: verifiedTargetRuntimeId,
+      });
+      outputToRoute = { ...outputToRoute, runtimeId: verifiedTargetRuntimeId };
+    } else if (
       persistedTargetRuntimeId &&
       resolvedTargetRuntimeId &&
       persistedTargetRuntimeId !== resolvedTargetRuntimeId
@@ -1376,7 +1387,9 @@ export const planEntityOutputs = (
         });
       }
     }
-    const targetRuntimeId = normalizeRuntimeId(String(outputToRoute.runtimeId || '')) || resolvedTargetRuntimeId;
+    const targetRuntimeId = normalizeRuntimeId(String(outputToRoute.runtimeId || '')) ||
+      verifiedTargetRuntimeId ||
+      resolvedTargetRuntimeId;
     routeLog.debug('plan.output', {
       entity: shortId(outputToRoute.entityId),
       runtime: targetRuntimeId ? shortId(targetRuntimeId, 8) : 'unknown',
