@@ -1077,6 +1077,12 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('pm2 set pm2-logrotate:max_size 20M');
     expect(deploy).toContain('pm2 set pm2-logrotate:retain 5');
     expect(deploy).toContain('pm2 set pm2-logrotate:compress true');
+    expect(deploy).toContain('pause_production_explorer_backend');
+    expect(deploy).toContain('resume_production_explorer_backend');
+    expect(deploy).toContain('com.docker.compose.service=backend');
+    expect(deploy.indexOf('resume_production_explorer_backend')).toBeLessThan(
+      deploy.indexOf('trap cleanup_local_deploy_artifacts EXIT'),
+    );
     expect(deploy).toContain('RESET_PRODUCTION_MESH=0');
     expect(deploy).toContain('--reset-mesh');
     expect(deploy).toContain('--code-only');
