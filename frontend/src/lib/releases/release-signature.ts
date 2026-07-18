@@ -21,7 +21,7 @@ export type FoundationReleaseMember = {
 export type FoundationReleaseBoard = {
   schemaVersion: 1;
   name: 'xln Foundation';
-  providerCompatibility: 'EntityProvider.HankoBytes.v2';
+  providerCompatibility: 'EntityProvider.HankoBytes.v1';
   threshold: number;
   members: FoundationReleaseMember[];
   boardHash: string;
@@ -129,7 +129,7 @@ export function createFoundationReleaseBoard(addresses: string[], threshold = 2)
   return {
     schemaVersion: 1,
     name: 'xln Foundation',
-    providerCompatibility: 'EntityProvider.HankoBytes.v2',
+    providerCompatibility: 'EntityProvider.HankoBytes.v1',
     threshold,
     members,
     boardHash,
@@ -308,7 +308,7 @@ export function verifyReleaseAttestation(
     const expectedBoardHash = trustedBoardHash(expectedBoard);
     const boardHash = computeFoundationBoardHash(attestation.board.threshold, attestation.board.members);
     if (boardHash !== expectedBoardHash || boardHash !== attestation.board.boardHash.toLowerCase() || boardHash !== attestation.board.entityId.toLowerCase()) return false;
-    if (attestation.board.providerCompatibility !== 'EntityProvider.HankoBytes.v2') return false;
+    if (attestation.board.providerCompatibility !== 'EntityProvider.HankoBytes.v1') return false;
     const verified = verifyCanonicalHanko({
       digest: attestation.envelopeHash,
       hanko: attestation.hanko,
@@ -353,8 +353,8 @@ export function verifyReleaseSnapshot(
     if (typeof snapshot.repository.merkleRoot !== 'string') return false;
     const computedRoot = computeCodeSnapshotRoot(snapshot.files);
     if (computedRoot !== snapshot.repository.merkleRoot.toLowerCase()) return false;
-    // Historical v1 attestations remain immutable catalog evidence, but the
-    // breaking v2 claim ABI never treats them as current authorization.
+    // Historical attestations remain immutable catalog evidence, but their
+    // pre-canonical wire format is never treated as current authorization.
     if (!requiresFoundationAttestation(snapshot.release.version)) {
       return Boolean(snapshot.attestation && snapshot.frozenCore && envelopeMatches(snapshot.attestation, {
         ...snapshot.release,

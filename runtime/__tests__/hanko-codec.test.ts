@@ -20,9 +20,9 @@ const signature = (index: number): Uint8Array => {
 };
 
 describe('canonical Hanko wire codec', () => {
-  test('matches the independently pinned v2 Board and envelope golden hashes', () => {
+  test('matches the independently pinned v1 Board and envelope golden hashes', () => {
     const key = ethers.getBytes(ethers.toBeHex(1n, 32));
-    const goldenDigest = ethers.keccak256(ethers.toUtf8Bytes('xln:hanko:v2:golden'));
+    const goldenDigest = ethers.keccak256(ethers.toUtf8Bytes('xln:hanko:v1:golden'));
     const member = ethers.zeroPadValue(new ethers.Wallet(ethers.hexlify(key)).address, 32).toLowerCase() as `0x${string}`;
     const delays = { boardChangeDelay: 11n, controlChangeDelay: 12n, dividendChangeDelay: 13n };
     const entityId = hashHankoBoardClaim({
@@ -38,7 +38,7 @@ describe('canonical Hanko wire codec', () => {
       claims: [{ entityId, entityIndexes: [0n], weights: [1n], threshold: 1n, ...delays }],
     });
     expect(entityId).toBe('0xe3d6aa2ac02777d0796e2996d73c3e203011357aff8b877ee86beab827a8e4f0');
-    expect(ethers.keccak256(hanko)).toBe('0x2cd1dbbc4bfda53dcf10774f95c62a6e6f610390a5230e0803e856a89af99b9b');
+    expect(ethers.keccak256(hanko)).toBe('0x560d730cce926ec199d5dc8386d2494414ff218ebb940c9d2a69d3b6a08964fb');
   });
 
   test('round-trips the canonical Solidity tuple including exact Board delays', () => {

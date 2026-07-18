@@ -112,7 +112,7 @@ describe('Foundation release Hanko', () => {
     }
   });
 
-  test('keeps pre-v2 Hanko immutable but unverified and requires canonical v2 from 0.1.9', () => {
+  test('keeps historical Hanko immutable but unverified and requires canonical v1 from 0.1.9', () => {
     expect(CURRENT_XLN_RELEASE_VERSION).toBe(readFileSync(resolve(ROOT, 'VERSION'), 'utf8').trim());
     expect(verifyReleaseManifestPolicy(MANIFEST)).toBe(true);
     expect(verifyReleaseManifestEntry(MANIFEST_017)).toBe(true);

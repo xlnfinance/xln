@@ -413,7 +413,7 @@ describe("Hanko Authorization", function () {
   it("binds all three Board delays into the lazy Entity id", async function () {
     const { entityProvider } = await loadFixture(deployFixture);
     const privateKey = ethers.toBeHex(1n, 32);
-    const hash = ethers.keccak256(ethers.toUtf8Bytes("xln:hanko:v2:golden"));
+    const hash = ethers.keccak256(ethers.toUtf8Bytes("xln:hanko:v1:golden"));
     const member = addressEntityId(ethers.computeAddress(new ethers.SigningKey(privateKey).publicKey));
     const delays = [11, 12, 13] as const;
     const entityId = boardHash(1, [member], [1], delays);
@@ -424,7 +424,7 @@ describe("Hanko Authorization", function () {
       [[entityId, [0], [1], 1, delays]],
     );
     expect(entityId).to.equal("0xe3d6aa2ac02777d0796e2996d73c3e203011357aff8b877ee86beab827a8e4f0");
-    expect(ethers.keccak256(hanko)).to.equal("0x2cd1dbbc4bfda53dcf10774f95c62a6e6f610390a5230e0803e856a89af99b9b");
+    expect(ethers.keccak256(hanko)).to.equal("0x560d730cce926ec199d5dc8386d2494414ff218ebb940c9d2a69d3b6a08964fb");
     expect(await entityProvider.verifyHankoSignature(hanko, hash)).to.deep.equal([entityId, true]);
   });
 
