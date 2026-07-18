@@ -20,15 +20,13 @@ export const MAX_FRAME_SIZE_BYTES = 10_000_000;
 export function validateAccountFrame(
   frame: AccountFrame,
   currentTimestamp?: number,
-  previousFrameTimestamp?: number,
 ): boolean {
-  return getAccountFrameValidationError(frame, currentTimestamp, previousFrameTimestamp) === '';
+  return getAccountFrameValidationError(frame, currentTimestamp) === '';
 }
 
 export function getAccountFrameValidationError(
   frame: AccountFrame,
   currentTimestamp?: number,
-  previousFrameTimestamp?: number,
 ): string {
   if (!Number.isSafeInteger(frame.height) || frame.height < 0) return `height ${frame.height} is invalid`;
   if (!Number.isSafeInteger(frame.jHeight) || frame.jHeight < 0) {
@@ -55,10 +53,12 @@ export function getAccountFrameValidationError(
       return `timestamp future skew ${futureSkewMs}ms > ${MAX_FRAME_FUTURE_SKEW_MS}ms`;
     }
 
-    if (previousFrameTimestamp !== undefined && frame.timestamp < previousFrameTimestamp) {
-      return `timestamp went backwards by ${previousFrameTimestamp - frame.timestamp}ms`;
-    }
   }
+
+  // A later Entity frame may legitimately carry an older proposer clock.
+  // Preserve the signed waterfall timestamp and surface the regression at
+  // the consensus boundary; rewriting or rejecting it would make peers
+  // disagree about the exact Account frame that was proposed.
 
   return '';
 }

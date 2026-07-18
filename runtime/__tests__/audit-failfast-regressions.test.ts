@@ -2301,7 +2301,7 @@ describe('audit fail-fast regressions', () => {
     expect(result.accountJClaimNodeChanges?.replacedNodeHashes).toEqual([]);
   });
 
-  test('account frame freshness rejects future skew but permits old retransmission', () => {
+  test('account frame freshness rejects future skew but permits old and regressed signed frames', () => {
     const account = makeProposalAccount([], 'alice', 'hub');
     const oldFrame = makeIncomingAccountFrame(
       account,
@@ -2310,9 +2310,11 @@ describe('audit fail-fast regressions', () => {
       1_000,
     );
     const futureFrame = { ...oldFrame, timestamp: 130_001 };
+    const regressedFrame = { ...oldFrame, timestamp: 999 };
 
-    expect(validateAccountFrame(oldFrame, 100_000, 0)).toBe(true);
-    expect(validateAccountFrame(futureFrame, 100_000, 0)).toBe(false);
+    expect(validateAccountFrame(oldFrame, 100_000)).toBe(true);
+    expect(validateAccountFrame(futureFrame, 100_000)).toBe(false);
+    expect(validateAccountFrame(regressedFrame, 100_000)).toBe(true);
   });
 
   test('HTLC secret enforcement reserve closes on either entity time or finalized J-height', () => {
@@ -2835,7 +2837,7 @@ describe('audit fail-fast regressions', () => {
     expect(frameDelta?.rightCreditLimit).toBe(500n);
   });
 
-  test('proposer and receiver use the same monotonic frame timestamp for pull state', async () => {
+  test('proposer and receiver use the exact Entity frame timestamp for pull state', async () => {
     const env = createEmptyEnv('account-frame-timestamp-parity');
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
@@ -2870,7 +2872,7 @@ describe('audit fail-fast regressions', () => {
     const proposed = await proposeAccountFrame(env, proposer, env.timestamp);
     if (!proposed.success) throw new Error(proposed.error || 'proposal failed');
     const frame = proposed.accountInput!.proposal.frame;
-    expect(frame.timestamp).toBe(env.timestamp + 1);
+    expect(frame.timestamp).toBe(env.timestamp);
 
     const replayed = await applyAccountTx(
       receiver,
@@ -2885,7 +2887,7 @@ describe('audit fail-fast regressions', () => {
     expect(computeAccountStateRoot(receiver)).toBe(frame.accountStateRoot);
   });
 
-  test('nested Account proposal replays the committed Entity timestamp across different validator ticks', async () => {
+  test('nested Account proposal accepts a future committed Entity timestamp across validator ticks', async () => {
     const seed = 'account-frame-entity-timestamp-authority';
     const proposerEnv = createEmptyEnv(seed);
     const validatorEnv = createEmptyEnv(seed);
@@ -2901,7 +2903,7 @@ describe('audit fail-fast regressions', () => {
       { type: 'set_credit_limit', data: { tokenId: 1, amount: 100n } },
     ], left.entityId, right.entityId);
     base.deltas.set(1, createDefaultDelta(1));
-    const committedEntityTimestamp = 777;
+    const committedEntityTimestamp = 1_777;
 
     const proposer = await proposeAccountFrame(
       proposerEnv,

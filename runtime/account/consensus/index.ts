@@ -1107,10 +1107,20 @@ async function preflightIncomingAccountFrame(
   const frameValidationError = getAccountFrameValidationError(
     receivedFrame,
     securityContext.entityTimestamp,
-    previousTimestamp,
   );
   if (frameValidationError) {
     return { kind: 'return', result: { success: false, error: `Invalid frame structure: ${frameValidationError}`, events } };
+  }
+  if (previousTimestamp !== undefined && receivedFrame.timestamp < previousTimestamp) {
+    accountLog.warn('frame.timestamp_regressed_accepted', {
+      accountHeight: accountMachine.currentHeight,
+      entityId: input.toEntityId,
+      counterpartyEntityId: input.fromEntityId,
+      previousTimestamp,
+      proposedTimestamp: receivedFrame.timestamp,
+      regressionMs: previousTimestamp - receivedFrame.timestamp,
+      entityTimestamp: securityContext.entityTimestamp,
+    });
   }
 
   const expectedPrevFrameHash =

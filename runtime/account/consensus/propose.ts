@@ -146,17 +146,25 @@ export async function proposeAccountFrame(
   // Use account-level finalized J-height (consensus state), not live replica tip.
   // Replica tip can drift between runtime sessions and break WAL replay hashes.
   const frameJHeight = entityJHeight ?? accountMachine.lastFinalizedJHeight ?? 0;
-  // Every transaction must execute against the exact timestamp committed by
-  // the frame. In rapid multi-runtime flows the previous frame can already be
-  // at env.timestamp, so monotonicity advances this value by one. Applying a
-  // timestamp-bearing tx (for example pull_lock) with env.timestamp first and
-  // publishing previous+1 later makes proposer and receiver commit different
-  // Account state roots.
+  // The Entity timestamp is the sole clock for every Account proposal created
+  // inside that Entity frame. Equal timestamps are expected when Entity
+  // consensus iterates more than once inside one Runtime frame.
   const previousTimestamp = accountMachine.currentFrame?.timestamp ?? 0;
   if (!Number.isSafeInteger(entityFrameTimestamp) || entityFrameTimestamp < 0) {
     throw new Error(`ACCOUNT_PROPOSAL_ENTITY_TIMESTAMP_INVALID:${String(entityFrameTimestamp)}`);
   }
-  const frameTimestamp = Math.max(entityFrameTimestamp, previousTimestamp + 1);
+  const frameTimestamp = entityFrameTimestamp;
+  if (frameTimestamp < previousTimestamp) {
+    accountLog.warn('proposal.timestamp_regressed_accepted', {
+      accountHeight: accountMachine.currentHeight,
+      entityId: myEntityId,
+      counterpartyEntityId: counterparty,
+      previousTimestamp,
+      proposedTimestamp: frameTimestamp,
+      regressionMs: previousTimestamp - frameTimestamp,
+      runtimeTimestamp: env.timestamp,
+    });
+  }
 
   const allEvents: string[] = [];
   const revealedSecrets: Array<{ secret: string; hashlock: string }> = [];
@@ -380,11 +388,6 @@ export async function proposeAccountFrame(
 
   const weAreLeft = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
 
-  // Ensure monotonic timestamps within account (HTLC safety + multi-runtime compatibility).
-  if (frameTimestamp > env.timestamp && HEAVY_LOGS) {
-    accountLog.debug('timestamp.monotonic', { frameTimestamp, previousTimestamp, envTimestamp: env.timestamp });
-  }
-
   const accountTxsCopy = structuredClone([...validTxs]);
   let accountStateRoot: string;
   try {
@@ -398,7 +401,7 @@ export async function proposeAccountFrame(
   }
   const frameData = {
     height: accountMachine.currentHeight + 1,
-    timestamp: frameTimestamp, // MONOTONIC: max(env.timestamp, prev+1) for multi-runtime safety
+    timestamp: frameTimestamp,
     jHeight: frameJHeight, // CRITICAL: J-height for HTLC consensus
     accountTxs: accountTxsCopy,
     // CRITICAL: Use stored stateHash from currentFrame (set during commit)

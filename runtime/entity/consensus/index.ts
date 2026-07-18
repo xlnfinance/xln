@@ -4556,7 +4556,22 @@ export const applyEntityFrame = async (
 
   // Validators receive the proposer's frame timestamp; proposers use env.timestamp.
   // HTLC timelocks and lockIds must see this before handlers run.
-  currentEntityState.timestamp = frameTimestamp ?? env.timestamp;
+  const effectiveFrameTimestamp = frameTimestamp ?? env.timestamp;
+  if (!Number.isSafeInteger(effectiveFrameTimestamp) || effectiveFrameTimestamp < 0) {
+    throw new Error(`ENTITY_FRAME_TIMESTAMP_INVALID:${String(effectiveFrameTimestamp)}`);
+  }
+  if (effectiveFrameTimestamp < currentEntityState.timestamp) {
+    entityLog.warn('frame.timestamp_regressed_accepted', {
+      entityId: currentEntityState.entityId,
+      previousHeight: currentEntityState.height,
+      nextHeight: currentEntityState.height + 1,
+      previousTimestamp: currentEntityState.timestamp,
+      proposedTimestamp: effectiveFrameTimestamp,
+      regressionMs: currentEntityState.timestamp - effectiveFrameTimestamp,
+      runtimeTimestamp: env.timestamp,
+    });
+  }
+  currentEntityState.timestamp = effectiveFrameTimestamp;
   const allOutputs: EntityInput[] = [];
   const allJOutputs: JInput[] = [];
   const collectedHashes: Array<{
