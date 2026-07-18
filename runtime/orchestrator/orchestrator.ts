@@ -1191,6 +1191,39 @@ const persistManagedChildFailure = (
   return persistChildFailureReceipt(childDiagnosticsDir, receipt, randomUUID()).receiptPath;
 };
 
+const persistOrchestratorFailure = (error: unknown): string => {
+  const exitedAt = Date.now();
+  const reason = serializeError(error);
+  const observation: ChildFailureObservation = {
+    role: 'orchestrator',
+    name: 'mesh-orchestrator',
+    code: 1,
+    signal: null,
+    reason,
+  };
+  const decision = decideChildFailure({}, observation);
+  const receipt: ChildFailureReceipt = {
+    schema: 'xln-child-failure-v1',
+    recordedAt: new Date(exitedAt).toISOString(),
+    ...observation,
+    pid: process.pid,
+    reasonCode: decision.reasonCode,
+    fingerprint: decision.fingerprint,
+    identicalFailureCount: decision.count,
+    action: 'fail-stop',
+    backoffMs: 0,
+    startedAt: null,
+    exitedAt,
+    reset: { ...resetState },
+    codeFingerprint: orchestratorCodeFingerprint,
+    lastHealth: null,
+    lastInfo: null,
+    recentStdout: [],
+    recentStderr: [error instanceof Error && error.stack ? error.stack : reason],
+  };
+  return persistChildFailureReceipt(childDiagnosticsDir, receipt, randomUUID()).receiptPath;
+};
+
 const handleUnexpectedHubFailure = (
   child: HubChild,
   observation: ChildFailureObservation,
@@ -3243,7 +3276,16 @@ assertMinDiskFree();
 
 if (!args.deferInitialReset) {
   void ensureReset().catch(async (error) => {
-    meshLog.error('reset.initial_failed', { error: serializeError(error) });
+    let receiptPath: string | null = null;
+    try {
+      receiptPath = persistOrchestratorFailure(error);
+    } catch (receiptError) {
+      meshLog.error('reset.failure_receipt_write_failed', {
+        error: serializeError(receiptError),
+        originalFailure: serializeError(error),
+      });
+    }
+    meshLog.error('reset.initial_failed', { error: serializeError(error), receiptPath });
     await stopAllChildren({
       quiesceRounds: 1,
       quiesceTimeoutMs: CHILD_SHUTDOWN_QUIESCE_TIMEOUT_MS,

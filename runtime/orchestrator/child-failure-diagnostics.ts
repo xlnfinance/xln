@@ -12,7 +12,7 @@ import { safeStringify } from '../protocol/serialization';
 export type ChildFailureReceipt = {
   schema: 'xln-child-failure-v1';
   recordedAt: string;
-  role: 'hub' | 'market-maker';
+  role: 'hub' | 'market-maker' | 'orchestrator';
   name: string;
   pid: number | null;
   code: number | null;

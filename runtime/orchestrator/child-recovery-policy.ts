@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 export const MAX_IDENTICAL_CHILD_FAILURES = 3;
 
 export type ChildFailureObservation = {
-  role: 'hub' | 'market-maker';
+  role: 'hub' | 'market-maker' | 'orchestrator';
   name: string;
   code: number | null;
   signal: NodeJS.Signals | null;
