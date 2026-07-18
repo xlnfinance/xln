@@ -1,10 +1,10 @@
 import type { Env, EnvSnapshot } from './types';
 
-// This is only an in-memory debug tail; the storage WAL owns authoritative
-// history. Canonical snapshots contain the complete Runtime/Entity/Account
-// projection, so retaining hundreds of them makes production memory scale with
-// state size and can starve the WAL writer under sustained bootstrap load.
-export const RECENT_RUNTIME_HISTORY_LIMIT = 16;
+// This is only the current in-memory debug view; the storage WAL owns history.
+// Canonical snapshots contain the complete Runtime/Entity/Account projection,
+// so retaining prior snapshots makes production memory scale with state size
+// and can starve the WAL writer under sustained bootstrap load.
+export const RECENT_RUNTIME_HISTORY_LIMIT = 1;
 
 export const appendRecentRuntimeSnapshot = (
   history: readonly EnvSnapshot[],

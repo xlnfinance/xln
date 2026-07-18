@@ -27,7 +27,7 @@ test('recent snapshot helper enforces its exact bound and rejects invalid limits
 });
 
 test('production Env retains only the bounded canonical debug tail', async () => {
-  expect(RECENT_RUNTIME_HISTORY_LIMIT).toBe(16);
+  expect(RECENT_RUNTIME_HISTORY_LIMIT).toBe(1);
   const seed = 'bounded runtime history alpha beta gamma';
   const env = createEmptyEnv(seed);
   env.runtimeConfig = {
@@ -92,7 +92,7 @@ test('production Env retains only the bounded canonical debug tail', async () =>
 
   expect(env.height).toBe(1);
   expect(env.history).toHaveLength(RECENT_RUNTIME_HISTORY_LIMIT);
-  expect(env.history[0]?.description).toBe('seed-1');
+  expect(env.history[0]?.height).toBe(1);
   expect(env.history.at(-1)?.height).toBe(1);
   expect(trace.snapshots).toHaveLength(1);
   expect(trace.snapshots[0]?.height).toBe(1);
