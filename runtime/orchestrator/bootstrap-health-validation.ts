@@ -32,6 +32,25 @@ const optionalSafeInteger = (record: Record<string, unknown>, key: string, path:
   }
 };
 
+const requiredSafeInteger = (record: Record<string, unknown>, key: string, path: string): void => {
+  const value = record[key];
+  if (!Number.isSafeInteger(value) || Number(value) < 0) {
+    invalid(`${path}.${key}`, 'nonnegative-safe-integer');
+  }
+};
+
+const requiredNullableSafeInteger = (record: Record<string, unknown>, key: string, path: string): void => {
+  const value = record[key];
+  if (value !== null && (!Number.isSafeInteger(value) || Number(value) < 0)) {
+    invalid(`${path}.${key}`, 'null-or-nonnegative-safe-integer');
+  }
+};
+
+const requiredNullableString = (record: Record<string, unknown>, key: string, path: string): void => {
+  const value = record[key];
+  if (value !== null && typeof value !== 'string') invalid(`${path}.${key}`, 'null-or-string');
+};
+
 const stringArray = (value: unknown, path: string): void => {
   for (const [index, entry] of optionalArray(value, path).entries()) {
     if (typeof entry !== 'string') invalid(`${path}[${index}]`, 'string');
@@ -57,6 +76,9 @@ const validateMesh = (value: unknown): void => {
       optionalField(pair, key, 'string', path);
     }
     for (const key of ['hasAccount', 'ready'] as const) optionalField(pair, key, 'boolean', path);
+    requiredSafeInteger(pair, 'currentHeight', path);
+    requiredNullableSafeInteger(pair, 'pendingFrameHeight', path);
+    requiredNullableString(pair, 'pendingFrameHash', path);
   }
 };
 

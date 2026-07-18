@@ -150,6 +150,9 @@ export type HubHealthPayload = {
       counterpartyId: string;
       counterpartyName: string;
       hasAccount: boolean;
+      currentHeight: number;
+      pendingFrameHeight: number | null;
+      pendingFrameHash: string | null;
       grantedByMe: string;
       grantedByPeer: string;
       ready: boolean;

@@ -25,6 +25,9 @@ const buildCausalPeerMirrors = (
       .map(pair => ({
         peer: peer.name,
         hasAccount: pair.hasAccount,
+        currentHeight: pair.currentHeight,
+        pendingFrameHeight: pair.pendingFrameHeight,
+        pendingFrameHash: pair.pendingFrameHash,
         ready: pair.ready,
         grantedByMe: pair.grantedByMe,
         grantedByPeer: pair.grantedByPeer,
@@ -77,6 +80,9 @@ export const buildHubBaselineProgressSignature = (
       .map(pair => ({
         counterpartyId: pair.counterpartyId,
         hasAccount: pair.hasAccount,
+        currentHeight: pair.currentHeight,
+        pendingFrameHeight: pair.pendingFrameHeight,
+        pendingFrameHash: pair.pendingFrameHash,
         ready: pair.ready,
         grantedByMe: pair.grantedByMe,
         grantedByPeer: pair.grantedByPeer,

@@ -173,6 +173,9 @@ type HubPairHealth = {
   counterpartyId: string;
   counterpartyName: string;
   hasAccount: boolean;
+  currentHeight: number;
+  pendingFrameHeight: number | null;
+  pendingFrameHash: string | null;
   grantedByMe: string;
   grantedByPeer: string;
   ready: boolean;
@@ -1409,6 +1412,9 @@ const buildPairHealth = (env: Env, selfEntityId: string, peers: Array<{ name: st
       counterpartyId: peer.entityId,
       counterpartyName: peer.name,
       hasAccount: hasAccount(env, selfEntityId, peer.entityId),
+      currentHeight: Number(account?.currentHeight ?? 0),
+      pendingFrameHeight: account?.pendingFrame ? Number(account.pendingFrame.height) : null,
+      pendingFrameHash: account?.pendingFrame?.stateHash ?? null,
       grantedByMe: grantedByMe.toString(),
       grantedByPeer: grantedByPeer.toString(),
       ready: hasPairMutualCredits(env, selfEntityId, peer.entityId, DEFAULT_ACCOUNT_TOKEN_IDS, getBootstrapCreditAmount),

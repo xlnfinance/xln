@@ -40,6 +40,10 @@ describe('hub baseline progress', () => {
       height: 1.5,
       mesh: { pairs: [] },
     })).toThrow('BOOTSTRAP_HEALTH_PAYLOAD_INVALID:path=health.height:expected=nonnegative-safe-integer');
+    expect(() => validateHubHealthPayload({
+      height: 1,
+      mesh: { pairs: [{ counterpartyId: 'h2' }] },
+    })).toThrow('BOOTSTRAP_HEALTH_PAYLOAD_INVALID:path=mesh.pairs[0].currentHeight:expected=nonnegative-safe-integer');
   });
 
   test('counts runtime frames while startup catch-up is still forming', () => {
@@ -66,6 +70,9 @@ describe('hub baseline progress', () => {
           counterpartyId: 'h2',
           counterpartyName: 'H2',
           hasAccount: true,
+          currentHeight: 1,
+          pendingFrameHeight: null,
+          pendingFrameHash: null,
           grantedByMe: '1',
           grantedByPeer: '0',
           ready: false,
@@ -73,6 +80,30 @@ describe('hub baseline progress', () => {
       },
     });
     expect(signature(accountProgress)).not.toBe(signature(before));
+  });
+
+  test('counts an exact pending Account proposal while bilateral credit is unchanged', () => {
+    const pair = {
+      counterpartyId: 'h2',
+      counterpartyName: 'H2',
+      hasAccount: true,
+      currentHeight: 1,
+      pendingFrameHeight: null,
+      pendingFrameHash: null,
+      grantedByMe: '0',
+      grantedByPeer: '1',
+      ready: false,
+    };
+    const before = health({ timings: p2pReady, mesh: { ready: false, pairs: [pair] } });
+    const after = health({
+      timings: p2pReady,
+      mesh: {
+        ready: false,
+        pairs: [{ ...pair, pendingFrameHeight: 2, pendingFrameHash: '0xproposal' }],
+      },
+    });
+
+    expect(signature(after)).not.toBe(signature(before));
   });
 
   test('ignores mesh-loop clocks and labels after P2P', () => {
@@ -95,6 +126,9 @@ describe('hub baseline progress', () => {
       counterpartyId,
       counterpartyName: counterpartyId,
       hasAccount: true,
+      currentHeight: 1,
+      pendingFrameHeight: null,
+      pendingFrameHash: null,
       grantedByMe: '1',
       grantedByPeer: '1',
       ready: true,
@@ -151,6 +185,9 @@ describe('hub baseline progress', () => {
         counterpartyId: 'h1',
         counterpartyName: 'H1',
         hasAccount: true,
+        currentHeight: 1,
+        pendingFrameHeight: null,
+        pendingFrameHash: null,
         grantedByMe: '0',
         grantedByPeer: '0',
         ready: false,
@@ -180,6 +217,9 @@ describe('hub baseline progress', () => {
         counterpartyId: 'h1',
         counterpartyName: 'H1',
         hasAccount: true,
+        currentHeight: 1,
+        pendingFrameHeight: null,
+        pendingFrameHash: null,
         grantedByMe: '0',
         grantedByPeer: '0',
         ready: false,
@@ -208,6 +248,9 @@ describe('hub baseline progress', () => {
         counterpartyId: 'h3',
         counterpartyName: 'H3',
         hasAccount: true,
+        currentHeight: 1,
+        pendingFrameHeight: null,
+        pendingFrameHash: null,
         grantedByMe: '0',
         grantedByPeer: '0',
         ready: false,
