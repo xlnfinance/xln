@@ -1065,10 +1065,12 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('rmdir data db db-tmp 2>/dev/null || true');
     expect(deploy).toContain('chmod -R go-rwx "$XLN_STATE_ROOT"');
     expect(deploy).toContain('rm -rf "$XLN_RDB_ROOT/runtime/prod-main"');
-    expect(deploy).toContain('pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M -- --reset');
-    expect(deploy).toContain('pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M -- --reset');
-    expect(deploy).toContain('pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M');
-    expect(deploy).toContain('pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M');
+    expect(deploy).not.toContain('-- --reset');
+    expect(deploy).toContain('pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M --kill-timeout 60000 --restart-delay 2000');
+    expect(deploy).toContain('pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M --kill-timeout 60000 --restart-delay 2000');
+    expect(deploy).toContain('run_or_fail_deploy "unsafe Anvil PM2 supervision" bun scripts/check-anvil-supervision.ts');
+    expect(deploy).toContain('wait_for_anvil_state_checkpoint "$XLN_JDB_ROOT/anvil-state.json"');
+    expect(deploy).toContain('wait_for_anvil_state_checkpoint "$XLN_JDB_ROOT/anvil2-state.json"');
     expect(deploy).toContain('pm2 delete xln-server >/dev/null 2>&1 || true');
     expect(deploy).toContain('run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M');
     expect(deploy).toContain('export XLN_MESH_PRESERVE_STATE_ON_RESET=0');
@@ -1973,6 +1975,11 @@ describe('production startup wiring', () => {
     expect(anvil).toContain('--prune-history "$ANVIL_PRUNE_HISTORY"');
     expect(anvil).toContain('--state "$ANVIL_STATE"');
     expect(anvil).toContain('--state-interval "$ANVIL_STATE_INTERVAL"');
+    expect(anvil).toContain('ANVIL_STATE_INTERVAL="${ANVIL_STATE_INTERVAL:-60}"');
+    expect(anvil).toContain('exec anvil --host 0.0.0.0');
+    expect(anvil).toContain('ANVIL_PRODUCTION_RESET_REQUIRES_ONE_SHOT_AUTHORIZATION');
+    expect(anvil).toContain('ANVIL_PORT_ALREADY_BOUND');
+    expect(anvil).not.toContain('| tee');
     expect(anvil).not.toContain('--mixed-mining');
     expect(anvil).toContain('JDB_ROOT="${XLN_JDB_ROOT:-$REPO_ROOT/data}"');
     expect(anvil2).toContain('ANVIL_CHAIN_ID="${ANVIL2_CHAIN_ID:-31338}"');

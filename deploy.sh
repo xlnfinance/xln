@@ -126,6 +126,20 @@ wait_for_rpc_chain() {
   return 1
 }
 
+wait_for_anvil_state_checkpoint() {
+  local state_file="$1"
+  local deadline=$((SECONDS + 120))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    if [ -s "$state_file" ] && bun -e 'JSON.parse(await Bun.file(process.argv[1]).text())' "$state_file" >/dev/null 2>&1; then
+      echo "[deploy] durable Anvil checkpoint ready: $state_file"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "ANVIL_STATE_CHECKPOINT_TIMEOUT:file=${state_file}" >&2
+  return 1
+}
+
 wait_for_public_rpc_chain() {
   local path="$1"
   local expected_chain_hex="$2"
@@ -984,18 +998,18 @@ run_local_deploy() {
         lsof -ti TCP:8546 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
         pm2 delete anvil >/dev/null 2>&1 || true
         pm2 delete anvil2 >/dev/null 2>&1 || true
-        run_or_fail_deploy "failed to start anvil via pm2" pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M -- --reset
-        run_or_fail_deploy "failed to start anvil2 via pm2" pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M -- --reset
+        run_or_fail_deploy "failed to start anvil via pm2" pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M --kill-timeout 60000 --restart-delay 2000
+        run_or_fail_deploy "failed to start anvil2 via pm2" pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M --kill-timeout 60000 --restart-delay 2000
       else
         export XLN_MESH_PRESERVE_STATE_ON_RESET=1
         echo "[deploy] restarting production services without resetting anvil/runtime state"
         if ! wait_for_rpc_chain "http://127.0.0.1:8545" "0x7a69"; then
           pm2 delete anvil >/dev/null 2>&1 || true
-          run_or_fail_deploy "failed to start anvil via pm2" pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M
+          run_or_fail_deploy "failed to start anvil via pm2" pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M --kill-timeout 60000 --restart-delay 2000
         fi
         if ! wait_for_rpc_chain "http://127.0.0.1:8546" "0x7a6a"; then
           pm2 delete anvil2 >/dev/null 2>&1 || true
-          run_or_fail_deploy "failed to start anvil2 via pm2" pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M
+          run_or_fail_deploy "failed to start anvil2 via pm2" pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M --kill-timeout 60000 --restart-delay 2000
         fi
       fi
       if ! wait_for_rpc_chain "http://127.0.0.1:8545" "0x7a69"; then
@@ -1004,6 +1018,9 @@ run_local_deploy() {
       if ! wait_for_rpc_chain "http://127.0.0.1:8546" "0x7a6a"; then
         fail_deploy_with_debug "anvil2 did not become ready on :8546"
       fi
+      run_or_fail_deploy "unsafe Anvil PM2 supervision" bun scripts/check-anvil-supervision.ts
+      run_or_fail_deploy "primary Anvil did not persist a valid checkpoint" wait_for_anvil_state_checkpoint "$XLN_JDB_ROOT/anvil-state.json"
+      run_or_fail_deploy "secondary Anvil did not persist a valid checkpoint" wait_for_anvil_state_checkpoint "$XLN_JDB_ROOT/anvil2-state.json"
 
       run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M
       run_or_fail_deploy "failed to start xln-watchtower via pm2" pm2 start scripts/start-watchtower.sh --name xln-watchtower --interpreter bash --max-memory-restart 256M
