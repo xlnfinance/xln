@@ -165,4 +165,59 @@ describe('hub baseline progress', () => {
     expect(after.evaluations['H1']?.stalled).toBe(true);
     expect(after.evaluations['H2']?.stalled).toBe(false);
   });
+
+  test('counts only the exact peer mirror as causal progress for a waiting hub', () => {
+    const h1 = health({ entityId: 'h1', timings: p2pReady });
+    const h2 = health({ entityId: 'h2', timings: p2pReady });
+    const initial = evaluateHubBaselineDeadlines([
+      { name: 'H1', health: h1 },
+      { name: 'H2', health: h2 },
+    ], {}, 0, 60_000);
+    const h2AcceptedH1 = health({
+      entityId: 'h2',
+      timings: p2pReady,
+      mesh: { ready: false, pairs: [{
+        counterpartyId: 'h1',
+        counterpartyName: 'H1',
+        hasAccount: true,
+        grantedByMe: '0',
+        grantedByPeer: '0',
+        ready: false,
+      }] },
+    });
+    const after = evaluateHubBaselineDeadlines([
+      { name: 'H1', health: h1 },
+      { name: 'H2', health: h2AcceptedH1 },
+    ], initial.state, 60_000, 60_000);
+
+    expect(after.stalledNames).toEqual([]);
+    expect(after.evaluations['H1']?.progressed).toBe(true);
+  });
+
+  test('does not let an unrelated peer mirror mask a stalled hub', () => {
+    const h1 = health({ entityId: 'h1', timings: p2pReady });
+    const h2 = health({ entityId: 'h2', timings: p2pReady });
+    const initial = evaluateHubBaselineDeadlines([
+      { name: 'H1', health: h1 },
+      { name: 'H2', health: h2 },
+    ], {}, 0, 60_000);
+    const h2AcceptedH3 = health({
+      entityId: 'h2',
+      timings: p2pReady,
+      mesh: { ready: false, pairs: [{
+        counterpartyId: 'h3',
+        counterpartyName: 'H3',
+        hasAccount: true,
+        grantedByMe: '0',
+        grantedByPeer: '0',
+        ready: false,
+      }] },
+    });
+    const after = evaluateHubBaselineDeadlines([
+      { name: 'H1', health: h1 },
+      { name: 'H2', health: h2AcceptedH3 },
+    ], initial.state, 60_000, 60_000);
+
+    expect(after.stalledNames).toEqual(['H1']);
+  });
 });

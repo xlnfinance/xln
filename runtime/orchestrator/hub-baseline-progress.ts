@@ -12,6 +12,26 @@ type HubBaselineObservation = Readonly<{
 
 const sorted = (values: readonly string[]): string[] => [...values].sort();
 
+const buildCausalPeerMirrors = (
+  owner: HubBaselineObservation,
+  observations: readonly HubBaselineObservation[],
+): unknown[] => {
+  const ownerEntityId = String(owner.health?.entityId || '').trim().toLowerCase();
+  if (!ownerEntityId) return [];
+  return observations
+    .filter(peer => peer.name !== owner.name)
+    .flatMap(peer => (peer.health?.mesh?.pairs ?? [])
+      .filter(pair => pair.counterpartyId.toLowerCase() === ownerEntityId)
+      .map(pair => ({
+        peer: peer.name,
+        hasAccount: pair.hasAccount,
+        ready: pair.ready,
+        grantedByMe: pair.grantedByMe,
+        grantedByPeer: pair.grantedByPeer,
+      })))
+    .sort((left, right) => compareStableText(left.peer, right.peer));
+};
+
 export type HubBaselineProgressState = Readonly<Record<string, Readonly<{
   signature: string;
   lastProgressAt: number;
@@ -103,9 +123,16 @@ export const evaluateHubBaselineDeadlines = (
   for (const observation of [...observations]
     .sort((left, right) => compareStableText(left.name, right.name))) {
     const prior = previous[observation.name] ?? { signature: '', lastProgressAt: now };
+    // Bilateral account setup is causal for both endpoints. A hub may have
+    // durably sent its proposal and wait while the peer commits the mirror
+    // side; count only that exact peer view, never unrelated peer activity.
+    const causalSignature = safeStringify({
+      local: buildHubBaselineProgressSignature([observation]),
+      peerMirrors: buildCausalPeerMirrors(observation, observations),
+    });
     const evaluation = evaluateBootstrapProgressDeadline(
       prior,
-      buildHubBaselineProgressSignature([observation]),
+      causalSignature,
       now,
       timeoutMs,
     );
