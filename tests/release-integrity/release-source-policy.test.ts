@@ -37,7 +37,7 @@ describe('release source policy', () => {
     }
   });
 
-  test('requires canonical v2 signing from 0.1.9 onward', () => {
+  test('requires canonical Hanko v1 signing from 0.1.9 onward', () => {
     expect(() => assertReleaseSigningConfigured('0.1.6')).not.toThrow();
     expect(() => assertReleaseSigningConfigured('0.1.8')).not.toThrow();
     expect(() => assertReleaseSigningConfigured('0.1.9')).toThrow('RELEASE_SIGNING_KEYS_REQUIRED');
