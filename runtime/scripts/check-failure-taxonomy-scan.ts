@@ -218,7 +218,7 @@ for (const marker of [
   "meshLog.error('child.unexpected_exit'",
   "meshLog.error('child.unexpected_exit.stop_failed'",
   "meshLog.error('custody.bootstrap_failed'",
-  "meshLog.warn('reset.sigterm_during_reset'",
+  "meshLog.warn('reset.signal_during_reset'",
   "meshLog.error('reset.initial_failed'",
   'classifyRuntimeBootstrapStageFailure(stage.key, stage.status, stage.reason)',
 ]) {
