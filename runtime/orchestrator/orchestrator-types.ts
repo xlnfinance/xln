@@ -152,6 +152,15 @@ export type HubHealthPayload = {
       ready: boolean;
     }>;
   };
+  bootstrapProgress?: {
+    active: boolean;
+    startedAtMs: number;
+    lastProgressAtMs: number;
+    step: string;
+    idleMs: number;
+    totalMs: number;
+    stallTimeoutMs: number;
+  };
   bootstrapReserves?: {
     ok: boolean;
     targetMet?: boolean;
@@ -484,6 +493,7 @@ export type AggregatedHealth = {
     restartCount: number;
     lastErrorLine: string | null;
     quiescence: RuntimeQuiescenceHealth | null;
+    bootstrapProgress: HubHealthPayload['bootstrapProgress'] | null;
   }>;
   timings: TimingMap;
 };

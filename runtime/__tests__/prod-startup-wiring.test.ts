@@ -1040,19 +1040,20 @@ describe('production startup wiring', () => {
 
   test('deploy starts and checks the production Tron chain', () => {
     const deploy = readFileSync(join(repoRoot, 'deploy.sh'), 'utf8');
+    const bootstrapMonitor = readFileSync(join(repoRoot, 'scripts/watch-prod-bootstrap.ts'), 'utf8');
     const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
     };
     expect(deploy).toContain('pm2 start scripts/start-anvil2.sh --name anvil2');
     expect(deploy).toContain('wait_for_rpc_chain "http://127.0.0.1:8546" "0x7a6a"');
     expect(deploy).toContain('wait_for_public_rpc_chain "/rpc2" "0x7a6a"');
-    expect(deploy).toContain('curl --max-time 10 -fsS http://127.0.0.1:8080/api/health');
+    expect(bootstrapMonitor).toContain("http://127.0.0.1:8080/api/health");
     expect(deploy).toContain('curl --max-time 10 -fsS "$url"');
     expect(deploy).toContain('curl --max-time 10 -sS -X POST');
     expect(deploy).toContain('location ~ ^/rpc[2-8]$');
     expect(deploy).toContain('public /rpc must proxy through orchestrator safety filter');
     expect(deploy).toContain('fail_deploy_with_debug "anvil2 did not become ready on :8546"');
-    expect(deploy).toContain('local deadline=$((SECONDS + 1800))');
+    expect(deploy).toContain('bun scripts/watch-prod-bootstrap.ts http://127.0.0.1:8080/api/health 1800000');
     expect(deploy).toContain('RESET_PRODUCTION_MESH=0');
     expect(deploy).toContain('--reset-mesh');
     expect(deploy).toContain('--code-only');

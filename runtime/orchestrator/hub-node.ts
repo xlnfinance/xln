@@ -45,7 +45,9 @@ import {
   advanceBootstrapProgress,
   assertBootstrapNotStalled,
   beginBootstrapProgress,
+  buildBootstrapProgressHealth,
   type BootstrapProgress,
+  type BootstrapProgressHealth,
 } from './bootstrap-progress-watchdog';
 import { restoredRuntimeRouteRelocated } from './restored-gossip-route';
 import { readInheritedChildSecrets, resolveChildSecret } from './child-secrets';
@@ -260,6 +262,7 @@ type LocalHealthResponse = {
     ready: boolean;
     pairs: HubPairHealth[];
   };
+  bootstrapProgress: BootstrapProgressHealth;
   bootstrapReserves: BootstrapReserveHealth;
   jurisdiction: JurisdictionImportDiagnostics | null;
   jadapter: {
@@ -1419,7 +1422,8 @@ const buildLocalHealth = (
   entityId: string | null,
   tokenCatalog: JTokenInfo[],
   jadapter: JAdapter | null,
-  hubEntities: HubBootstrapEntry[] = [],
+  hubEntities: HubBootstrapEntry[],
+  bootstrapProgress: BootstrapProgressHealth,
 ): LocalHealthResponse => {
   const selfJurisdictionName = getEntityJurisdictionName(env, entityId);
   const selfJurisdiction = getEntityJurisdiction(env, entityId) || selfJurisdictionName;
@@ -1454,6 +1458,7 @@ const buildLocalHealth = (
       ready: Boolean(entityId) && pairs.length === Math.max(0, requiredNames.length - 1) && pairs.every(pair => pair.ready),
       pairs,
     },
+    bootstrapProgress,
     bootstrapReserves: buildHubBootstrapReserveHealth(env, entityId, tokenCatalog, hubEntities),
     jurisdiction: jurisdictionImportDiagnostics,
     jadapter: {
@@ -1713,7 +1718,19 @@ const run = async (): Promise<void> => {
       }
 
       if (pathname === '/api/health') {
-        const health = buildLocalHealth(env, bootstrap?.entityId ?? null, activeTokenCatalog, activeJAdapter, hubBootstraps);
+        const health = buildLocalHealth(
+          env,
+          bootstrap?.entityId ?? null,
+          activeTokenCatalog,
+          activeJAdapter,
+          hubBootstraps,
+          buildBootstrapProgressHealth(
+            meshLoopProgress,
+            meshLoopInFlight,
+            Date.now(),
+            MESH_BOOTSTRAP_STALL_TIMEOUT_MS,
+          ),
+        );
         return new Response(safeStringify(operatorAuthorized ? health : publicLocalHubHealth(health)), {
           headers,
         });

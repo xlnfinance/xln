@@ -1697,6 +1697,7 @@ const computeAggregatedHealth = (options: {
       restartCount: child.restartCount,
       lastErrorLine: child.recentStderr.at(-1) ?? null,
       quiescence: child.lastHealth?.quiescence ?? null,
+      bootstrapProgress: child.lastHealth?.bootstrapProgress ?? null,
     };
   });
 

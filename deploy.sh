@@ -180,30 +180,7 @@ wait_for_public_rpc_placeholder() {
 }
 
 wait_for_main_stack() {
-  local deadline=$((SECONDS + 1800))
-  while [ "$SECONDS" -lt "$deadline" ]; do
-    local body
-    body="$(curl --max-time 10 -fsS http://127.0.0.1:8080/api/health || true)"
-    if [ -n "$body" ] && node -e '
-      const payload = JSON.parse(process.argv[1]);
-      const ok =
-        payload?.coreOk === true &&
-        payload?.systemOk === true &&
-        payload?.system?.runtime === true &&
-        payload?.system?.relay === true &&
-        payload?.hubMesh?.ok === true &&
-        payload?.marketMaker?.ok === true &&
-        payload?.bootstrapReserves?.ok === true &&
-        payload?.custody?.ok === true &&
-        Array.isArray(payload?.hubs) &&
-        payload.hubs.length >= 3;
-      process.exit(ok ? 0 : 1);
-    ' "$body"; then
-      return 0
-    fi
-    sleep 1
-  done
-  return 1
+  bun scripts/watch-prod-bootstrap.ts http://127.0.0.1:8080/api/health 1800000
 }
 
 wait_for_http_status() {

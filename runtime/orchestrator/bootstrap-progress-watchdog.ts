@@ -4,6 +4,13 @@ export type BootstrapProgress = Readonly<{
   step: string;
 }>;
 
+export type BootstrapProgressHealth = BootstrapProgress & Readonly<{
+  active: boolean;
+  idleMs: number;
+  totalMs: number;
+  stallTimeoutMs: number;
+}>;
+
 const requireTimestamp = (label: string, value: number): number => {
   if (!Number.isFinite(value) || value < 0) {
     throw new Error(`BOOTSTRAP_PROGRESS_TIMESTAMP_INVALID:${label}=${value}`);
@@ -45,4 +52,20 @@ export const assertBootstrapNotStalled = (
   throw new Error(
     `MESH_BOOTSTRAP_STALLED step=${progress.step} idleMs=${idleMs} totalMs=${totalMs} timeoutMs=${stallTimeoutMs}`,
   );
+};
+
+export const buildBootstrapProgressHealth = (
+  progress: BootstrapProgress,
+  active: boolean,
+  nowMs: number,
+  stallTimeoutMs: number,
+): BootstrapProgressHealth => {
+  const now = requireTimestamp('health', nowMs);
+  return {
+    ...progress,
+    active,
+    idleMs: Math.max(0, now - progress.lastProgressAtMs),
+    totalMs: Math.max(0, now - progress.startedAtMs),
+    stallTimeoutMs,
+  };
 };
