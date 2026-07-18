@@ -5219,6 +5219,7 @@ describe('audit fail-fast regressions', () => {
     const seed = 'account-frame-cap-seed';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
+    env.timestamp = 1_000;
     env.browserVM = {
       getDepositoryAddress: () => hex20('dd'),
     } as typeof env.browserVM;
@@ -5247,6 +5248,7 @@ describe('audit fail-fast regressions', () => {
     const seed = 'account-frame-ack-loss-recovery';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
+    env.timestamp = 1_000;
     env.browserVM = {
       getDepositoryAddress: () => hex20('dd'),
     } as typeof env.browserVM;
@@ -5293,6 +5295,7 @@ describe('audit fail-fast regressions', () => {
     const seed = 'account-credit-limit-reuses-proof';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
+    env.timestamp = 1_000;
     env.browserVM = { getDepositoryAddress: () => hex20('dd') } as typeof env.browserVM;
     const left = registerLazySigner(seed, '1');
     const right = registerLazySigner(seed, '2');
@@ -5329,6 +5332,7 @@ describe('audit fail-fast regressions', () => {
     const seed = 'account-consumed-proof-opens-evidence-epoch';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
+    env.timestamp = 1_000;
     env.browserVM = { getDepositoryAddress: () => hex20('dd') } as typeof env.browserVM;
     const left = registerLazySigner(seed, '1');
     const right = registerLazySigner(seed, '2');
@@ -6167,6 +6171,7 @@ describe('audit fail-fast regressions', () => {
     const seed = 'account-proposal-failure-retains-mempool';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
+    env.timestamp = 1_000;
 
     const left = registerLazySigner(seed, '1');
     const right = registerLazySigner(seed, '2');
