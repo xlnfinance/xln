@@ -1902,6 +1902,11 @@ describe('multisig HTLC validator encryption', () => {
     });
     if (!p2p) throw new Error('PROFILE_P2P_DEDUP_RUNTIME_MISSING');
     try {
+      const pendingAtStartup = env.runtimeMempool?.entityInputs
+        .flatMap((input) => input.entityTxs ?? [])
+        .filter((tx) => tx.type === 'certifyProfile').length ?? 0;
+      expect(pendingAtStartup).toBe(1);
+
       (p2p as unknown as {
         applyIncomingEncryptionAnnouncements: (from: string, announcements: unknown[]) => void;
       }).applyIncomingEncryptionAnnouncements('peer-runtime', [announcement]);

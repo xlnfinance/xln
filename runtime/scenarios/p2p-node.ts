@@ -7,9 +7,9 @@ import { startStandaloneRelayServer } from '../relay/standalone-server';
 import { main, startP2P, process as runtimeProcess, enqueueRuntimeInput, createLazyEntity, generateLazyEntityId, getActiveJAdapter, startRuntimeLoop } from '../runtime.ts';
 import { createLocalDeliveryHandler } from '../relay/local-delivery';
 import { getEntityReplicaById } from '../server/entity-lookup';
-import { processUntil, converge } from './helpers';
+import { processUntil } from './helpers';
 import { isLeft, deriveDelta } from '../account/utils';
-import { deriveSignerKeySync, registerSignerKey, getSignerPrivateKey } from '../account/crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, getSignerPrivateKey } from '../account/crypto';
 import { loadJurisdictions } from '../jurisdiction/jurisdiction-loader';
 import { DEFAULT_TOKENS, TOKEN_REGISTRATION_AMOUNT, getDefaultTokenSupply } from '../jadapter/default-tokens';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
@@ -726,12 +726,13 @@ const run = async () => {
     throw new Error(`RUNTIME_ID_MISSING: ${role}`);
   }
 
-  const signerId = `${role}-validator`;
+  const signerLabel = `${role}-validator`;
 
   // CRITICAL: Derive and register signer key BEFORE createLazyEntity
   // Otherwise resolveValidatorAddress will fail
   const seedBytes = new TextEncoder().encode(seed);
-  const privateKey = deriveSignerKeySync(seedBytes, signerId);
+  const privateKey = deriveSignerKeySync(seedBytes, signerLabel);
+  const signerId = deriveSignerAddressSync(seedBytes, signerLabel).toLowerCase();
   registerSignerKey(env, signerId, privateKey);
 
   const { config } = createLazyEntity(role, [signerId], 1n, jurisdiction ?? undefined, env);
@@ -912,7 +913,6 @@ const run = async () => {
     { entityId, signerId, entityTxs: [{ type: 'openAccount', data: { targetEntityId: hubProfile.entityId } }] },
   ]);
 
-  await converge(env, 20);
   await waitForAccount(env, entityId, signerId, hubProfile.entityId);
   await waitForAccountReady(env, entityId, signerId, hubProfile.entityId, 180);
 
@@ -933,7 +933,6 @@ const run = async () => {
     },
   ]);
 
-  await converge(env, 30);
   await waitForOwnCreditLimit(env, entityId, signerId, hubProfile.entityId, usd(500_000), 300);
 
   // ASSERT: Verify bidirectional capacity exists
@@ -1116,7 +1115,6 @@ const run = async () => {
         ],
       },
     ]);
-    await converge(env, 20);
     await waitForOwnCreditLimit(env, entityId, signerId, hubProfile.entityId, creditAmount, 60);
     console.log('P2P_BOB_READY');
 

@@ -5,7 +5,10 @@ import { isRuntimeId } from '../networking/runtime-id';
 import { assertLocalEntityCryptoKeys } from '../entity/crypto';
 import type { RuntimeInboundEntityInputResult } from './entity-routing';
 import { isDeliveryDelivered } from '../protocol/payments/delivery-result';
-import { buildLocalProfileCertificationInput } from '../networking/local-profile-lifecycle';
+import {
+  buildLocalProfileCertificationInput,
+  collectDueLocalProfileCertificationInputs,
+} from '../networking/local-profile-lifecycle';
 
 export type { P2PConfig } from '../networking/p2p';
 
@@ -164,6 +167,11 @@ export const startRuntimeP2P = (
   state.p2p = new RuntimeP2P(p2pOptions);
 
   envRecord(env)[ENV_P2P_SINGLETON_KEY] = state.p2p;
+  const dueProfileCertifications = collectDueLocalProfileCertificationInputs(env);
+  if (dueProfileCertifications.length > 0) {
+    deps.enqueueRuntimeInputs(env, dueProfileCertifications);
+    deps.notifyEnvChange(env);
+  }
   state.p2p.connect();
   return state.p2p;
 };
