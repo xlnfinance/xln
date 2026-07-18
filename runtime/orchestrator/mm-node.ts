@@ -113,6 +113,7 @@ import { getReliableOutputIdentity } from '../machine/output-routing';
 import {
   assertMarketMakerReadySnapshotParity,
   buildMarketMakerBootstrapEntityStateHashFromCanonicalHashes,
+  evaluateMarketMakerBootstrapDeadline,
   marketMakerBootstrapProgressSignature,
   resolveMarketMakerReadySnapshotAction,
   runtimeBacklogBlocksMarketMakerQuotes,
@@ -4691,10 +4692,15 @@ const run = async (): Promise<void> => {
     let lastProgressCheckpoint = buildBootstrapCausalCheckpoint();
     let lastBacklogLogAt = 0;
     let bootstrapCompletionCheckArmed = false;
-    const markProgress = (reason: string, health: MarketMakerHealth | null = cachedMarketMakerHealth): void => {
-      lastProgressAt = Date.now();
+    const markProgress = (
+      reason: string,
+      health: MarketMakerHealth | null,
+      now: number,
+      checkpoint: ReturnType<typeof buildBootstrapCausalCheckpoint>,
+    ): void => {
+      lastProgressAt = now;
       lastProgressReason = reason;
-      lastProgressCheckpoint = buildBootstrapCausalCheckpoint();
+      lastProgressCheckpoint = checkpoint;
       emitBootstrapDebugEvent('progress', {
         reason,
         idleMs: 0,
@@ -4702,18 +4708,31 @@ const run = async (): Promise<void> => {
         checkpoint: lastProgressCheckpoint,
       });
     };
-    const observeProgress = (reason: string, health: MarketMakerHealth | null): void => {
+    const observeProgress = (
+      reason: string,
+      health: MarketMakerHealth | null,
+    ): ReturnType<typeof evaluateMarketMakerBootstrapDeadline> => {
+      const checkpoint = buildBootstrapCausalCheckpoint();
       const signature = marketMakerBootstrapProgressSignature(
         health,
-        buildBootstrapCausalCheckpoint(),
+        checkpoint,
       );
-      if (signature === lastProgressSignature) return;
-      lastProgressSignature = signature;
-      markProgress(reason, health);
+      const evaluation = evaluateMarketMakerBootstrapDeadline(
+        { signature: lastProgressSignature, lastProgressAt },
+        signature,
+        Date.now(),
+        MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS,
+      );
+      if (evaluation.progressed) {
+        lastProgressSignature = evaluation.signature;
+        markProgress(reason, health, evaluation.lastProgressAt, checkpoint);
+      }
+      return evaluation;
     };
     const assertBootstrapNotStalled = (health: MarketMakerHealth | null): void => {
-      const idleMs = Date.now() - lastProgressAt;
-      if (idleMs < MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS) return;
+      const evaluation = observeProgress('deadline-checkpoint', health);
+      const { idleMs } = evaluation;
+      if (!evaluation.stalled) return;
       const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryMmContext, profile));
       const currentCheckpoint = buildBootstrapCausalCheckpoint();
       const p2p = getP2PState(env);

@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import {
   assertMarketMakerReadySnapshotParity,
   buildMarketMakerBootstrapEntityStateHashFromCanonicalHashes,
+  evaluateMarketMakerBootstrapDeadline,
   marketMakerBootstrapProgressSignature,
   resolveMarketMakerReadySnapshotAction,
   runtimeBacklogBlocksMarketMakerQuotes,
@@ -138,4 +139,34 @@ test('entity inputs captured by an in-flight runtime frame retain quote backpres
     inFlightEntityInputs: 1,
     jInputs: 0,
   })).toBe(true);
+});
+
+test('causal progress completed after the old deadline is observed before stall rejection', () => {
+  const afterLongFrame = evaluateMarketMakerBootstrapDeadline(
+    { signature: 'height-89', lastProgressAt: 1_000 },
+    'height-90',
+    62_000,
+    60_000,
+  );
+  expect(afterLongFrame).toEqual({
+    progressed: true,
+    signature: 'height-90',
+    lastProgressAt: 62_000,
+    idleMs: 0,
+    stalled: false,
+  });
+
+  expect(evaluateMarketMakerBootstrapDeadline(
+    { signature: afterLongFrame.signature, lastProgressAt: afterLongFrame.lastProgressAt },
+    'height-90',
+    122_000,
+    60_000,
+  ).stalled).toBe(true);
+
+  expect(() => evaluateMarketMakerBootstrapDeadline(
+    { signature: 'height-90', lastProgressAt: 62_000 },
+    'height-91',
+    61_999,
+    60_000,
+  )).toThrow('MARKET_MAKER_BOOTSTRAP_PROGRESS_CLOCK_REGRESSION');
 });
