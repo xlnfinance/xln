@@ -78,11 +78,10 @@ test('ready snapshot parity binds Entity state and publishes the durable runtime
     .toThrow('MARKET_MAKER_READY_SNAPSHOT_FRAME_MISSING');
 });
 
-test('ready snapshot seeds only an empty history and never reimports a live head', () => {
+test('ready snapshot advances only at a newer finalized runtime height', () => {
   expect(resolveMarketMakerReadySnapshotAction(165, 0)).toBe('seed-recovery-base');
   expect(resolveMarketMakerReadySnapshotAction(165, 165)).toBe('already-persisted');
-  expect(() => resolveMarketMakerReadySnapshotAction(165, 164))
-    .toThrow('MARKET_MAKER_READY_SNAPSHOT_STORAGE_POSITION_MISMATCH');
+  expect(resolveMarketMakerReadySnapshotAction(165, 164)).toBe('advance-recovery-base');
   expect(() => resolveMarketMakerReadySnapshotAction(165, 166))
     .toThrow('MARKET_MAKER_READY_SNAPSHOT_STORAGE_POSITION_MISMATCH');
 });

@@ -136,6 +136,44 @@ const assertFreshState = async (
 };
 
 describe('restored checkpoint conflict policy', () => {
+  test('atomically advances an older complete recovery base', async () => {
+    const seed = `restore advance ${process.pid} deterministic seed`;
+    const base = await createRecoveryEnv(seed);
+    cleanupPaths.push(resolveDbPath(base.env, 'core'));
+    base.env.timestamp = 1_000;
+    base.replica.lastConsensusProgressAt = 1_111;
+    await persistRestoredEnvToDB(base.env);
+    await closeRecoveryEnv(base.env);
+
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const restored = await loadEnvFromDB(runtimeId, seed);
+    if (!restored) throw new Error('restore advance lost initial recovery base');
+    restored.runtimeConfig = {
+      ...restored.runtimeConfig,
+      storage: { ...restored.runtimeConfig?.storage, enabled: false },
+    };
+    registerSignerKey(restored, base.signerId, deriveSignerKeySync(seed, '1'));
+    enqueueRuntimeInput(restored, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: base.entityId,
+        signerId: base.signerId,
+        entityTxs: [{
+          type: 'profile-update',
+          data: { profile: { entityId: base.entityId, name: 'advanced-base' } },
+        }],
+      }],
+    });
+    await processRuntime(restored, []);
+    const advancedReplica = Array.from(restored.eReplicas.values())[0];
+    if (!advancedReplica) throw new Error('restore advance replica missing');
+    advancedReplica.lastConsensusProgressAt = 2_222;
+    await persistRestoredEnvToDB(restored);
+    await closeRecoveryEnv(restored);
+
+    await assertFreshState(seed, { height: 2, progress: 2_222, profileName: 'advanced-base' });
+  });
+
   test('rejects lower-height rollback and preserves the higher base', async () => {
     const seed = `restore rollback ${process.pid} deterministic seed`;
     const base = await createRecoveryEnv(seed, false, 'higher-base');

@@ -116,7 +116,7 @@ export const runtimeBacklogBlocksMarketMakerQuotes = (
 export const resolveMarketMakerReadySnapshotAction = (
   runtimeHeight: number,
   persistedHeight: number,
-): 'seed-recovery-base' | 'already-persisted' => {
+): 'seed-recovery-base' | 'advance-recovery-base' | 'already-persisted' => {
   if (!Number.isSafeInteger(runtimeHeight) || runtimeHeight <= 0) {
     throw new Error(`MARKET_MAKER_READY_SNAPSHOT_RUNTIME_HEIGHT_INVALID:${runtimeHeight}`);
   }
@@ -125,6 +125,12 @@ export const resolveMarketMakerReadySnapshotAction = (
   }
   if (persistedHeight === 0) return 'seed-recovery-base';
   if (persistedHeight === runtimeHeight) return 'already-persisted';
+  // MM deliberately pauses WAL writes between complete bootstrap checkpoints.
+  // A restored ready state can therefore advance in memory while catching up
+  // with hub events. Only the next fully quiesced ready fence may atomically
+  // replace that older recovery base. The storage importer independently
+  // rejects timestamp rollback and same-height state conflicts.
+  if (persistedHeight < runtimeHeight) return 'advance-recovery-base';
   throw new Error(
     `MARKET_MAKER_READY_SNAPSHOT_STORAGE_POSITION_MISMATCH:` +
     `runtime=${runtimeHeight}:persisted=${persistedHeight}`,

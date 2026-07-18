@@ -4619,7 +4619,7 @@ const run = async (): Promise<void> => {
             Number(env.height ?? 0),
             Number(persistedHead?.latestHeight ?? 0),
           );
-          if (snapshotAction === 'seed-recovery-base') {
+          if (snapshotAction !== 'already-persisted') {
             await persistRestoredEnvToDB(env);
           }
           const persistedFrame = await readPersistedStorageFrameRecord(env, Number(env.height ?? 0));
@@ -4633,7 +4633,7 @@ const run = async (): Promise<void> => {
             snapshotAction === 'already-persisted'
               ? 'bootstrap.ready_snapshot.already_persisted'
               : 'bootstrap.ready_snapshot.persisted',
-            { height: env.height },
+            { height: env.height, action: snapshotAction },
           );
         } catch (error) {
           env.runtimeConfig = previousRuntimeConfig;
