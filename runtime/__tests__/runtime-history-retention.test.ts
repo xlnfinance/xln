@@ -26,7 +26,8 @@ test('recent snapshot helper enforces its exact bound and rejects invalid limits
     .toThrow('RUNTIME_HISTORY_LIMIT_INVALID:0');
 });
 
-test('production Env retains only the latest 256 canonical snapshots', async () => {
+test('production Env retains only the bounded canonical debug tail', async () => {
+  expect(RECENT_RUNTIME_HISTORY_LIMIT).toBe(16);
   const seed = 'bounded runtime history alpha beta gamma';
   const env = createEmptyEnv(seed);
   env.runtimeConfig = {
