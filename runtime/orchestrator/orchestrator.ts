@@ -71,6 +71,7 @@ import {
   CHILD_LOG_RING_MAX,
   HEALTH_RESPONSE_REFRESH_TIMEOUT_MS,
   HUB_BASELINE_TIMEOUT_MS,
+  HUB_BASELINE_STALL_TIMEOUT_MS,
   HUB_DIRECT_LINK_BASELINE_GRACE_MS,
   HUB_NAMES,
   HUB_PROFILES_READY_TIMEOUT_MS,
@@ -131,6 +132,7 @@ import {
 } from './market-maker-health-payload';
 import { createMarketMakerChildPoller } from './market-maker-child-poll';
 import { buildAggregatedMarketMakerHealth } from './market-maker-aggregated-health';
+import { buildHubBaselineProgressSignature } from './hub-baseline-progress';
 import { resolveRuntimeImportReadiness } from './runtime-import-readiness';
 import { persistChildFailureReceipt, type ChildFailureReceipt } from './child-failure-diagnostics';
 import {
@@ -2277,14 +2279,23 @@ const buildAggregatedHealthResponse = async (
 };
 
 const waitForHubBaseline = async (): Promise<void> => {
-  const deadline = Date.now() + HUB_BASELINE_TIMEOUT_MS;
   const directRequired = HUB_NAMES.length * Math.max(0, HUB_NAMES.length - 1);
   const requireDirectLinks = process.env['XLN_REQUIRE_DIRECT_BASELINE'] === '1';
   let directGraceStartedAt = 0;
   let lastStatus: Record<string, unknown> | null = null;
   let warnedDirectGrace = false;
-  while (Date.now() < deadline) {
+  let lastProgressAt = Date.now();
+  let lastProgressSignature = '';
+  while (true) {
     await pollAllHubHealth();
+    const progressSignature = buildHubBaselineProgressSignature(hubChildren.map(child => ({
+      name: child.name,
+      health: child.lastHealth,
+    })));
+    if (progressSignature !== lastProgressSignature) {
+      lastProgressSignature = progressSignature;
+      lastProgressAt = Date.now();
+    }
     const health = computeAggregatedHealth();
     const coreReady =
       health.hubMesh.ok &&
@@ -2320,9 +2331,15 @@ const waitForHubBaseline = async (): Promise<void> => {
         return;
       }
     }
+    const idleMs = Date.now() - lastProgressAt;
+    if (idleMs > HUB_BASELINE_STALL_TIMEOUT_MS) {
+      throw new Error(
+        `HUB_BASELINE_STALLED idleMs=${idleMs} timeoutMs=${HUB_BASELINE_STALL_TIMEOUT_MS} ` +
+        `status=${safeStringify(lastStatus)} health=${safeStringify(health)}`,
+      );
+    }
     await delay(250);
   }
-  throw new Error(`HUB_BASELINE_TIMEOUT ${safeStringify({ status: lastStatus, health: computeAggregatedHealth() })}`);
 };
 
 const waitForHubProfilesReady = async (): Promise<void> => {
