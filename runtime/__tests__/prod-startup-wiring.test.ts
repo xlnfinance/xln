@@ -1085,9 +1085,14 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('chmod -R go-rwx "$XLN_STATE_ROOT"');
     expect(deploy).toContain('rm -rf "$XLN_RDB_ROOT/runtime/prod-main"');
     expect(deploy).not.toContain('-- --reset');
-    expect(deploy).toContain('--max-memory-restart 768M --kill-timeout 60000 --restart-delay 2000');
-    expect(deploy).toContain('ensure_production_anvil_memory_limit anvil scripts/start-anvil.sh');
-    expect(deploy).toContain('ensure_production_anvil_memory_limit anvil2 scripts/start-anvil2.sh');
+    expect(deploy).toContain('--kill-timeout 60000 --restart-delay 2000');
+    const startAnvil = deploy.slice(
+      deploy.indexOf('start_production_anvil()'),
+      deploy.indexOf('ensure_production_anvil_memory_restart_disabled()'),
+    );
+    expect(startAnvil).not.toContain('--max-memory-restart');
+    expect(deploy).toContain('ensure_production_anvil_memory_restart_disabled anvil scripts/start-anvil.sh');
+    expect(deploy).toContain('ensure_production_anvil_memory_restart_disabled anvil2 scripts/start-anvil2.sh');
     expect(deploy).toContain('run_or_fail_deploy "unsafe Anvil PM2 supervision" bun scripts/check-anvil-supervision.ts');
     expect(deploy).toContain('wait_for_anvil_state_checkpoint "$XLN_JDB_ROOT/anvil-state.json"');
     expect(deploy).toContain('wait_for_anvil_state_checkpoint "$XLN_JDB_ROOT/anvil2-state.json"');
@@ -1858,7 +1863,9 @@ describe('production startup wiring', () => {
     expect(driveMeshBootstrap).toContain('const expectedPeerProfiles = Math.max(0, resolvedArgs.meshHubNames.length - 1) * hubBootstraps.length;');
     expect(driveMeshBootstrap).toContain('peerReservesReady = allPeerProfiles.length >= expectedPeerProfiles;');
     expect(driveMeshBootstrap).toContain('reserveReadyMarked = reserveHealth.targetMet === true && peerReservesReady;');
-    expect(driveMeshBootstrap).toContain('assertBootstrapNotStalled');
+    expect(driveMeshBootstrap).not.toContain('assertBootstrapNotStalled');
+    expect(driveMeshBootstrap).not.toContain('meshLoopProgress = beginBootstrapProgress(Date.now())');
+    expect(driveMeshBootstrap).not.toContain("markMeshBootstrapProgress('idle')");
     expect(driveMeshBootstrap).toContain('markMeshBootstrapProgress(`local-reserve:${step}`)');
     expect(hubNode).toContain("const AUTO_PROVISION_EXTERNAL_FAUCET = process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] !== '0';");
     expect(hubNode).toContain('if (!resolvedArgs.deployTokens || !AUTO_PROVISION_EXTERNAL_FAUCET) return;');

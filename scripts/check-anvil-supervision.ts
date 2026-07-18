@@ -1,7 +1,5 @@
 import { readFileSync } from 'node:fs';
 
-const MIB = 1024 * 1024;
-const REQUIRED_ANVIL_RSS_LIMIT = 768 * MIB;
 const MIN_KILL_TIMEOUT_MS = 60_000;
 const MIN_RESTART_DELAY_MS = 2_000;
 
@@ -30,7 +28,7 @@ const normalizedArgs = (value: unknown): string[] => {
 export const validateAnvilSupervision = (
   entries: readonly Pm2Entry[],
   readProcessName: (pid: number) => string,
-): Array<{ name: string; pid: number; maxMemoryBytes: number }> => {
+): Array<{ name: string; pid: number; memoryRestart: 'disabled' }> => {
   return ['anvil', 'anvil2'].map((name) => {
     const entry = entries.find((candidate) => candidate.name === name);
     if (!entry) fail('ANVIL_PM2_ENTRY_MISSING', name);
@@ -43,9 +41,9 @@ export const validateAnvilSupervision = (
     const processName = readProcessName(pid).trim();
     if (processName !== 'anvil') fail('ANVIL_PM2_WRONG_PROCESS', `${name}:pid=${pid}:comm=${processName}`);
 
-    const maxMemoryBytes = Number(env.max_memory_restart);
-    if (!Number.isSafeInteger(maxMemoryBytes) || maxMemoryBytes !== REQUIRED_ANVIL_RSS_LIMIT) {
-      fail('ANVIL_PM2_MEMORY_LIMIT_INVALID', `${name}:${env.max_memory_restart}`);
+    const maxMemoryBytes = Number(env.max_memory_restart ?? 0);
+    if (!Number.isSafeInteger(maxMemoryBytes) || maxMemoryBytes !== 0) {
+      fail('ANVIL_PM2_MEMORY_RESTART_ENABLED', `${name}:${env.max_memory_restart}`);
     }
     const killTimeout = Number(env.kill_timeout);
     if (!Number.isSafeInteger(killTimeout) || killTimeout < MIN_KILL_TIMEOUT_MS) {
@@ -55,7 +53,7 @@ export const validateAnvilSupervision = (
     if (!Number.isSafeInteger(restartDelay) || restartDelay < MIN_RESTART_DELAY_MS) {
       fail('ANVIL_PM2_RESTART_DELAY_INVALID', `${name}:${env.restart_delay}`);
     }
-    return { name, pid, maxMemoryBytes };
+    return { name, pid, memoryRestart: 'disabled' as const };
   });
 };
 

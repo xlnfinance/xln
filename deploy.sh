@@ -754,19 +754,19 @@ start_production_anvil() {
   local script="$2"
   run_or_fail_deploy "failed to start ${name} via pm2" \
     pm2 start "$script" --name "$name" --interpreter bash \
-      --max-memory-restart 768M --kill-timeout 60000 --restart-delay 2000
+      --kill-timeout 60000 --restart-delay 2000
 }
 
-ensure_production_anvil_memory_limit() {
+ensure_production_anvil_memory_restart_disabled() {
   local name="$1"
   local script="$2"
   local configured_bytes
   configured_bytes="$(pm2 jlist | jq -r --arg name "$name" \
     '[.[] | select(.name == $name) | .pm2_env.max_memory_restart][0] // 0')"
-  if [ "$configured_bytes" = "805306368" ]; then
+  if [ "$configured_bytes" = "0" ]; then
     return 0
   fi
-  echo "[deploy] reconfiguring ${name} memory ceiling: ${configured_bytes} -> 805306368"
+  echo "[deploy] disabling unsafe memory-triggered restart for ${name}: ${configured_bytes} -> 0"
   pm2 delete "$name" >/dev/null 2>&1 || true
   start_production_anvil "$name" "$script"
 }
@@ -1058,10 +1058,10 @@ run_local_deploy() {
           start_production_anvil anvil2 scripts/start-anvil2.sh
         fi
       fi
-      run_or_fail_deploy "failed to enforce primary Anvil memory ceiling" \
-        ensure_production_anvil_memory_limit anvil scripts/start-anvil.sh
-      run_or_fail_deploy "failed to enforce secondary Anvil memory ceiling" \
-        ensure_production_anvil_memory_limit anvil2 scripts/start-anvil2.sh
+      run_or_fail_deploy "failed to disable primary Anvil memory-triggered restart" \
+        ensure_production_anvil_memory_restart_disabled anvil scripts/start-anvil.sh
+      run_or_fail_deploy "failed to disable secondary Anvil memory-triggered restart" \
+        ensure_production_anvil_memory_restart_disabled anvil2 scripts/start-anvil2.sh
       if ! wait_for_rpc_chain "http://127.0.0.1:8545" "0x7a69"; then
         fail_deploy_with_debug "anvil did not become ready on :8545"
       fi

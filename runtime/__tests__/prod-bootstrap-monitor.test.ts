@@ -57,7 +57,7 @@ describe('production bootstrap monitor', () => {
     }));
   });
 
-  test('fails the reported step as soon as its stall budget is exceeded', () => {
+  test('leaves local step timing diagnostic because the parent owns the causal deadline', () => {
     const health = healthy();
     health.systemOk = false;
     health.hubs[1]!.bootstrapProgress = {
@@ -67,9 +67,7 @@ describe('production bootstrap monitor', () => {
       totalMs: 300_000,
       stallTimeoutMs: 120_000,
     };
-    expect(findProductionBootstrapFatal(health, 400_000)).toBe(
-      'PROD_BOOTSTRAP_HUB_STALLED:H2:step=local-reserve:H2:Tron:fund-events:idleMs=120001:timeoutMs=120000',
-    );
+    expect(findProductionBootstrapFatal(health, 400_000)).toBeNull();
   });
 
   test('does not turn a completed stage budget into a total bootstrap deadline', () => {

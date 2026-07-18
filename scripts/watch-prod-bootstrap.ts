@@ -73,12 +73,6 @@ export const findProductionBootstrapFatal = (
       const signal = String(hub.exitSignal || '');
       return `PROD_BOOTSTRAP_HUB_EXITED:${name}:code=${String(hub.exitCode)}${signal ? `:signal=${signal}` : ''}`;
     }
-    const progress = hub.bootstrapProgress;
-    const idleMs = finiteNumber(progress?.idleMs);
-    const stallTimeoutMs = finiteNumber(progress?.stallTimeoutMs);
-    if (progress?.active === true && idleMs !== null && stallTimeoutMs !== null && idleMs > stallTimeoutMs) {
-      return `PROD_BOOTSTRAP_HUB_STALLED:${name}:step=${String(progress.step || 'unknown')}:idleMs=${idleMs}:timeoutMs=${stallTimeoutMs}`;
-    }
   }
 
   for (const stage of health.bootstrapTimeline?.stages ?? []) {

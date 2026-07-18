@@ -43,7 +43,6 @@ import { createStructuredLogger } from '../infra/logger';
 import { handleMeshBootstrapLoopError } from './mesh-bootstrap-fail-fast';
 import {
   advanceBootstrapProgress,
-  assertBootstrapNotStalled,
   beginBootstrapProgress,
   buildBootstrapProgressHealth,
   type BootstrapProgress,
@@ -1569,7 +1568,6 @@ const run = async (): Promise<void> => {
       meshLoop = null;
     }
     while (meshLoopInFlight) {
-      assertBootstrapNotStalled(meshLoopProgress, Date.now(), MESH_BOOTSTRAP_STALL_TIMEOUT_MS);
       await sleep(100);
     }
   };
@@ -2268,12 +2266,8 @@ const run = async (): Promise<void> => {
 
   const driveMeshBootstrap = async (): Promise<void> => {
     if (!bootstrap || shuttingDown || meshBootstrapPaused) return;
-    if (meshLoopInFlight) {
-      assertBootstrapNotStalled(meshLoopProgress, Date.now(), MESH_BOOTSTRAP_STALL_TIMEOUT_MS);
-      return;
-    }
+    if (meshLoopInFlight) return;
     meshLoopInFlight = true;
-    meshLoopProgress = beginBootstrapProgress(Date.now());
     try {
       const bootstrapJurisdiction =
         getEntityJurisdiction(env, bootstrap.entityId) ||
@@ -2468,7 +2462,6 @@ const run = async (): Promise<void> => {
       }
     } finally {
       meshLoopInFlight = false;
-      markMeshBootstrapProgress('idle');
     }
   };
 
