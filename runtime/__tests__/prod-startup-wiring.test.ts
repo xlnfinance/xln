@@ -1053,7 +1053,7 @@ describe('production startup wiring', () => {
     const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
     };
-    expect(deploy).toContain('pm2 start scripts/start-anvil2.sh --name anvil2');
+    expect(deploy).toContain('start_production_anvil anvil2 scripts/start-anvil2.sh');
     expect(deploy).toContain('wait_for_rpc_chain "http://127.0.0.1:8546" "0x7a6a"');
     expect(deploy).toContain('wait_for_public_rpc_chain "/rpc2" "0x7a6a"');
     expect(bootstrapMonitor).toContain("http://127.0.0.1:8080/api/health");
@@ -1084,8 +1084,9 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('chmod -R go-rwx "$XLN_STATE_ROOT"');
     expect(deploy).toContain('rm -rf "$XLN_RDB_ROOT/runtime/prod-main"');
     expect(deploy).not.toContain('-- --reset');
-    expect(deploy).toContain('pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M --kill-timeout 60000 --restart-delay 2000');
-    expect(deploy).toContain('pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M --kill-timeout 60000 --restart-delay 2000');
+    expect(deploy).toContain('--max-memory-restart 768M --kill-timeout 60000 --restart-delay 2000');
+    expect(deploy).toContain('ensure_production_anvil_memory_limit anvil scripts/start-anvil.sh');
+    expect(deploy).toContain('ensure_production_anvil_memory_limit anvil2 scripts/start-anvil2.sh');
     expect(deploy).toContain('run_or_fail_deploy "unsafe Anvil PM2 supervision" bun scripts/check-anvil-supervision.ts');
     expect(deploy).toContain('wait_for_anvil_state_checkpoint "$XLN_JDB_ROOT/anvil-state.json"');
     expect(deploy).toContain('wait_for_anvil_state_checkpoint "$XLN_JDB_ROOT/anvil2-state.json"');

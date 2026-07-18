@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 
 const MIB = 1024 * 1024;
-const MAX_SAFE_ANVIL_RSS = 768 * MIB;
+const REQUIRED_ANVIL_RSS_LIMIT = 768 * MIB;
 const MIN_KILL_TIMEOUT_MS = 60_000;
 const MIN_RESTART_DELAY_MS = 2_000;
 
@@ -44,7 +44,7 @@ export const validateAnvilSupervision = (
     if (processName !== 'anvil') fail('ANVIL_PM2_WRONG_PROCESS', `${name}:pid=${pid}:comm=${processName}`);
 
     const maxMemoryBytes = Number(env.max_memory_restart);
-    if (!Number.isSafeInteger(maxMemoryBytes) || maxMemoryBytes <= 0 || maxMemoryBytes > MAX_SAFE_ANVIL_RSS) {
+    if (!Number.isSafeInteger(maxMemoryBytes) || maxMemoryBytes !== REQUIRED_ANVIL_RSS_LIMIT) {
       fail('ANVIL_PM2_MEMORY_LIMIT_INVALID', `${name}:${env.max_memory_restart}`);
     }
     const killTimeout = Number(env.kill_timeout);

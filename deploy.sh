@@ -749,6 +749,28 @@ run_or_fail_deploy() {
   fi
 }
 
+start_production_anvil() {
+  local name="$1"
+  local script="$2"
+  run_or_fail_deploy "failed to start ${name} via pm2" \
+    pm2 start "$script" --name "$name" --interpreter bash \
+      --max-memory-restart 768M --kill-timeout 60000 --restart-delay 2000
+}
+
+ensure_production_anvil_memory_limit() {
+  local name="$1"
+  local script="$2"
+  local configured_bytes
+  configured_bytes="$(pm2 jlist | jq -r --arg name "$name" \
+    '[.[] | select(.name == $name) | .pm2_env.max_memory_restart][0] // 0')"
+  if [ "$configured_bytes" = "805306368" ]; then
+    return 0
+  fi
+  echo "[deploy] reconfiguring ${name} memory ceiling: ${configured_bytes} -> 805306368"
+  pm2 delete "$name" >/dev/null 2>&1 || true
+  start_production_anvil "$name" "$script"
+}
+
 ensure_production_direct_hub_ports() {
   cat > /etc/nginx/conf.d/xln-direct-ports.conf <<'EOF'
 server {
@@ -1022,20 +1044,24 @@ run_local_deploy() {
         lsof -ti TCP:8546 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
         pm2 delete anvil >/dev/null 2>&1 || true
         pm2 delete anvil2 >/dev/null 2>&1 || true
-        run_or_fail_deploy "failed to start anvil via pm2" pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M --kill-timeout 60000 --restart-delay 2000
-        run_or_fail_deploy "failed to start anvil2 via pm2" pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M --kill-timeout 60000 --restart-delay 2000
+        start_production_anvil anvil scripts/start-anvil.sh
+        start_production_anvil anvil2 scripts/start-anvil2.sh
       else
         export XLN_MESH_PRESERVE_STATE_ON_RESET=1
         echo "[deploy] restarting production services without resetting anvil/runtime state"
         if ! wait_for_rpc_chain "http://127.0.0.1:8545" "0x7a69"; then
           pm2 delete anvil >/dev/null 2>&1 || true
-          run_or_fail_deploy "failed to start anvil via pm2" pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M --kill-timeout 60000 --restart-delay 2000
+          start_production_anvil anvil scripts/start-anvil.sh
         fi
         if ! wait_for_rpc_chain "http://127.0.0.1:8546" "0x7a6a"; then
           pm2 delete anvil2 >/dev/null 2>&1 || true
-          run_or_fail_deploy "failed to start anvil2 via pm2" pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M --kill-timeout 60000 --restart-delay 2000
+          start_production_anvil anvil2 scripts/start-anvil2.sh
         fi
       fi
+      run_or_fail_deploy "failed to enforce primary Anvil memory ceiling" \
+        ensure_production_anvil_memory_limit anvil scripts/start-anvil.sh
+      run_or_fail_deploy "failed to enforce secondary Anvil memory ceiling" \
+        ensure_production_anvil_memory_limit anvil2 scripts/start-anvil2.sh
       if ! wait_for_rpc_chain "http://127.0.0.1:8545" "0x7a69"; then
         fail_deploy_with_debug "anvil did not become ready on :8545"
       fi
