@@ -43,6 +43,27 @@ const finiteNumber = (value: unknown): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+export const PRODUCTION_HEALTH_UNAVAILABLE_TIMEOUT_MS = 60_000;
+
+export const isProductionHealthUnavailableExpired = (
+  lastAvailableAtMs: number,
+  startedAtMs: number,
+  nowMs: number,
+  timeoutMs = PRODUCTION_HEALTH_UNAVAILABLE_TIMEOUT_MS,
+): boolean => {
+  const values = { lastAvailableAtMs, startedAtMs, nowMs, timeoutMs };
+  for (const [name, value] of Object.entries(values)) {
+    if (!Number.isFinite(value) || value < 0) {
+      throw new Error(`PROD_BOOTSTRAP_HEALTH_DEADLINE_INVALID:${name}=${value}`);
+    }
+  }
+  const availableBoundaryMs = lastAvailableAtMs > 0 ? lastAvailableAtMs : startedAtMs;
+  if (nowMs < availableBoundaryMs) {
+    throw new Error('PROD_BOOTSTRAP_HEALTH_CLOCK_REGRESSION');
+  }
+  return nowMs - availableBoundaryMs > timeoutMs;
+};
+
 export const isProductionBootstrapReady = (health: BootstrapHealth): boolean =>
   health.coreOk === true &&
   health.systemOk === true &&
@@ -194,9 +215,9 @@ const main = async (): Promise<void> => {
         console.log(`[bootstrap] health unavailable: ${message}`);
         lastFetchError = message;
       }
-      const unavailableMs = Date.now() - (lastAvailableAt || startedAt);
-      const limitMs = lastAvailableAt > 0 ? 15_000 : 60_000;
-      if (unavailableMs > limitMs) {
+      const nowMs = Date.now();
+      const unavailableMs = nowMs - (lastAvailableAt || startedAt);
+      if (isProductionHealthUnavailableExpired(lastAvailableAt, startedAt, nowMs)) {
         throw new Error(`PROD_BOOTSTRAP_HEALTH_UNAVAILABLE:elapsedMs=${unavailableMs}:last=${message}`);
       }
     }

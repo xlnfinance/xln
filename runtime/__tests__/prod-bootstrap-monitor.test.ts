@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   findDeployScopedChildFatal,
   findProductionBootstrapFatal,
+  isProductionHealthUnavailableExpired,
   isProductionBootstrapReady,
   summarizeProductionBootstrap,
 } from '../../scripts/watch-prod-bootstrap';
@@ -29,6 +30,16 @@ const healthy = () => ({
 });
 
 describe('production bootstrap monitor', () => {
+  test('allows one bounded minute of health backpressure after a successful poll', () => {
+    expect(isProductionHealthUnavailableExpired(10_000, 1_000, 70_000)).toBe(false);
+    expect(isProductionHealthUnavailableExpired(10_000, 1_000, 70_001)).toBe(true);
+  });
+
+  test('uses the same bounded minute before the first successful health poll', () => {
+    expect(isProductionHealthUnavailableExpired(0, 1_000, 61_000)).toBe(false);
+    expect(isProductionHealthUnavailableExpired(0, 1_000, 61_001)).toBe(true);
+  });
+
   test('recognizes the complete production gate', () => {
     const health = healthy();
     expect(isProductionBootstrapReady(health)).toBe(true);
