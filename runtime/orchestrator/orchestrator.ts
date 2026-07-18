@@ -82,6 +82,7 @@ import {
   parseArgs,
 } from './orchestrator-config';
 import { evaluateBootstrapProgressDeadline } from './bootstrap-progress-deadline';
+import { buildHubReadySnapshotFence } from './hub-ready-snapshot-fence';
 import { validateHubHealthPayload, validateHubInfoPayload } from './bootstrap-health-validation';
 import {
   createManagedRuntimeLeaseManager,
@@ -2615,6 +2616,52 @@ const persistHubReadySnapshots = async (): Promise<void> => {
   }
 };
 
+const waitForHubReadySnapshotFence = async (): Promise<void> => {
+  if (!envFlagEnabled(HUB_BOOTSTRAP_PAUSE_STORAGE)) return;
+  const quietMs = 750;
+  let quietStartedAt: number | null = null;
+  let progress = {
+    signature: '',
+    lastProgressAt: Date.now(),
+  };
+  while (true) {
+    await pollAllHubHealth();
+    const now = Date.now();
+    const fence = buildHubReadySnapshotFence(hubChildren.map(child => ({
+      name: child.name,
+      online: child.proc?.exitCode === null && child.proc?.signalCode === null,
+      height: child.lastHealth?.height,
+      quiescence: child.lastHealth?.quiescence,
+    })));
+    const evaluation = evaluateBootstrapProgressDeadline(
+      progress,
+      fence.signature,
+      now,
+      HUB_BASELINE_STALL_TIMEOUT_MS,
+    );
+    progress = {
+      signature: evaluation.signature,
+      lastProgressAt: evaluation.lastProgressAt,
+    };
+    if (fence.ready) {
+      quietStartedAt ??= now;
+      if (now - quietStartedAt >= quietMs) {
+        meshLog.info('hub_ready_snapshot.fence_ready', { quietMs, hubs: fence.hubs });
+        return;
+      }
+    } else {
+      quietStartedAt = null;
+    }
+    if (evaluation.stalled) {
+      throw new Error(
+        `HUB_READY_SNAPSHOT_FENCE_STALLED idleMs=${evaluation.idleMs} ` +
+        `timeoutMs=${HUB_BASELINE_STALL_TIMEOUT_MS} hubs=${safeStringify(fence.hubs)}`,
+      );
+    }
+    await delay(250);
+  }
+};
+
 const runReset = async (options: OrchestratorResetOptions = configuredResetOptions): Promise<void> => {
   if (options.enableMarketMaker && !configuredResetOptions.enableMarketMaker) {
     throw new Error('RESET_MARKET_MAKER_NOT_CONFIGURED');
@@ -2738,6 +2785,7 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
 
     if (custodyBootstrapError) throw custodyBootstrapError;
 
+    await waitForHubReadySnapshotFence();
     await persistHubReadySnapshots();
 
     activeResetOptions = resolveActiveResetOptions(configuredResetOptions, options);

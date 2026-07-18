@@ -64,6 +64,7 @@ type HealthPayload = {
 };
 
 type RuntimeQuiescenceHealth = {
+  pendingRuntimeWork?: number;
   pendingReliableOutputs?: number;
   pendingAccountFrames?: number;
   accountMempoolTxs?: number;

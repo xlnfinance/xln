@@ -39,6 +39,7 @@ test('bootstrap quiescence counts only reliable outbox and live Account work', (
   } as unknown as EntityReplica]]);
 
   expect(summarizeRuntimeQuiescence(env)).toEqual({
+    pendingRuntimeWork: 1,
     pendingReliableOutputs: 1,
     pendingAccountFrames: 1,
     accountMempoolTxs: 3,

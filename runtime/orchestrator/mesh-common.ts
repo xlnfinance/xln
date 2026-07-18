@@ -92,6 +92,7 @@ export const hasPendingRuntimeWork = (env: Env): boolean => {
 };
 
 export type RuntimeQuiescenceHealth = {
+  pendingRuntimeWork: number;
   pendingReliableOutputs: number;
   pendingAccountFrames: number;
   accountMempoolTxs: number;
@@ -108,6 +109,7 @@ export const summarizeRuntimeQuiescence = (env: Env): RuntimeQuiescenceHealth =>
     }
   }
   return {
+    pendingRuntimeWork: hasPendingRuntimeWork(env) ? 1 : 0,
     pendingReliableOutputs: (env.pendingNetworkOutputs ?? [])
       .filter(output => getReliableOutputIdentity(output) !== null).length,
     pendingAccountFrames,

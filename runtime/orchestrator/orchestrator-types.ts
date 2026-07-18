@@ -334,6 +334,7 @@ export type MarketMakerInfoPayload = HubInfoPayload;
 export type ManagedRuntimeRole = 'hub' | 'market-maker';
 
 export type RuntimeQuiescenceHealth = {
+  pendingRuntimeWork: number;
   pendingReliableOutputs: number;
   pendingAccountFrames: number;
   accountMempoolTxs: number;
