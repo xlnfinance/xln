@@ -259,11 +259,15 @@ test('dev cleanup stops a live wrapper whose full process identity matches', asy
   }
 });
 
-test('HTTPS and HTTP dev servers use separate SvelteKit outputs', () => {
+test('HTTPS and HTTP dev servers share canonical SvelteKit output with isolated Vite caches', () => {
   const child = readFileSync(join(repoRoot, 'scripts/dev/run-dev-child.sh'), 'utf8');
-  expect(child).toContain('run_vite "$WEB_PORT" ".svelte-kit-dev-https"');
-  expect(child).toContain('run_vite "$WEB_HTTP_PORT" ".svelte-kit-dev-http"');
-  expect(child).toContain('XLN_SVELTE_KIT_OUT_DIR="$svelte_out_dir"');
+  expect(child).toContain('run_vite "$WEB_PORT" --logLevel warn');
+  expect(child).toContain('run_vite "$WEB_HTTP_PORT" --config vite.config.http.ts --logLevel warn');
+  expect(child).not.toContain('XLN_SVELTE_KIT_OUT_DIR');
+  expect(readFileSync(join(repoRoot, 'frontend/vite.config.ts'), 'utf8'))
+    .toContain("process.env['VITE_CACHE_DIR'] || 'node_modules/.vite'");
+  expect(readFileSync(join(repoRoot, 'frontend/vite.config.http.ts'), 'utf8'))
+    .toContain("process.env['VITE_HTTP_CACHE_DIR'] || 'node_modules/.vite-http'");
 });
 
 test('storage health measures the configured RDB and JDB shard roots', async () => {

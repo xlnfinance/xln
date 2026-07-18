@@ -92,12 +92,10 @@ run_anvil() {
 
 run_vite() {
   local port="$1"
-  local svelte_out_dir="$2"
-  shift 2
+  shift
   cd frontend
   echo "VITE_DEV_SERVER_START port=${port} api=http://127.0.0.1:${API_PORT} logLevel=warn"
   run_owned env \
-    XLN_SVELTE_KIT_OUT_DIR="$svelte_out_dir" \
     VITE_DEV_PORT="$port" \
     VITE_API_PROXY_TARGET="http://127.0.0.1:${API_PORT}" \
     VITE_XLN_WATCHTOWER_URL="http://127.0.0.1:${WATCHTOWER_PORT}" \
@@ -170,9 +168,9 @@ case "$role" in
     run_owned ./scripts/dev/watch-runtime-build.sh
     ;;
   vite)
-    run_vite "$WEB_PORT" ".svelte-kit-dev-https" --logLevel warn
+    run_vite "$WEB_PORT" --logLevel warn
     ;;
   vite-http)
-    run_vite "$WEB_HTTP_PORT" ".svelte-kit-dev-http" --config vite.config.http.ts --logLevel warn
+    run_vite "$WEB_HTTP_PORT" --config vite.config.http.ts --logLevel warn
     ;;
 esac
