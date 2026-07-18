@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { persistChildFailureReceipt, type ChildFailureReceipt } from '../orchestrator/child-failure-diagnostics';
-import { decideChildFailure } from '../orchestrator/child-recovery-policy';
+import { decideChildFailure, selectChildFailureReason } from '../orchestrator/child-recovery-policy';
 
 const crash = (reason: string) => ({
   role: 'hub' as const,
@@ -39,6 +39,19 @@ describe('managed child recovery policy', () => {
 
     expect(signal).toMatchObject({ action: 'recover', count: 1 });
     expect(signal.fingerprint).not.toBe(exit.fingerprint);
+  });
+
+  test('selects a stable fatal code instead of a trailing stack frame', () => {
+    const reason = selectChildFailureReason(
+      [
+        'Error: J_WATCHER_DRAIN_STALLED:idleMs=120000',
+        '    at processTicksAndRejections (native:7:39)',
+      ],
+      [],
+      'MM_UNEXPECTED_EXIT',
+    );
+    expect(reason).toBe('Error: J_WATCHER_DRAIN_STALLED:idleMs=120000');
+    expect(decideChildFailure({}, crash(reason)).reasonCode).toBe('J_WATCHER_DRAIN_STALLED');
   });
 
   test('atomically preserves both historical and latest diagnostics', () => {

@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import {
   createResetCoordinator,
   resolveActiveResetOptions,
+  resolveHealthResetOptions,
   resolveResetCapabilityHealth,
 } from '../orchestrator/reset-coordinator';
 
@@ -143,4 +144,12 @@ test('health reflects completed reset capabilities instead of configured optiona
     custodyEnabled: false,
     custodyOk: true,
   });
+});
+
+test('health reflects requested capabilities only while their reset is running', () => {
+  const active = { enableMarketMaker: false, enableCustody: false };
+  const pending = { enableMarketMaker: true, enableCustody: true };
+  expect(resolveHealthResetOptions(active, pending, true)).toBe(pending);
+  expect(resolveHealthResetOptions(active, pending, false)).toBe(active);
+  expect(resolveHealthResetOptions(active, null, true)).toBe(active);
 });

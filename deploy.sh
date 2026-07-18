@@ -1011,10 +1011,13 @@ run_local_deploy() {
       touch "$XLN_STATE_ROOT/.checkout-state-migrated"
 
       if [ "$RESET_PRODUCTION_MESH" = "1" ]; then
-        export XLN_MESH_PRESERVE_STATE_ON_RESET=0
+        export XLN_MESH_PRESERVE_STATE_ON_RESET=1
         echo "[deploy] resetting production anvil + runtime state"
         rm -rf "$XLN_RDB_ROOT/runtime/prod-main" "$XLN_RDB_ROOT/runtime/prod-mesh" "$XLN_RDB_ROOT/custody/prod" "$XLN_RDB_ROOT/custody-tmp"
         rm -f "$XLN_JDB_ROOT/anvil-state.json" "$XLN_JDB_ROOT/anvil2-state.json"
+        install -d -m 700 "$XLN_RDB_ROOT/runtime"
+        rm -f "$XLN_RDB_ROOT/runtime/.mesh-reset-once" "$XLN_RDB_ROOT/runtime/.mesh-reset-once.claimed"
+        install -m 600 /dev/null "$XLN_RDB_ROOT/runtime/.mesh-reset-once"
         lsof -ti TCP:8545 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
         lsof -ti TCP:8546 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
         pm2 delete anvil >/dev/null 2>&1 || true

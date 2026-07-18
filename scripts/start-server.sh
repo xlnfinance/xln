@@ -33,6 +33,22 @@ export XLN_DB_PATH=${XLN_DB_PATH:-$RDB_ROOT/runtime/prod-main}
 export XLN_USE_PREDEPLOYED_ADDRESSES=${XLN_USE_PREDEPLOYED_ADDRESSES:-true}
 export XLN_JURISDICTIONS_PATH=${XLN_JURISDICTIONS_PATH:-$XLN_DB_PATH/jurisdictions.json}
 export XLN_MESH_DB_ROOT=${XLN_MESH_DB_ROOT:-$RDB_ROOT/runtime/prod-mesh}
+XLN_MESH_RESET_MARKER="$RDB_ROOT/runtime/.mesh-reset-once"
+XLN_MESH_RESET_CLAIM="$RDB_ROOT/runtime/.mesh-reset-once.claimed"
+export XLN_MESH_PRESERVE_STATE_ON_RESET=1
+if [ -f "$XLN_MESH_RESET_MARKER" ]; then
+  mv "$XLN_MESH_RESET_MARKER" "$XLN_MESH_RESET_CLAIM"
+  export XLN_MESH_PRESERVE_STATE_ON_RESET=0
+  echo "[start-server] MESH_RESET_CLAIMED marker=$XLN_MESH_RESET_CLAIM"
+elif [ -f "$XLN_MESH_RESET_CLAIM" ] && [ ! -f "$XLN_MESH_DB_ROOT/jurisdictions.json" ]; then
+  export XLN_MESH_PRESERVE_STATE_ON_RESET=0
+  echo "[start-server] MESH_RESET_RETRY claim=$XLN_MESH_RESET_CLAIM"
+elif [ -f "$XLN_MESH_RESET_CLAIM" ]; then
+  rm -f "$XLN_MESH_RESET_CLAIM"
+  echo "[start-server] MESH_RESET_FINALIZED db=$XLN_MESH_DB_ROOT"
+else
+  echo "[start-server] MESH_STATE_PRESERVED db=$XLN_MESH_DB_ROOT"
+fi
 export XLN_MESH_API_PORT_BASE=${XLN_MESH_API_PORT_BASE:-18090}
 export XLN_MESH_PUBLIC_PORT_BASE=${XLN_MESH_PUBLIC_PORT_BASE:-8090}
 export XLN_MESH_CUSTODY_PORT=${XLN_MESH_CUSTODY_PORT:-$(xln_custody_port)}

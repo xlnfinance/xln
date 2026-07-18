@@ -11,6 +11,12 @@ export const resolveActiveResetOptions = (
   enableCustody: configured.enableCustody && completed.enableCustody,
 });
 
+export const resolveHealthResetOptions = (
+  active: OrchestratorResetOptions,
+  pending: OrchestratorResetOptions | null,
+  resetInProgress: boolean,
+): OrchestratorResetOptions => resetInProgress && pending ? pending : active;
+
 export const resolveResetCapabilityHealth = (
   active: OrchestratorResetOptions,
   online: Readonly<{ marketMakerOnline: boolean; custodyOnline: boolean }>,

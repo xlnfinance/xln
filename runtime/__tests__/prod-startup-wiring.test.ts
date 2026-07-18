@@ -1046,6 +1046,7 @@ describe('production startup wiring', () => {
 
   test('deploy starts and checks the production Tron chain', () => {
     const deploy = readFileSync(join(repoRoot, 'deploy.sh'), 'utf8');
+    const startServer = readFileSync(join(repoRoot, 'scripts/start-server.sh'), 'utf8');
     const bootstrapMonitor = readFileSync(join(repoRoot, 'scripts/watch-prod-bootstrap.ts'), 'utf8');
     const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
@@ -1088,8 +1089,13 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('wait_for_anvil_state_checkpoint "$XLN_JDB_ROOT/anvil2-state.json"');
     expect(deploy).toContain('pm2 delete xln-server >/dev/null 2>&1 || true');
     expect(deploy).toContain('run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M');
-    expect(deploy).toContain('export XLN_MESH_PRESERVE_STATE_ON_RESET=0');
     expect(deploy).toContain('export XLN_MESH_PRESERVE_STATE_ON_RESET=1');
+    expect(deploy).toContain('install -m 600 /dev/null "$XLN_RDB_ROOT/runtime/.mesh-reset-once"');
+    expect(deploy).not.toContain('export XLN_MESH_PRESERVE_STATE_ON_RESET=0');
+    expect(startServer).toContain('export XLN_MESH_PRESERVE_STATE_ON_RESET=0');
+    expect(startServer).toContain('MESH_RESET_CLAIMED');
+    expect(startServer).toContain('MESH_RESET_RETRY');
+    expect(startServer).toContain('MESH_RESET_FINALIZED');
     expect(deploy.match(/git clean -fd -e data\/ -e db\/ -e db-tmp\//g)).toHaveLength(2);
     expect(deploy.match(/if \[ -f \/var\/lib\/xln\/\.checkout-state-migrated \]; then git clean -fd; else/g)).toHaveLength(2);
     expect(deploy).not.toContain('pm2 restart xln-server');
@@ -1127,7 +1133,9 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('scheduleRuntimeImportManifestRefresh(null);');
     expect(orchestrator).toContain('clearRuntimeImportManifestFile();\n  const preserveState');
     expect(orchestrator).not.toContain('await persistHubReadySnapshots();\n    publishRuntimeImportManifest();');
-    expect(orchestrator).toContain('resetState.inProgress = false;\n  }\n  await publishRuntimeImportManifest();');
+    expect(orchestrator).toContain(
+      'resetState.inProgress = false;\n    pendingResetOptions = null;\n  }\n  await publishRuntimeImportManifest();',
+    );
 
     expect(existsSync(join(repoRoot, 'frontend/src/routes/radapter/manage/+page.svelte'))).toBe(false);
     expect(appLayout).toContain('async function importRemoteRuntimesIntoApp');

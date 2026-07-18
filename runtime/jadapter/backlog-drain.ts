@@ -11,6 +11,34 @@ import {
   isEntityReplicaRelevantToWatcher,
 } from './watcher';
 import { safeStringify } from '../protocol/serialization';
+import { setTimeout as delay } from 'node:timers/promises';
+
+export const J_WATCHER_DRAIN_STALL_TIMEOUT_MS = 120_000;
+const J_WATCHER_DRAIN_RETRY_DELAY_MS = 100;
+
+export type JWatcherDrainProgress = {
+  fingerprint: string;
+  lastProgressAt: number;
+  retrying: boolean;
+};
+
+export const observeJWatcherDrainProgress = (
+  previous: JWatcherDrainProgress | null,
+  fingerprint: string,
+  nowMs: number,
+  timeoutMs = J_WATCHER_DRAIN_STALL_TIMEOUT_MS,
+): JWatcherDrainProgress => {
+  if (!previous || previous.fingerprint !== fingerprint) {
+    return { fingerprint, lastProgressAt: nowMs, retrying: false };
+  }
+  const idleMs = nowMs - previous.lastProgressAt;
+  if (idleMs >= timeoutMs) {
+    throw new Error(
+      `J_WATCHER_DRAIN_STALLED:idleMs=${idleMs}:timeoutMs=${timeoutMs}:${fingerprint}`,
+    );
+  }
+  return { ...previous, retrying: true };
+};
 
 export type CapturedJWatcherTarget = {
   adapter: JAdapter;
@@ -231,15 +259,18 @@ export const drainJWatcherBacklog = async (
     return [];
   }
 
-  const seen = new Set<string>();
+  let progress: JWatcherDrainProgress | null = null;
   while (true) {
     const statuses = targets.map((target) => getJWatcherDrainStatus(env, target));
     if (statuses.every(isJWatcherDrainComplete)) return statuses;
     const fingerprint = getDrainFingerprint(env, targets, statuses);
-    if (seen.has(fingerprint)) {
-      throw new Error(`J_WATCHER_DRAIN_STALLED:${fingerprint}`);
+    progress = observeJWatcherDrainProgress(progress, fingerprint, performance.now());
+    if (progress.retrying) {
+      // RPC watchers intentionally absorb transient read races. Avoid a hot
+      // loop while the same bounded target is retried, but retain a hard stall
+      // deadline so a lost watcher cannot hide behind that retry policy.
+      await delay(J_WATCHER_DRAIN_RETRY_DELAY_MS);
     }
-    seen.add(fingerprint);
     // Freeze the captured target while Entity consensus finalizes it. Polling
     // a continuously advancing chain here creates a moving target: every slow
     // quorum frame observes a newer empty suffix and the drain never returns.

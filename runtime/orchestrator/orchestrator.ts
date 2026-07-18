@@ -135,6 +135,7 @@ import { resolveRuntimeImportReadiness } from './runtime-import-readiness';
 import { persistChildFailureReceipt, type ChildFailureReceipt } from './child-failure-diagnostics';
 import {
   decideChildFailure,
+  selectChildFailureReason,
   type ChildFailureDecision,
   type ChildFailureObservation,
 } from './child-recovery-policy';
@@ -148,6 +149,7 @@ import {
 import {
   createResetCoordinator,
   resolveActiveResetOptions,
+  resolveHealthResetOptions,
   resolveResetCapabilityHealth,
   type OrchestratorResetOptions,
 } from './reset-coordinator';
@@ -273,6 +275,7 @@ let activeResetOptions: OrchestratorResetOptions = {
   enableMarketMaker: false,
   enableCustody: false,
 };
+let pendingResetOptions: OrchestratorResetOptions | null = null;
 
 const meshRootSeed = requireMeshRootSeed();
 const runtimeSeedOverrides = readMeshSeedOverrides(
@@ -1307,8 +1310,11 @@ const spawnHub = async (child: HubChild): Promise<void> => {
         name: child.name,
         code: code ?? null,
         signal: signal ?? null,
-        reason: child.recentStderr.at(-1) ?? child.recentStdout.at(-1) ??
+        reason: selectChildFailureReason(
+          child.recentStderr,
+          child.recentStdout,
           `${child.name}_UNEXPECTED_EXIT code=${String(code)} signal=${String(signal)}`,
+        ),
       });
     }
   });
@@ -1401,8 +1407,11 @@ const spawnMarketMaker = async (): Promise<void> => {
         name: marketMakerChild.name,
         code: code ?? null,
         signal: signal ?? null,
-        reason: marketMakerChild.recentStderr.at(-1) ?? marketMakerChild.recentStdout.at(-1) ??
+        reason: selectChildFailureReason(
+          marketMakerChild.recentStderr,
+          marketMakerChild.recentStdout,
           `MM_UNEXPECTED_EXIT code=${String(code)} signal=${String(signal)} phase=${String(marketMakerChild.lastStartupPhase)}`,
+        ),
       };
       const decision = decideChildFailure(marketMakerChild.failureCounts, observation);
       marketMakerChild.failureCounts = decision.counts;
@@ -1952,7 +1961,12 @@ const computeAggregatedHealth = (options: {
     && custodySupport.daemonChild.proc.exitCode === null
     && custodySupport.custodyChild.proc.exitCode === null,
   );
-  const capabilityHealth = resolveResetCapabilityHealth(activeResetOptions, {
+  const healthResetOptions = resolveHealthResetOptions(
+    activeResetOptions,
+    pendingResetOptions,
+    resetState.inProgress,
+  );
+  const capabilityHealth = resolveResetCapabilityHealth(healthResetOptions, {
     marketMakerOnline,
     custodyOnline,
   });
@@ -2463,6 +2477,7 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
   if (options.enableCustody && !configuredResetOptions.enableCustody) {
     throw new Error('RESET_CUSTODY_NOT_CONFIGURED');
   }
+  pendingResetOptions = options;
   resetState.inProgress = true;
   resetState.lastError = null;
   resetState.startedAt = Date.now();
@@ -2590,6 +2605,7 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
     throw error;
   } finally {
     resetState.inProgress = false;
+    pendingResetOptions = null;
   }
   await publishRuntimeImportManifest();
 };

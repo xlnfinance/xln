@@ -26,6 +26,19 @@ const stableReasonCode = (reason: string): string => {
   return clean.slice(-512) || 'UNREPORTED_CHILD_FAILURE';
 };
 
+export const selectChildFailureReason = (
+  recentStderr: readonly string[],
+  recentStdout: readonly string[],
+  fallback: string,
+): string => {
+  const hasStableCode = (line: string): boolean => /\b(?:[A-Z][A-Z0-9]*_)+[A-Z0-9]+\b/.test(line);
+  return [...recentStderr].reverse().find(hasStableCode)
+    ?? [...recentStdout].reverse().find(hasStableCode)
+    ?? recentStderr.at(-1)
+    ?? recentStdout.at(-1)
+    ?? fallback;
+};
+
 export const decideChildFailure = (
   counts: Readonly<Record<string, number>>,
   observation: ChildFailureObservation,
