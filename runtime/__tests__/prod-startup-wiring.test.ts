@@ -1131,6 +1131,8 @@ describe('production startup wiring', () => {
     expect(orchestrator).not.toContain('status: readiness.status, headers');
     expect(orchestrator).toContain('clearRuntimeImportManifestFile();');
     expect(orchestrator).toContain('scheduleRuntimeImportManifestRefresh(null);');
+    expect(orchestrator).toContain('const preflightComplete = resetClear.completedAt !== null && params.storageOk;');
+    expect(orchestrator).toContain('const custodyState = params.custodyOk ? true : custodyStarted ? false : null;');
     expect(orchestrator).toContain('clearRuntimeImportManifestFile();\n  const preserveState');
     expect(orchestrator).not.toContain('await persistHubReadySnapshots();\n    publishRuntimeImportManifest();');
     expect(orchestrator).toContain(

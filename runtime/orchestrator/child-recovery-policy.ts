@@ -21,6 +21,7 @@ export type ChildFailureDecision = {
 
 const stableReasonCode = (reason: string): string => {
   const clean = reason.replaceAll(/\x1B\[[0-?]*[ -/]*[@-~]/g, '').trim();
+  if (/Unexpected end of JSON input/i.test(clean)) return 'RPC_RESPONSE_JSON_TRUNCATED';
   const codes = clean.match(/\b(?:[A-Z][A-Z0-9]*_)+[A-Z0-9]+\b/g);
   if (codes?.length) return codes.at(-1)!;
   return clean.slice(-512) || 'UNREPORTED_CHILD_FAILURE';
@@ -32,8 +33,11 @@ export const selectChildFailureReason = (
   fallback: string,
 ): string => {
   const hasStableCode = (line: string): boolean => /\b(?:[A-Z][A-Z0-9]*_)+[A-Z0-9]+\b/.test(line);
-  return [...recentStderr].reverse().find(hasStableCode)
-    ?? [...recentStdout].reverse().find(hasStableCode)
+  const hasCriticalMessage = (line: string): boolean =>
+    /fatal watcher error|Unexpected end of JSON input|SyntaxError|ECONNRESET|ETIMEDOUT/i.test(line);
+  const isMeaningful = (line: string): boolean => hasStableCode(line) || hasCriticalMessage(line);
+  return [...recentStderr].reverse().find(isMeaningful)
+    ?? [...recentStdout].reverse().find(isMeaningful)
     ?? recentStderr.at(-1)
     ?? recentStdout.at(-1)
     ?? fallback;

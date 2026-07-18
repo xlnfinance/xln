@@ -1699,6 +1699,11 @@ const buildBootstrapTimeline = (params: {
   const resetHubs = timingFor('reset_wait_hubs');
   const resetMarketMaker = timingFor('reset_market_maker');
   const resetCustody = timingFor('reset_custody');
+  const preflightComplete = resetClear.completedAt !== null && params.storageOk;
+  const preflightActive = resetClear.startedAt !== null && resetClear.completedAt === null && params.storageOk;
+  const preflightState = preflightComplete ? true : params.storageOk ? null : false;
+  const custodyStarted = resetCustody.startedAt !== null;
+  const custodyState = params.custodyOk ? true : custodyStarted ? false : null;
   const fallbackLastEvent = resetTotal.completedAt
     ? {
       event: resetState.lastError ? 'reset-failed' : 'reset-complete',
@@ -1730,7 +1735,7 @@ const buildBootstrapTimeline = (params: {
       {
         key: 'preflight',
         label: 'Preflight',
-        status: stageStatus(params.resetOk && params.storageOk, { active: resetState.inProgress }),
+        status: stageStatus(preflightState, { active: preflightActive }),
         reason: resetState.lastError || (params.storageOk ? 'Reset and storage preflight clear' : 'Storage gate blocked'),
         budgetMs: STARTUP_TIMEOUT_MS,
         actualMs: resetClear.ms,
@@ -1738,7 +1743,7 @@ const buildBootstrapTimeline = (params: {
         completedAt: resetClear.completedAt,
         evidence: [
           { label: 'storage ok', value: params.storageOk },
-          { label: 'reset ok', value: params.resetOk },
+          { label: 'reset state cleared', value: resetClear.completedAt !== null },
         ],
       },
       {
@@ -1801,7 +1806,10 @@ const buildBootstrapTimeline = (params: {
       {
         key: 'custody',
         label: 'Custody',
-        status: stageStatus(params.custodyOk, { active: params.custodyEnabled && !params.custodyOk, disabled: !params.custodyEnabled }),
+        status: stageStatus(custodyState, {
+          active: params.custodyEnabled && custodyStarted && resetCustody.completedAt === null && !params.custodyOk,
+          disabled: !params.custodyEnabled,
+        }),
         reason: params.custodyEnabled ? 'Custody daemon and service health' : 'Custody disabled for this boot',
         budgetMs: null,
         actualMs: resetCustody.ms,

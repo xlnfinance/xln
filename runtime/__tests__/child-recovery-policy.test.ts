@@ -54,6 +54,21 @@ describe('managed child recovery policy', () => {
     expect(decideChildFailure({}, crash(reason)).reasonCode).toBe('J_WATCHER_DRAIN_STALLED');
   });
 
+  test('classifies a structured truncated RPC response instead of its closing brace', () => {
+    const reason = selectChildFailureReason(
+      [
+        '[network] WS_DIRECT_ERROR {',
+        '[JAdapter:rpc] fatal watcher error; exiting: {',
+        'message: "Unexpected end of JSON input",',
+        '}',
+      ],
+      [],
+      'H3_UNEXPECTED_EXIT',
+    );
+    expect(reason).toBe('message: "Unexpected end of JSON input",');
+    expect(decideChildFailure({}, crash(reason)).reasonCode).toBe('RPC_RESPONSE_JSON_TRUNCATED');
+  });
+
   test('atomically preserves both historical and latest diagnostics', () => {
     const root = mkdtempSync(join(tmpdir(), 'xln-child-failure-'));
     const receipt: ChildFailureReceipt = {

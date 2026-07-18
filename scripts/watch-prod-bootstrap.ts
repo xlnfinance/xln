@@ -82,8 +82,9 @@ export const findProductionBootstrapFatal = (
       return `PROD_BOOTSTRAP_STAGE_FATAL:${String(stage['key'] || 'unknown')}:${String((failure as Record<string, unknown>)['code'] || 'unknown')}`;
     }
     const startedAt = finiteNumber(stage['startedAt']);
+    const completedAt = finiteNumber(stage['completedAt']);
     const budgetMs = finiteNumber(stage['budgetMs']);
-    if (startedAt !== null && budgetMs !== null && nowMs - startedAt > budgetMs) {
+    if (completedAt === null && startedAt !== null && budgetMs !== null && nowMs - startedAt > budgetMs) {
       return `PROD_BOOTSTRAP_STAGE_BUDGET_EXCEEDED:${String(stage['key'] || 'unknown')}:elapsedMs=${nowMs - startedAt}:budgetMs=${budgetMs}`;
     }
   }

@@ -70,4 +70,16 @@ describe('production bootstrap monitor', () => {
       'PROD_BOOTSTRAP_HUB_STALLED:H2:step=local-reserve:H2:Tron:fund-events:idleMs=120001:timeoutMs=120000',
     );
   });
+
+  test('does not turn a completed stage budget into a total bootstrap deadline', () => {
+    const health = healthy();
+    health.bootstrapTimeline.stages = [{
+      key: 'preflight',
+      status: 'active',
+      startedAt: 1_000,
+      completedAt: 40_000,
+      budgetMs: 600_000,
+    }];
+    expect(findProductionBootstrapFatal(health, 700_000)).toBeNull();
+  });
 });

@@ -346,7 +346,7 @@ const rpcErrorText = (error: unknown): string => {
 };
 
 export const isTransientRpcUnavailableError = (error: unknown): boolean =>
-  /J_HISTORY_HEADER_MISSING:height=\d+ error=none|J_RECEIPT_RANGE_REORG|J_RECEIPT_RANGE_PARENT_MISMATCH|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|Failed to fetch|NetworkError|Load failed|PROXY_UPSTREAM_TIMEOUT|RPC_BATCH_HTTP_50[0234]|50[0234] (Bad Gateway|Gateway Timeout|Service Unavailable|Internal Server Error)|server response 50[0234]|responseStatus["': ]+50[0234]/i
+  /J_HISTORY_HEADER_MISSING:height=\d+ error=none|J_RECEIPT_RANGE_REORG|J_RECEIPT_RANGE_PARENT_MISMATCH|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|Failed to fetch|NetworkError|Load failed|Unexpected end of JSON input|PROXY_UPSTREAM_TIMEOUT|RPC_BATCH_HTTP_50[0234]|50[0234] (Bad Gateway|Gateway Timeout|Service Unavailable|Internal Server Error)|server response 50[0234]|responseStatus["': ]+50[0234]/i
     .test(rpcErrorText(error));
 
 export const shouldEmitExternalWalletBalanceDelta = (
