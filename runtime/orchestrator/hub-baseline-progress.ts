@@ -9,23 +9,30 @@ type HubBaselineObservation = Readonly<{
 const sorted = (values: readonly string[]): string[] => [...values].sort();
 
 /**
- * Only count runtime height while gossip is still forming. Once every profile
- * is visible, heartbeat frames are not proof that accounts/reserves converge.
+ * Count runtime height through deterministic J-watcher/catalog catch-up. Once
+ * P2P is connected, heartbeat frames are not proof that accounts/reserves
+ * converge; only causal mesh state changes keep the deadline alive.
  */
 export const buildHubBaselineProgressSignature = (
   observations: readonly HubBaselineObservation[],
 ): string => safeStringify(observations.map(({ name, health }) => ({
   name,
+  startupComplete: health?.timings?.['p2p_connect']?.completedAt !== null &&
+    health?.timings?.['p2p_connect']?.completedAt !== undefined,
   phase: !health
     ? 'health'
-    : !health.gossip?.ready
-      ? 'gossip'
+    : health.timings?.['p2p_connect']?.completedAt === null ||
+        health.timings?.['p2p_connect']?.completedAt === undefined
+      ? 'startup'
       : !health.mesh?.ready
         ? 'accounts'
         : !health.bootstrapReserves?.ok
           ? 'reserves'
           : 'ready',
-  startupHeight: health?.gossip?.ready ? null : Number(health?.height ?? 0),
+  startupHeight: health?.timings?.['p2p_connect']?.completedAt === null ||
+      health?.timings?.['p2p_connect']?.completedAt === undefined
+    ? Number(health?.height ?? 0)
+    : null,
   visibleHubNames: sorted(health?.gossip?.visibleHubNames ?? []),
   meshPairs: (health?.mesh?.pairs ?? []).map(pair => ({
     counterpartyId: pair.counterpartyId,
