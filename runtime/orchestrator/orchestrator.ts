@@ -1454,7 +1454,11 @@ const spawnMarketMaker = async (): Promise<void> => {
       XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000',
       XLN_STORAGE_SYNC_WRITES: process.env['XLN_STORAGE_SYNC_WRITES'] ?? '1',
       XLN_MARKET_MAKER_DISABLE_STORAGE: process.env['XLN_MARKET_MAKER_DISABLE_STORAGE'] ?? '1',
-      XLN_DISABLE_RUNTIME_RESTORE: process.env['XLN_MARKET_MAKER_DISABLE_RESTORE'] ?? process.env['XLN_DISABLE_RUNTIME_RESTORE'] ?? '1',
+      // Incomplete MM bootstrap remains memory-only because storage is disabled
+      // above. Once offers-ready atomically seeds the durable checkpoint, every
+      // later process start must restore it just like any other Runtime; starting
+      // from height zero would make persisted hub account outputs look like gaps.
+      XLN_DISABLE_RUNTIME_RESTORE: process.env['XLN_MARKET_MAKER_DISABLE_RESTORE'] ?? process.env['XLN_DISABLE_RUNTIME_RESTORE'] ?? '0',
       XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT: process.env['XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT'] ?? '1',
       XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL:
         process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL'] ??
