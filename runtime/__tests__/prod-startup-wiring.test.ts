@@ -1058,6 +1058,11 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('wait_for_rpc_chain "http://127.0.0.1:8546" "0x7a6a"');
     expect(deploy).toContain('wait_for_public_rpc_chain "/rpc2" "0x7a6a"');
     expect(bootstrapMonitor).toContain("http://127.0.0.1:8080/api/health");
+    expect(startServer).toContain('XLN_RUNTIME_TICK_DELAY_MS=${XLN_RUNTIME_TICK_DELAY_MS:-25}');
+    expect(startServer).toContain(
+      'MARKET_MAKER_RUNTIME_TICK_DELAY_MS=${MARKET_MAKER_RUNTIME_TICK_DELAY_MS:-25}',
+    );
+    expect(startServer).toContain('MARKET_MAKER_API_YIELD_MS=${MARKET_MAKER_API_YIELD_MS:-25}');
     expect(deploy).toContain('curl --max-time 10 -fsS "$url"');
     expect(deploy).toContain('curl --max-time 10 -sS -X POST');
     expect(deploy).toContain('location ~ ^/rpc[2-8]$');
