@@ -782,8 +782,11 @@ test.describe('watchtower runtime recovery', () => {
       const preWipe = await waitForCommittedPrimaryLocalAccountState(page);
       expect(preWipe.accountExists, 'pre-wipe local account must exist').toBe(true);
       expect(preWipe.hubId, 'pre-wipe local account must resolve a hub id').toBeTruthy();
-      const receipt = await waitForWatchtowerReceipt(tower.baseUrl, lookupKey);
-      expect(receipt.height, 'watchtower backup must store a committed runtime frame before wipe').toBeGreaterThan(0);
+      const receipt = await waitForWatchtowerReceipt(tower.baseUrl, lookupKey, preWipe.runtimeHeight);
+      expect(
+        receipt.height,
+        'watchtower backup must cover the exact committed runtime state observed before wipe',
+      ).toBeGreaterThanOrEqual(preWipe.runtimeHeight);
       expect(receipt.storedBytes, 'watchtower backup must store encrypted runtime bytes').toBeGreaterThan(0);
 
       page = await wipeBrowserRuntimeState(page, context, [tower.baseUrl]);
@@ -807,17 +810,18 @@ test.describe('watchtower runtime recovery', () => {
       expect(restored.runtimeId.toLowerCase(), 'runtime id must stay stable across watchtower restore').toBe(runtime.runtimeId.toLowerCase());
 
       await expect
-        .poll(() => readLocalHubAccountState(page, preWipe.hubId!), {
+        .poll(async () => {
+          const state = await readLocalHubAccountState(page, preWipe.hubId!);
+          return state.accountExists
+            && !state.hasPendingFrame
+            && state.currentHeight >= preWipe.currentHeight
+            && state.tokenIds.join(',') === preWipe.tokenIds.join(',');
+        }, {
           timeout: 90_000,
           intervals: [500, 1_000, 1_500],
           message: 'watchtower restore must recover the committed hub account state',
         })
-        .toMatchObject({
-          accountExists: true,
-          hasPendingFrame: preWipe.hasPendingFrame,
-          currentHeight: preWipe.currentHeight,
-          tokenIds: preWipe.tokenIds,
-      });
+        .toBe(true);
 
       const after = await readLocalHubAccountState(page, preWipe.hubId!);
       expect(after.runtimeHeight, 'restored runtime height must be non-zero after tower recovery').toBeGreaterThan(0);

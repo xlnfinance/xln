@@ -22,6 +22,13 @@ import type { PushRegistrationRequestV1, PushUnregisterRequestV1 } from '../push
 
 const DEFAULT_MAX_JSON_BODY_BYTES = 128 * 1024;
 const SMALL_MAX_JSON_BODY_BYTES = 8 * 1024;
+const APPOINTMENT_ENVELOPE_MAX_BYTES = 64 * 1024;
+
+const resolveAppointmentBodyLimit = (store: WatchtowerStore): number =>
+  Math.max(
+    DEFAULT_MAX_JSON_BODY_BYTES,
+    store.maxStoredBytesPerLookupKey + APPOINTMENT_ENVELOPE_MAX_BYTES,
+  );
 
 const parseContentLength = (request: Request): number | null => {
   const header = request.headers.get('content-length');
@@ -265,7 +272,12 @@ const errorResponse = (error: unknown): Response => {
 
 export const handleTowerAppointment = async (req: Request, store: WatchtowerStore): Promise<Response> => {
   try {
-    const appointment = verifyTowerAppointment(await parseJsonBody<TowerAppointmentV1>(req));
+    // The HTTP envelope must be able to carry any bundle that the configured
+    // storage quota can accept. Keep a bounded allowance for signatures and
+    // appointment metadata; the store still enforces the authoritative quota.
+    const appointment = verifyTowerAppointment(
+      await parseJsonBody<TowerAppointmentV1>(req, resolveAppointmentBodyLimit(store)),
+    );
     const receipt = await store.upsertAppointment(appointment);
     return new Response(serializeTaggedJson({ ok: true, receipt }), {
       headers: { 'content-type': 'application/json' },

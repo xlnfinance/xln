@@ -207,6 +207,32 @@ describe('standalone watchtower service', () => {
     expect(typeof payload.receipt?.towerSignature).toBe('string');
   });
 
+  test('accepts an appointment body larger than 128 KiB when it fits the configured quota', async () => {
+    const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-large-body-${Date.now()}`);
+    rmSync(tempRoot, { recursive: true, force: true });
+    mkdirSync(tempRoot, { recursive: true });
+
+    const server = startStandaloneWatchtowerServer({
+      host: '127.0.0.1',
+      port: 0,
+      towerId: 'tower-large-body-test',
+      dbPath: join(tempRoot, 'tower.level'),
+      maxStoredBytesPerLookupKey: 512 * 1024,
+    });
+    servers.push(server);
+    const { appointment } = await createRuntimeAppointment();
+    appointment.bundle.ciphertext = `0x${'ab'.repeat(80 * 1024)}`;
+    const body = JSON.stringify(appointment);
+    expect(Buffer.byteLength(body, 'utf8')).toBeGreaterThan(128 * 1024);
+
+    const response = await fetch(`http://127.0.0.1:${server.server.port}/api/tower/appointment`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body,
+    });
+    expect(response.status).toBe(200);
+  });
+
   test('rejects oversize free-tier bundles with quota error', async () => {
     const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-quota-${Date.now()}`);
     rmSync(tempRoot, { recursive: true, force: true });

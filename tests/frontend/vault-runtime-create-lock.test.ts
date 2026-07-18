@@ -94,6 +94,20 @@ describe('vault runtime creation lock', () => {
     expect(stopP2P).toBeGreaterThan(stopLoop);
   });
 
+  test('page shutdown retains the recovery barrier until accepted work is fully stopped', () => {
+    const source = read('frontend/src/lib/stores/vaultStore.ts');
+    const operationStart = source.indexOf('async suspendAllRuntimeActivity(): Promise<void>');
+    const operationEnd = source.indexOf('\n  async refreshActiveRuntimeFromDbIfBehind()', operationStart);
+    expect(operationStart).toBeGreaterThan(0);
+    expect(operationEnd).toBeGreaterThan(operationStart);
+    const operationSource = source.slice(operationStart, operationEnd);
+
+    const stopRuntime = operationSource.indexOf('await stopRuntimeEnv(');
+    const unregisterAfterStop = operationSource.indexOf('unregisterRuntimeEnvChange(runtimeId);', stopRuntime);
+    expect(stopRuntime).toBeGreaterThan(0);
+    expect(unregisterAfterStop).toBeGreaterThan(stopRuntime);
+  });
+
   test('page unload synchronously fences external ingress before navigation aborts requests', () => {
     const store = read('frontend/src/lib/stores/vaultStore.ts');
     const layout = read('frontend/src/routes/app/+layout.svelte');

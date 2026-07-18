@@ -2990,10 +2990,16 @@ export const vaultOperations = {
     shutdownRuntimeResumeListener();
     const entries = Array.from(get(runtimes).entries());
     await Promise.all(entries.map(async ([runtimeId, entry]) => {
-      unregisterRuntimeEnvChange(runtimeId);
-      if (!entry?.env) return;
+      if (!entry?.env) {
+        unregisterRuntimeEnvChange(runtimeId);
+        return;
+      }
       try {
         await stopRuntimeEnv(unwrapLiveRuntimeEnv(entry.env) ?? entry.env);
+        // Keep the recovery barrier installed while accepted ingress drains.
+        // That drain may commit an Account frame and emit its ACK; removing the
+        // barrier first would let the peer advance past the latest tower backup.
+        unregisterRuntimeEnvChange(runtimeId);
       } catch (error) {
         throw new Error(
           `RUNTIME_QUIESCE_ENTRY_FAILED:${normalizeRuntimeId(runtimeId)}:${error instanceof Error ? error.message : String(error)}`,
