@@ -3,7 +3,11 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { persistChildFailureReceipt, type ChildFailureReceipt } from '../orchestrator/child-failure-diagnostics';
-import { decideChildFailure, selectChildFailureReason } from '../orchestrator/child-recovery-policy';
+import {
+  decideChildFailure,
+  selectChildFailureReason,
+  shouldCaptureUnexpectedChildExit,
+} from '../orchestrator/child-recovery-policy';
 
 const crash = (reason: string) => ({
   role: 'hub' as const,
@@ -47,6 +51,13 @@ describe('managed child recovery policy', () => {
     expect(signal.fingerprint).not.toBe(exit.fingerprint);
   });
 
+  test('shutdown signal cannot manufacture child failure receipts', () => {
+    expect(shouldCaptureUnexpectedChildExit(false, false, true)).toBe(true);
+    expect(shouldCaptureUnexpectedChildExit(true, false, true)).toBe(false);
+    expect(shouldCaptureUnexpectedChildExit(false, true, true)).toBe(false);
+    expect(shouldCaptureUnexpectedChildExit(false, false, false)).toBe(false);
+  });
+
   test('selects a stable fatal code instead of a trailing stack frame', () => {
     const reason = selectChildFailureReason(
       [
@@ -75,7 +86,7 @@ describe('managed child recovery policy', () => {
     expect(decideChildFailure({}, crash(reason)).reasonCode).toBe('RPC_RESPONSE_JSON_TRUNCATED');
   });
 
-  test('atomically preserves both historical and latest diagnostics', () => {
+  test('atomically preserves both historical and latest fatal diagnostics', () => {
     const root = mkdtempSync(join(tmpdir(), 'xln-child-failure-'));
     const receipt: ChildFailureReceipt = {
       schema: 'xln-child-failure-v1',
@@ -89,8 +100,8 @@ describe('managed child recovery policy', () => {
       reasonCode: 'MESH_BOOTSTRAP_STALLED',
       fingerprint: 'abc',
       identicalFailureCount: 1,
-      action: 'recover',
-      backoffMs: 2_000,
+      action: 'fail-stop',
+      backoffMs: 0,
       startedAt: 1,
       exitedAt: 2,
       reset: { inProgress: true },
@@ -105,6 +116,58 @@ describe('managed child recovery policy', () => {
       expect(readFileSync(paths.receiptPath, 'utf8')).toBe(readFileSync(paths.latestPath, 'utf8'));
       expect(readdirSync(root).sort()).toEqual([
         '20260718T120000000Z-H2-unit.json',
+        'last-fatal.json',
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('recoverable child receipt cannot overwrite the latest fatal diagnosis', () => {
+    const root = mkdtempSync(join(tmpdir(), 'xln-child-failure-'));
+    const base: ChildFailureReceipt = {
+      schema: 'xln-child-failure-v1',
+      recordedAt: '2026-07-18T12:00:00.000Z',
+      role: 'market-maker',
+      name: 'MM',
+      pid: 42,
+      code: 1,
+      signal: null,
+      reason: 'MARKET_MAKER_BOOTSTRAP_STALLED',
+      reasonCode: 'MARKET_MAKER_BOOTSTRAP_STALLED',
+      fingerprint: 'fatal',
+      identicalFailureCount: 1,
+      action: 'fail-stop',
+      backoffMs: 0,
+      startedAt: 1,
+      exitedAt: 2,
+      reset: { inProgress: true },
+      codeFingerprint: { gitHead: 'deadbeef' },
+      lastHealth: { ok: false },
+      lastInfo: null,
+      recentStdout: [],
+      recentStderr: ['fatal'],
+    };
+    try {
+      const fatal = persistChildFailureReceipt(root, base, 'fatal');
+      const fatalPayload = readFileSync(fatal.latestPath, 'utf8');
+      persistChildFailureReceipt(root, {
+        ...base,
+        recordedAt: '2026-07-18T12:00:01.000Z',
+        role: 'hub',
+        name: 'H1',
+        signal: 'SIGINT',
+        reason: 'H1_TRANSIENT_EXIT',
+        reasonCode: 'H1_TRANSIENT_EXIT',
+        fingerprint: 'recover',
+        action: 'recover',
+        backoffMs: 2_000,
+      }, 'recover');
+
+      expect(readFileSync(fatal.latestPath, 'utf8')).toBe(fatalPayload);
+      expect(readdirSync(root).sort()).toEqual([
+        '20260718T120000000Z-MM-fatal.json',
+        '20260718T120001000Z-H1-recover.json',
         'last-fatal.json',
       ]);
     } finally {

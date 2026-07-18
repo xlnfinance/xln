@@ -38,3 +38,26 @@ export const evaluateBootstrapProgressDeadline = (
     stalled: idleMs >= timeoutMs,
   };
 };
+
+/**
+ * A detached bootstrap batch is not semantic progress, but it owns a separate
+ * bounded execution window. This prevents the semantic idle deadline from
+ * killing a Runtime frame that is still completing deterministically.
+ */
+export const isBootstrapWorkWithinDeadline = (
+  workStartedAt: number | null,
+  now: number,
+  timeoutMs: number,
+): boolean => {
+  if (workStartedAt === null) return false;
+  if (!Number.isSafeInteger(workStartedAt) || workStartedAt < 0) {
+    throw new Error(`BOOTSTRAP_WORK_STARTED_AT_INVALID:${workStartedAt}`);
+  }
+  if (!Number.isSafeInteger(now) || now < workStartedAt) {
+    throw new Error(`BOOTSTRAP_WORK_CLOCK_INVALID:started=${workStartedAt}:now=${now}`);
+  }
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new Error(`BOOTSTRAP_WORK_TIMEOUT_INVALID:${timeoutMs}`);
+  }
+  return now - workStartedAt < timeoutMs;
+};

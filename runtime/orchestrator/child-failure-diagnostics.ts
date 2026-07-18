@@ -63,6 +63,8 @@ export const persistChildFailureReceipt = (
   const latestPath = join(diagnosticsDir, 'last-fatal.json');
   const payload = `${safeStringify(receipt)}\n`;
   writeAtomicDurable(receiptPath, payload);
-  writeAtomicDurable(latestPath, payload);
+  if (receipt.action === 'fail-stop') {
+    writeAtomicDurable(latestPath, payload);
+  }
   return { receiptPath, latestPath };
 };

@@ -6,7 +6,10 @@ import {
   resolveMarketMakerReadySnapshotAction,
   runtimeBacklogBlocksMarketMakerQuotes,
 } from '../orchestrator/mm-bootstrap-progress';
-import { evaluateBootstrapProgressDeadline } from '../orchestrator/bootstrap-progress-deadline';
+import {
+  evaluateBootstrapProgressDeadline,
+  isBootstrapWorkWithinDeadline,
+} from '../orchestrator/bootstrap-progress-deadline';
 import { computeCanonicalRuntimeStateHash } from '../storage/canonical-hash';
 import { computeStorageFrameHash } from '../storage/hashes';
 import type { StorageFrameRecord } from '../storage/types';
@@ -195,4 +198,18 @@ test('causal progress completed after the old deadline is observed before stall 
     61_999,
     60_000,
   )).toThrow('BOOTSTRAP_PROGRESS_CLOCK_REGRESSION');
+});
+
+test('active bootstrap frame gets its own bounded window without fabricating progress', () => {
+  const semanticDeadline = evaluateBootstrapProgressDeadline(
+    { signature: 'account-height-6', lastProgressAt: 1_000 },
+    'account-height-6',
+    96_000,
+    60_000,
+  );
+
+  expect(semanticDeadline.stalled).toBe(true);
+  expect(isBootstrapWorkWithinDeadline(41_000, 96_000, 60_000)).toBe(true);
+  expect(isBootstrapWorkWithinDeadline(36_000, 96_000, 60_000)).toBe(false);
+  expect(isBootstrapWorkWithinDeadline(null, 96_000, 60_000)).toBe(false);
 });

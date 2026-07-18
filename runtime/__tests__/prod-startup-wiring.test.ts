@@ -335,7 +335,7 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain("meshLog.error('child.unexpected_exit'");
     expect(orchestrator).toContain("meshLog.error('child.unexpected_exit.stop_failed'");
     expect(orchestrator).toContain("meshLog.error('custody.bootstrap_failed'");
-    expect(orchestrator).toContain("meshLog.warn('reset.sigterm_during_reset'");
+    expect(orchestrator).toContain("meshLog.warn('reset.signal_during_reset'");
     expect(orchestrator).toContain("meshLog.error('reset.initial_failed'");
     expect(orchestrator).toContain('persistOrchestratorFailure(error)');
     expect(orchestrator).not.toContain('[MESH] child pid=');

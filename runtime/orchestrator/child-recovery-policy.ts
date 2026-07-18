@@ -30,6 +30,12 @@ const stableReasonCode = (reason: string): string => {
 export const isTerminalBootstrapFailureReasonCode = (reasonCode: string): boolean =>
   /(?:BOOTSTRAP_STALLED|WATCHER_DRAIN_STALLED)$/.test(reasonCode);
 
+export const shouldCaptureUnexpectedChildExit = (
+  controlledStop: boolean,
+  orchestratorShuttingDown: boolean,
+  isCurrentProcess: boolean,
+): boolean => isCurrentProcess && !controlledStop && !orchestratorShuttingDown;
+
 export const selectChildFailureReason = (
   recentStderr: readonly string[],
   recentStdout: readonly string[],

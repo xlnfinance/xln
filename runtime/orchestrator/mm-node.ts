@@ -117,7 +117,10 @@ import {
   resolveMarketMakerReadySnapshotAction,
   runtimeBacklogBlocksMarketMakerQuotes,
 } from './mm-bootstrap-progress';
-import { evaluateBootstrapProgressDeadline } from './bootstrap-progress-deadline';
+import {
+  evaluateBootstrapProgressDeadline,
+  isBootstrapWorkWithinDeadline,
+} from './bootstrap-progress-deadline';
 
 type Args = {
   name: string;
@@ -4694,6 +4697,7 @@ const run = async (): Promise<void> => {
     let lastProgressCheckpoint = buildBootstrapCausalCheckpoint();
     let lastBacklogLogAt = 0;
     let bootstrapCompletionCheckArmed = false;
+    let bootstrapWorkStartedAt: number | null = null;
     const markProgress = (
       reason: string,
       health: MarketMakerHealth | null,
@@ -4732,9 +4736,18 @@ const run = async (): Promise<void> => {
       return evaluation;
     };
     const assertBootstrapNotStalled = (health: MarketMakerHealth | null): void => {
+      const now = Date.now();
       const evaluation = observeProgress('deadline-checkpoint', health);
       const { idleMs } = evaluation;
       if (!evaluation.stalled) return;
+      if (
+        hasMarketMakerRuntimeBacklog(env) &&
+        isBootstrapWorkWithinDeadline(
+          bootstrapWorkStartedAt,
+          now,
+          MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS,
+        )
+      ) return;
       const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryMmContext, profile));
       const currentCheckpoint = buildBootstrapCausalCheckpoint();
       const p2p = getP2PState(env);
@@ -4851,6 +4864,7 @@ const run = async (): Promise<void> => {
       const enqueued = await driveQuotes('bootstrap');
       await yieldMarketMakerApi();
       if (enqueued) {
+        bootstrapWorkStartedAt = Date.now();
         bootstrapCompletionCheckArmed = false;
       }
       if (hasMarketMakerRuntimeBacklog(env)) {
@@ -4859,6 +4873,7 @@ const run = async (): Promise<void> => {
         await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
         continue;
       }
+      bootstrapWorkStartedAt = null;
       const health = publishBootstrapHealthSnapshot();
       observeProgress('health', health);
       refreshBootstrapPhase(health);

@@ -140,6 +140,7 @@ import { persistChildFailureReceipt, type ChildFailureReceipt } from './child-fa
 import {
   decideChildFailure,
   selectChildFailureReason,
+  shouldCaptureUnexpectedChildExit,
   type ChildFailureDecision,
   type ChildFailureObservation,
 } from './child-recovery-policy';
@@ -1130,6 +1131,7 @@ const reapStaleManagedChildren = async (): Promise<void> => {
 };
 
 let fatalOrchestratorShutdownStarted = false;
+let orchestratorShutdownStarted = false;
 const controlledStopPids = new Set<number>();
 
 const rememberControlledStop = (proc: ChildProcess | null): void => {
@@ -1386,7 +1388,11 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       child.exitCode = code ?? null;
       child.exitSignal = signal ?? null;
     }
-    if (!controlledStop && isCurrentProc) {
+    if (shouldCaptureUnexpectedChildExit(
+      controlledStop,
+      orchestratorShutdownStarted,
+      isCurrentProc,
+    )) {
       handleUnexpectedHubFailure(child, {
         role: 'hub',
         name: child.name,
@@ -1483,7 +1489,11 @@ const spawnMarketMaker = async (): Promise<void> => {
       marketMakerChild.exitCode = code ?? null;
       marketMakerChild.exitSignal = signal ?? null;
     }
-    if (!controlledStop && isCurrentProc) {
+    if (shouldCaptureUnexpectedChildExit(
+      controlledStop,
+      orchestratorShutdownStarted,
+      isCurrentProc,
+    )) {
       const observation: ChildFailureObservation = {
         role: 'market-maker',
         name: marketMakerChild.name,
@@ -3260,13 +3270,17 @@ const shutdown = async (): Promise<void> => {
   process.exit(0);
 };
 
-process.on('SIGTERM', () => {
+const requestShutdown = (signal: NodeJS.Signals): void => {
+  if (orchestratorShutdownStarted) return;
+  orchestratorShutdownStarted = true;
   if (resetState.inProgress) {
-    meshLog.warn('reset.sigterm_during_reset');
+    meshLog.warn('reset.signal_during_reset', { signal });
   }
   void shutdown();
-});
-process.on('SIGINT', () => { void shutdown(); });
+};
+
+process.on('SIGTERM', () => { requestShutdown('SIGTERM'); });
+process.on('SIGINT', () => { requestShutdown('SIGINT'); });
 
 console.log(
   `CONTROL_READY host=${args.host} port=${args.port} relay=${relayUrl} rpc=${args.rpcUrl} mm=${args.mmEnabled ? 'on' : 'off'} custody=${args.custodyEnabled ? 'on' : 'off'} reset=${args.resetAllowed ? 'on' : 'off'} deferInitialReset=${args.deferInitialReset ? 'on' : 'off'}`,

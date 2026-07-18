@@ -861,6 +861,8 @@ Canonical decisions from the owner:
 
 ### P2.1 Wallet/QA UX polish already present but not visually accepted
 
+- Keep the xln mascot hidden by default for `0.1.9`. Preserve its implementation
+  and tests; resume opt-in mascot visual acceptance only after the release.
 - Keep Runtime/Entity heights, timestamps, board, votes, hooks, proposals, and
   consensus diagnostics under Settings -> Consensus. Do not show a floating
   “Committed/Accepted H###” badge over normal wallet pages.
