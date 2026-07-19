@@ -137,6 +137,7 @@ import type {
   StorageFrameRecord,
   StorageHead,
   StoragePersistenceBoundaryHook,
+  StoragePersistenceProgressHook,
   StorageRuntimeConfig,
 } from './types';
 export {
@@ -214,6 +215,7 @@ export type {
   StorageHead,
   StoragePersistenceBoundary,
   StoragePersistenceBoundaryHook,
+  StoragePersistenceProgressHook,
   StorageReplicaMeta,
   StorageRuntimeConfig,
   StorageSnapshotManifest,
@@ -709,6 +711,7 @@ export const recoverStorageDbFromHistory = async (options: {
   db: RuntimeDbLike;
   historyDb: RuntimeFrameDbLike;
   config: Required<StorageRuntimeConfig>;
+  onPersistenceProgress?: StoragePersistenceProgressHook;
 }): Promise<{ recovered: boolean; entityHashDocs?: Map<string, StorageEntityHashDoc> }> => {
   const historyHead = await readHead(options.historyDb, options.config);
   const rawCurrentHead = await readRawOrNull(options.db, KEY_HEAD);
@@ -718,6 +721,7 @@ export const recoverStorageDbFromHistory = async (options: {
   const historyMaterializedHeight = materializedHeightOf(historyHead);
   const currentMaterializedHeight = materializedHeightOf(currentHead);
   const historySnapshotHeight = Math.max(0, Math.floor(Number(historyHead.latestSnapshotHeight ?? 0)));
+  options.onPersistenceProgress?.('recovery-heads-read');
 
   if (
     currentLatestHeight > historyLatestHeight ||
@@ -742,8 +746,10 @@ export const recoverStorageDbFromHistory = async (options: {
     // scan does not add per-frame cost to the normal append path.
     if (historySnapshotHeight > 0) {
       await verifyStorageSnapshotIntegrity(options.historyDb, historyHead);
+      options.onPersistenceProgress?.('recovery-snapshot-verified');
     }
     await clearCurrentRecoveryState(options.db);
+    options.onPersistenceProgress?.('recovery-current-cleared');
     replayFromHeight = 0;
     recovered = true;
     if (historySnapshotHeight > 0) {
@@ -753,6 +759,7 @@ export const recoverStorageDbFromHistory = async (options: {
         diff: { height: historySnapshotHeight, puts: snapshotDocs, dels: [] },
       });
       replayFromHeight = historySnapshotHeight;
+      options.onPersistenceProgress?.('recovery-snapshot-applied');
     }
   }
   for (let height = replayFromHeight + 1; height <= historyMaterializedHeight; height += 1) {
@@ -767,26 +774,32 @@ export const recoverStorageDbFromHistory = async (options: {
       diff,
       ...(entityHashDocs ? { entityHashDocs } : {}),
     });
+    options.onPersistenceProgress?.(`recovery-diff-applied:${height}`);
     recovered = true;
   }
 
   const batch = options.db.batch();
   const metaChanged = await synchronizeReplicaMeta(options.historyDb, options.db, batch);
+  options.onPersistenceProgress?.('recovery-replica-metadata-synchronized');
   const headChanged = !rawCurrentHead || !storageHeadsEqual(historyHead, currentHead);
   // The normal append path writes both DBs and never scans the content-addressed
   // DAG. Only a lagging/current-cache recovery needs to copy immutable nodes.
   const boardNodesChanged = headChanged
     ? await synchronizeCertifiedBoardNodes(options.historyDb, options.db, batch)
     : false;
+  options.onPersistenceProgress?.('recovery-board-nodes-synchronized');
   const consumptionNodesChanged = headChanged
     ? await synchronizeConsumptionNodes(options.historyDb, options.db, batch)
     : false;
+  options.onPersistenceProgress?.('recovery-consumption-nodes-synchronized');
   const accountJClaimNodesChanged = headChanged
     ? await synchronizeAccountJClaimNodes(options.historyDb, options.db, batch)
     : false;
+  options.onPersistenceProgress?.('recovery-account-j-nodes-synchronized');
   if (headChanged) batch.put(KEY_HEAD, encodeBuffer(historyHead));
   if (metaChanged || boardNodesChanged || consumptionNodesChanged || accountJClaimNodesChanged || headChanged) {
     await writeBatch(batch);
+    options.onPersistenceProgress?.('recovery-current-write-done');
     recovered = true;
   }
   return { recovered, ...(entityHashDocs ? { entityHashDocs } : {}) };
@@ -822,6 +835,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   rotateEpochDb?: (env: Env, snapshotHeight: number, timestamp: number) => Promise<boolean | void>;
   stopStaleWriterOnHeadAhead?: boolean;
   onPersistenceBoundary?: StoragePersistenceBoundaryHook;
+  onPersistenceProgress?: StoragePersistenceProgressHook;
 } & PerfDeps): Promise<StorageFrameSaveResult> => {
   const config = resolveStorageRuntimeConfig(options.env);
   if (!config.enabled) return { materialized: false, materializedOverlayRecords: 0, frameDbCommitted: true };
@@ -836,10 +850,18 @@ export const saveRuntimeFrameToStorage = async (options: {
   const historyOpened = await options.tryOpenFrameDb(options.env);
   if (!historyOpened) return { materialized: false, materializedOverlayRecords: 0, frameDbCommitted: false };
   const historyDb = options.getFrameDb(options.env);
-  const recoveredStorage = await recoverStorageDbFromHistory({ db, historyDb, config });
+  const recoveredStorage = await recoverStorageDbFromHistory({
+    db,
+    historyDb,
+    config,
+    ...(options.onPersistenceProgress
+      ? { onPersistenceProgress: options.onPersistenceProgress }
+      : {}),
+  });
   if (recoveredStorage.entityHashDocs) {
     state.storageEntityHashDocs = recoveredStorage.entityHashDocs;
   }
+  options.onPersistenceProgress?.('opened');
   const openMs = options.getPerfMs() - openStartedAt;
 
   const appliedRuntimeInput = options.currentFrameInput ?? { runtimeTxs: [], entityInputs: [] };
@@ -857,6 +879,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   const framePuts = buildDocPuts(options.env, frameTouched, replicaLookup);
   const frameBookDels = buildBookDeletionsFromOverlay(frameOverlayRecords);
   const diff = buildDiffRecord(options.env.height, framePuts, frameBookDels);
+  options.onPersistenceProgress?.('diff-built');
   const diffBuildMs = options.getPerfMs() - diffBuildStartedAt;
 
   const writeStartedAt = options.getPerfMs();
@@ -892,6 +915,7 @@ export const saveRuntimeFrameToStorage = async (options: {
     throw new Error(`STORAGE_PREV_FRAME_MISSING: height=${head.latestHeight}`);
   }
   const prevFrameHash = previousFrame ? previousFrame.frameHash ?? computeStorageFrameHash(previousFrame) : ZERO_FRAME_HASH;
+  options.onPersistenceProgress?.('history-read');
   const frameKey = keyFrame(options.env.height);
   const diffKey = keyDiff(options.env.height);
   const diffBuffer = encodeBuffer(diff);
@@ -969,6 +993,7 @@ export const saveRuntimeFrameToStorage = async (options: {
         ...(cachedEntityHashDocs ? { entityHashDocs: cachedEntityHashDocs } : {}),
       })
     : null;
+  options.onPersistenceProgress?.('materialized-hashes-built');
   const runtimeMachine = buildDurableRuntimeMachineSnapshot(options.env, {
     pendingNetworkOutputs: options.currentFrameOutputs ?? options.env.pendingNetworkOutputs ?? [],
   });
@@ -991,6 +1016,7 @@ export const saveRuntimeFrameToStorage = async (options: {
     replicaLookup,
     runtimeMachine,
   );
+  options.onPersistenceProgress?.('canonical-hashes-built');
   const canonicalHashes = canonicalHashEnabled ? runtimeStateHashes : null;
   const replicaMetaCommitment = buildStorageReplicaMetaCommitment(options.env, lineagePlan);
   const replicaMetaEntries = replicaMetaCommitment.entries;
@@ -1003,6 +1029,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   for await (const key of iterateKeys(db, { prefix: keyLiveReplicaMetaPrefix() })) {
     if (!liveReplicaMetaKeys.has(key.toString('hex'))) staleCurrentReplicaMetaKeys.push(Buffer.from(key));
   }
+  options.onPersistenceProgress?.('replica-metadata-read');
   const frameRecordBase: StorageFrameRecord = {
     height: options.env.height,
     timestamp: options.env.timestamp,
@@ -1055,6 +1082,7 @@ export const saveRuntimeFrameToStorage = async (options: {
     );
 
   const frameBuffer = encodeBuffer(frameRecord);
+  options.onPersistenceProgress?.('frame-encoded');
   const projectedReplayBytes =
     head.retainedHistoryBytes +
     frameKey.byteLength +
@@ -1103,6 +1131,7 @@ export const saveRuntimeFrameToStorage = async (options: {
     frameDbBytes = frameDbCommitPlan.writtenBytes;
     putFrameDbCommit(historyBatch, frameDbCommitPlan);
   }
+  options.onPersistenceProgress?.('frame-db-plan-built');
   const batch = db.batch();
   if (staleCurrentReplicaMetaKeys.length > 0 && typeof batch.del !== 'function') {
     throw new Error('STORAGE_CURRENT_REPLICA_META_DELETE_UNSUPPORTED');
@@ -1162,12 +1191,16 @@ export const saveRuntimeFrameToStorage = async (options: {
   };
   historyBatch.put(KEY_HEAD, encodeBuffer(nextHead));
   batch.put(KEY_HEAD, encodeBuffer(nextHead));
+  options.onPersistenceProgress?.('authoritative-write-start');
   await writeBatch(historyBatch);
+  options.onPersistenceProgress?.('authoritative-write-done');
   await options.onPersistenceBoundary?.('after-authoritative-history-commit');
   if (frameDbCommitPlan) {
     frameDbCommitted = true;
   }
+  options.onPersistenceProgress?.('current-cache-write-start');
   await writeBatch(batch);
+  options.onPersistenceProgress?.('current-cache-write-done');
   await options.onPersistenceBoundary?.('after-current-cache-commit');
   applyCertifiedEntityLineagePlan(options.env, lineagePlan);
   if (state) {
@@ -1207,6 +1240,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   let latestSnapshotHeight = head.latestSnapshotHeight;
 
   if (snapshotDue || snapshotRequiredByBytes) {
+    options.onPersistenceProgress?.('snapshot-start');
     const snapshotStartedAt = options.getPerfMs();
     const snapshotResult = await createSnapshot(
       db,
@@ -1242,6 +1276,7 @@ export const saveRuntimeFrameToStorage = async (options: {
       options.onPersistenceBoundary,
     );
     snapshotMs = options.getPerfMs() - snapshotStartedAt;
+    options.onPersistenceProgress?.('snapshot-done');
   }
 
   if (snapDocs > 0) {
@@ -1258,8 +1293,11 @@ export const saveRuntimeFrameToStorage = async (options: {
       );
     }
     prunedBytes += await pruneUnreachableCertifiedBoardHistoryNodes(options.env, historyDb, db);
+    options.onPersistenceProgress?.('snapshot-board-gc-done');
     prunedBytes += await pruneUnreachableConsumptionHistoryNodes(options.env, historyDb);
+    options.onPersistenceProgress?.('snapshot-consumption-gc-done');
     prunedBytes += await pruneUnreachableAccountJClaimHistoryNodes(options.env, historyDb);
+    options.onPersistenceProgress?.('snapshot-account-j-gc-done');
   }
 
   retainedHistoryBytes = Math.max(0, retainedHistoryBytes - prunedBytes);
@@ -1287,6 +1325,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   if (epochRotated && snapDocs > 0 && options.rotateEpochDb) {
     const rotated = await options.rotateEpochDb(options.env, latestSnapshotHeight, options.env.timestamp);
     epochDbRotated = rotated !== false;
+    options.onPersistenceProgress?.('snapshot-epoch-rotation-done');
   }
 
   const verboseStorageLogs =

@@ -379,6 +379,7 @@ import { buildStorageReplicaMetaCommitment } from './storage/replicas';
 import { assertStorageSafetyOverridesAllowed } from './storage/safety';
 import { storageOverlayRecordKey } from './storage/overlay';
 import type { StorageDoc, StoragePersistenceBoundaryHook } from './storage/types';
+import { evaluateStorageProgressDeadline } from './storage/progress-deadline';
 import type { RuntimeAdapterReadQuery } from './radapter';
 import {
   assertCertifiedJHistoryIntegrity,
@@ -4659,8 +4660,12 @@ class RuntimeStorageWriteTimeoutError extends Error {
     readonly timeoutMs: number,
     readonly frameHeight: number,
     readonly runtimeId: string,
+    readonly step: string,
   ) {
-    super(`STORAGE_WRITE_TIMEOUT:frame=${frameHeight}:runtime=${runtimeId}:timeoutMs=${timeoutMs}`);
+    super(
+      `STORAGE_WRITE_TIMEOUT:frame=${frameHeight}:runtime=${runtimeId}:` +
+        `timeoutMs=${timeoutMs}:step=${step}`,
+    );
     this.name = 'RuntimeStorageWriteTimeoutError';
   }
 }
@@ -4678,28 +4683,73 @@ class RuntimeFrameStorageError extends Error {
 
 const withStorageWriteTimeout = async <T>(
   env: Env,
-  promise: Promise<T>,
+  operation: (markProgress: (step: string) => void) => Promise<T>,
 ): Promise<T> => {
   const timeoutMs = resolveStorageWriteTimeoutMs();
-  if (timeoutMs <= 0) return await promise;
+  if (timeoutMs <= 0) return await operation(() => undefined);
 
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_resolve, reject) => {
-        timer = setTimeout(() => {
-          reject(new RuntimeStorageWriteTimeoutError(
+  return await new Promise<T>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let settled = false;
+    let lastProgressAtMs = Date.now();
+    let lastProgressStep = 'start';
+
+    const clearTimer = (): void => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+    };
+    const schedule = (delayMs: number): void => {
+      clearTimer();
+      timer = setTimeout(() => {
+        if (settled) return;
+        let deadline: ReturnType<typeof evaluateStorageProgressDeadline>;
+        try {
+          deadline = evaluateStorageProgressDeadline(
+            lastProgressAtMs,
+            Date.now(),
             timeoutMs,
-            env.height,
-            String(env.runtimeId || ''),
-          ));
-        }, timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
+          );
+        } catch (error) {
+          settled = true;
+          reject(error);
+          return;
+        }
+        if (!deadline.stalled) {
+          schedule(deadline.remainingMs);
+          return;
+        }
+        settled = true;
+        reject(new RuntimeStorageWriteTimeoutError(
+          timeoutMs,
+          env.height,
+          String(env.runtimeId || ''),
+          lastProgressStep,
+        ));
+      }, delayMs);
+    };
+    const markProgress = (step: string): void => {
+      if (settled) return;
+      lastProgressAtMs = Date.now();
+      lastProgressStep = step;
+      schedule(timeoutMs);
+    };
+
+    schedule(timeoutMs);
+    Promise.resolve().then(() => operation(markProgress)).then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimer();
+        resolve(value);
+      },
+      (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        clearTimer();
+        reject(error);
+      },
+    );
+  });
 };
 
 const resolveAuthoritativeFrameCommitStatus = async (
@@ -4745,7 +4795,7 @@ export const saveEnvToDB = async (
   try {
     saveResult = await withStorageWriteTimeout(
       env,
-      withStorageWriterLock(env, () => saveRuntimeFrameToStorage({
+      (markStorageProgress) => withStorageWriterLock(env, () => saveRuntimeFrameToStorage({
         env,
         tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
         getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
@@ -4761,6 +4811,8 @@ export const saveEnvToDB = async (
         ...(runtimeMachineBeforeApply === undefined
           ? {}
           : { currentFrameRuntimeMachineBeforeApply: runtimeMachineBeforeApply }),
+        onPersistenceProgress: markStorageProgress,
+        onPersistenceBoundary: (boundary) => markStorageProgress(`boundary:${boundary}`),
       })),
     );
   } catch (error) {

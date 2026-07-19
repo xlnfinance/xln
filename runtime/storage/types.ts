@@ -80,6 +80,8 @@ export type StoragePersistenceBoundaryHook = (
   boundary: StoragePersistenceBoundary,
 ) => void | Promise<void>;
 
+export type StoragePersistenceProgressHook = (step: string) => void;
+
 export type StorageHead = {
   schemaVersion: number;
   latestHeight: number;
