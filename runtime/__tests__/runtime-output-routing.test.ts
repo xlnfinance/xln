@@ -82,15 +82,23 @@ const dispatchFrameOutputs = (outputs: DeliverableEntityInput[]): {
   if (!targetRuntimeId) throw new Error('TEST_COMMIT_TARGET_RUNTIME_MISSING');
   const delivered: DeliverableEntityInput[] = [];
   const env = {
+    runtimeId: runtimeId('10'),
+    height: 25,
     timestamp: 2_500,
     runtimeState: {
-      directEntityInputDispatch: (_runtimeId: string, input: DeliverableEntityInput) => {
-        delivered.push(input);
+      directEntityInputsDispatch: (_runtimeId: string, envelope: RuntimeEntityInputsEnvelope) => {
+        delivered.push(...envelope.entityInputs);
         return deliveryAccepted('ROUTE_DIRECT_DELIVERED');
       },
     },
   } as unknown as Env;
-  const deferred = dispatchEntityOutputs(env, outputs.map(output => ({ output, targetRuntimeId })), {
+  const deferred = dispatchEntityOutputs(env, outputs.map(output => ({
+    output: {
+      ...output,
+      sourceRuntimeFrame: output.sourceRuntimeFrame ?? { height: env.height, timestamp: env.timestamp },
+    },
+    targetRuntimeId,
+  })), {
     ensureRuntimeState: target => target.runtimeState!,
     getP2P: () => null,
     enqueueRuntimeInputs: () => {},
@@ -420,7 +428,7 @@ describe('runtime output routing', () => {
     const planned = planEntityOutputs(env, [output], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState ??= {},
       getP2P: () => ({
-        enqueueEntityInputDelivery: () => deliveryAccepted('TEST_DELIVERED'),
+        enqueueEntityInputsDelivery: () => deliveryAccepted('TEST_DELIVERED'),
         getVerifiedRuntimeRoute: () => ({ runtimeId: resolvedRuntimeId, lastUpdated: 2 }),
       }),
       enqueueRuntimeInputs: () => {},
@@ -455,7 +463,7 @@ describe('runtime output routing', () => {
     const planned = planEntityOutputs(env, [output], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState ??= {},
       getP2P: () => ({
-        enqueueEntityInputDelivery: () => deliveryAccepted('TEST_DELIVERED'),
+        enqueueEntityInputsDelivery: () => deliveryAccepted('TEST_DELIVERED'),
         getVerifiedRuntimeRoute: () => ({ runtimeId: resolvedRuntimeId, lastUpdated: 2 }),
       }),
       enqueueRuntimeInputs: () => {},
@@ -491,7 +499,7 @@ describe('runtime output routing', () => {
     const planned = planEntityOutputs(env, [output], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState ??= {},
       getP2P: () => ({
-        enqueueEntityInputDelivery: () => deliveryAccepted('TEST_DELIVERED'),
+        enqueueEntityInputsDelivery: () => deliveryAccepted('TEST_DELIVERED'),
         getVerifiedRuntimeRoute: () => ({ runtimeId: currentRuntimeId, lastUpdated: 2 }),
       }),
       enqueueRuntimeInputs: () => {},
@@ -547,7 +555,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       timestamp: 1234,
       runtimeState: {
-        directEntityInputDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
+        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
       warn: (_scope: string, code: string) => {
         warnings.push(code);
@@ -601,7 +609,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       timestamp: 4321,
       runtimeState: {
-        directEntityInputDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
+        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
       warn: () => {},
       error: () => {},
@@ -649,7 +657,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       timestamp: 4331,
       runtimeState: {
-        directEntityInputDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
+        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
       warn: () => {},
       error: () => {},
@@ -658,13 +666,14 @@ describe('runtime output routing', () => {
       runtimeId: targetRuntimeId,
       entityId: entityId('41'),
       signerId: runtimeId('42'),
+      sourceRuntimeFrame: { height: 11, timestamp: 4331 },
       entityTxs: [],
     };
 
     expect(() => dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       getP2P: () => ({
-        enqueueEntityInputDelivery: (() => true) as any,
+        enqueueEntityInputsDelivery: (() => true) as any,
       }),
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
@@ -683,7 +692,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       timestamp: 2468,
       runtimeState: {
-        directEntityInputDispatch: () => ({
+        directEntityInputsDispatch: () => ({
           outcome: 'delivered',
           code: 'ROUTE_DIRECT_DELIVERED',
           retryable: false,
@@ -698,13 +707,14 @@ describe('runtime output routing', () => {
       runtimeId: targetRuntimeId,
       entityId: entityId('3a'),
       signerId: runtimeId('3b'),
+      sourceRuntimeFrame: { height: 12, timestamp: 2468 },
       entityTxs: [],
     };
 
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       getP2P: () => ({
-        enqueueEntityInputDelivery: () => {
+        enqueueEntityInputsDelivery: () => {
           p2pCalls.push(true);
           return deliveryAccepted('P2P_ENTITY_INPUT_DELIVERED');
         },
@@ -833,7 +843,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       timestamp: 2469,
       runtimeState: {
-        directEntityInputDispatch: (() => true) as any,
+        directEntityInputsDispatch: (() => true) as any,
       },
       warn: () => {},
       error: () => {},
@@ -842,13 +852,14 @@ describe('runtime output routing', () => {
       runtimeId: targetRuntimeId,
       entityId: entityId('3e'),
       signerId: runtimeId('3f'),
+      sourceRuntimeFrame: { height: 13, timestamp: 2469 },
       entityTxs: [],
     };
 
     expect(() => dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       getP2P: () => ({
-        enqueueEntityInputDelivery: () => {
+        enqueueEntityInputsDelivery: () => {
           p2pCalls.push(true);
           return deliveryAccepted('P2P_ENTITY_INPUT_DELIVERED');
         },
@@ -866,12 +877,12 @@ describe('runtime output routing', () => {
 
   test('falls back to P2P after typed direct dispatch defer', () => {
     const targetRuntimeId = runtimeId('25');
-    const p2pCalls: Array<{ targetRuntimeId: string; input: DeliverableEntityInput; ingressTimestamp?: number }> = [];
+    const p2pCalls: Array<{ targetRuntimeId: string; envelope: RuntimeEntityInputsEnvelope; ingressTimestamp?: number }> = [];
     const env = {
       runtimeId: runtimeId('11'),
       timestamp: 1357,
       runtimeState: {
-        directEntityInputDispatch: () => ({
+        directEntityInputsDispatch: () => ({
           outcome: 'deferred',
           code: 'ROUTE_DIRECT_MISS_FALLBACK',
           retryable: true,
@@ -886,14 +897,15 @@ describe('runtime output routing', () => {
       runtimeId: targetRuntimeId,
       entityId: entityId('3c'),
       signerId: runtimeId('3d'),
+      sourceRuntimeFrame: { height: 14, timestamp: 1357 },
       entityTxs: [],
     };
 
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       getP2P: () => ({
-        enqueueEntityInputDelivery: (runtimeId, input, ingressTimestamp) => {
-          p2pCalls.push({ targetRuntimeId: runtimeId, input, ingressTimestamp });
+        enqueueEntityInputsDelivery: (runtimeId, envelope, ingressTimestamp) => {
+          p2pCalls.push({ targetRuntimeId: runtimeId, envelope, ingressTimestamp });
           return deliveryAccepted('P2P_ENTITY_INPUT_DELIVERED');
         },
       }),
@@ -914,12 +926,13 @@ describe('runtime output routing', () => {
 
   test('sendEntityInputWithRouting exposes typed remote delivery result', () => {
     const targetRuntimeId = runtimeId('23');
-    const p2pCalls: Array<{ targetRuntimeId: string; input: DeliverableEntityInput; ingressTimestamp?: number }> = [];
+    const p2pCalls: Array<{ targetRuntimeId: string; envelope: RuntimeEntityInputsEnvelope; ingressTimestamp?: number }> = [];
     const env = {
       runtimeId: runtimeId('11'),
+      height: 15,
       timestamp: 2345,
       runtimeState: {
-        directEntityInputDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
+        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
       warn: () => {},
       error: () => {},
@@ -936,8 +949,8 @@ describe('runtime output routing', () => {
     const result = sendEntityInputWithRouting(env, input, {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       getP2P: () => ({
-        enqueueEntityInputDelivery: (runtimeId, routedInput, ingressTimestamp) => {
-          p2pCalls.push({ targetRuntimeId: runtimeId, input: routedInput, ingressTimestamp });
+        enqueueEntityInputsDelivery: (runtimeId, envelope, ingressTimestamp) => {
+          p2pCalls.push({ targetRuntimeId: runtimeId, envelope, ingressTimestamp });
           return deliveryAccepted('P2P_ENTITY_INPUT_DELIVERED');
         },
       }),
@@ -960,7 +973,11 @@ describe('runtime output routing', () => {
       },
     });
     expect(p2pCalls).toHaveLength(1);
-    expect(p2pCalls[0]?.input.runtimeId).toBe(targetRuntimeId);
+    expect(p2pCalls[0]?.envelope).toMatchObject({
+      sourceRuntimeHeight: 15,
+      sourceRuntimeTimestamp: 2345,
+      entityInputs: [expect.objectContaining({ runtimeId: targetRuntimeId })],
+    });
   });
 
   test('sendEntityInputWithRouting exposes typed local queue result', () => {
@@ -1013,6 +1030,7 @@ describe('runtime output routing', () => {
       runtimeId: targetRuntimeId,
       entityId: entityId('78'),
       signerId: runtimeId('79'),
+      sourceRuntimeFrame: { height: 16, timestamp: 9012 },
       entityTxs: [{
         type: 'openAccount',
         data: { targetEntityId: entityId('80') },
@@ -1025,7 +1043,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       timestamp: 9012,
       runtimeState: {
-        directEntityInputDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
+        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
       warn: (_scope: string, code: string) => warnings.push(code),
       info: (_scope: string, code: string) => infos.push(code),
@@ -1037,7 +1055,7 @@ describe('runtime output routing', () => {
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       getP2P: () => ({
-        enqueueEntityInputDelivery: () => deliveryFailure({
+        enqueueEntityInputsDelivery: () => deliveryFailure({
           category: 'TransientRace',
           code: 'P2P_SEND_RETURNED_FALSE',
           message: 'P2P enqueue returned false',
@@ -1064,7 +1082,7 @@ describe('runtime output routing', () => {
     dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       getP2P: () => ({
-        enqueueEntityInputDelivery: () => deliveryFailure({
+        enqueueEntityInputsDelivery: () => deliveryFailure({
           category: 'TransientRace',
           code: 'P2P_SEND_RETURNED_FALSE',
           message: 'P2P enqueue returned false',
@@ -1088,6 +1106,7 @@ describe('runtime output routing', () => {
       runtimeId: targetRuntimeId,
       entityId: entityId('55'),
       signerId: runtimeId('56'),
+      sourceRuntimeFrame: { height: 17, timestamp: 5678 },
       entityTxs: [],
     };
     const warnings: string[] = [];
@@ -1096,7 +1115,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       timestamp: 5678,
       runtimeState: {
-        directEntityInputDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
+        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
       warn: (_scope: string, code: string) => warnings.push(code),
       info: (_scope: string, code: string) => infos.push(code),
@@ -1128,13 +1147,14 @@ describe('runtime output routing', () => {
       `0x${'59'.repeat(32)}`,
       '0xproposal-signature',
     );
+    output.sourceRuntimeFrame = { height: 18, timestamp: 5678 };
     const warnings: string[] = [];
     const infos: string[] = [];
     const env = {
       runtimeId: runtimeId('11'),
       timestamp: 5678,
       runtimeState: {
-        directEntityInputDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
+        directEntityInputsDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
       warn: (_scope: string, code: string) => warnings.push(code),
       info: (_scope: string, code: string) => infos.push(code),
@@ -1164,6 +1184,7 @@ describe('runtime output routing', () => {
       runtimeId: targetRuntimeId,
       entityId: entityId('82'),
       signerId: runtimeId('83'),
+      sourceRuntimeFrame: { height: 19, timestamp: 5678 },
       entityTxs: [],
     };
     const env = {
@@ -1177,7 +1198,7 @@ describe('runtime output routing', () => {
     expect(() => dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       getP2P: () => ({
-        enqueueEntityInputDelivery: () => deliveryFailure({
+        enqueueEntityInputsDelivery: () => deliveryFailure({
           category: 'Contradiction',
           code: 'P2P_ROUTE_CORRUPT',
           terminal: true,

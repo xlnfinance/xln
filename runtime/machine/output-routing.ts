@@ -1688,7 +1688,7 @@ export const dispatchEntityOutputs = (
       throw error;
     }
   }
-  return deferredOutputs;
+  return deferredOutputs.sort(compareOutputDelivery);
 };
 
 export const sendEntityInputWithRouting = (

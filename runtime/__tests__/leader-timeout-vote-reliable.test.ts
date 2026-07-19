@@ -42,6 +42,7 @@ import type {
   EntityReplica,
   EntityState,
   Env,
+  RuntimeEntityInputsEnvelope,
 } from '../types';
 
 const runtime = (seed: string): Env => {
@@ -126,8 +127,16 @@ const voteOutput = (
   runtimeId: receiver.runtimeId!,
   entityId: replica.entityId,
   signerId: replica.signerId,
+  sourceRuntimeFrame: { height: vote.targetHeight, timestamp: vote.targetHeight },
   leaderTimeoutVote: vote,
 });
+
+const requireOnlyEnvelopeInput = (envelope: RuntimeEntityInputsEnvelope): DeliverableEntityInput => {
+  if (envelope.entityInputs.length !== 1 || !envelope.entityInputs[0]) {
+    throw new Error(`TEST_EXPECTED_SINGLE_ENTITY_INPUT:${envelope.entityInputs.length}`);
+  }
+  return envelope.entityInputs[0];
+};
 
 const routingDeps = (
   targetRuntimeId: string,
@@ -266,7 +275,7 @@ describe('reliable leader timeout vote delivery', () => {
     const { replica, vote } = installVoteTarget(receiver, 'leader-vote-reliable-retry-board');
     const output = voteOutput(receiver, replica, vote);
     const deps = routingDeps(receiver.runtimeId!, () => ({
-      enqueueEntityInputDelivery: () => deliveryAccepted('TEST_TRANSPORT_HANDOFF_ONLY'),
+      enqueueEntityInputsDelivery: () => deliveryAccepted('TEST_TRANSPORT_HANDOFF_ONLY'),
     }));
 
     sendEntityInputWithRouting(sender, output, deps);
@@ -286,8 +295,12 @@ describe('reliable leader timeout vote delivery', () => {
       sender,
       [{ output, targetRuntimeId: receiver.runtimeId! }],
       routingDeps(receiver.runtimeId!, () => ({
-        enqueueEntityInputDelivery: (_runtimeId, delivered) => {
-          registrations.push(registerReliableIngress(receiver, sender.runtimeId!, delivered).kind);
+        enqueueEntityInputsDelivery: (_runtimeId, delivered) => {
+          registrations.push(registerReliableIngress(
+            receiver,
+            sender.runtimeId!,
+            requireOnlyEnvelopeInput(delivered),
+          ).kind);
           return deliveryAccepted('TEST_TRANSPORT_HANDOFF_ONLY');
         },
       })),
@@ -378,18 +391,21 @@ describe('reliable leader timeout vote delivery', () => {
     const nextHeight = structuredClone(first);
     nextHeight.leaderTimeoutVote!.targetHeight += 1;
     nextHeight.leaderTimeoutVote!.previousFrameHash = `0x${'51'.repeat(32)}`;
+    nextHeight.sourceRuntimeFrame = { height: first.sourceRuntimeFrame!.height + 1, timestamp: 1_001 };
     const otherVoter = structuredClone(first);
     otherVoter.leaderTimeoutVote!.voterId = replica.signerId;
     otherVoter.leaderTimeoutVote!.signature = `0x${'52'.repeat(65)}`;
+    otherVoter.sourceRuntimeFrame = { height: first.sourceRuntimeFrame!.height + 2, timestamp: 1_002 };
     const attempted: string[] = [];
 
     const deferred = dispatchEntityOutputs(
       runtime('leader-vote-reliable-hol-sender'),
       [nextHeight, otherVoter, first].map(output => ({ output, targetRuntimeId: receiver.runtimeId! })),
       routingDeps(receiver.runtimeId!, () => ({
-        enqueueEntityInputDelivery: (_runtimeId, delivered) => {
-          const label = delivered.leaderTimeoutVote?.voterId === vote.voterId
-            ? `primary-${delivered.leaderTimeoutVote.targetHeight}`
+        enqueueEntityInputsDelivery: (_runtimeId, delivered) => {
+          const input = requireOnlyEnvelopeInput(delivered);
+          const label = input.leaderTimeoutVote?.voterId === vote.voterId
+            ? `primary-${input.leaderTimeoutVote.targetHeight}`
             : 'other-voter';
           attempted.push(label);
           return label === `primary-${vote.targetHeight}`

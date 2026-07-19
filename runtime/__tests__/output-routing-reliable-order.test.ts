@@ -21,7 +21,7 @@ import {
 } from '../account/crypto';
 import { createEmptyEnv } from '../runtime';
 import { deliveryAccepted, deliveryFailure } from '../protocol/payments/delivery-result';
-import type { DeliverableEntityInput, Env, JPrefixAttestation, RoutedEntityInput } from '../types';
+import type { DeliverableEntityInput, Env, JPrefixAttestation, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
 
 const runtimeId = (byte: string): string => `0x${byte.repeat(20)}`;
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -31,6 +31,23 @@ const targetEntityId = entityId('92');
 const targetSignerId = runtimeId('93');
 const accountPeerId = entityId('94');
 
+const sourceRuntimeFrame = (
+  kind: number,
+  height: number,
+  target: string = targetEntityId,
+): NonNullable<RoutedEntityInput['sourceRuntimeFrame']> => {
+  const targetOrder = Number.parseInt(target.slice(2, 4), 16);
+  const sourceHeight = targetOrder * 100_000 + height * 10 + kind;
+  return { height: sourceHeight, timestamp: sourceHeight };
+};
+
+const requireOnlyEnvelopeInput = (envelope: RuntimeEntityInputsEnvelope): DeliverableEntityInput => {
+  if (envelope.entityInputs.length !== 1 || !envelope.entityInputs[0]) {
+    throw new Error(`TEST_EXPECTED_SINGLE_ENTITY_INPUT:${envelope.entityInputs.length}`);
+  }
+  return envelope.entityInputs[0];
+};
+
 const entityFrameOutput = (
   height: number,
   target = targetEntityId,
@@ -39,6 +56,7 @@ const entityFrameOutput = (
   runtimeId: targetRuntimeId,
   entityId: target,
   signerId: targetSignerId,
+  sourceRuntimeFrame: sourceRuntimeFrame(1, height, target),
   proposedFrame: {
     height,
     timestamp: height,
@@ -54,6 +72,7 @@ const accountAckOutput = (height: number): DeliverableEntityInput => ({
   runtimeId: targetRuntimeId,
   entityId: targetEntityId,
   signerId: targetSignerId,
+  sourceRuntimeFrame: sourceRuntimeFrame(2, height),
   entityTxs: [{
     type: 'accountInput',
     data: {
@@ -73,6 +92,7 @@ const jFinalityOutput = (height: number): DeliverableEntityInput => ({
   runtimeId: targetRuntimeId,
   entityId: targetEntityId,
   signerId: targetSignerId,
+  sourceRuntimeFrame: sourceRuntimeFrame(3, height),
   entityTxs: [{
     type: 'j_event',
     data: {
@@ -94,6 +114,7 @@ const hashPrecommitOutput = (height: number): DeliverableEntityInput => ({
   runtimeId: targetRuntimeId,
   entityId: targetEntityId,
   signerId: targetSignerId,
+  sourceRuntimeFrame: sourceRuntimeFrame(4, height),
   hashPrecommitFrame: {
     height,
     frameHash: `0xentity-frame-${height}`,
@@ -127,6 +148,7 @@ const jPrefixOutput = (height: number): DeliverableEntityInput => {
     runtimeId: targetRuntimeId,
     entityId: targetEntityId,
     signerId: targetSignerId,
+    sourceRuntimeFrame: sourceRuntimeFrame(5, height),
     jPrefixAttestations: new Map([[sourceValidatorId, attestation]]),
   };
 };
@@ -210,8 +232,8 @@ describe('ordered reliable output lanes', () => {
         env,
         outputs.map(output => ({ output, targetRuntimeId })),
         routingDeps(() => ({
-          enqueueEntityInputDelivery: (_runtimeId, output) => {
-            const order = reliableOrder(output);
+          enqueueEntityInputsDelivery: (_runtimeId, output) => {
+            const order = reliableOrder(requireOnlyEnvelopeInput(output));
             attempted.push(order);
             return order === 1
               ? deliveryFailure({
@@ -242,8 +264,8 @@ describe('ordered reliable output lanes', () => {
       } as unknown as Env;
       const deps = routingDeps(() => transportAvailable
         ? {
-            enqueueEntityInputDelivery: (_runtimeId, output) => {
-              attempted.push(reliableOrder(output));
+            enqueueEntityInputsDelivery: (_runtimeId, output) => {
+              attempted.push(reliableOrder(requireOnlyEnvelopeInput(output)));
               return deliveryAccepted('TEST_DELIVERED');
             },
           }
@@ -261,7 +283,7 @@ describe('ordered reliable output lanes', () => {
 
   for (const [label, createOutput] of orderedCases) {
     test(`${label}: pending outputs use numeric height order`, () => {
-      const pending = buildPendingNetworkOutputs([2, 10, 11, 100].map(createOutput));
+      const pending = buildPendingNetworkOutputs([2, 10, 11, 100].map(height => createOutput(height)));
       expect(pending.map(reliableOrder)).toEqual([2, 10, 11, 100]);
     });
   }
@@ -288,8 +310,8 @@ describe('ordered reliable output lanes', () => {
     } as unknown as Env;
     const deps = routingDeps(() => transportAvailable
       ? {
-          enqueueEntityInputDelivery: (_runtimeId, output) => {
-            attempted.push(reliableOrder(output));
+          enqueueEntityInputsDelivery: (_runtimeId, output) => {
+            attempted.push(reliableOrder(requireOnlyEnvelopeInput(output)));
             return deliveryAccepted('TEST_ACCOUNT_ACK_DELIVERED');
           },
         }
@@ -353,8 +375,8 @@ describe('ordered reliable output lanes', () => {
       env,
       h12,
       routingDeps(() => ({
-        enqueueEntityInputDelivery: (_runtimeId, output) => {
-          attempted.push(reliableOrder(output));
+        enqueueEntityInputsDelivery: (_runtimeId, output) => {
+          attempted.push(reliableOrder(requireOnlyEnvelopeInput(output)));
           return deliveryAccepted('TEST_ACCOUNT_ACK_NEXT_DELIVERED');
         },
       })),
@@ -378,8 +400,8 @@ describe('ordered reliable output lanes', () => {
       env,
       [accountAckOutput(10), accountAckOutput(9)].map(output => ({ output, targetRuntimeId })),
       routingDeps(() => ({
-        enqueueEntityInputDelivery: (_runtimeId, output) => {
-          const order = reliableOrder(output);
+        enqueueEntityInputsDelivery: (_runtimeId, output) => {
+          const order = reliableOrder(requireOnlyEnvelopeInput(output));
           attempted.push(order);
           return order === 9
             ? deliveryFailure({
@@ -417,8 +439,9 @@ describe('ordered reliable output lanes', () => {
       env,
       outputs.map(output => ({ output, targetRuntimeId })),
       routingDeps(() => ({
-        enqueueEntityInputDelivery: (_runtimeId, output) => {
-          const label = `${output.entityId === entityA ? 'A' : 'B'}${reliableOrder(output)}`;
+        enqueueEntityInputsDelivery: (_runtimeId, output) => {
+          const input = requireOnlyEnvelopeInput(output);
+          const label = `${input.entityId === entityA ? 'A' : 'B'}${reliableOrder(input)}`;
           attempted.push(label);
           return label === 'A1'
             ? deliveryFailure({
@@ -449,6 +472,7 @@ describe('ordered reliable output lanes', () => {
       runtimeId: targetRuntimeId,
       entityId: targetEntityId,
       signerId: targetSignerId,
+      sourceRuntimeFrame: sourceRuntimeFrame(6, 1),
       entityTxs: [{ type: 'profile-update', data: { name: 'ordinary' } } as never],
     } satisfies DeliverableEntityInput;
 
@@ -456,8 +480,9 @@ describe('ordered reliable output lanes', () => {
       env,
       [entityFrameOutput(2), ordinary, entityFrameOutput(1)].map(output => ({ output, targetRuntimeId })),
       routingDeps(() => ({
-        enqueueEntityInputDelivery: (_runtimeId, output) => {
-          const order = output.proposedFrame ? reliableOrder(output) : 'ordinary';
+        enqueueEntityInputsDelivery: (_runtimeId, output) => {
+          const input = requireOnlyEnvelopeInput(output);
+          const order = input.proposedFrame ? reliableOrder(input) : 'ordinary';
           attempted.push(order);
           return order === 1
             ? deliveryFailure({ category: 'TransientRace', code: 'TEST_HEAD_DEFERRED', terminal: false })
@@ -485,8 +510,9 @@ describe('ordered reliable output lanes', () => {
       env,
       outputs.map(output => ({ output, targetRuntimeId })),
       routingDeps(() => ({
-        enqueueEntityInputDelivery: (_runtimeId, output) => {
-          const kind = output.proposedFrame ? 'entity-frame' : 'account-ack';
+        enqueueEntityInputsDelivery: (_runtimeId, output) => {
+          const input = requireOnlyEnvelopeInput(output);
+          const kind = input.proposedFrame ? 'entity-frame' : 'account-ack';
           attempted.push(kind);
           return attempted.length === 1
             ? deliveryFailure({ category: 'TransientRace', code: 'TEST_LANE_HEAD_DEFERRED', terminal: false })
@@ -529,8 +555,8 @@ describe('ordered reliable output lanes', () => {
       env,
       [{ output: entityFrameOutput(2), targetRuntimeId }],
       routingDeps(() => ({
-        enqueueEntityInputDelivery: (_runtimeId, output) => {
-          attempted.push(reliableOrder(output));
+        enqueueEntityInputsDelivery: (_runtimeId, output) => {
+          attempted.push(reliableOrder(requireOnlyEnvelopeInput(output)));
           return deliveryAccepted('TEST_DELIVERED_AFTER_CERTIFICATE');
         },
       })),
@@ -560,7 +586,7 @@ describe('ordered reliable output lanes', () => {
       env,
       [{ output, targetRuntimeId }],
       routingDeps(() => ({
-        enqueueEntityInputDelivery: () => deliveryAccepted('TEST_TRANSPORT_HANDOFF_ONLY'),
+        enqueueEntityInputsDelivery: () => deliveryAccepted('TEST_TRANSPORT_HANDOFF_ONLY'),
       })),
     );
 
