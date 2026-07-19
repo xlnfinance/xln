@@ -71,6 +71,12 @@ export const buildHubBaselineProgressSignature = (
           : !health.bootstrapReserves?.ok
             ? 'reserves'
             : 'ready',
+    // Child bootstrap steps are causal events (account opened, funding batch
+    // submitted, watcher applied), unlike idle clocks and runtime heights.
+    // Count only active work so an idle loop cannot keep the parent alive.
+    activeBootstrapStep: health?.bootstrapProgress?.active === true
+      ? health.bootstrapProgress.step
+      : null,
     startupHeight: health?.timings?.['p2p_connect']?.completedAt === null ||
       health?.timings?.['p2p_connect']?.completedAt === undefined
       ? Number(health?.height ?? 0)
@@ -115,7 +121,7 @@ export const buildHubBaselineProgressSignature = (
         }))
         .sort((left, right) => compareStableText(left.entityId, right.entityId)),
     },
-  })));
+  }))); 
 
 export const evaluateHubBaselineDeadlines = (
   observations: readonly HubBaselineObservation[],

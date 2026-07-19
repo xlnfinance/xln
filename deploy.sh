@@ -653,14 +653,14 @@ PY
 }
 
 pretty_print_json() {
-  node -e '
-    const raw = process.argv[1] || "";
+  printf '%s' "${1:-}" | bun -e '
+    const raw = await Bun.stdin.text();
     try {
       console.log(JSON.stringify(JSON.parse(raw), null, 2));
     } catch {
       console.log(raw);
     }
-  ' "${1:-}"
+  '
 }
 
 debug_dump_http_json() {

@@ -999,6 +999,8 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('public /rpc must proxy through orchestrator safety filter');
     expect(deploy).toContain('fail_deploy_with_debug "anvil2 did not become ready on :8546"');
     expect(deploy).toContain('bun scripts/watch-prod-bootstrap.ts http://127.0.0.1:8080/api/health 0');
+    expect(deploy).toContain('const raw = await Bun.stdin.text();');
+    expect(deploy).not.toContain('const raw = process.argv[1] || "";');
     expect(deploy).not.toContain('truncate -s 0');
     expect(deploy).toContain('local expected_version="${XLN_FOUNDRY_VERSION:-v1.7.1}"');
     expect(deploy).toContain('foundryup --install "$expected_version"');

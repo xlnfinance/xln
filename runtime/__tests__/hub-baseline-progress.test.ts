@@ -121,6 +121,29 @@ describe('hub baseline progress', () => {
     expect(signature(after)).toBe(signature(before));
   });
 
+  test('counts a new active child bootstrap step without trusting its clock', () => {
+    const before = health({
+      timings: p2pReady,
+      bootstrapProgress: {
+        ...health().bootstrapProgress!,
+        active: true,
+        step: 'peer-reserve:fund-batch:Testnet:start',
+      },
+    });
+    const after = health({
+      timings: p2pReady,
+      bootstrapProgress: {
+        ...before.bootstrapProgress!,
+        idleMs: 59_000,
+        lastProgressAtMs: 60_000,
+        step: 'peer-reserve:fund-events:Testnet:applied',
+        totalMs: 60_000,
+      },
+    });
+
+    expect(signature(after)).not.toBe(signature(before));
+  });
+
   test('canonicalizes pair, reserve entity, and token order', () => {
     const pair = (counterpartyId: string) => ({
       counterpartyId,
