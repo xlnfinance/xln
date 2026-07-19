@@ -1364,8 +1364,15 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("`http://127.0.0.1:${marketMakerApiPort}/api/health`");
     expect(smoke).toContain("emitDebugEvent('mm-health-poll'");
     expect(smoke).toContain('durationMs: Date.now() - startedAt');
-    expect(smoke).toContain('const directMarketMakerHealth = fetchMarketMakerHealth(health);');
+    expect(smoke).toContain('const marketMakerProbe = fetchMarketMakerHealthProbe(health);');
+    expect(smoke).toContain('const directMarketMakerHealth = marketMakerProbe.payload;');
     expect(smoke).toContain('const stageHealth = healthWithDirectMarketMaker(health, directMarketMakerHealth);');
+    expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_NO_PROGRESS_FATAL_MS'] || '60000'");
+    expect(smoke).toContain('causalProgress = trackCausalProgress(causalProgress, JSON.stringify(last), nowMs);');
+    expect(smoke).toContain('const decision = evaluateMmHealthProbeFailure({');
+    expect(smoke).toContain("emitDebugEvent('mm-health-transient'");
+    expect(smoke).toContain('LOCAL_PROD_SMOKE_NO_CAUSAL_PROGRESS');
+    expect(smoke).toContain("if (message.includes('LOCAL_PROD_SMOKE_NO_CAUSAL_PROGRESS')) throw error;");
     expect(smoke).toContain('if (iteration % 10 === 0 || healthReady(stageHealth))');
     expect(smoke).toContain('if (healthReady(stageHealth))');
     expect(smoke).toContain('return stageHealth;');

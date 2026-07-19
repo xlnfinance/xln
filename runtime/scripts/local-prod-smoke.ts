@@ -11,6 +11,11 @@ import {
   tailLog,
 } from './e2e-fatal-log-monitor';
 import { getHubMeshBudgetElapsedMs } from './bootstrap-stage-budget';
+import {
+  evaluateMmHealthProbeFailure,
+  trackCausalProgress,
+  type CausalProgressState,
+} from './bootstrap-progress';
 
 type ManagedProcess = {
   name: string;
@@ -157,6 +162,10 @@ const healthPollMaxMs = Math.max(
 const marketMakerHealthPollMaxMs = Math.max(
   250,
   Number(process.env['XLN_LOCAL_PROD_SMOKE_MM_HEALTH_POLL_MAX_MS'] || '5000'),
+);
+const bootstrapNoProgressFatalMs = Math.max(
+  1_000,
+  Number(process.env['XLN_LOCAL_PROD_SMOKE_NO_PROGRESS_FATAL_MS'] || '60000'),
 );
 const healthPollIntervalMs = Math.max(
   100,
@@ -313,6 +322,8 @@ const copySnapshotTemplate = (sourceDir: string, targetDir: string): void => {
 };
 
 const stopManaged = async (): Promise<void> => {
+  // Mark intentional cleanup so induced child exits never overwrite the original root cause.
+  emitDebugEvent('cleanup', { stage: 'stop-managed', intentional: true });
   for (const child of children.reverse()) {
     if (!child.proc.pid || child.proc.exitCode !== null) continue;
     try {
@@ -421,7 +432,12 @@ const directMarketMakerHealthPhases = new Set([
 const shouldFetchMarketMakerHealth = (health: HealthPayload): boolean =>
   directMarketMakerHealthPhases.has(String(health.marketMaker?.startupPhase || ''));
 
-const fetchMarketMakerHealth = (health: HealthPayload): MarketMakerDirectHealthPayload | null => {
+type MarketMakerHealthProbe = {
+  payload: MarketMakerDirectHealthPayload | null;
+  transientError: string | null;
+};
+
+const fetchMarketMakerHealthProbe = (health: HealthPayload): MarketMakerHealthProbe => {
   if (!shouldFetchMarketMakerHealth(health)) {
     emitDebugEvent('mm-health-poll', {
       stage: 'mm-health-poll',
@@ -429,7 +445,7 @@ const fetchMarketMakerHealth = (health: HealthPayload): MarketMakerDirectHealthP
       skipped: true,
       startupPhase: health.marketMaker?.startupPhase ?? null,
     });
-    return null;
+    return { payload: null, transientError: null };
   }
   const startedAt = Date.now();
   try {
@@ -443,17 +459,27 @@ const fetchMarketMakerHealth = (health: HealthPayload): MarketMakerDirectHealthP
       durationMs: Date.now() - startedAt,
       ok: true,
     });
-    return payload;
+    return { payload, transientError: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     emitDebugEvent('mm-health-poll', {
       stage: 'mm-health-poll',
       durationMs: Date.now() - startedAt,
       ok: false,
+      transient: true,
       error: message,
     });
+    return { payload: null, transientError: message };
+  }
+};
+
+const fetchMarketMakerHealth = (health: HealthPayload): MarketMakerDirectHealthPayload | null => {
+  const probe = fetchMarketMakerHealthProbe(health);
+  const message = probe.transientError;
+  if (message !== null) {
     throw new Error(`LOCAL_PROD_SMOKE_MM_HEALTH_FAILED error=${message}`);
   }
+  return probe.payload;
 };
 
 const assertMarketMakerInfoResponsive = async (): Promise<MarketMakerInfoPayload> => {
@@ -655,36 +681,74 @@ const waitForHealth = async (): Promise<HealthPayload> => {
   let last: unknown = null;
   let iteration = 0;
   let lastMarketMakerPhase: string | null = null;
+  let causalProgress: CausalProgressState | null = null;
   while (Date.now() < deadline) {
     try {
       assertNoFatalChildLogs('health-poll');
       const health = await fetchHealth();
-      const directMarketMakerHealth = fetchMarketMakerHealth(health);
+      const marketMakerProbe = fetchMarketMakerHealthProbe(health);
+      const directMarketMakerHealth = marketMakerProbe.payload;
       const stageHealth = healthWithDirectMarketMaker(health, directMarketMakerHealth);
       last = summarizeHealth(stageHealth);
       emitDebugEvent('health-snapshot', { stage: 'health-poll', snapshot: last });
-      const marketMakerPhase = String(stageHealth.marketMaker?.startupPhase || '');
-      if (marketMakerPhase && marketMakerPhase !== lastMarketMakerPhase) {
-        lastMarketMakerPhase = marketMakerPhase;
-        recordStage(`marketMaker:${marketMakerPhase}`, last);
-      }
-      if (health.custody?.ok === true) recordStageOnce('custody:ready', last);
-      if (health.bootstrapReserves?.ok === true) recordStageOnce('bootstrap-reserves:ready', last);
-      if (health.hubMesh?.ok === true) recordStageOnce('hubMesh:ready', last);
-      if (
-        stageHealth.marketMaker?.cross?.ok === true &&
-        Number(stageHealth.marketMaker?.cross?.expectedRoutes || 0) > 0
-      ) {
-        recordStageOnce('marketMaker:cross-ready', last);
-      }
-      if (stageHealth.marketMaker?.ok === true) recordStageOnce('marketMaker:ready', last);
-      enforceBootstrapStageBudgets(stageHealth, last as Record<string, unknown>);
-      if (iteration % 10 === 0 || healthReady(stageHealth)) {
-        console.log(`[local-prod-smoke] health ${JSON.stringify(last)}`);
-      }
-      if (healthReady(stageHealth)) {
-        recordStageOnce('system:ready', last);
-        return stageHealth;
+      const nowMs = Date.now();
+      causalProgress = trackCausalProgress(causalProgress, JSON.stringify(last), nowMs);
+      if (marketMakerProbe.transientError !== null) {
+        // Stale MM view: never counts as ready and never advances stages.
+        // Continue only while the rest of bootstrap still shows causal progress.
+        const decision = evaluateMmHealthProbeFailure({
+          nowMs,
+          lastProgressAtMs: causalProgress.lastProgressAtMs,
+          noProgressFatalMs: bootstrapNoProgressFatalMs,
+        });
+        emitDebugEvent('mm-health-transient', {
+          stage: 'health-poll',
+          action: decision.action,
+          msSinceProgress: decision.msSinceProgress,
+          noProgressFatalMs: bootstrapNoProgressFatalMs,
+          error: marketMakerProbe.transientError,
+        });
+        console.warn(
+          `[local-prod-smoke] WARN mm-health transient failure action=${decision.action} ` +
+          `msSinceProgress=${decision.msSinceProgress} error=${marketMakerProbe.transientError}`,
+        );
+        if (decision.action === 'fatal') {
+          throw new Error(
+            `LOCAL_PROD_SMOKE_MM_HEALTH_FAILED msSinceProgress=${decision.msSinceProgress} ` +
+            `noProgressFatalMs=${bootstrapNoProgressFatalMs} error=${marketMakerProbe.transientError}`,
+          );
+        }
+      } else {
+        const msSinceProgress = nowMs - causalProgress.lastProgressAtMs;
+        if (msSinceProgress > bootstrapNoProgressFatalMs) {
+          throw new Error(
+            `LOCAL_PROD_SMOKE_NO_CAUSAL_PROGRESS msSinceProgress=${msSinceProgress} ` +
+            `noProgressFatalMs=${bootstrapNoProgressFatalMs} last=${JSON.stringify(last)}`,
+          );
+        }
+        const marketMakerPhase = String(stageHealth.marketMaker?.startupPhase || '');
+        if (marketMakerPhase && marketMakerPhase !== lastMarketMakerPhase) {
+          lastMarketMakerPhase = marketMakerPhase;
+          recordStage(`marketMaker:${marketMakerPhase}`, last);
+        }
+        if (health.custody?.ok === true) recordStageOnce('custody:ready', last);
+        if (health.bootstrapReserves?.ok === true) recordStageOnce('bootstrap-reserves:ready', last);
+        if (health.hubMesh?.ok === true) recordStageOnce('hubMesh:ready', last);
+        if (
+          stageHealth.marketMaker?.cross?.ok === true &&
+          Number(stageHealth.marketMaker?.cross?.expectedRoutes || 0) > 0
+        ) {
+          recordStageOnce('marketMaker:cross-ready', last);
+        }
+        if (stageHealth.marketMaker?.ok === true) recordStageOnce('marketMaker:ready', last);
+        enforceBootstrapStageBudgets(stageHealth, last as Record<string, unknown>);
+        if (iteration % 10 === 0 || healthReady(stageHealth)) {
+          console.log(`[local-prod-smoke] health ${JSON.stringify(last)}`);
+        }
+        if (healthReady(stageHealth)) {
+          recordStageOnce('system:ready', last);
+          return stageHealth;
+        }
       }
     } catch (error) {
       if (fatalStageBudgetError) throw new Error(fatalStageBudgetError);
@@ -692,6 +756,7 @@ const waitForHealth = async (): Promise<HealthPayload> => {
       if (message.includes('LOCAL_PROD_SMOKE_STAGE_BUDGET_EXCEEDED')) throw error;
       if (message.includes('LOCAL_PROD_SMOKE_FATAL_LOG')) throw error;
       if (message.includes('LOCAL_PROD_SMOKE_MM_HEALTH_FAILED')) throw error;
+      if (message.includes('LOCAL_PROD_SMOKE_NO_CAUSAL_PROGRESS')) throw error;
       last = message;
     }
     iteration += 1;
