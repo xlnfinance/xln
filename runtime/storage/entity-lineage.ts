@@ -912,6 +912,28 @@ export const rebaseCertifiedEntityLineageAtRuntimeCheckpoint = (
   const lineageByReplicaKey = new Map<string, CertifiedEntityFrameLink[]>();
   const anchorByReplicaKey = new Map<string, CertifiedEntityLineageAnchor>();
   const entriesByEntity = new Map<string, ReplicaEntry[]>();
+  const endpointEvidence = new Map<string, CertifiedEntityLineageAnchor>();
+  const endpointKey = (entityId: string, height: number, frameHash: string): string =>
+    `${normalizeEntityId(entityId)}:${height}:${String(frameHash).toLowerCase()}`;
+  for (const anchor of validated.anchorByReplicaKey.values()) {
+    endpointEvidence.set(endpointKey(anchor.entityId, anchor.height, anchor.frameHash), anchor);
+  }
+  for (const [replicaKey, links] of validated.lineageByReplicaKey) {
+    const replica = env.eReplicas.get(replicaKey);
+    const evidenceEntityId = normalizeEntityId(replica?.entityId || replica?.state?.entityId || '');
+    if (!evidenceEntityId && links.length > 0) {
+      throw new Error(`STORAGE_ENTITY_LINEAGE_CHECKPOINT_REPLICA_MISSING:${replicaKey}`);
+    }
+    for (const link of links) {
+      endpointEvidence.set(endpointKey(evidenceEntityId, link.frame.height, link.frame.hash), {
+        entityId: evidenceEntityId,
+        height: link.frame.height,
+        frameHash: link.frame.hash,
+        stateRoot: link.frame.stateRoot,
+        authority: link.postAuthority,
+      });
+    }
+  }
   for (const [rawReplicaKey, replica] of env.eReplicas) {
     if (!replica?.state) continue;
     const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || '');
@@ -927,16 +949,23 @@ export const rebaseCertifiedEntityLineageAtRuntimeCheckpoint = (
     }
     const pending = entries.map(entry => {
       const state = entry.replica.state;
-      const authority = buildEntityFrameAuthority(state);
-      const base = state.height === 0
-        ? createGenesisAnchor(env, entityId, entry)
-        : {
-            entityId,
-            height: state.height,
-            frameHash: replicaHead(entry.replica),
-            stateRoot: computeCanonicalEntityConsensusStateHash(state),
-            authority,
-          } satisfies CertifiedEntityLineageAnchor;
+      const frameHash = replicaHead(entry.replica);
+      const evidence = endpointEvidence.get(endpointKey(entityId, state.height, frameHash));
+      if (!evidence) {
+        throw new Error(
+          `STORAGE_ENTITY_LINEAGE_CHECKPOINT_ENDPOINT_MISSING:${entityId}:${state.height}:${frameHash}`,
+        );
+      }
+      const base: CertifiedEntityLineageAnchor = {
+        entityId,
+        height: state.height,
+        frameHash,
+        stateRoot: evidence.stateRoot,
+        authority: structuredClone(evidence.authority),
+        ...(evidence.authorityEvidenceHash
+          ? { authorityEvidenceHash: evidence.authorityEvidenceHash }
+          : {}),
+      };
       return { entry, anchor: base };
     });
     const replicaSetRoot = computeRuntimeCheckpointReplicaSetRoot(env.height, pending);
