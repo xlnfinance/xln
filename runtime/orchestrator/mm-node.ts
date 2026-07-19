@@ -4676,6 +4676,13 @@ const run = async (): Promise<void> => {
         currentCheckpoint,
         health: summarizeMarketMakerHealthForDebug(health),
         backlog: getMarketMakerRuntimeBacklogSnapshot(env, { includeQueuedEntityInputs: true }),
+        activeProcess: env.runtimeState?.processingPromise
+          ? {
+              enteredAt: env.lastProcessEnteredAt,
+              progressAt: env.activeProcessProgressAt,
+              progressStep: env.activeProcessProgressStep,
+            }
+          : null,
         p2p: {
           connected: p2p.connected,
           reconnect: p2p.reconnect,
@@ -4754,7 +4761,10 @@ const run = async (): Promise<void> => {
         hasMarketMakerRuntimeBacklog(env),
         bootstrapLoopNow,
         env.runtimeState?.processingPromise
-          ? env.lastProcessEnteredAt
+          ? Math.max(
+              env.lastProcessEnteredAt ?? 0,
+              env.activeProcessProgressAt ?? 0,
+            )
           : undefined,
       );
       assertBootstrapNotStalled(cachedMarketMakerHealth);

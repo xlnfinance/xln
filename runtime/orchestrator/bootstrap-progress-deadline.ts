@@ -44,31 +44,33 @@ export const updateBootstrapWorkStartedAt = (
   previousStartedAt: number | null,
   hasWork: boolean,
   now: number,
-  activeFrameStartedAt?: number,
+  activeProcessProgressAt?: number,
 ): number | null => {
   if (!Number.isSafeInteger(now) || now < 0) {
     throw new Error(`BOOTSTRAP_WORK_NOW_INVALID:${now}`);
   }
   if (!hasWork) return null;
-  if (activeFrameStartedAt !== undefined) {
-    if (!Number.isSafeInteger(activeFrameStartedAt) || activeFrameStartedAt < 0) {
-      throw new Error(`BOOTSTRAP_FRAME_STARTED_AT_INVALID:${activeFrameStartedAt}`);
+  if (activeProcessProgressAt !== undefined) {
+    if (!Number.isSafeInteger(activeProcessProgressAt) || activeProcessProgressAt < 0) {
+      throw new Error(`BOOTSTRAP_PROCESS_PROGRESS_AT_INVALID:${activeProcessProgressAt}`);
     }
-    if (activeFrameStartedAt > now) {
-      throw new Error(`BOOTSTRAP_FRAME_CLOCK_INVALID:started=${activeFrameStartedAt}:now=${now}`);
+    if (activeProcessProgressAt > now) {
+      throw new Error(
+        `BOOTSTRAP_PROCESS_PROGRESS_CLOCK_INVALID:progress=${activeProcessProgressAt}:now=${now}`,
+      );
     }
   }
-  if (previousStartedAt === null) return activeFrameStartedAt ?? now;
+  if (previousStartedAt === null) return activeProcessProgressAt ?? now;
   if (!Number.isSafeInteger(previousStartedAt) || previousStartedAt < 0) {
     throw new Error(`BOOTSTRAP_WORK_STARTED_AT_INVALID:${previousStartedAt}`);
   }
   if (now < previousStartedAt) {
     throw new Error(`BOOTSTRAP_WORK_CLOCK_INVALID:started=${previousStartedAt}:now=${now}`);
   }
-  // A newly entered Runtime frame gets its own execution deadline. Its start
-  // is not semantic progress: once this bounded window expires, bootstrap
+  // Each completed operational process phase starts one bounded window. This
+  // is not semantic bootstrap progress: a phase that runs for the full timeout
   // still fails even if unrelated work remains continuously queued.
-  return Math.max(previousStartedAt, activeFrameStartedAt ?? previousStartedAt);
+  return Math.max(previousStartedAt, activeProcessProgressAt ?? previousStartedAt);
 };
 
 /**

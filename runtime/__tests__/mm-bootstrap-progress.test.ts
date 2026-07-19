@@ -240,3 +240,11 @@ test('each actively processing Runtime frame gets one bounded execution window',
   expect(isBootstrapWorkWithinDeadline(nextFrameStartedAt, 100_000, 60_000)).toBe(true);
   expect(isBootstrapWorkWithinDeadline(nextFrameStartedAt, 130_000, 60_000)).toBe(false);
 });
+
+test('active Runtime phase progress renews only the current bounded execution window', () => {
+  const applyStartedAt = updateBootstrapWorkStartedAt(9_000, true, 61_000, 54_000);
+
+  expect(applyStartedAt).toBe(54_000);
+  expect(isBootstrapWorkWithinDeadline(applyStartedAt, 61_000, 60_000)).toBe(true);
+  expect(isBootstrapWorkWithinDeadline(applyStartedAt, 114_000, 60_000)).toBe(false);
+});

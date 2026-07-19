@@ -1141,6 +1141,10 @@ export interface Env {
   runtimeSeed?: string | undefined; // BrainVault seed backing this runtime (plaintext, dev mode)
   runtimeId?: string | undefined; // Runtime identity (usually signer1 address)
   lastProcessEnteredAt?: number; // Wall-clock timestamp of most recent process() entry
+  /** Ephemeral wall-clock boundary for the active process(); never consensus or WAL state. */
+  activeProcessProgressAt?: number;
+  /** Last completed operational phase of the active process(); diagnostics only. */
+  activeProcessProgressStep?: string;
   dbNamespace?: string; // DB namespace for per-runtime persistence (defaults to runtimeId)
   // Runtime mempool (runtime-level queue; WAL-like). runtimeInput is the persisted frame input field.
   runtimeMempool?: RuntimeInput | undefined;

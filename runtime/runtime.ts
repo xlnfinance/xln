@@ -3856,6 +3856,10 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
   ) => Promise<Error>) | undefined;
   const markProcessProfile = (label: string): void => {
     processProfileMarks[label] = Math.round(getPerfMs() - processProfileStartMs);
+    // Operational watchdog progress only. Keep this on the live Env so a
+    // long private frame remains observable without contaminating RJEA state.
+    liveEnv.activeProcessProgressAt = Date.now();
+    liveEnv.activeProcessProgressStep = label;
   };
   const logProcessProfile = (): void => {
     processProfileMetrics.heightAfter = env.height;
@@ -3884,6 +3888,8 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     const frameHeightBeforeTick = env.height;
     const frameTimestampBeforeTick = env.timestamp;
     env.lastProcessEnteredAt = Date.now();
+    env.activeProcessProgressAt = env.lastProcessEnteredAt;
+    env.activeProcessProgressStep = 'entered';
 
     if (!env.emit) {
       attachEventEmitters(env);
@@ -4602,6 +4608,8 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     logProcessProfile();
     processState.inFlightEntityInputs = 0;
     processState.processingPromise = null;
+    delete liveEnv.activeProcessProgressAt;
+    delete liveEnv.activeProcessProgressStep;
     releaseProcessLock();
   }
 };
