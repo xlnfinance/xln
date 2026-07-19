@@ -33,6 +33,7 @@ import { createAccountJClaimSession } from '../j-claim-session';
 import { prepareAccountJClaimTx } from '../j-claim-transition';
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
 import { getNextSettlementNonce } from '../../protocol/settlement/operations';
+import { cumulativeMarksToDurations } from '../../infra/perf-profile';
 
 const accountLog = createStructuredLogger('account');
 const ACCOUNT_PROPOSAL_PROFILE =
@@ -94,6 +95,10 @@ export async function proposeAccountFrame(
   accountJClaimNodeStore?: AccountJClaimNodeStore,
 ): Promise<ProposeAccountFrameResult> {
   const profileStartMs = getPerfMs();
+  const profileCheckpoints: Record<string, number> = {};
+  const checkpointProfile = (label: string): void => {
+    profileCheckpoints[label] = Math.round(getPerfMs() - profileStartMs);
+  };
   // Derive counterparty from canonical left/right
   const myEntityId = accountMachine.proofHeader.fromEntity;
   const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
@@ -158,6 +163,7 @@ export async function proposeAccountFrame(
 
   // Clone account machine for validation
   let clonedMachine = cloneAccountMachine(accountMachine);
+  checkpointProfile('clone');
   // NOTE: proofHeader.nextProofNonce is NOT set here — it's incremented per-message, not per-frame
 
   // Deterministic J-height for account frame hashing:
@@ -360,6 +366,7 @@ export async function proposeAccountFrame(
       collectSuccessfulTx(accountTx, preparedTx, result);
     }
   }
+  checkpointProfile('validateTxs');
 
   accountMachine.mempool = removeCommittedTxsFromMempool(accountMachine.mempool, txsToRemove);
   markStorageAccountDirty(env, accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
@@ -420,6 +427,7 @@ export async function proposeAccountFrame(
       events,
     };
   }
+  checkpointProfile('stateRoot');
   const frameData = {
     height: accountMachine.currentHeight + 1,
     timestamp: frameTimestamp,
@@ -434,6 +442,7 @@ export async function proposeAccountFrame(
   };
 
   frameData.stateHash = await createFrameHash(frameData as AccountFrame);
+  checkpointProfile('frameHash');
 
   accountLog.debug('proposal.frame_built', {
     height: frameData.height,
@@ -464,6 +473,7 @@ export async function proposeAccountFrame(
       events,
     };
   }
+  checkpointProfile('frameValidation');
 
   // Generate HANKO signature - CRITICAL: Use signerId, not entityId
   // For single-signer entities, build hanko with single EOA signature
@@ -527,6 +537,7 @@ export async function proposeAccountFrame(
     // that can never produce the on-chain recovery proof it promises.
     throw new Error(`DISPUTE_PROOF_BUILD_FAILED: ${(error as Error).message}`, { cause: error });
   }
+  checkpointProfile('disputeProof');
 
   const proofChanged = disputeHash !== undefined;
   let frameHanko: string | undefined;
@@ -546,6 +557,7 @@ export async function proposeAccountFrame(
     }
     accountMachine.currentFrameHanko = frameHanko;
   }
+  checkpointProfile('signatures');
   if (proofChanged && disputeHash) {
     if (disputeHanko) accountMachine.currentDisputeProofHanko = disputeHanko;
     accountMachine.currentDisputeProofNonce = signedProofNonce;
@@ -631,6 +643,7 @@ export async function proposeAccountFrame(
   }
   if (proofChanged) accountMachine.proofHeader.nextProofNonce = signedProofNonce + 1;
   accountMachine.pendingAccountInput = cloneIsolatedAccountInput(accountInput);
+  checkpointProfile('finalize');
 
   // Collect hashes for entity-quorum signing (multi-signer support)
   const hashesToSign: AccountConsensusHashToSign[] = [
@@ -663,8 +676,10 @@ export async function proposeAccountFrame(
       txTypes: Array.from(new Set(newFrame.accountTxs.map((tx) => tx.type))).sort(),
       optimisticBatch: canOptimisticallyValidateBatch && !optimisticBatchFailed,
       totalMs: profileTotalMs,
+      marks: profileCheckpoints,
+      phases: cumulativeMarksToDurations(profileCheckpoints, profileTotalMs),
     };
-    if (ACCOUNT_PROPOSAL_PROFILE) accountLog.warn('proposal.profile', profile);
+    if (profileTotalMs >= ACCOUNT_PROPOSAL_SLOW_MS) accountLog.warn('proposal.profile', profile);
     else accountLog.debug('proposal.profile', profile);
   }
   return finalResult;

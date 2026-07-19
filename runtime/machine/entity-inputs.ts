@@ -108,6 +108,8 @@ export const applyMergedEntityInputs = async (
   const profiledInputs: Array<Record<string, unknown>> = [];
   const crossJCommandQueue: CrossJCommand[] = [];
   let localEventCount = 0;
+  let externalApplyMs = 0;
+  let immediateCrossJApplyMs = 0;
 
   const routeCommittedEntityOutputs = (outputs: RoutedEntityInput[]): void => {
     for (const output of outputs) {
@@ -210,6 +212,7 @@ export const applyMergedEntityInputs = async (
         }
         entityFrameCommitted ||= result.entityFrameCommitted;
         const inputElapsedMs = Math.round(getPerfMs() - inputProfileStartedAt);
+        immediateCrossJApplyMs += inputElapsedMs;
         if (ENTITY_INPUT_PROFILE || inputElapsedMs >= ENTITY_INPUT_SLOW_MS) {
           profiledInputs.push({
             elapsedMs: inputElapsedMs,
@@ -363,6 +366,7 @@ export const applyMergedEntityInputs = async (
       }
     }
     const inputElapsedMs = Math.round(getPerfMs() - inputProfileStartedAt);
+    externalApplyMs += inputElapsedMs;
     if (ENTITY_INPUT_PROFILE || inputElapsedMs >= ENTITY_INPUT_SLOW_MS) {
       profiledInputs.push({
         elapsedMs: inputElapsedMs,
@@ -401,6 +405,11 @@ export const applyMergedEntityInputs = async (
       appliedInputs: appliedEntityInputs.length,
       outputs: entityOutbox.length,
       jOutputs: jOutbox.length,
+      phaseTotals: {
+        externalApply: externalApplyMs,
+        immediateCrossJApply: immediateCrossJApplyMs,
+        remainder: Math.max(0, elapsedMs - externalApplyMs - immediateCrossJApplyMs),
+      },
       slowInputs: profiledInputs
         .sort((left, right) => Number(right['elapsedMs'] || 0) - Number(left['elapsedMs'] || 0))
         .slice(0, 16),

@@ -29,6 +29,7 @@ const RUNTIME_PROCESS_SLOW_MS = Math.max(
   Number(nodeProcess?.env?.['XLN_RUNTIME_PROCESS_SLOW_MS'] || '1000'),
 );
 import { getPerfMs, getWallClockMs } from './utils';
+import { cumulativeMarksToDurations } from './infra/perf-profile';
 import {
   cloneIsolatedEntityInput,
   cloneIsolatedRoutedEntityInputs,
@@ -2303,6 +2304,10 @@ const applyRuntimeInput = async (
     { runtimeId: env.runtimeId, height: env.height },
   );
   const startTime = getPerfMs();
+  const applyProfileMarks: Record<string, number> = {};
+  const markApplyProfile = (label: string): void => {
+    applyProfileMarks[label] = Math.round(getPerfMs() - startTime);
+  };
 
   // Ensure event emitters are attached (may be lost after store serialization)
   if (!env.emit) {
@@ -2392,6 +2397,7 @@ const applyRuntimeInput = async (
       [...validatedEntityInputs],
       input => hasVerifiedEntityCommitPrecertificate(env, input),
     );
+    markApplyProfile('validateMerge');
 
     const isReplay = envRecord(env)[ENV_REPLAY_MODE_KEY] === true;
     if (runtimeInput.reliableReceipts && runtimeInput.reliableReceipts.length > 0) {
@@ -2406,6 +2412,7 @@ const applyRuntimeInput = async (
         isReplay,
       }));
     }
+    markApplyProfile('runtimeTxs');
 
     // Seal every certified H0 anchor before an Entity input can advance that
     // replica to H1. Storage is intentionally written from the post-state, so
@@ -2413,6 +2420,7 @@ const applyRuntimeInput = async (
     // already lost the only authoritative H0 state. This also covers an entity
     // imported and advanced in the same Runtime frame.
     applyCertifiedEntityLineagePlan(env, buildCertifiedEntityLineagePlan(env));
+    markApplyProfile('lineage');
 
     const routingDeps = getRuntimeEntityRoutingDeps();
     const initialJOutbox = [...earlyJOutbox, ...runtimeTxJOutbox];
@@ -2423,12 +2431,14 @@ const applyRuntimeInput = async (
       isReplay,
       routingDeps,
     );
+    markApplyProfile('atomicCrossJPreflight');
     const appliedEntityBatch = await applyMergedEntityInputs(
       env,
       preparedEntityInputs.inputs,
       initialJOutbox,
       { isReplay, routingDeps },
     );
+    markApplyProfile('entityApply');
     const failedAtomicIndexes = crossJPairIndexesThatDidNotCommit(
       env,
       preparedEntityInputs.pairs,
@@ -2449,6 +2459,7 @@ const applyRuntimeInput = async (
     const reliableIngressCommits = commitReliableIngress(env, appliedEntityInputs);
     applyCommittedLocalReliableReceipts(env, reliableIngressCommits);
     releaseUncommittedReliableIngress(env, validatedEntityInputs, appliedEntityInputs);
+    markApplyProfile('reliableIngress');
     // Releasing a rejected/deferred ingress mutates only the live transport
     // waiter set. It is deliberately absent from snapshots and cannot own a
     // WAL height. Durable active/terminal frontier commits remain replayable.
@@ -2527,6 +2538,7 @@ const applyRuntimeInput = async (
       env.gossip = createGossipLayer();
       runtimeLog.info('gossip.recreated', { height: env.height });
     }
+    markApplyProfile('finalize');
 
     const endTime = getPerfMs();
     const applyElapsedMs = Math.round(endTime - startTime);
@@ -2539,6 +2551,8 @@ const applyRuntimeInput = async (
         entityTxs: appliedEntityInputs.reduce((sum, input) => sum + Number(input.entityTxs?.length || 0), 0),
         outputs: entityOutbox.length,
         jOutputs: jOutbox.length,
+        marks: applyProfileMarks,
+        phases: cumulativeMarksToDurations(applyProfileMarks, applyElapsedMs),
       });
     }
     if (DEBUG) {
@@ -4048,6 +4062,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       elapsedMs,
       ...processProfileMetrics,
       marks: processProfileMarks,
+      phases: cumulativeMarksToDurations(processProfileMarks, elapsedMs),
     });
   };
 

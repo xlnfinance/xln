@@ -31,6 +31,7 @@ import type {
   ValidatorEntityFrameExecution,
 } from '../../types';
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, getPerfMs, log } from '../../utils';
+import { cumulativeMarksToDurations } from '../../infra/perf-profile';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import {
   cloneIsolatedEntityInput,
@@ -2917,6 +2918,11 @@ export const applyEntityInput = async (
   entityInput: EntityInput,
   options: { trustedLocalRuntimeProtocol?: 'cross-j' } = {},
 ): Promise<ApplyEntityInputResult> => {
+  const consensusProfileStartedAt = getPerfMs();
+  const consensusProfileCheckpoints: Record<string, number> = {};
+  const checkpointConsensusProfile = (label: string): void => {
+    consensusProfileCheckpoints[label] = Math.round(getPerfMs() - consensusProfileStartedAt);
+  };
   const trustedLocalCrossJurisdiction = options.trustedLocalRuntimeProtocol === 'cross-j';
   if (trustedLocalCrossJurisdiction && !isSingleSignerEntity(entityReplica.state)) {
     throw new Error(`CROSS_J_LOCAL_COMMAND_SINGLE_SIGNER_REQUIRED:${entityReplica.entityId}`);
@@ -3036,6 +3042,7 @@ export const applyEntityInput = async (
     jOutbox,
     frameHash,
   };
+  checkpointConsensusProfile('ingress');
 
   const leaderVoteResult = await handleLeaderTimeoutVote(phaseContext);
   if (leaderVoteResult) return leaderVoteResult;
@@ -3125,6 +3132,7 @@ export const applyEntityInput = async (
 
     entityLog.debug('mempool.forwarded_to_proposer', { txs: txCount, proposer: shortId(proposerId) });
   }
+  checkpointConsensusProfile('admission');
 
   const commitNotificationResult = await handleCommitNotification(phaseContext);
   if (commitNotificationResult) return commitNotificationResult;
@@ -3219,6 +3227,7 @@ export const applyEntityInput = async (
           currentAuthorityReady: false,
           ...(jPrefixProposalBlocked ? { reason: 'J_PREFIX_QUORUM_REQUIRED' } : {}),
         };
+  checkpointConsensusProfile('selection');
   // A frozen-base roll exists only to open a fresh J-prefix voting round.
   // Mixing user/governance work into it lets a proposer keep advancing Entity
   // state while an honest validator has an observed J event, so the queued
@@ -3269,6 +3278,7 @@ export const applyEntityInput = async (
       consumptionNodeChanges,
       accountJClaimNodeChanges,
     } = await applyEntityFrame(env, workingReplica.state, proposalTxs, env.timestamp);
+    checkpointConsensusProfile('frameApply');
     const newHeight = workingReplica.state.height + 1;
     const newTimestamp = env.timestamp;
 
@@ -3297,6 +3307,7 @@ export const applyEntityInput = async (
       singleSignerFrameHash,
       frameOutputs,
     );
+    checkpointConsensusProfile('commitments');
 
     const hashesToSign = buildEntityHashesToSign(workingReplica.state.entityId, newHeight, singleSignerFrameHash, [
       ...collectedHashes,
@@ -3316,6 +3327,7 @@ export const applyEntityInput = async (
         await Promise.all(hashesToSign.map(hashInfo => signFrame(env, workingReplica.signerId, hashInfo.hash))),
       ],
     ]);
+    checkpointConsensusProfile('signatures');
 
     if (!workingReplica.hankoWitness) {
       workingReplica.hankoWitness = new Map();
@@ -3403,6 +3415,19 @@ export const applyEntityInput = async (
     jOutbox.push(...frameJOutputs);
 
     workingReplica.mempool = removeCommittedTxsFromMempool(workingReplica.mempool, proposalTxs);
+    checkpointConsensusProfile('commit');
+    const consensusProfileElapsedMs = Math.round(getPerfMs() - consensusProfileStartedAt);
+    if (ENTITY_FRAME_PROFILE || consensusProfileElapsedMs >= ENTITY_FRAME_SLOW_MS) {
+      entityLog.warn('single_signer.profile', {
+        entity: String(workingReplica.entityId || '').slice(-8),
+        elapsedMs: consensusProfileElapsedMs,
+        txs: proposalTxs.length,
+        outputs: entityOutbox.length,
+        jOutputs: jOutbox.length,
+        marks: consensusProfileCheckpoints,
+        phases: cumulativeMarksToDurations(consensusProfileCheckpoints, consensusProfileElapsedMs),
+      });
+    }
     return {
       outcome: { kind: 'committed' },
       newState: workingReplica.state,
@@ -4781,6 +4806,7 @@ export const applyEntityFrame = async (
       orderbookCrossFills: orderbookStats.orderbookCrossFills,
       prunedOriginatedHtlcRoutes,
       marks: frameProfileMarks,
+      phases: cumulativeMarksToDurations(frameProfileMarks, frameElapsedMs),
       txTypeTotals: Array.from(frameProfileTxTotals.entries())
         .map(([type, value]) => ({ type, ...value }))
         .sort((left, right) => right.elapsedMs - left.elapsedMs)
