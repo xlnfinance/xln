@@ -659,12 +659,6 @@ async function faucetAmount(page: Page, userEntityId: string, hubEntityId: strin
   expect(false, `faucetAmount failed: status=${lastStatus} body=${JSON.stringify(lastBody)}`).toBe(true);
 }
 
-function generateHtlcPayload(): { secret: string; hashlock: string } {
-  const secret = ethers.hexlify(ethers.randomBytes(32));
-  const hashlock = ethers.keccak256(secret);
-  return { secret, hashlock };
-}
-
 async function sendRoutedHtlcPayment(
   page: Page,
   fromEntityId: string,
@@ -673,8 +667,7 @@ async function sendRoutedHtlcPayment(
   route: string[],
   amountUsd: bigint,
   description: string,
-): Promise<{ secret: string; hashlock: string }> {
-  const { secret, hashlock } = generateHtlcPayload();
+): Promise<void> {
   await enqueueEntityTxs(page, fromEntityId, fromSignerId, [{
     type: 'htlcPayment',
     data: {
@@ -683,11 +676,8 @@ async function sendRoutedHtlcPayment(
       amount: usdcUnits(amountUsd),
       route,
       description,
-      secret,
-      hashlock,
     },
   }]);
-  return { secret, hashlock };
 }
 
 async function readPairState(page: Page, counterpartyId: string, ownerEntityId?: string) {
@@ -910,22 +900,23 @@ async function waitForRebalanceReceiveReady(
 async function waitForSenderHtlcLock(
   page: Page,
   counterpartyId: string,
-  hashlock: string,
+  baselineHashlocks: string[],
   baselineLockCount: number,
   timeoutMs = 25_000,
   ownerEntityId?: string,
-) {
+): Promise<{ snapshot: NonNullable<Awaited<ReturnType<typeof readPairState>>>; hashlock: string }> {
   const start = Date.now();
   let last: Awaited<ReturnType<typeof readPairState>> = null;
+  const prior = new Set(baselineHashlocks.map((hashlock) => hashlock.toLowerCase()));
   while (Date.now() - start < timeoutMs) {
     last = await readPairState(page, counterpartyId, ownerEntityId);
-    const hashSeen = Array.isArray(last?.recentHtlcHashlocks) && last.recentHtlcHashlocks.includes(hashlock);
+    const hashlock = last?.recentHtlcHashlocks.find((candidate) => !prior.has(candidate.toLowerCase())) || '';
     const lockCountIncreased = Number(last?.recentHtlcLockCount || 0) > baselineLockCount;
-    if (hashSeen || lockCountIncreased) return last;
+    if (last && hashlock && lockCountIncreased) return { snapshot: last, hashlock };
     await page.waitForTimeout(350);
   }
   throw new Error(
-    `sender HTLC lock not observed for ${counterpartyId.slice(0, 12)} hashlock=${hashlock.slice(0, 12)}: ${JSON.stringify(last, null, 2)}`,
+    `sender HTLC lock not observed for ${counterpartyId.slice(0, 12)}: ${JSON.stringify(last, null, 2)}`,
   );
 }
 
@@ -2380,7 +2371,7 @@ test.describe('Rebalance E2E', () => {
 
       await waitForPairIdle(senderPage, h1, 60_000, rt1.entityId);
       const senderBeforeP1 = await readPairState(senderPage, h1, rt1.entityId);
-      const p1 = await sendRoutedHtlcPayment(
+      await sendRoutedHtlcPayment(
         senderPage,
         rt1.entityId,
         rt1.signerId,
@@ -2389,7 +2380,14 @@ test.describe('Rebalance E2E', () => {
         550n,
         'rt1->rt2 via h1,h2 htlc #1',
       );
-      await waitForSenderHtlcLock(senderPage, h1, p1.hashlock, Number(senderBeforeP1?.recentHtlcLockCount || 0), 25_000, rt1.entityId);
+      await waitForSenderHtlcLock(
+        senderPage,
+        h1,
+        senderBeforeP1?.recentHtlcHashlocks ?? [],
+        Number(senderBeforeP1?.recentHtlcLockCount || 0),
+        25_000,
+        rt1.entityId,
+      );
 
       let afterP1: any = null;
       await expect.poll(async () => {
@@ -2407,7 +2405,7 @@ test.describe('Rebalance E2E', () => {
       );
       await waitForPairIdle(senderPage, h1, 60_000, rt1.entityId);
       const senderBeforeP2 = await readPairState(senderPage, h1, rt1.entityId);
-      const p2 = await sendRoutedHtlcPayment(
+      await sendRoutedHtlcPayment(
         senderPage,
         rt1.entityId,
         rt1.signerId,
@@ -2416,8 +2414,15 @@ test.describe('Rebalance E2E', () => {
         550n,
         'rt1->rt2 via h1,h2 htlc #2 pre-rebalance',
       );
-      await waitForSenderHtlcLock(senderPage, h1, p2.hashlock, Number(senderBeforeP2?.recentHtlcLockCount || 0), 25_000, rt1.entityId)
-        .catch(() => null);
+      const p2Lock = await waitForSenderHtlcLock(
+        senderPage,
+        h1,
+        senderBeforeP2?.recentHtlcHashlocks ?? [],
+        Number(senderBeforeP2?.recentHtlcLockCount || 0),
+        25_000,
+        rt1.entityId,
+      ).catch(() => null);
+      const p2Hashlock = p2Lock?.hashlock ?? '';
 
       await recipientPage.waitForTimeout(2_000);
       type P2Observation = {
@@ -2431,8 +2436,8 @@ test.describe('Rebalance E2E', () => {
       const readP2Observation = async (): Promise<P2Observation> => {
         const afterP2 = await readPairState(recipientPage, h2, rt2.entityId);
         expect(afterP2, 'rt2-h2 state after payment#2').toBeTruthy();
-        const p2HashSeen = Array.isArray(afterP2?.recentHtlcHashlocks) && afterP2.recentHtlcHashlocks.includes(p2.hashlock);
-        const p2Received = await hasDebugHtlcEvent(recipientPage, p2.hashlock, 'HtlcReceived', scenarioStartedAt);
+        const p2HashSeen = !!p2Hashlock && Array.isArray(afterP2?.recentHtlcHashlocks) && afterP2.recentHtlcHashlocks.includes(p2Hashlock);
+        const p2Received = !!p2Hashlock && await hasDebugHtlcEvent(recipientPage, p2Hashlock, 'HtlcReceived', scenarioStartedAt);
         const rt2P2Events = await readPersistedFrameEventsSinceCursor(recipientPage, {
           cursor: rt2P2Cursor,
           eventNames: ['HtlcReceived', 'account_settled_finalized_bilateral'],
@@ -2513,8 +2518,8 @@ test.describe('Rebalance E2E', () => {
       while (!p2PostRebalanceReceived && Date.now() < p2PostRebalanceDeadline) {
         afterP2PostRebalance = await readPairState(recipientPage, h2, rt2.entityId);
         const hashSeen = Array.isArray(afterP2PostRebalance?.recentHtlcHashlocks)
-          && afterP2PostRebalance.recentHtlcHashlocks.includes(p2.hashlock);
-        const eventSeen = await hasDebugHtlcEvent(recipientPage, p2.hashlock, 'HtlcReceived', scenarioStartedAt);
+          && afterP2PostRebalance.recentHtlcHashlocks.includes(p2Hashlock);
+        const eventSeen = !!p2Hashlock && await hasDebugHtlcEvent(recipientPage, p2Hashlock, 'HtlcReceived', scenarioStartedAt);
         p2PostRebalanceReceived = hashSeen || eventSeen;
         if (p2PostRebalanceReceived) break;
         await recipientPage.waitForTimeout(400);
@@ -2531,7 +2536,7 @@ test.describe('Rebalance E2E', () => {
       const debtBeforeP3 = BigInt(rebDone.hubExposure || rebDone.hubDebt || '0');
       await waitForPairIdle(senderPage, h1, 20_000, rt1.entityId);
       const senderBeforeP3 = await readPairState(senderPage, h1, rt1.entityId);
-      const p3 = await sendRoutedHtlcPayment(
+      await sendRoutedHtlcPayment(
         senderPage,
         rt1.entityId,
         rt1.signerId,
@@ -2540,7 +2545,14 @@ test.describe('Rebalance E2E', () => {
         550n,
         'rt1->rt2 via h1,h2 htlc #3 post-rebalance',
       );
-      await waitForSenderHtlcLock(senderPage, h1, p3.hashlock, Number(senderBeforeP3?.recentHtlcLockCount || 0), 25_000, rt1.entityId);
+      await waitForSenderHtlcLock(
+        senderPage,
+        h1,
+        senderBeforeP3?.recentHtlcHashlocks ?? [],
+        Number(senderBeforeP3?.recentHtlcLockCount || 0),
+        25_000,
+        rt1.entityId,
+      );
 
       let afterP3: any = null;
       await expect.poll(async () => {
@@ -2608,7 +2620,7 @@ test.describe('Rebalance E2E', () => {
 
       await waitForPairIdle(senderPage, h3, 60_000, rt1.entityId);
       const senderBeforeFirstH3 = await readPairState(senderPage, h3, rt1.entityId);
-      const payment1 = await sendRoutedHtlcPayment(
+      await sendRoutedHtlcPayment(
         senderPage,
         rt1.entityId,
         rt1.signerId,
@@ -2617,7 +2629,14 @@ test.describe('Rebalance E2E', () => {
         550n,
         'rt1->rt2 via h3 htlc #1',
       );
-      await waitForSenderHtlcLock(senderPage, h3, payment1.hashlock, Number(senderBeforeFirstH3?.recentHtlcLockCount || 0), 25_000, rt1.entityId);
+      await waitForSenderHtlcLock(
+        senderPage,
+        h3,
+        senderBeforeFirstH3?.recentHtlcHashlocks ?? [],
+        Number(senderBeforeFirstH3?.recentHtlcLockCount || 0),
+        25_000,
+        rt1.entityId,
+      );
 
       let afterP1: any = null;
       await expect.poll(async () => {
@@ -2634,7 +2653,7 @@ test.describe('Rebalance E2E', () => {
       );
       await waitForPairIdle(senderPage, h3, 60_000, rt1.entityId);
       const senderBeforeP2 = await readPairState(senderPage, h3, rt1.entityId);
-      const payment2 = await sendRoutedHtlcPayment(
+      await sendRoutedHtlcPayment(
         senderPage,
         rt1.entityId,
         rt1.signerId,
@@ -2643,14 +2662,22 @@ test.describe('Rebalance E2E', () => {
         550n,
         'rt1->rt2 via h3 htlc #2 should fail pre-rebalance',
       );
-      await waitForSenderHtlcLock(senderPage, h3, payment2.hashlock, Number(senderBeforeP2?.recentHtlcLockCount || 0), 25_000, rt1.entityId)
-        .catch(() => null);
+      const payment2Lock = await waitForSenderHtlcLock(
+        senderPage,
+        h3,
+        senderBeforeP2?.recentHtlcHashlocks ?? [],
+        Number(senderBeforeP2?.recentHtlcLockCount || 0),
+        25_000,
+        rt1.entityId,
+      ).catch(() => null);
+      const payment2Hashlock = payment2Lock?.hashlock ?? '';
 
       await recipientPage.waitForTimeout(2_000);
       const afterP2 = await readPairState(recipientPage, h3, rt2.entityId);
       expect(afterP2, 'runtime2-h3 state after payment2').toBeTruthy();
-      const hasPayment2PreRebalance = Array.isArray(afterP2?.recentHtlcHashlocks)
-        && afterP2.recentHtlcHashlocks.includes(payment2.hashlock);
+      const hasPayment2PreRebalance = !!payment2Hashlock
+        && Array.isArray(afterP2?.recentHtlcHashlocks)
+        && afterP2.recentHtlcHashlocks.includes(payment2Hashlock);
       const rt2P2Events = await readPersistedFrameEventsSinceCursor(recipientPage, {
         cursor: rt2P2Cursor,
         eventNames: ['HtlcReceived', 'account_settled_finalized_bilateral'],
@@ -2664,7 +2691,8 @@ test.describe('Rebalance E2E', () => {
         (step) => String(step?.accountId || '').toLowerCase() === h3Lower,
       );
       const h3SettledDuringP2 = h3SettledEarly || h3SettlesAfterP2 > h3SettlesBeforeP2;
-      const payment2Received = await hasDebugHtlcEvent(recipientPage, payment2.hashlock, 'HtlcReceived', scenarioStartedAt);
+      const payment2Received = !!payment2Hashlock
+        && await hasDebugHtlcEvent(recipientPage, payment2Hashlock, 'HtlcReceived', scenarioStartedAt);
       if (hasPayment2PreRebalance || payment2Received) {
         expect(
           h3SettledDuringP2,
@@ -2689,7 +2717,7 @@ test.describe('Rebalance E2E', () => {
 
       await waitForPairIdle(senderPage, h3, 60_000, rt1.entityId);
       const senderBeforeP3 = await readPairState(senderPage, h3, rt1.entityId);
-      const payment3 = await sendRoutedHtlcPayment(
+      await sendRoutedHtlcPayment(
         senderPage,
         rt1.entityId,
         rt1.signerId,
@@ -2698,7 +2726,14 @@ test.describe('Rebalance E2E', () => {
         550n,
         'rt1->rt2 via h3 htlc #3 post-rebalance',
       );
-      await waitForSenderHtlcLock(senderPage, h3, payment3.hashlock, Number(senderBeforeP3?.recentHtlcLockCount || 0), 25_000, rt1.entityId);
+      await waitForSenderHtlcLock(
+        senderPage,
+        h3,
+        senderBeforeP3?.recentHtlcHashlocks ?? [],
+        Number(senderBeforeP3?.recentHtlcLockCount || 0),
+        25_000,
+        rt1.entityId,
+      );
 
       const debtBeforeP3 = BigInt(rebDone.hubDebt || rebDone.hubExposure || '0');
       const outCapacityBeforeP3 = BigInt(rebDone.outCapacity || '0');
