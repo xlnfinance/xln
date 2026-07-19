@@ -12,17 +12,6 @@ FRONTEND_ONLY=0
 PRODUCTION=0
 RESET_PRODUCTION_MESH=0
 PREBUILT_FRONTEND_ARCHIVE=""
-PRODUCTION_EXPLORER_BACKEND_CONTAINER=""
-
-resume_production_explorer_backend() {
-  [ -n "$PRODUCTION_EXPLORER_BACKEND_CONTAINER" ] || return 0
-  if command -v docker >/dev/null 2>&1; then
-    docker start "$PRODUCTION_EXPLORER_BACKEND_CONTAINER" >/dev/null
-    echo "[deploy] resumed production explorer backend: $PRODUCTION_EXPLORER_BACKEND_CONTAINER"
-  fi
-  PRODUCTION_EXPLORER_BACKEND_CONTAINER=""
-}
-
 pause_production_explorer_backend() {
   command -v docker >/dev/null 2>&1 || return 0
   local container
@@ -31,13 +20,11 @@ pause_production_explorer_backend() {
     --filter label=com.docker.compose.service=backend \
     --format '{{.Names}}' | head -1)"
   [ -n "$container" ] || return 0
-  docker stop --time 30 "$container" >/dev/null
-  PRODUCTION_EXPLORER_BACKEND_CONTAINER="$container"
-  echo "[deploy] paused production explorer backend during bootstrap: $container"
+  docker stop --timeout 30 "$container" >/dev/null
+  echo "[deploy] stopped production explorer backend: $container"
 }
 
 cleanup_local_deploy_artifacts() {
-  resume_production_explorer_backend
   if [ -n "$PREBUILT_FRONTEND_ARCHIVE" ]; then
     rm -f "$PREBUILT_FRONTEND_ARCHIVE"
   fi
@@ -1159,7 +1146,6 @@ run_local_deploy() {
       if ! wait_for_public_production_stack; then
         fail_deploy_with_debug "public production stack did not become healthy"
       fi
-      run_or_fail_deploy "failed to resume production explorer backend" resume_production_explorer_backend
     else
       # Recreate from the wrapper on every non-fresh deploy. Restarting the existing PM2
       # entry can preserve an old direct command/env and silently drop wrapper defaults.
