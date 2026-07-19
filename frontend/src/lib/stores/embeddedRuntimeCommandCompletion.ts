@@ -106,3 +106,22 @@ export const findCommittedEmbeddedRuntimeInputHeight = (
   }
   return committedHeight;
 };
+
+export const findPersistedEmbeddedRuntimeInputHeight = async (
+  readFrame: (height: number) => Promise<Pick<EnvSnapshot, 'height' | 'runtimeInput'> | null>,
+  submitted: RuntimeInput,
+  afterHeight: number,
+  throughHeight: number,
+): Promise<number | null> => {
+  if (!Number.isSafeInteger(afterHeight) || afterHeight < 0) {
+    throw new Error(`EMBEDDED_RUNTIME_COMMAND_BASE_HEIGHT_INVALID:${String(afterHeight)}`);
+  }
+  if (!Number.isSafeInteger(throughHeight) || throughHeight < afterHeight) {
+    throw new Error(`EMBEDDED_RUNTIME_COMMAND_SCAN_HEIGHT_INVALID:${String(throughHeight)}`);
+  }
+  for (let height = afterHeight + 1; height <= throughHeight; height += 1) {
+    const frame = await readFrame(height);
+    if (frame && runtimeFrameContainsSubmittedInput(frame.runtimeInput, submitted)) return frame.height;
+  }
+  return null;
+};

@@ -16,6 +16,7 @@ import { RuntimeAdapterError } from '../../runtime/radapter/errors';
 import { listUnresolvedRemoteRuntimeCommandIntents } from '../../frontend/src/lib/stores/runtimeCommandIntent';
 import {
   findCommittedEmbeddedRuntimeInputHeight,
+  findPersistedEmbeddedRuntimeInputHeight,
   runtimeFrameContainsSubmittedInput,
 } from '../../frontend/src/lib/stores/embeddedRuntimeCommandCompletion';
 
@@ -579,6 +580,37 @@ test('embedded command completion follows the submitted input, not unrelated con
   expect(runtimeFrameContainsSubmittedInput(committedWithBackground, submitted)).toBe(true);
   expect(findCommittedEmbeddedRuntimeInputHeight(history, submitted, 11)).toBe(12);
   expect(findCommittedEmbeddedRuntimeInputHeight(history, submitted, 12)).toBeNull();
+});
+
+test('embedded command completion reads an evicted committed frame from durable storage', async () => {
+  const submitted: RuntimeInput = {
+    runtimeTxs: [],
+    entityInputs: [{
+      entityId: '0xentity-a',
+      signerId: '0xsigner-a',
+      entityTxs: [{ type: 'extendCredit', data: { tokenId: 3, amount: 10n } } as never],
+    }],
+  };
+  const unrelated: RuntimeInput = {
+    runtimeTxs: [],
+    entityInputs: [{
+      entityId: '0xentity-b',
+      signerId: '0xsigner-b',
+      entityTxs: [{ type: 'scheduledWake', data: {} } as never],
+    }],
+  };
+  const frames = new Map([
+    [19, { height: 19, runtimeInput: submitted }],
+    [20, { height: 20, runtimeInput: unrelated }],
+  ]);
+
+  expect(findCommittedEmbeddedRuntimeInputHeight([frames.get(20)!] as never, submitted, 15)).toBeNull();
+  expect(await findPersistedEmbeddedRuntimeInputHeight(
+    async (height) => frames.get(height) ?? null,
+    submitted,
+    15,
+    20,
+  )).toBe(19);
 });
 
 test('embedded command completion is multiset-exact and accepts only derived HTLC fields', () => {

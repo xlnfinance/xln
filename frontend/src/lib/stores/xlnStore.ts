@@ -29,7 +29,10 @@ import {
   isRuntimeCommandJournalUnlocked,
   signRuntimeAdapterOwnerBinding,
 } from './runtimeCommandJournalKeyring';
-import { findCommittedEmbeddedRuntimeInputHeight } from './embeddedRuntimeCommandCompletion';
+import {
+  findCommittedEmbeddedRuntimeInputHeight,
+  findPersistedEmbeddedRuntimeInputHeight,
+} from './embeddedRuntimeCommandCompletion';
 import {
   REMOTE_HISTORY_SCAN_CACHE_LIMIT,
   resetRuntimeHistoryFrames,
@@ -1283,6 +1286,13 @@ const drainLocalRuntimeInput = async (
   for (let i = 0; i < 80; i += 1) {
     const committedHeight = findCommittedEmbeddedRuntimeInputHeight(env.history ?? [], input, afterHeight);
     if (committedHeight !== null) return committedHeight;
+    const persistedHeight = await findPersistedEmbeddedRuntimeInputHeight(
+      (height) => xln.readPersistedStorageFrameRecord(env, height),
+      input,
+      afterHeight,
+      Math.max(afterHeight, Math.floor(Number(env.height || 0))),
+    );
+    if (persistedHeight !== null) return persistedHeight;
     const beforeHeight = Number(env.height || 0);
     await xln.process(env, undefined, 0);
     publishLocalRuntimeEnvIfActive(env);
