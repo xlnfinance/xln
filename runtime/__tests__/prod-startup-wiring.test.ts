@@ -223,6 +223,7 @@ describe('production startup wiring', () => {
     expect(script).toContain('--rpc2-url "$ANVIL_RPC2"');
     expect(script).toContain('export XLN_RUNTIME_EXIT_ON_FATAL=${XLN_RUNTIME_EXIT_ON_FATAL:-1}');
     expect(script).toContain('export XLN_STORAGE_WRITE_TIMEOUT_MS=${XLN_STORAGE_WRITE_TIMEOUT_MS:-60000}');
+    expect(script).toContain('export XLN_SNAPSHOT_INTERVAL_FRAMES=${XLN_SNAPSHOT_INTERVAL_FRAMES:-1024}');
     expect(script).not.toContain('HUB_BOOTSTRAP_PAUSE_STORAGE');
     expect(script).not.toContain('HUB_READY_SNAPSHOT');
     expect(script).toContain('export XLN_MESH_BOOTSTRAP_STALL_TIMEOUT_MS=${XLN_MESH_BOOTSTRAP_STALL_TIMEOUT_MS:-60000}');

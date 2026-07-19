@@ -58,6 +58,11 @@ export XLN_MESH_CUSTODY_DAEMON_PORT=${XLN_MESH_CUSTODY_DAEMON_PORT:-$(xln_custod
 export XLN_CUSTODY_PUBLIC_RPC_URL=${XLN_CUSTODY_PUBLIC_RPC_URL:-wss://custody.xln.finance/rpc}
 export XLN_RUNTIME_EXIT_ON_FATAL=${XLN_RUNTIME_EXIT_ON_FATAL:-1}
 export XLN_STORAGE_WRITE_TIMEOUT_MS=${XLN_STORAGE_WRITE_TIMEOUT_MS:-60000}
+# Managed testnet nodes rebuild from genesis during bootstrap. The generic
+# five-frame developer cadence snapshots four CPU-heavy runtimes at once and
+# can starve the authoritative WAL write. Keep bootstrap WAL-only; the first
+# compact recovery snapshot is a steady-state concern.
+export XLN_SNAPSHOT_INTERVAL_FRAMES=${XLN_SNAPSHOT_INTERVAL_FRAMES:-1024}
 # Leave a bounded scheduling window between CPU-heavy Runtime frames so the
 # one-CPU production host can serve health, relay, nginx, and ssh control-plane I/O.
 export XLN_RUNTIME_TICK_DELAY_MS=${XLN_RUNTIME_TICK_DELAY_MS:-25}
