@@ -4748,10 +4748,14 @@ const run = async (): Promise<void> => {
       if (startupPhase !== previousPhase) rebuildCachedHealthResponseJson();
     };
     while (!shuttingDown) {
+      const bootstrapLoopNow = Date.now();
       bootstrapWorkStartedAt = updateBootstrapWorkStartedAt(
         bootstrapWorkStartedAt,
         hasMarketMakerRuntimeBacklog(env),
-        Date.now(),
+        bootstrapLoopNow,
+        env.runtimeState?.processingPromise
+          ? env.lastProcessEnteredAt
+          : undefined,
       );
       assertBootstrapNotStalled(cachedMarketMakerHealth);
       if (hasMarketMakerRuntimeBacklog(env)) {

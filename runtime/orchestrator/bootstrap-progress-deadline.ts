@@ -44,19 +44,31 @@ export const updateBootstrapWorkStartedAt = (
   previousStartedAt: number | null,
   hasWork: boolean,
   now: number,
+  activeFrameStartedAt?: number,
 ): number | null => {
   if (!Number.isSafeInteger(now) || now < 0) {
     throw new Error(`BOOTSTRAP_WORK_NOW_INVALID:${now}`);
   }
   if (!hasWork) return null;
-  if (previousStartedAt === null) return now;
+  if (activeFrameStartedAt !== undefined) {
+    if (!Number.isSafeInteger(activeFrameStartedAt) || activeFrameStartedAt < 0) {
+      throw new Error(`BOOTSTRAP_FRAME_STARTED_AT_INVALID:${activeFrameStartedAt}`);
+    }
+    if (activeFrameStartedAt > now) {
+      throw new Error(`BOOTSTRAP_FRAME_CLOCK_INVALID:started=${activeFrameStartedAt}:now=${now}`);
+    }
+  }
+  if (previousStartedAt === null) return activeFrameStartedAt ?? now;
   if (!Number.isSafeInteger(previousStartedAt) || previousStartedAt < 0) {
     throw new Error(`BOOTSTRAP_WORK_STARTED_AT_INVALID:${previousStartedAt}`);
   }
   if (now < previousStartedAt) {
     throw new Error(`BOOTSTRAP_WORK_CLOCK_INVALID:started=${previousStartedAt}:now=${now}`);
   }
-  return previousStartedAt;
+  // A newly entered Runtime frame gets its own execution deadline. Its start
+  // is not semantic progress: once this bounded window expires, bootstrap
+  // still fails even if unrelated work remains continuously queued.
+  return Math.max(previousStartedAt, activeFrameStartedAt ?? previousStartedAt);
 };
 
 /**

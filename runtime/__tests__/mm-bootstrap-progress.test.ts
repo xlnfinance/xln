@@ -225,3 +225,18 @@ test('remote follow-up work starts a fresh bounded window after a quiescent gap'
   expect(remoteFollowUpStartedAt).toBe(65_000);
   expect(isBootstrapWorkWithinDeadline(remoteFollowUpStartedAt, 100_000, 60_000)).toBe(true);
 });
+
+test('each actively processing Runtime frame gets one bounded execution window', () => {
+  const firstFrameStartedAt = updateBootstrapWorkStartedAt(null, true, 10_000, 9_000);
+  expect(firstFrameStartedAt).toBe(9_000);
+
+  const nextFrameStartedAt = updateBootstrapWorkStartedAt(
+    firstFrameStartedAt,
+    true,
+    100_000,
+    70_000,
+  );
+  expect(nextFrameStartedAt).toBe(70_000);
+  expect(isBootstrapWorkWithinDeadline(nextFrameStartedAt, 100_000, 60_000)).toBe(true);
+  expect(isBootstrapWorkWithinDeadline(nextFrameStartedAt, 130_000, 60_000)).toBe(false);
+});
