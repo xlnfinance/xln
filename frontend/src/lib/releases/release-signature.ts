@@ -102,7 +102,7 @@ export const FOUNDATION_RELEASE_BOARD_ENTITY_ID = '0xca0c2edf3058b14ab9e7ac05aac
 // The browser cannot discover a future release from an attacker replaying an old,
 // valid manifest. It can and must reject anything older than the release it was
 // built from. A release-integrity test keeps this floor equal to the root VERSION.
-export const CURRENT_XLN_RELEASE_VERSION = '0.1.9';
+export const CURRENT_XLN_RELEASE_VERSION = '0.1.10';
 
 export function computeFoundationBoardHash(threshold: number, members: FoundationReleaseMember[]): HankoHex {
   if (!Number.isInteger(threshold) || threshold <= 0 || threshold > 0xffff) throw new Error('RELEASE_BOARD_INVALID_THRESHOLD');
