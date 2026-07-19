@@ -10,7 +10,6 @@ import { keccak256, toUtf8Bytes } from 'ethers';
 import { hasEntityCommitCertificate } from '../protocol/signatures';
 import {
   entityInputHasCrossJurisdictionIntraRuntimeTx,
-  isCrossJurisdictionEntityInputRemoteHopAllowed,
 } from '../extensions/cross-j/boundary';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import { normalizeRuntimeId } from '../networking/runtime-id';
@@ -1431,17 +1430,9 @@ export const planEntityOutputs = (
         `txTypes=${(outputToRoute.entityTxs || []).map(tx => tx.type).join(',')}`,
       );
     }
-    if (
-      entityInputHasCrossJurisdictionIntraRuntimeTx(outputToRoute) &&
-      !isCrossJurisdictionEntityInputRemoteHopAllowed(
-        outputToRoute,
-        env.runtimeId,
-        targetRuntimeId,
-        entityId => deps.resolveRuntimeIdForCrossJurisdictionEntity(env, entityId),
-      )
-    ) {
+    if (entityInputHasCrossJurisdictionIntraRuntimeTx(outputToRoute)) {
       throw new Error(
-        `CROSS_J_REMOTE_TOPOLOGY_INVALID: entity=${String(outputToRoute.entityId || '').toLowerCase()} ` +
+        `CROSS_J_REMOTE_OUTPUT_FORBIDDEN: entity=${String(outputToRoute.entityId || '').toLowerCase()} ` +
         `targetRuntime=${targetRuntimeId} txTypes=${(outputToRoute.entityTxs || []).map(tx => tx.type).join(',')}`,
       );
     }

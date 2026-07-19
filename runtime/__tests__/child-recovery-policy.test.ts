@@ -24,6 +24,19 @@ describe('managed child recovery policy', () => {
     expect(decision).toMatchObject({ action: 'fail-stop', count: 1, backoffMs: 0 });
   });
 
+  test('persists an unhandled Runtime-loop fatal on its first occurrence', () => {
+    const decision = decideChildFailure({}, crash(
+      '[ERROR][runtime] loop.error {"message":"CROSS_J_LOCAL_EVENT_REJECTED:order=42"}',
+    ));
+
+    expect(decision).toMatchObject({
+      action: 'fail-stop',
+      count: 1,
+      backoffMs: 0,
+      reasonCode: 'CROSS_J_LOCAL_EVENT_REJECTED',
+    });
+  });
+
   test('recovers transient failures twice and fail-stops on the third identical failure', () => {
     const first = decideChildFailure({}, crash('RPC_RESPONSE_JSON_TRUNCATED'));
     const second = decideChildFailure(first.counts, crash('RPC_RESPONSE_JSON_TRUNCATED'));

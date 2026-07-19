@@ -1051,7 +1051,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     });
 
     expect(result.outputs).toHaveLength(0);
-    expect(result.newState.messages.at(-1)).toContain('CROSS_J_BOOK_JURISDICTION_INVALID:testnet:localanvil2');
+    expect(result.newState.messages.at(-1)).toContain('CROSS_J_BOOK_JURISDICTION_INVALID:testnet');
   });
 
   test('prepared cross-j route keeps immutable routeHash through alias-named source commit and clear', async () => {
@@ -5829,6 +5829,8 @@ describe('cross-jurisdiction hashledger swap', () => {
   });
 
   test('cross-j same-token market price uses jurisdiction asset orientation', () => {
+    const sourceRef = `stack:2:0x${'22'.repeat(20)}`;
+    const targetRef = `stack:1:0x${'11'.repeat(20)}`;
     const route = {
       ...buildPreparedCrossJurisdictionRoute({
       orderId: 'cross-same-token-market',
@@ -5836,14 +5838,14 @@ describe('cross-jurisdiction hashledger swap', () => {
       hubEntityId: entity('c2'),
       bookOwnerEntityId: entity('c3'),
       source: {
-        jurisdiction: 'stack:z:dep',
+        jurisdiction: sourceRef,
         entityId: entity('c1'),
         counterpartyEntityId: entity('c2'),
         tokenId: 1,
         amount: 2_000_000_000_000n,
       },
       target: {
-        jurisdiction: 'stack:a:dep',
+        jurisdiction: targetRef,
         entityId: entity('c3'),
         counterpartyEntityId: entity('c4'),
         tokenId: 1,
@@ -5874,7 +5876,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       crossJurisdiction: route,
     }, route.bookOwnerEntityId || '');
 
-    expect(market?.pairId).toBe('cross:stack:a:dep:1/stack:z:dep:1');
+    expect(market?.pairId).toBe(`cross:${targetRef}:1/${sourceRef}:1`);
     expect(market?.side).toBe(0);
     expect(market?.baseAmount).toBe(1_000_000_000_000n);
     expect(market?.quoteAmount).toBe(2_000_000_000_000n);
@@ -5887,45 +5889,39 @@ describe('cross-jurisdiction hashledger swap', () => {
     const tronRef = `stack:728126428:0x${'31'.repeat(20)}`;
     const testnetRef = `stack:11155111:0x${'21'.repeat(20)}`;
 
-    const sourceStableToTargetEth = deriveCanonicalCrossJurisdictionMarketForLegs('tron', 3, 'testnet', 2);
+    const sourceStableToTargetEth = deriveCanonicalCrossJurisdictionMarketForLegs(tronRef, 3, testnetRef, 2);
     expect(sourceStableToTargetEth.sourceIsBase).toBe(false);
-    expect(sourceStableToTargetEth.baseKey).toBe('testnet:2');
-    expect(sourceStableToTargetEth.quoteKey).toBe('tron:3');
-    expect(sourceStableToTargetEth.venueId).toBe('cross:testnet:2/tron:3');
+    expect(sourceStableToTargetEth.baseKey).toBe(`${testnetRef}:2`);
+    expect(sourceStableToTargetEth.quoteKey).toBe(`${tronRef}:3`);
+    expect(sourceStableToTargetEth.venueId).toBe(`cross:${testnetRef}:2/${tronRef}:3`);
     expect(deriveCanonicalCrossJurisdictionBookOwnerForLegs(
       tronRef,
-      3,
       sourceHub,
       testnetRef,
-      2,
       targetHub,
     )).toBe(targetHub);
 
-    const sourceEthToTargetStable = deriveCanonicalCrossJurisdictionMarketForLegs('testnet', 2, 'tron', 3);
+    const sourceEthToTargetStable = deriveCanonicalCrossJurisdictionMarketForLegs(testnetRef, 2, tronRef, 3);
     expect(sourceEthToTargetStable.sourceIsBase).toBe(true);
-    expect(sourceEthToTargetStable.baseKey).toBe('testnet:2');
-    expect(sourceEthToTargetStable.quoteKey).toBe('tron:3');
-    expect(sourceEthToTargetStable.venueId).toBe('cross:testnet:2/tron:3');
+    expect(sourceEthToTargetStable.baseKey).toBe(`${testnetRef}:2`);
+    expect(sourceEthToTargetStable.quoteKey).toBe(`${tronRef}:3`);
+    expect(sourceEthToTargetStable.venueId).toBe(`cross:${testnetRef}:2/${tronRef}:3`);
     expect(deriveCanonicalCrossJurisdictionBookOwnerForLegs(
       testnetRef,
-      2,
       targetHub,
       tronRef,
-      3,
       sourceHub,
     )).toBe(targetHub);
 
-    const sourceTronEthToTargetStable = deriveCanonicalCrossJurisdictionMarketForLegs('tron', 2, 'testnet', 3);
+    const sourceTronEthToTargetStable = deriveCanonicalCrossJurisdictionMarketForLegs(tronRef, 2, testnetRef, 3);
     expect(sourceTronEthToTargetStable.sourceIsBase).toBe(true);
-    expect(sourceTronEthToTargetStable.baseKey).toBe('tron:2');
-    expect(sourceTronEthToTargetStable.quoteKey).toBe('testnet:3');
-    expect(sourceTronEthToTargetStable.venueId).toBe('cross:tron:2/testnet:3');
+    expect(sourceTronEthToTargetStable.baseKey).toBe(`${tronRef}:2`);
+    expect(sourceTronEthToTargetStable.quoteKey).toBe(`${testnetRef}:3`);
+    expect(sourceTronEthToTargetStable.venueId).toBe(`cross:${tronRef}:2/${testnetRef}:3`);
     expect(deriveCanonicalCrossJurisdictionBookOwnerForLegs(
       tronRef,
-      2,
       sourceHub,
       testnetRef,
-      3,
       targetHub,
     )).toBe(targetHub);
   });
@@ -5933,11 +5929,13 @@ describe('cross-jurisdiction hashledger swap', () => {
   test('cross-j WETH/stable market offer prices in stable quote units', () => {
     const sourceHub = entity('stable-price-source-hub');
     const targetHub = entity('stable-price-target-hub');
-    const canonicalMarket = deriveCanonicalCrossJurisdictionMarketForLegs('tron', 2, 'testnet', 3);
+    const sourceRef = `stack:728126428:0x${'31'.repeat(20)}`;
+    const targetRef = `stack:11155111:0x${'21'.repeat(20)}`;
+    const canonicalMarket = deriveCanonicalCrossJurisdictionMarketForLegs(sourceRef, 2, targetRef, 3);
     expect(canonicalMarket.sourceIsBase).toBe(true);
-    expect(canonicalMarket.baseKey).toBe('tron:2');
-    expect(canonicalMarket.quoteKey).toBe('testnet:3');
-    expect(canonicalMarket.venueId).toBe('cross:tron:2/testnet:3');
+    expect(canonicalMarket.baseKey).toBe(`${sourceRef}:2`);
+    expect(canonicalMarket.quoteKey).toBe(`${targetRef}:3`);
+    expect(canonicalMarket.venueId).toBe(`cross:${sourceRef}:2/${targetRef}:3`);
     const route = {
       ...buildPreparedCrossJurisdictionRoute({
         orderId: 'cross-tron-weth-testnet-usdt-price',
@@ -5945,14 +5943,14 @@ describe('cross-jurisdiction hashledger swap', () => {
         hubEntityId: sourceHub,
         bookOwnerEntityId: targetHub,
         source: {
-          jurisdiction: 'tron',
+          jurisdiction: sourceRef,
           entityId: entity('stable-price-maker'),
           counterpartyEntityId: sourceHub,
           tokenId: 2,
           amount: 1_000_000_000_000_000_000n,
         },
         target: {
-          jurisdiction: 'testnet',
+          jurisdiction: targetRef,
           entityId: targetHub,
           counterpartyEntityId: entity('stable-price-taker'),
           tokenId: 3,
@@ -5983,7 +5981,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       crossJurisdiction: route,
     }, targetHub);
 
-    expect(market?.pairId).toBe('cross:tron:2/testnet:3');
+    expect(market?.pairId).toBe(`cross:${sourceRef}:2/${targetRef}:3`);
     expect(market?.side).toBe(1);
     expect(market?.baseAmount).toBe(route.source.amount);
     expect(market?.quoteAmount).toBe(route.target.amount);
@@ -5993,11 +5991,13 @@ describe('cross-jurisdiction hashledger swap', () => {
   test('cross-j stable/WETH market offer keeps stable quote units when source is stable', () => {
     const sourceHub = entity('stable-source-quote-hub');
     const targetHub = entity('stable-target-base-hub');
-    const canonicalMarket = deriveCanonicalCrossJurisdictionMarketForLegs('tron', 3, 'testnet', 2);
+    const sourceRef = `stack:728126428:0x${'31'.repeat(20)}`;
+    const targetRef = `stack:11155111:0x${'21'.repeat(20)}`;
+    const canonicalMarket = deriveCanonicalCrossJurisdictionMarketForLegs(sourceRef, 3, targetRef, 2);
     expect(canonicalMarket.sourceIsBase).toBe(false);
-    expect(canonicalMarket.baseKey).toBe('testnet:2');
-    expect(canonicalMarket.quoteKey).toBe('tron:3');
-    expect(canonicalMarket.venueId).toBe('cross:testnet:2/tron:3');
+    expect(canonicalMarket.baseKey).toBe(`${targetRef}:2`);
+    expect(canonicalMarket.quoteKey).toBe(`${sourceRef}:3`);
+    expect(canonicalMarket.venueId).toBe(`cross:${targetRef}:2/${sourceRef}:3`);
     const route = {
       ...buildPreparedCrossJurisdictionRoute({
         orderId: 'cross-tron-usdt-testnet-weth-price',
@@ -6005,14 +6005,14 @@ describe('cross-jurisdiction hashledger swap', () => {
         hubEntityId: sourceHub,
         bookOwnerEntityId: targetHub,
         source: {
-          jurisdiction: 'tron',
+          jurisdiction: sourceRef,
           entityId: entity('stable-source-quote-maker'),
           counterpartyEntityId: sourceHub,
           tokenId: 3,
           amount: 2_500n * 10n ** 6n,
         },
         target: {
-          jurisdiction: 'testnet',
+          jurisdiction: targetRef,
           entityId: targetHub,
           counterpartyEntityId: entity('stable-target-base-taker'),
           tokenId: 2,
@@ -6043,7 +6043,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       crossJurisdiction: route,
     }, targetHub);
 
-    expect(market?.pairId).toBe('cross:testnet:2/tron:3');
+    expect(market?.pairId).toBe(`cross:${targetRef}:2/${sourceRef}:3`);
     expect(market?.side).toBe(0);
     expect(market?.baseAmount).toBe(route.target.amount);
     expect(market?.quoteAmount).toBe(route.source.amount);
@@ -6110,6 +6110,6 @@ describe('cross-jurisdiction hashledger swap', () => {
       runtimeSeed: 'cross-same-chain-same-token-invalid',
       sourceDisputeDelayMs: 5_000,
       now: 1_000,
-    })).toThrow(/CROSS_J_SAME_JURISDICTION_TOKEN_INVALID/);
+    })).toThrow(/CROSS_J_REQUIRES_DISTINCT_STACKS/);
   });
 });

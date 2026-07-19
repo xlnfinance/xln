@@ -1331,7 +1331,10 @@ export const buildMarketMakerCrossOfferSpecs = (
   const specs: MarketMakerOfferSpec[] = [];
   const crossPairs = buildMarketMakerCrossTokenPairs(sourceTokenIds, targetTokenIds);
   const targetByBaseName = new Map(targetHubs.map(hub => [hubRoleName(hub), hub] as const));
-  const now = Number(env.timestamp || Date.now());
+  const now = Math.floor(Number(env.timestamp));
+  if (!Number.isFinite(now) || now <= 0) {
+    throw new Error(`MARKET_MAKER_CROSS_TIMESTAMP_INVALID:${String(env.timestamp)}`);
+  }
 
   for (const sourceHub of sourceHubs) {
     const targetHub = targetByBaseName.get(hubRoleName(sourceHub));
@@ -1380,10 +1383,8 @@ export const buildMarketMakerCrossOfferSpecs = (
         const levelId = level + 1;
         const bookOwnerEntityId = deriveCanonicalCrossJurisdictionBookOwnerForLegs(
           sourceJurisdictionRef,
-          pair.sourceTokenId,
           sourceHub.entityId,
           targetJurisdictionRef,
-          pair.targetTokenId,
           targetHub.entityId,
         );
         const bookHubSignerId = normalizeEntityRef(bookOwnerEntityId) === normalizeEntityRef(sourceHub.entityId)

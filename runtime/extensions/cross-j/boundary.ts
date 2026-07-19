@@ -126,31 +126,3 @@ export const resolveCrossJurisdictionRuntimeTopology = (
     hubRuntimeId: sourceHubRuntimeId,
   };
 };
-
-export const isCrossJurisdictionRouteRemoteHopAllowed = (
-  _route: CrossJurisdictionSwapRoute,
-  _localRuntimeId: string | null | undefined,
-  _remoteRuntimeId: string | null | undefined,
-  _resolveRuntimeId: CrossJurisdictionRouteRuntimeResolver,
-): boolean => {
-  return false;
-};
-
-export const isCrossJurisdictionEntityInputRemoteHopAllowed = (
-  input: Pick<EntityInput, 'entityTxs'>,
-  localRuntimeId: string | null | undefined,
-  remoteRuntimeId: string | null | undefined,
-  resolveRuntimeId: CrossJurisdictionRouteRuntimeResolver,
-): boolean => {
-  let sawCrossJ = false;
-  for (const tx of getEffectiveEntityInputTxs(input)) {
-    if (!isCrossJurisdictionIntraRuntimeTx(tx)) continue;
-    sawCrossJ = true;
-    const route = extractCrossJurisdictionRouteFromTx(tx);
-    if (!route) return false;
-    if (!isCrossJurisdictionRouteRemoteHopAllowed(route, localRuntimeId, remoteRuntimeId, resolveRuntimeId)) {
-      return false;
-    }
-  }
-  return sawCrossJ;
-};

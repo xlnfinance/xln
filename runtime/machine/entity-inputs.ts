@@ -2,12 +2,10 @@ import { applyEntityInput } from '../entity/consensus/index';
 import type { EntityInputOutcome } from '../entity/consensus/index';
 import {
   entityInputHasCrossJurisdictionIntraRuntimeTx,
-  isCrossJurisdictionEntityInputRemoteHopAllowed,
 } from '../extensions/cross-j/boundary';
 import {
   collectCrossJurisdictionRemoteEntityHints,
   registerEntityRuntimeHint,
-  resolveRuntimeIdForCrossJurisdictionEntity,
   type RuntimeEntityRoutingDeps,
 } from './entity-routing';
 import { safeStringify } from '../protocol/serialization';
@@ -254,13 +252,7 @@ export const applyMergedEntityInputs = async (
 
     if (
       entityInput.from &&
-      entityInputHasCrossJurisdictionIntraRuntimeTx(entityInput) &&
-      !isCrossJurisdictionEntityInputRemoteHopAllowed(
-        entityInput,
-        env.runtimeId,
-        entityInput.from,
-        entityId => resolveRuntimeIdForCrossJurisdictionEntity(env, entityId, routingDeps),
-      )
+      entityInputHasCrossJurisdictionIntraRuntimeTx(entityInput)
     ) {
       const dropDetails = {
         entityId: entityInput.entityId,
@@ -270,8 +262,8 @@ export const applyMergedEntityInputs = async (
       env.error('network', 'REJECT_CROSS_J_TOPOLOGY_INVALID', dropDetails, entityInput.entityId);
       assertRuntimeIngress(
         false,
-        'RUNTIME_CROSS_J_TOPOLOGY_INVALID',
-        'Cross-j system inputs must stay inside their two-runtime route topology',
+        'RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN',
+        'Cross-j Entity inputs are runtime-private and cannot arrive from a remote runtime',
         dropDetails,
       );
     }

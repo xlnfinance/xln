@@ -142,10 +142,8 @@ export function buildCrossJurisdictionSwapSubmission(
   const expiresInMs = Math.max(30_000, Math.floor(params.expiresInMs ?? 120_000));
   const canonicalBookHubEntityId = deriveCanonicalCrossJurisdictionBookOwnerForLegs(
     sourceUserStackId,
-    Number(params.sourceTokenId),
     params.sourceHubEntityId,
     targetHubStackId,
-    Number(params.targetTokenId),
     params.targetHubEntityId,
   );
   if (

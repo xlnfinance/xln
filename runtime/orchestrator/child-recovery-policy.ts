@@ -33,6 +33,10 @@ const stableReasonCode = (reason: string): string => {
 export const isTerminalBootstrapFailureReasonCode = (reasonCode: string): boolean =>
   /(?:BOOTSTRAP_STALLED|WATCHER_DRAIN_STALLED)$/.test(reasonCode);
 
+export const isRuntimeLoopFatalReason = (reason: string): boolean =>
+  /\[ERROR\]\[runtime\]\s+loop\.error\b/.test(reason) ||
+  /\bRUNTIME_LOOP_(?:ERROR|HALTED)\b/.test(reason);
+
 export const shouldCaptureUnexpectedChildExit = (
   controlledStop: boolean,
   orchestratorShuttingDown: boolean,
@@ -71,9 +75,12 @@ export const decideChildFailure = (
   const count = (counts[fingerprint] ?? 0) + 1;
   const nextCounts = { ...counts, [fingerprint]: count };
   const terminalBootstrapFailure = isTerminalBootstrapFailureReasonCode(reasonCode);
+  const runtimeLoopFatal = isRuntimeLoopFatalReason(observation.reason);
   return {
-    action: terminalBootstrapFailure || count >= MAX_IDENTICAL_CHILD_FAILURES ? 'fail-stop' : 'recover',
-    backoffMs: terminalBootstrapFailure ? 0 : Math.min(10_000, count * 2_000),
+    action: terminalBootstrapFailure || runtimeLoopFatal || count >= MAX_IDENTICAL_CHILD_FAILURES
+      ? 'fail-stop'
+      : 'recover',
+    backoffMs: terminalBootstrapFailure || runtimeLoopFatal ? 0 : Math.min(10_000, count * 2_000),
     count,
     fingerprint,
     reasonCode,

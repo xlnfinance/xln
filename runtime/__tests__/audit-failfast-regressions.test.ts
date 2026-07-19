@@ -691,7 +691,7 @@ describe('audit fail-fast regressions', () => {
         type: 'requestCrossJurisdictionSwap',
         data: { route: {} },
       } as any],
-    }])).rejects.toThrow('RUNTIME_CROSS_J_TOPOLOGY_INVALID');
+    }])).rejects.toThrow('RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN');
 
     await expect(process(env, [{
       from: remoteRuntime,
@@ -717,7 +717,7 @@ describe('audit fail-fast regressions', () => {
           }],
         },
       } as any],
-    }])).rejects.toThrow('RUNTIME_CROSS_J_TOPOLOGY_INVALID');
+    }])).rejects.toThrow('RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN');
 
     expect(() => sendEntityInput(env, {
       entityId: `0x${'22'.repeat(32)}`,
@@ -735,7 +735,7 @@ describe('audit fail-fast regressions', () => {
         type: 'registerCrossJurisdictionSwap',
         data: { route: {} },
       } as any],
-    })).toThrow('CROSS_J_REMOTE_TOPOLOGY_INVALID');
+    })).toThrow('CROSS_J_REMOTE_OUTPUT_FORBIDDEN');
   });
 
   test('runtime ingress retargets stale signer hints only when the local target entity has one replica', async () => {
@@ -1577,7 +1577,7 @@ describe('audit fail-fast regressions', () => {
           },
         },
       } as any],
-    }])).rejects.toThrow('RUNTIME_CROSS_J_TOPOLOGY_INVALID');
+    }])).rejects.toThrow('RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN');
   });
 
   test('cross-j order admission requires committed source and target pull receipts', () => {

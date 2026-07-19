@@ -419,6 +419,21 @@ test('five-token jurisdiction keeps same-chain and cross depth inside one accoun
   }
 });
 
+test('cross offer construction requires the deterministic Runtime-frame timestamp', () => {
+  const { env, contexts, visibleHubs } = buildBootstrapTopology();
+  env.timestamp = 0;
+
+  expect(() => buildMarketMakerCrossOfferSpecs(
+    env,
+    contexts[0]!,
+    contexts[1]!,
+    [visibleHubs[0]!],
+    [visibleHubs[1]!],
+    [1],
+    [1],
+  )).toThrow('MARKET_MAKER_CROSS_TIMESTAMP_INVALID:0');
+});
+
 test('runtime market maker health stays red when same-chain offers are committed but cross source offer is pending', () => {
   const { env, contexts, visibleHubs, tokenIdsByContext } = buildBootstrapTopology();
   const sourceContext = contexts[0]!;
