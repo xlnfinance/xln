@@ -94,6 +94,7 @@ export interface RuntimeRecoveryTowerFailureSummary {
 export interface RuntimeRecoveryConfig {
   towers?: RecoveryTowerConfig[];
   useDefaultTowers?: boolean;
+  waitForTowerReceipts?: boolean;
   minSuccessfulTowers?: number;
   maxStoredBytes?: number;
   lastKnownStoredBytes?: number;
@@ -702,6 +703,7 @@ const buildDefaultRecoveryTowerConfigs = (): RecoveryTowerConfig[] =>
 
 const buildDefaultRuntimeRecoveryConfig = (): RuntimeRecoveryConfig => ({
   useDefaultTowers: false,
+  waitForTowerReceipts: false,
   towers: buildDefaultRecoveryTowerConfigs(),
 });
 
@@ -734,6 +736,7 @@ export const buildRuntimeRecoveryConfigForMode = (
   return {
     ...(options.previous || {}),
     useDefaultTowers: false,
+    waitForTowerReceipts: options.previous?.waitForTowerReceipts === true,
     towers,
   };
 };
@@ -2470,7 +2473,8 @@ function registerRuntimeEnvChange(
   }
   unregisterRuntimeEnvChange(normalizedRuntimeId);
   if (typeof xln.registerEnvChangeCallback !== 'function') return;
-  if (typeof xln.registerRecoveryBackupBarrier === 'function') {
+  const recovery = get(runtimesState).runtimes[normalizedRuntimeId]?.recovery;
+  if (recovery?.waitForTowerReceipts === true && typeof xln.registerRecoveryBackupBarrier === 'function') {
     runtimeRecoveryBarrierUnsubscribers.set(
       normalizedRuntimeId,
       xln.registerRecoveryBackupBarrier(runtimeEnv, async (backupEnv) => {

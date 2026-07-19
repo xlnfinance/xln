@@ -5,6 +5,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { spawnBunChild, startCustodySupport, stopManagedChild, waitForHttpReady } from '../orchestrator/custody-bootstrap';
 import { selectPrimaryHubJurisdiction } from '../orchestrator/jurisdiction-select';
+import { fetchLoopback } from '../orchestrator/loopback-fetch';
 
 const API_BASE_URL = process.env['DEV_API_BASE_URL'] || 'http://127.0.0.1:8082';
 const ANVIL_RPC = process.env['DEV_ANVIL_RPC'] || 'http://127.0.0.1:8545';
@@ -151,11 +152,7 @@ const main = async (): Promise<void> => {
 
   const probe = async (url: string): Promise<boolean> => {
     try {
-      const previous = process.env['NODE_TLS_REJECT_UNAUTHORIZED'];
-      process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
-      const response = await fetch(url);
-      if (previous === undefined) delete process.env['NODE_TLS_REJECT_UNAUTHORIZED'];
-      else process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = previous;
+      const response = await fetchLoopback(url);
       return response.ok;
     } catch {
       return false;

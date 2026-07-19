@@ -220,20 +220,14 @@ const results: SoundcheckResult[] = [];
 let index = 0;
 let freshResult: SoundcheckResult | null = null;
 if (mode === 'fresh' || mode === 'all') {
-  freshResult = await runSmoke('fresh', index++, mode === 'all'
-    ? {
-      XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT: '1',
-    }
-    : {});
+  freshResult = await runSmoke('fresh', index++, {});
   results.push(freshResult);
 }
 if (mode === 'all') {
   if (!freshResult) throw new Error('BOOTSTRAP_SOUNDCHECK_FRESH_RESULT_MISSING');
   results.push(installTemplateFromResult(freshResult));
 } else if (mode === 'template') {
-  results.push(await runSmoke('template', index++, {
-    XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT: '1',
-  }));
+  results.push(await runSmoke('template', index++, {}));
 }
 if (mode === 'clone' || mode === 'all') {
   requireTemplate();

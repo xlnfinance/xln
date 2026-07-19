@@ -8,6 +8,7 @@ const DEFAULT_CAPABILITY_TTL_MS = 60 * 60 * 1_000;
 const DEFAULT_CAPABILITY_MAX_TTL_MS = 24 * 60 * 60 * 1_000;
 const DEFAULT_CAPABILITY_AUDIENCE = 'xln-runtime';
 const DEFAULT_CAPABILITY_KEY_ID = 'default';
+let registeredRuntimeAdapterAuthSeed: string | null = null;
 
 export type RuntimeAdapterAuthVerification = {
   level: RuntimeAdapterAuthLevel;
@@ -156,11 +157,25 @@ const constantTimeEquals = (left: string, right: string): boolean => {
 
 export const resolveRuntimeAdapterAuthSeed = (env: Env | null): string | null => {
   const fromEnv = typeof process !== 'undefined' ? String(process.env['XLN_RADAPTER_AUTH_SEED'] || '').trim() : '';
+  if (registeredRuntimeAdapterAuthSeed) {
+    if (fromEnv && normalizedSeed(fromEnv) !== registeredRuntimeAdapterAuthSeed) {
+      throw new Error('RADAPTER_AUTH_SEED_SOURCE_CONFLICT');
+    }
+    return registeredRuntimeAdapterAuthSeed;
+  }
   if (fromEnv) return normalizedSeed(fromEnv);
   if (truthyEnv('XLN_RADAPTER_REQUIRE_AUTH_SEED')) return null;
   if (!truthyEnv('XLN_RADAPTER_ALLOW_RUNTIME_SEED_AUTH')) return null;
   const runtimeSeed = String(env?.runtimeSeed || '').trim();
   return runtimeSeed ? normalizedSeed(runtimeSeed) : null;
+};
+
+export const registerRuntimeAdapterAuthSeed = (seed: string): void => {
+  const normalized = normalizedSeed(seed);
+  if (registeredRuntimeAdapterAuthSeed && registeredRuntimeAdapterAuthSeed !== normalized) {
+    throw new Error('RADAPTER_AUTH_SEED_REGISTRATION_CONFLICT');
+  }
+  registeredRuntimeAdapterAuthSeed = normalized;
 };
 
 export const verifyRuntimeAdapterAuthKey = (

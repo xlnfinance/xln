@@ -6,6 +6,7 @@ import type { Readable } from 'node:stream';
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
 import { deserializeTaggedJson } from '../protocol/serialization';
 import { deriveManagedEntityIdentity } from './daemon-control';
+import { fetchLoopback } from './loopback-fetch';
 import {
   buildManagedRuntimeChildSecretEnv,
   childSecretFdEnv,
@@ -278,16 +279,7 @@ export const waitForHttpReady = async (
   while (Date.now() < deadline) {
     assertChildStillRunning(child);
     try {
-      const insecureLocalHttps = url.startsWith('https://localhost:') || url.startsWith('https://127.0.0.1:');
-      const prevTlsReject = process.env['NODE_TLS_REJECT_UNAUTHORIZED'];
-      if (insecureLocalHttps) {
-        process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
-      }
-      const response = await fetch(url);
-      if (insecureLocalHttps) {
-        if (prevTlsReject === undefined) delete process.env['NODE_TLS_REJECT_UNAUTHORIZED'];
-        else process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = prevTlsReject;
-      }
+      const response = await fetchLoopback(url);
       const bodyText = await response.text();
       if (response.status < 500) {
         const ready = isReady ? await isReady(response, bodyText) : true;

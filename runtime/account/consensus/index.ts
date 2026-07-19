@@ -814,6 +814,7 @@ type IncomingFramePreflightResult =
     receivedFrame: AccountFrame;
     ourEntityId: string;
     frameJHeight: number;
+    rollbackPendingFrame: boolean;
   }
   | { kind: 'return'; result: HandleAccountInputResult };
 
@@ -954,14 +955,12 @@ function handleUnmatchedAck(
   };
 }
 
-function handleSameHeightIncomingFrame(
-  env: Env,
+function resolveSameHeightIncomingFrame(
   accountMachine: AccountMachine,
-  input: AccountInput,
   receivedFrame: AccountFrame,
   events: string[],
   committedFrames: AccountCommittedFrame[],
-): HandleAccountInputResult | undefined {
+): HandleAccountInputResult | true | undefined {
   if (!(accountMachine.pendingFrame && receivedFrame.height === accountMachine.pendingFrame.height)) {
     return undefined;
   }
@@ -990,6 +989,17 @@ function handleSameHeightIncomingFrame(
     return undefined;
   }
 
+  return true;
+}
+
+function applySameHeightIncomingFrameRollback(
+  env: Env,
+  accountMachine: AccountMachine,
+  input: AccountInput,
+  receivedFrame: AccountFrame,
+  events: string[],
+): void {
+  const receivedHash = receivedFrame.stateHash;
   let restoredTxCount = 0;
   if (accountMachine.pendingFrame) {
     restoredTxCount = accountMachine.pendingFrame.accountTxs.length;
@@ -1012,7 +1022,6 @@ function handleSameHeightIncomingFrame(
   }
 
   events.push(`📥 Accepted LEFT's frame ${receivedFrame.height} (we are RIGHT, deterministic tiebreaker)`);
-  return undefined;
 }
 
 async function verifyIncomingFrameHanko(
@@ -1152,18 +1161,6 @@ async function preflightIncomingAccountFrame(
     };
   }
 
-  const sameHeightResult = handleSameHeightIncomingFrame(
-    env,
-    accountMachine,
-    input,
-    receivedFrame,
-    events,
-    committedFrames,
-  );
-  if (sameHeightResult) {
-    return { kind: 'return', result: sameHeightResult };
-  }
-
   // NOTE: rollbackCount decrement happens in ACK block when pendingFrame confirmed.
   if (HEAVY_LOGS) {
     accountLog.debug('frame.sequence_check', {
@@ -1222,11 +1219,31 @@ async function preflightIncomingAccountFrame(
     };
   }
 
+  // Resolve simultaneous proposals only after every rejecting preflight has
+  // authenticated the frame. RIGHT's rollback is deferred until deterministic
+  // replay on a clone succeeds, so a rejected peer frame cannot mutate live
+  // pending state or restore its transactions into the mempool.
+  const sameHeightResolution = resolveSameHeightIncomingFrame(
+    accountMachine,
+    receivedFrame,
+    events,
+    committedFrames,
+  );
+  if (sameHeightResolution !== true && sameHeightResolution) {
+    return { kind: 'return', result: sameHeightResolution };
+  }
+
   const ourEntityId = accountMachine.proofHeader.fromEntity;
   const currentJHeight = accountMachine.lastFinalizedJHeight ?? 0;
   const frameJHeight = receivedFrame.jHeight ?? currentJHeight;
 
-  return { kind: 'continue', receivedFrame, ourEntityId, frameJHeight };
+  return {
+    kind: 'continue',
+    receivedFrame,
+    ourEntityId,
+    frameJHeight,
+    rollbackPendingFrame: sameHeightResolution === true,
+  };
 }
 
 function collectReceiverValidationDeltas(clonedMachine: AccountMachine): {
@@ -1897,6 +1914,16 @@ async function handleIncomingAccountFrame(
       };
     }
     return validationResult;
+  }
+
+  if (preflight.rollbackPendingFrame) {
+    applySameHeightIncomingFrameRollback(
+      env,
+      accountMachine,
+      input,
+      preflight.receivedFrame,
+      events,
+    );
   }
 
   await commitIncomingFrameOnRealState(

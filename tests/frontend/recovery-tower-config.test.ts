@@ -47,14 +47,21 @@ test('resolveDefaultRecoveryTowerUrls enables explicit dev watchtower on localho
 });
 
 test('runtime recovery modes keep tower setup out of seed creation defaults', () => {
-  expect(buildRuntimeRecoveryConfigForMode('official', {
+  const official = buildRuntimeRecoveryConfigForMode('official', {
     officialTowerUrl: 'https://xln.finance/',
-  }).towers).toEqual([{
+  });
+  expect(official.waitForTowerReceipts).toBe(false);
+  expect(official.towers).toEqual([{
     id: 'official-watchtower',
     url: 'https://xln.finance',
     towerMode: 'delayed_last_resort',
     enabled: true,
   }]);
+
+  expect(buildRuntimeRecoveryConfigForMode('backup_only', {
+    officialTowerUrl: 'https://xln.finance/',
+    previous: { waitForTowerReceipts: true },
+  }).waitForTowerReceipts).toBe(true);
 
   expect(buildRuntimeRecoveryConfigForMode('backup_only', {
     officialTowerUrl: 'https://xln.finance/',
@@ -67,6 +74,18 @@ test('runtime recovery modes keep tower setup out of seed creation defaults', ()
     useDefaultTowers: false,
     towers: [{ url: 'http://127.0.0.1:9100', towerMode: 'delayed_last_resort', enabled: true }],
   });
+});
+
+test('tower receipts block runtime output only when explicitly enabled', () => {
+  const source = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
+  const registration = source.slice(
+    source.indexOf('function registerRuntimeEnvChange('),
+    source.indexOf('function runtimeToEntry(', source.indexOf('function registerRuntimeEnvChange(')),
+  );
+  expect(registration).toContain("recovery?.waitForTowerReceipts === true");
+  expect(registration.indexOf('recovery?.waitForTowerReceipts === true')).toBeLessThan(
+    registration.indexOf('xln.registerRecoveryBackupBarrier(runtimeEnv'),
+  );
 });
 
 test('runtime recovery upload skips already uploaded height instead of building empty journal tail', () => {

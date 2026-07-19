@@ -82,7 +82,7 @@ import {
   parseArgs,
 } from './orchestrator-config';
 import { evaluateBootstrapProgressDeadline } from './bootstrap-progress-deadline';
-import { buildHubReadySnapshotFence } from './hub-ready-snapshot-fence';
+import { fetchLoopback } from './loopback-fetch';
 import { validateHubHealthPayload, validateHubInfoPayload } from './bootstrap-health-validation';
 import {
   createManagedRuntimeLeaseManager,
@@ -223,11 +223,6 @@ const marketMakerReadyRestartLimit = Math.max(
   Math.floor(Number(process.env['XLN_MARKET_MAKER_READY_RESTARTS'] ?? '2')),
 );
 const MARKET_MAKER_RESTART_FENCING_GRACE_MS = STORAGE_WRITER_LOCK_TTL_MS + 1_000;
-const HUB_BOOTSTRAP_PAUSE_STORAGE = process.env['XLN_HUB_BOOTSTRAP_PAUSE_STORAGE'] ?? '1';
-const HUB_READY_SNAPSHOT_TIMEOUT_MS = Math.max(
-  5_000,
-  Math.floor(Number(process.env['XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS'] || '60000')),
-);
 const relayUrl = args.relayUrl;
 const shardJurisdictionsPath = join(args.dbRoot, 'jurisdictions.json');
 const controlPlaneDir = join(args.dbRoot, '.control-plane');
@@ -642,11 +637,6 @@ const marketMakerBootstrapEventsPath = (): string =>
   String(process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL'] || '').trim() ||
   join(marketMakerChild.dbPath, 'bootstrap-events.jsonl');
 
-const envFlagEnabled = (value: unknown): boolean => {
-  const normalized = String(value ?? '').trim().toLowerCase();
-  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
-};
-
 const pushChildLogLines = (target: string[], chunk: Buffer | string): void => {
   const text = chunk.toString();
   for (const rawLine of text.split(/\r?\n/)) {
@@ -752,13 +742,8 @@ const recordFetchFailure = (
 const fetchJson = async <T>(url: string, timeoutMs = 2_000): Promise<T | null> => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const insecureLocalHttps = url.startsWith('https://localhost:') || url.startsWith('https://127.0.0.1:');
-  const previousTlsReject = process.env['NODE_TLS_REJECT_UNAUTHORIZED'];
   try {
-    if (insecureLocalHttps) {
-      process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
-    }
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetchLoopback(url, { signal: controller.signal });
     if (!response.ok) {
       recordFetchFailure(url, 'http', `status=${response.status}`);
       return null;
@@ -780,10 +765,6 @@ const fetchJson = async <T>(url: string, timeoutMs = 2_000): Promise<T | null> =
     recordFetchFailure(url, 'transport', serializeError(error));
     return null;
   } finally {
-    if (insecureLocalHttps) {
-      if (previousTlsReject === undefined) delete process.env['NODE_TLS_REJECT_UNAUTHORIZED'];
-      else process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = previousTlsReject;
-    }
     clearTimeout(timer);
   }
 };
@@ -805,38 +786,6 @@ const postJson = async (url: string, timeoutMs = 1_000): Promise<void> => {
     // best effort before hard stop
   } finally {
     if (timer) clearTimeout(timer);
-  }
-};
-
-type ControlOkResponse = {
-  ok?: boolean;
-  error?: string;
-  code?: string;
-  [key: string]: unknown;
-};
-
-const postJsonExpectOk = async <T extends ControlOkResponse>(url: string, timeoutMs: number): Promise<T> => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { method: 'POST', signal: controller.signal });
-    const bodyText = await response.text().catch(() => '');
-    let payload: ControlOkResponse | null = null;
-    if (bodyText.trim()) {
-      try {
-        payload = JSON.parse(bodyText) as ControlOkResponse;
-      } catch {
-        payload = { error: bodyText.slice(0, 500) };
-      }
-    }
-    if (!response.ok || payload?.ok !== true) {
-      throw new Error(`CONTROL_POST_FAILED url=${url} status=${response.status} payload=${safeStringify(payload)}`);
-    }
-    return payload as T;
-  } catch (error) {
-    throw new Error(`CONTROL_POST_FAILED url=${url} error=${serializeError(error)}`);
-  } finally {
-    clearTimeout(timer);
   }
 };
 
@@ -1352,13 +1301,11 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
       ...buildRpcChildEnv(),
       USE_ANVIL: 'true',
-      XLN_RADAPTER_AUTH_SEED: child.authSeed,
       XLN_ORCHESTRATOR_PID: String(process.pid),
       XLN_ORCHESTRATOR_OWNER_ID: orchestratorOwnerId,
       XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(STARTUP_TIMEOUT_MS),
       XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '1',
       XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000',
-      XLN_HUB_BOOTSTRAP_PAUSE_STORAGE: HUB_BOOTSTRAP_PAUSE_STORAGE,
       XLN_LOG_LEVEL: process.env['XLN_HUB_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn',
     }),
   });
@@ -1407,7 +1354,10 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       });
     }
   });
-  await writeInheritedChildSecrets(proc, { runtimeSeed: child.seed });
+  await writeInheritedChildSecrets(proc, {
+    runtimeSeed: child.seed,
+    radapterAuthSeed: child.authSeed,
+  });
 };
 
 const spawnMarketMaker = async (): Promise<void> => {
@@ -1447,20 +1397,13 @@ const spawnMarketMaker = async (): Promise<void> => {
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
       ...buildRpcChildEnv(),
       USE_ANVIL: 'true',
-      XLN_RADAPTER_AUTH_SEED: marketMakerChild.authSeed,
       XLN_ORCHESTRATOR_PID: String(process.pid),
       XLN_ORCHESTRATOR_OWNER_ID: orchestratorOwnerId,
       XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(STARTUP_TIMEOUT_MS),
       XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '1',
       XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000',
       XLN_STORAGE_SYNC_WRITES: process.env['XLN_STORAGE_SYNC_WRITES'] ?? '1',
-      XLN_MARKET_MAKER_DISABLE_STORAGE: process.env['XLN_MARKET_MAKER_DISABLE_STORAGE'] ?? '1',
-      // Incomplete MM bootstrap remains memory-only because storage is disabled
-      // above. Once offers-ready atomically seeds the durable checkpoint, every
-      // later process start must restore it just like any other Runtime; starting
-      // from height zero would make persisted hub account outputs look like gaps.
       XLN_DISABLE_RUNTIME_RESTORE: process.env['XLN_MARKET_MAKER_DISABLE_RESTORE'] ?? process.env['XLN_DISABLE_RUNTIME_RESTORE'] ?? '0',
-      XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT: process.env['XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT'] ?? '1',
       XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL:
         process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL'] ??
         join(marketMakerChild.dbPath, 'bootstrap-events.jsonl'),
@@ -1543,7 +1486,10 @@ const spawnMarketMaker = async (): Promise<void> => {
       }
     }
   });
-  await writeInheritedChildSecrets(proc, { runtimeSeed: marketMakerChild.seed });
+  await writeInheritedChildSecrets(proc, {
+    runtimeSeed: marketMakerChild.seed,
+    radapterAuthSeed: marketMakerChild.authSeed,
+  });
 };
 
 const stopAllChildren = async (options: StopAllChildrenOptions = {}): Promise<void> => {
@@ -2594,74 +2540,6 @@ const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {
   }
 };
 
-const persistHubReadySnapshots = async (): Promise<void> => {
-  if (!envFlagEnabled(HUB_BOOTSTRAP_PAUSE_STORAGE)) return;
-  const startedAt = startTiming('reset_persist_ready_snapshots');
-  try {
-    const results = await Promise.all(hubChildren.map(async (child) => {
-      const payload = await postJsonExpectOk(
-        `http://${args.host}:${child.apiPort}/api/control/runtime/persist-ready-snapshot`,
-        HUB_READY_SNAPSHOT_TIMEOUT_MS,
-      );
-      return {
-        name: child.name,
-        height: payload['height'] ?? null,
-        wasPaused: payload['wasPaused'] ?? null,
-        persistencePaused: payload['persistencePaused'] ?? null,
-      };
-    }));
-    meshLog.info('hub_ready_snapshots.persisted', { results });
-  } finally {
-    finishTiming('reset_persist_ready_snapshots', startedAt);
-  }
-};
-
-const waitForHubReadySnapshotFence = async (): Promise<void> => {
-  if (!envFlagEnabled(HUB_BOOTSTRAP_PAUSE_STORAGE)) return;
-  const quietMs = 750;
-  let quietStartedAt: number | null = null;
-  let progress = {
-    signature: '',
-    lastProgressAt: Date.now(),
-  };
-  while (true) {
-    await pollAllHubHealth();
-    const now = Date.now();
-    const fence = buildHubReadySnapshotFence(hubChildren.map(child => ({
-      name: child.name,
-      online: child.proc?.exitCode === null && child.proc?.signalCode === null,
-      height: child.lastHealth?.height,
-      quiescence: child.lastHealth?.quiescence,
-    })));
-    const evaluation = evaluateBootstrapProgressDeadline(
-      progress,
-      fence.signature,
-      now,
-      HUB_BASELINE_STALL_TIMEOUT_MS,
-    );
-    progress = {
-      signature: evaluation.signature,
-      lastProgressAt: evaluation.lastProgressAt,
-    };
-    if (fence.ready) {
-      quietStartedAt ??= now;
-      if (now - quietStartedAt >= quietMs) {
-        meshLog.info('hub_ready_snapshot.fence_ready', { quietMs, hubs: fence.hubs });
-        return;
-      }
-    } else {
-      quietStartedAt = null;
-    }
-    if (evaluation.stalled) {
-      throw new Error(
-        `HUB_READY_SNAPSHOT_FENCE_STALLED idleMs=${evaluation.idleMs} ` +
-        `timeoutMs=${HUB_BASELINE_STALL_TIMEOUT_MS} hubs=${safeStringify(fence.hubs)}`,
-      );
-    }
-    await delay(250);
-  }
-};
-
 const runReset = async (options: OrchestratorResetOptions = configuredResetOptions): Promise<void> => {
   if (options.enableMarketMaker && !configuredResetOptions.enableMarketMaker) {
     throw new Error('RESET_MARKET_MAKER_NOT_CONFIGURED');
@@ -2784,9 +2662,6 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
     }
 
     if (custodyBootstrapError) throw custodyBootstrapError;
-
-    await waitForHubReadySnapshotFence();
-    await persistHubReadySnapshots();
 
     activeResetOptions = resolveActiveResetOptions(configuredResetOptions, options);
     finishTiming('reset_total', resetTotalStartedAt);

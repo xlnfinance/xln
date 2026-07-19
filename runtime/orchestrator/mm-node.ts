@@ -6,6 +6,7 @@ import { dirname } from 'node:path';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { createStructuredLogger } from '../infra/logger';
 import { readInheritedChildSecrets, resolveChildSecret } from './child-secrets';
+import { registerRuntimeAdapterAuthSeed } from '../radapter/auth';
 import { decodeRuntimeAdapterRequest } from '../radapter/codec';
 import { deriveAccountWatchSeed } from '../account/watch-seed';
 import { deriveSignerAddressSync, deriveSignerKeySync, prewarmSignerLabels, registerSignerKey } from '../account/crypto';
@@ -35,7 +36,6 @@ import {
   startP2P,
   startJurisdictionWatchers,
   startRuntimeLoop,
-  persistRestoredEnvToDB,
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
   readPersistedRuntimeActivityPage,
@@ -95,7 +95,7 @@ import { getJurisdictionStackId } from '../jurisdiction/jurisdiction-stack';
 import { getJurisdictionIdentityRef } from '../jurisdiction/jurisdiction-runtime';
 import { startParentLivenessWatch } from './parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
-import { checkpointNodeRuntime, quiesceNodeRuntime } from './node-runtime-quiesce';
+import { quiesceNodeRuntime } from './node-runtime-quiesce';
 import {
   formatJurisdictionDisplayName,
   requireJurisdictionBlockTimeMs,
@@ -111,10 +111,8 @@ import { MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS } from './orchestrator-config';
 import { requireDeliveryDelivered } from '../protocol/payments/delivery-result';
 import { getReliableOutputIdentity } from '../machine/output-routing';
 import {
-  assertMarketMakerReadySnapshotParity,
   buildMarketMakerBootstrapEntityStateHashFromCanonicalHashes,
   marketMakerBootstrapProgressSignature,
-  resolveMarketMakerReadySnapshotAction,
   runtimeBacklogBlocksMarketMakerQuotes,
 } from './mm-bootstrap-progress';
 import {
@@ -349,9 +347,9 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
       String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK),
   ),
 );
-// Cross bootstrap builds full route depth across waves. Keep each
-// producer wave to a single source-hub batch so prod's one-CPU runtime does not
-// monopolize HTTP while admitting and committing cross orders.
+// A bootstrap wave admits two independent source hubs for one direction in a
+// single Runtime frame. This stays below both the 64-transaction Entity-frame
+// cap and the five-second health responsiveness budget on a one-CPU runtime.
 const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 45;
 const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 45;
 const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
@@ -370,7 +368,7 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '2'),
 );
 const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
@@ -516,6 +514,15 @@ const parseArgs = (): Args => {
   }
   const rpcUrls = readRpcUrls();
   const childSecrets = readInheritedChildSecrets();
+  const radapterAuthSeed = resolveChildSecret(
+    childSecrets,
+    'radapterAuthSeed',
+    process.env['XLN_RADAPTER_AUTH_SEED'] || '',
+  );
+  if (radapterAuthSeed) {
+    registerRuntimeAdapterAuthSeed(radapterAuthSeed);
+    delete process.env['XLN_RADAPTER_AUTH_SEED'];
+  }
   const seed = resolveChildSecret(
     childSecrets,
     'runtimeSeed',
@@ -597,18 +604,6 @@ const prewarmLocalMarketMakerSignerKeys = (): void => {
     name: resolvedArgs.name,
     count: signerIds.length,
   });
-};
-
-const configureMarketMakerStorage = (env: Env): void => {
-  if (!envFlagEnabled(process.env['XLN_MARKET_MAKER_DISABLE_STORAGE'])) return;
-  env.runtimeConfig = {
-    ...(env.runtimeConfig || {}),
-    storage: {
-      ...(env.runtimeConfig?.storage || {}),
-      enabled: false,
-    },
-  };
-  nodeLog.info('dev_bootstrap.storage_disabled', { name: resolvedArgs.name });
 };
 
 const configureMarketMakerRuntimeLogging = (env: Env): void => {
@@ -3330,7 +3325,6 @@ const run = async (): Promise<void> => {
 	  registerEnvChangeCallback(env, (changedEnv) => {
 	    runtimeIngressReceipts.observeLatestRuntimeFrame(changedEnv);
 	  });
-  configureMarketMakerStorage(env);
   configureMarketMakerRuntimeLogging(env);
   prewarmLocalMarketMakerSignerKeys();
   // Bootstrap the local state machine before exposing this runtime to remote
@@ -3358,7 +3352,6 @@ const run = async (): Promise<void> => {
   let bootstrapCrossStarted = false;
   let bootstrapCrossPlanJobCount: number | null = null;
   let bootstrapCrossProducerAttempted = false;
-  let bootstrapReadySnapshotPersisted = false;
   type DirectEntityInputDebug = {
     at: number;
     fromRuntimeId: string;
@@ -4561,91 +4554,13 @@ const run = async (): Promise<void> => {
     rebuildCachedHealthResponseJson();
   };
 
-  /**
-   * The ready fingerprint, canonical hashes, and recovery snapshot must all
-   * describe one runtime state. Computing them around event-loop yields lets
-   * a P2P input land between those artifacts. When persistence is enabled,
-   * build and publish every artifact inside the same checkpoint fence.
-   */
-  const finalizeMarketMakerBootstrapState = async (): Promise<MarketMakerBootstrapFinalization | null> => {
-    const shouldPersist =
-      !bootstrapReadySnapshotPersisted &&
-      envFlagEnabled(process.env['XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT']);
-    if (!shouldPersist) {
-      const finalization = buildMarketMakerBootstrapFinalization();
-      publishMarketMakerBootstrapFinalization(finalization);
-      return finalization;
-    }
-
-    const previousRuntimeConfig = env.runtimeConfig;
-    let finalization: MarketMakerBootstrapFinalization | null = null;
-    let retryAfterCheckpoint = false;
-    await checkpointNodeRuntime(env, {
-      workTimeoutMs: 30_000,
-      loopTimeoutMs: 30_000,
-      quietMs: 250,
-      loopConfig: {
-        tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS,
-        maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
-        maxEntityTxsPerFrame: MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
-      },
-      persist: async () => {
-        const quiescedCompletionHealth = buildMarketMakerHealthSnapshot({ includeCross: true });
-        if (
-          !canCheckBootstrapCompletion() ||
-          !isBootstrapDepthComplete(quiescedCompletionHealth)
-        ) {
-          retryAfterCheckpoint = true;
-          emitBootstrapDebugEvent('finalize-retry', {
-            reason: 'quiesced-depth-changed',
-            health: summarizeMarketMakerHealthForDebug(quiescedCompletionHealth),
-          });
-          return;
-        }
-        finalization = buildMarketMakerBootstrapFinalization();
-        // Storage stays disabled until every producer and the runtime loop are
-        // stopped. Enabling it earlier lets an in-flight frame enter the
-        // append path before this checkpoint has seeded its recovery base.
-        env.runtimeConfig = {
-          ...(env.runtimeConfig || {}),
-          storage: {
-            ...(env.runtimeConfig?.storage || {}),
-            enabled: true,
-          },
-        };
-        try {
-          const persistedHead = await readPersistedStorageHead(env);
-          const snapshotAction = resolveMarketMakerReadySnapshotAction(
-            Number(env.height ?? 0),
-            Number(persistedHead?.latestHeight ?? 0),
-          );
-          if (snapshotAction !== 'already-persisted') {
-            await persistRestoredEnvToDB(env);
-          }
-          const persistedFrame = await readPersistedStorageFrameRecord(env, Number(env.height ?? 0));
-          const persistedRuntimeStateHash = assertMarketMakerReadySnapshotParity({
-            height: Number(env.height ?? 0),
-            entityStateHash: finalization.entityStateHash,
-          }, persistedFrame);
-          finalization = { ...finalization, runtimeStateHash: persistedRuntimeStateHash };
-          bootstrapReadySnapshotPersisted = true;
-          nodeLog.info(
-            snapshotAction === 'already-persisted'
-              ? 'bootstrap.ready_snapshot.already_persisted'
-              : 'bootstrap.ready_snapshot.persisted',
-            { height: env.height, action: snapshotAction },
-          );
-        } catch (error) {
-          env.runtimeConfig = previousRuntimeConfig;
-          throw error;
-        }
-        publishMarketMakerBootstrapFinalization(finalization);
-      },
-    });
-    if (retryAfterCheckpoint) return null;
-    if (!finalization) {
-      throw new Error('MARKET_MAKER_BOOTSTRAP_FINALIZATION_MISSING');
-    }
+  const finalizeMarketMakerBootstrapState = (): MarketMakerBootstrapFinalization => {
+    // The live Env advances only after the canonical runtime commit point has
+    // persisted the finalized frame and its durable outbox. READY therefore
+    // describes an already-durable state; it must never create a second,
+    // bootstrap-specific snapshot protocol.
+    const finalization = buildMarketMakerBootstrapFinalization();
+    publishMarketMakerBootstrapFinalization(finalization);
     return finalization;
   };
 
@@ -4659,13 +4574,12 @@ const run = async (): Promise<void> => {
     if (!canCheckBootstrapCompletion()) return false;
 
     const finalizeStartedAt = Date.now();
-    const persistStartedAt = Date.now();
-    const finalization = await finalizeMarketMakerBootstrapState();
-    if (!finalization) return false;
+    const publishStartedAt = Date.now();
+    const finalization = finalizeMarketMakerBootstrapState();
     const { health, fingerprint, runtimeStateHash, entityStateHash } = finalization;
     emitBootstrapDebugEvent('finalize-step', {
-      step: 'persist-ready-snapshot',
-      durationMs: Date.now() - persistStartedAt,
+      step: 'publish-ready-state',
+      durationMs: Date.now() - publishStartedAt,
     });
     emitBootstrapDebugEvent('ready-hash', {
       hash: fingerprint.hash,

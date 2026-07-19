@@ -6167,6 +6167,65 @@ describe('audit fail-fast regressions', () => {
     expect(receiverAccount.counterpartyDisputeHash).toBeUndefined();
   });
 
+  test('invalid simultaneous proposal cannot roll back the pending frame', async () => {
+    const seed = 'invalid-simultaneous-proposal-is-atomic';
+    const env = createEmptyEnv(seed);
+    env.quietRuntimeLogs = true;
+    env.timestamp = 10_000;
+    env.browserVM = { getDepositoryAddress: () => hex20('dd') } as typeof env.browserVM;
+
+    const first = registerLazySigner(seed, '1');
+    const second = registerLazySigner(seed, '2');
+    const left = isLeftEntity(first.entityId, second.entityId) ? first : second;
+    const right = left === first ? second : first;
+    attachSigningReplica(env, left.entityId, left.signerId);
+    attachSigningReplica(env, right.entityId, right.signerId);
+
+    const leftAccount = makeProposalAccount(
+      [{ type: 'add_delta', data: { tokenId: 1 } }],
+      left.entityId,
+      right.entityId,
+    );
+    const rightAccount = makeProposalAccount(
+      [{ type: 'add_delta', data: { tokenId: 2 } }],
+      left.entityId,
+      right.entityId,
+    );
+    rightAccount.proofHeader = {
+      fromEntity: right.entityId,
+      toEntity: left.entityId,
+      nextProofNonce: 0,
+    };
+
+    const leftProposal = await proposeAccountFrame(env, leftAccount, env.timestamp);
+    const rightProposal = await proposeAccountFrame(env, rightAccount, env.timestamp);
+    if (!leftProposal.success || !leftProposal.accountInput || leftProposal.accountInput.kind !== 'frame') {
+      throw new Error(`LEFT_SIMULTANEOUS_PROPOSAL_FAILED:${leftProposal.error ?? 'missing frame'}`);
+    }
+    if (!rightProposal.success || !rightProposal.accountInput || rightProposal.accountInput.kind !== 'frame') {
+      throw new Error(`RIGHT_SIMULTANEOUS_PROPOSAL_FAILED:${rightProposal.error ?? 'missing frame'}`);
+    }
+
+    const invalidInput = structuredClone(leftProposal.accountInput);
+    invalidInput.proposal.frameHanko = `0x${'ff'.repeat(65)}`;
+    const stateBefore = safeStringify(rightAccount);
+    const result = await applyAccountInput(env, rightAccount, invalidInput);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid hanko signature');
+    expect(safeStringify(rightAccount)).toBe(stateBefore);
+
+    const accepted = await applyAccountInput(env, rightAccount, leftProposal.accountInput);
+    expect(accepted.success).toBe(true);
+    expect(rightAccount.currentHeight).toBe(1);
+    expect(rightAccount.pendingFrame?.height).toBe(2);
+    expect(rightAccount.pendingFrame?.accountTxs).toEqual([
+      { type: 'add_delta', data: { tokenId: 2 } },
+    ]);
+    expect(rightAccount.rollbackCount).toBe(1);
+    expect(rightAccount.mempool).toEqual([]);
+  });
+
   test('failed proposal keeps queued txs, including late arrivals, instead of wiping the mempool', async () => {
     const seed = 'account-proposal-failure-retains-mempool';
     const env = createEmptyEnv(seed);

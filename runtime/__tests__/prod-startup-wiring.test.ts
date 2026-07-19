@@ -38,128 +38,66 @@ describe('production startup wiring', () => {
     expect(stableReturnIndex).toBeGreaterThan(yieldIndex);
   });
 
-  test('market-maker ready hashes and recovery snapshot share one quiesced state', () => {
+  test('market-maker READY is derived synchronously from the already committed live Env', () => {
     const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
-    const buildStart = mmNode.indexOf('const buildMarketMakerBootstrapFinalization = ()');
-    const buildEnd = mmNode.indexOf('const publishMarketMakerBootstrapFinalization = (', buildStart);
-    const buildBlock = mmNode.slice(buildStart, buildEnd);
-    const checkpointStart = mmNode.indexOf('await checkpointNodeRuntime(env, {', buildEnd);
-    const persistStart = mmNode.indexOf('persist: async () => {', checkpointStart);
-    const buildInsideFence = mmNode.indexOf('finalization = buildMarketMakerBootstrapFinalization();', persistStart);
-    const snapshotWrite = mmNode.indexOf('await persistRestoredEnvToDB(env);', persistStart);
-
-    expect(buildStart).toBeGreaterThanOrEqual(0);
-    expect(buildEnd).toBeGreaterThan(buildStart);
-    expect(buildBlock).not.toContain('await ');
-    expect(checkpointStart).toBeGreaterThan(buildEnd);
-    expect(persistStart).toBeGreaterThan(checkpointStart);
-    expect(buildInsideFence).toBeGreaterThan(persistStart);
-    expect(snapshotWrite).toBeGreaterThan(buildInsideFence);
-  });
-
-  test('market-maker checkpoint retries when drained ingress changes completed depth', () => {
-    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
-    const finalizeStart = mmNode.indexOf('const finalizeMarketMakerBootstrapState = async ()');
-    const finalizeEnd = mmNode.indexOf('const markOffersReady = async', finalizeStart);
-    const finalize = mmNode.slice(finalizeStart, finalizeEnd);
-    const persistStart = finalize.indexOf('persist: async () => {');
-    const quiescedHealth = finalize.indexOf('const quiescedCompletionHealth =', persistStart);
-    const retry = finalize.indexOf('retryAfterCheckpoint = true;', quiescedHealth);
-    const build = finalize.indexOf('finalization = buildMarketMakerBootstrapFinalization();', persistStart);
-
-    expect(finalizeStart).toBeGreaterThanOrEqual(0);
-    expect(finalizeEnd).toBeGreaterThan(finalizeStart);
-    expect(persistStart).toBeGreaterThanOrEqual(0);
-    expect(quiescedHealth).toBeGreaterThan(persistStart);
-    expect(retry).toBeGreaterThan(quiescedHealth);
-    expect(build).toBeGreaterThan(retry);
-    expect(finalize).toContain('if (retryAfterCheckpoint) return null;');
-
-    const markStart = mmNode.indexOf('const markOffersReady = async', finalizeEnd);
-    const markEnd = mmNode.indexOf('const waitForBootstrapOffers = async', markStart);
-    const mark = mmNode.slice(markStart, markEnd);
-    expect(mark).toContain('if (!finalization) return false;');
-  });
-
-  test('market-maker ready snapshot verifies storage and publishes its durable runtime hash', () => {
-    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
-    const progress = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-bootstrap-progress.ts'), 'utf8');
-    const finalizeStart = mmNode.indexOf('const finalizeMarketMakerBootstrapState = async ()');
-    const finalizeEnd = mmNode.indexOf('const markOffersReady = async', finalizeStart);
-    const finalize = mmNode.slice(finalizeStart, finalizeEnd);
-    const existing = finalize.indexOf("if (snapshotAction === 'already-persisted') {");
-    const readFrame = finalize.indexOf('await readPersistedStorageFrameRecord(env, Number(env.height ?? 0))');
-    const parityCheck = finalize.indexOf('assertMarketMakerReadySnapshotParity({', readFrame);
-    const publishPersistedHash = finalize.indexOf(
-      'finalization = { ...finalization, runtimeStateHash: persistedRuntimeStateHash };',
-      parityCheck,
+    const finalize = extractSourceBlock(
+      mmNode,
+      'const finalizeMarketMakerBootstrapState = (): MarketMakerBootstrapFinalization =>',
+      'const markOffersReady = async',
     );
-    const persistedFlag = finalize.indexOf('bootstrapReadySnapshotPersisted = true;', publishPersistedHash);
-
-    expect(existing).toBe(-1);
-    expect(readFrame).toBeGreaterThanOrEqual(0);
-    expect(parityCheck).toBeGreaterThan(readFrame);
-    expect(publishPersistedHash).toBeGreaterThan(parityCheck);
-    expect(persistedFlag).toBeGreaterThan(publishPersistedHash);
-    expect(progress).toContain('MARKET_MAKER_READY_SNAPSHOT_FRAME_HASH_MISMATCH');
-    expect(progress).toContain('MARKET_MAKER_READY_SNAPSHOT_RUNTIME_HASH_MISMATCH');
-    expect(progress).toContain('MARKET_MAKER_READY_SNAPSHOT_ENTITY_HASH_MISMATCH');
+    expect(finalize).toContain('const finalization = buildMarketMakerBootstrapFinalization();');
+    expect(finalize).toContain('publishMarketMakerBootstrapFinalization(finalization);');
+    expect(finalize).not.toContain('await ');
+    expect(finalize).not.toContain('checkpointNodeRuntime');
   });
 
-  test('market-maker enables steady-state WAL only after a successful ready snapshot', () => {
+  test('market-maker rechecks completion immediately before publishing READY', () => {
     const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
-    const finalizeStart = mmNode.indexOf('const finalizeMarketMakerBootstrapState = async ()');
-    const finalizeEnd = mmNode.indexOf('const markOffersReady = async', finalizeStart);
-    const finalize = mmNode.slice(finalizeStart, finalizeEnd);
-    const enableStorage = finalize.indexOf('enabled: true,');
-    const persist = finalize.indexOf('await persistRestoredEnvToDB(env);', enableStorage);
-    const persistedFlag = finalize.indexOf('bootstrapReadySnapshotPersisted = true;', persist);
-    const restoreOnFailure = finalize.indexOf('env.runtimeConfig = previousRuntimeConfig;', persistedFlag);
-
-    expect(enableStorage).toBeGreaterThanOrEqual(0);
-    expect(persist).toBeGreaterThan(enableStorage);
-    expect(persistedFlag).toBeGreaterThan(persist);
-    expect(restoreOnFailure).toBeGreaterThan(persistedFlag);
-    expect(finalize.slice(restoreOnFailure - 40, restoreOnFailure)).toContain('catch');
-    expect(finalize).not.toContain('finally {\n          env.runtimeConfig = previousRuntimeConfig;');
+    const mark = extractSourceBlock(mmNode, 'const markOffersReady = async', 'const waitForBootstrapOffers = async');
+    const firstCheck = mark.indexOf('if (!canCheckBootstrapCompletion()) return false;');
+    const yieldIndex = mark.indexOf('await yieldMarketMakerApi();', firstCheck);
+    const secondCheck = mark.indexOf('if (!canCheckBootstrapCompletion()) return false;', yieldIndex);
+    const finalize = mark.indexOf('finalizeMarketMakerBootstrapState();', secondCheck);
+    expect(firstCheck).toBeGreaterThanOrEqual(0);
+    expect(yieldIndex).toBeGreaterThan(firstCheck);
+    expect(secondCheck).toBeGreaterThan(yieldIndex);
+    expect(finalize).toBeGreaterThan(secondCheck);
   });
 
-  test('hub checkpoints stop their mesh producer before erecting the runtime fence', () => {
+  test('canonical runtime commit persists the durable outbox before backup and dispatch', () => {
+    const runtime = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
+    const durableOutbox = runtime.indexOf('env.pendingNetworkOutputs = buildPendingNetworkOutputs([');
+    const save = runtime.indexOf('const saveOutcome = await saveEnvToDB(', durableOutbox);
+    const backup = runtime.indexOf('const recoveryBarrier = state.recoveryBackupBarrier;', save);
+    const dispatch = runtime.indexOf('dispatchEntityOutputs(env, remoteOutputs', backup);
+    expect(durableOutbox).toBeGreaterThanOrEqual(0);
+    expect(save).toBeGreaterThan(durableOutbox);
+    expect(backup).toBeGreaterThan(save);
+    expect(dispatch).toBeGreaterThan(backup);
+  });
+
+  test('market-maker never disables WAL during bootstrap', () => {
+    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    expect(mmNode).not.toContain('MARKET_MAKER_DISABLE_STORAGE');
+    expect(mmNode).not.toContain('MARKET_MAKER_PERSIST_READY_SNAPSHOT');
+    expect(mmNode).not.toContain('bootstrapReadySnapshotPersisted');
+    expect(mmNode).not.toContain('persist-ready-snapshot');
+  });
+
+  test('hubs never pause WAL for a final bootstrap snapshot', () => {
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
-    const routeStart = hubNode.indexOf(
-      "if (pathname === '/api/control/runtime/persist-ready-snapshot' && request.method === 'POST')",
-    );
-    const routeEnd = hubNode.indexOf("if (pathname === '/api/jurisdictions')", routeStart);
-    const route = hubNode.slice(routeStart, routeEnd);
-    const producerPause = route.indexOf('await pauseMeshBootstrapProducerAndWait();');
-    const checkpoint = route.indexOf('await checkpointNodeRuntime(env, {');
-    const checkpointSucceeded = route.indexOf('checkpointSucceeded = true;', checkpoint);
-    const producerResume = route.indexOf('if (checkpointSucceeded) resumeMeshBootstrapProducer();');
-
-    expect(routeStart).toBeGreaterThanOrEqual(0);
-    expect(routeEnd).toBeGreaterThan(routeStart);
-    expect(producerPause).toBeGreaterThanOrEqual(0);
-    expect(checkpoint).toBeGreaterThan(producerPause);
-    expect(checkpointSucceeded).toBeGreaterThan(checkpoint);
-    expect(producerResume).toBeGreaterThan(checkpointSucceeded);
+    expect(hubNode).not.toContain('HUB_BOOTSTRAP_PAUSE_STORAGE');
+    expect(hubNode).not.toContain('readySnapshotInFlight');
+    expect(hubNode).not.toContain('persist-ready-snapshot');
+    expect(hubNode).not.toContain('prepare-ready-snapshot');
   });
 
-  test('hub serializes ready checkpoints before pausing the shared mesh producer', () => {
-    const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
-    const routeStart = hubNode.indexOf(
-      "if (pathname === '/api/control/runtime/persist-ready-snapshot' && request.method === 'POST')",
-    );
-    const routeEnd = hubNode.indexOf("if (pathname === '/api/jurisdictions')", routeStart);
-    const route = hubNode.slice(routeStart, routeEnd);
-    const rejectConcurrent = route.indexOf('if (readySnapshotInFlight) {');
-    const claim = route.indexOf('readySnapshotInFlight = true;', rejectConcurrent);
-    const pause = route.indexOf('await pauseMeshBootstrapProducerAndWait();', claim);
-    const release = route.indexOf('readySnapshotInFlight = false;', pause);
-
-    expect(rejectConcurrent).toBeGreaterThanOrEqual(0);
-    expect(claim).toBeGreaterThan(rejectConcurrent);
-    expect(pause).toBeGreaterThan(claim);
-    expect(release).toBeGreaterThan(pause);
+  test('orchestrator has no bootstrap-specific snapshot coordinator', () => {
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    expect(orchestrator).not.toContain('persistHubReadySnapshots');
+    expect(orchestrator).not.toContain('HUB_READY_SNAPSHOT');
+    expect(orchestrator).not.toContain('prepare-ready-snapshot');
+    expect(orchestrator).not.toContain('resume-ready-snapshot');
   });
 
   test('production frontend deploy builds off-host and uploads a complete artifact', () => {
@@ -285,15 +223,15 @@ describe('production startup wiring', () => {
     expect(script).toContain('--rpc2-url "$ANVIL_RPC2"');
     expect(script).toContain('export XLN_RUNTIME_EXIT_ON_FATAL=${XLN_RUNTIME_EXIT_ON_FATAL:-1}');
     expect(script).toContain('export XLN_STORAGE_WRITE_TIMEOUT_MS=${XLN_STORAGE_WRITE_TIMEOUT_MS:-60000}');
-    expect(script).toContain('export XLN_HUB_BOOTSTRAP_PAUSE_STORAGE=${XLN_HUB_BOOTSTRAP_PAUSE_STORAGE:-1}');
-    expect(script).toContain('export XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS=${XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS:-60000}');
+    expect(script).not.toContain('HUB_BOOTSTRAP_PAUSE_STORAGE');
+    expect(script).not.toContain('HUB_READY_SNAPSHOT');
     expect(script).toContain('export XLN_MESH_BOOTSTRAP_STALL_TIMEOUT_MS=${XLN_MESH_BOOTSTRAP_STALL_TIMEOUT_MS:-60000}');
     expect(script).toContain('export XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS=${XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS:-600000}');
     expect(script).toContain('export XLN_HUB_BASELINE_TIMEOUT_MS=${XLN_HUB_BASELINE_TIMEOUT_MS:-600000}');
     expect(script).toContain('export MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS=${MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS:-600000}');
     expect(script).toContain('export MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS=${MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS:-60000}');
     expect(script).toContain('export XLN_MARKET_MAKER_READY_TIMEOUT_MS=${XLN_MARKET_MAKER_READY_TIMEOUT_MS:-600000}');
-    expect(script).toContain('export XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT=${XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT:-1}');
+    expect(script).not.toContain('MARKET_MAKER_PERSIST_READY_SNAPSHOT');
     expect(script).toContain('export XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME=${XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME:-8}');
     expect(script).toContain('export XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME=${XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME:-64}');
     expect(script).toContain('export MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME=${MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME:-8}');
@@ -305,7 +243,7 @@ describe('production startup wiring', () => {
       'export MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE=${MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE:-1000}',
     );
     expect(script).toContain(
-      'export MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE=${MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE:-1}',
+      'export MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE=${MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE:-2}',
     );
     expect(script).toContain(
       'export MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK=${MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK:-45}',
@@ -444,9 +382,8 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain("return await proxyRpc(request, args.rpcUrls[rpcProxyIndex] || '', operatorAuthorized);");
     expect(orchestrator).toContain("XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '1'");
     expect(orchestrator).toContain("XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000'");
-    expect(orchestrator).toContain("const HUB_BOOTSTRAP_PAUSE_STORAGE = process.env['XLN_HUB_BOOTSTRAP_PAUSE_STORAGE'] ?? '1';");
-    expect(orchestrator).toContain("process.env['XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS'] || '60000'");
-    expect(orchestrator).toContain('XLN_HUB_BOOTSTRAP_PAUSE_STORAGE: HUB_BOOTSTRAP_PAUSE_STORAGE');
+    expect(orchestrator).not.toContain('HUB_BOOTSTRAP_PAUSE_STORAGE');
+    expect(orchestrator).not.toContain('HUB_READY_SNAPSHOT');
     expect(orchestrator).toContain("XLN_LOG_LEVEL: process.env['XLN_HUB_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn'");
     expect(runtimeEntityRouting).not.toContain('deps.startRuntimeLoop(env);');
     expect(runtimeEntityRouting).not.toContain('processRuntime(env)');
@@ -454,9 +391,9 @@ describe('production startup wiring', () => {
     expect(runtimeMainSource).toContain('const shouldExitOnRuntimeFatal = (runtimeProcess = getRuntimeProcessGlobal()): boolean =>');
     expect(runtimeMainSource).toContain("runtimeProcess.exit(1);");
     expect(orchestrator).toContain("XLN_STORAGE_SYNC_WRITES: process.env['XLN_STORAGE_SYNC_WRITES'] ?? '1'");
-    expect(orchestrator).toContain("XLN_MARKET_MAKER_DISABLE_STORAGE: process.env['XLN_MARKET_MAKER_DISABLE_STORAGE'] ?? '1'");
+    expect(orchestrator).not.toContain('XLN_MARKET_MAKER_DISABLE_STORAGE');
     expect(orchestrator).toContain("XLN_DISABLE_RUNTIME_RESTORE: process.env['XLN_MARKET_MAKER_DISABLE_RESTORE'] ?? process.env['XLN_DISABLE_RUNTIME_RESTORE'] ?? '0'");
-    expect(orchestrator).toContain("XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT: process.env['XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT'] ?? '1'");
+    expect(orchestrator).not.toContain('XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT');
     expect(orchestrator).toContain("XLN_LOG_LEVEL: process.env['XLN_MARKET_MAKER_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn'");
     expect(orchestrator).toContain('const getMarketMakerIdentities = (): MarketMakerSupportPeerIdentity[] => {');
     expect(orchestrator).toContain('deriveMarketMakerEntityId(signerId, toMarketMakerEntityJurisdictionConfig(jurisdiction))');
@@ -554,16 +491,11 @@ describe('production startup wiring', () => {
     expect(hubNode.indexOf('if (LOG_HUB_INSPECT_URL) {')).toBeLessThan(
       hubNode.indexOf("nodeLog.info('inspect_url.ready'"),
     );
-    expect(hubNode).toContain('persistRestoredEnvToDB');
-    expect(hubNode).toContain('const configureHubBootstrapStorage = (env: Env): void => {');
-    expect(hubNode).toContain("if (!envFlagEnabled(process.env['XLN_HUB_BOOTSTRAP_PAUSE_STORAGE'])) return;");
-    expect(hubNode).toContain('env.runtimeState.persistencePaused = true;');
-    expect(hubNode).toContain('configureHubBootstrapStorage(env);');
-    expect(hubNode).toContain("pathname === '/api/control/runtime/persist-ready-snapshot'");
-    expect(hubNode).toContain('const result = await checkpointNodeRuntime(env, {');
-    expect(hubNode).toContain('persist: () => persistRestoredEnvToDB(env),');
+    expect(hubNode).not.toContain('persistRestoredEnvToDB');
+    expect(hubNode).not.toContain('configureHubBootstrapStorage');
+    expect(hubNode).not.toContain('persistencePaused = true');
+    expect(hubNode).not.toContain('ready-snapshot');
     expect(hubNode).toContain('startRuntimeLoop(env, {');
-    expect(hubNode).toContain("nodeLog.info('bootstrap_ready_snapshot.persisted'");
     expect(hubNode).toContain("import { prewarmSignerLabels } from '../account/crypto';");
     expect(hubNode).toContain('const buildLocalHubSignerLabels = (): string[] => {');
     expect(hubNode).toContain('const prewarmLocalHubSignerKeys = (): void => {');
@@ -578,8 +510,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('deriveMarketMakerEntityId(signerId, entityJurisdiction)');
     expect(mmNode).toContain('blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction)');
     expect(mmNode).toContain('isCanonicalAccountOpener(mmEntityId, hubEntityId)');
-    expect(mmNode).toContain("nodeLog.info('dev_bootstrap.storage_disabled'");
-    expect(mmNode).not.toContain('Runtime storage disabled for rebuildable market-maker state');
+    expect(mmNode).not.toContain('dev_bootstrap.storage_disabled');
     expect(mmNode).toContain('const configureMarketMakerRuntimeLogging = (env: Env): void => {');
     expect(mmNode).toContain("if (envFlagEnabled(process.env['XLN_MARKET_MAKER_VERBOSE_RUNTIME_LOGS'])) return;");
     expect(mmNode).toContain('env.quietRuntimeLogs = true;');
@@ -965,7 +896,7 @@ describe('production startup wiring', () => {
     expect(nodeQuiesce.indexOf('runtimeIdle = await stopRuntimeLoopAndWait(')).toBeLessThan(
       nodeQuiesce.indexOf('await stopP2PAndWait('),
     );
-    expect(nodeQuiesce.indexOf('const quiesceResult = await quiesceNodeRuntime(env, options);')).toBeLessThan(
+    expect(nodeQuiesce.indexOf('const quiesceResult = await quiesceNodeRuntime(env, {')).toBeLessThan(
       nodeQuiesce.indexOf('state.persistencePaused = true;'),
     );
     expect(nodeQuiesce.indexOf('await options.persist();')).toBeLessThan(
@@ -974,7 +905,6 @@ describe('production startup wiring', () => {
     for (const source of sources) {
       expect(source).toContain("from './node-runtime-quiesce';");
       expect(source).toContain('quiesceNodeRuntime');
-      expect(source).toContain('checkpointNodeRuntime');
       const quiesceBlock = extractSourceBlock(
         source,
         "if (pathname === '/api/control/runtime/quiesce' && request.method === 'POST') {",
@@ -1363,22 +1293,19 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("emitDebugEvent('health-poll'");
     expect(smoke).toContain("emitDebugEvent('health-snapshot'");
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_TEMPLATE_DIR']");
-    expect(smoke).toContain("const persistMarketMakerStorage = process.env['XLN_LOCAL_PROD_SMOKE_PERSIST_MM'] === '1';");
+    expect(smoke).not.toContain('XLN_LOCAL_PROD_SMOKE_PERSIST_MM');
     expect(smoke).toContain('const copySnapshotTemplate = (sourceDir: string, targetDir: string): void => {');
     expect(smoke).toContain("recordStage('snapshot:copied', { templateDir, workDir });");
     expect(smoke).toContain("XLN_MESH_PRESERVE_STATE_ON_RESET: '1'");
     expect(smoke).toContain("...(useSnapshotTemplate ? {");
-    expect(smoke).toContain("XLN_MARKET_MAKER_DISABLE_STORAGE: '0'");
-    expect(smoke).toContain("XLN_MARKET_MAKER_DISABLE_RESTORE: '0'");
-    expect(smoke).toContain("...(persistMarketMakerStorage ? {");
-    expect(smoke).toContain("XLN_MARKET_MAKER_DISABLE_STORAGE: '0'");
-    expect(smoke).toContain("XLN_MARKET_MAKER_DISABLE_RESTORE: '0'");
+    expect(smoke).toContain("process.env['XLN_MARKET_MAKER_DISABLE_RESTORE'] || '0'");
+    expect(smoke).not.toContain('XLN_MARKET_MAKER_DISABLE_STORAGE');
     expect(smoke).toContain("MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK:");
     expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '45'");
     expect(smoke).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:");
     expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '45'");
-    expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1'");
-    expect(mmNode).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1'");
+    expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '2'");
+    expect(mmNode).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '2'");
     expect(mmNode).toContain('remainingSourceHubGroups -= 1;');
     expect(mmNode).toContain('const orderedSourceHubs = [...sourceHubs].sort');
     expect(mmNode).not.toContain('const sourceHubScans = [...sourceHubs]');
@@ -1442,38 +1369,26 @@ describe('production startup wiring', () => {
     expect(smoke).not.toContain('healthReady(health))');
     expect(smoke).toContain('const summarizeBlockers = (blockers: unknown[] | undefined): unknown[] =>');
     expect(smoke).toContain('blockerDetails: health.marketMaker?.cross?.routes?.map(route => summarizeBlockers(route.blockers)) ?? []');
-    expect(mmNode).toContain("persistRestoredEnvToDB");
-    expect(mmNode).toContain("process.env['XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT']");
-    expect(mmNode).toContain("snapshotAction === 'already-persisted'");
-    expect(mmNode).toContain("? 'bootstrap.ready_snapshot.already_persisted'");
-    expect(mmNode).toContain(": 'bootstrap.ready_snapshot.persisted'");
-    const mmReadySnapshotStart = mmNode.indexOf('const finalizeMarketMakerBootstrapState = async ()');
-    const mmReadySnapshotEnd = mmNode.indexOf('const markOffersReady = async', mmReadySnapshotStart);
-    const mmReadySnapshotSource = mmNode.slice(mmReadySnapshotStart, mmReadySnapshotEnd);
-    const mmReadySnapshotCheckpoint = mmReadySnapshotSource.indexOf('await checkpointNodeRuntime(env, {');
-    const mmReadySnapshotPersist = mmReadySnapshotSource.indexOf('persist: async () => {');
-    const mmReadySnapshotStorageEnable = mmReadySnapshotSource.indexOf('env.runtimeConfig = {');
-    expect(mmReadySnapshotStorageEnable).toBeGreaterThan(mmReadySnapshotCheckpoint);
-    expect(mmReadySnapshotStorageEnable).toBeGreaterThan(mmReadySnapshotPersist);
-    expect(mmReadySnapshotSource.indexOf('await checkpointNodeRuntime(env, {')).toBeLessThan(
-      mmReadySnapshotSource.indexOf('await readPersistedStorageHead(env)'),
+    expect(mmNode).not.toContain('persistRestoredEnvToDB');
+    expect(mmNode).not.toContain('MARKET_MAKER_PERSIST_READY_SNAPSHOT');
+    const mmReadySource = extractSourceBlock(
+      mmNode,
+      'const finalizeMarketMakerBootstrapState = (): MarketMakerBootstrapFinalization =>',
+      'const markOffersReady = async',
     );
-    expect(mmReadySnapshotSource).not.toContain('env.runtimeState.persistenceQuiescing = true;');
-    expect(mmReadySnapshotSource).not.toContain('stopRuntimeLoopAndWait');
+    expect(mmReadySource).toContain('buildMarketMakerBootstrapFinalization();');
+    expect(mmReadySource).toContain('publishMarketMakerBootstrapFinalization(finalization);');
+    expect(mmReadySource).not.toContain('await ');
     expect(mmNode).toContain('const markOffersReady = async (): Promise<boolean> => {');
-    expect(mmNode).toContain('await finalizeMarketMakerBootstrapState();');
+    expect(mmNode).toContain('const finalization = finalizeMarketMakerBootstrapState();');
     expect(orchestrator).toContain("const preserveState = process.env['XLN_MESH_PRESERVE_STATE_ON_RESET'] === '1';");
     expect(orchestrator).toContain('} else if (existsSync(args.dbRoot)) {');
     expect(orchestrator).toContain('rmSync(args.dbRoot, { recursive: true, force: true });');
     expect(orchestrator).toContain('PRESERVE_STATE_DB_ROOT_MISSING');
     expect(orchestrator).toContain('PRESERVE_STATE_JURISDICTIONS_MISSING');
-    expect(orchestrator).toContain('const postJsonExpectOk = async <T extends ControlOkResponse>');
-    expect(orchestrator).toContain("payload?.ok !== true");
-    expect(orchestrator).toContain('const persistHubReadySnapshots = async (): Promise<void> => {');
-    expect(orchestrator).toContain('reset_persist_ready_snapshots');
-    expect(orchestrator).toContain('/api/control/runtime/persist-ready-snapshot');
-    expect(orchestrator).toContain('await persistHubReadySnapshots();');
-    expect(orchestrator.indexOf('await persistHubReadySnapshots();')).toBeLessThan(orchestrator.indexOf("finishTiming('reset_total', resetTotalStartedAt);"));
+    expect(orchestrator).not.toContain('postJsonExpectOk');
+    expect(orchestrator).not.toContain('persistHubReadySnapshots');
+    expect(orchestrator).not.toContain('ready-snapshot');
     expect(smoke).toContain("recordStage(`marketMaker:${marketMakerPhase}`, last);");
     expect(smoke).toContain("recordStageOnce('system:ready', last);");
     expect(smoke).toContain("recordStage('post-bootstrap:observed', { stabilityMs: postBootstrapStabilityMs });");
@@ -1483,9 +1398,9 @@ describe('production startup wiring', () => {
     expect(smoke).not.toContain('const postBootstrapHealth = await fetchHealth();');
     expect(smoke).toContain("recordStage('post-bootstrap:stable', summarizeHealth(postBootstrapHealth));");
     expect(smoke).toContain("MARKET_MAKER_BOOTSTRAP_LOOP_MS: process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1'");
-    expect(smoke).toContain("XLN_HUB_BOOTSTRAP_PAUSE_STORAGE: process.env['XLN_HUB_BOOTSTRAP_PAUSE_STORAGE'] || '1'");
-    expect(smoke).toContain("XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS: process.env['XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS'] || '60000'");
-    expect(smoke).toContain("XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT: process.env['XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT'] || '1'");
+    expect(smoke).not.toContain('XLN_HUB_BOOTSTRAP_PAUSE_STORAGE');
+    expect(smoke).not.toContain('XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS');
+    expect(smoke).not.toContain('XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT');
     expect(smoke).toContain("process.env['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '8'");
     expect(smoke).toContain("process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '64'");
     expect(smoke).toContain("process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '8'");
@@ -1517,7 +1432,7 @@ describe('production startup wiring', () => {
     expect(soundcheck).toContain('const installTemplateFromResult = (result: SoundcheckResult): SoundcheckResult => {');
     expect(soundcheck).toContain("if (mode === 'all') {");
     expect(soundcheck).toContain('results.push(installTemplateFromResult(freshResult));');
-    expect(soundcheck).toContain("XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT: '1'");
+    expect(soundcheck).not.toContain('XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT');
     expect(soundcheck).not.toContain('XLN_LOCAL_PROD_SMOKE_PERSIST_MM');
     expect(soundcheck).toContain("XLN_LOCAL_PROD_SMOKE_ENFORCE_STAGE_BUDGETS: '1'");
     expect(soundcheck).toContain('marketMakerEventsJsonl: metrics.marketMakerEventsJsonl');
@@ -1901,7 +1816,7 @@ describe('production startup wiring', () => {
     const readiness = extractSourceBlock(
       orchestrator,
       'const waitForShardJurisdictions = async (child: HubChild): Promise<void> =>',
-      'const persistHubReadySnapshots = async (): Promise<void> =>',
+      'const runReset = async (options: OrchestratorResetOptions = configuredResetOptions): Promise<void> =>',
     );
 
     expect(readiness).toContain('await findMissingRpcContractCode(args.rpcUrl, contracts)');

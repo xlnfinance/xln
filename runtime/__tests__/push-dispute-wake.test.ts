@@ -278,6 +278,33 @@ describe('runDisputeWatchSweep', () => {
 
     expect(topicHash).not.toBe(TOPIC0);
   });
+
+  test('does not advance the scan cursor past a failed wake', async () => {
+    const { Interface, id } = await import('ethers');
+    const iface = new Interface([
+      'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments, uint256 disputeTimeout)',
+    ]);
+    const encoded = iface.encodeEventLog('DisputeStarted', [
+      entityId(1), entityId(2), 6, id('proof-retry'), id('seed-retry'), '0x', '0x', 5_910,
+    ]);
+    const log = { topics: [...encoded.topics] as string[], data: encoded.data, blockNumber: 151 };
+    let fail = true;
+    const sender: PushSender = {
+      kind: 'retry-once',
+      send: async () => fail ? { ok: false, error: 'offline' } : { ok: true },
+    };
+    const { store, cursors } = buildFakeStore();
+    const providerFactory = makeProvider([log]);
+
+    const first = await runDisputeWatchSweep(store, sender, { providerFactory: () => providerFactory(), maxBlockRange: 1000 });
+    expect(first.errors).toBe(1);
+    expect(cursors.size).toBe(0);
+
+    fail = false;
+    const second = await runDisputeWatchSweep(store, sender, { providerFactory: () => providerFactory(), maxBlockRange: 1000 });
+    expect(second.notificationsSent).toBe(1);
+    expect(cursors.get(`${CHAIN_ID}:${DEPOSITORY}`)).toBe(200);
+  });
 });
 
 describe('buildDisputeWakeNotification', () => {

@@ -132,7 +132,6 @@ const marketMakerApiPort = nodePortBase + 3;
 const workDir = process.env['XLN_LOCAL_PROD_SMOKE_DIR'] || join(tmpdir(), `xln-local-prod-smoke-${portBase}`);
 const templateDir = String(process.env['XLN_LOCAL_PROD_SMOKE_TEMPLATE_DIR'] || '').trim();
 const useSnapshotTemplate = templateDir.length > 0;
-const persistMarketMakerStorage = process.env['XLN_LOCAL_PROD_SMOKE_PERSIST_MM'] === '1';
 const children: ManagedProcess[] = [];
 const marketMakerInfoLatencyMaxMs = Math.max(
   250,
@@ -765,9 +764,6 @@ const main = async (): Promise<void> => {
     MARKET_MAKER_RUNTIME_TICK_DELAY_MS:
       process.env['MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '25',
     MARKET_MAKER_API_YIELD_MS: process.env['MARKET_MAKER_API_YIELD_MS'] || '25',
-    XLN_HUB_BOOTSTRAP_PAUSE_STORAGE: process.env['XLN_HUB_BOOTSTRAP_PAUSE_STORAGE'] || '1',
-    XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS: process.env['XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS'] || '60000',
-    XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT: process.env['XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT'] || '1',
     XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME:
       process.env['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '8',
     XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME:
@@ -791,21 +787,12 @@ const main = async (): Promise<void> => {
     MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:
       process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '45',
     MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE:
-      process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1',
+      process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '2',
     XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL: marketMakerEventsJsonlPath,
     ...(useSnapshotTemplate ? { XLN_MESH_PRESERVE_STATE_ON_RESET: '1' } : {}),
     ...(useSnapshotTemplate ? {
-      // Default clone/hydrate runs keep steady-state WAL enabled, while an
-      // explicit override lets the restart proof exercise the production
-      // memory-only catch-up followed by one finalized checkpoint advance.
-      XLN_MARKET_MAKER_DISABLE_STORAGE:
-        process.env['XLN_MARKET_MAKER_DISABLE_STORAGE'] || '0',
       XLN_MARKET_MAKER_DISABLE_RESTORE:
         process.env['XLN_MARKET_MAKER_DISABLE_RESTORE'] || '0',
-    } : {}),
-    ...(persistMarketMakerStorage ? {
-      XLN_MARKET_MAKER_DISABLE_STORAGE: '0',
-      XLN_MARKET_MAKER_DISABLE_RESTORE: '0',
     } : {}),
   });
   recordStage('server:started', { apiPort, marketMakerApiPort });

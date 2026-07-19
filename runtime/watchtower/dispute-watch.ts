@@ -117,6 +117,7 @@ export const runDisputeWatchSweep = async (
       let cursor = flooredFrom - 1;
       for (let start = flooredFrom; start <= head; start += maxBlockRange) {
         const end = Math.min(head, start + maxBlockRange - 1);
+        let chunkDeliveryFailed = false;
         const logs = await provider.getLogs({
           fromBlock: start,
           toBlock: end,
@@ -139,9 +140,13 @@ export const runDisputeWatchSweep = async (
               notificationsSent += 1;
             } else {
               errors += 1;
+              chunkDeliveryFailed = true;
             }
           }
         }
+        // Successful wakes are deduped durably, so replaying this chunk is
+        // safe. Advancing past a failed wake would lose that dispute forever.
+        if (chunkDeliveryFailed) break;
         cursor = end;
       }
       if (cursor >= flooredFrom) {

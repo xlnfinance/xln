@@ -33,7 +33,7 @@ import {
 import { toPublicRpcUrl } from '../networking/loopback-url';
 import { startParentLivenessWatch } from './parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
-import { checkpointNodeRuntime, quiesceNodeRuntime } from './node-runtime-quiesce';
+import { quiesceNodeRuntime } from './node-runtime-quiesce';
 import { applyJEventsToEnv } from '../jadapter/watcher';
 import { drainJWatcherBacklog } from '../jadapter/backlog-drain';
 import { createRelayStore } from '../relay/store';
@@ -56,6 +56,7 @@ import { getTokenIdsForJurisdiction } from '../account/utils';
 import { isLocalOperatorRequest, publicLocalHubHealth, resolveSocketPeerAddress } from '../server/health-redaction';
 import {
   deriveRuntimeAdapterCapabilityToken,
+  registerRuntimeAdapterAuthSeed,
   resolveRuntimeAdapterAuthAudience,
   resolveRuntimeAdapterAuthSeed,
 } from '../radapter/auth';
@@ -94,7 +95,6 @@ import {
   startP2P,
   startJurisdictionWatchers,
   startRuntimeLoop,
-  persistRestoredEnvToDB,
   getEntityJAdapter,
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
@@ -392,6 +392,15 @@ const parseArgs = (): Args => {
   const rpcUrls = readRpcUrls();
 
   const childSecrets = readInheritedChildSecrets();
+  const radapterAuthSeed = resolveChildSecret(
+    childSecrets,
+    'radapterAuthSeed',
+    process.env['XLN_RADAPTER_AUTH_SEED'] || '',
+  );
+  if (radapterAuthSeed) {
+    registerRuntimeAdapterAuthSeed(radapterAuthSeed);
+    delete process.env['XLN_RADAPTER_AUTH_SEED'];
+  }
   const seed = resolveChildSecret(
     childSecrets,
     'runtimeSeed',
@@ -560,13 +569,6 @@ const prewarmLocalHubSignerKeys = (): void => {
 const configureHubRuntimeLogging = (env: Env): void => {
   if (envFlagEnabled(process.env['XLN_HUB_VERBOSE_RUNTIME_LOGS'])) return;
   env.quietRuntimeLogs = true;
-};
-
-const configureHubBootstrapStorage = (env: Env): void => {
-  if (!envFlagEnabled(process.env['XLN_HUB_BOOTSTRAP_PAUSE_STORAGE'])) return;
-  env.runtimeState = env.runtimeState ?? {};
-  env.runtimeState.persistencePaused = true;
-  nodeLog.info('dev_bootstrap.storage_disabled', { name: resolvedArgs.name });
 };
 
 const resolveOperatorAppUrl = (): string => {
@@ -1507,7 +1509,6 @@ const run = async (): Promise<void> => {
     runtimeIngressReceipts.observeLatestRuntimeFrame(changedEnv);
   });
   configureHubRuntimeLogging(env);
-  configureHubBootstrapStorage(env);
   prewarmLocalHubSignerKeys();
   finishTiming('runtime_boot', runtimeBootStartedAt);
 
@@ -1560,7 +1561,6 @@ const run = async (): Promise<void> => {
   let meshLoopFatal = false;
   let meshBootstrapPaused = false;
   let startMeshBootstrapProducer: (() => void) | null = null;
-  let readySnapshotInFlight = false;
   let shuttingDown = false;
 
   const markMeshBootstrapProgress = (step: string): void => {
@@ -1578,11 +1578,6 @@ const run = async (): Promise<void> => {
     }
   };
 
-  const resumeMeshBootstrapProducer = (): void => {
-    if (shuttingDown || meshLoopFatal) return;
-    meshBootstrapPaused = false;
-    startMeshBootstrapProducer?.();
-  };
   type DirectEntityInputDebug = {
     at: number;
     fromRuntimeId: string;
@@ -1837,58 +1832,6 @@ const run = async (): Promise<void> => {
           const message = error instanceof Error ? error.message : String(error);
           console.error(`[${resolvedArgs.name}] runtime quiesce failed: ${message}`);
           return new Response(safeStringify({ ok: false, error: message }), { status: 503, headers });
-        }
-      }
-
-      if (pathname === '/api/control/runtime/persist-ready-snapshot' && request.method === 'POST') {
-        if (readySnapshotInFlight) {
-          return new Response(safeStringify({
-            ok: false,
-            code: 'HUB_READY_SNAPSHOT_IN_PROGRESS',
-          }), { status: 409, headers });
-        }
-        readySnapshotInFlight = true;
-        let checkpointSucceeded = false;
-        try {
-          await pauseMeshBootstrapProducerAndWait();
-          const result = await checkpointNodeRuntime(env, {
-            workTimeoutMs: 30_000,
-            loopTimeoutMs: 30_000,
-            quietMs: 250,
-            resumePersistenceAfterCheckpoint: true,
-            persist: () => persistRestoredEnvToDB(env),
-            loopConfig: {
-              tickDelayMs: HUB_RUNTIME_TICK_DELAY_MS,
-              maxEntityInputsPerFrame: HUB_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
-              maxEntityTxsPerFrame: HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
-            },
-          });
-          checkpointSucceeded = true;
-          nodeLog.info('bootstrap_ready_snapshot.persisted', {
-            height: env.height,
-            wasPaused: result.wasPersistencePaused,
-          });
-          return new Response(safeStringify({
-            ok: true,
-            ...result,
-            height: Number(env.height ?? 0),
-            wasPaused: result.wasPersistencePaused,
-            persistencePaused: Boolean(env.runtimeState?.persistencePaused),
-          }), { headers });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          const quiesceFailed = message.startsWith('NODE_RUNTIME_QUIESCE_FAILED:');
-          return new Response(safeStringify({
-            ok: false,
-            code: quiesceFailed
-              ? 'HUB_READY_SNAPSHOT_QUIESCE_FAILED'
-              : 'HUB_READY_SNAPSHOT_PERSIST_FAILED',
-            error: message,
-            runtimeHeight: Number(env.height ?? 0),
-          }), { status: quiesceFailed ? 503 : 500, headers });
-        } finally {
-          readySnapshotInFlight = false;
-          if (checkpointSucceeded) resumeMeshBootstrapProducer();
         }
       }
 

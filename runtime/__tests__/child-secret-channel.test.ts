@@ -49,11 +49,16 @@ describe('orchestrator child secret channel', () => {
   test('managed runtime FD is the sole seed source even when the parent has a different seed', async () => {
     const parentSeed = 'parent-operator-runtime-seed';
     const childSeed = 'derived-h1-runtime-seed';
+    const childAuthSeed = 'derived-h1-radapter-auth-seed-32-bytes';
     const code = [
       "import { readInheritedChildSecrets, resolveChildSecret } from './runtime/orchestrator/child-secrets.ts';",
+      "import { registerRuntimeAdapterAuthSeed, resolveRuntimeAdapterAuthSeed } from './runtime/radapter/auth.ts';",
       'const secrets = readInheritedChildSecrets();',
       "const seed = resolveChildSecret(secrets, 'runtimeSeed', process.env['XLN_RUNTIME_SEED'] || '');",
-      "process.stdout.write(JSON.stringify({ seed, keep: process.env['KEEP_FOR_CHILD'] || '', root: process.env['XLN_MESH_ROOT_SEED'] || '', custody: process.env['CUSTODY_SEED'] || '', daemon: process.env['CUSTODY_DAEMON_RUNTIME_SEED'] || '', auth: process.env['CUSTODY_DAEMON_AUTH_SEED'] || '', radapter: process.env['XLN_RADAPTER_AUTH_SEED'] || '' }));",
+      "const radapterAuthSeed = resolveChildSecret(secrets, 'radapterAuthSeed', process.env['XLN_RADAPTER_AUTH_SEED'] || '');",
+      'registerRuntimeAdapterAuthSeed(radapterAuthSeed);',
+      "delete process.env['XLN_RADAPTER_AUTH_SEED'];",
+      "process.stdout.write(JSON.stringify({ seed, authSeedMatches: resolveRuntimeAdapterAuthSeed(null) === radapterAuthSeed, keep: process.env['KEEP_FOR_CHILD'] || '', root: process.env['XLN_MESH_ROOT_SEED'] || '', custody: process.env['CUSTODY_SEED'] || '', daemon: process.env['CUSTODY_DAEMON_RUNTIME_SEED'] || '', auth: process.env['CUSTODY_DAEMON_AUTH_SEED'] || '', radapter: process.env['XLN_RADAPTER_AUTH_SEED'] || '' }));",
     ].join('');
     const child = spawn(process.execPath, ['-e', code], {
       cwd: process.cwd(),
@@ -73,7 +78,10 @@ describe('orchestrator child secret channel', () => {
     });
     const stdoutPromise = readStream(child.stdout);
     const stderrPromise = readStream(child.stderr);
-    await writeInheritedChildSecrets(child, { runtimeSeed: childSeed });
+    await writeInheritedChildSecrets(child, {
+      runtimeSeed: childSeed,
+      radapterAuthSeed: childAuthSeed,
+    });
     const exitCode = await new Promise<number | null>((resolve, reject) => {
       child.once('error', reject);
       child.once('close', resolve);
@@ -85,6 +93,7 @@ describe('orchestrator child secret channel', () => {
     expect(stderr).toBe('');
     expect(JSON.parse(stdout)).toEqual({
       seed: childSeed,
+      authSeedMatches: true,
       keep: 'kept',
       root: '',
       custody: '',
