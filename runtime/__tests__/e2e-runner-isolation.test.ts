@@ -7,6 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import {
   assertE2ECodeFingerprintStable,
   assertE2EShardPortsIsolated,
+  batchPlaywrightTargetsByFile,
   computeE2EBuildInputHash,
   computeE2EBuildArtifactHash,
   computeE2ESourceDriftProbe,
@@ -191,6 +192,59 @@ describe('isolated E2E runner resources', () => {
     expect(parsePlaywrightFilesFlag('tests/one.spec.ts,tests/two.spec.ts')).toEqual([
       'tests/one.spec.ts',
       'tests/two.spec.ts',
+    ]);
+  });
+
+  test('batches one spec by infrastructure requirements and QA category', () => {
+    const batches = batchPlaywrightTargetsByFile([
+      {
+        target: 'tests/e2e-swap.spec.ts',
+        requireMarketMaker: true,
+        requireCustody: false,
+        scenario: null,
+        title: 'functional one',
+        tags: ['@functional'],
+        testCategory: 'functional',
+      },
+      {
+        target: 'tests/e2e-swap.spec.ts',
+        requireMarketMaker: true,
+        requireCustody: false,
+        scenario: null,
+        title: 'functional two',
+        tags: ['@functional'],
+        testCategory: 'functional',
+      },
+      {
+        target: 'tests/e2e-swap.spec.ts',
+        requireMarketMaker: true,
+        requireCustody: false,
+        scenario: null,
+        title: 'resilience one',
+        tags: ['@resilience'],
+        testCategory: 'resilience',
+      },
+    ]);
+
+    expect(batches).toHaveLength(2);
+    expect(batches.map(batch => ({
+      title: batch.title,
+      grep: batch.grep,
+      category: batch.testCategory,
+      requireMarketMaker: batch.requireMarketMaker,
+    }))).toEqual([
+      {
+        title: 'tests/e2e-swap.spec.ts [functional batch]',
+        grep: undefined,
+        category: 'functional',
+        requireMarketMaker: true,
+      },
+      {
+        title: 'tests/e2e-swap.spec.ts [resilience batch]',
+        grep: undefined,
+        category: 'resilience',
+        requireMarketMaker: true,
+      },
     ]);
   });
 

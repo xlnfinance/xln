@@ -107,6 +107,7 @@ type CliArgs = {
   pwGrep?: string | undefined;
   pwProject?: string | undefined;
   pwFiles: string[];
+  batchFiles: boolean;
   includeAllSpecs: boolean;
   excludeMarketMaker: boolean;
   marketMakerOnly: boolean;
@@ -797,6 +798,7 @@ const parseArgs = (): CliArgs => {
     pwGrep,
     pwProject,
     pwFiles,
+    batchFiles: hasFlag('batch-files'),
     includeAllSpecs: hasFlag('all') || hasFlag('include-all') || process.env['E2E_ALL'] === '1',
     excludeMarketMaker: hasFlag('exclude-market-maker') || hasFlag('no-market-maker-heavy'),
     marketMakerOnly: hasFlag('market-maker-only') || hasFlag('only-market-maker-heavy'),
@@ -1303,6 +1305,34 @@ type PlaywrightTarget = {
   grep?: string;
   tags?: string[];
   testCategory?: QaTestCategory;
+};
+
+export const batchPlaywrightTargetsByFile = (
+  targets: readonly PlaywrightTarget[],
+): PlaywrightTarget[] => {
+  const groups = new Map<string, PlaywrightTarget>();
+  for (const target of targets) {
+    if (!target.testCategory) {
+      throw new Error(`QA_TEST_CATEGORY_MISSING:${target.target}:${target.title ?? ''}`);
+    }
+    const key = [
+      target.target,
+      target.requireMarketMaker ? 'mm' : 'no-mm',
+      target.requireCustody ? 'custody' : 'no-custody',
+      target.testCategory,
+    ].join('|');
+    if (groups.has(key)) continue;
+    groups.set(key, {
+      target: target.target,
+      requireMarketMaker: target.requireMarketMaker,
+      requireCustody: target.requireCustody,
+      scenario: target.scenario,
+      title: `${target.target} [${target.testCategory} batch]`,
+      tags: [QA_TEST_CATEGORY_TAGS[target.testCategory]],
+      testCategory: target.testCategory,
+    });
+  }
+  return [...groups.values()];
 };
 
 const extractTopLevelTestTitle = (line: string): string | undefined => {
@@ -3266,6 +3296,7 @@ async function main(): Promise<void> {
   console.log(`Prewait health: ${args.prewaitHealth}`);
   console.log(`Browser health: ${args.strictBrowserHealth ? 'strict' : 'report-only'}`);
   console.log(`QA category  : ${args.qaCategory ?? 'all'}`);
+  console.log(`File batching: ${args.batchFiles ? 'yes' : 'no'}`);
   console.log(`Start target : ${args.startAt}`);
   console.log(`Keep prior logs: ${args.preserveArtifacts ? 'yes' : 'no'}`);
   console.log(`Artifacts    : video=${args.videoMode}, trace=${args.traceMode}, screenshot=${args.screenshotMode}`);
@@ -3317,6 +3348,9 @@ async function main(): Promise<void> {
       if (expandedTargets.length === 0) {
         throw new Error(`No isolated test targets matched --qa-category=${args.qaCategory}`);
       }
+    }
+    if (args.batchFiles) {
+      expandedTargets = batchPlaywrightTargetsByFile(expandedTargets);
     }
     const totalTargetCount = expandedTargets.length;
     if (args.startAt >= totalTargetCount) {
