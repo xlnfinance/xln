@@ -90,7 +90,7 @@ const CORE_FILES = {
     'entity/tx/handlers/account.ts',         // Account operations (openAccount, extendCredit)
     'entity/tx/handlers/r2c.ts', // Deposit collateral / reserve-to-collateral flow (R2C)
     'entity/tx/handlers/htlc-payment.ts',    // HTLC payment routing
-    'entity/tx/handlers/create-settlement.ts', // Settlement creation
+    'entity/tx/handlers/settle.ts', // Settlement workspace creation, approval, and execution
     'entity/tx/handlers/mint-reserves.ts',   // Reserve minting (J-events)
     'entity/tx/handlers/dispute.ts',         // Dispute/salvage gateway and evidence handling
 
@@ -296,7 +296,7 @@ const CROSS_FILES = {
     'entity/tx/handlers/cross-j-sweep.ts',
     'entity/tx/handlers/dispute.ts',
     'entity/tx/handlers/htlc-payment.ts',
-    'entity/tx/handlers/create-settlement.ts',
+    'entity/tx/handlers/settle.ts',
     'account/tx/index.ts',
     'account/tx/apply.ts',
     'account/tx/handlers/swap-offer.ts',
@@ -306,7 +306,7 @@ const CROSS_FILES = {
     'account/tx/handlers/cross-swap-fill-ack.ts',
     'account/tx/handlers/add-delta.ts',
     'account/tx/handlers/j-event-claim.ts',
-    'account/tx/handlers/settle-hold.ts',
+    'account/tx/handlers/settle-transition.ts',
     'orderbook/index.ts',
     'orderbook/types.ts',
     'orderbook/core.ts',
@@ -417,7 +417,7 @@ const RUNTIME_FILES = {
     'entity/tx/handlers/account.ts',
     'entity/tx/handlers/r2c.ts',
     'entity/tx/handlers/htlc-payment.ts',
-    'entity/tx/handlers/create-settlement.ts',
+    'entity/tx/handlers/settle.ts',
     'entity/tx/handlers/mint-reserves.ts',
     'account/tx/index.ts',
     'account/tx/apply.ts',
