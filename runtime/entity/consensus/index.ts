@@ -226,6 +226,7 @@ import {
   assertCanonicalSettlementWorkspace,
   hasPendingSettlementTransition,
 } from '../../account/tx/handlers/settle-transition';
+import { getNextSettlementNonce } from '../../protocol/settlement/operations';
 export {
   mergeEntityInputs,
   prioritizeEntityConsensusInputs,
@@ -4070,6 +4071,47 @@ function materializeDeferredSettlementApprovals(
   }
 }
 
+type SettlementTransitionTx = Extract<AccountTx, { type: 'settle_transition' }>;
+type SettlementSealTx = Omit<SettlementTransitionTx, 'data'> & {
+  data: Extract<SettlementTransitionTx['data'], { kind: 'seal' }>;
+};
+
+function refreshStaleUncommittedSettlementSeals(state: EntityState): void {
+  for (const [accountId, account] of [...state.accounts.entries()].sort(([left], [right]) => compareStableText(left, right))) {
+    const workspace = account.settlementWorkspace;
+    if (!workspace || workspace.nonceAtSign !== undefined || account.pendingFrame) continue;
+    const workspaceHash = assertCanonicalSettlementWorkspace(account, workspace);
+    const expectedNonce = getNextSettlementNonce(account);
+    const staleSeals = account.mempool.filter((tx): tx is SettlementSealTx =>
+      tx.type === 'settle_transition' &&
+      tx.data.kind === 'seal' &&
+      tx.data.version === workspace.version &&
+      tx.data.workspaceHash.toLowerCase() === workspaceHash &&
+      tx.data.settlementNonce !== expectedNonce
+    );
+    if (staleSeals.length === 0) continue;
+
+    // A same-height Account tiebreaker can restore our uncommitted seal after
+    // the winning peer frame has advanced the exact proof frontier. Never
+    // mutate or tolerate that signed seal: discard only the local intent and
+    // deterministically request a fresh Entity-quorum witness for this exact
+    // workspace at the new nonce.
+    const staleSet = new Set<AccountTx>(staleSeals);
+    account.mempool = account.mempool.filter((tx) => !staleSet.has(tx));
+    state.deferredAccountProposals ??= new Map();
+    const existing = state.deferredAccountProposals.get(accountId);
+    if (existing && existing !== workspaceHash) {
+      throw new Error(`SETTLEMENT_REFRESH_DEFERRED_CONFLICT:${accountId}:${existing}:${workspaceHash}`);
+    }
+    state.deferredAccountProposals.set(accountId, workspaceHash);
+    entityLog.warn('settlement.stale_seal_refreshed', {
+      account: shortId(accountId),
+      expectedNonce,
+      staleNonces: staleSeals.map((tx) => tx.data.settlementNonce).sort((left, right) => left - right),
+    });
+  }
+}
+
 async function proposePendingAccountFrames(context: ProposePendingAccountFramesContext): Promise<number> {
   const { env, currentEntityState, proposableAccounts, allOutputs, collectedHashes, accountJClaimNodeStore } = context;
   const accountsToProposeFrames = Array.from(proposableAccounts)
@@ -4692,6 +4734,7 @@ export const applyEntityFrame = async (
   // deterministic entity state.
   drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts);
   drainCommittedCrossJurisdictionCancelAcks(env, currentEntityState, proposableAccounts);
+  refreshStaleUncommittedSettlementSeals(currentEntityState);
   materializeDeferredSettlementApprovals(
     env,
     currentEntityState,

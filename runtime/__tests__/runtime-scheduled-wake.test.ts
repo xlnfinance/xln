@@ -289,6 +289,37 @@ describe('runtime scheduled wake', () => {
     expect(proposerResult.newState.crontabState?.hooks.has('watchdog:deterministic')).toBe(false);
   });
 
+  test('applies deterministic self-actions in the scheduled wake frame', async () => {
+    const env = createEmptyEnv('scheduled-wake-self-action-test');
+    env.timestamp = 10_000;
+    env.scenarioMode = true;
+    const id = entityId('60');
+    const proposer = signerId('61');
+    const state = makeState(id, proposer, env.timestamp);
+    scheduleHook(state.crontabState!, {
+      id: 'cross-j-sweep:self',
+      triggerAt: 9_000,
+      type: 'cross_j_orderbook_sweep',
+      data: { reason: 'scheduled-wake-self-action-test' },
+    });
+    const tx: ScheduledWakeTx = {
+      type: 'scheduledWake',
+      data: {
+        version: 1,
+        proposerSignerId: proposer,
+        dueAt: 9_000,
+        jobs: [{ kind: 'hook', id: 'cross-j-sweep:self', dueAt: 9_000 }],
+      },
+    };
+
+    const result = await applyEntityFrame(env, state, [tx], env.timestamp);
+
+    expect(result.outputs).toEqual([]);
+    expect(result.newState.messages).toContain(
+      '🌉 Cross-j orderbook sweep: scheduled-wake-self-action-test expired=0 closedOffers=0 waiting=0',
+    );
+  });
+
   test('accepts newly due jobs while a canonical wake waits for its frame', async () => {
     const env = createEmptyEnv('scheduled-wake-frame-delay-test');
     env.timestamp = 10_000;

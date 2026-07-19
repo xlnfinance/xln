@@ -7,6 +7,7 @@ import { prepareAccountJClaimTx } from '../account/j-claim-transition';
 import { handleJEventClaim } from '../account/tx/handlers/j-event-claim';
 import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
 import { applyEntityFrame } from '../entity/consensus';
+import { proposeAccountFrame } from '../account/consensus/propose';
 import { computeCanonicalEntityConsensusStateHash } from '../entity/consensus/state-root';
 import { buildSignedEntityCommand } from '../entity/command';
 import { signedEntityCommandTx } from '../entity/command-codec';
@@ -436,6 +437,25 @@ describe('atomic settlement Account transition', () => {
     expect(seal).toMatchObject({
       type: 'settle_transition',
       data: { kind: 'seal', settlementNonce: 6, postProof: { nonce: 7 } },
+    });
+
+    materialized.newState.accounts.get(counterparty)!.proofHeader.nextProofNonce = 7;
+    await expect(proposeAccountFrame(
+      env,
+      materialized.newState.accounts.get(counterparty)!,
+      2_001,
+    )).resolves.toMatchObject({
+      success: false,
+      error: 'Transactions deferred until signed settlement finalizes: 1',
+    });
+    const refreshed = await applyEntityFrame(env, materialized.newState, [], 2_001);
+    const refreshedAccount = refreshed.newState.accounts.get(counterparty)!;
+    expect(refreshed.newState.deferredAccountProposals?.has(counterparty)).toBe(false);
+    expect(refreshed.collectedHashes?.map(({ type }) => type)).toEqual(['settlement', 'dispute']);
+    expect(refreshedAccount.mempool).toHaveLength(1);
+    expect(refreshedAccount.mempool[0]).toMatchObject({
+      type: 'settle_transition',
+      data: { kind: 'seal', settlementNonce: 7, postProof: { nonce: 8 } },
     });
   });
 

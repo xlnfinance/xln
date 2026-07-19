@@ -32,6 +32,7 @@ import { computeAccountStateRoot, computeAccountStateSectionHashes } from '../st
 import { createAccountJClaimSession } from '../j-claim-session';
 import { prepareAccountJClaimTx } from '../j-claim-transition';
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
+import { getNextSettlementNonce } from '../../protocol/settlement/operations';
 
 const accountLog = createStructuredLogger('account');
 const ACCOUNT_PROPOSAL_PROFILE =
@@ -67,6 +68,23 @@ const isCrossJurisdictionPullResolveTx = (
 
 const isRetryableAccountProposalError = (error: string | undefined): boolean =>
   Boolean(error?.startsWith('SETTLEMENT_SIGNED_ACCOUNT_FROZEN:'));
+
+const isRefreshableStaleSettlementSeal = (
+  account: AccountMachine,
+  tx: AccountTx,
+  error: string | undefined,
+): boolean => {
+  if (tx.type !== 'settle_transition' || tx.data.kind !== 'seal') return false;
+  if (!error?.startsWith(`SETTLEMENT_SEAL_NONCE_MISMATCH:${tx.data.settlementNonce}:`)) return false;
+  const workspace = account.settlementWorkspace;
+  return Boolean(
+    workspace &&
+    workspace.nonceAtSign === undefined &&
+    tx.data.version === workspace.version &&
+    tx.data.workspaceHash.toLowerCase() === workspace.workspaceHash.toLowerCase() &&
+    tx.data.settlementNonce !== getNextSettlementNonce(account)
+  );
+};
 
 export async function proposeAccountFrame(
   env: Env,
@@ -278,7 +296,10 @@ export async function proposeAccountFrame(
       const { result, preparedTx } = await processOnMachine(txMachine, accountTx);
 
       if (!result.success) {
-        if (isRetryableAccountProposalError(result.error)) {
+        if (
+          isRetryableAccountProposalError(result.error) ||
+          isRefreshableStaleSettlementSeal(clonedMachine, accountTx, result.error)
+        ) {
           deferredTxCount += 1;
           allEvents.push(...result.events);
           accountLog.info('tx.deferred', {

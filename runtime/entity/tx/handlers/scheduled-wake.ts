@@ -1,6 +1,7 @@
 import type { EntityReplica, EntityState, EntityTx, Env, HashToSign } from '../../../types';
 import { executeCrontab } from '../../scheduler';
 import { assertScheduledWakeMatchesState } from '../../../machine/scheduled-wake';
+import { isCollectiveEntityActionTx } from '../../authorization';
 
 type ScheduledWakeTx = Extract<EntityTx, { type: 'scheduledWake' }>;
 
@@ -24,9 +25,24 @@ export const handleScheduledWakeEntityTx = async (
     manualBroadcastInInput,
     hashesToSign,
   });
+  const approvedEntityTxs: EntityTx[] = [];
+  const externalOutputs = outputs.filter((output) => {
+    const isLocalCollectiveAction =
+      output.entityId.toLowerCase() === state.entityId.toLowerCase() &&
+      (output.entityTxs?.length ?? 0) > 0 &&
+      output.entityTxs!.every(isCollectiveEntityActionTx);
+    if (!isLocalCollectiveAction) return true;
+    approvedEntityTxs.push(...output.entityTxs!);
+    return false;
+  });
   return {
     newState: replica.state,
-    outputs,
+    outputs: externalOutputs,
+    // A scheduled wake is already part of this Entity proposal. Its
+    // deterministic self-actions therefore belong to the same signed frame;
+    // certifying an output back to the same Entity adds a second Runtime frame
+    // and lets the command become stale behind unrelated local progress.
+    ...(approvedEntityTxs.length > 0 ? { approvedEntityTxs } : {}),
     ...(hashesToSign.length > 0 ? { hashesToSign } : {}),
   };
 };
