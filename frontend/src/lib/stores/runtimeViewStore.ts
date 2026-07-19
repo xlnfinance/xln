@@ -186,12 +186,27 @@ const errorMessage = (value: unknown): string =>
 let runtimeViewRefreshId = 0;
 let heightRefreshInFlight = false;
 let pendingHeightRefresh = 0;
+let heightRefreshRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let heightRefreshRetryTarget = 0;
+let heightRefreshRetryAttempt = 0;
+const HEIGHT_REFRESH_RETRY_LIMIT = 20;
+
+export const runtimeViewHeightRetryDelayMs = (attempt: number): number =>
+  Math.min(250, 50 * (2 ** Math.max(0, Math.floor(Number(attempt) || 0))));
+
+const clearHeightRefreshRetry = (): void => {
+  if (heightRefreshRetryTimer) clearTimeout(heightRefreshRetryTimer);
+  heightRefreshRetryTimer = null;
+  heightRefreshRetryTarget = 0;
+  heightRefreshRetryAttempt = 0;
+};
 
 export const runtimeView = writable<RuntimeView>(emptyRuntimeView());
 
 export const resetRuntimeView = (): void => {
   runtimeViewRefreshId += 1;
   pendingHeightRefresh = 0;
+  clearHeightRefreshRetry();
   selectedRuntimeViewHeight = null;
   runtimeView.set(emptyRuntimeView());
 };
@@ -315,16 +330,39 @@ export const setRuntimeViewAtHeight = async (value: number | null): Promise<Runt
   return refreshRuntimeView(currentRuntimeViewQuery());
 };
 
+const scheduleRuntimeViewHeightRetry = (): void => {
+  if (heightRefreshRetryTimer || heightRefreshInFlight || selectedRuntimeViewHeight !== null) return;
+  const frameHeight = Math.max(0, Math.floor(Number(get(runtimeView).frame?.height || 0)));
+  const targetHeight = pendingHeightRefresh;
+  if (targetHeight <= frameHeight || get(runtimeControllerHandle).status !== 'connected') {
+    clearHeightRefreshRetry();
+    return;
+  }
+  if (heightRefreshRetryTarget !== targetHeight) {
+    heightRefreshRetryTarget = targetHeight;
+    heightRefreshRetryAttempt = 0;
+  }
+  if (heightRefreshRetryAttempt >= HEIGHT_REFRESH_RETRY_LIMIT) {
+    runtimeView.update((view) => ({
+      ...view,
+      loading: false,
+      error: `RUNTIME_VIEW_CATCHUP_TIMEOUT: target=h${targetHeight} frame=h${frameHeight}`,
+    }));
+    return;
+  }
+  const delayMs = runtimeViewHeightRetryDelayMs(heightRefreshRetryAttempt++);
+  heightRefreshRetryTimer = setTimeout(() => {
+    heightRefreshRetryTimer = null;
+    void refreshRuntimeViewAfterHeightAdvance();
+  }, delayMs);
+};
+
 const refreshRuntimeViewAfterHeightAdvance = async (): Promise<void> => {
   if (selectedRuntimeViewHeight !== null) return;
   if (heightRefreshInFlight) return;
   heightRefreshInFlight = true;
   try {
-    while (pendingHeightRefresh > Math.max(0, Math.floor(Number(get(runtimeView).frame?.height || 0)))) {
-      const targetHeight = pendingHeightRefresh;
-      await refreshRuntimeView(currentRuntimeViewQuery());
-      if (pendingHeightRefresh <= targetHeight) break;
-    }
+    await refreshRuntimeView(currentRuntimeViewQuery());
   } catch (error) {
     runtimeView.update((view) => ({
       ...view,
@@ -339,7 +377,9 @@ const refreshRuntimeViewAfterHeightAdvance = async (): Promise<void> => {
       pendingHeightRefresh > frameHeight &&
       get(runtimeControllerHandle).status === 'connected'
     ) {
-      void refreshRuntimeViewAfterHeightAdvance();
+      scheduleRuntimeViewHeightRetry();
+    } else {
+      clearHeightRefreshRetry();
     }
   }
 };
@@ -360,6 +400,9 @@ runtimeAdapterHeight.subscribe((height) => {
   // height refresh before that frame exists races the initial read and can
   // make its caller observe a transient frame=null as a successful result.
   if (!runtimeViewNeedsHeightRefresh(view, handle.status, nextHeight)) return;
+  if (nextHeight > pendingHeightRefresh) {
+    clearHeightRefreshRetry();
+  }
   pendingHeightRefresh = Math.max(pendingHeightRefresh, nextHeight);
   void refreshRuntimeViewAfterHeightAdvance();
 });

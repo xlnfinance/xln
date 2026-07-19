@@ -56,6 +56,19 @@ const normalizeHeight = (height: unknown): number => {
   return Number.isFinite(normalized) && normalized >= 0 ? normalized : 0;
 };
 
+const responseHeight = (value: unknown): number | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const headValue = record['head'];
+  const head = headValue && typeof headValue === 'object' && !Array.isArray(headValue)
+    ? headValue as Record<string, unknown>
+    : null;
+  const candidates = [record['height'], record['latestHeight'], head?.['latestHeight']]
+    .filter((candidate) => candidate !== undefined && candidate !== null)
+    .map(normalizeHeight);
+  return candidates.length > 0 ? Math.max(...candidates) : null;
+};
+
 const stableQueryValue = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(stableQueryValue);
   if (value && typeof value === 'object') {
@@ -107,7 +120,8 @@ export class RuntimeQueryClient {
     const cached = queryCache.get(key) as RuntimeQueryCacheEntry<T> | undefined;
     if (cached && cached.height === requestHeight) return cached.data;
     const data = await adapter.read<T>(path, query);
-    queryCache.set(key, { height: requestHeight, data });
+    const observedHeight = query?.atHeight === undefined ? responseHeight(data) : null;
+    queryCache.set(key, { height: observedHeight ?? requestHeight, data });
     trimQueryCache();
     return data;
   }

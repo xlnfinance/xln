@@ -5,7 +5,10 @@ import {
   RuntimeQueryClient,
   clearRuntimeQueryCache,
 } from '../../frontend/src/lib/stores/runtimeQueryClient';
-import { runtimeViewNeedsHeightRefresh } from '../../frontend/src/lib/stores/runtimeViewStore';
+import {
+  runtimeViewHeightRetryDelayMs,
+  runtimeViewNeedsHeightRefresh,
+} from '../../frontend/src/lib/stores/runtimeViewStore';
 
 test('runtime query client exposes typed projection reads and bounded cache', () => {
   const source = readFileSync('frontend/src/lib/stores/runtimeQueryClient.ts', 'utf8');
@@ -71,6 +74,13 @@ test('runtime view height pushes cannot race the initial remote projection', () 
   expect(runtimeViewNeedsHeightRefresh(liveView, 'connected', 11)).toBe(true);
 });
 
+test('runtime view catch-up retries back off instead of spinning', () => {
+  expect([0, 1, 2, 3, 20].map(runtimeViewHeightRetryDelayMs)).toEqual([50, 100, 200, 250, 250]);
+  const source = readFileSync('frontend/src/lib/stores/runtimeViewStore.ts', 'utf8');
+  expect(source).not.toContain('while (pendingHeightRefresh');
+  expect(source).toContain('RUNTIME_VIEW_CATCHUP_TIMEOUT');
+});
+
 test('activity history panel reads activity through RuntimeQueryClient only', () => {
   const panelSource = readFileSync('frontend/src/lib/components/Entity/ActivityHistoryPanel.svelte', 'utf8');
   const querySource = readFileSync('frontend/src/lib/components/Entity/activity-history-query.ts', 'utf8');
@@ -134,6 +144,27 @@ test('runtime query cache is live-height aware but keeps historical reads pinned
   const secondHistorical = await queryClient.readHistoryFrameBatch(historicalQuery);
   expect(firstHistorical).toBe(secondHistorical);
   expect(reads).toHaveLength(3);
+});
+
+test('runtime query cache never pins a lagging live projection to a newer adapter height', async () => {
+  clearRuntimeQueryCache();
+  let readNumber = 0;
+  const adapter = {
+    currentHeight: 38,
+    read: async (path: string) => {
+      readNumber += 1;
+      const height = readNumber === 1 ? 37 : 38;
+      return path === 'head'
+        ? { latestHeight: height }
+        : { height, head: { latestHeight: height }, entities: [], activeEntityId: null, activeEntity: null };
+    },
+  };
+  const queryClient = new RuntimeQueryClient(() => adapter as never, 'runtime-query-lag-test');
+
+  expect((await queryClient.readViewFrame()).height).toBe(37);
+  expect((await queryClient.readViewFrame()).height).toBe(38);
+  expect((await queryClient.readViewFrame()).height).toBe(38);
+  expect(readNumber).toBe(2);
 });
 
 test('runtime query cache follows custom adapter height during remote validation', async () => {
