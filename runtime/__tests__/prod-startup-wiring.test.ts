@@ -1542,9 +1542,12 @@ describe('production startup wiring', () => {
     expect(allTestsFast).toContain('env: sanitizeChildProcessEnv(env)');
     expect(allTestsFast).toContain('const e2eEnv = withoutTestArtifactCleanupDoneEnv(childEnv);');
     expect(allTestsFast).toContain('e2eEnv,');
-    expect(systemRunner).toContain("import { cleanupTestArtifactsBeforeRun } from './test-artifact-cleanup';");
+    expect(systemRunner).toContain('cleanupTestArtifactsBeforeRun,');
+    expect(systemRunner).toContain('TEST_ARTIFACT_CLEANUP_DONE_ENV,');
+    expect(systemRunner).toContain("from './test-artifact-cleanup';");
     expect(systemRunner).toContain("import { sanitizeChildProcessEnv } from '../server/child-process-env';");
     expect(systemRunner).toContain("cleanupTestArtifactsBeforeRun({ reason: 'system-tests' })");
+    expect(systemRunner).toContain("process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1'");
     expect(systemRunner).toContain('env: sanitizeChildProcessEnv(process.env)');
     expect(systemRunner).toContain('env: sanitizeChildProcessEnv({');
     expect(soakRunner).toContain("import { sanitizeChildProcessEnv } from '../server/child-process-env';");

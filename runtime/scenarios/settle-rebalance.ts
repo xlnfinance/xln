@@ -28,6 +28,7 @@ import { deriveDelta } from '../account/utils';
 import { isLeftEntity } from '../entity/id';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
+import { startRuntimeHistoryTraceForTesting } from '../history-retention';
 import { ethers } from 'ethers';
 
 const USDC = 1;
@@ -430,26 +431,8 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
 
   const daveCollateralBeforeHtlc =
     findReplica(env, dave.id)[1].state.accounts.get(hub.id)?.deltas.get(USDC)?.collateral || 0n;
-  const phase65StartHeight = env.height;
-
   const htlcSecret = ethers.keccak256(ethers.toUtf8Bytes('settle-rebalance-htlc-phase-6-5'));
   const htlcHashlock = hashHtlcSecret(htlcSecret);
-
-  await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: [withDeterministicHtlcTestSecret({
-      type: 'htlcPayment',
-      data: {
-        targetEntityId: dave.id,
-        tokenId: USDC,
-        amount: usd(2_000),
-        route: [hub.id, dave.id],
-        description: 'hub->dave htlc rebalance trigger',
-        hashlock: htlcHashlock,
-      },
-    }, htlcSecret)],
-  }]);
   let daveAccountAfterHtlc = findReplica(env, dave.id)[1].state.accounts.get(hub.id);
   let daveRequestedAfterHtlc = 0n;
   let daveCollateralAfterHtlc = daveCollateralBeforeHtlc;
@@ -457,39 +440,60 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
   let phase65HtlcFinalized = false;
   let phase65RequestCollateralCommitted = false;
 
-  // Wait for the full off-chain ACK chain, not a fixed tick count. Runtime
-  // may insert a J-event-only frame between submit and local follow-ups; the
-  // invariant here is the observed sequence, not a specific frame number.
-  for (let i = 0; i < 80; i++) {
-    advanceTime(i < 20 ? 50 : 100);
-    await process(env);
-    daveAccountAfterHtlc = findReplica(env, dave.id)[1].state.accounts.get(hub.id);
-    daveRequestedAfterHtlc = daveAccountAfterHtlc?.requestedRebalance.get(USDC) || 0n;
-    daveCollateralAfterHtlc = daveAccountAfterHtlc?.deltas.get(USDC)?.collateral || 0n;
-    const phase65Logs = (env.history ?? [])
-      .filter((snapshot) => Number(snapshot.height ?? 0) >= phase65StartHeight)
-      .flatMap((snapshot) => snapshot.logs ?? []);
-    phase65HtlcReceived = phase65Logs.some((log) => {
-      const data = (log.data ?? {}) as Record<string, unknown>;
-      return log.message === 'HtlcReceived' &&
-        String(data['entityId'] || '').toLowerCase() === dave.id.toLowerCase() &&
-        String(data['hashlock'] || '').toLowerCase() === htlcHashlock.toLowerCase();
-    });
-    phase65HtlcFinalized = phase65Logs.some((log) => {
-      const data = (log.data ?? {}) as Record<string, unknown>;
-      return log.message === 'HtlcFinalized' &&
-        String(data['hashlock'] || '').toLowerCase() === htlcHashlock.toLowerCase();
-    });
-    phase65RequestCollateralCommitted = phase65Logs.some((log) => {
-      const data = (log.data ?? {}) as Record<string, unknown>;
-      return log.message === 'request_collateral_committed' &&
-        String(data['entityId'] || '').toLowerCase() === dave.id.toLowerCase() &&
-        Number(data['tokenId']) === USDC;
-    });
-    if (phase65HtlcReceived && phase65HtlcFinalized && phase65RequestCollateralCommitted &&
-      (daveRequestedAfterHtlc > 0n || daveCollateralAfterHtlc > daveCollateralBeforeHtlc)) {
-      break;
+  // Production history is intentionally bounded to one snapshot. This
+  // scenario owns the multi-frame trace only for the causal assertion below.
+  const phase65Trace = startRuntimeHistoryTraceForTesting(env);
+  try {
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [withDeterministicHtlcTestSecret({
+        type: 'htlcPayment',
+        data: {
+          targetEntityId: dave.id,
+          tokenId: USDC,
+          amount: usd(2_000),
+          route: [hub.id, dave.id],
+          description: 'hub->dave htlc rebalance trigger',
+          hashlock: htlcHashlock,
+        },
+      }, htlcSecret)],
+    }]);
+
+    // Wait for the full off-chain ACK chain, not a fixed tick count. Runtime
+    // may insert a J-event-only frame between submit and local follow-ups; the
+    // invariant here is the observed sequence, not a specific frame number.
+    for (let i = 0; i < 80; i++) {
+      advanceTime(i < 20 ? 50 : 100);
+      await process(env);
+      daveAccountAfterHtlc = findReplica(env, dave.id)[1].state.accounts.get(hub.id);
+      daveRequestedAfterHtlc = daveAccountAfterHtlc?.requestedRebalance.get(USDC) || 0n;
+      daveCollateralAfterHtlc = daveAccountAfterHtlc?.deltas.get(USDC)?.collateral || 0n;
+      const phase65Logs = phase65Trace.snapshots.flatMap((snapshot) => snapshot.logs ?? []);
+      phase65HtlcReceived = phase65Logs.some((log) => {
+        const data = (log.data ?? {}) as Record<string, unknown>;
+        return log.message === 'HtlcReceived' &&
+          String(data['entityId'] || '').toLowerCase() === dave.id.toLowerCase() &&
+          String(data['hashlock'] || '').toLowerCase() === htlcHashlock.toLowerCase();
+      });
+      phase65HtlcFinalized = phase65Logs.some((log) => {
+        const data = (log.data ?? {}) as Record<string, unknown>;
+        return log.message === 'HtlcFinalized' &&
+          String(data['hashlock'] || '').toLowerCase() === htlcHashlock.toLowerCase();
+      });
+      phase65RequestCollateralCommitted = phase65Logs.some((log) => {
+        const data = (log.data ?? {}) as Record<string, unknown>;
+        return log.message === 'request_collateral_committed' &&
+          String(data['entityId'] || '').toLowerCase() === dave.id.toLowerCase() &&
+          Number(data['tokenId']) === USDC;
+      });
+      if (phase65HtlcReceived && phase65HtlcFinalized && phase65RequestCollateralCommitted &&
+        (daveRequestedAfterHtlc > 0n || daveCollateralAfterHtlc > daveCollateralBeforeHtlc)) {
+        break;
+      }
     }
+  } finally {
+    phase65Trace.stop();
   }
 
   const phase65TopUpApplied = daveCollateralAfterHtlc > daveCollateralBeforeHtlc;

@@ -17,7 +17,10 @@ import { mkdirSync, createWriteStream, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
-import { cleanupTestArtifactsBeforeRun } from './test-artifact-cleanup';
+import {
+  cleanupTestArtifactsBeforeRun,
+  TEST_ARTIFACT_CLEANUP_DONE_ENV,
+} from './test-artifact-cleanup';
 import { sanitizeChildProcessEnv } from '../server/child-process-env';
 
 type PipedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
@@ -295,6 +298,7 @@ async function runScenarioOnWorker(
 async function main(): Promise<void> {
   const args = parseArgs();
   cleanupTestArtifactsBeforeRun({ reason: 'system-tests' });
+  process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1';
   const scenarios = args.scenarios;
   if (scenarios.length === 0) {
     console.error('No scenarios selected. Use --scenarios=a,b,c');
