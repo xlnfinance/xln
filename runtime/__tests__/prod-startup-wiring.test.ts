@@ -61,6 +61,18 @@ describe('production startup wiring', () => {
     );
   });
 
+  test('release RPC scenarios include the lock hostage terminal-evidence flow', () => {
+    const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
+    const systemRunner = readFileSync(join(repoRoot, 'runtime/scripts/run-system-tests-parallel.ts'), 'utf8');
+
+    expect(releaseGate).toContain(
+      "{ name: 'RPC system scenarios', command: 'bun run test:system:parallel', timeoutMs: 1_200_000 }",
+    );
+    expect(systemRunner).toMatch(
+      /const DEFAULT_SCENARIOS = \[[\s\S]*?'processbatch'[\s\S]*?'rebalance'[\s\S]*?'settle-rebalance'[\s\S]*?'lock-ahb'[\s\S]*?\];/,
+    );
+  });
+
   test('market-maker revalidates bootstrap completion after yielding to ingress', () => {
     const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
     const armedBranchStart = mmNode.indexOf('if (bootstrapCompletionCheckArmed && canCheckBootstrapCompletion()) {');

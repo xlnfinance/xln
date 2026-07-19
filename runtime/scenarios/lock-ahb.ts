@@ -1762,11 +1762,22 @@ export async function lockAhb(env: Env): Promise<void> {
     const secretQueued = secretsAfter.some(
       (r: { secret: string }) => r.secret === hostageSecret.secret
     );
+    const secretAlreadyFinalized = (bobRepAfterFinalize.state.jBlockChain ?? [])
+      .flatMap(block => block.events ?? [])
+      .some(event =>
+        event.type === 'SecretRevealed'
+        && String(event.data.hashlock).toLowerCase() === hostageSecret.hashlock.toLowerCase()
+        && String(event.data.secret).toLowerCase() === hostageSecret.secret.toLowerCase()
+      );
 
     console.log(`\n🔍 HOSTAGE REVEAL QUEUE VERIFICATION:`);
     console.log(`   Secrets before: ${secretsBefore}`);
     console.log(`   Queued/sent secrets: ${secretsAfter.length}`);
-    assert(secretQueued, 'Hostage preimage queued in the certified/sent J-batch');
+    console.log(`   Already Entity-finalized: ${secretAlreadyFinalized}`);
+    assert(
+      secretQueued || secretAlreadyFinalized,
+      'Hostage preimage queued/sent or already observed in Entity-finalized SecretRevealed event',
+    );
 
     // Bring Hub back online at the exact durable retry boundary. The reliable
     // Account lane must reach a terminal ACK; deleting/requeueing it would hide

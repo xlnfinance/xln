@@ -41,6 +41,7 @@ const DEFAULT_SCENARIOS = [
   'processbatch',
   'rebalance',
   'settle-rebalance',
+  'lock-ahb',
 ];
 
 type CliArgs = {
