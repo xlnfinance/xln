@@ -1,6 +1,6 @@
 {
   "name": "xlnfinance",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "packageManager": "bun@1.3.14",
   "main": "index.js",
   "scripts": {
@@ -208,8 +208,8 @@
     "mocha": "^10.8.2",
     "playwright": "^1.61.1",
     "prettier": "^3.9.5",
-    "tronbox": "^4.8.0",
-    "tronweb": "^6.3.0",
+    "tronbox": "^4.9.0",
+    "tronweb": "^6.4.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },
