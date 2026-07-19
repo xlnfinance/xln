@@ -347,9 +347,10 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
       String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK),
   ),
 );
-// A bootstrap wave admits two independent source hubs for one direction in a
-// single Runtime frame. This stays below both the 64-transaction Entity-frame
-// cap and the five-second health responsiveness budget on a one-CPU runtime.
+// The canonical testnet mesh has three source hubs. Their largest combined
+// direction is 45 offers, so admitting all three in one Runtime frame remains
+// below the 64-transaction Entity-frame cap and avoids an unnecessary network
+// roundtrip for the third hub.
 const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 45;
 const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 45;
 const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
@@ -368,7 +369,7 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '2'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '3'),
 );
 const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
