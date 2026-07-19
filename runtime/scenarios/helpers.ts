@@ -458,7 +458,7 @@ export async function processUntil(
     // Process local state
     await process(env);
     onTick?.(round + 1);
-    advanceScenarioTime(env, undefined, true);
+    advanceScenarioTime(env);
 
     // Yield to event loop to allow WS messages to be received
     await new Promise(resolve => setTimeout(resolve, 10));
