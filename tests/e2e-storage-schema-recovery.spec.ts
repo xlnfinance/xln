@@ -8,12 +8,12 @@ type BrowserIssue = {
   message: string;
 };
 
-const mutateCurrentStorageHeadToLegacySchema = async (
+const mutateAuthoritativeStorageHeadToLegacySchema = async (
   page: Page,
   runtimeId: string,
 ): Promise<{ databaseName: string; before: number; after: number }> => {
   const currentBytes = await page.evaluate(async id => {
-    const location = `db-${id}-storage-current`;
+    const location = `db-${id}-frames`;
     const databaseName = `level-js-${location}`;
     const open = indexedDB.open(databaseName, 1);
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -48,7 +48,7 @@ const mutateCurrentStorageHeadToLegacySchema = async (
   }
   const encoded = Array.from(encodeBinaryPayload({ ...head, schemaVersion: 1 }, 'msgpack'));
   await page.evaluate(async ({ id, bytes }) => {
-    const location = `db-${id}-storage-current`;
+    const location = `db-${id}-frames`;
     const databaseName = `level-js-${location}`;
     const open = indexedDB.open(databaseName, 1);
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -72,7 +72,7 @@ const mutateCurrentStorageHeadToLegacySchema = async (
 
 const readPersistedStorageSchema = async (page: Page, runtimeId: string): Promise<number> => {
   const bytes = await page.evaluate(async id => {
-    const location = `db-${id}-storage-current`;
+    const location = `db-${id}-frames`;
     const databaseName = `level-js-${location}`;
     const open = indexedDB.open(databaseName, 1);
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -147,9 +147,9 @@ test.describe('Storage schema recovery', () => {
     );
 
     expect(issues).toEqual([]);
-    const mutation = await mutateCurrentStorageHeadToLegacySchema(page, runtimeId);
+    const mutation = await mutateAuthoritativeStorageHeadToLegacySchema(page, runtimeId);
     expect(mutation).toEqual({
-      databaseName: `level-js-db-${runtimeId}-storage-current`,
+      databaseName: `level-js-db-${runtimeId}-frames`,
       before: STORAGE_SCHEMA_VERSION,
       after: 1,
     });
@@ -160,7 +160,7 @@ test.describe('Storage schema recovery', () => {
     await expect(errorScreen).toBeVisible({ timeout: 30_000 });
     await expect(errorScreen.getByRole('heading', { name: 'Local runtime needs recovery' })).toBeVisible();
     await expect(errorScreen).toContainText('storage schema 1');
-    await expect(errorScreen).toContainText('requires schema 2');
+    await expect(errorScreen).toContainText(`requires schema ${STORAGE_SCHEMA_VERSION}`);
     await expect(errorScreen).toContainText('No incompatible data was applied or deleted');
     await expect(page.getByTestId('storage-schema-recover')).toBeVisible();
     await expect(page.getByTestId('storage-schema-reset')).toBeVisible();
