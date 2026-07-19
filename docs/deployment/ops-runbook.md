@@ -99,9 +99,10 @@ bun run security:audit-pack
 bun run prod:health
 ```
 
-Use `bun run deploy:prod` for a normal state-preserving production rollout. Use
-`bun run deploy:prod:fresh` only when the release owner explicitly approves
-resetting the public demo/testnet state.
+Use `bun run deploy:prod` for the canonical production rollout. It always resets
+the public testnet chain, runtime, mesh, and custody state before bootstrapping.
+Hub and market-maker WAL is not a deployment input. `bun run deploy:prod:fresh`
+is an explicit alias for the same clean deployment policy.
 
 Before a public-net release candidate, also run:
 

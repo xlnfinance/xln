@@ -27,6 +27,7 @@ describe('orchestrator public RPC routes', () => {
     const payload = JSON.parse(toPublicJurisdictionsPayload({
       shardJurisdictionsPath: '/tmp/unused-jurisdictions.json',
       rpc2Url: 'http://127.0.0.1:8546',
+      ephemeralTestnet: true,
       rpcUrls: {
         1: 'http://127.0.0.1:8545',
         2: 'http://127.0.0.1:8546',
@@ -84,6 +85,7 @@ describe('orchestrator public RPC routes', () => {
     expect(payload.jurisdictions.rpc3.rpc).toBe('/rpc3');
     expect(payload.jurisdictions.custom8.rpc).toBe('/rpc8');
     expect(payload.jurisdictions.external.rpc).toBe('https://example.invalid/rpc');
+    expect(payload.ephemeralTestnet).toBe(true);
   });
 
   test('rejects an active RPC stack without exact EntityProvider deployment metadata', () => {

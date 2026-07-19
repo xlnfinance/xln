@@ -23,6 +23,7 @@ export type OrchestratorJurisdictionsConfig = {
   shardJurisdictionsPath: string;
   rpc2Url: string;
   rpcUrls?: Record<number, string>;
+  ephemeralTestnet?: boolean;
 };
 
 type ShardJurisdictionsFile = Record<string, unknown> & {
@@ -425,6 +426,7 @@ export const toPublicJurisdictionsPayload = (
   const networkVersion = computeJurisdictionsNetworkVersion(parsed, String(parsed.version || '3'));
   parsed['deployVersion'] = networkVersion;
   parsed['networkVersion'] = networkVersion;
+  parsed['ephemeralTestnet'] = config.ephemeralTestnet === true;
   for (const [key, jurisdiction] of Object.entries(parsed.jurisdictions)) {
     if (!jurisdiction || typeof jurisdiction !== 'object') continue;
     assertPublicActiveRpcDeploymentMetadata(key, jurisdiction);

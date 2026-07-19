@@ -1092,8 +1092,11 @@ describe('production startup wiring', () => {
     expect(deploy.match(/git clean -fd -e data\/ -e db\/ -e db-tmp\//g)).toHaveLength(2);
     expect(deploy.match(/if \[ -f \/var\/lib\/xln\/\.checkout-state-migrated \]; then git clean -fd; else/g)).toHaveLength(2);
     expect(deploy).not.toContain('pm2 restart xln-server');
-    expect(packageJson.scripts['deploy:prod:runtime']).toContain('--code-only');
-    expect(packageJson.scripts['deploy:prod:runtime:code']).toContain('--code-only');
+    expect(packageJson.scripts['deploy:prod']).toContain('--reset-mesh');
+    expect(packageJson.scripts['deploy:prod']).not.toContain('--code-only');
+    expect(packageJson.scripts['deploy:prod:runtime']).toContain('--reset-mesh');
+    expect(packageJson.scripts['deploy:prod:runtime']).not.toContain('--code-only');
+    expect(packageJson.scripts['deploy:prod:runtime:code']).toBeUndefined();
     expect(packageJson.scripts['deploy:prod:runtime:reset']).toContain('--reset-mesh');
     expect(packageJson.scripts['deploy:prod:fresh']).toContain('--reset-mesh');
   });

@@ -24,6 +24,7 @@
   import { tabOperations } from '$lib/stores/tabStore';
   import { timeOperations } from '$lib/stores/timeStore';
   import { vaultOperations } from '$lib/stores/vaultStore';
+  import { resolveDeployVersionAction } from '$lib/utils/deployVersionPolicy';
   import { resetEverything } from '$lib/utils/resetEverything';
   import { parseStorageSchemaMismatch } from '$lib/utils/storageSchemaRecovery';
   import {
@@ -77,6 +78,7 @@
   const DEPLOY_VERSION_KEY = 'xln-deploy-version';
   type DeployVersionPayload = {
     version: string;
+    ephemeralTestnet: boolean;
   };
 
   function logAppShellDiagnostic(message: string, details?: unknown): void {
@@ -284,7 +286,7 @@
       await bootApp();
       if (options.persistDeployVersionAfterBoot) {
         try {
-          persistDeployVersion(await fetchCurrentDeployVersion());
+          persistDeployVersion((await fetchCurrentDeployVersion()).version);
         } catch (deployError) {
           logAppShellDiagnostic('Deploy version persistence failed after boot', deployError);
         }
@@ -377,10 +379,10 @@
       throw new Error('MISSING_DEPLOY_VERSION');
     }
 
-    return { version };
+    return { version, ephemeralTestnet: root['ephemeralTestnet'] === true };
   }
 
-  async function fetchCurrentDeployVersion(): Promise<string> {
+  async function fetchCurrentDeployVersion(): Promise<DeployVersionPayload> {
     const response = await fetch(`/api/jurisdictions?ts=${Date.now()}`, {
       cache: 'no-store',
       headers: {
@@ -392,26 +394,31 @@
       throw new Error(`DEPLOY_VERSION_FETCH_FAILED:${response.status}`);
     }
     const payload = parseDeployVersionPayload(await response.json());
-    return payload.version;
+    return payload;
   }
 
   async function ensureCurrentDeployVersion(): Promise<boolean> {
-    let currentVersion = '';
+    let current: DeployVersionPayload;
     try {
-      currentVersion = await fetchCurrentDeployVersion();
+      current = await fetchCurrentDeployVersion();
     } catch (error) {
       logAppShellDiagnostic('Deploy version fetch failed', error);
       return false;
     }
 
     const storedVersion = readStoredDeployVersion();
-    if (!storedVersion) {
-      persistDeployVersion(currentVersion);
+    const action = resolveDeployVersionAction(storedVersion, current.version, current.ephemeralTestnet);
+    if (action === 'persist-current') {
+      persistDeployVersion(current.version);
       return false;
     }
-    if (storedVersion === currentVersion) return false;
+    if (action === 'continue') return false;
+    if (action === 'reset-ephemeral-testnet') {
+      await resetEverything({ confirmed: true, reason: 'deploy-version-change-testnet' });
+      return true;
+    }
 
-    error.set(`Deploy version changed from ${storedVersion} to ${currentVersion}. Review recovery coverage before resetting local data.`);
+    error.set(`Deploy version changed from ${storedVersion} to ${current.version}. Review recovery coverage before resetting local data.`);
     isLoading.set(false);
     return true;
   }
@@ -514,7 +521,7 @@
         error.set(null);
         embedBootReady = true;
         try {
-          persistDeployVersion(await fetchCurrentDeployVersion());
+          persistDeployVersion((await fetchCurrentDeployVersion()).version);
         } catch (error) {
           logAppShellDiagnostic('Deploy version persistence failed in lock test mode', error);
         }
@@ -522,7 +529,7 @@
       }
       await bootApp();
       try {
-        persistDeployVersion(await fetchCurrentDeployVersion());
+        persistDeployVersion((await fetchCurrentDeployVersion()).version);
       } catch (error) {
         logAppShellDiagnostic('Deploy version persistence failed after app boot', error);
       }

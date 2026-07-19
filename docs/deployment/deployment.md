@@ -168,8 +168,9 @@ export USE_ANVIL=true
 - deploy from an explicit operator/release script
 - keep the repo clean before deploy except approved runtime data outside git
 - after deploy, verify health instead of assuming a process restart means success
-- `bun run deploy:prod` preserves the existing demo/testnet runtime state and only restarts the production stack with the current code
-- `bun run deploy:prod:fresh` is the explicit destructive path; it resets anvil, runtime, mesh, and custody demo state
+- `bun run deploy:prod` always rebuilds the public testnet from a clean Anvil, runtime, mesh, and custody state
+- do not restore hub or market-maker WAL during a normal deploy; those bootstrap identities are recreated deterministically
+- `bun run deploy:prod:fresh` is an explicit alias for the same clean deployment policy
 
 ## Verification Checklist
 
