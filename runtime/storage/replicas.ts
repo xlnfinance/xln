@@ -1,12 +1,11 @@
 import type { EntityReplica, EntityState, Env } from '../types';
-import { encodeBuffer } from './codec';
 import {
   buildCertifiedEntityLineagePlan,
   rebaseCertifiedEntityLineageAtRuntimeCheckpoint,
 } from './entity-lineage';
 import { computeStorageReplicaMetaDigest } from './hashes';
 import { keyLiveReplicaMeta, normalizeEntityId } from './keys';
-import { projectReplicaMeta } from './projections';
+import { encodeReplicaMeta } from './projections';
 import type { StorageReplicaLookup } from './types';
 
 export const findReplicaForEntity = (
@@ -55,10 +54,10 @@ export const buildStorageReplicaMetaCommitmentFromCheckpointPlan = (
     }
     entries.push({
       key: keyLiveReplicaMeta(entityId, signerId),
-      value: encodeBuffer(projectReplicaMeta(replica, {
+      value: encodeReplicaMeta(replica, {
         certifiedFrameLineage: checkpointPlan.lineageByReplicaKey.get(String(replicaKey)),
         certifiedFrameAnchor: checkpointPlan.anchorByReplicaKey.get(String(replicaKey)),
-      })),
+      }),
     });
   }
   return { entries, digest: computeStorageReplicaMetaDigest(entries) };

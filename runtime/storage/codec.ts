@@ -11,8 +11,11 @@ export const notFound = (error: unknown): boolean => {
   return code === 'LEVEL_NOT_FOUND' || name === 'NotFoundError';
 };
 
-export const encodeBuffer = (value: unknown): Buffer => {
-  return Buffer.from(encodeBinaryPayload(value, 'msgpack'));
+export const encodeBuffer = (
+  value: unknown,
+  options: { omitSymbolKeys?: boolean } = {},
+): Buffer => {
+  return Buffer.from(encodeBinaryPayload(value, 'msgpack', options));
 };
 
 const requireStorageMsgpack = (buffer: Buffer): void => {

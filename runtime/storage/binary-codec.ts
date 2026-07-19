@@ -59,6 +59,7 @@ const canonicalize = (
   path: string,
   stack: Set<object>,
   preserveUndefined: boolean,
+  omitSymbolKeys: boolean,
 ): unknown => {
   if (value === null || typeof value === 'string' || typeof value === 'boolean' || typeof value === 'bigint') {
     return value;
@@ -100,13 +101,13 @@ const canonicalize = (
     if (Array.isArray(value)) {
       return value.map((entry, index) => {
         if (!(index in value)) return unsupported(`${path}[${index}]`, 'sparse-array');
-        return canonicalize(entry, `${path}[${index}]`, stack, preserveUndefined);
+        return canonicalize(entry, `${path}[${index}]`, stack, preserveUndefined, omitSymbolKeys);
       });
     }
     if (value instanceof Map) {
       const entries = Array.from(value.entries()).map(([key, entryValue], index) => {
-        const canonicalKey = canonicalize(key, `${path}.key[${index}]`, stack, preserveUndefined);
-        const canonicalValue = canonicalize(entryValue, `${path}.value[${index}]`, stack, preserveUndefined);
+        const canonicalKey = canonicalize(key, `${path}.key[${index}]`, stack, preserveUndefined, omitSymbolKeys);
+        const canonicalValue = canonicalize(entryValue, `${path}.value[${index}]`, stack, preserveUndefined, omitSymbolKeys);
         return {
           key: canonicalKey,
           value: canonicalValue,
@@ -122,7 +123,7 @@ const canonicalize = (
     }
     if (value instanceof Set) {
       const entries = Array.from(value.values()).map((entry, index) => {
-        const canonical = canonicalize(entry, `${path}[${index}]`, stack, preserveUndefined);
+        const canonical = canonicalize(entry, `${path}[${index}]`, stack, preserveUndefined, omitSymbolKeys);
         return { value: canonical, bytes: canonicalSortBytes(canonical) };
       });
       entries.sort((left, right) => compareBytes(left.bytes, right.bytes));
@@ -133,7 +134,9 @@ const canonicalize = (
     if (prototype !== Object.prototype && prototype !== null) {
       return unsupported(path, `prototype=${value.constructor?.name ?? 'unknown'}`);
     }
-    if (Object.getOwnPropertySymbols(value).length > 0) return unsupported(path, 'symbol-key');
+    if (!omitSymbolKeys && Object.getOwnPropertySymbols(value).length > 0) {
+      return unsupported(path, 'symbol-key');
+    }
     const output: Record<string, unknown> = {};
     for (const key of Object.getOwnPropertyNames(value).sort()) {
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
@@ -144,7 +147,7 @@ const canonicalize = (
         enumerable: true,
         configurable: true,
         writable: true,
-        value: canonicalize(descriptor.value, `${path}.${key}`, stack, preserveUndefined),
+        value: canonicalize(descriptor.value, `${path}.${key}`, stack, preserveUndefined, omitSymbolKeys),
       });
     }
     return output;
@@ -156,8 +159,9 @@ const canonicalize = (
 export const encodeBinaryPayload = (
   value: unknown,
   codec: XlnBinaryCodecName = 'msgpack',
+  options: { omitSymbolKeys?: boolean } = {},
 ): Uint8Array => {
-  const canonical = canonicalize(value, '$', new Set(), codec === 'msgpack');
+  const canonical = canonicalize(value, '$', new Set(), codec === 'msgpack', options.omitSymbolKeys === true);
   const body = codec === 'json'
     ? textEncoder.encode(serializeCanonicalTaggedJson(canonical))
     : asBytes(msgpackCodec.pack(canonical));

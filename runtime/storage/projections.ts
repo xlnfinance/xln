@@ -144,20 +144,22 @@ const cloneHankoWitness = (hankoWitness?: EntityReplica['hankoWitness']): Entity
   );
 };
 
-export const projectReplicaMeta = (
+type ReplicaMetaProjectionOptions = {
+  certifiedFrameLineage?: EntityReplica['certifiedFrameLineage'];
+  certifiedFrameAnchor?: EntityReplica['certifiedFrameAnchor'];
+};
+
+const buildReplicaMetaProjection = (
   replica: EntityReplica,
-  options?: {
-    certifiedFrameLineage?: EntityReplica['certifiedFrameLineage'];
-    certifiedFrameAnchor?: EntityReplica['certifiedFrameAnchor'];
-  },
+  state: EntityState,
+  mempool: EntityReplica['mempool'],
+  options?: ReplicaMetaProjectionOptions,
 ): StorageReplicaMeta => ({
   entityId: normalizeEntityId(replica.entityId),
   signerId: normalizeEntityId(replica.signerId),
   isProposer: replica.isProposer,
-  // Snapshot now. Replica states continue mutating after projection, and
-  // Account clonedForValidation is an ephemeral replay cache, not recovery data.
-  state: cloneEntityState(replica.state, true),
-  mempool: structuredClone(replica.mempool),
+  state,
+  mempool,
   ...withProp('position', replica.position),
   ...withProp('proposal', replica.proposal),
   ...withProp('lockedFrame', replica.lockedFrame),
@@ -179,6 +181,44 @@ export const projectReplicaMeta = (
   ...withProp('jSubmitState', replica.jSubmitState),
   ...withProp('entityProviderActionSubmitState', replica.entityProviderActionSubmitState),
 });
+
+export const projectReplicaMeta = (
+  replica: EntityReplica,
+  options?: ReplicaMetaProjectionOptions,
+): StorageReplicaMeta => buildReplicaMetaProjection(
+  replica,
+  // Snapshot now. Replica states continue mutating after projection, and
+  // Account clonedForValidation is an ephemeral replay cache, not recovery data.
+  cloneEntityState(replica.state, true),
+  structuredClone(replica.mempool),
+  options,
+);
+
+const projectEntityStateForImmediateEncoding = (state: EntityState): EntityState => {
+  let accounts: EntityState['accounts'] | undefined;
+  for (const [accountId, account] of state.accounts) {
+    if (!Object.hasOwn(account, 'clonedForValidation')) continue;
+    accounts ??= new Map(state.accounts);
+    const { clonedForValidation: _ephemeralValidationCache, ...durableAccount } = account;
+    accounts.set(accountId, durableAccount as typeof account);
+  }
+  return accounts ? { ...state, accounts } : state;
+};
+
+/**
+ * Encode the authoritative replica metadata synchronously without first making
+ * a redundant full structuredClone. encodeBuffer canonicalizes into an
+ * isolated tree before returning, so live references cannot escape this call.
+ */
+export const encodeReplicaMeta = (
+  replica: EntityReplica,
+  options?: ReplicaMetaProjectionOptions,
+): Buffer => encodeBuffer(buildReplicaMetaProjection(
+  replica,
+  projectEntityStateForImmediateEncoding(replica.state),
+  replica.mempool,
+  options,
+), { omitSymbolKeys: true });
 
 const projectAccountDocFull = (account: AccountMachine): StorageAccountDoc => ({
   leftEntity: account.leftEntity,

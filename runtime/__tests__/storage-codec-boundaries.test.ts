@@ -203,6 +203,11 @@ describe('canonical binary codec', () => {
     expect(() => encodeBinaryPayload(cyclic, 'msgpack')).toThrow('XLN_BINARY_CODEC_CYCLE');
     expect(() => encodeBinaryPayload({ fn: () => 1 }, 'msgpack'))
       .toThrow('XLN_BINARY_CODEC_UNSUPPORTED');
+    const symbolKey = Symbol('ephemeral');
+    const symbolMarked = { durable: 1, [symbolKey]: true };
+    expect(() => encodeBinaryPayload(symbolMarked, 'msgpack')).toThrow('detail=symbol-key');
+    expect(decodeBinaryPayload(encodeBinaryPayload(symbolMarked, 'msgpack', { omitSymbolKeys: true })))
+      .toEqual({ durable: 1 });
   });
 
   test('authoritative MessagePack preserves own undefined while debug JSON rejects it', () => {

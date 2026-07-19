@@ -2,10 +2,11 @@ import { expect, test } from 'bun:test';
 
 import { computeCanonicalEntityHash, computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import { computeStorageFrameHash } from '../storage/hashes';
+import { encodeBuffer } from '../storage/codec';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { applyCommand, createBook, replaceOrderbookPair } from '../orderbook';
-import { hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc, projectReplicaMeta } from '../storage/projections';
+import { encodeReplicaMeta, hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc, projectReplicaMeta } from '../storage/projections';
 import { cloneEntityState } from '../state-helpers';
 import type { StorageFrameRecord } from '../storage/types';
 import type { AccountMachine, EntityReplica, Env } from '../types';
@@ -363,4 +364,22 @@ test('replica metadata projection preserves in-flight consensus and layout state
   expect(meta.jHistory).toEqual(replica.jHistory);
   expect(meta.state).toEqual(cloneEntityState(replica.state, true));
   expect(meta.state.accounts.get(counterpartyId)?.pulls).toBeUndefined();
+});
+
+test('immediate replica metadata encoding matches the isolated recovery projection', () => {
+  const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  const account = replica.state.accounts.get(counterpartyId)!;
+  account.clonedForValidation = structuredClone(account);
+  Object.defineProperty(account, Symbol('ephemeral-account-marker'), {
+    configurable: true,
+    enumerable: true,
+    value: true,
+  });
+
+  const expected = encodeBuffer(projectReplicaMeta(replica));
+  const actual = encodeReplicaMeta(replica);
+
+  expect(actual.equals(expected)).toBeTrue();
+  expect(replica.state.accounts.get(counterpartyId)?.clonedForValidation).toBeDefined();
 });
