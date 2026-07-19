@@ -1,5 +1,6 @@
 import type { EntityInput, EntityLeaderTimeoutVote, EntityReplica, EntityState, EntityTx, Env } from '../types';
 import type { CrontabTaskMethod } from '../entity/scheduler-types';
+import { crontabTaskHasPendingWork } from '../entity/scheduler';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import {
   buildEntityLeaderVoteBody,
@@ -95,22 +96,8 @@ const getIndex = (env: Env): DeadlineIndex => {
 };
 
 export const entityNeedsPeriodicWake = (replica: EntityReplica): boolean => {
-  const state = replica.state;
-  for (const account of state.accounts.values()) {
-    const settlement = account.settlementWorkspace;
-    if (settlement && settlement.status !== 'submitted') {
-      const counterpartyHanko = state.entityId === account.leftEntity
-        ? settlement.rightHanko
-        : settlement.leftHanko;
-      if (counterpartyHanko) return true;
-    }
-    if (account.activeDispute || account.pendingFrame || account.pendingAccountInput) return true;
-  }
-  if (state.jBatchState?.sentBatch) return true;
-  if (!state.hubRebalanceConfig) return false;
-  for (const account of state.accounts.values()) {
-    if ((account.requestedRebalance?.size ?? 0) > 0) return true;
-    if ((account.requestedRebalanceFeeState?.size ?? 0) > 0) return true;
+  for (const method of replica.state.crontabState?.tasks.keys() ?? []) {
+    if (crontabTaskHasPendingWork(replica.state, method)) return true;
   }
   return false;
 };
@@ -127,7 +114,11 @@ export const collectDueScheduledWakeJobs = (
   if (includePeriodicTasks) {
     for (const task of state.crontabState?.tasks?.values() ?? []) {
       const dueAt = task.lastRun + task.intervalMs;
-      if (task.enabled && dueAt <= now) jobs.push({ kind: 'task', id: task.method, dueAt });
+      if (
+        task.enabled &&
+        crontabTaskHasPendingWork(state, task.method) &&
+        dueAt <= now
+      ) jobs.push({ kind: 'task', id: task.method, dueAt });
     }
   }
   return jobs.sort((left, right) =>
@@ -150,6 +141,7 @@ const nextReplicaDeadline = (replica: EntityReplica): number | null => {
   if (entityNeedsPeriodicWake(replica)) {
     for (const task of replica.state.crontabState?.tasks?.values() ?? []) {
       if (!task.enabled) continue;
+      if (!crontabTaskHasPendingWork(replica.state, task.method)) continue;
       const dueAt = task.lastRun + task.intervalMs;
       next = Math.min(next, dueAt);
     }

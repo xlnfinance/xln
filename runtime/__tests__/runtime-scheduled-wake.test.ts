@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { initCrontab, scheduleHook } from '../entity/scheduler';
+import {
+  ACCOUNT_TIMEOUT_CHECK_INTERVAL_MS,
+  HUB_REBALANCE_INTERVAL_MS,
+  initCrontab,
+  scheduleHook,
+} from '../entity/scheduler';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { buildSignedEntityCommand } from '../entity/command';
 import { signedEntityCommandTx } from '../entity/command-codec';
@@ -14,7 +19,9 @@ import {
 } from '../runtime';
 import {
   assertScheduledWakeTxAuthorized,
+  collectDueScheduledWakeJobs,
   createDueScheduledWakeInputs,
+  entityNeedsPeriodicWake,
   getNextScheduledWakeTimestamp,
   MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS,
   refreshScheduledWakeIndex,
@@ -82,6 +89,52 @@ const makeReplica = (state: EntityState, signer: string, isProposer: boolean): E
 });
 
 describe('runtime scheduled wake', () => {
+  test('a pending account frame does not activate the unrelated one-second hub rebalance task', () => {
+    const id = entityId('20');
+    const proposer = signerId('30');
+    const counterparty = entityId('21');
+    const state = makeState(id, proposer, 0);
+    state.hubRebalanceConfig = {} as never;
+    state.accounts.set(counterparty, {
+      leftEntity: id,
+      rightEntity: counterparty,
+      pendingFrame: { height: 1, timestamp: 0, accountTxs: [] },
+      requestedRebalance: new Map(),
+      deltas: new Map(),
+    } as never);
+    const replica = makeReplica(state, proposer, true);
+
+    expect(entityNeedsPeriodicWake(replica)).toBe(true);
+    expect(collectDueScheduledWakeJobs(state, HUB_REBALANCE_INTERVAL_MS, true)).toEqual([]);
+    expect(collectDueScheduledWakeJobs(state, ACCOUNT_TIMEOUT_CHECK_INTERVAL_MS, true)).toEqual([
+      {
+        kind: 'task',
+        id: 'checkAccountTimeouts',
+        dueAt: ACCOUNT_TIMEOUT_CHECK_INTERVAL_MS,
+      },
+    ]);
+  });
+
+  test('real rebalance demand still activates the one-second hub task', () => {
+    const id = entityId('22');
+    const proposer = signerId('32');
+    const counterparty = entityId('23');
+    const state = makeState(id, proposer, 0);
+    state.hubRebalanceConfig = {} as never;
+    state.accounts.set(counterparty, {
+      leftEntity: id,
+      rightEntity: counterparty,
+      requestedRebalance: new Map([[1, 1n]]),
+      deltas: new Map(),
+    } as never);
+    const replica = makeReplica(state, proposer, true);
+
+    expect(entityNeedsPeriodicWake(replica)).toBe(true);
+    expect(collectDueScheduledWakeJobs(state, HUB_REBALANCE_INTERVAL_MS, true)).toEqual([
+      { kind: 'task', id: 'hubRebalance', dueAt: HUB_REBALANCE_INTERVAL_MS },
+    ]);
+  });
+
   test('quiesce preserves newly-due hooks without treating them as drainable work', async () => {
     const env = createEmptyEnv('scheduled-wake-quiesce');
     env.scenarioMode = false;

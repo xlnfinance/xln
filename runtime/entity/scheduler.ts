@@ -170,6 +170,59 @@ export function initCrontab(): CrontabState {
   };
 }
 
+const accountNeedsTimeoutTask = (state: EntityReplica['state']): boolean =>
+  [...state.accounts.values()].some(account => Boolean(account.pendingFrame));
+
+const accountNeedsHubRebalanceTask = (
+  state: EntityReplica['state'],
+  counterpartyId: string,
+): boolean => {
+  const account = state.accounts.get(counterpartyId);
+  if (!account) return false;
+  if ([...account.requestedRebalance.values()].some(amount => amount > 0n)) return true;
+  if (account.pendingFrame || hasPendingSettlementTransition(account)) return false;
+
+  const workspace = account.settlementWorkspace;
+  const hubIsLeft = isLeftEntity(state.entityId, counterpartyId);
+  if (
+    workspace?.status === 'ready_to_submit' &&
+    workspace.lastModifiedByLeft === hubIsLeft &&
+    workspace.executorIsLeft === hubIsLeft &&
+    workspace.ops.length > 0 &&
+    workspace.ops.every(op => op.type === 'c2r') &&
+    Boolean(hubIsLeft ? workspace.rightHanko : workspace.leftHanko)
+  ) return true;
+  if (workspace) return false;
+
+  for (const [tokenId, delta] of account.deltas) {
+    if ((account.requestedRebalance.get(tokenId) ?? 0n) > 0n) continue;
+    const hubDerived = deriveDelta(delta, hubIsLeft);
+    const outHold = hubDerived.outTotalHold;
+    if (outHold === undefined) {
+      throw new Error(`deriveDelta missing outTotalHold for token ${String(tokenId)} on ${counterpartyId}`);
+    }
+    const freeOutCollateral = hubDerived.outCollateral > outHold
+      ? hubDerived.outCollateral - outHold
+      : 0n;
+    if (freeOutCollateral > getDefaultRebalancePolicyForToken(tokenId).r2cRequestSoftLimit) return true;
+  }
+  return false;
+};
+
+/** Only schedule periodic consensus work when its handler can change state or emit output. */
+export const crontabTaskHasPendingWork = (
+  state: EntityReplica['state'],
+  method: CrontabTaskMethod,
+): boolean => {
+  if (method === 'checkAccountTimeouts') return accountNeedsTimeoutTask(state);
+  if (!state.hubRebalanceConfig) return false;
+  if (state.jBatchState?.sentBatch) return true;
+  for (const counterpartyId of state.accounts.keys()) {
+    if (accountNeedsHubRebalanceTask(state, counterpartyId)) return true;
+  }
+  return false;
+};
+
 const CRONTAB_TASK_HANDLERS: Record<CrontabTaskMethod, CrontabTaskHandler> = {
   checkAccountTimeouts: checkAccountTimeoutsHandler,
   hubRebalance: hubRebalanceHandler,
