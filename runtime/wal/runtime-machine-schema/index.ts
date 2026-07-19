@@ -118,7 +118,11 @@ const validateRoutedEntityInputs = (
 
 const validateRuntimeInput = (value: unknown, code: string): RuntimeInput => {
   const input = validateRuntimeInputEnvelope(value, code);
-  input.entityInputs.forEach((entry, index) => validateRoutedEntityInput(entry, `${code}_ENTITY_INPUT_${index}`));
+  input.entityInputs.forEach((entry, index) => validateRoutedEntityInput(
+    entry,
+    `${code}_ENTITY_INPUT_${index}`,
+    { allowSourceRuntimeFrame: true },
+  ));
   if (input.jInputs !== undefined) validateJInputs(input.jInputs, `${code}_J_INPUTS`);
   if (input.reliableReceipts !== undefined) {
     requireArray(input.reliableReceipts, `${code}_RELIABLE_RECEIPTS`).forEach((receipt, index) =>

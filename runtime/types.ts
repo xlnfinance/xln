@@ -669,10 +669,10 @@ export interface RoutedEntityInput extends EntityInput {
   signerId: string;
   runtimeId?: string;
   /**
-   * Transport-only Runtime-frame provenance. Outbound it survives durable
+   * Authenticated Runtime-frame provenance. Outbound it survives durable
    * retries so frames are never combined; inbound it binds paired cross-j
-   * Account inputs to the same authenticated source envelope. It is stripped
-   * before an Entity input becomes committed Runtime/WAL input.
+   * Account inputs to the same source envelope. A committed Runtime input
+   * retains it so WAL replay cannot pair legs from different source frames.
    */
   sourceRuntimeFrame?: {
     height: number;

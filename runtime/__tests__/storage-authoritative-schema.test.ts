@@ -228,7 +228,7 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       .toThrow('RUNTIME_MACHINE_RUNTIME_INPUT_ENTITY_INPUT_0_ENTITY_TX_0_DATA');
   });
 
-  test('validates durable source Runtime-frame provenance only in the network outbox', () => {
+  test('validates durable source Runtime-frame provenance in outbox and committed Runtime input', () => {
     const sourceRuntimeFrame = { height: 7, timestamp: 7000 };
     const routedInput = {
       runtimeId: `0x${'33'.repeat(20)}`,
@@ -251,12 +251,18 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
     expect(() => validateDurableRuntimeMachineSnapshot(malformedFrame, 'RUNTIME_MACHINE'))
       .toThrow('RUNTIME_MACHINE_PENDINGNETWORKOUTPUTS_0_SOURCE_RUNTIME_FRAME_HEIGHT:-1');
 
-    const forbiddenIngress = buildDurableRuntimeMachineSnapshot(
+    const committedIngress = buildDurableRuntimeMachineSnapshot(
       createEmptyEnv('runtime-machine-source-frame-ingress'),
     );
-    forbiddenIngress['runtimeInput'] = { runtimeTxs: [], entityInputs: [routedInput] };
-    expect(() => validateDurableRuntimeMachineSnapshot(forbiddenIngress, 'RUNTIME_MACHINE'))
-      .toThrow('RUNTIME_MACHINE_RUNTIME_INPUT_ENTITY_INPUT_0_FIELDS');
+    committedIngress['runtimeInput'] = { runtimeTxs: [], entityInputs: [routedInput] };
+    expect(() => validateDurableRuntimeMachineSnapshot(committedIngress, 'RUNTIME_MACHINE')).not.toThrow();
+
+    const malformedIngress = structuredClone(committedIngress);
+    (malformedIngress['runtimeInput'] as {
+      entityInputs: Array<{ sourceRuntimeFrame: { height: number } }>;
+    }).entityInputs[0]!.sourceRuntimeFrame.height = -1;
+    expect(() => validateDurableRuntimeMachineSnapshot(malformedIngress, 'RUNTIME_MACHINE'))
+      .toThrow('RUNTIME_MACHINE_RUNTIME_INPUT_ENTITY_INPUT_0_SOURCE_RUNTIME_FRAME_HEIGHT:-1');
   });
 
   test('recursively rejects malformed EntityTx payloads in every nested carrier', () => {
