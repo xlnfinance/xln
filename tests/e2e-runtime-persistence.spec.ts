@@ -19,6 +19,10 @@ import {
 } from './utils/e2e-demo-users';
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-connect';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, waitForNamedHubs } from './utils/e2e-baseline';
+import { getTokenInfo } from '../runtime/account/utils';
+
+const USDC_TOKEN_ID = 1;
+const USDC_UNIT = 10n ** BigInt(getTokenInfo(USDC_TOKEN_ID).decimals);
 
 function randomMnemonic(): string {
   return Wallet.createRandom().mnemonic!.phrase;
@@ -681,11 +685,11 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     let aliceExpectedOut = aliceOutBeforeFaucet;
     for (let i = 0; i < 5; i++) {
       await faucet(page, alice.entityId, hubId);
-      aliceExpectedOut += 100n * 10n ** 18n;
+      aliceExpectedOut += 100n * USDC_UNIT;
       await waitForOutCapAtLeast(page, alice.entityId, hubId, aliceExpectedOut, 60_000);
     }
     const aliceOutAfterFaucet = await outCap(page, alice.entityId, hubId);
-    expect(aliceOutAfterFaucet - aliceOutBeforeFaucet).toBe(500n * 10n ** 18n);
+    expect(aliceOutAfterFaucet - aliceOutBeforeFaucet).toBe(500n * USDC_UNIT);
 
     await setSnapshotInterval(bobPage, 5);
     await connectHub(bobPage, bob.entityId, bob.signerId, hubId);
@@ -693,11 +697,11 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     let bobExpectedOut = bobOutBeforeFaucet;
     for (let i = 0; i < 5; i++) {
       await faucet(bobPage, bob.entityId, hubId);
-      bobExpectedOut += 100n * 10n ** 18n;
+      bobExpectedOut += 100n * USDC_UNIT;
       await waitForOutCapAtLeast(bobPage, bob.entityId, hubId, bobExpectedOut, 60_000);
     }
     const bobOutAfterFaucet = await outCap(bobPage, bob.entityId, hubId);
-    expect(bobOutAfterFaucet - bobOutBeforeFaucet).toBe(500n * 10n ** 18n);
+    expect(bobOutAfterFaucet - bobOutBeforeFaucet).toBe(500n * USDC_UNIT);
 
     await waitForPairIdle(page, hubId);
     await waitForPairIdle(bobPage, hubId);
