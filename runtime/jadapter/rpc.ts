@@ -2958,8 +2958,8 @@ export async function createRpcAdapter(
             }
             pendingWatcherJHistoryRange = null;
             lastPendingHistoryWaitKey = '';
+            commitScannedWatcherCursor(activeEnv, lastSyncedBlock);
           }
-          commitScannedWatcherCursor(activeEnv, lastSyncedBlock);
           const watcherReplica = findWatcherJurisdictionReplica(
             activeEnv,
             addresses.depository,
@@ -3289,7 +3289,6 @@ export async function createRpcAdapter(
             }
             lastSyncedBlock = Math.max(lastSyncedBlock, toBlock);
             consecutiveTransientWatcherFailures = 0;
-            commitScannedWatcherCursor(activeEnv, lastSyncedBlock);
             return;
           }
 
@@ -3333,7 +3332,6 @@ export async function createRpcAdapter(
 
           lastSyncedBlock = Math.max(lastSyncedBlock, toBlock);
           consecutiveTransientWatcherFailures = 0;
-          commitScannedWatcherCursor(activeEnv, lastSyncedBlock);
         })().catch((error: unknown) => {
           const message = watcherErrorMessage(error);
           if (watcherStopping) {

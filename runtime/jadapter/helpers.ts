@@ -1405,11 +1405,9 @@ export function buildJHistoryRangeRuntimeInput(
     // exact (chainId, Depository) selector and may advance every matching Entity.
     if (scope === 'observed' && !observationsByReplica.has(key)) continue;
     const baseHeight = Number(replica.state.lastFinalizedJHeight || 0);
-    const scanDistanceMayReachLiveness = scannedThroughHeight - baseHeight >= JBLOCK_LIVENESS_INTERVAL;
     const observations = observationsByReplica.get(key) || [];
-    const hasLocalHeaders = headers.length > 0;
-    if (observations.length === 0 && !scanDistanceMayReachLiveness && !hasLocalHeaders) continue;
     if (scannedThroughHeight <= baseHeight) continue;
+    const scanDistanceMayReachLiveness = scannedThroughHeight - baseHeight >= JBLOCK_LIVENESS_INTERVAL;
     const jurisdictionRef = getJEventJurisdictionRef(replica.state.config.jurisdiction);
     if (watcherReplica && jurisdictionRef !== watcherJurisdictionRef) {
       throw new Error(
@@ -1422,13 +1420,13 @@ export function buildJHistoryRangeRuntimeInput(
       tentativeHistory = recordValidatorJHistory(tentativeHistory, observation.data, replica.state);
     }
     const normalizedTipBlockHash = String(tipBlockHash).toLowerCase();
-    if (
+    const shouldRecordScanTip =
       headers.length > 0 ||
       !tentativeHistory ||
       tentativeHistory.scannedThroughHeight !== scannedThroughHeight ||
-      tentativeHistory.tipBlockHash !== normalizedTipBlockHash
-    ) {
-      const scanTipObservation: Extract<RuntimeTx, { type: 'observeJRange' }> = {
+      tentativeHistory.tipBlockHash !== normalizedTipBlockHash;
+    const scanTipObservation: Extract<RuntimeTx, { type: 'observeJRange' }> | null = shouldRecordScanTip
+      ? {
         type: 'observeJRange',
         data: {
           entityId,
@@ -1439,10 +1437,17 @@ export function buildJHistoryRangeRuntimeInput(
           ...(headers.length > 0 ? { headers } : {}),
           blocks: [],
         },
-      };
+      }
+      : null;
+    if (scanTipObservation) {
       tentativeHistory = recordValidatorJHistory(tentativeHistory, scanTipObservation.data, replica.state);
-      runtimeTxs.push(markLocalJAuthorityRuntimeTx(scanTipObservation));
     }
+    const hasDuePrefixAdvance = hasDueLocalJPrefixAdvance(replica.state, tentativeHistory);
+    // Empty authenticated pages below liveness stay outside Runtime state. The
+    // one exception is a page that closes the exact prefix for a previously
+    // persisted sparse semantic event: that event must become attestable now.
+    if (observations.length === 0 && !scanDistanceMayReachLiveness && !hasDuePrefixAdvance) continue;
+    if (scanTipObservation) runtimeTxs.push(markLocalJAuthorityRuntimeTx(scanTipObservation));
     scannedReplicaKeys.push(replicaKey);
     // A semantic J event must hold the watcher cursor until the Entity has
     // certified the containing authenticated prefix. This obligation is
@@ -1454,7 +1459,8 @@ export function buildJHistoryRangeRuntimeInput(
     // not an Entity range until the liveness interval is due. Treating every
     // scanned replica as pending finality deadlocks the watcher one empty block
     // after an event because no proposal is supposed to exist for that suffix.
-    if (!hasDueLocalJPrefixAdvance(replica.state, tentativeHistory)) continue;
+    if (!hasDuePrefixAdvance) continue;
+    if (!tentativeHistory) throw new Error(`J_HISTORY_DUE_WITHOUT_HISTORY:${replicaKey}`);
     if (hasCurrentRoundJPrefixAttestation(replica)) continue;
     if (getLocalJPrefixAttestableHeight(replica.state, tentativeHistory) === null) {
       jadapterHelperLog.debug('j_prefix.attestation_deferred', {

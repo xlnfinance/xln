@@ -269,7 +269,7 @@ export async function createBrowserVMAdapter(
       if (input) observedInputs.push(input);
     }
 
-    enqueueJHistoryRange(
+    const range = enqueueJHistoryRange(
       activeEnv,
       observedInputs,
       targetBlock,
@@ -278,7 +278,9 @@ export async function createBrowserVMAdapter(
       headers,
       config.chainId,
     );
-    updateWatcherJurisdictionCursor(activeEnv, targetBlock, addresses.depository, config.chainId);
+    if (observedInputs.length > 0 || range.scannedReplicaKeys.length > 0) {
+      updateWatcherJurisdictionCursor(activeEnv, targetBlock, addresses.depository, config.chainId);
+    }
   };
 
   const pollBrowserVmHistorySerialized = async (): Promise<void> => {

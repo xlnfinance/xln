@@ -748,6 +748,35 @@ describe('jadapter helper cursors', () => {
     expect(resolveCommittedWatcherCursor(env, pending, 100, 0)).toBe(100);
   });
 
+  test('authenticated empty watcher progress below liveness does not create Runtime work', () => {
+    const seed = 'jadapter-empty-page-no-runtime-frame';
+    const env = createEmptyEnv(seed);
+    const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const entityId = `0x${'7b'.repeat(32)}`;
+    const jurisdiction = makeJurisdiction('Empty page deferred', 31337, `0x${'7c'.repeat(20)}`);
+    const blockHash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
+    const replica = makeReplica(entityId, signerId, true);
+    replica.state.config.jurisdiction = jurisdiction;
+    env.eReplicas.set(`${entityId}:${signerId}`, replica);
+
+    const range = enqueueJHistoryRange(
+      env,
+      [],
+      99,
+      blockHash(99),
+      undefined,
+      Array.from({ length: 99 }, (_, index) => ({
+        jHeight: index + 1,
+        jBlockHash: blockHash(index + 1),
+      })),
+    );
+
+    expect(range).toEqual({ scannedReplicaKeys: [], finalityReplicaKeys: [] });
+    expect(env.runtimeMempool?.runtimeTxs ?? []).toEqual([]);
+    expect(env.runtimeMempool?.entityInputs ?? []).toEqual([]);
+    expect(env.runtimeState?.wakeRequested).not.toBe(true);
+  });
+
   test('watcher does not enqueue the next authenticated page before the prior local scan is durable', () => {
     const env = createEmptyEnv('jadapter-pending-local-scan');
     const entityId = `0x${'45'.repeat(32)}`;
