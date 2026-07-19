@@ -54,6 +54,7 @@ import { findMissingRpcContractCode } from './contract-readiness';
 import { readJurisdictionsFile } from './jurisdictions-file';
 import { getTokenIdsForJurisdiction } from '../account/utils';
 import { isLocalOperatorRequest, publicLocalHubHealth, resolveSocketPeerAddress } from '../server/health-redaction';
+import { requiresLocalNodeOperator } from '../server/node-http-access';
 import {
   deriveRuntimeAdapterCapabilityToken,
   registerRuntimeAdapterAuthSeed,
@@ -1700,6 +1701,13 @@ const run = async (): Promise<void> => {
 
 	      const directUpgrade = directRuntimeWs.maybeUpgrade(request, serverRef);
 	      if (directUpgrade.handled) return directUpgrade.response;
+
+      if (requiresLocalNodeOperator(url) && !operatorAuthorized) {
+        return new Response(safeStringify({ error: 'Operator access required' }), {
+          status: 403,
+          headers,
+        });
+      }
 
       if (pathname === '/api/info') {
         return new Response(safeStringify({

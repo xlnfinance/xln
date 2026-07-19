@@ -21,6 +21,8 @@ import {
 } from '../radapter/server';
 import { resolveRuntimeAdapterRead } from '../radapter/resolve';
 import { createRuntimeIngressReceiptStore } from '../server/ingress-receipts';
+import { isLocalOperatorRequest, resolveSocketPeerAddress } from '../server/health-redaction';
+import { requiresLocalNodeOperator } from '../server/node-http-access';
 import { handleRuntimeInputStatus } from '../server/runtime-input-control';
 import { drainJWatcherBacklog } from '../jadapter/backlog-drain';
 import {
@@ -3839,6 +3841,7 @@ const run = async (): Promise<void> => {
       try {
         const url = new URL(request.url);
         const pathname = url.pathname;
+        const operatorAuthorized = isLocalOperatorRequest(request, resolveSocketPeerAddress(serverRef, request));
 
         if (request.headers.get('upgrade') === 'websocket' && pathname === '/rpc') {
           const upgraded = serverRef.upgrade(request, { data: { type: 'rpc' } });
@@ -3848,6 +3851,13 @@ const run = async (): Promise<void> => {
 
         const directUpgrade = directRuntimeWs.maybeUpgrade(request, serverRef);
         if (directUpgrade.handled) return directUpgrade.response;
+
+        if (requiresLocalNodeOperator(url) && !operatorAuthorized) {
+          return new Response(safeStringify({ error: 'Operator access required' }), {
+            status: 403,
+            headers: JSON_HEADERS,
+          });
+        }
 
         if (pathname === '/api/account/status' && request.method === 'GET') {
           const entityId = String(

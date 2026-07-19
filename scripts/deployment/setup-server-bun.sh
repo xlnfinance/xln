@@ -147,7 +147,7 @@ server {
     ssl_certificate /etc/letsencrypt/live/xln.finance/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/xln.finance/privkey.pem;
 
-    location / {
+    location = /rpc {
         proxy_pass http://127.0.0.1:18090;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
@@ -155,6 +155,17 @@ server {
         proxy_set_header Host \$host;
         proxy_read_timeout 86400;
     }
+
+    location = /ws {
+        proxy_pass http://127.0.0.1:18090;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_read_timeout 86400;
+    }
+
+    location / { return 404; }
 }
 
 server {
@@ -163,7 +174,7 @@ server {
     ssl_certificate /etc/letsencrypt/live/xln.finance/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/xln.finance/privkey.pem;
 
-    location / {
+    location = /rpc {
         proxy_pass http://127.0.0.1:18091;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
@@ -171,6 +182,17 @@ server {
         proxy_set_header Host \$host;
         proxy_read_timeout 86400;
     }
+
+    location = /ws {
+        proxy_pass http://127.0.0.1:18091;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_read_timeout 86400;
+    }
+
+    location / { return 404; }
 }
 
 server {
@@ -179,7 +201,7 @@ server {
     ssl_certificate /etc/letsencrypt/live/xln.finance/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/xln.finance/privkey.pem;
 
-    location / {
+    location = /rpc {
         proxy_pass http://127.0.0.1:18092;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
@@ -187,6 +209,17 @@ server {
         proxy_set_header Host \$host;
         proxy_read_timeout 86400;
     }
+
+    location = /ws {
+        proxy_pass http://127.0.0.1:18092;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_read_timeout 86400;
+    }
+
+    location / { return 404; }
 }
 
 server {
@@ -195,7 +228,7 @@ server {
     ssl_certificate /etc/letsencrypt/live/xln.finance/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/xln.finance/privkey.pem;
 
-    location / {
+    location = /rpc {
         proxy_pass http://127.0.0.1:18093;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
@@ -203,6 +236,17 @@ server {
         proxy_set_header Host \$host;
         proxy_read_timeout 86400;
     }
+
+    location = /ws {
+        proxy_pass http://127.0.0.1:18093;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_read_timeout 86400;
+    }
+
+    location / { return 404; }
 }
 EOF
 

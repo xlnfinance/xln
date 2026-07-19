@@ -5,7 +5,7 @@ import { Level } from 'level';
 
 import type { AccountFrame } from '../types';
 import { decodeBinaryPayload, encodeBinaryPayload } from '../storage/binary-codec';
-import { decodeBuffer, encodeBuffer } from '../storage/codec';
+import { decodeBuffer, encodeBuffer, writeBatch } from '../storage/codec';
 import {
   readFrameDbAccountFrames,
   readFrameDbHead,
@@ -119,6 +119,16 @@ afterEach(() => {
 });
 
 describe('canonical binary codec', () => {
+  test('explicit rebuildable-cache writes do not request an fsync', async () => {
+    let observed: { sync?: boolean } | undefined = { sync: true };
+    await writeBatch({
+      write: async (options) => {
+        observed = options;
+      },
+    }, { sync: false });
+    expect(observed).toBeUndefined();
+  });
+
   test('encodes plain browser payloads without a global Buffer polyfill', () => {
     const moduleUrl = new URL('../storage/binary-codec.ts', import.meta.url).href;
     const serializationUrl = new URL('../protocol/serialization.ts', import.meta.url).href;

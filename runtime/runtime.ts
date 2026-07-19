@@ -4007,6 +4007,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     deferredOutputs: 0,
     jOutputs: 0,
     frameAdvanced: false,
+    storageMs: undefined as Awaited<ReturnType<typeof saveRuntimeFrameToStorage>>['persistencePerfMs'],
   };
   let processProfileOutcome = 'unknown';
   let reliableIngressCommits: ReliableIngressCommit[] = [];
@@ -4515,6 +4516,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
           env.pendingNetworkOutputs,
           runtimeMachineBeforeApply,
         );
+        processProfileMetrics.storageMs = saveOutcome.persistencePerfMs;
         if (saveOutcome.staleWriterStopped) {
           frameRollbackHandled = true;
           const rollbackError = await rollbackUndurableFrame(
@@ -4947,7 +4949,10 @@ export const saveEnvToDB = async (
   currentFrameInput?: RuntimeInput,
   currentFrameOutputs?: RoutedEntityInput[],
   currentFrameRuntimeMachineBeforeApply?: Record<string, unknown>,
-): Promise<{ staleWriterStopped: boolean }> => {
+): Promise<{
+  staleWriterStopped: boolean;
+  persistencePerfMs?: Awaited<ReturnType<typeof saveRuntimeFrameToStorage>>['persistencePerfMs'];
+}> => {
   if (envRecord(env)[ENV_REPLAY_MODE_KEY] === true) {
     throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
   }
@@ -5034,7 +5039,10 @@ export const saveEnvToDB = async (
       height: env.height,
     });
   }
-  return { staleWriterStopped: false };
+  return {
+    staleWriterStopped: false,
+    ...(saveResult.persistencePerfMs ? { persistencePerfMs: saveResult.persistencePerfMs } : {}),
+  };
 };
 
 type VerifyRuntimeChainResult = {

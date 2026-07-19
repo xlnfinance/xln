@@ -819,6 +819,18 @@ export type StorageFrameSaveResult = {
   epochDbRotated?: boolean;
   frameDbRetainedBytes?: number;
   frameDbPrunedBytes?: number;
+  persistencePerfMs?: StoragePersistencePerf;
+};
+
+export type StoragePersistencePerf = {
+  open: number;
+  diff: number;
+  prepare: number;
+  authoritativeWrite: number;
+  currentCacheWrite: number;
+  postCommit: number;
+  snapshot: number;
+  total: number;
 };
 
 export const saveRuntimeFrameToStorage = async (options: {
@@ -1191,15 +1203,20 @@ export const saveRuntimeFrameToStorage = async (options: {
   };
   historyBatch.put(KEY_HEAD, encodeBuffer(nextHead));
   batch.put(KEY_HEAD, encodeBuffer(nextHead));
+  const authoritativeWriteStartedAt = options.getPerfMs();
+  const prepareMs = authoritativeWriteStartedAt - writeStartedAt;
   options.onPersistenceProgress?.('authoritative-write-start');
-  await writeBatch(historyBatch);
+  await writeBatch(historyBatch, { sync: true });
+  const authoritativeWriteMs = options.getPerfMs() - authoritativeWriteStartedAt;
   options.onPersistenceProgress?.('authoritative-write-done');
   await options.onPersistenceBoundary?.('after-authoritative-history-commit');
   if (frameDbCommitPlan) {
     frameDbCommitted = true;
   }
+  const currentCacheWriteStartedAt = options.getPerfMs();
   options.onPersistenceProgress?.('current-cache-write-start');
-  await writeBatch(batch);
+  await writeBatch(batch, { sync: false });
+  const currentCacheWriteMs = options.getPerfMs() - currentCacheWriteStartedAt;
   options.onPersistenceProgress?.('current-cache-write-done');
   await options.onPersistenceBoundary?.('after-current-cache-commit');
   applyCertifiedEntityLineagePlan(options.env, lineagePlan);
@@ -1228,6 +1245,7 @@ export const saveRuntimeFrameToStorage = async (options: {
     frameDbLatestPrunedHeight = frameDbResult.latestPrunedRuntimeHeight;
     frameDbCommitted = true;
   }
+  const postCommitMs = options.getPerfMs() - currentCacheWriteStartedAt - currentCacheWriteMs;
   const writeMs = options.getPerfMs() - writeStartedAt;
 
   let snapshotMs = 0;
@@ -1331,6 +1349,16 @@ export const saveRuntimeFrameToStorage = async (options: {
   const verboseStorageLogs =
     String(process.env['XLN_STORAGE_VERBOSE'] ?? '').toLowerCase() === '1' ||
     String(process.env['XLN_STORAGE_VERBOSE'] ?? '').toLowerCase() === 'true';
+  const persistencePerfMs: StoragePersistencePerf = {
+    open: openMs,
+    diff: diffBuildMs,
+    prepare: prepareMs,
+    authoritativeWrite: authoritativeWriteMs,
+    currentCacheWrite: currentCacheWriteMs,
+    postCommit: postCommitMs,
+    snapshot: snapshotMs,
+    total: options.getPerfMs() - openStartedAt,
+  };
   if (verboseStorageLogs && options.env.quietRuntimeLogs !== true) {
     storageLog.info('persist.frame', {
       runtimeId: String(options.env.runtimeId || '').slice(0, 12),
@@ -1356,10 +1384,15 @@ export const saveRuntimeFrameToStorage = async (options: {
       epochRotated,
       epochDbRotated,
       perfMs: {
-        open: options.formatPerfMs(openMs),
-        diff: options.formatPerfMs(diffBuildMs),
+        open: options.formatPerfMs(persistencePerfMs.open),
+        diff: options.formatPerfMs(persistencePerfMs.diff),
+        prepare: options.formatPerfMs(persistencePerfMs.prepare),
+        authoritativeWrite: options.formatPerfMs(persistencePerfMs.authoritativeWrite),
+        currentCacheWrite: options.formatPerfMs(persistencePerfMs.currentCacheWrite),
+        postCommit: options.formatPerfMs(persistencePerfMs.postCommit),
         write: options.formatPerfMs(writeMs),
-        snap: options.formatPerfMs(snapshotMs),
+        snap: options.formatPerfMs(persistencePerfMs.snapshot),
+        total: options.formatPerfMs(persistencePerfMs.total),
       },
     });
   }
@@ -1376,5 +1409,6 @@ export const saveRuntimeFrameToStorage = async (options: {
     epochDbRotated,
     frameDbRetainedBytes,
     frameDbPrunedBytes,
+    persistencePerfMs,
   };
 };

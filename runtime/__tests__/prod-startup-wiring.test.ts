@@ -21,6 +21,46 @@ const extractSourceBlock = (source: string, marker: string, nextMarker: string):
 };
 
 describe('production startup wiring', () => {
+  test('public direct runtime ports expose only websocket transport routes', () => {
+    const sources = [
+      readFileSync(join(repoRoot, 'deploy.sh'), 'utf8'),
+      readFileSync(join(repoRoot, 'scripts/deployment/setup-server-bun.sh'), 'utf8'),
+      readFileSync(join(repoRoot, 'scripts/deployment/setup-server.sh'), 'utf8'),
+    ];
+
+    for (const source of sources) {
+      expect(source).toContain('location = /rpc {');
+      expect(source).toContain('location = /ws {');
+      expect(source).toContain('return 404;');
+      expect(source).not.toMatch(/listen 809[0-3][^}]+location \/ \{\s+proxy_pass/s);
+    }
+    expect(sources[2]).not.toContain('proxy_set_header Upgrade \\$http_upgrade;');
+    expect(sources[2]).not.toContain('proxy_set_header Host \\$host;');
+
+    for (const source of [
+      readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8'),
+      readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8'),
+    ]) {
+      const upgrade = source.indexOf('const directUpgrade = directRuntimeWs.maybeUpgrade(request, serverRef);');
+      const guard = source.indexOf('if (requiresLocalNodeOperator(url) && !operatorAuthorized)', upgrade);
+      const info = source.indexOf("if (pathname === '/api/info')", guard);
+      expect(guard).toBeGreaterThan(upgrade);
+      expect(info).toBeGreaterThan(guard);
+    }
+  });
+
+  test('deterministic replay oracle is release-only and has its own timeout', () => {
+    const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
+
+    expect(packageJson.scripts['check:src']).not.toContain('check:determinism');
+    expect(releaseGate).toContain(
+      "{ name: 'deterministic replay oracle', command: 'bun run check:determinism', timeoutMs: 600_000 }",
+    );
+  });
+
   test('market-maker revalidates bootstrap completion after yielding to ingress', () => {
     const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
     const armedBranchStart = mmNode.indexOf('if (bootstrapCompletionCheckArmed && canCheckBootstrapCompletion()) {');
