@@ -27,8 +27,6 @@ import { XLN_PROTOCOL_VERSION } from '../protocol/version';
 
 type PendingRequest = {
   op: RuntimeAdapterRequestBody['op'];
-  path?: string;
-  query?: RuntimeAdapterReadQuery;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -348,13 +346,9 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     if (!pending) return;
     this.pending.delete(message.inReplyTo);
     if (message.ok) {
-      const allowDecrease =
-        pending.op === 'auth' ||
-        (pending.op === 'read' && (
-          pending.path === 'head' ||
-          (pending.path === 'view-frame' && pending.query?.atHeight === undefined)
-        ));
-      this.noteHeight(heightFromPayload(message.payload), { allowDecrease });
+      // Auth establishes a fresh connection frontier. Reads can lag behind a
+      // newer tick while persistence catches up, so they must stay monotonic.
+      this.noteHeight(heightFromPayload(message.payload), { allowDecrease: pending.op === 'auth' });
       pending.resolve(message.payload);
     } else {
       pending.reject(new RuntimeAdapterError(message.error.code, message.error.message, message.error.retryable));
@@ -375,8 +369,6 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       }, timeoutMs);
       const pending: PendingRequest = {
         op: body.op,
-        ...('path' in body ? { path: body.path } : {}),
-        ...('query' in body ? { query: body.query } : {}),
         timer,
         resolve: (value) => {
           clearTimeout(timer);
