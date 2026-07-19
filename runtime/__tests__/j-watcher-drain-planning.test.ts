@@ -11,9 +11,11 @@ const status = (overrides: Partial<JWatcherDrainStatus> = {}): JWatcherDrainStat
   depositoryAddress: `0x${'11'.repeat(20)}`,
   targetBlock: 100,
   committedCursor: 100,
+  authenticatedThrough: 100,
   replicas: [{
     key: 'entity:validator',
     localScannedThrough: 100,
+    authenticatedThrough: 100,
     entityFinalizedThrough: 99,
     pendingDueFinality: true,
   }],
@@ -25,12 +27,30 @@ describe('scenario J-watcher drain planning', () => {
     expect(needsJWatcherPoll(status())).toBe(false);
   });
 
-  test('polls when either the watcher cursor or a fresh replica is behind', () => {
+  test('accepts a transient authenticated empty suffix without advancing the WAL cursor', () => {
+    expect(needsJWatcherPoll(status({
+      committedCursor: 99,
+      replicas: [{
+        key: 'entity:validator',
+        localScannedThrough: 99,
+        authenticatedThrough: 100,
+        entityFinalizedThrough: 99,
+        pendingDueFinality: false,
+      }],
+    }))).toBe(false);
+  });
+
+  test('commits the WAL cursor after a meaningful range becomes durable', () => {
     expect(needsJWatcherPoll(status({ committedCursor: 99 }))).toBe(true);
+  });
+
+  test('polls when either the authenticated watcher scan or a fresh replica is behind', () => {
+    expect(needsJWatcherPoll(status({ authenticatedThrough: 99 }))).toBe(true);
     expect(needsJWatcherPoll(status({
       replicas: [{
         key: 'entity:validator',
         localScannedThrough: 99,
+        authenticatedThrough: 0,
         entityFinalizedThrough: 99,
         pendingDueFinality: false,
       }],

@@ -185,6 +185,11 @@ export interface JAdapter {
   stopWatchingAndWait(): Promise<void>;
   // Immediate poll for scenarios (no-op if watcher not started)
   pollNow?(): Promise<void>;
+  /** Authenticated watcher progress that may be newer than the durable WAL cursor. */
+  getWatcherScanProgress?(): {
+    scannedThroughHeight: number;
+    replicaScannedThrough: Record<string, number>;
+  };
 
   // BrowserVM-specific (returns null for RPC mode)
   getBrowserVM(): BrowserVMProvider | null;

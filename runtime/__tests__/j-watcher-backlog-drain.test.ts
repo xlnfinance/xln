@@ -291,15 +291,17 @@ describe('RPC J-watcher backlog drain', () => {
     const authenticatedEmptyTail = await provider.getBlockNumber();
     await processJEvents(env);
 
-    expect(Number(env.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n)).toBe(authenticatedEmptyTail);
+    const durableSemanticHeight = Number(reserveEvent?.blockNumber ?? 0);
+    expect(Number(env.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n)).toBe(durableSemanticHeight);
+    expect(adapter.getWatcherScanProgress?.().scannedThroughHeight).toBe(authenticatedEmptyTail);
     const currentReplica = env.eReplicas.get(`${entityId}:${SIGNER_ID}`);
-    expect(currentReplica?.jHistory?.scannedThroughHeight).toBe(authenticatedEmptyTail);
-    expect(currentReplica?.state.lastFinalizedJHeight).toBe(Number(reserveEvent?.blockNumber ?? 0));
+    expect(currentReplica?.jHistory?.scannedThroughHeight).toBe(durableSemanticHeight);
+    expect(currentReplica?.state.lastFinalizedJHeight).toBe(durableSemanticHeight);
 
     // A watched ERC20 receipt can be perfectly authentic yet irrelevant to
-    // every Entity in this Runtime. The watcher must still durably advance the
-    // authenticated header prefix; otherwise it re-reads the same range on
-    // every poll because the global cursor outruns validator-local history.
+    // every Entity in this Runtime. It advances only transient authenticated
+    // scan progress; WAL state remains event-driven and a restart safely
+    // rescans the bounded empty suffix.
     const [watchedToken] = await adapter.getTokenRegistry();
     if (!watchedToken) throw new Error('J_WATCHER_BACKLOG_WATCHED_TOKEN_MISSING');
     const watchedErc20 = new ethers.Contract(
@@ -316,17 +318,18 @@ describe('RPC J-watcher backlog drain', () => {
     await processJEvents(env);
 
     const afterIrrelevantLog = env.eReplicas.get(`${entityId}:${SIGNER_ID}`);
-    expect(afterIrrelevantLog?.jHistory?.scannedThroughHeight).toBe(irrelevantLogHeight);
-    expect(afterIrrelevantLog?.jHistory?.contiguousThroughHeight).toBe(irrelevantLogHeight);
+    expect(afterIrrelevantLog?.jHistory?.scannedThroughHeight).toBe(durableSemanticHeight);
+    expect(afterIrrelevantLog?.jHistory?.contiguousThroughHeight).toBe(durableSemanticHeight);
+    expect(adapter.getWatcherScanProgress?.().scannedThroughHeight).toBe(irrelevantLogHeight);
 
     const restored = createEmptyEnv(RUNTIME_SEED);
     if (!afterIrrelevantLog) throw new Error('J_WATCHER_BACKLOG_REPLICA_MISSING');
     restored.eReplicas.set(`${entityId}:${SIGNER_ID}`, buildCanonicalEntityReplicaSnapshot(afterIrrelevantLog));
     restoreDurableRuntimeSnapshot(restored, buildDurableRuntimeMachineSnapshot(env));
 
-    expect(Number(restored.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n)).toBe(irrelevantLogHeight);
+    expect(Number(restored.jReplicas.get(jurisdictionName)?.blockNumber ?? 0n)).toBe(durableSemanticHeight);
     expect(restored.eReplicas.get(`${entityId}:${SIGNER_ID}`)?.jHistory?.scannedThroughHeight)
-      .toBe(irrelevantLogHeight);
+      .toBe(durableSemanticHeight);
 
     const lateSignerPrivateKey = getSignerPrivateKey(env, LATE_SIGNER_ID);
     const lateSignerAddress = new ethers.Wallet(ethers.hexlify(lateSignerPrivateKey)).address;

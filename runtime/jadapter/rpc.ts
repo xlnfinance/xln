@@ -2465,6 +2465,7 @@ export async function createRpcAdapter(
       const confirmationDepth = resolveFinalityDepth(!!env?.scenarioMode);
       const startBlock = getWatcherStartBlock(env, addresses.depository, config.chainId);
       lastSyncedBlock = Math.max(0, startBlock - 1);
+      watcherScanProgress = { scannedThroughHeight: 0, replicaScannedThrough: {} };
       rpcLog.info('watcher.start', {
         chainId: config.chainId,
         pollMs: watchPollMs,
@@ -2940,6 +2941,7 @@ export async function createRpcAdapter(
           pollStep = `verifyCanonicalTip:${lastSyncedBlock}`;
           if (await reconcileWatcherCanonicalTip(activeEnv)) {
             pendingWatcherJHistoryRange = null;
+            watcherScanProgress = { scannedThroughHeight: 0, replicaScannedThrough: {} };
             return;
           }
           if (pendingWatcherJHistoryRange) {
@@ -3288,6 +3290,7 @@ export async function createRpcAdapter(
               };
             }
             lastSyncedBlock = Math.max(lastSyncedBlock, toBlock);
+            rememberWatcherScanProgress(activeEnv, watcherReplica, toBlock);
             consecutiveTransientWatcherFailures = 0;
             return;
           }
@@ -3331,6 +3334,7 @@ export async function createRpcAdapter(
           }
 
           lastSyncedBlock = Math.max(lastSyncedBlock, toBlock);
+          rememberWatcherScanProgress(activeEnv, watcherReplica, toBlock);
           consecutiveTransientWatcherFailures = 0;
         })().catch((error: unknown) => {
           const message = watcherErrorMessage(error);
@@ -3487,6 +3491,10 @@ export async function createRpcAdapter(
       return await readCurrentRpcBlockNumber();
     },
 
+    getWatcherScanProgress() {
+      return watcherScanProgress;
+    },
+
     getFinalityDepth(): number {
       return resolveFinalityDepth(false);
     },
@@ -3520,6 +3528,27 @@ export async function createRpcAdapter(
   let watcherStopping = false;
   let watcherGeneration = 0;
   let lastSyncedBlock = 0;
+  let watcherScanProgress = {
+    scannedThroughHeight: 0,
+    replicaScannedThrough: {} as Record<string, number>,
+  };
+  const rememberWatcherScanProgress = (
+    env: Env,
+    watcherReplica: NonNullable<ReturnType<typeof findWatcherJurisdictionReplica>>,
+    scannedThroughHeight: number,
+  ): void => {
+    const byReplica = new Map(Object.entries(watcherScanProgress.replicaScannedThrough));
+    for (const [key, replica] of env.eReplicas.entries()) {
+      if (!isEntityReplicaRelevantToWatcher(env, replica, watcherReplica)) continue;
+      byReplica.set(key, Math.max(byReplica.get(key) ?? 0, scannedThroughHeight));
+    }
+    watcherScanProgress = {
+      scannedThroughHeight: Math.max(watcherScanProgress.scannedThroughHeight, scannedThroughHeight),
+      replicaScannedThrough: Object.fromEntries(
+        [...byReplica.entries()].sort(([left], [right]) => compareStableText(left, right)),
+      ),
+    };
+  };
   let consecutiveTransientWatcherFailures = 0;
   let lastTransientWatcherLogAt = 0;
   const txCounter: EventBatchCounter = { value: 0 };

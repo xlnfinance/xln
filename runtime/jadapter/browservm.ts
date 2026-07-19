@@ -24,6 +24,7 @@ import {
   enqueueJHistoryRange,
   findWatcherJurisdictionReplica,
   getMinimumScannedSignerJHeight,
+  isEntityReplicaRelevantToWatcher,
   normalizeAdapterEvents,
   processEventBatch,
   updateWatcherJurisdictionCursor,
@@ -281,6 +282,15 @@ export async function createBrowserVMAdapter(
     if (observedInputs.length > 0 || range.scannedReplicaKeys.length > 0) {
       updateWatcherJurisdictionCursor(activeEnv, targetBlock, addresses.depository, config.chainId);
     }
+    const byReplica = new Map(Object.entries(watcherScanProgress.replicaScannedThrough));
+    for (const [key, replica] of activeEnv.eReplicas.entries()) {
+      if (!isEntityReplicaRelevantToWatcher(activeEnv, replica, watcherReplica)) continue;
+      byReplica.set(key, Math.max(byReplica.get(key) ?? 0, targetBlock));
+    }
+    watcherScanProgress = {
+      scannedThroughHeight: Math.max(watcherScanProgress.scannedThroughHeight, targetBlock),
+      replicaScannedThrough: Object.fromEntries([...byReplica.entries()].sort(([left], [right]) => left.localeCompare(right))),
+    };
   };
 
   const pollBrowserVmHistorySerialized = async (): Promise<void> => {
@@ -620,6 +630,10 @@ export async function createBrowserVMAdapter(
       return Number(browserVM.getBlockNumber());
     },
 
+    getWatcherScanProgress() {
+      return watcherScanProgress;
+    },
+
     getFinalityDepth(): number {
       return 0;
     },
@@ -634,6 +648,11 @@ export async function createBrowserVMAdapter(
     async close(): Promise<void> {
       await adapter.stopWatchingAndWait();
     },
+  };
+
+  let watcherScanProgress = {
+    scannedThroughHeight: 0,
+    replicaScannedThrough: {} as Record<string, number>,
   };
 
   return adapter;

@@ -50,9 +50,11 @@ export type JWatcherDrainStatus = {
   depositoryAddress: string;
   targetBlock: number;
   committedCursor: number;
+  authenticatedThrough: number;
   replicas: Array<{
     key: string;
     localScannedThrough: number;
+    authenticatedThrough: number;
     entityFinalizedThrough: number;
     pendingDueFinality: boolean;
   }>;
@@ -92,7 +94,12 @@ const requireWatcherReplica = (env: Env, adapter: JAdapter): JReplica => {
 export const captureTrustedJWatcherTargets = async (env: Env): Promise<CapturedJWatcherTarget[]> => {
   const targets: CapturedJWatcherTarget[] = [];
   for (const adapter of getUniqueWatcherAdapters(env)) {
-    if (!adapter.pollNow || !adapter.getCurrentBlockNumber || !adapter.getFinalityDepth) {
+    if (
+      !adapter.pollNow ||
+      !adapter.getCurrentBlockNumber ||
+      !adapter.getFinalityDepth ||
+      !adapter.getWatcherScanProgress
+    ) {
       throw new Error(`J_WATCHER_DRAIN_API_MISSING:${adapter.chainId}:${adapter.addresses.depository}`);
     }
     const chainHead = requireSafeBlock(await adapter.getCurrentBlockNumber(), 'J_WATCHER_CHAIN_HEAD_INVALID');
@@ -157,24 +164,48 @@ export const getJWatcherDrainStatus = (
   target: CapturedJWatcherTarget,
 ): JWatcherDrainStatus => {
   const watcherReplica = requireWatcherReplica(env, target.adapter);
+  const scanProgress = target.adapter.getWatcherScanProgress?.();
+  if (!scanProgress) {
+    throw new Error(`J_WATCHER_DRAIN_SCAN_PROGRESS_MISSING:${target.adapter.chainId}`);
+  }
+  const authenticatedThrough = requireSafeBlock(
+    scanProgress.scannedThroughHeight,
+    'J_WATCHER_AUTHENTICATED_HEIGHT_INVALID',
+  );
+  const authenticatedByReplica = scanProgress.replicaScannedThrough;
   return {
     chainId: Number(target.adapter.chainId),
     depositoryAddress: target.adapter.addresses.depository.toLowerCase(),
     targetBlock: target.targetBlock,
     committedCursor: requireSafeBlock(watcherReplica.blockNumber, 'J_WATCHER_COMMITTED_CURSOR_INVALID'),
-    replicas: relevantReplicas(env, watcherReplica).map(([key, replica]) => replicaDrainStatus(key, replica)),
+    authenticatedThrough,
+    replicas: relevantReplicas(env, watcherReplica).map(([key, replica]) => ({
+      ...replicaDrainStatus(key, replica),
+      authenticatedThrough: requireSafeBlock(
+        authenticatedByReplica[key] ?? 0,
+        `J_WATCHER_REPLICA_AUTHENTICATED_HEIGHT_INVALID:${key}`,
+      ),
+    })),
   };
 };
 
+const requiresDurableWatcherCursor = (status: JWatcherDrainStatus): boolean =>
+  status.replicas.some((replica) => replica.localScannedThrough >= status.targetBlock);
+
 export const isJWatcherDrainComplete = (status: JWatcherDrainStatus): boolean =>
-  status.committedCursor >= status.targetBlock &&
+  status.authenticatedThrough >= status.targetBlock &&
+  (!requiresDurableWatcherCursor(status) || status.committedCursor >= status.targetBlock) &&
   status.replicas.every((replica) =>
-    replica.localScannedThrough >= status.targetBlock && !replica.pendingDueFinality
+    Math.max(replica.localScannedThrough, replica.authenticatedThrough) >= status.targetBlock &&
+    !replica.pendingDueFinality
   );
 
 export const needsJWatcherPoll = (status: JWatcherDrainStatus): boolean =>
-  status.committedCursor < status.targetBlock ||
-  status.replicas.some((replica) => replica.localScannedThrough < status.targetBlock);
+  status.authenticatedThrough < status.targetBlock ||
+  (requiresDurableWatcherCursor(status) && status.committedCursor < status.targetBlock) ||
+  status.replicas.some((replica) =>
+    Math.max(replica.localScannedThrough, replica.authenticatedThrough) < status.targetBlock
+  );
 
 const jTxSummary = (tx: EntityTx): unknown => ({
   baseHeight: Number((tx.data as { baseHeight?: number }).baseHeight ?? 0),
