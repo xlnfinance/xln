@@ -8,7 +8,7 @@ import {
   hasConnectedEncryptedRelayClient,
   sendEntityInputDirectViaRelaySocketDelivery,
 } from '../server/relay-direct';
-import type { DeliverableEntityInput, Env, RoutedEntityInput } from '../types';
+import type { DeliverableEntityInput, Env, RuntimeEntityInputsEnvelope } from '../types';
 
 type SentMessage = {
   type?: string;
@@ -50,7 +50,7 @@ describe('relay direct entity delivery', () => {
     expect(source).toContain('relay.direct.send_failed');
   });
 
-  test('sends a complete encrypted entity_input packet to a live relay client', () => {
+  test('sends a complete encrypted entity_inputs packet to a live relay client', () => {
     const sourceSeed = 'relay-direct-source';
     const targetSeed = 'relay-direct-target';
     const sourceRuntimeId = deriveSignerAddressSync(sourceSeed, '1').toLowerCase();
@@ -70,6 +70,7 @@ describe('relay direct entity delivery', () => {
     const input: DeliverableEntityInput = {
       runtimeId: targetRuntimeId,
       entityId: `0x${'ab'.repeat(32)}`,
+      signerId: targetRuntimeId,
       entityTxs: [{
         type: 'accountInput',
         data: {
@@ -79,12 +80,18 @@ describe('relay direct entity delivery', () => {
         },
       }],
     };
+    const envelope: RuntimeEntityInputsEnvelope = {
+      sourceRuntimeId,
+      sourceRuntimeHeight: 7,
+      sourceRuntimeTimestamp: 12345,
+      entityInputs: [input],
+    };
 
     const delivery = sendEntityInputDirectViaRelaySocketDelivery(
       store,
       { runtimeId: sourceRuntimeId } as Env,
       targetRuntimeId,
-      input,
+      envelope,
       (_key, message) => logs.push(message),
       12345,
     );
@@ -101,7 +108,7 @@ describe('relay direct entity delivery', () => {
     const packet = targetSocket.sent[0]!;
     expect(packet.id).toMatch(/^srv_\d+$/);
     expect(packet).toMatchObject({
-      type: 'entity_input',
+      type: 'entity_inputs',
       from: sourceRuntimeId,
       fromEncryptionPubKey: sourcePubKey,
       to: targetRuntimeId,
@@ -110,13 +117,13 @@ describe('relay direct entity delivery', () => {
       entityId: input.entityId,
       txs: 1,
     });
-    const decrypted = decryptJSON<RoutedEntityInput>(String(packet.payload || ''), targetKeys.privateKey);
-    expect(decrypted).toEqual(input);
+    const decrypted = decryptJSON<RuntimeEntityInputsEnvelope>(String(packet.payload || ''), targetKeys.privateKey);
+    expect(decrypted).toEqual(envelope);
     expect(store.debugEvents.at(-1)).toMatchObject({
       event: 'delivery',
       from: sourceRuntimeId,
       to: targetRuntimeId,
-      msgType: 'entity_input',
+      msgType: 'entity_inputs',
       status: 'delivered-direct-local',
       delivery: {
         outcome: 'delivered',
@@ -126,7 +133,8 @@ describe('relay direct entity delivery', () => {
         terminal: true,
       },
       details: {
-        entityId: input.entityId,
+        sourceRuntimeHeight: 7,
+        entityIds: [input.entityId],
         txs: 1,
       },
     });
@@ -150,14 +158,21 @@ describe('relay direct entity delivery', () => {
     const input: DeliverableEntityInput = {
       runtimeId: targetRuntimeId,
       entityId: `0x${'aa'.repeat(32)}`,
+      signerId: targetRuntimeId,
       entityTxs: [],
+    };
+    const envelope: RuntimeEntityInputsEnvelope = {
+      sourceRuntimeId,
+      sourceRuntimeHeight: 8,
+      sourceRuntimeTimestamp: 23456,
+      entityInputs: [input],
     };
 
     const delivery = sendEntityInputDirectViaRelaySocketDelivery(
       store,
       { runtimeId: sourceRuntimeId } as Env,
       targetRuntimeId,
-      input,
+      envelope,
       () => undefined,
       23456,
     );
@@ -203,14 +218,21 @@ describe('relay direct entity delivery', () => {
     const input: DeliverableEntityInput = {
       runtimeId: targetRuntimeId,
       entityId: `0x${'bb'.repeat(32)}`,
+      signerId: targetRuntimeId,
       entityTxs: [],
+    };
+    const envelope: RuntimeEntityInputsEnvelope = {
+      sourceRuntimeId,
+      sourceRuntimeHeight: 9,
+      sourceRuntimeTimestamp: 34567,
+      entityInputs: [input],
     };
 
     const delivery = sendEntityInputDirectViaRelaySocketDelivery(
       store,
       { runtimeId: sourceRuntimeId } as Env,
       targetRuntimeId,
-      input,
+      envelope,
       () => undefined,
       34567,
     );
@@ -258,14 +280,21 @@ describe('relay direct entity delivery', () => {
     const input: DeliverableEntityInput = {
       runtimeId: targetRuntimeId,
       entityId: `0x${'bc'.repeat(32)}`,
+      signerId: targetRuntimeId,
       entityTxs: [],
+    };
+    const envelope: RuntimeEntityInputsEnvelope = {
+      sourceRuntimeId,
+      sourceRuntimeHeight: 10,
+      sourceRuntimeTimestamp: 45678,
+      entityInputs: [input],
     };
 
     const delivery = sendEntityInputDirectViaRelaySocketDelivery(
       store,
       { runtimeId: sourceRuntimeId } as Env,
       targetRuntimeId,
-      input,
+      envelope,
       (_key, message) => logs.push(message),
       45678,
     );
@@ -293,7 +322,8 @@ describe('relay direct entity delivery', () => {
         terminal: false,
       },
       details: {
-        entityId: input.entityId,
+        sourceRuntimeHeight: 10,
+        entityIds: [input.entityId],
         txs: 0,
         error: 'socket exploded',
       },
@@ -315,14 +345,21 @@ describe('relay direct entity delivery', () => {
     const input: DeliverableEntityInput = {
       runtimeId: targetRuntimeId,
       entityId: `0x${'de'.repeat(32)}`,
+      signerId: targetRuntimeId,
       entityTxs: [],
+    };
+    const envelope: RuntimeEntityInputsEnvelope = {
+      sourceRuntimeId,
+      sourceRuntimeHeight: 11,
+      sourceRuntimeTimestamp: 1,
+      entityInputs: [input],
     };
 
     const delivery = sendEntityInputDirectViaRelaySocketDelivery(
       store,
       { runtimeId: sourceRuntimeId } as Env,
       targetRuntimeId,
-      input,
+      envelope,
       (_key, message) => logs.push(message),
     );
 
@@ -349,7 +386,8 @@ describe('relay direct entity delivery', () => {
         terminal: false,
       },
       details: {
-        entityId: input.entityId,
+        sourceRuntimeHeight: 11,
+        entityIds: [input.entityId],
         txs: 0,
       },
     });
@@ -369,14 +407,21 @@ describe('relay direct entity delivery', () => {
     const input: DeliverableEntityInput = {
       runtimeId: targetRuntimeId,
       entityId: `0x${'ef'.repeat(32)}`,
+      signerId: targetRuntimeId,
       entityTxs: [],
+    };
+    const envelope: RuntimeEntityInputsEnvelope = {
+      sourceRuntimeId,
+      sourceRuntimeHeight: 12,
+      sourceRuntimeTimestamp: 1,
+      entityInputs: [input],
     };
 
     const delivery = sendEntityInputDirectViaRelaySocketDelivery(
       store,
       { runtimeId: sourceRuntimeId } as Env,
       targetRuntimeId,
-      input,
+      envelope,
       (_key, message) => logs.push(message),
     );
 
@@ -403,7 +448,8 @@ describe('relay direct entity delivery', () => {
         terminal: false,
       },
       details: {
-        entityId: input.entityId,
+        sourceRuntimeHeight: 12,
+        entityIds: [input.entityId],
         txs: 0,
       },
     });

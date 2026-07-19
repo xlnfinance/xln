@@ -13,7 +13,7 @@ import {
   splitPendingOutputsByRetryWindow,
 } from '../machine/output-routing';
 import { deliveryAccepted, deliveryDeferred, deliveryFailure } from '../protocol/payments/delivery-result';
-import type { DeliverableEntityInput, EntityLeaderTimeoutVote, Env, RoutedEntityInput } from '../types';
+import type { DeliverableEntityInput, EntityLeaderTimeoutVote, Env, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
 import { getWallClockMs } from '../utils';
 
 const runtimeId = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -542,7 +542,7 @@ describe('runtime output routing', () => {
   test('falls back to encrypted P2P delivery after direct dispatch misses', () => {
     const targetRuntimeId = runtimeId('22');
     const warnings: string[] = [];
-    const p2pCalls: Array<{ targetRuntimeId: string; input: DeliverableEntityInput; ingressTimestamp?: number }> = [];
+    const p2pCalls: Array<{ targetRuntimeId: string; envelope: RuntimeEntityInputsEnvelope; ingressTimestamp?: number }> = [];
     const env = {
       runtimeId: runtimeId('11'),
       timestamp: 1234,
@@ -557,6 +557,7 @@ describe('runtime output routing', () => {
       runtimeId: targetRuntimeId,
       entityId: entityId('33'),
       signerId: runtimeId('34'),
+      sourceRuntimeFrame: { height: 9, timestamp: 1234 },
       entityTxs: [{
         type: 'registerCrossJurisdictionSwap',
         data: { route: { orderId: 'route-1' } },
@@ -566,8 +567,8 @@ describe('runtime output routing', () => {
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       getP2P: () => ({
-        enqueueEntityInputDelivery: (runtimeId, input, ingressTimestamp) => {
-          p2pCalls.push({ targetRuntimeId: runtimeId, input, ingressTimestamp });
+        enqueueEntityInputsDelivery: (runtimeId, envelope, ingressTimestamp) => {
+          p2pCalls.push({ targetRuntimeId: runtimeId, envelope, ingressTimestamp });
           return deliveryAccepted('P2P_ENTITY_INPUT_DELIVERED');
         },
       }),
@@ -583,14 +584,19 @@ describe('runtime output routing', () => {
     expect(deferred).toEqual([]);
     expect(p2pCalls).toHaveLength(1);
     expect(p2pCalls[0]?.targetRuntimeId).toBe(targetRuntimeId);
-    expect(p2pCalls[0]?.input.entityId).toBe(output.entityId);
+    expect(p2pCalls[0]?.envelope).toMatchObject({
+      sourceRuntimeId: env.runtimeId,
+      sourceRuntimeHeight: 9,
+      sourceRuntimeTimestamp: 1234,
+      entityInputs: [expect.objectContaining({ entityId: output.entityId })],
+    });
     expect(p2pCalls[0]?.ingressTimestamp).toBe(1234);
     expect(warnings).not.toContain('ROUTE_DIRECT_SOCKET_REQUIRED');
   });
 
   test('uses typed P2P delivery dispatch', () => {
     const targetRuntimeId = runtimeId('21');
-    const p2pCalls: Array<{ targetRuntimeId: string; input: DeliverableEntityInput; ingressTimestamp?: number }> = [];
+    const p2pCalls: Array<{ targetRuntimeId: string; envelope: RuntimeEntityInputsEnvelope; ingressTimestamp?: number }> = [];
     const env = {
       runtimeId: runtimeId('11'),
       timestamp: 4321,
@@ -604,14 +610,15 @@ describe('runtime output routing', () => {
       runtimeId: targetRuntimeId,
       entityId: entityId('31'),
       signerId: runtimeId('32'),
+      sourceRuntimeFrame: { height: 10, timestamp: 4321 },
       entityTxs: [],
     };
 
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       getP2P: () => ({
-        enqueueEntityInputDelivery: (runtimeId, input, ingressTimestamp) => {
-          p2pCalls.push({ targetRuntimeId: runtimeId, input, ingressTimestamp });
+        enqueueEntityInputsDelivery: (runtimeId, envelope, ingressTimestamp) => {
+          p2pCalls.push({ targetRuntimeId: runtimeId, envelope, ingressTimestamp });
           return {
             outcome: 'delivered',
             code: 'P2P_ENTITY_INPUT_DELIVERED',

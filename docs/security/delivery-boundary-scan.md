@@ -18,7 +18,7 @@ creep back into call sites.
 - Relay is the official baseline for remote entity-input delivery.
 - Direct delivery is an opportunistic fast path. A miss or stale socket falls
   through to the same typed delivery boundary instead of claiming success.
-- Raw `sendEntityInputRaw()` is limited to the P2P adapter and websocket client.
+- Raw `sendEntityInputsRaw()` is limited to the P2P adapter and websocket client.
 - Runtime routing, RuntimeP2P, relay-router, relay-store, direct runtime
   websocket, hub-node, and market-maker node all expose or consume
   `DeliveryResult` metadata.

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { RuntimeP2P } from '../networking/p2p';
 import type { Profile } from '../networking/gossip';
-import type { Env, RoutedEntityInput } from '../types';
+import type { Env } from '../types';
 
 const key = (byte: string): string => `0x${byte.repeat(32)}`;
 
@@ -52,7 +52,7 @@ const makeP2P = (profiles: Profile[]): RuntimeP2P => new RuntimeP2P({
     warn: () => {},
   } as unknown as Env,
   runtimeId: runtimeIdFor('local'),
-  onEntityInput: (_from: string, _input: RoutedEntityInput) => {},
+  onEntityInputs: () => {},
   onGossipProfiles: () => {},
 });
 

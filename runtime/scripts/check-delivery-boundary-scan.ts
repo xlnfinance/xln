@@ -161,7 +161,7 @@ for (const file of runtimeSources) {
   const relPath = relative(repoRoot, file);
   const source = readText(file);
   if (!rawEntityInputSendAllowedFiles.has(relPath)) {
-    assertNotMatches(source, /\bsendEntityInputRaw\s*\(|['"]sendEntityInputRaw['"]/, relPath, 'raw entity input websocket send');
+    assertNotMatches(source, /\bsendEntityInputsRaw\s*\(|['"]sendEntityInputsRaw['"]/, relPath, 'raw entity inputs websocket send');
   }
   if (!deliveryDecisionAllowedFiles.has(relPath)) {
     assertNotMatches(
@@ -191,7 +191,7 @@ for (const [path, markers] of [
     'export const deliveryFailure',
   ]],
   ['runtime/machine/output-routing.ts', [
-    'enqueueEntityInputDelivery(targetRuntimeId: string, input: DeliverableEntityInput, ingressTimestamp?: number): DeliveryResult;',
+    'enqueueEntityInputsDelivery(targetRuntimeId: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): DeliveryResult;',
     'export type RuntimeEntityInputRoutingResult = {',
     'delivery: DeliveryResult;',
     'export const buildPendingNetworkOutputs',
@@ -203,17 +203,17 @@ for (const [path, markers] of [
     'shouldRetryDelivery(p2pDelivery)',
   ]],
   ['runtime/networking/p2p.ts', [
-    'enqueueEntityInputDelivery(targetRuntimeId: string, input: RoutedEntityInput, ingressTimestamp?: number): EntityInputDeliveryResult',
-    'sendEntityInputRaw',
+    'enqueueEntityInputsDelivery(targetRuntimeId: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): EntityInputDeliveryResult',
+    'sendEntityInputsRaw',
     "delivery.code === 'P2P_NO_PUBKEY'",
     'P2P_ENTITY_INPUT_HANDED_TO_TRANSPORT',
     'Durable retry ownership belongs to the runtime outbox',
   ]],
   ['runtime/networking/ws-client.ts', [
-    'sendEntityInputRaw(to: string, input: RoutedEntityInput, ingressTimestamp?: number): boolean',
+    'sendEntityInputsRaw(to: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): boolean',
   ]],
   ['runtime/networking/direct-runtime-bun.ts', [
-    'sendEntityInputDelivery(targetRuntimeId: string, input: RoutedEntityInput, ingressTimestamp?: number): DeliveryResult',
+    'sendEntityInputsDelivery(targetRuntimeId: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): DeliveryResult',
     'ROUTE_DIRECT_MISS_FALLBACK',
     'ROUTE_DIRECT_SEND_FAILED',
   ]],
@@ -230,10 +230,10 @@ for (const [path, markers] of [
     'local-delivery-failed',
   ]],
   ['runtime/orchestrator/hub-node.ts', [
-    'directRuntimeWs.sendEntityInputDelivery(targetRuntimeId, input, ingressTimestamp)',
+    'directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp)',
   ]],
   ['runtime/orchestrator/mm-node.ts', [
-    'directRuntimeWs.sendEntityInputDelivery(targetRuntimeId, input, ingressTimestamp)',
+    'directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp)',
   ]],
 ] as const) {
   const text = readText(path);
@@ -266,7 +266,7 @@ for (const [path, markers] of [
     'undelivered disposition centralizes retry/drop event decisions',
   ]],
   ['runtime/__tests__/delivery-boundary.test.ts', [
-    'raw entity input websocket send stays behind the P2P delivery adapter',
+    'raw entity inputs websocket send stays behind the P2P delivery adapter',
     'delivery retry and terminal decisions stay behind shared helpers',
     'delivery outcome decisions stay behind shared helpers',
   ]],
@@ -275,8 +275,8 @@ for (const [path, markers] of [
     'ROUTE_SEND_NOT_DELIVERED',
   ]],
   ['runtime/__tests__/p2p-prefetch.test.ts', [
-    'enqueueEntityInputDelivery reports typed delivery result',
-    'enqueueEntityInputDelivery returns typed success with transport',
+    'enqueueEntityInputsDelivery reports typed delivery result',
+    'enqueueEntityInputsDelivery returns typed success with transport',
   ]],
   ['runtime/__tests__/relay-store.test.ts', [
     'relay send result predicate matches websocket failure contract',
@@ -294,7 +294,7 @@ for (const [path, markers] of [
     'send-failed',
   ]],
   ['runtime/__tests__/direct-runtime-bun.test.ts', [
-    'sendEntityInputDelivery',
+    'sendEntityInputsDelivery',
     'ROUTE_DIRECT_DELIVERED',
   ]],
 ] as const) {
@@ -310,7 +310,7 @@ for (const marker of [
   'bun run security:delivery-boundary',
   'Relay is the official baseline',
   'Direct delivery is an opportunistic fast path',
-  'Raw `sendEntityInputRaw()` is limited to the P2P adapter',
+  'Raw `sendEntityInputsRaw()` is limited to the P2P adapter',
   'Retry/drop/fatal decisions live behind shared delivery helpers',
 ]) {
   assertIncludes(auditDoc, marker, auditDocPath);

@@ -242,8 +242,11 @@ import {
 import {
   createRuntimeOutputRoutingDeps,
   handleInboundP2PEntityInput as routeInboundP2PEntityInput,
+  handleInboundP2PEntityInputs as routeInboundP2PEntityInputs,
   registerEntityRuntimeHint as registerEntityRuntimeHintForRouting,
+  selectMatchedCrossJAccountInputPairs,
   validateInboundP2PEntityInput,
+  validateInboundP2PEntityInputsEnvelope,
   type RuntimeInboundEntityInputOptions,
   type RuntimeEntityRoutingDeps,
 } from './machine/entity-routing';
@@ -425,6 +428,7 @@ import type {
   JReplica,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
+  RuntimeEntityInputsEnvelope,
   RuntimeFrameIngressBuffer,
   RuntimeOverlayRecord,
   RuntimeInput,
@@ -543,7 +547,7 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
       p2p: null,
       pendingP2PConfig: null,
       lastP2PConfig: null,
-      directEntityInputDispatch: null,
+      directEntityInputsDispatch: null,
       directReliableReceiptDispatch: null,
       canUseConnectedRelayFallback: null,
       recoveryBackupBarrier: null,
@@ -1630,7 +1634,7 @@ const detachRuntimeEnv = (env: Env): void => {
     }
     state.lastP2PConfig = null;
     state.pendingP2PConfig = null;
-    state.directEntityInputDispatch = null;
+    state.directEntityInputsDispatch = null;
     state.loopPromise = null;
     state.stopLoop = null;
     state.wakeLoop = null;
@@ -1782,6 +1786,27 @@ export const handleInboundP2PEntityInput = (
   return { kind: 'queued' } as const;
 };
 
+export const handleInboundP2PEntityInputs = (
+  env: Env,
+  from: string,
+  envelope: RuntimeEntityInputsEnvelope,
+  ingressTimestamp?: number,
+) => {
+  const deps = getRuntimeEntityRoutingDeps();
+  const buffered = getRuntimeFrameIngressBuffer(env);
+  if (!buffered) {
+    return routeInboundP2PEntityInputs(env, from, envelope, deps, ingressTimestamp);
+  }
+  validateInboundP2PEntityInputsEnvelope(env, from, envelope, deps);
+  appendRuntimeFrameIngress(buffered, {
+    kind: 'entity-inputs',
+    from,
+    envelope,
+    ...(ingressTimestamp === undefined ? {} : { ingressTimestamp }),
+  });
+  return { kind: 'queued' as const, receipts: [] as ReliableDeliveryReceipt[] };
+};
+
 export const handleInboundReliableReceipt = (
   env: Env,
   from: string,
@@ -1878,16 +1903,30 @@ const drainRuntimeFrameIngressBuffer = (transaction: RuntimeFrameTransaction): v
           );
           continue;
         }
-        const result = routeInboundP2PEntityInput(
+        if (ingress.kind === 'entity') {
+          const result = routeInboundP2PEntityInput(
+            env,
+            ingress.from,
+            ingress.input,
+            deps,
+            ingress.ingressTimestamp,
+            { acceptedBeforeQuiesce: true },
+          );
+          if (result.kind === 'receipt') {
+            dispatchRuntimeReliableReceipt(env, ingress.from, result.receipt);
+          }
+          continue;
+        }
+        const result = routeInboundP2PEntityInputs(
           env,
           ingress.from,
-          ingress.input,
+          ingress.envelope,
           deps,
           ingress.ingressTimestamp,
           { acceptedBeforeQuiesce: true },
         );
-        if (result.kind === 'receipt') {
-          dispatchRuntimeReliableReceipt(env, ingress.from, result.receipt);
+        for (const receipt of result.receipts) {
+          dispatchRuntimeReliableReceipt(env, ingress.from, receipt);
         }
       } catch (error) {
         errors.push(error instanceof Error ? error : new Error(String(error)));
@@ -2068,7 +2107,7 @@ function getRuntimeP2PLifecycleDeps(): RuntimeP2PLifecycleDeps {
     ensureRuntimeState,
     notifyEnvChange,
     enqueueRuntimeInputs: (env, inputs) => enqueueRuntimeInputs(env, inputs),
-    handleInboundP2PEntityInput,
+    handleInboundP2PEntityInputs,
     handleInboundReliableReceipt,
   };
 }
@@ -2158,6 +2197,93 @@ export const processJBlockEvents = async (env: Env): Promise<void> => {
   if (pending === 0) return;
 
   runtimeLog.debug('jblock.queued', { pending });
+};
+
+const crossJPairIndexesThatDidNotCommit = (
+  env: Env,
+  pairs: ReturnType<typeof selectMatchedCrossJAccountInputPairs>['pairs'],
+  outcomes: Awaited<ReturnType<typeof applyMergedEntityInputs>>['inputOutcomes'],
+): Set<number> => {
+  const committed = new Set(outcomes
+    .filter(entry => entry.outcome.kind === 'committed' && entry.entityFrameCommitted)
+    .map(entry => entry.inputIndex));
+  return new Set(pairs
+    .filter(pair =>
+      !committed.has(pair.sourceInputIndex) ||
+      !committed.has(pair.targetInputIndex) ||
+      !crossJAccountFrameMatches(env, pair.sourceAccountFrame) ||
+      !crossJAccountFrameMatches(env, pair.targetAccountFrame))
+    .flatMap(pair => [pair.sourceInputIndex, pair.targetInputIndex]));
+};
+
+const crossJAccountFrameMatches = (
+  env: Env,
+  expected: ReturnType<typeof selectMatchedCrossJAccountInputPairs>['pairs'][number]['sourceAccountFrame'],
+): boolean => {
+  const replica = [...env.eReplicas.values()].find(candidate =>
+    candidate.entityId.toLowerCase() === expected.entityId.toLowerCase() &&
+    candidate.signerId.toLowerCase() === expected.signerId.toLowerCase());
+  const account = [...(replica?.state.accounts.entries() ?? [])].find(([counterpartyId]) =>
+    counterpartyId.toLowerCase() === expected.counterpartyEntityId.toLowerCase())?.[1];
+  return account?.currentFrame.height === expected.height &&
+    String(account.currentFrame.stateHash || '').toLowerCase() === expected.stateHash.toLowerCase();
+};
+
+export const prepareAtomicCrossJAccountInputs = async (
+  env: Env,
+  inputs: readonly RoutedEntityInput[],
+  initialJOutbox: JInput[],
+  isReplay: boolean,
+  routingDeps: RuntimeEntityRoutingDeps,
+): Promise<{
+  inputs: RoutedEntityInput[];
+  pairs: ReturnType<typeof selectMatchedCrossJAccountInputPairs>['pairs'];
+}> => {
+  const initial = selectMatchedCrossJAccountInputPairs(env, inputs);
+  if (initial.droppedInputIndexes.length > 0) {
+    if (isReplay) throw new Error('RUNTIME_REPLAY_CROSS_J_ACCOUNT_PAIR_INVALID');
+    env.warn('network', 'CROSS_J_ACCOUNT_PAIR_STRUCTURAL_MISMATCH', {
+      received: inputs.length,
+      droppedInputIndexes: initial.droppedInputIndexes,
+    });
+  }
+  let retained = initial.inputs;
+  for (let attempt = 0; attempt <= initial.pairs.length; attempt += 1) {
+    const selection = selectMatchedCrossJAccountInputPairs(env, retained);
+    if (selection.droppedInputIndexes.length > 0) {
+      throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_SELECTION_UNSTABLE');
+    }
+    if (isReplay || selection.pairs.length === 0) return selection;
+    const previewEnv = cloneRuntimeFrameWorkingEnv(env);
+    const preview = await applyMergedEntityInputs(previewEnv, selection.inputs, initialJOutbox, {
+      isReplay: false,
+      routingDeps,
+    });
+    const failedIndexes = crossJPairIndexesThatDidNotCommit(previewEnv, selection.pairs, preview.inputOutcomes);
+    for (const pair of selection.pairs) {
+      if (
+        crossJAccountFrameMatches(env, pair.sourceAccountFrame) ||
+        crossJAccountFrameMatches(env, pair.targetAccountFrame)
+      ) {
+        failedIndexes.add(pair.sourceInputIndex);
+        failedIndexes.add(pair.targetInputIndex);
+      }
+    }
+    if (preview.localCrossJurisdictionEventFailures.length > 0) {
+      selection.pairs.forEach(pair => {
+        failedIndexes.add(pair.sourceInputIndex);
+        failedIndexes.add(pair.targetInputIndex);
+      });
+    }
+    if (failedIndexes.size === 0) return selection;
+    env.warn('network', 'CROSS_J_ACCOUNT_PAIR_PREVIEW_REJECTED', {
+      attempt,
+      pairCount: selection.pairs.length,
+      droppedInputIndexes: [...failedIndexes].sort((left, right) => left - right),
+    });
+    retained = selection.inputs.filter((_input, inputIndex) => !failedIndexes.has(inputIndex));
+  }
+  throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_PREFLIGHT_DID_NOT_CONVERGE');
 };
 
 const applyRuntimeInput = async (
@@ -2288,12 +2414,33 @@ const applyRuntimeInput = async (
     // imported and advanced in the same Runtime frame.
     applyCertifiedEntityLineagePlan(env, buildCertifiedEntityLineagePlan(env));
 
-    const { entityOutbox, appliedEntityInputs, entityFrameCommitted, jOutbox } = await applyMergedEntityInputs(
+    const routingDeps = getRuntimeEntityRoutingDeps();
+    const initialJOutbox = [...earlyJOutbox, ...runtimeTxJOutbox];
+    const preparedEntityInputs = await prepareAtomicCrossJAccountInputs(
       env,
       mergedInputs,
-      [...earlyJOutbox, ...runtimeTxJOutbox],
-      { isReplay, routingDeps: getRuntimeEntityRoutingDeps() },
+      initialJOutbox,
+      isReplay,
+      routingDeps,
     );
+    const appliedEntityBatch = await applyMergedEntityInputs(
+      env,
+      preparedEntityInputs.inputs,
+      initialJOutbox,
+      { isReplay, routingDeps },
+    );
+    const failedAtomicIndexes = crossJPairIndexesThatDidNotCommit(
+      env,
+      preparedEntityInputs.pairs,
+      appliedEntityBatch.inputOutcomes,
+    );
+    if (
+      failedAtomicIndexes.size > 0 ||
+      (preparedEntityInputs.pairs.length > 0 && appliedEntityBatch.localCrossJurisdictionEventFailures.length > 0)
+    ) {
+      throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_COMMIT_DIVERGED_FROM_PREFLIGHT');
+    }
+    const { entityOutbox, appliedEntityInputs, entityFrameCommitted, jOutbox } = appliedEntityBatch;
 
     // Reliable receiver authority is part of the R-machine post-state, not a
     // transport side effect. Plan it before deciding whether this tick owns a
@@ -2409,7 +2556,13 @@ const applyRuntimeInput = async (
         ? { reliableReceipts: runtimeInput.reliableReceipts }
         : {}),
     };
-    return { entityOutbox, mergedInputs, jOutbox, appliedRuntimeInput, reliableIngressCommits };
+    return {
+      entityOutbox,
+      mergedInputs: preparedEntityInputs.inputs,
+      jOutbox,
+      appliedRuntimeInput,
+      reliableIngressCommits,
+    };
   } catch (error) {
     // Strict scenarios already surface the thrown value at their outer boundary.
     // Logging directly to process stderr here would make the strict console trap throw a
@@ -3427,7 +3580,8 @@ const queueLocalOutputsWithReliability = (
   const inputs: RoutedEntityInput[] = [];
   const receipts: ReliableDeliveryReceipt[] = [];
   const retained: RoutedEntityInput[] = [];
-  for (const output of localOutputs) {
+  for (const originatedOutput of localOutputs) {
+    const { sourceRuntimeFrame: _sourceRuntimeFrame, ...output } = originatedOutput;
     if (!getReliableOutputIdentity(output)) {
       inputs.push(output);
       continue;
@@ -3457,9 +3611,18 @@ const applyDeterministicRuntimeOutputPlan = (
   entityOutbox: readonly RoutedEntityInput[],
   outputRoutingDeps: RuntimeOutputRoutingDeps,
 ) => {
+  const originatedEntityOutbox = entityOutbox.map(output => output.sourceRuntimeFrame
+    ? output
+    : {
+        ...output,
+        sourceRuntimeFrame: {
+          height: env.height,
+          timestamp: env.timestamp,
+        },
+      });
   const pendingBeforePlan = buildPendingNetworkOutputs(pruneReceiptedReliableOutputs(env, [
     ...(env.pendingNetworkOutputs ?? []),
-    ...entityOutbox,
+    ...originatedEntityOutbox,
   ]));
   const { ready, waiting } = splitPendingOutputsByRetryWindow(
     env,
@@ -3515,7 +3678,7 @@ const RUNTIME_FRAME_SHARED_STATE_KEYS = new Set<string>([
   'infraDbOpenPromise',
   'infraDbPendingWrites',
   'runtimeSyncChannel',
-  'directEntityInputDispatch',
+  'directEntityInputsDispatch',
   'directReliableReceiptDispatch',
   'canUseConnectedRelayFallback',
   'recoveryBackupBarrier',
@@ -3612,17 +3775,16 @@ const createRuntimeFrameGossipSnapshot = (env: Env): Env['gossip'] => {
   return gossip;
 };
 
-const createRuntimeFrameTransaction = (liveEnv: Env): RuntimeFrameTransaction => {
-  const liveMempool = ensureRuntimeMempool(liveEnv);
-  const workingMempool = cloneRuntimeFrameMempool(liveMempool);
-  const workingState = cloneRuntimeFrameState(liveEnv);
+const cloneRuntimeFrameWorkingEnv = (sourceEnv: Env): Env => {
+  const workingMempool = cloneRuntimeFrameMempool(ensureRuntimeMempool(sourceEnv));
+  const workingState = cloneRuntimeFrameState(sourceEnv);
   const workingEnv: Env = {
-    ...liveEnv,
-    eReplicas: new Map(Array.from(liveEnv.eReplicas.entries(), ([key, replica]) => [
+    ...sourceEnv,
+    eReplicas: new Map(Array.from(sourceEnv.eReplicas.entries(), ([key, replica]) => [
       key,
       buildCanonicalEntityReplicaSnapshot(replica),
     ])),
-    jReplicas: new Map<string, JReplica>(Array.from(liveEnv.jReplicas.entries(), ([key, replica]) => [
+    jReplicas: new Map<string, JReplica>(Array.from(sourceEnv.jReplicas.entries(), ([key, replica]) => [
       key,
       {
         ...buildCanonicalJReplicaSnapshot(replica),
@@ -3632,27 +3794,33 @@ const createRuntimeFrameTransaction = (liveEnv: Env): RuntimeFrameTransaction =>
     runtimeState: workingState,
     runtimeMempool: workingMempool,
     runtimeInput: workingMempool,
-    ...(liveEnv.runtimeConfig ? { runtimeConfig: structuredClone(liveEnv.runtimeConfig) } : {}),
-    ...(liveEnv.browserVMState ? { browserVMState: structuredClone(liveEnv.browserVMState) } : {}),
-    ...(liveEnv.overlay ? { overlay: structuredClone(liveEnv.overlay) } : {}),
-    ...(liveEnv.pendingOutputs
-      ? { pendingOutputs: cloneIsolatedRoutedEntityInputs(liveEnv.pendingOutputs) }
+    ...(sourceEnv.runtimeConfig ? { runtimeConfig: structuredClone(sourceEnv.runtimeConfig) } : {}),
+    ...(sourceEnv.browserVMState ? { browserVMState: structuredClone(sourceEnv.browserVMState) } : {}),
+    ...(sourceEnv.overlay ? { overlay: structuredClone(sourceEnv.overlay) } : {}),
+    ...(sourceEnv.pendingOutputs
+      ? { pendingOutputs: cloneIsolatedRoutedEntityInputs(sourceEnv.pendingOutputs) }
       : {}),
-    ...(liveEnv.networkInbox
-      ? { networkInbox: cloneIsolatedRoutedEntityInputs(liveEnv.networkInbox) }
+    ...(sourceEnv.networkInbox
+      ? { networkInbox: cloneIsolatedRoutedEntityInputs(sourceEnv.networkInbox) }
       : {}),
-    ...(liveEnv.pendingNetworkOutputs
-      ? { pendingNetworkOutputs: cloneIsolatedRoutedEntityInputs(liveEnv.pendingNetworkOutputs) }
+    ...(sourceEnv.pendingNetworkOutputs
+      ? { pendingNetworkOutputs: cloneIsolatedRoutedEntityInputs(sourceEnv.pendingNetworkOutputs) }
       : {}),
-    frameLogs: structuredClone(liveEnv.frameLogs),
-    history: [...liveEnv.history],
-    gossip: createRuntimeFrameGossipSnapshot(liveEnv),
-    evms: new Map(liveEnv.evms),
-    ...(liveEnv.extra ? { extra: structuredClone(liveEnv.extra) } : {}),
+    frameLogs: structuredClone(sourceEnv.frameLogs),
+    history: [...sourceEnv.history],
+    gossip: createRuntimeFrameGossipSnapshot(sourceEnv),
+    evms: new Map(sourceEnv.evms),
+    ...(sourceEnv.extra ? { extra: structuredClone(sourceEnv.extra) } : {}),
   };
   attachEventEmitters(workingEnv);
-  if (liveEnv.runtimeState?.scheduledWakeIndex !== undefined) rebuildScheduledWakeIndex(workingEnv);
+  if (sourceEnv.runtimeState?.scheduledWakeIndex !== undefined) rebuildScheduledWakeIndex(workingEnv);
+  return workingEnv;
+};
 
+const createRuntimeFrameTransaction = (liveEnv: Env): RuntimeFrameTransaction => {
+  const workingEnv = cloneRuntimeFrameWorkingEnv(liveEnv);
+  const workingMempool = ensureRuntimeMempool(workingEnv);
+  const workingState = ensureRuntimeState(workingEnv);
   const concurrentMempool: RuntimeInput = { runtimeTxs: [], entityInputs: [] };
   const ingressBuffer = beginRuntimeFrameIngressBuffer(liveEnv);
   // Operational producers read the live Env while this private working Env is

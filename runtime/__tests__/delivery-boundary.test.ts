@@ -35,14 +35,14 @@ const deliveryFlagDecisionAllowedFiles = new Set([
   'runtime/protocol/payments/delivery-result.ts',
 ]);
 
-test('raw entity input websocket send stays behind the P2P delivery adapter', () => {
+test('raw entity inputs websocket send stays behind the P2P delivery adapter', () => {
   const offenders = collectRuntimeSourceFiles(join(repoRoot, 'runtime'))
     .map((file) => {
       const relPath = relative(repoRoot, file);
       if (rawEntityInputSendAllowedFiles.has(relPath)) return null;
 
       const source = readFileSync(file, 'utf8');
-      return /\bsendEntityInputRaw\s*\(/.test(source) || /['"]sendEntityInputRaw['"]/.test(source)
+      return /\bsendEntityInputsRaw\s*\(/.test(source) || /['"]sendEntityInputsRaw['"]/.test(source)
         ? relPath
         : null;
     })

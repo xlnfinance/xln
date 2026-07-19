@@ -4,7 +4,7 @@ import { createDirectRuntimeWsRoute } from '../networking/direct-runtime-bun';
 import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, pubKeyToHex } from '../networking/p2p-crypto';
 import { hashHelloMessage, serializeWsMessage, deserializeWsMessage, serializeWsMessageForDebug, type RuntimeWsMessage } from '../networking/ws-protocol';
 import { encodeBinaryPayload } from '../storage/binary-codec';
-import type { ReliableDeliveryReceipt, RoutedEntityInput } from '../types';
+import type { ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
 
 const makeAuthedHello = (
   seed: string,
@@ -48,7 +48,7 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: deriveSignerAddressSync('direct-upgrade-server', '1').toLowerCase(),
       runtimeSeed: 'direct-upgrade-server',
-      onEntityInput: () => undefined,
+      onEntityInputs: () => undefined,
     });
     const upgradedRequests: Request[] = [];
     const server = {
@@ -75,7 +75,7 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
-      onEntityInput: () => {},
+      onEntityInputs: () => {},
     });
 
     const forged = makeFakeWs();
@@ -129,7 +129,7 @@ describe('direct runtime websocket route', () => {
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
       requireHelloAuth: false,
-      onEntityInput: () => {},
+      onEntityInputs: () => {},
     });
     const { ws, sent } = makeFakeWs();
     route.websocket.open(ws);
@@ -152,14 +152,14 @@ describe('direct runtime websocket route', () => {
     const clientSeed = 'direct-route-client';
     const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
     const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
-    const received: Array<{ from: string; input: RoutedEntityInput; timestamp?: number }> = [];
+    const received: Array<{ from: string; envelope: RuntimeEntityInputsEnvelope; timestamp?: number }> = [];
 
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
       requireHelloAuth: false,
-      onEntityInput: (from, input, timestamp) => {
-        received.push({ from, input, timestamp });
+      onEntityInputs: (from, envelope, timestamp) => {
+        received.push({ from, envelope, timestamp });
       },
     });
 
@@ -180,7 +180,13 @@ describe('direct runtime websocket route', () => {
       signerId: clientRuntimeId,
       entityTxs: [],
     };
-    expect(route.sendEntityInputDelivery(clientRuntimeId, outboundInput, 123)).toMatchObject({
+    const outboundEnvelope: RuntimeEntityInputsEnvelope = {
+      sourceRuntimeId: serverRuntimeId,
+      sourceRuntimeHeight: 7,
+      sourceRuntimeTimestamp: 123,
+      entityInputs: [outboundInput as RuntimeEntityInputsEnvelope['entityInputs'][number]],
+    };
+    expect(route.sendEntityInputsDelivery(clientRuntimeId, outboundEnvelope, 123)).toMatchObject({
       outcome: 'delivered',
       code: 'ROUTE_DIRECT_DELIVERED',
       retryable: false,
@@ -189,15 +195,15 @@ describe('direct runtime websocket route', () => {
     });
 
     const outbound = sent[1];
-    expect(outbound?.type).toBe('entity_input');
+    expect(outbound?.type).toBe('entity_inputs');
     expect(outbound?.from).toBe(serverRuntimeId);
     expect(outbound?.to).toBe(clientRuntimeId);
     expect(outbound?.encrypted).toBe(true);
-    const decryptedOutbound = decryptJSON<RoutedEntityInput>(
+    const decryptedOutbound = decryptJSON<RuntimeEntityInputsEnvelope>(
       String(outbound?.payload || ''),
       deriveEncryptionKeyPair(clientSeed).privateKey,
     );
-    expect(decryptedOutbound.entityId).toBe(outboundInput.entityId);
+    expect(decryptedOutbound).toEqual(outboundEnvelope);
 
     const inboundInput: RoutedEntityInput = {
       entityId: `0x${'22'.repeat(32)}`,
@@ -205,21 +211,27 @@ describe('direct runtime websocket route', () => {
       signerId: serverRuntimeId,
       entityTxs: [],
     };
+    const inboundEnvelope: RuntimeEntityInputsEnvelope = {
+      sourceRuntimeId: clientRuntimeId,
+      sourceRuntimeHeight: 9,
+      sourceRuntimeTimestamp: 456,
+      entityInputs: [inboundInput as RuntimeEntityInputsEnvelope['entityInputs'][number]],
+    };
     await route.websocket.message(ws, serializeWsMessage({
-      type: 'entity_input',
+      type: 'entity_inputs',
       id: 'client-to-server',
       from: clientRuntimeId,
       fromEncryptionPubKey: pubKeyToHex(deriveEncryptionKeyPair(clientSeed).publicKey),
       to: serverRuntimeId,
       timestamp: 456,
       encrypted: true,
-      payload: encryptJSON(inboundInput, deriveEncryptionKeyPair(serverSeed).publicKey),
+      payload: encryptJSON(inboundEnvelope, deriveEncryptionKeyPair(serverSeed).publicKey),
     }));
 
     expect(received).toEqual([
       {
         from: clientRuntimeId,
-        input: inboundInput,
+        envelope: inboundEnvelope,
         timestamp: 456,
       },
     ]);
@@ -254,7 +266,7 @@ describe('direct runtime websocket route', () => {
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
       requireHelloAuth: false,
-      onEntityInput: () => {},
+      onEntityInputs: () => {},
       onReliableReceipt: (from, inboundReceipt) => {
         received.push({ from, receipt: inboundReceipt });
       },
@@ -284,19 +296,19 @@ describe('direct runtime websocket route', () => {
     expect(received).toEqual([{ from: clientRuntimeId, receipt: inboundReceipt }]);
   });
 
-  test('rejects unencrypted entity input on a direct socket', async () => {
+  test('rejects unencrypted entity inputs on a direct socket', async () => {
     const serverSeed = 'direct-route-server-plaintext';
     const clientSeed = 'direct-route-client-plaintext';
     const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
     const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
-    const received: Array<{ from: string; input: RoutedEntityInput; timestamp?: number }> = [];
+    const received: Array<{ from: string; envelope: RuntimeEntityInputsEnvelope; timestamp?: number }> = [];
 
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
       requireHelloAuth: false,
-      onEntityInput: (from, input, timestamp) => {
-        received.push({ from, input, timestamp });
+      onEntityInputs: (from, envelope, timestamp) => {
+        received.push({ from, envelope, timestamp });
       },
     });
 
@@ -305,7 +317,7 @@ describe('direct runtime websocket route', () => {
     await route.websocket.message(ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
     await route.websocket.message(ws, encodeBinaryPayload({
       v: 1,
-      type: 'entity_input',
+      type: 'entity_inputs',
       id: 'client-to-server-plaintext',
       from: clientRuntimeId,
       fromEncryptionPubKey: pubKeyToHex(deriveEncryptionKeyPair(clientSeed).publicKey),
@@ -313,16 +325,21 @@ describe('direct runtime websocket route', () => {
       timestamp: 456,
       encrypted: false,
       payload: {
-        entityId: `0x${'22'.repeat(32)}`,
-        runtimeId: serverRuntimeId,
-        signerId: serverRuntimeId,
-        entityTxs: [],
+        sourceRuntimeId: clientRuntimeId,
+        sourceRuntimeHeight: 9,
+        sourceRuntimeTimestamp: 456,
+        entityInputs: [{
+          entityId: `0x${'22'.repeat(32)}`,
+          runtimeId: serverRuntimeId,
+          signerId: serverRuntimeId,
+          entityTxs: [],
+        }],
       },
     }, 'msgpack'));
 
     expect(sent.at(-1)).toMatchObject({
       type: 'error',
-      error: 'Invalid wire message: WS_MESSAGE_ENTITY_INPUT_ENCRYPTION_INVALID',
+      error: 'Invalid wire message: WS_MESSAGE_ENTITY_INPUTS_ENCRYPTION_INVALID',
     });
     expect(received).toEqual([]);
   });
@@ -348,7 +365,7 @@ describe('direct runtime websocket route', () => {
           bundles: [{ lookupKey, encryptedBundle: 'ciphertext' }],
         };
       },
-      onEntityInput: () => {},
+      onEntityInputs: () => {},
     });
 
     const { ws, sent } = makeFakeWs();
@@ -392,7 +409,7 @@ describe('direct runtime websocket route', () => {
         calls += 1;
         return {};
       },
-      onEntityInput: () => {},
+      onEntityInputs: () => {},
     });
 
     const { ws, sent } = makeFakeWs();
@@ -420,12 +437,12 @@ describe('direct runtime websocket route', () => {
   test('rejects same-runtime direct websocket peers', async () => {
     const serverSeed = 'direct-route-server-same-runtime';
     const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
-    const received: RoutedEntityInput[] = [];
+    const received: unknown[] = [];
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
-      onEntityInput: (_from, input) => {
-        received.push(input);
+      onEntityInputs: (_from, envelope) => {
+        received.push(envelope);
       },
     });
 
@@ -451,7 +468,7 @@ describe('direct runtime websocket route', () => {
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
       requireHelloAuth: false,
-      onEntityInput: () => {},
+      onEntityInputs: () => {},
     });
 
     const first = makeFakeWs();
@@ -476,11 +493,16 @@ describe('direct runtime websocket route', () => {
       signerId: clientRuntimeId,
       entityTxs: [],
     };
-    expect(route.sendEntityInputDelivery(clientRuntimeId, outboundInput)).toMatchObject({
+    expect(route.sendEntityInputsDelivery(clientRuntimeId, {
+      sourceRuntimeId: serverRuntimeId,
+      sourceRuntimeHeight: 1,
+      sourceRuntimeTimestamp: 1,
+      entityInputs: [outboundInput as RuntimeEntityInputsEnvelope['entityInputs'][number]],
+    })).toMatchObject({
       outcome: 'delivered',
       code: 'ROUTE_DIRECT_DELIVERED',
     });
-    expect(first.sent.at(-1)?.type).toBe('entity_input');
+    expect(first.sent.at(-1)?.type).toBe('entity_inputs');
     expect(second.sent).toEqual([]);
   });
 
@@ -491,7 +513,7 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
-      onEntityInput: () => undefined,
+      onEntityInputs: () => undefined,
     });
     const outboundInput: RoutedEntityInput = {
       entityId: `0x${'44'.repeat(32)}`,
@@ -500,7 +522,12 @@ describe('direct runtime websocket route', () => {
       entityTxs: [],
     };
 
-    expect(route.sendEntityInputDelivery(targetRuntimeId, outboundInput)).toMatchObject({
+    expect(route.sendEntityInputsDelivery(targetRuntimeId, {
+      sourceRuntimeId: serverRuntimeId,
+      sourceRuntimeHeight: 1,
+      sourceRuntimeTimestamp: 1,
+      entityInputs: [outboundInput as RuntimeEntityInputsEnvelope['entityInputs'][number]],
+    })).toMatchObject({
       outcome: 'deferred',
       code: 'ROUTE_DIRECT_MISS_FALLBACK',
       retryable: true,
@@ -518,7 +545,7 @@ describe('direct runtime websocket route', () => {
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
       requireHelloAuth: false,
-      onEntityInput: () => undefined,
+      onEntityInputs: () => undefined,
     });
     const { ws } = makeFakeWs();
     route.websocket.open(ws);
@@ -527,11 +554,16 @@ describe('direct runtime websocket route', () => {
       throw new Error('socket write exploded');
     };
 
-    const delivery = route.sendEntityInputDelivery(clientRuntimeId, {
-      entityId: `0x${'45'.repeat(32)}`,
-      runtimeId: clientRuntimeId,
-      signerId: clientRuntimeId,
-      entityTxs: [],
+    const delivery = route.sendEntityInputsDelivery(clientRuntimeId, {
+      sourceRuntimeId: serverRuntimeId,
+      sourceRuntimeHeight: 1,
+      sourceRuntimeTimestamp: 1,
+      entityInputs: [{
+        entityId: `0x${'45'.repeat(32)}`,
+        runtimeId: clientRuntimeId,
+        signerId: clientRuntimeId,
+        entityTxs: [],
+      }],
     });
 
     expect(delivery).toMatchObject({

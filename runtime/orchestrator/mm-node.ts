@@ -31,7 +31,7 @@ import {
   process as runtimeProcess,
   enqueueRuntimeInput,
   validateRuntimeInputAdmission,
-  handleInboundP2PEntityInput,
+  handleInboundP2PEntityInputs,
   handleInboundReliableReceipt,
   startP2P,
   startJurisdictionWatchers,
@@ -3357,8 +3357,8 @@ const run = async (): Promise<void> => {
   type DirectEntityInputDebug = {
     at: number;
     fromRuntimeId: string;
-    entityId: string;
-    signerId: string;
+    entityIds: string[];
+    signerIds: string[];
     txTypes: string[];
     error?: string;
   };
@@ -3755,21 +3755,21 @@ const run = async (): Promise<void> => {
     runtimeSeed: resolvedArgs.seed,
     onRecoveryBundleRequest: async (_from, lookupKey) =>
       resolveRuntimeAdapterRead({ env }, `recovery/bundles/${encodeURIComponent(lookupKey)}`),
-    onEntityInput: async (from, input, ingressTimestamp) => {
+    onEntityInputs: async (from, envelope, ingressTimestamp) => {
       if (!externalIngressReady) throw new Error('RUNTIME_STARTUP_J_CATCHUP_PENDING');
       const debugEntry: DirectEntityInputDebug = {
         at: Date.now(),
         fromRuntimeId: String(from || ''),
-        entityId: String(input.entityId || ''),
-        signerId: String(input.signerId || ''),
-        txTypes: (input.entityTxs || []).map(tx => String(tx?.type || '')),
+        entityIds: envelope.entityInputs.map(input => String(input.entityId || '')),
+        signerIds: envelope.entityInputs.map(input => String(input.signerId || '')),
+        txTypes: envelope.entityInputs.flatMap(input => (input.entityTxs || []).map(tx => String(tx?.type || ''))),
       };
       lastDirectEntityInput = debugEntry;
       try {
-        const inbound = handleInboundP2PEntityInput(env, from, input, ingressTimestamp);
-        if (inbound.kind === 'receipt') {
+        const inbound = handleInboundP2PEntityInputs(env, from, envelope, ingressTimestamp);
+        for (const receipt of inbound.receipts) {
           requireDeliveryDelivered(
-            directRuntimeWs.sendReliableReceiptDelivery(from, inbound.receipt),
+            directRuntimeWs.sendReliableReceiptDelivery(from, receipt),
             delivery => `DIRECT_RELIABLE_RECEIPT_NOT_DELIVERED:${delivery.code}`,
           );
         }
@@ -3787,10 +3787,10 @@ const run = async (): Promise<void> => {
     },
   });
   env.runtimeState = env.runtimeState ?? {};
-  env.runtimeState.directEntityInputDispatch =
+  env.runtimeState.directEntityInputsDispatch =
     process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'
-      ? (targetRuntimeId, input, ingressTimestamp) =>
-          directRuntimeWs.sendEntityInputDelivery(targetRuntimeId, input, ingressTimestamp)
+      ? (targetRuntimeId, envelope, ingressTimestamp) =>
+          directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp)
       : null;
   env.runtimeState.directReliableReceiptDispatch = (targetRuntimeId, receipt) =>
     directRuntimeWs.sendReliableReceiptDelivery(targetRuntimeId, receipt);

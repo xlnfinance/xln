@@ -1,4 +1,4 @@
-import type { ReliableDeliveryReceipt, RoutedEntityInput } from '../types';
+import type { ReliableDeliveryReceipt, RuntimeEntityInputsEnvelope } from '../types';
 import { deserializeWsMessage, hashHelloMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
 import { signDigest } from '../account/crypto';
 import { encryptJSON, decryptJSON, pubKeyToHex } from './p2p-crypto';
@@ -113,7 +113,7 @@ export type RuntimeWsClientOptions = {
   encryptionKeyPair?: { publicKey: Uint8Array; privateKey: Uint8Array }; // For E2E encryption
   getTargetEncryptionKey?: (runtimeId: string) => Uint8Array | null; // Lookup target's pubkey
   onPeerEncryptionKey?: (runtimeId: string, pubKeyHex: string) => void;
-  onEntityInput?: (from: string, input: RoutedEntityInput, timestamp?: number) => Promise<void> | void;
+  onEntityInputs?: (from: string, envelope: RuntimeEntityInputsEnvelope, timestamp?: number) => Promise<void> | void;
   onReliableReceipt?: (from: string, receipt: ReliableDeliveryReceipt) => Promise<void> | void;
   onGossipRequest?: (from: string, payload: unknown) => Promise<void> | void;
   onGossipResponse?: (from: string, payload: unknown) => Promise<void> | void;
@@ -606,19 +606,19 @@ export class RuntimeWsClient {
       this.options.onPeerEncryptionKey?.(msg.from, msg.fromEncryptionPubKey);
     }
 
-    if (msg.type === 'entity_input' && msg.payload && msg.from) {
-      // entity_input received - decrypt below
+    if (msg.type === 'entity_inputs' && msg.payload && msg.from) {
+      // One encrypted envelope carries every output from one source R-frame.
 
       // Reject unencrypted entity_input messages
       if (!msg.encrypted) {
-        console.error(`❌ WS-CLIENT: Rejected unencrypted entity_input from ${msg.from}`);
+        console.error(`❌ WS-CLIENT: Rejected unencrypted entity_inputs from ${msg.from}`);
         this.sendDebugEvent({
           level: 'error',
           code: 'P2P_UNENCRYPTED',
-          message: 'Rejected unencrypted entity_input',
+          message: 'Rejected unencrypted entity_inputs',
           from: msg.from,
         });
-        this.options.onError?.(new Error(`P2P_UNENCRYPTED: Received unencrypted entity_input from ${msg.from}`));
+        this.options.onError?.(new Error(`P2P_UNENCRYPTED: Received unencrypted entity_inputs from ${msg.from}`));
         return;
       }
 
@@ -635,9 +635,9 @@ export class RuntimeWsClient {
       }
 
       // Decrypt - throws on error (fail-fast)
-      let entityInput: RoutedEntityInput;
+      let envelope: RuntimeEntityInputsEnvelope;
       try {
-        entityInput = decryptJSON<RoutedEntityInput>(msg.payload as string, this.options.encryptionKeyPair.privateKey);
+        envelope = decryptJSON<RuntimeEntityInputsEnvelope>(msg.payload as string, this.options.encryptionKeyPair.privateKey);
         // Decrypted successfully
       } catch (decryptError) {
         console.error(`❌ WS-CLIENT-DECRYPT-FAILED:`, decryptError);
@@ -651,7 +651,7 @@ export class RuntimeWsClient {
         return;
       }
 
-      await this.options.onEntityInput?.(msg.from, entityInput, typeof msg.timestamp === 'number' ? msg.timestamp : undefined);
+      await this.options.onEntityInputs?.(msg.from, envelope, typeof msg.timestamp === 'number' ? msg.timestamp : undefined);
       return;
     }
     if (msg.type === 'entity_input_receipt' && msg.payload && msg.from) {
@@ -706,8 +706,8 @@ export class RuntimeWsClient {
     }
   }
 
-  sendEntityInputRaw(to: string, input: RoutedEntityInput, ingressTimestamp?: number): boolean {
-    // Encryption is MANDATORY for entity_input messages
+  sendEntityInputsRaw(to: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): boolean {
+    // Encryption is mandatory for the complete per-R-frame envelope.
     if (!this.options.getTargetEncryptionKey || !this.options.encryptionKeyPair) {
       throw new Error('P2P_NO_ENCRYPTION: Encryption not configured');
     }
@@ -718,10 +718,10 @@ export class RuntimeWsClient {
     }
 
     // Encrypt - throws on error (fail-fast, never send plaintext)
-    const payload = encryptJSON(input, targetPubKey);
+    const payload = encryptJSON(envelope, targetPubKey);
 
     return this.sendRaw({
-      type: 'entity_input',
+      type: 'entity_inputs',
       id: makeMessageId(),
       from: this.options.runtimeId,
       fromEncryptionPubKey: pubKeyToHex(this.options.encryptionKeyPair.publicKey),
@@ -732,8 +732,10 @@ export class RuntimeWsClient {
           : nextTimestamp(),
       payload,
       encrypted: true,
-      entityId: input.entityId,
-      txs: input.entityTxs?.length ?? 0,
+      ...(envelope.entityInputs.length === 1 && envelope.entityInputs[0]
+        ? { entityId: envelope.entityInputs[0].entityId }
+        : {}),
+      txs: envelope.entityInputs.reduce((count, input) => count + (input.entityTxs?.length ?? 0), 0),
     });
   }
 

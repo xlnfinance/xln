@@ -668,6 +668,24 @@ export interface EntityInput {
 export interface RoutedEntityInput extends EntityInput {
   signerId: string;
   runtimeId?: string;
+  /**
+   * Transport-only Runtime-frame provenance. Outbound it survives durable
+   * retries so frames are never combined; inbound it binds paired cross-j
+   * Account inputs to the same authenticated source envelope. It is stripped
+   * before an Entity input becomes committed Runtime/WAL input.
+   */
+  sourceRuntimeFrame?: {
+    height: number;
+    timestamp: number;
+  };
+}
+
+/** One authenticated transport unit emitted by one committed source R-frame. */
+export interface RuntimeEntityInputsEnvelope {
+  sourceRuntimeId: string;
+  sourceRuntimeHeight: number;
+  sourceRuntimeTimestamp: number;
+  entityInputs: DeliverableEntityInput[];
 }
 
 /**
@@ -679,9 +697,16 @@ export type RuntimeFrameIngressBuffer = {
   status: 'active' | 'draining' | 'closed';
   entries: Array<
     | {
+        /** Internal/test ingress API; cross-runtime transports use entity-inputs. */
         kind: 'entity';
         from: string;
         input: RoutedEntityInput;
+        ingressTimestamp?: number;
+      }
+    | {
+        kind: 'entity-inputs';
+        from: string;
+        envelope: RuntimeEntityInputsEnvelope;
         ingressTimestamp?: number;
       }
     | {
@@ -1326,9 +1351,9 @@ export interface Env {
     }>;
     externalWalletWatchOwners?: Map<string, Map<string, number>>;
     watcherDedupCounter?: import('./jadapter/watcher').EventBatchCounter;
-    directEntityInputDispatch?: ((
+    directEntityInputsDispatch?: ((
       targetRuntimeId: string,
-      input: DeliverableEntityInput,
+      envelope: RuntimeEntityInputsEnvelope,
       ingressTimestamp?: number,
     ) => import('./machine/output-routing').RuntimeDirectEntityInputDispatchResult) | null;
     directReliableReceiptDispatch?: ((

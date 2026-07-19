@@ -6,18 +6,16 @@
  */
 
 import {
-  handleInboundP2PEntityInput,
+  handleInboundP2PEntityInputs,
   handleInboundReliableReceipt,
 } from '../runtime.ts';
 import { deriveEncryptionKeyPair, decryptJSON, type P2PKeyPair } from '../networking/p2p-crypto';
 import type {
   Env,
-  EntityInput,
   EntityReplica,
   ReliableDeliveryReceipt,
-  RoutedEntityInput,
+  RuntimeEntityInputsEnvelope,
 } from '../types';
-import { validateDeliverableEntityInput } from '../validation-utils';
 import {
   type RelayStore,
   normalizeRuntimeKey,
@@ -99,65 +97,65 @@ export const createLocalDeliveryHandler = (
       });
       return;
     }
-    if (msg.type !== 'entity_input') {
+    if (msg.type !== 'entity_inputs') {
       throw new Error(`Unsupported local delivery type: ${String(msg.type)}`);
     }
 
-    let input: RoutedEntityInput;
     if (msg.encrypted !== true || typeof payload !== 'string') {
-      throw new Error('P2P_UNENCRYPTED: local entity_input must be encrypted');
+      throw new Error('P2P_UNENCRYPTED: local entity_inputs must be encrypted');
     }
     const activeKeyPair = getServerKeyPair();
-    input = validateDeliverableEntityInput(decryptJSON<EntityInput>(payload, activeKeyPair.privateKey));
-    relayLog(`[RELAY] → decrypted entity_input: entityId=${input.entityId?.slice(-8)} txs=${input.entityTxs?.length ?? 0}`);
+    const envelope = decryptJSON<RuntimeEntityInputsEnvelope>(payload, activeKeyPair.privateKey);
+    relayLog(`[RELAY] → decrypted entity_inputs: inputs=${envelope.entityInputs?.length ?? 0}`);
 
-    // Check if local replica exists
-    const localReplicaExists = !!getEntityReplicaById(env, String(input.entityId || ''));
-
-    if (!localReplicaExists) {
-      const entityId = String(input.entityId || '');
+    const missingEntityIds = (envelope.entityInputs || [])
+      .map(input => String(input.entityId || ''))
+      .filter(entityId => !getEntityReplicaById(env, entityId));
+    if (missingEntityIds.length > 0) {
       pushDebugEvent(store, {
         event: 'delivery',
         from,
         to: toKey,
-        msgType: 'entity_input',
+        msgType: 'entity_inputs',
         encrypted: msg.encrypted === true,
         status: 'rejected-no-local-replica',
         reason: 'NO_LOCAL_REPLICA',
         details: {
-          entityId,
+          entityIds: missingEntityIds,
         },
       });
-      throw new Error(`NO_LOCAL_REPLICA: entityId=${entityId || 'unknown'} runtimeId=${toKey}`);
+      throw new Error(`NO_LOCAL_REPLICA: entityIds=${missingEntityIds.join(',')} runtimeId=${toKey}`);
     }
 
-    // Enqueue to runtime only after receiver-side reliable ingress registration.
-    const routedInput: RoutedEntityInput = { ...input, from };
-    const result = handleInboundP2PEntityInput(
+    const result = handleInboundP2PEntityInputs(
       env,
       from,
-      routedInput,
+      envelope,
       typeof msg.timestamp === 'number' ? msg.timestamp : undefined,
     );
-    if (result.kind === 'receipt') {
-      const delivery = env.runtimeState?.p2p?.enqueueReliableReceiptDelivery(from, result.receipt);
+    for (const receipt of result.receipts) {
+      const delivery = env.runtimeState?.p2p?.enqueueReliableReceiptDelivery(from, receipt);
       if (!delivery || !isDeliveryDelivered(delivery)) {
         throw new Error(`RELIABLE_RECEIPT_SEND_DEFERRED:${delivery?.code ?? 'P2P_UNAVAILABLE'}`);
       }
     }
-    if (result.kind === 'ignored') {
-      throw new Error('INBOUND_ENTITY_INPUT_IGNORED');
+    if (result.kind === 'ignored' && result.receipts.length === 0) {
+      throw new Error('INBOUND_ENTITY_INPUTS_IGNORED');
     }
     const queueSize = env.runtimeMempool?.entityInputs?.length ?? env.runtimeInput?.entityInputs?.length ?? 0;
-    relayLog(`[RELAY] → local entity_input result=${result.kind} (queue=${queueSize})`);
+    relayLog(`[RELAY] → local entity_inputs result=${result.kind} (queue=${queueSize})`);
     pushDebugEvent(store, {
       event: 'delivery',
       from,
       to: toKey,
-      msgType: 'entity_input',
+      msgType: 'entity_inputs',
       encrypted: msg.encrypted === true,
       status: result.kind === 'pending' ? 'delivered-local-pending' : 'delivered-local-queued',
-      details: { entityId: input.entityId, txs: input.entityTxs?.length ?? 0, queueSize },
+      details: {
+        entityIds: envelope.entityInputs.map(input => input.entityId),
+        txs: envelope.entityInputs.reduce((count, input) => count + (input.entityTxs?.length ?? 0), 0),
+        queueSize,
+      },
     });
   };
 };

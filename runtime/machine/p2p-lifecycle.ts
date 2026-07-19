@@ -1,9 +1,9 @@
-import type { Env, ReliableDeliveryReceipt, RoutedEntityInput } from '../types';
+import type { Env, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import { RuntimeP2P, type P2PConfig } from '../networking/p2p';
 import { isRuntimeId } from '../networking/runtime-id';
 import { assertLocalEntityCryptoKeys } from '../entity/crypto';
-import type { RuntimeInboundEntityInputResult } from './entity-routing';
+import type { RuntimeInboundEntityInputsResult } from './entity-routing';
 import { isDeliveryDelivered } from '../protocol/payments/delivery-result';
 import {
   buildLocalProfileCertificationInput,
@@ -15,12 +15,12 @@ export type { P2PConfig } from '../networking/p2p';
 export type RuntimeP2PLifecycleDeps = {
   ensureRuntimeState: (env: Env) => NonNullable<Env['runtimeState']>;
   notifyEnvChange: (env: Env) => void;
-  handleInboundP2PEntityInput: (
+  handleInboundP2PEntityInputs: (
     env: Env,
     from: string,
-    input: RoutedEntityInput,
+    envelope: RuntimeEntityInputsEnvelope,
     ingressTimestamp?: number,
-  ) => RuntimeInboundEntityInputResult;
+  ) => RuntimeInboundEntityInputsResult;
   handleInboundReliableReceipt: (
     env: Env,
     from: string,
@@ -115,15 +115,16 @@ export const startRuntimeP2P = (
   const p2pOptions: ConstructorParameters<typeof RuntimeP2P>[0] = {
     env,
     runtimeId: resolvedRuntimeId,
-    onEntityInput: (from, input, ingressTimestamp) => {
-      const result = deps.handleInboundP2PEntityInput(env, from, input, ingressTimestamp);
-      if (result.kind !== 'receipt') return;
-      const delivery = state.p2p?.enqueueReliableReceiptDelivery(from, result.receipt);
-      if (!delivery || !isDeliveryDelivered(delivery)) {
-        env.warn('network', 'RELIABLE_RECEIPT_SEND_DEFERRED', {
-          targetRuntimeId: from,
-          delivery: delivery ?? null,
-        });
+    onEntityInputs: (from, envelope, ingressTimestamp) => {
+      const result = deps.handleInboundP2PEntityInputs(env, from, envelope, ingressTimestamp);
+      for (const receipt of result.receipts) {
+        const delivery = state.p2p?.enqueueReliableReceiptDelivery(from, receipt);
+        if (!delivery || !isDeliveryDelivered(delivery)) {
+          env.warn('network', 'RELIABLE_RECEIPT_SEND_DEFERRED', {
+            targetRuntimeId: from,
+            delivery: delivery ?? null,
+          });
+        }
       }
     },
     onReliableReceipt: (from, receipt) => {

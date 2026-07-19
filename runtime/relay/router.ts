@@ -120,7 +120,7 @@ const closeSupersededRuntimeSocket = (ws: RelaySocketLike): void => {
 export type RelayRouterConfig = {
   store: RelayStore;
   localRuntimeId: string;
-  /** Called when an entity_input or its signed durable receipt targets this runtime. */
+  /** Called when an entity_inputs envelope or its signed durable receipt targets this runtime. */
   localDeliver: (from: string | undefined, msg: RuntimeWsMessage) => Promise<void>;
   /** Thin wrapper over the binary production WebSocket codec. */
   send: (ws: RelaySocketLike, data: Uint8Array) => RelaySendResult;
@@ -554,7 +554,7 @@ export const relayRoute = async (
 
   // ----- routable messages -----
   if (
-    type === 'entity_input' ||
+    type === 'entity_inputs' ||
     type === 'entity_input_receipt' ||
     type === 'gossip_response' ||
     LIVE_RECOVERY_MESSAGE_TYPES.has(type)
@@ -572,7 +572,7 @@ export const relayRoute = async (
       return;
     }
 
-    if (type === 'entity_input' && (msg.encrypted !== true || typeof payload !== 'string')) {
+    if (type === 'entity_inputs' && (msg.encrypted !== true || typeof payload !== 'string')) {
       pushDebugEvent(store, {
         event: 'error',
         from,
@@ -583,7 +583,7 @@ export const relayRoute = async (
         delivery: relayDeliveryMetadata('rejected', 'ENTITY_INPUT_MUST_BE_ENCRYPTED'),
         details: { traceId },
       });
-      send(ws, serializeWsMessage({ type: 'error', error: 'entity_input must be encrypted' }));
+      send(ws, serializeWsMessage({ type: 'error', error: 'entity_inputs must be encrypted' }));
       return;
     }
 
@@ -634,7 +634,7 @@ export const relayRoute = async (
     }
 
     // Local application delivery for scoped reliable protocol messages.
-    if ((type === 'entity_input' || type === 'entity_input_receipt') && payload && isLocalTarget) {
+    if ((type === 'entity_inputs' || type === 'entity_input_receipt') && payload && isLocalTarget) {
       try {
         await config.localDeliver(from, msg);
         return;
@@ -662,8 +662,8 @@ export const relayRoute = async (
       }
     }
 
-    if (type === 'entity_input' || type === 'entity_input_receipt') {
-      const unavailableCode = type === 'entity_input'
+    if (type === 'entity_inputs' || type === 'entity_input_receipt') {
+      const unavailableCode = type === 'entity_inputs'
         ? 'ENTITY_INPUT_TARGET_NOT_CONNECTED'
         : 'ENTITY_INPUT_RECEIPT_TARGET_NOT_CONNECTED';
       relayLog(`[RELAY] → rejected ${type} (target not connected)`);

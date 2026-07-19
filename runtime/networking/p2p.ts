@@ -5,7 +5,7 @@
  * Durable retry ownership belongs to the runtime outbox, never this adapter.
  */
 
-import type { Env, ReliableDeliveryReceipt, RoutedEntityInput } from '../types';
+import type { Env, ReliableDeliveryReceipt, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
 import { canonicalizeProfile, getBoardPrimaryPublicKey, parseProfile, type Profile } from './gossip';
 import { RuntimeWsClient } from './ws-client';
 import { buildLocalEntityProfile } from './gossip-helper';
@@ -82,7 +82,7 @@ type RuntimeP2POptions = {
   advertiseEntityIds?: string[];
   isHub?: boolean;
   gossipPollMs?: number;
-  onEntityInput: (from: string, input: RoutedEntityInput, timestamp?: number) => void;
+  onEntityInputs: (from: string, envelope: RuntimeEntityInputsEnvelope, timestamp?: number) => void;
   onReliableReceipt?: (from: string, receipt: ReliableDeliveryReceipt) => void;
   onGossipProfiles: (from: string, profiles: Profile[]) => void;
   onEncryptionManifestComplete?: (
@@ -243,7 +243,7 @@ export class RuntimeP2P {
   private seedRuntimeIds: string[];
   private advertiseEntityIds: string[] | null;
   private gossipPollMs: number;
-  private onEntityInput: (from: string, input: RoutedEntityInput, timestamp?: number) => void;
+  private onEntityInputs: (from: string, envelope: RuntimeEntityInputsEnvelope, timestamp?: number) => void;
   private onReliableReceipt: (from: string, receipt: ReliableDeliveryReceipt) => void;
   private onGossipProfiles: (from: string, profiles: Profile[]) => void;
   private onEncryptionManifestComplete: RuntimeP2POptions['onEncryptionManifestComplete'];
@@ -278,7 +278,7 @@ export class RuntimeP2P {
     this.seedRuntimeIds = uniqueTransportValues(options.seedRuntimeIds || []);
     this.advertiseEntityIds = options.advertiseEntityIds || null;
     this.gossipPollMs = normalizeGossipPollMs(options.gossipPollMs);
-    this.onEntityInput = options.onEntityInput;
+    this.onEntityInputs = options.onEntityInputs;
     this.onReliableReceipt = options.onReliableReceipt ?? (() => {
       throw new Error('P2P_RELIABLE_RECEIPT_HANDLER_MISSING');
     });
@@ -379,11 +379,11 @@ export class RuntimeP2P {
           this.announceLocalProfiles();
           this.syncDirectPeerConnections();
         },
-        onEntityInput: async (from, input, timestamp) => {
+        onEntityInputs: async (from, envelope, timestamp) => {
           if (this.closing || this.closed) return;
-          await this.ensureProfilesForInput(input);
+          await Promise.all(envelope.entityInputs.map(input => this.ensureProfilesForInput(input)));
           if (this.closing || this.closed) return;
-          this.onEntityInput(from, input, timestamp);
+          this.onEntityInputs(from, envelope, timestamp);
         },
         onReliableReceipt: (from, receipt) => {
           if (!this.closing && !this.closed) this.onReliableReceipt(from, receipt);
@@ -587,23 +587,23 @@ export class RuntimeP2P {
     return rows.sort((left, right) => compareStableText(left.runtimeId, right.runtimeId));
   }
 
-  private deliverEntityInput(
-    client: Pick<RuntimeWsClient, 'sendEntityInputRaw'>,
+  private deliverEntityInputs(
+    client: Pick<RuntimeWsClient, 'sendEntityInputsRaw'>,
     targetRuntimeId: string,
-    input: RoutedEntityInput,
+    envelope: RuntimeEntityInputsEnvelope,
     ingressTimestamp: number | undefined,
     transport: EntityInputDeliveryTransport,
   ): EntityInputDeliveryResult {
-    const sent = client.sendEntityInputRaw(targetRuntimeId, input, ingressTimestamp);
+    const sent = client.sendEntityInputsRaw(targetRuntimeId, envelope, ingressTimestamp);
     return sent
       ? p2pDeliveryResult(deliveryAccepted('P2P_ENTITY_INPUT_HANDED_TO_TRANSPORT'), transport)
       : p2pSendFalseDelivery(transport);
   }
 
-  enqueueEntityInputDelivery(targetRuntimeId: string, input: RoutedEntityInput, ingressTimestamp?: number): EntityInputDeliveryResult {
+  enqueueEntityInputsDelivery(targetRuntimeId: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): EntityInputDeliveryResult {
     try {
       failfastAssert(typeof targetRuntimeId === 'string' && targetRuntimeId.length > 0, 'P2P_TARGET_RUNTIME_INVALID', 'targetRuntimeId is required');
-      failfastAssert(typeof input?.entityId === 'string' && input.entityId.length > 0, 'P2P_ENTITY_INPUT_INVALID', 'entity_input missing entityId', { targetRuntimeId });
+      failfastAssert(Array.isArray(envelope?.entityInputs) && envelope.entityInputs.length > 0, 'P2P_ENTITY_INPUTS_INVALID', 'entity_inputs envelope is empty', { targetRuntimeId });
     } catch (error) {
       this.env.warn('network', 'P2P_FAILFAST_REJECT', {
         failfast: asFailFastPayload(error),
@@ -616,8 +616,10 @@ export class RuntimeP2P {
       throw error;
     }
 
-    this.ensureRelayConnectionsForEntity(input.entityId);
-    this.prefetchProfilesForInput(input);
+    for (const input of envelope.entityInputs) {
+      this.ensureRelayConnectionsForEntity(input.entityId);
+      this.prefetchProfilesForInput(input);
+    }
 
     const normalizedTargetRuntimeId = normalizeRuntimeId(targetRuntimeId);
     failfastAssert(
@@ -630,11 +632,11 @@ export class RuntimeP2P {
     let delivery: EntityInputDeliveryResult | null = null;
     if (client && client.isOpen()) {
       try {
-        delivery = this.deliverEntityInput(client, normalizedTargetRuntimeId, input, ingressTimestamp, transport);
+        delivery = this.deliverEntityInputs(client, normalizedTargetRuntimeId, envelope, ingressTimestamp, transport);
         if (isDeliveryDelivered(delivery)) return delivery;
         this.env.warn('network', 'P2P_SEND_FAILED', {
           targetRuntimeId: normalizedTargetRuntimeId,
-          entityId: input.entityId,
+          entityIds: envelope.entityInputs.map(input => input.entityId),
           transport,
           delivery,
         });
@@ -646,7 +648,7 @@ export class RuntimeP2P {
           code: p2pSendThrowDebugCode(delivery),
           message,
           targetRuntimeId: normalizedTargetRuntimeId,
-          entityId: input.entityId,
+          entityIds: envelope.entityInputs.map(input => input.entityId),
           transport,
           delivery,
         });
@@ -654,7 +656,7 @@ export class RuntimeP2P {
           this.refreshGossip();
         }
         throw new Error(
-          `P2P_ENTITY_INPUT_SEND_THROW: runtime=${normalizedTargetRuntimeId} entity=${input.entityId} ` +
+          `P2P_ENTITY_INPUTS_SEND_THROW: runtime=${normalizedTargetRuntimeId} entities=${envelope.entityInputs.length} ` +
           `transport=${transport} error=${message}`,
         );
       }
@@ -667,14 +669,14 @@ export class RuntimeP2P {
       code: 'P2P_ENTITY_INPUT_NOT_DELIVERED',
       message: finalMessage,
       targetRuntimeId: normalizedTargetRuntimeId,
-      entityId: input.entityId,
+      entityIds: envelope.entityInputs.map(input => input.entityId),
       transport,
       relayConnected: Boolean(this.getActiveClient()),
       directPeers: this.getDirectPeerState(),
       delivery: finalDelivery,
     });
     throw new Error(
-      `P2P_ENTITY_INPUT_NOT_DELIVERED: runtime=${normalizedTargetRuntimeId} entity=${input.entityId} ` +
+      `P2P_ENTITY_INPUTS_NOT_DELIVERED: runtime=${normalizedTargetRuntimeId} entities=${envelope.entityInputs.length} ` +
       `transport=${transport}`,
     );
   }
@@ -1541,11 +1543,11 @@ export class RuntimeP2P {
         if (this.closing || this.closed) return;
         this.directClientErrors.delete(normalizedTargetRuntimeId);
       },
-      onEntityInput: async (from, input, timestamp) => {
+      onEntityInputs: async (from, envelope, timestamp) => {
         if (this.closing || this.closed) return;
-        await this.ensureProfilesForInput(input);
+        await Promise.all(envelope.entityInputs.map(input => this.ensureProfilesForInput(input)));
         if (this.closing || this.closed) return;
-        this.onEntityInput(from, input, timestamp);
+        this.onEntityInputs(from, envelope, timestamp);
       },
       onReliableReceipt: (from, receipt) => {
         if (!this.closing && !this.closed) this.onReliableReceipt(from, receipt);

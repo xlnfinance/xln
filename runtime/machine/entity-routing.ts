@@ -1,9 +1,13 @@
 import type {
+  AccountInput,
+  AccountTx,
+  CrossJurisdictionBookAdmissionReceipt,
   EntityInput,
   Env,
   JInput,
   ReliableDeliveryReceipt,
   RoutedEntityInput,
+  RuntimeEntityInputsEnvelope,
   RuntimeTx,
 } from '../types';
 import type { Profile } from '../networking/gossip';
@@ -13,6 +17,8 @@ import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope'
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { registerReliableIngress } from './reliable-delivery';
 import { advanceEntityCommandNonce, assertSignedEntityCommand } from '../entity/command';
+import { validateDeliverableEntityInput } from '../validation-utils';
+import { accountInputAck, accountInputProposal } from '../account/consensus/flush';
 
 type RuntimeState = NonNullable<Env['runtimeState']>;
 
@@ -44,12 +50,261 @@ export type RuntimeInboundEntityInputResult =
   | { kind: 'ignored' }
   | { kind: 'receipt'; receipt: ReliableDeliveryReceipt };
 
+export type RuntimeInboundEntityInputsResult = {
+  kind: 'queued' | 'pending' | 'ignored';
+  receipts: ReliableDeliveryReceipt[];
+};
+
 export type RuntimeInboundEntityInputValidation =
   | { kind: 'accepted' }
   | { kind: 'ignored' };
 
 const normalizeEntityKey = (value: string): string => String(value || '').toLowerCase();
 const RUNTIME_HINT_TTL_MS = 60_000;
+
+type CrossJAdmissionCandidate = {
+  inputIndex: number;
+  routeKey: string;
+  pairKey: string;
+  leg: 'source' | 'target';
+  accountInput: AccountInput;
+  pull: Extract<AccountTx, { type: 'pull_lock' }>;
+  targetReceipt?: CrossJurisdictionBookAdmissionReceipt;
+};
+
+const admissionKey = (orderId: string, routeHash: string): string =>
+  `${String(orderId || '').trim()}\u0000${String(routeHash || '').trim().toLowerCase()}`;
+
+const admissionOriginKey = (input: RoutedEntityInput): string => {
+  const frame = input.sourceRuntimeFrame;
+  if (!frame) return input.from ? `remote:${normalizeRuntimeId(input.from)}:missing` : 'local';
+  return `${normalizeRuntimeId(input.from)}:${frame.height}:${frame.timestamp}`;
+};
+
+const admissionPairKey = (input: RoutedEntityInput, routeKey: string): string =>
+  `${admissionOriginKey(input)}\u0000${routeKey}`;
+
+const crossPull = (
+  accountTxs: readonly AccountTx[],
+  leg: 'source' | 'target',
+): Extract<AccountTx, { type: 'pull_lock' }> | null => {
+  const pulls = accountTxs.filter((tx): tx is Extract<AccountTx, { type: 'pull_lock' }> =>
+    tx.type === 'pull_lock' && tx.data.crossJurisdiction?.leg === leg);
+  return pulls.length === 1 ? pulls[0]! : null;
+};
+
+const effectiveAccountInputs = (input: RoutedEntityInput): AccountInput[] =>
+  getEffectiveEntityInputTxs(input).flatMap(tx => tx.type === 'accountInput' ? [tx.data] : []);
+
+const sourceAdmissionCandidate = (
+  input: RoutedEntityInput,
+  inputIndex: number,
+  accountInput: AccountInput,
+): CrossJAdmissionCandidate | null => {
+  const proposal = accountInputProposal(accountInput);
+  if (!proposal) return null;
+  const pull = crossPull(proposal.frame.accountTxs, 'source');
+  const binding = pull?.data.crossJurisdiction;
+  if (!pull || !binding?.targetReceipt) return null;
+  const matchingOffer = proposal.frame.accountTxs.find(tx =>
+    tx.type === 'swap_offer' &&
+    tx.data.crossJurisdiction?.orderId === binding.orderId &&
+    String(tx.data.crossJurisdiction?.routeHash || '').toLowerCase() === String(binding.routeHash || '').toLowerCase());
+  if (!matchingOffer) return null;
+  const routeKey = admissionKey(binding.orderId, binding.routeHash);
+  return {
+    inputIndex,
+    routeKey,
+    pairKey: admissionPairKey(input, routeKey),
+    leg: 'source',
+    accountInput,
+    pull,
+    targetReceipt: binding.targetReceipt,
+  };
+};
+
+const findReplicaAccount = (
+  env: Env,
+  input: RoutedEntityInput,
+  counterpartyId: string,
+) => {
+  const replica = [...env.eReplicas.values()].find(candidate =>
+    normalizeEntityKey(candidate.entityId) === normalizeEntityKey(input.entityId) &&
+    normalizeEntityKey(candidate.signerId) === normalizeEntityKey(input.signerId));
+  if (!replica) return null;
+  const target = normalizeEntityKey(counterpartyId);
+  return [...replica.state.accounts.entries()].find(([key]) => normalizeEntityKey(key) === target)?.[1] ?? null;
+};
+
+const targetAdmissionCandidate = (
+  env: Env,
+  input: RoutedEntityInput,
+  inputIndex: number,
+  accountInput: AccountInput,
+): CrossJAdmissionCandidate | null => {
+  const ack = accountInputAck(accountInput);
+  if (!ack) return null;
+  const account = findReplicaAccount(env, input, accountInput.fromEntityId);
+  const pending = account?.pendingFrame;
+  if (
+    !pending ||
+    pending.height !== ack.height ||
+    String(pending.stateHash || '').toLowerCase() !== String(ack.frameHash || '').toLowerCase()
+  ) return null;
+  const pull = crossPull(pending.accountTxs, 'target');
+  const binding = pull?.data.crossJurisdiction;
+  if (!pull || !binding) return null;
+  const routeKey = admissionKey(binding.orderId, binding.routeHash);
+  return {
+    inputIndex,
+    routeKey,
+    pairKey: admissionPairKey(input, routeKey),
+    leg: 'target',
+    accountInput,
+    pull,
+  };
+};
+
+const targetPullMatchesReceipt = (
+  candidate: CrossJAdmissionCandidate,
+  receipt: CrossJurisdictionBookAdmissionReceipt,
+): boolean => {
+  const binding = candidate.pull.data.crossJurisdiction;
+  return candidate.leg === 'target' && Boolean(binding) &&
+    receipt.leg === 'target' &&
+    admissionKey(receipt.orderId, receipt.routeHash) === candidate.routeKey &&
+    normalizeEntityKey(receipt.hubEntityId) === normalizeEntityKey(candidate.accountInput.toEntityId) &&
+    normalizeEntityKey(receipt.counterpartyEntityId) === normalizeEntityKey(candidate.accountInput.fromEntityId) &&
+    receipt.pullId === candidate.pull.data.pullId &&
+    receipt.tokenId === candidate.pull.data.tokenId &&
+    receipt.signedAmount === candidate.pull.data.amount &&
+    receipt.revealedUntilTimestamp === candidate.pull.data.revealedUntilTimestamp &&
+    receipt.fullHash.toLowerCase() === String(candidate.pull.data.fullHash || '').toLowerCase() &&
+    receipt.partialRoot.toLowerCase() === String(candidate.pull.data.partialRoot || '').toLowerCase();
+};
+
+export type CrossJAccountInputPair = {
+  pairKey: string;
+  sourceInputIndex: number;
+  targetInputIndex: number;
+  sourceAccountFrame: CrossJAccountFrameExpectation;
+  targetAccountFrame: CrossJAccountFrameExpectation;
+};
+
+export type CrossJAccountFrameExpectation = {
+  entityId: string;
+  signerId: string;
+  counterpartyEntityId: string;
+  height: number;
+  stateHash: string;
+};
+
+export type CrossJAccountInputPairSelection = {
+  inputs: RoutedEntityInput[];
+  pairs: CrossJAccountInputPair[];
+  droppedInputIndexes: number[];
+};
+
+const collectCrossJAdmissionCandidates = (
+  env: Env,
+  inputs: readonly RoutedEntityInput[],
+): CrossJAdmissionCandidate[] => inputs.flatMap((input, inputIndex) =>
+  effectiveAccountInputs(input).flatMap(accountInput => [
+    sourceAdmissionCandidate(input, inputIndex, accountInput),
+    targetAdmissionCandidate(env, input, inputIndex, accountInput),
+  ].filter((candidate): candidate is CrossJAdmissionCandidate => candidate !== null)));
+
+/**
+ * Cross-j admission is the only cross-runtime Account phase that requires two
+ * sibling legs in one source-R-frame envelope. A target proposal remains a
+ * normal single input; its ACK is admitted only beside the source proposal
+ * bound to the exact target receipt. Later fill/close Account traffic remains
+ * ordinary bilateral consensus traffic.
+ */
+export const selectMatchedCrossJAccountInputPairs = (
+  env: Env,
+  inputs: readonly RoutedEntityInput[],
+): CrossJAccountInputPairSelection => {
+  const candidates = collectCrossJAdmissionCandidates(env, inputs);
+  if (candidates.length === 0) return { inputs: [...inputs], pairs: [], droppedInputIndexes: [] };
+
+  const byKey = new Map<string, CrossJAdmissionCandidate[]>();
+  for (const candidate of candidates) {
+    const group = byKey.get(candidate.pairKey) ?? [];
+    group.push(candidate);
+    byKey.set(candidate.pairKey, group);
+  }
+  const candidateCounts = new Map<number, number>();
+  for (const candidate of candidates) {
+    candidateCounts.set(candidate.inputIndex, (candidateCounts.get(candidate.inputIndex) ?? 0) + 1);
+  }
+  const invalidIndexes = new Set([...candidateCounts]
+    .filter(([, count]) => count !== 1)
+    .map(([inputIndex]) => inputIndex));
+  const pairs: CrossJAccountInputPair[] = [];
+  const allCandidateIndexes = new Set(candidates.map(candidate => candidate.inputIndex));
+  for (const [pairKey, group] of byKey) {
+    const sources = group.filter(candidate => candidate.leg === 'source');
+    const targets = group.filter(candidate => candidate.leg === 'target');
+    const groupIndexes = new Set(group.map(candidate => candidate.inputIndex));
+    if (
+      sources.length !== 1 ||
+      targets.length !== 1 ||
+      groupIndexes.size !== 2 ||
+      [...groupIndexes].some(inputIndex => invalidIndexes.has(inputIndex))
+    ) {
+      groupIndexes.forEach(inputIndex => invalidIndexes.add(inputIndex));
+      continue;
+    }
+    const receipt = sources[0]!.targetReceipt;
+    if (!receipt || !targetPullMatchesReceipt(targets[0]!, receipt)) {
+      groupIndexes.forEach(inputIndex => invalidIndexes.add(inputIndex));
+      continue;
+    }
+    const sourceInput = inputs[sources[0]!.inputIndex]!;
+    const targetInput = inputs[targets[0]!.inputIndex]!;
+    const sourceProposal = accountInputProposal(sources[0]!.accountInput);
+    const targetAck = accountInputAck(targets[0]!.accountInput);
+    if (!sourceProposal || !targetAck) {
+      groupIndexes.forEach(inputIndex => invalidIndexes.add(inputIndex));
+      continue;
+    }
+    pairs.push({
+      pairKey,
+      sourceInputIndex: sources[0]!.inputIndex,
+      targetInputIndex: targets[0]!.inputIndex,
+      sourceAccountFrame: {
+        entityId: sourceInput.entityId,
+        signerId: sourceInput.signerId,
+        counterpartyEntityId: sources[0]!.accountInput.fromEntityId,
+        height: sourceProposal.frame.height,
+        stateHash: sourceProposal.frame.stateHash,
+      },
+      targetAccountFrame: {
+        entityId: targetInput.entityId,
+        signerId: targetInput.signerId,
+        counterpartyEntityId: targets[0]!.accountInput.fromEntityId,
+        height: targetAck.height,
+        stateHash: targetAck.frameHash,
+      },
+    });
+  }
+  const pairedIndexes = new Set(pairs.flatMap(pair => [pair.sourceInputIndex, pair.targetInputIndex]));
+  const droppedInputIndexes = [...allCandidateIndexes]
+    .filter(inputIndex => invalidIndexes.has(inputIndex) || !pairedIndexes.has(inputIndex))
+    .sort((left, right) => left - right);
+  const dropped = new Set(droppedInputIndexes);
+  return {
+    inputs: inputs.filter((_input, inputIndex) => !dropped.has(inputIndex)),
+    pairs: pairs.filter(pair => !dropped.has(pair.sourceInputIndex) && !dropped.has(pair.targetInputIndex)),
+    droppedInputIndexes,
+  };
+};
+
+export const filterMatchedCrossJAccountInputPairs = (
+  env: Env,
+  inputs: readonly RoutedEntityInput[],
+): RoutedEntityInput[] => selectMatchedCrossJAccountInputPairs(env, inputs).inputs;
 
 const runtimeRoutingTimestamp = (env: Env): number => {
   const timestamp = Math.floor(Number(env.timestamp ?? 0));
@@ -319,6 +574,98 @@ export const handleInboundP2PEntityInput = (
   );
   env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
   return { kind: 'queued' };
+};
+
+export const validateInboundP2PEntityInputsEnvelope = (
+  env: Env,
+  from: string,
+  envelope: RuntimeEntityInputsEnvelope,
+  deps: RuntimeEntityRoutingDeps,
+  options: RuntimeInboundEntityInputOptions = {},
+): RoutedEntityInput[] => {
+  const sourceRuntimeId = normalizeRuntimeId(envelope?.sourceRuntimeId);
+  const transportSource = normalizeRuntimeId(from);
+  if (!sourceRuntimeId || sourceRuntimeId !== transportSource) {
+    throw new Error('INBOUND_ENTITY_INPUTS_SOURCE_RUNTIME_MISMATCH');
+  }
+  if (
+    !Number.isSafeInteger(envelope.sourceRuntimeHeight) || envelope.sourceRuntimeHeight < 0 ||
+    !Number.isSafeInteger(envelope.sourceRuntimeTimestamp) || envelope.sourceRuntimeTimestamp < 0
+  ) {
+    throw new Error('INBOUND_ENTITY_INPUTS_SOURCE_FRAME_INVALID');
+  }
+  if (!Array.isArray(envelope.entityInputs) || envelope.entityInputs.length === 0) {
+    throw new Error('INBOUND_ENTITY_INPUTS_EMPTY');
+  }
+  const localRuntimeId = normalizeRuntimeId(env.runtimeId);
+  const validatedInputs = envelope.entityInputs.flatMap(rawInput => {
+    const input = validateDeliverableEntityInput(rawInput);
+    if (localRuntimeId && normalizeRuntimeId(input.runtimeId) !== localRuntimeId) {
+      throw new Error(
+        `INBOUND_ENTITY_INPUTS_TARGET_RUNTIME_MISMATCH:expected=${localRuntimeId}:actual=${input.runtimeId}`,
+      );
+    }
+    const validation = validateInboundP2PEntityInput(env, from, input, deps, options);
+    return validation.kind === 'accepted'
+      ? [{
+          ...input,
+          from: transportSource,
+          sourceRuntimeFrame: {
+            height: envelope.sourceRuntimeHeight,
+            timestamp: envelope.sourceRuntimeTimestamp,
+          },
+        }]
+      : [];
+  });
+  const retainedInputs = filterMatchedCrossJAccountInputPairs(env, validatedInputs);
+  if (retainedInputs.length !== validatedInputs.length) {
+    env.warn?.('network', 'INBOUND_CROSS_J_ACCOUNT_PAIR_DROPPED', {
+      fromRuntimeId: from,
+      sourceRuntimeHeight: envelope.sourceRuntimeHeight,
+      received: validatedInputs.length,
+      retained: retainedInputs.length,
+    });
+  }
+  return retainedInputs;
+};
+
+export const handleInboundP2PEntityInputs = (
+  env: Env,
+  from: string,
+  envelope: RuntimeEntityInputsEnvelope,
+  deps: RuntimeEntityRoutingDeps,
+  ingressTimestamp?: number,
+  options: RuntimeInboundEntityInputOptions = {},
+): RuntimeInboundEntityInputsResult => {
+  // Validate the complete envelope before mutating reliable ledgers or queues.
+  const inputs = validateInboundP2PEntityInputsEnvelope(env, from, envelope, deps, options);
+  const queued: RoutedEntityInput[] = [];
+  const receipts: ReliableDeliveryReceipt[] = [];
+  let pending = false;
+  for (const input of inputs) {
+    const registration = registerReliableIngress(env, from, input);
+    if (registration.kind === 'pending') {
+      pending = true;
+      continue;
+    }
+    if (registration.kind === 'receipt') {
+      receipts.push(registration.receipt);
+      continue;
+    }
+    queued.push(input);
+  }
+  if (queued.length > 0) {
+    deps.enqueueRuntimeInputs(env, queued, undefined, undefined, ingressTimestamp, options);
+    env.info('network', 'INBOUND_ENTITY_INPUTS', {
+      fromRuntimeId: from,
+      sourceRuntimeHeight: envelope.sourceRuntimeHeight,
+      inputCount: queued.length,
+    });
+  }
+  return {
+    kind: queued.length > 0 ? 'queued' : pending ? 'pending' : 'ignored',
+    receipts,
+  };
 };
 
 export const createRuntimeOutputRoutingDeps = (

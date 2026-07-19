@@ -43,7 +43,7 @@ const makeClient = (options: {
   signerId: string;
   onOpen?: () => void;
   getTargetEncryptionKey?: (runtimeId: string) => Uint8Array | null;
-  onEntityInput?: (from: string) => Promise<void> | void;
+  onEntityInputs?: (from: string) => Promise<void> | void;
   onRecoveryBundleRequest?: (from: string, lookupKey: string) => Promise<unknown> | unknown;
   onError?: (error: Error) => void;
 }): RuntimeWsClient => {
@@ -55,7 +55,7 @@ const makeClient = (options: {
     useHelloAuth: true,
     encryptionKeyPair: deriveEncryptionKeyPair(options.seed),
     getTargetEncryptionKey: options.getTargetEncryptionKey,
-    onEntityInput: options.onEntityInput,
+    onEntityInputs: options.onEntityInputs,
     onOpen: options.onOpen,
     onRecoveryBundleRequest: options.onRecoveryBundleRequest,
     onError: options.onError,
@@ -228,7 +228,7 @@ describe('runtime websocket recovery requests', () => {
       seed: SEED_B,
       runtimeId: RUNTIME_B,
       signerId: '2',
-      onEntityInput: () => {
+      onEntityInputs: () => {
         received += 1;
         throw new Error('INBOUND_ENTITY_RUNTIME_QUIESCING');
       },
@@ -238,11 +238,16 @@ describe('runtime websocket recovery requests', () => {
     await receiver.connect();
     await waitUntil(() => relay.store.clients.has(RUNTIME_A) && relay.store.clients.has(RUNTIME_B), 'relay clients');
 
-    expect(sender.sendEntityInputRaw(RUNTIME_B, {
-      entityId: `0x${'44'.repeat(32)}`,
-      signerId: '2',
-      runtimeId: RUNTIME_B,
-      entityTxs: [],
+    expect(sender.sendEntityInputsRaw(RUNTIME_B, {
+      sourceRuntimeId: RUNTIME_A,
+      sourceRuntimeHeight: 7,
+      sourceRuntimeTimestamp: 7000,
+      entityInputs: [{
+        entityId: `0x${'44'.repeat(32)}`,
+        signerId: '2',
+        runtimeId: RUNTIME_B,
+        entityTxs: [],
+      }],
     })).toBe(true);
     await waitUntil(() => receiverErrors.includes('INBOUND_ENTITY_RUNTIME_QUIESCING'), 'retryable rejection reported');
 

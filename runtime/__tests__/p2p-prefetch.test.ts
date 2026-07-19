@@ -1,12 +1,20 @@
 import { expect, test } from 'bun:test';
 
-import type { RoutedEntityInput } from '../types';
+import type { RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
 import { RuntimeP2P } from '../networking/p2p';
 
 const TARGET_RUNTIME_ID = '0x1111111111111111111111111111111111111111';
+const SOURCE_RUNTIME_ID = '0x3333333333333333333333333333333333333333';
 const SOURCE_ENTITY_ID = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
-test('enqueueEntityInputDelivery starts profile prefetch before transport resolution', () => {
+const envelopeFor = (input: RoutedEntityInput): RuntimeEntityInputsEnvelope => ({
+  sourceRuntimeId: SOURCE_RUNTIME_ID,
+  sourceRuntimeHeight: 7,
+  sourceRuntimeTimestamp: 7000,
+  entityInputs: [{ ...input, runtimeId: TARGET_RUNTIME_ID }],
+});
+
+test('enqueueEntityInputsDelivery starts profile prefetch before transport resolution', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, unknown>;
 
   let prefetched = false;
@@ -39,13 +47,13 @@ test('enqueueEntityInputDelivery starts profile prefetch before transport resolu
     }],
   };
 
-  expect(() => p2p.enqueueEntityInputDelivery(TARGET_RUNTIME_ID, input)).toThrow(/P2P_ENTITY_INPUT_NOT_DELIVERED/);
+  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toThrow(/P2P_ENTITY_INPUTS_NOT_DELIVERED/);
 
   expect(prefetched).toBe(true);
   expect(resolvedAfterPrefetch).toBe(true);
 });
 
-test('enqueueEntityInputDelivery reports typed delivery result when no transport is open', () => {
+test('enqueueEntityInputsDelivery reports typed delivery result when no transport is open', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   const debugEvents: unknown[] = [];
 
@@ -70,7 +78,7 @@ test('enqueueEntityInputDelivery reports typed delivery result when no transport
     entityTxs: [],
   };
 
-  expect(() => p2p.enqueueEntityInputDelivery(TARGET_RUNTIME_ID, input)).toThrow(/P2P_ENTITY_INPUT_NOT_DELIVERED/);
+  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toThrow(/P2P_ENTITY_INPUTS_NOT_DELIVERED/);
   expect(debugEvents.at(-1)).toMatchObject({
     code: 'P2P_ENTITY_INPUT_NOT_DELIVERED',
     delivery: {
@@ -87,13 +95,13 @@ test('enqueueEntityInputDelivery reports typed delivery result when no transport
   });
 });
 
-test('enqueueEntityInputDelivery reports typed delivery result when transport send returns false', () => {
+test('enqueueEntityInputsDelivery reports typed delivery result when transport send returns false', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   const debugEvents: unknown[] = [];
   const warnings: unknown[][] = [];
   const relayClient = {
     isOpen: () => true,
-    sendEntityInputRaw: () => false,
+    sendEntityInputsRaw: () => false,
   };
 
   p2p.env = {
@@ -119,7 +127,7 @@ test('enqueueEntityInputDelivery reports typed delivery result when transport se
     entityTxs: [],
   };
 
-  expect(() => p2p.enqueueEntityInputDelivery(TARGET_RUNTIME_ID, input)).toThrow(/P2P_ENTITY_INPUT_NOT_DELIVERED/);
+  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toThrow(/P2P_ENTITY_INPUTS_NOT_DELIVERED/);
   expect(warnings[0]?.[2]).toMatchObject({
     delivery: {
       outcome: 'failed',
@@ -142,13 +150,13 @@ test('enqueueEntityInputDelivery reports typed delivery result when transport se
   });
 });
 
-test('enqueueEntityInputDelivery refreshes gossip from typed no-pubkey delivery code', () => {
+test('enqueueEntityInputsDelivery refreshes gossip from typed no-pubkey delivery code', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   const debugEvents: unknown[] = [];
   let refreshes = 0;
   const relayClient = {
     isOpen: () => true,
-    sendEntityInputRaw: () => {
+    sendEntityInputsRaw: () => {
       throw new Error('P2P_NO_PUBKEY missing gossip profile');
     },
   };
@@ -177,13 +185,13 @@ test('enqueueEntityInputDelivery refreshes gossip from typed no-pubkey delivery 
     entityTxs: [],
   };
 
-  expect(() => p2p.enqueueEntityInputDelivery(TARGET_RUNTIME_ID, input)).toThrow(/P2P_ENTITY_INPUT_SEND_THROW/);
+  expect(() => p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input))).toThrow(/P2P_ENTITY_INPUTS_SEND_THROW/);
   expect(refreshes).toBe(1);
   expect(debugEvents.at(-1)).toMatchObject({
     level: 'error',
     code: 'P2P_NO_PUBKEY_DELIVERY_FAILED',
     targetRuntimeId: TARGET_RUNTIME_ID,
-    entityId: SOURCE_ENTITY_ID,
+    entityIds: [SOURCE_ENTITY_ID],
     transport: 'relay',
     delivery: {
       outcome: 'failed',
@@ -195,14 +203,14 @@ test('enqueueEntityInputDelivery refreshes gossip from typed no-pubkey delivery 
   });
 });
 
-test('enqueueEntityInputDelivery uses official relay when advertised hub direct endpoint is not open', () => {
+test('enqueueEntityInputsDelivery uses official relay when advertised hub direct endpoint is not open', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   const sent: Array<{ to: string; input: RoutedEntityInput; timestamp?: number }> = [];
   const debugEvents: unknown[] = [];
 
   const relayClient = {
     isOpen: () => true,
-    sendEntityInputRaw: (to: string, input: RoutedEntityInput, timestamp?: number) => {
+    sendEntityInputsRaw: (to: string, input: RuntimeEntityInputsEnvelope, timestamp?: number) => {
       sent.push({ to, input, timestamp });
       return true;
     },
@@ -239,7 +247,7 @@ test('enqueueEntityInputDelivery uses official relay when advertised hub direct 
     }],
   };
 
-  expect(p2p.enqueueEntityInputDelivery(TARGET_RUNTIME_ID, input, 1234)).toMatchObject({
+  expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input), 1234)).toMatchObject({
     outcome: 'delivered',
     code: 'P2P_ENTITY_INPUT_HANDED_TO_TRANSPORT',
     transport: 'relay',
@@ -255,12 +263,12 @@ test('enqueueEntityInputDelivery uses official relay when advertised hub direct 
   )).toBe(false);
 });
 
-test('enqueueEntityInputDelivery returns typed success with transport', () => {
+test('enqueueEntityInputsDelivery returns typed success with transport', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   const sent: Array<{ to: string; input: RoutedEntityInput; timestamp?: number }> = [];
   const relayClient = {
     isOpen: () => true,
-    sendEntityInputRaw: (to: string, input: RoutedEntityInput, timestamp?: number) => {
+    sendEntityInputsRaw: (to: string, input: RuntimeEntityInputsEnvelope, timestamp?: number) => {
       sent.push({ to, input, timestamp });
       return true;
     },
@@ -284,7 +292,7 @@ test('enqueueEntityInputDelivery returns typed success with transport', () => {
     entityTxs: [],
   };
 
-  expect(p2p.enqueueEntityInputDelivery(TARGET_RUNTIME_ID, input, 2345)).toMatchObject({
+  expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input), 2345)).toMatchObject({
     outcome: 'delivered',
     code: 'P2P_ENTITY_INPUT_HANDED_TO_TRANSPORT',
     retryable: false,
@@ -296,14 +304,14 @@ test('enqueueEntityInputDelivery returns typed success with transport', () => {
   expect(sent[0]?.timestamp).toBe(2345);
 });
 
-test('enqueueEntityInputDelivery prefers open direct transport over relay', () => {
+test('enqueueEntityInputsDelivery prefers open direct transport over relay', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   const relaySent: unknown[] = [];
   const directSent: Array<{ to: string; input: RoutedEntityInput; timestamp?: number }> = [];
 
   const relayClient = {
     isOpen: () => true,
-    sendEntityInputRaw: () => {
+    sendEntityInputsRaw: () => {
       relaySent.push(true);
       return true;
     },
@@ -311,7 +319,7 @@ test('enqueueEntityInputDelivery prefers open direct transport over relay', () =
   const directClient = {
     isOpen: () => true,
     isConnecting: () => false,
-    sendEntityInputRaw: (to: string, input: RoutedEntityInput, timestamp?: number) => {
+    sendEntityInputsRaw: (to: string, input: RuntimeEntityInputsEnvelope, timestamp?: number) => {
       directSent.push({ to, input, timestamp });
       return true;
     },
@@ -336,7 +344,7 @@ test('enqueueEntityInputDelivery prefers open direct transport over relay', () =
     entityTxs: [],
   };
 
-  expect(p2p.enqueueEntityInputDelivery(TARGET_RUNTIME_ID, input, 5678)).toMatchObject({
+  expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input), 5678)).toMatchObject({
     outcome: 'delivered',
     code: 'P2P_ENTITY_INPUT_HANDED_TO_TRANSPORT',
     transport: 'direct',
@@ -347,14 +355,14 @@ test('enqueueEntityInputDelivery prefers open direct transport over relay', () =
   expect(relaySent).toHaveLength(0);
 });
 
-test('enqueueEntityInputDelivery uses relay when direct transport is not authoritative for entity inputs', () => {
+test('enqueueEntityInputsDelivery uses relay when direct transport is not authoritative for entity inputs', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   const relaySent: Array<{ to: string; input: RoutedEntityInput; timestamp?: number }> = [];
   const directSent: unknown[] = [];
 
   const relayClient = {
     isOpen: () => true,
-    sendEntityInputRaw: (to: string, input: RoutedEntityInput, timestamp?: number) => {
+    sendEntityInputsRaw: (to: string, input: RuntimeEntityInputsEnvelope, timestamp?: number) => {
       relaySent.push({ to, input, timestamp });
       return true;
     },
@@ -362,7 +370,7 @@ test('enqueueEntityInputDelivery uses relay when direct transport is not authori
   const directClient = {
     isOpen: () => true,
     isConnecting: () => false,
-    sendEntityInputRaw: () => {
+    sendEntityInputsRaw: () => {
       directSent.push(true);
       return true;
     },
@@ -394,7 +402,7 @@ test('enqueueEntityInputDelivery uses relay when direct transport is not authori
     }],
   };
 
-  expect(p2p.enqueueEntityInputDelivery(TARGET_RUNTIME_ID, input, 6789)).toMatchObject({
+  expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelopeFor(input), 6789)).toMatchObject({
     outcome: 'delivered',
     code: 'P2P_ENTITY_INPUT_HANDED_TO_TRANSPORT',
     transport: 'relay',

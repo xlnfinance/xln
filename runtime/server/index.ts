@@ -27,7 +27,7 @@ import {
 } from '../runtime.ts';
 import { readFileSync } from 'node:fs';
 import { safeStringify, serializeTaggedJson } from '../protocol/serialization';
-import type { DeliverableEntityInput, Env } from '../types';
+import type { Env, RuntimeEntityInputsEnvelope } from '../types';
 import { createExternalWalletApi } from '../api/external-wallet-api';
 import { maybeHandleQaRequest } from '../qa/api';
 import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from '../jadapter';
@@ -287,9 +287,9 @@ let serverBootCompletedAt: number | null = null;
 const sendEntityInputDirectViaRelaySocketDelivery = (
   env: Env,
   targetRuntimeId: string,
-  input: DeliverableEntityInput,
+  envelope: RuntimeEntityInputsEnvelope,
   ingressTimestamp?: number,
-) => sendEntityInputDirectViaRelaySocketDeliveryInStore(relayStore, env, targetRuntimeId, input, logOneShot, ingressTimestamp);
+) => sendEntityInputDirectViaRelaySocketDeliveryInStore(relayStore, env, targetRuntimeId, envelope, logOneShot, ingressTimestamp);
 
 const hasConnectedEncryptedRelayClient = (targetRuntimeId: string): boolean =>
   hasConnectedEncryptedRelayClientInStore(relayStore, targetRuntimeId);
@@ -1047,8 +1047,8 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     env.quietRuntimeLogs = !verboseRuntimeLogs;
     serverLog.info('runtime.log_mode', { mode: env.quietRuntimeLogs ? 'quiet' : 'verbose' });
     env.runtimeState = env.runtimeState ?? {};
-    env.runtimeState.directEntityInputDispatch = (targetRuntimeId, input, ingressTimestamp) =>
-      sendEntityInputDirectViaRelaySocketDelivery(runtimeEnv, targetRuntimeId, input, ingressTimestamp);
+    env.runtimeState.directEntityInputsDispatch = (targetRuntimeId, envelope, ingressTimestamp) =>
+      sendEntityInputDirectViaRelaySocketDelivery(runtimeEnv, targetRuntimeId, envelope, ingressTimestamp);
     env.runtimeState.canUseConnectedRelayFallback = hasConnectedEncryptedRelayClient;
     startRuntimeLoop(env);
     serverLog.info('runtime.loop.started');

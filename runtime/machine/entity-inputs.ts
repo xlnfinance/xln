@@ -32,6 +32,11 @@ const ENTITY_INPUT_SLOW_MS = Math.max(
 export interface RuntimeEntityInputApplyResult {
   entityOutbox: RoutedEntityInput[];
   appliedEntityInputs: RoutedEntityInput[];
+  inputOutcomes: Array<{
+    inputIndex: number;
+    outcome: EntityInputOutcome;
+    entityFrameCommitted: boolean;
+  }>;
   localCrossJurisdictionEventTrace: RoutedEntityInput[];
   localCrossJurisdictionEventFailures: Array<{
     input: RoutedEntityInput;
@@ -93,6 +98,7 @@ export const applyMergedEntityInputs = async (
 ): Promise<RuntimeEntityInputApplyResult> => {
   const entityOutbox: RoutedEntityInput[] = [];
   const appliedEntityInputs: RoutedEntityInput[] = [];
+  const inputOutcomes: RuntimeEntityInputApplyResult['inputOutcomes'] = [];
   const localCrossJurisdictionEventTrace: RoutedEntityInput[] = [];
   const localCrossJurisdictionEventFailures: RuntimeEntityInputApplyResult['localCrossJurisdictionEventFailures'] = [];
   let entityFrameCommitted = false;
@@ -231,7 +237,7 @@ export const applyMergedEntityInputs = async (
     }
   };
 
-  for (const entityInput of mergedInputs) {
+  for (const [inputIndex, entityInput] of mergedInputs.entries()) {
     if (
       entityInput.localRuntimeProtocol === 'cross-j' ||
       (entityInput.entityTxs ?? []).some(tx => tx.type === 'runtimeOutput')
@@ -341,6 +347,11 @@ export const applyMergedEntityInputs = async (
     }
 
     const result = await applyEntityInputToReplica(env, entityReplica, replicaKey, entityInput, actualSignerId, isReplay);
+    inputOutcomes.push({
+      inputIndex,
+      outcome: result.outcome,
+      entityFrameCommitted: result.entityFrameCommitted,
+    });
     entityFrameCommitted ||= result.entityFrameCommitted;
     if (isCommittedEntityInput(result.outcome) && entityInput.from) {
       const appliedRouteHints = new Set([
@@ -399,6 +410,7 @@ export const applyMergedEntityInputs = async (
   return {
     entityOutbox,
     appliedEntityInputs,
+    inputOutcomes,
     localCrossJurisdictionEventTrace,
     localCrossJurisdictionEventFailures,
     entityFrameCommitted,

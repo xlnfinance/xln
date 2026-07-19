@@ -1,5 +1,5 @@
 import type { ServerWebSocket } from 'bun';
-import type { DeliverableEntityInput, Env } from '../types';
+import type { Env, RuntimeEntityInputsEnvelope } from '../types';
 import { encryptJSON, hexToPubKey } from '../networking/p2p-crypto';
 import {
   isRelaySocketOpen,
@@ -49,7 +49,7 @@ const pushDirectRelayDeliveryEvent = (
   input: {
     fromRuntimeId?: string;
     targetRuntimeId: string;
-    entityInput: DeliverableEntityInput;
+    envelope: RuntimeEntityInputsEnvelope;
     status: string;
     reason?: string;
     delivery?: DeliveryResult;
@@ -60,14 +60,15 @@ const pushDirectRelayDeliveryEvent = (
     event: 'delivery',
     ...(input.fromRuntimeId ? { from: input.fromRuntimeId } : {}),
     to: input.targetRuntimeId,
-    msgType: 'entity_input',
+    msgType: 'entity_inputs',
     encrypted: true,
     status: input.status,
     ...(input.reason ? { reason: input.reason } : {}),
     ...(input.delivery ? { delivery: input.delivery } : {}),
     details: {
-      entityId: input.entityInput.entityId,
-      txs: input.entityInput.entityTxs?.length ?? 0,
+      sourceRuntimeHeight: input.envelope.sourceRuntimeHeight,
+      entityIds: input.envelope.entityInputs.map(entityInput => entityInput.entityId),
+      txs: input.envelope.entityInputs.reduce((count, entityInput) => count + (entityInput.entityTxs?.length ?? 0), 0),
       ...(input.details || {}),
     },
   });
@@ -77,7 +78,7 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
   relayStore: RelayStore,
   env: Env,
   targetRuntimeId: string,
-  input: DeliverableEntityInput,
+  envelope: RuntimeEntityInputsEnvelope,
   logOneShot: RelayDirectOneShotLog,
   ingressTimestamp?: number,
 ): DeliveryResult => {
@@ -86,7 +87,7 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
     const delivery = deferredDirectRelayDelivery('ROUTE_DIRECT_SOURCE_RUNTIME_MISSING');
     pushDirectRelayDeliveryEvent(relayStore, {
       targetRuntimeId,
-      entityInput: input,
+      envelope,
       status: 'direct-miss-fallback',
       reason: delivery.code,
       delivery,
@@ -105,7 +106,7 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
     pushDirectRelayDeliveryEvent(relayStore, {
       fromRuntimeId,
       targetRuntimeId,
-      entityInput: input,
+      envelope,
       status: 'direct-miss-fallback',
       reason: delivery.code,
       delivery,
@@ -123,7 +124,7 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
     pushDirectRelayDeliveryEvent(relayStore, {
       fromRuntimeId,
       targetRuntimeId,
-      entityInput: input,
+      envelope,
       status: 'direct-miss-fallback',
       reason: delivery.code,
       delivery,
@@ -132,11 +133,11 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
   }
 
   try {
-    const payload = encryptJSON(input, hexToPubKey(targetPubKeyHex));
+    const payload = encryptJSON(envelope, hexToPubKey(targetPubKeyHex));
     const target = relayStore.clients.get(targetKey);
     const messageSeq = nextWsTimestamp(relayStore);
     const msg = {
-      type: 'entity_input' as const,
+      type: 'entity_inputs' as const,
       id: `srv_${messageSeq}`,
       from: fromRuntimeId,
       fromEncryptionPubKey: fromPubKeyHex,
@@ -147,8 +148,10 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
           : messageSeq,
       payload,
       encrypted: true,
-      entityId: input.entityId,
-      txs: input.entityTxs?.length ?? 0,
+      ...(envelope.entityInputs.length === 1 && envelope.entityInputs[0]
+        ? { entityId: envelope.entityInputs[0].entityId }
+        : {}),
+      txs: envelope.entityInputs.reduce((count, entityInput) => count + (entityInput.entityTxs?.length ?? 0), 0),
     };
     if (target && isRelaySocketOpen(target.ws)) {
       const result = target.ws.send(serializeWsMessage(msg));
@@ -156,7 +159,7 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
         pushDirectRelayDeliveryEvent(relayStore, {
           fromRuntimeId,
           targetRuntimeId,
-          entityInput: input,
+          envelope,
           status: 'send-failed',
           reason: 'ROUTE_DIRECT_SEND_FALSE',
         });
@@ -165,7 +168,7 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
       pushDirectRelayDeliveryEvent(relayStore, {
         fromRuntimeId,
         targetRuntimeId,
-        entityInput: input,
+        envelope,
         status: 'delivered-direct-local',
       });
       return deliveryAccepted('ROUTE_DIRECT_DELIVERED');
@@ -177,7 +180,7 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
     pushDirectRelayDeliveryEvent(relayStore, {
       fromRuntimeId,
       targetRuntimeId,
-      entityInput: input,
+      envelope,
       status: 'direct-miss-fallback',
     });
     return deferredDirectRelayDelivery('ROUTE_DIRECT_MISS_FALLBACK');
@@ -191,7 +194,7 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
     pushDirectRelayDeliveryEvent(relayStore, {
       fromRuntimeId,
       targetRuntimeId,
-      entityInput: input,
+      envelope,
       status: 'send-failed',
       reason: 'ROUTE_DIRECT_SEND_THROW',
       details: { error: reason },

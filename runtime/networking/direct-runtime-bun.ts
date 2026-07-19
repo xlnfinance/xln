@@ -1,4 +1,4 @@
-import type { ReliableDeliveryReceipt, RoutedEntityInput } from '../types';
+import type { ReliableDeliveryReceipt, RuntimeEntityInputsEnvelope } from '../types';
 import {
   deliveryAccepted,
   deliveryDeferred,
@@ -18,7 +18,7 @@ type DirectRuntimeWsOptions = {
   path?: string;
   requireHelloAuth?: boolean;
   helloSkewMs?: number;
-  onEntityInput: (from: string, input: RoutedEntityInput, timestamp?: number) => Promise<void> | void;
+  onEntityInputs: (from: string, envelope: RuntimeEntityInputsEnvelope, timestamp?: number) => Promise<void> | void;
   onReliableReceipt?: (from: string, receipt: ReliableDeliveryReceipt) => Promise<void> | void;
   onRecoveryBundleRequest?: (from: string, lookupKey: string) => Promise<unknown> | unknown;
 };
@@ -180,7 +180,7 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
         .filter(session => session.runtimeId.length > 0)
         .sort((left, right) => compareCanonicalText(left.runtimeId, right.runtimeId));
     },
-    sendEntityInputDelivery(targetRuntimeId: string, input: RoutedEntityInput, ingressTimestamp?: number): DeliveryResult {
+    sendEntityInputsDelivery(targetRuntimeId: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): DeliveryResult {
       const targetKey = normalizeRuntimeId(targetRuntimeId);
       if (!targetKey) {
         return deliveryDeferred({
@@ -204,9 +204,9 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
         });
       }
       try {
-        const payload = encryptJSON(input, hexToPubKey(peerKey));
+        const payload = encryptJSON(envelope, hexToPubKey(peerKey));
         const msg: RuntimeWsMessage = {
-          type: 'entity_input',
+          type: 'entity_inputs',
           id: makeMessageId(),
           from: serverRuntimeId,
           fromEncryptionPubKey: pubKeyToHex(keyPair.publicKey),
@@ -217,8 +217,10 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
               : nextTimestamp(),
           payload,
           encrypted: true,
-          entityId: input.entityId,
-          txs: input.entityTxs?.length ?? 0,
+          ...(envelope.entityInputs.length === 1 && envelope.entityInputs[0]
+            ? { entityId: envelope.entityInputs[0].entityId }
+            : {}),
+          txs: envelope.entityInputs.reduce((count, input) => count + (input.entityTxs?.length ?? 0), 0),
         };
         const sendAttempt = trySend(session.ws, msg);
         if (!sendAttempt.sent) forgetSession(session.ws);
@@ -442,7 +444,7 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
           }
           return;
         }
-        if (msg.type !== 'entity_input') {
+        if (msg.type !== 'entity_inputs') {
           send(ws, { type: 'error', error: 'Unsupported direct ws message type' });
           return;
         }
@@ -451,7 +453,7 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
           return;
         }
         if (!msg.encrypted || typeof msg.payload !== 'string') {
-          send(ws, { type: 'error', error: 'Direct entity_input must be encrypted' });
+          send(ws, { type: 'error', error: 'Direct entity_inputs must be encrypted' });
           return;
         }
         const fromRuntimeId = normalizeRuntimeId(session.runtimeId || '');
@@ -464,8 +466,8 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
           return;
         }
         try {
-          const input = decryptJSON<RoutedEntityInput>(msg.payload, keyPair.privateKey);
-          await options.onEntityInput(fromRuntimeId, input, typeof msg.timestamp === 'number' ? msg.timestamp : undefined);
+          const envelope = decryptJSON<RuntimeEntityInputsEnvelope>(msg.payload, keyPair.privateKey);
+          await options.onEntityInputs(fromRuntimeId, envelope, typeof msg.timestamp === 'number' ? msg.timestamp : undefined);
         } catch (error) {
           send(ws, { type: 'error', error: `Direct delivery failed: ${(error as Error).message}` });
         }

@@ -26,7 +26,6 @@ import type {
   Env,
   JurisdictionConfig,
   JurisdictionEvent,
-  RoutedEntityInput,
 } from '../types';
 import {
   computeEntityProfileCertificationHash,
@@ -922,7 +921,7 @@ describe('multisig HTLC validator encryption', () => {
     const p2p = new RuntimeP2P({
       env,
       runtimeId: env.runtimeId!,
-      onEntityInput: () => undefined,
+      onEntityInputs: () => undefined,
       onGossipProfiles: (_from, accepted) => acceptedProfiles.push(accepted),
     });
     await (p2p as unknown as {
@@ -2086,7 +2085,7 @@ describe('multisig HTLC validator encryption', () => {
     const p2pFor = (env: Env, runtimeId: string) => new RuntimeP2P({
       env,
       runtimeId,
-      onEntityInput: (_from: string, _input: RoutedEntityInput) => {},
+      onEntityInputs: () => {},
       onGossipProfiles: () => {},
     });
 

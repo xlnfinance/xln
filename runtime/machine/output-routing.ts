@@ -5,6 +5,7 @@ import type {
   ReliableDeliveryEvidenceBinding,
   ReliableDeliveryIdentity,
   RoutedEntityInput,
+  RuntimeEntityInputsEnvelope,
 } from '../types';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import { hasEntityCommitCertificate } from '../protocol/signatures';
@@ -660,6 +661,7 @@ export const buildRouteOutputKey = (output: RoutedEntityInput): string => {
   }
   return safeStringify({
     runtimeId: output.runtimeId ?? '',
+    sourceRuntimeFrame: output.sourceRuntimeFrame ?? null,
     entityId: output.entityId,
     signerId: output.signerId,
     from: output.from ?? '',
@@ -798,7 +800,7 @@ export type PlannedRemoteOutput = {
 };
 
 type RuntimeP2PDispatch = {
-  enqueueEntityInputDelivery(targetRuntimeId: string, input: DeliverableEntityInput, ingressTimestamp?: number): DeliveryResult;
+  enqueueEntityInputsDelivery(targetRuntimeId: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): DeliveryResult;
   getVerifiedRuntimeRoute?(entityId: string): { runtimeId: string; lastUpdated: number } | null;
 };
 
@@ -908,14 +910,14 @@ const buildRoutingDeliveryResult = (input: {
   return deliveryAccepted('ROUTE_NOOP');
 };
 
-const enqueueP2PEntityInputDelivery = (
+const enqueueP2PEntityInputsDelivery = (
   p2p: RuntimeP2PDispatch,
   targetRuntimeId: string,
-  output: DeliverableEntityInput,
+  envelope: RuntimeEntityInputsEnvelope,
   ingressTimestamp: number | undefined,
 ): DeliveryResult => {
   return requireDeliveryResult(
-    p2p.enqueueEntityInputDelivery(targetRuntimeId, output, ingressTimestamp),
+    p2p.enqueueEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp),
     'ROUTE_P2P_INVALID_DELIVERY_RESULT',
   );
 };
@@ -1466,6 +1468,58 @@ const batchOutputsByTarget = (outputs: DeliverableEntityInput[]): DeliverableEnt
   return Array.from(batched.values()).sort(compareOutputDelivery);
 };
 
+const requireOutputRuntimeFrame = (
+  output: RoutedEntityInput,
+): NonNullable<RoutedEntityInput['sourceRuntimeFrame']> => {
+  const frame = output.sourceRuntimeFrame;
+  if (
+    !frame ||
+    !Number.isSafeInteger(frame.height) ||
+    frame.height < 0 ||
+    !Number.isSafeInteger(frame.timestamp) ||
+    frame.timestamp < 0
+  ) {
+    throw new Error(
+      `ROUTE_SOURCE_RUNTIME_FRAME_INVALID:entity=${output.entityId}:` +
+      `height=${String(frame?.height)}:timestamp=${String(frame?.timestamp)}`,
+    );
+  }
+  return frame;
+};
+
+const outputEnvelopeGroupKey = (output: DeliverableEntityInput): string => {
+  const frame = requireOutputRuntimeFrame(output);
+  return safeStringify({
+    runtimeId: normalizeRuntimeId(output.runtimeId),
+    height: frame.height,
+    timestamp: frame.timestamp,
+  });
+};
+
+const buildRuntimeEntityInputsEnvelope = (
+  env: Env,
+  outputs: readonly DeliverableEntityInput[],
+): RuntimeEntityInputsEnvelope => {
+  if (outputs.length === 0) throw new Error('ROUTE_ENTITY_INPUTS_ENVELOPE_EMPTY');
+  const sourceRuntimeId = normalizeRuntimeId(String(env.runtimeId || ''));
+  if (!sourceRuntimeId) throw new Error('ROUTE_SOURCE_RUNTIME_ID_INVALID');
+  const firstFrame = requireOutputRuntimeFrame(outputs[0]!);
+  const entityInputs = outputs.map(output => {
+    const frame = requireOutputRuntimeFrame(output);
+    if (frame.height !== firstFrame.height || frame.timestamp !== firstFrame.timestamp) {
+      throw new Error('ROUTE_ENTITY_INPUTS_ENVELOPE_FRAME_MISMATCH');
+    }
+    const { sourceRuntimeFrame: _sourceRuntimeFrame, ...input } = output;
+    return validateDeliverableEntityInput(input);
+  });
+  return {
+    sourceRuntimeId,
+    sourceRuntimeHeight: firstFrame.height,
+    sourceRuntimeTimestamp: firstFrame.timestamp,
+    entityInputs,
+  };
+};
+
 const awaitsDurableEntityCertificate = (
   env: Env,
   targetRuntimeId: string,
@@ -1501,133 +1555,133 @@ export const dispatchEntityOutputs = (
   deps: RuntimeOutputRoutingDeps,
 ): RoutedEntityInput[] => {
   const state = deps.ensureRuntimeState(env);
-  const directDispatch = state.directEntityInputDispatch;
+  const directDispatch = state.directEntityInputsDispatch;
   const p2p = deps.getP2P(env);
 
-  const groupedByRuntime = new Map<string, DeliverableEntityInput[]>();
+  const groupedByEnvelope = new Map<string, {
+    targetRuntimeId: string;
+    outputs: DeliverableEntityInput[];
+  }>();
   for (const { output, targetRuntimeId } of outputs) {
-    const list = groupedByRuntime.get(targetRuntimeId) || [];
-    list.push(output);
-    groupedByRuntime.set(targetRuntimeId, list);
+    const key = outputEnvelopeGroupKey(output);
+    const group = groupedByEnvelope.get(key) ?? { targetRuntimeId, outputs: [] };
+    if (group.targetRuntimeId !== targetRuntimeId) {
+      throw new Error('ROUTE_ENTITY_INPUTS_ENVELOPE_TARGET_MISMATCH');
+    }
+    group.outputs.push(output);
+    groupedByEnvelope.set(key, group);
   }
 
-  const batchedOutputs: PlannedRemoteOutput[] = [];
-  for (const [targetRuntimeId, grouped] of groupedByRuntime.entries()) {
-    const batchedGrouped = batchOutputsByTarget(grouped);
-    for (const output of batchedGrouped) {
-      batchedOutputs.push({ output, targetRuntimeId });
-    }
-  }
-  batchedOutputs.sort((left, right) =>
-    compareOutputDelivery(left.output, right.output) ||
-    compareStableText(left.targetRuntimeId, right.targetRuntimeId));
-  if (batchedOutputs.length < outputs.length) {
-    routeLog.debug('batch.reduced', { before: outputs.length, after: batchedOutputs.length });
-  }
+  const envelopeGroups = [...groupedByEnvelope.values()]
+    .map(group => ({ ...group, outputs: batchOutputsByTarget(group.outputs) }))
+    .sort((left, right) =>
+      compareStableText(left.targetRuntimeId, right.targetRuntimeId) ||
+      compareOutputDelivery(left.outputs[0]!, right.outputs[0]!));
 
   const deferredOutputs: RoutedEntityInput[] = [];
   // Every reliable lane serializes handoff until exact durable application.
   // Account ACK heights are sparse per direction, but a newer ACK only wakes
   // the oldest queued ACK; it never overtakes that receipt-gated lane head.
   const blockedReliableLanes = new Set<string>();
-  for (const { output, targetRuntimeId } of batchedOutputs) {
-    const reliable = getReliableOutputIdentity(output);
-    if (reliable && blockedReliableLanes.has(reliable.laneKey)) {
-      deferredOutputs.push(output);
-      continue;
+  for (const group of envelopeGroups) {
+    const sendable: DeliverableEntityInput[] = [];
+    for (const output of group.outputs) {
+      const reliable = getReliableOutputIdentity(output);
+      if (reliable && blockedReliableLanes.has(reliable.laneKey)) {
+        deferredOutputs.push(output);
+        continue;
+      }
+      if (reliable && awaitsDurableEntityCertificate(env, group.targetRuntimeId, reliable)) {
+        deferredOutputs.push(output);
+        blockedReliableLanes.add(reliable.laneKey);
+        continue;
+      }
+      sendable.push(output);
+      // A reliable lane head remains pending until its durable application
+      // receipt, so later lane entries cannot share this transport envelope.
+      if (reliable) blockedReliableLanes.add(reliable.laneKey);
     }
-    if (reliable && awaitsDurableEntityCertificate(env, targetRuntimeId, reliable)) {
-      routeLog.debug('reliable.awaiting_entity_certificate', {
-        entity: shortId(reliable.entityId),
-        height: reliable.height,
-      });
-      deferredOutputs.push(output);
-      blockedReliableLanes.add(reliable.laneKey);
-      continue;
-    }
+    if (sendable.length === 0) continue;
+
+    const envelope = buildRuntimeEntityInputsEnvelope(env, sendable);
+    const retainReliable = (): void => {
+      deferredOutputs.push(...sendable.filter(output => getReliableOutputIdentity(output) !== null));
+    };
     if (directDispatch) {
       const directDelivery = requireDeliveryResult(
-        directDispatch(targetRuntimeId, output, env.timestamp),
+        directDispatch(group.targetRuntimeId, envelope, envelope.sourceRuntimeTimestamp),
         'ROUTE_DIRECT_INVALID_DELIVERY_RESULT',
       );
       if (isDeliveryDelivered(directDelivery)) {
-        if (reliable) {
-          deferredOutputs.push(output);
-          blockedReliableLanes.add(reliable.laneKey);
-        }
+        retainReliable();
         continue;
       }
-      // Direct dispatch is only an optimization for runtimes connected to this
-      // process. A miss must still fall through to RuntimeP2P, which encrypts the
-      // entity_input and delivers it over relay/direct transport. Cross-j system
-      // txs are safe here because planEntityOutputs already validated that the
-      // hop is exactly between the two runtimes bound by the route topology.
     }
     if (!p2p) {
-      const details = {
-        entityId: output.entityId,
-        runtimeId: targetRuntimeId,
-      };
-      // A normal Entity output is best-effort and may be produced before P2P
-      // bootstrap completes; retaining it in the retry queue is expected state,
-      // not an operator warning. Consensus lanes have an ordering/liveness
-      // obligation, so absence of their transport remains loud.
-      if (reliable) env.warn?.('network', 'ROUTE_RELIABLE_DEFERRED_NO_P2P', details);
-      else env.info?.('network', 'ROUTE_DEFERRED_NO_P2P', details);
-      deferredOutputs.push(output);
-      if (reliable) blockedReliableLanes.add(reliable.laneKey);
+      for (const output of sendable) {
+        const reliable = getReliableOutputIdentity(output);
+        const details = { entityId: output.entityId, runtimeId: group.targetRuntimeId };
+        if (reliable) env.warn?.('network', 'ROUTE_RELIABLE_DEFERRED_NO_P2P', details);
+        else env.info?.('network', 'ROUTE_DEFERRED_NO_P2P', details);
+      }
+      deferredOutputs.push(...sendable);
       continue;
     }
-    routeLog.debug('p2p.enqueue', {
-      runtime: shortId(targetRuntimeId, 8),
-      entity: shortId(output.entityId),
-      txs: output.entityTxs?.length || 0,
+
+    routeLog.debug('p2p.enqueue_envelope', {
+      runtime: shortId(group.targetRuntimeId, 8),
+      sourceHeight: envelope.sourceRuntimeHeight,
+      inputs: envelope.entityInputs.length,
     });
     let p2pDelivery: DeliveryResult | null = null;
     try {
-      p2pDelivery = enqueueP2PEntityInputDelivery(p2p, targetRuntimeId, output, env.timestamp);
+      p2pDelivery = enqueueP2PEntityInputsDelivery(
+        p2p,
+        group.targetRuntimeId,
+        envelope,
+        envelope.sourceRuntimeTimestamp,
+      );
       if (isDeliveryDelivered(p2pDelivery)) {
-        if (reliable) {
-          deferredOutputs.push(output);
-          blockedReliableLanes.add(reliable.laneKey);
-        }
+        retainReliable();
         continue;
       }
       if (shouldRetryDelivery(p2pDelivery)) {
-        reportRetryableRouteDefer(env, deps, output, {
-          entityId: output.entityId,
-          runtimeId: targetRuntimeId,
-          delivery: p2pDelivery,
-        });
-        deferredOutputs.push(output);
-        if (reliable) blockedReliableLanes.add(reliable.laneKey);
+        for (const output of sendable) {
+          reportRetryableRouteDefer(env, deps, output, {
+            entityId: output.entityId,
+            runtimeId: group.targetRuntimeId,
+            delivery: p2pDelivery,
+          });
+        }
+        deferredOutputs.push(...sendable);
         continue;
       }
-      requireDeliveryDelivered(p2pDelivery, (delivery) =>
-        `ROUTE_SEND_NOT_DELIVERED: entity=${output.entityId} runtime=${targetRuntimeId} ` +
-        `code=${delivery.code} txTypes=${(output.entityTxs || []).map(tx => tx.type).join(',')}`);
+      requireDeliveryDelivered(p2pDelivery, delivery =>
+        `ROUTE_SEND_NOT_DELIVERED: runtime=${group.targetRuntimeId} ` +
+        `code=${delivery.code} inputs=${sendable.length}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const transientTransportFailure = [
-        'P2P_ENTITY_INPUT_NOT_DELIVERED',
-        'P2P_ENTITY_INPUT_SEND_THROW',
+        'P2P_ENTITY_INPUTS_NOT_DELIVERED',
+        'P2P_ENTITY_INPUTS_SEND_THROW',
         'P2P_TRANSPORT',
         'WebSocket',
       ].some(marker => message.includes(marker));
       if ((p2pDelivery !== null && shouldRetryDelivery(p2pDelivery)) || transientTransportFailure) {
-        reportRetryableRouteDefer(env, deps, output, {
-          entityId: output.entityId,
-          runtimeId: targetRuntimeId,
-          error: message,
-          ...(p2pDelivery ? { delivery: p2pDelivery } : {}),
-        });
-        deferredOutputs.push(output);
-        if (reliable) blockedReliableLanes.add(reliable.laneKey);
+        for (const output of sendable) {
+          reportRetryableRouteDefer(env, deps, output, {
+            entityId: output.entityId,
+            runtimeId: group.targetRuntimeId,
+            error: message,
+            ...(p2pDelivery ? { delivery: p2pDelivery } : {}),
+          });
+        }
+        deferredOutputs.push(...sendable);
         continue;
       }
       env.error?.('network', 'ROUTE_SEND_FAILED', {
-        entityId: output.entityId,
-        runtimeId: targetRuntimeId,
+        runtimeId: group.targetRuntimeId,
+        inputCount: sendable.length,
         error: message,
         ...(p2pDelivery ? { delivery: p2pDelivery } : {}),
       });
@@ -1643,9 +1697,18 @@ export const sendEntityInputWithRouting = (
   deps: RuntimeOutputRoutingDeps,
 ): RuntimeEntityInputRoutingResult => {
   const state = deps.ensureRuntimeState(env);
+  const originatedInput: RoutedEntityInput = input.sourceRuntimeFrame
+    ? input
+    : {
+        ...input,
+        sourceRuntimeFrame: {
+          height: env.height,
+          timestamp: env.timestamp,
+        },
+      };
   const pendingBeforePlan = buildPendingNetworkOutputs(pruneReceiptedReliableOutputs(env, [
     ...(env.pendingNetworkOutputs ?? []),
-    input,
+    originatedInput,
   ]));
   const { ready: readyPendingOutputs, waiting: waitingPendingOutputs } = splitPendingOutputsByRetryWindow(
     env,

@@ -231,7 +231,7 @@ describe('relay-router gossip fanout', () => {
 
     store.clients.clear();
     enqueueMessage(store, RUNTIME_A, {
-      type: 'entity_input',
+      type: 'entity_inputs',
       id: 'pending-ack',
       from: RUNTIME_B,
       to: RUNTIME_A,
@@ -287,7 +287,7 @@ describe('relay-router gossip fanout', () => {
 
     await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
     enqueueMessage(store, RUNTIME_A, {
-      type: 'entity_input',
+      type: 'entity_inputs',
       id: 'pending-ack',
       from: RUNTIME_B,
       to: RUNTIME_A,
@@ -402,7 +402,7 @@ describe('relay-router gossip fanout', () => {
     expect((sentBySocket.get(fresh)?.at(-1) as { type?: string; error?: string } | undefined)?.type).not.toBe('error');
   });
 
-  test('rejects entity_input when the registered target socket is stale', async () => {
+  test('rejects entity_inputs when the registered target socket is stale', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
@@ -423,7 +423,7 @@ describe('relay-router gossip fanout', () => {
     staleB.readyState = 3;
 
     await relayRoute(config, wsA, {
-      type: 'entity_input',
+      type: 'entity_inputs',
       id: 'deliver-to-stale',
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
@@ -473,7 +473,7 @@ describe('relay-router gossip fanout', () => {
     await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
     await relayRoute(config, wsB, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
     await relayRoute(config, wsA, {
-      type: 'entity_input',
+      type: 'entity_inputs',
       id: 'deliver-send-false',
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
@@ -535,7 +535,7 @@ describe('relay-router gossip fanout', () => {
     await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
     await relayRoute(config, wsB, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
     await relayRoute(config, wsA, {
-      type: 'entity_input',
+      type: 'entity_inputs',
       id: 'deliver-account-input',
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
@@ -547,7 +547,7 @@ describe('relay-router gossip fanout', () => {
     });
 
     expect(sentBySocket.get(wsB)?.at(-1)).toMatchObject({
-      type: 'entity_input',
+      type: 'entity_inputs',
       id: 'deliver-account-input',
       from: RUNTIME_A,
       to: RUNTIME_B,
@@ -718,7 +718,7 @@ describe('relay-router gossip fanout', () => {
     });
   });
 
-  test('rejects unencrypted entity_input at relay ingress', async () => {
+  test('rejects unencrypted entity_inputs at relay ingress', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
@@ -735,7 +735,7 @@ describe('relay-router gossip fanout', () => {
 
     await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
     await relayRoute(config, wsA, {
-      type: 'entity_input',
+      type: 'entity_inputs',
       id: 'plaintext-entity-input',
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
@@ -748,7 +748,7 @@ describe('relay-router gossip fanout', () => {
 
     expect(sentBySocket.get(wsA)?.at(-1)).toMatchObject({
       type: 'error',
-      error: 'entity_input must be encrypted',
+      error: 'entity_inputs must be encrypted',
     });
     expect(store.pendingMessages.get(RUNTIME_B)).toBeUndefined();
     expect(store.debugEvents.some(event => event.reason === 'ENTITY_INPUT_MUST_BE_ENCRYPTED')).toBe(true);
@@ -765,7 +765,7 @@ describe('relay-router gossip fanout', () => {
     });
   });
 
-  test('local entity_input delivery failures expose typed delivery metadata', async () => {
+  test('local entity_inputs delivery failures expose typed delivery metadata', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
@@ -784,7 +784,7 @@ describe('relay-router gossip fanout', () => {
 
     await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
     await relayRoute(config, wsA, {
-      type: 'entity_input',
+      type: 'entity_inputs',
       id: 'local-delivery-fail',
       from: RUNTIME_A,
       fromEncryptionPubKey: KEY_A,
@@ -856,12 +856,18 @@ describe('relay-router gossip fanout', () => {
       signerId: env.runtimeId,
       entityTxs: [],
     };
+    const envelope = {
+      sourceRuntimeId: RUNTIME_A,
+      sourceRuntimeHeight: 1,
+      sourceRuntimeTimestamp: 1,
+      entityInputs: [unknownEntityInput],
+    };
 
     await expect(handler(RUNTIME_A, {
-      type: 'entity_input',
+      type: 'entity_inputs',
       to: env.runtimeId,
       encrypted: true,
-      payload: encryptJSON(unknownEntityInput, deriveEncryptionKeyPair(env.runtimeSeed).publicKey),
+      payload: encryptJSON(envelope, deriveEncryptionKeyPair(env.runtimeSeed).publicKey),
     })).rejects.toThrow('NO_LOCAL_REPLICA');
 
     expect(store.pendingMessages.get(env.runtimeId)).toBeUndefined();

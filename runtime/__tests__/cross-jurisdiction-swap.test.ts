@@ -15,7 +15,7 @@ import { applyEntityInput, mergeEntityInputs } from '../entity/consensus/index';
 import { appendDefaultProposerCrossJMaterializations } from '../entity/cross-j-proposer-materialization';
 import {
   createEmptyEnv,
-  process,
+  prepareAtomicCrossJAccountInputs,
   submitCrossJurisdictionSwap,
 } from '../runtime';
 import { buildCrossJurisdictionSwapSubmission } from '../machine/jurisdiction-api';
@@ -64,7 +64,10 @@ import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '..
 import { signEntityHashes } from '../hanko/signing';
 import { queueCrossJurisdictionSourceDisputeFromTargetDispute } from '../entity/tx/j-events-htlc';
 import { applyMergedEntityInputs } from '../machine/entity-inputs';
-import type { RuntimeEntityRoutingDeps } from '../machine/entity-routing';
+import {
+  selectMatchedCrossJAccountInputPairs,
+  type RuntimeEntityRoutingDeps,
+} from '../machine/entity-routing';
 import {
   addReplica,
   addr,
@@ -80,6 +83,7 @@ import {
   prepareJEventInput,
 } from './helpers/cross-j';
 import { applyJEventRange, buildJEventRangeData } from './helpers/j-history';
+import { buildLocalEntityProfile } from '../networking/gossip-helper';
 import { LIMITS } from '../constants';
 
 const makeLocalCrossJRoutingDeps = (): RuntimeEntityRoutingDeps => ({
@@ -590,6 +594,10 @@ describe('cross-jurisdiction hashledger swap', () => {
     const targetUserState = makeState(targetUser, targetUserSigner, targetJ, targetHub);
     const sourceHubState = makeState(sourceHub, sourceHubSigner, sourceJ, sourceUser);
     const targetHubState = makeState(targetHub, targetHubSigner, targetJ, targetUser);
+    sourceUserState.profile.name = 'source user';
+    targetUserState.profile.name = 'target user';
+    sourceHubState.profile.name = 'source hub';
+    targetHubState.profile.name = 'target hub';
     sourceHubState.orderbookExt = {
       books: new Map(),
       orderPairs: new Map(),
@@ -603,18 +611,6 @@ describe('cross-jurisdiction hashledger swap', () => {
         supportedPairs: [],
       },
     };
-    userEnv.gossip = {
-      getProfiles: () => [
-        { entityId: sourceHub, metadata: { board: { validators: [{ signerId: sourceHubSigner }] } } },
-        { entityId: targetHub, metadata: { board: { validators: [{ signerId: targetHubSigner }] } } },
-      ],
-    } as typeof userEnv.gossip;
-    hubEnv.gossip = {
-      getProfiles: () => [
-        { entityId: sourceUser, metadata: { board: { validators: [{ signerId: sourceUserSigner }] } } },
-        { entityId: targetUser, metadata: { board: { validators: [{ signerId: targetUserSigner }] } } },
-      ],
-    } as typeof hubEnv.gossip;
     sourceUserState.prevFrameHash = 'genesis';
     targetUserState.prevFrameHash = 'genesis';
     sourceHubState.prevFrameHash = 'genesis';
@@ -623,6 +619,12 @@ describe('cross-jurisdiction hashledger swap', () => {
     addReplica(userEnv, targetUserState, targetUserSigner);
     addReplica(hubEnv, sourceHubState, sourceHubSigner);
     addReplica(hubEnv, targetHubState, targetHubSigner);
+    const sourceHubProfile = buildLocalEntityProfile(hubEnv, sourceHubState);
+    const targetHubProfile = buildLocalEntityProfile(hubEnv, targetHubState);
+    const sourceUserProfile = buildLocalEntityProfile(userEnv, sourceUserState);
+    const targetUserProfile = buildLocalEntityProfile(userEnv, targetUserState);
+    userEnv.gossip = { getProfiles: () => [sourceHubProfile, targetHubProfile] } as typeof userEnv.gossip;
+    hubEnv.gossip = { getProfiles: () => [sourceUserProfile, targetUserProfile] } as typeof hubEnv.gossip;
 
     const intent = withCanonicalCrossJurisdictionRouteHash({
       orderId: 'cross-j-ordered-account-cascade',
@@ -713,17 +715,67 @@ describe('cross-jurisdiction hashledger swap', () => {
       output.entityTxs?.some(tx => tx.type === 'consensusOutput'));
     if (!sourceProposalOutput) throw new Error('TEST_SOURCE_ACCOUNT_PROPOSAL_REQUIRED');
 
+    const ordinaryInput = {
+      entityId: sourceHub,
+      signerId: sourceHubSigner,
+      entityTxs: [],
+    };
+    expect(selectMatchedCrossJAccountInputPairs(hubEnv, [targetAckOutput]).inputs).toEqual([]);
+    expect(selectMatchedCrossJAccountInputPairs(hubEnv, [sourceProposalOutput]).inputs).toEqual([]);
+    expect(selectMatchedCrossJAccountInputPairs(hubEnv, [targetAckOutput, ordinaryInput]).inputs).toEqual([
+      ordinaryInput,
+    ]);
+    const pairedSelection = selectMatchedCrossJAccountInputPairs(
+      hubEnv,
+      [targetAckOutput, sourceProposalOutput, ordinaryInput],
+    );
+    expect(pairedSelection.inputs).toEqual([targetAckOutput, sourceProposalOutput, ordinaryInput]);
+    expect(pairedSelection.pairs).toHaveLength(1);
+
+    const targetFromFrame10 = {
+      ...targetAckOutput,
+      from: 'user-runtime',
+      sourceRuntimeFrame: { height: 10, timestamp: 10_000 },
+    };
+    const sourceFromFrame11 = {
+      ...sourceProposalOutput,
+      from: 'user-runtime',
+      sourceRuntimeFrame: { height: 11, timestamp: 10_100 },
+    };
+    expect(selectMatchedCrossJAccountInputPairs(
+      hubEnv,
+      [targetFromFrame10, sourceFromFrame11, ordinaryInput],
+    ).inputs).toEqual([ordinaryInput]);
+
     const replayBaseline = new Map(
       [...hubEnv.eReplicas].map(([key, replica]) => [key, cloneEntityReplica(replica)]),
     );
+    const sourceHeightBeforePreflight = hubEnv.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)!.state.height;
+    const targetHeightBeforePreflight = hubEnv.eReplicas.get(`${targetHub}:${targetHubSigner}`)!.state.height;
+    const atomicPrepared = await prepareAtomicCrossJAccountInputs(
+      hubEnv,
+      pairedSelection.inputs.slice(0, 2),
+      [],
+      false,
+      makeLocalCrossJRoutingDeps(),
+    );
+    expect(atomicPrepared.inputs).toHaveLength(2);
+    expect(atomicPrepared.pairs).toHaveLength(1);
+    expect(hubEnv.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)!.state.height)
+      .toBe(sourceHeightBeforePreflight);
+    expect(hubEnv.eReplicas.get(`${targetHub}:${targetHubSigner}`)!.state.height)
+      .toBe(targetHeightBeforePreflight);
     const pass = await applyMergedEntityInputs(
       hubEnv,
-      mergeEntityInputs([targetAckOutput, sourceProposalOutput]),
+      mergeEntityInputs(atomicPrepared.inputs),
       [],
       { isReplay: false, routingDeps: makeLocalCrossJRoutingDeps() },
     );
 
     const committedSource = hubEnv.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)?.state;
+    const committedSourceReplica = cloneEntityReplica(
+      hubEnv.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)!,
+    );
     expect(committedSource?.crossJurisdictionSwaps?.get(route.orderId)?.targetReceipt).toEqual(targetReceipt);
     expect(committedSource?.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('resting');
     expect(committedSource?.messages).toContain(`🌉 Cross-j swap ${route.orderId} committed by source Account`);
@@ -754,7 +806,9 @@ describe('cross-jurisdiction hashledger swap', () => {
       txTypes: ['registerCrossJurisdictionSwap', 'admitCrossJurisdictionBookOrder'],
     }]);
 
-    hubEnv.eReplicas = replayBaseline;
+    hubEnv.eReplicas = new Map(
+      [...replayBaseline].map(([key, replica]) => [key, cloneEntityReplica(replica)]),
+    );
     const replay = await applyMergedEntityInputs(
       hubEnv,
       pass.appliedEntityInputs,
@@ -772,6 +826,23 @@ describe('cross-jurisdiction hashledger swap', () => {
       [],
       { isReplay: false, routingDeps: makeLocalCrossJRoutingDeps() },
     )).rejects.toThrow('RUNTIME_CROSS_J_EXTERNAL_INGRESS_FORBIDDEN');
+
+    hubEnv.eReplicas = new Map(
+      [...replayBaseline].map(([key, replica]) => [key, cloneEntityReplica(replica)]),
+    );
+    hubEnv.eReplicas.set(`${sourceHub}:${sourceHubSigner}`, committedSourceReplica);
+    const sourceHeightBeforeAtomicRetry = committedSourceReplica.state.height;
+    const targetHeightBeforeAtomicRetry = hubEnv.eReplicas.get(`${targetHub}:${targetHubSigner}`)!.state.height;
+    const commonSourceFrame = { height: 10, timestamp: 10_000 };
+    const rejectedRetry = await prepareAtomicCrossJAccountInputs(hubEnv, [
+      { ...targetAckOutput, from: 'user-runtime', sourceRuntimeFrame: commonSourceFrame },
+      { ...sourceProposalOutput, from: 'user-runtime', sourceRuntimeFrame: commonSourceFrame },
+    ], [], false, makeLocalCrossJRoutingDeps());
+    expect(rejectedRetry.inputs).toEqual([]);
+    expect(hubEnv.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)!.state.height)
+      .toBe(sourceHeightBeforeAtomicRetry);
+    expect(hubEnv.eReplicas.get(`${targetHub}:${targetHubSigner}`)!.state.height)
+      .toBe(targetHeightBeforeAtomicRetry);
   });
 
   test('submitCrossJurisdictionSwap queues hub prepare, then prepare builds symmetric pull commitments', async () => {

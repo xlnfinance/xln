@@ -297,7 +297,7 @@ test('p2p shutdown cancels the deferred bootstrap poll', async () => {
   const p2p = new RuntimeP2P({
     env,
     runtimeId: RUNTIME_ID,
-    onEntityInput: () => {},
+    onEntityInputs: () => {},
     onGossipProfiles: () => {},
   });
   let bootstrapPolls = 0;
@@ -322,7 +322,7 @@ test('p2p shutdown aborts an in-flight retry delay', async () => {
   const p2p = new RuntimeP2P({
     env,
     runtimeId: RUNTIME_ID,
-    onEntityInput: () => {},
+    onEntityInputs: () => {},
     onGossipProfiles: () => {},
   });
   const internals = p2p as unknown as {
@@ -342,7 +342,7 @@ test('p2p shutdown drains every client before reporting aggregate failure', asyn
   const p2p = new RuntimeP2P({
     env,
     runtimeId: RUNTIME_ID,
-    onEntityInput: () => {},
+    onEntityInputs: () => {},
     onGossipProfiles: () => {},
   });
   let slowDone = false;
@@ -377,7 +377,7 @@ test('closing p2p rejects late direct-client creation', () => {
   const p2p = new RuntimeP2P({
     env,
     runtimeId: RUNTIME_ID,
-    onEntityInput: () => {},
+    onEntityInputs: () => {},
     onGossipProfiles: () => {},
   });
   const internals = p2p as unknown as {
@@ -459,7 +459,7 @@ test('synchronous runtime stop preserves actual P2P clients until awaited drain'
   const p2p = new RuntimeP2P({
     env,
     runtimeId: RUNTIME_ID,
-    onEntityInput: () => {},
+    onEntityInputs: () => {},
     onGossipProfiles: () => {},
   });
   let closeStarted = false;
