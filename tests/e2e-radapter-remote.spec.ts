@@ -8,6 +8,11 @@ import {
 import { openAccountWorkspaceTab } from './utils/e2e-account-workspace';
 import { resolveRuntimeImportAppUrl } from './utils/e2e-runtime-import';
 import { closeRuntimeContext } from './utils/e2e-runtime-shutdown';
+import { deriveSignerAddressSync } from '../runtime/account/crypto';
+import { decodeRuntimeAdapterRequest } from '../runtime/radapter/codec';
+import { signRuntimeAdapterServerIdentity } from '../runtime/radapter/server-identity-signer';
+import type { RuntimeAdapterRequest } from '../runtime/radapter/types';
+import type { Env } from '../runtime/types';
 
 const REMOTE_RUNTIME_IMPORT_STORAGE_KEY = 'xln-remote-runtime-imports';
 const REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY = 'xln-remote-runtime-import-last-result';
@@ -89,6 +94,30 @@ type RuntimeAdapterDebugSurface = {
 type E2EHealthSnapshot = Awaited<ReturnType<typeof ensureE2EBaseline>>;
 
 const installOneMillionRuntimeAdapterSocket = async (page: import('@playwright/test').Page): Promise<void> => {
+  const runtimeSeed = 'one-million-runtime-adapter-fixture';
+  const identityEnv = {
+    runtimeSeed,
+    runtimeId: deriveSignerAddressSync(runtimeSeed, '1').toLowerCase(),
+  } as Env;
+  await page.exposeFunction('__xlnDecodeOneMillionRuntimeAdapterRequest', (bytes: number[]) => {
+    const request = decodeRuntimeAdapterRequest(Uint8Array.from(bytes)) as RuntimeAdapterRequest;
+    return {
+      id: request.id,
+      op: request.op,
+      ...('path' in request ? { path: request.path } : {}),
+      ...(request.op === 'auth'
+        ? {
+            authPayload: {
+              authLevel: 'inspect' as const,
+              commandLaneKind: 'capability' as const,
+              currentHeight: 42,
+              nextCommandSequence: 1,
+              ...signRuntimeAdapterServerIdentity(identityEnv, request.challenge),
+            },
+          }
+        : {}),
+    };
+  });
   await page.addInitScript(() => {
     const targetWsUrl = 'ws://one-million-runtime.invalid/rpc';
     const NativeWebSocket = window.WebSocket;
@@ -216,26 +245,45 @@ const installOneMillionRuntimeAdapterSocket = async (page: import('@playwright/t
         }, 0);
       }
 
-      send(_raw: unknown): void {
+      send(raw: unknown): void {
         stats.sentCount += 1;
         stats.events.push(`send:${stats.sentCount}`);
-        const id = `r-${stats.sentCount}`;
-        const payload = stats.sentCount === 1
-          ? { authLevel: 'inspect', currentHeight: 42 }
-          : stats.sentCount === 2
-            ? head
-            : viewFrame;
-        const response = JSON.stringify({ v: 1, inReplyTo: id, ok: true, payload });
-        const byteLength = encoder.encode(response).byteLength;
-        stats.maxPayloadBytes = Math.max(stats.maxPayloadBytes, byteLength);
-        if (stats.sentCount === 3) {
-          stats.viewFrameBytes = byteLength;
-          stats.maxAccountItems = viewFrame.activeEntity.accounts.items.length;
+        if (!(raw instanceof ArrayBuffer) && !ArrayBuffer.isView(raw)) {
+          throw new Error(`ONE_MILLION_RADAPTER_BINARY_REQUEST_REQUIRED:${typeof raw}`);
         }
-        setTimeout(() => {
-          stats.events.push(`reply:${id}`);
-          this.onmessage?.({ data: response });
-        }, 0);
+        const bytes = raw instanceof ArrayBuffer
+          ? Array.from(new Uint8Array(raw))
+          : Array.from(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
+        const decodeRequest = (window as unknown as {
+          __xlnDecodeOneMillionRuntimeAdapterRequest: (value: number[]) => Promise<{
+            id: string;
+            op: string;
+            path?: string;
+            authPayload?: Record<string, unknown>;
+          }>;
+        }).__xlnDecodeOneMillionRuntimeAdapterRequest;
+        void decodeRequest(bytes).then((request) => {
+          const payload = request.op === 'auth'
+            ? request.authPayload
+            : request.path === 'head'
+              ? head
+              : request.path === 'entities'
+                ? viewFrame.entities
+                : request.path === 'activity'
+                  ? { events: [], nextCursor: null }
+                  : viewFrame;
+          const response = JSON.stringify({ v: 1, inReplyTo: request.id, ok: true, payload });
+          const byteLength = encoder.encode(response).byteLength;
+          stats.maxPayloadBytes = Math.max(stats.maxPayloadBytes, byteLength);
+          if (request.path === 'view-frame') {
+            stats.viewFrameBytes = byteLength;
+            stats.maxAccountItems = viewFrame.activeEntity.accounts.items.length;
+          }
+          setTimeout(() => {
+            stats.events.push(`reply:${request.id}:${request.op}:${request.path ?? ''}`);
+            this.onmessage?.({ data: response });
+          }, 0);
+        });
       }
 
       close(): void {
