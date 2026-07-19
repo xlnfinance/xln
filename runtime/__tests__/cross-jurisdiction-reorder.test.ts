@@ -87,8 +87,8 @@ describe('cross-jurisdiction reorder invariants', () => {
         targetReceipt,
       },
     });
-    const emittedTxTypes = committed.outputs.flatMap(output => output.entityTxs?.map(tx => tx.type) ?? []);
-    expect(emittedTxTypes).toEqual(['pullLock', 'placeSwapOffer']);
-    expect(committed.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('resting');
+    expect(committed.outputs).toEqual([]);
+    expect(committed.mempoolOps?.map(op => op.tx.type)).toEqual(['pull_lock', 'swap_offer']);
+    expect(committed.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('target_locked');
   });
 });

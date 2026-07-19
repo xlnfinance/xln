@@ -6,7 +6,7 @@ import {
   resolveAutoRebalanceFeePolicy,
 } from '../tx/handlers/request-collateral';
 import { normalizeAccountStateDomain, type AccountStateDomain } from '../state-root';
-import { prependAccountMempoolTxs } from '../mempool';
+import { assertAccountMempoolWithinLimit } from '../mempool';
 import {
   firstUsableContractAddress,
   requireDurableJurisdictionStack,
@@ -108,13 +108,28 @@ export function prependUniqueMempoolTxs(accountMachine: AccountMachine, txs: Acc
   const existing = new Set(accountMachine.mempool.map(txFingerprint));
   const missing: AccountTx[] = [];
   for (const tx of txs) {
+    // Each direct payment is one separately authorized intent even when its
+    // projected Account bytes match another payment exactly. Same-frame
+    // rollback is already idempotent by the authenticated frame hash.
+    if (tx.type === 'direct_payment') {
+      missing.push(tx);
+      continue;
+    }
     const fp = txFingerprint(tx);
     if (existing.has(fp)) continue;
     existing.add(fp);
     missing.push(tx);
   }
   if (missing.length > 0) {
-    prependAccountMempoolTxs(accountMachine, missing, 'accountConsensus:rollbackRestore');
+    // These txs move out of pendingFrame rather than entering from outside, so
+    // validate the resulting queue itself. The caller clears pendingFrame only
+    // after this atomic prepend succeeds.
+    const nextMempool = [...missing, ...accountMachine.mempool];
+    assertAccountMempoolWithinLimit(
+      { mempool: nextMempool },
+      'accountConsensus:rollbackRestore',
+    );
+    accountMachine.mempool = nextMempool;
   }
   return missing.length;
 }

@@ -1,7 +1,12 @@
 import { LIMITS } from '../constants';
 import type { AccountMachine, AccountTx } from '../types';
 
-type AccountMempoolSubject = Pick<AccountMachine, 'mempool'>;
+type AccountMempoolSubject = Pick<AccountMachine, 'mempool'> & {
+  pendingFrame?: AccountMachine['pendingFrame'] | undefined;
+};
+
+const pendingAccountTxCount = (account: AccountMempoolSubject): number =>
+  account.pendingFrame?.accountTxs.length ?? 0;
 
 export const assertAccountMempoolWithinLimit = (
   account: AccountMempoolSubject,
@@ -10,10 +15,13 @@ export const assertAccountMempoolWithinLimit = (
   if (!Array.isArray(account.mempool)) {
     throw new Error(`ACCOUNT_MEMPOOL_INVALID: context=${context}`);
   }
-  if (account.mempool.length <= LIMITS.ACCOUNT_MEMPOOL_SIZE) return;
+  const pending = pendingAccountTxCount(account);
+  const outstanding = account.mempool.length + pending;
+  if (outstanding <= LIMITS.ACCOUNT_MEMPOOL_SIZE) return;
   throw new Error(
     `ACCOUNT_MEMPOOL_LIMIT_EXCEEDED: context=${context} ` +
-      `mempool=${account.mempool.length} limit=${LIMITS.ACCOUNT_MEMPOOL_SIZE}`,
+      `mempool=${account.mempool.length} pending=${pending} ` +
+      `outstanding=${outstanding} limit=${LIMITS.ACCOUNT_MEMPOOL_SIZE}`,
   );
 };
 
@@ -26,11 +34,12 @@ const assertAccountMempoolAdmission = (
   if (!Number.isSafeInteger(incoming) || incoming < 0) {
     throw new Error(`ACCOUNT_MEMPOOL_INCOMING_INVALID: context=${context} incoming=${incoming}`);
   }
-  const next = account.mempool.length + incoming;
+  const pending = pendingAccountTxCount(account);
+  const next = account.mempool.length + pending + incoming;
   if (next <= LIMITS.ACCOUNT_MEMPOOL_SIZE) return;
   throw new Error(
     `ACCOUNT_MEMPOOL_LIMIT_EXCEEDED: context=${context} ` +
-      `existing=${account.mempool.length} incoming=${incoming} ` +
+      `mempool=${account.mempool.length} pending=${pending} incoming=${incoming} ` +
       `limit=${LIMITS.ACCOUNT_MEMPOOL_SIZE}`,
   );
 };

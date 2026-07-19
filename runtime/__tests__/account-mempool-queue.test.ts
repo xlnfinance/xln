@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
 import { queueAccountMempoolTx } from '../entity/consensus/account-mempool-queue';
+import { prependUniqueMempoolTxs } from '../account/consensus/helpers';
+import { LIMITS } from '../constants';
 import type { AccountMachine, AccountTx } from '../types';
 
 const PAYMENT: Extract<AccountTx, { type: 'direct_payment' }> = {
@@ -47,5 +49,26 @@ describe('account mempool multiplicity', () => {
 
     expect(queueAccountMempoolTx(account, structuredClone(lifecycle))).toBe(false);
     expect(account.mempool).toEqual([]);
+  });
+
+  test('counts pending and queued transactions under one outstanding limit', () => {
+    const account = accountWithPending(PAYMENT);
+    account.mempool = Array.from(
+      { length: LIMITS.ACCOUNT_MEMPOOL_SIZE - 1 },
+      () => structuredClone(PAYMENT),
+    );
+
+    expect(() => queueAccountMempoolTx(account, structuredClone(PAYMENT)))
+      .toThrow('ACCOUNT_MEMPOOL_LIMIT_EXCEEDED');
+    expect(account.mempool).toHaveLength(LIMITS.ACCOUNT_MEMPOOL_SIZE - 1);
+    expect(account.pendingFrame?.accountTxs).toHaveLength(1);
+  });
+
+  test('rollback restores identical direct payments with their full multiplicity', () => {
+    const account = accountWithPending(PAYMENT) as AccountMachine;
+    account.mempool = [structuredClone(PAYMENT)];
+
+    expect(prependUniqueMempoolTxs(account, [structuredClone(PAYMENT)])).toBe(1);
+    expect(account.mempool).toEqual([PAYMENT, PAYMENT]);
   });
 });

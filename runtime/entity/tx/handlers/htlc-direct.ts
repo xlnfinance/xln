@@ -204,13 +204,18 @@ export const handleRollbackTimedOutFramesEntityTx = (
     if (!accountMachine?.pendingFrame) continue;
     if (accountMachine.pendingFrame.height !== frameHeight) continue;
 
-    const retryTxs = accountMachine.pendingFrame.accountTxs.filter((tx) => tx.type !== 'htlc_lock');
+    const pendingFrame = accountMachine.pendingFrame;
+    const retryTxs = pendingFrame.accountTxs.filter((tx) => tx.type !== 'htlc_lock');
+    delete accountMachine.pendingFrame;
+    delete accountMachine.pendingAccountInput;
+    delete accountMachine.pendingAccountInputSignerId;
+    delete accountMachine.clonedForValidation;
     appendAccountMempoolTxs(
       accountMachine,
       retryTxs,
       `rollbackTimedOutFrames:${counterpartyId}:${frameHeight}`,
     );
-    for (const tx of accountMachine.pendingFrame.accountTxs) {
+    for (const tx of pendingFrame.accountTxs) {
       if (tx.type === 'htlc_lock') {
         const hashlock = tx.data.hashlock;
         const route = newState.htlcRoutes.get(hashlock);
@@ -231,10 +236,6 @@ export const handleRollbackTimedOutFramesEntityTx = (
       }
     }
 
-    delete accountMachine.pendingFrame;
-    delete accountMachine.pendingAccountInput;
-    delete accountMachine.pendingAccountInputSignerId;
-    delete accountMachine.clonedForValidation;
   }
 
   return { newState, outputs, mempoolOps };

@@ -78,7 +78,12 @@ export const validateCrossJurisdictionRouteTransition = (
     const preparedIntentCommit =
       existing.status === 'intent' &&
       Boolean(next.sourcePull && next.targetPull) &&
-      (next.status === 'resting' || next.status === 'target_prepared' || next.status === 'source_committed') &&
+      (
+        next.status === 'target_locked' ||
+        next.status === 'resting' ||
+        next.status === 'target_prepared' ||
+        next.status === 'source_committed'
+      ) &&
       sameCrossJurisdictionIntentTerms(existing, next);
     if (preparedIntentCommit) return null;
     return 'route hash mismatch';
