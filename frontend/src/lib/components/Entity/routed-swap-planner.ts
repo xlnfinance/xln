@@ -217,10 +217,8 @@ export function buildCrossJurisdictionHop(input: {
   ) as CrossMarketView;
   const bookHubId = deriveCanonicalCrossJurisdictionBookOwnerForLegs(
     input.sourceJurisdictionRef,
-    input.tokenId,
     sourceHubId,
     input.targetJurisdictionRef,
-    input.tokenId,
     targetHubId,
   );
   return {

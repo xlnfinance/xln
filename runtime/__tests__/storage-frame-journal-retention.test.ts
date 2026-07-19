@@ -730,6 +730,7 @@ describe('storage frame journal retention', () => {
       runtimeId: `0x${'71'.repeat(20)}`,
       entityId: `0x${'72'.repeat(32)}`,
       signerId: `0x${'73'.repeat(20)}`,
+      sourceRuntimeFrame: { height: env.height, timestamp: env.timestamp },
       proposedFrame: {
         height: 22,
         parentFrameHash: `0x${'74'.repeat(32)}`,

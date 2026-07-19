@@ -51,11 +51,16 @@ const validateRuntimeConfig = (value: unknown, code: string): void => {
   if (config['storage'] !== undefined) validateStorageConfig(config['storage'], `${code}_STORAGE`);
 };
 
-const validateRoutedEntityInput = (value: unknown, code: string): RoutedEntityInput => {
+const validateRoutedEntityInput = (
+  value: unknown,
+  code: string,
+  options: { allowSourceRuntimeFrame?: boolean } = {},
+): RoutedEntityInput => {
   const input = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(input, ['entityId', 'signerId'], [
     'runtimeId', 'from', 'certifiedOutputIdentity', 'entityTxs', 'proposedFrame',
     'hashPrecommitFrame', 'hashPrecommits', 'jPrefixAttestations', 'leaderTimeoutVote',
+    ...(options.allowSourceRuntimeFrame ? ['sourceRuntimeFrame'] : []),
   ], `${code}_FIELDS`);
   validateEntityInput(input);
   for (const field of ['entityId', 'signerId', 'runtimeId', 'from']) {
@@ -67,6 +72,17 @@ const validateRoutedEntityInput = (value: unknown, code: string): RoutedEntityIn
     requireString(identity['lane'], `${code}_OUTPUT_IDENTITY_LANE`);
     if (typeof identity['sequence'] !== 'bigint' || identity['sequence'] < 0n) throw new Error(`${code}_OUTPUT_IDENTITY_SEQUENCE`);
     requireString(identity['semanticHash'], `${code}_OUTPUT_IDENTITY_HASH`);
+  }
+  if (input['sourceRuntimeFrame'] !== undefined) {
+    const frame = requireBoundaryRecord(input['sourceRuntimeFrame'], `${code}_SOURCE_RUNTIME_FRAME`);
+    requireExactBoundaryKeys(
+      frame,
+      ['height', 'timestamp'],
+      [],
+      `${code}_SOURCE_RUNTIME_FRAME_FIELDS`,
+    );
+    requireBoundaryInteger(frame['height'], `${code}_SOURCE_RUNTIME_FRAME_HEIGHT`);
+    requireBoundaryInteger(frame['timestamp'], `${code}_SOURCE_RUNTIME_FRAME_TIMESTAMP`);
   }
   if (input['entityTxs'] !== undefined) {
     validateEntityTxs(input['entityTxs'], `${code}_ENTITY_TX`);
@@ -93,8 +109,12 @@ const validateRoutedEntityInput = (value: unknown, code: string): RoutedEntityIn
   return input as unknown as RoutedEntityInput;
 };
 
-const validateRoutedEntityInputs = (value: unknown, code: string): RoutedEntityInput[] =>
-  requireArray(value, code).map((entry, index) => validateRoutedEntityInput(entry, `${code}_${index}`));
+const validateRoutedEntityInputs = (
+  value: unknown,
+  code: string,
+  options: { allowSourceRuntimeFrame?: boolean } = {},
+): RoutedEntityInput[] => requireArray(value, code)
+  .map((entry, index) => validateRoutedEntityInput(entry, `${code}_${index}`, options));
 
 const validateRuntimeInput = (value: unknown, code: string): RuntimeInput => {
   const input = validateRuntimeInputEnvelope(value, code);
@@ -123,8 +143,15 @@ export const validateDurableRuntimeMachineSnapshot = (
   if (snapshot['runtimeConfig'] !== undefined) validateRuntimeConfig(snapshot['runtimeConfig'], `${code}_RUNTIME_CONFIG`);
   if (snapshot['runtimeState'] !== undefined) validateDurableRuntimeState(snapshot['runtimeState'], `${code}_RUNTIME_STATE`);
   validateRuntimeInput(snapshot['runtimeInput'], `${code}_RUNTIME_INPUT`);
-  for (const field of ['pendingOutputs', 'networkInbox', 'pendingNetworkOutputs']) {
+  for (const field of ['pendingOutputs', 'networkInbox']) {
     if (snapshot[field] !== undefined) validateRoutedEntityInputs(snapshot[field], `${code}_${field.toUpperCase()}`);
+  }
+  if (snapshot['pendingNetworkOutputs'] !== undefined) {
+    validateRoutedEntityInputs(
+      snapshot['pendingNetworkOutputs'],
+      `${code}_PENDINGNETWORKOUTPUTS`,
+      { allowSourceRuntimeFrame: true },
+    );
   }
   validateJReplicas(snapshot['jReplicas'], `${code}_J_REPLICAS`);
   return cloneIsolatedRuntimeSnapshot(snapshot);

@@ -324,10 +324,8 @@
     if (!sourceJurisdictionRef || !selectedCrossTarget.targetJurisdictionRef) return sourceHubId;
     return deriveCanonicalCrossJurisdictionBookOwnerForLegs(
       sourceJurisdictionRef,
-      giveToken,
       sourceHubId,
       selectedCrossTarget.targetJurisdictionRef,
-      wantToken,
       selectedCrossTarget.targetHubEntityId,
     );
   })();
@@ -3018,10 +3016,8 @@
         }
         const bookOwnerEntityId = deriveCanonicalCrossJurisdictionBookOwnerForLegs(
           sourceJurisdictionRef,
-          giveToken,
           resolvedCounterparty,
           targetRoute.targetJurisdictionRef,
-          wantToken,
           targetRoute.targetHubEntityId,
         );
         const sourceHubSignerId = resolveSignerId(resolvedCounterparty);

@@ -1,8 +1,19 @@
 import { defineConfig, devices } from '@playwright/test';
+import { existsSync } from 'node:fs';
 
 delete process.env['NO_COLOR'];
 
-const PW_BASE_URL = process.env['PW_BASE_URL'] || 'https://localhost:8080';
+const devHttpsCertificatePairs = [
+  ['frontend/localhost+3-key.pem', 'frontend/localhost+3.pem'],
+  ['frontend/localhost+2-key.pem', 'frontend/localhost+2.pem'],
+  ['192.168.1.23+2-key.pem', '192.168.1.23+2.pem'],
+] as const;
+const defaultPwBaseUrl = devHttpsCertificatePairs.some(
+  ([keyPath, certPath]) => existsSync(keyPath) && existsSync(certPath),
+) ? 'https://localhost:8080' : 'http://localhost:8080';
+const PW_BASE_URL = process.env['PW_BASE_URL'] || (
+  defaultPwBaseUrl
+);
 const PW_WORKERS_RAW = Number(process.env['PW_WORKERS'] || '1');
 const PW_WORKERS = Number.isFinite(PW_WORKERS_RAW) && PW_WORKERS_RAW > 0 ? Math.floor(PW_WORKERS_RAW) : 1;
 const PW_SKIP_WEBSERVER = process.env['PW_SKIP_WEBSERVER'] === '1';
