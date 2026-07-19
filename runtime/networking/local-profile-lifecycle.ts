@@ -99,14 +99,32 @@ export const buildLocalProfileCertificationInput = (
 };
 
 /** Collect due profile certifications even when no P2P transport is running. */
-export const collectDueLocalProfileCertificationInputs = (env: Env): EntityInput[] => {
-  const announcements = collectLocalProfileEncryptionAnnouncements(env);
-  const localEntityIds = new Set(announcements.map(({ board }) => normalize(board.entityId)));
+export const collectDueLocalProfileCertificationInputs = (
+  env: Env,
+  candidateEntityIds?: ReadonlySet<string>,
+): EntityInput[] => {
+  const candidates = candidateEntityIds
+    ? new Set([...candidateEntityIds].map(normalize))
+    : undefined;
+  const localEntityIds = new Set(
+    [...env.eReplicas.values()]
+      .filter((replica) => (!candidates || candidates.has(normalize(replica.entityId))))
+      .filter((replica) => hasLocalSigner(env, replica.signerId))
+      .map((replica) => normalize(replica.entityId)),
+  );
   const inputs: EntityInput[] = [];
   for (const entityId of [...localEntityIds].sort(compareStableText)) {
     const state = entityReplicas(env, entityId)[0]?.state;
     if (!state) continue;
-    const manifest = getCompleteProfileEncryptionManifest(env, state);
+    // A persisted manifest already contains the complete signed validator-key
+    // board. Re-signing and re-merging every local attestation on each Account
+    // update was a pure CPU tax; only incomplete initial certification needs
+    // fresh local announcements.
+    let manifest = getCompleteProfileEncryptionManifest(env, state);
+    if (!manifest) {
+      collectLocalProfileEncryptionAnnouncements(env, new Set([entityId]));
+      manifest = getCompleteProfileEncryptionManifest(env, state);
+    }
     if (!manifest) continue;
     const input = buildLocalProfileCertificationInput(env, entityId, manifest.attestations);
     if (input) inputs.push(input);
@@ -124,11 +142,27 @@ export const announceCertifiedLocalProfiles = async (
 ): Promise<number> => {
   let announced = 0;
   for (const entityId of [...new Set(entityIds.map(normalize))].sort(compareStableText)) {
+    const existing = env.gossip.getProfiles().find((profile) => normalize(profile.entityId) === entityId);
     const candidates = entityReplicas(env, entityId)
       .filter((replica) => hasLocalSigner(env, replica.signerId))
       .sort((left, right) => compareStableText(normalize(left.signerId), normalize(right.signerId)));
     for (const replica of candidates) {
       if (!replica.state.profileEncryptionManifest) continue;
+      const latestProfileWitness = [...(replica.hankoWitness?.entries() ?? [])]
+        .filter(([, witness]) => witness.type === 'profile')
+        .sort((left, right) => (
+          right[1].entityHeight - left[1].entityHeight
+          || right[1].createdAt - left[1].createdAt
+          || compareStableText(left[0], right[0])
+        ))[0];
+      if (
+        existing
+        && latestProfileWitness
+        && computeProfileHash(existing) === latestProfileWitness[0]
+        && existing.metadata.profileHanko === latestProfileWitness[1].hanko
+      ) {
+        break;
+      }
       const profile = buildLocalEntityProfile(env, replica.state);
       const witness = replica.hankoWitness?.get(computeProfileHash(profile));
       if (!witness || witness.type !== 'profile') continue;

@@ -3262,6 +3262,117 @@ describe('audit fail-fast regressions', () => {
     expect(account.mempool).toEqual([]);
   });
 
+  test('same-chain offers match and queue both resolves in one hub Entity frame', async () => {
+    const seed = 'same-chain-single-hub-frame';
+    const env = createEmptyEnv(seed);
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const hub = registerLazySigner(seed, 'hub');
+    const maker = registerLazySigner(seed, 'maker');
+    const taker = registerLazySigner(seed, 'taker');
+    for (const identity of [hub, maker, taker]) {
+      attachSigningReplica(env, identity.entityId, identity.signerId);
+    }
+
+    const fundedAccount = (proposerId: string, counterpartyId: string): AccountMachine => {
+      const leftEntity = isLeftEntity(proposerId, counterpartyId) ? proposerId : counterpartyId;
+      const rightEntity = leftEntity === proposerId ? counterpartyId : proposerId;
+      const account = makeProposalAccount([], leftEntity, rightEntity);
+      account.proofHeader = { fromEntity: proposerId, toEntity: counterpartyId, nextProofNonce: 0 };
+      for (const tokenId of [1, 2]) {
+        account.deltas.set(tokenId, {
+          ...createDefaultDelta(tokenId),
+          leftCreditLimit: 10n ** 24n,
+          rightCreditLimit: 10n ** 24n,
+        });
+      }
+      return account;
+    };
+
+    const proposalFor = async (
+      identity: typeof maker,
+      tx: Extract<AccountTx, { type: 'swap_offer' }>,
+    ): Promise<{ input: AccountInput; hubAccount: AccountMachine }> => {
+      const proposerAccount = fundedAccount(identity.entityId, hub.entityId);
+      proposerAccount.mempool.push(tx);
+      const proposed = await proposeAccountFrame(env, proposerAccount, env.timestamp, 0);
+      if (!proposed.success || !proposed.accountInput) {
+        throw new Error(`SAME_CHAIN_PROPOSAL_FAILED:${proposed.error || 'missing input'}`);
+      }
+      return {
+        input: proposed.accountInput,
+        hubAccount: fundedAccount(hub.entityId, identity.entityId),
+      };
+    };
+
+    const baseAmount = SWAP_LOT_SCALE;
+    const quoteAmount = 1_000_000n;
+    const makerOffer = await proposalFor(maker, {
+      type: 'swap_offer',
+      data: {
+        offerId: 'same-frame-maker',
+        giveTokenId: 2,
+        giveAmount: baseAmount,
+        wantTokenId: 1,
+        wantAmount: quoteAmount,
+        minFillRatio: 0,
+      },
+    });
+    const takerOffer = await proposalFor(taker, {
+      type: 'swap_offer',
+      data: {
+        offerId: 'same-frame-taker',
+        giveTokenId: 1,
+        giveAmount: quoteAmount,
+        wantTokenId: 2,
+        wantAmount: baseAmount,
+        minFillRatio: 0,
+      },
+    });
+
+    const hubState = makeEntityState(hub.entityId);
+    hubState.config = makeSingleSignerConfigFor(hub.signerId);
+    hubState.profile.isHub = true;
+    hubState.accounts.set(maker.entityId, makerOffer.hubAccount);
+    hubState.accounts.set(taker.entityId, takerOffer.hubAccount);
+    hubState.orderbookExt = {
+      books: new Map(),
+      orderPairs: new Map(),
+      referrals: new Map(),
+      hubProfile: {
+        entityId: hub.entityId,
+        name: 'Single-frame Hub',
+        minTradeSize: 0n,
+        spreadDistribution: {
+          makerBps: 0,
+          takerBps: 10_000,
+          hubBps: 0,
+          makerReferrerBps: 0,
+          takerReferrerBps: 0,
+        },
+        referenceTokenId: 1,
+        supportedPairs: ['1/2'],
+      },
+    };
+
+    const result = await applyEntityFrame(env, hubState, [
+      { type: 'accountInput', data: makerOffer.input },
+      { type: 'accountInput', data: takerOffer.input },
+    ], env.timestamp);
+
+    for (const accountId of [maker.entityId, taker.entityId]) {
+      const pending = result.newState.accounts.get(accountId)?.pendingFrame;
+      expect(pending?.accountTxs.some((tx) => tx.type === 'swap_resolve')).toBe(true);
+    }
+    expect(result.outputs.filter((output) => (
+      output.entityTxs?.some((tx) => (
+        tx.type === 'accountInput'
+        && 'proposal' in tx.data
+        && tx.data.proposal.frame.accountTxs.some((accountTx) => accountTx.type === 'swap_resolve')
+      ))
+    ))).toHaveLength(2);
+  });
+
   test('entity frame commits mark the entity core doc dirty for storage replay', async () => {
     const seed = 'entity-frame-storage-mark seed alpha beta gamma';
     const env = createEmptyEnv(seed);

@@ -75,8 +75,9 @@ import {
   keyAccountJClaimNodePrefix,
   keySnapshotReplicaMetaPrefix,
 } from './keys';
-import { buildStorageReplicaMetaCommitment } from './replicas';
+import { buildStorageReplicaMetaCommitmentFromCheckpointPlan } from './replicas';
 import { createStructuredLogger } from '../infra/logger';
+import { cumulativeMarksToDurations } from '../infra/perf-profile';
 import type {
   CertifiedBoardPatriciaNode,
   EntityState,
@@ -824,8 +825,11 @@ export type StorageFrameSaveResult = {
 
 export type StoragePersistencePerf = {
   open: number;
+  planning: number;
+  planningStages: Record<string, number>;
   diff: number;
   prepare: number;
+  prepareStages: Record<string, number>;
   authoritativeWrite: number;
   currentCacheWrite: number;
   postCommit: number;
@@ -876,17 +880,26 @@ export const saveRuntimeFrameToStorage = async (options: {
   options.onPersistenceProgress?.('opened');
   const openMs = options.getPerfMs() - openStartedAt;
 
+  const planningStartedAt = options.getPerfMs();
+  const planningMarks: Record<string, number> = {};
+  const checkpointPlanning = (label: string): void => {
+    planningMarks[label] = options.getPerfMs() - planningStartedAt;
+  };
   const appliedRuntimeInput = options.currentFrameInput ?? { runtimeTxs: [], entityInputs: [] };
   const frameOverlayRecords = Array.isArray(state.currentStorageOverlayMarks)
     ? state.currentStorageOverlayMarks.map((record) => ({ ...record }))
     : [];
   const overlayRecords = mergeOverlayRecordsIntoEnv(options.env, []);
   const frameTouched = storageRefsFromOverlay(frameOverlayRecords);
+  checkpointPlanning('overlay');
   const lineagePlan = rebaseCertifiedEntityLineageAtRuntimeCheckpoint(
     options.env,
     buildCertifiedEntityLineagePlan(options.env),
   );
   const replicaLookup = lineagePlan.lookup;
+  checkpointPlanning('lineage');
+  const planningMs = options.getPerfMs() - planningStartedAt;
+  const planningStages = cumulativeMarksToDurations(planningMarks, planningMs);
   const diffBuildStartedAt = options.getPerfMs();
   const framePuts = buildDocPuts(options.env, frameTouched, replicaLookup);
   const frameBookDels = buildBookDeletionsFromOverlay(frameOverlayRecords);
@@ -895,6 +908,10 @@ export const saveRuntimeFrameToStorage = async (options: {
   const diffBuildMs = options.getPerfMs() - diffBuildStartedAt;
 
   const writeStartedAt = options.getPerfMs();
+  const prepareMarks: Record<string, number> = {};
+  const checkpointPrepare = (label: string): void => {
+    prepareMarks[label] = options.getPerfMs() - writeStartedAt;
+  };
   const head = await readHead(historyDb, config);
   if (options.stopStaleWriterOnHeadAhead) {
     if (head.latestHeight > options.env.height) {
@@ -928,6 +945,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   }
   const prevFrameHash = previousFrame ? previousFrame.frameHash ?? computeStorageFrameHash(previousFrame) : ZERO_FRAME_HASH;
   options.onPersistenceProgress?.('history-read');
+  checkpointPrepare('historyRead');
   const frameKey = keyFrame(options.env.height);
   const diffKey = keyDiff(options.env.height);
   const diffBuffer = encodeBuffer(diff);
@@ -984,6 +1002,7 @@ export const saveRuntimeFrameToStorage = async (options: {
     .filter((ref): ref is Extract<StorageDocRef, { family: 'account' }> => ref.family === 'account')
     .map((ref) => ({ entityId: ref.entityId, counterpartyId: ref.counterpartyId }));
   const touchedBookEntities = Array.from(frameTouched.touchedBookEntities.values()).sort();
+  checkpointPrepare('pendingNodes');
 
   const materializedTouched = shouldMaterialize
     ? storageRefsFromOverlay(overlayRecords)
@@ -1006,6 +1025,7 @@ export const saveRuntimeFrameToStorage = async (options: {
       })
     : null;
   options.onPersistenceProgress?.('materialized-hashes-built');
+  checkpointPrepare('materializedHashes');
   const runtimeMachine = buildDurableRuntimeMachineSnapshot(options.env, {
     pendingNetworkOutputs: options.currentFrameOutputs ?? options.env.pendingNetworkOutputs ?? [],
   });
@@ -1020,6 +1040,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   if (!runtimeMachineBeforeApply) {
     throw new Error(`STORAGE_PRE_APPLY_RUNTIME_MACHINE_REQUIRED:height=${options.env.height}`);
   }
+  checkpointPrepare('runtimeMachine');
   const canonicalHashEnabled = config.canonicalHashPeriodFrames > 0;
   const runtimeStateHashes = prepareStorageCanonicalStateHashes(
     options.env,
@@ -1029,19 +1050,23 @@ export const saveRuntimeFrameToStorage = async (options: {
     runtimeMachine,
   );
   options.onPersistenceProgress?.('canonical-hashes-built');
+  checkpointPrepare('canonicalHashes');
   const canonicalHashes = canonicalHashEnabled ? runtimeStateHashes : null;
-  const replicaMetaCommitment = buildStorageReplicaMetaCommitment(options.env, lineagePlan);
+  const replicaMetaCommitment = buildStorageReplicaMetaCommitmentFromCheckpointPlan(options.env, lineagePlan);
   const replicaMetaEntries = replicaMetaCommitment.entries;
   const liveReplicaMetaKeys = new Set(replicaMetaEntries.map(entry => entry.key.toString('hex')));
+  checkpointPrepare('replicaCommitment');
   const staleHistoryReplicaMetaKeys: Buffer[] = [];
   for await (const key of iterateKeys(historyDb, { prefix: keyLiveReplicaMetaPrefix() })) {
     if (!liveReplicaMetaKeys.has(key.toString('hex'))) staleHistoryReplicaMetaKeys.push(Buffer.from(key));
   }
+  checkpointPrepare('replicaHistoryScan');
   const staleCurrentReplicaMetaKeys: Buffer[] = [];
   for await (const key of iterateKeys(db, { prefix: keyLiveReplicaMetaPrefix() })) {
     if (!liveReplicaMetaKeys.has(key.toString('hex'))) staleCurrentReplicaMetaKeys.push(Buffer.from(key));
   }
   options.onPersistenceProgress?.('replica-metadata-read');
+  checkpointPrepare('replicaCurrentScan');
   const frameRecordBase: StorageFrameRecord = {
     height: options.env.height,
     timestamp: options.env.timestamp,
@@ -1095,6 +1120,7 @@ export const saveRuntimeFrameToStorage = async (options: {
 
   const frameBuffer = encodeBuffer(frameRecord);
   options.onPersistenceProgress?.('frame-encoded');
+  checkpointPrepare('frameEncode');
   const projectedReplayBytes =
     head.retainedHistoryBytes +
     frameKey.byteLength +
@@ -1203,8 +1229,10 @@ export const saveRuntimeFrameToStorage = async (options: {
   };
   historyBatch.put(KEY_HEAD, encodeBuffer(nextHead));
   batch.put(KEY_HEAD, encodeBuffer(nextHead));
+  checkpointPrepare('batchPlan');
   const authoritativeWriteStartedAt = options.getPerfMs();
   const prepareMs = authoritativeWriteStartedAt - writeStartedAt;
+  const prepareStages = cumulativeMarksToDurations(prepareMarks, prepareMs);
   options.onPersistenceProgress?.('authoritative-write-start');
   await writeBatch(historyBatch, { sync: true });
   const authoritativeWriteMs = options.getPerfMs() - authoritativeWriteStartedAt;
@@ -1351,8 +1379,11 @@ export const saveRuntimeFrameToStorage = async (options: {
     String(process.env['XLN_STORAGE_VERBOSE'] ?? '').toLowerCase() === 'true';
   const persistencePerfMs: StoragePersistencePerf = {
     open: openMs,
+    planning: planningMs,
+    planningStages,
     diff: diffBuildMs,
     prepare: prepareMs,
+    prepareStages,
     authoritativeWrite: authoritativeWriteMs,
     currentCacheWrite: currentCacheWriteMs,
     postCommit: postCommitMs,
@@ -1385,8 +1416,17 @@ export const saveRuntimeFrameToStorage = async (options: {
       epochDbRotated,
       perfMs: {
         open: options.formatPerfMs(persistencePerfMs.open),
+        planning: options.formatPerfMs(persistencePerfMs.planning),
+        planningStages: Object.fromEntries(
+          Object.entries(persistencePerfMs.planningStages)
+            .map(([stage, durationMs]) => [stage, options.formatPerfMs(durationMs)]),
+        ),
         diff: options.formatPerfMs(persistencePerfMs.diff),
         prepare: options.formatPerfMs(persistencePerfMs.prepare),
+        prepareStages: Object.fromEntries(
+          Object.entries(persistencePerfMs.prepareStages)
+            .map(([stage, durationMs]) => [stage, options.formatPerfMs(durationMs)]),
+        ),
         authoritativeWrite: options.formatPerfMs(persistencePerfMs.authoritativeWrite),
         currentCacheWrite: options.formatPerfMs(persistencePerfMs.currentCacheWrite),
         postCommit: options.formatPerfMs(persistencePerfMs.postCommit),

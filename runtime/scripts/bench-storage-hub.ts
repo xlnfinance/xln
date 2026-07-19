@@ -21,7 +21,7 @@ import {
 import { dbRootPath } from '../machine/platform';
 import type { AccountMachine, EntityReplica, EntityState, EntityTx, Env, JReplica, RoutedEntityInput } from '../types';
 import { getPerfMs } from '../utils';
-import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
+import { buildDurableRuntimeMachineSnapshot, buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
 
 type Participant = {
   entityId: string;
@@ -465,9 +465,12 @@ const importParticipants = async (
       })),
       entityInputs: [],
     } as unknown as Env['runtimeInput'];
+    const runtimeMachineBeforeApply = buildDurableRuntimeMachineSnapshot(env, {
+      pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
+    });
     await applyRuntimeInput(env, runtimeInput);
     if (env.runtimeConfig?.storage?.enabled === true || env.runtimeState?.persistencePaused !== true) {
-      await saveEnvToDB(env, runtimeInput);
+      await saveEnvToDB(env, runtimeInput, undefined, runtimeMachineBeforeApply);
     }
   }
 };
@@ -532,6 +535,7 @@ async function main() {
   const dbRoot = process.env['XLN_DB_PATH'] || requestedDbRoot;
 
   const runtimeId = deriveSignerAddressSync(seed, '900000').toLowerCase();
+  registerSignerKey(seed, runtimeId, deriveSignerKeySync(seed, '900000'));
   const dbPath = join(dbRoot, runtimeId);
 
   if (persist) {
@@ -545,9 +549,6 @@ async function main() {
   env.quietRuntimeLogs = true;
   env.scenarioMode = true;
   env.timestamp = 1;
-  env.gossip.announce = () => {};
-  env.gossip.getProfiles = () => [];
-  env.gossip.getHubs = () => [];
   env.runtimeConfig = {
     ...(env.runtimeConfig || {}),
     snapshotIntervalFrames: snapshotInterval,
@@ -586,8 +587,10 @@ async function main() {
     entityProviderAddress: jurisdiction.entityProviderAddress,
     chainId: jurisdiction.chainId,
     contracts: {
+      account: '0x000000000000000000000000000000000000ac01',
       depository: jurisdiction.depositoryAddress,
       entityProvider: jurisdiction.entityProviderAddress,
+      deltaTransformer: '0x000000000000000000000000000000000000de17',
     },
   };
   env.jReplicas.set(jurisdiction.name, benchJReplica);

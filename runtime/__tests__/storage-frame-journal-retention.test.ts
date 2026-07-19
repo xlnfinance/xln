@@ -441,7 +441,29 @@ describe('storage frame journal retention', () => {
     env.timestamp = 1_000;
     env.quietRuntimeLogs = true;
 
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    const firstSave = await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    const persistence = firstSave.persistencePerfMs;
+    expect(persistence).toBeTruthy();
+    expect(Object.keys(persistence?.planningStages ?? {})).toEqual(['overlay', 'lineage', 'remainder']);
+    expect(Object.keys(persistence?.prepareStages ?? {})).toEqual([
+      'historyRead',
+      'pendingNodes',
+      'materializedHashes',
+      'runtimeMachine',
+      'canonicalHashes',
+      'replicaCommitment',
+      'replicaHistoryScan',
+      'replicaCurrentScan',
+      'frameEncode',
+      'batchPlan',
+      'remainder',
+    ]);
+    const prepareStageTotal = Object.values(persistence?.prepareStages ?? {})
+      .reduce((sum, durationMs) => sum + durationMs, 0);
+    expect(prepareStageTotal).toBeLessThanOrEqual((persistence?.prepare ?? 0) + 0.01);
+    const planningStageTotal = Object.values(persistence?.planningStages ?? {})
+      .reduce((sum, durationMs) => sum + durationMs, 0);
+    expect(planningStageTotal).toBeLessThanOrEqual((persistence?.planning ?? 0) + 0.01);
     await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [])).rejects.toThrow(
       'STORAGE_APPEND_INVARIANT_FAILED',
     );

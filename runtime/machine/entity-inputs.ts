@@ -446,6 +446,20 @@ const didCommitEntityFrame = (
   return true;
 };
 
+const preserveAppliedRoutedProvenance = (
+  appliedInput: EntityInput,
+  routedInput: RoutedEntityInput,
+  signerId: string,
+): RoutedEntityInput => ({
+  ...appliedInput,
+  signerId,
+  ...(routedInput.runtimeId !== undefined ? { runtimeId: routedInput.runtimeId } : {}),
+  ...(routedInput.from !== undefined ? { from: routedInput.from } : {}),
+  ...(routedInput.sourceRuntimeFrame
+    ? { sourceRuntimeFrame: { ...routedInput.sourceRuntimeFrame } }
+    : {}),
+});
+
 const applyEntityInputToReplica = async (
   env: Env,
   entityReplica: EntityReplica,
@@ -498,10 +512,16 @@ const applyEntityInputToReplica = async (
       ? { trustedLocalRuntimeProtocol: 'cross-j' }
       : undefined,
   );
-  const appliedInput: RoutedEntityInput = {
-    ...(canonicalAppliedInput ?? normalizedInput),
-    signerId: actualSignerId,
-  };
+  // Consensus may canonicalize the applied body (for example, signing a local
+  // leader vote), while Runtime routing provenance must remain byte-identical
+  // to the authenticated envelope. Dropping the origin here makes WAL replay
+  // merge inputs that live execution deliberately kept in separate origin
+  // lanes, changing Entity frame partitioning and hashes after restart.
+  const appliedInput = preserveAppliedRoutedProvenance(
+    canonicalAppliedInput ?? normalizedInput,
+    entityInput,
+    actualSignerId,
+  );
   const committed = isCommittedEntityInput(outcome);
   const nextReplica: EntityReplica = committed ? {
     ...workingReplica,

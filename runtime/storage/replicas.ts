@@ -28,8 +28,23 @@ export const buildStorageReplicaMetaCommitment = (
 ): {
   entries: Array<{ key: Buffer; value: Buffer }>;
   digest: string;
+} => buildStorageReplicaMetaCommitmentFromCheckpointPlan(
+  env,
+  rebaseCertifiedEntityLineageAtRuntimeCheckpoint(env, lineagePlan),
+);
+
+/**
+ * Build metadata from a lineage plan already rebased for this exact Runtime
+ * height. The storage commit path validates and rebases once, then reuses the
+ * same immutable plan for lookup, metadata, and post-commit publication.
+ */
+export const buildStorageReplicaMetaCommitmentFromCheckpointPlan = (
+  env: Env,
+  checkpointPlan: ReturnType<typeof rebaseCertifiedEntityLineageAtRuntimeCheckpoint>,
+): {
+  entries: Array<{ key: Buffer; value: Buffer }>;
+  digest: string;
 } => {
-  const checkpointPlan = rebaseCertifiedEntityLineageAtRuntimeCheckpoint(env, lineagePlan);
   const entries: Array<{ key: Buffer; value: Buffer }> = [];
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
     if (!replica?.state) continue;

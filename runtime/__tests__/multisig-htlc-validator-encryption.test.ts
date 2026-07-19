@@ -16,6 +16,7 @@ import {
   requireProfileEncryptionManifest,
 } from '../networking/profile-encryption';
 import { buildEntityProfile } from '../networking/gossip-helper';
+import { announceCertifiedLocalProfiles } from '../networking/local-profile-lifecycle';
 import { NobleCryptoProvider } from '../protocol/crypto/noble';
 import { generateLazyEntityId } from '../entity/factory';
 import { buildQuorumHanko, getEntityConfigBoardHash, verifyHankoForHash } from '../hanko/signing';
@@ -43,7 +44,10 @@ import {
 } from '../protocol/htlc/multi-recipient';
 import { assertNoConsensusVisibleHtlcPaymentSecrets } from '../protocol/htlc/consensus-secret-guard';
 import { withDeterministicHtlcTestSecret } from '../protocol/htlc/test-secret-capability';
-import { handleCertifyProfileEntityTx } from '../entity/tx/handlers/profile-certification';
+import {
+  buildCurrentEntityProfileHashToSign,
+  handleCertifyProfileEntityTx,
+} from '../entity/tx/handlers/profile-certification';
 import {
   buildEntityProfileDescriptor,
   computeEntityProfileCertificationComponents,
@@ -98,6 +102,7 @@ import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { canonicalJurisdictionEventsHash, getJEventJurisdictionRef } from '../jurisdiction/event-observation';
 import { buildLocalJPrefixAttestation } from '../jurisdiction/j-prefix-consensus';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
+import { startRuntimeHistoryTraceForTesting } from '../history-retention';
 import { validateEntityTx } from '../wal/runtime-machine-schema/entity-tx';
 import {
   buildConsensusOutputOrigin,
@@ -747,6 +752,7 @@ describe('multisig HTLC validator encryption', () => {
   test('consensus replay canonicalizes the full manifest and independently derives the profile secondary hash', () => {
     const env = { eReplicas: new Map() } as unknown as Env;
     const state = certificationState();
+    state.config.validators.reverse();
     const result = handleCertifyProfileEntityTx(env, state, {
       type: 'certifyProfile',
       data: { encryptionAttestations: [attest(second), attest(first)] },
@@ -755,23 +761,28 @@ describe('multisig HTLC validator encryption', () => {
     expect(stored?.attestations.map((entry) => entry.signerId))
       .toEqual([first.signerId, second.signerId].sort());
     expect(validateEntityState(result.newState).profileEncryptionManifest?.hash).toBe(stored?.hash);
+    const storedBySigner = new Map(stored!.attestations.map((entry) => [entry.signerId, entry]));
     const descriptorBoard = {
       threshold: stored!.threshold,
-      validators: stored!.attestations.map((entry) => ({
-        signer: entry.signer,
-        signerId: entry.signerId,
-        publicKey: entry.publicKey,
-        weight: entry.weight,
-      })),
+      validators: result.newState.config.validators.map((signerId) => {
+        const entry = storedBySigner.get(signerId)!;
+        return {
+          signer: entry.signer,
+          signerId: entry.signerId,
+          publicKey: entry.publicKey,
+          weight: entry.weight,
+        };
+      }),
       encryptionAttestations: [...stored!.attestations],
     };
-    expect(result.hashesToSign).toEqual([{
+    expect(result.hashesToSign).toBeUndefined();
+    expect(buildCurrentEntityProfileHashToSign(result.newState)).toEqual({
       hash: computeEntityProfileDescriptorHash(
         buildEntityProfileDescriptor(result.newState, descriptorBoard),
       ),
       type: 'profile',
       context: `profile:${stored!.hash}`,
-    }]);
+    });
     expect(() => handleCertifyProfileEntityTx(env, state, {
       type: 'certifyProfile',
       data: { encryptionAttestations: [attest(first)] },
@@ -1314,7 +1325,7 @@ describe('multisig HTLC validator encryption', () => {
     const semanticHash = hashCertifiedEntityOutputSemantic(
       ENTITY_ID,
       SENDER_ID,
-      'account-frame',
+      'account-ack',
       7n,
       [accountInput],
     );
@@ -1323,7 +1334,7 @@ describe('multisig HTLC validator encryption', () => {
       11,
       `0x${'91'.repeat(32)}`,
       0,
-      { lane: 'account-frame', sequence: 7n, semanticHash },
+      { lane: 'account-ack', sequence: 7n, semanticHash },
     );
     const outputHash = hashCertifiedEntityOutput(origin, SENDER_ID, [accountInput]);
     const certifiedOutput = {
@@ -1642,6 +1653,7 @@ describe('multisig HTLC validator encryption', () => {
     );
     env.gossip.announce(sourceProfile);
     env.gossip.announce(destination);
+    const historyTrace = startRuntimeHistoryTraceForTesting(env);
 
     const rawSecret = `0x${'cd'.repeat(32)}`;
     const rawPayment = withDeterministicHtlcTestSecret({
@@ -1661,7 +1673,7 @@ describe('multisig HTLC validator encryption', () => {
     }]);
     expect(rawPayment.data).not.toHaveProperty('preparedEnvelope');
 
-    const durablePayment = env.history
+    const durablePayment = historyTrace.snapshots
       .flatMap((frame) => frame.runtimeInput.entityInputs)
       .flatMap((input) => input.entityTxs ?? [])
       .find((tx) => tx.type === 'htlcPayment');
@@ -1670,7 +1682,7 @@ describe('multisig HTLC validator encryption', () => {
     }
     expect(durablePayment.data.preparedEnvelope).toBeDefined();
     expect(durablePayment.data).not.toHaveProperty('secret');
-    expect(serializeTaggedJson(env.history)).not.toContain(rawSecret);
+    expect(serializeTaggedJson(historyTrace.snapshots)).not.toContain(rawSecret);
     expect(serializeTaggedJson(env.eReplicas)).not.toContain(rawSecret);
     expect(durablePayment.data.preparedRouteProfiles).toHaveLength(1);
     expect(durablePayment.data.startedAtMs).toBe(1_000);
@@ -1689,7 +1701,7 @@ describe('multisig HTLC validator encryption', () => {
       signerId: source.signer,
       entityTxs: [uiLikePayment],
     }]);
-    const durablePayments = env.history
+    const durablePayments = historyTrace.snapshots
       .flatMap((frame) => frame.runtimeInput.entityInputs)
       .flatMap((input) => input.entityTxs ?? [])
       .filter((tx): tx is Extract<typeof tx, { type: 'htlcPayment' }> => tx.type === 'htlcPayment');
@@ -1751,6 +1763,7 @@ describe('multisig HTLC validator encryption', () => {
     expect(firstReplay.outputs[0]?.signerId).toBe(first.signerId);
     expect(firstReplay.outputs[0]?.entityTxs?.[0]?.type).toBe('accountInput');
     expect(firstReplay.outputs.some((output) => output.entityTxs?.length === 0)).toBe(false);
+    historyTrace.stop();
     clearSignerKeys(env);
   });
 
@@ -1782,6 +1795,7 @@ describe('multisig HTLC validator encryption', () => {
       state,
       hankoWitness: new Map(),
     });
+    const historyTrace = startRuntimeHistoryTraceForTesting(env);
     const evidence = await anchorManualGenesisReplica(env, state);
     if (!evidence) throw new Error('HTLC_TEST_REGISTRATION_EVIDENCE_MISSING');
     await certifyRegisteredBoardPrefix(env, entityId, signerId, evidence);
@@ -1800,14 +1814,15 @@ describe('multisig HTLC validator encryption', () => {
     const profile = env.gossip.getProfiles().find((candidate) => candidate.entityId === entityId);
     expect(profile?.metadata.profileHanko).toBeDefined();
     expect(profile && (await verifyProfileSignature(profile, env)).valid).toBe(true);
-    const certifyTxCount = env.history
+    expect(await announceCertifiedLocalProfiles(env, [entityId])).toBe(0);
+    const certifyTxCount = historyTrace.snapshots
       .flatMap((frame) => frame.runtimeInput.entityInputs)
       .flatMap((input) => input.entityTxs ?? [])
       .filter((tx) => tx.type === 'certifyProfile').length;
     expect(certifyTxCount).toBe(1);
 
     await processRuntime(env, [{ entityId, signerId, entityTxs: [] }]);
-    const certifyTxCountAfterIdleFrame = env.history
+    const certifyTxCountAfterIdleFrame = historyTrace.snapshots
       .flatMap((frame) => frame.runtimeInput.entityInputs)
       .flatMap((input) => input.entityTxs ?? [])
       .filter((tx) => tx.type === 'certifyProfile').length;
@@ -1829,30 +1844,31 @@ describe('multisig HTLC validator encryption', () => {
         },
       }],
     }]);
-    const uncertifiedUpdate = env.gossip.getProfiles().find((candidate) => candidate.entityId === entityId);
-    expect(uncertifiedUpdate?.name).toBe('certified-profile');
-
-    await processRuntime(env, [{ entityId, signerId, entityTxs: [] }]);
     const recertified = env.gossip.getProfiles().find((candidate) => candidate.entityId === entityId);
     expect(recertified?.name).toBe('recertified-profile');
     expect(recertified?.metadata.profileHanko).toBeDefined();
     expect(recertified && (await verifyProfileSignature(recertified, env)).valid).toBe(true);
-    const recertificationFrameTxTypes = env.history.slice(-2).map((frame) => (
+    const recertificationFrameTxTypes = historyTrace.snapshots.slice(-1).map((frame) => (
       frame.runtimeInput.entityInputs.flatMap((input) => input.entityTxs?.map((tx) => tx.type) ?? [])
     ));
-    expect(recertificationFrameTxTypes).toEqual([['profile-update'], ['certifyProfile']]);
-    const recertifyTxCount = env.history
+    expect(recertificationFrameTxTypes).toEqual([['profile-update']]);
+    const recertifyTxCount = historyTrace.snapshots
       .flatMap((frame) => frame.runtimeInput.entityInputs)
       .flatMap((input) => input.entityTxs ?? [])
       .filter((tx) => tx.type === 'certifyProfile').length;
-    expect(recertifyTxCount).toBe(2);
+    expect(recertifyTxCount).toBe(1);
+
+    const heightAfterRecertification = env.height;
+    await processRuntime(env);
+    expect(env.height).toBe(heightAfterRecertification);
 
     await processRuntime(env, [{ entityId, signerId, entityTxs: [] }]);
-    const recertifyTxCountAfterIdleFrame = env.history
+    const recertifyTxCountAfterIdleFrame = historyTrace.snapshots
       .flatMap((frame) => frame.runtimeInput.entityInputs)
       .flatMap((input) => input.entityTxs ?? [])
       .filter((tx) => tx.type === 'certifyProfile').length;
-    expect(recertifyTxCountAfterIdleFrame).toBe(2);
+    expect(recertifyTxCountAfterIdleFrame).toBe(1);
+    historyTrace.stop();
     clearSignerKeys(env);
   });
 

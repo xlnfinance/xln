@@ -16,10 +16,7 @@ import { deriveSignerAddressSync, getSignerAddress, getSignerPrivateKey, getSign
 import { deriveEncryptionKeyPair, pubKeyToHex } from './p2p-crypto';
 import { UINT16_MAX } from '../constants';
 import { requireCompleteValidatorEncryptionManifest } from '../protocol/htlc/validator-encryption';
-import {
-  collectLocalProfileEncryptionAnnouncements,
-  getProfileEncryptionAttestations,
-} from './profile-encryption';
+import { getProfileEncryptionAttestations } from './profile-encryption';
 import { buildEntityProfileDescriptor } from './profile-descriptor';
 
 type BuiltProfile = Omit<Profile, 'runtimeId' | 'runtimeEncPubKey'>;
@@ -163,7 +160,6 @@ export function buildEntityProfile(
 }
 
 export const createProfileSignerResolver = (env: Env): ProfileSignerResolver => {
-  collectLocalProfileEncryptionAnnouncements(env);
   return {
     getSignerAddress: (signerId) => getSignerAddress(env, signerId),
     getSignerPublicKeyHex: (signerId) => {

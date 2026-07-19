@@ -3,7 +3,7 @@ import { compareStableText } from '../protocol/serialization';
 import type { Env } from '../types';
 import { buildDurableRuntimeMachineSnapshot } from '../wal/snapshot';
 import {
-  computeCanonicalEntityHashesFromEnv,
+  computeCanonicalEntityHash,
   computeCanonicalRuntimeStateHash,
 } from './canonical-hash';
 import { encodeBuffer } from './codec';
@@ -213,8 +213,10 @@ export const prepareStorageCanonicalStateHashes = (
 ): { canonicalStateHash: string; canonicalEntityHashes: StorageFrameEntityHash[] } => {
   void touchedEntities;
   void previousFrame;
-  void replicaLookup;
-  const canonicalEntityHashes = computeCanonicalEntityHashesFromEnv(env)
+  const canonicalEntityHashes = Array.from(
+    replicaLookup.values(),
+    ({ replica }) => computeCanonicalEntityHash(replica),
+  )
     .sort((left, right) => compareStableText(left.entityId, right.entityId));
   return {
     canonicalEntityHashes,

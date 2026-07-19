@@ -31,7 +31,7 @@ import type {
   ValidatorEntityFrameExecution,
 } from '../../types';
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, getPerfMs, log } from '../../utils';
-import { cumulativeMarksToDurations } from '../../infra/perf-profile';
+import { cumulativeMarksToPhases } from '../../infra/perf-profile';
 import { compareStableText, safeStringify } from '../../protocol/serialization';
 import {
   cloneIsolatedEntityInput,
@@ -175,6 +175,7 @@ import {
 import { orderCertifiedOutputsBySequence } from './output-envelope';
 import { cloneCrossJurisdictionAccountTxRoute } from '../../extensions/cross-j/index';
 import { buildCrossJurisdictionFillId, CROSS_J_PENDING_FILL_ACK_TTL_MS } from '../../extensions/cross-j/fill-ack';
+import { buildCurrentEntityProfileHashToSign } from '../tx/handlers/profile-certification';
 import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../tx/htlc-route-lifecycle';
 import { computeHtlcEnvelopeContextHash } from '../../protocol/htlc/envelope';
 import { encryptedHtlcLayer } from '../../protocol/htlc/onion-advance';
@@ -3424,8 +3425,7 @@ export const applyEntityInput = async (
         txs: proposalTxs.length,
         outputs: entityOutbox.length,
         jOutputs: jOutbox.length,
-        marks: consensusProfileCheckpoints,
-        phases: cumulativeMarksToDurations(consensusProfileCheckpoints, consensusProfileElapsedMs),
+        phases: cumulativeMarksToPhases(consensusProfileCheckpoints, consensusProfileElapsedMs),
       });
     }
     return {
@@ -4690,6 +4690,13 @@ export const applyEntityFrame = async (
   });
   markFrameProfile('entityTxLoop');
 
+  // A certified manifest makes the current public routing descriptor part of
+  // every Entity frame's unified Hanko map. Derive it only after the complete
+  // transaction list has applied: a certifyProfile followed by accountInput
+  // must sign the final Account capacities, never an intermediate descriptor.
+  const currentProfileHash = buildCurrentEntityProfileHashToSign(currentEntityState);
+  if (currentProfileHash) collectedHashes.push(currentProfileHash);
+
   if (authorityTransitionOnly) {
     currentEntityState = assignCertifiedOutputIdentities(currentEntityState, allOutputs);
     entityLog.info('frame.board_authority_transition_only', {
@@ -4805,8 +4812,7 @@ export const applyEntityFrame = async (
       orderbookBookUpdates: orderbookStats.orderbookBookUpdates,
       orderbookCrossFills: orderbookStats.orderbookCrossFills,
       prunedOriginatedHtlcRoutes,
-      marks: frameProfileMarks,
-      phases: cumulativeMarksToDurations(frameProfileMarks, frameElapsedMs),
+      phases: cumulativeMarksToPhases(frameProfileMarks, frameElapsedMs),
       txTypeTotals: Array.from(frameProfileTxTotals.entries())
         .map(([type, value]) => ({ type, ...value }))
         .sort((left, right) => right.elapsedMs - left.elapsedMs)

@@ -25,6 +25,9 @@ type RuntimeHistoryTrace = {
 
 const testingTraceByEnv = new Map<Env, RuntimeHistoryTrace>();
 
+export const hasRuntimeHistoryTraceForTesting = (env: Env): boolean =>
+  testingTraceByEnv.has(env);
+
 export type RuntimeHistoryTraceCollector = {
   readonly snapshots: readonly EnvSnapshot[];
   stop: () => void;

@@ -1,4 +1,5 @@
 export type PerfMarks = Record<string, number>;
+export type PerfPhase = Readonly<{ name: string; ms: number }>;
 
 export const cumulativeMarksToDurations = (
   marks: PerfMarks,
@@ -18,10 +19,17 @@ export const cumulativeMarksToDurations = (
   return durations;
 };
 
+export const cumulativeMarksToPhases = (
+  marks: PerfMarks,
+  totalMs: number,
+): PerfPhase[] => Object.entries(cumulativeMarksToDurations(marks, totalMs))
+  .map(([name, ms]) => ({ name, ms }));
+
 const HISTOGRAM_BOUNDS_MS = [
   1, 2, 5, 10, 20, 50, 100, 200, 500,
   1_000, 2_000, 5_000, 10_000, 20_000, 30_000,
-  60_000, 120_000, 300_000, 600_000, Number.POSITIVE_INFINITY,
+  40_000, 45_000, 50_000, 60_000, 70_000, 80_000, 90_000,
+  120_000, 300_000, 600_000, Number.POSITIVE_INFINITY,
 ] as const;
 
 export interface PerfMetricSummary {

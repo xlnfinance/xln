@@ -584,6 +584,43 @@ describe('runtime ingress timestamp', () => {
     expect(entityNeedsPeriodicWake(replica)).toBe(true);
   });
 
+  test('default runtime cadence commits consecutive queued frames without a delay gate', async () => {
+    const env = createIsolatedEnv('runtime-default-zero-delay');
+    env.quietRuntimeLogs = true;
+    addTestJurisdiction(env);
+
+    const importReplica = async (label: string): Promise<void> => {
+      const signerId = deriveSignerAddressSync(env.runtimeSeed!, label).toLowerCase();
+      const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
+      enqueueRuntimeInput(env, {
+        runtimeTxs: [{
+          type: 'importReplica',
+          entityId,
+          signerId,
+          data: {
+            config: {
+              mode: 'proposer-based',
+              threshold: 1n,
+              validators: [signerId],
+              shares: { [signerId]: 1n },
+              jurisdiction: testJurisdiction(),
+            },
+            isProposer: false,
+            profileName: label,
+          },
+        }],
+        entityInputs: [],
+      });
+      await process(env);
+    };
+
+    await importReplica('zero-delay-first');
+    const firstHeight = env.height;
+    expect(env.runtimeConfig?.minFrameDelayMs).toBe(0);
+    await importReplica('zero-delay-second');
+    expect(env.height).toBe(firstHeight + 1);
+  });
+
   test('runtime loop waits for minFrameDelayMs between processed cycles', async () => {
     const env = createIsolatedEnv('runtime-frame-delay-seed');
     env.quietRuntimeLogs = true;

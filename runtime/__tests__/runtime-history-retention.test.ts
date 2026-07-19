@@ -96,4 +96,31 @@ test('production Env retains only the bounded canonical debug tail', async () =>
   expect(env.history.at(-1)?.height).toBe(1);
   expect(trace.snapshots).toHaveLength(1);
   expect(trace.snapshots[0]?.height).toBe(1);
+
+  const secondSigner = deriveSignerAddressSync(seed, '2');
+  const secondEntityId = generateLazyEntityId([secondSigner], 1n).toLowerCase();
+  enqueueRuntimeInput(env, {
+    runtimeTxs: [{
+      type: 'importReplica',
+      entityId: secondEntityId,
+      signerId: secondSigner,
+      data: {
+        isProposer: false,
+        config: {
+          mode: 'proposer-based',
+          threshold: 1n,
+          validators: [secondSigner],
+          shares: { [secondSigner]: 1n },
+          jurisdiction,
+        },
+      },
+    }],
+    entityInputs: [],
+  });
+  await processRuntime(env, []);
+
+  expect(env.height).toBe(2);
+  expect(env.runtimeConfig?.snapshotIntervalFrames).toBe(100);
+  expect(env.history).toHaveLength(RECENT_RUNTIME_HISTORY_LIMIT);
+  expect(env.history[0]?.height).toBe(1);
 });

@@ -29,7 +29,7 @@ const RUNTIME_PROCESS_SLOW_MS = Math.max(
   Number(nodeProcess?.env?.['XLN_RUNTIME_PROCESS_SLOW_MS'] || '1000'),
 );
 import { getPerfMs, getWallClockMs } from './utils';
-import { cumulativeMarksToDurations } from './infra/perf-profile';
+import { cumulativeMarksToPhases } from './infra/perf-profile';
 import {
   cloneIsolatedEntityInput,
   cloneIsolatedRoutedEntityInputs,
@@ -51,6 +51,7 @@ import {
 import { computePersistedEnvStateHash } from './wal/hash';
 import {
   appendRecentRuntimeSnapshot,
+  hasRuntimeHistoryTraceForTesting,
   recordRuntimeHistoryTraceForTesting,
 } from './history-retention';
 import {
@@ -127,9 +128,7 @@ import {
   prewarmSignerKeyCache,
 } from './account/crypto';
 import {
-  buildEntityAdvertisedStateFingerprint,
   buildLocalEntityProfile,
-  createProfileSignerResolver,
 } from './networking/gossip-helper';
 import type { Profile } from './networking/gossip';
 import { normalizeRuntimeId } from './networking/runtime-id';
@@ -856,6 +855,7 @@ export const enqueueRuntimeInput = (env: Env, runtimeInput: RuntimeInput): void 
 
 export const hasRuntimeWork = (env: Env): boolean => {
   const mempool = ensureRuntimeMempool(env);
+  if ((env.runtimeState?.pendingProfileCertificationEntityIds?.size ?? 0) > 0) return true;
   if ((env.runtimeState?.pendingCommittedJOutbox?.length ?? 0) > 0) return true;
   if ((env.runtimeState?.pendingJurisdictionImports?.size ?? 0) > 0) return true;
   if (mempool.runtimeTxs.length > 0 || mempool.entityInputs.length > 0) return true;
@@ -2551,8 +2551,7 @@ const applyRuntimeInput = async (
         entityTxs: appliedEntityInputs.reduce((sum, input) => sum + Number(input.entityTxs?.length || 0), 0),
         outputs: entityOutbox.length,
         jOutputs: jOutbox.length,
-        marks: applyProfileMarks,
-        phases: cumulativeMarksToDurations(applyProfileMarks, applyElapsedMs),
+        phases: cumulativeMarksToPhases(applyProfileMarks, applyElapsedMs),
       });
     }
     if (DEBUG) {
@@ -3976,7 +3975,10 @@ const publishRuntimeFrameTransaction = (transaction: RuntimeFrameTransaction): E
   const mergedMempool = mergeRuntimeFrameMempools(workingMempool, concurrentMempool);
   liveEnv.runtimeMempool = mergedMempool;
   liveEnv.runtimeInput = mergedMempool;
-  liveState.wakeRequested = liveState.wakeRequested === true || runtimeInputHasQueuedWork(mergedMempool);
+  liveState.wakeRequested =
+    liveState.wakeRequested === true ||
+    runtimeInputHasQueuedWork(mergedMempool) ||
+    (liveState.pendingProfileCertificationEntityIds?.size ?? 0) > 0;
   rebuildScheduledWakeIndex(liveEnv);
   for (const jReplica of liveEnv.jReplicas.values()) jReplica.jadapter?.setBlockTimestamp(liveEnv.timestamp);
   transaction.published = true;
@@ -4061,8 +4063,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       outcome: processProfileOutcome,
       elapsedMs,
       ...processProfileMetrics,
-      marks: processProfileMarks,
-      phases: cumulativeMarksToDurations(processProfileMarks, elapsedMs),
+      phases: cumulativeMarksToPhases(processProfileMarks, elapsedMs),
     });
   };
 
@@ -4102,6 +4103,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       enqueueRuntimeContinuation(env, env.networkInbox, undefined, undefined, ingressNow);
       env.networkInbox = [];
     }
+    markProcessProfile('ingressQueues');
     await materializePendingJurisdictionImportResults(env, (runtimeTx) => {
       enqueueRuntimeContinuation(
         env,
@@ -4111,7 +4113,16 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
         env.scenarioMode ? env.timestamp : getWallClockMs(),
       );
     });
-    const profileCertificationInputs = collectDueLocalProfileCertificationInputs(env);
+    markProcessProfile('jurisdictionImports');
+    const pendingProfileCertificationEntityIds = processState.pendingProfileCertificationEntityIds;
+    const profileCertificationInputs = collectDueLocalProfileCertificationInputs(
+      env,
+      pendingProfileCertificationEntityIds,
+    );
+    // Undefined means the first post-start scan covered every local Entity.
+    // Later scans consume only Entities dirtied by the preceding committed
+    // Runtime frame; a crash naturally restores the one-time full scan.
+    processState.pendingProfileCertificationEntityIds = new Set();
     if (profileCertificationInputs.length > 0) {
       // Derived local work belongs to the already-open ingress boundary. Do
       // not replace an explicit queued timestamp with the wall clock observed
@@ -4126,6 +4137,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
         profileIngressTimestamp,
       );
     }
+    markProcessProfile('profileCertification');
     markProcessProfile('enqueue');
 
     if (!hasRuntimeWork(env)) {
@@ -4338,35 +4350,6 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       }
       return localEntityIds;
     };
-    const getAdvertisedStateFingerprints = (localEntityIds: ReadonlySet<string>): Map<string, string> => {
-      const fingerprints = new Map<string, string>();
-      if (localEntityIds.size === 0) return fingerprints;
-      for (const replica of env.eReplicas.values()) {
-        const entityId = String(replica?.entityId || '').toLowerCase();
-        if (!entityId || !localEntityIds.has(entityId) || fingerprints.has(entityId)) continue;
-        try {
-          fingerprints.set(entityId, buildEntityAdvertisedStateFingerprint(replica.state, createProfileSignerResolver(env)));
-        } catch (error) {
-          if (!quietRuntimeLogs) {
-            runtimeLog.warn('gossip.profile_fingerprint_skip', {
-              entityId: entityId.slice(-8),
-              error: (error as Error).message,
-            });
-          }
-        }
-      }
-      return fingerprints;
-    };
-    const advertisedStateBeforeApply = getAdvertisedStateFingerprints(getLocallySignableEntityIds());
-    const shouldAnnounceEntityProfile = (input: EntityInput): boolean => {
-      if (!input?.entityTxs?.length) return false;
-      return input.entityTxs.some(
-        tx =>
-          tx.type === 'openAccount' ||
-          tx.type === 'profile-update' ||
-          tx.type === 'certifyProfile',
-      );
-    };
     if (hasRuntimeInput) {
       if (!quietRuntimeLogs) {
         runtimeLog.debug('tick.input.processing', {
@@ -4411,17 +4394,21 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
             changedEntityIds.add(runtimeTx.entityId.toLowerCase());
           }
         }
-        for (const entityInput of runtimeInput.entityInputs) {
-          if (entityInput.entityId && shouldAnnounceEntityProfile(entityInput)) {
-            changedEntityIds.add(entityInput.entityId.toLowerCase());
-          }
+        // Every Entity state mutation is represented by the canonical applied
+        // input, including sibling cross-j cascades. Re-announcing those exact
+        // Entities is cheaper and safer than rebuilding every local public
+        // profile twice per Runtime frame merely to detect a difference.
+        for (const entityInput of result.appliedRuntimeInput.entityInputs) {
+          if (entityInput.entityId) changedEntityIds.add(entityInput.entityId.toLowerCase());
         }
-        const advertisedStateAfterApply = getAdvertisedStateFingerprints(getLocallySignableEntityIds());
-        for (const [entityId, fingerprint] of advertisedStateAfterApply.entries()) {
-          if (advertisedStateBeforeApply.get(entityId) !== fingerprint) {
-            changedEntityIds.add(entityId);
-          }
+        const certificationCandidates = state.pendingProfileCertificationEntityIds ?? new Set<string>();
+        for (const entityId of changedEntityIds) {
+          const hasCertifiedManifest = [...env.eReplicas.values()].some((replica) => (
+            replica.entityId.toLowerCase() === entityId && Boolean(replica.state.profileEncryptionManifest)
+          ));
+          if (!hasCertifiedManifest) certificationCandidates.add(entityId);
         }
+        state.pendingProfileCertificationEntityIds = certificationCandidates;
         markProcessProfile('fingerprints');
       } finally {
         envRecord(env)[ENV_APPLY_ALLOWED_KEY] = false;
@@ -4475,33 +4462,40 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     const frameAdvanced = env.height !== frameHeightBeforeTick;
     processProfileMetrics.frameAdvanced = frameAdvanced;
     if (frameAdvanced) {
-      const committedFrameLogs = Array.isArray(env.frameLogs)
-        ? env.frameLogs.map((entry): FrameLogEntry => ({ ...entry }))
-        : [];
-      const snapshot = buildCanonicalEnvSnapshot(env, {
-        runtimeInput: appliedRuntimeInputForPersistence ?? { runtimeTxs: [], entityInputs: [] },
-        runtimeOutputs: env.pendingOutputs ?? [],
-        description: env.extra?.description ?? `Frame ${env.height}`,
-        meta: {
-          title: env.extra?.subtitle?.title ?? `Frame ${env.height}`,
-          ...(env.extra?.subtitle ? { subtitle: env.extra.subtitle } : {}),
-          ...(env.frameDisplayMs !== undefined ? { displayMs: env.frameDisplayMs } : {}),
-        },
-        logs: committedFrameLogs,
-        gossipProfiles: env.gossip?.getProfiles ? env.gossip.getProfiles() : [],
-      });
-
-      // History is a local/debug timeline, not the durable source of truth.
-      // If the process crashes before WAL save, this in-memory tail is expected
-      // to disappear; replay always trusts persisted frames, not env.history.
-      env.history = appendRecentRuntimeSnapshot(env.history ?? [], snapshot);
-
-      if (!quietRuntimeLogs) {
-        runtimeLog.debug('history.snapshot', {
-          title: snapshot.meta?.title ?? `Frame ${env.height}`,
-          height: env.height,
-          historyLength: env.history.length,
+      const snapshotInterval = ensureRuntimeConfig(env).snapshotIntervalFrames ?? DEFAULT_SNAPSHOT_INTERVAL_FRAMES;
+      const snapshotDue =
+        env.height === 1 ||
+        env.height % snapshotInterval === 0 ||
+        hasRuntimeHistoryTraceForTesting(liveEnv);
+      if (snapshotDue) {
+        const committedFrameLogs = Array.isArray(env.frameLogs)
+          ? env.frameLogs.map((entry): FrameLogEntry => ({ ...entry }))
+          : [];
+        const snapshot = buildCanonicalEnvSnapshot(env, {
+          runtimeInput: appliedRuntimeInputForPersistence ?? { runtimeTxs: [], entityInputs: [] },
+          runtimeOutputs: env.pendingOutputs ?? [],
+          description: env.extra?.description ?? `Frame ${env.height}`,
+          meta: {
+            title: env.extra?.subtitle?.title ?? `Frame ${env.height}`,
+            ...(env.extra?.subtitle ? { subtitle: env.extra.subtitle } : {}),
+            ...(env.frameDisplayMs !== undefined ? { displayMs: env.frameDisplayMs } : {}),
+          },
+          logs: committedFrameLogs,
+          gossipProfiles: env.gossip?.getProfiles ? env.gossip.getProfiles() : [],
         });
+
+        // History is a local/debug timeline, not the durable source of truth.
+        // WAL stores every R-frame; this full Env projection is periodic unless
+        // an explicit test trace owns the memory required for every frame.
+        env.history = appendRecentRuntimeSnapshot(env.history ?? [], snapshot);
+
+        if (!quietRuntimeLogs) {
+          runtimeLog.debug('history.snapshot', {
+            title: snapshot.meta?.title ?? `Frame ${env.height}`,
+            height: env.height,
+            historyLength: env.history.length,
+          });
+        }
       }
       markProcessProfile('snapshot');
     }

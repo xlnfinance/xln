@@ -47,6 +47,8 @@ import { pruneUnreachableDisputeEvidence } from '../../../protocol/dispute/evide
 import type { ApplyEntityTxOptions } from '../apply';
 import { armHtlcSecretAckTimeout, persistVerifiedHtlcSecret } from '../htlc-route-lifecycle';
 import { buildHubRebalancePolicyTx } from './account-admin';
+import { cumulativeMarksToPhases } from '../../../infra/perf-profile';
+import { getPerfMs } from '../../../utils';
 
 export type { MempoolOp } from './account/orderbook-queue';
 export {
@@ -70,6 +72,14 @@ export type {
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const accountHandlerLog = createStructuredLogger('account.handler');
+const ACCOUNT_INPUT_PROFILE = typeof process !== 'undefined' && (
+  process.env?.['XLN_ACCOUNT_INPUT_PROFILE'] === '1' ||
+  process.env?.['XLN_RUNTIME_PROCESS_PROFILE'] === '1'
+);
+const ACCOUNT_INPUT_SLOW_MS = Math.max(
+  0,
+  Number(typeof process !== 'undefined' ? process.env?.['XLN_ACCOUNT_INPUT_SLOW_MS'] || '250' : '250'),
+);
 
 export const frozenAccountInputLogLevel = (
   account: Pick<AccountMachine, 'status' | 'activeDispute'>,
@@ -111,6 +121,13 @@ export async function applyAccountInput(
   env: Env,
   options?: ApplyEntityTxOptions,
 ): Promise<AccountHandlerResult> {
+  const profileStartedAt = getPerfMs();
+  const profileMarks: Record<string, number> = {};
+  const checkpointProfile = (label: string): void => {
+    profileMarks[label] = Math.round(getPerfMs() - profileStartedAt);
+  };
+  let profileOutcome = 'returned';
+  try {
   // State is already cloned at the Entity-frame boundary.
   const newState: EntityState = state;
   const incomingAck = accountInputAck(input);
@@ -302,6 +319,7 @@ export async function applyAccountInput(
   if (!accountMachine) {
     throw new Error(`CRITICAL: AccountMachine creation failed for ${input.fromEntityId}`);
   }
+  checkpointProfile('accountResolve');
 
   // Dispute freeze: this mirrors account/tx/apply.ts through
   // canProcessAccountTxForDisputeStatus. During dispute_preparing we still allow
@@ -372,6 +390,7 @@ export async function applyAccountInput(
       addMessage(newState, `⚠️ Settlement: ${result.message}`);
     }
   }
+  checkpointProfile('preConsensus');
 
   // CHANNEL.TS PATTERN: Apply frame-level consensus only.
   if (incomingAck || incomingProposal || input.kind === 'dispute' || input.kind === 'board_reseal') {
@@ -393,6 +412,7 @@ export async function applyAccountInput(
       owningEntityIsHub: Boolean(newState.hubRebalanceConfig),
       ...(counterpartyCertifiedBoardHash ? { counterpartyCertifiedBoardHash } : {}),
     }, options?.accountJClaimNodeStore);
+    checkpointProfile('consensus');
     accountJClaimNodeChanges = result.accountJClaimNodeChanges;
     const touchesCrossFillAck =
       pendingBeforeTxs.includes('cross_swap_fill_ack') ||
@@ -547,6 +567,7 @@ export async function applyAccountInput(
       if (committedFrameEntries.length > 0) {
         pruneUnreachableDisputeEvidence(accountMachine, newState.jBatchState);
       }
+      checkpointProfile('committedFollowups');
 
       if (allSwapOffersCreated.length > 0) {
         accountHandlerLog.debug('swap.offers_committed', { count: allSwapOffersCreated.length });
@@ -600,7 +621,9 @@ export async function applyAccountInput(
           height: accountInputReferenceHeight(result.response),
           prevHanko: Boolean(accountInputAck(result.response)),
         });
+        checkpointProfile('responseRouting');
       }
+      checkpointProfile('postConsensus');
     } else if (result.disputeRequired) {
       if (result.disputeRequired.signedFrame) {
         accountMachine.shadow.rejectedFrameEvidence = {
@@ -716,6 +739,7 @@ export async function applyAccountInput(
     throw new Error(error);
   }
 
+  checkpointProfile('finalize');
   return {
     newState,
     outputs,
@@ -726,4 +750,22 @@ export async function applyAccountInput(
     ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
     ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
   };
+  } catch (error) {
+    profileOutcome = 'threw';
+    throw error;
+  } finally {
+    const elapsedMs = Math.round(getPerfMs() - profileStartedAt);
+    if (ACCOUNT_INPUT_PROFILE || elapsedMs >= ACCOUNT_INPUT_SLOW_MS) {
+      accountHandlerLog.warn('input.profile', {
+        entity: shortId(state.entityId, 8),
+        counterparty: shortId(input.fromEntityId, 8),
+        kind: input.kind,
+        height: accountInputReferenceHeight(input) ?? null,
+        proposalTxs: accountInputProposal(input)?.frame.accountTxs.length ?? 0,
+        outcome: profileOutcome,
+        elapsedMs,
+        phases: cumulativeMarksToPhases(profileMarks, elapsedMs),
+      });
+    }
+  }
 }

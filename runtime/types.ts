@@ -1208,6 +1208,8 @@ export interface Env {
     stopLoop?: (() => void) | null;
     wakeLoop?: (() => void) | null;
     wakeRequested?: boolean;
+    /** Ephemeral, event-driven profile certification candidates; rebuilt by a full scan after restart. */
+    pendingProfileCertificationEntityIds?: Set<string>;
     scheduledWakeIndex?: {
       heap: Array<{
         dueAt: number;

@@ -33,7 +33,7 @@ import { createAccountJClaimSession } from '../j-claim-session';
 import { prepareAccountJClaimTx } from '../j-claim-transition';
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
 import { getNextSettlementNonce } from '../../protocol/settlement/operations';
-import { cumulativeMarksToDurations } from '../../infra/perf-profile';
+import { cumulativeMarksToPhases } from '../../infra/perf-profile';
 
 const accountLog = createStructuredLogger('account');
 const ACCOUNT_PROPOSAL_PROFILE =
@@ -676,11 +676,12 @@ export async function proposeAccountFrame(
       txTypes: Array.from(new Set(newFrame.accountTxs.map((tx) => tx.type))).sort(),
       optimisticBatch: canOptimisticallyValidateBatch && !optimisticBatchFailed,
       totalMs: profileTotalMs,
-      marks: profileCheckpoints,
-      phases: cumulativeMarksToDurations(profileCheckpoints, profileTotalMs),
+      phases: cumulativeMarksToPhases(profileCheckpoints, profileTotalMs),
     };
-    if (profileTotalMs >= ACCOUNT_PROPOSAL_SLOW_MS) accountLog.warn('proposal.profile', profile);
-    else accountLog.debug('proposal.profile', profile);
+    // Explicit profiling must remain visible under the production child
+    // default XLN_LOG_LEVEL=warn. Debug-only output made the opt-in flag appear
+    // enabled while silently emitting no successful fast proposals.
+    accountLog.warn('proposal.profile', profile);
   }
   return finalResult;
 }

@@ -74,7 +74,7 @@ const defaultDbPath = nodeProcess ? 'db-tmp/runtime' : 'db';
 export const dbRootPath = nodeProcess?.env?.['XLN_DB_PATH'] || defaultDbPath;
 
 export const DEFAULT_SNAPSHOT_INTERVAL_FRAMES = (() => {
-  const parsed = Number(readRuntimeEnv('XLN_SNAPSHOT_INTERVAL_FRAMES') ?? '5');
-  if (!Number.isFinite(parsed) || parsed < 1) return 5;
+  const parsed = Number(readRuntimeEnv('XLN_SNAPSHOT_INTERVAL_FRAMES') ?? '100');
+  if (!Number.isFinite(parsed) || parsed < 1) return 100;
   return Math.floor(parsed);
 })();

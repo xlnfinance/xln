@@ -84,6 +84,7 @@ import {
 } from './helpers/cross-j';
 import { applyJEventRange, buildJEventRangeData } from './helpers/j-history';
 import { buildLocalEntityProfile } from '../networking/gossip-helper';
+import { collectLocalProfileEncryptionAnnouncements } from '../networking/profile-encryption';
 import { LIMITS } from '../constants';
 
 const makeLocalCrossJRoutingDeps = (): RuntimeEntityRoutingDeps => ({
@@ -619,6 +620,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     addReplica(userEnv, targetUserState, targetUserSigner);
     addReplica(hubEnv, sourceHubState, sourceHubSigner);
     addReplica(hubEnv, targetHubState, targetHubSigner);
+    collectLocalProfileEncryptionAnnouncements(hubEnv, new Set([sourceHub, targetHub]));
+    collectLocalProfileEncryptionAnnouncements(userEnv, new Set([sourceUser, targetUser]));
     const sourceHubProfile = buildLocalEntityProfile(hubEnv, sourceHubState);
     const targetHubProfile = buildLocalEntityProfile(hubEnv, targetHubState);
     const sourceUserProfile = buildLocalEntityProfile(userEnv, sourceUserState);
@@ -752,9 +755,16 @@ describe('cross-jurisdiction hashledger swap', () => {
     );
     const sourceHeightBeforePreflight = hubEnv.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)!.state.height;
     const targetHeightBeforePreflight = hubEnv.eReplicas.get(`${targetHub}:${targetHubSigner}`)!.state.height;
+    const commonSourceFrame = { height: 12, timestamp: 10_200 };
+    const routedAtomicInputs = pairedSelection.inputs.slice(0, 2).map(input => ({
+      ...input,
+      runtimeId: hubEnv.runtimeId,
+      from: 'user-runtime',
+      sourceRuntimeFrame: commonSourceFrame,
+    }));
     const atomicPrepared = await prepareAtomicCrossJAccountInputs(
       hubEnv,
-      pairedSelection.inputs.slice(0, 2),
+      routedAtomicInputs,
       [],
       false,
       makeLocalCrossJRoutingDeps(),
@@ -796,6 +806,14 @@ describe('cross-jurisdiction hashledger swap', () => {
       targetHub,
       sourceHub,
     ]);
+    expect(pass.appliedEntityInputs.map(input => ({
+      runtimeId: input.runtimeId,
+      from: input.from,
+      sourceRuntimeFrame: input.sourceRuntimeFrame,
+    }))).toEqual([
+      { runtimeId: hubEnv.runtimeId, from: 'user-runtime', sourceRuntimeFrame: commonSourceFrame },
+      { runtimeId: hubEnv.runtimeId, from: 'user-runtime', sourceRuntimeFrame: commonSourceFrame },
+    ]);
     expect(pass.localCrossJurisdictionEventTrace.map(input => ({
       entityId: input.entityId,
       txTypes: input.entityTxs?.flatMap(tx => tx.type === 'runtimeOutput'
@@ -809,9 +827,17 @@ describe('cross-jurisdiction hashledger swap', () => {
     hubEnv.eReplicas = new Map(
       [...replayBaseline].map(([key, replica]) => [key, cloneEntityReplica(replica)]),
     );
-    const replay = await applyMergedEntityInputs(
+    const replayPrepared = await prepareAtomicCrossJAccountInputs(
       hubEnv,
       pass.appliedEntityInputs,
+      [],
+      true,
+      makeLocalCrossJRoutingDeps(),
+    );
+    expect(replayPrepared.pairs).toHaveLength(1);
+    const replay = await applyMergedEntityInputs(
+      hubEnv,
+      mergeEntityInputs(replayPrepared.inputs),
       [],
       { isReplay: true, routingDeps: makeLocalCrossJRoutingDeps() },
     );
@@ -833,7 +859,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     hubEnv.eReplicas.set(`${sourceHub}:${sourceHubSigner}`, committedSourceReplica);
     const sourceHeightBeforeAtomicRetry = committedSourceReplica.state.height;
     const targetHeightBeforeAtomicRetry = hubEnv.eReplicas.get(`${targetHub}:${targetHubSigner}`)!.state.height;
-    const commonSourceFrame = { height: 10, timestamp: 10_000 };
     const rejectedRetry = await prepareAtomicCrossJAccountInputs(hubEnv, [
       { ...targetAckOutput, from: 'user-runtime', sourceRuntimeFrame: commonSourceFrame },
       { ...sourceProposalOutput, from: 'user-runtime', sourceRuntimeFrame: commonSourceFrame },
