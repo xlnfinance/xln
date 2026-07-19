@@ -3,12 +3,16 @@ import type { RuntimeInput } from '@xln/runtime/xln-api';
 import { registerDebugSurface } from '$lib/utils/debugSurface';
 import {
   createRuntimeCommandId,
+  listUnresolvedRemoteRuntimeCommandIntents,
   markRemoteRuntimeCommandIntentAccepted,
   normalizeRuntimeCommandId,
+  resolveRemoteRuntimeCommandId,
   resolveRemoteRuntimeCommandIntent,
   settleRemoteRuntimeCommandIntent,
+  withRemoteRuntimeCommandReplayLease,
   type RuntimeCommandIntentOptions,
 } from './runtimeCommandIntent';
+import { installRuntimeCommandJournalKeys } from './runtimeCommandJournalKeyring';
 import { normalizeRuntimeCommandSequence } from './runtimeCommandIntentCodec';
 export type { RuntimeCommandIntentOptions } from './runtimeCommandIntent';
 export type RuntimeCommandExecutionOptions = RuntimeCommandIntentOptions & {
@@ -284,6 +288,16 @@ const exposeRuntimeCommandDebugSurface = (): void => {
     latest: get(runtimeCommandLatestReceipt),
     receipts: get(runtimeCommandReceipts),
     clear: clearRuntimeCommandReceipts,
+  }));
+  // Localhost-only production-preview QA surface. Browser resilience tests must
+  // exercise the shipped bundle, never Vite's development-only `/src` loader.
+  registerDebugSurface('commandJournal', () => ({
+    installKeys: installRuntimeCommandJournalKeys,
+    list: listUnresolvedRemoteRuntimeCommandIntents,
+    resolveId: resolveRemoteRuntimeCommandId,
+    markAccepted: markRemoteRuntimeCommandIntentAccepted,
+    settle: settleRemoteRuntimeCommandIntent,
+    withReplayLease: withRemoteRuntimeCommandReplayLease,
   }));
 };
 

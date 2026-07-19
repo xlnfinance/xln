@@ -44,22 +44,30 @@ const deleteJournal = async (page: Page): Promise<void> => {
   }), DB_NAME);
 };
 
-const unlockJournal = (page: Page): Promise<void> => page.evaluate(async ({ runtimeId, walletSeed }) => {
-  const keyring = await import('/src/lib/stores/runtimeCommandJournalKeyring.ts');
-  await keyring.installRuntimeCommandJournalKeys(runtimeId, walletSeed);
-}, { runtimeId: RUNTIME_ID, walletSeed: WALLET_SEED });
+const waitForJournalSurface = (page: Page): Promise<void> => page.waitForFunction(() =>
+  Boolean((window as never as { __xln?: { commandJournal?: unknown } }).__xln?.commandJournal));
+
+const unlockJournal = async (page: Page): Promise<void> => {
+  await waitForJournalSurface(page);
+  await page.evaluate(async ({ runtimeId, walletSeed }) => {
+  const journal = (window as never as { __xln?: { commandJournal?: { installKeys: (id: string, seed: string) => Promise<void> } } }).__xln?.commandJournal;
+  if (!journal) throw new Error('TEST_COMMAND_JOURNAL_DEBUG_SURFACE_MISSING');
+  await journal.installKeys(runtimeId, walletSeed);
+  }, { runtimeId: RUNTIME_ID, walletSeed: WALLET_SEED });
+};
 
 const loadJournal = (
   page: Page,
   runtimeId = RUNTIME_ID,
   serverFingerprint = SERVER_FINGERPRINT,
-) => page.evaluate(async ({ id, fingerprint }) => {
-  const journal = await import('/src/lib/stores/runtimeCommandIntent.ts');
-  return journal.listUnresolvedRemoteRuntimeCommandIntents(id, fingerprint);
-}, { id: runtimeId, fingerprint: serverFingerprint });
+) => waitForJournalSurface(page).then(() => page.evaluate(async ({ id, fingerprint }) => {
+    const journal = (window as never as { __xln?: { commandJournal?: { list: (runtimeId: string, serverFingerprint: string) => Promise<unknown[]> } } }).__xln?.commandJournal;
+    if (!journal) throw new Error('TEST_COMMAND_JOURNAL_DEBUG_SURFACE_MISSING');
+    return journal.list(id, fingerprint);
+  }, { id: runtimeId, fingerprint: serverFingerprint }));
 
 test('remote command journal survives reload with encrypted exact payload and the same intent ID', { tag: '@resilience' }, async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/app');
   await deleteJournal(page);
   await unlockJournal(page);
   const input = {
@@ -68,13 +76,14 @@ test('remote command journal survives reload with encrypted exact payload and th
     jInputs: [],
   };
   const commandIds = await page.evaluate(async ({ runtimeInput, runtimeId, serverFingerprint }) => {
-    const journal = await import('/src/lib/stores/runtimeCommandIntent.ts');
-    const first = await journal.resolveRemoteRuntimeCommandId({
+    const journal = (window as never as { __xln?: { commandJournal?: { resolveId: (options: unknown) => Promise<string> } } }).__xln?.commandJournal;
+    if (!journal) throw new Error('TEST_COMMAND_JOURNAL_DEBUG_SURFACE_MISSING');
+    const first = await journal.resolveId({
       input: runtimeInput as never,
       runtimeId,
       serverFingerprint,
     });
-    const second = await journal.resolveRemoteRuntimeCommandId({
+    const second = await journal.resolveId({
       input: structuredClone(runtimeInput) as never,
       runtimeId,
       serverFingerprint,
@@ -143,8 +152,9 @@ test('remote command journal survives reload with encrypted exact payload and th
     { commandId: commandIds[1], status: 'pending', input },
   ]);
   const retriedCommandId = await page.evaluate(async ({ commandId, runtimeId, serverFingerprint, exactInput }) => {
-    const journal = await import('/src/lib/stores/runtimeCommandIntent.ts');
-    return journal.resolveRemoteRuntimeCommandId({
+    const journal = (window as never as { __xln?: { commandJournal?: { resolveId: (options: unknown) => Promise<string> } } }).__xln?.commandJournal;
+    if (!journal) throw new Error('TEST_COMMAND_JOURNAL_DEBUG_SURFACE_MISSING');
+    return journal.resolveId({
       commandId,
       runtimeId,
       serverFingerprint,
@@ -158,8 +168,9 @@ test('remote command journal survives reload with encrypted exact payload and th
   });
   expect(retriedCommandId).toBe(commandIds[0]);
   await expect(page.evaluate(async ({ commandId, runtimeId, serverFingerprint }) => {
-    const journal = await import('/src/lib/stores/runtimeCommandIntent.ts');
-    return journal.resolveRemoteRuntimeCommandId({
+    const journal = (window as never as { __xln?: { commandJournal?: { resolveId: (options: unknown) => Promise<string> } } }).__xln?.commandJournal;
+    if (!journal) throw new Error('TEST_COMMAND_JOURNAL_DEBUG_SURFACE_MISSING');
+    return journal.resolveId({
       commandId,
       runtimeId,
       serverFingerprint,
@@ -169,8 +180,9 @@ test('remote command journal survives reload with encrypted exact payload and th
     .rejects.toThrow('RUNTIME_COMMAND_ID_PAYLOAD_MISMATCH');
 
   await page.evaluate(async (commandId) => {
-    const journal = await import('/src/lib/stores/runtimeCommandIntent.ts');
-    await journal.markRemoteRuntimeCommandIntentAccepted(commandId, {
+    const journal = (window as never as { __xln?: { commandJournal?: { markAccepted: (id: string, upstream: unknown) => Promise<void> } } }).__xln?.commandJournal;
+    if (!journal) throw new Error('TEST_COMMAND_JOURNAL_DEBUG_SURFACE_MISSING');
+    await journal.markAccepted(commandId, {
       receiptId: 'browser-receipt',
       statusUrl: '/receipt/browser-receipt',
     });
@@ -190,19 +202,21 @@ test('remote command journal survives reload with encrypted exact payload and th
   ]);
 
   await page.evaluate(async (commandIdsToSettle) => {
-    const journal = await import('/src/lib/stores/runtimeCommandIntent.ts');
-    for (const commandId of commandIdsToSettle) await journal.settleRemoteRuntimeCommandIntent(commandId);
+    const journal = (window as never as { __xln?: { commandJournal?: { settle: (id: string) => Promise<void> } } }).__xln?.commandJournal;
+    if (!journal) throw new Error('TEST_COMMAND_JOURNAL_DEBUG_SURFACE_MISSING');
+    for (const commandId of commandIdsToSettle) await journal.settle(commandId);
   }, commandIds);
   expect(await loadJournal(page)).toEqual([]);
 });
 
 test('remote command journal fails loud on payload mutation and oversized persisted metadata', { tag: '@resilience' }, async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/app');
   await deleteJournal(page);
   await unlockJournal(page);
   const commandId = await page.evaluate(async ({ runtimeId, serverFingerprint }) => {
-    const journal = await import('/src/lib/stores/runtimeCommandIntent.ts');
-    return journal.resolveRemoteRuntimeCommandId({
+    const journal = (window as never as { __xln?: { commandJournal?: { resolveId: (options: unknown) => Promise<string> } } }).__xln?.commandJournal;
+    if (!journal) throw new Error('TEST_COMMAND_JOURNAL_DEBUG_SURFACE_MISSING');
+    return journal.resolveId({
       input: { runtimeTxs: [], entityInputs: [], jInputs: [] },
       runtimeId,
       serverFingerprint,
@@ -253,8 +267,9 @@ test('remote command journal fails loud on payload mutation and oversized persis
   await deleteJournal(page);
   await unlockJournal(page);
   const oversizedId = await page.evaluate(async ({ runtimeId, serverFingerprint }) => {
-    const journal = await import('/src/lib/stores/runtimeCommandIntent.ts?oversized=1');
-    return journal.resolveRemoteRuntimeCommandId({
+    const journal = (window as never as { __xln?: { commandJournal?: { resolveId: (options: unknown) => Promise<string> } } }).__xln?.commandJournal;
+    if (!journal) throw new Error('TEST_COMMAND_JOURNAL_DEBUG_SURFACE_MISSING');
+    return journal.resolveId({
       input: { runtimeTxs: [], entityInputs: [], jInputs: [] },
       runtimeId,
       serverFingerprint,
@@ -267,10 +282,12 @@ test('remote command journal fails loud on payload mutation and oversized persis
 
 test('remote command replay lease has exactly one browser-tab owner', { tag: '@resilience' }, async ({ page, context }) => {
   const contender = await context.newPage();
-  await Promise.all([page.goto('/'), contender.goto('/')]);
+  await Promise.all([page.goto('/app'), contender.goto('/app')]);
+  await Promise.all([waitForJournalSurface(page), waitForJournalSurface(contender)]);
   const owner = page.evaluate(async (runtimeId) => {
-    const journal = await import('/src/lib/stores/runtimeCommandIntent.ts');
-    return journal.withRemoteRuntimeCommandReplayLease(runtimeId, () =>
+    const journal = (window as never as { __xln?: { commandJournal?: { withReplayLease: <T>(id: string, operation: () => Promise<T>) => Promise<T> } } }).__xln?.commandJournal;
+    if (!journal) throw new Error('TEST_COMMAND_JOURNAL_DEBUG_SURFACE_MISSING');
+    return journal.withReplayLease(runtimeId, () =>
       new Promise<string>((resolve) => {
         (window as typeof window & { __releaseRuntimeReplay?: () => void }).__releaseRuntimeReplay = () => resolve('released');
       }));
@@ -279,8 +296,9 @@ test('remote command replay lease has exactly one browser-tab owner', { tag: '@r
     typeof (window as typeof window & { __releaseRuntimeReplay?: unknown }).__releaseRuntimeReplay === 'function');
 
   await expect(contender.evaluate(async (runtimeId) => {
-    const journal = await import('/src/lib/stores/runtimeCommandIntent.ts');
-    return journal.withRemoteRuntimeCommandReplayLease(runtimeId, async () => 'wrong-owner');
+    const journal = (window as never as { __xln?: { commandJournal?: { withReplayLease: <T>(id: string, operation: () => Promise<T>) => Promise<T> } } }).__xln?.commandJournal;
+    if (!journal) throw new Error('TEST_COMMAND_JOURNAL_DEBUG_SURFACE_MISSING');
+    return journal.withReplayLease(runtimeId, async () => 'wrong-owner');
   }, RUNTIME_ID)).rejects.toThrow('RUNTIME_COMMAND_REPLAY_LEASE_BUSY');
 
   await page.evaluate(() => {
@@ -294,12 +312,13 @@ test('remote command replay lease has exactly one browser-tab owner', { tag: '@r
 test('cross-tab terminal settlement cannot be resurrected by a stale accepted write', { tag: '@resilience' }, async ({ page, context }) => {
   const settler = await context.newPage();
   const staleWriter = await context.newPage();
-  await Promise.all([page.goto('/'), settler.goto('/'), staleWriter.goto('/')]);
+  await Promise.all([page.goto('/app'), settler.goto('/app'), staleWriter.goto('/app')]);
   await deleteJournal(page);
   await Promise.all([unlockJournal(page), unlockJournal(settler), unlockJournal(staleWriter)]);
   const commandId = await page.evaluate(async ({ runtimeId, serverFingerprint }) => {
-    const journal = await import('/src/lib/stores/runtimeCommandIntent.ts');
-    return journal.resolveRemoteRuntimeCommandId({
+    const journal = (window as never as { __xln?: { commandJournal?: { resolveId: (options: unknown) => Promise<string> } } }).__xln?.commandJournal;
+    if (!journal) throw new Error('TEST_COMMAND_JOURNAL_DEBUG_SURFACE_MISSING');
+    return journal.resolveId({
       runtimeId,
       serverFingerprint,
       input: { runtimeTxs: [], entityInputs: [], jInputs: [] },
@@ -319,8 +338,9 @@ test('cross-tab terminal settlement cannot be resurrected by a stale accepted wr
   await settler.evaluate(async (id) => {
     const target = window as typeof window & { __journalSettleState?: string };
     target.__journalSettleState = 'waiting';
-    const journal = await import('/src/lib/stores/runtimeCommandIntent.ts');
-    void journal.settleRemoteRuntimeCommandIntent(id).then(
+    const journal = (window as never as { __xln?: { commandJournal?: { settle: (commandId: string) => Promise<void> } } }).__xln?.commandJournal;
+    if (!journal) throw new Error('TEST_COMMAND_JOURNAL_DEBUG_SURFACE_MISSING');
+    void journal.settle(id).then(
       () => { target.__journalSettleState = 'done'; },
       error => { target.__journalSettleState = `error:${error instanceof Error ? error.message : String(error)}`; },
     );
@@ -328,8 +348,9 @@ test('cross-tab terminal settlement cannot be resurrected by a stale accepted wr
   await staleWriter.evaluate(async (id) => {
     const target = window as typeof window & { __journalAcceptedState?: string };
     target.__journalAcceptedState = 'waiting';
-    const journal = await import('/src/lib/stores/runtimeCommandIntent.ts');
-    void journal.markRemoteRuntimeCommandIntentAccepted(id, { receiptId: 'stale-receipt' }).then(
+    const journal = (window as never as { __xln?: { commandJournal?: { markAccepted: (commandId: string, upstream: unknown) => Promise<void> } } }).__xln?.commandJournal;
+    if (!journal) throw new Error('TEST_COMMAND_JOURNAL_DEBUG_SURFACE_MISSING');
+    void journal.markAccepted(id, { receiptId: 'stale-receipt' }).then(
       () => { target.__journalAcceptedState = 'done'; },
       error => { target.__journalAcceptedState = `error:${error instanceof Error ? error.message : String(error)}`; },
     );
