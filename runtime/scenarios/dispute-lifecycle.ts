@@ -11,6 +11,7 @@
 import type { AccountMachine, Env } from '../types';
 import type { JAdapter } from '../jadapter/types';
 import { getAccountFrameHistoryView } from '../machine/env-events';
+import { startRuntimeHistoryTraceForTesting } from '../history-retention';
 import { bootScenario, registerEntities, fundEntities } from './boot';
 import {
   getProcess,
@@ -100,6 +101,9 @@ export async function runDisputeLifecycle(_existingEnv?: Env): Promise<Env> {
       : {}),
   });
   env.quietRuntimeLogs = true;
+  const visualTrace = _existingEnv?.scenarioMode
+    ? startRuntimeHistoryTraceForTesting(env)
+    : null;
   const scenarioDebug = (globalThis as { process?: { env?: Record<string, string | undefined> } })
     .process?.env?.['XLN_SCENARIO_DEBUG'] === '1';
   if (scenarioDebug) env.scenarioLogLevel = 'debug';
@@ -440,9 +444,11 @@ export async function runDisputeLifecycle(_existingEnv?: Env): Promise<Env> {
     assert(!aliceAfterReopen?.pendingFrame, 'Alice pendingFrame must clear after explicit reopen', env);
     assert(!hubAfterReopen?.pendingFrame, 'Hub pendingFrame must clear after explicit reopen', env);
 
+    if (visualTrace) env.history = [...visualTrace.snapshots];
     console.log('✅ dispute-lifecycle passed');
     return env;
   } finally {
+    visualTrace?.stop();
     restoreStrict();
   }
 }
