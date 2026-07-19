@@ -1361,11 +1361,16 @@ export const planEntityOutputs = (
     // hint: after a runtime restart those two stale values can agree and would
     // otherwise route the bilateral message to the retired runtime forever.
     if (verifiedTargetRuntimeId && persistedTargetRuntimeId !== verifiedTargetRuntimeId) {
-      env.warn?.('network', 'ROUTE_TARGET_RUNTIME_REBOUND', {
+      const routeBindingData = {
         entityId: outputToRoute.entityId,
         persistedRuntimeId: persistedTargetRuntimeId || null,
         resolvedRuntimeId: verifiedTargetRuntimeId,
-      });
+      };
+      if (persistedTargetRuntimeId) {
+        env.warn?.('network', 'ROUTE_TARGET_RUNTIME_REBOUND', routeBindingData);
+      } else {
+        env.info?.('network', 'ROUTE_TARGET_RUNTIME_BOUND', routeBindingData);
+      }
       outputToRoute = { ...outputToRoute, runtimeId: verifiedTargetRuntimeId };
     } else if (
       persistedTargetRuntimeId &&

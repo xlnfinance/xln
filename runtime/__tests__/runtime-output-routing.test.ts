@@ -437,6 +437,42 @@ describe('runtime output routing', () => {
     expect(warnings).toEqual(['ROUTE_TARGET_RUNTIME_REBOUND']);
   });
 
+  test('records first verified runtime binding without reporting a route rebound', () => {
+    const resolvedRuntimeId = runtimeId('16');
+    const info: string[] = [];
+    const warnings: string[] = [];
+    const output = {
+      entityId: entityId('17'),
+      signerId: runtimeId('18'),
+      entityTxs: [],
+    } satisfies RoutedEntityInput;
+    const env = {
+      runtimeId: runtimeId('19'),
+      info: (_scope: string, code: string) => info.push(code),
+      warn: (_scope: string, code: string) => warnings.push(code),
+    } as unknown as Env;
+
+    const planned = planEntityOutputs(env, [output], {
+      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState ??= {},
+      getP2P: () => ({
+        enqueueEntityInputDelivery: () => deliveryAccepted('TEST_DELIVERED'),
+        getVerifiedRuntimeRoute: () => ({ runtimeId: resolvedRuntimeId, lastUpdated: 2 }),
+      }),
+      enqueueRuntimeInputs: () => {},
+      extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
+      hasLocalSignerForEntity: () => false,
+      hasLocalSignerForEntitySigner: () => false,
+      resolveSoleLocalSignerForEntity: () => null,
+      resolveRuntimeIdForEntity: () => resolvedRuntimeId,
+      resolveRuntimeIdForCrossJurisdictionEntity: () => resolvedRuntimeId,
+    });
+
+    expect(planned.remoteOutputs[0]?.targetRuntimeId).toBe(resolvedRuntimeId);
+    expect(planned.remoteOutputs[0]?.output.runtimeId).toBe(resolvedRuntimeId);
+    expect(info).toEqual(['ROUTE_TARGET_RUNTIME_BOUND']);
+    expect(warnings).toEqual([]);
+  });
+
   test('verified profile route supersedes matching stale durable and cached routes', () => {
     const staleRuntimeId = runtimeId('1a');
     const currentRuntimeId = runtimeId('1b');
