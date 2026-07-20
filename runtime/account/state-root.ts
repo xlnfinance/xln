@@ -218,7 +218,7 @@ const accountEntityOverlayState = (account: AccountMachine): unknown => ({
   disputePrepare: account.disputePrepare,
   settlementWorkspace: settlementOverlayState(account.settlementWorkspace),
   activeDispute: account.activeDispute,
-  pendingForward: account.pendingForward,
+  pendingForwards: account.pendingForwards,
   pendingWithdrawals: pendingWithdrawalOverlayState(account.pendingWithdrawals),
   shadow: account.shadow,
 });

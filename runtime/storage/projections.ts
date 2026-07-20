@@ -253,7 +253,7 @@ const projectAccountDocFull = (account: AccountMachine): StorageAccountDoc => ({
   ...withProp('pendingAccountInput', account.pendingAccountInput ? cloneCrossJurisdictionAccountInputRoute(account.pendingAccountInput) : undefined),
   ...withProp('pendingAccountInputSignerId', account.pendingAccountInputSignerId),
   ...withProp('lastOutboundFrameAck', account.lastOutboundFrameAck),
-  ...withProp('pendingForward', account.pendingForward),
+  ...withProp('pendingForwards', account.pendingForwards),
   ...withProp('hankoSignature', account.hankoSignature),
   ...withProp('lastRollbackFrameHash', account.lastRollbackFrameHash),
   ...withProp('abiProofBody', account.abiProofBody),

@@ -51,12 +51,17 @@ export interface RebalanceQuote {
 
 /** Fee state for request_collateral (fee is prepaid in requester frame). */
 export interface RebalanceRequestFeeState {
+  requestId: string;
   feeTokenId: number;
   feePaidUpfront: bigint;
   requestedAmount: bigint;
   policyVersion: number;
   requestedAt: number;
   requestedByLeft: boolean;
+  refund?: {
+    reason: 'policy_mismatch' | 'timeout' | 'fee_too_low' | 'manual';
+    refundedAmount: bigint;
+  };
 }
 
 export interface AccountRebalanceShadowState {

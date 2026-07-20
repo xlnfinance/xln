@@ -18,7 +18,7 @@ const crossJurisdictionStackKey = (jurisdiction: string): string => {
   return `stack:${stack.chainId}:${stack.depositoryAddress}`;
 };
 
-const crossJurisdictionAssetKey = (jurisdiction: string, tokenId: number): string =>
+export const crossJurisdictionAssetKey = (jurisdiction: string, tokenId: number): string =>
   `${crossJurisdictionStackKey(jurisdiction)}:${Math.floor(Number(tokenId) || 0)}`;
 
 const sourceLegIsCanonicalBase = (

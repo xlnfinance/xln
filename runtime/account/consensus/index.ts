@@ -1479,10 +1479,11 @@ async function commitIncomingFrameOnRealState(
     });
   }
 
-  if (validation.clonedMachine.pendingForward) {
-    accountMachine.pendingForward = validation.clonedMachine.pendingForward;
-    accountLog.debug('pending_forward.copied', {
-      route: validation.clonedMachine.pendingForward.route.map(r => shortId(r)),
+  if (validation.clonedMachine.pendingForwards?.length) {
+    accountMachine.pendingForwards = validation.clonedMachine.pendingForwards;
+    accountLog.debug('pending_forwards.copied', {
+      count: validation.clonedMachine.pendingForwards.length,
+      routes: validation.clonedMachine.pendingForwards.map(forward => forward.route.map(r => shortId(r))),
     });
   }
 

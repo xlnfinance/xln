@@ -5601,18 +5601,18 @@ describe('audit fail-fast regressions', () => {
       },
     };
     accountMachine.hankoSignature = `0x${'bb'.repeat(65)}`;
-    accountMachine.pendingForward = {
+    accountMachine.pendingForwards = [{
       route: [hex20('33'), hex20('44')],
       tokenId: 1,
       amount: 123n,
       description: 'pending-forward-storage',
-    };
+    }];
 
     const doc = projectAccountDoc(accountMachine);
 
     expect(doc.lastOutboundFrameAck).toEqual(accountMachine.lastOutboundFrameAck);
     expect(doc.hankoSignature).toBe(accountMachine.hankoSignature);
-    expect(doc.pendingForward).toEqual(accountMachine.pendingForward);
+    expect(doc.pendingForwards).toEqual(accountMachine.pendingForwards);
   });
 
   test('crontab resends bundled ACK plus pending frame after relay loss', async () => {
@@ -6340,12 +6340,14 @@ describe('audit fail-fast regressions', () => {
     const accepted = await applyAccountInput(env, rightAccount, leftProposal.accountInput);
     expect(accepted.success).toBe(true);
     expect(rightAccount.currentHeight).toBe(1);
-    expect(rightAccount.pendingFrame?.height).toBe(2);
-    expect(rightAccount.pendingFrame?.accountTxs).toEqual([
+    // Account apply only commits the winning frame and restores the losing
+    // intent. The Entity's one final proposableAccounts pass owns creation of
+    // the successor frame, so direct apply must not install it early.
+    expect(rightAccount.pendingFrame).toBeUndefined();
+    expect(rightAccount.mempool).toEqual([
       { type: 'add_delta', data: { tokenId: 2 } },
     ]);
     expect(rightAccount.rollbackCount).toBe(1);
-    expect(rightAccount.mempool).toEqual([]);
   });
 
   test('Entity flush re-sends LEFT winning proposal after simultaneous-frame collision', async () => {

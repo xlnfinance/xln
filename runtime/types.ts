@@ -1442,7 +1442,6 @@ export interface Env {
 
   // E→E message queue (always spans ticks - no same-tick cascade)
   pendingOutputs?: RoutedEntityInput[]; // Outputs queued for next tick
-  skipPendingForward?: boolean;   // Temp flag to defer forwarding to next frame
   networkInbox?: RoutedEntityInput[];   // Inbound network messages queued for next tick
   pendingNetworkOutputs?: RoutedEntityInput[]; // Durable, bounded at-least-once transport outbox.
   lockRuntimeSeed?: boolean;      // Prevent runtime seed updates during scenarios

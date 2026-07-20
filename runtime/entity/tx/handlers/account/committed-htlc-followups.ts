@@ -77,10 +77,17 @@ export async function applyCommittedHtlcLockFollowup(
 
 export function applyPendingForwardFollowup(ctx: HtlcFollowupContext): void {
   const { state, accountMachine, newState, mempoolOps } = ctx;
-  if (!accountMachine.pendingForward || ctx.env.skipPendingForward) return;
-  const forward = accountMachine.pendingForward;
-  const nextHop = forward.route.length > 1 ? forward.route[1] : null;
-  if (nextHop && newState.accounts.has(nextHop)) {
+  const forwards = accountMachine.pendingForwards;
+  if (!forwards?.length) return;
+
+  for (const [forwardIndex, forward] of forwards.entries()) {
+    const nextHop = forward.route.length > 1 ? forward.route[1] : undefined;
+    if (!nextHop) {
+      throw new Error(`ROUTED_PAYMENT_NEXT_HOP_MISSING:index=${forwardIndex}`);
+    }
+    if (!newState.accounts.has(nextHop)) {
+      throw new Error(`ROUTED_PAYMENT_NEXT_HOP_ACCOUNT_MISSING:index=${forwardIndex}:nextHop=${nextHop}`);
+    }
     mempoolOps.push({
       accountId: nextHop,
       tx: {
@@ -98,7 +105,7 @@ export function applyPendingForwardFollowup(ctx: HtlcFollowupContext): void {
       },
     });
   }
-  delete accountMachine.pendingForward;
+  delete accountMachine.pendingForwards;
 }
 
 export function applyHtlcTimeoutFollowups(ctx: HtlcFollowupContext, timedOutHashlocks: string[]): void {

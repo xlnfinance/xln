@@ -1052,11 +1052,11 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
       }),
     };
   }
-  if (account.pendingForward) {
-    result.pendingForward = {
-      ...account.pendingForward,
-      route: [...account.pendingForward.route],
-    };
+  if (account.pendingForwards) {
+    result.pendingForwards = account.pendingForwards.map(forward => ({
+      ...forward,
+      route: [...forward.route],
+    }));
   }
 
   // ABI-encoded proofBody for on-chain disputes

@@ -10,7 +10,6 @@ import { FINANCIAL } from '../../../constants';
 import { isLeftEntity } from '../../../entity/id';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 import { getAccountPerspective } from '../../../state-helpers';
-import { decodeRebalancePolicyMemo } from '../../../extensions/rebalance/policy';
 import { ensureDelta } from '../delta-utils';
 
 const directPaymentLog = createStructuredLogger('account.payment');
@@ -118,40 +117,6 @@ export function handleDirectPayment(
   // Apply canonical delta (identical on both sides)
   delta.offdelta += canonicalDelta;
 
-  const memoPolicy = decodeRebalancePolicyMemo(description);
-  if (memoPolicy) {
-    // Clear local pending request when hub refunds prepaid fee.
-    // Refund path is unilateral on hub side; requester must clear after refund payment commits.
-    if (memoPolicy.reason === 'policy_mismatch' || memoPolicy.reason === 'timeout' || memoPolicy.reason === 'fee_too_low') {
-      const candidates: Array<{
-        requestTokenId: number;
-        requestedAt: number;
-        feePaidUpfront: bigint;
-      }> = [];
-      for (const [requestTokenId, feeState] of accountMachine.requestedRebalanceFeeState?.entries() || []) {
-        const pendingRequestedAmount = accountMachine.requestedRebalance.get(requestTokenId) ?? 0n;
-        if (pendingRequestedAmount <= 0n) continue;
-        if (feeState.feeTokenId !== tokenId) continue;
-        // Refund must come from counterparty to requester.
-        if (senderIsLeft === feeState.requestedByLeft) continue;
-        candidates.push({
-          requestTokenId,
-          requestedAt: feeState.requestedAt || 0,
-          feePaidUpfront: feeState.feePaidUpfront || 0n,
-        });
-      }
-      candidates.sort((a, b) => (a.requestedAt === b.requestedAt ? a.requestTokenId - b.requestTokenId : a.requestedAt - b.requestedAt));
-      const match = candidates.find(c => c.feePaidUpfront <= 0n || amount <= c.feePaidUpfront) ?? candidates[0];
-      if (match) {
-        accountMachine.requestedRebalance.delete(match.requestTokenId);
-        accountMachine.requestedRebalanceFeeState?.delete(match.requestTokenId);
-        events.push(
-          `↩️ Rebalance request cleared after hub refund (${memoPolicy.reason}, token=${match.requestTokenId}, amount=${amount})`,
-        );
-      }
-    }
-  }
-
   // Events differ by perspective but state is identical (derive from byLeft)
   const { counterparty: cpForEvent } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
   const iAmLeft = accountMachine.proofHeader.fromEntity === leftEntity;
@@ -195,14 +160,16 @@ export function handleDirectPayment(
         // Store forwarding info for entity-consensus to create next hop transaction
         // NOTE: Route already sliced by entity/tx/apply (sender removed)
         // So route[0] = current entity, route[1] = next hop
-        accountMachine.pendingForward = {
+        const pendingForwards = accountMachine.pendingForwards ?? [];
+        pendingForwards.push({
           tokenId,
           amount,
           route: [...route], // Copy to prevent mutation
           ...(description ? { description } : {}),
           ...(deliveryMode ? { deliveryMode } : {}),
           ...(trustedGatewayEntityId ? { trustedGatewayEntityId } : {}),
-        };
+        });
+        accountMachine.pendingForwards = pendingForwards;
       }
     }
   }

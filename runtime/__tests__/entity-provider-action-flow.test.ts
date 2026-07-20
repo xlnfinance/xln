@@ -481,7 +481,6 @@ describe('EntityProvider action flow', () => {
       jurisdictionName: 'EntityProviderActions',
       jTxs: [jTx],
     }]);
-    expect(split.immediate).toEqual([]);
     expect(split.durable).toEqual([]);
     expect(split.retries.map((tx) => tx.type)).toEqual(['retryEntityProviderAction']);
 

@@ -330,6 +330,7 @@ import {
 import { cloneEntityState, resolveEntityProposerId } from './state-helpers';
 import { getEntityShortId, formatEntityId } from './utils';
 import { safeStringify } from './protocol/serialization';
+import { validateJInputs } from './wal/runtime-machine-schema/j';
 import {
   canonicalizeStorageAuditValue,
   computeCanonicalEntityHash,
@@ -1712,6 +1713,48 @@ export const registerEntityRuntimeHint = (env: Env, entityId: string, runtimeId:
 
 export const MAX_RUNTIME_FRAME_INGRESS_ENTRIES = 1_024;
 export const MAX_RUNTIME_FRAME_INGRESS_BYTES = 4 * 1024 * 1024;
+export const MAX_RUNTIME_J_INPUTS = 256;
+export const MAX_RUNTIME_J_TXS = 1_024;
+export const MAX_RUNTIME_J_TXS_PER_JURISDICTION = 512;
+export const MAX_RUNTIME_J_INPUT_BYTES = 1024 * 1024;
+
+const validateRuntimeJIngressLimits = (env: Env, runtimeInput: RuntimeInput): void => {
+  if (runtimeInput.jInputs === undefined) return;
+  if (!Array.isArray(runtimeInput.jInputs)) {
+    throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: Invalid jInputs: expected array, got ${typeof runtimeInput.jInputs}`);
+  }
+  if (runtimeInput.jInputs.length > MAX_RUNTIME_J_INPUTS) {
+    throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: Too many J inputs: ${runtimeInput.jInputs.length} > ${MAX_RUNTIME_J_INPUTS}`);
+  }
+  let totalTxs = 0;
+  let totalBytes = 0;
+  const txsByJurisdiction = new Map<string, number>();
+  for (const [index, input] of runtimeInput.jInputs.entries()) {
+    if (!input || !Array.isArray(input.jTxs)) {
+      throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: Invalid J input at index ${index}`);
+    }
+    const jurisdictionName = String(input.jurisdictionName || '');
+    if (!env.jReplicas?.has(jurisdictionName)) {
+      throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: Unknown J jurisdiction: ${jurisdictionName}`);
+    }
+    totalTxs += input.jTxs.length;
+    if (totalTxs > MAX_RUNTIME_J_TXS) {
+      throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: Too many J transactions: ${totalTxs} > ${MAX_RUNTIME_J_TXS}`);
+    }
+    const jurisdictionTxs = (txsByJurisdiction.get(jurisdictionName) ?? 0) + input.jTxs.length;
+    if (jurisdictionTxs > MAX_RUNTIME_J_TXS_PER_JURISDICTION) {
+      throw new Error(
+        `RUNTIME_INPUT_ADMISSION_REJECTED: Too many J transactions for ${jurisdictionName}: ` +
+        `${jurisdictionTxs} > ${MAX_RUNTIME_J_TXS_PER_JURISDICTION}`,
+      );
+    }
+    txsByJurisdiction.set(jurisdictionName, jurisdictionTxs);
+    totalBytes += new TextEncoder().encode(safeStringify(input)).byteLength;
+    if (totalBytes > MAX_RUNTIME_J_INPUT_BYTES) {
+      throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: J payload too large: ${totalBytes} > ${MAX_RUNTIME_J_INPUT_BYTES}`);
+    }
+  }
+};
 
 type AccountedRuntimeFrameIngressBuffer = RuntimeFrameIngressBuffer & { byteLength: number };
 type RuntimeFrameIngressEntry = RuntimeFrameIngressBuffer['entries'][number];
@@ -2017,6 +2060,7 @@ export const validateRuntimeInputAdmission = (env: Env, runtimeInput: RuntimeInp
       `RUNTIME_INPUT_ADMISSION_REJECTED: Invalid reliableReceipts: expected array, got ${typeof runtimeInput.reliableReceipts}`,
     );
   }
+  validateRuntimeJIngressLimits(env, runtimeInput);
   if (runtimeInput.runtimeTxs.length > 1000) {
     throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: Too many runtime transactions: ${runtimeInput.runtimeTxs.length} > 1000`);
   }
@@ -2366,19 +2410,18 @@ const applyRuntimeInput = async (
       );
     }
 
+    validateRuntimeJIngressLimits(env, runtimeInput);
+
     // Collect incoming J-inputs into early jOutbox (will be merged with handler jOutputs later)
     // These are NOT pushed to jReplica.mempool — they go to jOutbox → JAdapter post-save
     const earlyJOutbox: JInput[] = [];
     if (runtimeInput.jInputs && Array.isArray(runtimeInput.jInputs)) {
+      const validatedJInputs = validateJInputs(runtimeInput.jInputs, 'RUNTIME_INPUT_J');
       runtimeLog.debug('joutbox.incoming', { jInputs: runtimeInput.jInputs.length });
-      for (const jInput of runtimeInput.jInputs) {
+      for (const jInput of validatedJInputs) {
         const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
         if (!jReplica) {
-          runtimeLog.error('joutbox.jurisdiction_missing', {
-            jurisdictionName: jInput.jurisdictionName,
-            jTxs: jInput.jTxs.length,
-          });
-          continue;
+          rejectRuntimeInput(`Unknown J jurisdiction: ${jInput.jurisdictionName}`);
         }
         runtimeLog.debug('joutbox.collect', {
           jurisdictionName: jInput.jurisdictionName,
@@ -4439,7 +4482,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
         const splitJOutbox = splitJOutboxForDurableSubmit(result.jOutbox);
         registerPendingCommittedJOutbox(env, splitJOutbox.durable);
         queuedJSubmitRetries = splitJOutbox.retries;
-        jOutbox = splitJOutbox.immediate;
+        jOutbox = [];
         // Local authorization symbols prove that a command entered through a
         // trusted in-process adapter. They are neither deterministic protocol
         // data nor needed on replay (replay is authorized by the committed

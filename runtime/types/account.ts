@@ -367,15 +367,17 @@ export interface AccountMachine {
 
   hankoSignature?: string; // Latest generated account proof hanko.
 
-  // Payment routing: pending state for multi-hop payments.
-  pendingForward?: {
+  // Payment routing: locally derived follow-ups for every routed payment in a
+  // committed Account frame. This must remain an ordered list: byte-identical
+  // payments are independent signed intents and must never be deduplicated.
+  pendingForwards?: Array<{
     tokenId: number;
     amount: bigint;
     route: string[];
     description?: string;
     deliveryMode?: Extract<PaymentDeliveryMode, 'trusted'>;
     trustedGatewayEntityId?: string;
-  };
+  }>;
 
   // Withdrawal tracking (Phase 2: C→R)
   pendingWithdrawals: Map<string, {
@@ -775,6 +777,15 @@ export type AccountTx =
         feeTokenId?: number;  // Optional fee token (defaults to tokenId)
         feeAmount: bigint;    // Prepaid fee debited immediately in the request_collateral frame
         policyVersion: number; // Hub fee-policy version used to compute feeAmount
+      };
+    }
+  | {
+      type: 'rebalance_refund';
+      data: {
+        requestId: string;
+        requestTokenId: number;
+        amount: bigint;
+        reason: 'policy_mismatch' | 'timeout' | 'fee_too_low' | 'manual';
       };
     }
   | {

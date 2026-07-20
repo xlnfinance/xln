@@ -402,12 +402,10 @@ export const makeJSubmitResultRuntimeTx = (
 
 export const splitJOutboxForDurableSubmit = (
   jOutbox: JInput[],
-): { immediate: JInput[]; durable: JInput[]; retries: RuntimeTx[] } => {
-  const immediate: JInput[] = [];
+): { durable: JInput[]; retries: RuntimeTx[] } => {
   const durable: JInput[] = [];
   const retries: RuntimeTx[] = [];
   for (const input of jOutbox) {
-    const immediateTxs: JTx[] = [];
     const durableTxs: JTx[] = [];
     for (const jTx of input.jTxs) {
       if (isEntityProviderActionJTx(jTx)) {
@@ -433,7 +431,13 @@ export const splitJOutboxForDurableSubmit = (
           }));
         }
       } else if (jTx.type !== 'batch') {
-        immediateTxs.push(jTx);
+        // Direct EOA calls have no application nonce bound to RJEA state. A
+        // replay would sign a new transaction nonce and could execute twice.
+        // Debug mint belongs to bootstrap control-plane APIs; Depository debt
+        // enforcement is invoked by its monetary operations. Neither is a
+        // valid post-consensus side effect until it has an on-chain idempotency
+        // domain equivalent to Hanko/EntityProvider nonces.
+        throw new Error(`J_SUBMIT_NON_DURABLE_COMMAND_FORBIDDEN:${jTx.type}`);
       } else if (jTx.data.runtimeSubmitAttempt) {
         durableTxs.push(jTx);
       } else {
@@ -457,8 +461,7 @@ export const splitJOutboxForDurableSubmit = (
         }));
       }
     }
-    if (immediateTxs.length > 0) immediate.push({ jurisdictionName: input.jurisdictionName, jTxs: immediateTxs });
     if (durableTxs.length > 0) durable.push({ jurisdictionName: input.jurisdictionName, jTxs: durableTxs });
   }
-  return { immediate, durable, retries };
+  return { durable, retries };
 };

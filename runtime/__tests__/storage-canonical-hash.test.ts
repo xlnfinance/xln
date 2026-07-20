@@ -258,12 +258,12 @@ test('storage projection round-trip preserves canonical account optional-field s
   const state = replica.state;
   const account = state.accounts.get(counterpartyId)!;
   account.hankoSignature = '0xaccount-proof-hanko';
-  account.pendingForward = {
+  account.pendingForwards = [{
     tokenId: 1,
     amount: 25n,
     route: [entityId, counterpartyId],
     description: 'projection-round-trip',
-  };
+  }];
   account.lendingIntents = new Map([['lend-0123456789abcdef', 'fund']]);
   account.subcontracts = new Map([['custom-transformer', {
     transformerAddress: `0x${'33'.repeat(20)}`,
@@ -334,7 +334,7 @@ test('storage projection round-trip preserves canonical account optional-field s
   expect(hydratedState.accounts.get(counterpartyId)?.swapOrderHistory).toBeUndefined();
   expect(hydratedState.accounts.get(counterpartyId)?.swapClosedOrders).toBeUndefined();
   expect(hydratedState.accounts.get(counterpartyId)?.hankoSignature).toBe(account.hankoSignature);
-  expect(hydratedState.accounts.get(counterpartyId)?.pendingForward).toEqual(account.pendingForward);
+  expect(hydratedState.accounts.get(counterpartyId)?.pendingForwards).toEqual(account.pendingForwards);
   expect(hydratedState.accounts.get(counterpartyId)?.lendingIntents).toEqual(account.lendingIntents);
   expect(hydratedState.accounts.get(counterpartyId)?.subcontracts).toEqual(account.subcontracts);
   expect(hydratedState.accounts.get(counterpartyId)?.disputePrepare).toEqual(account.disputePrepare);

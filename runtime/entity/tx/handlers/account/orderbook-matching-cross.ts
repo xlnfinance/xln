@@ -17,6 +17,7 @@ import {
   type CrossJurisdictionFillInstruction,
   type CrossMarketOffer,
 } from '../../../../extensions/cross-j/orderbook';
+import { crossJurisdictionAssetKey } from '../../../../extensions/cross-j/market';
 import {
   buildCrossJurisdictionPendingFillFromAck,
   CROSS_J_PENDING_FILL_ACK_TTL_MS,
@@ -40,10 +41,34 @@ const orderbookCrossLog = createStructuredLogger('orderbook.cross');
 
 const cloneCrossBookForSimulation = (book: BookState): BookState => structuredClone(book) as BookState;
 
-const crossBookQtyLots = (baseTokenId: number, baseAmount: bigint): bigint => {
+export const crossBookQtyLots = (baseTokenId: number, baseAmount: bigint): bigint => {
   if (baseAmount <= 0n) return 0n;
   const lotScale = getSwapLotScale(baseTokenId);
-  return (baseAmount + lotScale - 1n) / lotScale;
+  return baseAmount / lotScale;
+};
+
+type PlannedCrossAck = NonNullable<ReturnType<typeof buildCrossJurisdictionFillAck>>;
+
+const assertPlannedCrossAckConservation = (plans: readonly PlannedCrossAck[]): void => {
+  const netByAsset = new Map<string, bigint>();
+  for (const { instruction } of plans) {
+    const sourceKey = crossJurisdictionAssetKey(
+      instruction.route.source.jurisdiction,
+      instruction.route.source.tokenId,
+    );
+    const targetKey = crossJurisdictionAssetKey(
+      instruction.route.target.jurisdiction,
+      instruction.route.target.tokenId,
+    );
+    netByAsset.set(sourceKey, (netByAsset.get(sourceKey) ?? 0n) - instruction.executionSourceAmount);
+    netByAsset.set(targetKey, (netByAsset.get(targetKey) ?? 0n) + instruction.executionTargetAmount);
+  }
+  const mismatches = [...netByAsset.entries()]
+    .filter(([, net]) => net !== 0n)
+    .sort(([left], [right]) => compareCanonicalText(left, right));
+  if (mismatches.length > 0) {
+    throw new Error(`CROSS_J_TRADE_CONSERVATION_FAILED:${mismatches.map(([asset, net]) => `${asset}=${net}`).join(',')}`);
+  }
 };
 
 const isWorkingCrossRouteStatus = (status: string | undefined): boolean =>
@@ -230,10 +255,9 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
         suspendedCrossOrderIds.add(orderId);
         continue;
       }
-      // Cross-j fill ratios are exact account/hash-ledger state, while the
-      // matcher stores whole lots. Use a ceiling lot count for the live row:
-      // the route cap still prevents over-settlement, and dropping the final
-      // fractional lot would silently remove working liquidity.
+      // The matcher stores whole lots. Never round a route remainder up: doing
+      // so creates an execution larger than one leg can settle. Sub-lot dust is
+      // closed by the committed fill ACK lifecycle instead of entering a trade.
       const canonicalQtyLots = crossBookQtyLots(meta.baseTokenId, meta.baseAmount);
       if (pendingAck) {
         // A cross-j partial fill ACK is an in-flight account settlement, not a
@@ -440,6 +464,7 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
     }
   }
 
+  const plannedAcks: PlannedCrossAck[] = [];
   for (const namespacedOrderId of [...crossAggregatedFills.keys()].sort(compareCanonicalText)) {
     const fill = crossAggregatedFills.get(namespacedOrderId);
     if (!fill) continue;
@@ -462,6 +487,18 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
           `account=${accountId} offer=${offerId} filledLots=${fill.filledLots}`,
       );
     }
+    plannedAcks.push(ack);
+  }
+
+  // Phase 1 is pure planning. No account mempool or admission state is touched
+  // until every source/target leg nets to zero by canonical asset.
+  assertPlannedCrossAckConservation(plannedAcks);
+
+  for (const ack of plannedAcks) {
+    const { accountId, offerId } = ack.instruction;
+    const namespacedOrderId = ack.instruction.orderId;
+    const meta = crossLiveOfferMeta.get(namespacedOrderId) ?? buildCrossMarketOfferFromBookOrder(hubState, namespacedOrderId);
+    if (!meta) throw new Error(`ORDERBOOK_CROSS_J_FILL_META_MISSING: order=${namespacedOrderId}`);
     const admission = getCrossAdmission(accountId, offerId);
     if (admission) {
       const pendingFill = buildCrossJurisdictionPendingFillFromAck(ack.tx, Number(hubState.timestamp || 0));

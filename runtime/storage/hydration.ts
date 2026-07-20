@@ -93,7 +93,7 @@ export const hydrateAccountDocFromStorage = (doc: StorageAccountDoc): AccountMac
   ...withProp('pendingAccountInput', doc.pendingAccountInput ? cloneCrossJurisdictionAccountInputRoute(doc.pendingAccountInput) : undefined),
   ...withProp('pendingAccountInputSignerId', doc.pendingAccountInputSignerId),
   ...withProp('lastOutboundFrameAck', doc.lastOutboundFrameAck),
-  ...withProp('pendingForward', doc.pendingForward),
+  ...withProp('pendingForwards', doc.pendingForwards),
   ...withProp('hankoSignature', doc.hankoSignature),
   ...withProp('lastRollbackFrameHash', doc.lastRollbackFrameHash),
   ...withProp('abiProofBody', doc.abiProofBody),

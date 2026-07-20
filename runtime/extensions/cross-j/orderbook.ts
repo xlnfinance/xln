@@ -587,8 +587,12 @@ export const buildCrossJurisdictionFillAck = (
   // cross-j never creates a second target-side payment lane.
   const exactFillRatio = deriveExactSwapFillRatio(
     targetTotal,
-    previousTargetClaimed + targetAmount >= targetTotal ? targetTotal : previousTargetClaimed + targetAmount,
+    previousTargetClaimed + targetAmount,
   );
+  if (
+    previousSourceClaimed + sourceAmount > sourceTotal ||
+    previousTargetClaimed + targetAmount > targetTotal
+  ) return null;
   const fillRatio = exactFillRatioToUint16(exactFillRatio);
   if (fillRatio <= previousCumulativeRatio) return null;
 
@@ -608,15 +612,18 @@ export const buildCrossJurisdictionFillAck = (
   const settlementSourceAmount = exactCumulativeSource - previousSourceClaimed;
   const settlementTargetAmount = exactCumulativeTarget - previousTargetClaimed;
   if (settlementSourceAmount <= 0n || settlementTargetAmount <= 0n) return null;
-  const sourceSavings = settlementSourceAmount > sourceAmount ? settlementSourceAmount - sourceAmount : 0n;
+  // The matcher owns one exact base/quote execution pair. The proportional
+  // source claim may be larger only when this order receives price improvement;
+  // the difference is returned during clear. It may never be smaller than the
+  // shared execution amount, because that would make the paired ACKs diverge.
+  if (settlementTargetAmount !== targetAmount || settlementSourceAmount < sourceAmount) return null;
+  const sourceSavings = settlementSourceAmount - sourceAmount;
   const priceImprovementAmount = sourceSavings;
   const priceImprovementTokenId = priceImprovementAmount > 0n
     ? Number(meta.route.source.tokenId)
     : null;
-  const executionSourceAmount = sourceSavings > 0n
-    ? settlementSourceAmount - sourceSavings
-    : settlementSourceAmount;
-  const executionTargetAmount = settlementTargetAmount;
+  const executionSourceAmount = sourceAmount;
+  const executionTargetAmount = targetAmount;
   const nextActualTargetAmount = previousTargetClaimed + executionTargetAmount;
   const terminalCancel =
     fillRatio >= CROSS_J_MAX_FILL_RATIO ||

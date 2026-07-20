@@ -11,6 +11,7 @@ import { handleDirectPayment } from './handlers/direct-payment';
 import { handleReserveToCollateral } from './handlers/reserve-to-collateral';
 import { handleRequestCollateral } from './handlers/request-collateral';
 import { handleRebalancePolicy } from './handlers/rebalance-policy';
+import { handleRebalanceRefund } from './handlers/rebalance-refund';
 import { handleReopenDisputed } from './handlers/reopen-disputed';
 import { handleHtlcLock } from './handlers/htlc-lock';
 import { handleHtlcResolve } from './handlers/htlc-resolve';
@@ -188,6 +189,9 @@ export async function applyAccountTx(
       }
       return result;
       }
+
+    case 'rebalance_refund':
+      return handleRebalanceRefund(accountMachine, accountTx, byLeft);
 
     case 'rebalance_policy':
       return handleRebalancePolicy(accountMachine, accountTx, byLeft, currentTimestamp);

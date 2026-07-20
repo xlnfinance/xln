@@ -899,7 +899,7 @@ const compactAccountDocForView = (doc: StorageAccountDoc): StorageAccountDoc => 
   if (pulls) compact.pulls = pulls;
   if (doc.pendingFrame) compact.pendingFrame = compactAccountFrameForView(doc.pendingFrame);
   if (doc.lastOutboundFrameAck) compact.lastOutboundFrameAck = doc.lastOutboundFrameAck;
-  if (doc.pendingForward) compact.pendingForward = doc.pendingForward;
+  if (doc.pendingForwards) compact.pendingForwards = doc.pendingForwards;
   if (doc.hankoSignature) compact.hankoSignature = doc.hankoSignature;
   if (doc.lastRollbackFrameHash) compact.lastRollbackFrameHash = doc.lastRollbackFrameHash;
   if (doc.currentFrameHanko) compact.currentFrameHanko = doc.currentFrameHanko;

@@ -68,27 +68,6 @@ export function handleRequestCollateral(
     return { success: false, events: [], error: `request_collateral: no delta for fee token ${feeToken}` };
   }
 
-  const requesterFeeCapacity = deriveDelta(feeDelta, requesterIsLeft).outCapacity;
-  const existingFeePaid = existingRequest > 0n ? (existingFeeState?.feePaidUpfront ?? 0n) : 0n;
-  const feeTopup = effectiveFeeTarget > existingFeePaid ? effectiveFeeTarget - existingFeePaid : 0n;
-  if (feeTopup > requesterFeeCapacity) {
-    return {
-      success: false,
-      events: [],
-      error: `request_collateral: insufficient fee capacity in token ${feeToken} (${requesterFeeCapacity} < ${feeTopup})`,
-    };
-  }
-
-  // Convention: positive offdelta means LEFT has more.
-  // requester pays hub upfront here.
-  if (feeTopup > 0n) {
-    if (requesterIsLeft) {
-      feeDelta.offdelta -= feeTopup;
-    } else {
-      feeDelta.offdelta += feeTopup;
-    }
-  }
-
   // Request size is deterministic from payload; when fee is paid in the SAME token,
   // request collateral for net amount after prepaid fee to avoid tiny pending tails.
   let effectiveRequest = effectiveAmount;
@@ -104,22 +83,30 @@ export function handleRequestCollateral(
     };
   }
   if (effectiveRequest <= 0n) {
-    // Roll back prepaid debit because no request remains after recompute.
-    if (feeTopup > 0n) {
-      if (requesterIsLeft) {
-        feeDelta.offdelta += feeTopup;
-      } else {
-        feeDelta.offdelta -= feeTopup;
-      }
-    }
-    accountMachine.requestedRebalance.delete(tokenId);
-    accountMachine.requestedRebalanceFeeState?.delete(tokenId);
-      return {
-        success: true,
-        events: [
-          `ℹ️ Collateral request became zero after prepaid fee charge (fee=${effectiveFeeTarget}, token=${feeToken})`,
-        ],
-      };
+    return {
+      success: true,
+      events: [
+        `ℹ️ Collateral request skipped: prepaid fee consumes the full request (fee=${effectiveFeeTarget}, token=${feeToken})`,
+      ],
+    };
+  }
+
+  const requesterFeeCapacity = deriveDelta(feeDelta, requesterIsLeft).outCapacity;
+  const existingFeePaid = existingRequest > 0n ? (existingFeeState?.feePaidUpfront ?? 0n) : 0n;
+  const feeTopup = effectiveFeeTarget > existingFeePaid ? effectiveFeeTarget - existingFeePaid : 0n;
+  if (feeTopup > requesterFeeCapacity) {
+    return {
+      success: false,
+      events: [],
+      error: `request_collateral: insufficient fee capacity in token ${feeToken} (${requesterFeeCapacity} < ${feeTopup})`,
+    };
+  }
+
+  // Convention: positive offdelta means LEFT has more.
+  // requester pays hub upfront here. All no-op exits are above this mutation.
+  if (feeTopup > 0n) {
+    if (requesterIsLeft) feeDelta.offdelta -= feeTopup;
+    else feeDelta.offdelta += feeTopup;
   }
 
   if (!accountMachine.requestedRebalanceFeeState) {
@@ -130,6 +117,8 @@ export function handleRequestCollateral(
   // Hub's hubRebalanceHandler will pick this up and add R→C to jBatch.
   accountMachine.requestedRebalance.set(tokenId, effectiveRequest);
   accountMachine.requestedRebalanceFeeState.set(tokenId, {
+    requestId: existingFeeState?.requestId ??
+      `rebalance:${requesterIsLeft ? 'left' : 'right'}:${tokenId}:${accountMachine.currentHeight + 1}`,
     feeTokenId: feeToken,
     feePaidUpfront: effectiveFeeTarget,
     requestedAmount: effectiveRequest,

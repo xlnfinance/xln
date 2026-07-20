@@ -159,7 +159,7 @@ export type StorageAccountDoc = {
   pendingAccountInput?: AccountMachine['pendingAccountInput'];
   pendingAccountInputSignerId?: AccountMachine['pendingAccountInputSignerId'];
   lastOutboundFrameAck?: AccountMachine['lastOutboundFrameAck'];
-  pendingForward?: AccountMachine['pendingForward'];
+  pendingForwards?: AccountMachine['pendingForwards'];
   hankoSignature?: AccountMachine['hankoSignature'];
   rollbackCount: number;
   lastRollbackFrameHash?: string;

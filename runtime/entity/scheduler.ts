@@ -910,6 +910,18 @@ async function hubRebalanceHandler(
         continue;
       }
       const prepaidFee = feeState.feePaidUpfront;
+      if (feeState.refund) {
+        emitRebalanceDebug({
+          step: 2,
+          status: 'blocked',
+          event: 'request_refund_in_progress',
+          counterpartyId,
+          tokenId,
+          requestId: feeState.requestId,
+          refundedAmount: String(feeState.refund.refundedAmount),
+        });
+        continue;
+      }
       let jBatchSubmittedAt = accountMachine.shadow.rebalance.submittedAtByToken.get(tokenId) ?? 0;
       const submittedAgeMs = jBatchSubmittedAt > 0 ? now - jBatchSubmittedAt : 0;
       let submittedBatchStale = jBatchSubmittedAt > 0 && submittedAgeMs >= HUB_SUBMITTED_REQUEST_STALE_MS;

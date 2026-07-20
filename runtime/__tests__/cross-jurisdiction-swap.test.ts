@@ -58,12 +58,13 @@ import { deriveCanonicalCrossJurisdictionBookOwnerForLegs, deriveCanonicalCrossJ
 import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenIdsForJurisdiction } from '../account/utils';
 import { normalizeEntitySwapTradingPairs } from '../machine/swap-pairs';
 import { verifyHashLadderBinary } from '../protocol/htlc/hash-ladder';
-import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook/types';
+import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, quoteAmountAtPrice } from '../orderbook/types';
 import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../protocol/dispute/proof-builder';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../protocol/dispute/arguments';
 import { signEntityHashes } from '../hanko/signing';
 import { queueCrossJurisdictionSourceDisputeFromTargetDispute } from '../entity/tx/j-events-htlc';
 import { applyMergedEntityInputs } from '../machine/entity-inputs';
+import { crossBookQtyLots } from '../entity/tx/handlers/account/orderbook-matching-cross';
 import {
   selectMatchedCrossJAccountInputPairs,
   type RuntimeEntityRoutingDeps,
@@ -3155,6 +3156,67 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(ack?.instruction.priceImprovementMode).toBe('source_savings');
     expect(ack?.instruction.priceImprovementAmount).toBe(sourceTotal - executionSource);
     expect(ack?.tx.data.cancelRemainder).toBe(true);
+  });
+
+  test('paired cross-j ACKs conserve exact execution amounts and reject sub-lot liquidity', () => {
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const tron = makeJurisdiction('Tron', 728126428, '21', '22');
+    const hub = entity('91');
+    const seller = entity('92');
+    const buyer = entity('93');
+    const lot = SWAP_LOT_SCALE;
+    const makerPrice = 25_000_000n;
+    const takerLimit = 26_000_000n;
+    const quoteAt = (price: bigint) => quoteAmountAtPrice(2, 1, lot, price);
+    const sellRoute = buildPreparedCrossJurisdictionRoute({
+      orderId: 'paired-sell',
+      makerEntityId: seller,
+      hubEntityId: hub,
+      bookOwnerEntityId: hub,
+      source: { jurisdiction: jref(eth), entityId: seller, counterpartyEntityId: hub, tokenId: 2, amount: 2n * lot },
+      target: { jurisdiction: jref(tron), entityId: hub, counterpartyEntityId: seller, tokenId: 1, amount: 2n * quoteAt(makerPrice) },
+      status: 'resting',
+      createdAt: 1,
+      updatedAt: 1,
+    }, { runtimeSeed: 'paired-sell', sourceDisputeDelayMs: 5_000, now: 1 });
+    const buyRoute = buildPreparedCrossJurisdictionRoute({
+      orderId: 'paired-buy',
+      makerEntityId: buyer,
+      hubEntityId: hub,
+      bookOwnerEntityId: hub,
+      source: { jurisdiction: jref(tron), entityId: buyer, counterpartyEntityId: hub, tokenId: 1, amount: quoteAt(takerLimit) },
+      target: { jurisdiction: jref(eth), entityId: hub, counterpartyEntityId: buyer, tokenId: 2, amount: lot },
+      status: 'resting',
+      createdAt: 1,
+      updatedAt: 1,
+    }, { runtimeSeed: 'paired-buy', sourceDisputeDelayMs: 5_000, now: 1 });
+    const offer = (route: typeof sellRoute, accountId: string) => ({
+      offerId: route.orderId,
+      accountId,
+      makerIsLeft: false,
+      fromEntity: hub,
+      toEntity: route.makerEntityId,
+      createdHeight: 1,
+      giveTokenId: route.source.tokenId,
+      giveAmount: route.source.amount,
+      quantizedGive: route.source.amount,
+      wantTokenId: route.target.tokenId,
+      wantAmount: route.target.amount,
+      quantizedWant: route.target.amount,
+      minFillRatio: 0,
+      timeInForce: 0 as const,
+      crossJurisdiction: { ...route, status: 'resting' as const },
+    });
+    const sellMeta = buildCrossJurisdictionMarketOffer(offer(sellRoute, 'sell-account'), hub)!;
+    const buyMeta = buildCrossJurisdictionMarketOffer(offer(buyRoute, 'buy-account'), hub)!;
+    const fill = { filledLots: 1n, weightedCost: makerPrice };
+    const sellAck = buildCrossJurisdictionFillAck('sell-account', sellRoute.orderId, 'sell-account:paired-sell', sellMeta, fill)!;
+    const buyAck = buildCrossJurisdictionFillAck('buy-account', buyRoute.orderId, 'buy-account:paired-buy', buyMeta, fill)!;
+
+    expect(sellAck.instruction.executionSourceAmount).toBe(buyAck.instruction.executionTargetAmount);
+    expect(sellAck.instruction.executionTargetAmount).toBe(buyAck.instruction.executionSourceAmount);
+    expect(buyAck.instruction.priceImprovementAmount).toBe(quoteAt(takerLimit) - quoteAt(makerPrice));
+    expect(crossBookQtyLots(2, lot - 1n)).toBe(0n);
   });
 
   test('cross-j fill ack accepts floor-scaled source progress for target-derived exact ratio', async () => {
