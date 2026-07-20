@@ -40,6 +40,7 @@ import { createRelayStore } from '../relay/store';
 import { safeStringify } from '../protocol/serialization';
 import { requireDeliveryDelivered } from '../protocol/payments/delivery-result';
 import { createStructuredLogger } from '../infra/logger';
+import { getPerfMs } from '../utils';
 import { handleMeshBootstrapLoopError } from './mesh-bootstrap-fail-fast';
 import {
   advanceBootstrapProgress,
@@ -533,7 +534,7 @@ const nodeLog = createStructuredLogger('mesh.hub', { hub: resolvedArgs.name });
 let jurisdictionImportDiagnostics: JurisdictionImportDiagnostics | null = null;
 const HUB_RUNTIME_TICK_DELAY_MS = Math.max(
   0,
-  Number(process.env['HUB_RUNTIME_TICK_DELAY_MS'] || process.env['XLN_RUNTIME_TICK_DELAY_MS'] || '1'),
+  Number(process.env['HUB_RUNTIME_TICK_DELAY_MS'] || process.env['XLN_RUNTIME_TICK_DELAY_MS'] || '0'),
 );
 const HUB_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME = Math.max(
   1,
@@ -1559,14 +1560,17 @@ const run = async (): Promise<void> => {
   let externalIngressReady = false;
   let meshLoop: ReturnType<typeof setInterval> | null = null;
   let meshLoopInFlight = false;
-  let meshLoopProgress: BootstrapProgress = beginBootstrapProgress(Date.now());
+  // Bootstrap liveness measures elapsed process time, not civil time. Date.now
+  // can move backwards under NTP and previously killed every hub at once.
+  const bootstrapClockMs = (): number => getPerfMs();
+  let meshLoopProgress: BootstrapProgress = beginBootstrapProgress(bootstrapClockMs());
   let meshLoopFatal = false;
   let meshBootstrapPaused = false;
   let startMeshBootstrapProducer: (() => void) | null = null;
   let shuttingDown = false;
 
   const markMeshBootstrapProgress = (step: string): void => {
-    meshLoopProgress = advanceBootstrapProgress(meshLoopProgress, step, Date.now());
+    meshLoopProgress = advanceBootstrapProgress(meshLoopProgress, step, bootstrapClockMs());
   };
 
   const pauseMeshBootstrapProducerAndWait = async (): Promise<void> => {
@@ -1735,7 +1739,7 @@ const run = async (): Promise<void> => {
           buildBootstrapProgressHealth(
             meshLoopProgress,
             meshLoopInFlight,
-            Date.now(),
+            bootstrapClockMs(),
             MESH_BOOTSTRAP_STALL_TIMEOUT_MS,
           ),
         );

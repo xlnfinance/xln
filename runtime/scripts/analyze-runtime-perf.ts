@@ -86,6 +86,11 @@ const consumeProfile = (profile: ParsedProfile): void => {
     observe(profile.runtime, 'runtime.process.total', totalMs);
     observePhases(profile, 'runtime.process', totalMs);
     const storage = asRecord(profile.payload['storageMs']);
+    const cpu = asRecord(profile.payload['cpuMs']);
+    for (const [stage, rawDurationMs] of Object.entries(cpu ?? {})) {
+      const durationMs = asDurationMs(rawDurationMs);
+      if (durationMs !== undefined) observe(profile.runtime, `runtime.cpu.${stage}`, durationMs);
+    }
     for (const [stage, rawDurationMs] of Object.entries(storage ?? {})) {
       const durationMs = asDurationMs(rawDurationMs);
       if (durationMs !== undefined) observe(profile.runtime, `runtime.storage.${stage}`, durationMs);

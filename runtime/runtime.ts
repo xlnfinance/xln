@@ -22,14 +22,23 @@ const RUNTIME_APPLY_SLOW_MS = Math.max(
   0,
   Number(nodeProcess?.env?.['XLN_RUNTIME_APPLY_SLOW_MS'] || '500'),
 );
+const RUNTIME_ACCOUNT_CAUSAL_TRACE =
+  nodeProcess?.env?.['XLN_ACCOUNT_CAUSAL_TRACE'] === '1';
 const RUNTIME_PROCESS_PROFILE =
-  RUNTIME_APPLY_PROFILE || nodeProcess?.env?.['XLN_RUNTIME_PROCESS_PROFILE'] === '1';
+  RUNTIME_APPLY_PROFILE ||
+  RUNTIME_ACCOUNT_CAUSAL_TRACE ||
+  nodeProcess?.env?.['XLN_RUNTIME_PROCESS_PROFILE'] === '1';
 const RUNTIME_PROCESS_SLOW_MS = Math.max(
   0,
   Number(nodeProcess?.env?.['XLN_RUNTIME_PROCESS_SLOW_MS'] || '1000'),
 );
 import { getPerfMs, getWallClockMs } from './utils';
 import { cumulativeMarksToPhases } from './infra/perf-profile';
+import {
+  causalTraceContainsWork,
+  summarizeRuntimeAccountCausality,
+  type EntityInputCausalTrace,
+} from './infra/account-causal-trace';
 import {
   cloneIsolatedEntityInput,
   cloneIsolatedRoutedEntityInputs,
@@ -1241,7 +1250,7 @@ const quarantineLiveRuntimeInput = (
  *   1. process() — drain mempool, apply R-frame (pure E/A consensus)
  *   2. persist   — atomic LevelDB write of finalized frame
  *   3. broadcast — J-batch execution + E-output P2P dispatch (side effects)
- *   4. sleep     — configurable delay (0 = no wait, just yield)
+ *   4. schedule  — optional configured delay; zero drains chained work immediately
  */
 export type RuntimeLoopConfig = {
   tickDelayMs?: number;
@@ -1345,8 +1354,8 @@ export function startRuntimeLoop(env: Env, config?: RuntimeLoopConfig): () => vo
           const remainingDelayMs = getRemainingRuntimeFrameDelayMs(env);
           if (remainingDelayMs > 0) {
             await sleep(remainingDelayMs);
-          } else {
-            // Drain chained outputs/ACKs immediately.
+          } else if (runtimeLoopTickDelayMs > 0) {
+            // A positive operator override intentionally throttles chained work.
             await sleep(runtimeLoopTickDelayMs);
           }
           continue;
@@ -2435,7 +2444,12 @@ const applyRuntimeInput = async (
     // attempting to reconstruct the anchor only at commit time would have
     // already lost the only authoritative H0 state. This also covers an entity
     // imported and advanced in the same Runtime frame.
-    applyCertifiedEntityLineagePlan(env, buildCertifiedEntityLineagePlan(env));
+    const entityLineageAnchorMissing = [...env.eReplicas.values()].some(replica => (
+      Boolean(replica?.state) && !replica.certifiedFrameAnchor
+    ));
+    if (entityLineageAnchorMissing) {
+      applyCertifiedEntityLineagePlan(env, buildCertifiedEntityLineagePlan(env));
+    }
     markApplyProfile('lineage');
 
     const routingDeps = getRuntimeEntityRoutingDeps();
@@ -4026,10 +4040,15 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
   });
 
   const processProfileStartMs = getPerfMs();
+  const processProfileCpuStart = RUNTIME_PROCESS_PROFILE && nodeProcess?.cpuUsage
+    ? nodeProcess.cpuUsage()
+    : undefined;
   const processProfileMarks: Record<string, number> = {};
   const processProfileMetrics = {
     heightBefore: env.height,
     heightAfter: env.height,
+    timestampBefore: env.timestamp,
+    timestampAfter: env.timestamp,
     runtimeTxs: 0,
     entityInputs: 0,
     entityTxs: 0,
@@ -4040,6 +4059,11 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     jOutputs: 0,
     frameAdvanced: false,
     storageMs: undefined as Awaited<ReturnType<typeof saveRuntimeFrameToStorage>>['persistencePerfMs'],
+    cpuMs: undefined as { user: number; system: number; total: number } | undefined,
+    accountCausality: undefined as {
+      ingress: EntityInputCausalTrace[];
+      egress: EntityInputCausalTrace[];
+    } | undefined,
   };
   let processProfileOutcome = 'unknown';
   let reliableIngressCommits: ReliableIngressCommit[] = [];
@@ -4065,7 +4089,14 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
   };
   const logProcessProfile = (): void => {
     processProfileMetrics.heightAfter = env.height;
+    processProfileMetrics.timestampAfter = env.timestamp;
     const elapsedMs = Math.round(getPerfMs() - processProfileStartMs);
+    if (processProfileCpuStart && nodeProcess?.cpuUsage) {
+      const cpu = nodeProcess.cpuUsage(processProfileCpuStart);
+      const user = cpu.user / 1_000;
+      const system = cpu.system / 1_000;
+      processProfileMetrics.cpuMs = { user, system, total: user + system };
+    }
     const hasProfileWork =
       processProfileMetrics.runtimeTxs > 0 ||
       processProfileMetrics.entityInputs > 0 ||
@@ -4322,6 +4353,12 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     );
     runtimeInput.entityInputs = await prepareHtlcPaymentEntityInputs(env, runtimeInput.entityInputs);
     runtimeInputForRequeue = cloneRuntimeFrameMempool(runtimeInput);
+    if (RUNTIME_ACCOUNT_CAUSAL_TRACE) {
+      const ingress = summarizeRuntimeAccountCausality(runtimeInput.entityInputs);
+      if (causalTraceContainsWork(ingress)) {
+        processProfileMetrics.accountCausality = { ingress, egress: [] };
+      }
+    }
     processProfileMetrics.entityInputs = runtimeInput.entityInputs.length;
     processProfileMetrics.entityTxs = runtimeInput.entityInputs.reduce(
       (sum, input) => sum + Number(input.entityTxs?.length || 0),
@@ -4390,6 +4427,15 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
           });
         }
         entityOutbox = result.entityOutbox;
+        if (RUNTIME_ACCOUNT_CAUSAL_TRACE) {
+          const egress = summarizeRuntimeAccountCausality(entityOutbox);
+          if (causalTraceContainsWork(egress)) {
+            processProfileMetrics.accountCausality = {
+              ingress: processProfileMetrics.accountCausality?.ingress ?? [],
+              egress,
+            };
+          }
+        }
         const splitJOutbox = splitJOutboxForDurableSubmit(result.jOutbox);
         registerPendingCommittedJOutbox(env, splitJOutbox.durable);
         queuedJSubmitRetries = splitJOutbox.retries;

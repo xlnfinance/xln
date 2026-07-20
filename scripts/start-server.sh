@@ -63,10 +63,10 @@ export XLN_STORAGE_WRITE_TIMEOUT_MS=${XLN_STORAGE_WRITE_TIMEOUT_MS:-60000}
 # can starve the authoritative WAL write. Keep bootstrap WAL-only; the first
 # compact recovery snapshot is a steady-state concern.
 export XLN_SNAPSHOT_INTERVAL_FRAMES=${XLN_SNAPSHOT_INTERVAL_FRAMES:-1024}
-# Leave a bounded scheduling window between CPU-heavy Runtime frames so the
-# one-CPU production host can serve health, relay, nginx, and ssh control-plane I/O.
-export XLN_RUNTIME_TICK_DELAY_MS=${XLN_RUNTIME_TICK_DELAY_MS:-25}
-export MARKET_MAKER_RUNTIME_TICK_DELAY_MS=${MARKET_MAKER_RUNTIME_TICK_DELAY_MS:-25}
+# Chained Runtime work is latency-critical. Async persistence/network I/O yields
+# naturally; operators may still set an explicit positive throttle if required.
+export XLN_RUNTIME_TICK_DELAY_MS=${XLN_RUNTIME_TICK_DELAY_MS:-0}
+export MARKET_MAKER_RUNTIME_TICK_DELAY_MS=${MARKET_MAKER_RUNTIME_TICK_DELAY_MS:-0}
 export MARKET_MAKER_API_YIELD_MS=${MARKET_MAKER_API_YIELD_MS:-25}
 export XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME=${XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME:-8}
 export XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME=${XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME:-64}

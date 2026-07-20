@@ -40,7 +40,6 @@ import {
   shouldIncludeToken,
   summarizeDeltasForLog,
 } from './helpers';
-import { proposeAccountFrame } from './propose';
 import { appendAccountMempoolTx, appendAccountMempoolTxs } from '../mempool';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../protocol/dispute/arguments';
 import type {
@@ -766,35 +765,10 @@ async function handlePendingFrameAck(
     appendAccountMempoolTxs(accountMachine, ackAutoRebalanceTxs, 'accountConsensus:ackAutoRebalance');
     events.push(`🔄 Auto-rebalance queued ${ackAutoRebalanceTxs.length} tx(s) after ACK commit`);
   }
-  // CRITICAL FIX: Chained Proposal - if mempool has items (e.g. j_event_claim), propose immediately
+  // Entity consensus owns the only Account proposal flush. A pure ACK may
+  // unlock queued work, but proposing here would expose a half-finalized
+  // pendingFrame before the Entity pass binds its route and signer.
   if (!proposal) {
-    if (accountMachine.mempool.length > 0) {
-      const proposeResult = await proposeAccountFrame(
-        env,
-        accountMachine,
-        securityContext.entityTimestamp,
-        undefined,
-        committedJClaims.store,
-      );
-      if (proposeResult.success && proposeResult.accountInput) {
-        return {
-          kind: 'return',
-          result: {
-            success: true,
-            response: proposeResult.accountInput,
-            events: [...events, ...proposeResult.events],
-            timedOutHashlocks,
-            ...(committedFrames.length > 0 && { committedFrames }),
-            ...(proposeResult.revealedSecrets && { revealedSecrets: proposeResult.revealedSecrets }),
-            ...(proposeResult.swapOffersCreated && { swapOffersCreated: proposeResult.swapOffersCreated }),
-            ...(proposeResult.swapCancelRequests && { swapCancelRequests: proposeResult.swapCancelRequests }),
-            ...(proposeResult.swapOffersCancelled && { swapOffersCancelled: proposeResult.swapOffersCancelled }),
-            ...(proposeResult.hashesToSign &&
-              proposeResult.hashesToSign.length > 0 && { hashesToSign: proposeResult.hashesToSign }),
-          },
-        };
-      }
-    }
     if (HEAVY_LOGS) accountLog.debug('return.ack_only', { height: ackHeight });
     return {
       kind: 'return',
@@ -980,7 +954,24 @@ function resolveSameHeightIncomingFrame(
     if (accountMachine.mempool.length > 0) {
       events.push(`⚠️ LEFT has ${accountMachine.mempool.length} pending txs while waiting for RIGHT's ACK`);
     }
-    return { success: true, events, ...(committedFrames.length > 0 && { committedFrames }) };
+    const pendingResponse = accountMachine.pendingAccountInput;
+    const pendingProposal = pendingResponse ? accountInputProposal(pendingResponse) : undefined;
+    if (
+      !pendingResponse ||
+      !pendingProposal ||
+      pendingProposal.frame.stateHash !== accountMachine.pendingFrame.stateHash
+    ) {
+      throw new Error(`ACCOUNT_COLLISION_PENDING_RESPONSE_MISSING:${receivedFrame.height}`);
+    }
+    // LEFT did not accept the peer proposal, so it owes no ACK. It must resend
+    // the exact already-signed proposal that won the deterministic collision;
+    // rebuilding it would risk changing bytes, nonce, or Hanko.
+    return {
+      success: true,
+      response: structuredClone(pendingResponse),
+      events,
+      ...(committedFrames.length > 0 && { committedFrames }),
+    };
   }
 
   const receivedHash = receivedFrame.stateHash;
@@ -1538,26 +1529,6 @@ async function commitIncomingFrameOnRealState(
   }
 }
 
-function mergeBatchedProposalIntoAck(
-  response: Extract<AccountInput, { kind: 'ack' }>,
-  proposeResult: ProposeAccountFrameResult,
-  events: string[],
-): Extract<AccountInput, { kind: 'frame_ack' }> {
-  const proposal = proposeResult.accountInput && accountInputProposal(proposeResult.accountInput);
-  if (!proposal) throw new Error('ACCOUNT_FLUSH_PROPOSAL_MISSING');
-  const newFrameId = proposal.frame.height;
-  events.push(`📤 Batched ACK + frame ${newFrameId}`);
-  return {
-    kind: 'frame_ack',
-    fromEntityId: response.fromEntityId,
-    toEntityId: response.toEntityId,
-    domain: structuredClone(response.domain),
-    ...(response.watchSeed ? { watchSeed: response.watchSeed } : {}),
-    ack: response.ack,
-    proposal,
-  };
-}
-
 type IncomingFrameAckMaterial = {
   response: Extract<AccountInput, { kind: 'ack' }>;
   outboundAck: {
@@ -1697,42 +1668,6 @@ async function buildIncomingFrameAckMaterial(
   };
 }
 
-async function maybeBatchAckWithNewFrame(
-  env: Env,
-  accountMachine: AccountMachine,
-  entityTimestamp: number,
-  input: AccountInput,
-  response: Extract<AccountInput, { kind: 'ack' }>,
-  events: string[],
-  accountJClaimNodeStore: AccountJClaimNodeStore,
-): Promise<{ response: AccountInput; proposeResult: ProposeAccountFrameResult | undefined }> {
-  let proposeResult: ProposeAccountFrameResult | undefined;
-
-  if (HEAVY_LOGS) {
-    accountLog.debug('ack.batch_check', {
-      from: shortId(input.fromEntityId),
-      mempool: accountMachine.mempool.length,
-      pendingFrame: Boolean(accountMachine.pendingFrame),
-      mempoolTxs: accountMachine.mempool.map(tx => tx.type),
-    });
-  }
-  if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
-    proposeResult = await proposeAccountFrame(
-      env,
-      accountMachine,
-      entityTimestamp,
-      undefined,
-      accountJClaimNodeStore,
-    );
-
-    if (proposeResult.success && proposeResult.accountInput) {
-      return { response: mergeBatchedProposalIntoAck(response, proposeResult, events), proposeResult };
-    }
-  }
-
-  return { response, proposeResult };
-}
-
 function storeAckDisputeState(
   accountMachine: AccountMachine,
   material: IncomingFrameAckMaterial,
@@ -1801,40 +1736,32 @@ function buildIncomingFrameReturnPayload(
 async function buildAckResponseForIncomingFrame(
   env: Env,
   accountMachine: AccountMachine,
-  securityContext: AccountInputSecurityContext,
   input: AccountInput,
   receivedFrame: AccountFrame,
   validation: IncomingFrameValidation,
   events: string[],
   timedOutHashlocks: string[],
   committedFrames: AccountCommittedFrame[],
-  accountJClaimNodeStore: AccountJClaimNodeStore,
 ): Promise<HandleAccountInputResult> {
   const ackMaterial = await buildIncomingFrameAckMaterial(env, accountMachine, input, receivedFrame, events);
   if (ackMaterial.kind === 'return') return ackMaterial.result;
   const { material } = ackMaterial;
   storeAckDisputeState(accountMachine, material);
   if (material.proofChanged) accountMachine.proofHeader.nextProofNonce = material.ackSignedNonce + 1;
-  // Install the reusable ACK before proposing the successor so the immediate
-  // response and every durable retry cache the same frame_ack bytes. Building
-  // the proposal first would cache a pure successor frame that can overtake
-  // its ACK after a retry and wedge the peer behind its pending predecessor.
+  // Install the reusable ACK before the final Entity flush. The flush may
+  // combine it with a successor proposal, while retries retain these exact
+  // ACK bytes independently of that successor.
   accountMachine.lastOutboundFrameAck = material.outboundAck;
-  const { response, proposeResult } = await maybeBatchAckWithNewFrame(
-    env,
-    accountMachine,
-    securityContext.entityTimestamp,
-    input,
-    material.response,
-    events,
-    accountJClaimNodeStore,
-  );
+  // Entity consensus owns the only Account-output flush point. Do not propose
+  // here: later AccountInputs, matching, HTLC hooks, and cross-j hooks in the
+  // same Entity frame may enqueue more work for this account. The final
+  // proposableAccounts pass emits either ACK+proposal or the mandatory ACK.
   return buildIncomingFrameReturnPayload(
     input,
     receivedFrame,
-    response,
+    material.response,
     validation,
-    proposeResult,
+    undefined,
     material.ackDisputeHash,
     events,
     timedOutHashlocks,
@@ -1946,14 +1873,12 @@ async function handleIncomingAccountFrame(
     result: await buildAckResponseForIncomingFrame(
       env,
       accountMachine,
-      securityContext,
       input,
       preflight.receivedFrame,
       validationResult.validation,
       events,
       timedOutHashlocks,
       committedFrames,
-      committedJClaims.store,
     ),
   };
 }

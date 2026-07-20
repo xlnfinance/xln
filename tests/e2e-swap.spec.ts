@@ -1355,6 +1355,28 @@ async function executeOrderbookClickFill(
   options?: { scope?: 'aggregated' | 'selected'; preferredAccountId?: string },
 ): Promise<{ routedCounterpartyId: string }> {
   const orderbookLogs: string[] = [];
+  const rpc2Methods = new Map<string, number>();
+  let rpc2HttpRequests = 0;
+  let rpc2JsonRpcCalls = 0;
+  let swapClickStartedAt = 0;
+  const onRpcRequest = (request: { url(): string; postData(): string | null }) => {
+    if (!/\/rpc2(?:\?|$)/.test(request.url())) return;
+    rpc2HttpRequests += 1;
+    const body = request.postData();
+    if (!body) return;
+    try {
+      const parsed = JSON.parse(body) as unknown;
+      const calls = Array.isArray(parsed) ? parsed : [parsed];
+      for (const call of calls) {
+        if (!call || typeof call !== 'object') continue;
+        const method = String((call as { method?: unknown }).method || 'missing');
+        rpc2JsonRpcCalls += 1;
+        rpc2Methods.set(method, (rpc2Methods.get(method) ?? 0) + 1);
+      }
+    } catch {
+      rpc2Methods.set('invalid-json', (rpc2Methods.get('invalid-json') ?? 0) + 1);
+    }
+  };
   const onConsole = (msg: { text(): string }) => {
     const text = msg.text();
     if (text.includes('ORDERBOOK') || text.includes('Swap offer placed') || text.includes('Failed to place swap')) {
@@ -1363,6 +1385,7 @@ async function executeOrderbookClickFill(
     }
   };
   page.on('console', onConsole as any);
+  page.on('request', onRpcRequest as any);
   const readOrderbookDebug = async () => await page.evaluate(({ entityId, signerId, counterpartyId }) => {
     const env = (window as any).isolatedEnv;
     const accountSelect = document.querySelector('[data-testid="swap-account-select"]') as HTMLSelectElement | null;
@@ -1530,7 +1553,25 @@ async function executeOrderbookClickFill(
       expect(routedCounterpartyId.toLowerCase()).toBe(clickedSourceIds[0]);
     }
     const swapStateBefore = await readSwapState(page, accountRef.entityId, accountRef.signerId, routedCounterpartyId);
+    await page.evaluate(() => {
+      const messages: string[] = [];
+      const observed = new Set<Element>();
+      const collect = () => {
+        for (const toast of document.querySelectorAll('.toast')) {
+          if (observed.has(toast)) continue;
+          observed.add(toast);
+          const message = toast.querySelector('.message')?.textContent?.trim();
+          if (message) messages.push(message);
+        }
+      };
+      collect();
+      const observer = new MutationObserver(collect);
+      observer.observe(document.body, { childList: true, subtree: true });
+      (window as any).__xlnSwapFeedbackMessages = messages;
+      (window as any).__xlnSwapFeedbackObserver = observer;
+    });
     await expect(placeButton).toBeEnabled({ timeout: 10_000 });
+    swapClickStartedAt = Date.now();
     await placeButton.click();
 
     await expect
@@ -1545,6 +1586,29 @@ async function executeOrderbookClickFill(
         { timeout: 30_000, intervals: [100, 250, 500, 1000] },
       )
       .toBe(true);
+    const clickToClosedStateMs = Date.now() - swapClickStartedAt;
+    const swapFeedbackMessages = await page.evaluate(() => {
+      ((window as any).__xlnSwapFeedbackObserver as MutationObserver | undefined)?.disconnect();
+      const messages = [...((window as any).__xlnSwapFeedbackMessages as string[] || [])];
+      delete (window as any).__xlnSwapFeedbackObserver;
+      delete (window as any).__xlnSwapFeedbackMessages;
+      return messages;
+    });
+    const placementFeedback = swapFeedbackMessages.filter((message) =>
+      message === 'Swap offer submitted'
+      || message === 'Order placed'
+      || message.startsWith('Order placed and fully filled'),
+    );
+    expect(placementFeedback).toHaveLength(1);
+    expect(placementFeedback[0]).toMatch(/^Order placed and fully filled/);
+    const rpc2MethodSummary = [...rpc2Methods.entries()]
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+      .map(([method, count]) => `${method}:${count}`)
+      .join(',');
+    console.log(
+      `[E2E-SWAP-LATENCY] click_to_closed_state=${clickToClosedStateMs}ms ` +
+      `rpc2_http=${rpc2HttpRequests} rpc2_calls=${rpc2JsonRpcCalls} methods=${rpc2MethodSummary || 'none'}`,
+    );
 
     await expect
       .poll(
@@ -1612,6 +1676,7 @@ async function executeOrderbookClickFill(
     throw error;
   } finally {
     page.off('console', onConsole as any);
+    page.off('request', onRpcRequest as any);
   }
 }
 

@@ -304,7 +304,7 @@ const MARKET_MAKER_BOOTSTRAP_START_DELAY_MS = Math.max(
 );
 const MARKET_MAKER_RUNTIME_TICK_DELAY_MS = Math.max(
   0,
-  Number(process.env['MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '1'),
+  Number(process.env['MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '0'),
 );
 const MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME = Math.max(
   1,

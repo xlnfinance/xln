@@ -27,6 +27,12 @@ import { formatRuntime } from '../qa/runtime-ascii';
 import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRuntimeSeed, converge, commitRuntimeInput, findReplica } from './helpers';
 import { createGossipLayer } from '../networking/gossip';
 import { swapKey } from '../orderbook/swap-execution';
+import { getTokenInfo } from '../account/utils';
+import {
+  summarizeRuntimeAccountCausality,
+  type EntityInputCausalTrace,
+} from '../infra/account-causal-trace';
+import { getPerfMs } from '../utils';
 
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
 let _processWithStep: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
@@ -67,12 +73,14 @@ async function processJEvents(env: Env): Promise<void> {
 const USDC_TOKEN_ID = 1;
 const ETH_TOKEN_ID = 2;
 
-// Precision
-const DECIMALS = 18n;
-const ONE = 10n ** DECIMALS;
+// Always derive raw units from canonical token metadata. USDC uses 6 decimals
+// while WETH uses 18; treating both as 18 makes a 3,000 USDC/WETH order look
+// like a 3e15 price and the live price-band correctly cancels it.
+const tokenUnits = (tokenId: number, amount: number | bigint): bigint =>
+  BigInt(amount) * (10n ** BigInt(getTokenInfo(tokenId).decimals));
 
-const eth = (amount: number | bigint) => BigInt(amount) * ONE;
-const usdc = (amount: number | bigint) => BigInt(amount) * ONE;
+const eth = (amount: number | bigint) => tokenUnits(ETH_TOKEN_ID, amount);
+const usdc = (amount: number | bigint) => tokenUnits(USDC_TOKEN_ID, amount);
 
 const ETH_PRICE_MAIN = 3000n;
 const ETH_PRICE_LOW = 2900n;
@@ -144,6 +152,41 @@ function assert(condition: boolean, message: string, env?: Env): void {
 }
 
 type RegisteredScenarioEntity = Readonly<{ id: string; signer: string }>;
+
+type ScenarioAccountCausalFrame = {
+  runtimeHeight: number;
+  runtimeTimestamp: number;
+  inputs: EntityInputCausalTrace[];
+};
+
+const printScenarioAccountTimeline = (
+  label: string,
+  frames: readonly ScenarioAccountCausalFrame[],
+): void => {
+  console.log(`[SWAP-CAUSAL] ${label} frames=${frames.length}`);
+  for (const frame of frames) {
+    for (const input of frame.inputs) {
+      if (input.accountEnvelopes.length === 0) {
+        console.log(
+          `[SWAP-CAUSAL] R=${frame.runtimeHeight} RT=${frame.runtimeTimestamp} ` +
+          `E=${input.entityFrameHeight ?? '-'} entity=${input.entity} ` +
+          `command=${input.entityTxTypes.join('+')} offers=${input.entityOfferIds.join(',') || '-'}`,
+        );
+        continue;
+      }
+      for (const envelope of input.accountEnvelopes) {
+        const proposalTxs = envelope.proposalTxs.map(tx =>
+          `${tx.type}${tx.offerId ? `:${tx.offerId}` : ''}`).join('+') || '-';
+        console.log(
+          `[SWAP-CAUSAL] R=${frame.runtimeHeight} RT=${frame.runtimeTimestamp} ` +
+          `E=${input.entityFrameHeight ?? '-'} entity=${input.entity} ` +
+          `A=${envelope.kind} ack=${envelope.ackHeight ?? '-'} ` +
+          `proposal=${envelope.proposalHeight ?? '-'} txs=${proposalTxs}`,
+        );
+      }
+    }
+  }
+};
 
 const registeredEntitiesByAlias = new Map<string, RegisteredScenarioEntity>();
 
@@ -684,12 +727,25 @@ function assertQuantizedRemaining(
 export async function swapWithOrderbook(env: Env): Promise<Env> {
   const restoreFailFast = enableStrictScenario(env, 'SWAP');
   const prevScenarioMode = env.scenarioMode;
+  const accountCausalFrames: ScenarioAccountCausalFrame[] = [];
+  let stopAccountCausalTrace = (): void => {};
   try {
   env.scenarioMode = true; // Deterministic time control
   if (env.quietRuntimeLogs === undefined) {
     env.quietRuntimeLogs = true;
   }
   const process = await getProcess();
+  const runtime = await import('../runtime');
+  stopAccountCausalTrace = runtime.registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
+    const inputs = summarizeRuntimeAccountCausality(runtimeInput.entityInputs);
+    if (inputs.length > 0) {
+      accountCausalFrames.push({
+        runtimeHeight: height,
+        runtimeTimestamp: env.timestamp,
+        inputs,
+      });
+    }
+  });
   const jadapter = getScenarioJAdapter(env);
   const runDisputePhase = Boolean((env as Env & { scenarioSwapRunDisputePhase?: boolean }).scenarioSwapRunDisputePhase);
   console.log('═══════════════════════════════════════════════════════════════');
@@ -825,6 +881,10 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
 
   // Step 2: Bob places swap_offer - should trigger matching!
   console.log(`📊 Step 2: Bob places swap_offer (${TRADE_ETH_HALF} ETH @ ${ETH_PRICE_HIGH})...`);
+  const bobTraceStart = accountCausalFrames.length;
+  const bobWallStartedAt = getPerfMs();
+  const processCpuUsage = globalThis.process?.cpuUsage?.bind(globalThis.process);
+  const bobCpuStartedAt = processCpuUsage?.();
   await process(env, [{
     entityId: bob.id,
     signerId: bob.signer,
@@ -856,6 +916,22 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
     return aliceFillRatio > 0 && bobFillRatio > 0;
   }, 20, 'RJEA fill ratios recorded');
   await converge(env);
+  const bobWallMs = getPerfMs() - bobWallStartedAt;
+  const bobCpu = bobCpuStartedAt ? processCpuUsage?.(bobCpuStartedAt) : undefined;
+  const bobTrace = accountCausalFrames.slice(bobTraceStart);
+  printScenarioAccountTimeline('bob-buy-001', bobTrace);
+  const bobResolveEnvelope = bobTrace
+    .flatMap(frame => frame.inputs)
+    .flatMap(input => input.accountEnvelopes)
+    .find(envelope => envelope.proposalTxs.some(tx =>
+      tx.type === 'swap_resolve' && tx.offerId === 'bob-buy-001'));
+  assert(bobResolveEnvelope?.kind === 'frame_ack', 'Hub coalesces offer ACK and resolve proposal into one frame_ack');
+  assert(bobResolveEnvelope?.ackHeight !== undefined, 'Coalesced Hub response contains the offer ACK');
+  console.log(
+    `[SWAP-CAUSAL-BENCH] offer=bob-buy-001 runtimeFrames=${bobTrace.length} ` +
+    `wallMs=${bobWallMs.toFixed(2)} cpuUserMs=${bobCpu ? (bobCpu.user / 1_000).toFixed(2) : 'n/a'} ` +
+    `cpuSystemMs=${bobCpu ? (bobCpu.system / 1_000).toFixed(2) : 'n/a'}`,
+  );
 
   // Verify the trades occurred via RJEA flow by checking bilateral accounts
   // After matching: Alice should have traded Bob's buy qty, Bob should have filled
@@ -923,14 +999,14 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   // Bob should have traded via RJEA (has non-zero deltas)
   const bobTraded = (bobEth?.offdelta ?? 0n) !== 0n || (bobUsdc?.offdelta ?? 0n) !== 0n;
   assert(bobTraded, 'Bob should have traded via RJEA flow');
-  assert(bobFillRatio === MAX_FILL_RATIO, `Bob fillRatio = ${MAX_FILL_RATIO} (got ${bobFillRatio})`);
+  assert(bobFillRatio > 0, `Bob has a recorded fill ratio (got ${bobFillRatio})`);
 
-  const aliceFilled = computeFilledAmounts(eth(TRADE_ETH), usdc(TRADE_USDC_MAIN_UNITS), aliceFillRatio);
-  const bobFilled = computeFilledAmounts(
-    usdcForEth(TRADE_ETH_HALF, ETH_PRICE_HIGH),
-    eth(TRADE_ETH_HALF),
-    bobFillRatio
-  );
+  // A taker buying at 3,100 against a resting 3,000 ask receives the full base
+  // quantity while spending less than its quote limit. One proportional ratio
+  // cannot represent that price improvement; assert the canonical execution
+  // amounts emitted by the matcher instead.
+  const executedBase = eth(TRADE_ETH_HALF);
+  const executedQuote = usdcForEth(TRADE_ETH_HALF, ETH_PRICE_MAIN);
 
   const aliceEthDelta = (aliceEth?.offdelta ?? 0n) - aliceBaselineEth;
   const aliceUsdcDelta = (aliceUsdc?.offdelta ?? 0n) - aliceBaselineUsdc;
@@ -942,21 +1018,21 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   // CANONICAL semantics: Right pays → offdelta INCREASES, Right receives → offdelta DECREASES
   // Bob gives USDC → offdelta increases (positive)
   // Bob receives ETH → offdelta decreases (negative)
-  assert(bobEthDelta === -bobFilled.filledWant, `Bob ETH delta = -${bobFilled.filledWant} (got ${bobEthDelta})`);
+  assert(bobEthDelta === -executedBase, `Bob ETH delta = -${executedBase} (got ${bobEthDelta})`);
   // Bob can prepay request_collateral fee in USDC during this phase.
   // So USDC delta is bounded by fill and may be slightly lower than exact filledGive.
   assert(bobUsdcDelta > 0n, `Bob USDC delta must stay positive after fill (got ${bobUsdcDelta})`);
   assert(
-    bobUsdcDelta <= bobFilled.filledGive,
-    `Bob USDC delta must not exceed filledGive ${bobFilled.filledGive} (got ${bobUsdcDelta})`,
+    bobUsdcDelta <= executedQuote,
+    `Bob USDC delta must not exceed execution quote ${executedQuote} (got ${bobUsdcDelta})`,
   );
-  assert(aliceEthDelta === -aliceFilled.filledGive, `Alice ETH delta = -${aliceFilled.filledGive} (got ${aliceEthDelta})`);
-  assert(aliceUsdcDelta === aliceFilled.filledWant, `Alice USDC delta = +${aliceFilled.filledWant} (got ${aliceUsdcDelta})`);
+  assert(aliceEthDelta === -executedBase, `Alice ETH delta = -${executedBase} (got ${aliceEthDelta})`);
+  assert(aliceUsdcDelta === executedQuote, `Alice USDC delta = +${executedQuote} (got ${aliceUsdcDelta})`);
 
   // Alice's offer should be partially filled (Bob took half of the order)
   const aliceOfferRemaining = aliceAccount?.swapOffers?.get('alice-sell-001');
   if (aliceOfferRemaining) {
-    const expectedRemaining = eth(TRADE_ETH) - aliceFilled.filledGive;
+    const expectedRemaining = eth(TRADE_ETH) - executedBase;
     assertQuantizedRemaining(aliceOfferRemaining.giveAmount, expectedRemaining, eth(TRADE_ETH), 'Alice remaining ETH');
   }
 
@@ -1221,6 +1297,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
 
   return env;
   } finally {
+    stopAccountCausalTrace();
     env.scenarioMode = prevScenarioMode ?? false;
     restoreFailFast();
   }
@@ -1245,24 +1322,6 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
   console.log('═══════════════════════════════════════════════════════════════\n');
 
   const hub = getRegisteredEntity('2');
-  const [, hubRep] = findReplica(env, hub.id);
-
-  // Reset hub orderbook + swap holds to isolate Phase 3 from earlier tests
-  if (hubRep.state.orderbookExt) {
-    hubRep.state.orderbookExt.books = new Map();
-  }
-  if (hubRep.state.pendingSwapFillRatios) {
-    hubRep.state.pendingSwapFillRatios.clear();
-  }
-  for (const account of hubRep.state.accounts.values()) {
-    if (account.swapOffers?.size) {
-      account.swapOffers.clear();
-    }
-    for (const delta of account.deltas.values()) {
-      if (delta.leftHold) delta.leftHold = 0n;
-      if (delta.rightHold) delta.rightHold = 0n;
-    }
-  }
 
   // Carol and Dave already registered in Phase 1 (registerEntities created all 5 eReplicas)
   const carol = { ...getRegisteredEntity('4'), name: 'Carol' };

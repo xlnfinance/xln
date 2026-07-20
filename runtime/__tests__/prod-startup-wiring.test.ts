@@ -597,12 +597,13 @@ describe('production startup wiring', () => {
       .toBeGreaterThan(runtimeSource.lastIndexOf('applyEntityInputFrameCap('));
     expect(runtimeSource).toContain('if (remoteOutputs.length > 0 && env.quietRuntimeLogs !== true)');
     expect(runtimeSource).not.toContain('void config;');
-    expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '1'");
+    expect(runtimeSource).toContain('else if (runtimeLoopTickDelayMs > 0)');
+    expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '0'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '8'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '64'");
     expect(mmNode).toContain('maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME');
     expect(mmNode).toContain('maxEntityTxsPerFrame: MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME');
-    expect(hubNode).toContain("process.env['XLN_RUNTIME_TICK_DELAY_MS'] || '1'");
+    expect(hubNode).toContain("process.env['XLN_RUNTIME_TICK_DELAY_MS'] || '0'");
     expect(hubNode).toContain("process.env['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '8'");
     expect(hubNode).toContain("process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '64'");
     expect(hubNode).toContain('maxEntityInputsPerFrame: HUB_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME');
@@ -672,7 +673,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const visibleByPair = countCrossSpecVisibleOffersByPair(env, specs);');
     expect(mmNode).toContain('countCrossPairCoverageGaps(env, right[1]) -');
     expect(mmNode).toContain('(visibleByPair.get(left.pairId) || 0) - (visibleByPair.get(right.pairId) || 0)');
-    expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '1'");
+    expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '0'");
     expect(mmNode).toContain("MARKET_MAKER_API_YIELD_MS'] || '5'");
     expect(mmNode).toContain('const yieldMarketMakerApi = async (): Promise<void> => {');
     expect(mmNode).toContain('await new Promise<void>(resolve => setTimeout(resolve, MARKET_MAKER_API_YIELD_MS));');
@@ -1047,9 +1048,9 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('wait_for_rpc_chain "http://127.0.0.1:8546" "0x7a6a"');
     expect(deploy).toContain('wait_for_public_rpc_chain "/rpc2" "0x7a6a"');
     expect(bootstrapMonitor).toContain("http://127.0.0.1:8080/api/health");
-    expect(startServer).toContain('XLN_RUNTIME_TICK_DELAY_MS=${XLN_RUNTIME_TICK_DELAY_MS:-25}');
+    expect(startServer).toContain('XLN_RUNTIME_TICK_DELAY_MS=${XLN_RUNTIME_TICK_DELAY_MS:-0}');
     expect(startServer).toContain(
-      'MARKET_MAKER_RUNTIME_TICK_DELAY_MS=${MARKET_MAKER_RUNTIME_TICK_DELAY_MS:-25}',
+      'MARKET_MAKER_RUNTIME_TICK_DELAY_MS=${MARKET_MAKER_RUNTIME_TICK_DELAY_MS:-0}',
     );
     expect(startServer).toContain('MARKET_MAKER_API_YIELD_MS=${MARKET_MAKER_API_YIELD_MS:-25}');
     expect(deploy).toContain('curl --max-time 10 -fsS "$url"');
@@ -1876,6 +1877,10 @@ describe('production startup wiring', () => {
     expect(driveMeshBootstrap).not.toContain('meshLoopProgress = beginBootstrapProgress(Date.now())');
     expect(driveMeshBootstrap).not.toContain("markMeshBootstrapProgress('idle')");
     expect(driveMeshBootstrap).toContain('markMeshBootstrapProgress(`local-reserve:${step}`)');
+    expect(hubNode).toContain('const bootstrapClockMs = (): number => getPerfMs();');
+    expect(hubNode).toContain('beginBootstrapProgress(bootstrapClockMs())');
+    expect(hubNode).toContain('advanceBootstrapProgress(meshLoopProgress, step, bootstrapClockMs())');
+    expect(hubNode).not.toContain('advanceBootstrapProgress(meshLoopProgress, step, Date.now())');
     expect(hubNode).toContain("const AUTO_PROVISION_EXTERNAL_FAUCET = process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] !== '0';");
     expect(hubNode).toContain('if (!resolvedArgs.deployTokens || !AUTO_PROVISION_EXTERNAL_FAUCET) return;');
     expect(hubNode).toContain('await ensureExternalFaucetProvisionReady();');

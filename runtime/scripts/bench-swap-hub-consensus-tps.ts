@@ -198,6 +198,7 @@ const registerBenchEntity = (
   slot: string,
 ): { entityId: string; signerId: string } => {
   const identity = registerBenchIdentity(seed, slot);
+  registerSignerKey(env, identity.signerId, deriveSignerKeySync(seed, slot));
   addReplica(env, identity.entityId, identity.signerId, jurisdiction);
   return identity;
 };
@@ -537,6 +538,7 @@ const runConsensusRoundTrip = async (benchCase: BenchAccountCase, stages?: Stage
 const makeParticipantEnv = (seed: string, jurisdiction: JurisdictionConfig): Env => {
   const env = createEmptyEnv(seed);
   env.runtimeSeed = seed;
+  env.timestamp = 1_000;
   env.quietRuntimeLogs = true;
   installJurisdiction(env, jurisdiction);
   return env;
@@ -545,6 +547,7 @@ const makeParticipantEnv = (seed: string, jurisdiction: JurisdictionConfig): Env
 const makeEnv = (seed: string): { env: Env; jurisdiction: JurisdictionConfig; hubId: string } => {
   const env = createEmptyEnv(seed);
   env.runtimeSeed = seed;
+  env.timestamp = 1_000;
   env.quietRuntimeLogs = true;
   const jurisdiction = makeJurisdiction();
   installJurisdiction(env, jurisdiction);

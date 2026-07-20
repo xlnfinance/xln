@@ -48,7 +48,7 @@ import {
   shortOrder,
   shouldLogFullPayloads,
 } from '../../infra/logger';
-import { accountInputProposal, accountInputReferenceHeight } from '../../account/consensus/flush';
+import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from '../../account/consensus/flush';
 import { resolveCertifiedAccountCounterpartyProposer } from '../../account/counterparty-route';
 import {
   addMessages,
@@ -3654,6 +3654,7 @@ type ApplyEntityTxsInOrderContext = {
   allJOutputs: JInput[];
   collectedHashes: Array<{ hash: string; type: HashType; context: string }>;
   proposableAccounts: Set<string>;
+  requiredAccountResponses: Map<string, AccountInput>;
   allSwapOffersCreated: SwapOfferEvent[];
   allSwapCancelRequests: SwapCancelRequestEvent[];
   allSwapOffersCancelled: SwapCancelEvent[];
@@ -3764,6 +3765,7 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
     allJOutputs,
     collectedHashes,
     proposableAccounts,
+    requiredAccountResponses,
     allSwapOffersCreated,
     allSwapCancelRequests,
     allSwapOffersCancelled,
@@ -3820,6 +3822,7 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
       hashesToSign,
       mempoolOps,
       dirtyAccounts,
+      requiredAccountResponse,
       swapOffersCreated,
       swapCancelRequests,
       swapOffersCancelled,
@@ -3859,6 +3862,18 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
       markStorageAccountDirty(env, currentEntityState.entityId, accountId);
     }
 
+    if (requiredAccountResponse) {
+      const accountId = requiredAccountResponse.toEntityId.toLowerCase();
+      proposableAccounts.add(accountId);
+      const existingRequiredResponse = requiredAccountResponses.get(accountId);
+      if (
+        existingRequiredResponse &&
+        safeStringify(existingRequiredResponse) !== safeStringify(requiredAccountResponse)
+      ) {
+        throw new Error(`ACCOUNT_REQUIRED_RESPONSE_CONFLICT:${accountId}`);
+      }
+      requiredAccountResponses.set(accountId, structuredClone(requiredAccountResponse));
+    }
     allOutputs.push(...outputs);
     if (jOutputs) allJOutputs.push(...jOutputs);
     if (hashesToSign && hashesToSign.length > 0) {
@@ -4008,6 +4023,7 @@ type ProposePendingAccountFramesContext = {
   env: Env;
   currentEntityState: EntityState;
   proposableAccounts: Set<string>;
+  requiredAccountResponses: Map<string, AccountInput>;
   allOutputs: EntityInput[];
   collectedHashes: Array<{ hash: string; type: HashType; context: string }>;
   accountJClaimNodeStore: AccountJClaimNodeStore;
@@ -4138,51 +4154,58 @@ function refreshStaleUncommittedSettlementSeals(state: EntityState): void {
 }
 
 async function proposePendingAccountFrames(context: ProposePendingAccountFramesContext): Promise<number> {
-  const { env, currentEntityState, proposableAccounts, allOutputs, collectedHashes, accountJClaimNodeStore } = context;
-  const accountsToProposeFrames = Array.from(proposableAccounts)
-    .filter(accountId => {
-      const accountMachine = currentEntityState.accounts.get(accountId);
-      if (!accountMachine) {
-        return false;
-      }
-      return accountHasProposableMempool(accountMachine, currentEntityState);
-    })
-    .sort();
+  const {
+    env,
+    currentEntityState,
+    proposableAccounts,
+    requiredAccountResponses,
+    allOutputs,
+    collectedHashes,
+    accountJClaimNodeStore,
+  } = context;
+  const processedAccounts = new Set<string>();
+  let proposedFrames = 0;
 
-  for (const accountKey of accountsToProposeFrames) {
+  while (true) {
+    const accountKey = [...proposableAccounts]
+      .filter(candidate => !processedAccounts.has(candidate))
+      .sort(compareStableText)[0];
+    if (!accountKey) break;
+    processedAccounts.add(accountKey);
     const accountMachine = currentEntityState.accounts.get(accountKey);
     const { counterparty: cpId } = accountMachine
       ? getAccountPerspective(accountMachine, currentEntityState.entityId)
       : { counterparty: 'unknown' };
-    if (!accountMachine) continue;
-
-    const proposal = await proposeAccountFrame(
-      env,
-      accountMachine,
-      currentEntityState.timestamp,
-      currentEntityState.lastFinalizedJHeight,
-      accountJClaimNodeStore,
-    );
-    if (proposal.swapOffersCancelled && proposal.swapOffersCancelled.length > 0) {
-      const normalizedCancels = proposal.swapOffersCancelled.map(({ offerId }) => ({
-        accountId: accountKey,
-        offerId,
-      }));
-      applyCommittedSwapCancelsToOrderbook(env, currentEntityState, normalizedCancels);
-    }
-    if (proposal.hashesToSign) {
-      collectedHashes.push(...proposal.hashesToSign);
+    if (!accountMachine) {
+      throw new Error(`ACCOUNT_FLUSH_ACCOUNT_MISSING:${accountKey}`);
     }
 
-    if (proposal.failedHtlcLocks && proposal.failedHtlcLocks.length > 0) {
-      for (const { hashlock, reason } of proposal.failedHtlcLocks) {
-        const route = currentEntityState.htlcRoutes.get(hashlock);
-        if (route) {
-          // Always clean local bookkeeping for failed proposals.
-          if (route.outboundLockId) {
-            currentEntityState.lockBook.delete(route.outboundLockId);
-          }
+    const requiredResponse = requiredAccountResponses.get(accountKey.toLowerCase());
 
+    let proposal: Awaited<ReturnType<typeof proposeAccountFrame>> | undefined;
+    if (accountHasProposableMempool(accountMachine, currentEntityState)) {
+      proposal = await proposeAccountFrame(
+        env,
+        accountMachine,
+        currentEntityState.timestamp,
+        currentEntityState.lastFinalizedJHeight,
+        accountJClaimNodeStore,
+      );
+      proposedFrames += 1;
+      if (proposal.swapOffersCancelled && proposal.swapOffersCancelled.length > 0) {
+        const normalizedCancels = proposal.swapOffersCancelled.map(({ offerId }) => ({
+          accountId: accountKey,
+          offerId,
+        }));
+        applyCommittedSwapCancelsToOrderbook(env, currentEntityState, normalizedCancels);
+      }
+      if (proposal.hashesToSign) collectedHashes.push(...proposal.hashesToSign);
+
+      if (proposal.failedHtlcLocks && proposal.failedHtlcLocks.length > 0) {
+        for (const { hashlock, reason } of proposal.failedHtlcLocks) {
+          const route = currentEntityState.htlcRoutes.get(hashlock);
+          if (!route) continue;
+          if (route.outboundLockId) currentEntityState.lockBook.delete(route.outboundLockId);
           if (route.inboundEntity && route.inboundLockId) {
             const inboundAccount = currentEntityState.accounts.get(route.inboundEntity);
             if (inboundAccount) {
@@ -4201,21 +4224,42 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
               proposableAccounts.add(route.inboundEntity);
             }
           }
-
           terminateHtlcRoute(currentEntityState, hashlock, currentEntityState.timestamp);
         }
       }
     }
 
-    if (proposal.success && proposal.accountInput) {
+    const finalAccountInput = proposal?.success && proposal.accountInput
+      ? proposal.accountInput
+      : requiredResponse;
+    if (!finalAccountInput) continue;
+    if (requiredResponse) {
+      const requiredAck = accountInputAck(requiredResponse);
+      const requiredProposal = accountInputProposal(requiredResponse);
+      const finalAck = accountInputAck(finalAccountInput);
+      const finalProposal = accountInputProposal(finalAccountInput);
+      if (requiredAck && (!finalAck || safeStringify(finalAck) !== safeStringify(requiredAck))) {
+        throw new Error(`ACCOUNT_REQUIRED_ACK_NOT_BUNDLED:${accountKey}:${requiredAck.height}`);
+      }
+      if (
+        requiredProposal &&
+        (!finalProposal || safeStringify(finalProposal) !== safeStringify(requiredProposal))
+      ) {
+        throw new Error(
+          `ACCOUNT_REQUIRED_PROPOSAL_NOT_PRESERVED:${accountKey}:${requiredProposal.frame.height}`,
+        );
+      }
+    }
+
+    {
       const encryptedTargetSignerId = certifiedAccountOutputSignerHint(
-        proposal.accountInput.toEntityId,
-        proposal.accountInput,
+        finalAccountInput.toEntityId,
+        finalAccountInput,
       );
       const certifiedTargetSignerId = await resolveCertifiedAccountCounterpartyProposer(
         env,
         accountMachine,
-        proposal.accountInput.toEntityId,
+        finalAccountInput.toEntityId,
       );
       if (
         encryptedTargetSignerId &&
@@ -4223,49 +4267,53 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
         encryptedTargetSignerId !== certifiedTargetSignerId
       ) {
         throw new Error(
-          `ACCOUNT_OUTPUT_SIGNER_HINT_CONFLICT:${proposal.accountInput.toEntityId}:` +
+          `ACCOUNT_OUTPUT_SIGNER_HINT_CONFLICT:${finalAccountInput.toEntityId}:` +
           `${encryptedTargetSignerId}:${certifiedTargetSignerId}`,
         );
       }
       const targetSignerId = encryptedTargetSignerId ?? certifiedTargetSignerId ?? resolveEntityProposerId(
           env,
-          proposal.accountInput.toEntityId,
-          `account proposal output ${currentEntityState.entityId}->${proposal.accountInput.toEntityId}`,
+          finalAccountInput.toEntityId,
+          `account flush output ${currentEntityState.entityId}->${finalAccountInput.toEntityId}`,
         );
       // Persist validator-local delivery metadata beside the cached input so a
       // post-checkpoint resend does not require gossip to be online first.
       // The field is intentionally excluded from Entity consensus roots.
-      accountMachine.pendingAccountInputSignerId = targetSignerId;
+      if (accountInputProposal(finalAccountInput)) {
+        accountMachine.pendingAccountInputSignerId = targetSignerId;
+      }
       const outputEntityInput: EntityInput = {
-        entityId: proposal.accountInput.toEntityId,
+        entityId: finalAccountInput.toEntityId,
         signerId: targetSignerId,
         entityTxs: [
           {
             type: 'accountInput' as const,
-            data: proposal.accountInput,
+            data: finalAccountInput,
           },
         ],
       };
       allOutputs.push(outputEntityInput);
 
-      addMessages(currentEntityState, proposal.events);
-      emitScopedEvents(
-        env,
-        'account',
-        `E/A/${currentEntityState.entityId.slice(-4)}:${cpId.slice(-4)}/propose`,
-        proposal.events,
-        {
-          entityId: currentEntityState.entityId,
-          counterpartyId: cpId,
-          frameHeight: accountInputReferenceHeight(proposal.accountInput),
-          accountKey,
-        },
-        currentEntityState.entityId,
-      );
+      if (proposal) {
+        addMessages(currentEntityState, proposal.events);
+        emitScopedEvents(
+          env,
+          'account',
+          `E/A/${currentEntityState.entityId.slice(-4)}:${cpId.slice(-4)}/propose`,
+          proposal.events,
+          {
+            entityId: currentEntityState.entityId,
+            counterpartyId: cpId,
+            frameHeight: accountInputReferenceHeight(finalAccountInput),
+            accountKey,
+          },
+          currentEntityState.entityId,
+        );
+      }
     }
   }
 
-  return accountsToProposeFrames.length;
+  return proposedFrames;
 }
 
 type ApplyOrderbookMatchingContext = {
@@ -4656,6 +4704,7 @@ export const applyEntityFrame = async (
   };
 
   const proposableAccounts = new Set<string>();
+  const requiredAccountResponses = new Map<string, AccountInput>();
   if (!authorityTransitionOnly) {
     drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts);
     drainCommittedCrossJurisdictionCancelAcks(env, currentEntityState, proposableAccounts);
@@ -4678,6 +4727,7 @@ export const applyEntityFrame = async (
     allJOutputs,
     collectedHashes,
     proposableAccounts,
+    requiredAccountResponses,
     allSwapOffersCreated,
     allSwapCancelRequests,
     allSwapOffersCancelled,
@@ -4780,6 +4830,7 @@ export const applyEntityFrame = async (
     env,
     currentEntityState,
     proposableAccounts,
+    requiredAccountResponses,
     allOutputs,
     collectedHashes,
     accountJClaimNodeStore,

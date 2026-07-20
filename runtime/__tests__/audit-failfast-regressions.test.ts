@@ -2243,7 +2243,7 @@ describe('audit fail-fast regressions', () => {
     expect(receiver.currentHeight).toBe(1);
   });
 
-  test('peer J-claim commit can batch the local claim without publishing speculative CAS changes', async () => {
+  test('Entity flush batches a committed peer J-claim ACK with the local claim', async () => {
     const seed = 'account-j-claim-overlay-batched-ack';
     const env = createEmptyEnv(seed);
     env.timestamp = 10_000;
@@ -2287,11 +2287,19 @@ describe('audit fail-fast regressions', () => {
     });
 
     expect(result.success).toBe(true);
-    expect(result.response?.kind).toBe('frame_ack');
-    if (result.response?.kind !== 'frame_ack') throw new Error('expected batched frame_ack');
+    expect(result.response?.kind).toBe('ack');
+    const newClaimNodes = new Map(
+      result.accountJClaimNodeChanges?.newNodes.map(({ hash, node }) => [hash, node]) ?? [],
+    );
+    const flushed = await proposeAccountFrame(env, receiver, env.timestamp, 7, {
+      get: hash => newClaimNodes.get(hash),
+    });
+    expect(flushed.success).toBe(true);
+    expect(flushed.accountInput?.kind).toBe('frame_ack');
+    if (flushed.accountInput?.kind !== 'frame_ack') throw new Error('expected Entity-flushed frame_ack');
     expect(receiver.pendingAccountInput?.kind).toBe('frame_ack');
-    expect(receiver.pendingAccountInput).toEqual(result.response);
-    expect(result.response.proposal.frame.accountTxs.map((tx) => tx.type)).toEqual(['j_event_claim']);
+    expect(receiver.pendingAccountInput).toEqual(flushed.accountInput);
+    expect(flushed.accountInput.proposal.frame.accountTxs.map((tx) => tx.type)).toEqual(['j_event_claim']);
     expect(receiver.currentHeight).toBe(1);
     expect(receiver.pendingFrame?.height).toBe(2);
     expect(receiver.leftPendingJClaims.count).toBe(1n);
@@ -5903,7 +5911,7 @@ describe('audit fail-fast regressions', () => {
     expect(result.response).toEqual(accountMachine.lastOutboundFrameAck.response);
   });
 
-  test('applyAccountInput retains a bundled ACK without mutating live Entity replicas', async () => {
+  test('Entity flush batches ACK and successor without mutating live Entity replicas', async () => {
     const seed = 'account-frame-bundled-proposal-lost';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
@@ -5938,19 +5946,20 @@ describe('audit fail-fast regressions', () => {
     const accepted = await applyAccountInput(env, receiver, proposed.accountInput);
 
     expect(accepted.success).toBe(true);
-    expect(accepted.response?.kind).toBe('frame_ack');
+    expect(accepted.response?.kind).toBe('ack');
     expect(receiver.currentHeight).toBe(1);
-    expect(receiver.pendingFrame?.height).toBe(2);
+    expect(receiver.pendingFrame).toBeUndefined();
     expect(receiver.lastOutboundFrameAck?.height).toBe(1);
     expect(liveHubTasks.map(task => task.lastRun)).toEqual([500, 500]);
-    if (!accepted.response || accepted.response.kind !== 'frame_ack') {
-      throw new Error('BUNDLED_ACK_RESPONSE_MISSING');
+    const flushed = await proposeAccountFrame(env, receiver, env.timestamp);
+    if (!flushed.success || flushed.accountInput?.kind !== 'frame_ack') {
+      throw new Error('ENTITY_FLUSHED_ACK_RESPONSE_MISSING');
     }
-    const proposalSeal = accepted.response.proposal.disputeSeal;
-    const ackSeal = accepted.response.ack.disputeSeal;
+    const proposalSeal = flushed.accountInput.proposal.disputeSeal;
+    const ackSeal = flushed.accountInput.ack.disputeSeal;
     expect(ackSeal).toBeDefined();
     expect(proposalSeal).toBeDefined();
-    expect(accepted.hashesToSign).toEqual(expect.arrayContaining([
+    expect([...(accepted.hashesToSign ?? []), ...(flushed.hashesToSign ?? [])]).toEqual(expect.arrayContaining([
       {
         hash: proposed.accountInput.proposal.frame.stateHash,
         type: 'accountFrame',
@@ -5962,7 +5971,7 @@ describe('audit fail-fast regressions', () => {
         context: `account:${left.entityId.slice(-8)}:ack-dispute`,
       },
       {
-        hash: accepted.response.proposal.frame.stateHash,
+        hash: flushed.accountInput.proposal.frame.stateHash,
         type: 'accountFrame',
         context: expect.stringContaining(':frame:2'),
       },
@@ -5972,8 +5981,10 @@ describe('audit fail-fast regressions', () => {
         context: expect.stringContaining(':dispute'),
       },
     ]));
-    expect(new Set(accepted.hashesToSign?.map(({ hash }) => hash)).size).toBe(4);
-    const committedBundled = await applyAccountInput(env, proposer, accepted.response);
+    expect(new Set(
+      [...(accepted.hashesToSign ?? []), ...(flushed.hashesToSign ?? [])].map(({ hash }) => hash),
+    ).size).toBe(4);
+    const committedBundled = await applyAccountInput(env, proposer, flushed.accountInput);
     expect(committedBundled.success).toBe(true);
     expect(liveHubTasks.map(task => task.lastRun)).toEqual([500, 500]);
     expect(proposer.currentHeight).toBe(2);
@@ -6335,6 +6346,63 @@ describe('audit fail-fast regressions', () => {
     ]);
     expect(rightAccount.rollbackCount).toBe(1);
     expect(rightAccount.mempool).toEqual([]);
+  });
+
+  test('Entity flush re-sends LEFT winning proposal after simultaneous-frame collision', async () => {
+    const seed = 'entity-flush-simultaneous-left-winner';
+    const env = createEmptyEnv(seed);
+    env.quietRuntimeLogs = true;
+    env.timestamp = 10_000;
+    env.browserVM = { getDepositoryAddress: () => hex20('dd') } as typeof env.browserVM;
+
+    const first = registerLazySigner(seed, '1');
+    const second = registerLazySigner(seed, '2');
+    const left = isLeftEntity(first.entityId, second.entityId) ? first : second;
+    const right = left === first ? second : first;
+    attachSigningReplica(env, left.entityId, left.signerId);
+    attachSigningReplica(env, right.entityId, right.signerId);
+
+    const leftAccount = makeProposalAccount(
+      [{ type: 'add_delta', data: { tokenId: 1 } }],
+      left.entityId,
+      right.entityId,
+    );
+    const rightAccount = makeProposalAccount(
+      [{ type: 'add_delta', data: { tokenId: 2 } }],
+      left.entityId,
+      right.entityId,
+    );
+    rightAccount.proofHeader = {
+      fromEntity: right.entityId,
+      toEntity: left.entityId,
+      nextProofNonce: 0,
+    };
+
+    const leftProposal = await proposeAccountFrame(env, leftAccount, env.timestamp);
+    const rightProposal = await proposeAccountFrame(env, rightAccount, env.timestamp);
+    if (!leftProposal.success || !leftProposal.accountInput) {
+      throw new Error(`LEFT_SIMULTANEOUS_PROPOSAL_FAILED:${leftProposal.error ?? 'missing input'}`);
+    }
+    if (!rightProposal.success || !rightProposal.accountInput) {
+      throw new Error(`RIGHT_SIMULTANEOUS_PROPOSAL_FAILED:${rightProposal.error ?? 'missing input'}`);
+    }
+    leftAccount.pendingAccountInputSignerId = right.signerId;
+
+    const leftState = makeEntityState(left.entityId);
+    leftState.config = makeSingleSignerConfigFor(left.signerId);
+    leftState.accounts.set(right.entityId, leftAccount);
+    const applied = await applyEntityFrame(env, leftState, [{
+      type: 'accountInput',
+      data: rightProposal.accountInput,
+    }], env.timestamp);
+
+    const accountOutputs = applied.outputs.flatMap(output => output.entityTxs ?? [])
+      .filter((tx): tx is Extract<EntityTx, { type: 'accountInput' }> => tx.type === 'accountInput');
+    expect(accountOutputs).toHaveLength(1);
+    expect(accountOutputs[0]?.data).toEqual(leftProposal.accountInput);
+    expect(accountOutputs[0]?.data.kind).toBe('frame');
+    expect(applied.newState.accounts.get(right.entityId)?.pendingFrame?.stateHash)
+      .toBe(leftAccount.pendingFrame?.stateHash);
   });
 
   test('failed proposal keeps queued txs, including late arrivals, instead of wiping the mempool', async () => {

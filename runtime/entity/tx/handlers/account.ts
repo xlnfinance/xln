@@ -1,7 +1,7 @@
 import type { AccountInput, EntityState, Env, EntityInput, AccountMachine } from '../../../types';
 import { markStorageAccountDirty, markStorageEntityDirty } from '../../../machine/env-events';
 import { applyAccountInput as applyConsensusAccountInput } from '../../../account/consensus/index';
-import { addMessage, addMessages, emitScopedEvents, resolveEntityProposerId } from '../../../state-helpers';
+import { addMessage, addMessages, emitScopedEvents } from '../../../state-helpers';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 import {
   accountStateDomainFromJurisdiction,
@@ -34,7 +34,6 @@ import type {
 } from './account/orderbook-offers';
 import { canProcessAccountTxForDisputeStatus } from '../../../account/consensus/dispute-policy';
 import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from '../../../account/consensus/flush';
-import { resolveCertifiedAccountCounterpartyProposer } from '../../../account/counterparty-route';
 import { handleDisputeStart, handlePrepareDispute } from './dispute';
 import {
   getCertifiedBoardNodeStore,
@@ -110,6 +109,8 @@ export interface AccountHandlerResult {
   swapOffersCreated: SwapOfferEvent[];
   swapCancelRequests: SwapCancelRequestEvent[];
   swapOffersCancelled: SwapCancelEvent[];
+  /** Exact consensus response that the final Entity flush must preserve. */
+  requiredAccountResponse?: AccountInput;
   // Multi-signer: Hashes that need entity-quorum signing
   hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute' | 'settlement'; context: string }>;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
@@ -183,6 +184,7 @@ export async function applyAccountInput(
   // Get or create account machine (KEY: counterparty ID for simpler lookups)
   // AccountMachine still uses canonical left/right internally
   const counterpartyId = normalizeEntityRef(input.fromEntityId);
+  let requiredAccountResponse: AccountInput | undefined;
   const existingAccountKey = findAccountKeyInsensitive(newState.accounts, counterpartyId);
   let accountMachine = existingAccountKey ? newState.accounts.get(existingAccountKey) : undefined;
   const createdAccount = !accountMachine;
@@ -579,49 +581,18 @@ export async function applyAccountInput(
         accountHandlerLog.debug('swap.offers_cancelled_committed', { count: allSwapOffersCancelled.length });
       }
 
-      // Send response (ACK + optional new frame)
+      // Account responses are not outputs yet. Entity consensus performs one
+      // final Account flush after every AccountInput, matching pass, and hook
+      // has run, so an ACK can be combined with all same-frame Account work.
       if (result.response) {
-        accountHandlerLog.debug('response.send', { to: shortId(result.response.toEntityId), height: accountInputReferenceHeight(result.response) });
-
-        // Get target proposer
-        // IMPORTANT: Send only to PROPOSER - bilateral consensus between entity proposers
-        // Multi-validator entities sync account state via entity-level consensus (not bilateral broadcast)
-        const targetSignerId = (
-          await resolveCertifiedAccountCounterpartyProposer(
-            env,
-            accountMachine,
-            result.response.toEntityId,
-          )
-        ) ?? resolveEntityProposerId(
-            env,
-            result.response.toEntityId,
-            `account response output ${newState.entityId}->${result.response.toEntityId}`,
-          );
-        if (accountInputProposal(result.response)) {
-          if (!accountMachine.pendingAccountInput) {
-            throw new Error(
-              `ACCOUNT_PENDING_INPUT_MISSING_FOR_RESPONSE: entity=${newState.entityId}` +
-              ` counterparty=${result.response.toEntityId}`,
-            );
-          }
-          accountMachine.pendingAccountInputSignerId = targetSignerId;
-        }
-        outputs.push({
-          entityId: result.response.toEntityId,
-          signerId: targetSignerId,
-          entityTxs: [{
-            type: 'accountInput',
-            data: result.response
-          }]
-        });
-
-        accountHandlerLog.debug('response.queued', {
+        requiredAccountResponse = structuredClone(result.response);
+        accountHandlerLog.debug('response.deferred_to_entity_flush', {
           from: shortId(state.entityId),
           to: shortId(result.response.toEntityId),
           height: accountInputReferenceHeight(result.response),
           prevHanko: Boolean(accountInputAck(result.response)),
         });
-        checkpointProfile('responseRouting');
+        checkpointProfile('responseDeferred');
       }
       checkpointProfile('postConsensus');
     } else if (result.disputeRequired) {
@@ -747,6 +718,7 @@ export async function applyAccountInput(
     swapOffersCreated: allSwapOffersCreated,
     swapCancelRequests: allSwapCancelRequests,
     swapOffersCancelled: allSwapOffersCancelled,
+    ...(requiredAccountResponse ? { requiredAccountResponse } : {}),
     ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
     ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
   };

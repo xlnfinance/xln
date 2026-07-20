@@ -1,4 +1,4 @@
-import type { EntityState, EntityTx, Env, EntityInput, JInput, HashType } from '../../types';
+import type { AccountInput, EntityState, EntityTx, Env, EntityInput, JInput, HashType } from '../../types';
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
 import { markStorageAccountDirty, markStorageEntityDirty } from '../../machine/env-events';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
@@ -112,6 +112,8 @@ export interface ApplyEntityTxResult {
   // Pure events for entity-level orchestration
   mempoolOps?: MempoolOp[];
   dirtyAccounts?: string[];
+  /** Exact consensus response that the final Entity flush must preserve. */
+  requiredAccountResponse?: AccountInput;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
   swapOffersCreated?: SwapOfferEvent[];
   swapCancelRequests?: SwapCancelRequestEvent[];
@@ -179,6 +181,7 @@ const handleAccountInputEntityTx: EntityTxDispatcher = async (env, entityState, 
     swapOffersCreated: result.swapOffersCreated,
     swapCancelRequests: result.swapCancelRequests,
     swapOffersCancelled: result.swapOffersCancelled,
+    ...(result.requiredAccountResponse ? { requiredAccountResponse: result.requiredAccountResponse } : {}),
     ...(result.accountJClaimNodeChanges ? { accountJClaimNodeChanges: result.accountJClaimNodeChanges } : {}),
     ...(result.hashesToSign && result.hashesToSign.length > 0 && { hashesToSign: result.hashesToSign }),
   };

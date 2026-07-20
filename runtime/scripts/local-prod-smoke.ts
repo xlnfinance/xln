@@ -825,9 +825,9 @@ const main = async (): Promise<void> => {
     PUBLIC_RPC: `http://127.0.0.1:${apiPort}/rpc`,
     XLN_MIN_DISK_FREE_BYTES: '1',
     MARKET_MAKER_BOOTSTRAP_LOOP_MS: process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1',
-    XLN_RUNTIME_TICK_DELAY_MS: process.env['XLN_RUNTIME_TICK_DELAY_MS'] || '25',
+    XLN_RUNTIME_TICK_DELAY_MS: process.env['XLN_RUNTIME_TICK_DELAY_MS'] || '0',
     MARKET_MAKER_RUNTIME_TICK_DELAY_MS:
-      process.env['MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '25',
+      process.env['MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '0',
     MARKET_MAKER_API_YIELD_MS: process.env['MARKET_MAKER_API_YIELD_MS'] || '25',
     XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME:
       process.env['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '8',

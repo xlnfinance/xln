@@ -2858,7 +2858,7 @@
         const feeNote = closed.feeAmount > 0n
           ? `. Fee: ${formatSwapFee(closed.feeAmount, closed.feeTokenId)}`
           : '';
-        toasts.success(`Swap fully filled${improvementNote}${feeNote}`);
+        toasts.success(`Order placed and fully filled${improvementNote}${feeNote}`);
       } else if (closed.status === 'partial') {
         if (stpBlockingOrderId) {
           const feeNote = closed.feeAmount > 0n
@@ -3114,7 +3114,9 @@
 
       orderbookRefreshNonce += 1;
       pendingSwapFeedbackOfferId = offerId;
-      toasts.success(crossJurisdiction ? 'Cross-j swap preparation submitted' : 'Swap offer submitted');
+      if (crossJurisdiction) {
+        toasts.success('Cross-j swap preparation submitted');
+      }
 
       // Reset form
       orderPercent = 100;
