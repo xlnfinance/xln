@@ -19,10 +19,8 @@ const ALLOWED_WALLET_ORIGINS = new Set([CANONICAL_WALLET_ORIGIN]);
 
 const isAllowedWalletOrigin = (url: URL): boolean => {
   if (ALLOWED_WALLET_ORIGINS.has(url.origin)) return true;
-  return (
-    url.protocol === 'https:'
-    && (url.hostname === 'localhost' || url.hostname === '127.0.0.1')
-  );
+  const isLoopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+  return isLoopback && (url.protocol === 'http:' || url.protocol === 'https:');
 };
 
 const sanitizeText = (value: string | null | undefined, maxLen: number): string => {

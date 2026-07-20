@@ -1013,14 +1013,6 @@ const applyEntityInputFrameCap = (
   return true;
 };
 
-const entityInputHasNonTxPayload = (input: EntityInput): boolean =>
-  Boolean(
-    input.proposedFrame ||
-    (input.hashPrecommits && input.hashPrecommits.size > 0) ||
-    (input.jPrefixAttestations && input.jPrefixAttestations.size > 0) ||
-    input.leaderTimeoutVote,
-  );
-
 const applyEntityTxFrameCap = (
   runtimeInput: RuntimeInput,
   mempool: RuntimeInput,
@@ -1031,6 +1023,7 @@ const applyEntityTxFrameCap = (
   if (frameLimit <= 0) return false;
 
   let selectedTxs = 0;
+  let capReached = false;
   let changed = false;
   const frameInputs: EntityInput[] = [];
   const deferredInputs: EntityInput[] = [];
@@ -1038,10 +1031,10 @@ const applyEntityTxFrameCap = (
   for (const input of runtimeInput.entityInputs) {
     const txs = input.entityTxs ?? [];
     const txCount = txs.length;
-    const nonTxPayload = entityInputHasNonTxPayload(input);
 
-    if (changed) {
+    if (capReached) {
       deferredInputs.push(input);
+      changed = true;
       continue;
     }
 
@@ -1057,26 +1050,20 @@ const applyEntityTxFrameCap = (
       continue;
     }
 
-    if (txCount <= remaining) {
+    // EntityInput is the accepted consensus envelope. Splitting entityTxs here
+    // would turn one authorized intent into independently durable prefixes and
+    // make receipts/cross-leg invariants observe states the sender never made.
+    // The cap schedules whole envelopes only; one oversized head may pass whole
+    // so FIFO can never deadlock.
+    if (txCount <= remaining || selectedTxs === 0) {
       frameInputs.push(input);
       selectedTxs += txCount;
+      if (selectedTxs >= frameLimit) capReached = true;
       continue;
     }
 
-    if (nonTxPayload) {
-      if (frameInputs.length === 0) {
-        frameInputs.push(input);
-        selectedTxs += txCount;
-      } else {
-        deferredInputs.push(input);
-      }
-      changed = true;
-      continue;
-    }
-
-    frameInputs.push({ ...input, entityTxs: txs.slice(0, remaining) });
-    deferredInputs.push({ ...input, entityTxs: txs.slice(remaining) });
-    selectedTxs += remaining;
+    deferredInputs.push(input);
+    capReached = true;
     changed = true;
   }
 

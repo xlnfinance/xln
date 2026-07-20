@@ -205,7 +205,7 @@ describe('runtime ingress timestamp', () => {
     expect(env.runtimeMempool?.queuedAt).toBeUndefined();
   });
 
-  test('runtime tx frame cap splits oversized entity input FIFO without dropping queuedAt', async () => {
+  test('runtime tx frame cap never splits one accepted entity input', async () => {
     const env = createIsolatedEnv('runtime-entity-tx-frame-cap');
     env.quietRuntimeLogs = true;
     env.scenarioMode = true;
@@ -250,33 +250,13 @@ describe('runtime ingress timestamp', () => {
     enqueueRuntimeInput(env, acceptedInput);
 
     await process(env);
-    const pendingProfileNames = (): string[] => (env.runtimeMempool?.entityInputs ?? [])
+    const deferredProfileUpdates = (env.runtimeMempool?.entityInputs ?? [])
       .flatMap(input => input.entityTxs ?? [])
-      .filter(tx => tx.type === 'profile-update')
-      .map(tx => tx.data.profile.name);
-    expect(pendingProfileNames()).toEqual(['tx-3', 'tx-4', 'tx-5']);
-    expect(env.runtimeMempool?.queuedAt).toBe(1_000);
-    expect(receipts.get('capped-runtime-input')).toMatchObject({
-      status: 'pending',
-      observedFingerprintCount: 2,
-      requiredFingerprintCount: 5,
-    });
-
-    await process(env);
-    expect(pendingProfileNames()).toEqual(['tx-5']);
-    expect(env.runtimeMempool?.queuedAt).toBe(1_000);
-    expect(receipts.get('capped-runtime-input')).toMatchObject({
-      status: 'pending',
-      observedFingerprintCount: 4,
-      requiredFingerprintCount: 5,
-    });
-
-    await process(env);
-    expect(env.runtimeMempool?.entityInputs ?? []).toHaveLength(0);
-    expect(env.runtimeMempool?.queuedAt).toBeUndefined();
+      .filter(tx => tx.type === 'profile-update');
+    expect(deferredProfileUpdates).toHaveLength(0);
     expect(receipts.get('capped-runtime-input')).toMatchObject({
       status: 'observed',
-      observedHeight: 3,
+      observedHeight: 1,
       observedFingerprintCount: 5,
       requiredFingerprintCount: 5,
     });
@@ -373,6 +353,11 @@ describe('runtime ingress timestamp', () => {
     env.quietRuntimeLogs = true;
     env.timestamp = getWallClockMs();
     addTestJurisdiction(env);
+    const committedScheduledWakePresence: boolean[] = [];
+    registerRuntimeFrameCommitCallback(env, ({ runtimeInput }) => {
+      committedScheduledWakePresence.push(runtimeInput.entityInputs.some(input =>
+        input.entityTxs?.some(tx => tx.type === 'scheduledWake')));
+    });
 
     const { entityId: existingEntityId, signerId, replica } = addSignableReplica(env, env.timestamp);
 
@@ -420,8 +405,7 @@ describe('runtime ingress timestamp', () => {
     expect(env.timestamp).toBeLessThanOrEqual(getWallClockMs() + TIMING.TIMESTAMP_DRIFT_MS);
     const updatedReplica = env.eReplicas.get(`${existingEntityId}:${signerId}`);
     expect(updatedReplica?.state.crontabState?.hooks?.has('watchdog:due-after-ingress')).toBe(false);
-    expect(env.history.at(-1)?.runtimeInput.entityInputs.some(input =>
-      input.entityTxs?.some(tx => tx.type === 'scheduledWake'))).toBe(true);
+    expect(committedScheduledWakePresence.at(-1)).toBe(true);
   });
 
   test('direct live process inputs stamp R-frame from block creation time', async () => {
