@@ -7,7 +7,7 @@ This is the **only live TODO/NEXT file**. Git history contains the retired
 
 - Target: `v0.1.12` after the mandatory gates pass.
 - Branch: `ai/routed-provenance`.
-- Candidate head before this checklist edit: `4a261e41e01b707732878f05b98e2646d5fe03f9`.
+- Candidate implementation head before this checklist refresh: `a439615d1`.
 - Base: `edfb178be`; production remains on the published `v0.1.11` until this
   candidate is fully verified.
 - Frozen Core: unchanged at
@@ -33,14 +33,16 @@ This is the **only live TODO/NEXT file**. Git history contains the retired
 
 ## Release gates still required
 
-1. Run `bun run check` once after all narrow L1/L2 fixes are green. Stop at the
-   first failure and return to its smallest reproducer.
-2. Run the focused same-chain/cross-j browser orderbook journey and inspect the
-   browser console. Mascot remains hidden and excluded.
-3. Run the documented release RPC/browser gates on the immutable candidate,
-   including the newly gated `lock-ahb` scenario.
+1. Finish `bun run gate:release` on the immutable candidate. It includes the
+   newly gated `lock-ahb` RPC scenario and stops at the first failed phase.
+2. Run the public-network acceptance gate with `bun run gate:mainnet`.
+3. External audit handoff: `docs/security/external-audit-brief.md`.
 4. Merge to `main`, push authoritative source, perform a fresh production
    redeploy/reset, verify health and browser console, then publish/tag `v0.1.12`.
+
+Already green: `bun run check`, focused same-chain Chromium, focused cross-j
+one-click Chromium, and strict browser console health. Mascot remains hidden
+and excluded.
 
 ## Post-release storage work
 
