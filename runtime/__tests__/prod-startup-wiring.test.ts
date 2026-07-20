@@ -1532,7 +1532,7 @@ describe('production startup wiring', () => {
     expect(fatalHelper).toContain('/JADAPTER_MISSING/');
     expect(fatalHelper).not.toContain('/PENDING[-_]FRAME[-_]STALE/');
     expect(fatalHelper).toContain('/MM_READY_TIMEOUT/');
-    expect(fatalHelper).toContain('/CROSS_J_[A-Z0-9_:-]*/');
+    expect(fatalHelper).toContain('/\\[ERROR\\].*CROSS_J_[A-Z0-9_:-]*/');
     expect(fatalHelper).toContain('/ROUTE_NO_P2P/');
     expect(fatalHelper).toContain('/child\\.unexpected_exit/');
     expect(fatalHelper).toContain('export const E2E_FATAL_LOG_TAIL_LINES = 80;');

@@ -62,6 +62,20 @@ test('incremental fatal scanner restarts from byte zero after log truncation', (
   });
 });
 
+test('cross-j pair-drop warnings remain observable without killing the E2E stack', () => {
+  withLog(path => {
+    const scanner = createIncrementalRuntimeFatalLogScanner(path);
+    appendFileSync(path, '[network] INBOUND_CROSS_J_ACCOUNT_PAIR_DROPPED received=1 retained=0\n');
+    expect(scanner.scan()).toBeNull();
+
+    appendFileSync(path, '[ERROR][runtime] apply_input.failed CROSS_J_ROUTE_HASH_MISMATCH\n');
+    expect(scanner.scan()).toMatchObject({
+      pattern: '/\\[ERROR\\].*CROSS_J_[A-Z0-9_:-]*/',
+      lineNumber: 2,
+    });
+  });
+});
+
 test('isolated E2E runner polls through the incremental scanner', () => {
   const runner = readFileSync(
     join(process.cwd(), 'runtime/scripts/run-e2e-parallel-isolated.ts'),

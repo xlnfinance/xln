@@ -98,7 +98,6 @@ type SyntheticJEventInput = {
     type: string;
     data: Record<string, unknown>;
   };
-  blockHash: string;
   transactionHash: string;
 };
 
@@ -332,12 +331,37 @@ async function injectSyntheticJEventThroughWatcher(
         `depository=${expectedDepository} matches=${watcherMatches.length}`,
       );
     }
+    const rpcUrlRaw = String(
+      watcherMatches[0]?.rpcs?.[0] || jurisdiction.rpc || '',
+    );
+    if (!rpcUrlRaw) throw new Error(`synthetic J watcher RPC missing: chain=${expectedChainId}`);
+    const rpcUrl = rpcUrlRaw.startsWith('/')
+      ? new URL(rpcUrlRaw, window.location.origin).toString()
+      : rpcUrlRaw;
+    const headerResponse = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'eth_getBlockByNumber',
+        params: [`0x${blockNumber.toString(16)}`, false],
+      }),
+    });
+    if (!headerResponse.ok) {
+      throw new Error(`synthetic J canonical header fetch failed: ${headerResponse.status}`);
+    }
+    const headerPayload = await headerResponse.json() as { result?: { hash?: string } };
+    const canonicalBlockHash = String(headerPayload.result?.hash || '').toLowerCase();
+    if (!/^0x[0-9a-f]{64}$/.test(canonicalBlockHash)) {
+      throw new Error(`synthetic J canonical header missing: height=${blockNumber}`);
+    }
 
     runtimeModule.applyJEventsToEnv(env, [{
       name: input.event.type,
       args: input.event.data,
       blockNumber,
-      blockHash: input.blockHash,
+      blockHash: canonicalBlockHash,
       transactionHash: input.transactionHash,
       logIndex: 0,
     }], 'e2e-cross-j-source-dispute', watcherMatches[0]);
@@ -2735,11 +2759,9 @@ async function triggerSourceDisputeArguments(
       onChainNonce: 1,
     },
   };
-  const blockHash = `0x${'ab'.repeat(32)}`;
   const transactionHash = `0x${'cd'.repeat(32)}`;
   await injectSyntheticJEventThroughWatcher(page, source, {
     event,
-    blockHash,
     transactionHash,
   });
   await flushRuntime(page, 8);
