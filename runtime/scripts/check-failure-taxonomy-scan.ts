@@ -104,7 +104,6 @@ const readinessHealth: Parameters<typeof resolveRuntimeImportReadiness>[0] = {
     startedAt: null,
     completedAt: null,
     failedAt: null,
-    resolvedAt: null,
   },
   hubMesh: {
     ok: true,

@@ -12,7 +12,6 @@ export type HubRuntimeHealth = {
 export type ResetHealthInput = {
   inProgress: boolean;
   lastError: string | null;
-  resolvedAt: number | null;
 };
 
 export const deriveHubRuntimeHealth = (input: HubRuntimeHealthInput): HubRuntimeHealth => ({
@@ -21,4 +20,4 @@ export const deriveHubRuntimeHealth = (input: HubRuntimeHealthInput): HubRuntime
 });
 
 export const deriveResetHealthOk = (input: ResetHealthInput): boolean =>
-  !input.inProgress && (!input.lastError || input.resolvedAt !== null);
+  !input.inProgress && !input.lastError;

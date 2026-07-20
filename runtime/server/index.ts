@@ -21,6 +21,7 @@ import {
   startRuntimeLoop,
   ensureGossipProfiles,
   registerEnvChangeCallback,
+  registerRuntimeFrameCommitCallback,
   closeRuntimeDb,
   closeInfraDb,
   registerSignerKey,
@@ -1038,8 +1039,8 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       });
     }
     serverEnv = env;
-    registerEnvChangeCallback(env, (nextEnv) => {
-      runtimeIngressReceipts.observeLatestRuntimeFrame(nextEnv);
+    registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
+      runtimeIngressReceipts.observeRuntimeInput(height, runtimeInput);
     });
     serverLog.info('runtime.init.ready', { runtimeId: shortId(env.runtimeId, 10) });
     const runtimeEnv = env;

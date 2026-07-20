@@ -47,6 +47,7 @@ import {
   loadEntityViewPageFromStorageDb,
   listPersistedEntityIdsAtHeight,
   registerEnvChangeCallback,
+  registerRuntimeFrameCommitCallback,
 } from '../runtime.ts';
 import type { AccountMachine, CrossJurisdictionSwapRoute, EntityInput, Env, SwapOffer } from '../types';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
@@ -3326,8 +3327,8 @@ const run = async (): Promise<void> => {
 	    Math.max(0, Math.floor(Number(targetEnv?.height ?? 0)));
 	  const runtimeInputStatusUrl = (id: string): string =>
 	    `/api/control/runtime-input/${encodeURIComponent(id)}/status`;
-	  registerEnvChangeCallback(env, (changedEnv) => {
-	    runtimeIngressReceipts.observeLatestRuntimeFrame(changedEnv);
+	  registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
+	    runtimeIngressReceipts.observeRuntimeInput(height, runtimeInput);
 	  });
   configureMarketMakerRuntimeLogging(env);
   prewarmLocalMarketMakerSignerKeys();

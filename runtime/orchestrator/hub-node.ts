@@ -106,6 +106,7 @@ import {
   loadEntityViewPageFromStorageDb,
   listPersistedEntityIdsAtHeight,
   registerEnvChangeCallback,
+  registerRuntimeFrameCommitCallback,
   validateRuntimeInputAdmission,
 } from '../runtime.ts';
 import type { EntityInput, Env, JReplica } from '../types';
@@ -1506,8 +1507,8 @@ const run = async (): Promise<void> => {
     Math.max(0, Math.floor(Number(targetEnv?.height ?? 0)));
   const runtimeInputStatusUrl = (id: string): string =>
     `/api/control/runtime-input/${encodeURIComponent(id)}/status`;
-  registerEnvChangeCallback(env, (changedEnv) => {
-    runtimeIngressReceipts.observeLatestRuntimeFrame(changedEnv);
+  registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
+    runtimeIngressReceipts.observeRuntimeInput(height, runtimeInput);
   });
   configureHubRuntimeLogging(env);
   prewarmLocalHubSignerKeys();

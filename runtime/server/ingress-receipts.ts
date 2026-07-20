@@ -20,6 +20,8 @@ export type RuntimeIngressReceipt = {
   enqueuedHeight: number;
   inputHash?: string;
   inputFingerprints?: string[];
+  observedFingerprintCount?: number;
+  requiredFingerprintCount?: number;
   observedHeight?: number;
   expiresAt: number;
   note?: string;
@@ -74,6 +76,22 @@ export const projectRuntimeIngressReceiptForWire = (
     enqueuedHeight: requireBoundaryInteger(receipt.enqueuedHeight, 'RUNTIME_INGRESS_RECEIPT_ENQUEUED_HEIGHT_INVALID'),
     ...(receipt.inputHash !== undefined ? { inputHash: receipt.inputHash } : {}),
     ...(receipt.inputFingerprints !== undefined ? { inputFingerprints: [...receipt.inputFingerprints] } : {}),
+    ...(receipt.observedFingerprintCount !== undefined
+      ? {
+          observedFingerprintCount: requireBoundaryInteger(
+            receipt.observedFingerprintCount,
+            'RUNTIME_INGRESS_RECEIPT_OBSERVED_FINGERPRINT_COUNT_INVALID',
+          ),
+        }
+      : {}),
+    ...(receipt.requiredFingerprintCount !== undefined
+      ? {
+          requiredFingerprintCount: requireBoundaryInteger(
+            receipt.requiredFingerprintCount,
+            'RUNTIME_INGRESS_RECEIPT_REQUIRED_FINGERPRINT_COUNT_INVALID',
+          ),
+        }
+      : {}),
     ...(receipt.observedHeight !== undefined
       ? { observedHeight: requireBoundaryInteger(receipt.observedHeight, 'RUNTIME_INGRESS_RECEIPT_OBSERVED_HEIGHT_INVALID') }
       : {}),
@@ -137,17 +155,17 @@ export const fingerprintRuntimeIngressInput = (input: RuntimeInput): string[] =>
   return fingerprints;
 };
 
-const containsAllFingerprints = (available: string[], required: string[]): boolean => {
-  const counts = new Map<string, number>();
-  for (const fingerprint of available) {
-    counts.set(fingerprint, (counts.get(fingerprint) ?? 0) + 1);
+const consumeObservedFingerprints = (remaining: string[], observed: string[]): string[] => {
+  const observedCounts = new Map<string, number>();
+  for (const fingerprint of observed) {
+    observedCounts.set(fingerprint, (observedCounts.get(fingerprint) ?? 0) + 1);
   }
-  for (const fingerprint of required) {
-    const count = counts.get(fingerprint) ?? 0;
-    if (count <= 0) return false;
-    counts.set(fingerprint, count - 1);
-  }
-  return true;
+  return remaining.filter((fingerprint) => {
+    const count = observedCounts.get(fingerprint) ?? 0;
+    if (count <= 0) return true;
+    observedCounts.set(fingerprint, count - 1);
+    return false;
+  });
 };
 
 const createReceiptId = (): string => {
@@ -160,6 +178,10 @@ export const createRuntimeIngressReceiptStore = (options: RuntimeIngressReceiptS
   const ttlMs = Math.max(1_000, options.ttlMs ?? DEFAULT_RECEIPT_TTL_MS);
   const now = options.now ?? (() => Date.now());
   const receipts = new Map<string, RuntimeIngressReceipt>();
+  const fingerprintProgress = new Map<string, {
+    remaining: string[];
+    lastObservedFrameKey?: string;
+  }>();
 
   const expireOldReceipts = (): void => {
     const timestamp = now();
@@ -168,6 +190,7 @@ export const createRuntimeIngressReceiptStore = (options: RuntimeIngressReceiptS
         receipts.set(id, { ...receipt, status: 'expired' });
       } else if (timestamp >= receipt.expiresAt + ttlMs) {
         receipts.delete(id);
+        fingerprintProgress.delete(id);
       }
     }
   };
@@ -182,13 +205,33 @@ export const createRuntimeIngressReceiptStore = (options: RuntimeIngressReceiptS
       if (observedHeight <= receipt.enqueuedHeight) continue;
       const requiredFingerprints = receipt.inputFingerprints ?? [];
       if (requiredFingerprints.length > 0) {
-        if (!containsAllFingerprints(observedFingerprints, requiredFingerprints)) continue;
+        const progress = fingerprintProgress.get(id) ?? { remaining: [...requiredFingerprints] };
+        const observedFrameKey = `${observedHeight}:${observedInputHash}`;
+        if (progress.lastObservedFrameKey === observedFrameKey) continue;
+        const remaining = consumeObservedFingerprints(progress.remaining, observedFingerprints);
+        fingerprintProgress.set(id, { remaining, lastObservedFrameKey: observedFrameKey });
+        if (remaining.length > 0) {
+          if (remaining.length !== progress.remaining.length) {
+            receipts.set(id, {
+              ...receipt,
+              observedFingerprintCount: requiredFingerprints.length - remaining.length,
+              requiredFingerprintCount: requiredFingerprints.length,
+            });
+          }
+          continue;
+        }
       } else if (!receipt.inputHash || receipt.inputHash !== observedInputHash) {
         continue;
       }
       receipts.set(id, {
         ...receipt,
         status: 'observed',
+        ...(requiredFingerprints.length > 0
+          ? {
+              observedFingerprintCount: requiredFingerprints.length,
+              requiredFingerprintCount: requiredFingerprints.length,
+            }
+          : {}),
         observedHeight,
         note:
           receipt.note ??
@@ -201,6 +244,9 @@ export const createRuntimeIngressReceiptStore = (options: RuntimeIngressReceiptS
     register(input: RegisterReceiptOptions): RuntimeIngressReceipt {
       expireOldReceipts();
       const enqueuedAt = now();
+      const inputFingerprints = input.inputFingerprints ?? (
+        input.runtimeInput ? fingerprintRuntimeIngressInput(input.runtimeInput) : undefined
+      );
       const receipt: RuntimeIngressReceipt = {
         id: input.id || createReceiptId(),
         kind: input.kind,
@@ -209,23 +255,24 @@ export const createRuntimeIngressReceiptStore = (options: RuntimeIngressReceiptS
         enqueuedAt,
         enqueuedHeight: normalizeHeight(input.enqueuedHeight),
         ...(input.inputHash || input.runtimeInput ? { inputHash: input.inputHash ?? hashRuntimeIngressInput(input.runtimeInput!) } : {}),
-        ...(input.inputFingerprints || input.runtimeInput
-          ? { inputFingerprints: input.inputFingerprints ?? fingerprintRuntimeIngressInput(input.runtimeInput!) }
+        ...(inputFingerprints !== undefined
+          ? {
+              inputFingerprints,
+              observedFingerprintCount: 0,
+              requiredFingerprintCount: inputFingerprints.length,
+            }
           : {}),
         expiresAt: enqueuedAt + ttlMs,
         ...(input.note ? { note: input.note } : {}),
       };
       receipts.set(receipt.id, receipt);
+      if ((receipt.inputFingerprints?.length ?? 0) > 0) {
+        fingerprintProgress.set(receipt.id, { remaining: [...receipt.inputFingerprints!] });
+      }
       return receipt;
     },
 
     observeRuntimeInput,
-
-    observeLatestRuntimeFrame(env: { history?: Array<{ height: number; runtimeInput: RuntimeInput }> }): void {
-      const latestFrame = Array.isArray(env.history) ? env.history.at(-1) : undefined;
-      if (!latestFrame?.runtimeInput) return;
-      observeRuntimeInput(latestFrame.height, latestFrame.runtimeInput);
-    },
 
     get(id: string): RuntimeIngressReceipt | null {
       expireOldReceipts();

@@ -5,9 +5,17 @@ import { TIMING } from '../constants';
 import { initCrontab, scheduleHook } from '../entity/scheduler';
 import { generateLazyEntityId } from '../entity/factory';
 import { processEventBatch } from '../jadapter/watcher';
+import { createRuntimeIngressReceiptStore } from '../server/ingress-receipts';
 import { buildJEventRangeData } from './helpers/j-history';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
-import { createEmptyEnv, enqueueRuntimeInput, entityNeedsPeriodicWake, process, startRuntimeLoop } from '../runtime';
+import {
+  createEmptyEnv,
+  enqueueRuntimeInput,
+  entityNeedsPeriodicWake,
+  process,
+  registerRuntimeFrameCommitCallback,
+  startRuntimeLoop,
+} from '../runtime';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import type { AccountMachine, EntityReplica, Env, JurisdictionConfig, JurisdictionEvent } from '../types';
 import { getWallClockMs } from '../utils';
@@ -224,10 +232,22 @@ describe('runtime ingress timestamp', () => {
       },
     }));
 
-    enqueueRuntimeInput(env, {
+    const acceptedInput = {
       runtimeTxs: [],
       entityInputs: [{ entityId, signerId, entityTxs: txs }],
+    };
+    const receipts = createRuntimeIngressReceiptStore({ now: () => 1_000 });
+    receipts.register({
+      id: 'capped-runtime-input',
+      kind: 'test',
+      counts: { runtimeTxs: 0, entityInputs: 1, jInputs: 0 },
+      enqueuedHeight: env.height,
+      runtimeInput: acceptedInput,
     });
+    registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
+      receipts.observeRuntimeInput(height, runtimeInput);
+    });
+    enqueueRuntimeInput(env, acceptedInput);
 
     await process(env);
     const pendingProfileNames = (): string[] => (env.runtimeMempool?.entityInputs ?? [])
@@ -236,14 +256,31 @@ describe('runtime ingress timestamp', () => {
       .map(tx => tx.data.profile.name);
     expect(pendingProfileNames()).toEqual(['tx-3', 'tx-4', 'tx-5']);
     expect(env.runtimeMempool?.queuedAt).toBe(1_000);
+    expect(receipts.get('capped-runtime-input')).toMatchObject({
+      status: 'pending',
+      observedFingerprintCount: 2,
+      requiredFingerprintCount: 5,
+    });
 
     await process(env);
     expect(pendingProfileNames()).toEqual(['tx-5']);
     expect(env.runtimeMempool?.queuedAt).toBe(1_000);
+    expect(receipts.get('capped-runtime-input')).toMatchObject({
+      status: 'pending',
+      observedFingerprintCount: 4,
+      requiredFingerprintCount: 5,
+    });
 
     await process(env);
     expect(env.runtimeMempool?.entityInputs ?? []).toHaveLength(0);
     expect(env.runtimeMempool?.queuedAt).toBeUndefined();
+    expect(receipts.get('capped-runtime-input')).toMatchObject({
+      status: 'observed',
+      observedHeight: 3,
+      observedFingerprintCount: 5,
+      requiredFingerprintCount: 5,
+    });
+    expect(env.history.at(-1)?.height).toBe(1);
   });
 
   test('runtime frame cap preserves watcher j_event priority across queued entity inputs', async () => {

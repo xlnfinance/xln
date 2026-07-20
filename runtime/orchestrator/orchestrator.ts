@@ -267,7 +267,6 @@ const resetState: ResetState = {
   startedAt: null,
   completedAt: null,
   failedAt: null,
-  resolvedAt: null,
 };
 const configuredResetOptions: OrchestratorResetOptions = {
   enableMarketMaker: args.mmEnabled,
@@ -2057,9 +2056,6 @@ const computeAggregatedHealth = (options: {
   const coreOk = storage.ok && hubsOnline && hubMeshOk;
   const resetOk = deriveResetHealthOk(resetState);
   const systemOk = coreOk && resetOk && mmOk && custodyOk && bootstrapReservesOk;
-  if (!resetState.inProgress && resetState.lastError && coreOk && !resetState.resolvedAt) {
-    resetState.resolvedAt = Date.now();
-  }
   const degraded = [
     storage.ok ? null : 'storage',
     hubsOnline ? null : 'hubs',
@@ -2554,7 +2550,6 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
   resetState.startedAt = Date.now();
   resetState.completedAt = null;
   resetState.failedAt = null;
-  resetState.resolvedAt = null;
   activeResetOptions = { enableMarketMaker: false, enableCustody: false };
   clearRuntimeImportManifestFile();
   const preserveState = process.env['XLN_MESH_PRESERVE_STATE_ON_RESET'] === '1';

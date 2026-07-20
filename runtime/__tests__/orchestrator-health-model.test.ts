@@ -33,9 +33,8 @@ test('orchestrator health does not mark hubs online without a live process and h
   }).online).toBe(false);
 });
 
-test('orchestrator health never reports reset ready while reset is active or unresolved', () => {
-  expect(deriveResetHealthOk({ inProgress: true, lastError: null, resolvedAt: null })).toBe(false);
-  expect(deriveResetHealthOk({ inProgress: false, lastError: 'reset failed', resolvedAt: null })).toBe(false);
-  expect(deriveResetHealthOk({ inProgress: false, lastError: null, resolvedAt: null })).toBe(true);
-  expect(deriveResetHealthOk({ inProgress: false, lastError: 'reset failed', resolvedAt: 1 })).toBe(true);
+test('orchestrator health latches a reset failure until a fresh reset clears it', () => {
+  expect(deriveResetHealthOk({ inProgress: true, lastError: null })).toBe(false);
+  expect(deriveResetHealthOk({ inProgress: false, lastError: 'reset failed' })).toBe(false);
+  expect(deriveResetHealthOk({ inProgress: false, lastError: null })).toBe(true);
 });

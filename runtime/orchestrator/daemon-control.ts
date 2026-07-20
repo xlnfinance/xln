@@ -280,6 +280,12 @@ const summarizeRuntimeInputStatus = (status: ControlRuntimeStatusResponse): stri
           status: status.receipt.status,
           enqueuedHeight: status.receipt.enqueuedHeight,
           observedHeight: status.receipt.observedHeight ?? null,
+          fingerprintProgress: status.receipt.requiredFingerprintCount === undefined
+            ? null
+            : {
+                observed: status.receipt.observedFingerprintCount ?? 0,
+                required: status.receipt.requiredFingerprintCount,
+              },
           counts: status.receipt.counts,
           note: status.receipt.note ?? null,
         }

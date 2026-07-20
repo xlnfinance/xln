@@ -164,7 +164,6 @@ export const publicAggregatedHealth = (health: unknown): Record<string, unknown>
         startedAt: valueOf(reset, 'startedAt'),
         completedAt: valueOf(reset, 'completedAt'),
         failedAt: valueOf(reset, 'failedAt'),
-        resolvedAt: valueOf(reset, 'resolvedAt'),
         hasError: Boolean(valueOf(reset, 'lastError')),
       }
       : undefined,

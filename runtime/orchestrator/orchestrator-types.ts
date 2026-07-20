@@ -95,7 +95,6 @@ export type ResetState = {
   startedAt: number | null;
   completedAt: number | null;
   failedAt: number | null;
-  resolvedAt: number | null;
 };
 
 export type HubProcessSpec = {

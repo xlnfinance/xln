@@ -505,6 +505,16 @@ export const registerEnvChangeCallback = (env: Env, callback: (env: Env) => void
   return () => state.envChangeCallbacks?.delete(callback);
 };
 
+export const registerRuntimeFrameCommitCallback = (
+  env: Env,
+  callback: (frame: { height: number; runtimeInput: RuntimeInput }) => void,
+): (() => void) => {
+  const state = ensureRuntimeState(env);
+  if (!state.runtimeFrameCommitCallbacks) state.runtimeFrameCommitCallbacks = new Set();
+  state.runtimeFrameCommitCallbacks.add(callback);
+  return () => state.runtimeFrameCommitCallbacks?.delete(callback);
+};
+
 export const registerRecoveryBackupBarrier = (
   env: Env,
   callback: (env: Env, info: { height: number; remoteOutputCount: number; jInputCount: number }) => Promise<void>,
@@ -2182,6 +2192,25 @@ const notifyEnvChange = (env: Env) => {
   }
 };
 
+const notifyRuntimeFrameCommitted = (
+  env: Env,
+  runtimeInput: RuntimeInput,
+): void => {
+  const callbacks = ensureRuntimeState(env).runtimeFrameCommitCallbacks;
+  if (!callbacks || callbacks.size === 0) return;
+  const frame = { height: env.height, runtimeInput };
+  for (const callback of callbacks) {
+    try {
+      callback(frame);
+    } catch (error) {
+      runtimeLog.warn('frame_commit.callback_failed', {
+        error: error instanceof Error ? error.message : String(error),
+        height: env.height,
+      });
+    }
+  }
+};
+
 /**
  * Process any pending j-events after j-block finalization
  * Called automatically after each BrowserVM batch execution
@@ -3678,6 +3707,7 @@ const RUNTIME_FRAME_SHARED_STATE_KEYS = new Set<string>([
   'processingPromise',
   'p2p',
   'envChangeCallbacks',
+  'runtimeFrameCommitCallbacks',
   'db',
   'dbOpenPromise',
   'storageDb',
@@ -4599,6 +4629,10 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       env = publishRuntimeFrameTransaction(frameTransaction);
       state = ensureRuntimeState(env);
       drainRuntimeFrameIngressBuffer(frameTransaction);
+    }
+
+    if (frameAdvanced && appliedRuntimeInputForPersistence) {
+      notifyRuntimeFrameCommitted(env, appliedRuntimeInputForPersistence);
     }
 
     const recoveryBarrier = state.recoveryBackupBarrier;

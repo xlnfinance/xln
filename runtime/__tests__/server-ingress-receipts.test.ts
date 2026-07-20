@@ -83,6 +83,62 @@ describe('runtime ingress receipts', () => {
     });
   });
 
+  test('observes one accepted ingress after its commands commit across capped runtime frames', () => {
+    const store = createRuntimeIngressReceiptStore({ ttlMs: 10_000, now: () => 1_000 });
+    const firstCommand = { type: 'openAccount', data: { targetEntityId: 'hub-a' } };
+    const repeatedCommand = {
+      type: 'extendCredit',
+      data: { counterpartyEntityId: 'hub-a', tokenId: 1, amount: 100n },
+    };
+    const acceptedInput = {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: 'custody',
+        signerId: 'custody-signer',
+        entityTxs: [firstCommand, repeatedCommand, repeatedCommand],
+      }],
+    } as unknown as RuntimeInput;
+
+    store.register({
+      id: 'capped-ingress',
+      kind: 'control',
+      counts: { runtimeTxs: 0, entityInputs: 1, jInputs: 0 },
+      enqueuedHeight: 4,
+      runtimeInput: acceptedInput,
+    });
+
+    const firstCommittedFrame = {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: 'custody',
+        signerId: 'custody-signer',
+        entityTxs: [firstCommand, repeatedCommand],
+      }],
+    } as unknown as RuntimeInput;
+    store.observeRuntimeInput(5, firstCommittedFrame);
+    expect(store.get('capped-ingress')?.status).toBe('pending');
+    expect(store.get('capped-ingress')).toMatchObject({
+      observedFingerprintCount: 2,
+      requiredFingerprintCount: 3,
+    });
+
+    store.observeRuntimeInput(5, firstCommittedFrame);
+    expect(store.get('capped-ingress')?.status).toBe('pending');
+
+    store.observeRuntimeInput(6, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: 'custody',
+        signerId: 'custody-signer',
+        entityTxs: [repeatedCommand],
+      }],
+    } as unknown as RuntimeInput);
+    expect(store.get('capped-ingress')).toMatchObject({
+      status: 'observed',
+      observedHeight: 6,
+    });
+  });
+
   test('observes a raw HTLC command through its immutable server marker after proposer sealing', () => {
     const store = createRuntimeIngressReceiptStore({ ttlMs: 10_000, now: () => 1_000 });
     const marker = {
