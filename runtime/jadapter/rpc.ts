@@ -2960,8 +2960,14 @@ export async function createRpcAdapter(
             }
             pendingWatcherJHistoryRange = null;
             lastPendingHistoryWaitKey = '';
-            commitScannedWatcherCursor(activeEnv, lastSyncedBlock);
           }
+          // Multi-signer replicas can finalize a previously scanned range
+          // before this poll begins. In that case there is no local-history
+          // write left to await, but the Runtime-level watcher cursor still
+          // needs its own durable RuntimeTx. Restricting this commit to the
+          // pending-range branch leaves the cursor permanently one block
+          // behind and turns a fully idle watcher into a false drain stall.
+          commitScannedWatcherCursor(activeEnv, lastSyncedBlock);
           const watcherReplica = findWatcherJurisdictionReplica(
             activeEnv,
             addresses.depository,
