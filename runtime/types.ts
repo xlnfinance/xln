@@ -241,6 +241,24 @@ export type RuntimeP2PSurface = {
   announceProfilesForEntitiesNow(entityIds: string[], reason?: string): Promise<void>;
 };
 
+export type RuntimeSecurityIncident = {
+  id: string;
+  domain: 'cross-j';
+  code: string;
+  source: 'local-consensus' | 'remote-ingress';
+  severity: 'warning' | 'critical';
+  status: 'active' | 'resolved';
+  summary: string;
+  entityId: string;
+  accountId?: string;
+  offerId?: string;
+  routeHash?: string;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  resolvedAt?: number;
+  occurrences: number;
+};
+
 export interface JurisdictionConfig {
   address: string;
   name: string;
@@ -1281,6 +1299,8 @@ export interface Env {
       mirrorToConsole?: boolean;
     };
     pendingAuditEvents?: Array<Record<string, unknown>>;
+    /** Bounded, replayable wallet security status. Never stores untrusted payload bodies. */
+    securityIncidents?: Map<string, RuntimeSecurityIncident>;
     recentJEvents?: Array<{
       name: string;
       args: Record<string, unknown>;
@@ -1303,7 +1323,7 @@ export interface Env {
       timestamp: number;
       reason: string;
       message: string;
-      action: 'halted';
+      action: 'dropped';
       counts: {
         runtimeTxs: number;
         entityInputs: number;

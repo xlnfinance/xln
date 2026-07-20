@@ -738,6 +738,34 @@ describe('audit fail-fast regressions', () => {
     })).toThrow('CROSS_J_REMOTE_OUTPUT_FORBIDDEN');
   });
 
+  test('live runtime drops remote cross-j ingress and records a bounded warning without halting', async () => {
+    const env = createEmptyEnv('cross-j-live-ingress-drop');
+    env.scenarioMode = false;
+    env.quietRuntimeLogs = true;
+    const remoteRuntime = `0x${'99'.repeat(20)}`;
+
+    await expect(process(env, [{
+      from: remoteRuntime,
+      entityId: `0x${'11'.repeat(32)}`,
+      signerId: `0x${'01'.repeat(20)}`,
+      entityTxs: [{
+        type: 'requestCrossJurisdictionSwap',
+        data: { route: {} },
+      } as any],
+    }])).resolves.toBe(env);
+
+    expect(env.runtimeState?.halted).not.toBe(true);
+    expect(env.runtimeState?.lifecyclePhase).not.toBe('halted');
+    expect(env.runtimeState?.quarantinedRuntimeInputs?.at(-1)?.action).toBe('dropped');
+    expect([...env.runtimeState!.securityIncidents!.values()]).toContainEqual(expect.objectContaining({
+      code: 'CROSS_J_REMOTE_INPUT_REJECTED',
+      source: 'remote-ingress',
+      severity: 'warning',
+      status: 'active',
+      occurrences: 1,
+    }));
+  });
+
   test('runtime ingress retargets stale signer hints only when the local target entity has one replica', async () => {
     const env = createEmptyEnv('stale-signer-retarget');
     env.scenarioMode = true;
@@ -794,7 +822,7 @@ describe('audit fail-fast regressions', () => {
     }])).rejects.toThrow('RUNTIME_REPLICA_NOT_FOUND');
   });
 
-  test('live runtime rejects stale signer tx-bearing inputs instead of dropping them', async () => {
+  test('live runtime drops stale signer tx-bearing inputs without halting', async () => {
     const env = createEmptyEnv('stale-signer-live-drop');
     env.scenarioMode = false;
     env.quietRuntimeLogs = true;
@@ -822,8 +850,8 @@ describe('audit fail-fast regressions', () => {
           creditAmount: 1n,
         },
       }],
-    }])).rejects.toThrow('RUNTIME_REPLICA_NOT_FOUND');
-    expect(env.runtimeState?.quarantinedRuntimeInputs?.[0]?.action).toBe('halted');
+    }])).resolves.toBe(env);
+    expect(env.runtimeState?.quarantinedRuntimeInputs?.[0]?.action).toBe('dropped');
     expect(env.eReplicas.get(`${entityId}:${actualSignerId}`)?.state.accounts.size).toBe(0);
   });
 
@@ -844,12 +872,12 @@ describe('audit fail-fast regressions', () => {
           creditAmount: 1n,
         },
       }],
-    }])).rejects.toThrow('FINANCIAL-SAFETY: signerId is missing');
+    }])).resolves.toBe(env);
 
     const quarantine = env.runtimeState?.quarantinedRuntimeInputs ?? [];
     expect(quarantine.length).toBe(1);
     expect(quarantine[0]?.reason).toBe('FINANCIAL-SAFETY:');
-    expect(quarantine[0]?.action).toBe('halted');
+    expect(quarantine[0]?.action).toBe('dropped');
     expect(quarantine[0]?.counts.entityInputs).toBe(1);
     expect(env.runtimeMempool?.entityInputs.length).toBe(0);
 
@@ -8104,6 +8132,12 @@ describe('audit fail-fast regressions', () => {
     const preserved = await applyEntityFrame(expiredEnv, expiredState, []);
     const preservedAck = preserved.newState.pendingCrossJurisdictionFillAcks?.values().next().value;
     expect(preservedAck?.ttlExpiredAt).toBe(expiredEnv.timestamp);
+    expect([...expiredEnv.runtimeState!.securityIncidents!.values()]).toContainEqual(expect.objectContaining({
+      code: 'CROSS_J_FILL_ACK_TTL_EXPIRED',
+      status: 'active',
+      entityId: sourceState.entityId,
+      offerId: orderId,
+    }));
     env.timestamp = originalTimestamp;
 
     const stateWithOffer = first.newState;

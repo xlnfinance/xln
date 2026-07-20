@@ -60,6 +60,7 @@ import {
   resolveEntityProposerId,
 } from '../../state-helpers';
 import { markStorageAccountDirty, markStorageEntityDirty, recordOrderbookPairUpdate } from '../../machine/env-events';
+import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from '../../machine/security-incidents';
 import { LIMITS } from '../../constants';
 import { signAccountFrame as signFrame, verifyAccountSignature as verifyFrame } from '../../account/crypto';
 import { appendAccountMempoolTx } from '../../account/mempool';
@@ -1334,6 +1335,17 @@ const drainPendingCrossJurisdictionFillAcks = (
       };
       pendingAck.ttlExpiredAt = now;
       markStorageEntityDirty(env, currentEntityState.entityId);
+      recordRuntimeSecurityIncident(env, {
+        domain: 'cross-j',
+        code: 'CROSS_J_FILL_ACK_TTL_EXPIRED',
+        source: 'local-consensus',
+        severity: 'critical',
+        summary: 'A committed sibling fill acknowledgement has no matching local source offer',
+        entityId: currentEntityState.entityId,
+        accountId: pendingAck.accountId,
+        offerId: pendingAck.tx.data.offerId,
+        routeHash: pendingAck.tx.data.routeHash || '',
+      });
       entityLog.warn('crossj.fill_ack_ttl_expired_preserved', payload);
     }
     const account = currentEntityState.accounts.get(pendingAck.accountId);
@@ -1341,6 +1353,19 @@ const drainPendingCrossJurisdictionFillAcks = (
     if (queueAccountMempoolTx(account, pendingAck.tx)) {
       proposableAccounts.add(pendingAck.accountId);
       markStorageAccountDirty(env, currentEntityState.entityId, pendingAck.accountId);
+    }
+    if (pendingAck.ttlExpiredAt !== undefined) {
+      resolveRuntimeSecurityIncident(env, {
+        domain: 'cross-j',
+        code: 'CROSS_J_FILL_ACK_TTL_EXPIRED',
+        source: 'local-consensus',
+        severity: 'critical',
+        summary: 'A committed sibling fill acknowledgement has no matching local source offer',
+        entityId: currentEntityState.entityId,
+        accountId: pendingAck.accountId,
+        offerId: pendingAck.tx.data.offerId,
+        routeHash: pendingAck.tx.data.routeHash || '',
+      });
     }
     pending.delete(key);
     drained++;
@@ -4396,7 +4421,7 @@ function applyOrderbookMatching(context: ApplyOrderbookMatchingContext): Orderbo
     admitted: offersToMatch.length,
   });
 
-  const matchResult = processOrderbookSwaps(currentEntityState, offersToMatch);
+  const matchResult = processOrderbookSwaps(currentEntityState, offersToMatch, { runtimeEnv: env });
   stats.orderbookMatched = true;
   stats.orderbookMempoolOps = matchResult.mempoolOps.length;
   stats.orderbookBookUpdates = matchResult.bookUpdates.length;

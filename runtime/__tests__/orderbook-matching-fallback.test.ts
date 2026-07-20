@@ -3750,9 +3750,17 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    expect(() => processCommittedOrderbookSwaps(entityState, [takerOffer] as any)).not.toThrow();
+    const runtimeEnv = createEmptyEnv('cross-j-expired-book-fill-security-status');
+    runtimeEnv.timestamp = entityState.timestamp;
+    runtimeEnv.error = () => undefined;
+    expect(() => processCommittedOrderbookSwaps(entityState, [takerOffer] as any, { runtimeEnv })).not.toThrow();
     const admission = entityState.crossJurisdictionBookAdmissions.get('remote-maker:maker-cross-expired-pending-progress');
     expect(admission?.pendingFill?.ttlExpiredAt).toBe(entityState.timestamp);
+    expect([...runtimeEnv.runtimeState!.securityIncidents!.values()]).toContainEqual(expect.objectContaining({
+      code: 'CROSS_J_BOOK_FILL_TTL_EXPIRED',
+      status: 'active',
+      entityId: entityState.entityId,
+    }));
   });
 
   test('suspends cross-j orders after the first same-pass fill until ACK commits', () => {

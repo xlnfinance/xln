@@ -402,10 +402,12 @@ export const makeJSubmitResultRuntimeTx = (
 
 export const splitJOutboxForDurableSubmit = (
   jOutbox: JInput[],
-): { durable: JInput[]; retries: RuntimeTx[] } => {
+): { maintenance: JInput[]; durable: JInput[]; retries: RuntimeTx[] } => {
+  const maintenance: JInput[] = [];
   const durable: JInput[] = [];
   const retries: RuntimeTx[] = [];
   for (const input of jOutbox) {
+    const maintenanceTxs: JTx[] = [];
     const durableTxs: JTx[] = [];
     for (const jTx of input.jTxs) {
       if (isEntityProviderActionJTx(jTx)) {
@@ -430,14 +432,17 @@ export const splitJOutboxForDurableSubmit = (
             },
           }));
         }
-      } else if (jTx.type !== 'batch') {
-        // Direct EOA calls have no application nonce bound to RJEA state. A
-        // replay would sign a new transaction nonce and could execute twice.
-        // Debug mint belongs to bootstrap control-plane APIs; Depository debt
-        // enforcement is invoked by its monetary operations. Neither is a
-        // valid post-consensus side effect until it has an on-chain idempotency
-        // domain equivalent to Hanko/EntityProvider nonces.
-        throw new Error(`J_SUBMIT_NON_DURABLE_COMMAND_FORBIDDEN:${jTx.type}`);
+      } else if (jTx.type === 'mint' || jTx.type === 'debtEnforcement') {
+        // These are deliberately not consensus settlement commands:
+        // - mint is a local-dev/testnet admin utility and is unavailable on
+        //   production chains;
+        // - enforceDebts is permissionless monotonic queue maintenance. Every
+        //   monetary contract path enforces debt too, so this call is only a
+        //   liveness hint and repeating it can only advance valid FIFO debt.
+        // Submit both after WAL, but never replay them as durable financial
+        // intents. New JTx kinds must choose an explicit durable design rather
+        // than silently entering this maintenance lane.
+        maintenanceTxs.push(jTx);
       } else if (jTx.data.runtimeSubmitAttempt) {
         durableTxs.push(jTx);
       } else {
@@ -461,7 +466,8 @@ export const splitJOutboxForDurableSubmit = (
         }));
       }
     }
+    if (maintenanceTxs.length > 0) maintenance.push({ jurisdictionName: input.jurisdictionName, jTxs: maintenanceTxs });
     if (durableTxs.length > 0) durable.push({ jurisdictionName: input.jurisdictionName, jTxs: durableTxs });
   }
-  return { durable, retries };
+  return { maintenance, durable, retries };
 };

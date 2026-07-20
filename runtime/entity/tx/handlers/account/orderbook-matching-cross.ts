@@ -1,4 +1,5 @@
-import type { EntityState } from '../../../../types';
+import type { EntityState, Env } from '../../../../types';
+import { recordRuntimeSecurityIncident } from '../../../../machine/security-incidents';
 import {
   applyCommand,
   getBookOrder,
@@ -78,6 +79,7 @@ type RejectInvalidCrossOffer = (accountId: string, offerId: string, reason: stri
 type RecordDebugProjectionReject = (accountId: string, offerId: string, reason: string) => true;
 
 type CrossOrderbookProcessInput = {
+  runtimeEnv?: Env;
   hubState: EntityState;
   ext: OrderbookExtState;
   crossJurisdictionSwapOffers: CrossJurisdictionWorkingOrderbookOffer[];
@@ -93,6 +95,7 @@ type CrossOrderbookProcessInput = {
 
 export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookProcessInput): void => {
   const {
+    runtimeEnv,
     hubState,
     ext,
     crossJurisdictionSwapOffers,
@@ -181,6 +184,19 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
       };
       pendingFill.ttlExpiredAt = now;
       admission.updatedAt = now || admission.updatedAt;
+      if (runtimeEnv) {
+        recordRuntimeSecurityIncident(runtimeEnv, {
+          domain: 'cross-j',
+          code: 'CROSS_J_BOOK_FILL_TTL_EXPIRED',
+          source: 'local-consensus',
+          severity: 'critical',
+          summary: 'Book-owner fill is still waiting for its exact terminal sibling acknowledgement',
+          entityId: hubState.entityId,
+          accountId,
+          offerId,
+          routeHash: admission.routeHash || admission.route?.routeHash || '',
+        });
+      }
       orderbookCrossLog.warn('pending_fill_ack_ttl_expired_preserved', payload);
     }
     return true;

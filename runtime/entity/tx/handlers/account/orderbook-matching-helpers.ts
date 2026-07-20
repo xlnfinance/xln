@@ -34,12 +34,13 @@ import {
   getCrossJurisdictionRouteRemainingAmounts,
   type CrossMarketOffer,
 } from '../../../../extensions/cross-j/orderbook';
-import type { EntityState } from '../../../../types';
+import type { EntityState, Env } from '../../../../types';
 import { normalizeSwapOfferForOrderbook, resolveStoredOfferEntityRefs } from './orderbook-offers';
 import type { SwapResolveEnqueueData } from './orderbook-queue';
 
 export type OrderbookProcessOptions = {
   debugRebuildProjectionOnly?: boolean;
+  runtimeEnv?: Env;
 };
 
 type NamespacedOrderRef = {

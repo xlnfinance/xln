@@ -130,6 +130,7 @@ import {
   peekPendingFrameDbRecords,
   setAccountFrameHistoryView,
 } from './machine/env-events';
+import { recordRuntimeSecurityIncident } from './machine/security-incidents';
 import {
   deriveSignerAddressSync,
   getLocalSignerPrivateKey,
@@ -1221,13 +1222,23 @@ const quarantineLiveRuntimeInput = (
     timestamp: Math.max(0, env.timestamp || 0),
     reason,
     message,
-    action: 'halted' as const,
+    action: 'dropped' as const,
     ...summary,
   };
   state.quarantinedRuntimeInputs = [
     ...(state.quarantinedRuntimeInputs ?? []),
     record,
   ].slice(-MAX_RUNTIME_INPUT_QUARANTINE_RECORDS);
+  if (reason === 'CROSS_J_' || reason === 'ORDERBOOK_') {
+    recordRuntimeSecurityIncident(env, {
+      domain: 'cross-j',
+      code: reason === 'CROSS_J_' ? 'CROSS_J_REMOTE_INPUT_REJECTED' : 'CROSS_J_ORDERBOOK_INPUT_REJECTED',
+      source: 'remote-ingress',
+      severity: 'warning',
+      summary: 'An untrusted cross-j input was rejected before state application',
+      entityId: summary.entityInputs[0]?.entityId ?? '',
+    });
+  }
   const payload = {
     quarantineId: record.id,
     reason,
@@ -1241,6 +1252,13 @@ const quarantineLiveRuntimeInput = (
   }
   return true;
 };
+
+class RuntimeInputQuarantinedError extends Error {
+  constructor(cause: Error) {
+    super(`RUNTIME_INPUT_DROPPED:${cause.message}`, { cause });
+    this.name = 'RuntimeInputQuarantinedError';
+  }
+}
 
 /**
  * Start the single runtime event loop. Called once on init.
@@ -4350,7 +4368,9 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       }
       return rollbackErrors.length > 0
         ? new AggregateError([originalError, ...rollbackErrors], 'RUNTIME_APPLY_ROLLBACK_FAILED')
-        : originalError;
+        : quarantineResult
+          ? new RuntimeInputQuarantinedError(originalError)
+          : originalError;
     };
     processProfileMetrics.runtimeTxs = runtimeInput.runtimeTxs.length;
     processProfileMetrics.entityInputs = runtimeInput.entityInputs.length;
@@ -4482,7 +4502,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
         const splitJOutbox = splitJOutboxForDurableSubmit(result.jOutbox);
         registerPendingCommittedJOutbox(env, splitJOutbox.durable);
         queuedJSubmitRetries = splitJOutbox.retries;
-        jOutbox = [];
+        jOutbox = splitJOutbox.maintenance;
         // Local authorization symbols prove that a command entered through a
         // trusted in-process adapter. They are neither deterministic protocol
         // data nor needed on replay (replay is authorized by the committed
@@ -4856,6 +4876,10 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       const rollbackError = await rollbackUndurableFrame(error, {
         quarantine: !(error instanceof RuntimeFrameStorageError),
       });
+      if (rollbackError instanceof RuntimeInputQuarantinedError) {
+        processProfileOutcome = 'input-dropped';
+        return liveEnv;
+      }
       throw rollbackError;
     }
     if (

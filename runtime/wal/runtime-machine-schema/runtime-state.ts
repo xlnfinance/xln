@@ -11,6 +11,7 @@ import {
   requireBoundaryInteger,
   requireBoundaryRecord,
   requireExactBoundaryKeys,
+  requireMap,
   requireSet,
   requireString,
   requireStringArray,
@@ -111,7 +112,7 @@ const validateQuarantine = (value: unknown, code: string): void => {
   for (const field of ['id', 'reason', 'message']) requireString(item[field], `${code}_${field.toUpperCase()}`);
   requireBoundaryInteger(item['height'], `${code}_HEIGHT`);
   requireBoundaryInteger(item['timestamp'], `${code}_TIMESTAMP`);
-  if (item['action'] !== 'halted') throw new Error(`${code}_ACTION`);
+  if (item['action'] !== 'dropped') throw new Error(`${code}_ACTION`);
   const counts = requireBoundaryRecord(item['counts'], `${code}_COUNTS`);
   requireExactBoundaryKeys(counts, ['runtimeTxs', 'entityInputs', 'jInputs'], [], `${code}_COUNTS_FIELDS`);
   for (const field of ['runtimeTxs', 'entityInputs', 'jInputs']) requireBoundaryInteger(counts[field], `${code}_COUNT_${field}`);
@@ -131,11 +132,39 @@ const validateQuarantine = (value: unknown, code: string): void => {
   }
 };
 
+const validateSecurityIncident = (value: unknown, code: string): void => {
+  const incident = requireBoundaryRecord(value, code);
+  requireExactBoundaryKeys(incident, [
+    'id', 'domain', 'code', 'source', 'severity', 'status', 'summary', 'entityId',
+    'firstSeenAt', 'lastSeenAt', 'occurrences',
+  ], ['accountId', 'offerId', 'routeHash', 'resolvedAt'], `${code}_FIELDS`);
+  for (const field of ['id', 'code', 'summary', 'entityId']) {
+    requireString(incident[field], `${code}_${field.toUpperCase()}`);
+  }
+  for (const field of ['accountId', 'offerId', 'routeHash']) {
+    if (incident[field] !== undefined) requireString(incident[field], `${code}_${field.toUpperCase()}`);
+  }
+  if (incident['domain'] !== 'cross-j') throw new Error(`${code}_DOMAIN`);
+  if (incident['source'] !== 'local-consensus' && incident['source'] !== 'remote-ingress') {
+    throw new Error(`${code}_SOURCE`);
+  }
+  if (incident['severity'] !== 'warning' && incident['severity'] !== 'critical') {
+    throw new Error(`${code}_SEVERITY`);
+  }
+  if (incident['status'] !== 'active' && incident['status'] !== 'resolved') {
+    throw new Error(`${code}_STATUS`);
+  }
+  requireBoundaryInteger(incident['firstSeenAt'], `${code}_FIRST_SEEN`);
+  requireBoundaryInteger(incident['lastSeenAt'], `${code}_LAST_SEEN`);
+  requireBoundaryInteger(incident['occurrences'], `${code}_OCCURRENCES`, 1);
+  if (incident['resolvedAt'] !== undefined) requireBoundaryInteger(incident['resolvedAt'], `${code}_RESOLVED_AT`);
+};
+
 export const validateDurableRuntimeState = (value: unknown, code: string): void => {
   const state = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(state, [], [
     'halted', 'fatalDebugPayload', 'maxEntityInputsPerFrame', 'maxEntityTxsPerFrame',
-    'pendingAuditEvents', 'quarantinedRuntimeInputs', 'pendingFrameDbRecords', 'deferredNetworkMeta',
+    'pendingAuditEvents', 'securityIncidents', 'quarantinedRuntimeInputs', 'pendingFrameDbRecords', 'deferredNetworkMeta',
     'reliableIngressReceiptLedger', 'reliableIngressTerminalWatermarks',
     'receivedReliableReceiptLedger', 'receivedReliableTerminalWatermarks',
     'pendingReliableIngress', 'reliableIngressCommitting', 'verifiedProfileRoutes',
@@ -159,6 +188,16 @@ export const validateDurableRuntimeState = (value: unknown, code: string): void 
       requireBoundaryRecord(event, `${code}_PENDING_AUDIT_EVENT_${index}`);
       validateStorageSafeValue(event, `${code}_PENDING_AUDIT_EVENT_${index}`);
     });
+  }
+  if (state['securityIncidents'] !== undefined) {
+    const incidents = requireMap(state['securityIncidents'], `${code}_SECURITY_INCIDENTS`);
+    if (incidents.size > 256) throw new Error(`${code}_SECURITY_INCIDENTS_CAPACITY`);
+    for (const [rawId, incident] of incidents) {
+      const id = requireString(rawId, `${code}_SECURITY_INCIDENT_ID`);
+      validateSecurityIncident(incident, `${code}_SECURITY_INCIDENT_${id}`);
+      const stored = requireBoundaryRecord(incident, `${code}_SECURITY_INCIDENT_${id}`);
+      if (stored['id'] !== id) throw new Error(`${code}_SECURITY_INCIDENT_KEY_MISMATCH`);
+    }
   }
   if (state['quarantinedRuntimeInputs'] !== undefined) requireArray(state['quarantinedRuntimeInputs'], `${code}_QUARANTINE`).forEach((entry, index) => validateQuarantine(entry, `${code}_QUARANTINE_${index}`));
   if (state['pendingFrameDbRecords'] !== undefined) requireArray(state['pendingFrameDbRecords'], `${code}_FRAME_DB`).forEach((entry, index) => validateAccountFrameRecord(entry, `${code}_FRAME_DB_${index}`));
