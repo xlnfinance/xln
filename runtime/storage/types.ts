@@ -52,8 +52,9 @@ export type StorageRuntimeConfig = {
   materializePeriodFrames?: number;
   /**
    * Canonical runtime-state commitment.
-   * 0 disables it; any positive value stores and verifies a full canonical hash
-   * every frame. Sparse cadences are intentionally not used for restore safety.
+   * 0 disables it; a positive value stores and verifies a full canonical hash
+   * on that cadence and on mandatory materialization checkpoints. Every frame
+   * remains protected by the chained WAL frame hash.
    */
   canonicalHashPeriodFrames?: number;
   accountMerkleRadix?: RadixMerkleRadix;
@@ -235,7 +236,7 @@ export type StorageFrameRecord = {
    */
   canonicalStateHash?: string;
   canonicalEntityHashes?: StorageFrameEntityHash[];
-  /** Per-frame canonical Entity + durable R-machine replay oracle. */
+  /** Sparse canonical Entity + durable R-machine replay oracle. */
   runtimeStateHash?: string;
   runtimeInput: RuntimeInput;
   /**

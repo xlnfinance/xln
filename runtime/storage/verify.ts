@@ -150,27 +150,27 @@ export const verifyStorageTailIntegrity = async (
     if (!skipPrevHashCheck && record.prevFrameHash !== previousHash) {
       throw new Error(`STORAGE_VERIFY_FRAME_CHAIN_BROKEN: height=${height} expectedPrev=${previousHash} actualPrev=${record.prevFrameHash ?? 'none'}`);
     }
-    if (!Array.isArray(record.entityHashes)) {
-      throw new Error(`STORAGE_VERIFY_ENTITY_HASHES_MISSING: height=${height}`);
-    }
     if (record.materializedState !== false) {
+      if (!Array.isArray(record.entityHashes)) {
+        throw new Error(`STORAGE_VERIFY_ENTITY_HASHES_MISSING: height=${height}`);
+      }
       const expectedStateHash = computeStorageStateRoot(record.entityHashes);
       if (record.stateHash !== expectedStateHash) {
         throw new Error(`STORAGE_VERIFY_STATE_HASH_MISMATCH: height=${height} expected=${expectedStateHash} actual=${record.stateHash}`);
       }
-      if (record.canonicalStateHash || Array.isArray(record.canonicalEntityHashes)) {
-        if (!Array.isArray(record.canonicalEntityHashes) || !record.canonicalStateHash) {
-          throw new Error(`STORAGE_VERIFY_CANONICAL_HASH_MISSING: height=${height}`);
-        }
-        const expectedCanonicalHash = computeCanonicalRuntimeStateHash(
-          record.height,
-          record.timestamp,
-          record.canonicalEntityHashes,
-          record.runtimeMachine,
-        );
-        if (record.canonicalStateHash !== expectedCanonicalHash) {
-          throw new Error(`STORAGE_VERIFY_CANONICAL_HASH_MISMATCH: height=${height} expected=${expectedCanonicalHash} actual=${record.canonicalStateHash}`);
-        }
+    }
+    if (record.canonicalStateHash || Array.isArray(record.canonicalEntityHashes)) {
+      if (!Array.isArray(record.canonicalEntityHashes) || !record.canonicalStateHash) {
+        throw new Error(`STORAGE_VERIFY_CANONICAL_HASH_MISSING: height=${height}`);
+      }
+      const expectedCanonicalHash = computeCanonicalRuntimeStateHash(
+        record.height,
+        record.timestamp,
+        record.canonicalEntityHashes,
+        record.runtimeMachine,
+      );
+      if (record.canonicalStateHash !== expectedCanonicalHash) {
+        throw new Error(`STORAGE_VERIFY_CANONICAL_HASH_MISMATCH: height=${height} expected=${expectedCanonicalHash} actual=${record.canonicalStateHash}`);
       }
     }
     const actualFrameHash = computeStorageFrameHash(record);
@@ -196,10 +196,19 @@ export const verifyStorageTailIntegrity = async (
     }
     const liveEntityHashes = await readAllEntityHashDocs(db);
     if (liveEntityHashes.size > 0) {
+      const materializedRecord = await readStorageFrameRecord(
+        db,
+        Math.max(1, Math.floor(Number(head.latestMaterializedHeight))),
+      );
+      if (!materializedRecord?.entityHashes) {
+        throw new Error(
+          `STORAGE_VERIFY_MATERIALIZED_ENTITY_HASHES_MISSING:height=${head.latestMaterializedHeight}`,
+        );
+      }
       assertEntityHashesEqual(
         toFrameEntityHashes(liveEntityHashes.values()),
-        latestRecord.entityHashes,
-        `latestHeight=${latestHeight}`,
+        materializedRecord.entityHashes,
+        `materializedHeight=${head.latestMaterializedHeight}`,
       );
     }
   }

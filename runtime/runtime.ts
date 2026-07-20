@@ -3177,9 +3177,6 @@ const replayRecoveryFrameJournals = async (
       if (!frame.runtimeMachineBeforeApply || typeof frame.runtimeMachineBeforeApply !== 'object') {
         throw new Error(`RECOVERY_JOURNAL_PRE_RUNTIME_MACHINE_MISSING:height=${frameHeight}`);
       }
-      if (!/^0x[0-9a-f]{64}$/i.test(String(frame.runtimeStateHash ?? ''))) {
-        throw new Error(`RECOVERY_JOURNAL_STATE_HASH_MISSING:height=${frameHeight}`);
-      }
       if (!/^0x[0-9a-f]{64}$/i.test(String(frame.replicaMetaDigest ?? ''))) {
         throw new Error(`RECOVERY_JOURNAL_REPLICA_META_DIGEST_MISSING:height=${frameHeight}`);
       }
@@ -3219,12 +3216,14 @@ const replayRecoveryFrameJournals = async (
           );
         }
         assertRecoveryRuntimeMachineMatches(env, frame.runtimeMachine, frameHeight);
-        const actualStateHash = computeCanonicalStateHashFromEnv(env);
-        if (actualStateHash !== frame.runtimeStateHash) {
-          throw new Error(
-            `RECOVERY_JOURNAL_STATE_HASH_MISMATCH:height=${frameHeight}:` +
-            `expected=${frame.runtimeStateHash}:actual=${actualStateHash}`,
-          );
+        if (frame.runtimeStateHash) {
+          const actualStateHash = computeCanonicalStateHashFromEnv(env);
+          if (actualStateHash !== frame.runtimeStateHash) {
+            throw new Error(
+              `RECOVERY_JOURNAL_STATE_HASH_MISMATCH:height=${frameHeight}:` +
+              `expected=${frame.runtimeStateHash}:actual=${actualStateHash}`,
+            );
+          }
         }
       } finally {
         envRecord(env)[ENV_APPLY_ALLOWED_KEY] = false;
@@ -4701,15 +4700,19 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     const p2p = getP2P(env);
     const localEntityIds = getLocallySignableEntityIds();
     const changedLocalEntityIds = [...changedEntityIds].filter(entityId => localEntityIds.has(entityId));
-    if (changedLocalEntityIds.length > 0) {
+    if (
+      p2p &&
+      remoteOutputs.length > 0 &&
+      changedLocalEntityIds.length > 0 &&
+      typeof p2p.announceProfilesForEntitiesNow === 'function'
+    ) {
+      // The immediate P2P path signs once, updates local gossip, and sends the
+      // same certified profile before dependent outputs. Calling the local
+      // announcer first duplicated the complete signing pass on every trade.
+      await p2p.announceProfilesForEntitiesNow(changedLocalEntityIds, 'pre-output-profile-refresh');
+    } else if (changedLocalEntityIds.length > 0) {
       await announceCertifiedLocalProfiles(env, changedLocalEntityIds);
-    }
-    if (p2p && changedLocalEntityIds.length > 0) {
-      if (remoteOutputs.length > 0 && typeof p2p.announceProfilesForEntitiesNow === 'function') {
-        await p2p.announceProfilesForEntitiesNow(changedLocalEntityIds, 'pre-output-profile-refresh');
-      } else {
-        p2p.announceProfilesForEntities(changedLocalEntityIds, 'routing-profile-refresh');
-      }
+      p2p?.announceProfilesForEntities(changedLocalEntityIds, 'routing-profile-refresh');
     }
     markProcessProfile('profileAnnounce');
 
@@ -4961,11 +4964,15 @@ const resolveAuthoritativeFrameCommitStatus = async (
   const head = await readStorageHead(historyDb);
   const frame = await readStorageFrameRecord(historyDb, env.height);
   if (frame) {
-    const expectedStateHash = computeCanonicalStateHashFromEnv(env);
     const expectedInputValue = expectedInput ?? { runtimeTxs: [], entityInputs: [] };
-    const stateMatches = frame.runtimeStateHash === expectedStateHash;
     const inputMatches = safeStringify(frame.runtimeInput) === safeStringify(expectedInputValue);
-    return stateMatches && inputMatches ? 'committed' : 'conflict';
+    const runtimeMachineMatches = safeStringify(frame.runtimeMachine) === safeStringify(
+      buildDurableRuntimeMachineSnapshot(env, {
+        pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
+      }),
+    );
+    const stateMatches = !frame.runtimeStateHash || frame.runtimeStateHash === computeCanonicalStateHashFromEnv(env);
+    return inputMatches && runtimeMachineMatches && stateMatches ? 'committed' : 'conflict';
   }
   if (!head) return 'unknown';
   if (head.latestHeight >= env.height) return 'conflict';
@@ -5796,7 +5803,7 @@ const verifyPersistedFrameState = (
   actualCanonicalStateHash: string;
   ok: boolean;
 } => {
-  const expectedStateHash = persistedFrame.stateHash;
+  const expectedStateHash = persistedFrame.stateHash ?? '';
   const storageHashMode = persistedFrame.hashMode === 'storage-merkle-v1';
   const actualStateHash = storageHashMode && persistedFrame.materializedState === false
     ? expectedStateHash

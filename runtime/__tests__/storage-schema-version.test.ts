@@ -60,15 +60,15 @@ const memoryDbWithHead = (head: StorageHead): RuntimeDbLike => memoryDb([[KEY_HE
 describe('storage schema boundary', () => {
   test('rejects legacy command and incomplete-checkpoint schemas before hydrating entity state', async () => {
     await expect(readStorageHead(memoryDbWithHead(currentHead(2)))).rejects.toThrow(
-      'STORAGE_SCHEMA_MISMATCH:stored=2:current=5',
+      `STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}`,
     );
     await expect(readStorageHead(memoryDbWithHead(currentHead(3)))).rejects.toThrow(
-      'STORAGE_SCHEMA_MISMATCH:stored=3:current=5',
+      `STORAGE_SCHEMA_MISMATCH:stored=3:current=${STORAGE_SCHEMA_VERSION}`,
     );
     await expect(readStorageHead(memoryDbWithHead(currentHead(4)))).rejects.toThrow(
-      'STORAGE_SCHEMA_MISMATCH:stored=4:current=5',
+      `STORAGE_SCHEMA_MISMATCH:stored=4:current=${STORAGE_SCHEMA_VERSION}`,
     );
-    expect(STORAGE_SCHEMA_VERSION).toBe(5);
+    expect(STORAGE_SCHEMA_VERSION).toBe(6);
   });
 
   test('accepts only the current schema and preserves an empty database', async () => {
@@ -80,12 +80,15 @@ describe('storage schema boundary', () => {
 
   test('rejects future and malformed storage heads fail-closed', async () => {
     await expect(readStorageHead(memoryDbWithHead(currentHead(STORAGE_SCHEMA_VERSION + 1)))).rejects.toThrow(
-      'STORAGE_SCHEMA_MISMATCH:stored=6:current=5',
+      `STORAGE_SCHEMA_MISMATCH:stored=${STORAGE_SCHEMA_VERSION + 1}:current=${STORAGE_SCHEMA_VERSION}`,
     );
     await expect(
-      readStorageHead(memoryDb([[KEY_HEAD, { ...currentHead(5), schemaVersion: '5' }]])),
+      readStorageHead(memoryDb([[KEY_HEAD, {
+        ...currentHead(STORAGE_SCHEMA_VERSION),
+        schemaVersion: String(STORAGE_SCHEMA_VERSION),
+      }]])),
     ).rejects.toThrow(
-      'STORAGE_SCHEMA_INVALID:stored=5:current=5',
+      `STORAGE_SCHEMA_INVALID:stored=${STORAGE_SCHEMA_VERSION}:current=${STORAGE_SCHEMA_VERSION}`,
     );
   });
 
@@ -99,7 +102,7 @@ describe('storage schema boundary', () => {
       retainFrames: storageConfig.frameDbRetainFrames,
     };
     await expect(readFrameDbHead(memoryDb([[KEY_FRAME_DB_HEAD, legacy]]), storageConfig)).rejects.toThrow(
-      'STORAGE_SCHEMA_MISMATCH:stored=2:current=5:boundary=frame-db-head',
+      `STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}:boundary=frame-db-head`,
     );
   });
 
@@ -111,21 +114,23 @@ describe('storage schema boundary', () => {
         historyDb: legacyDb,
         config: storageConfig,
       }),
-    ).rejects.toThrow('STORAGE_SCHEMA_MISMATCH:stored=2:current=5');
-    await expect(verifyStorageTailIntegrity(legacyDb)).rejects.toThrow('STORAGE_SCHEMA_MISMATCH:stored=2:current=5');
+    ).rejects.toThrow(`STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}`);
+    await expect(verifyStorageTailIntegrity(legacyDb)).rejects.toThrow(
+      `STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}`,
+    );
     await expect(
       seedFreshStorageEpoch({
         sourceDb: legacyDb,
         targetDb: memoryDb(),
         snapshotHeight: 7,
       }),
-    ).rejects.toThrow('STORAGE_SCHEMA_MISMATCH:stored=2:current=5');
+    ).rejects.toThrow(`STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}`);
     await expect(
       inspectStorage({
         env: {} as Env,
         tryOpenDb: async () => true,
         getRuntimeDb: () => legacyDb,
       }),
-    ).rejects.toThrow('STORAGE_SCHEMA_MISMATCH:stored=2:current=5');
+    ).rejects.toThrow(`STORAGE_SCHEMA_MISMATCH:stored=2:current=${STORAGE_SCHEMA_VERSION}`);
   });
 });

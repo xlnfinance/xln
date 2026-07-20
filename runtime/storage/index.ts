@@ -240,7 +240,7 @@ const positiveStorageInteger = (value: unknown, label: string): number => {
   return normalized;
 };
 
-const resolveCanonicalHashPeriodFrames = (env: Env): 0 | 1 => {
+const resolveCanonicalHashPeriodFrames = (env: Env): number => {
   const explicitPeriod =
     env.runtimeConfig?.storage?.canonicalHashPeriodFrames ??
     process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'];
@@ -249,15 +249,16 @@ const resolveCanonicalHashPeriodFrames = (env: Env): 0 | 1 => {
     if (!Number.isSafeInteger(normalized) || normalized < 0) {
       throw new Error(`STORAGE_CONFIG_CANONICAL_HASH_PERIOD_FRAMES_INVALID:${String(explicitPeriod)}`);
     }
-    return normalized > 0 ? 1 : 0;
+    return normalized;
   }
   const legacyOverride = process.env['XLN_STORAGE_VERIFY_CANONICAL'];
   if (legacyOverride !== undefined) {
     return parseStorageBoolean(legacyOverride, 'VERIFY_CANONICAL') ? 1 : 0;
   }
-  // Mainnet default: every authoritative frame carries the independent
-  // canonical replay oracle. Disabling it must be an explicit operator choice.
-  return 1;
+  // The frame hash-chain protects every WAL append. The independent full-state
+  // oracle is deliberately sparse because recomputing it scales with the whole
+  // Runtime rather than with this frame's work.
+  return 100;
 };
 
 export const resolveStorageRuntimeConfig = (env: Env): Required<StorageRuntimeConfig> => {
@@ -780,9 +781,14 @@ export const recoverStorageDbFromHistory = async (options: {
   }
 
   const batch = options.db.batch();
-  const metaChanged = await synchronizeReplicaMeta(options.historyDb, options.db, batch);
-  options.onPersistenceProgress?.('recovery-replica-metadata-synchronized');
   const headChanged = !rawCurrentHead || !storageHeadsEqual(historyHead, currentHead);
+  // History commits before the rebuildable current cache. Equal heads prove
+  // that the previous atomic current-cache batch (head + metadata) completed;
+  // scanning every replica prefix again on the next normal append is pure I/O.
+  const metaChanged = headChanged
+    ? await synchronizeReplicaMeta(options.historyDb, options.db, batch)
+    : false;
+  options.onPersistenceProgress?.('recovery-replica-metadata-synchronized');
   // The normal append path writes both DBs and never scans the content-addressed
   // DAG. Only a lagging/current-cache recovery needs to copy immutable nodes.
   const boardNodesChanged = headChanged
@@ -1041,30 +1047,46 @@ export const saveRuntimeFrameToStorage = async (options: {
     throw new Error(`STORAGE_PRE_APPLY_RUNTIME_MACHINE_REQUIRED:height=${options.env.height}`);
   }
   checkpointPrepare('runtimeMachine');
-  const canonicalHashEnabled = config.canonicalHashPeriodFrames > 0;
-  const runtimeStateHashes = prepareStorageCanonicalStateHashes(
-    options.env,
-    [],
-    previousFrame,
-    replicaLookup,
-    runtimeMachine,
+  const canonicalHashDue = config.canonicalHashPeriodFrames > 0 && (
+    options.env.height === 1 ||
+    options.env.height % config.canonicalHashPeriodFrames === 0 ||
+    shouldMaterialize
   );
+  const runtimeStateHashes = canonicalHashDue
+    ? prepareStorageCanonicalStateHashes(
+        options.env,
+        [],
+        previousFrame,
+        replicaLookup,
+        runtimeMachine,
+      )
+    : null;
   options.onPersistenceProgress?.('canonical-hashes-built');
   checkpointPrepare('canonicalHashes');
-  const canonicalHashes = canonicalHashEnabled ? runtimeStateHashes : null;
   const replicaMetaCommitment = buildStorageReplicaMetaCommitmentFromCheckpointPlan(options.env, lineagePlan);
   const replicaMetaEntries = replicaMetaCommitment.entries;
   const liveReplicaMetaKeys = new Set(replicaMetaEntries.map(entry => entry.key.toString('hex')));
   checkpointPrepare('replicaCommitment');
   const staleHistoryReplicaMetaKeys: Buffer[] = [];
-  for await (const key of iterateKeys(historyDb, { prefix: keyLiveReplicaMetaPrefix() })) {
-    if (!liveReplicaMetaKeys.has(key.toString('hex'))) staleHistoryReplicaMetaKeys.push(Buffer.from(key));
+  const cachedReplicaMetaKeys = state.storageReplicaMetaKeys instanceof Set
+    ? state.storageReplicaMetaKeys
+    : null;
+  if (cachedReplicaMetaKeys) {
+    for (const keyHex of cachedReplicaMetaKeys) {
+      if (!liveReplicaMetaKeys.has(keyHex)) staleHistoryReplicaMetaKeys.push(Buffer.from(keyHex, 'hex'));
+    }
+  } else {
+    // A process restart pays one authoritative scan. Subsequent appends use
+    // the writer-local key set published only after both DB batches commit.
+    for await (const key of iterateKeys(historyDb, { prefix: keyLiveReplicaMetaPrefix() })) {
+      if (!liveReplicaMetaKeys.has(key.toString('hex'))) staleHistoryReplicaMetaKeys.push(Buffer.from(key));
+    }
   }
   checkpointPrepare('replicaHistoryScan');
-  const staleCurrentReplicaMetaKeys: Buffer[] = [];
-  for await (const key of iterateKeys(db, { prefix: keyLiveReplicaMetaPrefix() })) {
-    if (!liveReplicaMetaKeys.has(key.toString('hex'))) staleCurrentReplicaMetaKeys.push(Buffer.from(key));
-  }
+  // Current is an exact rebuildable mirror of authoritative history at an
+  // equal head, so the same deletion set applies to both atomic batches. A
+  // second prefix scan only doubled LevelDB work on every Runtime frame.
+  const staleCurrentReplicaMetaKeys = staleHistoryReplicaMetaKeys;
   options.onPersistenceProgress?.('replica-metadata-read');
   checkpointPrepare('replicaCurrentScan');
   const frameRecordBase: StorageFrameRecord = {
@@ -1075,12 +1097,12 @@ export const saveRuntimeFrameToStorage = async (options: {
     stateHash: preparedHashes?.stateHash ?? '',
     hashMode: 'storage-merkle-v1',
     materializedState: shouldMaterialize,
-    entityHashes: preparedHashes?.entityHashes ?? previousFrame?.entityHashes ?? [],
-    ...(canonicalHashes ? {
-      canonicalStateHash: canonicalHashes.canonicalStateHash,
-      canonicalEntityHashes: canonicalHashes.canonicalEntityHashes,
+    ...(preparedHashes ? { entityHashes: preparedHashes.entityHashes } : {}),
+    ...(runtimeStateHashes ? {
+      canonicalStateHash: runtimeStateHashes.canonicalStateHash,
+      canonicalEntityHashes: runtimeStateHashes.canonicalEntityHashes,
+      runtimeStateHash: runtimeStateHashes.canonicalStateHash,
     } : {}),
-    runtimeStateHash: runtimeStateHashes.canonicalStateHash,
     runtimeInput: appliedRuntimeInput,
     runtimeMachineBeforeApply: cloneIsolatedRuntimeSnapshot(runtimeMachineBeforeApply),
     runtimeMachine,
@@ -1251,6 +1273,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   if (state) {
     state.currentStorageOverlayMarks = [];
     state.pendingCertifiedBoardNodes = new Map();
+    state.storageReplicaMetaKeys = new Set(liveReplicaMetaKeys);
     finalizePersistedConsumptionNodes(options.env, safeConsumptionDeletes);
     finalizePersistedAccountJClaimNodes(options.env, safeAccountJClaimDeletes);
   }

@@ -5,7 +5,7 @@ import type { RadixMerkleRadix } from './merkle';
  * checkpoint. Schema 3 snapshots can restore an Entity state above H0 without
  * its certified lineage anchor and therefore are not valid recovery bundles.
  */
-export const STORAGE_SCHEMA_VERSION = 5;
+export const STORAGE_SCHEMA_VERSION = 6;
 
 export class StorageSchemaMismatchError extends Error {
   readonly code = 'STORAGE_SCHEMA_MISMATCH' as const;
@@ -43,7 +43,7 @@ export const DEFAULT_RETAIN_SNAPSHOTS = 3;
 export const DEFAULT_EPOCH_MAX_BYTES = 256 * 1024 * 1024;
 export const DEFAULT_FRAME_DB_MAX_BYTES = 1024 * 1024 * 1024;
 export const DEFAULT_FRAME_DB_RETAIN_FRAMES = 100_000;
-export const DEFAULT_MATERIALIZE_PERIOD_FRAMES = 64;
+export const DEFAULT_MATERIALIZE_PERIOD_FRAMES = 100;
 export const DEFAULT_ACCOUNT_MERKLE_RADIX: RadixMerkleRadix = 16;
 
 export const KEY_HEAD = Buffer.from([0x20]);

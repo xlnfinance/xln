@@ -105,6 +105,47 @@ describe('storage frame journal retention', () => {
     await closeInfraDb(env);
   });
 
+  test('stores only the chained R-frame between sparse canonical checkpoints', async () => {
+    const seed = `sparse-canonical-wal ${Date.now()} alpha beta gamma`;
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    cleanupRuntimeStorage(dbRoot, runtimeId);
+    const env = createEmptyEnv(seed);
+    env.runtimeId = runtimeId;
+    env.dbNamespace = runtimeId;
+    env.quietRuntimeLogs = true;
+    env.runtimeConfig = {
+      ...(env.runtimeConfig || {}),
+      storage: {
+        canonicalHashPeriodFrames: 3,
+        materializePeriodFrames: 100,
+        snapshotPeriodFrames: 100,
+      },
+    };
+
+    for (let height = 1; height <= 3; height += 1) {
+      env.height = height;
+      env.timestamp = 1_000 + height;
+      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    }
+
+    const first = await readStorageFrameRecord(getFrameDb(env), 1);
+    const middle = await readStorageFrameRecord(getFrameDb(env), 2);
+    const checkpoint = await readStorageFrameRecord(getFrameDb(env), 3);
+    expect(first?.runtimeStateHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(middle?.runtimeStateHash).toBeUndefined();
+    expect(middle?.canonicalStateHash).toBeUndefined();
+    expect(middle?.canonicalEntityHashes).toBeUndefined();
+    expect(middle?.entityHashes).toBeUndefined();
+    expect(middle?.frameHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(checkpoint?.runtimeStateHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(checkpoint?.prevFrameHash).toBe(middle?.frameHash);
+    expect((await verifyStorageTailIntegrity(getFrameDb(env))).checkedFrames).toBe(3);
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  });
+
   test('returns null for a checkpoint view that was legitimately pruned by a newer snapshot', async () => {
     const seed = `checkpoint-view-pruned ${Date.now()} alpha beta gamma`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();

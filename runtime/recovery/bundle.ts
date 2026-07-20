@@ -136,8 +136,8 @@ const normalizeAndValidateBundleFields = (
         'pre',
       );
       assertRuntimeMachineBoundToRuntime(frame.runtimeMachine, runtimeId, frameHeight, 'post');
-      if (!/^0x[0-9a-f]{64}$/i.test(String(frame.runtimeStateHash || ''))) {
-        throw new Error(`RECOVERY_BUNDLE_JOURNAL_STATE_HASH_REQUIRED:height=${frameHeight}`);
+      if (frame.runtimeStateHash !== undefined && !/^0x[0-9a-f]{64}$/i.test(String(frame.runtimeStateHash))) {
+        throw new Error(`RECOVERY_BUNDLE_JOURNAL_STATE_HASH_INVALID:height=${frameHeight}`);
       }
       if (!/^0x[0-9a-f]{64}$/i.test(String(frame.replicaMetaDigest || ''))) {
         throw new Error(`RECOVERY_BUNDLE_JOURNAL_REPLICA_META_DIGEST_REQUIRED:height=${frameHeight}`);

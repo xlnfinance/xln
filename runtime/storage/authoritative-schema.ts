@@ -69,10 +69,10 @@ export const validateStorageFrameRecordValue = (value: unknown): StorageFrameRec
   const frame = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(frame, [
     'height', 'timestamp', 'prevFrameHash', 'frameHash', 'replicaMetaDigest', 'stateHash',
-    'hashMode', 'materializedState', 'entityHashes', 'runtimeStateHash', 'runtimeInput',
+    'hashMode', 'materializedState', 'runtimeInput',
     'runtimeMachineBeforeApply', 'runtimeMachine', 'touchedEntities', 'touchedAccounts',
     'touchedBookEntities',
-  ], ['canonicalStateHash', 'canonicalEntityHashes', 'runtimeOutputs', 'overlayRecords'], `${code}_FIELDS`);
+  ], ['entityHashes', 'canonicalStateHash', 'canonicalEntityHashes', 'runtimeStateHash', 'runtimeOutputs', 'overlayRecords'], `${code}_FIELDS`);
   requireBoundaryInteger(frame['height'], `${code}_HEIGHT`, 1);
   requireBoundaryInteger(frame['timestamp'], `${code}_TIMESTAMP`);
   requireStorageHash(frame['prevFrameHash'], `${code}_PREV_HASH`);
@@ -81,8 +81,14 @@ export const validateStorageFrameRecordValue = (value: unknown): StorageFrameRec
   if (typeof frame['stateHash'] !== 'string') throw new Error(`${code}_STATE_HASH`);
   if (frame['hashMode'] !== 'storage-merkle-v1') throw new Error(`${code}_HASH_MODE`);
   requireStorageBoolean(frame['materializedState'], `${code}_MATERIALIZED`);
-  validateFrameEntityHashes(frame['entityHashes'], `${code}_ENTITY_HASHES`);
-  requireStorageHash(frame['runtimeStateHash'], `${code}_RUNTIME_STATE_HASH`);
+  if (frame['materializedState'] === true) {
+    validateFrameEntityHashes(frame['entityHashes'], `${code}_ENTITY_HASHES`);
+  } else if (frame['entityHashes'] !== undefined) {
+    throw new Error(`${code}_NON_MATERIALIZED_ENTITY_HASHES_FORBIDDEN`);
+  }
+  if (frame['runtimeStateHash'] !== undefined) {
+    requireStorageHash(frame['runtimeStateHash'], `${code}_RUNTIME_STATE_HASH`);
+  }
   validateRuntimeInputEnvelope(frame['runtimeInput'], `${code}_RUNTIME_INPUT`);
   frame['runtimeMachineBeforeApply'] = validateDurableRuntimeMachineSnapshot(
     frame['runtimeMachineBeforeApply'],
@@ -111,6 +117,14 @@ const validateTouchedAccounts = (value: unknown, code: string): void => {
 const validateOptionalFrameFields = (frame: Record<string, unknown>, code: string): void => {
   if (frame['canonicalStateHash'] !== undefined) requireStorageHash(frame['canonicalStateHash'], `${code}_CANONICAL_HASH`);
   if (frame['canonicalEntityHashes'] !== undefined) validateFrameEntityHashes(frame['canonicalEntityHashes'], `${code}_CANONICAL_ENTITIES`);
+  const canonicalFields = [
+    frame['canonicalStateHash'],
+    frame['canonicalEntityHashes'],
+    frame['runtimeStateHash'],
+  ];
+  if (canonicalFields.some(value => value !== undefined) && canonicalFields.some(value => value === undefined)) {
+    throw new Error(`${code}_CANONICAL_CHECKPOINT_INCOMPLETE`);
+  }
   if (frame['runtimeOutputs'] !== undefined) requireStorageArray(frame['runtimeOutputs'], `${code}_OUTPUTS`);
   if (frame['overlayRecords'] !== undefined) requireStorageArray(frame['overlayRecords'], `${code}_OVERLAYS`);
 };

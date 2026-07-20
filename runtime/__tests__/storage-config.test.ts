@@ -4,6 +4,14 @@ import { createEmptyEnv } from '../runtime';
 import { resolveStorageRuntimeConfig } from '../storage';
 
 describe('storage config', () => {
+  test('uses sparse full-state checkpoints without weakening per-frame WAL chaining', () => {
+    const env = createEmptyEnv('sparse-storage-checkpoints');
+    expect(resolveStorageRuntimeConfig(env).canonicalHashPeriodFrames).toBe(100);
+    expect(resolveStorageRuntimeConfig(env).materializePeriodFrames).toBe(100);
+    env.runtimeConfig = { storage: { canonicalHashPeriodFrames: 37 } };
+    expect(resolveStorageRuntimeConfig(env).canonicalHashPeriodFrames).toBe(37);
+  });
+
   test('rejects invalid limits instead of silently disabling retention with NaN', () => {
     for (const [field, value] of [
       ['snapshotPeriodFrames', Number.NaN],
