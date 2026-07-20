@@ -81,6 +81,7 @@ describe('isolated E2E runner resources', () => {
   test('runner build and browser helpers have no fallback to shared dev resources', () => {
     const runner = readFileSync('runtime/scripts/run-e2e-parallel-isolated.ts', 'utf8');
     const runtimeImport = readFileSync('tests/utils/e2e-runtime-import.ts', 'utf8');
+    const viteConfig = readFileSync('frontend/vite.config.ts', 'utf8');
 
     expect(runner).toContain('XLN_RUNTIME_BUNDLE_OUT: artifacts.runtimeBundlePath');
     expect(runner).toContain('XLN_SVELTE_BUILD_DIR: relative(frontendRoot, artifacts.frontendBuildDir)');
@@ -89,6 +90,10 @@ describe('isolated E2E runner resources', () => {
     expect(runner).toContain('codeFingerprint.buildInputHash,');
     expect(runner).not.toContain('prepareIsolatedE2EBuild(logsDir, codeFingerprint.codeHash');
     expect(runner).not.toContain("runE2ECommand('bun', ['run', 'build']");
+    expect(runner).toContain("const webUrl = `http://localhost:${webPort}`");
+    expect(runner).toContain("XLN_VITE_FORCE_HTTP: '1'");
+    expect(runner).toContain('Math.min(args.stackTimeoutMs, 30_000)');
+    expect(viteConfig).toContain("const FORCE_HTTP = process.env['XLN_VITE_FORCE_HTTP'] === '1'");
     expect(runtimeImport).not.toContain("return 'http://127.0.0.1:8082'");
   });
 

@@ -23,26 +23,30 @@ import { configureWsProxyLifecycle } from './vite-ws-proxy-lifecycle';
  * Your nginx deployment is safe - it uses its own certificates!
  */
 
+// Isolated E2E is loopback-only and must not depend on developer certificates.
+// localhost remains a secure browser context over HTTP.
+const FORCE_HTTP = process.env['XLN_VITE_FORCE_HTTP'] === '1';
+
 // Check if HTTPS certs exist (try multiple locations)
 let certPath = './localhost+3.pem';
 let keyPath = './localhost+3-key.pem';
-let hasCerts = fs.existsSync(certPath) && fs.existsSync(keyPath);
+let hasCerts = !FORCE_HTTP && fs.existsSync(certPath) && fs.existsSync(keyPath);
 
 // Fallback to localhost+2 certs
-if (!hasCerts) {
+if (!FORCE_HTTP && !hasCerts) {
 	certPath = './localhost+2.pem';
 	keyPath = './localhost+2-key.pem';
 	hasCerts = fs.existsSync(certPath) && fs.existsSync(keyPath);
 }
 
 // Fallback to LAN IP certs if localhost certs don't exist
-if (!hasCerts) {
+if (!FORCE_HTTP && !hasCerts) {
 	certPath = '../192.168.1.23+2.pem';
 	keyPath = '../192.168.1.23+2-key.pem';
 	hasCerts = fs.existsSync(certPath) && fs.existsSync(keyPath);
 }
 
-if (!hasCerts) {
+if (!FORCE_HTTP && !hasCerts) {
 	console.warn('⚠️  HTTPS certs not found. Run: ./generate-certs.sh');
 	console.warn('   (Optional - only needed for local HTTPS development)');
 }

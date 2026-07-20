@@ -2151,14 +2151,17 @@ const hardResetShardBaseline = async (
   }
 };
 
-const waitForHttpsReady = async (url: string, timeoutMs: number, signal?: AbortSignal): Promise<void> => {
-  // Use curl -k for self-signed local certs.
+const waitForWebReady = async (url: string, timeoutMs: number, signal?: AbortSignal): Promise<void> => {
   const deadline = Date.now() + timeoutMs;
   let lastError = '';
   while (Date.now() < deadline) {
     assertE2EShardNotAborted(signal);
     const ok = await new Promise<boolean>(resolve => {
-      const p = spawn('curl', ['-k', '-sSf', url], { stdio: 'ignore' });
+      const p = spawn('curl', [
+        ...(url.startsWith('https:') ? ['-k'] : []),
+        '-sSf',
+        url,
+      ], { stdio: 'ignore' });
       const abort = (): void => {
         if (p.exitCode === null) p.kill('SIGTERM');
       };
@@ -2175,7 +2178,7 @@ const waitForHttpsReady = async (url: string, timeoutMs: number, signal?: AbortS
     if (!lastError) lastError = 'curl_exit_nonzero';
     await e2eRetryDelay(250, signal);
   }
-  throw new Error(`HTTPS_ENDPOINT_NOT_READY url=${url} timeoutMs=${timeoutMs} last=${lastError || 'none'}`);
+  throw new Error(`WEB_ENDPOINT_NOT_READY url=${url} timeoutMs=${timeoutMs} last=${lastError || 'none'}`);
 };
 
 export type E2ECommandResult = {
@@ -2627,7 +2630,8 @@ const runShard = async (
   const rpcUrl = `http://127.0.0.1:${rpcPort}`;
   const rpc2Url = `http://127.0.0.1:${rpc2Port}`;
   const apiUrl = `http://127.0.0.1:${apiPort}`;
-  const webUrl = `https://localhost:${webPort}`;
+  const frontendRoot = resolve(process.cwd(), 'frontend');
+  const webUrl = `http://localhost:${webPort}`;
   const dbPath = shardPaths.dbRoot;
   const runtimeImportManifestPath = join(dbPath, 'runtime-import-manifest.json');
   // Keep anvil's live state outside orchestrator dbRoot. Reset intentionally rm -rf's dbRoot.
@@ -2933,7 +2937,7 @@ const runShard = async (
     vite = spawn(
       'node',
       [
-        resolve(process.cwd(), 'frontend', 'node_modules', 'vite', 'bin', 'vite.js'),
+        resolve(frontendRoot, 'node_modules', 'vite', 'bin', 'vite.js'),
         'preview',
         '--mode',
         `xln-e2e-${basename(logsDir)}-${shard}`,
@@ -2944,7 +2948,7 @@ const runShard = async (
         '--strictPort',
       ],
       {
-        cwd: resolve(process.cwd(), 'frontend'),
+        cwd: frontendRoot,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: sanitizeChildProcessEnv({
           ...process.env,
@@ -2954,17 +2958,18 @@ const runShard = async (
           RPC_TRON: rpc2Url,
           VITE_DEV_PORT: String(webPort),
           VITE_API_PROXY_TARGET: apiUrl,
+          XLN_VITE_FORCE_HTTP: '1',
           VITE_CACHE_DIR: shardViteCacheDir,
           XLN_SVELTE_KIT_OUT_DIR: shardSvelteKitOutDir,
-          XLN_SVELTE_BUILD_DIR: relative(resolve(process.cwd(), 'frontend'), buildArtifacts.frontendBuildDir),
+          XLN_SVELTE_BUILD_DIR: relative(frontendRoot, buildArtifacts.frontendBuildDir),
           XLN_RUNTIME_BUNDLE_PATH: buildArtifacts.runtimeBundlePath,
-          VITE_PUBLIC_DIR: relative(resolve(process.cwd(), 'frontend'), buildArtifacts.publicDir),
+          VITE_PUBLIC_DIR: relative(frontendRoot, buildArtifacts.publicDir),
         }),
       },
     );
     vite.stdout.on('data', c => log.write(`[vite] ${c.toString()}`));
     vite.stderr.on('data', c => log.write(`[vite:err] ${c.toString()}`));
-    await waitForHttpsReady(webUrl, args.stackTimeoutMs, shardAbortController.signal);
+    await waitForWebReady(webUrl, Math.min(args.stackTimeoutMs, 30_000), shardAbortController.signal);
     markPhase('viteBoot', viteStart);
     throwIfAborted();
 
