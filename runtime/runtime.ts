@@ -5248,9 +5248,12 @@ export const listPersistedEntityIdsAtHeight = async (env: Env, targetHeight: num
       }
       for (const account of frame?.touchedAccounts ?? []) {
         const entityId = String(account?.entityId || '').toLowerCase();
-        const counterpartyId = String(account?.counterpartyId || '').toLowerCase();
         if (entityId) entityIds.add(entityId);
-        if (counterpartyId) entityIds.add(counterpartyId);
+        // An Account doc belongs to `entityId`; its counterparty is commonly a
+        // remote Entity and therefore has no core doc in this Runtime. Graph
+        // projection adds that endpoint as a placeholder after loading the
+        // local Account. Treating it as local makes historical reads demand an
+        // Entity core that cannot exist in this keyspace.
       }
       for (const entry of frame?.entityHashes ?? []) {
         const entityId = String(entry?.entityId || '').toLowerCase();

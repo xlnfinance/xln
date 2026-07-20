@@ -28,8 +28,8 @@ import {
 import { markStorageEntityDirty } from '../machine/env-events';
 import { recoverStorageDbFromHistory, saveRuntimeFrameToStorage } from '../storage';
 import { decodeBuffer } from '../storage/codec';
-import { KEY_HEAD, keyConsumptionNode, keyDiff } from '../storage/keys';
-import type { RuntimeDbLike, StorageDiffRecord, StorageHead } from '../storage/types';
+import { KEY_HEAD, keyConsumptionNode, keyDiff, keyLiveEntity } from '../storage/keys';
+import type { RuntimeDbLike, StorageEntityCoreDoc, StorageHead } from '../storage/types';
 import type { JReplica, JurisdictionConfig } from '../types';
 import { getPerfMs } from '../utils';
 import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
@@ -195,10 +195,12 @@ test('normal frame atomically publishes accumulator root, witness node, diff, an
   ));
   expect(atomicHistoryWrite).toBeDefined();
   expect(decodeBuffer(await historyDb.get(keyConsumptionNode(node.hash)))).toEqual(node.node);
-  const diff = decodeBuffer<StorageDiffRecord>(await historyDb.get(keyDiff(env.height)));
-  const persistedEntity = diff.puts.find((doc) => doc.family === 'entity');
-  expect(persistedEntity?.family === 'entity' && persistedEntity.value.consumptionAccumulator)
-    .toEqual(applied.state);
+  // Frame 1 is also the mandatory recovery snapshot anchor, so its diff is
+  // pruned only after the complete snapshot is published. The atomic write
+  // above proves the root-bearing diff and witness node crossed the durable
+  // boundary together; the materialized cache proves the published value.
+  const persistedEntity = decodeBuffer<StorageEntityCoreDoc>(await currentDb.get(keyLiveEntity(entityId)));
+  expect(persistedEntity.consumptionAccumulator).toEqual(applied.state);
 
   const rebuiltCurrent = makeAtomicMemoryDb();
   await recoverStorageDbFromHistory({

@@ -2,8 +2,10 @@ import { deriveSignerAddressSync } from '../../account/crypto';
 import {
   createEmptyEnv,
   enqueueRuntimeInput,
+  getFrameDb,
   process as processRuntime,
 } from '../../runtime';
+import { readStorageFrameRecord } from '../../storage';
 import {
   buildCatchupFixtureCertificate,
   catchupFixtureDeliverable,
@@ -90,7 +92,8 @@ const afterH1 = env.eReplicas.get(`${initialState.entityId}:${targetSignerId}`);
 if (env.height !== 2 || afterH1?.state.height !== 1) {
   throw new Error(`CATCHUP_CRASH_H1_NOT_DURABLE:R=${env.height}:E=${afterH1?.state.height ?? 'missing'}`);
 }
-const durableHeights = env.history?.at(-1)?.runtimeInput.entityInputs
+const durableFrame = await readStorageFrameRecord(getFrameDb(env), env.height);
+const durableHeights = durableFrame?.runtimeInput.entityInputs
   .map(input => input.proposedFrame?.height ?? null);
 if (durableHeights?.length !== 1 || durableHeights[0] !== 1) {
   throw new Error(`CATCHUP_CRASH_FRAME_BARRIER:${String(durableHeights)}`);

@@ -29,6 +29,7 @@ const networkOutput = (signerId: string): DeliverableEntityInput => ({
   entityId,
   signerId,
   runtimeId,
+  sourceRuntimeFrame: { height: 1, timestamp: 100 },
 });
 
 describe('scenario convergence timeout diagnostics', () => {

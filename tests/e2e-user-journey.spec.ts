@@ -40,7 +40,8 @@ type EntityIdleSnapshot = {
   quiescent: boolean;
   runtimeHeight: number;
   entityHeight: number;
-  scannedJHeight: number;
+  projectedJHeight: number;
+  watcherScannedJHeight: number;
   finalizedJHeight: number;
   pendingWorkCount: number;
   recentInputs: Array<{
@@ -219,6 +220,16 @@ async function readEntityIdleSnapshot(
     const env = (window as typeof window & {
       isolatedEnv?: {
         height?: number;
+        jReplicas?: Map<string, {
+          chainId?: number;
+          depositoryAddress?: string;
+          contracts?: { depository?: string };
+          jadapter?: {
+            chainId?: number;
+            addresses?: { depository?: string };
+            getWatcherScanProgress?: () => { scannedThroughHeight?: number };
+          };
+        }>;
         eReplicas?: Map<string, {
           signerId?: string;
           entityId?: string;
@@ -230,6 +241,9 @@ async function readEntityIdleSnapshot(
             entityId?: string;
             height?: number;
             lastFinalizedJHeight?: number;
+            config?: {
+              jurisdiction?: { chainId?: number; depositoryAddress?: string };
+            };
             accounts?: Map<string, { mempool?: unknown[]; pendingFrame?: unknown }>;
           };
         }>;
@@ -243,6 +257,28 @@ async function readEntityIdleSnapshot(
       String(candidate.signerId || '').toLowerCase() === signer,
     );
     if (!replica?.state) throw new Error(`E2E_IDLE_REPLICA_MISSING:${entity}:${signer}`);
+    const jurisdiction = replica.state.config?.jurisdiction;
+    const jurisdictionChainId = Number(jurisdiction?.chainId ?? 0);
+    const jurisdictionDepository = String(jurisdiction?.depositoryAddress ?? '').toLowerCase();
+    const watcherMatches = Array.from(env.jReplicas?.values() ?? []).filter((candidate) => {
+      const chainId = Number(candidate.chainId ?? candidate.jadapter?.chainId ?? 0);
+      const depository = String(
+        candidate.depositoryAddress ??
+        candidate.contracts?.depository ??
+        candidate.jadapter?.addresses?.depository ??
+        '',
+      ).toLowerCase();
+      return chainId === jurisdictionChainId && depository === jurisdictionDepository;
+    });
+    if (watcherMatches.length !== 1) {
+      throw new Error(
+        `E2E_IDLE_WATCHER_RESOLUTION_FAILED:${jurisdictionChainId}:${jurisdictionDepository}:` +
+        `matches=${watcherMatches.length}`,
+      );
+    }
+    const watcherScannedJHeight = Number(
+      watcherMatches[0].jadapter?.getWatcherScanProgress?.().scannedThroughHeight ?? 0,
+    );
     const accounts = Array.from(replica.state.accounts?.values() ?? []);
     const runtimeMempool = env.runtimeMempool;
     const pendingWorkCount =
@@ -278,7 +314,8 @@ async function readEntityIdleSnapshot(
         accounts.every((account) => (account.mempool?.length ?? 0) === 0 && !account.pendingFrame),
       runtimeHeight: Number(env.height ?? 0),
       entityHeight: Number(replica.state.height ?? 0),
-      scannedJHeight: Number(replica.jHistory?.scannedThroughHeight ?? 0),
+      projectedJHeight: Number(replica.jHistory?.scannedThroughHeight ?? 0),
+      watcherScannedJHeight,
       finalizedJHeight: Number(replica.state.lastFinalizedJHeight ?? 0),
       pendingWorkCount,
       recentInputs,
@@ -461,13 +498,13 @@ test.describe('E2E User Journey', () => {
     const idleBefore = await readEntityIdleSnapshot(page, initial.entityId, initial.signerId);
     await mineEmptyJurisdictionBlock(page);
     await expect.poll(
-      async () => (await readEntityIdleSnapshot(page, initial.entityId, initial.signerId)).scannedJHeight,
+      async () => (await readEntityIdleSnapshot(page, initial.entityId, initial.signerId)).watcherScannedJHeight,
       {
         timeout: 10_000,
         intervals: [100, 250, 500, 1000],
         message: 'the internal watcher must authenticate the newly mined empty J block',
       },
-    ).toBeGreaterThan(idleBefore.scannedJHeight);
+    ).toBeGreaterThan(idleBefore.watcherScannedJHeight);
     const idleAfter = await readEntityIdleSnapshot(page, initial.entityId, initial.signerId);
     expect(idleAfter.quiescent, 'idle watcher polling must not create new Entity work').toBe(true);
     expect(
@@ -475,9 +512,11 @@ test.describe('E2E User Journey', () => {
       `authenticated empty J headers must not create empty Entity frames: ${JSON.stringify({ idleBefore, idleAfter })}`,
     )
       .toBe(idleBefore.entityHeight);
-    expect(idleAfter.finalizedJHeight, 'empty J headers stay local until real work or the liveness interval')
+    expect(idleAfter.finalizedJHeight, 'empty J headers stay watcher-local until real Entity work')
       .toBe(idleBefore.finalizedJHeight);
-    expect(idleAfter.scannedJHeight, 'the internal watcher must keep scanning while Entity height stays idle')
-      .toBeGreaterThan(idleBefore.scannedJHeight);
+    expect(idleAfter.projectedJHeight, 'empty J headers must not mutate the durable Entity projection')
+      .toBe(idleBefore.projectedJHeight);
+    expect(idleAfter.watcherScannedJHeight, 'the internal watcher must keep scanning while Entity height stays idle')
+      .toBeGreaterThan(idleBefore.watcherScannedJHeight);
   });
 });

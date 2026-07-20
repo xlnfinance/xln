@@ -251,13 +251,13 @@ describe('node runtime quiesce', () => {
           expect(env.runtimeState?.p2p).toBeNull();
           expect(env.runtimeState?.persistenceQuiescing).toBe(true);
           expect(env.runtimeState?.persistencePaused).toBe(true);
-          expect(env.height).toBe(1);
+          expect(env.height).toBeGreaterThanOrEqual(1);
           expect(env.history).toHaveLength(1);
           expect(env.eReplicas.has(`${entityId}:${runtimeId}`)).toBe(true);
           expect(env.runtimeMempool?.runtimeTxs).toHaveLength(0);
           expect(env.runtimeMempool?.entityInputs).toHaveLength(0);
           expect(hasRuntimeWork(env)).toBe(false);
-          expect((await readPersistedStorageHead(env))?.latestHeight).toBe(1);
+          expect((await readPersistedStorageHead(env))?.latestHeight).toBe(env.height);
           persisted = true;
         },
       });

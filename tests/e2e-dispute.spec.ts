@@ -329,34 +329,15 @@ async function mineBlockChunk(page: Page, blocks: number): Promise<void> {
   throw new Error(`batch block mining unavailable for ${blocks} blocks: ${errors.join(' | ')}`);
 }
 
-async function readRuntimeJurisdictionHeight(page: Page): Promise<number> {
-  return page.evaluate(() => {
-    const env = (window as typeof window & { isolatedEnv?: any }).isolatedEnv;
-    const activeJurisdiction = String(env?.activeJurisdiction || '');
-    const jReplica = activeJurisdiction ? env?.jReplicas?.get?.(activeJurisdiction) : null;
-    return Number(jReplica?.blockNumber || 0n);
-  });
-}
-
 async function waitForBlock(page: Page, targetBlock: number): Promise<void> {
   const deadline = Date.now() + 90_000;
-  let catchupBlocksMined = 0;
   for (;;) {
     const current = await readCurrentChainBlock(page);
-    const runtimeVisible = await readRuntimeJurisdictionHeight(page);
-    if (current >= targetBlock && runtimeVisible >= targetBlock) return;
+    if (current >= targetBlock) return;
     if (Date.now() >= deadline) {
-      throw new Error(
-        `timed out waiting for block ${targetBlock} ` +
-          `(chain=${current}, runtime=${runtimeVisible}, catchupBlocksMined=${catchupBlocksMined})`,
-      );
+      throw new Error(`timed out waiting for block ${targetBlock} (chain=${current})`);
     }
-    if (current < targetBlock) {
-      await mineBlocks(page, targetBlock - current);
-    } else {
-      catchupBlocksMined += 1;
-      await mineOneBlock(page);
-    }
+    await mineBlocks(page, targetBlock - current);
   }
 }
 

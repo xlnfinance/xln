@@ -137,11 +137,14 @@ describe('e2e baseline readiness', () => {
     expect(config).toContain('XLN_MESH_DEFER_INITIAL_RESET=1 SKIP_TYPECHECK=1 bun run dev');
   });
 
-  test('orchestrator health and runtime imports use the successfully active reset capabilities', () => {
+  test('orchestrator health exposes pending reset capabilities while imports require successful activation', () => {
     const orchestrator = readFileSync('runtime/orchestrator/orchestrator.ts', 'utf8');
-    expect(orchestrator).toContain('resolveResetCapabilityHealth(activeResetOptions');
+    expect(orchestrator).toContain('const healthResetOptions = resolveHealthResetOptions(');
+    expect(orchestrator).toContain('resolveResetCapabilityHealth(healthResetOptions');
     expect(orchestrator).toContain('mmEnabled: capabilityHealth.marketMakerEnabled');
     expect(orchestrator).toContain('enabled: capabilityHealth.custodyEnabled');
     expect(orchestrator).toContain('activeResetOptions = resolveActiveResetOptions(configuredResetOptions, options)');
+    expect(orchestrator).toContain('if (activeResetOptions.enableMarketMaker && marketMakerRuntimeId)');
+    expect(orchestrator).toContain('if (activeResetOptions.enableCustody && custodySupport?.daemonAuthSeed');
   });
 });

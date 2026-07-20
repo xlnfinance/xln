@@ -1714,20 +1714,35 @@ export async function lockAhb(env: Env): Promise<void> {
       throw new Error('HOSTAGE_TIMEOUT_WATCHER_MISSING');
     }
     const bobReplicaKey = `${bob.id}:${bob.signer}`.toLowerCase();
-    const bobWatcherState = watcherStatuses
-      .flatMap(status => status.replicas.map(replica => ({ chainId: status.chainId, ...replica })))
+    const bobWatcherStatus = watcherStatuses.find(status =>
+      status.replicas.some(replica => replica.key.toLowerCase() === bobReplicaKey),
+    );
+    const bobWatcherState = bobWatcherStatus?.replicas
       .find(replica => replica.key.toLowerCase() === bobReplicaKey);
-    if (!bobWatcherState || BigInt(bobWatcherState.entityFinalizedThrough) < timeoutBlock) {
+    if (!bobWatcherState) {
+      throw new Error(`HOSTAGE_TIMEOUT_BOB_WATCHER_STATE_MISSING:replica=${bobReplicaKey}`);
+    }
+    // Header-only watcher progress is intentionally not an Entity heartbeat.
+    // Let the already-scheduled dispute hook consume the authenticated prefix;
+    // production reaches the same boundary on its next wall-clock wake.
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const [, currentBobReplica] = findReplica(env, bob.id);
+      if (BigInt(currentBobReplica.state.lastFinalizedJHeight) >= timeoutBlock) break;
+      env.timestamp += 1_000;
+      await convergeWithOffline(env, hostageOfflineSigners, 20, 'hostage-hub-offline');
+    }
+    const [, bobReplicaAtTimeout] = findReplica(env, bob.id);
+    if (BigInt(bobReplicaAtTimeout.state.lastFinalizedJHeight) < timeoutBlock) {
       throw new Error(
         `HOSTAGE_TIMEOUT_BOB_J_FINALITY_LAG:` +
-        `replica=${bobReplicaKey}:finalized=${bobWatcherState?.entityFinalizedThrough ?? 'missing'}:` +
+        `replica=${bobReplicaKey}:finalized=${bobReplicaAtTimeout.state.lastFinalizedJHeight}:` +
         `target=${timeoutBlock}`,
       );
     }
-    const runtimeVisibleJHeight = BigInt(env.jReplicas.get('AHB Demo')?.blockNumber ?? 0n);
+    const authenticatedJHeight = BigInt(bobWatcherStatus?.authenticatedThrough ?? 0);
     assert(
-      mining.finalBlock >= timeoutBlock && runtimeVisibleJHeight >= timeoutBlock,
-      `Dispute timeout visible to provider/runtime (${mining.finalBlock}/${runtimeVisibleJHeight} >= ${timeoutBlock})`,
+      mining.finalBlock >= timeoutBlock && authenticatedJHeight >= timeoutBlock,
+      `Dispute timeout visible to provider/watcher (${mining.finalBlock}/${authenticatedJHeight} >= ${timeoutBlock})`,
     );
 
     const [, bobRepBeforeFinalize] = findReplica(env, bob.id);
@@ -1746,6 +1761,9 @@ export async function lockAhb(env: Env): Promise<void> {
           useOnchainRegistry: true, // KEY: This triggers on-chain secret reveal!
           description: 'Hostage reveal: secret goes to on-chain registry'
         }
+      }, {
+        type: 'j_broadcast',
+        data: {},
       }]
     }], hostageOfflineSigners, 'hostage-hub-offline');
     await convergeWithOffline(env, hostageOfflineSigners, 20, 'hostage-hub-offline');

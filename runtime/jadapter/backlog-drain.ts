@@ -13,7 +13,7 @@ import {
 import { safeStringify } from '../protocol/serialization';
 import { setTimeout as delay } from 'node:timers/promises';
 
-export const J_WATCHER_DRAIN_STALL_TIMEOUT_MS = 120_000;
+export const J_WATCHER_DRAIN_STALL_TIMEOUT_MS = 60_000;
 const J_WATCHER_DRAIN_RETRY_DELAY_MS = 100;
 
 export type JWatcherDrainProgress = {
@@ -190,7 +190,8 @@ export const getJWatcherDrainStatus = (
 };
 
 const requiresDurableWatcherCursor = (status: JWatcherDrainStatus): boolean =>
-  status.replicas.some((replica) => replica.localScannedThrough >= status.targetBlock);
+  status.replicas.length > 0 &&
+  status.replicas.every((replica) => replica.entityFinalizedThrough >= status.targetBlock);
 
 export const isJWatcherDrainComplete = (status: JWatcherDrainStatus): boolean =>
   status.authenticatedThrough >= status.targetBlock &&

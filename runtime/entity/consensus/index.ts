@@ -401,11 +401,11 @@ const ensureLocalJPrefixAttestation = (
  * into the next Entity round immediately after commit.
  *
  * A signed prefix is immutable for its Entity height. The watcher therefore
- * keeps a later scan in durable validator-local history. A semantic event (or
- * the bounded liveness interval) must not wait for unrelated Entity traffic,
+ * keeps a later scan in durable validator-local history. A semantic event
+ * must not wait for unrelated Entity traffic,
  * so deriving that due vote here is a deterministic consequence of the commit.
- * An empty suffix below the liveness boundary intentionally remains local and
- * is certified by the next real Entity frame instead of creating one itself.
+ * An empty suffix remains local and is certified by the next real Entity frame
+ * instead of creating one itself.
  */
 const advanceLocalJPrefixRoundAfterCommit = (env: Env, replica: EntityReplica, entityOutbox: EntityInput[]): void => {
   clearCommittedJPrefixRound(replica);

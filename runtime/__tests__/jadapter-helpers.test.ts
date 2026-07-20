@@ -742,7 +742,7 @@ describe('jadapter helper cursors', () => {
 
     expect(range.scannedReplicaKeys).toEqual([replicaKey]);
     expect(range.finalityReplicaKeys).toEqual([]);
-    expect(env.runtimeMempool?.entityInputs[0]?.jPrefixAttestations?.size).toBe(1);
+    expect(env.runtimeMempool?.entityInputs ?? []).toEqual([]);
     const pending = new Map<number, Set<string>>();
     rememberPendingWatcherJBlock(pending, 100, range.finalityReplicaKeys);
     expect(resolveCommittedWatcherCursor(env, pending, 100, 0)).toBe(100);

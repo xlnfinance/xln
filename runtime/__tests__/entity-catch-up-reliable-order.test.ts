@@ -20,6 +20,7 @@ import { generateLazyEntityId } from '../entity/factory';
 import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
 import { initCrontab } from '../entity/scheduler';
 import { buildQuorumHanko } from '../hanko/signing';
+import { startRuntimeHistoryTraceForTesting } from '../history-retention';
 import { buildLocalEntityProfile } from '../networking/gossip-helper';
 import {
   collectLocalProfileEncryptionAnnouncements,
@@ -47,7 +48,11 @@ import {
   process as processRuntime,
   restoreEnvFromRecoveryBundles,
 } from '../runtime';
-import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
+import {
+  computeCanonicalEntityHashesFromEnv,
+  computeCanonicalRuntimeStateHash,
+  computeCanonicalStateHashFromEnv,
+} from '../storage/canonical-hash';
 import { buildStorageReplicaMetaCommitment } from '../storage/replicas';
 import {
   applyCertifiedEntityLineagePlan,
@@ -532,18 +537,33 @@ describe('ordered reliable Entity catch-up', () => {
       pendingNetworkOutputs: restarted.pendingNetworkOutputs ?? [],
       includeIngressWorkingState: true,
     });
-    await processRuntime(restarted, [structuredClone(h2)]);
+    const committedFrameTrace = startRuntimeHistoryTraceForTesting(restarted);
+    try {
+      await processRuntime(restarted, [structuredClone(h2)]);
+    } finally {
+      committedFrameTrace.stop();
+    }
     const afterHeightOneReplica = restarted.eReplicas.get(`${initialState.entityId}:${signerId}`);
     expect(afterHeightOneReplica?.state.height).toBe(1);
     expect(afterHeightOneReplica?.state.prevFrameHash).toBe(heightOne.frame.hash);
-    expect(restarted.history?.at(-1)?.runtimeInput.entityInputs
+    expect(committedFrameTrace.snapshots.at(-1)?.runtimeInput.entityInputs
       .map(input => input.proposedFrame?.height ?? null)).toEqual([1]);
     expect(restarted.pendingNetworkOutputs?.map(output => output.proposedFrame?.height ?? null)).toEqual([2]);
     expect(restarted.runtimeMempool?.entityInputs
       .map(input => input.proposedFrame?.height ?? null)).toEqual([2]);
 
-    const committedHistoryFrame = restarted.history?.at(-1);
+    const committedHistoryFrame = committedFrameTrace.snapshots.at(-1);
     if (!committedHistoryFrame) throw new Error('TEST_RELIABLE_RECOVERY_HISTORY_FRAME_MISSING');
+    const durableMachineAfterHeightOne = {
+      ...buildDurableRuntimeMachineSnapshot(restarted, {
+        pendingNetworkOutputs: restarted.pendingNetworkOutputs ?? [],
+      }),
+      // The duplicate H+2 arrived while H+1 was processing. It enters the next
+      // live mempool only after the H+1 durability fence; therefore the H+1 WAL
+      // record retains the pre-apply runtime input while its durable outbox
+      // already contains deferred H+2.
+      runtimeInput: structuredClone(runtimeMachineBeforeHeightOne['runtimeInput']),
+    };
     const journal: PersistedFrameJournal = {
       height: committedHistoryFrame.height,
       timestamp: committedHistoryFrame.timestamp,
@@ -551,10 +571,13 @@ describe('ordered reliable Entity catch-up', () => {
       runtimeInput: structuredClone(committedHistoryFrame.runtimeInput),
       runtimeOutputs: structuredClone(restarted.pendingNetworkOutputs ?? []),
       runtimeMachineBeforeApply: runtimeMachineBeforeHeightOne,
-      runtimeMachine: buildDurableRuntimeMachineSnapshot(restarted, {
-        pendingNetworkOutputs: restarted.pendingNetworkOutputs ?? [],
-      }),
-      runtimeStateHash: computeCanonicalStateHashFromEnv(restarted),
+      runtimeMachine: durableMachineAfterHeightOne,
+      runtimeStateHash: computeCanonicalRuntimeStateHash(
+        restarted.height,
+        restarted.timestamp,
+        computeCanonicalEntityHashesFromEnv(restarted),
+        durableMachineAfterHeightOne,
+      ),
       logs: structuredClone(committedHistoryFrame.logs ?? []),
     };
     const tailRecoveryBundle = buildRuntimeRecoveryBundle(restarted, {

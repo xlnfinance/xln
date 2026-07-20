@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { proposeAccountFrame } from '../account/consensus/propose';
+import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
 import { applyEntityInput } from '../entity/consensus';
 import { generateLazyEntityId } from '../entity/factory';
 import { createEmptyEnv, hasRuntimeWork } from '../runtime';
@@ -17,17 +18,23 @@ import {
   registerTestSigner,
 } from './helpers/cross-j';
 
-const signedWorkspace = (): NonNullable<AccountMachine['settlementWorkspace']> => ({
-  workspaceHash: `0x${'41'.repeat(32)}`,
-  ops: [],
-  settlementHash: `0x${'42'.repeat(32)}`,
-  lastModifiedByLeft: true,
-  status: 'submitted',
-  version: 1,
-  createdAt: 1,
-  lastUpdatedAt: 1,
-  executorIsLeft: true,
-});
+const signedWorkspace = (
+  account: Pick<AccountMachine, 'leftEntity' | 'rightEntity'>,
+): NonNullable<AccountMachine['settlementWorkspace']> => {
+  const workspace: NonNullable<AccountMachine['settlementWorkspace']> = {
+    workspaceHash: `0x${'00'.repeat(32)}`,
+    ops: [],
+    settlementHash: `0x${'42'.repeat(32)}`,
+    lastModifiedByLeft: true,
+    status: 'submitted',
+    version: 1,
+    createdAt: 1,
+    lastUpdatedAt: 1,
+    executorIsLeft: true,
+  };
+  workspace.workspaceHash = createSettlementWorkspaceHash(account, workspace);
+  return workspace;
+};
 
 const repayment = (borrower: string, hub: string): AccountTx => ({
   type: 'lending_repay',
@@ -51,7 +58,7 @@ const frozenRepaymentReplica = () => {
   const counterpartyId = generateLazyEntityId([counterpartySignerId], 1n).toLowerCase();
   const state = makeState(entityId, signerId, jurisdiction);
   const account = makeAccount(entityId, counterpartyId, jurisdiction);
-  account.settlementWorkspace = signedWorkspace();
+  account.settlementWorkspace = signedWorkspace(account);
   account.mempool = [repayment(entityId, counterpartyId)];
   state.accounts.set(counterpartyId, account);
   addReplica(env, state, signerId);

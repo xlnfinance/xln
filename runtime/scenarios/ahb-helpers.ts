@@ -5,6 +5,7 @@ import { createEmptyBatch, batchAddReserveToReserve } from '../jurisdiction/batc
 import { formatRuntime } from '../qa/runtime-ascii';
 import { advanceScenarioTime } from './helpers';
 import { submitSignedScenarioBatch } from './j-batch-submit';
+import { DEFAULT_TOKENS } from '../jadapter/default-tokens';
 
 type ProcessFn = (env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>;
 
@@ -20,7 +21,7 @@ export const getProcess = async (): Promise<ProcessFn> => {
 };
 
 export const USDC_TOKEN_ID = 1;
-export const DECIMALS = 18n;
+export const DECIMALS = BigInt(DEFAULT_TOKENS[USDC_TOKEN_ID - 1]!.decimals);
 export const ONE_TOKEN = 10n ** DECIMALS;
 export const AHB_JURISDICTION = 'AHB Demo';
 
@@ -162,27 +163,40 @@ export async function maybeApproveSettlement(
   approver: { id: string; signer: string; name: string },
   counterpartyId: string,
 ): Promise<boolean> {
+  await processUntil(env, () => {
+    const [, approverReplica] = findReplica(env, approver.id);
+    const account = approverReplica.state.accounts.get(counterpartyId);
+    return !account?.mempool.some((tx) => tx.type === 'settle_transition') &&
+      !account?.pendingFrame?.accountTxs.some((tx) => tx.type === 'settle_transition');
+  }, 20, `${approver.name} settlement proposal delivery`);
+
   const [, approverRep] = findReplica(env, approver.id);
   const account = approverRep.state.accounts.get(counterpartyId);
   const workspace = account?.settlementWorkspace;
   if (!workspace) throw new Error(`SETTLEMENT_WORKSPACE_MISSING:${approver.id}:${counterpartyId}`);
   const approverIsLeft = isLeft(approver.id, counterpartyId);
   const myHanko = approverIsLeft ? workspace.leftHanko : workspace.rightHanko;
+  let approved = false;
   if (myHanko) {
     console.log(`ℹ️ ${approver.name} already signed settlement with ${counterpartyId.slice(-4)} (skip duplicate settle_approve)`);
-    return false;
+  } else {
+    const processRuntime = await getProcess();
+    await processRuntime(env, [{
+      entityId: approver.id,
+      signerId: approver.signer,
+      entityTxs: [{
+        type: 'settle_approve',
+        data: { counterpartyEntityId: counterpartyId, workspaceHash: workspace.workspaceHash },
+      }],
+    }]);
+    approved = true;
   }
 
-  const processRuntime = await getProcess();
-  await processRuntime(env, [{
-    entityId: approver.id,
-    signerId: approver.signer,
-    entityTxs: [{
-      type: 'settle_approve',
-      data: { counterpartyEntityId: counterpartyId, workspaceHash: workspace.workspaceHash },
-    }],
-  }]);
-  return true;
+  await processUntil(env, () => {
+    const [, counterpartyReplica] = findReplica(env, counterpartyId);
+    return counterpartyReplica.state.accounts.get(approver.id)?.settlementWorkspace?.status === 'ready_to_submit';
+  }, 20, `${approver.name} settlement approval delivery`);
+  return approved;
 }
 
 export async function processUntil(

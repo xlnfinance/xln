@@ -172,8 +172,11 @@ export function deriveMicroscopeTimeline(
   requireTimelineInput(elapsedMs, baseMs);
   const scenarios = selectedScenarios(mode);
   const cycleDuration = scenarios.reduce((sum, scenario) => sum + scenarioDuration(scenario, baseMs), 0);
-  const cycleIndex = Math.floor(elapsedMs / cycleDuration);
-  const elapsedInCycle = elapsedMs % cycleDuration;
+  const autoTour = mode === 'auto';
+  const cycleIndex = autoTour ? Math.floor(elapsedMs / cycleDuration) : 0;
+  const elapsedInCycle = autoTour
+    ? elapsedMs % cycleDuration
+    : Math.min(elapsedMs, cycleDuration - 1);
   const locatedScenario = locateScenario(scenarios, elapsedInCycle, baseMs);
   const locatedPhase = locatePhase(locatedScenario.scenario, locatedScenario.elapsed, baseMs);
   return {

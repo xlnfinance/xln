@@ -531,16 +531,6 @@ export const buildValidatorJPrefixHeaders = (
   });
 };
 
-export const hasCompleteValidatorJPrefixHeaders = (
-  state: EntityState,
-  history: ValidatorJHistory,
-  scannedThroughHeight: number = history.scannedThroughHeight,
-): boolean => {
-  const baseHeight = state.lastFinalizedJHeight;
-  if (!Number.isSafeInteger(scannedThroughHeight) || scannedThroughHeight < baseHeight) return false;
-  return scannedThroughHeight <= getValidatorJContiguousThroughHeight(state, history);
-};
-
 export const getJEventRangeValidationError = (
   state: EntityState,
   history: ValidatorJHistory | undefined,

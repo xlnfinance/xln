@@ -1737,7 +1737,7 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
 test('health runtime adapter renders 1M aggregate snapshot without freezing', { tag: '@resilience' }, async ({ page }) => {
   await installOneMillionRuntimeAdapterSocket(page);
 
-  await page.goto(`${API_BASE_URL}/health`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${APP_BASE_URL}/health`, { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'xln health admin' })).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
   await expect.poll(async () => await page.evaluate(() =>
     (window.WebSocket as unknown as { __xlnOneMillionRuntimeAdapterSocket?: boolean }).__xlnOneMillionRuntimeAdapterSocket === true,

@@ -38,8 +38,8 @@ export const assertStorageSchemaVersion = (
   }
   return stored;
 };
-export const DEFAULT_SNAPSHOT_PERIOD_FRAMES = 256;
-export const DEFAULT_RETAIN_SNAPSHOTS = 3;
+export const DEFAULT_SNAPSHOT_PERIOD_FRAMES = 10_000;
+export const DEFAULT_RETAIN_SNAPSHOTS = 2;
 export const DEFAULT_EPOCH_MAX_BYTES = 256 * 1024 * 1024;
 export const DEFAULT_FRAME_DB_MAX_BYTES = 1024 * 1024 * 1024;
 export const DEFAULT_FRAME_DB_RETAIN_FRAMES = 100_000;

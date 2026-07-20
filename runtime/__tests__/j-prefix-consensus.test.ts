@@ -1049,7 +1049,7 @@ describe('validator J-prefix consensus', () => {
     ).toThrow('J_PREFIX_STRONGER_LOCAL_CERTIFICATE');
   });
 
-  test('rolls a frozen base round when the authenticated empty suffix reaches the liveness boundary', async () => {
+  test('does not roll a frozen base round for an authenticated empty suffix at any distance', async () => {
     const env = createEmptyEnv('j-prefix-frozen-empty-liveness-roll');
     env.timestamp = 2_000;
     env.quietRuntimeLogs = true;
@@ -1077,30 +1077,10 @@ describe('validator J-prefix consensus', () => {
     replica.jHistory = observedThrough(110, false);
     env.eReplicas.set(`${entityId}:${validatorId}`, replica);
 
-    expect(hasEntityLeaderWork(replica)).toBe(true);
-    expect(hasRuntimeWork(env)).toBe(true);
-
-    const rolled = await applyEntityInput(env, replica, {
-      entityId,
-      signerId: validatorId,
-      entityTxs: [],
-    });
-    expect(rolled.outcome).toEqual({ kind: 'committed' });
-    expect(rolled.workingReplica.state.lastFinalizedJHeight).toBe(10);
-    expect(rolled.workingReplica.certifiedFrameLineage?.at(-1)?.frame.txs).toEqual([]);
-    expect(rolled.workingReplica.jPrefixRound?.certificate?.selected.scannedThroughHeight).toBe(110);
-
-    const finalized = await applyEntityInput(env, rolled.workingReplica, {
-      entityId,
-      signerId: validatorId,
-      entityTxs: [],
-    });
-    expect(finalized.outcome).toEqual({ kind: 'committed' });
-    expect(finalized.workingReplica.state.lastFinalizedJHeight).toBe(110);
-
-    env.eReplicas.set(`${entityId}:${validatorId}`, finalized.workingReplica);
-    expect(hasEntityLeaderWork(finalized.workingReplica)).toBe(false);
+    expect(hasEntityLeaderWork(replica)).toBe(false);
     expect(hasRuntimeWork(env)).toBe(false);
+    expect(replica.state.lastFinalizedJHeight).toBe(10);
+    expect(replica.jHistory.scannedThroughHeight).toBe(110);
   });
 
   test('freezes H11 vote, preserves a semantic H12 event, then automatically finalizes H12 next round', async () => {

@@ -1,12 +1,14 @@
 import { computeCanonicalRuntimeStateHash } from './canonical-hash';
 import {
   assertEntityHashesEqual,
+  computeStorageEntityHashesFromDocs,
   computeStorageFrameHash,
   computeStorageReplicaMetaDigest,
   computeStorageStateRoot,
   readAllEntityHashDocs,
   toFrameEntityHashes,
 } from './hashes';
+import { readSnapshotDocs } from './lifecycle';
 import {
   KEY_LIVE_REPLICA_META,
   STORAGE_VERIFY_TAIL_FRAMES,
@@ -92,6 +94,20 @@ export const verifyStorageSnapshotAtHeight = async (
   if (!snapshotFrame) throw new Error(`STORAGE_VERIFY_SNAPSHOT_FRAME_MISSING: height=${snapshotHeight}`);
   if (snapshotFrame.materializedState === false) {
     throw new Error(`STORAGE_VERIFY_SNAPSHOT_NOT_MATERIALIZED: height=${snapshotHeight}`);
+  }
+  const snapshotDocs = await readSnapshotDocs(db, snapshotHeight);
+  const snapshotEntityHashes = computeStorageEntityHashesFromDocs(snapshotDocs);
+  assertEntityHashesEqual(
+    snapshotEntityHashes,
+    snapshotFrame.entityHashes,
+    `snapshotHeight=${snapshotHeight}`,
+  );
+  const snapshotStateHash = computeStorageStateRoot(snapshotEntityHashes);
+  if (snapshotFrame.stateHash !== snapshotStateHash) {
+    throw new Error(
+      `STORAGE_VERIFY_SNAPSHOT_STATE_HASH_MISMATCH:height=${snapshotHeight}:` +
+        `expected=${snapshotFrame.stateHash || 'missing'}:actual=${snapshotStateHash}`,
+    );
   }
   const actualReplicaMetaDigest = await computeSnapshotReplicaMetaDigest(db, snapshotHeight);
   if (snapshotFrame.replicaMetaDigest !== actualReplicaMetaDigest) {

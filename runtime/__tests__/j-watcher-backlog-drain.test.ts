@@ -357,7 +357,7 @@ describe('RPC J-watcher backlog drain', () => {
 
     const lateReplica = env.eReplicas.get(`${lateEntityId}:${LATE_SIGNER_ID}`);
     expect(lateReplica?.jHistory?.scannedThroughHeight).toBe(irrelevantLogHeight);
-    expect(lateReplica?.state.lastFinalizedJHeight).toBe(irrelevantLogHeight);
+    expect(lateReplica?.state.lastFinalizedJHeight).toBeLessThan(irrelevantLogHeight);
     if (!lateReplica) throw new Error('J_WATCHER_BACKLOG_LATE_REPLICA_MISSING');
     expect(resolveObserverCertifiedBoardHash(
       lateReplica.state,

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  isJWatcherDrainComplete,
   needsJWatcherPoll,
   observeJWatcherDrainProgress,
   type JWatcherDrainStatus,
@@ -40,8 +41,61 @@ describe('scenario J-watcher drain planning', () => {
     }))).toBe(false);
   });
 
+  test('does not require a global cursor beyond the common durable Entity prefix', () => {
+    const emptyTail = status({
+      committedCursor: 99,
+      replicas: [{
+        key: 'affected:validator',
+        localScannedThrough: 100,
+        authenticatedThrough: 100,
+        entityFinalizedThrough: 100,
+        pendingDueFinality: false,
+      }, {
+        key: 'unaffected:validator',
+        localScannedThrough: 99,
+        authenticatedThrough: 100,
+        entityFinalizedThrough: 99,
+        pendingDueFinality: false,
+      }],
+    });
+    expect(needsJWatcherPoll(emptyTail)).toBe(false);
+    expect(isJWatcherDrainComplete(emptyTail)).toBe(true);
+  });
+
+  test('does not fabricate Entity finality for an authenticated empty tail', () => {
+    const emptyTail = status({
+      targetBlock: 5_783,
+      committedCursor: 23,
+      authenticatedThrough: 5_783,
+      replicas: [{
+        key: 'affected:validator',
+        localScannedThrough: 5_783,
+        authenticatedThrough: 5_783,
+        entityFinalizedThrough: 5_783,
+        pendingDueFinality: false,
+      }, {
+        key: 'unaffected:validator',
+        localScannedThrough: 5_783,
+        authenticatedThrough: 5_783,
+        entityFinalizedThrough: 23,
+        pendingDueFinality: false,
+      }],
+    });
+    expect(needsJWatcherPoll(emptyTail)).toBe(false);
+    expect(isJWatcherDrainComplete(emptyTail)).toBe(true);
+  });
+
   test('commits the WAL cursor after a meaningful range becomes durable', () => {
-    expect(needsJWatcherPoll(status({ committedCursor: 99 }))).toBe(true);
+    expect(needsJWatcherPoll(status({
+      committedCursor: 99,
+      replicas: [{
+        key: 'entity:validator',
+        localScannedThrough: 100,
+        authenticatedThrough: 100,
+        entityFinalizedThrough: 100,
+        pendingDueFinality: false,
+      }],
+    }))).toBe(true);
   });
 
   test('polls when either the authenticated watcher scan or a fresh replica is behind', () => {

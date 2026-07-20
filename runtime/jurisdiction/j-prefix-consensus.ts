@@ -3,7 +3,6 @@ import { ethers } from 'ethers';
 import { signAccountFrame, verifyAccountSignature } from '../account/crypto';
 import { encodeCanonicalEntityConsensusValue } from '../entity/consensus/state-root';
 import { compareStableText } from '../protocol/serialization';
-import { JBLOCK_LIVENESS_INTERVAL } from '../types';
 import type {
   ConsensusConfig,
   EntityReplica,
@@ -27,7 +26,6 @@ import {
   buildValidatorJPrefixHeaders,
   finalizedJHistoryRoot,
   getValidatorJContiguousThroughHeight,
-  hasCompleteValidatorJPrefixHeaders,
   reconcileJEventRangeWithFinalizedState,
 } from './local-history';
 import { getJRangeClaimsProposableBudgetError, type JRangeBody } from './range-budget';
@@ -795,23 +793,16 @@ export const hasAttestablePendingLocalJEvent = (
   );
 };
 
-const isLocalJPrefixLivenessDue = (state: EntityState, history: ValidatorJHistory | undefined): boolean =>
-  Boolean(history && (() => {
-    const attestableHeight = getLocalJPrefixAttestableHeight(state, history);
-    return attestableHeight !== null &&
-      hasCompleteValidatorJPrefixHeaders(state, history, attestableHeight) &&
-      attestableHeight - state.lastFinalizedJHeight >= JBLOCK_LIVENESS_INTERVAL;
-  })());
-
 /**
- * Local J work that is allowed to create an otherwise-empty Entity frame.
- * Header-only scan progress below the liveness boundary stays validator-local;
- * the next real Entity frame can still certify that newer exact prefix.
+ * Only semantic J work may create an otherwise-empty Entity frame. Header-only
+ * scan progress stays validator-local and is certified by the next real Entity
+ * input or hook. Chain liveness is transport evidence, not Entity consensus
+ * state, so it must never manufacture financial history on its own.
  */
 export const hasDueLocalJPrefixAdvance = (
   state: EntityState,
   history: ValidatorJHistory | undefined,
-): boolean => hasAttestablePendingLocalJEvent(state, history) || isLocalJPrefixLivenessDue(state, history);
+): boolean => hasAttestablePendingLocalJEvent(state, history);
 
 /**
  * A validator that already signed the certified base cannot replace that vote
@@ -892,9 +883,7 @@ export const assertFrameJPrefix = (
   }
   if (certificate.selected.scannedThroughHeight === certificate.baseHeight) {
     if (ranges.length !== 0) throw new Error(`J_PREFIX_RANGE_COUNT_INVALID:${ranges.length}`);
-    const finalityDue =
-      hasPendingLocalJEvent(replica.state, replica.jHistory) ||
-      isLocalJPrefixLivenessDue(replica.state, replica.jHistory);
+    const finalityDue = hasPendingLocalJEvent(replica.state, replica.jHistory);
     const emptyFrozenRoll = frame.txs.length === 0 && isFrozenBaseJPrefixRollAuthorized(replica, certificate);
     if (finalityDue && !emptyFrozenRoll && !emptyBaseRollFrame) {
       throw new Error('J_PREFIX_REQUIRED_LOCAL_EVENT');

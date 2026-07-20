@@ -52,6 +52,7 @@ import {
   enqueueJHistoryRewindForReplicaKeys,
   enqueueJHistoryRange,
   findWatcherJurisdictionReplica,
+  getMinimumCommittedSignerJHeight,
   getMinimumScannedSignerJHeight,
   isWatcherJHistoryRangeDurable,
   getWatcherStartBlock,
@@ -2671,10 +2672,27 @@ export async function createRpcAdapter(
         Math.max(0, getWatcherStartBlock(activeEnv, addresses.depository, config.chainId) - 1);
       const commitScannedWatcherCursor = (activeEnv: Env, candidateCursor: number): number => {
         const currentCursor = readCommittedWatcherCursor(activeEnv);
+        const watcherReplica = findWatcherJurisdictionReplica(
+          activeEnv,
+          addresses.depository,
+          config.chainId,
+        );
+        if (!watcherReplica) {
+          throw new Error(`J_WATCHER_JURISDICTION_NOT_FOUND:cursor:${config.chainId}:${addresses.depository}`);
+        }
+        // Empty authenticated tails are transient watcher progress, not
+        // Runtime state. Persisting their raw scan tip creates heartbeat
+        // R-frames and can make a restart skip evidence that no Entity has
+        // certified. The durable cursor may advance only through the common
+        // Entity-certified prefix; later empty blocks are safely rescanned.
+        const certifiedCursor = getMinimumCommittedSignerJHeight(activeEnv, watcherReplica);
+        const durableCandidate = certifiedCursor === null
+          ? currentCursor
+          : Math.min(candidateCursor, certifiedCursor);
         const resolvedCursor = resolveCommittedWatcherCursor(
           activeEnv,
           pendingWatcherJBlocks,
-          candidateCursor,
+          durableCandidate,
           currentCursor,
         );
         if (resolvedCursor > currentCursor) {

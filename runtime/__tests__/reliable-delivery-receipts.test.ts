@@ -6,6 +6,7 @@ import {
   registerSignerKey,
   signAccountFrame,
 } from '../account/crypto';
+import { buildQuorumHanko } from '../hanko/signing';
 import {
   applyReliableDeliveryReceipts,
   captureReliableReceiptSenderCheckpoint,
@@ -24,7 +25,10 @@ import {
   hashJPrefixAttestation,
   mergeJPrefixAttestations,
 } from '../jurisdiction/j-prefix-consensus';
-import { hashCertifiedEntityOutputSemantic } from '../entity/consensus/output-certification';
+import {
+  hashCertifiedEntityOutput,
+  hashCertifiedEntityOutputSemantic,
+} from '../entity/consensus/output-certification';
 import { generateLazyEntityId } from '../entity/factory';
 import { applyMergedEntityInputs } from '../machine/entity-inputs';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
@@ -38,9 +42,11 @@ import {
 } from './fixtures/reliable-local-catchup-fixture';
 import {
   createEmptyEnv,
+  getFrameDb,
   handleInboundReliableReceipt,
   process as processRuntime,
 } from '../runtime';
+import { readStorageFrameRecord } from '../storage';
 import { buildRouteOutputKey, getReliableOutputIdentity } from '../machine/output-routing';
 import type {
   AccountMachine,
@@ -79,6 +85,9 @@ const frameOutput = (
   signerId: signerId('b2'),
   proposedFrame: {
     height,
+    parentFrameHash: height === 1 ? 'genesis' : `0x${'cd'.repeat(32)}`,
+    stateRoot: `0x${'ce'.repeat(32)}`,
+    authorityRoot: `0x${'cf'.repeat(32)}`,
     timestamp: height,
     hash: frameHash,
     txs: [],
@@ -533,7 +542,7 @@ describe('durable scoped reliable delivery receipts', () => {
     });
   });
 
-  test('certified ACK staged by a frozen J-prefix roll receives no receipt before exact Account commit', async () => {
+  test('authenticated empty suffix does not stage a certified ACK behind a fabricated J-prefix roll', async () => {
     const sender = runtime('reliable-certified-ack-frozen-prefix-sender');
     const receiver = runtime('reliable-certified-ack-frozen-prefix-receiver');
     receiver.scenarioMode = true;
@@ -542,7 +551,19 @@ describe('durable scoped reliable delivery receipts', () => {
 
     const validatorId = receiver.runtimeId!;
     const targetEntityId = generateLazyEntityId([validatorId], 1n).toLowerCase();
-    const sourceEntityId = entityId('d1');
+    const sourceSignerId = deriveSignerAddressSync(receiver.runtimeSeed!, 'frozen-prefix-source').toLowerCase();
+    registerSignerKey(
+      receiver,
+      sourceSignerId,
+      deriveSignerKeySync(receiver.runtimeSeed!, 'frozen-prefix-source'),
+    );
+    const sourceEntityId = generateLazyEntityId([sourceSignerId], 1n).toLowerCase();
+    const sourceConfig = {
+      mode: 'proposer-based' as const,
+      threshold: 1n,
+      validators: [sourceSignerId],
+      shares: { [sourceSignerId]: 1n },
+    };
     const depositoryAddress = signerId('a1');
     const jurisdictionRef = `stack:31337:${depositoryAddress}`;
     const jBlockHash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
@@ -558,7 +579,7 @@ describe('durable scoped reliable delivery receipts', () => {
       jHeight: 10,
       prevFrameHash: `0x${'08'.repeat(32)}`,
       accountStateRoot: `0x${'19'.repeat(32)}`,
-      stateHash: '0xaccount-frame-9',
+      stateHash: `0x${'09'.repeat(32)}`,
     };
     const pendingFrame = {
       ...account.currentFrame,
@@ -566,8 +587,12 @@ describe('durable scoped reliable delivery receipts', () => {
       timestamp: 2_000,
       prevFrameHash: account.currentFrame.stateHash,
       accountStateRoot: `0x${'20'.repeat(32)}`,
-      stateHash: '0xaccount-frame-10',
+      stateHash: `0x${'10'.repeat(32)}`,
     };
+    const ackHanko = await buildQuorumHanko(receiver, sourceEntityId, pendingFrame.stateHash, [{
+      signerId: sourceSignerId,
+      signature: signAccountFrame(receiver, sourceSignerId, pendingFrame.stateHash),
+    }], sourceConfig);
     account.pendingFrame = pendingFrame;
     account.pendingAccountInput = {
       kind: 'frame',
@@ -670,7 +695,7 @@ describe('durable scoped reliable delivery receipts', () => {
         ack: {
           height: 10,
           frameHash: pendingFrame.stateHash,
-          frameHanko: `0x${'31'.repeat(65)}`,
+          frameHanko: ackHanko,
         },
       },
     } as never;
@@ -681,6 +706,20 @@ describe('durable scoped reliable delivery receipts', () => {
       10n,
       [nestedAck],
     );
+    const origin = {
+      sourceEntityId,
+      lane: 'account-ack' as const,
+      sequence: 10n,
+      semanticHash,
+      height: 19,
+      frameHash: entityId('e1'),
+      outputIndex: 0,
+    };
+    const outputHash = hashCertifiedEntityOutput(origin, targetEntityId, [nestedAck]);
+    const outputHanko = await buildQuorumHanko(receiver, sourceEntityId, outputHash, [{
+      signerId: sourceSignerId,
+      signature: signAccountFrame(receiver, sourceSignerId, outputHash),
+    }], sourceConfig);
     const output: DeliverableEntityInput = {
       runtimeId: receiver.runtimeId!,
       entityId: targetEntityId,
@@ -689,15 +728,9 @@ describe('durable scoped reliable delivery receipts', () => {
         type: 'consensusOutput',
         data: {
           origin: {
-            sourceEntityId,
-            lane: 'account-ack',
-            sequence: 10n,
-            semanticHash,
-            height: 19,
-            frameHash: entityId('e1'),
-            outputIndex: 0,
+            ...origin,
           },
-          outputHanko: `0x${'32'.repeat(65)}`,
+          outputHanko,
           targetEntityId,
           entityTxs: [nestedAck],
         },
@@ -721,22 +754,13 @@ describe('durable scoped reliable delivery receipts', () => {
     expect(applied.entityFrameCommitted).toBe(true);
     expect(applied.appliedEntityInputs).toHaveLength(1);
     expect(receiver.eReplicas.get(`${targetEntityId}:${validatorId}`)?.state.height).toBe(1);
-    expect(commitReliableIngress(receiver, applied.appliedEntityInputs)).toEqual([]);
-    expect(receiver.runtimeState?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
-    releaseUncommittedReliableIngress(receiver, [{ ...output, from: sender.runtimeId! }], applied.appliedEntityInputs);
-    expect(receiver.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
-    expect(registerReliableIngress(receiver, sender.runtimeId!, output).kind).toBe('enqueue');
-
     const committedAccount = receiver.eReplicas
       .get(`${targetEntityId}:${validatorId}`)?.state.accounts.get(sourceEntityId) as AccountMachine | undefined;
     if (!committedAccount) throw new Error('TEST_FROZEN_PREFIX_ACCOUNT_MISSING');
-    committedAccount.currentHeight = 10;
-    committedAccount.currentFrame = structuredClone(pendingFrame);
-    delete committedAccount.pendingFrame;
-    delete committedAccount.pendingAccountInput;
-    delete committedAccount.pendingAccountInputSignerId;
+    expect(committedAccount.currentHeight).toBe(10);
+    expect(committedAccount.pendingFrame).toBeUndefined();
 
-    const commits = commitReliableIngress(receiver, [{ ...output, from: sender.runtimeId! }]);
+    const commits = commitReliableIngress(receiver, applied.appliedEntityInputs);
     expect(commits).toHaveLength(1);
     expect(commits[0]?.receipt?.body).toMatchObject({
       coverage: 'terminal',
@@ -1744,7 +1768,8 @@ describe('durable scoped reliable delivery receipts', () => {
     await processRuntime(receiver, [output]);
 
     expect(receiver.height).toBe(heightBefore + 1);
-    expect(receiver.history.at(-1)?.runtimeInput.entityInputs).toEqual([]);
+    const receiptOnlyFrame = await readStorageFrameRecord(getFrameDb(receiver), receiver.height);
+    expect(receiptOnlyFrame?.runtimeInput.entityInputs).toEqual([]);
     expect(receiver.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
     expect(receiver.runtimeState?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
     expect([...(receiver.runtimeState?.reliableIngressTerminalWatermarks?.values() ?? [])]

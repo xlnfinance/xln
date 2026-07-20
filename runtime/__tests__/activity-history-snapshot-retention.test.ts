@@ -27,7 +27,7 @@ import { readFrameReceipts } from '../server/rpc-ws';
 const recipientId = `0x${'bb'.repeat(32)}`;
 const hubId = `0x${'cc'.repeat(32)}`;
 
-test('activity remains queryable after its replay frame is pruned by a snapshot', async () => {
+test('activity remains queryable while snapshots retain the authoritative R-frame WAL', async () => {
   const seed = `activity snapshot retention ${process.pid} deterministic seed`;
   const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
   const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
@@ -134,7 +134,7 @@ test('activity remains queryable after its replay frame is pruned by a snapshot'
       await saveEnvToDB(env, runtimeInput, [], buildDurableRuntimeMachineSnapshot(env));
     }
 
-    expect(await readPersistedFrameJournal(env, 3)).toBeNull();
+    expect(await readPersistedFrameJournal(env, 3)).not.toBeNull();
     const compactActivity = await readFrameDbRuntimeActivity(getFrameDb(env), 3);
     expect(compactActivity?.runtimeInput.entityInputs).toEqual([{
       entityId,

@@ -19,8 +19,17 @@
 
 import type { Env, EntityInput } from '../types';
 import { getPerfMs } from '../utils';
-import { bindScenarioJReplica, ensureJAdapter, getJAdapterMode, createJReplica } from './boot';
+import {
+  bindScenarioJReplica,
+  ensureJAdapter,
+  getJAdapterMode,
+  createJReplica,
+  resolveScenarioBoardSigner,
+} from './boot';
 import { commitRuntimeInput, getOffdelta, converge, assert, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
+import { generateLazyEntityId } from '../entity/factory';
+import { DEFAULT_TOKENS } from '../jadapter/default-tokens';
+import { isLeft } from '../account/utils';
 
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
 
@@ -33,7 +42,7 @@ const getProcess = async () => {
 };
 
 const USDC = 1;
-const DECIMALS = 18n;
+const DECIMALS = BigInt(DEFAULT_TOKENS[USDC - 1]!.decimals);
 const ONE = 10n ** DECIMALS;
 const usd = (amount: number | bigint) => BigInt(amount) * ONE;
 
@@ -69,9 +78,17 @@ export async function rapidFire(env: Env): Promise<void> {
     jadapter,
   );
 
-  const alice = { name: 'Alice', id: '0x' + '1'.padStart(64, '0'), signer: '1' };
-  const hub = { name: 'Hub', id: '0x' + '2'.padStart(64, '0'), signer: '2' };
-  const bob = { name: 'Bob', id: '0x' + '3'.padStart(64, '0'), signer: '3' };
+  const createEntity = (name: string, alias: string) => {
+    const signer = resolveScenarioBoardSigner(env, alias);
+    return {
+      name,
+      signer,
+      id: generateLazyEntityId([signer], 1n, env).toLowerCase(),
+    };
+  };
+  const alice = createEntity('Alice', '1');
+  const hub = createEntity('Hub', '2');
+  const bob = createEntity('Bob', '3');
   const entities = [alice, hub, bob];
 
   await commitRuntimeInput(env, {
@@ -226,16 +243,18 @@ export async function rapidFire(env: Env): Promise<void> {
   // Equal traffic in both directions should leave only symmetric routing-fee spread.
   const ahDelta = getOffdelta(env, alice.id, hub.id, USDC);
   const hbDelta = getOffdelta(env, hub.id, bob.id, USDC);
+  const alicePerspective = isLeft(alice.id, hub.id) ? ahDelta : -ahDelta;
+  const hubPerspective = isLeft(hub.id, bob.id) ? hbDelta : -hbDelta;
 
   console.log(`📊 Final positions:`);
-  console.log(`   Alice-Hub: ${ahDelta} (routing-fee carry allowed)`);
-  console.log(`   Hub-Bob:   ${hbDelta} (routing-fee carry allowed)`);
+  console.log(`   Alice→Hub: ${alicePerspective} (Alice perspective)`);
+  console.log(`   Hub→Bob:   ${hubPerspective} (Hub perspective)`);
 
   const feeCarryCap = usd(paymentCount);
-  assert(ahDelta === -hbDelta, `Fee carry is symmetric across both hub edges: ${ahDelta} === -(${hbDelta})`);
-  assert(ahDelta <= 0n, `Alice-Hub fee carry debits the sender side: ${ahDelta}`);
-  assert(hbDelta >= 0n, `Hub-Bob fee carry credits the opposite side: ${hbDelta}`);
-  assert(ahDelta >= -feeCarryCap, `Fee carry stays bounded under total sent volume: ${ahDelta} >= -${feeCarryCap}`);
+  assert(alicePerspective === -hubPerspective, `Fee carry is symmetric across both hub edges: ${alicePerspective} === -(${hubPerspective})`);
+  assert(alicePerspective <= 0n, `Alice-Hub fee carry debits the sender side: ${alicePerspective}`);
+  assert(hubPerspective >= 0n, `Hub-Bob fee carry credits the opposite side: ${hubPerspective}`);
+  assert(alicePerspective >= -feeCarryCap, `Fee carry stays bounded under total sent volume: ${alicePerspective} >= -${feeCarryCap}`);
 
   // Check no stuck mempools
   let totalMempool = 0;

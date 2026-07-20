@@ -103,7 +103,7 @@ describe('BrowserVM J-watcher historical catch-up', () => {
     }
   }, 30_000);
 
-  test('advances every local scan when a block event applies to only one entity', async () => {
+  test('does not fabricate an empty Entity scan when a block event applies to its sibling only', async () => {
     const { env, jadapter, jurisdiction } = await bootScenario({
       name: 'j-watcher-browservm-multi-entity-scan',
       seed: 'j-watcher-browservm-multi-entity-scan',
@@ -122,6 +122,10 @@ describe('BrowserVM J-watcher historical catch-up', () => {
       ], jurisdiction);
       if (!sender || !observer) throw new Error('BROWSERVM_MULTI_ENTITY_REGISTRATION_MISSING');
 
+      const observerBeforeFund = env.eReplicas.get(`${observer.id}:${observer.signer}`);
+      if (!observerBeforeFund) throw new Error('BROWSERVM_MULTI_ENTITY_OBSERVER_BEFORE_FUND_MISSING');
+      const observerScanBeforeFund = observerBeforeFund.jHistory?.scannedThroughHeight;
+
       await fundEntities(env, jadapter, [{ id: sender.id, tokenId: 1, amount: 100n }]);
       const targetBlock = Number(await jadapter.getCurrentBlockNumber?.());
       const senderReplica = env.eReplicas.get(`${sender.id}:${sender.signer}`);
@@ -130,7 +134,11 @@ describe('BrowserVM J-watcher historical catch-up', () => {
 
       expect(senderReplica.state.reserves.get(1)).toBe(100n);
       expect(senderReplica.jHistory?.scannedThroughHeight).toBe(targetBlock);
-      expect(observerReplica.jHistory?.scannedThroughHeight).toBe(targetBlock);
+      // Receipt-driven scans do not carry a jurisdiction selector for unrelated
+      // entities. Advancing the observer here would both manufacture a no-op
+      // Entity frame and risk copying chain A's block hash into chain B state.
+      expect(observerReplica.jHistory?.scannedThroughHeight).toBe(observerScanBeforeFund);
+      expect(observerReplica.jHistory?.scannedThroughHeight).toBeLessThan(targetBlock);
     } finally {
       await jadapter.close();
     }

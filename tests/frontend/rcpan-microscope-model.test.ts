@@ -18,6 +18,16 @@ function timeline(
 }
 
 describe('RCPAN account microscope finance', () => {
+  test('explicit scenarios hold their terminal state while the auto tour keeps cycling', () => {
+    const elapsed = 1_000_000;
+    const explicit = deriveMicroscopeTimeline(elapsed, BASE_MS, 'debt-recovery');
+    const auto = deriveMicroscopeTimeline(elapsed, BASE_MS, 'auto');
+
+    expect(explicit.phase).toBe('repaid');
+    expect(explicit.cycleIndex).toBe(0);
+    expect(auto.cycleIndex).toBeGreaterThan(0);
+  });
+
   test('uses canonical offdelta for a right-to-left payment', () => {
     const state = timeline('reserve-backed', 'signed');
     const rcpan = deriveRcpanFinanceFrame(USDC, state);

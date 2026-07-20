@@ -34,7 +34,11 @@ import { buildQuorumHanko, verifyHankoForHash } from '../hanko/signing';
 import { createEmptyEnv } from '../runtime';
 import { safeStringify } from '../protocol/serialization';
 import { LIMITS } from '../constants';
-import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
+import {
+  hydrateEntityStateFromStorage,
+  projectAccountDoc,
+  projectEntityCoreDoc,
+} from '../storage/projections';
 import { getConsumptionNodeStore } from '../entity/consumption-store';
 import {
   createConsumptionProof,
@@ -73,50 +77,50 @@ const buildGenericOrigin = (
   height: number,
   frameHash: string,
   outputIndex: number,
-): ConsensusOutputOrigin => ({
-  sourceEntityId,
-  lane: 'generic',
-  sequence,
-  semanticHash: hashCertifiedEntityOutputSemantic(
-    sourceEntityId,
-    targetEntityId,
-    'generic',
-    sequence,
-    entityTxs,
-  ),
-  height,
-  frameHash,
-  outputIndex,
-});
-
-const buildCertifiedRemovalTx = (
-  sourceEntityId: string,
-  targetEntityId: string,
-  reason: string,
-): EntityTx => {
-  const route = {
-    orderId: `certified-remove-${sourceEntityId.slice(-8)}-${targetEntityId.slice(-8)}`,
-    routeHash: digest('e'),
-    bookOwnerEntityId: targetEntityId,
-    makerEntityId: sourceEntityId,
-    hubEntityId: targetEntityId,
-    source: {
-      jurisdiction: 'source-j', entityId: sourceEntityId,
-      counterpartyEntityId: targetEntityId, tokenId: 1, amount: 1n,
-    },
-    target: {
-      jurisdiction: 'target-j', entityId: targetEntityId,
-      counterpartyEntityId: sourceEntityId, tokenId: 2, amount: 1n,
-    },
-    status: 'resting',
-    createdAt: 1,
-    updatedAt: 1,
-  } satisfies CrossJurisdictionSwapRoute;
+): ConsensusOutputOrigin => {
+  const lane = entityTxs.some(tx => tx.type === 'accountInput' && tx.data.kind !== 'board_reseal')
+    ? 'account-settlement'
+    : 'generic';
   return {
-    type: 'removeCrossJurisdictionBookOrder',
-    data: { orderId: route.orderId, sourceEntityId, route, reason },
+    sourceEntityId,
+    lane,
+    sequence,
+    semanticHash: hashCertifiedEntityOutputSemantic(
+      sourceEntityId,
+      targetEntityId,
+      lane,
+      sequence,
+      entityTxs,
+    ),
+    height,
+    frameHash,
+    outputIndex,
   };
 };
+
+const buildUnverifiedBoardResealTx = (
+  sourceEntityId: string,
+  targetEntityId: string,
+  sequence: bigint = 1n,
+): EntityTx => ({
+  type: 'accountInput',
+  data: {
+    kind: 'board_reseal',
+    fromEntityId: sourceEntityId,
+    toEntityId: targetEntityId,
+    domain: {
+      chainId: 31_337,
+      depositoryAddress: `0x${'dd'.repeat(20)}`,
+    },
+    reseal: {
+      height: 1,
+      frameHash: digest('0'),
+      frameHanko: '0x01',
+      boardActivationJHeight: 1,
+      boardActivationLogIndex: Number(sequence),
+    },
+  },
+});
 
 const registerOnly = (env: Env, signerId: string) => {
   clearSignerKeys(env);
@@ -273,6 +277,68 @@ const buildExactQuorumHanko = async (
   return buildQuorumHanko(setup.env, setup.entityId, hash, signatures, setup.state.config);
 };
 
+const installCertifiedOutputTargetAccount = (
+  source: ReturnType<typeof createMultisigAccountState>,
+  targetState: EntityState,
+  targetEntityId: string,
+): AccountMachine => {
+  const existing = targetState.accounts.get(source.entityId);
+  if (existing) return existing;
+  const sourceAccount = source.state.accounts.get(source.counterpartyId);
+  if (!sourceAccount) throw new Error('TEST_SOURCE_ACCOUNT_MISSING');
+  const account = structuredClone(sourceAccount);
+  const [leftEntity, rightEntity] = [source.entityId, targetEntityId].sort();
+  account.leftEntity = leftEntity;
+  account.rightEntity = rightEntity;
+  account.proofHeader = {
+    ...account.proofHeader,
+    fromEntity: targetEntityId,
+    toEntity: source.entityId,
+  };
+  account.currentHeight = 1;
+  account.currentFrame = {
+    ...account.currentFrame,
+    height: 1,
+    timestamp: 1,
+    accountTxs: [],
+    prevFrameHash: digest('f'),
+    accountStateRoot: digest('0'),
+    stateHash: digest('0'),
+    byLeft: targetEntityId === leftEntity,
+  };
+  account.mempool = [];
+  delete account.pendingFrame;
+  delete account.pendingAccountInput;
+  targetState.accounts.set(source.entityId, account);
+  return account;
+};
+
+const buildCertifiedBoardResealTx = async (
+  source: ReturnType<typeof createMultisigAccountState>,
+  targetState: EntityState,
+  targetEntityId: string,
+  sequence: bigint = 1n,
+): Promise<EntityTx> => {
+  const account = installCertifiedOutputTargetAccount(source, targetState, targetEntityId);
+  const frameHash = account.currentFrame.stateHash;
+  return {
+    type: 'accountInput',
+    data: {
+      kind: 'board_reseal',
+      fromEntityId: source.entityId,
+      toEntityId: targetEntityId,
+      domain: account.domain,
+      reseal: {
+        height: account.currentHeight,
+        frameHash,
+        frameHanko: await buildExactQuorumHanko(source, frameHash),
+        boardActivationJHeight: 1,
+        boardActivationLogIndex: Number(sequence),
+      },
+    },
+  };
+};
+
 describe('multisig secondary Hanko production', () => {
   test('prepare cross-j output binds exact payload and requires real source-board quorum', async () => {
     const source = createMultisigAccountState(validators[0]);
@@ -413,10 +479,11 @@ describe('multisig secondary Hanko production', () => {
     if (!target) throw new Error('TEST_TARGET_REPLICA_MISSING');
     const rawOutputs: EntityTx[] = [];
     for (let outputIndex = 0; outputIndex < 2; outputIndex += 1) {
-      const entityTxs = [buildCertifiedRemovalTx(
-        source.entityId,
+      const entityTxs = [await buildCertifiedBoardResealTx(
+        source,
+        target.state,
         source.counterpartyId,
-        `sequential-${outputIndex}`,
+        BigInt(outputIndex + 1),
       )];
       const origin = buildGenericOrigin(
         source.entityId,
@@ -455,7 +522,12 @@ describe('multisig secondary Hanko production', () => {
     const target = source.env.eReplicas.get(`${source.counterpartyId}:${counterpartySigner}`);
     if (!target) throw new Error('TEST_TARGET_REPLICA_MISSING');
     const certifiedOutput = async (sequence: bigint, reason: string): Promise<EntityTx> => {
-      const entityTxs = [buildCertifiedRemovalTx(source.entityId, source.counterpartyId, reason)];
+      const entityTxs = [await buildCertifiedBoardResealTx(
+        source,
+        target.state,
+        source.counterpartyId,
+        sequence,
+      )];
       const origin = buildGenericOrigin(
         source.entityId,
         source.counterpartyId,
@@ -576,7 +648,7 @@ describe('multisig secondary Hanko production', () => {
       certifiedOutputSequences: new Map(frontierEntries),
     };
     const existingTarget = frontierEntries[0]![0];
-    const existingPayload = [buildCertifiedRemovalTx(setup.entityId, existingTarget, 'existing')];
+    const existingPayload = [buildUnverifiedBoardResealTx(setup.entityId, existingTarget)];
     const advancedOutputs: EntityInput[] = [{
       entityId: existingTarget,
       signerId: validators[0]!,
@@ -590,7 +662,7 @@ describe('multisig secondary Hanko production', () => {
     const overflowOutputs: EntityInput[] = [{
       entityId: newTarget,
       signerId: validators[0]!,
-      entityTxs: [buildCertifiedRemovalTx(setup.entityId, newTarget, 'overflow')],
+      entityTxs: [buildUnverifiedBoardResealTx(setup.entityId, newTarget)],
     }];
     expect(() => assignCertifiedOutputIdentities(fullState, overflowOutputs)).toThrow(
       `CONSENSUS_OUTPUT_SOURCE_RELATIONSHIP_LIMIT_EXCEEDED:` +
@@ -833,10 +905,12 @@ describe('multisig secondary Hanko production', () => {
       proposer.env,
     )).rejects.toThrow(/CONSENSUS_OUTPUT_WITNESS_HANKO_INVALID/);
 
-    const dedupEntityTxs: EntityTx[] = [buildCertifiedRemovalTx(
-      proposer.entityId,
+    const dedupTarget = proposer.env.eReplicas.get(`${proposer.counterpartyId}:${counterpartySigner}`);
+    if (!dedupTarget) throw new Error('TEST_DEDUP_TARGET_MISSING');
+    const dedupEntityTxs: EntityTx[] = [await buildCertifiedBoardResealTx(
+      proposer,
+      dedupTarget.state,
       proposer.counterpartyId,
-      'provider-alpha',
     )];
     const dedupOrigin = buildGenericOrigin(
       proposer.entityId,
@@ -855,10 +929,10 @@ describe('multisig secondary Hanko production', () => {
     const dedupHanko = await buildExactQuorumHanko(proposer, dedupHash);
     const providerTamperedTxs = structuredClone(dedupEntityTxs);
     const providerTamperedRemoval = providerTamperedTxs[0];
-    if (providerTamperedRemoval?.type !== 'removeCrossJurisdictionBookOrder') {
-      throw new Error('TEST_CERTIFIED_REMOVAL_MISSING');
+    if (providerTamperedRemoval?.type !== 'accountInput' || providerTamperedRemoval.data.kind !== 'board_reseal') {
+      throw new Error('TEST_CERTIFIED_ACCOUNT_INPUT_MISSING');
     }
-    providerTamperedRemoval.data.reason = 'provider-beta';
+    providerTamperedRemoval.data.reseal.boardActivationLogIndex += 100;
     const providerTamperedOrigin: ConsensusOutputOrigin = {
       ...dedupOrigin,
       semanticHash: hashCertifiedEntityOutputSemantic(
@@ -894,11 +968,13 @@ describe('multisig secondary Hanko production', () => {
     if (!targetReplica) throw new Error('TEST_TARGET_REPLICA_MISSING');
     registerOnly(proposer.env, counterpartySigner);
     const firstDelivery = await applyEntityInput(proposer.env, targetReplica, structuredClone(certifiedInput));
-    const accountAfterFirst = structuredClone(firstDelivery.workingReplica.state.accounts);
+    const accountAfterFirst = new Map(Array.from(firstDelivery.workingReplica.state.accounts.entries())
+      .map(([counterpartyId, account]) => [counterpartyId, projectAccountDoc(account)]));
     const messagesAfterFirst = structuredClone(firstDelivery.workingReplica.state.messages);
     const restoredState = hydrateEntityStateFromStorage({
       core: projectEntityCoreDoc(firstDelivery.workingReplica.state),
-      accounts: new Map(),
+      accounts: new Map(Array.from(firstDelivery.workingReplica.state.accounts.entries())
+        .map(([counterpartyId, account]) => [counterpartyId, projectAccountDoc(account)])),
       books: new Map(),
     });
     expect(restoredState.consumptionAccumulator).toEqual(
@@ -910,7 +986,9 @@ describe('multisig secondary Hanko production', () => {
       structuredClone(certifiedInput),
     );
     expect(duplicateDelivery.workingReplica.state.consumptionAccumulator?.count).toBe(1n);
-    expect(safeStringify(duplicateDelivery.workingReplica.state.accounts)).toBe(safeStringify(accountAfterFirst));
+    const accountAfterDuplicate = new Map(Array.from(duplicateDelivery.workingReplica.state.accounts.entries())
+      .map(([counterpartyId, account]) => [counterpartyId, projectAccountDoc(account)]));
+    expect(safeStringify(accountAfterDuplicate)).toBe(safeStringify(accountAfterFirst));
     expect(safeStringify(duplicateDelivery.workingReplica.state.messages)).toBe(safeStringify(messagesAfterFirst));
     const quarantinedDelivery = await applyEntityInput(proposer.env, duplicateDelivery.workingReplica, {
       ...structuredClone(certifiedInput),
@@ -999,16 +1077,20 @@ describe('multisig secondary Hanko production', () => {
     await assertTamperRejected(
       tx => {
         const removal = tx.data.entityTxs[0];
-        if (removal?.type !== 'removeCrossJurisdictionBookOrder') throw new Error('TEST_CERTIFIED_REMOVAL_MISSING');
-        removal.data.reason = 'tampered';
+        if (removal?.type !== 'accountInput' || removal.data.kind !== 'board_reseal') {
+          throw new Error('TEST_CERTIFIED_ACCOUNT_INPUT_MISSING');
+        }
+        removal.data.reseal.boardActivationLogIndex += 1;
       },
       /CONSENSUS_OUTPUT_SEMANTIC_HASH_MISMATCH/,
     );
     await assertTamperRejected(
       tx => {
         const removal = tx.data.entityTxs[0];
-        if (removal?.type !== 'removeCrossJurisdictionBookOrder') throw new Error('TEST_CERTIFIED_REMOVAL_MISSING');
-        removal.data.reason = 'provider-beta';
+        if (removal?.type !== 'accountInput' || removal.data.kind !== 'board_reseal') {
+          throw new Error('TEST_CERTIFIED_ACCOUNT_INPUT_MISSING');
+        }
+        removal.data.reseal.boardActivationLogIndex += 100;
       },
       /CONSENSUS_OUTPUT_SEMANTIC_HASH_MISMATCH/,
     );
@@ -1055,11 +1137,12 @@ describe('multisig secondary Hanko production', () => {
     source.env.eReplicas.set(`${targetEntityId}:${targetValidators[0]}`, targetLeader);
     source.env.eReplicas.set(`${targetEntityId}:${targetValidators[1]}`, targetFollower);
 
-    const entityTxs: EntityTx[] = [buildCertifiedRemovalTx(
-      source.entityId,
+    const entityTxs: EntityTx[] = [await buildCertifiedBoardResealTx(
+      source,
+      targetLeader.state,
       targetEntityId,
-      'route-independent certificate',
     )];
+    targetFollower.state.accounts = structuredClone(targetLeader.state.accounts);
     const origin = buildGenericOrigin(
       source.entityId,
       targetEntityId,
@@ -1110,9 +1193,8 @@ describe('multisig secondary Hanko production', () => {
     expect(replayed.outcome.kind).toBe('committed');
     expect(replayed.workingReplica.state.height).toBe(1);
     expect(replayed.workingReplica.state.consumptionAccumulator?.count).toBe(1n);
-    expect(replayed.workingReplica.state.messages.some(message =>
-      message.includes('route-independent certificate'),
-    )).toBe(true);
+    expect(replayed.workingReplica.state.accounts.get(source.entityId)?.counterpartyBoardReseal)
+      .toMatchObject({ activationJHeight: 1, activationLogIndex: 1 });
   });
 
   test('rejects a valid source-A output Hanko whose nested account input claims source C', async () => {
@@ -1126,7 +1208,11 @@ describe('multisig secondary Hanko production', () => {
         kind: 'settle',
         fromEntityId: forgedSource,
         toEntityId: source.counterpartyId,
-        settleAction: { type: 'reject', memo: 'must not mutate target' },
+        domain: {
+          chainId: 31_337,
+          depositoryAddress: `0x${'dd'.repeat(20)}`,
+        },
+        settleAction: { type: 'reject', memo: 'must not mutate target', version: 1 },
       },
     }];
     const origin = buildGenericOrigin(
@@ -1155,10 +1241,10 @@ describe('multisig secondary Hanko production', () => {
     const source = createMultisigAccountState(validators[0]);
     const targetReplica = source.env.eReplicas.get(`${source.counterpartyId}:${counterpartySigner}`);
     if (!targetReplica) throw new Error('TEST_TARGET_REPLICA_MISSING');
-    const entityTxs: EntityTx[] = [buildCertifiedRemovalTx(
-      source.entityId,
+    const entityTxs: EntityTx[] = [await buildCertifiedBoardResealTx(
+      source,
+      targetReplica.state,
       source.counterpartyId,
-      'proof required',
     )];
     const origin = buildGenericOrigin(
       source.entityId,

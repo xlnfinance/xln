@@ -57,7 +57,8 @@ test('runtime dev startup status logs stay structured', () => {
   expect(hubNode).toContain("nodeLog.error('jurisdiction_contracts.code_missing'");
   expect(hubNode).toContain("nodeLog.error('jurisdictions_file.invalid'");
   expect(hubNode).not.toContain('Ignore malformed local file and keep falling back');
-  expect(hubNode).toContain("nodeLog.info('bootstrap_ready_snapshot.persisted'");
+  expect(hubNode).not.toContain('BOOTSTRAP_READY_SNAPSHOT_PERSISTED');
+  expect(hubNode).not.toContain("bootstrap_ready_snapshot.persisted");
   expect(hubNode).not.toContain('console.log(`Importing sibling hub jurisdiction');
   expect(hubNode).not.toContain('console.log(`Sibling hub ready');
   expect(hubNode).toContain("nodeLog.debug('sibling_jurisdiction.importing'");
@@ -66,12 +67,12 @@ test('runtime dev startup status logs stay structured', () => {
   expect(marketMakerNode).not.toContain('BOOTSTRAP_READY_HASH hash=${fingerprint.hash}');
   expect(marketMakerNode).not.toContain('console.log(`[MESH-MM] Sibling MM ready');
   expect(marketMakerNode).not.toContain('Token universe for market making:');
-  expect(marketMakerNode).toContain("nodeLog.info('bootstrap.ready_snapshot.persisted'");
+  expect(marketMakerNode).not.toContain("bootstrap.ready_snapshot.persisted");
   expect(marketMakerNode).toContain("nodeLog.info('bootstrap.ready_hash'");
   expect(marketMakerNode).toContain("nodeLog.debug('sibling_mm.ready'");
   expect(marketMakerNode).toContain("nodeLog.debug('token_universe.ready'");
   expect(orchestrator).not.toContain('console.log(`HUB_READY_SNAPSHOTS_PERSISTED');
-  expect(orchestrator).toContain("meshLog.info('hub_ready_snapshots.persisted'");
+  expect(orchestrator).not.toContain("hub_ready_snapshots.persisted");
   expect(orchestrator).not.toContain('[MESH] runtime import manifest refresh failed');
   expect(orchestrator).toContain("meshLog.warn('runtime_import_manifest.refresh_failed'");
   expect(wsClient).not.toContain('console.log(`[WS] Connected to ${this.options.url}`)');

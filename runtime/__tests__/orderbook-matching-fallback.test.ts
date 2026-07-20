@@ -27,6 +27,11 @@ import {
 import type { AccountMachine, AccountTx, SwapOffer } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 
+const TESTNET_STACK = `stack:31337:0x${'11'.repeat(20)}`;
+const TRON_STACK = `stack:31338:0x${'22'.repeat(20)}`;
+const CROSS_WETH_USDC_PAIR = `cross:${TESTNET_STACK}:2/${TRON_STACK}:1`;
+const CROSS_USDC_USDC_PAIR = `cross:${TESTNET_STACK}:1/${TRON_STACK}:1`;
+
 const processCommittedOrderbookSwaps = (
   state: Parameters<typeof processOrderbookSwaps>[0],
   offers: NormalizedOrderbookOffer[],
@@ -1865,7 +1870,7 @@ describe('orderbook matching fallback execution mapping', () => {
 
   test('fails fast when a persisted cross-j book order has no swapOffer or admitted route', () => {
     const lot = SWAP_LOT_SCALE;
-    const pairId = 'cross:base:1/tron:1';
+    const pairId = CROSS_USDC_USDC_PAIR;
     let staleBook = createBook({
       bucketWidthTicks: 10_000n,
       maxOrders: 10_000,
@@ -1889,14 +1894,14 @@ describe('orderbook matching fallback execution mapping', () => {
       makerEntityId: 'taker-entity',
       hubEntityId: 'hub-entity',
       source: {
-        jurisdiction: 'base',
+        jurisdiction: TESTNET_STACK,
         entityId: 'taker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
         amount: lot,
       },
       target: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'taker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
@@ -1963,7 +1968,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const filledTargetAmount = quoteAmountAtPrice(2, 1, filledSourceAmount, 25_000_000n);
     const remainingSource = sourceTotal - filledSourceAmount;
     const remainingTarget = targetTotal - filledTargetAmount;
-    const pairId = 'cross:testnet:2/tron:1';
+    const pairId = CROSS_WETH_USDC_PAIR;
     const namespacedOrderId = 'maker-account:maker-cross-partial';
     let staleBook = createBook({
       bucketWidthTicks: 10_000n,
@@ -1988,14 +1993,14 @@ describe('orderbook matching fallback execution mapping', () => {
       makerEntityId: 'maker-entity',
       hubEntityId: 'hub-entity',
       source: {
-        jurisdiction: 'testnet',
+        jurisdiction: TESTNET_STACK,
         entityId: 'maker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 2,
         amount: sourceTotal,
       },
       target: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'maker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
@@ -2066,7 +2071,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const targetTotal = quoteAmountAtPrice(2, 1, sourceTotal, 25_000_000n);
     const fillSource = 10_000n * lot;
     const fillTarget = quoteAmountAtPrice(2, 1, fillSource, 25_000_000n);
-    const pairId = 'cross:testnet:2/tron:1';
+    const pairId = CROSS_WETH_USDC_PAIR;
     const makerOrderId = 'maker-account:maker-cross-partial-live';
     let book = createBook({
       bucketWidthTicks: 10_000n,
@@ -2091,14 +2096,14 @@ describe('orderbook matching fallback execution mapping', () => {
       makerEntityId: 'maker-entity',
       hubEntityId: 'hub-entity',
       source: {
-        jurisdiction: 'testnet',
+        jurisdiction: TESTNET_STACK,
         entityId: 'maker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 2,
         amount: sourceTotal,
       },
       target: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'maker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
@@ -2113,14 +2118,14 @@ describe('orderbook matching fallback execution mapping', () => {
       orderId: 'taker-cross-partial-live',
       makerEntityId: 'taker-entity',
       source: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'taker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
         amount: fillTarget,
       },
       target: {
-        jurisdiction: 'testnet',
+        jurisdiction: TESTNET_STACK,
         entityId: 'taker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 2,
@@ -2209,7 +2214,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const makerQtyLots = sourceTotal / lot;
     const fillSource = lot;
     const fillTarget = quoteAmountAtPrice(2, 1, fillSource, ORDERBOOK_PRICE_SCALE);
-    const pairId = 'cross:testnet:2/tron:1';
+    const pairId = CROSS_WETH_USDC_PAIR;
     const makerOrderId = 'maker-account:maker-cross-tiny-fill';
     let book = createBook({
       bucketWidthTicks: 10_000n,
@@ -2234,14 +2239,14 @@ describe('orderbook matching fallback execution mapping', () => {
       makerEntityId: 'maker-entity',
       hubEntityId: 'hub-entity',
       source: {
-        jurisdiction: 'testnet',
+        jurisdiction: TESTNET_STACK,
         entityId: 'maker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 2,
         amount: sourceTotal,
       },
       target: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'maker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
@@ -2259,14 +2264,14 @@ describe('orderbook matching fallback execution mapping', () => {
       orderId: 'taker-cross-tiny-fill',
       makerEntityId: 'taker-entity',
       source: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'taker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
         amount: fillTarget,
       },
       target: {
-        jurisdiction: 'testnet',
+        jurisdiction: TESTNET_STACK,
         entityId: 'taker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 2,
@@ -2344,7 +2349,7 @@ describe('orderbook matching fallback execution mapping', () => {
 
   test('removes non-working cross-j committed routes before matching new takers', () => {
     const lot = SWAP_LOT_SCALE;
-    const pairId = 'cross:testnet:2/tron:1';
+    const pairId = CROSS_WETH_USDC_PAIR;
     const staleOrderId = 'old-maker:old-cross';
     let book = createBook({
       bucketWidthTicks: 10_000n,
@@ -2369,14 +2374,14 @@ describe('orderbook matching fallback execution mapping', () => {
       makerEntityId: 'old-maker',
       hubEntityId: 'hub-entity',
       source: {
-        jurisdiction: 'testnet',
+        jurisdiction: TESTNET_STACK,
         entityId: 'old-maker',
         counterpartyEntityId: 'hub-entity',
         tokenId: 2,
         amount: lot,
       },
       target: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'old-maker',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
@@ -2391,14 +2396,14 @@ describe('orderbook matching fallback execution mapping', () => {
       orderId: 'new-taker',
       makerEntityId: 'new-taker',
       source: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'new-taker',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
         amount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
       },
       target: {
-        jurisdiction: 'testnet',
+        jurisdiction: TESTNET_STACK,
         entityId: 'new-taker',
         counterpartyEntityId: 'hub-entity',
         tokenId: 2,
@@ -2471,7 +2476,7 @@ describe('orderbook matching fallback execution mapping', () => {
 
   test('removes terminal admitted cross-j rows even when stale mirrors still look resting', () => {
     const lot = SWAP_LOT_SCALE;
-    const pairId = 'cross:testnet:2/tron:1';
+    const pairId = CROSS_WETH_USDC_PAIR;
     const staleOrderId = 'old-maker:old-cross';
     let book = createBook({
       bucketWidthTicks: 10_000n,
@@ -2496,14 +2501,14 @@ describe('orderbook matching fallback execution mapping', () => {
       makerEntityId: 'old-maker',
       hubEntityId: 'hub-entity',
       source: {
-        jurisdiction: 'testnet',
+        jurisdiction: TESTNET_STACK,
         entityId: 'old-maker',
         counterpartyEntityId: 'hub-entity',
         tokenId: 2,
         amount: lot,
       },
       target: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'old-maker',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
@@ -2536,14 +2541,14 @@ describe('orderbook matching fallback execution mapping', () => {
       orderId: 'new-taker',
       makerEntityId: 'new-taker',
       source: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'new-taker',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
         amount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
       },
       target: {
-        jurisdiction: 'testnet',
+        jurisdiction: TESTNET_STACK,
         entityId: 'new-taker',
         counterpartyEntityId: 'hub-entity',
         tokenId: 2,
@@ -2623,7 +2628,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const filledSourceAmount = 10_000n * lot;
     const filledTargetAmount = quoteAmountAtPrice(2, 1, filledSourceAmount, 25_000_000n);
     const remainingSource = sourceTotal - filledSourceAmount;
-    const pairId = 'cross:testnet:2/tron:1';
+    const pairId = CROSS_WETH_USDC_PAIR;
     const namespacedOrderId = 'maker-entity:maker-cross-partial';
     let staleBook = createBook({
       bucketWidthTicks: 10_000n,
@@ -2648,14 +2653,14 @@ describe('orderbook matching fallback execution mapping', () => {
       makerEntityId: 'maker-entity',
       hubEntityId: 'hub-entity',
       source: {
-        jurisdiction: 'testnet',
+        jurisdiction: TESTNET_STACK,
         entityId: 'maker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 2,
         amount: sourceTotal,
       },
       target: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'maker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
@@ -2724,7 +2729,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const targetTotal = quoteAmountAtPrice(2, 1, sourceTotal, 25_000_000n);
     const filledSourceAmount = 10_000n * lot;
     const filledTargetAmount = quoteAmountAtPrice(2, 1, filledSourceAmount, 25_000_000n);
-    const pairId = 'cross:testnet:2/tron:1';
+    const pairId = CROSS_WETH_USDC_PAIR;
     const namespacedOrderId = 'maker-entity:maker-cross-progress';
     let book = createBook({
       bucketWidthTicks: 10_000n,
@@ -2749,14 +2754,14 @@ describe('orderbook matching fallback execution mapping', () => {
       makerEntityId: 'maker-entity',
       hubEntityId: 'hub-entity',
       source: {
-        jurisdiction: 'testnet',
+        jurisdiction: TESTNET_STACK,
         entityId: 'maker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 2,
         amount: sourceTotal,
       },
       target: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'maker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
@@ -2865,7 +2870,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const filledSourceAmount = 10000152590218966n;
     const filledTargetAmount = quoteAmountAtPrice(2, 1, filledSourceAmount, 25_000_000n);
     const remainingSource = sourceTotal - filledSourceAmount;
-    const pairId = 'cross:testnet:2/tron:1';
+    const pairId = CROSS_WETH_USDC_PAIR;
     const makerOrderId = 'maker-account:maker-cross-pending';
     let book = createBook({
       bucketWidthTicks: 10_000n,
@@ -2890,14 +2895,14 @@ describe('orderbook matching fallback execution mapping', () => {
       makerEntityId: 'maker-entity',
       hubEntityId: 'hub-entity',
       source: {
-        jurisdiction: 'testnet',
+        jurisdiction: TESTNET_STACK,
         entityId: 'maker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 2,
         amount: sourceTotal,
       },
       target: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'maker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
@@ -2930,14 +2935,14 @@ describe('orderbook matching fallback execution mapping', () => {
       orderId: 'taker-cross-pending',
       makerEntityId: 'taker-entity',
       source: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'taker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
         amount: filledTargetAmount,
       },
       target: {
-        jurisdiction: 'testnet',
+        jurisdiction: TESTNET_STACK,
         entityId: 'taker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 2,
@@ -3026,7 +3031,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const filledSourceAmount = 10000152590218966n;
     const filledTargetAmount = quoteAmountAtPrice(2, 1, filledSourceAmount, 25_000_000n);
     const remainingSource = sourceTotal - filledSourceAmount;
-    const pairId = 'cross:testnet:2/tron:1';
+    const pairId = CROSS_WETH_USDC_PAIR;
     const makerOrderId = 'maker-account:maker-cross-pending';
     let book = createBook({
       bucketWidthTicks: 10_000n,
@@ -3051,14 +3056,14 @@ describe('orderbook matching fallback execution mapping', () => {
       makerEntityId: 'taker-entity',
       hubEntityId: 'hub-entity',
       source: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'taker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
         amount: filledTargetAmount,
       },
       target: {
-        jurisdiction: 'testnet',
+        jurisdiction: TESTNET_STACK,
         entityId: 'taker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 2,
@@ -3142,7 +3147,7 @@ describe('orderbook matching fallback execution mapping', () => {
 
   test('keeps matching committed cross-j orders while another order has a pending fill ack', () => {
     const lot = getSwapLotScale(1);
-    const pairId = 'cross:base:1/tron:1';
+    const pairId = CROSS_USDC_USDC_PAIR;
     const pendingOrderId = 'maker-pending-account:maker-cross-pending';
     const committedOrderId = 'maker-committed-account:maker-cross-committed';
     let book = createBook({
@@ -3178,14 +3183,14 @@ describe('orderbook matching fallback execution mapping', () => {
       makerEntityId: 'maker-pending',
       hubEntityId: 'hub-entity',
       source: {
-        jurisdiction: 'base',
+        jurisdiction: TESTNET_STACK,
         entityId: 'maker-pending',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
         amount: 2n * lot,
       },
       target: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'maker-pending',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
@@ -3218,14 +3223,14 @@ describe('orderbook matching fallback execution mapping', () => {
       orderId: 'maker-cross-committed',
       makerEntityId: 'maker-committed',
       source: {
-        jurisdiction: 'base',
+        jurisdiction: TESTNET_STACK,
         entityId: 'maker-committed',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
         amount: 2n * lot,
       },
       target: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'maker-committed',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
@@ -3255,14 +3260,14 @@ describe('orderbook matching fallback execution mapping', () => {
       orderId: 'taker-cross',
       makerEntityId: 'taker',
       source: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'taker',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
         amount: 2n * lot,
       },
       target: {
-        jurisdiction: 'base',
+        jurisdiction: TESTNET_STACK,
         entityId: 'taker',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
@@ -3354,7 +3359,7 @@ describe('orderbook matching fallback execution mapping', () => {
 
   test('matches remote cross-j book metadata from admitted route without rebuilding the row', () => {
     const lot = SWAP_LOT_SCALE;
-    const pairId = 'cross:base:2/tron:1';
+    const pairId = CROSS_WETH_USDC_PAIR;
     const remoteOrderId = 'remote-maker:maker-cross';
     let book = createBook({
       bucketWidthTicks: 10_000n,
@@ -3379,14 +3384,14 @@ describe('orderbook matching fallback execution mapping', () => {
       makerEntityId: 'remote-maker',
       hubEntityId: 'hub-entity',
       source: {
-        jurisdiction: 'base',
+        jurisdiction: TESTNET_STACK,
         entityId: 'remote-maker',
         counterpartyEntityId: 'remote-source-hub',
         tokenId: 2,
         amount: 30n * lot,
       },
       target: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'hub-entity',
         counterpartyEntityId: 'remote-target-user',
         tokenId: 1,
@@ -3401,14 +3406,14 @@ describe('orderbook matching fallback execution mapping', () => {
       orderId: 'taker-cross',
       makerEntityId: 'local-taker',
       source: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'local-taker',
         counterpartyEntityId: 'local-source-hub',
         tokenId: 1,
         amount: quoteAmountAtPrice(2, 1, 30n * lot, 25_000_000n),
       },
       target: {
-        jurisdiction: 'base',
+        jurisdiction: TESTNET_STACK,
         entityId: 'hub-entity',
         counterpartyEntityId: 'local-target-user',
         tokenId: 2,
@@ -3480,7 +3485,7 @@ describe('orderbook matching fallback execution mapping', () => {
 
   test('suspends remote admitted cross-j row while book progress is pending', () => {
     const lot = SWAP_LOT_SCALE;
-    const pairId = 'cross:base:2/tron:1';
+    const pairId = CROSS_WETH_USDC_PAIR;
     const remoteOrderId = 'remote-maker:maker-cross-pending-progress';
     let book = createBook({
       bucketWidthTicks: 10_000n,
@@ -3505,14 +3510,14 @@ describe('orderbook matching fallback execution mapping', () => {
       makerEntityId: 'remote-maker',
       hubEntityId: 'hub-entity',
       source: {
-        jurisdiction: 'base',
+        jurisdiction: TESTNET_STACK,
         entityId: 'remote-maker',
         counterpartyEntityId: 'remote-source-hub',
         tokenId: 2,
         amount: 30n * lot,
       },
       target: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'hub-entity',
         counterpartyEntityId: 'remote-target-user',
         tokenId: 1,
@@ -3527,14 +3532,14 @@ describe('orderbook matching fallback execution mapping', () => {
       orderId: 'local-taker-cross-pending-progress',
       makerEntityId: 'local-taker',
       source: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'local-taker',
         counterpartyEntityId: 'local-source-hub',
         tokenId: 1,
         amount: quoteAmountAtPrice(2, 1, 30n * lot, 25_000_000n),
       },
       target: {
-        jurisdiction: 'base',
+        jurisdiction: TESTNET_STACK,
         entityId: 'hub-entity',
         counterpartyEntityId: 'local-target-user',
         tokenId: 2,
@@ -3616,7 +3621,7 @@ describe('orderbook matching fallback execution mapping', () => {
 
   test('preserves expired remote admitted cross-j pending fill progress for replay', () => {
     const lot = SWAP_LOT_SCALE;
-    const pairId = 'cross:base:2/tron:1';
+    const pairId = CROSS_WETH_USDC_PAIR;
     const remoteOrderId = 'remote-maker:maker-cross-expired-pending-progress';
     let book = createBook({
       bucketWidthTicks: 10_000n,
@@ -3642,14 +3647,14 @@ describe('orderbook matching fallback execution mapping', () => {
       makerEntityId: 'remote-maker',
       hubEntityId: 'hub-entity',
       source: {
-        jurisdiction: 'base',
+        jurisdiction: TESTNET_STACK,
         entityId: 'remote-maker',
         counterpartyEntityId: 'remote-source-hub',
         tokenId: 2,
         amount: 30n * lot,
       },
       target: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'hub-entity',
         counterpartyEntityId: 'remote-target-user',
         tokenId: 1,
@@ -3664,14 +3669,14 @@ describe('orderbook matching fallback execution mapping', () => {
       orderId: 'local-taker-cross-expired-pending-progress',
       makerEntityId: 'local-taker',
       source: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'local-taker',
         counterpartyEntityId: 'local-source-hub',
         tokenId: 1,
         amount: quoteAmountAtPrice(2, 1, 30n * lot, 25_000_000n),
       },
       target: {
-        jurisdiction: 'base',
+        jurisdiction: TESTNET_STACK,
         entityId: 'hub-entity',
         counterpartyEntityId: 'local-target-user',
         tokenId: 2,
@@ -3752,7 +3757,7 @@ describe('orderbook matching fallback execution mapping', () => {
 
   test('suspends cross-j orders after the first same-pass fill until ACK commits', () => {
     const lot = SWAP_LOT_SCALE;
-    const pairId = 'cross:base:1/tron:1';
+    const pairId = CROSS_USDC_USDC_PAIR;
     const baseRoute = {
       bookOwnerEntityId: 'hub-entity',
       venueId: pairId,
@@ -3766,14 +3771,14 @@ describe('orderbook matching fallback execution mapping', () => {
       orderId: 'maker-cross',
       makerEntityId: 'maker-entity',
       source: {
-        jurisdiction: 'base',
+        jurisdiction: TESTNET_STACK,
         entityId: 'maker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
         amount: 2n * lot,
       },
       target: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'maker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
@@ -3804,14 +3809,14 @@ describe('orderbook matching fallback execution mapping', () => {
         orderId: id,
         makerEntityId: id,
         source: {
-          jurisdiction: 'tron',
+          jurisdiction: TRON_STACK,
           entityId: id,
           counterpartyEntityId: 'hub-entity',
           tokenId: 1,
           amount: lot,
         },
         target: {
-          jurisdiction: 'base',
+          jurisdiction: TESTNET_STACK,
           entityId: id,
           counterpartyEntityId: 'hub-entity',
           tokenId: 1,
@@ -3884,7 +3889,7 @@ describe('orderbook matching fallback execution mapping', () => {
 
   test('debug cross-j rebuild does not persist a resting projection', () => {
     const lot = SWAP_LOT_SCALE;
-    const pairId = 'cross:base:1/tron:1';
+    const pairId = CROSS_USDC_USDC_PAIR;
     const route = {
       orderId: 'debug-cross',
       bookOwnerEntityId: 'hub-entity',
@@ -3892,14 +3897,14 @@ describe('orderbook matching fallback execution mapping', () => {
       makerEntityId: 'maker-entity',
       hubEntityId: 'hub-entity',
       source: {
-        jurisdiction: 'base',
+        jurisdiction: TESTNET_STACK,
         entityId: 'maker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,
         amount: lot,
       },
       target: {
-        jurisdiction: 'tron',
+        jurisdiction: TRON_STACK,
         entityId: 'maker-entity',
         counterpartyEntityId: 'hub-entity',
         tokenId: 1,

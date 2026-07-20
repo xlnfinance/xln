@@ -169,6 +169,33 @@ export const computeStorageStateRoot = (entityHashes: StorageFrameEntityHash[]):
   ).root;
 };
 
+/**
+ * Rebuild the storage commitment from an isolated set of projected documents.
+ * Snapshot verification must hash the bytes it read back from the snapshot
+ * namespace; reusing the live Merkle cache would only prove that the source
+ * cache was internally consistent, not that the copied checkpoint is usable.
+ */
+export const computeStorageEntityHashesFromDocs = (
+  docs: readonly StorageDoc[],
+): StorageFrameEntityHash[] => {
+  const cellsByEntity = new Map<string, Array<{ hexKey: string; value: Buffer }>>();
+  for (const doc of docs) {
+    const ref = docRefForDoc(doc);
+    const entityId = normalizeEntityId(ref.entityId);
+    const cells = cellsByEntity.get(entityId) ?? [];
+    cells.push({
+      hexKey: storageMerkleCellHexKey(docRefCellKey(ref)),
+      value: hashToBytes(encodeStorageDocValue(doc).hash),
+    });
+    cellsByEntity.set(entityId, cells);
+  }
+  return Array.from(cellsByEntity.entries(), ([entityId, cells]) => ({
+    entityId,
+    hash: buildHexKeyedMerkle(cells, { radix: DEFAULT_ACCOUNT_MERKLE_RADIX }).root,
+    cellCount: cells.length,
+  })).sort((left, right) => compareStableText(left.entityId, right.entityId));
+};
+
 export const normalizeFrameEntityHashes = (entityHashes: StorageFrameEntityHash[] | undefined): StorageFrameEntityHash[] =>
   (entityHashes ?? [])
     .map((entry) => ({

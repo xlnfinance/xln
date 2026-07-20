@@ -450,7 +450,10 @@ describe('runtime recovery tower', () => {
       'journal must carry the exact pre-apply durable R-machine',
     ).toBeTruthy();
     expect(frame?.runtimeMachine, 'journal must carry the exact durable R-machine').toBeTruthy();
-    expect(frame?.runtimeStateHash).toMatch(/^0x[0-9a-f]{64}$/);
+    // Ordinary sparse WAL frames carry the exact pre/post R-machine and
+    // replica commitment without paying a full canonical re-hash. The signed
+    // tail is replayed and compared with the latest checkpoint below.
+    expect(frame?.runtimeStateHash).toBeUndefined();
     const tailBundle = buildRuntimeRecoveryBundle(env, {
       signers,
       kind: 'journal_tail',

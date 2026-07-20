@@ -95,6 +95,7 @@ describe('entity hub profile classification', () => {
       entityInputs: [],
     });
     await process(env);
+    await process(env);
 
     const stateBefore = findEntityState(env, entityId);
     expect(stateBefore.profile.isHub).toBe(false);

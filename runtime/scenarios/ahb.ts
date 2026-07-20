@@ -15,7 +15,13 @@
  */
 
 import type { Env, EntityInput } from '../types';
-import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, createJReplica } from './boot';
+import {
+  bindScenarioJReplica,
+  ensureJAdapter,
+  getScenarioJAdapter,
+  createJReplica,
+  resolveScenarioBoardSigner,
+} from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain, commitRuntimeInput } from './helpers';
 import { formatRuntime } from '../qa/runtime-ascii';
@@ -192,7 +198,7 @@ export async function ahb(env: Env): Promise<void> {
 
     for (let i = 0; i < 3; i++) {
       const name = entityNames[i]!;
-      const signer = String(i + 1);
+      const signer = resolveScenarioBoardSigner(env, String(i + 1));
       const position = AHB_POSITIONS[name as keyof typeof AHB_POSITIONS];
 
       // Compute boardHash for lazy entity (entityId MUST equal boardHash)
@@ -1990,9 +1996,17 @@ export async function ahb(env: Env): Promise<void> {
     for (let i = 0; i < 40; i++) {
       await syncChain(env, 1);
       targetBlockNumber = await readTarget() ?? targetBlockNumber;
-      const visibleBlock = BigInt(env.jReplicas?.get(AHB_JURISDICTION)?.blockNumber ?? 0n);
+      const entityVisibleBlock = BigInt(Math.max(
+        findReplica(env, bob.id)[1].state.lastFinalizedJHeight,
+        findReplica(env, hub.id)[1].state.lastFinalizedJHeight,
+      ));
+      const authenticatedBlock = BigInt(jadapter.getWatcherScanProgress?.().scannedThroughHeight ?? 0);
       const providerBlock = BigInt(await jadapter.provider.getBlockNumber());
-      if (visibleBlock >= targetBlockNumber && providerBlock >= targetBlockNumber) return;
+      if (
+        entityVisibleBlock >= targetBlockNumber &&
+        authenticatedBlock >= targetBlockNumber &&
+        providerBlock >= targetBlockNumber
+      ) return;
       const blocksBehind = targetBlockNumber > providerBlock ? targetBlockNumber - providerBlock : 1n;
       if (blocksBehind > 8n && blocksBehind <= BigInt(Number.MAX_SAFE_INTEGER)) {
         try {
@@ -2005,10 +2019,15 @@ export async function ahb(env: Env): Promise<void> {
       }
       await process(env);
     }
-    const visibleBlock = BigInt(env.jReplicas?.get(AHB_JURISDICTION)?.blockNumber ?? 0n);
+    const entityVisibleBlock = BigInt(Math.max(
+      findReplica(env, bob.id)[1].state.lastFinalizedJHeight,
+      findReplica(env, hub.id)[1].state.lastFinalizedJHeight,
+    ));
+    const authenticatedBlock = BigInt(jadapter.getWatcherScanProgress?.().scannedThroughHeight ?? 0);
     const providerBlock = BigInt(await jadapter.provider.getBlockNumber());
     throw new Error(
-      `AHB ${label}: runtime/provider J-height ${visibleBlock}/${providerBlock} < timeout ${targetBlockNumber}`,
+      `AHB ${label}: entity/authenticated/provider J-height ` +
+        `${entityVisibleBlock}/${authenticatedBlock}/${providerBlock} < timeout ${targetBlockNumber}`,
     );
   };
 
@@ -2087,6 +2106,13 @@ export async function ahb(env: Env): Promise<void> {
   // Verify DebtCreated event received by entities
   // H14 AUDIT FIX: Verify actual debt amount, not just event existence
   const [, bobFinal] = findReplica(env, bob.id);
+  if (AHB_DEBUG) {
+    console.log('[AHB_DEBUG_DEBT]', safeStringify({
+      messages: bobFinal.state.messages.filter(message => message.includes('DEBT')),
+      inDebtsByToken: bobFinal.state.inDebtsByToken,
+      outDebtsByToken: bobFinal.state.outDebtsByToken,
+    }));
+  }
   const debtMessage = bobFinal.state.messages.find(m => m.includes('DEBT') && m.includes(hub.id.slice(-4)));
   assert(debtMessage, 'PHASE 7: Bob did not receive DebtCreated event');
 
@@ -2225,82 +2251,35 @@ export async function ahb(env: Env): Promise<void> {
   assert(bobEdgeAfterFail.state.accounts.get(hub.id)?.activeDispute, 'PHASE 8: activeDispute cleared after early finalize');
   console.log('✅ Early finalize failed as expected (dispute still active)');
 
-  // Create a newer off-chain state so counterparty can counter-dispute
-  console.log('⚙️  Creating newer off-chain state for counter-dispute...');
-  const bumpAmount = ONE_TOKEN;
-  const bobDeltaEdge = bobEdgeAfterFail.state.accounts.get(hub.id)?.deltas.get(USDC_TOKEN_ID);
-  if (!bobDeltaEdge) {
-    throw new Error('PHASE 8: Bob-Hub delta missing for counter-dispute bump');
+  // Once DisputeStarted is committed, ordinary Account business is frozen.
+  // A valid higher counter-proof must already have been signed before this
+  // boundary; creating a new payment now would mutate the committed calldata.
+  for (let round = 0; round < 12; round++) {
+    const bobObserved = findReplica(env, bob.id)[1].state.accounts.get(hub.id)?.activeDispute?.observedOnChain === true;
+    const hubObserved = findReplica(env, hub.id)[1].state.accounts.get(bob.id)?.activeDispute?.observedOnChain === true;
+    if (bobObserved && hubObserved) break;
+    await syncChain(env, 1);
   }
-  const bobIsLeftEdge = isLeft(bob.id, hub.id);
-  const hubIsLeftEdge = isLeft(hub.id, bob.id);
-  const bobDerivedEdge = deriveDelta(bobDeltaEdge, bobIsLeftEdge);
-  const hubDerivedEdge = deriveDelta(bobDeltaEdge, hubIsLeftEdge);
+  const [, hubEdgeAfterFail] = findReplica(env, hub.id);
+  const bobFrozenAccount = bobEdgeAfterFail.state.accounts.get(hub.id);
+  const hubFrozenAccount = hubEdgeAfterFail.state.accounts.get(bob.id);
+  assert(bobFrozenAccount?.status === 'disputed', 'PHASE 8: Bob account must remain frozen during dispute');
+  assert(hubFrozenAccount?.status === 'disputed', 'PHASE 8: Hub account must remain frozen during dispute');
+  assert(!bobFrozenAccount.pendingFrame && bobFrozenAccount.mempool.length === 0, 'PHASE 8: Bob frozen account has pending business');
+  assert(!hubFrozenAccount.pendingFrame && hubFrozenAccount.mempool.length === 0, 'PHASE 8: Hub frozen account has pending business');
+  checkSolvency(env, TOTAL_SOLVENCY, 'PHASE 8 DISPUTE-FROZEN');
 
-  const bumpSender = bobDerivedEdge.outCapacity >= bumpAmount ? bob : (hubDerivedEdge.outCapacity >= bumpAmount ? hub : null);
-  if (!bumpSender) {
-    throw new Error('PHASE 8: No capacity for counter-dispute bump payment');
-  }
-  const bumpRecipient = bumpSender === bob ? hub : bob;
-
-  await process(env, [{
-    entityId: bumpSender.id,
-    signerId: bumpSender.signer,
-    entityTxs: [{
-      type: 'directPayment',
-      data: {
-        targetEntityId: bumpRecipient.id,
-        tokenId: USDC_TOKEN_ID,
-        amount: bumpAmount,
-        route: [bumpSender.id, bumpRecipient.id],
-        description: 'Counter-dispute bump'
-      }
-    }]
-  }]);
-
-  await processUntil(env, () => {
-    const [, bobRep] = findReplica(env, bob.id);
-    const [, hubRep] = findReplica(env, hub.id);
-    const bobAcc = bobRep.state.accounts.get(hub.id);
-    const hubAcc = hubRep.state.accounts.get(bob.id);
-    return Boolean(bobAcc && hubAcc && !bobAcc.pendingFrame && !hubAcc.pendingFrame);
-  }, 12, 'Counter-dispute bump commit');
-
-  const [, bobAfterBump] = findReplica(env, bob.id);
-  const bobAccountAfterBump = bobAfterBump.state.accounts.get(hub.id);
-  assert(bobAccountAfterBump?.activeDispute, 'PHASE 8: activeDispute missing after bump');
-
-  // H13 AUDIT FIX: Counter-dispute requires SAME OR HIGHER nonce than initial dispute
-  // Edge cases handled by contract:
-  // - Same nonce: ACCEPTED (cooperative approval - you agree with disputed state)
-  // - Higher nonce: ACCEPTED (counter-dispute with newer state)
-  // - Lower nonce: REJECTED (regression attack)
-  const initialNonce = bobAccountAfterBump.activeDispute.initialNonce;
-  const currentNonce = bobAccountAfterBump.proofHeader.nextProofNonce;
-  assert(
-    currentNonce >= initialNonce,
-    `H13: nonce must be >= initial for counter-dispute (initial=${initialNonce}, current=${currentNonce})`
-  );
-  console.log(`   H13: Dispute finalization nonce check: ${initialNonce} → ${currentNonce} (same or higher ✅)`);
-  assert(bobAccountAfterBump.counterpartyDisputeProofHanko, 'PHASE 8: missing counterparty dispute hanko for counter-dispute');
-
-  // H10 AUDIT FIX: Verify solvency after counter-dispute bump (state changed during dispute).
-  checkSolvency(env, TOTAL_SOLVENCY, 'PHASE 8 COUNTER-DISPUTE-BUMP');
-
-  // Non-starter finalizes unilaterally only AFTER timeout (protocol invariant).
-  const [, hubReplicaAfterBump] = findReplica(env, hub.id);
-  const hubAccountAfterBump = hubReplicaAfterBump.state.accounts.get(bob.id);
-  const counterpartyDisputeState = hubAccountAfterBump?.activeDispute ?? bobAccountAfterBump.activeDispute;
-  assert(counterpartyDisputeState, 'PHASE 8: activeDispute missing before timeout wait');
-  const targetCounterTimeout = counterpartyDisputeState.disputeTimeout;
-  console.log(`⏳ STEP 8b: Waiting counter-dispute timeout (target block ${targetCounterTimeout})...`);
+  const disputeState = hubFrozenAccount.activeDispute ?? bobFrozenAccount.activeDispute;
+  assert(disputeState, 'PHASE 8: activeDispute missing before timeout wait');
+  const targetCounterTimeout = disputeState.disputeTimeout;
+  console.log(`⏳ STEP 8b: Waiting dispute timeout (target block ${targetCounterTimeout})...`);
   if (typeof providerAny.send !== 'function') {
     throw new Error('AHB counter-dispute timeout mining requires RPC provider with evm_mine support');
   }
   while (true) {
     const currentBlock = BigInt(await jadapter.provider.getBlockNumber());
     if (currentBlock >= targetCounterTimeout) {
-      console.log(`✅ Counter-dispute timeout reached at block ${currentBlock}`);
+      console.log(`✅ Dispute timeout reached at block ${currentBlock}`);
       break;
     }
     await providerAny.send('evm_mine', []);
@@ -2315,22 +2294,21 @@ export async function ahb(env: Env): Promise<void> {
       const onChainTimeout = (await jadapter.getAccountInfo(bob.id, hub.id)).disputeTimeout;
       return onChainTimeout > 0n ? onChainTimeout : runtimeTimeout;
     },
-    'phase8 counter-dispute timeout',
+    'phase8 dispute timeout',
   );
 
-  console.log('⚖️ STEP 8c: Scheduler finalizes the latest counter-proof (post-timeout)...');
+  console.log('⚖️ STEP 8c: Scheduler finalizes the committed proof (post-timeout)...');
   await waitForDisputeFinality('PHASE 8');
 
   const edgeInfoAfterCounter = vm?.getAccountInfo ? await vm.getAccountInfo(bob.id, hub.id) : null;
   if (edgeInfoAfterCounter) {
-    assert(edgeInfoAfterCounter.disputeHash === zeroHash, 'PHASE 8: dispute not cleared after counter-dispute');
+    assert(edgeInfoAfterCounter.disputeHash === zeroHash, 'PHASE 8: dispute not cleared after timeout');
   }
   const [, bobEdgeFinal] = findReplica(env, bob.id);
-  assert(!bobEdgeFinal.state.accounts.get(hub.id)?.activeDispute, 'PHASE 8: activeDispute not cleared after counter-dispute');
-  console.log('✅ Latest counter-proof finalized after timeout and converged on both entities');
+  assert(!bobEdgeFinal.state.accounts.get(hub.id)?.activeDispute, 'PHASE 8: activeDispute not cleared after timeout');
+  console.log('✅ Committed proof finalized after timeout and converged on both entities');
 
-  // H10 AUDIT FIX: Verify solvency AFTER counter-dispute finalized.
-  checkSolvency(env, TOTAL_SOLVENCY, 'PHASE 8 POST-COUNTER-DISPUTE');
+  checkSolvency(env, TOTAL_SOLVENCY, 'PHASE 8 POST-DISPUTE');
 
   console.log('ℹ️ PHASE 8d skipped: no cooperative disputeFinalize path in unilateral-only protocol.');
 
@@ -2417,7 +2395,7 @@ export async function ahb(env: Env): Promise<void> {
     // ============================================================================
     console.log('\n🤝 PHASE 9: Carol cooperative close (post-scenario)');
 
-    const carolSigner = '4';
+    const carolSigner = resolveScenarioBoardSigner(env, '4');
     const carolPosition = { x: 0, y: -60, z: 0 };  // Below Hub
     const carolConfig = {
       mode: 'proposer-based' as const,
@@ -2487,12 +2465,13 @@ export async function ahb(env: Env): Promise<void> {
       ]
     }]);
 
+    await syncChain(env, 5);
     await processUntil(env, () => {
-      const jRep = env.jReplicas?.get('AHB Demo');
-      return jRep ? jRep.mempool.length === 0 : false;
-    }, 40, 'Carol reserve funding');
-
-    await processJEvents(env);
+      const carolReserve = findReplica(env, carol.id)[1].state.reserves.get(USDC_TOKEN_ID) ?? 0n;
+      return carolReserve >= carolSeed;
+    }, 20, 'Carol reserve funding');
+    const carolOnChainReserve = await jadapter.getReserves(carol.id, USDC_TOKEN_ID);
+    assert(carolOnChainReserve >= carolSeed, 'PHASE 9: Carol on-chain reserve funding missing');
 
     // Open Carol ↔ Hub account
     await process(env, [{
@@ -2500,7 +2479,11 @@ export async function ahb(env: Env): Promise<void> {
       signerId: carol.signer,
       entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }]
     }]);
-    await process(env);
+    await processUntil(env, () => {
+      const carolAccount = findReplica(env, carol.id)[1].state.accounts.get(hub.id);
+      const hubAccount = findReplica(env, hub.id)[1].state.accounts.get(carol.id);
+      return Boolean(carolAccount && hubAccount && !carolAccount.pendingFrame && !hubAccount.pendingFrame);
+    }, 20, 'Carol-Hub account open');
 
     // Deposit collateral from Carol to Hub
     const carolCollateral = usd(50_000);
@@ -2519,10 +2502,12 @@ export async function ahb(env: Env): Promise<void> {
         { type: 'j_broadcast', data: {} }
       ]
     }]);
-    await process(env);
-    await processJEvents(env);
-    await process(env);
-    await process(env);
+    await syncChain(env, 5);
+    await processUntil(env, () => {
+      const carolDelta = findReplica(env, carol.id)[1].state.accounts.get(hub.id)?.deltas.get(USDC_TOKEN_ID);
+      const hubDelta = findReplica(env, hub.id)[1].state.accounts.get(carol.id)?.deltas.get(USDC_TOKEN_ID);
+      return carolDelta?.collateral === carolCollateral && hubDelta?.collateral === carolCollateral;
+    }, 20, 'Carol-Hub collateral observation');
 
     const [, carolAfterR2C] = findReplica(env, carol.id);
     const carolAccountInit = carolAfterR2C.state.accounts.get(hub.id);
