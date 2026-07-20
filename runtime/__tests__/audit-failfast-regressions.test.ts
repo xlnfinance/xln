@@ -1863,16 +1863,16 @@ describe('audit fail-fast regressions', () => {
       makerEntityId: sourceUser,
       hubEntityId: targetHub,
       bookOwnerEntityId: targetHub,
-      venueId: 'cross:stack:a:dep:1/stack:z:dep:1',
+      venueId: 'cross:stack:31337:0x1111111111111111111111111111111111111111:1/stack:31338:0x2222222222222222222222222222222222222222:1',
       source: {
-        jurisdiction: 'stack:z:dep',
+        jurisdiction: 'stack:31338:0x2222222222222222222222222222222222222222',
         entityId: sourceUser,
         counterpartyEntityId: sourceHub,
         tokenId: 1,
         amount: sourcePull.amount,
       },
       target: {
-        jurisdiction: 'stack:a:dep',
+        jurisdiction: 'stack:31337:0x1111111111111111111111111111111111111111',
         entityId: targetHub,
         counterpartyEntityId: targetUser,
         tokenId: 1,
@@ -7472,7 +7472,9 @@ describe('audit fail-fast regressions', () => {
     const remoteTargetUser = `0x${'32'.repeat(32)}`;
     const localTaker = `0x${'33'.repeat(32)}`;
     const localTargetUser = `0x${'34'.repeat(32)}`;
-    const pairId = 'cross:base:2/tron:1';
+    const sourceJurisdiction = 'stack:31338:0x2222222222222222222222222222222222222222';
+    const bookOwnerJurisdiction = 'stack:31337:0x1111111111111111111111111111111111111111';
+    const pairId = `cross:${sourceJurisdiction}:2/${bookOwnerJurisdiction}:1`;
     const sourceHubSigner = sourceHubIdentity.signerId;
     const bookOwnerSigner = bookOwnerIdentity.signerId;
     const collisionSigner = '3';
@@ -7546,12 +7548,12 @@ describe('audit fail-fast regressions', () => {
 
     const makerRoute = buildRoute(
       'remote-maker-cross',
-      'base',
+      sourceJurisdiction,
       remoteMaker,
       sourceHub,
       2,
       30n * lot,
-      'tron',
+      bookOwnerJurisdiction,
       bookOwnerHub,
       remoteTargetUser,
       1,
@@ -7559,12 +7561,12 @@ describe('audit fail-fast regressions', () => {
     );
     const takerRoute = buildRoute(
       'local-taker-cross',
-      'tron',
+      bookOwnerJurisdiction,
       localTaker,
       bookOwnerHub,
       1,
       75_000n * lot,
-      'base',
+      sourceJurisdiction,
       bookOwnerHub,
       localTargetUser,
       2,
@@ -8235,14 +8237,14 @@ describe('audit fail-fast regressions', () => {
       targetSignerId: 'target-user-signer',
       bookHubSignerId: 'committed-book-owner-signer',
       source: {
-        jurisdiction: 'stack:source:depository',
+        jurisdiction: 'stack:31338:0x2222222222222222222222222222222222222222',
         entityId: sourceUser,
         counterpartyEntityId: sourceHub,
         tokenId: 1,
         amount: 1_000n,
       },
       target: {
-        jurisdiction: 'stack:target:depository',
+        jurisdiction: 'stack:31337:0x1111111111111111111111111111111111111111',
         entityId: targetHub,
         counterpartyEntityId: targetUser,
         tokenId: 2,
