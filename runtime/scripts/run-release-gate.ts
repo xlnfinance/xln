@@ -93,7 +93,6 @@ const releaseSteps: GateStep[] = [
   ...ciSteps,
   { name: 'deterministic replay oracle', command: 'bun run check:determinism', timeoutMs: 600_000 },
   { name: 'real WebSocket P2P relay', command: 'bun run test:p2p:relay', timeoutMs: 240_000 },
-  { name: 'bounded soak gate', command: 'bun run soak:quick', timeoutMs: 2_100_000 },
   { name: 'core E2E gate', command: 'bun run test:e2e:core', timeoutMs: 1_200_000 },
   { name: 'RPC system scenarios', command: 'bun run test:system:parallel', timeoutMs: 1_200_000 },
   { name: 'hub 10k storage benchmark', command: 'bun run bench:radapter:hub10k', timeoutMs: 1_200_000 },

@@ -61,6 +61,12 @@ describe('production startup wiring', () => {
     );
   });
 
+  test('bounded soak stays separate from the release gate', () => {
+    const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
+
+    expect(releaseGate).not.toContain("command: 'bun run soak:quick'");
+  });
+
   test('release RPC scenarios include the lock hostage terminal-evidence flow', () => {
     const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
     const systemRunner = readFileSync(join(repoRoot, 'runtime/scripts/run-system-tests-parallel.ts'), 'utf8');

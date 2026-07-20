@@ -7,7 +7,8 @@ This is the **only live TODO/NEXT file**. Git history contains the retired
 
 - Target: `v0.1.12` after the mandatory gates pass.
 - Branch: `ai/routed-provenance`.
-- Candidate implementation head before this checklist refresh: `a439615d1`.
+- Candidate implementation head: current HEAD of `ai/routed-provenance`; freeze
+  the exact SHA when the release gate starts.
 - Base: `edfb178be`; production remains on the published `v0.1.11` until this
   candidate is fully verified.
 - Frozen Core: unchanged at
@@ -30,11 +31,15 @@ This is the **only live TODO/NEXT file**. Git history contains the retired
 - Redundant replica-meta cloning and repeated lineage endpoint hashing are
   removed. Storage CPU fell from ~1206 ms to ~946 ms across the same 10-frame
   benchmark (~21.6%).
+- Control ingress receipts observe every durable R-frame directly (not sparse
+  debug history) and accumulate capped command batches across frames. Reset
+  failures remain latched until a fresh reset explicitly clears them.
 
 ## Release gates still required
 
 1. Finish `bun run gate:release` on the immutable candidate. It includes the
    newly gated `lock-ahb` RPC scenario and stops at the first failed phase.
+   The bounded soak remains a separate non-release gate by owner decision.
 2. Run the public-network acceptance gate with `bun run gate:mainnet`.
 3. External audit handoff: `docs/security/external-audit-brief.md`.
 4. Merge to `main`, push authoritative source, perform a fresh production
