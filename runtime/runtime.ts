@@ -366,7 +366,6 @@ import {
   applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,
   buildRuntimeCheckpointLineagePlan,
-  rebaseCertifiedEntityLineageAtRuntimeCheckpoint,
 } from './storage/entity-lineage';
 import {
   assertCertifiedRegistrationEvidenceStore,
@@ -3615,11 +3614,13 @@ const replayRecoveryFrameJournals = async (
         if (frame.runtimeMachine) {
           assertRecoveryRuntimeMachineMatches(env, frame.runtimeMachine, frameHeight);
         }
+        // Rebuild the exact compact checkpoint shape used by the writer.
+        // The generic rebase helper intentionally retains the latest lineage
+        // link, while materialized Runtime checkpoints replace that link with
+        // a local endpoint anchor. Mixing the two encodings makes identical
+        // replay state fail its replica-meta digest at a checkpoint boundary.
         const replayCheckpointLineagePlan = frame.replicaMetaCheckpoint
-          ? rebaseCertifiedEntityLineageAtRuntimeCheckpoint(
-              env,
-              buildCertifiedEntityLineagePlan(env),
-            )
+          ? buildRuntimeCheckpointLineagePlan(env)
           : null;
         const actualReplicaMetaCommitment = replayCheckpointLineagePlan
           ? buildStorageReplicaMetaCommitmentFromCheckpointPlan(
