@@ -236,7 +236,7 @@ const hubNodePath = 'runtime/orchestrator/hub-node.ts';
 const hubNode = readText(hubNodePath);
 for (const marker of [
   "createStructuredLogger('mesh.hub'",
-  "nodeLog.info('signer_keys.prewarmed'",
+  "nodeLog.info('signer_keys.ready'",
   "nodeLog.info('faucet_provision.ready'",
   "nodeLog.info('runtime.ready'",
   "nodeLog.info('inspect_url.ready'",
@@ -245,6 +245,7 @@ for (const marker of [
   assertIncludes(hubNode, marker, hubNodePath);
 }
 assertNotIncludes(hubNode, "nodeLog.info('dev_bootstrap.storage_disabled'", hubNodePath);
+assertNotIncludes(hubNode, "nodeLog.info('signer_keys.prewarmed'", hubNodePath);
 assertNotIncludes(hubNode, '[MESH-HUB] SIGNER_KEYS_PREWARMED', hubNodePath);
 assertNotIncludes(hubNode, '[MESH-HUB] DEV_BOOTSTRAP_STORAGE_DISABLED', hubNodePath);
 assertNotIncludes(hubNode, '[MESH-HUB] FAUCET_PROVISION_READY', hubNodePath);
@@ -256,13 +257,14 @@ const marketMakerNodePath = 'runtime/orchestrator/mm-node.ts';
 const marketMakerNode = readText(marketMakerNodePath);
 for (const marker of [
   "createStructuredLogger('mesh.marketMaker'",
-  "nodeLog.info('signer_keys.prewarmed'",
+  "nodeLog.info('signer_keys.ready'",
   "nodeLog.info('runtime.ready'",
   "nodeLog.info('offers.ready'",
 ]) {
   assertIncludes(marketMakerNode, marker, marketMakerNodePath);
 }
 assertNotIncludes(marketMakerNode, "nodeLog.info('dev_bootstrap.storage_disabled'", marketMakerNodePath);
+assertNotIncludes(marketMakerNode, "nodeLog.info('signer_keys.prewarmed'", marketMakerNodePath);
 assertNotIncludes(marketMakerNode, '[MESH-MM] SIGNER_KEYS_PREWARMED', marketMakerNodePath);
 assertNotIncludes(marketMakerNode, 'Runtime storage disabled for rebuildable market-maker state', marketMakerNodePath);
 assertNotIncludes(marketMakerNode, '[MESH-MM] RUNTIME_READY', marketMakerNodePath);
