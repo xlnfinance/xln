@@ -157,7 +157,7 @@ case "$role" in
         --wallet-url "http://localhost:${WEB_HTTP_PORT}/app"
     ;;
   watchtower)
-    run_owned bun --watch runtime/watchtower/standalone-server.ts \
+    run_owned bun --no-orphans --watch runtime/watchtower/standalone-server.ts \
       --host 127.0.0.1 \
       --port "$WATCHTOWER_PORT" \
       --db "$XLN_RDB_ROOT/watchtower" \
