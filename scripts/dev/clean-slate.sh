@@ -34,9 +34,11 @@ assert_port_clear() {
     sleep 0.1
     attempts=$((attempts - 1))
   done
-  local commands
-  commands="$(ps -p "$(echo "$pids" | tr '\n' ',')" -o pid=,command= 2>/dev/null || true)"
-  echo "DEV_PORT_BUSY_UNOWNED:port=${port} pids=$(echo "$pids" | tr '\n' ',') commands=${commands}" >&2
+  echo "DEV_PORT_BUSY_UNOWNED:port=${port} pids=$(echo "$pids" | paste -sd, -) ownerFile=$([[ -f "$DEV_OWNER_FILE" ]] && printf present || printf missing)" >&2
+  local pid
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] && describe_dev_port_listener "$port" "$pid" "$DEV_PID_DIR"
+  done <<< "$pids"
   return 1
 }
 
