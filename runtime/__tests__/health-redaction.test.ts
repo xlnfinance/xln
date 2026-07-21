@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import {
   isLocalOperatorRequest,
   publicAggregatedHealth,
+  publicLocalHubHealth,
   publicRuntimeHealth,
 } from '../server/health-redaction';
 
@@ -47,6 +48,27 @@ test('public runtime health strips operational identifiers and reserves', () => 
   expect(body).not.toContain('accounts');
   expect(body).not.toContain('activeClients');
   expect(body).toContain('activeClientCount');
+});
+
+test('public hub health exposes halted status without leaking fatal internals', () => {
+  const publicPayload = publicLocalHubHealth({
+    ok: false,
+    name: 'H1',
+    runtime: {
+      halted: true,
+      lifecyclePhase: 'halted',
+      fatalDebugPayload: { message: 'secret invariant payload', stack: 'secret stack' },
+    },
+    gossip: {},
+    mesh: {},
+    bootstrapReserves: {},
+    jadapter: {},
+  });
+  const body = JSON.stringify(publicPayload);
+
+  expect(publicPayload.runtime).toEqual({ halted: true });
+  expect(body).not.toContain('secret invariant payload');
+  expect(body).not.toContain('secret stack');
 });
 
 test('public aggregated health strips child process ids and hub runtime ids', () => {

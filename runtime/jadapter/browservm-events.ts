@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 import { bytesToHex } from '@ethereumjs/util';
 import type { Address } from '@ethereumjs/util';
+import { extractCanonicalDepositoryEventArgs } from './depository-event-codec';
 
 export type EthereumLog = [
   Address | Uint8Array | string | { toBytes?: () => Uint8Array; toString(): string },
@@ -70,9 +71,12 @@ export const decodeBrowserVmEvents = (
       try {
         const parsed = iface.parseLog({ topics, data });
         if (!parsed) continue;
+        const args = parsed.name === 'DisputeFinalized'
+          ? extractCanonicalDepositoryEventArgs(parsed)
+          : Object.fromEntries(parsed.fragment.inputs.map((input, index) => [input.name, parsed.args[index]]));
         decoded.push({
           name: parsed.name,
-          args: Object.fromEntries(parsed.fragment.inputs.map((input, index) => [input.name, parsed.args[index]])),
+          args,
           blockNumber,
           blockHash,
           ...(transactionHash ? { transactionHash, logIndex } : {}),

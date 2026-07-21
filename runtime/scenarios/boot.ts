@@ -262,7 +262,7 @@ export async function ensureJAdapter(
   const { createJAdapter } = await import('../jadapter');
   const { setBrowserVMJurisdiction } = await import('../jadapter');
 
-  const actualMode = mode ?? getJAdapterMode();
+  const actualMode = mode ?? env?.scenarioJAdapterMode ?? getJAdapterMode();
   const rpcUrl = process.env['ANVIL_RPC'] || getDefaultAnvilRpcUrl();
   const chainId = actualMode === 'browservm'
     ? 31337

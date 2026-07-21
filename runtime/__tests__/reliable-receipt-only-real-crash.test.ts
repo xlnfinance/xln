@@ -35,6 +35,7 @@ test('restores a terminal receipt-only frontier after real SIGKILL', async () =>
   mkdirSync(dbRootPath, { recursive: true });
   const seed = `reliable receipt-only SIGKILL ${process.pid}`;
   const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+  const peerRuntimeId = deriveSignerAddressSync(seed, 'peer').toLowerCase();
   cleanupRuntimeId = runtimeId;
   cleanupRuntimeStorage(runtimeId);
 
@@ -71,9 +72,9 @@ test('restores a terminal receipt-only frontier after real SIGKILL', async () =>
     });
 
     const frame = await readStorageFrameRecord(getFrameDb(restored), 3);
-    expect(frame?.runtimeInput.entityInputs).toEqual([]);
-    expect(frame?.runtimeMachineBeforeApply).toBeTruthy();
-    expect(frame?.runtimeMachine).toBeTruthy();
+    expect(frame?.runtimeInput.entityInputs).toHaveLength(1);
+    expect(frame?.runtimeInput.entityInputs[0]?.from).toBe(peerRuntimeId);
+    expect(frame?.runtimeMachine).toBeUndefined();
   } finally {
     await closeRuntimeDb(restored);
     await closeInfraDb(restored);

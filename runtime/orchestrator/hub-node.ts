@@ -254,6 +254,11 @@ type LocalHealthResponse = {
   relayUrl: string;
   directWsUrl?: string;
   apiUrl: string;
+  runtime: {
+    halted: boolean;
+    lifecyclePhase: string | null;
+    fatalDebugPayload: unknown;
+  };
   quiescence: ReturnType<typeof summarizeRuntimeQuiescence>;
   p2p?: {
     directPeers: Array<{ runtimeId: string; endpoint: string; open: boolean }>;
@@ -537,12 +542,12 @@ const HUB_RUNTIME_TICK_DELAY_MS = Math.max(
   Number(process.env['HUB_RUNTIME_TICK_DELAY_MS'] || process.env['XLN_RUNTIME_TICK_DELAY_MS'] || '0'),
 );
 const HUB_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME = Math.max(
-  1,
-  Number(process.env['HUB_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || process.env['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '8'),
+  0,
+  Number(process.env['HUB_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || process.env['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '0'),
 );
 const HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME = Math.max(
-  1,
-  Number(process.env['HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '64'),
+  0,
+  Number(process.env['HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '0'),
 );
 
 const envFlagEnabled = (value: unknown): boolean => {
@@ -1435,6 +1440,7 @@ const buildLocalHealth = (
   hubEntities: HubBootstrapEntry[],
   bootstrapProgress: BootstrapProgressHealth,
 ): LocalHealthResponse => {
+  const runtimeHalted = env.runtimeState?.halted === true;
   const selfJurisdictionName = getEntityJurisdictionName(env, entityId);
   const selfJurisdiction = getEntityJurisdiction(env, entityId) || selfJurisdictionName;
   const visibleHubProfiles = readVisibleHubProfiles(env, selfJurisdiction);
@@ -1447,7 +1453,7 @@ const buildLocalHealth = (
   const pairs = entityId ? buildPairHealth(env, entityId, peers) : [];
 
   return {
-    ok: Boolean(entityId) && pairs.length === Math.max(0, requiredNames.length - 1) && pairs.every(pair => pair.ready),
+    ok: !runtimeHalted && Boolean(entityId) && pairs.length === Math.max(0, requiredNames.length - 1) && pairs.every(pair => pair.ready),
     name: resolvedArgs.name,
     height: Math.max(0, Math.floor(Number(env.height || 0))),
     entityId,
@@ -1455,6 +1461,11 @@ const buildLocalHealth = (
     relayUrl: resolvedArgs.relayUrl,
     directWsUrl,
     apiUrl,
+    runtime: {
+      halted: runtimeHalted,
+      lifecyclePhase: env.runtimeState?.lifecyclePhase ?? null,
+      fatalDebugPayload: env.runtimeState?.fatalDebugPayload ?? null,
+    },
     quiescence: summarizeRuntimeQuiescence(env),
     p2p: {
       directPeers: getP2PState(env).directPeers || [],
@@ -1488,6 +1499,9 @@ const run = async (): Promise<void> => {
   process.env['JADAPTER_DEV_PRIVATE_KEY'] = deriveAnvilDevPrivateKey(resolveHubSignerIndex(resolvedArgs.name));
 
   const runtimeBootStartedAt = startTiming('runtime_boot');
+  // WAL replay may need to reproduce a locally authored proposal before main()
+  // returns. Register this runtime's deterministic signer labels first.
+  prewarmLocalHubSignerKeys();
   const env = await main(resolvedArgs.seed, {
     trustedJurisdictionRpcBindings: resolveMeshJurisdictionRpcBindings(
       resolvedArgs.rpcUrl,
@@ -1512,7 +1526,6 @@ const run = async (): Promise<void> => {
     runtimeIngressReceipts.observeRuntimeInput(height, runtimeInput);
   });
   configureHubRuntimeLogging(env);
-  prewarmLocalHubSignerKeys();
   finishTiming('runtime_boot', runtimeBootStartedAt);
 
   let bootstrap: { entityId: string; signerId: string } | null = null;
@@ -1650,11 +1663,14 @@ const run = async (): Promise<void> => {
     },
   });
   env.runtimeState = env.runtimeState ?? {};
-  env.runtimeState.directEntityInputsDispatch =
-    process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'
-      ? (targetRuntimeId, envelope, ingressTimestamp) =>
-          directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp)
-      : null;
+  // Entity inputs and their reliable receipts must share the authenticated
+  // direct websocket whenever the peer is connected. Apart from avoiding a
+  // relay round-trip, this preserves send order: the useful account ACK + next
+  // proposal is queued before the transport receipt. output-routing retains
+  // reliable inputs until their durable receipt and falls back to P2P when the
+  // direct peer is unavailable, so this is not a best-effort-only path.
+  env.runtimeState.directEntityInputsDispatch = (targetRuntimeId, envelope, ingressTimestamp) =>
+    directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp);
   env.runtimeState.directReliableReceiptDispatch = (targetRuntimeId, receipt) =>
     directRuntimeWs.sendReliableReceiptDelivery(targetRuntimeId, receipt);
   const handleRadapterWsMessage = (ws: HubServerSocket, raw: string | Buffer | ArrayBuffer): void => {

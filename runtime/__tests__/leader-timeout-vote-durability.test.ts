@@ -17,7 +17,6 @@ import { initCrontab } from '../entity/scheduler';
 import { dbRootPath } from '../machine/platform';
 import {
   buildRuntimeRecoveryBundle,
-  computeRuntimeRecoveryBundleSignatureDigest,
   validateRuntimeRecoveryBundle,
 } from '../recovery/bundle';
 import {
@@ -31,7 +30,6 @@ import {
   readPersistedFrameJournal,
   restoreEnvFromRecoveryBundles,
 } from '../runtime';
-import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import type {
   EntityLeaderTimeoutVote,
   EntityReplica,
@@ -230,23 +228,9 @@ describe('leader timeout vote durability', () => {
       createdAt: 2_000,
     });
     const forgedTail = structuredClone(tailBundle);
-    const forgedOutbox = [{ jurisdictionName: 'forged-jurisdiction', jTxs: [] }];
     const forgedFrame = forgedTail.frames?.[0];
-    if (!forgedFrame?.runtimeMachine) throw new Error('LEADER_TIMEOUT_VOTE_FORGED_FRAME_MISSING');
-    const forgedRuntimeState = forgedFrame.runtimeMachine['runtimeState'];
-    forgedFrame.runtimeMachine['runtimeState'] = {
-      ...(forgedRuntimeState && typeof forgedRuntimeState === 'object' ? forgedRuntimeState : {}),
-      pendingCommittedJOutbox: forgedOutbox,
-    };
-    env.runtimeState ??= {};
-    const originalPendingCommittedJOutbox = env.runtimeState.pendingCommittedJOutbox;
-    env.runtimeState.pendingCommittedJOutbox = forgedOutbox;
-    forgedFrame.runtimeStateHash = computeCanonicalStateHashFromEnv(env);
-    if (originalPendingCommittedJOutbox === undefined) {
-      delete env.runtimeState.pendingCommittedJOutbox;
-    } else {
-      env.runtimeState.pendingCommittedJOutbox = originalPendingCommittedJOutbox;
-    }
+    if (!forgedFrame) throw new Error('LEADER_TIMEOUT_VOTE_FORGED_FRAME_MISSING');
+    forgedFrame.runtimeInput.entityInputs = [];
     const wrongReplicaDigestFrame = structuredClone(frame);
     wrongReplicaDigestFrame.replicaMetaDigest = `0x${'77'.repeat(32)}`;
     const signedWrongReplicaDigestTail = buildRuntimeRecoveryBundle(env, {
@@ -303,19 +287,6 @@ describe('leader timeout vote durability', () => {
     )).rejects.toThrow('RECOVERY_BUNDLE_SIGNATURE_INVALID');
 
     const wrongRuntimeId = deriveSignerAddressSync(`${seed}:wrong-runtime`, '1').toLowerCase();
-    for (const phase of ['runtimeMachineBeforeApply', 'runtimeMachine'] as const) {
-      const wrongNestedRuntimeTail = structuredClone(tailBundle);
-      wrongNestedRuntimeTail.frames![0]![phase]!.runtimeId = wrongRuntimeId;
-      wrongNestedRuntimeTail.signature = signAccountFrame(
-        env,
-        '1',
-        computeRuntimeRecoveryBundleSignatureDigest(wrongNestedRuntimeTail),
-      );
-      await expect(restoreEnvFromRecoveryBundles(
-        [snapshotBundle, wrongNestedRuntimeTail],
-        { runtimeSeed: seed, runtimeId: env.runtimeId },
-      )).rejects.toThrow('RECOVERY_BUNDLE_JOURNAL_RUNTIME_ID_MISMATCH');
-    }
 
     const reorderedFrameTail = structuredClone(tailBundle);
     reorderedFrameTail.frames![0]!.height += 1;
@@ -341,8 +312,6 @@ describe('leader timeout vote durability', () => {
 
     const payloadRuntimeIdTamper = structuredClone(tailBundle);
     payloadRuntimeIdTamper.runtimeId = wrongRuntimeId;
-    payloadRuntimeIdTamper.frames![0]!.runtimeMachineBeforeApply!.runtimeId = wrongRuntimeId;
-    payloadRuntimeIdTamper.frames![0]!.runtimeMachine!.runtimeId = wrongRuntimeId;
     await expect(restoreEnvFromRecoveryBundles(
       [snapshotBundle, payloadRuntimeIdTamper],
       { runtimeSeed: seed, runtimeId: env.runtimeId },

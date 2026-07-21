@@ -1,6 +1,7 @@
 import { getDefaultCreditLimit } from '../../account/utils';
 import { cloneAccountMachine } from '../../state-helpers';
 import type { AccountMachine, Delta, SettlementDiff } from '../../types';
+import { invalidateAccountMapCommitment } from '../../account/map-commitment';
 
 const UINT256_MAX = (1n << 256n) - 1n;
 const INT256_MIN = -(1n << 255n);
@@ -51,5 +52,6 @@ export const projectAccountAfterSettlement = (
   const projected = cloneAccountMachine(account);
   for (const diff of diffs) applyProjectedDiff(projected, diff);
   for (const tokenId of forgiveTokenIds) requireProjectedDelta(projected, tokenId);
+  invalidateAccountMapCommitment(projected, 'deltas');
   return projected;
 };

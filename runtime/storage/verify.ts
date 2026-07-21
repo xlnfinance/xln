@@ -204,10 +204,15 @@ export const verifyStorageTailIntegrity = async (
       replicaMetas.push({ key, value: await db.get(key) });
     }
     const actualReplicaMetaDigest = computeStorageReplicaMetaDigest(replicaMetas);
-    if (latestRecord.replicaMetaDigest !== actualReplicaMetaDigest) {
+    const replicaCheckpointHeight = Math.max(1, Math.floor(Number(head.latestMaterializedHeight)));
+    const replicaCheckpointRecord = await readStorageFrameRecord(db, replicaCheckpointHeight);
+    if (!replicaCheckpointRecord?.replicaMetaCheckpoint) {
+      throw new Error(`STORAGE_VERIFY_REPLICA_META_CHECKPOINT_MISSING:height=${replicaCheckpointHeight}`);
+    }
+    if (replicaCheckpointRecord.replicaMetaDigest !== actualReplicaMetaDigest) {
       throw new Error(
-        `STORAGE_VERIFY_REPLICA_META_DIGEST_MISMATCH: height=${latestHeight} ` +
-        `expected=${latestRecord.replicaMetaDigest || 'missing'} actual=${actualReplicaMetaDigest}`,
+        `STORAGE_VERIFY_REPLICA_META_DIGEST_MISMATCH: height=${replicaCheckpointHeight} ` +
+        `expected=${replicaCheckpointRecord.replicaMetaDigest || 'missing'} actual=${actualReplicaMetaDigest}`,
       );
     }
     const liveEntityHashes = await readAllEntityHashDocs(db);

@@ -7,6 +7,12 @@
  * - no price grid, repricing, or representability window
  */
 
+import {
+  invalidateBookCommitment,
+  invalidateBookLevelCommitment,
+  invalidateBookOrderCommitment,
+} from './commitment';
+
 export type Side = 0 | 1;        // 0 = BUY (bids), 1 = SELL (asks)
 export type TIF = 0 | 1 | 2;     // 0 = GTC, 1 = IOC, 2 = FOK
 
@@ -38,18 +44,21 @@ export interface BookOrderState {
   qtyLots: bigint;
   seq: number;
   bucketId: bigint;
+  commitmentHash?: string;
 }
 
 export interface PriceLevelState {
   priceTicks: bigint;
   orderIds: string[];
   totalQtyLots: bigint;
+  commitmentHash?: string;
 }
 
 export interface PriceBucketState {
   bucketId: bigint;
   pricesAsc: bigint[];
   levels: Map<string, PriceLevelState>;
+  commitmentHash?: string;
 }
 
 export interface BookSideLevel {
@@ -70,6 +79,7 @@ export interface BookState {
   readonly tradeCount: number;
   readonly tradeQtySum: bigint;
   readonly eventHash: bigint;
+  commitmentHash?: string;
 }
 
 export interface ApplyCommandOptions {
@@ -188,11 +198,13 @@ function addRestingOrder(state: MutableBookState, order: BookOrderState): void {
   level.orderIds.push(order.orderId);
   level.totalQtyLots += order.qtyLots;
   state.orders.set(order.orderId, order);
+  invalidateBookOrderCommitment(state, order.orderId);
 }
 
 function removeExistingOrder(state: MutableBookState, orderId: string): BookOrderState | null {
   const order = state.orders.get(orderId);
   if (!order) return null;
+  invalidateBookOrderCommitment(state, orderId);
   const buckets = sideBucketMap(state, order.side);
   const bucket = buckets.get(bucketKey(order.bucketId));
   if (!bucket) {
@@ -295,6 +307,7 @@ function bumpHash(state: MutableBookState, tag: number, a: number | bigint, b: n
   const a32 = Number((typeof a === 'bigint' ? a : BigInt(a)) & 0xffffffffn);
   const b32 = Number((typeof b === 'bigint' ? b : BigInt(b)) & 0xffffffffn);
   state.eventHash = (state.eventHash * PRIME + BigInt((tag * 2654435761 >>> 0) ^ a32 ^ (b32 << 7))) & 0x1fffffffffffffn;
+  invalidateBookCommitment(state);
 }
 
 function estimateImmediateFill(
@@ -365,12 +378,13 @@ function matchAgainstBook(
     const { makerOrderId } = best;
     const maker = best.maker;
     if (!maker || maker.qtyLots <= 0n) {
+      const oppositeSide: Side = takerSide === 0 ? 1 : 0;
+      invalidateBookLevelCommitment(state, oppositeSide, best.bucketId, best.level.priceTicks);
       if (!removeOrderId(best.level.orderIds, makerOrderId)) {
         throw new Error(`BOOK_CORRUPTION: top-of-book order ${makerOrderId} missing from level queue`);
       }
       state.orders.delete(makerOrderId);
       if (best.level.orderIds.length === 0) {
-        const oppositeSide: Side = takerSide === 0 ? 1 : 0;
         const bucket = sideBucketMap(state, oppositeSide).get(bucketKey(best.bucketId));
         if (bucket) {
           bucket.levels.delete(priceKey(best.level.priceTicks));
@@ -416,6 +430,7 @@ function matchAgainstBook(
     if (tradeQty === maker.qtyLots) {
       removeExistingOrder(state, maker.orderId);
     } else {
+      invalidateBookOrderCommitment(state, maker.orderId);
       maker.qtyLots -= tradeQty;
       const nextTotalQtyLots = best.level.totalQtyLots - tradeQty;
       if (nextTotalQtyLots < 0n) {

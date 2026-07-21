@@ -4,6 +4,7 @@ import type {
   Env,
   ReliableDeliveryEvidenceBinding,
   ReliableDeliveryIdentity,
+  ReliableDeliveryReceipt,
   RoutedEntityInput,
   RuntimeEntityInputsEnvelope,
 } from '../types';
@@ -27,8 +28,10 @@ import { encodeCanonicalEntityConsensusValue } from '../entity/consensus/state-r
 import { assertCertifiedOutputSemanticIdentity } from '../entity/consensus/output-certification';
 import {
   getCertifiedOutputNestedTxs,
+  getEffectiveEntityInputTxs,
   orderCertifiedOutputsBySequence,
 } from '../entity/consensus/output-envelope';
+import { accountInputAck, accountInputProposal } from '../account/consensus/flush';
 import {
   deliveryAccepted,
   deliveryDeferred,
@@ -41,6 +44,7 @@ import {
 } from '../protocol/payments/delivery-result';
 import {
   reliableReceiptCoversIdentity,
+  senderFrontierKey,
   senderFrontierKeyForIdentity,
 } from './reliable-frontier';
 
@@ -59,6 +63,10 @@ export type ReliableOutputIdentity = ReliableDeliveryIdentity & {
   order: number;
   /** Same-height evidence is applied from proposal/sparse to terminal/richer. */
   variantOrder: number;
+};
+
+const cloneRoutedOutputWithCachedIdentity = <T extends RoutedEntityInput>(output: T): T => {
+  return structuredClone(output) as T;
 };
 
 const normalizeRouteText = (value: unknown): string => String(value ?? '').trim().toLowerCase();
@@ -517,25 +525,29 @@ const getReliableTxIdentity = (
   };
 };
 
-export const getReliableOutputIdentity = (
+const computeReliableOutputIdentity = (
   output: RoutedEntityInput,
 ): ReliableOutputIdentity | null => {
+  const reliableTxIdentities = (output.entityTxs ?? []).map(tx => getReliableTxIdentity(output, tx));
   const identities = [
     getEntityFrameReliableIdentity(output),
     getHashPrecommitReliableIdentity(output),
     getLeaderTimeoutVoteReliableIdentity(output),
     getJPrefixAttestationReliableIdentity(output),
-    ...(output.entityTxs ?? []).map(tx => getReliableTxIdentity(output, tx)),
+    ...reliableTxIdentities,
   ].filter((identity): identity is ReliableOutputIdentity => identity !== null);
   if (identities.length === 0) return null;
-  const reliableTxCount = (output.entityTxs ?? [])
-    .filter(tx => getReliableTxIdentity(output, tx) !== null).length;
+  const reliableTxCount = reliableTxIdentities.filter(identity => identity !== null).length;
   const hasOrdinaryTxs = (output.entityTxs?.length ?? 0) > reliableTxCount;
   if (identities.length !== 1 || hasOrdinaryTxs) {
     throw new Error('ROUTE_MIXED_RELIABLE_OUTPUT_MUST_BE_SPLIT');
   }
   return identities[0]!;
 };
+
+export const getReliableOutputIdentity = (
+  output: RoutedEntityInput,
+): ReliableOutputIdentity | null => computeReliableOutputIdentity(output);
 
 const assertReliableEvidenceCompatible = (
   existing: ReliableOutputIdentity,
@@ -618,30 +630,43 @@ export const splitRoutedOutputByDeliveryLane = <T extends RoutedEntityInput>(out
   const split: RoutedEntityInput[] = [];
   const routeInput = route as RoutedEntityInput;
 
-  if (proposedFrame) split.push({ ...routeInput, proposedFrame });
+  const appendSplit = (
+    candidate: RoutedEntityInput,
+  ): void => { split.push(candidate); };
+
+  if (proposedFrame) {
+    const candidate = { ...routeInput, proposedFrame };
+    appendSplit(candidate);
+  }
   if (hashPrecommits && hashPrecommits.size > 0) {
     if (!hashPrecommitFrame) throw new Error('ROUTE_PRECOMMIT_FRAME_REFERENCE_MISSING');
-    split.push({ ...routeInput, hashPrecommitFrame, hashPrecommits });
+    const candidate = { ...routeInput, hashPrecommitFrame, hashPrecommits };
+    appendSplit(candidate);
   } else if (hashPrecommitFrame) {
     throw new Error('ROUTE_PRECOMMIT_FRAME_REFERENCE_WITHOUT_SIGNATURES');
   }
-  if (leaderTimeoutVote) split.push({ ...routeInput, leaderTimeoutVote });
+  if (leaderTimeoutVote) {
+    const candidate = { ...routeInput, leaderTimeoutVote };
+    appendSplit(candidate);
+  }
   if (jPrefixAttestations) {
     for (const [signerId, attestation] of jPrefixAttestations) {
-      split.push({
+      const candidate = {
         ...routeInput,
         jPrefixAttestations: new Map([[signerId, structuredClone(attestation)]]),
-      });
+      };
+      appendSplit(candidate);
     }
   }
 
   const ordinaryTxs: EntityTx[] = [];
   for (const tx of entityTxs) {
-    if (getReliableTxIdentity(output, tx)) split.push({ ...routeInput, entityTxs: [tx] });
+    const identity = getReliableTxIdentity(output, tx);
+    if (identity) appendSplit({ ...routeInput, entityTxs: [tx] });
     else ordinaryTxs.push(tx);
   }
-  if (ordinaryTxs.length > 0) split.push({ ...routeInput, entityTxs: ordinaryTxs });
-  if (split.length === 0) split.push({ ...routeInput, entityTxs: [] });
+  if (ordinaryTxs.length > 0) appendSplit({ ...routeInput, entityTxs: ordinaryTxs });
+  if (split.length === 0) appendSplit({ ...routeInput, entityTxs: [] });
 
   return split as T[];
 };
@@ -690,6 +715,97 @@ const clearRestoredReliableOutputsDue = (env: Env): void => {
 
 const isAccountAckIdentity = (identity: ReliableOutputIdentity): boolean =>
   identity.kind === 'account-ack';
+
+const isCrossJAdmissionSourceProposal = (output: RoutedEntityInput): boolean =>
+  getEffectiveEntityInputTxs(output).some((tx) => {
+    if (tx.type !== 'accountInput') return false;
+    const proposal = accountInputProposal(tx.data);
+    if (!proposal) return false;
+    const sourcePull = proposal.frame.accountTxs.find(accountTx =>
+      accountTx.type === 'pull_lock' &&
+      accountTx.data.crossJurisdiction?.leg === 'source' &&
+      Boolean(accountTx.data.crossJurisdiction.targetReceipt));
+    const binding = sourcePull?.type === 'pull_lock' ? sourcePull.data.crossJurisdiction : undefined;
+    if (!binding) return false;
+    return proposal.frame.accountTxs.some(accountTx =>
+      accountTx.type === 'swap_offer' &&
+      accountTx.data.crossJurisdiction?.orderId === binding.orderId &&
+      String(accountTx.data.crossJurisdiction.routeHash || '').toLowerCase() ===
+        String(binding.routeHash || '').toLowerCase());
+  });
+
+/**
+ * Cross-j admission is committed as one Runtime envelope: target ACK and
+ * source proposal either reach the hub together or remain together in the
+ * durable outbox. The source proposal is the self-describing member; the
+ * paired ACK is bound by the receiver's two-phase Account preflight.
+ */
+const isAtomicCrossJAdmissionEnvelope = (
+  outputs: readonly RoutedEntityInput[],
+): boolean => outputs.length >= 2 &&
+  outputs.some(isCrossJAdmissionSourceProposal) &&
+  outputs.some(output => {
+    const identity = getReliableOutputIdentity(output);
+    return identity !== null && isAccountAckIdentity(identity);
+  });
+
+const summarizeAccountEnvelopeOutputs = (outputs: readonly RoutedEntityInput[]) =>
+  outputs.map(output => ({
+    entityId: output.entityId,
+    signerId: output.signerId,
+    sourceRuntimeFrame: output.sourceRuntimeFrame ?? null,
+    accountInputs: getEffectiveEntityInputTxs(output).flatMap(tx => {
+      if (tx.type !== 'accountInput') return [];
+      const ack = accountInputAck(tx.data);
+      const proposal = accountInputProposal(tx.data);
+      return [{
+        kind: tx.data.kind,
+        fromEntityId: tx.data.fromEntityId,
+        toEntityId: tx.data.toEntityId,
+        ackHeight: ack?.height ?? null,
+        proposalHeight: proposal?.frame.height ?? null,
+      }];
+    }),
+  }));
+
+const sourceFrameGroupKey = (output: RoutedEntityInput): string | null => {
+  const frame = output.sourceRuntimeFrame;
+  if (!frame) return null;
+  return safeStringify({
+    runtimeId: normalizeRuntimeId(output.runtimeId),
+    height: frame.height,
+    timestamp: frame.timestamp,
+  });
+};
+
+const groupAtomicCrossJAdmissionOutputs = (
+  outputs: readonly RoutedEntityInput[],
+): Array<{ outputs: RoutedEntityInput[]; atomic: boolean }> => {
+  const bySourceFrame = new Map<string, RoutedEntityInput[]>();
+  for (const output of outputs) {
+    const key = sourceFrameGroupKey(output);
+    if (!key) continue;
+    const group = bySourceFrame.get(key) ?? [];
+    group.push(output);
+    bySourceFrame.set(key, group);
+  }
+  const atomicKeys = new Set([...bySourceFrame]
+    .filter(([, group]) => isAtomicCrossJAdmissionEnvelope(group))
+    .map(([key]) => key));
+  const emitted = new Set<string>();
+  const grouped: Array<{ outputs: RoutedEntityInput[]; atomic: boolean }> = [];
+  for (const output of outputs) {
+    const key = sourceFrameGroupKey(output);
+    if (!key || !atomicKeys.has(key)) {
+      grouped.push({ outputs: [output], atomic: false });
+      continue;
+    }
+    if (emitted.has(key)) continue;
+    emitted.add(key);
+    grouped.push({ outputs: bySourceFrame.get(key)!, atomic: true });
+  }
+  return grouped;
+};
 
 const overwriteRoutedEntityOutput = <T extends RoutedEntityInput>(target: T, source: T): T => {
   const targetRecord = target as unknown as Record<string, unknown>;
@@ -847,6 +963,15 @@ const reportRetryableRouteDefer = (
 ): void => {
   const attempts = (getDeferredNetworkMeta(env, deps).get(buildRouteOutputKey(output))?.attempts ?? 0) + 1;
   const payload = { ...details, attempts };
+  routeLog.info('output.deferred', {
+    ...payload,
+    entityId: output.entityId,
+    signerId: output.signerId,
+    runtimeId: output.runtimeId ?? null,
+    sourceRuntimeFrame: output.sourceRuntimeFrame ?? null,
+    reliableIdentity: getReliableOutputIdentity(output),
+    txTypes: (output.entityTxs ?? []).map(tx => tx.type),
+  });
   if (attempts >= NETWORK_RETRY_WARNING_ATTEMPT) {
     env.warn?.('network', 'ROUTE_SEND_DEFERRED', payload);
     return;
@@ -965,9 +1090,32 @@ export const splitPendingOutputsByRetryWindow = (
     }),
   );
 
-  for (const output of orderedPending) {
+  for (const unit of groupAtomicCrossJAdmissionOutputs(orderedPending)) {
+    if (unit.atomic) {
+      const reliableOutputs = unit.outputs.filter(output => getReliableOutputIdentity(output) !== null);
+      const reliable = reliableOutputs
+        .map(output => getReliableOutputIdentity(output)!)
+        .filter((identity): identity is ReliableOutputIdentity => identity !== null);
+      const retryFenceOutputs = reliableOutputs.length > 0 ? reliableOutputs : unit.outputs;
+      const due = (restoredReliableDue && reliable.length > 0) || retryFenceOutputs.some(output => {
+        const entry = meta.get(buildRouteOutputKey(output));
+        return !entry || entry.nextRetryAt <= nowMs;
+      });
+      if (due) {
+        ready.push(...unit.outputs);
+      } else {
+        waiting.push(...unit.outputs);
+        reliable.forEach(identity => blockedReliableLanes.add(identity.laneKey));
+      }
+      continue;
+    }
+    const output = unit.outputs[0]!;
     const reliable = getReliableOutputIdentity(output);
-    if (reliable && blockedReliableLanes.has(reliable.laneKey)) {
+    if (
+      reliable &&
+      reliable.kind !== 'account-ack' &&
+      blockedReliableLanes.has(reliable.laneKey)
+    ) {
       waiting.push(output);
       continue;
     }
@@ -977,20 +1125,16 @@ export const splitPendingOutputsByRetryWindow = (
       ready.push(output);
       continue;
     }
-    if (
-      reliable &&
-      isAccountAckIdentity(reliable) &&
-      readyAccountAckLanes.has(reliable.laneKey)
-    ) {
-      // A newly produced sparse ACK (for example H8 after H5) must wake the
-      // backed-off lane head, never overtake it. The head remains receipt-gated;
-      // once its exact receipt commits, the higher ACK becomes the next head.
+    if (reliable && isAccountAckIdentity(reliable) && readyAccountAckLanes.has(reliable.laneKey)) {
+      // A newly produced ACK proves the peer already signed the Account chain
+      // through its predecessor. Wake and emit every older ACK first, then the
+      // new ACK in the same pass; a separate delivery receipt must not add a
+      // Runtime-frame boundary to bilateral consensus.
       ready.push(output);
-      blockedReliableLanes.add(reliable.laneKey);
       continue;
     }
     waiting.push(output);
-    if (reliable) blockedReliableLanes.add(reliable.laneKey);
+    if (reliable && reliable.kind !== 'account-ack') blockedReliableLanes.add(reliable.laneKey);
   }
   return { ready, waiting };
 };
@@ -1008,18 +1152,31 @@ export const getNextNetworkRetryTimestamp = (
   const meta = getDeferredNetworkMeta(env, deps);
   let nextRetryAt = Infinity;
   const blockedUntilByReliableLane = new Map<string, number>();
-  for (const output of buildPendingNetworkOutputs(pending)) {
+  const retryScheduledOutputs = groupAtomicCrossJAdmissionOutputs(buildPendingNetworkOutputs(pending))
+    .flatMap((unit) => {
+      if (!unit.atomic) return unit.outputs;
+      const reliableOutputs = unit.outputs.filter(
+        output => getReliableOutputIdentity(output) !== null,
+      );
+      // The ordinary source proposal is inseparable from its reliable target
+      // ACK. It deliberately has no independent retry metadata: using its
+      // implicit deadline=0 here made hasRuntimeWork() spin while the atomic
+      // splitter correctly kept the whole envelope in its waiting set.
+      return reliableOutputs.length > 0 ? reliableOutputs : unit.outputs;
+    });
+  for (const output of retryScheduledOutputs) {
     const ownRetryAt = meta.get(buildRouteOutputKey(output))?.nextRetryAt ?? 0;
     const reliable = getReliableOutputIdentity(output);
     if (!reliable) {
       nextRetryAt = Math.min(nextRetryAt, ownRetryAt);
       continue;
     }
-    const effectiveRetryAt = Math.max(
-      ownRetryAt,
-      blockedUntilByReliableLane.get(reliable.laneKey) ?? 0,
-    );
-    blockedUntilByReliableLane.set(reliable.laneKey, effectiveRetryAt);
+    const effectiveRetryAt = reliable.kind === 'account-ack'
+      ? ownRetryAt
+      : Math.max(ownRetryAt, blockedUntilByReliableLane.get(reliable.laneKey) ?? 0);
+    if (reliable.kind !== 'account-ack') {
+      blockedUntilByReliableLane.set(reliable.laneKey, effectiveRetryAt);
+    }
     nextRetryAt = Math.min(nextRetryAt, effectiveRetryAt);
   }
   return Number.isFinite(nextRetryAt) ? nextRetryAt : null;
@@ -1128,7 +1285,7 @@ export const buildPendingNetworkOutputs = (outputs: RoutedEntityInput[]): Routed
     const key = buildRouteOutputKey(output);
     const existing = deduped.get(key);
     if (existing) mergeRoutedEntityOutput(existing, output);
-    else deduped.set(key, structuredClone(output));
+    else deduped.set(key, cloneRoutedOutputWithCachedIdentity(output));
   }
   const pending = [...deduped.values()]
     .map(output => output.entityTxs
@@ -1191,25 +1348,57 @@ export const markRestoredReliableOutputsDue = (env: Env): void => {
 export const pruneReceiptedReliableOutputs = (
   env: Env,
   outputs: RoutedEntityInput[],
+  appliedReceipts: readonly ReliableDeliveryReceipt[] = [],
 ): RoutedEntityInput[] => {
   const active = env.runtimeState?.receivedReliableReceiptLedger;
   const terminal = env.runtimeState?.receivedReliableTerminalWatermarks;
   if ((!active || active.size === 0) && (!terminal || terminal.size === 0)) return outputs;
-  const retained: RoutedEntityInput[] = [];
-  for (const output of outputs) {
+  const receiptsByFrontier = new Map<string, ReliableDeliveryReceipt[]>();
+  for (const receipt of appliedReceipts) {
+    const key = senderFrontierKey(receipt);
+    const lane = receiptsByFrontier.get(key) ?? [];
+    lane.push(receipt);
+    receiptsByFrontier.set(key, lane);
+  }
+  const isReceipted = (output: RoutedEntityInput): boolean => {
     const identity = getReliableOutputIdentity(output);
     const receiverRuntimeId = normalizeRuntimeId(output.runtimeId);
-    if (!identity || !receiverRuntimeId) {
-      retained.push(output);
-      continue;
-    }
+    if (!identity || !receiverRuntimeId) return false;
     const frontierKey = senderFrontierKeyForIdentity(receiverRuntimeId, identity);
-    const receipts = [active?.get(frontierKey), terminal?.get(frontierKey)];
-    if (!receipts.some(receipt => receipt && reliableReceiptCoversIdentity(receipt, identity))) {
-      retained.push(output);
+    return [
+      active?.get(frontierKey),
+      terminal?.get(frontierKey),
+      ...(receiptsByFrontier.get(frontierKey) ?? []),
+    ]
+      .some(receipt => receipt && reliableReceiptCoversIdentity(receipt, identity));
+  };
+  const envelopeGroups = new Map<string, RoutedEntityInput[]>();
+  for (const output of outputs) {
+    const key = sourceFrameGroupKey(output) ?? safeStringify({ singleton: buildRouteOutputKey(output) });
+    const group = envelopeGroups.get(key) ?? [];
+    group.push(output);
+    envelopeGroups.set(key, group);
+  }
+  const retained: RoutedEntityInput[] = [];
+  for (const group of envelopeGroups.values()) {
+    const reliableOutputs = group.filter(output => getReliableOutputIdentity(output) !== null);
+    if (
+      isAtomicCrossJAdmissionEnvelope(group) &&
+      reliableOutputs.length > 0 &&
+      reliableOutputs.every(isReceipted)
+    ) {
+      for (const output of group) {
+        env.runtimeState?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
+      }
       continue;
     }
-    env.runtimeState?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
+    for (const output of group) {
+      if (!isReceipted(output)) {
+        retained.push(output);
+        continue;
+      }
+      env.runtimeState?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
+    }
   }
   return retained;
 };
@@ -1233,18 +1422,33 @@ export const rescheduleDeferredOutputs = (
 
   const nowMs = getNetworkRetryNowMs(env);
   const retriedReliableLanes = new Set<string>();
-  for (const output of buildPendingNetworkOutputs(failed)) {
-    const reliable = getReliableOutputIdentity(output);
-    if (reliable && retriedReliableLanes.has(reliable.laneKey)) {
-      meta.delete(buildRouteOutputKey(output));
-      continue;
+  for (const unit of groupAtomicCrossJAdmissionOutputs(buildPendingNetworkOutputs(failed))) {
+    const retryOutputs = unit.atomic
+      ? unit.outputs.filter(output => getReliableOutputIdentity(output) !== null)
+      : unit.outputs;
+    if (unit.atomic) {
+      unit.outputs
+        .filter(output => getReliableOutputIdentity(output) === null)
+        .forEach(output => meta.delete(buildRouteOutputKey(output)));
     }
-    const key = buildRouteOutputKey(output);
-    const attempts = (meta.get(key)?.attempts ?? 0) + 1;
-    const retryMaxMs = reliable ? RELIABLE_NETWORK_RETRY_MAX_MS : NETWORK_RETRY_MAX_MS;
-    const delayMs = Math.min(retryMaxMs, NETWORK_RETRY_BASE_MS * (2 ** Math.min(attempts - 1, 5)));
-    meta.set(key, { attempts, nextRetryAt: nowMs + delayMs });
-    if (reliable) retriedReliableLanes.add(reliable.laneKey);
+    for (const output of retryOutputs) {
+      const reliable = getReliableOutputIdentity(output);
+      if (
+        !unit.atomic
+        && reliable
+        && reliable.kind !== 'account-ack'
+        && retriedReliableLanes.has(reliable.laneKey)
+      ) {
+        meta.delete(buildRouteOutputKey(output));
+        continue;
+      }
+      const key = buildRouteOutputKey(output);
+      const attempts = (meta.get(key)?.attempts ?? 0) + 1;
+      const retryMaxMs = reliable ? RELIABLE_NETWORK_RETRY_MAX_MS : NETWORK_RETRY_MAX_MS;
+      const delayMs = Math.min(retryMaxMs, NETWORK_RETRY_BASE_MS * (2 ** Math.min(attempts - 1, 5)));
+      meta.set(key, { attempts, nextRetryAt: nowMs + delayMs });
+      if (reliable) retriedReliableLanes.add(reliable.laneKey);
+    }
   }
 
   if (attemptedPending.some(output => getReliableOutputIdentity(output) !== null)) {
@@ -1272,7 +1476,7 @@ export const planEntityOutputs = (
     if (existing) {
       mergeRoutedEntityOutput(existing, output);
     } else {
-      deduped.set(key, structuredClone(output));
+      deduped.set(key, cloneRoutedOutputWithCachedIdentity(output));
     }
   }
   const allOutputs = [...deduped.values()];
@@ -1579,15 +1783,24 @@ export const dispatchEntityOutputs = (
       compareOutputDelivery(left.outputs[0]!, right.outputs[0]!));
 
   const deferredOutputs: RoutedEntityInput[] = [];
-  // Every reliable lane serializes handoff until exact durable application.
-  // Account ACK heights are sparse per direction, but a newer ACK only wakes
-  // the oldest queued ACK; it never overtakes that receipt-gated lane head.
+  // Every reliable lane except Account ACK serializes handoff until exact
+  // durable application. Account ACKs are emitted in canonical height order
+  // without a receipt-gated pause: ACK H+1 can only exist after this same peer
+  // signed Account frame H+1 on top of H, so its signed frame is already the
+  // causal proof that waiting for a separate transport receipt would duplicate.
+  // The receiver still queues out-of-order delivery and rejects equivocation.
   const blockedReliableLanes = new Set<string>();
   for (const group of envelopeGroups) {
+    const atomicCrossJAdmission = isAtomicCrossJAdmissionEnvelope(group.outputs);
     const sendable: DeliverableEntityInput[] = [];
     for (const output of group.outputs) {
       const reliable = getReliableOutputIdentity(output);
-      if (reliable && blockedReliableLanes.has(reliable.laneKey)) {
+      if (
+        !atomicCrossJAdmission &&
+        reliable &&
+        reliable.kind !== 'account-ack' &&
+        blockedReliableLanes.has(reliable.laneKey)
+      ) {
         deferredOutputs.push(output);
         continue;
       }
@@ -1599,12 +1812,25 @@ export const dispatchEntityOutputs = (
       sendable.push(output);
       // A reliable lane head remains pending until its durable application
       // receipt, so later lane entries cannot share this transport envelope.
-      if (reliable) blockedReliableLanes.add(reliable.laneKey);
+      if (reliable && reliable.kind !== 'account-ack') blockedReliableLanes.add(reliable.laneKey);
     }
     if (sendable.length === 0) continue;
 
     const envelope = buildRuntimeEntityInputsEnvelope(env, sendable);
+    if (atomicCrossJAdmission || sendable.some(isCrossJAdmissionSourceProposal)) {
+      routeLog.info('crossj.admission_envelope_dispatch', {
+        atomic: atomicCrossJAdmission,
+        targetRuntimeId: group.targetRuntimeId,
+        sourceRuntimeHeight: envelope.sourceRuntimeHeight,
+        inputCount: sendable.length,
+        outputs: summarizeAccountEnvelopeOutputs(sendable),
+      });
+    }
     const retainReliable = (): void => {
+      if (atomicCrossJAdmission) {
+        deferredOutputs.push(...sendable);
+        return;
+      }
       deferredOutputs.push(...sendable.filter(output => getReliableOutputIdentity(output) !== null));
     };
     if (directDispatch) {
@@ -1613,6 +1839,14 @@ export const dispatchEntityOutputs = (
         'ROUTE_DIRECT_INVALID_DELIVERY_RESULT',
       );
       if (isDeliveryDelivered(directDelivery)) {
+        routeLog.info('output.accepted', {
+          atMs: getWallClockMs(),
+          transport: 'direct',
+          code: directDelivery.code,
+          targetRuntimeId: group.targetRuntimeId,
+          sourceRuntimeHeight: envelope.sourceRuntimeHeight,
+          outputs: summarizeAccountEnvelopeOutputs(sendable),
+        });
         retainReliable();
         continue;
       }
@@ -1642,6 +1876,14 @@ export const dispatchEntityOutputs = (
         envelope.sourceRuntimeTimestamp,
       );
       if (isDeliveryDelivered(p2pDelivery)) {
+        routeLog.info('output.accepted', {
+          atMs: getWallClockMs(),
+          transport: 'p2p',
+          code: p2pDelivery.code,
+          targetRuntimeId: group.targetRuntimeId,
+          sourceRuntimeHeight: envelope.sourceRuntimeHeight,
+          outputs: summarizeAccountEnvelopeOutputs(sendable),
+        });
         retainReliable();
         continue;
       }

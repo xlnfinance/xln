@@ -35,8 +35,7 @@ import {
 } from './overlay-docs';
 import {
   applyCertifiedEntityLineagePlan,
-  buildCertifiedEntityLineagePlan,
-  rebaseCertifiedEntityLineageAtRuntimeCheckpoint,
+  buildRuntimeCheckpointLineagePlan,
 } from './entity-lineage';
 import {
   listStorageSnapshotReplicaMetas,
@@ -75,7 +74,13 @@ import {
   keyAccountJClaimNodePrefix,
   keySnapshotReplicaMetaPrefix,
 } from './keys';
-import { buildStorageReplicaMetaCommitmentFromCheckpointPlan } from './replicas';
+import {
+  buildLiveReplicaLookup,
+  buildLiveReplicaMetaPlan,
+  buildStorageLiveReplicaMetaCommitment,
+  buildStorageReplicaMetaCommitmentFromCheckpointPlan,
+  summarizeStorageReplicaMetaHeads,
+} from './replicas';
 import { createStructuredLogger } from '../infra/logger';
 import { cumulativeMarksToDurations } from '../infra/perf-profile';
 import type {
@@ -88,7 +93,7 @@ import type {
 } from '../types';
 import {
   cloneIsolatedRoutedEntityInputs,
-  cloneIsolatedRuntimeSnapshot,
+  cloneIsolatedRuntimeInput,
 } from '../protocol/runtime-input-clone';
 import {
   collectReachableCertifiedBoardNodes,
@@ -103,6 +108,7 @@ import {
 import {
   collectReachableConsumptionNodes,
   finalizePersistedConsumptionNodes,
+  getConsumptionNodeStore,
   getLiveConsumptionAccumulatorStates,
   getSafePendingConsumptionDeletes,
 } from '../entity/consumption-store';
@@ -118,6 +124,7 @@ import {
   getSafePendingAccountJClaimDeletes,
 } from '../account/j-claim-store';
 import { buildDurableRuntimeMachineSnapshot } from '../wal/snapshot';
+import { buildRuntimeOutputRetryFence } from '../machine/output-retry-fence';
 import { verifyStorageSnapshotIntegrity } from './verify';
 import {
   validateAccountJClaimNodeValue,
@@ -151,6 +158,7 @@ export {
 } from './projections';
 export {
   readFrameDbAccountFrames,
+  readFrameDbEntityFrames,
   readFrameDbRuntimeActivity,
 } from './frame-db';
 export {
@@ -258,7 +266,10 @@ const resolveCanonicalHashPeriodFrames = (env: Env): number => {
   // The frame hash-chain protects every WAL append. The independent full-state
   // oracle is deliberately sparse because recomputing it scales with the whole
   // Runtime rather than with this frame's work.
-  return 100;
+  // Full canonical hashing is an audit oracle, not part of authoritative WAL
+  // durability. Enable it explicitly in tests/diagnostics; production relies
+  // on frame hashes plus incremental materialized-state checksums.
+  return 0;
 };
 
 export const resolveStorageRuntimeConfig = (env: Env): Required<StorageRuntimeConfig> => {
@@ -270,7 +281,7 @@ export const resolveStorageRuntimeConfig = (env: Env): Required<StorageRuntimeCo
   return {
     enabled: raw?.enabled === undefined ? true : parseStorageBoolean(raw.enabled, 'ENABLED'),
     snapshotPeriodFrames: positiveStorageInteger(
-      raw?.snapshotPeriodFrames ?? env.runtimeConfig?.snapshotIntervalFrames ?? DEFAULT_SNAPSHOT_PERIOD_FRAMES,
+      raw?.snapshotPeriodFrames ?? DEFAULT_SNAPSHOT_PERIOD_FRAMES,
       'SNAPSHOT_PERIOD_FRAMES',
     ),
     retainSnapshots: positiveStorageInteger(raw?.retainSnapshots ?? DEFAULT_RETAIN_SNAPSHOTS, 'RETAIN_SNAPSHOTS'),
@@ -480,7 +491,10 @@ const readSnapshotReplicaStates = async (
   const states: EntityState[] = [];
   for (const entityId of [...new Set(entityIds)].sort()) {
     const metas = await listStorageSnapshotReplicaMetas(historyDb, height, entityId);
-    for (const meta of metas) states.push(meta.state);
+    for (const meta of metas) {
+      if (!meta.state) throw new Error(`STORAGE_SNAPSHOT_REPLICA_STATE_MISSING:${height}:${entityId}`);
+      states.push(meta.state);
+    }
   }
   return states;
 };
@@ -848,7 +862,6 @@ export const saveRuntimeFrameToStorage = async (options: {
   stateHash?: string;
   currentFrameInput?: RuntimeInput;
   currentFrameOutputs?: RoutedEntityInput[];
-  currentFrameRuntimeMachineBeforeApply?: Record<string, unknown>;
   frameDbRecords?: RuntimeFrameDbRecord[];
   tryOpenDb: (env: Env) => Promise<boolean>;
   getRuntimeDb: (env: Env) => RuntimeDbLike;
@@ -885,24 +898,38 @@ export const saveRuntimeFrameToStorage = async (options: {
   }
   options.onPersistenceProgress?.('opened');
   const openMs = options.getPerfMs() - openStartedAt;
+  const head = await readHead(historyDb, config);
+  const appliedRuntimeInput = options.currentFrameInput ?? { runtimeTxs: [], entityInputs: [] };
+  const snapshotDue =
+    options.env.height === 1 ||
+    options.env.height % config.snapshotPeriodFrames === 0;
+  // Byte pressure may move the next checkpoint forward. Checking the retained
+  // prefix before appending permits at most one WAL frame of overshoot while
+  // keeping ordinary frames free of full-state projection work.
+  const snapshotRequiredByBytes =
+    head.retainedHistoryBytes + encodeBuffer(appliedRuntimeInput).byteLength >= config.epochMaxBytes;
+  const shouldMaterialize =
+    options.env.height === 1 ||
+    options.env.height % config.materializePeriodFrames === 0 ||
+    snapshotDue ||
+    snapshotRequiredByBytes;
 
   const planningStartedAt = options.getPerfMs();
   const planningMarks: Record<string, number> = {};
   const checkpointPlanning = (label: string): void => {
     planningMarks[label] = options.getPerfMs() - planningStartedAt;
   };
-  const appliedRuntimeInput = options.currentFrameInput ?? { runtimeTxs: [], entityInputs: [] };
   const frameOverlayRecords = Array.isArray(state.currentStorageOverlayMarks)
     ? state.currentStorageOverlayMarks.map((record) => ({ ...record }))
     : [];
   const overlayRecords = mergeOverlayRecordsIntoEnv(options.env, []);
   const frameTouched = storageRefsFromOverlay(frameOverlayRecords);
   checkpointPlanning('overlay');
-  const lineagePlan = rebaseCertifiedEntityLineageAtRuntimeCheckpoint(
-    options.env,
-    buildCertifiedEntityLineagePlan(options.env),
-  );
-  const replicaLookup = lineagePlan.lookup;
+  const checkpointedLineagePlan = shouldMaterialize
+    ? buildRuntimeCheckpointLineagePlan(options.env)
+    : null;
+  const lineagePlan = checkpointedLineagePlan ?? buildLiveReplicaMetaPlan(options.env);
+  const replicaLookup = checkpointedLineagePlan?.lookup ?? buildLiveReplicaLookup(options.env);
   checkpointPlanning('lineage');
   const planningMs = options.getPerfMs() - planningStartedAt;
   const planningStages = cumulativeMarksToDurations(planningMarks, planningMs);
@@ -918,7 +945,6 @@ export const saveRuntimeFrameToStorage = async (options: {
   const checkpointPrepare = (label: string): void => {
     prepareMarks[label] = options.getPerfMs() - writeStartedAt;
   };
-  const head = await readHead(historyDb, config);
   if (options.stopStaleWriterOnHeadAhead) {
     if (head.latestHeight > options.env.height) {
       return {
@@ -981,27 +1007,6 @@ export const saveRuntimeFrameToStorage = async (options: {
     if (hashAccountJClaimNode(node) !== hash) throw new Error(`ACCOUNT_J_CLAIM_NODE_CORRUPT:${hash}`);
     pendingAccountJClaimHistoryBytes += keyAccountJClaimNode(hash).byteLength + encodeBuffer(node).byteLength;
   }
-  const projectedHistoryBytesWithoutFrame =
-    head.retainedHistoryBytes +
-    diffKey.byteLength +
-    diffBuffer.byteLength +
-    pendingBoardHistoryBytes +
-    pendingConsumptionHistoryBytes +
-    pendingAccountJClaimHistoryBytes;
-  // Frame 1 is the immutable recovery anchor for the first WAL suffix. Without
-  // a published snapshot here, its validator-local Entity metadata exists only
-  // at the live head and deterministic replay cannot start before the first
-  // periodic checkpoint.
-  const snapshotDue =
-    options.env.height === 1 ||
-    options.env.height % config.snapshotPeriodFrames === 0;
-  const snapshotRequiredByBytes = projectedHistoryBytesWithoutFrame > config.epochMaxBytes;
-  const shouldMaterialize =
-    options.env.height === 1 ||
-    options.env.height % config.materializePeriodFrames === 0 ||
-    snapshotDue ||
-    snapshotRequiredByBytes;
-
   const frameLogs = Array.isArray(options.env.frameLogs) ? options.env.frameLogs.map((entry) => ({ ...entry })) : [];
   const touchedEntities = Array.from(frameTouched.touchedEntities.values()).sort();
   const touchedAccounts = Array.from(frameTouched.touchedAccounts.values())
@@ -1032,46 +1037,72 @@ export const saveRuntimeFrameToStorage = async (options: {
     : null;
   options.onPersistenceProgress?.('materialized-hashes-built');
   checkpointPrepare('materializedHashes');
-  const runtimeMachine = buildDurableRuntimeMachineSnapshot(options.env, {
-    pendingNetworkOutputs: options.currentFrameOutputs ?? options.env.pendingNetworkOutputs ?? [],
-  });
-  const appliedInputHasWork =
-    appliedRuntimeInput.runtimeTxs.length > 0 ||
-    appliedRuntimeInput.entityInputs.length > 0 ||
-    (appliedRuntimeInput.jInputs?.length ?? 0) > 0 ||
-    (appliedRuntimeInput.reliableReceipts?.length ?? 0) > 0;
-  const runtimeMachineBeforeApply = options.currentFrameRuntimeMachineBeforeApply ?? (
-    appliedInputHasWork ? null : runtimeMachine
-  );
-  if (!runtimeMachineBeforeApply) {
-    throw new Error(`STORAGE_PRE_APPLY_RUNTIME_MACHINE_REQUIRED:height=${options.env.height}`);
-  }
-  checkpointPrepare('runtimeMachine');
   const canonicalHashDue = config.canonicalHashPeriodFrames > 0 && (
     options.env.height === 1 ||
-    options.env.height % config.canonicalHashPeriodFrames === 0 ||
-    shouldMaterialize
+    options.env.height % config.canonicalHashPeriodFrames === 0
   );
+  const runtimeMachine = shouldMaterialize || canonicalHashDue
+    ? buildDurableRuntimeMachineSnapshot(options.env, {
+        pendingNetworkOutputs: options.currentFrameOutputs ?? options.env.pendingNetworkOutputs ?? [],
+        excludePersistedFrameDbRecords: true,
+      })
+    : undefined;
+  checkpointPrepare('runtimeMachine');
   const runtimeStateHashes = canonicalHashDue
     ? prepareStorageCanonicalStateHashes(
         options.env,
         [],
         previousFrame,
         replicaLookup,
-        runtimeMachine,
+        runtimeMachine!,
       )
     : null;
   options.onPersistenceProgress?.('canonical-hashes-built');
   checkpointPrepare('canonicalHashes');
-  const replicaMetaCommitment = buildStorageReplicaMetaCommitmentFromCheckpointPlan(options.env, lineagePlan);
-  const replicaMetaEntries = replicaMetaCommitment.entries;
-  const liveReplicaMetaKeys = new Set(replicaMetaEntries.map(entry => entry.key.toString('hex')));
+  const replicaMetaStateMode: StorageFrameRecord['replicaMetaStateMode'] = checkpointedLineagePlan
+    ? snapshotDue || snapshotRequiredByBytes
+      ? 'full'
+      : 'shared-entity-state'
+    : 'live-head';
+  const replicaMetaCommitment = checkpointedLineagePlan
+    ? buildStorageReplicaMetaCommitmentFromCheckpointPlan(options.env, lineagePlan, {
+        omitIntermediateSingleSignerState: replicaMetaStateMode === 'shared-entity-state',
+      })
+    : buildStorageLiveReplicaMetaCommitment(options.env);
+  // Full replica metadata is a checkpoint body. Ordinary WAL frames commit a
+  // compact replay checksum but write only their Runtime input/state-machine
+  // fence; replay deterministically regenerates the intermediate metadata.
+  const replicaMetaEntries = checkpointedLineagePlan ? replicaMetaCommitment.entries : [];
+  if (process.env['XLN_STORAGE_DEBUG_REPLICA_META'] === '1') {
+    storageLog.info('replica_meta.debug', {
+      height: options.env.height,
+      digest: replicaMetaCommitment.digest,
+      checkpoint: checkpointedLineagePlan !== null,
+      consumptionNodes: getConsumptionNodeStore(options.env).size,
+      consumptionRoots: [...options.env.eReplicas.values()].map(replica => ({
+        entityId: replica.entityId,
+        root: replica.state.consumptionAccumulator?.root ?? null,
+        count: replica.state.consumptionAccumulator?.count?.toString() ?? null,
+        mempool: replica.mempool.map(tx => tx.type === 'consensusOutput'
+          ? `consensusOutput:${tx.data.origin.sourceEntityId}:${tx.data.origin.sequence.toString()}`
+          : tx.type),
+      })),
+      heads: summarizeStorageReplicaMetaHeads(replicaMetaCommitment.entries),
+    });
+  }
+  const liveReplicaMetaKeys = checkpointedLineagePlan
+    ? new Set(replicaMetaEntries.map(entry => entry.key.toString('hex')))
+    : state.storageReplicaMetaKeys instanceof Set
+      ? new Set(state.storageReplicaMetaKeys)
+      : new Set<string>();
   checkpointPrepare('replicaCommitment');
   const staleHistoryReplicaMetaKeys: Buffer[] = [];
   const cachedReplicaMetaKeys = state.storageReplicaMetaKeys instanceof Set
     ? state.storageReplicaMetaKeys
     : null;
-  if (cachedReplicaMetaKeys) {
+  if (!checkpointedLineagePlan) {
+    // Intermediate frames never rewrite/delete the checkpoint metadata.
+  } else if (cachedReplicaMetaKeys) {
     for (const keyHex of cachedReplicaMetaKeys) {
       if (!liveReplicaMetaKeys.has(keyHex)) staleHistoryReplicaMetaKeys.push(Buffer.from(keyHex, 'hex'));
     }
@@ -1089,11 +1120,17 @@ export const saveRuntimeFrameToStorage = async (options: {
   const staleCurrentReplicaMetaKeys = staleHistoryReplicaMetaKeys;
   options.onPersistenceProgress?.('replica-metadata-read');
   checkpointPrepare('replicaCurrentScan');
+  const runtimeOutputRetryMeta = buildRuntimeOutputRetryFence(
+    options.env,
+    options.currentFrameOutputs ?? [],
+  );
   const frameRecordBase: StorageFrameRecord = {
     height: options.env.height,
     timestamp: options.env.timestamp,
     prevFrameHash,
     replicaMetaDigest: replicaMetaCommitment.digest,
+    replicaMetaCheckpoint: checkpointedLineagePlan !== null,
+    replicaMetaStateMode,
     stateHash: preparedHashes?.stateHash ?? '',
     hashMode: 'storage-merkle-v1',
     materializedState: shouldMaterialize,
@@ -1104,10 +1141,18 @@ export const saveRuntimeFrameToStorage = async (options: {
       runtimeStateHash: runtimeStateHashes.canonicalStateHash,
     } : {}),
     runtimeInput: appliedRuntimeInput,
-    runtimeMachineBeforeApply: cloneIsolatedRuntimeSnapshot(runtimeMachineBeforeApply),
-    runtimeMachine,
+    ...(options.env.runtimeMempool && (
+      options.env.runtimeMempool.runtimeTxs.length > 0 ||
+      options.env.runtimeMempool.entityInputs.length > 0 ||
+      (options.env.runtimeMempool.jInputs?.length ?? 0) > 0 ||
+      (options.env.runtimeMempool.reliableReceipts?.length ?? 0) > 0
+    ) ? { pendingRuntimeInput: cloneIsolatedRuntimeInput(options.env.runtimeMempool) } : {}),
+    ...(runtimeMachine ? { runtimeMachine } : {}),
     ...(options.currentFrameOutputs && options.currentFrameOutputs.length > 0
       ? { runtimeOutputs: cloneIsolatedRoutedEntityInputs(options.currentFrameOutputs) }
+      : {}),
+    ...(runtimeOutputRetryMeta.length > 0
+      ? { runtimeOutputRetryMeta }
       : {}),
     ...(shouldMaterialize && overlayRecords.length > 0
       ? { overlayRecords: overlayRecords.map((record) => ({ ...record })) }
@@ -1269,11 +1314,11 @@ export const saveRuntimeFrameToStorage = async (options: {
   const currentCacheWriteMs = options.getPerfMs() - currentCacheWriteStartedAt;
   options.onPersistenceProgress?.('current-cache-write-done');
   await options.onPersistenceBoundary?.('after-current-cache-commit');
-  applyCertifiedEntityLineagePlan(options.env, lineagePlan);
+  if (checkpointedLineagePlan) applyCertifiedEntityLineagePlan(options.env, checkpointedLineagePlan);
   if (state) {
     state.currentStorageOverlayMarks = [];
     state.pendingCertifiedBoardNodes = new Map();
-    state.storageReplicaMetaKeys = new Set(liveReplicaMetaKeys);
+    if (checkpointedLineagePlan) state.storageReplicaMetaKeys = new Set(liveReplicaMetaKeys);
     finalizePersistedConsumptionNodes(options.env, safeConsumptionDeletes);
     finalizePersistedAccountJClaimNodes(options.env, safeAccountJClaimDeletes);
   }

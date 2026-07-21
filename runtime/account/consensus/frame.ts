@@ -113,7 +113,7 @@ export async function createFrameHash(frame: AccountFrame): Promise<string> {
     ['transactions', frame.accountTxs.map(canonicalAccountTxForFrameHash)],
     ['deltas', frame.deltas],
     ['accountStateRoot', frame.accountStateRoot],
-  ]);
+  ], 'integrity');
 }
 
 export async function computeFrameHash(frame: AccountFrame): Promise<string> {

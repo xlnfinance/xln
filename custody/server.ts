@@ -13,6 +13,7 @@ import { readInheritedChildSecrets, resolveChildSecret } from '../runtime/orches
 import { startParentLivenessWatch } from '../runtime/orchestrator/parent-watch';
 import { DaemonRpcClient, type DaemonFrameLog } from './daemon-client';
 import { CustodyStore, type ActivityRecord, type SessionRecord, type WithdrawalRecord } from './store';
+import { bindCustodyWithdrawalInitiation } from './withdrawal-journal';
 
 const inheritedSecrets = readInheritedChildSecrets();
 
@@ -342,6 +343,11 @@ const creditDepositFromLog = (height: number, log: DaemonFrameLog): void => {
 };
 
 const processFrameLog = (height: number, log: DaemonFrameLog): void => {
+  if (log.message === 'HtlcInitiated') {
+    bindCustodyWithdrawalInitiation(store, CUSTODY_ENTITY_ID, log);
+    return;
+  }
+
   if (log.message === 'HtlcReceived') {
     creditDepositFromLog(height, log);
     return;
@@ -387,12 +393,20 @@ const syncJournal = async (): Promise<void> => {
       fromHeight,
       limit: 250,
       entityId: CUSTODY_ENTITY_ID,
-      eventNames: ['HtlcReceived', 'HtlcFinalized', 'HtlcFailed'],
+      eventNames: ['HtlcInitiated', 'HtlcReceived', 'HtlcFinalized', 'HtlcFailed'],
     });
 
+    // Bind every locally initiated withdrawal before consuming terminal events
+    // from the same page. A fast route may initiate and finalize before the
+    // submit HTTP response returns and updates SQLite.
     for (const receipt of response.receipts) {
       for (const log of receipt.logs) {
-        processFrameLog(receipt.height, log);
+        if (log.message === 'HtlcInitiated') processFrameLog(receipt.height, log);
+      }
+    }
+    for (const receipt of response.receipts) {
+      for (const log of receipt.logs) {
+        if (log.message !== 'HtlcInitiated') processFrameLog(receipt.height, log);
       }
     }
 
@@ -467,7 +481,7 @@ const submitWithdrawal = async (withdrawal: WithdrawalRecord) => await withPayme
     routeJson: withdrawal.routeJson!,
     updatedAt: Date.now(),
   });
-  if (!updated || updated.status !== 'sent') {
+  if (!updated || (updated.status !== 'sent' && updated.status !== 'finalized')) {
     throw new Error(`CUSTODY_WITHDRAWAL_SENT_WRITE_FAILED:${withdrawal.id}`);
   }
   return queued;

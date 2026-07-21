@@ -38,7 +38,7 @@ test('storage radix merkle initializes in browsers without Node Buffer', () => {
     throw new Error(new TextDecoder().decode(child.stderr));
   }
   expect(new TextDecoder().decode(child.stdout)).toBe(
-    '0x5b78a4a1570459de98166be75630265d9ba2a14ccde51f7504d4a6d8a2639de0',
+    '0xce2c1b69c0344052a703456f24c34ba951ba9f304a7d8d10adec20ac8160088e',
   );
 });
 

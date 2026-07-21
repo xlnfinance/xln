@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { CustodyStore } from '../../custody/store';
+import { bindCustodyWithdrawalInitiation } from '../../custody/withdrawal-journal';
 
 const roots: string[] = [];
 
@@ -11,6 +12,71 @@ afterEach(async () => {
 });
 
 describe('custody withdrawal retry journal', () => {
+  test('binds initiation before a same-page terminal event and accepts the exact submit replay', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'xln-custody-initiation-race-'));
+    roots.push(root);
+    const store = new CustodyStore(join(root, 'custody.sqlite'));
+    const custodyEntityId = `0x${'10'.repeat(32)}`;
+    const targetEntityId = `0x${'20'.repeat(32)}`;
+    const hashlock = `0x${'30'.repeat(32)}`;
+    const withdrawalId = 'wd_initiation_race_0001';
+    const description = `custody-withdrawal:${withdrawalId} requested:65 fee:5`;
+    const route = [custodyEntityId, targetEntityId];
+    const routeJson = JSON.stringify(route);
+    store.createSession('race-session', 'race-user');
+    store.creditDeposit({
+      eventKey: 'race-deposit',
+      userId: 'race-user',
+      tokenId: 1,
+      amountMinor: 100n,
+      description: 'seed balance',
+      fromEntityId: targetEntityId,
+      hashlock: `0x${'40'.repeat(32)}`,
+      frameHeight: 1,
+      createdAt: 1,
+    });
+    store.reserveWithdrawal({
+      id: withdrawalId,
+      userId: 'race-user',
+      tokenId: 1,
+      amountMinor: 70n,
+      requestedAmountMinor: 65n,
+      feeMinor: 5n,
+      targetEntityId,
+      description,
+      routeJson,
+      commandId: `custody:${withdrawalId}`,
+      createdAt: 2,
+    });
+
+    expect(bindCustodyWithdrawalInitiation(store, custodyEntityId, {
+      id: 1,
+      timestamp: 3,
+      level: 'info',
+      category: 'system',
+      message: 'HtlcInitiated',
+      data: {
+        entityId: custodyEntityId,
+        toEntity: targetEntityId,
+        tokenId: 1,
+        amount: '65',
+        description,
+        route,
+        hashlock,
+      },
+    })).toBe(true);
+    store.finalizeWithdrawalByHashlock({ hashlock, frameHeight: 4, updatedAt: 4 });
+    expect(store.markWithdrawalSent({ id: withdrawalId, hashlock, routeJson, updatedAt: 5 })?.status).toBe('finalized');
+    expect(store.getWithdrawalById(withdrawalId)?.status).toBe('finalized');
+    expect(() => store.markWithdrawalSent({
+      id: withdrawalId,
+      hashlock: `0x${'31'.repeat(32)}`,
+      routeJson,
+      updatedAt: 6,
+    })).toThrow('CUSTODY_WITHDRAWAL_SENT_REPLAY_CONFLICT');
+    store.close();
+  });
+
   test('reopens an exact submitting intent without refunding or changing its command lane sequence', async () => {
     const root = await mkdtemp(join(tmpdir(), 'xln-custody-retry-'));
     roots.push(root);

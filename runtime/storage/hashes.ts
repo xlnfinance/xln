@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import { computeIntegrityDigest } from '../infra/integrity-checksum';
 import { compareStableText } from '../protocol/serialization';
 import type { Env } from '../types';
 import { buildDurableRuntimeMachineSnapshot } from '../wal/snapshot';
@@ -64,9 +65,9 @@ type StorageDocEncodedValue = { buffer: Buffer; hash: string; hashBytes: Buffer 
 const ENTITY_MERKLE_NAMESPACE = 'runtime-roots' as const;
 
 const hashBuffer = (value: Buffer | Uint8Array): string =>
-  ethers.keccak256(value instanceof Uint8Array ? value : Uint8Array.from(value));
+  computeIntegrityDigest(value instanceof Uint8Array ? value : Uint8Array.from(value));
 
-const hashStable = (value: unknown): string => ethers.keccak256(encodeBinaryPayload(value, 'msgpack'));
+const hashStable = (value: unknown): string => computeIntegrityDigest(encodeBinaryPayload(value, 'msgpack'));
 
 export type StorageReplicaMetaDigestEntry = {
   key: Uint8Array;
@@ -85,7 +86,7 @@ export const computeStorageReplicaMetaDigest = (
   entries: entries
     .map((entry) => ({
       key: ethers.hexlify(entry.key).toLowerCase(),
-      valueHash: ethers.keccak256(entry.value),
+      valueHash: computeIntegrityDigest(entry.value),
     }))
     .sort((left, right) => {
       const byKey = compareStableText(left.key, right.key);
@@ -133,7 +134,7 @@ const bookPairMerklePayload = (pairId: string): Buffer => {
   if (!normalized) {
     throw new Error(`STORAGE_INVALID_BOOK_MERKLE_PATH: ${pairId}`);
   }
-  return hashToBytes(ethers.keccak256(ethers.toUtf8Bytes(`xln:book-pair:${normalized}`)));
+  return hashToBytes(computeIntegrityDigest(ethers.toUtf8Bytes(`xln:book-pair:${normalized}`)));
 };
 
 const storageMerklePath = (key: string): string => {
@@ -263,7 +264,7 @@ export const computeStorageFrameHash = (record: StorageFrameRecord): string => {
   const stableRecord = { ...record };
   delete stableRecord.frameHash;
   return hashStable({
-    kind: 'xln.storage.frame.v2',
+    kind: 'xln.storage.frame',
     ...stableRecord,
     entityHashes: (stableRecord.entityHashes ?? [])
       .map((entry) => ({

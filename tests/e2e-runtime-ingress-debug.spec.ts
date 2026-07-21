@@ -101,24 +101,23 @@ function runtimeIngressGuardSatisfied(snapshot: {
   loopErrorEvents: number;
   loopHaltedEvents: number;
 }): boolean {
-  const loopCountsAreBounded =
-    (snapshot.halted !== false && snapshot.loopErrorEvents === 1 && snapshot.loopHaltedEvents === 1) ||
-    (snapshot.halted !== true && snapshot.loopErrorEvents === 0 && snapshot.loopHaltedEvents === 0);
   return snapshot.rejectReplicaEvents <= 1 &&
     snapshot.quarantinedEvents === 1 &&
     (snapshot.quarantineRecords === undefined || snapshot.quarantineRecords === 1) &&
     (snapshot.queuedRejectedInputs === undefined || snapshot.queuedRejectedInputs === 0) &&
-    loopCountsAreBounded;
+    snapshot.halted !== true &&
+    snapshot.loopErrorEvents === 0 &&
+    snapshot.loopHaltedEvents === 0;
 }
 
 test.describe('runtime ingress debug loop guards', () => {
   test.setTimeout(TEST_TIMEOUT_MS);
 
-  test('bad entity inputs are quarantined once and halt without a runtime error loop', { tag: '@resilience' }, async ({ page }) => {
+  test('bad entity inputs are quarantined once while the runtime remains live', { tag: '@resilience' }, async ({ page }) => {
     allowBrowserIssue({
       type: 'console',
       severity: 'error',
-      message: /REJECT_ENTITY_INPUT_REPLICA_NOT_FOUND|RUNTIME_REPLICA_NOT_FOUND|RUNTIME_INPUT_QUARANTINED|Runtime loop error|RUNTIME_LOOP_ERROR|RUNTIME_LOOP_HALTED/,
+      message: /REJECT_ENTITY_INPUT_REPLICA_NOT_FOUND|RUNTIME_REPLICA_NOT_FOUND|RUNTIME_INPUT_QUARANTINED/,
     });
     await ensureE2EBaseline(page, {
       apiBaseUrl: API_BASE_URL,
@@ -144,11 +143,12 @@ test.describe('runtime ingress debug loop guards', () => {
       })
       .toMatchObject({
         guardSatisfied: true,
-        halted: true,
+        loopActive: true,
+        halted: false,
         queuedRejectedInputs: 0,
         quarantinedEvents: 1,
-        loopErrorEvents: 1,
-        loopHaltedEvents: 1,
+        loopErrorEvents: 0,
+        loopHaltedEvents: 0,
         quarantineRecords: 1,
       });
 

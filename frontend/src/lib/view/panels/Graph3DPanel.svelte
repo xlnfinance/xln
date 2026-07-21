@@ -7,7 +7,7 @@
   import { createAccountBars } from '$lib/network3d/AccountBarRenderer';
   import { panelBridge } from '../utils/panelBridge';
   import { PerformanceMonitor, type PerfMetrics } from '../utils/perfMonitor';
-  import { submitRuntimeInput, entityPositions, type RelativeEntityPosition } from '$lib/stores/xlnStore';
+  import { getXLN, submitRuntimeInput, entityPositions, type RelativeEntityPosition } from '$lib/stores/xlnStore';
   import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
   import Graph3DViewport from '../components/Graph3DViewport.svelte';
   import { HandGesturePaymentController } from '../utils/handGesturePayments';
@@ -777,8 +777,7 @@
     if (graphInitialized) return;
     graphInitialized = true;
     try {
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      XLN = await import(/* @vite-ignore */ runtimeUrl);
+      XLN = await getXLN() as unknown as GraphXLNRuntime;
     } catch (err) {
       console.error('[Graph3D] Failed to load XLN runtime:', err);
     }
@@ -3865,8 +3864,7 @@
         throw new Error(`Failed to load scenario: ${response.statusText}`);
       }
       const scenarioText = await response.text();
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+      const XLN = await getXLN() as unknown as GraphXLNRuntime;
       const parsed = XLN?.parseScenario(scenarioText);
       if (parsed.errors.length > 0) {
         console.error('Scenario parse errors:', parsed.errors);

@@ -12,9 +12,10 @@ import {
   reliableReceiptExactKey,
   sameReliableIdentityPosition,
   senderFrontierKey,
+  senderFrontierKeyForIdentity,
 } from './reliable-frontier';
 import {
-  buildRouteOutputKey,
+  pruneReceiptedReliableOutputs,
 } from './output-routing';
 import {
   ensureReliableState,
@@ -73,6 +74,45 @@ export const reliableReceiptMatchesOutput = (
   if (normalizeRuntimeId(output.runtimeId) !== receipt.body.receiverRuntimeId) return false;
   const identity = getInputReliableIdentity(output);
   return Boolean(identity && reliableReceiptCoversIdentity(receipt, identity));
+};
+
+type IndexedReliableOutput = {
+  index: number;
+  output: RoutedEntityInput;
+  identity: NonNullable<ReturnType<typeof getInputReliableIdentity>>;
+};
+
+const indexReliableOutputs = (
+  outputs: readonly RoutedEntityInput[],
+): Map<string, IndexedReliableOutput[]> => {
+  const indexed = new Map<string, IndexedReliableOutput[]>();
+  for (let index = 0; index < outputs.length; index += 1) {
+    const output = outputs[index]!;
+    const receiverRuntimeId = normalizeRuntimeId(output.runtimeId);
+    if (!receiverRuntimeId) continue;
+    const identity = getInputReliableIdentity(output);
+    if (!identity) continue;
+    const key = senderFrontierKeyForIdentity(receiverRuntimeId, identity);
+    const lane = indexed.get(key) ?? [];
+    lane.push({ index, output, identity });
+    indexed.set(key, lane);
+  }
+  return indexed;
+};
+
+/** Match locally generated receipts without repeatedly hashing every output. */
+export const matchReceiptsToOutputs = (
+  outputs: readonly RoutedEntityInput[],
+  receipts: readonly ReliableDeliveryReceipt[],
+): Map<ReliableDeliveryReceipt, RoutedEntityInput> => {
+  const indexed = indexReliableOutputs(outputs);
+  const matches = new Map<ReliableDeliveryReceipt, RoutedEntityInput>();
+  for (const receipt of receipts) {
+    const candidate = indexed.get(senderFrontierKey(receipt))?.find(entry =>
+      reliableReceiptCoversIdentity(receipt, entry.identity));
+    if (candidate) matches.set(receipt, candidate.output);
+  }
+  return matches;
 };
 
 type TerminalCrossCoverage = 'none' | 'covered' | 'lower-exact';
@@ -168,9 +208,8 @@ export const applyReliableDeliveryReceipts = (
   const state = ensureReliableState(env);
   const active = new Map(state.receivedReliableReceiptLedger ?? []);
   const terminal = new Map(state.receivedReliableTerminalWatermarks ?? []);
-  let outputs = [...(env.pendingNetworkOutputs ?? [])];
-  const removedRouteKeys = new Set<string>();
-  let removed = 0;
+  const outputs = [...(env.pendingNetworkOutputs ?? [])];
+  const indexedOutputs = indexReliableOutputs(outputs);
   for (const receipt of receipts) {
     const validationError = getReliableDeliveryReceiptValidationError(env, receipt);
     if (validationError) throw new Error(validationError);
@@ -179,16 +218,12 @@ export const applyReliableDeliveryReceipts = (
     const ledger = receipt.body.coverage === 'terminal' ? terminal : active;
     const existing = ledger.get(senderFrontierKey(receipt));
     if (existing) receiptAdvancesSameCoverage(existing, receipt);
-    const retained: RoutedEntityInput[] = [];
-    for (const output of outputs) {
-      if (!reliableReceiptMatchesOutput(output, receipt)) retained.push(output);
-      else {
-        removedRouteKeys.add(buildRouteOutputKey(output));
-        removed += 1;
-      }
+    let pendingMatches = 0;
+    for (const candidate of indexedOutputs.get(senderFrontierKey(receipt)) ?? []) {
+      if (reliableReceiptCoversIdentity(receipt, candidate.identity)) pendingMatches += 1;
     }
     if (
-      retained.length === outputs.length &&
+      pendingMatches === 0 &&
       !existing &&
       crossCoverage !== 'lower-exact'
     ) {
@@ -196,16 +231,20 @@ export const applyReliableDeliveryReceipts = (
         `RELIABLE_RECEIPT_OUTPUT_NOT_PENDING:${receipt.body.identity.kind}:${receipt.body.identity.height}`,
       );
     }
-    outputs = retained;
     if (crossCoverage !== 'lower-exact') {
       applyReceiptToSenderLedgers(active, terminal, receipt);
     }
   }
-  env.pendingNetworkOutputs = outputs;
   state.receivedReliableReceiptLedger = active;
   state.receivedReliableTerminalWatermarks = terminal;
-  for (const routeKey of removedRouteKeys) state.deferredNetworkMeta?.delete(routeKey);
-  return { removed };
+  // GC only after every receipt is installed in the sender ledger. Atomic
+  // cross-j admission contains one reliable target ACK plus an ordinary source
+  // proposal. Removing the ACK first destroys the envelope identity and leaves
+  // the source proposal to retry alone, violating atomic delivery after a
+  // successful commit. The shared pruning rule retires the complete source
+  // Runtime-frame group once every reliable member is receipted.
+  env.pendingNetworkOutputs = pruneReceiptedReliableOutputs(env, outputs, receipts);
+  return { removed: outputs.length - env.pendingNetworkOutputs.length };
 };
 
 export const captureReliableReceiptSenderCheckpoint = (

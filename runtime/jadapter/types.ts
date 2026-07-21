@@ -111,6 +111,12 @@ export interface JAdapter {
     disputeTimeout: bigint;
   }>;
   getEntityNonce(entityId: string): Promise<bigint>;
+  /** Exact receipt proof for a previously submitted sealed Depository batch. */
+  hasProcessedBatch?(
+    entityId: string,
+    batchHash: string,
+    entityNonce: bigint,
+  ): Promise<boolean>;
   /** Trusted chain state for EntityProvider quorum-action reconciliation. */
   getEntityProviderActionNonce?(entityId: string): Promise<bigint>;
   /** Exact canonical receipt for one consumed EntityProvider action nonce. */
@@ -281,10 +287,11 @@ export type BrowserVmEthersProviderTarget = {
     evm: {
       runCall(request: {
         to: Address;
-        caller: Address;
-        data: Uint8Array;
-        gasLimit: bigint;
-      }): Promise<{ execResult: { exceptionError?: unknown; returnValue: Uint8Array } }>;
+      caller: Address;
+      data: Uint8Array;
+      gasLimit: bigint;
+      value?: bigint;
+      }): Promise<{ execResult: { exceptionError?: unknown; returnValue: Uint8Array; executionGasUsed: bigint } }>;
     };
   };
   deployerAddress: Address;
@@ -299,4 +306,5 @@ export type BrowserVmEthersProviderTarget = {
   getBlockNumber?(): bigint | number;
   getBlockTimestamp?(): number;
   getChainId?(): bigint | number;
+  mineEmptyBlock?(timestampMs?: number): Promise<number>;
 };

@@ -167,7 +167,7 @@ export const validateDurableRuntimeState = (value: unknown, code: string): void 
     'pendingAuditEvents', 'securityIncidents', 'quarantinedRuntimeInputs', 'pendingFrameDbRecords', 'deferredNetworkMeta',
     'reliableIngressReceiptLedger', 'reliableIngressTerminalWatermarks',
     'receivedReliableReceiptLedger', 'receivedReliableTerminalWatermarks',
-    'pendingReliableIngress', 'reliableIngressCommitting', 'verifiedProfileRoutes',
+    'pendingReliableIngress', 'reliableIngressCommitting',
     'runtimeAdapterCommandFrontiers', 'pendingCommittedJOutbox', 'pendingJurisdictionImports',
     'numberedRegistrationIntents', 'certifiedRegistrationEvidence',
   ], `${code}_FIELDS`);
@@ -213,12 +213,6 @@ export const validateDurableRuntimeState = (value: unknown, code: string): void 
   ]) if (state[field] !== undefined) validateStringMap(state[field], `${code}_${field.toUpperCase()}`, validateReliableReceipt);
   if (state['pendingReliableIngress'] !== undefined) validateStringMap(state['pendingReliableIngress'], `${code}_PENDING_RELIABLE_INGRESS`, validatePendingIngress);
   if (state['reliableIngressCommitting'] !== undefined) for (const key of requireSet(state['reliableIngressCommitting'], `${code}_RELIABLE_COMMITTING`)) requireString(key, `${code}_RELIABLE_COMMITTING_KEY`);
-  if (state['verifiedProfileRoutes'] !== undefined) validateStringMap(state['verifiedProfileRoutes'], `${code}_PROFILE_ROUTES`, (entry, entryCode) => {
-    const route = requireBoundaryRecord(entry, entryCode);
-    requireExactBoundaryKeys(route, ['runtimeId', 'lastUpdated'], [], `${entryCode}_FIELDS`);
-    requireString(route['runtimeId'], `${entryCode}_RUNTIME_ID`);
-    requireBoundaryInteger(route['lastUpdated'], `${entryCode}_LAST_UPDATED`);
-  });
   if (state['runtimeAdapterCommandFrontiers'] !== undefined) validateStringMap(state['runtimeAdapterCommandFrontiers'], `${code}_COMMAND_FRONTIERS`, (entry, entryCode) => {
     const frontier = requireBoundaryRecord(entry, entryCode);
     requireExactBoundaryKeys(frontier, ['lastContiguousSequence', 'lastInputHash', 'lastCommandId', 'observedHeight', 'expiresAtMs'], [], `${entryCode}_FIELDS`);

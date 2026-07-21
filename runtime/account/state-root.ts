@@ -2,8 +2,18 @@ import { ethers } from 'ethers';
 
 import type { AccountMachine, AccountStateDomain, JurisdictionConfig, SettlementWorkspace } from '../types';
 import { compareStableText } from '../protocol/serialization';
-import { buildHexKeyedMerkle } from '../storage/merkle';
+import { buildHexKeyedMerkle, type RadixMerkleHashAlgorithm } from '../storage/merkle';
+import { computeIntegrityDigest } from '../infra/integrity-checksum';
 import { assertAccountJClaimAccumulatorState } from './j-claim-accumulator';
+import {
+  computeAccountMapCommitment,
+  type AccountMapCommitmentTiming,
+} from './map-commitment';
+import { createStructuredLogger } from '../infra/logger';
+import { isRuntimePerfProfileEnabled } from '../infra/perf-runtime-flags';
+import { getPerfMs } from '../utils';
+
+const accountRootLog = createStructuredLogger('account.state-root');
 
 export type { AccountStateDomain } from '../types';
 
@@ -16,6 +26,17 @@ export type AccountStateRootDebugRecord = {
 };
 
 export type AccountStateSectionHashes = Readonly<Record<string, string>>;
+
+export type AccountStateRootTiming = {
+  totalMs?: number;
+  phases?: {
+    mapsAndProjection: number;
+    leafEncoding: number;
+    merkle: number;
+  };
+  mapMs?: Record<string, number>;
+  mapStatus?: Record<string, AccountMapCommitmentTiming>;
+};
 
 let accountStateRootDebugRecorder: ((record: AccountStateRootDebugRecord) => void) | null = null;
 
@@ -76,7 +97,71 @@ const scalarNode = (value: null | boolean | number | bigint | string): RlpNode =
   return [textNode('string'), textNode(value)];
 };
 
-const nodeSortKey = (node: RlpNode): string => ethers.encodeRlp(node);
+const compareBytes = (left: Uint8Array, right: Uint8Array): number => {
+  const limit = Math.min(left.byteLength, right.byteLength);
+  for (let index = 0; index < limit; index += 1) {
+    const difference = Number(left[index]) - Number(right[index]);
+    if (difference !== 0) return difference;
+  }
+  return left.byteLength - right.byteLength;
+};
+
+const rlpLengthBytes = (length: number): Uint8Array => {
+  if (!Number.isSafeInteger(length) || length < 0) {
+    throw new Error(`ACCOUNT_STATE_RLP_LENGTH_INVALID:${String(length)}`);
+  }
+  if (length === 0) return Uint8Array.of(0);
+  const bytes: number[] = [];
+  let remaining = length;
+  while (remaining > 0) {
+    bytes.push(remaining & 0xff);
+    remaining = Math.floor(remaining / 256);
+  }
+  bytes.reverse();
+  return Uint8Array.from(bytes);
+};
+
+const concatBytes = (parts: readonly Uint8Array[], totalLength: number): Uint8Array => {
+  const output = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const part of parts) {
+    output.set(part, offset);
+    offset += part.byteLength;
+  }
+  return output;
+};
+
+const encodeRlpPayload = (payload: Uint8Array, list: boolean): Uint8Array => {
+  if (!list && payload.byteLength === 1 && payload[0]! < 0x80) return payload;
+  const shortBase = list ? 0xc0 : 0x80;
+  const longBase = list ? 0xf7 : 0xb7;
+  if (payload.byteLength <= 55) {
+    return concatBytes([Uint8Array.of(shortBase + payload.byteLength), payload], payload.byteLength + 1);
+  }
+  const lengthBytes = rlpLengthBytes(payload.byteLength);
+  return concatBytes(
+    [Uint8Array.of(longBase + lengthBytes.byteLength), lengthBytes, payload],
+    1 + lengthBytes.byteLength + payload.byteLength,
+  );
+};
+
+/** Byte-identical to ethers.encodeRlp, without its recursive hex/string round trips. */
+const encodeRlpNode = (node: RlpNode): Uint8Array => {
+  if (typeof node === 'string') return encodeRlpPayload(ethers.getBytes(node), false);
+  const children = node.map(encodeRlpNode);
+  const payloadLength = children.reduce((total, child) => total + child.byteLength, 0);
+  return encodeRlpPayload(concatBytes(children, payloadLength), true);
+};
+
+const encodeRlpList = (children: readonly Uint8Array[]): Uint8Array => {
+  const payloadLength = children.reduce((total, child) => total + child.byteLength, 0);
+  return encodeRlpPayload(concatBytes(children, payloadLength), true);
+};
+
+const encodeText = (value: string): Uint8Array =>
+  encodeRlpPayload(ethers.toUtf8Bytes(value), false);
+
+const nodeSortKey = (node: RlpNode): Uint8Array => encodeRlpNode(node);
 
 const canonicalRlpNode = (value: unknown): RlpNode => {
   if (value === null || ['boolean', 'number', 'bigint', 'string'].includes(typeof value)) {
@@ -84,14 +169,22 @@ const canonicalRlpNode = (value: unknown): RlpNode => {
   }
   if (Array.isArray(value)) return [textNode('array'), ...value.map(canonicalRlpNode)];
   if (value instanceof Map) {
-    const entries = Array.from(value.entries()).map(([key, entry]) => [canonicalRlpNode(key), canonicalRlpNode(entry)] satisfies RlpNode[]);
-    entries.sort((left, right) => compareStableText(nodeSortKey(left[0]!), nodeSortKey(right[0]!)));
-    return [textNode('map'), ...entries];
+    const entries = Array.from(value.entries()).map(([key, entry]) => {
+      const keyNode = canonicalRlpNode(key);
+      return {
+        node: [keyNode, canonicalRlpNode(entry)] satisfies RlpNode[],
+        sortKey: nodeSortKey(keyNode),
+      };
+    });
+    entries.sort((left, right) => compareBytes(left.sortKey, right.sortKey));
+    return [textNode('map'), ...entries.map(entry => entry.node)];
   }
   if (value instanceof Set) {
-    const entries = Array.from(value.values()).map(canonicalRlpNode)
-      .sort((left, right) => compareStableText(nodeSortKey(left), nodeSortKey(right)));
-    return [textNode('set'), ...entries];
+    const entries = Array.from(value.values()).map((entry) => {
+      const node = canonicalRlpNode(entry);
+      return { node, sortKey: nodeSortKey(node) };
+    }).sort((left, right) => compareBytes(left.sortKey, right.sortKey));
+    return [textNode('set'), ...entries.map(entry => entry.node)];
   }
   if (typeof value === 'object' && value !== null) {
     const entries = Object.entries(value as Record<string, unknown>)
@@ -103,26 +196,99 @@ const canonicalRlpNode = (value: unknown): RlpNode => {
   throw new Error(`ACCOUNT_STATE_RLP_UNSUPPORTED:${typeof value}`);
 };
 
-const encodeRlpValue = (value: unknown): Uint8Array =>
-  ethers.getBytes(ethers.encodeRlp(canonicalRlpNode(value)));
+/**
+ * Byte-identical to encodeRlpNode(canonicalRlpNode(value)), but emits the RLP
+ * bottom-up. A cross-j pull contains a complete immutable route; building a
+ * second recursive RlpNode graph for every dirty pull doubled allocation and
+ * traversal cost on the hub hot path.
+ */
+const encodeAccountStateValueDirect = (value: unknown): Uint8Array => {
+  if (value === null) return encodeRlpList([encodeText('null')]);
+  if (typeof value === 'boolean') {
+    return encodeRlpList([encodeText('bool'), encodeRlpPayload(Uint8Array.of(value ? 1 : 0), false)]);
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error(`ACCOUNT_STATE_RLP_NON_FINITE_NUMBER:${String(value)}`);
+    return encodeRlpList([encodeText('number'), encodeText(String(value))]);
+  }
+  if (typeof value === 'bigint') {
+    const magnitude = value < 0n ? -value : value;
+    return encodeRlpList([
+      encodeText('bigint'),
+      encodeRlpPayload(Uint8Array.of(value < 0n ? 1 : 0), false),
+      encodeRlpPayload(ethers.getBytes(ethers.toBeHex(magnitude)), false),
+    ]);
+  }
+  if (typeof value === 'string') {
+    return encodeRlpList([encodeText('string'), encodeText(value)]);
+  }
+  if (Array.isArray(value)) {
+    return encodeRlpList([encodeText('array'), ...value.map(encodeAccountStateValueDirect)]);
+  }
+  if (value instanceof Map) {
+    const entries = Array.from(value.entries()).map(([key, entry]) => {
+      const encodedKey = encodeAccountStateValueDirect(key);
+      return {
+        encodedKey,
+        encodedEntry: encodeRlpList([encodedKey, encodeAccountStateValueDirect(entry)]),
+      };
+    }).sort((left, right) => compareBytes(left.encodedKey, right.encodedKey));
+    return encodeRlpList([encodeText('map'), ...entries.map(entry => entry.encodedEntry)]);
+  }
+  if (value instanceof Set) {
+    const entries = Array.from(value.values(), encodeAccountStateValueDirect).sort(compareBytes);
+    return encodeRlpList([encodeText('set'), ...entries]);
+  }
+  if (typeof value === 'object' && value !== null) {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => compareStableText(left, right))
+      .map(([key, entry]) => encodeRlpList([encodeText(key), encodeAccountStateValueDirect(entry)]));
+    return encodeRlpList([encodeText('object'), ...entries]);
+  }
+  throw new Error(`ACCOUNT_STATE_RLP_UNSUPPORTED:${typeof value}`);
+};
+
+export const encodeAccountStateValueOracle = (value: unknown): Uint8Array =>
+  encodeRlpNode(canonicalRlpNode(value));
+
+export const encodeAccountStateValue = (value: unknown): Uint8Array =>
+  encodeAccountStateValueDirect(value);
+
+const integrityMerkleKey = (namespace: string, path: string): string =>
+  computeIntegrityDigest(new TextEncoder().encode(`xln.${namespace}.${path}`));
 
 const stateLeaf = (path: string, value: unknown): { hexKey: string; value: Uint8Array } => ({
-  hexKey: ethers.keccak256(ethers.toUtf8Bytes(`xln.account.state.${path}`)),
-  value: encodeRlpValue(value),
+  hexKey: integrityMerkleKey('account.state', path),
+  value: encodeAccountStateValue(value),
 });
 
 export const computeCanonicalMerkleRoot = (
   namespace: string,
   entries: ReadonlyArray<readonly [path: string, value: unknown]>,
+  hashAlgorithm: RadixMerkleHashAlgorithm = 'keccak256',
 ): string => buildHexKeyedMerkle(entries.map(([path, value]) => ({
-  hexKey: ethers.keccak256(ethers.toUtf8Bytes(`xln.${namespace}.${path}`)),
-  value: encodeRlpValue(value),
-}))).root;
+    hexKey: hashAlgorithm === 'integrity'
+      ? integrityMerkleKey(namespace, path)
+      : ethers.keccak256(ethers.toUtf8Bytes(`xln.${namespace}.${path}`)),
+    value: encodeAccountStateValue(value),
+})), { hashAlgorithm }).root;
 
 const accountStateRootEntries = (
   account: AccountMachine,
+  cold = false,
+  mapTimings?: Record<string, number>,
+  mapStatuses?: Record<string, AccountMapCommitmentTiming>,
 ): ReadonlyArray<readonly [path: string, value: unknown]> => {
   const domain = normalizeAccountStateDomain(account.domain);
+  const mapRoot = (namespace: Parameters<typeof computeAccountMapCommitment>[1]): string => {
+    const startedAt = mapTimings ? getPerfMs() : 0;
+    const status = mapStatuses ? {} as AccountMapCommitmentTiming : undefined;
+    const root = computeAccountMapCommitment(account, namespace, encodeAccountStateValue, cold, status);
+    if (mapTimings) mapTimings[namespace] = getPerfMs() - startedAt;
+    if (status && mapStatuses) mapStatuses[namespace] = status;
+    return root;
+  };
   return [
     ['identity', {
     chainId: domain.chainId,
@@ -132,17 +298,17 @@ const accountStateRootEntries = (
     watchSeed: account.watchSeed.toLowerCase(),
     }],
     ['financial', {
-    deltas: account.deltas,
+    deltasRoot: mapRoot('deltas'),
     globalCreditLimits: account.globalCreditLimits,
     jNonce: account.jNonce,
     disputeConfig: account.disputeConfig,
     }],
     ['commitments', {
-    locks: account.locks,
-    pulls: account.pulls,
-    swapOffers: account.swapOffers,
-    subcontracts: account.subcontracts,
-    lendingIntents: account.lendingIntents ?? new Map(),
+    locksRoot: mapRoot('locks'),
+    pullsRoot: mapRoot('pulls'),
+    swapOffersRoot: mapRoot('swapOffers'),
+    subcontractsRoot: mapRoot('subcontracts'),
+    lendingIntentsRoot: mapRoot('lendingIntents'),
     // Settlement is bilateral Account state, not an Entity-local UI overlay.
     // Bind the full sealed workspace, including its exact Hankos, so every
     // later Account frame proves the same executable authorization. Undefined
@@ -167,15 +333,44 @@ export const computeAccountStateSectionHashes = (
 ): AccountStateSectionHashes => Object.fromEntries(
   accountStateRootEntries(account).map(([path, value]) => [
     path,
-    ethers.keccak256(encodeRlpValue(value)),
+    computeIntegrityDigest(encodeAccountStateValue(value)),
   ]),
 );
 
 export const computeAccountStateRoot = (
   account: AccountMachine,
+  timing?: AccountStateRootTiming,
 ): string => {
-  const entries = accountStateRootEntries(account);
-  const root = buildHexKeyedMerkle(entries.map(([path, value]) => stateLeaf(path, value))).root;
+  const profile = Boolean(timing) ||
+    isRuntimePerfProfileEnabled('XLN_ACCOUNT_STATE_ROOT_PROFILE', 'XLN_RUNTIME_PROCESS_PROFILE');
+  const startedAt = profile ? getPerfMs() : 0;
+  const mapTimings: Record<string, number> | undefined = profile ? {} : undefined;
+  const mapStatuses: Record<string, AccountMapCommitmentTiming> | undefined = profile ? {} : undefined;
+  const entries = accountStateRootEntries(account, false, mapTimings, mapStatuses);
+  const entriesAt = profile ? getPerfMs() : 0;
+  const leaves = entries.map(([path, value]) => stateLeaf(path, value));
+  const leavesAt = profile ? getPerfMs() : 0;
+  const root = buildHexKeyedMerkle(leaves, { hashAlgorithm: 'integrity' }).root;
+  if (profile) {
+    const endedAt = getPerfMs();
+    const profileRecord = {
+      totalMs: Number((endedAt - startedAt).toFixed(3)),
+      phases: {
+        mapsAndProjection: Number((entriesAt - startedAt).toFixed(3)),
+        leafEncoding: Number((leavesAt - entriesAt).toFixed(3)),
+        merkle: Number((endedAt - leavesAt).toFixed(3)),
+      },
+      mapMs: Object.fromEntries(Object.entries(mapTimings ?? {}).map(([key, value]) => [key, Number(value.toFixed(3))])),
+      mapStatus: mapStatuses,
+    };
+    if (timing) Object.assign(timing, profileRecord);
+    if (isRuntimePerfProfileEnabled('XLN_ACCOUNT_STATE_ROOT_PROFILE', 'XLN_RUNTIME_PROCESS_PROFILE')) {
+      accountRootLog.warn('profile', {
+        account: `${account.leftEntity.slice(-8)}:${account.rightEntity.slice(-8)}`,
+        ...profileRecord,
+      });
+    }
+  }
   if (accountStateRootDebugRecorder) {
     accountStateRootDebugRecorder({
       accountId: `${account.leftEntity.toLowerCase()}:${account.rightEntity.toLowerCase()}`,
@@ -184,6 +379,22 @@ export const computeAccountStateRoot = (
     });
   }
   return root;
+};
+
+/** Cold oracle used by tests/restore audits to detect every missed cache invalidation. */
+export const computeAccountStateRootCold = (account: AccountMachine): string => {
+  const entries = accountStateRootEntries(account, true);
+  return buildHexKeyedMerkle(
+    entries.map(([path, value]) => stateLeaf(path, value)),
+    { hashAlgorithm: 'integrity' },
+  ).root;
+};
+
+export const assertAccountStateRootCache = (account: AccountMachine, code = 'ACCOUNT_STATE_ROOT_CACHE'): string => {
+  const incremental = computeAccountStateRoot(account);
+  const cold = computeAccountStateRootCold(account);
+  if (incremental !== cold) throw new Error(`${code}_MISMATCH:incremental=${incremental}:cold=${cold}`);
+  return incremental;
 };
 
 const settlementOverlayState = (

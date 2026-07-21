@@ -24,6 +24,13 @@ type CanonicalRpcBlock = {
 
 type RpcSend = (method: string, params: unknown[]) => Promise<unknown>;
 
+export type RpcBatchCall = {
+  method: string;
+  params: unknown[];
+};
+
+export type RpcBatchSend = (calls: readonly RpcBatchCall[]) => Promise<unknown[]>;
+
 export type ReceiptReadProfile = {
   commitment?: 'ethereum-trie' | 'tron-complete-receipts';
   expectedParent?: {
@@ -59,8 +66,7 @@ const mapConcurrent = async <T, R>(
   return results;
 };
 
-const readCanonicalBlock = async (send: RpcSend, height: number): Promise<CanonicalRpcBlock> => {
-  const raw = await send('eth_getBlockByNumber', [ethers.toQuantity(height), false]);
+const parseCanonicalBlock = (raw: unknown, height: number): CanonicalRpcBlock => {
   if (!raw || typeof raw !== 'object') throw new Error(`J_RECEIPT_BLOCK_MISSING:${height}`);
   const block = raw as Partial<CanonicalRpcBlock>;
   if (parseReceiptQuantity(block.number, 'BLOCK_NUMBER') !== BigInt(height)) {
@@ -74,6 +80,24 @@ const readCanonicalBlock = async (send: RpcSend, height: number): Promise<Canoni
     throw new Error(`J_RECEIPT_BLOCK_TRANSACTIONS_INVALID:${height}`);
   }
   return block as CanonicalRpcBlock;
+};
+
+const readCanonicalBlocks = async (
+  send: RpcSend,
+  heights: readonly number[],
+  sendBatch?: RpcBatchSend,
+): Promise<CanonicalRpcBlock[]> => {
+  const calls = heights.map((height): RpcBatchCall => ({
+    method: 'eth_getBlockByNumber',
+    params: [ethers.toQuantity(height), false],
+  }));
+  const rawBlocks = sendBatch
+    ? await sendBatch(calls)
+    : await mapConcurrent(calls, 16, (call) => send(call.method, call.params));
+  if (rawBlocks.length !== heights.length) {
+    throw new Error(`J_RECEIPT_BATCH_LENGTH_MISMATCH:expected=${heights.length}:actual=${rawBlocks.length}`);
+  }
+  return rawBlocks.map((raw, index) => parseCanonicalBlock(raw, heights[index]!));
 };
 
 const canonicalHeader = (block: CanonicalRpcBlock) => ({
@@ -183,13 +207,25 @@ const validateReceiptSet = async (
 const readEthereumReceipts = async (
   send: RpcSend,
   block: CanonicalRpcBlock,
+  sendBatch?: RpcBatchSend,
 ): Promise<{
   receipts: CanonicalRpcReceipt[];
   proofs: Map<number, Omit<CanonicalReceiptMptProof, 'receiptLogIndex'>>;
 }> => {
-  const unordered = await mapConcurrent(block.transactions, 16, async (transactionHash, index) => {
-    const normalized = normalizeReceiptHash(transactionHash, `TRANSACTION_${index}_HASH`);
-    const raw = await send('eth_getTransactionReceipt', [normalized]);
+  const calls = block.transactions.map((transactionHash, index): RpcBatchCall => ({
+    method: 'eth_getTransactionReceipt',
+    params: [normalizeReceiptHash(transactionHash, `TRANSACTION_${index}_HASH`)],
+  }));
+  const rawReceipts = sendBatch
+    ? await sendBatch(calls)
+    : await mapConcurrent(calls, 16, (call) => send(call.method, call.params));
+  if (rawReceipts.length !== block.transactions.length) {
+    throw new Error(
+      `J_RECEIPT_BATCH_LENGTH_MISMATCH:expected=${block.transactions.length}:actual=${rawReceipts.length}`,
+    );
+  }
+  const unordered = rawReceipts.map((raw, index) => {
+    const normalized = normalizeReceiptHash(block.transactions[index], `TRANSACTION_${index}_HASH`);
     if (!raw || typeof raw !== 'object') {
       throw new Error(`J_RECEIPT_TRANSACTION_RECEIPT_MISSING:${normalized}`);
     }
@@ -321,6 +357,7 @@ export const readAuthenticatedReceiptRange = async (
   toBlock: number,
   watchedAddresses: readonly string[],
   profile: ReceiptReadProfile = {},
+  sendBatch?: RpcBatchSend,
 ): Promise<AuthenticatedReceiptRange> => {
   if (!Number.isSafeInteger(fromBlock) || !Number.isSafeInteger(toBlock) || fromBlock < 1 || toBlock < fromBlock) {
     throw new Error(`J_RECEIPT_RANGE_INVALID:${fromBlock}:${toBlock}`);
@@ -331,7 +368,7 @@ export const readAuthenticatedReceiptRange = async (
   const commitment = profile.commitment ?? 'ethereum-trie';
   const anchorHeight = fromBlock > 1 ? fromBlock - 1 : fromBlock;
   const rangeHeights = Array.from({ length: toBlock - anchorHeight + 1 }, (_, index) => anchorHeight + index);
-  const rangeBlocks = await mapConcurrent(rangeHeights, 16, (height) => readCanonicalBlock(send, height));
+  const rangeBlocks = await readCanonicalBlocks(send, rangeHeights, sendBatch);
   assertContiguousBlocks(rangeBlocks, profile.expectedParent);
   const blocks = rangeBlocks.filter(block => Number(parseReceiptQuantity(block.number, 'BLOCK_NUMBER')) >= fromBlock);
   const logsByBlock = await mapConcurrent(blocks, 4, async (block) => {
@@ -340,7 +377,7 @@ export const readAuthenticatedReceiptRange = async (
     if (commitment === 'tron-complete-receipts') {
       return collectWatchedLogs(block, await readTronReceipts(send, block), addresses);
     }
-    const authenticated = await readEthereumReceipts(send, block);
+    const authenticated = await readEthereumReceipts(send, block, sendBatch);
     return collectWatchedLogs(block, authenticated.receipts, addresses, authenticated.proofs);
   });
   const logs = logsByBlock.flat().sort((left, right) =>
@@ -348,7 +385,7 @@ export const readAuthenticatedReceiptRange = async (
   if (commitment === 'tron-complete-receipts') {
     await crossCheckTronLogs(send, fromBlock, toBlock, addresses, logs);
   }
-  const fenceBlocks = await mapConcurrent(rangeHeights, 16, (height) => readCanonicalBlock(send, height));
+  const fenceBlocks = await readCanonicalBlocks(send, rangeHeights, sendBatch);
   assertContiguousBlocks(fenceBlocks, profile.expectedParent);
   assertRangeFenceUnchanged(rangeBlocks, fenceBlocks);
   return {
@@ -364,6 +401,7 @@ export const readAuthenticatedLogsForRange = async (
   toBlock: number,
   watchedAddresses: readonly string[],
   profile: ReceiptReadProfile = {},
+  sendBatch?: RpcBatchSend,
 ): Promise<AuthenticatedRpcLog[]> => (
-  await readAuthenticatedReceiptRange(send, fromBlock, toBlock, watchedAddresses, profile)
+  await readAuthenticatedReceiptRange(send, fromBlock, toBlock, watchedAddresses, profile, sendBatch)
 ).logs;

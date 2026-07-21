@@ -34,7 +34,7 @@ describe('runtime performance profiling', () => {
     ]);
   });
 
-  test('keeps bounded histogram statistics without retaining samples', () => {
+  test('reports exact percentiles for a bounded sample window', () => {
     const metric = new BoundedPerfMetric();
     for (const value of [1, 5, 10, 100, 1_000]) metric.observe(value);
     expect(metric.summary()).toEqual({
@@ -49,13 +49,26 @@ describe('runtime performance profiling', () => {
     });
   });
 
-  test('keeps the 20-80 second incident tail distinguishable', () => {
+  test('does not inflate incident percentiles to histogram bucket ceilings', () => {
     const metric = new BoundedPerfMetric();
     for (const value of [25_000, 42_700, 66_800]) metric.observe(value);
     expect(metric.summary()).toMatchObject({
-      p50Ms: 45_000,
-      p95Ms: 70_000,
+      p50Ms: 42_700,
+      p95Ms: 66_800,
       maxMs: 66_800,
+    });
+  });
+
+  test('bounds percentile memory to the latest configured samples', () => {
+    const metric = new BoundedPerfMetric(3);
+    for (const value of [1, 2, 100, 200]) metric.observe(value);
+    expect(metric.summary()).toMatchObject({
+      count: 4,
+      avgMs: 75.75,
+      minMs: 1,
+      p50Ms: 100,
+      p95Ms: 200,
+      maxMs: 200,
     });
   });
 

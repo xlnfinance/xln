@@ -139,6 +139,7 @@ describe('storage frame journal retention', () => {
     expect(middle?.canonicalStateHash).toBeUndefined();
     expect(middle?.canonicalEntityHashes).toBeUndefined();
     expect(middle?.entityHashes).toBeUndefined();
+    expect(middle?.runtimeMachine).toBeUndefined();
     expect(middle?.frameHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(checkpoint?.runtimeStateHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(checkpoint?.prevFrameHash).toBe(middle?.frameHash);
@@ -910,8 +911,7 @@ describe('storage frame journal retention', () => {
     await processRuntime(env, []);
     const journal = await readPersistedFrameJournal(env, env.height);
     expect(journal?.runtimeOutputs).toEqual([pendingOutput]);
-    expect(journal?.runtimeMachineBeforeApply?.pendingNetworkOutputs).toEqual([pendingOutput]);
-    expect(journal?.runtimeMachine?.pendingNetworkOutputs).toEqual([pendingOutput]);
+    expect(journal?.runtimeMachine).toBeUndefined();
     expect(journal?.runtimeStateHash).toBeUndefined();
     const liveCanonicalStateHash = computeCanonicalStateHashFromEnv(env);
     await closeRuntimeDb(env);
@@ -969,7 +969,7 @@ describe('storage frame journal retention', () => {
     }
   });
 
-  test('production commits the canonical replay oracle on every frame by default', async () => {
+  test('production chains every WAL frame without rebuilding the canonical replay oracle by default', async () => {
     const previousNodeEnv = process.env['NODE_ENV'];
     const previousPeriod = process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'];
     const previousVerify = process.env['XLN_STORAGE_VERIFY_CANONICAL'];
@@ -988,8 +988,9 @@ describe('storage frame journal retention', () => {
       await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
       const frame = await readStorageFrameRecord(getFrameDb(env), 1);
       expect(frame?.stateHash).toMatch(/^0x[0-9a-f]{64}$/);
-      expect(frame?.canonicalStateHash).toMatch(/^0x[0-9a-f]{64}$/);
-      expect(frame?.canonicalEntityHashes).toEqual([]);
+      expect(frame?.frameHash).toMatch(/^0x[0-9a-f]{64}$/);
+      expect(frame?.canonicalStateHash).toBeUndefined();
+      expect(frame?.canonicalEntityHashes).toBeUndefined();
     } finally {
       await closeRuntimeDb(env);
       await closeInfraDb(env);
@@ -1257,10 +1258,19 @@ describe('storage frame journal retention', () => {
     expect(await readRawOrNull(getFrameDb(env), keyDiff(snapshotHeight))).toBeNull();
     expect(await readRawOrNull(getRuntimeStorageDb(env), keyFrame(snapshotHeight))).toBeNull();
 
-    env.height = latestAfterRotation + 1;
-    env.timestamp += 1;
     env.runtimeConfig.storage.epochMaxBytes = 1_000_000;
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId,
+        signerId: signer,
+        entityTxs: [{
+          type: 'profile-update',
+          data: { profile: { entityId, name: 'post-rotation-live-frame' } },
+        }],
+      }],
+    });
+    await processRuntime(env, []);
     expect(await getPersistedLatestHeight(env)).toBe(latestAfterRotation + 1);
 
     await closeRuntimeDb(env);
@@ -1291,8 +1301,16 @@ describe('storage frame journal retention', () => {
     const env = createEmptyEnv(seed);
     env.runtimeId = runtimeId;
     env.dbNamespace = runtimeId;
-    env.runtimeConfig = { ...(env.runtimeConfig || {}), snapshotIntervalFrames: 1 };
+    env.runtimeConfig = {
+      ...(env.runtimeConfig || {}),
+      snapshotIntervalFrames: 1,
+      storage: {
+        ...(env.runtimeConfig?.storage || {}),
+        snapshotPeriodFrames: 1,
+      },
+    };
     env.quietRuntimeLogs = true;
+    env.timestamp = 1_000;
 
     const signerA = deriveSignerAddressSync(seed, '1');
     const signerB = deriveSignerAddressSync(seed, '2');
@@ -1399,9 +1417,18 @@ describe('storage frame journal retention', () => {
         snapshotPeriodFrames: latestHeight + 100,
       },
     };
-    env.height = latestHeight + 1;
-    env.timestamp += 1;
-    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: entityA,
+        signerId: signerA,
+        entityTxs: [{
+          type: 'profile-update',
+          data: { profile: { entityId: entityA, name: 'retention-replay-tail' } },
+        }],
+      }],
+    });
+    await processRuntime(env, []);
     const replayTailHeight = env.height;
     expect(await readPersistedFrameJournal(env, replayTailHeight)).toBeTruthy();
 
@@ -1877,10 +1904,28 @@ describe('storage frame journal retention', () => {
         snapshotPeriodFrames: 100,
       },
     };
-    restoredAtTwo.height = 3;
-    restoredAtTwo.timestamp += 1;
-    await saveEnvToDB(restoredAtTwo, { runtimeTxs: [], entityInputs: [] }, []);
+    enqueueRuntimeInput(restoredAtTwo, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId,
+        signerId: signer,
+        entityTxs: [{
+          type: 'profile-update',
+          data: { profile: { entityId, name: 'non-materialized-message' } },
+        }],
+      }],
+    });
+    await processRuntime(restoredAtTwo, []);
+    expect(restoredAtTwo.height).toBe(3);
     expect(restoredAtTwo.overlay?.length ?? 0).toBe(0);
+    const materializedFrame = await readStorageFrameRecord(getFrameDb(restoredAtTwo), 3);
+    expect(materializedFrame?.replicaMetaStateMode).toBe('shared-entity-state');
+    const compactMeta = decodeBuffer<Record<string, unknown>>(
+      await getFrameDb(restoredAtTwo).get(keyLiveReplicaMeta(entityId, signer)),
+    );
+    expect(compactMeta['state']).toBeUndefined();
+    expect(compactMeta['localEntityState']).toBeDefined();
+    expect((await verifyStorageTailIntegrity(getFrameDb(restoredAtTwo))).checkedFrames).toBe(3);
 
     await closeRuntimeDb(restoredAtTwo);
     await closeInfraDb(restoredAtTwo);

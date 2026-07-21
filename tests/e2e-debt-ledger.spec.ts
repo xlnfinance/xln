@@ -1036,11 +1036,16 @@ async function enforceDebtDirect(page: Page, entityId: string, tokenId: number):
       __xln_instance?: {
         buildDebtEnforcementRuntimeInput?: (env: unknown, params: { entityId: string; tokenId: number }) => unknown;
       };
+      __xln?: {
+        instance?: {
+          buildDebtEnforcementRuntimeInput?: (env: unknown, params: { entityId: string; tokenId: number }) => unknown;
+        };
+      };
     };
     const env = view.isolatedEnv ?? view.__xln_env;
     const XLN = view.XLN
       ?? view.__xln_instance
-      ?? await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
+      ?? view.__xln?.instance;
     if (!env || !XLN?.buildDebtEnforcementRuntimeInput) {
       throw new Error('DEBT_ENFORCEMENT_BUILDER_MISSING');
     }

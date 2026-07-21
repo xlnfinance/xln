@@ -23,6 +23,7 @@ import type {
   RuntimeOverlayRecord,
   SwapOffer,
 } from '../types';
+import type { RuntimeOutputRetryFenceEntry } from '../machine/output-retry-fence';
 import type { RadixMerkleRadix, RadixMerkleRootKind } from './merkle';
 import type { StorageMerkleNamespace } from './keys';
 
@@ -224,6 +225,8 @@ export type StorageFrameRecord = {
   frameHash?: string;
   /** Commits the exact validator-local recovery metadata published with this frame. */
   replicaMetaDigest: string;
+  replicaMetaCheckpoint: boolean;
+  replicaMetaStateMode: 'live-head' | 'shared-entity-state' | 'full';
   stateHash: string;
   hashMode?: 'storage-merkle-v1';
   materializedState?: boolean;
@@ -239,18 +242,17 @@ export type StorageFrameRecord = {
   /** Sparse canonical Entity + durable R-machine replay oracle. */
   runtimeStateHash?: string;
   runtimeInput: RuntimeInput;
-  /**
-   * Exact durable-machine state immediately before runtimeInput was applied.
-   * This retains transport ingress provenance created by a side-effect-only
-   * tick so journal replay can independently reproduce local self-receipts.
-   */
-  runtimeMachineBeforeApply?: Record<string, unknown>;
+  /** Exact bounded input queue retained after this frame (for deferred H+1 work). */
+  pendingRuntimeInput?: RuntimeInput;
+  /** Full durable Runtime state is a sparse materialization checkpoint only. */
   runtimeMachine?: Record<string, unknown>;
   /**
    * Transport envelopes not yet terminally delivered after this committed
    * frame. They are replayable at-least-once side effects, not consensus state.
    */
   runtimeOutputs?: RoutedEntityInput[];
+  /** Exact retry/backoff fence for the retained transport envelopes. */
+  runtimeOutputRetryMeta?: RuntimeOutputRetryFenceEntry[];
   overlayRecords?: RuntimeOverlayRecord[];
   touchedEntities: string[];
   touchedAccounts: Array<{ entityId: string; counterpartyId: string }>;
@@ -307,8 +309,14 @@ export type StorageReplicaMeta = {
   entityId: string;
   signerId: string;
   isProposer: boolean;
-  /** Exact validator-local Entity state at the authoritative R-frame boundary. */
-  state: EntityState;
+  /**
+   * Exact validator-local state for multi-validator or checkpoint records.
+   * Intermediate single-signer metadata references the authoritative shared
+   * Entity doc/diff at the same R-frame instead of duplicating it.
+   */
+  state?: EntityState;
+  /** Entity-local fields intentionally excluded from shared Entity docs. */
+  localEntityState?: Pick<EntityState, 'entityEncPubKey' | 'entityEncPrivKey' | 'htlcNotes'>;
   mempool: EntityReplica['mempool'];
   position?: EntityReplica['position'];
   proposal?: EntityReplica['proposal'];

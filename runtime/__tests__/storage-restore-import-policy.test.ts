@@ -56,7 +56,11 @@ const createRecoveryEnv = async (
   env.quietRuntimeLogs = true;
   env.runtimeConfig = {
     ...env.runtimeConfig,
-    storage: { ...env.runtimeConfig?.storage, enabled: saveDuringProcess },
+    storage: {
+      ...env.runtimeConfig?.storage,
+      enabled: saveDuringProcess,
+      ...(saveDuringProcess ? { canonicalHashPeriodFrames: 1 } : {}),
+    },
   };
   env.activeJurisdiction = jurisdiction.name;
   env.jReplicas.set(jurisdiction.name, {

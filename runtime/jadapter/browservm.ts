@@ -55,6 +55,7 @@ import {
   markLocalJAuthorityRuntimeTx,
 } from '../jurisdiction/registration-evidence';
 import { assertEntityProviderActionJTxBinding } from '../entity/entity-provider-action';
+import { extractCanonicalDepositoryEventArgs } from './depository-event-codec';
 
 const asFactoryRunner = (runner: unknown): Parameters<typeof Account__factory.connect>[1] =>
   runner as Parameters<typeof Account__factory.connect>[1];
@@ -151,12 +152,7 @@ export async function createBrowserVMAdapter(
       );
     }
     if (!parsed || !CANONICAL_J_EVENTS.some((name) => name === parsed?.name)) return null;
-    const args: Record<string, unknown> = {};
-    for (let index = 0; index < parsed.fragment.inputs.length; index += 1) {
-      const input = parsed.fragment.inputs[index];
-      if (!input) continue;
-      args[input.name || String(index)] = parsed.args[index];
-    }
+    const args = extractCanonicalDepositoryEventArgs(parsed);
     return {
       name: parsed.name,
       args,
@@ -368,6 +364,10 @@ export async function createBrowserVMAdapter(
 
     async getEntityNonce(entityId: string): Promise<bigint> {
       return await browserVM.getEntityNonce(normalizeEntityId(entityId));
+    },
+
+    async hasProcessedBatch(entityId: string, batchHash: string, entityNonce: bigint): Promise<boolean> {
+      return browserVM.hasProcessedBatch(normalizeEntityId(entityId), batchHash, entityNonce);
     },
 
     async getEntityProviderActionNonce(entityId: string): Promise<bigint> {

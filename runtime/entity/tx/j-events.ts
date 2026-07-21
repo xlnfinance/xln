@@ -631,6 +631,14 @@ function applyDisputeFinalizedJEvent(
     candidateCounterpartyId,
   );
   const removed = removedDraft + removedSent;
+  jEventLog.info('dispute_finalized.applied', {
+    entity: shortId(entityIdNorm),
+    counterparty: shortId(counterpartyId),
+    sender: shortId(senderStr),
+    block: Number(blockNumber || 0),
+    removedDraft,
+    removedSent,
+  });
   if (removed > 0) {
     addMessage(newState, `🧹 Removed ${removed} stale dispute-finalize op(s) for ${counterpartyId.slice(-4)}`);
   }

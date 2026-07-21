@@ -12,17 +12,25 @@ import {
   cloneIsolatedRuntimeInput,
 } from '../protocol/runtime-input-clone';
 import { validateDurableRuntimeMachineSnapshot } from './runtime-machine-schema';
+import {
+  assertRuntimeOutputRetryFenceMatchesOutputs,
+  type RuntimeOutputRetryFenceEntry,
+  validateRuntimeOutputRetryFence,
+} from '../machine/output-retry-fence';
 
 export type PersistedFrameJournal = {
   height: number;
   timestamp: number;
   /** Exact validator-local replica metadata commitment for deterministic replay. */
   replicaMetaDigest: string;
+  replicaMetaCheckpoint: boolean;
+  replicaMetaStateMode: 'live-head' | 'shared-entity-state' | 'full';
   runtimeInput: RuntimeInput;
+  /** Exact bounded input queue retained after this frame. */
+  pendingRuntimeInput?: RuntimeInput;
   runtimeOutputs?: RoutedEntityInput[];
-  /** Exact durable R-machine snapshot immediately before runtimeInput. */
-  runtimeMachineBeforeApply?: Record<string, unknown>;
-  /** Exact durable R-machine snapshot published by this frame. */
+  runtimeOutputRetryMeta?: RuntimeOutputRetryFenceEntry[];
+  /** Sparse durable R-machine checkpoint; absent on ordinary input-only frames. */
   runtimeMachine?: Record<string, unknown>;
   runtimeStateHash?: string;
   logs: FrameLogEntry[];
@@ -44,8 +52,8 @@ export const validatePersistedFrameJournal = (
   const decoded = requireBoundaryRecord(value, 'WAL_FRAME_INVALID');
   requireExactBoundaryKeys(
     decoded,
-    ['height', 'timestamp', 'replicaMetaDigest', 'runtimeInput', 'logs'],
-    ['runtimeOutputs', 'runtimeMachineBeforeApply', 'runtimeMachine', 'runtimeStateHash'],
+    ['height', 'timestamp', 'replicaMetaDigest', 'replicaMetaCheckpoint', 'replicaMetaStateMode', 'runtimeInput', 'logs'],
+    ['pendingRuntimeInput', 'runtimeOutputs', 'runtimeOutputRetryMeta', 'runtimeMachine', 'runtimeStateHash'],
     'WAL_FIELDS_INVALID',
   );
   const height = requireBoundaryInteger(decoded['height'], 'WAL_HEIGHT_INVALID', 1);
@@ -62,18 +70,36 @@ export const validatePersistedFrameJournal = (
       decoded['replicaMetaDigest'],
       `WAL_REPLICA_META_DIGEST_INVALID:height=${height}`,
     ),
+    replicaMetaCheckpoint: decoded['replicaMetaCheckpoint'] === true || decoded['replicaMetaCheckpoint'] === false
+      ? decoded['replicaMetaCheckpoint']
+      : (() => { throw new Error(`WAL_REPLICA_META_CHECKPOINT_INVALID:height=${height}`); })(),
+    replicaMetaStateMode: decoded['replicaMetaStateMode'] === 'live-head' ||
+      decoded['replicaMetaStateMode'] === 'shared-entity-state' ||
+      decoded['replicaMetaStateMode'] === 'full'
+      ? decoded['replicaMetaStateMode']
+      : (() => { throw new Error(`WAL_REPLICA_META_STATE_MODE_INVALID:height=${height}`); })(),
     runtimeInput,
     logs: validateFrameLogEntries(decoded['logs'], `WAL_LOGS_INVALID:height=${height}`),
   };
+  if (decoded['pendingRuntimeInput'] !== undefined) {
+    frame.pendingRuntimeInput = cloneIsolatedRuntimeInput(
+      validateRuntimeInputEnvelope(decoded['pendingRuntimeInput'], `WAL_PENDING_RUNTIME_INPUT:height=${height}`),
+    );
+  }
   if (decoded['runtimeOutputs'] !== undefined) {
     if (!Array.isArray(decoded['runtimeOutputs'])) throw new Error(`WAL_RUNTIME_OUTPUTS_INVALID:height=${height}`);
     decoded['runtimeOutputs'].forEach(validateEntityInput);
     frame.runtimeOutputs = cloneIsolatedRoutedEntityInputs(decoded['runtimeOutputs'] as RoutedEntityInput[]);
   }
-  if (decoded['runtimeMachineBeforeApply'] !== undefined) {
-    frame.runtimeMachineBeforeApply = validateRuntimeSnapshot(
-      decoded['runtimeMachineBeforeApply'],
-      `WAL_RUNTIME_MACHINE_BEFORE_INVALID:height=${height}`,
+  if (decoded['runtimeOutputRetryMeta'] !== undefined) {
+    frame.runtimeOutputRetryMeta = validateRuntimeOutputRetryFence(
+      decoded['runtimeOutputRetryMeta'],
+      `WAL_RUNTIME_OUTPUT_RETRY_META_INVALID:height=${height}`,
+    );
+    assertRuntimeOutputRetryFenceMatchesOutputs(
+      frame.runtimeOutputRetryMeta,
+      frame.runtimeOutputs ?? [],
+      `WAL_RUNTIME_OUTPUT_RETRY_META_INVALID:height=${height}`,
     );
   }
   if (decoded['runtimeMachine'] !== undefined) {

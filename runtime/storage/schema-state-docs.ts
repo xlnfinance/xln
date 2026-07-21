@@ -1,5 +1,6 @@
 import type { BookState } from '../orderbook';
 import { validateBookStructure } from '../orderbook/validity';
+import { verifyAndWarmBookCommitment } from '../orderbook/commitment';
 import { validateAccountMachine, validateEntityState } from '../validation-utils';
 import { LIMITS } from '../constants';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from './types';
@@ -124,7 +125,7 @@ const validateBookHeader = (value: unknown): BookState => {
   requireExactBoundaryKeys(book, [
     'params', 'orders', 'bidBuckets', 'askBuckets', 'bidBucketIdsDesc',
     'askBucketIdsAsc', 'nextSeq', 'tradeCount', 'tradeQtySum', 'eventHash',
-  ], [], `${code}_FIELDS`);
+  ], ['commitmentHash'], `${code}_FIELDS`);
   const params = requireBoundaryRecord(book['params'], `${code}_PARAMS`);
   requireExactBoundaryKeys(params, ['bucketWidthTicks', 'maxOrders', 'stpPolicy'], [], `${code}_PARAM_FIELDS`);
   requireStorageBigInt(params['bucketWidthTicks'], `${code}_BUCKET_WIDTH`, 1n);
@@ -146,6 +147,7 @@ export const validateStorageBookDocValue = (value: unknown): BookState => {
   const book = validateBookHeader(value);
   const report = validateBookStructure(book);
   if (!report.ok) throw new Error(`STORAGE_BOOK_DOC_STRUCTURE_INVALID:${report.errors.join('|')}`);
+  verifyAndWarmBookCommitment(book, 'STORAGE_BOOK_DOC_COMMITMENT');
   return book;
 };
 

@@ -36,7 +36,7 @@ env.runtimeConfig = {
     frameDbMaxBytes: 1_000_000_000,
     frameDbRetainFrames: 100,
     materializePeriodFrames: 50,
-    canonicalHashPeriodFrames: 1,
+    canonicalHashPeriodFrames: 0,
     accountMerkleRadix: 16,
   },
 };

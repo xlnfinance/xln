@@ -428,8 +428,7 @@ async function cancelFirstOpenSwapOrder(page: Page): Promise<void> {
 async function runtimeDbMeta(page: Page) {
   return await page.evaluate(async () => {
     const env = (window as any).isolatedEnv;
-    const XLN = (window as any).XLN
-      || await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
+    const XLN = (window as any).__xln?.instance;
     if (!env || !XLN?.getPersistedLatestHeight) return { ok: false, error: 'env/xln missing' };
     const latestN = Number(await XLN.getPersistedLatestHeight(env) || 0);
     const checkpointList = await XLN.listPersistedCheckpointHeights(env);
@@ -536,8 +535,7 @@ async function outCap(page: Page, entityId: string, cpId: string): Promise<bigin
   return await page.evaluate(async ({ entityId, cpId }) => {
     const env = (window as any).isolatedEnv;
     if (!env?.eReplicas) throw new Error('isolatedEnv missing');
-    const runtimeModule = (window as any).XLN
-      || await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
+    const runtimeModule = (window as any).__xln?.instance;
     const deriveDelta = (runtimeModule as any)?.deriveDelta;
     if (typeof deriveDelta !== 'function') {
       throw new Error('deriveDelta missing');
@@ -635,7 +633,9 @@ async function setSnapshotInterval(page: Page, frames: number) {
     const env = (window as any).isolatedEnv;
     if (!env) return false;
     if (!env.runtimeConfig) env.runtimeConfig = {};
+    if (!env.runtimeConfig.storage) env.runtimeConfig.storage = {};
     env.runtimeConfig.snapshotIntervalFrames = frames;
+    env.runtimeConfig.storage.snapshotPeriodFrames = frames;
     return true;
   }, frames);
   expect(ok, 'setSnapshotInterval failed').toBe(true);
@@ -759,7 +759,16 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     expect(aliceAfter.hasEnv, 'Alice env must exist after reload').toBe(true);
     expect(aliceAfter.entityCount, 'Alice entities must survive reload').toBeGreaterThan(0);
     expect(aliceAfter.runtimeHeight, 'Alice runtime height must persist').toBeGreaterThan(0);
-    expect(aliceAfter.historyFrames, 'Alice history frames must persist').toBeGreaterThan(0);
+    // Runtime RAM retains only the finalized head plus work in progress. Older
+    // R/E/A frames belong to the LevelDB history/checkpoint stores and must not
+    // be rehydrated into env.history on reload.
+    expect(aliceAfter.historyFrames, 'Historical runtime frames must stay out of RAM').toBe(0);
+    expect(aliceDbAfter.hasSnapshotCheckpoint, 'Compacted history must retain its checkpoint on disk').toBe(true);
+    expect(
+      aliceDbAfter.frameTimeline.some((frame: { h?: number; missing?: boolean }) =>
+        !frame.missing && Number(frame.h || 0) > Number(aliceDbAfter.checkpoint || 0)),
+      'Post-checkpoint WAL inputs must remain readable from LevelDB',
+    ).toBe(true);
     expect(aliceOutAfterReload, 'Alice 500 USDC faucet state must persist').toBe(aliceOutBeforeReload);
     expect(aliceOutAfterReload, 'Alice must remain funded after replayed payments and swaps').toBeGreaterThan(0n);
     expect(aliceSwapAfter.accountSwapOffersSize, 'Alice canceled swap offer must stay canceled after genesis replay').toBe(aliceSwapBefore.accountSwapOffersSize);
@@ -768,7 +777,11 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
       /^(genesis:1|snapshot:\d+|checkpoint:\d+)$/.test(String(aliceAfter.replayMeta?.selectedSnapshotLabel || '')),
       `Alice restore must report a valid replay snapshot label, got ${String(aliceAfter.replayMeta?.selectedSnapshotLabel || '')}`,
     ).toBe(true);
-    expect(Number(aliceAfter.replayMeta?.latestHeight || 0)).toBe(Number(aliceDbBefore.latest || 0));
+    // Watchers resume after restore and may commit cursor progress immediately.
+    // Recovery must preserve the old head and report the actual current head;
+    // requiring equality with the pre-reload height incorrectly forbids valid work.
+    expect(Number(aliceAfter.replayMeta?.latestHeight || 0)).toBeGreaterThanOrEqual(Number(aliceDbBefore.latest || 0));
+    expect(Number(aliceAfter.replayMeta?.latestHeight || 0)).toBe(Number(aliceDbAfter.latest || 0));
     expect(Number(aliceDbAfter.checkpoint || 0)).toBeGreaterThan(1);
     await bobContext.close().catch(() => undefined);
   });

@@ -2887,6 +2887,7 @@
 
   async function placeSwapOffer() {
     if (placingSwapOffer) return;
+    const placementStartedAt = performance.now();
     placingSwapOffer = true;
     submitError = '';
     try {
@@ -3073,6 +3074,11 @@
       }
 
       if (crossJurisdiction && targetRoute) {
+        const crossSubmitStartedAt = performance.now();
+        performance.measure('xln.cross_j.handler_to_plan', {
+          start: placementStartedAt,
+          end: crossSubmitStartedAt,
+        });
         const crossInputPlan = buildCrossSwapRuntimeInputPlan({
           sourceEntityId,
           sourceSignerId: signerId,
@@ -3085,12 +3091,24 @@
           shouldOpenTargetAccount: shouldAutoOpenCrossTargetAccount,
           shouldExtendTargetCredit: shouldAutoPrepareCrossInbound,
         });
-        if (crossInputPlan.setupInput) {
+        if (crossInputPlan.targetSetupTxs.length > 0) {
+          const prewarmStartedAt = performance.now();
           await prewarmCounterpartyProfiles(runtimeEnv, [targetRoute.targetHubEntityId]);
+          performance.measure('xln.cross_j.profile_prewarm', {
+            start: prewarmStartedAt,
+            end: performance.now(),
+          });
         }
-        for (const runtimeInput of crossInputPlan.orderedInputs) {
-          await submitRuntimeInput(runtimeInput);
-        }
+        const runtimeSubmitStartedAt = performance.now();
+        await submitRuntimeInput(crossInputPlan.input);
+        performance.measure('xln.cross_j.runtime_submit', {
+          start: runtimeSubmitStartedAt,
+          end: performance.now(),
+        });
+        performance.measure('xln.cross_j.submit_total', {
+          start: crossSubmitStartedAt,
+          end: performance.now(),
+        });
       } else {
         entityTxs.push({
           type: 'placeSwapOffer' as const,

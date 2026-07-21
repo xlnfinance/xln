@@ -582,24 +582,23 @@ describe('runtime frame atomicity', () => {
       height: 1,
       timestamp: 1_000,
       replicaMetaDigest: hash('f1'),
+      replicaMetaCheckpoint: false,
+      replicaMetaStateMode: 'live-head',
       runtimeInput,
-      runtimeMachineBeforeApply: { runtimeInput, jReplicas: [] },
       runtimeMachine: { runtimeInput, jReplicas: [] },
       logs: [],
     });
 
     const decoded = decodePersistedFrameJournal(payload, 1);
-    if (!decoded?.runtimeMachineBeforeApply || !decoded.runtimeMachine) {
+    if (!decoded?.runtimeMachine) {
       throw new Error('TEST_WAL_RUNTIME_MACHINE_MISSING');
     }
-    for (const snapshot of [decoded.runtimeMachineBeforeApply, decoded.runtimeMachine]) {
-      const imports = (snapshot['runtimeInput'] as RuntimeInput).runtimeTxs
-        .filter(tx => tx.type === 'importReplica');
-      expect(imports.slice(4, 8).map(tx => tx.data.config.validators)).toEqual(
-        Array.from({ length: 4 }, () => ['6', '7', '8', '9']),
-      );
-      expect(new Set(imports.slice(4, 8).map(tx => tx.data.config)).size).toBe(4);
-    }
+    const imports = (decoded.runtimeMachine['runtimeInput'] as RuntimeInput).runtimeTxs
+      .filter(tx => tx.type === 'importReplica');
+    expect(imports.slice(4, 8).map(tx => tx.data.config.validators)).toEqual(
+      Array.from({ length: 4 }, () => ['6', '7', '8', '9']),
+    );
+    expect(new Set(imports.slice(4, 8).map(tx => tx.data.config)).size).toBe(4);
   });
 
   test('strict scenarios preserve the original runtime failure instead of replacing its stack', async () => {

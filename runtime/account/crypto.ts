@@ -458,9 +458,11 @@ export function getSignerPrivateKey(env: SignerKeyEnv, signerId: string): Uint8A
     return exactRegistered;
   }
   if (isHexAddress(key)) {
+    const registeredCount = getSignerKeyStore(env)?.privateKeys.size ?? 0;
     throw new Error(
       `MISSING_SIGNER_KEY: no registered private key for signer ${key}. ` +
-      `This runtime must prewarm its local signer EOAs on env creation.`,
+      `This runtime must prewarm its local signer EOAs on env creation. ` +
+      `registeredCount=${registeredCount}`,
     );
   }
   throw new Error(`UNSUPPORTED_SIGNER_ID: "${signerId}" is not numeric or a registered EOA address.`);

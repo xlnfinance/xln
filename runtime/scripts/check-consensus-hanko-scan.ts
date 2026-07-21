@@ -71,10 +71,11 @@ assertOrder(accountConsensus, accountConsensusPath, [
   'true,',
   "assertNoUnilateralSettlementMutation(clonedMachine, beforeSettlement, accountTx, 'receiver/validate');",
   'const frameHashMismatch = await verifySenderFrameHash',
-  'accountStateRoot: computeAccountStateRoot(clonedMachine),',
-  'const localStateHash = await createFrameHash(localFrame);',
-  'if (localStateHash !== receivedFrame.stateHash)',
-  'const localProofBodyHash = buildAccountProofBodyFromEnv(env, clonedMachine).proofBodyHash;',
+  'const localAccountStateRoot = computeAccountStateRoot(clonedMachine);',
+  'localAccountStateRoot !== receivedFrame.accountStateRoot',
+  '!accountFrameDeltasEqual(ourFinalDeltas, receivedFrame.deltas)',
+  'const proofResult = buildAccountProofBodyFromEnv(env, clonedMachine);',
+  'const localProofBodyHash = proofResult.proofBodyHash;',
   'const frameSealError = disputeSealRequirementError(',
 ]);
 
@@ -134,7 +135,9 @@ assertOrder(entityFrame, entityFramePath, [
   'txs: txs.map(canonicalEntityTxForFrameHash),',
   'stateRoot: stateRoot.toLowerCase(),',
   'authorityRoot: authorityRoot.toLowerCase(),',
-  'return ethers.keccak256(ethers.toUtf8Bytes(encodeCanonicalEntityConsensusValue(frameData)));',
+  'const encoded = encodeCanonicalEntityConsensusValue(frameData);',
+  'const hash = ethers.keccak256(ethers.toUtf8Bytes(encoded));',
+  'return hash;',
 ]);
 assertOrder(entityFrame, entityFramePath, [
   'const stateRoot = computeCanonicalEntityConsensusStateHash(newState);',

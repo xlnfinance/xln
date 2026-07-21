@@ -45,7 +45,14 @@ describe('checkpoint persistence with pending bilateral state', () => {
     const env = createEmptyEnv(seed);
     env.runtimeId = runtimeId;
     env.dbNamespace = runtimeId;
-    env.runtimeConfig = { ...(env.runtimeConfig || {}), snapshotIntervalFrames: 1 };
+    env.runtimeConfig = {
+      ...(env.runtimeConfig || {}),
+      storage: {
+        ...env.runtimeConfig?.storage,
+        snapshotPeriodFrames: 1,
+        materializePeriodFrames: 1,
+      },
+    };
     env.quietRuntimeLogs = true;
 
     const signerA = deriveSignerAddressSync(seed, '1');

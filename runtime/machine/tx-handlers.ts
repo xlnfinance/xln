@@ -43,7 +43,7 @@ import {
 } from '../utils';
 import { createStructuredLogger } from '../infra/logger';
 import { cloneEntityState } from '../state-helpers';
-import { buildCertifiedEntityLineagePlan } from '../storage/entity-lineage';
+import { buildRuntimeCheckpointLineagePlan } from '../storage/entity-lineage';
 import {
   assertCertifiedRegistrationEvidence,
   assertJAuthorityRuntimeTxAuthorized,
@@ -245,7 +245,12 @@ const resolveImportCheckpointState = (
   signerId: string,
   config: EntityState['config'],
 ): EntityState => {
-  const selected = buildCertifiedEntityLineagePlan(env).lookup.get(entityId);
+  // Live Runtime memory keeps only the latest certified Entity endpoint. The
+  // complete certificate history is an inspection/replay concern stored in the
+  // frame DB; requiring it here would turn every late validator import into an
+  // accidental in-memory archive dependency. Bind the import to the exact
+  // already-certified local endpoint that the next Runtime checkpoint uses.
+  const selected = buildRuntimeCheckpointLineagePlan(env).lookup.get(entityId);
   if (!selected) throw new Error(`IMPORT_REPLICA_CERTIFIED_CHECKPOINT_MISSING:${entityId}`);
   if (!selected.state.config.validators.some(validator => (
     String(validator).toLowerCase() === signerId

@@ -44,6 +44,7 @@ type EntityIdleSnapshot = {
   watcherScannedJHeight: number;
   finalizedJHeight: number;
   pendingWorkCount: number;
+  pendingSemanticJEventCount: number;
   recentInputs: Array<{
     runtimeHeight: number;
     txTypes: string[];
@@ -236,7 +237,10 @@ async function readEntityIdleSnapshot(
           mempool?: unknown[];
           proposal?: unknown;
           lockedFrame?: unknown;
-          jHistory?: { scannedThroughHeight?: number };
+          jHistory?: {
+            scannedThroughHeight?: number;
+            eventBlocks?: Map<number, unknown>;
+          };
           state?: {
             entityId?: string;
             height?: number;
@@ -281,6 +285,11 @@ async function readEntityIdleSnapshot(
     );
     const accounts = Array.from(replica.state.accounts?.values() ?? []);
     const runtimeMempool = env.runtimeMempool;
+    const finalizedJHeight = Number(replica.state.lastFinalizedJHeight ?? 0);
+    const projectedJHeight = Number(replica.jHistory?.scannedThroughHeight ?? 0);
+    const pendingSemanticJEventCount = Array.from(replica.jHistory?.eventBlocks?.keys?.() ?? [])
+      .filter(height => Number(height) > finalizedJHeight && Number(height) <= projectedJHeight)
+      .length;
     const pendingWorkCount =
       (runtimeMempool?.runtimeTxs?.length ?? 0) +
       (runtimeMempool?.entityInputs?.length ?? 0) +
@@ -308,16 +317,18 @@ async function readEntityIdleSnapshot(
     return {
       quiescent:
         pendingWorkCount === 0 &&
+        pendingSemanticJEventCount === 0 &&
         (replica.mempool?.length ?? 0) === 0 &&
         !replica.proposal &&
         !replica.lockedFrame &&
         accounts.every((account) => (account.mempool?.length ?? 0) === 0 && !account.pendingFrame),
       runtimeHeight: Number(env.height ?? 0),
       entityHeight: Number(replica.state.height ?? 0),
-      projectedJHeight: Number(replica.jHistory?.scannedThroughHeight ?? 0),
+      projectedJHeight,
       watcherScannedJHeight,
-      finalizedJHeight: Number(replica.state.lastFinalizedJHeight ?? 0),
+      finalizedJHeight,
       pendingWorkCount,
+      pendingSemanticJEventCount,
       recentInputs,
     };
   }, { targetEntityId: entityId, targetSignerId: signerId });
@@ -495,6 +506,21 @@ test.describe('E2E User Journey', () => {
       async () => (await readEntityIdleSnapshot(page, initial.entityId, initial.signerId)).quiescent,
       { timeout: 20_000, intervals: [100, 250, 500], message: 'Entity must become idle after faucet ACK' },
     ).toBe(true);
+    const beforeInitialJCatchup = await readEntityIdleSnapshot(page, initial.entityId, initial.signerId);
+    await mineEmptyJurisdictionBlock(page);
+    await expect.poll(
+      async () => (await readEntityIdleSnapshot(page, initial.entityId, initial.signerId)).finalizedJHeight,
+      {
+        timeout: 10_000,
+        intervals: [100, 250, 500, 1000],
+        message: 'the new Entity must certify pre-existing jurisdiction bootstrap evidence before the idle check',
+      },
+    ).toBeGreaterThan(beforeInitialJCatchup.finalizedJHeight);
+    await expect.poll(
+      async () => (await readEntityIdleSnapshot(page, initial.entityId, initial.signerId)).quiescent,
+      { timeout: 10_000, intervals: [100, 250, 500], message: 'Entity must settle after initial J catch-up' },
+    ).toBe(true);
+
     const idleBefore = await readEntityIdleSnapshot(page, initial.entityId, initial.signerId);
     await mineEmptyJurisdictionBlock(page);
     await expect.poll(

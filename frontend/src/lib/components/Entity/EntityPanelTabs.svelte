@@ -54,15 +54,11 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   import ContextSwitcher from './ContextSwitcher.svelte';
   import {
     OFFCHAIN_FAUCET_REQUEST_TIMEOUT_MS,
-    attachOffchainFaucetReceipt,
     faucetPendingKey,
     type FaucetApiResult,
-    type PendingOffchainFaucet,
     type PendingReserveFaucet,
     readJsonResponse,
-    reconcilePendingOffchainFaucets,
     reconcilePendingReserveFaucets,
-    removeOffchainFaucet,
   } from './account-faucet';
   import {
     buildMoveArrowPath,
@@ -1081,11 +1077,8 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   // On-chain reserves are derived directly from replica.state.reserves.
   let onchainReserves: Map<number, bigint> = new Map();
   let pendingReserveFaucets: PendingReserveFaucet[] = [];
-  let pendingOffchainFaucets: PendingOffchainFaucet[] = [];
+  let pendingOffchainFaucetKeys = new Set<string>();
   let assetFaucetSubmitting = false;
-  $: pendingOffchainFaucetKeys = new Set(
-    pendingOffchainFaucets.map(req => faucetPendingKey(req.hubEntityId, req.tokenId)),
-  );
   // External tokens (ERC20 balances held by signer EOA)
   let externalTokens: ExternalToken[] = [];
   let externalTokensLoading = true;
@@ -1508,19 +1501,22 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       toasts.error(`Reserve faucet failed: ${(err as Error).message}`);
     }
   }
-	  async function faucetOffchain(hubEntityId: string, tokenId: number = 1) {
-	    const entityId = replica?.state?.entityId || tab.entityId;
-	    if (!entityId) {
-	      notifyUserActionError('offchain-faucet', 'Active entity missing for offchain faucet');
-	      return;
-	    }
-	    if (!isSameJurisdictionEntityInReplicas(activeReplicas, replica, tab.entityId, entityId, hubEntityId)) {
-	      toasts.error('Switch to the matching jurisdiction entity before funding that account.');
-	      return;
-	    }
-	    try {
+  async function faucetOffchain(hubEntityId: string, tokenId: number = 1) {
+    const entityId = replica?.state?.entityId || tab.entityId;
+    if (!entityId) {
+      notifyUserActionError('offchain-faucet', 'Active entity missing for offchain faucet');
+      return;
+    }
+    if (!isSameJurisdictionEntityInReplicas(activeReplicas, replica, tab.entityId, entityId, hubEntityId)) {
+      toasts.error('Switch to the matching jurisdiction entity before funding that account.');
+      return;
+    }
+    const tokenMeta = resolveReserveTokenMeta(tokenId);
+    const pendingKey = faucetPendingKey(hubEntityId, tokenMeta.tokenId);
+    if (pendingOffchainFaucetKeys.has(pendingKey)) return;
+    pendingOffchainFaucetKeys = new Set([...pendingOffchainFaucetKeys, pendingKey]);
+    try {
       const requestApiBase = resolveApiBase();
-      const tokenMeta = resolveReserveTokenMeta(tokenId);
       const amountStr = tokenMeta.symbol === 'WETH' || tokenMeta.symbol === 'ETH' ? '0.2' : '100';
       const runtimeId = getRuntimeId(actionRuntimeEnv);
       if (!runtimeId) {
@@ -1529,19 +1525,6 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       if (!hubEntityId) {
         throw new Error('Offchain faucet requires a target hub account.');
       }
-      const pendingKey = faucetPendingKey(hubEntityId, tokenMeta.tokenId);
-      const amountWei = parseTokenAmountInput(amountStr, tokenMeta.decimals);
-      const baselineOut = getDerivedDeltaForAccount(hubEntityId, tokenMeta.tokenId)?.outCapacity ?? 0n;
-      const pendingRequest = {
-        hubEntityId,
-        tokenId: tokenMeta.tokenId,
-        amount: amountWei,
-        baselineOut,
-        expectedOut: baselineOut + amountWei,
-        startedAt: Date.now(),
-        symbol: tokenMeta.symbol,
-      };
-      pendingOffchainFaucets = [...pendingOffchainFaucets, pendingRequest];
       toasts.info(`Funding ${tokenMeta.symbol} account...`);
       const requestTimeoutMs = OFFCHAIN_FAUCET_REQUEST_TIMEOUT_MS;
       let response: Response | null = null;
@@ -1583,24 +1566,18 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
         });
         throw new Error(result?.error || `Faucet failed (${status})`);
       }
-      pendingOffchainFaucets = attachOffchainFaucetReceipt(
-        pendingOffchainFaucets,
-        pendingKey,
-        result,
-      );
-      recordServerIngressReceipt(result);
-      const queueLabel = result?.accountReady === false
-        ? 'Account setup is settling; faucet payment is queued.'
-        : 'Faucet payment queued.';
-      toasts.info(`${queueLabel} ${result?.requestId ? `Receipt ${result.requestId}` : ''}`.trim());
+      toasts.success(`Faucet accepted: ${amountStr} ${tokenMeta.symbol}.`);
     } catch (err) {
       logEntityPanelDiagnostic('Offchain faucet failed', {
         hubEntityId,
         tokenId,
         error: toErrorMessage(err, 'Offchain faucet failed'),
       });
-      pendingOffchainFaucets = removeOffchainFaucet(pendingOffchainFaucets, hubEntityId, tokenId);
       toasts.error(`Offchain faucet failed: ${(err as Error).message}`);
+    } finally {
+      const next = new Set(pendingOffchainFaucetKeys);
+      next.delete(pendingKey);
+      pendingOffchainFaucetKeys = next;
     }
   }
   function handleAccountFaucet(event: CustomEvent<{ counterpartyId: string; tokenId: number }>) {
@@ -2015,32 +1992,6 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     }
     if (remaining.length !== pendingReserveFaucets.length) {
       pendingReserveFaucets = remaining;
-    }
-  }
-  $: if (pendingOffchainFaucets.length > 0) {
-    const now = Date.now();
-    const accountStateSignal = [
-      Number(replica?.state?.height ?? 0),
-      accountSpendableByToken.size,
-      assetLedgerGrandTotal,
-    ].join(':');
-    void accountStateSignal;
-    const { remaining, received, timedOut } = reconcilePendingOffchainFaucets(
-      pendingOffchainFaucets,
-      now,
-      (req) => getDerivedDeltaForAccount(req.hubEntityId, req.tokenId)?.outCapacity ?? req.baselineOut,
-    );
-    for (const { req, currentOut } of received) {
-      const elapsedMs = now - req.startedAt;
-      toasts.success(
-        `Received ${formatAmount(req.amount, getTokenInfo(req.tokenId).decimals)} ${req.symbol} in account (${(elapsedMs / 1000).toFixed(1)}s).`,
-      );
-    }
-    for (const req of timedOut) {
-      toasts.error(`Account faucet timed out for ${req.symbol}. Check server logs.`);
-    }
-    if (remaining.length !== pendingOffchainFaucets.length) {
-      pendingOffchainFaucets = remaining;
     }
   }
   const EXTERNAL_WALLET_REQUEST_TIMEOUT_MS = 5_000;

@@ -1,4 +1,8 @@
-import { validateAccountFrame } from '../validation-utils';
+import {
+  validateAccountFrame,
+  validateConsensusConfig,
+  validateProposedEntityFrame,
+} from '../validation-utils';
 import {
   requireBoundaryInteger,
   requireBoundaryRecord,
@@ -6,7 +10,11 @@ import {
   validateFrameLogEntries,
 } from '../protocol/boundary-validation';
 import { assertStorageSchemaVersion } from './keys';
-import type { StoredAccountFrameValue, StoredRuntimeActivityValue } from './frame-db';
+import type {
+  StoredAccountFrameValue,
+  StoredEntityFrameValue,
+  StoredRuntimeActivityValue,
+} from './frame-db';
 import type { StorageFrameDbHead } from './types';
 
 const requireStringArray = (value: unknown, code: string): string[] => {
@@ -145,5 +153,46 @@ export const validateStoredAccountFrameValue = (
       record['timestamp'],
       `FRAME_DB_ACCOUNT_FRAME_TIMESTAMP_INVALID:height=${accountHeight}`,
     ),
+  };
+};
+
+export const validateStoredEntityFrameValue = (
+  value: unknown,
+  entityHeight: number,
+): StoredEntityFrameValue => {
+  const code = `FRAME_DB_ENTITY_FRAME_FIELDS_INVALID:height=${entityHeight}`;
+  const record = requireBoundaryRecord(value, code);
+  requireExactBoundaryKeys(record, ['link', 'runtimeHeight', 'timestamp'], [], code);
+  const link = requireBoundaryRecord(record['link'], `${code}:link`);
+  requireExactBoundaryKeys(link, ['frame', 'postAuthority'], [], `${code}:link`);
+  const frame = validateProposedEntityFrame(link['frame'], `FrameDb.EntityFrame[${entityHeight}]`);
+  if (frame.height !== entityHeight) {
+    throw new Error(`FRAME_DB_ENTITY_FRAME_HEIGHT_MISMATCH:key=${entityHeight}:frame=${frame.height}`);
+  }
+  const authority = requireBoundaryRecord(link['postAuthority'], `${code}:postAuthority`);
+  requireExactBoundaryKeys(authority, ['config', 'leaderState'], [], `${code}:postAuthority`);
+  validateConsensusConfig(authority['config'], `${code}:postAuthority.config`);
+  const leaderState = requireBoundaryRecord(authority['leaderState'], `${code}:postAuthority.leaderState`);
+  requireExactBoundaryKeys(
+    leaderState,
+    ['activeValidatorId', 'view', 'changedAtHeight'],
+    [],
+    `${code}:postAuthority.leaderState`,
+  );
+  if (typeof leaderState['activeValidatorId'] !== 'string' || leaderState['activeValidatorId'].length === 0) {
+    throw new Error(`${code}:postAuthority.leaderState.activeValidatorId`);
+  }
+  requireBoundaryInteger(leaderState['view'], `${code}:postAuthority.leaderState.view`);
+  requireBoundaryInteger(
+    leaderState['changedAtHeight'],
+    `${code}:postAuthority.leaderState.changedAtHeight`,
+  );
+  return {
+    link: {
+      frame,
+      postAuthority: authority as unknown as StoredEntityFrameValue['link']['postAuthority'],
+    },
+    runtimeHeight: requireBoundaryInteger(record['runtimeHeight'], `${code}:runtimeHeight`, 1),
+    timestamp: requireBoundaryInteger(record['timestamp'], `${code}:timestamp`),
   };
 };

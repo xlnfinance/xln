@@ -12,6 +12,7 @@ export type RawMarketMakerHealthPayload = {
   apiUrl?: string;
   directWsUrl?: string;
   startupPhase?: string;
+  runtime?: MarketMakerHealthPayload['runtime'];
   p2p?: MarketMakerHealthPayload['p2p'];
   gossip?: MarketMakerHealthPayload['gossip'];
   enabled?: boolean;
@@ -57,6 +58,7 @@ export const normalizeMarketMakerHealthPayload = (
   if (payload.apiUrl !== undefined) wrapped.apiUrl = payload.apiUrl;
   if (payload.directWsUrl !== undefined) wrapped.directWsUrl = payload.directWsUrl;
   if (payload.startupPhase !== undefined) wrapped.startupPhase = payload.startupPhase;
+  if (payload.runtime !== undefined) wrapped.runtime = payload.runtime;
   if (payload.p2p !== undefined) wrapped.p2p = payload.p2p;
   if (payload.gossip !== undefined) wrapped.gossip = payload.gossip;
   if (payload.bootstrap !== undefined) wrapped.bootstrap = payload.bootstrap;

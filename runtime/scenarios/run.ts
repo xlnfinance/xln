@@ -235,6 +235,7 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
           JADAPTER_MODE: mode,
           ANVIL_RPC: rpcUrl,
           XLN_DB_PATH: dbPath,
+          XLN_ENTITY_STATE_ROOT_AUDIT: '1',
         },
       });
 
@@ -350,6 +351,7 @@ async function main() {
 
   cleanupTestArtifactsBeforeRun({ reason: 'scenario', argv: process.argv.slice(2) });
   process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1';
+  process.env['XLN_ENTITY_STATE_ROOT_AUDIT'] = '1';
 
   // Set env vars — scenarios read these via getJAdapterMode() / ensureJAdapter()
   if (mode) process.env['JADAPTER_MODE'] = mode;
@@ -390,7 +392,9 @@ async function main() {
 }
 
 main().catch((error: unknown) => {
-  const details = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  const details = error instanceof Error
+    ? `${error.name}: ${error.message}\n${error.stack ?? '(no stack)'}`
+    : String(error);
   console.error('\nScenario FAILED:', details);
   process.exit(1);
 });

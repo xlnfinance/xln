@@ -816,21 +816,20 @@ test('dev DockRoot entity panel resolves seed through remote RuntimeView project
   });
 
   await page.waitForSelector('.entity-panel-wrapper [data-testid="entity-workspace"]', { timeout: REMOTE_E2E_WAIT_MS });
-  const panelState = await page.evaluate((expected) => {
+  await expect(page.locator(`[data-panel-id="${opened.tabId}"]`)).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  const panelState = await page.evaluate(() => {
     const workspaces = Array.from(document.querySelectorAll('.entity-panel-wrapper [data-testid="entity-workspace"]'));
     const statusErrors = Array.from(document.querySelectorAll('.entity-panel-status.error')).map((node) => node.textContent || '');
     return {
       workspaceCount: workspaces.length,
-      hasExpectedPanel: !!document.querySelector(`[data-panel-id="${expected.tabId}"]`),
       statusErrors,
       bodyText: document.body.textContent || '',
     };
-  }, opened);
+  });
 
   expect(opened.entityId).toMatch(/^0x[0-9a-f]{64}$/);
   expect(opened.signerId).toMatch(/^0x[0-9a-f]{40}$/);
   expect(panelState.workspaceCount).toBeGreaterThan(0);
-  expect(panelState.hasExpectedPanel).toBe(true);
   expect(panelState.statusErrors).toEqual([]);
   expect(panelState.bodyText).toContain(opened.entityId);
 });

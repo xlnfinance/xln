@@ -12,6 +12,7 @@ import {
   createEmptyEnv,
   enqueueRuntimeInput,
   entityNeedsPeriodicWake,
+  hasRuntimeWork,
   process,
   registerRuntimeFrameCommitCallback,
   startRuntimeLoop,
@@ -203,6 +204,53 @@ describe('runtime ingress timestamp', () => {
     await process(env);
     expect(env.runtimeMempool?.entityInputs ?? []).toHaveLength(0);
     expect(env.runtimeMempool?.queuedAt).toBeUndefined();
+  });
+
+  test('stale queuedAt without payload cannot spin empty Runtime cycles', () => {
+    const env = createIsolatedEnv('runtime-empty-queued-at');
+    env.timestamp = 1_000;
+    env.runtimeMempool = {
+      runtimeTxs: [],
+      entityInputs: [],
+      queuedAt: 9_000,
+    };
+    env.runtimeInput = env.runtimeMempool;
+
+    expect(hasRuntimeWork(env)).toBe(false);
+  });
+
+  test('runtime drains the whole accepted Entity input bundle in one R-frame by default', async () => {
+    const env = createIsolatedEnv('runtime-entity-input-no-default-cap');
+    env.quietRuntimeLogs = true;
+    env.scenarioMode = true;
+    env.timestamp = 1_000;
+
+    const replicas = Array.from({ length: 12 }, (_, index) => {
+      const label = `uncapped-${index}`;
+      const signerId = deriveSignerAddressSync(env.runtimeSeed!, label).toLowerCase();
+      registerSignerKey(env, signerId, deriveSignerKeySync(env.runtimeSeed!, label));
+      const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
+      env.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId));
+      return { entityId, signerId };
+    });
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: replicas.map(({ entityId, signerId }, index) => ({
+        entityId,
+        signerId,
+        entityTxs: [{
+          type: 'profile-update' as const,
+          data: { profile: { entityId, name: `uncapped-${index}` } },
+        }],
+      })),
+    });
+
+    await process(env);
+
+    expect(env.height).toBe(1);
+    expect(env.history.at(-1)?.runtimeInput.entityInputs).toHaveLength(12);
+    expect(env.runtimeMempool?.entityInputs ?? []).toHaveLength(0);
+    expect(env.runtimeState?.maxEntityInputsPerFrame).toBeUndefined();
   });
 
   test('runtime tx frame cap never splits one accepted entity input', async () => {

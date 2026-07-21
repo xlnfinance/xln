@@ -279,7 +279,7 @@ describe('production startup wiring', () => {
     expect(script).toContain('export RELAY_URL=${RELAY_URL:-$INTERNAL_RELAY_URL}');
     expect(script).toContain('--relay-url "$RELAY_URL"');
     expect(script).toContain('--rpc2-url "$ANVIL_RPC2"');
-    expect(script).toContain('export XLN_RUNTIME_EXIT_ON_FATAL=${XLN_RUNTIME_EXIT_ON_FATAL:-1}');
+    expect(script).toContain('export XLN_RUNTIME_EXIT_ON_FATAL=${XLN_RUNTIME_EXIT_ON_FATAL:-0}');
     expect(script).toContain('export XLN_STORAGE_WRITE_TIMEOUT_MS=${XLN_STORAGE_WRITE_TIMEOUT_MS:-60000}');
     expect(script).toContain('export XLN_SNAPSHOT_INTERVAL_FRAMES=${XLN_SNAPSHOT_INTERVAL_FRAMES:-1024}');
     expect(script).not.toContain('HUB_BOOTSTRAP_PAUSE_STORAGE');
@@ -291,10 +291,10 @@ describe('production startup wiring', () => {
     expect(script).toContain('export MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS=${MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS:-60000}');
     expect(script).toContain('export XLN_MARKET_MAKER_READY_TIMEOUT_MS=${XLN_MARKET_MAKER_READY_TIMEOUT_MS:-600000}');
     expect(script).not.toContain('MARKET_MAKER_PERSIST_READY_SNAPSHOT');
-    expect(script).toContain('export XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME=${XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME:-8}');
-    expect(script).toContain('export XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME=${XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME:-64}');
-    expect(script).toContain('export MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME=${MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME:-8}');
-    expect(script).toContain('export MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME=${MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME:-64}');
+    expect(script).toContain('export XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME=${XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME:-0}');
+    expect(script).toContain('export XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME=${XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME:-0}');
+    expect(script).toContain('export MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME=${MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME:-0}');
+    expect(script).toContain('export MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME=${MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME:-0}');
     expect(script).toContain('export XLN_CUSTODY_PUBLIC_RPC_URL=${XLN_CUSTODY_PUBLIC_RPC_URL:-wss://custody.xln.finance/rpc}');
     expect(script).toContain('export MARKET_MAKER_MAX_LEVELS_PER_PAIR=${MARKET_MAKER_MAX_LEVELS_PER_PAIR:-10}');
     expect(script).toContain('export MARKET_MAKER_CROSS_LEVELS_PER_PAIR=${MARKET_MAKER_CROSS_LEVELS_PER_PAIR:-3}');
@@ -348,7 +348,8 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('if (hubHealthPollInFlight) return hubHealthPollInFlight;');
     expect(orchestrator).toContain('const marketMakerPoller = createMarketMakerChildPoller({');
     expect(orchestrator).toContain('const pollMarketMakerInfo = marketMakerPoller.pollInfo;');
-    expect(orchestrator).toContain('const pollMarketMakerHealth = marketMakerPoller.pollHealth;');
+    expect(orchestrator).toContain('const pollMarketMakerHealth = async (): Promise<void> => {');
+    expect(orchestrator).toContain('observeManagedRuntimeHalt(marketMakerChild, marketMakerChild.lastHealth);');
     expect(marketMakerPoller).toContain('let healthPollInFlight: Promise<void> | null = null;');
     expect(marketMakerPoller).toContain('let infoPollInFlight: Promise<void> | null = null;');
     expect(marketMakerPoller).toContain('if (healthPollInFlight) return healthPollInFlight;');
@@ -439,7 +440,7 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('const buildRpcChildEnv = (): Record<string, string> => {');
     expect(orchestrator).toContain('const rpcProxyIndex = resolveRpcProxyIndex(pathname);');
     expect(orchestrator).toContain("return await proxyRpc(request, args.rpcUrls[rpcProxyIndex] || '', operatorAuthorized);");
-    expect(orchestrator).toContain("XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '1'");
+    expect(orchestrator).toContain("XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '0'");
     expect(orchestrator).toContain("XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000'");
     expect(orchestrator).not.toContain('HUB_BOOTSTRAP_PAUSE_STORAGE');
     expect(orchestrator).not.toContain('HUB_READY_SNAPSHOT');
@@ -559,6 +560,7 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('const buildLocalHubSignerLabels = (): string[] => {');
     expect(hubNode).toContain('const prewarmLocalHubSignerKeys = (): void => {');
     expect(hubNode).toContain('prewarmLocalHubSignerKeys();');
+    expect(hubNode.indexOf('prewarmLocalHubSignerKeys();')).toBeLessThan(hubNode.indexOf('const env = await main('));
     expect(hubNode.indexOf('prewarmLocalHubSignerKeys();')).toBeLessThan(hubNode.indexOf('startRuntimeLoop(env, {'));
     expect(hubNode).toContain('const hasLiveJAdapterForJurisdiction = (env: Env, jurisdictionName: string): boolean =>');
     expect(hubNode).toContain('if (!hasLiveJAdapterForJurisdiction(env, secondaryName)) {');
@@ -577,6 +579,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const buildLocalMarketMakerSignerLabels = (): string[] => {');
     expect(mmNode).toContain('const prewarmLocalMarketMakerSignerKeys = (): void => {');
     expect(mmNode).toContain('prewarmLocalMarketMakerSignerKeys();');
+    expect(mmNode.indexOf('prewarmLocalMarketMakerSignerKeys();')).toBeLessThan(mmNode.indexOf('const env = await main('));
     expect(mmNode.indexOf('prewarmLocalMarketMakerSignerKeys();')).toBeLessThan(mmNode.indexOf('startRuntimeLoop(env, {'));
     expect(mmNode).toContain('const hasLiveJurisdictionAdapter = (env: Env, jurisdiction: JurisdictionConfig): boolean => {');
     expect(mmNode).toContain('const targetRef = getJurisdictionIdentityRef(target);');
@@ -599,13 +602,13 @@ describe('production startup wiring', () => {
     expect(runtimeSource).not.toContain('void config;');
     expect(runtimeSource).toContain('else if (runtimeLoopTickDelayMs > 0)');
     expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '0'");
-    expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '8'");
-    expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '64'");
+    expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '0'");
+    expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '0'");
     expect(mmNode).toContain('maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME');
     expect(mmNode).toContain('maxEntityTxsPerFrame: MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME');
     expect(hubNode).toContain("process.env['XLN_RUNTIME_TICK_DELAY_MS'] || '0'");
-    expect(hubNode).toContain("process.env['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '8'");
-    expect(hubNode).toContain("process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '64'");
+    expect(hubNode).toContain("process.env['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '0'");
+    expect(hubNode).toContain("process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '0'");
     expect(hubNode).toContain('maxEntityInputsPerFrame: HUB_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME');
     expect(hubNode).toContain('maxEntityTxsPerFrame: HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME');
     expect(mmNode).toContain('const pushMarketMakerEntityTx = (');
@@ -1471,10 +1474,10 @@ describe('production startup wiring', () => {
     expect(smoke).not.toContain('XLN_HUB_BOOTSTRAP_PAUSE_STORAGE');
     expect(smoke).not.toContain('XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS');
     expect(smoke).not.toContain('XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT');
-    expect(smoke).toContain("process.env['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '8'");
-    expect(smoke).toContain("process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '64'");
-    expect(smoke).toContain("process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '8'");
-    expect(smoke).toContain("process.env['MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '64'");
+    expect(smoke).toContain("process.env['XLN_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '0'");
+    expect(smoke).toContain("process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '0'");
+    expect(smoke).toContain("process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '0'");
+    expect(smoke).toContain("process.env['MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '0'");
     expect(smoke).toContain("XLN_RUNTIME_PROCESS_SLOW_MS: process.env['XLN_RUNTIME_PROCESS_SLOW_MS'] || '250'");
     expect(smoke).toContain("XLN_ENTITY_FRAME_SLOW_MS: process.env['XLN_ENTITY_FRAME_SLOW_MS'] || '250'");
     expect(smoke).toContain('throw new Error(`LOCAL_PROD_SMOKE_MM_HEALTH_FAILED error=${message}`);');
@@ -1805,7 +1808,7 @@ describe('production startup wiring', () => {
     expect(orchestrator).not.toContain('--mesh-hub-identities-json');
   });
 
-  test('hub and market maker route consensus entity inputs through relay, not direct ws best-effort', () => {
+  test('hub and market maker prefer authenticated direct entity delivery with relay fallback', () => {
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
     const p2p = readFileSync(join(repoRoot, 'runtime/networking/p2p.ts'), 'utf8');
@@ -1813,8 +1816,10 @@ describe('production startup wiring', () => {
     expect(p2p).toContain('preferRelayForEntityInput?: boolean;');
     expect(p2p).toContain('if (this.preferRelayForEntityInput) {');
     expect(p2p).toContain("transport: 'relay'");
-    expect(hubNode).toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
-    expect(mmNode).toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
+    expect(hubNode).not.toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
+    expect(mmNode).not.toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
+    expect(hubNode).toContain('directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp)');
+    expect(mmNode).toContain('directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp)');
     expect(hubNode).toContain('preferRelayForEntityInput: true');
     expect(mmNode).toContain('preferRelayForEntityInput: true');
   });

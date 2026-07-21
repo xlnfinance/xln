@@ -117,6 +117,11 @@ const validateTimings = (value: unknown): void => {
 export const validateHubHealthPayload = (value: unknown): HubHealthPayload => {
   const health = recordAt(value, 'health');
   optionalSafeInteger(health, 'height', 'health');
+  if (health['runtime'] !== undefined) {
+    const runtime = recordAt(health['runtime'], 'health.runtime');
+    optionalField(runtime, 'halted', 'boolean', 'health.runtime');
+    optionalField(runtime, 'lifecyclePhase', 'string', 'health.runtime');
+  }
   if (health['gossip'] !== undefined) {
     const gossip = recordAt(health['gossip'], 'gossip');
     stringArray(gossip['visibleHubNames'], 'gossip.visibleHubNames');

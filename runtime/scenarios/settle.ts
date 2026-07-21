@@ -12,7 +12,7 @@
 
 import type { Env, SettlementDiff, SettlementOp } from '../types';
 import { compileOps } from '../protocol/settlement/operations';
-import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain as syncChainHelper, findReplica, setScenarioStorageEnabled, converge, processUntil } from './helpers';
+import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain as syncChainHelper, findReplica, setScenarioStorageEnabled, converge, processUntil, processJEvents } from './helpers';
 import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig, registerEntities as bootRegisterEntities } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { formatRuntime } from '../qa/runtime-ascii';
@@ -38,21 +38,6 @@ function assert(condition: unknown, message: string, env?: Env): asserts conditi
       console.log('='.repeat(80) + '\n');
     }
     throw new Error(`ASSERT: ${message}`);
-  }
-}
-
-async function processJEvents(env: Env): Promise<void> {
-  for (const [, jReplica] of env.jReplicas) {
-    const ja = jReplica.jadapter;
-    if (ja?.pollNow) await ja.pollNow();
-  }
-
-  const process = await getProcess();
-  const pendingInputs = env.runtimeInput?.entityInputs || [];
-  if (pendingInputs.length > 0) {
-    const toProcess = [...pendingInputs];
-    env.runtimeInput.entityInputs = [];
-    await process(env, toProcess);
   }
 }
 

@@ -2,6 +2,7 @@ import { writable, derived, get } from 'svelte/store';
 import { errorLog } from './errorLogStore';
 import { settings } from './settingsStore';
 import { activeEnv, activeRuntimeId, registerRuntimeAdapterSwitcher, runtimes, runtimeOperations } from './runtimeStore';
+import { vaultOperations } from './vaultStore';
 import { xlnEnvironment, setXlnEnvironment } from './embeddedRuntimeStore';
 import { toasts } from './toastStore';
 import {
@@ -835,14 +836,16 @@ const createEmbeddedRuntimeAdapter = async (
   targetEnv?: Env | null,
 ): Promise<RuntimeAdapter> => {
   let boundEnv = targetEnv ? (unwrapLiveRuntimeEnv(targetEnv) ?? targetEnv) : null;
-  if (!boundEnv && !getEnv()) {
-    const env = await xln.main(runtimeSeed ?? null);
-    setXlnEnvironment(env);
-    boundEnv = env;
-  }
   if (!boundEnv) {
     const env = getEnv();
     boundEnv = env ? (unwrapLiveRuntimeEnv(env) ?? env) : null;
+  }
+  if (!boundEnv) {
+    // No ad-hoc env construction here: the only way to obtain a correctly
+    // restored env (real signer keys, not just the generic index sweep) is
+    // the canonical vaultOperations.selectRuntime path in switchAppRuntimeAdapter,
+    // which always builds/passes targetEnv before this function is called.
+    throw new Error('EMBEDDED_RUNTIME_ADAPTER_ENV_MISSING: caller must restore env via the canonical runtime-selection path before requesting an adapter');
   }
   const boundRuntimeId = normalizeRuntimeConfigId(boundEnv?.runtimeId || '');
   const getLiveEnv = () => {
@@ -952,8 +955,16 @@ export const switchAppRuntimeAdapter = async (config: RuntimeAdapterConfig): Pro
       env = unwrapLiveRuntimeEnv(currentEnv) ?? currentEnv;
     }
   }
-  if (!env && selectedRuntime?.type === 'local' && selectedRuntime.seed) {
-    env = await xln.main(selectedRuntime.seed);
+  if (!env && selectedRuntimeId) {
+    // Canonical restore only: registers the runtime's real signer keys
+    // (not just the generic HD-index sweep) before any replay can run.
+    // Never construct an env for a known local runtime any other way.
+    await vaultOperations.selectRuntime(selectedRuntimeId);
+    const restored = get(runtimes).get(selectedRuntimeId);
+    env = restored?.type === 'local' ? (unwrapLiveRuntimeEnv(restored.env) ?? restored.env) : null;
+    if (!env) {
+      throw new Error(`EMBEDDED_RUNTIME_ENV_RESTORE_FAILED: selectRuntime completed but no local env is cached for ${selectedRuntimeId}`);
+    }
   }
   if (!env) {
     env = await xln.main(normalizedConfig.seed ?? null);
@@ -1049,7 +1060,23 @@ export async function initializeXLN(): Promise<Env | null> {
     // Load from IndexedDB - main() handles DB timeout internally
     let env: Env;
     try {
-      env = await xln.main(adapterConfig.seed ?? null);
+      const knownRuntimeId = String(get(activeRuntimeId) || '').toLowerCase();
+      if (knownRuntimeId) {
+        // A real user identity is already selected (vaultOperations.initialize()
+        // runs before this in bootApp()): canonical restore only, never the
+        // ambient generated-on-demand embedded-seed identity below.
+        await vaultOperations.selectRuntime(knownRuntimeId);
+        const restored = get(runtimes).get(knownRuntimeId);
+        const restoredEnv = restored?.type === 'local'
+          ? (unwrapLiveRuntimeEnv(restored.env) ?? restored.env)
+          : null;
+        if (!restoredEnv) {
+          throw new Error(`XLN_INIT_ENV_RESTORE_FAILED: selectRuntime completed but no local env is cached for ${knownRuntimeId}`);
+        }
+        env = restoredEnv;
+      } else {
+        env = await xln.main(adapterConfig.seed ?? null);
+      }
     } catch (restoreError) {
       if (!isFinancialRestoreFailure(restoreError)) {
         throw restoreError;

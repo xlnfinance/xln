@@ -1,4 +1,5 @@
 import {
+  applyRuntimeInput,
   createEmptyEnv,
   enqueueRuntimeInput,
   getFrameDb,
@@ -7,6 +8,8 @@ import {
   tryOpenDb,
   tryOpenFrameDb,
 } from '../../runtime';
+import { applyAccountInput } from '../../account/consensus';
+import { proposeAccountFrame } from '../../account/consensus/propose';
 import {
   deriveSignerAddressSync,
   deriveSignerKeySync,
@@ -17,12 +20,6 @@ import {
   computeAccountStateRoot,
 } from '../../account/state-root';
 import {
-  applyAccountJClaimInsert,
-  createAccountJClaimProof,
-  createAccountJClaimRecord,
-} from '../../account/j-claim-accumulator';
-import {
-  cacheCommittedAccountJClaimNodeChanges,
   getAccountJClaimNodeStore,
 } from '../../account/j-claim-store';
 import {
@@ -68,6 +65,7 @@ const jurisdiction: JurisdictionConfig = {
 const env = createEmptyEnv(seed);
 env.runtimeId = signerA;
 env.dbNamespace = signerA;
+env.scenarioMode = true;
 env.quietRuntimeLogs = true;
 env.activeJurisdiction = jurisdiction.name;
 env.runtimeConfig = { ...env.runtimeConfig, storage: { enabled: false } };
@@ -78,7 +76,7 @@ const storageConfig = {
     frameDbMaxBytes: 1_000_000_000,
     frameDbRetainFrames: 100_000,
     materializePeriodFrames: 1,
-    canonicalHashPeriodFrames: 1,
+    canonicalHashPeriodFrames: 0,
     accountMerkleRadix: 16,
 };
 env.jReplicas.set(jurisdiction.name, {
@@ -132,6 +130,19 @@ const opened = handleOpenAccountEntityTx(env, replica.state, {
   },
 });
 replica.state = opened.newState;
+const counterpartyReplica = Array.from(env.eReplicas.values()).find((candidate) => (
+  candidate.entityId === counterpartyId
+));
+if (!counterpartyReplica) throw new Error('ACCOUNT_J_CRASH_COUNTERPARTY_REPLICA_MISSING');
+const counterpartyOpened = handleOpenAccountEntityTx(env, counterpartyReplica.state, {
+  type: 'openAccount',
+  data: {
+    targetEntityId: entityId,
+    accountDomain: accountStateDomainFromJurisdiction(jurisdiction),
+    watchSeed: `0x${'33'.repeat(32)}`,
+  },
+});
+counterpartyReplica.state = counterpartyOpened.newState;
 env.runtimeConfig = { ...env.runtimeConfig, storage: { enabled: true, ...storageConfig } };
 
 const refreshGenesisAnchor = (target: EntityReplica): void => {
@@ -145,8 +156,58 @@ const refreshGenesisAnchor = (target: EntityReplica): void => {
 };
 
 refreshGenesisAnchor(replica);
+refreshGenesisAnchor(counterpartyReplica);
+const account = replica.state.accounts.get(counterpartyId);
+if (!account) throw new Error('ACCOUNT_J_CRASH_ACCOUNT_MISSING');
+const counterpartyAccount = counterpartyReplica.state.accounts.get(entityId);
+if (!counterpartyAccount) throw new Error('ACCOUNT_J_CRASH_COUNTERPARTY_ACCOUNT_MISSING');
+account.mempool = [{
+  type: 'j_event_claim',
+  data: {
+    jHeight: 7,
+    jBlockHash: `0x${'41'.repeat(32)}`,
+    events: [{
+      type: 'AccountSettled',
+      data: {
+        leftEntity: account.leftEntity,
+        rightEntity: account.rightEntity,
+        tokenId: 1,
+        leftReserve: '0',
+        rightReserve: '0',
+        collateral: '0',
+        ondelta: '0',
+        nonce: 1,
+      },
+    }],
+  },
+}];
+const proposed = await proposeAccountFrame(
+  env,
+  account,
+  env.timestamp,
+  7,
+  getAccountJClaimNodeStore(env),
+);
+if (!proposed.success || !proposed.accountInput) {
+  throw new Error(`ACCOUNT_J_CRASH_PROPOSAL_FAILED:${proposed.error ?? 'unknown'}`);
+}
+account.pendingAccountInput = proposed.accountInput;
+account.pendingAccountInputSignerId = signerB;
+const peerValidation = await applyAccountInput(
+  env,
+  structuredClone(counterpartyAccount),
+  proposed.accountInput,
+  { entityTimestamp: env.timestamp, finalizedJHeight: 7 },
+  new Map(),
+);
+if (!peerValidation.success || !peerValidation.response) {
+  throw new Error(`ACCOUNT_J_CRASH_ACK_FAILED:${peerValidation.error ?? 'missing-response'}`);
+}
+const claimAck = peerValidation.response;
 markStorageAccountDirty(env, entityId, counterpartyId);
+markStorageAccountDirty(env, counterpartyId, entityId);
 markStorageEntityDirty(env, entityId);
+markStorageEntityDirty(env, counterpartyId);
 await saveRuntimeFrameToStorage({
   env,
   tryOpenDb,
@@ -157,36 +218,32 @@ await saveRuntimeFrameToStorage({
   formatPerfMs: (value) => value.toFixed(2),
 });
 
-const account = replica.state.accounts.get(counterpartyId);
-if (!account) throw new Error('ACCOUNT_J_CRASH_ACCOUNT_MISSING');
-const side = account.leftEntity === entityId ? 'left' as const : 'right' as const;
-const state = side === 'left' ? account.leftPendingJClaims : account.rightPendingJClaims;
-const record = createAccountJClaimRecord({
-  chainId: jurisdiction.chainId,
-  depositoryAddress: jurisdiction.depositoryAddress,
-  leftEntity: account.leftEntity,
-  rightEntity: account.rightEntity,
-}, side, {
-  jHeight: 7,
-  jBlockHash: `0x${'41'.repeat(32)}`,
-  eventsHash: `0x${'42'.repeat(32)}`,
-});
-const applied = applyAccountJClaimInsert(
-  state,
-  record,
-  createAccountJClaimProof(getAccountJClaimNodeStore(env), state.root, record),
-);
-if (side === 'left') account.leftPendingJClaims = applied.state;
-else account.rightPendingJClaims = applied.state;
-cacheCommittedAccountJClaimNodeChanges(env, applied);
-const accountRoot = computeAccountStateRoot(account);
-account.currentFrame.accountStateRoot = accountRoot;
-account.currentFrame.stateHash = accountRoot;
-refreshGenesisAnchor(replica);
-markStorageAccountDirty(env, entityId, counterpartyId);
-markStorageEntityDirty(env, entityId);
-env.height += 1;
 env.timestamp += 1;
+const runtimeInput = {
+  runtimeTxs: [],
+  entityInputs: [{
+    entityId,
+    signerId: signerA,
+    entityTxs: [{ type: 'accountInput' as const, data: claimAck }],
+  }],
+};
+const appliedRuntime = await applyRuntimeInput(env, runtimeInput);
+const committedReplica = Array.from(env.eReplicas.values()).find((candidate) => candidate.entityId === entityId);
+const committedAccount = committedReplica?.state.accounts.get(counterpartyId);
+if (!committedAccount) throw new Error('ACCOUNT_J_CRASH_COMMITTED_ACCOUNT_MISSING');
+const side = committedAccount.leftEntity === entityId ? 'left' as const : 'right' as const;
+const state = side === 'left' ? committedAccount.leftPendingJClaims : committedAccount.rightPendingJClaims;
+if (state.count !== 1n) {
+  throw new Error(`ACCOUNT_J_CRASH_CLAIM_NOT_APPLIED:${state.count}:` + JSON.stringify({
+    appliedInputs: appliedRuntime.appliedRuntimeInput.entityInputs.map(input => ({
+      txs: input.entityTxs?.map(tx => tx.type),
+      proposal: input.proposedFrame?.height ?? null,
+    })),
+    entityHeight: committedReplica?.state.height,
+    mempool: committedReplica?.mempool.map(tx => tx.type),
+    pendingFrame: committedAccount.pendingFrame?.height ?? null,
+  }));
+}
 
 const checkpoint = buildRuntimeCheckpointSnapshot(env);
 const checkpointState = checkpoint['runtimeState'] as { accountJClaimNodes?: Map<string, unknown> };
@@ -201,6 +258,7 @@ if (requestedBoundary === 'before-authoritative-history-commit') {
 
 await saveRuntimeFrameToStorage({
   env,
+  currentFrameInput: appliedRuntime.appliedRuntimeInput,
   tryOpenDb,
   getRuntimeDb: getRuntimeStorageDb,
   tryOpenFrameDb,

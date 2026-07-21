@@ -320,6 +320,7 @@
 
   function preparePreviewEnv(env: Env): Env {
     env.scenarioMode = true;
+    env.scenarioJAdapterMode = 'browservm';
     env.quietRuntimeLogs = true;
     env.scenarioLogLevel = 'error';
     env.timestamp = env.timestamp || 1;
@@ -398,6 +399,7 @@
 
   async function loadScenario(option = selectedScenario): Promise<void> {
     const seq = ++loadSeq;
+    const startedAt = performance.now();
     pause();
     status = 'loading';
     statusText = `Running ${option.title}`;
@@ -423,11 +425,15 @@
       status = 'ready';
       statusText = `${option.title}: ${nextFrames.length} frames`;
       publishFrame(currentFrame);
+      console.info(`E2E-TIMING:scenario_player.${option.id}=${Math.round(performance.now() - startedAt)}ms`);
     } catch (error) {
       if (seq !== loadSeq) return;
       status = 'error';
       errorText = formatErrorMessage(error);
       statusText = 'Scenario failed';
+      console.error(
+        `SCENARIO_PLAYER_FAILED:${option.id}:elapsedMs=${Math.round(performance.now() - startedAt)}:${errorText}`,
+      );
     }
   }
 

@@ -152,7 +152,12 @@ import {
 } from '../protocol/htlc/validator-encryption';
 import { handleMeshBootstrapLoopError } from '../orchestrator/mesh-bootstrap-fail-fast';
 import { fitCrossAmountsToOrderbook } from '../orchestrator/mm-node';
-import { cloneAccountMachine, resolveEntityProposerId } from '../state-helpers';
+import {
+  clearReplayOutputSignerHints,
+  cloneAccountMachine,
+  installReplayOutputSignerHints,
+  resolveEntityProposerId,
+} from '../state-helpers';
 import { QUOTE_EXPIRY_MS } from '../types';
 import type { AccountFrame, AccountInput, AccountMachine, AccountTx, ConsensusConfig, CrossJurisdictionSwapRoute, DisputeFinalizationEvidence, EntityInput, EntityReplica, EntityState, EntityTx, Env, JInput, JurisdictionConfig, JurisdictionEvent, RuntimeTx } from '../types';
 import { installCanonicalRegisteredBoardAuthority } from './helpers/registration-evidence';
@@ -886,6 +891,49 @@ describe('audit fail-fast regressions', () => {
     expect(env.runtimeMempool?.entityInputs.length).toBe(0);
   });
 
+  test('remote Entity handler failures are dropped but the same local failure is fatal', async () => {
+    const makeRuntime = (seed: string) => {
+      const env = createEmptyEnv(seed);
+      env.scenarioMode = false;
+      env.quietRuntimeLogs = true;
+      const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
+      registerSignerKey(env, signerId, deriveSignerKeySync(seed, '1'));
+      const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
+      const state = makeEntityState(entityId);
+      state.config = makeSingleSignerConfigFor(signerId);
+      env.eReplicas.set(`${entityId}:${signerId}`, {
+        entityId,
+        signerId,
+        mempool: [],
+        isProposer: true,
+        state,
+      });
+      return { env, entityId, signerId };
+    };
+    const invalidEntityTx = {
+      type: 'definitely_unknown_entity_tx',
+      data: {},
+    } as any;
+
+    const remote = makeRuntime('remote-handler-failure-drop');
+    await expect(process(remote.env, [{
+      from: `0x${'cd'.repeat(20)}`,
+      entityId: remote.entityId,
+      signerId: remote.signerId,
+      entityTxs: [invalidEntityTx],
+    } as any])).resolves.toBe(remote.env);
+    expect(remote.env.runtimeState?.quarantinedRuntimeInputs?.at(-1)?.reason)
+      .toBe('REMOTE_ENTITY_INPUT_APPLY_FAILED');
+
+    const local = makeRuntime('local-handler-failure-fatal');
+    await expect(process(local.env, [{
+      entityId: local.entityId,
+      signerId: local.signerId,
+      entityTxs: [invalidEntityTx],
+    }])).rejects.toThrow('ENTITY_FRAME_TX_FAILED: type=definitely_unknown_entity_tx');
+    expect(local.env.runtimeState?.quarantinedRuntimeInputs ?? []).toHaveLength(0);
+  });
+
   test('local signer resolution prefers an available local signer over stale config validator fallback', () => {
     const env = createEmptyEnv('local-signer-resolution-stale-config');
     env.scenarioMode = false;
@@ -962,6 +1010,19 @@ describe('audit fail-fast regressions', () => {
     } as Env['gossip'];
 
     expect(resolveEntityProposerId(env, entityId, 'remote-output')).toBe(hubSignerId);
+  });
+
+  test('sparse WAL replay resolves an Account output from its atomically stored signer witness', () => {
+    const env = createEmptyEnv('replay-output-signer-witness');
+    const entityId = `0x${'a1'.repeat(32)}`;
+    const signerId = `0x${'a2'.repeat(20)}`;
+
+    installReplayOutputSignerHints(env, new Map([[entityId, signerId]]));
+    expect(resolveEntityProposerId(env, entityId, 'replayed-account-output')).toBe(signerId);
+
+    clearReplayOutputSignerHints(env);
+    expect(() => resolveEntityProposerId(env, entityId, 'replayed-account-output'))
+      .toThrow('SIGNER_RESOLUTION_FAILED');
   });
 
   test('runtime input admission rejects tx-bearing stale signer before enqueue', () => {

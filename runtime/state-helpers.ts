@@ -49,8 +49,41 @@ import type { CrontabState, ScheduledHook } from './entity/scheduler-types';
 import type { Profile } from './networking/gossip';
 import { createStructuredLogger } from './infra/logger';
 import { getEntityLeaderState, isEntityActiveLeader } from './entity/consensus/leader';
+import { forkAccountCommitmentCache } from './account/map-commitment';
+import { forkEntityAccountCommitmentCache } from './entity/consensus/state-root';
 
 const stateHelperLog = createStructuredLogger('state.helpers');
+const REPLAY_OUTPUT_SIGNER_HINTS = Symbol.for('xln.runtime.replay.output-signer-hints');
+
+export const installReplayOutputSignerHints = (
+  env: Env,
+  hints: ReadonlyMap<string, string>,
+): void => {
+  const canonical = new Map<string, string>();
+  for (const [rawEntityId, rawSignerId] of hints) {
+    const entityId = String(rawEntityId || '').trim().toLowerCase();
+    const signerId = String(rawSignerId || '').trim().toLowerCase();
+    if (!entityId || !signerId) {
+      throw new Error('REPLAY_OUTPUT_SIGNER_HINT_INVALID');
+    }
+    canonical.set(entityId, signerId);
+  }
+  Object.defineProperty(env, REPLAY_OUTPUT_SIGNER_HINTS, {
+    value: canonical,
+    configurable: true,
+    enumerable: false,
+    writable: false,
+  });
+};
+
+export const clearReplayOutputSignerHints = (env: Env): void => {
+  delete (env as unknown as Record<PropertyKey, unknown>)[REPLAY_OUTPUT_SIGNER_HINTS];
+};
+
+const replayOutputSignerHint = (env: Env, entityId: string): string | null => {
+  const hints = (env as unknown as Record<PropertyKey, unknown>)[REPLAY_OUTPUT_SIGNER_HINTS];
+  return hints instanceof Map ? String(hints.get(entityId) || '') || null : null;
+};
 import type {
   BookOrderState,
   BookState,
@@ -312,6 +345,13 @@ export function resolveEntityProposerId(env: Env, entityId: string, context: str
 
   if (localKeyReplicaFallback) return localKeyReplicaFallback;
   if (configFallback && getLocalSignerPrivateKey(env, configFallback)) return configFallback;
+  // Sparse-WAL replay runs before gossip/network infrastructure is attached.
+  // The same atomically hashed WAL record already contains the durable outbox,
+  // so its exact Account-output signer is valid local routing evidence. This
+  // hint never enters Entity/Account consensus state and is cleared after each
+  // replayed R-frame.
+  const replayHint = replayOutputSignerHint(env, targetEntityId);
+  if (replayHint) return replayHint;
   if (gossipFallback) return gossipFallback;
   if (configFallback) return configFallback;
 
@@ -476,7 +516,11 @@ const cloneBatchHistoryEntry = (entry: CompletedBatch): CompletedBatch => {
  * Creates a safe deep clone of entity state with guaranteed jBlock preservation
  * This prevents the jBlock corruption bugs that occur with manual state spreading
  */
-export function cloneEntityState(entityState: EntityState, forSnapshot: boolean = false): EntityState {
+const cloneEntityStateWithPolicy = (
+  entityState: EntityState,
+  forSnapshot: boolean,
+  validateClone: boolean,
+): EntityState => {
   let cloned: EntityState;
 
   // Use structuredClone for deep cloning with fallback.
@@ -486,7 +530,7 @@ export function cloneEntityState(entityState: EntityState, forSnapshot: boolean 
     const manual = manualCloneEntityState(entityState, forSnapshot);
 
     // VALIDATE AT SOURCE: Guarantee type safety from manual clone path too.
-    return validateEntityState(manual, 'cloneEntityState.manual');
+    return validateClone ? validateEntityState(manual, 'cloneEntityState.manual') : manual;
   }
 
   // CRITICAL: Validate entityId was preserved correctly.
@@ -525,12 +569,33 @@ export function cloneEntityState(entityState: EntityState, forSnapshot: boolean 
   cloneCrossJurisdictionRoutesInState(cloned, entityState);
   for (const [accountId, account] of cloned.accounts.entries()) {
     const sourceAccount = entityState.accounts.get(accountId);
-    if (sourceAccount) cloneDisputeEvidenceIntoAccount(account, sourceAccount);
+    if (sourceAccount) {
+      cloneDisputeEvidenceIntoAccount(account, sourceAccount);
+    }
     cloneCrossJurisdictionRoutesInAccount(account, sourceAccount ?? account);
+    // Route cloning replaces several Account maps. Fork only after that final
+    // shape exists, otherwise the cache points at the pre-route-clone Maps and
+    // correctly (but expensively) falls back to a cold rebuild.
+    if (sourceAccount && !forSnapshot) forkAccountCommitmentCache(sourceAccount, account);
   }
+  if (!forSnapshot) forkEntityAccountCommitmentCache(entityState, cloned);
 
   // VALIDATE AT SOURCE: Guarantee type safety from this point forward.
-  return validateEntityState(cloned, 'cloneEntityState.structuredClone');
+  return validateClone ? validateEntityState(cloned, 'cloneEntityState.structuredClone') : cloned;
+};
+
+export function cloneEntityState(entityState: EntityState, forSnapshot: boolean = false): EntityState {
+  return cloneEntityStateWithPolicy(entityState, forSnapshot, true);
+}
+
+/**
+ * Clone state that already crossed a validation/consensus boundary.
+ * External decode and proposal validation must keep using cloneEntityState().
+ * Re-running cryptographic manifest validation for every private R-frame
+ * transaction is redundant and blocks the browser event loop under load.
+ */
+export function cloneTrustedEntityState(entityState: EntityState, forSnapshot: boolean = false): EntityState {
+  return cloneEntityStateWithPolicy(entityState, forSnapshot, false);
 }
 
 /**
@@ -771,11 +836,17 @@ function cloneBookState(book: BookState): BookState {
  * Deep clone entity replica with all nested state properly cloned
  * Uses cloneEntityState as the entry point for state cloning
  */
-export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean = false): EntityReplica => {
-  return validateEntityReplica({
+const cloneEntityReplicaWithPolicy = (
+  replica: EntityReplica,
+  forSnapshot: boolean,
+  validateClone: boolean,
+): EntityReplica => {
+  const cloned = {
     entityId: replica.entityId,
     signerId: replica.signerId,
-    state: cloneEntityState(replica.state, forSnapshot), // forSnapshot excludes clonedForValidation
+    state: validateClone
+      ? cloneEntityState(replica.state, forSnapshot)
+      : cloneTrustedEntityState(replica.state, forSnapshot),
     mempool: Array.isArray(replica.mempool) ? cloneArray(replica.mempool) : [],
     ...(replica.proposal && { proposal: cloneIsolatedProposedEntityFrame(replica.proposal) }),
     ...(replica.lockedFrame && { lockedFrame: cloneIsolatedProposedEntityFrame(replica.lockedFrame) }),
@@ -785,7 +856,9 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
       validatorExecution: {
         frameHash: replica.validatorExecution.frameHash,
         height: replica.validatorExecution.height,
-        state: cloneEntityState(replica.validatorExecution.state),
+        state: validateClone
+          ? cloneEntityState(replica.validatorExecution.state)
+          : cloneTrustedEntityState(replica.validatorExecution.state),
         outputs: replica.validatorExecution.outputs.map(cloneIsolatedEntityInput),
         jOutputs: replica.validatorExecution.jOutputs.map(output => structuredClone(output)),
         hashesToSign: replica.validatorExecution.hashesToSign.map(hash => ({ ...hash })),
@@ -834,8 +907,23 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
     ...(replica.entityProviderActionSubmitState && {
       entityProviderActionSubmitState: structuredClone(replica.entityProviderActionSubmitState),
     }),
-  }, 'cloneEntityReplica');
+  } as EntityReplica;
+  if (!validateClone) {
+    if (cloned.entityId !== cloned.state.entityId) {
+      throw new Error('TRUSTED_ENTITY_REPLICA_CLONE_ID_MISMATCH');
+    }
+    return cloned;
+  }
+  return validateEntityReplica(cloned, 'cloneEntityReplica');
 };
+
+export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean = false): EntityReplica =>
+  cloneEntityReplicaWithPolicy(replica, forSnapshot, true);
+
+export const cloneTrustedEntityReplica = (
+  replica: EntityReplica,
+  forSnapshot: boolean = false,
+): EntityReplica => cloneEntityReplicaWithPolicy(replica, forSnapshot, false);
 
 // === ACCOUNT MACHINE HELPERS ===
 
@@ -859,11 +947,12 @@ export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolea
 
   // Normal clone - preserve clonedForValidation for consensus
   try {
-    const cloned = structuredClone(account);
-    setAccountFrameHistoryView(cloned, getAccountFrameHistoryView(account));
-    cloneDisputeEvidenceIntoAccount(cloned, account);
-    cloneCrossJurisdictionRoutesInAccount(cloned, account);
-    return cloned;
+      const cloned = structuredClone(account);
+      setAccountFrameHistoryView(cloned, getAccountFrameHistoryView(account));
+      cloneDisputeEvidenceIntoAccount(cloned, account);
+      cloneCrossJurisdictionRoutesInAccount(cloned, account);
+      forkAccountCommitmentCache(account, cloned);
+      return cloned;
   } catch (error) {
     if (HEAVY_LOGS) {
       stateHelperLog.debug('clone.account_machine.structured_clone_failed', {
@@ -1116,5 +1205,6 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
   }
 
   cloneCrossJurisdictionRoutesInAccount(result, account);
+  if (!skipClonedForValidation) forkAccountCommitmentCache(account, result);
   return result;
 }

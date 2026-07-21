@@ -1352,9 +1352,25 @@ async function executeOrderbookClickFill(
   page: Page,
   accountRef: { entityId: string; signerId: string; counterpartyId: string; hubIds: string[] },
   clickTarget: 'lowest-ask' | 'highest-bid' | 'mid-price',
-  options?: { scope?: 'aggregated' | 'selected'; preferredAccountId?: string },
-): Promise<{ routedCounterpartyId: string }> {
+  options?: {
+    scope?: 'aggregated' | 'selected';
+    preferredAccountId?: string;
+    measureIdleRpcWindow?: boolean;
+  },
+): Promise<{
+  routedCounterpartyId: string;
+  feedbackFullyFilledMs: number;
+  closedStateMs: number;
+  rpcHttpRequests: number;
+  rpcCalls: number;
+  rpcMethods: Record<string, number>;
+  idleRpcWindowMs: number;
+  idleRpcHttpRequests: number;
+  idleRpcCalls: number;
+  idleRpcMethods: Record<string, number>;
+}> {
   const orderbookLogs: string[] = [];
+  const runtimeProfiles: Array<{ observedAtMs: number; text: string }> = [];
   const rpc2Methods = new Map<string, number>();
   let rpc2HttpRequests = 0;
   let rpc2JsonRpcCalls = 0;
@@ -1379,6 +1395,15 @@ async function executeOrderbookClickFill(
   };
   const onConsole = (msg: { text(): string }) => {
     const text = msg.text();
+    if (
+      text.includes('process.profile') ||
+      text.includes('frame.profile') ||
+      text.includes('single_signer.profile') ||
+      text.includes('proposal.profile') ||
+      text.includes('state-root] profile')
+    ) {
+      runtimeProfiles.push({ observedAtMs: Date.now(), text });
+    }
     if (text.includes('ORDERBOOK') || text.includes('Swap offer placed') || text.includes('Failed to place swap')) {
       orderbookLogs.push(text);
       if (orderbookLogs.length > 40) orderbookLogs.shift();
@@ -1553,25 +1578,86 @@ async function executeOrderbookClickFill(
       expect(routedCounterpartyId.toLowerCase()).toBe(clickedSourceIds[0]);
     }
     const swapStateBefore = await readSwapState(page, accountRef.entityId, accountRef.signerId, routedCounterpartyId);
-    await page.evaluate(() => {
+    await page.evaluate(({ entityId, signerId, counterpartyId }) => {
+      const runtimeProcess = (globalThis as any).process;
+      if (runtimeProcess?.env) {
+        runtimeProcess.env.XLN_RUNTIME_PROCESS_PROFILE = '1';
+        runtimeProcess.env.XLN_RUNTIME_PROCESS_SLOW_MS = '0';
+        runtimeProcess.env.XLN_ENTITY_FRAME_SLOW_MS = '0';
+        runtimeProcess.env.XLN_ENTITY_INPUT_SLOW_MS = '0';
+        runtimeProcess.env.XLN_ACCOUNT_INPUT_SLOW_MS = '0';
+      }
       const messages: string[] = [];
-      const observed = new Set<Element>();
+      const feedbackEvents: Array<{ message: string; atMs: number }> = [];
+      // This helper is invoked more than once in the round-trip journey. Old
+      // terminal toasts are page history, not feedback for the next click.
+      const observed = new Set<Element>(document.querySelectorAll('.toast'));
       const collect = () => {
         for (const toast of document.querySelectorAll('.toast')) {
           if (observed.has(toast)) continue;
           observed.add(toast);
           const message = toast.querySelector('.message')?.textContent?.trim();
-          if (message) messages.push(message);
+          if (message) {
+            messages.push(message);
+            const clickStartedAt = Number((window as any).__xlnSwapClickStartedAt || performance.now());
+            feedbackEvents.push({ message, atMs: Math.max(0, Math.round(performance.now() - clickStartedAt)) });
+          }
         }
       };
-      collect();
       const observer = new MutationObserver(collect);
       observer.observe(document.body, { childList: true, subtree: true });
       (window as any).__xlnSwapFeedbackMessages = messages;
+      (window as any).__xlnSwapFeedbackEvents = feedbackEvents;
       (window as any).__xlnSwapFeedbackObserver = observer;
-    });
+      const startedAt = performance.now();
+      const samples: Array<Record<string, unknown>> = [];
+      let lastSignature = '';
+      const sample = () => {
+        const env = (window as any).isolatedEnv;
+        const replicaKey = env?.eReplicas instanceof Map
+          ? Array.from(env.eReplicas.keys()).find((key: unknown) => {
+              const [candidateEntityId, candidateSignerId] = String(key).split(':');
+              return candidateEntityId?.toLowerCase() === entityId.toLowerCase()
+                && candidateSignerId?.toLowerCase() === signerId.toLowerCase();
+            })
+          : null;
+        const replica = replicaKey ? env.eReplicas.get(replicaKey) : null;
+        const account = replica?.state?.accounts instanceof Map
+          ? Array.from(replica.state.accounts.entries()).find(([key, value]: [unknown, any]) =>
+              String(key).toLowerCase() === counterpartyId.toLowerCase()
+              || String(value?.counterpartyEntityId || '').toLowerCase() === counterpartyId.toLowerCase(),
+            )?.[1]
+          : null;
+        const history = account?.swapOrderHistory instanceof Map
+          ? Array.from(account.swapOrderHistory.values()) as any[]
+          : [];
+        const state = {
+          runtimeHeight: Number(env?.height ?? 0),
+          entityHeight: Number(replica?.state?.height ?? 0),
+          accountHeight: Number(account?.currentHeight ?? 0),
+          mempool: Number(account?.mempool?.length ?? 0),
+          pending: Number(account?.pendingFrame?.accountTxs?.length ?? 0),
+          openOffers: Number(account?.swapOffers?.size ?? 0),
+          closedOrders: Number(account?.swapClosedOrders?.size ?? 0),
+          resolves: history.reduce((count, entry) => count + Number(Array.isArray(entry?.resolves) ? entry.resolves.length : 0), 0),
+        };
+        const signature = JSON.stringify(state);
+        if (signature !== lastSignature) {
+          samples.push({ atMs: Math.round(performance.now() - startedAt), ...state });
+          lastSignature = signature;
+        }
+        (window as any).__xlnSwapCausalAnimationFrame = requestAnimationFrame(sample);
+      };
+      (window as any).__xlnSwapCausalSamples = samples;
+      (window as any).__xlnSwapCausalAnimationFrame = requestAnimationFrame(sample);
+    }, accountRef);
     await expect(placeButton).toBeEnabled({ timeout: 10_000 });
+    rpc2HttpRequests = 0;
+    rpc2JsonRpcCalls = 0;
+    rpc2Methods.clear();
+    await page.evaluate(() => { (window as any).__xlnSwapClickStartedAt = performance.now(); });
     swapClickStartedAt = Date.now();
+    console.log('[E2E-SWAP-CLICK] start');
     await placeButton.click();
 
     await expect
@@ -1587,13 +1673,25 @@ async function executeOrderbookClickFill(
       )
       .toBe(true);
     const clickToClosedStateMs = Date.now() - swapClickStartedAt;
-    const swapFeedbackMessages = await page.evaluate(() => {
+    const swapObservation = await page.evaluate(() => {
       ((window as any).__xlnSwapFeedbackObserver as MutationObserver | undefined)?.disconnect();
       const messages = [...((window as any).__xlnSwapFeedbackMessages as string[] || [])];
+      const feedbackEvents = [...((window as any).__xlnSwapFeedbackEvents as Array<{ message: string; atMs: number }> || [])];
+      cancelAnimationFrame(Number((window as any).__xlnSwapCausalAnimationFrame || 0));
+      const samples = [...((window as any).__xlnSwapCausalSamples as Array<Record<string, unknown>> || [])];
+      const runtimeProcess = (globalThis as any).process;
+      if (runtimeProcess?.env) {
+        runtimeProcess.env.XLN_RUNTIME_PROCESS_PROFILE = '0';
+      }
       delete (window as any).__xlnSwapFeedbackObserver;
       delete (window as any).__xlnSwapFeedbackMessages;
-      return messages;
+      delete (window as any).__xlnSwapFeedbackEvents;
+      delete (window as any).__xlnSwapClickStartedAt;
+      delete (window as any).__xlnSwapCausalAnimationFrame;
+      delete (window as any).__xlnSwapCausalSamples;
+      return { messages, feedbackEvents, samples };
     });
+    const swapFeedbackMessages = swapObservation.messages;
     const placementFeedback = swapFeedbackMessages.filter((message) =>
       message === 'Swap offer submitted'
       || message === 'Order placed'
@@ -1601,6 +1699,14 @@ async function executeOrderbookClickFill(
     );
     expect(placementFeedback).toHaveLength(1);
     expect(placementFeedback[0]).toMatch(/^Order placed and fully filled/);
+    const fullyFilledFeedback = swapObservation.feedbackEvents.find((event) =>
+      event.message.startsWith('Order placed and fully filled'),
+    );
+    expect(fullyFilledFeedback, 'fully-filled feedback must carry an exact click-relative timestamp').toBeDefined();
+    const feedbackFullyFilledMs = Number(fullyFilledFeedback?.atMs ?? Number.POSITIVE_INFINITY);
+    console.log(`[E2E-TIMING] swap_click.feedback_fully_filled ${feedbackFullyFilledMs}ms`);
+    expect(feedbackFullyFilledMs, 'resting-book click must be visibly filled within the UI SLA').toBeLessThanOrEqual(500);
+    expect(rpc2JsonRpcCalls, 'a pure off-chain swap must not amplify chain RPC polling').toBeLessThanOrEqual(1);
     const rpc2MethodSummary = [...rpc2Methods.entries()]
       .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
       .map(([method, count]) => `${method}:${count}`)
@@ -1609,6 +1715,12 @@ async function executeOrderbookClickFill(
       `[E2E-SWAP-LATENCY] click_to_closed_state=${clickToClosedStateMs}ms ` +
       `rpc2_http=${rpc2HttpRequests} rpc2_calls=${rpc2JsonRpcCalls} methods=${rpc2MethodSummary || 'none'}`,
     );
+    console.log(`[E2E-SWAP-FEEDBACK] ${JSON.stringify(swapObservation.feedbackEvents)}`);
+    console.log('[E2E-SWAP-CLICK] closed');
+    console.log(`[E2E-SWAP-CAUSAL] ${JSON.stringify(swapObservation.samples)}`);
+    for (const profile of runtimeProfiles.filter((sample) => sample.observedAtMs >= swapClickStartedAt)) {
+      console.log(`[E2E-SWAP-PROFILE] at=${profile.observedAtMs - swapClickStartedAt}ms ${profile.text}`);
+    }
 
     await expect
       .poll(
@@ -1668,7 +1780,51 @@ async function executeOrderbookClickFill(
     await expect(firstClosedRow.locator('td').first()).toContainText(/Filled/i, { timeout: 10_000 });
     await expect(firstClosedRow.locator('td').first()).not.toContainText(/Partial/i, { timeout: 10_000 });
     await waitForSwapBilateralSettlementIdle(page, accountRef, routedCounterpartyId);
-    return { routedCounterpartyId };
+    const clickRpcHttpRequests = rpc2HttpRequests;
+    const clickRpcCalls = rpc2JsonRpcCalls;
+    const clickRpcMethods = Object.fromEntries(
+      [...rpc2Methods.entries()].sort(([left], [right]) => left.localeCompare(right)),
+    );
+    let idleRpcWindowMs = 0;
+    let idleRpcHttpRequests = 0;
+    let idleRpcCalls = 0;
+    let idleRpcMethods: Record<string, number> = {};
+    if (options?.measureIdleRpcWindow) {
+      rpc2HttpRequests = 0;
+      rpc2JsonRpcCalls = 0;
+      rpc2Methods.clear();
+      const idleStartedAt = Date.now();
+      await page.waitForTimeout(6_000);
+      idleRpcWindowMs = Date.now() - idleStartedAt;
+      idleRpcHttpRequests = rpc2HttpRequests;
+      idleRpcCalls = rpc2JsonRpcCalls;
+      idleRpcMethods = Object.fromEntries(
+        [...rpc2Methods.entries()].sort(([left], [right]) => left.localeCompare(right)),
+      );
+      const allowedHttpRequests = Math.floor(idleRpcWindowMs / 1_000);
+      console.log(
+        `[E2E-RPC-RATE] endpoint=rpc2 window=${idleRpcWindowMs}ms ` +
+        `http=${idleRpcHttpRequests} calls=${idleRpcCalls} ` +
+        `rate=${(idleRpcHttpRequests * 1_000 / idleRpcWindowMs).toFixed(3)}req/s ` +
+        `methods=${JSON.stringify(idleRpcMethods)}`,
+      );
+      expect(
+        idleRpcHttpRequests,
+        'one browser Runtime must issue at most one rpc2 HTTP request per second while idle',
+      ).toBeLessThanOrEqual(allowedHttpRequests);
+    }
+    return {
+      routedCounterpartyId,
+      feedbackFullyFilledMs,
+      closedStateMs: clickToClosedStateMs,
+      rpcHttpRequests: clickRpcHttpRequests,
+      rpcCalls: clickRpcCalls,
+      rpcMethods: clickRpcMethods,
+      idleRpcWindowMs,
+      idleRpcHttpRequests,
+      idleRpcCalls,
+      idleRpcMethods,
+    };
   } catch (error) {
     const debugState = await readOrderbookDebug().catch(() => null);
     console.error(`[E2E-ORDERBOOK-DEBUG] ${clickTarget} recent logs:\n${orderbookLogs.join('\n')}`);
@@ -2204,12 +2360,20 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     };
   }
 
-  test('swap orderbook lowest ask click fills immediately at displayed book price', { tag: '@functional' }, async ({ page }) => {
+  test('swap orderbook lowest ask click fills immediately at displayed book price', { tag: '@functional' }, async ({ page }, testInfo) => {
     const accountRef = await prepareOrderbookClickTest(page);
 
-    await timedStep('swap_click.lowest_ask_fills', () =>
-      executeOrderbookClickFill(page, accountRef, 'lowest-ask'),
+    const metrics = await timedStep('swap_click.lowest_ask_fills', () =>
+      executeOrderbookClickFill(page, accountRef, 'lowest-ask', { measureIdleRpcWindow: true }),
     );
+    await testInfo.attach('swap-click-latency.json', {
+      body: Buffer.from(JSON.stringify({
+        schema: 'xln.qa.swap-click-latency.v1',
+        slaMs: 500,
+        ...metrics,
+      }, null, 2)),
+      contentType: 'application/json',
+    });
   });
 
   test('swap orderbook highest bid click fills immediately at displayed book price', { tag: '@functional' }, async ({ page }) => {

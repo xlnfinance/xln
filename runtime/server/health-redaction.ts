@@ -204,6 +204,7 @@ export const publicAggregatedHealth = (health: unknown): Record<string, unknown>
 
 export const publicLocalHubHealth = (health: unknown): Record<string, unknown> => {
   const root = recordOrEmpty(health);
+  const runtime = recordOf(root, 'runtime');
   const gossip = recordOf(root, 'gossip');
   const mesh = recordOf(root, 'mesh');
   const bootstrapReserves = recordOf(root, 'bootstrapReserves');
@@ -214,6 +215,9 @@ export const publicLocalHubHealth = (health: unknown): Record<string, unknown> =
   return {
     ok: valueOf(root, 'ok'),
     name: valueOf(root, 'name'),
+    runtime: {
+      halted: valueOf(runtime, 'halted') === true,
+    },
     gossip: {
       ready: valueOf(gossip, 'ready') === true,
       visibleHubCount: arrayOf(gossip, 'visibleHubNames')?.length ?? 0,

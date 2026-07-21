@@ -33,6 +33,14 @@ import {
   cloneIsolatedRuntimeInput,
 } from '../protocol/runtime-input-clone';
 
+export const authorizeRestoredRuntimeInput = (runtimeInput: RuntimeInput): RuntimeInput => {
+  markRestoredJSubmitRuntimeTxs(runtimeInput.runtimeTxs);
+  markRestoredJAuthorityRuntimeTxs(runtimeInput.runtimeTxs);
+  markRestoredJImportResultRuntimeTxs(runtimeInput.runtimeTxs);
+  markRestoredEntityProviderActionRuntimeTxs(runtimeInput.runtimeTxs);
+  return runtimeInput;
+};
+
 const cloneHankoWitness = (
   hankoWitness?: EntityReplica['hankoWitness'],
 ): EntityReplica['hankoWitness'] | undefined => {
@@ -147,6 +155,14 @@ export const buildCanonicalJReplicaSnapshot = (jr: JReplica): JReplica => ({
     : {}),
 });
 
+const buildDurableJReplicaSnapshot = (jr: JReplica): JReplica => ({
+  ...buildCanonicalJReplicaSnapshot(jr),
+  // Submission/watcher infrastructure updates this wall-clock marker after
+  // the authoritative R-frame is committed. Input-only WAL replay therefore
+  // cannot reproduce it, and no reducer may treat it as consensus state.
+  lastBlockTimestamp: 0,
+});
+
 const withoutEphemeralScheduledWake = (runtimeInput?: RuntimeInput): RuntimeInput => {
   const cloned = cloneIsolatedRuntimeInput(runtimeInput ?? { runtimeTxs: [], entityInputs: [] });
   return {
@@ -185,7 +201,6 @@ const DURABLE_RUNTIME_STATE_KEYS = [
   'fatalDebugPayload',
   'maxEntityInputsPerFrame',
   'maxEntityTxsPerFrame',
-  'pendingAuditEvents',
   'securityIncidents',
   'quarantinedRuntimeInputs',
   'pendingFrameDbRecords',
@@ -196,7 +211,6 @@ const DURABLE_RUNTIME_STATE_KEYS = [
   'receivedReliableTerminalWatermarks',
   'pendingReliableIngress',
   'reliableIngressCommitting',
-  'verifiedProfileRoutes',
   'runtimeAdapterCommandFrontiers',
   'pendingCommittedJOutbox',
   'pendingJurisdictionImports',
@@ -209,6 +223,7 @@ const buildDurableRuntimeStateSnapshot = (
   options?: {
     includeCertifiedBoardNodes?: boolean;
     includeIngressWorkingState?: boolean;
+    excludePersistedFrameDbRecords?: boolean;
   },
 ): Record<string, unknown> | undefined => {
   const state = env.runtimeState;
@@ -218,10 +233,11 @@ const buildDurableRuntimeStateSnapshot = (
     ...(state.fatalDebugPayload ? { fatalDebugPayload: structuredClone(state.fatalDebugPayload) } : {}),
     ...(state.maxEntityInputsPerFrame !== undefined ? { maxEntityInputsPerFrame: state.maxEntityInputsPerFrame } : {}),
     ...(state.maxEntityTxsPerFrame !== undefined ? { maxEntityTxsPerFrame: state.maxEntityTxsPerFrame } : {}),
-    ...(hasDurableEntries(state.pendingAuditEvents) ? { pendingAuditEvents: structuredClone(state.pendingAuditEvents) } : {}),
     ...(hasDurableEntries(state.securityIncidents) ? { securityIncidents: structuredClone(state.securityIncidents) } : {}),
     ...(hasDurableEntries(state.quarantinedRuntimeInputs) ? { quarantinedRuntimeInputs: structuredClone(state.quarantinedRuntimeInputs) } : {}),
-    ...(hasDurableEntries(state.pendingFrameDbRecords) ? { pendingFrameDbRecords: structuredClone(state.pendingFrameDbRecords) } : {}),
+    ...(!options?.excludePersistedFrameDbRecords && hasDurableEntries(state.pendingFrameDbRecords)
+      ? { pendingFrameDbRecords: structuredClone(state.pendingFrameDbRecords) }
+      : {}),
     ...(hasDurableEntries(state.deferredNetworkMeta) ? { deferredNetworkMeta: structuredClone(state.deferredNetworkMeta) } : {}),
     ...(hasDurableEntries(state.reliableIngressReceiptLedger)
       ? { reliableIngressReceiptLedger: structuredClone(state.reliableIngressReceiptLedger) }
@@ -241,7 +257,6 @@ const buildDurableRuntimeStateSnapshot = (
           reliableIngressCommitting: structuredClone(state.reliableIngressCommitting ?? new Set()),
         }
       : {}),
-    ...(hasDurableEntries(state.verifiedProfileRoutes) ? { verifiedProfileRoutes: structuredClone(state.verifiedProfileRoutes) } : {}),
     ...(hasDurableEntries(state.runtimeAdapterCommandFrontiers)
       ? { runtimeAdapterCommandFrontiers: structuredClone(state.runtimeAdapterCommandFrontiers) }
       : {}),
@@ -282,6 +297,7 @@ export const buildDurableRuntimeMachineSnapshot = (
   options?: {
     pendingNetworkOutputs?: RoutedEntityInput[];
     includeIngressWorkingState?: boolean;
+    excludePersistedFrameDbRecords?: boolean;
   },
 ): Record<string, unknown> => ({
   ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
@@ -290,9 +306,11 @@ export const buildDurableRuntimeMachineSnapshot = (
   ...(env.runtimeConfig ? { runtimeConfig: structuredClone(env.runtimeConfig) } : {}),
   ...(buildDurableRuntimeStateSnapshot(env, {
     includeIngressWorkingState: options?.includeIngressWorkingState === true,
+    excludePersistedFrameDbRecords: options?.excludePersistedFrameDbRecords === true,
   }) ? {
       runtimeState: buildDurableRuntimeStateSnapshot(env, {
         includeIngressWorkingState: options?.includeIngressWorkingState === true,
+        excludePersistedFrameDbRecords: options?.excludePersistedFrameDbRecords === true,
       }),
     } : {}),
   runtimeInput: withoutEphemeralScheduledWake(env.runtimeMempool ?? env.runtimeInput),
@@ -303,7 +321,7 @@ export const buildDurableRuntimeMachineSnapshot = (
     : {}),
   jReplicas: Array.from((env.jReplicas || new Map()).entries()).map(([key, replica]) => [
     key,
-    buildCanonicalJReplicaSnapshot(replica),
+    buildDurableJReplicaSnapshot(replica),
   ]),
 });
 
@@ -389,11 +407,9 @@ export const restoreDurableRuntimeSnapshot = (
   }
   const runtimeInput = snapshot['runtimeInput'];
   if (runtimeInput && typeof runtimeInput === 'object') {
-    const restoredInput = withoutEphemeralScheduledWake(runtimeInput as RuntimeInput);
-    markRestoredJSubmitRuntimeTxs(restoredInput.runtimeTxs);
-    markRestoredJAuthorityRuntimeTxs(restoredInput.runtimeTxs);
-    markRestoredJImportResultRuntimeTxs(restoredInput.runtimeTxs);
-    markRestoredEntityProviderActionRuntimeTxs(restoredInput.runtimeTxs);
+    const restoredInput = authorizeRestoredRuntimeInput(
+      withoutEphemeralScheduledWake(runtimeInput as RuntimeInput),
+    );
     env.runtimeInput = restoredInput;
     env.runtimeMempool = restoredInput;
   }

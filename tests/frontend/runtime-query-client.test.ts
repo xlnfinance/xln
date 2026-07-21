@@ -81,6 +81,31 @@ test('runtime view catch-up retries back off instead of spinning', () => {
   expect(source).toContain('RUNTIME_VIEW_CATCHUP_TIMEOUT');
 });
 
+test('persisted receipt probes reuse the live Runtime module singleton', () => {
+  const source = readFileSync('tests/utils/e2e-runtime-receipts.ts', 'utf8');
+
+  expect(source).toContain('const XLN = view.__xln?.instance;');
+  expect(source).not.toContain('runtime.js');
+  expect(source).not.toContain('await import(');
+  expect(source).not.toContain('window.XLN');
+});
+
+test('wallet UI and wallet-backed E2E helpers never import a second Runtime module', () => {
+  const guardedFiles = [
+    'frontend/src/lib/view/panels/ArchitectPanel.svelte',
+    'frontend/src/lib/view/panels/Graph3DPanel.svelte',
+    'tests/e2e-debt-ledger.spec.ts',
+    'tests/e2e-runtime-persistence.spec.ts',
+  ];
+
+  for (const file of guardedFiles) {
+    const source = readFileSync(file, 'utf8');
+    expect(source).not.toContain("new URL('/runtime.js'");
+    expect(source).not.toContain('new URL(`/runtime.js');
+    expect(source).not.toContain('await import(/* @vite-ignore */ runtimeUrl)');
+  }
+});
+
 test('activity history panel reads activity through RuntimeQueryClient only', () => {
   const panelSource = readFileSync('frontend/src/lib/components/Entity/ActivityHistoryPanel.svelte', 'utf8');
   const querySource = readFileSync('frontend/src/lib/components/Entity/activity-history-query.ts', 'utf8');

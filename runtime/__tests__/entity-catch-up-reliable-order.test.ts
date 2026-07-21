@@ -533,10 +533,6 @@ describe('ordered reliable Entity catch-up', () => {
     // barrier this applied H+1 and H+2 before a single WAL save.
     await processRuntime(restarted, []);
     expect(restarted.eReplicas.get(`${initialState.entityId}:${signerId}`)?.state.height).toBe(0);
-    const runtimeMachineBeforeHeightOne = buildDurableRuntimeMachineSnapshot(restarted, {
-      pendingNetworkOutputs: restarted.pendingNetworkOutputs ?? [],
-      includeIngressWorkingState: true,
-    });
     const committedFrameTrace = startRuntimeHistoryTraceForTesting(restarted);
     try {
       await processRuntime(restarted, [structuredClone(h2)]);
@@ -554,23 +550,18 @@ describe('ordered reliable Entity catch-up', () => {
 
     const committedHistoryFrame = committedFrameTrace.snapshots.at(-1);
     if (!committedHistoryFrame) throw new Error('TEST_RELIABLE_RECOVERY_HISTORY_FRAME_MISSING');
-    const durableMachineAfterHeightOne = {
-      ...buildDurableRuntimeMachineSnapshot(restarted, {
-        pendingNetworkOutputs: restarted.pendingNetworkOutputs ?? [],
-      }),
-      // The duplicate H+2 arrived while H+1 was processing. It enters the next
-      // live mempool only after the H+1 durability fence; therefore the H+1 WAL
-      // record retains the pre-apply runtime input while its durable outbox
-      // already contains deferred H+2.
-      runtimeInput: structuredClone(runtimeMachineBeforeHeightOne['runtimeInput']),
-    };
+    const durableMachineAfterHeightOne = buildDurableRuntimeMachineSnapshot(restarted, {
+      pendingNetworkOutputs: restarted.pendingNetworkOutputs ?? [],
+    });
     const journal: PersistedFrameJournal = {
       height: committedHistoryFrame.height,
       timestamp: committedHistoryFrame.timestamp,
       replicaMetaDigest: buildStorageReplicaMetaCommitment(restarted).digest,
+      replicaMetaCheckpoint: true,
+      replicaMetaStateMode: 'full',
       runtimeInput: structuredClone(committedHistoryFrame.runtimeInput),
+      pendingRuntimeInput: structuredClone(restarted.runtimeMempool!),
       runtimeOutputs: structuredClone(restarted.pendingNetworkOutputs ?? []),
-      runtimeMachineBeforeApply: runtimeMachineBeforeHeightOne,
       runtimeMachine: durableMachineAfterHeightOne,
       runtimeStateHash: computeCanonicalRuntimeStateHash(
         restarted.height,
@@ -605,18 +596,15 @@ describe('ordered reliable Entity catch-up', () => {
     expect(computeCanonicalStateHashFromEnv(tailRestored)).toBe(journal.runtimeStateHash);
     await closeInfraDb(tailRestored);
 
-    const missingPreStateTail = structuredClone(tailRecoveryBundle);
-    delete missingPreStateTail.frames![0]!.runtimeMachineBeforeApply;
+    const missingPendingInputTail = structuredClone(tailRecoveryBundle);
+    delete missingPendingInputTail.frames![0]!.pendingRuntimeInput;
     await expect(restoreEnvFromRecoveryBundles(
-      [baseRecoveryBundle, missingPreStateTail],
+      [baseRecoveryBundle, missingPendingInputTail],
       { runtimeSeed: receiverSeed, runtimeId: receiver.runtimeId },
-    )).rejects.toThrow('RECOVERY_BUNDLE_JOURNAL_PRE_RUNTIME_MACHINE_REQUIRED');
+    )).rejects.toThrow('RECOVERY_BUNDLE_SIGNATURE_INVALID');
 
     const missingLocalOutboxTail = structuredClone(tailRecoveryBundle);
-    missingLocalOutboxTail.frames![0]!.runtimeMachineBeforeApply = {
-      ...missingLocalOutboxTail.frames![0]!.runtimeMachineBeforeApply,
-      pendingNetworkOutputs: [],
-    };
+    missingLocalOutboxTail.frames![0]!.runtimeOutputs = [];
     await expect(restoreEnvFromRecoveryBundles(
       [baseRecoveryBundle, missingLocalOutboxTail],
       { runtimeSeed: receiverSeed, runtimeId: receiver.runtimeId },

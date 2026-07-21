@@ -71,7 +71,9 @@ describe('canonical Hanko wire codec', () => {
         ));
       const packed = packHankoSignatures(signatures);
       expect(unpackHankoSignatures(packed).map(ethers.getBytes)).toEqual(signatures);
-      expect(recoverHankoSignatures(digest, packed)).toHaveLength(count);
+      expect(recoverHankoSignatures(digest, packed).map(entry => entry.signerEntityId.slice(-40)))
+        .toEqual(signatures.map(entry =>
+          ethers.recoverAddress(digest, ethers.hexlify(entry)).slice(2).toLowerCase()));
     }
   });
 

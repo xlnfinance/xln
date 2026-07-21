@@ -307,12 +307,12 @@ const MARKET_MAKER_RUNTIME_TICK_DELAY_MS = Math.max(
   Number(process.env['MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '0'),
 );
 const MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME = Math.max(
-  1,
-  Number(process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '8'),
+  0,
+  Number(process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '0'),
 );
 const MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME = Math.max(
-  1,
-  Number(process.env['MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '64'),
+  0,
+  Number(process.env['MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '0'),
 );
 const MARKET_MAKER_API_YIELD_MS = Math.max(
   1,
@@ -3309,6 +3309,9 @@ const getMarketMakerRuntimeBacklogSnapshot = (
 const run = async (): Promise<void> => {
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
 
+	  // Replay uses the exact signed bytes/nonces from WAL, but reconstructing a
+	  // local proposal still requires the deterministic private key to exist.
+	  prewarmLocalMarketMakerSignerKeys();
 	  const env = await main(resolvedArgs.seed, {
 	    trustedJurisdictionRpcBindings: resolveMeshJurisdictionRpcBindings(
 	      resolvedArgs.rpcUrl,
@@ -3329,9 +3332,8 @@ const run = async (): Promise<void> => {
 	    `/api/control/runtime-input/${encodeURIComponent(id)}/status`;
 	  registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
 	    runtimeIngressReceipts.observeRuntimeInput(height, runtimeInput);
-	  });
+  });
   configureMarketMakerRuntimeLogging(env);
-  prewarmLocalMarketMakerSignerKeys();
   // Bootstrap the local state machine before exposing this runtime to remote
   // entity_input delivery. Persisted hub routes can send immediately when P2P
   // connects, so every advertised MM entity must already exist at that point.
@@ -3623,8 +3625,9 @@ const run = async (): Promise<void> => {
     const marketMakerHealth = startupPhase === 'offers-ready'
       ? rawMarketMakerHealth
       : { ...rawMarketMakerHealth, ok: false };
+    const runtimeHalted = env.runtimeState?.halted === true;
     cachedHealthResponseJson = safeStringify({
-      ok: visibleHubs.length === resolvedArgs.meshHubNames.length,
+      ok: !runtimeHalted && visibleHubs.length === resolvedArgs.meshHubNames.length,
       name: resolvedArgs.name,
       height: Math.max(0, Math.floor(Number(env.height || 0))),
       entityId: activeEntityId,
@@ -3633,6 +3636,11 @@ const run = async (): Promise<void> => {
       directWsUrl,
       apiUrl,
       startupPhase,
+      runtime: {
+        halted: runtimeHalted,
+        lifecyclePhase: env.runtimeState?.lifecyclePhase ?? null,
+        fatalDebugPayload: env.runtimeState?.fatalDebugPayload ?? null,
+      },
       p2p: {
         directPeers: getP2PState(env).directPeers || [],
         directInput: {
@@ -3790,11 +3798,11 @@ const run = async (): Promise<void> => {
     },
   });
   env.runtimeState = env.runtimeState ?? {};
-  env.runtimeState.directEntityInputsDispatch =
-    process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'
-      ? (targetRuntimeId, envelope, ingressTimestamp) =>
-          directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp)
-      : null;
+  // Keep Entity inputs and reliable receipts on the same authenticated direct
+  // websocket when available. output-routing retains reliable inputs until a
+  // durable receipt and falls back to P2P if this direct send is unavailable.
+  env.runtimeState.directEntityInputsDispatch = (targetRuntimeId, envelope, ingressTimestamp) =>
+    directRuntimeWs.sendEntityInputsDelivery(targetRuntimeId, envelope, ingressTimestamp);
   env.runtimeState.directReliableReceiptDispatch = (targetRuntimeId, receipt) =>
     directRuntimeWs.sendReliableReceiptDelivery(targetRuntimeId, receipt);
   const handleRadapterWsMessage = (ws: MarketMakerServerSocket, raw: string | Buffer | ArrayBuffer): void => {

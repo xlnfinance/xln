@@ -17,9 +17,9 @@ import type {
   AccountInput,
   AccountMachine,
   AccountTx,
+  AccountFrameDbRecord,
   HtlcNoteKey,
   HtlcRoute,
-  RuntimeFrameDbRecord,
   RuntimeOverlayRecord,
 } from './types/account';
 import type { HubRebalanceConfig } from './types/rebalance';
@@ -164,6 +164,7 @@ export type {
   AccountSnapshot,
   AccountStatus,
   AccountTx,
+  AccountFrameDbRecord,
   AssetBalance,
   CrossJurisdictionSecretRelay,
   Delta,
@@ -172,7 +173,6 @@ export type {
   HtlcNoteKey,
   HtlcRoute,
   PullCommitment,
-  RuntimeFrameDbRecord,
   RuntimeOverlayRecord,
   SettlementDiff,
   SettlementOp,
@@ -238,7 +238,7 @@ export type RuntimeP2PSurface = {
   sendDebugEvent(payload: unknown): boolean;
   syncProfiles(): Promise<boolean>;
   announceProfilesForEntities(entityIds: string[], reason?: string): void;
-  announceProfilesForEntitiesNow(entityIds: string[], reason?: string): Promise<void>;
+  announceProfilesForEntitiesNow(entityIds: string[], reason?: string, includePending?: boolean): Promise<void>;
 };
 
 export type RuntimeSecurityIncident = {
@@ -1060,6 +1060,15 @@ export interface CertifiedEntityFrameLink {
   postAuthority: EntityFrameAuthority;
 }
 
+export type RuntimeFrameDbRecord = AccountFrameDbRecord | {
+  kind: 'entityFrame';
+  entityId: string;
+  entityHeight: number;
+  link: CertifiedEntityFrameLink;
+  runtimeHeight?: number;
+  timestamp?: number;
+};
+
 /** Locally trusted genesis/checkpoint root published by the authoritative R-frame WAL. */
 export interface CertifiedEntityLineageAnchor {
   entityId: string;
@@ -1110,7 +1119,7 @@ export interface EntityReplica {
   lockedFrame?: ProposedEntityFrame; // Frame this validator is locked/precommitted to
   /** Validator-local replay result; commits never consume proposer-supplied state or outputs. */
   validatorExecution?: ValidatorEntityFrameExecution;
-  /** Deduplicated certified suffix used to prove any legal local replica lag. */
+  /** Latest finalized certificate only; historical certificates live in the frame DB. */
   certifiedFrameLineage?: CertifiedEntityFrameLink[];
   certifiedFrameAnchor?: CertifiedEntityLineageAnchor;
   isProposer: boolean;
@@ -1196,6 +1205,7 @@ export interface Env {
   runtimeConfig?: {
     minFrameDelayMs?: number; // Minimum delay between runtime frames
     loopIntervalMs?: number;  // Loop interval for runtime processing
+    /** In-memory/debug history cadence. Durable storage snapshots use storage.snapshotPeriodFrames. */
     snapshotIntervalFrames?: number;
     /** Local operator warning only; never rejects an otherwise valid Entity frame. */
     entityConsensusStateWarningBytes?: number;
@@ -1435,6 +1445,9 @@ export interface Env {
 
   // Scenario mode: deterministic time control (scenarios set env.timestamp manually)
   scenarioMode?: boolean; // When true, runtime doesn't auto-update timestamp
+  // Explicit dependency injection for scenario execution. Visual previews use the
+  // real in-process EVM so they never depend on or flood an external RPC endpoint.
+  scenarioJAdapterMode?: import('./jadapter/types').JAdapterMode;
   quietRuntimeLogs?: boolean; // When true, suppress noisy runtime console logs
   debugJWatcherBatches?: boolean; // Enables verbose J watcher batch routing diagnostics
   scenarioLogLevel?: 'debug' | 'info' | 'warn' | 'error'; // Scenario log verbosity

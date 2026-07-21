@@ -27,6 +27,7 @@ import { handleLendingAccountTx } from './handlers/lending';
 import { canProcessAccountTxForDisputeStatus } from '../consensus/dispute-policy';
 import { createStructuredLogger } from '../../infra/logger';
 import type { AccountJClaimSession } from '../j-claim-session';
+import { invalidateAccountMapCommitment, type AccountCommittedMap } from '../map-commitment';
 
 const accountTxLog = createStructuredLogger('account.tx');
 
@@ -79,7 +80,7 @@ const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter =>
  * @param currentHeight - Current J-block height (for HTLC revealBeforeHeight validation)
  * @returns Result with success, events, and optional error (may include secret/hashlock for HTLC routing)
  */
-export async function applyAccountTx(
+async function applyAccountTxMutation(
   accountMachine: AccountMachine,
   accountTx: AccountTx,
   byLeft: boolean,
@@ -342,4 +343,106 @@ export async function applyAccountTx(
         return { success: false, error: `Unknown accountTx type: ${String(unknown.type)}`, events: [] };
       }
   }
+}
+
+const swapDeltaKeys = (account: AccountMachine, tx: AccountTx): number[] => {
+  if (tx.type === 'swap_offer') return [tx.data.giveTokenId, tx.data.wantTokenId];
+  if (tx.type === 'swap_resolve') {
+    const offer = account.swapOffers.get(tx.data.offerId);
+    const keys = [
+      offer?.giveTokenId ?? tx.data.restingGiveTokenId,
+      offer?.wantTokenId ?? tx.data.restingWantTokenId,
+      tx.data.feeTokenId,
+    ];
+    return [...new Set(keys.filter((value): value is number => Number.isSafeInteger(value)))];
+  }
+  return [];
+};
+
+const invalidateCommittedMapsForTx = (
+  account: AccountMachine,
+  tx: AccountTx,
+  deltaKeysBeforeMutation: readonly number[],
+): void => {
+  const invalidate = (namespace: AccountCommittedMap, key?: unknown): void =>
+    invalidateAccountMapCommitment(account, namespace, key);
+  switch (tx.type) {
+    case 'add_delta':
+    case 'set_credit_limit':
+    case 'direct_payment':
+    case 'reserve_to_collateral':
+    case 'request_collateral':
+    case 'rebalance_refund':
+    case 'j_event_claim':
+    case 'settle_transition':
+      invalidate('deltas');
+      return;
+    case 'lending_fund':
+    case 'lending_borrow_request':
+    case 'lending_repay':
+    case 'lending_credit':
+    case 'lending_close_request':
+    case 'lending_close_payout':
+      invalidate('deltas');
+      invalidate('lendingIntents');
+      return;
+    case 'htlc_lock':
+    case 'htlc_resolve':
+      invalidate('deltas');
+      invalidate('locks', tx.data.lockId);
+      return;
+    case 'pull_lock':
+    case 'pull_resolve':
+    case 'pull_cancel':
+    case 'cross_pull_close':
+      invalidate('deltas');
+      invalidate('pulls', tx.data.pullId);
+      return;
+    case 'swap_offer':
+      for (const tokenId of deltaKeysBeforeMutation) invalidate('deltas', tokenId);
+      invalidate('swapOffers', tx.data.offerId);
+      return;
+    case 'swap_resolve':
+      for (const tokenId of deltaKeysBeforeMutation) invalidate('deltas', tokenId);
+      invalidate('swapOffers', tx.data.offerId);
+      return;
+    case 'cross_swap_fill_ack':
+      invalidate('deltas');
+      invalidate('pulls');
+      invalidate('swapOffers', tx.data.offerId);
+      return;
+    case 'cross_j_intent':
+    case 'rebalance_policy':
+    case 'reopen_disputed':
+    case 'account_frame':
+    case 'account_settle':
+      return;
+  }
+};
+
+export async function applyAccountTx(
+  accountMachine: AccountMachine,
+  accountTx: AccountTx,
+  byLeft: boolean,
+  currentTimestamp: number = 0,
+  currentHeight: number = 0,
+  isValidation: boolean = false,
+  env?: Env,
+  jClaimSession?: AccountJClaimSession,
+  counterpartyCertifiedBoardHash?: string,
+): Promise<ApplyAccountTxResult> {
+  const deltaKeysBeforeMutation = swapDeltaKeys(accountMachine, accountTx);
+  const result = await applyAccountTxMutation(
+    accountMachine,
+    accountTx,
+    byLeft,
+    currentTimestamp,
+    currentHeight,
+    isValidation,
+    env,
+    jClaimSession,
+    counterpartyCertifiedBoardHash,
+  );
+  if (result.success) invalidateCommittedMapsForTx(accountMachine, accountTx, deltaKeysBeforeMutation);
+  return result;
 }

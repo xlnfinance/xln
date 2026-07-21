@@ -284,7 +284,7 @@ describe('swap panel helpers', () => {
     })).toThrow('positive inbound credit limit');
   });
 
-  test('builds ordered RuntimeInputs for one-click cross swap setup and request', () => {
+  test('builds one RuntimeInput for one-click cross swap setup and request', () => {
     const route = {
       orderId: 'order-1',
       makerEntityId: '0xsource',
@@ -306,41 +306,38 @@ describe('swap panel helpers', () => {
       shouldExtendTargetCredit: true,
     });
 
-    expect(plan.orderedInputs).toHaveLength(2);
-    expect(plan.setupInput?.entityInputs).toEqual([{
-      entityId: '0xtarget',
-      signerId: '0xTargetSigner',
-      entityTxs: [{
-        type: 'openAccount',
-        data: {
-          targetEntityId: '0xTargetHub',
-          tokenId: 2,
-          creditAmount: 10_000n,
-        },
-      }],
-    }]);
-    expect(plan.requestInput.entityInputs).toEqual([{
-      entityId: '0xsource',
-      signerId: '0xSourceSigner',
-      entityTxs: [{
-        type: 'requestCrossJurisdictionSwap',
-        data: { route },
-      }],
-    }]);
+    expect(plan.input.entityInputs).toEqual([
+      {
+        entityId: '0xtarget',
+        signerId: '0xTargetSigner',
+        entityTxs: [{
+          type: 'openAccount',
+          data: {
+            targetEntityId: '0xTargetHub',
+            tokenId: 2,
+            creditAmount: 10_000n,
+          },
+        }],
+      },
+      {
+        entityId: '0xsource',
+        signerId: '0xSourceSigner',
+        entityTxs: [{
+          type: 'requestCrossJurisdictionSwap',
+          data: { route },
+        }],
+      },
+    ]);
   });
 
   test('SwapPanel uses ordered RuntimeInput plans for cross swap setup', () => {
     const source = Bun.file('frontend/src/lib/components/Entity/SwapPanel.svelte');
     return source.text().then((text) => {
       expect(text).toContain('buildCrossSwapRuntimeInputPlan');
-      expect(text).toContain('crossInputPlan.setupInput');
-      expect(text).toContain('for (const runtimeInput of crossInputPlan.orderedInputs)');
-      expect(text).toContain('await submitRuntimeInput(runtimeInput)');
+      expect(text).toContain('crossInputPlan.targetSetupTxs.length > 0');
+      expect(text).toContain('await submitRuntimeInput(crossInputPlan.input)');
       expect(text).not.toContain('crossCommandEnv');
       expect(text).not.toContain('submitRuntimeInput(crossCommandEnv, runtimeInput)');
-      expect(text).not.toContain('const crossRuntimeInput = crossInputPlan.setupInput');
-      expect(text).not.toContain('...(crossInputPlan.setupInput.entityInputs || [])');
-      expect(text).not.toContain('...(crossInputPlan.requestInput.entityInputs || [])');
       expect(text).not.toContain('await submitRuntimeInput(nextEnv, crossInputPlan.requestInput)');
       expect(text).not.toContain('buildCrossTargetSetupTxs');
     });
@@ -391,7 +388,7 @@ describe('swap panel helpers', () => {
     expect(resolverSlice).toContain('resolveProjectedSignerId(entityId)');
     expect(resolverSlice).not.toContain("throw new Error('XLN environment not ready')");
     expect(placeSlice).toContain('resolveSwapLogicalClock(currentReplica)');
-    expect(placeSlice).toContain('await submitRuntimeInput(runtimeInput)');
+    expect(placeSlice).toContain('await submitRuntimeInput(crossInputPlan.input)');
     expect(placeSlice).toContain('await submitEntityInputs([{');
     expect(placeSlice).toContain('await prewarmCounterpartyProfiles(runtimeEnv, [targetRoute.targetHubEntityId])');
     expect(placeSlice).not.toContain("throw new Error('XLN environment not ready')");

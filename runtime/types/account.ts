@@ -214,7 +214,7 @@ export interface AccountMachine {
   status: AccountStatus; // Manual lifecycle gate for dispute freeze/reopen
 
   mempool: AccountTx[]; // Unprocessed account transactions
-  currentFrame: AccountFrame; // Current agreed state (includes full transaction history for replay/audit)
+  currentFrame: AccountFrame; // Latest finalized bilateral frame; older frames live in the frame DB.
 
   // Per-token delta states (giant per-token table like old_src)
   deltas: Map<number, Delta>; // tokenId -> Delta
@@ -432,7 +432,7 @@ export interface AccountFrame {
   deltas: Delta[];
 }
 
-export type RuntimeFrameDbRecord =
+export type AccountFrameDbRecord =
   {
     kind: 'accountFrame';
     entityId: string;

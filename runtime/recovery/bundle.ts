@@ -119,28 +119,28 @@ const normalizeAndValidateBundleFields = (
       if (frameHeight !== expectedHeight) {
         throw new Error(`RECOVERY_BUNDLE_JOURNAL_FRAME_GAP: expected=${expectedHeight} actual=${frameHeight}`);
       }
-      if (!frame.runtimeMachineBeforeApply || typeof frame.runtimeMachineBeforeApply !== 'object') {
-        throw new Error(`RECOVERY_BUNDLE_JOURNAL_PRE_RUNTIME_MACHINE_REQUIRED:height=${frameHeight}`);
-      }
-      if (!frame.runtimeMachine || typeof frame.runtimeMachine !== 'object') {
-        throw new Error(`RECOVERY_BUNDLE_JOURNAL_RUNTIME_MACHINE_REQUIRED:height=${frameHeight}`);
-      }
       // The runtime identity is derived from the locally trusted vault seed.
       // Even a correctly signed recovery tail must not make restore consume a
       // nested identity as authority: signing can faithfully preserve a local
       // persistence bug, while this binding keeps the trust root unambiguous.
-      assertRuntimeMachineBoundToRuntime(
-        frame.runtimeMachineBeforeApply,
-        runtimeId,
-        frameHeight,
-        'pre',
-      );
-      assertRuntimeMachineBoundToRuntime(frame.runtimeMachine, runtimeId, frameHeight, 'post');
+      if (frame.runtimeMachine) {
+        assertRuntimeMachineBoundToRuntime(frame.runtimeMachine, runtimeId, frameHeight, 'post');
+      }
       if (frame.runtimeStateHash !== undefined && !/^0x[0-9a-f]{64}$/i.test(String(frame.runtimeStateHash))) {
         throw new Error(`RECOVERY_BUNDLE_JOURNAL_STATE_HASH_INVALID:height=${frameHeight}`);
       }
       if (!/^0x[0-9a-f]{64}$/i.test(String(frame.replicaMetaDigest || ''))) {
         throw new Error(`RECOVERY_BUNDLE_JOURNAL_REPLICA_META_DIGEST_REQUIRED:height=${frameHeight}`);
+      }
+      if (typeof frame.replicaMetaCheckpoint !== 'boolean') {
+        throw new Error(`RECOVERY_BUNDLE_JOURNAL_REPLICA_META_CHECKPOINT_REQUIRED:height=${frameHeight}`);
+      }
+      if (
+        frame.replicaMetaStateMode !== 'live-head' &&
+        frame.replicaMetaStateMode !== 'shared-entity-state' &&
+        frame.replicaMetaStateMode !== 'full'
+      ) {
+        throw new Error(`RECOVERY_BUNDLE_JOURNAL_REPLICA_META_STATE_MODE_REQUIRED:height=${frameHeight}`);
       }
       expectedHeight += 1;
     }

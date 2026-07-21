@@ -32,6 +32,16 @@ export type ReliableIngressRegistration =
   | { kind: 'pending' }
   | { kind: 'receipt'; receipt: ReliableDeliveryReceipt };
 
+export type ReliableIngressRegistrationOptions = {
+  /**
+   * One authenticated cross-j envelope may carry Account ACK H+1 beside the
+   * source leg while ACK H is already queued immediately ahead of it. Admit
+   * that exact contiguous successor into the same Runtime batch; suppressing
+   * it would split the money bundle and leave only the source proposal.
+   */
+  allowContiguousPendingAccountAck?: boolean;
+};
+
 const validateIngressRoute = (
   env: Env,
   fromRuntimeIdRaw: string,
@@ -174,11 +184,24 @@ const assertNoPendingOrderGap = (
   return pending.length > 0;
 };
 
+const canEnqueueContiguousPendingAccountAck = (
+  env: Env,
+  fromRuntimeId: string,
+  identity: ReliableDeliveryIdentity,
+): boolean => {
+  if (identity.kind !== 'account-ack') return false;
+  const pending = pendingIdentitiesForLane(env, fromRuntimeId, identity);
+  if (pending.length === 0 || pending.some(candidate => candidate.kind !== 'account-ack')) return false;
+  const highestPendingHeight = Math.max(...pending.map(candidate => candidate.height));
+  return highestPendingHeight + 1 === identity.height;
+};
+
 /** Register transport ingress without treating durable queueing as terminal coverage. */
 export const registerReliableIngress = (
   env: Env,
   fromRuntimeIdRaw: string,
   input: RoutedEntityInput,
+  options: ReliableIngressRegistrationOptions = {},
 ): ReliableIngressRegistration => {
   const identity = getInputReliableIdentity(input);
   if (!identity) return { kind: 'ordinary' };
@@ -191,13 +214,18 @@ export const registerReliableIngress = (
   // owner instead of observing a premature receipt.
   if (pending?.targetRuntimeIds.has(fromRuntimeId)) return { kind: 'pending' };
   const durable = registerAgainstDurableFrontiers(env, fromRuntimeId, input, identity);
-  if (durable) return durable;
+  const admitContiguousPendingAccountAck =
+    options.allowContiguousPendingAccountAck === true &&
+    canEnqueueContiguousPendingAccountAck(env, fromRuntimeId, identity);
+  if (durable && !(durable.kind === 'pending' && admitContiguousPendingAccountAck)) return durable;
   if (pending) {
     assertSourceLaneCapacity(env, fromRuntimeId, identity);
     pending.targetRuntimeIds.add(fromRuntimeId);
     return { kind: 'pending' };
   }
-  if (assertNoPendingOrderGap(env, fromRuntimeId, identity)) return { kind: 'pending' };
+  if (assertNoPendingOrderGap(env, fromRuntimeId, identity) && !admitContiguousPendingAccountAck) {
+    return { kind: 'pending' };
+  }
   assertSourceLaneCapacity(env, fromRuntimeId, identity);
   state.pendingReliableIngress!.set(key, {
     identity,

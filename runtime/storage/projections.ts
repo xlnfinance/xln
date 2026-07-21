@@ -147,6 +147,7 @@ const cloneHankoWitness = (hankoWitness?: EntityReplica['hankoWitness']): Entity
 type ReplicaMetaProjectionOptions = {
   certifiedFrameLineage?: EntityReplica['certifiedFrameLineage'];
   certifiedFrameAnchor?: EntityReplica['certifiedFrameAnchor'];
+  omitState?: boolean;
 };
 
 const buildReplicaMetaProjection = (
@@ -158,7 +159,14 @@ const buildReplicaMetaProjection = (
   entityId: normalizeEntityId(replica.entityId),
   signerId: normalizeEntityId(replica.signerId),
   isProposer: replica.isProposer,
-  state,
+  ...(!options?.omitState ? { state } : {}),
+  ...(options?.omitState ? {
+    localEntityState: {
+      entityEncPubKey: state.entityEncPubKey,
+      entityEncPrivKey: state.entityEncPrivKey,
+      ...withProp('htlcNotes', state.htlcNotes),
+    },
+  } : {}),
   mempool,
   ...withProp('position', replica.position),
   ...withProp('proposal', replica.proposal),

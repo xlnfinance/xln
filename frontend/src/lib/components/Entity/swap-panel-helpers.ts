@@ -71,9 +71,7 @@ export type CrossTargetSetupTx =
     };
 
 export type CrossSwapRuntimeInputPlan = {
-  setupInput: RuntimeInput | null;
-  requestInput: RuntimeInput;
-  orderedInputs: RuntimeInput[];
+  input: RuntimeInput;
   targetSetupTxs: EntityTx[];
 };
 
@@ -474,9 +472,13 @@ export function buildCrossSwapRuntimeInputPlan(input: {
   };
 
   return {
-    setupInput,
-    requestInput,
-    orderedInputs: setupInput ? [setupInput, requestInput] : [requestInput],
+    input: {
+      runtimeTxs: [],
+      entityInputs: [
+        ...(setupInput?.entityInputs ?? []),
+        ...requestInput.entityInputs,
+      ],
+    },
     targetSetupTxs,
   };
 }

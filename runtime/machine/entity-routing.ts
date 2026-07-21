@@ -3,6 +3,7 @@ import type {
   AccountTx,
   CrossJurisdictionBookAdmissionReceipt,
   EntityInput,
+  EntityReplica,
   Env,
   JInput,
   ReliableDeliveryReceipt,
@@ -19,6 +20,9 @@ import { registerReliableIngress } from './reliable-delivery';
 import { advanceEntityCommandNonce, assertSignedEntityCommand } from '../entity/command';
 import { validateDeliverableEntityInput } from '../validation-utils';
 import { accountInputAck, accountInputProposal } from '../account/consensus/flush';
+import { createStructuredLogger } from '../infra/logger';
+
+const routingLog = createStructuredLogger('network.entity-routing');
 
 type RuntimeState = NonNullable<Env['runtimeState']>;
 
@@ -70,15 +74,16 @@ type CrossJAdmissionCandidate = {
   accountInput: AccountInput;
   pull: Extract<AccountTx, { type: 'pull_lock' }>;
   targetReceipt?: CrossJurisdictionBookAdmissionReceipt;
+  alreadyCommitted: boolean;
 };
 
 const admissionKey = (orderId: string, routeHash: string): string =>
   `${String(orderId || '').trim()}\u0000${String(routeHash || '').trim().toLowerCase()}`;
 
 const admissionOriginKey = (input: RoutedEntityInput): string => {
-  const frame = input.sourceRuntimeFrame;
-  if (!frame) return input.from ? `remote:${normalizeRuntimeId(input.from)}:missing` : 'local';
-  return `${normalizeRuntimeId(input.from)}:${frame.height}:${frame.timestamp}`;
+  if (!input.from) return 'local';
+  const runtimeId = normalizeRuntimeId(input.from);
+  return runtimeId ? `remote:${runtimeId}` : 'remote:missing';
 };
 
 const admissionPairKey = (input: RoutedEntityInput, routeKey: string): string =>
@@ -120,20 +125,40 @@ const sourceAdmissionCandidate = (
     accountInput,
     pull,
     targetReceipt: binding.targetReceipt,
+    alreadyCommitted: false,
   };
 };
+
+const findInputReplica = (
+  env: Env,
+  input: RoutedEntityInput,
+): EntityReplica | null =>
+  ([...env.eReplicas.values()].find(candidate =>
+    normalizeEntityKey(candidate.entityId) === normalizeEntityKey(input.entityId) &&
+    normalizeEntityKey(candidate.signerId) === normalizeEntityKey(input.signerId)) ?? null);
 
 const findReplicaAccount = (
   env: Env,
   input: RoutedEntityInput,
   counterpartyId: string,
 ) => {
-  const replica = [...env.eReplicas.values()].find(candidate =>
-    normalizeEntityKey(candidate.entityId) === normalizeEntityKey(input.entityId) &&
-    normalizeEntityKey(candidate.signerId) === normalizeEntityKey(input.signerId));
+  const replica = findInputReplica(env, input);
   if (!replica) return null;
   const target = normalizeEntityKey(counterpartyId);
   return [...replica.state.accounts.entries()].find(([key]) => normalizeEntityKey(key) === target)?.[1] ?? null;
+};
+
+const proposalAlreadyCommitted = (
+  env: Env,
+  input: RoutedEntityInput,
+  accountInput: AccountInput,
+): boolean => {
+  const proposal = accountInputProposal(accountInput);
+  if (!proposal) return false;
+  const account = findReplicaAccount(env, input, accountInput.fromEntityId);
+  return account?.currentFrame.height === proposal.frame.height &&
+    String(account.currentFrame.stateHash || '').toLowerCase() ===
+      String(proposal.frame.stateHash || '').toLowerCase();
 };
 
 const targetAdmissionCandidate = (
@@ -145,13 +170,18 @@ const targetAdmissionCandidate = (
   const ack = accountInputAck(accountInput);
   if (!ack) return null;
   const account = findReplicaAccount(env, input, accountInput.fromEntityId);
+  const frameMatchesAck = (frame: NonNullable<typeof account>['currentFrame'] | undefined): boolean =>
+    frame?.height === ack.height &&
+    String(frame.stateHash || '').toLowerCase() === String(ack.frameHash || '').toLowerCase();
   const pending = account?.pendingFrame;
-  if (
-    !pending ||
-    pending.height !== ack.height ||
-    String(pending.stateHash || '').toLowerCase() !== String(ack.frameHash || '').toLowerCase()
-  ) return null;
-  const pull = crossPull(pending.accountTxs, 'target');
+  const current = account?.currentFrame;
+  const frame = frameMatchesAck(pending)
+    ? pending
+    : frameMatchesAck(current)
+      ? current
+      : null;
+  if (!frame) return null;
+  const pull = crossPull(frame.accountTxs, 'target');
   const binding = pull?.data.crossJurisdiction;
   if (!pull || !binding) return null;
   const routeKey = admissionKey(binding.orderId, binding.routeHash);
@@ -162,6 +192,7 @@ const targetAdmissionCandidate = (
     leg: 'target',
     accountInput,
     pull,
+    alreadyCommitted: frame === current,
   };
 };
 
@@ -205,21 +236,72 @@ export type CrossJAccountInputPairSelection = {
   droppedInputIndexes: number[];
 };
 
+export type PotentialCrossJAccountInputPair = {
+  sourceInputIndex: number;
+  targetInputIndex: number;
+};
+
+/**
+ * Structural pairing used only to keep a contiguous reliable ACK in the same
+ * Runtime candidate batch as its source leg. It deliberately does not approve
+ * money: the strict selector below re-checks the ACK against the target Hub's
+ * pending Account frame after earlier causal ACKs have advanced that state.
+ */
+export const selectPotentialCrossJAccountInputPairs = (
+  inputs: readonly RoutedEntityInput[],
+): PotentialCrossJAccountInputPair[] => {
+  const sources = inputs.flatMap((input, inputIndex) =>
+    effectiveAccountInputs(input).flatMap(accountInput => {
+      const source = sourceAdmissionCandidate(input, inputIndex, accountInput);
+      return source ? [source] : [];
+    }));
+  const claimedTargets = new Set<number>();
+  const pairs: PotentialCrossJAccountInputPair[] = [];
+  for (const source of sources) {
+    const receipt = source.targetReceipt;
+    if (!receipt) continue;
+    const targets = inputs.flatMap((input, inputIndex) => {
+      if (inputIndex === source.inputIndex || claimedTargets.has(inputIndex)) return [];
+      if (admissionPairKey(input, source.routeKey) !== source.pairKey) return [];
+      if (normalizeEntityKey(input.entityId) !== normalizeEntityKey(receipt.hubEntityId)) return [];
+      const matchingAcks = effectiveAccountInputs(input).filter(accountInput =>
+        Boolean(accountInputAck(accountInput)) &&
+        normalizeEntityKey(accountInput.toEntityId) === normalizeEntityKey(receipt.hubEntityId) &&
+        normalizeEntityKey(accountInput.fromEntityId) === normalizeEntityKey(receipt.counterpartyEntityId));
+      return matchingAcks.length === 1 ? [inputIndex] : [];
+    });
+    if (targets.length !== 1) continue;
+    claimedTargets.add(targets[0]!);
+    pairs.push({ sourceInputIndex: source.inputIndex, targetInputIndex: targets[0]! });
+  }
+  return pairs;
+};
+
 const collectCrossJAdmissionCandidates = (
   env: Env,
   inputs: readonly RoutedEntityInput[],
-): CrossJAdmissionCandidate[] => inputs.flatMap((input, inputIndex) =>
-  effectiveAccountInputs(input).flatMap(accountInput => [
-    sourceAdmissionCandidate(input, inputIndex, accountInput),
-    targetAdmissionCandidate(env, input, inputIndex, accountInput),
-  ].filter((candidate): candidate is CrossJAdmissionCandidate => candidate !== null)));
+): CrossJAdmissionCandidate[] => inputs.flatMap((input, inputIndex) => {
+  const replica = findInputReplica(env, input);
+  if (replica?.state.profile?.isHub !== true) return [];
+  return effectiveAccountInputs(input).flatMap(accountInput => {
+    const source = sourceAdmissionCandidate(input, inputIndex, accountInput);
+    if (source) source.alreadyCommitted = proposalAlreadyCommitted(env, input, accountInput);
+    return [
+      source,
+      targetAdmissionCandidate(env, input, inputIndex, accountInput),
+    ].filter((candidate): candidate is CrossJAdmissionCandidate => candidate !== null);
+  });
+});
 
 /**
  * Cross-j admission is the only cross-runtime Account phase that requires two
- * sibling legs in one source-R-frame envelope. A target proposal remains a
- * normal single input; its ACK is admitted only beside the source proposal
- * bound to the exact target receipt. Later fill/close Account traffic remains
- * ordinary bilateral consensus traffic.
+ * sibling legs in one receiver Runtime candidate. Reliable delivery may carry
+ * those legs from adjacent source R-frames, so source runtime identity (not
+ * source frame height) is the shared boundary. The exact target receipt, pull,
+ * route and both signed Account frames remain the monetary binding. A target
+ * proposal remains a normal single input; its ACK is admitted only beside the
+ * matching source proposal. Later fill/close Account traffic remains ordinary
+ * bilateral consensus traffic.
  */
 export const selectMatchedCrossJAccountInputPairs = (
   env: Env,
@@ -228,21 +310,25 @@ export const selectMatchedCrossJAccountInputPairs = (
   const candidates = collectCrossJAdmissionCandidates(env, inputs);
   if (candidates.length === 0) return { inputs: [...inputs], pairs: [], droppedInputIndexes: [] };
 
+  // A byte-exact Account frame already present in durable state is transport
+  // replay, not a new monetary leg. Let bilateral consensus emit its missing
+  // ACK independently; requiring the sibling again would turn packet loss into
+  // an alert/retry loop after a successful atomic commit.
+  const uncommittedCandidates = candidates.filter(candidate => !candidate.alreadyCommitted);
   const byKey = new Map<string, CrossJAdmissionCandidate[]>();
-  for (const candidate of candidates) {
+  for (const candidate of uncommittedCandidates) {
     const group = byKey.get(candidate.pairKey) ?? [];
     group.push(candidate);
     byKey.set(candidate.pairKey, group);
   }
   const candidateCounts = new Map<number, number>();
-  for (const candidate of candidates) {
+  for (const candidate of uncommittedCandidates) {
     candidateCounts.set(candidate.inputIndex, (candidateCounts.get(candidate.inputIndex) ?? 0) + 1);
   }
   const invalidIndexes = new Set([...candidateCounts]
     .filter(([, count]) => count !== 1)
     .map(([inputIndex]) => inputIndex));
   const pairs: CrossJAccountInputPair[] = [];
-  const allCandidateIndexes = new Set(candidates.map(candidate => candidate.inputIndex));
   for (const [pairKey, group] of byKey) {
     const sources = group.filter(candidate => candidate.leg === 'source');
     const targets = group.filter(candidate => candidate.leg === 'target');
@@ -289,6 +375,7 @@ export const selectMatchedCrossJAccountInputPairs = (
       },
     });
   }
+  const allCandidateIndexes = new Set(uncommittedCandidates.map(candidate => candidate.inputIndex));
   const pairedIndexes = new Set(pairs.flatMap(pair => [pair.sourceInputIndex, pair.targetInputIndex]));
   const droppedInputIndexes = [...allCandidateIndexes]
     .filter(inputIndex => invalidIndexes.has(inputIndex) || !pairedIndexes.has(inputIndex))
@@ -617,16 +704,13 @@ export const validateInboundP2PEntityInputsEnvelope = (
         }]
       : [];
   });
-  const retainedInputs = filterMatchedCrossJAccountInputPairs(env, validatedInputs);
-  if (retainedInputs.length !== validatedInputs.length) {
-    env.warn?.('network', 'INBOUND_CROSS_J_ACCOUNT_PAIR_DROPPED', {
-      fromRuntimeId: from,
-      sourceRuntimeHeight: envelope.sourceRuntimeHeight,
-      received: validatedInputs.length,
-      retained: retainedInputs.length,
-    });
-  }
-  return retainedInputs;
+  // Pairing is state-dependent: an older Account ACK from the same ordered
+  // transport may still be queued immediately before this envelope. Filtering
+  // here would inspect stale Account pendingFrame state and destroy one leg of
+  // an otherwise valid atomic admission. Runtime apply performs the two-phase
+  // preflight after earlier inputs have advanced state, then commits both legs
+  // or ignores both with a security incident.
+  return validatedInputs;
 };
 
 export const handleInboundP2PEntityInputs = (
@@ -639,11 +723,21 @@ export const handleInboundP2PEntityInputs = (
 ): RuntimeInboundEntityInputsResult => {
   // Validate the complete envelope before mutating reliable ledgers or queues.
   const inputs = validateInboundP2PEntityInputsEnvelope(env, from, envelope, deps, options);
+  const atomicCrossJInputIndexes = new Set(
+    selectPotentialCrossJAccountInputPairs(inputs)
+      .flatMap(pair => [pair.sourceInputIndex, pair.targetInputIndex]),
+  );
   const queued: RoutedEntityInput[] = [];
   const receipts: ReliableDeliveryReceipt[] = [];
+  const registrationTrace: Array<{ inputIndex: number; entityId: string; kind: string }> = [];
   let pending = false;
-  for (const input of inputs) {
-    const registration = registerReliableIngress(env, from, input);
+  for (const [inputIndex, input] of inputs.entries()) {
+    const registration = registerReliableIngress(env, from, input, {
+      allowContiguousPendingAccountAck: atomicCrossJInputIndexes.has(inputIndex),
+    });
+    if (atomicCrossJInputIndexes.size > 0) {
+      registrationTrace.push({ inputIndex, entityId: input.entityId, kind: registration.kind });
+    }
     if (registration.kind === 'pending') {
       pending = true;
       continue;
@@ -653,6 +747,14 @@ export const handleInboundP2PEntityInputs = (
       continue;
     }
     queued.push(input);
+  }
+  if (atomicCrossJInputIndexes.size > 0) {
+    routingLog.info('crossj.atomic_envelope_ingress', {
+      sourceRuntimeId: envelope.sourceRuntimeId,
+      sourceRuntimeHeight: envelope.sourceRuntimeHeight,
+      inputCount: inputs.length,
+      registrationTrace,
+    });
   }
   if (queued.length > 0) {
     deps.enqueueRuntimeInputs(env, queued, undefined, undefined, ingressTimestamp, options);

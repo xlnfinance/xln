@@ -5,6 +5,10 @@ import { basename, dirname, join } from 'path';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { deriveAccountWatchSeed } from '../account/watch-seed';
 import { generateLazyEntityId } from '../entity/factory';
+import {
+  createEntityFrameHashFromStateRoot,
+  setEntityFrameHashDebugRecorder,
+} from '../entity/consensus/frame';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { converge } from '../scenarios/helpers';
 import { serializeTaggedJson } from '../protocol/serialization';
@@ -12,6 +16,7 @@ import { buildAccountMerkleFromState } from '../storage';
 import { inspectStorageDb, loadEntityStateFromStorageDb } from '../runtime';
 import {
   applyRuntimeInput,
+  closeInfraDb,
   closeRuntimeDb,
   createEmptyEnv,
   loadEnvFromDB,
@@ -21,7 +26,14 @@ import {
 import { dbRootPath } from '../machine/platform';
 import type { AccountMachine, EntityReplica, EntityState, EntityTx, Env, JReplica, RoutedEntityInput } from '../types';
 import { getPerfMs } from '../utils';
-import { buildDurableRuntimeMachineSnapshot, buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
+import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
+import {
+  buildStorageLiveReplicaMetaCommitment,
+  inspectStorageReplicaMetaEntries,
+  summarizeStorageReplicaMetaEntries,
+  summarizeStorageReplicaMetaFields,
+  summarizeStorageReplicaMetaHeads,
+} from '../storage/replicas';
 
 type Participant = {
   entityId: string;
@@ -465,12 +477,9 @@ const importParticipants = async (
       })),
       entityInputs: [],
     } as unknown as Env['runtimeInput'];
-    const runtimeMachineBeforeApply = buildDurableRuntimeMachineSnapshot(env, {
-      pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
-    });
     await applyRuntimeInput(env, runtimeInput);
     if (env.runtimeConfig?.storage?.enabled === true || env.runtimeState?.persistencePaused !== true) {
-      await saveEnvToDB(env, runtimeInput, undefined, runtimeMachineBeforeApply);
+      await saveEnvToDB(env, runtimeInput);
     }
   }
 };
@@ -516,6 +525,8 @@ async function main() {
   const persist = hasFlag('--persist');
   const storageEnabled = hasFlag('--storage');
   const storageSnapshotPeriod = parsePositiveInt(getArg('--storage-snapshot', '256'), 256);
+  const storageMaterializePeriod = parsePositiveInt(getArg('--storage-materialize', '100'), 100);
+  const storageCanonicalPeriod = parseNonNegativeInt(getArg('--storage-canonical', '0'), 0);
   const storageEpochMb = parsePositiveInt(getArg('--storage-epoch-mb', '256'), 256);
   const accountMerkleRadix = getArg('--account-merkle-radix', '16') === '256' ? 256 : 16;
   const recoveryBudgetMs = parsePositiveInt(getArg('--recovery-budget-ms', '10000'), 10000);
@@ -530,6 +541,19 @@ async function main() {
   const paymentAmount = parseBigIntArg(getArg('--amount', '1'), 1n);
   const maxConverge = parsePositiveInt(getArg('--max-converge', '200'), 200);
   const verbose = hasFlag('--verbose');
+  if (hasFlag('--debug-replica-meta')) {
+    process.env['XLN_STORAGE_DEBUG_REPLICA_META'] = '1';
+    setEntityFrameHashDebugRecorder((record) => {
+      const payload = record.payload as { txs?: Array<{ type?: unknown }> };
+      console.error('[ENTITY_FRAME_HASH]', JSON.stringify({
+        entityId: record.entityId,
+        height: record.height,
+        hash: record.hash,
+        txTypes: payload.txs?.map(tx => tx.type) ?? [],
+        payloadHash: createHash('sha256').update(JSON.stringify(record.payload)).digest('hex'),
+      }));
+    });
+  }
   const seed = getArg('--seed', 'bench-storage-hub alpha beta gamma delta epsilon')!;
   const requestedDbRoot = getArg('--db-root', dbRootPath)!;
   const dbRoot = process.env['XLN_DB_PATH'] || requestedDbRoot;
@@ -557,6 +581,8 @@ async function main() {
           storage: {
             enabled: true,
             snapshotPeriodFrames: storageSnapshotPeriod,
+            materializePeriodFrames: storageMaterializePeriod,
+            canonicalHashPeriodFrames: storageCanonicalPeriod,
             retainSnapshots: 3,
             epochMaxBytes: storageEpochMb * 1024 * 1024,
             accountMerkleRadix,
@@ -703,7 +729,7 @@ async function main() {
   let settlementMs = 0;
   let processedPayments = 0;
 
-  if (users.length > 0) {
+  if (users.length > 0 && payments > 0) {
     const sampleUser = users[0]!;
     const sampleUserReplicaBefore = findReplica(env, sampleUser);
     const sampleHubAccountBefore = hubReplica.state.accounts.get(sampleUser.entityId);
@@ -817,6 +843,42 @@ async function main() {
   let crashRecoveredHubAccountCount: number | null = null;
   let crashRecoveredHeight: number | null = null;
   if (storageEnabled) {
+    if (hasFlag('--debug-replica-meta')) {
+      for (const replica of env.eReplicas.values()) {
+        for (const { frame } of replica.certifiedFrameLineage ?? []) {
+          const recomputed = createEntityFrameHashFromStateRoot(
+            frame.parentFrameHash,
+            frame.height,
+            frame.timestamp,
+            frame.txs,
+            replica.entityId,
+            frame.stateRoot,
+            frame.authorityRoot,
+            frame.jPrefixCertificate,
+          );
+          console.error('[ENTITY_FRAME_LINEAGE_VERIFY]', JSON.stringify({
+            entityId: replica.entityId,
+            height: frame.height,
+            declared: frame.hash,
+            recomputed,
+            txTypes: frame.txs.map(tx => tx.type),
+          }));
+        }
+      }
+      const liveReplicaMeta = buildStorageLiveReplicaMetaCommitment(env);
+      console.log(`Replica meta live digest=${liveReplicaMeta.digest} entries=${JSON.stringify(
+        summarizeStorageReplicaMetaEntries(liveReplicaMeta.entries),
+      )}`);
+      console.log(`Replica meta live fields=${JSON.stringify(
+        summarizeStorageReplicaMetaFields(liveReplicaMeta.entries),
+      )}`);
+      console.log(`Replica meta live heads=${serializeTaggedJson(
+        summarizeStorageReplicaMetaHeads(liveReplicaMeta.entries),
+      )}`);
+      console.log(`Replica meta live values=${serializeTaggedJson(
+        inspectStorageReplicaMetaEntries(liveReplicaMeta.entries),
+      )}`);
+    }
     const liveHubReplica = findReplica(env, hub);
     const liveMerkleStartedAt = getPerfMs();
     storageLiveMerkleRoot = buildAccountMerkleFromState(liveHubReplica.state.accounts, accountMerkleRadix).root;
@@ -870,6 +932,7 @@ async function main() {
     storageStats = await inspectStorageDb(env);
   }
   await closeRuntimeDb(env);
+  await closeInfraDb(env);
   if (storageEnabled && crashRecover) {
     const crashStartedAt = getPerfMs();
     const recoveredEnv = await loadEnvFromDB(runtimeId, seed);
@@ -879,6 +942,7 @@ async function main() {
     crashRecoveredHeight = recoveredEnv.height;
     crashRecoveredHubAccountCount = recoveredHub.state.accounts.size;
     await closeRuntimeDb(recoveredEnv);
+    await closeInfraDb(recoveredEnv);
     if (crashRecoveredHubAccountCount !== users.length) {
       throw new Error(`CRASH_RECOVERY_ACCOUNT_COUNT_MISMATCH:${crashRecoveredHubAccountCount}/${users.length}`);
     }

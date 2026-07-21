@@ -122,6 +122,7 @@ export interface Runtime {
 }
 
 const runtimeCreationInFlight = new Map<string, Promise<void>>();
+const signerCreationInFlight = new Map<string, Promise<Signer | null>>();
 const schemaMismatchRecoveryRuntimeIds = new Set<string>();
 
 type CreateRuntimeOptions = {
@@ -272,6 +273,7 @@ const recoveryTowerInfoCache = new Map<string, { fetchedAt: number; info: TowerS
 
 const RECOVERY_UPLOAD_DEBOUNCE_MS = 1_500;
 const RECOVERY_SNAPSHOT_INTERVAL_FRAMES = 10_000;
+const RUNTIME_P2P_SHUTDOWN_TIMEOUT_MS = 10_000;
 const RECOVERY_TOWER_INFO_TTL_MS = 60_000;
 // Keep this aligned with Depository.defaultDisputeDelay. Towers are not meant to
 // intervene for most of the dispute window; they only become eligible in the final
@@ -2419,7 +2421,7 @@ async function suspendRuntimeEnvActivity(env: Env, loadedXln?: XLNModule): Promi
   // consensus lanes can emit their final delivery/receipt while the runtime
   // becomes idle; stopping P2P earlier strands that durable output locally.
   try {
-    await xln.stopP2PAndWait(env);
+    await xln.stopP2PAndWait(env, RUNTIME_P2P_SHUTDOWN_TIMEOUT_MS);
   } catch (error) {
     failures.push(`p2p:${error instanceof Error ? error.message : String(error)}`);
   }
@@ -4007,8 +4009,12 @@ export const vaultOperations = {
     await runtimeOperations.selectRuntime(resolvedRuntimeId);
   },
 
-  // Add signer to active runtime
-  addSigner(name?: string, jurisdiction?: string): Signer | null {
+  // Add signer to active runtime. Awaits key registration and entity
+  // creation before returning: the runtime's own processing loop can pick up
+  // a newly imported replica's mempool (e.g. its self-certifyProfile) as soon
+  // as importReplica lands, so the signer key must already be registered by
+  // then — never fire-and-forget this tail.
+  async addSigner(name?: string, jurisdiction?: string): Promise<Signer | null> {
     const current = get(runtimesState);
     if (!current.activeRuntimeId) return null;
 
@@ -4019,6 +4025,13 @@ export const vaultOperations = {
     if (jurisdictionKey) {
       const existing = runtime.signers.find((signer) => normalizeJurisdictionKey(signer.jurisdiction) === jurisdictionKey);
       if (existing) return existing;
+    }
+
+    const inflightKey = runtime.id;
+    const priorCreation = signerCreationInFlight.get(inflightKey);
+    if (priorCreation) {
+      await priorCreation;
+      return this.addSigner(name, jurisdiction);
     }
 
     const nextIndex = runtime.signers.length;
@@ -4033,23 +4046,10 @@ export const vaultOperations = {
       ...(jurisdiction ? { jurisdiction } : {}),
     };
 
-    runtimesState.update(state => ({
-      ...state,
-      runtimes: {
-        ...state.runtimes,
-        [runtime.id]: {
-          ...runtime,
-          signers: [...runtime.signers, newSigner]
-        }
-      }
-    }));
-
-    this.saveToStorage();
-
     // CRITICAL: Register HD-derived private key with runtime BEFORE creating entity
     // Why: Runtime's deriveSignerKeySync uses different derivation than BIP44 HD
     // Without this, hanko verification fails (signature from wrong key)
-    void (async () => {
+    const creation = (async (): Promise<Signer> => {
       const xln = await getXLN();
       const privateKey = derivePrivateKey(runtime.seed, derivationIndex);
       const privateKeyBytes = new Uint8Array(
@@ -4065,10 +4065,37 @@ export const vaultOperations = {
         throw new Error(`[VaultStore] Cannot auto-create signer entity without active runtime env: runtime=${runtime.id}`);
       }
       const entityId = await autoCreateEntityForSigner(address, runtimeEnv, jurisdiction);
-      if (entityId) {
-        this.setSignerEntity(nextIndex, entityId);
-      }
-    })().catch(err => {
+      const committedSigner: Signer = entityId ? { ...newSigner, entityId } : newSigner;
+
+      // Publish the signer only after every prerequisite succeeded. Persisting it
+      // earlier leaves a vault entry whose key/entity setup failed halfway.
+      runtimesState.update(state => {
+        const latestRuntime = state.runtimes[runtime.id];
+        if (!latestRuntime) {
+          throw new Error(`SIGNER_RUNTIME_DISAPPEARED:${runtime.id}`);
+        }
+        if (latestRuntime.signers.some(signer => signer.address.toLowerCase() === address.toLowerCase())) {
+          throw new Error(`SIGNER_ADDRESS_ALREADY_EXISTS:${address}`);
+        }
+        return {
+          ...state,
+          runtimes: {
+            ...state.runtimes,
+            [runtime.id]: {
+              ...latestRuntime,
+              signers: [...latestRuntime.signers, committedSigner],
+            },
+          },
+        };
+      });
+      this.saveToStorage();
+      return committedSigner;
+    })();
+    signerCreationInFlight.set(inflightKey, creation);
+
+    try {
+      return await creation;
+    } catch (err) {
       errorLog.log('Failed to register key/create entity', 'Runtime Creation', {
         runtimeId: runtime.id,
         signerIndex: nextIndex,
@@ -4077,10 +4104,11 @@ export const vaultOperations = {
       });
       toasts.error(`Failed to create signer entity: ${(err as Error)?.message || String(err)}`, 10_000);
       throw err;
-    });
-    // Auto-faucet removed - user can request funds manually via XLNSend
-
-    return newSigner;
+    } finally {
+      if (signerCreationInFlight.get(inflightKey) === creation) {
+        signerCreationInFlight.delete(inflightKey);
+      }
+    }
   },
 
   // Select signer

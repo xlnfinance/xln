@@ -1,4 +1,6 @@
 import { validateRuntimeInputEnvelope } from '../protocol/boundary-validation';
+import type { RoutedEntityInput } from '../types';
+import { validateEntityInput } from '../validation-utils';
 import { assertStorageSchemaVersion } from './keys';
 import type {
   StorageDiffRecord,
@@ -26,6 +28,10 @@ import {
   validateStorageEntityCoreDocValue,
 } from './schema-state-docs';
 import { validateDurableRuntimeMachineSnapshot } from '../wal/runtime-machine-schema';
+import {
+  assertRuntimeOutputRetryFenceMatchesOutputs,
+  validateRuntimeOutputRetryFence,
+} from '../machine/output-retry-fence';
 
 export * from './schema-state-docs';
 export * from './schema-merkle-cas';
@@ -68,16 +74,29 @@ export const validateStorageFrameRecordValue = (value: unknown): StorageFrameRec
   const code = 'STORAGE_FRAME_INVALID';
   const frame = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(frame, [
-    'height', 'timestamp', 'prevFrameHash', 'frameHash', 'replicaMetaDigest', 'stateHash',
+    'height', 'timestamp', 'prevFrameHash', 'frameHash', 'replicaMetaDigest', 'replicaMetaCheckpoint',
+    'replicaMetaStateMode', 'stateHash',
     'hashMode', 'materializedState', 'runtimeInput',
-    'runtimeMachineBeforeApply', 'runtimeMachine', 'touchedEntities', 'touchedAccounts',
+    'touchedEntities', 'touchedAccounts',
     'touchedBookEntities',
-  ], ['entityHashes', 'canonicalStateHash', 'canonicalEntityHashes', 'runtimeStateHash', 'runtimeOutputs', 'overlayRecords'], `${code}_FIELDS`);
+  ], ['entityHashes', 'canonicalStateHash', 'canonicalEntityHashes', 'runtimeStateHash', 'runtimeMachine', 'pendingRuntimeInput', 'runtimeOutputs', 'runtimeOutputRetryMeta', 'overlayRecords'], `${code}_FIELDS`);
   requireBoundaryInteger(frame['height'], `${code}_HEIGHT`, 1);
   requireBoundaryInteger(frame['timestamp'], `${code}_TIMESTAMP`);
   requireStorageHash(frame['prevFrameHash'], `${code}_PREV_HASH`);
   requireStorageHash(frame['frameHash'], `${code}_FRAME_HASH`);
   requireStorageHash(frame['replicaMetaDigest'], `${code}_REPLICA_META_DIGEST`);
+  requireStorageBoolean(frame['replicaMetaCheckpoint'], `${code}_REPLICA_META_CHECKPOINT`);
+  if (
+    frame['replicaMetaStateMode'] !== 'live-head' &&
+    frame['replicaMetaStateMode'] !== 'shared-entity-state' &&
+    frame['replicaMetaStateMode'] !== 'full'
+  ) throw new Error(`${code}_REPLICA_META_STATE_MODE`);
+  if (frame['replicaMetaCheckpoint'] === false && frame['replicaMetaStateMode'] !== 'live-head') {
+    throw new Error(`${code}_REPLICA_META_STATE_MODE_NON_CHECKPOINT`);
+  }
+  if (frame['replicaMetaCheckpoint'] === true && frame['replicaMetaStateMode'] === 'live-head') {
+    throw new Error(`${code}_REPLICA_META_STATE_MODE_CHECKPOINT`);
+  }
   if (typeof frame['stateHash'] !== 'string') throw new Error(`${code}_STATE_HASH`);
   if (frame['hashMode'] !== 'storage-merkle-v1') throw new Error(`${code}_HASH_MODE`);
   requireStorageBoolean(frame['materializedState'], `${code}_MATERIALIZED`);
@@ -89,19 +108,34 @@ export const validateStorageFrameRecordValue = (value: unknown): StorageFrameRec
   if (frame['runtimeStateHash'] !== undefined) {
     requireStorageHash(frame['runtimeStateHash'], `${code}_RUNTIME_STATE_HASH`);
   }
+  const requiresRuntimeMachine = frame['materializedState'] === true || frame['canonicalStateHash'] !== undefined;
+  if (requiresRuntimeMachine || frame['runtimeMachine'] !== undefined) {
+    frame['runtimeMachine'] = validateDurableRuntimeMachineSnapshot(
+      frame['runtimeMachine'],
+      `${code}_MACHINE`,
+    );
+  }
   validateRuntimeInputEnvelope(frame['runtimeInput'], `${code}_RUNTIME_INPUT`);
-  frame['runtimeMachineBeforeApply'] = validateDurableRuntimeMachineSnapshot(
-    frame['runtimeMachineBeforeApply'],
-    `${code}_MACHINE_BEFORE`,
-  );
-  frame['runtimeMachine'] = validateDurableRuntimeMachineSnapshot(
-    frame['runtimeMachine'],
-    `${code}_MACHINE`,
-  );
+  if (frame['pendingRuntimeInput'] !== undefined) {
+    validateRuntimeInputEnvelope(frame['pendingRuntimeInput'], `${code}_PENDING_RUNTIME_INPUT`);
+  }
+  if (frame['runtimeOutputRetryMeta'] !== undefined) {
+    frame['runtimeOutputRetryMeta'] = validateRuntimeOutputRetryFence(
+      frame['runtimeOutputRetryMeta'],
+      `${code}_RUNTIME_OUTPUT_RETRY_META`,
+    );
+  }
   requireStringArray(frame['touchedEntities'], `${code}_TOUCHED_ENTITIES`);
   validateTouchedAccounts(frame['touchedAccounts'], `${code}_TOUCHED_ACCOUNTS`);
   requireStringArray(frame['touchedBookEntities'], `${code}_TOUCHED_BOOK_ENTITIES`);
   validateOptionalFrameFields(frame, code);
+  if (frame['runtimeOutputRetryMeta'] !== undefined) {
+    assertRuntimeOutputRetryFenceMatchesOutputs(
+      frame['runtimeOutputRetryMeta'] as ReturnType<typeof validateRuntimeOutputRetryFence>,
+      (frame['runtimeOutputs'] ?? []) as RoutedEntityInput[],
+      `${code}_RUNTIME_OUTPUT_RETRY_META`,
+    );
+  }
   return frame as StorageFrameRecord;
 };
 
@@ -125,7 +159,10 @@ const validateOptionalFrameFields = (frame: Record<string, unknown>, code: strin
   if (canonicalFields.some(value => value !== undefined) && canonicalFields.some(value => value === undefined)) {
     throw new Error(`${code}_CANONICAL_CHECKPOINT_INCOMPLETE`);
   }
-  if (frame['runtimeOutputs'] !== undefined) requireStorageArray(frame['runtimeOutputs'], `${code}_OUTPUTS`);
+  if (frame['runtimeOutputs'] !== undefined) {
+    frame['runtimeOutputs'] = requireStorageArray(frame['runtimeOutputs'], `${code}_OUTPUTS`)
+      .map(validateEntityInput);
+  }
   if (frame['overlayRecords'] !== undefined) requireStorageArray(frame['overlayRecords'], `${code}_OVERLAYS`);
 };
 

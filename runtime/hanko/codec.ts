@@ -7,7 +7,10 @@ import type {
   HankoString,
   HankoWireClaim,
 } from '../types/hanko';
-import { signDigestBytesWithPrivateKey } from '../account/crypto';
+import {
+  recoverAddressFromDigestSignature,
+  signDigestBytesWithPrivateKey,
+} from '../account/crypto';
 
 export const HANKO_ABI = [
   'tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[])',
@@ -174,12 +177,19 @@ export const recoverHankoSignatures = (
   packed: string,
 ): readonly HankoRecoveredSignature[] => {
   const canonicalDigest = asHankoBytes32(digest, 'DIGEST');
+  const digestBytes = ethers.getBytes(canonicalDigest);
   const signerIds = new Set<string>();
   return unpackHankoSignatures(packed).map((signature, index) => {
-    let address: string;
-    try {
-      address = ethers.recoverAddress(canonicalDigest, signature);
-    } catch {
+    const signatureBytes = ethers.getBytes(signature);
+    const recovery = signatureBytes[64];
+    const address = recovery === 27 || recovery === 28
+      ? recoverAddressFromDigestSignature(
+          digestBytes,
+          signatureBytes.slice(0, 64),
+          recovery - 27,
+        )
+      : null;
+    if (!address) {
       throw new Error(`HANKO_SIGNATURE_RECOVERY_FAILED:${index}`);
     }
     const signerEntityId = ethers.zeroPadValue(address, 32).toLowerCase() as HankoHex;

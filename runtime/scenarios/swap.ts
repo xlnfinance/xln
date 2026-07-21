@@ -932,6 +932,10 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
     `wallMs=${bobWallMs.toFixed(2)} cpuUserMs=${bobCpu ? (bobCpu.user / 1_000).toFixed(2) : 'n/a'} ` +
     `cpuSystemMs=${bobCpu ? (bobCpu.system / 1_000).toFixed(2) : 'n/a'}`,
   );
+  assert(
+    bobWallMs <= 500,
+    `Resting-book order reaches fully settled state within 500ms (got ${bobWallMs.toFixed(2)}ms)`,
+  );
 
   // Verify the trades occurred via RJEA flow by checking bilateral accounts
   // After matching: Alice should have traded Bob's buy qty, Bob should have filled

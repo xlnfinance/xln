@@ -12,12 +12,14 @@ import {
 } from '../entity/consensus/state-root';
 import type { AccountFrame, EntityState, EntityTx } from '../types';
 
-const ACCOUNT_FRAME_GOLDEN_HASH = '0x24608c6f58a8ad49080c316a4e1d04fe272704cec4b6e091deadf5929e83ff79';
+// Intentional testnet reset: Account frame/state integrity commitments use the
+// native-SHA integrity helper; Ethereum-facing proof hashes remain Keccak.
+const ACCOUNT_FRAME_GOLDEN_HASH = '0x15cd826cf4c3d968ec506d1ec758c7529963079ca1fcaeb4b29a0fa1d4c0c7b0';
 // Independently calculated with a standalone tagged-tuple reference encoder.
 // Keep these literal so changing the production codec cannot bless itself.
-const ENTITY_STATE_ROOT_GOLDEN_HASH = '0x7ab7eb3612ad1f3c224c018120bb6c9a10fe41a204b7657c1e36eb6d8663b3eb';
-const ENTITY_AUTHORITY_ROOT_GOLDEN_HASH = '0x34ddecb744dd2cb805b0b6c1997b6002aedde64ac3f728d96feced6e37a96951';
-const ENTITY_FRAME_GOLDEN_HASH = '0x1c13997704122760c7fe8fd4fa8e37eb125ff14fb4d3699f4d527e7b316308a2';
+const ENTITY_STATE_ROOT_GOLDEN_HASH = '0xc3068db0403b6c52e77fdcf9c7d5dc3c9d33a1698c6436e23709a5215896016c';
+const ENTITY_AUTHORITY_ROOT_GOLDEN_HASH = '0xa7c4fd7139d47d2567c6a97c7d7d06bc6d60fc4481acbe8155584f3573b520bd';
+const ENTITY_FRAME_GOLDEN_HASH = '0x54a9f7415fc1d4511da49c5c470b7efb7e0a45de4ad89e5003e0ac25bf41b553';
 
 const makeAccountFrameFixture = (): AccountFrame => ({
   height: 7,

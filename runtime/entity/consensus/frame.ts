@@ -215,7 +215,17 @@ export function createEntityFrameHashFromStateRoot(
     authorityRoot: authorityRoot.toLowerCase(),
     jPrefixCertificate: jPrefixCertificate ?? null,
   };
-  return ethers.keccak256(ethers.toUtf8Bytes(encodeCanonicalEntityConsensusValue(frameData)));
+  const encoded = encodeCanonicalEntityConsensusValue(frameData);
+  const hash = ethers.keccak256(ethers.toUtf8Bytes(encoded));
+  if (frameHashDebugRecorder) {
+    frameHashDebugRecorder({
+      entityId,
+      height,
+      hash,
+      payload: JSON.parse(encoded),
+    });
+  }
+  return hash;
 }
 
 export async function createEntityFrameHash(
@@ -255,24 +265,5 @@ export async function createEntityFrameHash(
     authorityRoot,
     jPrefixCertificate,
   );
-  if (frameHashDebugRecorder) {
-    const encoded = encodeCanonicalEntityConsensusValue({
-      version: 'xln:entity-frame:v4',
-      jPrefixCertificate: jPrefixCertificate ?? null,
-      prevFrameHash,
-      height,
-      timestamp,
-      txs: txs.map(canonicalEntityTxForFrameHash),
-      entityId: newState.entityId,
-      stateRoot,
-      authorityRoot,
-    });
-    frameHashDebugRecorder({
-      entityId: newState.entityId,
-      height,
-      hash,
-      payload: JSON.parse(encoded),
-    });
-  }
   return hash;
 }

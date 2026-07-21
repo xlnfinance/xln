@@ -493,6 +493,86 @@ describe('durable scoped reliable delivery receipts', () => {
     expect(duplicate.receipt).toEqual(commits[0]?.receipt);
   });
 
+  test('an atomic cross-j envelope admits the contiguous Account ACK behind its queued predecessor', () => {
+    const sender = runtime('reliable-cross-j-contiguous-sender');
+    const receiver = runtime('reliable-cross-j-contiguous-receiver');
+    const predecessor = certifiedAccountAckOutput(receiver.runtimeId!, 2);
+    const bundledSuccessor = certifiedAccountAckOutput(receiver.runtimeId!, 3);
+
+    expect(registerReliableIngress(receiver, sender.runtimeId!, predecessor).kind).toBe('enqueue');
+    expect(registerReliableIngress(receiver, sender.runtimeId!, bundledSuccessor).kind).toBe('pending');
+    expect(registerReliableIngress(receiver, sender.runtimeId!, bundledSuccessor, {
+      allowContiguousPendingAccountAck: true,
+    }).kind).toBe('enqueue');
+    expect(receiver.runtimeState?.pendingReliableIngress?.size).toBe(2);
+    expect(registerReliableIngress(receiver, sender.runtimeId!, bundledSuccessor, {
+      allowContiguousPendingAccountAck: true,
+    }).kind).toBe('pending');
+  });
+
+  test('a target ACK receipt retires its atomic cross-j source proposal companion', () => {
+    const sender = runtime('reliable-cross-j-atomic-sender');
+    const receiver = runtime('reliable-cross-j-atomic-receiver');
+    const targetAck = certifiedAccountAckOutput(receiver.runtimeId!, 3);
+    const sourceProposal: DeliverableEntityInput = {
+      runtimeId: receiver.runtimeId!,
+      entityId: entityId('c1'),
+      signerId: signerId('c2'),
+      entityTxs: [{
+        type: 'accountInput',
+        data: {
+          kind: 'frame',
+          fromEntityId: entityId('d1'),
+          toEntityId: entityId('c1'),
+          proposal: {
+            frame: {
+              height: 7,
+              timestamp: 7,
+              jHeight: 7,
+              prevFrameHash: '0xsource-frame-6',
+              accountStateRoot: '0xsource-root-7',
+              stateHash: '0xsource-frame-7',
+              deltas: [],
+              accountTxs: [{
+                type: 'pull_lock',
+                data: {
+                  tokenId: 1,
+                  amount: 1n,
+                  crossJurisdiction: {
+                    leg: 'source',
+                    orderId: 'atomic-order',
+                    routeHash: '0xatomic-route',
+                    targetReceipt: { orderId: 'atomic-order' },
+                  },
+                },
+              }, {
+                type: 'swap_offer',
+                data: {
+                  crossJurisdiction: {
+                    orderId: 'atomic-order',
+                    routeHash: '0xatomic-route',
+                  },
+                },
+              }],
+            },
+            frameHanko: '0xsource-hanko-7',
+          },
+        },
+      } as never],
+    };
+    const sourceRuntimeFrame = { height: 27, timestamp: 27 };
+    targetAck.sourceRuntimeFrame = sourceRuntimeFrame;
+    sourceProposal.sourceRuntimeFrame = sourceRuntimeFrame;
+    sender.pendingNetworkOutputs = [targetAck, sourceProposal];
+
+    const commits = commitAtReceiver(receiver, sender.runtimeId!, targetAck);
+    const receipt = commits[0]?.receipt;
+    if (!receipt) throw new Error('TEST_ATOMIC_CROSS_J_RECEIPT_MISSING');
+
+    expect(applyReliableDeliveryReceipts(sender, [receipt])).toEqual({ removed: 2 });
+    expect(sender.pendingNetworkOutputs).toEqual([]);
+  });
+
   test('an Account ACK staged behind another Entity transition stays pending until its exact frame commits', () => {
     const sender = runtime('reliable-receipt-staged-account-ack-sender');
     const receiver = runtime('reliable-receipt-staged-account-ack-receiver');
@@ -1769,7 +1849,10 @@ describe('durable scoped reliable delivery receipts', () => {
 
     expect(receiver.height).toBe(heightBefore + 1);
     const receiptOnlyFrame = await readStorageFrameRecord(getFrameDb(receiver), receiver.height);
-    expect(receiptOnlyFrame?.runtimeInput.entityInputs).toEqual([]);
+    expect(receiptOnlyFrame?.runtimeInput.entityInputs).toEqual([{
+      ...output,
+      from: sender.runtimeId,
+    }]);
     expect(receiver.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
     expect(receiver.runtimeState?.reliableIngressReceiptLedger?.size ?? 0).toBe(0);
     expect([...(receiver.runtimeState?.reliableIngressTerminalWatermarks?.values() ?? [])]

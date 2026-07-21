@@ -79,6 +79,12 @@ const ACCOUNT_INPUT_SLOW_MS = Math.max(
   0,
   Number(typeof process !== 'undefined' ? process.env?.['XLN_ACCOUNT_INPUT_SLOW_MS'] || '250' : '250'),
 );
+const accountInputProfileEnabled = (): boolean =>
+  ACCOUNT_INPUT_PROFILE || process.env?.['XLN_ACCOUNT_INPUT_PROFILE'] === '1' || process.env?.['XLN_RUNTIME_PROCESS_PROFILE'] === '1';
+const accountInputSlowMs = (): number => {
+  const configured = Number(process.env?.['XLN_ACCOUNT_INPUT_SLOW_MS'] ?? ACCOUNT_INPUT_SLOW_MS);
+  return Number.isFinite(configured) && configured >= 0 ? configured : ACCOUNT_INPUT_SLOW_MS;
+};
 
 export const frozenAccountInputLogLevel = (
   account: Pick<AccountMachine, 'status' | 'activeDispute'>,
@@ -727,7 +733,7 @@ export async function applyAccountInput(
     throw error;
   } finally {
     const elapsedMs = Math.round(getPerfMs() - profileStartedAt);
-    if (ACCOUNT_INPUT_PROFILE || elapsedMs >= ACCOUNT_INPUT_SLOW_MS) {
+    if (accountInputProfileEnabled() || elapsedMs >= accountInputSlowMs()) {
       accountHandlerLog.warn('input.profile', {
         entity: shortId(state.entityId, 8),
         counterparty: shortId(input.fromEntityId, 8),

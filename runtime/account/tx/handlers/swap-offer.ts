@@ -31,6 +31,7 @@ import { getCrossJurisdictionBookReceiptError } from '../../../extensions/cross-
 import { MAX_SWAP_FILL_RATIO } from '../../../orderbook/swap-execution';
 import { ensureDelta } from '../delta-utils';
 import { addHold } from '../hold-utils';
+import { getAccountSwapMarketLimitError } from '../../swap-limits';
 
 export async function handleSwapOffer(
   accountMachine: AccountMachine,
@@ -119,6 +120,14 @@ export async function handleSwapOffer(
       events,
     };
   }
+
+  const marketLimitError = getAccountSwapMarketLimitError(accountMachine.swapOffers.values(), {
+    giveTokenId,
+    wantTokenId,
+    ...(crossJurisdiction ? { crossJurisdiction } : {}),
+    makerIsLeft,
+  });
+  if (marketLimitError) return { success: false, error: marketLimitError, events };
 
   // 4. Quantize order to orderbook lot granularity at source.
   // This keeps account holds, swap state, and orderbook matching deterministic.

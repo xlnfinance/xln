@@ -13,6 +13,7 @@ import type { EntityInput, EntityReplica, EntityTx, Env, JInput, RoutedEntityInp
 import { resolveEntityProposerId } from '../state-helpers';
 import { validateEntityOutput } from '../validation-utils';
 import { nodeProcess } from './platform';
+import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../infra/perf-runtime-flags';
 import { DEBUG, getPerfMs } from '../utils';
 import { createStructuredLogger, logError, shortId } from '../infra/logger';
 
@@ -28,6 +29,10 @@ const ENTITY_INPUT_SLOW_MS = Math.max(
   0,
   Number(nodeProcess?.env?.['XLN_ENTITY_INPUT_SLOW_MS'] || '1000'),
 );
+const entityInputProfileEnabled = (): boolean =>
+  ENTITY_INPUT_PROFILE || isRuntimePerfProfileEnabled('XLN_ENTITY_INPUT_PROFILE');
+const entityInputSlowMs = (): number =>
+  readRuntimePerfSlowMs('XLN_ENTITY_INPUT_SLOW_MS', ENTITY_INPUT_SLOW_MS);
 
 export interface RuntimeEntityInputApplyResult {
   entityOutbox: RoutedEntityInput[];
@@ -38,12 +43,42 @@ export interface RuntimeEntityInputApplyResult {
     entityFrameCommitted: boolean;
   }>;
   localCrossJurisdictionEventTrace: RoutedEntityInput[];
-  localCrossJurisdictionEventFailures: Array<{
-    input: RoutedEntityInput;
-    outcome: Exclude<EntityInputOutcome, { kind: 'committed' }>;
-  }>;
   entityFrameCommitted: boolean;
   jOutbox: JInput[];
+}
+
+/**
+ * Preserves authenticated transport provenance across the consensus boundary.
+ * Runtime uses this typed error instead of message substring matching: an
+ * untrusted remote input may be quarantined, while the same failure in a
+ * locally generated command is a deterministic runtime bug and must halt.
+ */
+export class RuntimeEntityInputApplyError extends Error {
+  readonly entityId: string;
+  readonly sourceRuntimeId: string;
+  readonly trustedLocalCrossJurisdiction: boolean;
+
+  constructor(
+    input: RoutedEntityInput,
+    trustedLocalCrossJurisdiction: boolean,
+    cause: unknown,
+  ) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    super(
+      `RUNTIME_ENTITY_INPUT_APPLY_FAILED:entity=${input.entityId}:` +
+        `signer=${input.signerId}:txs=${(input.entityTxs ?? []).map(tx => tx.type).join(',') || 'none'}:` +
+        `proposal=${input.proposedFrame ? 'yes' : 'no'}:cause=${message}`,
+      { cause },
+    );
+    this.name = 'RuntimeEntityInputApplyError';
+    this.entityId = input.entityId;
+    this.sourceRuntimeId = String(input.from ?? '').trim();
+    this.trustedLocalCrossJurisdiction = trustedLocalCrossJurisdiction;
+  }
+
+  get isRemoteIngress(): boolean {
+    return this.sourceRuntimeId.length > 0 && !this.trustedLocalCrossJurisdiction;
+  }
 }
 
 /**
@@ -100,7 +135,6 @@ export const applyMergedEntityInputs = async (
   const appliedEntityInputs: RoutedEntityInput[] = [];
   const inputOutcomes: RuntimeEntityInputApplyResult['inputOutcomes'] = [];
   const localCrossJurisdictionEventTrace: RoutedEntityInput[] = [];
-  const localCrossJurisdictionEventFailures: RuntimeEntityInputApplyResult['localCrossJurisdictionEventFailures'] = [];
   let entityFrameCommitted = false;
   const jOutbox: JInput[] = [...initialJOutbox];
   const { isReplay, routingDeps } = options;
@@ -196,10 +230,6 @@ export const applyMergedEntityInputs = async (
           const outcomeDetail = result.outcome.kind === 'rejected'
             ? result.outcome.code
             : result.outcome.reason;
-          localCrossJurisdictionEventFailures.push({
-            input: result.appliedInput,
-            outcome: result.outcome,
-          });
           entityInputLog.error('crossj.local_event_not_applied', {
             entity: entityInput.entityId,
             signer: actualSignerId,
@@ -208,12 +238,15 @@ export const applyMergedEntityInputs = async (
             localEventRound,
             txTypes: (entityInput.entityTxs ?? []).map(tx => tx.type),
           });
-          continue;
+          throw new Error(
+            `RUNTIME_CROSS_J_LOCAL_EVENT_NOT_COMMITTED:entity=${entityInput.entityId}:` +
+              `round=${localEventRound}:outcome=${result.outcome.kind}:detail=${outcomeDetail}`,
+          );
         }
         entityFrameCommitted ||= result.entityFrameCommitted;
         const inputElapsedMs = Math.round(getPerfMs() - inputProfileStartedAt);
         immediateCrossJApplyMs += inputElapsedMs;
-        if (ENTITY_INPUT_PROFILE || inputElapsedMs >= ENTITY_INPUT_SLOW_MS) {
+        if (entityInputProfileEnabled() || inputElapsedMs >= entityInputSlowMs()) {
           profiledInputs.push({
             elapsedMs: inputElapsedMs,
             entity: String(entityInput.entityId || '').slice(-8),
@@ -367,7 +400,7 @@ export const applyMergedEntityInputs = async (
     }
     const inputElapsedMs = Math.round(getPerfMs() - inputProfileStartedAt);
     externalApplyMs += inputElapsedMs;
-    if (ENTITY_INPUT_PROFILE || inputElapsedMs >= ENTITY_INPUT_SLOW_MS) {
+    if (entityInputProfileEnabled() || inputElapsedMs >= entityInputSlowMs()) {
       profiledInputs.push({
         elapsedMs: inputElapsedMs,
         entity: String(entityInput.entityId || '').slice(-8),
@@ -397,7 +430,7 @@ export const applyMergedEntityInputs = async (
   }
 
   const elapsedMs = Math.round(getPerfMs() - profileStartedAt);
-  if (ENTITY_INPUT_PROFILE || elapsedMs >= ENTITY_INPUT_SLOW_MS) {
+  if (entityInputProfileEnabled() || elapsedMs >= entityInputSlowMs()) {
     entityInputLog.warn('inputs.profile', {
       height: env.height,
       elapsedMs,
@@ -421,7 +454,6 @@ export const applyMergedEntityInputs = async (
     appliedEntityInputs,
     inputOutcomes,
     localCrossJurisdictionEventTrace,
-    localCrossJurisdictionEventFailures,
     entityFrameCommitted,
     jOutbox,
   };
@@ -504,14 +536,24 @@ const applyEntityInputToReplica = async (
     });
   }
 
-  const { outcome, newState, outputs, jOutputs, workingReplica, canonicalAppliedInput } = await applyEntityInput(
-    env,
-    entityReplica,
-    normalizedInput,
-    trustedLocalCrossJurisdiction
-      ? { trustedLocalRuntimeProtocol: 'cross-j' }
-      : undefined,
-  );
+  let applied: Awaited<ReturnType<typeof applyEntityInput>>;
+  try {
+    applied = await applyEntityInput(
+      env,
+      entityReplica,
+      normalizedInput,
+      trustedLocalCrossJurisdiction
+        ? { trustedLocalRuntimeProtocol: 'cross-j' }
+        : undefined,
+    );
+  } catch (error) {
+    throw new RuntimeEntityInputApplyError(
+      entityInput,
+      trustedLocalCrossJurisdiction,
+      error,
+    );
+  }
+  const { outcome, newState, outputs, jOutputs, workingReplica, canonicalAppliedInput } = applied;
   // Consensus may canonicalize the applied body (for example, signing a local
   // leader vote), while Runtime routing provenance must remain byte-identical
   // to the authenticated envelope. Dropping the origin here makes WAL replay

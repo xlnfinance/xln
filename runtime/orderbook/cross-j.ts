@@ -2,6 +2,7 @@ import type { CrossJurisdictionSwapRoute, EntityState, Env } from '../types';
 import type { OrderbookExtState } from './index';
 import { applyCommand, getBookOrder, getOrderbookPairsForOrder, MAX_ORDERBOOK_QTY_LOTS, replaceOrderbookPair } from './index';
 import { markStorageEntityDirty, recordOrderbookPairUpdate } from '../machine/env-events';
+import { invalidateBookOrderCommitment } from './commitment';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
@@ -116,6 +117,7 @@ export const resizeBookOrderById = (
 
   // This is not matcher repair. Cross-j book quantity changes only when the
   // book owner applies an explicit committed account-ACK progress event.
+  invalidateBookOrderCommitment(match.book, namespacedOrderId);
   match.order.qtyLots = nextQtyLots;
   level.totalQtyLots = nextTotal;
   replaceOrderbookPair(ext, match.pairId, match.book);

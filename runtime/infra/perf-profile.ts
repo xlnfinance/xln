@@ -25,12 +25,7 @@ export const cumulativeMarksToPhases = (
 ): PerfPhase[] => Object.entries(cumulativeMarksToDurations(marks, totalMs))
   .map(([name, ms]) => ({ name, ms }));
 
-const HISTOGRAM_BOUNDS_MS = [
-  1, 2, 5, 10, 20, 50, 100, 200, 500,
-  1_000, 2_000, 5_000, 10_000, 20_000, 30_000,
-  40_000, 45_000, 50_000, 60_000, 70_000, 80_000, 90_000,
-  120_000, 300_000, 600_000, Number.POSITIVE_INFINITY,
-] as const;
+const DEFAULT_PERCENTILE_SAMPLE_LIMIT = 4_096;
 
 export interface PerfMetricSummary {
   count: number;
@@ -44,11 +39,18 @@ export interface PerfMetricSummary {
 }
 
 export class BoundedPerfMetric {
-  private readonly buckets = HISTOGRAM_BOUNDS_MS.map(() => 0);
+  private readonly percentileSamples: number[] = [];
+  private percentileSampleCursor = 0;
   private sumMs = 0;
   private minimumMs = Number.POSITIVE_INFINITY;
   private maximumMs = 0;
   private sampleCount = 0;
+
+  constructor(private readonly percentileSampleLimit = DEFAULT_PERCENTILE_SAMPLE_LIMIT) {
+    if (!Number.isSafeInteger(percentileSampleLimit) || percentileSampleLimit <= 0) {
+      throw new Error(`PERF_PERCENTILE_SAMPLE_LIMIT_INVALID:${percentileSampleLimit}`);
+    }
+  }
 
   observe(rawDurationMs: number): void {
     if (!Number.isFinite(rawDurationMs) || rawDurationMs < 0) return;
@@ -57,9 +59,12 @@ export class BoundedPerfMetric {
     this.sumMs += durationMs;
     this.minimumMs = Math.min(this.minimumMs, durationMs);
     this.maximumMs = Math.max(this.maximumMs, durationMs);
-    const bucketIndex = HISTOGRAM_BOUNDS_MS.findIndex(bound => durationMs <= bound);
-    const resolvedBucketIndex = bucketIndex < 0 ? this.buckets.length - 1 : bucketIndex;
-    this.buckets[resolvedBucketIndex] = (this.buckets[resolvedBucketIndex] ?? 0) + 1;
+    if (this.percentileSamples.length < this.percentileSampleLimit) {
+      this.percentileSamples.push(durationMs);
+      return;
+    }
+    this.percentileSamples[this.percentileSampleCursor] = durationMs;
+    this.percentileSampleCursor = (this.percentileSampleCursor + 1) % this.percentileSampleLimit;
   }
 
   summary(): PerfMetricSummary {
@@ -79,15 +84,8 @@ export class BoundedPerfMetric {
   }
 
   private percentile(ratio: number): number {
-    const target = Math.max(1, Math.ceil(this.sampleCount * ratio));
-    let seen = 0;
-    for (let index = 0; index < this.buckets.length; index += 1) {
-      seen += this.buckets[index]!;
-      if (seen >= target) {
-        const bound = HISTOGRAM_BOUNDS_MS[index]!;
-        return Number.isFinite(bound) ? bound : this.maximumMs;
-      }
-    }
-    return this.maximumMs;
+    const sorted = [...this.percentileSamples].sort((left, right) => left - right);
+    const index = Math.max(0, Math.ceil(sorted.length * ratio) - 1);
+    return sorted[index] ?? this.maximumMs;
   }
 }

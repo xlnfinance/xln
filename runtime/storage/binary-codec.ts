@@ -112,12 +112,18 @@ const canonicalize = (
           key: canonicalKey,
           value: canonicalValue,
           keyBytes: canonicalSortBytes(canonicalKey),
-          valueBytes: canonicalSortBytes(canonicalValue),
+          valueBytes: undefined as Uint8Array | undefined,
         };
       });
       entries.sort((left, right) => {
         const byKey = compareBytes(left.keyBytes, right.keyBytes);
-        return byKey !== 0 ? byKey : compareBytes(left.valueBytes, right.valueBytes);
+        if (byKey !== 0) return byKey;
+        // A Map normally has unique canonical scalar keys. Only pay to encode
+        // entire values when two distinct host keys collapse to identical
+        // canonical bytes and a deterministic tie-break is actually needed.
+        left.valueBytes ??= canonicalSortBytes(left.value);
+        right.valueBytes ??= canonicalSortBytes(right.value);
+        return compareBytes(left.valueBytes, right.valueBytes);
       });
       return new Map(entries.map(entry => [entry.key, entry.value]));
     }

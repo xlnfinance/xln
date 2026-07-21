@@ -1,19 +1,18 @@
 import type { Env, EnvSnapshot } from './types';
 
-// This is only the current in-memory debug view; the storage WAL owns history.
-// Canonical snapshots contain the complete Runtime/Entity/Account projection,
-// so retaining prior snapshots makes production memory scale with state size
-// and can starve the WAL writer under sustained bootstrap load.
-export const RECENT_RUNTIME_HISTORY_LIMIT = 1;
+// Runtime memory is the live finalized state plus the private in-flight clone.
+// Historical views belong to LevelDB or to an explicit test-only collector.
+export const RECENT_RUNTIME_HISTORY_LIMIT = 0;
 
 export const appendRecentRuntimeSnapshot = (
   history: readonly EnvSnapshot[],
   snapshot: EnvSnapshot,
   limit = RECENT_RUNTIME_HISTORY_LIMIT,
 ): EnvSnapshot[] => {
-  if (!Number.isSafeInteger(limit) || limit <= 0) {
+  if (!Number.isSafeInteger(limit) || limit < 0) {
     throw new Error(`RUNTIME_HISTORY_LIMIT_INVALID:${String(limit)}`);
   }
+  if (limit === 0) return [];
   const keepBeforeAppend = Math.max(0, limit - 1);
   const retained = keepBeforeAppend === 0 ? [] : history.slice(-keepBeforeAppend);
   return [...retained, snapshot];

@@ -134,6 +134,11 @@ export type HubHealthPayload = {
   relayUrl?: string;
   apiUrl?: string;
   directWsUrl?: string;
+  runtime?: {
+    halted?: boolean;
+    lifecyclePhase?: string;
+    fatalDebugPayload?: unknown;
+  };
   quiescence?: RuntimeQuiescenceHealth;
   p2p?: {
     directPeers?: Array<{ runtimeId: string; endpoint: string; open: boolean }>;
@@ -288,6 +293,11 @@ export type MarketMakerHealthPayload = {
   apiUrl?: string;
   directWsUrl?: string;
   startupPhase?: string;
+  runtime?: {
+    halted?: boolean;
+    lifecyclePhase?: string;
+    fatalDebugPayload?: unknown;
+  };
   p2p?: {
     directPeers?: Array<{ runtimeId: string; endpoint: string; open: boolean }>;
   };

@@ -36,7 +36,9 @@ export {
  */
 export const DEV_CHAIN_IDS = new Set<number>([31337, 31338]);
 const DEFAULT_RPC_POLLING_INTERVAL_MS = 1_000;
-const XLN_JSON_RPC_PROVIDER_OPTIONS = {
+const xlnJsonRpcProviderOptions = (
+  network?: ethers.Networkish,
+): ethers.JsonRpcApiProviderOptions => ({
   // Ethers caches low-level perform calls for 250ms by default and batches
   // same-tick JSON-RPC requests. Fast local chains can mine thousands of
   // blocks synchronously inside that window, which makes later eth_call
@@ -44,12 +46,17 @@ const XLN_JSON_RPC_PROVIDER_OPTIONS = {
   // reads for submit safety, so disable both behaviours at the adapter edge.
   cacheTimeout: -1,
   batchMaxCount: 1,
-} as const;
+  // A jurisdiction URL is immutable runtime configuration, not an injected
+  // wallet whose selected chain can change. Binding the provider once avoids
+  // ethers issuing eth_chainId before unrelated calls. createRpcAdapter still
+  // performs one explicit wire-level chain check before any contract use.
+  ...(network === undefined ? {} : { staticNetwork: ethers.Network.from(network) }),
+});
 
 export const createXlnJsonRpcProvider = (
   rpcUrl: string,
   network?: ethers.Networkish,
-): ethers.JsonRpcProvider => new ethers.JsonRpcProvider(rpcUrl, network, XLN_JSON_RPC_PROVIDER_OPTIONS);
+): ethers.JsonRpcProvider => new ethers.JsonRpcProvider(rpcUrl, network, xlnJsonRpcProviderOptions(network));
 
 const configureRpcPolling = (provider: ethers.JsonRpcProvider): void => {
   const configuredInterval =
@@ -140,7 +147,7 @@ export async function createJAdapter(config: JAdapterConfig): Promise<JAdapter> 
     throw new Error('rpcUrl required for anvil/rpc mode');
   }
   const rpcUrl = normalizeLoopbackUrl(config.rpcUrl);
-  const provider = createXlnJsonRpcProvider(rpcUrl);
+  const provider = createXlnJsonRpcProvider(rpcUrl, config.chainId);
   configureRpcPolling(provider);
   // Use NonceTrackingWallet for rapid sequential txs (anvil deploys many contracts)
   const signer = new NonceTrackingWallet(privateKey, provider);

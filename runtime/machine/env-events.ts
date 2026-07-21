@@ -9,8 +9,19 @@
  *   env.emit('FrameCommitted', { entityId, height, hash });
  */
 
-import type { AccountFrame, AccountMachine, Env, LogCategory, FrameLogEntry, RuntimeFrameDbRecord, RuntimeOverlayRecord } from '../types';
+import type {
+  AccountFrame,
+  AccountMachine,
+  CertifiedEntityFrameLink,
+  Env,
+  LogCategory,
+  FrameLogEntry,
+  RuntimeFrameDbRecord,
+  RuntimeOverlayRecord,
+} from '../types';
+import { encodeCanonicalEntityConsensusValue } from '../entity/consensus/state-root';
 import { storageOverlayRecordKey } from '../storage/overlay';
+import { invalidateEntityAccountCommitment } from '../entity/consensus/state-root';
 
 const getLogState = (env: Env) => {
   if (!env.runtimeState) env.runtimeState = {};
@@ -141,6 +152,11 @@ export const markStorageAccountDirty = (env: Env, entityId: string, counterparty
   const normalizedEntityId = String(entityId || '').toLowerCase();
   const normalizedCounterpartyId = String(counterpartyId || '').toLowerCase();
   if (!normalizedEntityId || !normalizedCounterpartyId) return;
+  for (const replica of env.eReplicas.values()) {
+    if (replica.entityId.toLowerCase() === normalizedEntityId) {
+      invalidateEntityAccountCommitment(replica.state, normalizedCounterpartyId);
+    }
+  }
   const record: RuntimeOverlayRecord = {
     family: 'account',
     entityId: normalizedEntityId,
@@ -167,7 +183,9 @@ export const markStorageBookDirty = (
   pushOverlayRecord(env, record);
 };
 
-export const ACCOUNT_FRAME_HISTORY_VIEW_LIMIT = 50;
+// AccountMachine already owns currentFrame and pendingFrame. Historical frames
+// are written to the frame DB and loaded explicitly by inspection APIs.
+export const ACCOUNT_FRAME_HISTORY_VIEW_LIMIT = 0;
 const ACCOUNT_FRAME_HISTORY_VIEW = Symbol.for('xln.accountFrameHistoryView');
 type AccountWithFrameHistoryView = AccountMachine & {
   [ACCOUNT_FRAME_HISTORY_VIEW]?: AccountFrame[];
@@ -229,6 +247,45 @@ export const recordAccountFrameHistory = (
     frame: structuredClone(record.frame),
   });
   markStorageAccountDirty(env, entityId, counterpartyId);
+};
+
+export const recordEntityFrameHistory = (
+  env: Env,
+  record: { entityId: string; link: CertifiedEntityFrameLink },
+): void => {
+  const entityId = String(record.entityId || '').toLowerCase();
+  const entityHeight = Number(record.link?.frame?.height ?? 0);
+  if (!entityId || !Number.isSafeInteger(entityHeight) || entityHeight <= 0) {
+    throw new Error(`FRAME_DB_ENTITY_FRAME_IDENTITY_INVALID:${entityId}:${String(entityHeight)}`);
+  }
+  const pending = getPendingFrameDbRecords(env);
+  const existing = pending.find((candidate): candidate is Extract<RuntimeFrameDbRecord, { kind: 'entityFrame' }> => (
+    candidate.kind === 'entityFrame' &&
+    candidate.entityId === entityId &&
+    candidate.entityHeight === entityHeight
+  ));
+  if (existing) {
+    if (existing.link.frame.hash !== record.link.frame.hash) {
+      throw new Error(
+        `FRAME_DB_ENTITY_FRAME_FORK:entity=${entityId}:height=${entityHeight}:` +
+        `existing=${existing.link.frame.hash}:incoming=${record.link.frame.hash}`,
+      );
+    }
+    if (
+      encodeCanonicalEntityConsensusValue(record.link) <
+      encodeCanonicalEntityConsensusValue(existing.link)
+    ) {
+      existing.link = structuredClone(record.link);
+    }
+    return;
+  }
+  pending.push({
+    kind: 'entityFrame',
+    entityId,
+    entityHeight,
+    link: structuredClone(record.link),
+  });
+  markStorageEntityDirty(env, entityId);
 };
 
 export const recordOrderbookPairUpdate = (

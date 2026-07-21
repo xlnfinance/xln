@@ -366,14 +366,36 @@ export class CustodyStore {
     routeJson: string;
     updatedAt: number;
   }): WithdrawalRecord | null {
-    this.db
-      .query(
-        `UPDATE withdrawals
-         SET status = 'sent', hashlock = ?2, route_json = ?3, updated_at = ?4, daemon_error = NULL
-         WHERE id = ?1 AND status = 'submitting'`,
-      )
-      .run(params.id, params.hashlock, params.routeJson, params.updatedAt);
-    return this.getWithdrawalById(params.id);
+    const txn = this.db.transaction((input: typeof params) => {
+      const current = this.getWithdrawalById(input.id);
+      if (!current) return null;
+      const hashlock = input.hashlock.toLowerCase();
+      if (current.status === 'sent' || current.status === 'finalized') {
+        if (current.hashlock?.toLowerCase() !== hashlock || current.routeJson !== input.routeJson) {
+          throw new Error(`CUSTODY_WITHDRAWAL_SENT_REPLAY_CONFLICT:${input.id}`);
+        }
+        return current;
+      }
+      if (current.status !== 'submitting') {
+        throw new Error(`CUSTODY_WITHDRAWAL_TERMINAL_CONFLICT:${input.id}:${current.status}->sent`);
+      }
+      const updated = this.db
+        .query(
+          `UPDATE withdrawals
+           SET status = 'sent', hashlock = ?2, route_json = ?3, updated_at = ?4, daemon_error = NULL
+           WHERE id = ?1 AND status = 'submitting'`,
+        )
+        .run(input.id, hashlock, input.routeJson, input.updatedAt);
+      if (Number(updated.changes) !== 1) {
+        throw new Error(`CUSTODY_WITHDRAWAL_SENT_WRITE_CONFLICT:${input.id}`);
+      }
+      const sent = this.getWithdrawalById(input.id);
+      if (!sent || sent.status !== 'sent' || sent.hashlock?.toLowerCase() !== hashlock) {
+        throw new Error(`CUSTODY_WITHDRAWAL_SENT_WRITE_FAILED:${input.id}`);
+      }
+      return sent;
+    });
+    return txn(params);
   }
 
   failWithdrawalById(params: {

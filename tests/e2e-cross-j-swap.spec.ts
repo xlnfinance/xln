@@ -338,23 +338,48 @@ async function injectSyntheticJEventThroughWatcher(
     const rpcUrl = rpcUrlRaw.startsWith('/')
       ? new URL(rpcUrlRaw, window.location.origin).toString()
       : rpcUrlRaw;
-    const headerResponse = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'eth_getBlockByNumber',
-        params: [`0x${blockNumber.toString(16)}`, false],
-      }),
-    });
-    if (!headerResponse.ok) {
-      throw new Error(`synthetic J canonical header fetch failed: ${headerResponse.status}`);
+    type RpcPayload = {
+      result?: unknown;
+      error?: { code?: number; message?: string; data?: unknown };
+    };
+    const callRpc = async (method: string, params: unknown[]): Promise<RpcPayload> => {
+      const response = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+      });
+      if (!response.ok) throw new Error(`synthetic J RPC HTTP error: method=${method} status=${response.status}`);
+      const payload = await response.json() as RpcPayload;
+      if (payload.error) {
+        throw new Error(`synthetic J RPC error: method=${method} error=${JSON.stringify(payload.error)}`);
+      }
+      return payload;
+    };
+    const blockQuantity = `0x${blockNumber.toString(16)}`;
+    let headerPayload = await callRpc('eth_getBlockByNumber', [blockQuantity, false]);
+    if (headerPayload.result === null) {
+      const currentPayload = await callRpc('eth_blockNumber', []);
+      const currentHeight = Number.parseInt(String(currentPayload.result || ''), 16);
+      if (currentHeight !== scannedHeight) {
+        throw new Error(
+          `synthetic J canonical header gap: chain=${expectedChainId} required=${blockNumber} ` +
+          `current=${currentHeight} scanned=${scannedHeight} rpc=${rpcUrl}`,
+        );
+      }
+      const rpcHost = new URL(rpcUrl).hostname;
+      if (rpcHost !== 'localhost' && rpcHost !== '127.0.0.1' && rpcHost !== '::1') {
+        throw new Error(`synthetic J mining forbidden for non-local RPC: ${rpcUrl}`);
+      }
+      await callRpc('evm_mine', []);
+      headerPayload = await callRpc('eth_getBlockByNumber', [blockQuantity, false]);
     }
-    const headerPayload = await headerResponse.json() as { result?: { hash?: string } };
-    const canonicalBlockHash = String(headerPayload.result?.hash || '').toLowerCase();
+    const header = headerPayload.result as { hash?: string } | null | undefined;
+    const canonicalBlockHash = String(header?.hash || '').toLowerCase();
     if (!/^0x[0-9a-f]{64}$/.test(canonicalBlockHash)) {
-      throw new Error(`synthetic J canonical header missing: height=${blockNumber}`);
+      throw new Error(
+        `synthetic J canonical header missing: chain=${expectedChainId} ` +
+        `height=${blockNumber} rpc=${rpcUrl} result=${JSON.stringify(header ?? null)}`,
+      );
     }
 
     runtimeModule.applyJEventsToEnv(env, [{
@@ -1800,6 +1825,10 @@ async function placeCrossOrder(
     expectSetupConsent?: boolean;
   },
 ): Promise<string> {
+  const flowStartedAt = Date.now();
+  const emitPhaseTiming = (phase: string, startedAt: number): void => {
+    console.log(`[E2E-TIMING] cross_j_order.${phase} ${Date.now() - startedAt}ms`);
+  };
   await openSwapWorkspace(page);
   await dismissSwapCompletionModal(page);
   await selectSourceChainInSwap(page, params.source.entityId);
@@ -1850,7 +1879,13 @@ async function placeCrossOrder(
       .not.toMatch(/create target account|account setup required/i);
   }
   await expect(submit).toBeEnabled({ timeout: 30_000 });
+  emitPhaseTiming('pre_submit', flowStartedAt);
+  const clickStartedAt = Date.now();
+  await page.evaluate(() => {
+    (window as CrossRuntimeWindow & { __crossJClickAt?: number }).__crossJClickAt = Date.now();
+  });
   await submit.click();
+  emitPhaseTiming('click_dispatch', clickStartedAt);
   let lastSubmitState: unknown = null;
   let createdOrderId = '';
   try {
@@ -1916,6 +1951,15 @@ async function placeCrossOrder(
     throw new Error(`${error instanceof Error ? error.message : String(error)}\nlastSubmitState=${JSON.stringify(lastSubmitState, null, 2)}`);
   }
   expect(createdOrderId, 'cross-j order submit must return exact created orderId').toBeTruthy();
+  emitPhaseTiming('click_to_route', clickStartedAt);
+  const browserMeasures = await page.evaluate(() =>
+    performance.getEntriesByType('measure')
+      .filter(entry => entry.name.startsWith('xln.cross_j.'))
+      .slice(-8)
+      .map(entry => ({ name: entry.name, duration: Math.round(entry.duration) })));
+  for (const measure of browserMeasures) {
+    console.log(`[E2E-TIMING] ${measure.name} ${measure.duration}ms`);
+  }
   let lastCommitState: unknown = null;
   try {
     await expect.poll(
@@ -1970,6 +2014,7 @@ async function placeCrossOrder(
   } catch (error) {
     throw new Error(`${error instanceof Error ? error.message : String(error)}\nlastCommitState=${JSON.stringify(lastCommitState, null, 2)}`);
   }
+  emitPhaseTiming('click_to_source_commit', clickStartedAt);
   return createdOrderId;
 }
 
@@ -2997,6 +3042,11 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
 
   test('cross swap one-click prepares missing target account and inbound credit', { tag: '@functional' }, async ({ page }) => {
     const browserConsole = attachBrowserConsoleGuard(page);
+    page.on('console', (message) => {
+      if (message.text().includes('[INFO][p2p] ingress.entity_inputs')) {
+        console.log(`[E2E-P2P] ${message.text()}`);
+      }
+    });
     const baseline = await timedStep('cross_j_auto_setup.ensure_baseline', () => ensureE2EBaseline(page, {
       apiBaseUrl: API_BASE_URL,
       requireMarketMaker: false,
@@ -3042,6 +3092,82 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       }),
     );
 
+    await page.evaluate(() => {
+      const view = window as CrossRuntimeWindow & { __crossJFrameTrace?: unknown[]; __crossJClickAt?: number };
+      const browserProcess = (globalThis as typeof globalThis & {
+        process?: { env?: Record<string, string | undefined> };
+      }).process;
+      if (browserProcess?.env) {
+        browserProcess.env.XLN_P2P_INGRESS_PROFILE = '1';
+      }
+      const longTasks: Array<{ startTime: number; duration: number; name: string }> = [];
+      (view as typeof view & { __crossJLongTasks?: typeof longTasks }).__crossJLongTasks = longTasks;
+      if (typeof PerformanceObserver === 'function') {
+        const observer = new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            longTasks.push({
+              startTime: Math.round(entry.startTime),
+              duration: Math.round(entry.duration),
+              name: entry.name,
+            });
+          }
+        });
+        observer.observe({ entryTypes: ['longtask'] });
+      }
+      const env = view.isolatedEnv;
+      const runtimeModule = view.__xln?.instance;
+      if (!env || typeof runtimeModule?.registerRuntimeFrameCommitCallback !== 'function') {
+        throw new Error('cross-j Runtime frame trace API missing');
+      }
+      view.__crossJFrameTrace = [];
+      runtimeModule.registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }: any) => {
+        const activeEnv = view.isolatedEnv;
+        const effectiveTxs = (input: any) => Array.from(input?.entityTxs || []).flatMap((tx: any) =>
+          tx?.type === 'consensusOutput' || tx?.type === 'runtimeOutput'
+            ? Array.from(tx?.data?.entityTxs || [])
+            : [tx]);
+        const accountInputs = (input: any) => effectiveTxs(input).flatMap((tx: any) => {
+          if (tx?.type !== 'accountInput') return [];
+          const data = tx.data || {};
+          return [{
+            entityId: String(input.entityId || ''),
+            runtimeId: String(input.runtimeId || ''),
+            sourceRuntimeFrame: input.sourceRuntimeFrame || null,
+            kind: String(data.kind || ''),
+            ackHeight: Number(data.ack?.height ?? -1),
+            proposalHeight: Number(data.proposal?.frame?.height ?? -1),
+            accountTxTypes: Array.from(data.proposal?.frame?.accountTxs || []).map((accountTx: any) =>
+              String(accountTx?.type || '')),
+          }];
+        });
+        view.__crossJFrameTrace!.push({
+          height,
+          wallAfterClickMs: view.__crossJClickAt ? Date.now() - view.__crossJClickAt : null,
+          inputEntityTxTypes: Array.from(runtimeInput?.entityInputs || []).map((input: any) => ({
+            entityId: String(input?.entityId || ''),
+            txTypes: effectiveTxs(input).map((tx: any) => String(tx?.type || '')),
+          })),
+          crossRoutes: Array.from(activeEnv?.eReplicas?.values?.() || []).flatMap((replica: any) =>
+            Array.from(replica?.state?.crossJurisdictionSwaps?.values?.() || []).map((route: any) => ({
+              entityId: String(replica?.state?.entityId || replica?.entityId || ''),
+              orderId: String(route?.orderId || ''),
+              status: String(route?.status || ''),
+            }))),
+          inputAccountInputs: Array.from(runtimeInput?.entityInputs || []).flatMap(accountInputs),
+          inputReliableReceipts: Array.from(runtimeInput?.reliableReceipts || []).map((receipt: any) => ({
+            kind: String(receipt?.body?.identity?.kind || ''),
+            height: Number(receipt?.body?.identity?.height ?? -1),
+            coverage: String(receipt?.body?.coverage || ''),
+            receiverRuntimeId: String(receipt?.body?.receiverRuntimeId || ''),
+          })),
+          pendingOutputAccountInputs: Array.from(activeEnv?.pendingNetworkOutputs || []).flatMap(accountInputs),
+        });
+      });
+    });
+
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Profiler.enable');
+    await cdp.send('Profiler.start');
     await timedStep('cross_j_auto_setup.submit_one_click_swap', () => placeCrossOrder(page, {
       source,
       hubId,
@@ -3054,6 +3180,68 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       expectedClickToTokenId: USDC,
       expectSetupConsent: true,
     }));
+    const { profile } = await cdp.send('Profiler.stop') as {
+      profile: {
+        nodes: Array<{
+          id: number;
+          callFrame: { functionName: string; url: string; lineNumber: number };
+          children?: number[];
+        }>;
+        samples?: number[];
+        timeDeltas?: number[];
+      };
+    };
+    await cdp.detach();
+    const cpuByNode = new Map<number, number>();
+    for (const [index, nodeId] of (profile.samples ?? []).entries()) {
+      cpuByNode.set(nodeId, (cpuByNode.get(nodeId) ?? 0) + Number(profile.timeDeltas?.[index] ?? 0) / 1000);
+    }
+    const nodeById = new Map(profile.nodes.map(node => [node.id, node]));
+    const parentById = new Map<number, number>();
+    for (const node of profile.nodes) {
+      for (const childId of node.children ?? []) parentById.set(childId, node.id);
+    }
+    const inclusiveCpuByNode = new Map<number, number>();
+    for (const [index, sampleNodeId] of (profile.samples ?? []).entries()) {
+      const sampleMs = Number(profile.timeDeltas?.[index] ?? 0) / 1000;
+      let nodeId: number | undefined = sampleNodeId;
+      while (nodeId !== undefined) {
+        inclusiveCpuByNode.set(nodeId, (inclusiveCpuByNode.get(nodeId) ?? 0) + sampleMs);
+        nodeId = parentById.get(nodeId);
+      }
+    }
+    const cpuTop = [...cpuByNode]
+      .map(([nodeId, selfMs]) => ({ node: nodeById.get(nodeId), selfMs: Math.round(selfMs) }))
+      .filter(row => row.node && row.node.callFrame.functionName !== '(idle)')
+      .sort((left, right) => right.selfMs - left.selfMs)
+      .slice(0, 20)
+      .map(row => ({
+        functionName: row.node!.callFrame.functionName,
+        selfMs: row.selfMs,
+        url: row.node!.callFrame.url,
+        lineNumber: row.node!.callFrame.lineNumber + 1,
+      }));
+    const longTasks = await page.evaluate(() =>
+      (window as CrossRuntimeWindow & {
+        __crossJLongTasks?: Array<{ startTime: number; duration: number; name: string }>;
+      }).__crossJLongTasks ?? []);
+    console.log(`[E2E-CROSS-J-CPU] ${JSON.stringify(cpuTop)}`);
+    const inclusiveCpuTop = [...inclusiveCpuByNode]
+      .map(([nodeId, inclusiveMs]) => ({ node: nodeById.get(nodeId), inclusiveMs: Math.round(inclusiveMs) }))
+      .filter(row => row.node && !['(root)', '(idle)', '(program)'].includes(row.node.callFrame.functionName))
+      .sort((left, right) => right.inclusiveMs - left.inclusiveMs)
+      .slice(0, 40)
+      .map(row => ({
+        functionName: row.node!.callFrame.functionName,
+        inclusiveMs: row.inclusiveMs,
+        url: row.node!.callFrame.url,
+        lineNumber: row.node!.callFrame.lineNumber + 1,
+      }));
+    console.log(`[E2E-CROSS-J-CPU-INCLUSIVE] ${JSON.stringify(inclusiveCpuTop)}`);
+    console.log(`[E2E-CROSS-J-LONG-TASKS] ${JSON.stringify(longTasks.slice(-30))}`);
+    const frameTrace = await page.evaluate(() =>
+      (window as CrossRuntimeWindow & { __crossJFrameTrace?: unknown[] }).__crossJFrameTrace ?? []);
+    console.log(`[E2E-CROSS-J-FRAMES] ${JSON.stringify(frameTrace)}`);
 
     await timedStep('cross_j_auto_setup.wait_target_account', () =>
       waitForAccountReady(page, target, targetHub.entityId, [USDC], 90_000),

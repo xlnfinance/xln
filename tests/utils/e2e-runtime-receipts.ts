@@ -18,11 +18,22 @@ export type PersistedFrameEvent = {
 };
 
 type RuntimeWindow = typeof window & {
+  __xln?: {
+    instance?: PersistedRuntimeApi;
+  };
   isolatedEnv?: {
     runtimeId?: string;
     dbNamespace?: string;
     height?: number;
   };
+};
+
+type PersistedRuntimeApi = {
+  getPersistedLatestHeight: (env: unknown) => Promise<number>;
+  listPersistedCheckpointHeights: (env: unknown) => Promise<number[]>;
+  readPersistedFrameJournal: (env: unknown, height: number) => Promise<unknown>;
+  readPersistedCheckpointSnapshot: (env: unknown, height: number) => Promise<unknown>;
+  readPersistedRuntimeActivityJournal: (env: unknown, height: number) => Promise<PersistedFrameJournalView>;
 };
 
 type PersistedFrameJournalView = {
@@ -49,8 +60,7 @@ async function readRuntimeDbMeta(page: Page): Promise<PersistedDbMeta> {
     const view = window as RuntimeWindow;
     const runtimeHeight = Number(view.isolatedEnv?.height || 0);
     const env = view.isolatedEnv;
-    const XLN = (window as any).XLN
-      || await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
+    const XLN = view.__xln?.instance;
     if (!env) throw new Error('PERSISTED_RUNTIME_ENV_UNAVAILABLE');
     if (!XLN?.getPersistedLatestHeight) throw new Error('PERSISTED_RUNTIME_API_UNAVAILABLE');
 
@@ -80,8 +90,7 @@ export async function getPersistedReceiptCursor(page: Page): Promise<PersistedRe
   const latestHeight = await page.evaluate(async () => {
     const view = window as RuntimeWindow;
     const env = view.isolatedEnv;
-    const XLN = (window as any).XLN
-      || await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
+    const XLN = view.__xln?.instance;
     if (!env) throw new Error('PERSISTED_RUNTIME_ENV_UNAVAILABLE');
     if (!XLN?.getPersistedLatestHeight) throw new Error('PERSISTED_RUNTIME_API_UNAVAILABLE');
     return Number(await XLN.getPersistedLatestHeight(env) || 0);
@@ -99,8 +108,7 @@ async function readPersistedFrameEvents(
     const env = view.isolatedEnv;
     const events: PersistedFrameEvent[] = [];
 
-    const XLN = (window as any).XLN
-      || await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
+    const XLN = view.__xln?.instance;
     if (!env) throw new Error('PERSISTED_RUNTIME_ENV_UNAVAILABLE');
     if (!XLN?.getPersistedLatestHeight) throw new Error('PERSISTED_RUNTIME_API_UNAVAILABLE');
 

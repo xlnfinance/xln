@@ -4,6 +4,7 @@ import { decodeValidatedBuffer, encodeBuffer, writeBatch } from './codec';
 import { deleteKeyRange, deleteKeys, iterateKeys, readRawOrNull } from './level';
 import {
   FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME,
+  FRAME_DB_ENTITY_FRAME_BY_RUNTIME,
   FRAME_DB_RUNTIME_ACTIVITY,
   KEY_FRAME_DB_HEAD,
   STORAGE_SCHEMA_VERSION,
@@ -12,14 +13,20 @@ import {
   keyFrameDbAccountFrameByRuntime,
   keyFrameDbAccountFrameByRuntimePrefix,
   keyFrameDbAccountFramePrefix,
+  keyFrameDbEntityFrame,
+  keyFrameDbEntityFrameByRuntime,
+  keyFrameDbEntityFrameByRuntimePrefix,
+  keyFrameDbEntityFramePrefix,
   keyFrameDbRuntimeActivity,
   normalizeEntityId,
   parseFrameDbAccountFrameKey,
   parseFrameDbAccountFrameRuntimeIndexKey,
+  parseFrameDbEntityFrameRuntimeIndexKey,
 } from './keys';
 import {
   validateFrameDbHeadValue,
   validateStoredAccountFrameValue,
+  validateStoredEntityFrameValue,
   validateStoredRuntimeActivityValue,
 } from './frame-db-schema';
 import type {
@@ -40,6 +47,17 @@ export type StoredAccountFrameRecord = Extract<RuntimeFrameDbRecord, { kind: 'ac
 export type StoredAccountFrameValue = {
   source: Extract<RuntimeFrameDbRecord, { kind: 'accountFrame' }>['source'];
   frame: Extract<RuntimeFrameDbRecord, { kind: 'accountFrame' }>['frame'];
+  runtimeHeight: number;
+  timestamp: number;
+};
+
+export type StoredEntityFrameRecord = Extract<RuntimeFrameDbRecord, { kind: 'entityFrame' }> & {
+  runtimeHeight: number;
+  timestamp: number;
+};
+
+export type StoredEntityFrameValue = {
+  link: Extract<RuntimeFrameDbRecord, { kind: 'entityFrame' }>['link'];
   runtimeHeight: number;
   timestamp: number;
 };
@@ -99,6 +117,28 @@ export const buildFrameDbPuts = (options: {
   puts.push({ key: keyFrameDbRuntimeActivity(options.height), value: encodeBuffer(runtimeActivity) });
 
   for (const record of options.frameDbRecords ?? []) {
+    if (record.kind === 'entityFrame') {
+      const entityId = normalizeEntityId(record.entityId);
+      const entityHeight = record.entityHeight;
+      if (!entityId) throw new Error('FRAME_DB_ENTITY_FRAME_ENTITY_ID_INVALID');
+      if (!Number.isSafeInteger(entityHeight) || entityHeight <= 0) {
+        throw new Error(`FRAME_DB_ENTITY_FRAME_HEIGHT_INVALID:${String(entityHeight)}`);
+      }
+      const recordHeight = record.runtimeHeight ?? options.height;
+      const recordTimestamp = record.timestamp ?? options.timestamp;
+      const stored: StoredEntityFrameValue = {
+        link: structuredClone(record.link),
+        runtimeHeight: recordHeight,
+        timestamp: recordTimestamp,
+      };
+      validateStoredEntityFrameValue(stored, entityHeight);
+      puts.push({ key: keyFrameDbEntityFrame(entityId, entityHeight), value: encodeBuffer(stored) });
+      puts.push({
+        key: keyFrameDbEntityFrameByRuntime(recordHeight, entityId, entityHeight),
+        value: Buffer.alloc(0),
+      });
+      continue;
+    }
     const entityId = normalizeEntityId(record.entityId);
     const counterpartyId = normalizeEntityId(record.counterpartyId);
     const accountHeight = record.accountHeight;
@@ -236,6 +276,26 @@ const pruneFrameDbBeforeRuntimeHeight = async (
   const accountFrameKeysToDelete = Array.from(accountFrameKeysByHex.values());
   removedBytes += await deleteKeys(db, accountFrameKeysToDelete, onPruneBatch);
   removedKeys += accountFrameKeysToDelete.length;
+
+  const entityFrameKeysByHex = new Map<string, Buffer>();
+  for await (const key of iterateKeys(db, {
+    gte: keyFrameDbEntityFrameByRuntimePrefix(),
+    lt: Buffer.concat([Buffer.from([FRAME_DB_ENTITY_FRAME_BY_RUNTIME]), encodeHeight(cutoff + 1)]),
+  })) {
+    entityFrameKeysByHex.set(key.toString('hex'), key);
+    const parsed = parseFrameDbEntityFrameRuntimeIndexKey(key);
+    const primaryKey = keyFrameDbEntityFrame(parsed.entityId, parsed.entityHeight);
+    entityFrameKeysByHex.set(primaryKey.toString('hex'), primaryKey);
+    if (entityFrameKeysByHex.size >= 512) {
+      const keysToDelete = Array.from(entityFrameKeysByHex.values());
+      removedBytes += await deleteKeys(db, keysToDelete, onPruneBatch);
+      removedKeys += keysToDelete.length;
+      entityFrameKeysByHex.clear();
+    }
+  }
+  const entityFrameKeysToDelete = Array.from(entityFrameKeysByHex.values());
+  removedBytes += await deleteKeys(db, entityFrameKeysToDelete, onPruneBatch);
+  removedKeys += entityFrameKeysToDelete.length;
 
   return { removedBytes, removedKeys };
 };
@@ -403,4 +463,46 @@ export const readFrameDbAccountFrames = async (
     if (records.length >= limit) break;
   }
   return records.sort((left, right) => left.accountHeight - right.accountHeight);
+};
+
+export const readFrameDbEntityFrames = async (
+  db: RuntimeFrameDbLike,
+  entityId: string,
+  options: { limit?: number; maxEntityHeight?: number; maxRuntimeHeight?: number } = {},
+): Promise<StoredEntityFrameRecord[]> => {
+  const limit = options.limit ?? Number.POSITIVE_INFINITY;
+  if (limit !== Number.POSITIVE_INFINITY && (!Number.isSafeInteger(limit) || limit <= 0)) {
+    throw new Error(`FRAME_DB_ENTITY_FRAME_LIMIT_INVALID:${String(limit)}`);
+  }
+  const maxEntityHeight = options.maxEntityHeight ?? Number.MAX_SAFE_INTEGER;
+  const maxRuntimeHeight = options.maxRuntimeHeight ?? Number.MAX_SAFE_INTEGER;
+  if (!Number.isSafeInteger(maxEntityHeight) || maxEntityHeight < 0) {
+    throw new Error(`FRAME_DB_ENTITY_FRAME_MAX_ENTITY_HEIGHT_INVALID:${String(maxEntityHeight)}`);
+  }
+  if (!Number.isSafeInteger(maxRuntimeHeight) || maxRuntimeHeight < 0) {
+    throw new Error(`FRAME_DB_ENTITY_FRAME_MAX_RUNTIME_HEIGHT_INVALID:${String(maxRuntimeHeight)}`);
+  }
+  if (maxEntityHeight === 0 || maxRuntimeHeight === 0) return [];
+  const prefix = keyFrameDbEntityFramePrefix(entityId);
+  const range = maxEntityHeight < Number.MAX_SAFE_INTEGER
+    ? { gte: prefix, lt: keyFrameDbEntityFrame(entityId, maxEntityHeight + 1), reverse: true }
+    : { prefix, reverse: true };
+  const records: StoredEntityFrameRecord[] = [];
+  for await (const key of iterateKeys(db, range)) {
+    const entityHeight = Number(key.readBigUInt64BE(33));
+    if (entityHeight > maxEntityHeight) continue;
+    const value = decodeValidatedBuffer(await db.get(key), decoded =>
+      validateStoredEntityFrameValue(decoded, entityHeight));
+    if (value.runtimeHeight > maxRuntimeHeight) continue;
+    records.push({
+      kind: 'entityFrame',
+      entityId: normalizeEntityId(entityId),
+      entityHeight,
+      link: structuredClone(value.link),
+      runtimeHeight: value.runtimeHeight,
+      timestamp: value.timestamp,
+    });
+    if (records.length >= limit) break;
+  }
+  return records.sort((left, right) => left.entityHeight - right.entityHeight);
 };

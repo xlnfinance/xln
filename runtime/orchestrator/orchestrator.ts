@@ -905,6 +905,7 @@ const pollHubHealth = async (child: HubChild): Promise<void> => {
   if (rawHealth) {
     try {
       child.lastHealth = validateHubHealthPayload(rawHealth);
+      observeManagedRuntimeHalt(child, child.lastHealth);
     } catch (error) {
       recordFetchFailure(healthUrl, 'payload', serializeError(error));
     }
@@ -945,7 +946,12 @@ const marketMakerPoller = createMarketMakerChildPoller({
 });
 
 const pollMarketMakerInfo = marketMakerPoller.pollInfo;
-const pollMarketMakerHealth = marketMakerPoller.pollHealth;
+const pollMarketMakerHealth = async (): Promise<void> => {
+  await marketMakerPoller.pollHealth();
+  if (marketMakerChild.lastHealth) {
+    observeManagedRuntimeHalt(marketMakerChild, marketMakerChild.lastHealth);
+  }
+};
 const fetchMarketMakerFullHealthForResponse = marketMakerPoller.fetchFullHealthForResponse;
 
 let lastHealthResponseRefreshMs: number | null = null;
@@ -1143,6 +1149,32 @@ const persistManagedChildFailure = (
   return persistChildFailureReceipt(childDiagnosticsDir, receipt, randomUUID()).receiptPath;
 };
 
+const persistedRuntimeHaltFingerprints = new Set<string>();
+
+const observeManagedRuntimeHalt = (
+  child: RecoverableChild,
+  health: { runtime?: { halted?: boolean; fatalDebugPayload?: unknown } },
+): void => {
+  if (health.runtime?.halted !== true) return;
+  const reason = safeStringify(health.runtime.fatalDebugPayload ?? { message: 'RUNTIME_HALTED' });
+  const observation: ChildFailureObservation = {
+    role: child === marketMakerChild ? 'market-maker' : 'hub',
+    name: child.name,
+    code: null,
+    signal: null,
+    reason,
+  };
+  const decision = decideChildFailure({}, observation);
+  if (persistedRuntimeHaltFingerprints.has(decision.fingerprint)) return;
+  const receiptPath = persistManagedChildFailure(child, observation, decision, 'fail-stop');
+  persistedRuntimeHaltFingerprints.add(decision.fingerprint);
+  meshLog.error('runtime.halted', {
+    child: child.name,
+    receiptPath,
+    fatal: health.runtime.fatalDebugPayload ?? null,
+  });
+};
+
 const persistOrchestratorFailure = (error: unknown): string => {
   const exitedAt = Date.now();
   const reason = serializeError(error);
@@ -1304,7 +1336,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       XLN_ORCHESTRATOR_PID: String(process.pid),
       XLN_ORCHESTRATOR_OWNER_ID: orchestratorOwnerId,
       XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(STARTUP_TIMEOUT_MS),
-      XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '1',
+      XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '0',
       XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000',
       XLN_LOG_LEVEL: process.env['XLN_HUB_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn',
     }),
@@ -1400,7 +1432,7 @@ const spawnMarketMaker = async (): Promise<void> => {
       XLN_ORCHESTRATOR_PID: String(process.pid),
       XLN_ORCHESTRATOR_OWNER_ID: orchestratorOwnerId,
       XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(STARTUP_TIMEOUT_MS),
-      XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '1',
+      XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '0',
       XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000',
       XLN_STORAGE_SYNC_WRITES: process.env['XLN_STORAGE_SYNC_WRITES'] ?? '1',
       XLN_DISABLE_RUNTIME_RESTORE: process.env['XLN_MARKET_MAKER_DISABLE_RESTORE'] ?? process.env['XLN_DISABLE_RUNTIME_RESTORE'] ?? '0',

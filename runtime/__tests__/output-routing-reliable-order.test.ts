@@ -8,6 +8,7 @@ import {
   hasReadyPendingNetworkOutputs,
   rescheduleDeferredOutputs,
   sendEntityInputWithRouting,
+  splitPendingOutputsByRetryWindow,
   type RuntimeOutputRoutingDeps,
 } from '../machine/output-routing';
 import {
@@ -83,6 +84,48 @@ const accountAckOutput = (height: number): DeliverableEntityInput => ({
         height,
         frameHash: `0xaccount-frame-${height}`,
         frameHanko: `0xaccount-hanko-${height}`,
+      },
+    },
+  } as never],
+});
+
+const atomicCrossJSourceProposal = (
+  frame: NonNullable<RoutedEntityInput['sourceRuntimeFrame']>,
+): DeliverableEntityInput => ({
+  runtimeId: targetRuntimeId,
+  entityId: targetEntityId,
+  signerId: targetSignerId,
+  sourceRuntimeFrame: frame,
+  entityTxs: [{
+    type: 'accountInput',
+    data: {
+      kind: 'frame',
+      fromEntityId: accountPeerId,
+      toEntityId: targetEntityId,
+      proposal: {
+        frame: {
+          height: 8,
+          timestamp: frame.timestamp,
+          accountTxs: [{
+            type: 'pull_lock',
+            data: {
+              crossJurisdiction: {
+                leg: 'source',
+                orderId: 'atomic-cross-j-order',
+                routeHash: '0xatomic-cross-j-route',
+                targetReceipt: { receiptId: 'target-receipt' },
+              },
+            },
+          }, {
+            type: 'swap_offer',
+            data: {
+              crossJurisdiction: {
+                orderId: 'atomic-cross-j-order',
+                routeHash: '0xatomic-cross-j-route',
+              },
+            },
+          }],
+        },
       },
     },
   } as never],
@@ -194,6 +237,35 @@ const orderedCases = [
 const receiptGatedCases = orderedCases.filter(([label]) => label !== 'account ACK');
 
 describe('ordered reliable output lanes', () => {
+  test('atomic cross-j ordinary leg inherits the reliable ACK retry deadline', () => {
+    const frame = { height: 77, timestamp: 1_000 };
+    const ack = { ...accountAckOutput(3), sourceRuntimeFrame: frame };
+    const sourceProposal = atomicCrossJSourceProposal(frame);
+    const env = {
+      scenarioMode: true,
+      timestamp: 1_000,
+      runtimeState: {},
+      pendingNetworkOutputs: [],
+    } as unknown as Env;
+    const deps = {
+      ensureRuntimeState: (targetEnv: Env) => targetEnv.runtimeState ??= {},
+    } as RuntimeOutputRoutingDeps;
+
+    env.pendingNetworkOutputs = rescheduleDeferredOutputs(
+      env,
+      [],
+      [sourceProposal, ack],
+      [],
+      deps,
+    );
+    const retryAt = getNextNetworkRetryTimestamp(env, deps);
+
+    expect(retryAt).toBe(2_000);
+    expect(hasReadyPendingNetworkOutputs(env, deps, 1_999)).toBe(false);
+    env.timestamp = 2_000;
+    expect(hasReadyPendingNetworkOutputs(env, deps, 2_000)).toBe(true);
+  });
+
   test('keeps Account ACK retry cadence below the bilateral liveness timeout', () => {
     const output = accountAckOutput(5);
     const env = {
@@ -215,6 +287,29 @@ describe('ordered reliable output lanes', () => {
       expect(nextRetryAt! - env.timestamp).toBeLessThanOrEqual(4_000);
       env.timestamp = nextRetryAt!;
     }
+  });
+
+  test('schedules every pending Account ACK instead of spinning on an unscheduled sibling', () => {
+    const lower = accountAckOutput(5);
+    const higher = accountAckOutput(6);
+    const env = {
+      scenarioMode: true,
+      timestamp: 1_000,
+      runtimeState: {},
+      pendingNetworkOutputs: [],
+    } as unknown as Env;
+    const deps = {
+      ensureRuntimeState: (targetEnv: Env) => targetEnv.runtimeState ??= {},
+    } as RuntimeOutputRoutingDeps;
+
+    const pending = rescheduleDeferredOutputs(env, [], [lower, higher], [], deps);
+    env.pendingNetworkOutputs = pending;
+
+    expect(env.runtimeState?.deferredNetworkMeta?.size).toBe(2);
+    expect(getNextNetworkRetryTimestamp(env, deps)).toBe(2_000);
+    expect(hasReadyPendingNetworkOutputs(env, deps, 1_999)).toBe(false);
+    env.timestamp = 2_000;
+    expect(splitPendingOutputsByRetryWindow(env, pending, deps).ready).toEqual(pending);
   });
 
   for (const [label, createOutput] of receiptGatedCases) {
@@ -288,7 +383,7 @@ describe('ordered reliable output lanes', () => {
     });
   }
 
-  test('a new sparse ACK H8 wakes backed-off H5, then H8 waits for the exact H5 receipt', () => {
+  test('a new sparse ACK H8 wakes backed-off H5 and schedules both without a retry spin', () => {
     let transportAvailable = false;
     const attempted: number[] = [];
     const receiver = createEmptyEnv('sparse-account-ack-receiver');
@@ -321,9 +416,9 @@ describe('ordered reliable output lanes', () => {
     transportAvailable = true;
     sendEntityInputWithRouting(env, h8, deps);
 
-    expect(attempted).toEqual([5]);
+    expect(attempted).toEqual([5, 8]);
     expect((env.pendingNetworkOutputs ?? []).map(reliableOrder)).toEqual([5, 8]);
-    expect(env.runtimeState?.deferredNetworkMeta?.size).toBe(1);
+    expect(env.runtimeState?.deferredNetworkMeta?.size).toBe(2);
     const h5RetryAt = getNextNetworkRetryTimestamp(env, deps);
     expect(h5RetryAt).not.toBeNull();
     expect(hasReadyPendingNetworkOutputs(env, deps, h5RetryAt! - 1)).toBe(false);
@@ -334,10 +429,9 @@ describe('ordered reliable output lanes', () => {
     const h5Receipt = createReliableDeliveryReceipt(receiver, h5Identity, 'terminal');
     expect(applyReliableDeliveryReceipts(env, [h5Receipt])).toEqual({ removed: 1 });
     expect((env.pendingNetworkOutputs ?? []).map(reliableOrder)).toEqual([8]);
-    expect(getNextNetworkRetryTimestamp(env, deps)).toBe(0);
-    expect(hasReadyPendingNetworkOutputs(env, deps, 0)).toBe(true);
-
-    sendEntityInputWithRouting(env, h8, deps);
+    expect(getNextNetworkRetryTimestamp(env, deps)).toBe(h5RetryAt);
+    expect(hasReadyPendingNetworkOutputs(env, deps, h5RetryAt! - 1)).toBe(false);
+    expect(hasReadyPendingNetworkOutputs(env, deps, h5RetryAt!)).toBe(true);
     expect(attempted).toEqual([5, 8]);
   });
 
@@ -386,7 +480,7 @@ describe('ordered reliable output lanes', () => {
     expect((env.pendingNetworkOutputs ?? []).map(reliableOrder)).toEqual([12]);
   });
 
-  test('a delayed Account ACK H9 cannot be handed off after H10', () => {
+  test('a delayed Account ACK H9 does not receipt-gate the causally proven H10 ACK', () => {
     const attempted: number[] = [];
     const env = {
       runtimeId: runtimeId('90'),
@@ -414,7 +508,7 @@ describe('ordered reliable output lanes', () => {
       })),
     );
 
-    expect(attempted).toEqual([9]);
+    expect(attempted).toEqual([9, 10]);
     expect(deferred.map(reliableOrder)).toEqual([9, 10]);
   });
 

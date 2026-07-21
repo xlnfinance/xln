@@ -286,8 +286,7 @@
     lastAction = `Sending R2R: ${shortAddress(r2rFromEntity)} → ${shortAddress(r2rToEntity)}...`;
 
     try {
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+      const XLN = await getXLN();
 
       // Debug: check reserves before R2R
       const amount = BigInt(r2rAmount);
@@ -495,13 +494,14 @@
     if (!requireLiveMode('run swap-market')) return;
     loading = true;
     try {
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+      const XLN = await getXLN();
 
       ensureScenarioEnv(XLN, 'Swap Market');
       $runtimeFrameEnv.eReplicas.clear();
       $runtimeFrameEnv.history = [];
-      await XLN.scenarios.swapMarket($runtimeFrameEnv);
+      const runSwapMarketScenario = XLN.scenarios.swapMarket;
+      if (!runSwapMarketScenario) throw new Error('Swap Market scenario is unavailable');
+      await runSwapMarketScenario($runtimeFrameEnv);
 
       const frames = $runtimeFrameEnv.history || [];
       publishCurrentEnv(frames);
@@ -519,13 +519,14 @@
     if (!requireLiveMode('run rapid-fire')) return;
     loading = true;
     try {
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+      const XLN = await getXLN();
 
       ensureScenarioEnv(XLN, 'Rapid Fire');
       $runtimeFrameEnv.eReplicas.clear();
       $runtimeFrameEnv.history = [];
-      await XLN.scenarios.rapidFire($runtimeFrameEnv);
+      const runRapidFireScenario = XLN.scenarios.rapidFire;
+      if (!runRapidFireScenario) throw new Error('Rapid Fire scenario is unavailable');
+      await runRapidFireScenario($runtimeFrameEnv);
 
       const frames = $runtimeFrameEnv.history || [];
       publishCurrentEnv(frames);
@@ -649,8 +650,7 @@
     loading = true;
 
     try {
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+      const XLN = await getXLN();
 
       // Auto-create default jurisdiction if none exists
       if (!$runtimeFrameEnv?.activeJurisdiction) {
@@ -783,8 +783,7 @@
     loading = true;
 
     try {
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+      const XLN = await getXLN();
 
       // Pick 2 random different entities
       const from = entityIds[Math.floor(Math.random() * entityIds.length)];
@@ -856,8 +855,7 @@
     loading = true;
 
     try {
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+      const XLN = await getXLN();
 
       // Pick random sender with reserves > 0
       const entitiesWithReserves = entityIds.filter(id => {
@@ -953,8 +951,7 @@
     lastAction = 'Creating 100 entities... (FPS test)';
 
     try {
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+      const XLN = await getXLN();
 
       const xlnomy = $runtimeFrameEnv.jReplicas.get($runtimeFrameEnv.activeJurisdiction);
       if (!xlnomy) throw new Error('Active xlnomy not found');
@@ -1116,8 +1113,7 @@
     loading = true;
 
     try {
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+      const XLN = await getXLN();
 
       // VaultStore handles J-machine import - Architect should NOT auto-create
       if (!$runtimeFrameEnv?.activeJurisdiction) {
@@ -1162,8 +1158,7 @@
   async function createEntitiesFromTopology(topology: any) {
     if (!requireLiveMode('create entities')) return;
 
-    const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-    const XLN = await import(/* @vite-ignore */ runtimeUrl);
+    const XLN = await getXLN();
 
     const xlnomy = $runtimeFrameEnv.jReplicas.get($runtimeFrameEnv.activeJurisdiction);
     if (!xlnomy) {
@@ -1338,8 +1333,7 @@
           stopFedPaymentLoop();
           return;
         }
-        const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-        const XLN = await import(/* @vite-ignore */ runtimeUrl);
+        const XLN = await getXLN();
 
         // STEP 1: Smart QE (Fed mints if system liquidity low)
         await runSmartQE(XLN, topology);
@@ -1540,8 +1534,7 @@
           stopFedPaymentLoop();
           return;
         }
-        const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-        const XLN = await import(/* @vite-ignore */ runtimeUrl);
+        const XLN = await getXLN();
 
         tick++;
         const action = tick % 4; // 4-step cycle
@@ -1673,8 +1666,7 @@
     lastAction = `Creating jurisdiction "${newXlnomyName.toLowerCase()}"...`;
 
     try {
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+      const XLN = await getXLN();
 
       // Step 1: Import J-machine
       const isBrowserVM = newXlnomyEvmType === 'browservm';
@@ -1761,8 +1753,7 @@
     lastAction = `Creating entity "${newEntityName}"...`;
 
     try {
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+      const XLN = await getXLN();
 
       // Generate signerId from xlnomy name + entity name
       const signerId = `${$runtimeFrameEnv.activeJurisdiction.toLowerCase()}_${newEntityName.toLowerCase()}`;

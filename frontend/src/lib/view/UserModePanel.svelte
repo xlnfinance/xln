@@ -791,7 +791,7 @@
   }
 
   async function handleAddSigner() {
-    const newSigner = vaultOperations.addSigner();
+    const newSigner = await vaultOperations.addSigner();
     if (!newSigner) {
       logUserModeDiagnostic('Failed to add signer: no active vault');
     }
@@ -814,7 +814,7 @@
       const result = await importJMachineViaRuntime(env, event.detail);
       publishRuntimeFrameEnv(result.env);
       selectedJurisdictionName = result.config.name;
-      const signerForJurisdiction = vaultOperations.addSigner(`${result.config.name} signer`, result.config.name);
+      const signerForJurisdiction = await vaultOperations.addSigner(`${result.config.name} signer`, result.config.name);
       if (signerForJurisdiction?.address) {
         vaultOperations.selectSigner(signerForJurisdiction.index);
         selectedSignerId = signerForJurisdiction.address;

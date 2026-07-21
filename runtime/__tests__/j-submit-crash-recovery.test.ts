@@ -38,7 +38,7 @@ describe('J submit crash recovery', () => {
     cleanupRuntimeId = '';
   });
 
-  test('persists a real BrowserVM contract rejection as a validator-local terminal result', async () => {
+  test('reconciles an exact BrowserVM batch receipt after the submit result is lost', async () => {
     mkdirSync(dbRootPath, { recursive: true });
     const seed = `J submit real crash ${process.pid} deterministic seed`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
@@ -98,12 +98,6 @@ describe('J submit crash recovery', () => {
     expect(intentReplica.jSubmitState).toBeUndefined();
     expect(afterIntent.runtimeMempool?.runtimeTxs).toHaveLength(1);
     expect(afterIntent.runtimeMempool?.runtimeTxs[0]?.type).toBe('retryJSubmit');
-    const sentBatchHash = intentReplica.state.jBatchState?.sentBatch?.batchHash;
-    if (!sentBatchHash) throw new Error('real terminal rejection sent batch missing');
-    const witness = intentReplica.hankoWitness?.get(sentBatchHash);
-    if (!witness) throw new Error('real terminal rejection Hanko witness missing');
-    intentReplica.hankoWitness!.set(sentBatchHash, { ...witness, hanko: '0x1234' });
-
     registerRecoveryBackupBarrier(afterIntent, async () => {
       throw new Error('CRASH_AFTER_ATTEMPT_COMMIT');
     });
@@ -121,6 +115,15 @@ describe('J submit crash recovery', () => {
       entityNonce: 1,
     });
     expect(afterAttempt.runtimeState?.pendingCommittedJOutbox).toHaveLength(1);
+    const sealedAttempt = afterAttempt.runtimeState?.pendingCommittedJOutbox?.[0]?.jTxs[0];
+    if (sealedAttempt?.type !== 'batch') {
+      throw new Error('real terminal rejection sealed batch attempt missing');
+    }
+    await jadapter.processBatch(
+      sealedAttempt.data.encodedBatch,
+      sealedAttempt.data.hankoSignature,
+      BigInt(sealedAttempt.data.entityNonce),
+    );
 
     // Let any independently due Entity scheduler work commit behind the same
     // pre-I/O recovery fence. The state captured after reopen is therefore the
@@ -144,9 +147,9 @@ describe('J submit crash recovery', () => {
     await processRuntime(beforeIo, []);
     const queuedResult = beforeIo.runtimeMempool?.runtimeTxs[0];
     expect(queuedResult?.type).toBe('recordJSubmitResult');
-    if (queuedResult?.type !== 'recordJSubmitResult') throw new Error('real terminal result was not queued');
-    expect(queuedResult.data.outcome).toBe('terminalFailure');
-    expect(queuedResult.data.message).toContain('Batch processing failed:');
+    if (queuedResult?.type !== 'recordJSubmitResult') throw new Error('exact receipt result was not queued');
+    expect(queuedResult.data.outcome).toBe('reconciled');
+    expect(queuedResult.data.message).toBeUndefined();
     expect(findReplica(beforeIo, sender.id).jSubmitState?.terminalFailure).toBeUndefined();
     expect(findReplica(beforeIo, sender.id).state).toEqual(consensusStateBeforeResult);
     expect(computeCanonicalEntityHash(findReplica(beforeIo, sender.id)).hash).toBe(consensusHashBeforeResult);
@@ -163,12 +166,13 @@ describe('J submit crash recovery', () => {
     await processRuntime(afterIo, []);
     const replayedResult = afterIo.runtimeMempool?.runtimeTxs[0];
     expect(replayedResult?.type).toBe('recordJSubmitResult');
-    if (replayedResult?.type !== 'recordJSubmitResult') throw new Error('replayed real terminal result missing');
-    expect(replayedResult.data.outcome).toBe('terminalFailure');
-    expect(replayedResult.data.message).toContain('Batch processing failed:');
+    if (replayedResult?.type !== 'recordJSubmitResult') throw new Error('replayed exact receipt result missing');
+    expect(replayedResult.data.outcome).toBe('reconciled');
+    expect(replayedResult.data.message).toBeUndefined();
     await processRuntime(afterIo, []);
-    expect(findReplica(afterIo, sender.id).state).toEqual(consensusStateBeforeResult);
-    expect(computeCanonicalEntityHash(findReplica(afterIo, sender.id)).hash).toBe(consensusHashBeforeResult);
+    expect(findReplica(afterIo, sender.id).state.jBatchState?.sentBatch).toBeUndefined();
+    const consensusHashAfterReconcile = computeCanonicalEntityHash(findReplica(afterIo, sender.id)).hash;
+    expect(consensusHashAfterReconcile).not.toBe(consensusHashBeforeResult);
     await closeRuntimeDb(afterIo);
     await closeInfraDb(afterIo);
 
@@ -177,12 +181,11 @@ describe('J submit crash recovery', () => {
     try {
       const finalReplica = findReplica(afterResult, sender.id);
       expect(finalReplica.jSubmitState?.submitAttempts).toBe(1);
-      expect(finalReplica.jSubmitState?.lastResultOutcome).toBe('terminalFailure');
-      expect(finalReplica.jSubmitState?.terminalFailure?.message).toContain('Batch processing failed:');
-      expect(finalReplica.state.jBatchState?.sentBatch?.terminalFailure).toBeUndefined();
+      expect(finalReplica.jSubmitState?.lastResultOutcome).toBe('reconciled');
+      expect(finalReplica.jSubmitState?.terminalFailure).toBeUndefined();
+      expect(finalReplica.state.jBatchState?.sentBatch).toBeUndefined();
       expect(afterResult.runtimeState?.pendingCommittedJOutbox ?? []).toEqual([]);
-      expect(finalReplica.state).toEqual(consensusStateBeforeResult);
-      expect(computeCanonicalEntityHash(finalReplica).hash).toBe(consensusHashBeforeResult);
+      expect(computeCanonicalEntityHash(finalReplica).hash).toBe(consensusHashAfterReconcile);
     } finally {
       await closeRuntimeDb(afterResult);
       await closeInfraDb(afterResult);

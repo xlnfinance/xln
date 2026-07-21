@@ -80,7 +80,9 @@ describe('vault runtime creation lock', () => {
     const functionSource = source.slice(functionStart, functionEnd);
 
     const stopWatchers = functionSource.indexOf('await xln.stopJurisdictionWatchersAndWait(env);');
-    const stopP2P = functionSource.indexOf('await xln.stopP2PAndWait(env);');
+    const stopP2P = functionSource.indexOf(
+      'await xln.stopP2PAndWait(env, RUNTIME_P2P_SHUTDOWN_TIMEOUT_MS);',
+    );
     const drainWork = functionSource.indexOf('await xln.waitForRuntimeWorkDrained(env, 30_000);');
     const pausePersistence = functionSource.indexOf('env.runtimeState.persistencePaused = true;');
     const quiescePersistence = functionSource.indexOf('env.runtimeState.persistenceQuiescing = true;');
@@ -92,6 +94,7 @@ describe('vault runtime creation lock', () => {
     expect(pausePersistence).toBeGreaterThan(drainWork);
     expect(stopLoop).toBeGreaterThan(quiescePersistence);
     expect(stopP2P).toBeGreaterThan(stopLoop);
+    expect(source).toContain('const RUNTIME_P2P_SHUTDOWN_TIMEOUT_MS = 10_000;');
   });
 
   test('page shutdown retains the recovery barrier until accepted work is fully stopped', () => {

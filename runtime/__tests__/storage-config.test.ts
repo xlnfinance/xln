@@ -6,8 +6,10 @@ import { resolveStorageRuntimeConfig } from '../storage';
 describe('storage config', () => {
   test('uses sparse full-state checkpoints without weakening per-frame WAL chaining', () => {
     const env = createEmptyEnv('sparse-storage-checkpoints');
-    expect(resolveStorageRuntimeConfig(env).canonicalHashPeriodFrames).toBe(100);
+    env.runtimeConfig = { ...(env.runtimeConfig || {}), snapshotIntervalFrames: 100 };
+    expect(resolveStorageRuntimeConfig(env).canonicalHashPeriodFrames).toBe(0);
     expect(resolveStorageRuntimeConfig(env).materializePeriodFrames).toBe(100);
+    expect(resolveStorageRuntimeConfig(env).snapshotPeriodFrames).toBe(10_000);
     env.runtimeConfig = { storage: { canonicalHashPeriodFrames: 37 } };
     expect(resolveStorageRuntimeConfig(env).canonicalHashPeriodFrames).toBe(37);
   });

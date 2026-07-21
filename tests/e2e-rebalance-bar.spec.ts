@@ -2619,7 +2619,6 @@ test.describe('Rebalance E2E', () => {
       const scenarioStartedAt = Date.now();
 
       await waitForPairIdle(senderPage, h3, 60_000, rt1.entityId);
-      const senderBeforeFirstH3 = await readPairState(senderPage, h3, rt1.entityId);
       await sendRoutedHtlcPayment(
         senderPage,
         rt1.entityId,
@@ -2628,14 +2627,6 @@ test.describe('Rebalance E2E', () => {
         [rt1.entityId, h3, rt2.entityId],
         550n,
         'rt1->rt2 via h3 htlc #1',
-      );
-      await waitForSenderHtlcLock(
-        senderPage,
-        h3,
-        senderBeforeFirstH3?.recentHtlcHashlocks ?? [],
-        Number(senderBeforeFirstH3?.recentHtlcLockCount || 0),
-        25_000,
-        rt1.entityId,
       );
 
       let afterP1: any = null;
@@ -2716,7 +2707,6 @@ test.describe('Rebalance E2E', () => {
       });
 
       await waitForPairIdle(senderPage, h3, 60_000, rt1.entityId);
-      const senderBeforeP3 = await readPairState(senderPage, h3, rt1.entityId);
       await sendRoutedHtlcPayment(
         senderPage,
         rt1.entityId,
@@ -2726,15 +2716,10 @@ test.describe('Rebalance E2E', () => {
         550n,
         'rt1->rt2 via h3 htlc #3 post-rebalance',
       );
-      await waitForSenderHtlcLock(
-        senderPage,
-        h3,
-        senderBeforeP3?.recentHtlcHashlocks ?? [],
-        Number(senderBeforeP3?.recentHtlcLockCount || 0),
-        25_000,
-        rt1.entityId,
-      );
 
+      // The authoritative success proof is the recipient's economic state
+      // below. Sender frameHistory is intentionally pruned from RAM and a
+      // fast lock+resolve may disappear before the browser observes it.
       const debtBeforeP3 = BigInt(rebDone.hubDebt || rebDone.hubExposure || '0');
       const outCapacityBeforeP3 = BigInt(rebDone.outCapacity || '0');
       let afterP3: any = null;

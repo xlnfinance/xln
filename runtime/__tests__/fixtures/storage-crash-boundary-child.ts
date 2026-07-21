@@ -55,6 +55,7 @@ import {
   mergeJPrefixAttestations,
 } from '../../jurisdiction/j-prefix-consensus';
 import { markStorageEntityDirty } from '../../machine/env-events';
+import { cloneIsolatedRuntimeInput } from '../../protocol/runtime-input-clone';
 import { collectDueJSubmitRuntimeTxs } from '../../machine/j-submit-scheduler';
 import { registerPendingCommittedJOutbox } from '../../machine/j-submit-state';
 import { applyRuntimeTx } from '../../machine/tx-handlers';
@@ -254,7 +255,10 @@ env.quietRuntimeLogs = true;
 env.runtimeConfig = {
   ...env.runtimeConfig,
   storage: {
-    enabled: true,
+    // The crash-boundary fixture installs an already-certified checkpoint
+    // below. Do not persist the earlier synthetic construction steps as if
+    // they were a replayable Runtime frame.
+    enabled: recoveryLagMode || recoveryBoardRootLagMode,
     snapshotPeriodFrames: 1,
     retainSnapshots: 1,
     epochMaxBytes: 1_000_000_000,
@@ -442,14 +446,34 @@ proposerReplica.hankoWitness = new Map([[batchHash, {
   entityHeight: proposerReplica.state.height,
   createdAt: env.timestamp,
 }]]);
+
+if (!recoveryLagMode && !recoveryBoardRootLagMode) {
+  env.runtimeConfig.storage = { ...env.runtimeConfig.storage, enabled: true };
+  markStorageEntityDirty(env, entityId);
+  await saveRuntimeFrameToStorage({
+    env,
+    currentFrameInput: { runtimeTxs: [], entityInputs: [] },
+    tryOpenDb,
+    getRuntimeDb: getRuntimeStorageDb,
+    tryOpenFrameDb,
+    getFrameDb,
+    getPerfMs,
+    formatPerfMs: (value) => Math.round(value * 1_000) / 1_000,
+  });
+  // Live process() assigns the new Runtime frame's height and timestamp before
+  // applying its input. Replay does the same, so attempt bytes stay identical.
+  env.height += 1;
+  env.timestamp += 1;
+}
 const [retry] = collectDueJSubmitRuntimeTxs(env, env.timestamp);
 if (!retry) throw new Error('crash fixture J-submit retry missing');
 registerPendingCommittedJOutbox(env, await applyRuntimeTx(env, retry, { isReplay: true }));
+const appliedRuntimeInput = cloneIsolatedRuntimeInput({ runtimeTxs: [retry], entityInputs: [] });
 markStorageEntityDirty(env, entityId);
 
-env.height += 1;
-env.timestamp += 1;
 if (recoveryLagMode || recoveryBoardRootLagMode) {
+  env.height += 1;
+  env.timestamp += 1;
   const laggingEntry = Array.from(env.eReplicas.entries()).find(([, candidate]) => (
     candidate.entityId === entityId && candidate.signerId === signerB
   ));
@@ -524,6 +548,10 @@ if (recoveryLagMode || recoveryBoardRootLagMode) {
 } else {
   await saveRuntimeFrameToStorage({
     env,
+    // WAL stores causal inputs, not a duplicate full Env. The live mutation
+    // above deliberately bypasses process() so this crash fixture must provide
+    // the exact input that deterministically rebuilds the durable J attempt.
+    currentFrameInput: appliedRuntimeInput,
     tryOpenDb,
     getRuntimeDb: getRuntimeStorageDb,
     tryOpenFrameDb,

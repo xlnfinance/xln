@@ -52,6 +52,11 @@ import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-bu
 import { signEntityHashes, verifyHankoForHash } from '../../hanko/signing';
 import { getReplicaByEntityId } from '../../entity/replica';
 import { computeAccountStateRoot, computeAccountStateSectionHashes } from '../state-root';
+import {
+  commitStagedAccountCommitmentCache,
+  discardStagedAccountCommitmentCache,
+  forkAccountCommitmentCache,
+} from '../map-commitment';
 import { createAccountJClaimSession, type AccountJClaimSession } from '../j-claim-session';
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
 import {
@@ -685,6 +690,8 @@ async function handlePendingFrameAck(
     }
   }
 
+  commitStagedAccountCommitmentCache(accountMachine);
+
   accountLog.debug('frame.commit.complete', {
     side: 'proposer',
     counterparty: shortId(cpForLog),
@@ -737,6 +744,7 @@ async function handlePendingFrameAck(
   delete accountMachine.pendingAccountInput;
   delete accountMachine.pendingAccountInputSignerId;
   delete accountMachine.clonedForValidation;
+  discardStagedAccountCommitmentCache(accountMachine);
   if (
     accountMachine.lastOutboundFrameAck &&
     Number(accountMachine.lastOutboundFrameAck.height) < Number(committedHeight)
@@ -794,6 +802,7 @@ type IncomingFramePreflightResult =
 
 type IncomingFrameValidation = {
   clonedMachine: AccountMachine;
+  proofResult: ReturnType<typeof buildAccountProofBodyFromEnv>;
   processEvents: string[];
   revealedSecrets: AccountRevealedSecret[];
   swapOffersCreated: AccountSwapOfferCreated[];
@@ -1005,6 +1014,7 @@ function applySameHeightIncomingFrameRollback(
   delete accountMachine.pendingAccountInput;
   delete accountMachine.pendingAccountInputSignerId;
   delete accountMachine.clonedForValidation;
+  discardStagedAccountCommitmentCache(accountMachine);
   markStorageAccountDirty(env, accountMachine.proofHeader.fromEntity, input.fromEntityId);
   accountMachine.rollbackCount = Math.max(1, accountMachine.rollbackCount + 1);
   accountMachine.lastRollbackFrameHash = receivedHash; // Track this rollback
@@ -1264,6 +1274,24 @@ function collectReceiverValidationDeltas(clonedMachine: AccountMachine): {
   return { tokenIds, deltas };
 }
 
+const accountFrameDeltasEqual = (left: readonly Delta[], right: readonly Delta[]): boolean => {
+  if (left.length !== right.length) return false;
+  return left.every((delta, index) => {
+    const peer = right[index];
+    return peer !== undefined &&
+      delta.tokenId === peer.tokenId &&
+      delta.collateral === peer.collateral &&
+      delta.ondelta === peer.ondelta &&
+      delta.offdelta === peer.offdelta &&
+      delta.leftCreditLimit === peer.leftCreditLimit &&
+      delta.rightCreditLimit === peer.rightCreditLimit &&
+      delta.leftAllowance === peer.leftAllowance &&
+      delta.rightAllowance === peer.rightAllowance &&
+      delta.leftHold === peer.leftHold &&
+      delta.rightHold === peer.rightHold;
+  });
+};
+
 async function verifySenderFrameHash(
   receivedFrame: AccountFrame,
   events: string[],
@@ -1367,20 +1395,15 @@ async function validateIncomingFrameOnClone(
   if (frameHashMismatch) return { kind: 'return', result: frameHashMismatch };
 
   const { deltas: ourFinalDeltas } = collectReceiverValidationDeltas(clonedMachine);
-  const localFrame: AccountFrame = {
-    ...receivedFrame,
-    accountStateRoot: computeAccountStateRoot(clonedMachine),
-    deltas: ourFinalDeltas,
-    stateHash: '',
-  };
-  const localStateHash = await createFrameHash(localFrame);
-  if (localStateHash !== receivedFrame.stateHash) {
+  const localAccountStateRoot = computeAccountStateRoot(clonedMachine);
+  if (
+    localAccountStateRoot !== receivedFrame.accountStateRoot ||
+    !accountFrameDeltasEqual(ourFinalDeltas, receivedFrame.deltas)
+  ) {
     accountLog.warn('frame.state_root_mismatch', {
       height: receivedFrame.height,
-      local: shortHash(localStateHash),
-      received: shortHash(receivedFrame.stateHash),
       txs: receivedFrame.accountTxs.map(tx => tx.type),
-      localAccountStateRoot: localFrame.accountStateRoot,
+      localAccountStateRoot,
       receivedAccountStateRoot: receivedFrame.accountStateRoot,
       localDeltas: summarizeDeltasForLog(new Map(ourFinalDeltas.map(delta => [delta.tokenId, delta]))),
       receivedDeltas: summarizeDeltasForLog(new Map(receivedFrame.deltas.map(delta => [delta.tokenId, delta]))),
@@ -1391,7 +1414,8 @@ async function validateIncomingFrameOnClone(
     });
     return { kind: 'return', result: { success: false, error: 'Bilateral account state root mismatch', events } };
   }
-  const localProofBodyHash = buildAccountProofBodyFromEnv(env, clonedMachine).proofBodyHash;
+  const proofResult = buildAccountProofBodyFromEnv(env, clonedMachine);
+  const localProofBodyHash = proofResult.proofBodyHash;
   const frameSealError = disputeSealRequirementError(
     localProofBodyHash,
     accountMachine.counterpartyDisputeProofBodyHash,
@@ -1413,6 +1437,7 @@ async function validateIncomingFrameOnClone(
     kind: 'continue',
     validation: {
       clonedMachine,
+      proofResult,
       processEvents,
       revealedSecrets,
       swapOffersCreated,
@@ -1464,6 +1489,8 @@ async function commitIncomingFrameOnRealState(
     }
     assertNoUnilateralSettlementMutation(accountMachine, beforeSettlement, tx, 'receiver/commit');
   }
+
+  forkAccountCommitmentCache(validation.clonedMachine, accountMachine);
 
   accountLog.debug('frame.commit.complete', {
     side: 'receiver',
@@ -1553,6 +1580,7 @@ async function buildIncomingFrameAckMaterial(
   accountMachine: AccountMachine,
   input: AccountInput,
   receivedFrame: AccountFrame,
+  ackProofResult: ReturnType<typeof buildAccountProofBodyFromEnv>,
   events: string[],
 ): Promise<IncomingFrameAckMaterialResult> {
   const ackEntityId = accountMachine.proofHeader.fromEntity;
@@ -1570,7 +1598,6 @@ async function buildIncomingFrameAckMaterial(
   });
 
   const ackHankoDomain = getAccountStateDomain(accountMachine);
-  const ackProofResult = buildAccountProofBodyFromEnv(env, accountMachine);
   const proofChanged =
     ackProofResult.proofBodyHash.toLowerCase() !== accountMachine.currentDisputeProofBodyHash?.toLowerCase() ||
     Number(accountMachine.currentDisputeProofNonce ?? 0) <= Number(accountMachine.jNonce ?? 0);
@@ -1744,7 +1771,14 @@ async function buildAckResponseForIncomingFrame(
   timedOutHashlocks: string[],
   committedFrames: AccountCommittedFrame[],
 ): Promise<HandleAccountInputResult> {
-  const ackMaterial = await buildIncomingFrameAckMaterial(env, accountMachine, input, receivedFrame, events);
+  const ackMaterial = await buildIncomingFrameAckMaterial(
+    env,
+    accountMachine,
+    input,
+    receivedFrame,
+    validation.proofResult,
+    events,
+  );
   if (ackMaterial.kind === 'return') return ackMaterial.result;
   const { material } = ackMaterial;
   storeAckDisputeState(accountMachine, material);

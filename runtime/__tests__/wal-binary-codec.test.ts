@@ -18,6 +18,8 @@ const journal = (): PersistedFrameJournal => ({
   height: 7,
   timestamp: 123,
   replicaMetaDigest: `0x${'22'.repeat(32)}`,
+  replicaMetaCheckpoint: false,
+  replicaMetaStateMode: 'live-head',
   runtimeInput: { runtimeTxs: [], entityInputs: [] },
   runtimeStateHash: `0x${'11'.repeat(32)}`,
   logs: [{ id: 1, level: 'info', category: 'system', message: 'frame', timestamp: 123 }],
@@ -208,11 +210,17 @@ describe('WAL binary codec', () => {
     expect(restored.runtimeMempool).toBe(restored.runtimeInput);
     expect(restored.runtimeConfig).toEqual(env.runtimeConfig);
     expect(restored.pendingOutputs).toEqual(env.pendingOutputs);
-    expect(restored.runtimeState?.verifiedProfileRoutes).toEqual(env.runtimeState.verifiedProfileRoutes);
+    // Authenticated gossip routes are a rebuildable transport cache. They are
+    // deliberately excluded from the input-only WAL machine: P2P can update
+    // them between frames, so persisting them would make replay depend on
+    // nondeterministic network timing.
+    expect(checkpoint.runtimeState?.verifiedProfileRoutes).toBeUndefined();
+    expect(restored.runtimeState?.verifiedProfileRoutes).toBeUndefined();
     expect(restored.runtimeState?.runtimeAdapterCommandFrontiers).toEqual(env.runtimeState.runtimeAdapterCommandFrontiers);
     expect(restored.jReplicas.get('Testnet')).toEqual(expect.objectContaining({
       blockNumber: 44n,
       stateRoot: new Uint8Array(32).fill(7),
+      lastBlockTimestamp: 0,
     }));
     expect(restored.jReplicas.get('Testnet')?.jadapter).toBeUndefined();
   });

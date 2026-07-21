@@ -14,5 +14,10 @@ export {
   verifyCanonicalReceiptProof,
 } from './receipt-codec';
 
-export type { AuthenticatedReceiptRange, ReceiptReadProfile } from './receipt-reader';
+export type {
+  AuthenticatedReceiptRange,
+  ReceiptReadProfile,
+  RpcBatchCall,
+  RpcBatchSend,
+} from './receipt-reader';
 export { readAuthenticatedLogsForRange, readAuthenticatedReceiptRange } from './receipt-reader';

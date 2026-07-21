@@ -73,6 +73,10 @@ type HubConsensusBenchmarkResult = {
     receive: number;
     commit: number;
   };
+  stageMsByKind?: {
+    same: NonNullable<HubConsensusBenchmarkResult['stageMs']>;
+    cross: NonNullable<HubConsensusBenchmarkResult['stageMs']>;
+  };
 };
 
 type StageTotals = {
@@ -81,6 +85,9 @@ type StageTotals = {
   commit: number;
   count: number;
 };
+
+const DEFAULT_BENCH_BATCH_SIZE = 10;
+const DEFAULT_BENCH_PROCESSES = 4;
 
 const createStageTotals = (): StageTotals => ({ propose: 0, receive: 0, commit: 0, count: 0 });
 
@@ -119,14 +126,20 @@ const benchmarkSeed = (label: string): string => {
 
 const parseCli = (args: string[]): Cli => {
   const swaps = positiveInt(args, '--swaps', 1_000);
-  const batchSize = Math.min(positiveInt(args, '--batch-size', MAX_ACCOUNT_FRAME_TXS), MAX_ACCOUNT_FRAME_TXS);
+  // Keep direct invocation identical to the release gate. MAX_ACCOUNT_FRAME_TXS
+  // is an admission bound, not a promise that every heterogeneous payload of
+  // that count fits the contract's encoded dispute-proof byte limit.
+  const batchSize = Math.min(
+    positiveInt(args, '--batch-size', DEFAULT_BENCH_BATCH_SIZE),
+    MAX_ACCOUNT_FRAME_TXS,
+  );
   return {
     swaps,
     warmup: nonNegativeInt(args, '--warmup', 100),
     minTps: positiveInt(args, '--min-tps', 10_000),
     concurrency: positiveInt(args, '--concurrency', 128),
     batchSize,
-    processes: positiveInt(args, '--processes', 1),
+    processes: positiveInt(args, '--processes', DEFAULT_BENCH_PROCESSES),
     users: positiveInt(args, '--users', Math.max(1, Math.ceil(swaps / batchSize))),
   };
 };
@@ -610,24 +623,26 @@ const runPass = async (
   sameSwaps: number;
   crossSwaps: number;
   elapsedMs: number;
-  stages: StageTotals;
+  stages: { same: StageTotals; cross: StageTotals };
   frames: number;
   sameUsers: number;
   crossUsers: number;
 }> => {
   const { env, jurisdiction, hubId } = makeEnv(seed);
   const { same, cross } = buildCases(env, jurisdiction, hubId, swaps, batchSize, users);
-  const stages = concurrency === 1 ? createStageTotals() : undefined;
+  const stages = concurrency === 1
+    ? { same: createStageTotals(), cross: createStageTotals() }
+    : undefined;
   const startedAt = getPerfMs();
-  const sameResult = await runMeasuredCases(same, concurrency, stages);
-  const crossResult = await runMeasuredCases(cross, concurrency, stages);
+  const sameResult = await runMeasuredCases(same, concurrency, stages?.same);
+  const crossResult = await runMeasuredCases(cross, concurrency, stages?.cross);
   return {
     sameElapsedMs: sameResult.elapsedMs,
     crossElapsedMs: crossResult.elapsedMs,
     sameSwaps: sameResult.swaps,
     crossSwaps: crossResult.swaps,
     elapsedMs: getPerfMs() - startedAt,
-    stages: stages ?? createStageTotals(),
+    stages: stages ?? { same: createStageTotals(), cross: createStageTotals() },
     frames: same.length + cross.length,
     sameUsers: same.length,
     crossUsers: cross.length,
@@ -728,7 +743,7 @@ export const runSwapHubConsensusBenchmark = async (cli: Cli): Promise<HubConsens
       benchmarkSeed('swap-hub-consensus-warmup'),
       cli.concurrency,
       cli.batchSize,
-      Math.min(cli.users, cli.warmup),
+      Math.min(cli.warmup, Math.max(cli.users, Math.ceil(cli.warmup / cli.batchSize))),
     );
   }
   const {
@@ -753,7 +768,8 @@ export const runSwapHubConsensusBenchmark = async (cli: Cli): Promise<HubConsens
   const sameTps = sameSwaps / Math.max(sameElapsedMs / 1000, 0.001);
   const crossTps = crossSwaps / Math.max(crossElapsedMs / 1000, 0.001);
   const tps = totalSwaps / elapsedSeconds;
-  const stageMs = averageStageMs(stages);
+  const sameStageMs = averageStageMs(stages.same);
+  const crossStageMs = averageStageMs(stages.cross);
   const output: HubConsensusBenchmarkResult = {
     benchmark: 'swap-hub-account-consensus',
     sameSwaps,
@@ -774,7 +790,14 @@ export const runSwapHubConsensusBenchmark = async (cli: Cli): Promise<HubConsens
     concurrency: cli.concurrency,
     processes: cli.processes,
     scope: `batched distributed account consensus throughput across ${sameUsers + crossUsers} user accounts: hub propose/commit + user ACK on independent accounts; up to ${cli.batchSize} swap txs per account frame; includes hanko sign/verify and dispute proof, excludes entity frame and storage flush`,
-    ...(stageMs ? { stageMs } : {}),
+    ...(sameStageMs && crossStageMs ? {
+      stageMs: {
+        propose: Number((sameStageMs.propose + crossStageMs.propose).toFixed(3)),
+        receive: Number((sameStageMs.receive + crossStageMs.receive).toFixed(3)),
+        commit: Number((sameStageMs.commit + crossStageMs.commit).toFixed(3)),
+      },
+      stageMsByKind: { same: sameStageMs, cross: crossStageMs },
+    } : {}),
   };
   return output;
 };

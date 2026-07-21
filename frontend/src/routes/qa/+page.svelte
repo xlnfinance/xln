@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import QaAdminEvidenceBoard from '$lib/components/QA/QaAdminEvidenceBoard.svelte';
   import QaProtectedImage from '$lib/components/QA/QaProtectedImage.svelte';
+  import QaPerformanceTrend from '$lib/components/QA/QaPerformanceTrend.svelte';
   import QaScenarioPlayer from '$lib/components/QA/QaScenarioPlayer.svelte';
   import QaTestLedgerTable from '$lib/components/QA/QaTestLedgerTable.svelte';
   import {
@@ -1531,6 +1532,7 @@
             </div>
           </section>
         {/if}
+        <QaPerformanceTrend history={history} />
         <section class="benchmark-trend" data-testid="qa-benchmark-trend">
           <div class="suite-list-head compact-head">
             <div>

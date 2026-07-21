@@ -1,6 +1,6 @@
 import type { BookState } from '../orderbook';
 import type { EntityState, Env } from '../types';
-import { ethers } from 'ethers';
+import { computeIntegrityDigest } from '../infra/integrity-checksum';
 import { decodeBuffer, decodeValidatedBuffer } from './codec';
 import { docRefCellKey, docRefKey, docValueKey } from './doc-refs';
 import { storageMerkleCellHexKey } from './hashes';
@@ -268,13 +268,31 @@ const listReplicaMetas = async (
   entityId: string,
   prefix: Buffer,
   expectedKey: (entityId: string, signerId: string) => Buffer,
+  sharedState?: EntityState,
 ): Promise<StorageReplicaMeta[]> => {
   const metas: StorageReplicaMeta[] = [];
   const seenSigners = new Set<string>();
   const expectedEntityId = normalizeEntityId(entityId);
   for await (const key of iterateKeys(db, { prefix })) {
+    const decoded = decodeBuffer<unknown>(await db.get(key));
+    let candidate = decoded;
+    if (
+      decoded && typeof decoded === 'object' && !Array.isArray(decoded) &&
+      !Object.hasOwn(decoded, 'state') && sharedState
+    ) {
+      const decodedRecord = decoded as Record<string, unknown>;
+      const localState = decodedRecord['localEntityState'];
+      if (!localState || typeof localState !== 'object' || Array.isArray(localState)) {
+        throw new Error(`STORAGE_REPLICA_META_LOCAL_STATE_MISSING:entity=${expectedEntityId}`);
+      }
+      const { localEntityState: _localEntityState, ...localMeta } = decodedRecord;
+      candidate = {
+        ...localMeta,
+        state: { ...sharedState, ...(localState as Record<string, unknown>) },
+      };
+    }
     const meta = validateEntityReplica(
-      decodeBuffer<unknown>(await db.get(key)),
+      candidate,
       `StorageReplicaMeta[0x${key.toString('hex')}]`,
     ) as StorageReplicaMeta;
     const metaEntityId = normalizeEntityId(String(meta.entityId || ''));
@@ -309,11 +327,13 @@ const listReplicaMetas = async (
 export const listStorageReplicaMetas = async (
   db: RuntimeDbLike,
   entityId: string,
+  sharedState?: EntityState,
 ): Promise<StorageReplicaMeta[]> => listReplicaMetas(
   db,
   entityId,
   keyLiveReplicaMetaPrefix(entityId),
   keyLiveReplicaMeta,
+  sharedState,
 );
 
 export const listStorageSnapshotReplicaMetas = async (
@@ -359,7 +379,7 @@ const storageVerifyMerkleMode = (): 'none' | 'deep' => {
 };
 
 const hashRawDocValue = (value: Buffer | Uint8Array): string =>
-  ethers.keccak256(value instanceof Uint8Array ? value : Uint8Array.from(value));
+  computeIntegrityDigest(value instanceof Uint8Array ? value : Uint8Array.from(value));
 
 const assertLiveDocHash = async (options: {
   db: RuntimeDbLike;

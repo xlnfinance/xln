@@ -49,6 +49,9 @@ export const LIMITS = {
   /** Maximum active swap offers per bilateral account */
   MAX_ACCOUNT_SWAP_OFFERS: 1000,
 
+  /** Maximum live offers for one maker, direction, and economic market. */
+  MAX_ACCOUNT_SWAP_OFFERS_PER_SIDE_PER_MARKET: 10,
+
   /** Recent terminal swap lifecycle rows retained in the live Account projection. */
   MAX_ACCOUNT_TERMINAL_SWAP_HISTORY: 100,
 
@@ -204,7 +207,11 @@ export const BLOCKCHAIN = {
   CONFIRMATION_BLOCKS: 12, // ~3 minutes on Ethereum
 
   /** J-watcher polling interval (milliseconds) */
-  J_WATCHER_POLL_INTERVAL_MS: 1_000, // One simple canonical poll per second
+  // Idle RPC runtimes share the same chain, so a 1s poll per runtime amplifies
+  // into dozens of identical eth_blockNumber calls. Local submissions invoke
+  // pollNow() at the durability boundary; the interval is only the external
+  // chain fallback and therefore may stay deliberately cold.
+  J_WATCHER_POLL_INTERVAL_MS: 5_000,
 
   /** Maximum finalized block range fetched by one J-watcher poll. */
   J_WATCHER_MAX_BLOCKS_PER_POLL: 256,

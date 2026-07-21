@@ -3,10 +3,12 @@ import { expect, test } from 'bun:test';
 import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,
+  computeCanonicalEntityConsensusStateHashCold,
   computeEntityFrameAuthorityRoot,
   encodeCanonicalEntityConsensusValue,
   ENTITY_CONSENSUS_STATE_FIELDS,
   ENTITY_STATE_ROOT_EXCLUDED_FIELDS,
+  invalidateEntityAccountCommitment,
 } from '../entity/consensus/state-root';
 import { createEntityFrameHash } from '../entity/consensus/frame';
 import type { EntityState } from '../types';
@@ -113,7 +115,12 @@ const mutators = {
   ]]); },
   outDebtsByToken: state => { state.outDebtsByToken = new Map([[1, new Map([[counterpartyId, { marker: 'out-debt' } as never]])]]); },
   inDebtsByToken: state => { state.inDebtsByToken = new Map([[1, new Map([[counterpartyId, { marker: 'in-debt' } as never]])]]); },
-  orderbookExt: state => { state.orderbookExt = { marker: 'orderbook' } as never; },
+  orderbookExt: state => { state.orderbookExt = {
+    books: new Map(),
+    orderPairs: new Map(),
+    referrals: new Map(),
+    hubProfile: { marker: 'orderbook' },
+  } as never; },
   lockBook: state => { state.lockBook.set('lock', { marker: 'lock' } as never); },
   swapTradingPairs: state => { state.swapTradingPairs = [{ baseTokenId: 1, quoteTokenId: 2, pairId: '1:2' }]; },
   pendingSwapFillRatios: state => { state.pendingSwapFillRatios = new Map([['fill' as never, 1]]); },
@@ -265,6 +272,7 @@ test('Entity consensus root excludes only typed Account replica caches', () => {
     .toBe(computeCanonicalEntityConsensusStateHash(right));
 
   (right.accounts.get(counterpartyId) as unknown as { status: string }).status = 'disputed';
+  invalidateEntityAccountCommitment(right, counterpartyId);
   expect(computeCanonicalEntityConsensusStateHash(left))
     .not.toBe(computeCanonicalEntityConsensusStateHash(right));
 
@@ -274,8 +282,79 @@ test('Entity consensus root excludes only typed Account replica caches', () => {
     activationLogIndex: 2,
     reason: 'bilateral-frame-uncertified',
   };
+  invalidateEntityAccountCommitment(right, counterpartyId);
   expect(computeCanonicalEntityConsensusStateHash(left))
     .not.toBe(computeCanonicalEntityConsensusStateHash(right));
+});
+
+test('Entity Account commitment cache has a cold oracle for missed invalidation', () => {
+  const state = baseState();
+  state.accounts.set(counterpartyId, {
+    status: 'active',
+    mempool: [],
+    pendingWithdrawals: new Map(),
+  } as never);
+  const before = computeCanonicalEntityConsensusStateHash(state);
+  (state.accounts.get(counterpartyId) as unknown as { status: string }).status = 'disputed';
+  expect(computeCanonicalEntityConsensusStateHash(state)).toBe(before);
+  expect(computeCanonicalEntityConsensusStateHashCold(state)).not.toBe(before);
+  invalidateEntityAccountCommitment(state, counterpartyId);
+  expect(computeCanonicalEntityConsensusStateHash(state))
+    .toBe(computeCanonicalEntityConsensusStateHashCold(state));
+});
+
+test('Entity consensus root binds incremental book commitments but not the derived cancel index', () => {
+  const makeOrderbookExt = () => ({
+    books: new Map([['1/2', {
+      params: { bucketWidthTicks: 100n, maxOrders: 10, stpPolicy: 1 },
+      orders: new Map(),
+      bidBuckets: new Map(),
+      askBuckets: new Map(),
+      bidBucketIdsDesc: [],
+      askBucketIdsAsc: [],
+      nextSeq: 1,
+      tradeCount: 0,
+      tradeQtySum: 0n,
+      eventHash: 0n,
+    }]]),
+    orderPairs: new Map(),
+    referrals: new Map(),
+    hubProfile: {
+      entityId,
+      name: 'hub',
+      spreadDistribution: {
+        makerBps: 0,
+        takerBps: 10_000,
+        hubBps: 0,
+        makerReferrerBps: 0,
+        takerReferrerBps: 0,
+      },
+      referenceTokenId: 1,
+      minTradeSize: 0n,
+      supportedPairs: ['1/2'],
+    },
+  }) as NonNullable<EntityState['orderbookExt']>;
+
+  const baseline = baseState();
+  baseline.orderbookExt = makeOrderbookExt();
+  const baselineRoot = computeCanonicalEntityConsensusStateHash(baseline);
+
+  const derivedIndexOnly = structuredClone(baseline);
+  derivedIndexOnly.orderbookExt!.orderPairs.set('account:offer', ['1/2']);
+  expect(computeCanonicalEntityConsensusStateHash(derivedIndexOnly)).toBe(baselineRoot);
+
+  const bookChanged = structuredClone(baseline);
+  bookChanged.orderbookExt!.books.get('1/2')!.eventHash = 99n;
+  delete bookChanged.orderbookExt!.books.get('1/2')!.commitmentHash;
+  expect(computeCanonicalEntityConsensusStateHash(bookChanged)).not.toBe(baselineRoot);
+
+  const referralChanged = structuredClone(baseline);
+  referralChanged.orderbookExt!.referrals.set('referral', { marker: 'bound' } as never);
+  expect(computeCanonicalEntityConsensusStateHash(referralChanged)).not.toBe(baselineRoot);
+
+  const policyChanged = structuredClone(baseline);
+  policyChanged.orderbookExt!.hubProfile.minTradeSize = 1n;
+  expect(computeCanonicalEntityConsensusStateHash(policyChanged)).not.toBe(baselineRoot);
 });
 
 test('Entity consensus root strips only typed post-hash Account witnesses', () => {

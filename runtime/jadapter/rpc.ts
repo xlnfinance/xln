@@ -67,6 +67,8 @@ import {
   type RawJEvent,
   type RawJEventArgs,
 } from './watcher';
+import { shouldAuditCanonicalWatcherState } from './watcher-poll-policy';
+import { readAndAssertRpcChainId } from './rpc-network';
 import {
   getEntityCertifiedJAnchor,
   getValidatorJExpectedBlockHash,
@@ -98,6 +100,7 @@ import {
   readAuthenticatedReceiptRange,
   type AuthenticatedReceiptRange,
   type ReceiptReadProfile,
+  type RpcBatchCall,
 } from './receipt-root';
 import { normalizeReceiptHash, parseReceiptQuantity } from './receipt-codec';
 import { assertDepositoryEntityProviderBinding } from './stack-binding';
@@ -443,7 +446,7 @@ export const resolveApprovalReceiptLogIndex = (params: {
  */
 export async function createRpcAdapter(
   config: JAdapterConfig,
-  provider: Provider,
+  provider: ethers.JsonRpcProvider,
   signer: Signer
 ): Promise<JAdapter> {
   const traceEnabled = process.env['JADAPTER_TRACE'] === '1';
@@ -565,14 +568,9 @@ export async function createRpcAdapter(
     return /missing revert data|CALL_EXCEPTION|BlockOutOfRangeError|Failed to load state snapshot|No such file/i.test(detail);
   };
 
-  trace('provider.getNetwork:start');
-  const rpcChainId = Number((await provider.getNetwork()).chainId);
-  trace('provider.getNetwork:done', { rpcChainId, configChainId: Number(config.chainId) });
-  if (rpcChainId !== Number(config.chainId)) {
-    throw new Error(
-      `[JAdapter:rpc] chainId mismatch: config=${config.chainId} rpc=${rpcChainId}. Refusing to sign/submit.`,
-    );
-  }
+  trace('provider.eth_chainId:start');
+  const rpcChainId = await readAndAssertRpcChainId(provider, config.chainId);
+  trace('provider.eth_chainId:done', { rpcChainId, configChainId: Number(config.chainId) });
 
   const applyGasHeadroom = (value: bigint): bigint =>
     (value * BigInt(GAS_HEADROOM_BPS) + 9_999n) / 10_000n;
@@ -744,6 +742,33 @@ export async function createRpcAdapter(
       throw new Error(`J_WATCHER_BLOCK_NUMBER_INVALID:${String(raw)}`);
     }
     return blockNumber;
+  };
+
+  const sendAuthenticatedRpcBatch = async (calls: readonly RpcBatchCall[]): Promise<unknown[]> => {
+    if (calls.length === 0) return [];
+    const rpcUrl = String(config.rpcUrl || '').trim();
+    if (!rpcUrl) throw new Error('J_RECEIPT_BATCH_RPC_URL_MISSING');
+    const batch: RpcBatchRequest[] = calls.map((call, index) => ({
+      id: index + 1,
+      jsonrpc: '2.0',
+      method: call.method,
+      params: call.params,
+    }));
+    const responses = await sendRpcBatch(rpcUrl, batch);
+    return batch.map((request) => {
+      const response = responses.get(request.id);
+      if (!response) throw new Error(`J_RECEIPT_BATCH_RESPONSE_MISSING:${request.id}:${request.method}`);
+      if (response.error) {
+        throw new Error(
+          `J_RECEIPT_BATCH_CALL_FAILED:${request.id}:${request.method}:` +
+          `${String(response.error.message || 'unknown')}`,
+        );
+      }
+      if (!Object.prototype.hasOwnProperty.call(response, 'result')) {
+        throw new Error(`J_RECEIPT_BATCH_RESULT_MISSING:${request.id}:${request.method}`);
+      }
+      return response.result;
+    });
   };
 
   const readBlockHeadersAtHeights = async (
@@ -1091,6 +1116,44 @@ export async function createRpcAdapter(
     };
   };
 
+  const hasProcessedBatch = async (
+    entityId: string,
+    batchHash: string,
+    entityNonce: bigint,
+  ): Promise<boolean> => {
+    const normalizedEntityId = normalizeEntityId(entityId);
+    if (!ethers.isHexString(batchHash, 32)) {
+      throw new Error(`HANKO_BATCH_RECEIPT_HASH_INVALID:${batchHash}`);
+    }
+    if (entityNonce <= 0n || entityNonce > ethers.MaxUint256) {
+      throw new Error(`HANKO_BATCH_RECEIPT_NONCE_INVALID:${entityNonce.toString()}`);
+    }
+    const event = depository.interface.getEvent('HankoBatchProcessed');
+    if (!event) throw new Error('HANKO_BATCH_EVENT_ABI_MISSING');
+    const logs = await provider.getLogs({
+      address: await getLiveDepositoryAddress(),
+      fromBlock: Math.max(0, entityProviderDeploymentBlock),
+      toBlock: 'latest',
+      topics: [
+        event.topicHash,
+        ethers.zeroPadValue(normalizedEntityId, 32),
+        ethers.zeroPadValue(batchHash, 32),
+      ],
+    });
+    const exact = logs.filter((log) => {
+      const parsed = depository.interface.parseLog({ topics: [...log.topics], data: log.data });
+      return parsed?.name === 'HankoBatchProcessed' &&
+        BigInt(parsed.args['nonce']) === entityNonce &&
+        parsed.args['success'] === true;
+    });
+    if (exact.length > 1) {
+      throw new Error(
+        `HANKO_BATCH_RECEIPT_DUPLICATE:${normalizedEntityId}:${batchHash}:${entityNonce.toString()}`,
+      );
+    }
+    return exact.length === 1;
+  };
+
   const adapter: JAdapter = {
     mode: config.mode,
     chainId: config.chainId,
@@ -1336,6 +1399,8 @@ export async function createRpcAdapter(
     async getEntityNonce(entityId: string): Promise<bigint> {
       return depository.entityNonces(normalizeEntityId(entityId));
     },
+
+    hasProcessedBatch,
 
     async getEntityProviderActionNonce(entityId: string): Promise<bigint> {
       return entityProvider.entityActionNonces(normalizeEntityId(entityId));
@@ -2461,6 +2526,8 @@ export async function createRpcAdapter(
       let lastPendingHistoryWaitKey = '';
       let reorgRewindPendingReplicaKeys: string[] = [];
       let lastAuthorityHeaderAuditKey = '';
+      let lastObservedHead = -1;
+      let lastCanonicalAuditAtMs = 0;
       const watchPollMs = BLOCKCHAIN.J_WATCHER_POLL_INTERVAL_MS;
       const manualPolling = env.scenarioMode === true;
       const confirmationDepth = resolveFinalityDepth(!!env?.scenarioMode);
@@ -2954,13 +3021,42 @@ export async function createRpcAdapter(
           if (watcherPollCancelled()) return;
           const safeToBlock = currentBlock - confirmationDepth;
           if (safeToBlock <= 0) return;
-          pollStep = `verifyAuthorityEvidence:${currentBlock}`;
-          await assertAuthorityEvidenceCanonical(activeEnv, currentBlock);
-          pollStep = `verifyCanonicalTip:${lastSyncedBlock}`;
-          if (await reconcileWatcherCanonicalTip(activeEnv)) {
-            pendingWatcherJHistoryRange = null;
-            watcherScanProgress = { scannedThroughHeight: 0, replicaScannedThrough: {} };
-            return;
+          const watcherReplica = findWatcherJurisdictionReplica(
+            activeEnv,
+            addresses.depository,
+            config.chainId,
+          );
+          if (!watcherReplica) {
+            throw new Error(`J_WATCHER_JURISDICTION_NOT_FOUND:poll:${config.chainId}:${addresses.depository}`);
+          }
+          const minimumLocalScan = getMinimumScannedSignerJHeight(activeEnv, watcherReplica);
+          const nextGlobalBlock = lastSyncedBlock + 1;
+          const nextReplicaCatchUpBlock = minimumLocalScan === null
+            ? nextGlobalBlock
+            : minimumLocalScan + 1;
+          const fromBlock = Math.min(nextGlobalBlock, nextReplicaCatchUpBlock);
+          const nowMs = Date.now();
+          const canonicalAuditDue = shouldAuditCanonicalWatcherState({
+            currentHead: currentBlock,
+            lastObservedHead,
+            nowMs,
+            lastAuditAtMs: lastCanonicalAuditAtMs,
+            hasRangeWork: fromBlock <= safeToBlock,
+            hasPendingHistory: pendingWatcherJHistoryRange !== null,
+            hasPendingReorg: reorgRewindPendingReplicaKeys.length > 0,
+          });
+          lastObservedHead = currentBlock;
+          if (canonicalAuditDue) {
+            pollStep = `verifyAuthorityEvidence:${currentBlock}`;
+            await assertAuthorityEvidenceCanonical(activeEnv, currentBlock);
+            pollStep = `verifyCanonicalTip:${lastSyncedBlock}`;
+            if (await reconcileWatcherCanonicalTip(activeEnv)) {
+              pendingWatcherJHistoryRange = null;
+              watcherScanProgress = { scannedThroughHeight: 0, replicaScannedThrough: {} };
+              lastCanonicalAuditAtMs = nowMs;
+              return;
+            }
+            lastCanonicalAuditAtMs = nowMs;
           }
           if (pendingWatcherJHistoryRange) {
             if (!isWatcherJHistoryRangeDurable(activeEnv, pendingWatcherJHistoryRange)) {
@@ -2986,24 +3082,10 @@ export async function createRpcAdapter(
           // pending-range branch leaves the cursor permanently one block
           // behind and turns a fully idle watcher into a false drain stall.
           commitScannedWatcherCursor(activeEnv, lastSyncedBlock);
-          const watcherReplica = findWatcherJurisdictionReplica(
-            activeEnv,
-            addresses.depository,
-            config.chainId,
-          );
-          if (!watcherReplica) {
-            throw new Error(`J_WATCHER_JURISDICTION_NOT_FOUND:poll:${config.chainId}:${addresses.depository}`);
-          }
-          const minimumLocalScan = getMinimumScannedSignerJHeight(activeEnv, watcherReplica);
-          const nextGlobalBlock = lastSyncedBlock + 1;
           // A replica imported after the watcher reached the tip has no local
           // authenticated history yet. The global cursor must not hide that
           // per-replica gap: rescan from the earliest local cursor while keeping
           // lastSyncedBlock monotonic. Exact duplicate ranges reconcile as no-ops.
-          const nextReplicaCatchUpBlock = minimumLocalScan === null
-            ? nextGlobalBlock
-            : minimumLocalScan + 1;
-          const fromBlock = Math.min(nextGlobalBlock, nextReplicaCatchUpBlock);
           if (fromBlock > safeToBlock) return;
 
           const toBlock = resolveWatcherPollToBlock(fromBlock, safeToBlock);
@@ -3045,6 +3127,7 @@ export async function createRpcAdapter(
                 ? 'tron-complete-receipts'
                 : 'ethereum-trie',
             },
+            sendAuthenticatedRpcBatch,
           );
           if (watcherPollCancelled()) return;
           const authenticatedIngress = prepareAuthenticatedWatcherIngress(

@@ -9,6 +9,7 @@ import {
   verifyStorageTailIntegrity,
 } from './';
 import { assertStorageSafetyOverridesAllowed } from './safety';
+import { withChunkedValues } from './chunked-db';
 import {
   fsyncStorageParentDirectory,
   writeDurableStorageMarkerFile,
@@ -20,6 +21,10 @@ const storageLog = createStructuredLogger('runtime.storage');
 
 const formatStorageError = (error: unknown): string =>
   error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+
+const createChunkedLevel = (path: string): Level<Buffer, Buffer> => withChunkedValues(
+  new Level(path, { valueEncoding: 'buffer', keyEncoding: 'binary' }) as unknown as Level<Buffer, Buffer>,
+);
 
 export type RuntimeStorageDbDeps = {
   ensureRuntimeState(env: Env): RuntimeState;
@@ -529,7 +534,7 @@ export const getStorageDb = (
   const fields = storageStateFields(role);
   const existing = state[fields.dbField] as Level<Buffer, Buffer> | undefined;
   if (existing) return existing;
-  const db = new Level(resolveStorageDbPath(env, role), { valueEncoding: 'buffer', keyEncoding: 'binary' }) as unknown as Level<Buffer, Buffer>;
+  const db = createChunkedLevel(resolveStorageDbPath(env, role));
   state[fields.dbField] = db;
   return db;
 };
@@ -772,10 +777,7 @@ export const rotateStorageEpochDb = async (
     const nextPath = `${currentPath}-next-${snapshotHeight}`;
     const fs = await import('fs/promises');
     const currentDb = getStorageDb(env, deps, 'current');
-    const nextDb = new Level(nextPath, {
-      valueEncoding: 'buffer',
-      keyEncoding: 'binary',
-    }) as unknown as Level<Buffer, Buffer>;
+    const nextDb = createChunkedLevel(nextPath);
     await fs.rm(nextPath, { recursive: true, force: true });
     await nextDb.open();
     try {
@@ -826,7 +828,7 @@ export const getRuntimeDb = (
   const state = deps.ensureRuntimeState(env);
   if (!state.db) {
     const path = resolveDbPath(env, 'core');
-    state.db = new Level(path, { valueEncoding: 'buffer', keyEncoding: 'binary' }) as unknown as Level<Buffer, Buffer>;
+    state.db = createChunkedLevel(path);
   }
   return state.db;
 };
@@ -838,7 +840,7 @@ export const getInfraDb = (
   const state = deps.ensureRuntimeState(env);
   if (!state.infraDb) {
     const path = resolveDbPath(env, 'infra');
-    state.infraDb = new Level(path, { valueEncoding: 'buffer', keyEncoding: 'binary' }) as unknown as Level<Buffer, Buffer>;
+    state.infraDb = createChunkedLevel(path);
   }
   return state.infraDb;
 };
@@ -849,7 +851,7 @@ export const getFrameDb = (
 ): Level<Buffer, Buffer> => {
   const state = deps.ensureRuntimeState(env);
   if (!state.frameDb) {
-    state.frameDb = new Level(resolveFrameDbPath(env), { valueEncoding: 'buffer', keyEncoding: 'binary' }) as unknown as Level<Buffer, Buffer>;
+    state.frameDb = createChunkedLevel(resolveFrameDbPath(env));
   }
   return state.frameDb as Level<Buffer, Buffer>;
 };

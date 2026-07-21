@@ -666,9 +666,18 @@ const buildCheckpointedReplicaLineage = (
     );
   }
   const variantsByHeight = new Map<number, CertifiedEntityFrameLink[]>();
+  const retainedPreCheckpointLinks: CertifiedEntityFrameLink[] = [];
   for (const candidate of entry.replica.certifiedFrameLineage ?? []) {
     const frame = assertFrameBody(entityId, candidate);
-    if (frame.height <= anchor.height || frame.height > entry.replica.state.height) {
+    // Retained pre-checkpoint history (kept by default so the on-disk audit
+    // trail survives a checkpoint rebase) is already covered by the anchor's
+    // authority and was verified when it first entered the lineage. It is
+    // carried forward untouched, never re-verified here.
+    if (frame.height <= anchor.height) {
+      retainedPreCheckpointLinks.push(candidate);
+      continue;
+    }
+    if (frame.height > entry.replica.state.height) {
       throw new Error(
         `STORAGE_ENTITY_LINEAGE_CERT_HEIGHT_INVALID:${entityId}:${frame.height}:` +
         `${anchor.height}:${entry.replica.state.height}`,
@@ -723,7 +732,7 @@ const buildCheckpointedReplicaLineage = (
   } else {
     assertReplicaMatchesCertifiedHeight(entry, selectedLinks.at(-1)!);
   }
-  return selectedLinks;
+  return [...retainedPreCheckpointLinks, ...selectedLinks];
 };
 
 const assertCheckpointSet = (
@@ -979,7 +988,8 @@ export const rebaseCertifiedEntityLineageAtRuntimeCheckpoint = (
       };
       assertLineageAnchor(env, entityId, checkpointed);
       anchorByReplicaKey.set(entry.replicaKey, checkpointed);
-      lineageByReplicaKey.set(entry.replicaKey, []);
+      const latest = validated.lineageByReplicaKey.get(entry.replicaKey)?.at(-1);
+      if (latest) lineageByReplicaKey.set(entry.replicaKey, [latest]);
     }
   }
   return {
@@ -987,6 +997,143 @@ export const rebaseCertifiedEntityLineageAtRuntimeCheckpoint = (
     lineageByReplicaKey,
     anchorByReplicaKey,
   };
+};
+
+/**
+ * Builds the local checkpoint anchor from Entity endpoints that this Runtime
+ * has already certified while applying earlier R-frames. This intentionally
+ * does not re-verify every historical Hanko: that audit belongs to replay and
+ * test gates. Repeating it synchronously every 100 R-frames turns a derived
+ * LevelDB checkpoint into user-visible latency without adding new authority.
+ */
+export const buildRuntimeCheckpointLineagePlan = (
+  env: Env,
+): CertifiedEntityLineagePlan => {
+  const entriesByEntity = new Map<string, ReplicaEntry[]>();
+  for (const [rawReplicaKey, replica] of env.eReplicas) {
+    if (!replica?.state) continue;
+    const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || '');
+    if (!entityId) continue;
+    assertValidHeight({ replicaKey: String(rawReplicaKey), replica });
+    const entries = entriesByEntity.get(entityId) ?? [];
+    entries.push({ replicaKey: String(rawReplicaKey), replica });
+    entriesByEntity.set(entityId, entries);
+  }
+
+  // Entity-frame certificates are Entity-wide facts, not validator-local
+  // facts. Live storage keeps the pre-checkpoint lineage on one canonical
+  // replica to avoid multiplying identical Hanko payloads by the signer count.
+  // Resolve that shared evidence by exact consensus endpoint, then bind it to
+  // every matching local replica below. A same-height fork or a state mismatch
+  // remains fatal before the checkpoint enters the WAL.
+  const endpointKey = (entityId: string, height: number, frameHash: string): string =>
+    `${normalizeEntityId(entityId)}:${height}:${String(frameHash).toLowerCase()}`;
+  const endpointEvidence = new Map<string, CertifiedEntityLineageAnchor>();
+  const registerEndpointEvidence = (evidence: CertifiedEntityLineageAnchor): void => {
+    const key = endpointKey(evidence.entityId, evidence.height, evidence.frameHash);
+    const existing = endpointEvidence.get(key);
+    if (existing && (
+      existing.stateRoot.toLowerCase() !== evidence.stateRoot.toLowerCase() ||
+      computeEntityFrameAuthorityRoot(existing.authority) !==
+        computeEntityFrameAuthorityRoot(evidence.authority)
+    )) {
+      throw new Error(`STORAGE_RUNTIME_CHECKPOINT_ENDPOINT_CONFLICT:${key}`);
+    }
+    if (!existing) endpointEvidence.set(key, evidence);
+  };
+  for (const [entityId, entries] of entriesByEntity) {
+    for (const { replica } of entries) {
+      if (replica.certifiedFrameAnchor) {
+        registerEndpointEvidence({
+          ...structuredClone(replica.certifiedFrameAnchor),
+          entityId,
+        });
+      }
+      for (const link of replica.certifiedFrameLineage ?? []) {
+        registerEndpointEvidence({
+          entityId,
+          height: link.frame.height,
+          frameHash: link.frame.hash,
+          stateRoot: link.frame.stateRoot,
+          authority: structuredClone(link.postAuthority),
+        });
+      }
+    }
+  }
+
+  const lookup: StorageReplicaLookup = new Map();
+  const lineageByReplicaKey = new Map<string, CertifiedEntityFrameLink[]>();
+  const anchorByReplicaKey = new Map<string, CertifiedEntityLineageAnchor>();
+  for (const [entityId, entries] of Array.from(entriesByEntity.entries()).sort(([left], [right]) => (
+    compareStableText(left, right)
+  ))) {
+    const ordered = [...entries].sort((left, right) => (
+      right.replica.state.height - left.replica.state.height ||
+      compareStableText(left.replicaKey.toLowerCase(), right.replicaKey.toLowerCase())
+    ));
+    const selected = ordered[0]!;
+    lookup.set(entityId, {
+      replicaKey: selected.replicaKey,
+      replica: selected.replica,
+      state: selected.replica.state,
+    });
+
+    const pending = entries.map((entry) => {
+      const height = entry.replica.state.height;
+      const frameHash = replicaHead(entry.replica);
+      const genesisAnchor = height === 0 && frameHash === 'genesis'
+        ? createGenesisAnchor(env, entityId, entry)
+        : undefined;
+      const evidence = endpointEvidence.get(endpointKey(entityId, height, frameHash));
+      if (!genesisAnchor && !evidence) {
+        const existingAnchor = entry.replica.certifiedFrameAnchor;
+        const anchorEndpoint = existingAnchor
+          ? `${existingAnchor.height}@${existingAnchor.frameHash}`
+          : 'none';
+        const lineageEndpoints = (entry.replica.certifiedFrameLineage ?? [])
+          .map((link) => `${link.frame.height}@${link.frame.hash}`)
+          .join(',') || 'none';
+        throw new Error(
+          `STORAGE_RUNTIME_CHECKPOINT_ENDPOINT_MISSING:${entityId}:${entry.replica.signerId}:` +
+            `head=${height}@${frameHash}:anchor=${anchorEndpoint}:lineage=${lineageEndpoints}`,
+        );
+      }
+      const anchor: CertifiedEntityLineageAnchor = genesisAnchor ?? {
+        entityId,
+        height,
+        frameHash,
+        stateRoot: evidence!.stateRoot,
+        authority: structuredClone(evidence!.authority),
+        ...(evidence!.authorityEvidenceHash
+          ? { authorityEvidenceHash: evidence!.authorityEvidenceHash }
+          : {}),
+      };
+      const stateRoot = computeCanonicalEntityConsensusStateHash(entry.replica.state);
+      const authorityRoot = computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(entry.replica.state));
+      if (
+        stateRoot !== anchor.stateRoot ||
+        authorityRoot !== computeEntityFrameAuthorityRoot(anchor.authority)
+      ) {
+        throw new Error(
+          `STORAGE_RUNTIME_CHECKPOINT_STATE_MISMATCH:${entityId}:${entry.replica.signerId}:` +
+            `head=${height}@${frameHash}:state=${stateRoot}/${anchor.stateRoot}:` +
+            `authority=${authorityRoot}/${computeEntityFrameAuthorityRoot(anchor.authority)}`,
+        );
+      }
+      return { entry, anchor };
+    });
+    const replicaSetRoot = computeRuntimeCheckpointReplicaSetRoot(env.height, pending);
+    for (const { entry, anchor } of pending) {
+      anchorByReplicaKey.set(entry.replicaKey, {
+        ...anchor,
+        runtimeCheckpoint: { runtimeHeight: env.height, replicaSetRoot },
+      });
+      // The anchor already commits the exact current endpoint. Old links are
+      // in the frame DB; the live lineage starts empty and collects only new
+      // Entity frames produced inside the next in-flight R-frame.
+    }
+  }
+  return { lookup, lineageByReplicaKey, anchorByReplicaKey };
 };
 
 export const applyCertifiedEntityLineagePlan = (

@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { computeAccountShadowRoot, computeAccountStateRoot } from '../account/state-root';
+import {
+  computeAccountShadowRoot,
+  computeAccountStateRoot,
+  encodeAccountStateValue,
+  encodeAccountStateValueOracle,
+} from '../account/state-root';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
 import type { AccountMachine } from '../types';
@@ -39,6 +44,27 @@ const account = (): AccountMachine => ({
 } as AccountMachine);
 
 describe('canonical account state root', () => {
+  test('direct canonical RLP encoder stays byte-identical to the recursive oracle', () => {
+    const fixtures: unknown[] = [
+      null,
+      false,
+      true,
+      0,
+      -17,
+      0n,
+      -12345678901234567890n,
+      '',
+      'xln',
+      [1, 'two', 3n, { z: false, a: null }],
+      new Map<unknown, unknown>([[2, 'b'], [1, { nested: 7n }]]),
+      new Set<unknown>(['z', 'a', 5n]),
+      { z: [3, 2, 1], omitted: undefined, a: new Map([['k', 9n]]) },
+    ];
+    for (const fixture of fixtures) {
+      expect(encodeAccountStateValue(fixture)).toEqual(encodeAccountStateValueOracle(fixture));
+    }
+  });
+
   test('is independent of host locale for map keys, object keys, and dispute subcontracts', () => {
     const base = account();
     base.lendingIntents = new Map([

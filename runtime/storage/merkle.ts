@@ -1,6 +1,12 @@
 import { ethers } from 'ethers';
+import { computeIntegrityDigest } from '../infra/integrity-checksum';
 
 export type RadixMerkleRadix = 16 | 256;
+export type RadixMerkleHashAlgorithm = 'integrity' | 'keccak256';
+export type RadixMerkleOptions = {
+  radix?: RadixMerkleRadix;
+  hashAlgorithm?: RadixMerkleHashAlgorithm;
+};
 
 export type RadixMerkleLeaf = {
   key: Uint8Array;
@@ -81,8 +87,13 @@ const LEAF_DOMAIN = domainBytes('xln.storage.merkle.leaf.v1');
 const BRANCH_DOMAIN = domainBytes('xln.storage.merkle.branch.v1');
 const EXTENSION_DOMAIN = domainBytes('xln.storage.merkle.extension.v1');
 
-const hashParts = (domain: Uint8Array, parts: Uint8Array[]): string => {
-  return ethers.keccak256(concatBytes(domain, ...parts));
+const hashParts = (
+  domain: Uint8Array,
+  parts: Uint8Array[],
+  hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
+): string => {
+  const payload = concatBytes(domain, ...parts);
+  return hashAlgorithm === 'keccak256' ? ethers.keccak256(payload) : computeIntegrityDigest(payload);
 };
 
 const hexToBytes = (hex: string): Uint8Array => {
@@ -98,26 +109,36 @@ const pathSlots = (key: Uint8Array, radix: RadixMerkleRadix): number[] => {
 export const radixMerklePathSlots = (key: Uint8Array, radix: RadixMerkleRadix): number[] =>
   pathSlots(key, radix);
 
-const leafHash = (leaf: RadixMerkleLeaf): string =>
-  hashParts(LEAF_DOMAIN, [leaf.key, leaf.value]);
+const leafHash = (
+  leaf: RadixMerkleLeaf,
+  hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
+): string => hashParts(LEAF_DOMAIN, [leaf.key, leaf.value], hashAlgorithm);
 
-export const computeRadixMerkleLeafHash = (key: Uint8Array, value: Uint8Array): string =>
-  leafHash({ key, value });
+export const computeRadixMerkleLeafHash = (
+  key: Uint8Array,
+  value: Uint8Array,
+  hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
+): string => leafHash({ key, value }, hashAlgorithm);
 
-const branchHash = (radix: RadixMerkleRadix, children: Array<[number, string]>): string => {
+const branchHash = (
+  radix: RadixMerkleRadix,
+  children: Array<[number, string]>,
+  hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
+): string => {
   if (children.length === 0) return EMPTY_RADIX_MERKLE_ROOT;
   const parts: Uint8Array[] = [Uint8Array.of(radix === 256 ? 0xff : 0x10)];
   for (const [slot, hash] of children.sort((left, right) => left[0] - right[0])) {
     parts.push(Uint8Array.of(slot));
     parts.push(hexToBytes(hash));
   }
-  return hashParts(BRANCH_DOMAIN, parts);
+  return hashParts(BRANCH_DOMAIN, parts, hashAlgorithm);
 };
 
 export const computeRadixMerkleBranchHash = (
   radix: RadixMerkleRadix,
   children: Array<[number, string]>,
-): string => branchHash(radix, children);
+  hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
+): string => branchHash(radix, children, hashAlgorithm);
 
 const encodePathSegment = (radix: RadixMerkleRadix, path: number[]): Uint8Array => {
   const header = uint16Bytes(path.length);
@@ -137,12 +158,17 @@ const encodePathSegment = (radix: RadixMerkleRadix, path: number[]): Uint8Array 
 export const packRadixMerklePath = (radix: RadixMerkleRadix, path: number[]): Uint8Array =>
   encodePathSegment(radix, path);
 
-const extensionHash = (radix: RadixMerkleRadix, path: number[], childHash: string): string =>
+const extensionHash = (
+  radix: RadixMerkleRadix,
+  path: number[],
+  childHash: string,
+  hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
+): string =>
   hashParts(EXTENSION_DOMAIN, [
     Uint8Array.of(radix === 256 ? 0xff : 0x10),
     encodePathSegment(radix, path),
     hexToBytes(childHash),
-  ]);
+  ], hashAlgorithm);
 
 export const computeRadixMerkleEdgeHash = (
   radix: RadixMerkleRadix,
@@ -150,10 +176,13 @@ export const computeRadixMerkleEdgeHash = (
   childKind: 'branch' | 'leaf',
   childPath: number[],
   childNodeHash: string,
+  hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
 ): string => {
   if (childKind === 'leaf') return childNodeHash;
   const segment = childPath.slice(parentPath.length + 1);
-  return segment.length > 0 ? extensionHash(radix, segment, childNodeHash) : childNodeHash;
+  return segment.length > 0
+    ? extensionHash(radix, segment, childNodeHash, hashAlgorithm)
+    : childNodeHash;
 };
 
 export const computeRadixMerkleRootHash = (
@@ -161,10 +190,13 @@ export const computeRadixMerkleRootHash = (
   rootKind: RadixMerkleRootKind,
   rootPath: number[],
   rootNodeHash: string,
+  hashAlgorithm: RadixMerkleHashAlgorithm = 'integrity',
 ): string => {
   if (rootKind === 'empty') return EMPTY_RADIX_MERKLE_ROOT;
   if (rootKind === 'leaf') return rootNodeHash;
-  return rootPath.length > 0 ? extensionHash(radix, rootPath, rootNodeHash) : rootNodeHash;
+  return rootPath.length > 0
+    ? extensionHash(radix, rootPath, rootNodeHash, hashAlgorithm)
+    : rootNodeHash;
 };
 
 type MerkleItem = {
@@ -213,7 +245,7 @@ const commonPrefixLength = (items: MerkleItem[], offset: number, depth: number):
 
 export const buildRadixMerkle = (
   leaves: RadixMerkleLeaf[],
-  options?: { radix?: RadixMerkleRadix },
+  options?: RadixMerkleOptions,
 ): RadixMerkleResult => {
   const built = buildRadixMerkleMaterialized(leaves, options);
   return {
@@ -229,9 +261,10 @@ export const buildRadixMerkle = (
 
 export const buildRadixMerkleMaterialized = (
   leaves: RadixMerkleLeaf[],
-  options?: { radix?: RadixMerkleRadix },
+  options?: RadixMerkleOptions,
 ): RadixMerkleMaterializedResult => {
   const radix = options?.radix === 256 ? 256 : 16;
+  const hashAlgorithm = options?.hashAlgorithm ?? 'integrity';
   if (leaves.length === 0) {
     return {
       radix,
@@ -256,7 +289,7 @@ export const buildRadixMerkleMaterialized = (
       key: leaf.key,
       value: leaf.value,
       path: pathSlots(leaf.key, radix),
-      hash: leafHash(leaf),
+      hash: leafHash(leaf, hashAlgorithm),
     });
   }
 
@@ -278,7 +311,12 @@ export const buildRadixMerkleMaterialized = (
     if (shared > 0) {
       const child = buildSummaryNode(offset + shared, group);
       return {
-        hash: extensionHash(radix, group[0]?.path.slice(offset, offset + shared) ?? [], child.hash),
+        hash: extensionHash(
+          radix,
+          group[0]?.path.slice(offset, offset + shared) ?? [],
+          child.hash,
+          hashAlgorithm,
+        ),
         branchCount: child.branchCount,
         extensionCount: child.extensionCount + 1,
         maxDepth: child.maxDepth,
@@ -298,6 +336,7 @@ export const buildRadixMerkleMaterialized = (
       hash: branchHash(
         radix,
         children.map(([slot, child]) => [slot, child.hash]),
+        hashAlgorithm,
       ),
       branchCount: children.reduce((sum, [, child]) => sum + child.branchCount, 1),
       extensionCount: children.reduce((sum, [, child]) => sum + child.extensionCount, 0),
@@ -312,7 +351,7 @@ export const buildRadixMerkleMaterialized = (
   const edgeHash = (parentPath: number[], child: MerkleMaterializedNode): string => {
     if (child.kind === 'leaf') return child.hash;
     const segment = child.path.slice(parentPath.length + 1);
-    return segment.length > 0 ? extensionHash(radix, segment, child.hash) : child.hash;
+    return segment.length > 0 ? extensionHash(radix, segment, child.hash, hashAlgorithm) : child.hash;
   };
 
   const buildNode = (offset: number, group: MerkleItem[]): MerkleMaterializedNode => {
@@ -351,7 +390,11 @@ export const buildRadixMerkleMaterialized = (
     const branch: MerkleMaterializedNode = {
       kind: 'branch',
       path: branchPath,
-      hash: branchHash(radix, children.map((child) => [child.slot, edgeHash(branchPath, child.node)])),
+      hash: branchHash(
+        radix,
+        children.map((child) => [child.slot, edgeHash(branchPath, child.node)]),
+        hashAlgorithm,
+      ),
       children,
     };
     materializedBranches.push({
@@ -369,7 +412,13 @@ export const buildRadixMerkleMaterialized = (
 
   const summaryRoot = buildSummaryNode(0, items);
   const materializedRoot = buildNode(0, items);
-  const rootHash = computeRadixMerkleRootHash(radix, materializedRoot.kind, materializedRoot.path, nodeHash(materializedRoot));
+  const rootHash = computeRadixMerkleRootHash(
+    radix,
+    materializedRoot.kind,
+    materializedRoot.path,
+    nodeHash(materializedRoot),
+    hashAlgorithm,
+  );
 
   return {
     radix,
@@ -388,7 +437,7 @@ export const buildRadixMerkleMaterialized = (
 
 export const buildHexKeyedMerkle = (
   leaves: Array<{ hexKey: string; value: Uint8Array }>,
-  options?: { radix?: RadixMerkleRadix },
+  options?: RadixMerkleOptions,
 ): RadixMerkleResult => {
   return buildRadixMerkle(
     leaves.map((leaf) => ({
@@ -401,7 +450,7 @@ export const buildHexKeyedMerkle = (
 
 export const buildHexKeyedMerkleMaterialized = (
   leaves: Array<{ hexKey: string; value: Uint8Array }>,
-  options?: { radix?: RadixMerkleRadix },
+  options?: RadixMerkleOptions,
 ): RadixMerkleMaterializedResult => {
   return buildRadixMerkleMaterialized(
     leaves.map((leaf) => ({

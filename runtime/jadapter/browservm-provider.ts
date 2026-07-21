@@ -1624,6 +1624,15 @@ export class BrowserVMProvider {
     return this.blockTimestamp;
   }
 
+  /** Mine a real empty jurisdiction block without fabricating a transaction. */
+  async mineEmptyBlock(timestampMs = this.blockTimestamp + 1_000): Promise<number> {
+    return await this.runExclusiveVmOperation(async () => {
+      if (this.activeBlock) throw new Error('BROWSERVM_EMPTY_BLOCK_DURING_ACTIVE_BLOCK');
+      this.createBlock(timestampMs);
+      return this.blockHeight;
+    });
+  }
+
   /** Get chainId for batch hanko hashing */
   getChainId(): bigint {
     if (!this.common) return BigInt(this.configuredChainId);
@@ -1674,6 +1683,33 @@ export class BrowserVMProvider {
       result.execResult.returnValue,
     );
     return BigInt(decoded[0]);
+  }
+
+  hasProcessedBatch(entityId: string, batchHash: string, entityNonce: bigint): boolean {
+    if (!this.depositoryAddress || !this.depositoryInterface) {
+      throw new Error('Depository not deployed');
+    }
+    const event = this.depositoryInterface.getEvent('HankoBatchProcessed');
+    if (!event) throw new Error('BROWSERVM_HANKO_BATCH_EVENT_ABI_MISSING');
+    const logs = this.getLogs({
+      address: this.depositoryAddress.toString(),
+      topics: [
+        event.topicHash,
+        ethers.zeroPadValue(normalizeEntityId(entityId), 32),
+        ethers.zeroPadValue(batchHash, 32),
+      ],
+    }).filter((log) => {
+      const parsed = this.depositoryInterface!.parseLog({ topics: log.topics, data: log.data });
+      return parsed?.name === 'HankoBatchProcessed' &&
+        BigInt(parsed.args['nonce']) === entityNonce &&
+        parsed.args['success'] === true;
+    });
+    if (logs.length > 1) {
+      throw new Error(
+        `BROWSERVM_HANKO_BATCH_RECEIPT_DUPLICATE:${entityId}:${batchHash}:${entityNonce.toString()}`,
+      );
+    }
+    return logs.length === 1;
   }
 
   getEntityProviderActionReceipt(

@@ -8,6 +8,7 @@ import {
 import type { JEventClaimTx, JEventMempoolOp } from './j-events-types';
 import { clearFinalizedSettlementWorkspace } from '../../account/tx/handlers/settle-transition';
 import { buildAccountProofBody } from '../../protocol/dispute/proof-builder';
+import { invalidateAccountMapCommitment } from '../../account/map-commitment';
 
 const isJEventClaimOp = (op: JEventMempoolOp): op is { accountId: string; tx: JEventClaimTx } =>
   op.tx.type === 'j_event_claim';
@@ -69,6 +70,7 @@ const applyAccountSettledEvent = (account: AccountMachine, event: JurisdictionEv
     }
     account.shadow.rebalance.submittedAtByToken.delete(tokenIdNum);
   }
+  invalidateAccountMapCommitment(account, 'deltas', tokenIdNum);
 };
 
 const activatePostSettlementProof = (

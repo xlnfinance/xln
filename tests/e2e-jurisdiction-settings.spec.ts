@@ -209,7 +209,15 @@ test('settings can add BrowserVM jurisdiction and keep Graph3D visual path alive
   await page.goto(`${APP_BASE_URL}/embed`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.graph3d-wrapper')).toBeVisible({ timeout: INIT_TIMEOUT });
   await expect(page.locator('.graph3d-panel canvas')).toHaveCount(1, { timeout: INIT_TIMEOUT });
-  await page.waitForTimeout(1_000);
+  await expect.poll(async () => await page.evaluate(() => {
+    const env = (window as typeof window & {
+      __xln?: { env?: { jReplicas?: Map<string, unknown> } | null };
+    }).__xln?.env;
+    return env?.jReplicas?.has?.('local-sim-visual') === true;
+  }), {
+    timeout: INIT_TIMEOUT,
+    intervals: [50, 100, 250, 500],
+  }).toBe(true);
   const restoredJMachineShape = await page.evaluate(() => {
     type JMachineShape = { blockNumber?: unknown; mempool?: unknown };
     type RuntimeShape = {

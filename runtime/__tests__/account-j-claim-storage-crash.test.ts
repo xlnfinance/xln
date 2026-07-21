@@ -17,6 +17,7 @@ import {
 } from '../account/j-claim-accumulator';
 import { getAccountJClaimNodeStore } from '../account/j-claim-store';
 import { generateLazyEntityId } from '../entity/factory';
+import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
 import { dbRootPath } from '../machine/platform';
 import { decodeBuffer, encodeBuffer } from '../storage/codec';
 import { keyAccountJClaimNode, keyDiff } from '../storage/keys';
@@ -91,11 +92,24 @@ describe('Account J-claim real storage crash recovery', () => {
           throw new Error('ACCOUNT_J_CRASH_RESTORED_LEAF_MISSING');
         }
         const record: AccountJClaimRecord = restoredNode.record;
+        const expectedEventsHash = canonicalJurisdictionEventsHash([{
+          type: 'AccountSettled',
+          data: {
+            leftEntity: account.leftEntity,
+            rightEntity: account.rightEntity,
+            tokenId: 1,
+            leftReserve: '0',
+            rightReserve: '0',
+            collateral: '0',
+            ondelta: '0',
+            nonce: 1,
+          },
+        }]);
         expect(record).toMatchObject({
           side,
           jHeight: 7,
           jBlockHash: `0x${'41'.repeat(32)}`,
-          eventsHash: `0x${'42'.repeat(32)}`,
+          eventsHash: expectedEventsHash,
         });
         const proof = createAccountJClaimProof(getAccountJClaimNodeStore(restored), state.root, record);
         expect(verifyAccountJClaimProof(state.root, record, proof)).toEqual({ status: 'member', record });

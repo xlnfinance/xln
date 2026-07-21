@@ -44,6 +44,10 @@ describe('hub baseline progress', () => {
       height: 1,
       mesh: { pairs: [{ counterpartyId: 'h2' }] },
     })).toThrow('BOOTSTRAP_HEALTH_PAYLOAD_INVALID:path=mesh.pairs[0].currentHeight:expected=nonnegative-safe-integer');
+    expect(() => validateHubHealthPayload({
+      height: 1,
+      runtime: { halted: 'yes' },
+    })).toThrow('BOOTSTRAP_HEALTH_PAYLOAD_INVALID:path=health.runtime.halted:expected=boolean');
   });
 
   test('counts runtime frames while startup catch-up is still forming', () => {

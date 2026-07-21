@@ -89,6 +89,11 @@ type DisputeAccountReader = {
     entityId: string,
     counterpartyId: string,
   ) => Promise<{ disputeHash: string; disputeTimeout: bigint }>;
+  hasProcessedBatch?: (
+    entityId: string,
+    batchHash: string,
+    entityNonce: bigint,
+  ) => Promise<boolean>;
 };
 
 const ZERO_BYTES32 = `0x${'0'.repeat(64)}`;
@@ -146,17 +151,56 @@ const reconcileFinalizedDispute = async (
   return true;
 };
 
+const reconcileExactProcessedBatch = async (
+  env: Env,
+  jAdapter: DisputeAccountReader,
+  jTx: JTx,
+  deps: RuntimeJSubmitDeps,
+): Promise<boolean> => {
+  if (
+    jTx.type !== 'batch' ||
+    typeof jAdapter.hasProcessedBatch !== 'function' ||
+    typeof jTx.data.entityNonce !== 'number' ||
+    !jTx.data.batchHash
+  ) return false;
+  const matched = await jAdapter.hasProcessedBatch(
+    jTx.entityId,
+    jTx.data.batchHash,
+    BigInt(jTx.data.entityNonce),
+  );
+  if (!matched) return false;
+  const signerId = normalizedEntityId(jTx.data.signerId);
+  if (!signerId) throw new Error(`J_SUBMIT_FATAL: PROCESSED_BATCH_SIGNER_MISSING:${jTx.entityId}`);
+  deps.enqueueRuntimeInputs(env, [{
+    entityId: jTx.entityId,
+    signerId,
+    entityTxs: [{
+      type: 'j_abort_sent_batch',
+      data: { reason: 'exact-onchain-batch-receipt', requeueToCurrent: false },
+    }],
+  }], undefined, undefined, env.timestamp);
+  jSubmitLog.warn('sealed_batch.exact_receipt_reconciled', {
+    entityId: shortId(jTx.entityId),
+    batchHash: jTx.data.batchHash,
+    entityNonce: jTx.data.entityNonce,
+  });
+  return true;
+};
+
 const reconcilePermanentSubmitFailure = async (
   env: Env,
   jAdapter: DisputeAccountReader,
   jTx: JTx,
   deps: RuntimeJSubmitDeps,
-): Promise<boolean> => reconcileFinalizedDispute(
-  env,
-  jAdapter,
-  jTx,
-  deps,
-  'counterparty-finalized-after-submit-failure',
+): Promise<boolean> => (
+  await reconcileExactProcessedBatch(env, jAdapter, jTx, deps) ||
+  await reconcileFinalizedDispute(
+    env,
+    jAdapter,
+    jTx,
+    deps,
+    'counterparty-finalized-after-submit-failure',
+  )
 );
 
 const validateSealedBatchJTx = (jTx: JTx): void => {
@@ -185,46 +229,6 @@ const validateDurableEntityProviderAction = (jurisdictionName: string, jTx: JTx)
 
 export const isTransientJSubmitFailure = (error: unknown): boolean => {
   return classifyJAdapterFailure(error).category === 'transient';
-};
-
-const skipAlreadyConsumedSealedBatch = async (
-  env: Env,
-  jAdapter: { getEntityNonce?: (entityId: string) => Promise<bigint> },
-  jTx: JTx,
-  deps: RuntimeJSubmitDeps,
-): Promise<boolean> => {
-  if (jTx.type !== 'batch') return false;
-  if (typeof jTx.data?.entityNonce !== 'number') return false;
-  if (typeof jAdapter.getEntityNonce !== 'function') return false;
-  let chainNonce: bigint;
-  try {
-    chainNonce = await jAdapter.getEntityNonce(jTx.entityId);
-  } catch (error) {
-    jSubmitLog.warn('nonce_preflight.unavailable', {
-      entityId: shortId(jTx.entityId),
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return false;
-  }
-  const submittedNonce = BigInt(jTx.data.entityNonce);
-  if (chainNonce < submittedNonce) return false;
-  const signerId = normalizedEntityId(jTx.data.signerId);
-  if (!signerId) throw new Error(`J_SUBMIT_FATAL: STALE_NONCE_SIGNER_MISSING:${jTx.entityId}`);
-  deps.enqueueRuntimeInputs(env, [{
-    entityId: jTx.entityId,
-    signerId,
-    entityTxs: [{
-      type: 'j_abort_sent_batch',
-      data: { reason: `chain-nonce-consumed:${chainNonce.toString()}`, requeueToCurrent: false },
-    }],
-  }], undefined, undefined, env.timestamp);
-  jSubmitLog.warn('sealed_batch.stale_skipped', {
-    entityId: shortId(jTx.entityId),
-    submittedNonce: submittedNonce.toString(),
-    chainNonce: chainNonce.toString(),
-    reconciliationQueued: true,
-  });
-  return true;
 };
 
 const queueBatchResult = (
@@ -451,10 +455,6 @@ export async function submitRuntimeJOutbox(
             message: 'entity_provider_action_non_local_submitter',
           });
         }
-        continue;
-      }
-      if (await skipAlreadyConsumedSealedBatch(env, jAdapter, jTx, deps)) {
-        if (jTx.type === 'batch') queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'reconciled');
         continue;
       }
       if (await reconcileFinalizedDispute(

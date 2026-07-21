@@ -25,6 +25,20 @@ export class BrowserVMEthersProvider extends ethers.AbstractProvider {
     return this._network;
   }
 
+  async send(method: string, params: unknown[]): Promise<unknown> {
+    if (method !== 'evm_mine') {
+      throw new Error(`BROWSERVM_RPC_METHOD_UNSUPPORTED:${method}`);
+    }
+    if (params.length !== 0) {
+      throw new Error(`BROWSERVM_EVM_MINE_PARAMS_UNSUPPORTED:${params.length}`);
+    }
+    if (typeof this.browserVM.mineEmptyBlock !== 'function') {
+      throw new Error('BROWSERVM_EMPTY_BLOCK_MINING_UNAVAILABLE');
+    }
+    await this.browserVM.mineEmptyBlock();
+    return '0x0';
+  }
+
   private async runReadOnlyCall(
     request: Parameters<BrowserVmEthersProviderTarget['vm']['evm']['runCall']>[0],
   ): ReturnType<BrowserVmEthersProviderTarget['vm']['evm']['runCall']> {
@@ -159,8 +173,28 @@ export class BrowserVMEthersProvider extends ethers.AbstractProvider {
         // BrowserVM doesn't store full tx data
         return asResponse(null);
 
-      case 'estimateGas':
-        return asResponse(1000000n);
+      case 'estimateGas': {
+        if (!req.transaction.to) {
+          throw new Error('BROWSERVM_ESTIMATE_GAS_CONTRACT_CREATION_UNSUPPORTED');
+        }
+        const data = ethers.getBytes(req.transaction.data || '0x');
+        const result = await this.runReadOnlyCall({
+          to: createAddressFromString(ethers.getAddress(req.transaction.to)),
+          caller: req.transaction.from
+            ? createAddressFromString(ethers.getAddress(req.transaction.from))
+            : this.browserVM.deployerAddress,
+          data,
+          gasLimit: 30_000_000n,
+          value: req.transaction.value ?? 0n,
+        });
+        if (result.execResult.exceptionError) {
+          throw new Error(`BROWSERVM_ESTIMATE_GAS_FAILED:${String(result.execResult.exceptionError)}`);
+        }
+        const zeroBytes = data.reduce((count, byte) => count + (byte === 0 ? 1 : 0), 0);
+        const intrinsicGas = 21_000n + BigInt(zeroBytes * 4 + (data.length - zeroBytes) * 16);
+        const measured = result.execResult.executionGasUsed + intrinsicGas;
+        return asResponse((measured * 120n) / 100n + 10_000n);
+      }
 
       case 'getBlock': {
         // Return minimal block info

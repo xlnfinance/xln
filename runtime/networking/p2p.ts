@@ -23,6 +23,7 @@ import {
   type GossipProfileBatchRequest,
 } from '../relay/profile-batch';
 import { createStructuredLogger, shortId } from '../infra/logger';
+import { isRuntimePerfProfileEnabled } from '../infra/perf-runtime-flags';
 import {
   isBrowserDirectWsEndpointAllowed,
   isSameWsUrlList,
@@ -380,10 +381,7 @@ export class RuntimeP2P {
           this.syncDirectPeerConnections();
         },
         onEntityInputs: async (from, envelope, timestamp) => {
-          if (this.closing || this.closed) return;
-          await Promise.all(envelope.entityInputs.map(input => this.ensureProfilesForInput(input)));
-          if (this.closing || this.closed) return;
-          this.onEntityInputs(from, envelope, timestamp);
+          await this.acceptInboundEntityInputs('relay', from, envelope, timestamp);
         },
         onReliableReceipt: (from, receipt) => {
           if (!this.closing && !this.closed) this.onReliableReceipt(from, receipt);
@@ -861,6 +859,31 @@ export class RuntimeP2P {
     return resolved;
   }
 
+  private async acceptInboundEntityInputs(
+    transport: 'relay' | 'direct',
+    from: string,
+    envelope: RuntimeEntityInputsEnvelope,
+    timestamp: number | undefined,
+  ): Promise<void> {
+    if (this.closing || this.closed) return;
+    const profileStartedAt = Date.now();
+    const profileResults = await Promise.all(
+      envelope.entityInputs.map(input => this.ensureProfilesForInput(input)),
+    );
+    if (this.closing || this.closed) return;
+    if (isRuntimePerfProfileEnabled('XLN_P2P_INGRESS_PROFILE')) {
+      p2pLog.info('ingress.entity_inputs', {
+        transport,
+        sourceRuntimeId: from,
+        sourceRuntimeHeight: envelope.sourceRuntimeHeight,
+        inputCount: envelope.entityInputs.length,
+        profileResolved: profileResults.every(Boolean),
+        profileWaitMs: Date.now() - profileStartedAt,
+      });
+    }
+    this.onEntityInputs(from, envelope, timestamp);
+  }
+
   private prefetchProfilesForInput(input: RoutedEntityInput): void {
     const missingEntities = this.collectProfileEntityIdsForInput(input)
       .filter(entityId => !this.hasProfileForEntity(entityId));
@@ -1054,18 +1077,24 @@ export class RuntimeP2P {
     }, PROFILE_ANNOUNCE_DEBOUNCE_MS);
   }
 
-  async announceProfilesForEntitiesNow(entityIds: string[], reason: string = 'runtime-change'): Promise<void> {
+  async announceProfilesForEntitiesNow(
+    entityIds: string[],
+    reason: string = 'runtime-change',
+    includePending = true,
+  ): Promise<void> {
     if (this.closing || this.closed) return;
     if (!entityIds || entityIds.length === 0) return;
     const targets = new Set<string>();
-    for (const pending of this.pendingAnnounceEntities) {
-      if (pending) targets.add(normalizeId(pending));
+    if (includePending) {
+      for (const pending of this.pendingAnnounceEntities) {
+        if (pending) targets.add(normalizeId(pending));
+      }
     }
     for (const entityId of entityIds) {
       if (entityId) targets.add(normalizeId(entityId));
     }
-    this.pendingAnnounceEntities.clear();
-    if (this.announceTimer) {
+    if (includePending) this.pendingAnnounceEntities.clear();
+    if (includePending && this.announceTimer) {
       clearTimeout(this.announceTimer);
       this.announceTimer = null;
     }
@@ -1544,10 +1573,7 @@ export class RuntimeP2P {
         this.directClientErrors.delete(normalizedTargetRuntimeId);
       },
       onEntityInputs: async (from, envelope, timestamp) => {
-        if (this.closing || this.closed) return;
-        await Promise.all(envelope.entityInputs.map(input => this.ensureProfilesForInput(input)));
-        if (this.closing || this.closed) return;
-        this.onEntityInputs(from, envelope, timestamp);
+        await this.acceptInboundEntityInputs('direct', from, envelope, timestamp);
       },
       onReliableReceipt: (from, receipt) => {
         if (!this.closing && !this.closed) this.onReliableReceipt(from, receipt);

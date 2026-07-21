@@ -28,12 +28,18 @@ import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '..
 import { MEMPOOL_LIMIT } from './constants';
 import type { AccountConsensusHashToSign, AccountSwapOfferCreated, ProposeAccountFrameResult } from './types';
 import { getReplicaByEntityId } from '../../entity/replica';
-import { computeAccountStateRoot, computeAccountStateSectionHashes } from '../state-root';
+import {
+  computeAccountStateRoot,
+  computeAccountStateSectionHashes,
+  type AccountStateRootTiming,
+} from '../state-root';
+import { stageAccountCommitmentCache } from '../map-commitment';
 import { createAccountJClaimSession } from '../j-claim-session';
 import { prepareAccountJClaimTx } from '../j-claim-transition';
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
 import { getNextSettlementNonce } from '../../protocol/settlement/operations';
 import { cumulativeMarksToPhases } from '../../infra/perf-profile';
+import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../infra/perf-runtime-flags';
 
 const accountLog = createStructuredLogger('account');
 const ACCOUNT_PROPOSAL_PROFILE =
@@ -42,6 +48,10 @@ const ACCOUNT_PROPOSAL_SLOW_MS = Math.max(
   0,
   Number(typeof process !== 'undefined' ? process.env?.['XLN_ACCOUNT_PROPOSAL_SLOW_MS'] || '250' : '250'),
 );
+const accountProposalProfileEnabled = (): boolean =>
+  ACCOUNT_PROPOSAL_PROFILE || isRuntimePerfProfileEnabled('XLN_ACCOUNT_PROPOSAL_PROFILE');
+const accountProposalSlowMs = (): number =>
+  readRuntimePerfSlowMs('XLN_ACCOUNT_PROPOSAL_SLOW_MS', ACCOUNT_PROPOSAL_SLOW_MS);
 
 const shouldUseOptimisticProposalBatch = (txs: readonly AccountTx[]): boolean =>
   txs.length > 1 &&
@@ -418,8 +428,9 @@ export async function proposeAccountFrame(
 
   const accountTxsCopy = structuredClone([...validTxs]);
   let accountStateRoot: string;
+  const stateRootTiming: AccountStateRootTiming = {};
   try {
-    accountStateRoot = computeAccountStateRoot(clonedMachine);
+    accountStateRoot = computeAccountStateRoot(clonedMachine, stateRootTiming);
   } catch (error) {
     return {
       success: false,
@@ -444,13 +455,15 @@ export async function proposeAccountFrame(
   frameData.stateHash = await createFrameHash(frameData as AccountFrame);
   checkpointProfile('frameHash');
 
-  accountLog.debug('proposal.frame_built', {
-    height: frameData.height,
-    stateHash: frameData.stateHash,
-    accountStateRoot: frameData.accountStateRoot,
-    accountStateSectionHashes: computeAccountStateSectionHashes(clonedMachine),
-    txs: frameData.accountTxs.map(tx => tx.type),
-  });
+  if (HEAVY_LOGS) {
+    accountLog.debug('proposal.frame_built', {
+      height: frameData.height,
+      stateHash: frameData.stateHash,
+      accountStateRoot: frameData.accountStateRoot,
+      accountStateSectionHashes: computeAccountStateSectionHashes(clonedMachine),
+      txs: frameData.accountTxs.map(tx => tx.type),
+    });
+  }
 
   let newFrame: AccountFrame;
   try {
@@ -582,6 +595,7 @@ export async function proposeAccountFrame(
   // Settlements are handled via SettlementWorkspace flow (entity/tx/handlers/settle.ts).
 
   // Set pending state (no longer storing clone - re-execution on commit)
+  stageAccountCommitmentCache(accountMachine, clonedMachine);
   accountMachine.pendingFrame = newFrame;
   markStorageAccountDirty(env, accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
 
@@ -667,7 +681,7 @@ export async function proposeAccountFrame(
   };
   if (failedHtlcLocks.length > 0) finalResult.failedHtlcLocks = failedHtlcLocks;
   const profileTotalMs = Math.round(getPerfMs() - profileStartMs);
-  if (ACCOUNT_PROPOSAL_PROFILE || profileTotalMs >= ACCOUNT_PROPOSAL_SLOW_MS) {
+  if (accountProposalProfileEnabled() || profileTotalMs >= accountProposalSlowMs()) {
     const profile = {
       entity: shortId(signingEntityId, 8),
       counterparty: shortId(counterparty, 8),
@@ -677,6 +691,7 @@ export async function proposeAccountFrame(
       optimisticBatch: canOptimisticallyValidateBatch && !optimisticBatchFailed,
       totalMs: profileTotalMs,
       phases: cumulativeMarksToPhases(profileCheckpoints, profileTotalMs),
+      stateRoot: stateRootTiming,
     };
     // Explicit profiling must remain visible under the production child
     // default XLN_LOG_LEVEL=warn. Debug-only output made the opt-in flag appear

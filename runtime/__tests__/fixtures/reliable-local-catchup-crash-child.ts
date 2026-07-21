@@ -98,6 +98,11 @@ const durableHeights = durableFrame?.runtimeInput.entityInputs
 if (durableHeights?.length !== 1 || durableHeights[0] !== 1) {
   throw new Error(`CATCHUP_CRASH_FRAME_BARRIER:${String(durableHeights)}`);
 }
+const durablePendingHeights = durableFrame?.pendingRuntimeInput?.entityInputs
+  .map(input => input.proposedFrame?.height ?? null);
+if (durablePendingHeights?.length !== 1 || durablePendingHeights[0] !== 2) {
+  throw new Error(`CATCHUP_CRASH_PENDING_INPUT_FENCE:${String(durablePendingHeights)}`);
+}
 if (env.pendingNetworkOutputs?.length !== 1 || env.pendingNetworkOutputs[0]?.proposedFrame?.height !== 2) {
   throw new Error('CATCHUP_CRASH_H2_OUTBOX_NOT_DURABLE');
 }

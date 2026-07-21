@@ -52,12 +52,17 @@ async function mineUntilHeight(jadapter: JAdapter, targetHeight: number): Promis
   if (typeof mineableProvider.send !== 'function') {
     throw new Error('dispute-lifecycle requires RPC provider with evm_mine support');
   }
-  let current = Number(await jadapter.provider.getBlockNumber());
+  const readHeight = async (): Promise<number> => Number(
+    jadapter.getCurrentBlockNumber
+      ? await jadapter.getCurrentBlockNumber()
+      : await jadapter.provider.getBlockNumber(),
+  );
+  let current = await readHeight();
   let guard = 0;
   const maxMines = Math.max(2000, targetHeight - current + 32);
   while (current < targetHeight) {
     await mineableProvider.send('evm_mine', []);
-    current = Number(await jadapter.provider.getBlockNumber());
+    current = await readHeight();
     guard += 1;
     if (guard > maxMines) {
       throw new Error(`mineUntilHeight guard tripped: current=${current}, target=${targetHeight}`);
@@ -96,6 +101,9 @@ export async function runDisputeLifecycle(_existingEnv?: Env): Promise<Env> {
     name: 'dispute-lifecycle',
     signerIds: ['2', '3'],
     seed: 'dispute-lifecycle-deterministic',
+    ...(_existingEnv?.scenarioJAdapterMode
+      ? { mode: _existingEnv.scenarioJAdapterMode }
+      : {}),
     ...(_existingEnv?.runtimeConfig?.storage?.enabled !== undefined
       ? { storageEnabled: _existingEnv.runtimeConfig.storage.enabled }
       : {}),
