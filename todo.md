@@ -5,11 +5,11 @@ This is the **only live TODO/NEXT file**. Git history contains the retired
 
 ## Candidate
 
-- Target: `v0.1.12` after the mandatory gates pass.
-- Branch: `ai/routed-provenance`.
-- Candidate implementation head: current HEAD of `ai/routed-provenance`; freeze
+- Target: `v0.1.14` after the mandatory gates pass.
+- Branch: `ai/mainnet-blockers`.
+- Candidate implementation head: current HEAD of `ai/mainnet-blockers`; freeze
   the exact SHA when the release gate starts.
-- Base: `edfb178be`; production remains on the published `v0.1.11` until this
+- Base: `00f77f85c`; production remains on the published `v0.1.13` until this
   candidate is fully verified.
 - Frozen Core: unchanged at
   `0x4eccf4492e5d085b24162f86d327e003c36b7e2a90ad527db1653fde391946a7`.
@@ -43,7 +43,7 @@ This is the **only live TODO/NEXT file**. Git history contains the retired
 2. Run the public-network acceptance gate with `bun run gate:mainnet`.
 3. External audit handoff: `docs/security/external-audit-brief.md`.
 4. Merge to `main`, push authoritative source, perform a fresh production
-   redeploy/reset, verify health and browser console, then publish/tag `v0.1.12`.
+   redeploy/reset, verify health and browser console, then publish/tag `v0.1.14`.
 
 Already green: `bun run check`, focused same-chain Chromium, focused cross-j
 one-click Chromium, and strict browser console health. Mascot remains hidden

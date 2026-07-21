@@ -1,7 +1,7 @@
 import { Wallet } from 'ethers';
 import { decodeBinaryPayload, encodeBinaryPayload } from '../runtime/storage/binary-codec';
 import { STORAGE_SCHEMA_VERSION } from '../runtime/storage/keys';
-import { expect, test, type Page } from './global-setup';
+import { allowBrowserIssue, expect, test, type Page } from './global-setup';
 
 type BrowserIssue = {
   type: 'console' | 'pageerror' | 'requestfailed' | 'http';
@@ -104,6 +104,12 @@ test.describe('Storage schema recovery', () => {
     page,
   }, testInfo) => {
     test.setTimeout(5 * 60_000);
+    for (const message of [
+      /frame_db\.open_failed .*STORAGE_SCHEMA_MISMATCH/,
+      /load_env_from_db\.failed .*STORAGE_SCHEMA_MISMATCH/,
+    ]) {
+      allowBrowserIssue({ type: 'console', severity: 'error', message });
+    }
     const issues: BrowserIssue[] = [];
     page.on('console', message => {
       if (message.type() === 'error' || message.type() === 'warning') {

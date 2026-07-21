@@ -114,11 +114,14 @@ test.describe('runtime ingress debug loop guards', () => {
   test.setTimeout(TEST_TIMEOUT_MS);
 
   test('bad entity inputs are quarantined once while the runtime remains live', { tag: '@resilience' }, async ({ page }) => {
-    allowBrowserIssue({
-      type: 'console',
-      severity: 'error',
-      message: /REJECT_ENTITY_INPUT_REPLICA_NOT_FOUND|RUNTIME_REPLICA_NOT_FOUND|RUNTIME_INPUT_QUARANTINED/,
-    });
+    for (const message of [
+      /REJECT_ENTITY_INPUT_UNKNOWN_ENTITY/,
+      /apply_input\.failed .*RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET/,
+      /RUNTIME_INPUT_QUARANTINED .*RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET/,
+      /input\.quarantined .*RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET/,
+    ]) {
+      allowBrowserIssue({ type: 'console', severity: 'error', message });
+    }
     await ensureE2EBaseline(page, {
       apiBaseUrl: API_BASE_URL,
       requireHubMesh: false,

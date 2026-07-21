@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { summarizeQaBrowserIssues, type QaBrowserIssue } from '../qa/report';
 import { assertE2EBrowserHealthGate } from '../scripts/run-e2e-parallel-isolated';
 
 const browserHealth = (overrides: Partial<{
@@ -45,6 +46,22 @@ describe('isolated E2E browser health gate', () => {
       issueCount: 1,
       warningCount: 1,
     }), false)).not.toThrow();
+  });
+
+  test('strict mode accepts narrowly tagged expected negative-path evidence', () => {
+    const issue: QaBrowserIssue = {
+      type: 'console',
+      severity: 'warning',
+      message: '[expected] [ERROR][runtime] input.quarantined RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET',
+      url: 'http://localhost:8080/app',
+      method: null,
+      status: null,
+      testId: 'chromium :: expected negative path',
+      timestamp: 1,
+    };
+    const health = summarizeQaBrowserIssues([issue]);
+    expect(health).toMatchObject(browserHealth());
+    expect(() => assertE2EBrowserHealthGate(health, true)).not.toThrow();
   });
 
   test('release and market-maker scripts opt into strict browser health only', () => {

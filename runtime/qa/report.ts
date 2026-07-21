@@ -794,12 +794,17 @@ const normalizeQaBrowserHealthSummary = (
 };
 
 export const summarizeQaBrowserIssues = (issues: readonly QaBrowserIssue[], since = 0): QaBrowserHealthSummary => {
+  // Expected negative-path evidence stays in the run manifest for audit/debug,
+  // but a test-scoped allowBrowserIssue rule must not poison the strict release
+  // gate. The global Playwright fixture adds this tag only after matching the
+  // issue type, severity, message, and current test id.
+  const unexpectedIssues = issues.filter(issue => !issue.message.startsWith('[expected] '));
   const summary = {
-    issueCount: issues.length,
-    errorCount: issues.filter(issue => issue.severity === 'error').length,
-    warningCount: issues.filter(issue => issue.severity === 'warning').length,
-    networkFailureCount: issues.filter(issue => issue.type === 'requestfailed').length,
-    httpErrorCount: issues.filter(issue => issue.type === 'http').length,
+    issueCount: unexpectedIssues.length,
+    errorCount: unexpectedIssues.filter(issue => issue.severity === 'error').length,
+    warningCount: unexpectedIssues.filter(issue => issue.severity === 'warning').length,
+    networkFailureCount: unexpectedIssues.filter(issue => issue.type === 'requestfailed').length,
+    httpErrorCount: unexpectedIssues.filter(issue => issue.type === 'http').length,
   };
   return {
     ...summary,
