@@ -36,9 +36,10 @@ What is true now:
 - a release soak passed 13 complete `gate:ci + hub10k` iterations before manual
   stop, but the current one-hour mainnet-preflight soak has not completed
   uninterrupted on this line;
-- remaining mainnet risk is concentrated in signing/HSM separation,
-  uninterrupted release-duration soak, external audit, real mainnet ops,
-  PSR/peer recovery, observability, and explicit product boundaries.
+- remaining mainnet risk is concentrated in policy-enforcing threshold
+  signing, uninterrupted release-duration soak, external audit, real mainnet
+  ops, observability, and explicit product boundaries. PSR/peer recovery is an
+  optional third-line recovery aid rather than a launch gate.
 
 ## Precedence
 
@@ -132,8 +133,8 @@ When docs disagree, use this order:
 
 ### P1 - protocol and runtime
 
-4. Implement Peer State Refresh so a wiped client can recover from honest peers
-   even when a tower is unavailable.
+4. Keep Peer State Refresh optional and outside the launch gate; local encrypted
+   backups and independent watchtowers are the required recovery paths.
 5. Add account-level recovery coverage UI and tower receipt/failure visibility.
 6. Classify runtime exceptions as `drop`, `defer`, `debug-assert`, or `fatal`.
 7. Keep consensus/Hanko source-shape scan green and hand its documented
@@ -176,7 +177,8 @@ When docs disagree, use this order:
 
 ### Recovery and Offline Safety
 
-- finish PSR and recovery coverage UX;
+- keep optional PSR work outside the launch gate; recovery coverage UX must
+  prioritize local encrypted backup and independent watchtowers;
 - keep tower backup, restore, and delayed-last-resort tests in the gate set;
 - prove restore and defense on realistic offline cases, not only clean demos.
 

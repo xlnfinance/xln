@@ -27,8 +27,9 @@ and `bun run security:audit-pack` passed on 2026-07-09, and a
 historical release soak completed 13 full gate/benchmark iterations before
 being stopped manually. That is enough for serious public-testnet hardening. It
 is not enough for real funds because the full uninterrupted current
-mainnet-preflight soak, signing/HSM separation, real mainnet ops, Peer State
-Refresh, and independent external audit are still open.
+mainnet-preflight soak, policy-enforcing threshold signing, real mainnet ops,
+and independent external audit are still open. Peer State Refresh is an
+optional third-line recovery aid, not a launch gate.
 
 ## Public Testnet / Demo Scope
 
@@ -80,8 +81,9 @@ Required:
 - delayed-last-resort tower action remains green;
 - tower backup and last-resort disputer roles stay independently configurable
   even when served by one daemon;
-- Peer State Refresh has recovery-candidate plumbing, but the honest-peer
-  endpoint and drill are still required before this is mainnet-complete;
+- recovery order is local encrypted backup, independent watchtower restore,
+  then optional honest-peer refresh; failure of those paths must lead to an
+  explicit on-chain dispute/exit, never silent fresh-wallet creation;
 - persistence repair/recovery tooling is documented and usable;
 - restore drills cover wiped browser, restart, and offline user cases.
 

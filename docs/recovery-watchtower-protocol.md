@@ -8,13 +8,13 @@ Audience: runtime, wallet, hub, relay, and protocol implementers
 
 BrainVault can restore the user's keys on a new computer, but it cannot restore bilateral account state by itself. XLN needs a recovery layer that makes a fresh install converge back to the user's latest safe state with no manual backup ceremony.
 
-The protocol should have three layers:
+The recovery order has three layers:
 
-1. **Peer State Refresh (PSR)**: the wallet periodically asks every known counterparty or hub for the latest signed account state. Honest hubs answer for free because it improves trust and Hub Matrix reputation.
-2. **Recovery Relay**: a public, non-custodial evidence relay stores signed account-open anchors, state receipts, and complaints when a counterparty gives a stale/fake response or refuses to answer.
-3. **Watchtower Vault**: a cheap or free service stores the last `K` compact encrypted recovery bundles per account, keyed by deterministic blinded slots. Advanced towers also monitor J-layer disputes and publish the user's latest valid proof when the user is offline.
+1. **Local encrypted backup**: restore the latest user-controlled Runtime bundle before contacting any service.
+2. **Watchtower Vault**: independent services store the last `K` compact encrypted recovery bundles per account, keyed by deterministic blinded slots. Advanced towers also monitor J-layer disputes and publish the user's latest valid proof when the user is offline.
+3. **Optional peer assistance**: Peer State Refresh (PSR) or a recovery relay may supply independently verifiable signed evidence when local and tower copies are unavailable. Launch safety must not depend on a hub answering.
 
-The user flow must be: install wallet, enter the same BrainVault inputs, derive the same runtime identity, discover accounts, fetch peer/tower bundles, verify signatures locally, restore account machines, resume.
+The user flow must be: install wallet, enter the same BrainVault inputs, derive the same runtime identity, try local backup then independent towers, verify every bundle locally, and restore account machines. Peer assistance is optional; if recovery evidence remains unavailable, the wallet offers an explicit on-chain dispute/exit rather than silently creating fresh state.
 
 ## Lightning Lessons
 
@@ -55,7 +55,7 @@ Implemented in the current repo:
 
 Still missing or incomplete:
 
-- first-class Peer State Refresh (PSR) wire flow;
+- optional Peer State Refresh (PSR) wire flow (not a launch gate);
 - recovery relay account discovery and complaint/reputation flow;
 - account-level recovery coverage UI;
 - production monitoring/alerts for tower upload freshness and action receipts;
@@ -127,7 +127,7 @@ blinded lookup: H("xln/recovery/discovery/v1" || recoveryPubkey || entityId)
 
 For consumer UX, hubs should publish anchors automatically. Privacy-sensitive users can use blinded discovery plus local contact lists.
 
-### Layer 2: Peer State Refresh
+### Optional Layer 3: Peer State Refresh
 
 Peer State Refresh is the simple mechanism from the prompt: periodically ping existing accounts and ask for the latest state.
 
