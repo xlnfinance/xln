@@ -23,7 +23,7 @@ import type {
   RuntimeOverlayRecord,
   SwapOffer,
 } from '../types';
-import type { RuntimeOutputRetryFenceEntry } from '../machine/output-retry-fence';
+import type { DurableOutputRetryState } from '../machine/durable-output-retry';
 import type { RadixMerkleRadix, RadixMerkleRootKind } from './merkle';
 import type { StorageMerkleNamespace } from './keys';
 
@@ -251,8 +251,8 @@ export type StorageFrameRecord = {
    * frame. They are replayable at-least-once side effects, not consensus state.
    */
   runtimeOutputs?: RoutedEntityInput[];
-  /** Exact retry/backoff fence for the retained transport envelopes. */
-  runtimeOutputRetryMeta?: RuntimeOutputRetryFenceEntry[];
+  /** Retry/backoff state for the retained transport outputs. */
+  runtimeOutputRetryState?: DurableOutputRetryState[];
   overlayRecords?: RuntimeOverlayRecord[];
   touchedEntities: string[];
   touchedAccounts: Array<{ entityId: string; counterpartyId: string }>;

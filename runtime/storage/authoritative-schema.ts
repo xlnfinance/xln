@@ -28,10 +28,7 @@ import {
   validateStorageEntityCoreDocValue,
 } from './schema-state-docs';
 import { validateDurableRuntimeMachineSnapshot } from '../wal/runtime-machine-schema';
-import {
-  assertRuntimeOutputRetryFenceMatchesOutputs,
-  validateRuntimeOutputRetryFence,
-} from '../machine/output-retry-fence';
+import { validateDurableOutputRetryState } from '../machine/durable-output-retry';
 
 export * from './schema-state-docs';
 export * from './schema-merkle-cas';
@@ -79,7 +76,7 @@ export const validateStorageFrameRecordValue = (value: unknown): StorageFrameRec
     'hashMode', 'materializedState', 'runtimeInput',
     'touchedEntities', 'touchedAccounts',
     'touchedBookEntities',
-  ], ['entityHashes', 'canonicalStateHash', 'canonicalEntityHashes', 'runtimeStateHash', 'runtimeMachine', 'pendingRuntimeInput', 'runtimeOutputs', 'runtimeOutputRetryMeta', 'overlayRecords'], `${code}_FIELDS`);
+  ], ['entityHashes', 'canonicalStateHash', 'canonicalEntityHashes', 'runtimeStateHash', 'runtimeMachine', 'pendingRuntimeInput', 'runtimeOutputs', 'runtimeOutputRetryState', 'overlayRecords'], `${code}_FIELDS`);
   requireBoundaryInteger(frame['height'], `${code}_HEIGHT`, 1);
   requireBoundaryInteger(frame['timestamp'], `${code}_TIMESTAMP`);
   requireStorageHash(frame['prevFrameHash'], `${code}_PREV_HASH`);
@@ -119,21 +116,15 @@ export const validateStorageFrameRecordValue = (value: unknown): StorageFrameRec
   if (frame['pendingRuntimeInput'] !== undefined) {
     validateRuntimeInputEnvelope(frame['pendingRuntimeInput'], `${code}_PENDING_RUNTIME_INPUT`);
   }
-  if (frame['runtimeOutputRetryMeta'] !== undefined) {
-    frame['runtimeOutputRetryMeta'] = validateRuntimeOutputRetryFence(
-      frame['runtimeOutputRetryMeta'],
-      `${code}_RUNTIME_OUTPUT_RETRY_META`,
-    );
-  }
   requireStringArray(frame['touchedEntities'], `${code}_TOUCHED_ENTITIES`);
   validateTouchedAccounts(frame['touchedAccounts'], `${code}_TOUCHED_ACCOUNTS`);
   requireStringArray(frame['touchedBookEntities'], `${code}_TOUCHED_BOOK_ENTITIES`);
   validateOptionalFrameFields(frame, code);
-  if (frame['runtimeOutputRetryMeta'] !== undefined) {
-    assertRuntimeOutputRetryFenceMatchesOutputs(
-      frame['runtimeOutputRetryMeta'] as ReturnType<typeof validateRuntimeOutputRetryFence>,
+  if (frame['runtimeOutputRetryState'] !== undefined) {
+    frame['runtimeOutputRetryState'] = validateDurableOutputRetryState(
+      frame['runtimeOutputRetryState'],
       (frame['runtimeOutputs'] ?? []) as RoutedEntityInput[],
-      `${code}_RUNTIME_OUTPUT_RETRY_META`,
+      `${code}_RUNTIME_OUTPUT_RETRY_STATE`,
     );
   }
   return frame as StorageFrameRecord;

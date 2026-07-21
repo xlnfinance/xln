@@ -141,10 +141,12 @@ import { accountInputAck, accountInputProposal } from './account/consensus/flush
 import { getEffectiveEntityInputTxs } from './entity/consensus/output-envelope';
 import {
   deriveSignerAddressSync,
+  deriveSignerKeySync,
   getCachedSignerPrivateKey,
   getLocalSignerPrivateKey,
   getSignerPrivateKey,
   prewarmSignerKeyCache,
+  registerSignerKey,
 } from './account/crypto';
 import {
   buildLocalEntityProfile,
@@ -240,6 +242,7 @@ import {
   getReliableOutputIdentity,
   getNextNetworkRetryTimestamp,
   hasReadyPendingNetworkOutputs,
+  markPendingCrossJAdmissionOutputsReady,
   markRestoredReliableOutputsDue,
   MAX_PENDING_NETWORK_OUTPUTS,
   planEntityOutputs,
@@ -312,7 +315,7 @@ import {
   type ReliableReceiptSenderCheckpoint,
 } from './machine/reliable-delivery';
 import { reliableIdentityExactKey } from './machine/reliable-frontier';
-import { applyRuntimeOutputRetryFence } from './machine/output-retry-fence';
+import { restoreDurableOutputRetryState } from './machine/durable-output-retry';
 import { submitRuntimeJOutbox } from './machine/j-submit';
 import {
   copyLocalJSubmitRuntimeTxAuthorization,
@@ -933,6 +936,19 @@ const getRuntimeWorkReason = (env: Env): string | null => {
 };
 
 export const hasRuntimeWork = (env: Env): boolean => getRuntimeWorkReason(env) !== null;
+
+export const retryPendingCrossJAdmissionEnvelopes = (
+  env: Env,
+  targetRuntimeId?: string,
+): number => {
+  const ready = markPendingCrossJAdmissionOutputsReady(
+    env,
+    getRuntimeOutputRoutingDeps(),
+    targetRuntimeId,
+  );
+  if (ready > 0) requestRuntimeLoopWake(env);
+  return ready;
+};
 
 const collectAccountMempoolWakeInputs = (env: Env): EntityInput[] => {
   const wakeInputs: EntityInput[] = [];
@@ -2946,11 +2962,34 @@ const applyRuntimeInput = async (
 };
 
 // Runtime bootstrap
+export type RuntimeLocalSigner = Readonly<{
+  label: string;
+  seed?: Uint8Array | string;
+}>;
+
+export type RuntimeCreationOptions = Readonly<{
+  trustedJurisdictionRpcBindings?: readonly TrustedJurisdictionRpcBinding[];
+  localSigners?: readonly RuntimeLocalSigner[];
+}>;
+
 const main = async (
   runtimeSeedOverride?: string | null,
-  options?: { trustedJurisdictionRpcBindings?: readonly TrustedJurisdictionRpcBinding[] },
+  options?: RuntimeCreationOptions,
 ): Promise<Env> => {
-  const baseEnv = createEmptyEnv(runtimeSeedOverride ?? null);
+  const runtimeSeed = runtimeSeedOverride ?? null;
+  if (options?.localSigners?.length && runtimeSeed === null) {
+    throw new Error('RUNTIME_LOCAL_SIGNERS_REQUIRE_SEED');
+  }
+  if (runtimeSeed !== null) {
+    for (const signer of options?.localSigners ?? []) {
+      const label = String(signer.label || '').trim();
+      if (!label) throw new Error('RUNTIME_LOCAL_SIGNER_LABEL_REQUIRED');
+      const signerSeed = signer.seed ?? runtimeSeed;
+      const signerId = deriveSignerAddressSync(signerSeed, label).toLowerCase();
+      registerSignerKey(runtimeSeed, signerId, deriveSignerKeySync(signerSeed, label));
+    }
+  }
+  const baseEnv = createEmptyEnv(runtimeSeed);
 
   let env = baseEnv;
   let restoredFromCoreDb = false;
@@ -3604,7 +3643,11 @@ const replayRecoveryFrameJournals = async (
           : undefined;
         env.runtimeInput = env.runtimeMempool ?? { runtimeTxs: [], entityInputs: [] };
         env.pendingNetworkOutputs = cloneIsolatedRoutedEntityInputs(frame.runtimeOutputs ?? []);
-        applyRuntimeOutputRetryFence(env, frame.runtimeOutputRetryMeta ?? []);
+        restoreDurableOutputRetryState(
+          env,
+          frame.runtimeOutputRetryState ?? [],
+          frame.runtimeOutputs ?? [],
+        );
         // These activity records were consumed by the same atomic storage
         // batch as the Runtime frame. Compare the committed post-state, not
         // the writer's pre-commit buffer.
@@ -4130,7 +4173,7 @@ const applyCommittedLocalReliableReceipts = (
     // Live execution proves sender ownership through the exact durable outbox
     // item. Sparse-WAL replay intentionally does not retain pre-frame state;
     // its authenticated `from === runtimeId` input is the equivalent proof and
-    // the frame's post-state output fence is installed after reducer replay.
+    // the frame's post-state outputs are installed after reducer replay.
     localCommits.push(commit);
   }
   const pendingOutputs = env.pendingNetworkOutputs ?? [];
@@ -6098,7 +6141,11 @@ const loadEnvFromStorage = async (
       : undefined;
     env.runtimeInput = env.runtimeMempool ?? { runtimeTxs: [], entityInputs: [] };
     env.pendingNetworkOutputs = cloneIsolatedRoutedEntityInputs(frame.runtimeOutputs ?? []);
-    applyRuntimeOutputRetryFence(env, frame.runtimeOutputRetryMeta ?? []);
+    restoreDurableOutputRetryState(
+      env,
+      frame.runtimeOutputRetryState ?? [],
+      frame.runtimeOutputs ?? [],
+    );
     await restoreOverlayFromFrameLog(env, targetHeight);
     await hydrateAccountFrameHistoryViews(env);
     let restoredFrameLogs: FrameLogEntry[] = [];
@@ -6357,8 +6404,8 @@ const buildRecoveryJournalFromStorageFrame = (
   ...(frame.runtimeOutputs?.length
     ? { runtimeOutputs: cloneIsolatedRoutedEntityInputs(frame.runtimeOutputs) }
     : {}),
-  ...(frame.runtimeOutputRetryMeta?.length
-    ? { runtimeOutputRetryMeta: structuredClone(frame.runtimeOutputRetryMeta) }
+  ...(frame.runtimeOutputRetryState?.length
+    ? { runtimeOutputRetryState: structuredClone(frame.runtimeOutputRetryState) }
     : {}),
   ...(frame.runtimeMachine
     ? { runtimeMachine: cloneIsolatedRuntimeSnapshot(frame.runtimeMachine) }
@@ -6671,8 +6718,8 @@ const restoreReplayedActivityViews = async (
   env: Env,
   targetHeight: number,
 ): Promise<void> => {
-  // Activity/history hydration is a read-model concern. Never erase the exact
-  // deferred input fence reconstructed from the latest WAL frame.
+  // Activity/history hydration is a read-model concern. Never erase deferred
+  // input state reconstructed from the latest WAL frame.
   env.runtimeInput = env.runtimeMempool ?? { runtimeTxs: [], entityInputs: [] };
   await restoreOverlayFromFrameLog(env, targetHeight);
   await hydrateAccountFrameHistoryViews(env);

@@ -124,7 +124,7 @@ import {
   getSafePendingAccountJClaimDeletes,
 } from '../account/j-claim-store';
 import { buildDurableRuntimeMachineSnapshot } from '../wal/snapshot';
-import { buildRuntimeOutputRetryFence } from '../machine/output-retry-fence';
+import { buildDurableOutputRetryState } from '../machine/durable-output-retry';
 import { verifyStorageSnapshotIntegrity } from './verify';
 import {
   validateAccountJClaimNodeValue,
@@ -1120,7 +1120,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   const staleCurrentReplicaMetaKeys = staleHistoryReplicaMetaKeys;
   options.onPersistenceProgress?.('replica-metadata-read');
   checkpointPrepare('replicaCurrentScan');
-  const runtimeOutputRetryMeta = buildRuntimeOutputRetryFence(
+  const runtimeOutputRetryState = buildDurableOutputRetryState(
     options.env,
     options.currentFrameOutputs ?? [],
   );
@@ -1151,8 +1151,8 @@ export const saveRuntimeFrameToStorage = async (options: {
     ...(options.currentFrameOutputs && options.currentFrameOutputs.length > 0
       ? { runtimeOutputs: cloneIsolatedRoutedEntityInputs(options.currentFrameOutputs) }
       : {}),
-    ...(runtimeOutputRetryMeta.length > 0
-      ? { runtimeOutputRetryMeta }
+    ...(runtimeOutputRetryState.length > 0
+      ? { runtimeOutputRetryState }
       : {}),
     ...(shouldMaterialize && overlayRecords.length > 0
       ? { overlayRecords: overlayRecords.map((record) => ({ ...record })) }

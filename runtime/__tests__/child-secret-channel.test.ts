@@ -120,8 +120,8 @@ describe('orchestrator child secret channel', () => {
     ].join('');
     for (let attempt = 0; attempt < 25; attempt += 1) {
       const child = spawnBunChild(`startup-signer-test-${attempt}`, ['-e', code], {}, {
-        startupSignerId: `0x${'12'.repeat(20)}`,
-        startupSignerPrivateKey: `0x${'34'.repeat(32)}`,
+        startupSignerSeed: 'custody-startup-seed',
+        startupSignerLabel: 'custody-startup-label',
       });
       await child.startupSecretsWritten;
       const exitCode = await new Promise<number | null>((resolve, reject) => {
@@ -131,8 +131,8 @@ describe('orchestrator child secret channel', () => {
 
       expect(exitCode).toBe(0);
       expect(JSON.parse(child.stdoutLines.join(''))).toEqual({
-        startupSignerId: `0x${'12'.repeat(20)}`,
-        startupSignerPrivateKey: `0x${'34'.repeat(32)}`,
+        startupSignerSeed: 'custody-startup-seed',
+        startupSignerLabel: 'custody-startup-label',
       });
     }
   });

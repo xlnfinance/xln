@@ -55,6 +55,22 @@ describe('signer cache prewarm', () => {
     }
   });
 
+  test('makes an inherited EOA available to restore through its runtime seed scope', () => {
+    const runtimeSeed = 'startup-signer-restore-runtime';
+    const signerSeed = 'startup-signer-external-vault';
+    const privateKey = deriveSignerKeySync(signerSeed, 'custody-validator');
+    const signerId = deriveSignerAddressSync(signerSeed, 'custody-validator').toLowerCase();
+    clearSignerKeys(runtimeSeed);
+    try {
+      registerSignerKey(runtimeSeed, signerId, privateKey);
+      expect(Buffer.from(getSignerPrivateKey({ runtimeSeed }, signerId)).toString('hex')).toBe(
+        Buffer.from(privateKey).toString('hex'),
+      );
+    } finally {
+      clearSignerKeys(runtimeSeed);
+    }
+  });
+
   test('fails loud when runtime signer-cache prewarm cannot complete', () => {
     expect(() => prewarmRuntimeSignerCache('prewarm-fail-fast-seed', 0))
       .toThrow('SIGNER_CACHE_PREWARM_COUNT_INVALID:0');

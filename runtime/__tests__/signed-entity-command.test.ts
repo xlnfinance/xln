@@ -708,7 +708,7 @@ describe('signed Entity command admission', () => {
     expect(retry.jOutputs).toHaveLength(0);
   });
 
-  test('persists the bounded retry fence and restores exact-retry semantics', () => {
+  test('persists the command nonce and restores exact-retry semantics', () => {
     const { env, signerId, state } = setup('retry-persistence');
     const command = buildSignedEntityCommand(env, state, signerId, [chatCommand(signerId)]);
     const advanced = advanceEntityCommandNonce(state, assertSignedEntityCommand(env, state, command));

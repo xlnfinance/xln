@@ -203,9 +203,12 @@ export const validateDurableRuntimeState = (value: unknown, code: string): void 
   if (state['pendingFrameDbRecords'] !== undefined) requireArray(state['pendingFrameDbRecords'], `${code}_FRAME_DB`).forEach((entry, index) => validateAccountFrameRecord(entry, `${code}_FRAME_DB_${index}`));
   if (state['deferredNetworkMeta'] !== undefined) validateStringMap(state['deferredNetworkMeta'], `${code}_DEFERRED_NETWORK`, (entry, entryCode) => {
     const meta = requireBoundaryRecord(entry, entryCode);
-    requireExactBoundaryKeys(meta, ['attempts', 'nextRetryAt'], [], `${entryCode}_FIELDS`);
+    requireExactBoundaryKeys(meta, ['attempts', 'nextRetryAt'], ['manual'], `${entryCode}_FIELDS`);
     requireBoundaryInteger(meta['attempts'], `${entryCode}_ATTEMPTS`);
     requireBoundaryInteger(meta['nextRetryAt'], `${entryCode}_NEXT_RETRY`);
+    if (meta['manual'] !== undefined && requireBoolean(meta['manual'], `${entryCode}_MANUAL`) !== true) {
+      throw new Error(`${entryCode}_MANUAL`);
+    }
   });
   for (const field of [
     'reliableIngressReceiptLedger', 'reliableIngressTerminalWatermarks',

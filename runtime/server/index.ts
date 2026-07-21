@@ -24,7 +24,6 @@ import {
   registerRuntimeFrameCommitCallback,
   closeRuntimeDb,
   closeInfraDb,
-  registerSignerKey,
 } from '../runtime.ts';
 import { readFileSync } from 'node:fs';
 import { safeStringify, serializeTaggedJson } from '../protocol/serialization';
@@ -193,14 +192,14 @@ const SERVER_RUNTIME_SEED = (() => {
   }
   return seed;
 })();
-const STARTUP_SIGNER_SECRET = (() => {
+const STARTUP_SIGNER = (() => {
   const secrets = readInheritedChildSecrets();
-  const signerId = String(secrets['startupSignerId'] || '').trim().toLowerCase();
-  const privateKey = String(secrets['startupSignerPrivateKey'] || '').trim();
-  if (Boolean(signerId) !== Boolean(privateKey)) {
-    throw new Error('STARTUP_SIGNER_SECRET_INCOMPLETE');
+  const seed = String(secrets['startupSignerSeed'] || '').trim();
+  const label = String(secrets['startupSignerLabel'] || '').trim();
+  if (Boolean(seed) !== Boolean(label)) {
+    throw new Error('STARTUP_SIGNER_DERIVATION_INCOMPLETE');
   }
-  return signerId && privateKey ? { signerId, privateKey } : null;
+  return seed && label ? { seed, label } : null;
 })();
 const FAUCET_SIGNER_LABEL = process.env['FAUCET_SIGNER_LABEL'] ?? 'faucet-1';
 const FAUCET_SEED = process.env['FAUCET_SEED'] ?? `${SERVER_RUNTIME_SEED}:faucet`;
@@ -1027,17 +1026,8 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     serverLog.info('runtime.init.start');
     env = await main(SERVER_RUNTIME_SEED, {
       trustedJurisdictionRpcBindings: resolveTrustedServerRestoreRpcBindings(),
+      localSigners: STARTUP_SIGNER ? [STARTUP_SIGNER] : [],
     });
-    if (STARTUP_SIGNER_SECRET) {
-      registerSignerKey(
-        env,
-        STARTUP_SIGNER_SECRET.signerId,
-        ethers.getBytes(STARTUP_SIGNER_SECRET.privateKey),
-      );
-      serverLog.info('runtime.startup_signer.registered', {
-        signerId: shortId(STARTUP_SIGNER_SECRET.signerId, 10),
-      });
-    }
     serverEnv = env;
     registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
       runtimeIngressReceipts.observeRuntimeInput(height, runtimeInput);

@@ -13,10 +13,9 @@ import {
 } from '../protocol/runtime-input-clone';
 import { validateDurableRuntimeMachineSnapshot } from './runtime-machine-schema';
 import {
-  assertRuntimeOutputRetryFenceMatchesOutputs,
-  type RuntimeOutputRetryFenceEntry,
-  validateRuntimeOutputRetryFence,
-} from '../machine/output-retry-fence';
+  type DurableOutputRetryState,
+  validateDurableOutputRetryState,
+} from '../machine/durable-output-retry';
 
 export type PersistedFrameJournal = {
   height: number;
@@ -29,7 +28,7 @@ export type PersistedFrameJournal = {
   /** Exact bounded input queue retained after this frame. */
   pendingRuntimeInput?: RuntimeInput;
   runtimeOutputs?: RoutedEntityInput[];
-  runtimeOutputRetryMeta?: RuntimeOutputRetryFenceEntry[];
+  runtimeOutputRetryState?: DurableOutputRetryState[];
   /** Sparse durable R-machine checkpoint; absent on ordinary input-only frames. */
   runtimeMachine?: Record<string, unknown>;
   runtimeStateHash?: string;
@@ -53,7 +52,7 @@ export const validatePersistedFrameJournal = (
   requireExactBoundaryKeys(
     decoded,
     ['height', 'timestamp', 'replicaMetaDigest', 'replicaMetaCheckpoint', 'replicaMetaStateMode', 'runtimeInput', 'logs'],
-    ['pendingRuntimeInput', 'runtimeOutputs', 'runtimeOutputRetryMeta', 'runtimeMachine', 'runtimeStateHash'],
+    ['pendingRuntimeInput', 'runtimeOutputs', 'runtimeOutputRetryState', 'runtimeMachine', 'runtimeStateHash'],
     'WAL_FIELDS_INVALID',
   );
   const height = requireBoundaryInteger(decoded['height'], 'WAL_HEIGHT_INVALID', 1);
@@ -91,15 +90,11 @@ export const validatePersistedFrameJournal = (
     decoded['runtimeOutputs'].forEach(validateEntityInput);
     frame.runtimeOutputs = cloneIsolatedRoutedEntityInputs(decoded['runtimeOutputs'] as RoutedEntityInput[]);
   }
-  if (decoded['runtimeOutputRetryMeta'] !== undefined) {
-    frame.runtimeOutputRetryMeta = validateRuntimeOutputRetryFence(
-      decoded['runtimeOutputRetryMeta'],
-      `WAL_RUNTIME_OUTPUT_RETRY_META_INVALID:height=${height}`,
-    );
-    assertRuntimeOutputRetryFenceMatchesOutputs(
-      frame.runtimeOutputRetryMeta,
+  if (decoded['runtimeOutputRetryState'] !== undefined) {
+    frame.runtimeOutputRetryState = validateDurableOutputRetryState(
+      decoded['runtimeOutputRetryState'],
       frame.runtimeOutputs ?? [],
-      `WAL_RUNTIME_OUTPUT_RETRY_META_INVALID:height=${height}`,
+      `WAL_RUNTIME_OUTPUT_RETRY_STATE_INVALID:height=${height}`,
     );
   }
   if (decoded['runtimeMachine'] !== undefined) {

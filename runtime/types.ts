@@ -1361,6 +1361,7 @@ export interface Env {
     deferredNetworkMeta?: Map<string, {
       attempts: number;
       nextRetryAt: number;
+      manual?: true;
     }>;
     /** Durable receiver active exact frontier, keyed by authenticated source runtime + lane. */
     reliableIngressReceiptLedger?: Map<string, ReliableDeliveryReceipt>;

@@ -275,17 +275,10 @@ const startDaemon = async (): Promise<ManagedChild | null> => {
       XLN_RUNTIME_SEED: DAEMON_RUNTIME_SEED,
       XLN_DB_PATH: `${DB_ROOT}/daemon-db`,
     },
-    (() => {
-      const identity = deriveManagedEntityIdentity({
-        name: PROFILE_NAME,
-        seed: SEED,
-        signerLabel: SIGNER_LABEL,
-      });
-      return {
-        startupSignerId: identity.signerId,
-        startupSignerPrivateKey: identity.privateKeyHex,
-      };
-    })(),
+    {
+      startupSignerSeed: SEED,
+      startupSignerLabel: SIGNER_LABEL,
+    },
   );
   mirrorChildLogs('custody-daemon', daemonChild);
   await waitForHttpReady(

@@ -5,7 +5,6 @@ import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
 import { deserializeTaggedJson } from '../protocol/serialization';
-import { deriveManagedEntityIdentity } from './daemon-control';
 import { fetchLoopback } from './loopback-fetch';
 import {
   buildManagedRuntimeChildSecretEnv,
@@ -602,11 +601,6 @@ export const startCustodySupport = async (
   let daemonChild: ManagedChild | null = null;
   let custodyChild: ManagedChild | null = null;
   try {
-    const startupIdentity = deriveManagedEntityIdentity({
-      name: options.profileName,
-      seed: options.seed,
-      signerLabel: options.signerLabel,
-    });
     const shardJurisdictionsPath = join(options.dbRoot, 'jurisdictions.json');
     await mkdir(options.dbRoot, { recursive: true });
     await writeFile(shardJurisdictionsPath, await readFile(resolveCustodyJurisdictionsJsonPath(), 'utf8'), 'utf8');
@@ -646,8 +640,8 @@ export const startCustodySupport = async (
         XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
       },
       {
-        startupSignerId: startupIdentity.signerId,
-        startupSignerPrivateKey: startupIdentity.privateKeyHex,
+        startupSignerSeed: options.seed,
+        startupSignerLabel: options.signerLabel,
       },
     );
     const [, hubIds] = await Promise.all([

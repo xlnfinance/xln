@@ -68,12 +68,12 @@ const RUNTIME_HINT_TTL_MS = 60_000;
 
 type CrossJAdmissionCandidate = {
   inputIndex: number;
-  routeKey: string;
+  routeKeys: string[];
   pairKey: string;
   leg: 'source' | 'target';
   accountInput: AccountInput;
-  pull: Extract<AccountTx, { type: 'pull_lock' }>;
-  targetReceipt?: CrossJurisdictionBookAdmissionReceipt;
+  pulls: Array<Extract<AccountTx, { type: 'pull_lock' }>>;
+  targetReceipts: CrossJurisdictionBookAdmissionReceipt[];
   alreadyCommitted: boolean;
 };
 
@@ -86,17 +86,26 @@ const admissionOriginKey = (input: RoutedEntityInput): string => {
   return runtimeId ? `remote:${runtimeId}` : 'remote:missing';
 };
 
-const admissionPairKey = (input: RoutedEntityInput, routeKey: string): string =>
-  `${admissionOriginKey(input)}\u0000${routeKey}`;
+const admissionPairKey = (input: RoutedEntityInput, routeKeys: readonly string[]): string =>
+  `${admissionOriginKey(input)}\u0000${[...routeKeys].sort().join('\u0001')}`;
 
-const crossPull = (
+const sameSourceRuntimeFrame = (
+  source: RoutedEntityInput,
+  target: RoutedEntityInput,
+): boolean => {
+  const sourceFrame = source.sourceRuntimeFrame;
+  const targetFrame = target.sourceRuntimeFrame;
+  if (!sourceFrame || !targetFrame) return true;
+  return sourceFrame.height === targetFrame.height &&
+    sourceFrame.timestamp === targetFrame.timestamp;
+};
+
+const crossPulls = (
   accountTxs: readonly AccountTx[],
   leg: 'source' | 'target',
-): Extract<AccountTx, { type: 'pull_lock' }> | null => {
-  const pulls = accountTxs.filter((tx): tx is Extract<AccountTx, { type: 'pull_lock' }> =>
+): Array<Extract<AccountTx, { type: 'pull_lock' }>> =>
+  accountTxs.filter((tx): tx is Extract<AccountTx, { type: 'pull_lock' }> =>
     tx.type === 'pull_lock' && tx.data.crossJurisdiction?.leg === leg);
-  return pulls.length === 1 ? pulls[0]! : null;
-};
 
 const effectiveAccountInputs = (input: RoutedEntityInput): AccountInput[] =>
   getEffectiveEntityInputTxs(input).flatMap(tx => tx.type === 'accountInput' ? [tx.data] : []);
@@ -108,23 +117,26 @@ const sourceAdmissionCandidate = (
 ): CrossJAdmissionCandidate | null => {
   const proposal = accountInputProposal(accountInput);
   if (!proposal) return null;
-  const pull = crossPull(proposal.frame.accountTxs, 'source');
-  const binding = pull?.data.crossJurisdiction;
-  if (!pull || !binding?.targetReceipt) return null;
-  const matchingOffer = proposal.frame.accountTxs.find(tx =>
+  const pulls = crossPulls(proposal.frame.accountTxs, 'source');
+  if (pulls.length === 0) return null;
+  const bindings = pulls.map(pull => pull.data.crossJurisdiction!);
+  if (bindings.some(binding => !binding.targetReceipt)) return null;
+  const routeKeys = bindings.map(binding => admissionKey(binding.orderId, binding.routeHash));
+  if (new Set(routeKeys).size !== routeKeys.length) return null;
+  const everyPullHasOffer = bindings.every(binding => proposal.frame.accountTxs.some(tx =>
     tx.type === 'swap_offer' &&
     tx.data.crossJurisdiction?.orderId === binding.orderId &&
-    String(tx.data.crossJurisdiction?.routeHash || '').toLowerCase() === String(binding.routeHash || '').toLowerCase());
-  if (!matchingOffer) return null;
-  const routeKey = admissionKey(binding.orderId, binding.routeHash);
+    String(tx.data.crossJurisdiction?.routeHash || '').toLowerCase() ===
+      String(binding.routeHash || '').toLowerCase()));
+  if (!everyPullHasOffer) return null;
   return {
     inputIndex,
-    routeKey,
-    pairKey: admissionPairKey(input, routeKey),
+    routeKeys,
+    pairKey: admissionPairKey(input, routeKeys),
     leg: 'source',
     accountInput,
-    pull,
-    targetReceipt: binding.targetReceipt,
+    pulls,
+    targetReceipts: bindings.map(binding => binding.targetReceipt!),
     alreadyCommitted: false,
   };
 };
@@ -181,38 +193,51 @@ const targetAdmissionCandidate = (
       ? current
       : null;
   if (!frame) return null;
-  const pull = crossPull(frame.accountTxs, 'target');
-  const binding = pull?.data.crossJurisdiction;
-  if (!pull || !binding) return null;
-  const routeKey = admissionKey(binding.orderId, binding.routeHash);
+  const pulls = crossPulls(frame.accountTxs, 'target');
+  if (pulls.length === 0) return null;
+  const routeKeys = pulls.map(pull => admissionKey(
+    pull.data.crossJurisdiction!.orderId,
+    pull.data.crossJurisdiction!.routeHash,
+  ));
+  if (new Set(routeKeys).size !== routeKeys.length) return null;
   return {
     inputIndex,
-    routeKey,
-    pairKey: admissionPairKey(input, routeKey),
+    routeKeys,
+    pairKey: admissionPairKey(input, routeKeys),
     leg: 'target',
     accountInput,
-    pull,
+    pulls,
+    targetReceipts: [],
     alreadyCommitted: frame === current,
   };
 };
 
 const targetPullMatchesReceipt = (
   candidate: CrossJAdmissionCandidate,
+  pull: Extract<AccountTx, { type: 'pull_lock' }>,
   receipt: CrossJurisdictionBookAdmissionReceipt,
 ): boolean => {
-  const binding = candidate.pull.data.crossJurisdiction;
+  const binding = pull.data.crossJurisdiction;
   return candidate.leg === 'target' && Boolean(binding) &&
     receipt.leg === 'target' &&
-    admissionKey(receipt.orderId, receipt.routeHash) === candidate.routeKey &&
+    admissionKey(receipt.orderId, receipt.routeHash) ===
+      admissionKey(binding!.orderId, binding!.routeHash) &&
     normalizeEntityKey(receipt.hubEntityId) === normalizeEntityKey(candidate.accountInput.toEntityId) &&
     normalizeEntityKey(receipt.counterpartyEntityId) === normalizeEntityKey(candidate.accountInput.fromEntityId) &&
-    receipt.pullId === candidate.pull.data.pullId &&
-    receipt.tokenId === candidate.pull.data.tokenId &&
-    receipt.signedAmount === candidate.pull.data.amount &&
-    receipt.revealedUntilTimestamp === candidate.pull.data.revealedUntilTimestamp &&
-    receipt.fullHash.toLowerCase() === String(candidate.pull.data.fullHash || '').toLowerCase() &&
-    receipt.partialRoot.toLowerCase() === String(candidate.pull.data.partialRoot || '').toLowerCase();
+    receipt.pullId === pull.data.pullId &&
+    receipt.tokenId === pull.data.tokenId &&
+    receipt.signedAmount === pull.data.amount &&
+    receipt.revealedUntilTimestamp === pull.data.revealedUntilTimestamp &&
+    receipt.fullHash.toLowerCase() === String(pull.data.fullHash || '').toLowerCase() &&
+    receipt.partialRoot.toLowerCase() === String(pull.data.partialRoot || '').toLowerCase();
 };
+
+const targetFrameMatchesReceipts = (
+  target: CrossJAdmissionCandidate,
+  receipts: readonly CrossJurisdictionBookAdmissionReceipt[],
+): boolean => target.pulls.length === receipts.length &&
+  target.pulls.every(pull =>
+    receipts.filter(receipt => targetPullMatchesReceipt(target, pull, receipt)).length === 1);
 
 export type CrossJAccountInputPair = {
   pairKey: string;
@@ -258,16 +283,20 @@ export const selectPotentialCrossJAccountInputPairs = (
   const claimedTargets = new Set<number>();
   const pairs: PotentialCrossJAccountInputPair[] = [];
   for (const source of sources) {
-    const receipt = source.targetReceipt;
-    if (!receipt) continue;
+    const receipts = source.targetReceipts;
+    if (receipts.length === 0) continue;
+    const sourceInput = inputs[source.inputIndex]!;
     const targets = inputs.flatMap((input, inputIndex) => {
       if (inputIndex === source.inputIndex || claimedTargets.has(inputIndex)) return [];
-      if (admissionPairKey(input, source.routeKey) !== source.pairKey) return [];
-      if (normalizeEntityKey(input.entityId) !== normalizeEntityKey(receipt.hubEntityId)) return [];
+      if (!sameSourceRuntimeFrame(sourceInput, input)) return [];
+      if (admissionOriginKey(input) !== admissionOriginKey(sourceInput)) return [];
+      if (receipts.some(receipt =>
+        normalizeEntityKey(input.entityId) !== normalizeEntityKey(receipt.hubEntityId))) return [];
       const matchingAcks = effectiveAccountInputs(input).filter(accountInput =>
         Boolean(accountInputAck(accountInput)) &&
-        normalizeEntityKey(accountInput.toEntityId) === normalizeEntityKey(receipt.hubEntityId) &&
-        normalizeEntityKey(accountInput.fromEntityId) === normalizeEntityKey(receipt.counterpartyEntityId));
+        receipts.every(receipt =>
+          normalizeEntityKey(accountInput.toEntityId) === normalizeEntityKey(receipt.hubEntityId) &&
+          normalizeEntityKey(accountInput.fromEntityId) === normalizeEntityKey(receipt.counterpartyEntityId)));
       return matchingAcks.length === 1 ? [inputIndex] : [];
     });
     if (targets.length !== 1) continue;
@@ -342,8 +371,8 @@ export const selectMatchedCrossJAccountInputPairs = (
       groupIndexes.forEach(inputIndex => invalidIndexes.add(inputIndex));
       continue;
     }
-    const receipt = sources[0]!.targetReceipt;
-    if (!receipt || !targetPullMatchesReceipt(targets[0]!, receipt)) {
+    const receipts = sources[0]!.targetReceipts;
+    if (!targetFrameMatchesReceipts(targets[0]!, receipts)) {
       groupIndexes.forEach(inputIndex => invalidIndexes.add(inputIndex));
       continue;
     }
@@ -704,6 +733,18 @@ export const validateInboundP2PEntityInputsEnvelope = (
         }]
       : [];
   });
+  const sourceIndexes = validatedInputs.flatMap((input, inputIndex) =>
+    effectiveAccountInputs(input).some(accountInput =>
+      sourceAdmissionCandidate(input, inputIndex, accountInput) !== null)
+      ? [inputIndex]
+      : []);
+  if (sourceIndexes.length > 0) {
+    const pairs = selectPotentialCrossJAccountInputPairs(validatedInputs);
+    const exactPair = sourceIndexes.length === 1 && validatedInputs.length === 2 && pairs.length === 1 &&
+      pairs[0]!.sourceInputIndex === sourceIndexes[0] &&
+      new Set([pairs[0]!.sourceInputIndex, pairs[0]!.targetInputIndex]).size === 2;
+    if (!exactPair) throw new Error('INBOUND_CROSS_J_ATOMIC_ENVELOPE_INVALID');
+  }
   // Pairing is state-dependent: an older Account ACK from the same ordered
   // transport may still be queued immediately before this envelope. Filtering
   // here would inspect stale Account pendingFrame state and destroy one leg of

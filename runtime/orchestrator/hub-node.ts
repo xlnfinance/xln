@@ -9,7 +9,6 @@ import type {
 } from 'ethers';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { createExternalWalletApi } from '../api/external-wallet-api';
-import { prewarmSignerLabels } from '../account/crypto';
 import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
@@ -564,14 +563,6 @@ const buildLocalHubSignerLabels = (): string[] => {
     if (secondaryName) labels.push(`${resolvedArgs.signerLabel}:${secondaryName}`);
   }
   return labels;
-};
-
-const prewarmLocalHubSignerKeys = (): void => {
-  const signerIds = prewarmSignerLabels(resolvedArgs.seed, buildLocalHubSignerLabels());
-  nodeLog.info('signer_keys.prewarmed', {
-    name: resolvedArgs.name,
-    count: signerIds.length,
-  });
 };
 
 const configureHubRuntimeLogging = (env: Env): void => {
@@ -1499,15 +1490,15 @@ const run = async (): Promise<void> => {
   process.env['JADAPTER_DEV_PRIVATE_KEY'] = deriveAnvilDevPrivateKey(resolveHubSignerIndex(resolvedArgs.name));
 
   const runtimeBootStartedAt = startTiming('runtime_boot');
-  // WAL replay may need to reproduce a locally authored proposal before main()
-  // returns. Register this runtime's deterministic signer labels first.
-  prewarmLocalHubSignerKeys();
+  const localSignerLabels = buildLocalHubSignerLabels();
   const env = await main(resolvedArgs.seed, {
+    localSigners: localSignerLabels.map(label => ({ label })),
     trustedJurisdictionRpcBindings: resolveMeshJurisdictionRpcBindings(
       resolvedArgs.rpcUrl,
       resolveLocalApiUrl,
     ),
   });
+  nodeLog.info('signer_keys.ready', { name: resolvedArgs.name, count: localSignerLabels.length });
   if (restoredRuntimeRouteRelocated(env.gossip.getProfiles(), {
     runtimeId: String(env.runtimeId || ''),
     wsUrl: directWsUrl,

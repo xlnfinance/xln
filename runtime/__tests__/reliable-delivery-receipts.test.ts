@@ -542,7 +542,21 @@ describe('durable scoped reliable delivery receipts', () => {
                     leg: 'source',
                     orderId: 'atomic-order',
                     routeHash: '0xatomic-route',
-                    targetReceipt: { orderId: 'atomic-order' },
+                    targetReceipt: {
+                      receiptHash: '0xatomic-target-receipt',
+                      leg: 'target',
+                      orderId: 'atomic-order',
+                      routeHash: '0xatomic-route',
+                      hubEntityId: entityId('b1'),
+                      counterpartyEntityId: entityId('d1'),
+                      pullId: 'atomic-target-pull',
+                      tokenId: 1,
+                      signedAmount: 1n,
+                      revealedUntilTimestamp: 1,
+                      fullHash: '0xatomic-target-full',
+                      partialRoot: '0xatomic-target-partial',
+                      committedAt: 7,
+                    },
                   },
                 },
               }, {
@@ -1801,7 +1815,8 @@ describe('durable scoped reliable delivery receipts', () => {
     expect(sender.height).toBe(1);
     expect(sender.pendingNetworkOutputs).toEqual([]);
     expect(sender.runtimeState?.receivedReliableReceiptLedger?.size).toBe(1);
-    expect(sender.history.at(-1)?.runtimeInput.reliableReceipts).toEqual([commits[0]!.receipt]);
+    const durableFrame = await readStorageFrameRecord(getFrameDb(sender), sender.height);
+    expect(durableFrame?.runtimeInput.reliableReceipts).toEqual([commits[0]!.receipt]);
 
     handleInboundReliableReceipt(sender, receiver.runtimeId!, commits[0]!.receipt);
     expect(sender.runtimeMempool?.reliableReceipts ?? []).toEqual([]);

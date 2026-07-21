@@ -2624,17 +2624,31 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
 
     const spawnH1StartedAt = startTiming('reset_spawn_h1');
     await spawnHub(h1);
+    // A preserved snapshot already contains the validated shared jurisdiction
+    // config, so no hub owns a provisioning dependency. Start every isolated
+    // Runtime immediately; serial restore replay would make healthy node costs
+    // additive and violate the mesh SLO by construction.
+    if (preserveState) await Promise.all(h23.map(child => spawnHub(child)));
     finishTiming('reset_spawn_h1', spawnH1StartedAt);
 
     const waitH1StartedAt = startTiming('reset_wait_h1');
-    await waitForHubSelfReady(h1);
+    if (preserveState) {
+      await Promise.all(hubChildren.map(child => waitForHubSelfReady(child)));
+    } else {
+      await waitForHubSelfReady(h1);
+    }
     finishTiming('reset_wait_h1', waitH1StartedAt);
     await waitForShardJurisdictions(h1);
 
     const spawnH23StartedAt = startTiming('reset_spawn_h23');
-    for (const child of h23) {
-      await spawnHub(child);
-      await waitForHubSelfReady(child);
+    // H2 and H3 have isolated ports and storage. Starting them serially makes
+    // fresh boot cost additive. H1 is the ordered prerequisite only in fresh
+    // mode because it proves the newly provisioned jurisdiction config.
+    if (!preserveState) {
+      await Promise.all(h23.map(async child => {
+        await spawnHub(child);
+        await waitForHubSelfReady(child);
+      }));
     }
     finishTiming('reset_spawn_h23', spawnH23StartedAt);
 

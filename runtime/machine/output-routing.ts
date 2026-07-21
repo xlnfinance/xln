@@ -47,6 +47,7 @@ import {
   senderFrontierKey,
   senderFrontierKeyForIdentity,
 } from './reliable-frontier';
+import { selectPotentialCrossJAccountInputPairs } from './entity-routing';
 
 const routeLog = createStructuredLogger('network.route');
 
@@ -734,21 +735,6 @@ const isCrossJAdmissionSourceProposal = (output: RoutedEntityInput): boolean =>
         String(binding.routeHash || '').toLowerCase());
   });
 
-/**
- * Cross-j admission is committed as one Runtime envelope: target ACK and
- * source proposal either reach the hub together or remain together in the
- * durable outbox. The source proposal is the self-describing member; the
- * paired ACK is bound by the receiver's two-phase Account preflight.
- */
-const isAtomicCrossJAdmissionEnvelope = (
-  outputs: readonly RoutedEntityInput[],
-): boolean => outputs.length >= 2 &&
-  outputs.some(isCrossJAdmissionSourceProposal) &&
-  outputs.some(output => {
-    const identity = getReliableOutputIdentity(output);
-    return identity !== null && isAccountAckIdentity(identity);
-  });
-
 const summarizeAccountEnvelopeOutputs = (outputs: readonly RoutedEntityInput[]) =>
   outputs.map(output => ({
     entityId: output.entityId,
@@ -778,31 +764,45 @@ const sourceFrameGroupKey = (output: RoutedEntityInput): string | null => {
   });
 };
 
-const groupAtomicCrossJAdmissionOutputs = (
-  outputs: readonly RoutedEntityInput[],
-): Array<{ outputs: RoutedEntityInput[]; atomic: boolean }> => {
-  const bySourceFrame = new Map<string, RoutedEntityInput[]>();
-  for (const output of outputs) {
-    const key = sourceFrameGroupKey(output);
-    if (!key) continue;
-    const group = bySourceFrame.get(key) ?? [];
-    group.push(output);
-    bySourceFrame.set(key, group);
+const groupAtomicCrossJAdmissionOutputs = <T extends RoutedEntityInput>(
+  outputs: readonly T[],
+): Array<{ outputs: T[]; atomic: boolean }> => {
+  const pairs = selectPotentialCrossJAccountInputPairs(outputs);
+  const pairByIndex = new Map<number, typeof pairs[number]>();
+  for (const pair of pairs) {
+    const source = outputs[pair.sourceInputIndex]!;
+    const target = outputs[pair.targetInputIndex]!;
+    if (sourceFrameGroupKey(source) !== sourceFrameGroupKey(target)) {
+      throw new Error('ROUTE_CROSS_J_ATOMIC_SOURCE_FRAME_MISMATCH');
+    }
+    pairByIndex.set(pair.sourceInputIndex, pair);
+    pairByIndex.set(pair.targetInputIndex, pair);
   }
-  const atomicKeys = new Set([...bySourceFrame]
-    .filter(([, group]) => isAtomicCrossJAdmissionEnvelope(group))
-    .map(([key]) => key));
-  const emitted = new Set<string>();
-  const grouped: Array<{ outputs: RoutedEntityInput[]; atomic: boolean }> = [];
-  for (const output of outputs) {
-    const key = sourceFrameGroupKey(output);
-    if (!key || !atomicKeys.has(key)) {
+  for (const [index, output] of outputs.entries()) {
+    if (isCrossJAdmissionSourceProposal(output) && !pairByIndex.has(index)) {
+      throw new Error(
+        `ROUTE_CROSS_J_ATOMIC_PAIR_MISSING:${safeStringify({
+          sourceIndex: index,
+          potentialPairs: pairs,
+          outputs,
+        })}`,
+      );
+    }
+  }
+  const emittedSources = new Set<number>();
+  const grouped: Array<{ outputs: T[]; atomic: boolean }> = [];
+  for (const [index, output] of outputs.entries()) {
+    const pair = pairByIndex.get(index);
+    if (!pair) {
       grouped.push({ outputs: [output], atomic: false });
       continue;
     }
-    if (emitted.has(key)) continue;
-    emitted.add(key);
-    grouped.push({ outputs: bySourceFrame.get(key)!, atomic: true });
+    if (emittedSources.has(pair.sourceInputIndex)) continue;
+    emittedSources.add(pair.sourceInputIndex);
+    grouped.push({
+      outputs: [outputs[pair.targetInputIndex]!, outputs[pair.sourceInputIndex]!],
+      atomic: true,
+    });
   }
   return grouped;
 };
@@ -947,7 +947,7 @@ export type RuntimeOutputRoutingDeps = {
 const getDeferredNetworkMeta = (
   env: Env,
   deps: RuntimeOutputRoutingDeps,
-): Map<string, { attempts: number; nextRetryAt: number }> => {
+): NonNullable<NonNullable<Env['runtimeState']>['deferredNetworkMeta']> => {
   const state = deps.ensureRuntimeState(env);
   if (!state.deferredNetworkMeta) {
     state.deferredNetworkMeta = new Map();
@@ -1086,7 +1086,7 @@ export const splitPendingOutputsByRetryWindow = (
       const identity = getReliableOutputIdentity(output);
       if (!identity || !isAccountAckIdentity(identity)) return [];
       const retry = meta.get(buildRouteOutputKey(output));
-      return !retry || retry.nextRetryAt <= nowMs ? [identity.laneKey] : [];
+      return !retry || (!retry.manual && retry.nextRetryAt <= nowMs) ? [identity.laneKey] : [];
     }),
   );
 
@@ -1097,10 +1097,12 @@ export const splitPendingOutputsByRetryWindow = (
         .map(output => getReliableOutputIdentity(output)!)
         .filter((identity): identity is ReliableOutputIdentity => identity !== null);
       const retryFenceOutputs = reliableOutputs.length > 0 ? reliableOutputs : unit.outputs;
-      const due = (restoredReliableDue && reliable.length > 0) || retryFenceOutputs.some(output => {
+      const manuallyPaused = retryFenceOutputs.some(output =>
+        meta.get(buildRouteOutputKey(output))?.manual === true);
+      const due = !manuallyPaused && ((restoredReliableDue && reliable.length > 0) || retryFenceOutputs.some(output => {
         const entry = meta.get(buildRouteOutputKey(output));
         return !entry || entry.nextRetryAt <= nowMs;
-      });
+      }));
       if (due) {
         ready.push(...unit.outputs);
       } else {
@@ -1145,11 +1147,13 @@ export const getNextNetworkRetryTimestamp = (
 ): number | null => {
   const pending = env.pendingNetworkOutputs ?? [];
   if (pending.length === 0) return null;
+  const meta = getDeferredNetworkMeta(env, deps);
   if (
     hasRestoredReliableOutputsDue(env) &&
-    pending.some(output => getReliableOutputIdentity(output) !== null)
+    pending.some(output =>
+      getReliableOutputIdentity(output) !== null &&
+      meta.get(buildRouteOutputKey(output))?.manual !== true)
   ) return 0;
-  const meta = getDeferredNetworkMeta(env, deps);
   let nextRetryAt = Infinity;
   const blockedUntilByReliableLane = new Map<string, number>();
   const retryScheduledOutputs = groupAtomicCrossJAdmissionOutputs(buildPendingNetworkOutputs(pending))
@@ -1165,7 +1169,9 @@ export const getNextNetworkRetryTimestamp = (
       return reliableOutputs.length > 0 ? reliableOutputs : unit.outputs;
     });
   for (const output of retryScheduledOutputs) {
-    const ownRetryAt = meta.get(buildRouteOutputKey(output))?.nextRetryAt ?? 0;
+    const retry = meta.get(buildRouteOutputKey(output));
+    if (retry?.manual) continue;
+    const ownRetryAt = retry?.nextRetryAt ?? 0;
     const reliable = getReliableOutputIdentity(output);
     if (!reliable) {
       nextRetryAt = Math.min(nextRetryAt, ownRetryAt);
@@ -1372,27 +1378,27 @@ export const pruneReceiptedReliableOutputs = (
     ]
       .some(receipt => receipt && reliableReceiptCoversIdentity(receipt, identity));
   };
-  const envelopeGroups = new Map<string, RoutedEntityInput[]>();
+  const sourceFrameGroups = new Map<string, RoutedEntityInput[]>();
   for (const output of outputs) {
     const key = sourceFrameGroupKey(output) ?? safeStringify({ singleton: buildRouteOutputKey(output) });
-    const group = envelopeGroups.get(key) ?? [];
+    const group = sourceFrameGroups.get(key) ?? [];
     group.push(output);
-    envelopeGroups.set(key, group);
+    sourceFrameGroups.set(key, group);
   }
   const retained: RoutedEntityInput[] = [];
-  for (const group of envelopeGroups.values()) {
-    const reliableOutputs = group.filter(output => getReliableOutputIdentity(output) !== null);
+  for (const unit of [...sourceFrameGroups.values()].flatMap(groupAtomicCrossJAdmissionOutputs)) {
+    const reliableOutputs = unit.outputs.filter(output => getReliableOutputIdentity(output) !== null);
     if (
-      isAtomicCrossJAdmissionEnvelope(group) &&
+      unit.atomic &&
       reliableOutputs.length > 0 &&
       reliableOutputs.every(isReceipted)
     ) {
-      for (const output of group) {
+      for (const output of unit.outputs) {
         env.runtimeState?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
       }
       continue;
     }
-    for (const output of group) {
+    for (const output of unit.outputs) {
       if (!isReceipted(output)) {
         retained.push(output);
         continue;
@@ -1423,6 +1429,9 @@ export const rescheduleDeferredOutputs = (
   const nowMs = getNetworkRetryNowMs(env);
   const retriedReliableLanes = new Set<string>();
   for (const unit of groupAtomicCrossJAdmissionOutputs(buildPendingNetworkOutputs(failed))) {
+    // A cross-j Account cohort must remain one durable envelope, but it must not
+    // replay itself after a peer outage. The operator explicitly re-arms it once
+    // that peer is known online; until then both Account frames stay paused here.
     const retryOutputs = unit.atomic
       ? unit.outputs.filter(output => getReliableOutputIdentity(output) !== null)
       : unit.outputs;
@@ -1446,7 +1455,11 @@ export const rescheduleDeferredOutputs = (
       const attempts = (meta.get(key)?.attempts ?? 0) + 1;
       const retryMaxMs = reliable ? RELIABLE_NETWORK_RETRY_MAX_MS : NETWORK_RETRY_MAX_MS;
       const delayMs = Math.min(retryMaxMs, NETWORK_RETRY_BASE_MS * (2 ** Math.min(attempts - 1, 5)));
-      meta.set(key, { attempts, nextRetryAt: nowMs + delayMs });
+      meta.set(key, {
+        attempts,
+        nextRetryAt: unit.atomic ? nowMs : nowMs + delayMs,
+        ...(unit.atomic ? { manual: true as const } : {}),
+      });
       if (reliable) retriedReliableLanes.add(reliable.laneKey);
     }
   }
@@ -1456,6 +1469,36 @@ export const rescheduleDeferredOutputs = (
   }
 
   return buildPendingNetworkOutputs([...failed, ...waiting]);
+};
+
+export const markPendingCrossJAdmissionOutputsReady = (
+  env: Env,
+  deps: RuntimeOutputRoutingDeps,
+  targetRuntimeId?: string,
+): number => {
+  const normalizedTarget = targetRuntimeId ? normalizeRuntimeId(targetRuntimeId) : '';
+  const meta = getDeferredNetworkMeta(env, deps);
+  const nowMs = getNetworkRetryNowMs(env);
+  let readyEnvelopes = 0;
+  for (const unit of groupAtomicCrossJAdmissionOutputs(
+    buildPendingNetworkOutputs(env.pendingNetworkOutputs ?? []),
+  )) {
+    if (!unit.atomic) continue;
+    if (normalizedTarget && unit.outputs.some(output => normalizeRuntimeId(output.runtimeId) !== normalizedTarget)) {
+      continue;
+    }
+    const retryOutputs = unit.outputs.filter(output => getReliableOutputIdentity(output) !== null);
+    if (!retryOutputs.some(output => meta.get(buildRouteOutputKey(output))?.manual === true)) continue;
+    for (const output of retryOutputs) {
+      const key = buildRouteOutputKey(output);
+      meta.set(key, {
+        attempts: meta.get(key)?.attempts ?? 0,
+        nextRetryAt: nowMs,
+      });
+    }
+    readyEnvelopes += 1;
+  }
+  return readyEnvelopes;
 };
 
 export const planEntityOutputs = (
@@ -1777,7 +1820,8 @@ export const dispatchEntityOutputs = (
   }
 
   const envelopeGroups = [...groupedByEnvelope.values()]
-    .map(group => ({ ...group, outputs: batchOutputsByTarget(group.outputs) }))
+    .flatMap(group => groupAtomicCrossJAdmissionOutputs(batchOutputsByTarget(group.outputs))
+      .map(unit => ({ targetRuntimeId: group.targetRuntimeId, ...unit })))
     .sort((left, right) =>
       compareStableText(left.targetRuntimeId, right.targetRuntimeId) ||
       compareOutputDelivery(left.outputs[0]!, right.outputs[0]!));
@@ -1791,7 +1835,7 @@ export const dispatchEntityOutputs = (
   // The receiver still queues out-of-order delivery and rejects equivocation.
   const blockedReliableLanes = new Set<string>();
   for (const group of envelopeGroups) {
-    const atomicCrossJAdmission = isAtomicCrossJAdmissionEnvelope(group.outputs);
+    const atomicCrossJAdmission = group.atomic;
     const sendable: DeliverableEntityInput[] = [];
     for (const output of group.outputs) {
       const reliable = getReliableOutputIdentity(output);

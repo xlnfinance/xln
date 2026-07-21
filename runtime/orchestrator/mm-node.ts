@@ -9,7 +9,7 @@ import { readInheritedChildSecrets, resolveChildSecret } from './child-secrets';
 import { registerRuntimeAdapterAuthSeed } from '../radapter/auth';
 import { decodeRuntimeAdapterRequest } from '../radapter/codec';
 import { deriveAccountWatchSeed } from '../account/watch-seed';
-import { deriveSignerAddressSync, deriveSignerKeySync, prewarmSignerLabels, registerSignerKey } from '../account/crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import {
@@ -600,14 +600,6 @@ const buildLocalMarketMakerSignerLabels = (): string[] => {
     if (secondaryName) labels.push(`${resolvedArgs.signerLabel}:${secondaryName}`);
   }
   return labels;
-};
-
-const prewarmLocalMarketMakerSignerKeys = (): void => {
-  const signerIds = prewarmSignerLabels(resolvedArgs.seed, buildLocalMarketMakerSignerLabels());
-  nodeLog.info('signer_keys.prewarmed', {
-    name: resolvedArgs.name,
-    count: signerIds.length,
-  });
 };
 
 const configureMarketMakerRuntimeLogging = (env: Env): void => {
@@ -3309,15 +3301,15 @@ const getMarketMakerRuntimeBacklogSnapshot = (
 const run = async (): Promise<void> => {
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
 
-	  // Replay uses the exact signed bytes/nonces from WAL, but reconstructing a
-	  // local proposal still requires the deterministic private key to exist.
-	  prewarmLocalMarketMakerSignerKeys();
+	  const localSignerLabels = buildLocalMarketMakerSignerLabels();
 	  const env = await main(resolvedArgs.seed, {
+	    localSigners: localSignerLabels.map(label => ({ label })),
 	    trustedJurisdictionRpcBindings: resolveMeshJurisdictionRpcBindings(
 	      resolvedArgs.rpcUrl,
 	      resolveLocalApiUrl,
 	    ),
 	  });
+	  nodeLog.info('signer_keys.ready', { name: resolvedArgs.name, count: localSignerLabels.length });
 	  // Capture the persistence oracle before the runtime loop or jurisdiction
 	  // watchers can apply new, legitimate inputs. A post-startup raw Entity hash
 	  // is not a restore oracle: even an empty finalized J range advances the

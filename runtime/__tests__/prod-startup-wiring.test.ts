@@ -386,11 +386,11 @@ describe('production startup wiring', () => {
     expect(standaloneServer).toContain('throw new Error(`PREDEPLOYED_CONTRACT_CODE_MISSING:');
     expect(standaloneServer).toContain('throw new Error(`PREDEPLOYED_STACK_DEPLOY_FORBIDDEN:${reason}`)');
     expect(standaloneServer).toContain('await globalJAdapter?.close();');
-    expect(custodyBootstrap).toContain('startupSignerPrivateKey: startupIdentity.privateKeyHex');
-    expect(standaloneServer).toContain('const STARTUP_SIGNER_SECRET = (() => {');
-    expect(standaloneServer.indexOf('registerSignerKey(\n        env,\n        STARTUP_SIGNER_SECRET.signerId')).toBeLessThan(
-      standaloneServer.indexOf('startRuntimeLoop(env);'),
-    );
+    expect(custodyBootstrap).toContain('startupSignerSeed: options.seed');
+    expect(custodyBootstrap).toContain('startupSignerLabel: options.signerLabel');
+    expect(standaloneServer).toContain('const STARTUP_SIGNER = (() => {');
+    expect(standaloneServer).toContain('localSigners: STARTUP_SIGNER ? [STARTUP_SIGNER] : []');
+    expect(standaloneServer).not.toContain('registerSignerKey(');
     expect(standaloneServer).not.toContain('globalJAdapter?.close().catch(() => undefined)');
     expect(standaloneServer).toContain('updateJurisdictionsJson(');
     expect(standaloneServer).toContain('globalJAdapter.entityProviderDeploymentBlock,');
@@ -556,12 +556,9 @@ describe('production startup wiring', () => {
     expect(hubNode).not.toContain('persistencePaused = true');
     expect(hubNode).not.toContain('ready-snapshot');
     expect(hubNode).toContain('startRuntimeLoop(env, {');
-    expect(hubNode).toContain("import { prewarmSignerLabels } from '../account/crypto';");
     expect(hubNode).toContain('const buildLocalHubSignerLabels = (): string[] => {');
-    expect(hubNode).toContain('const prewarmLocalHubSignerKeys = (): void => {');
-    expect(hubNode).toContain('prewarmLocalHubSignerKeys();');
-    expect(hubNode.indexOf('prewarmLocalHubSignerKeys();')).toBeLessThan(hubNode.indexOf('const env = await main('));
-    expect(hubNode.indexOf('prewarmLocalHubSignerKeys();')).toBeLessThan(hubNode.indexOf('startRuntimeLoop(env, {'));
+    expect(hubNode).toContain('localSigners: localSignerLabels.map(label => ({ label }))');
+    expect(hubNode).not.toContain('prewarmSignerLabels');
     expect(hubNode).toContain('const hasLiveJAdapterForJurisdiction = (env: Env, jurisdictionName: string): boolean =>');
     expect(hubNode).toContain('if (!hasLiveJAdapterForJurisdiction(env, secondaryName)) {');
     expect(orchestrator).not.toContain('creditAmount: MARKET_MAKER_CREDIT_AMOUNT.toString()');
@@ -575,12 +572,9 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const configureMarketMakerRuntimeLogging = (env: Env): void => {');
     expect(mmNode).toContain("if (envFlagEnabled(process.env['XLN_MARKET_MAKER_VERBOSE_RUNTIME_LOGS'])) return;");
     expect(mmNode).toContain('env.quietRuntimeLogs = true;');
-    expect(mmNode).toContain('prewarmSignerLabels');
     expect(mmNode).toContain('const buildLocalMarketMakerSignerLabels = (): string[] => {');
-    expect(mmNode).toContain('const prewarmLocalMarketMakerSignerKeys = (): void => {');
-    expect(mmNode).toContain('prewarmLocalMarketMakerSignerKeys();');
-    expect(mmNode.indexOf('prewarmLocalMarketMakerSignerKeys();')).toBeLessThan(mmNode.indexOf('const env = await main('));
-    expect(mmNode.indexOf('prewarmLocalMarketMakerSignerKeys();')).toBeLessThan(mmNode.indexOf('startRuntimeLoop(env, {'));
+    expect(mmNode).toContain('localSigners: localSignerLabels.map(label => ({ label }))');
+    expect(mmNode).not.toContain('prewarmSignerLabels');
     expect(mmNode).toContain('const hasLiveJurisdictionAdapter = (env: Env, jurisdiction: JurisdictionConfig): boolean => {');
     expect(mmNode).toContain('const targetRef = getJurisdictionIdentityRef(target);');
     expect(mmNode).toContain('const replicaRef = getJurisdictionIdentityRef(replica);');
@@ -1341,6 +1335,10 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_HUB_MESH_BUDGET_MS'] || '20000'");
     expect(smoke).toContain('LOCAL_PROD_SMOKE_STAGE_BUDGET_EXCEEDED');
     expect(smoke).toContain('spawnH1StartedAt: health.timings?.reset_spawn_h1?.startedAt');
+    expect(orchestrator).toContain('if (preserveState) await Promise.all(h23.map(child => spawnHub(child)));');
+    expect(orchestrator).toContain('await Promise.all(hubChildren.map(child => waitForHubSelfReady(child)));');
+    expect(orchestrator).toContain('await Promise.all(h23.map(async child => {');
+    expect(orchestrator).not.toContain('for (const child of h23) {');
     expect(smoke).not.toContain("const serverStartedAt = stageElapsed('server:started') ?? 0;");
     expect(smoke).toContain("const crossReadyAt = stageElapsed('marketMaker:cross-ready');");
     expect(smoke).toContain("requireStageBudget('marketMaker:cross', crossReadyAt - crossStartedAt, stageBudgetsMs.cross, snapshot);");
