@@ -112,8 +112,10 @@ test('bun run dev does not print token-bearing runtime import URLs by default', 
   expect(devChild).toContain('"${DEV_CHILD_COMMAND} vite-http"');
   expect(runDev).not.toContain('USE_ANVIL=true RUNTIME_VERBOSE_LOGS=');
   expect(runDev).not.toContain('exec concurrently');
-  expect(runDev).toContain('sawSigtermFanout++');
-  expect(runDev).toContain('concurrently_status=${PIPESTATUS[0]}');
+  expect(runDev).toContain('bun --no-orphans "$CONCURRENTLY_JS"');
+  expect(runDev).toContain('--kill-timeout 5000');
+  expect(runDev).toContain('trap cleanup_dev_stack EXIT');
+  expect(runDev).toContain('concurrently_status=$?');
   expect(runDev).toContain('exit "$concurrently_status"');
   expect(devChild).toContain('runtime/orchestrator/orchestrator.ts');
   expect(devChild).toContain('DEV_CHILD_ROLE_UNKNOWN');
@@ -125,7 +127,7 @@ test('bun run dev does not print token-bearing runtime import URLs by default', 
   expect(runDev).toContain('MESH_LOG_LEVEL="${XLN_LOG_LEVEL:-warn}"');
   expect(devChild).toContain('XLN_LOG_LEVEL="$MESH_LOG_LEVEL"');
   expect(runtimeWatcher).toContain('set -euo pipefail');
-  expect(runtimeWatcher).toContain('bun build runtime/runtime.ts');
+  expect(runtimeWatcher).toContain('bun --no-orphans build runtime/runtime.ts');
   expect(runtimeWatcher).toContain('--external buffer');
   expect(runtimeWatcher).toContain('if [[ -z "${line//[[:space:]]/}" ]]');
 });

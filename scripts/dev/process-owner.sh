@@ -1,13 +1,21 @@
 #!/bin/bash
 
-dev_process_start_identity() {
+read_dev_process_start_identity() {
   local pid="$1"
   local identity
   if ! identity="$(LC_ALL=C ps -ww -p "$pid" -o lstart= 2>/dev/null | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"; then
-    echo "DEV_PROCESS_START_IDENTITY_UNAVAILABLE:pid=${pid}" >&2
     return 1
   fi
   if [[ -z "$identity" || "$identity" == *$'\t'* || "$identity" == *$'\n'* ]]; then
+    return 1
+  fi
+  printf '%s' "$identity"
+}
+
+dev_process_start_identity() {
+  local pid="$1"
+  local identity
+  if ! identity="$(read_dev_process_start_identity "$pid")"; then
     echo "DEV_PROCESS_START_IDENTITY_INVALID:pid=${pid}" >&2
     return 1
   fi
@@ -38,12 +46,24 @@ dev_repo_root_canonical() {
 assert_owned_dev_process_identity() {
   local pid="$1" expected_start="$2" repo_root="$3" role="$4"
   local live_start command_line expected_script
-  live_start="$(dev_process_start_identity "$pid")" || return 1
+  if ! live_start="$(read_dev_process_start_identity "$pid")"; then
+    # The process may exit between kill -0 and ps. That is successful cleanup,
+    # not an ownership failure. A still-live process without a provable start
+    # identity remains a hard stop so cleanup can never signal a foreign PID.
+    if ! kill -0 "$pid" 2>/dev/null; then
+      return 3
+    fi
+    echo "DEV_PROCESS_START_IDENTITY_UNAVAILABLE:pid=${pid}" >&2
+    return 1
+  fi
   if [[ "$live_start" != "$expected_start" ]]; then
     echo "DEV_PROCESS_START_IDENTITY_MISMATCH:pid=${pid} expected=${expected_start} actual=${live_start}" >&2
     return 1
   fi
   if ! command_line="$(LC_ALL=C ps -ww -p "$pid" -o command= 2>/dev/null)" || [[ -z "$command_line" ]]; then
+    if ! kill -0 "$pid" 2>/dev/null; then
+      return 3
+    fi
     echo "DEV_PROCESS_COMMAND_UNAVAILABLE:pid=${pid}" >&2
     return 1
   fi
@@ -100,7 +120,14 @@ signal_owned_dev_record() {
   local pid process_start repo_root role
   IFS=$'\t' read -r pid process_start repo_root role <<< "$record"
   kill -0 "$pid" 2>/dev/null || return 0
-  assert_owned_dev_process_identity "$pid" "$process_start" "$repo_root" "$role" || return 1
+  local identity_status
+  if assert_owned_dev_process_identity "$pid" "$process_start" "$repo_root" "$role"; then
+    identity_status=0
+  else
+    identity_status=$?
+  fi
+  [[ "$identity_status" -eq 3 ]] && return 0
+  [[ "$identity_status" -eq 0 ]] || return "$identity_status"
   if ! kill "-$signal" "$pid" 2>/dev/null && kill -0 "$pid" 2>/dev/null; then
     echo "DEV_PROCESS_SIGNAL_FAILED:pid=${pid} signal=${signal}" >&2
     return 1
@@ -117,8 +144,13 @@ stop_owned_dev_process_batch() {
     for record in "${records[@]}"; do
       IFS=$'\t' read -r pid process_start repo_root role <<< "$record"
       if kill -0 "$pid" 2>/dev/null; then
-        assert_owned_dev_process_identity "$pid" "$process_start" "$repo_root" "$role" || return 1
-        remaining+=("$record")
+        local identity_status
+        if assert_owned_dev_process_identity "$pid" "$process_start" "$repo_root" "$role"; then
+          remaining+=("$record")
+        else
+          identity_status=$?
+          [[ "$identity_status" -eq 3 ]] || return "$identity_status"
+        fi
       fi
     done
     [[ "${#remaining[@]}" -eq 0 ]] && return 0
@@ -128,6 +160,19 @@ stop_owned_dev_process_batch() {
   done
   echo "[dev:clean] force-stopping owned dev processes" >&2
   for record in "${records[@]}"; do signal_owned_dev_record KILL "$record" || return 1; done
+  attempts=20
+  while [[ "$attempts" -gt 0 ]]; do
+    local live_count=0
+    for record in "${records[@]}"; do
+      IFS=$'\t' read -r pid process_start repo_root role <<< "$record"
+      kill -0 "$pid" 2>/dev/null && live_count=$((live_count + 1))
+    done
+    [[ "$live_count" -eq 0 ]] && return 0
+    sleep 0.1
+    attempts=$((attempts - 1))
+  done
+  echo "DEV_PROCESS_FORCE_STOP_TIMEOUT:count=${#records[@]}" >&2
+  return 1
 }
 
 stop_owned_dev_processes() {
@@ -153,10 +198,45 @@ stop_owned_dev_processes() {
       return 1
     fi
     if ! kill -0 "$pid" 2>/dev/null; then rm -f "$pid_file"; continue; fi
-    assert_owned_dev_process_identity "$pid" "$process_start" "$repo_root" "$role" || return 1
+    local identity_status
+    if assert_owned_dev_process_identity "$pid" "$process_start" "$repo_root" "$role"; then
+      identity_status=0
+    else
+      identity_status=$?
+    fi
+    if [[ "$identity_status" -eq 3 ]]; then
+      rm -f "$pid_file"
+      continue
+    fi
+    [[ "$identity_status" -eq 0 ]] || return "$identity_status"
     owned_records+=("$pid"$'\t'"$process_start"$'\t'"$repo_root"$'\t'"$role")
   done
   [[ "${#owned_records[@]}" -eq 0 ]] && return 0
   echo "[dev:clean] stopping owned dev processes"
   stop_owned_dev_process_batch "${owned_records[@]}"
+}
+
+dev_single_line() {
+  tr '\t\r\n' '   ' | sed -e 's/[[:space:]][[:space:]]*/ /g' -e 's/^ //' -e 's/ $//'
+}
+
+describe_dev_port_listener() {
+  local port="$1" pid="$2" pid_dir="$3"
+  local ppid pgid process_start cwd command ownership pid_file
+  ppid="$(LC_ALL=C ps -p "$pid" -o ppid= 2>/dev/null | dev_single_line || true)"
+  pgid="$(LC_ALL=C ps -p "$pid" -o pgid= 2>/dev/null | dev_single_line || true)"
+  process_start="$(read_dev_process_start_identity "$pid" 2>/dev/null || printf 'unavailable')"
+  cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | dev_single_line || true)"
+  command="$(LC_ALL=C ps -ww -p "$pid" -o command= 2>/dev/null | dev_single_line || true)"
+  ownership='none'
+  for pid_file in "$pid_dir"/*.pid; do
+    [[ -e "$pid_file" ]] || continue
+    local owner_id stored_pid stored_start repo_root role extra
+    IFS=$'\t' read -r owner_id stored_pid stored_start repo_root role extra < "$pid_file" || continue
+    if [[ "$stored_pid" == "$pid" ]]; then
+      ownership="role=${role},record=$(basename "$pid_file")"
+      break
+    fi
+  done
+  echo "DEV_PORT_BUSY_PROCESS:port=${port} pid=${pid} ppid=${ppid:-unavailable} pgid=${pgid:-unavailable} start=${process_start} cwd=${cwd:-unavailable} ownership=${ownership} command=${command:-unavailable}" >&2
 }

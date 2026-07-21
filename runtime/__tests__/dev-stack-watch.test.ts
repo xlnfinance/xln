@@ -48,7 +48,7 @@ test('dev stack restarts backend services when source changes', () => {
   expect(script).toContain('bun --no-orphans runtime/scripts/watch-process-tree.ts');
   expect(script).toContain('--watch-root "$REPO_ROOT/runtime"');
   expect(script).toContain('bun --no-orphans runtime/orchestrator/orchestrator.ts');
-  expect(script).toContain('bun --watch runtime/watchtower/standalone-server.ts');
+  expect(script).toContain('bun --no-orphans --watch runtime/watchtower/standalone-server.ts');
 });
 
 test('configured MESH supervisor reaps its exact process group before restart', async () => {

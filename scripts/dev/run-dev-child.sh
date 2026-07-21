@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
 DEV_CHILD_COMMAND="\"$REPO_ROOT/scripts/dev/run-dev-child.sh\""
+CONCURRENTLY_JS="$REPO_ROOT/node_modules/concurrently/dist/bin/concurrently.js"
 source "$SCRIPT_DIR/process-owner.sh"
 
 role="${1:-}"
@@ -37,8 +38,14 @@ ANVIL_BLOCK_TIME="${XLN_ANVIL_BLOCK_TIME:-1}"
 RUNTIME_VERBOSE_LOGS="${RUNTIME_VERBOSE_LOGS:-0}"
 DEV_VERBOSE="${DEV_VERBOSE:-0}"
 DEV_RPC_READY_TIMEOUT_MS="${XLN_DEV_RPC_READY_TIMEOUT_MS:-15000}"
+DEV_CHILD_TERM_TIMEOUT_MS="${XLN_DEV_CHILD_TERM_TIMEOUT_MS:-5000}"
 ANVIL_TMPDIR="${ANVIL_TMPDIR:-$XLN_JDB_ROOT/tmp/anvil}"
 ANVIL_STATE_INTERVAL_SECONDS=60
+
+if [[ ! "$DEV_CHILD_TERM_TIMEOUT_MS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "DEV_CHILD_TERM_TIMEOUT_INVALID:${DEV_CHILD_TERM_TIMEOUT_MS}" >&2
+  exit 2
+fi
 
 register_owned_dev_process "$role" "$REPO_ROOT"
 owned_child_pid=''
@@ -51,7 +58,25 @@ forward_owned_signal() {
   local signal="$1"
   trap - TERM INT EXIT
   if [[ -n "$owned_child_pid" ]] && kill -0 "$owned_child_pid" 2>/dev/null; then
-    kill "-$signal" "$owned_child_pid" 2>/dev/null || true
+    # Background processes may inherit SIGINT as ignored. Always request an
+    # orderly child shutdown with SIGTERM, then enforce a finite upper bound.
+    kill -TERM "$owned_child_pid" 2>/dev/null || true
+    local attempts=$(( (DEV_CHILD_TERM_TIMEOUT_MS + 99) / 100 ))
+    while kill -0 "$owned_child_pid" 2>/dev/null && [[ "$attempts" -gt 0 ]]; do
+      local child_state
+      child_state="$(LC_ALL=C ps -p "$owned_child_pid" -o stat= 2>/dev/null | sed -e 's/^[[:space:]]*//' || true)"
+      [[ "$child_state" == Z* ]] && break
+      sleep 0.1
+      attempts=$((attempts - 1))
+    done
+    if kill -0 "$owned_child_pid" 2>/dev/null; then
+      local child_state
+      child_state="$(LC_ALL=C ps -p "$owned_child_pid" -o stat= 2>/dev/null | sed -e 's/^[[:space:]]*//' || true)"
+      if [[ "$child_state" != Z* ]]; then
+        echo "DEV_CHILD_FORCE_STOP:role=${role} pid=${owned_child_pid}" >&2
+        kill -KILL "$owned_child_pid" 2>/dev/null || true
+      fi
+    fi
     wait "$owned_child_pid" 2>/dev/null || true
   fi
   cleanup_owned_child
@@ -116,8 +141,10 @@ case "$role" in
   stack)
     run_owned bun runtime/scripts/wait-rpc-chain.ts --url "http://127.0.0.1:${RPC_PORT}" --chain-id 31337 --timeout-ms "$DEV_RPC_READY_TIMEOUT_MS"
     run_owned bun runtime/scripts/wait-rpc-chain.ts --url "http://127.0.0.1:${RPC2_PORT}" --chain-id 31338 --timeout-ms "$DEV_RPC_READY_TIMEOUT_MS"
-    run_owned concurrently \
+    run_owned bun --no-orphans "$CONCURRENTLY_JS" \
+      --kill-others \
       --kill-others-on-fail \
+      --kill-timeout 5000 \
       --names 'MESH,WATCH,RUNTIME,VITE,VITE_HTTP' \
       -c 'blue,red,yellow,green,white' \
       "${DEV_CHILD_COMMAND} mesh" \
@@ -157,7 +184,7 @@ case "$role" in
         --wallet-url "http://localhost:${WEB_HTTP_PORT}/app"
     ;;
   watchtower)
-    run_owned bun --watch runtime/watchtower/standalone-server.ts \
+    run_owned bun --no-orphans --watch runtime/watchtower/standalone-server.ts \
       --host 127.0.0.1 \
       --port "$WATCHTOWER_PORT" \
       --db "$XLN_RDB_ROOT/watchtower" \
