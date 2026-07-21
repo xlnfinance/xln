@@ -27,9 +27,24 @@ and `bun run security:audit-pack` passed on 2026-07-09, and a
 historical release soak completed 13 full gate/benchmark iterations before
 being stopped manually. That is enough for serious public-testnet hardening. It
 is not enough for real funds because the full uninterrupted current
-mainnet-preflight soak, policy-enforcing threshold signing, real mainnet ops,
-and independent external audit are still open. Peer State Refresh is an
-optional third-line recovery aid, not a launch gate.
+mainnet-preflight soak, real mainnet ops, and independent external audit are
+still open. Peer State Refresh is an optional third-line recovery aid, not a
+launch gate.
+
+### Signing boundary decision
+
+Runtime is the policy-enforcement boundary. Signers authorize only the exact
+hashes produced by Runtime after deterministic RJEA validation and entity
+quorum; a separate signer or HSM must not attempt to reimplement that policy.
+RJEA is too stateful and protocol-specific to duplicate safely in generic key
+hardware, and two policy engines would create a divergence and upgrade hazard.
+
+An HSM may still be used as optional key custody against raw-key extraction,
+but it is neither a mainnet gate nor a defense against compromise of a live
+Runtime that is authorized to request signatures. Operational controls,
+multisigner entity governance, backups, watchtowers, and fail-closed Runtime
+validation are the supported security boundaries. Do not reopen mandatory HSM
+or external policy-signer work without an explicit owner architecture change.
 
 ## Public Testnet / Demo Scope
 

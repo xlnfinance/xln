@@ -124,6 +124,12 @@ operational evidence for restart/load stability, not unit-test substitutes.
 
 ## Known Non-Goals
 
+- Do not require an HSM or external signer to duplicate Runtime policy. Runtime
+  is the deterministic RJEA policy-enforcement boundary; duplicating its
+  stateful rules in key hardware creates a second policy engine that can drift.
+  Optional HSM custody may reduce raw-key extraction risk, but it cannot protect
+  against a compromised live Runtime that remains authorized to request
+  signatures and is not a mainnet gate.
 - Do not propose repair-on-restore or quarantine behavior for production storage corruption. Production should fail closed.
 - Do not route cross-jurisdiction control messages through generic public P2P unless a new signed inter-runtime protocol is explicitly designed and reviewed.
 - Do not treat "queued" HTTP responses as committed payments.
@@ -135,8 +141,6 @@ operational evidence for restart/load stability, not unit-test substitutes.
 
 ## Known Open Mainnet Blockers
 
-- Signing remains scheduled for a remote signer/HSM boundary; raw runtime
-  signing seed material must not be treated as a final real-funds posture.
 - The current one-hour mainnet-preflight soak must complete uninterrupted from a
   clean tree.
 - Real mainnet RPC endpoints, operator/tower funding, gas policy, incident

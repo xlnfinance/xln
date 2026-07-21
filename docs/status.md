@@ -36,10 +36,11 @@ What is true now:
 - a release soak passed 13 complete `gate:ci + hub10k` iterations before manual
   stop, but the current one-hour mainnet-preflight soak has not completed
   uninterrupted on this line;
-- remaining mainnet risk is concentrated in policy-enforcing threshold
-  signing, uninterrupted release-duration soak, external audit, real mainnet
-  ops, observability, and explicit product boundaries. PSR/peer recovery is an
-  optional third-line recovery aid rather than a launch gate.
+- remaining mainnet risk is concentrated in uninterrupted release-duration
+  soak, external audit, real mainnet ops, observability, and explicit product
+  boundaries. Runtime is the policy engine; mandatory HSM/external policy
+  signing is explicitly not a launch gate. PSR/peer recovery is an optional
+  third-line recovery aid rather than a launch gate.
 
 ## Precedence
 
