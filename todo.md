@@ -68,8 +68,10 @@ An audit claim is not accepted until reproduced against the current candidate.
   resolve the source pull before the exact User ACK/Hanko is committed.
 - [x] L1: replay/idempotency, whole-envelope manual retry, WAL/restart recovery,
   and no `targetReceipt` in protocol state or persisted records.
-- [ ] L2: exact cross-j isolated flow, packet loss/reorder, partial fill, cancel,
-  dispute and restart scenarios.
+- [x] L2: exact isolated full/partial/cancel/dispute flow on `d8e6f1954`:
+  Playwright 1/1 PASS, strict isolated runner PASS in 49.3s.
+- [ ] L2: packet loss/reorder and live restart during one intact cross-j
+  envelope; prove no single-leg commit and manual whole-envelope retry.
 - [ ] L3: full cross-j/security/release E2E; eliminate
   `ROUTE_CROSS_J_ATOMIC_PAIR_MISSING` without relaxing atomicity.
 
@@ -230,7 +232,7 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   and signer readiness. Freeze the exact SHA only when the final gate begins.
 - QA evidence upload is deferred by owner and is not a blocker for bug fixing.
 - [ ] L1 and L2 evidence for every changed invariant.
-- [ ] `VITE_DEV_PORT=18080 bun run check` exit 0; frozen core unchanged.
+- [x] `VITE_DEV_PORT=18080 bun run check` exit 0; frozen core unchanged.
 - [ ] Full unit/storage/Merkle/WAL/SIGKILL/security/contract/RPC/BrowserVM gates.
 - [ ] Profile accountInput after correctness refactors; retain a CI metric and
   target <=50ms/tx per bilateral pair before publishing TPS claims.
