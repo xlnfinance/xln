@@ -13,13 +13,18 @@ import { accountHasPullResolveQueued } from './tx/cross-jurisdiction-helpers';
 const normalized = (value: unknown): string => String(value ?? '').trim().toLowerCase();
 
 const nestedTxs = (tx: EntityTx): readonly EntityTx[] =>
-  tx.type === 'entityCommand' ? tx.data.txs : [tx];
+  tx.type === 'entityCommand'
+    ? tx.data.txs
+    : tx.type === 'runtimeOutput' && tx.data.protocol === 'cross-j'
+      ? tx.data.entityTxs
+      : [tx];
 
 const pendingOrderIds = (replica: EntityReplica, txs: readonly EntityTx[]): Set<string> => {
   const ids = new Set<string>();
   for (const tx of [...replica.mempool, ...txs]) {
     for (const nested of nestedTxs(tx)) {
       if (nested.type === 'materializeCrossJurisdictionSwap') ids.add(`setup:${nested.data.route.orderId}`);
+      if (nested.type === 'registerCrossJurisdictionSwap') ids.add(`setup:${nested.data.route.orderId}`);
       if (nested.type === 'materializeCrossJurisdictionClear') ids.add(`clear:${nested.data.orderId}`);
     }
   }
@@ -39,6 +44,16 @@ export const appendDefaultProposerCrossJMaterializations = (
 ): EntityTx[] => {
   const defaultProposer = normalized(replica.state.config.validators[0]);
   if (!defaultProposer || normalized(replica.signerId) !== defaultProposer) return [...txs];
+
+  // A sibling registration is the commit phase of one already-materialized
+  // envelope. Pulling unrelated local intents into that Entity frame lets one
+  // Account proposal include reverse routes before its paired sibling can see
+  // them. Keep preparation and registration as separate Runtime phases; the
+  // intent's own wake/input will materialize it with both legs together.
+  const isRegistrationFrame = txs.some(tx =>
+    nestedTxs(tx).some(nested => nested.type === 'registerCrossJurisdictionSwap')
+  );
+  if (isRegistrationFrame) return [...txs];
 
   const pending = pendingOrderIds(replica, txs);
   const additions: EntityTx[] = [];

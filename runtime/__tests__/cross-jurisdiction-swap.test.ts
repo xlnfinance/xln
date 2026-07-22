@@ -242,12 +242,19 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     const proposer = await applyEntityTx(proposerEnv, proposerRaw.newState, materialized[0]!);
     const validator = await applyEntityTx(validatorEnv, validatorRaw.newState, materialized[0]!);
+    const sourceRegistration = proposer.outputs.find(output => output.entityId === sourceHub)?.entityTxs?.[0];
+    if (sourceRegistration?.type !== 'registerCrossJurisdictionSwap') {
+      throw new Error('TEST_CROSS_J_SOURCE_REGISTRATION_REQUIRED');
+    }
+    const proposerRegistered = await applyEntityTx(proposerEnv, proposer.newState, sourceRegistration);
+    const validatorRegistered = await applyEntityTx(validatorEnv, validator.newState, sourceRegistration);
 
-    expect(proposer.newState.crossJurisdictionSwaps?.get(baseRoute.orderId)?.sourcePull)
+    expect(proposerRegistered.newState.crossJurisdictionSwaps?.get(baseRoute.orderId)?.sourcePull)
       .toEqual(preparedRoute.sourcePull);
-    expect(validator.newState.crossJurisdictionSwaps?.get(baseRoute.orderId)?.sourcePull)
+    expect(validatorRegistered.newState.crossJurisdictionSwaps?.get(baseRoute.orderId)?.sourcePull)
       .toEqual(preparedRoute.sourcePull);
     expect(validator.outputs).toEqual(proposer.outputs);
+    expect(validatorRegistered.mempoolOps).toEqual(proposerRegistered.mempoolOps);
 
     const buildClearingState = (state: EntityState): EntityState => {
       const next = cloneEntityState(state);
@@ -283,8 +290,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       type: 'requestCrossJurisdictionClear',
       data: { orderId: baseRoute.orderId, cancelRemainder: true },
     } as const;
-    const proposerClear = await applyEntityTx(proposerEnv, buildClearingState(proposer.newState), rawClear);
-    const validatorClear = await applyEntityTx(validatorEnv, buildClearingState(validator.newState), rawClear);
+    const proposerClear = await applyEntityTx(proposerEnv, buildClearingState(proposerRegistered.newState), rawClear);
+    const validatorClear = await applyEntityTx(validatorEnv, buildClearingState(validatorRegistered.newState), rawClear);
     expect(proposerClear.mempoolOps).toEqual([]);
     expect(validatorClear.mempoolOps).toEqual([]);
     expect(proposerClear.outputs).toEqual([{ entityId: sourceHub, signerId: sourceHubSigner, entityTxs: [] }]);
@@ -331,9 +338,20 @@ describe('cross-jurisdiction hashledger swap', () => {
       applyEntityTx(proposerEnv, delayedProposerState, materialized[0]!),
       applyEntityTx(validatorEnv, delayedValidatorState, materialized[0]!),
     ]);
-    expect(delayedProposer.newState.crossJurisdictionSwaps?.get(baseRoute.orderId)?.sourcePull)
+    const delayedProposerRegistered = await applyEntityTx(
+      proposerEnv,
+      delayedProposer.newState,
+      sourceRegistration,
+    );
+    const delayedValidatorRegistered = await applyEntityTx(
+      validatorEnv,
+      delayedValidator.newState,
+      sourceRegistration,
+    );
+    expect(delayedProposerRegistered.newState.crossJurisdictionSwaps?.get(baseRoute.orderId)?.sourcePull)
       .toEqual(preparedRoute.sourcePull);
     expect(delayedValidator.outputs).toEqual(delayedProposer.outputs);
+    expect(delayedValidatorRegistered.mempoolOps).toEqual(delayedProposerRegistered.mempoolOps);
 
     const tamperedRoute = {
       ...preparedRoute,
@@ -461,16 +479,15 @@ describe('cross-jurisdiction hashledger swap', () => {
       'sourceEntityId',
       'targetEntityId',
     ]);
-    expect(runtimeOutput.data.entityTxs.map(tx => tx.type)).toEqual([
-      'registerCrossJurisdictionSwap',
-      'pullLock',
-    ]);
+    expect(runtimeOutput.data.entityTxs.map(tx => tx.type)).toEqual(['registerCrossJurisdictionSwap']);
 
     const targetReplica = env.eReplicas.get(`${targetHub}:${targetHubSigner}`)!;
     const targetCommit = await applyEntityInput(env, targetReplica, localOutput);
     expect(targetCommit.outcome.kind).toBe('committed');
     expect(targetCommit.newState.crossJurisdictionSwaps?.get(intent.orderId)?.routeHash).toBe(intent.routeHash);
     expect(targetCommit.newState.accounts.get(targetUser)?.mempool.map(tx => tx.type)).toEqual([]);
+    expect(targetCommit.newState.accounts.get(targetUser)?.pendingFrame?.accountTxs.map(tx => tx.type))
+      .toEqual(['pull_lock']);
     expect(targetCommit.outputs.flatMap(output => output.entityTxs ?? []).some(tx => tx.type === 'consensusOutput')).toBe(true);
   });
 
@@ -554,6 +571,51 @@ describe('cross-jurisdiction hashledger swap', () => {
         data: { proposerSignerId: sourceHubSigner, route: prepared },
       }],
     };
+    const reverseIntent = withCanonicalCrossJurisdictionRouteHash({
+      ...cloneCrossJurisdictionRoute(intent),
+      routeHash: '',
+      orderId: 'cross-j-runtime-same-frame-cascade-reverse',
+      makerEntityId: targetUser,
+      hubEntityId: targetHub,
+      bookOwnerEntityId: targetHub,
+      sourceSignerId: targetUserSigner,
+      sourceHubSignerId: targetHubSigner,
+      targetHubSignerId: sourceHubSigner,
+      targetSignerId: sourceUserSigner,
+      bookHubSignerId: targetHubSigner,
+      source: {
+        jurisdiction: jref(targetJ),
+        entityId: targetUser,
+        counterpartyEntityId: targetHub,
+        tokenId: 1,
+        amount: 900n,
+      },
+      target: {
+        jurisdiction: jref(sourceJ),
+        entityId: sourceHub,
+        counterpartyEntityId: sourceUser,
+        tokenId: 1,
+        amount: 1_000n,
+      },
+    });
+    const secondForwardIntent = withCanonicalCrossJurisdictionRouteHash({
+      ...cloneCrossJurisdictionRoute(intent),
+      routeHash: '',
+      orderId: 'cross-j-runtime-same-frame-cascade-forward-2',
+    });
+    const reversePrepared = buildPreparedCrossJurisdictionRoute(reverseIntent, {
+      runtimeSeed: seed,
+      sourceDisputeDelayMs: 5_000,
+      now: env.timestamp,
+    });
+    const reverseInput: EntityInput = {
+      entityId: targetHub,
+      signerId: targetHubSigner,
+      entityTxs: [{
+        type: 'materializeCrossJurisdictionSwap',
+        data: { proposerSignerId: targetHubSigner, route: reversePrepared },
+      }],
+    };
 
     const saturatedEnv = createEmptyEnv(`${seed}-saturated-local-event`);
     saturatedEnv.timestamp = env.timestamp;
@@ -583,19 +645,40 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(committedSaturatedTarget.crossJurisdictionSwaps?.get(intent.orderId)?.routeHash).toBe(intent.routeHash);
     expect(saturatedEnv.eReplicas.get(`${targetHub}:${targetHubSigner}`)?.mempool).toHaveLength(LIMITS.MEMPOOL_SIZE);
 
+    sourceState.crossJurisdictionSwaps?.set(secondForwardIntent.orderId, secondForwardIntent);
+    targetState.crossJurisdictionSwaps?.set(reverseIntent.orderId, reverseIntent);
     const pass = await applyMergedEntityInputs(
       env,
-      [sourceInput],
+      [sourceInput, reverseInput],
       [],
       { isReplay: false, routingDeps: makeLocalCrossJRoutingDeps() },
     );
 
-    expect(env.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)?.state.height).toBe(sourceHeight + 1);
-    expect(env.eReplicas.get(`${targetHub}:${targetHubSigner}`)?.state.height).toBe(targetHeight + 1);
+    expect(env.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)?.state.height).toBe(sourceHeight + 4);
+    expect(env.eReplicas.get(`${targetHub}:${targetHubSigner}`)?.state.height).toBe(targetHeight + 4);
     expect(env.eReplicas.get(`${targetHub}:${targetHubSigner}`)?.state.crossJurisdictionSwaps?.get(intent.orderId)?.routeHash)
       .toBe(intent.routeHash);
-    expect(pass.appliedEntityInputs.map(input => input.entityId)).toEqual([sourceHub]);
-    expect(pass.localCrossJurisdictionEventTrace.map(input => input.entityId)).toEqual([targetHub]);
+    expect(pass.appliedEntityInputs.map(input => input.entityId)).toEqual([sourceHub, targetHub]);
+    expect(pass.localCrossJurisdictionEventTrace.map(input => input.entityId)).toEqual([
+      sourceHub,
+      targetHub,
+      sourceHub,
+      targetHub,
+      targetHub,
+      sourceHub,
+    ]);
+    const sourceAccount = env.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)!.state.accounts.get(sourceUser)!;
+    const targetAccount = env.eReplicas.get(`${targetHub}:${targetHubSigner}`)!.state.accounts.get(targetUser)!;
+    const crossJOrderIds = (txs: readonly AccountTx[]): string[] => txs.flatMap(tx => {
+      if (tx.type === 'pull_lock') return tx.data.crossJurisdiction?.orderId ?? [];
+      if (tx.type === 'swap_offer') return tx.data.crossJurisdiction?.orderId ?? [];
+      return [];
+    });
+    expect(new Set(crossJOrderIds(sourceAccount.pendingFrame?.accountTxs ?? []))).toEqual(new Set([intent.orderId]));
+    expect(new Set(crossJOrderIds(targetAccount.pendingFrame?.accountTxs ?? []))).toEqual(new Set([intent.orderId]));
+    const queuedOrderIds = new Set([secondForwardIntent.orderId, reverseIntent.orderId]);
+    expect(new Set(crossJOrderIds(sourceAccount.mempool))).toEqual(queuedOrderIds);
+    expect(new Set(crossJOrderIds(targetAccount.mempool))).toEqual(queuedOrderIds);
     expect(pass.entityOutbox.map(output => ({
       entityId: output.entityId,
       txTypes: output.entityTxs?.map(tx => tx.type) ?? [],
@@ -974,12 +1057,14 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(materialized).toHaveLength(1);
     expect(materialized[0]?.type).toBe('materializeCrossJurisdictionSwap');
     const prepared = await applyEntityTx(hubEnv, requested.newState, materialized[0]!);
-      expect(prepared.mempoolOps?.map(op => op.tx.type)).toEqual(['pull_lock', 'swap_offer']);
-      expect(prepared.outputs).toHaveLength(1);
+      expect(prepared.mempoolOps).toBeUndefined();
+      expect(prepared.outputs).toHaveLength(2);
+      const sourceHubOutput = prepared.outputs.find(output => output.entityId === sourceHub);
       const targetHubOutput = prepared.outputs.find(output => output.entityId === targetHub);
       const targetUserOutput = prepared.outputs.find(output => output.entityId === targetUser);
       const sourceUserOutput = prepared.outputs.find(output => output.entityId === sourceUser);
-      expect(targetHubOutput?.entityTxs?.map(tx => tx.type)).toEqual(['registerCrossJurisdictionSwap', 'pullLock']);
+      expect(sourceHubOutput?.entityTxs?.map(tx => tx.type)).toEqual(['registerCrossJurisdictionSwap']);
+      expect(targetHubOutput?.entityTxs?.map(tx => tx.type)).toEqual(['registerCrossJurisdictionSwap']);
       expect(targetUserOutput).toBeUndefined();
       expect(sourceUserOutput).toBeUndefined();
       const preparedRoute = (targetHubOutput?.entityTxs?.[0]?.data as any).route;
@@ -987,7 +1072,11 @@ describe('cross-jurisdiction hashledger swap', () => {
       expect(deriveCrossJurisdictionRouteHash(preparedRoute)).toBe(preparedRoute.routeHash);
       expect(preparedRoute.sourcePull.fullHash).toBe(preparedRoute.targetPull.fullHash);
       expect(preparedRoute.sourcePull.partialRoot).toBe(preparedRoute.targetPull.partialRoot);
-      expect((targetHubOutput?.entityTxs?.[1]?.data as any).crossJurisdiction).toMatchObject({
+      const sourceRegistration = await applyEntityTx(hubEnv, prepared.newState, sourceHubOutput!.entityTxs![0]!);
+      const targetRegistration = await applyEntityTx(hubEnv, targetHubState, targetHubOutput!.entityTxs![0]!);
+      expect(sourceRegistration.mempoolOps?.map(op => op.tx.type)).toEqual(['pull_lock', 'swap_offer']);
+      expect(targetRegistration.mempoolOps?.map(op => op.tx.type)).toEqual(['pull_lock']);
+      expect((targetRegistration.mempoolOps?.[0]?.tx as any).data.crossJurisdiction).toMatchObject({
         orderId: preparedRoute.orderId,
         routeHash: preparedRoute.routeHash,
         leg: 'target',
@@ -1059,15 +1148,21 @@ describe('cross-jurisdiction hashledger swap', () => {
       type: 'materializeCrossJurisdictionSwap',
       data: { proposerSignerId: addr('ae'), route: hubPreparedRoute },
     });
+      const sourceHubOutput = preparedResult.outputs.find(output => output.entityId === sourceHub);
       const targetHubOutput = preparedResult.outputs.find(output => output.entityId === targetHub);
       const preparedRoute = (targetHubOutput?.entityTxs?.find(tx => tx.type === 'registerCrossJurisdictionSwap')?.data as any)?.route;
       expect(preparedRoute.source.jurisdiction).toBe(jref(sourceUserAliasJurisdiction));
       expect(preparedRoute.routeHash).toBe(staleIntent.routeHash);
       expect(preparedRoute.sourcePull.fullHash).toBe(preparedRoute.targetPull.fullHash);
-    const sourcePullTx = preparedResult.mempoolOps?.find(op => op.tx.type === 'pull_lock')?.tx as
+    const sourceRegistration = await applyEntityTx(
+      env,
+      preparedResult.newState,
+      sourceHubOutput!.entityTxs![0]!,
+    );
+    const sourcePullTx = sourceRegistration.mempoolOps?.find(op => op.tx.type === 'pull_lock')?.tx as
       | Extract<AccountTx, { type: 'pull_lock' }>
       | undefined;
-    const swapOfferTx = preparedResult.mempoolOps?.find(op => op.tx.type === 'swap_offer')?.tx as
+    const swapOfferTx = sourceRegistration.mempoolOps?.find(op => op.tx.type === 'swap_offer')?.tx as
       | Extract<AccountTx, { type: 'swap_offer' }>
       | undefined;
     expect(sourcePullTx?.data.crossJurisdictionRoute?.routeHash).toBe(preparedRoute.routeHash);
@@ -1075,7 +1170,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(swapOfferTx?.data.crossJurisdiction?.source.jurisdiction).toBe(jref(sourceUserAliasJurisdiction));
     expect(swapOfferTx?.data.crossJurisdiction?.sourcePull?.fullHash).toBe(preparedRoute.sourcePull.fullHash);
 
-      const clearingHubState = preparedResult.newState;
+      const clearingHubState = sourceRegistration.newState;
       const clearingRoute = {
         ...preparedRoute,
         status: 'clear_requested' as const,

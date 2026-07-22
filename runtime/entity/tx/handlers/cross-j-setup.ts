@@ -149,73 +149,29 @@ export const handlePrepareCrossJurisdictionSwapEntityTx = (
     addMessage(newState, `❌ Cross-j prepare ${route.orderId} blocked: ${transitionError}`);
     return { newState, outputs };
   }
-  newState.crossJurisdictionSwaps.set(preparedRoute.orderId, mergeCrossJurisdictionRoute(existing, preparedRoute));
   const publicPreparedRoute = cloneCrossJurisdictionRoute(preparedRoute);
-  const sourceAccountId = findAccountKey(newState, publicPreparedRoute.source.entityId);
-  if (!sourceAccountId) throw new Error(`CROSS_J_SOURCE_ACCOUNT_MISSING:${publicPreparedRoute.orderId}`);
+  newState.crossJurisdictionSwaps.set(
+    publicPreparedRoute.orderId,
+    mergeCrossJurisdictionRoute(existing, publicPreparedRoute),
+  );
   const readyRoute = {
     ...cloneCrossJurisdictionRoute(publicPreparedRoute),
     status: 'resting' as const,
   };
 
+  // Both Account legs must be derived from one committed Entity frame. The
+  // former inline source mempool write raced the sibling target command: a
+  // second route could enter only one pending Account frame and leave both
+  // frames permanently unacknowledgeable. These two runtime-local commands
+  // are committed together, then each sibling derives exactly its own leg.
+  pushCrossJOutput(env, outputs, readyRoute.source.counterpartyEntityId, [
+    { type: 'registerCrossJurisdictionSwap', data: { route: readyRoute } },
+  ], readyRoute.sourceHubSignerId);
   pushCrossJOutput(env, outputs, readyRoute.target.entityId, [
     { type: 'registerCrossJurisdictionSwap', data: { route: readyRoute } },
-    {
-      type: 'pullLock',
-      data: {
-        counterpartyEntityId: readyRoute.target.counterpartyEntityId,
-        pullId: readyRoute.targetPull!.pullId,
-        tokenId: readyRoute.targetPull!.tokenId,
-        amount: readyRoute.targetPull!.signedAmount,
-          revealedUntilTimestamp: readyRoute.targetPull!.revealedUntilTimestamp,
-          fullHash: readyRoute.targetPull!.fullHash,
-          partialRoot: readyRoute.targetPull!.partialRoot,
-          crossJurisdiction: buildCrossJurisdictionPullBinding(readyRoute, 'target'),
-          crossJurisdictionRoute: cloneCrossJurisdictionRoute(readyRoute),
-          description: readyRoute.memo || `Cross-j target pull ${readyRoute.orderId}`,
-        },
-      },
   ], readyRoute.targetHubSignerId);
   addMessage(newState, `🌉 Cross-j swap ${preparedRoute.orderId} paired source and target proposals requested by hub`);
-  return {
-    newState,
-    outputs,
-    mempoolOps: [
-      {
-        accountId: sourceAccountId,
-        tx: {
-          type: 'pull_lock',
-          data: {
-            pullId: readyRoute.sourcePull!.pullId,
-            tokenId: readyRoute.sourcePull!.tokenId,
-            amount: readyRoute.sourcePull!.signedAmount,
-            revealedUntilTimestamp: readyRoute.sourcePull!.revealedUntilTimestamp,
-            fullHash: readyRoute.sourcePull!.fullHash,
-            partialRoot: readyRoute.sourcePull!.partialRoot,
-            crossJurisdiction: buildCrossJurisdictionPullBinding(readyRoute, 'source'),
-            crossJurisdictionRoute: cloneCrossJurisdictionRoute(readyRoute),
-          },
-        },
-      },
-      {
-        accountId: sourceAccountId,
-        tx: {
-          type: 'swap_offer',
-          data: {
-            offerId: readyRoute.orderId,
-            giveTokenId: readyRoute.source.tokenId,
-            giveAmount: readyRoute.source.amount,
-            wantTokenId: readyRoute.target.tokenId,
-            wantAmount: readyRoute.target.amount,
-            ...(readyRoute.priceTicks !== undefined ? { priceTicks: readyRoute.priceTicks } : {}),
-            timeInForce: 0,
-            minFillRatio: 0,
-            crossJurisdiction: cloneCrossJurisdictionRoute(readyRoute),
-          },
-        },
-      },
-    ],
-  };
+  return { newState, outputs };
 };
 
 export const handleMaterializeCrossJurisdictionSwapEntityTx = (
@@ -278,5 +234,82 @@ export const handleRegisterCrossJurisdictionSwapEntityTx = (
   }
   newState.crossJurisdictionSwaps.set(route.orderId, mergeCrossJurisdictionRoute(existing, route));
   addMessage(newState, `🌉 Cross-j swap ${route.orderId} registered`);
+  const openingTransition =
+    !existing || existing.status === 'intent' || existing.status === 'target_prepared';
+  if (!openingTransition || route.status !== 'resting') return { newState, outputs: [] };
+  if (!route.sourcePull || !route.targetPull) {
+    throw new Error(`CROSS_J_REGISTER_OPENING_PULLS_MISSING:${route.orderId}`);
+  }
+
+  const localEntityId = normalizeEntityRef(newState.entityId);
+  const sourceHubEntityId = normalizeEntityRef(route.source.counterpartyEntityId);
+  const targetHubEntityId = normalizeEntityRef(route.target.entityId);
+  if (localEntityId === sourceHubEntityId) {
+    const sourceAccountId = findAccountKey(newState, route.source.entityId);
+    if (!sourceAccountId) throw new Error(`CROSS_J_SOURCE_ACCOUNT_MISSING:${route.orderId}`);
+    return {
+      newState,
+      outputs: [],
+      mempoolOps: [
+        {
+          accountId: sourceAccountId,
+          tx: {
+            type: 'pull_lock',
+            data: {
+              pullId: route.sourcePull.pullId,
+              tokenId: route.sourcePull.tokenId,
+              amount: route.sourcePull.signedAmount,
+              revealedUntilTimestamp: route.sourcePull.revealedUntilTimestamp,
+              fullHash: route.sourcePull.fullHash,
+              partialRoot: route.sourcePull.partialRoot,
+              crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
+              crossJurisdictionRoute: cloneCrossJurisdictionRoute(route),
+            },
+          },
+        },
+        {
+          accountId: sourceAccountId,
+          tx: {
+            type: 'swap_offer',
+            data: {
+              offerId: route.orderId,
+              giveTokenId: route.source.tokenId,
+              giveAmount: route.source.amount,
+              wantTokenId: route.target.tokenId,
+              wantAmount: route.target.amount,
+              ...(route.priceTicks !== undefined ? { priceTicks: route.priceTicks } : {}),
+              timeInForce: 0,
+              minFillRatio: 0,
+              crossJurisdiction: cloneCrossJurisdictionRoute(route),
+            },
+          },
+        },
+      ],
+    };
+  }
+  if (localEntityId === targetHubEntityId) {
+    const targetAccountId = findAccountKey(newState, route.target.counterpartyEntityId);
+    if (!targetAccountId) throw new Error(`CROSS_J_TARGET_ACCOUNT_MISSING:${route.orderId}`);
+    return {
+      newState,
+      outputs: [],
+      mempoolOps: [{
+        accountId: targetAccountId,
+        tx: {
+          type: 'pull_lock',
+          data: {
+            pullId: route.targetPull.pullId,
+            tokenId: route.targetPull.tokenId,
+            amount: route.targetPull.signedAmount,
+            revealedUntilTimestamp: route.targetPull.revealedUntilTimestamp,
+            fullHash: route.targetPull.fullHash,
+            partialRoot: route.targetPull.partialRoot,
+            crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
+            crossJurisdictionRoute: cloneCrossJurisdictionRoute(route),
+          },
+        },
+      }],
+    };
+  }
   return { newState, outputs: [] };
 };

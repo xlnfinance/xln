@@ -366,7 +366,13 @@ export const assertCertifiedOutputSemanticAuthority = (
     case 'registerCrossJurisdictionSwap': {
       const route = tx.data.route;
       assertSemanticSource(tx.type, source, [route.source.counterpartyEntityId]);
-      assertSemanticTarget(tx.type, target, route.target.entityId);
+      const sourceHub = normalizeEntityRef(route.source.counterpartyEntityId);
+      const targetHub = normalizeEntityRef(route.target.entityId);
+      if (target !== sourceHub && target !== targetHub) {
+        throw new Error(
+          `CONSENSUS_OUTPUT_SEMANTIC_TARGET_MISMATCH:${tx.type}:${target}:${sourceHub},${targetHub}`,
+        );
+      }
       return;
     }
     case 'pullLock': {
@@ -504,8 +510,16 @@ export const assertRuntimeOutputAuthorization = (
   if (!source || !target || target !== normalizeEntityRef(currentState.entityId)) {
     throw new Error(`RUNTIME_OUTPUT_TARGET_MISMATCH:${target || 'missing'}:${currentState.entityId}`);
   }
-  if (source === target) throw new Error(`RUNTIME_OUTPUT_SELF_FORBIDDEN:${source}`);
   if (txs.length === 0) throw new Error('RUNTIME_OUTPUT_TXS_MISSING');
+  if (
+    source === target &&
+    !txs.every(tx =>
+      tx.type === 'registerCrossJurisdictionSwap' &&
+      normalizeEntityRef(tx.data.route.source.counterpartyEntityId) === source
+    )
+  ) {
+    throw new Error(`RUNTIME_OUTPUT_SELF_FORBIDDEN:${source}`);
+  }
   for (const tx of txs) {
     if (protocolTxTypes.has(tx.type)) {
       throw new Error(`RUNTIME_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN:${tx.type}`);
@@ -540,7 +554,13 @@ export const assertRuntimeOutputAuthorization = (
                 : undefined;
       return orderId ? currentState.crossJurisdictionSwaps?.get(orderId) : undefined;
     })();
-    if (!semanticRoute || !isCrossJurisdictionSiblingPair(semanticRoute, source, target)) {
+    const selfSourceRegistration = source === target &&
+      tx.type === 'registerCrossJurisdictionSwap' &&
+      normalizeEntityRef(semanticRoute?.source.counterpartyEntityId) === source;
+    if (
+      !semanticRoute ||
+      (!selfSourceRegistration && !isCrossJurisdictionSiblingPair(semanticRoute, source, target))
+    ) {
       throw new Error(`RUNTIME_OUTPUT_NON_SIBLING_FORBIDDEN:${tx.type}:${source}:${target}`);
     }
     assertCertifiedOutputSemanticAuthority(source, target, tx, currentState, txs);
