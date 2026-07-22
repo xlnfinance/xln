@@ -725,6 +725,7 @@ describe('J validator-local history and Entity-finalized ranges', () => {
         outputs: [],
         jOutputs: [],
         hashesToSign: [],
+        storageChanges: [],
       },
     };
     env.eReplicas.set(`${entityId}:${validatorId}`, replica);

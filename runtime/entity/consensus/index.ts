@@ -35,6 +35,7 @@ import type {
   HashType,
   JInput,
   ProposedEntityFrame,
+  RuntimeOverlayRecord,
   ValidatorEntityFrameExecution,
 } from '../../types';
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, getPerfMs, log } from '../../utils';
@@ -48,6 +49,7 @@ import {
 } from '../../protocol/runtime-input-clone';
 import { nodeProcess } from '../../machine/platform';
 import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../infra/perf-runtime-flags';
+import { mergeStorageOverlayRecords } from '../../storage/overlay';
 import {
   createStructuredLogger,
   logError,
@@ -68,11 +70,8 @@ import {
   resolveEntityProposerId,
 } from '../../state-helpers';
 import {
-  markStorageAccountDirty,
-  markStorageEntityDirty,
   applyStorageChanges,
   recordEntityFrameHistory,
-  recordOrderbookPairUpdate,
 } from '../../machine/env-events';
 import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from '../../machine/security-incidents';
 import { LIMITS } from '../../constants';
@@ -842,6 +841,7 @@ const replayPreparedFrameForRelay = async (
     collectedHashes = [],
     outputs,
     jOutputs,
+    storageChanges,
     consumptionNodeChanges,
     accountJClaimNodeChanges,
   } = await applyEntityFrame(env, replica.state, frame.txs, frame.timestamp);
@@ -889,6 +889,7 @@ const replayPreparedFrameForRelay = async (
     outputs,
     jOutputs,
     hashesToSign: manifest,
+    storageChanges,
     ...(consumptionNodeChanges ? { consumptionNodeChanges } : {}),
     ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
   };
@@ -1314,7 +1315,6 @@ const stashPendingCrossJurisdictionFillAck = (
     storedAt: currentEntityState.timestamp || env.timestamp,
     reason,
   });
-  markStorageEntityDirty(env, currentEntityState.entityId);
   entityLog.info('crossj.fill_ack_deferred', {
     entity: shortId(currentEntityState.entityId, 8),
     account: shortId(accountId, 8),
@@ -1327,6 +1327,7 @@ const drainPendingCrossJurisdictionFillAcks = (
   env: Env,
   currentEntityState: EntityState,
   proposableAccounts: Set<string>,
+  storageChanges: RuntimeOverlayRecord[],
 ): number => {
   const pending = currentEntityState.pendingCrossJurisdictionFillAcks;
   if (!pending || pending.size === 0) return 0;
@@ -1374,7 +1375,6 @@ const drainPendingCrossJurisdictionFillAcks = (
         },
       };
       pendingAck.ttlExpiredAt = now;
-      markStorageEntityDirty(env, currentEntityState.entityId);
       recordRuntimeSecurityIncident(env, {
         domain: 'cross-j',
         code: 'CROSS_J_FILL_ACK_TTL_EXPIRED',
@@ -1392,7 +1392,11 @@ const drainPendingCrossJurisdictionFillAcks = (
     if (!account?.swapOffers?.has(pendingAck.tx.data.offerId)) continue;
     if (queueAccountMempoolTx(account, pendingAck.tx)) {
       proposableAccounts.add(pendingAck.accountId);
-      markStorageAccountDirty(env, currentEntityState.entityId, pendingAck.accountId);
+      storageChanges.push({
+        family: 'account',
+        entityId: currentEntityState.entityId,
+        counterpartyId: pendingAck.accountId,
+      });
     }
     if (pendingAck.ttlExpiredAt !== undefined) {
       resolveRuntimeSecurityIncident(env, {
@@ -1409,7 +1413,6 @@ const drainPendingCrossJurisdictionFillAcks = (
     }
     pending.delete(key);
     drained++;
-    markStorageEntityDirty(env, currentEntityState.entityId);
     entityLog.info('crossj.fill_ack_drained', {
       entity: shortId(currentEntityState.entityId, 8),
       account: shortId(pendingAck.accountId, 8),
@@ -1421,9 +1424,9 @@ const drainPendingCrossJurisdictionFillAcks = (
 };
 
 const drainCommittedCrossJurisdictionCancelAcks = (
-  env: Env,
   currentEntityState: EntityState,
   proposableAccounts: Set<string>,
+  storageChanges: RuntimeOverlayRecord[],
 ): number => {
   let queued = 0;
   for (const { accountId, tx } of collectCommittedCrossJurisdictionCancelAcks(currentEntityState)) {
@@ -1436,8 +1439,11 @@ const drainCommittedCrossJurisdictionCancelAcks = (
     }
     if (!queueAccountMempoolTx(account, tx)) continue;
     proposableAccounts.add(accountId);
-    markStorageAccountDirty(env, currentEntityState.entityId, accountId);
-    markStorageEntityDirty(env, currentEntityState.entityId);
+    storageChanges.push({
+      family: 'account',
+      entityId: currentEntityState.entityId,
+      counterpartyId: accountId,
+    });
     queued += 1;
   }
   return queued;
@@ -2245,6 +2251,7 @@ async function handleCommitNotification(context: ApplyEntityInputContext): Promi
       collectedHashes: replayedCollectedHashes = [],
       outputs: replayedOutputs,
       jOutputs: replayedJOutputs,
+      storageChanges,
       consumptionNodeChanges,
       accountJClaimNodeChanges,
     } = await applyEntityFrame(env, workingReplica.state, proposedFrame.txs, proposedFrame.timestamp);
@@ -2299,6 +2306,7 @@ async function handleCommitNotification(context: ApplyEntityInputContext): Promi
       outputs: replayedOutputs,
       jOutputs: replayedJOutputs,
       hashesToSign: expectedHashesToSign,
+      storageChanges,
       ...(consumptionNodeChanges ? { consumptionNodeChanges } : {}),
       ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
     };
@@ -2417,6 +2425,10 @@ async function handleCommitNotification(context: ApplyEntityInputContext): Promi
   cacheCommittedConsumptionNodeChanges(env, execution.consumptionNodeChanges);
   cacheCommittedAccountJClaimNodeChanges(env, execution.accountJClaimNodeChanges);
   workingReplica.state = committedState;
+  applyStorageChanges(env, committedState, [
+    ...execution.storageChanges,
+    { family: 'entity', entityId: committedState.entityId },
+  ]);
   emitCommittedPendingFrameWarnings(preCommitState, committedState);
   emitCommittedEntitySizeLog(entitySizeLog);
   proposedFrame.hankos = committedHankos;
@@ -2449,7 +2461,6 @@ async function handleCommitNotification(context: ApplyEntityInputContext): Promi
   workingReplica.lastConsensusProgressAt = env.timestamp;
   workingReplica.isProposer = isEntityActiveLeader(workingReplica);
   await runLocalPostCommitHooks(env, workingReplica, entityOutbox);
-  markStorageEntityDirty(env, workingReplica.state.entityId);
   entityLog.debug('commit.applied', {
     height: workingReplica.state.height,
     frame: shortHash(proposedFrame.hash),
@@ -2565,6 +2576,7 @@ async function handleProposedFramePrecommit(context: ApplyEntityInputContext): P
     collectedHashes: validatorCollectedHashes = [],
     outputs: validatorOutputs,
     jOutputs: validatorJOutputs,
+    storageChanges,
     consumptionNodeChanges,
     accountJClaimNodeChanges,
   } = await applyEntityFrame(env, workingReplica.state, proposedFrame.txs, proposedFrame.timestamp);
@@ -2695,6 +2707,7 @@ async function handleProposedFramePrecommit(context: ApplyEntityInputContext): P
     outputs: validatorOutputs,
     jOutputs: validatorJOutputs,
     hashesToSign,
+    storageChanges,
     ...(consumptionNodeChanges ? { consumptionNodeChanges } : {}),
     ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
   };
@@ -2940,6 +2953,10 @@ async function handleHashPrecommits(context: ApplyEntityInputContext): Promise<A
   cacheCommittedConsumptionNodeChanges(env, execution.consumptionNodeChanges);
   cacheCommittedAccountJClaimNodeChanges(env, execution.accountJClaimNodeChanges);
   workingReplica.state = committedState;
+  applyStorageChanges(env, committedState, [
+    ...execution.storageChanges,
+    { family: 'entity', entityId: committedState.entityId },
+  ]);
   emitCommittedPendingFrameWarnings(preCommitState, committedState);
   emitCommittedEntitySizeLog(entitySizeLog);
   pruneReplicaFinalizedJHistory(workingReplica);
@@ -2984,7 +3001,6 @@ async function handleHashPrecommits(context: ApplyEntityInputContext): Promise<A
     });
   });
   await runLocalPostCommitHooks(env, workingReplica, entityOutbox);
-  markStorageEntityDirty(env, workingReplica.state.entityId);
 
   return commitEntityConsensusInput(context);
 }
@@ -3375,6 +3391,7 @@ export const applyEntityInput = async (
       newState: newEntityState,
       outputs: frameOutputs,
       jOutputs: frameJOutputs,
+      storageChanges,
       collectedHashes = [],
       consumptionNodeChanges,
       accountJClaimNodeChanges,
@@ -3504,6 +3521,10 @@ export const applyEntityInput = async (
     cacheCommittedConsumptionNodeChanges(env, consumptionNodeChanges);
     cacheCommittedAccountJClaimNodeChanges(env, accountJClaimNodeChanges);
     workingReplica.state = committedState;
+    applyStorageChanges(env, committedState, [
+      ...storageChanges,
+      { family: 'entity', entityId: committedState.entityId },
+    ]);
     emitCommittedPendingFrameWarnings(preCommitState, committedState);
     emitCommittedEntitySizeLog(entitySizeLog);
     appendCertifiedEntityFrameLink(
@@ -3519,7 +3540,6 @@ export const applyEntityInput = async (
     pruneReplicaFinalizedJHistory(workingReplica);
     await runLocalPostCommitHooks(env, workingReplica, entityOutbox);
     workingReplica.lastConsensusProgressAt = env.timestamp;
-    markStorageEntityDirty(env, workingReplica.state.entityId);
 
     entityOutbox.push(...commitOutputs);
     jOutbox.push(...frameJOutputs);
@@ -3614,6 +3634,7 @@ export const applyEntityInput = async (
       newState: newEntityState,
       outputs: proposalOutputs,
       jOutputs: proposalJOutputs,
+      storageChanges,
       collectedHashes = [],
       consumptionNodeChanges,
       accountJClaimNodeChanges,
@@ -3693,6 +3714,7 @@ export const applyEntityInput = async (
       outputs: proposalOutputs,
       jOutputs: proposalJOutputs,
       hashesToSign,
+      storageChanges,
       ...(consumptionNodeChanges ? { consumptionNodeChanges } : {}),
       ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
     };
@@ -3775,6 +3797,7 @@ type ApplyEntityTxsInOrderContext = {
   accountJClaimNewNodes: Map<string, AccountJClaimNode>;
   accountJClaimReplacedNodeHashes: Set<string>;
   accountJClaimNodeStore: AccountJClaimNodeStore;
+  storageChanges: RuntimeOverlayRecord[];
   /** Set only after the enclosing SignedEntityCommand has been fully verified. */
   authorizedCommand?: true | undefined;
   /** Set only when a signed proposal has reached real weighted board quorum. */
@@ -3783,6 +3806,22 @@ type ApplyEntityTxsInOrderContext = {
   authorizedCertifiedOutput?: true | undefined;
   /** Runtime-local proposer trust lane for cross-j sibling effects. */
   authorizedRuntimeOutput?: true | undefined;
+};
+
+const recordFrameAccountChange = (
+  storageChanges: RuntimeOverlayRecord[],
+  entityId: string,
+  counterpartyId: string,
+): void => {
+  storageChanges.push({ family: 'account', entityId, counterpartyId });
+};
+
+const recordFrameBookChange = (
+  storageChanges: RuntimeOverlayRecord[],
+  entityId: string,
+  pairId: string,
+): void => {
+  storageChanges.push({ family: 'book', entityId, pairId });
 };
 
 const applyRuntimeOutput = async (
@@ -3949,7 +3988,7 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
       throw new Error(`ENTITY_FRAME_TX_FAILED: type=${String(entityTx.type)} error=${skippedError}`);
     }
     currentEntityState = newState;
-    applyStorageChanges(env, currentEntityState, storageChanges);
+    context.storageChanges.push(...storageChanges);
     if (accountJClaimNodeChanges) {
       for (const { hash, node } of accountJClaimNodeChanges.newNodes) {
         context.accountJClaimNewNodes.set(hash, node);
@@ -4022,8 +4061,7 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
             continue;
           }
           proposableAccounts.add(accountId);
-          markStorageAccountDirty(env, currentEntityState.entityId, accountId);
-          markStorageEntityDirty(env, currentEntityState.entityId);
+          recordFrameAccountChange(context.storageChanges, currentEntityState.entityId, accountId);
 
           if (tx.type === 'htlc_lock' && tx.data?.timelock && tx.data?.lockId) {
             if (currentEntityState.crontabState) {
@@ -4033,14 +4071,12 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
                 type: 'htlc_timeout',
                 data: { accountId, lockId: tx.data.lockId },
               });
-              markStorageEntityDirty(env, currentEntityState.entityId);
             }
           }
 
           if (tx.type === 'htlc_resolve' && tx.data?.lockId) {
             if (currentEntityState.crontabState) {
               cancelCrontabHook(currentEntityState.crontabState, `htlc-timeout:${tx.data.lockId}`);
-              markStorageEntityDirty(env, currentEntityState.entityId);
             }
           }
         } else if (tx.type === 'cross_swap_fill_ack') {
@@ -4113,8 +4149,8 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
         proposableAccounts.add(counterpartyId);
       }
     }
-    drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts);
-    drainCommittedCrossJurisdictionCancelAcks(env, currentEntityState, proposableAccounts);
+    drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts, context.storageChanges);
+    drainCommittedCrossJurisdictionCancelAcks(currentEntityState, proposableAccounts, context.storageChanges);
     const txElapsedMs = Math.round(getPerfMs() - txProfileStartMs);
     const txProfile = frameProfileTxTotals.get(entityTx.type) ?? { count: 0, elapsedMs: 0 };
     txProfile.count += 1;
@@ -4133,6 +4169,7 @@ type ProposePendingAccountFramesContext = {
   allOutputs: EntityInput[];
   collectedHashes: Array<{ hash: string; type: HashType; context: string }>;
   accountJClaimNodeStore: AccountJClaimNodeStore;
+  storageChanges: RuntimeOverlayRecord[];
 };
 
 const certifiedAccountOutputSignerHint = (
@@ -4178,6 +4215,7 @@ function materializeDeferredSettlementApprovals(
   state: EntityState,
   proposableAccounts: Set<string>,
   collectedHashes: Array<{ hash: string; type: HashType; context: string }>,
+  storageChanges: RuntimeOverlayRecord[],
 ): void {
   const deferred = state.deferredAccountProposals;
   if (!deferred || deferred.size === 0) return;
@@ -4212,6 +4250,7 @@ function materializeDeferredSettlementApprovals(
     if (account.mempool.length > 0 && !peerSealPinsAccountState) continue;
     const draft = buildSettlementSealDraft(account, state, accountId, env);
     appendAccountMempoolTx(account, draft.tx, `entityConsensus:settlementSeal:${accountId}`);
+    recordFrameAccountChange(storageChanges, state.entityId, accountId);
     collectedHashes.push(...draft.hashesToSign);
     proposableAccounts.add(accountId);
     deferred.delete(accountId);
@@ -4223,7 +4262,10 @@ type SettlementSealTx = Omit<SettlementTransitionTx, 'data'> & {
   data: Extract<SettlementTransitionTx['data'], { kind: 'seal' }>;
 };
 
-function refreshStaleUncommittedSettlementSeals(state: EntityState): void {
+function refreshStaleUncommittedSettlementSeals(
+  state: EntityState,
+  storageChanges: RuntimeOverlayRecord[],
+): void {
   for (const [accountId, account] of [...state.accounts.entries()].sort(([left], [right]) => compareStableText(left, right))) {
     const workspace = account.settlementWorkspace;
     if (!workspace || workspace.nonceAtSign !== undefined || account.pendingFrame) continue;
@@ -4245,6 +4287,7 @@ function refreshStaleUncommittedSettlementSeals(state: EntityState): void {
     // workspace at the new nonce.
     const staleSet = new Set<AccountTx>(staleSeals);
     account.mempool = account.mempool.filter((tx) => !staleSet.has(tx));
+    recordFrameAccountChange(storageChanges, state.entityId, accountId);
     state.deferredAccountProposals ??= new Map();
     const existing = state.deferredAccountProposals.get(accountId);
     if (existing && existing !== workspaceHash) {
@@ -4271,6 +4314,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
     allOutputs,
     collectedHashes,
     accountJClaimNodeStore,
+    storageChanges,
   } = context;
   const processedAccounts = new Set<string>();
   let proposedFrames = 0;
@@ -4310,13 +4354,20 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
         accountJClaimNodeStore,
         crossJOpeningProposalTxs,
       );
+      if (proposal.accountChanged) {
+        storageChanges.push({
+          family: 'account',
+          entityId: currentEntityState.entityId,
+          counterpartyId: accountKey,
+        });
+      }
       proposedFrames += 1;
       if (proposal.swapOffersCancelled && proposal.swapOffersCancelled.length > 0) {
         const normalizedCancels = proposal.swapOffersCancelled.map(({ offerId }) => ({
           accountId: accountKey,
           offerId,
         }));
-        applyCommittedSwapCancelsToOrderbook(env, currentEntityState, normalizedCancels);
+        applyCommittedSwapCancelsToOrderbook(env, currentEntityState, normalizedCancels, storageChanges);
       }
       if (proposal.hashesToSign) collectedHashes.push(...proposal.hashesToSign);
 
@@ -4340,6 +4391,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
                 },
                 `entityConsensus:failedHtlc:${route.inboundEntity}`,
               );
+              recordFrameAccountChange(storageChanges, currentEntityState.entityId, route.inboundEntity);
               proposableAccounts.add(route.inboundEntity);
             }
           }
@@ -4441,6 +4493,7 @@ type ApplyOrderbookMatchingContext = {
   allSwapOffersCreated: SwapOfferEvent[];
   allOutputs: EntityInput[];
   proposableAccounts: Set<string>;
+  storageChanges: RuntimeOverlayRecord[];
 };
 
 type OrderbookFrameStats = {
@@ -4460,7 +4513,7 @@ const emptyOrderbookFrameStats = (): OrderbookFrameStats => ({
 });
 
 function applyOrderbookMatching(context: ApplyOrderbookMatchingContext): OrderbookFrameStats {
-  const { env, currentEntityState, allSwapOffersCreated, allOutputs, proposableAccounts } = context;
+  const { env, currentEntityState, allSwapOffersCreated, allOutputs, proposableAccounts, storageChanges } = context;
   const stats = emptyOrderbookFrameStats();
   stats.hasPersistedCrossJurisdictionBook = Boolean(
     currentEntityState.orderbookExt &&
@@ -4542,8 +4595,7 @@ function applyOrderbookMatching(context: ApplyOrderbookMatchingContext): Orderbo
           continue;
         }
         proposableAccounts.add(accountId);
-        markStorageAccountDirty(env, currentEntityState.entityId, accountId);
-        markStorageEntityDirty(env, currentEntityState.entityId);
+        recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
         currentEntityState.pendingSwapFillRatios ||= new Map();
         const key = swapKey(accountId, tx.data.offerId);
         currentEntityState.pendingSwapFillRatios.set(key, tx.data.fillRatio);
@@ -4564,8 +4616,7 @@ function applyOrderbookMatching(context: ApplyOrderbookMatchingContext): Orderbo
           continue;
         }
         proposableAccounts.add(accountId);
-        markStorageAccountDirty(env, currentEntityState.entityId, accountId);
-        markStorageEntityDirty(env, currentEntityState.entityId);
+        recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
         entityLog.debug('crossj.local_fill_ack_queued', {
           account: shortId(accountId, 8),
           offer: shortOrder(tx.data.offerId, 8),
@@ -4606,8 +4657,7 @@ function applyOrderbookMatching(context: ApplyOrderbookMatchingContext): Orderbo
         continue;
       }
       proposableAccounts.add(accountId);
-      markStorageAccountDirty(env, currentEntityState.entityId, accountId);
-      markStorageEntityDirty(env, currentEntityState.entityId);
+      recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
       entityLog.debug('orderbook.account_tx_queued', { account: shortId(accountId, 8), tx: tx.type });
     }
   }
@@ -4638,11 +4688,7 @@ function applyOrderbookMatching(context: ApplyOrderbookMatchingContext): Orderbo
   const ext = currentEntityState.orderbookExt as OrderbookExtState;
   for (const { pairId, book } of matchResult.bookUpdates) {
     replaceOrderbookPair(ext, pairId, book);
-    recordOrderbookPairUpdate(env, {
-      entityId: currentEntityState.entityId,
-      pairId,
-      book,
-    });
+    recordFrameBookChange(storageChanges, currentEntityState.entityId, pairId);
   }
 
   return stats;
@@ -4654,10 +4700,11 @@ type ApplySwapCancelRequestsContext = {
   allSwapCancelRequests: SwapCancelRequestEvent[];
   proposableAccounts: Set<string>;
   allOutputs: EntityInput[];
+  storageChanges: RuntimeOverlayRecord[];
 };
 
 function applySwapCancelRequests(context: ApplySwapCancelRequestsContext): void {
-  const { env, currentEntityState, allSwapCancelRequests, proposableAccounts, allOutputs } = context;
+  const { env, currentEntityState, allSwapCancelRequests, proposableAccounts, allOutputs, storageChanges } = context;
   if (allSwapCancelRequests.length === 0) return;
 
   const routedCancels = routeRemoteCrossJurisdictionBookCancels(
@@ -4678,8 +4725,7 @@ function applySwapCancelRequests(context: ApplySwapCancelRequestsContext): void 
     }
     if (!queueAccountMempoolTx(account, tx)) continue;
     proposableAccounts.add(accountId);
-    markStorageAccountDirty(env, currentEntityState.entityId, accountId);
-    markStorageEntityDirty(env, currentEntityState.entityId);
+    recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
   }
 
   const localBookCancels = routedCancels.localBookCancels;
@@ -4695,18 +4741,13 @@ function applySwapCancelRequests(context: ApplySwapCancelRequestsContext): void 
         continue;
       }
       proposableAccounts.add(accountId);
-      markStorageAccountDirty(env, currentEntityState.entityId, accountId);
-      markStorageEntityDirty(env, currentEntityState.entityId);
+      recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
     }
 
     const ext = currentEntityState.orderbookExt as OrderbookExtState;
     for (const { pairId, book } of cancelResult.bookUpdates) {
       replaceOrderbookPair(ext, pairId, book);
-      recordOrderbookPairUpdate(env, {
-        entityId: currentEntityState.entityId,
-        pairId,
-        book,
-      });
+      recordFrameBookChange(storageChanges, currentEntityState.entityId, pairId);
     }
     return;
   }
@@ -4733,6 +4774,7 @@ function applySwapCancelRequests(context: ApplySwapCancelRequestsContext): void 
       continue;
     }
     proposableAccounts.add(accountId);
+    recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
   }
 }
 
@@ -4750,6 +4792,7 @@ export const applyEntityFrame = async (
   deterministicState: EntityState;
   outputs: EntityInput[];
   jOutputs: JInput[];
+  storageChanges: RuntimeOverlayRecord[];
   // Hashes emitted during frame processing that need entity-quorum signing
   collectedHashes?: Array<{
     hash: string;
@@ -4821,6 +4864,7 @@ export const applyEntityFrame = async (
   const consumptionReplacedNodeHashes = new Set<string>();
   const accountJClaimNewNodes = new Map<string, AccountJClaimNode>();
   const accountJClaimReplacedNodeHashes = new Set<string>();
+  const storageChanges: RuntimeOverlayRecord[] = [];
   const committedAccountJClaimNodes = getAccountJClaimNodeStore(env);
   const accountJClaimNodeStore: AccountJClaimNodeStore = {
     get: hash => accountJClaimNewNodes.get(hash) ?? committedAccountJClaimNodes.get(hash),
@@ -4829,8 +4873,8 @@ export const applyEntityFrame = async (
   const proposableAccounts = new Set<string>();
   const requiredAccountResponses = new Map<string, AccountInput>();
   if (!authorityTransitionOnly) {
-    drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts);
-    drainCommittedCrossJurisdictionCancelAcks(env, currentEntityState, proposableAccounts);
+    drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts, storageChanges);
+    drainCommittedCrossJurisdictionCancelAcks(currentEntityState, proposableAccounts, storageChanges);
     for (const [accountId, accountMachine] of currentEntityState.accounts) {
       if (accountHasProposableMempool(accountMachine, currentEntityState)) {
         proposableAccounts.add(accountId);
@@ -4860,6 +4904,7 @@ export const applyEntityFrame = async (
     accountJClaimNewNodes,
     accountJClaimReplacedNodeHashes,
     accountJClaimNodeStore,
+    storageChanges,
   });
   markFrameProfile('entityTxLoop');
 
@@ -4882,6 +4927,7 @@ export const applyEntityFrame = async (
       deterministicState: cloneEntityState(currentEntityState),
       outputs: allOutputs,
       jOutputs: allJOutputs,
+      storageChanges: mergeStorageOverlayRecords(undefined, storageChanges),
       collectedHashes,
       ...(consumptionNewNodes.size > 0 || consumptionReplacedNodeHashes.size > 0
         ? {
@@ -4911,7 +4957,7 @@ export const applyEntityFrame = async (
   // before the next matching pass. Otherwise a restored book can still expose
   // an order that the account frame has already removed.
   if (allSwapOffersCancelled.length > 0) {
-    applyCommittedSwapCancelsToOrderbook(env, currentEntityState, allSwapOffersCancelled);
+    applyCommittedSwapCancelsToOrderbook(env, currentEntityState, allSwapOffersCancelled, storageChanges);
   }
 
   // A committed cancel has priority over every offer created in the same
@@ -4923,6 +4969,7 @@ export const applyEntityFrame = async (
     allSwapCancelRequests,
     proposableAccounts,
     allOutputs,
+    storageChanges,
   });
   markFrameProfile('cancels');
 
@@ -4932,19 +4979,21 @@ export const applyEntityFrame = async (
     allSwapOffersCreated,
     allOutputs,
     proposableAccounts,
+    storageChanges,
   });
   markFrameProfile('orderbook');
 
   // Hash before account proposals so proposer and validators commit to the same
   // deterministic entity state.
-  drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts);
-  drainCommittedCrossJurisdictionCancelAcks(env, currentEntityState, proposableAccounts);
-  refreshStaleUncommittedSettlementSeals(currentEntityState);
+  drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts, storageChanges);
+  drainCommittedCrossJurisdictionCancelAcks(currentEntityState, proposableAccounts, storageChanges);
+  refreshStaleUncommittedSettlementSeals(currentEntityState, storageChanges);
   materializeDeferredSettlementApprovals(
     env,
     currentEntityState,
     proposableAccounts,
     collectedHashes,
+    storageChanges,
   );
   for (const accountId of proposableAccounts) {
     invalidateEntityAccountCommitment(currentEntityState, accountId);
@@ -4967,14 +5016,12 @@ export const applyEntityFrame = async (
         allOutputs,
         collectedHashes,
         accountJClaimNodeStore,
+        storageChanges,
       });
   markFrameProfile('accountProposals');
   currentEntityState = assignCertifiedOutputIdentities(currentEntityState, allOutputs);
 
   const prunedOriginatedHtlcRoutes = pruneSettledOriginatedHtlcRoutes(currentEntityState, currentEntityState.timestamp);
-  if (prunedOriginatedHtlcRoutes > 0) {
-    markStorageEntityDirty(env, currentEntityState.entityId);
-  }
 
   const frameElapsedMs = Math.round(getPerfMs() - frameProfileStartMs);
   if (entityFrameProfileEnabled() || frameElapsedMs >= entityFrameSlowMs()) {
@@ -5009,6 +5056,7 @@ export const applyEntityFrame = async (
     deterministicState,
     outputs: allOutputs,
     jOutputs: allJOutputs,
+    storageChanges: mergeStorageOverlayRecords(undefined, storageChanges),
     collectedHashes,
     ...(consumptionNewNodes.size > 0 || consumptionReplacedNodeHashes.size > 0
       ? {

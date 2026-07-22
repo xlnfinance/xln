@@ -34,6 +34,7 @@ export type AccountConsensusFrameResult = {
 };
 
 export type ProposeAccountFrameResult = AccountConsensusFrameResult & {
+  accountChanged?: true;
   accountInput?: AccountInput;
   failedHtlcLocks?: Array<{ hashlock: string; reason: string }>;
 };

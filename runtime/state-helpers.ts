@@ -862,8 +862,12 @@ const cloneEntityReplicaWithPolicy = (
         outputs: replica.validatorExecution.outputs.map(cloneIsolatedEntityInput),
         jOutputs: replica.validatorExecution.jOutputs.map(output => structuredClone(output)),
         hashesToSign: replica.validatorExecution.hashesToSign.map(hash => ({ ...hash })),
+        storageChanges: replica.validatorExecution.storageChanges.map(change => ({ ...change })),
         ...(replica.validatorExecution.consumptionNodeChanges
           ? { consumptionNodeChanges: structuredClone(replica.validatorExecution.consumptionNodeChanges) }
+          : {}),
+        ...(replica.validatorExecution.accountJClaimNodeChanges
+          ? { accountJClaimNodeChanges: structuredClone(replica.validatorExecution.accountJClaimNodeChanges) }
           : {}),
       },
     }),

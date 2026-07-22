@@ -13,7 +13,15 @@
  * 6. Events flow back to entities via j_event handlers
  */
 
-import type { EntityState, EntityTx, EntityInput, Env, AccountMachine, SwapOffer } from '../../../types';
+import type {
+  EntityState,
+  EntityTx,
+  EntityInput,
+  Env,
+  AccountMachine,
+  SwapOffer,
+  RuntimeOverlayRecord,
+} from '../../../types';
 import type { ProofBodyStruct } from '../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { isUsableContractAddress } from '../../../jurisdiction/contract-address';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
@@ -202,12 +210,12 @@ function hasQueuedDisputeFinalize(state: EntityState, counterpartyEntityId: stri
 }
 
 const removeOrderbookRowForDispute = (
-  env: Env,
   state: EntityState,
   outputs: EntityInput[],
   counterpartyEntityId: string,
   offerId: string,
   offer: SwapOffer,
+  storageChanges: RuntimeOverlayRecord[],
 ): { localRemoved: boolean; remoteQueued: boolean } => {
   // Starting a dispute freezes account consensus. Any resting order from that
   // account must stop being matchable before the dispute batch is broadcast:
@@ -220,7 +228,7 @@ const removeOrderbookRowForDispute = (
   // removed forever because the underlying account is no longer live.
   if (!offer.crossJurisdiction) {
     return {
-      localRemoved: removeBookOrderById(env, state, swapKey(counterpartyEntityId, offerId)),
+      localRemoved: removeBookOrderById(state, swapKey(counterpartyEntityId, offerId), storageChanges),
       remoteQueued: false,
     };
   }
@@ -230,7 +238,7 @@ const removeOrderbookRowForDispute = (
   const sourceEntityId = route.source.entityId;
   if (bookOwnerEntityId === String(state.entityId).toLowerCase()) {
     return {
-      localRemoved: removeBookOrderById(env, state, swapKey(sourceEntityId, offerId)),
+      localRemoved: removeBookOrderById(state, swapKey(sourceEntityId, offerId), storageChanges),
       remoteQueued: false,
     };
   }
@@ -258,16 +266,23 @@ const removeOrderbookRowForDispute = (
 };
 
 const removeDisputedAccountOrdersFromBook = (
-  env: Env,
   state: EntityState,
   outputs: EntityInput[],
   counterpartyEntityId: string,
   account: AccountMachine,
+  storageChanges: RuntimeOverlayRecord[],
 ): { localRemoved: number; remoteQueued: number } => {
   let localRemoved = 0;
   let remoteQueued = 0;
   for (const [offerId, offer] of account.swapOffers ?? new Map<string, SwapOffer>()) {
-    const result = removeOrderbookRowForDispute(env, state, outputs, counterpartyEntityId, offerId, offer);
+    const result = removeOrderbookRowForDispute(
+      state,
+      outputs,
+      counterpartyEntityId,
+      offerId,
+      offer,
+      storageChanges,
+    );
     if (result.localRemoved) localRemoved++;
     if (result.remoteQueued) remoteQueued++;
   }
@@ -341,7 +356,8 @@ const markAccountDisputePreparing = (
 export async function handlePrepareDispute(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'prepareDispute' }>,
-  env: Env,
+  _env: Env,
+  storageChanges: RuntimeOverlayRecord[] = [],
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
   const { counterpartyEntityId, description = 'prepare-dispute', minCooldownMs = 0 } = entityTx.data;
   const newState = cloneEntityState(entityState);
@@ -356,7 +372,7 @@ export async function handlePrepareDispute(
     return { newState, outputs };
   }
 
-  removeDisputedAccountOrdersFromBook(env, newState, outputs, counterpartyEntityId, account);
+  removeDisputedAccountOrdersFromBook(newState, outputs, counterpartyEntityId, account, storageChanges);
   markAccountDisputePreparing(newState, account, description, minCooldownMs);
 
   const issues = collectDisputeEvidenceReadinessIssues(account, Number(newState.timestamp ?? 0));
@@ -375,7 +391,8 @@ export async function handlePrepareDispute(
 export async function handleDisputeStart(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'disputeStart' }>,
-  env: Env
+  env: Env,
+  storageChanges: RuntimeOverlayRecord[] = [],
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
   const {
     counterpartyEntityId,
@@ -459,7 +476,7 @@ export async function handleDisputeStart(
     return { newState, outputs };
   }
 
-  removeDisputedAccountOrdersFromBook(env, newState, outputs, counterpartyEntityId, account);
+  removeDisputedAccountOrdersFromBook(newState, outputs, counterpartyEntityId, account, storageChanges);
 
   // Use stored counterparty dispute hanko AND proofBodyHash (exchanged during bilateral consensus)
   // CRITICAL: Must use the SAME proofBodyHash that the hanko signed, not a fresh one!

@@ -23,7 +23,7 @@ import {
   mergeCrossJurisdictionBookAdmission,
 } from '../../../extensions/cross-j/orderbook';
 import { resolveRuntimeSecurityIncident } from '../../../machine/security-incidents';
-import type { CrossJurisdictionSwapRoute, EntityState, EntityTx, Env } from '../../../types';
+import type { CrossJurisdictionSwapRoute, EntityState, EntityTx, Env, RuntimeOverlayRecord } from '../../../types';
 import { getSwapLotScale } from '../../../orderbook';
 import {
   removeCrossJurisdictionBookOrderByRouteId,
@@ -200,6 +200,7 @@ export const applyCrossJurisdictionBookProgressToState = (
   env: Env,
   newState: EntityState,
   data: CrossJurisdictionBookProgressTx['data'],
+  storageChanges: RuntimeOverlayRecord[] = [],
 ): boolean => {
   assertCrossJurisdictionPriceImprovementMode(data.priceImprovementMode, data.orderId);
   const now = deterministicEntityTimestamp(newState, env);
@@ -320,11 +321,11 @@ export const applyCrossJurisdictionBookProgressToState = (
     if (!marketOffer) throw new Error(`CROSS_J_BOOK_PROGRESS_MARKET_INVALID: order=${route.orderId}`);
     const qtyLots = crossBookQtyLots(marketOffer.baseTokenId, marketOffer.baseAmount);
     const resized = resizeCrossJurisdictionBookOrderByRouteId(
-      env,
       newState,
       nextRoute.source.entityId,
       nextRoute.orderId,
       qtyLots,
+      storageChanges,
     );
     if (!resized) {
       throw new Error(`CROSS_J_BOOK_PROGRESS_ORDER_MISSING: order=${route.orderId}`);
@@ -332,7 +333,12 @@ export const applyCrossJurisdictionBookProgressToState = (
     return true;
   }
 
-  const removed = removeCrossJurisdictionBookOrderByRouteId(env, newState, nextRoute.source.entityId, nextRoute.orderId);
+  const removed = removeCrossJurisdictionBookOrderByRouteId(
+    newState,
+    nextRoute.source.entityId,
+    nextRoute.orderId,
+    storageChanges,
+  );
   if (!removed && !isCrossJurisdictionTerminalStatus(nextRoute.status)) {
     throw new Error(`CROSS_J_BOOK_PROGRESS_ORDER_MISSING: order=${route.orderId}`);
   }
@@ -346,7 +352,12 @@ export const handleApplyCrossJurisdictionBookProgressEntityTx = (
   options?: ApplyEntityTxOptions,
 ) => {
   const newState = stateForEntityTx(entityState, options);
-  const changed = applyCrossJurisdictionBookProgressToState(env, newState, entityTx.data);
+  const changed = applyCrossJurisdictionBookProgressToState(
+    env,
+    newState,
+    entityTx.data,
+    options?.storageChanges,
+  );
   if (changed) {
     addMessage(newState, `🌉 Cross-j book progress ${entityTx.data.orderId}${entityTx.data.reason ? `: ${entityTx.data.reason}` : ''}`);
   }
@@ -446,10 +457,10 @@ export const handleRemoveCrossJurisdictionBookOrderEntityTx = (
       )
     : undefined;
   const removed = removeCrossJurisdictionBookOrderByRouteId(
-    env,
     newState,
     entityTx.data.sourceEntityId,
     entityTx.data.orderId,
+    options?.storageChanges ?? [],
   );
   const outputs = pendingCancel && route && entityTx.data.sourceAccountId
     ? [buildCrossJurisdictionBookRemovalAckOutput(

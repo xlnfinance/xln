@@ -1898,6 +1898,30 @@ export function validateEntityReplica(value: unknown, context = 'EntityReplica')
     validateArray(execution['outputs'], `${context}.validatorExecution.outputs`);
     validateArray(execution['jOutputs'], `${context}.validatorExecution.jOutputs`);
     validateArray(execution['hashesToSign'], `${context}.validatorExecution.hashesToSign`);
+    const storageChanges = validateArray(
+      execution['storageChanges'],
+      `${context}.validatorExecution.storageChanges`,
+    );
+    for (const [index, rawChange] of storageChanges.entries()) {
+      const changeContext = `${context}.validatorExecution.storageChanges[${index}]`;
+      const change = validateObject(rawChange, changeContext);
+      const family = validateString(change['family'], `${changeContext}.family`);
+      validateString(change['entityId'], `${changeContext}.entityId`);
+      if (family === 'account') {
+        assertExactFields(change, new Set(['family', 'entityId', 'counterpartyId']), changeContext);
+        validateString(change['counterpartyId'], `${changeContext}.counterpartyId`);
+      } else if (family === 'book') {
+        assertExactFields(change, new Set(['family', 'entityId', 'pairId', 'deleted']), changeContext);
+        validateString(change['pairId'], `${changeContext}.pairId`);
+        if (change['deleted'] !== undefined && typeof change['deleted'] !== 'boolean') {
+          throw new FinancialDataCorruptionError(`${changeContext}.deleted must be boolean`);
+        }
+      } else if (family === 'entity') {
+        assertExactFields(change, new Set(['family', 'entityId']), changeContext);
+      } else {
+        throw new FinancialDataCorruptionError(`${changeContext}.family is invalid`);
+      }
+    }
     if (execution['consumptionNodeChanges'] !== undefined) {
       const changes = validateObject(
         execution['consumptionNodeChanges'],
@@ -1907,6 +1931,17 @@ export function validateEntityReplica(value: unknown, context = 'EntityReplica')
       validateArray(
         changes['replacedNodeHashes'],
         `${context}.validatorExecution.consumptionNodeChanges.replacedNodeHashes`,
+      );
+    }
+    if (execution['accountJClaimNodeChanges'] !== undefined) {
+      const changes = validateObject(
+        execution['accountJClaimNodeChanges'],
+        `${context}.validatorExecution.accountJClaimNodeChanges`,
+      );
+      validateArray(changes['newNodes'], `${context}.validatorExecution.accountJClaimNodeChanges.newNodes`);
+      validateArray(
+        changes['replacedNodeHashes'],
+        `${context}.validatorExecution.accountJClaimNodeChanges.replacedNodeHashes`,
       );
     }
   }

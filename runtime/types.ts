@@ -1117,6 +1117,8 @@ export interface ValidatorEntityFrameExecution {
   outputs: EntityInput[];
   jOutputs: JInput[];
   hashesToSign: HashToSign[];
+  /** Storage invalidations interpreted only after this exact frame commits. */
+  storageChanges: RuntimeOverlayRecord[];
   /** Validator-computed CAS delta, published only when this exact frame commits. */
   consumptionNodeChanges?: {
     newNodes: readonly ConsumptionNodeEntry[];

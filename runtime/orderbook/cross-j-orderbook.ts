@@ -1,4 +1,4 @@
-import type { CrossJurisdictionBookAdmission, EntityState, Env } from '../types';
+import type { CrossJurisdictionBookAdmission, EntityState, Env, RuntimeOverlayRecord } from '../types';
 import {
   normalizeSwapOfferForOrderbook,
   type SwapCancelEvent,
@@ -28,6 +28,7 @@ export const applyCommittedSwapCancelsToOrderbook = (
   env: Env,
   state: EntityState,
   cancels: SwapCancelEvent[],
+  storageChanges: RuntimeOverlayRecord[] = [],
 ): void => {
   if (cancels.length === 0) return;
   const ext = state.orderbookExt as OrderbookExtState | undefined;
@@ -35,7 +36,7 @@ export const applyCommittedSwapCancelsToOrderbook = (
   crossJBookLog.debug('committed_cancel.apply', { count: cancels.length });
   for (const { accountId, offerId } of cancels) {
     const namespacedOrderId = `${accountId}:${offerId}`;
-    if (removeBookOrderById(env, state, namespacedOrderId)) {
+    if (removeBookOrderById(state, namespacedOrderId, storageChanges)) {
       const offer = findAccountByCounterparty(state, accountId)?.swapOffers?.get(offerId);
       if (offer?.crossJurisdiction) {
         markCrossJurisdictionBookAdmissionClosed(

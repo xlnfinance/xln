@@ -1625,14 +1625,38 @@ describe('audit fail-fast regressions', () => {
     const signer = installSingleSignerBoard(env, state);
     const frameTimestamp = 1_000;
 
-    await expect(applyEntityFrame(env, state, await buildQuorumAuthorizedFrameTxs(env, state, [
+    const frameTxs = await buildQuorumAuthorizedFrameTxs(env, state, [
       { type: 'chatMessage', data: { message: 'first mutation' } } as any,
       { type: 'definitely_unknown_entity_tx', data: {} } as any,
       { type: 'chatMessage', data: { message: 'late mutation' } } as any,
-    ], frameTimestamp), frameTimestamp)).rejects.toThrow('ENTITY_FRAME_TX_FAILED: type=definitely_unknown_entity_tx');
+    ], frameTimestamp);
+    env.overlay = [];
+    if (env.runtimeState) env.runtimeState.currentStorageOverlayMarks = [];
+    await expect(applyEntityFrame(env, state, frameTxs, frameTimestamp))
+      .rejects.toThrow('ENTITY_FRAME_TX_FAILED: type=definitely_unknown_entity_tx');
 
     expect(state.messages).toHaveLength(0);
     expect(state.nonces.has(signer)).toBe(false);
+    expect(env.runtimeState?.currentStorageOverlayMarks ?? []).toEqual([]);
+  });
+
+  test('entity frame keeps reducer storage changes local until exact commit', async () => {
+    const env = createEmptyEnv('entity-frame-storage-commit-boundary');
+    env.quietRuntimeLogs = true;
+    env.timestamp = 1_000;
+    const state = makeEntityState(`0x${'60'.repeat(32)}`);
+    installSingleSignerBoard(env, state);
+    const frameTxs = await buildQuorumAuthorizedFrameTxs(env, state, [
+      { type: 'chatMessage', data: { message: 'commit-bound storage change' } } as any,
+    ]);
+    env.overlay = [];
+    if (env.runtimeState) env.runtimeState.currentStorageOverlayMarks = [];
+
+    const applied = await applyEntityFrame(env, state, frameTxs, env.timestamp);
+
+    expect(applied.newState.messages).toHaveLength(1);
+    expect(applied.storageChanges).toContainEqual({ family: 'entity', entityId: state.entityId });
+    expect(env.runtimeState?.currentStorageOverlayMarks ?? []).toEqual([]);
   });
 
   test('cross-j remote route cannot seed missing sibling runtime hints before topology validation', async () => {

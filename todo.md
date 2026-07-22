@@ -137,8 +137,15 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   invalidates its complete parent path, and identical puts produce zero Merkle
   writes. Radix/path/unique-child guards and a strict `<10,000 byte` persisted
   node boundary fail before write/use. Storage L1-L2: 147/147 PASS, 674
-  assertions; types PASS. Remaining consensus/scheduler/orderbook/Runtime
-  callsites stay explicit until their own parity proof is green.
+  assertions; types PASS. Phase 3 binds normalized storage changes to the exact
+  Entity-frame execution and applies them only with the matching committed
+  frame hash. Rejected/speculative frames leave the global overlay untouched;
+  Account proposal mempool removal is atomic with proposal success; Entity,
+  Account and cross-j orderbook reducers no longer mark global storage directly.
+  Validator execution clone/validation preserves storage and Account-J CAS
+  changes. Entity/J/schema/deferred L2: 65/65 PASS; commit-boundary L1: 3/3
+  PASS; source/frozen/types PASS. Remaining scheduler/Runtime callsites stay
+  explicit until their own parity proof is green.
 - [x] Prove whether `runtime/wal/store.ts`, legacy core DB and duplicate HEAD/DAG
   surfaces have production consumers; delete only demonstrated dead paths. No
   production caller reached the parallel WAL API or empty core LevelDB, so both

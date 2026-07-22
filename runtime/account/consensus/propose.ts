@@ -11,7 +11,6 @@ import { safeStringify } from '../../protocol/serialization';
 import { cloneIsolatedAccountInput } from '../../protocol/account-input-clone';
 import { validateAccountFrame as validateAccountFrameStrict } from '../../validation-utils';
 import { applyAccountTx } from '../tx/apply';
-import { markStorageAccountDirty } from '../../machine/env-events';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { createFrameHash, MAX_ACCOUNT_FRAME_TXS, MAX_FRAME_SIZE_BYTES } from './frame';
 import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
@@ -399,10 +398,12 @@ export async function proposeAccountFrame(
   }
   checkpointProfile('validateTxs');
 
-  accountMachine.mempool = removeCommittedTxsFromMempool(accountMachine.mempool, txsToRemove);
-  markStorageAccountDirty(env, accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
+  const accountChangedBeforeProposal = txsToRemove.length > 0;
 
   if (validTxs.length === 0) {
+    if (accountChangedBeforeProposal) {
+      accountMachine.mempool = removeCommittedTxsFromMempool(accountMachine.mempool, txsToRemove);
+    }
     const earlyResult: {
       success: false;
       error: string;
@@ -416,7 +417,7 @@ export async function proposeAccountFrame(
       events: allEvents,
     };
     if (failedHtlcLocks.length > 0) earlyResult.failedHtlcLocks = failedHtlcLocks;
-    return earlyResult;
+    return accountChangedBeforeProposal ? { ...earlyResult, accountChanged: true } : earlyResult;
   }
 
   const finalDeltas: Delta[] = [];
@@ -618,12 +619,14 @@ export async function proposeAccountFrame(
   // Set pending state (no longer storing clone - re-execution on commit)
   stageAccountCommitmentCache(accountMachine, clonedMachine);
   accountMachine.pendingFrame = newFrame;
-  markStorageAccountDirty(env, accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
 
   // Remove only the transactions that actually made it into the proposed frame.
   // This function is async and can yield while hashing/signing; late arrivals must
   // remain queued for the next frame instead of being silently wiped by position.
-  accountMachine.mempool = removeCommittedTxsFromMempool(accountMachine.mempool, validMempoolTxs);
+  accountMachine.mempool = removeCommittedTxsFromMempool(
+    accountMachine.mempool,
+    [...txsToRemove, ...validMempoolTxs],
+  );
 
   events.push(`🚀 Proposed frame ${newFrame.height} with ${newFrame.accountTxs.length} transactions`);
 
@@ -692,6 +695,7 @@ export async function proposeAccountFrame(
 
   const finalResult: ProposeAccountFrameResult = {
     success: true,
+    accountChanged: true,
     accountInput,
     events,
     revealedSecrets,

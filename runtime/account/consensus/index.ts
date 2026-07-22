@@ -22,7 +22,7 @@ import { isLeft } from '../utils';
 import { HEAVY_LOGS } from '../../utils';
 import { safeStringify } from '../../protocol/serialization';
 import { applyAccountTx } from '../tx/apply';
-import { appendAccountFrameHistoryView, getAccountFrameHistoryView, markStorageAccountDirty, recordAccountFrameHistory } from '../../machine/env-events';
+import { appendAccountFrameHistoryView, getAccountFrameHistoryView, recordAccountFrameHistory } from '../../machine/env-events';
 import { deriveAccountFrameOffdeltas, deriveAccountFrameTokenIds } from '../frame';
 import { createStructuredLogger, shortHash, shortId, shouldLogFullPayloads } from '../../infra/logger';
 import {
@@ -751,7 +751,6 @@ async function handlePendingFrameAck(
   ) {
     delete accountMachine.lastOutboundFrameAck;
   }
-  markStorageAccountDirty(env, accountMachine.proofHeader.fromEntity, input.fromEntityId);
   accountMachine.rollbackCount = Math.max(0, accountMachine.rollbackCount - 1); // Successful confirmation reduces rollback
   if (accountMachine.rollbackCount === 0) {
     delete accountMachine.lastRollbackFrameHash; // Reset deduplication on full resolution
@@ -993,9 +992,9 @@ function resolveSameHeightIncomingFrame(
 }
 
 function applySameHeightIncomingFrameRollback(
-  env: Env,
+  _env: Env,
   accountMachine: AccountMachine,
-  input: AccountInput,
+  _input: AccountInput,
   receivedFrame: AccountFrame,
   events: string[],
 ): void {
@@ -1015,7 +1014,6 @@ function applySameHeightIncomingFrameRollback(
   delete accountMachine.pendingAccountInputSignerId;
   delete accountMachine.clonedForValidation;
   discardStagedAccountCommitmentCache(accountMachine);
-  markStorageAccountDirty(env, accountMachine.proofHeader.fromEntity, input.fromEntityId);
   accountMachine.rollbackCount = Math.max(1, accountMachine.rollbackCount + 1);
   accountMachine.lastRollbackFrameHash = receivedHash; // Track this rollback
   if (accountMachine.rollbackCount > 1) {

@@ -507,6 +507,7 @@ export async function applyAccountInput(
             outputs,
             committedFrame.timestamp,
             allSwapOffersCreated,
+            options?.storageChanges,
           );
           if (!crossJurisdictionFollowupHandled) {
             await applyCommittedHtlcLockFollowup(

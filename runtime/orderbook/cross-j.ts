@@ -1,7 +1,6 @@
-import type { CrossJurisdictionSwapRoute, EntityState, Env } from '../types';
+import type { CrossJurisdictionSwapRoute, EntityState, RuntimeOverlayRecord } from '../types';
 import type { OrderbookExtState } from './index';
 import { applyCommand, getBookOrder, getOrderbookPairsForOrder, MAX_ORDERBOOK_QTY_LOTS, replaceOrderbookPair } from './index';
-import { markStorageEntityDirty, recordOrderbookPairUpdate } from '../machine/env-events';
 import { invalidateBookOrderCommitment } from './commitment';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
@@ -13,9 +12,9 @@ export const crossJurisdictionBookOrderId = (route: CrossJurisdictionSwapRoute):
   crossJurisdictionBookOrderIdFor(route.source.entityId, route.orderId);
 
 export const removeBookOrderById = (
-  env: Env,
   state: EntityState,
   namespacedOrderId: string,
+  storageChanges: RuntimeOverlayRecord[],
 ): boolean => {
   const ext = state.orderbookExt as OrderbookExtState | undefined;
   if (!ext) return false;
@@ -43,12 +42,7 @@ export const removeBookOrderById = (
     orderId: namespacedOrderId,
   });
   replaceOrderbookPair(ext, match.pairId, result.state);
-  recordOrderbookPairUpdate(env, {
-    entityId: state.entityId,
-    pairId: match.pairId,
-    book: result.state,
-  });
-  markStorageEntityDirty(env, state.entityId);
+  storageChanges.push({ family: 'book', entityId: state.entityId, pairId: match.pairId });
   return true;
 };
 
@@ -66,10 +60,10 @@ export const hasBookOrderById = (
 };
 
 export const removeCrossJurisdictionBookOrder = (
-  env: Env,
   state: EntityState,
   route: CrossJurisdictionSwapRoute,
-): boolean => removeBookOrderById(env, state, crossJurisdictionBookOrderId(route));
+  storageChanges: RuntimeOverlayRecord[],
+): boolean => removeBookOrderById(state, crossJurisdictionBookOrderId(route), storageChanges);
 
 export const hasCrossJurisdictionBookOrder = (
   state: EntityState,
@@ -77,17 +71,21 @@ export const hasCrossJurisdictionBookOrder = (
 ): boolean => hasBookOrderById(state, crossJurisdictionBookOrderId(route));
 
 export const removeCrossJurisdictionBookOrderByRouteId = (
-  env: Env,
   state: EntityState,
   sourceEntityId: string,
   orderId: string,
-): boolean => removeBookOrderById(env, state, crossJurisdictionBookOrderIdFor(sourceEntityId, orderId));
+  storageChanges: RuntimeOverlayRecord[],
+): boolean => removeBookOrderById(
+  state,
+  crossJurisdictionBookOrderIdFor(sourceEntityId, orderId),
+  storageChanges,
+);
 
 export const resizeBookOrderById = (
-  env: Env,
   state: EntityState,
   namespacedOrderId: string,
   nextQtyLots: bigint,
+  storageChanges: RuntimeOverlayRecord[],
 ): boolean => {
   if (nextQtyLots <= 0n || nextQtyLots > MAX_ORDERBOOK_QTY_LOTS) {
     throw new Error(`ORDERBOOK_RESIZE_INVALID: order=${namespacedOrderId} qty=${nextQtyLots.toString()}`);
@@ -121,19 +119,19 @@ export const resizeBookOrderById = (
   match.order.qtyLots = nextQtyLots;
   level.totalQtyLots = nextTotal;
   replaceOrderbookPair(ext, match.pairId, match.book);
-  recordOrderbookPairUpdate(env, {
-    entityId: state.entityId,
-    pairId: match.pairId,
-    book: match.book,
-  });
-  markStorageEntityDirty(env, state.entityId);
+  storageChanges.push({ family: 'book', entityId: state.entityId, pairId: match.pairId });
   return true;
 };
 
 export const resizeCrossJurisdictionBookOrderByRouteId = (
-  env: Env,
   state: EntityState,
   sourceEntityId: string,
   orderId: string,
   nextQtyLots: bigint,
-): boolean => resizeBookOrderById(env, state, crossJurisdictionBookOrderIdFor(sourceEntityId, orderId), nextQtyLots);
+  storageChanges: RuntimeOverlayRecord[],
+): boolean => resizeBookOrderById(
+  state,
+  crossJurisdictionBookOrderIdFor(sourceEntityId, orderId),
+  nextQtyLots,
+  storageChanges,
+);

@@ -13,7 +13,7 @@ import {
 } from '../../../extensions/cross-j/orderbook';
 import { removeBookOrderById } from '../../../orderbook/cross-j';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
-import type { EntityInput, EntityState, EntityTx, Env } from '../../../types';
+import type { EntityInput, EntityState, EntityTx, Env, RuntimeOverlayRecord } from '../../../types';
 import { formatEntityId } from '../../../utils';
 import { findAccountKey } from '../account-key';
 import {
@@ -35,16 +35,17 @@ const deterministicEntityTimestamp = (state: EntityState, env: Env): number =>
   Number(state.timestamp || env.timestamp || 0);
 
 const cancelOrderbookOfferIfPresent = (
-  env: Env,
   state: EntityState,
   accountId: string,
   offerId: string,
-): boolean => removeBookOrderById(env, state, `${accountId}:${offerId}`);
+  storageChanges: RuntimeOverlayRecord[],
+): boolean => removeBookOrderById(state, `${accountId}:${offerId}`, storageChanges);
 
 export const handleOrderbookSweepCrossJurisdictionEntityTx = (
   env: Env,
   entityState: EntityState,
   entityTx: CrossJurisdictionSweepTx,
+  storageChanges: RuntimeOverlayRecord[] = [],
 ): CrossJurisdictionSweepResult => {
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
@@ -89,7 +90,7 @@ export const handleOrderbookSweepCrossJurisdictionEntityTx = (
     const hasFilledAmount = hasCrossJurisdictionCommittedFill(route);
 
     if (accountId && account?.swapOffers?.has(orderId)) {
-      cancelOrderbookOfferIfPresent(env, newState, accountId, orderId);
+      cancelOrderbookOfferIfPresent(newState, accountId, orderId, storageChanges);
       markCrossJurisdictionBookAdmissionClosed(newState, sourceEntityId, orderId, now, 'sweep_expired');
       if (!accountHasCrossSwapAckQueued(account, orderId)) {
         mempoolOps.push({

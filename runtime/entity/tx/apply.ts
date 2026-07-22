@@ -126,6 +126,8 @@ export interface ApplyEntityTxOptions {
   mutableFrameState?: boolean;
   manualBroadcastInInput?: boolean;
   accountJClaimNodeStore?: AccountJClaimNodeStore;
+  /** Reducer-local collector; interpreted only after the enclosing Entity frame commits. */
+  storageChanges?: RuntimeOverlayRecord[];
 }
 
 export type EntityTxReducerResult = Omit<ApplyEntityTxResult, 'storageChanges'> & {
@@ -297,9 +299,9 @@ const entityTxDispatchers: Record<string, EntityTxDispatcher> = {
   registerCrossJurisdictionSwap: (env, state, tx, options) => handleRegisterCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'registerCrossJurisdictionSwap' }>, options),
   crossJurisdictionFillNotice: (_env, state, tx) => handleCrossJurisdictionFillNoticeEntityTx(state, tx as Extract<EntityTx, { type: 'crossJurisdictionFillNotice' }>),
   materializeCrossJurisdictionClear: (env, state, tx) => handleMaterializeCrossJurisdictionClearEntityTx(env, state, tx as Extract<EntityTx, { type: 'materializeCrossJurisdictionClear' }>),
-  requestCrossJurisdictionClear: (env, state, tx) => handleRequestCrossJurisdictionClearEntityTx(env, state, tx as Extract<EntityTx, { type: 'requestCrossJurisdictionClear' }>),
+  requestCrossJurisdictionClear: (env, state, tx, options) => handleRequestCrossJurisdictionClearEntityTx(env, state, tx as Extract<EntityTx, { type: 'requestCrossJurisdictionClear' }>, options?.storageChanges),
   crossJurisdictionSalvage: (env, state, tx) => handleCrossJurisdictionSalvageEntityTx(env, state, tx as Extract<EntityTx, { type: 'crossJurisdictionSalvage' }>),
-  orderbookSweepCrossJurisdiction: (env, state, tx) => handleOrderbookSweepCrossJurisdictionEntityTx(env, state, tx as Extract<EntityTx, { type: 'orderbookSweepCrossJurisdiction' }>),
+  orderbookSweepCrossJurisdiction: (env, state, tx, options) => handleOrderbookSweepCrossJurisdictionEntityTx(env, state, tx as Extract<EntityTx, { type: 'orderbookSweepCrossJurisdiction' }>, options?.storageChanges),
   admitCrossJurisdictionBookOrder: (env, state, tx, options) => handleAdmitCrossJurisdictionBookOrderEntityTx(env, state, tx as Extract<EntityTx, { type: 'admitCrossJurisdictionBookOrder' }>, options),
   applyCrossJurisdictionBookProgress: (env, state, tx, options) => handleApplyCrossJurisdictionBookProgressEntityTx(env, state, tx as Extract<EntityTx, { type: 'applyCrossJurisdictionBookProgress' }>, options),
   removeCrossJurisdictionBookOrder: (env, state, tx, options) => handleRemoveCrossJurisdictionBookOrderEntityTx(env, state, tx as Extract<EntityTx, { type: 'removeCrossJurisdictionBookOrder' }>, options),
@@ -308,8 +310,8 @@ const entityTxDispatchers: Record<string, EntityTxDispatcher> = {
   resolveSwap: (_env, state, tx, options) => handleResolveSwapRequest(state, tx as Extract<EntityTx, { type: 'resolveSwap' }>, options),
   proposeCancelSwap: (_env, state, tx, options) => handleCancelSwapRequest(state, tx as Extract<EntityTx, { type: 'proposeCancelSwap' }>, options),
   r2e: (_env, state, tx) => handleR2E(state, tx as Extract<EntityTx, { type: 'r2e' }>),
-  prepareDispute: (env, state, tx) => handlePrepareDispute(state, tx as Extract<EntityTx, { type: 'prepareDispute' }>, env),
-  disputeStart: (env, state, tx) => handleDisputeStart(state, tx as Extract<EntityTx, { type: 'disputeStart' }>, env),
+  prepareDispute: (env, state, tx, options) => handlePrepareDispute(state, tx as Extract<EntityTx, { type: 'prepareDispute' }>, env, options?.storageChanges),
+  disputeStart: (env, state, tx, options) => handleDisputeStart(state, tx as Extract<EntityTx, { type: 'disputeStart' }>, env, options?.storageChanges),
   disputeFinalize: (env, state, tx) => handleDisputeFinalize(state, tx as Extract<EntityTx, { type: 'disputeFinalize' }>, env),
 };
 
@@ -327,7 +329,11 @@ export const applyEntityTx = async (
   try {
     const dispatcher = entityTxDispatchers[String(entityTx.type)];
     if (dispatcher) {
-      const { accountChanges = [], ...result } = await dispatcher(env, entityState, entityTx, options);
+      const reducerStorageChanges: RuntimeOverlayRecord[] = [];
+      const { accountChanges = [], ...result } = await dispatcher(env, entityState, entityTx, {
+        ...options,
+        storageChanges: reducerStorageChanges,
+      });
       const entityId = result.newState.entityId.toLowerCase();
       return {
         ...result,
@@ -336,6 +342,7 @@ export const applyEntityTx = async (
           ...Array.from(new Set(accountChanges.map(accountId => accountId.toLowerCase())))
             .sort()
             .map(counterpartyId => ({ family: 'account' as const, entityId, counterpartyId })),
+          ...reducerStorageChanges,
         ],
       };
     }

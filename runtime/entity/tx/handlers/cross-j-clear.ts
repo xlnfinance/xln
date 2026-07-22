@@ -9,7 +9,7 @@ import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { buildCrossJurisdictionCancelAck } from '../../../extensions/cross-j/orderbook';
 import { removeBookOrderById } from '../../../orderbook/cross-j';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
-import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env } from '../../../types';
+import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env, RuntimeOverlayRecord } from '../../../types';
 import { formatEntityId } from '../../../utils';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import {
@@ -33,11 +33,11 @@ const deterministicEntityTimestamp = (state: EntityState, env: Env): number =>
   Number(state.timestamp || env.timestamp || 0);
 
 const cancelOrderbookOfferIfPresent = (
-  env: Env,
   state: EntityState,
   accountId: string,
   offerId: string,
-): boolean => removeBookOrderById(env, state, `${accountId}:${offerId}`);
+  storageChanges: RuntimeOverlayRecord[],
+): boolean => removeBookOrderById(state, `${accountId}:${offerId}`, storageChanges);
 
 const closeProofMatches = (
   left: CrossJurisdictionClearMaterializationTx['data']['proof'],
@@ -56,6 +56,7 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
   env: Env,
   entityState: EntityState,
   entityTx: CrossJurisdictionClearTx,
+  storageChanges: RuntimeOverlayRecord[] = [],
 ): CrossJurisdictionClearResult => {
   const { orderId, cancelRemainder = false } = entityTx.data;
   const newState = cloneEntityState(entityState);
@@ -131,7 +132,7 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
       addMessage(newState, `🌉 Cross-j clear ${orderId} waiting for account offer close ack`);
       return { newState, outputs, mempoolOps };
     }
-    const removedFromBook = cancelOrderbookOfferIfPresent(env, newState, accountId, orderId);
+    const removedFromBook = cancelOrderbookOfferIfPresent(newState, accountId, orderId, storageChanges);
     mempoolOps.push({
       accountId,
       tx: buildCrossJurisdictionCancelAck(orderId, canonicalRoute),
