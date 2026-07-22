@@ -1903,10 +1903,6 @@ describe('multisig HTLC validator encryption', () => {
     const evidence = await anchorManualGenesisReplica(env, state);
     if (!evidence) throw new Error('HTLC_TEST_REGISTRATION_EVIDENCE_MISSING');
     await certifyRegisteredBoardPrefix(env, entityId, signerId, evidence);
-    const certificationsBeforeP2P = env.history
-      .flatMap((frame) => frame.runtimeInput.entityInputs)
-      .flatMap((input) => input.entityTxs ?? [])
-      .filter((tx) => tx.type === 'certifyProfile').length;
     const [announcement] = collectLocalProfileEncryptionAnnouncements(env);
     if (!announcement) throw new Error('PROFILE_P2P_DEDUP_ANNOUNCEMENT_MISSING');
     const p2p = startP2P(env, {
@@ -1916,6 +1912,11 @@ describe('multisig HTLC validator encryption', () => {
       advertiseEntityIds: [entityId],
     });
     if (!p2p) throw new Error('PROFILE_P2P_DEDUP_RUNTIME_MISSING');
+    const historyTrace = startRuntimeHistoryTraceForTesting(env);
+    const certificationsBeforeP2P = historyTrace.snapshots
+      .flatMap((frame) => frame.runtimeInput.entityInputs)
+      .flatMap((input) => input.entityTxs ?? [])
+      .filter((tx) => tx.type === 'certifyProfile').length;
     try {
       const pendingAtStartup = env.runtimeMempool?.entityInputs
         .flatMap((input) => input.entityTxs ?? [])
@@ -1932,7 +1933,7 @@ describe('multisig HTLC validator encryption', () => {
 
       await processRuntime(env, [{ entityId, signerId, entityTxs: [] }]);
 
-      const committedCertifications = env.history
+      const committedCertifications = historyTrace.snapshots
         .flatMap((frame) => frame.runtimeInput.entityInputs)
         .flatMap((input) => input.entityTxs ?? [])
         .filter((tx) => tx.type === 'certifyProfile').length;
@@ -1942,6 +1943,7 @@ describe('multisig HTLC validator encryption', () => {
       expect(committedCertifications).toBe(certificationsBeforeP2P + 1);
       expect(pendingAfterCommit).toBe(0);
     } finally {
+      historyTrace.stop();
       await stopP2PAndWait(env);
       clearSignerKeys(env);
     }

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { LIMITS } from '../constants';
+import { NobleCryptoProvider } from '../protocol/crypto/noble';
 import { createOnionEnvelopes, validateEnvelope } from '../protocol/htlc/envelope';
 
 describe('htlc envelope validation', () => {
@@ -44,5 +45,30 @@ describe('htlc envelope validation', () => {
     const route = Array.from({ length: 102 }, (_, index) => `entity-${index}`);
 
     await expect(createOnionEnvelopes(route, 'secret')).rejects.toThrow('101 hops > MAX_HOPS (100)');
+  });
+
+  test('fails closed when encryption inputs or certified recipient keys are missing', async () => {
+    const route = [`0x${'11'.repeat(32)}`, `0x${'22'.repeat(32)}`];
+    const binding = {
+      rootLockId: `0x${'33'.repeat(32)}`,
+      hashlock: `0x${'44'.repeat(32)}`,
+      tokenId: 1,
+      senderLockAmount: 1n,
+      timelock: 60_000n,
+      revealBeforeHeight: 100,
+    };
+
+    await expect(createOnionEnvelopes(route, `0x${'55'.repeat(32)}`))
+      .rejects.toThrow('Onion envelope encryption requires crypto, certified manifests, amounts, and lock binding');
+    await expect(createOnionEnvelopes(
+      route,
+      `0x${'55'.repeat(32)}`,
+      new Map(),
+      new NobleCryptoProvider({ deterministicSeed: 'missing-htlc-manifest' }),
+      new Map(),
+      undefined,
+      1,
+      binding,
+    )).rejects.toThrow(`Missing validator encryption manifest for payer ${route[0]}`);
   });
 });

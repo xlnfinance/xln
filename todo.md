@@ -149,7 +149,7 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   cleanup failures now emit operation, PID/path where relevant, and the error.
 - [ ] Audit semantic silent fallbacks in remaining catch clauses; retain only
   typed validation results or explicitly documented adversarial soft-fail paths.
-- [ ] Verify and remove every HTLC cleartext fallback when recipient encryption
+- [x] Verify and remove every HTLC cleartext fallback when recipient encryption
   material is missing; fail closed and prove browser/runtime bundles contain no
   plaintext payment secret path.
 - [ ] Verify the reported shared `jReplicas` state-root assumption and collateral
