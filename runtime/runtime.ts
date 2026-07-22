@@ -7132,19 +7132,28 @@ export async function submitCrossJurisdictionIntent(
   };
   const state = ensureRuntimeState(env);
   const direct = state.directEntityInputsDispatch;
-  const delivery = direct
+  let delivery = direct
     ? requireDeliveryResult(
         direct(targetRuntimeId, envelope, envelope.sourceRuntimeTimestamp),
         'CROSS_J_INTENT_DIRECT_DELIVERY_INVALID',
       )
-    : requireDeliveryResult(
-        getP2P(env)?.enqueueEntityInputsDelivery(
+    : null;
+  if (!delivery || !isDeliveryDelivered(delivery)) {
+    const p2p = getP2P(env);
+    if (p2p) {
+      delivery = requireDeliveryResult(
+        p2p.enqueueEntityInputsDelivery(
           targetRuntimeId,
           envelope,
           envelope.sourceRuntimeTimestamp,
         ),
         'CROSS_J_INTENT_P2P_DELIVERY_INVALID',
       );
+    }
+  }
+  if (!delivery) {
+    throw new Error('CROSS_J_INTENT_NOT_DELIVERED:NO_TRANSPORT');
+  }
   if (!isDeliveryDelivered(delivery)) {
     // M1 is intentionally best-effort: no durable outbox and no automatic
     // retry. The caller may resubmit the same orderId after the Hub reconnects.

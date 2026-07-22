@@ -77,17 +77,21 @@ import { crossBookQtyLots } from '../entity/tx/handlers/account/orderbook-matchi
 import {
   createRuntimeOutputRoutingDeps,
   registerEntityRuntimeHint,
+  selectPotentialCrossJAccountInputPairs,
   selectMatchedCrossJAccountInputPairs,
+  validateInboundP2PEntityInputsEnvelope,
   type RuntimeEntityRoutingDeps,
 } from '../machine/entity-routing';
 import {
+  buildPendingNetworkOutputs,
   buildRouteOutputKey,
   dispatchEntityOutputs,
   planEntityOutputs,
+  pruneReceiptedReliableOutputs,
   rescheduleDeferredOutputs,
   splitPendingOutputsByRetryWindow,
 } from '../machine/output-routing';
-import { deliveryAccepted } from '../protocol/payments/delivery-result';
+import { deliveryAccepted, deliveryDeferred } from '../protocol/payments/delivery-result';
 import {
   addReplica,
   addr,
@@ -733,6 +737,44 @@ describe('cross-jurisdiction hashledger swap', () => {
       runtimeId: userEnv.runtimeId,
       sourceRuntimeFrame: hubFrame,
     }));
+    const dedupedProposals = buildPendingNetworkOutputs([
+      { ...proposals[0]!, sourceRuntimeFrame: { height: 41, timestamp: hubEnv.timestamp - 1 } },
+      { ...proposals[1]!, sourceRuntimeFrame: { height: 41, timestamp: hubEnv.timestamp - 1 } },
+      ...proposals,
+    ]);
+    expect(dedupedProposals).toHaveLength(2);
+    expect(selectPotentialCrossJAccountInputPairs(dedupedProposals)).toHaveLength(1);
+    const repeatedCohorts = [
+      { ...proposals[0]!, sourceRuntimeFrame: { height: 41, timestamp: hubEnv.timestamp - 1 } },
+      { ...proposals[1]!, sourceRuntimeFrame: { height: 41, timestamp: hubEnv.timestamp - 1 } },
+      ...proposals,
+    ];
+    expect(selectPotentialCrossJAccountInputPairs(repeatedCohorts)).toHaveLength(2);
+    const atomicRepeatedCohorts = repeatedCohorts.map(input => {
+      const frame = input.sourceRuntimeFrame!;
+      const cohort = repeatedCohorts.filter(candidate =>
+        candidate.sourceRuntimeFrame?.height === frame.height &&
+        candidate.sourceRuntimeFrame.timestamp === frame.timestamp);
+      const pairKey = selectPotentialCrossJAccountInputPairs(cohort)[0]!.pairKey;
+      return { ...input, atomicCrossJurisdictionPair: { phase: 'proposal' as const, pairKey } };
+    });
+    const mergedRepeatedCohorts = mergeEntityInputs(atomicRepeatedCohorts);
+    expect(mergedRepeatedCohorts).toHaveLength(4);
+    expect(selectPotentialCrossJAccountInputPairs(mergedRepeatedCohorts)).toHaveLength(2);
+    const reversedProposals = [...proposals].reverse();
+    const structuralPair = selectPotentialCrossJAccountInputPairs(reversedProposals)[0]!;
+    expect(validateInboundP2PEntityInputsEnvelope(
+      userEnv,
+      hubEnv.runtimeId!,
+      {
+        sourceRuntimeId: hubEnv.runtimeId!,
+        sourceRuntimeHeight: hubFrame.height,
+        sourceRuntimeTimestamp: hubFrame.timestamp,
+        atomicCrossJurisdictionPair: { phase: 'proposal', pairKey: structuralPair.pairKey },
+        entityInputs: reversedProposals.map(({ from: _from, sourceRuntimeFrame: _frame, ...input }) => input),
+      },
+      makeLocalCrossJRoutingDeps(),
+    )).toHaveLength(2);
     expect(selectMatchedCrossJAccountInputPairs(userEnv, [proposals[0]!]).inputs).toEqual([]);
     const ordinaryUserInput = { entityId: sourceUser, signerId: sourceUserSigner, entityTxs: [] };
     expect(selectMatchedCrossJAccountInputPairs(userEnv, [proposals[0]!, ordinaryUserInput]).inputs)
@@ -795,6 +837,16 @@ describe('cross-jurisdiction hashledger swap', () => {
       .get(targetUser)?.currentFrame.accountTxs.map(tx => tx.type)).toEqual(['pull_lock']);
     expect(hubEnv.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)?.state.orderbookExt?.books.size).toBe(1);
     expect(hubAckPass.entityOutbox).toEqual([]);
+    const retainedProposalCohort = rescheduleDeferredOutputs(
+      hubEnv,
+      [],
+      proposals,
+      [],
+      makeLocalCrossJRoutingDeps(),
+    );
+    expect(retainedProposalCohort).toHaveLength(2);
+    expect(pruneReceiptedReliableOutputs(hubEnv, retainedProposalCohort)).toEqual([]);
+    expect(hubEnv.runtimeState?.deferredNetworkMeta?.size).toBe(0);
   });
 
   test('submitCrossJurisdictionSwap queues hub prepare, then prepare builds symmetric pull commitments', async () => {
@@ -853,11 +905,21 @@ describe('cross-jurisdiction hashledger swap', () => {
     registerEntityRuntimeHint(env, targetHub, hubEnv.runtimeId!, routingDeps);
     registerEntityRuntimeHint(hubEnv, sourceUser, env.runtimeId!, routingDeps);
     registerEntityRuntimeHint(hubEnv, targetUser, env.runtimeId!, routingDeps);
-    env.runtimeState!.directEntityInputsDispatch = (targetRuntimeId, envelope) => {
+    let directAttempts = 0;
+    let relayAttempts = 0;
+    env.runtimeState!.directEntityInputsDispatch = targetRuntimeId => {
       expect(targetRuntimeId).toBe(hubEnv.runtimeId);
-      handleInboundP2PEntityInputs(hubEnv, env.runtimeId!, envelope);
-      return deliveryAccepted('TEST_UNSIGNED_CROSS_J_INTENT_DELIVERED');
+      directAttempts += 1;
+      return deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' });
     };
+    env.runtimeState!.p2p = {
+      enqueueEntityInputsDelivery: (targetRuntimeId: string, envelope: RuntimeEntityInputsEnvelope) => {
+        expect(targetRuntimeId).toBe(hubEnv.runtimeId);
+        relayAttempts += 1;
+        handleInboundP2PEntityInputs(hubEnv, env.runtimeId!, envelope);
+        return deliveryAccepted('TEST_UNSIGNED_CROSS_J_INTENT_RELAYED');
+      },
+    } as any;
 
     const submitParams = {
       orderId: 'cross-test-1',
@@ -882,6 +944,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       ...submitParams,
       targetAmount: 91n,
     })).rejects.toThrow('INBOUND_CROSS_J_INTENT_ORDER_ID_CONFLICT');
+    expect(directAttempts).toBe(3);
+    expect(relayAttempts).toBe(3);
     expect([...hubEnv.runtimeState!.securityIncidents!.values()].map(incident => incident.code))
       .toContain('CROSS_J_INTENT_ORDER_ID_CONFLICT');
 
@@ -893,6 +957,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.route.target.jurisdiction).toBe(jref(base));
     expect(queued).toHaveLength(1);
     expect(queued[0]?.entityId).toBe(sourceHub);
+    expect(queued[0]?.from).toBeUndefined();
+    expect(queued[0]?.sourceRuntimeFrame).toBeUndefined();
     expect(queued[0]?.entityTxs?.[0]?.type).toBe('prepareCrossJurisdictionSwap');
     expect(env.runtimeMempool?.entityInputs).toEqual([]);
 

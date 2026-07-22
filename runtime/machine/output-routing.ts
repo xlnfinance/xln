@@ -672,6 +672,57 @@ export const splitRoutedOutputByDeliveryLane = <T extends RoutedEntityInput>(out
   return split as T[];
 };
 
+const accountProposalOutputIdentity = (output: RoutedEntityInput): string | null => {
+  const txs = getEffectiveEntityInputTxs(output);
+  if (txs.length === 0) return null;
+  const proposals = txs.flatMap(tx => {
+    if (tx.type !== 'accountInput') return [];
+    const proposal = accountInputProposal(tx.data);
+    return proposal ? [{ accountInput: tx.data, proposal }] : [];
+  });
+  if (proposals.length !== txs.length) return null;
+  return safeStringify({
+    runtimeId: normalizeRuntimeId(output.runtimeId),
+    entityId: output.entityId.toLowerCase(),
+    signerId: output.signerId.toLowerCase(),
+    from: normalizeRuntimeId(output.from),
+    proposals: proposals.map(({ accountInput, proposal }) => ({
+      fromEntityId: accountInput.fromEntityId.toLowerCase(),
+      toEntityId: accountInput.toEntityId.toLowerCase(),
+      height: proposal.frame.height,
+      stateHash: proposal.frame.stateHash.toLowerCase(),
+    })),
+  });
+};
+
+const accountProposalEvidenceRank = (output: RoutedEntityInput): number =>
+  getEffectiveEntityInputTxs(output).reduce((rank, tx) => {
+    if (tx.type !== 'accountInput') return rank;
+    const proposal = accountInputProposal(tx.data);
+    if (!proposal) return rank;
+    return rank + Number(Boolean(proposal.frameHanko)) + Number(Boolean(proposal.disputeSeal));
+  }, 0);
+
+const accountProposalCommittedBySender = (
+  env: Env,
+  output: RoutedEntityInput,
+): boolean => {
+  const proposals = getEffectiveEntityInputTxs(output).flatMap(tx => {
+    if (tx.type !== 'accountInput') return [];
+    const proposal = accountInputProposal(tx.data);
+    return proposal ? [{ accountInput: tx.data, proposal }] : [];
+  });
+  if (proposals.length === 0) return false;
+  return proposals.every(({ accountInput, proposal }) => [...env.eReplicas.values()].some(replica => {
+    if (replica.entityId.toLowerCase() !== accountInput.fromEntityId.toLowerCase()) return false;
+    const targetCounterparty = accountInput.toEntityId.toLowerCase();
+    const account = [...replica.state.accounts.entries()].find(([counterpartyId]) =>
+      counterpartyId.toLowerCase() === targetCounterparty)?.[1];
+    return account?.currentFrame.height === proposal.frame.height &&
+      account.currentFrame.stateHash.toLowerCase() === proposal.frame.stateHash.toLowerCase();
+  }));
+};
+
 export const buildRouteOutputKey = (output: RoutedEntityInput): string => {
   const reliableIdentity = getReliableOutputIdentity(output);
   if (reliableIdentity) return safeStringify({ reliableIdentity });
@@ -685,6 +736,8 @@ export const buildRouteOutputKey = (output: RoutedEntityInput): string => {
       voteHash: hashEntityLeaderVoteBody(output.leaderTimeoutVote),
     });
   }
+  const accountProposalIdentity = accountProposalOutputIdentity(output);
+  if (accountProposalIdentity) return accountProposalIdentity;
   return safeStringify({
     runtimeId: output.runtimeId ?? '',
     sourceRuntimeFrame: output.sourceRuntimeFrame ?? null,
@@ -734,6 +787,14 @@ const isCrossJAdmissionSourceProposal = (output: RoutedEntityInput): boolean =>
         String(binding.routeHash || '').toLowerCase());
   });
 
+const isCrossJAdmissionProposal = (output: RoutedEntityInput): boolean =>
+  getEffectiveEntityInputTxs(output).some(tx => {
+    if (tx.type !== 'accountInput') return false;
+    const proposal = accountInputProposal(tx.data);
+    return Boolean(proposal?.frame.accountTxs.some(accountTx =>
+      accountTx.type === 'pull_lock' && accountTx.data.crossJurisdiction));
+  });
+
 const summarizeAccountEnvelopeOutputs = (outputs: readonly RoutedEntityInput[]) =>
   outputs.map(output => ({
     entityId: output.entityId,
@@ -749,61 +810,77 @@ const summarizeAccountEnvelopeOutputs = (outputs: readonly RoutedEntityInput[]) 
         toEntityId: tx.data.toEntityId,
         ackHeight: ack?.height ?? null,
         proposalHeight: proposal?.frame.height ?? null,
+        crossPulls: proposal?.frame.accountTxs.flatMap(accountTx =>
+          accountTx.type === 'pull_lock' && accountTx.data.crossJurisdiction
+            ? [{
+                leg: accountTx.data.crossJurisdiction.leg,
+                orderId: accountTx.data.crossJurisdiction.orderId,
+                routeHash: accountTx.data.crossJurisdiction.routeHash,
+              }]
+            : []) ?? [],
       }];
     }),
   }));
 
-const sourceFrameGroupKey = (output: RoutedEntityInput): string | null => {
-  const frame = output.sourceRuntimeFrame;
-  if (!frame) return null;
-  return safeStringify({
-    runtimeId: normalizeRuntimeId(output.runtimeId),
-    height: frame.height,
-    timestamp: frame.timestamp,
-  });
-};
-
 const groupAtomicCrossJAdmissionOutputs = <T extends RoutedEntityInput>(
   outputs: readonly T[],
-): Array<{ outputs: T[]; atomic: boolean }> => {
-  const pairs = selectPotentialCrossJAccountInputPairs(outputs);
-  const pairByIndex = new Map<number, typeof pairs[number]>();
-  for (const pair of pairs) {
-    const source = outputs[pair.sourceInputIndex]!;
-    const target = outputs[pair.targetInputIndex]!;
-    if (sourceFrameGroupKey(source) !== sourceFrameGroupKey(target)) {
-      throw new Error('ROUTE_CROSS_J_ATOMIC_SOURCE_FRAME_MISMATCH');
-    }
-    pairByIndex.set(pair.sourceInputIndex, pair);
-    pairByIndex.set(pair.targetInputIndex, pair);
-  }
+): Array<{ outputs: T[]; atomic: boolean; complete: boolean }> => {
+  type IndexedUnit = {
+    firstIndex: number;
+    outputs: T[];
+    atomic: boolean;
+    complete: boolean;
+  };
+  const claimed = new Set<number>();
+  const indexed: IndexedUnit[] = [];
+
+  // ACK pairs already carry their proposal cohort identity. Group that exact
+  // identity before any target batching so two sequential cohorts can never be
+  // collapsed into one envelope with one misleading pairKey.
+  const explicitGroups = new Map<string, number[]>();
   for (const [index, output] of outputs.entries()) {
-    if (isCrossJAdmissionSourceProposal(output) && !pairByIndex.has(index)) {
-      throw new Error(
-        `ROUTE_CROSS_J_ATOMIC_PAIR_MISSING:${safeStringify({
-          sourceIndex: index,
-          potentialPairs: pairs,
-          outputs,
-        })}`,
-      );
-    }
+    const pair = output.atomicCrossJurisdictionPair;
+    if (!pair) continue;
+    const key = safeStringify(pair);
+    const indexes = explicitGroups.get(key) ?? [];
+    indexes.push(index);
+    explicitGroups.set(key, indexes);
   }
-  const emittedSources = new Set<number>();
-  const grouped: Array<{ outputs: T[]; atomic: boolean }> = [];
-  for (const [index, output] of outputs.entries()) {
-    const pair = pairByIndex.get(index);
-    if (!pair) {
-      grouped.push({ outputs: [output], atomic: false });
-      continue;
-    }
-    if (emittedSources.has(pair.sourceInputIndex)) continue;
-    emittedSources.add(pair.sourceInputIndex);
-    grouped.push({
-      outputs: [outputs[pair.targetInputIndex]!, outputs[pair.sourceInputIndex]!],
+  for (const indexes of explicitGroups.values()) {
+    indexes.forEach(index => claimed.add(index));
+    indexed.push({
+      firstIndex: Math.min(...indexes),
+      outputs: indexes.map(index => outputs[index]!),
       atomic: true,
+      complete: indexes.length === 2,
     });
   }
-  return grouped;
+
+  for (const pair of selectPotentialCrossJAccountInputPairs(outputs)) {
+    const indexes = [pair.sourceInputIndex, pair.targetInputIndex];
+    if (indexes.some(index => claimed.has(index))) continue;
+    indexes.forEach(index => claimed.add(index));
+    indexed.push({
+      firstIndex: Math.min(...indexes),
+      outputs: [outputs[pair.targetInputIndex]!, outputs[pair.sourceInputIndex]!],
+      atomic: true,
+      complete: true,
+    });
+  }
+
+  for (const [index, output] of outputs.entries()) {
+    if (claimed.has(index)) continue;
+    const incompleteCrossJ = isCrossJAdmissionProposal(output);
+    indexed.push({
+      firstIndex: index,
+      outputs: [output],
+      atomic: incompleteCrossJ,
+      complete: !incompleteCrossJ,
+    });
+  }
+  return indexed
+    .sort((left, right) => left.firstIndex - right.firstIndex)
+    .map(({ firstIndex: _firstIndex, ...unit }) => unit);
 };
 
 const overwriteRoutedEntityOutput = <T extends RoutedEntityInput>(target: T, source: T): T => {
@@ -884,6 +961,22 @@ export const mergeRoutedEntityOutput = <T extends RoutedEntityInput>(existing: T
         return incomingIsCommit ? overwriteRoutedEntityOutput(existing, incoming) : existing;
       }
     }
+    const canonical = selectCanonicalReliableOutput(existing, incoming);
+    return canonical === existing ? existing : overwriteRoutedEntityOutput(existing, incoming);
+  }
+
+  const existingAccountProposal = accountProposalOutputIdentity(existing);
+  if (existingAccountProposal && existingAccountProposal === accountProposalOutputIdentity(incoming)) {
+    const evidenceDelta = accountProposalEvidenceRank(incoming) - accountProposalEvidenceRank(existing);
+    if (evidenceDelta !== 0) {
+      return evidenceDelta > 0 ? overwriteRoutedEntityOutput(existing, incoming) : existing;
+    }
+    const existingFrame = existing.sourceRuntimeFrame;
+    const incomingFrame = incoming.sourceRuntimeFrame;
+    const incomingIsNewer = Boolean(incomingFrame && (!existingFrame ||
+      incomingFrame.height > existingFrame.height ||
+      (incomingFrame.height === existingFrame.height && incomingFrame.timestamp > existingFrame.timestamp)));
+    if (incomingIsNewer) return overwriteRoutedEntityOutput(existing, incoming);
     const canonical = selectCanonicalReliableOutput(existing, incoming);
     return canonical === existing ? existing : overwriteRoutedEntityOutput(existing, incoming);
   }
@@ -1091,6 +1184,10 @@ export const splitPendingOutputsByRetryWindow = (
 
   for (const unit of groupAtomicCrossJAdmissionOutputs(orderedPending)) {
     if (unit.atomic) {
+      if (!unit.complete) {
+        waiting.push(...unit.outputs);
+        continue;
+      }
       const reliableOutputs = unit.outputs.filter(output => getReliableOutputIdentity(output) !== null);
       const reliable = reliableOutputs
         .map(output => getReliableOutputIdentity(output)!)
@@ -1158,6 +1255,7 @@ export const getNextNetworkRetryTimestamp = (
   const retryScheduledOutputs = groupAtomicCrossJAdmissionOutputs(buildPendingNetworkOutputs(pending))
     .flatMap((unit) => {
       if (!unit.atomic) return unit.outputs;
+      if (!unit.complete) return [];
       const reliableOutputs = unit.outputs.filter(
         output => getReliableOutputIdentity(output) !== null,
       );
@@ -1355,9 +1453,26 @@ export const pruneReceiptedReliableOutputs = (
   outputs: RoutedEntityInput[],
   appliedReceipts: readonly ReliableDeliveryReceipt[] = [],
 ): RoutedEntityInput[] => {
+  // Proposal cohorts intentionally have no transport receipt. Their business
+  // terminal is the ordinary bilateral Account ACK that commits the exact
+  // proposed frame on both Hub sibling Entities. Once both frames are current,
+  // keep no transport retry state: retaining the original proposal envelope
+  // would either leak outbox entries forever or invite a manual duplicate.
+  const uncommittedOutputs = groupAtomicCrossJAdmissionOutputs(outputs).flatMap(unit => {
+    const committedProposalCohort = unit.atomic && unit.complete &&
+      unit.outputs.every(output =>
+        getReliableOutputIdentity(output) === null && accountProposalCommittedBySender(env, output));
+    if (!committedProposalCohort) return unit.outputs;
+    for (const output of unit.outputs) {
+      env.runtimeState?.deferredNetworkMeta?.delete(buildRouteOutputKey(output));
+    }
+    return [];
+  });
   const active = env.runtimeState?.receivedReliableReceiptLedger;
   const terminal = env.runtimeState?.receivedReliableTerminalWatermarks;
-  if ((!active || active.size === 0) && (!terminal || terminal.size === 0)) return outputs;
+  if ((!active || active.size === 0) && (!terminal || terminal.size === 0)) {
+    return uncommittedOutputs;
+  }
   const receiptsByFrontier = new Map<string, ReliableDeliveryReceipt[]>();
   for (const receipt of appliedReceipts) {
     const key = senderFrontierKey(receipt);
@@ -1377,15 +1492,12 @@ export const pruneReceiptedReliableOutputs = (
     ]
       .some(receipt => receipt && reliableReceiptCoversIdentity(receipt, identity));
   };
-  const sourceFrameGroups = new Map<string, RoutedEntityInput[]>();
-  for (const output of outputs) {
-    const key = sourceFrameGroupKey(output) ?? safeStringify({ singleton: buildRouteOutputKey(output) });
-    const group = sourceFrameGroups.get(key) ?? [];
-    group.push(output);
-    sourceFrameGroups.set(key, group);
-  }
   const retained: RoutedEntityInput[] = [];
-  for (const unit of [...sourceFrameGroups.values()].flatMap(groupAtomicCrossJAdmissionOutputs)) {
+  for (const unit of groupAtomicCrossJAdmissionOutputs(uncommittedOutputs)) {
+    if (!unit.complete) {
+      retained.push(...unit.outputs);
+      continue;
+    }
     const reliableOutputs = unit.outputs.filter(output => getReliableOutputIdentity(output) !== null);
     if (
       unit.atomic &&
@@ -1428,17 +1540,17 @@ export const rescheduleDeferredOutputs = (
   const nowMs = getNetworkRetryNowMs(env);
   const retriedReliableLanes = new Set<string>();
   for (const unit of groupAtomicCrossJAdmissionOutputs(buildPendingNetworkOutputs(failed))) {
+    if (!unit.complete) continue;
     // A cross-j Account cohort must remain one durable envelope, but it must not
     // replay itself after a peer outage. The operator explicitly re-arms it once
     // that peer is known online; until then both Account frames stay paused here.
-    const retryOutputs = unit.atomic
-      ? unit.outputs.filter(output => getReliableOutputIdentity(output) !== null)
-      : unit.outputs;
-    if (unit.atomic) {
-      unit.outputs
-        .filter(output => getReliableOutputIdentity(output) === null)
-        .forEach(output => meta.delete(buildRouteOutputKey(output)));
-    }
+    // Proposal cohorts are ordinary Account frames, while ACK cohorts carry
+    // reliable identities. Both phases still have the same retry contract:
+    // after one transport attempt the complete envelope stays paused until an
+    // operator explicitly re-arms it. Fencing only reliable outputs made the
+    // proposal phase immediately due again and replayed both money legs on
+    // every Runtime tick.
+    const retryOutputs = unit.outputs;
     for (const output of retryOutputs) {
       const reliable = getReliableOutputIdentity(output);
       if (
@@ -1482,11 +1594,11 @@ export const markPendingCrossJAdmissionOutputsReady = (
   for (const unit of groupAtomicCrossJAdmissionOutputs(
     buildPendingNetworkOutputs(env.pendingNetworkOutputs ?? []),
   )) {
-    if (!unit.atomic) continue;
+    if (!unit.atomic || !unit.complete) continue;
     if (normalizedTarget && unit.outputs.some(output => normalizeRuntimeId(output.runtimeId) !== normalizedTarget)) {
       continue;
     }
-    const retryOutputs = unit.outputs.filter(output => getReliableOutputIdentity(output) !== null);
+    const retryOutputs = unit.outputs;
     if (!retryOutputs.some(output => meta.get(buildRouteOutputKey(output))?.manual === true)) continue;
     for (const output of retryOutputs) {
       const key = buildRouteOutputKey(output);
@@ -1734,11 +1846,8 @@ const requireOutputRuntimeFrame = (
 };
 
 const outputEnvelopeGroupKey = (output: DeliverableEntityInput): string => {
-  const frame = requireOutputRuntimeFrame(output);
   return safeStringify({
     runtimeId: normalizeRuntimeId(output.runtimeId),
-    height: frame.height,
-    timestamp: frame.timestamp,
   });
 };
 
@@ -1761,12 +1870,18 @@ const buildRuntimeEntityInputsEnvelope = (
   const atomicCrossJurisdictionPair = explicitPair ?? (inferredProposalPair
     ? {
         phase: 'proposal' as const,
-        pairKey: `proposal:${sourceRuntimeId}:${firstFrame.height}:${firstFrame.timestamp}`,
+        pairKey: structuralPairs[0]!.pairKey,
       }
     : undefined);
+  const envelopeFrame = atomicCrossJurisdictionPair
+    ? { height: env.height, timestamp: env.timestamp }
+    : firstFrame;
   const entityInputs = outputs.map(output => {
     const frame = requireOutputRuntimeFrame(output);
-    if (frame.height !== firstFrame.height || frame.timestamp !== firstFrame.timestamp) {
+    if (
+      !atomicCrossJurisdictionPair &&
+      (frame.height !== firstFrame.height || frame.timestamp !== firstFrame.timestamp)
+    ) {
       throw new Error('ROUTE_ENTITY_INPUTS_ENVELOPE_FRAME_MISMATCH');
     }
     const {
@@ -1778,8 +1893,8 @@ const buildRuntimeEntityInputsEnvelope = (
   });
   return {
     sourceRuntimeId,
-    sourceRuntimeHeight: firstFrame.height,
-    sourceRuntimeTimestamp: firstFrame.timestamp,
+    sourceRuntimeHeight: envelopeFrame.height,
+    sourceRuntimeTimestamp: envelopeFrame.timestamp,
     entityInputs,
     ...(atomicCrossJurisdictionPair ? { atomicCrossJurisdictionPair } : {}),
   };
@@ -1838,8 +1953,16 @@ export const dispatchEntityOutputs = (
   }
 
   const envelopeGroups = [...groupedByEnvelope.values()]
-    .flatMap(group => groupAtomicCrossJAdmissionOutputs(batchOutputsByTarget(group.outputs))
-      .map(unit => ({ targetRuntimeId: group.targetRuntimeId, ...unit })))
+    .flatMap(group => {
+      const units = groupAtomicCrossJAdmissionOutputs(group.outputs);
+      const atomicUnits = units.filter(unit => unit.atomic);
+      const ordinaryOutputs = units.filter(unit => !unit.atomic).flatMap(unit => unit.outputs);
+      const ordinaryUnits = ordinaryOutputs.length > 0
+        ? groupAtomicCrossJAdmissionOutputs(batchOutputsByTarget(ordinaryOutputs))
+        : [];
+      return [...atomicUnits, ...ordinaryUnits]
+        .map(unit => ({ targetRuntimeId: group.targetRuntimeId, ...unit }));
+    })
     .sort((left, right) =>
       compareStableText(left.targetRuntimeId, right.targetRuntimeId) ||
       compareOutputDelivery(left.outputs[0]!, right.outputs[0]!));
@@ -1853,6 +1976,19 @@ export const dispatchEntityOutputs = (
   // The receiver still queues out-of-order delivery and rejects equivocation.
   const blockedReliableLanes = new Set<string>();
   for (const group of envelopeGroups) {
+    if (!group.complete) {
+      throw new Error(
+        `ROUTE_CROSS_J_INCOMPLETE_COHORT_MARKED_READY:${safeStringify({
+          targetRuntimeId: group.targetRuntimeId,
+          outputs: summarizeAccountEnvelopeOutputs(group.outputs),
+          atomicPairs: group.outputs.map(output => output.atomicCrossJurisdictionPair ?? null),
+          plannedOutputs: outputs.map(({ output, targetRuntimeId }) => ({
+            targetRuntimeId,
+            ...summarizeAccountEnvelopeOutputs([output])[0],
+          })),
+        })}`,
+      );
+    }
     const atomicCrossJAdmission = group.atomic;
     const sendable: DeliverableEntityInput[] = [];
     for (const output of group.outputs) {

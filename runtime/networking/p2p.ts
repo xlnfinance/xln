@@ -601,7 +601,14 @@ export class RuntimeP2P {
   enqueueEntityInputsDelivery(targetRuntimeId: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): EntityInputDeliveryResult {
     try {
       failfastAssert(typeof targetRuntimeId === 'string' && targetRuntimeId.length > 0, 'P2P_TARGET_RUNTIME_INVALID', 'targetRuntimeId is required');
-      failfastAssert(Array.isArray(envelope?.entityInputs) && envelope.entityInputs.length > 0, 'P2P_ENTITY_INPUTS_INVALID', 'entity_inputs envelope is empty', { targetRuntimeId });
+      failfastAssert(Array.isArray(envelope?.entityInputs), 'P2P_ENTITY_INPUTS_INVALID', 'entity_inputs envelope is malformed', { targetRuntimeId });
+      const hasIntent = envelope.crossJurisdictionIntent !== undefined;
+      failfastAssert(
+        hasIntent ? envelope.entityInputs.length === 0 : envelope.entityInputs.length > 0,
+        'P2P_ENTITY_INPUTS_INVALID',
+        hasIntent ? 'cross-j intent envelope contains entity inputs' : 'entity_inputs envelope is empty',
+        { targetRuntimeId },
+      );
     } catch (error) {
       this.env.warn('network', 'P2P_FAILFAST_REJECT', {
         failfast: asFailFastPayload(error),

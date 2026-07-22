@@ -304,6 +304,40 @@ test('enqueueEntityInputsDelivery returns typed success with transport', () => {
   expect(sent[0]?.timestamp).toBe(2345);
 });
 
+test('enqueueEntityInputsDelivery relays an intent-only cross-j envelope', () => {
+  const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
+  const sent: RuntimeEntityInputsEnvelope[] = [];
+  const relayClient = {
+    isOpen: () => true,
+    sendEntityInputsRaw: (_to: string, envelope: RuntimeEntityInputsEnvelope) => {
+      sent.push(envelope);
+      return true;
+    },
+  };
+
+  p2p.env = { warn: () => undefined };
+  p2p.sendDebugEvent = () => true;
+  p2p.resolveTransportClient = () => ({ client: relayClient, transport: 'relay' });
+  p2p.clients = [relayClient];
+  p2p.directClients = new Map();
+  p2p.directClientUrls = new Map();
+  p2p.directClientErrors = new Map();
+
+  const envelope = {
+    sourceRuntimeId: SOURCE_RUNTIME_ID,
+    sourceRuntimeHeight: 8,
+    sourceRuntimeTimestamp: 8000,
+    entityInputs: [],
+    crossJurisdictionIntent: { orderId: 'intent-only' },
+  } as unknown as RuntimeEntityInputsEnvelope;
+
+  expect(p2p.enqueueEntityInputsDelivery(TARGET_RUNTIME_ID, envelope)).toMatchObject({
+    outcome: 'delivered',
+    transport: 'relay',
+  });
+  expect(sent).toEqual([envelope]);
+});
+
 test('enqueueEntityInputsDelivery prefers open direct transport over relay', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   const relaySent: unknown[] = [];

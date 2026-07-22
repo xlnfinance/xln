@@ -2351,6 +2351,7 @@ const maintainMarketMakerCrossQuotes = async (
   maxSourceHubGroups = Number.MAX_SAFE_INTEGER,
   emitBootstrapWaveEvents = false,
   deferredEntityInputsByEntitySigner?: Map<string, EntityInput>,
+  attemptedBootstrapIntentOrderIds: Set<string> = new Set(),
 ): Promise<boolean> => {
   const startedAt = Date.now();
   const direction = `${sourceContext.jurisdictionName}->${targetContext.jurisdictionName}`;
@@ -2499,6 +2500,7 @@ const maintainMarketMakerCrossQuotes = async (
           .filter(spec =>
             spec.crossJurisdiction &&
             !existingOfferIds.has(spec.offerId) &&
+            !attemptedBootstrapIntentOrderIds.has(spec.offerId) &&
             !hasCrossSpecBootstrapProgress(env, spec, getPendingCrossRequestOrderIds),
           )
           .filter(spec => {
@@ -2529,6 +2531,7 @@ const maintainMarketMakerCrossQuotes = async (
         for (const spec of selectedCandidates) {
           const route = spec.crossJurisdiction!;
           await submitCrossJurisdictionIntent(env, route);
+          attemptedBootstrapIntentOrderIds.add(spec.offerId);
           submittedIntentCount += 1;
           existingOfferIds.add(spec.offerId);
           selectedForSourceHub += 1;
@@ -4050,6 +4053,7 @@ const run = async (): Promise<void> => {
   let bootstrapSameCursor = 0;
   let bootstrapCrossCursor = 0;
   let steadyCrossCursor = 0;
+  const attemptedBootstrapIntentOrderIds = new Set<string>();
   let lastSameQuoteProgressLogAt = 0;
   let lastSameQuoteProgressKey = '';
   const hubsForContext = (visibleHubs: HubProfile[], context: MarketMakerEntityContext): HubProfile[] =>
@@ -4431,6 +4435,7 @@ const run = async (): Promise<void> => {
             : Number.MAX_SAFE_INTEGER,
           mode === 'bootstrap',
           deferredBootstrapCrossInputs ?? undefined,
+          attemptedBootstrapIntentOrderIds,
         )) {
           const deferredTxsAfter = deferredBootstrapCrossInputs
             ? countMarketMakerEntityInputTxs(deferredBootstrapCrossInputs)

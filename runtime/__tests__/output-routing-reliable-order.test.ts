@@ -229,6 +229,48 @@ describe('ordered reliable output lanes', () => {
     expect(hasReadyPendingNetworkOutputs(env, deps, 1_000_000)).toBe(true);
   });
 
+  test('ordinary cross-j proposal legs also wait for an explicit retry trigger', () => {
+    const frame = { height: 77, timestamp: 1_000 };
+    const pair = { phase: 'proposal' as const, pairKey: 'atomic-proposal-pair-77' };
+    const sourceProposal = {
+      runtimeId: targetRuntimeId,
+      entityId: targetEntityId,
+      signerId: targetSignerId,
+      sourceRuntimeFrame: frame,
+      atomicCrossJurisdictionPair: pair,
+      entityTxs: [],
+    } as RoutedEntityInput;
+    const targetProposal = {
+      ...sourceProposal,
+      entityId: entityId('95'),
+    };
+    const env = {
+      scenarioMode: true,
+      timestamp: 1_000,
+      runtimeState: {},
+      pendingNetworkOutputs: [],
+    } as unknown as Env;
+    const deps = {
+      ensureRuntimeState: (targetEnv: Env) => targetEnv.runtimeState ??= {},
+    } as RuntimeOutputRoutingDeps;
+
+    env.pendingNetworkOutputs = rescheduleDeferredOutputs(
+      env,
+      [],
+      [sourceProposal, targetProposal],
+      [],
+      deps,
+    );
+
+    expect(env.runtimeState?.deferredNetworkMeta?.size).toBe(2);
+    expect(getNextNetworkRetryTimestamp(env, deps)).toBeNull();
+    env.timestamp = 1_000_000;
+    expect(hasReadyPendingNetworkOutputs(env, deps, 1_000_000)).toBe(false);
+    expect(markPendingCrossJAdmissionOutputsReady(env, deps, targetRuntimeId)).toBe(1);
+    expect(getNextNetworkRetryTimestamp(env, deps)).toBe(1_000_000);
+    expect(hasReadyPendingNetworkOutputs(env, deps, 1_000_000)).toBe(true);
+  });
+
   test('one cohort keeps both cross-j Account ACKs atomic', () => {
     const frame = { height: 78, timestamp: 1_000 };
     const pair = { phase: 'ack' as const, pairKey: 'atomic-ack-pair-78' };
@@ -267,6 +309,41 @@ describe('ordered reliable output lanes', () => {
         manual: true,
       },
     ]);
+  });
+
+  test('sequential cross-j cohorts to one runtime stay in separate envelopes', () => {
+    const firstPair = { phase: 'ack' as const, pairKey: 'atomic-ack-pair-first' };
+    const secondPair = { phase: 'ack' as const, pairKey: 'atomic-ack-pair-second' };
+    const outputs = [
+      { ...accountAckOutput(3), atomicCrossJurisdictionPair: firstPair },
+      { ...accountAckOutput(4), atomicCrossJurisdictionPair: firstPair },
+      { ...accountAckOutput(5), atomicCrossJurisdictionPair: secondPair },
+      { ...accountAckOutput(6), atomicCrossJurisdictionPair: secondPair },
+    ];
+    const envelopes: RuntimeEntityInputsEnvelope[] = [];
+    const env = {
+      runtimeId: runtimeId('90'),
+      timestamp: 1_000,
+      runtimeState: {},
+      warn: () => {},
+      error: () => {},
+    } as unknown as Env;
+
+    dispatchEntityOutputs(
+      env,
+      outputs.map(output => ({ output, targetRuntimeId })),
+      routingDeps(() => ({
+        enqueueEntityInputsDelivery: (_runtimeId, envelope) => {
+          envelopes.push(envelope);
+          return deliveryAccepted('TEST_ATOMIC_COHORT_DELIVERED');
+        },
+      })),
+    );
+
+    expect(envelopes).toHaveLength(2);
+    expect(envelopes.map(envelope => envelope.entityInputs.length)).toEqual([2, 2]);
+    expect(envelopes.map(envelope => envelope.atomicCrossJurisdictionPair?.pairKey).sort())
+      .toEqual([firstPair.pairKey, secondPair.pairKey].sort());
   });
 
   test('keeps Account ACK retry cadence below the bilateral liveness timeout', () => {

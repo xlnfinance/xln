@@ -93,8 +93,11 @@ const admissionOriginKey = (input: RoutedEntityInput): string => {
   return runtimeId ? `remote:${runtimeId}` : 'remote:missing';
 };
 
-const admissionPairKey = (input: RoutedEntityInput, routeKeys: readonly string[]): string =>
-  `${admissionOriginKey(input)}\u0000${[...routeKeys].sort().join('\u0001')}`;
+// This key crosses the runtime boundary inside the atomic envelope. Transport
+// provenance is deliberately checked beside it, not encoded into it: the same
+// cohort is "local" at the sender and "remote:<sender>" at the receiver.
+const admissionPairKey = (_input: RoutedEntityInput, routeKeys: readonly string[]): string =>
+  [...routeKeys].sort().join('\u0001');
 
 const exactAdmissionPairKey = (
   input: RoutedEntityInput,
@@ -211,65 +214,22 @@ const targetProposalCandidate = (
   };
 };
 
-const ackAdmissionCandidate = (
-  env: Env,
-  input: RoutedEntityInput,
-  inputIndex: number,
-  accountInput: AccountInput,
-): CrossJAdmissionCandidate | null => {
-  const ack = accountInputAck(accountInput);
-  if (!ack) return null;
-  const account = findReplicaAccount(env, input, accountInput.fromEntityId);
-  const frameMatchesAck = (frame: NonNullable<typeof account>['currentFrame'] | undefined): boolean =>
-    frame?.height === ack.height &&
-    String(frame.stateHash || '').toLowerCase() === String(ack.frameHash || '').toLowerCase();
-  const pending = account?.pendingFrame;
-  const current = account?.currentFrame;
-  const frame = frameMatchesAck(pending)
-    ? pending
-    : frameMatchesAck(current)
-      ? current
-      : null;
-  if (!frame) return null;
-  const sourcePulls = crossPulls(frame.accountTxs, 'source');
-  const targetPulls = crossPulls(frame.accountTxs, 'target');
-  if ((sourcePulls.length === 0) === (targetPulls.length === 0)) return null;
-  const leg = sourcePulls.length > 0 ? 'source' : 'target';
-  const pulls = leg === 'source' ? sourcePulls : targetPulls;
-  const routeKeys = pulls.map(pull => admissionKey(
-    pull.data.crossJurisdiction!.orderId,
-    pull.data.crossJurisdiction!.routeHash,
-  ));
-  if (new Set(routeKeys).size !== routeKeys.length) return null;
-  return {
-    inputIndex,
-    routeKeys,
-    pairKey: exactAdmissionPairKey(input, routeKeys, 'ack'),
-    phase: 'ack',
-    leg,
-    accountInput,
-    frame,
-    pulls,
-    alreadyCommitted: frame === current,
-  };
-};
-
 const routeForCrossJPull = (
   pull: Extract<AccountTx, { type: 'pull_lock' }>,
 ): NonNullable<Extract<AccountTx, { type: 'pull_lock' }>['data']['crossJurisdictionRoute']> | null =>
   pull.data.crossJurisdictionRoute ?? null;
 
-const pairedPullsMatch = (
-  source: CrossJAdmissionCandidate,
-  target: CrossJAdmissionCandidate,
+const pairedPullListsMatch = (
+  sourcePulls: readonly Extract<AccountTx, { type: 'pull_lock' }>[],
+  targetPulls: readonly Extract<AccountTx, { type: 'pull_lock' }>[],
 ): boolean => {
-  if (source.phase !== target.phase || source.pulls.length !== target.pulls.length) return false;
-  for (const sourcePull of source.pulls) {
+  if (sourcePulls.length !== targetPulls.length) return false;
+  for (const sourcePull of sourcePulls) {
     const sourceBinding = sourcePull.data.crossJurisdiction;
     const sourceRoute = routeForCrossJPull(sourcePull);
     if (!sourceBinding || !sourceRoute) return false;
     const key = admissionKey(sourceBinding.orderId, sourceBinding.routeHash);
-    const matchingTargets = target.pulls.filter(targetPull => {
+    const matchingTargets = targetPulls.filter(targetPull => {
       const targetBinding = targetPull.data.crossJurisdiction;
       return targetBinding && admissionKey(targetBinding.orderId, targetBinding.routeHash) === key;
     });
@@ -315,34 +275,132 @@ export type CrossJAccountInputPairSelection = {
 };
 
 export type PotentialCrossJAccountInputPair = {
+  pairKey: string;
   sourceInputIndex: number;
   targetInputIndex: number;
 };
+
+type CrossJAdmissionFrameCandidate = {
+  inputIndex: number;
+  pairKey: string;
+  originKey: string;
+  phase: 'proposal' | 'ack';
+  accountInput: AccountInput;
+  frame: AccountFrame;
+  sourcePulls: Array<Extract<AccountTx, { type: 'pull_lock' }>>;
+  targetPulls: Array<Extract<AccountTx, { type: 'pull_lock' }>>;
+  alreadyCommitted: boolean;
+  valid: boolean;
+};
+
+const buildCrossJProposalFrameCandidate = (
+  input: RoutedEntityInput,
+  inputIndex: number,
+  accountInput: AccountInput,
+): CrossJAdmissionFrameCandidate | null => {
+  const proposal = accountInputProposal(accountInput);
+  if (!proposal) return null;
+  const sourcePulls = crossPulls(proposal.frame.accountTxs, 'source');
+  const targetPulls = crossPulls(proposal.frame.accountTxs, 'target');
+  if (sourcePulls.length === 0 && targetPulls.length === 0) return null;
+  const source = sourceAdmissionCandidate(input, inputIndex, accountInput);
+  const target = targetProposalCandidate(input, inputIndex, accountInput);
+  const routeKeys = [...sourcePulls, ...targetPulls].map(pull => admissionKey(
+    pull.data.crossJurisdiction!.orderId,
+    pull.data.crossJurisdiction!.routeHash,
+  ));
+  return {
+    inputIndex,
+    pairKey: exactAdmissionPairKey(input, routeKeys, 'proposal'),
+    originKey: admissionOriginKey(input),
+    phase: 'proposal',
+    accountInput,
+    frame: proposal.frame,
+    sourcePulls,
+    targetPulls,
+    alreadyCommitted: false,
+    valid: new Set(routeKeys).size === routeKeys.length &&
+      (sourcePulls.length === 0 || source !== null) &&
+      (targetPulls.length === 0 || target !== null),
+  };
+};
+
+const buildCrossJAckFrameCandidate = (
+  env: Env,
+  input: RoutedEntityInput,
+  inputIndex: number,
+  accountInput: AccountInput,
+): CrossJAdmissionFrameCandidate | null => {
+  const ack = accountInputAck(accountInput);
+  if (!ack) return null;
+  const account = findReplicaAccount(env, input, accountInput.fromEntityId);
+  const frameMatchesAck = (frame: NonNullable<typeof account>['currentFrame'] | undefined): boolean =>
+    frame?.height === ack.height &&
+    String(frame.stateHash || '').toLowerCase() === String(ack.frameHash || '').toLowerCase();
+  const frame = frameMatchesAck(account?.pendingFrame)
+    ? account!.pendingFrame!
+    : frameMatchesAck(account?.currentFrame)
+      ? account!.currentFrame
+      : null;
+  if (!frame) return null;
+  const sourcePulls = crossPulls(frame.accountTxs, 'source');
+  const targetPulls = crossPulls(frame.accountTxs, 'target');
+  if (sourcePulls.length === 0 && targetPulls.length === 0) return null;
+  const routeKeys = [...sourcePulls, ...targetPulls].map(pull => admissionKey(
+    pull.data.crossJurisdiction!.orderId,
+    pull.data.crossJurisdiction!.routeHash,
+  ));
+  return {
+    inputIndex,
+    pairKey: exactAdmissionPairKey(input, routeKeys, 'ack'),
+    originKey: admissionOriginKey(input),
+    phase: 'ack',
+    accountInput,
+    frame,
+    sourcePulls,
+    targetPulls,
+    alreadyCommitted: frame === account?.currentFrame,
+    valid: new Set(routeKeys).size === routeKeys.length,
+  };
+};
+
+const admissionFramesMatch = (
+  left: CrossJAdmissionFrameCandidate,
+  right: CrossJAdmissionFrameCandidate,
+): boolean => left.valid && right.valid &&
+  left.phase === right.phase &&
+  left.pairKey === right.pairKey &&
+  left.originKey === right.originKey &&
+  pairedPullListsMatch(left.sourcePulls, right.targetPulls) &&
+  pairedPullListsMatch(right.sourcePulls, left.targetPulls);
 
 /** Structural only; monetary approval happens in the state-aware selector. */
 export const selectPotentialCrossJAccountInputPairs = (
   inputs: readonly RoutedEntityInput[],
 ): PotentialCrossJAccountInputPair[] => {
-  const sources = inputs.flatMap((input, inputIndex) =>
+  const candidates = inputs.flatMap((input, inputIndex) =>
     effectiveAccountInputs(input).flatMap(accountInput => {
-      const source = sourceAdmissionCandidate(input, inputIndex, accountInput);
-      return source ? [source] : [];
+      const candidate = buildCrossJProposalFrameCandidate(input, inputIndex, accountInput);
+      return candidate ? [candidate] : [];
     }));
   const pairs: PotentialCrossJAccountInputPair[] = [];
-  for (const source of sources) {
-    const sourceInput = inputs[source.inputIndex]!;
-    const targets = inputs.flatMap((input, inputIndex) => {
-      if (inputIndex === source.inputIndex) return [];
-      if (!sameSourceRuntimeFrame(sourceInput, input)) return [];
-      if (admissionOriginKey(input) !== admissionOriginKey(sourceInput)) return [];
-      const matchingTargets = effectiveAccountInputs(input)
-        .map(accountInput => targetProposalCandidate(input, inputIndex, accountInput))
-        .filter((candidate): candidate is CrossJAdmissionCandidate => candidate !== null)
-        .filter(candidate => candidate.pairKey === source.pairKey && pairedPullsMatch(source, candidate));
-      return matchingTargets.length === 1 ? [inputIndex] : [];
+  for (let leftIndex = 0; leftIndex < candidates.length; leftIndex += 1) {
+    const left = candidates[leftIndex]!;
+    const matches = candidates.filter((right, rightIndex) =>
+      rightIndex > leftIndex &&
+      right.inputIndex !== left.inputIndex &&
+      normalizeRuntimeId(inputs[right.inputIndex]!.runtimeId) ===
+        normalizeRuntimeId(inputs[left.inputIndex]!.runtimeId) &&
+      sameSourceRuntimeFrame(inputs[right.inputIndex]!, inputs[left.inputIndex]!) &&
+      admissionOriginKey(inputs[right.inputIndex]!) === admissionOriginKey(inputs[left.inputIndex]!) &&
+      admissionFramesMatch(left, right));
+    if (matches.length !== 1) continue;
+    const right = matches[0]!;
+    pairs.push({
+      pairKey: left.pairKey,
+      sourceInputIndex: left.inputIndex,
+      targetInputIndex: right.inputIndex,
     });
-    if (targets.length !== 1) continue;
-    pairs.push({ sourceInputIndex: source.inputIndex, targetInputIndex: targets[0]! });
   }
   if (pairs.length === 0 && inputs.length === 2) {
     const cohort = inputs[0]?.atomicCrossJurisdictionPair;
@@ -355,7 +413,11 @@ export const selectPotentialCrossJAccountInputPairs = (
         ? [inputIndex]
         : []) : [];
     if (ackIndexes.length === 2) {
-      pairs.push({ sourceInputIndex: ackIndexes[0]!, targetInputIndex: ackIndexes[1]! });
+      pairs.push({
+        pairKey: cohort!.pairKey,
+        sourceInputIndex: ackIndexes[0]!,
+        targetInputIndex: ackIndexes[1]!,
+      });
     }
   }
   return pairs;
@@ -364,23 +426,19 @@ export const selectPotentialCrossJAccountInputPairs = (
 const collectCrossJAdmissionCandidates = (
   env: Env,
   inputs: readonly RoutedEntityInput[],
-): CrossJAdmissionCandidate[] => inputs.flatMap((input, inputIndex) => {
+): CrossJAdmissionFrameCandidate[] => inputs.flatMap((input, inputIndex) => {
   const replica = findInputReplica(env, input);
   if (!replica) return [];
   const receivingHub = replica.state.profile?.isHub === true;
   return effectiveAccountInputs(input).flatMap(accountInput => {
-    if (receivingHub) {
-      const ack = ackAdmissionCandidate(env, input, inputIndex, accountInput);
-      return ack ? [ack] : [];
-    }
-    const proposals = [
-      sourceAdmissionCandidate(input, inputIndex, accountInput),
-      targetProposalCandidate(input, inputIndex, accountInput),
-    ].filter((candidate): candidate is CrossJAdmissionCandidate => candidate !== null);
-    for (const candidate of proposals) {
+    const candidate = receivingHub
+      ? buildCrossJAckFrameCandidate(env, input, inputIndex, accountInput)
+      : buildCrossJProposalFrameCandidate(input, inputIndex, accountInput);
+    if (!candidate) return [];
+    if (!receivingHub) {
       candidate.alreadyCommitted = proposalAlreadyCommitted(env, input, accountInput);
     }
-    return proposals;
+    return [candidate];
   });
 });
 
@@ -401,7 +459,7 @@ export const selectMatchedCrossJAccountInputPairs = (
   // ACK independently; requiring the sibling again would turn packet loss into
   // an alert/retry loop after a successful atomic commit.
   const uncommittedCandidates = candidates.filter(candidate => !candidate.alreadyCommitted);
-  const byKey = new Map<string, CrossJAdmissionCandidate[]>();
+  const byKey = new Map<string, CrossJAdmissionFrameCandidate[]>();
   for (const candidate of uncommittedCandidates) {
     const group = byKey.get(candidate.pairKey) ?? [];
     group.push(candidate);
@@ -414,47 +472,45 @@ export const selectMatchedCrossJAccountInputPairs = (
   const invalidIndexes = new Set([...candidateCounts]
     .filter(([, count]) => count !== 1)
     .map(([inputIndex]) => inputIndex));
+  uncommittedCandidates
+    .filter(candidate => !candidate.valid)
+    .forEach(candidate => invalidIndexes.add(candidate.inputIndex));
   const pairs: CrossJAccountInputPair[] = [];
   for (const [pairKey, group] of byKey) {
-    const sources = group.filter(candidate => candidate.leg === 'source');
-    const targets = group.filter(candidate => candidate.leg === 'target');
     const groupIndexes = new Set(group.map(candidate => candidate.inputIndex));
     if (
-      sources.length !== 1 ||
-      targets.length !== 1 ||
+      group.length !== 2 ||
       groupIndexes.size !== 2 ||
       [...groupIndexes].some(inputIndex => invalidIndexes.has(inputIndex))
     ) {
       groupIndexes.forEach(inputIndex => invalidIndexes.add(inputIndex));
       continue;
     }
-    const sourceInput = inputs[sources[0]!.inputIndex]!;
-    const targetInput = inputs[targets[0]!.inputIndex]!;
-    if (
-      !sameSourceRuntimeFrame(sourceInput, targetInput) ||
-      !pairedPullsMatch(sources[0]!, targets[0]!)
-    ) {
+    const [source, target] = [...group].sort((left, right) => left.inputIndex - right.inputIndex);
+    const sourceInput = inputs[source!.inputIndex]!;
+    const targetInput = inputs[target!.inputIndex]!;
+    if (!sameSourceRuntimeFrame(sourceInput, targetInput) || !admissionFramesMatch(source!, target!)) {
       groupIndexes.forEach(inputIndex => invalidIndexes.add(inputIndex));
       continue;
     }
     pairs.push({
       pairKey,
-      phase: sources[0]!.phase,
-      sourceInputIndex: sources[0]!.inputIndex,
-      targetInputIndex: targets[0]!.inputIndex,
+      phase: source!.phase,
+      sourceInputIndex: source!.inputIndex,
+      targetInputIndex: target!.inputIndex,
       sourceAccountFrame: {
         entityId: sourceInput.entityId,
         signerId: sourceInput.signerId,
-        counterpartyEntityId: sources[0]!.accountInput.fromEntityId,
-        height: sources[0]!.frame.height,
-        stateHash: sources[0]!.frame.stateHash,
+        counterpartyEntityId: source!.accountInput.fromEntityId,
+        height: source!.frame.height,
+        stateHash: source!.frame.stateHash,
       },
       targetAccountFrame: {
         entityId: targetInput.entityId,
         signerId: targetInput.signerId,
-        counterpartyEntityId: targets[0]!.accountInput.fromEntityId,
-        height: targets[0]!.frame.height,
-        stateHash: targets[0]!.frame.stateHash,
+        counterpartyEntityId: target!.accountInput.fromEntityId,
+        height: target!.frame.height,
+        stateHash: target!.frame.stateHash,
       },
     });
   }
@@ -861,11 +917,6 @@ export const validateInboundP2PEntityInputsEnvelope = (
         entityId: sourceHubEntityId,
         signerId: sourceHubSignerId,
         ...(localRuntimeId ? { runtimeId: localRuntimeId } : {}),
-        from: transportSource,
-        sourceRuntimeFrame: {
-          height: envelope.sourceRuntimeHeight,
-          timestamp: envelope.sourceRuntimeTimestamp,
-        },
         entityTxs: [{
           type: 'prepareCrossJurisdictionSwap',
           data: { route },
@@ -873,15 +924,18 @@ export const validateInboundP2PEntityInputsEnvelope = (
       });
     }
   }
-  const sourceIndexes = validatedInputs.flatMap((input, inputIndex) =>
-    effectiveAccountInputs(input).some(accountInput =>
-      sourceAdmissionCandidate(input, inputIndex, accountInput) !== null)
-      ? [inputIndex]
-      : []);
-  if (sourceIndexes.length > 0) {
+  const crossJProposalIndexes = validatedInputs.flatMap((input, inputIndex) =>
+    effectiveAccountInputs(input).some(accountInput => {
+      const proposal = accountInputProposal(accountInput);
+      return proposal?.frame.accountTxs.some(tx =>
+        tx.type === 'pull_lock' && tx.data.crossJurisdiction) === true;
+    }) ? [inputIndex] : []);
+  if (crossJProposalIndexes.length > 0 || atomicPair) {
     const pairs = selectPotentialCrossJAccountInputPairs(validatedInputs);
-    const exactPair = sourceIndexes.length === 1 && validatedInputs.length === 2 && pairs.length === 1 &&
-      pairs[0]!.sourceInputIndex === sourceIndexes[0] &&
+    const exactPair = atomicPair !== undefined &&
+      validatedInputs.length === 2 &&
+      pairs.length === 1 &&
+      pairs[0]!.pairKey === atomicPair.pairKey &&
       new Set([pairs[0]!.sourceInputIndex, pairs[0]!.targetInputIndex]).size === 2;
     if (!exactPair) throw new Error('INBOUND_CROSS_J_ATOMIC_ENVELOPE_INVALID');
   }

@@ -185,6 +185,13 @@ export const prioritizeEntityConsensusInputs = <T extends RoutedEntityInput>(
 
 const entityInputMergeKey = (input: RoutedEntityInput): string => {
   const base = `${input.entityId.toLowerCase()}:${String(input.signerId || '').toLowerCase()}`;
+  const atomicCrossJ = input.atomicCrossJurisdictionPair;
+  if (atomicCrossJ) {
+    const sourceFrame = input.sourceRuntimeFrame;
+    if (!sourceFrame) throw new Error('ENTITY_INPUT_ATOMIC_CROSS_J_SOURCE_FRAME_MISSING');
+    return `${base}:cross-j-atomic:${atomicCrossJ.phase}:${atomicCrossJ.pairKey}:` +
+      `${sourceFrame.height}:${sourceFrame.timestamp}`;
+  }
   if (input.jPrefixAttestations) {
     if (input.jPrefixAttestations.size !== 1) throw new Error('ENTITY_INPUT_J_PREFIX_MUST_BE_SPLIT');
     const entry = input.jPrefixAttestations.entries().next().value;
