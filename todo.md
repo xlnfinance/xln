@@ -89,7 +89,7 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   commitment at the first divergent height; forbid expected=actual tautology.
 - [ ] Resolve the current branch's hash/domain/schema collision. Because this is
   a fresh reset, keep one format only; do not add migrations or dual readers.
-- [ ] Verify the previously failing 10 SIGKILL lineage cases on current HEAD;
+- [x] Verify the previously failing 10 SIGKILL lineage cases on current HEAD;
   fix any remaining loss of certified lineage without inventing peer recovery.
 - [x] Register chunk prefix `0x7e`; prove delete/overwrite/checkpoint collection
   cannot leak orphan chunks indefinitely; document truncated checksum scope.

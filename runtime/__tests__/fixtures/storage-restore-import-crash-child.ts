@@ -9,7 +9,10 @@ import {
 import {
   deriveSignerAddressSync,
   deriveSignerKeySync,
+  signAccountFrame,
 } from '../../account/crypto';
+import { createEntityFrameHashFromStateRoot } from '../../entity/consensus/frame';
+import { getEntityLeaderState } from '../../entity/consensus/leader';
 import { generateLazyEntityId } from '../../entity/factory';
 import {
   applyConsumptionOutput,
@@ -27,7 +30,7 @@ import {
   computeEntityFrameAuthorityRoot,
 } from '../../entity/consensus/state-root';
 import type { StoragePersistenceBoundary } from '../../storage';
-import type { JReplica, JurisdictionConfig } from '../../types';
+import type { CertifiedEntityFrameLink, JReplica, JurisdictionConfig } from '../../types';
 
 const [seed, requestedBoundary] = Bun.argv.slice(2);
 if (!seed || !requestedBoundary) throw new Error('seed and restore boundary are required');
@@ -98,7 +101,8 @@ const consumptionIdentity = (height: number) => ({
   outputHash: `0x${(height + 16).toString(16).padStart(2, '0').repeat(32)}`,
   outputHanko: `0x${height.toString(16).padStart(2, '0')}`,
 });
-const commitConsumption = (height: number): void => {
+const commitConsumption = async (height: number): Promise<void> => {
+  const preState = replica.state;
   const before = replica.state.consumptionAccumulator ?? createEmptyConsumptionAccumulator();
   const identity = consumptionIdentity(height);
   const proof = createConsumptionProof(
@@ -107,20 +111,63 @@ const commitConsumption = (height: number): void => {
     getConsumptionKey(identity),
   );
   const applied = applyConsumptionOutput(before, identity, proof);
-  replica.state = { ...replica.state, consumptionAccumulator: applied.state };
-  if (replica.certifiedFrameAnchor?.height === 0) {
-    replica.certifiedFrameAnchor = {
-      ...replica.certifiedFrameAnchor,
-      stateRoot: computeCanonicalEntityConsensusStateHash(replica.state),
-      authorityRoot: computeEntityFrameAuthorityRoot(buildEntityFrameAuthority(replica.state)),
-    };
-  }
+  const entityHeight = preState.height + 1;
+  const timestamp = preState.timestamp + 1;
+  const postStateWithoutHead = {
+    ...preState,
+    height: entityHeight,
+    timestamp,
+    consumptionAccumulator: applied.state,
+  };
+  const stateRoot = computeCanonicalEntityConsensusStateHash(postStateWithoutHead);
+  const postAuthority = buildEntityFrameAuthority(postStateWithoutHead);
+  const authorityRoot = computeEntityFrameAuthorityRoot(postAuthority);
+  const parentFrameHash = preState.height === 0 ? 'genesis' : String(preState.prevFrameHash || '');
+  const txs = [];
+  const hash = createEntityFrameHashFromStateRoot(
+    parentFrameHash,
+    entityHeight,
+    timestamp,
+    txs,
+    entityId,
+    stateRoot,
+    authorityRoot,
+  );
+  const hashesToSign = [{
+    hash,
+    type: 'entityFrame' as const,
+    context: `entity-frame:${entityHeight}`,
+  }];
+  const signature = await signAccountFrame(env, signerId, hash);
+  const link: CertifiedEntityFrameLink = {
+    frame: {
+      parentFrameHash,
+      height: entityHeight,
+      timestamp,
+      txs,
+      hash,
+      stateRoot,
+      authorityRoot,
+      leader: {
+        proposerSignerId: signerId,
+        view: getEntityLeaderState(preState).view,
+      },
+      hashesToSign,
+      collectedSigs: new Map([[signerId, [signature]]]),
+    },
+    postAuthority,
+  };
+  replica.state = { ...postStateWithoutHead, prevFrameHash: hash };
+  replica.certifiedFrameLineage = [
+    ...(replica.certifiedFrameLineage ?? []),
+    link,
+  ];
   cacheCommittedConsumptionNodeChanges(env, {
     newNodes: applied.newNodes,
     replacedNodeHashes: applied.replacedNodeHashes,
   });
 };
-commitConsumption(1);
+await commitConsumption(1);
 replica.lastConsensusProgressAt = 1_000;
 env.timestamp = 1_000;
 await persistRestoredEnvToDB(env);
@@ -129,7 +176,7 @@ await persistRestoredEnvToDB(env);
 // authoritative: recovery must discard it and rebuild solely from history.
 await getRuntimeStorageDb(env).put(Buffer.from([0x7f]), Buffer.from('stale-cache'), { sync: true });
 env.height += 1;
-commitConsumption(2);
+await commitConsumption(2);
 replica.lastConsensusProgressAt = 2_000;
 env.timestamp = 2_000;
 await persistRestoredEnvToDB(env, {

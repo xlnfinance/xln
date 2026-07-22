@@ -988,8 +988,13 @@ export const rebaseCertifiedEntityLineageAtRuntimeCheckpoint = (
       };
       assertLineageAnchor(env, entityId, checkpointed);
       anchorByReplicaKey.set(entry.replicaKey, checkpointed);
-      const latest = validated.lineageByReplicaKey.get(entry.replicaKey)?.at(-1);
-      if (latest) lineageByReplicaKey.set(entry.replicaKey, [latest]);
+      const certifiedLineage = validated.lineageByReplicaKey.get(entry.replicaKey);
+      if (certifiedLineage && certifiedLineage.length > 0) {
+        // A Runtime checkpoint accelerates recovery; it is not a pruning
+        // authority. Keep the complete locally certified audit chain until a
+        // separate, explicit pruning protocol defines an equivalent proof.
+        lineageByReplicaKey.set(entry.replicaKey, structuredClone(certifiedLineage));
+      }
     }
   }
   return {
@@ -1128,9 +1133,13 @@ export const buildRuntimeCheckpointLineagePlan = (
         ...anchor,
         runtimeCheckpoint: { runtimeHeight: env.height, replicaSetRoot },
       });
-      // The anchor already commits the exact current endpoint. Old links are
-      // in the frame DB; the live lineage starts empty and collects only new
-      // Entity frames produced inside the next in-flight R-frame.
+      const certifiedLineage = entry.replica.certifiedFrameLineage;
+      if (certifiedLineage && certifiedLineage.length > 0) {
+        // Checkpoint publication cannot silently destroy audit evidence. The
+        // frame DB is a second durable copy, not a substitute for the lineage
+        // committed by replica metadata.
+        lineageByReplicaKey.set(entry.replicaKey, structuredClone(certifiedLineage));
+      }
     }
   }
   return { lookup, lineageByReplicaKey, anchorByReplicaKey };
