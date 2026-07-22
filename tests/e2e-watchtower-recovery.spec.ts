@@ -10,7 +10,7 @@
  *    state from the watchtower instead of booting as a fresh empty wallet.
  */
 
-import { allowBrowserIssue, expect, test, type BrowserContext, type Page } from './global-setup';
+import { allowBrowserIssue, expect, test, type BrowserContext, type Page } from './global-setup.mts';
 import { createServer } from 'node:net';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

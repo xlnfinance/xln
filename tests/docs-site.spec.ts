@@ -1,4 +1,4 @@
-import { expect, test, devices, type BrowserContext, type Page } from './global-setup';
+import { expect, test, devices, type BrowserContext, type Page } from './global-setup.mts';
 
 type FailureEntry = {
   url: string;

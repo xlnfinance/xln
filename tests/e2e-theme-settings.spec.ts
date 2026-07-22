@@ -1,4 +1,4 @@
-import { test, expect, type Page } from './global-setup';
+import { test, expect, type Page } from './global-setup.mts';
 import { Wallet } from 'ethers';
 import {
   gotoApp as gotoSharedApp,

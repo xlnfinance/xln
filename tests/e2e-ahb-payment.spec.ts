@@ -8,7 +8,7 @@
  * restore the same state after reload via snapshot + WAL replay.
  */
 
-import { test, expect, type Page } from './global-setup';
+import { test, expect, type Page } from './global-setup.mts';
 import { ethers } from 'ethers';
 import { deriveDelta } from '../runtime/account/utils';
 import { APP_BASE_URL, API_BASE_URL, resetProdServer } from './utils/e2e-baseline';

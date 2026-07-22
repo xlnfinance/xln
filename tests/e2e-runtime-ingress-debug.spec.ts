@@ -1,4 +1,4 @@
-import { allowBrowserIssue, expect, test, type Page } from './global-setup';
+import { allowBrowserIssue, expect, test, type Page } from './global-setup.mts';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline } from './utils/e2e-baseline';
 import { gotoApp } from './utils/e2e-demo-users';
 

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from './global-setup';
+import { test, expect, type Page } from './global-setup.mts';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 
 import {

@@ -1,4 +1,4 @@
-import { expect, test } from './global-setup';
+import { expect, test } from './global-setup.mts';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, waitForNamedHubs } from './utils/e2e-baseline';
 import { resolveRuntimeImportAppUrl } from './utils/e2e-runtime-import';
 

@@ -1,6 +1,4 @@
-import browserTestFixtures from '../../tests/global-setup.ts';
-
-const { expect, test } = browserTestFixtures;
+import { expect, test } from '../../tests/global-setup.mts';
 
 async function completeOnboarding(page: import('@playwright/test').Page): Promise<void> {
   await expect(page.getByLabel('Display name')).toBeVisible({ timeout: 240_000 });

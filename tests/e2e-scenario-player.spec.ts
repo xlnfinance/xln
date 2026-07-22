@@ -1,4 +1,4 @@
-import { expect, test } from './global-setup';
+import { expect, test } from './global-setup.mts';
 import { timedStep } from './utils/e2e-timing';
 
 test.describe('visual scenario player', () => {

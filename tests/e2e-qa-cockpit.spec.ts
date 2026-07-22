@@ -1,4 +1,4 @@
-import { expect, test } from './global-setup';
+import { expect, test } from './global-setup.mts';
 
 const QA_FIXTURE_RUN_ID = '20260623-235959-999';
 const QA_FAST_RUN_ID = '20260623-225959-888';

@@ -12,7 +12,7 @@
  * and spends only from already credited offchain funds after the deposit lands.
  */
 
-import { test, expect, type BrowserContext, type Page } from './global-setup';
+import { test, expect, type BrowserContext, type Page } from './global-setup.mts';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';

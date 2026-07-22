@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import { expect, test, type Page } from './global-setup';
+import { expect, test, type Page } from './global-setup.mts';
 
 import {
   normalizeBrainvaultMnemonic as normalizeMnemonic,

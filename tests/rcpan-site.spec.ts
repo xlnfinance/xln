@@ -1,4 +1,4 @@
-import { devices, expect, test, type Browser, type Page, type TestInfo } from './global-setup';
+import { devices, expect, test, type Browser, type Page, type TestInfo } from './global-setup.mts';
 
 type BrowserIssue = Readonly<{ type: string; text: string }>;
 type Scenario = 'full-collateral' | 'reserve-backed' | 'debt-recovery';

@@ -1,4 +1,4 @@
-import { expect, test } from './global-setup';
+import { expect, test } from './global-setup.mts';
 
 type BrowserIssue = {
   type: 'console' | 'pageerror';

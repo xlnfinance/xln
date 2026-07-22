@@ -1,4 +1,4 @@
-import { test, expect, type Page } from './global-setup';
+import { test, expect, type Page } from './global-setup.mts';
 import { deriveDelta } from '../runtime/account/utils';
 import { getHealth } from './utils/e2e-baseline';
 import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';

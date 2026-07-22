@@ -57,7 +57,7 @@ const FAILURE_HOOK_TIMEOUT_MS = 5_000;
 const asError = (value: unknown, label: string): Error =>
   value instanceof Error ? value : new Error(`${label}: ${String(value)}`);
 
-const withFailureHookTimeout = async <T>(label: string, operation: () => Promise<T>): Promise<T> => {
+const withFailureHookTimeout = async <T,>(label: string, operation: () => Promise<T>): Promise<T> => {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
@@ -305,7 +305,6 @@ export const allowBrowserIssue = (rule: BrowserIssueExpectation): void => {
 };
 
 export { devices, expect, request };
-export default { expect, test };
 export type {
   APIRequestContext,
   APIResponse,

@@ -4,7 +4,7 @@
  * These tests verify that swap offers can auto-prepare missing token capacity, place and cancel
  * cleanly through the UI, and that the scenario runners still produce partial fills after reload-safe setup.
  */
-import { test, expect, type Locator, type Page, type TestInfo } from './global-setup';
+import { test, expect, type Locator, type Page, type TestInfo } from './global-setup.mts';
 import { Wallet } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, getHealth } from './utils/e2e-baseline';

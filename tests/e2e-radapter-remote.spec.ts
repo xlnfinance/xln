@@ -1,4 +1,4 @@
-import { expect, test } from './global-setup';
+import { expect, test } from './global-setup.mts';
 import {
   APP_BASE_URL,
   API_BASE_URL,

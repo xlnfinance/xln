@@ -11,7 +11,7 @@
  *
  * These tests exist to prove that rebalance is deterministic, visually correct, and replay-safe.
  */
-import { test, expect, type Browser, type BrowserContext, type Page } from './global-setup';
+import { test, expect, type Browser, type BrowserContext, type Page } from './global-setup.mts';
 import { deriveDelta, getTokenInfo } from '../runtime/account/utils';
 import { ethers } from 'ethers';
 import { timedStep } from './utils/e2e-timing';

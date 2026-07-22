@@ -12,7 +12,7 @@
  * discover recipient, find a route, pay, and observe the balance delta on screen.
  */
 
-import { test, expect } from './global-setup';
+import { test, expect } from './global-setup.mts';
 import { ensureE2EBaseline, APP_BASE_URL } from './utils/e2e-baseline';
 import { connectHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';

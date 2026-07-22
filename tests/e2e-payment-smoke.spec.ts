@@ -1,4 +1,4 @@
-import { test, expect, type BrowserContext, type Page } from './global-setup';
+import { test, expect, type BrowserContext, type Page } from './global-setup.mts';
 import { Wallet } from 'ethers';
 import {
   getRenderedOutboundForAccount,

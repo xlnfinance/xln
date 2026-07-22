@@ -1,4 +1,4 @@
-import { test, expect, type BrowserContext, type Page } from './global-setup';
+import { test, expect, type BrowserContext, type Page } from './global-setup.mts';
 import { AbiCoder, HDNodeWallet, Mnemonic, Wallet, getIndexedAccountPath, keccak256, toUtf8Bytes } from 'ethers';
 import { deriveDelta, getTokenInfo } from '../runtime/account/utils';
 import { ensureE2EBaseline, type E2EHealthResponse } from './utils/e2e-baseline';

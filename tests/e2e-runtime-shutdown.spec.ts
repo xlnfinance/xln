@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http';
-import { test, expect } from './global-setup';
+import { test, expect } from './global-setup.mts';
 
 let probeServer: Server;
 let probeUrl = '';

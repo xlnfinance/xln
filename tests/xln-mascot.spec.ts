@@ -1,4 +1,4 @@
-import { devices, expect, test, type Browser, type Page, type TestInfo } from './global-setup';
+import { devices, expect, test, type Browser, type Page, type TestInfo } from './global-setup.mts';
 import { Wallet } from 'ethers';
 import { APP_BASE_URL } from './utils/e2e-baseline';
 import {
