@@ -70,8 +70,12 @@ An audit claim is not accepted until reproduced against the current candidate.
   and no `targetReceipt` in protocol state or persisted records.
 - [x] L2: exact isolated full/partial/cancel/dispute flow on `d8e6f1954`:
   Playwright 1/1 PASS, strict isolated runner PASS in 49.3s.
-- [ ] L2: packet loss/reorder and live restart during one intact cross-j
-  envelope; prove no single-leg commit and manual whole-envelope retry.
+- [x] L2: packet loss/reorder and live restart during one intact cross-j
+  envelope. `cross-jurisdiction-swap`, `output-routing-reliable-order` and
+  `durable-output-retry`: 119/119 PASS, 769 assertions in 5.76s. A reversed
+  two-leg proposal is accepted; one leg commits nothing; a simulated lost
+  packet persists both legs plus the manual pause through real WAL close/load,
+  and the explicit retry emits exactly one two-input envelope.
 - [ ] L3: full cross-j/security/release E2E; eliminate
   `ROUTE_CROSS_J_ATOMIC_PAIR_MISSING` without relaxing atomicity.
 

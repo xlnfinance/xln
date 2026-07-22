@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { rmSync } from 'fs';
+import { join } from 'path';
 
 import {
   buildPendingNetworkOutputs,
@@ -22,7 +24,13 @@ import {
   deriveSignerKeySync,
   registerSignerKey,
 } from '../account/crypto';
-import { createEmptyEnv } from '../runtime';
+import {
+  closeInfraDb,
+  closeRuntimeDb,
+  createEmptyEnv,
+  loadEnvFromDB,
+  saveEnvToDB,
+} from '../runtime';
 import { deliveryAccepted, deliveryFailure } from '../protocol/payments/delivery-result';
 import type { DeliverableEntityInput, Env, JPrefixAttestation, RoutedEntityInput, RuntimeEntityInputsEnvelope } from '../types';
 
@@ -308,6 +316,102 @@ const orderedCases = [
 const receiptGatedCases = orderedCases.filter(([label]) => label !== 'account ACK');
 
 describe('ordered reliable output lanes', () => {
+  test('packet loss keeps one cross-j proposal envelope paused and atomic across restart', async () => {
+    const seed = `cross-j-envelope-restart ${process.pid} ${Date.now()} alpha beta gamma`;
+    const sourceRuntimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    const removeStorage = (): void => {
+      const namespacePath = join(dbRoot, sourceRuntimeId);
+      for (const suffix of ['', '-storage-current', '-storage-previous', '-frames', '-events', '-infra']) {
+        rmSync(`${namespacePath}${suffix}`, { recursive: true, force: true });
+      }
+    };
+    removeStorage();
+
+    const env = createEmptyEnv(seed);
+    env.runtimeId = sourceRuntimeId;
+    env.dbNamespace = sourceRuntimeId;
+    env.height = 1;
+    env.timestamp = 1_000;
+    env.quietRuntimeLogs = true;
+    const sourceProposal = crossJProposalOutput('source', { height: 1, timestamp: 1_000 });
+    const targetProposal = crossJProposalOutput('target', { height: 1, timestamp: 1_000 });
+    const pair = { phase: 'proposal' as const, pairKey: 'cross-j-restart-pair' };
+    const proposals = [
+      { ...targetProposal, atomicCrossJurisdictionPair: pair },
+      { ...sourceProposal, atomicCrossJurisdictionPair: pair },
+    ];
+    const lostEnvelopes: RuntimeEntityInputsEnvelope[] = [];
+    const lostDeps = routingDeps(() => ({
+      enqueueEntityInputsDelivery: (_runtimeId, envelope) => {
+        lostEnvelopes.push(envelope);
+        return deliveryFailure({
+          category: 'TransientRace',
+          code: 'TEST_PACKET_LOST',
+          message: 'whole envelope packet lost',
+          terminal: false,
+        });
+      },
+    }));
+
+    try {
+      const failed = dispatchEntityOutputs(
+        env,
+        proposals.map(output => ({ output, targetRuntimeId })),
+        lostDeps,
+      );
+      expect(lostEnvelopes).toHaveLength(1);
+      expect(lostEnvelopes[0]?.entityInputs).toHaveLength(2);
+      env.pendingNetworkOutputs = rescheduleDeferredOutputs(env, [], failed, [], lostDeps);
+      expect(env.pendingNetworkOutputs).toHaveLength(2);
+      expect([...env.runtimeState!.deferredNetworkMeta!.values()].every(meta => meta.manual === true)).toBe(true);
+
+      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, env.pendingNetworkOutputs);
+      await closeRuntimeDb(env);
+      await closeInfraDb(env);
+
+      const restored = await loadEnvFromDB(sourceRuntimeId, seed);
+      if (!restored) throw new Error('TEST_CROSS_J_RESTART_DID_NOT_RESTORE');
+      restored.timestamp = 1_000_000;
+      const deliveredEnvelopes: RuntimeEntityInputsEnvelope[] = [];
+      const restoredDeps = routingDeps(() => ({
+        enqueueEntityInputsDelivery: (_runtimeId, envelope) => {
+          deliveredEnvelopes.push(envelope);
+          return deliveryAccepted('TEST_MANUAL_CROSS_J_RETRY_DELIVERED');
+        },
+      }));
+      try {
+        expect(restored.pendingNetworkOutputs).toHaveLength(2);
+        expect(hasReadyPendingNetworkOutputs(restored, restoredDeps, restored.timestamp)).toBe(false);
+        expect(deliveredEnvelopes).toHaveLength(0);
+        expect(markPendingCrossJAdmissionOutputsReady(restored, restoredDeps, targetRuntimeId)).toBe(1);
+
+        const retryWindow = splitPendingOutputsByRetryWindow(
+          restored,
+          restored.pendingNetworkOutputs ?? [],
+          restoredDeps,
+        );
+        expect(retryWindow.ready).toHaveLength(2);
+        expect(retryWindow.waiting).toHaveLength(0);
+        dispatchEntityOutputs(
+          restored,
+          retryWindow.ready.map(output => ({ output, targetRuntimeId })),
+          restoredDeps,
+        );
+        expect(deliveredEnvelopes).toHaveLength(1);
+        expect(deliveredEnvelopes[0]?.entityInputs).toHaveLength(2);
+        expect(deliveredEnvelopes[0]?.atomicCrossJurisdictionPair).toEqual(pair);
+      } finally {
+        await closeRuntimeDb(restored);
+        await closeInfraDb(restored);
+      }
+    } finally {
+      await closeRuntimeDb(env);
+      await closeInfraDb(env);
+      removeStorage();
+    }
+  });
+
   test('atomic cross-j envelope waits for an explicit retry trigger', () => {
     const frame = { height: 77, timestamp: 1_000 };
     const pair = { phase: 'ack' as const, pairKey: 'atomic-ack-pair-77' };
