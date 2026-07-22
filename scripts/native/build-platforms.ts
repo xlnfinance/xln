@@ -436,7 +436,10 @@ function packageDesktopApp(): NativeArtifact[] {
 
 	const electronApp = path.join(ROOT, 'node_modules/electron/dist/Electron.app');
 	if (!existsSync(electronApp)) {
-		throw new Error(`Missing Electron.app at ${electronApp}. Run bun install or bunx electron --version first.`);
+		run('bunx', ['electron', '--version'], ROOT);
+	}
+	if (!existsSync(electronApp)) {
+		throw new Error(`Electron bootstrap completed without creating ${electronApp}`);
 	}
 	if (!existsSync(path.join(BUILD_DIR, 'index.html'))) {
 		throw new Error(`Missing ${path.join(BUILD_DIR, 'index.html')}. Build frontend before packaging desktop.`);
