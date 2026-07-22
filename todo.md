@@ -152,9 +152,9 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
 - [x] Verify and remove every HTLC cleartext fallback when recipient encryption
   material is missing; fail closed and prove browser/runtime bundles contain no
   plaintext payment secret path.
-- [ ] Verify the reported shared `jReplicas` state-root assumption and collateral
-  synchronization hardcoded to token 1; fix any reproduced cross-jurisdiction or
-  multi-token corruption before mainnet.
+- [x] Reject the stale shared-`jReplicas` state-root/token-1 report on current
+  code: no production assignment or hardcode remains; jurisdiction authority is
+  exact `(chainId, Depository)`. Multi-j/source-binding/security: 26/26 PASS.
 
 ## P1 — deterministic startup and signers
 
