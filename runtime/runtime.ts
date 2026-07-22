@@ -3502,6 +3502,12 @@ const recoveryMachineMismatchFields = (
   const fields = new Set([...Object.keys(expected), ...Object.keys(actual)]);
   const mismatches: string[] = [];
   for (const field of [...fields].sort()) {
+    const expectedHasField = Object.prototype.hasOwnProperty.call(expected, field);
+    const actualHasField = Object.prototype.hasOwnProperty.call(actual, field);
+    if (expectedHasField !== actualHasField) {
+      mismatches.push(field);
+      continue;
+    }
     if (canonicalRecoveryMachine({ value: expected[field] }) === canonicalRecoveryMachine({ value: actual[field] })) continue;
     if (field !== 'runtimeState') {
       mismatches.push(field);
@@ -3515,6 +3521,12 @@ const recoveryMachineMismatchFields = (
       : {};
     const stateFields = new Set([...Object.keys(expectedState), ...Object.keys(actualState)]);
     for (const stateField of [...stateFields].sort()) {
+      const expectedHasStateField = Object.prototype.hasOwnProperty.call(expectedState, stateField);
+      const actualHasStateField = Object.prototype.hasOwnProperty.call(actualState, stateField);
+      if (expectedHasStateField !== actualHasStateField) {
+        mismatches.push(`runtimeState.${stateField}`);
+        continue;
+      }
       if (canonicalRecoveryMachine({ value: expectedState[stateField] }) !== canonicalRecoveryMachine({ value: actualState[stateField] })) {
         mismatches.push(`runtimeState.${stateField}`);
       }
@@ -3550,9 +3562,11 @@ const assertRecoveryRuntimeMachineMatches = (
     const actualHash = ethers.keccak256(ethers.toUtf8Bytes(actual));
     const mismatchFields = recoveryMachineMismatchFields(expectedReplayMachine, actualMachine);
     const firstField = mismatchFields[0] || 'unknown';
+    const expectedValue = readRecoveryMachineField(expectedReplayMachine, firstField);
+    const actualValue = readRecoveryMachineField(actualMachine, firstField);
     const detail = canonicalRecoveryMachine({
-      actual: readRecoveryMachineField(actualMachine, firstField),
-      expected: readRecoveryMachineField(expectedReplayMachine, firstField),
+      actual: actualValue === undefined ? { present: false } : { present: true, value: actualValue },
+      expected: expectedValue === undefined ? { present: false } : { present: true, value: expectedValue },
     }).slice(0, 5_000);
     throw new Error(
       `RECOVERY_JOURNAL_RUNTIME_MACHINE_MISMATCH:height=${height}:` +

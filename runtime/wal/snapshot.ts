@@ -232,7 +232,7 @@ const buildDurableRuntimeStateSnapshot = (
   const state = env.runtimeState;
   if (!state) return undefined;
   const durable = {
-    ...(state.halted !== undefined ? { halted: state.halted } : {}),
+    ...(state.halted === true ? { halted: true } : {}),
     ...(state.fatalDebugPayload ? { fatalDebugPayload: structuredClone(state.fatalDebugPayload) } : {}),
     ...(state.maxEntityInputsPerFrame !== undefined ? { maxEntityInputsPerFrame: state.maxEntityInputsPerFrame } : {}),
     ...(state.maxEntityTxsPerFrame !== undefined ? { maxEntityTxsPerFrame: state.maxEntityTxsPerFrame } : {}),
@@ -331,14 +331,18 @@ export const buildDurableRuntimeMachineSnapshot = (
 /**
  * Project the part of a durable Runtime snapshot that deterministic frame
  * replay can reproduce. Runtime config is local operator policy (loop timing,
- * storage retention, checkpoint cadence); it may change between frames without
- * a Runtime input and therefore cannot be used as a reducer post-state oracle.
+ * storage retention, checkpoint cadence). activeJurisdiction selects the local
+ * J-adapter and the hub bootstrap temporarily changes it while creating sibling
+ * entities. Neither value is a Runtime input, so either may change between
+ * frames without a replayable transition and cannot be a reducer post-state
+ * oracle. Full checkpoints still preserve both for process restoration.
  */
 export const projectReplayVerifiableRuntimeMachine = (
   snapshot: Record<string, unknown>,
 ): Record<string, unknown> => {
   const replayVerifiable = { ...snapshot };
   delete replayVerifiable['runtimeConfig'];
+  delete replayVerifiable['activeJurisdiction'];
   return replayVerifiable;
 };
 

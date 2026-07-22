@@ -227,15 +227,17 @@ test('per-frame post-state hash commits replayed state and frame coordinates', (
   })).not.toBe(hash);
 });
 
-test('replay oracle excludes local operator runtime config only', () => {
+test('replay oracle excludes local operator config and active J-adapter selector', () => {
   const runtimeState = { pendingCommittedJOutbox: new Map([['a', 1]]) };
   const left = projectReplayVerifiableRuntimeMachine({
     runtimeId: 'runtime-a',
+    activeJurisdiction: 'Testnet',
     runtimeConfig: { storage: { snapshotPeriodFrames: 2 } },
     runtimeState,
   });
   const right = projectReplayVerifiableRuntimeMachine({
     runtimeId: 'runtime-a',
+    activeJurisdiction: 'Tron',
     runtimeConfig: { storage: { snapshotPeriodFrames: 200 } },
     runtimeState,
   });
@@ -262,6 +264,21 @@ test('replay oracle canonicalizes empty optional Runtime input queues', () => {
 
   expect(buildReplayVerifiableRuntimeMachineSnapshot(withEmptyOptionals))
     .toEqual(buildReplayVerifiableRuntimeMachineSnapshot(base));
+});
+
+test('replay oracle canonicalizes the non-halted default but preserves a halt', () => {
+  const base = {
+    eReplicas: new Map(),
+    jReplicas: new Map(),
+    runtimeInput: { runtimeTxs: [], entityInputs: [] },
+  } as unknown as Env;
+  const running = { ...base, runtimeState: { halted: false } } as Env;
+  const halted = { ...base, runtimeState: { halted: true } } as Env;
+
+  expect(buildReplayVerifiableRuntimeMachineSnapshot(running))
+    .toEqual(buildReplayVerifiableRuntimeMachineSnapshot(base));
+  expect(buildReplayVerifiableRuntimeMachineSnapshot(halted))
+    .toMatchObject({ runtimeState: { halted: true } });
 });
 
 test('canonical storage hash is deterministic across orderbook pair index insertion order', () => {
