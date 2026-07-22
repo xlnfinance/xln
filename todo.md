@@ -168,8 +168,9 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
 
 ## P1 — test system and release evidence
 
-- [ ] Reproduce the reported unit baseline and current two failures before
-  changing them: pending-frame fail-fast regression and radapter 5s timeout.
+- [x] Reject the reported two unit failures on current HEAD before changing
+  code: pending-frame 10/10 PASS (p95 142ms); radapter root metadata 10/10 PASS
+  (max 2.524s under the unchanged 5s timeout).
 - [ ] Move the 20,050-frame/2.27-GiB 10k checkpoint rollover test from default
   unit into `test:stress:storage`; preserve it as a nightly/release gate.
 - [ ] Split `unit-pure`, `unit-storage`, `integration-browser-vm`, and `stress`;
