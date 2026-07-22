@@ -163,7 +163,7 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   immediately from its seed before any Entity/Account work is accepted.
 - [x] Remove delayed/legacy signer bootstrap paths once all callers use the
   single constructor path; no retry fence or silent fallback.
-- [ ] Bootstrap must remain deterministic and pass fresh reset, restart and
+- [x] Bootstrap must remain deterministic and pass fresh reset, restart and
   BrowserVM scenarios.
 
 ## P1 — test system and release evidence
