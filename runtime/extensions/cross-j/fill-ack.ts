@@ -48,28 +48,6 @@ const getCrossJurisdictionFillAckProofRatio = (tx: CrossSwapFillAckTx): number =
     fillDenominator: tx.data.fillDenominator,
   });
 
-export const buildCrossJurisdictionFillReceiptHash = (tx: CrossSwapFillAckTx): string =>
-  ethers.keccak256(ethers.toUtf8Bytes([
-    'xln:cross-j:fill-receipt',
-    tx.data.routeHash || '',
-    tx.data.offerId,
-    Math.max(0, Math.floor(Number(tx.data.previousFillSeq ?? 0) || 0)),
-    Math.max(0, Math.floor(Number(tx.data.fillSeq ?? 0) || 0)),
-    Math.max(0, Math.floor(Number(tx.data.cumulativeFillRatio ?? 0) || 0)),
-    (tx.data.incrementalSourceAmount ?? 0n).toString(),
-    (tx.data.incrementalTargetAmount ?? 0n).toString(),
-    (tx.data.cumulativeSourceAmount ?? 0n).toString(),
-    (tx.data.cumulativeTargetAmount ?? 0n).toString(),
-    (tx.data.fillNumerator ?? 0n).toString(),
-    (tx.data.fillDenominator ?? 0n).toString(),
-    tx.data.priceImprovementMode || '',
-    (tx.data.priceImprovementAmount ?? 0n).toString(),
-    String(tx.data.priceImprovementTokenId ?? ''),
-    tx.data.cancelRemainder ? '1' : '0',
-    tx.data.ackKind || '',
-    tx.data.pairId || '',
-  ].join('|'))).toLowerCase();
-
 export const buildCrossJurisdictionPendingFillFromAck = (
   tx: CrossSwapFillAckTx,
   updatedAt: number,
@@ -94,7 +72,6 @@ export const buildCrossJurisdictionPendingFillFromAck = (
   });
   return {
     fillId,
-    receiptHash: buildCrossJurisdictionFillReceiptHash(tx),
     ackKind: normalizeAckKind(tx),
     ...(previousFillSeq !== undefined ? { previousFillSeq } : {}),
     fillSeq,

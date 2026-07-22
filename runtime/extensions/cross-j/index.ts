@@ -926,7 +926,6 @@ function cloneCrossJurisdictionPendingFill(
 ): CrossJurisdictionPendingFill {
   return {
     fillId: String(pendingFill.fillId || ''),
-    receiptHash: String(pendingFill.receiptHash || pendingFill.fillId || ''),
     ackKind: pendingFill.ackKind === 'cancel' ? 'cancel' : 'fill',
     fillSeq: Math.max(0, Math.floor(Number(pendingFill.fillSeq ?? 0) || 0)),
     ...(pendingFill.previousFillSeq !== undefined

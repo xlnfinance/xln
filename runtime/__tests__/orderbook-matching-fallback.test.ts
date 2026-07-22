@@ -2832,7 +2832,6 @@ describe('orderbook matching fallback execution mapping', () => {
 
     admission!.pendingFill = {
       fillId: 'pending-exact-duplicate',
-      receiptHash: 'pending-exact-duplicate',
       ackKind: 'fill',
       fillSeq: 1,
       cumulativeFillRatio: 0,
@@ -3578,7 +3577,6 @@ describe('orderbook matching fallback execution mapping', () => {
             route: makerRoute,
             pendingFill: {
               fillId: 'test-pending-fill',
-              receiptHash: 'test-pending-fill-receipt',
               ackKind: 'fill',
               fillSeq: 1,
               cumulativeFillRatio: 16_384,
@@ -3716,7 +3714,6 @@ describe('orderbook matching fallback execution mapping', () => {
             route: makerRoute,
             pendingFill: {
               fillId: 'test-expired-pending-fill',
-              receiptHash: 'test-expired-pending-fill-receipt',
               ackKind: 'fill',
               fillSeq: 1,
               cumulativeFillRatio: 16_384,

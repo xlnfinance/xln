@@ -47,7 +47,10 @@ An audit claim is not accepted until reproduced against the current candidate.
   than target by dispute delay plus safety margin.
 - [x] Remove `CrossJurisdictionBookAdmissionReceipt`, `targetReceipt`, receipt
   pairing and receipt-driven source-pull admission. Transport-level reliable
-  delivery receipts are unrelated and remain transport metadata.
+  delivery receipts are unrelated and remain transport metadata. The unused
+  partial-fill `receiptHash`/second hash domain was also removed: `fillId` is
+  the sole idempotency identity. Later cancel flow retains an explicit committed
+  book-removal ACK, not an opening/admission receipt or financial authority.
 - [x] Store/retry the whole cross-j envelope as one unit. No automatic retry is
   required when a peer is offline; an operator may manually retry the intact
   envelope when it returns.

@@ -4450,7 +4450,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     });
   });
 
-  test('source hub waits for committed sibling book-removal receipt before Account ACK', async () => {
+  test('source hub waits for committed sibling book-removal ACK before Account ACK', async () => {
     const env = createEmptyEnv('cross-cancel-remote-book-owner');
     env.timestamp = 10_000;
     env.quietRuntimeLogs = true;

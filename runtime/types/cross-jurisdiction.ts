@@ -43,7 +43,6 @@ export type CrossJurisdictionBookStatus =
 
 export interface CrossJurisdictionPendingFill {
   fillId: string;
-  receiptHash: string;
   ackKind: 'fill' | 'cancel';
   fillSeq: number;
   previousFillSeq?: number;
