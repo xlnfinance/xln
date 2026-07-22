@@ -425,13 +425,17 @@ test('qa severity model normalizes legacy runs and gates release manifests', () 
 });
 
 test('qa system verdict is schema-backed by latest run severity', () => {
-  const empty = buildQaSystemVerdict([]);
+  const now = Date.UTC(2026, 5, 24);
+  const empty = buildQaSystemVerdict([], now);
   expect(empty.status).toBe('UNKNOWN');
   expect(empty.activeCount).toBe(0);
   expect(empty.reason).toBe('No QA runs yet');
 
-  const baseline = benchmarkRun('system-baseline', 1000, 800);
-  const failedCurrent = benchmarkRun('system-current', 1300, 1100, 'new-code', 'new-head');
+  const baseline = benchmarkRun('20260623-215959-999', 1000, 800);
+  const failedCurrent = {
+    ...benchmarkRun('20260623-225959-999', 1300, 1100, 'new-code', 'new-head'),
+    manifestVersion: 4,
+  };
   const failedRun = applyQaRunSeverity({
     ...failedCurrent,
     status: 'failed',
@@ -468,7 +472,7 @@ test('qa system verdict is schema-backed by latest run severity', () => {
       }],
     }],
   });
-  const failed = buildQaSystemVerdict([summarizeQaRun(failedRun)]);
+  const failed = buildQaSystemVerdict([summarizeQaRun(failedRun)], now);
   expect(failed.schemaVersion).toBe(1);
   expect(failed.status).toBe('FAIL');
   expect(failed.reason).toContain('qa.system-verdict-fixture');
@@ -477,10 +481,67 @@ test('qa system verdict is schema-backed by latest run severity', () => {
   expect(failed.regressionStatus).toBe('slower');
   expect(failed.browserErrorCount).toBe(1);
 
-  const passed = buildQaSystemVerdict([summarizeQaRun(benchmarkRun('system-green', 900, 700))]);
+  const passedRun = {
+    ...benchmarkRun('20260623-235959-999', 900, 700),
+    manifestVersion: 4,
+  };
+  const passed = buildQaSystemVerdict([summarizeQaRun(passedRun)], now);
   expect(passed.status).toBe('PASS');
   expect(passed.activeCount).toBe(0);
   expect(passed.failingSurfaceCount).toBe(0);
+});
+
+test('qa system verdict excludes future fixture dirty and unknown-schema runs', () => {
+  const now = Date.UTC(2026, 5, 24);
+  const eligible = {
+    ...benchmarkRun('20260623-235959-995', 900, 700),
+    manifestVersion: 4,
+  };
+  const future = {
+    ...benchmarkRun('20991231-235959-999', 900, 700),
+    manifestVersion: 4,
+    createdAt: Date.UTC(2099, 11, 31, 23, 59, 59, 999),
+  };
+  const fixture = {
+    ...benchmarkRun('20260623-235959-998', 900, 700),
+    manifestVersion: 4,
+    args: { fixture: 'qa-cockpit' },
+  };
+  const dirty = {
+    ...benchmarkRun('20260623-235959-997', 900, 700),
+    manifestVersion: 4,
+    code: { ...eligible.code!, dirty: true },
+  };
+  const unknownSchema = {
+    ...benchmarkRun('20260623-235959-996', 900, 700),
+    manifestVersion: 999,
+  };
+
+  const verdict = buildQaSystemVerdict([
+    summarizeQaRun(future),
+    summarizeQaRun(fixture),
+    summarizeQaRun(dirty),
+    summarizeQaRun(unknownSchema),
+    summarizeQaRun(eligible),
+  ], now);
+  expect(verdict.status).toBe('PASS');
+  expect(verdict.latestRunId).toBe(eligible.runId);
+
+  const excluded = buildQaSystemVerdict([
+    summarizeQaRun(future),
+    summarizeQaRun(fixture),
+    summarizeQaRun(dirty),
+    summarizeQaRun(unknownSchema),
+  ], now);
+  expect(excluded.status).toBe('UNKNOWN');
+  expect(excluded.reason).toBe('No release-eligible QA runs');
+  expect(excluded.evidence.map(item => item.value)).toEqual([
+    4,
+    'future timestamp',
+    'fixture run',
+    'dirty worktree',
+    'unsupported manifest schema',
+  ]);
 });
 
 test('qa run ledger exposes canonical operator fields', () => {
@@ -1742,9 +1803,11 @@ test('qa runs endpoint reads SQLite summaries without requiring run logs', async
     const base = benchmarkRun(runId, 2345, 1200);
     const run: QaRunManifest = {
       ...base,
+      manifestVersion: 4,
       createdAt,
       completedAt: createdAt + 2345,
       status: 'failed',
+      testCategory: 'functional',
       passedShards: 0,
       failedShards: 1,
       failureClasses: ['assertion'],
@@ -1769,6 +1832,7 @@ test('qa runs endpoint reads SQLite summaries without requiring run logs', async
       },
       shards: [{
         ...base.shards[0]!,
+        testCategory: 'functional',
         status: 'failed',
         error: 'Expected canonical ledger failure',
         failureClass: 'assertion',
@@ -1825,7 +1889,7 @@ test('qa runs endpoint reads SQLite summaries without requiring run logs', async
       expect(payload.verdict?.activeCount).toBeGreaterThan(0);
       const ledgerRow = payload.ledger?.find(item => item.runId === runId);
       expect(ledgerRow?.status).toBe('failed');
-      expect(ledgerRow?.suiteLabel).toBe('qa cockpit');
+      expect(ledgerRow?.suiteLabel).toBe('functional · qa cockpit');
       expect(ledgerRow?.category).toBe('e2e');
       expect(ledgerRow?.startedBy).toBe('ledger-api-operator');
       expect(ledgerRow?.auditAction).toBe('restart-run');

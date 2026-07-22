@@ -366,6 +366,8 @@ export type QaRunSummary = Omit<QaRunManifest, 'perf' | 'shards'> & {
   childCpuP95Pct: number | null;
 };
 
+export const QA_RUN_MANIFEST_VERSION = 4;
+
 export type QaSystemVerdictStatus = 'PASS' | 'DEGRADED' | 'FAIL' | 'UNKNOWN';
 
 export type QaSystemVerdict = QaSeveritySignal & {
@@ -1094,16 +1096,38 @@ const qaSystemVerdictReason = (run: QaRunSummary): string => {
   return run.reason;
 };
 
-export const buildQaSystemVerdict = (runs: readonly QaRunSummary[]): QaSystemVerdict => {
-  const latest = runs[0] ?? null;
+const qaVerdictRunExclusion = (run: QaRunSummary, now: number): string | null => {
+  if (run.manifestVersion !== QA_RUN_MANIFEST_VERSION) return 'unsupported manifest schema';
+  const runIdTimestamp = parseRunIdTimestamp(run.runId);
+  if (runIdTimestamp === null || formatQaRunIdUtc(runIdTimestamp) !== run.runId) return 'invalid run ID';
+  if (runIdTimestamp > now + FUTURE_RUN_SKEW_MS || run.createdAt > now + FUTURE_RUN_SKEW_MS) {
+    return 'future timestamp';
+  }
+  if (Object.prototype.hasOwnProperty.call(run.args ?? {}, 'fixture')) return 'fixture run';
+  if (run.code?.dirty !== false) return run.code?.dirty ? 'dirty worktree' : 'clean fingerprint missing';
+  return null;
+};
+
+export const buildQaSystemVerdict = (
+  runs: readonly QaRunSummary[],
+  now = Date.now(),
+): QaSystemVerdict => {
+  const latest = runs.find(run => qaVerdictRunExclusion(run, now) === null) ?? null;
   if (!latest) {
+    const reason = runs.length === 0 ? 'No QA runs yet' : 'No release-eligible QA runs';
     return {
       ...makeQaSeveritySignal({
         severity: 'UNKNOWN',
-        reason: 'No QA runs yet',
+        reason,
         since: 0,
         owner: 'qa-system',
-        evidence: [{ label: 'runs', value: 0 }],
+        evidence: [
+          { label: 'runs', value: runs.length },
+          ...runs.slice(0, 10).map(run => ({
+            label: run.runId,
+            value: qaVerdictRunExclusion(run, now) ?? 'eligible',
+          })),
+        ],
       }),
       schemaVersion: 1,
       status: 'UNKNOWN',

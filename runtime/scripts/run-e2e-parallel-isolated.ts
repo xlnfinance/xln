@@ -44,6 +44,7 @@ import {
   formatQaRunIdUtc,
   normalizeQaBrowserIssues,
   parseQaTimelineSteps,
+  QA_RUN_MANIFEST_VERSION,
   redactQaSecretText,
   recordQaRunHistory,
   summarizeQaFailureClasses,
@@ -1185,7 +1186,7 @@ const writeRunManifest = (
     testCategories.push(shard.testCategory);
   }
   let manifest: QaRunManifest = applyQaRunSeverity({
-    manifestVersion: 4,
+    manifestVersion: QA_RUN_MANIFEST_VERSION,
     runId: logsDir.split('/').at(-1) || logsDir,
     createdAt,
     completedAt: Date.now(),

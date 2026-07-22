@@ -225,8 +225,12 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
 
 ## P2 — QA cockpit
 
-- [ ] Exclude future timestamps, fixture IDs, dirty runs and unknown schemas
+- [x] Exclude future timestamps, fixture IDs, dirty runs and unknown schemas
   from verdicts; remove the synthetic `20991231-235959-999` contamination.
+  Verdict selection now accepts only current schema v4, valid non-future run IDs
+  and timestamps, explicit non-fixture manifests and clean code fingerprints.
+  Historical rows remain inspectable but cannot decide a release. The synthetic
+  2099 row/directory is absent. QA report L1/L2: 44/44 PASS; runtime types PASS.
 - [ ] Define `candidateId = gitHead + codeHash + gateConfigHash`; verdict uses
   only fresh mandatory gates from the same candidate.
 - [ ] Record unit/contract/scenario/release results, not only E2E.
