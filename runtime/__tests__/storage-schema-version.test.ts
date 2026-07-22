@@ -83,6 +83,7 @@ describe('storage schema boundary', () => {
     expect(STORAGE_FRAME_FORMAT).toEqual({
       schemaVersion: 7,
       domain: 'xln.storage.frame',
+      postStateDomain: 'xln.storage.postState',
       algorithmId: 'sha256',
       hashMode: 'storage-merkle-v1',
     });

@@ -22,6 +22,8 @@ export type PersistedFrameJournal = {
   timestamp: number;
   /** Exact validator-local replica metadata commitment for deterministic replay. */
   replicaMetaDigest: string;
+  /** Per-frame post-state oracle over Entity heads and durable Runtime state. */
+  postStateHash: string;
   replicaMetaCheckpoint: boolean;
   replicaMetaStateMode: 'live-head' | 'shared-entity-state' | 'full';
   runtimeInput: RuntimeInput;
@@ -51,7 +53,7 @@ export const validatePersistedFrameJournal = (
   const decoded = requireBoundaryRecord(value, 'WAL_FRAME_INVALID');
   requireExactBoundaryKeys(
     decoded,
-    ['height', 'timestamp', 'replicaMetaDigest', 'replicaMetaCheckpoint', 'replicaMetaStateMode', 'runtimeInput', 'logs'],
+    ['height', 'timestamp', 'replicaMetaDigest', 'postStateHash', 'replicaMetaCheckpoint', 'replicaMetaStateMode', 'runtimeInput', 'logs'],
     ['pendingRuntimeInput', 'runtimeOutputs', 'runtimeOutputRetryState', 'runtimeMachine', 'runtimeStateHash'],
     'WAL_FIELDS_INVALID',
   );
@@ -68,6 +70,10 @@ export const validatePersistedFrameJournal = (
     replicaMetaDigest: requireBytes32(
       decoded['replicaMetaDigest'],
       `WAL_REPLICA_META_DIGEST_INVALID:height=${height}`,
+    ),
+    postStateHash: requireBytes32(
+      decoded['postStateHash'],
+      `WAL_POST_STATE_HASH_INVALID:height=${height}`,
     ),
     replicaMetaCheckpoint: decoded['replicaMetaCheckpoint'] === true || decoded['replicaMetaCheckpoint'] === false
       ? decoded['replicaMetaCheckpoint']

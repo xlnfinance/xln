@@ -18,6 +18,7 @@ const journal = (): PersistedFrameJournal => ({
   height: 7,
   timestamp: 123,
   replicaMetaDigest: `0x${'22'.repeat(32)}`,
+  postStateHash: `0x${'33'.repeat(32)}`,
   replicaMetaCheckpoint: false,
   replicaMetaStateMode: 'live-head',
   runtimeInput: { runtimeTxs: [], entityInputs: [] },

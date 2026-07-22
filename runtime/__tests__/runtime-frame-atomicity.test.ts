@@ -582,6 +582,7 @@ describe('runtime frame atomicity', () => {
       height: 1,
       timestamp: 1_000,
       replicaMetaDigest: hash('f1'),
+      postStateHash: hash('f2'),
       replicaMetaCheckpoint: false,
       replicaMetaStateMode: 'live-head',
       runtimeInput,

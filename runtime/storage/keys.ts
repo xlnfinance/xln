@@ -11,6 +11,7 @@ export const STORAGE_SCHEMA_VERSION = 7;
 export const STORAGE_FRAME_FORMAT = Object.freeze({
   schemaVersion: STORAGE_SCHEMA_VERSION,
   domain: 'xln.storage.frame',
+  postStateDomain: 'xln.storage.postState',
   algorithmId: INTEGRITY_DIGEST_ALGORITHM_ID,
   hashMode: 'storage-merkle-v1',
 } as const);

@@ -10,6 +10,7 @@ import {
 import { docValueKey, liveKeyForDoc } from './doc-refs';
 import {
   computeStorageFrameHash,
+  computeStoragePostStateHash,
   computeStorageReplicaMetaDigest,
   prepareStorageStateHashes,
 } from './hashes';
@@ -32,6 +33,7 @@ import {
 import { readStorageFrameRecord, readStorageHead } from './read';
 import { verifyStorageSnapshotIntegrity } from './verify';
 import { verifyStorageTailIntegrity } from './verify';
+import { projectReplayVerifiableRuntimeMachine } from '../wal/snapshot';
 import type {
   RuntimeDbLike,
   RuntimeFrameDbLike,
@@ -254,6 +256,13 @@ export const replaceRestoredStorageBase = async (
     puts: options.docs,
     dels: [],
   });
+  const replicaMetaDigest = computeStorageReplicaMetaDigest(options.replicaMetas);
+  const postStateHash = computeStoragePostStateHash({
+    height: options.height,
+    timestamp: options.timestamp,
+    replicaMetaDigest,
+    runtimeMachine: projectReplayVerifiableRuntimeMachine(options.runtimeMachine),
+  });
 
   const currentBody = options.currentDb.batch();
   queueCurrentBody(
@@ -273,6 +282,12 @@ export const replaceRestoredStorageBase = async (
       throw new Error(
         `RECOVERY_IMPORT_SAME_HEIGHT_STORAGE_HASH_CONFLICT:height=${options.height}:` +
         `existingHash=${existing.frame.stateHash}:candidateHash=${prepared.stateHash}`,
+      );
+    }
+    if (postStateHash !== existing.frame.postStateHash) {
+      throw new Error(
+        `RECOVERY_IMPORT_SAME_HEIGHT_POST_STATE_HASH_CONFLICT:height=${options.height}:` +
+        `existingHash=${existing.frame.postStateHash}:candidateHash=${postStateHash}`,
       );
     }
     const currentHead = options.currentDb.batch();
@@ -296,9 +311,10 @@ export const replaceRestoredStorageBase = async (
     height: options.height,
     timestamp: options.timestamp,
     prevFrameHash: ZERO_FRAME_HASH,
-    replicaMetaDigest: computeStorageReplicaMetaDigest(options.replicaMetas),
+    replicaMetaDigest,
     replicaMetaCheckpoint: true,
     replicaMetaStateMode: 'full',
+    postStateHash,
     stateHash: prepared.stateHash,
     hashMode: 'storage-merkle-v1',
     materializedState: true,

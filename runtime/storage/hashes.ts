@@ -284,6 +284,26 @@ export const computeStorageFrameHash = (record: StorageFrameRecord): string => {
   });
 };
 
+/**
+ * Per-frame replay oracle. Entity heads commit validator-recomputed consensus
+ * state roots, while the durable Runtime machine covers state outside Entity
+ * consensus. Hashing only the input or copying the persisted stateHash into
+ * "actual" would let a changed reducer replay a valid WAL into different
+ * financial state without identifying the first divergent frame.
+ */
+export const computeStoragePostStateHash = (input: {
+  height: number;
+  timestamp: number;
+  replicaMetaDigest: string;
+  runtimeMachine: Record<string, unknown>;
+}): string => hashStable({
+  kind: STORAGE_FRAME_FORMAT.postStateDomain,
+  height: input.height,
+  timestamp: input.timestamp,
+  replicaMetaDigest: input.replicaMetaDigest,
+  runtimeMachine: input.runtimeMachine,
+});
+
 type PersistedMerkleLeafNode = {
   kind: 'leaf';
   path: number[];

@@ -5,7 +5,7 @@ import {
   computeCanonicalEntityHash,
   computeCanonicalStateHashFromEnv,
 } from '../storage/canonical-hash';
-import { computeStorageFrameHash } from '../storage/hashes';
+import { computeStorageFrameHash, computeStoragePostStateHash } from '../storage/hashes';
 import { encodeBuffer } from '../storage/codec';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { encodeBoard, hashBoard } from '../entity/factory';
@@ -14,6 +14,7 @@ import { encodeReplicaMeta, hydrateEntityStateFromStorage, projectAccountDoc, pr
 import { cloneEntityState } from '../state-helpers';
 import type { StorageFrameRecord } from '../storage/types';
 import type { AccountMachine, EntityReplica, Env } from '../types';
+import { projectReplayVerifiableRuntimeMachine } from '../wal/snapshot';
 
 const signerIds = [`0x${'11'.repeat(20)}`, `0x${'12'.repeat(20)}`];
 const consensusConfig = {
@@ -178,6 +179,7 @@ test('storage frame integrity commits every named runtime-machine field', () => 
     height: 1,
     timestamp: 100,
     replicaMetaDigest: `0x${'22'.repeat(32)}`,
+    postStateHash: `0x${'44'.repeat(32)}`,
     stateHash: `0x${'33'.repeat(32)}`,
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     touchedEntities: [],
@@ -190,15 +192,53 @@ test('storage frame integrity commits every named runtime-machine field', () => 
 
   // Current testnet storage checksum golden. Fresh deploys intentionally keep
   // one format instead of a parallel versioned recovery implementation.
-  expect(alpha).toBe('0xc4a6f61889c070075ee31a526007705a1ed0183635dda5395c6ee975c0b27381');
+  expect(alpha).toBe('0x94202ebbd430e4046de88aeb99a9c985346649a40b279eee2d6b3c3cb5652d93');
   expect(alpha).not.toBe(beta);
   const ownUndefined = computeStorageFrameHash({ ...base, runtimeMachine: { hidden: undefined } });
   // Authoritative MessagePack preserves an explicitly named undefined field;
   // it must therefore remain distinguishable from both an empty and an absent
   // runtime-machine record in the WAL integrity preimage.
-  expect(ownUndefined).toBe('0x21319723089c03a7a408e30a6aab68b691f6ec74b0ef9d84bb42e7c323ad1eef');
+  expect(ownUndefined).toBe('0xdcd35dcdbd949e29ba3c8ee47c94e5731c15c5187c275fbb69f9220c49cbd180');
   expect(ownUndefined).not.toBe(computeStorageFrameHash({ ...base, runtimeMachine: {} }));
   expect(ownUndefined).not.toBe(computeStorageFrameHash(base));
+});
+
+test('per-frame post-state hash commits replayed state and frame coordinates', () => {
+  const base = {
+    height: 7,
+    timestamp: 1234,
+    replicaMetaDigest: `0x${'22'.repeat(32)}`,
+    runtimeMachine: { runtimeState: { pendingCommittedJOutbox: new Map([['a', 1]]) } },
+  };
+  const hash = computeStoragePostStateHash(base);
+
+  expect(computeStoragePostStateHash({ ...base, height: 8 })).not.toBe(hash);
+  expect(computeStoragePostStateHash({ ...base, timestamp: 1235 })).not.toBe(hash);
+  expect(computeStoragePostStateHash({
+    ...base,
+    replicaMetaDigest: `0x${'23'.repeat(32)}`,
+  })).not.toBe(hash);
+  expect(computeStoragePostStateHash({
+    ...base,
+    runtimeMachine: { runtimeState: { pendingCommittedJOutbox: new Map([['a', 2]]) } },
+  })).not.toBe(hash);
+});
+
+test('replay oracle excludes local operator runtime config only', () => {
+  const runtimeState = { pendingCommittedJOutbox: new Map([['a', 1]]) };
+  const left = projectReplayVerifiableRuntimeMachine({
+    runtimeId: 'runtime-a',
+    runtimeConfig: { storage: { snapshotPeriodFrames: 2 } },
+    runtimeState,
+  });
+  const right = projectReplayVerifiableRuntimeMachine({
+    runtimeId: 'runtime-a',
+    runtimeConfig: { storage: { snapshotPeriodFrames: 200 } },
+    runtimeState,
+  });
+
+  expect(left).toEqual(right);
+  expect(left).toEqual({ runtimeId: 'runtime-a', runtimeState });
 });
 
 test('canonical storage hash is deterministic across orderbook pair index insertion order', () => {

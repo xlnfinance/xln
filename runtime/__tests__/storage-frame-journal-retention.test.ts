@@ -23,6 +23,7 @@ import {
   verifyRuntimeChain,
 } from '../runtime.ts';
 import {
+  computeStorageFrameHash,
   readFrameDbRuntimeActivity,
   readStorageFrameRecord,
   readStorageHead,
@@ -84,6 +85,91 @@ describe('storage frame journal retention', () => {
     await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
     return env;
   };
+
+  test('replay rejects a validly rechained divergent post-state at its first height', async () => {
+    const seed = `post-state-divergence ${Date.now()} alpha beta gamma`;
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    cleanupRuntimeStorage(dbRoot, runtimeId);
+    const env = createEmptyEnv(seed);
+    env.runtimeId = runtimeId;
+    env.dbNamespace = runtimeId;
+    env.height = 1;
+    env.timestamp = 1_000;
+    env.quietRuntimeLogs = true;
+    let envClosed = false;
+    try {
+      const jurisdiction: JurisdictionConfig = {
+        name: 'post-state-divergence',
+        chainId: 31337,
+        depositoryAddress: '0x0000000000000000000000000000000000000011',
+        entityProviderAddress: '0x0000000000000000000000000000000000000012',
+      };
+      installTestJurisdiction(env, jurisdiction);
+      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+      for (const signerIndex of [2, 3]) {
+        const signer = deriveSignerAddressSync(seed, String(signerIndex)).toLowerCase();
+        registerSignerKey(env, signer, deriveSignerKeySync(seed, String(signerIndex)));
+        const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
+        enqueueRuntimeInput(env, {
+          runtimeTxs: [{
+            type: 'importReplica',
+            entityId,
+            signerId: signer,
+            data: {
+              isProposer: true,
+              config: {
+                mode: 'proposer-based',
+                threshold: 1n,
+                validators: [signer],
+                shares: { [signer]: 1n },
+                jurisdiction,
+              },
+            },
+          }],
+          entityInputs: [],
+        });
+        await processRuntime(env, []);
+      }
+      await closeRuntimeDb(env);
+      await closeInfraDb(env);
+      envClosed = true;
+      expect((await verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: 1 })).ok).toBe(true);
+
+      const historyDb = new Level<Buffer, Buffer>(`${join(dbRoot, runtimeId)}-frames`, {
+        keyEncoding: 'buffer',
+        valueEncoding: 'buffer',
+      });
+      await historyDb.open();
+      try {
+        let previousFrameHash = (await readStorageFrameRecord(historyDb, 1))?.frameHash;
+        if (!previousFrameHash) throw new Error('TEST_POST_STATE_BASE_FRAME_MISSING');
+        for (const height of [2, 3]) {
+          const persisted = await readStorageFrameRecord(historyDb, height);
+          if (!persisted) throw new Error(`TEST_POST_STATE_FRAME_MISSING:${height}`);
+          const rechained = {
+            ...persisted,
+            prevFrameHash: previousFrameHash,
+            ...(height === 2 ? { postStateHash: `0x${'99'.repeat(32)}` } : {}),
+            frameHash: undefined,
+          };
+          const frameHash = computeStorageFrameHash(rechained);
+          await historyDb.put(keyFrame(height), encodeBuffer({ ...rechained, frameHash }));
+          previousFrameHash = frameHash;
+        }
+      } finally {
+        await historyDb.close();
+      }
+
+      await expect(verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: 1 }))
+        .rejects.toThrow('RECOVERY_JOURNAL_POST_STATE_HASH_MISMATCH:height=2');
+    } finally {
+      if (!envClosed) {
+        await closeRuntimeDb(env);
+        await closeInfraDb(env);
+      }
+    }
+  });
 
   test('accounts full authoritative frame journals in retained history bytes', async () => {
     const env = await createSavedEmptyEnv('frame-byte-accounting');

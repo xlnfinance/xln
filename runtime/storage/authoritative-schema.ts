@@ -72,7 +72,7 @@ export const validateStorageFrameRecordValue = (value: unknown): StorageFrameRec
   const frame = requireBoundaryRecord(value, code);
   requireExactBoundaryKeys(frame, [
     'height', 'timestamp', 'prevFrameHash', 'frameHash', 'replicaMetaDigest', 'replicaMetaCheckpoint',
-    'replicaMetaStateMode', 'stateHash',
+    'replicaMetaStateMode', 'postStateHash', 'stateHash',
     'hashMode', 'materializedState', 'runtimeInput',
     'touchedEntities', 'touchedAccounts',
     'touchedBookEntities',
@@ -94,6 +94,7 @@ export const validateStorageFrameRecordValue = (value: unknown): StorageFrameRec
   if (frame['replicaMetaCheckpoint'] === true && frame['replicaMetaStateMode'] === 'live-head') {
     throw new Error(`${code}_REPLICA_META_STATE_MODE_CHECKPOINT`);
   }
+  requireStorageHash(frame['postStateHash'], `${code}_POST_STATE_HASH`);
   if (typeof frame['stateHash'] !== 'string') throw new Error(`${code}_STATE_HASH`);
   if (frame['hashMode'] !== STORAGE_FRAME_FORMAT.hashMode) throw new Error(`${code}_HASH_MODE`);
   requireStorageBoolean(frame['materializedState'], `${code}_MATERIALIZED`);

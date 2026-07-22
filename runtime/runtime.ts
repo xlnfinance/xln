@@ -59,12 +59,13 @@ import {
   buildCanonicalEnvSnapshot,
   buildCanonicalJReplicaSnapshot,
   buildDurableRuntimeMachineSnapshot,
+  buildReplayVerifiableRuntimeMachineSnapshot,
   buildRuntimeCheckpointSnapshot,
   authorizeRestoredRuntimeInput,
   normalizePersistedSnapshotInPlace,
+  projectReplayVerifiableRuntimeMachine,
   restoreDurableRuntimeSnapshot,
 } from './wal/snapshot';
-import { computePersistedEnvStateHash } from './wal/hash';
 import {
   hasRuntimeHistoryTraceForTesting,
   recordRuntimeHistoryTraceForTesting,
@@ -380,7 +381,7 @@ import {
   materializePendingJurisdictionImportResults,
 } from './machine/jurisdiction-import';
 import {
-  computeStorageStateRoot,
+  computeStoragePostStateHash,
   findStorageLatestSnapshotAtOrBelow,
   hydrateAccountJClaimRootNodesFromStorage,
   hydrateCertifiedBoardRootNodesFromStorage,
@@ -3538,19 +3539,20 @@ const assertRecoveryRuntimeMachineMatches = (
   height: number,
   options?: { includeIngressWorkingState?: boolean },
 ): void => {
-  const actualMachine = buildDurableRuntimeMachineSnapshot(env, {
+  const actualMachine = buildReplayVerifiableRuntimeMachineSnapshot(env, {
     includeIngressWorkingState: options?.includeIngressWorkingState === true,
   });
+  const expectedReplayMachine = projectReplayVerifiableRuntimeMachine(expectedMachine);
   const actual = canonicalRecoveryMachine(actualMachine);
-  const expected = canonicalRecoveryMachine(expectedMachine);
+  const expected = canonicalRecoveryMachine(expectedReplayMachine);
   if (actual !== expected) {
     const expectedHash = ethers.keccak256(ethers.toUtf8Bytes(expected));
     const actualHash = ethers.keccak256(ethers.toUtf8Bytes(actual));
-    const mismatchFields = recoveryMachineMismatchFields(expectedMachine, actualMachine);
+    const mismatchFields = recoveryMachineMismatchFields(expectedReplayMachine, actualMachine);
     const firstField = mismatchFields[0] || 'unknown';
     const detail = canonicalRecoveryMachine({
       actual: readRecoveryMachineField(actualMachine, firstField),
-      expected: readRecoveryMachineField(expectedMachine, firstField),
+      expected: readRecoveryMachineField(expectedReplayMachine, firstField),
     }).slice(0, 5_000);
     throw new Error(
       `RECOVERY_JOURNAL_RUNTIME_MACHINE_MISMATCH:height=${height}:` +
@@ -3584,6 +3586,9 @@ const replayRecoveryFrameJournals = async (
       }
       if (!/^0x[0-9a-f]{64}$/i.test(String(frame.replicaMetaDigest ?? ''))) {
         throw new Error(`RECOVERY_JOURNAL_REPLICA_META_DIGEST_MISSING:height=${frameHeight}`);
+      }
+      if (!/^0x[0-9a-f]{64}$/i.test(String(frame.postStateHash ?? ''))) {
+        throw new Error(`RECOVERY_JOURNAL_POST_STATE_HASH_MISSING:height=${frameHeight}`);
       }
       env.timestamp = requireBoundaryInteger(
         frame.timestamp,
@@ -3709,6 +3714,21 @@ const replayRecoveryFrameJournals = async (
             `appliedInput=${safeStringify(appliedInputSummary)}:` +
             `entityOutbox=${safeStringify(replayResult.entityOutbox.map(output => ({ entityId: output.entityId, txs: output.entityTxs?.map(tx => tx.type) ?? [] })))}:` +
             `actualMeta=${safeStringify(inspectStorageReplicaMetaEntries(actualReplicaMetaCommitment.entries)).slice(0, 8_000)}`,
+          );
+        }
+        const actualPostStateHash = computeStoragePostStateHash({
+          height: frameHeight,
+          timestamp: env.timestamp,
+          replicaMetaDigest: actualReplicaMetaDigest,
+          runtimeMachine: buildReplayVerifiableRuntimeMachineSnapshot(env, {
+            pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
+            excludePersistedFrameDbRecords: true,
+          }),
+        });
+        if (actualPostStateHash !== frame.postStateHash) {
+          throw new Error(
+            `RECOVERY_JOURNAL_POST_STATE_HASH_MISMATCH:height=${frameHeight}:` +
+            `expected=${frame.postStateHash}:actual=${actualPostStateHash}`,
           );
         }
         if (frame.runtimeStateHash) {
@@ -6405,6 +6425,7 @@ const buildRecoveryJournalFromStorageFrame = (
   height: frame.height,
   timestamp: frame.timestamp,
   replicaMetaDigest: frame.replicaMetaDigest,
+  postStateHash: frame.postStateHash,
   replicaMetaCheckpoint: frame.replicaMetaCheckpoint,
   replicaMetaStateMode: frame.replicaMetaStateMode,
   runtimeInput: frame.runtimeInput,
@@ -6434,13 +6455,27 @@ const verifyPersistedFrameState = (
   actualCanonicalStateHash: string;
   ok: boolean;
 } => {
-  const expectedStateHash = persistedFrame.stateHash ?? '';
+  const expectedStateHash = persistedFrame.postStateHash;
   const storageHashMode = persistedFrame.hashMode === 'storage-merkle-v1';
-  const actualStateHash = storageHashMode && persistedFrame.materializedState === false
-    ? expectedStateHash
-    : storageHashMode && Array.isArray(persistedFrame.entityHashes)
-      ? computeStorageStateRoot(persistedFrame.entityHashes)
-      : computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(env));
+  const replayCheckpointLineagePlan = persistedFrame.replicaMetaCheckpoint
+    ? buildRuntimeCheckpointLineagePlan(env)
+    : null;
+  const actualReplicaMetaDigest = replayCheckpointLineagePlan
+    ? buildStorageReplicaMetaCommitmentFromCheckpointPlan(
+        env,
+        replayCheckpointLineagePlan,
+        { omitIntermediateSingleSignerState: persistedFrame.replicaMetaStateMode === 'shared-entity-state' },
+      ).digest
+    : buildStorageLiveReplicaMetaCommitment(env).digest;
+  const actualStateHash = computeStoragePostStateHash({
+    height: persistedFrame.height,
+    timestamp: persistedFrame.timestamp,
+    replicaMetaDigest: actualReplicaMetaDigest,
+    runtimeMachine: buildReplayVerifiableRuntimeMachineSnapshot(env, {
+      pendingNetworkOutputs: env.pendingNetworkOutputs ?? [],
+      excludePersistedFrameDbRecords: true,
+    }),
+  });
   const expectedCanonicalStateHash = storageHashMode
     ? String(persistedFrame.canonicalStateHash || '')
     : expectedStateHash;

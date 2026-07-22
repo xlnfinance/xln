@@ -132,6 +132,9 @@ const normalizeAndValidateBundleFields = (
       if (!/^0x[0-9a-f]{64}$/i.test(String(frame.replicaMetaDigest || ''))) {
         throw new Error(`RECOVERY_BUNDLE_JOURNAL_REPLICA_META_DIGEST_REQUIRED:height=${frameHeight}`);
       }
+      if (!/^0x[0-9a-f]{64}$/i.test(String(frame.postStateHash || ''))) {
+        throw new Error(`RECOVERY_BUNDLE_JOURNAL_POST_STATE_HASH_REQUIRED:height=${frameHeight}`);
+      }
       if (typeof frame.replicaMetaCheckpoint !== 'boolean') {
         throw new Error(`RECOVERY_BUNDLE_JOURNAL_REPLICA_META_CHECKPOINT_REQUIRED:height=${frameHeight}`);
       }

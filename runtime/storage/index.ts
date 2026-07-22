@@ -17,6 +17,7 @@ import {
 } from './frame-db';
 import {
   computeStorageFrameHash,
+  computeStoragePostStateHash,
   prepareStorageCanonicalStateHashes,
   prepareStorageStateHashes,
 } from './hashes';
@@ -128,7 +129,10 @@ import {
   getLiveAccountJClaimAccumulatorStates,
   getSafePendingAccountJClaimDeletes,
 } from '../account/j-claim-store';
-import { buildDurableRuntimeMachineSnapshot } from '../wal/snapshot';
+import {
+  buildDurableRuntimeMachineSnapshot,
+  buildReplayVerifiableRuntimeMachineSnapshot,
+} from '../wal/snapshot';
 import { buildDurableOutputRetryState } from '../machine/durable-output-retry';
 import { verifyStorageSnapshotIntegrity } from './verify';
 import {
@@ -174,6 +178,7 @@ export {
 } from './lifecycle';
 export {
   computeStorageFrameHash,
+  computeStoragePostStateHash,
   computeStorageStateRoot,
 } from './hashes';
 export {
@@ -1052,6 +1057,10 @@ export const saveRuntimeFrameToStorage = async (options: {
     options.env.height === 1 ||
     options.env.height % config.canonicalHashPeriodFrames === 0
   );
+  const runtimeMachineForPostState = buildReplayVerifiableRuntimeMachineSnapshot(options.env, {
+    pendingNetworkOutputs: options.currentFrameOutputs ?? options.env.pendingNetworkOutputs ?? [],
+    excludePersistedFrameDbRecords: true,
+  });
   const runtimeMachine = shouldMaterialize || canonicalHashDue
     ? buildDurableRuntimeMachineSnapshot(options.env, {
         pendingNetworkOutputs: options.currentFrameOutputs ?? options.env.pendingNetworkOutputs ?? [],
@@ -1142,6 +1151,12 @@ export const saveRuntimeFrameToStorage = async (options: {
     replicaMetaDigest: replicaMetaCommitment.digest,
     replicaMetaCheckpoint: checkpointedLineagePlan !== null,
     replicaMetaStateMode,
+    postStateHash: computeStoragePostStateHash({
+      height: options.env.height,
+      timestamp: options.env.timestamp,
+      replicaMetaDigest: replicaMetaCommitment.digest,
+      runtimeMachine: runtimeMachineForPostState,
+    }),
     stateHash: preparedHashes?.stateHash ?? '',
     hashMode: STORAGE_FRAME_FORMAT.hashMode,
     materializedState: shouldMaterialize,

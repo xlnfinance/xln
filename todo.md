@@ -91,13 +91,20 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
 - [x] Duplicate normalized Merkle keys must throw; no last-write-wins.
 - [x] On load, validate LevelDB key <-> namespace/entity/path, recompute leaf,
   edge, branch and root hashes, and reject any persisted mismatch before HEAD.
-- [ ] Verify frame replay against an independently computed post-state
-  commitment at the first divergent height; forbid expected=actual tautology.
+- [x] Verify every frame replay against an independently recomputed
+  `postStateHash = H(height, timestamp, replicaMetaDigest, durable machine)`;
+  Entity heads bind validator-recomputed state roots and the compact Runtime/J/
+  outbox machine is checked at the first divergent height. A validly re-chained
+  height-2 tamper fails exactly at height 2. Storage/WAL L1-L2: 133/133 PASS,
+  1,611 assertions; types PASS. Operator-only `runtimeConfig` is deliberately
+  excluded because it can change without an RJEA input. Benchmark impact:
+  868.04ms -> 870.33ms for 16 payments (+0.26%, 18.43 -> 18.38 TPS).
 - [x] Resolve the current branch's hash/domain/schema collision. The only
   fresh-reset format is schema 7 with SHA-256, `xln.storage.frame` and
   `storage-merkle-v1`; schema 6 is rejected at the HEAD boundary. No migration,
   dual reader/writer or version-named compatibility format exists. Storage
-  schema/codec/authoritative L1: 41/41 PASS, 129 assertions; types PASS.
+  schema/codec/authoritative L1: 41/41 PASS, 129 assertions; types PASS. The
+  inseparable descriptor also pins `xln.storage.postState`.
 - [x] Verify the previously failing 10 SIGKILL lineage cases on current HEAD;
   fix any remaining loss of certified lineage without inventing peer recovery.
 - [x] Register chunk prefix `0x7e`; prove delete/overwrite/checkpoint collection

@@ -23,6 +23,7 @@ const buildReadyFrame = (
     height: 165,
     timestamp: 1_000,
     replicaMetaDigest: '0xmeta',
+    postStateHash: '0xpost-state',
     stateHash: '0xstate',
     canonicalEntityHashes,
     runtimeStateHash: computeCanonicalRuntimeStateHash(165, 1_000, canonicalEntityHashes, runtimeMachine),

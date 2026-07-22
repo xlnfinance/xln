@@ -54,6 +54,7 @@ import {
   computeCanonicalStateHashFromEnv,
 } from '../storage/canonical-hash';
 import { buildStorageReplicaMetaCommitment } from '../storage/replicas';
+import { computeStoragePostStateHash } from '../storage/hashes';
 import {
   applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,
@@ -66,7 +67,11 @@ import type {
   JurisdictionEvent,
   ProposedEntityFrame,
 } from '../types';
-import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../wal/snapshot';
+import {
+  buildDurableRuntimeMachineSnapshot,
+  buildReplayVerifiableRuntimeMachineSnapshot,
+  restoreDurableRuntimeSnapshot,
+} from '../wal/snapshot';
 import type { PersistedFrameJournal } from '../wal/store';
 
 const TEST_RUN_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -553,10 +558,20 @@ describe('ordered reliable Entity catch-up', () => {
     const durableMachineAfterHeightOne = buildDurableRuntimeMachineSnapshot(restarted, {
       pendingNetworkOutputs: restarted.pendingNetworkOutputs ?? [],
     });
+    const replayMachineAfterHeightOne = buildReplayVerifiableRuntimeMachineSnapshot(restarted, {
+      pendingNetworkOutputs: restarted.pendingNetworkOutputs ?? [],
+    });
+    const replicaMetaDigest = buildStorageReplicaMetaCommitment(restarted).digest;
     const journal: PersistedFrameJournal = {
       height: committedHistoryFrame.height,
       timestamp: committedHistoryFrame.timestamp,
-      replicaMetaDigest: buildStorageReplicaMetaCommitment(restarted).digest,
+      replicaMetaDigest,
+      postStateHash: computeStoragePostStateHash({
+        height: committedHistoryFrame.height,
+        timestamp: committedHistoryFrame.timestamp,
+        replicaMetaDigest,
+        runtimeMachine: replayMachineAfterHeightOne,
+      }),
       replicaMetaCheckpoint: true,
       replicaMetaStateMode: 'full',
       runtimeInput: structuredClone(committedHistoryFrame.runtimeInput),

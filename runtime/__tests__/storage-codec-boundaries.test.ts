@@ -67,8 +67,8 @@ const GOLDEN_JSON_V1_BODY =
 const GOLDEN_HASHES_V1 = {
   msgpack: '0x2155da9edd8ffde80d3a2f4a52b40995ed89a9680979e25c18b998359fe2832f',
   json: '0x36b7663b235d64db039ba8736fa82d9f3f830c1e7d4e351f554f4464b6ba27d6',
-  walMsgpack: '0xb3081bbb0c410937b24e950c76d76978c1b87c0285807de6736e1d00abd97ef1',
-  walJson: '0xef4eda3e43c93aa5e1c21e21556742c1fdc1915b3dcbbca8ecaf76bcaee5f205',
+  walMsgpack: '0xea054a2d89949ebe2c0022b73099a8d80b55f53867697102b8284c269953200f',
+  walJson: '0x0f595ea1a59023584b99e3ea3019efcc6425d4fd901b886823b1b2555be9665a',
   frameMsgpack: '0x30b36234718ca0624e8fdb67e45746f3a6dd6c06beadf989797acda5c99fcf03',
   frameJson: '0x863eef139d80887612e7291b04bfec5cbb8f596ef028bbd42610866d672fed7b',
 } as const;
@@ -122,6 +122,9 @@ const goldenWalV1 = (): PersistedFrameJournal => ({
   height: 7,
   timestamp: 123,
   replicaMetaDigest: `0x${'22'.repeat(32)}`,
+  postStateHash: `0x${'33'.repeat(32)}`,
+  replicaMetaCheckpoint: false,
+  replicaMetaStateMode: 'live-head',
   runtimeInput: { runtimeTxs: [], entityInputs: [] },
   runtimeStateHash: `0x${'11'.repeat(32)}`,
   logs: [{ id: 1, timestamp: 123, level: 'info', category: 'system', message: 'frame' }],

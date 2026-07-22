@@ -227,6 +227,8 @@ export type StorageFrameRecord = {
   replicaMetaDigest: string;
   replicaMetaCheckpoint: boolean;
   replicaMetaStateMode: 'live-head' | 'shared-entity-state' | 'full';
+  /** Required per-frame replay commitment over Entity heads and durable Runtime state. */
+  postStateHash: string;
   stateHash: string;
   hashMode?: 'storage-merkle-v1';
   materializedState?: boolean;

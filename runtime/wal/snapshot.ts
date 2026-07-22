@@ -325,6 +325,31 @@ export const buildDurableRuntimeMachineSnapshot = (
   ]),
 });
 
+/**
+ * Project the part of a durable Runtime snapshot that deterministic frame
+ * replay can reproduce. Runtime config is local operator policy (loop timing,
+ * storage retention, checkpoint cadence); it may change between frames without
+ * a Runtime input and therefore cannot be used as a reducer post-state oracle.
+ */
+export const projectReplayVerifiableRuntimeMachine = (
+  snapshot: Record<string, unknown>,
+): Record<string, unknown> => {
+  const replayVerifiable = { ...snapshot };
+  delete replayVerifiable['runtimeConfig'];
+  return replayVerifiable;
+};
+
+export const buildReplayVerifiableRuntimeMachineSnapshot = (
+  env: Env,
+  options?: {
+    pendingNetworkOutputs?: RoutedEntityInput[];
+    includeIngressWorkingState?: boolean;
+    excludePersistedFrameDbRecords?: boolean;
+  },
+): Record<string, unknown> => projectReplayVerifiableRuntimeMachine(
+  buildDurableRuntimeMachineSnapshot(env, options),
+);
+
 const cloneProfiles = (profiles: Profile[] | undefined): Profile[] | undefined => {
   if (!profiles || profiles.length === 0) return undefined;
   return profiles.map(profile => structuredClone(profile));
