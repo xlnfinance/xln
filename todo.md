@@ -132,8 +132,13 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   changes delete the incremental Entity-account commitment entry so its parent
   root recomputes lazily. Differential incremental-vs-cold Merkle proof plus
   affected Entity/J/account L1 and cross-j/atomic/storage L2: 325/325 PASS,
-  3,100 assertions. Remaining consensus/scheduler/orderbook/Runtime callsites
-  stay explicit until their own parity proof is green.
+  3,100 assertions. Phase 2 removes the Merkle editor's duplicate `dirty` bit:
+  hash absence is now the sole invalidation state, every actual leaf change
+  invalidates its complete parent path, and identical puts produce zero Merkle
+  writes. Radix/path/unique-child guards and a strict `<10,000 byte` persisted
+  node boundary fail before write/use. Storage L1-L2: 147/147 PASS, 674
+  assertions; types PASS. Remaining consensus/scheduler/orderbook/Runtime
+  callsites stay explicit until their own parity proof is green.
 - [x] Prove whether `runtime/wal/store.ts`, legacy core DB and duplicate HEAD/DAG
   surfaces have production consumers; delete only demonstrated dead paths. No
   production caller reached the parallel WAL API or empty core LevelDB, so both

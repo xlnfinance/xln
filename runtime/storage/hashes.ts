@@ -64,6 +64,8 @@ import type {
 type StorageDocEncodedValue = { buffer: Buffer; hash: string; hashBytes: Buffer };
 
 const ENTITY_MERKLE_NAMESPACE = 'runtime-roots' as const;
+/** Strict upper bound for one physical Merkle node value in LevelDB. */
+export const MAX_PERSISTED_MERKLE_NODE_BYTES = 10_000;
 
 const hashBuffer = (value: Buffer | Uint8Array): string =>
   computeIntegrityDigest(value instanceof Uint8Array ? value : Uint8Array.from(value));
@@ -309,15 +311,16 @@ type PersistedMerkleLeafNode = {
   path: number[];
   key: string;
   valueHash: string;
-  hash: string;
-  dirty?: boolean;
+  /** Absent exactly while this node must be rehashed and persisted. */
+  hash?: string;
 };
 
 type PersistedMerkleChildRef = {
   slot: number;
   kind: 'branch' | 'leaf';
   path: number[];
-  hash: string;
+  /** Absent when the referenced child edge changed. */
+  hash?: string;
   node?: PersistedMerkleNode;
 };
 
@@ -325,8 +328,8 @@ type PersistedMerkleBranchNode = {
   kind: 'branch';
   path: number[];
   children: Map<number, PersistedMerkleChildRef>;
-  hash: string;
-  dirty?: boolean;
+  /** Absent exactly while this node must be rehashed and persisted. */
+  hash?: string;
 };
 
 type PersistedMerkleNode = PersistedMerkleLeafNode | PersistedMerkleBranchNode;
@@ -407,21 +410,24 @@ class PersistedEntityMerkleEditor {
     return this.leafCountValue;
   }
 
-  async put(cellKey: string, valueHash: string): Promise<void> {
-    const leaf = this.makeLeaf(cellKey, valueHash, true);
+  async put(cellKey: string, valueHash: string): Promise<boolean> {
+    const leaf = this.makeLeaf(cellKey, valueHash);
     const result = await this.insertNode(await this.loadRootNode(), leaf);
+    if (!result.changed) return false;
     this.rootNode = result.node;
     this.rootNodeLoaded = true;
     if (!result.existed) this.leafCountValue += 1;
+    return true;
   }
 
-  async del(cellKey: string): Promise<void> {
+  async del(cellKey: string): Promise<boolean> {
     const path = this.pathForCellKey(cellKey);
     const result = await this.deleteNode(await this.loadRootNode(), path);
-    if (!result.deleted) return;
+    if (!result.deleted) return false;
     this.rootNode = result.node;
     this.rootNodeLoaded = true;
     this.leafCountValue = Math.max(0, this.leafCountValue - 1);
+    return true;
   }
 
   async flush(): Promise<{
@@ -434,12 +440,12 @@ class PersistedEntityMerkleEditor {
     const root = await this.loadRootNode();
     const rootKind: RadixMerkleRootKind = root?.kind ?? 'empty';
     const rootPath = root ? [...root.path] : [];
+    const branchPuts: StorageMerkleBranchDoc[] = [];
+    const leafPuts: StorageMerkleLeafDoc[] = [];
+    this.collectChanged(root, branchPuts, leafPuts);
     const rootHash = root
       ? computeRadixMerkleRootHash(DEFAULT_ACCOUNT_MERKLE_RADIX, root.kind, root.path, this.nodeHash(root))
       : EMPTY_RADIX_MERKLE_ROOT;
-    const branchPuts: StorageMerkleBranchDoc[] = [];
-    const leafPuts: StorageMerkleLeafDoc[] = [];
-    this.collectDirty(root, branchPuts, leafPuts);
     const finalBranchPaths = new Set<string>();
     const finalLeafPaths = new Set<string>();
     this.collectLoadedFinalPaths(root, finalBranchPaths, finalLeafPaths);
@@ -466,17 +472,14 @@ class PersistedEntityMerkleEditor {
     return radixMerklePathSlots(merkleCellPathBytes(storageMerklePath(cellKey)), DEFAULT_ACCOUNT_MERKLE_RADIX);
   }
 
-  private makeLeaf(cellKey: string, valueHash: string, dirty: boolean): PersistedMerkleLeafNode {
+  private makeLeaf(cellKey: string, valueHash: string): PersistedMerkleLeafNode {
     const keyBytes = merkleCellPathBytes(storageMerklePath(cellKey));
-    const valueBytes = hashToBytes(valueHash);
     const path = radixMerklePathSlots(keyBytes, DEFAULT_ACCOUNT_MERKLE_RADIX);
     return {
       kind: 'leaf',
       path,
       key: `0x${Buffer.from(keyBytes).toString('hex')}`,
       valueHash,
-      hash: computeRadixMerkleLeafHash(keyBytes, valueBytes),
-      dirty,
     };
   }
 
@@ -554,27 +557,20 @@ class PersistedEntityMerkleEditor {
       slot: nodeSlotUnder(parentPath, node.path),
       kind: node.kind,
       path: [...node.path],
-      hash: computeRadixMerkleEdgeHash(
-        DEFAULT_ACCOUNT_MERKLE_RADIX,
-        parentPath,
-        node.kind,
-        node.path,
-        this.nodeHash(node),
-      ),
       node,
     };
   }
 
   private nodeHash(node: PersistedMerkleNode): string {
     if (node.kind === 'leaf') {
-      if (!node.dirty && node.hash) return node.hash;
+      if (node.hash) return node.hash;
       node.hash = computeRadixMerkleLeafHash(
         Buffer.from(node.key.replace(/^0x/, ''), 'hex'),
         Buffer.from(node.valueHash.replace(/^0x/, ''), 'hex'),
       );
       return node.hash;
     }
-    if (!node.dirty && node.hash) return node.hash;
+    if (node.hash) return node.hash;
     node.hash = computeRadixMerkleBranchHash(
       DEFAULT_ACCOUNT_MERKLE_RADIX,
       Array.from(node.children.entries())
@@ -585,7 +581,11 @@ class PersistedEntityMerkleEditor {
   }
 
   private childEdgeHash(parentPath: number[], child: PersistedMerkleChildRef): string {
-    if (!child.node) return child.hash;
+    if (!child.node) {
+      if (!child.hash) throw new Error(`STORAGE_MERKLE_CHILD_HASH_MISSING: entity=${this.entityId}`);
+      return child.hash;
+    }
+    if (child.hash && child.node.hash) return child.hash;
     child.kind = child.node.kind;
     child.path = [...child.node.path];
     child.hash = computeRadixMerkleEdgeHash(
@@ -599,43 +599,42 @@ class PersistedEntityMerkleEditor {
   }
 
   private markBranchDirty(node: PersistedMerkleBranchNode): void {
-    node.dirty = true;
-    node.hash = '';
+    delete node.hash;
   }
 
   private makeBranch(path: number[], children: PersistedMerkleNode[]): PersistedMerkleBranchNode {
     const branch: PersistedMerkleBranchNode = {
       kind: 'branch',
       path,
-      hash: '',
-      dirty: true,
       children: new Map(),
     };
     for (const child of children) {
       const ref = this.childRefFromNode(path, child);
       branch.children.set(ref.slot, ref);
     }
-    branch.hash = this.nodeHash(branch);
     return branch;
   }
 
   private async insertNode(
     node: PersistedMerkleNode | null,
     leaf: PersistedMerkleLeafNode,
-  ): Promise<{ node: PersistedMerkleNode; existed: boolean }> {
-    if (!node) return { node: leaf, existed: false };
+  ): Promise<{ node: PersistedMerkleNode; existed: boolean; changed: boolean }> {
+    if (!node) return { node: leaf, existed: false, changed: true };
     if (node.kind === 'leaf') {
       const shared = commonMerklePathPrefixLength(node.path, leaf.path);
       if (shared === node.path.length && shared === leaf.path.length) {
+        if (node.key === leaf.key && node.valueHash === leaf.valueHash) {
+          return { node, existed: true, changed: false };
+        }
         node.key = leaf.key;
         node.valueHash = leaf.valueHash;
-        node.hash = leaf.hash;
-        node.dirty = true;
-        return { node, existed: true };
+        delete node.hash;
+        return { node, existed: true, changed: true };
       }
       return {
         node: this.makeBranch(node.path.slice(0, shared), [node, leaf]),
         existed: false,
+        changed: true,
       };
     }
 
@@ -644,6 +643,7 @@ class PersistedEntityMerkleEditor {
       return {
         node: this.makeBranch(node.path.slice(0, shared), [node, leaf]),
         existed: false,
+        changed: true,
       };
     }
 
@@ -652,14 +652,15 @@ class PersistedEntityMerkleEditor {
     if (!childRef) {
       node.children.set(slot, this.childRefFromNode(node.path, leaf));
       this.markBranchDirty(node);
-      return { node, existed: false };
+      return { node, existed: false, changed: true };
     }
 
     const child = await this.loadChild(childRef);
     const result = await this.insertNode(child, leaf);
+    if (!result.changed) return { node, existed: result.existed, changed: false };
     node.children.set(slot, this.childRefFromNode(node.path, result.node));
     this.markBranchDirty(node);
-    return { node, existed: result.existed };
+    return { node, existed: result.existed, changed: true };
   }
 
   private async deleteNode(
@@ -692,14 +693,14 @@ class PersistedEntityMerkleEditor {
     return { node, deleted: true };
   }
 
-  private collectDirty(
+  private collectChanged(
     node: PersistedMerkleNode | null,
     branchPuts: StorageMerkleBranchDoc[],
     leafPuts: StorageMerkleLeafDoc[],
   ): void {
     if (!node) return;
     if (node.kind === 'leaf') {
-      if (node.dirty) {
+      if (!node.hash) {
         leafPuts.push({
           entityId: this.entityId,
           namespace: ENTITY_MERKLE_NAMESPACE,
@@ -713,7 +714,11 @@ class PersistedEntityMerkleEditor {
       return;
     }
 
-    if (node.dirty) {
+    const changed = !node.hash;
+    for (const child of node.children.values()) {
+      if (child.node) this.collectChanged(child.node, branchPuts, leafPuts);
+    }
+    if (changed) {
       branchPuts.push({
         entityId: this.entityId,
         namespace: ENTITY_MERKLE_NAMESPACE,
@@ -729,9 +734,6 @@ class PersistedEntityMerkleEditor {
             hash: this.childEdgeHash(node.path, child),
           })),
       });
-    }
-    for (const child of node.children.values()) {
-      if (child.node) this.collectDirty(child.node, branchPuts, leafPuts);
     }
   }
 
@@ -782,23 +784,38 @@ type EntityMerkleFlush = {
   leafDels: number[][];
 };
 
+type StorageMerkleNodeDoc = StorageMerkleRootDoc | StorageMerkleBranchDoc | StorageMerkleLeafDoc;
+
+const encodeMerkleNode = (doc: StorageMerkleNodeDoc): Buffer => {
+  const validated = 'rootHash' in doc
+    ? validateStorageMerkleRootDocValue(doc)
+    : 'children' in doc
+      ? validateStorageMerkleBranchDocValue(doc)
+      : validateStorageMerkleLeafDocValue(doc);
+  const encoded = encodeBuffer(validated);
+  if (encoded.byteLength >= MAX_PERSISTED_MERKLE_NODE_BYTES) {
+    throw new Error(`STORAGE_MERKLE_NODE_TOO_LARGE:bytes=${encoded.byteLength}`);
+  }
+  return encoded;
+};
+
 const appendEntityMerkleFlush = (
   entityId: string,
   flushed: EntityMerkleFlush,
   merklePuts: Array<{ key: Buffer; value: Buffer }>,
   merkleDelsByKey: Map<string, Buffer>,
 ): void => {
-  merklePuts.push({ key: keyMerkleRoot(entityId, ENTITY_MERKLE_NAMESPACE), value: encodeBuffer(flushed.rootDoc) });
+  merklePuts.push({ key: keyMerkleRoot(entityId, ENTITY_MERKLE_NAMESPACE), value: encodeMerkleNode(flushed.rootDoc) });
   for (const branchDoc of flushed.branchPuts) {
     merklePuts.push({
       key: keyMerkleBranch(entityId, ENTITY_MERKLE_NAMESPACE, packRadixMerklePath(branchDoc.radix, branchDoc.path)),
-      value: encodeBuffer(branchDoc),
+      value: encodeMerkleNode(branchDoc),
     });
   }
   for (const leafDoc of flushed.leafPuts) {
     merklePuts.push({
       key: keyMerkleLeaf(entityId, ENTITY_MERKLE_NAMESPACE, packRadixMerklePath(leafDoc.radix, leafDoc.path)),
-      value: encodeBuffer(leafDoc),
+      value: encodeMerkleNode(leafDoc),
     });
   }
   for (const path of flushed.branchDels) {
@@ -883,8 +900,8 @@ export const prepareStorageStateHashes = async (options: {
   const updateEntityCell = async (entityId: string, key: string, hash: string | null): Promise<void> => {
     const normalized = normalizeEntityId(entityId);
     const editor = await openEntityEditor(normalized);
-    if (hash) await editor.put(key, hash);
-    else await editor.del(key);
+    const changed = hash ? await editor.put(key, hash) : await editor.del(key);
+    if (!changed) return;
     touchedEntityIds.add(normalized);
     entityHashDocs.set(normalized, entityHashDocs.get(normalized) ?? {
       entityId: normalized,

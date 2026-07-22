@@ -38,7 +38,7 @@ import {
   MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES,
 } from '../radapter/command-frontier';
 import { decodeBuffer, encodeBuffer } from '../storage/codec';
-import { prepareStorageStateHashes } from '../storage/hashes';
+import { MAX_PERSISTED_MERKLE_NODE_BYTES, prepareStorageStateHashes } from '../storage/hashes';
 import { verifyLiveStorageIntegrity } from '../storage/live-integrity';
 import {
   KEY_HEAD,
@@ -3999,6 +3999,27 @@ test('storage entity hash docs persist root metadata only', async () => {
   expect(firstRoot.leafCount).toBe(accountCount);
   expect(firstRoot.rootKind).toBe('branch');
   expect(Array.isArray(firstRoot.rootPath)).toBe(true);
+  expect(first.merklePuts.every(({ value }) => value.byteLength < MAX_PERSISTED_MERKLE_NODE_BYTES)).toBe(true);
+
+  const unchangedId = `0x${(1).toString(16).padStart(64, '0')}`;
+  const unchanged = await prepareStorageStateHashes({
+    db: makeMemoryDb(first.merklePuts.map((item) => [item.key, item.value] as [Buffer, Buffer])),
+    puts: [{
+      family: 'account',
+      entityId,
+      counterpartyId: unchangedId,
+      value: projectAccountDoc({
+        ...base,
+        rightEntity: unchangedId,
+        proofHeader: { ...base.proofHeader, toEntity: unchangedId },
+      }),
+    }],
+    dels: [],
+    entityHashDocs: first.entityHashDocs,
+  });
+  expect(unchanged.entityHashDocs.get(entityId)?.hash).toBe(firstDoc.hash);
+  expect(unchanged.merklePuts).toHaveLength(0);
+  expect(unchanged.merkleDels).toHaveLength(0);
 
   const oldRoot = firstDoc.hash;
   const changedId = `0x${(2_001).toString(16).padStart(64, '0')}`;
