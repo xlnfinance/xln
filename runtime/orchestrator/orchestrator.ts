@@ -26,6 +26,7 @@ import {
   type RelayStore,
 } from '../relay/store';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay/router';
+import { closeRelayClientsForReset } from '../relay/reset';
 import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
 import { createHelloChallengeRegistry } from '../networking/hello-challenge';
 import { type MarketSnapshotPayload } from '../relay/market-snapshot';
@@ -706,14 +707,7 @@ const stopProcess = async (proc: ChildProcess | null): Promise<void> => {
 };
 
 const clearRelayState = (): void => {
-  for (const [, client] of relayStore.clients.entries()) {
-    try {
-      client.ws.close?.(4000, 'mesh-reset');
-    } catch {
-      try { client.ws.close?.(); } catch {}
-    }
-  }
-  relayStore.clients.clear();
+  closeRelayClientsForReset(relayStore);
   clearPendingMessages(relayStore);
   relayStore.gossipProfiles.clear();
   relayStore.runtimeEncryptionKeys.clear();

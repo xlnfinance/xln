@@ -8,6 +8,11 @@ import type { ManagedRuntimeLease, ManagedRuntimeSpec } from './orchestrator-typ
 
 export type ManagedProcessTableEntry = { pid: number; command: string };
 
+export type ManagedProcessOps = {
+  kill(pid: number, signal: NodeJS.Signals | 0): true;
+  sleep(ms: number): Promise<void>;
+};
+
 type ManagedRuntimeLeaseManagerConfig = {
   controlPlaneDir: string;
   ownerId: string;
@@ -17,12 +22,22 @@ const formatError = (error: unknown): string => error instanceof Error ? error.m
 
 const managedLeaseLog = createStructuredLogger('orchestrator.managed_leases');
 
-const isPidAlive = (pid: number): boolean => {
+const defaultProcessOps: ManagedProcessOps = {
+  kill: (pid, signal) => process.kill(pid, signal),
+  sleep: delay,
+};
+
+const isPidAlive = (pid: number, ops: ManagedProcessOps = defaultProcessOps): boolean => {
   try {
-    process.kill(pid, 0);
+    ops.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    if (code === 'ESRCH') return false;
+    if (code === 'EPERM') return true;
+    throw new Error(`MANAGED_RUNTIME_PID_PROBE_FAILED:pid=${pid}:error=${formatError(error)}`, {
+      cause: error,
+    });
   }
 };
 
@@ -38,34 +53,75 @@ const commandMatchesManagedRuntime = (command: string, spec: ManagedRuntimeSpec)
   return hasApiPort && hasDbPath;
 };
 
-const killProcessIds = async (pids: number[], label: string): Promise<void> => {
+export const killManagedProcessIds = async (
+  pids: number[],
+  label: string,
+  ops: ManagedProcessOps = defaultProcessOps,
+): Promise<void> => {
   if (pids.length === 0) return;
   managedLeaseLog.warn('stale_processes.kill', { label, pids });
   for (const pid of pids) {
-    try { process.kill(pid, 'SIGTERM'); } catch {}
+    try {
+      ops.kill(pid, 'SIGTERM');
+    } catch (error) {
+      managedLeaseLog.warn('stale_process.sigterm_failed', { label, pid, error: formatError(error) });
+    }
   }
-  await delay(1_000);
+  await ops.sleep(1_000);
   for (const pid of pids) {
-    if (!isPidAlive(pid)) continue;
-    try { process.kill(pid, 'SIGKILL'); } catch {}
+    if (!isPidAlive(pid, ops)) continue;
+    try {
+      ops.kill(pid, 'SIGKILL');
+    } catch (error) {
+      managedLeaseLog.warn('stale_process.sigkill_failed', { label, pid, error: formatError(error) });
+    }
   }
-  await delay(200);
+  await ops.sleep(200);
+  const survivors = pids.filter(pid => isPidAlive(pid, ops));
+  if (survivors.length > 0) {
+    managedLeaseLog.error('stale_processes.survived_sigkill', { label, pids: survivors });
+    throw new Error(`MANAGED_RUNTIME_PROCESS_TERMINATION_FAILED:${label}:pids=${survivors.join(',')}`);
+  }
 };
 
-export const readManagedProcessTable = async (): Promise<ManagedProcessTableEntry[]> => {
-  return await new Promise<ManagedProcessTableEntry[]>((resolve) => {
-    const child = spawn('ps', ['-axo', 'pid=,command='], {
+export const readManagedProcessTable = async (
+  spawnProcess: typeof spawn = spawn,
+): Promise<ManagedProcessTableEntry[]> => {
+  return await new Promise<ManagedProcessTableEntry[]>((resolve, reject) => {
+    const child = spawnProcess('ps', ['-axo', 'pid=,command='], {
       cwd: process.cwd(),
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
+    if (!child.stdout || !child.stderr) {
+      reject(new Error('MANAGED_PROCESS_TABLE_PIPE_UNAVAILABLE'));
+      return;
+    }
 
     let stdout = '';
+    let stderr = '';
+    let settled = false;
     child.stdout.on('data', chunk => {
       stdout += chunk.toString();
     });
+    child.stderr.on('data', chunk => {
+      stderr += chunk.toString();
+    });
 
-    child.on('error', () => resolve([]));
-    child.on('close', () => {
+    child.on('error', error => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(`MANAGED_PROCESS_TABLE_SPAWN_FAILED:${formatError(error)}`, { cause: error }));
+    });
+    child.on('close', (code, signal) => {
+      if (settled) return;
+      settled = true;
+      if (code !== 0) {
+        reject(new Error(
+          `MANAGED_PROCESS_TABLE_EXIT_FAILED:code=${String(code)}:signal=${String(signal || '')}:` +
+          `stderr=${stderr.trim() || 'empty'}`,
+        ));
+        return;
+      }
       const rows = stdout
         .split(/\r?\n/)
         .map((line): ManagedProcessTableEntry | null => {
@@ -176,7 +232,7 @@ export const createManagedRuntimeLeaseManager = (config: ManagedRuntimeLeaseMana
       }
     }
 
-    await killProcessIds(verified, `${spec.name} ${spec.role} process(es)`);
+    await killManagedProcessIds(verified, `${spec.name} ${spec.role} process(es)`);
   };
 
   return {

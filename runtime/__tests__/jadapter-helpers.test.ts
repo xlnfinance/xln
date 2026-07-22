@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { AbiCoder } from 'ethers';
 
 import { deriveSignerAddressSync } from '../account/crypto';
 import {
+  decodeStandardSolidityRevertData,
   isTransientRpcUnavailableError,
   readOptionalRpcBatchBigInt,
   readRequiredRpcBatchBigInt,
@@ -1288,6 +1290,28 @@ describe('jadapter helper cursors', () => {
     const reserveEvent = findRecentReserveUpdatedEvent(env, entityA, 2, 500n);
     expect(reserveEvent?.transactionHash).toBe(`0x${'ab'.repeat(32)}`);
     expect(findRecentReserveUpdatedEvent(env, entityA, 2, 501n)).toBeNull();
+  });
+
+  test('malformed standard Solidity reverts log selector and payload length', () => {
+    const warnings: Array<{ event: string; details: Record<string, unknown> }> = [];
+    const log = { warn: (event: string, details: Record<string, unknown>) => warnings.push({ event, details }) };
+
+    expect(decodeStandardSolidityRevertData('0x08c379a0ff', log)).toBe('');
+    expect(decodeStandardSolidityRevertData('0x4e487b71ff', log)).toBe('');
+    expect(warnings).toEqual([
+      {
+        event: 'revert.error_string_decode_failed',
+        details: expect.objectContaining({ selector: '0x08c379a0', payloadBytes: 5 }),
+      },
+      {
+        event: 'revert.panic_decode_failed',
+        details: expect.objectContaining({ selector: '0x4e487b71', payloadBytes: 5 }),
+      },
+    ]);
+
+    const validError = `0x08c379a0${AbiCoder.defaultAbiCoder().encode(['string'], ['denied']).slice(2)}`;
+    expect(decodeStandardSolidityRevertData(validError, log)).toBe(' reason="denied"');
+    expect(warnings).toHaveLength(2);
   });
 
   test('processEventBatch keeps same ERC20 transfer log deltas for both tracked external owners', () => {

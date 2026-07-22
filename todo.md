@@ -116,13 +116,13 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
 
 ## P1 — runtime operational correctness
 
-- [ ] Verify `managed-runtime-leases.ts` process discovery: a `ps` failure must
+- [x] Verify `managed-runtime-leases.ts` process discovery: a `ps` failure must
   fail closed, and TERM/KILL errors plus post-KILL PID state must be observable.
-- [ ] Verify mesh reset WebSocket cleanup: failed graceful close must remain
+- [x] Verify mesh reset WebSocket cleanup: failed graceful close must remain
   tracked and use forced termination where supported; no orphan socket.
-- [ ] Log ABI `Error(string)` / `Panic(uint256)` decode failures with selector
+- [x] Log ABI `Error(string)` / `Panic(uint256)` decode failures with selector
   and payload length while preserving the original transaction failure.
-- [ ] Remove the commented historical RPC implementation after confirming no
+- [x] Remove the commented historical RPC implementation after confirming no
   executable/reference value remains. Git is the history.
 - [ ] Audit every empty/silent catch in production Runtime; convert to typed
   propagation or structured error logging.

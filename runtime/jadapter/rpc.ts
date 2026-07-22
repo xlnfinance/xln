@@ -349,6 +349,37 @@ const rpcErrorText = (error: unknown): string => {
   return String(error);
 };
 
+type RevertDecodeLogger = {
+  warn(event: string, details: Record<string, unknown>): void;
+};
+
+export const decodeStandardSolidityRevertData = (
+  revertData: string,
+  log: RevertDecodeLogger = rpcLog,
+): string => {
+  const selector = revertData.slice(0, 10);
+  const payloadBytes = Math.max(0, Math.floor((revertData.length - 2) / 2));
+  try {
+    if (selector === '0x08c379a0') {
+      const [reason] = ethers.AbiCoder.defaultAbiCoder().decode(['string'], `0x${revertData.slice(10)}`);
+      return ` reason="${String(reason)}"`;
+    }
+    if (selector === '0x4e487b71') {
+      const [panicCode] = ethers.AbiCoder.defaultAbiCoder().decode(['uint256'], `0x${revertData.slice(10)}`);
+      return ` panic=0x${BigInt(panicCode).toString(16)}`;
+    }
+    return '';
+  } catch (error) {
+    log.warn(
+      selector === '0x08c379a0'
+        ? 'revert.error_string_decode_failed'
+        : 'revert.panic_decode_failed',
+      { selector, payloadBytes, error: rpcErrorText(error) },
+    );
+    return '';
+  }
+};
+
 export const isTransientRpcUnavailableError = (error: unknown): boolean =>
   /J_HISTORY_HEADER_MISSING:height=\d+ error=none|J_RECEIPT_RANGE_REORG|J_RECEIPT_RANGE_PARENT_MISMATCH|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|Failed to fetch|NetworkError|Load failed|Unexpected end of JSON input|PROXY_UPSTREAM_TIMEOUT|RPC_BATCH_HTTP_50[0234]|50[0234] (Bad Gateway|Gateway Timeout|Service Unavailable|Internal Server Error)|server response 50[0234]|responseStatus["': ]+50[0234]/i
     .test(rpcErrorText(error));
@@ -1708,30 +1739,6 @@ export async function createRpcAdapter(
       }
       // Real networks: must use real deposits
       throw new Error('debugFundReserves only available on configured dev chains - use real token deposits');
-      /* Original implementation for reference (requires Depository extension):
-      const tx = await depository.debugFundReserves(entityId, tokenId, amount);
-      const receipt = await tx.wait();
-      if (!receipt) throw new Error('Fund reserves failed');
-
-      const events: JEvent[] = [];
-      for (const log of receipt.logs) {
-        try {
-          const parsed = depository.interface.parseLog(log);
-          if (parsed) {
-            events.push({
-              name: parsed.name,
-              args: Object.fromEntries(
-                parsed.fragment.inputs.map((input: { name: string }, i: number) => [input.name, parsed.args[i]])
-              ),
-              blockNumber: receipt.blockNumber,
-              blockHash: receipt.blockHash,
-              transactionHash: receipt.hash,
-            });
-          }
-        } catch { }
-      }
-      return events;
-      */
     },
 
     async debugFundReservesBatch(mints: JReserveMint[]): Promise<JEvent[]> {
@@ -2371,9 +2378,16 @@ export async function createRpcAdapter(
               let localSnapshotRaceAfterGasEstimate = false;
               if (revertData && revertData !== '0x') {
                 const sig = typeof revertData === 'string' ? revertData.slice(0, 10) : '';
+                const payloadBytes = typeof revertData === 'string'
+                  ? Math.max(0, Math.floor((revertData.length - 2) / 2))
+                  : 0;
                 let errName = `unknown(${sig})`;
                 let decoded = '';
-                if (typeof revertData === 'string') {
+                if (
+                  typeof revertData === 'string' &&
+                  sig !== '0x08c379a0' &&
+                  sig !== '0x4e487b71'
+                ) {
                   try {
                     const parsedError = depository.interface.parseError(revertData);
                     if (parsedError) {
@@ -2382,21 +2396,16 @@ export async function createRpcAdapter(
                       errName = `${parsedError.name}()`;
                       decoded = argStr;
                     }
-                  } catch {
-                    // fall through to standard Error(string)/Panic decoding below
+                  } catch (error) {
+                    rpcLog.warn('revert.contract_error_decode_failed', {
+                      selector: sig,
+                      payloadBytes,
+                      error: rpcErrorText(error),
+                    });
                   }
                 }
-                // Decode Error(string) if present
-                if (sig === '0x08c379a0' && typeof revertData === 'string') {
-                  try {
-                    const reason = ethers.AbiCoder.defaultAbiCoder().decode(['string'], '0x' + revertData.slice(10));
-                    decoded = ` reason="${reason[0]}"`;
-                  } catch { }
-                } else if (sig === '0x4e487b71' && typeof revertData === 'string') {
-                  try {
-                    const [panicCode] = ethers.AbiCoder.defaultAbiCoder().decode(['uint256'], '0x' + revertData.slice(10));
-                    decoded = ` panic=0x${BigInt(panicCode).toString(16)}`;
-                  } catch { }
+                if (typeof revertData === 'string') {
+                  decoded = decodeStandardSolidityRevertData(revertData);
                 }
                 errDetail = `${errName}${decoded}`;
               } else {

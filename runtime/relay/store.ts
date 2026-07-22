@@ -39,6 +39,7 @@ export type RelayClient = {
 export type RelaySocketLike = {
   send(data: string | Uint8Array): boolean | number | void;
   close?(code?: number, reason?: string): unknown;
+  terminate?(): unknown;
   readyState?: unknown;
 };
 
