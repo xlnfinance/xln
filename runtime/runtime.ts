@@ -2505,11 +2505,32 @@ export const prepareAtomicCrossJAccountInputs = async (
     }
     if (isReplay || selection.pairs.length === 0) return selection;
     const previewEnv = cloneRuntimeFrameWorkingEnv(env);
-    const preview = await applyMergedEntityInputs(previewEnv, selection.inputs, initialJOutbox, {
-      isReplay: false,
-      routingDeps,
-    });
-    const failedIndexes = crossJPairIndexesThatDidNotCommit(previewEnv, selection.pairs, preview.inputOutcomes);
+    let failedIndexes: Set<number>;
+    try {
+      const preview = await applyMergedEntityInputs(previewEnv, selection.inputs, initialJOutbox, {
+        isReplay: false,
+        routingDeps,
+      });
+      failedIndexes = crossJPairIndexesThatDidNotCommit(
+        previewEnv,
+        selection.pairs,
+        preview.inputOutcomes,
+      );
+    } catch (error) {
+      if (!(error instanceof RuntimeEntityInputApplyError) || !error.isRemoteIngress) throw error;
+      const failedInputIndex = selection.inputs.findIndex(input =>
+        input.entityId.toLowerCase() === error.entityId.toLowerCase() &&
+        input.signerId.toLowerCase() === error.signerId.toLowerCase() &&
+        String(input.from ?? '').trim().toLowerCase() === error.sourceRuntimeId.toLowerCase() &&
+        input.sourceRuntimeFrame?.height === error.sourceRuntimeHeight &&
+        input.sourceRuntimeFrame?.timestamp === error.sourceRuntimeTimestamp);
+      const failedPair = selection.pairs.find(pair =>
+        pair.sourceInputIndex === failedInputIndex || pair.targetInputIndex === failedInputIndex);
+      // Only the exact two-leg remote cohort is soft-rejected. A tempting
+      // catch-all here would hide an unrelated Runtime/Entity invariant failure.
+      if (!failedPair) throw error;
+      failedIndexes = new Set([failedPair.sourceInputIndex, failedPair.targetInputIndex]);
+    }
     for (const pair of selection.pairs) {
       if (
         crossJAccountFrameMatches(env, pair.sourceAccountFrame) ||
@@ -2525,6 +2546,21 @@ export const prepareAtomicCrossJAccountInputs = async (
       pairCount: selection.pairs.length,
       droppedInputIndexes: [...failedIndexes].sort((left, right) => left - right),
     });
+    for (const pair of selection.pairs) {
+      const pairIndexes = [pair.sourceInputIndex, pair.targetInputIndex];
+      if (!pairIndexes.some(inputIndex => failedIndexes.has(inputIndex))) continue;
+      for (const inputIndex of pairIndexes) {
+        const rejectedInput = selection.inputs[inputIndex]!;
+        recordRuntimeSecurityIncident(env, {
+          domain: 'cross-j',
+          code: 'CROSS_J_ACCOUNT_PAIR_PREVIEW_REJECTED',
+          source: 'remote-ingress',
+          severity: 'warning',
+          summary: 'A signed cross-j Account pair failed atomic scratch-state validation and was ignored',
+          entityId: rejectedInput.entityId,
+        });
+      }
+    }
     retained = selection.inputs.filter((_input, inputIndex) => !failedIndexes.has(inputIndex));
   }
   throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_PREFLIGHT_DID_NOT_CONVERGE');

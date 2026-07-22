@@ -55,7 +55,10 @@ export interface RuntimeEntityInputApplyResult {
  */
 export class RuntimeEntityInputApplyError extends Error {
   readonly entityId: string;
+  readonly signerId: string;
   readonly sourceRuntimeId: string;
+  readonly sourceRuntimeHeight: number | undefined;
+  readonly sourceRuntimeTimestamp: number | undefined;
   readonly trustedLocalCrossJurisdiction: boolean;
 
   constructor(
@@ -72,7 +75,10 @@ export class RuntimeEntityInputApplyError extends Error {
     );
     this.name = 'RuntimeEntityInputApplyError';
     this.entityId = input.entityId;
+    this.signerId = input.signerId;
     this.sourceRuntimeId = String(input.from ?? '').trim();
+    this.sourceRuntimeHeight = input.sourceRuntimeFrame?.height;
+    this.sourceRuntimeTimestamp = input.sourceRuntimeFrame?.timestamp;
     this.trustedLocalCrossJurisdiction = trustedLocalCrossJurisdiction;
   }
 

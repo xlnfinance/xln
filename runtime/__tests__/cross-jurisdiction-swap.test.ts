@@ -4,6 +4,7 @@ import { ethers } from 'ethers';
 import { applyEntityTx } from '../entity/tx/apply';
 import { applyAccountTx } from '../account/tx/apply';
 import { proposeAccountFrame } from '../account/consensus/propose';
+import { accountInputAck, accountInputProposal } from '../account/consensus/flush';
 import { handlePullCancel } from '../account/tx/handlers/pull';
 import { computeAccountStateRoot } from '../account/state-root';
 import {
@@ -35,6 +36,7 @@ import type {
   EntityTx,
   JurisdictionEvent,
   RuntimeEntityInputsEnvelope,
+  RoutedEntityInput,
 } from '../types';
 import { generateLazyEntityId } from '../entity/factory';
 import { createDefaultDelta } from '../validation-utils';
@@ -116,6 +118,8 @@ import { applyJEventRange, buildJEventRangeData } from './helpers/j-history';
 import { buildLocalEntityProfile } from '../networking/gossip-helper';
 import { collectLocalProfileEncryptionAnnouncements } from '../networking/profile-encryption';
 import { LIMITS } from '../constants';
+import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
+import { cloneIsolatedRoutedEntityInputs } from '../protocol/runtime-input-clone';
 
 const makeLocalCrossJRoutingDeps = (): RuntimeEntityRoutingDeps => ({
   ensureRuntimeState: current => {
@@ -882,6 +886,33 @@ describe('cross-jurisdiction hashledger swap', () => {
       targetUser,
     ].sort());
 
+    const hubOnlySourceAccount = hubEnv.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)!
+      .state.accounts.get(sourceUser)!;
+    const hubOnlyTargetAccount = hubEnv.eReplicas.get(`${targetHub}:${targetHubSigner}`)!
+      .state.accounts.get(targetUser)!;
+    expect(hubOnlySourceAccount.pendingFrame?.accountTxs.map(tx => tx.type))
+      .toEqual(['pull_lock', 'swap_offer']);
+    expect(hubOnlyTargetAccount.pendingFrame?.accountTxs.map(tx => tx.type)).toEqual(['pull_lock']);
+    expect(hubOnlySourceAccount.currentFrame.accountTxs).toEqual([]);
+    expect(hubOnlyTargetAccount.currentFrame.accountTxs).toEqual([]);
+    expect(hubOnlySourceAccount.pulls?.has(prepared.sourcePull!.pullId) ?? false).toBe(false);
+    expect(hubOnlySourceAccount.swapOffers.has(prepared.orderId)).toBe(false);
+    expect(buildAccountProofBody(hubOnlySourceAccount, '').runtimeProofBody.transformers).toEqual([]);
+    const hubOnlyResolve = await applyAccountTx(
+      cloneAccountMachine(hubOnlySourceAccount),
+      {
+        type: 'pull_resolve',
+        data: { pullId: prepared.sourcePull!.pullId, binary: '0x' },
+      },
+      prepared.sourcePull!.signedAmount > 0n,
+      hubEnv.timestamp,
+      hubOnlySourceAccount.currentFrame.height,
+    );
+    expect(hubOnlyResolve).toMatchObject({
+      success: false,
+      error: `Pull ${prepared.sourcePull!.pullId} not found`,
+    });
+
     const hubFrame = { height: 42, timestamp: hubEnv.timestamp };
     const proposals = hubWakePass.entityOutbox.map(output => ({
       ...output,
@@ -935,6 +966,106 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(proposalSelection.pairs.map(pair => pair.phase)).toEqual(['proposal']);
     expect(proposalSelection.droppedInputIndexes).toEqual([]);
 
+    const proposalFrame = (input: RoutedEntityInput) => {
+      const accountInput = getEffectiveEntityInputTxs(input).flatMap(tx =>
+        tx.type === 'accountInput' ? [tx.data] : [])[0];
+      const proposal = accountInput ? accountInputProposal(accountInput) : undefined;
+      if (!proposal) throw new Error(`TEST_CROSS_J_PROPOSAL_MISSING:${input.entityId}`);
+      return proposal;
+    };
+    const targetPull = (inputs: RoutedEntityInput[]) => {
+      const targetInput = inputs.find(input => input.entityId === targetUser);
+      const pull = targetInput && proposalFrame(targetInput).frame.accountTxs.find(tx =>
+        tx.type === 'pull_lock' && tx.data.crossJurisdiction?.leg === 'target');
+      if (!pull || pull.type !== 'pull_lock') throw new Error('TEST_CROSS_J_TARGET_PULL_MISSING');
+      return pull;
+    };
+    const corruptions: Array<{
+      name: string;
+      mutate(inputs: RoutedEntityInput[]): void;
+    }> = [
+      {
+        name: 'cohort frame',
+        mutate: inputs => { inputs[1]!.sourceRuntimeFrame!.height += 1; },
+      },
+      {
+        name: 'route hash',
+        mutate: inputs => { targetPull(inputs).data.crossJurisdiction!.routeHash = `0x${'f1'.repeat(32)}`; },
+      },
+      {
+        name: 'target entity',
+        mutate: inputs => {
+          targetPull(inputs).data.crossJurisdictionRoute!.target.counterpartyEntityId = entity('ee');
+        },
+      },
+      {
+        name: 'asset',
+        mutate: inputs => { targetPull(inputs).data.tokenId += 1; },
+      },
+      {
+        name: 'amount',
+        mutate: inputs => { targetPull(inputs).data.amount += 1n; },
+      },
+      {
+        name: 'full hash',
+        mutate: inputs => { targetPull(inputs).data.fullHash = `0x${'f2'.repeat(32)}`; },
+      },
+      {
+        name: 'partial root',
+        mutate: inputs => { targetPull(inputs).data.partialRoot = `0x${'f3'.repeat(32)}`; },
+      },
+      {
+        name: 'pull id',
+        mutate: inputs => { targetPull(inputs).data.pullId = 'corrupt-target-pull'; },
+      },
+      {
+        name: 'deadline',
+        mutate: inputs => { targetPull(inputs).data.revealedUntilTimestamp += 1; },
+      },
+      {
+        name: 'account Hanko',
+        mutate: inputs => { proposalFrame(inputs[1]!).frameHanko = '0x00'; },
+      },
+    ];
+    for (const corruption of corruptions) {
+      const corrupted = cloneIsolatedRoutedEntityInputs(proposals);
+      corruption.mutate(corrupted);
+      const replicasBefore = [...userEnv.eReplicas.entries()].map(([key, replica]) =>
+        [key, cloneEntityReplica(replica)] as const);
+      const incidentsBefore = [...(userEnv.runtimeState?.securityIncidents?.values() ?? [])]
+        .reduce((sum, incident) => sum + incident.occurrences, 0);
+      const rejected = await prepareAtomicCrossJAccountInputs(
+        userEnv,
+        [...corrupted, ordinaryUserInput],
+        [],
+        false,
+        makeLocalCrossJRoutingDeps(),
+      );
+      expect(rejected.pairs, corruption.name).toEqual([]);
+      expect(rejected.inputs, corruption.name).toEqual([ordinaryUserInput]);
+      expect([...userEnv.eReplicas.entries()], corruption.name).toEqual(replicasBefore);
+      const incidentsAfter = [...(userEnv.runtimeState?.securityIncidents?.values() ?? [])]
+        .reduce((sum, incident) => sum + incident.occurrences, 0);
+      expect(incidentsAfter, corruption.name)
+        .toBeGreaterThan(incidentsBefore);
+    }
+
+    const validThenCorruptCohorts = cloneIsolatedRoutedEntityInputs(atomicRepeatedCohorts);
+    const corruptNewestTarget = validThenCorruptCohorts.find(input =>
+      input.entityId === targetUser && input.sourceRuntimeFrame?.height === hubFrame.height);
+    if (!corruptNewestTarget) throw new Error('TEST_CROSS_J_NEWEST_TARGET_COHORT_MISSING');
+    corruptNewestTarget.sourceRuntimeFrame!.height += 1;
+    const retainedOlderCohort = await prepareAtomicCrossJAccountInputs(
+      userEnv,
+      validThenCorruptCohorts,
+      [],
+      false,
+      makeLocalCrossJRoutingDeps(),
+    );
+    expect(retainedOlderCohort.pairs).toHaveLength(1);
+    expect(retainedOlderCohort.inputs).toHaveLength(2);
+    expect(retainedOlderCohort.inputs.every(input => input.sourceRuntimeFrame?.height === 41)).toBe(true);
+
     const preparedUserInputs = await prepareAtomicCrossJAccountInputs(
       userEnv,
       proposals,
@@ -964,7 +1095,69 @@ describe('cross-jurisdiction hashledger swap', () => {
       from: userEnv.runtimeId,
       runtimeId: hubEnv.runtimeId,
       sourceRuntimeFrame: userFrame,
+      atomicCrossJurisdictionPair: {
+        phase: 'ack' as const,
+        pairKey: proposalSelection.pairs[0]!.pairKey,
+      },
     }));
+    const acknowledgement = (input: RoutedEntityInput) => {
+      const accountInput = getEffectiveEntityInputTxs(input).flatMap(tx =>
+        tx.type === 'accountInput' ? [tx.data] : [])[0];
+      const ack = accountInput ? accountInputAck(accountInput) : undefined;
+      if (!accountInput || !ack) throw new Error(`TEST_CROSS_J_ACK_MISSING:${input.entityId}`);
+      return { accountInput, ack };
+    };
+    const ackCorruptions: Array<{
+      name: string;
+      mutate(inputs: RoutedEntityInput[]): void;
+    }> = [
+      {
+        name: 'ACK cohort frame',
+        mutate: inputs => { inputs[1]!.sourceRuntimeFrame!.height += 1; },
+      },
+      {
+        name: 'ACK height',
+        mutate: inputs => { acknowledgement(inputs[1]!).ack.height += 1; },
+      },
+      {
+        name: 'ACK frame hash',
+        mutate: inputs => { acknowledgement(inputs[1]!).ack.frameHash = `0x${'f4'.repeat(32)}`; },
+      },
+      {
+        name: 'ACK Hanko',
+        mutate: inputs => { acknowledgement(inputs[1]!).ack.frameHanko = '0x00'; },
+      },
+      {
+        name: 'ACK sender entity',
+        mutate: inputs => { acknowledgement(inputs[1]!).accountInput.fromEntityId = entity('ef'); },
+      },
+      {
+        name: 'ACK domain',
+        mutate: inputs => { acknowledgement(inputs[1]!).accountInput.domain.chainId += 1; },
+      },
+    ];
+    const ordinaryHubInput = { entityId: sourceHub, signerId: sourceHubSigner, entityTxs: [] };
+    for (const corruption of ackCorruptions) {
+      const corrupted = cloneIsolatedRoutedEntityInputs(acknowledgements);
+      corruption.mutate(corrupted);
+      const replicasBefore = [...hubEnv.eReplicas.entries()].map(([key, replica]) =>
+        [key, cloneEntityReplica(replica)] as const);
+      const incidentsBefore = [...(hubEnv.runtimeState?.securityIncidents?.values() ?? [])]
+        .reduce((sum, incident) => sum + incident.occurrences, 0);
+      const rejected = await prepareAtomicCrossJAccountInputs(
+        hubEnv,
+        [...corrupted, ordinaryHubInput],
+        [],
+        false,
+        makeLocalCrossJRoutingDeps(),
+      );
+      expect(rejected.pairs, corruption.name).toEqual([]);
+      expect(rejected.inputs, corruption.name).toEqual([ordinaryHubInput]);
+      expect([...hubEnv.eReplicas.entries()], corruption.name).toEqual(replicasBefore);
+      const incidentsAfter = [...(hubEnv.runtimeState?.securityIncidents?.values() ?? [])]
+        .reduce((sum, incident) => sum + incident.occurrences, 0);
+      expect(incidentsAfter, corruption.name).toBeGreaterThan(incidentsBefore);
+    }
     const queuedIntent = withCanonicalCrossJurisdictionRouteHash({
       ...cloneCrossJurisdictionRoute(intent),
       orderId: 'cross-j-atomic-opening-next',

@@ -464,7 +464,22 @@ export const selectMatchedCrossJAccountInputPairs = (
   inputs: readonly RoutedEntityInput[],
 ): CrossJAccountInputPairSelection => {
   const candidates = collectCrossJAdmissionCandidates(env, inputs);
-  if (candidates.length === 0) return { inputs: [...inputs], pairs: [], droppedInputIndexes: [] };
+  const cohortKey = (input: RoutedEntityInput, phase: 'proposal' | 'ack', pairKey: string): string => {
+    const frame = input.sourceRuntimeFrame;
+    return `${phase}\u0000${pairKey}\u0000${admissionOriginKey(input)}\u0000${frame?.height ?? ''}\u0000${frame?.timestamp ?? ''}`;
+  };
+  const atomicGroups = new Map<string, number[]>();
+  for (const [inputIndex, input] of inputs.entries()) {
+    const marker = input.atomicCrossJurisdictionPair;
+    if (!marker) continue;
+    const key = cohortKey(input, marker.phase, marker.pairKey);
+    const group = atomicGroups.get(key) ?? [];
+    group.push(inputIndex);
+    atomicGroups.set(key, group);
+  }
+  if (candidates.length === 0 && atomicGroups.size === 0) {
+    return { inputs: [...inputs], pairs: [], droppedInputIndexes: [] };
+  }
 
   // A byte-exact Account frame already present in durable state is transport
   // replay, not a new monetary leg. Let bilateral consensus emit its missing
@@ -473,9 +488,14 @@ export const selectMatchedCrossJAccountInputPairs = (
   const uncommittedCandidates = candidates.filter(candidate => !candidate.alreadyCommitted);
   const byKey = new Map<string, CrossJAdmissionFrameCandidate[]>();
   for (const candidate of uncommittedCandidates) {
-    const group = byKey.get(candidate.pairKey) ?? [];
+    // pairKey binds economics; the authenticated transport frame binds one
+    // delivery attempt. Combining retries by pairKey alone turns two valid
+    // two-leg cohorts into one invalid four-leg cohort.
+    const input = inputs[candidate.inputIndex]!;
+    const key = cohortKey(input, candidate.phase, candidate.pairKey);
+    const group = byKey.get(key) ?? [];
     group.push(candidate);
-    byKey.set(candidate.pairKey, group);
+    byKey.set(key, group);
   }
   const candidateCounts = new Map<number, number>();
   for (const candidate of uncommittedCandidates) {
@@ -488,7 +508,7 @@ export const selectMatchedCrossJAccountInputPairs = (
     .filter(candidate => !candidate.valid)
     .forEach(candidate => invalidIndexes.add(candidate.inputIndex));
   const pairs: CrossJAccountInputPair[] = [];
-  for (const [pairKey, group] of byKey) {
+  for (const group of byKey.values()) {
     const groupIndexes = new Set(group.map(candidate => candidate.inputIndex));
     if (
       group.length !== 2 ||
@@ -506,7 +526,7 @@ export const selectMatchedCrossJAccountInputPairs = (
       continue;
     }
     pairs.push({
-      pairKey,
+      pairKey: source!.pairKey,
       phase: source!.phase,
       sourceInputIndex: source!.inputIndex,
       targetInputIndex: target!.inputIndex,
@@ -528,9 +548,28 @@ export const selectMatchedCrossJAccountInputPairs = (
   }
   const allCandidateIndexes = new Set(uncommittedCandidates.map(candidate => candidate.inputIndex));
   const pairedIndexes = new Set(pairs.flatMap(pair => [pair.sourceInputIndex, pair.targetInputIndex]));
-  const droppedInputIndexes = [...allCandidateIndexes]
-    .filter(inputIndex => invalidIndexes.has(inputIndex) || !pairedIndexes.has(inputIndex))
-    .sort((left, right) => left - right);
+  const committedCandidateIndexes = new Set(candidates
+    .filter(candidate => candidate.alreadyCommitted)
+    .map(candidate => candidate.inputIndex));
+  const atomicInvalidIndexes = new Set<number>();
+  for (const groupIndexes of atomicGroups.values()) {
+    const allAlreadyCommitted = groupIndexes.length === 2 &&
+      groupIndexes.every(inputIndex => committedCandidateIndexes.has(inputIndex));
+    const exactPairExists = groupIndexes.length === 2 && pairs.some(pair =>
+      groupIndexes.includes(pair.sourceInputIndex) &&
+      groupIndexes.includes(pair.targetInputIndex));
+    // The authenticated envelope marker survives even when a corrupt ACK no
+    // longer resolves to pending state. Treating that ACK as ordinary traffic
+    // would let one leg escape the atomic scratch-state gate.
+    if (!allAlreadyCommitted && !exactPairExists) {
+      groupIndexes.forEach(inputIndex => atomicInvalidIndexes.add(inputIndex));
+    }
+  }
+  const droppedInputIndexes = [...new Set([
+    ...[...allCandidateIndexes]
+      .filter(inputIndex => invalidIndexes.has(inputIndex) || !pairedIndexes.has(inputIndex)),
+    ...atomicInvalidIndexes,
+  ])].sort((left, right) => left - right);
   const dropped = new Set(droppedInputIndexes);
   return {
     inputs: inputs.filter((_input, inputIndex) => !dropped.has(inputIndex)),

@@ -58,13 +58,13 @@ An audit claim is not accepted until reproduced against the current candidate.
 - [x] L1: M2 contains exactly two Hub-signed ready Account proposals in one
   envelope: source pull+offer and target pull; neither is enforceable without
   the matching User ACK.
-- [ ] L1: corrupt each binding field independently; M3 and M4 leave both
+- [x] L1: corrupt each binding field independently; M3 and M4 leave both
   siblings byte-identical and emit no Entity frame/ACK.
 - [x] L1: valid M3 creates exactly two sibling Entity frames and one outbound
   envelope containing exactly the two Account ACKs.
 - [x] L1: valid M4 creates exactly two Hub sibling Entity frames in one Runtime
   frame, commits the order, and emits no fourth protocol message.
-- [ ] L1: a Hub-only source proposal cannot be used in dispute/settlement or
+- [x] L1: a Hub-only source proposal cannot be used in dispute/settlement or
   resolve the source pull before the exact User ACK/Hanko is committed.
 - [x] L1: replay/idempotency, whole-envelope manual retry, WAL/restart recovery,
   and no `targetReceipt` in protocol state or persisted records.
