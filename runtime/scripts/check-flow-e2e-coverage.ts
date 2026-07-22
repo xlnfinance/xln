@@ -104,6 +104,7 @@ const requirements: CoverageRequirement[] = [
       "type: 'placeSwapOffer'",
       '<SwapOrderList',
       '{requestCrossClear}',
+      'submitActiveCrossJurisdictionIntent',
     ],
   },
   {
@@ -120,7 +121,9 @@ const requirements: CoverageRequirement[] = [
     area: 'frontend',
     file: 'frontend/src/lib/components/Entity/swap-panel-helpers.ts',
     patterns: [
-      'submitActiveCrossJurisdictionIntent',
+      'buildCrossSwapRuntimeInputPlan',
+      'setupInput',
+      'targetSetupTxs',
     ],
   },
   {
