@@ -935,9 +935,10 @@ describe('production startup wiring', () => {
 
   test('fast e2e caps full-stack browser concurrency at the release-tested level', () => {
     const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-fast.ts'), 'utf8');
-    const configured = runner.match(/'--shards=(\d+)'/);
-    expect(configured).not.toBeNull();
-    expect(Number(configured?.[1] || 0)).toBeLessThanOrEqual(8);
+    expect(runner).toContain('const stackConcurrency = isCi ? 1 : 8;');
+    expect(runner).toContain('`--shards=${stackConcurrency}`');
+    expect(runner).toContain('`--max-mm-concurrency=${isCi ? 1 : 2}`');
+    expect(runner).toContain('`--max-reset-concurrency=${isCi ? 1 : 4}`');
   });
 
   test('isolated e2e overlaps the bounded market-maker queue with plain stacks', () => {

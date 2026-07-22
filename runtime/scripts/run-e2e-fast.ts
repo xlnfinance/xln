@@ -86,6 +86,11 @@ const FAST_E2E_TARGETS = [
 const fastTargets = FAST_E2E_TARGETS.map((target) => `${target.file}::${target.title}`);
 const passthrough = process.argv.slice(2);
 const isCi = process.env['CI'] === 'true';
+// A GitHub four-core runner cannot bootstrap one five-runtime stack while
+// Playwright reads another: the second bootstrap can starve the first
+// runtime's WebSocket event loop past the adapter deadline. Keep the complete
+// stack lifecycle serial in CI; local workstations retain bounded parallelism.
+const stackConcurrency = isCi ? 1 : 8;
 cleanupTestArtifactsBeforeRun({
   reason: 'e2e-fast',
   scope: 'e2e',
@@ -94,9 +99,9 @@ cleanupTestArtifactsBeforeRun({
 const args = [
   'runtime/scripts/run-e2e-parallel-isolated.ts',
   ...passthrough,
-  `--shards=${isCi ? 2 : 8}`,
+  `--shards=${stackConcurrency}`,
   '--workers-per-shard=1',
-  '--max-mm-concurrency=2',
+  `--max-mm-concurrency=${isCi ? 1 : 2}`,
   `--max-reset-concurrency=${isCi ? 1 : 4}`,
   '--stack-timeout-ms=300000',
   '--pw-project=chromium',
