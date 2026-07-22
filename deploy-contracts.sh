@@ -276,18 +276,6 @@ deploy_to_network() {
         return 1
     fi
 
-    # CRITICAL: Run R2R smoke test - FAIL deployment if it doesn't work
-    echo "   🧪 Running CRITICAL Reserve-to-Reserve (R2R) smoke test..."
-    echo "   🚨 This test MUST PASS or deployment will FAIL"
-    if ! bunx hardhat run test-r2r-post-deployment.cjs --network "$network_config" 2>&1; then
-        echo "   ❌ CRITICAL: R2R smoke test FAILED!"
-        echo "   🚫 DEPLOYMENT FAILED - R2R functionality broken"
-        echo "   💡 This means the UI won't work with these contracts"
-        cd ..
-        return 1
-    fi
-    echo "   ✅ CRITICAL: R2R smoke test PASSED - Contracts fully functional"
-
     # Build and update frontend bundle with latest runtime.js
     echo "   🔧 Updating frontend bundle with latest runtime code..."
     cd ..

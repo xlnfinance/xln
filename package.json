@@ -142,7 +142,6 @@
     "deploy:prod:fresh": "./deploy.sh --remote root@xln.finance --push --frontend --fresh --production --reset-mesh",
     "deploy:qa": "./scripts/deploy-qa-evidence.sh --remote root@xln.finance",
     "deploy:qa:dry": "./scripts/deploy-qa-evidence.sh --remote root@xln.finance --dry-run",
-    "test:contracts:r2r": "echo 'obsolete: direct unsafe R2R post-deploy script removed; use processBatch paths in e2e/scenarios'",
     "test:governance": "bun runtime/scripts/run-with-test-cleanup.ts --reason=governance --child-cwd=jurisdictions -- bunx hardhat test --grep governance",
     "test:entity": "bun runtime/scripts/run-with-test-cleanup.ts --reason=entity --child-cwd=jurisdictions -- bunx hardhat test --grep entity",
     "check": "bun run check:src && bun run check:frontend-file-size && bun run check:frontend",

@@ -35,7 +35,6 @@ const SCENARIOS: Record<string, { file: string; fn: string }> = {
   'rapid-fire':        { file: './rapid-fire',        fn: 'rapidFire' },
   'settle-rebalance':  { file: './settle-rebalance',  fn: 'runSettleRebalance' },
   'processbatch':      { file: './processbatch',      fn: 'runProcessBatchScenario' },
-  'process-batch':     { file: './processbatch',      fn: 'runProcessBatchScenario' },
   'dispute-lifecycle': { file: './dispute-lifecycle', fn: 'runDisputeLifecycle' },
 };
 

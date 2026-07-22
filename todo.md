@@ -155,8 +155,12 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   nested Account sender route hint with a focused regression; reject per-frame
   recovery info spam; retain the current green storage benchmark API instead
   of the stale four-argument `saveEnvToDB` call.
-- [ ] After main merge, remove merged/superseded worktrees and their branches;
-  preserve no worktree as an archive.
+- [x] After main merge, remove merged/superseded worktrees and their branches;
+  preserve no worktree as an archive. `git worktree list` now contains only the
+  clean root `main` and this candidate worktree. All other `ai/*` branches were
+  either proven ancestors of `948aea5bc` or explicitly rejected above; dirty
+  sender-route and benchmark edits were verified present in `main` before their
+  superseded worktrees were removed.
 
 ## P1 — runtime operational correctness
 
@@ -213,8 +217,11 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   gates; consolidate logging-policy tests into one precise AST gate.
 - [ ] Split giant fail-fast, cross-j, orderbook and QA cockpit test files by
   domain without weakening security/consensus coverage.
-- [ ] Remove obsolete `test:contracts:r2r`, duplicate processbatch aliases and
-  entrypoints that execute no test.
+- [x] Remove obsolete `test:contracts:r2r`, duplicate processbatch aliases and
+  entrypoints that execute no test. Deleted the post-deploy script that called
+  the deliberately absent `unsafeProcessBatch`, removed its deployment hook and
+  the `process-batch` alias. Current Hanko ABI guard: 1/1 PASS; canonical RPC
+  `processbatch` scenario PASS; obsolete references: 0.
 
 ## P2 — QA cockpit
 
