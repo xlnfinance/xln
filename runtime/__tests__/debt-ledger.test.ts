@@ -77,7 +77,6 @@ const makeState = (entityId: string, signerId: string): EntityState => ({
   htlcNotes: new Map(),
   lockBook: new Map(),
   swapTradingPairs: [],
-  pendingSwapFillRatios: new Map(),
 });
 
 const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): void => {

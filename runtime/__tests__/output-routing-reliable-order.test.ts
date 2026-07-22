@@ -170,7 +170,6 @@ const crossJProposalOutput = (
               wantTokenId: 2,
               wantAmount: 20n,
               timeInForce: 0,
-              minFillRatio: 0,
               crossJurisdiction: route,
             },
           },

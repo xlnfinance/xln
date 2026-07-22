@@ -82,7 +82,6 @@ const makeEntityStateFixture = (accountHash: string): EntityState => ({
   htlcFeesEarned: 12n,
   lockBook: new Map(),
   swapTradingPairs: [{ baseTokenId: 1, quoteTokenId: 2, pairId: '1/2' }],
-  pendingSwapFillRatios: new Map(),
 });
 
 describe('frame hash golden fixtures', () => {

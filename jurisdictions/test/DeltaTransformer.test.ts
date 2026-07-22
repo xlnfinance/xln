@@ -27,7 +27,6 @@ function makeSwapOffer(
     wantTokenId,
     wantAmount,
     makerIsLeft,
-    minFillRatio: 0,
     createdHeight: 0,
     quantizedGive: giveAmount,
     quantizedWant: wantAmount,

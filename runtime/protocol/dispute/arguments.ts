@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import type { AccountMachine, EntityState } from '../../types';
 import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
-import { asOfferId, swapKey, type OfferId } from '../../orderbook/swap-keys';
+import { asOfferId, type OfferId } from '../../orderbook/swap-keys';
 import { sortTransformerEntries } from '../transformer-ordering';
 import { decodeHashLadderBinary } from '../htlc/hash-ladder';
 import {
@@ -68,15 +68,25 @@ const hashHtlcSecret = (secret: string): string => {
 };
 
 const buildPendingSwapFillRatios = (
-  entityState: EntityState,
-  counterpartyEntityId: string,
+  account: AccountMachine,
   snapshot: DisputeArgumentSnapshot,
 ): Map<OfferId, number> => {
   const ratios = new Map<OfferId, number>();
-  for (const offerId of [...snapshot.plan.leftSwapOfferIds, ...snapshot.plan.rightSwapOfferIds]) {
-    const ratio = entityState.pendingSwapFillRatios?.get(swapKey(counterpartyEntityId, offerId));
-    if (ratio === undefined || !Number.isSafeInteger(ratio) || ratio <= 0 || ratio > MAX_FILL_RATIO) continue;
-    ratios.set(asOfferId(offerId), ratio);
+  const planned = new Set(
+    [...snapshot.plan.leftSwapOfferIds, ...snapshot.plan.rightSwapOfferIds].map(asOfferId),
+  );
+  // A resolve can arrive after this side has already built an optimistic frame.
+  // Therefore the Account machine itself is the durable evidence source: first
+  // the in-flight candidate, then later arrivals retained in its mempool. The
+  // first resolve for an offer is authoritative for this signed ProofBody;
+  // another fill cannot causally apply until that candidate is committed.
+  for (const tx of [...(account.pendingFrame?.accountTxs ?? []), ...(account.mempool ?? [])]) {
+    if (tx.type !== 'swap_resolve') continue;
+    const offerId = asOfferId(tx.data.offerId);
+    if (!planned.has(offerId) || ratios.has(offerId)) continue;
+    const ratio = tx.data.fillRatio;
+    if (!Number.isSafeInteger(ratio) || ratio <= 0 || ratio > MAX_FILL_RATIO) continue;
+    ratios.set(offerId, ratio);
   }
   return ratios;
 };
@@ -238,7 +248,7 @@ export function buildDisputeArgumentsForSnapshot(
   // treated as adversarial optional evidence: malformed argument blobs become
   // empty/no-op so the sender cannot block finalization of unrelated claims.
   const snapshot = requireDisputeArgumentSnapshot(account, proofbodyHash, 'build');
-  const fillRatios = buildPendingSwapFillRatios(entityState, counterpartyEntityId, snapshot);
+  const fillRatios = buildPendingSwapFillRatios(account, snapshot);
   const resolves = collectPullResolves(account);
   const leftFillRatios = snapshot.plan.leftSwapOfferIds.map((offerId) => fillRatios.get(asOfferId(offerId)) ?? 0);
   const rightFillRatios = snapshot.plan.rightSwapOfferIds.map((offerId) => fillRatios.get(asOfferId(offerId)) ?? 0);

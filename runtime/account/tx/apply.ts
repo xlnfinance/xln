@@ -52,7 +52,6 @@ type ApplyAccountTxResult = {
     wantAmount: bigint;
     priceTicks?: bigint | undefined;
     timeInForce?: 0 | 1 | 2 | undefined;
-    minFillRatio: number;
   };
   swapOfferCancelRequested?: { offerId: string };
   swapOfferCancelled?: { offerId: string; accountId: string; makerId?: string };

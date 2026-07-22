@@ -11,7 +11,6 @@
  * 3. Hub fills 50%: Partial fill
  * 4. Hub fills remaining 50%: Swap complete
  * 5. Verify final balances
- * 6. Test partial fill with minFillRatio
  * 7. Test cancel
  *
  * Run with: bun runtime/scenarios/swap.ts
@@ -26,7 +25,6 @@ import type { JAdapter } from '../jadapter/types';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRuntimeSeed, converge, commitRuntimeInput, findReplica } from './helpers';
 import { createGossipLayer } from '../networking/gossip';
-import { swapKey } from '../orderbook/swap-execution';
 import { getTokenInfo } from '../account/utils';
 import {
   summarizeRuntimeAccountCausality,
@@ -122,8 +120,6 @@ const SWAP_POSITIONS: Record<string, { x: number; y: number; z: number }> = {
 // Fill ratio constants (uint16)
 const MAX_FILL_RATIO = 65535;
 const FILL_50 = 32768;
-const FILL_75 = 49152;
-const FILL_80 = 52428;
 const FULL_FILL = MAX_FILL_RATIO;
 
 const ceilDiv = (numerator: bigint, denominator: bigint): bigint => {
@@ -135,6 +131,21 @@ const computeFilledAmounts = (giveAmount: bigint, wantAmount: bigint, fillRatio:
   const filledGive = (giveAmount * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO);
   const filledWant = giveAmount > 0n ? ceilDiv(filledGive * wantAmount, giveAmount) : 0n;
   return { filledGive, filledWant };
+};
+
+const pendingAccountSwapFillRatio = (
+  env: Env,
+  entityId: string,
+  accountId: string,
+  offerId: string,
+): number => {
+  const [, replica] = findReplica(env, entityId);
+  const account = replica.state.accounts.get(accountId);
+  const tx = [
+    ...(account?.pendingFrame?.accountTxs ?? []),
+    ...(account?.mempool ?? []),
+  ].find(candidate => candidate.type === 'swap_resolve' && candidate.data.offerId === offerId);
+  return tx?.type === 'swap_resolve' ? tx.data.fillRatio : 0;
 };
 
 function assert(condition: boolean, message: string, env?: Env): void {
@@ -371,7 +382,6 @@ export async function swap(env: Env): Promise<void> {
         giveAmount: eth(TRADE_ETH),
         wantTokenId: USDC_TOKEN_ID,
         wantAmount: usdc(TRADE_USDC_MAIN_UNITS),
-        minFillRatio: 0,
       },
     }],
   }]);
@@ -537,7 +547,6 @@ export async function swap(env: Env): Promise<void> {
         giveAmount: eth(TRADE_ETH_HALF),
         wantTokenId: USDC_TOKEN_ID,
         wantAmount: usdc(TRADE_USDC_HALF_UNITS),
-        minFillRatio: 0, // No minimum
       },
     }],
   }]);
@@ -597,93 +606,6 @@ export async function swap(env: Env): Promise<void> {
   console.log('  ✅ Cancel request resolved by hub, open-offers cleaned, hold released\n');
 
   // ============================================================================
-  // TEST 5: minFillRatio enforcement
-  // ============================================================================
-  console.log('═══════════════════════════════════════════════════════════════');
-  console.log('TEST 5: minFillRatio enforcement');
-  console.log('═══════════════════════════════════════════════════════════════\n');
-
-  const offerId3 = 'order-003';
-
-  // Alice places offer with 75% minimum
-  const MIN_75_PERCENT = FILL_75;
-  console.log(`📊 Alice: swap_offer (${TRADE_ETH_HALF} ETH, min 75% fill)`);
-  await process(env, [{
-    entityId: alice.id,
-    signerId: alice.signer,
-    entityTxs: [{
-      type: 'placeSwapOffer',
-      data: {
-        counterpartyEntityId: hub.id,
-        offerId: offerId3,
-        giveTokenId: ETH_TOKEN_ID,
-        giveAmount: eth(TRADE_ETH_HALF),
-        wantTokenId: USDC_TOKEN_ID,
-        wantAmount: usdc(TRADE_USDC_HALF_UNITS),
-        timeInForce: 1, // IOC permits minFillRatio; resting GTC offers must use 0.
-        minFillRatio: MIN_75_PERCENT,
-      },
-    }],
-  }]);
-  await converge(env);
-  await converge(env);
-
-  // Hub tries to fill only 50% - should fail
-  console.log('💱 Hub: swap_resolve (50% fill - should fail)');
-  const belowMinFill = computeFilledAmounts(eth(TRADE_ETH_HALF), usdc(TRADE_USDC_HALF_UNITS), FILL_50);
-  await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: [{
-      type: 'resolveSwap',
-      data: {
-        counterpartyEntityId: alice.id,
-        offerId: offerId3,
-        fillRatio: FILL_50, // 50% < 75% min
-        cancelRemainder: false,
-        executionGiveAmount: belowMinFill.filledGive,
-        executionWantAmount: belowMinFill.filledWant,
-      },
-    }],
-  }]);
-  await converge(env);
-  await converge(env);
-
-  // Verify offer still exists (fill was rejected)
-  const [, aliceRep6] = findReplica(env, alice.id);
-  const account6 = aliceRep6.state.accounts.get(hub.id);
-  assert(account6?.swapOffers?.has(offerId3) === true, 'Order 3 still exists (50% fill rejected)');
-
-  // Hub fills 80% - should succeed
-  const FILL_80_PERCENT = FILL_80;
-  console.log('💱 Hub: swap_resolve (80% fill - should succeed)');
-  const allowedFill = computeFilledAmounts(eth(TRADE_ETH_HALF), usdc(TRADE_USDC_HALF_UNITS), FILL_80_PERCENT);
-  await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: [{
-      type: 'resolveSwap',
-      data: {
-        counterpartyEntityId: alice.id,
-        offerId: offerId3,
-        fillRatio: FILL_80_PERCENT,
-        cancelRemainder: true, // Cancel remainder
-        executionGiveAmount: allowedFill.filledGive,
-        executionWantAmount: allowedFill.filledWant,
-      },
-    }],
-  }]);
-  // Need enough ticks for full round-trip: propose → receive → ACK → commit
-  await converge(env);
-
-  // Verify offer removed (filled + cancelled)
-  const [, aliceRep7] = findReplica(env, alice.id);
-  const account7 = aliceRep7.state.accounts.get(hub.id);
-  assert(!account7?.swapOffers?.has(offerId3), 'Order 3 removed (80% fill + cancel)');
-
-  console.log('  ✅ minFillRatio enforced correctly\n');
-
-  // ============================================================================
   // SUMMARY
   // ============================================================================
   console.log('═══════════════════════════════════════════════════════════════');
@@ -695,7 +617,6 @@ export async function swap(env: Env): Promise<void> {
   console.log('  2. ✅ swap_resolve fills partially (50%), keeps remainder');
   console.log('  3. ✅ swap_resolve fills fully, removes offer');
   console.log('  4. ✅ proposeCancelSwap + hub resolve removes offer, releases hold');
-  console.log('  5. ✅ minFillRatio rejects underfills');
   console.log('\n');
   } finally {
     env.scenarioMode = prevScenarioMode ?? false;
@@ -852,7 +773,6 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
         giveAmount: eth(TRADE_ETH),
         wantTokenId: USDC_TOKEN_ID,
         wantAmount: usdc(TRADE_USDC_MAIN_UNITS),
-        minFillRatio: 0,
       },
     }],
   }]);
@@ -898,7 +818,6 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
         giveAmount: usdcForEth(TRADE_ETH_HALF, ETH_PRICE_HIGH),
         wantTokenId: ETH_TOKEN_ID,
         wantAmount: eth(TRADE_ETH_HALF),
-        minFillRatio: 0,
       },
     }],
   }]);
@@ -910,10 +829,8 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   let aliceFillRatio = 0;
   let bobFillRatio = 0;
   await processUntil(env, () => {
-    const [, hubRepMatch] = findReplica(env, hub.id);
-    const pending = hubRepMatch.state.pendingSwapFillRatios;
-    aliceFillRatio = pending?.get(swapKey(alice.id, 'alice-sell-001')) || 0;
-    bobFillRatio = pending?.get(swapKey(bob.id, 'bob-buy-001')) || 0;
+    aliceFillRatio = pendingAccountSwapFillRatio(env, hub.id, alice.id, 'alice-sell-001');
+    bobFillRatio = pendingAccountSwapFillRatio(env, hub.id, bob.id, 'bob-buy-001');
     return aliceFillRatio > 0 && bobFillRatio > 0;
   }, 20, 'RJEA fill ratios recorded');
   await converge(env);
@@ -1109,7 +1026,6 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
         giveAmount: eth(disputeEth),
         wantTokenId: USDC_TOKEN_ID,
         wantAmount: usdc(disputeUsdc),
-        minFillRatio: 0,
       },
     }],
   }]);
@@ -1128,18 +1044,15 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
         giveAmount: usdcForEth(disputeFillEth, ETH_PRICE_MAIN),
         wantTokenId: ETH_TOKEN_ID,
         wantAmount: eth(disputeFillEth),
-        minFillRatio: 0,
       },
     }],
   }]);
 
   // Process until orderbook match produces pending fill ratio (but before swap_resolve commits)
-  const pendingKey = swapKey(alice.id, disputeOfferId);
   let pendingRatio = 0;
   for (let i = 0; i < 8; i++) {
     await process(env);
-    const [, hubAfterMatch] = findReplica(env, hub.id);
-    pendingRatio = hubAfterMatch.state.pendingSwapFillRatios?.get(pendingKey) || 0;
+    pendingRatio = pendingAccountSwapFillRatio(env, hub.id, alice.id, disputeOfferId);
     if (pendingRatio > 0) break;
   }
   assert(pendingRatio > 0, `Pending fillRatio recorded for ${disputeOfferId}`);
@@ -1376,7 +1289,6 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
         giveAmount: eth(CAROL_SELL_ETH),
         wantTokenId: USDC_TOKEN_ID,
         wantAmount: usdcForEth(CAROL_SELL_ETH, ETH_PRICE_LOW),
-        minFillRatio: 0,
       },
     }],
   }]);
@@ -1407,7 +1319,6 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
         giveAmount: usdcForEth(DAVE_BUY_ETH, ETH_PRICE_MAIN),
         wantTokenId: ETH_TOKEN_ID,
         wantAmount: eth(DAVE_BUY_ETH),
-        minFillRatio: 0,
       },
     }],
   }]);
@@ -1437,7 +1348,6 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
         giveAmount: eth(CAROL_SELL_2_ETH),
         wantTokenId: USDC_TOKEN_ID,
         wantAmount: usdcForEth(CAROL_SELL_2_ETH, ETH_PRICE_HIGH),
-        minFillRatio: 0,
       },
     }],
   }]);
@@ -1467,7 +1377,6 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
         giveAmount: usdcForEth(DAVE_SWEEP_ETH, ETH_PRICE_SWEEP),
         wantTokenId: ETH_TOKEN_ID,
         wantAmount: eth(DAVE_SWEEP_ETH),
-        minFillRatio: 0,
       },
     }],
   }]);

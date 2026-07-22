@@ -1,6 +1,5 @@
 import type { AccountFrame, AccountTx, EntityState, Env, HtlcNoteKey, HtlcRoute } from '../../../../types';
 import { HEAVY_LOGS } from '../../../../utils';
-import { swapKey } from '../../../../orderbook/swap-execution';
 import { cancelHook as cancelScheduledHook } from '../../../scheduler';
 import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../../htlc-route-lifecycle';
 import { buildHtlcFinalizedEventPayload, buildHtlcReceivedEventPayload } from '../../../../protocol/htlc/events';
@@ -342,10 +341,6 @@ export function applyCommittedAccountFrameFollowups(
 
     if (accountTx.type === 'j_event_claim') continue;
 
-    if (accountTx.type === 'swap_resolve') {
-      const key = swapKey(counterpartyId, accountTx.data.offerId);
-      newState.pendingSwapFillRatios?.delete(key);
-    }
   }
   pruneSettledOriginatedHtlcRoutes(newState, newState.timestamp);
 }

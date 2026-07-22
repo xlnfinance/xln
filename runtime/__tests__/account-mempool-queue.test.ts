@@ -1,13 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
-import {
-  queueAccountMempoolTx,
-  reconcilePendingSwapFillRatios,
-  recordPendingSwapFillRatio,
-} from '../entity/consensus/account-mempool-queue';
+import { queueAccountMempoolTx } from '../entity/consensus/account-mempool-queue';
 import { prependUniqueMempoolTxs } from '../account/consensus/helpers';
+import { freezeAccountForDispute } from '../account/consensus/dispute-policy';
 import { LIMITS } from '../constants';
-import type { AccountMachine, AccountTx, EntityState } from '../types';
+import type { AccountMachine, AccountTx } from '../types';
 
 const PAYMENT: Extract<AccountTx, { type: 'direct_payment' }> = {
   type: 'direct_payment',
@@ -55,36 +52,22 @@ describe('account mempool multiplicity', () => {
     expect(account.mempool).toEqual([]);
   });
 
-  test('records one canonical swap dispute intent outside the pending Account frame', () => {
-    const state = { pendingSwapFillRatios: new Map() } as unknown as EntityState;
-    const fill = {
+  test('moves pending unilateral evidence back to mempool before dispute freeze', () => {
+    const fill: AccountTx = {
       type: 'swap_resolve',
       data: { offerId: 'offer-1', fillRatio: 32_768, cancelRemainder: false },
-    } as AccountTx;
+    };
+    const account = accountWithPending(fill) as AccountMachine;
+    account.mempool = [
+      { type: 'pull_resolve', data: { pullId: 'pull-1', binary: '0x1234' } },
+      structuredClone(PAYMENT),
+    ];
 
-    recordPendingSwapFillRatio(state, 'peer', fill);
-    expect(state.pendingSwapFillRatios?.get('peer:offer-1' as never)).toBe(32_768);
-    expect(() => recordPendingSwapFillRatio(state, 'peer', {
-      ...fill,
-      data: { ...fill.data, fillRatio: 16_384 },
-    } as AccountTx)).toThrow('SWAP_DISPUTE_FILL_RATIO_CONFLICT');
-  });
+    freezeAccountForDispute(account, true);
 
-  test('removes rejected fill evidence once no matching tx remains', () => {
-    const fill = {
-      type: 'swap_resolve',
-      data: { offerId: 'offer-1', fillRatio: 32_768, cancelRemainder: false },
-    } as AccountTx;
-    const state = { pendingSwapFillRatios: new Map() } as unknown as EntityState;
-    const account = { mempool: [fill] } as Pick<AccountMachine, 'mempool' | 'pendingFrame'>;
-
-    recordPendingSwapFillRatio(state, 'peer', fill);
-    reconcilePendingSwapFillRatios(state, 'peer', account);
-    expect(state.pendingSwapFillRatios?.size).toBe(1);
-
-    account.mempool = [];
-    reconcilePendingSwapFillRatios(state, 'peer', account);
-    expect(state.pendingSwapFillRatios?.size).toBe(0);
+    expect(account.pendingFrame).toBeUndefined();
+    expect(account.mempool.map(tx => tx.type)).toEqual(['swap_resolve', 'pull_resolve']);
+    expect(account.mempool[0]).toEqual(fill);
   });
 
   test('counts pending and queued transactions under one outstanding limit', () => {

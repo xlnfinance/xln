@@ -77,11 +77,7 @@ import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from '.
 import { LIMITS } from '../../constants';
 import { signAccountFrame as signFrame, verifyAccountSignature as verifyFrame } from '../../account/crypto';
 import { appendAccountMempoolTx } from '../../account/mempool';
-import {
-  queueAccountMempoolTx,
-  reconcilePendingSwapFillRatios,
-  recordPendingSwapFillRatio,
-} from './account-mempool-queue';
+import { queueAccountMempoolTx } from './account-mempool-queue';
 import {
   normalizeSwapOfferForOrderbook,
   collectCommittedCrossJurisdictionCancelAcks,
@@ -4064,7 +4060,6 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
           if (!queueAccountMempoolTx(account, tx)) {
             continue;
           }
-          recordPendingSwapFillRatio(currentEntityState, accountId, tx);
           proposableAccounts.add(accountId);
           recordFrameAccountChange(context.storageChanges, currentEntityState.entityId, accountId);
 
@@ -4359,7 +4354,6 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
         accountJClaimNodeStore,
         crossJOpeningProposalTxs,
       );
-      reconcilePendingSwapFillRatios(currentEntityState, accountKey, accountMachine);
       if (proposal.accountChanged) {
         storageChanges.push({
           family: 'account',
@@ -4600,7 +4594,6 @@ function applyOrderbookMatching(context: ApplyOrderbookMatchingContext): Orderbo
         if (!queueAccountMempoolTx(account, tx)) {
           continue;
         }
-        recordPendingSwapFillRatio(currentEntityState, accountId, tx);
         proposableAccounts.add(accountId);
         recordFrameAccountChange(storageChanges, currentEntityState.entityId, accountId);
         entityLog.debug('orderbook.account_tx_queued', { account: shortId(accountId, 8), tx: tx.type });

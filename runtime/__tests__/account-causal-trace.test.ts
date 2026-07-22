@@ -58,7 +58,6 @@ describe('account causal trace', () => {
           giveAmount: 1n,
           wantTokenId: 2,
           wantAmount: 1n,
-          minFillRatio: 0,
         },
       }],
     } as EntityInput;

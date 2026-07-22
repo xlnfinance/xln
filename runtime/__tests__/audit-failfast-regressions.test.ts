@@ -510,7 +510,6 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
     htlcNotes: new Map(),
     lockBook: new Map(),
     swapTradingPairs: [],
-    pendingSwapFillRatios: new Map(),
     crontabState: initCrontab(),
   },
 });
@@ -542,7 +541,6 @@ const makeEntityState = (entityId: string): EntityState => ({
   htlcNotes: new Map(),
   lockBook: new Map(),
   swapTradingPairs: [],
-  pendingSwapFillRatios: new Map(),
   crontabState: initCrontab(),
 });
 
@@ -1541,7 +1539,6 @@ describe('audit fail-fast regressions', () => {
         giveAmount: 100n,
         wantTokenId: 2,
         wantAmount: 200n,
-        minFillRatio: 0,
       },
     } as any)).rejects.toThrow('SWAP_REQUEST_ACCOUNT_MISSING:placeSwapOffer');
 
@@ -1888,7 +1885,6 @@ describe('audit fail-fast regressions', () => {
         wantTokenId: 1,
         wantAmount: route.target.amount,
         priceTicks: 20_000n,
-        minFillRatio: 0,
         crossJurisdiction: admittedRoute,
       },
     }, true, 1);
@@ -1994,7 +1990,6 @@ describe('audit fail-fast regressions', () => {
           giveAmount: restingRoute.source.amount,
           wantTokenId: restingRoute.target.tokenId,
           wantAmount: restingRoute.target.amount,
-          minFillRatio: 0,
           crossJurisdiction: restingRoute,
         },
       }, true, 1);
@@ -3080,7 +3075,6 @@ describe('audit fail-fast regressions', () => {
           giveAmount: amount,
           wantTokenId: 2,
           wantAmount: amount,
-          minFillRatio: 0,
           crossJurisdiction: route,
         },
       },
@@ -3154,7 +3148,6 @@ describe('audit fail-fast regressions', () => {
       wantAmount,
       priceTicks: 3_000n * ORDERBOOK_PRICE_SCALE,
       timeInForce: 0,
-      minFillRatio: 0,
       makerIsLeft,
       createdHeight: 0,
       quantizedGive: giveAmount,
@@ -3222,7 +3215,6 @@ describe('audit fail-fast regressions', () => {
         giveAmount: baseAmount,
         wantTokenId: 1,
         wantAmount: quoteAmount,
-        minFillRatio: 0,
       },
     });
     const takerOffer = await proposalFor(taker, {
@@ -3233,7 +3225,6 @@ describe('audit fail-fast regressions', () => {
         giveAmount: quoteAmount,
         wantTokenId: 2,
         wantAmount: baseAmount,
-        minFillRatio: 0,
       },
     });
 
@@ -5266,7 +5257,6 @@ describe('audit fail-fast regressions', () => {
           giveAmount: 100n,
           wantTokenId: 2,
           wantAmount: 100n,
-          minFillRatio: 0,
         },
       },
       true,
@@ -6382,36 +6372,6 @@ describe('audit fail-fast regressions', () => {
     expect(accountMachine.pendingFrame).toBeUndefined();
     expect(accountMachine.mempool).toHaveLength(2);
     expect(accountMachine.mempool).toEqual([firstTx, lateTx]);
-  });
-
-  test('swap_offer rejects minFillRatio for resting GTC orders', async () => {
-    const accountMachine = {
-      leftEntity: 'left',
-      rightEntity: 'right',
-      deltas: new Map(),
-      swapOffers: new Map(),
-    };
-
-    const result = await handleSwapOffer(
-      accountMachine as Parameters<typeof handleSwapOffer>[0],
-      {
-        type: 'swap_offer',
-        data: {
-          offerId: 'gtc-aon',
-          giveTokenId: 1,
-          giveAmount: 10n ** 18n,
-          wantTokenId: 2,
-          wantAmount: 2n * 10n ** 18n,
-          minFillRatio: 32768,
-          timeInForce: 0,
-        },
-      },
-      true,
-      1,
-    );
-
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('minFillRatio > 0 requires timeInForce');
   });
 
   test('DisputeFinalized scrubs stale sentBatch finalize and failed Hanko does not resurrect it', async () => {
@@ -7606,7 +7566,6 @@ describe('audit fail-fast regressions', () => {
       wantTokenId: makerRoute.target.tokenId,
       wantAmount: makerRoute.target.amount,
       makerIsLeft: makerSourceAccount.leftEntity.toLowerCase() === remoteMaker.toLowerCase(),
-      minFillRatio: 0,
       timeInForce: 0,
       createdHeight: 1,
       priceTicks: 25_000_000n,
@@ -7636,7 +7595,6 @@ describe('audit fail-fast regressions', () => {
       giveAmount: makerRoute.source.amount,
       wantTokenId: makerRoute.target.tokenId,
       wantAmount: makerRoute.target.amount,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 25_000_000n,
       crossJurisdiction: makerRoute,
@@ -7675,7 +7633,6 @@ describe('audit fail-fast regressions', () => {
       wantTokenId: takerRoute.target.tokenId,
       wantAmount: takerRoute.target.amount,
       makerIsLeft: takerAccount.leftEntity.toLowerCase() === localTaker.toLowerCase(),
-      minFillRatio: 0,
       timeInForce: 0,
       createdHeight: 2,
       priceTicks: 25_000_000n,
@@ -7694,7 +7651,6 @@ describe('audit fail-fast regressions', () => {
       wantTokenId: makerRoute.target.tokenId,
       wantAmount: makerRoute.target.amount,
       makerIsLeft: collisionAccount.leftEntity.toLowerCase() === remoteMaker.toLowerCase(),
-      minFillRatio: 0,
       timeInForce: 0,
       createdHeight: 1,
       priceTicks: 25_000_000n,
@@ -7831,7 +7787,6 @@ describe('audit fail-fast regressions', () => {
       wantTokenId: restingRoute.target.tokenId,
       wantAmount: restingRoute.target.amount,
       makerIsLeft: account.leftEntity.toLowerCase() === user.toLowerCase(),
-      minFillRatio: 0,
       timeInForce: 0,
       createdHeight: 1,
       priceTicks: 25_000_000n,
@@ -8038,7 +7993,6 @@ describe('audit fail-fast regressions', () => {
       wantTokenId: route.target.tokenId,
       wantAmount: route.target.amount,
       makerIsLeft: sourceAccount.leftEntity.toLowerCase() === sourceUser.toLowerCase(),
-      minFillRatio: 0,
       timeInForce: 0,
       createdHeight: 1,
       priceTicks: 25_000_000n,
@@ -8169,7 +8123,6 @@ describe('audit fail-fast regressions', () => {
       wantTokenId: 2,
       wantAmount: 2_000n,
       makerIsLeft: false,
-      minFillRatio: 0,
       createdHeight: 1,
       quantizedGive: 1_000n,
       quantizedWant: 2_000n,
@@ -8255,7 +8208,6 @@ describe('audit fail-fast regressions', () => {
       wantTokenId: 2,
       wantAmount: 2_000n,
       makerIsLeft: false,
-      minFillRatio: 0,
       createdHeight: 1,
       crossJurisdiction: route,
     });
@@ -8316,7 +8268,6 @@ describe('audit fail-fast regressions', () => {
       wantTokenId: 2,
       wantAmount: 2_000n,
       makerIsLeft: false,
-      minFillRatio: 0,
       createdHeight: 1,
       quantizedGive: 1_000n,
       quantizedWant: 2_000n,

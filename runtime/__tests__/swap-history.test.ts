@@ -53,7 +53,6 @@ describe('swap order history', () => {
       wantTokenId: 1,
       wantAmount: 100n,
       makerIsLeft: true,
-      minFillRatio: 0,
       createdHeight: 1,
       quantizedGive: 40n,
       quantizedWant: 100n,

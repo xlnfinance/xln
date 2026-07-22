@@ -590,12 +590,7 @@ function applyDisputeFinalizedJEvent(
     account.proofHeader.nextProofNonce = finalizedJNonce + 1;
   }
   account.status = 'disputed';
-  delete account.pendingFrame;
-  delete account.pendingAccountInput;
-  delete account.pendingAccountInputSignerId;
-  delete account.clonedForValidation;
-  account.rollbackCount = 0;
-  delete account.lastRollbackFrameHash;
+  freezeAccountForDispute(account, false);
   delete account.counterpartyDisputeProofHanko;
   delete account.counterpartyDisputeProofNonce;
   delete account.counterpartyDisputeProofBodyHash;

@@ -44,7 +44,6 @@ const makeState = (): EntityState => ({
   htlcNotes: new Map(),
   lockBook: new Map(),
   swapTradingPairs: [],
-  pendingSwapFillRatios: new Map(),
 });
 
 const makeAccount = (counterparty: string): AccountMachine => {

@@ -742,7 +742,6 @@ type EntityTxPayload =
         // Sent together with give/want for deterministic cross-checking.
         priceTicks?: bigint;
         timeInForce?: 0 | 1 | 2; // 0 = GTC, 1 = IOC, 2 = FOK
-        minFillRatio: number; // 0-65535
         crossJurisdiction?: CrossJurisdictionSwapRoute;
       };
     }

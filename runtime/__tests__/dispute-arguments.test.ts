@@ -25,7 +25,6 @@ function offer(offerId: string, makerIsLeft: boolean, giveTokenId: number, wantT
     wantTokenId,
     wantAmount: 200n,
     makerIsLeft,
-    minFillRatio: 0,
     createdHeight: 1,
     quantizedGive: 100n,
     quantizedWant: 200n,
@@ -143,14 +142,12 @@ describe('dispute argument snapshots', () => {
     account.swapOffers.clear();
     account.swapOffers.set('unrelated', offer('unrelated', true, 1, 2));
 
-    const state = {
-      entityId: 'left',
-      pendingSwapFillRatios: new Map([
-        ['right:a-left-owned', 111],
-        ['right:z-right-owned', 222],
-        ['right:unrelated', 333],
-      ]),
-    } as unknown as EntityState;
+    account.mempool = [
+      { type: 'swap_resolve', data: { offerId: 'a-left-owned', fillRatio: 111, cancelRemainder: false } },
+      { type: 'swap_resolve', data: { offerId: 'z-right-owned', fillRatio: 222, cancelRemainder: false } },
+      { type: 'swap_resolve', data: { offerId: 'unrelated', fillRatio: 333, cancelRemainder: false } },
+    ];
+    const state = { entityId: 'left' } as unknown as EntityState;
 
     const args = buildDisputeArgumentsForSnapshot(account, state, 'right', proof.proofBodyHash, {
       secretsSide: 'left',
@@ -160,7 +157,7 @@ describe('dispute argument snapshots', () => {
     expect(decodeFirstRatio(args.rightArguments)).toBe(111);
   });
 
-  test('uses Entity swap intent and ignores the optimistic pending frame completely', () => {
+  test('uses a late Account mempool fill omitted from the optimistic pending frame', () => {
     const account = accountWithSwaps([
       ['remaining-left-owned', {
         ...offer('remaining-left-owned', true, 1, 2),
@@ -174,10 +171,7 @@ describe('dispute argument snapshots', () => {
       height: 2,
       timestamp: 20,
       jHeight: 0,
-      accountTxs: [{
-        type: 'swap_resolve',
-        data: { offerId: 'remaining-left-owned', fillRatio: 1, cancelRemainder: false },
-      } as AccountTx],
+      accountTxs: [{ type: 'direct_payment', data: { tokenId: 1, amount: 1n } }],
       prevFrameHash: 'after-first',
       stateHash: 'pending-second',
       byLeft: false,
@@ -188,10 +182,11 @@ describe('dispute argument snapshots', () => {
       account,
       captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct),
     );
-    const state = {
-      entityId: 'left',
-      pendingSwapFillRatios: new Map([['right:remaining-left-owned', 32_768]]),
-    } as unknown as EntityState;
+    account.mempool = [{
+      type: 'swap_resolve',
+      data: { offerId: 'remaining-left-owned', fillRatio: 32_768, cancelRemainder: false },
+    }];
+    const state = { entityId: 'left' } as unknown as EntityState;
     const args = buildDisputeArgumentsForSnapshot(
       account,
       state,
@@ -200,9 +195,10 @@ describe('dispute argument snapshots', () => {
       { secretsSide: 'left' },
     );
     expect(decodeFirstRatio(args.rightArguments)).toBe(32768);
+    account.mempool = [];
     const withoutIntent = buildDisputeArgumentsForSnapshot(
       account,
-      { entityId: 'left', pendingSwapFillRatios: new Map() } as unknown as EntityState,
+      state,
       'right',
       proof.proofBodyHash,
       { secretsSide: 'left' },
@@ -210,7 +206,7 @@ describe('dispute argument snapshots', () => {
     expect(withoutIntent.rightArguments).toBe('0x');
   });
 
-  test('isolates invalid or unplanned Entity swap evidence per signed offer', () => {
+  test('isolates invalid or unplanned Account mempool evidence per signed offer', () => {
     const account = accountWithSwaps([
       ['invalid', offer('invalid', true, 1, 2)],
       ['valid', offer('valid', true, 1, 2)],
@@ -221,14 +217,12 @@ describe('dispute argument snapshots', () => {
       captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct),
     );
 
-    const state = {
-      entityId: 'left',
-      pendingSwapFillRatios: new Map([
-        ['right:invalid', 65_536],
-        ['right:valid', 32_768],
-        ['right:unplanned', 12_345],
-      ]),
-    } as unknown as EntityState;
+    account.mempool = [
+      { type: 'swap_resolve', data: { offerId: 'invalid', fillRatio: 65_536, cancelRemainder: false } },
+      { type: 'swap_resolve', data: { offerId: 'valid', fillRatio: 32_768, cancelRemainder: false } },
+      { type: 'swap_resolve', data: { offerId: 'unplanned', fillRatio: 12_345, cancelRemainder: false } },
+    ];
+    const state = { entityId: 'left' } as unknown as EntityState;
     const args = buildDisputeArgumentsForSnapshot(
       account,
       state,

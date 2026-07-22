@@ -80,7 +80,6 @@ const installVoteTarget = (env: Env): {
     htlcNotes: new Map(),
     lockBook: new Map(),
     swapTradingPairs: [],
-    pendingSwapFillRatios: new Map(),
   };
   const replica: EntityReplica = {
     entityId,

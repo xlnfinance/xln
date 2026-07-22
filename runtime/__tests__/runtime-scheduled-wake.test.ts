@@ -77,7 +77,6 @@ const makeState = (id: string, proposer: string, timestamp: number): EntityState
   htlcNotes: new Map(),
   lockBook: new Map(),
   swapTradingPairs: [],
-  pendingSwapFillRatios: new Map(),
   crontabState: initCrontab(),
 });
 

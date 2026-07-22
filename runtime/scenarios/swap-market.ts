@@ -71,9 +71,6 @@ const wbtc = (amount: number | bigint) => BigInt(amount) * ONE;
 const dai = (amount: number | bigint) => BigInt(amount) * ONE;
 
 // Fill ratios
-const FILL_10 = 6553;
-const FILL_25 = 16384;
-const FILL_50 = 32768;
 
 // Using helpers from helpers.ts (no duplication)
 
@@ -379,7 +376,6 @@ export async function swapMarket(env: Env): Promise<void> {
           giveAmount: eth(10),
           wantTokenId: USDC,
           wantAmount: usdc(31000), // $3100/ETH
-          minFillRatio: FILL_25, // 25% min fill
         },
       }],
     },
@@ -396,7 +392,6 @@ export async function swapMarket(env: Env): Promise<void> {
           giveAmount: eth(5),
           wantTokenId: USDC,
           wantAmount: usdc(15250), // $3050/ETH
-          minFillRatio: FILL_50, // 50% min fill
         },
       }],
     },
@@ -413,7 +408,6 @@ export async function swapMarket(env: Env): Promise<void> {
           giveAmount: usdc(23600), // $2950/ETH * 8
           wantTokenId: ETH,
           wantAmount: eth(8),
-          minFillRatio: FILL_25, // 25% min fill
         },
       }],
     },
@@ -439,7 +433,6 @@ export async function swapMarket(env: Env): Promise<void> {
           giveAmount: wbtc(2),
           wantTokenId: USDC,
           wantAmount: usdc(122000), // $61000/WBTC
-          minFillRatio: FILL_50, // 50% min fill
         },
       }],
     },
@@ -456,7 +449,6 @@ export async function swapMarket(env: Env): Promise<void> {
           giveAmount: usdc(59000), // $59000/WBTC
           wantTokenId: WBTC,
           wantAmount: wbtc(1),
-          minFillRatio: FILL_25, // 25% min fill
         },
       }],
     },
@@ -482,7 +474,6 @@ export async function swapMarket(env: Env): Promise<void> {
           giveAmount: dai(500),
           wantTokenId: USDC,
           wantAmount: usdc(501), // ~$1.002/DAI
-          minFillRatio: FILL_10, // 10% min fill
         },
       }],
     },
@@ -499,7 +490,6 @@ export async function swapMarket(env: Env): Promise<void> {
           giveAmount: usdc(299), // ~$0.997/DAI * 300
           wantTokenId: DAI,
           wantAmount: dai(300),
-          minFillRatio: FILL_10, // 10% min fill
         },
       }],
     },
@@ -554,7 +544,6 @@ export async function swapMarket(env: Env): Promise<void> {
         giveAmount: usdc(9300), // $3100/ETH * 3 ETH
         wantTokenId: ETH,
         wantAmount: eth(3),
-        minFillRatio: 0,
       },
     }],
   }]);
@@ -575,7 +564,6 @@ export async function swapMarket(env: Env): Promise<void> {
         giveAmount: wbtc(1),
         wantTokenId: USDC,
         wantAmount: usdc(58000), // Lower than Alice's bid
-        minFillRatio: 0,
       },
     }],
   }]);
@@ -596,7 +584,6 @@ export async function swapMarket(env: Env): Promise<void> {
         giveAmount: usdc(101), // ~$1.01/DAI * 100
         wantTokenId: DAI,
         wantAmount: dai(100),
-        minFillRatio: 0,
       },
     }],
   }]);
@@ -693,7 +680,6 @@ export async function swapMarket(env: Env): Promise<void> {
         giveAmount: eth(10),
         wantTokenId: USDC,
         wantAmount: usdc(30200), // $3020/ETH (better price)
-        minFillRatio: FILL_25,
       },
     }],
   }]);
@@ -984,7 +970,6 @@ export async function swapMarketStress(env: Env): Promise<void> {
               giveAmount: usdc(qty * price),
               wantTokenId: ETH,
               wantAmount: eth(qty),
-              minFillRatio: 0,
             },
           }],
         });
@@ -1002,7 +987,6 @@ export async function swapMarketStress(env: Env): Promise<void> {
               giveAmount: eth(qty),
               wantTokenId: USDC,
               wantAmount: usdc(qty * price),
-              minFillRatio: 0,
             },
           }],
         });

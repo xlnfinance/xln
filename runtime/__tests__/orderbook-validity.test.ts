@@ -14,7 +14,6 @@ const makeOffer = (overrides: Partial<SwapOffer> = {}): SwapOffer => ({
   wantAmount: (SWAP_LOT_SCALE * 1000n) / ORDERBOOK_PRICE_SCALE,
   priceTicks: 1000n,
   timeInForce: 0,
-  minFillRatio: 0,
   makerIsLeft: false,
   createdHeight: 1,
   ...overrides,

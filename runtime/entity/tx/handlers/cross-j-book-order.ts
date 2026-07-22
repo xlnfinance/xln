@@ -103,7 +103,6 @@ const buildCommittedCrossJurisdictionOfferEvent = (
       wantTokenId: Number(route.target.tokenId),
       wantAmount: remaining.targetRemaining,
       ...(route.priceTicks !== undefined ? { priceTicks: BigInt(route.priceTicks) } : {}),
-      minFillRatio: 0,
       crossJurisdiction: cloneCrossJurisdictionRoute(route),
     };
   }
@@ -120,7 +119,6 @@ const buildCommittedCrossJurisdictionOfferEvent = (
     wantAmount: remaining.targetRemaining,
     ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
     ...(offer.timeInForce !== undefined ? { timeInForce: offer.timeInForce } : {}),
-    minFillRatio: offer.minFillRatio,
     crossJurisdiction: cloneCrossJurisdictionRoute(route),
   };
 };

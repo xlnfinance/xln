@@ -84,7 +84,6 @@ const entityReplica = (
     htlcNotes: new Map(),
     lockBook: new Map(),
     swapTradingPairs: [],
-    pendingSwapFillRatios: new Map(),
   },
 } as EntityReplica);
 

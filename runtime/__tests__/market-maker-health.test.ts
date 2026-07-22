@@ -242,7 +242,6 @@ test('five-token market maker depth remains canonical through Account and hub ad
         wantTokenId: spec.wantTokenId,
         wantAmount: spec.wantAmount,
         priceTicks: spec.priceTicks,
-        minFillRatio: spec.minFillRatio,
       },
     }, true, 1);
     expect(result.error).toBeUndefined();
@@ -265,7 +264,6 @@ test('five-token market maker depth remains canonical through Account and hub ad
       quantizedWant: offer.quantizedWant,
       priceTicks: offer.priceTicks,
       timeInForce: offer.timeInForce ?? 0,
-      minFillRatio: offer.minFillRatio,
     });
     if (working.orderbookKind !== 'same-jurisdiction') {
       throw new Error(`MARKET_MAKER_SAME_CHAIN_SPEC_BECAME_CROSS_J:${spec.offerId}`);
@@ -476,7 +474,6 @@ test('runtime market maker health stays red when same-chain offers are committed
         giveAmount: pendingSpec.giveAmount,
         wantTokenId: pendingSpec.wantTokenId,
         wantAmount: pendingSpec.wantAmount,
-        minFillRatio: pendingSpec.minFillRatio,
         crossJurisdiction: pendingSpec.crossJurisdiction!,
       },
     }],
@@ -637,7 +634,6 @@ test('market maker finalized cross matching tolerates rolling route hash but rej
     wantTokenId: spec.wantTokenId,
     wantAmount: spec.wantAmount,
     priceTicks: route.priceTicks,
-    minFillRatio: 0,
     makerIsLeft: true,
     createdHeight: 1,
     crossJurisdiction: {

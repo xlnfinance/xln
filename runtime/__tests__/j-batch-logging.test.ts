@@ -46,7 +46,6 @@ const makeEntityState = (): EntityState => ({
   htlcNotes: new Map(),
   lockBook: new Map(),
   swapTradingPairs: [],
-  pendingSwapFillRatios: new Map(),
 });
 
 test('j-batch success-path logs stay behind structured debug logging', () => {

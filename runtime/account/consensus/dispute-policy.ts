@@ -1,11 +1,15 @@
 import type { AccountMachine, AccountTx } from '../../types';
+import { prependUniqueMempoolTxs } from './helpers';
+import { createStructuredLogger } from '../../infra/logger';
+
+const disputePolicyLog = createStructuredLogger('account.dispute-policy');
 
 /**
  * Account dispute freeze policy.
  *
  * The prepare-dispute phase is a local-only quarantine before any on-chain
  * dispute hash is committed. Account consensus is already frozen: optional
- * evidence is collected in Entity state and never by creating another Account
+ * evidence remains in the Account mempool and never creates another Account
  * frame on top of the last mutually signed ProofBody.
  *
  * Once disputeStart is queued or observed on-chain, calldata hashes are already
@@ -39,9 +43,25 @@ export const freezeAccountForDispute = (
   account: AccountMachine,
   retainOptionalEvidence: boolean,
 ): void => {
+  const pendingEvidence = retainOptionalEvidence
+    ? (account.pendingFrame?.accountTxs ?? []).filter(isDisputeEvidenceAccountTx)
+    : [];
   account.mempool = (account.mempool || []).filter((tx) => (
     isAccountControlTx(tx.type) || (retainOptionalEvidence && isDisputeEvidenceAccountTx(tx))
   ));
+  // A locally proposed frame is not mutually signed state, but a unilateral
+  // resolve inside it is still valid transformer evidence. Move that evidence
+  // back before deleting the candidate; later resolves are already behind it
+  // in mempool and remain available while the peer is offline.
+  prependUniqueMempoolTxs(account, pendingEvidence);
+  disputePolicyLog.info('freeze', {
+    leftEntity: account.leftEntity,
+    rightEntity: account.rightEntity,
+    status: account.status,
+    retainOptionalEvidence,
+    restoredPendingEvidence: pendingEvidence.map(tx => tx.type),
+    retainedMempool: account.mempool.map(tx => tx.type),
+  });
   // The candidate is not mutually committed state. Dispute always starts from
   // the last signed ProofBody; late proposal/ACK traffic is rejected at ingress.
   delete account.pendingFrame;

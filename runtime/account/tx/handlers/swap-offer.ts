@@ -27,7 +27,6 @@ import {
   deriveCanonicalCrossJurisdictionMarket,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../extensions/cross-j/index';
-import { MAX_SWAP_FILL_RATIO } from '../../../orderbook/swap-execution';
 import { ensureDelta } from '../delta-utils';
 import { addHold } from '../hold-utils';
 import { getAccountSwapMarketLimitError } from '../../swap-limits';
@@ -39,7 +38,7 @@ export async function handleSwapOffer(
   currentHeight: number,
   _isValidation: boolean = false
 ): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCreated?: SwapOfferEvent }> {
-  const { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks: inputPriceTicks, timeInForce, minFillRatio, crossJurisdiction } = accountTx.data;
+  const { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks: inputPriceTicks, timeInForce, crossJurisdiction } = accountTx.data;
   const events: string[] = [];
 
   // Initialize swapOffers Map if not present
@@ -110,19 +109,8 @@ export async function handleSwapOffer(
       return { success: false, error: `Cross-j swap must be prepared before entering the book`, events };
     }
   }
-  if (minFillRatio < 0 || minFillRatio > MAX_SWAP_FILL_RATIO) {
-    return { success: false, error: `Invalid minFillRatio: ${minFillRatio}`, events };
-  }
   if (timeInForce !== undefined && timeInForce !== 0 && timeInForce !== 1 && timeInForce !== 2) {
     return { success: false, error: `Invalid timeInForce: ${String(timeInForce)}`, events };
-  }
-  const effectiveTif = timeInForce ?? 0;
-  if (minFillRatio > 0 && effectiveTif === 0) {
-    return {
-      success: false,
-      error: 'minFillRatio > 0 requires timeInForce to be IOC (1) or FOK (2)',
-      events,
-    };
   }
 
   // 3. Determine maker perspective (Channel.ts: byLeft = frame proposer = maker)
@@ -337,7 +325,6 @@ export async function handleSwapOffer(
     wantAmount: effectiveWantAmount,
     priceTicks,
     ...(timeInForce !== undefined ? { timeInForce } : {}),
-    minFillRatio,
     makerIsLeft,
     createdHeight: currentHeight,
     quantizedGive: effectiveGiveAmount,
@@ -375,7 +362,6 @@ export async function handleSwapOffer(
       wantAmount: effectiveWantAmount,
       priceTicks,
       ...(timeInForce !== undefined ? { timeInForce } : {}),
-      minFillRatio,
       ...(publicCrossJurisdiction ? { crossJurisdiction: publicCrossJurisdiction } : {}),
     },
   };

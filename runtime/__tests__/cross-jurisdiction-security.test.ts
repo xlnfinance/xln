@@ -131,7 +131,6 @@ describe('cross-jurisdiction security invariants', () => {
       giveAmount: route.source.amount,
       wantTokenId: route.target.tokenId,
       wantAmount: route.target.amount,
-      minFillRatio: 0,
       makerIsLeft: account.leftEntity === sourceUser,
       createdHeight: 1,
       crossJurisdiction: { ...route, routeHash: secret('ff') },

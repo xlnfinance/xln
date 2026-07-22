@@ -19,7 +19,6 @@ export type AccountSwapOfferCreated = {
   wantAmount: bigint;
   priceTicks?: bigint | undefined;
   timeInForce?: 0 | 1 | 2 | undefined;
-  minFillRatio: number;
 };
 
 export type AccountConsensusFrameResult = {

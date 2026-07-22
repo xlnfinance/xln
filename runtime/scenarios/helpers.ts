@@ -12,6 +12,7 @@ import { normalizeRuntimeId } from '../networking/runtime-id';
 import { drainJWatcherBacklog } from '../jadapter/backlog-drain';
 import { buildRouteOutputKey } from '../machine/output-routing';
 import { releaseUncommittedReliableIngress } from '../machine/reliable-delivery';
+import { accountHasProposableMempool } from '../entity/consensus/account-mempool-eligibility';
 
 // Lazy-loaded process to avoid circular deps
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
@@ -426,7 +427,7 @@ export async function converge(env: Env, maxCycles = 10): Promise<void> {
       }
       // Check account-level work (bilateral consensus)
       for (const [, account] of replica.state.accounts) {
-        if (account.mempool.length > 0 || account.pendingFrame) {
+        if (account.pendingFrame || accountHasProposableMempool(account, replica.state)) {
           hasWork = true;
           break;
         }
@@ -501,7 +502,7 @@ export async function convergeWithOffline(
       }
       // Check account-level work (bilateral consensus)
       for (const [, account] of replica.state.accounts) {
-        if (account.mempool.length > 0 || account.pendingFrame) {
+        if (account.pendingFrame || accountHasProposableMempool(account, replica.state)) {
           hasWork = true;
           break;
         }
@@ -521,7 +522,7 @@ const throwScenarioConvergenceTimeout = (
   const entityBacklog = [...env.eReplicas.values()]
     .flatMap(replica => {
       const pendingAccounts = [...replica.state.accounts.values()]
-        .filter(account => account.mempool.length > 0 || account.pendingFrame)
+        .filter(account => account.pendingFrame || accountHasProposableMempool(account, replica.state))
         .length;
       if (!replica.mempool.length && !replica.proposal && !replica.lockedFrame && pendingAccounts === 0) return [];
       const txTypes = replica.mempool.map(tx => tx.type).join(',');

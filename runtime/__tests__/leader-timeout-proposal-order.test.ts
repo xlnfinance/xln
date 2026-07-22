@@ -70,7 +70,6 @@ const baseState = (env: Env): EntityState => {
     htlcNotes: new Map(),
     lockBook: new Map(),
     swapTradingPairs: [],
-    pendingSwapFillRatios: new Map(),
     crontabState: initCrontab(),
   };
 };

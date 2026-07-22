@@ -291,7 +291,6 @@ const makeHubState = (entityId: string, height: number, timestamp: number): Enti
   htlcNotes: new Map(),
   lockBook: new Map(),
   swapTradingPairs: [],
-  pendingSwapFillRatios: new Map(),
 });
 
 const seedBooks = (state: EntityState, count: number): void => {

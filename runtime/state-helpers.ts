@@ -677,9 +677,6 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
     ...(Array.isArray(entityState.swapTradingPairs)
       ? { swapTradingPairs: entityState.swapTradingPairs.map((pair) => ({ ...pair })) }
       : {}),
-    ...(entityState.pendingSwapFillRatios
-      ? { pendingSwapFillRatios: new Map(Array.from(entityState.pendingSwapFillRatios.entries())) }
-      : {}),
     ...(entityState.crossJurisdictionSwaps
       ? { crossJurisdictionSwaps: new Map(Array.from(entityState.crossJurisdictionSwaps.entries()).map(([id, route]) => [id, cloneCrossJurisdictionRoute(route)])) }
       : {}),

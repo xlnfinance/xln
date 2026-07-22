@@ -85,7 +85,6 @@ const makeGenesis = (env: Env, signerId: string): EntityState => {
     htlcNotes: new Map(),
     lockBook: new Map(),
     swapTradingPairs: [],
-    pendingSwapFillRatios: new Map(),
     pendingCrossJurisdictionFillAcks: new Map(),
     crossJurisdictionBookAdmissions: new Map(),
   };

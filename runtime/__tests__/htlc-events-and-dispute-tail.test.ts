@@ -92,7 +92,6 @@ const makeReplica = (entityId: string, counterpartyId: string): EntityReplica =>
       htlcNotes: new Map(),
       lockBook: new Map(),
       swapTradingPairs: [],
-      pendingSwapFillRatios: new Map(),
       crontabState: initCrontab(),
     },
   };

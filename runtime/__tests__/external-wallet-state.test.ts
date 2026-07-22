@@ -93,7 +93,6 @@ const makeState = (entityId: string, signerId: string): EntityState => ({
   htlcNotes: new Map(),
   lockBook: new Map(),
   swapTradingPairs: [],
-  pendingSwapFillRatios: new Map(),
 });
 
 const signJEventInput = (

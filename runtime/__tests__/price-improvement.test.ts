@@ -287,7 +287,7 @@ describe('price improvement', () => {
      * }
      *
      * When present, settlement uses these instead of deriving from offer ratio.
-     * fillRatio still used for: minFillRatio check, partial fill bookkeeping, hold release.
+     * fillRatio is used for partial fill bookkeeping and hold release.
      */
     function proposedSettlement(
       executionBaseWei: bigint,
@@ -357,7 +357,6 @@ describe('price improvement', () => {
         wantTokenId: 2,
         wantAmount: executionBaseAmount,
         makerIsLeft: true,
-        minFillRatio: 0,
         createdHeight: 0,
         quantizedGive: limitQuoteAmount,
         quantizedWant: executionBaseAmount,
@@ -440,7 +439,6 @@ describe('price improvement', () => {
         wantTokenId: 1,
         wantAmount: limitQuoteAmount,
         makerIsLeft: true,
-        minFillRatio: 0,
         createdHeight: 0,
         quantizedGive: executionBaseAmount,
         quantizedWant: limitQuoteAmount,
@@ -479,7 +477,6 @@ describe('price improvement', () => {
         wantTokenId: 1,
         wantAmount: ticksLotsToWei(8700n),
         makerIsLeft: true,
-        minFillRatio: 0,
         createdHeight: 0,
         quantizedGive: executionBaseAmount,
         quantizedWant: ticksLotsToWei(8700n),
@@ -513,7 +510,6 @@ describe('price improvement', () => {
         wantTokenId: 1,
         wantAmount,
         makerIsLeft: true,
-        minFillRatio: 0,
         createdHeight: 0,
         quantizedGive: giveAmount,
         quantizedWant: wantAmount,
@@ -544,7 +540,6 @@ describe('price improvement', () => {
         wantTokenId: 1,
         wantAmount,
         makerIsLeft: true,
-        minFillRatio: 0,
         createdHeight: 0,
         quantizedGive: giveAmount,
         quantizedWant: wantAmount,
@@ -578,7 +573,6 @@ describe('price improvement', () => {
         wantTokenId: 1,
         wantAmount,
         makerIsLeft: true,
-        minFillRatio: 0,
         createdHeight: 0,
         quantizedGive: giveAmount,
         quantizedWant: wantAmount,

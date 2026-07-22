@@ -69,7 +69,6 @@ describe('rendered token metadata is exact', () => {
       giveAmount: 100_000_000n,
       wantTokenId: 1,
       wantAmount: 1_000_000n,
-      minFillRatio: 0,
       createdHeight: 1,
     } as SwapBookEntry;
 

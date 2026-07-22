@@ -179,7 +179,6 @@
       giveAmount: 'Sell Amount',
       wantAmount: 'Buy Amount',
       priceTicks: 'Limit Price',
-      minFillRatio: 'Min Fill',
       fillRatio: 'Fill',
       cancelRemainder: 'Cancel Remainder',
       requestId: 'Request ID',
@@ -309,7 +308,7 @@
       const tokenId = toTokenIdSafe(value);
       return { label, value: tokenId ? tokenLabel(tokenId) : '-' };
     }
-    if (key === 'minFillRatio' || key === 'fillRatio') {
+    if (key === 'fillRatio') {
       return { label, value: fillRatioToPercent(value) };
     }
     if (key === 'priceTicks') {
@@ -366,7 +365,6 @@
       'description',
       'route',
       'priceTicks',
-      'minFillRatio',
       'fillRatio',
       'cancelRemainder',
       'requestId',

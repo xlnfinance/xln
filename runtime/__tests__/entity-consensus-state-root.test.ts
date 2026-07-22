@@ -123,7 +123,6 @@ const mutators = {
   } as never; },
   lockBook: state => { state.lockBook.set('lock', { marker: 'lock' } as never); },
   swapTradingPairs: state => { state.swapTradingPairs = [{ baseTokenId: 1, quoteTokenId: 2, pairId: '1:2' }]; },
-  pendingSwapFillRatios: state => { state.pendingSwapFillRatios = new Map([['fill' as never, 1]]); },
   crossJurisdictionSwaps: state => { state.crossJurisdictionSwaps = new Map([['swap', { marker: 'cross-swap' } as never]]); },
   pendingCrossJurisdictionFillAcks: state => { state.pendingCrossJurisdictionFillAcks = new Map([['ack', { marker: 'cross-ack' } as never]]); },
   crossJurisdictionBookAdmissions: state => { state.crossJurisdictionBookAdmissions = new Map([['admission', { marker: 'cross-admission' } as never]]); },

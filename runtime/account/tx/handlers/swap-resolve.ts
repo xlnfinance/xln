@@ -10,11 +10,10 @@
  * Flow:
  * 1. Find offer by offerId
  * 2. Validate caller is NOT the maker (is the counterparty/hub)
- * 3. Validate fillRatio >= offer.minFillRatio (unless cancelling all)
- * 4. Validate exact execution amounts for fills
- * 5. Update deltas atomically (both tokens)
- * 6. Release proportional hold
- * 7. If cancelRemainder: remove offer; else: update remaining amount
+ * 3. Validate exact execution amounts for fills
+ * 4. Update deltas atomically (both tokens)
+ * 5. Release proportional hold
+ * 6. If cancelRemainder: remove offer; else: update remaining amount
  *
  * Delta rules (same as HTLC):
  * - Left gives -> offdelta decreases (negative)
@@ -260,14 +259,6 @@ export async function handleSwapResolve(
         events,
       };
     }
-  }
-
-  if (canonicalFillRatio > 0 && canonicalFillRatio < offer.minFillRatio) {
-    return {
-      success: false,
-      error: `Fill ratio ${canonicalFillRatio} below minimum ${offer.minFillRatio}`,
-      events,
-    };
   }
 
   if (canonicalFillRatio > 0) {
