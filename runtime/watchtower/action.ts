@@ -529,13 +529,9 @@ export const runWatchtowerSweep = async (
       }
       let disputeStartBlock: bigint | undefined;
       if (typeof depository.defaultDisputeDelay === 'function') {
-        try {
-          const disputeDelay = BigInt(await depository.defaultDisputeDelay());
-          if (disputeDelay > 0n && disputeTimeout >= disputeDelay) {
-            disputeStartBlock = disputeTimeout - disputeDelay;
-          }
-        } catch {
-          disputeStartBlock = undefined;
+        const disputeDelay = BigInt(await depository.defaultDisputeDelay());
+        if (disputeDelay > 0n && disputeTimeout >= disputeDelay) {
+          disputeStartBlock = disputeTimeout - disputeDelay;
         }
       }
       const disputeContext = await findActiveDisputeContext(

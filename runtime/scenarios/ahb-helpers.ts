@@ -130,14 +130,15 @@ export function getDerivedOutCapacity(env: Env, entityId: string, counterpartyId
  */
 export async function processJEvents(env: Env): Promise<void> {
   const processRuntime = await getProcess();
+  const { getScenarioJAdapter, isScenarioJAdapterMissingError } = await import('./boot');
+  let jadapter;
   try {
-    const { getScenarioJAdapter } = await import('./boot');
-    const jadapter = getScenarioJAdapter(env);
-    if (typeof jadapter.pollNow === 'function') {
-      await jadapter.pollNow();
-    }
-  } catch {
-    // Scenario may call this before adapter is attached.
+    jadapter = getScenarioJAdapter(env);
+  } catch (error) {
+    if (!isScenarioJAdapterMissingError(error)) throw error;
+  }
+  if (typeof jadapter?.pollNow === 'function') {
+    await jadapter.pollNow();
   }
   const pendingInputs = env.runtimeInput?.entityInputs || [];
   if (!env.quietRuntimeLogs) {

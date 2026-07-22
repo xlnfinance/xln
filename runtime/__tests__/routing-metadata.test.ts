@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Profile } from '../networking/gossip';
 import { parseProfile } from '../networking/gossip';
 import { buildNetworkGraph } from '../routing/graph';
+import { normalizeBigInt } from '../routing/capacity';
 import { PathFinder } from '../routing/pathfinding';
 import { SigningKey, computeAddress } from 'ethers';
 import { computeValidatorEncryptionAttestationDigest } from '../protocol/htlc/validator-encryption';
@@ -71,6 +72,31 @@ function profile(
 }
 
 describe('Routing metadata hard requirements', () => {
+  test('malformed advertised capacity is rejected instead of becoming zero', () => {
+    expect(() => normalizeBigInt('not-a-capacity')).toThrow('ROUTING_CAPACITY_BIGINT_INVALID');
+    expect(() => normalizeBigInt(1.5)).toThrow('ROUTING_CAPACITY_NUMBER_INVALID');
+
+    const alice = profile(ALICE, ALICE.slice(0, 42), {
+      routingFeePPM: 10_000,
+      baseFee: 0n,
+      isHub: false,
+      board: boardFor(ALICE, `0x${'41'.repeat(32)}`),
+    }, [{
+      counterpartyId: BOB,
+      tokenCapacities: { [TOKEN_ID]: { inCapacity: '1', outCapacity: 'invalid' } } as ReturnType<typeof caps>,
+    }]);
+    const bob = profile(BOB, BOB.slice(0, 42), {
+      routingFeePPM: 10_000,
+      baseFee: 0n,
+      isHub: false,
+      board: boardFor(BOB, `0x${'42'.repeat(32)}`),
+    }, []);
+
+    const graph = buildNetworkGraph(new Map([[ALICE, alice], [BOB, bob]]), TOKEN_ID);
+    expect(graph.edges.has(ALICE)).toBe(false);
+    expect(graph.accountCapacities.size).toBe(0);
+  });
+
   test('routing graph diagnostics use structured logging only', () => {
     const source = readFileSync(join(process.cwd(), 'runtime/routing/graph.ts'), 'utf8');
 

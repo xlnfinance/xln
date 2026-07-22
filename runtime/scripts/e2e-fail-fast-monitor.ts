@@ -8,13 +8,7 @@ import {
   findFirstRuntimeFatalLogHit,
   tailLog,
 } from './e2e-fatal-log-monitor';
-
-type RunnerLockPayload = {
-  pid: number;
-  startedAt: number;
-  cwd: string;
-  logsDir?: string;
-};
+import { isE2ERunnerProcessAlive, readE2ERunnerLock } from './e2e-runner-lock';
 
 const repoRoot = process.cwd();
 const e2eRoot = resolve(repoRoot, '.logs', 'e2e-parallel');
@@ -32,42 +26,16 @@ const positiveInt = (raw: string | null, fallback: number): number => {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 };
 
-const pidIsAlive = (pid: number): boolean => {
-  if (!Number.isFinite(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const readRunnerLock = (): RunnerLockPayload | null => {
-  try {
-    return JSON.parse(readFileSync(runnerLockPath, 'utf8')) as RunnerLockPayload;
-  } catch {
-    return null;
-  }
-};
+const readRunnerLock = () => readE2ERunnerLock(runnerLockPath);
 
 const latestLogsDir = (): string | null => {
   if (!existsSync(e2eRoot)) return null;
-  return readdirSync(e2eRoot)
+  const candidates = readdirSync(e2eRoot)
     .map(name => join(e2eRoot, name))
-    .filter(path => {
-      try {
-        return statSync(path).isDirectory();
-      } catch {
-        return false;
-      }
-    })
-    .sort((left, right) => {
-      try {
-        return statSync(right).mtimeMs - statSync(left).mtimeMs;
-      } catch {
-        return 0;
-      }
-    })[0] ?? null;
+    .map(path => ({ path, stat: statSync(path) }))
+    .filter(entry => entry.stat.isDirectory())
+    .sort((left, right) => right.stat.mtimeMs - left.stat.mtimeMs);
+  return candidates[0]?.path ?? null;
 };
 
 const resolveLogsDir = (): string | null => {
@@ -89,7 +57,7 @@ const shardLogPaths = (logsDir: string): string[] => {
 
 const stopRunner = async (): Promise<void> => {
   const lock = readRunnerLock();
-  if (!lock || !pidIsAlive(lock.pid)) return;
+  if (!lock || !isE2ERunnerProcessAlive(lock.pid)) return;
   console.error(`[e2e-monitor] stopping runner pid=${lock.pid} lock=${runnerLockPath}`);
   try {
     process.kill(lock.pid, 'SIGTERM');
@@ -97,7 +65,7 @@ const stopRunner = async (): Promise<void> => {
     console.error(`[e2e-monitor] SIGTERM failed pid=${lock.pid}`, error);
   }
   await delay(3_000);
-  if (!pidIsAlive(lock.pid)) return;
+  if (!isE2ERunnerProcessAlive(lock.pid)) return;
   try {
     process.kill(lock.pid, 'SIGKILL');
   } catch (error) {
@@ -117,11 +85,7 @@ const scanOnce = (logsDir: string, scannedLinesByPath: Map<string, number>): boo
       );
       return true;
     }
-    try {
-      scannedLinesByPath.set(path, readFileSync(path, 'utf8').split('\n').length);
-    } catch {
-      scannedLinesByPath.set(path, 0);
-    }
+    scannedLinesByPath.set(path, readFileSync(path, 'utf8').split('\n').length);
   }
   return false;
 };

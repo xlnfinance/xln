@@ -2118,6 +2118,10 @@ describe('multisig HTLC validator encryption', () => {
     };
     expect(await firstColdStart.getLocalProfilesForEntities()).toEqual([]);
     expect(firstColdStart.getLocalEncryptionAnnouncements()).toHaveLength(1);
+    const [validReplica] = firstEnv.eReplicas.values();
+    firstEnv.eReplicas.set('malformed-replica-key', validReplica!);
+    await expect(firstColdStart.getLocalProfilesForEntities()).rejects.toThrow('Invalid replica key format');
+    firstEnv.eReplicas.delete('malformed-replica-key');
 
     const secondEnv = envFor(second);
     registerSignerKey(secondEnv, second.signer, second.privateKey);

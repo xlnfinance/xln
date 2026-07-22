@@ -18,7 +18,7 @@
 import type { Env, EntityInput } from '../types';
 import type { JAdapter } from '../jadapter/types';
 import { getProcess, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput, processWithOffline, convergeWithOffline, advanceScenarioToNextNetworkRetry } from './helpers';
-import { bindScenarioJReplica, ensureJAdapter, registerEntities, createJReplica, createJurisdictionConfig, getScenarioJAdapter, resolveScenarioBoardSigner } from './boot';
+import { bindScenarioJReplica, ensureJAdapter, registerEntities, createJReplica, createJurisdictionConfig, getScenarioJAdapter, isScenarioJAdapterMissingError, resolveScenarioBoardSigner } from './boot';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { isLeft } from '../account/utils';
 import { ethers } from 'ethers';
@@ -99,7 +99,8 @@ export async function lockAhb(env: Env): Promise<void> {
         jadapter.addresses.depository,
         jadapter.addresses.entityProvider,
       );
-    } catch {
+    } catch (error) {
+      if (!isScenarioJAdapterMissingError(error)) throw error;
       // No jadapter attached — self-boot (browser path or direct CLI)
       jadapter = await ensureJAdapter(env);
       const jReplicaName = 'AHB Demo';

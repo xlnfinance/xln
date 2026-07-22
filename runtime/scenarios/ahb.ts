@@ -19,6 +19,7 @@ import {
   bindScenarioJReplica,
   ensureJAdapter,
   getScenarioJAdapter,
+  isScenarioJAdapterMissingError,
   createJReplica,
   resolveScenarioBoardSigner,
 } from './boot';
@@ -127,7 +128,8 @@ export async function ahb(env: Env): Promise<void> {
     let jadapter: JAdapter;
     try {
       jadapter = getScenarioJAdapter(env);
-    } catch {
+    } catch (error) {
+      if (!isScenarioJAdapterMissingError(error)) throw error;
       jadapter = await ensureJAdapter(env);
       bindScenarioJReplica(
         env,

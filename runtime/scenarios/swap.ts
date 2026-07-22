@@ -21,7 +21,7 @@ import type { AccountMachine, Env, EntityInput } from '../types';
 import { ethers } from 'ethers';
 import { getBestAsk, SWAP_LOT_SCALE } from '../orderbook';
 import { getOpenSwapOfferEntries } from '../orderbook/open-swap-offers';
-import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig } from './boot';
+import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, isScenarioJAdapterMissingError, createJReplica, createJurisdictionConfig } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRuntimeSeed, converge, commitRuntimeInput, findReplica } from './helpers';
@@ -259,7 +259,8 @@ export async function swap(env: Env): Promise<void> {
   let jadapter: JAdapter;
   try {
     jadapter = getScenarioJAdapter(env);
-  } catch {
+  } catch (error) {
+    if (!isScenarioJAdapterMissingError(error)) throw error;
     jadapter = await ensureJAdapter(env);
     bindScenarioJReplica(
       env,

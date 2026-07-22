@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, truncateSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createIncrementalRuntimeFatalLogScanner } from '../scripts/e2e-fatal-log-monitor';
@@ -59,6 +59,15 @@ test('incremental fatal scanner restarts from byte zero after log truncation', (
       pattern: '/RUNTIME_LOOP_ERROR/',
       lineNumber: 1,
     });
+  });
+});
+
+test('incremental fatal scanner fails closed if an observed log disappears', () => {
+  withLog(path => {
+    const scanner = createIncrementalRuntimeFatalLogScanner(path);
+    expect(scanner.scan()).toBeNull();
+    unlinkSync(path);
+    expect(() => scanner.scan()).toThrow('E2E_FATAL_LOG_SCAN_FAILED');
   });
 });
 

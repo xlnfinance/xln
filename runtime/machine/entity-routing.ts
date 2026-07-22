@@ -641,13 +641,10 @@ export const hasLocalEntityReplica = (
   deps: Pick<RuntimeEntityRoutingDeps, 'extractEntityId'>,
 ): boolean => {
   const target = normalizeEntityKey(entityId);
-  return Array.from(env.eReplicas.keys()).some(key => {
-    try {
-      return normalizeEntityKey(deps.extractEntityId(key)) === target;
-    } catch {
-      return false;
-    }
-  });
+  for (const key of env.eReplicas.keys()) {
+    if (normalizeEntityKey(deps.extractEntityId(key)) === target) return true;
+  }
+  return false;
 };
 
 export const resolveRuntimeIdForCrossJurisdictionEntity = (

@@ -392,13 +392,9 @@ const runtimeImportLogUrlEnabled = ['1', 'true', 'yes', 'on'].includes(
   String(process.env['XLN_RUNTIME_IMPORT_LOG_URL'] || '').trim().toLowerCase(),
 );
 
-const isLoopbackPublicBase = (() => {
-  try {
-    return /^(localhost|127\.|0\.0\.0\.0|::1|\[::1\])/.test(new URL(args.publicWsBaseUrl).hostname);
-  } catch {
-    return true;
-  }
-})();
+const isLoopbackPublicBase = /^(localhost|127\.|0\.0\.0\.0|::1|\[::1\])/.test(
+  new URL(args.publicWsBaseUrl).hostname,
+);
 
 // Externally-reachable radapter /rpc URL for a hub / market-maker node.
 // Prod is fronted by nginx (publicPort -> apiPort, e.g. 8090 -> 18090); local has no proxy,

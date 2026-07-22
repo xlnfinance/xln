@@ -13,7 +13,7 @@
 import type { Env, SettlementDiff, SettlementOp } from '../types';
 import { compileOps } from '../protocol/settlement/operations';
 import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain as syncChainHelper, findReplica, setScenarioStorageEnabled, converge, processUntil, processJEvents } from './helpers';
-import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig, registerEntities as bootRegisterEntities } from './boot';
+import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, isScenarioJAdapterMissingError, createJReplica, createJurisdictionConfig, registerEntities as bootRegisterEntities } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { createGossipLayer } from '../networking/gossip';
@@ -108,7 +108,8 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   let jadapter: JAdapter;
   try {
     jadapter = getScenarioJAdapter(env);
-  } catch {
+  } catch (error) {
+    if (!isScenarioJAdapterMissingError(error)) throw error;
     jadapter = await ensureJAdapter(env);
     bindScenarioJReplica(
       env,

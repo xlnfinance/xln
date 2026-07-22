@@ -431,8 +431,7 @@ export function getCachedSignerAddress(scope: SignerKeyScope, signerId: string):
   return address;
 }
 
-// Export for runtime/hanko/signing.ts
-export function getSignerPrivateKey(env: SignerKeyEnv, signerId: string): Uint8Array {
+export function getSignerPrivateKeyIfAvailable(env: SignerKeyEnv, signerId: string): Uint8Array | null {
   const key = signerId.toLowerCase();
   if (parseSignerIndex(key) !== null) {
     if (env?.runtimeSeed === undefined || env?.runtimeSeed === null) {
@@ -441,18 +440,22 @@ export function getSignerPrivateKey(env: SignerKeyEnv, signerId: string): Uint8A
     return getOrDeriveKey(env.runtimeSeed, key);
   }
   const exactRegistered = getExactRegisteredSignerPrivateKey(env, key);
-  if (exactRegistered) {
-    return exactRegistered;
-  }
-  if (isHexAddress(key)) {
-    const registeredCount = getSignerKeyStore(env)?.privateKeys.size ?? 0;
-    throw new Error(
-      `MISSING_SIGNER_KEY: no registered private key for signer ${key}. ` +
-      `This runtime must prewarm its local signer EOAs on env creation. ` +
-      `registeredCount=${registeredCount}`,
-    );
-  }
+  if (exactRegistered) return exactRegistered;
+  if (isHexAddress(key)) return null;
   throw new Error(`UNSUPPORTED_SIGNER_ID: "${signerId}" is not numeric or a registered EOA address.`);
+}
+
+// Export for runtime/hanko/signing.ts
+export function getSignerPrivateKey(env: SignerKeyEnv, signerId: string): Uint8Array {
+  const privateKey = getSignerPrivateKeyIfAvailable(env, signerId);
+  if (privateKey) return privateKey;
+  const key = signerId.toLowerCase();
+  const registeredCount = getSignerKeyStore(env)?.privateKeys.size ?? 0;
+  throw new Error(
+    `MISSING_SIGNER_KEY: no registered private key for signer ${key}. ` +
+    `This runtime must prewarm its local signer EOAs on env creation. ` +
+    `registeredCount=${registeredCount}`,
+  );
 }
 
 export function getSignerPublicKey(env: SignerKeyEnv, signerId: string): Uint8Array | null {

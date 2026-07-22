@@ -1531,6 +1531,7 @@ describe('production startup wiring', () => {
   test('isolated e2e runner fails fast on fatal shard log markers', () => {
     const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
     const fatalHelper = readFileSync(join(repoRoot, 'runtime/scripts/e2e-fatal-log-monitor.ts'), 'utf8');
+    const runnerLockHelper = readFileSync(join(repoRoot, 'runtime/scripts/e2e-runner-lock.ts'), 'utf8');
     const standaloneMonitor = readFileSync(join(repoRoot, 'runtime/scripts/e2e-fail-fast-monitor.ts'), 'utf8');
     const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
     const mainnetGate = readFileSync(join(repoRoot, 'runtime/scripts/run-mainnet-preflight-gate.ts'), 'utf8');
@@ -1563,7 +1564,10 @@ describe('production startup wiring', () => {
     expect(runner).toContain('--- last 80 lines (${logPath}) ---');
     expect(runner).toContain('shardAbortController.abort();');
     expect(runner).toContain("child.kill('SIGTERM')");
-    expect(runner).toContain('logsDir?: string;');
+    expect(runner).toContain("from './e2e-runner-lock';");
+    expect(runnerLockHelper).toContain('logsDir?: string;');
+    expect(runnerLockHelper).toContain("if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;");
+    expect(runnerLockHelper).toContain("if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;");
     expect(runner).toContain('const releaseRunnerLock = acquireRunnerLock(logsDir);');
     expect(standaloneMonitor).toContain("const runnerLockPath = join(e2eRoot, '.runner-lock.json');");
     expect(standaloneMonitor).toContain('findFirstRuntimeFatalLogHit(path, fromLine)');

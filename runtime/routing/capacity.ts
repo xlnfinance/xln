@@ -10,7 +10,13 @@ export type TokenCapacityLike = {
 
 export const normalizeBigInt = (value: unknown): bigint => {
   if (typeof value === 'bigint') return value;
-  if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.floor(value));
+  if (value === null || value === undefined || value === '') return 0n;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || !Number.isInteger(value)) {
+      throw new Error(`ROUTING_CAPACITY_NUMBER_INVALID:${String(value)}`);
+    }
+    return BigInt(value);
+  }
   if (typeof value === 'string' && value.trim() !== '') {
     const trimmed = value.trim();
     const parsed = trimmed.startsWith('BigInt(') && trimmed.endsWith(')')
@@ -19,10 +25,10 @@ export const normalizeBigInt = (value: unknown): bigint => {
     try {
       return BigInt(parsed);
     } catch {
-      return 0n;
+      throw new Error(`ROUTING_CAPACITY_BIGINT_INVALID:${value.slice(0, 80)}`);
     }
   }
-  return 0n;
+  throw new Error(`ROUTING_CAPACITY_TYPE_INVALID:${typeof value}`);
 };
 
 type TokenCapContainer =
@@ -50,4 +56,3 @@ export const getTokenCapacity = (
     outCapacity: normalizeBigInt(raw.outCapacity ?? 0n),
   };
 };
-

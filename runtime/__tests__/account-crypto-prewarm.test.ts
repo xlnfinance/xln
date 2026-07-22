@@ -7,6 +7,7 @@ import {
   getCachedSignerPrivateKey,
   getCachedSignerPublicKey,
   getSignerPrivateKey,
+  getSignerPrivateKeyIfAvailable,
   prewarmSignerLabels,
   registerSignerKey,
   signDigest,
@@ -84,6 +85,18 @@ describe('signer cache prewarm', () => {
     } finally {
       clearSignerKeys(runtimeSeed);
     }
+  });
+
+  test('typed signer lookup distinguishes a missing EOA from corrupted identity', () => {
+    const runtimeSeed = 'typed-signer-lookup';
+    expect(getSignerPrivateKeyIfAvailable(
+      { runtimeSeed },
+      '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    )).toBeNull();
+    expect(() => getSignerPrivateKeyIfAvailable({ runtimeSeed }, 'malformed-signer'))
+      .toThrow('UNSUPPORTED_SIGNER_ID');
+    expect(() => getSignerPrivateKeyIfAvailable({}, '1'))
+      .toThrow('CRYPTO_DETERMINISM_VIOLATION');
   });
 
   test('fails loud when runtime signer-cache prewarm cannot complete', () => {

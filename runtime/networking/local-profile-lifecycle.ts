@@ -1,4 +1,4 @@
-import { getSignerPrivateKey } from '../account/crypto';
+import { getSignerPrivateKeyIfAvailable } from '../account/crypto';
 import { isEntityActiveLeader } from '../entity/consensus/leader';
 import type { EntityInput, EntityReplica, Env } from '../types';
 import {
@@ -18,12 +18,7 @@ import {
 const normalize = (value: string): string => value.trim().toLowerCase();
 
 const hasLocalSigner = (env: Env, signerId: string): boolean => {
-  try {
-    getSignerPrivateKey(env, signerId);
-    return true;
-  } catch {
-    return false;
-  }
+  return getSignerPrivateKeyIfAvailable(env, signerId) !== null;
 };
 
 const entityReplicas = (env: Env, entityId: string): EntityReplica[] => {

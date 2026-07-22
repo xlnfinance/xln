@@ -586,13 +586,9 @@ const resolveOperatorAppUrl = (): string => {
   if (explicit) return explicit.replace(/\/+$/, '').endsWith('/app')
     ? explicit.replace(/\/+$/, '')
     : `${explicit.replace(/\/+$/, '')}/app`;
-  try {
-    const parsed = new URL(directWsUrl);
-    if (parsed.hostname === 'xln.finance' || parsed.hostname.endsWith('.xln.finance')) {
-      return `https://${parsed.hostname}/app`;
-    }
-  } catch {
-    // Fall back below.
+  const parsed = new URL(directWsUrl);
+  if (parsed.hostname === 'xln.finance' || parsed.hostname.endsWith('.xln.finance')) {
+    return `https://${parsed.hostname}/app`;
   }
   return 'http://localhost:8080/app';
 };

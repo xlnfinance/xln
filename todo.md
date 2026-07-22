@@ -176,8 +176,14 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   cleanup failures emit operation, PID/path where relevant, and the error;
   production WebSocket diagnostics fail on close errors, and corrupt news
   budget files fail closed instead of silently resetting the spend counter.
-- [ ] Audit semantic silent fallbacks in remaining catch clauses; retain only
+- [x] Audit semantic silent fallbacks in remaining catch clauses; retain only
   typed validation results or explicitly documented adversarial soft-fail paths.
+  Operational uncertainty now fails closed for process/runner leases, log and
+  persistence reads, signer availability, routing capacity, watchtower delay,
+  support-peer identity, local replica keys and scenario adapters. Adversarial
+  profile/evidence decoders remain isolated typed rejection paths. L1/L2:
+  109/109 targeted tests (1,675 assertions), six adapter scenarios COMPLETE,
+  runtime types and `check:src` PASS; frozen core unchanged.
 - [x] Reject malformed Hub support-peer identity JSON as one invalid config;
   never silently drop one/all MM sibling identities and continue bootstrap.
 - [x] Verify and remove every HTLC cleartext fallback when recipient encryption

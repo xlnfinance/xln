@@ -620,7 +620,8 @@ const readPassedE2eRunForPrune = (path: string, runId: string): E2eRunForPrune |
         ? manifest.completedAt
         : statSync(path).mtimeMs;
     return { path, runId, completedAtMs };
-  } catch {
+  } catch (error) {
+    console.warn(`[soak] retaining unparseable E2E run path=${path}: ${String(error)}`);
     return null;
   }
 };

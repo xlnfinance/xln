@@ -12,7 +12,7 @@ import type {
   ProfileMirror,
 } from './gossip';
 import { compareStableText, safeStringify } from '../protocol/serialization';
-import { deriveSignerAddressSync, getSignerAddress, getSignerPrivateKey, getSignerPublicKey } from '../account/crypto';
+import { deriveSignerAddressSync, getSignerAddress, getSignerPrivateKeyIfAvailable, getSignerPublicKey } from '../account/crypto';
 import { deriveEncryptionKeyPair, pubKeyToHex } from './p2p-crypto';
 import { UINT16_MAX } from '../constants';
 import { requireCompleteValidatorEncryptionManifest } from '../protocol/htlc/validator-encryption';
@@ -45,11 +45,7 @@ const buildProfileMirrors = (env: Env, entityState: EntityState): ProfileMirror[
   for (const replica of env.eReplicas?.values?.() || []) {
     const entityId = String(replica?.state?.entityId || replica?.entityId || '').trim();
     if (!entityId || entityId.toLowerCase() === entityState.entityId.toLowerCase()) continue;
-    try {
-      getSignerPrivateKey(env, replica.signerId);
-    } catch {
-      continue;
-    }
+    if (getSignerPrivateKeyIfAvailable(env, replica.signerId) === null) continue;
     const jurisdiction = buildProfileJurisdiction(replica.state);
     if (!jurisdiction) continue;
     mirrors.set(entityId.toLowerCase(), { entityId, jurisdiction });

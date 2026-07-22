@@ -151,8 +151,8 @@ function tail(path: string, lines = 60): string {
     const text = readFileSync(path, 'utf8');
     const chunks = text.split('\n');
     return chunks.slice(-lines).join('\n');
-  } catch {
-    return '(unable to read log tail)';
+  } catch (error) {
+    return `(unable to read log tail: ${error instanceof Error ? error.message : String(error)})`;
   }
 }
 

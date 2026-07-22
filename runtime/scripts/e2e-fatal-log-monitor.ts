@@ -34,6 +34,9 @@ export type IncrementalRuntimeFatalLogScanner = {
 const findFatalPattern = (line: string): RegExp | undefined =>
   RUNTIME_FATAL_LOG_PATTERNS.find(candidate => candidate.test(line));
 
+const isMissingFile = (error: unknown): boolean =>
+  (error as NodeJS.ErrnoException)?.code === 'ENOENT';
+
 /**
  * Reads only bytes appended since the previous scan. The partial final line is
  * deliberately retained and rechecked with the next append: a process may
@@ -101,8 +104,12 @@ export const createIncrementalRuntimeFatalLogScanner = (
           if (hit) return hit;
         }
         return null;
-      } catch {
-        return null;
+      } catch (error) {
+        if (isMissingFile(error) && fileIdentity === '') return null;
+        throw new Error(
+          `E2E_FATAL_LOG_SCAN_FAILED:path=${path}:` +
+          `${error instanceof Error ? error.message : String(error)}`,
+        );
       } finally {
         if (fd !== null) closeSync(fd);
       }
@@ -114,8 +121,8 @@ export const tailLog = (path: string, lines = E2E_FATAL_LOG_TAIL_LINES): string 
   try {
     const text = readFileSync(path, 'utf8');
     return text.split('\n').slice(-lines).join('\n');
-  } catch {
-    return '(unable to read log tail)';
+  } catch (error) {
+    return `(unable to read log tail: ${error instanceof Error ? error.message : String(error)})`;
   }
 };
 
@@ -123,8 +130,12 @@ export const findFirstRuntimeFatalLogHit = (path: string, fromLine = 0): FatalLo
   let text = '';
   try {
     text = readFileSync(path, 'utf8');
-  } catch {
-    return null;
+  } catch (error) {
+    if (isMissingFile(error)) return null;
+    throw new Error(
+      `E2E_FATAL_LOG_READ_FAILED:path=${path}:` +
+      `${error instanceof Error ? error.message : String(error)}`,
+    );
   }
   const lines = text.split('\n');
   for (let i = Math.max(0, fromLine); i < lines.length; i += 1) {
@@ -144,8 +155,12 @@ export const findRuntimeFatalLogLines = (path: string, maxLines = 12): string[] 
   let text = '';
   try {
     text = readFileSync(path, 'utf8');
-  } catch {
-    return [];
+  } catch (error) {
+    if (isMissingFile(error)) return [];
+    throw new Error(
+      `E2E_FATAL_LOG_READ_FAILED:path=${path}:` +
+      `${error instanceof Error ? error.message : String(error)}`,
+    );
   }
   const out: string[] = [];
   const lines = text.split('\n');

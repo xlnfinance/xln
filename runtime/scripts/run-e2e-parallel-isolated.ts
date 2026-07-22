@@ -81,6 +81,11 @@ import {
   type ManagedChildProcess,
 } from './e2e-managed-process';
 import {
+  isE2ERunnerProcessAlive,
+  readE2ERunnerLock,
+  type E2ERunnerLock,
+} from './e2e-runner-lock';
+import {
   buildIsolatedE2ERerunCommand,
   parseJsonLinesStrict,
   parseJsonStrict,
@@ -663,13 +668,6 @@ const startPerfMonitor = (
   };
 };
 
-type RunnerLockPayload = {
-  pid: number;
-  startedAt: number;
-  cwd: string;
-  logsDir?: string;
-};
-
 type AsyncLimiter = {
   run: <T>(fn: () => Promise<T>) => Promise<T>;
 };
@@ -717,13 +715,7 @@ export const parsePlaywrightFilesFlag = (raw: string): string[] => {
 const parseArgs = (): CliArgs => {
   const args = process.argv.slice(2);
   const longMode = process.env['E2E_LONG'] === '1';
-  const cpu = (() => {
-    try {
-      return Math.max(1, availableParallelism());
-    } catch {
-      return 8;
-    }
-  })();
+  const cpu = Math.max(1, availableParallelism());
   const defaultShards = Math.max(2, Math.min(16, Math.floor(cpu / 2)));
   const getFlag = (name: string): string | undefined => {
     const prefix = `--${name}=`;
@@ -816,27 +808,11 @@ const parseArgs = (): CliArgs => {
 
 const RUNNER_LOCK_PATH = resolve(process.cwd(), '.logs', 'e2e-parallel', '.runner-lock.json');
 
-const readRunnerLock = (): RunnerLockPayload | null => {
-  try {
-    return JSON.parse(readFileSync(RUNNER_LOCK_PATH, 'utf8')) as RunnerLockPayload;
-  } catch {
-    return null;
-  }
-};
-
-const pidIsAlive = (pid: number): boolean => {
-  if (!Number.isFinite(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
+const readRunnerLock = (): E2ERunnerLock | null => readE2ERunnerLock(RUNNER_LOCK_PATH);
 
 const acquireRunnerLock = (logsDir: string): (() => void) => {
   mkdirSync(resolve(process.cwd(), '.logs', 'e2e-parallel'), { recursive: true });
-  const current: RunnerLockPayload = {
+  const current: E2ERunnerLock = {
     pid: process.pid,
     startedAt: Date.now(),
     cwd: process.cwd(),
@@ -865,9 +841,12 @@ const acquireRunnerLock = (logsDir: string): (() => void) => {
         process.exit(143);
       });
       return release;
-    } catch {
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw new Error(`RUNNER_LOCK_ACQUIRE_FAILED:path=${RUNNER_LOCK_PATH}:${String(error)}`);
+      }
       const existing = readRunnerLock();
-      if (existing && pidIsAlive(existing.pid)) {
+      if (existing && isE2ERunnerProcessAlive(existing.pid)) {
         throw new Error(`RUNNER_LOCKED pid=${existing.pid} startedAt=${existing.startedAt} path=${RUNNER_LOCK_PATH}`);
       }
       try {
@@ -930,7 +909,8 @@ const assertRunnerPreflight = async (): Promise<void> => {
 const parseStepTimings = (path: string): QaSlowStep[] => {
   try {
     return parseQaTimelineSteps(readFileSync(path, 'utf8'));
-  } catch {
+  } catch (error) {
+    console.warn(`[e2e] step timing unavailable path=${path}: ${String(error)}`);
     return [];
   }
 };
@@ -1807,7 +1787,7 @@ const killPids = async (pids: number[], label: string): Promise<void> => {
   }
   await delay(1_000);
   for (const pid of unique) {
-    if (!pidIsAlive(pid)) continue;
+    if (!isE2ERunnerProcessAlive(pid)) continue;
     try {
       process.kill(pid, 'SIGKILL');
     } catch (error) {

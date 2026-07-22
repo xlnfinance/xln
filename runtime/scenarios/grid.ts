@@ -22,6 +22,7 @@ import { createEmptyBatch, batchAddReserveToReserve } from '../jurisdiction/batc
 import {
   ensureJAdapter,
   getScenarioJAdapter,
+  isScenarioJAdapterMissingError,
   createJReplica,
   bindScenarioJReplica,
   createJurisdictionConfig,
@@ -135,7 +136,8 @@ export async function grid(env: Env): Promise<void> {
   let jadapter: JAdapter;
   try {
     jadapter = getScenarioJAdapter(env);
-  } catch {
+  } catch (error) {
+    if (!isScenarioJAdapterMissingError(error)) throw error;
     jadapter = await ensureJAdapter(env);
     bindScenarioJReplica(
       env,

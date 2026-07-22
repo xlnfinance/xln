@@ -280,11 +280,7 @@ const assertNoFatalChildLogs = (stage: string): void => {
         `--- last ${E2E_FATAL_LOG_TAIL_LINES} lines (${path}) ---\n${tail}`,
       );
     }
-    try {
-      fatalLogScannedLinesByPath.set(path, readFileSync(path, 'utf8').split('\n').length);
-    } catch {
-      fatalLogScannedLinesByPath.set(path, 0);
-    }
+    fatalLogScannedLinesByPath.set(path, readFileSync(path, 'utf8').split('\n').length);
   }
 };
 

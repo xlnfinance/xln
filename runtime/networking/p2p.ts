@@ -10,7 +10,7 @@ import { canonicalizeProfile, getBoardPrimaryPublicKey, parseProfile, type Profi
 import { RuntimeWsClient } from './ws-client';
 import { buildLocalEntityProfile } from './gossip-helper';
 import { extractEntityId } from '../ids';
-import { getSignerPrivateKey, registerSignerPublicKey } from '../account/crypto';
+import { getSignerPrivateKeyIfAvailable, registerSignerPublicKey } from '../account/crypto';
 import { computeProfileHash, signProfileRuntimeRoute, verifyProfileSignature } from './profile-signing';
 import { inspectHankoForHash } from '../hanko/signing';
 import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from './p2p-crypto';
@@ -1176,12 +1176,7 @@ export class RuntimeP2P {
     const profiles: Profile[] = [];
     const seen = new Set<string>();
     for (const [replicaKey, replica] of this.env.eReplicas.entries()) {
-      let entityId: string;
-      try {
-        entityId = extractEntityId(replicaKey);
-      } catch {
-        continue;
-      }
+      const entityId = extractEntityId(replicaKey);
       const replicaSignerId = getReplicaSignerId(replicaKey);
       // Only advertise entities we can actually sign for.
       // This excludes imported/foreign replicas in browser runtimes while still
@@ -1189,11 +1184,7 @@ export class RuntimeP2P {
       if (!replicaSignerId) {
         continue;
       }
-      try {
-        getSignerPrivateKey(this.env, replicaSignerId);
-      } catch {
-        continue;
-      }
+      if (getSignerPrivateKeyIfAvailable(this.env, replicaSignerId) === null) continue;
       const normalizedEntityId = normalizeId(entityId);
       if (seen.has(normalizedEntityId)) continue;
       if (advertisedSet && !advertisedSet.has(normalizedEntityId)) continue;

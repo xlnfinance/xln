@@ -16,6 +16,11 @@ import { registrationEvidenceKey } from '../jurisdiction/registration-evidence';
 
 export type { JAdapterMode };
 
+export const SCENARIO_JADAPTER_MISSING = 'SCENARIO_JADAPTER_MISSING';
+
+export const isScenarioJAdapterMissingError = (error: unknown): boolean =>
+  error instanceof Error && error.message.startsWith(`${SCENARIO_JADAPTER_MISSING}:`);
+
 const IS_BROWSER_RUNTIME = typeof window !== 'undefined' && typeof document !== 'undefined';
 const IS_NODE_RUNTIME = !IS_BROWSER_RUNTIME;
 
@@ -526,7 +531,7 @@ export function getScenarioJAdapter(env: Env): JAdapter {
   for (const jr of env.jReplicas?.values() || []) {
     if (jr.jadapter) return jr.jadapter;
   }
-  throw new Error('No JAdapter found on env — call bootScenario() first');
+  throw new Error(`${SCENARIO_JADAPTER_MISSING}: call bootScenario() first`);
 }
 
 // ============================================================================

@@ -87,7 +87,18 @@ export function buildNetworkGraph(
       }
 
       // Get capacities for this token
-      const tokenCapacity = getTokenCapacity(account.tokenCapacities, tokenId);
+      let tokenCapacity: ReturnType<typeof getTokenCapacity>;
+      try {
+        tokenCapacity = getTokenCapacity(account.tokenCapacities, tokenId);
+      } catch (error) {
+        routingGraphLog.warn('drop_profile_invalid_capacity', {
+          entityId: fromEntity,
+          counterpartyId: toEntity,
+          tokenId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        continue;
+      }
       if (!tokenCapacity || tokenCapacity.outCapacity === 0n) continue;
 
       const baseFee = sanitizeBaseFee(profile.metadata.baseFee);

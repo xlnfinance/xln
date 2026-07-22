@@ -35,12 +35,7 @@ export const listLocalControlEntities = (
   for (const replica of env.eReplicas?.values?.() || []) {
     const entityId = String(replica?.entityId || '').toLowerCase();
     if (!entityId || seen.has(entityId)) continue;
-    let signerId = '';
-    try {
-      signerId = resolveEntityProposerId(env, entityId, 'daemon-control.list');
-    } catch {
-      continue;
-    }
+    const signerId = resolveEntityProposerId(env, entityId, 'daemon-control.list');
     seen.add(entityId);
     const profile = replica?.state?.profile as (typeof replica.state.profile & { publicAccounts?: unknown[] }) | undefined;
     entities.push({

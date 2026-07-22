@@ -146,7 +146,7 @@ import {
   deriveSignerKeySync,
   getCachedSignerPrivateKey,
   getLocalSignerPrivateKey,
-  getSignerPrivateKey,
+  getSignerPrivateKeyIfAvailable,
   prewarmSignerKeyCache,
   registerSignerKey,
 } from './account/crypto';
@@ -2103,14 +2103,7 @@ const getLocalSignerIdsForEntity = (env: Env, entityId: string): string[] => {
     const replicaEntityId = extractEntityId(replicaKey).toLowerCase();
     const signerId = extractSignerId(replicaKey);
     if (replicaEntityId !== targetEntityId || !signerId) continue;
-    try {
-      getSignerPrivateKey(env, signerId);
-      signerIds.add(signerId);
-    } catch {
-      // Imported/read-only replicas are useful for route inspection, but they
-      // must never make network outputs "local". Only a replica whose signer key
-      // is present can consume routed entity input without relay delivery.
-    }
+    if (getSignerPrivateKeyIfAvailable(env, signerId) !== null) signerIds.add(signerId);
   }
   return [...signerIds];
 };
@@ -3325,11 +3318,7 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
         const entityId = extractEntityId(replicaKey);
         const signerId = extractSignerId(replicaKey);
         if (!entityId || !signerId) continue;
-        try {
-          getSignerPrivateKey(env, signerId);
-        } catch {
-          continue;
-        }
+        if (getSignerPrivateKeyIfAvailable(env, signerId) === null) continue;
         if (profiles.has(entityId)) continue;
         const existingTs = env.gossip?.getProfiles?.().find((profile) => profile.entityId === entityId)?.lastUpdated ?? 0;
         const liveTimestamp = Math.max(existingTs + 1, env.timestamp || 1);
@@ -5013,12 +5002,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
         const signerId = extractSignerId(replicaKey);
         const entityId = extractEntityId(replicaKey).toLowerCase();
         if (!signerId) continue;
-        try {
-          getSignerPrivateKey(env, signerId);
-          localEntityIds.add(entityId);
-        } catch {
-          // A valid imported replica without its private signer key is read-only.
-        }
+        if (getSignerPrivateKeyIfAvailable(env, signerId) !== null) localEntityIds.add(entityId);
       }
       return localEntityIds;
     };
