@@ -226,10 +226,12 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   3,111-test unit gate.
 - [x] Make `run-with-test-cleanup` own and stop its complete child process tree
   on SIGINT/SIGTERM. The wrapper owns one process group; `local-prod-smoke`
-  idempotently stops the exact detached groups it creates before exiting. L1:
-  20/20 PASS, 124 assertions, both signals remove child and grandchild. L2 on
-  `08f19315d`: interrupted live bootstrap exited 130; Anvil/orchestrator PID and
-  listeners were 0; the next E2E port scan returned `E2E_PORT_SCAN_CLEAN`.
+  idempotently stops the exact detached groups it creates before exiting. All
+  three runners share one fail-loud process-group primitive (-62 duplicate LOC).
+  L1: runtime types, cleanup 20/20 and supervisor 3/3 PASS; both signals remove
+  child and grandchild. L2: interrupted live bootstrap exited 130 with 0
+  Anvil/orchestrator PID/listeners and `E2E_PORT_SCAN_CLEAN`; normal fresh
+  bootstrap then passed in 103.9s and left 0 listeners.
 - [ ] Replace fixed E2E waits with observable state predicates. Run 10x on one
   immutable SHA before quarantining any historically flaky scenario.
 - [ ] Merge duplicate payment E2E only after unique assertions are preserved in

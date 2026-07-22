@@ -3,7 +3,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { statSync, watch, type FSWatcher } from 'node:fs';
 import { resolve } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
+import { stopProcessGroup } from './process-group';
 
 type SupervisorOptions = Readonly<{
   label: string;
@@ -95,44 +95,16 @@ export const parseDevWatchSupervisorArgs = (argv: string[]): SupervisorOptions =
   return { ...options, command, commandArgs };
 };
 
-const processGroupAlive = (pid: number): boolean => {
-  try {
-    process.kill(-pid, 0);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
-    if ((error as NodeJS.ErrnoException).code === 'EPERM') return true;
-    throw error;
-  }
-};
-
-const signalProcessGroup = (pid: number, signal: NodeJS.Signals): void => {
-  try {
-    process.kill(-pid, signal);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
-    throw new Error(`DEV_WATCH_GROUP_SIGNAL_FAILED:pid=${pid}:signal=${signal}`, { cause: error });
-  }
-};
-
-const waitForProcessGroupExit = async (pid: number, timeoutMs: number): Promise<boolean> => {
-  const deadline = performance.now() + timeoutMs;
-  while (performance.now() < deadline) {
-    if (!processGroupAlive(pid)) return true;
-    await delay(25);
-  }
-  return !processGroupAlive(pid);
-};
-
 const stopGeneration = async (generation: Generation, options: SupervisorOptions, reason: string): Promise<void> => {
   const { pid, number } = generation;
   console.log(`[${options.label}] stopping generation=${number} pgid=${pid} reason=${reason}`);
-  signalProcessGroup(pid, 'SIGTERM');
-  if (await waitForProcessGroupExit(pid, options.termTimeoutMs)) return;
-  console.warn(`[${options.label}] force-stopping generation=${number} pgid=${pid}`);
-  signalProcessGroup(pid, 'SIGKILL');
-  if (await waitForProcessGroupExit(pid, options.killTimeoutMs)) return;
-  throw new Error(`DEV_WATCH_GROUP_EXIT_TIMEOUT:label=${options.label}:generation=${number}:pgid=${pid}`);
+  await stopProcessGroup({
+    pid,
+    termTimeoutMs: options.termTimeoutMs,
+    killTimeoutMs: options.killTimeoutMs,
+    timeoutError: `DEV_WATCH_GROUP_EXIT_TIMEOUT:label=${options.label}:generation=${number}:pgid=${pid}`,
+    onEscalate: () => console.warn(`[${options.label}] force-stopping generation=${number} pgid=${pid}`),
+  });
 };
 
 const shouldRestartForPath = (filename: string | Buffer | null): boolean => (

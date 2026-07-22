@@ -8,6 +8,7 @@ import {
   transferTestArtifactRunLease,
 } from './test-artifact-cleanup';
 import { sanitizeChildProcessEnv } from '../server/child-process-env';
+import { signalProcessGroup, stopProcessGroup } from './process-group';
 
 type CleanupScope = 'all' | 'e2e';
 
@@ -25,45 +26,16 @@ const CLEANUP_ONLY_FLAGS = new Set(['--keep-test-artifacts', '--no-cleanup']);
 const CHILD_GROUP_STOP_TIMEOUT_MS = 5_000;
 const WRAPPER_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
 
-const signalProcessGroup = (pid: number, signal: NodeJS.Signals): boolean => {
-  try {
-    process.kill(-pid, signal);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
-    throw error;
-  }
-};
-
-const processGroupIsAlive = (pid: number): boolean => {
-  try {
-    process.kill(-pid, 0);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
-    throw error;
-  }
-};
-
-const waitForProcessGroupExit = async (pid: number, timeoutMs: number): Promise<boolean> => {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (!processGroupIsAlive(pid)) return true;
-    await new Promise(resolve => setTimeout(resolve, 20));
-  }
-  return !processGroupIsAlive(pid);
-};
-
 export const stopChildProcessGroup = async (
   pid: number,
   signal: NodeJS.Signals = 'SIGTERM',
-): Promise<void> => {
-  if (!signalProcessGroup(pid, signal)) return;
-  if (await waitForProcessGroupExit(pid, CHILD_GROUP_STOP_TIMEOUT_MS)) return;
-  signalProcessGroup(pid, 'SIGKILL');
-  if (await waitForProcessGroupExit(pid, CHILD_GROUP_STOP_TIMEOUT_MS)) return;
-  throw new Error(`TEST_CLEANUP_CHILD_GROUP_STOP_TIMEOUT:pid=${pid}`);
-};
+): Promise<void> => stopProcessGroup({
+  pid,
+  signal,
+  termTimeoutMs: CHILD_GROUP_STOP_TIMEOUT_MS,
+  killTimeoutMs: CHILD_GROUP_STOP_TIMEOUT_MS,
+  timeoutError: `TEST_CLEANUP_CHILD_GROUP_STOP_TIMEOUT:pid=${pid}`,
+});
 
 const readOptionValue = (args: string[], index: number, name: string): { value: string; nextIndex: number } => {
   const arg = args[index] || '';

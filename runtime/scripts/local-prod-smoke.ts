@@ -10,6 +10,7 @@ import {
   findFirstRuntimeFatalLogHit,
   tailLog,
 } from './e2e-fatal-log-monitor';
+import { stopProcessGroup } from './process-group';
 import { getHubMeshBudgetElapsedMs } from './bootstrap-stage-budget';
 import {
   evaluateMmHealthProbeFailure,
@@ -320,23 +321,16 @@ const copySnapshotTemplate = (sourceDir: string, targetDir: string): void => {
 const performStopManaged = async (): Promise<void> => {
   // Mark intentional cleanup so induced child exits never overwrite the original root cause.
   emitDebugEvent('cleanup', { stage: 'stop-managed', intentional: true });
-  for (const child of children.reverse()) {
-    if (!child.proc.pid || child.proc.exitCode !== null) continue;
-    try {
-      process.kill(-child.proc.pid, 'SIGTERM');
-    } catch (error) {
-      console.warn(`[local-prod-smoke] SIGTERM failed pid=${child.proc.pid}`, error);
-    }
-  }
-  await sleep(2_000);
-  for (const child of children) {
-    if (!child.proc.pid || child.proc.exitCode !== null) continue;
-    try {
-      process.kill(-child.proc.pid, 'SIGKILL');
-    } catch (error) {
-      console.warn(`[local-prod-smoke] SIGKILL failed pid=${child.proc.pid}`, error);
-    }
-  }
+  await Promise.all([...children].reverse().map(({ name, proc }) => (
+    proc.pid
+      ? stopProcessGroup({
+        pid: proc.pid,
+        termTimeoutMs: 2_000,
+        killTimeoutMs: 2_000,
+        timeoutError: `LOCAL_PROD_SMOKE_GROUP_EXIT_TIMEOUT:name=${name}:pid=${proc.pid}`,
+      })
+      : Promise.resolve()
+  )));
 };
 
 let stopManagedPromise: Promise<void> | null = null;
