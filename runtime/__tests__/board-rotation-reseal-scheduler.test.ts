@@ -157,6 +157,7 @@ test('bad board reseal account cannot block good output and retries from one bou
     false,
   );
   expect(first.outputs.map(output => output.entityId)).toEqual([goodId]);
+  expect(first.accountChanges).toEqual([badId, goodId].sort());
   expect(first.hashesToSign).toEqual([expect.objectContaining({ hash: digest(202), type: 'accountFrame' })]);
   expect(first.newState.accounts.get(goodId)?.boardResealMigration).toBeUndefined();
   expect(first.newState.accounts.get(badId)?.boardResealMigration?.reason)
@@ -180,6 +181,7 @@ test('bad board reseal account cannot block good output and retries from one bou
     false,
   );
   expect(second.outputs.map(output => output.entityId)).toEqual([badId]);
+  expect(second.accountChanges).toEqual([badId]);
   expect(second.hashesToSign?.map(entry => entry.hash).sort()).toEqual([digest(201), digest(211)].sort());
   expect(second.newState.accounts.get(badId)?.boardResealMigration).toBeUndefined();
   expect(second.newState.crontabState?.hooks.has(BOARD_RESEAL_HOOK_ID)).toBe(false);
@@ -231,6 +233,7 @@ test('1000 board reseals drain in deterministic 32-account frames across restart
     state.timestamp = hook.triggerAt;
     const result = await handleScheduledWakeEntityTx(env, state, scheduledWakeForHook(state, signerId), false);
     expect(result.outputs.length).toBeGreaterThan(0);
+    expect(result.accountChanges).toEqual(nextIds);
     expect(result.outputs.length).toBeLessThanOrEqual(32);
     expect(result.hashesToSign?.length).toBe(result.outputs.length);
     expect(Buffer.byteLength(safeStringify({ outputs: result.outputs, hashesToSign: result.hashesToSign })))

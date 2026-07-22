@@ -18,7 +18,7 @@ import {
   computeEntityFrameAuthorityRoot,
 } from '../entity/consensus/state-root';
 import { generateLazyEntityId } from '../entity/factory';
-import { markStorageEntityDirty } from '../machine/env-events';
+import { applyRuntimeStorageChanges } from '../machine/env-events';
 import { createEmptyEnv, enqueueRuntimeInput, process as processRuntime } from '../runtime';
 import { recoverStorageDbFromHistory, saveRuntimeFrameToStorage } from '../storage';
 import { keyConsumptionNode } from '../storage/keys';
@@ -173,7 +173,7 @@ test('snapshot retention keeps old witnesses until their roots are pruned, then 
 
   replica.state = { ...replica.state, consumptionAccumulator: accumulator };
   refreshGenesisAnchor(replica);
-  markStorageEntityDirty(env, entityId);
+  applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
   env.runtimeConfig = {
     storage: {
       enabled: true,
@@ -205,7 +205,7 @@ test('snapshot retention keeps old witnesses until their roots are pruned, then 
   refreshGenesisAnchor(replica);
   env.height += 1;
   env.timestamp += 1;
-  markStorageEntityDirty(env, entityId);
+  applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
   await save();
 
   expect(await isMissing(historyDb, keyConsumptionNode(replacedHash))).toBe(true);

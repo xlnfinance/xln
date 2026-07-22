@@ -62,7 +62,6 @@ import {
 } from '../account/rebalance-defaults';
 import { terminateHtlcRoute } from './tx/htlc-route-lifecycle';
 import { getEntityCertifiedJurisdictionHeight } from '../jurisdiction/height';
-import { markStorageAccountDirty, markStorageEntityDirty } from '../machine/env-events';
 import { createStructuredLogger, shortHash, shortId } from '../infra/logger';
 import { batchAddReserveToCollateral, initJBatch } from '../jurisdiction/batch';
 import { accountInputProposal, accountInputReferenceHeight } from '../account/consensus/flush';
@@ -96,6 +95,7 @@ const accountInputProposedFrameHeight = (input: AccountInput): number => {
 type CrontabExecutionContext = {
   manualBroadcastInInput: boolean;
   hashesToSign?: HashToSign[];
+  accountChanges: Set<string>;
 };
 
 /** Emit liveness diagnostics only from the canonical post-frame state. */
@@ -228,14 +228,6 @@ const CRONTAB_TASK_HANDLERS: Record<CrontabTaskMethod, CrontabTaskHandler> = {
   hubRebalance: hubRebalanceHandler,
 };
 
-const markEntityCrontabDirty = (env: Env, replica: EntityReplica): void => {
-  markStorageEntityDirty(env, replica.state.entityId || replica.entityId);
-};
-
-const markEntityAccountDirty = (env: Env, replica: EntityReplica, counterpartyId: string): void => {
-  markStorageAccountDirty(env, replica.state.entityId || replica.entityId, counterpartyId);
-};
-
 // ═══════════════════════════════════════════════════════════════════════
 // Scheduled Hooks API (setTimeout-like)
 // ═══════════════════════════════════════════════════════════════════════
@@ -294,7 +286,6 @@ export async function executeCrontab(
     }
 
     if (dueHooks.length > 0) {
-      markEntityCrontabDirty(env, replica);
       crontabLog.debug('hooks.fired', { entity: shortId(replica.entityId), count: dueHooks.length, timestamp: now });
       const hookOutputs = await processDueHooks(env, dueHooks, replica, context);
       allOutputs.push(...hookOutputs);
@@ -312,7 +303,6 @@ export async function executeCrontab(
       const outputs = await handler(env, replica, task, context);
       allOutputs.push(...outputs);
       task.lastRun = now;
-      markEntityCrontabDirty(env, replica);
       if (outputs.length > 0) {
         crontabLog.debug('task.outputs', { method: task.method, outputs: outputs.length });
       }
@@ -382,7 +372,6 @@ async function processDueHooks(
                 type: 'dispute_deadline',
                 data: { accountId },
               });
-              markEntityCrontabDirty(env, replica);
             }
             crontabLog.debug('dispute.wait_onchain_start', {
               account: shortId(accountId),
@@ -400,7 +389,6 @@ async function processDueHooks(
                 type: 'dispute_deadline',
                 data: { accountId },
               });
-              markEntityCrontabDirty(env, replica);
             }
             crontabLog.debug('dispute.retry_until_timeout', {
               account: shortId(accountId),
@@ -423,7 +411,7 @@ async function processDueHooks(
 
           if (sentHasFinalize || replica.state.jBatchState?.sentBatch) {
             account.activeDispute.finalizeQueued = sentHasFinalize || (account.activeDispute.finalizeQueued ?? false);
-            markEntityAccountDirty(env, replica, accountId);
+            context.accountChanges.add(accountId);
             const retryMs = 1000;
             if (replica.state.crontabState) {
               scheduleHook(replica.state.crontabState, {
@@ -432,7 +420,6 @@ async function processDueHooks(
                 type: 'dispute_deadline',
                 data: { accountId },
               });
-              markEntityCrontabDirty(env, replica);
             }
             crontabLog.debug('dispute.deferred_sent_batch', { account: shortId(accountId), retryMs });
             break;
@@ -440,7 +427,7 @@ async function processDueHooks(
 
           if (draftHasFinalize) {
             account.activeDispute.finalizeQueued = true;
-            markEntityAccountDirty(env, replica, accountId);
+            context.accountChanges.add(accountId);
             shouldBroadcastQueuedDisputeFinalizations = true;
             break;
           }
@@ -448,7 +435,7 @@ async function processDueHooks(
           if (account.activeDispute.finalizeQueued) {
             // Recover from stale local latch (e.g. after abort/drop of previous finalize batch).
             account.activeDispute.finalizeQueued = false;
-            markEntityAccountDirty(env, replica, accountId);
+            context.accountChanges.add(accountId);
           }
 
           disputeFinalizeCounterparties.add(accountId);
@@ -468,7 +455,6 @@ async function processDueHooks(
           // ACK already finalized (lock removed) — clear latch and skip.
           if (inboundLockId && !account.locks?.has(inboundLockId)) {
             terminateHtlcRoute(replica.state, hashlock, replica.state.timestamp);
-            markEntityCrontabDirty(env, replica);
             break;
           }
 
@@ -500,7 +486,6 @@ async function processDueHooks(
           const task = replica.state.crontabState?.tasks?.get('hubRebalance');
           if (task) {
             task.lastRun = 0;
-            markEntityCrontabDirty(env, replica);
             crontabLog.debug('hub_rebalance.kick');
           }
         }
@@ -524,7 +509,7 @@ async function processDueHooks(
           outputs.push(...drafts.outputs);
           context.hashesToSign.push(...drafts.hashesToSign);
           for (const update of drafts.accountMigrations) {
-            markEntityAccountDirty(env, replica, update.counterpartyId);
+            context.accountChanges.add(update.counterpartyId);
           }
           const pendingForActivation = [...replica.state.accounts.values()].some(account =>
             account.boardResealMigration?.activationJHeight === activation.jHeight &&
@@ -545,7 +530,6 @@ async function processDueHooks(
             });
           }
           if (drafts.accountMigrations.length > 0 || drafts.hasMore || pendingForActivation) {
-            markEntityCrontabDirty(env, replica);
           }
         }
         break;
@@ -831,7 +815,6 @@ async function hubRebalanceHandler(
   // Initialize jBatch if needed
   if (!replica.state.jBatchState) {
     replica.state.jBatchState = initJBatch();
-    markEntityCrontabDirty(_env, replica);
   }
 
   // Pending broadcast blocks direct jBatch mutations (R→C/C→R execute), but we can still
@@ -906,7 +889,7 @@ async function hubRebalanceHandler(
           tokenId,
         });
         accountMachine.requestedRebalance.delete(tokenId);
-        markEntityAccountDirty(_env, replica, counterpartyId);
+        context.accountChanges.add(counterpartyId);
         continue;
       }
       const prepaidFee = feeState.feePaidUpfront;
@@ -962,7 +945,7 @@ async function hubRebalanceHandler(
         accountMachine.shadow.rebalance.submittedAtByToken.delete(tokenId);
         jBatchSubmittedAt = 0;
         submittedBatchStale = false;
-        markEntityAccountDirty(_env, replica, counterpartyId);
+        context.accountChanges.add(counterpartyId);
         emitRebalanceDebug({
           step: 2,
           status: 'retry',
@@ -1023,7 +1006,7 @@ async function hubRebalanceHandler(
         });
         accountMachine.requestedRebalance.delete(tokenId);
         accountMachine.requestedRebalanceFeeState?.delete(tokenId);
-        markEntityAccountDirty(_env, replica, counterpartyId);
+        context.accountChanges.add(counterpartyId);
         continue;
       }
 
@@ -1086,12 +1069,11 @@ async function hubRebalanceHandler(
           target.tokenId,
           target.amount,
         );
-        markEntityCrontabDirty(_env, replica);
         const targetAccount = replica.state.accounts.get(target.counterpartyId);
         const targetFeeState = targetAccount?.requestedRebalanceFeeState?.get(target.tokenId);
         if (targetAccount && targetFeeState && !targetAccount.shadow.rebalance.submittedAtByToken.has(target.tokenId)) {
           targetAccount.shadow.rebalance.submittedAtByToken.set(target.tokenId, now);
-          markEntityAccountDirty(_env, replica, target.counterpartyId);
+          context.accountChanges.add(target.counterpartyId);
         }
         queuedCount += 1;
         crontabLog.debug('rebalance.r2c.batch_add', {

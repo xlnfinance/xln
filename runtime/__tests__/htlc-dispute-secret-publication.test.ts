@@ -110,6 +110,7 @@ describe('HTLC dispute secret publication liveness', () => {
 
     const outputs = await executeCrontab(env, replica, state.crontabState, {
       manualBroadcastInInput: false,
+      accountChanges: new Set(),
     });
     const finalize = outputs
       .flatMap((output) => output.entityTxs ?? [])

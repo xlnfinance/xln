@@ -251,6 +251,7 @@ describe('atomic settlement Account transition', () => {
 
     const outputs = await executeCrontab(env, replica, state.crontabState, {
       manualBroadcastInInput: false,
+      accountChanges: new Set(),
     });
 
     expect(outputs.flatMap(output => output.entityTxs ?? []).map(tx => tx.type))
@@ -298,6 +299,7 @@ describe('atomic settlement Account transition', () => {
 
     const outputs = await executeCrontab(env, replica, state.crontabState, {
       manualBroadcastInInput: false,
+      accountChanges: new Set(),
     });
 
     expect(outputs.flatMap(output => output.entityTxs ?? []).map(tx => tx.type))

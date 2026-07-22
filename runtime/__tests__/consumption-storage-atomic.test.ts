@@ -25,7 +25,7 @@ import {
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
 } from '../entity/consensus/state-root';
-import { markStorageEntityDirty } from '../machine/env-events';
+import { applyRuntimeStorageChanges } from '../machine/env-events';
 import { recoverStorageDbFromHistory, saveRuntimeFrameToStorage } from '../storage';
 import { decodeBuffer } from '../storage/codec';
 import { KEY_HEAD, keyConsumptionNode, keyDiff, keyLiveEntity } from '../storage/keys';
@@ -166,7 +166,7 @@ test('normal frame atomically publishes accumulator root, witness node, diff, an
   });
   expect(() => buildRuntimeCheckpointSnapshot(env)).toThrow(`CONSUMPTION_NODE_CORRUPT:${node.hash}`);
   store.set(node.hash, node.node);
-  markStorageEntityDirty(env, entityId);
+  applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
   env.runtimeConfig = {
     storage: {
       enabled: true,

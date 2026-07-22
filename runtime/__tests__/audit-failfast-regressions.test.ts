@@ -3352,7 +3352,7 @@ describe('audit fail-fast regressions', () => {
     });
   });
 
-  test('crontab-only canonical mutations mark entity docs dirty for storage replay', async () => {
+  test('crontab-only canonical mutations stay local until Entity frame commit', async () => {
     const seed = 'crontab-storage-mark seed alpha beta gamma';
     const env = createEmptyEnv(seed);
     env.scenarioMode = true;
@@ -3377,11 +3377,14 @@ describe('audit fail-fast regressions', () => {
       state,
     } as EntityReplica;
 
-    await executeCrontab(env, replica, state.crontabState, { manualBroadcastInInput: false });
+    await executeCrontab(env, replica, state.crontabState, {
+      manualBroadcastInInput: false,
+      accountChanges: new Set(),
+    });
 
     const marks = env.runtimeState?.currentStorageOverlayMarks ?? [];
     expect(state.crontabState.hooks.has('test-settlement-window')).toBe(false);
-    expect(marks.some((record) => record.family === 'entity' && record.entityId === entityId)).toBe(true);
+    expect(marks).toEqual([]);
   });
 
   test('single-signer j_broadcast attaches consensus hanko to J batch output', async () => {
@@ -5595,6 +5598,7 @@ describe('audit fail-fast regressions', () => {
 
     const outputs = await executeCrontab(env, replica, replica.state.crontabState!, {
       manualBroadcastInInput: false,
+      accountChanges: new Set(),
     });
 
     expect(outputs).toHaveLength(1);
@@ -5639,6 +5643,7 @@ describe('audit fail-fast regressions', () => {
     try {
       const outputs = await executeCrontab(env, replica, replica.state.crontabState!, {
         manualBroadcastInInput: false,
+        accountChanges: new Set(),
       });
       const rollback = outputs.flatMap(output => output.entityTxs ?? [])
         .find(tx => tx.type === 'rollbackTimedOutFrames');
@@ -5748,6 +5753,7 @@ describe('audit fail-fast regressions', () => {
 
     const outputs = await executeCrontab(env, replica, replica.state.crontabState!, {
       manualBroadcastInInput: false,
+      accountChanges: new Set(),
     });
 
     expect(outputs).toHaveLength(1);

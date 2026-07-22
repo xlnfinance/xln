@@ -144,14 +144,14 @@ const pushOverlayRecord = (env: Env, record: RuntimeOverlayRecord): void => {
   currentMarks.push({ ...record });
 };
 
-export const markStorageEntityDirty = (env: Env, entityId: string): void => {
+const markStorageEntityDirty = (env: Env, entityId: string): void => {
   const normalized = String(entityId || '').toLowerCase();
   if (!normalized) return;
   const record: RuntimeOverlayRecord = { family: 'entity', entityId: normalized };
   pushOverlayRecord(env, record);
 };
 
-export const markStorageAccountDirty = (env: Env, entityId: string, counterpartyId: string): void => {
+const markStorageAccountDirty = (env: Env, entityId: string, counterpartyId: string): void => {
   const normalizedEntityId = String(entityId || '').toLowerCase();
   const normalizedCounterpartyId = String(counterpartyId || '').toLowerCase();
   if (!normalizedEntityId || !normalizedCounterpartyId) return;
@@ -168,7 +168,7 @@ export const markStorageAccountDirty = (env: Env, entityId: string, counterparty
   pushOverlayRecord(env, record);
 };
 
-export const markStorageBookDirty = (
+const markStorageBookDirty = (
   env: Env,
   entityId: string,
   pairId: string,
@@ -186,23 +186,32 @@ export const markStorageBookDirty = (
   pushOverlayRecord(env, record);
 };
 
-export const applyStorageChanges = (
+export const applyRuntimeStorageChanges = (
   env: Env,
-  state: EntityState,
   changes: readonly RuntimeOverlayRecord[],
 ): void => {
   for (const change of changes) {
     if (change.family === 'entity') {
       markStorageEntityDirty(env, change.entityId);
     } else if (change.family === 'account') {
-      if (change.entityId.toLowerCase() === state.entityId.toLowerCase()) {
-        invalidateEntityAccountCommitment(state, change.counterpartyId);
-      }
       markStorageAccountDirty(env, change.entityId, change.counterpartyId);
     } else {
       markStorageBookDirty(env, change.entityId, change.pairId, change.deleted === true);
     }
   }
+};
+
+export const applyStorageChanges = (
+  env: Env,
+  state: EntityState,
+  changes: readonly RuntimeOverlayRecord[],
+): void => {
+  for (const change of changes) {
+    if (change.family === 'account' && change.entityId.toLowerCase() === state.entityId.toLowerCase()) {
+      invalidateEntityAccountCommitment(state, change.counterpartyId);
+    }
+  }
+  applyRuntimeStorageChanges(env, changes);
 };
 
 // AccountMachine already owns currentFrame and pendingFrame. Historical frames
@@ -268,7 +277,7 @@ export const recordAccountFrameHistory = (
     source: record.source,
     frame: structuredClone(record.frame),
   });
-  markStorageAccountDirty(env, entityId, counterpartyId);
+  applyRuntimeStorageChanges(env, [{ family: 'account', entityId, counterpartyId }]);
 };
 
 export const recordEntityFrameHistory = (
@@ -307,21 +316,7 @@ export const recordEntityFrameHistory = (
     entityHeight,
     link: structuredClone(record.link),
   });
-  markStorageEntityDirty(env, entityId);
-};
-
-export const recordOrderbookPairUpdate = (
-  env: Env,
-  record: {
-    entityId: string;
-    pairId: string;
-    book?: unknown | null;
-  },
-): void => {
-  const entityId = String(record.entityId || '').toLowerCase();
-  const pairId = String(record.pairId || '').trim();
-  if (!entityId || !pairId) return;
-  markStorageBookDirty(env, entityId, pairId, !record.book);
+  applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
 };
 
 export const peekPendingFrameDbRecords = (

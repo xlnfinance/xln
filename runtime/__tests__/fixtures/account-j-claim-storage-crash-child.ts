@@ -29,7 +29,7 @@ import {
 } from '../../entity/consensus/state-root';
 import { generateLazyEntityId } from '../../entity/factory';
 import { handleOpenAccountEntityTx } from '../../entity/tx/handlers/open-account';
-import { markStorageAccountDirty, markStorageEntityDirty } from '../../machine/env-events';
+import { applyRuntimeStorageChanges } from '../../machine/env-events';
 import {
   saveRuntimeFrameToStorage,
   type StoragePersistenceBoundary,
@@ -204,10 +204,12 @@ if (!peerValidation.success || !peerValidation.response) {
   throw new Error(`ACCOUNT_J_CRASH_ACK_FAILED:${peerValidation.error ?? 'missing-response'}`);
 }
 const claimAck = peerValidation.response;
-markStorageAccountDirty(env, entityId, counterpartyId);
-markStorageAccountDirty(env, counterpartyId, entityId);
-markStorageEntityDirty(env, entityId);
-markStorageEntityDirty(env, counterpartyId);
+applyRuntimeStorageChanges(env, [
+  { family: 'account', entityId, counterpartyId },
+  { family: 'account', entityId: counterpartyId, counterpartyId: entityId },
+  { family: 'entity', entityId },
+  { family: 'entity', entityId: counterpartyId },
+]);
 await saveRuntimeFrameToStorage({
   env,
   tryOpenDb: tryOpenStorageDb,

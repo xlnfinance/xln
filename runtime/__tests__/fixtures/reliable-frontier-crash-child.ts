@@ -14,7 +14,7 @@ import {
   receiverFrontierKey,
   senderFrontierKey,
 } from '../../machine/reliable-frontier';
-import { markStorageEntityDirty } from '../../machine/env-events';
+import { applyRuntimeStorageChanges } from '../../machine/env-events';
 import { serializeTaggedJson } from '../../protocol/serialization';
 import {
   createCatchupFixtureState,
@@ -69,7 +69,7 @@ await prepareCatchupFixtureReplica(
   authority.leaderSignerId,
   authority.targetSignerId,
 );
-markStorageEntityDirty(env, authorityState.entityId);
+applyRuntimeStorageChanges(env, [{ family: 'entity', entityId: authorityState.entityId }]);
 env.height = 1;
 env.timestamp = 1;
 await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);

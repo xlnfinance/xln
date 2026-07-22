@@ -123,7 +123,7 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   cannot leak orphan chunks indefinitely; document truncated checksum scope.
 - [x] Add PID-reuse reproducer and bind writer ownership to process birth
   identity. A live writer cannot be stolen; a dead writer cannot block forever.
-- [ ] Replace 83 manual dirty marks incrementally with reducer-returned
+- [x] Replace 83 manual dirty marks incrementally with reducer-returned
   `{nextState, storageChanges, durableEffects}` and differential proof for
   Account, Entity, orderbook and Runtime routing before deleting old marks.
   Phase 1 removes every direct mark from `entity/tx/**`: successful reducers
@@ -144,8 +144,15 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   Account and cross-j orderbook reducers no longer mark global storage directly.
   Validator execution clone/validation preserves storage and Account-J CAS
   changes. Entity/J/schema/deferred L2: 65/65 PASS; commit-boundary L1: 3/3
-  PASS; source/frozen/types PASS. Remaining scheduler/Runtime callsites stay
-  explicit until their own parity proof is green.
+  PASS; source/frozen/types PASS. Phase 4 removes every scheduler-side global
+  write: `scheduledWake` returns exact Account changes through the Entity
+  reducer, while its Entity change is recorded once by that reducer. RuntimeTx
+  mutation helpers return their changed Entity to one typed interpreter inside
+  the isolated Runtime-frame transaction; failed persistence discards state,
+  clock, history, overlay and restores exact input. Low-level mark functions are
+  private, the dead orderbook wrapper is deleted, and production has no direct
+  mark imports. Scheduler/settlement/storage/Runtime atomicity L1-L2: 98/98
+  PASS, 1,733 assertions; Runtime import/J lineage: 51/51 PASS; types PASS.
 - [x] Prove whether `runtime/wal/store.ts`, legacy core DB and duplicate HEAD/DAG
   surfaces have production consumers; delete only demonstrated dead paths. No
   production caller reached the parallel WAL API or empty core LevelDB, so both

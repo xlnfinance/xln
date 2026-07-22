@@ -21,9 +21,11 @@ export const handleScheduledWakeEntityTx = async (
     isProposer: true,
   };
   const hashesToSign: HashToSign[] = [];
+  const accountChanges = new Set<string>();
   const outputs = await executeCrontab(env, replica, state.crontabState, {
     manualBroadcastInInput,
     hashesToSign,
+    accountChanges,
   });
   const approvedEntityTxs: EntityTx[] = [];
   const externalOutputs = outputs.filter((output) => {
@@ -44,5 +46,6 @@ export const handleScheduledWakeEntityTx = async (
     // and lets the command become stale behind unrelated local progress.
     ...(approvedEntityTxs.length > 0 ? { approvedEntityTxs } : {}),
     ...(hashesToSign.length > 0 ? { hashesToSign } : {}),
+    ...(accountChanges.size > 0 ? { accountChanges: [...accountChanges].sort() } : {}),
   };
 };

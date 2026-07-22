@@ -1,5 +1,5 @@
 import { buildDefaultEntitySwapPairs, getTokenIdsForJurisdiction } from '../account/utils';
-import { markStorageEntityDirty } from './env-events';
+import { applyRuntimeStorageChanges } from './env-events';
 import {
   canonicalizeLocalEntityCryptoKeys,
   resolveReplicaEntityCryptoKeys,
@@ -70,6 +70,11 @@ export interface RuntimeTxHandlerDeps {
   isReplay?: boolean;
 }
 
+const commitRuntimeTxEntityChange = (env: Env, entityId: string | undefined): JInput[] => {
+  if (entityId) applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
+  return [];
+};
+
 export const applyRuntimeTx = async (
   env: Env,
   runtimeTx: RuntimeTx,
@@ -121,20 +126,17 @@ export const applyRuntimeTx = async (
     return [];
   }
   if (runtimeTx.type === 'importReplica') {
-    importReplicaRuntimeTx(env, runtimeTx);
-    return [];
+    return commitRuntimeTxEntityChange(env, importReplicaRuntimeTx(env, runtimeTx));
   }
   if (runtimeTx.type === 'observeJRange') {
-    observeJRangeRuntimeTx(env, runtimeTx);
-    return [];
+    return commitRuntimeTxEntityChange(env, observeJRangeRuntimeTx(env, runtimeTx));
   }
   if (runtimeTx.type === 'advanceJWatcherCursor') {
     applyWatcherJurisdictionCursor(env, runtimeTx.data);
     return [];
   }
   if (runtimeTx.type === 'rewindJHistory') {
-    rewindJHistoryRuntimeTx(env, runtimeTx);
-    return [];
+    return commitRuntimeTxEntityChange(env, rewindJHistoryRuntimeTx(env, runtimeTx));
   }
   if (runtimeTx.type === 'retryJSubmit') {
     return applyRetryJSubmitRuntimeTx(env, runtimeTx);
@@ -157,7 +159,7 @@ export const applyRuntimeTx = async (
 const rewindJHistoryRuntimeTx = (
   env: Env,
   runtimeTx: Extract<RuntimeTx, { type: 'rewindJHistory' }>,
-): void => {
+): string => {
   const entityId = String(runtimeTx.data.entityId || '').trim().toLowerCase();
   const signerId = String(runtimeTx.data.signerId || '').trim().toLowerCase();
   const match = findExistingReplicaCaseInsensitive(env, entityId, signerId);
@@ -188,13 +190,13 @@ const rewindJHistoryRuntimeTx = (
   const rewound = rewindValidatorJHistory(match.replica.state, match.replica.jHistory);
   if (rewound) match.replica.jHistory = rewound;
   else delete match.replica.jHistory;
-  markStorageEntityDirty(env, entityId);
+  return entityId;
 };
 
 const observeJRangeRuntimeTx = (
   env: Env,
   runtimeTx: Extract<RuntimeTx, { type: 'observeJRange' }>,
-): void => {
+): string | undefined => {
   const entityId = String(runtimeTx.data.entityId || '').trim().toLowerCase();
   const signerId = String(runtimeTx.data.signerId || '').trim().toLowerCase();
   const match = findExistingReplicaCaseInsensitive(env, entityId, signerId);
@@ -236,7 +238,7 @@ const observeJRangeRuntimeTx = (
     observation,
     match.replica.state,
   );
-  markStorageEntityDirty(env, entityId);
+  return entityId;
 };
 
 const resolveImportCheckpointState = (
@@ -271,7 +273,7 @@ const resolveImportCheckpointState = (
   return selected.state;
 };
 
-const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): void => {
+const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): string => {
   const importedEntityId = String(runtimeTx.entityId || '').toLowerCase();
   const importedSignerId =
     normalizeRuntimeId(String(runtimeTx.signerId || '')) ||
@@ -313,8 +315,7 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): vo
       canonicalizeLocalEntityCryptoKeys(env, importedEntityId, importedSignerId, existingReplica.state);
       if (existingReplicaKey !== replicaKey) env.eReplicas.delete(existingReplicaKey);
       env.eReplicas.set(replicaKey, existingReplica);
-      markStorageEntityDirty(env, importedEntityId);
-      return;
+      return importedEntityId;
     }
 
     backfillEntityJurisdictionBinding(env, importedEntityId, config.jurisdiction!);
@@ -336,14 +337,13 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): vo
       env.eReplicas.delete(existingReplicaKey);
     }
     env.eReplicas.set(replicaKey, existingReplica);
-    markStorageEntityDirty(env, existingReplica.state.entityId);
     if (DEBUG) {
       runtimeTxLog.debug('replica.restored_reused', {
         entity: formatEntityDisplay(importedEntityId),
         signer: formatSignerDisplay(importedSignerId),
       });
     }
-    return;
+    return importedEntityId;
   }
 
   const replicaKeys = resolveReplicaEntityCryptoKeys(env, importedEntityId, importedSignerId);
@@ -373,14 +373,13 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): vo
         : {}),
     };
     env.eReplicas.set(replicaKey, checkpointReplica);
-    markStorageEntityDirty(env, importedEntityId);
     runtimeTxLog.info('replica.imported_from_certified_checkpoint', {
       entity: formatEntityDisplay(importedEntityId),
       signer: formatSignerDisplay(importedSignerId),
       height: checkpointState.height,
       head: checkpointState.prevFrameHash ?? 'genesis',
     });
-    return;
+    return importedEntityId;
   }
   backfillEntityJurisdictionBinding(env, importedEntityId, config.jurisdiction!);
   const replica: EntityReplica = {
@@ -438,8 +437,6 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): vo
   }
 
   env.eReplicas.set(replicaKey, replica);
-  markStorageEntityDirty(env, replica.state.entityId);
-
   const createdReplica = env.eReplicas.get(replicaKey);
   const actualJBlock = createdReplica?.state.lastFinalizedJHeight;
   if (typeof actualJBlock !== 'number') {
@@ -448,6 +445,7 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): vo
         `expected=number actualType=${typeof actualJBlock} actual=${String(actualJBlock)}`,
     );
   }
+  return importedEntityId;
 };
 
 const findExistingReplicaCaseInsensitive = (

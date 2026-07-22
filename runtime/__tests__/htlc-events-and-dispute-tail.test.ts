@@ -313,6 +313,7 @@ describe('htlc event contract and dispute tail', () => {
 
     const outputs = await executeCrontab(env, replica, replica.state.crontabState!, {
       manualBroadcastInInput: false,
+      accountChanges: new Set(),
     });
 
     expect(outputs).toHaveLength(1);

@@ -54,7 +54,7 @@ import {
   buildLocalJPrefixAttestation,
   mergeJPrefixAttestations,
 } from '../../jurisdiction/j-prefix-consensus';
-import { markStorageEntityDirty } from '../../machine/env-events';
+import { applyRuntimeStorageChanges } from '../../machine/env-events';
 import { cloneIsolatedRuntimeInput } from '../../protocol/runtime-input-clone';
 import { collectDueJSubmitRuntimeTxs } from '../../machine/j-submit-scheduler';
 import { registerPendingCommittedJOutbox } from '../../machine/j-submit-state';
@@ -449,7 +449,7 @@ proposerReplica.hankoWitness = new Map([[batchHash, {
 
 if (!recoveryLagMode && !recoveryBoardRootLagMode) {
   env.runtimeConfig.storage = { ...env.runtimeConfig.storage, enabled: true };
-  markStorageEntityDirty(env, entityId);
+  applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
   await saveRuntimeFrameToStorage({
     env,
     currentFrameInput: { runtimeTxs: [], entityInputs: [] },
@@ -469,7 +469,7 @@ const [retry] = collectDueJSubmitRuntimeTxs(env, env.timestamp);
 if (!retry) throw new Error('crash fixture J-submit retry missing');
 registerPendingCommittedJOutbox(env, await applyRuntimeTx(env, retry, { isReplay: true }));
 const appliedRuntimeInput = cloneIsolatedRuntimeInput({ runtimeTxs: [retry], entityInputs: [] });
-markStorageEntityDirty(env, entityId);
+applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
 
 if (recoveryLagMode || recoveryBoardRootLagMode) {
   env.height += 1;

@@ -19,7 +19,7 @@ import {
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
 } from '../entity/consensus/state-root';
-import { markStorageEntityDirty } from '../machine/env-events';
+import { applyRuntimeStorageChanges } from '../machine/env-events';
 import { createEmptyEnv, enqueueRuntimeInput, process as processRuntime } from '../runtime';
 import { inspectStorage, saveRuntimeFrameToStorage } from '../storage';
 import {
@@ -180,7 +180,7 @@ test('retained checkpoint roots preserve board witnesses until snapshot pruning 
         env.height += 1;
         env.timestamp += 1;
       }
-      markStorageEntityDirty(env, entityId);
+      applyRuntimeStorageChanges(env, [{ family: 'entity', entityId }]);
       await save();
       roots.push(updated.root);
       records.push(record);
