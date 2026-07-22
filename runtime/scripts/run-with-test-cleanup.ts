@@ -22,6 +22,48 @@ export type ParsedRunWithTestCleanupArgs = {
 };
 
 const CLEANUP_ONLY_FLAGS = new Set(['--keep-test-artifacts', '--no-cleanup']);
+const CHILD_GROUP_STOP_TIMEOUT_MS = 5_000;
+const WRAPPER_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
+
+const signalProcessGroup = (pid: number, signal: NodeJS.Signals): boolean => {
+  try {
+    process.kill(-pid, signal);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    throw error;
+  }
+};
+
+const processGroupIsAlive = (pid: number): boolean => {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    throw error;
+  }
+};
+
+const waitForProcessGroupExit = async (pid: number, timeoutMs: number): Promise<boolean> => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!processGroupIsAlive(pid)) return true;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  return !processGroupIsAlive(pid);
+};
+
+export const stopChildProcessGroup = async (
+  pid: number,
+  signal: NodeJS.Signals = 'SIGTERM',
+): Promise<void> => {
+  if (!signalProcessGroup(pid, signal)) return;
+  if (await waitForProcessGroupExit(pid, CHILD_GROUP_STOP_TIMEOUT_MS)) return;
+  signalProcessGroup(pid, 'SIGKILL');
+  if (await waitForProcessGroupExit(pid, CHILD_GROUP_STOP_TIMEOUT_MS)) return;
+  throw new Error(`TEST_CLEANUP_CHILD_GROUP_STOP_TIMEOUT:pid=${pid}`);
+};
 
 const readOptionValue = (args: string[], index: number, name: string): { value: string; nextIndex: number } => {
   const arg = args[index] || '';
@@ -115,6 +157,7 @@ const run = async (): Promise<number> => {
 
   const child: ChildProcess = spawn(parsed.command, parsed.commandArgs, {
     cwd: parsed.childCwd || process.cwd(),
+    detached: true,
     env: sanitizeChildProcessEnv({
       ...process.env,
       [TEST_ARTIFACT_CLEANUP_DONE_ENV]: '1',
@@ -132,17 +175,30 @@ const run = async (): Promise<number> => {
     throw error;
   }
 
-  return await new Promise<number>((resolve, reject) => {
-    child.once('error', reject);
-    child.once('exit', (code: number | null, signal: NodeJS.Signals | null) => {
-      if (signal) {
-        process.kill(process.pid, signal);
-        resolve(1);
-        return;
-      }
-      resolve(code ?? 1);
+  let wrapperSignal: NodeJS.Signals | null = null;
+  const signalHandlers = new Map<NodeJS.Signals, () => void>();
+  for (const signal of WRAPPER_SIGNALS) {
+    const handler = (): void => {
+      wrapperSignal ??= signal;
+      signalProcessGroup(child.pid!, signal);
+    };
+    signalHandlers.set(signal, handler);
+    process.on(signal, handler);
+  }
+
+  try {
+    const childResult = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+      child.once('error', reject);
+      child.once('exit', (code, signal) => resolve({ code, signal }));
     });
-  });
+    await stopChildProcessGroup(child.pid, wrapperSignal ?? 'SIGTERM');
+    if (wrapperSignal === 'SIGINT') return 130;
+    if (wrapperSignal === 'SIGTERM') return 143;
+    if (childResult.signal) return 128;
+    return childResult.code ?? 1;
+  } finally {
+    for (const [signal, handler] of signalHandlers) process.off(signal, handler);
+  }
 };
 
 if (import.meta.main) {
