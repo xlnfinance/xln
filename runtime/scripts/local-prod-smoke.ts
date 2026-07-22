@@ -317,7 +317,7 @@ const copySnapshotTemplate = (sourceDir: string, targetDir: string): void => {
   }
 };
 
-const stopManaged = async (): Promise<void> => {
+const performStopManaged = async (): Promise<void> => {
   // Mark intentional cleanup so induced child exits never overwrite the original root cause.
   emitDebugEvent('cleanup', { stage: 'stop-managed', intentional: true });
   for (const child of children.reverse()) {
@@ -338,6 +338,28 @@ const stopManaged = async (): Promise<void> => {
     }
   }
 };
+
+let stopManagedPromise: Promise<void> | null = null;
+const stopManaged = (): Promise<void> => {
+  stopManagedPromise ??= performStopManaged();
+  return stopManagedPromise;
+};
+
+let shutdownSignal: NodeJS.Signals | null = null;
+const handleShutdownSignal = (signal: NodeJS.Signals): void => {
+  if (shutdownSignal) return;
+  shutdownSignal = signal;
+  void stopManaged()
+    .then(() => process.exit(signal === 'SIGINT' ? 130 : 143))
+    .catch(error => {
+      console.error(`[local-prod-smoke] signal cleanup failed signal=${signal}`, error);
+      process.exit(1);
+    });
+};
+const handleSigint = (): void => handleShutdownSignal('SIGINT');
+const handleSigterm = (): void => handleShutdownSignal('SIGTERM');
+process.on('SIGINT', handleSigint);
+process.on('SIGTERM', handleSigterm);
 
 const rpcChainId = async (port: number): Promise<string> => {
   const response = await fetch(`http://127.0.0.1:${port}`, {
@@ -946,4 +968,6 @@ try {
   throw error;
 } finally {
   await stopManaged();
+  process.off('SIGINT', handleSigint);
+  process.off('SIGTERM', handleSigterm);
 }
