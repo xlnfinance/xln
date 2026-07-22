@@ -452,48 +452,50 @@ describe('test artifact cleanup', () => {
     }
   }, 15_000);
 
-  test('SIGINT stops the wrapper child and its complete process group', async () => {
-    const root = makeTempWorkspace();
-    const repoRoot = process.cwd();
-    const wrapperPath = join(repoRoot, 'runtime/scripts/run-with-test-cleanup.ts');
-    const readyPath = join(root, 'process-group-ready.json');
-    const childProbe = [
-      "import { spawn } from 'node:child_process';",
-      "import { writeFileSync } from 'node:fs';",
-      "const root = String(process.env.XLN_TEST_LEASE_PROBE_ROOT || '');",
-      "const grandchild = spawn(process.execPath, ['-e', 'setInterval(() => undefined, 1_000)'], { stdio: 'ignore' });",
-      "writeFileSync(`${root}/process-group-ready.json`, JSON.stringify({ childPid: process.pid, grandchildPid: grandchild.pid }));",
-      'setInterval(() => undefined, 1_000);',
-    ].join('\n');
-    const wrapper = spawn(process.execPath, [
-      wrapperPath,
-      `--cwd=${root}`,
-      '--reason=sigint-process-group',
-      '--',
-      process.execPath,
-      '-e',
-      childProbe,
-    ], {
-      cwd: repoRoot,
-      env: independentTestRunEnv({ XLN_TEST_LEASE_PROBE_ROOT: root }),
-      stdio: 'ignore',
-    });
-    let childPid = 0;
-    let grandchildPid = 0;
+  test('SIGINT and SIGTERM stop the wrapper child and its complete process group', async () => {
+    for (const [signal, exitCode] of [['SIGINT', 130], ['SIGTERM', 143]] as const) {
+      const root = makeTempWorkspace();
+      const repoRoot = process.cwd();
+      const wrapperPath = join(repoRoot, 'runtime/scripts/run-with-test-cleanup.ts');
+      const readyPath = join(root, 'process-group-ready.json');
+      const childProbe = [
+        "import { spawn } from 'node:child_process';",
+        "import { writeFileSync } from 'node:fs';",
+        "const root = String(process.env.XLN_TEST_LEASE_PROBE_ROOT || '');",
+        "const grandchild = spawn(process.execPath, ['-e', 'setInterval(() => undefined, 1_000)'], { stdio: 'ignore' });",
+        "writeFileSync(`${root}/process-group-ready.json`, JSON.stringify({ childPid: process.pid, grandchildPid: grandchild.pid }));",
+        'setInterval(() => undefined, 1_000);',
+      ].join('\n');
+      const wrapper = spawn(process.execPath, [
+        wrapperPath,
+        `--cwd=${root}`,
+        `--reason=${signal.toLowerCase()}-process-group`,
+        '--',
+        process.execPath,
+        '-e',
+        childProbe,
+      ], {
+        cwd: repoRoot,
+        env: independentTestRunEnv({ XLN_TEST_LEASE_PROBE_ROOT: root }),
+        stdio: 'ignore',
+      });
+      let childPid = 0;
+      let grandchildPid = 0;
 
-    try {
-      await waitForFile(readyPath);
-      ({ childPid, grandchildPid } = JSON.parse(readFileSync(readyPath, 'utf8')));
-      wrapper.kill('SIGINT');
-      await waitForProcessExit(wrapper);
-      expect(wrapper.exitCode).toBe(130);
-      await waitForPidExit(childPid);
-      await waitForPidExit(grandchildPid);
-    } finally {
-      if (wrapper.exitCode === null && wrapper.signalCode === null) wrapper.kill('SIGKILL');
-      if (childPid > 0) killProcessIfAlive(childPid);
-      if (grandchildPid > 0) killProcessIfAlive(grandchildPid);
-      rmSync(root, { recursive: true, force: true });
+      try {
+        await waitForFile(readyPath);
+        ({ childPid, grandchildPid } = JSON.parse(readFileSync(readyPath, 'utf8')));
+        wrapper.kill(signal);
+        await waitForProcessExit(wrapper);
+        expect(wrapper.exitCode).toBe(exitCode);
+        await waitForPidExit(childPid);
+        await waitForPidExit(grandchildPid);
+      } finally {
+        if (wrapper.exitCode === null && wrapper.signalCode === null) wrapper.kill('SIGKILL');
+        if (childPid > 0) killProcessIfAlive(childPid);
+        if (grandchildPid > 0) killProcessIfAlive(grandchildPid);
+        rmSync(root, { recursive: true, force: true });
+      }
     }
   }, 15_000);
 
