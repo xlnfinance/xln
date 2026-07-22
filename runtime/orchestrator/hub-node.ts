@@ -125,6 +125,7 @@ import {
   HUB_MESH_TOKEN_ID,
   HUB_REQUIRED_TOKEN_COUNT,
   hasAccount,
+  hasPendingRuntimeWork,
   hasQueuedOpenAccount,
   hasPairMutualCredits,
   isCanonicalAccountOpener,
@@ -2246,6 +2247,11 @@ const run = async (): Promise<void> => {
   const driveMeshBootstrap = async (): Promise<void> => {
     if (!bootstrap || shuttingDown || meshBootstrapPaused) return;
     if (meshLoopInFlight) return;
+    // Bootstrap commands are derived from committed entity state. Building an
+    // openAccount while the previous frame is still applying can enqueue the
+    // same open twice: the active input is no longer visible in the mempool,
+    // but its account has not reached env yet.
+    if (hasPendingRuntimeWork(env)) return;
     meshLoopInFlight = true;
     try {
       const bootstrapJurisdiction =
