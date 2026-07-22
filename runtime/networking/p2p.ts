@@ -58,6 +58,28 @@ export const reportRelayClientError = (env: Env, relay: string, error: Error): v
   env.warn('network', 'WS_CLIENT_ERROR', { relay, error: error.message });
 };
 
+export const reportDirectClientError = (
+  env: Env,
+  endpoint: string,
+  targetRuntimeId: string,
+  error: Error,
+): 'retryable-backpressure' | 'transport-error' => {
+  if (error.message.startsWith(RETRYABLE_INGRESS_BACKPRESSURE)) {
+    env.info('network', 'WS_DIRECT_RETRYABLE_BACKPRESSURE', {
+      endpoint,
+      targetRuntimeId,
+      error: error.message,
+    });
+    return 'retryable-backpressure';
+  }
+  env.warn('network', 'WS_DIRECT_ERROR', {
+    endpoint,
+    targetRuntimeId,
+    error: error.message,
+  });
+  return 'transport-error';
+};
+
 export type P2PConfig = {
   relayUrls?: string[];
   wsUrl?: string | null;
@@ -1587,13 +1609,11 @@ export class RuntimeP2P {
       },
       onError: (error) => {
         if (this.closing || this.closed) return;
+        if (reportDirectClientError(this.env, endpoint, normalizedTargetRuntimeId, error) === 'retryable-backpressure') {
+          return;
+        }
         this.directClientErrors.set(normalizedTargetRuntimeId, {
           at: Date.now(),
-          error: error.message,
-        });
-        this.env.warn('network', 'WS_DIRECT_ERROR', {
-          endpoint,
-          targetRuntimeId: normalizedTargetRuntimeId,
           error: error.message,
         });
       },

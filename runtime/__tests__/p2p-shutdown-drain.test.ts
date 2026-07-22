@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { reportRelayClientError, RuntimeP2P } from '../networking/p2p';
+import { reportDirectClientError, reportRelayClientError, RuntimeP2P } from '../networking/p2p';
 import { RuntimeWsClient } from '../networking/ws-client';
 import { deriveEncryptionKeyPair } from '../networking/p2p-crypto';
 import { stopRuntimeP2P, stopRuntimeP2PAndWait } from '../machine/p2p-lifecycle';
@@ -28,6 +28,27 @@ test('offline reliable-receipt target is an explicit info-level retry race', () 
 
   reportRelayClientError(env, 'ws://relay', new Error('unexpected transport failure'));
   expect(warnings).toEqual(['WS_CLIENT_ERROR']);
+});
+
+test('direct runtime quiesce is info-level backpressure, not a transport warning', () => {
+  const env = createEmptyEnv('p2p-direct-quiesce-severity');
+  const info: string[] = [];
+  const warnings: string[] = [];
+  env.info = (_category, message) => { info.push(message); };
+  env.warn = (_category, message) => { warnings.push(message); };
+
+  expect(reportDirectClientError(
+    env,
+    'ws://peer/ws',
+    `0x${'22'.repeat(20)}`,
+    new Error('INBOUND_ENTITY_RUNTIME_QUIESCING: entity=0x11 signer=0x22 txTypes=consensusOutput'),
+  )).toBe('retryable-backpressure');
+  expect(info).toEqual(['WS_DIRECT_RETRYABLE_BACKPRESSURE']);
+  expect(warnings).toEqual([]);
+
+  expect(reportDirectClientError(env, 'ws://peer/ws', `0x${'22'.repeat(20)}`, new Error('socket failed')))
+    .toBe('transport-error');
+  expect(warnings).toEqual(['WS_DIRECT_ERROR']);
 });
 
 test('websocket client remains connecting until the transport handshake settles', async () => {
