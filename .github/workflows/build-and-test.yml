@@ -219,7 +219,8 @@ jobs:
         with:
           name: e2e-test-results
           path: |
-            .logs/
+            .logs/e2e-parallel/
             test-results/
             playwright-report/
+          include-hidden-files: true
           retention-days: 7

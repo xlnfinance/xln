@@ -85,6 +85,7 @@ const FAST_E2E_TARGETS = [
 
 const fastTargets = FAST_E2E_TARGETS.map((target) => `${target.file}::${target.title}`);
 const passthrough = process.argv.slice(2);
+const isCi = process.env['CI'] === 'true';
 cleanupTestArtifactsBeforeRun({
   reason: 'e2e-fast',
   scope: 'e2e',
@@ -93,10 +94,10 @@ cleanupTestArtifactsBeforeRun({
 const args = [
   'runtime/scripts/run-e2e-parallel-isolated.ts',
   ...passthrough,
-  '--shards=8',
+  `--shards=${isCi ? 2 : 8}`,
   '--workers-per-shard=1',
   '--max-mm-concurrency=2',
-  '--max-reset-concurrency=4',
+  `--max-reset-concurrency=${isCi ? 1 : 4}`,
   '--stack-timeout-ms=300000',
   '--pw-project=chromium',
   `--pw-files=${JSON.stringify(fastTargets)}`,
