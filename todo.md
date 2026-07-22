@@ -134,6 +134,12 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
 - [x] Audit and reject `ai/instant-swap` sparse canonical hashes (`4ae4abeae`):
   omitting the independent post-state hash on intermediate frames weakens exact
   divergence localization. Keep performance work behind differential proof.
+- [x] Audit dirty worktrees, not only commits: port the missing authenticated
+  nested Account sender route hint with a focused regression; reject per-frame
+  recovery info spam; retain the current green storage benchmark API instead
+  of the stale four-argument `saveEnvToDB` call.
+- [ ] After main merge, remove merged/superseded worktrees and their branches;
+  preserve no worktree as an archive.
 
 ## P1 — runtime operational correctness
 
@@ -175,8 +181,9 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   unit into `test:stress:storage`; preserve it as a nightly/release gate.
 - [ ] Split `unit-pure`, `unit-storage`, `integration-browser-vm`, and `stress`;
   target PR gate <=60s and record per-file duration/result JSON in QA history.
-- [ ] Isolate test cleanup so it never removes build artifacts owned by a live
-  dev/E2E process.
+- [x] Isolate test cleanup so it never removes build artifacts owned by a live
+  dev/E2E process; token/PID lease and SIGKILL-child ownership pass in the
+  3,111-test unit gate.
 - [ ] Replace fixed E2E waits with observable state predicates. Run 10x on one
   immutable SHA before quarantining any historically flaky scenario.
 - [ ] Merge duplicate payment E2E only after unique assertions are preserved in

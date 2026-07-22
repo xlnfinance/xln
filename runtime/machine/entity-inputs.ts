@@ -9,6 +9,7 @@ import {
   type RuntimeEntityRoutingDeps,
 } from './entity-routing';
 import { safeStringify } from '../protocol/serialization';
+import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
 import type { EntityInput, EntityReplica, EntityTx, Env, JInput, RoutedEntityInput } from '../types';
 import { resolveEntityProposerId } from '../state-helpers';
 import { validateEntityOutput } from '../validation-utils';
@@ -102,10 +103,10 @@ export interface RuntimeEntityInputApplyOptions {
   routingDeps: RuntimeEntityRoutingDeps;
 }
 
-const collectAppliedAccountSenderHints = (input: RoutedEntityInput): string[] => {
+export const collectAppliedAccountSenderHints = (input: RoutedEntityInput): string[] => {
   const localEntityId = String(input.entityId || '').toLowerCase();
   const hints = new Set<string>();
-  for (const tx of input.entityTxs ?? []) {
+  for (const tx of getEffectiveEntityInputTxs(input)) {
     if (tx.type !== 'accountInput') continue;
     const data = tx.data as { fromEntityId?: unknown; toEntityId?: unknown };
     const fromEntityId = typeof data.fromEntityId === 'string' ? data.fromEntityId.toLowerCase() : '';
