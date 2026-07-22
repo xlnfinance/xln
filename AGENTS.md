@@ -111,6 +111,11 @@ Everywhere in code: fail-fast and loud (full stop + throw popup on error).
 
 Use three test levels for every fix; do not jump straight to broad suites.
 
+- Run CPU-heavy gates and parallel E2E locally on the Mac Studio; hosted CI is a secondary reproducibility signal, not the primary debugging loop.
+- Localize a failure with the exact target first. Do not rerun a broad suite until its L1/L2 regression is green.
+- Run each required broad gate once per unchanged commit candidate; do not repeat it without a relevant code or environment change.
+- When a slow investigation reveals a shorter reliable path, encode that path in the owning script or this protocol before handoff.
+
 1. **L1 narrow:** smallest unit/spec/scenario that directly covers the changed function or bug.
 2. **L2 targeted flow:** one focused integration or isolated e2e for the user-visible path that broke.
 3. **L3 broad gate:** related suite/full browser batch only after L1 and L2 are green.

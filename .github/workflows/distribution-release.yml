@@ -92,11 +92,16 @@ jobs:
       - name: Create immutable GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release create "${GITHUB_REF_NAME}"
-          native/dist/release-assets/*
-          native/dist/release-manifest.json
-          native/dist/SHA256SUMS
-          --repo "${GITHUB_REPOSITORY}"
-          --verify-tag
-          --generate-notes
+        run: |
+          assets=()
+          while IFS= read -r -d '' asset; do
+            assets+=("$asset")
+          done < <(find native/dist/release-assets -type f -print0)
+          test "${#assets[@]}" -gt 0
+          gh release create "${GITHUB_REF_NAME}" \
+            "${assets[@]}" \
+            native/dist/release-manifest.json \
+            native/dist/SHA256SUMS \
+            --repo "${GITHUB_REPOSITORY}" \
+            --verify-tag \
+            --generate-notes
