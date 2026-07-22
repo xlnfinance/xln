@@ -86,7 +86,7 @@ Merkle hashing has explicit domain separation:
 
 Branch children are hashed in slot order. Compressed path segments are length-prefixed and byte-deterministic. A one-leaf tree stays one leaf. Branches split only where keys diverge. Deletes collapse branches immediately.
 
-`stateHash` uses the storage Merkle root. `canonicalStateHash` is an opt-in audit oracle behind `XLN_STORAGE_VERIFY_CANONICAL=1`; it is intentionally not part of the production hot path.
+`stateHash` uses the storage Merkle root. `canonicalStateHash` is an opt-in audit oracle written only when `canonicalHashPeriodFrames` or `XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES` enables it. `XLN_STORAGE_VERIFY_CANONICAL=1` only requires that evidence during verification; it never changes the writer format.
 
 ## Incremental Update Contract
 
