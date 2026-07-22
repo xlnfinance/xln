@@ -1,5 +1,5 @@
 import type { Delta, DerivedDelta, Profile as GossipProfile } from '@xln/runtime/xln-api';
-import { getTokenCapacity, normalizeBigInt } from '@xln/runtime/routing/capacity';
+import { getTokenCapacity } from '@xln/runtime/routing/capacity';
 
 export type CapacitySnapshot = {
   inCapacity: bigint;
@@ -30,11 +30,6 @@ export type HopQuote = {
 
 export function normalizeEntityId(value: string | null | undefined): string {
   return String(value || '').trim().toLowerCase();
-}
-
-export function sanitizeBigInt(raw: unknown): bigint {
-  const normalized = normalizeBigInt(raw);
-  return normalized < 0n ? 0n : normalized;
 }
 
 export function sanitizeFeePPM(raw: unknown, defaultFeePPM = 1): number {
@@ -115,8 +110,7 @@ export function getLocalAccountCapacity(
       const delta = findTokenDelta(account, tokenId);
       if (!delta) return null;
       const derived = deriveDelta(delta, resolveReplicaPerspective(account, fromEntityId, toEntityId));
-      const outCapacity = sanitizeBigInt(derived.outCapacity);
-      const inCapacity = sanitizeBigInt(derived.inCapacity);
+      const { outCapacity, inCapacity } = derived;
       if (outCapacity <= 0n && inCapacity <= 0n) return null;
       return { outCapacity, inCapacity };
     }
@@ -208,7 +202,7 @@ export function quoteHop(
     getLocalAccountCapacity(replicaMap, deriveDelta, fromEntityId, toEntityId, tokenId)
     ?? getGossipAccountCapacity(profiles, fromEntityId, toEntityId, tokenId);
   const feePPM = sanitizeFeePPM(profile?.metadata.routingFeePPM, defaultUnknownHopFeePPM);
-  const baseFee = sanitizeBigInt(profile?.metadata.baseFee ?? 0n);
+  const baseFee = profile?.metadata.baseFee ?? 0n;
   const ppmFee = (amountIn * BigInt(feePPM)) / 1_000_000n;
 
   return {
@@ -216,6 +210,6 @@ export function quoteHop(
     feePPM,
     baseFee,
     outCap: directionalOutCap,
-    inCap: sanitizeBigInt(tokenCapacity?.inCapacity ?? 0n),
+    inCap: tokenCapacity?.inCapacity ?? 0n,
   };
 }

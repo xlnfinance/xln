@@ -35,7 +35,6 @@
     getDirectionalEdgeCapacity,
     normalizeEntityId,
     quoteHop,
-    sanitizeBigInt,
   } from './payment-routing';
   import {
     emptyPaymentPanelView,

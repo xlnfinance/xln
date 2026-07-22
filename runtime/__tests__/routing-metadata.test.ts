@@ -72,6 +72,41 @@ function profile(
 }
 
 describe('Routing metadata hard requirements', () => {
+  test('decodes canonical JSON BigInt tags before routing', () => {
+    const parsed = parseProfile({
+      ...profile(ALICE, ALICE.slice(0, 42), {
+        routingFeePPM: 10_000,
+        baseFee: 0n,
+        isHub: false,
+        board: boardFor(ALICE, `0x${'41'.repeat(32)}`),
+      }, [{
+        counterpartyId: BOB,
+        tokenCapacities: caps(12n, 34n),
+      }]),
+      metadata: {
+        routingFeePPM: 10_000,
+        baseFee: { __xlnType: 'BigInt', value: '7' },
+        isHub: false,
+        board: boardFor(ALICE, `0x${'41'.repeat(32)}`),
+      },
+      accounts: [{
+        counterpartyId: BOB,
+        tokenCapacities: {
+          [TOKEN_ID]: {
+            inCapacity: { __xlnType: 'BigInt', value: '12' },
+            outCapacity: { __xlnType: 'BigInt', value: '34' },
+          },
+        },
+      }],
+    });
+
+    expect(parsed.metadata.baseFee).toBe(7n);
+    expect(parsed.accounts[0]?.tokenCapacities[TOKEN_ID]).toEqual({
+      inCapacity: '12',
+      outCapacity: '34',
+    });
+  });
+
   test('malformed advertised capacity is rejected instead of becoming zero', () => {
     expect(() => normalizeBigInt('not-a-capacity')).toThrow('ROUTING_CAPACITY_BIGINT_INVALID');
     expect(() => normalizeBigInt(1.5)).toThrow('ROUTING_CAPACITY_NUMBER_INVALID');

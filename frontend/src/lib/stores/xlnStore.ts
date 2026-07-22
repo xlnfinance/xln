@@ -71,6 +71,7 @@ import {
 import { waitForOpenAccountCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
 import { requireTokenDecimals } from '$lib/components/Entity/token-metadata';
 import { getXLN, xlnInstance } from './xlnRuntimeLoader';
+import { parseProfile as parseGossipProfile } from '@xln/runtime/networking/gossip';
 import type {
   XLNModule,
   Env,
@@ -1193,12 +1194,20 @@ async function fetchPaymentGossipProfiles(entityIds: string[]): Promise<GossipPr
     try {
       const response = await fetch(`/api/gossip/profile?entityId=${encodeURIComponent(entityId)}`);
       if (!response.ok) continue;
-      const payload = await response.json().catch(() => null) as {
-        profile?: GossipProfile | null;
-        peers?: GossipProfile[];
-      } | null;
-      if (payload?.profile) profiles.push(payload.profile);
-      if (Array.isArray(payload?.peers)) profiles.push(...payload.peers);
+      const payload = await response.json() as unknown;
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        throw new Error(`PAYMENT_GOSSIP_RESPONSE_INVALID: entity=${entityId}`);
+      }
+      const record = payload as { profile?: unknown; peers?: unknown };
+      if (record.profile !== undefined && record.profile !== null) {
+        profiles.push(parseGossipProfile(record.profile));
+      }
+      if (record.peers !== undefined) {
+        if (!Array.isArray(record.peers)) {
+          throw new Error(`PAYMENT_GOSSIP_PEERS_INVALID: entity=${entityId}`);
+        }
+        profiles.push(...record.peers.map(parseGossipProfile));
+      }
     } catch (error) {
       errorLog.log('Payment gossip profile fetch failed', 'Payment Gossip', { entityId, error });
     }
