@@ -421,6 +421,10 @@ export async function createBrowserVMAdapter(
       return await browserVM.getEthBalance(owner);
     },
 
+    async getDebts(entityId: string, tokenId: number) {
+      return await browserVM.getDebts(entityId, tokenId);
+    },
+
     async processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<JBatchReceipt> {
       return receiptFromEvents(toJEvents(await browserVM.processBatch(encodedBatch, hankoData, nonce)));
     },

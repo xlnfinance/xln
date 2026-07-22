@@ -73,6 +73,7 @@ const BLOCK_GAS_LIMIT = 200_000_000n; // Simnet headroom for large deploys/batch
 // zero would reproduce Anvil's contract addresses and create an ambiguous
 // (chainId, Depository) watcher domain when both stacks are imported.
 const BROWSERVM_DEPLOYMENT_NONCE = 1_024n;
+const MAX_BROWSER_VM_DEBT_QUEUE_READS = 100_000;
 
 const requireBrowserVmChainId = (value: unknown, code: string): number => {
   if (!Number.isSafeInteger(value) || Number(value) < 1) {
@@ -1218,7 +1219,9 @@ export class BrowserVMProvider {
       gasLimit: 100000n,
     });
     if (accountKeyResult.execResult.exceptionError) {
-      return { nonce: 0n, disputeHash: '0x', disputeTimeout: 0n };
+      throw new Error(
+        `BROWSERVM_ACCOUNT_KEY_READ_FAILED:${safeStringify(accountKeyResult.execResult.exceptionError)}`,
+      );
     }
     const accountKeyDecoded = this.depositoryInterface.decodeFunctionResult(
       'accountKey',
@@ -1234,7 +1237,9 @@ export class BrowserVMProvider {
       gasLimit: 100000n,
     });
     if (result.execResult.exceptionError) {
-      return { nonce: 0n, disputeHash: '0x', disputeTimeout: 0n };
+      throw new Error(
+        `BROWSERVM_ACCOUNT_INFO_READ_FAILED:${safeStringify(result.execResult.exceptionError)}`,
+      );
     }
 
     const decoded = this.depositoryInterface.decodeFunctionResult('_accounts', result.execResult.returnValue);
@@ -1243,6 +1248,78 @@ export class BrowserVMProvider {
       disputeHash: decoded[1],
       disputeTimeout: BigInt(decoded[2]),
     };
+  }
+
+  /** Read the active FIFO debt queue through the current public mapping ABI. */
+  async getDebts(entityId: string, tokenId: number): Promise<Array<{ amount: bigint; creditor: string }>> {
+    if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
+
+    const readUint = async (functionName: '_debtIndex' | '_activeDebtsByToken' | 'debtOutstanding'): Promise<bigint> => {
+      const call = this.depositoryInterface!.encodeFunctionData(functionName, [entityId, tokenId]);
+      const result = await this.runReadOnlyCall({
+        to: this.depositoryAddress!,
+        caller: this.deployerAddress,
+        data: hexToBytes(call as `0x${string}`),
+        gasLimit: 500_000n,
+      });
+      if (result.execResult.exceptionError) {
+        throw new Error(
+          `BROWSERVM_DEBT_METADATA_READ_FAILED:function=${functionName}:` +
+          `${safeStringify(result.execResult.exceptionError)}`,
+        );
+      }
+      const [value] = this.depositoryInterface!.decodeFunctionResult(
+        functionName,
+        result.execResult.returnValue,
+      );
+      return BigInt(value);
+    };
+    const [cursor, activeCount, outstanding] = await Promise.all([
+      readUint('_debtIndex'),
+      readUint('_activeDebtsByToken'),
+      readUint('debtOutstanding'),
+    ]);
+    if (activeCount > BigInt(MAX_BROWSER_VM_DEBT_QUEUE_READS)) {
+      throw new Error(
+        `BROWSERVM_DEBT_QUEUE_READ_LIMIT:entity=${entityId}:token=${tokenId}:` +
+        `active=${activeCount}:limit=${MAX_BROWSER_VM_DEBT_QUEUE_READS}`,
+      );
+    }
+    const debts: Array<{ amount: bigint; creditor: string }> = [];
+    let observedOutstanding = 0n;
+
+    for (let offset = 0n; offset < activeCount; offset += 1n) {
+      const index = cursor + offset;
+      const debtCall = this.depositoryInterface.encodeFunctionData('_debts', [entityId, tokenId, index]);
+      const debtResult = await this.runReadOnlyCall({
+        to: this.depositoryAddress,
+        caller: this.deployerAddress,
+        data: hexToBytes(debtCall as `0x${string}`),
+        gasLimit: 500_000n,
+      });
+      if (debtResult.execResult.exceptionError) {
+        throw new Error(
+          `BROWSERVM_DEBT_ENTRY_READ_FAILED:index=${index}:` +
+          `${safeStringify(debtResult.execResult.exceptionError)}`,
+        );
+      }
+      const [creditor, amountRaw] = this.depositoryInterface.decodeFunctionResult(
+        '_debts',
+        debtResult.execResult.returnValue,
+      );
+      const amount = BigInt(amountRaw);
+      if (amount <= 0n) throw new Error(`BROWSERVM_DEBT_ENTRY_ZERO:index=${index}`);
+      observedOutstanding += amount;
+      debts.push({ creditor: String(creditor), amount });
+    }
+
+    if (observedOutstanding !== outstanding) {
+      throw new Error(
+        `BROWSERVM_DEBT_OUTSTANDING_MISMATCH:entity=${entityId}:token=${tokenId}:` +
+        `observed=${observedOutstanding}:contract=${outstanding}`,
+      );
+    }
+    return debts;
   }
 
   /** Enforce debts (FIFO) */

@@ -61,6 +61,7 @@ describe('BrowserVM JAdapter boundary', () => {
       await adapter.depository.getTokensLength();
       await adapter.getReserves(ethers.ZeroHash, 1);
       await adapter.getErc20Balance(adapter.addresses.depository, ethers.ZeroAddress);
+      expect(await adapter.getDebts?.(ethers.ZeroHash, 1)).toEqual([]);
       const after = ethers.hexlify(await capture());
       expect(after).toBe(before);
     } finally {

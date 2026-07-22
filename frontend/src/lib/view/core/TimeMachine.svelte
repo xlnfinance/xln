@@ -178,7 +178,6 @@
     ChevronRight,
     SkipForward,
     Repeat,
-    Download,
     Scissors,
     ChevronDown
   } from 'lucide-svelte';
@@ -201,7 +200,6 @@
   // Dropdowns
   let showSpeedMenu = false;
   let showLoopMenu = false;
-  let showExportMenu = false;
   let remoteScanHeightDraft = '';
   let remoteScanError = '';
   let remoteEntityChanging = false;
@@ -332,17 +330,6 @@
       sliceEnd = null;
       loopMode = 'off';
     }
-  }
-
-  function exportFrames() {
-    const data = JSON.stringify($history, null, 2);
-    const blob = new Blob([data], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `xln-frames-${Date.now()}.json`;
-    a.click();
-    showExportMenu = false;
   }
 
   function formatShortEndpoint(value: string): string {
@@ -725,7 +712,7 @@
           class="frame-badge"
           class:live={$isLive}
           data-testid="time-machine-frame-badge"
-          on:click={() => { showSpeedMenu = !showSpeedMenu; showLoopMenu = false; showExportMenu = false; }}
+          on:click={() => { showSpeedMenu = !showSpeedMenu; showLoopMenu = false; }}
           title="Click for playback settings"
         >
           {$isLive ? `LIVE/${$history.length}` : `${selectedFrameIndex + 1}/${$history.length}`}
@@ -760,12 +747,6 @@
           {:else}
             Clear Slice
           {/if}
-        </button>
-        <div class="menu-divider"></div>
-        <div class="menu-section">Export</div>
-        <button on:click={exportFrames}>
-          <Download size={12} />
-          Export JSON
         </button>
       </div>
         {/if}

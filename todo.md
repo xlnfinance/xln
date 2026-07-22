@@ -241,8 +241,11 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
 
 ## P2 — TimeMachine and recovery UX
 
-- [ ] Verify and remove legacy `EnvSnapshot[]` JSON export if it has no import or
-  recovery consumer. Do not repair it as a second history format.
+- [x] Verify and remove legacy `EnvSnapshot[]` JSON export if it has no import or
+  recovery consumer. No importer or recovery consumer exists; removed the raw
+  `JSON.stringify($history)` download and its TimeMachine UI instead of creating
+  a second history format. The transient `EnvSnapshot[]` projection remains only
+  for live/local UI playback.
 - [ ] Build exact offline recording from the existing canonical checkpoint +
   persisted WAL tail + manifest/hashes, using the one recovery codec.
 - [ ] Open recordings through a detached read-only adapter: no P2P, command bus,
