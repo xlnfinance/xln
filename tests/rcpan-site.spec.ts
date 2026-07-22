@@ -135,7 +135,7 @@ async function assertHeroContentContained(page: Page): Promise<void> {
 }
 
 async function assertCoreSurface(page: Page): Promise<void> {
-  await expect(page.locator('.topbar-links > a')).toHaveText(['App', 'Docs', 'RCPAN', 'Releases']);
+  await expect(page.locator('.topbar-links > a')).toHaveText(['App', 'Install', 'Docs', 'RCPAN', 'Releases']);
   await expect(page.getByRole('link', { name: 'RCPAN', exact: true })).toHaveClass(/active/);
   await expect(page.locator('.system-story')).toHaveCount(2);
   await expect(page.locator('.system-story').nth(0).locator('.reserve-node')).toHaveCount(2);
