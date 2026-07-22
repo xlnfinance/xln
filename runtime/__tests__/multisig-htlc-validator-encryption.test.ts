@@ -615,7 +615,7 @@ const certifiedSingleSignerHubProfile = async (nextHopId: string): Promise<Profi
     },
     accounts: [{
       counterpartyId: nextHopId,
-      tokenCapacities: { '1': { outCapacity: '1000', inCapacity: '1000' } },
+      tokenCapacities: { '1': { outCapacity: 1000n, inCapacity: 1000n } },
     }],
   };
   const profileHash = computeProfileHash(profile);
@@ -2055,9 +2055,9 @@ describe('multisig HTLC validator encryption', () => {
     await rejectsMutation((candidate) => {
       const capacities = candidate.data.preparedRouteProfiles![0]!.descriptor.accounts[0]!.tokenCapacities as Record<
         string,
-        { outCapacity: string; inCapacity: string }
+        { outCapacity: bigint; inCapacity: bigint }
       >;
-      capacities['1']!.outCapacity = '999';
+      capacities['1']!.outCapacity = 999n;
     }, 'HTLC_PAYMENT_PREPARED_ROUTE_PROFILE_HANKO_INVALID');
     await rejectsMutation((candidate) => {
       (candidate.data.preparedRouteProfiles![0]!.descriptor as unknown as Record<string, unknown>)['provider'] = {

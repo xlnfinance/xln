@@ -5,8 +5,6 @@
  * utilization = 1 - (outCapacity / totalCapacity)
  * effectivePPM = basePPM * (1 + utilization)
  */
-import { normalizeBigInt } from './capacity';
-
 export const PPM_DENOM = 1_000_000n;
 export const DIRECTIONAL_UTIL_STEP_PPM = 50_000n; // 5% utilization buckets
 export const DIRECTIONAL_UTIL_CAP_PPM = 500_000n; // cap uplift at +50% (1.5x base fee)
@@ -22,9 +20,7 @@ export const sanitizeFeePPM = (raw: unknown, fallback: number = 1): number => {
   return v;
 };
 
-export const sanitizeBaseFee = (raw: unknown): bigint => {
-  return clampNonNegative(normalizeBigInt(raw));
-};
+export const sanitizeBaseFee = (raw: bigint): bigint => clampNonNegative(raw);
 
 /**
  * Effective directional PPM derived from account direction utilization.

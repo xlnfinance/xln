@@ -1,5 +1,4 @@
 import { ethers } from 'ethers';
-import type { Provider } from 'ethers';
 import { firstUsableContractAddress } from '../jurisdiction/contract-address';
 
 export type DebugEventEmitter = {
@@ -74,22 +73,6 @@ export const fetchRpcCode = async (
   } finally {
     clearTimeout(timeoutHandle);
   }
-};
-
-export const readContractCode = async (
-  provider: Provider,
-  rpcUrl: string | undefined,
-  address: string,
-): Promise<string> => {
-  const normalizedRpcUrl = String(rpcUrl || '').trim();
-  if (normalizedRpcUrl) {
-    try {
-      return await fetchRpcCode(normalizedRpcUrl, address);
-    } catch (error) {
-      console.warn(`[JAdapter:rpc] eth_getCode probe failed for ${address}: ${(error as Error).message}`);
-    }
-  }
-  return provider.getCode(address);
 };
 
 export const sendRpcBatch = async (

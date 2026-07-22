@@ -65,7 +65,7 @@ const buildProfileAccounts = (state: EntityState): { accounts: ProfileAccount[];
     const deltas = [...account.deltas.entries()].sort(([left], [right]) => compareTokenId(String(left), String(right)));
     for (const [tokenId, delta] of deltas) {
       const derived = deriveDelta(delta, isLeft(account.proofHeader.fromEntity, account.proofHeader.toEntity));
-      capacities[String(tokenId)] = { inCapacity: derived.inCapacity.toString(), outCapacity: derived.outCapacity.toString() };
+      capacities[String(tokenId)] = { inCapacity: derived.inCapacity, outCapacity: derived.outCapacity };
       if (derived.inCapacity > 0n) hasInboundCapacity = true;
     }
     accounts.push({ counterpartyId, tokenCapacities: capacities });

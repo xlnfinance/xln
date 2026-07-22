@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import type { Profile } from '../networking/gossip';
 import { parseProfile } from '../networking/gossip';
 import { buildNetworkGraph } from '../routing/graph';
-import { normalizeBigInt } from '../routing/capacity';
 import { PathFinder } from '../routing/pathfinding';
 import { SigningKey, computeAddress } from 'ethers';
 import { computeValidatorEncryptionAttestationDigest } from '../protocol/htlc/validator-encryption';
@@ -20,8 +19,8 @@ const MALFORMED_HUB = '0x3333333333333333333333333333333333333333333333333333333
 
 const caps = (out: bigint, inn: bigint) => ({
   [TOKEN_ID]: {
-    outCapacity: out.toString(),
-    inCapacity: inn.toString(),
+    outCapacity: out,
+    inCapacity: inn,
   },
 });
 
@@ -102,34 +101,24 @@ describe('Routing metadata hard requirements', () => {
 
     expect(parsed.metadata.baseFee).toBe(7n);
     expect(parsed.accounts[0]?.tokenCapacities[TOKEN_ID]).toEqual({
-      inCapacity: '12',
-      outCapacity: '34',
+      inCapacity: 12n,
+      outCapacity: 34n,
     });
   });
 
-  test('malformed advertised capacity is rejected instead of becoming zero', () => {
-    expect(() => normalizeBigInt('not-a-capacity')).toThrow('ROUTING_CAPACITY_BIGINT_INVALID');
-    expect(() => normalizeBigInt(1.5)).toThrow('ROUTING_CAPACITY_NUMBER_INVALID');
-
-    const alice = profile(ALICE, ALICE.slice(0, 42), {
+  test('rejects malformed advertised capacity at profile ingress', () => {
+    const malformed = profile(ALICE, ALICE.slice(0, 42), {
       routingFeePPM: 10_000,
       baseFee: 0n,
       isHub: false,
       board: boardFor(ALICE, `0x${'41'.repeat(32)}`),
-    }, [{
-      counterpartyId: BOB,
-      tokenCapacities: { [TOKEN_ID]: { inCapacity: '1', outCapacity: 'invalid' } } as ReturnType<typeof caps>,
-    }]);
-    const bob = profile(BOB, BOB.slice(0, 42), {
-      routingFeePPM: 10_000,
-      baseFee: 0n,
-      isHub: false,
-      board: boardFor(BOB, `0x${'42'.repeat(32)}`),
     }, []);
+    malformed.accounts = [{
+      counterpartyId: BOB,
+      tokenCapacities: { [TOKEN_ID]: { inCapacity: 1n, outCapacity: 'invalid' } },
+    }] as unknown as Profile['accounts'];
 
-    const graph = buildNetworkGraph(new Map([[ALICE, alice], [BOB, bob]]), TOKEN_ID);
-    expect(graph.edges.has(ALICE)).toBe(false);
-    expect(graph.accountCapacities.size).toBe(0);
+    expect(() => parseProfile(malformed)).toThrow('GOSSIP_PROFILE_ACCOUNT_OUT_CAPACITY_INVALID');
   });
 
   test('routing graph diagnostics use structured logging only', () => {

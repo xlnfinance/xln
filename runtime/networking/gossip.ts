@@ -61,8 +61,8 @@ export type ProfileMirror = {
 };
 
 export type ProfileTokenCapacity = {
-  inCapacity: bigint | string;
-  outCapacity: bigint | string;
+  inCapacity: bigint;
+  outCapacity: bigint;
 };
 
 export type ProfileAccount = {
@@ -321,16 +321,6 @@ const parseBigIntValue = (raw: unknown, field: string, entityId: string): bigint
   throw new Error(`${field}: entity=${entityId}`);
 };
 
-const stringifyBigIntLike = (raw: unknown): string => {
-  if (typeof raw === 'bigint') return raw.toString();
-  if (typeof raw === 'number' && Number.isFinite(raw)) return Math.floor(raw).toString();
-  if (typeof raw === 'string' && /^-?\d+$/.test(raw)) return raw;
-  if (isRecord(raw) && raw['__xlnType'] === 'BigInt' && typeof raw['value'] === 'string' && /^-?\d+$/.test(raw['value'])) {
-    return raw['value'];
-  }
-  return '0';
-};
-
 const parseBoardValidator = (raw: unknown, entityId: string): BoardValidator => {
   if (!isRecord(raw)) {
     throw new Error(`GOSSIP_PROFILE_BOARD_VALIDATOR_INVALID: entity=${entityId}`);
@@ -504,10 +494,22 @@ const parseProfileTokenCapacities = (
       'GOSSIP_PROFILE_ACCOUNT_TOKEN_CAPACITY_UNKNOWN_FIELD',
       entityId,
     );
-    capacities[tokenId] = {
-      inCapacity: stringifyBigIntLike(capacityRaw['inCapacity']),
-      outCapacity: stringifyBigIntLike(capacityRaw['outCapacity']),
-    };
+    const inCapacity = parseBigIntValue(
+      capacityRaw['inCapacity'],
+      'GOSSIP_PROFILE_ACCOUNT_IN_CAPACITY_INVALID',
+      entityId,
+    );
+    const outCapacity = parseBigIntValue(
+      capacityRaw['outCapacity'],
+      'GOSSIP_PROFILE_ACCOUNT_OUT_CAPACITY_INVALID',
+      entityId,
+    );
+    if (inCapacity < 0n || outCapacity < 0n) {
+      throw new Error(
+        `GOSSIP_PROFILE_ACCOUNT_CAPACITY_NEGATIVE: entity=${entityId} counterparty=${counterpartyId} token=${tokenId}`,
+      );
+    }
+    capacities[tokenId] = { inCapacity, outCapacity };
   }
   return capacities;
 };

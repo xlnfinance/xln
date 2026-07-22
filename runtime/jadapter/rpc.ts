@@ -90,7 +90,6 @@ import {
   firstAddress,
   isDebugEventEmitter,
   linkArtifactBytecode,
-  readContractCode,
   sendRpcBatch,
   type RpcBatchRequest,
   type RpcBatchResponse,
@@ -1039,10 +1038,10 @@ export async function createRpcAdapter(
     }
 
     trace('fromReplica.getCode:start');
-    const accountCode = await readContractCode(provider, config.rpcUrl, addresses.account);
-    const depCode = await readContractCode(provider, config.rpcUrl, addresses.depository);
-    const epCode = await readContractCode(provider, config.rpcUrl, addresses.entityProvider);
-    const transformerCode = await readContractCode(provider, config.rpcUrl, addresses.deltaTransformer);
+    const accountCode = await provider.getCode(addresses.account);
+    const depCode = await provider.getCode(addresses.depository);
+    const epCode = await provider.getCode(addresses.entityProvider);
+    const transformerCode = await provider.getCode(addresses.deltaTransformer);
     trace('fromReplica.getCode:done', {
       accountLen: accountCode.length,
       depLen: depCode.length,
@@ -1932,8 +1931,8 @@ export async function createRpcAdapter(
         overrides?: TxOverrides
       ) => Promise<unknown>;
       const [tokenCode, spenderCode] = await Promise.all([
-        readContractCode(provider, config.rpcUrl, tokenAddress),
-        readContractCode(provider, config.rpcUrl, spender),
+        provider.getCode(tokenAddress),
+        provider.getCode(spender),
       ]);
       if (!tokenCode || tokenCode === '0x') {
         throw new Error(`approveErc20 invalid token contract: ${tokenAddress}`);

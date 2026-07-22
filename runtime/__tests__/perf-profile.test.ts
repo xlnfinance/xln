@@ -74,6 +74,7 @@ describe('runtime performance profiling', () => {
 
   test('parses orchestrator stdout, stderr, and nested supervisor prefixes', () => {
     const payload = '{"elapsedMs":12,"phases":[{"name":"apply","ms":12}]}';
+    expect(parseProfileLine(`[MM] [INFO][runtime] process.profile ${payload}`)?.runtime).toBe('MM');
     expect(parseProfileLine(`[MM] [WARN][runtime] process.profile ${payload}`)?.runtime).toBe('MM');
     expect(parseProfileLine(`[MM:err] [WARN][runtime] process.profile ${payload}`)?.runtime).toBe('MM');
     expect(parseProfileLine(`[STACK] [MESH] [H1] [WARN][runtime] process.profile ${payload}`)?.runtime).toBe('H1');

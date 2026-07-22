@@ -4716,12 +4716,16 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       processProfileMetrics.jOutputs > 0 ||
       processProfileMetrics.frameAdvanced;
     if ((!processProfileEnabled || !hasProfileWork) && elapsedMs < runtimeProcessSlowMs()) return;
-    runtimeLog.warn('process.profile', {
+    const profileFields = {
       outcome: processProfileOutcome,
       elapsedMs,
       ...processProfileMetrics,
       phases: cumulativeMarksToPhases(processProfileMarks, elapsedMs),
-    });
+    };
+    // Completed-frame timings are telemetry consumed by the perf analyzer, not
+    // degraded operation. Preserve WARN for incomplete/failed frame outcomes.
+    if (processProfileOutcome === 'completed') runtimeLog.info('process.profile', profileFields);
+    else runtimeLog.warn('process.profile', profileFields);
   };
 
   try {

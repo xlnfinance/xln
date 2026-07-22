@@ -76,6 +76,12 @@ An audit claim is not accepted until reproduced against the current candidate.
   two-leg proposal is accepted; one leg commits nothing; a simulated lost
   packet persists both legs plus the manual pause through real WAL close/load,
   and the explicit retry emits exactly one two-input envelope.
+- [x] Keep routing/profile financial capacities native `bigint` after the
+  canonical `parseProfile` wire boundary. Remove the duplicate generic
+  capacity parser, string-backed signed descriptor values, routing catch/drop
+  fallback and browser `eth_getCode` fetch fallback. Evidence on `e1001546`:
+  22/22 focused tests PASS; exact payment + cross-j 2/2 PASS with strict browser
+  health; deriveDelta/manual-math/frozen-core gates unchanged.
 - [ ] L3: full cross-j/security/release E2E; eliminate
   `ROUTE_CROSS_J_ATOMIC_PAIR_MISSING` without relaxing atomicity.
 
