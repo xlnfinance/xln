@@ -56,7 +56,6 @@ import {
   KEY_LIVE_ACCOUNT,
   KEY_LIVE_BOOK,
   KEY_LIVE_ENTITY,
-  KEY_LIVE_REPLICA_META,
   KEY_MERKLE_BRANCH,
   KEY_MERKLE_LEAF,
   KEY_MERKLE_ROOT,
@@ -377,7 +376,6 @@ const CURRENT_RECOVERY_PREFIXES = [
   KEY_LIVE_ENTITY,
   KEY_LIVE_ACCOUNT,
   KEY_LIVE_BOOK,
-  KEY_LIVE_REPLICA_META,
   KEY_MERKLE_ROOT,
   KEY_MERKLE_BRANCH,
   KEY_MERKLE_LEAF,
@@ -403,31 +401,6 @@ const storageHeadsEqual = (left: StorageHead, right: StorageHead): boolean =>
   left.epochMaxBytes === right.epochMaxBytes &&
   left.accountMerkleRadix === right.accountMerkleRadix &&
   left.retainedHistoryBytes === right.retainedHistoryBytes;
-
-const synchronizeReplicaMeta = async (
-  historyDb: RuntimeFrameDbLike,
-  currentDb: RuntimeDbLike,
-  batch: ReturnType<RuntimeDbLike['batch']>,
-): Promise<boolean> => {
-  if (typeof batch.del !== 'function') throw new Error('STORAGE_RECOVERY_DELETE_UNSUPPORTED');
-  const authoritative = new Map<string, { key: Buffer; value: Buffer }>();
-  for await (const key of iterateKeys(historyDb, { prefix: keyLiveReplicaMetaPrefix() })) {
-    authoritative.set(key.toString('hex'), { key, value: await historyDb.get(key) });
-  }
-  let changed = false;
-  for await (const key of iterateKeys(currentDb, { prefix: keyLiveReplicaMetaPrefix() })) {
-    if (authoritative.has(key.toString('hex'))) continue;
-    batch.del(key);
-    changed = true;
-  }
-  for (const { key, value } of authoritative.values()) {
-    const current = await readRawOrNull(currentDb, key);
-    if (current?.equals(value)) continue;
-    batch.put(key, value);
-    changed = true;
-  }
-  return changed;
-};
 
 const synchronizeCertifiedBoardNodes = async (
   historyDb: RuntimeFrameDbLike,
@@ -812,13 +785,7 @@ export const recoverStorageDbFromHistory = async (options: {
 
   const batch = options.db.batch();
   const headChanged = !rawCurrentHead || !storageHeadsEqual(historyHead, currentHead);
-  // History commits before the rebuildable current cache. Equal heads prove
-  // that the previous atomic current-cache batch (head + metadata) completed;
-  // scanning every replica prefix again on the next normal append is pure I/O.
-  const metaChanged = headChanged
-    ? await synchronizeReplicaMeta(options.historyDb, options.db, batch)
-    : false;
-  options.onPersistenceProgress?.('recovery-replica-metadata-synchronized');
+  // History commits before the rebuildable current projection cache.
   // The normal append path writes both DBs and never scans the content-addressed
   // DAG. Only a lagging/current-cache recovery needs to copy immutable nodes.
   const boardNodesChanged = headChanged
@@ -834,7 +801,7 @@ export const recoverStorageDbFromHistory = async (options: {
     : false;
   options.onPersistenceProgress?.('recovery-account-j-nodes-synchronized');
   if (headChanged) batch.put(KEY_HEAD, encodeBuffer(historyHead));
-  if (metaChanged || boardNodesChanged || consumptionNodesChanged || accountJClaimNodesChanged || headChanged) {
+  if (boardNodesChanged || consumptionNodesChanged || accountJClaimNodesChanged || headChanged) {
     await writeBatch(batch);
     options.onPersistenceProgress?.('recovery-current-write-done');
     recovered = true;
@@ -1134,12 +1101,7 @@ export const saveRuntimeFrameToStorage = async (options: {
     }
   }
   checkpointPrepare('replicaHistoryScan');
-  // Current is an exact rebuildable mirror of authoritative history at an
-  // equal head, so the same deletion set applies to both atomic batches. A
-  // second prefix scan only doubled LevelDB work on every Runtime frame.
-  const staleCurrentReplicaMetaKeys = staleHistoryReplicaMetaKeys;
   options.onPersistenceProgress?.('replica-metadata-read');
-  checkpointPrepare('replicaCurrentScan');
   const runtimeOutputRetryState = buildDurableOutputRetryState(
     options.env,
     options.currentFrameOutputs ?? [],
@@ -1264,10 +1226,6 @@ export const saveRuntimeFrameToStorage = async (options: {
   }
   options.onPersistenceProgress?.('frame-db-plan-built');
   const batch = db.batch();
-  if (staleCurrentReplicaMetaKeys.length > 0 && typeof batch.del !== 'function') {
-    throw new Error('STORAGE_CURRENT_REPLICA_META_DELETE_UNSUPPORTED');
-  }
-  for (const key of staleCurrentReplicaMetaKeys) batch.del!(key);
   for (const { key, value } of pendingBoardEntries) {
     batch.put(key, value);
   }
@@ -1300,11 +1258,9 @@ export const saveRuntimeFrameToStorage = async (options: {
     }
   }
   for (const entry of replicaMetaEntries) {
-    // Replica metadata is authoritative recovery state. Keep it in the same
-    // atomic history batch as frame+diff+head; the current DB is a rebuildable
-    // materialized cache and may lag after a crash.
+    // Replica metadata is authoritative recovery state. Keep one copy in the
+    // same atomic history batch as frame, diff, and HEAD.
     historyBatch.put(entry.key, entry.value);
-    batch.put(entry.key, entry.value);
   }
 
   const nextHead: StorageHead = {

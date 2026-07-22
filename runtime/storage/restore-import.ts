@@ -106,14 +106,12 @@ const queueCurrentBody = (
   batch: ReturnType<RuntimeDbLike['batch']>,
   docs: readonly StorageDoc[],
   prepared: Awaited<ReturnType<typeof prepareStorageStateHashes>>,
-  replicaMetas: readonly ReplicaMetaEntry[],
   certifiedBoardNodes: readonly { key: Buffer; value: Buffer }[],
   consumptionNodes: readonly { key: Buffer; value: Buffer }[],
   accountJClaimNodes: readonly { key: Buffer; value: Buffer }[],
 ): void => {
   for (const doc of docs) batch.put(liveKeyForDoc(doc), encodedDocValue(doc, prepared));
   for (const item of prepared.merklePuts) batch.put(item.key, item.value);
-  for (const item of replicaMetas) batch.put(item.key, item.value);
   for (const item of certifiedBoardNodes) batch.put(item.key, item.value);
   for (const item of consumptionNodes) batch.put(item.key, item.value);
   for (const item of accountJClaimNodes) batch.put(item.key, item.value);
@@ -269,7 +267,6 @@ export const replaceRestoredStorageBase = async (
     currentBody,
     options.docs,
     prepared,
-    options.replicaMetas,
     certifiedBoardNodes,
     consumptionNodes,
     accountJClaimNodes,

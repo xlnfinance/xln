@@ -116,7 +116,6 @@ export const seedFreshStorageEpoch = async (options: {
     Buffer.from([KEY_LIVE_ENTITY]),
     Buffer.from([KEY_LIVE_ACCOUNT]),
     Buffer.from([KEY_LIVE_BOOK]),
-    Buffer.from([KEY_LIVE_REPLICA_META]),
     Buffer.from([KEY_MERKLE_ROOT]),
     Buffer.from([KEY_MERKLE_BRANCH]),
     Buffer.from([KEY_MERKLE_LEAF]),
@@ -262,16 +261,15 @@ export const createSnapshot = async (
   onPersistenceBoundary?: StoragePersistenceBoundaryHook,
 ): Promise<{ docCount: number; bytes: number }> => {
   await pruneUnpublishedSnapshots(targetDb, onPersistenceBoundary);
-  const livePrefixes = [
+  const liveDocPrefixes = [
     Buffer.from([KEY_LIVE_ENTITY]),
     Buffer.from([KEY_LIVE_ACCOUNT]),
     Buffer.from([KEY_LIVE_BOOK]),
-    Buffer.from([KEY_LIVE_REPLICA_META]),
   ];
 
   let written = 0;
   let bytes = 0;
-  for (const prefix of livePrefixes) {
+  for (const prefix of liveDocPrefixes) {
     const copied = await copyKeyRange(sourceDb, targetDb, { prefix }, (key) => {
       if (key[0] === KEY_LIVE_ENTITY) {
         return Buffer.concat([Buffer.from([KEY_SNAPSHOT_ENTITY]), encodeHeight(height), key.subarray(1)]);
@@ -282,14 +280,24 @@ export const createSnapshot = async (
       if (key[0] === KEY_LIVE_BOOK) {
         return Buffer.concat([Buffer.from([KEY_SNAPSHOT_BOOK]), encodeHeight(height), key.subarray(1)]);
       }
-      if (key[0] === KEY_LIVE_REPLICA_META) {
-        return Buffer.concat([Buffer.from([KEY_SNAPSHOT_REPLICA_META]), encodeHeight(height), key.subarray(1)]);
-      }
       return null;
     }, async () => onPersistenceBoundary?.('after-snapshot-chunk'));
     written += copied.count;
     bytes += copied.bytes;
   }
+  const replicaMetas = await copyKeyRange(
+    targetDb,
+    targetDb,
+    { prefix: Buffer.from([KEY_LIVE_REPLICA_META]) },
+    (key) => Buffer.concat([
+      Buffer.from([KEY_SNAPSHOT_REPLICA_META]),
+      encodeHeight(height),
+      key.subarray(1),
+    ]),
+    async () => onPersistenceBoundary?.('after-snapshot-chunk'),
+  );
+  written += replicaMetas.count;
+  bytes += replicaMetas.bytes;
   const batch = targetDb.batch();
   const manifestKey = keySnapshotManifest(height);
   const manifestValue = encodeBuffer({ height, createdAt: Math.max(0, Math.floor(Number(createdAt || 0))), docCount: written } satisfies StorageSnapshotManifest);

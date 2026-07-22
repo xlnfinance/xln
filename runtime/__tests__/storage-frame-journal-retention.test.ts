@@ -653,7 +653,6 @@ describe('storage frame journal retention', () => {
       'canonicalHashes',
       'replicaCommitment',
       'replicaHistoryScan',
-      'replicaCurrentScan',
       'frameEncode',
       'batchPlan',
       'remainder',
@@ -874,8 +873,8 @@ describe('storage frame journal retention', () => {
     ].sort((left, right) => String(left[0]).localeCompare(String(right[0])));
     expect(restoredReplicas.map(({ signerId, isProposer }) => [signerId, isProposer])).toEqual(expectedReplicas);
 
-    await getRuntimeStorageDb(restored).del(keyLiveReplicaMeta(entityId, signerA));
-    await getRuntimeStorageDb(restored).del(keyLiveReplicaMeta(entityId, signerB));
+    expect(await readRawOrNull(getRuntimeStorageDb(restored), keyLiveReplicaMeta(entityId, signerA))).toBeNull();
+    expect(await readRawOrNull(getRuntimeStorageDb(restored), keyLiveReplicaMeta(entityId, signerB))).toBeNull();
     await closeRuntimeDb(restored);
     await closeInfraDb(restored);
 
@@ -1854,6 +1853,7 @@ describe('storage frame journal retention', () => {
     const snapshotHeight = Number(head?.latestSnapshotHeight ?? 0);
     expect(snapshotHeight).toBeGreaterThan(0);
     const snapshotMetaKey = keySnapshotReplicaMeta(snapshotHeight, entityId, signer);
+    expect(await readRawOrNull(getRuntimeStorageDb(env), keyLiveReplicaMeta(entityId, signer))).toBeNull();
     const validMeta = await db.get(snapshotMetaKey);
     const corruptedMeta = decodeBuffer<Record<string, unknown>>(validMeta);
     corruptedMeta['hankoWitness'] = 'not-a-map';

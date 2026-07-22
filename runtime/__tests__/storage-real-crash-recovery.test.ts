@@ -328,27 +328,8 @@ describe('real process storage crash recovery', () => {
         expect(frame?.canonicalStateHash).toBe(computeCanonicalStateHashFromEnv(restored));
         await recoverStorageDbFromHistory({ db: currentDb, historyDb, config });
         expect(await readStorageHead(currentDb)).toEqual(historyHead);
-        const currentMeta = decodeBuffer<StorageReplicaMeta>(
-          await currentDb.get(keyLiveReplicaMeta(entityId, signerB)),
-        );
-        expect(currentMeta.leaderVotes?.size).toBe(2);
-        expect(currentMeta.pendingLeaderCertificate?.toView).toBe(1);
-        expect(currentMeta.pendingLeaderCertificate?.votes.size).toBe(2);
-        expect(currentMeta.lastConsensusProgressAt).toBe(12_345);
-        expect(currentMeta.jHistory).toEqual(replica?.jHistory);
-        expect(currentMeta.jPrefixRound).toEqual(replica?.jPrefixRound);
-        expect(currentMeta.state.entityEncPubKey).toBe(expectedKeysB.publicKey);
-        expect(currentMeta.state.entityEncPrivKey).toBe(expectedKeysB.privateKey);
-        expect(currentMeta.state.htlcNotes).toEqual(replica?.state.htlcNotes);
-        expect(currentMeta.state).toEqual(replica?.state);
-        const submitMeta = decodeBuffer<StorageReplicaMeta>(
-          await currentDb.get(keyLiveReplicaMeta(entityId, signerA)),
-        );
-        expect(submitMeta.jSubmitState).toEqual(submitReplica?.jSubmitState);
-        expect(submitMeta.state.entityEncPubKey).toBe(expectedKeysA.publicKey);
-        expect(submitMeta.state.entityEncPrivKey).toBe(expectedKeysA.privateKey);
-        expect(submitMeta.state.htlcNotes).toEqual(submitReplica?.state.htlcNotes);
-        expect(submitMeta.state).toEqual(submitReplica?.state);
+        expect(await readRawOrNull(currentDb, keyLiveReplicaMeta(entityId, signerB))).toBeNull();
+        expect(await readRawOrNull(currentDb, keyLiveReplicaMeta(entityId, signerA))).toBeNull();
       } finally {
         await closeRuntimeDb(restored);
         await closeInfraDb(restored);
@@ -484,8 +465,6 @@ describe('real process storage crash recovery', () => {
       expect(recovery.recovered).toBe(true);
       expect(await readStorageHead(currentDb)).toEqual(await readStorageHead(historyDb));
 
-      const signerA = deriveSignerAddressSync(seed, '1').toLowerCase();
-      const signerB = deriveSignerAddressSync(seed, '2').toLowerCase();
       const entityId = generateNumberedEntityId(2).toLowerCase();
       const rebuiltState = await loadEntityStateFromStorage({
         env: restored,
@@ -510,9 +489,10 @@ describe('real process storage crash recovery', () => {
             entityId,
           )
         : null).toMatch(/^0x[0-9a-f]{64}$/);
-      expect(decodeBuffer<StorageReplicaMeta>(
-        await currentDb.get(keyLiveReplicaMeta(entityId, signerA)),
-      ).jSubmitState?.submitAttempts).toBe(1);
+      expect(await readRawOrNull(currentDb, keyLiveReplicaMeta(
+        entityId,
+        deriveSignerAddressSync(seed, '1').toLowerCase(),
+      ))).toBeNull();
     } finally {
       await closeRuntimeDb(restored);
       await closeInfraDb(restored);

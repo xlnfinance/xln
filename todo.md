@@ -128,11 +128,20 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   production caller reached the parallel WAL API or empty core LevelDB, so both
   and their self-tests were removed. `PersistedFrameJournal` now derives from
   `StorageFrameRecord`. History/current HEAD and immutable nodes remain active
-  as authority/cache, not parallel authorities. Net -700+ LOC; types and
+  as authority/cache, not parallel authorities. Net -663 LOC; types and
   storage schema/atomicity 61/61 PASS; real crash/recovery 54/54 PASS.
-- [ ] Reduce frame write amplification: audit the two Runtime-machine snapshots,
-  transport noise in frame hashes, duplicated replicaMeta and rebuildable
-  indexes. Preserve authoritative replay and crash boundaries.
+- [x] Reduce frame write amplification without weakening recovery. The
+  replay-verifiable Runtime machine is an ephemeral per-frame hash preimage;
+  the full machine is persisted only at sparse materialization/canonical-hash
+  boundaries. Full `replicaMeta` now has one authoritative live copy in history
+  DB and snapshots copy it there directly; current DB no longer writes, scans,
+  deletes or restores a duplicate. `runtimeOutputs` remains one durable replay
+  copy: it restores unsent transport and signer routing, while frame/post-state
+  hashes bind the value without storing another body. Frame DB account/entity/
+  activity indexes remain active bounded history APIs, not recovery authority.
+  Targeted schema/crash/recovery 75/75 PASS, 720 assertions; 16-account benchmark:
+  24 frames, 0 parity mismatches, 14.37 payment TPS, 2.08 MiB full snapshot,
+  262 KiB maximum frame.
 - [ ] Split oversized storage modules by append/materialize/snapshot/prune and
   current/history/recovery reads after behavior is frozen by tests.
 - [x] Add a format-discipline snapshot gate covering domain tags, algorithm IDs
