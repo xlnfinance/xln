@@ -96,6 +96,7 @@ const buildFixture = async (label: string): Promise<RaceFixture> => {
   const env = createEmptyEnv(`${label}-${RUN_ID}`);
   env.scenarioMode = true;
   env.quietRuntimeLogs = true;
+  env.runtimeConfig = { storage: { enabled: false } };
   env.timestamp = 20_000;
   const state = baseState(env);
   const proposerId = state.config.validators[0]!;

@@ -99,6 +99,7 @@
     "bench:radapter:hub1m:allmem": "bun --expose-gc runtime/scripts/bench-radapter-hub-1m.ts --accounts=1000000 --hot-percent=1 --memory=all --seed-mode=bulk --chunk=10000 --traffic-rounds=10 --touch-per-round=100 --keep-db",
     "test:scenarios:parallel:isolated": "bun runtime/scenarios/run.ts",
     "test:unit": "bun runtime/scripts/run-unit-tests.ts",
+    "test:stress:storage": "bun runtime/scripts/run-unit-tests.ts runtime/__tests__/storage-hub-10k-checkpoint-rollover.test.ts",
     "test:all:fast": "bun runtime/scripts/run-all-tests-fast.ts",
     "test:feedback:20": "bun runtime/scenarios/run.ts --set=smoke --workers=2",
     "test:all:quick": "bun runtime/scripts/run-all-tests-fast.ts --quick --scenario-workers=2 --e2e-shards=1",

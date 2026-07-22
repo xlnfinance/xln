@@ -142,7 +142,9 @@ test('selected embedded runtime never falls back to a mismatched bootstrap env',
   expect(embeddedSource).not.toContain('console.info');
   expect(switchSource).toContain('const currentRuntimeId = normalizeRuntimeConfigId(currentEnv?.runtimeId || \'\');');
   expect(switchSource).toContain('if (!selectedRuntimeId || currentRuntimeId === selectedRuntimeId)');
-  expect(switchSource).toContain('env = await xln.main(selectedRuntime.seed);');
+  expect(switchSource).toContain('await vaultOperations.selectRuntime(selectedRuntimeId);');
+  expect(switchSource).toContain('EMBEDDED_RUNTIME_ENV_RESTORE_FAILED');
+  expect(switchSource).toContain('env = await xln.main(normalizedConfig.seed ?? null);');
   expect(switchSource).toContain('EMBEDDED_RUNTIME_ENV_MISMATCH');
   expect(switchSource).not.toContain('if (!env) env = await xln.main(normalizedConfig.seed ?? null);');
 });

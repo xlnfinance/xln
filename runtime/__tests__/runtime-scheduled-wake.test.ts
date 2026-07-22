@@ -15,6 +15,7 @@ import {
   createEmptyEnv,
   hasRuntimeWork,
   process as processRuntime,
+  registerRuntimeFrameCommitCallback,
   waitForRuntimeWorkDrained,
 } from '../runtime';
 import {
@@ -30,7 +31,7 @@ import {
 import { safeStringify } from '../protocol/serialization';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import { computeCanonicalEntityHash } from '../storage/canonical-hash';
-import type { EntityReplica, EntityState } from '../types';
+import type { EntityReplica, EntityState, RuntimeInput } from '../types';
 import { buildCanonicalRuntimeStateSnapshot, restoreDurableRuntimeSnapshot } from '../wal/snapshot';
 import {
   collectLocalProfileEncryptionAnnouncements,
@@ -249,6 +250,10 @@ describe('runtime scheduled wake', () => {
         data: { from: proposer, message: 'left after prior commit' },
       }],
     )));
+    const committedInputs: Array<{ height: number; entityInputs: RuntimeInput['entityInputs'] }> = [];
+    registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
+      committedInputs.push({ height, entityInputs: structuredClone(runtimeInput.entityInputs) });
+    });
     await processRuntime(env);
 
     expect(env.height).toBe(1);
@@ -256,10 +261,13 @@ describe('runtime scheduled wake', () => {
     expect(env.eReplicas.get(`${id}:${proposer}`)?.state.messages)
       .toContain(`${proposer}: left after prior commit`);
     expect(env.eReplicas.get(`${id}:${proposer}`)?.mempool).toHaveLength(0);
-    expect(env.history.at(-1)?.runtimeInput.entityInputs).toEqual([{
-      entityId: id,
-      signerId: proposer,
-      entityTxs: [],
+    expect(committedInputs).toEqual([{
+      height: 1,
+      entityInputs: [{
+        entityId: id,
+        signerId: proposer,
+        entityTxs: [],
+      }],
     }]);
   });
 

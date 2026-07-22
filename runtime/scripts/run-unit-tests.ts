@@ -38,6 +38,10 @@ const SUBPROCESS_STDIO_TEST_FILES = [
   'print-dev-links.test.ts',
 ];
 
+const STRESS_TEST_FILES = [
+  'storage-hub-10k-checkpoint-rollover.test.ts',
+];
+
 const CLEANUP_ONLY_FLAGS = new Set(['--keep-test-artifacts', '--no-cleanup']);
 
 const rawArgs = process.argv.slice(2);
@@ -54,6 +58,7 @@ const rootTestArgs = [
         ...DEFAULT_UNIT_TEST_TARGETS,
         ...passthrough,
         ...SUBPROCESS_STDIO_TEST_FILES.map(file => `--path-ignore-patterns=**/${file}`),
+        ...STRESS_TEST_FILES.map(file => `--path-ignore-patterns=**/${file}`),
       ]),
 ];
 

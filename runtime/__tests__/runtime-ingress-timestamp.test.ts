@@ -244,11 +244,15 @@ describe('runtime ingress timestamp', () => {
         }],
       })),
     });
+    const committedInputs: Array<{ height: number; entityInputCount: number }> = [];
+    registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
+      committedInputs.push({ height, entityInputCount: runtimeInput.entityInputs.length });
+    });
 
     await process(env);
 
     expect(env.height).toBe(1);
-    expect(env.history.at(-1)?.runtimeInput.entityInputs).toHaveLength(12);
+    expect(committedInputs).toEqual([{ height: 1, entityInputCount: 12 }]);
     expect(env.runtimeMempool?.entityInputs ?? []).toHaveLength(0);
     expect(env.runtimeState?.maxEntityInputsPerFrame).toBeUndefined();
   });
@@ -308,7 +312,7 @@ describe('runtime ingress timestamp', () => {
       observedFingerprintCount: 5,
       requiredFingerprintCount: 5,
     });
-    expect(env.history.at(-1)?.height).toBe(1);
+    expect(receipts.get('capped-runtime-input')?.observedHeight).toBe(1);
   });
 
   test('runtime frame cap preserves watcher j_event priority across queued entity inputs', async () => {
@@ -480,6 +484,10 @@ describe('runtime ingress timestamp', () => {
     const entityId = generateLazyEntityId([signerId], 1n);
     const replica = makeReplica(entityId, 1_000, signerId);
     env.eReplicas.set(`${entityId}:${signerId}`, replica);
+    let committedInput: Env['runtimeInput'] | null = null;
+    registerRuntimeFrameCommitCallback(env, ({ runtimeInput }) => {
+      committedInput = structuredClone(runtimeInput);
+    });
 
     enqueueRuntimeInput(env, {
       timestamp: 20_000,
@@ -504,7 +512,7 @@ describe('runtime ingress timestamp', () => {
     expect(env.timestamp).toBe(20_000);
     const updatedReplica = env.eReplicas.get(`${entityId}:${signerId}`);
     expect(updatedReplica?.state.timestamp).toBe(20_000);
-    expect(env.history.at(-1)?.runtimeInput.entityInputs[0]?.entityTxs?.[0]).toMatchObject({
+    expect(committedInput?.entityInputs[0]?.entityTxs?.[0]).toMatchObject({
       type: 'profile-update',
       data: { profile: { entityId, name: 'Explicit Timestamp' } },
     });
@@ -563,6 +571,11 @@ describe('runtime ingress timestamp', () => {
       type: 'watchdog',
       data: {},
     });
+    let committedScheduledWake = false;
+    registerRuntimeFrameCommitCallback(env, ({ runtimeInput }) => {
+      committedScheduledWake = runtimeInput.entityInputs.some(input =>
+        input.entityTxs?.some(tx => tx.type === 'scheduledWake'));
+    });
 
     enqueueRuntimeInput(env, {
       timestamp: 20_000,
@@ -576,8 +589,7 @@ describe('runtime ingress timestamp', () => {
     expect(env.timestamp).toBeLessThanOrEqual(Date.now() + TIMING.TIMESTAMP_DRIFT_MS);
     const updatedReplica = env.eReplicas.get(`${entityId}:${signerId}`);
     expect(updatedReplica?.state.crontabState?.hooks?.has('watchdog:due-after-empty-ingress')).toBe(false);
-    expect(env.history.at(-1)?.runtimeInput.entityInputs.some(input =>
-      input.entityTxs?.some(tx => tx.type === 'scheduledWake'))).toBe(true);
+    expect(committedScheduledWake).toBe(true);
   });
 
   test('idle runtime loop does not advance logical time from wall clock', async () => {

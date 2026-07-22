@@ -133,8 +133,8 @@ describe('frontend time-machine current env contract', () => {
     expect(timeMachine).toContain('`${$runtimeControllerHandle.id}|${$isLive');
     expect(workspace).toContain('$runtimeView.atHeight');
     expect(workspace).toContain('runtimeViewFrameMatchesAtHeight');
-    expect(xlnStore.match(/assertRuntimeViewIsLive\(get\(runtimeView\)\)/g)).toHaveLength(2);
-    expect(xlnStore.match(/assertNetworkMachineIsLive\(get\(networkMachineRuntime\)\)/g)).toHaveLength(2);
+    expect(xlnStore.match(/assertRuntimeViewIsLive\(get\(runtimeView\)\)/g)).toHaveLength(3);
+    expect(xlnStore.match(/assertNetworkMachineIsLive\(get\(networkMachineRuntime\)\)/g)).toHaveLength(3);
     expect(chrome).not.toContain('Viewing historical state');
     expect(chrome).not.toContain('history-warning');
   });

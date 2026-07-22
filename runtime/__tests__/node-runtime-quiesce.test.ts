@@ -7,6 +7,7 @@ import {
   enqueueRuntimeInput,
   hasRuntimeWork,
   persistRestoredEnvToDB,
+  readPersistedFrameJournals,
   readPersistedStorageHead,
   startP2P,
   startRuntimeLoop,
@@ -252,12 +253,20 @@ describe('node runtime quiesce', () => {
           expect(env.runtimeState?.persistenceQuiescing).toBe(true);
           expect(env.runtimeState?.persistencePaused).toBe(true);
           expect(env.height).toBeGreaterThanOrEqual(1);
-          expect(env.history).toHaveLength(1);
           expect(env.eReplicas.has(`${entityId}:${runtimeId}`)).toBe(true);
           expect(env.runtimeMempool?.runtimeTxs).toHaveLength(0);
           expect(env.runtimeMempool?.entityInputs).toHaveLength(0);
           expect(hasRuntimeWork(env)).toBe(false);
           expect((await readPersistedStorageHead(env))?.latestHeight).toBe(env.height);
+          const journals = await readPersistedFrameJournals(env, {
+            fromHeight: 1,
+            toHeight: env.height,
+            limit: env.height,
+          });
+          expect(journals.at(-1)?.height).toBe(env.height);
+          expect(journals.some(journal => journal.runtimeInput.runtimeTxs.some(
+            tx => tx.type === 'importReplica' && tx.entityId === entityId,
+          ))).toBe(true);
           persisted = true;
         },
       });

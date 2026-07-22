@@ -8,6 +8,7 @@
     setXlnEnvironment,
   } from '$lib/stores/xlnStore';
   import { timeOperations } from '$lib/stores/timeStore';
+  import { errorLog } from '$lib/stores/errorLogStore';
   import type { Env, EnvSnapshot, XLNModule } from '@xln/runtime/xln-api';
 
   type ScenarioOption = {
@@ -431,8 +432,10 @@
       status = 'error';
       errorText = formatErrorMessage(error);
       statusText = 'Scenario failed';
-      console.error(
+      errorLog.log(
         `SCENARIO_PLAYER_FAILED:${option.id}:elapsedMs=${Math.round(performance.now() - startedAt)}:${errorText}`,
+        'Scenario Player',
+        error,
       );
     }
   }
