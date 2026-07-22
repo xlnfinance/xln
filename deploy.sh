@@ -907,6 +907,16 @@ ensure_production_host_hygiene() {
   install -d -m 700 /var/lib/xln /var/lib/xln/jdb /var/lib/xln/jdb/tmp /var/lib/xln/rdb
   ensure_production_foundry
 
+  # This pre-PM2 service predates the canonical production stack and points at
+  # a non-existent /root/xln/news-api.ts. Leaving it enabled creates an
+  # unbounded systemd crash loop on every boot (65k+ restarts observed).
+  if [ -e /etc/systemd/system/xln-news-api.service ]; then
+    systemctl disable --now xln-news-api.service
+    rm -f /etc/systemd/system/xln-news-api.service
+    systemctl daemon-reload
+    systemctl reset-failed
+  fi
+
   if command -v crontab >/dev/null 2>&1; then
     crontab -l 2>/dev/null | grep -v '/root/xln/auto-redeploy.sh' | crontab - 2>/dev/null || true
   fi

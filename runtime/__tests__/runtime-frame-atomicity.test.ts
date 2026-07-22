@@ -19,8 +19,6 @@ import {
   getRuntimeStorageDb,
   handleInboundP2PEntityInput,
   handleInboundReliableReceipt,
-  MAX_RUNTIME_FRAME_INGRESS_BYTES,
-  MAX_RUNTIME_FRAME_INGRESS_ENTRIES,
   process as processRuntime,
 } from '../runtime';
 import {
@@ -57,8 +55,6 @@ import { readStorageFrameRecord } from '../storage/read';
 
 const TEST_RUN_ID = `${process.pid}-${Date.now()}`;
 const cleanupNamespaces: string[] = [];
-
-type AccountedRuntimeFrameIngressBuffer = RuntimeFrameIngressBuffer & { byteLength: number };
 
 const address = (byte: string): string => `0x${byte.repeat(20)}`;
 const hash = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -240,11 +236,10 @@ const exactQueuedInput = (env: Env): RuntimeInput => ({
     : {}),
 });
 
-const installTestIngressBuffer = (env: Env): AccountedRuntimeFrameIngressBuffer => {
-  const buffer: AccountedRuntimeFrameIngressBuffer = {
+const installTestIngressBuffer = (env: Env): RuntimeFrameIngressBuffer => {
+  const buffer: RuntimeFrameIngressBuffer = {
     status: 'active',
     entries: [],
-    byteLength: 0,
   };
   env.runtimeState ??= {};
   env.runtimeState.runtimeFrameIngressBuffer = buffer;
@@ -692,53 +687,30 @@ describe('runtime frame atomicity', () => {
     expect(Object.getOwnPropertySymbols(persisted!.runtimeInput.runtimeTxs[0]!)).toHaveLength(0);
   });
 
-  test('frame ingress count limit is exact and rejects before cloning or mutation', () => {
-    const env = createEmptyEnv(`runtime ingress count capacity ${TEST_RUN_ID}`);
+  test('frame ingress remains lossless beyond former count and byte thresholds', () => {
+    const env = createEmptyEnv(`runtime ingress load ${TEST_RUN_ID}`);
     env.quietRuntimeLogs = true;
     installJurisdiction(env);
     const replica = installValidatorReplica(env, address('c1'), env.runtimeId!);
     const buffer = installTestIngressBuffer(env);
     const sourceRuntimeId = address('c3');
-    const input: RoutedEntityInput = {
+    const input = {
       entityId: replica.entityId,
       signerId: replica.signerId,
       entityTxs: [],
-    };
+      padding: 'x'.repeat(4 * 1024 * 1024 + 1),
+    } as RoutedEntityInput & { padding: string };
 
-    for (let index = 0; index < MAX_RUNTIME_FRAME_INGRESS_ENTRIES - 1; index += 1) {
+    expect(handleInboundP2PEntityInput(env, sourceRuntimeId, input, env.timestamp))
+      .toEqual({ kind: 'queued' });
+    input.padding = '';
+    for (let index = 0; index < 1_024; index += 1) {
       expect(handleInboundP2PEntityInput(env, sourceRuntimeId, input, env.timestamp))
         .toEqual({ kind: 'queued' });
     }
     const reliable = createTestReliableReceipt(env, replica.entityId, replica.signerId);
     expect(handleInboundReliableReceipt(env, reliable.from, reliable.receipt)).toBe('queued');
-    expect(buffer.entries).toHaveLength(MAX_RUNTIME_FRAME_INGRESS_ENTRIES);
-
-    const beforeEntries = buffer.entries;
-    const beforeByteLength = buffer.byteLength;
-    const mempoolBefore = safeStringify(env.runtimeMempool);
-    const originalStructuredClone = globalThis.structuredClone;
-    let cloneCalls = 0;
-    globalThis.structuredClone = ((value: unknown) => {
-      cloneCalls += 1;
-      return originalStructuredClone(value);
-    }) as typeof structuredClone;
-    let failure: unknown;
-    try {
-      handleInboundP2PEntityInput(env, sourceRuntimeId, input, env.timestamp);
-    } catch (error) {
-      failure = error;
-    } finally {
-      globalThis.structuredClone = originalStructuredClone;
-    }
-
-    expect((failure as Error | undefined)?.message).toContain(
-      'RUNTIME_FRAME_INGRESS_CAPACITY_EXCEEDED:dimension=count',
-    );
-    expect(cloneCalls).toBe(0);
-    expect(buffer.entries).toBe(beforeEntries);
-    expect(buffer.entries).toHaveLength(MAX_RUNTIME_FRAME_INGRESS_ENTRIES);
-    expect(buffer.byteLength).toBe(beforeByteLength);
-    expect(safeStringify(env.runtimeMempool)).toBe(mempoolBefore);
+    expect(buffer.entries).toHaveLength(1_026);
   });
 
   test('receipt ingress is fenced before it can enter an active frame buffer', () => {
@@ -764,66 +736,6 @@ describe('runtime frame atomicity', () => {
     ])).toBe(
       '1/2:Error:FIRST_INGRESS_FAILURE|2/2:TypeError:SECOND_INGRESS_FAILURE',
     );
-  });
-
-  test('frame ingress UTF-8 byte limit is exact for Entity and receipt inputs', () => {
-    const env = createEmptyEnv(`runtime ingress byte capacity ${TEST_RUN_ID}`);
-    env.quietRuntimeLogs = true;
-    installJurisdiction(env);
-    const replica = installValidatorReplica(env, address('d1'), env.runtimeId!);
-    const buffer = installTestIngressBuffer(env);
-    const sourceRuntimeId = address('d3');
-    const input = {
-      entityId: replica.entityId,
-      signerId: replica.signerId,
-      entityTxs: [],
-      padding: '',
-    } as RoutedEntityInput & { padding: string };
-    const entry = {
-      kind: 'entity',
-      from: sourceRuntimeId,
-      input,
-      ingressTimestamp: env.timestamp,
-    };
-    const emptyBytes = new TextEncoder().encode(safeStringify(entry)).byteLength;
-    const unicodePrefix = '€';
-    const paddingBytes = MAX_RUNTIME_FRAME_INGRESS_BYTES - emptyBytes;
-    if (paddingBytes < 3) throw new Error('TEST_RUNTIME_FRAME_INGRESS_BYTE_LIMIT_TOO_SMALL');
-    input.padding = `${unicodePrefix}${'x'.repeat(paddingBytes - 3)}`;
-    expect(new TextEncoder().encode(safeStringify(entry)).byteLength)
-      .toBe(MAX_RUNTIME_FRAME_INGRESS_BYTES);
-
-    expect(handleInboundP2PEntityInput(env, sourceRuntimeId, input, env.timestamp))
-      .toEqual({ kind: 'queued' });
-    expect(buffer.byteLength).toBe(MAX_RUNTIME_FRAME_INGRESS_BYTES);
-    expect(buffer.entries).toHaveLength(1);
-
-    const reliable = createTestReliableReceipt(env, replica.entityId, replica.signerId);
-    const mempoolBefore = safeStringify(env.runtimeMempool);
-    const originalStructuredClone = globalThis.structuredClone;
-    let cloneCalls = 0;
-    globalThis.structuredClone = ((value: unknown) => {
-      cloneCalls += 1;
-      return originalStructuredClone(value);
-    }) as typeof structuredClone;
-    let failure: unknown;
-    try {
-      handleInboundReliableReceipt(env, reliable.from, reliable.receipt);
-    } catch (error) {
-      failure = error;
-    } finally {
-      globalThis.structuredClone = originalStructuredClone;
-    }
-
-    expect((failure as Error | undefined)?.message).toContain(
-      'RUNTIME_FRAME_INGRESS_CAPACITY_EXCEEDED:dimension=bytes',
-    );
-    expect(cloneCalls).toBe(0);
-    expect(buffer.entries).toHaveLength(1);
-    expect(buffer.byteLength).toBe(MAX_RUNTIME_FRAME_INGRESS_BYTES);
-    expect(safeStringify(env.runtimeMempool)).toBe(mempoolBefore);
-    expect(env.runtimeState?.receivedReliableReceiptLedger).toBeUndefined();
-    expect(env.runtimeState?.receivedReliableTerminalWatermarks).toBeUndefined();
   });
 
   test('frame ingress ownership is env-local and closes after the exact frame', async () => {

@@ -1763,8 +1763,6 @@ export const registerEntityRuntimeHint = (env: Env, entityId: string, runtimeId:
   registerEntityRuntimeHintForRouting(env, entityId, runtimeId, getRuntimeEntityRoutingDeps());
 };
 
-export const MAX_RUNTIME_FRAME_INGRESS_ENTRIES = 1_024;
-export const MAX_RUNTIME_FRAME_INGRESS_BYTES = 4 * 1024 * 1024;
 export const MAX_RUNTIME_J_INPUTS = 256;
 export const MAX_RUNTIME_J_TXS = 1_024;
 export const MAX_RUNTIME_J_TXS_PER_JURISDICTION = 512;
@@ -1808,64 +1806,36 @@ const validateRuntimeJIngressLimits = (env: Env, runtimeInput: RuntimeInput): vo
   }
 };
 
-type AccountedRuntimeFrameIngressBuffer = RuntimeFrameIngressBuffer & { byteLength: number };
 type RuntimeFrameIngressEntry = RuntimeFrameIngressBuffer['entries'][number];
 
-const beginRuntimeFrameIngressBuffer = (env: Env): AccountedRuntimeFrameIngressBuffer => {
+const beginRuntimeFrameIngressBuffer = (env: Env): RuntimeFrameIngressBuffer => {
   const state = ensureRuntimeState(env);
   if (state.runtimeFrameIngressBuffer) {
     throw new Error(
       `RUNTIME_FRAME_INGRESS_BUFFER_ALREADY_ACTIVE:${state.runtimeFrameIngressBuffer.status}`,
     );
   }
-  const buffer: AccountedRuntimeFrameIngressBuffer = {
+  const buffer: RuntimeFrameIngressBuffer = {
     status: 'active',
     entries: [],
-    byteLength: 0,
   };
   state.runtimeFrameIngressBuffer = buffer;
   return buffer;
 };
 
-const getRuntimeFrameIngressBuffer = (env: Env): AccountedRuntimeFrameIngressBuffer | undefined => {
+const getRuntimeFrameIngressBuffer = (env: Env): RuntimeFrameIngressBuffer | undefined => {
   const buffer = env.runtimeState?.runtimeFrameIngressBuffer;
   if (buffer && buffer.status !== 'active') {
     throw new Error(`RUNTIME_FRAME_INGRESS_BUFFER_INVALID_LIFECYCLE:${buffer.status}`);
   }
-  if (!buffer) return undefined;
-  const accounted = buffer as AccountedRuntimeFrameIngressBuffer;
-  if (!Number.isSafeInteger(accounted.byteLength) || accounted.byteLength < 0) {
-    throw new Error(
-      `RUNTIME_FRAME_INGRESS_BUFFER_BYTE_LENGTH_INVALID:${String(accounted.byteLength)}`,
-    );
-  }
-  return accounted;
+  return buffer;
 };
 
 const appendRuntimeFrameIngress = (
-  buffer: AccountedRuntimeFrameIngressBuffer,
+  buffer: RuntimeFrameIngressBuffer,
   entry: RuntimeFrameIngressEntry,
 ): void => {
-  const currentCount = buffer.entries.length;
-  if (currentCount >= MAX_RUNTIME_FRAME_INGRESS_ENTRIES) {
-    throw new Error(
-      `RUNTIME_FRAME_INGRESS_CAPACITY_EXCEEDED:dimension=count:` +
-        `current=${currentCount}:incoming=1:max=${MAX_RUNTIME_FRAME_INGRESS_ENTRIES}`,
-    );
-  }
-  const incomingBytes = new TextEncoder().encode(safeStringify(entry)).byteLength;
-  if (
-    incomingBytes > MAX_RUNTIME_FRAME_INGRESS_BYTES ||
-    buffer.byteLength > MAX_RUNTIME_FRAME_INGRESS_BYTES - incomingBytes
-  ) {
-    throw new Error(
-      `RUNTIME_FRAME_INGRESS_CAPACITY_EXCEEDED:dimension=bytes:` +
-        `current=${buffer.byteLength}:incoming=${incomingBytes}:max=${MAX_RUNTIME_FRAME_INGRESS_BYTES}`,
-    );
-  }
-  const cloned = structuredClone(entry);
-  buffer.entries.push(cloned);
-  buffer.byteLength += incomingBytes;
+  buffer.entries.push(structuredClone(entry));
 };
 
 export const handleInboundP2PEntityInput = (
@@ -2000,7 +1970,6 @@ const drainRuntimeFrameIngressBuffer = (transaction: RuntimeFrameTransaction): v
   delete state.runtimeFrameIngressBuffer;
   const entries = buffered.entries;
   buffered.entries = [];
-  (buffered as AccountedRuntimeFrameIngressBuffer).byteLength = 0;
   const deps = getRuntimeEntityRoutingDeps();
   const errors: Error[] = [];
   try {
