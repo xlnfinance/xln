@@ -10,7 +10,7 @@ import {
   getRuntimeStorageDb,
   loadEnvFromDB,
   saveEnvToDB,
-  tryOpenDb,
+  tryOpenStorageDb,
 } from '../runtime';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { deriveLocalEntityCryptoKeys } from '../entity/crypto';
@@ -489,7 +489,7 @@ describe('real process storage crash recovery', () => {
       const entityId = generateNumberedEntityId(2).toLowerCase();
       const rebuiltState = await loadEntityStateFromStorage({
         env: restored,
-        tryOpenDb,
+        tryOpenDb: tryOpenStorageDb,
         getRuntimeDb: getRuntimeStorageDb,
         entityId,
       });

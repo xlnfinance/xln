@@ -35,10 +35,6 @@ import {
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
 } from '../wal/snapshot';
-import {
-  decodePersistedFrameJournal,
-  encodePersistedFrameJournal,
-} from '../wal/store';
 import type {
   AccountInput,
   ConsensusConfig,
@@ -570,32 +566,6 @@ describe('runtime frame atomicity', () => {
     const imports = (cloned.runtimeInput as RuntimeInput).runtimeTxs
       .filter(tx => tx.type === 'importReplica');
 
-    expect(imports.slice(4, 8).map(tx => tx.data.config.validators)).toEqual(
-      Array.from({ length: 4 }, () => ['6', '7', '8', '9']),
-    );
-    expect(new Set(imports.slice(4, 8).map(tx => tx.data.config)).size).toBe(4);
-  });
-
-  test('WAL journal decode isolates repeated runtime-machine configs', () => {
-    const { runtimeInput } = makeAliasedBoardRuntimeInput();
-    const payload = encodePersistedFrameJournal({
-      height: 1,
-      timestamp: 1_000,
-      replicaMetaDigest: hash('f1'),
-      postStateHash: hash('f2'),
-      replicaMetaCheckpoint: false,
-      replicaMetaStateMode: 'live-head',
-      runtimeInput,
-      runtimeMachine: { runtimeInput, jReplicas: [] },
-      logs: [],
-    });
-
-    const decoded = decodePersistedFrameJournal(payload, 1);
-    if (!decoded?.runtimeMachine) {
-      throw new Error('TEST_WAL_RUNTIME_MACHINE_MISSING');
-    }
-    const imports = (decoded.runtimeMachine['runtimeInput'] as RuntimeInput).runtimeTxs
-      .filter(tx => tx.type === 'importReplica');
     expect(imports.slice(4, 8).map(tx => tx.data.config.validators)).toEqual(
       Array.from({ length: 4 }, () => ['6', '7', '8', '9']),
     );

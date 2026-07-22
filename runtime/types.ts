@@ -1279,8 +1279,6 @@ export interface Env {
     lastP2PConfig?: RuntimeP2PConfigLike | null;
     envChangeCallbacks?: Set<(env: Env) => void>;
     runtimeFrameCommitCallbacks?: Set<(frame: { height: number; runtimeInput: RuntimeInput }) => void>;
-    db?: Level<Buffer, Buffer> | null | undefined;
-    dbOpenPromise?: Promise<boolean> | null | undefined;
     storageDb?: Level<Buffer, Buffer> | null | undefined;
     storageDbOpenPromise?: Promise<boolean> | null | undefined;
     storagePreviousDb?: Level<Buffer, Buffer> | null | undefined;

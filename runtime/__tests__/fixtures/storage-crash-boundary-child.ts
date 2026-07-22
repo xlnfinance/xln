@@ -7,7 +7,7 @@ import {
   getRuntimeStorageDb,
   persistRestoredEnvToDB,
   process as processRuntime,
-  tryOpenDb,
+  tryOpenStorageDb,
   tryOpenFrameDb,
 } from '../../runtime';
 import {
@@ -453,7 +453,7 @@ if (!recoveryLagMode && !recoveryBoardRootLagMode) {
   await saveRuntimeFrameToStorage({
     env,
     currentFrameInput: { runtimeTxs: [], entityInputs: [] },
-    tryOpenDb,
+    tryOpenDb: tryOpenStorageDb,
     getRuntimeDb: getRuntimeStorageDb,
     tryOpenFrameDb,
     getFrameDb,
@@ -552,7 +552,7 @@ if (recoveryLagMode || recoveryBoardRootLagMode) {
     // above deliberately bypasses process() so this crash fixture must provide
     // the exact input that deterministically rebuilds the durable J attempt.
     currentFrameInput: appliedRuntimeInput,
-    tryOpenDb,
+    tryOpenDb: tryOpenStorageDb,
     getRuntimeDb: getRuntimeStorageDb,
     tryOpenFrameDb,
     getFrameDb,

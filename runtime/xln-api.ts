@@ -52,7 +52,7 @@ export type {
   CrossJurisdictionSwapRoute,
   PaymentDeliveryMode,
 } from './types';
-export type { PersistedFrameJournal } from './wal/store';
+export type { PersistedFrameJournal } from './storage/types';
 export type { BoardMemberInput } from './entity/factory';
 export type { PersistedActivityJournal } from './api/activity-history';
 export type { StorageFrameRecord, StorageHead } from './storage/types';
@@ -178,7 +178,7 @@ import type {
   TowerModeV1,
 } from './recovery/types';
 import type { JAdapter } from './jadapter/types';
-import type { PersistedFrameJournal } from './wal/store';
+import type { PersistedFrameJournal } from './storage/types';
 import type { EmbeddedRuntimeAdapter } from './radapter/embedded';
 import type { RemoteRuntimeAdapter } from './radapter/remote';
 import type { PersistedActivityJournal, RuntimeActivityFilters } from './api/activity-history';
@@ -554,7 +554,6 @@ export interface XLNModule {
   // Database operations
   clearDB: (env?: Env) => Promise<void>;
   clearDatabase: () => Promise<void>;
-  clearDatabaseAndHistory: (env: Env) => Promise<Env>;
   saveEnvToDB: (env: Env) => Promise<void>;
   persistRestoredEnvToDB: (env: Env) => Promise<void>;
   restoreEnvFromCheckpointSnapshot: (

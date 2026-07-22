@@ -821,18 +821,6 @@ export const rotateStorageEpochDb = async (
   }
 };
 
-export const getRuntimeDb = (
-  env: Env,
-  deps: RuntimeStorageDbDeps,
-): Level<Buffer, Buffer> => {
-  const state = deps.ensureRuntimeState(env);
-  if (!state.db) {
-    const path = resolveDbPath(env, 'core');
-    state.db = createChunkedLevel(path);
-  }
-  return state.db;
-};
-
 export const getInfraDb = (
   env: Env,
   deps: RuntimeStorageDbDeps,
@@ -883,39 +871,6 @@ export const closeInfraDb = async (env: Env): Promise<void> => {
     throw error;
   }
 };
-
-export async function tryOpenDb(
-  env: Env,
-  deps: RuntimeStorageDbDeps,
-): Promise<boolean> {
-  const state = deps.ensureRuntimeState(env);
-  if (!state.dbOpenPromise) {
-    const db = getRuntimeDb(env, deps);
-    state.dbOpenPromise = (async () => {
-      try {
-        await db.open();
-        return true;
-      } catch (error) {
-        const isBlocked =
-          error instanceof Error &&
-          (error.message?.includes('blocked') || error.name === 'SecurityError' || error.name === 'InvalidStateError');
-        if (isBlocked) {
-          storageLog.warn('runtime_db.blocked', { error: formatStorageError(error) });
-          return false;
-        }
-        // Non-blocked open errors are fatal for persistence.
-        state.dbOpenPromise = null;
-        throw error;
-      }
-    })();
-  }
-  try {
-    return await state.dbOpenPromise;
-  } catch (error) {
-    storageLog.error('runtime_db.open_failed', { error: formatStorageError(error) });
-    throw error;
-  }
-}
 
 export async function tryOpenFrameDb(
   env: Env,

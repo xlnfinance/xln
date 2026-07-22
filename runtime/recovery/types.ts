@@ -1,4 +1,4 @@
-import type { PersistedFrameJournal } from '../wal/store';
+import type { PersistedFrameJournal } from '../storage/types';
 
 export type RuntimeRecoverySignerV1 = {
   index: number;

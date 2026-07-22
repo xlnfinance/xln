@@ -72,7 +72,7 @@ import {
   buildReplayVerifiableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
 } from '../wal/snapshot';
-import type { PersistedFrameJournal } from '../wal/store';
+import type { PersistedFrameJournal } from '../storage/types';
 
 const TEST_RUN_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 

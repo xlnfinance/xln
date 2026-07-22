@@ -5,7 +5,7 @@ import {
   getFrameDb,
   getRuntimeStorageDb,
   process as processRuntime,
-  tryOpenDb,
+  tryOpenStorageDb,
   tryOpenFrameDb,
 } from '../../runtime';
 import { applyAccountInput } from '../../account/consensus';
@@ -210,7 +210,7 @@ markStorageEntityDirty(env, entityId);
 markStorageEntityDirty(env, counterpartyId);
 await saveRuntimeFrameToStorage({
   env,
-  tryOpenDb,
+  tryOpenDb: tryOpenStorageDb,
   getRuntimeDb: getRuntimeStorageDb,
   tryOpenFrameDb,
   getFrameDb,
@@ -259,7 +259,7 @@ if (requestedBoundary === 'before-authoritative-history-commit') {
 await saveRuntimeFrameToStorage({
   env,
   currentFrameInput: appliedRuntime.appliedRuntimeInput,
-  tryOpenDb,
+  tryOpenDb: tryOpenStorageDb,
   getRuntimeDb: getRuntimeStorageDb,
   tryOpenFrameDb,
   getFrameDb,

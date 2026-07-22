@@ -123,8 +123,13 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
 - [ ] Replace 83 manual dirty marks incrementally with reducer-returned
   `{nextState, storageChanges, durableEffects}` and differential proof for
   Account, Entity, orderbook and Runtime routing before deleting old marks.
-- [ ] Prove whether `runtime/wal/store.ts`, legacy core DB and duplicate HEAD/DAG
-  surfaces have production consumers; delete only demonstrated dead paths.
+- [x] Prove whether `runtime/wal/store.ts`, legacy core DB and duplicate HEAD/DAG
+  surfaces have production consumers; delete only demonstrated dead paths. No
+  production caller reached the parallel WAL API or empty core LevelDB, so both
+  and their self-tests were removed. `PersistedFrameJournal` now derives from
+  `StorageFrameRecord`. History/current HEAD and immutable nodes remain active
+  as authority/cache, not parallel authorities. Net -700+ LOC; types and
+  storage schema/atomicity 61/61 PASS; real crash/recovery 54/54 PASS.
 - [ ] Reduce frame write amplification: audit the two Runtime-machine snapshots,
   transport noise in frame hashes, duplicated replicaMeta and rebuildable
   indexes. Preserve authoritative replay and crash boundaries.
@@ -134,8 +139,10 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   and schema version. `STORAGE_FRAME_FORMAT` is one frozen descriptor consumed
   by frame hashing, writing and validation; its exact schema/domain/algorithm/
   hashMode tuple is pinned by `storage-schema-version.test.ts`.
-- [ ] Make history HEAD the sole recovery authority; prove deleting current DB
-  rebuilds it completely. Current HEAD may remain only a cache marker.
+- [x] Make history HEAD the sole recovery authority; prove deleting current DB
+  rebuilds it completely. History is committed synchronously before the
+  rebuildable current cache; a current-ahead head fails loud. The real-process
+  deleted-current-cache recovery test passed inside the 54/54 crash gate.
 - [ ] Add a minimal deterministic SimNetwork/SimStorage harness for seeded
   delay/reorder/drop/partial-write/kill, asserting bilateral delta conservation,
   replay==live and no double HTLC resolution. Preserve every red seed.

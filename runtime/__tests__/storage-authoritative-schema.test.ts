@@ -23,10 +23,6 @@ import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } fro
 import { computeStorageFrameHash } from '../storage/hashes';
 import type { StorageFrameRecord } from '../storage/types';
 import { createEmptyBatch } from '../jurisdiction/batch';
-import {
-  decodePersistedFrameJournal,
-  encodePersistedFrameJournal,
-} from '../wal/store';
 import { validateDurableRuntimeMachineSnapshot } from '../wal/runtime-machine-schema';
 import { validateEntityTx } from '../wal/runtime-machine-schema/entity-tx';
 import { buildEntityTransactionProposalAction } from '../entity/authorization';
@@ -153,27 +149,6 @@ describe('authoritative RDB schemas survive a real close/reopen boundary', () =>
       frame,
       validateStorageFrameRecordValue,
     )).rejects.toThrow('STORAGE_FRAME_INVALID_MACHINE_RUNTIME_STATE_PENDING_COMMITTED_J_OUTBOX');
-  });
-
-  test('WAL and storage share the same nested runtime-machine schema', () => {
-    const env = createEmptyEnv('wal-runtime-machine-schema');
-    const validMachine = buildDurableRuntimeMachineSnapshot(env);
-    const corruptMachine = structuredClone(validMachine);
-    corruptMachine['runtimeState'] = { pendingCommittedJOutbox: 'CORRUPT' };
-
-    expect(() => decodePersistedFrameJournal(encodePersistedFrameJournal({
-      height: 1,
-      timestamp: 1,
-      replicaMetaDigest: hash,
-      postStateHash: hash,
-      replicaMetaCheckpoint: true,
-      replicaMetaStateMode: 'full',
-      runtimeInput: { runtimeTxs: [], entityInputs: [] },
-      runtimeMachine: corruptMachine,
-      logs: [],
-    }), 1)).toThrow(
-      'WAL_RUNTIME_MACHINE_INVALID:height=1_RUNTIME_STATE_PENDING_COMMITTED_J_OUTBOX',
-    );
   });
 
   test('rejects unknown runtime-state fields and corrupt nested J entries', () => {

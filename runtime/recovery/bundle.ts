@@ -12,7 +12,7 @@ import type {
   RuntimeRecoveryMetaV1,
   RuntimeRecoverySignerV1,
 } from './types';
-import type { PersistedFrameJournal } from '../wal/store';
+import type { PersistedFrameJournal } from '../storage/types';
 
 const RECOVERY_BUNDLE_VERSION = 1;
 const MAX_RECOVERY_JOURNAL_FRAMES = 10_000;

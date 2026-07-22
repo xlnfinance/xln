@@ -499,7 +499,7 @@ import {
   log,
 } from './utils';
 import { createStructuredLogger, logError } from './infra/logger';
-import type { PersistedFrameJournal } from './wal/store';
+import type { PersistedFrameJournal } from './storage/types';
 import {
   buildRuntimeActivityEvents,
   dedupeRuntimeActivityEvents,
@@ -537,13 +537,11 @@ import {
   deriveRuntimeIdFromSeed,
   getFrameDb as getFrameDbStorage,
   getInfraDb as getInfraDbStorage,
-  getRuntimeDb as getRuntimeDbStorage,
   getStorageDb as getStorageDbStorage,
   normalizeDbNamespace,
   resolveFrameDbPath,
   resolveStorageDbPath,
   rotateStorageEpochDb as rotateStorageEpochDbStorage,
-  tryOpenDb as tryOpenDbStorage,
   tryOpenFrameDb as tryOpenFrameDbStorage,
   tryOpenStorageDb as tryOpenStorageDbStorage,
   withStorageConsistentRead,
@@ -641,9 +639,6 @@ const getRuntimeStorageDbDeps = (): RuntimeStorageDbDeps => ({
   ensureRuntimeState,
 });
 
-export const getRuntimeDb = (env: Env): Level<Buffer, Buffer> =>
-  getRuntimeDbStorage(env, getRuntimeStorageDbDeps());
-
 export const getRuntimeStorageDb = (env: Env, role: StorageDbRole = 'current'): Level<Buffer, Buffer> =>
   getStorageDb(env, role);
 
@@ -656,14 +651,11 @@ export const getInfraDb = (env: Env): Level<Buffer, Buffer> =>
 export const getFrameDb = (env: Env): Level<Buffer, Buffer> =>
   getFrameDbStorage(env, getRuntimeStorageDbDeps());
 
-const tryOpenStorageDb = (env: Env, role: StorageDbRole = 'current'): Promise<boolean> =>
+export const tryOpenStorageDb = (env: Env, role: StorageDbRole = 'current'): Promise<boolean> =>
   tryOpenStorageDbStorage(env, getRuntimeStorageDbDeps(), role);
 
 const rotateStorageEpochDb = (env: Env, snapshotHeight: number, timestamp = env.timestamp): Promise<boolean> =>
   rotateStorageEpochDbStorage(env, getRuntimeStorageDbDeps(), snapshotHeight, timestamp);
-
-export const tryOpenDb = (env: Env): Promise<boolean> =>
-  tryOpenDbStorage(env, getRuntimeStorageDbDeps());
 
 export const tryOpenFrameDb = (env: Env): Promise<boolean> =>
   tryOpenFrameDbStorage(env, getRuntimeStorageDbDeps());
@@ -674,17 +666,6 @@ const throwSettledErrors = (results: PromiseSettledResult<unknown>[], code: stri
     .map(result => result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
   if (errors.length === 1) throw errors[0];
   if (errors.length > 1) throw new AggregateError(errors, code);
-};
-
-const closeLegacyRuntimeDb = async (env: Env): Promise<void> => {
-  const state = env.runtimeState;
-  const db = state?.db;
-  if (!state || !db) return;
-  await db.close();
-  if (state.db === db) {
-    state.db = null;
-    state.dbOpenPromise = null;
-  }
 };
 
 export const closeRuntimeDb = async (env: Env): Promise<void> => {
@@ -701,7 +682,6 @@ export const closeRuntimeDb = async (env: Env): Promise<void> => {
     closeStorageDb(env, 'current'),
     closeStorageDb(env, 'previous'),
     closeFrameDb(env),
-    closeLegacyRuntimeDb(env),
   ]);
   throwSettledErrors(closed, 'RUNTIME_DB_CLOSE_FAILED');
 };
@@ -3018,12 +2998,6 @@ const main = async (
         : {}),
     });
     if (loaded) {
-      const loadedState = ensureRuntimeState(loaded);
-      const baseState = ensureRuntimeState(baseEnv);
-      if (runtimeIsBrowser) {
-        loadedState.db = baseState.db;
-        loadedState.dbOpenPromise = baseState.dbOpenPromise;
-      }
       env = loaded;
       restoredFromCoreDb = true;
       runtimeLog.info('main.restored', { runtime: String(env.runtimeId || '').slice(0, 12), height: env.height });
@@ -3069,31 +3043,6 @@ const getSnapshot = (env: Env, index: number) => {
 const getCurrentHistoryIndex = (env: Env) => (env.history || []).length - 1;
 
 // Clear database for a specific runtime and return a fresh env
-const clearDatabaseAndHistory = async (env: Env): Promise<Env> => {
-  runtimeLog.info('db.reset.start');
-  const db = getRuntimeDb(env);
-  await clearDatabase(db);
-  try {
-    const infraReady = await tryOpenInfraDb(env);
-    if (infraReady) {
-      await clearDatabase(getInfraDb(env));
-    }
-  } catch (error) {
-    runtimeLog.warn('db.reset.infra_clear_failed', { error: error instanceof Error ? error.message : String(error) });
-  }
-
-  const seed = env.runtimeSeed ?? null;
-  const freshEnv = createEmptyEnv(seed);
-  if (env.runtimeId) {
-    freshEnv.runtimeId = env.runtimeId;
-    freshEnv.dbNamespace = normalizeDbNamespace(env.runtimeId);
-  }
-  attachEventEmitters(freshEnv);
-
-  runtimeLog.info('db.reset.done');
-  return freshEnv;
-};
-
 /**
  * Queue an entity transaction for processing (helper for UI components)
  * Wraps applyRuntimeInput with a single entity tx
@@ -3125,7 +3074,6 @@ export {
   clearDatabase,
   classifyBilateralState,
   getAccountBarVisual,
-  clearDatabaseAndHistory,
   // Clean logs: getCleanLogs, clearCleanLogs, copyCleanLogs - exported at definition
   // Entity creation functions
   createLazyEntity,
@@ -4301,8 +4249,6 @@ const RUNTIME_FRAME_SHARED_STATE_KEYS = new Set<string>([
   'p2p',
   'envChangeCallbacks',
   'runtimeFrameCommitCallbacks',
-  'db',
-  'dbOpenPromise',
   'storageDb',
   'storageDbOpenPromise',
   'storagePreviousDb',
@@ -7209,15 +7155,10 @@ export const clearDB = async (env?: Env): Promise<void> => {
   if (!runtimeIsBrowser) return;
 
   try {
-    const dbReady = await tryOpenDb(targetEnv);
     const infraReady = await tryOpenInfraDb(targetEnv);
     const storageReady = await tryOpenStorageDb(targetEnv, 'current');
     const storagePreviousReady = await tryOpenStorageDb(targetEnv, 'previous');
     const frameReady = await tryOpenFrameDb(targetEnv);
-    if (dbReady) {
-      const db = getRuntimeDb(targetEnv);
-      await db.clear();
-    }
     if (infraReady) {
       const infraDb = getInfraDb(targetEnv);
       await infraDb.clear();
