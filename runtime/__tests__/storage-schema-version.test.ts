@@ -4,7 +4,12 @@ import { encodeBuffer } from '../storage/codec';
 import { readFrameDbHead } from '../storage/frame-db';
 import { inspectStorage } from '../storage/inspect';
 import { recoverStorageDbFromHistory } from '../storage/index';
-import { KEY_FRAME_DB_HEAD, KEY_HEAD, STORAGE_SCHEMA_VERSION } from '../storage/keys';
+import {
+  KEY_FRAME_DB_HEAD,
+  KEY_HEAD,
+  STORAGE_FRAME_FORMAT,
+  STORAGE_SCHEMA_VERSION,
+} from '../storage/keys';
 import { seedFreshStorageEpoch } from '../storage/lifecycle';
 import { readStorageHead } from '../storage/read';
 import type { RuntimeDbLike, StorageFrameDbHead, StorageHead, StorageRuntimeConfig } from '../storage/types';
@@ -68,7 +73,20 @@ describe('storage schema boundary', () => {
     await expect(readStorageHead(memoryDbWithHead(currentHead(4)))).rejects.toThrow(
       `STORAGE_SCHEMA_MISMATCH:stored=4:current=${STORAGE_SCHEMA_VERSION}`,
     );
-    expect(STORAGE_SCHEMA_VERSION).toBe(6);
+    await expect(readStorageHead(memoryDbWithHead(currentHead(6)))).rejects.toThrow(
+      `STORAGE_SCHEMA_MISMATCH:stored=6:current=${STORAGE_SCHEMA_VERSION}:boundary=storage-head`,
+    );
+    expect(STORAGE_SCHEMA_VERSION).toBe(7);
+  });
+
+  test('pins the one current frame format as one inseparable descriptor', () => {
+    expect(STORAGE_FRAME_FORMAT).toEqual({
+      schemaVersion: 7,
+      domain: 'xln.storage.frame',
+      algorithmId: 'sha256',
+      hashMode: 'storage-merkle-v1',
+    });
+    expect(Object.isFrozen(STORAGE_FRAME_FORMAT)).toBe(true);
   });
 
   test('accepts only the current schema and preserves an empty database', async () => {

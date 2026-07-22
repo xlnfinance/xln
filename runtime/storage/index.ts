@@ -62,6 +62,7 @@ import {
   KEY_CERTIFIED_BOARD_NODE,
   KEY_CONSUMPTION_NODE,
   KEY_ACCOUNT_J_CLAIM_NODE,
+  STORAGE_FRAME_FORMAT,
   STORAGE_SCHEMA_VERSION,
   ZERO_FRAME_HASH,
   decodeEntityId,
@@ -1142,7 +1143,7 @@ export const saveRuntimeFrameToStorage = async (options: {
     replicaMetaCheckpoint: checkpointedLineagePlan !== null,
     replicaMetaStateMode,
     stateHash: preparedHashes?.stateHash ?? '',
-    hashMode: 'storage-merkle-v1',
+    hashMode: STORAGE_FRAME_FORMAT.hashMode,
     materializedState: shouldMaterialize,
     ...(preparedHashes ? { entityHashes: preparedHashes.entityHashes } : {}),
     ...(runtimeStateHashes ? {

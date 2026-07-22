@@ -1,11 +1,19 @@
 import type { RadixMerkleRadix } from './merkle';
+import { INTEGRITY_DIGEST_ALGORITHM_ID } from '../infra/integrity-checksum';
 
 /**
- * Schema 4 makes validator-local replica metadata part of every retained
- * checkpoint. Schema 3 snapshots can restore an Entity state above H0 without
- * its certified lineage anchor and therefore are not valid recovery bundles.
+ * Schema 7 is the only supported fresh-reset format. It binds the current
+ * SHA-256 frame chain to its domain and Merkle mode; schema 6 used different
+ * frame-hash bytes and must never be interpreted as this format.
  */
-export const STORAGE_SCHEMA_VERSION = 6;
+export const STORAGE_SCHEMA_VERSION = 7;
+
+export const STORAGE_FRAME_FORMAT = Object.freeze({
+  schemaVersion: STORAGE_SCHEMA_VERSION,
+  domain: 'xln.storage.frame',
+  algorithmId: INTEGRITY_DIGEST_ALGORITHM_ID,
+  hashMode: 'storage-merkle-v1',
+} as const);
 
 export class StorageSchemaMismatchError extends Error {
   readonly code = 'STORAGE_SCHEMA_MISMATCH' as const;

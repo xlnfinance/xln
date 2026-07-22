@@ -1,7 +1,7 @@
 import { validateRuntimeInputEnvelope } from '../protocol/boundary-validation';
 import type { RoutedEntityInput } from '../types';
 import { validateEntityInput } from '../validation-utils';
-import { assertStorageSchemaVersion } from './keys';
+import { assertStorageSchemaVersion, STORAGE_FRAME_FORMAT } from './keys';
 import type {
   StorageDiffRecord,
   StorageDoc,
@@ -95,7 +95,7 @@ export const validateStorageFrameRecordValue = (value: unknown): StorageFrameRec
     throw new Error(`${code}_REPLICA_META_STATE_MODE_CHECKPOINT`);
   }
   if (typeof frame['stateHash'] !== 'string') throw new Error(`${code}_STATE_HASH`);
-  if (frame['hashMode'] !== 'storage-merkle-v1') throw new Error(`${code}_HASH_MODE`);
+  if (frame['hashMode'] !== STORAGE_FRAME_FORMAT.hashMode) throw new Error(`${code}_HASH_MODE`);
   requireStorageBoolean(frame['materializedState'], `${code}_MATERIALIZED`);
   if (frame['materializedState'] === true) {
     validateFrameEntityHashes(frame['entityHashes'], `${code}_ENTITY_HASHES`);

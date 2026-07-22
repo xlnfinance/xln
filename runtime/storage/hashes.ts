@@ -17,6 +17,7 @@ import {
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
   KEY_LIVE_ENTITY,
+  STORAGE_FRAME_FORMAT,
   decodeEntityId,
   hexBytes,
   keyLiveAccountPrefix,
@@ -271,7 +272,7 @@ export const computeStorageFrameHash = (record: StorageFrameRecord): string => {
   const stableRecord = { ...record };
   delete stableRecord.frameHash;
   return hashStable({
-    kind: 'xln.storage.frame',
+    kind: STORAGE_FRAME_FORMAT.domain,
     ...stableRecord,
     entityHashes: (stableRecord.entityHashes ?? [])
       .map((entry) => ({

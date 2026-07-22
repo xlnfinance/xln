@@ -93,8 +93,11 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   edge, branch and root hashes, and reject any persisted mismatch before HEAD.
 - [ ] Verify frame replay against an independently computed post-state
   commitment at the first divergent height; forbid expected=actual tautology.
-- [ ] Resolve the current branch's hash/domain/schema collision. Because this is
-  a fresh reset, keep one format only; do not add migrations or dual readers.
+- [x] Resolve the current branch's hash/domain/schema collision. The only
+  fresh-reset format is schema 7 with SHA-256, `xln.storage.frame` and
+  `storage-merkle-v1`; schema 6 is rejected at the HEAD boundary. No migration,
+  dual reader/writer or version-named compatibility format exists. Storage
+  schema/codec/authoritative L1: 41/41 PASS, 129 assertions; types PASS.
 - [x] Verify the previously failing 10 SIGKILL lineage cases on current HEAD;
   fix any remaining loss of certified lineage without inventing peer recovery.
 - [x] Register chunk prefix `0x7e`; prove delete/overwrite/checkpoint collection
@@ -111,9 +114,10 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   indexes. Preserve authoritative replay and crash boundaries.
 - [ ] Split oversized storage modules by append/materialize/snapshot/prune and
   current/history/recovery reads after behavior is frozen by tests.
-- [ ] Add a format-discipline snapshot gate covering domain tags, algorithm IDs
-  and schema version so persisted bytes cannot change without the one explicit
-  format change approved for a fresh reset.
+- [x] Add a format-discipline snapshot gate covering domain tags, algorithm IDs
+  and schema version. `STORAGE_FRAME_FORMAT` is one frozen descriptor consumed
+  by frame hashing, writing and validation; its exact schema/domain/algorithm/
+  hashMode tuple is pinned by `storage-schema-version.test.ts`.
 - [ ] Make history HEAD the sole recovery authority; prove deleting current DB
   rebuilds it completely. Current HEAD may remain only a cache marker.
 - [ ] Add a minimal deterministic SimNetwork/SimStorage harness for seeded
