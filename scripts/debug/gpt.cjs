@@ -355,7 +355,6 @@ const CROSS_FILES = {
     'runtime/__tests__/helpers/cross-j.ts',
     'runtime/__tests__/cross-jurisdiction-swap.test.ts',
     'runtime/__tests__/cross-jurisdiction-security.test.ts',
-    'runtime/__tests__/cross-jurisdiction-reorder.test.ts',
     'runtime/__tests__/multi-jurisdiction-entity.test.ts',
     'runtime/__tests__/orderbook-lifecycle.test.ts',
     'runtime/__tests__/orderbook-matching-fallback.test.ts',
