@@ -68,7 +68,6 @@ const makeOffer = (index: number): SwapOffer => ({
   giveAmount: 100n,
   wantTokenId: 2,
   wantAmount: 50n,
-  minFillRatio: 0,
   makerIsLeft: true,
   createdHeight: index + 1,
 });

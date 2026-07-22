@@ -167,7 +167,6 @@ export type MarketMakerOfferSpec = {
   wantTokenId: number;
   wantAmount: bigint;
   priceTicks: bigint;
-  minFillRatio: number;
   crossJurisdiction?: CrossJurisdictionSwapRoute;
 };
 
@@ -1238,10 +1237,6 @@ export const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: num
             wantTokenId: entry.pair.quoteTokenId,
             wantAmount: askWantAmount,
             priceTicks: askPriceTicks,
-            // Resting MM quotes must be ordinary GTC orders. A non-zero minFillRatio on
-            // a resting book order creates AON-like semantics that the matcher cannot
-            // honor safely across bilateral state channels, so keep it at zero here.
-            minFillRatio: 0,
           });
         }
         if (bidGiveAmount > 0n) {
@@ -1254,9 +1249,6 @@ export const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: num
             wantTokenId: entry.pair.baseTokenId,
             wantAmount: bidBaseSize,
             priceTicks: bidPriceTicks,
-            // Same rule for resting bids: keep them plain GTC so they are always
-            // eligible to rest on book and match incrementally.
-            minFillRatio: 0,
           });
         }
       }
@@ -1481,7 +1473,6 @@ export const buildMarketMakerCrossOfferSpecs = (
             wantTokenId: pair.targetTokenId,
             wantAmount: amounts.targetAmount,
             priceTicks: amounts.priceTicks,
-            minFillRatio: 0,
             crossJurisdiction: route,
           });
         }
@@ -1839,7 +1830,6 @@ const maintainMarketMakerQuotes = async (
             wantTokenId: spec.wantTokenId,
             wantAmount: spec.wantAmount,
             priceTicks: spec.priceTicks,
-            minFillRatio: spec.minFillRatio,
           },
         },
       );
@@ -2993,7 +2983,6 @@ const canonicalSwapOfferEconomics = (offer: SwapOffer): Record<string, unknown> 
   wantAmount: String(offer.wantAmount),
   priceTicks: offer.priceTicks === undefined ? null : String(offer.priceTicks),
   timeInForce: Number(offer.timeInForce ?? 0),
-  minFillRatio: Number(offer.minFillRatio ?? 0),
   quantizedGive: offer.quantizedGive === undefined ? null : String(offer.quantizedGive),
   quantizedWant: offer.quantizedWant === undefined ? null : String(offer.quantizedWant),
 });

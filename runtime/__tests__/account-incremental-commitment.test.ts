@@ -25,7 +25,6 @@ const offer = (index: number): SwapOffer => ({
   wantAmount: 2_000_000n + BigInt(index),
   priceTicks: 2_000_000n,
   timeInForce: 0,
-  minFillRatio: 0,
   makerIsLeft: true,
   createdHeight: index + 1,
 });

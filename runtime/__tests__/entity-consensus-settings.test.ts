@@ -76,7 +76,6 @@ const replica = (payment: EntityTx): EntityReplica => ({
     htlcFeesEarned: 0n,
     lockBook: new Map(),
     swapTradingPairs: [],
-    pendingSwapFillRatios: new Map(),
   },
 }) as EntityReplica;
 

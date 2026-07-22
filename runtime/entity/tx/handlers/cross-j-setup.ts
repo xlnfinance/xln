@@ -279,7 +279,6 @@ export const handleRegisterCrossJurisdictionSwapEntityTx = (
               wantAmount: route.target.amount,
               ...(route.priceTicks !== undefined ? { priceTicks: route.priceTicks } : {}),
               timeInForce: 0,
-              minFillRatio: 0,
               crossJurisdiction: cloneCrossJurisdictionRoute(route),
             },
           },

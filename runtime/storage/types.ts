@@ -1,7 +1,6 @@
 import type { BookState, EntityReferral, HubProfile } from '../orderbook';
 import type { CrontabState } from '../entity/scheduler-types';
 import type { JBatchState } from '../jurisdiction/batch';
-import type { SwapKey } from '../orderbook/swap-keys';
 import type {
   AccountInput,
   AccountMachine,
@@ -130,7 +129,6 @@ export type StorageEntityCoreDoc = {
   inDebtsByToken?: Map<number, Map<string, DebtEntry>>;
   lockBook: Map<string, LockBookEntry>;
   swapTradingPairs?: EntitySwapPair[];
-  pendingSwapFillRatios?: Map<SwapKey, number>;
   crossJurisdictionSwaps?: EntityState['crossJurisdictionSwaps'];
   pendingCrossJurisdictionFillAcks?: EntityState['pendingCrossJurisdictionFillAcks'];
   crossJurisdictionBookAdmissions?: EntityState['crossJurisdictionBookAdmissions'];

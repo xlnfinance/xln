@@ -42,7 +42,6 @@ export interface SwapOfferEvent {
   wantAmount: bigint;
   priceTicks?: bigint | undefined;
   timeInForce?: 0 | 1 | 2 | undefined;
-  minFillRatio: number;
   crossJurisdiction?: CrossJurisdictionSwapRoute;
 }
 
@@ -99,7 +98,6 @@ export const normalizeSwapOfferForOrderbook = (
     wantAmount: BigInt(offer.wantAmount),
     priceTicks,
     timeInForce: offer.timeInForce ?? 0,
-    minFillRatio: Number(offer.minFillRatio ?? 0),
     ...(offer.crossJurisdiction ? { crossJurisdiction: offer.crossJurisdiction } : {}),
   };
 };
@@ -143,7 +141,6 @@ export const collectOpenSwapOffersForOrderbook = (hubState: EntityState): Normal
               wantAmount: offer.wantAmount,
               priceTicks: offer.priceTicks,
               timeInForce: offer.timeInForce,
-              minFillRatio: offer.minFillRatio,
               ...(offer.crossJurisdiction ? { crossJurisdiction: offer.crossJurisdiction } : {}),
             },
             accountId,

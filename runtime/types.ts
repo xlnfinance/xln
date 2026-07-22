@@ -1,5 +1,4 @@
 import type { OrderbookExtState } from './orderbook';
-import type { SwapKey } from './orderbook/swap-keys';
 import type { Level } from 'level';
 import type { RuntimeP2P } from './networking/p2p';
 import type { CrossJurisdictionBookAdmission, CrossJurisdictionSwapRoute } from './types/cross-jurisdiction';
@@ -944,8 +943,6 @@ export interface EntityState {
   // Kept in entity state so UI and runtime use one source of truth.
   swapTradingPairs?: EntitySwapPair[];
 
-  // 📈 Pending swap fill ratios (orderbook → dispute arguments)
-  pendingSwapFillRatios?: Map<SwapKey, number>; // key = "accountId:offerId"
   // Cross-jurisdiction swap routes are duplicated into sibling entities so
   // target-side dispute salvage does not depend on relay/profile gossip.
   crossJurisdictionSwaps?: Map<string, CrossJurisdictionSwapRoute>;
@@ -986,7 +983,6 @@ export interface SwapBookEntry {
   giveAmount: bigint;       // remaining amount
   wantTokenId: number;
   wantAmount: bigint;       // remaining want
-  minFillRatio: number;
   createdHeight: number;
   priceTicks: bigint;
   crossJurisdiction?: CrossJurisdictionSwapRoute;

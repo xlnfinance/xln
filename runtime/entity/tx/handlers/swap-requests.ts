@@ -54,7 +54,7 @@ export const handlePlaceSwapOfferRequest = (
   const newState = stateForEntityTx(entityState, options);
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
-  const { counterpartyEntityId, offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks, timeInForce, minFillRatio, crossJurisdiction } =
+  const { counterpartyEntityId, offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks, timeInForce, crossJurisdiction } =
     entityTx.data;
 
   requireSwapAccount(newState, counterpartyEntityId, 'placeSwapOffer');
@@ -88,7 +88,6 @@ export const handlePlaceSwapOfferRequest = (
       wantAmount,
       ...(priceTicks !== undefined ? { priceTicks } : {}),
       ...(timeInForce !== undefined ? { timeInForce } : {}),
-      minFillRatio,
       ...(publicCrossJurisdiction ? { crossJurisdiction: publicCrossJurisdiction } : {}),
     },
   };

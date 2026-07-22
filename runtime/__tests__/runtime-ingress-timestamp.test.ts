@@ -103,7 +103,6 @@ const makeReplica = (entityId: string, timestamp: number, signerId = '1'): Entit
       htlcNotes: new Map(),
       lockBook: new Map(),
       swapTradingPairs: [],
-      pendingSwapFillRatios: new Map(),
       crontabState: initCrontab(),
     },
   }) as EntityReplica;

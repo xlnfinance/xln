@@ -2973,7 +2973,6 @@
         priceTicks: canonicalPriceTicks,
         routeValue: liveSelectedRouteValue,
       });
-      const minFillRatio = 0;
       const requiredInboundCreditLimit = computeAutoInboundCreditTarget(
         resolvedCounterparty,
         wantToken,
@@ -3126,7 +3125,6 @@
             wantTokenId: wantToken,
             wantAmount: effectiveWantAmount,
             priceTicks: canonicalPriceTicks,
-            minFillRatio,
           },
         });
         await submitEntityInputs([{

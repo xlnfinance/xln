@@ -166,7 +166,6 @@ const makeEntityState = (entityId: string, config: ConsensusConfig): EntityState
   lockBook: new Map(),
   crontabState: initCrontab(),
   swapTradingPairs: [],
-  pendingSwapFillRatios: new Map(),
   pendingCrossJurisdictionFillAcks: new Map(),
   crossJurisdictionBookAdmissions: new Map(),
 });

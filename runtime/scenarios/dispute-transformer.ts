@@ -27,6 +27,7 @@ const USDC = 1;
 const WETH = 2;
 const MAX_FILL_RATIO = 65_535n;
 const WETH_LOT = 1_000_000_000_000n;
+const SCENARIO_DEADLINE_MS = 4_102_464_800_000n;
 
 type Registered = { id: string; signer: string; name: string };
 type MineableProvider = { send(method: string, params: unknown[]): Promise<unknown> };
@@ -40,6 +41,12 @@ const requireRegistered = (value: Registered | undefined, name: string): Registe
 
 const frameTxTypes = (frame: AccountFrame | undefined): string[] =>
   frame?.accountTxs.map((tx) => tx.type) ?? [];
+
+const accountEvidenceSummary = (account: AccountMachine | undefined) => ({
+  status: account?.status,
+  pendingFrameTxs: frameTxTypes(account?.pendingFrame),
+  mempool: account?.mempool,
+});
 
 const findAccountAck = (txs: readonly EntityTx[] | undefined): AccountAckInput | undefined => {
   for (const tx of txs ?? []) {
@@ -222,9 +229,10 @@ export async function runDisputeTransformer(_existingEnv?: Env): Promise<Env> {
     const aliceHashlock = hashHtlcSecret(aliceSecret);
     const hubHashlock = hashHtlcSecret(hubSecret);
     const revealHeight = Number(env.jReplicas.values().next().value?.blockNumber ?? 0n) + 20_000;
-    const latestBlock = await jadapter.provider.getBlock('latest');
-    if (!latestBlock) throw new Error('DISPUTE_TRANSFORMER_LATEST_BLOCK_MISSING');
-    const deadline = BigInt(Number(latestBlock.timestamp) * 1_000 + 20_000_000);
+    // Managed scenario Anvil starts at a fixed timestamp. Do not derive signed
+    // Account state from the latest RPC block: watcher scheduling can mine one
+    // extra service block and change the ProofBody by one second.
+    const deadline = SCENARIO_DEADLINE_MS;
     const aliceLockId = generateLockId(aliceHashlock, revealHeight, 0, env.timestamp);
     const hubLockId = generateLockId(hubHashlock, revealHeight, 1, env.timestamp);
     const giveAmount = MAX_FILL_RATIO * WETH_LOT;
@@ -235,7 +243,7 @@ export async function runDisputeTransformer(_existingEnv?: Env): Promise<Env> {
       signerId: alice.signer,
       entityTxs: [
         { type: 'manualHtlcLock', data: { counterpartyId: hub.id, lockId: aliceLockId, hashlock: aliceHashlock, timelock: deadline, revealBeforeHeight: revealHeight, amount: usd(7), tokenId: USDC } },
-        { type: 'placeSwapOffer', data: { counterpartyEntityId: hub.id, offerId: 'alice-maker-left', giveTokenId: WETH, giveAmount, wantTokenId: USDC, wantAmount, minFillRatio: 0 } },
+        { type: 'placeSwapOffer', data: { counterpartyEntityId: hub.id, offerId: 'alice-maker-left', giveTokenId: WETH, giveAmount, wantTokenId: USDC, wantAmount } },
       ],
     }]);
     await converge(env, 12);
@@ -244,7 +252,7 @@ export async function runDisputeTransformer(_existingEnv?: Env): Promise<Env> {
       signerId: hub.signer,
       entityTxs: [
         { type: 'manualHtlcLock', data: { counterpartyId: alice.id, lockId: hubLockId, hashlock: hubHashlock, timelock: deadline, revealBeforeHeight: revealHeight, amount: usd(3), tokenId: USDC } },
-        { type: 'placeSwapOffer', data: { counterpartyEntityId: alice.id, offerId: 'hub-maker-right', giveTokenId: WETH, giveAmount, wantTokenId: USDC, wantAmount, minFillRatio: 0 } },
+        { type: 'placeSwapOffer', data: { counterpartyEntityId: alice.id, offerId: 'hub-maker-right', giveTokenId: WETH, giveAmount, wantTokenId: USDC, wantAmount } },
       ],
     }]);
     await converge(env, 12);
@@ -289,6 +297,10 @@ export async function runDisputeTransformer(_existingEnv?: Env): Promise<Env> {
 
     const alicePending = requirePendingResolution(findReplica(env, alice.id)[1].state.accounts.get(hub.id), 'alice');
     const hubPending = requirePendingResolution(findReplica(env, hub.id)[1].state.accounts.get(alice.id), 'hub');
+    console.log(`[DISPUTE_DEBUG:pending-evidence] ${safeStringify({
+      alice: accountEvidenceSummary(findReplica(env, alice.id)[1].state.accounts.get(hub.id)),
+      hub: accountEvidenceSummary(findReplica(env, hub.id)[1].state.accounts.get(alice.id)),
+    })}`);
     const baseAccount = base!;
 
     const before = new Map<number, { leftReserve: bigint; rightReserve: bigint; collateral: bigint; ondelta: bigint; offdelta: bigint }>();
@@ -325,9 +337,12 @@ export async function runDisputeTransformer(_existingEnv?: Env): Promise<Env> {
     if (!start) throw new Error('DISPUTE_TRANSFORMER_START_NOT_DRAFTED');
     assert(start.proofbodyHash === baseProofHash, 'Dispute start did not use the last mutually signed ProofBody', env);
     const starter = decodeArguments(start.starterInitialArguments, 'starter.initial');
+    const signedSnapshot = prepared.disputeArgumentSnapshotsByHash?.[start.proofbodyHash];
     console.log(`[DISPUTE_DEBUG:start] ${safeStringify({
       nonce: start.nonce,
       proofbodyHash: start.proofbodyHash,
+      proofBodyStruct: signedSnapshot?.proofBodyStruct,
+      argumentPlan: signedSnapshot?.plan,
       starterInitialArguments: start.starterInitialArguments,
       starterIncrementedArguments: start.starterIncrementedArguments,
       decoded: starter,
@@ -357,13 +372,32 @@ export async function runDisputeTransformer(_existingEnv?: Env): Promise<Env> {
       env,
     );
 
+    console.log(`[DISPUTE_DEBUG:before-start-broadcast] ${safeStringify({
+      alice: accountEvidenceSummary(findReplica(env, alice.id)[1].state.accounts.get(hub.id)),
+      hub: accountEvidenceSummary(findReplica(env, hub.id)[1].state.accounts.get(alice.id)),
+    })}`);
+
     await process(env, [{ entityId: hub.id, signerId: hub.signer, entityTxs: [{ type: 'j_broadcast', data: {} }] }]);
     await syncChain(env, 5);
+    console.log(`[DISPUTE_DEBUG:before-start-event] ${safeStringify({
+      alice: accountEvidenceSummary(findReplica(env, alice.id)[1].state.accounts.get(hub.id)),
+      hub: accountEvidenceSummary(findReplica(env, hub.id)[1].state.accounts.get(alice.id)),
+    })}`);
     await processJEvents(env);
+    console.log(`[DISPUTE_DEBUG:after-start-event] ${safeStringify({
+      alice: accountEvidenceSummary(findReplica(env, alice.id)[1].state.accounts.get(hub.id)),
+      hub: accountEvidenceSummary(findReplica(env, hub.id)[1].state.accounts.get(alice.id)),
+    })}`);
     await converge(env, 12);
     const aliceActive = findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.activeDispute;
     if (!aliceActive) throw new Error('DISPUTE_TRANSFORMER_ACTIVE_DISPUTE_MISSING');
     await mineUntil(jadapter, Number(aliceActive.disputeTimeout));
+
+    const aliceBeforeFinalize = findReplica(env, alice.id)[1].state.accounts.get(hub.id);
+    console.log(`[DISPUTE_DEBUG:finalizer-account] ${safeStringify({
+      ...accountEvidenceSummary(aliceBeforeFinalize),
+      activeDispute: aliceBeforeFinalize?.activeDispute,
+    })}`);
 
     await process(env, [{ entityId: alice.id, signerId: alice.signer, entityTxs: [{
       type: 'disputeFinalize', data: { counterpartyEntityId: hub.id, cooperative: false, description: 'mixed-transformer-finalize' },

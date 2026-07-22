@@ -250,7 +250,6 @@ export async function handleCrossSwapFillAck(
     offer.wantAmount = remainingTarget;
     offer.quantizedGive = remainingSource;
     offer.quantizedWant = remainingTarget;
-    offer.minFillRatio = 0;
     const nextPriceTicks = route.priceTicks ?? offer.priceTicks;
     if (nextPriceTicks !== undefined) offer.priceTicks = nextPriceTicks;
     remainingOfferEvent = {
@@ -265,7 +264,6 @@ export async function handleCrossSwapFillAck(
       wantAmount: offer.wantAmount,
       ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
       ...(offer.timeInForce !== undefined ? { timeInForce: offer.timeInForce } : {}),
-      minFillRatio: offer.minFillRatio,
       crossJurisdiction: offer.crossJurisdiction,
     };
     events.push(`🌉 Cross-j offer ${offerId.slice(0, 8)} filled to ${fill.nextRatio}/${CROSS_J_MAX_FILL_RATIO}, ${remainingSource} source remaining`);

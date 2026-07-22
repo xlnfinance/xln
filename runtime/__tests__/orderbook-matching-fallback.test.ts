@@ -106,7 +106,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: SWAP_LOT_SCALE,
       wantTokenId: 1,
       wantAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1000n,
     };
@@ -182,7 +181,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 2,
       wantAmount: baseQty,
       createdHeight: 1,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1100n,
     };
@@ -197,7 +195,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 5,
       wantAmount: (1000n * lot) / 10_000n,
       createdHeight: 1,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1000n,
     };
@@ -212,7 +209,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 5,
       wantAmount: (1100n * lot) / 10_000n,
       createdHeight: 1,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1100n,
     };
@@ -272,7 +268,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 5,
       wantAmount: makerQuoteQty,
       createdHeight: 1,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: makerPriceTicks,
     };
@@ -288,7 +283,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 2,
       wantAmount: makerBaseQty,
       createdHeight: 2,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: takerPriceTicks,
     };
@@ -360,7 +354,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 5,
       wantAmount: makerQuoteQty,
       createdHeight: 1,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: makerPriceTicks,
     };
@@ -376,7 +369,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 2,
       wantAmount: takerBaseQty,
       createdHeight: 2,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: takerPriceTicks,
     };
@@ -445,7 +437,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 5,
       wantAmount: (2n * lot * 10_000n) / 10_000n,
       createdHeight: 1,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 10_000n,
     };
@@ -461,7 +452,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 5,
       wantAmount: (lot * 10_100n) / 10_000n,
       createdHeight: 2,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 10_100n,
     };
@@ -477,7 +467,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 2,
       wantAmount: 3n * lot,
       createdHeight: 3,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 10_100n,
     };
@@ -555,7 +544,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 5,
       wantAmount: selfAskQuoteQty,
       createdHeight: 1,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: selfAskPriceTicks,
     };
@@ -571,7 +559,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 5,
       wantAmount: otherAskQuoteQty,
       createdHeight: 2,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: otherAskPriceTicks,
     };
@@ -587,7 +574,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 2,
       wantAmount: takerBaseQty,
       createdHeight: 3,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: takerPriceTicks,
     };
@@ -655,7 +641,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 5,
       wantAmount: (3n * lot * makerAskPriceTicks) / 10_000n,
       createdHeight: 1,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: makerAskPriceTicks,
     };
@@ -671,7 +656,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 2,
       wantAmount: 2n * lot,
       createdHeight: 2,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: makerBidPriceTicks,
     };
@@ -722,7 +706,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 2,
       wantAmount: lot,
       createdHeight: 1,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1000n,
     };
@@ -738,7 +721,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 5,
       wantAmount: (1200n * lot) / 10_000n,
       createdHeight: 2,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1200n,
     };
@@ -754,7 +736,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 2,
       wantAmount: 2n * lot,
       createdHeight: 3,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1400n,
     };
@@ -813,7 +794,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 2,
       wantAmount: lot,
       createdHeight: 1,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1000n,
     };
@@ -829,7 +809,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 5,
       wantAmount: (1200n * lot) / 10_000n,
       createdHeight: 2,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1200n,
     };
@@ -845,7 +824,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 5,
       wantAmount: (800n * 2n * lot) / 10_000n,
       createdHeight: 3,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 800n,
     };
@@ -921,7 +899,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 2,
       wantAmount: 2n * lot,
       createdHeight: 3,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1250n,
     };
@@ -944,7 +921,6 @@ describe('orderbook matching fallback execution mapping', () => {
                   wantTokenId: 5,
                   wantAmount: (1000n * lot) / 10_000n,
                   makerIsLeft: false,
-                  minFillRatio: 0,
                   createdHeight: 1,
                   priceTicks: 1000n,
                   quantizedGive: lot,
@@ -998,7 +974,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: 2n * lot,
       wantTokenId: 5,
       wantAmount: (2006n * lot) / 10_000n,
-      minFillRatio: 0,
       createdHeight: 1,
       priceTicks: 1003n,
       quantizedGive: 2n * lot,
@@ -1045,7 +1020,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 5,
       wantAmount: (hugePriceTicks * lot) / 10_000n,
       createdHeight: 1,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: hugePriceTicks,
       quantizedGive: lot,
@@ -1100,7 +1074,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 2,
       wantAmount: makerBaseQty,
       createdHeight: 2,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: makerPriceTicks,
     };
@@ -1152,7 +1125,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 5,
       wantAmount: makerQuoteQty,
       createdHeight: 1,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: makerPriceTicks,
     };
@@ -1178,7 +1150,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: makerQuoteQty,
       wantTokenId: 2,
       wantAmount: makerBaseQty,
-      minFillRatio: 0,
       createdHeight: 2,
       priceTicks: makerPriceTicks,
       quantizedGive: makerQuoteQty,
@@ -1207,7 +1178,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: 2n * lot,
       wantTokenId: 5,
       wantAmount: (2000n * lot) / 10_000n,
-      minFillRatio: 0,
       createdHeight: 1,
       quantizedGive: 2n * lot,
       quantizedWant: (2000n * lot) / 10_000n,
@@ -1256,7 +1226,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 5,
       wantAmount: makerQuoteQty,
       createdHeight: 1,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: makerPriceTicks,
     };
@@ -1272,7 +1241,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 2,
       wantAmount: takerBaseQty,
       createdHeight: 2,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: takerPriceTicks,
     };
@@ -1336,7 +1304,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: lot,
       wantTokenId: 1,
       wantAmount: (lot * nearAskPriceTicks) / 10_000n,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: nearAskPriceTicks,
     };
@@ -1351,7 +1318,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: lot,
       wantTokenId: 1,
       wantAmount: (lot * farAskPriceTicks) / 10_000n,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: farAskPriceTicks,
     };
@@ -1366,7 +1332,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: (lot * bidPriceTicks) / 10_000n,
       wantTokenId: 2,
       wantAmount: lot,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: bidPriceTicks,
     };
@@ -1454,7 +1419,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 5,
       wantAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
       createdHeight: 1,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1000n,
       quantizedGive: SWAP_LOT_SCALE,
@@ -1472,7 +1436,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 2,
       wantAmount: SWAP_LOT_SCALE,
       createdHeight: 2,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1400n,
       quantizedGive: (1400n * SWAP_LOT_SCALE) / 10_000n,
@@ -1508,7 +1471,6 @@ describe('orderbook matching fallback execution mapping', () => {
         books: new Map(),
         pairConfig: new Map(),
       },
-      pendingSwapFillRatios: new Map(),
     } as any;
 
     const firstPass = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer] as any);
@@ -1576,7 +1538,6 @@ describe('orderbook matching fallback execution mapping', () => {
         giveAmount: SWAP_LOT_SCALE,
         wantTokenId: 5,
         wantAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
-        minFillRatio: 0,
         timeInForce: 0,
         priceTicks: 1000n,
       },
@@ -1591,7 +1552,6 @@ describe('orderbook matching fallback execution mapping', () => {
         giveAmount: SWAP_LOT_SCALE,
         wantTokenId: 5,
         wantAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
-        minFillRatio: 0,
         timeInForce: 0,
         priceTicks: 1000n,
       },
@@ -1643,7 +1603,6 @@ describe('orderbook matching fallback execution mapping', () => {
         giveAmount: SWAP_LOT_SCALE,
         wantTokenId: 5,
         wantAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
-        minFillRatio: 0,
         timeInForce: 0,
         priceTicks: 1000n,
       },
@@ -1658,7 +1617,6 @@ describe('orderbook matching fallback execution mapping', () => {
         giveAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
         wantTokenId: 2,
         wantAmount: SWAP_LOT_SCALE,
-        minFillRatio: 0,
         timeInForce: 0,
         priceTicks: 1000n,
       },
@@ -1708,7 +1666,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: 30_000n * SWAP_LOT_SCALE,
       wantTokenId: 1,
       wantAmount: (30_000n * SWAP_LOT_SCALE * priceTicks) / 10_000n,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks,
     };
@@ -1767,7 +1724,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: size,
       wantTokenId: 1,
       wantAmount: (size * priceTicks) / 10_000n,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks,
     });
@@ -1819,7 +1775,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: lot,
       wantTokenId: 1,
       wantAmount: (lot * askPriceTicks) / 10_000n,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: askPriceTicks,
     };
@@ -1834,7 +1789,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: (lot * bidPriceTicks) / 10_000n,
       wantTokenId: 2,
       wantAmount: lot,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: bidPriceTicks,
     };
@@ -1923,7 +1877,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: lot,
       wantTokenId: 1,
       wantAmount: lot,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 10_000n,
       crossJurisdiction: route,
@@ -2030,7 +1983,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 1,
       wantAmount: remainingTarget,
       quantizedWant: remainingTarget,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 25_000_000n,
       crossJurisdiction: route,
@@ -2145,7 +2097,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 1,
       wantAmount: targetTotal,
       quantizedWant: targetTotal,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 25_000_000n,
       crossJurisdiction: makerRoute,
@@ -2163,7 +2114,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 2,
       wantAmount: fillSource,
       quantizedWant: fillSource,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 25_000_000n,
       crossJurisdiction: takerRoute,
@@ -2293,7 +2243,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 1,
       wantAmount: targetTotal,
       quantizedWant: targetTotal,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: ORDERBOOK_PRICE_SCALE,
       crossJurisdiction: makerRoute,
@@ -2311,7 +2260,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 2,
       wantAmount: fillSource,
       quantizedWant: fillSource,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: ORDERBOOK_PRICE_SCALE,
       crossJurisdiction: takerRoute,
@@ -2424,7 +2372,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 2,
       wantAmount: lot,
       quantizedWant: lot,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 25_000_000n,
       crossJurisdiction: takerRoute,
@@ -2531,7 +2478,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 1,
       wantAmount: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
       quantizedWant: quoteAmountAtPrice(2, 1, lot, 25_000_000n),
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 25_000_000n,
       crossJurisdiction: staleRoute,
@@ -2568,7 +2514,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 2,
       wantAmount: lot,
       quantizedWant: lot,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 25_000_000n,
       crossJurisdiction: takerRoute,
@@ -2924,7 +2869,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 1,
       wantAmount: targetTotal,
       quantizedWant: targetTotal,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 25_000_000n,
       crossJurisdiction: makerRoute,
@@ -2962,7 +2906,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 2,
       wantAmount: filledSourceAmount,
       quantizedWant: filledSourceAmount,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 25_000_000n,
       crossJurisdiction: takerRoute,
@@ -3085,7 +3028,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 2,
       wantAmount: filledSourceAmount,
       quantizedWant: filledSourceAmount,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 25_000_000n,
       crossJurisdiction: route,
@@ -3212,7 +3154,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 1,
       wantAmount: 2n * lot,
       quantizedWant: 2n * lot,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 10_000n,
       crossJurisdiction: pendingRoute,
@@ -3249,7 +3190,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 1,
       wantAmount: 2n * lot,
       quantizedWant: 2n * lot,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 10_000n,
       crossJurisdiction: committedRoute,
@@ -3287,7 +3227,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 1,
       wantAmount: 2n * lot,
       quantizedWant: 2n * lot,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 10_000n,
       crossJurisdiction: takerRoute,
@@ -3430,7 +3369,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: quoteAmountAtPrice(2, 1, 30n * lot, 25_000_000n),
       wantTokenId: 2,
       wantAmount: 30n * lot,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 25_000_000n,
       crossJurisdiction: takerRoute,
@@ -3556,7 +3494,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: quoteAmountAtPrice(2, 1, 30n * lot, 25_000_000n),
       wantTokenId: 2,
       wantAmount: 30n * lot,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 25_000_000n,
       crossJurisdiction: takerRoute,
@@ -3692,7 +3629,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: quoteAmountAtPrice(2, 1, 30n * lot, 25_000_000n),
       wantTokenId: 2,
       wantAmount: 30n * lot,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 25_000_000n,
       crossJurisdiction: takerRoute,
@@ -3803,7 +3739,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 1,
       wantAmount: 2n * lot,
       quantizedWant: 2n * lot,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 10_000n,
       crossJurisdiction: makerRoute,
@@ -3841,7 +3776,6 @@ describe('orderbook matching fallback execution mapping', () => {
         wantTokenId: 1,
         wantAmount: lot,
         quantizedWant: lot,
-        minFillRatio: 0,
         timeInForce: 0,
         priceTicks: 10_000n,
         crossJurisdiction: route,
@@ -3932,7 +3866,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 1,
       wantAmount: lot,
       quantizedWant: lot,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 10_000n,
       crossJurisdiction: route,
@@ -3984,7 +3917,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: lot,
       wantTokenId: 1,
       wantAmount: (lot * 25_000_000n) / 10_000n,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 25_000_000n,
     };
@@ -3999,7 +3931,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: (lot * 25_000_100n) / 10_000n,
       wantTokenId: 2,
       wantAmount: lot,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 25_000_100n,
     };
@@ -4014,7 +3945,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: (lot * 24_999_900n) / 10_000n,
       wantTokenId: 2,
       wantAmount: lot,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 24_999_900n,
     };
@@ -4108,7 +4038,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: lot,
       wantTokenId: 1,
       wantAmount: (lot * priceTicks) / 10_000n,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks,
     });
@@ -4125,7 +4054,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: (lot * bidPriceTicks) / 10_000n,
       wantTokenId: 2,
       wantAmount: lot,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: bidPriceTicks,
     };
@@ -4199,7 +4127,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: lot,
       wantTokenId: 1,
       wantAmount: (lot * askPriceTicks) / 10_000n,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: askPriceTicks,
     };
@@ -4214,7 +4141,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: (lot * bidPriceTicks) / 10_000n,
       wantTokenId: 2,
       wantAmount: lot,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: bidPriceTicks,
     };
@@ -4222,10 +4148,19 @@ describe('orderbook matching fallback execution mapping', () => {
     const entityState = {
       entityId: 'hub-entity',
       accounts: new Map([
-        ['maker-account', { swapOffers: new Map([['maker-ask', makerOffer]]) }],
+        ['maker-account', {
+          swapOffers: new Map([['maker-ask', makerOffer]]),
+          mempool: [{
+            type: 'swap_resolve',
+            data: {
+              offerId: 'maker-ask',
+              fillRatio: 32768,
+              cancelRemainder: false,
+            },
+          }],
+        }],
         ['taker-account', { swapOffers: new Map() }],
       ]),
-      pendingSwapFillRatios: new Map([['maker-account:maker-ask', 500_000]]),
       orderbookExt: {
         hubProfile: {
           entityId: 'hub-entity',
@@ -4289,7 +4224,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: 210n * SWAP_LOT_SCALE,
       wantTokenId: 1,
       wantAmount: (210n * SWAP_LOT_SCALE * anchorPriceTicks) / 10_000n,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: anchorPriceTicks,
     };
@@ -4313,7 +4247,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: 960n * SWAP_LOT_SCALE,
       wantTokenId: 1,
       wantAmount: (960n * SWAP_LOT_SCALE * overflowPriceTicks) / 10_000n,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: overflowPriceTicks,
     };
@@ -4362,7 +4295,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: SWAP_LOT_SCALE,
       wantTokenId: 5,
       wantAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1000n,
     }));
@@ -4393,7 +4325,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: lot,
       wantTokenId: 5,
       wantAmount: (lot * 10_000n) / 10_000n,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 10_000n,
     };
@@ -4408,7 +4339,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: (lot * 10_000n) / 10_000n,
       wantTokenId: 2,
       wantAmount: lot,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 10_000n,
     };
@@ -4483,7 +4413,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: lot,
       wantTokenId: 1,
       wantAmount: (1000n * lot) / 10_000n,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1000n,
     };
@@ -4508,7 +4437,6 @@ describe('orderbook matching fallback execution mapping', () => {
     const entityState = {
       entityId: 'hub-entity',
       accounts: new Map([['alice', aliceAccount]]),
-      pendingSwapFillRatios: new Map(),
       orderbookExt: {
         hubProfile: {
           entityId: 'hub-entity',
@@ -4550,7 +4478,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: lot,
       wantTokenId: 1,
       wantAmount: (1000n * lot) / 10_000n,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1000n,
     };
@@ -4588,7 +4515,6 @@ describe('orderbook matching fallback execution mapping', () => {
     const entityState = {
       entityId: 'hub-entity',
       accounts: new Map([['alice', aliceAccount]]),
-      pendingSwapFillRatios: new Map(),
       orderbookExt: {
         hubProfile: {
           entityId: 'hub-entity',
@@ -4643,7 +4569,6 @@ describe('orderbook matching fallback execution mapping', () => {
       wantTokenId: 2,
       wantAmount: lot,
       createdHeight: 1,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 10_000n,
     };
@@ -4692,7 +4617,6 @@ describe('orderbook matching fallback execution mapping', () => {
       giveAmount: lot,
       wantTokenId: 1,
       wantAmount: (1000n * lot) / 10_000n,
-      minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1000n,
     };
@@ -4726,7 +4650,6 @@ describe('orderbook matching fallback execution mapping', () => {
     const entityState = {
       entityId: 'hub-entity',
       accounts: new Map([['alice', makeAccountMachine(offer as any)]]),
-      pendingSwapFillRatios: new Map(),
       orderbookExt: {
         hubProfile: {
           entityId: 'hub-entity',

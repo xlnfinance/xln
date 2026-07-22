@@ -50,7 +50,6 @@ const makeEntityState = (): EntityState => ({
   htlcNotes: new Map(),
   lockBook: new Map(),
   swapTradingPairs: [],
-  pendingSwapFillRatios: new Map(),
 });
 
 test('account handlers keep failures behind structured logging', () => {

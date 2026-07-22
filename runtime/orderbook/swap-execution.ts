@@ -38,7 +38,6 @@ export interface NormalizedOrderbookOffer extends SwapOfferLike {
   wantAmount: bigint;
   priceTicks: bigint;
   timeInForce: 0 | 1 | 2;
-  minFillRatio: number;
   createdHeight: number;
   crossJurisdiction?: CrossJurisdictionSwapRoute;
 }

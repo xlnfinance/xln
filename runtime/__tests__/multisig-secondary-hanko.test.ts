@@ -234,7 +234,6 @@ const createMultisigAccountState = (
     htlcNotes: new Map(),
     lockBook: new Map(),
     swapTradingPairs: [],
-    pendingSwapFillRatios: new Map(),
   } as EntityState;
   const replica: EntityReplica = {
     entityId,

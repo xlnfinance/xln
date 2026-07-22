@@ -84,7 +84,6 @@ export interface SwapOffer {
   wantAmount: bigint;           // Corresponding want amount (maintains ratio)
   priceTicks?: bigint;          // Canonical limit price used for requantization after partial fills
   timeInForce?: 0 | 1 | 2;      // 0 = GTC, 1 = IOC, 2 = FOK
-  minFillRatio: number;         // 0-65535, minimum acceptable fill
   makerIsLeft: boolean;         // Who created this offer (canonical direction)
   createdHeight: number;        // AccountFrame height when created
   // Quantized amounts for orderbook consistency (set by hub when adding to book)
@@ -681,7 +680,7 @@ export interface DerivedDelta {
  */
 export type AccountEvent =
   | { type: 'htlc_revealed'; hashlock: string; secret: string }
-  | { type: 'swap_offer_created'; offerId: string; makerId: string; accountId: string; giveTokenId: number; giveAmount: bigint; wantTokenId: number; wantAmount: bigint; timeInForce?: 0 | 1 | 2; minFillRatio: number; crossJurisdiction?: CrossJurisdictionSwapRoute }
+  | { type: 'swap_offer_created'; offerId: string; makerId: string; accountId: string; giveTokenId: number; giveAmount: bigint; wantTokenId: number; wantAmount: bigint; timeInForce?: 0 | 1 | 2; crossJurisdiction?: CrossJurisdictionSwapRoute }
   | { type: 'swap_offer_cancelled'; offerId: string; accountId: string };
 
 // Account transaction types
@@ -895,7 +894,6 @@ export type AccountTx =
         // Kept optional for backwards compatibility with older scenarios.
         priceTicks?: bigint;
         timeInForce?: 0 | 1 | 2;  // 0 = GTC, 1 = IOC, 2 = FOK
-        minFillRatio: number;     // 0-65535 (uint16), minimum partial fill
         crossJurisdiction?: CrossJurisdictionSwapRoute;
       };
     }

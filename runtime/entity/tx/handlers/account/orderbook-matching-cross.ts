@@ -391,7 +391,6 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
         postOnly: debugRebuildProjectionOnly,
         priceTicks: marketOffer.priceTicks,
         qtyLots,
-        minFillRatio: rawOffer.minFillRatio,
       }, { suspendedOrderIds: suspendedCrossOrderIds });
     } catch (error) {
       rejectInvalidCrossOffer(
@@ -449,7 +448,6 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
         postOnly: debugRebuildProjectionOnly,
         priceTicks: marketOffer.priceTicks,
         qtyLots,
-        minFillRatio: rawOffer.minFillRatio,
       }, { suspendedOrderIds: suspendedCrossOrderIds });
       if (collectTradeEvents(committedResult.events).length > 0) {
         throw new Error(`ORDERBOOK_CROSS_J_COMMITTED_WRITE_TRADED: order=${currentNamespacedOrderId}`);

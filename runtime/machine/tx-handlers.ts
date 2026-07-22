@@ -418,7 +418,6 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): st
       lockBook: new Map(),
       crontabState: initCrontab(),
       swapTradingPairs: buildDefaultEntitySwapPairs(getTokenIdsForJurisdiction(config.jurisdiction)),
-      pendingSwapFillRatios: new Map(),
       pendingCrossJurisdictionFillAcks: new Map(),
       crossJurisdictionBookAdmissions: new Map(),
     },

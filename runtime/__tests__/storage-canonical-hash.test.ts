@@ -118,7 +118,6 @@ const makeEnv = (account: AccountMachine, reserves: Array<[number, bigint]>): En
           htlcNotes: new Map(),
           lockBook: new Map(),
           swapTradingPairs: [],
-          pendingSwapFillRatios: new Map(),
         },
       } as EntityReplica],
     ]),

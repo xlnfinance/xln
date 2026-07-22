@@ -100,7 +100,6 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
         wantAmount: liveOffer.wantAmount,
         priceTicks: liveOffer.priceTicks,
         timeInForce: liveOffer.timeInForce,
-        minFillRatio: liveOffer.minFillRatio,
       },
       accountId,
     );
@@ -382,7 +381,6 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
         postOnly: debugRebuildProjectionOnly,
         priceTicks,
         qtyLots,
-        minFillRatio: offer.minFillRatio,
       }, { suspendedOrderIds: suspendedSameOrderIds });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

@@ -185,7 +185,6 @@ const makeEntityState = (
   lockBook: new Map(),
   crossJurisdictionSwaps: new Map(),
   swapTradingPairs: [],
-  pendingSwapFillRatios: new Map(),
 });
 
 const addReplica = (
@@ -337,7 +336,6 @@ const makeSameCase = (
       wantAmount,
       priceTicks: 3_000n * ORDERBOOK_PRICE_SCALE,
       timeInForce: 0,
-      minFillRatio: 0,
       makerIsLeft,
       createdHeight: 0,
       quantizedGive: giveAmount,
@@ -443,7 +441,6 @@ const makeCrossCase = (
       wantAmount: admittedRoute.target.amount,
       priceTicks: 2n * ORDERBOOK_PRICE_SCALE,
       timeInForce: 0,
-      minFillRatio: 0,
       makerIsLeft,
       createdHeight: 0,
       quantizedGive: admittedRoute.source.amount,

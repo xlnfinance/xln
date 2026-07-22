@@ -36,7 +36,6 @@ export function hasQueuedSwapResolveForEntityState(
 ): boolean {
   const key = swapKey(accountId, offerId);
   if (queuedSwapResolutions.has(key)) return true;
-  if (hubState.pendingSwapFillRatios?.has(key) === true) return true;
   const accountMachine = hubState.accounts.get(accountId);
   if (!accountMachine) return false;
   if ((accountMachine.mempool ?? []).some((tx) => tx.type === 'swap_resolve' && tx.data.offerId === offerId)) return true;

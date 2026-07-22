@@ -172,7 +172,6 @@ export const makeState = (
     lockBook: new Map(),
     crossJurisdictionSwaps: new Map(),
     swapTradingPairs: [],
-    pendingSwapFillRatios: new Map(),
   };
 };
 

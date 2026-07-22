@@ -28,7 +28,7 @@ const ENTITY_OPTIONAL = [
   'deferredAccountProposals', 'jHistoryFinality', 'certifiedBoardState', 'batchHistory',
   'accountInputQueue', 'crontabState', 'jBatchState', 'entityProviderActionState',
   'profileEncryptionManifest', 'consumptionAccumulator', 'certifiedOutputSequences',
-  'outDebtsByToken', 'inDebtsByToken', 'swapTradingPairs', 'pendingSwapFillRatios',
+  'outDebtsByToken', 'inDebtsByToken', 'swapTradingPairs',
   'crossJurisdictionSwaps', 'pendingCrossJurisdictionFillAcks',
   'crossJurisdictionBookAdmissions', 'hubRebalanceConfig', 'orderbookHubProfile',
   'orderbookReferrals', 'lending',

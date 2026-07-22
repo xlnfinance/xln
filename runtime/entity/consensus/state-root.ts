@@ -58,7 +58,6 @@ export const ENTITY_CONSENSUS_STATE_FIELDS = [
   'orderbookExt',
   'lockBook',
   'swapTradingPairs',
-  'pendingSwapFillRatios',
   'crossJurisdictionSwaps',
   'pendingCrossJurisdictionFillAcks',
   'crossJurisdictionBookAdmissions',

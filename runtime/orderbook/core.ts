@@ -19,7 +19,7 @@ export type TIF = 0 | 1 | 2;     // 0 = GTC, 1 = IOC, 2 = FOK
 export const MAX_FILL_RATIO = 65535;
 
 export type OrderCmd =
-  | { kind: 0; ownerId: string; orderId: string; side: Side; tif: TIF; postOnly: boolean; priceTicks: bigint; qtyLots: bigint; minFillRatio?: number }
+  | { kind: 0; ownerId: string; orderId: string; side: Side; tif: TIF; postOnly: boolean; priceTicks: bigint; qtyLots: bigint }
   | { kind: 1; ownerId: string; orderId: string }
   | { kind: 2; ownerId: string; orderId: string; newPriceTicks: bigint | null; qtyDeltaLots: bigint };
 
@@ -514,7 +514,7 @@ export function applyCommand(state: BookState, cmd: OrderCmd, options: ApplyComm
     return { state, events };
   }
 
-  const { ownerId, orderId, side, tif, postOnly, priceTicks, qtyLots, minFillRatio = 0 } = cmd;
+  const { ownerId, orderId, side, tif, postOnly, priceTicks, qtyLots } = cmd;
 
   if (qtyLots <= 0n || qtyLots > MAX_ORDERBOOK_QTY_LOTS) {
     events.push({ type: 'REJECT', orderId, ownerId, reason: 'qty out of range' });
@@ -522,10 +522,6 @@ export function applyCommand(state: BookState, cmd: OrderCmd, options: ApplyComm
   }
   if (priceTicks <= 0n) {
     events.push({ type: 'REJECT', orderId, ownerId, reason: 'price must be positive' });
-    return { state, events };
-  }
-  if (minFillRatio < 0 || minFillRatio > MAX_FILL_RATIO) {
-    events.push({ type: 'REJECT', orderId, ownerId, reason: `minFillRatio must be 0-${MAX_FILL_RATIO}` });
     return { state, events };
   }
   if (m.orders.has(orderId)) {
@@ -553,14 +549,6 @@ export function applyCommand(state: BookState, cmd: OrderCmd, options: ApplyComm
     events.push({ type: 'REJECT', orderId, ownerId, reason: 'FOK cannot fill entirely' });
     return { state, events };
   }
-  if (minFillRatio > 0 && (tif === 1 || tif === 2)) {
-    const fillRatio = Number((estimate.filledQty * BigInt(MAX_FILL_RATIO)) / qtyLots);
-    if (fillRatio < minFillRatio) {
-      events.push({ type: 'REJECT', orderId, ownerId, reason: `minFillRatio not met: ${fillRatio} < ${minFillRatio} (pre-check)` });
-      return { state, events };
-    }
-  }
-
   const match = matchAgainstBook(m, side, ownerId, orderId, priceTicks, qtyLots, events, suspendedOrderIds);
   const remaining = match.remaining;
   const filledQty = qtyLots - remaining;

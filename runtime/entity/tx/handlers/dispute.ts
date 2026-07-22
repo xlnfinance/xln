@@ -331,10 +331,9 @@ const markAccountDisputePreparing = (
     ...(startIntent ? { startIntent } : {}),
   };
 
-  // Freeze optimistic account traffic. Secrets observed later through
-  // jurisdiction events can still be added to argument builders, but ordinary
-  // bilateral proposals must not keep changing the proof/argument pair while
-  // we are preparing an adversarial on-chain path.
+  // Freeze optimistic account traffic. Optional resolve evidence remains in
+  // the Account mempool, but ordinary bilateral proposals must not keep
+  // changing the signed ProofBody while preparing an adversarial on-chain path.
   freezeAccountForDispute(account, true);
 };
 

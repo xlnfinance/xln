@@ -89,7 +89,6 @@ export const createCatchupFixtureState = (
     htlcNotes: new Map(),
     lockBook: new Map(),
     swapTradingPairs: [],
-    pendingSwapFillRatios: new Map(),
   };
 };
 

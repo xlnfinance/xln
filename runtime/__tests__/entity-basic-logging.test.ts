@@ -52,7 +52,6 @@ const makeEntityState = (validators: readonly [string, string], entityId: string
   htlcNotes: new Map(),
   lockBook: new Map(),
   swapTradingPairs: [],
-  pendingSwapFillRatios: new Map(),
 });
 
 test('basic proposal and vote state transitions are unchanged', () => {

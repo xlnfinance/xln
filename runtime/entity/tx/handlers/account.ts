@@ -513,7 +513,6 @@ export async function applyAccountInput(
           wantAmount: offer.wantAmount,
           ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
           ...(offer.timeInForce !== undefined ? { timeInForce: offer.timeInForce } : {}),
-          minFillRatio: offer.minFillRatio,
           ...(offer.crossJurisdiction ? { crossJurisdiction: offer.crossJurisdiction } : {}),
         };
       };

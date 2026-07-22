@@ -159,7 +159,6 @@ const makeProjectionReplica = () => ({
     htlcFeesEarned: 0n,
     lockBook: new Map(),
     swapTradingPairs: [],
-    pendingSwapFillRatios: new Map(),
   },
 });
 

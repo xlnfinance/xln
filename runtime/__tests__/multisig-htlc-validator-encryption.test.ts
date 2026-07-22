@@ -297,7 +297,6 @@ const processSenderState = (
   entityEncPubKey: encryptionPublicKey,
   entityEncPrivKey: encryptionPrivateKey,
   swapTradingPairs: [],
-  pendingSwapFillRatios: new Map(),
   crontabState: initCrontab(),
 });
 

@@ -219,7 +219,6 @@ const projectEntityCoreDoc = (state: EntityState): Record<string, unknown> => ({
   orderbookExt: state.orderbookExt,
   lockBook: state.lockBook,
   swapTradingPairs: state.swapTradingPairs,
-  pendingSwapFillRatios: state.pendingSwapFillRatios,
   hubRebalanceConfig: state.hubRebalanceConfig,
 });
 

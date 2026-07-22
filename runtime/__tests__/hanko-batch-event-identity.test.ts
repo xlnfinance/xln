@@ -58,7 +58,6 @@ const makeEntityState = (): EntityState => ({
   htlcNotes: new Map(),
   lockBook: new Map(),
   swapTradingPairs: [],
-  pendingSwapFillRatios: new Map(),
 });
 
 test('finalized different batch at the pending nonce quarantines the now-unexecutable replacement', async () => {

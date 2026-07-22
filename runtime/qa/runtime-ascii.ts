@@ -11,7 +11,6 @@
 import type { Env, EntityState, AccountMachine } from '../types';
 import { getWallClockMs } from '../utils';
 import { listOpenSwapOffers } from '../orderbook/open-swap-offers';
-import { MAX_SWAP_FILL_RATIO } from '../orderbook/swap-execution';
 
 export interface FormatOptions {
   maxAccounts?: number;
@@ -358,7 +357,7 @@ export function formatEntity(entity: EntityState, options?: FormatOptions): stri
     for (const swap of swaps) {
       const giveSymbol = swap.giveTokenId === 1 ? 'USDC' : 'ETH';
       const wantSymbol = swap.wantTokenId === 1 ? 'USDC' : 'ETH';
-      output.push(' '.repeat(indent) + `    ${formatBigInt(swap.giveAmount)} ${giveSymbol} → ${formatBigInt(swap.wantAmount)} ${wantSymbol} | min=${swap.minFillRatio}/${MAX_SWAP_FILL_RATIO}`);
+      output.push(' '.repeat(indent) + `    ${formatBigInt(swap.giveAmount)} ${giveSymbol} → ${formatBigInt(swap.wantAmount)} ${wantSymbol}`);
     }
 
     if (swapCount > (opts.maxSwaps || 10)) {
@@ -468,7 +467,7 @@ export function formatAccount(account: AccountMachine, myEntityId: string, optio
       const side = swap.makerIsLeft ? '(maker=LEFT)' : '(maker=RIGHT)';
       output.push(' '.repeat(indent) + `    Offer: ${swap.offerId.slice(0, 12)}...`);
       output.push(' '.repeat(indent) + `      Give: ${formatBigInt(swap.giveAmount)} ${giveSymbol} | Want: ${formatBigInt(swap.wantAmount)} ${wantSymbol}`);
-      output.push(' '.repeat(indent) + `      MinFill: ${swap.minFillRatio}/${MAX_SWAP_FILL_RATIO} | ${side}`);
+      output.push(' '.repeat(indent) + `      ${side}`);
     }
 
     if (account.swapOffers.size > (opts.maxSwaps || 10)) {
