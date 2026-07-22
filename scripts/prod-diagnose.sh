@@ -267,14 +267,22 @@ check_public_ws() {
   if bun -e '
     const url = process.argv[1];
     const ws = new WebSocket(url);
+    const close = (phase) => {
+      try {
+        ws.close();
+        return true;
+      } catch (error) {
+        console.error(`PROD_DIAGNOSE_WEBSOCKET_CLOSE_FAILED:${phase}:${error instanceof Error ? error.message : String(error)}`);
+        return false;
+      }
+    };
     const timer = setTimeout(() => {
-      try { ws.close(); } catch {}
+      close("timeout");
       process.exit(1);
     }, 5000);
     ws.onopen = () => {
       clearTimeout(timer);
-      try { ws.close(); } catch {}
-      process.exit(0);
+      process.exit(close("open") ? 0 : 1);
     };
     ws.onerror = () => {
       clearTimeout(timer);

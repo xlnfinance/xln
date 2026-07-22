@@ -168,8 +168,10 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   and payload length while preserving the original transaction failure.
 - [x] Remove the commented historical RPC implementation after confirming no
   executable/reference value remains. Git is the history.
-- [x] Eliminate every literal empty catch in production/runtime scripts; all 15
-  cleanup failures now emit operation, PID/path where relevant, and the error.
+- [x] Eliminate every literal empty catch in production/runtime/scripts. The 15
+  cleanup failures emit operation, PID/path where relevant, and the error;
+  production WebSocket diagnostics fail on close errors, and corrupt news
+  budget files fail closed instead of silently resetting the spend counter.
 - [ ] Audit semantic silent fallbacks in remaining catch clauses; retain only
   typed validation results or explicitly documented adversarial soft-fail paths.
 - [x] Verify and remove every HTLC cleartext fallback when recipient encryption

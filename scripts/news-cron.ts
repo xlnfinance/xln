@@ -34,7 +34,9 @@ function getTodayBudget(): BudgetData {
     try {
       const data = JSON.parse(readFileSync(BUDGET_FILE, "utf-8"));
       if (data.date === today) return data;
-    } catch {}
+    } catch (error) {
+      throw new Error(`NEWS_BUDGET_READ_FAILED:${BUDGET_FILE}`, { cause: error });
+    }
   }
   return { date: today, spent_usd: 0, requests: 0, tokens_in: 0, tokens_out: 0 };
 }
