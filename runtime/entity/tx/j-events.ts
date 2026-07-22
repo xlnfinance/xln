@@ -20,7 +20,6 @@ import {
   getJEventJurisdictionRef,
 } from '../../jurisdiction/event-observation';
 import { verifyAccountSignature } from '../../account/crypto';
-import { markStorageEntityDirty } from '../../machine/env-events';
 import { hashProofBodyStruct } from '../../protocol/dispute/proof-builder';
 import { buildAccountProofBodyFromEnv } from '../../account/consensus/helpers';
 import { assertDisputeProofBodyWithinContractLimits } from '../../jurisdiction/batch';
@@ -502,7 +501,6 @@ async function applyDisputeStartedJEvent(context: FinalizedJEventContext): Promi
       type: 'dispute_deadline',
       data: { accountId: counterpartyId },
     });
-    markStorageEntityDirty(env, newState.entityId);
   }
 }
 
@@ -583,7 +581,6 @@ function applyDisputeFinalizedJEvent(
     addMessage(newState, `✅ DISPUTE FINALIZED with ${counterpartyId.slice(-4)} (nonce ${Number(initialNonce)})`);
     if (newState.crontabState) {
       cancelCrontabHook(newState.crontabState, `dispute-deadline:${counterpartyId.toLowerCase()}`);
-      markStorageEntityDirty(env, newState.entityId);
     }
   } else {
     jEventLog.warn('dispute_finalized.no_active_dispute', { counterparty: shortId(counterpartyId) });

@@ -16,7 +16,6 @@ import {
   armHtlcSecretAckTimeout,
   terminateHtlcRoute,
 } from '../../htlc-route-lifecycle';
-import { markStorageEntityDirty } from '../../../../machine/env-events';
 import { pushCrossJurisdictionEntityOutput } from '../../cross-j-outputs';
 import { CROSS_J_MAX_FILL_RATIO } from '../../../../extensions/cross-j/index';
 import { buildHtlcFinalizedEventPayload } from '../../../../protocol/htlc/events';
@@ -165,7 +164,6 @@ export function applyHtlcSecretFollowups(ctx: HtlcSecretFollowupContext, reveale
         tx: { type: 'htlc_resolve', data: { lockId: route.inboundLockId, outcome: 'secret', secret } },
       });
       armHtlcSecretAckTimeout(newState, route);
-      markStorageEntityDirty(env, newState.entityId);
       continue;
     }
 

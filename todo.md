@@ -123,6 +123,14 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
 - [ ] Replace 83 manual dirty marks incrementally with reducer-returned
   `{nextState, storageChanges, durableEffects}` and differential proof for
   Account, Entity, orderbook and Runtime routing before deleting old marks.
+  Phase 1 removes every direct mark from `entity/tx/**`: successful reducers
+  return normalized Entity/Account changes, one interpreter applies them only
+  after the tx succeeds, and rejected/unhandled txs return no change. Account
+  changes delete the incremental Entity-account commitment entry so its parent
+  root recomputes lazily. Differential incremental-vs-cold Merkle proof plus
+  affected Entity/J/account L1 and cross-j/atomic/storage L2: 325/325 PASS,
+  3,100 assertions. Remaining consensus/scheduler/orderbook/Runtime callsites
+  stay explicit until their own parity proof is green.
 - [x] Prove whether `runtime/wal/store.ts`, legacy core DB and duplicate HEAD/DAG
   surfaces have production consumers; delete only demonstrated dead paths. No
   production caller reached the parallel WAL API or empty core LevelDB, so both

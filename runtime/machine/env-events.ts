@@ -13,6 +13,7 @@ import type {
   AccountFrame,
   AccountMachine,
   CertifiedEntityFrameLink,
+  EntityState,
   Env,
   LogCategory,
   FrameLogEntry,
@@ -183,6 +184,25 @@ export const markStorageBookDirty = (
     ...(deleted ? { deleted: true } : {}),
   };
   pushOverlayRecord(env, record);
+};
+
+export const applyStorageChanges = (
+  env: Env,
+  state: EntityState,
+  changes: readonly RuntimeOverlayRecord[],
+): void => {
+  for (const change of changes) {
+    if (change.family === 'entity') {
+      markStorageEntityDirty(env, change.entityId);
+    } else if (change.family === 'account') {
+      if (change.entityId.toLowerCase() === state.entityId.toLowerCase()) {
+        invalidateEntityAccountCommitment(state, change.counterpartyId);
+      }
+      markStorageAccountDirty(env, change.entityId, change.counterpartyId);
+    } else {
+      markStorageBookDirty(env, change.entityId, change.pairId, change.deleted === true);
+    }
+  }
 };
 
 // AccountMachine already owns currentFrame and pendingFrame. Historical frames

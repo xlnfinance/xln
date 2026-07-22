@@ -1,6 +1,5 @@
-import type { AccountInput, EntityState, EntityTx, Env, EntityInput, JInput, HashType } from '../../types';
+import type { AccountInput, EntityState, EntityTx, Env, EntityInput, JInput, HashType, RuntimeOverlayRecord } from '../../types';
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
-import { markStorageAccountDirty, markStorageEntityDirty } from '../../machine/env-events';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import {
   applyAccountInput,
@@ -106,10 +105,10 @@ const entityTxLog = createStructuredLogger('entity.tx');
 export interface ApplyEntityTxResult {
   newState: EntityState;
   outputs: EntityInput[];
+  storageChanges: RuntimeOverlayRecord[];
   jOutputs?: JInput[];
   // Pure events for entity-level orchestration
   mempoolOps?: MempoolOp[];
-  dirtyAccounts?: string[];
   /** Exact consensus response that the final Entity flush must preserve. */
   requiredAccountResponse?: AccountInput;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
@@ -129,12 +128,16 @@ export interface ApplyEntityTxOptions {
   accountJClaimNodeStore?: AccountJClaimNodeStore;
 }
 
+export type EntityTxReducerResult = Omit<ApplyEntityTxResult, 'storageChanges'> & {
+  accountChanges?: string[];
+};
+
 type EntityTxDispatcher = (
   env: Env,
   entityState: EntityState,
   entityTx: EntityTx,
   options?: ApplyEntityTxOptions,
-) => Promise<ApplyEntityTxResult> | ApplyEntityTxResult;
+) => Promise<EntityTxReducerResult> | EntityTxReducerResult;
 
 const handleJEventEntityTx: EntityTxDispatcher = async (env, entityState, entityTx) => {
   if (entityTx.type !== 'j_event') throw new Error(`ENTITY_TX_DISPATCH_MISMATCH: ${entityTx.type}`);
@@ -163,7 +166,7 @@ const handleJEventEntityTx: EntityTxDispatcher = async (env, entityState, entity
     newState,
     outputs: outputs || [],
     mempoolOps: mempoolOps || [],
-    dirtyAccounts,
+    accountChanges: dirtyAccounts,
     ...(hashesToSign && hashesToSign.length > 0 ? { hashesToSign } : {}),
   };
 };
@@ -171,11 +174,11 @@ const handleJEventEntityTx: EntityTxDispatcher = async (env, entityState, entity
 const handleAccountInputEntityTx: EntityTxDispatcher = async (env, entityState, entityTx, options) => {
   if (entityTx.type !== 'accountInput') throw new Error(`ENTITY_TX_DISPATCH_MISMATCH: ${entityTx.type}`);
   const result = await applyAccountInput(entityState, entityTx.data, env, options);
-  markStorageAccountDirty(env, result.newState.entityId, entityTx.data.fromEntityId);
   return {
     newState: result.newState,
     outputs: result.outputs,
     mempoolOps: result.mempoolOps,
+    accountChanges: [entityTx.data.fromEntityId],
     swapOffersCreated: result.swapOffersCreated,
     swapCancelRequests: result.swapCancelRequests,
     swapOffersCancelled: result.swapOffersCancelled,
@@ -318,20 +321,28 @@ export const applyEntityTx = async (
 ): Promise<ApplyEntityTxResult> => {
   if (!entityTx) {
     logError('ENTITY_TX', `❌ EntityTx is undefined!`);
-    return { newState: entityState, outputs: [] };
+    return { newState: entityState, outputs: [], storageChanges: [] };
   }
 
   try {
-    markStorageEntityDirty(env, entityState.entityId);
-
     const dispatcher = entityTxDispatchers[String(entityTx.type)];
     if (dispatcher) {
-      return await dispatcher(env, entityState, entityTx, options);
+      const { accountChanges = [], ...result } = await dispatcher(env, entityState, entityTx, options);
+      const entityId = result.newState.entityId.toLowerCase();
+      return {
+        ...result,
+        storageChanges: [
+          { family: 'entity', entityId },
+          ...Array.from(new Set(accountChanges.map(accountId => accountId.toLowerCase())))
+            .sort()
+            .map(counterpartyId => ({ family: 'account' as const, entityId, counterpartyId })),
+        ],
+      };
     }
 
     const skippedError = `ENTITY_TX_UNHANDLED: type=${String(entityTx.type)}`;
     entityTxLog.warn('unhandled', { type: String(entityTx.type) });
-    return { newState: entityState, outputs: [], jOutputs: [], skippedError };
+    return { newState: entityState, outputs: [], storageChanges: [], jOutputs: [], skippedError };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (shouldRethrowEntityTxError(error)) {
@@ -339,6 +350,6 @@ export const applyEntityTx = async (
       throw error;
     }
     entityTxLog.debug('skipped_error', { type: String(entityTx.type), error: message });
-    return { newState: entityState, outputs: [], jOutputs: [], skippedError: message };
+    return { newState: entityState, outputs: [], storageChanges: [], jOutputs: [], skippedError: message };
   }
 };

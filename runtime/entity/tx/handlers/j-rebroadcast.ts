@@ -6,7 +6,7 @@ import {
   getJurisdictionConfigName,
   requireRuntimeJurisdictionConfigByName,
 } from '../../../jurisdiction/jurisdiction-runtime';
-import type { ApplyEntityTxResult } from '../apply';
+import type { EntityTxReducerResult } from '../apply';
 import { getEntityLeaderState } from '../../consensus/leader';
 
 const MIN_GAS_BUMP_BPS = 0;
@@ -55,7 +55,7 @@ export async function handleJRebroadcast(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'j_rebroadcast' }>,
   env: Env,
-): Promise<ApplyEntityTxResult> {
+): Promise<EntityTxReducerResult> {
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
   const jOutputs: JInput[] = [];

@@ -1,5 +1,4 @@
 import type { AccountInput, EntityState, Env, EntityInput, AccountMachine } from '../../../types';
-import { markStorageAccountDirty, markStorageEntityDirty } from '../../../machine/env-events';
 import { applyAccountInput as applyConsensusAccountInput } from '../../../account/consensus/index';
 import { addMessage, addMessages, emitScopedEvents } from '../../../state-helpers';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
@@ -184,7 +183,6 @@ export async function applyAccountInput(
       `accountInput:${newState.entityId}`,
     );
   }
-  markStorageEntityDirty(env, newState.entityId);
   if (input.domain === undefined) throw new Error(`ACCOUNT_INPUT_DOMAIN_REQUIRED:${counterpartyId}`);
   const inputDomain = normalizeAccountStateDomain(input.domain, 'ACCOUNT_INPUT_DOMAIN');
   if (accountMachine) {
@@ -197,9 +195,6 @@ export async function applyAccountInput(
     if (!sameAccountStateDomain(inputDomain, accountStateDomainFromJurisdiction(jurisdiction))) {
       throw new Error(`ACCOUNT_INPUT_DOMAIN_MISMATCH:${counterpartyId}`);
     }
-  }
-  if (accountMachine) {
-    markStorageAccountDirty(env, newState.entityId, counterpartyId);
   }
   const inputWatchSeed = input.watchSeed === undefined
     ? undefined
@@ -302,7 +297,6 @@ export async function applyAccountInput(
     // Store with counterparty ID as key (simpler than canonical)
     // Type assertion safe: accountMachine was just created above in this block
     upsertSortedStringMapEntry(newState.accounts, counterpartyId, accountMachine as AccountMachine);
-    markStorageAccountDirty(env, newState.entityId, counterpartyId);
     accountHandlerLog.debug('machine.created', { counterparty: shortId(counterpartyId) });
   }
 
@@ -457,7 +451,6 @@ export async function applyAccountInput(
             counterpartyId,
           },
         });
-        markStorageEntityDirty(env, newState.entityId);
       }
 
       // Multi-signer: Collect hashes from result during processing
@@ -614,7 +607,6 @@ export async function applyAccountInput(
           armHtlcSecretAckTimeout(newState, route);
         }
       }
-      markStorageEntityDirty(env, newState.entityId);
       const prepared = await handlePrepareDispute(
         newState,
         {

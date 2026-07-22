@@ -70,6 +70,7 @@ import {
 import {
   markStorageAccountDirty,
   markStorageEntityDirty,
+  applyStorageChanges,
   recordEntityFrameHistory,
   recordOrderbookPairUpdate,
 } from '../../machine/env-events';
@@ -3931,7 +3932,7 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
       jOutputs,
       hashesToSign,
       mempoolOps,
-      dirtyAccounts,
+      storageChanges,
       requiredAccountResponse,
       swapOffersCreated,
       swapCancelRequests,
@@ -3948,6 +3949,7 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
       throw new Error(`ENTITY_FRAME_TX_FAILED: type=${String(entityTx.type)} error=${skippedError}`);
     }
     currentEntityState = newState;
+    applyStorageChanges(env, currentEntityState, storageChanges);
     if (accountJClaimNodeChanges) {
       for (const { hash, node } of accountJClaimNodeChanges.newNodes) {
         context.accountJClaimNewNodes.set(hash, node);
@@ -3968,10 +3970,6 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
         authorizedRuntimeOutput: undefined,
       });
     }
-    for (const accountId of dirtyAccounts || []) {
-      markStorageAccountDirty(env, currentEntityState.entityId, accountId);
-    }
-
     if (requiredAccountResponse) {
       const accountId = requiredAccountResponse.toEntityId.toLowerCase();
       proposableAccounts.add(accountId);

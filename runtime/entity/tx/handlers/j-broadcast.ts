@@ -25,7 +25,7 @@ import {
   getJurisdictionConfigName,
   requireRuntimeJurisdictionConfigByName,
 } from '../../../jurisdiction/jurisdiction-runtime';
-import type { ApplyEntityTxResult } from '../apply';
+import type { EntityTxReducerResult } from '../apply';
 import { createStructuredLogger, shortHash, shortId } from '../../../infra/logger';
 import { getEntityLeaderState } from '../../consensus/leader';
 
@@ -35,7 +35,7 @@ export async function handleJBroadcast(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'j_broadcast' }>,
   env: Env
-): Promise<ApplyEntityTxResult> {
+): Promise<EntityTxReducerResult> {
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
   const jOutputs: JInput[] = [];

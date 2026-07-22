@@ -51,6 +51,7 @@ import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
 import {
   buildEntityFrameAuthority,
   computeCanonicalEntityConsensusStateHash,
+  computeCanonicalEntityConsensusStateHashCold,
   computeEntityFrameAuthorityRoot,
 } from '../entity/consensus/state-root';
 import {
@@ -112,6 +113,7 @@ import { applyCommand, createBook, getBookOrder, getSwapLotScale, ORDERBOOK_PRIC
 import { process, createEmptyEnv, registerEntityRuntimeHint, sendEntityInput, validateRuntimeInputAdmission } from '../runtime';
 import { createJReplica } from '../scenarios/boot';
 import { applyMergedEntityInputs } from '../machine/entity-inputs';
+import { applyStorageChanges } from '../machine/env-events';
 import { submitRuntimeJOutbox } from '../machine/j-submit';
 import {
   buildJSubmitAttemptId,
@@ -3282,6 +3284,48 @@ describe('audit fail-fast regressions', () => {
     });
     const marks = env.runtimeState?.currentStorageOverlayMarks ?? [];
     expect(marks.some((record) => record.family === 'entity' && record.entityId === entityId)).toBe(true);
+  });
+
+  test('entity reducers return exact storage changes and invalidate account Merkle cache only after success', async () => {
+    const entityId = `0x${'a1'.repeat(32)}`;
+    const counterpartyId = `0x${'b2'.repeat(32)}`;
+    const env = createEmptyEnv('storage changes reducer seed alpha beta gamma');
+    const state = makeEntityState(entityId);
+    state.accounts.set(counterpartyId, makeProposalAccount([], entityId, counterpartyId));
+    env.eReplicas.set(`${entityId}:test`, {
+      entityId,
+      signerId: 'test',
+      mempool: [],
+      isProposer: true,
+      state,
+    });
+
+    const reduced = await applyEntityTx(env, state, {
+      type: 'profile-update',
+      data: { profile: { entityId, name: 'Storage changes' } },
+    });
+    expect(env.runtimeState?.currentStorageOverlayMarks ?? []).toEqual([]);
+    expect(reduced.storageChanges).toEqual([{ family: 'entity', entityId }]);
+    applyStorageChanges(env, reduced.newState, reduced.storageChanges);
+    expect(env.runtimeState?.currentStorageOverlayMarks).toEqual([{ family: 'entity', entityId }]);
+
+    const rejected = await applyEntityTx(env, reduced.newState, { type: '__unknown__' } as unknown as EntityTx);
+    expect(rejected.skippedError).toContain('ENTITY_TX_UNHANDLED');
+    expect(rejected.storageChanges).toEqual([]);
+    expect(env.runtimeState?.currentStorageOverlayMarks).toEqual([{ family: 'entity', entityId }]);
+
+    const cachedRoot = computeCanonicalEntityConsensusStateHash(state);
+    state.accounts.get(counterpartyId)!.currentHeight += 1;
+    expect(computeCanonicalEntityConsensusStateHash(state)).toBe(cachedRoot);
+    applyStorageChanges(env, state, [{ family: 'account', entityId, counterpartyId }]);
+    const invalidatedRoot = computeCanonicalEntityConsensusStateHash(state);
+    expect(invalidatedRoot).not.toBe(cachedRoot);
+    expect(invalidatedRoot).toBe(computeCanonicalEntityConsensusStateHashCold(state));
+    expect(env.runtimeState?.currentStorageOverlayMarks).toContainEqual({
+      family: 'account',
+      entityId,
+      counterpartyId,
+    });
   });
 
   test('crontab-only canonical mutations mark entity docs dirty for storage replay', async () => {

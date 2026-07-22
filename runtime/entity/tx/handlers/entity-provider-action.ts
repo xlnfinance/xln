@@ -30,7 +30,7 @@ import {
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardRecord,
 } from '../../../jurisdiction/board-registry';
-import type { ApplyEntityTxResult } from '../apply';
+import type { EntityTxReducerResult } from '../apply';
 
 type TransferTx = Extract<EntityTx, { type: 'entityProviderTransfer' }>;
 type ReleaseTx = Extract<EntityTx, { type: 'entityProviderReleaseControlShares' }>;
@@ -133,7 +133,7 @@ const handleAction = (
   entityState: EntityState,
   entityTx: TransferTx | ReleaseTx,
   env: Env,
-): ApplyEntityTxResult => {
+): EntityTxReducerResult => {
   const configuredName = getJurisdictionConfigName(entityState.config.jurisdiction);
   if (!configuredName) throw new Error('ENTITY_PROVIDER_ACTION_JURISDICTION_MISSING');
   const jurisdiction = requireRuntimeJurisdictionConfigByName(
@@ -222,19 +222,19 @@ export const handleEntityProviderTransfer = (
   entityState: EntityState,
   entityTx: TransferTx,
   env: Env,
-): ApplyEntityTxResult => handleAction(entityState, entityTx, env);
+): EntityTxReducerResult => handleAction(entityState, entityTx, env);
 
 export const handleEntityProviderReleaseControlShares = (
   entityState: EntityState,
   entityTx: ReleaseTx,
   env: Env,
-): ApplyEntityTxResult => handleAction(entityState, entityTx, env);
+): EntityTxReducerResult => handleAction(entityState, entityTx, env);
 
 export const handleEntityProviderCancelAction = (
   entityState: EntityState,
   entityTx: CancelTx,
   env: Env,
-): ApplyEntityTxResult => {
+): EntityTxReducerResult => {
   const configuredName = getJurisdictionConfigName(entityState.config.jurisdiction);
   if (!configuredName) throw new Error('ENTITY_PROVIDER_ACTION_JURISDICTION_MISSING');
   const jurisdiction = requireRuntimeJurisdictionConfigByName(

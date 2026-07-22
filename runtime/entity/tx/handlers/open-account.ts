@@ -2,7 +2,6 @@ import { isLeftEntity } from '../../id';
 import type { Delta, EntityInput, EntityState, EntityTx, Env } from '../../../types';
 import { scaleWholeTokenAmount } from '../../../types';
 import { formatEntityId } from '../../../utils';
-import { markStorageAccountDirty, markStorageEntityDirty } from '../../../machine/env-events';
 import { upsertSortedStringMapEntry } from '../../../storage/sorted-index';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
@@ -28,6 +27,7 @@ type OpenAccountEntityTx = Extract<EntityTx, { type: 'openAccount' }>;
 type OpenAccountResult = {
   newState: EntityState;
   outputs: EntityInput[];
+  accountChanges: string[];
 };
 
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -182,8 +182,6 @@ export const handleOpenAccountEntityTx = (
       lastFinalizedJHeight: 0,
       jNonce: 0,
     });
-    markStorageAccountDirty(env, newState.entityId, counterpartyId);
-    markStorageEntityDirty(env, newState.entityId);
   }
 
   const localAccount = newState.accounts.get(accountKey);
@@ -230,5 +228,5 @@ export const handleOpenAccountEntityTx = (
 
   addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(counterpartyId)}`);
 
-  return { newState, outputs };
+  return { newState, outputs, accountChanges: [counterpartyId] };
 };
