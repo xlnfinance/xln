@@ -8,7 +8,13 @@ import {
   appendDefaultProposerAcceptedHtlcReveals,
   emitDefaultProposerHtlcOnionAdvances,
 } from '../htlc-onion-post-commit';
-import { appendDefaultProposerCrossJMaterializations } from '../cross-j-proposer-materialization';
+import {
+  appendDefaultProposerCrossJMaterializations,
+  entityTxContainsAccountTransition,
+  entityTxContainsCrossJSetup,
+  selectCrossJOpeningAccountProposalTxs,
+  selectCrossJCommitPhaseTxs,
+} from '../cross-j-proposer-materialization';
 import { assertLocalJRebroadcastAllowed } from '../tx/handlers/j-rebroadcast';
 import type {
   AccountInput,
@@ -1146,9 +1152,11 @@ export const selectProposableEntityTxs = async (
     if (authority.kind === 'defer') blockedOutput = true;
   }
   if (!blockedOutput) {
+    const phaseSelection = selectCrossJCommitPhaseTxs(mempool);
     return applyJRangeBudgetToSelection({
-      txs: attachTargetConsumptionProofs(env, state, mempool),
+      txs: attachTargetConsumptionProofs(env, state, phaseSelection.txs),
       currentAuthorityReady: true,
+      ...(phaseSelection.deferredCrossJSetup ? { reason: 'CROSS_J_ACCOUNT_COMMIT_PRIORITY' } : {}),
     });
   }
   if (jRanges.length > 0) {
@@ -4280,6 +4288,15 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
       throw new Error(`ACCOUNT_FLUSH_ACCOUNT_MISSING:${accountKey}`);
     }
 
+    const crossJOpeningProposalTxs = selectCrossJOpeningAccountProposalTxs(env, currentEntityState, accountMachine);
+    if (crossJOpeningProposalTxs === null) {
+      entityLog.debug('account.cross_j_opening_cohort_wait', {
+        account: shortId(accountKey),
+        entity: shortId(currentEntityState.entityId),
+      });
+      continue;
+    }
+
     const requiredResponse = requiredAccountResponses.get(accountKey.toLowerCase());
 
     let proposal: Awaited<ReturnType<typeof proposeAccountFrame>> | undefined;
@@ -4290,6 +4307,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
         currentEntityState.timestamp,
         currentEntityState.lastFinalizedJHeight,
         accountJClaimNodeStore,
+        crossJOpeningProposalTxs,
       );
       proposedFrames += 1;
       if (proposal.swapOffersCancelled && proposal.swapOffersCancelled.length > 0) {
@@ -4743,6 +4761,10 @@ export const applyEntityFrame = async (
   assertEntityFrameTxByteBudget(entityTxs);
   assertEntityFrameJRangeBudget(entityTxs);
   assertScheduledWakeFrameOrder(entityTxs);
+  const crossJSetupPhase = entityTxs.some(entityTxContainsCrossJSetup);
+  if (crossJSetupPhase && entityTxs.some(entityTxContainsAccountTransition)) {
+    throw new Error('CROSS_J_SETUP_ACCOUNT_TRANSITION_MIXED');
+  }
   const authorityTransitionOnly = await isSelfBoardAuthorityTransitionFrame(env, entityState, entityTxs);
   const frameProfileStartMs = getPerfMs();
   const frameProfileMarks: Record<string, number> = {};
@@ -4929,15 +4951,22 @@ export const applyEntityFrame = async (
   const deterministicState = cloneEntityState(currentEntityState);
   markFrameProfile('deterministicClone');
 
-  const accountsToProposeFramesCount = await proposePendingAccountFrames({
-    env,
-    currentEntityState,
-    proposableAccounts,
-    requiredAccountResponses,
-    allOutputs,
-    collectedHashes,
-    accountJClaimNodeStore,
-  });
+  // Runtime-local source/target registrations are sibling effects of one
+  // materialization frame. Flushing an Account proposal while only the first
+  // sibling Entity frame has committed exposes a one-legged proposal. Keep the
+  // Account mempool durable; the next ordinary wake observes both committed
+  // sibling registrations and flushes the exact matched cohort.
+  const accountsToProposeFramesCount = crossJSetupPhase
+    ? 0
+    : await proposePendingAccountFrames({
+        env,
+        currentEntityState,
+        proposableAccounts,
+        requiredAccountResponses,
+        allOutputs,
+        collectedHashes,
+        accountJClaimNodeStore,
+      });
   markFrameProfile('accountProposals');
   currentEntityState = assignCertifiedOutputIdentities(currentEntityState, allOutputs);
 

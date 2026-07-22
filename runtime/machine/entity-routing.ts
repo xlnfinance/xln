@@ -280,6 +280,16 @@ export type PotentialCrossJAccountInputPair = {
   targetInputIndex: number;
 };
 
+export type PotentialCrossJAccountInputPairOptions = {
+  /**
+   * Sender-side Account legs may be certified by sibling Entities in adjacent
+   * Runtime frames. They remain private in the durable outbox until the exact
+   * structural pair exists, then transport gives both one envelope frame.
+   * Inbound selection must keep the default and require that shared envelope.
+   */
+  allowDifferentSourceRuntimeFrames?: boolean;
+};
+
 type CrossJAdmissionFrameCandidate = {
   inputIndex: number;
   pairKey: string;
@@ -377,6 +387,7 @@ const admissionFramesMatch = (
 /** Structural only; monetary approval happens in the state-aware selector. */
 export const selectPotentialCrossJAccountInputPairs = (
   inputs: readonly RoutedEntityInput[],
+  options: PotentialCrossJAccountInputPairOptions = {},
 ): PotentialCrossJAccountInputPair[] => {
   const candidates = inputs.flatMap((input, inputIndex) =>
     effectiveAccountInputs(input).flatMap(accountInput => {
@@ -391,7 +402,8 @@ export const selectPotentialCrossJAccountInputPairs = (
       right.inputIndex !== left.inputIndex &&
       normalizeRuntimeId(inputs[right.inputIndex]!.runtimeId) ===
         normalizeRuntimeId(inputs[left.inputIndex]!.runtimeId) &&
-      sameSourceRuntimeFrame(inputs[right.inputIndex]!, inputs[left.inputIndex]!) &&
+        (options.allowDifferentSourceRuntimeFrames === true ||
+          sameSourceRuntimeFrame(inputs[right.inputIndex]!, inputs[left.inputIndex]!)) &&
       admissionOriginKey(inputs[right.inputIndex]!) === admissionOriginKey(inputs[left.inputIndex]!) &&
       admissionFramesMatch(left, right));
     if (matches.length !== 1) continue;

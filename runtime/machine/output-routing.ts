@@ -856,7 +856,13 @@ const groupAtomicCrossJAdmissionOutputs = <T extends RoutedEntityInput>(
     });
   }
 
-  for (const pair of selectPotentialCrossJAccountInputPairs(outputs)) {
+  // Sibling Entity consensus can certify the two Account legs in adjacent
+  // Runtime frames. Neither leg leaves this outbox alone. Pair exact route
+  // bytes here, then buildRuntimeEntityInputsEnvelope assigns one shared
+  // transport frame that the receiver requires before applying either leg.
+  for (const pair of selectPotentialCrossJAccountInputPairs(outputs, {
+    allowDifferentSourceRuntimeFrames: true,
+  })) {
     const indexes = [pair.sourceInputIndex, pair.targetInputIndex];
     if (indexes.some(index => claimed.has(index))) continue;
     indexes.forEach(index => claimed.add(index));
@@ -1865,7 +1871,9 @@ const buildRuntimeEntityInputsEnvelope = (
     output.atomicCrossJurisdictionPair.pairKey === explicitPair.pairKey)) {
     throw new Error('ROUTE_CROSS_J_ATOMIC_COHORT_MISMATCH');
   }
-  const structuralPairs = selectPotentialCrossJAccountInputPairs(outputs);
+  const structuralPairs = selectPotentialCrossJAccountInputPairs(outputs, {
+    allowDifferentSourceRuntimeFrames: true,
+  });
   const inferredProposalPair = !explicitPair && outputs.length === 2 && structuralPairs.length === 1;
   const atomicCrossJurisdictionPair = explicitPair ?? (inferredProposalPair
     ? {

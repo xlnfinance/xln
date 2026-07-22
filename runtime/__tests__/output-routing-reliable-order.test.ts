@@ -91,6 +91,117 @@ const accountAckOutput = (height: number): DeliverableEntityInput => ({
   } as never],
 });
 
+const crossJProposalOutput = (
+  leg: 'source' | 'target',
+  frame: NonNullable<RoutedEntityInput['sourceRuntimeFrame']>,
+): RoutedEntityInput => {
+  const sourceEntityId = entityId('a1');
+  const sourceHubEntityId = entityId('a2');
+  const targetHubEntityId = entityId('a3');
+  const targetEntity = entityId('a4');
+  const routeHash = `0x${'ab'.repeat(32)}`;
+  const fullHash = `0x${'bc'.repeat(32)}`;
+  const partialRoot = `0x${'cd'.repeat(32)}`;
+  const route = {
+    orderId: 'cross-j-adjacent-runtime-frames',
+    routeHash,
+    source: {
+      jurisdiction: 'stack:1:source',
+      entityId: sourceEntityId,
+      counterpartyEntityId: sourceHubEntityId,
+      tokenId: 1,
+      amount: 10n,
+    },
+    target: {
+      jurisdiction: 'stack:2:target',
+      entityId: targetHubEntityId,
+      counterpartyEntityId: targetEntity,
+      tokenId: 2,
+      amount: 20n,
+    },
+    sourcePull: {
+      pullId: 'source-pull',
+      tokenId: 1,
+      signedAmount: -10n,
+      revealedUntilTimestamp: 900,
+      fullHash,
+      partialRoot,
+    },
+    targetPull: {
+      pullId: 'target-pull',
+      tokenId: 2,
+      signedAmount: -20n,
+      revealedUntilTimestamp: 1_000,
+      fullHash,
+      partialRoot,
+    },
+    status: 'resting',
+    createdAt: 1,
+    updatedAt: 1,
+    expiresAt: 2_000,
+  };
+  const pull = leg === 'source' ? route.sourcePull : route.targetPull;
+  const accountTxs = [
+    {
+      type: 'pull_lock',
+      data: {
+        ...pull,
+        amount: pull.signedAmount,
+        crossJurisdiction: { orderId: route.orderId, routeHash, leg },
+        crossJurisdictionRoute: route,
+      },
+    },
+    ...(leg === 'source'
+      ? [
+          {
+            type: 'swap_offer',
+            data: {
+              offerId: route.orderId,
+              giveTokenId: 1,
+              giveAmount: 10n,
+              wantTokenId: 2,
+              wantAmount: 20n,
+              timeInForce: 0,
+              minFillRatio: 0,
+              crossJurisdiction: route,
+            },
+          },
+        ]
+      : []),
+  ];
+  const fromEntityId = leg === 'source' ? sourceHubEntityId : targetHubEntityId;
+  const toEntityId = leg === 'source' ? sourceEntityId : targetEntity;
+  return {
+    runtimeId: targetRuntimeId,
+    entityId: toEntityId,
+    signerId: targetSignerId,
+    sourceRuntimeFrame: frame,
+    entityTxs: [
+      {
+        type: 'accountInput',
+        data: {
+          kind: 'frame',
+          fromEntityId,
+          toEntityId,
+          domain: { chainId: leg === 'source' ? 1 : 2, depositoryAddress: runtimeId('a5') },
+          proposal: {
+            frame: {
+              height: 1,
+              timestamp: 1,
+              jHeight: 0,
+              accountTxs,
+              prevFrameHash: 'genesis',
+              accountStateRoot: `0x${'de'.repeat(32)}`,
+              stateHash: `0x${(leg === 'source' ? 'ef' : 'f0').repeat(32)}`,
+              deltas: [],
+            },
+          },
+        },
+      } as never,
+    ],
+  };
+};
+
 const jFinalityOutput = (height: number): DeliverableEntityInput => ({
   runtimeId: targetRuntimeId,
   entityId: targetEntityId,
@@ -227,6 +338,37 @@ describe('ordered reliable output lanes', () => {
     expect(markPendingCrossJAdmissionOutputsReady(env, deps, targetRuntimeId)).toBe(1);
     expect(getNextNetworkRetryTimestamp(env, deps)).toBe(0);
     expect(hasReadyPendingNetworkOutputs(env, deps, 1_000_000)).toBe(true);
+  });
+
+  test('pairs sibling cross-j proposals certified in adjacent Runtime frames into one envelope', () => {
+    const sourceProposal = crossJProposalOutput('source', { height: 48, timestamp: 1_000 });
+    const targetProposal = crossJProposalOutput('target', { height: 49, timestamp: 1_001 });
+    const envelopes: RuntimeEntityInputsEnvelope[] = [];
+    const env = {
+      runtimeId: runtimeId('90'),
+      height: 50,
+      timestamp: 1_002,
+      runtimeState: {},
+      warn: () => {},
+      error: () => {},
+    } as unknown as Env;
+
+    dispatchEntityOutputs(
+      env,
+      [sourceProposal, targetProposal].map(output => ({ output, targetRuntimeId })),
+      routingDeps(() => ({
+        enqueueEntityInputsDelivery: (_runtimeId, envelope) => {
+          envelopes.push(envelope);
+          return deliveryAccepted('TEST_CROSS_J_ADJACENT_FRAMES_DELIVERED');
+        },
+      })),
+    );
+
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]?.entityInputs).toHaveLength(2);
+    expect(envelopes[0]?.sourceRuntimeHeight).toBe(50);
+    expect(envelopes[0]?.sourceRuntimeTimestamp).toBe(1_002);
+    expect(envelopes[0]?.atomicCrossJurisdictionPair?.phase).toBe('proposal');
   });
 
   test('ordinary cross-j proposal legs also wait for an explicit retry trigger', () => {

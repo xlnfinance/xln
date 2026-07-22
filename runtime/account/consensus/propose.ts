@@ -103,6 +103,7 @@ export async function proposeAccountFrame(
   entityFrameTimestamp: number,
   entityJHeight?: number, // Optional: J-height from entity state for HTLC consensus
   accountJClaimNodeStore?: AccountJClaimNodeStore,
+  selectedMempoolTxs?: readonly AccountTx[],
 ): Promise<ProposeAccountFrameResult> {
   const profileStartMs = getPerfMs();
   const profileCheckpoints: Record<string, number> = {};
@@ -156,7 +157,27 @@ export async function proposeAccountFrame(
   // simultaneous-proposal rollback/tiebreaker path below, not by a special
   // j_event_claim gate here.
 
-  const proposalWindow = accountMachine.mempool.slice(0, MAX_ACCOUNT_FRAME_TXS);
+  const proposalSource = selectedMempoolTxs ?? accountMachine.mempool;
+  if (proposalSource.length === 0) {
+    throw new Error('ACCOUNT_PROPOSAL_SELECTION_EMPTY');
+  }
+  if (proposalSource.length > MAX_ACCOUNT_FRAME_TXS) {
+    throw new Error(`ACCOUNT_PROPOSAL_SELECTION_TOO_LARGE:${proposalSource.length}`);
+  }
+  if (selectedMempoolTxs) {
+    const remaining = new Map<string, number>();
+    for (const tx of accountMachine.mempool) {
+      const key = safeStringify(tx);
+      remaining.set(key, (remaining.get(key) ?? 0) + 1);
+    }
+    for (const tx of selectedMempoolTxs) {
+      const key = safeStringify(tx);
+      const count = remaining.get(key) ?? 0;
+      if (count === 0) throw new Error('ACCOUNT_PROPOSAL_SELECTION_NOT_IN_MEMPOOL');
+      remaining.set(key, count - 1);
+    }
+  }
+  const proposalWindow = [...proposalSource];
   if (!quiet) {
     accountLog.info('proposal.frame_create', {
       txs: proposalWindow.map(tx => tx.type),
