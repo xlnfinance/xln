@@ -86,10 +86,6 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.Math__factory>;
     getContractFactory(
-      name: "SafeCast",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.SafeCast__factory>;
-    getContractFactory(
       name: "Strings",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.Strings__factory>;
@@ -277,11 +273,6 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.Math>;
     getContractAt(
-      name: "SafeCast",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.SafeCast>;
-    getContractAt(
       name: "Strings",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -475,10 +466,6 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.Math>;
     deployContract(
-      name: "SafeCast",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.SafeCast>;
-    deployContract(
       name: "Strings",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.Strings>;
@@ -665,11 +652,6 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.Math>;
-    deployContract(
-      name: "SafeCast",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.SafeCast>;
     deployContract(
       name: "Strings",
       args: any[],

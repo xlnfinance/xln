@@ -1,4 +1,4 @@
-import { expect, test } from '../../tests/global-setup';
+import { expect, test } from '../../tests/global-setup.ts';
 
 async function completeOnboarding(page: import('@playwright/test').Page): Promise<void> {
   await expect(page.getByLabel('Display name')).toBeVisible({ timeout: 240_000 });

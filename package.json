@@ -177,7 +177,7 @@
     "visualcheck": "bun tools/visualcheck.ts",
     "build:tsc": "bun node_modules/@typescript/native/bin/tsc",
     "watch": "bun node_modules/@typescript/native/bin/tsc --watch",
-    "env:build": "cd ./jurisdictions && npx hardhat compile",
+    "env:build": "cd ./jurisdictions && bun run compile",
     "env:run": "sh -c 'anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --mixed-mining --block-time ${XLN_ANVIL_BLOCK_TIME:-1} --block-gas-limit 60000000 --code-size-limit 65536'",
     "env:deploy": "cd ./jurisdictions && npx hardhat ignition deploy ignition/modules/Depository.ts  --network localhost",
     "format": "prettier --write ./runtime",
