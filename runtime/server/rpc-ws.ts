@@ -12,6 +12,7 @@ import {
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
   submitCrossJurisdictionIntent,
+  verifyLiveRuntimeStorage,
 } from '../runtime.ts';
 import { handleRuntimeAdapterMessage } from '../radapter/server';
 import { RuntimeAdapterError } from '../radapter/errors';
@@ -140,6 +141,10 @@ export const createServerRpcMessageHandler = ({
       enqueueRuntimeInput,
       submitCrossJurisdictionIntent: async (targetEnv, route) => {
         await submitCrossJurisdictionIntent(targetEnv, route);
+      },
+      controlRuntime: (targetEnv, action) => {
+        if (action !== 'verify-chain') throw new RuntimeAdapterError('E_BAD_QUERY', `unsupported runtime control: ${action}`);
+        return verifyLiveRuntimeStorage(targetEnv);
       },
       ...(validateRuntimeInputAdmission ? { validateRuntimeInputAdmission } : {}),
       ...(registerRuntimeInputReceipt ? { registerReceipt: registerRuntimeInputReceipt } : {}),

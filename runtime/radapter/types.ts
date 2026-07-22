@@ -164,6 +164,8 @@ export type RuntimeAdapterCrossJurisdictionIntentResult = {
   delivered: true;
 };
 
+export type RuntimeAdapterControlAction = 'verify-chain';
+
 export interface RuntimeAdapter {
   readonly mode: RuntimeAdapterMode;
   readonly runtimeId: string;
@@ -183,6 +185,7 @@ export interface RuntimeAdapter {
   submitCrossJurisdictionIntent(
     route: CrossJurisdictionSwapRoute,
   ): Promise<RuntimeAdapterCrossJurisdictionIntentResult>;
+  control<T = unknown>(action: RuntimeAdapterControlAction): Promise<T>;
   onChange(cb: (height: number) => void): () => void;
   onStatus(cb: (status: RuntimeAdapterStatus) => void): () => void;
 }
@@ -207,6 +210,7 @@ export type RuntimeAdapterRequest =
   | { v: XlnProtocolVersion; id: string; op: 'auth'; key?: string; challenge: string; ownerSignature?: string }
   | { v: XlnProtocolVersion; id: string; op: 'read'; path: string; query?: RuntimeAdapterReadQuery }
   | { v: XlnProtocolVersion; id: string; op: 'send'; commandId: string; commandSequence: number; input: RuntimeInput }
+  | { v: XlnProtocolVersion; id: string; op: 'control'; action: RuntimeAdapterControlAction }
   | { v: XlnProtocolVersion; id: string; op: 'cross-j-intent'; route: CrossJurisdictionSwapRoute };
 
 export type RuntimeAdapterResponse =

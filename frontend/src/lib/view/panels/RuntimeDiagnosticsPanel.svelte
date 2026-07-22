@@ -3,8 +3,9 @@
   import type { RuntimeSecurityIncident } from '@xln/runtime/types';
   import { safeStringify } from '@xln/runtime/protocol/serialization';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
+  import { getRuntimeControllerAdapter } from '$lib/stores/runtimeControllerStore';
   import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
-  import { activeRuntime, vaultOperations } from '$lib/stores/vaultStore';
+  import { activeRuntime } from '$lib/stores/vaultStore';
 
   let head: StorageHead | null = null;
   let checkpoints: Array<{ height?: number }> = [];
@@ -38,18 +39,12 @@
   }
 
   async function verify(): Promise<void> {
-    if ($runtimeControllerHandle.mode !== 'embedded') {
-      error = 'Remote chain verification requires a dedicated admin projection; inspect mode remains read-only.';
-      return;
-    }
-    if (!$activeRuntime?.seed) {
-      error = 'Active browser runtime seed is unavailable for verification.';
-      return;
-    }
     verifying = true;
     error = '';
     try {
-      verification = await vaultOperations.verifyRuntimeChain($runtimeControllerHandle.id, $activeRuntime.seed);
+	  const adapter = getRuntimeControllerAdapter();
+	  if (!adapter || adapter.status !== 'connected') throw new Error('Runtime adapter is not connected.');
+	  verification = await adapter.control('verify-chain');
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
       verification = null;

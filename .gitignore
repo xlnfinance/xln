@@ -119,6 +119,9 @@ runtime/runtime-check.js.map
 runtime/server-bundle.js
 runtime/server-bundle.js.map
 runtime/dist/
+packages/npm/xlnfinance/app/
+packages/npm/xlnfinance/dist/
+packages/npm/xlnfinance/*.tgz
 frontend/static/runtime.js
 frontend/static/runtime-bundle.js
 frontend/public/runtime.js

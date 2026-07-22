@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
 	appId: 'finance.xln.wallet',
-	appName: 'XLN Wallet',
+	appName: 'xln finance',
 	webDir: 'build',
 	bundledWebRuntime: false,
 	server: {

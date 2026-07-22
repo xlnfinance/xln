@@ -9,6 +9,7 @@ import type {
   RuntimeAdapterAuthLevel,
   RuntimeAdapterCommandLaneKind,
   RuntimeAdapterConfig,
+  RuntimeAdapterControlAction,
   RuntimeAdapterReadQuery,
   RuntimeAdapterRequest,
   RuntimeAdapterResponse,
@@ -37,6 +38,7 @@ type RuntimeAdapterRequestBody =
   | { op: 'auth'; key?: string; challenge: string; ownerSignature?: string }
   | { op: 'read'; path: string; query?: RuntimeAdapterReadQuery }
   | { op: 'send'; commandId: string; commandSequence: number; input: RuntimeInput }
+  | { op: 'control'; action: RuntimeAdapterControlAction }
   | { op: 'cross-j-intent'; route: CrossJurisdictionSwapRoute };
 
 const nextBackoff = (attempt: number, maxMs: number): number =>
@@ -183,6 +185,10 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       op: 'cross-j-intent',
       route,
     });
+  }
+
+  control<T = unknown>(action: RuntimeAdapterControlAction): Promise<T> {
+    return this.request<T>({ op: 'control', action });
   }
 
   onChange(cb: (height: number) => void): () => void {

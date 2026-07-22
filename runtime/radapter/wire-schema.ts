@@ -172,6 +172,10 @@ const validateRequest = (message: Record<string, unknown>): RuntimeAdapterReques
       requireBoundaryInteger(message['commandSequence'], 'RADAPTER_REQUEST_SEND_SEQUENCE_INVALID', 1);
       validateRuntimeInputEnvelope(message['input'], 'RADAPTER_REQUEST_SEND_INPUT');
       break;
+    case 'control':
+      requireExactBoundaryKeys(message, ['v', 'id', 'op', 'action'], [], 'RADAPTER_REQUEST_CONTROL_FIELDS_INVALID');
+      if (message['action'] !== 'verify-chain') throw new Error('RADAPTER_REQUEST_CONTROL_ACTION_INVALID');
+      break;
     case 'cross-j-intent':
       requireExactBoundaryKeys(
         message,

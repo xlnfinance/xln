@@ -3,7 +3,11 @@
   import QRCode from 'qrcode';
   import { Check, Copy, Download, QrCode } from 'lucide-svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
-  import { buildWalletPayHref, buildXlnInvoiceUri } from '$lib/utils/xlnInvoice';
+  import {
+    buildWalletPayHref,
+    buildXlnInvoiceDeepLink,
+    buildXlnInvoiceUri,
+  } from '$lib/utils/xlnInvoice';
 
   export let entityId: string;
 
@@ -12,11 +16,12 @@
   let description = '';
   let copiedId = false;
   let copiedInvoice = false;
+  let copiedAppLink = false;
   let qrDataUrl = '';
   let qrError = '';
   let qrJob = 0;
 
-  const copyText = async (text: string, kind: 'id' | 'invoice'): Promise<void> => {
+  const copyText = async (text: string, kind: 'id' | 'invoice' | 'app-link'): Promise<void> => {
     if (!text) return;
     await navigator.clipboard.writeText(text);
     if (kind === 'id') {
@@ -24,8 +29,13 @@
       setTimeout(() => copiedId = false, 1500);
       return;
     }
-    copiedInvoice = true;
-    setTimeout(() => copiedInvoice = false, 1500);
+    if (kind === 'invoice') {
+      copiedInvoice = true;
+      setTimeout(() => copiedInvoice = false, 1500);
+      return;
+    }
+    copiedAppLink = true;
+    setTimeout(() => copiedAppLink = false, 1500);
   };
 
   $: fullInvoice = buildXlnInvoiceUri({
@@ -36,6 +46,12 @@
   });
   $: invoicePreview = amount.trim() || description.trim() ? fullInvoice : entityId;
   $: walletHref = buildWalletPayHref({
+    targetEntityId: entityId,
+    tokenId,
+    amount,
+    description,
+  });
+  $: appLink = buildXlnInvoiceDeepLink({
     targetEntityId: entityId,
     tokenId,
     amount,
@@ -127,6 +143,9 @@
         <button class="secondary-inline" type="button" on:click={downloadQr} disabled={!qrDataUrl}>
           <Download size={14} />
           <span>Download QR</span>
+        </button>
+        <button class="secondary-inline" type="button" on:click={() => copyText(appLink, 'app-link')}>
+          {#if copiedAppLink}<Check size={14} /><span>Copied App Link</span>{:else}<Copy size={14} /><span>Copy App Link</span>{/if}
         </button>
       </div>
     </section>

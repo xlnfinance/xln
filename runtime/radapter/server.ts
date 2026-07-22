@@ -23,6 +23,7 @@ import { keccak256, toUtf8Bytes } from 'ethers';
 import type {
   RuntimeAdapterAuthLevel,
   RuntimeAdapterActivityPage,
+  RuntimeAdapterControlAction,
   RuntimeAdapterFrameReceiptResponse,
   RuntimeAdapterPaymentRoutesResponse,
   RuntimeAdapterReadQuery,
@@ -94,6 +95,7 @@ export type RuntimeAdapterServerDeps = {
 	  ) => Promise<RuntimeAdapterActivityPage>;
 	  enqueueRuntimeInput: (env: Env, input: RuntimeInput) => void;
 	  submitCrossJurisdictionIntent?: (env: Env, route: CrossJurisdictionSwapRoute) => Promise<unknown>;
+	  controlRuntime?: (env: Env, action: RuntimeAdapterControlAction) => Promise<unknown>;
 	  validateRuntimeInputAdmission?: (env: Env, input: RuntimeInput) => void;
 	  registerReceipt?: (input: RegisterReceiptOptions) => RuntimeIngressReceipt;
 	  readReceipt?: (id: string) => RuntimeIngressReceipt | null;
@@ -573,6 +575,16 @@ export const handleRuntimeAdapterMessage = async (
       }
       await deps.submitCrossJurisdictionIntent(env, msg.route);
       sendOk(ws, msg.id, { delivered: true }, diagnostic());
+      return true;
+    }
+
+    if (msg.op === 'control') {
+      requireAuth(state, 'admin');
+      requireBucket(state.sendBucket, 'control');
+      if (!deps.controlRuntime) {
+        throw new RuntimeAdapterError('E_INTERNAL', 'runtime admin control is unavailable');
+      }
+      sendOk(ws, msg.id, await deps.controlRuntime(env, msg.action), diagnostic());
       return true;
     }
 

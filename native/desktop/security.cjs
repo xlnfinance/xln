@@ -48,8 +48,8 @@ function sanitizeNotificationText(value, fallback, maxLength = 180) {
 
 function sanitizeNotificationPayload(payload = {}) {
 	return {
-		title: sanitizeNotificationText(payload.title, 'XLN payment', 80),
-		body: sanitizeNotificationText(payload.body, 'Open XLN Wallet to review.', 180),
+		title: sanitizeNotificationText(payload.title, 'xln payment', 80),
+		body: sanitizeNotificationText(payload.body, 'Open xln to review.', 180),
 	};
 }
 

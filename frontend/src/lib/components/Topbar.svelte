@@ -41,9 +41,10 @@
 
   <div class="topbar-links">
     <a href="/app" class="topbar-link" class:active={currentPath === '/app'}>App</a>
+    <a href="/install" class="topbar-link" class:active={currentPath === '/install'}>Install</a>
     <a href="/docs" class="topbar-link" class:active={currentPath === '/docs'}>Docs</a>
-    <a href="/rcpan" class="topbar-link" class:active={currentPath === '/rcpan'}>RCPAN</a>
-    <a href="/releases" class="topbar-link" class:active={currentPath === '/releases'}>Releases</a>
+    <a href="/rcpan" class="topbar-link optional-link" class:active={currentPath === '/rcpan'}>RCPAN</a>
+    <a href="/releases" class="topbar-link optional-link" class:active={currentPath === '/releases'}>Releases</a>
     <div class="topbar-dropdown tools-dropdown">
       <Dropdown bind:open={toolsDropdownOpen} minWidth={160} maxWidth={220}>
         <span slot="trigger" class="topbar-trigger">
@@ -296,9 +297,14 @@
   }
 
   @media (max-width: 520px) {
+    .optional-link,
     .tools-dropdown,
     .language-dropdown {
       display: none;
+    }
+
+    .optional-link.active {
+      display: inline;
     }
 
     .topbar {
