@@ -221,6 +221,9 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
 - [x] Isolate test cleanup so it never removes build artifacts owned by a live
   dev/E2E process; token/PID lease and SIGKILL-child ownership pass in the
   3,111-test unit gate.
+- [ ] Make `run-with-test-cleanup` own and stop its complete child process tree
+  on SIGINT/SIGTERM. Reproduce an interrupted bootstrap and prove no orphan
+  Anvil/orchestrator listener survives to block the next E2E port scan.
 - [ ] Replace fixed E2E waits with observable state predicates. Run 10x on one
   immutable SHA before quarantining any historically flaky scenario.
 - [ ] Merge duplicate payment E2E only after unique assertions are preserved in
