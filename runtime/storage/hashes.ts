@@ -94,8 +94,15 @@ export const computeStorageReplicaMetaDigest = (
     }),
 });
 
-const hashToBytes = (hash: string): Buffer =>
-  Buffer.from(String(hash || '').replace(/^0x/, '').padStart(64, '0'), 'hex');
+const hashToBytes = (hash: string): Buffer => hexBytes(hash);
+
+const merkleCellPathBytes = (path: string): Buffer => {
+  const raw = String(path);
+  if (!/^0x[0-9a-fA-F]{66}$/.test(raw)) {
+    throw new Error(`STORAGE_MERKLE_CELL_PATH_INVALID:${raw}`);
+  }
+  return Buffer.from(raw.slice(2), 'hex');
+};
 
 const encodeStorageDocValue = (doc: StorageDoc): StorageDocEncodedValue => {
   const buffer = encodeBuffer(doc.value);
@@ -157,7 +164,7 @@ const storageMerklePath = (key: string): string => {
 };
 
 export const storageMerkleCellHexKey = (cellKey: string): string =>
-  `0x${hashToBytes(storageMerklePath(cellKey)).toString('hex')}`;
+  `0x${merkleCellPathBytes(storageMerklePath(cellKey)).toString('hex')}`;
 
 export const computeStorageStateRoot = (entityHashes: StorageFrameEntityHash[]): string => {
   return buildHexKeyedMerkle(
@@ -435,11 +442,11 @@ class PersistedEntityMerkleEditor {
   }
 
   private pathForCellKey(cellKey: string): number[] {
-    return radixMerklePathSlots(hashToBytes(storageMerklePath(cellKey)), DEFAULT_ACCOUNT_MERKLE_RADIX);
+    return radixMerklePathSlots(merkleCellPathBytes(storageMerklePath(cellKey)), DEFAULT_ACCOUNT_MERKLE_RADIX);
   }
 
   private makeLeaf(cellKey: string, valueHash: string, dirty: boolean): PersistedMerkleLeafNode {
-    const keyBytes = hashToBytes(storageMerklePath(cellKey));
+    const keyBytes = merkleCellPathBytes(storageMerklePath(cellKey));
     const valueBytes = hashToBytes(valueHash);
     const path = radixMerklePathSlots(keyBytes, DEFAULT_ACCOUNT_MERKLE_RADIX);
     return {
@@ -786,9 +793,12 @@ const appendEntityMerkleFlush = (
 export const readAllEntityHashDocs = async (db: RuntimeDbLike): Promise<Map<string, StorageEntityHashDoc>> => {
   const docs = new Map<string, StorageEntityHashDoc>();
   for await (const key of iterateKeys(db, { prefix: keyMerkleRootPrefix() })) {
-    const entityId = decodeEntityId(key.subarray(1, 33));
     const rootDoc = await readValidatedOrNull(db, key, validateStorageMerkleRootDocValue);
     if (!rootDoc || rootDoc.namespace !== ENTITY_MERKLE_NAMESPACE) continue;
+    if (!key.equals(keyMerkleRoot(rootDoc.entityId, rootDoc.namespace))) {
+      throw new Error(`STORAGE_MERKLE_ROOT_KEY_MISMATCH:${key.toString('hex')}`);
+    }
+    const entityId = normalizeEntityId(rootDoc.entityId);
     docs.set(normalizeEntityId(entityId), {
       entityId: normalizeEntityId(entityId),
       hash: rootDoc.rootHash,
@@ -797,7 +807,8 @@ export const readAllEntityHashDocs = async (db: RuntimeDbLike): Promise<Map<stri
   }
 
   for await (const key of iterateKeys(db, { prefix: Buffer.from([KEY_LIVE_ENTITY]) })) {
-    const entityId = decodeEntityId(key.subarray(1, 33));
+    if (key.length !== 33) throw new Error(`STORAGE_LIVE_ENTITY_KEY_INVALID:${key.toString('hex')}`);
+    const entityId = decodeEntityId(key.subarray(1));
     const normalized = normalizeEntityId(entityId);
     if (!docs.has(normalized)) {
       await assertNoMerkleSideRowsWithoutRoot(db, normalized);

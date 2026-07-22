@@ -35,6 +35,8 @@ import {
   normalizeEntityId,
   parseLiveAccountKey,
   parseLiveBookKey,
+  parseSnapshotAccountKey,
+  parseSnapshotEntityKey,
   prefixUpperBound,
   textBytes,
 } from './keys';
@@ -507,11 +509,6 @@ const accountPageFromCandidates = (
   };
 };
 
-const parseSnapshotAccountKey = (key: Buffer): { entityId: string; counterpartyId: string } => ({
-  entityId: decodeEntityId(key.subarray(9, 41)),
-  counterpartyId: decodeEntityId(key.subarray(41, 73)),
-});
-
 const keySnapshotAccountCursor = (height: number, entityId: string, counterpartyId: string): Buffer =>
   Buffer.concat([keySnapshotAccountPrefix(height, entityId), hexBytes(counterpartyId)]);
 
@@ -575,6 +572,7 @@ export const findStorageLatestSnapshotAtOrBelow = async (
 export const listStorageLiveEntityIds = async (db: RuntimeDbLike): Promise<string[]> => {
   const ids: string[] = [];
   for await (const key of iterateKeys(db, { prefix: Buffer.from([KEY_LIVE_ENTITY]) })) {
+    if (key.length !== 33) throw new Error(`STORAGE_LIVE_ENTITY_KEY_INVALID:${key.toString('hex')}`);
     ids.push(decodeEntityId(key.subarray(1, 33)));
   }
   return ids;
@@ -588,7 +586,9 @@ export const listStorageSnapshotEntityIds = async (
   if (targetHeight <= 0) return [];
   const ids: string[] = [];
   for await (const key of iterateKeys(db, { prefix: keySnapshotEntityPrefix(targetHeight) })) {
-    ids.push(decodeEntityId(key.subarray(9, 41)));
+    const parsed = parseSnapshotEntityKey(key);
+    if (parsed.height !== targetHeight) throw new Error(`STORAGE_SNAPSHOT_ENTITY_HEIGHT_MISMATCH:${parsed.height}:${targetHeight}`);
+    ids.push(parsed.entityId);
   }
   return ids;
 };
@@ -657,8 +657,8 @@ const loadSnapshotDocsForEntity = async (db: RuntimeDbLike, snapshotHeight: numb
   }
 
   for await (const key of iterateKeys(db, { prefix: keySnapshotAccountPrefix(snapshotHeight, entityId) })) {
-    const entity = decodeEntityId(key.subarray(9, 41));
-    const counterparty = decodeEntityId(key.subarray(41, 73));
+    const { height: keyHeight, entityId: entity, counterpartyId: counterparty } = parseSnapshotAccountKey(key);
+    if (keyHeight !== snapshotHeight) throw new Error(`STORAGE_SNAPSHOT_ACCOUNT_HEIGHT_MISMATCH:${keyHeight}:${snapshotHeight}`);
     const value = assertStorageAccountDocBinding(
       decodeValidatedBuffer(await db.get(key), validateStorageAccountDocValue),
       entity,
@@ -695,7 +695,8 @@ const loadSnapshotDocsAtHeight = async (
   if (snapshotHeight <= 0) return docs;
 
   for await (const key of iterateKeys(db, { prefix: keySnapshotEntityPrefix(snapshotHeight) })) {
-    const entityId = decodeEntityId(key.subarray(9, 41));
+    const { height: keyHeight, entityId } = parseSnapshotEntityKey(key);
+    if (keyHeight !== snapshotHeight) throw new Error(`STORAGE_SNAPSHOT_ENTITY_HEIGHT_MISMATCH:${keyHeight}:${snapshotHeight}`);
     const value = assertStorageEntityDocBinding(
       decodeValidatedBuffer(await db.get(key), validateStorageEntityCoreDocValue),
       entityId,

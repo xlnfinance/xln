@@ -15,8 +15,28 @@ import {
 import {
   KEY_FRAME_DB_HEAD,
   STORAGE_SCHEMA_VERSION,
+  decodeEntityId,
+  hexBytes,
+  keyCertifiedBoardNode,
   keyFrameDbAccountFrame,
+  keyFrameDbAccountFrameByRuntime,
+  keyFrameDbEntityFrame,
+  keyFrameDbEntityFrameByRuntime,
   keyFrameDbRuntimeActivity,
+  keyLiveAccount,
+  keyLiveBook,
+  keyLiveEntity,
+  keyLiveReplicaMeta,
+  keySnapshotAccountPrefix,
+  keySnapshotEntity,
+  parseFrameDbAccountFrameKey,
+  parseFrameDbAccountFrameRuntimeIndexKey,
+  parseFrameDbEntityFrameKey,
+  parseFrameDbEntityFrameRuntimeIndexKey,
+  parseLiveAccountKey,
+  parseLiveBookKey,
+  parseSnapshotAccountKey,
+  parseSnapshotEntityKey,
 } from '../storage/keys';
 import type { RuntimeFrameDbLike, StorageRuntimeConfig } from '../storage/types';
 import {
@@ -119,6 +139,66 @@ afterEach(() => {
 });
 
 describe('canonical binary codec', () => {
+  test('storage keys require exact entity, hash, and signer hex widths', () => {
+    const valid32 = `0x${'ab'.repeat(32)}`;
+    const validSigner = `0x${'cd'.repeat(20)}`;
+    expect(keyLiveEntity(valid32)).toHaveLength(33);
+    expect(keyCertifiedBoardNode(valid32)).toHaveLength(33);
+    expect(keyLiveReplicaMeta(valid32, validSigner)).toHaveLength(65);
+    expect(decodeEntityId(Uint8Array.from({ length: 32 }, () => 0xab))).toBe(valid32);
+
+    for (const invalid of [
+      `0x${'a'.repeat(63)}`,
+      `0x${'a'.repeat(62)}`,
+      `0x${'a'.repeat(66)}`,
+      `0x${'g'.repeat(64)}`,
+      'ab'.repeat(32),
+    ]) {
+      expect(() => keyLiveEntity(invalid), invalid).toThrow('STORAGE_HEX_32_INVALID');
+      expect(() => keyCertifiedBoardNode(invalid), invalid).toThrow('STORAGE_HEX_32_INVALID');
+    }
+    for (const invalidSigner of [
+      `0x${'a'.repeat(39)}`,
+      `0x${'a'.repeat(42)}`,
+      `0x${'g'.repeat(40)}`,
+      'ab'.repeat(20),
+    ]) {
+      expect(() => keyLiveReplicaMeta(valid32, invalidSigner), invalidSigner)
+        .toThrow('STORAGE_SIGNER_HEX_20_INVALID');
+    }
+    expect(() => decodeEntityId(Uint8Array.from({ length: 31 }))).toThrow(
+      'STORAGE_ENTITY_ID_BYTES_INVALID:31',
+    );
+    expect(() => decodeEntityId(Uint8Array.from({ length: 33 }))).toThrow(
+      'STORAGE_ENTITY_ID_BYTES_INVALID:33',
+    );
+  });
+
+  test('all fixed-width storage key parsers reject wrong tags, truncation, and trailing bytes', () => {
+    const validKeys: Array<[Buffer, (key: Buffer) => unknown]> = [
+      [keyLiveAccount(entityId, counterpartyId), parseLiveAccountKey],
+      [keyFrameDbEntityFrame(entityId, 7), parseFrameDbEntityFrameKey],
+      [keyFrameDbEntityFrameByRuntime(8, entityId, 7), parseFrameDbEntityFrameRuntimeIndexKey],
+      [keyFrameDbAccountFrame(entityId, counterpartyId, 7), parseFrameDbAccountFrameKey],
+      [keyFrameDbAccountFrameByRuntime(8, entityId, counterpartyId, 7), parseFrameDbAccountFrameRuntimeIndexKey],
+      [keySnapshotEntity(8, entityId), parseSnapshotEntityKey],
+      [Buffer.concat([keySnapshotAccountPrefix(8, entityId), hexBytes(counterpartyId)]), parseSnapshotAccountKey],
+    ];
+    for (const [key, parse] of validKeys) {
+      expect(() => parse(key)).not.toThrow();
+      expect(() => parse(key.subarray(0, key.length - 1))).toThrow();
+      expect(() => parse(Buffer.concat([key, Buffer.from([0])]))).toThrow();
+      const wrongTag = Buffer.from(key);
+      wrongTag[0] = 0xff;
+      expect(() => parse(wrongTag)).toThrow();
+    }
+
+    const bookKey = keyLiveBook(entityId, 'ethereum:2/tron:1');
+    expect(parseLiveBookKey(bookKey).pairId).toBe('ethereum:2/tron:1');
+    expect(() => parseLiveBookKey(bookKey.subarray(0, bookKey.length - 1))).toThrow();
+    expect(() => parseLiveBookKey(Buffer.concat([bookKey, Buffer.from([0])]))).toThrow();
+  });
+
   test('explicit rebuildable-cache writes do not request an fsync', async () => {
     let observed: { sync?: boolean } | undefined = { sync: true };
     await writeBatch({

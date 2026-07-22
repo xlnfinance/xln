@@ -280,6 +280,36 @@ export type CrossMarketOffer = {
   makerId: string;
 };
 
+/**
+ * Cross-j has one price-improvement lane: unused source returns to the buyer.
+ * Settlement therefore always uses the ask, independent of arrival order.
+ * Generic maker-price settlement would pay an unsupported target-side bonus
+ * whenever a bid rests first and would make the two bilateral legs diverge.
+ */
+export const resolveCrossJurisdictionExecutionPriceTicks = (
+  first: CrossMarketOffer,
+  second: CrossMarketOffer,
+): bigint => {
+  if (
+    first.pairId !== second.pairId ||
+    first.baseTokenId !== second.baseTokenId ||
+    first.quoteTokenId !== second.quoteTokenId
+  ) {
+    throw new Error(`CROSS_J_TRADE_PAIR_MISMATCH:${first.pairId}:${second.pairId}`);
+  }
+  if (first.side === second.side) {
+    throw new Error(`CROSS_J_TRADE_SIDE_MISMATCH:${first.side}:${second.side}`);
+  }
+  const sell = first.side === 1 ? first : second;
+  const buy = first.side === 0 ? first : second;
+  if (sell.priceTicks <= 0n || buy.priceTicks <= 0n || sell.priceTicks > buy.priceTicks) {
+    throw new Error(
+      `CROSS_J_TRADE_PRICE_NOT_CROSSED:ask=${sell.priceTicks.toString()}:bid=${buy.priceTicks.toString()}`,
+    );
+  }
+  return sell.priceTicks;
+};
+
 export type CrossOrderbookFill = {
   filledLots: bigint;
   weightedCost: bigint;

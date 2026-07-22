@@ -78,12 +78,29 @@ export const ZERO_FRAME_HASH = `0x${'00'.repeat(32)}`;
 
 export const normalizeEntityId = (value: string): string => String(value || '').toLowerCase();
 
-export const hexBytes = (value: string): Buffer => {
-  const hex = normalizeEntityId(value).replace(/^0x/, '');
-  return Buffer.from(hex.padStart(64, '0'), 'hex');
+const exactHexBytes = (value: string, byteLength: number, code: string): Buffer => {
+  const raw = String(value);
+  const pattern = new RegExp(`^0x[0-9a-fA-F]{${byteLength * 2}}$`);
+  if (!pattern.test(raw)) throw new Error(`${code}:${raw}`);
+  return Buffer.from(raw.slice(2), 'hex');
 };
 
-export const decodeEntityId = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString('hex')}`;
+export const hexBytes = (value: string): Buffer => {
+  return exactHexBytes(value, 32, 'STORAGE_HEX_32_INVALID');
+};
+
+const signerKeyBytes = (value: string): Buffer =>
+  Buffer.concat([Buffer.alloc(12), exactHexBytes(value, 20, 'STORAGE_SIGNER_HEX_20_INVALID')]);
+
+export const decodeEntityId = (bytes: Uint8Array): string => {
+  if (bytes.byteLength !== 32) throw new Error(`STORAGE_ENTITY_ID_BYTES_INVALID:${bytes.byteLength}`);
+  return `0x${Buffer.from(bytes).toString('hex')}`;
+};
+
+export const decodeTaggedStorageHash = (key: Buffer, tag: number, code: string): string => {
+  if (key.length !== 33 || key[0] !== tag) throw new Error(`${code}:${key.toString('hex')}`);
+  return decodeEntityId(key.subarray(1));
+};
 
 export const encodeHeight = (height: number): Buffer => {
   const out = Buffer.allocUnsafe(8);
@@ -91,7 +108,19 @@ export const encodeHeight = (height: number): Buffer => {
   return out;
 };
 
-export const decodeHeight = (buffer: Buffer, offset = 1): number => Number(buffer.readBigUInt64BE(offset));
+export const decodeHeight = (buffer: Buffer, offset = 1): number => {
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset + 8 > buffer.length) {
+    throw new Error(`STORAGE_HEIGHT_KEY_TRUNCATED:offset=${offset}:length=${buffer.length}`);
+  }
+  const raw = buffer.readBigUInt64BE(offset);
+  if (raw > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error(`STORAGE_HEIGHT_KEY_UNSAFE:${raw.toString()}`);
+  return Number(raw);
+};
+
+export const decodeTaggedStorageHeight = (key: Buffer, tag: number, code: string): number => {
+  if (key.length !== 9 || key[0] !== tag) throw new Error(`${code}:${key.toString('hex')}`);
+  return decodeHeight(key);
+};
 
 export const textBytes = (value: string): Buffer => {
   const raw = Buffer.from(value, 'utf8');
@@ -128,7 +157,7 @@ export const keyLiveReplicaMetaPrefix = (entityId?: string): Buffer =>
     : Buffer.from([KEY_LIVE_REPLICA_META]);
 
 export const keyLiveReplicaMeta = (entityId: string, signerId: string): Buffer =>
-  Buffer.concat([keyLiveReplicaMetaPrefix(entityId), hexBytes(signerId)]);
+  Buffer.concat([keyLiveReplicaMetaPrefix(entityId), signerKeyBytes(signerId)]);
 
 export const keyCertifiedBoardNode = (hash: string): Buffer =>
   Buffer.concat([Buffer.from([KEY_CERTIFIED_BOARD_NODE]), hexBytes(hash)]);
@@ -213,6 +242,16 @@ export const keyFrameDbEntityFramePrefix = (entityId?: string): Buffer =>
     ? Buffer.concat([Buffer.from([FRAME_DB_ENTITY_FRAME]), hexBytes(entityId)])
     : Buffer.from([FRAME_DB_ENTITY_FRAME]);
 
+export const parseFrameDbEntityFrameKey = (key: Buffer): { entityId: string; entityHeight: number } => {
+  if (key.length !== 41 || key[0] !== FRAME_DB_ENTITY_FRAME) {
+    throw new Error(`STORAGE_FRAME_DB_ENTITY_KEY_INVALID:${key.toString('hex')}`);
+  }
+  return {
+    entityId: decodeEntityId(key.subarray(1, 33)),
+    entityHeight: decodeHeight(key, 33),
+  };
+};
+
 export const keyFrameDbEntityFrameByRuntime = (
   runtimeHeight: number,
   entityId: string,
@@ -231,11 +270,16 @@ export const parseFrameDbEntityFrameRuntimeIndexKey = (key: Buffer): {
   runtimeHeight: number;
   entityId: string;
   entityHeight: number;
-} => ({
-  runtimeHeight: decodeHeight(key, 1),
-  entityId: decodeEntityId(key.subarray(9, 41)),
-  entityHeight: decodeHeight(key, 41),
-});
+} => {
+  if (key.length !== 49 || key[0] !== FRAME_DB_ENTITY_FRAME_BY_RUNTIME) {
+    throw new Error(`STORAGE_FRAME_DB_ENTITY_RUNTIME_KEY_INVALID:${key.toString('hex')}`);
+  }
+  return {
+    runtimeHeight: decodeHeight(key, 1),
+    entityId: decodeEntityId(key.subarray(9, 41)),
+    entityHeight: decodeHeight(key, 41),
+  };
+};
 
 export const keyFrameDbAccountFramePrefix = (entityId?: string, counterpartyId?: string): Buffer => {
   if (entityId && counterpartyId) return Buffer.concat([Buffer.from([FRAME_DB_ACCOUNT_FRAME]), hexBytes(entityId), hexBytes(counterpartyId)]);
@@ -250,22 +294,32 @@ export const parseFrameDbAccountFrameRuntimeIndexKey = (key: Buffer): {
   entityId: string;
   counterpartyId: string;
   accountHeight: number;
-} => ({
-  runtimeHeight: decodeHeight(key, 1),
-  entityId: decodeEntityId(key.subarray(9, 41)),
-  counterpartyId: decodeEntityId(key.subarray(41, 73)),
-  accountHeight: decodeHeight(key, 73),
-});
+} => {
+  if (key.length !== 81 || key[0] !== FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME) {
+    throw new Error(`STORAGE_FRAME_DB_ACCOUNT_RUNTIME_KEY_INVALID:${key.toString('hex')}`);
+  }
+  return {
+    runtimeHeight: decodeHeight(key, 1),
+    entityId: decodeEntityId(key.subarray(9, 41)),
+    counterpartyId: decodeEntityId(key.subarray(41, 73)),
+    accountHeight: decodeHeight(key, 73),
+  };
+};
 
 export const parseFrameDbAccountFrameKey = (key: Buffer): {
   entityId: string;
   counterpartyId: string;
   accountHeight: number;
-} => ({
-  entityId: decodeEntityId(key.subarray(1, 33)),
-  counterpartyId: decodeEntityId(key.subarray(33, 65)),
-  accountHeight: decodeHeight(key, 65),
-});
+} => {
+  if (key.length !== 73 || key[0] !== FRAME_DB_ACCOUNT_FRAME) {
+    throw new Error(`STORAGE_FRAME_DB_ACCOUNT_KEY_INVALID:${key.toString('hex')}`);
+  }
+  return {
+    entityId: decodeEntityId(key.subarray(1, 33)),
+    counterpartyId: decodeEntityId(key.subarray(33, 65)),
+    accountHeight: decodeHeight(key, 65),
+  };
+};
 
 export const keySnapshotEntity = (height: number, entityId: string): Buffer =>
   Buffer.concat([Buffer.from([KEY_SNAPSHOT_ENTITY]), encodeHeight(height), hexBytes(entityId)]);
@@ -293,13 +347,35 @@ export const keySnapshotReplicaMeta = (
   Buffer.from([KEY_SNAPSHOT_REPLICA_META]),
   encodeHeight(height),
   hexBytes(entityId),
-  hexBytes(signerId),
+  signerKeyBytes(signerId),
 ]);
 
 export const keySnapshotReplicaMetaPrefix = (height: number, entityId?: string): Buffer =>
   entityId
     ? Buffer.concat([Buffer.from([KEY_SNAPSHOT_REPLICA_META]), encodeHeight(height), hexBytes(entityId)])
     : Buffer.concat([Buffer.from([KEY_SNAPSHOT_REPLICA_META]), encodeHeight(height)]);
+
+export const parseSnapshotEntityKey = (key: Buffer): { height: number; entityId: string } => {
+  if (key.length !== 41 || key[0] !== KEY_SNAPSHOT_ENTITY) {
+    throw new Error(`STORAGE_SNAPSHOT_ENTITY_KEY_INVALID:${key.toString('hex')}`);
+  }
+  return { height: decodeHeight(key), entityId: decodeEntityId(key.subarray(9, 41)) };
+};
+
+export const parseSnapshotAccountKey = (key: Buffer): {
+  height: number;
+  entityId: string;
+  counterpartyId: string;
+} => {
+  if (key.length !== 73 || key[0] !== KEY_SNAPSHOT_ACCOUNT) {
+    throw new Error(`STORAGE_SNAPSHOT_ACCOUNT_KEY_INVALID:${key.toString('hex')}`);
+  }
+  return {
+    height: decodeHeight(key),
+    entityId: decodeEntityId(key.subarray(9, 41)),
+    counterpartyId: decodeEntityId(key.subarray(41, 73)),
+  };
+};
 
 export const prefixUpperBound = (prefix: Buffer): Buffer | undefined => {
   const out = Buffer.from(prefix);
@@ -312,15 +388,34 @@ export const prefixUpperBound = (prefix: Buffer): Buffer | undefined => {
   return undefined;
 };
 
-export const parseLiveAccountKey = (key: Buffer): { entityId: string; counterpartyId: string } => ({
-  entityId: decodeEntityId(key.subarray(1, 33)),
-  counterpartyId: decodeEntityId(key.subarray(33, 65)),
-});
+export const parseLiveAccountKey = (key: Buffer): { entityId: string; counterpartyId: string } => {
+  if (key.length !== 65 || key[0] !== KEY_LIVE_ACCOUNT) {
+    throw new Error(`STORAGE_LIVE_ACCOUNT_KEY_INVALID:${key.toString('hex')}`);
+  }
+  return {
+    entityId: decodeEntityId(key.subarray(1, 33)),
+    counterpartyId: decodeEntityId(key.subarray(33, 65)),
+  };
+};
 
 export const parseLiveBookKey = (key: Buffer, offset = 1): { entityId: string; pairId: string } => {
+  if (offset === 1 && key[0] !== KEY_LIVE_BOOK) {
+    throw new Error(`STORAGE_LIVE_BOOK_KEY_INVALID:${key.toString('hex')}`);
+  }
+  if (offset === 9 && key[0] !== KEY_SNAPSHOT_BOOK) {
+    throw new Error(`STORAGE_SNAPSHOT_BOOK_KEY_INVALID:${key.toString('hex')}`);
+  }
   const entityId = decodeEntityId(key.subarray(offset, offset + 32));
-  const { value } = readText(key, offset + 32);
+  const { value, nextOffset } = readText(key, offset + 32);
+  if (nextOffset !== key.length) {
+    throw new Error(`STORAGE_BOOK_KEY_TRAILING_BYTES:${key.toString('hex')}`);
+  }
   return { entityId, pairId: value };
 };
 
-export const parseSnapshotManifestHeight = (key: Buffer): number => decodeHeight(key);
+export const parseSnapshotManifestHeight = (key: Buffer): number => {
+  if (key.length !== 9 || key[0] !== KEY_SNAPSHOT_MANIFEST) {
+    throw new Error(`STORAGE_SNAPSHOT_MANIFEST_KEY_INVALID:${key.toString('hex')}`);
+  }
+  return decodeHeight(key);
+};

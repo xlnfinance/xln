@@ -39,12 +39,14 @@ import {
 } from '../radapter/command-frontier';
 import { decodeBuffer, encodeBuffer } from '../storage/codec';
 import { prepareStorageStateHashes } from '../storage/hashes';
+import { verifyLiveStorageIntegrity } from '../storage/live-integrity';
 import {
   KEY_HEAD,
   STORAGE_SCHEMA_VERSION,
   hexBytes,
   keyLiveAccount,
   keyLiveEntity,
+  keyMerkleBranchPrefix,
   keyMerkleLeafPrefix,
   keyMerkleRoot,
   keySnapshotAccountPrefix,
@@ -2800,6 +2802,54 @@ test('storage live recovery can deep verify merkle side records', async () => {
     if (previous === undefined) delete process.env['XLN_STORAGE_VERIFY_MERKLE'];
     else process.env['XLN_STORAGE_VERIFY_MERKLE'] = previous;
   }
+});
+
+test('storage startup verifies live key bindings and the complete materialized merkle tree', async () => {
+  const env = makeEnv();
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  const account = replica.state.accounts.get(counterpartyId)!;
+  const coreDoc = projectEntityCoreDoc(replica.state);
+  const accountDoc = projectAccountDoc(account);
+  const prepared = await prepareStorageStateHashes({
+    db: makeMemoryDb([]),
+    puts: [
+      { family: 'entity', entityId, value: coreDoc },
+      { family: 'account', entityId, counterpartyId, value: accountDoc },
+    ],
+    dels: [],
+  });
+  const entries: Array<[Buffer, Buffer]> = [
+    [keyLiveEntity(entityId), prepared.docValueBuffers.get(`e:${entityId}`)!],
+    [keyLiveAccount(entityId, counterpartyId), prepared.docValueBuffers.get(`a:${entityId}:${counterpartyId}`)!],
+    ...prepared.merklePuts.map((item) => [item.key, item.value] as [Buffer, Buffer]),
+  ];
+
+  await expect(verifyLiveStorageIntegrity(makeMemoryDb(entries))).resolves.toBeUndefined();
+
+  const accountKey = keyLiveAccount(entityId, counterpartyId);
+  const movedAccount = entries.map(([key, value]) => (
+    key.equals(accountKey) ? [Buffer.concat([key, Buffer.from([0])]), value] : [key, value]
+  ) as [Buffer, Buffer]);
+  await expect(verifyLiveStorageIntegrity(makeMemoryDb(movedAccount)))
+    .rejects.toThrow('STORAGE_LIVE_ACCOUNT_KEY_INVALID');
+
+  const leafPrefix = keyMerkleLeafPrefix(entityId, 'runtime-roots');
+  const movedLeaf = entries.map(([key, value]) => (
+    key.subarray(0, leafPrefix.length).equals(leafPrefix)
+      ? [Buffer.concat([key, Buffer.from([0])]), value]
+      : [key, value]
+  ) as [Buffer, Buffer]);
+  await expect(verifyLiveStorageIntegrity(makeMemoryDb(movedLeaf)))
+    .rejects.toThrow('STORAGE_MERKLE_LEAF_KEY_MISMATCH');
+
+  const branchPrefix = keyMerkleBranchPrefix(entityId, 'runtime-roots');
+  const corruptBranch = entries.map(([key, value]) => {
+    if (!key.subarray(0, branchPrefix.length).equals(branchPrefix)) return [key, value] as [Buffer, Buffer];
+    const branch = decodeBuffer<Record<string, unknown>>(value);
+    return [key, encodeBuffer({ ...branch, hash: `0x${'ff'.repeat(32)}` })] as [Buffer, Buffer];
+  });
+  await expect(verifyLiveStorageIntegrity(makeMemoryDb(corruptBranch)))
+    .rejects.toThrow('STORAGE_MERKLE_BRANCH_MISMATCH');
 });
 
 test('runtime adapter account pagination avoids full sort materialization', async () => {

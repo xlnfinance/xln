@@ -9,6 +9,7 @@ import {
   toFrameEntityHashes,
 } from './hashes';
 import { readSnapshotDocs } from './lifecycle';
+import { verifyLiveStorageIntegrity } from './live-integrity';
 import {
   KEY_LIVE_REPLICA_META,
   STORAGE_VERIFY_TAIL_FRAMES,
@@ -130,6 +131,7 @@ export const verifyStorageTailIntegrity = async (
   const head = await readStorageHead(db);
   if (!head || head.latestHeight <= 0) return { latestHeight: 0, checkedFrames: 0 };
   const latestHeight = Math.max(0, Math.floor(Number(head.latestHeight)));
+  await verifyLiveStorageIntegrity(db);
   await verifyStorageSnapshotIntegrity(db, head);
   const tailFrames = Math.max(1, Math.floor(Number(options.tailFrames ?? STORAGE_VERIFY_TAIL_FRAMES)));
   const snapshotHeight = Math.max(0, Math.floor(Number(head.latestSnapshotHeight ?? 0)));

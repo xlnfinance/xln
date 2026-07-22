@@ -15,6 +15,7 @@ import {
   buildCrossJurisdictionMarketOffer,
   buildCrossJurisdictionFillAck,
   crossJurisdictionBookAdmissionKeyFor,
+  resolveCrossJurisdictionExecutionPriceTicks,
   type CrossJurisdictionFillInstruction,
   type CrossMarketOffer,
 } from '../../../../extensions/cross-j/orderbook';
@@ -402,7 +403,24 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
     }
 
     const rejectEvents = rejectEventsForOrder(result.events, currentNamespacedOrderId);
-    const tradeEvents = collectTradeEvents(result.events);
+    const rawTradeEvents = collectTradeEvents(result.events);
+    const tradeEvents = rawTradeEvents.map(event => {
+      const makerMeta = crossLiveOfferMeta.get(event.makerOrderId)
+        ?? buildCrossMarketOfferFromBookOrder(hubState, event.makerOrderId);
+      const takerMeta = crossLiveOfferMeta.get(event.takerOrderId)
+        ?? buildCrossMarketOfferFromBookOrder(hubState, event.takerOrderId);
+      if (!makerMeta || !takerMeta) {
+        throw new Error(
+          `ORDERBOOK_CROSS_J_TRADE_META_MISSING:maker=${event.makerOrderId}:taker=${event.takerOrderId}`,
+        );
+      }
+      crossLiveOfferMeta.set(event.makerOrderId, makerMeta);
+      crossLiveOfferMeta.set(event.takerOrderId, takerMeta);
+      return {
+        ...event,
+        price: resolveCrossJurisdictionExecutionPriceTicks(makerMeta, takerMeta),
+      };
+    });
     if (rejectEvents.length > 0 && tradeEvents.length === 0) {
       rejectInvalidCrossOffer(
         currentAccountId,

@@ -22,13 +22,14 @@ import {
   assertStorageSchemaVersion,
   decodeHeight,
   encodeHeight,
-  decodeEntityId,
   keySnapshotAccountPrefix,
   keySnapshotBookPrefix,
   keySnapshotEntityPrefix,
   keySnapshotManifest,
   keySnapshotReplicaMetaPrefix,
   parseLiveBookKey,
+  parseSnapshotAccountKey,
+  parseSnapshotEntityKey,
   parseSnapshotManifestHeight,
 } from './keys';
 import type {
@@ -55,7 +56,8 @@ export const readSnapshotDocs = async (
 ): Promise<StorageDoc[]> => {
   const docs: StorageDoc[] = [];
   for await (const key of iterateKeys(db, { prefix: keySnapshotEntityPrefix(height) })) {
-    const entityId = decodeEntityId(key.subarray(9, 41));
+    const { height: keyHeight, entityId } = parseSnapshotEntityKey(key);
+    if (keyHeight !== height) throw new Error(`STORAGE_SNAPSHOT_ENTITY_HEIGHT_MISMATCH:${keyHeight}:${height}`);
     docs.push({
       family: 'entity',
       entityId,
@@ -67,8 +69,8 @@ export const readSnapshotDocs = async (
     });
   }
   for await (const key of iterateKeys(db, { prefix: keySnapshotAccountPrefix(height) })) {
-    const entityId = decodeEntityId(key.subarray(9, 41));
-    const counterpartyId = decodeEntityId(key.subarray(41, 73));
+    const { height: keyHeight, entityId, counterpartyId } = parseSnapshotAccountKey(key);
+    if (keyHeight !== height) throw new Error(`STORAGE_SNAPSHOT_ACCOUNT_HEIGHT_MISMATCH:${keyHeight}:${height}`);
     docs.push({
       family: 'account',
       entityId,

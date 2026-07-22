@@ -27,11 +27,22 @@ const hashCanonical = (value: unknown): string =>
 const compareCanonical = (left: unknown, right: unknown): number =>
   compareStableText(JSON.stringify(left), JSON.stringify(right));
 
-export const canonicalizeStorageAuditValue = (value: unknown, stack: object[] = []): unknown => {
-  if (value === null || value === undefined) return null;
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+const unsupportedAuditValue = (path: string, detail: string): never => {
+  throw new Error(`STORAGE_AUDIT_HASH_UNSUPPORTED:path=${path}:detail=${detail}`);
+};
+
+const canonicalizeStorageAuditValueAt = (value: unknown, stack: object[], path: string): unknown => {
+  if (value === null) return null;
+  if (value === undefined) return unsupportedAuditValue(path, 'type=undefined');
+  if (typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return unsupportedAuditValue(path, `number=${String(value)}`);
+    return value;
+  }
   if (typeof value === 'bigint') return { __xlnType: 'BigInt', value: value.toString() };
-  if (typeof value === 'function' || typeof value === 'symbol') return null;
+  if (typeof value === 'function' || typeof value === 'symbol') {
+    return unsupportedAuditValue(path, `type=${typeof value}`);
+  }
   if (value instanceof Date) return { __xlnType: 'Date', value: value.toISOString() };
   if (typeof Buffer !== 'undefined' && Buffer.isBuffer(value)) {
     return { __xlnType: 'Buffer', value: value.toString('hex') };
@@ -47,12 +58,15 @@ export const canonicalizeStorageAuditValue = (value: unknown, stack: object[] = 
   }
 
   const objectRef = value as object;
-  if (stack.includes(objectRef)) return null;
+  if (stack.includes(objectRef)) return unsupportedAuditValue(path, 'cycle');
   stack.push(objectRef);
   try {
     if (value instanceof Map) {
       const entries = Array.from(value.entries())
-        .map(([key, entryValue]) => [canonicalizeStorageAuditValue(key, stack), canonicalizeStorageAuditValue(entryValue, stack)] as const)
+        .map(([key, entryValue], index) => [
+          canonicalizeStorageAuditValueAt(key, stack, `${path}.map[${index}].key`),
+          canonicalizeStorageAuditValueAt(entryValue, stack, `${path}.map[${index}].value`),
+        ] as const)
         .sort((left, right) => {
           const byKey = compareCanonical(left[0], right[0]);
           return byKey !== 0 ? byKey : compareCanonical(left[1], right[1]);
@@ -63,25 +77,31 @@ export const canonicalizeStorageAuditValue = (value: unknown, stack: object[] = 
     if (value instanceof Set) {
       return {
         __xlnType: 'Set',
-        value: Array.from(value.values()).map((entry) => canonicalizeStorageAuditValue(entry, stack)).sort(compareCanonical),
+        value: Array.from(value.values())
+          .map((entry, index) => canonicalizeStorageAuditValueAt(entry, stack, `${path}.set[${index}]`))
+          .sort(compareCanonical),
       };
     }
 
-    if (Array.isArray(value)) return value.map((entry) => canonicalizeStorageAuditValue(entry, stack));
+    if (Array.isArray(value)) {
+      return value.map((entry, index) => canonicalizeStorageAuditValueAt(entry, stack, `${path}[${index}]`));
+    }
 
     const record = value as Record<string, unknown>;
     const out: Record<string, unknown> = {};
     for (const key of Object.keys(record)
       .filter((entryKey) => !VOLATILE_FIELDS.has(entryKey))
       .sort(compareStableText)) {
-      if (record[key] === undefined) continue;
-      out[key] = canonicalizeStorageAuditValue(record[key], stack);
+      out[key] = canonicalizeStorageAuditValueAt(record[key], stack, `${path}.${key}`);
     }
     return out;
   } finally {
     stack.pop();
   }
 };
+
+export const canonicalizeStorageAuditValue = (value: unknown): unknown =>
+  canonicalizeStorageAuditValueAt(value, [], '$');
 
 export const computeCanonicalEntityHash = (replica: EntityReplica): CanonicalFrameEntityHash => {
   const entityId = normalizeEntityId(replica.entityId || replica.state?.entityId || '');

@@ -77,13 +77,13 @@ An audit claim is not accepted until reproduced against the current candidate.
 
 All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
 
-- [ ] Freeze valid key/hash/Merkle golden vectors before changes.
-- [ ] Strict 32-byte codecs for Entity IDs and hashes; reject odd, truncated,
+- [x] Freeze valid key/hash/Merkle golden vectors before changes.
+- [x] Strict 32-byte codecs for Entity IDs and hashes; reject odd, truncated,
   overlong and non-hex input; validate every parsed prefix and exact key length.
-- [ ] Canonical audit hash must reject NaN, Infinity, functions, symbols,
+- [x] Canonical audit hash must reject NaN, Infinity, functions, symbols,
   cycles and ambiguous undefined values instead of mapping them to `null`.
-- [ ] Duplicate normalized Merkle keys must throw; no last-write-wins.
-- [ ] On load, validate LevelDB key <-> namespace/entity/path, recompute leaf,
+- [x] Duplicate normalized Merkle keys must throw; no last-write-wins.
+- [x] On load, validate LevelDB key <-> namespace/entity/path, recompute leaf,
   edge, branch and root hashes, and reject any persisted mismatch before HEAD.
 - [ ] Verify frame replay against an independently computed post-state
   commitment at the first divergent height; forbid expected=actual tautology.
@@ -113,6 +113,27 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
 - [ ] Add a minimal deterministic SimNetwork/SimStorage harness for seeded
   delay/reorder/drop/partial-write/kill, asserting bilateral delta conservation,
   replay==live and no double HTLC resolution. Preserve every red seed.
+
+## Worktree integration audit
+
+- [x] Audit `ai/input-only-wal` (`54bc6e955`) without wholesale cherry-pick.
+  Its input-only frame format removes the current per-frame independent
+  post-state oracle and is incompatible with the one-format mainnet candidate.
+- [x] Reject its standalone `exclude pending ingress from checkpoints` patch:
+  it is valid only after input-only WAL can replay that queue; on the current
+  full checkpoint it would lose accepted, unprocessed ingress after restart.
+- [x] Verify its signer-startup fix is superseded: Hub/MM pass every signer
+  label into `main({localSigners})`, which derives/registers them before storage
+  replay. Do not restore the delayed prewarm path.
+- [x] Verify its payment fan-out, rebalance no-op fee, J-input budget, cross-j
+  dust and paired-ACK conservation fixes are present in the current design with
+  stricter bounds and current tests; do not resurrect removed legacy fields.
+- [x] Port and prove its remaining resting-bid/taker-sell execution-price fix
+  after owner confirmation: current protocol exposes only `source_savings`, so
+  both legs must use the ask/sell price regardless of arrival order.
+- [x] Audit and reject `ai/instant-swap` sparse canonical hashes (`4ae4abeae`):
+  omitting the independent post-state hash on intermediate frames weakens exact
+  divergence localization. Keep performance work behind differential proof.
 
 ## P1 — runtime operational correctness
 

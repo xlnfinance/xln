@@ -284,6 +284,12 @@ export const buildRadixMerkleMaterialized = (
   const deduped = new Map<string, MerkleItem>();
   for (const leaf of leaves) {
     const keyHex = bytesToHex(leaf.key);
+    if (deduped.has(keyHex)) {
+      // Callers construct authoritative leaves from independently normalized
+      // storage paths. Last-write-wins would hide a namespace/key collision
+      // and make the committed root depend on input order.
+      throw new Error(`RADIX_MERKLE_DUPLICATE_KEY:${keyHex}`);
+    }
     deduped.set(keyHex, {
       keyHex,
       key: leaf.key,

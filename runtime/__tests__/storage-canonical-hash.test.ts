@@ -1,6 +1,10 @@
 import { expect, test } from 'bun:test';
 
-import { computeCanonicalEntityHash, computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
+import {
+  canonicalizeStorageAuditValue,
+  computeCanonicalEntityHash,
+  computeCanonicalStateHashFromEnv,
+} from '../storage/canonical-hash';
 import { computeStorageFrameHash } from '../storage/hashes';
 import { encodeBuffer } from '../storage/codec';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
@@ -26,6 +30,7 @@ const makeAccount = (frameStateHash: string): AccountMachine =>
     leftEntity: entityId,
     rightEntity: counterpartyId,
     domain: { chainId: 31337, depositoryAddress: `0x${'de'.repeat(20)}` },
+    watchSeed: `0x${'ac'.repeat(32)}`,
     status: 'active',
     mempool: [],
     currentFrame: {
@@ -150,6 +155,22 @@ test('canonical storage hash is deterministic across Map insertion order', () =>
   const left = computeCanonicalStateHashFromEnv(makeEnv(makeAccount('history-a'), [[2, 20n], [1, 10n]]));
   const right = computeCanonicalStateHashFromEnv(makeEnv(makeAccount('history-a'), [[1, 10n], [2, 20n]]));
   expect(left).toBe(right);
+});
+
+test('canonical storage audit values reject ambiguous or lossy JavaScript values', () => {
+  const cyclic: Record<string, unknown> = {};
+  cyclic['self'] = cyclic;
+  for (const [label, value] of [
+    ['undefined', { value: undefined }],
+    ['NaN', { value: Number.NaN }],
+    ['Infinity', { value: Number.POSITIVE_INFINITY }],
+    ['function', { value: () => 1 }],
+    ['symbol', { value: Symbol('audit') }],
+    ['cycle', cyclic],
+  ] as const) {
+    expect(() => canonicalizeStorageAuditValue(value), label)
+      .toThrow('STORAGE_AUDIT_HASH_UNSUPPORTED');
+  }
 });
 
 test('storage frame integrity commits every named runtime-machine field', () => {

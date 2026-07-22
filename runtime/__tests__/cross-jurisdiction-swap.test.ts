@@ -67,6 +67,7 @@ import {
   buildCrossJurisdictionMarketOffer,
   getCrossJurisdictionRouteRemainingAmounts,
   mergeCrossJurisdictionBookAdmission,
+  resolveCrossJurisdictionExecutionPriceTicks,
 } from '../extensions/cross-j/orderbook';
 import { buildCrossJurisdictionPendingFillFromAck } from '../extensions/cross-j/fill-ack';
 import { committedCrossJSourceDisputeDelayMs } from '../extensions/cross-j/prepared-route';
@@ -3144,6 +3145,105 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(closed?.resolves.at(-1)?.cancelRemainder).toBe(true);
     expect(closed?.resolves.at(-1)?.fillNumerator).toBe(cumulative);
     expect(closed?.resolves.at(-1)?.fillDenominator).toBe(2n * lot);
+  });
+
+  test('cross-j settles a resting bid and taker sell at the ask so both legs conserve', () => {
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const tron = makeJurisdiction('Tron', 728126428, '21', '22');
+    const sourceUser = entity('91');
+    const sourceHub = entity('92');
+    const targetHub = entity('93');
+    const targetUser = entity('94');
+    const baseAmount = SWAP_LOT_SCALE;
+    const askQuoteAmount = 24_900_000n;
+    const bidQuoteAmount = 25_000_000n;
+
+    const sellRoute = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-taker-sell-at-ask',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      bookOwnerEntityId: sourceHub,
+      source: {
+        jurisdiction: jref(eth), entityId: sourceUser,
+        counterpartyEntityId: sourceHub, tokenId: 2, amount: baseAmount,
+      },
+      target: {
+        jurisdiction: jref(tron), entityId: targetHub,
+        counterpartyEntityId: targetUser, tokenId: 1, amount: askQuoteAmount,
+      },
+      priceImprovementMode: 'source_savings',
+      status: 'resting', createdAt: 1_000, updatedAt: 1_000, expiresAt: 61_000,
+    }, { runtimeSeed: 'cross-taker-sell-at-ask-seed', sourceDisputeDelayMs: 5_000, now: 1_000 });
+    const buyRoute = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-resting-bid-at-ask',
+      makerEntityId: targetUser,
+      hubEntityId: targetHub,
+      bookOwnerEntityId: sourceHub,
+      source: {
+        jurisdiction: jref(tron), entityId: targetUser,
+        counterpartyEntityId: targetHub, tokenId: 1, amount: bidQuoteAmount,
+      },
+      target: {
+        jurisdiction: jref(eth), entityId: sourceHub,
+        counterpartyEntityId: sourceUser, tokenId: 2, amount: baseAmount,
+      },
+      priceImprovementMode: 'source_savings',
+      status: 'resting', createdAt: 1_000, updatedAt: 1_000, expiresAt: 61_000,
+    }, { runtimeSeed: 'cross-resting-bid-at-ask-seed', sourceDisputeDelayMs: 5_000, now: 1_000 });
+    const sellMeta = buildCrossJurisdictionMarketOffer({
+      offerId: sellRoute.orderId,
+      accountId: 'sell-account',
+      makerIsLeft: false,
+      fromEntity: sourceHub,
+      toEntity: sourceUser,
+      createdHeight: 1,
+      giveTokenId: 2,
+      giveAmount: baseAmount,
+      quantizedGive: baseAmount,
+      wantTokenId: 1,
+      wantAmount: askQuoteAmount,
+      quantizedWant: askQuoteAmount,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 0n,
+      crossJurisdiction: { ...sellRoute, status: 'resting' as const },
+    }, sourceHub);
+    const buyMeta = buildCrossJurisdictionMarketOffer({
+      offerId: buyRoute.orderId,
+      accountId: 'buy-account',
+      makerIsLeft: false,
+      fromEntity: targetHub,
+      toEntity: targetUser,
+      createdHeight: 1,
+      giveTokenId: 1,
+      giveAmount: bidQuoteAmount,
+      quantizedGive: bidQuoteAmount,
+      wantTokenId: 2,
+      wantAmount: baseAmount,
+      quantizedWant: baseAmount,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 0n,
+      crossJurisdiction: { ...buyRoute, status: 'resting' as const },
+    }, sourceHub);
+
+    expect(sellMeta).not.toBeNull();
+    expect(buyMeta).not.toBeNull();
+    const executionPrice = resolveCrossJurisdictionExecutionPriceTicks(buyMeta!, sellMeta!);
+    expect(executionPrice).toBe(sellMeta!.priceTicks);
+    const fill = { filledLots: 1n, weightedCost: executionPrice };
+    const sellAck = buildCrossJurisdictionFillAck(
+      'sell-account', sellRoute.orderId, `sell-account:${sellRoute.orderId}`, sellMeta!, fill,
+    );
+    const buyAck = buildCrossJurisdictionFillAck(
+      'buy-account', buyRoute.orderId, `buy-account:${buyRoute.orderId}`, buyMeta!, fill,
+    );
+
+    expect(sellAck?.instruction.executionSourceAmount).toBe(baseAmount);
+    expect(sellAck?.instruction.executionTargetAmount).toBe(askQuoteAmount);
+    expect(buyAck?.instruction.executionSourceAmount).toBe(askQuoteAmount);
+    expect(buyAck?.instruction.executionTargetAmount).toBe(baseAmount);
+    expect(buyAck?.instruction.priceImprovementAmount).toBe(bidQuoteAmount - askQuoteAmount);
   });
 
   test('cross-j source-savings fill ack uses target progress, not improved source spend', () => {

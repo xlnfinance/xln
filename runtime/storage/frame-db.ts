@@ -21,6 +21,7 @@ import {
   normalizeEntityId,
   parseFrameDbAccountFrameKey,
   parseFrameDbAccountFrameRuntimeIndexKey,
+  parseFrameDbEntityFrameKey,
   parseFrameDbEntityFrameRuntimeIndexKey,
 } from './keys';
 import {
@@ -489,7 +490,11 @@ export const readFrameDbEntityFrames = async (
     : { prefix, reverse: true };
   const records: StoredEntityFrameRecord[] = [];
   for await (const key of iterateKeys(db, range)) {
-    const entityHeight = Number(key.readBigUInt64BE(33));
+    const parsed = parseFrameDbEntityFrameKey(key);
+    if (normalizeEntityId(parsed.entityId) !== normalizeEntityId(entityId)) {
+      throw new Error(`FRAME_DB_ENTITY_FRAME_KEY_BINDING_MISMATCH:${parsed.entityId}:${entityId}`);
+    }
+    const entityHeight = parsed.entityHeight;
     if (entityHeight > maxEntityHeight) continue;
     const value = decodeValidatedBuffer(await db.get(key), decoded =>
       validateStoredEntityFrameValue(decoded, entityHeight));

@@ -59,10 +59,14 @@ import {
   KEY_MERKLE_BRANCH,
   KEY_MERKLE_LEAF,
   KEY_MERKLE_ROOT,
+  KEY_CERTIFIED_BOARD_NODE,
+  KEY_CONSUMPTION_NODE,
+  KEY_ACCOUNT_J_CLAIM_NODE,
   STORAGE_SCHEMA_VERSION,
   ZERO_FRAME_HASH,
   decodeEntityId,
-  decodeHeight,
+  decodeTaggedStorageHash,
+  decodeTaggedStorageHeight,
   keyDiff,
   keyFrame,
   keyLiveReplicaMetaPrefix,
@@ -448,7 +452,7 @@ const synchronizeConsumptionNodes = async (
   const authoritative = new Map<string, ConsumptionNode>();
   const authoritativeValues = new Map<string, Buffer>();
   for await (const key of iterateKeys(historyDb, { prefix: keyConsumptionNodePrefix() })) {
-    const hash = `0x${key.subarray(1).toString('hex')}`;
+    const hash = decodeTaggedStorageHash(key, KEY_CONSUMPTION_NODE, 'STORAGE_CONSUMPTION_NODE_KEY_INVALID');
     const value = await historyDb.get(key);
     const node = decodeValidatedBuffer(value, validateConsumptionNodeValue);
     const actual = hashConsumptionNode(node);
@@ -520,7 +524,9 @@ const collectCertifiedBoardHistoryRoots = async (
   }
   for await (const key of iterateKeys(historyDb, { prefix: Buffer.from([KEY_DIFF]) })) {
     const diff = decodeValidatedBuffer(await historyDb.get(key), validateStorageDiffRecordValue);
-    if (diff.height !== decodeHeight(key)) throw new Error('STORAGE_DIFF_KEY_HEIGHT_MISMATCH:scope=board-gc');
+    if (diff.height !== decodeTaggedStorageHeight(key, KEY_DIFF, 'STORAGE_DIFF_KEY_INVALID')) {
+      throw new Error('STORAGE_DIFF_KEY_HEIGHT_MISMATCH:scope=board-gc');
+    }
     for (const doc of diff.puts) if (doc.family === 'entity') remember(certifiedBoardRoot(doc.value));
   }
   return roots;
@@ -532,7 +538,7 @@ const readCertifiedBoardNodes = async (
   const nodes = new Map<string, CertifiedBoardPatriciaNode>();
   const bytes = new Map<string, number>();
   for await (const key of iterateKeys(db, { prefix: keyCertifiedBoardNodePrefix() })) {
-    const hash = `0x${key.subarray(1).toString('hex')}`;
+    const hash = decodeTaggedStorageHash(key, KEY_CERTIFIED_BOARD_NODE, 'STORAGE_CERTIFIED_BOARD_NODE_KEY_INVALID');
     const raw = await db.get(key);
     const node = decodeValidatedBuffer(raw, validateCertifiedBoardNodeValue);
     const actual = hashCertifiedBoardNode(node);
@@ -591,7 +597,9 @@ const pruneUnreachableConsumptionHistoryNodes = async (
   }
   for await (const key of iterateKeys(historyDb, { prefix: Buffer.from([KEY_DIFF]) })) {
     const diff = decodeValidatedBuffer(await historyDb.get(key), validateStorageDiffRecordValue);
-    if (diff.height !== decodeHeight(key)) throw new Error('STORAGE_DIFF_KEY_HEIGHT_MISMATCH:scope=consumption-gc');
+    if (diff.height !== decodeTaggedStorageHeight(key, KEY_DIFF, 'STORAGE_DIFF_KEY_INVALID')) {
+      throw new Error('STORAGE_DIFF_KEY_HEIGHT_MISMATCH:scope=consumption-gc');
+    }
     for (const doc of diff.puts) {
       if (doc.family === 'entity') remember(doc.value.consumptionAccumulator);
     }
@@ -600,7 +608,7 @@ const pruneUnreachableConsumptionHistoryNodes = async (
   const stored = new Map<string, ConsumptionNode>();
   const encodedBytes = new Map<string, number>();
   for await (const key of iterateKeys(historyDb, { prefix: keyConsumptionNodePrefix() })) {
-    const hash = `0x${key.subarray(1).toString('hex')}`;
+    const hash = decodeTaggedStorageHash(key, KEY_CONSUMPTION_NODE, 'STORAGE_CONSUMPTION_NODE_KEY_INVALID');
     const raw = await historyDb.get(key);
     const node = decodeValidatedBuffer(raw, validateConsumptionNodeValue);
     const actual = hashConsumptionNode(node);
@@ -636,7 +644,7 @@ const synchronizeAccountJClaimNodes = async (
   const authoritative = new Map<string, AccountJClaimNode>();
   const values = new Map<string, Buffer>();
   for await (const key of iterateKeys(historyDb, { prefix: keyAccountJClaimNodePrefix() })) {
-    const hash = `0x${key.subarray(1).toString('hex')}`;
+    const hash = decodeTaggedStorageHash(key, KEY_ACCOUNT_J_CLAIM_NODE, 'STORAGE_ACCOUNT_J_CLAIM_NODE_KEY_INVALID');
     const value = await historyDb.get(key);
     const node = decodeValidatedBuffer(value, validateAccountJClaimNodeValue);
     const actual = hashAccountJClaimNode(node);
@@ -690,7 +698,9 @@ const pruneUnreachableAccountJClaimHistoryNodes = async (
   }
   for await (const key of iterateKeys(historyDb, { prefix: Buffer.from([KEY_DIFF]) })) {
     const diff = decodeValidatedBuffer(await historyDb.get(key), validateStorageDiffRecordValue);
-    if (diff.height !== decodeHeight(key)) throw new Error('STORAGE_DIFF_KEY_HEIGHT_MISMATCH:scope=account-j-gc');
+    if (diff.height !== decodeTaggedStorageHeight(key, KEY_DIFF, 'STORAGE_DIFF_KEY_INVALID')) {
+      throw new Error('STORAGE_DIFF_KEY_HEIGHT_MISMATCH:scope=account-j-gc');
+    }
     for (const doc of diff.puts) {
       if (doc.family !== 'account') continue;
       remember(doc.value.leftPendingJClaims);
@@ -700,7 +710,7 @@ const pruneUnreachableAccountJClaimHistoryNodes = async (
   const stored = new Map<string, AccountJClaimNode>();
   const bytes = new Map<string, number>();
   for await (const key of iterateKeys(historyDb, { prefix: keyAccountJClaimNodePrefix() })) {
-    const hash = `0x${key.subarray(1).toString('hex')}`;
+    const hash = decodeTaggedStorageHash(key, KEY_ACCOUNT_J_CLAIM_NODE, 'STORAGE_ACCOUNT_J_CLAIM_NODE_KEY_INVALID');
     const raw = await historyDb.get(key);
     const node = decodeValidatedBuffer(raw, validateAccountJClaimNodeValue);
     const actual = hashAccountJClaimNode(node);

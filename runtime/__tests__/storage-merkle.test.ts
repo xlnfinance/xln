@@ -70,17 +70,12 @@ test('storage radix merkle root changes when a leaf value changes', () => {
   expect(base.root).not.toBe(changed.root);
 });
 
-test('storage radix merkle deduplicates keys with last-write-wins semantics', () => {
-  const deduped = buildHexKeyedMerkle([
-    { hexKey: hexKey(0x11), value: value('old') },
-    { hexKey: hexKey(0x11), value: value('new') },
-  ]);
-  const single = buildHexKeyedMerkle([
-    { hexKey: hexKey(0x11), value: value('new') },
-  ]);
-
-  expect(deduped.root).toBe(single.root);
-  expect(deduped.leafCount).toBe(1);
+test('storage radix merkle rejects duplicate normalized keys', () => {
+  const key = hexKey(0x11);
+  expect(() => buildHexKeyedMerkle([
+    { hexKey: key, value: value('old') },
+    { hexKey: `0x${key.slice(2).toUpperCase()}`, value: value('new') },
+  ])).toThrow(`RADIX_MERKLE_DUPLICATE_KEY:${key.slice(2)}`);
 });
 
 test('storage radix merkle keeps one-leaf trees compact', () => {
