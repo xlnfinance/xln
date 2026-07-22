@@ -153,6 +153,7 @@ test('settings can add custom jurisdiction from canonical JSON and import it int
         hasReplica: true,
       });
   } finally {
+    await page.close();
     if (extra.proc.exitCode === null) {
       extra.proc.kill('SIGTERM');
     }
