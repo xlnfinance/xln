@@ -208,6 +208,9 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
 - [ ] `bun run gate:release` and `bun run gate:mainnet` on the immutable SHA.
 - [ ] Review the full diff for hacks, compatibility branches, swallowed errors,
   randomness and undocumented security assumptions.
+- [ ] External audit handoff: keep `docs/security/external-audit-brief.md`
+  current, deliver the immutable candidate and close every accepted finding
+  before enabling real user funds.
 - [ ] Commit coherent fixes, push candidate, merge into clean `main`, rerun the
   mandatory post-merge gate, tag/publish `v0.1.14`, fresh deploy/reset mainnet,
   and verify health. Stop before any irreversible action only if authority or
