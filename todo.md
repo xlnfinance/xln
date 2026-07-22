@@ -82,8 +82,11 @@ An audit claim is not accepted until reproduced against the current candidate.
   fallback and browser `eth_getCode` fetch fallback. Evidence on `e1001546`:
   22/22 focused tests PASS; exact payment + cross-j 2/2 PASS with strict browser
   health; deriveDelta/manual-math/frozen-core gates unchanged.
-- [ ] L3: full cross-j/security/release E2E; eliminate
-  `ROUTE_CROSS_J_ATOMIC_PAIR_MISSING` without relaxing atomicity.
+- [x] L3: full cross-j/security/release E2E is green without relaxing
+  atomicity. Evidence on `ff8940285`: security audit pack PASS; `bun run check`
+  PASS; bootstrap fresh/template/clone/hydrate 4/4 PASS; immutable run
+  `20260722-103658-033` 96/96 PASS with 0 browser issues, errors, warnings,
+  network failures or HTTP errors.
 
 ## P0/P1 — storage integrity audit
 
