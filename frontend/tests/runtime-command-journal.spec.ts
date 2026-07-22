@@ -1,4 +1,6 @@
-import { expect, test } from '../../tests/global-setup.ts';
+import browserTestFixtures from '../../tests/global-setup.ts';
+
+const { expect, test } = browserTestFixtures;
 
 const runtimeId = '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266';
 const serverFingerprint = `0x${'cd'.repeat(32)}`;

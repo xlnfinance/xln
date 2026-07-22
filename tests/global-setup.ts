@@ -305,6 +305,7 @@ export const allowBrowserIssue = (rule: BrowserIssueExpectation): void => {
 };
 
 export { devices, expect, request };
+export default { expect, test };
 export type {
   APIRequestContext,
   APIResponse,
