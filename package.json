@@ -243,5 +243,8 @@
     "tevm": "^1.0.0-next.149",
     "ws": "^8.21.1"
   },
+  "trustedDependencies": [
+    "electron"
+  ],
   "type": "module"
 }
