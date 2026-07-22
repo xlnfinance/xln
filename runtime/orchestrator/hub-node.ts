@@ -458,33 +458,43 @@ const deriveAnvilDevPrivateKey = (index: number): string => {
 };
 
 const parseSupportPeerIdentities = (raw: string): SupportPeerIdentity[] => {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map((entry) => {
-      const rawChainId = Number(entry?.chainId);
-      const chainId = Number.isFinite(rawChainId) && rawChainId > 0 ? Math.floor(rawChainId) : null;
-      const depositoryAddress = String(entry?.depositoryAddress || '').trim();
-      const jurisdictionRef = getJurisdictionIdentityRef({ chainId, depositoryAddress });
-      return {
-        name: String(entry?.name || '').trim(),
-        entityId: String(entry?.entityId || '').trim().toLowerCase(),
-        signerId: String(entry?.signerId || '').trim().toLowerCase(),
-        jurisdictionName: normalizeJurisdictionDisplayName(entry?.jurisdictionName || ''),
-        ...(chainId !== null ? { chainId } : {}),
-        ...(depositoryAddress ? { depositoryAddress } : {}),
-        jurisdictionRef,
-      };
-    }).filter((entry) =>
-      entry.name &&
-      entry.entityId &&
-      entry.signerId &&
-      entry.jurisdictionName &&
-      entry.jurisdictionRef,
-    );
-  } catch {
-    return [];
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error('SUPPORT_PEER_IDENTITIES_JSON_INVALID:malformed JSON', { cause: error });
   }
+  if (!Array.isArray(parsed)) throw new Error('SUPPORT_PEER_IDENTITIES_JSON_INVALID:expected array');
+
+  return parsed.map((rawEntry, index) => {
+    if (!rawEntry || typeof rawEntry !== 'object') {
+      throw new Error(`SUPPORT_PEER_IDENTITIES_JSON_INVALID:index=${index}:expected object`);
+    }
+    const entry = rawEntry as Record<string, unknown>;
+    const rawChainId = Number(entry['chainId']);
+    const chainId = Number.isInteger(rawChainId) && rawChainId > 0 ? rawChainId : null;
+    const depositoryAddress = String(entry['depositoryAddress'] || '').trim();
+    const jurisdictionRef = getJurisdictionIdentityRef({ chainId, depositoryAddress });
+    const identity: SupportPeerIdentity = {
+      name: String(entry['name'] || '').trim(),
+      entityId: String(entry['entityId'] || '').trim().toLowerCase(),
+      signerId: String(entry['signerId'] || '').trim().toLowerCase(),
+      jurisdictionName: normalizeJurisdictionDisplayName(entry['jurisdictionName'] || ''),
+      ...(chainId !== null ? { chainId } : {}),
+      ...(depositoryAddress ? { depositoryAddress } : {}),
+      jurisdictionRef,
+    };
+    if (
+      !identity.name ||
+      !/^0x[0-9a-f]{64}$/.test(identity.entityId) ||
+      !/^0x[0-9a-f]{40}$/.test(identity.signerId) ||
+      !identity.jurisdictionName ||
+      !identity.jurisdictionRef
+    ) {
+      throw new Error(`SUPPORT_PEER_IDENTITIES_JSON_INVALID:index=${index}:invalid identity binding`);
+    }
+    return identity;
+  });
 };
 
 const resolvedArgs = parseArgs();

@@ -507,7 +507,9 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('const readRpcUrls = (): Record<number, string> => {');
     expect(hubNode).toContain("const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);");
     expect(hubNode).toContain('visibleDirectSupportPeers');
-    expect(hubNode).toContain('jurisdictionName: normalizeJurisdictionDisplayName(entry?.jurisdictionName || \'\')');
+    expect(hubNode).toContain("jurisdictionName: normalizeJurisdictionDisplayName(entry['jurisdictionName'] || '')");
+    expect(hubNode).toContain('SUPPORT_PEER_IDENTITIES_JSON_INVALID:malformed JSON');
+    expect(hubNode).not.toContain('} catch {\n    return [];\n  }\n};\n\nconst resolvedArgs');
     expect(hubNode).not.toContain("normalized === 'arrakis'");
     expect(hubNode).not.toContain("normalized === 'wakanda'");
     expect(hubNode).not.toContain('PRIMARY_TESTNET_JURISDICTION_NAME');
@@ -538,7 +540,7 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('selectWritableJurisdictionKey(jurisdictions, undefined, [rpcUrl, publicRpcUrl])');
     expect(hubNode).not.toContain("targetKey = 'arrakis'");
     expect(hubNode).toContain('const jurisdictionRef = getJurisdictionIdentityRef({ chainId, depositoryAddress });');
-    expect(hubNode).toContain('entry.jurisdictionRef,');
+    expect(hubNode).toContain('!identity.jurisdictionRef');
     expect(mmNode).toContain('.filter(profile => profile.jurisdictionRef.length > 0)');
     expect(hubNode).toContain('return getJurisdictionIdentityRef(profile.metadata?.jurisdiction) === targetRef;');
     expect(hubNode).toContain('const peerJurisdiction = profile.metadata?.jurisdiction || identity;');
