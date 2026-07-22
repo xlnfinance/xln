@@ -58,22 +58,6 @@ export interface CrossJurisdictionPendingFill {
   ttlExpiredAt?: number;
 }
 
-export interface CrossJurisdictionBookAdmissionReceipt {
-  receiptHash: string;
-  leg: CrossJurisdictionBookLeg;
-  orderId: string;
-  routeHash: string;
-  hubEntityId: string;
-  counterpartyEntityId: string;
-  pullId: string;
-  tokenId: number;
-  signedAmount: bigint;
-  revealedUntilTimestamp: number;
-  fullHash: string;
-  partialRoot: string;
-  committedAt: number;
-}
-
 export interface CrossJurisdictionCloseProof {
   orderId: string;
   routeHash: string;
@@ -119,7 +103,6 @@ export interface CrossJurisdictionPullBinding {
   orderId: string;
   routeHash: string;
   leg: CrossJurisdictionBookLeg;
-  targetReceipt?: CrossJurisdictionBookAdmissionReceipt;
   sourceCloseProof?: CrossJurisdictionCloseProof;
   status?: CrossJurisdictionSwapStatus;
   cumulativeFillRatio?: number;
@@ -140,8 +123,6 @@ export interface CrossJurisdictionBookAdmission {
   bookOwnerEntityId: string;
   status: CrossJurisdictionBookStatus;
   route: CrossJurisdictionSwapRoute;
-  sourceReceipt?: CrossJurisdictionBookAdmissionReceipt;
-  targetReceipt?: CrossJurisdictionBookAdmissionReceipt;
   admittedAt?: number;
   resolvingAt?: number;
   closedAt?: number;
@@ -177,7 +158,6 @@ export interface CrossJurisdictionSwapRoute {
   target: CrossJurisdictionSwapLeg;
   sourcePull?: CrossJurisdictionPullLeg;
   targetPull?: CrossJurisdictionPullLeg;
-  targetReceipt?: CrossJurisdictionBookAdmissionReceipt;
   sourceCloseProof?: CrossJurisdictionCloseProof;
   targetCloseProof?: CrossJurisdictionCloseProof;
   priceTicks?: bigint;

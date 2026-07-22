@@ -8,7 +8,6 @@ import {
   buildCrossJurisdictionPullBinding,
   buildPreparedCrossJurisdictionRoute,
 } from '../extensions/cross-j/index';
-import { buildCrossJurisdictionBookAdmissionReceipt } from '../extensions/cross-j/orderbook';
 import { generateLazyEntityId } from '../entity/factory';
 import { MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
@@ -308,27 +307,6 @@ const mirrorAccount = (
   return mirror;
 };
 
-const targetReceiptFor = (route: CrossJurisdictionSwapRoute) =>
-  buildCrossJurisdictionBookAdmissionReceipt(
-    route,
-    'target',
-    {
-      type: 'pull_lock',
-      data: {
-        pullId: route.targetPull!.pullId,
-        tokenId: route.targetPull!.tokenId,
-        amount: route.targetPull!.signedAmount,
-        revealedUntilTimestamp: route.targetPull!.revealedUntilTimestamp,
-        fullHash: route.targetPull!.fullHash,
-        partialRoot: route.targetPull!.partialRoot,
-        crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
-      },
-    },
-    route.target.entityId,
-    route.target.counterpartyEntityId,
-    1_000,
-  );
-
 const makeSameCase = (
   hubEnv: Env,
   jurisdiction: JurisdictionConfig,
@@ -444,7 +422,6 @@ const makeCrossCase = (
       ...route,
       status: 'resting',
     };
-    admittedRoute.targetReceipt = targetReceiptFor(admittedRoute);
     base.pulls!.set(admittedRoute.sourcePull!.pullId, {
       pullId: admittedRoute.sourcePull!.pullId,
       tokenId: admittedRoute.sourcePull!.tokenId,

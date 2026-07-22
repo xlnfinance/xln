@@ -1,7 +1,6 @@
 import type { AccountTx, CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env } from '../../../types';
 import {
   buildCrossJurisdictionCloseProof,
-  cloneCrossJurisdictionBookAdmissionReceipt,
   cloneCrossJurisdictionRoute,
   CROSS_J_MAX_FILL_RATIO,
   applyCrossJurisdictionFillProgress,
@@ -13,9 +12,7 @@ import {
 } from '../../../extensions/cross-j/index';
 import { deriveCanonicalCrossJurisdictionBookOwner } from '../../../extensions/cross-j/market';
 import {
-  buildCrossJurisdictionBookAdmissionReceipt,
   crossJurisdictionBookAdmissionKeyFor,
-  getCrossJurisdictionBookReceiptError,
   markCrossJurisdictionBookAdmissionClosed,
 } from '../../../extensions/cross-j/orderbook';
 import { decodeHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
@@ -36,37 +33,6 @@ const normalizeEntityRef = (value: string): string => String(value || '').toLowe
 
 const committedCrossJurisdictionRatio = (route: CrossJurisdictionSwapRoute): number =>
   getCrossJurisdictionCommittedProofRatio(route);
-
-const applyIntentFollowup = (
-  newState: EntityState,
-  counterpartyId: string,
-  accountTx: Extract<AccountTx, { type: 'cross_j_intent' }>,
-  outputs: EntityInput[],
-): boolean => {
-  const route = cloneCrossJurisdictionRoute(accountTx.data.route);
-  const current = normalizeEntityRef(newState.entityId);
-  const counterparty = normalizeEntityRef(counterpartyId);
-  const sourceUser = normalizeEntityRef(route.source.entityId);
-  const sourceHub = normalizeEntityRef(route.source.counterpartyEntityId);
-  if (!(
-    (current === sourceUser && counterparty === sourceHub) ||
-    (current === sourceHub && counterparty === sourceUser)
-  )) {
-    throw new Error(`CROSS_J_INTENT_ACCOUNT_PARTICIPANTS_INVALID:${route.orderId}:${current}:${counterparty}`);
-  }
-  newState.crossJurisdictionSwaps ||= new Map();
-  const existing = newState.crossJurisdictionSwaps.get(route.orderId);
-  if (existing?.routeHash && route.routeHash && existing.routeHash.toLowerCase() !== route.routeHash.toLowerCase()) {
-    throw new Error(`CROSS_J_INTENT_ROUTE_CONFLICT:${route.orderId}`);
-  }
-  newState.crossJurisdictionSwaps.set(route.orderId, route);
-  if (current === sourceHub) {
-    const proposer = newState.config.validators[0];
-    if (!proposer) throw new Error(`CROSS_J_SOURCE_HUB_PROPOSER_MISSING:${route.orderId}`);
-    outputs.push({ entityId: newState.entityId, signerId: proposer, entityTxs: [] });
-  }
-  return true;
-};
 
 const assertPullResolveAllowed = (
   route: CrossJurisdictionSwapRoute,
@@ -258,9 +224,6 @@ const committedPullMatchesRoute = (
   ) {
     return false;
   }
-  if (leg === 'source' && (!binding.targetReceipt || binding.targetReceipt.leg !== 'target')) {
-    return false;
-  }
   return (
     accountTx.data.pullId === pull.pullId &&
     accountTx.data.tokenId === pull.tokenId &&
@@ -325,78 +288,30 @@ const queueBookAdmissionOnCommittedPull = (
       throw new Error(`CROSS_J_COMMITTED_PULL_ROUTE_MISMATCH: route=${route.orderId} leg=${leg} pull=${accountTx.data.pullId}`);
     }
     const admissionRoute = cloneCrossJurisdictionRoute(route);
-    if (leg === 'source') {
-      const targetReceipt = accountTx.data.crossJurisdiction?.targetReceipt;
-      if (!targetReceipt) {
-        throw new Error(`CROSS_J_SOURCE_PULL_TARGET_RECEIPT_MISSING: route=${route.orderId}`);
-      }
-      const receiptError = getCrossJurisdictionBookReceiptError(route, targetReceipt);
-      if (receiptError) {
-        throw new Error(`CROSS_J_SOURCE_PULL_TARGET_RECEIPT_INVALID: route=${route.orderId} ${receiptError}`);
-      }
-      // This is the source-hub counterpart of book admission: the account frame
-      // has now committed the source pull_lock whose binding already contains
-      // the exact target receipt. From this point the source account can accept
-      // a fill ACK, so the source entity route must become `resting` here.
-      //
-      // Do not let the fill-notice handler "repair" this from account offers.
-      // That rehydration masks dropped committed followups and lets matcher
-      // state run ahead of the source account consensus.
-      admissionRoute.targetReceipt = targetReceipt;
-      transitionCrossJurisdictionRouteStatus(admissionRoute, 'resting', committedAt);
-      Object.assign(route, admissionRoute);
-      newState.crossJurisdictionSwaps?.set(route.orderId, route);
-      addMessage(newState, `🌉 Cross-j swap ${route.orderId} committed by source Account`);
-      if (sourceUserCommitted) {
-        handled = true;
-        continue;
-      }
-    }
-    const receipt = buildCrossJurisdictionBookAdmissionReceipt(
+    transitionCrossJurisdictionRouteStatus(
       admissionRoute,
-      leg,
-      accountTx,
-      leg === 'target' ? route.target.entityId : route.source.counterpartyEntityId,
-      leg === 'target' ? route.target.counterpartyEntityId : route.source.entityId,
+      'resting',
       committedAt,
     );
-    if (leg === 'target') {
-      // Target-first escrow invariant: source funds are never locked from the
-      // source account until the target account has committed this exact pull
-      // receipt. The receipt is copied into the source commit and later into
-      // the source pull binding, so raw account txs cannot pretend target-side
-      // safety happened.
-      admissionRoute.targetReceipt = receipt;
-      transitionCrossJurisdictionRouteStatus(admissionRoute, 'target_locked', committedAt);
-      Object.assign(route, admissionRoute);
-      newState.crossJurisdictionSwaps?.set(route.orderId, route);
-      if (targetUserCommitted) {
-        outputs.push(buildCrossJurisdictionEntityOutput(env, route.source.entityId, [{
-          type: 'commitCrossJurisdictionSwap',
-          data: {
-            route: cloneCrossJurisdictionRoute(admissionRoute),
-            targetReceipt: cloneCrossJurisdictionBookAdmissionReceipt(receipt),
-          },
-        }], requireRouteSignerHint(route, route.source.entityId)));
-      } else {
-        outputs.push(buildCrossJurisdictionEntityOutput(env, route.source.counterpartyEntityId, [{
-          type: 'registerCrossJurisdictionSwap',
-          data: { route: cloneCrossJurisdictionRoute(admissionRoute) },
-        }], requireRouteSignerHint(route, route.source.counterpartyEntityId)));
-      }
-    }
+    Object.assign(route, admissionRoute);
+    newState.crossJurisdictionSwaps?.set(route.orderId, route);
 
-    if (targetUserCommitted) {
+    // Opening is admitted only from the source Hub's committed Account frame.
+    // That frame can reach this point only after Runtime preflight accepted the
+    // exact source+target proposal pair at the User Runtime and the exact two
+    // resulting ACKs at the Hub Runtime. Re-encoding that fact as a receipt is
+    // redundant and was the source of the old extra protocol round trip.
+    if (!sourceHubCommitted) {
       handled = true;
       continue;
     }
+    addMessage(newState, `🌉 Cross-j swap ${route.orderId} committed by both Account legs`);
     const bookOwnerEntityId = routeBookOwnerEntityId(admissionRoute);
     const admissionTx: Extract<EntityTx, { type: 'admitCrossJurisdictionBookOrder' }> = {
       type: 'admitCrossJurisdictionBookOrder',
       data: {
         route: cloneCrossJurisdictionRoute(admissionRoute),
-        receipt: cloneCrossJurisdictionBookAdmissionReceipt(receipt),
-        reason: `${leg}_pull_committed`,
+        reason: 'atomic_account_pair_committed',
       },
     };
     if (bookOwnerEntityId === currentEntityId) {
@@ -735,9 +650,6 @@ export function applyCommittedCrossJurisdictionAccountTxFollowup(
   committedAt: number,
   swapOffersCreated: SwapOfferEvent[],
 ): boolean {
-  if (accountTx.type === 'cross_j_intent') {
-    return applyIntentFollowup(newState, counterpartyId, accountTx, outputs);
-  }
   if (accountTx.type === 'pull_lock') {
     return queueBookAdmissionOnCommittedPull(
       env,

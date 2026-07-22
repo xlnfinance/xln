@@ -365,6 +365,10 @@ export interface XLNModule {
     env: Env,
     params: CrossJurisdictionSwapSubmitParams,
   ) => Promise<CrossJurisdictionSwapSubmitResult>;
+  submitCrossJurisdictionIntent: (
+    env: Env,
+    route: CrossJurisdictionSwapRoute,
+  ) => Promise<CrossJurisdictionSwapSubmitResult>;
   buildDisputeArgumentsForSnapshot?: (
     account: AccountMachine,
     entityState: EntityState,

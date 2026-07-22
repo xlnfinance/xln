@@ -1,8 +1,9 @@
-import type { RuntimeInput, Env } from '../types';
+import type { CrossJurisdictionSwapRoute, RuntimeInput, Env } from '../types';
 import type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
 	  RuntimeAdapterConfig,
+	  RuntimeAdapterCrossJurisdictionIntentResult,
 	  RuntimeAdapterReadQuery,
 	  RuntimeAdapterSendResult,
 	  RuntimeAdapterStatus,
@@ -14,6 +15,10 @@ export type EmbeddedRuntimeAdapterDeps = {
   getEnv: () => Env | null;
   main?: (seed?: string | null) => Promise<Env>;
   enqueueRuntimeInput: (env: Env, input: RuntimeInput) => void;
+  submitCrossJurisdictionIntent: (
+    env: Env,
+    route: CrossJurisdictionSwapRoute,
+  ) => Promise<RuntimeAdapterCrossJurisdictionIntentResult>;
   registerEnvChangeCallback: (env: Env, cb: (env: Env) => void) => (() => void);
   buildReadContext?: (env: Env) => Partial<Omit<RuntimeAdapterResolveContext, 'env'>>;
 };
@@ -97,6 +102,14 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
     if (!env) return Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'embedded runtime env is not ready', true));
     this.deps.enqueueRuntimeInput(env, input);
     return Promise.resolve({ height: Math.max(0, Math.floor(Number(env.height ?? 0))) });
+  }
+
+  submitCrossJurisdictionIntent(
+    route: CrossJurisdictionSwapRoute,
+  ): Promise<RuntimeAdapterCrossJurisdictionIntentResult> {
+    const env = this.resolveEnv();
+    if (!env) return Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'embedded runtime env is not ready', true));
+    return this.deps.submitCrossJurisdictionIntent(env, route);
   }
 
   onChange(cb: (height: number) => void): () => void {

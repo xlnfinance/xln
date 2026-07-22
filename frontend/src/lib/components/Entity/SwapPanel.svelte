@@ -13,7 +13,12 @@
   } from '@xln/runtime/xln-api';
   import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import type { SwapBookEntry } from '@xln/runtime/xln-api';
-  import { submitEntityInputs, submitRuntimeInput, xlnFunctions } from '../../stores/xlnStore';
+  import {
+    submitActiveCrossJurisdictionIntent,
+    submitEntityInputs,
+    submitRuntimeInput,
+    xlnFunctions,
+  } from '../../stores/xlnStore';
   import { toasts } from '../../stores/toastStore';
   import { errorLog } from '../../stores/errorLogStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
@@ -3080,8 +3085,6 @@
           end: crossSubmitStartedAt,
         });
         const crossInputPlan = buildCrossSwapRuntimeInputPlan({
-          sourceEntityId,
-          sourceSignerId: signerId,
           route: crossJurisdiction,
           targetEntityId: targetRoute.targetEntityId,
           targetSignerId: targetRoute.targetSignerId,
@@ -3100,7 +3103,10 @@
           });
         }
         const runtimeSubmitStartedAt = performance.now();
-        await submitRuntimeInput(crossInputPlan.input);
+        if (crossInputPlan.setupInput) {
+          await submitRuntimeInput(crossInputPlan.setupInput);
+        }
+        await submitActiveCrossJurisdictionIntent(crossJurisdiction);
         performance.measure('xln.cross_j.runtime_submit', {
           start: runtimeSubmitStartedAt,
           end: performance.now(),

@@ -60,6 +60,7 @@ const validateRoutedEntityInput = (
   requireExactBoundaryKeys(input, ['entityId', 'signerId'], [
     'runtimeId', 'from', 'certifiedOutputIdentity', 'entityTxs', 'proposedFrame',
     'hashPrecommitFrame', 'hashPrecommits', 'jPrefixAttestations', 'leaderTimeoutVote',
+    'atomicCrossJurisdictionPair',
     ...(options.allowSourceRuntimeFrame ? ['sourceRuntimeFrame'] : []),
   ], `${code}_FIELDS`);
   validateEntityInput(input);
@@ -83,6 +84,14 @@ const validateRoutedEntityInput = (
     );
     requireBoundaryInteger(frame['height'], `${code}_SOURCE_RUNTIME_FRAME_HEIGHT`);
     requireBoundaryInteger(frame['timestamp'], `${code}_SOURCE_RUNTIME_FRAME_TIMESTAMP`);
+  }
+  if (input['atomicCrossJurisdictionPair'] !== undefined) {
+    const pair = requireBoundaryRecord(input['atomicCrossJurisdictionPair'], `${code}_ATOMIC_CROSS_J_PAIR`);
+    requireExactBoundaryKeys(pair, ['phase', 'pairKey'], [], `${code}_ATOMIC_CROSS_J_PAIR_FIELDS`);
+    if (pair['phase'] !== 'proposal' && pair['phase'] !== 'ack') {
+      throw new Error(`${code}_ATOMIC_CROSS_J_PAIR_PHASE`);
+    }
+    requireString(pair['pairKey'], `${code}_ATOMIC_CROSS_J_PAIR_KEY`);
   }
   if (input['entityTxs'] !== undefined) {
     validateEntityTxs(input['entityTxs'], `${code}_ENTITY_TX`);

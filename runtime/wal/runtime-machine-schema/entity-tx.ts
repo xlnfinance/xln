@@ -17,7 +17,7 @@ const ENTITY_TX_NESTING_LIMIT = 16;
 
 const ENTITY_TX_TYPES = [
   'accountInput', 'admitCrossJurisdictionBookOrder', 'applyCrossJurisdictionBookProgress',
-  'cancelPull', 'certifyProfile', 'chat', 'chatMessage', 'commitCrossJurisdictionSwap',
+  'cancelPull', 'certifyProfile', 'chat', 'chatMessage',
   'consensusOutput', 'crossJurisdictionBookOrderRemoved', 'crossJurisdictionFillNotice', 'crossJurisdictionSalvage',
   'crossPullClose', 'directPayment', 'disputeFinalize', 'disputeStart', 'e2r',
   'entityCommand', 'entityProviderCancelAction', 'entityProviderReleaseControlShares',
@@ -31,7 +31,7 @@ const ENTITY_TX_TYPES = [
   'registerCrossJurisdictionSwap', 'reissueCertifiedOutput', 'removeCrossJurisdictionBookOrder',
   'reopenDisputedAccount', 'requestCollateral', 'requestCrossJurisdictionClear',
   'materializeCrossJurisdictionClear', 'materializeCrossJurisdictionSwap',
-  'requestCrossJurisdictionSwap', 'resolveHtlcLock', 'resolvePull', 'resolveSwap',
+  'resolveHtlcLock', 'resolvePull', 'resolveSwap',
   'rollbackTimedOutFrames', 'runtimeOutput', 'scheduledWake', 'setHubConfig', 'setRebalancePolicy',
   'settle_approve', 'settle_execute', 'settle_propose', 'settle_reject', 'settle_update', 'vote',
 ] as const satisfies readonly EntityTx['type'][];

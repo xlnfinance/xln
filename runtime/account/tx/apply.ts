@@ -19,7 +19,6 @@ import { handleCrossPullClose, handlePullCancel, handlePullLock, handlePullResol
 import { handleSwapOffer } from './handlers/swap-offer';
 import { handleSwapResolve } from './handlers/swap-resolve';
 import { handleCrossSwapFillAck } from './handlers/cross-swap-fill-ack';
-import { handleCrossJIntent } from './handlers/cross-j-intent';
 import { handleSwapCancelRequest } from './handlers/swap-cancel';
 import { getSignedSettlementWorkspaceTxError, handleSettleTransition } from './handlers/settle-transition';
 import { handleJEventClaim } from './handlers/j-event-claim';
@@ -118,9 +117,6 @@ async function applyAccountTxMutation(
 
   // Route to appropriate handler based on transaction type
   switch (accountTx.type) {
-    case 'cross_j_intent':
-      return handleCrossJIntent(accountMachine, accountTx, byLeft);
-
     case 'add_delta':
       return handleAddDelta(accountMachine, accountTx);
 
@@ -411,7 +407,6 @@ const invalidateCommittedMapsForTx = (
       invalidate('pulls');
       invalidate('swapOffers', tx.data.offerId);
       return;
-    case 'cross_j_intent':
     case 'rebalance_policy':
     case 'reopen_disputed':
     case 'account_frame':

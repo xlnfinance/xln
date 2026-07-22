@@ -139,23 +139,6 @@ export async function applyAccountInput(
   const newState: EntityState = state;
   const incomingAck = accountInputAck(input);
   const incomingProposal = accountInputProposal(input);
-  for (const accountTx of incomingProposal?.frame.accountTxs ?? []) {
-    if (accountTx.type !== 'pull_lock' || accountTx.data.crossJurisdiction?.leg !== 'source') continue;
-    const binding = accountTx.data.crossJurisdiction;
-    const route = newState.crossJurisdictionSwaps?.get(binding.orderId);
-    const receipt = route?.targetReceipt;
-    if (
-      !route ||
-      !receipt ||
-      !binding.targetReceipt ||
-      route.routeHash?.toLowerCase() !== binding.routeHash.toLowerCase() ||
-      receipt.receiptHash.toLowerCase() !== binding.targetReceipt.receiptHash.toLowerCase()
-    ) {
-      throw new Error(
-        `CROSS_J_SOURCE_PULL_CAUSAL_PREREQUISITE_MISSING:${binding.orderId}:entity=${newState.entityId}`,
-      );
-    }
-  }
   accountHandlerLog.debug('input.apply', {
     from: shortId(input.fromEntityId),
     to: shortId(input.toEntityId),

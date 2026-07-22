@@ -1,8 +1,6 @@
 import { deriveAccountWatchSeed } from '../../account/watch-seed';
 import { createEmptyAccountJClaimAccumulator } from '../../account/j-claim-accumulator';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../../account/crypto';
-import { buildCrossJurisdictionPullBinding } from '../../extensions/cross-j/index';
-import { buildCrossJurisdictionBookAdmissionReceipt } from '../../extensions/cross-j/orderbook';
 import { getJurisdictionStackId } from '../../jurisdiction/jurisdiction-runtime';
 import {
   canonicalDisputeFinalizationEvidenceHash,
@@ -207,27 +205,3 @@ export const installJurisdictions = (env: Env, ...jurisdictions: JurisdictionCon
     } as any);
   }
 };
-
-export const targetReceiptFor = (
-  route: CrossJurisdictionSwapRoute,
-  committedAt = 1_000,
-) =>
-  buildCrossJurisdictionBookAdmissionReceipt(
-    route,
-    'target',
-    {
-      type: 'pull_lock',
-      data: {
-        pullId: route.targetPull!.pullId,
-        tokenId: route.targetPull!.tokenId,
-        amount: route.targetPull!.signedAmount,
-        revealedUntilTimestamp: route.targetPull!.revealedUntilTimestamp,
-        fullHash: route.targetPull!.fullHash,
-        partialRoot: route.targetPull!.partialRoot,
-        crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
-      },
-    },
-    route.target.entityId,
-    route.target.counterpartyEntityId,
-    committedAt,
-  );

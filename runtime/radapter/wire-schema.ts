@@ -4,6 +4,7 @@ import {
   requireExactBoundaryKeys,
   validateRuntimeInputEnvelope,
 } from '../protocol/boundary-validation';
+import { validateStorageSafeValue } from '../wal/runtime-machine-schema/primitives';
 import type {
   RuntimeAdapterErrorCode,
   RuntimeAdapterErrorPayload,
@@ -170,6 +171,16 @@ const validateRequest = (message: Record<string, unknown>): RuntimeAdapterReques
       requireNonEmptyString(message['commandId'], 'RADAPTER_REQUEST_SEND_COMMAND_ID_INVALID');
       requireBoundaryInteger(message['commandSequence'], 'RADAPTER_REQUEST_SEND_SEQUENCE_INVALID', 1);
       validateRuntimeInputEnvelope(message['input'], 'RADAPTER_REQUEST_SEND_INPUT');
+      break;
+    case 'cross-j-intent':
+      requireExactBoundaryKeys(
+        message,
+        ['v', 'id', 'op', 'route'],
+        [],
+        'RADAPTER_REQUEST_CROSS_J_INTENT_FIELDS_INVALID',
+      );
+      requireBoundaryRecord(message['route'], 'RADAPTER_REQUEST_CROSS_J_INTENT_ROUTE_INVALID');
+      validateStorageSafeValue(message['route'], 'RADAPTER_REQUEST_CROSS_J_INTENT_ROUTE');
       break;
     default:
       throw new Error(`RADAPTER_REQUEST_OP_INVALID:${String(message['op'])}`);

@@ -22,7 +22,6 @@ import {
   makeState,
   partialBinary,
   secret,
-  targetReceiptFor,
 } from './helpers/cross-j';
 
 const buildRoute = (
@@ -71,40 +70,12 @@ describe('cross-jurisdiction security invariants', () => {
     expect(error).toContain('does not match local jurisdiction');
   });
 
-  test('commit refuses forged target receipt before source lock exists', async () => {
-    const env = createEmptyEnv('cross-forged-target-receipt');
-    env.timestamp = 1_000;
-    env.quietRuntimeLogs = true;
-    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
-    const tron = makeJurisdiction('Tron', 2, '21', '22');
-    installJurisdictions(env, eth, tron);
-    const sourceUser = entity('01');
-    const sourceHub = entity('02');
-    const route = buildRoute('cross-forged-target-receipt', 'cross-forged-target-receipt', eth, tron);
-    const forgedReceipt = { ...targetReceiptFor(route), signedAmount: route.targetPull!.signedAmount + 1n };
-    const state = makeState(sourceUser, addr('31'), eth, sourceHub);
-    state.crossJurisdictionSwaps?.set(route.orderId, { ...route, status: 'target_prepared' });
-
-    const result = await applyEntityTx(env, state, {
-      type: 'commitCrossJurisdictionSwap',
-      data: {
-        route: { ...route, status: 'target_locked', targetReceipt: forgedReceipt },
-        targetReceipt: forgedReceipt,
-      },
-    });
-
-    expect(result.outputs).toHaveLength(0);
-    expect(state.accounts.get(sourceHub)?.pulls?.has(route.sourcePull!.pullId)).not.toBe(true);
-    expect(result.newState.messages.at(-1)).toContain('CROSS_J_BOOK_ADMISSION_RECEIPT_MISMATCH');
-  });
-
-  test('source pull reveal with valid target receipt still requires committed fill progress', async () => {
+  test('source pull reveal requires committed fill progress', async () => {
     const route = {
       ...buildRoute('cross-source-reveal-no-fill', 'cross-source-reveal-no-fill'),
       status: 'resting' as const,
     };
-    const targetReceipt = targetReceiptFor(route);
-    const admittedRoute = { ...route, targetReceipt };
+    const admittedRoute = route;
     const account = makeAccount(route.source.counterpartyEntityId, route.source.entityId);
     account.pulls ??= new Map();
     account.pulls.set(route.sourcePull!.pullId, {
@@ -151,7 +122,6 @@ describe('cross-jurisdiction security invariants', () => {
       cumulativeFillRatio: 32_768,
       filledSourceAmount: 500_000_000_000_000_000n,
       filledTargetAmount: 450_000_000_000_000_000n,
-      targetReceipt: targetReceiptFor(buildRoute('cross-clear-route-mismatch', 'cross-clear-route-mismatch')),
     };
     state.crossJurisdictionSwaps?.set(route.orderId, route);
     const account = state.accounts.get(sourceUser)!;

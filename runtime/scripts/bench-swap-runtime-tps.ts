@@ -4,7 +4,6 @@ import {
   buildCrossJurisdictionPullBinding,
   buildPreparedCrossJurisdictionRoute,
 } from '../extensions/cross-j/index';
-import { buildCrossJurisdictionBookAdmissionReceipt } from '../extensions/cross-j/orderbook';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
 import type { AccountMachine, AccountTx, CrossJurisdictionSwapRoute, Delta } from '../types';
 import { getPerfMs } from '../utils';
@@ -133,27 +132,6 @@ const seedSameSwapAccount = (swaps: number): AccountMachine => {
   return account;
 };
 
-const targetReceiptFor = (route: CrossJurisdictionSwapRoute) =>
-  buildCrossJurisdictionBookAdmissionReceipt(
-    route,
-    'target',
-    {
-      type: 'pull_lock',
-      data: {
-        pullId: route.targetPull!.pullId,
-        tokenId: route.targetPull!.tokenId,
-        amount: route.targetPull!.signedAmount,
-        revealedUntilTimestamp: route.targetPull!.revealedUntilTimestamp,
-        fullHash: route.targetPull!.fullHash,
-        partialRoot: route.targetPull!.partialRoot,
-        crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
-      },
-    },
-    route.target.entityId,
-    route.target.counterpartyEntityId,
-    1_000,
-  );
-
 const seedCrossSwapAccount = (swaps: number): AccountMachine => {
   const sourceUser = entity('33');
   const sourceHub = entity('44');
@@ -194,7 +172,6 @@ const seedCrossSwapAccount = (swaps: number): AccountMachine => {
     ...template,
     status: 'resting' as const,
   };
-  templateRoute = { ...templateRoute, targetReceipt: targetReceiptFor(templateRoute) };
   account.pulls!.set(templateRoute.sourcePull!.pullId, {
     pullId: templateRoute.sourcePull!.pullId,
     tokenId: templateRoute.sourcePull!.tokenId,
@@ -219,7 +196,6 @@ const seedCrossSwapAccount = (swaps: number): AccountMachine => {
       target: { ...templateRoute.target },
       sourcePull: { ...templateRoute.sourcePull! },
       targetPull: { ...templateRoute.targetPull! },
-      ...(templateRoute.targetReceipt ? { targetReceipt: { ...templateRoute.targetReceipt } } : {}),
       status: 'resting' as const,
     };
     account.swapOffers.set(orderId, {

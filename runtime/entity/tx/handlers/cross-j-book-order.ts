@@ -14,7 +14,6 @@ import {
   crossJurisdictionBookAdmissionKeyFor,
   crossJurisdictionBookOwnerRef,
   getCrossJurisdictionBookAdmissionError,
-  getCrossJurisdictionBookReceiptError,
   getCrossJurisdictionRouteRemainingAmounts,
   isCrossJurisdictionBookAdmissionPending,
   buildCrossJurisdictionCancelAck,
@@ -138,12 +137,6 @@ export const handleAdmitCrossJurisdictionBookOrderEntityTx = (
   if (bookOwner !== normalizeEntityRef(newState.entityId)) {
     throw new Error(`CROSS_J_BOOK_ADMIT_WRONG_OWNER: order=${route.orderId} owner=${bookOwner} current=${newState.entityId}`);
   }
-  if (!entityTx.data.receipt) {
-    throw new Error(`CROSS_J_BOOK_ADMIT_RECEIPT_MISSING: order=${route.orderId}`);
-  }
-  const receiptError = getCrossJurisdictionBookReceiptError(route, entityTx.data.receipt);
-  if (receiptError) throw new Error(receiptError);
-
   const admissionKey = crossJurisdictionBookAdmissionKey(route);
   const existingAdmission = newState.crossJurisdictionBookAdmissions?.get(admissionKey);
   if (existingAdmission?.status === 'closed' || existingAdmission?.status === 'resolving') {
@@ -175,7 +168,7 @@ export const handleAdmitCrossJurisdictionBookOrderEntityTx = (
     );
   }
 
-  const admission = mergeCrossJurisdictionBookAdmission(newState, route, now, entityTx.data.receipt);
+  const admission = mergeCrossJurisdictionBookAdmission(newState, route, now);
 
   const offerEvent = buildCommittedCrossJurisdictionOfferEvent(newState, admission.route);
   if (!offerEvent) {

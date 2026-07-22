@@ -120,7 +120,7 @@ const requirements: CoverageRequirement[] = [
     area: 'frontend',
     file: 'frontend/src/lib/components/Entity/swap-panel-helpers.ts',
     patterns: [
-      "type: 'requestCrossJurisdictionSwap'",
+      'submitActiveCrossJurisdictionIntent',
     ],
   },
   {

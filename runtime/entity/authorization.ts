@@ -365,36 +365,17 @@ export const assertCertifiedOutputSemanticAuthority = (
     }
     case 'registerCrossJurisdictionSwap': {
       const route = tx.data.route;
-      if (route.targetReceipt) {
-        assertSemanticSource(tx.type, source, [route.target.entityId]);
-        assertSemanticTarget(tx.type, target, route.source.counterpartyEntityId);
-      } else {
-        assertSemanticSource(tx.type, source, [route.source.counterpartyEntityId]);
-        assertSemanticTarget(tx.type, target, route.target.entityId);
-      }
+      assertSemanticSource(tx.type, source, [route.source.counterpartyEntityId]);
+      assertSemanticTarget(tx.type, target, route.target.entityId);
       return;
     }
     case 'pullLock': {
       assertCertifiedCrossJTargetPull(source, target, tx, certifiedTxs);
       return;
     }
-    case 'commitCrossJurisdictionSwap': {
-      const route = tx.data.route;
-      assertSemanticSource(tx.type, source, [route.target.counterpartyEntityId]);
-      assertSemanticTarget(tx.type, target, route.source.entityId);
-      return;
-    }
     case 'admitCrossJurisdictionBookOrder': {
-      const { route, receipt } = tx.data;
-      const legHub = receipt.leg === 'source'
-        ? route.source.counterpartyEntityId
-        : receipt.leg === 'target'
-          ? route.target.entityId
-          : '';
-      assertSemanticSource(tx.type, source, [receipt.hubEntityId, legHub]);
-      if (normalizeEntityRef(receipt.hubEntityId) !== normalizeEntityRef(legHub)) {
-        throw new Error(`CONSENSUS_OUTPUT_BOOK_RECEIPT_HUB_MISMATCH:${receipt.hubEntityId}:${legHub || 'missing'}`);
-      }
+      const { route } = tx.data;
+      assertSemanticSource(tx.type, source, [route.source.counterpartyEntityId]);
       assertSemanticTarget(tx.type, target, routeBookOwner(route));
       return;
     }

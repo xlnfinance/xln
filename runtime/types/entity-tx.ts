@@ -1,6 +1,6 @@
 import type { JurisdictionEvent, JurisdictionEventData } from './jurisdiction-events';
 import type { AccountInput, AccountStateDomain, CrossJurisdictionSecretRelay, SettlementDiff, SettlementOp } from './account';
-import type { CrossJurisdictionBookAdmissionReceipt, CrossJurisdictionCloseProof, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
+import type { CrossJurisdictionCloseProof, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
 import type { LendingTermId } from './lending';
 import type { ProfileUpdateTx } from './profile';
 import type { ProposalAction } from '../types';
@@ -412,12 +412,6 @@ type EntityTxPayload =
       };
     }
   | {
-      type: 'requestCrossJurisdictionSwap';
-      data: {
-        route: CrossJurisdictionSwapRoute;
-      };
-    }
-  | {
       type: 'prepareCrossJurisdictionSwap';
       data: {
         route: CrossJurisdictionSwapRoute;
@@ -439,13 +433,6 @@ type EntityTxPayload =
         orderId: string;
         binary: string;
         proof: CrossJurisdictionCloseProof;
-      };
-    }
-  | {
-      type: 'commitCrossJurisdictionSwap';
-      data: {
-        route: CrossJurisdictionSwapRoute;
-        targetReceipt?: CrossJurisdictionBookAdmissionReceipt;
       };
     }
   | {
@@ -499,7 +486,6 @@ type EntityTxPayload =
       type: 'admitCrossJurisdictionBookOrder';
       data: {
         route: CrossJurisdictionSwapRoute;
-        receipt: CrossJurisdictionBookAdmissionReceipt;
         reason?: string;
       };
     }

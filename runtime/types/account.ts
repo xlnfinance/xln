@@ -673,11 +673,6 @@ export type AccountEvent =
 
 // Account transaction types
 export type AccountTx =
-  | {
-      /** Exact source-user intent delivered through the source-j Account. */
-      type: 'cross_j_intent';
-      data: { route: CrossJurisdictionSwapRoute };
-    }
   | { type: 'direct_payment'; data: { tokenId: number; amount: bigint; route?: string[]; description?: string; fromEntityId?: string; toEntityId?: string; deliveryMode?: Extract<PaymentDeliveryMode, 'trusted'>; trustedGatewayEntityId?: string } }
   | {
       type: 'lending_fund';

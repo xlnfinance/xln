@@ -1145,41 +1145,6 @@ describe('signed Entity command admission', () => {
       updatedAt: 1,
     } satisfies CrossJurisdictionSwapRoute);
     const routeHash = route.routeHash!;
-    const sourceReceipt = {
-      receiptHash: entityId('20'),
-      leg: 'source' as const,
-      orderId,
-      routeHash,
-      hubEntityId: sourceHub,
-      counterpartyEntityId: sourceUser,
-      pullId: 'source-pull',
-      tokenId: 1,
-      signedAmount: 10n,
-      revealedUntilTimestamp: 10_000,
-      fullHash: entityId('18'),
-      partialRoot: entityId('19'),
-      committedAt: 1,
-    };
-    const targetReceipt = {
-      receiptHash: entityId('22'),
-      leg: 'target' as const,
-      orderId,
-      routeHash,
-      hubEntityId: targetHub,
-      counterpartyEntityId: targetUser,
-      pullId: 'target-pull',
-      tokenId: 2,
-      signedAmount: 20n,
-      revealedUntilTimestamp: 10_000,
-      fullHash: entityId('1a'),
-      partialRoot: entityId('1b'),
-      committedAt: 1,
-    };
-    const targetLockedRoute = {
-      ...route,
-      status: 'target_locked' as const,
-      targetReceipt,
-    };
     const baseState = structuredClone(setup('runtime-semantic-roles').state);
     baseState.crossJurisdictionSwaps = new Map([[orderId, route]]);
     baseState.crossJurisdictionBookAdmissions = new Map([['admission', {
@@ -1189,7 +1154,6 @@ describe('signed Entity command admission', () => {
       bookOwnerEntityId: targetHub,
       status: 'admitted',
       route,
-      sourceReceipt,
       updatedAt: 1,
     }]]);
     const stateFor = (entityIdValue: string) => {
@@ -1224,9 +1188,6 @@ describe('signed Entity command admission', () => {
     const targetRegistration: EntityTx = {
       type: 'registerCrossJurisdictionSwap', data: { route },
     };
-    const targetReceiptRegistration: EntityTx = {
-      type: 'registerCrossJurisdictionSwap', data: { route: targetLockedRoute },
-    };
     const forcedSourceDispute: EntityTx = {
       type: 'disputeStart',
       data: {
@@ -1245,24 +1206,11 @@ describe('signed Entity command admission', () => {
         txs: [targetRegistration, targetPullLock],
       },
       {
-        source: targetHub,
-        target: sourceHub,
-        txs: [targetReceiptRegistration],
-      },
-      {
-        source: targetUser,
-        target: sourceUser,
-        txs: [{
-          type: 'commitCrossJurisdictionSwap',
-          data: { route: targetLockedRoute, targetReceipt },
-        }],
-      },
-      {
         source: sourceHub,
         target: targetHub,
         txs: [{
           type: 'admitCrossJurisdictionBookOrder',
-          data: { route, receipt: sourceReceipt },
+          data: { route },
         }],
       },
       {

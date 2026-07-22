@@ -724,8 +724,7 @@ const isCrossJAdmissionSourceProposal = (output: RoutedEntityInput): boolean =>
     if (!proposal) return false;
     const sourcePull = proposal.frame.accountTxs.find(accountTx =>
       accountTx.type === 'pull_lock' &&
-      accountTx.data.crossJurisdiction?.leg === 'source' &&
-      Boolean(accountTx.data.crossJurisdiction.targetReceipt));
+      accountTx.data.crossJurisdiction?.leg === 'source');
     const binding = sourcePull?.type === 'pull_lock' ? sourcePull.data.crossJurisdiction : undefined;
     if (!binding) return false;
     return proposal.frame.accountTxs.some(accountTx =>
@@ -1751,12 +1750,30 @@ const buildRuntimeEntityInputsEnvelope = (
   const sourceRuntimeId = normalizeRuntimeId(String(env.runtimeId || ''));
   if (!sourceRuntimeId) throw new Error('ROUTE_SOURCE_RUNTIME_ID_INVALID');
   const firstFrame = requireOutputRuntimeFrame(outputs[0]!);
+  const explicitPair = outputs[0]?.atomicCrossJurisdictionPair;
+  if (explicitPair && !outputs.every(output =>
+    output.atomicCrossJurisdictionPair?.phase === explicitPair.phase &&
+    output.atomicCrossJurisdictionPair.pairKey === explicitPair.pairKey)) {
+    throw new Error('ROUTE_CROSS_J_ATOMIC_COHORT_MISMATCH');
+  }
+  const structuralPairs = selectPotentialCrossJAccountInputPairs(outputs);
+  const inferredProposalPair = !explicitPair && outputs.length === 2 && structuralPairs.length === 1;
+  const atomicCrossJurisdictionPair = explicitPair ?? (inferredProposalPair
+    ? {
+        phase: 'proposal' as const,
+        pairKey: `proposal:${sourceRuntimeId}:${firstFrame.height}:${firstFrame.timestamp}`,
+      }
+    : undefined);
   const entityInputs = outputs.map(output => {
     const frame = requireOutputRuntimeFrame(output);
     if (frame.height !== firstFrame.height || frame.timestamp !== firstFrame.timestamp) {
       throw new Error('ROUTE_ENTITY_INPUTS_ENVELOPE_FRAME_MISMATCH');
     }
-    const { sourceRuntimeFrame: _sourceRuntimeFrame, ...input } = output;
+    const {
+      sourceRuntimeFrame: _sourceRuntimeFrame,
+      atomicCrossJurisdictionPair: _atomicCrossJurisdictionPair,
+      ...input
+    } = output;
     return validateDeliverableEntityInput(input);
   });
   return {
@@ -1764,6 +1781,7 @@ const buildRuntimeEntityInputsEnvelope = (
     sourceRuntimeHeight: firstFrame.height,
     sourceRuntimeTimestamp: firstFrame.timestamp,
     entityInputs,
+    ...(atomicCrossJurisdictionPair ? { atomicCrossJurisdictionPair } : {}),
   };
 };
 

@@ -54,7 +54,6 @@ import type {
 } from './types/entity-provider-actions';
 export type {
   CrossJurisdictionBookAdmission,
-  CrossJurisdictionBookAdmissionReceipt,
   CrossJurisdictionBookLeg,
   CrossJurisdictionBookStatus,
   CrossJurisdictionCloseProof,
@@ -696,6 +695,16 @@ export interface RoutedEntityInput extends EntityInput {
     height: number;
     timestamp: number;
   };
+  /**
+   * Transport-only cohort for the exact two cross-j Account legs. It never
+   * authorizes money: the receiving Runtime still state-validates both signed
+   * Account frames before applying either one. The marker prevents unrelated
+   * ACKs from being coupled or garbage-collected as an atomic pair.
+   */
+  atomicCrossJurisdictionPair?: {
+    phase: 'proposal' | 'ack';
+    pairKey: string;
+  };
 }
 
 /** One authenticated transport unit emitted by one committed source R-frame. */
@@ -704,6 +713,12 @@ export interface RuntimeEntityInputsEnvelope {
   sourceRuntimeHeight: number;
   sourceRuntimeTimestamp: number;
   entityInputs: DeliverableEntityInput[];
+  atomicCrossJurisdictionPair?: {
+    phase: 'proposal' | 'ack';
+    pairKey: string;
+  };
+  /** Unsigned best-effort M1. It authorizes no funds and only asks the Hub to propose both Account legs. */
+  crossJurisdictionIntent?: CrossJurisdictionSwapRoute;
 }
 
 /**

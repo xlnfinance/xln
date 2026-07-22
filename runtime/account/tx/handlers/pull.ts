@@ -115,7 +115,6 @@ const validateCrossJurisdictionPullResolve = (
   const status = binding.status || 'intent';
   const committedRatio = committedCrossJurisdictionRatio(binding);
   if (binding.leg === 'source') {
-    if (!binding.targetReceipt) return `CROSS_J_SOURCE_PULL_RESOLVE_TARGET_RECEIPT_MISSING:${binding.orderId}`;
     if (status !== 'clear_requested' && status !== 'clearing') {
       return `CROSS_J_SOURCE_PULL_RESOLVE_BEFORE_CLEAR:${binding.orderId}:status=${status}`;
     }
@@ -175,7 +174,7 @@ const validateCrossJurisdictionPullRoute = (account: AccountMachine, tx: PullLoc
 export async function handlePullLock(
   accountMachine: AccountMachine,
   accountTx: PullLockTx,
-  byLeft: boolean,
+  _byLeft: boolean,
   currentHeight: number,
   currentTimestamp: number,
 ): Promise<{ success: boolean; events: string[]; error?: string }> {
@@ -216,9 +215,11 @@ export async function handlePullLock(
 
   const beneficiaryIsLeft = amount > 0n;
   const loserIsLeft = !beneficiaryIsLeft;
-  if (byLeft !== loserIsLeft) {
-    return { success: false, error: `Only the paying side can create a pull lock`, events };
-  }
+  // Either side may propose a pull. A proposal signed only by its proposer is
+  // pending bilateral state: it cannot become enforceable or resolvable until
+  // the counterparty validates the exact frame and returns its ACK/Hanko. This
+  // is what lets a cross-j Hub propose the source pull while the User Runtime
+  // atomically decides whether to ACK it beside the matching target pull.
 
   const delta = ensureDelta(accountMachine, tokenId);
 

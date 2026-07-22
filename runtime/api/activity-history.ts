@@ -523,9 +523,7 @@ const eventFromEntityTx = (
     case 'cancelSwapOffer':
     case 'proposeCancelSwap':
       return eventFromSwap(journal, index, normalizeId(inputEntityId), txType, data, viewedEntityId);
-    case 'requestCrossJurisdictionSwap':
     case 'prepareCrossJurisdictionSwap':
-    case 'commitCrossJurisdictionSwap':
     case 'registerCrossJurisdictionSwap':
     case 'crossJurisdictionFillNotice':
       return eventFromCrossJurisdiction(journal, index, normalizeId(inputEntityId), txType, data, viewedEntityId);

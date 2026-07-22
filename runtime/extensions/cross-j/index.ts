@@ -5,7 +5,6 @@ import type {
   AccountInput,
   AccountTx,
   CrossJurisdictionBookAdmission,
-  CrossJurisdictionBookAdmissionReceipt,
   CrossJurisdictionCloseProof,
   CrossJurisdictionRouteDomain,
   CrossJurisdictionSettlementPolicy,
@@ -859,9 +858,6 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   const bookHubSignerId = optionalString(route.bookHubSignerId);
   const sourcePull = cloneCrossJurisdictionPullLeg(route.sourcePull);
   const targetPull = cloneCrossJurisdictionPullLeg(route.targetPull);
-  const targetReceipt = route.targetReceipt
-    ? cloneCrossJurisdictionBookAdmissionReceipt(route.targetReceipt)
-    : undefined;
   const sourceCloseProof = route.sourceCloseProof
     ? cloneCrossJurisdictionCloseProof(route.sourceCloseProof)
     : undefined;
@@ -898,7 +894,6 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   if (bookHubSignerId) clone.bookHubSignerId = bookHubSignerId;
   if (sourcePull) clone.sourcePull = sourcePull;
   if (targetPull) clone.targetPull = targetPull;
-  if (targetReceipt) clone.targetReceipt = targetReceipt;
   if (sourceCloseProof) clone.sourceCloseProof = sourceCloseProof;
   if (targetCloseProof) clone.targetCloseProof = targetCloseProof;
   if (priceTicks !== undefined) clone.priceTicks = priceTicks;
@@ -924,26 +919,6 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   if (error) clone.error = error;
   if (memo) clone.memo = memo;
   return clone;
-}
-
-export function cloneCrossJurisdictionBookAdmissionReceipt(
-  receipt: CrossJurisdictionBookAdmissionReceipt,
-): CrossJurisdictionBookAdmissionReceipt {
-  return {
-    receiptHash: String(receipt.receiptHash || ''),
-    leg: receipt.leg,
-    orderId: String(receipt.orderId || ''),
-    routeHash: String(receipt.routeHash || ''),
-    hubEntityId: String(receipt.hubEntityId || ''),
-    counterpartyEntityId: String(receipt.counterpartyEntityId || ''),
-    pullId: String(receipt.pullId || ''),
-    tokenId: Number(receipt.tokenId),
-    signedAmount: BigInt(receipt.signedAmount),
-    revealedUntilTimestamp: Number(receipt.revealedUntilTimestamp),
-    fullHash: String(receipt.fullHash || ''),
-    partialRoot: String(receipt.partialRoot || ''),
-    committedAt: Number(receipt.committedAt || 0),
-  };
 }
 
 function cloneCrossJurisdictionPendingFill(
@@ -977,9 +952,6 @@ export function cloneCrossJurisdictionPullBinding(
     routeHash: String(binding.routeHash || ''),
     leg: binding.leg,
   };
-  if (binding.targetReceipt) {
-    clone.targetReceipt = cloneCrossJurisdictionBookAdmissionReceipt(binding.targetReceipt);
-  }
   if (binding.sourceCloseProof) {
     clone.sourceCloseProof = cloneCrossJurisdictionCloseProof(binding.sourceCloseProof);
   }
@@ -1015,7 +987,6 @@ export function buildCrossJurisdictionPullBinding(
     orderId: canonical.orderId,
     routeHash: canonical.routeHash || deriveCrossJurisdictionRouteHash(canonical),
     leg,
-    ...(canonical.targetReceipt ? { targetReceipt: canonical.targetReceipt } : {}),
     ...(canonical.sourceCloseProof ? { sourceCloseProof: canonical.sourceCloseProof } : {}),
     status: canonical.status,
     ...(canonical.cumulativeFillRatio !== undefined ? { cumulativeFillRatio: canonical.cumulativeFillRatio } : {}),
@@ -1045,7 +1016,6 @@ export function buildCommittedCrossJurisdictionPullBinding(
     orderId: String(route.orderId || ''),
     routeHash,
     leg,
-    ...(route.targetReceipt ? { targetReceipt: route.targetReceipt } : {}),
     ...(route.sourceCloseProof ? { sourceCloseProof: route.sourceCloseProof } : {}),
     status: route.status,
     ...(route.cumulativeFillRatio !== undefined ? { cumulativeFillRatio: route.cumulativeFillRatio } : {}),
@@ -1072,12 +1042,6 @@ export function cloneCrossJurisdictionBookAdmission(
     route: cloneCrossJurisdictionRoute(admission.route),
     updatedAt: Number(admission.updatedAt || 0),
   };
-  if (admission.sourceReceipt) {
-    clone.sourceReceipt = cloneCrossJurisdictionBookAdmissionReceipt(admission.sourceReceipt);
-  }
-  if (admission.targetReceipt) {
-    clone.targetReceipt = cloneCrossJurisdictionBookAdmissionReceipt(admission.targetReceipt);
-  }
   const admittedAt = optionalNumber(admission.admittedAt);
   const resolvingAt = optionalNumber(admission.resolvingAt);
   const closedAt = optionalNumber(admission.closedAt);
@@ -1106,9 +1070,6 @@ export const cloneCrossJurisdictionSwapHistoryRoute = (entry: SwapOrderHistoryEn
   cloneCrossJurisdictionCarrierRoute({ ...entry });
 
 export function cloneCrossJurisdictionAccountTxRoute(tx: AccountTx): AccountTx {
-  if (tx.type === 'cross_j_intent') {
-    return { ...tx, data: { route: cloneCrossJurisdictionRoute(tx.data.route) } };
-  }
   if (tx.type === 'pull_lock' && tx.data.crossJurisdiction) {
     return {
       ...tx,

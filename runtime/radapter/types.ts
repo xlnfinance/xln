@@ -1,5 +1,5 @@
 import type { RuntimeActivityEvent, RuntimeActivityFilters } from '../api/activity-history';
-import type { RuntimeInput } from '../types';
+import type { CrossJurisdictionSwapRoute, RuntimeInput } from '../types';
 import type { XlnProtocolVersion } from '../protocol/version';
 import type { RuntimeIngressReceipt } from '../server/ingress-receipts';
 
@@ -160,6 +160,10 @@ export type RuntimeAdapterSendResult = {
 
 export type RuntimeAdapterSendOptions = { commandId?: string; commandSequence?: number };
 
+export type RuntimeAdapterCrossJurisdictionIntentResult = {
+  delivered: true;
+};
+
 export interface RuntimeAdapter {
   readonly mode: RuntimeAdapterMode;
   readonly runtimeId: string;
@@ -176,6 +180,9 @@ export interface RuntimeAdapter {
 
   read<T = unknown>(path: string, query?: RuntimeAdapterReadQuery): Promise<T>;
   send(input: RuntimeInput, options?: RuntimeAdapterSendOptions): Promise<RuntimeAdapterSendResult>;
+  submitCrossJurisdictionIntent(
+    route: CrossJurisdictionSwapRoute,
+  ): Promise<RuntimeAdapterCrossJurisdictionIntentResult>;
   onChange(cb: (height: number) => void): () => void;
   onStatus(cb: (status: RuntimeAdapterStatus) => void): () => void;
 }
@@ -199,7 +206,8 @@ export type RuntimeAdapterErrorPayload = {
 export type RuntimeAdapterRequest =
   | { v: XlnProtocolVersion; id: string; op: 'auth'; key?: string; challenge: string; ownerSignature?: string }
   | { v: XlnProtocolVersion; id: string; op: 'read'; path: string; query?: RuntimeAdapterReadQuery }
-  | { v: XlnProtocolVersion; id: string; op: 'send'; commandId: string; commandSequence: number; input: RuntimeInput };
+  | { v: XlnProtocolVersion; id: string; op: 'send'; commandId: string; commandSequence: number; input: RuntimeInput }
+  | { v: XlnProtocolVersion; id: string; op: 'cross-j-intent'; route: CrossJurisdictionSwapRoute };
 
 export type RuntimeAdapterResponse =
   | { v: XlnProtocolVersion; inReplyTo: string; ok: true; payload: unknown }

@@ -490,6 +490,9 @@ const preserveAppliedRoutedProvenance = (
   ...(routedInput.sourceRuntimeFrame
     ? { sourceRuntimeFrame: { ...routedInput.sourceRuntimeFrame } }
     : {}),
+  ...(routedInput.atomicCrossJurisdictionPair
+    ? { atomicCrossJurisdictionPair: { ...routedInput.atomicCrossJurisdictionPair } }
+    : {}),
 });
 
 const applyEntityInputToReplica = async (

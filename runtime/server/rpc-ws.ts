@@ -11,6 +11,7 @@ import {
   readPersistedRuntimeActivityJournal,
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
+  submitCrossJurisdictionIntent,
 } from '../runtime.ts';
 import { handleRuntimeAdapterMessage } from '../radapter/server';
 import { RuntimeAdapterError } from '../radapter/errors';
@@ -137,6 +138,9 @@ export const createServerRpcMessageHandler = ({
   async (ws: RelaySocket, request: RuntimeAdapterRequest, env: Env | null): Promise<void> => {
     await handleRuntimeAdapterMessage(ws, request, env, {
       enqueueRuntimeInput,
+      submitCrossJurisdictionIntent: async (targetEnv, route) => {
+        await submitCrossJurisdictionIntent(targetEnv, route);
+      },
       ...(validateRuntimeInputAdmission ? { validateRuntimeInputAdmission } : {}),
       ...(registerRuntimeInputReceipt ? { registerReceipt: registerRuntimeInputReceipt } : {}),
       ...(readRuntimeInputReceipt ? { readReceipt: readRuntimeInputReceipt } : {}),

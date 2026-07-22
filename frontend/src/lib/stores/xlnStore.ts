@@ -91,6 +91,7 @@ import type {
   BigIntMathUtils,
   FinancialConstants,
   SwapBookEntry,
+  CrossJurisdictionSwapRoute,
   Profile as GossipProfile,
 } from '@xln/runtime/xln-api';
 import { REMOTE_RUNTIME } from '@xln/runtime/constants';
@@ -861,6 +862,10 @@ const createEmbeddedRuntimeAdapter = async (
   return new xln.EmbeddedRuntimeAdapter({
     getEnv: getLiveEnv,
     enqueueRuntimeInput: (env, input) => xln.enqueueRuntimeInput(unwrapLiveRuntimeEnv(env) ?? env, input),
+    submitCrossJurisdictionIntent: async (env, route) => {
+      await xln.submitCrossJurisdictionIntent(unwrapLiveRuntimeEnv(env) ?? env, route);
+      return { delivered: true };
+    },
     registerEnvChangeCallback: (env, cb) => xln.registerEnvChangeCallback(env, cb),
     buildReadContext: (env) => ({
       readHead: () => xln.readPersistedStorageHead(env),
@@ -1682,6 +1687,18 @@ export async function submitRuntimeInput(
   commandOptions: RuntimeCommandExecutionOptions = {},
 ): Promise<Env | null> {
   return submitActiveRuntimeInput(input, commandOptions);
+}
+
+export async function submitActiveCrossJurisdictionIntent(
+  route: CrossJurisdictionSwapRoute,
+): Promise<void> {
+  assertRuntimeViewIsLive(get(runtimeView));
+  assertNetworkMachineIsLive(get(networkMachineRuntime));
+  const adapter = getRuntimeControllerAdapter();
+  if (!adapter || adapter.status !== 'connected') {
+    throw new Error('CROSS_J_INTENT_RUNTIME_ADAPTER_NOT_CONNECTED');
+  }
+  await adapter.submitCrossJurisdictionIntent(route);
 }
 
 export async function submitEntityInputs(inputs: RoutedEntityInput[] = []): Promise<Env | null> {

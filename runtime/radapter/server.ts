@@ -1,5 +1,5 @@
 import type { RuntimeActivityFilters } from '../api/activity-history';
-import type { EntityState, Env, RuntimeInput } from '../types';
+import type { CrossJurisdictionSwapRoute, EntityState, Env, RuntimeInput } from '../types';
 import {
   assertRuntimeAdapterMessageSize,
   encodeRuntimeAdapterMessageForBrowser,
@@ -93,6 +93,7 @@ export type RuntimeAdapterServerDeps = {
     },
 	  ) => Promise<RuntimeAdapterActivityPage>;
 	  enqueueRuntimeInput: (env: Env, input: RuntimeInput) => void;
+	  submitCrossJurisdictionIntent?: (env: Env, route: CrossJurisdictionSwapRoute) => Promise<unknown>;
 	  validateRuntimeInputAdmission?: (env: Env, input: RuntimeInput) => void;
 	  registerReceipt?: (input: RegisterReceiptOptions) => RuntimeIngressReceipt;
 	  readReceipt?: (id: string) => RuntimeIngressReceipt | null;
@@ -553,6 +554,25 @@ export const handleRuntimeAdapterMessage = async (
         } : {}),
       }, msg.path, msg.query);
       sendOk(ws, msg.id, payload, diagnostic());
+      return true;
+    }
+
+    if (msg.op === 'cross-j-intent') {
+      requireAuth(state, 'admin');
+      requireBucket(state.sendBucket, 'send');
+      if (deps.isMutatingIngressReady?.() === false) {
+        throw new RuntimeAdapterError(
+          'E_COMMAND_PENDING',
+          'RUNTIME_STARTUP_J_CATCHUP_PENDING',
+          true,
+          250,
+        );
+      }
+      if (!deps.submitCrossJurisdictionIntent) {
+        throw new RuntimeAdapterError('E_INTERNAL', 'cross-j intent transport is unavailable');
+      }
+      await deps.submitCrossJurisdictionIntent(env, msg.route);
+      sendOk(ws, msg.id, { delivered: true }, diagnostic());
       return true;
     }
 

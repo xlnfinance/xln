@@ -1,4 +1,4 @@
-import type { RuntimeInput } from '../types';
+import type { CrossJurisdictionSwapRoute, RuntimeInput } from '../types';
 import {
   decodeRuntimeAdapterBrowserMessage,
   decodeRuntimeAdapterMessage,
@@ -12,6 +12,7 @@ import type {
   RuntimeAdapterReadQuery,
   RuntimeAdapterRequest,
   RuntimeAdapterResponse,
+  RuntimeAdapterCrossJurisdictionIntentResult,
   RuntimeAdapterSendResult,
   RuntimeAdapterSendOptions,
   RuntimeAdapterStatus,
@@ -35,7 +36,8 @@ type PendingRequest = {
 type RuntimeAdapterRequestBody =
   | { op: 'auth'; key?: string; challenge: string; ownerSignature?: string }
   | { op: 'read'; path: string; query?: RuntimeAdapterReadQuery }
-  | { op: 'send'; commandId: string; commandSequence: number; input: RuntimeInput };
+  | { op: 'send'; commandId: string; commandSequence: number; input: RuntimeInput }
+  | { op: 'cross-j-intent'; route: CrossJurisdictionSwapRoute };
 
 const nextBackoff = (attempt: number, maxMs: number): number =>
   Math.min(maxMs, Math.max(1_000, 2 ** Math.min(attempt, 5) * 250));
@@ -169,6 +171,18 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
         this.nextSequence = Math.max(this.nextSequence ?? 1, commandSequence + 1);
         return result;
       });
+  }
+
+  submitCrossJurisdictionIntent(
+    route: CrossJurisdictionSwapRoute,
+  ): Promise<RuntimeAdapterCrossJurisdictionIntentResult> {
+    // M1 deliberately bypasses the durable RuntimeInput command lane. An
+    // offline Hub is not a financial failure: the user may manually resubmit
+    // the same canonical orderId after reconnecting.
+    return this.request<RuntimeAdapterCrossJurisdictionIntentResult>({
+      op: 'cross-j-intent',
+      route,
+    });
   }
 
   onChange(cb: (height: number) => void): () => void {

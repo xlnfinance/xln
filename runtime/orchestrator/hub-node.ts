@@ -107,6 +107,7 @@ import {
   listPersistedEntityIdsAtHeight,
   registerEnvChangeCallback,
   registerRuntimeFrameCommitCallback,
+  submitCrossJurisdictionIntent,
   validateRuntimeInputAdmission,
 } from '../runtime.ts';
 import type { EntityInput, Env, JReplica } from '../types';
@@ -1674,6 +1675,9 @@ const run = async (): Promise<void> => {
     }
 	    Promise.resolve(handleRuntimeAdapterMessage(ws, msg, env, {
 	      enqueueRuntimeInput,
+	      submitCrossJurisdictionIntent: async (targetEnv, route) => {
+	        await submitCrossJurisdictionIntent(targetEnv, route);
+	      },
 	      validateRuntimeInputAdmission,
 	      registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
 	      readReceipt: (id) => runtimeIngressReceipts.get(id),

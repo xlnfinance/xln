@@ -48,6 +48,7 @@ import {
   listPersistedEntityIdsAtHeight,
   registerEnvChangeCallback,
   registerRuntimeFrameCommitCallback,
+  submitCrossJurisdictionIntent,
 } from '../runtime.ts';
 import type { AccountMachine, CrossJurisdictionSwapRoute, EntityInput, Env, SwapOffer } from '../types';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
@@ -1880,29 +1881,9 @@ const getCommittedSourceAccountCrossOffer = (
 const collectPendingCrossRequestOrderIds = (env: Env, entityId: string): Set<string> => {
   const normalizedEntityId = normalizeEntityRef(entityId);
   const ids = new Set<string>();
-  const collectFromTxs = (txs: EntityInput['entityTxs'] | undefined): void => {
-    for (const tx of txs ?? []) {
-      if (tx?.type !== 'requestCrossJurisdictionSwap') continue;
-      const orderId = String(tx.data?.route?.orderId || '').trim();
-      if (orderId) ids.add(orderId);
-    }
-  };
-
   const replica = getEntityReplicaById(env, normalizedEntityId);
-  collectFromTxs(replica?.mempool);
-  collectFromTxs(replica?.proposal?.txs);
-  collectFromTxs(replica?.lockedFrame?.txs);
   for (const orderId of replica?.state?.crossJurisdictionSwaps?.keys?.() ?? []) {
     if (orderId) ids.add(String(orderId));
-  }
-
-  const runtimeInputs = [
-    ...(env.runtimeMempool?.entityInputs ?? []),
-    ...(env.runtimeInput?.entityInputs ?? []),
-  ];
-  for (const input of runtimeInputs) {
-    if (normalizeEntityRef(input.entityId) !== normalizedEntityId) continue;
-    collectFromTxs(input.entityTxs);
   }
   return ids;
 };
@@ -2428,6 +2409,7 @@ const maintainMarketMakerCrossQuotes = async (
 
   if (emitBootstrapWaveEvents) {
     const entityInputsByEntitySigner = new Map<string, EntityInput>();
+    let submittedIntentCount = 0;
     const pendingCrossRequestOrderIdsBySourceEntity = new Map<string, Set<string>>();
     const getPendingCrossRequestOrderIds = (entityId: string): Set<string> => {
       const normalizedEntityId = normalizeEntityRef(entityId);
@@ -2546,15 +2528,8 @@ const maintainMarketMakerCrossQuotes = async (
         }
         for (const spec of selectedCandidates) {
           const route = spec.crossJurisdiction!;
-          pushMarketMakerEntityTx(
-            entityInputsByEntitySigner,
-            route.source.entityId,
-            sourceContext.signerId,
-            {
-              type: 'requestCrossJurisdictionSwap' as const,
-              data: { route },
-            },
-          );
+          await submitCrossJurisdictionIntent(env, route);
+          submittedIntentCount += 1;
           existingOfferIds.add(spec.offerId);
           selectedForSourceHub += 1;
           remainingNewOffers -= 1;
@@ -2587,6 +2562,7 @@ const maintainMarketMakerCrossQuotes = async (
       }
     }
     if (desiredOffersSeen === 0) return false;
+    if (submittedIntentCount > 0) return true;
     const entityInputs = Array.from(entityInputsByEntitySigner.values());
     const nonEmptyEntityInputs = entityInputs.filter(input => (input.entityTxs?.length || 0) > 0);
     if (nonEmptyEntityInputs.length > 0) {
@@ -2630,6 +2606,7 @@ const maintainMarketMakerCrossQuotes = async (
   }
 
   const entityInputsByEntitySigner = new Map<string, EntityInput>();
+  let submittedIntentCount = 0;
   const pendingCrossRequestOrderIdsBySourceEntity = new Map<string, Set<string>>();
   const getPendingCrossRequestOrderIds = (entityId: string): Set<string> => {
     const normalizedEntityId = normalizeEntityRef(entityId);
@@ -2738,21 +2715,15 @@ const maintainMarketMakerCrossQuotes = async (
 
     for (const spec of missing) {
       const route = spec.crossJurisdiction!;
-      pushMarketMakerEntityTx(
-        entityInputsByEntitySigner,
-        route.source.entityId,
-        sourceContext.signerId,
-        {
-          type: 'requestCrossJurisdictionSwap' as const,
-          data: { route: spec.crossJurisdiction! },
-        },
-      );
+      await submitCrossJurisdictionIntent(env, route);
+      submittedIntentCount += 1;
     }
     remainingNewOffers -= missing.length;
     remainingSourceHubGroups -= 1;
     if (remainingSourceHubGroups <= 0) break;
   }
 
+  if (submittedIntentCount > 0) return true;
   const entityInputs = Array.from(entityInputsByEntitySigner.values());
   const nonEmptyEntityInputs = entityInputs.filter(input => (input.entityTxs?.length || 0) > 0);
   if (nonEmptyEntityInputs.length > 0) {
@@ -3807,6 +3778,9 @@ const run = async (): Promise<void> => {
     }
 	    Promise.resolve(handleRuntimeAdapterMessage(ws, msg, env, {
 	      enqueueRuntimeInput,
+	      submitCrossJurisdictionIntent: async (targetEnv, route) => {
+	        await submitCrossJurisdictionIntent(targetEnv, route);
+	      },
 	      validateRuntimeInputAdmission,
 	      registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
 	      readReceipt: (id) => runtimeIngressReceipts.get(id),

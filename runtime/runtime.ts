@@ -54,6 +54,7 @@ import {
 import { requireBoundaryInteger } from './protocol/boundary-validation';
 import { listOpenSwapOffers } from './orderbook/open-swap-offers';
 import { requireDurableJurisdictionStack } from './jurisdiction/contract-address';
+import { withCanonicalCrossJurisdictionRouteHash } from './extensions/cross-j/index';
 import {
   buildCanonicalEnvSnapshot,
   buildCanonicalJReplicaSnapshot,
@@ -255,7 +256,7 @@ import {
   type RuntimeOutputRoutingDeps,
 } from './machine/output-routing';
 import { runtimeInputRequiresOutboxCapacity } from './machine/admission';
-import { isDeliveryDelivered } from './protocol/payments/delivery-result';
+import { isDeliveryDelivered, requireDeliveryResult } from './protocol/payments/delivery-result';
 import { prepareHtlcPaymentEntityInputs } from './protocol/htlc/payment-admission';
 import { copyDeterministicHtlcTestSecretCapability } from './protocol/htlc/test-secret-capability';
 import {
@@ -466,6 +467,7 @@ import {
 import type {
   AccountFrame,
   CertifiedEntityFrameLink,
+  CrossJurisdictionSwapRoute,
   EntityInput,
   EntityReplica,
   EntityState,
@@ -2393,6 +2395,35 @@ const crossJAccountFrameMatches = (
     String(account.currentFrame.stateHash || '').toLowerCase() === expected.stateHash.toLowerCase();
 };
 
+const markCommittedCrossJAtomicAckOutputs = (
+  outputs: RoutedEntityInput[],
+  pairs: ReturnType<typeof selectMatchedCrossJAccountInputPairs>['pairs'],
+): void => {
+  for (const pair of pairs) {
+    if (pair.phase !== 'proposal') continue;
+    const expectedFrames = [pair.sourceAccountFrame, pair.targetAccountFrame];
+    const matched = expectedFrames.map(expected => outputs.filter(output =>
+      output.entityId.toLowerCase() === expected.counterpartyEntityId.toLowerCase() &&
+      getEffectiveEntityInputTxs(output).some(tx => {
+        if (tx.type !== 'accountInput') return false;
+        const ack = accountInputAck(tx.data);
+        return Boolean(
+          ack &&
+          tx.data.fromEntityId.toLowerCase() === expected.entityId.toLowerCase() &&
+          tx.data.toEntityId.toLowerCase() === expected.counterpartyEntityId.toLowerCase() &&
+          ack.height === expected.height &&
+          String(ack.frameHash || '').toLowerCase() === expected.stateHash.toLowerCase()
+        );
+      })));
+    if (matched.some(candidates => candidates.length !== 1) || matched[0]![0] === matched[1]![0]) {
+      throw new Error(`RUNTIME_CROSS_J_ATOMIC_ACK_OUTPUTS_INVALID:${pair.pairKey}`);
+    }
+    for (const output of [matched[0]![0]!, matched[1]![0]!]) {
+      output.atomicCrossJurisdictionPair = { phase: 'ack', pairKey: pair.pairKey };
+    }
+  }
+};
+
 const summarizeCrossJAccountInput = (input: RoutedEntityInput, inputIndex: number) => ({
   inputIndex,
   entityId: input.entityId,
@@ -2421,38 +2452,6 @@ const summarizeCrossJAccountInput = (input: RoutedEntityInput, inputIndex: numbe
     }];
   }),
 });
-
-const summarizeCrossJAdmissionHubState = (
-  env: Env,
-  inputs: readonly RoutedEntityInput[],
-) => inputs.flatMap(input => getEffectiveEntityInputTxs(input).flatMap(tx => {
-  if (tx.type !== 'accountInput') return [];
-  const proposal = accountInputProposal(tx.data);
-  return (proposal?.frame.accountTxs ?? []).flatMap(accountTx => {
-    if (accountTx.type !== 'pull_lock') return [];
-    const receipt = accountTx.data.crossJurisdiction?.targetReceipt;
-    if (!receipt) return [];
-    const replica = [...env.eReplicas.values()].find(candidate =>
-      candidate.entityId.toLowerCase() === receipt.hubEntityId.toLowerCase());
-    const account = [...(replica?.state.accounts.entries() ?? [])].find(([counterpartyId]) =>
-      counterpartyId.toLowerCase() === receipt.counterpartyEntityId.toLowerCase())?.[1];
-    const targetPullOrders = (frame: NonNullable<typeof account>['currentFrame'] | undefined) =>
-      (frame?.accountTxs ?? []).flatMap(candidate =>
-        candidate.type === 'pull_lock' && candidate.data.crossJurisdiction?.leg === 'target'
-          ? [candidate.data.crossJurisdiction.orderId]
-          : []);
-    return [{
-      orderId: receipt.orderId,
-      targetHubEntityId: receipt.hubEntityId,
-      targetCounterpartyEntityId: receipt.counterpartyEntityId,
-      targetHubIsHub: replica?.state.profile.isHub === true,
-      currentHeight: account?.currentFrame.height ?? null,
-      currentTargetPullOrders: targetPullOrders(account?.currentFrame),
-      pendingHeight: account?.pendingFrame?.height ?? null,
-      pendingTargetPullOrders: targetPullOrders(account?.pendingFrame),
-    }];
-  });
-}));
 
 export const prepareAtomicCrossJAccountInputs = async (
   env: Env,
@@ -2511,7 +2510,6 @@ export const prepareAtomicCrossJAccountInputs = async (
       // collapses nested objects to `[Object ...]`, which destroyed the exact
       // ACK/proposal/frame evidence needed to diagnose a rejected money leg.
       inputSummary: safeStringify(inputs.map(summarizeCrossJAccountInput)),
-      targetHubStateSummary: safeStringify(summarizeCrossJAdmissionHubState(env, inputs)),
     });
     for (const dropped of droppedInputs) {
       recordRuntimeSecurityIncident(env, {
@@ -2746,6 +2744,7 @@ const applyRuntimeInput = async (
     if (failedAtomicIndexes.size > 0) {
       throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_COMMIT_DIVERGED_FROM_PREFLIGHT');
     }
+    markCommittedCrossJAtomicAckOutputs(appliedEntityBatch.entityOutbox, preparedEntityInputs.pairs);
     const { entityOutbox, appliedEntityInputs, entityFrameCommitted, jOutbox } = appliedEntityBatch;
 
     // Reliable receiver authority is part of the R-machine post-state, not a
@@ -7131,13 +7130,60 @@ export type {
   DebtEnforcementRuntimeInputParams,
 } from './machine/jurisdiction-api';
 
+export async function submitCrossJurisdictionIntent(
+  env: Env,
+  route: CrossJurisdictionSwapRoute,
+): Promise<CrossJurisdictionSwapSubmitResult> {
+  const canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
+  if (canonicalRoute.status !== 'intent' || canonicalRoute.sourcePull || canonicalRoute.targetPull) {
+    throw new Error(`CROSS_J_INTENT_STATE_INVALID:${canonicalRoute.orderId}`);
+  }
+  const routing = getRuntimeOutputRoutingDeps();
+  const targetRuntimeId = routing.resolveRuntimeIdForCrossJurisdictionEntity(
+    env,
+    canonicalRoute.source.counterpartyEntityId,
+  );
+  if (!targetRuntimeId) {
+    throw new Error(`CROSS_J_INTENT_HUB_RUNTIME_UNKNOWN:${canonicalRoute.source.counterpartyEntityId}`);
+  }
+  const sourceRuntimeId = normalizeRuntimeId(env.runtimeId);
+  if (!sourceRuntimeId) throw new Error('CROSS_J_INTENT_SOURCE_RUNTIME_INVALID');
+  const envelope: RuntimeEntityInputsEnvelope = {
+    sourceRuntimeId,
+    sourceRuntimeHeight: Math.max(0, Math.floor(Number(env.height || 0))),
+    sourceRuntimeTimestamp: Math.max(0, Math.floor(Number(env.timestamp || 0))),
+    entityInputs: [],
+    crossJurisdictionIntent: structuredClone(canonicalRoute),
+  };
+  const state = ensureRuntimeState(env);
+  const direct = state.directEntityInputsDispatch;
+  const delivery = direct
+    ? requireDeliveryResult(
+        direct(targetRuntimeId, envelope, envelope.sourceRuntimeTimestamp),
+        'CROSS_J_INTENT_DIRECT_DELIVERY_INVALID',
+      )
+    : requireDeliveryResult(
+        getP2P(env)?.enqueueEntityInputsDelivery(
+          targetRuntimeId,
+          envelope,
+          envelope.sourceRuntimeTimestamp,
+        ),
+        'CROSS_J_INTENT_P2P_DELIVERY_INVALID',
+      );
+  if (!isDeliveryDelivered(delivery)) {
+    // M1 is intentionally best-effort: no durable outbox and no automatic
+    // retry. The caller may resubmit the same orderId after the Hub reconnects.
+    throw new Error(`CROSS_J_INTENT_NOT_DELIVERED:${delivery.code}`);
+  }
+  return { route: canonicalRoute };
+}
+
 export async function submitCrossJurisdictionSwap(
   env: Env,
   params: CrossJurisdictionSwapSubmitParams,
 ): Promise<CrossJurisdictionSwapSubmitResult> {
-  const { route, input } = buildCrossJurisdictionSwapSubmission(env, params);
-  enqueueRuntimeInput(env, input);
-  return { route };
+  const { route } = buildCrossJurisdictionSwapSubmission(env, params);
+  return submitCrossJurisdictionIntent(env, route);
 }
 
 // Entity ID utilities - universal parsing, provider-scoping, comparison

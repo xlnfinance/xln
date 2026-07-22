@@ -59,7 +59,7 @@ describe('runtime activity history', () => {
           entityId: hub,
           signerId: hub,
           entityTxs: [{
-            type: 'commitCrossJurisdictionSwap',
+            type: 'registerCrossJurisdictionSwap',
             data: { route },
           }],
         }],

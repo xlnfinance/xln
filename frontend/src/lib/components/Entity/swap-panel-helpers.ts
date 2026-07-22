@@ -71,7 +71,7 @@ export type CrossTargetSetupTx =
     };
 
 export type CrossSwapRuntimeInputPlan = {
-  input: RuntimeInput;
+  setupInput: RuntimeInput | null;
   targetSetupTxs: EntityTx[];
 };
 
@@ -420,8 +420,6 @@ export function buildCrossTargetSetupTxs(input: {
 }
 
 export function buildCrossSwapRuntimeInputPlan(input: {
-  sourceEntityId: string;
-  sourceSignerId: string;
   route: CrossJurisdictionSwapRoute;
   targetEntityId: string;
   targetSignerId: string;
@@ -431,12 +429,8 @@ export function buildCrossSwapRuntimeInputPlan(input: {
   shouldOpenTargetAccount: boolean;
   shouldExtendTargetCredit: boolean;
 }): CrossSwapRuntimeInputPlan {
-  const sourceEntityId = normalizeEntityId(input.sourceEntityId);
-  const sourceSignerId = String(input.sourceSignerId || '').trim();
   const targetEntityId = normalizeEntityId(input.targetEntityId);
   const targetSignerId = String(input.targetSignerId || '').trim();
-  if (!sourceEntityId) throw new Error('Cross swap source entity is required.');
-  if (!sourceSignerId) throw new Error('Cross swap source signer is required.');
   if (!targetEntityId) throw new Error('Cross swap target entity is required.');
   if (!targetSignerId) throw new Error('Cross swap target signer is required.');
 
@@ -459,26 +453,8 @@ export function buildCrossSwapRuntimeInputPlan(input: {
       }
     : null;
 
-  const requestInput: RuntimeInput = {
-    runtimeTxs: [],
-    entityInputs: [{
-      entityId: sourceEntityId,
-      signerId: sourceSignerId,
-      entityTxs: [{
-        type: 'requestCrossJurisdictionSwap',
-        data: { route: input.route },
-      }],
-    }],
-  };
-
   return {
-    input: {
-      runtimeTxs: [],
-      entityInputs: [
-        ...(setupInput?.entityInputs ?? []),
-        ...requestInput.entityInputs,
-      ],
-    },
+    setupInput,
     targetSetupTxs,
   };
 }

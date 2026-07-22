@@ -91,65 +91,6 @@ const accountAckOutput = (height: number): DeliverableEntityInput => ({
   } as never],
 });
 
-const atomicCrossJSourceProposal = (
-  frame: NonNullable<RoutedEntityInput['sourceRuntimeFrame']>,
-  pullCount = 1,
-): DeliverableEntityInput => ({
-  runtimeId: targetRuntimeId,
-  entityId: targetEntityId,
-  signerId: targetSignerId,
-  sourceRuntimeFrame: frame,
-  entityTxs: [{
-    type: 'accountInput',
-    data: {
-      kind: 'frame',
-      fromEntityId: accountPeerId,
-      toEntityId: targetEntityId,
-      proposal: {
-        frame: {
-          height: 8,
-          timestamp: frame.timestamp,
-          accountTxs: Array.from({ length: pullCount }, (_, index) => {
-            const suffix = pullCount === 1 ? '' : `-${index}`;
-            const orderId = `atomic-cross-j-order${suffix}`;
-            const routeHash = `0xatomic-cross-j-route${suffix}`;
-            return [{
-              type: 'pull_lock',
-              data: {
-                crossJurisdiction: {
-                  leg: 'source',
-                  orderId,
-                  routeHash,
-                  targetReceipt: {
-                    receiptHash: `0xtarget-receipt${suffix}`,
-                    leg: 'target',
-                    orderId,
-                    routeHash,
-                    hubEntityId: targetEntityId,
-                    counterpartyEntityId: accountPeerId,
-                    pullId: `target-pull${suffix}`,
-                    tokenId: 1,
-                    signedAmount: 1n,
-                    revealedUntilTimestamp: 1,
-                    fullHash: `0xtarget-full${suffix}`,
-                    partialRoot: `0xtarget-partial${suffix}`,
-                    committedAt: frame.timestamp,
-                  },
-                },
-              },
-            }, {
-              type: 'swap_offer',
-              data: {
-                crossJurisdiction: { orderId, routeHash },
-              },
-            }];
-          }).flat(),
-        },
-      },
-    },
-  } as never],
-});
-
 const jFinalityOutput = (height: number): DeliverableEntityInput => ({
   runtimeId: targetRuntimeId,
   entityId: targetEntityId,
@@ -258,8 +199,9 @@ const receiptGatedCases = orderedCases.filter(([label]) => label !== 'account AC
 describe('ordered reliable output lanes', () => {
   test('atomic cross-j envelope waits for an explicit retry trigger', () => {
     const frame = { height: 77, timestamp: 1_000 };
-    const ack = { ...accountAckOutput(3), sourceRuntimeFrame: frame };
-    const sourceProposal = atomicCrossJSourceProposal(frame);
+    const pair = { phase: 'ack' as const, pairKey: 'atomic-ack-pair-77' };
+    const sourceAck = { ...accountAckOutput(3), sourceRuntimeFrame: frame, atomicCrossJurisdictionPair: pair };
+    const targetAck = { ...accountAckOutput(4), sourceRuntimeFrame: frame, atomicCrossJurisdictionPair: pair };
     const env = {
       scenarioMode: true,
       timestamp: 1_000,
@@ -273,7 +215,7 @@ describe('ordered reliable output lanes', () => {
     env.pendingNetworkOutputs = rescheduleDeferredOutputs(
       env,
       [],
-      [sourceProposal, ack],
+      [sourceAck, targetAck],
       [],
       deps,
     );
@@ -287,10 +229,11 @@ describe('ordered reliable output lanes', () => {
     expect(hasReadyPendingNetworkOutputs(env, deps, 1_000_000)).toBe(true);
   });
 
-  test('one ACK keeps a batched cross-j Account frame atomic across every source pull', () => {
+  test('one cohort keeps both cross-j Account ACKs atomic', () => {
     const frame = { height: 78, timestamp: 1_000 };
-    const ack = { ...accountAckOutput(3), sourceRuntimeFrame: frame };
-    const batchedSourceProposal = atomicCrossJSourceProposal(frame, 11);
+    const pair = { phase: 'ack' as const, pairKey: 'atomic-ack-pair-78' };
+    const sourceAck = { ...accountAckOutput(3), sourceRuntimeFrame: frame, atomicCrossJurisdictionPair: pair };
+    const targetAck = { ...accountAckOutput(4), sourceRuntimeFrame: frame, atomicCrossJurisdictionPair: pair };
     const env = {
       scenarioMode: true,
       timestamp: 1_000,
@@ -304,19 +247,26 @@ describe('ordered reliable output lanes', () => {
     env.pendingNetworkOutputs = rescheduleDeferredOutputs(
       env,
       [],
-      [batchedSourceProposal, ack],
+      [sourceAck, targetAck],
       [],
       deps,
     );
 
     expect(env.pendingNetworkOutputs).toHaveLength(2);
-    expect(env.runtimeState?.deferredNetworkMeta?.size).toBe(1);
+    expect(env.runtimeState?.deferredNetworkMeta?.size).toBe(2);
     expect(getNextNetworkRetryTimestamp(env, deps)).toBeNull();
-    expect([...env.runtimeState!.deferredNetworkMeta!.values()]).toEqual([{
-      attempts: 1,
-      nextRetryAt: 1_000,
-      manual: true,
-    }]);
+    expect([...env.runtimeState!.deferredNetworkMeta!.values()]).toEqual([
+      {
+        attempts: 1,
+        nextRetryAt: 1_000,
+        manual: true,
+      },
+      {
+        attempts: 1,
+        nextRetryAt: 1_000,
+        manual: true,
+      },
+    ]);
   });
 
   test('keeps Account ACK retry cadence below the bilateral liveness timeout', () => {

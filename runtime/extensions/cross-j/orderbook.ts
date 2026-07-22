@@ -1,5 +1,3 @@
-import { ethers } from 'ethers';
-
 import {
   CROSS_J_MAX_FILL_RATIO,
   cloneCrossJurisdictionRoute,
@@ -23,9 +21,6 @@ import {
 import type {
   AccountTx,
   CrossJurisdictionBookAdmission,
-  CrossJurisdictionBookAdmissionReceipt,
-  CrossJurisdictionBookLeg,
-  CrossJurisdictionPullLeg,
   CrossJurisdictionSwapRoute,
   EntityState,
 } from '../../types';
@@ -53,158 +48,19 @@ const mergeAdmissionRoute = (
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
-const buildCrossJurisdictionBookAdmissionReceiptHash = (
-  input: Omit<CrossJurisdictionBookAdmissionReceipt, 'receiptHash'>,
-): string => ethers.keccak256(ethers.toUtf8Bytes([
-  'xln:cross-j:book-admission-receipt',
-  input.leg,
-  input.orderId,
-  input.routeHash,
-  input.hubEntityId,
-  input.counterpartyEntityId,
-  input.pullId,
-  String(input.tokenId),
-  input.signedAmount.toString(),
-  String(input.revealedUntilTimestamp),
-  input.fullHash,
-  input.partialRoot,
-  String(input.committedAt),
-].join('|'))).toLowerCase();
-
 export const crossJurisdictionBookAdmissionKeyFor = (sourceEntityId: string, orderId: string): string =>
   `${normalizeEntityRef(sourceEntityId)}:${String(orderId || '')}`;
 
 export const crossJurisdictionBookAdmissionKey = (route: CrossJurisdictionSwapRoute): string =>
   crossJurisdictionBookAdmissionKeyFor(route.source.entityId, route.orderId);
 
-const routeLegRefs = (
-  route: CrossJurisdictionSwapRoute,
-  leg: CrossJurisdictionBookLeg,
-): { hubEntityId: string; counterpartyEntityId: string; pull: CrossJurisdictionPullLeg | undefined } => (
-  leg === 'source'
-    ? {
-        hubEntityId: route.source.counterpartyEntityId,
-        counterpartyEntityId: route.source.entityId,
-        pull: route.sourcePull,
-      }
-    : {
-        hubEntityId: route.target.entityId,
-        counterpartyEntityId: route.target.counterpartyEntityId,
-        pull: route.targetPull,
-      }
-);
-
-const receiptAdmissionError = (
-  routeOrderId: string,
-  routeHash: string,
-  legName: CrossJurisdictionBookLeg,
-  receipt: CrossJurisdictionBookAdmissionReceipt | undefined,
-  expected: CrossJurisdictionPullLeg,
-  expectedHubEntityId: string,
-  expectedCounterpartyEntityId: string,
-): string | null => {
-  if (!receipt) {
-    return `CROSS_J_BOOK_ADMISSION_PENDING: order=${routeOrderId} leg=${legName} pull=${expected.pullId}`;
-  }
-  const { receiptHash, ...receiptBody } = receipt;
-  if (!receiptHash) {
-    return `CROSS_J_BOOK_ADMISSION_RECEIPT_MISMATCH: order=${routeOrderId} leg=${legName} receiptHash=missing`;
-  }
-  const expectedReceiptHash = buildCrossJurisdictionBookAdmissionReceiptHash(receiptBody);
-  if (receiptHash.toLowerCase() !== expectedReceiptHash.toLowerCase()) {
-    return `CROSS_J_BOOK_ADMISSION_RECEIPT_MISMATCH: order=${routeOrderId} leg=${legName} receiptHash=${receiptHash} expected=${expectedReceiptHash}`;
-  }
-  if (
-    receipt.leg !== legName ||
-    receipt.orderId !== routeOrderId ||
-    receipt.routeHash.toLowerCase() !== routeHash.toLowerCase() ||
-    normalizeEntityRef(receipt.hubEntityId) !== normalizeEntityRef(expectedHubEntityId) ||
-    normalizeEntityRef(receipt.counterpartyEntityId) !== normalizeEntityRef(expectedCounterpartyEntityId) ||
-    receipt.pullId !== expected.pullId ||
-    receipt.tokenId !== expected.tokenId ||
-    receipt.signedAmount !== expected.signedAmount ||
-    (receipt.fullHash || '').toLowerCase() !== expected.fullHash.toLowerCase() ||
-    (receipt.partialRoot || '').toLowerCase() !== expected.partialRoot.toLowerCase() ||
-    receipt.revealedUntilTimestamp !== expected.revealedUntilTimestamp
-  ) {
-    return `CROSS_J_BOOK_ADMISSION_RECEIPT_MISMATCH: order=${routeOrderId} leg=${legName} pull=${expected.pullId}`;
-  }
-  return null;
-};
-
-export const getCrossJurisdictionBookReceiptError = (
-  route: CrossJurisdictionSwapRoute,
-  receipt: CrossJurisdictionBookAdmissionReceipt,
-): string | null => {
-  const canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
-  const { hubEntityId, counterpartyEntityId, pull } = routeLegRefs(canonicalRoute, receipt.leg);
-  if (!pull) {
-    return `CROSS_J_BOOK_RECEIPT_PULL_REF_MISSING: order=${canonicalRoute.orderId} leg=${receipt.leg}`;
-  }
-  return receiptAdmissionError(
-    canonicalRoute.orderId,
-    canonicalRoute.routeHash || '',
-    receipt.leg,
-    receipt,
-    pull,
-    hubEntityId,
-    counterpartyEntityId,
-  );
-};
-
 export const crossJurisdictionBookOwnerRef = (route: CrossJurisdictionSwapRoute): string =>
   normalizeEntityRef(route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId || '');
-
-export const buildCrossJurisdictionBookAdmissionReceipt = (
-  route: CrossJurisdictionSwapRoute,
-  leg: CrossJurisdictionBookLeg,
-  accountTx: Extract<AccountTx, { type: 'pull_lock' }>,
-  hubEntityId: string,
-  counterpartyEntityId: string,
-  committedAt: number,
-): CrossJurisdictionBookAdmissionReceipt => {
-  const canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
-  const { hubEntityId: expectedHubEntityId, counterpartyEntityId: expectedCounterpartyEntityId, pull } =
-    routeLegRefs(canonicalRoute, leg);
-  if (!pull) {
-    throw new Error(`CROSS_J_BOOK_RECEIPT_PULL_REF_MISSING: order=${canonicalRoute.orderId} leg=${leg}`);
-  }
-  const receiptBody: Omit<CrossJurisdictionBookAdmissionReceipt, 'receiptHash'> = {
-    leg,
-    orderId: canonicalRoute.orderId,
-    routeHash: canonicalRoute.routeHash || '',
-    hubEntityId: normalizeEntityRef(hubEntityId),
-    counterpartyEntityId: normalizeEntityRef(counterpartyEntityId),
-    pullId: String(accountTx.data.pullId || ''),
-    tokenId: Number(accountTx.data.tokenId),
-    signedAmount: BigInt(accountTx.data.amount),
-    revealedUntilTimestamp: Number(accountTx.data.revealedUntilTimestamp),
-    fullHash: String(accountTx.data.fullHash || ''),
-    partialRoot: String(accountTx.data.partialRoot || ''),
-    committedAt: Number(committedAt || 0),
-  };
-  const receipt: CrossJurisdictionBookAdmissionReceipt = {
-    receiptHash: buildCrossJurisdictionBookAdmissionReceiptHash(receiptBody),
-    ...receiptBody,
-  };
-  const error = receiptAdmissionError(
-    canonicalRoute.orderId,
-    canonicalRoute.routeHash || '',
-    leg,
-    receipt,
-    pull,
-    expectedHubEntityId,
-    expectedCounterpartyEntityId,
-  );
-  if (error) throw new Error(error);
-  return receipt;
-};
 
 export const mergeCrossJurisdictionBookAdmission = (
   currentEntityState: EntityState,
   route: CrossJurisdictionSwapRoute,
   now: number,
-  receipt?: CrossJurisdictionBookAdmissionReceipt,
 ): CrossJurisdictionBookAdmission => {
   const canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
   const key = crossJurisdictionBookAdmissionKey(canonicalRoute);
@@ -226,10 +82,6 @@ export const mergeCrossJurisdictionBookAdmission = (
         route: mergedRoute,
         updatedAt: now,
       };
-  if (receipt) {
-    if (receipt.leg === 'source') current.sourceReceipt = receipt;
-    if (receipt.leg === 'target') current.targetReceipt = receipt;
-  }
   currentEntityState.crossJurisdictionBookAdmissions.set(key, current);
   return current;
 };
@@ -378,28 +230,7 @@ export const getCrossJurisdictionBookAdmissionError = (
     return `CROSS_J_BOOK_ADMISSION_ROUTE_MISMATCH: order=${canonicalRoute.orderId}`;
   }
 
-  const sourceRefs = routeLegRefs(canonicalRoute, 'source');
-  const targetRefs = routeLegRefs(canonicalRoute, 'target');
-  return (
-    receiptAdmissionError(
-      canonicalRoute.orderId,
-      canonicalRoute.routeHash || '',
-      'source',
-      admission.sourceReceipt,
-      canonicalRoute.sourcePull,
-      sourceRefs.hubEntityId,
-      sourceRefs.counterpartyEntityId,
-    ) ??
-    receiptAdmissionError(
-      canonicalRoute.orderId,
-      canonicalRoute.routeHash || '',
-      'target',
-      admission.targetReceipt,
-      canonicalRoute.targetPull,
-      targetRefs.hubEntityId,
-      targetRefs.counterpartyEntityId,
-    )
-  );
+  return null;
 };
 
 export const isCrossJurisdictionBookAdmissionPending = (error: string | null): boolean =>

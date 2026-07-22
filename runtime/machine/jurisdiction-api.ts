@@ -51,7 +51,6 @@ export type CrossJurisdictionSwapSubmitResult = {
 };
 
 export type CrossJurisdictionSwapSubmission = CrossJurisdictionSwapSubmitResult & {
-  input: RuntimeInput;
 };
 
 export type DebtEnforcementRuntimeInputParams = {
@@ -213,20 +212,6 @@ export function buildCrossJurisdictionSwapSubmission(
 
   return {
     route,
-    input: {
-      runtimeTxs: [],
-      entityInputs: [
-        {
-          entityId: params.sourceUserEntityId,
-          signerId: sourceUserSignerId,
-          entityTxs: [{
-            type: 'requestCrossJurisdictionSwap',
-            data: { route },
-          }],
-        },
-      ],
-      timestamp: now,
-    },
   };
 }
 

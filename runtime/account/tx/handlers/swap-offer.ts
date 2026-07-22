@@ -27,7 +27,6 @@ import {
   deriveCanonicalCrossJurisdictionMarket,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../extensions/cross-j/index';
-import { getCrossJurisdictionBookReceiptError } from '../../../extensions/cross-j/orderbook';
 import { MAX_SWAP_FILL_RATIO } from '../../../orderbook/swap-execution';
 import { ensureDelta } from '../delta-utils';
 import { addHold } from '../hold-utils';
@@ -108,15 +107,24 @@ export async function handleSwapOffer(
 
   // 3. Determine maker perspective (Channel.ts: byLeft = frame proposer = maker)
   const { leftEntity, rightEntity } = accountMachine;
-  const makerIsLeft = byLeft;
+  const proposerEntityId = byLeft ? leftEntity : rightEntity;
+  const makerIsLeft = crossJurisdiction
+    ? crossJurisdiction.makerEntityId.toLowerCase() === leftEntity.toLowerCase()
+    : byLeft;
   const makerEntityId = makerIsLeft ? leftEntity : rightEntity;
   if (
     crossJurisdiction &&
-    crossJurisdiction.makerEntityId.toLowerCase() !== makerEntityId.toLowerCase()
+    (
+      crossJurisdiction.makerEntityId.toLowerCase() !== makerEntityId.toLowerCase() ||
+      ![
+        crossJurisdiction.makerEntityId,
+        crossJurisdiction.source.counterpartyEntityId,
+      ].some(entityId => entityId.toLowerCase() === proposerEntityId.toLowerCase())
+    )
   ) {
     return {
       success: false,
-      error: `Cross-j swap maker must match the frame proposer`,
+      error: `Cross-j swap proposer must be the maker or source hub`,
       events,
     };
   }
@@ -267,26 +275,15 @@ export async function handleSwapOffer(
       };
     }
     const binding = pairedPull.crossJurisdiction;
-    const targetReceipt = binding?.targetReceipt ?? crossJurisdiction.targetReceipt;
     if (
       !binding ||
       binding.leg !== 'source' ||
       binding.orderId !== canonicalCrossJurisdiction.orderId ||
-      (binding.routeHash || '').toLowerCase() !== (canonicalCrossJurisdiction.routeHash || '').toLowerCase() ||
-      !targetReceipt ||
-      targetReceipt.leg !== 'target'
+      (binding.routeHash || '').toLowerCase() !== (canonicalCrossJurisdiction.routeHash || '').toLowerCase()
     ) {
       return {
         success: false,
-        error: `Cross-j source pull requires target receipt binding`,
-        events,
-      };
-    }
-    const receiptError = getCrossJurisdictionBookReceiptError(canonicalCrossJurisdiction, targetReceipt);
-    if (receiptError) {
-      return {
-        success: false,
-        error: receiptError,
+        error: `Cross-j source pull binding mismatch`,
         events,
       };
     }

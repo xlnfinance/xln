@@ -65,7 +65,14 @@ import type {
   StorageMerkleRootDoc,
   StorageSnapshotManifest,
 } from '../storage/types';
-import type { AccountTx, Delta, EntityReplica, Env, RuntimeInput } from '../types';
+import type {
+  AccountTx,
+  CrossJurisdictionSwapRoute,
+  Delta,
+  EntityReplica,
+  Env,
+  RuntimeInput,
+} from '../types';
 import type { BookState } from '../orderbook';
 import { DEFAULT_SPREAD_DISTRIBUTION, type OrderbookExtState } from '../orderbook/types';
 import { createGossipLayer, type Profile } from '../networking/gossip';
@@ -2975,6 +2982,66 @@ test('runtime adapter websocket handler rejects send under inspect auth', async 
   expect(denied.ok).toBe(false);
   expect(denied.error.code).toBe('E_UNAUTHORIZED');
   expect(denied.error.message).toContain('admin auth required');
+  expect(enqueued).toBe(0);
+});
+
+test('runtime adapter cross-j intent requires admin and bypasses the durable command lane', async () => {
+  const messages: unknown[] = [];
+  const socket = { send: (message: unknown) => { messages.push(message); } };
+  const env = makeEnv();
+  const route = {
+    orderId: 'radapter-cross-j-intent',
+    status: 'intent',
+  } as unknown as CrossJurisdictionSwapRoute;
+  let enqueued = 0;
+  const submitted: CrossJurisdictionSwapRoute[] = [];
+  const deps = {
+    enqueueRuntimeInput: () => { enqueued += 1; },
+    submitCrossJurisdictionIntent: async (_env: Env, submittedRoute: CrossJurisdictionSwapRoute) => {
+      submitted.push(submittedRoute);
+    },
+  };
+
+  await handleRuntimeAdapterMessage(socket, {
+    v: 1,
+    id: 'auth-inspect',
+    op: 'auth',
+    key: inspectToken(),
+    challenge: adapterAuthChallenge,
+  }, env, deps);
+  messages.length = 0;
+  await handleRuntimeAdapterMessage(socket, {
+    v: 1,
+    id: 'cross-j-denied',
+    op: 'cross-j-intent',
+    route,
+  }, env, deps);
+  const denied = decodeTestRuntimeAdapterMessage<{ ok: false; error: { code: string } }>(messages.pop());
+  expect(denied.ok).toBe(false);
+  expect(denied.error.code).toBe('E_UNAUTHORIZED');
+  expect(submitted).toHaveLength(0);
+
+  await handleRuntimeAdapterMessage(socket, {
+    v: 1,
+    id: 'auth-admin',
+    op: 'auth',
+    key: deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000),
+    challenge: adapterAuthChallenge,
+  }, env, deps);
+  messages.length = 0;
+  await handleRuntimeAdapterMessage(socket, {
+    v: 1,
+    id: 'cross-j-delivered',
+    op: 'cross-j-intent',
+    route,
+  }, env, deps);
+  const delivered = decodeTestRuntimeAdapterMessage<{
+    ok: true;
+    payload: { delivered: boolean };
+  }>(messages.pop());
+  expect(delivered.ok).toBe(true);
+  expect(delivered.payload).toEqual({ delivered: true });
+  expect(submitted).toEqual([route]);
   expect(enqueued).toBe(0);
 });
 

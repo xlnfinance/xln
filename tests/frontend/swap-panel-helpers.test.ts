@@ -284,7 +284,7 @@ describe('swap panel helpers', () => {
     })).toThrow('positive inbound credit limit');
   });
 
-  test('builds one RuntimeInput for one-click cross swap setup and request', () => {
+  test('builds only target setup input; M1 stays an unsigned best-effort intent', () => {
     const route = {
       orderId: 'order-1',
       makerEntityId: '0xsource',
@@ -294,8 +294,6 @@ describe('swap panel helpers', () => {
     } as never;
 
     const plan = buildCrossSwapRuntimeInputPlan({
-      sourceEntityId: '0xSOURCE',
-      sourceSignerId: '0xSourceSigner',
       route,
       targetEntityId: '0xTARGET',
       targetSignerId: '0xTargetSigner',
@@ -306,7 +304,7 @@ describe('swap panel helpers', () => {
       shouldExtendTargetCredit: true,
     });
 
-    expect(plan.input.entityInputs).toEqual([
+    expect(plan.setupInput?.entityInputs).toEqual([
       {
         entityId: '0xtarget',
         signerId: '0xTargetSigner',
@@ -319,14 +317,6 @@ describe('swap panel helpers', () => {
           },
         }],
       },
-      {
-        entityId: '0xsource',
-        signerId: '0xSourceSigner',
-        entityTxs: [{
-          type: 'requestCrossJurisdictionSwap',
-          data: { route },
-        }],
-      },
     ]);
   });
 
@@ -335,7 +325,8 @@ describe('swap panel helpers', () => {
     return source.text().then((text) => {
       expect(text).toContain('buildCrossSwapRuntimeInputPlan');
       expect(text).toContain('crossInputPlan.targetSetupTxs.length > 0');
-      expect(text).toContain('await submitRuntimeInput(crossInputPlan.input)');
+      expect(text).toContain('await submitRuntimeInput(crossInputPlan.setupInput)');
+      expect(text).toContain('await submitActiveCrossJurisdictionIntent(crossJurisdiction)');
       expect(text).not.toContain('crossCommandEnv');
       expect(text).not.toContain('submitRuntimeInput(crossCommandEnv, runtimeInput)');
       expect(text).not.toContain('await submitRuntimeInput(nextEnv, crossInputPlan.requestInput)');
@@ -388,7 +379,8 @@ describe('swap panel helpers', () => {
     expect(resolverSlice).toContain('resolveProjectedSignerId(entityId)');
     expect(resolverSlice).not.toContain("throw new Error('XLN environment not ready')");
     expect(placeSlice).toContain('resolveSwapLogicalClock(currentReplica)');
-    expect(placeSlice).toContain('await submitRuntimeInput(crossInputPlan.input)');
+    expect(placeSlice).toContain('await submitRuntimeInput(crossInputPlan.setupInput)');
+    expect(placeSlice).toContain('await submitActiveCrossJurisdictionIntent(crossJurisdiction)');
     expect(placeSlice).toContain('await submitEntityInputs([{');
     expect(placeSlice).toContain('await prewarmCounterpartyProfiles(runtimeEnv, [targetRoute.targetHubEntityId])');
     expect(placeSlice).not.toContain("throw new Error('XLN environment not ready')");
