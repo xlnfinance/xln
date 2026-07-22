@@ -66,4 +66,5 @@ cd jurisdictions && bunx hardhat test --grep DeltaTransformer
 - `bun run test:e2e:fast` runs the canonical isolated browser flow set from `runtime/scripts/run-e2e-fast.ts`.
 - `bun run gate:quick` runs source checks, selected runtime/native tests, soundcheck, and whitespace checks.
 - `bun run gate:ci` adds frontend check, contracts, persistence/watchtower smoke, coverage markers, and fast E2E.
-- `bun run gate:release` adds soak, core E2E, RPC scenarios, storage benchmark, and production health smoke.
+- `bun run gate:release` adds deterministic replay, core E2E, RPC scenarios, and the storage benchmark.
+- Production topology health is a post-deploy gate run by the mainnet/capped-testnet preflight.

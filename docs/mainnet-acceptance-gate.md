@@ -57,7 +57,7 @@ Concrete examples:
   static project rules must pass.
 - `bun run gate:release` is an integrated release gate: runtime tests,
   contracts, RPC settlement, persistence, watchtower smoke, fast e2e, system
-  tests, storage benchmark, and prod health.
+  tests, deterministic replay, and the storage benchmark.
 - `bun run gate:mainnet-preflight` is the operator-facing preflight: it runs
   source checks, deterministic money invariants, security audit pack, release
   gate, full browser e2e, watchtower smoke, and capped topology health.

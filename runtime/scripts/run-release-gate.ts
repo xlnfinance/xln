@@ -96,8 +96,11 @@ const releaseSteps: GateStep[] = [
   { name: 'core E2E gate', command: 'bun run test:e2e:core', timeoutMs: 1_200_000 },
   { name: 'RPC system scenarios', command: 'bun run test:system:parallel', timeoutMs: 1_200_000 },
   { name: 'hub 10k storage benchmark', command: 'bun run bench:radapter:hub10k', timeoutMs: 1_200_000 },
-  { name: 'production health smoke', command: 'bun run prod:health', timeoutMs: 60_000 },
 ];
+
+// A release candidate has not been deployed yet, so querying the current production
+// endpoint cannot validate this SHA. Deployment topology health stays mandatory in
+// the mainnet/capped-testnet preflight and the post-deploy operations gate.
 
 const profileSteps: Record<GateProfile, GateStep[]> = {
   quick: [...quickSteps, { name: 'frozen core final', command: 'bun run frozen-core:check', timeoutMs: 30_000 }],
