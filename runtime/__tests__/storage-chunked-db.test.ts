@@ -74,4 +74,35 @@ describe('chunked LevelDB values', () => {
     raw.rows.get(chunkKey)![0] ^= 0xff;
     await expect(db.get(key)).rejects.toThrow('STORAGE_CHUNK_CHECKSUM_MISMATCH');
   });
+
+  test('epoch copy collects chunks orphaned by overwrite and delete', async () => {
+    const sourceRaw = new MemoryDb();
+    const source = withChunkedValues(sourceRaw);
+    const key = Buffer.from([0x22, 0x03]);
+    await source.put!(key, Buffer.alloc(24_000, 0x11));
+    const firstPhysicalRows = sourceRaw.rows.size;
+    await source.put!(key, Buffer.alloc(24_000, 0x22));
+    expect(sourceRaw.rows.size).toBeGreaterThan(firstPhysicalRows);
+
+    const rotatedRaw = new MemoryDb();
+    const rotated = withChunkedValues(rotatedRaw);
+    for await (const logicalKey of source.keys!()) {
+      const normalizedKey = Buffer.from(logicalKey);
+      await rotated.put!(normalizedKey, await source.get(normalizedKey));
+    }
+    expect(await rotated.get(key)).toEqual(Buffer.alloc(24_000, 0x22));
+    expect(rotatedRaw.rows.size).toBe(firstPhysicalRows);
+
+    const deletion = source.batch();
+    deletion.del!(key);
+    await deletion.write();
+    expect(sourceRaw.rows.size).toBeGreaterThan(0);
+    const emptyEpochRaw = new MemoryDb();
+    const emptyEpoch = withChunkedValues(emptyEpochRaw);
+    for await (const logicalKey of source.keys!()) {
+      const normalizedKey = Buffer.from(logicalKey);
+      await emptyEpoch.put!(normalizedKey, await source.get(normalizedKey));
+    }
+    expect(emptyEpochRaw.rows.size).toBe(0);
+  });
 });

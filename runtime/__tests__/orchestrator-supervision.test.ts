@@ -5,6 +5,8 @@ import type { spawn } from 'node:child_process';
 
 import {
   killManagedProcessIds,
+  managedLeaseMatchesProcessBirth,
+  parseManagedProcessTable,
   readManagedProcessTable,
   type ManagedProcessOps,
 } from '../orchestrator/managed-runtime-leases';
@@ -34,6 +36,24 @@ test('managed process discovery fails closed on spawn error and non-zero exit', 
   await expect(exitFailure).rejects.toThrow(
     'MANAGED_PROCESS_TABLE_EXIT_FAILED:code=2:signal=:stderr=ps unavailable',
   );
+});
+
+test('managed process table binds a PID to its OS birth time', () => {
+  const entries = parseManagedProcessTable(
+    '  4321 Wed Jul 22 07:55:36 2026 bun runtime/orchestrator/hub-node.ts --name H1\n',
+  );
+  expect(entries).toHaveLength(1);
+  expect(entries[0]?.pid).toBe(4321);
+  expect(entries[0]?.command).toContain('hub-node.ts');
+  expect(entries[0]?.processStartedAt).toBe(Date.parse('Wed Jul 22 07:55:36 2026'));
+  expect(() => parseManagedProcessTable('4321 malformed-row')).toThrow('MANAGED_PROCESS_TABLE_ROW_INVALID');
+
+  const lease = { pid: 4321, processStartedAt: entries[0]!.processStartedAt };
+  expect(managedLeaseMatchesProcessBirth(lease, entries[0]!)).toBe(true);
+  expect(managedLeaseMatchesProcessBirth(lease, {
+    ...entries[0]!,
+    processStartedAt: entries[0]!.processStartedAt + 1_000,
+  })).toBe(false);
 });
 
 test('managed stale process termination verifies the PID after SIGKILL', async () => {

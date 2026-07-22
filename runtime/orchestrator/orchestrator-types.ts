@@ -564,5 +564,6 @@ export type ManagedRuntimeLease = ManagedRuntimeSpec & {
   pid: number;
   cwd: string;
   startedAt: number;
+  processStartedAt: number;
   updatedAt: number;
 };

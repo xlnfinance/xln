@@ -64,6 +64,8 @@ export const KEY_SNAPSHOT_ENTITY = 0x31;
 export const KEY_SNAPSHOT_ACCOUNT = 0x32;
 export const KEY_SNAPSHOT_BOOK = 0x33;
 export const KEY_SNAPSHOT_REPLICA_META = 0x34;
+/** Physical content-addressed chunks; hidden by the logical DB adapter. */
+export const KEY_CHUNK_VALUE = 0x7e;
 
 export const STORAGE_VERIFY_TAIL_FRAMES = 128;
 export const EPOCH_SEED_FRAME_TAIL = STORAGE_VERIFY_TAIL_FRAMES + 1;

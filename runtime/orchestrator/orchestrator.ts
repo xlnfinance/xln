@@ -1339,7 +1339,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
   if (!proc.pid) {
     throw new Error(`${child.name}_SPAWN_FAILED_NO_PID`);
   }
-  managedRuntimeLeases.writeLease(spec, proc.pid, child.startedAt ?? Date.now());
+  await managedRuntimeLeases.writeLease(spec, proc.pid, child.startedAt ?? Date.now());
   const stdoutPrefixState: PrefixLogState = { pending: '' };
   const stderrPrefixState: PrefixLogState = { pending: '' };
   proc.stdout?.on('data', chunk => {
@@ -1440,7 +1440,7 @@ const spawnMarketMaker = async (): Promise<void> => {
   if (!proc.pid) {
     throw new Error('MM_SPAWN_FAILED_NO_PID');
   }
-  managedRuntimeLeases.writeLease(spec, proc.pid, marketMakerChild.startedAt ?? Date.now());
+  await managedRuntimeLeases.writeLease(spec, proc.pid, marketMakerChild.startedAt ?? Date.now());
   const stdoutPrefixState: PrefixLogState = { pending: '' };
   const stderrPrefixState: PrefixLogState = { pending: '' };
   proc.stdout?.on('data', chunk => {

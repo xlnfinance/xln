@@ -6,7 +6,7 @@ import { createStructuredLogger } from '../infra/logger';
 import { safeStringify } from '../protocol/serialization';
 import type { ManagedRuntimeLease, ManagedRuntimeSpec } from './orchestrator-types';
 
-export type ManagedProcessTableEntry = { pid: number; command: string };
+export type ManagedProcessTableEntry = { pid: number; processStartedAt: number; command: string };
 
 export type ManagedProcessOps = {
   kill(pid: number, signal: NodeJS.Signals | 0): true;
@@ -16,6 +16,7 @@ export type ManagedProcessOps = {
 type ManagedRuntimeLeaseManagerConfig = {
   controlPlaneDir: string;
   ownerId: string;
+  processOps?: ManagedProcessOps;
 };
 
 const formatError = (error: unknown): string => error instanceof Error ? error.message : String(error);
@@ -53,6 +54,28 @@ const commandMatchesManagedRuntime = (command: string, spec: ManagedRuntimeSpec)
   return hasApiPort && hasDbPath;
 };
 
+export const parseManagedProcessTable = (stdout: string): ManagedProcessTableEntry[] => stdout
+  .split(/\r?\n/)
+  .map((line): ManagedProcessTableEntry | null => {
+    if (!line.trim()) return null;
+    const match = line.match(/^\s*(\d+)\s+(\S+\s+\S+\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+)$/);
+    if (!match) throw new Error(`MANAGED_PROCESS_TABLE_ROW_INVALID:${line.trim()}`);
+    const pid = Number.parseInt(match[1]!, 10);
+    if (!Number.isFinite(pid) || pid <= 0) throw new Error(`MANAGED_PROCESS_TABLE_PID_INVALID:${match[1]}`);
+    if (pid === process.pid) return null;
+    const processStartedAt = Date.parse(match[2]!);
+    if (!Number.isFinite(processStartedAt) || processStartedAt <= 0) {
+      throw new Error(`MANAGED_PROCESS_TABLE_START_INVALID:pid=${pid}:value=${match[2]}`);
+    }
+    return { pid, processStartedAt, command: match[3]!.trim() };
+  })
+  .filter((row): row is ManagedProcessTableEntry => row !== null);
+
+export const managedLeaseMatchesProcessBirth = (
+  lease: Pick<ManagedRuntimeLease, 'pid' | 'processStartedAt'>,
+  processEntry: Pick<ManagedProcessTableEntry, 'pid' | 'processStartedAt'>,
+): boolean => lease.pid === processEntry.pid && lease.processStartedAt === processEntry.processStartedAt;
+
 export const killManagedProcessIds = async (
   pids: number[],
   label: string,
@@ -88,7 +111,7 @@ export const readManagedProcessTable = async (
   spawnProcess: typeof spawn = spawn,
 ): Promise<ManagedProcessTableEntry[]> => {
   return await new Promise<ManagedProcessTableEntry[]>((resolve, reject) => {
-    const child = spawnProcess('ps', ['-axo', 'pid=,command='], {
+    const child = spawnProcess('ps', ['-axo', 'pid=,lstart=,command='], {
       cwd: process.cwd(),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -122,22 +145,17 @@ export const readManagedProcessTable = async (
         ));
         return;
       }
-      const rows = stdout
-        .split(/\r?\n/)
-        .map((line): ManagedProcessTableEntry | null => {
-          const match = line.match(/^\s*(\d+)\s+(.+)$/);
-          if (!match) return null;
-          const pid = Number.parseInt(match[1]!, 10);
-          if (!Number.isFinite(pid) || pid <= 0 || pid === process.pid) return null;
-          return { pid, command: match[2]!.trim() };
-        })
-        .filter((row): row is ManagedProcessTableEntry => row !== null);
-      resolve(rows);
+      try {
+        resolve(parseManagedProcessTable(stdout));
+      } catch (error) {
+        reject(error);
+      }
     });
   });
 };
 
 export const createManagedRuntimeLeaseManager = (config: ManagedRuntimeLeaseManagerConfig) => {
+  const processOps = config.processOps ?? defaultProcessOps;
   const leasePathFor = (spec: ManagedRuntimeSpec): string =>
     join(config.controlPlaneDir, `${spec.role}-${spec.name.toLowerCase()}.lease.json`);
 
@@ -153,7 +171,9 @@ export const createManagedRuntimeLeaseManager = (config: ManagedRuntimeLeaseMana
         Number(parsed.apiPort) === spec.apiPort &&
         String(parsed.dbPath || '') === spec.dbPath &&
         typeof parsed.ownerId === 'string' &&
-        Number.isFinite(parsed.pid)
+        Number.isFinite(parsed.pid) &&
+        Number.isFinite(parsed.processStartedAt) &&
+        Number(parsed.processStartedAt) > 0
       ) {
         return {
           role: spec.role,
@@ -166,6 +186,7 @@ export const createManagedRuntimeLeaseManager = (config: ManagedRuntimeLeaseMana
           pid: Number(parsed.pid),
           cwd: String(parsed.cwd || ''),
           startedAt: Number(parsed.startedAt || 0),
+          processStartedAt: Number(parsed.processStartedAt),
           updatedAt: Number(parsed.updatedAt || 0),
         };
       }
@@ -175,7 +196,9 @@ export const createManagedRuntimeLeaseManager = (config: ManagedRuntimeLeaseMana
     return null;
   };
 
-  const writeLease = (spec: ManagedRuntimeSpec, pid: number, startedAt: number): void => {
+  const writeLease = async (spec: ManagedRuntimeSpec, pid: number, startedAt: number): Promise<void> => {
+    const row = (await readManagedProcessTable()).find(candidate => candidate.pid === pid);
+    if (!row) throw new Error(`MANAGED_RUNTIME_PROCESS_BIRTH_MISSING:pid=${pid}`);
     mkdirSync(config.controlPlaneDir, { recursive: true });
     const lease: ManagedRuntimeLease = {
       ...spec,
@@ -184,6 +207,7 @@ export const createManagedRuntimeLeaseManager = (config: ManagedRuntimeLeaseMana
       pid,
       cwd: process.cwd(),
       startedAt,
+      processStartedAt: row.processStartedAt,
       updatedAt: Date.now(),
     };
     const path = leasePathFor(spec);
@@ -207,32 +231,45 @@ export const createManagedRuntimeLeaseManager = (config: ManagedRuntimeLeaseMana
   ): Promise<void> => {
     const table = processTable ?? await readManagedProcessTable();
     const candidates = new Set<number>();
+    const reusedPids = new Set<number>();
     const lease = readLease(spec);
     if (lease) {
-      if (!isPidAlive(lease.pid)) {
+      if (!isPidAlive(lease.pid, processOps)) {
         rmSync(leasePathFor(spec), { force: true });
-      } else if (lease.ownerId !== config.ownerId && lease.pid !== currentPid) {
-        candidates.add(lease.pid);
+      } else {
+        const row = table.find(candidate => candidate.pid === lease.pid);
+        if (!row) throw new Error(`MANAGED_RUNTIME_LIVE_PID_MISSING_FROM_TABLE:pid=${lease.pid}`);
+        if (!managedLeaseMatchesProcessBirth(lease, row)) {
+          reusedPids.add(lease.pid);
+          rmSync(leasePathFor(spec), { force: true });
+          managedLeaseLog.warn('lease.pid_reused', {
+            pid: lease.pid,
+            leasedProcessStartedAt: lease.processStartedAt,
+            actualProcessStartedAt: row.processStartedAt,
+          });
+        } else if (lease.ownerId !== config.ownerId && lease.pid !== currentPid) {
+          candidates.add(lease.pid);
+        }
       }
     }
 
     const commandByPid = new Map<number, string>();
     for (const row of table) {
       commandByPid.set(row.pid, row.command);
-      if (row.pid === currentPid) continue;
+      if (row.pid === currentPid || reusedPids.has(row.pid)) continue;
       if (commandMatchesManagedRuntime(row.command, spec)) candidates.add(row.pid);
     }
 
     const verified: number[] = [];
     for (const pid of candidates) {
-      if (pid === process.pid || pid === currentPid || !isPidAlive(pid)) continue;
+      if (pid === process.pid || pid === currentPid || !isPidAlive(pid, processOps)) continue;
       const command = commandByPid.get(pid) || '';
       if (commandMatchesManagedRuntime(command, spec)) {
         verified.push(pid);
       }
     }
 
-    await killManagedProcessIds(verified, `${spec.name} ${spec.role} process(es)`);
+    await killManagedProcessIds(verified, `${spec.name} ${spec.role} process(es)`, processOps);
   };
 
   return {

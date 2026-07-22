@@ -91,9 +91,9 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   a fresh reset, keep one format only; do not add migrations or dual readers.
 - [ ] Verify the previously failing 10 SIGKILL lineage cases on current HEAD;
   fix any remaining loss of certified lineage without inventing peer recovery.
-- [ ] Register chunk prefix `0x7e`; prove delete/overwrite/checkpoint collection
+- [x] Register chunk prefix `0x7e`; prove delete/overwrite/checkpoint collection
   cannot leak orphan chunks indefinitely; document truncated checksum scope.
-- [ ] Add PID-reuse reproducer and bind writer ownership to process birth
+- [x] Add PID-reuse reproducer and bind writer ownership to process birth
   identity. A live writer cannot be stolen; a dead writer cannot block forever.
 - [ ] Replace 83 manual dirty marks incrementally with reducer-returned
   `{nextState, storageChanges, durableEffects}` and differential proof for

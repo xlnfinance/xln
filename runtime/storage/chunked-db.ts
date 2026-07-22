@@ -1,8 +1,9 @@
 import { computeIntegrityChecksum, integrityChecksumFromHex } from '../infra/integrity-checksum';
+import { KEY_CHUNK_VALUE } from './keys';
 
 const MAX_PHYSICAL_VALUE_BYTES = 10 * 1024;
 const CHUNK_PAYLOAD_BYTES = 4 * 1024;
-const CHUNK_KEY_PREFIX = 0x7e;
+const CHUNK_KEY_PREFIX = KEY_CHUNK_VALUE;
 const MANIFEST_MAGIC = Buffer.from('xln-chunks\0', 'ascii');
 const MANIFEST_BYTES = MANIFEST_MAGIC.byteLength + 4 + 4 + 16;
 
@@ -76,6 +77,13 @@ const chunkKey = (checksum: string, index: number): Buffer => Buffer.concat([
   Buffer.from(integrityChecksumFromHex(checksum)),
   u32(index),
 ]);
+
+/**
+ * Chunk addresses use the first 128 bits of SHA-256 only for local physical
+ * deduplication and corruption detection. They are not a financial or
+ * consensus commitment: logical values are decoded and checked again by the
+ * authoritative 256-bit storage/frame/state hashes before recovery.
+ */
 
 const isChunkKey = (raw: Buffer | Uint8Array | string): boolean => {
   const key = Buffer.isBuffer(raw) ? raw : raw instanceof Uint8Array ? Buffer.from(raw) : Buffer.from(String(raw));
