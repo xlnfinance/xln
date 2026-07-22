@@ -68,7 +68,10 @@ async function getActiveApiBase(page: Page): Promise<string> {
   return relayToApiBase(runtimeApi) ?? APP_BASE_URL;
 }
 
-async function ensureAnyHubAccountOpen(page: Page): Promise<{ entityId: string; signerId: string; counterpartyId: string }> {
+async function ensureHubAccountOpen(
+  page: Page,
+  disputeMode: 'auto' | 'manual' = 'auto',
+): Promise<{ entityId: string; signerId: string; counterpartyId: string }> {
   const apiBase = await getActiveApiBase(page);
   const response = await page.request.get(`${apiBase}/api/debug/entities`);
   expect(response.ok(), 'debug entities endpoint must be available').toBe(true);
@@ -79,10 +82,13 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<{ entityId: string; 
     .filter((entity) => entity.isHub === true && typeof entity.entityId === 'string');
   const preferredHub = hubs.find((entity) => {
     const name = String(entity.name || entity.metadata?.name || '').trim().toUpperCase();
-    return name !== 'H2';
-  }) ?? hubs[0];
+    return disputeMode === 'manual' ? name === 'H2' : name !== 'H2';
+  });
   const hubId = preferredHub?.entityId;
-  expect(typeof hubId === 'string' && hubId.length > 0, 'at least one auto-finalizing hub must be available').toBe(true);
+  expect(
+    typeof hubId === 'string' && hubId.length > 0,
+    `${disputeMode} dispute hub must be available`,
+  ).toBe(true);
 
   await connectHub(page, hubId!);
 
@@ -1340,7 +1346,10 @@ test.describe('E2E Dispute Flow', () => {
 
     await timedStep('dispute.goto_app', () => gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 500 }));
     await timedStep('dispute.create_runtime', () => createRuntimeIdentity(page, `dispute-rt-${Date.now()}`, randomMnemonic()));
-    const accountRef = await timedStep('dispute.ensure_hub_account', () => ensureAnyHubAccountOpen(page));
+    // H1/H3 may correctly finalize as the counterparty immediately after DisputeStarted.
+    // Use H2's explicit manual mode so this lifecycle test deterministically observes
+    // the active state before advancing to the timeout and finalization stages.
+    const accountRef = await timedStep('dispute.ensure_hub_account', () => ensureHubAccountOpen(page, 'manual'));
     await timedStep('dispute.seed_preconditions', () => seedDisputePreconditions(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId));
 
     const localReserveBefore = await readLocalReserveState(page, accountRef.entityId, { allowUnavailable: true });
@@ -1438,7 +1447,10 @@ test.describe('E2E Dispute Flow', () => {
       await expect.poll(async () => {
         const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
         return snap.batchHistoryCount;
-      }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(finalizeBatchBefore.batchHistoryCount);
+      // The authenticated watcher deliberately advances at most 256 headers per
+      // poll. A production 5,760-block dispute window therefore needs multiple
+      // verified ranges before the starter can queue its timeout finalization.
+      }, { timeout: 180_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(finalizeBatchBefore.batchHistoryCount);
     });
     await timedStep('dispute.wait_finalize_applied', async () => {
       await expect.poll(async () => {
@@ -1561,7 +1573,7 @@ test.describe('E2E Dispute Flow', () => {
 
     await timedStep('dispute_broadcast.goto_app', () => gotoSharedApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 500 }));
     await timedStep('dispute_broadcast.create_runtime', () => createRuntimeIdentity(page, `dispute-ui-broadcast-rt-${Date.now()}`, randomMnemonic()));
-    const accountRef = await timedStep('dispute_broadcast.ensure_hub_account', () => ensureAnyHubAccountOpen(page));
+    const accountRef = await timedStep('dispute_broadcast.ensure_hub_account', () => ensureHubAccountOpen(page));
     await timedStep(
       'dispute_broadcast.seed_preconditions',
       () => seedDisputePreconditions(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
