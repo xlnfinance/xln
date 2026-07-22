@@ -1,96 +1,72 @@
-# xln platform distribution plan
+# xln distribution
 
-Status snapshot: 2026-07-22.
+Snapshot: 2026-07-22. Product name: **xln finance**. Package name: `xlnfinance`.
 
-## Current state
+## Release contract
 
-| Surface   | Existing code                                              | Distribution today                                            | Main blocker                                                              |
-| --------- | ---------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Web       | Full wallet at `/app`                                      | Public                                                        | Mutable server-delivered code is an unavoidable trust boundary            |
-| Bun CLI   | Four local package placeholders                            | None; npm registry returns 404 for every proposed xln package | Implement a real launcher, claim/publish a package, add provenance        |
-| Desktop   | Hardened Electron shell and macOS `.app` packager          | Source/build preview only                                     | Signed installers, notarization, Windows/Linux builders, verified updates |
-| iOS       | Capacitor shell, Xcode project, deep links, notifications  | Local debug build only                                        | Apple team signing, entitlements, archive/export, TestFlight              |
-| Android   | Capacitor shell, Gradle project, deep links, notifications | Local debug APK only                                          | Release keystore, AAB, Play Console internal testing                      |
-| Extension | MV3 keyless companion                                      | Unpacked Chromium build only                                  | Store packaging/review, Firefox port, Safari wrapper                      |
+Every artifact comes from one tagged commit and one version. `release/channels.json`
+defines the channels; `bun run release:manifest` records each downloadable asset,
+byte size, SHA-256 hash, commit, tag, and immutable GitHub Release URL.
 
-The npm name `xln` is already used by an unrelated package. The intended short command is therefore:
+No unsigned build is presented as trusted. Web delivery always retains the fundamental
+mutable-server warning. Release gates are L1 tests, targeted browser/native flows,
+screenshots at iPhone/laptop/wide viewports, and `bun run check`.
 
-```sh
-bunx xlnfinance@<version>
-```
+## Surfaces
 
-Do not publish the current `0.0.0` placeholders. They print reservation messages and are not installers.
+| Surface | Build | Distribution | Update path |
+| --- | --- | --- | --- |
+| Web | Static `/app` | `xln.finance/app` | Reload; server code remains mutable |
+| Local runtime | Bun daemon + static wallet | `bunx xlnfinance` | `bunx xlnfinance update` |
+| Desktop | Hardened Electron shell | GitHub Releases, then signed installers | Signed release feed |
+| iPhone/iPad | Capacitor iOS | TestFlight, then App Store | App Store |
+| Android | Capacitor Android | APK + Play internal testing | Google Play |
+| Chrome | Complete MV3 wallet | Unsigned ZIP, then Chrome Web Store | Chrome Web Store |
 
-## Distribution contract
+## Local runtime security and parity
 
-Every public channel must be produced from the same immutable commit and version. A generated release manifest should contain:
+The launcher creates stable local runtime/auth seeds, starts a loopback-only Bun daemon,
+and opens `http://localhost:8080/app` with a one-time 60-second pairing token. The token
+is exchanged same-origin for a short-lived `full` capability; the browser receives
+`access: admin`, never the persistent daemon control secret.
 
-- commit SHA, version, build timestamp, minimum OS versions, and runtime/frontend hashes;
-- artifact URLs, byte sizes, SHA-256 hashes, and detached signatures;
-- signing identity or certificate fingerprint for each platform;
-- release notes and an explicit security status (`preview`, `signed-beta`, or `stable`).
+On first start the daemon derives its local owner signer from the node seed and commits
+one deterministic lazy entity before reporting ready. The signer key stays in the node;
+the browser receives the projected entity and admin action surface, never the seed.
 
-The install page must derive availability from this manifest at build time. Missing artifacts fail the release; the UI must never turn a source directory into a download claim.
+The daemon survives browser and terminal closure. Embedded and remote wallets share the
+same `RuntimeAdapter` contract for reads, payments, accounts, swaps, entity/settings
+commands, cross-jurisdiction intent, history, and admin chain verification. Browser QA
+proves a profile write through remote admin, daemon restart, reconnect, and persisted
+height/state. Direct BrowserVM trie mutation is a developer backdoor, not a wallet
+capability, and is not exposed over remote admin RPC.
 
-## Phase 1: reproducible release foundation
+## Platform work
 
-1. Add a deterministic release job that builds the browser bundle once and feeds the identical artifact to Electron, Capacitor, and the extension.
-2. Generate SBOM, SHA-256 hashes, signed provenance, and `distribution.json` from the immutable release commit.
-3. Attach artifacts and manifest to a GitHub Release. Keep the public web app versioned at an immutable path for auditability, while explicitly retaining the mutable-origin warning.
-4. Gate release on native unit tests, browser screenshots at iPhone/laptop/wide sizes, package smoke tests, and `bun run check`.
+### Desktop
 
-Exit: a release can be identified, reproduced, and verified before any store upload.
+- Produce macOS ZIP/DMG, Windows installer, and Linux AppImage/deb from the same web bundle.
+- Sign/notarize macOS and Authenticode-sign Windows before enabling automatic install.
+- Reject downgrade and unsigned update metadata; test offline start, native links, and upgrade.
 
-## Phase 2: Bun and Electron
+### Mobile
 
-### Bun CLI
+- Apple: enroll, configure the signing team and privacy metadata, archive in CI, upload to TestFlight.
+- Android: create an offline release keystore, build AAB, publish to Play internal testing.
+- Test recovery, deep links, notification permissions, fresh install, and upgrade on real devices.
 
-1. Replace `packages/npm/xlnfinance` with a real, fail-fast launcher.
-2. Make the launcher resolve an explicit version, verify the signed release manifest and artifact hash, install locally, then launch xln. Never execute mutable Git `main` as an install path.
-3. Publish `xlnfinance` with npm provenance and public access; test `bunx xlnfinance@<version>` on clean macOS, Windows, and Linux machines.
-4. Keep `create-xln`, `xln-cli`, and `@xln/cli` unpublished until each has a distinct real purpose.
+### Chrome
 
-### Electron desktop
+- Keep Chrome-only MV3 packaging. No Firefox, Safari, or Edge scope.
+- Upload the same tested ZIP to Chrome Web Store for signed delivery and automatic updates.
+- Keep signing keys in the wallet vault/runtime; never in extension storage or service-worker messages.
 
-1. Retain the current loopback-only static server, sandboxed renderer, isolated preload bridge, deny-by-default permissions, and `xln://` handling.
-2. Add a cross-platform Electron packager (Electron Forge is the recommended default) without replacing the existing security boundary.
-3. Produce signed macOS DMG/ZIP, Windows MSIX or installer, and Linux AppImage plus deb/rpm artifacts.
-4. Configure macOS hardened runtime/notarization and Windows Authenticode. Add signed update metadata; never trust an unsigned update feed.
-5. Test install, upgrade, downgrade rejection, deep links, notifications, single-instance behavior, offline startup, and uninstall on every OS.
+## Accounts required
 
-Exit: all desktop buttons point to signed release artifacts and show version plus hash.
+- npm account and trusted publisher for `xlnfinance`.
+- Apple Developer Program and App Store Connect.
+- Google Play Console developer account.
+- Chrome Web Store developer account.
+- macOS Developer ID/notarization credentials and a Windows code-signing certificate.
 
-## Phase 3: iOS and Android
-
-### Apple
-
-1. Configure the Apple team, production bundle identifier, capabilities, universal/deep links, push environment, privacy manifest, and export options.
-2. Archive the existing Capacitor app from CI, upload to App Store Connect, and release through an internal TestFlight group first.
-3. Verify fresh install, upgrade, background wake, recovery, biometric/device-lock interaction, and iPhone/iPad layouts.
-
-### Android
-
-1. Create an offline-protected release keystore, configure signing outside the repository, and build an Android App Bundle.
-2. Publish to Google Play internal testing, then closed testing, with data-safety declarations and deep-link verification.
-3. Test fresh install, upgrade, backup-disabled storage, notification permission, recovery, and representative API levels.
-
-Exit: TestFlight and Play internal links are real, versioned, and exercised by release QA.
-
-## Phase 4: browser extensions
-
-1. Preserve the extension as a keyless companion until isolated signing/storage has its own threat model and audit.
-2. Add a minimal popup that reports the connected local wallet, requested permissions, and exact companion version.
-3. Package and submit MV3 builds to Chrome Web Store and Edge Add-ons with the current origin allowlist and zero host permissions.
-4. Port the constrained API surface to Firefox. Build Safari Web Extension packaging through the signed Apple app rather than expanding browser privileges.
-5. Add store-policy documents, permission justifications, wake/deep-link integration tests, and update compatibility tests.
-
-Exit: store links replace source links; the extension still holds no wallet signing keys.
-
-## Readiness labels
-
-- **Available now:** a public artifact or URL works for users today.
-- **Build preview:** source and local build path pass focused tests, but no signed public artifact exists.
-- **Signed beta:** public signed artifact exists in a staged channel such as TestFlight or Play internal testing.
-- **Stable:** signed distribution, update path, recovery flow, and platform-specific release gates are green.
-
-No channel advances by copy change alone. Its label changes only when the corresponding artifact and evidence exist.
+GitHub Releases and unsigned Chrome ZIPs need none of those store accounts and can ship first.

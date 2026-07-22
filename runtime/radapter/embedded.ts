@@ -3,6 +3,7 @@ import type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
 	  RuntimeAdapterConfig,
+	  RuntimeAdapterControlAction,
 	  RuntimeAdapterCrossJurisdictionIntentResult,
 	  RuntimeAdapterReadQuery,
 	  RuntimeAdapterSendResult,
@@ -19,6 +20,7 @@ export type EmbeddedRuntimeAdapterDeps = {
     env: Env,
     route: CrossJurisdictionSwapRoute,
   ) => Promise<RuntimeAdapterCrossJurisdictionIntentResult>;
+  controlRuntime?: (env: Env, action: RuntimeAdapterControlAction) => Promise<unknown>;
   registerEnvChangeCallback: (env: Env, cb: (env: Env) => void) => (() => void);
   buildReadContext?: (env: Env) => Partial<Omit<RuntimeAdapterResolveContext, 'env'>>;
 };
@@ -110,6 +112,15 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
     const env = this.resolveEnv();
     if (!env) return Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'embedded runtime env is not ready', true));
     return this.deps.submitCrossJurisdictionIntent(env, route);
+  }
+
+  control<T = unknown>(action: RuntimeAdapterControlAction): Promise<T> {
+    const env = this.resolveEnv();
+    if (!env) return Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'embedded runtime env is not ready', true));
+    if (!this.deps.controlRuntime) {
+      return Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'runtime admin control is unavailable'));
+    }
+    return this.deps.controlRuntime(env, action) as Promise<T>;
   }
 
   onChange(cb: (height: number) => void): () => void {

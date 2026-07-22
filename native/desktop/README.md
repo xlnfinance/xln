@@ -1,4 +1,4 @@
-# XLN Desktop Shell
+# xln finance desktop
 
 Electron wrapper for the same `frontend/build` artifact used by mobile shells.
 

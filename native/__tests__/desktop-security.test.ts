@@ -37,7 +37,7 @@ describe('desktop shell security policy', () => {
 			title: ' '.repeat(10),
 			body: `pay\n${'x'.repeat(300)}`,
 		});
-		expect(payload.title).toBe('XLN payment');
+		expect(payload.title).toBe('xln payment');
 		expect(payload.body.length).toBeLessThanOrEqual(180);
 		expect(payload.body).not.toContain('\n');
 	});

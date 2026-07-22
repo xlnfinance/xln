@@ -499,6 +499,7 @@ import {
 } from './utils';
 import { createStructuredLogger, logError } from './infra/logger';
 import type { PersistedFrameJournal } from './storage/types';
+import { verifyStorageTailIntegrity } from './storage/verify';
 import {
   buildRuntimeActivityEvents,
   dedupeRuntimeActivityEvents,
@@ -6579,6 +6580,20 @@ export const verifyRuntimeChain = async (
     expectedCanonicalStateHash,
     actualCanonicalStateHash,
   };
+};
+
+export const verifyLiveRuntimeStorage = async (env: Env): Promise<{
+  ok: true;
+  runtimeId: string;
+  latestHeight: number;
+  checkedFrames: number;
+}> => {
+  const ready = await tryOpenFrameDb(env);
+  if (!ready) throw new Error('LIVE_RUNTIME_STORAGE_UNAVAILABLE');
+  return withStorageConsistentRead(env, async () => {
+    const result = await verifyStorageTailIntegrity(getFrameDb(env));
+    return { ok: true, runtimeId: String(env.runtimeId || ''), ...result };
+  });
 };
 
 export const readPersistedFrameJournal = async (env: Env, height: number): Promise<PersistedFrameJournal | null> => {

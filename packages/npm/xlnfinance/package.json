@@ -1,7 +1,7 @@
 {
   "name": "xlnfinance",
-  "version": "0.0.0",
-  "description": "Reserved package for XLN Finance.",
+  "version": "0.1.17",
+  "description": "Local xln runtime daemon and browser wallet launcher.",
   "license": "AGPL-3.0",
   "type": "module",
   "bin": {
@@ -9,12 +9,23 @@
     "xlnfinance": "bin/xln.js"
   },
   "files": [
+    "app",
     "bin",
+    "dist",
+    "lib",
     "README.md",
     "package.json"
   ],
+  "engines": {
+    "bun": ">=1.3.0"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/xlnfinance/xln.git"
+  },
+  "homepage": "https://xln.finance/install",
+  "bugs": "https://github.com/xlnfinance/xln/issues",
+  "publishConfig": {
+    "access": "public"
   }
 }

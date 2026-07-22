@@ -1,10 +1,18 @@
 {
   "manifest_version": 3,
-  "name": "XLN Wallet Companion",
-  "version": "0.0.1",
-  "description": "Companion bridge for xln:// payment links and local XLN wallet wakeups.",
+  "name": "xln finance",
+  "short_name": "xln",
+  "version": "0.1.17",
+  "description": "The complete xln wallet, packaged for Chrome.",
   "action": {
-    "default_title": "XLN Wallet"
+    "default_title": "Open xln",
+    "default_icon": "icon-128.png"
+  },
+  "icons": {
+    "16": "icon-128.png",
+    "32": "icon-128.png",
+    "48": "icon-128.png",
+    "128": "icon-128.png"
   },
   "background": {
     "service_worker": "extension-service-worker.js",
@@ -12,6 +20,9 @@
   },
   "permissions": ["notifications", "storage"],
   "host_permissions": [],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*"
+  },
   "externally_connectable": {
     "matches": ["https://xln.finance/*", "http://localhost/*", "http://127.0.0.1/*"]
   }

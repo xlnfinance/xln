@@ -867,6 +867,10 @@ const createEmbeddedRuntimeAdapter = async (
       await xln.submitCrossJurisdictionIntent(unwrapLiveRuntimeEnv(env) ?? env, route);
       return { delivered: true };
     },
+    controlRuntime: (env, action) => {
+      if (action !== 'verify-chain') throw new Error(`UNSUPPORTED_RUNTIME_CONTROL:${action}`);
+      return xln.verifyLiveRuntimeStorage(env);
+    },
     registerEnvChangeCallback: (env, cb) => xln.registerEnvChangeCallback(env, cb),
     buildReadContext: (env) => ({
       readHead: () => xln.readPersistedStorageHead(env),

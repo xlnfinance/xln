@@ -116,6 +116,9 @@ import {
 import { selectPredeployedJurisdiction } from './predeployed-jurisdiction';
 import { getJurisdictionIdentityRef } from '../jurisdiction/jurisdiction-runtime';
 import { readInheritedChildSecrets } from '../orchestrator/child-secrets';
+import { createLocalPairingController } from './local-pairing';
+import { deriveSignerAddressSync } from '../account/crypto';
+import { buildLocalRuntimeOwner, ensureLocalRuntimeOwner } from './local-runtime-owner';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -133,6 +136,11 @@ let processGuardsInstalled = false;
 const runtimeIngressReceipts = createRuntimeIngressReceiptStore();
 const serverLog = createStructuredLogger('server');
 const assistantProxy = createAssistantProxyFromEnv(serverLog);
+const localPairingController = createLocalPairingController({
+  ...(process.env['XLN_LOCAL_CONTROL_TOKEN'] ? { controlToken: process.env['XLN_LOCAL_CONTROL_TOKEN'] } : {}),
+  ...(process.env['XLN_LOCAL_INSTANCE_ID'] ? { instanceId: process.env['XLN_LOCAL_INSTANCE_ID'] } : {}),
+  ...(process.env['XLN_DISTRIBUTION_VERSION'] ? { version: process.env['XLN_DISTRIBUTION_VERSION'] } : {}),
+});
 const tokenCatalogController = createTokenCatalogController({
   getAdapter: () => globalJAdapter,
 });
@@ -200,6 +208,13 @@ const STARTUP_SIGNER = (() => {
     throw new Error('STARTUP_SIGNER_DERIVATION_INCOMPLETE');
   }
   return seed && label ? { seed, label } : null;
+})();
+const LOCAL_RUNTIME_OWNER = (() => {
+  const label = String(process.env['XLN_LOCAL_OWNER_LABEL'] || '').trim();
+  if (!label) return null;
+  const profileName = String(process.env['XLN_LOCAL_OWNER_PROFILE_NAME'] || 'xln finance').trim();
+  if (!profileName) throw new Error('XLN_LOCAL_OWNER_PROFILE_NAME_REQUIRED');
+  return { label, profileName };
 })();
 const FAUCET_SIGNER_LABEL = process.env['FAUCET_SIGNER_LABEL'] ?? 'faucet-1';
 const FAUCET_SEED = process.env['FAUCET_SEED'] ?? `${SERVER_RUNTIME_SEED}:faucet`;
@@ -801,6 +816,9 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       const url = new URL(req.url);
       const pathname = url.pathname;
 
+      const localPairingResponse = await localPairingController.handle(req, pathname, env);
+      if (localPairingResponse) return localPairingResponse;
+
       if (req.headers.get('upgrade') === 'websocket') {
         const wsType = pathname === '/relay' ? 'relay' : pathname === '/rpc' ? 'rpc' : null;
         if (wsType) {
@@ -1034,7 +1052,10 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     serverLog.info('runtime.init.start');
     env = await main(SERVER_RUNTIME_SEED, {
       trustedJurisdictionRpcBindings: resolveTrustedServerRestoreRpcBindings(),
-      localSigners: STARTUP_SIGNER ? [STARTUP_SIGNER] : [],
+      localSigners: [
+        ...(STARTUP_SIGNER ? [STARTUP_SIGNER] : []),
+        ...(LOCAL_RUNTIME_OWNER ? [{ label: LOCAL_RUNTIME_OWNER.label }] : []),
+      ],
     });
     serverEnv = env;
     registerRuntimeFrameCommitCallback(env, ({ height, runtimeInput }) => {
@@ -1229,6 +1250,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
           stateRoot,
           mempool: [],
           blockDelayMs: 300,
+          blockTimeMs: 300,
           lastBlockTimestamp: env.timestamp,
           position: { x: 0, y: 50, z: 0 },
           depositoryAddress: globalJAdapter.addresses.depository,
@@ -1283,6 +1305,32 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         }
         if (!env.activeJurisdiction) env.activeJurisdiction = jName;
       }
+    }
+
+    if (LOCAL_RUNTIME_OWNER) {
+      const jurisdictionName = String(env.activeJurisdiction || 'local');
+      const jurisdiction = env.jReplicas.get(jurisdictionName);
+      if (!jurisdiction) throw new Error(`LOCAL_RUNTIME_OWNER_JURISDICTION_MISSING:${jurisdictionName}`);
+      const owner = buildLocalRuntimeOwner({
+        signerId: deriveSignerAddressSync(SERVER_RUNTIME_SEED, LOCAL_RUNTIME_OWNER.label),
+        profileName: LOCAL_RUNTIME_OWNER.profileName,
+        jurisdictionName,
+        jurisdiction,
+      });
+      const result = await ensureLocalRuntimeOwner(env, owner, {
+        enqueue: enqueueRuntimeInput,
+        onFrameCommit: (targetEnv, callback) => registerRuntimeFrameCommitCallback(
+          targetEnv,
+          ({ height }) => callback(height),
+        ),
+        timeoutMs: STARTUP_STEP_TIMEOUT_MS,
+      });
+      relayStore.activeHubEntityIds = [];
+      serverLog.info('local_owner.ready', {
+        entityId: shortId(result.entityId, 10),
+        created: result.created,
+        height: result.height,
+      });
     }
 
     // J-event watching belongs to the unified runtime loop. The server should

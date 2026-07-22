@@ -9,7 +9,7 @@ export type XlnInvoiceIntent = {
 };
 
 export type ParsedXlnInvoice = XlnInvoiceIntent & {
-  source: 'entity-query' | 'wallet-url';
+  source: 'entity-query' | 'wallet-url' | 'app-url';
   raw: string;
   canonicalUri: string;
 };
@@ -58,6 +58,7 @@ const isEntityId = (value: string): boolean => {
 };
 
 const isHttpUrl = (value: string): boolean => value.startsWith('http://') || value.startsWith('https://');
+const isXlnUrl = (value: string): boolean => value.startsWith('xln://');
 
 const extractPayHashPayload = (rawHash: string): string => {
   const hash = rawHash.startsWith('#') ? rawHash.slice(1) : rawHash;
@@ -135,6 +136,10 @@ export function buildWalletPayHref(intent: Partial<XlnInvoiceIntent> & { targetE
   return url.toString();
 }
 
+export function buildXlnInvoiceDeepLink(intent: Partial<XlnInvoiceIntent> & { targetEntityId: string }): string {
+  return `xln://pay/${buildXlnInvoiceUri(intent)}`;
+}
+
 export function parseXlnInvoice(rawValue: string): ParsedXlnInvoice {
   const raw = String(rawValue || '').trim();
   if (!raw) throw new Error('Invoice is empty');
@@ -163,6 +168,16 @@ export function parseXlnInvoice(rawValue: string): ParsedXlnInvoice {
       source: 'wallet-url',
       raw,
     };
+  }
+
+  if (isXlnUrl(raw)) {
+    const url = new URL(raw);
+    const host = url.hostname.toLowerCase();
+    if (host !== 'pay' && host !== 'invoice') throw new Error('Unsupported invoice format');
+    const pathname = url.pathname.replace(/^\/+/, '').trim();
+    const params = new URLSearchParams(url.search);
+    if (pathname && !params.has('target')) params.set('target', pathname);
+    return parseInvoiceParams(params, 'app-url', raw);
   }
 
   throw new Error('Unsupported invoice format');

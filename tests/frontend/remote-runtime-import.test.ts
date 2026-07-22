@@ -685,7 +685,7 @@ describe('remote runtime import manager utilities', () => {
     expect(appLayout).toContain('fetchRemoteRuntimeImportSource(source)');
     expect(appLayout).toContain('parseRemoteRuntimeImportPayload(payload)');
     expect(appLayout).toContain('persistActiveRemoteRuntimeImport(first)');
-    expect(appLayout).toContain('const hasExplicitRemoteRuntimeBootstrap = Boolean(importPayload || importSource || remoteRequest);');
+    expect(appLayout).toContain('const hasExplicitRemoteRuntimeBootstrap = Boolean(pairingToken || importPayload || importSource || remoteRequest);');
     expect(appLayout).toContain('if (!hasExplicitRemoteRuntimeBootstrap && await ensureCurrentDeployVersion()) return;');
     expect(appLayout.indexOf('const importPayload = readRemoteRuntimeImportPayloadFromUrl()')).toBeLessThan(
       appLayout.indexOf('if (!hasExplicitRemoteRuntimeBootstrap && await ensureCurrentDeployVersion()) return;'),

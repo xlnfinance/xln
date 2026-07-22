@@ -34,7 +34,7 @@ const BUILD_DIR = path.join(FRONTEND, 'build');
 const NATIVE_DIR = path.join(ROOT, 'native');
 const DIST_DIR = path.join(NATIVE_DIR, 'dist');
 const ARTIFACT_MANIFEST = path.join(DIST_DIR, 'native-artifacts.json');
-const APP_NAME = 'XLN Wallet';
+const APP_NAME = 'xln finance';
 const DESKTOP_BUNDLE_ID = 'finance.xln.wallet.desktop';
 
 function printHelp(): void {
@@ -346,7 +346,7 @@ function packageCapacitorPlatform(platform: 'ios' | 'android', flags: Set<string
 	if (platform === 'android') {
 		run('./gradlew', ['assembleDebug'], path.join(FRONTEND, 'android'), androidEnv());
 		const source = path.join(FRONTEND, 'android/app/build/outputs/apk/debug/app-debug.apk');
-		const destination = path.join(DIST_DIR, 'android/xln-wallet-debug.apk');
+		const destination = path.join(DIST_DIR, `android/xln-finance-${packageJsonVersion()}-android-debug.apk`);
 		if (!existsSync(source)) throw new Error(`Android debug APK was not produced at ${source}`);
 		mkdirSync(path.dirname(destination), { recursive: true });
 		copyFileSync(source, destination);
@@ -427,11 +427,11 @@ function updateDesktopInfoPlist(appPath: string): void {
 	writeFileSync(plistPath, plist);
 }
 
-function packageDesktopApp(): NativeArtifact {
+function packageDesktopApp(): NativeArtifact[] {
 	if (process.platform !== 'darwin') {
 		const reason = `desktop app bundle packaging is implemented for macOS; current platform is ${process.platform}`;
 		console.warn(`Skipping desktop package: ${reason}`);
-		return { target: 'desktop', kind: 'desktop-app', status: 'skipped', reason };
+		return [{ target: 'desktop', kind: 'desktop-app', status: 'skipped', reason }];
 	}
 
 	const electronApp = path.join(ROOT, 'node_modules/electron/dist/Electron.app');
@@ -467,7 +467,13 @@ function packageDesktopApp(): NativeArtifact {
 	});
 	updateDesktopInfoPlist(appPath);
 	pruneGeneratedNoise(appPath);
-	return { target: 'desktop', kind: 'mac-app', status: 'built', path: appPath };
+	const zipPath = path.join(DIST_DIR, 'desktop', `xln-finance-${packageJsonVersion()}-mac-${process.arch}.zip`);
+	rmSync(zipPath, { force: true });
+	run('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appPath, zipPath], ROOT);
+	return [
+		{ target: 'desktop', kind: 'mac-app', status: 'built', path: appPath },
+		{ target: 'desktop', kind: 'mac-zip', status: 'built', path: zipPath },
+	];
 }
 
 function desktopLaunchCommand(artifact: NativeArtifact | null): [string, string[], string] {
@@ -482,23 +488,24 @@ function prepareDesktop(flags: Set<string>): NativeArtifact[] {
 	const main = path.join(NATIVE_DIR, 'desktop/main.cjs');
 	if (!existsSync(main)) throw new Error(`Missing ${main}`);
 	const artifacts: NativeArtifact[] = [];
-	const packageArtifact = flags.has('--package') ? packageDesktopApp() : null;
-	if (packageArtifact) artifacts.push(packageArtifact);
+	const packageArtifacts = flags.has('--package') ? packageDesktopApp() : [];
+	artifacts.push(...packageArtifacts);
 	console.log('\nDesktop shell ready: native/desktop/main.cjs');
 	if (flags.has('--open') || flags.has('--smoke')) {
-		const [command, commandArgs, cwd] = desktopLaunchCommand(packageArtifact);
+		const appArtifact = packageArtifacts.find(artifact => artifact.kind === 'mac-app') || null;
+		const [command, commandArgs, cwd] = desktopLaunchCommand(appArtifact);
 		run(command, commandArgs, cwd, {
 			...process.env,
 			...(flags.has('--smoke') ? { XLN_ELECTRON_SMOKE: '1' } : {}),
 		});
 	}
-	if (!packageArtifact) {
+	if (packageArtifacts.length === 0) {
 		artifacts.push({ target: 'desktop', kind: 'electron-shell', status: 'synced', path: main });
 	}
 	return artifacts;
 }
 
-function prepareExtension(): NativeArtifact {
+function prepareExtension(flags: Set<string>): NativeArtifact[] {
 	const sourceDir = path.join(NATIVE_DIR, 'extension');
 	const distDir = path.join(sourceDir, 'dist');
 	rmSync(distDir, { recursive: true, force: true });
@@ -513,14 +520,26 @@ function prepareExtension(): NativeArtifact {
 		copyFileSync(iconSource, path.join(distDir, 'icon-128.png'));
 	}
 
-	const webDist = path.join(distDir, 'web');
-	cpSync(BUILD_DIR, webDist, {
+	cpSync(BUILD_DIR, distDir, {
 		recursive: true,
-		filter: source => !source.includes(`${path.sep}.DS_Store`),
+		filter: source => source === BUILD_DIR || !source.includes(`${path.sep}.DS_Store`),
 	});
+	copyFileSync(path.join(sourceDir, 'manifest.json'), path.join(distDir, 'manifest.json'));
+	copyFileSync(path.join(sourceDir, 'extension-service-worker.js'), path.join(distDir, 'extension-service-worker.js'));
+	copyFileSync(path.join(sourceDir, 'extension-security.js'), path.join(distDir, 'extension-security.js'));
 	pruneGeneratedNoise(distDir);
-	console.log('\nExtension companion ready: native/extension/dist');
-	return { target: 'extension', kind: 'browser-extension', status: 'built', path: distDir };
+	const artifacts: NativeArtifact[] = [
+		{ target: 'extension', kind: 'chrome-extension-unpacked', status: 'built', path: distDir },
+	];
+	if (flags.has('--package')) {
+		const zipPath = path.join(DIST_DIR, `chrome/xln-finance-chrome-${packageJsonVersion()}.zip`);
+		mkdirSync(path.dirname(zipPath), { recursive: true });
+		rmSync(zipPath, { force: true });
+		run('zip', ['-q', '-r', zipPath, '.'], distDir);
+		artifacts.push({ target: 'extension', kind: 'chrome-extension-zip', status: 'built', path: zipPath });
+	}
+	console.log('\nChrome extension ready: native/extension/dist');
+	return artifacts;
 }
 
 function writeArtifactManifest(targets: Platform[], flags: Set<string>, artifacts: NativeArtifact[]): void {
@@ -559,12 +578,12 @@ async function main(): Promise<void> {
 		} else if (target === 'desktop') {
 			artifacts.push(...prepareDesktop(flags));
 		} else if (target === 'extension') {
-			artifacts.push(prepareExtension());
+			artifacts.push(...prepareExtension(flags));
 		}
 	}
 
 	writeArtifactManifest(targets, flags, artifacts);
-	console.log(`\nXLN native pipeline complete: ${targets.join(', ')}`);
+	console.log(`\nxln native pipeline complete: ${targets.join(', ')}`);
 }
 
 if (import.meta.main) {

@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "product": "xln finance",
+  "repository": "xlnfinance/xln",
+  "package": "xlnfinance",
+  "channels": {
+    "web": {
+      "entry": "https://xln.finance/app",
+      "update": "reload",
+      "trust": "mutable-server-code"
+    },
+    "launcher": {
+      "entry": "bunx xlnfinance",
+      "update": "bunx xlnfinance update",
+      "runtime": "persistent-local-daemon",
+      "access": "admin"
+    },
+    "desktop": {
+      "entry": "github-release",
+      "update": "signed-release-feed"
+    },
+    "ios": {
+      "entry": "testflight",
+      "update": "app-store"
+    },
+    "android": {
+      "entry": "google-play-or-apk",
+      "update": "google-play"
+    },
+    "chrome": {
+      "entry": "chrome-web-store-or-unsigned-zip",
+      "update": "chrome-web-store"
+    }
+  }
+}

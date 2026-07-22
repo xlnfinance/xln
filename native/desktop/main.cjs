@@ -10,7 +10,7 @@ const {
 
 const ROOT = path.resolve(__dirname, '../..');
 const WEB_DIR = path.resolve(process.env.XLN_DESKTOP_WEB_DIR || path.join(ROOT, 'frontend/build'));
-const APP_NAME = 'XLN Wallet';
+const APP_NAME = 'xln finance';
 
 let mainWindow = null;
 let staticServer = null;
@@ -157,7 +157,7 @@ function createMenu() {
 		{
 			label: APP_NAME,
 			submenu: [
-				{ label: 'Show XLN Wallet', click: showMainWindow },
+				{ label: 'Show xln', click: showMainWindow },
 				{ type: 'separator' },
 				{ role: 'quit' },
 			],

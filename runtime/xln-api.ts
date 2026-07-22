@@ -605,6 +605,12 @@ export interface XLNModule {
     runtimeSeed?: string | null,
     options?: { fromSnapshotHeight?: number },
   ) => Promise<VerifyRuntimeChainResult>;
+  verifyLiveRuntimeStorage: (env: Env) => Promise<{
+    ok: true;
+    runtimeId: string;
+    latestHeight: number;
+    checkedFrames: number;
+  }>;
   readPersistedFrameJournal: (env: Env, height: number) => Promise<PersistedFrameJournal | null>;
   readPersistedRuntimeActivityJournal: (env: Env, height: number) => Promise<PersistedActivityJournal | null>;
   readPersistedFrameJournals: (

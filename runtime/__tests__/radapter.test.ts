@@ -3881,6 +3881,11 @@ test('remote adapter can inspect and control a hub over the rpc wire', async () 
 	          enqueued.push(input);
 	          targetEnv.height = Math.max(0, Math.floor(Number(targetEnv.height ?? 0))) + 1;
 	        },
+	        controlRuntime: async (targetEnv, action) => ({
+	          ok: action === 'verify-chain',
+	          runtimeId: targetEnv.runtimeId,
+	          verifiedHeight: targetEnv.height,
+	        }),
 	        registerReceipt: (receipt) => {
 	          const registered = {
 	            ...receipt,
@@ -3949,6 +3954,13 @@ test('remote adapter can inspect and control a hub over the rpc wire', async () 
     expect(view.activeEntity.summary.label).toBe('H1 Hub');
     expect(view.activeEntity.accounts.items).toHaveLength(1);
     expect(view.activeEntity.accounts.nextCursor).toBe(null);
+
+	const verification = await adapter.control<{
+	  ok: boolean;
+	  runtimeId: string;
+	  verifiedHeight: number;
+	}>('verify-chain');
+	expect(verification).toEqual({ ok: true, runtimeId, verifiedHeight: 7 });
 
     const graph = await adapter.read<{
       height: number;

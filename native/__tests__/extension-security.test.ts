@@ -2,18 +2,19 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-	normalizeXlnUrl,
+	normalizeXlnAppPath,
 	sanitizeNotificationPayload,
 } from '../extension/extension-security';
 
 const root = join(import.meta.dir, '../..');
 
-describe('browser extension companion policy', () => {
-	test('external wake payloads can only open xln deep links', () => {
-		expect(normalizeXlnUrl('xln://pay?amount=1')).toBe('xln://pay?amount=1');
-		expect(normalizeXlnUrl('https://evil.example/pay')).toBe('xln://app');
-		expect(normalizeXlnUrl('javascript:alert(1)')).toBe('xln://app');
-		expect(normalizeXlnUrl(`xln://pay?memo=${'x'.repeat(3000)}`)).toBe('xln://app');
+describe('Chrome extension wallet policy', () => {
+	test('external wake payloads can only open packaged app routes', () => {
+		expect(normalizeXlnAppPath('xln://pay?amount=1')).toBe('app.html#pay?amount=1');
+		expect(normalizeXlnAppPath(`xln://pay/${`0x${'ab'.repeat(32)}`}?amount=1`)).toContain('app.html#pay/');
+		expect(normalizeXlnAppPath('https://evil.example/pay')).toBe('app.html');
+		expect(normalizeXlnAppPath('javascript:alert(1)')).toBe('app.html');
+		expect(normalizeXlnAppPath(`xln://pay?memo=${'x'.repeat(3000)}`)).toBe('app.html');
 	});
 
 	test('notification text is bounded before it reaches the browser API', () => {
@@ -23,15 +24,18 @@ describe('browser extension companion policy', () => {
 			url: 'file:///Users/zigota/.ssh/id_rsa',
 		});
 
-		expect(payload.title).toBe('XLN payment');
+		expect(payload.title).toBe('xln payment');
 		expect(payload.body.length).toBeLessThanOrEqual(180);
 		expect(payload.body).not.toContain('\n');
-		expect(payload.url).toBe('xln://app');
+		expect(payload.appPath).toBe('app.html');
 	});
 
 	test('manifest does not expose wake messages to arbitrary websites', () => {
 		const manifest = JSON.parse(readFileSync(join(root, 'native/extension/manifest.json'), 'utf8'));
 		expect(manifest.externally_connectable.matches).toContain('https://xln.finance/*');
 		expect(manifest.externally_connectable.matches).not.toContain('https://*/*');
+		expect(manifest.name).toBe('xln finance');
+		expect(manifest.version).toBe('0.1.17');
+		expect(manifest.action.default_popup).toBeUndefined();
 	});
 });
