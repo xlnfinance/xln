@@ -127,8 +127,8 @@ const scanPathBytes = (targetPath: string): PathByteScan => {
         return;
       }
       if (stats.isDirectory()) truncated = true;
-    } catch {
-      // Best-effort diagnostics only.
+    } catch (error) {
+      console.warn(`[storage-monitor] path scan failed path=${path}`, error);
     }
   };
 
@@ -148,7 +148,8 @@ const scanPathBytes = (targetPath: string): PathByteScan => {
       for (const name of names.slice(0, STORAGE_HEALTH_SCAN_MAX_DIR_ENTRIES)) {
         addFileIfPresent(join(targetPath, name));
       }
-    } catch {
+    } catch (error) {
+      console.warn(`[storage-monitor] shallow scan failed path=${targetPath}`, error);
       return { bytes, entries, ms: Date.now() - startedAt, truncated: true, mode };
     }
     return { bytes, entries, ms: Date.now() - startedAt, truncated, mode };
@@ -171,8 +172,8 @@ const scanPathBytes = (targetPath: string): PathByteScan => {
       for (const name of names.slice(0, STORAGE_HEALTH_SCAN_MAX_DIR_ENTRIES)) {
         stack.push(join(current, name));
       }
-    } catch {
-      // Best-effort diagnostics only.
+    } catch (error) {
+      console.warn(`[storage-monitor] deep scan failed path=${current}`, error);
     }
   }
   if (stack.length > 0 || !canScanMore()) truncated = true;

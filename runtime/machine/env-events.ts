@@ -84,8 +84,10 @@ const forwardDebugEvent = (env: Env, payload: Record<string, unknown>): void => 
   const p2p = env.runtimeState?.p2p as { sendDebugEvent?: (data: unknown) => boolean } | undefined;
   try {
     p2p?.sendDebugEvent?.(payload);
-  } catch {
-    // Best effort only.
+  } catch (error) {
+    console.warn('[runtime-audit] debug event delivery failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 };
 

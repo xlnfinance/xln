@@ -12,6 +12,7 @@ import {
   assertDeterministicRpcStackAddresses,
   deployRpc2JurisdictionStack,
   provisionPrimaryRpcJurisdictionStack,
+  readShardJurisdictions,
   type OrchestratorJurisdictionsConfig,
 } from '../orchestrator/jurisdictions';
 import { createEmptyEnv, enqueueRuntimeInput, process as processRuntime } from '../runtime';
@@ -32,6 +33,20 @@ test('cross-chain stack address mismatch fails before runtime import', () => {
     ...primary,
     deltaTransformer: `0x${'55'.repeat(20)}`,
   })).toThrow('CROSS_CHAIN_CONTRACT_ADDRESS_MISMATCH:deltaTransformer');
+});
+
+test('malformed shard jurisdiction config fails before version synchronization', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'xln-invalid-shard-jurisdictions-'));
+  const jurisdictionsPath = join(root, 'jurisdictions.json');
+  try {
+    await writeFile(jurisdictionsPath, '{invalid-json', 'utf8');
+    expect(() => readShardJurisdictions({
+      shardJurisdictionsPath: jurisdictionsPath,
+      rpc2Url: '',
+    })).toThrow('JURISDICTIONS_VERSION_SYNC_INVALID');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 const reservePort = async (): Promise<number> => await new Promise((resolve, reject) => {
   const server = createServer();

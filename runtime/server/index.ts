@@ -488,15 +488,21 @@ const handleApi = async (
 
     try {
       await env?.runtimeState?.p2p?.syncProfiles?.();
-    } catch {
-      // best effort only
+    } catch (error) {
+      serverLog.warn('gossip.profile_sync_failed', {
+        targetEntityId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
     try {
       if (env) {
         await ensureGossipProfiles(env, [targetEntityId]);
       }
-    } catch {
-      // best effort only
+    } catch (error) {
+      serverLog.warn('gossip.profile_ensure_failed', {
+        targetEntityId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
 
     const bundle = buildKnownProfileBundle({ env, relayStore, entityId: targetEntityId });
@@ -926,8 +932,10 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
               });
               try {
                 ws.send(serializeWsMessage({ type: 'error', error: 'Relay handler exception' }));
-              } catch {
-                // Socket may already be closed; ignore.
+              } catch (sendError) {
+                serverLog.debug('ws.relay_error_response_failed', {
+                  error: sendError instanceof Error ? sendError.message : String(sendError),
+                });
               }
             });
           };
@@ -1292,8 +1300,11 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       onGossipStore: profile => {
         try {
           runtimeEnv.gossip?.announce?.(profile);
-        } catch {
-          /* best effort */
+        } catch (error) {
+          serverLog.warn('gossip.profile_announce_failed', {
+            entityId: profile.entityId,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       },
     };

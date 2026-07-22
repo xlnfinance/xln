@@ -776,8 +776,11 @@ const postJson = async (url: string, timeoutMs = 1_000): Promise<void> => {
         }, timeoutMs);
       }),
     ]);
-  } catch {
-    // best effort before hard stop
+  } catch (error) {
+    meshLog.warn('quiesce.post_failed', {
+      url,
+      error: error instanceof Error ? error.message : String(error),
+    });
   } finally {
     if (timer) clearTimeout(timer);
   }

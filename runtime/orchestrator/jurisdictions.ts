@@ -105,8 +105,12 @@ export const readShardJurisdictions = (config: OrchestratorJurisdictionsConfig):
       writeFileSync(config.shardJurisdictionsPath, next, 'utf8');
       return next;
     }
-  } catch {
-    // If either payload is malformed, just return the shard payload unchanged.
+  } catch (error) {
+    throw new Error(
+      `JURISDICTIONS_VERSION_SYNC_INVALID:path=${config.shardJurisdictionsPath}:` +
+      `${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
   }
   return shard;
 };

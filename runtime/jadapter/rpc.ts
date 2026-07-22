@@ -883,8 +883,10 @@ export async function createRpcAdapter(
     if (typeof candidate.resetNonce === 'function') {
       try {
         candidate.resetNonce();
-      } catch {
-        // Best-effort only.
+      } catch (error) {
+        rpcLog.warn('signer.nonce_reset_failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
   };
@@ -1260,8 +1262,12 @@ export async function createRpcAdapter(
             const margin = 1_000_000n;
             deployGasLimit = latestBlock.gasLimit > margin ? latestBlock.gasLimit - margin : latestBlock.gasLimit;
           }
-        } catch {
-          // Fallback to default when provider can't fetch block gas limit.
+        } catch (error) {
+          rpcLog.warn('contracts.deploy.gas_limit_lookup_failed', {
+            chainId: config.chainId,
+            fallbackGasLimit: deployGasLimit.toString(),
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
       const depositoryContract = await depositoryFactory.deploy(addresses.entityProvider, {
@@ -1398,8 +1404,11 @@ export async function createRpcAdapter(
       try {
         const rpc = provider as ethers.JsonRpcProvider;
         await rpc.send('evm_mine', []);
-      } catch {
-        // Real chains mine blocks automatically
+      } catch (error) {
+        rpcLog.debug('block.manual_mine_unavailable', {
+          chainId: config.chainId,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
       return [];
     },

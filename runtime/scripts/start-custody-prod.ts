@@ -123,8 +123,8 @@ const killStaleCustodyDaemon = async (): Promise<void> => {
   for (const pid of pids) {
     try {
       process.kill(pid, 'SIGTERM');
-    } catch {
-      // Ignore already-dead processes.
+    } catch (error) {
+      console.warn(`[custody-prod] SIGTERM failed pid=${pid}`, error);
     }
   }
   await sleep(1000);
@@ -133,8 +133,8 @@ const killStaleCustodyDaemon = async (): Promise<void> => {
   for (const pid of remaining) {
     try {
       process.kill(pid, 'SIGKILL');
-    } catch {
-      // Ignore already-dead processes.
+    } catch (error) {
+      console.warn(`[custody-prod] SIGKILL failed pid=${pid}`, error);
     }
   }
 };

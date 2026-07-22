@@ -59,8 +59,8 @@ const killManagedAnvil = (): void => {
   if (!managedAnvil || managedAnvil.exitCode !== null) return;
   try {
     managedAnvil.kill('SIGTERM');
-  } catch {
-    // Ignore cleanup failures
+  } catch (error) {
+    console.warn('[scenario] managed Anvil SIGTERM failed', error);
   }
 };
 
@@ -92,15 +92,16 @@ export const stopManagedScenarioAnvil = async (timeoutMs = 3_000): Promise<void>
   if (!child || child.exitCode !== null) return;
   try {
     child.kill('SIGTERM');
-  } catch {
+  } catch (error) {
+    console.warn('[scenario] managed Anvil SIGTERM failed', error);
     return;
   }
   await waitForManagedAnvilExit(child, timeoutMs);
   if (child.exitCode === null) {
     try {
       child.kill('SIGKILL');
-    } catch {
-      // Ignore cleanup failures
+    } catch (error) {
+      console.warn('[scenario] managed Anvil SIGKILL failed', error);
     }
     await waitForManagedAnvilExit(child, Math.min(timeoutMs, 1_000));
   }
