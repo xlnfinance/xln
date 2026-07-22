@@ -356,7 +356,7 @@ for (const [path, markers] of [
   ['runtime/runtime.ts', ["createStructuredLogger('runtime')", 'apply.profile', 'process.profile', 'joutbox.incoming']],
   ['runtime/machine/infra.ts', ["createStructuredLogger('runtime.infra')", 'jadapter.restore_retry', 'jadapter.restore_failed']],
   ['runtime/machine/infra-gossip-store.ts', ["createStructuredLogger('runtime.infra_gossip')", 'profile.restore_failed']],
-  ['runtime/storage/runtime-dbs.ts', ["createStructuredLogger('runtime.storage')", 'storage_db.blocked', 'runtime_db.open_failed']],
+  ['runtime/storage/runtime-dbs.ts', ["createStructuredLogger('runtime.storage')", 'storage_db.blocked', 'storage_db.open_failed']],
   ['runtime/storage/index.ts', ["createStructuredLogger('runtime.storage')", 'persist.frame']],
   ['runtime/watchtower/standalone-server.ts', ["createStructuredLogger('watchtower.standalone')", 'service.listen', 'sweep.failed', 'push_sweep.failed']],
   ['runtime/watchtower/dispute-watch.ts', ["createStructuredLogger('watchtower.dispute_watch')", 'target.failed']],
