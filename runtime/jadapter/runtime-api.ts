@@ -94,8 +94,12 @@ export const getEntityInfoFromChain = async (
       ...(entityNumber !== undefined ? { entityNumber } : {}),
       ...(name !== undefined ? { name } : {}),
     };
-  } catch {
-    return { exists: false };
+  } catch (error) {
+    throw new Error(
+      `GET_ENTITY_INFO_FROM_CHAIN_FAILED:entity=${normalizeEntityId(entityId)}:` +
+      `${error instanceof Error ? error.message : String(error)}`,
+      error instanceof Error ? { cause: error } : undefined,
+    );
   }
 };
 

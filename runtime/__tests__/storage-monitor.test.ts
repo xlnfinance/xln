@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
-import { assertDiskFreeAtLeast, getDiskFreeShortfallBytes, getMinDiskFreeBytes } from '../orchestrator/storage-monitor';
+import {
+  assertDiskFreeAtLeast,
+  getDiskFreeShortfallBytes,
+  getMinDiskFreeBytes,
+  parseStorageHistory,
+} from '../orchestrator/storage-monitor';
 
 describe('storage monitor disk guard', () => {
   test('accepts free space equal to the required floor', () => {
@@ -19,5 +24,12 @@ describe('storage monitor disk guard', () => {
     expect(getDiskFreeShortfallBytes(4, 5)).toBe(1);
     expect(getDiskFreeShortfallBytes(5, 5)).toBe(0);
     expect(getDiskFreeShortfallBytes(6, 5)).toBe(0);
+  });
+
+  test('rejects corrupt history instead of silently resetting the baseline', () => {
+    expect(() => parseStorageHistory('{', '/tmp/corrupt-history.json'))
+      .toThrow('STORAGE_HISTORY_INVALID:path=/tmp/corrupt-history.json');
+    expect(() => parseStorageHistory('[{"ts":1}]', '/tmp/incomplete-history.json'))
+      .toThrow('invalid entry at index 0');
   });
 });

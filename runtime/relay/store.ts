@@ -385,11 +385,11 @@ export const resolveEncryptionPublicKeyHex = (store: RelayStore, targetRuntimeId
 // ---------------------------------------------------------------------------
 
 const estimatePendingMessageBytes = (msg: unknown): number => {
-  try {
-    return Buffer.byteLength(safeStringify(msg));
-  } catch {
-    return Buffer.byteLength(String(msg));
-  }
+  // Queue limits are a security boundary. Falling back to String(msg) would
+  // measure a circular object as the tiny string "[object Object]" and permit
+  // it to bypass maxTotalBytes. Canonical serialization must succeed before a
+  // message can consume durable queue capacity.
+  return Buffer.byteLength(safeStringify(msg));
 };
 
 export const enqueueMessage = (store: RelayStore, toKey: string, msg: unknown): number => {

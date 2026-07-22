@@ -88,6 +88,13 @@ describe('orchestrator public RPC routes', () => {
     expect(payload.ephemeralTestnet).toBe(true);
   });
 
+  test('rejects malformed jurisdiction JSON instead of publishing it verbatim', () => {
+    expect(() => toPublicJurisdictionsPayload({
+      shardJurisdictionsPath: '/tmp/unused-jurisdictions.json',
+      rpc2Url: '',
+    }, '{')).toThrow('PUBLIC_JURISDICTIONS_JSON_INVALID');
+  });
+
   test('rejects an active RPC stack without exact EntityProvider deployment metadata', () => {
     const config = {
       shardJurisdictionsPath: '/tmp/unused-jurisdictions.json',

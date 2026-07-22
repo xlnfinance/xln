@@ -184,7 +184,10 @@ const waitForManagedChildExit = async (child: ManagedChild, timeoutMs: number): 
     };
     const onExit = () => finish(true);
     const onClose = () => finish(true);
-    const onError = () => finish(true);
+    // A ChildProcess `error` means an operation on the handle failed; it does
+    // not prove that the OS process exited. Only exit/close or the recorded
+    // exit state may release the runtime lease.
+    const onError = () => finish(false);
     const timer = setTimeout(() => finish(false), timeoutMs);
     child.proc.once('exit', onExit);
     child.proc.once('close', onClose);
@@ -245,23 +248,35 @@ export const stopManagedChild = async (
   if (!child || hasManagedChildExited(child)) return;
   const terminateTimeoutMs = opts.terminateTimeoutMs ?? 5_000;
   const killTimeoutMs = opts.killTimeoutMs ?? 5_000;
+  let terminateError: unknown = null;
 
   try {
-    child.proc.kill('SIGTERM');
-  } catch {
-    return;
+    if (!child.proc.kill('SIGTERM')) {
+      terminateError = new Error('SIGTERM was not delivered');
+    }
+  } catch (error) {
+    terminateError = error;
   }
-  if (await waitForManagedChildExit(child, terminateTimeoutMs)) return;
+  if (terminateError === null && await waitForManagedChildExit(child, terminateTimeoutMs)) return;
+  if (terminateError !== null && hasManagedChildExited(child)) return;
+
+  let killError: unknown = null;
 
   try {
-    child.proc.kill('SIGKILL');
-  } catch {
-    return;
+    if (!child.proc.kill('SIGKILL')) {
+      killError = new Error('SIGKILL was not delivered');
+    }
+  } catch (error) {
+    killError = error;
   }
   if (await waitForManagedChildExit(child, killTimeoutMs)) return;
 
+  const describeError = (error: unknown): string =>
+    error instanceof Error ? error.message : String(error);
   throw new Error(
     `MANAGED_CHILD_STOP_TIMEOUT name=${child.name} pid=${child.proc.pid ?? 'unknown'}\n` +
+    `SIGTERM=${terminateError === null ? 'delivered' : describeError(terminateError)}\n` +
+    `SIGKILL=${killError === null ? 'delivered' : describeError(killError)}\n` +
     `stdout:\n${tailLines(child.stdoutLines)}\n\nstderr:\n${tailLines(child.stderrLines)}`,
   );
 };

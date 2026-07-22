@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 
 import {
   stopManagedChild,
@@ -105,4 +106,28 @@ test('stopManagedChild escalates to SIGKILL when a child ignores SIGTERM', async
     stopManagedChild(child, { terminateTimeoutMs: 100, killTimeoutMs: 1500 }),
   ).resolves.toBeUndefined();
   expect(proc.signalCode).toBe('SIGKILL');
+});
+
+test('stopManagedChild fails loudly when neither signal reaches a live child', async () => {
+  const signals: NodeJS.Signals[] = [];
+  const proc = Object.assign(new EventEmitter(), {
+    exitCode: null,
+    signalCode: null,
+    pid: 4242,
+    kill: (signal: NodeJS.Signals) => {
+      signals.push(signal);
+      throw new Error(`${signal}_FAILED`);
+    },
+  });
+  const child = {
+    name: 'unreachable-child',
+    proc,
+    stdoutLines: ['still running'],
+    stderrLines: ['signal transport unavailable'],
+  } as unknown as ManagedChild;
+
+  await expect(
+    stopManagedChild(child, { terminateTimeoutMs: 10, killTimeoutMs: 10 }),
+  ).rejects.toThrow(/MANAGED_CHILD_STOP_TIMEOUT[\s\S]*SIGTERM_FAILED[\s\S]*SIGKILL_FAILED/);
+  expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
 });

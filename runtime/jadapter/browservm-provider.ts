@@ -1245,34 +1245,6 @@ export class BrowserVMProvider {
     };
   }
 
-  /** Get debts for an entity */
-  async getDebts(entityId: string, tokenId: number): Promise<Array<{amount: bigint, creditor: string}>> {
-    if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
-
-    // Use ethers Interface for ABI encoding (same as mainnet)
-    const callData = this.depositoryInterface.encodeFunctionData('getDebts', [entityId, tokenId]);
-
-    const result = await this.runReadOnlyCall({
-      to: this.depositoryAddress,
-      caller: this.deployerAddress,
-      data: hexToBytes(callData as `0x${string}`),
-      gasLimit: 500000n,
-    });
-
-    if (result.execResult.exceptionError) return [];
-
-    try {
-      const decoded = this.depositoryInterface.decodeFunctionResult('getDebts', result.execResult.returnValue);
-      // decoded[0] is the Debt[] array
-      return (decoded[0] as Array<{ amount: bigint; creditor: string }>).map((d) => ({
-        amount: d.amount,
-        creditor: d.creditor,
-      }));
-    } catch {
-      return [];
-    }
-  }
-
   /** Enforce debts (FIFO) */
   async enforceDebts(entityId: string, tokenId: number, maxIterations: number | bigint = 100n): Promise<void> {
     if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');

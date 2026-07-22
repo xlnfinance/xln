@@ -180,22 +180,37 @@ const scanPathBytes = (targetPath: string): PathByteScan => {
   return { bytes, entries, ms: Date.now() - startedAt, truncated, mode };
 };
 
+export const parseStorageHistory = (
+  text: string,
+  source = STORAGE_HISTORY_PATH,
+): StorageHistoryEntry[] => {
+  try {
+    const raw = JSON.parse(text) as unknown;
+    if (!Array.isArray(raw)) throw new Error('expected an array');
+    for (const [index, entry] of raw.entries()) {
+      const valid = typeof entry === 'object'
+        && entry !== null
+        && typeof (entry as StorageHistoryEntry).ts === 'number'
+        && Number.isFinite((entry as StorageHistoryEntry).ts)
+        && typeof (entry as StorageHistoryEntry).freeBytes === 'number'
+        && Number.isFinite((entry as StorageHistoryEntry).freeBytes)
+        && typeof (entry as StorageHistoryEntry).tracked === 'object'
+        && (entry as StorageHistoryEntry).tracked !== null;
+      if (!valid) throw new Error(`invalid entry at index ${index}`);
+    }
+    return raw as StorageHistoryEntry[];
+  } catch (error) {
+    throw new Error(
+      `STORAGE_HISTORY_INVALID:path=${source}:` +
+      `${error instanceof Error ? error.message : String(error)}`,
+      error instanceof Error ? { cause: error } : undefined,
+    );
+  }
+};
+
 const readStorageHistory = (): StorageHistoryEntry[] => {
   if (!existsSync(STORAGE_HISTORY_PATH)) return [];
-  try {
-    const raw = JSON.parse(readFileSync(STORAGE_HISTORY_PATH, 'utf8')) as StorageHistoryEntry[];
-    if (!Array.isArray(raw)) return [];
-    return raw.filter((entry) =>
-      typeof entry?.ts === 'number'
-      && Number.isFinite(entry.ts)
-      && typeof entry?.freeBytes === 'number'
-      && Number.isFinite(entry.freeBytes)
-      && typeof entry?.tracked === 'object'
-      && entry.tracked !== null,
-    );
-  } catch {
-    return [];
-  }
+  return parseStorageHistory(readFileSync(STORAGE_HISTORY_PATH, 'utf8'));
 };
 
 const writeStorageHistory = (entries: StorageHistoryEntry[]): void => {

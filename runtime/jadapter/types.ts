@@ -128,8 +128,6 @@ export interface JAdapter {
   getErc20Balances(tokenAddresses: string[], owner: string): Promise<bigint[]>;
   getErc20Allowance(tokenAddress: string, owner: string, spender: string): Promise<bigint>;
   getEthBalance?(owner: string): Promise<bigint>;
-  getDebts?(entityId: string, tokenId: number): Promise<Array<{ amount: bigint; creditor: string }>>;
-
   // Writes - Core Operations
   processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<JBatchReceipt>;
   enforceDebts(entityId: string, tokenId: number, maxIterations?: number | bigint): Promise<void>;
@@ -260,7 +258,6 @@ export interface BrowserVMProvider {
   getCollateral(entityId: string, counterpartyId: string, tokenId: number): Promise<{ collateral: bigint; ondelta: bigint }>;
   getReserves(entityId: string, tokenId: number): Promise<bigint>;
   getEthBalance?(owner: string): Promise<bigint>;
-  getDebts?(entityId: string, tokenId: number): Promise<Array<{ amount: bigint; creditor: string }>>;
   timeTravel?(stateRoot: Uint8Array): Promise<void>;
   getAccountInfo?(
     entityId: string,

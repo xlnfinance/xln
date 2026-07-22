@@ -126,8 +126,12 @@ export const hasShardRpc2Jurisdiction = (config: OrchestratorJurisdictionsConfig
         isRpc2Jurisdiction(config, key, jurisdiction),
       ),
     );
-  } catch {
-    return false;
+  } catch (error) {
+    throw new Error(
+      `SHARD_JURISDICTIONS_INVALID:path=${config.shardJurisdictionsPath}:` +
+      `${error instanceof Error ? error.message : String(error)}`,
+      error instanceof Error ? { cause: error } : undefined,
+    );
   }
 };
 
@@ -136,8 +140,12 @@ export const resolvePrimaryHubJurisdictionFallback = (config: OrchestratorJurisd
   try {
     const payload = JSON.parse(readFileSync(config.shardJurisdictionsPath, 'utf8')) as ShardJurisdictionsFile;
     return selectPrimaryHubJurisdiction(payload, config);
-  } catch {
-    return null;
+  } catch (error) {
+    throw new Error(
+      `SHARD_JURISDICTIONS_INVALID:path=${config.shardJurisdictionsPath}:` +
+      `${error instanceof Error ? error.message : String(error)}`,
+      error instanceof Error ? { cause: error } : undefined,
+    );
   }
 };
 
@@ -423,8 +431,12 @@ export const toPublicJurisdictionsPayload = (
   let parsed: ShardJurisdictionsFile;
   try {
     parsed = JSON.parse(raw) as ShardJurisdictionsFile;
-  } catch {
-    return raw;
+  } catch (error) {
+    throw new Error(
+      `PUBLIC_JURISDICTIONS_JSON_INVALID:` +
+      `${error instanceof Error ? error.message : String(error)}`,
+      error instanceof Error ? { cause: error } : undefined,
+    );
   }
   if (!parsed || typeof parsed !== 'object' || !parsed.jurisdictions) return raw;
   const networkVersion = computeJurisdictionsNetworkVersion(parsed, String(parsed.version || '3'));

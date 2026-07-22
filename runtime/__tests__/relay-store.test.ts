@@ -65,6 +65,19 @@ test('relay pending queue enforces total bytes and target caps', () => {
   expect(store.debugEvents.some(event => event.reason === 'PENDING_MESSAGE_TOO_LARGE')).toBe(true);
 });
 
+test('relay pending queue rejects payloads that cannot be measured canonically', () => {
+  const store = createRelayStore('relay-test');
+  const unreadable = new Proxy({}, {
+    ownKeys: () => {
+      throw new Error('PAYLOAD_KEYS_UNREADABLE');
+    },
+  });
+
+  expect(() => enqueueMessage(store, 'runtime-a', unreadable)).toThrow('SAFE_STRINGIFY_FAILED');
+  expect(store.pendingMessages.size).toBe(0);
+  expect(store.pendingMessageBytes).toBe(0);
+});
+
 test('relay pending delivery retains current and later messages when send fails', () => {
   const store = createRelayStore('relay-test');
   const delivered: unknown[] = [];
