@@ -714,10 +714,8 @@ export async function proposeAccountFrame(
       phases: cumulativeMarksToPhases(profileCheckpoints, profileTotalMs),
       stateRoot: stateRootTiming,
     };
-    // Explicit profiling must remain visible under the production child
-    // default XLN_LOG_LEVEL=warn. Debug-only output made the opt-in flag appear
-    // enabled while silently emitting no successful fast proposals.
-    accountLog.warn('proposal.profile', profile);
+    // Timing is operational telemetry, not a correctness warning.
+    accountLog.info('proposal.profile', profile);
   }
   return finalResult;
 }

@@ -3527,7 +3527,7 @@ export const applyEntityInput = async (
     checkpointConsensusProfile('commit');
     const consensusProfileElapsedMs = Math.round(getPerfMs() - consensusProfileStartedAt);
     if (entityFrameProfileEnabled() || consensusProfileElapsedMs >= entityFrameSlowMs()) {
-      entityLog.warn('single_signer.profile', {
+      entityLog.info('single_signer.profile', {
         entity: String(workingReplica.entityId || '').slice(-8),
         elapsedMs: consensusProfileElapsedMs,
         txs: proposalTxs.length,
@@ -4980,7 +4980,7 @@ export const applyEntityFrame = async (
 
   const frameElapsedMs = Math.round(getPerfMs() - frameProfileStartMs);
   if (entityFrameProfileEnabled() || frameElapsedMs >= entityFrameSlowMs()) {
-    entityLog.warn('frame.profile', {
+    entityLog.info('frame.profile', {
       entity: String(currentEntityState.entityId || '').slice(-8),
       elapsedMs: frameElapsedMs,
       txs: entityTxs.length,

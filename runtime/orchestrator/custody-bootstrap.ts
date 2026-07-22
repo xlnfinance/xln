@@ -99,8 +99,8 @@ export type CustodyJurisdictionTarget = {
 };
 
 type DebugTokenCapacitySummary = {
-  inCapacity?: string;
-  outCapacity?: string;
+  inCapacity?: bigint;
+  outCapacity?: bigint;
 };
 
 type DebugAccountSummary = {
@@ -405,7 +405,7 @@ export const fetchDebugEntities = async (apiBaseUrl: string): Promise<DebugEntit
   if (!response.ok) {
     throw new Error(`debug entities endpoint failed (${response.status})`);
   }
-  const body = await response.json() as DebugEntitiesResponse;
+  const body = deserializeTaggedJson<DebugEntitiesResponse>(await response.text());
   return Array.isArray(body.entities) ? body.entities : [];
 };
 
@@ -461,14 +461,7 @@ const isSameDebugJurisdiction = (
 };
 
 const hasPositiveCapacity = (value: unknown): boolean => {
-  if (typeof value !== 'string') return false;
-  const trimmed = value.trim();
-  if (!trimmed) return false;
-  try {
-    return BigInt(trimmed) > 0n;
-  } catch {
-    return false;
-  }
+  return typeof value === 'bigint' && value > 0n;
 };
 
 const hasAccountCapacityForToken = (

@@ -717,7 +717,7 @@ export async function applyAccountInput(
   } finally {
     const elapsedMs = Math.round(getPerfMs() - profileStartedAt);
     if (accountInputProfileEnabled() || elapsedMs >= accountInputSlowMs()) {
-      accountHandlerLog.warn('input.profile', {
+      accountHandlerLog.info('input.profile', {
         entity: shortId(state.entityId, 8),
         counterparty: shortId(input.fromEntityId, 8),
         kind: input.kind,

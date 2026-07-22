@@ -438,7 +438,7 @@ export const applyMergedEntityInputs = async (
 
   const elapsedMs = Math.round(getPerfMs() - profileStartedAt);
   if (entityInputProfileEnabled() || elapsedMs >= entityInputSlowMs()) {
-    entityInputLog.warn('inputs.profile', {
+    entityInputLog.info('inputs.profile', {
       height: env.height,
       elapsedMs,
       mergedInputs: mergedInputs.length,

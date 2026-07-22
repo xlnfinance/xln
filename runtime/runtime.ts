@@ -2858,7 +2858,7 @@ const applyRuntimeInput = async (
     const endTime = getPerfMs();
     const applyElapsedMs = Math.round(endTime - startTime);
     if (RUNTIME_APPLY_PROFILE || applyElapsedMs >= RUNTIME_APPLY_SLOW_MS) {
-      runtimeLog.warn('apply.profile', {
+      runtimeLog.info('apply.profile', {
         height: env.height,
         elapsedMs: applyElapsedMs,
         runtimeTxs: mergedRuntimeTxs.length,

@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { safeStringify } from '../protocol/serialization';
 
 import {
   stopManagedChild,
@@ -40,19 +41,19 @@ test('waitForCustodyRouteableState accepts hub-side custody capacity for non-rou
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
-    fetch: () => new Response(JSON.stringify({
+    fetch: () => new Response(safeStringify({
       entities: [
         {
           entityId: hubIds[0],
-          accounts: [{ counterpartyId: custodyId, tokenCapacities: { 1: { inCapacity: '0', outCapacity: '10' } } }],
+          accounts: [{ counterpartyId: custodyId, tokenCapacities: { 1: { inCapacity: 0n, outCapacity: 10n } } }],
         },
         {
           entityId: hubIds[1],
-          accounts: [{ counterpartyId: custodyId, tokenCapacities: { 1: { inCapacity: '0', outCapacity: '10' } } }],
+          accounts: [{ counterpartyId: custodyId, tokenCapacities: { 1: { inCapacity: 0n, outCapacity: 10n } } }],
         },
         {
           entityId: hubIds[2],
-          accounts: [{ counterpartyId: custodyId, tokenCapacities: { 1: { inCapacity: '0', outCapacity: '10' } } }],
+          accounts: [{ counterpartyId: custodyId, tokenCapacities: { 1: { inCapacity: 0n, outCapacity: 10n } } }],
         },
         {
           entityId: custodyId,
