@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
-import { queueAccountMempoolTx, recordPendingSwapFillRatio } from '../entity/consensus/account-mempool-queue';
+import {
+  queueAccountMempoolTx,
+  reconcilePendingSwapFillRatios,
+  recordPendingSwapFillRatio,
+} from '../entity/consensus/account-mempool-queue';
 import { prependUniqueMempoolTxs } from '../account/consensus/helpers';
 import { LIMITS } from '../constants';
 import type { AccountMachine, AccountTx, EntityState } from '../types';
@@ -64,6 +68,23 @@ describe('account mempool multiplicity', () => {
       ...fill,
       data: { ...fill.data, fillRatio: 16_384 },
     } as AccountTx)).toThrow('SWAP_DISPUTE_FILL_RATIO_CONFLICT');
+  });
+
+  test('removes rejected fill evidence once no matching tx remains', () => {
+    const fill = {
+      type: 'swap_resolve',
+      data: { offerId: 'offer-1', fillRatio: 32_768, cancelRemainder: false },
+    } as AccountTx;
+    const state = { pendingSwapFillRatios: new Map() } as unknown as EntityState;
+    const account = { mempool: [fill] } as Pick<AccountMachine, 'mempool' | 'pendingFrame'>;
+
+    recordPendingSwapFillRatio(state, 'peer', fill);
+    reconcilePendingSwapFillRatios(state, 'peer', account);
+    expect(state.pendingSwapFillRatios?.size).toBe(1);
+
+    account.mempool = [];
+    reconcilePendingSwapFillRatios(state, 'peer', account);
+    expect(state.pendingSwapFillRatios?.size).toBe(0);
   });
 
   test('counts pending and queued transactions under one outstanding limit', () => {

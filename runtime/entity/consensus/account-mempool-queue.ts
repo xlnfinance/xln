@@ -56,3 +56,27 @@ export const recordPendingSwapFillRatio = (
   }
   state.pendingSwapFillRatios.set(key, ratio);
 };
+
+/**
+ * Keep unilateral fill evidence bound to an actual queued or in-flight tx.
+ * Recording at enqueue time is required so a peer cannot block dispute evidence
+ * by withholding the ACK. But retaining a locally rejected fill would poison a
+ * later valid retry with a false ratio conflict, so proposal validation is the
+ * exact lifecycle boundary for removing evidence that never became a candidate.
+ */
+export const reconcilePendingSwapFillRatios = (
+  state: EntityState,
+  accountId: string,
+  account: AccountMempoolQueue,
+): void => {
+  const active = new Set<string>();
+  for (const tx of [...account.mempool, ...(account.pendingFrame?.accountTxs ?? [])]) {
+    if (tx.type === 'swap_resolve') active.add(swapKey(accountId, tx.data.offerId));
+  }
+  const prefix = `${accountId}:`;
+  const evidence = state.pendingSwapFillRatios;
+  if (!evidence) return;
+  for (const key of evidence.keys()) {
+    if (key.startsWith(prefix) && !active.has(key)) evidence.delete(key);
+  }
+};

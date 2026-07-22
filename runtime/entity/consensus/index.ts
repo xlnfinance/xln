@@ -77,7 +77,11 @@ import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from '.
 import { LIMITS } from '../../constants';
 import { signAccountFrame as signFrame, verifyAccountSignature as verifyFrame } from '../../account/crypto';
 import { appendAccountMempoolTx } from '../../account/mempool';
-import { queueAccountMempoolTx, recordPendingSwapFillRatio } from './account-mempool-queue';
+import {
+  queueAccountMempoolTx,
+  reconcilePendingSwapFillRatios,
+  recordPendingSwapFillRatio,
+} from './account-mempool-queue';
 import {
   normalizeSwapOfferForOrderbook,
   collectCommittedCrossJurisdictionCancelAcks,
@@ -4355,6 +4359,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
         accountJClaimNodeStore,
         crossJOpeningProposalTxs,
       );
+      reconcilePendingSwapFillRatios(currentEntityState, accountKey, accountMachine);
       if (proposal.accountChanged) {
         storageChanges.push({
           family: 'account',
