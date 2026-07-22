@@ -259,3 +259,47 @@ export const buildRuntimeRecoveryBundle = (
     checkpointHash: computeRuntimeRecoveryCheckpointHash(checkpoint),
   });
 };
+
+export const buildRuntimeRecoveryCheckpointBundle = (
+  env: Env,
+  options: {
+    checkpoint: Record<string, unknown>;
+    signers: RuntimeRecoverySignerV1[];
+    meta?: RuntimeRecoveryMetaV1;
+    createdAt?: number;
+  },
+): RuntimeRecoveryBundleV1 => {
+  const runtimeId = normalizeRuntimeId(env.runtimeId);
+  const checkpoint = structuredClone(options.checkpoint);
+  const checkpointRuntimeId = normalizeRuntimeId(checkpoint['runtimeId']);
+  if (!runtimeId || checkpointRuntimeId !== runtimeId) {
+    throw new Error(
+      `RECOVERY_BUNDLE_RUNTIME_ID_MISMATCH:bundle=${runtimeId || 'missing'}:` +
+      `checkpoint=${checkpointRuntimeId || 'missing'}`,
+    );
+  }
+  const runtimeHeight = Number(checkpoint['height']);
+  const runtimeTimestamp = Number(checkpoint['timestamp']);
+  if (
+    !Number.isSafeInteger(runtimeHeight)
+    || runtimeHeight < 0
+    || runtimeHeight > Math.floor(Number(env.height || 0))
+  ) {
+    throw new Error(`RECOVERY_BUNDLE_CHECKPOINT_HEIGHT_INVALID:${String(checkpoint['height'])}`);
+  }
+  if (!Number.isSafeInteger(runtimeTimestamp) || runtimeTimestamp < 0) {
+    throw new Error(`RECOVERY_BUNDLE_CHECKPOINT_TIMESTAMP_INVALID:${String(checkpoint['timestamp'])}`);
+  }
+  return signRuntimeRecoveryBundle(env, {
+    version: RECOVERY_BUNDLE_VERSION,
+    kind: 'snapshot',
+    runtimeId,
+    runtimeHeight,
+    runtimeTimestamp,
+    createdAt: Math.max(0, Math.floor(Number(options.createdAt ?? Date.now()))),
+    signers: options.signers.map(normalizeSigner),
+    ...(options.meta ? { meta: structuredClone(options.meta) } : {}),
+    checkpoint,
+    checkpointHash: computeRuntimeRecoveryCheckpointHash(checkpoint),
+  });
+};

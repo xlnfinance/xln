@@ -5,10 +5,12 @@ import { Wallet, getBytes, hexlify } from 'ethers';
 
 import { serializeTaggedJson, deserializeTaggedJson } from '../protocol/serialization';
 import {
+  buildPersistedRuntimeRecording,
   closeInfraDb,
   closeRuntimeDb,
   createEmptyEnv,
   enqueueRuntimeInput,
+  openDetachedRuntimeRecording,
   process as processRuntime,
   restoreEnvFromCheckpointSnapshot,
   restoreEnvFromRecoveryBundles,
@@ -18,6 +20,7 @@ import {
   buildRuntimeRecoveryBundle,
   computeRuntimeRecoveryCheckpointHash,
 } from '../recovery/bundle';
+import { buildRuntimeRecording, validateRuntimeRecording } from '../recovery/recording';
 import {
   buildTowerAppointmentOwnerMessage,
   decryptRuntimeRecoveryBundle,
@@ -469,6 +472,28 @@ describe('runtime recovery tower', () => {
     expect(restoredPersistedHash).toBe(originalPersistedHash);
     expect(restoredEnv.height).toBe(env.height);
     expect(restoredEnv.eReplicas.size).toBe(env.eReplicas.size);
+
+    const recording = buildRuntimeRecording([snapshotBundle, tailBundle], 10_002);
+    expect(validateRuntimeRecording(recording).manifestHash).toBe(recording.manifestHash);
+    const detached = openDetachedRuntimeRecording(recording, runtimeSeed);
+    const baseProjection = await detached.readAtHeight(baseHeight);
+    expect(baseProjection.height).toBe(baseHeight);
+    const targetProjection = await detached.readAtHeight(env.height);
+    expect(targetProjection.height).toBe(env.height);
+    expect(computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(targetProjection)))
+      .toBe(originalPersistedHash);
+    await detached.close();
+    await expect(detached.readAtHeight(baseHeight)).rejects.toThrow('RUNTIME_RECORDING_ADAPTER_CLOSED');
+
+    const persistedRecording = await buildPersistedRuntimeRecording(env, {
+      signers,
+      createdAt: 10_003,
+    });
+    expect(validateRuntimeRecording(persistedRecording).targetHeight).toBe(env.height);
+    const tamperedRecording = structuredClone(persistedRecording);
+    tamperedRecording.targetHeight += 1;
+    expect(() => validateRuntimeRecording(tamperedRecording))
+      .toThrow('RUNTIME_RECORDING_MANIFEST_MISMATCH');
   });
 
   test('tower stores blind backup appointments and serves restore payloads', async () => {

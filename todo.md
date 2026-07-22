@@ -246,10 +246,16 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   `JSON.stringify($history)` download and its TimeMachine UI instead of creating
   a second history format. The transient `EnvSnapshot[]` projection remains only
   for live/local UI playback.
-- [ ] Build exact offline recording from the existing canonical checkpoint +
-  persisted WAL tail + manifest/hashes, using the one recovery codec.
-- [ ] Open recordings through a detached read-only adapter: no P2P, command bus,
-  active Runtime mutation or vault writes; load requested heights lazily.
+- [x] Build exact offline recording from the existing canonical checkpoint +
+  persisted WAL tail + manifest/hashes, using the one recovery codec. Recording
+  is only a signed recovery snapshot plus optional contiguous recovery journal
+  tail; manifest pins every bundle hash and itself. A pruned base falls back to
+  an exact signed live snapshot rather than inventing another codec.
+- [x] Open recordings through a detached read-only adapter: no P2P, command bus,
+  active Runtime mutation or vault writes; load requested heights lazily. The
+  adapter restores only the requested signed height in memory, skips infra
+  rehydration/retry activation, and never opens/closes the live DB namespace.
+  Recovery/recording L1-L2: 10/10 PASS, 118 assertions; runtime types PASS.
 - [ ] Keep shareable projections separate from exact replay bundles so viewing
   history does not automatically disclose complete financial Runtime state.
 

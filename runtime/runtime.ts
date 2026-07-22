@@ -507,8 +507,18 @@ import {
   type RuntimeActivityEvent,
   type RuntimeActivityFilters,
 } from './api/activity-history';
-import { assertRuntimeRecoveryBundleAuthenticity } from './recovery/bundle';
-import type { RuntimeRecoveryBundleV1 } from './recovery/types';
+import {
+  assertRuntimeRecoveryBundleAuthenticity,
+  buildRuntimeRecoveryBundle,
+  buildRuntimeRecoveryCheckpointBundle,
+} from './recovery/bundle';
+import { buildRuntimeRecording, validateRuntimeRecording } from './recovery/recording';
+import type {
+  RuntimeRecording,
+  RuntimeRecoveryBundleV1,
+  RuntimeRecoveryMetaV1,
+  RuntimeRecoverySignerV1,
+} from './recovery/types';
 import {
   ensureLiveJAdapterForReplica,
   rehydrateRestoredRuntimeInfra,
@@ -3390,6 +3400,7 @@ export const restoreEnvFromCheckpointSnapshot = async (
   options?: {
     runtimeSeed?: string | null;
     runtimeId?: string | null;
+    readOnly?: boolean;
   },
 ): Promise<Env> => {
   if (!snapshot || typeof snapshot !== 'object') {
@@ -3462,12 +3473,14 @@ export const restoreEnvFromCheckpointSnapshot = async (
   assertAccountJClaimRootsAvailable(env);
   await assertCertifiedRegistrationEvidenceStore(env);
 
-  await rehydrateRestoredRuntimeInfra(env, {
-    isBrowser: runtimeIsBrowser,
-    loadGossipProfiles: (targetEnv) => loadGossipProfilesFromInfraDb(targetEnv, infraGossipDbAccess),
-    assertPersistedContractConfigReady,
-    setBrowserVMJurisdiction,
-  });
+  if (!options?.readOnly) {
+    await rehydrateRestoredRuntimeInfra(env, {
+      isBrowser: runtimeIsBrowser,
+      loadGossipProfiles: (targetEnv) => loadGossipProfilesFromInfraDb(targetEnv, infraGossipDbAccess),
+      assertPersistedContractConfigReady,
+      setBrowserVMJurisdiction,
+    });
+  }
   registerCommittedSingleSignerWallets(env);
   for (const profile of snapshotGossipProfiles) {
     env.gossip?.announce?.(profile);
@@ -3799,6 +3812,8 @@ export const restoreEnvFromRecoveryBundles = async (
   options?: {
     runtimeSeed?: string | null;
     runtimeId?: string | null;
+    targetHeight?: number;
+    readOnly?: boolean;
   },
 ): Promise<Env> => {
   const trustedRuntimeSeed = options?.runtimeSeed;
@@ -3812,7 +3827,15 @@ export const restoreEnvFromRecoveryBundles = async (
   if (snapshots.length === 0) {
     throw new Error('RECOVERY_BUNDLE_SNAPSHOT_REQUIRED');
   }
-  const candidates = snapshots.map((snapshot) => {
+  const requestedTarget = options?.targetHeight;
+  if (
+    requestedTarget !== undefined
+    && (!Number.isSafeInteger(requestedTarget) || requestedTarget < 0)
+  ) {
+    throw new Error(`RECOVERY_BUNDLE_TARGET_HEIGHT_INVALID:${String(requestedTarget)}`);
+  }
+  const candidates = snapshots.flatMap((snapshot) => {
+    if (requestedTarget !== undefined && snapshot.runtimeHeight > requestedTarget) return [];
     const snapshotHash = String(snapshot.checkpointHash || '').toLowerCase();
     const tail = validated
       .filter((bundle) =>
@@ -3821,26 +3844,45 @@ export const restoreEnvFromRecoveryBundles = async (
         && String(bundle.baseCheckpointHash || '').toLowerCase() === snapshotHash
         && bundle.runtimeHeight > snapshot.runtimeHeight,
       )
+      .filter((bundle) => requestedTarget === undefined || bundle.runtimeHeight >= requestedTarget)
       .sort((left, right) => right.runtimeHeight - left.runtimeHeight)[0];
+    if (requestedTarget !== undefined && snapshot.runtimeHeight < requestedTarget && !tail) return [];
     return {
       snapshot,
       tail,
-      height: tail?.runtimeHeight ?? snapshot.runtimeHeight,
+      height: requestedTarget ?? tail?.runtimeHeight ?? snapshot.runtimeHeight,
     };
   }).sort((left, right) => {
     if (right.height !== left.height) return right.height - left.height;
     return right.snapshot.runtimeHeight - left.snapshot.runtimeHeight;
   });
+  if (candidates.length === 0) {
+    throw new Error(`RECOVERY_BUNDLE_TARGET_HEIGHT_UNAVAILABLE:${String(requestedTarget)}`);
+  }
   const best = candidates[0]!;
   const env = await restoreEnvFromCheckpointSnapshot(best.snapshot.checkpoint!, options);
-  if (best.tail) {
+  if (best.tail && best.height > best.snapshot.runtimeHeight) {
     try {
-      await replayRecoveryFrameJournals(env, best.tail.frames || []);
+      await replayRecoveryFrameJournals(
+        env,
+        (best.tail.frames || []).filter(frame => frame.height <= best.height),
+      );
     } catch (error) {
+      if (options?.readOnly) throw error;
       return failRecoveryRestoreAfterCleanup(env, error);
     }
   }
-  markRestoredReliableOutputsDue(env);
+  if (env.height !== best.height) {
+    const mismatch = new Error(
+      `RECOVERY_BUNDLE_TARGET_HEIGHT_MISMATCH:expected=${best.height}:actual=${env.height}`,
+    );
+    if (options?.readOnly) throw mismatch;
+    return failRecoveryRestoreAfterCleanup(
+      env,
+      mismatch,
+    );
+  }
+  if (!options?.readOnly) markRestoredReliableOutputsDue(env);
   return env;
 };
 
@@ -6994,6 +7036,128 @@ export const readPersistedCheckpointSnapshot = async (
   });
 };
 
+const MAX_RUNTIME_RECORDING_JOURNAL_FRAMES = 10_000;
+
+export const buildPersistedRuntimeRecording = async (
+  env: Env,
+  options: {
+    signers: RuntimeRecoverySignerV1[];
+    meta?: RuntimeRecoveryMetaV1;
+    createdAt?: number;
+  },
+): Promise<RuntimeRecording> => {
+  const createdAt = Math.max(0, Math.floor(Number(options.createdAt ?? Date.now())));
+  const latestHeight = await getPersistedLatestHeight(env);
+  if (latestHeight !== env.height) {
+    throw new Error(
+      `RUNTIME_RECORDING_LIVE_HEAD_MISMATCH:persisted=${latestHeight}:env=${env.height}`,
+    );
+  }
+  if (latestHeight <= 0) {
+    return buildRuntimeRecording([
+      buildRuntimeRecoveryBundle(env, { ...options, createdAt, kind: 'snapshot' }),
+    ], createdAt);
+  }
+
+  const minimumBaseHeight = Math.max(1, latestHeight - MAX_RUNTIME_RECORDING_JOURNAL_FRAMES);
+  const checkpointHeights = (await listPersistedCheckpointHeights(env))
+    .filter(height => height >= minimumBaseHeight && height <= latestHeight)
+    .sort((left, right) => left - right);
+  let baseHeight = latestHeight;
+  let checkpoint: Record<string, unknown> | null = null;
+  for (const candidateHeight of checkpointHeights) {
+    const candidate = await readPersistedCheckpointSnapshot(env, candidateHeight);
+    if (!candidate) continue;
+    baseHeight = candidateHeight;
+    checkpoint = candidate;
+    break;
+  }
+  if (!checkpoint) {
+    return buildRuntimeRecording([
+      buildRuntimeRecoveryBundle(env, { ...options, createdAt, kind: 'snapshot' }),
+    ], createdAt);
+  }
+  const snapshotBundle = buildRuntimeRecoveryCheckpointBundle(env, {
+    ...options,
+    checkpoint,
+    createdAt,
+  });
+  if (baseHeight === latestHeight) {
+    return buildRuntimeRecording([snapshotBundle], createdAt);
+  }
+
+  const expectedFrameCount = latestHeight - baseHeight;
+  const frames = await readPersistedFrameJournals(env, {
+    fromHeight: baseHeight + 1,
+    toHeight: latestHeight,
+    limit: expectedFrameCount,
+  });
+  if (
+    frames.length !== expectedFrameCount
+    || frames[0]?.height !== baseHeight + 1
+    || frames.at(-1)?.height !== latestHeight
+  ) {
+    throw new Error(
+      `RUNTIME_RECORDING_JOURNAL_INCOMPLETE:base=${baseHeight}:target=${latestHeight}:` +
+      `expected=${expectedFrameCount}:actual=${frames.length}`,
+    );
+  }
+  const tailBundle = buildRuntimeRecoveryBundle(env, {
+    ...options,
+    createdAt,
+    kind: 'journal_tail',
+    baseCheckpoint: {
+      height: baseHeight,
+      hash: snapshotBundle.checkpointHash!,
+    },
+    frames,
+  });
+  return buildRuntimeRecording([snapshotBundle, tailBundle], createdAt);
+};
+
+export type DetachedRuntimeRecordingAdapter = {
+  readonly runtimeId: string;
+  readonly baseHeight: number;
+  readonly targetHeight: number;
+  readAtHeight(height: number): Promise<Env>;
+  close(): Promise<void>;
+};
+
+export const openDetachedRuntimeRecording = (
+  recording: RuntimeRecording,
+  runtimeSeed: string,
+): DetachedRuntimeRecordingAdapter => {
+  const validated = validateRuntimeRecording(recording);
+  let closed = false;
+  let activeProjection: Env | null = null;
+  return {
+    runtimeId: validated.runtimeId,
+    baseHeight: validated.baseHeight,
+    targetHeight: validated.targetHeight,
+    async readAtHeight(height: number): Promise<Env> {
+      if (closed) throw new Error('RUNTIME_RECORDING_ADAPTER_CLOSED');
+      if (!Number.isSafeInteger(height) || height < validated.baseHeight || height > validated.targetHeight) {
+        throw new Error(
+          `RUNTIME_RECORDING_HEIGHT_UNAVAILABLE:height=${height}:` +
+          `range=${validated.baseHeight}-${validated.targetHeight}`,
+        );
+      }
+      activeProjection = await restoreEnvFromRecoveryBundles(validated.bundles, {
+        runtimeSeed,
+        runtimeId: validated.runtimeId,
+        targetHeight: height,
+        readOnly: true,
+      });
+      return activeProjection;
+    },
+    async close(): Promise<void> {
+      if (closed) return;
+      closed = true;
+      activeProjection = null;
+    },
+  };
+};
+
 export const loadEnvFromDB = async (
   runtimeId?: string | null,
   runtimeSeed?: string | null,
@@ -7110,6 +7274,7 @@ export {
 } from './jurisdiction/event-observation';
 export type {
   EncryptedRuntimeRecoveryBundleV1,
+  RuntimeRecording,
   RuntimeRecoveryBundleV1,
   RuntimeRecoveryMetaV1,
   RuntimeRecoverySignerV1,
@@ -7123,10 +7288,15 @@ export type {
 } from './recovery/types';
 export {
   buildRuntimeRecoveryBundle,
+  buildRuntimeRecoveryCheckpointBundle,
   computeRuntimeRecoveryBundleHash,
   computeRuntimeRecoveryCheckpointHash,
   validateRuntimeRecoveryBundle,
 } from './recovery/bundle';
+export {
+  buildRuntimeRecording,
+  validateRuntimeRecording,
+} from './recovery/recording';
 export {
   buildTowerAppointmentOwnerMessage,
   computeWatchtowerCounterDisputeAuthorizationHash,

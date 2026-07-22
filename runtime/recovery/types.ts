@@ -35,6 +35,19 @@ export type RuntimeRecoveryBundleV1 = {
   signature: string;
 };
 
+/** Portable exact recording. Bundles remain the only state/replay codec. */
+export type RuntimeRecording = {
+  format: 'xln-runtime-recording';
+  version: 1;
+  runtimeId: string;
+  baseHeight: number;
+  targetHeight: number;
+  createdAt: number;
+  bundles: RuntimeRecoveryBundleV1[];
+  bundleHashes: string[];
+  manifestHash: string;
+};
+
 export type EncryptedRuntimeRecoveryBundleV1 = {
   version: 1;
   kind?: 'snapshot' | 'journal_tail';

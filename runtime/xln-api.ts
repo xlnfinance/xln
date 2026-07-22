@@ -58,6 +58,7 @@ export type { PersistedActivityJournal } from './api/activity-history';
 export type { StorageFrameRecord, StorageHead } from './storage/types';
 export type {
   EncryptedRuntimeRecoveryBundleV1,
+  RuntimeRecording,
   RuntimeRecoveryBundleV1,
   RuntimeRecoveryMetaV1,
   RuntimeRecoverySignerV1,
@@ -169,6 +170,7 @@ import type {
 import type { BoardMemberInput } from './entity/factory';
 import type {
   EncryptedRuntimeRecoveryBundleV1,
+  RuntimeRecording,
   RuntimeRecoveryBundleV1,
   RuntimeRecoveryMetaV1,
   RuntimeRecoverySignerV1,
@@ -561,7 +563,12 @@ export interface XLNModule {
   ) => Promise<Env>;
   restoreEnvFromRecoveryBundles: (
     bundles: RuntimeRecoveryBundleV1[],
-    options?: { runtimeSeed?: string | null; runtimeId?: string | null },
+    options?: {
+      runtimeSeed?: string | null;
+      runtimeId?: string | null;
+      targetHeight?: number;
+      readOnly?: boolean;
+    },
   ) => Promise<Env>;
   loadEnvFromDB: (
     runtimeId?: string | null,
@@ -621,6 +628,24 @@ export interface XLNModule {
       frames?: PersistedFrameJournal[];
     },
   ) => RuntimeRecoveryBundleV1;
+  buildPersistedRuntimeRecording: (
+    env: Env,
+    options: {
+      signers: RuntimeRecoverySignerV1[];
+      meta?: RuntimeRecoveryMetaV1;
+      createdAt?: number;
+    },
+  ) => Promise<RuntimeRecording>;
+  openDetachedRuntimeRecording: (
+    recording: RuntimeRecording,
+    runtimeSeed: string,
+  ) => {
+    readonly runtimeId: string;
+    readonly baseHeight: number;
+    readonly targetHeight: number;
+    readAtHeight(height: number): Promise<Env>;
+    close(): Promise<void>;
+  };
   encryptRuntimeRecoveryBundle: (
     bundle: RuntimeRecoveryBundleV1,
     runtimeSeed: string,
