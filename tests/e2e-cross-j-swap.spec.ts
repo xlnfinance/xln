@@ -1974,9 +1974,6 @@ async function placeCrossOrder(
           mempoolTxs: state.mempoolTxs,
           offers: state.offers,
           route: state.routeSummaries.find((route) => route.orderId === createdOrderId) || null,
-          sourceCommittedMessage: state.messages.some((message) =>
-            message.includes(`Cross-j swap ${createdOrderId} committed by source`),
-          ),
           pendingOutputs: state.pendingOutputs,
           pendingNetworkOutputs: state.pendingNetworkOutputs,
           runtimeMempoolInputs: state.runtimeMempoolInputs,
@@ -1985,19 +1982,22 @@ async function placeCrossOrder(
           messages: state.messages.slice(-10),
         };
         const route = state.routeSummaries.find((candidate) => candidate.orderId === createdOrderId);
-        const sourceCommittedOrAdvanced =
+        // The User Runtime commits both Account legs atomically after matching
+        // the Hub-signed proposal pair. The human-readable terminal message is
+        // emitted later by the Hub when both ACKs commit, so waiting for the old
+        // source-only message here adds a protocol round trip that no longer
+        // exists. The paired pull bindings and canonical route status are the
+        // state-level proof of User-side admission.
+        const accountPairCommittedOrAdvanced =
           Boolean(route?.sourcePull && route?.targetPull) &&
-          CROSS_J_SOURCE_COMMITTED_OR_ADVANCED_STATUSES.has(String(route?.status || '')) &&
-          state.messages.some((message) =>
-            message.includes(`Cross-j swap ${createdOrderId} committed by source`),
-          );
+          CROSS_J_SOURCE_COMMITTED_OR_ADVANCED_STATUSES.has(String(route?.status || ''));
         const sourceQueuesDrained =
           !state.hasPendingFrame &&
           state.pendingTxs.length === 0 &&
           state.mempoolTxs.length === 0 &&
           state.runtimeMempoolInputs.length === 0;
         return {
-          committed: state.currentHeight >= beforeHeight && sourceCommittedOrAdvanced && sourceQueuesDrained,
+          committed: state.currentHeight > beforeHeight && accountPairCommittedOrAdvanced && sourceQueuesDrained,
           currentHeight: state.currentHeight,
           hasPendingFrame: state.hasPendingFrame,
           routeStatus: route?.status || '',
