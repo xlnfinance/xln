@@ -1751,31 +1751,6 @@ export const getEnv = (env?: Env | null): Env | null => {
   return env;
 };
 
-export const setRuntimeSeed = (env: Env, seed: string | null): void => {
-  if (env?.lockRuntimeSeed) {
-    runtimeLog.warn('runtime_seed.update_blocked');
-    return;
-  }
-  const normalized = seed === null || seed === undefined ? '' : seed;
-  env.runtimeSeed = normalized;
-  if (normalized) {
-    try {
-      const derivedRuntimeId = normalizeRuntimeId(deriveSignerAddressSync(normalized, '1'));
-      if (derivedRuntimeId) env.runtimeId = derivedRuntimeId;
-      else delete env.runtimeId;
-    } catch (error) {
-      runtimeLog.warn('runtime_seed.derive_failed', { error: error instanceof Error ? error.message : String(error) });
-      delete env.runtimeId;
-    }
-  } else {
-    delete env.runtimeId;
-  }
-  if (env.runtimeId) {
-    env.dbNamespace = normalizeDbNamespace(env.runtimeId);
-  }
-  startPendingRuntimeP2PIfReady(env, getRuntimeP2PLifecycleDeps());
-};
-
 export const setRuntimeId = (env: Env, id: string | null): void => {
   const normalizedRuntimeId = normalizeRuntimeId(id);
   if (normalizedRuntimeId) env.runtimeId = normalizedRuntimeId;

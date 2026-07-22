@@ -3514,9 +3514,6 @@ export const vaultOperations = {
         ensureRuntimeLoopRunning(newEnv, xln, `create-runtime:${runtimeIdLower.slice(0, 12)}`);
         markPerf('prepare_runtime_before_bootstrap');
 
-        // REMOVED: setRuntimeSeed() - seed now stored in env.runtimeSeed and passed to pure functions
-        // All crypto functions now read from env.runtimeSeed, not global state
-
         // Fetch pre-deployed contract addresses from prod
         const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
         markPerf('wait_server_runtime_ready');

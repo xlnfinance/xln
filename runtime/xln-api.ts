@@ -533,7 +533,6 @@ export interface XLNModule {
 
   // Environment creation
   createEmptyEnv: (seed?: Uint8Array | string | null) => Env;
-  setRuntimeSeed: (env: Env, seed: string | null) => void;
   setRuntimeId: (env: Env, id: string | null) => void;
   deriveRuntimeId: (seed: string) => string;  // Derive runtimeId from seed (for isolated envs)
 

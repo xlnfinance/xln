@@ -98,7 +98,6 @@ installHmacSync();
 // would let one runtime sign or submit as another runtime's validator. The raw
 // seed is never used as a map key and clearing one vault cannot affect another.
 const signerKeyStores = new Map<string, SignerKeyStore>();
-let runtimeSeedLocked = false;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 const bytesToHex = (bytes: Uint8Array): string =>
@@ -239,18 +238,6 @@ export function prewarmSignerLabels(seed: Uint8Array | string, signerLabels: rea
     warmed.push(address);
   }
   return warmed;
-}
-
-export function setRuntimeSeed(seed: Uint8Array | string | null): void {
-  if (runtimeSeedLocked) {
-    console.warn('⚠️ Runtime seed update ignored (crypto lock enabled)');
-    return;
-  }
-  if (seed !== null) clearSignerKeys(seed);
-}
-
-export function lockRuntimeSeedUpdates(locked: boolean): void {
-  runtimeSeedLocked = locked;
 }
 
 const equalBytes = (left: Uint8Array, right: Uint8Array): boolean => {
@@ -505,29 +492,6 @@ export function getSignerAddress(env: SignerKeyEnv, signerId: string): string | 
   const exactRegistered = getExactRegisteredSignerAddress(env, key);
   if (exactRegistered) return exactRegistered;
   return isHexAddress(key) ? key : null;
-}
-
-/**
- * Register signer keys derived from a deterministic seed
- * Formula: privateKey = HMAC-SHA256(seed, signerId)
- */
-export async function registerSeededKeys(
-  seed: Uint8Array | string,
-  signerIds: string[]
-): Promise<void> {
-  setRuntimeSeed(seed);
-
-  for (const signerId of signerIds) {
-    const privateKey = await deriveSignerKey(seed, signerId);
-    const signerIndex = parseSignerIndex(signerId);
-    if (signerIndex !== null) {
-      registerSignerKey(seed, deriveSignerAddressSync(seed, signerId).toLowerCase(), privateKey);
-      continue;
-    }
-    registerSignerKey(seed, signerId, privateKey);
-  }
-
-  console.log(`🔑 Registered ${signerIds.length} keys from seed`);
 }
 
 /**

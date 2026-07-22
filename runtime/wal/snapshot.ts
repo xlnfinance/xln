@@ -358,7 +358,6 @@ export const buildCanonicalRuntimeStateSnapshot = (
   ...(env.pendingOutputs ? { pendingOutputs: cloneRuntimeOutputs(env.pendingOutputs) } : {}),
   ...(env.networkInbox ? { networkInbox: cloneRuntimeOutputs(env.networkInbox) } : {}),
   ...(env.pendingNetworkOutputs ? { pendingNetworkOutputs: cloneRuntimeOutputs(env.pendingNetworkOutputs) } : {}),
-  ...(env.lockRuntimeSeed !== undefined ? { lockRuntimeSeed: env.lockRuntimeSeed } : {}),
   eReplicas: Array.from(env.eReplicas.entries()).map(([replicaKey, replica]) => [
     replicaKey,
     buildCanonicalEntityReplicaSnapshot(
@@ -431,9 +430,6 @@ export const restoreDurableRuntimeSnapshot = (
   env.pendingNetworkOutputs = Array.isArray(snapshot['pendingNetworkOutputs'])
     ? cloneIsolatedRoutedEntityInputs(snapshot['pendingNetworkOutputs'] as RoutedEntityInput[])
     : [];
-  if (typeof snapshot['lockRuntimeSeed'] === 'boolean') {
-    env.lockRuntimeSeed = snapshot['lockRuntimeSeed'];
-  }
   if (Array.isArray(snapshot['jReplicas'])) {
     env.jReplicas = new Map(snapshot['jReplicas'].map((entry) => {
       if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string') {

@@ -136,9 +136,9 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
 ## P1 — deterministic startup and signers
 
 - [x] Runtime signer readiness is tracked on the current candidate.
-- [ ] Prove that every Runtime creation path derives and registers all signers
+- [x] Prove that every Runtime creation path derives and registers all signers
   immediately from its seed before any Entity/Account work is accepted.
-- [ ] Remove delayed/legacy signer bootstrap paths once all callers use the
+- [x] Remove delayed/legacy signer bootstrap paths once all callers use the
   single constructor path; no retry fence or silent fallback.
 - [ ] Bootstrap must remain deterministic and pass fresh reset, restart and
   BrowserVM scenarios.

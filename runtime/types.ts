@@ -1493,7 +1493,6 @@ export interface Env {
   pendingOutputs?: RoutedEntityInput[]; // Outputs queued for next tick
   networkInbox?: RoutedEntityInput[];   // Inbound network messages queued for next tick
   pendingNetworkOutputs?: RoutedEntityInput[]; // Durable, bounded at-least-once transport outbox.
-  lockRuntimeSeed?: boolean;      // Prevent runtime seed updates during scenarios
 
   // Frame-scoped structured logs (captured into snapshot, then reset)
   frameLogs: FrameLogEntry[];

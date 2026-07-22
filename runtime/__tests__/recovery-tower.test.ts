@@ -226,7 +226,6 @@ describe('runtime recovery tower', () => {
     };
     env.pendingOutputs = [{ entityId, signerId: runtimeId, runtimeId, entityTxs: [] }];
     env.networkInbox = [{ entityId, signerId: runtimeId, runtimeId, entityTxs: [] }];
-    env.lockRuntimeSeed = true;
     const bundle = buildRuntimeRecoveryBundle(env, {
       signers: [{
         index: 0,
@@ -268,7 +267,6 @@ describe('runtime recovery tower', () => {
     expect(restoredEnv.runtimeState?.maxEntityInputsPerFrame).toBe(123);
     expect(restoredEnv.pendingOutputs).toEqual(env.pendingOutputs);
     expect(restoredEnv.networkInbox).toEqual(env.networkInbox);
-    expect(restoredEnv.lockRuntimeSeed).toBe(true);
   });
 
   test('recovery checkpoint carries gossip profiles needed for restored openAccount routing', async () => {

@@ -75,10 +75,8 @@ export async function lockAhb(env: Env): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'HTLC AHB');
   // Register signer keys for real signatures
   // 2-6 for entities (1 reserved for foundation)
-  const { lockRuntimeSeedUpdates } = await import('../account/crypto');
   requireRuntimeSeed(env, 'HTLC AHB');
   ensureSignerKeysFromSeed(env, ['1', '2', '3', '4', '5', '6'], 'HTLC AHB');
-  lockRuntimeSeedUpdates(true);
   const process = await getProcess();
   env.scenarioMode = true; // Deterministic time control
   const rng = createRngFromEnv(env); // Deterministic RNG for HTLC secrets
@@ -1902,7 +1900,6 @@ export async function lockAhb(env: Env): Promise<void> {
   } finally {
     restoreStrict();
     env.scenarioMode = false; // ALWAYS re-enable live mode, even on error
-    lockRuntimeSeedUpdates(false);
   }
 }
 

@@ -11,9 +11,24 @@ import {
   registerSignerKey,
   signDigest,
 } from '../account/crypto';
-import { prewarmRuntimeSignerCache } from '../runtime';
+import { createEmptyEnv, prewarmRuntimeSignerCache } from '../runtime';
 
 describe('signer cache prewarm', () => {
+  test('creates deterministic signer keys synchronously with the runtime Env', () => {
+    const seed = 'runtime-creation-signers-ready';
+    clearSignerKeys(seed);
+    try {
+      const env = createEmptyEnv(seed);
+      const first = deriveSignerAddressSync(seed, '1').toLowerCase();
+      const twentieth = deriveSignerAddressSync(seed, '20').toLowerCase();
+      expect(env.runtimeId).toBe(first);
+      expect(getCachedSignerPrivateKey(seed, first)).toEqual(deriveSignerKeySync(seed, '1'));
+      expect(getCachedSignerPrivateKey(seed, twentieth)).toEqual(deriveSignerKeySync(seed, '20'));
+    } finally {
+      clearSignerKeys(seed);
+    }
+  });
+
   test('registers deterministic label-derived EOA signers for restored runtime signing', () => {
     const seed = 'signer-prewarm-restore-seed';
     const labels = ['hub-1', 'hub-1', 'hub-1:Tron (local anvil)'];

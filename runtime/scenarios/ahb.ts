@@ -70,10 +70,9 @@ export async function ahb(env: Env): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'AHB');
 
   // Require real runtime seed and derive signer keys (no test keys)
-  const { lockRuntimeSeedUpdates, getSignerPrivateKey } = await import('../account/crypto');
+  const { getSignerPrivateKey } = await import('../account/crypto');
   requireRuntimeSeed(env, 'AHB');
   ensureSignerKeysFromSeed(env, ['1', '2', '3', '4'], 'AHB');
-  lockRuntimeSeedUpdates(true);
 
   const walletEntries = [
     { label: 'alice', signerId: '1' },
@@ -89,7 +88,6 @@ export async function ahb(env: Env): Promise<void> {
 
   const process = await getProcess();
   env.scenarioMode = true; // Deterministic time control (scenarios set env.timestamp manually)
-  env.lockRuntimeSeed = true; // Prevent vault seed overrides during scenario
 
   try {
     // Reset runtime state for clean scenario runs in browser (persisted env can cause nonce/mempool drift)
@@ -2702,8 +2700,6 @@ export async function ahb(env: Env): Promise<void> {
   } finally {
     restoreStrict();
     env.scenarioMode = false; // ALWAYS re-enable live mode, even on error
-    env.lockRuntimeSeed = false;
-    lockRuntimeSeedUpdates(false);
   }
 }
 
