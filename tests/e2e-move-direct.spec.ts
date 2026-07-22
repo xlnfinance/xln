@@ -9,7 +9,7 @@ import {
   switchToRuntimeId,
 } from './utils/e2e-demo-users';
 import { getRenderedExternalBalance } from './utils/e2e-account-ui';
-import { timedStep } from './utils/e2e-timing';
+import { timedStep } from './utils/e2e-timing.mts';
 
 const LONG_E2E = process.env.E2E_LONG === '1';
 const ROUTE_TIMEOUT_MS = LONG_E2E ? 90_000 : 60_000;

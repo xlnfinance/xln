@@ -7,7 +7,7 @@ import {
 } from './utils/e2e-baseline';
 import { openAccountWorkspaceTab } from './utils/e2e-account-workspace';
 import { resolveRuntimeImportAppUrl } from './utils/e2e-runtime-import';
-import { closeRuntimeContext } from './utils/e2e-runtime-shutdown';
+import { closeRuntimeContext } from './utils/e2e-runtime-shutdown.mts';
 import { deriveSignerAddressSync } from '../runtime/account/crypto';
 import { decodeRuntimeAdapterRequest } from '../runtime/radapter/codec';
 import { signRuntimeAdapterServerIdentity } from '../runtime/radapter/server-identity-signer';

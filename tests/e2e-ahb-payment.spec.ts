@@ -25,7 +25,7 @@ import {
 } from './utils/e2e-demo-users';
 import { expectUiPaymentNoRoute, prepareUiPayment, submitUiPayment } from './utils/e2e-pay-ui';
 import { getPersistedReceiptCursor, waitForPersistedFrameEvent, waitForPersistedFrameEventMatch } from './utils/e2e-runtime-receipts';
-import { timedStep } from './utils/e2e-timing';
+import { timedStep } from './utils/e2e-timing.mts';
 
 const INIT_TIMEOUT = 30_000;
 const SETTLE_MS = 10_000;

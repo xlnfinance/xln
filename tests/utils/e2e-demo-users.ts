@@ -4,7 +4,7 @@ import { requireAppBaseUrl } from './e2e-base-url';
 import {
   quiesceRuntimePage,
   resetRuntimePageQuiescence,
-} from './e2e-runtime-shutdown';
+} from './e2e-runtime-shutdown.mts';
 
 export const APP_BASE_URL = requireAppBaseUrl();
 export const DEFAULT_INIT_TIMEOUT = 30_000;

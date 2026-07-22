@@ -1,6 +1,6 @@
 import { expect, test, type BrowserContext, type Page } from './global-setup.mts';
 import { APP_BASE_URL, ensureE2EBaseline } from './utils/e2e-baseline';
-import { closeRuntimeContext } from './utils/e2e-runtime-shutdown';
+import { closeRuntimeContext } from './utils/e2e-runtime-shutdown.mts';
 
 async function openApp(page: Page, path: string): Promise<void> {
   await page.goto(`${APP_BASE_URL}${path}`, { waitUntil: 'domcontentloaded' });

@@ -6,7 +6,7 @@ import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';
 import { gotoApp } from './utils/e2e-demo-users';
 import { enqueueEntityTxs } from './utils/e2e-runtime-input';
 import { requireIsolatedBaseUrl } from './utils/e2e-isolated-env';
-import { timedStep } from './utils/e2e-timing';
+import { timedStep } from './utils/e2e-timing.mts';
 import { hasSilentRelayMarketSubscribe, installSilentRelayWebSocket } from './utils/e2e-silent-relay';
 
 const INIT_TIMEOUT = 30_000;

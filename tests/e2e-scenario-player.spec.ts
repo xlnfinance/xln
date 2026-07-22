@@ -1,5 +1,5 @@
 import { expect, test } from './global-setup.mts';
-import { timedStep } from './utils/e2e-timing';
+import { timedStep } from './utils/e2e-timing.mts';
 
 test.describe('visual scenario player', () => {
   test('opens hub-collapse player, scrubs time, switches scenarios, and previews in wallet', { tag: '@functional' }, async ({ page }) => {

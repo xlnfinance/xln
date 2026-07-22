@@ -29,8 +29,8 @@ import {
 } from './utils/e2e-account-ui';
 import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
-import { timedStep } from './utils/e2e-timing';
-import { closeRuntimeContext } from './utils/e2e-runtime-shutdown';
+import { timedStep } from './utils/e2e-timing.mts';
+import { closeRuntimeContext } from './utils/e2e-runtime-shutdown.mts';
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 

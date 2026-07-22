@@ -14,7 +14,7 @@
 import { test, expect, type Browser, type BrowserContext, type Page } from './global-setup.mts';
 import { deriveDelta, getTokenInfo } from '../runtime/account/utils';
 import { ethers } from 'ethers';
-import { timedStep } from './utils/e2e-timing';
+import { timedStep } from './utils/e2e-timing.mts';
 import { APP_BASE_URL, API_BASE_URL, resetProdServer, waitForNamedHubs } from './utils/e2e-baseline';
 import {
   gotoApp as gotoSharedApp,

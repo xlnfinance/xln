@@ -12,13 +12,13 @@ import {
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { setE2ETimingOrigin } from './utils/e2e-timing';
+import { setE2ETimingOrigin } from './utils/e2e-timing.mts';
 import {
   quiesceRuntimePage,
   wrapRuntimeContextClose,
   wrapRuntimePageClose,
-} from './utils/e2e-runtime-shutdown';
-import { isBenignConsoleMessage } from './utils/browser-health-classification';
+} from './utils/e2e-runtime-shutdown.mts';
+import { isBenignConsoleMessage } from './utils/browser-health-classification.mts';
 
 type BrowserIssueType = 'console' | 'pageerror' | 'requestfailed' | 'http';
 type BrowserIssueSeverity = 'error' | 'warning';

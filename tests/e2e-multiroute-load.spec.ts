@@ -42,7 +42,7 @@ import { test, expect, type BrowserContext, type Page } from './global-setup.mts
 import { ethers } from 'ethers';
 import { resetProdServer as resetSharedProdServer } from './utils/e2e-baseline';
 import { APP_BASE_URL, API_BASE_URL } from './utils/e2e-baseline';
-import { timedStep } from './utils/e2e-timing';
+import { timedStep } from './utils/e2e-timing.mts';
 import {
   getRenderedOutboundForAccount,
   waitForRenderedOutboundForAccountDelta,
@@ -57,7 +57,7 @@ import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-co
 import { enqueueEntityTxs } from './utils/e2e-runtime-input';
 import { HTLC_ENFORCEMENT_RESERVE_MS } from '../runtime/account/consensus/deadline-policy';
 import { getTokenInfo } from '../runtime/account/utils';
-import { closeRuntimeContext } from './utils/e2e-runtime-shutdown';
+import { closeRuntimeContext } from './utils/e2e-runtime-shutdown.mts';
 
 const INIT_TIMEOUT = 30_000;
 

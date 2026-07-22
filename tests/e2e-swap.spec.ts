@@ -6,7 +6,7 @@
  */
 import { test, expect, type Locator, type Page, type TestInfo } from './global-setup.mts';
 import { Wallet } from 'ethers';
-import { timedStep } from './utils/e2e-timing';
+import { timedStep } from './utils/e2e-timing.mts';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, getHealth } from './utils/e2e-baseline';
 import { connectRuntimeToHubWithCredit as connectRuntimeToSharedHubWithCredit } from './utils/e2e-connect';
 import {

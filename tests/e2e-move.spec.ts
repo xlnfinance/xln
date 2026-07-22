@@ -9,7 +9,7 @@ import {
   getRenderedExternalBalance,
   getRenderedReserveBalance,
 } from './utils/e2e-account-ui';
-import { timedStep } from './utils/e2e-timing';
+import { timedStep } from './utils/e2e-timing.mts';
 import { capturePageScreenshot } from './utils/e2e-screenshots';
 
 const LONG_E2E = process.env.E2E_LONG === '1';

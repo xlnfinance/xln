@@ -31,7 +31,7 @@ import {
   getPersistedReceiptCursor,
   waitForPersistedFrameEventMatch,
 } from './utils/e2e-runtime-receipts';
-import { closeRuntimeContext, closeRuntimePage } from './utils/e2e-runtime-shutdown';
+import { closeRuntimeContext, closeRuntimePage } from './utils/e2e-runtime-shutdown.mts';
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 

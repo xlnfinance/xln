@@ -18,7 +18,7 @@ import { connectHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 import { getRenderedPrimaryOutbound } from './utils/e2e-account-ui';
 import { getPersistedReceiptCursor, waitForPersistedFrameEvent, waitForPersistedFrameEventMatch } from './utils/e2e-runtime-receipts';
-import { timedStep } from './utils/e2e-timing';
+import { timedStep } from './utils/e2e-timing.mts';
 
 const CONSENSUS_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';

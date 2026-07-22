@@ -8,7 +8,7 @@ import { configureWsProxyLifecycle } from '../../frontend/vite-ws-proxy-lifecycl
 import {
   quiesceRuntimePage,
   resetRuntimePageQuiescence,
-} from '../../tests/utils/e2e-runtime-shutdown';
+} from '../../tests/utils/e2e-runtime-shutdown.mts';
 
 const source = (file: string): string => readFileSync(join(process.cwd(), 'frontend', file), 'utf8');
 

@@ -6,7 +6,7 @@
  */
 import { test, expect, type Locator, type Page } from './global-setup.mts';
 import { Wallet } from 'ethers';
-import { timedStep } from './utils/e2e-timing';
+import { timedStep } from './utils/e2e-timing.mts';
 import { APP_BASE_URL, resetProdServer } from './utils/e2e-baseline';
 import { gotoApp as gotoSharedApp, createRuntimeIdentity } from './utils/e2e-demo-users';
 import { connectHub } from './utils/e2e-connect';
