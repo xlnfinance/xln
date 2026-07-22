@@ -9,12 +9,12 @@
 		Smartphone,
 		Terminal,
 	} from 'lucide-svelte';
-	import { INSTALL_CHANNELS } from '$lib/install/platforms';
+	import { INSTALL_CHANNELS, LOCAL_RUNTIME_COMMAND } from '$lib/install/platforms';
 	import './install-page.css';
 
 	let copied = false;
 	const copyCommand = async (): Promise<void> => {
-		await navigator.clipboard.writeText('bunx xlnfinance');
+		await navigator.clipboard.writeText(LOCAL_RUNTIME_COMMAND);
 		copied = true;
 		setTimeout(() => copied = false, 1400);
 	};
@@ -39,7 +39,7 @@
 		<p class="lede">Use any screen. Keep the financial machine under your control.</p>
 
 		<div class="command" data-testid="install-primary-command">
-			<div><span>$</span><code>bunx xlnfinance</code></div>
+			<div><span>$</span><code>{LOCAL_RUNTIME_COMMAND}</code></div>
 			<button type="button" on:click={copyCommand} aria-label="Copy install command">
 				{#if copied}<Check size={17} />{:else}<Copy size={17} />{/if}
 			</button>

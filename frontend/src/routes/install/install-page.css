@@ -27,11 +27,11 @@ nav { display: flex; justify-content: space-between; align-items: center; paddin
 .hero h1 em { color: var(--acid); font-style: normal; }
 .lede { max-width: 520px; margin: 32px 0 38px; color: #afb6ac; font-size: clamp(17px, 2vw, 22px); line-height: 1.5; }
 
-.command { display: flex; align-items: center; justify-content: space-between; width: min(100%, 570px); min-height: 64px; padding: 0 12px 0 21px; border: 1px solid rgba(182, 243, 107, .3); border-radius: 13px; background: #10140e; box-shadow: 0 22px 70px rgba(0, 0, 0, .28); }
-.command div { display: flex; gap: 13px; min-width: 0; align-items: center; }
+.command { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: min(100%, 570px); min-height: 64px; padding: 10px 12px 10px 21px; border: 1px solid rgba(182, 243, 107, .3); border-radius: 13px; background: #10140e; box-shadow: 0 22px 70px rgba(0, 0, 0, .28); }
+.command div { display: flex; flex: 1; gap: 13px; min-width: 0; align-items: center; }
 .command span { color: var(--acid); }
-.command code, .mini-command code { color: var(--ink); font: 540 15px/1 ui-monospace, monospace; }
-.command button { display: grid; place-items: center; width: 40px; height: 40px; border: 0; border-radius: 9px; color: #0b1008; background: var(--acid); cursor: pointer; }
+.command code, .mini-command code { min-width: 0; color: var(--ink); font: 540 15px/1.3 ui-monospace, monospace; overflow-wrap: anywhere; text-align: left; }
+.command button { display: grid; flex: 0 0 40px; place-items: center; width: 40px; height: 40px; border: 0; border-radius: 9px; color: #0b1008; background: var(--acid); cursor: pointer; }
 .runtime-flow { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-top: 17px; color: #737b71; font: 11px/1.4 ui-monospace, monospace; }
 .runtime-flow i { color: #475044; font-style: normal; }
 .runtime-flow strong { color: #a8b2a3; font-weight: 550; }
@@ -49,7 +49,8 @@ article.primary { grid-column: 1 / -1; min-height: 390px; border-color: rgba(182
 article h3 { margin: 27px 0 10px; font-size: 30px; font-weight: 540; letter-spacing: -.045em; }
 .summary { max-width: 560px; margin: 0; color: #b5bbb2; font-size: 15px; line-height: 1.55; }
 .platforms { margin-top: 12px; color: #6f776d; font: 10px/1.4 ui-monospace, monospace; text-transform: uppercase; }
-.mini-command { display: flex; width: min(100%, 420px); justify-content: space-between; align-items: center; margin-top: 23px; padding: 14px 16px; border: 1px solid rgba(182, 243, 107, .2); border-radius: 9px; color: var(--acid); background: #090c08; cursor: pointer; }
+.mini-command { display: flex; width: min(100%, 520px); gap: 12px; justify-content: space-between; align-items: center; margin-top: 23px; padding: 14px 16px; border: 1px solid rgba(182, 243, 107, .2); border-radius: 9px; color: var(--acid); background: #090c08; cursor: pointer; }
+.mini-command svg { flex: 0 0 auto; }
 dl { display: grid; gap: 9px; margin: auto 0 24px; padding-top: 24px; }
 dl div { display: grid; grid-template-columns: 18px 1fr; gap: 8px; color: #aeb5aa; font-size: 12px; line-height: 1.45; }
 dt { color: var(--acid); } dd { margin: 0; } .tradeoff { color: #777f75; } .tradeoff dt { color: #697067; }

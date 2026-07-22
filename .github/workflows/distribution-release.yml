@@ -33,7 +33,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun install --frozen-lockfile
         working-directory: frontend
-      - run: bun run release:launcher:pack
+      - run: bun run release:launcher:verify
       - run: bun scripts/native/build-platforms.ts desktop extension --package --smoke --no-build
       - uses: actions/upload-artifact@v4
         with:

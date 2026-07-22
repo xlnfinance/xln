@@ -28,17 +28,16 @@ const assertNoHorizontalOverflow = async (page: Page): Promise<void> => {
 };
 
 const assertInstallContent = async (page: Page): Promise<void> => {
-  await expect(page.getByRole('heading', { name: 'xln, wherever you operate.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Own the runtime\./ })).toBeVisible();
   await expect(page.locator('[data-testid^="install-channel-"]')).toHaveCount(5);
-  await expect(page.getByTestId('install-channel-web')).toContainText('Available now');
-  await expect(page.getByTestId('install-channel-web')).toContainText('mutable origin');
-  await expect(page.getByTestId('install-channel-cli')).toContainText('Registry pending');
-  await expect(page.getByTestId('install-channel-cli').locator('code')).toHaveText('bunx xlnfinance@0.1.15');
-  await expect(page.getByTestId('install-channel-desktop')).toContainText('macOS implemented');
-  await expect(page.getByTestId('install-channel-mobile')).toContainText('No TestFlight build yet');
-  await expect(page.getByTestId('install-channel-extension')).toContainText(
-    'No wallet keys in browser-extension storage',
+  await expect(page.getByTestId('install-channel-web')).toContainText('fundamental');
+  await expect(page.getByTestId('install-channel-cli')).toContainText('Recommended');
+  await expect(page.getByTestId('install-channel-cli').locator('code')).toHaveText(
+    /bunx --bun xlnfinance@https:\/\/github\.com\/xlnfinance\/xln\/releases\/download\/v/,
   );
+  await expect(page.getByTestId('install-channel-desktop')).toContainText('signed installers');
+  await expect(page.getByTestId('install-channel-mobile')).toContainText('TestFlight');
+  await expect(page.getByTestId('install-channel-extension')).toContainText('Developer mode');
   await expect(page.getByRole('link', { name: 'Install', exact: true })).toHaveClass(/active/);
   await assertNoHorizontalOverflow(page);
 };

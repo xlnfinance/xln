@@ -1,3 +1,5 @@
+import packageJson from '../../../package.json';
+
 export type InstallChannel = Readonly<{
   id: 'web' | 'cli' | 'desktop' | 'mobile' | 'extension';
   title: string;
@@ -11,6 +13,10 @@ export type InstallChannel = Readonly<{
   command?: string;
 }>;
 
+const launcherVersion = packageJson.version;
+const launcherUrl = `https://github.com/xlnfinance/xln/releases/download/v${launcherVersion}/xlnfinance-${launcherVersion}.tgz`;
+export const LOCAL_RUNTIME_COMMAND = `bunx --bun xlnfinance@${launcherUrl}`;
+
 export const INSTALL_CHANNELS: readonly InstallChannel[] = [
   {
     id: 'cli',
@@ -22,7 +28,7 @@ export const INSTALL_CHANNELS: readonly InstallChannel[] = [
     tradeoff: 'Requires Bun and a terminal.',
     href: 'https://www.npmjs.com/package/xlnfinance',
     action: 'Package details',
-    command: 'bunx xlnfinance',
+    command: LOCAL_RUNTIME_COMMAND,
   },
   {
     id: 'web',

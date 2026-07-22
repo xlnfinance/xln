@@ -24,6 +24,8 @@ const GENERATED_PREFIXES = [
   `frontend${sep}.svelte-kit${sep}`,
   `frontend${sep}.svelte-kit-e2e${sep}`,
   `native${sep}extension${sep}dist${sep}`,
+  `packages${sep}npm${sep}xlnfinance${sep}app${sep}`,
+  `packages${sep}npm${sep}xlnfinance${sep}dist${sep}`,
 ];
 
 const normalize = (path: string): string => path.split(sep).join('/');

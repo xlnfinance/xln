@@ -1,6 +1,6 @@
 {
   "name": "xlnfinance",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "packageManager": "bun@1.3.14",
   "main": "index.js",
   "scripts": {
@@ -163,6 +163,7 @@
     "release:snapshot": "bun tools/release-snapshot.ts",
     "release:launcher:build": "bun scripts/release/build-xlnfinance-package.ts",
     "release:launcher:pack": "bun scripts/release/build-xlnfinance-package.ts --pack",
+    "release:launcher:verify": "bun scripts/release/build-xlnfinance-package.ts --pack --smoke",
     "release:manifest": "bun scripts/release/build-release-manifest.ts",
     "frozen-core:check": "bun tools/frozen-core.ts check",
     "frozen-core:tree": "bun tools/frozen-core.ts tree",

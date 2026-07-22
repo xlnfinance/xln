@@ -8,7 +8,7 @@ const root = join(import.meta.dir, '../..');
 describe('native mobile shell configuration', () => {
 	test('serves the shared frontend build with production-safe webview defaults', () => {
 		expect(config.appId).toBe('finance.xln.wallet');
-		expect(config.appName).toBe('XLN Wallet');
+		expect(config.appName).toBe('xln finance');
 		expect(config.webDir).toBe('build');
 		expect(config.server?.hostname).toBe('localhost');
 		expect(config.android?.allowMixedContent).toBe(false);
