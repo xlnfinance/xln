@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
-import { spawnSync } from 'node:child_process';
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
   formatQaTestCategoryViolations,
@@ -9,16 +10,16 @@ import {
 import { listPlaywrightTestMetadata } from './playwright-test-metadata';
 
 const listSpecs = (root: string): string[] => {
-  const result = spawnSync('rg', ['--files', root], { cwd: process.cwd(), encoding: 'utf8', stdio: 'pipe' });
-  if (result.error) throw result.error;
-  if (result.status !== 0 && result.status !== 1) {
-    throw new Error(`E2E_SPEC_DISCOVERY_FAILED:${String(result.stderr ?? '').trim()}`);
-  }
-  return String(result.stdout ?? '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.endsWith('.spec.ts'))
-    .sort();
+  const specs: string[] = [];
+  const visit = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) visit(path);
+      else if (entry.isFile() && entry.name.endsWith('.spec.ts')) specs.push(path);
+    }
+  };
+  visit(root);
+  return specs.sort();
 };
 
 const mainTests = listPlaywrightTestMetadata(listSpecs('tests'));
