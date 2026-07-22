@@ -121,6 +121,8 @@ import { collectLocalProfileEncryptionAnnouncements } from '../networking/profil
 import { LIMITS } from '../constants';
 import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
 import { cloneIsolatedRoutedEntityInputs } from '../protocol/runtime-input-clone';
+import { createDueScheduledWakeInputs } from '../machine/scheduled-wake';
+import { ACCOUNT_PENDING_RESEND_AFTER_MS } from '../entity/scheduler';
 
 const makeLocalCrossJRoutingDeps = (): RuntimeEntityRoutingDeps => ({
   ensureRuntimeState: current => {
@@ -1196,6 +1198,28 @@ describe('cross-jurisdiction hashledger swap', () => {
     const ackSelection = selectMatchedCrossJAccountInputPairs(hubEnv, acknowledgements);
     expect(ackSelection.pairs.map(pair => pair.phase)).toEqual(['ack']);
     expect(ackSelection.droppedInputIndexes).toEqual([]);
+
+    hubEnv.timestamp += ACCOUNT_PENDING_RESEND_AFTER_MS + 1;
+    const dueWake = createDueScheduledWakeInputs(hubEnv, hubEnv.timestamp)
+      .find(input => input.entityId === sourceHub);
+    if (!dueWake) throw new Error('TEST_CROSS_J_SOURCE_HUB_WAKE_MISSING');
+    expect(dueWake.entityTxs?.flatMap(tx => tx.type === 'scheduledWake'
+      ? tx.data.jobs.map(job => job.id)
+      : [])).toContain('checkAccountTimeouts');
+    const preparedHubInputsWithWake = await prepareAtomicCrossJAccountInputs(
+      hubEnv,
+      mergeEntityInputs([...acknowledgements, dueWake]),
+      [],
+      false,
+      makeLocalCrossJRoutingDeps(),
+    );
+    expect(preparedHubInputsWithWake.pairs.map(pair => pair.phase)).toEqual(['ack']);
+    expect(preparedHubInputsWithWake.inputs.slice(0, 2).every(input =>
+      input.atomicCrossJurisdictionPair?.phase === 'ack')).toBe(true);
+    expect(preparedHubInputsWithWake.inputs[2]?.entityTxs?.some(tx =>
+      tx.type === 'scheduledWake')).toBe(true);
+    expect(preparedHubInputsWithWake.inputs.some(input =>
+      input.entityTxs?.some(tx => tx.type === 'scheduledWake'))).toBe(true);
 
     const preparedHubInputs = await prepareAtomicCrossJAccountInputs(
       hubEnv,

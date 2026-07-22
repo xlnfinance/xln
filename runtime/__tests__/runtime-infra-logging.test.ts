@@ -6,7 +6,7 @@ test('runtime infra restore diagnostics use structured logging', () => {
   const source = readFileSync(join(process.cwd(), 'runtime/machine/infra.ts'), 'utf8');
 
   expect(source).toContain("const infraLog = createStructuredLogger('runtime.infra');");
-  expect(source).toContain("infraLog.warn('jadapter.restore_retry'");
+  expect(source).toContain("infraLog.info('jadapter.restore_retry'");
   expect(source).toContain("infraLog.debug('jadapter.derived'");
   expect(source).toContain("infraLog.warn('gossip.restore_skipped'");
   expect(source).toContain("infraLog.debug('browservm.restored'");

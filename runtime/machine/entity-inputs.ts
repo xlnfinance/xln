@@ -42,6 +42,11 @@ export interface RuntimeEntityInputApplyResult {
     inputIndex: number;
     outcome: EntityInputOutcome;
     entityFrameCommitted: boolean;
+    committedAccountFrames: Array<{
+      counterpartyEntityId: string;
+      height: number;
+      stateHash: string;
+    }>;
   }>;
   localCrossJurisdictionEventTrace: RoutedEntityInput[];
   entityFrameCommitted: boolean;
@@ -151,6 +156,29 @@ export const applyMergedEntityInputs = async (
   let localEventCount = 0;
   let externalApplyMs = 0;
   let immediateCrossJApplyMs = 0;
+
+  const committedAccountFrames = (
+    input: RoutedEntityInput,
+    replica: EntityReplica,
+  ): RuntimeEntityInputApplyResult['inputOutcomes'][number]['committedAccountFrames'] => {
+    const counterparties = new Set(getEffectiveEntityInputTxs(input).flatMap(tx =>
+      tx.type === 'accountInput' ? [tx.data.fromEntityId.toLowerCase()] : []));
+    return [...counterparties].map(counterpartyEntityId => {
+      const account = [...replica.state.accounts.entries()].find(([entityId]) =>
+        entityId.toLowerCase() === counterpartyEntityId)?.[1];
+      if (!account) {
+        throw new Error(
+          `RUNTIME_COMMITTED_ACCOUNT_FRAME_MISSING:entity=${input.entityId}:` +
+          `counterparty=${counterpartyEntityId}`,
+        );
+      }
+      return {
+        counterpartyEntityId,
+        height: account.currentFrame.height,
+        stateHash: String(account.currentFrame.stateHash || '').toLowerCase(),
+      };
+    });
+  };
 
   const routeCommittedEntityOutputs = (outputs: RoutedEntityInput[]): void => {
     for (const output of outputs) {
@@ -394,6 +422,9 @@ export const applyMergedEntityInputs = async (
       inputIndex,
       outcome: result.outcome,
       entityFrameCommitted: result.entityFrameCommitted,
+      committedAccountFrames: isCommittedEntityInput(result.outcome)
+        ? committedAccountFrames(entityInput, result.nextReplica)
+        : [],
     });
     entityFrameCommitted ||= result.entityFrameCommitted;
     if (isCommittedEntityInput(result.outcome) && entityInput.from) {
@@ -430,10 +461,17 @@ export const applyMergedEntityInputs = async (
       });
       jOutbox.push(...result.jOutputs);
     }
-    // A later top-level Account input may causally depend on a trusted sibling
-    // event emitted by this commit. Consume that local event chain before
-    // advancing the ordered Runtime batch; remote outputs remain deferred.
-    await drainImmediateCrossJurisdictionOutputs();
+    const currentPair = entityInput.atomicCrossJurisdictionPair;
+    const nextPair = mergedInputs[inputIndex + 1]?.atomicCrossJurisdictionPair;
+    const nextInputCompletesCurrentPair = Boolean(
+      currentPair &&
+      nextPair?.phase === currentPair.phase &&
+      nextPair.pairKey === currentPair.pairKey,
+    );
+    // Both signed Account legs must exist in scratch state before matching or
+    // any other immediate cross-j effect can observe either leg. Runtime has
+    // already validated that an atomic cohort contains exactly two inputs.
+    if (!nextInputCompletesCurrentPair) await drainImmediateCrossJurisdictionOutputs();
   }
 
   const elapsedMs = Math.round(getPerfMs() - profileStartedAt);

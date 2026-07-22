@@ -185,7 +185,10 @@ export const ensureLiveJAdapterForReplica = async (
     context,
     attempts,
     onRetry: (attempt, totalAttempts, error) => {
-      infraLog.warn('jadapter.restore_retry', {
+      // A transient attempt that is still inside the bounded retry policy is
+      // recovery telemetry, not a runtime warning. Exhaustion remains a loud
+      // `jadapter.restore_failed` error in rehydrateRestoredRuntimeInfra.
+      infraLog.info('jadapter.restore_retry', {
         name,
         attempt,
         attempts: totalAttempts,
