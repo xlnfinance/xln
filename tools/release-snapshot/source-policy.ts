@@ -47,6 +47,21 @@ export function assertReleaseSourcePublished(
   root: string,
   sourceRef = 'refs/heads/main',
 ): void {
+  const remoteCommit = readRemoteSourceCommit(root, sourceRef);
+
+  const localSource = git(root, ['rev-parse', '--verify', 'HEAD']);
+  if (localSource.exitCode !== 0) {
+    throw new Error(`RELEASE_SOURCE_COMMIT_FAILED:${decode(localSource.stderr)}`);
+  }
+  const localCommit = decode(localSource.stdout);
+  // Equality is deliberately stronger than ancestry: callers use this only when
+  // they require the checked-out tree to be the exact authoritative tip.
+  if (localCommit !== remoteCommit) {
+    throw new Error(`RELEASE_SOURCE_NOT_AT_REMOTE_TIP:head=${localCommit}:origin=${remoteCommit}:ref=${sourceRef}`);
+  }
+}
+
+const readRemoteSourceCommit = (root: string, sourceRef: string): string => {
   if (!originConfigured(root)) throw new Error('RELEASE_REMOTE_REQUIRED:origin');
   const remoteSource = git(root, ['ls-remote', '--exit-code', '--heads', 'origin', sourceRef]);
   if (remoteSource.exitCode === 2) throw new Error(`RELEASE_REMOTE_SOURCE_REF_MISSING:${sourceRef}`);
@@ -57,16 +72,26 @@ export function assertReleaseSourcePublished(
   if (!/^[0-9a-f]{40,64}$/i.test(remoteCommit || '') || remoteRef !== sourceRef) {
     throw new Error(`RELEASE_REMOTE_SOURCE_INVALID:${sourceRef}`);
   }
+  return remoteCommit!;
+};
 
-  const localSource = git(root, ['rev-parse', '--verify', 'HEAD']);
-  if (localSource.exitCode !== 0) {
-    throw new Error(`RELEASE_SOURCE_COMMIT_FAILED:${decode(localSource.stderr)}`);
+export function assertReleaseSourceContainedInPublishedRef(
+  root: string,
+  sourceCommit: string,
+  sourceRef = 'refs/heads/main',
+): void {
+  if (!/^[0-9a-f]{40,64}$/i.test(sourceCommit)) {
+    throw new Error(`RELEASE_SOURCE_COMMIT_INVALID:${sourceCommit}`);
   }
-  const localCommit = decode(localSource.stdout);
-  // Equality is deliberately stronger than ancestry: an official snapshot must be
-  // produced from the exact authoritative tip, not an unpublished or stale branch.
-  if (localCommit !== remoteCommit) {
-    throw new Error(`RELEASE_SOURCE_NOT_AT_REMOTE_TIP:head=${localCommit}:origin=${remoteCommit}:ref=${sourceRef}`);
+  const remoteCommit = readRemoteSourceCommit(root, sourceRef);
+  const ancestry = git(root, ['merge-base', '--is-ancestor', sourceCommit, remoteCommit]);
+  if (ancestry.exitCode === 1) {
+    throw new Error(
+      `RELEASE_SOURCE_NOT_IN_REMOTE_REF:source=${sourceCommit}:origin=${remoteCommit}:ref=${sourceRef}`,
+    );
+  }
+  if (ancestry.exitCode !== 0) {
+    throw new Error(`RELEASE_REMOTE_SOURCE_ANCESTRY_FAILED:${decode(ancestry.stderr) || `exit=${ancestry.exitCode}`}`);
   }
 }
 

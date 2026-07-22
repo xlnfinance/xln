@@ -14,7 +14,10 @@ import {
 } from '../frontend/src/lib/releases/release-signature.ts';
 import type { FoundationReleaseKeys } from './release-snapshot/sign.ts';
 import type { ReleaseSnapshot } from './release-snapshot/types.ts';
-import { assertReleaseTagBindsSource } from './release-snapshot/source-policy.ts';
+import {
+  assertReleaseSourceContainedInPublishedRef,
+  assertReleaseTagBindsSource,
+} from './release-snapshot/source-policy.ts';
 
 const command = process.argv[2];
 const value = (name: string, fallback: string): string =>
@@ -48,6 +51,7 @@ if (command === 'verify' || command === 'publish-check') {
   if (!snapshot.attestation) {
     if (!valid) throw new Error(`RELEASE_ATTESTATION_MISSING:${snapshotPath}`);
     if (command === 'publish-check') {
+      assertReleaseSourceContainedInPublishedRef(process.cwd(), snapshot.release.sourceCommit);
       assertReleaseTagBindsSource(process.cwd(), snapshot.release.version, snapshot.release.sourceCommit);
       console.log(`Release tag binds source: v${snapshot.release.version} ${snapshot.release.sourceCommit}`);
     }
@@ -56,6 +60,7 @@ if (command === 'verify' || command === 'publish-check') {
   }
   if (!valid) throw new Error(`RELEASE_ATTESTATION_INVALID:${snapshotPath}`);
   if (command === 'publish-check') {
+    assertReleaseSourceContainedInPublishedRef(process.cwd(), snapshot.release.sourceCommit);
     assertReleaseTagBindsSource(process.cwd(), snapshot.release.version, snapshot.release.sourceCommit);
     console.log(`Release tag binds source: v${snapshot.release.version} ${snapshot.release.sourceCommit}`);
   }

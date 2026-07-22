@@ -250,6 +250,9 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
 - Current branch commits include deterministic startup, atomic routing groundwork
   and signer readiness. Freeze the exact SHA only when the final gate begins.
 - QA evidence upload is deferred by owner and is not a blocker for bug fixing.
+- [x] Make signed release publication two-phase without a red remote tip:
+  generate from a clean local metadata parent, then require `publish-check` to
+  prove that signed source is contained in `origin/main` and the annotated tag.
 - [ ] L1 and L2 evidence for every changed invariant.
 - [x] `VITE_DEV_PORT=18080 bun run check` exit 0; frozen core unchanged.
 - [ ] Full unit/storage/Merkle/WAL/SIGKILL/security/contract/RPC/BrowserVM gates.

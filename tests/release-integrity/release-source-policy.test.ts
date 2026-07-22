@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import {
   assertCleanReleaseSource,
+  assertReleaseSourceContainedInPublishedRef,
   assertReleaseSourcePublished,
   assertReleaseTagBindsSource,
   assertReleaseUnpublished,
@@ -141,6 +142,45 @@ describe('release source policy', () => {
       run(root, ['git', 'add', 'VERSION']);
       run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'commit', '--quiet', '-m', 'unpublished source']);
       expect(() => assertReleaseSourcePublished(root)).toThrow('RELEASE_SOURCE_NOT_AT_REMOTE_TIP');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(remote, { recursive: true, force: true });
+    }
+  });
+
+  test('allows a signed source ancestor only after the complete release reaches remote main', () => {
+    const root = mkdtempSync(join(tmpdir(), 'xln-release-contained-source-'));
+    const remote = mkdtempSync(join(tmpdir(), 'xln-release-contained-remote-'));
+    try {
+      run(remote, ['git', 'init', '--quiet', '--bare']);
+      run(root, ['git', 'init', '--quiet', '-b', 'main']);
+      writeFileSync(join(root, 'VERSION'), '0.1.14\n');
+      run(root, ['git', 'add', 'VERSION']);
+      run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'commit', '--quiet', '-m', 'signed source']);
+      const source = new TextDecoder().decode(
+        Bun.spawnSync(['git', 'rev-parse', 'HEAD'], { cwd: root, stdout: 'pipe' }).stdout,
+      ).trim();
+      run(root, ['git', 'remote', 'add', 'origin', remote]);
+
+      expect(() => assertReleaseSourceContainedInPublishedRef(root, source))
+        .toThrow('RELEASE_REMOTE_SOURCE_REF_MISSING');
+
+      writeFileSync(join(root, 'release.json'), '{"signed":true}\n');
+      run(root, ['git', 'add', 'release.json']);
+      run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'commit', '--quiet', '-m', 'signed snapshot']);
+      run(root, ['git', 'push', '--quiet', '-u', 'origin', 'main']);
+      expect(() => assertReleaseSourceContainedInPublishedRef(root, source)).not.toThrow();
+
+      run(root, ['git', 'checkout', '--quiet', '--orphan', 'unrelated']);
+      run(root, ['git', 'rm', '--quiet', '-rf', '.']);
+      writeFileSync(join(root, 'unrelated.txt'), 'unrelated\n');
+      run(root, ['git', 'add', 'unrelated.txt']);
+      run(root, ['git', '-c', 'user.name=xln test', '-c', 'user.email=xln@example.test', 'commit', '--quiet', '-m', 'unrelated']);
+      const unrelated = new TextDecoder().decode(
+        Bun.spawnSync(['git', 'rev-parse', 'HEAD'], { cwd: root, stdout: 'pipe' }).stdout,
+      ).trim();
+      expect(() => assertReleaseSourceContainedInPublishedRef(root, unrelated))
+        .toThrow('RELEASE_SOURCE_NOT_IN_REMOTE_REF');
     } finally {
       rmSync(root, { recursive: true, force: true });
       rmSync(remote, { recursive: true, force: true });

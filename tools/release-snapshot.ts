@@ -8,7 +8,6 @@ import { writeManifest, writeReleaseMarkdown } from './release-snapshot/render.t
 import { signReleaseSnapshot } from './release-snapshot/sign.ts';
 import {
   assertCleanReleaseSource,
-  assertReleaseSourcePublished,
   assertReleaseUnpublished,
   assertReleaseSigningConfigured,
   assertReleaseVersionMatchesSource,
@@ -56,7 +55,6 @@ function parseArgs(argv: string[]): Args {
 
 const args = parseArgs(process.argv.slice(2));
 assertCleanReleaseSource(args.root);
-assertReleaseSourcePublished(args.root);
 assertReleaseVersionMatchesSource(args.root, args.version);
 assertReleaseSigningConfigured(args.version, args.signingKeys);
 assertReleaseUnpublished(args.root, args.version, args.output);
