@@ -14,7 +14,10 @@ import { encodeReplicaMeta, hydrateEntityStateFromStorage, projectAccountDoc, pr
 import { cloneEntityState } from '../state-helpers';
 import type { StorageFrameRecord } from '../storage/types';
 import type { AccountMachine, EntityReplica, Env } from '../types';
-import { projectReplayVerifiableRuntimeMachine } from '../wal/snapshot';
+import {
+  buildReplayVerifiableRuntimeMachineSnapshot,
+  projectReplayVerifiableRuntimeMachine,
+} from '../wal/snapshot';
 
 const signerIds = [`0x${'11'.repeat(20)}`, `0x${'12'.repeat(20)}`];
 const consensusConfig = {
@@ -239,6 +242,26 @@ test('replay oracle excludes local operator runtime config only', () => {
 
   expect(left).toEqual(right);
   expect(left).toEqual({ runtimeId: 'runtime-a', runtimeState });
+});
+
+test('replay oracle canonicalizes empty optional Runtime input queues', () => {
+  const base = {
+    eReplicas: new Map(),
+    jReplicas: new Map(),
+    runtimeInput: { runtimeTxs: [], entityInputs: [] },
+  } as unknown as Env;
+  const withEmptyOptionals = {
+    ...base,
+    runtimeInput: {
+      runtimeTxs: [],
+      entityInputs: [],
+      jInputs: [],
+      reliableReceipts: [],
+    },
+  } as Env;
+
+  expect(buildReplayVerifiableRuntimeMachineSnapshot(withEmptyOptionals))
+    .toEqual(buildReplayVerifiableRuntimeMachineSnapshot(base));
 });
 
 test('canonical storage hash is deterministic across orderbook pair index insertion order', () => {

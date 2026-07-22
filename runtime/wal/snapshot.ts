@@ -165,8 +165,11 @@ const buildDurableJReplicaSnapshot = (jr: JReplica): JReplica => ({
 
 const withoutEphemeralScheduledWake = (runtimeInput?: RuntimeInput): RuntimeInput => {
   const cloned = cloneIsolatedRuntimeInput(runtimeInput ?? { runtimeTxs: [], entityInputs: [] });
+  const { jInputs, reliableReceipts, ...requiredInput } = cloned;
   return {
-    ...cloned,
+    ...requiredInput,
+    ...(jInputs && jInputs.length > 0 ? { jInputs } : {}),
+    ...(reliableReceipts && reliableReceipts.length > 0 ? { reliableReceipts } : {}),
     entityInputs: cloned.entityInputs.flatMap(input => {
       const originallyEmptyTrigger = Array.isArray(input.entityTxs) && input.entityTxs.length === 0;
       const durableInput = {
