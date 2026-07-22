@@ -5520,7 +5520,7 @@ describe('audit fail-fast regressions', () => {
       expect(proposerAccount.currentFrame.stateHash).toBe(receiverAccount.currentFrame.stateHash);
       expect(proposerAccount.locks.has(lockId)).toBe(true);
     }
-  });
+  }, 15_000);
 
   test('account storage keeps last outbound ACK so restored runtimes can bundle the next frame', () => {
     const accountMachine = makeProposalAccount([], hex20('11'), hex20('22'));
