@@ -93,12 +93,16 @@ const stopRunner = async (): Promise<void> => {
   console.error(`[e2e-monitor] stopping runner pid=${lock.pid} lock=${runnerLockPath}`);
   try {
     process.kill(lock.pid, 'SIGTERM');
-  } catch {}
+  } catch (error) {
+    console.error(`[e2e-monitor] SIGTERM failed pid=${lock.pid}`, error);
+  }
   await delay(3_000);
   if (!pidIsAlive(lock.pid)) return;
   try {
     process.kill(lock.pid, 'SIGKILL');
-  } catch {}
+  } catch (error) {
+    console.error(`[e2e-monitor] SIGKILL failed pid=${lock.pid}`, error);
+  }
 };
 
 const scanOnce = (logsDir: string, scannedLinesByPath: Map<string, number>): boolean => {

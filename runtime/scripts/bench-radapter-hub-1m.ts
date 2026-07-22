@@ -781,10 +781,14 @@ const runSnapshotRotationProbe = async (
   } finally {
     try {
       await historyDb.close();
-    } catch {}
+    } catch (error) {
+      console.warn('[bench] history DB close failed', error);
+    }
     try {
       await nextDb.close();
-    } catch {}
+    } catch (error) {
+      console.warn('[bench] next DB close failed', error);
+    }
     if (!cli.keepDb) {
       rmSync(historyPath, { recursive: true, force: true });
       rmSync(nextPath, { recursive: true, force: true });
@@ -1172,10 +1176,14 @@ async function main() {
   } finally {
     try {
       server?.stop(true);
-    } catch {}
+    } catch (error) {
+      console.warn('[bench] server stop failed', error);
+    }
     try {
       await db.close();
-    } catch {}
+    } catch (error) {
+      console.warn('[bench] DB close failed', error);
+    }
     if (!cli.keepDb) rmSync(dbPath, { recursive: true, force: true });
   }
 }

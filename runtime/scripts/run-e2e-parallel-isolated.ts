@@ -850,7 +850,9 @@ const acquireRunnerLock = (logsDir: string): (() => void) => {
         if (!active || active.pid !== process.pid) return;
         try {
           unlinkSync(RUNNER_LOCK_PATH);
-        } catch {}
+        } catch (error) {
+          console.warn(`[runner-lock] release failed path=${RUNNER_LOCK_PATH}`, error);
+        }
       };
       process.once('exit', release);
       process.once('SIGINT', () => {
@@ -869,7 +871,9 @@ const acquireRunnerLock = (logsDir: string): (() => void) => {
       }
       try {
         unlinkSync(RUNNER_LOCK_PATH);
-      } catch {}
+      } catch (error) {
+        console.warn(`[runner-lock] stale lock removal failed path=${RUNNER_LOCK_PATH}`, error);
+      }
     }
   }
 
@@ -1796,14 +1800,18 @@ const killPids = async (pids: number[], label: string): Promise<void> => {
   for (const pid of unique) {
     try {
       process.kill(pid, 'SIGTERM');
-    } catch {}
+    } catch (error) {
+      console.warn(`[preflight] SIGTERM failed pid=${pid}`, error);
+    }
   }
   await delay(1_000);
   for (const pid of unique) {
     if (!pidIsAlive(pid)) continue;
     try {
       process.kill(pid, 'SIGKILL');
-    } catch {}
+    } catch (error) {
+      console.warn(`[preflight] SIGKILL failed pid=${pid}`, error);
+    }
   }
   await delay(250);
 };
@@ -2127,7 +2135,9 @@ const hardResetShardBaseline = async (
       let body = '';
       try {
         body = await response.text();
-      } catch {}
+      } catch (error) {
+        console.warn(`[shard-reset] response body read failed status=${response.status}`, error);
+      }
       throw new Error(`SHARD_BASELINE_RESET_FAILED status=${response.status} body=${body.slice(0, 800)}`);
     }
     const remainingMs = Math.max(1_000, timeoutMs - (Date.now() - startedAt));
@@ -2223,11 +2233,15 @@ export const runE2ECommand = async (
     opts.log?.write(`[runner] aborting child pid=${proc.pid ?? 'unknown'} cmd=${cmd}\n`);
     try {
       if (proc.exitCode === null) proc.kill('SIGTERM');
-    } catch {}
+    } catch (error) {
+      opts.log?.write(`[runner] SIGTERM failed pid=${proc.pid ?? 'unknown'} error=${String(error)}\n`);
+    }
     abortKillTimer = setTimeout(() => {
       try {
         if (proc.exitCode === null) proc.kill('SIGKILL');
-      } catch {}
+      } catch (error) {
+        opts.log?.write(`[runner] SIGKILL failed pid=${proc.pid ?? 'unknown'} error=${String(error)}\n`);
+      }
     }, 1500);
   };
   if (opts.signal?.aborted) abortChild();

@@ -328,14 +328,18 @@ const stopManaged = async (): Promise<void> => {
     if (!child.proc.pid || child.proc.exitCode !== null) continue;
     try {
       process.kill(-child.proc.pid, 'SIGTERM');
-    } catch {}
+    } catch (error) {
+      console.warn(`[local-prod-smoke] SIGTERM failed pid=${child.proc.pid}`, error);
+    }
   }
   await sleep(2_000);
   for (const child of children) {
     if (!child.proc.pid || child.proc.exitCode !== null) continue;
     try {
       process.kill(-child.proc.pid, 'SIGKILL');
-    } catch {}
+    } catch (error) {
+      console.warn(`[local-prod-smoke] SIGKILL failed pid=${child.proc.pid}`, error);
+    }
   }
 };
 
