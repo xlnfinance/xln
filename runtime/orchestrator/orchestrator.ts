@@ -184,22 +184,24 @@ const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
 
 const args = parseArgs();
 const orchestratorOwnerId = `${process.pid}:${Date.now()}:${randomUUID()}`;
-const readGitValue = (gitArgs: string[]): string | null => {
+const readGitValue = (gitArgs: string[]): string => {
   try {
-    const value = execFileSync('git', gitArgs, {
+    return execFileSync('git', gitArgs, {
       cwd: process.cwd(),
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     }).trim();
-    return value || null;
-  } catch {
-    return null;
+  } catch (error) {
+    throw new Error(
+      `ORCHESTRATOR_GIT_FINGERPRINT_FAILED:command=${gitArgs.join(' ')}:` +
+      `${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 };
 const orchestratorCodeFingerprint = (() => {
   const gitHead = readGitValue(['rev-parse', 'HEAD']);
   const gitBranch = readGitValue(['rev-parse', '--abbrev-ref', 'HEAD']);
-  const gitStatus = readGitValue(['status', '--porcelain']) ?? '';
+  const gitStatus = readGitValue(['status', '--porcelain']);
   const dirty = gitStatus.length > 0;
   return {
     gitHead,
@@ -2512,14 +2514,10 @@ const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {
     const primary = resolvePrimaryHubJurisdictionFallback(jurisdictionsConfig);
     let contracts: RpcContractAddresses | null = null;
     if (primary) {
-      try {
-        const payload = JSON.parse(readShardJurisdictions(jurisdictionsConfig)) as {
-          jurisdictions?: Record<string, { contracts?: RpcContractAddresses }>;
-        };
-        contracts = payload.jurisdictions?.[primary.key]?.contracts ?? null;
-      } catch {
-        contracts = null;
-      }
+      const payload = JSON.parse(readShardJurisdictions(jurisdictionsConfig)) as {
+        jurisdictions?: Record<string, { contracts?: RpcContractAddresses }>;
+      };
+      contracts = payload.jurisdictions?.[primary.key]?.contracts ?? null;
     }
     let missingCode: string[] = ['primary:unavailable'];
     let probeError = '';

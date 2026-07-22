@@ -2100,10 +2100,10 @@ const getLocalSignerIdsForEntity = (env: Env, entityId: string): string[] => {
   const targetEntityId = String(entityId || '').toLowerCase();
   const signerIds = new Set<string>();
   for (const replicaKey of env.eReplicas.keys()) {
+    const replicaEntityId = extractEntityId(replicaKey).toLowerCase();
+    const signerId = extractSignerId(replicaKey);
+    if (replicaEntityId !== targetEntityId || !signerId) continue;
     try {
-      if (extractEntityId(replicaKey).toLowerCase() !== targetEntityId) continue;
-      const signerId = extractSignerId(replicaKey);
-      if (!signerId) continue;
       getSignerPrivateKey(env, signerId);
       signerIds.add(signerId);
     } catch {
@@ -5010,13 +5010,14 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     const getLocallySignableEntityIds = (): Set<string> => {
       const localEntityIds = new Set<string>();
       for (const replicaKey of env.eReplicas.keys()) {
+        const signerId = extractSignerId(replicaKey);
+        const entityId = extractEntityId(replicaKey).toLowerCase();
+        if (!signerId) continue;
         try {
-          const signerId = extractSignerId(replicaKey);
-          if (!signerId) continue;
           getSignerPrivateKey(env, signerId);
-          localEntityIds.add(extractEntityId(replicaKey).toLowerCase());
+          localEntityIds.add(entityId);
         } catch {
-          // ignore malformed key
+          // A valid imported replica without its private signer key is read-only.
         }
       }
       return localEntityIds;

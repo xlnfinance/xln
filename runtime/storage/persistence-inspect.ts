@@ -212,11 +212,7 @@ const buildWalTail = async (env: Env, latestHeight: number, tail: number): Promi
 
 const parseBundleFile = (path: string): unknown => {
   const raw = readFileSync(path, 'utf8');
-  try {
-    return deserializeTaggedJson<unknown>(raw);
-  } catch {
-    return JSON.parse(raw);
-  }
+  return deserializeTaggedJson<unknown>(raw);
 };
 
 export const inspectRecoveryBundleFile = (path?: string): PersistenceBundleSummary => {

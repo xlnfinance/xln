@@ -8,7 +8,7 @@ import {
 } from './utils';
 
 const readDumpPayload = async (req: Request): Promise<Record<string, unknown>> => {
-  const rawBody = await req.text().catch(() => '');
+  const rawBody = await req.text();
   const parsed = rawBody
     ? deserializeTaggedJson<Record<string, unknown>>(rawBody)
     : null;
@@ -16,11 +16,7 @@ const readDumpPayload = async (req: Request): Promise<Record<string, unknown>> =
 };
 
 const readDumpPreview = async (filePath: string): Promise<unknown> => {
-  try {
-    return JSON.parse(await readFile(filePath, 'utf8'));
-  } catch {
-    return undefined;
-  }
+  return JSON.parse(await readFile(filePath, 'utf8')) as unknown;
 };
 
 export const maybeHandleDebugDumpsRequest = async (input: {
@@ -34,7 +30,7 @@ export const maybeHandleDebugDumpsRequest = async (input: {
   if (input.req.method === 'GET') {
     await ensureDebugDumpDir();
     const limit = Math.max(1, Math.min(200, Number(new URL(input.req.url).searchParams.get('last') || '50')));
-    const files = (await readdir(DEBUG_DUMPS_DIR).catch(() => []))
+    const files = (await readdir(DEBUG_DUMPS_DIR))
       .filter((name) => name.endsWith('.json'))
       .sort()
       .slice(-limit)

@@ -142,16 +142,12 @@ const assertMetricCap = (label: string, value: number, cap: number): void => {
 };
 
 const dirBytes = (path: string): number => {
-  try {
-    const stat = statSync(path);
-    if (stat.isFile()) return stat.size;
-    if (!stat.isDirectory()) return 0;
-    let total = 0;
-    for (const entry of readdirSync(path)) total += dirBytes(join(path, entry));
-    return total;
-  } catch {
-    return 0;
-  }
+  const stat = statSync(path);
+  if (stat.isFile()) return stat.size;
+  if (!stat.isDirectory()) throw new Error(`BENCH_STORAGE_PATH_TYPE_INVALID:${path}`);
+  let total = 0;
+  for (const entry of readdirSync(path)) total += dirBytes(join(path, entry));
+  return total;
 };
 
 const nowMs = (): number => performance.now();

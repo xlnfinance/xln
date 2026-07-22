@@ -74,11 +74,11 @@ const parseNonNegativeInt = (value: string | undefined, fallback: number): numbe
 };
 
 const parseBigIntArg = (value: string | undefined, fallback: bigint): bigint => {
+  if (!value) return fallback;
   try {
-    if (!value) return fallback;
     return BigInt(value);
   } catch {
-    return fallback;
+    throw new Error(`INVALID_BIGINT_ARGUMENT:${value}`);
   }
 };
 
@@ -269,18 +269,14 @@ const projectAccountDoc = (account: AccountMachine): Record<string, unknown> => 
 });
 
 const getDirSize = (path: string): number => {
-  try {
-    const stat = statSync(path);
-    if (stat.isFile()) return stat.size;
-    if (!stat.isDirectory()) return 0;
-    let total = 0;
-    for (const entry of readdirSync(path)) {
-      total += getDirSize(join(path, entry));
-    }
-    return total;
-  } catch {
-    return 0;
+  const stat = statSync(path);
+  if (stat.isFile()) return stat.size;
+  if (!stat.isDirectory()) throw new Error(`BENCH_STORAGE_PATH_TYPE_INVALID:${path}`);
+  let total = 0;
+  for (const entry of readdirSync(path)) {
+    total += getDirSize(join(path, entry));
   }
+  return total;
 };
 
 const runtimeDbSiblingPaths = (basePath: string): string[] => {
@@ -290,8 +286,9 @@ const runtimeDbSiblingPaths = (basePath: string): string[] => {
     return readdirSync(parent)
       .filter(entry => entry === prefix || entry.startsWith(`${prefix}-`))
       .map(entry => join(parent, entry));
-  } catch {
-    return [];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
   }
 };
 

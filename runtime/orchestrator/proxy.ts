@@ -370,13 +370,16 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
 
   const proxyAnyHubGet = async (request: Request, endpointWithQuery: string): Promise<Response> => {
     await deps.pollAllHubHealth();
-    let requestedHubId = '';
+    let parsedEndpoint: URL;
     try {
-      const parsed = new URL(endpointWithQuery, 'http://orchestrator.local');
-      requestedHubId = String(parsed.searchParams.get('hubEntityId') || '').trim().toLowerCase();
-    } catch {
-      requestedHubId = '';
+      parsedEndpoint = new URL(endpointWithQuery, 'http://orchestrator.local');
+    } catch (error) {
+      return new Response(safeStringify(proxyFailureBody({
+        code: 'HUB_PROXY_ENDPOINT_INVALID',
+        error: serializeError(error),
+      })), { status: 400, headers: CORS_JSON_HEADERS });
     }
+    const requestedHubId = String(parsedEndpoint.searchParams.get('hubEntityId') || '').trim().toLowerCase();
     const child = requestedHubId ? deps.getHubChildByEntityId(requestedHubId) : deps.getHealthyHub();
     if (!child) {
       return new Response(safeStringify(requestedHubId

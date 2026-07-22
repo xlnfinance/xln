@@ -392,25 +392,25 @@ const extractResultEvidence = (stdoutTail: string): SoakResultEvidence | undefin
 type ProcessRow = { pid: number; ppid: number; cpuPct: number; rssKb: number };
 
 const readProcessRows = (): ProcessRow[] => {
+  let text: string;
   try {
-    const text = execFileSync('ps', ['-axo', 'pid=,ppid=,pcpu=,rss='], { encoding: 'utf8' });
-    return text
-      .trim()
-      .split('\n')
-      .map((line): ProcessRow | null => {
-        const parts = line.trim().split(/\s+/);
-        if (parts.length < 4) return null;
-        const pid = Number(parts[0]);
-        const ppid = Number(parts[1]);
-        const cpuPct = Number(parts[2]);
-        const rssKb = Number(parts[3]);
-        if (![pid, ppid, cpuPct, rssKb].every(Number.isFinite)) return null;
-        return { pid, ppid, cpuPct, rssKb };
-      })
-      .filter((row): row is ProcessRow => row !== null);
-  } catch {
-    return [];
+    text = execFileSync('ps', ['-axo', 'pid=,ppid=,pcpu=,rss='], { encoding: 'utf8' });
+  } catch (error) {
+    throw new Error(
+      `SOAK_PROCESS_TABLE_READ_FAILED:${error instanceof Error ? error.message : String(error)}`,
+    );
   }
+  return text.trim().split('\n').filter(Boolean).map((line): ProcessRow => {
+    const parts = line.trim().split(/\s+/);
+    const pid = Number(parts[0]);
+    const ppid = Number(parts[1]);
+    const cpuPct = Number(parts[2]);
+    const rssKb = Number(parts[3]);
+    if (parts.length !== 4 || ![pid, ppid, cpuPct, rssKb].every(Number.isFinite)) {
+      throw new Error(`SOAK_PROCESS_TABLE_ROW_INVALID:${line.trim().slice(0, 160)}`);
+    }
+    return { pid, ppid, cpuPct, rssKb };
+  });
 };
 
 const summarizeProcessTree = (rootPid: number): { cpuPct: number; rssKb: number } => {
