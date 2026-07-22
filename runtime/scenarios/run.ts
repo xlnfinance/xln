@@ -36,6 +36,7 @@ const SCENARIOS: Record<string, { file: string; fn: string }> = {
   'settle-rebalance':  { file: './settle-rebalance',  fn: 'runSettleRebalance' },
   'processbatch':      { file: './processbatch',      fn: 'runProcessBatchScenario' },
   'dispute-lifecycle': { file: './dispute-lifecycle', fn: 'runDisputeLifecycle' },
+  'dispute-transformer': { file: './dispute-transformer', fn: 'runDisputeTransformer' },
 };
 
 const DEFAULT_PARALLEL_SET = [
@@ -45,6 +46,7 @@ const DEFAULT_PARALLEL_SET = [
   'swap-tps',
   'lock-ahb',
   'dispute-lifecycle',
+  'dispute-transformer',
 ];
 
 const ALL_PARALLEL_SET = [
@@ -53,6 +55,7 @@ const ALL_PARALLEL_SET = [
   'settle-rebalance',
   'lock-ahb',
   'dispute-lifecycle',
+  'dispute-transformer',
   'ahb',
   'swap',
   'settle',
@@ -68,6 +71,7 @@ const SMOKE_PARALLEL_SET = [
   'processbatch',
   'rebalance',
   'dispute-lifecycle',
+  'dispute-transformer',
   'swap-tps',
   'multi-sig',
 ];

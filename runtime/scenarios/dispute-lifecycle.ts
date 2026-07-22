@@ -184,18 +184,20 @@ export async function runDisputeLifecycle(_existingEnv?: Env): Promise<Env> {
     const aliceClaimCountBefore = jEventClaimCount(aliceAccountPre);
     const hubClaimCountBefore = jEventClaimCount(hubAccountPre);
 
-    // Start dispute: local freeze must happen immediately (before on-chain event returns)
+    // Freeze locally before creating the jurisdiction batch.
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
       entityTxs: [{
-        type: 'disputeStart',
+        type: 'prepareDispute',
         data: { counterpartyEntityId: hub.id, description: 'safety-freeze-check' },
       }],
     }]);
+    const aliceAccountPreparing = findReplica(env, alice.id)[1].state.accounts.get(hub.id);
+    assert(aliceAccountPreparing?.status === 'disputed', 'ready prepareDispute must auto-draft disputeStart', env);
 
     const aliceAccountFrozen = findReplica(env, alice.id)[1].state.accounts.get(hub.id);
-    assert(aliceAccountFrozen?.status === 'disputed', 'disputeStart must freeze account immediately', env);
+    assert(aliceAccountFrozen?.status === 'disputed', 'disputeStart must transition prepared account to disputed', env);
     assert(!aliceAccountFrozen?.pendingFrame, 'pendingFrame must be cleared on freeze', env);
     assert(!aliceAccountFrozen?.pendingAccountInput, 'pendingAccountInput must be cleared on freeze', env);
     assert(env.jReplicas.size > 0, 'jReplicas missing', env);

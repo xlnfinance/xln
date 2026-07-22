@@ -56,12 +56,12 @@ export async function applyCommittedHtlcLockFollowup(
   if (accountTx.type !== 'htlc_lock') return;
   const { env, state, input, newState, accountMachine } = ctx;
   const lock = accountMachine.locks.get(accountTx.data.lockId);
-  if (!lock?.envelope) return;
-  const layer = encryptedHtlcLayer(lock.envelope);
+  if (!lock || accountTx.data.envelope === undefined) return;
+  const layer = encryptedHtlcLayer(accountTx.data.envelope);
   if (!layer) throw new Error(`HTLC_ONION_ENCRYPTED_LAYER_REQUIRED:${lock.lockId}`);
   if (layer.manifest.entityId.toLowerCase() !== newState.entityId.toLowerCase()) return;
   try {
-    await validateLocalCommittedHtlcLayer(env, newState, lock);
+    await validateLocalCommittedHtlcLayer(env, newState, lock, accountTx.data.envelope);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     env.error('network', 'HTLC_ONION_PUBLIC_VALIDATION_FAILED', {

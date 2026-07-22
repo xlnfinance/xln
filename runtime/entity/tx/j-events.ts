@@ -41,7 +41,7 @@ import {
   applyEntityProviderActionCancelled,
   applyEntityProviderActionExecuted,
 } from './j-events-entity-provider-action';
-import { isDisputeStartedByLeft } from '../../account/consensus/dispute-policy';
+import { freezeAccountForDispute, isDisputeStartedByLeft } from '../../account/consensus/dispute-policy';
 import {
   foldJHistoryRoot,
 } from '../../jurisdiction/history-consensus';
@@ -406,6 +406,7 @@ async function applyDisputeStartedJEvent(context: FinalizedJEventContext): Promi
 
   dirtyAccounts.add(counterpartyId.toLowerCase());
   account.status = 'disputed';
+  freezeAccountForDispute(account, true);
   const weAreStarter = senderStr === entityIdNorm;
   const disputeTimeout = Number(data.disputeTimeout);
   if (!Number.isSafeInteger(disputeTimeout) || disputeTimeout <= Number(blockNumber || 0)) {

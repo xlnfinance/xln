@@ -8,6 +8,7 @@ import {
   buildHtlcOnionAcceptOfferTx,
   buildHtlcOnionAdvanceTx,
   buildHtlcOnionRevealAcceptedTx,
+  committedHtlcLockEnvelope,
   hashEncryptedHtlcLayer,
   htlcSecretOfferContextHash,
   validateHtlcSecretOfferForLock,
@@ -15,7 +16,7 @@ import {
 } from '../protocol/htlc/onion-advance';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { accountInputAck } from '../account/consensus/flush';
-import type { EntityInput, EntityReplica, EntityTx, Env, HtlcLock } from '../types';
+import type { AccountTx, EntityInput, EntityReplica, EntityTx, Env, HtlcLock } from '../types';
 import { verifyCertifiedEntityOutput } from './consensus/output-certification';
 
 const log = createStructuredLogger('entity.htlc_onion_post_commit');
@@ -53,12 +54,15 @@ const alreadyAdvanced = (replica: EntityReplica, accountId: string, lock: HtlcLo
     || hasPendingAdvance(replica, lock.lockId);
 };
 
-const candidateLocks = (replica: EntityReplica): Array<{ accountId: string; lock: HtlcLock }> => {
-  const candidates: Array<{ accountId: string; lock: HtlcLock }> = [];
+type HtlcLockEnvelope = NonNullable<Extract<AccountTx, { type: 'htlc_lock' }>['data']['envelope']>;
+
+const candidateLocks = (replica: EntityReplica): Array<{ accountId: string; lock: HtlcLock; envelope: HtlcLockEnvelope }> => {
+  const candidates: Array<{ accountId: string; lock: HtlcLock; envelope: HtlcLockEnvelope }> = [];
   for (const [accountId, account] of replica.state.accounts) {
     for (const lock of account.locks.values()) {
       if (alreadyAdvanced(replica, accountId, lock)) continue;
-      candidates.push({ accountId, lock });
+      const envelope = committedHtlcLockEnvelope(account, lock.lockId);
+      if (envelope) candidates.push({ accountId, lock, envelope });
     }
   }
   return candidates.sort((left, right) =>
@@ -86,14 +90,15 @@ const decryptAdvance = async (
   replica: EntityReplica,
   accountId: string,
   lock: HtlcLock,
+  encryptedEnvelope: HtlcLockEnvelope,
 ): Promise<EntityTx | null> => {
-  const layerEntityId = lock.envelope && typeof lock.envelope === 'object' && 'manifest' in lock.envelope
-    ? normalized(lock.envelope.manifest?.entityId)
-    : lock.envelope && typeof lock.envelope === 'object' && lock.envelope.innerEnvelope
-      ? normalized(lock.envelope.innerEnvelope.manifest.entityId)
+  const layerEntityId = typeof encryptedEnvelope === 'object' && 'manifest' in encryptedEnvelope
+    ? normalized(encryptedEnvelope.manifest?.entityId)
+    : typeof encryptedEnvelope === 'object' && encryptedEnvelope.innerEnvelope
+      ? normalized(encryptedEnvelope.innerEnvelope.manifest.entityId)
       : '';
   if (layerEntityId !== normalized(replica.entityId)) return null;
-  const layer = await validateLocalCommittedHtlcLayer(env, replica.state, lock);
+  const layer = await validateLocalCommittedHtlcLayer(env, replica.state, lock, encryptedEnvelope);
   const proposerSignerId = normalized(replica.state.config.validators[0]);
   const proposerAttestations = layer.manifest.attestations.filter(
     (attestation) => attestation.signerId === proposerSignerId,
@@ -273,9 +278,9 @@ export const emitDefaultProposerHtlcOnionAdvances = async (
       }, replica.entityId);
     }
   }
-  for (const { accountId, lock } of candidateLocks(replica)) {
+  for (const { accountId, lock, envelope } of candidateLocks(replica)) {
     try {
-      const tx = await decryptAdvance(env, replica, accountId, lock);
+      const tx = await decryptAdvance(env, replica, accountId, lock, envelope);
       if (!tx) continue;
       outbox.push({
         entityId: replica.entityId,

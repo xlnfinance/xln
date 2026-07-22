@@ -98,7 +98,7 @@ const invalidateCurrentCache = async (
   await writeBatch(fence);
   await onBoundary?.('after-restore-current-fence');
   await deleteKeyRange(db, {}, () => true, async () => {
-    await onBoundary?.('after-restore-current-clear-chunk');
+    await onBoundary?.('after-restore-current-clear-batch');
   });
 };
 
@@ -110,7 +110,9 @@ const queueCurrentBody = (
   consumptionNodes: readonly { key: Buffer; value: Buffer }[],
   accountJClaimNodes: readonly { key: Buffer; value: Buffer }[],
 ): void => {
-  for (const doc of docs) batch.put(liveKeyForDoc(doc), encodedDocValue(doc, prepared));
+  void docs;
+  for (const key of prepared.docDels) batch.del?.(key);
+  for (const item of prepared.docPuts) batch.put(item.key, item.value);
   for (const item of prepared.merklePuts) batch.put(item.key, item.value);
   for (const item of certifiedBoardNodes) batch.put(item.key, item.value);
   for (const item of consumptionNodes) batch.put(item.key, item.value);

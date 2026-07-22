@@ -91,6 +91,13 @@ export const SCENARIOS: ScenarioMetadata[] = [
     tags: ['dispute', 'safety', 'rpc'],
     run: async (env: Env) => (await import('./dispute-lifecycle')).runDisputeLifecycle(env),
   },
+  {
+    id: 'dispute-transformer',
+    name: 'Programmable Dispute Transformer',
+    description: 'Real Depository dispute with payment, bilateral HTLC evidence, both swap directions, freeze, and late ACK',
+    tags: ['dispute', 'safety', 'htlc', 'swap', 'rpc'],
+    run: async (env: Env) => (await import('./dispute-transformer')).runDisputeTransformer(env),
+  },
 ];
 
 export function getScenario(id: string): ScenarioMetadata | undefined {
@@ -151,6 +158,14 @@ export const scenarioRegistry: ScenarioEntry[] = [
     load: async () => {
       const { runDisputeLifecycle } = await import('./dispute-lifecycle');
       return async (env: Env): Promise<Env> => runDisputeLifecycle(env);
+    },
+  },
+  {
+    key: 'dispute-transformer',
+    name: 'Programmable Dispute Transformer',
+    load: async () => {
+      const { runDisputeTransformer } = await import('./dispute-transformer');
+      return async (env: Env): Promise<Env> => runDisputeTransformer(env);
     },
   },
 ];

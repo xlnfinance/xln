@@ -125,7 +125,6 @@ const makeManualFallbackAccount = () => ({
         leftPullIds: [],
         rightPullIds: [],
       },
-      appliedSwapFillFingerprints: ['fill-1'],
     },
   },
   uncloneable: () => undefined,

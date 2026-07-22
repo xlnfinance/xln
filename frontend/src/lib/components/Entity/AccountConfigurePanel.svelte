@@ -36,8 +36,7 @@
   export let getCrossJTargetDisputeRisk: (counterpartyEntityId: string) => CrossJTargetDisputeRisk | null;
   export let formatCrossJTargetDisputeRisk: (risk: CrossJTargetDisputeRisk) => string;
   export let confirmAndQueueDisputeFinalize: (counterpartyEntityId: string, reason: string) => void | Promise<void>;
-  export let confirmAndQueueDisputeStart: (counterpartyEntityId: string, reason: string, options?: Record<string, unknown>) => void | Promise<void>;
-  export let confirmAndQueueDisputePrepare: (counterpartyEntityId: string, reason: string) => void | Promise<void>;
+  export let confirmAndQueueDisputePrepare: (counterpartyEntityId: string, reason: string, options?: Record<string, unknown>) => void | Promise<void>;
   export let addTokenToAccount: () => void | Promise<void>;
   export let submitRuntimeInput: ((input: RuntimeInput) => Promise<unknown> | unknown) | null = null;
 
@@ -109,7 +108,7 @@
     <div class="configure-token-card danger-card">
       <h4 class="section-head">Dispute Account</h4>
       <p class="muted">
-        Dispute preparation first freezes local account traffic and removes orderbook exposure. Start the on-chain dispute only after evidence is stable.
+        One action freezes local account traffic, removes orderbook exposure, and automatically drafts the on-chain dispute when evidence is stable.
       </p>
       {#if configureAccount?.activeDispute}
         <p class="danger-note">
@@ -125,30 +124,11 @@
         </button>
       {:else if configureAccount?.status === 'dispute_preparing'}
         <p class="danger-note">
-          Dispute is prepared locally. Normal account traffic is frozen; orderbook exposure is being removed before on-chain calldata is committed.
+          Preparing automatically. Normal account traffic is frozen; Dispute Start will appear in the batch after every orderbook removal is confirmed.
         </p>
-        <button
-          class="btn-danger-batch"
-          data-testid="configure-dispute-start"
-          on:click={() => confirmAndQueueDisputeStart(
-            workspaceAccountId,
-            'dispute-start-from-configure',
-            crossJTargetRisk
-              ? {
-                  allowUnsafeCrossJTargetDispute: unsafeCrossJTargetDisputeAccepted,
-                  acceptedCrossJTargetLossAmount: unsafeCrossJTargetDisputeAccepted
-                    ? crossJTargetRisk.amount
-                    : 0n,
-                }
-              : {},
-          )}
-          disabled={!activeIsLive}
-        >
-          Add Dispute Start To Batch
-        </button>
       {:else}
         <p class="danger-note">
-          Prepare first. This removes orders and stops normal account traffic without committing an on-chain dispute hash yet.
+          This removes orders and stops normal account traffic before committing the on-chain dispute hash.
         </p>
         {#if crossJTargetRisk}
           <label class="danger-confirm-row">
@@ -168,10 +148,18 @@
           on:click={() => confirmAndQueueDisputePrepare(
             workspaceAccountId,
             'dispute-prepare-from-configure',
+            crossJTargetRisk
+              ? {
+                  allowUnsafeCrossJTargetDispute: unsafeCrossJTargetDisputeAccepted,
+                  acceptedCrossJTargetLossAmount: unsafeCrossJTargetDisputeAccepted
+                    ? crossJTargetRisk.amount
+                    : 0n,
+                }
+              : {},
           )}
           disabled={!activeIsLive}
         >
-          Prepare Dispute
+          Prepare & Queue Dispute
         </button>
       {/if}
     </div>

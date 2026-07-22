@@ -34,7 +34,6 @@ const evidenceSnapshot = (hash: string, nonce: number, body: ProofBodyStruct) =>
     leftPullIds: [],
     rightPullIds: [],
   },
-  appliedSwapFillFingerprints: [],
 });
 
 const installEvidence = (

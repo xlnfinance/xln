@@ -255,22 +255,32 @@ const crossAckTx = (index: number): AccountTx => ({
 const runPass = async (
   swaps: number,
 ): Promise<{ same: AccountMachine; cross: AccountMachine; elapsedMs: number; sameElapsedMs: number; crossElapsedMs: number }> => {
-  const same = seedSameSwapAccount(swaps);
-  const cross = seedCrossSwapAccount(swaps);
-  const startedAt = getPerfMs();
-  const sameStartedAt = getPerfMs();
+  const same = seedSameSwapAccount(1);
+  const cross = seedCrossSwapAccount(1);
+  const sameTemplate = structuredClone(same.swapOffers.get('same-0')!);
+  const crossTemplate = structuredClone(cross.swapOffers.get('cross-0')!);
+  same.deltas.get(2)!.leftHold = sameTemplate.giveAmount * BigInt(swaps);
+  cross.deltas.get(1)!.leftHold = crossTemplate.giveAmount * BigInt(swaps);
+  let sameElapsedMs = 0;
   for (let index = 0; index < swaps; index += 1) {
+    if (index > 0) same.swapOffers.set(`same-${index}`, { ...sameTemplate, offerId: `same-${index}` });
+    const startedAt = getPerfMs();
     const result = await applyAccountTx(same, sameResolveTx(index), false, 2_000 + index, 2 + index);
+    sameElapsedMs += getPerfMs() - startedAt;
     if (!result.success) throw new Error(`SAME_SWAP_FAILED:${index}:${result.error}`);
   }
-  const sameElapsedMs = getPerfMs() - sameStartedAt;
-  const crossStartedAt = getPerfMs();
+  let crossElapsedMs = 0;
   for (let index = 0; index < swaps; index += 1) {
+    if (index > 0) cross.swapOffers.set(`cross-${index}`, {
+      ...structuredClone(crossTemplate),
+      offerId: `cross-${index}`,
+    });
+    const startedAt = getPerfMs();
     const result = await applyAccountTx(cross, crossAckTx(index), false, 2_000 + index, 2 + index);
+    crossElapsedMs += getPerfMs() - startedAt;
     if (!result.success) throw new Error(`CROSS_SWAP_FAILED:${index}:${result.error}`);
   }
-  const crossElapsedMs = getPerfMs() - crossStartedAt;
-  return { same, cross, elapsedMs: getPerfMs() - startedAt, sameElapsedMs, crossElapsedMs };
+  return { same, cross, elapsedMs: sameElapsedMs + crossElapsedMs, sameElapsedMs, crossElapsedMs };
 };
 
 export const runSwapRuntimeBenchmark = async (cli: Cli): Promise<RuntimeSwapBenchmarkResult> => {

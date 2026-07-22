@@ -6,6 +6,7 @@
 
 import type { AccountMachine, AccountTx } from '../../../types';
 import { deriveDelta } from '../../utils';
+import { deriveTransferOffdeltaChange } from '../../delta-movement';
 import { FINANCIAL } from '../../../constants';
 import { isLeftEntity } from '../../../entity/id';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
@@ -76,11 +77,6 @@ export function handleDirectPayment(
   // Derive capacity from sender's perspective
   const senderDerived = deriveDelta(delta, senderIsLeft);
 
-  // Canonical delta: always relative to left entity
-  // delta > 0 = RIGHT owes LEFT (RIGHT holds LEFT's collateral OR borrowed LEFT's credit)
-  // delta < 0 = LEFT owes RIGHT (LEFT holds RIGHT's collateral OR borrowed RIGHT's credit)
-  let canonicalDelta: bigint;
-
   if (paymentFromEntity !== leftEntity && paymentFromEntity !== rightEntity) {
     directPaymentLog.debug('entity_mismatch', {
       accountLeft: shortId(leftEntity),
@@ -95,17 +91,6 @@ export function handleDirectPayment(
     };
   }
 
-  // CANONICAL DELTA: Always moves TOWARD the payer (decreases their capacity)
-  // LEFT pays → delta DECREASES (negative)
-  // RIGHT pays → delta INCREASES (positive)
-  if (senderIsLeft) {
-    // LEFT sends → delta DECREASES (LEFT's outCapacity goes down)
-    canonicalDelta = -amount;
-  } else {
-    // RIGHT sends → delta INCREASES (RIGHT's outCapacity goes down)
-    canonicalDelta = amount;
-  }
-
   if (amount > senderDerived.outCapacity) {
     return {
       success: false,
@@ -115,7 +100,7 @@ export function handleDirectPayment(
   }
 
   // Apply canonical delta (identical on both sides)
-  delta.offdelta += canonicalDelta;
+  delta.offdelta += deriveTransferOffdeltaChange(senderIsLeft, amount);
 
   // Events differ by perspective but state is identical (derive from byLeft)
   const { counterparty: cpForEvent } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);

@@ -2,8 +2,24 @@ import { asOfferId, compareCanonicalText, swapKey, type OfferId, type SwapKey } 
 import { deriveSide } from './types.ts';
 import type { CrossJurisdictionSwapRoute } from '../types';
 import { UINT16_MAX } from '../constants.ts';
+import { deriveTransferOffdeltaChange } from '../account/delta-movement.ts';
 
 export const MAX_SWAP_FILL_RATIO = UINT16_MAX;
+
+/** Canonical Account offdelta movement for one executed swap. */
+export function deriveSwapOffdeltaChanges(
+  makerIsLeft: boolean,
+  filledGive: bigint,
+  filledWant: bigint,
+): { give: bigint; want: bigint } {
+  if (filledGive < 0n || filledWant < 0n) {
+    throw new Error(`SWAP_SETTLEMENT_AMOUNT_NEGATIVE:${filledGive}:${filledWant}`);
+  }
+  return {
+    give: deriveTransferOffdeltaChange(makerIsLeft, filledGive),
+    want: deriveTransferOffdeltaChange(!makerIsLeft, filledWant),
+  };
+}
 
 export interface SwapOfferLike {
   giveTokenId: number;

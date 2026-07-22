@@ -1,12 +1,12 @@
-import type { AccountTx } from '../../types';
+import type { AccountMachine, AccountTx } from '../../types';
 
 /**
  * Account dispute freeze policy.
  *
  * The prepare-dispute phase is a local-only quarantine before any on-chain
- * dispute hash is committed. During that phase the account may still consume
- * evidence-only updates that make transformer calldata more complete
- * (HTLC/pull secrets, swap fill ratios), but normal business must stop.
+ * dispute hash is committed. Account consensus is already frozen: optional
+ * evidence is collected in Entity state and never by creating another Account
+ * frame on top of the last mutually signed ProofBody.
  *
  * Once disputeStart is queued or observed on-chain, calldata hashes are already
  * committed. From that point even evidence updates must stop changing account
@@ -35,6 +35,23 @@ export const isAccountBusinessTx = (txType: string): boolean =>
 export const isArgumentChangingAccountTx = (txType: string): boolean =>
   isAccountBusinessTx(txType);
 
+export const freezeAccountForDispute = (
+  account: AccountMachine,
+  retainOptionalEvidence: boolean,
+): void => {
+  account.mempool = (account.mempool || []).filter((tx) => (
+    isAccountControlTx(tx.type) || (retainOptionalEvidence && isDisputeEvidenceAccountTx(tx))
+  ));
+  // The candidate is not mutually committed state. Dispute always starts from
+  // the last signed ProofBody; late proposal/ACK traffic is rejected at ingress.
+  delete account.pendingFrame;
+  delete account.pendingAccountInput;
+  delete account.pendingAccountInputSignerId;
+  delete account.clonedForValidation;
+  account.rollbackCount = 0;
+  delete account.lastRollbackFrameHash;
+};
+
 export const isDisputeStartedByLeft = (
   starterEntityId: string,
   leftEntityId: string,
@@ -55,8 +72,5 @@ export const canProcessAccountTxForDisputeStatus = (
 ): boolean => {
   const normalized = status ?? 'active';
   if (normalized === 'active') return true;
-  if (normalized === 'dispute_preparing') {
-    return isAccountControlTx(txType) || isDisputeEvidenceAccountTx(txType);
-  }
   return isAccountControlTx(txType);
 };

@@ -221,7 +221,6 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     buildAddTokenToAccountTx,
     buildBroadcastTx,
     buildDisputeFinalizeTx,
-    buildDisputeStartTx,
     buildExternalToReserveTx,
     buildMovePostSettleTxs,
     buildPrepareDisputeTx,
@@ -2990,18 +2989,13 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     }
   }
   function confirmDisputeAction(
-    kind: 'prepare' | 'start' | 'finalize',
+    kind: 'prepare' | 'finalize',
     counterpartyEntityId: string,
   ): boolean {
     const label = pendingBatchEntityLabel(counterpartyEntityId, getPendingBatchLabelOptions());
     if (kind === 'prepare') {
       return confirm(
-        `Prepare dispute with ${label}?\n\nThis freezes normal account traffic, removes orderbook exposure, and waits for stable dispute evidence before any on-chain batch is queued.`,
-      );
-    }
-    if (kind === 'start') {
-      return confirm(
-        `Start on-chain dispute with ${label}?\n\nThis adds Dispute Start to the pending batch. Use it only after dispute preparation reports stable evidence.`,
+        `Prepare dispute with ${label}?\n\nThis freezes normal account traffic, removes orderbook exposure, and automatically drafts Dispute Start as soon as evidence is stable.`,
       );
     }
     return confirm(
@@ -3027,17 +3021,10 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   async function confirmAndQueueDisputePrepare(
     counterpartyEntityId: string,
     description = 'dispute-prepare-from-configure',
-  ) {
-    if (!confirmDisputeAction('prepare', counterpartyEntityId)) return;
-    await queueDisputePrepare(counterpartyEntityId, description);
-  }
-  async function confirmAndQueueDisputeStart(
-    counterpartyEntityId: string,
-    description = 'dispute-from-configure',
     options: DisputeStartOptions = {},
   ) {
-    if (!confirmDisputeAction('start', counterpartyEntityId)) return;
-    await queueDisputeStart(counterpartyEntityId, description, options);
+    if (!confirmDisputeAction('prepare', counterpartyEntityId)) return;
+    await queueDisputePrepare(counterpartyEntityId, description, options);
   }
   async function confirmAndQueueDisputeFinalize(counterpartyEntityId: string, description = 'dispute-finalize-from-configure') {
     if (!confirmDisputeAction('finalize', counterpartyEntityId)) return;
@@ -3046,6 +3033,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   async function queueDisputePrepare(
     counterpartyEntityId: string,
     description = 'dispute-prepare-from-configure',
+    options: DisputeStartOptions = {},
   ) {
     const entityId = replica?.state?.entityId || tab.entityId;
     const signerId = resolveEntitySigner(entityId, 'dispute-prepare');
@@ -3060,44 +3048,15 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     if (!activeIsLive) { toasts.error('Dispute prepare requires LIVE mode'); return; }
     try {
       await submitEntityInputs([buildEntityInput(entityId, signerId, [
-        buildPrepareDisputeTx(counterpartyEntityId, description),
+        buildPrepareDisputeTx(counterpartyEntityId, description, options),
       ])]);
-      toasts.success('Dispute prepared — orderbook exposure removed');
+      toasts.success('Dispute preparation queued — start will draft automatically when ready');
     } catch (err) {
       logEntityPanelDiagnostic('Dispute prepare failed', {
         counterpartyEntityId,
         error: toErrorMessage(err, 'Dispute prepare failed'),
       });
       toasts.error(`Dispute prepare failed: ${(err as Error).message}`);
-    }
-  }
-  async function queueDisputeStart(
-    counterpartyEntityId: string,
-    description = 'dispute-from-configure',
-    options: DisputeStartOptions = {},
-  ) {
-    const entityId = replica?.state?.entityId || tab.entityId;
-    const signerId = resolveEntitySigner(entityId, 'dispute-start');
-    if (!entityId) {
-      notifyUserActionError('dispute-start', 'Active entity missing for dispute start');
-      return;
-    }
-    if (!signerId) {
-      notifyUserActionError('dispute-start', 'Active signer missing for dispute start');
-      return;
-    }
-    if (!activeIsLive) { toasts.error('Dispute requires LIVE mode'); return; }
-    try {
-      await submitEntityInputs([buildEntityInput(entityId, signerId, [
-        buildDisputeStartTx(counterpartyEntityId, description, options),
-      ])]);
-      toasts.success('Dispute queued — will be submitted on next batch broadcast');
-    } catch (err) {
-      logEntityPanelDiagnostic('Dispute start failed', {
-        counterpartyEntityId,
-        error: toErrorMessage(err, 'Dispute start failed'),
-      });
-      toasts.error(`Dispute failed: ${(err as Error).message}`);
     }
   }
   async function queueDisputeFinalize(counterpartyEntityId: string, description = 'dispute-finalize-from-configure') {
@@ -3879,7 +3838,6 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
             {getCrossJTargetDisputeRisk}
             {formatCrossJTargetDisputeRisk}
             {confirmAndQueueDisputeFinalize}
-            {confirmAndQueueDisputeStart}
             {confirmAndQueueDisputePrepare}
             {addTokenToAccount}
             {handleOpenAccountTargetChange}

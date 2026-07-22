@@ -1179,7 +1179,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
     entityId: hub.id,
     signerId: hub.signer,
     entityTxs: [{
-      type: 'disputeStart',
+      type: 'prepareDispute',
       data: {
         counterpartyEntityId: alice.id,
         description: 'Swap dispute (fillRatio enforced)',

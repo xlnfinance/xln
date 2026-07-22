@@ -94,6 +94,16 @@ import {
   type RpcBatchRequest,
   type RpcBatchResponse,
 } from './rpc-utils';
+
+/**
+ * `eth_estimateGas` minimizes gas, while optional dispute transformers are
+ * deliberately allowed to soft-skip when gas is low. A cheap successful no-op
+ * is therefore not a safe estimate for processBatch.
+ */
+export const PROCESS_BATCH_GAS_FLOOR = 10_000_000n;
+
+export const applyProcessBatchGasFloor = (estimatedGasLimit: bigint): bigint =>
+  estimatedGasLimit < PROCESS_BATCH_GAS_FLOOR ? PROCESS_BATCH_GAS_FLOOR : estimatedGasLimit;
 import { nodeProcess, runtimeIsBrowser } from '../machine/platform';
 import {
   readAuthenticatedReceiptRange,
@@ -503,7 +513,6 @@ export async function createRpcAdapter(
     Math.floor(Number(process.env['JADAPTER_MAX_FEE_GWEI'] ?? '200')),
   );
   const MAX_FEE_PER_GAS_WEI = ethers.parseUnits(String(MAX_FEE_PER_GAS_GWEI), 'gwei');
-  const DEFAULT_PROCESS_BATCH_GAS = 5_000_000n;
   type RpcReceipt = Parameters<typeof parseReceiptLogsToJEvents>[0] & {
     gasUsed?: bigint;
   };
@@ -672,10 +681,11 @@ export async function createRpcAdapter(
           ? depository.connect(txSigner as unknown as Parameters<typeof depository.connect>[0])
           : depository;
         const feeOverrides = await buildFeeOverrides();
-        const gasLimit = await estimateGasWithHeadroom(
+        const estimatedGasLimit = await estimateGasWithHeadroom(
           () => depositoryWithSigner.processBatch.estimateGas(encodedBatch, hankoData, nextNonce),
-          DEFAULT_PROCESS_BATCH_GAS,
+          PROCESS_BATCH_GAS_FLOOR,
         );
+        const gasLimit = applyProcessBatchGasFloor(estimatedGasLimit);
 
         const tx = await depositoryWithSigner.processBatch(encodedBatch, hankoData, nextNonce, {
           gasLimit,
@@ -717,6 +727,7 @@ export async function createRpcAdapter(
 
   type SendTxOptions = {
     gasFallback: bigint;
+    minimumGasLimit?: bigint;
     txNonce: number | null;
     resetSignerNonce: boolean;
   };
@@ -728,10 +739,13 @@ export async function createRpcAdapter(
     options: SendTxOptions,
   ): Promise<RpcReceipt> => {
     const txMethod = method as UntypedNonPayableMethod;
-    const gasLimit = await estimateGasWithHeadroom(
+    const estimatedGasLimit = await estimateGasWithHeadroom(
       () => txMethod.estimateGas(...args),
       options.gasFallback,
     );
+    const gasLimit = options.minimumGasLimit !== undefined && estimatedGasLimit < options.minimumGasLimit
+      ? options.minimumGasLimit
+      : estimatedGasLimit;
     if (options.resetSignerNonce) {
       maybeResetSignerNonce();
     }
@@ -1683,7 +1697,8 @@ export async function createRpcAdapter(
             depository.processBatch,
             [encodedBatch, hankoData, nonce],
             {
-              gasFallback: DEFAULT_PROCESS_BATCH_GAS,
+              gasFallback: PROCESS_BATCH_GAS_FLOOR,
+              minimumGasLimit: PROCESS_BATCH_GAS_FLOOR,
               txNonce: await allocateSerializedSignerNonce(),
               resetSignerNonce: true,
             },
@@ -2340,9 +2355,9 @@ export async function createRpcAdapter(
             // submitTx must not mutate external allowances as a hidden side effect.
             const gasEstimate = await estimateGasWithHeadroomResult(
               () => submitterDepository.processBatch.estimateGas(encodedBatch, hankoData, nextNonce),
-              DEFAULT_PROCESS_BATCH_GAS,
+              PROCESS_BATCH_GAS_FLOOR,
             );
-            const gasLimit = gasEstimate.gasLimit;
+            const gasLimit = applyProcessBatchGasFloor(gasEstimate.gasLimit);
             const resolvedFeeOverrides = await buildFeeOverrides();
             const requestedFeeOverrides = batchData.feeOverrides;
             if (requestedFeeOverrides?.maxFeePerGasWei) {

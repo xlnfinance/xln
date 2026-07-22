@@ -233,8 +233,11 @@ describe('proof-builder dispute hash', () => {
     const proof = buildAccountProofBody(accountMachine, DEPOSITORY);
     const allowances = proof.runtimeProofBody.transformers[0]?.allowances;
     expect(allowances).toEqual([
-      { deltaIndex: 0, rightAllowance: 29n, leftAllowance: 28n },
-      { deltaIndex: 1, rightAllowance: 32n, leftAllowance: 0n },
+      // Left-sender HTLC (11), maker-left give (17), and negative pull (29)
+      // can only move token 1 from left to right: 11 + 17 + 29 = 57.
+      { deltaIndex: 0, rightAllowance: 57n, leftAllowance: 0n },
+      // Right-sender HTLC (13) and maker-left want (19) move token 2 right→left.
+      { deltaIndex: 1, rightAllowance: 0n, leftAllowance: 32n },
       { deltaIndex: 2, rightAllowance: 0n, leftAllowance: 23n },
     ]);
   });

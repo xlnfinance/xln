@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
-import { queueAccountMempoolTx } from '../entity/consensus/account-mempool-queue';
+import { queueAccountMempoolTx, recordPendingSwapFillRatio } from '../entity/consensus/account-mempool-queue';
 import { prependUniqueMempoolTxs } from '../account/consensus/helpers';
 import { LIMITS } from '../constants';
-import type { AccountMachine, AccountTx } from '../types';
+import type { AccountMachine, AccountTx, EntityState } from '../types';
 
 const PAYMENT: Extract<AccountTx, { type: 'direct_payment' }> = {
   type: 'direct_payment',
@@ -49,6 +49,21 @@ describe('account mempool multiplicity', () => {
 
     expect(queueAccountMempoolTx(account, structuredClone(lifecycle))).toBe(false);
     expect(account.mempool).toEqual([]);
+  });
+
+  test('records one canonical swap dispute intent outside the pending Account frame', () => {
+    const state = { pendingSwapFillRatios: new Map() } as unknown as EntityState;
+    const fill = {
+      type: 'swap_resolve',
+      data: { offerId: 'offer-1', fillRatio: 32_768, cancelRemainder: false },
+    } as AccountTx;
+
+    recordPendingSwapFillRatio(state, 'peer', fill);
+    expect(state.pendingSwapFillRatios?.get('peer:offer-1' as never)).toBe(32_768);
+    expect(() => recordPendingSwapFillRatio(state, 'peer', {
+      ...fill,
+      data: { ...fill.data, fillRatio: 16_384 },
+    } as AccountTx)).toThrow('SWAP_DISPUTE_FILL_RATIO_CONFLICT');
   });
 
   test('counts pending and queued transactions under one outstanding limit', () => {

@@ -28,6 +28,9 @@ export const LIMITS = {
   /** Maximum size of a single frame in bytes. 1000 tx frames get a 10KB/tx budget. */
   MAX_FRAME_SIZE_BYTES: 10_000_000,
 
+  /** Strict exclusive limit for every physical mutable-storage value. */
+  MAX_STORAGE_VALUE_BYTES: 10_000,
+
   /** Maximum number of accounts per entity (prevents state bloat) */
   MAX_ACCOUNTS_PER_ENTITY: 1000,
 
@@ -46,8 +49,18 @@ export const LIMITS = {
   /** Maximum active HTLC locks per bilateral account; 16-bit hashledger cross-j swaps need 16 live legs. */
   MAX_ACCOUNT_HTLC_LOCKS: 32,
 
-  /** Maximum active swap offers per bilateral account */
-  MAX_ACCOUNT_SWAP_OFFERS: 1000,
+  /**
+   * Fast count guard sized below the canonical 10KB collection-byte limit.
+   * Aggregate fast guard; per-kind limits below reserve one bounded page for
+   * compact same-j rows plus larger cross-j rows.
+   */
+  MAX_ACCOUNT_SWAP_OFFERS: 23,
+
+  /** Compact same-j rows retained in one Account collection page. */
+  MAX_ACCOUNT_SAME_J_SWAP_OFFERS: 20,
+
+  /** Cross-j offers carry both signed legs and therefore have a tighter byte budget. */
+  MAX_ACCOUNT_CROSS_J_SWAP_OFFERS: 3,
 
   /** Maximum live offers for one maker, direction, and economic market. */
   MAX_ACCOUNT_SWAP_OFFERS_PER_SIDE_PER_MARKET: 10,

@@ -449,23 +449,6 @@ export function formatAccount(account: AccountMachine, myEntityId: string, optio
       const direction = lock.senderIsLeft ? 'L→R' : 'R→L';
       output.push(' '.repeat(indent) + `    Lock: ${lock.lockId.slice(0, 12)}... | ${formatBigInt(lock.amount)}`);
       output.push(' '.repeat(indent) + `      Hash: ${lock.hashlock.slice(0, 16)}... | ${direction} | Expires: ${timeLeft}`);
-      if (lock.envelope) {
-        let envInfo = 'Unknown';
-        if (typeof lock.envelope === 'object') {
-          if ('version' in lock.envelope && lock.envelope.version === 'xln:htlc-multi-recipient:v1') {
-            envInfo = `Encrypted for ${lock.envelope.recipients.length} validators`;
-          } else {
-            envInfo = 'finalRecipient' in lock.envelope && lock.envelope.finalRecipient
-              ? 'Final recipient'
-              : 'nextHop' in lock.envelope && typeof lock.envelope.nextHop === 'string'
-                ? `→ ${formatAddress(lock.envelope.nextHop)}`
-                : 'Unknown';
-          }
-        } else {
-          envInfo = `Encrypted: ${lock.envelope.slice(0, 20)}...`;
-        }
-        output.push(' '.repeat(indent) + `      Envelope: ${envInfo}`);
-      }
     }
 
     if (account.locks.size > (opts.maxLocks || 10)) {

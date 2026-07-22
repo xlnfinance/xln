@@ -76,4 +76,34 @@ describe('account economic swap limits', () => {
     expect(swapOffers.has('eleventh')).toBe(false);
     expect(swapOffers.size).toBe(limit);
   });
+
+  test('rejects cross-j depth before its signed legs can exceed one storage page', async () => {
+    const limit = LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS;
+    const swapOffers = new Map(
+      Array.from({ length: limit }, (_, index) => {
+        const current = {
+          ...offer(`cross-${index}`, true, index + 1, index + 2),
+          crossJurisdiction: { status: 'resting' },
+        } as SwapOffer;
+        return [current.offerId, current] as const;
+      }),
+    );
+    const account = { leftEntity: 'left', rightEntity: 'right', deltas: new Map(), swapOffers };
+    const result = await handleSwapOffer(account as Parameters<typeof handleSwapOffer>[0], {
+      type: 'swap_offer',
+      data: {
+        offerId: 'cross-overflow',
+        giveTokenId: 100,
+        giveAmount: 1n,
+        wantTokenId: 101,
+        wantAmount: 1n,
+        minFillRatio: 0,
+        crossJurisdiction: { status: 'resting' },
+      },
+    } as Parameters<typeof handleSwapOffer>[1], true, 2);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(`max ${limit}`);
+    expect(swapOffers.has('cross-overflow')).toBe(false);
+  });
 });

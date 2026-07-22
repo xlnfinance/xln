@@ -1,10 +1,5 @@
 import { decodeValidatedBuffer, encodeBuffer, writeBatch } from './codec';
 import {
-  docValueKey,
-  liveKeyForDoc,
-  liveKeyForRef,
-} from './doc-refs';
-import {
   deleteKeyRange,
   iterateKeys,
   readRawOrNull,
@@ -47,6 +42,7 @@ import {
   KEY_HEAD,
   KEY_DIFF,
   KEY_LIVE_ACCOUNT,
+  KEY_LIVE_ACCOUNT_FIELD,
   KEY_LIVE_BOOK,
   KEY_LIVE_ENTITY,
   KEY_MERKLE_BRANCH,
@@ -70,8 +66,10 @@ import {
   keyConsumptionNodePrefix,
   keyAccountJClaimNode,
   keyAccountJClaimNodePrefix,
+  parseLiveAccountKey,
   keySnapshotReplicaMetaPrefix,
 } from './keys';
+import { readAccountStorageLayout } from './account-layout';
 import {
   buildLiveReplicaLookup,
   buildLiveReplicaMetaPlan,
@@ -283,12 +281,10 @@ const applyDiffToLiveDb = async (options: {
     ...(options.entityHashDocs ? { entityHashDocs: options.entityHashDocs } : {}),
   });
   const batch = options.db.batch();
-  for (const doc of options.diff.puts) {
-    batch.put(liveKeyForDoc(doc), preparedHashes.docValueBuffers.get(docValueKey(doc)) ?? encodeBuffer(doc.value));
+  for (const key of preparedHashes.docDels) {
+    if (typeof batch.del === 'function') batch.del(key);
   }
-  for (const ref of options.diff.dels) {
-    if (typeof batch.del === 'function') batch.del(liveKeyForRef(ref));
-  }
+  for (const item of preparedHashes.docPuts) batch.put(item.key, item.value);
   for (const key of preparedHashes.merkleDels) {
     if (typeof batch.del === 'function') batch.del(key);
   }
@@ -302,6 +298,7 @@ const applyDiffToLiveDb = async (options: {
 const CURRENT_RECOVERY_PREFIXES = [
   KEY_LIVE_ENTITY,
   KEY_LIVE_ACCOUNT,
+  KEY_LIVE_ACCOUNT_FIELD,
   KEY_LIVE_BOOK,
   KEY_MERKLE_ROOT,
   KEY_MERKLE_BRANCH,
@@ -544,7 +541,10 @@ const synchronizeAccountJClaimNodes = async (
 ): Promise<boolean> => {
   const states: AccountJClaimAccumulatorState[] = [];
   for await (const key of iterateKeys(currentDb, { prefix: Buffer.from([KEY_LIVE_ACCOUNT]) })) {
-    const doc = decodeValidatedBuffer(await currentDb.get(key), validateStorageAccountDocValue);
+    const parsed = parseLiveAccountKey(key);
+    const stored = await readAccountStorageLayout(currentDb, parsed.entityId, parsed.counterpartyId, key);
+    if (!stored) throw new Error(`STORAGE_LIVE_ACCOUNT_MISSING:${key.toString('hex')}`);
+    const doc = validateStorageAccountDocValue(stored.doc);
     states.push(doc.leftPendingJClaims, doc.rightPendingJClaims);
   }
   const authoritative = new Map<string, AccountJClaimNode>();
@@ -1171,12 +1171,10 @@ export const saveRuntimeFrameToStorage = async (options: {
   }
   for (const hash of safeAccountJClaimDeletes) batch.del!(keyAccountJClaimNode(hash));
   if (preparedHashes) {
-    for (const doc of materializedPuts) {
-      batch.put(liveKeyForDoc(doc), preparedHashes.docValueBuffers.get(docValueKey(doc)) ?? encodeBuffer(doc.value));
+    for (const key of preparedHashes.docDels) {
+      if (typeof batch.del === 'function') batch.del(key);
     }
-    for (const ref of materializedDels) {
-      if (typeof batch.del === 'function') batch.del(liveKeyForRef(ref));
-    }
+    for (const item of preparedHashes.docPuts) batch.put(item.key, item.value);
     for (const key of preparedHashes.merkleDels) {
       if (typeof batch.del === 'function') batch.del(key);
     }

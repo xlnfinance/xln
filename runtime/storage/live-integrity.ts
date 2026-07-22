@@ -34,6 +34,7 @@ import {
   validateStorageMerkleLeafDocValue,
   validateStorageMerkleRootDocValue,
 } from './authoritative-schema';
+import { readAccountStorageLayout } from './account-layout';
 import type {
   RuntimeDbLike,
   StorageMerkleBranchDoc,
@@ -96,9 +97,10 @@ export const verifyLiveStorageIntegrity = async (db: RuntimeDbLike): Promise<voi
   for await (const key of iterateKeys(db, { prefix: keyLiveAccountPrefix() })) {
     const parsed = parseLiveAccountKey(key);
     assertExactKey(key, keyLiveAccount(parsed.entityId, parsed.counterpartyId), 'STORAGE_LIVE_ACCOUNT_KEY_MISMATCH');
-    const raw = await db.get(key);
+    const stored = await readAccountStorageLayout(db, parsed.entityId, parsed.counterpartyId, key);
+    if (!stored) throw new Error(`STORAGE_LIVE_ACCOUNT_MISSING:${key.toString('hex')}`);
     assertStorageAccountDocBinding(
-      decodeValidatedBuffer(raw, validateStorageAccountDocValue),
+      validateStorageAccountDocValue(stored.doc),
       parsed.entityId,
       parsed.counterpartyId,
       'startup-integrity',
@@ -107,7 +109,7 @@ export const verifyLiveStorageIntegrity = async (db: RuntimeDbLike): Promise<voi
       family: 'account',
       entityId: parsed.entityId,
       counterpartyId: parsed.counterpartyId,
-    }), raw);
+    }), stored.logicalValue);
   }
 
   for await (const key of iterateKeys(db, { prefix: keyLiveBookPrefix() })) {

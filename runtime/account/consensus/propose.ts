@@ -609,7 +609,6 @@ export async function proposeAccountFrame(
         proofResult.proofBodyHash,
         signedProofNonce,
         proofResult.proofBodyStruct,
-        { appliedAccountTxs: validTxs, appliedFrameHeight: newFrame.height },
       ),
     );
   }

@@ -27,6 +27,8 @@ import { getBootstrapCreditAmount, HUB_DEFAULT_MIN_TRADE_SIZE } from '../orchest
 import { createEmptyEnv } from '../runtime';
 import type { AccountMachine, EntityReplica, Env } from '../types';
 import { createDefaultDelta } from '../validation-utils';
+import { LIMITS } from '../constants';
+import { encodeBuffer } from '../storage/codec';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -39,7 +41,8 @@ test('default market maker depth fits every quote leg and aggregate hold inside 
   );
   const aggregateGiveByToken = new Map<number, bigint>();
 
-  expect(specs).toHaveLength(60);
+  expect(specs).toHaveLength(18);
+  expect(specs.length).toBeLessThanOrEqual(LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS);
   for (const spec of specs) {
     expect(spec.giveAmount).toBeLessThanOrEqual(getBootstrapCreditAmount(spec.giveTokenId));
     expect(spec.wantAmount).toBeLessThanOrEqual(getBootstrapCreditAmount(spec.wantTokenId));
@@ -226,7 +229,7 @@ test('five-token market maker depth remains canonical through Account and hub ad
   }
 
   const specs = buildMarketMakerOfferSpecs([hubEntityId], [1, 2, 3, 4, 5]);
-  expect(specs).toHaveLength(200);
+  expect(specs).toHaveLength(LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS);
   const rejected: string[] = [];
 
   for (const spec of specs) {
@@ -271,7 +274,8 @@ test('five-token market maker depth remains canonical through Account and hub ad
     if (materialized.kind === 'reject') rejected.push(`${spec.offerId}:${materialized.reason}`);
   }
 
-  expect(account.swapOffers.size).toBe(200);
+  expect(account.swapOffers.size).toBe(LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS);
+  expect(encodeBuffer(account.swapOffers).byteLength).toBeLessThan(LIMITS.MAX_STORAGE_VALUE_BYTES);
   expect(rejected).toEqual([]);
 });
 
@@ -300,16 +304,7 @@ const addReplica = (
 };
 
 const committedSameChainOffers = (hubEntityId: string, tokenIds: number[]): Map<string, unknown> => {
-  const offers = new Map<string, unknown>();
-  for (const pair of buildDefaultEntitySwapPairs(tokenIds)) {
-    const pairKey = `${pair.baseTokenId}-${pair.quoteTokenId}`;
-    for (const side of ['ask', 'bid']) {
-      for (let level = 1; level <= 10; level += 1) {
-        offers.set(`mm-${hubEntityId.slice(-6).toLowerCase()}-${pairKey}-${side}-${level}`, {});
-      }
-    }
-  }
-  return offers;
+  return new Map(buildMarketMakerOfferSpecs([hubEntityId], tokenIds).map(spec => [spec.offerId, {}]));
 };
 
 const buildBootstrapTopology = (): {
@@ -393,21 +388,32 @@ test('five-token jurisdiction keeps same-chain and cross depth inside one accoun
   const targetTokenIds = [1, 2, 3];
   addReplica(env, sourceContext.entityId, sourceContext.signerId);
   addReplica(env, targetContext.entityId, targetContext.signerId);
-  const specs = [
-    ...buildMarketMakerOfferSpecs([sourceHub.entityId], sourceTokenIds),
-    ...buildMarketMakerCrossOfferSpecs(
-      env,
-      sourceContext,
-      targetContext,
-      [sourceHub],
-      [targetHub],
-      sourceTokenIds,
-      targetTokenIds,
-    ),
-  ];
+  const crossSpecs = buildMarketMakerCrossOfferSpecs(
+    env,
+    sourceContext,
+    targetContext,
+    [sourceHub],
+    [targetHub],
+    sourceTokenIds,
+    targetTokenIds,
+  );
+  const reverseCrossSpecs = buildMarketMakerCrossOfferSpecs(
+    env,
+    targetContext,
+    sourceContext,
+    [targetHub],
+    [sourceHub],
+    targetTokenIds,
+    sourceTokenIds,
+  );
+  const specs = [...buildMarketMakerOfferSpecs([sourceHub.entityId], sourceTokenIds), ...crossSpecs];
   const aggregateGiveByToken = new Map<number, bigint>();
 
-  expect(specs).toHaveLength(245);
+  expect(specs).toHaveLength(
+    LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS + LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS,
+  );
+  expect(crossSpecs.some(spec => (spec.crossJurisdiction?.source.tokenId ?? 0) >= 4)).toBeTrue();
+  expect(reverseCrossSpecs.some(spec => (spec.crossJurisdiction?.target.tokenId ?? 0) >= 4)).toBeTrue();
   for (const spec of specs) {
     aggregateGiveByToken.set(
       spec.giveTokenId,
@@ -537,7 +543,7 @@ test('market maker hub discovery uses stable hubName instead of mutable display 
   expect(visibleHubs[0]?.hubName).toBe('h1');
 });
 
-test('runtime market maker health reports cross coverage before full depth without marking ok', () => {
+test('runtime market maker health stays red until every byte-budgeted cross market is covered', () => {
   const { env, contexts, visibleHubs, tokenIdsByContext } = buildBootstrapTopology();
   const sourceContext = contexts[0]!;
   const targetContext = contexts[1]!;
@@ -576,10 +582,12 @@ test('runtime market maker health reports cross coverage before full depth witho
   );
   const commitOneOfferPerPair = (account: AccountMachine, specs: ReturnType<typeof buildMarketMakerCrossOfferSpecs>): number => {
     const coveredPairs = new Set<string>();
+    const pairBudget = Math.max(1, new Set(specs.map(spec => spec.pairId)).size - 1);
     for (const spec of specs) {
       if (coveredPairs.has(spec.pairId)) continue;
       account.swapOffers?.set(spec.offerId, { crossJurisdiction: spec.crossJurisdiction });
       coveredPairs.add(spec.pairId);
+      if (coveredPairs.size >= pairBudget) break;
     }
     return coveredPairs.size;
   };
@@ -598,10 +606,9 @@ test('runtime market maker health reports cross coverage before full depth witho
   expect(health.cross.ok).toBe(false);
   expect(health.cross.expectedRoutes).toBe(2);
   expect(health.cross.routes.map(route => route.offers)).toEqual([sourcePairCoverage, targetPairCoverage]);
-  expect(health.cross.routes.every(route => route.ready)).toBe(true);
+  expect(health.cross.routes.some(route => !route.ready)).toBe(true);
   expect(health.cross.routes.some(route => !route.depthReady)).toBe(true);
-  expect(health.cross.routes.flatMap(route => route.pairs).every(pair => pair.ready)).toBe(true);
-  expect(health.cross.routes.flatMap(route => route.pairs).some(pair => !pair.depthReady)).toBe(true);
+  expect(health.cross.routes.flatMap(route => route.pairs).some(pair => !pair.ready)).toBe(true);
 });
 
 test('market maker finalized cross matching tolerates rolling route hash but rejects changed economics', () => {

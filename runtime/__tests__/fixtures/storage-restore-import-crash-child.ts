@@ -172,7 +172,7 @@ replica.lastConsensusProgressAt = 1_000;
 env.timestamp = 1_000;
 await persistRestoredEnvToDB(env);
 
-// Exercise the chunked cache-clear boundary too. This key is deliberately not
+// Exercise the rebranched cache-clear boundary too. This key is deliberately not
 // authoritative: recovery must discard it and rebuild solely from history.
 await getRuntimeStorageDb(env).put(Buffer.from([0x7f]), Buffer.from('stale-cache'), { sync: true });
 env.height += 1;

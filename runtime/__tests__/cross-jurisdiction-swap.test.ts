@@ -5699,7 +5699,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     })).rejects.toThrow('J_RANGE_EVIDENCE_HASH_MISMATCH');
   });
 
-  test('crossJurisdictionSalvage starts target dispute then queues broadcast', async () => {
+  test('crossJurisdictionSalvage lets prepareDispute safely schedule the target broadcast', async () => {
     const env = createEmptyEnv('cross-salvage-action');
     env.scenarioMode = true;
     env.timestamp = 40_000;
@@ -5795,10 +5795,9 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     expect(result.outputs).toHaveLength(1);
     expect(result.outputs?.[0]?.entityId).toBe(targetUser);
-    expect(result.outputs?.[0]?.entityTxs).toHaveLength(3);
+    expect(result.outputs?.[0]?.entityTxs).toHaveLength(2);
     expect(result.outputs?.[0]?.entityTxs?.[0]?.type).toBe('resolvePull');
-    expect(result.outputs?.[0]?.entityTxs?.[1]?.type).toBe('disputeStart');
-    expect(result.outputs?.[0]?.entityTxs?.[2]?.type).toBe('j_broadcast');
+    expect(result.outputs?.[0]?.entityTxs?.[1]?.type).toBe('prepareDispute');
     expect((result.outputs?.[0]?.entityTxs?.[0]?.data as any).counterpartyEntityId).toBe(targetHub);
     expect((result.outputs?.[0]?.entityTxs?.[0]?.data as any).binary).toBe(binary);
     expect((result.outputs?.[0]?.entityTxs?.[1]?.data as any).counterpartyEntityId).toBe(targetHub);
@@ -5808,15 +5807,18 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(starterInitialArguments.length).toBeGreaterThan(2);
 
     let chainedState = state;
+    const nestedOutputs: EntityInput[] = [];
     for (const entityTx of result.outputs?.[0]?.entityTxs ?? []) {
       const applied = await applyEntityTx(env, chainedState, entityTx);
       chainedState = applied.newState;
+      nestedOutputs.push(...(applied.outputs ?? []));
       for (const op of applied.mempoolOps ?? []) {
         const account = chainedState.accounts.get(op.accountId);
         expect(account, `mempool op account ${op.accountId.slice(-4)} must exist`).toBeDefined();
         account?.mempool.push(op.tx);
       }
     }
+    expect(nestedOutputs.flatMap(output => output.entityTxs).map(tx => tx.type)).toEqual(['j_broadcast']);
     const draftDisputeStarts = chainedState.jBatchState?.batch.disputeStarts ?? [];
     const sentDisputeStarts = chainedState.jBatchState?.sentBatch?.batch.disputeStarts ?? [];
     expect([...draftDisputeStarts, ...sentDisputeStarts]).toHaveLength(1);
@@ -5953,10 +5955,11 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(outputs[0]?.entityId).toBe(fixture.sourceUser);
     expect(outputs[0]?.signerId).toBe(fixture.sourceSigner);
     expect(outputs[0]?.entityTxs?.[0]).toEqual({
-      type: 'disputeStart',
+      type: 'prepareDispute',
       data: {
         counterpartyEntityId: fixture.sourceHub,
         crossJurisdictionRouteId: active.orderId,
+        description: `Cross-j source dispute prepare ${active.orderId}`,
       },
     });
   });
@@ -6127,7 +6130,7 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     const sourceOutput = result!.outputs.find(output => output.entityId === sourceUser);
     expect(sourceOutput?.signerId).toBe(sourceSigner);
-    expect(sourceOutput?.entityTxs?.map(tx => tx.type)).toEqual(['disputeStart']);
+    expect(sourceOutput?.entityTxs?.map(tx => tx.type)).toEqual(['prepareDispute']);
     expect((sourceOutput?.entityTxs?.[0]?.data as any).counterpartyEntityId).toBe(sourceHub);
     expect((sourceOutput?.entityTxs?.[0]?.data as any).crossJurisdictionRouteId).toBe(route.orderId);
   });
@@ -6153,6 +6156,19 @@ describe('cross-jurisdiction hashledger swap', () => {
         crossJurisdictionRouteId: 'missing-route',
       },
     })).rejects.toThrow('DISPUTE_START_CROSS_J_ROUTE_MISSING:missing-route');
+  });
+
+  test('route-bound disputeStart rejects a route from another bilateral account', async () => {
+    const fixture = makeTargetDisputeRouteSelectionFixture('cross-route-bound-role-mismatch');
+    const route = fixture.buildRoute('wrong-target-account', { targetHub: entity('99') });
+    fixture.state.crossJurisdictionSwaps?.set(route.orderId, route);
+    await expect(applyEntityTx(fixture.env, fixture.state, {
+      type: 'disputeStart',
+      data: {
+        counterpartyEntityId: fixture.targetHub,
+        crossJurisdictionRouteId: route.orderId,
+      },
+    })).rejects.toThrow(`DISPUTE_START_CROSS_J_ROUTE_ROLE_MISMATCH:${route.orderId}`);
   });
 
   test('production cross-j API exposes only hashledger orderbook flow', async () => {

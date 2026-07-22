@@ -50,10 +50,13 @@ export interface HtlcLock {
   createdHeight: number;       // AccountFrame height when created
   createdTimestamp: number;    // When lock was added (for logging)
 
-  // Onion routing envelope (cleartext JSON in Phase 2, encrypted in Phase 3)
-  envelope?: import('../protocol/htlc/envelope').HtlcEnvelope
-    | import('../protocol/htlc/multi-recipient').MultiRecipientCiphertext
-    | string;
+  /**
+   * Integrity binding for the encrypted onion carried by the signed AccountTx.
+   * The full ciphertext is transient frame input and must not inflate durable
+   * Account state.
+   */
+  envelopeHash?: string;
+
   /** Opaque beneficiary offer, decryptable only by the payer's default proposer. */
   secretOffer?: import('../protocol/htlc/multi-recipient').MultiRecipientCiphertext;
 }
@@ -340,6 +343,16 @@ export interface AccountMachine {
     startedAt: number;
     readyAfter: number;
     reason: string;
+    /** Cross-Entity book rows that must confirm removal before disputeStart. */
+    pendingOrderbookRemovalIds?: string[];
+    /** Exact start request retained until every asynchronous cleanup ACK commits. */
+    startIntent?: {
+      crossJurisdictionRouteId?: string;
+      starterInitialArguments?: string;
+      description?: string;
+      allowUnsafeCrossJTargetDispute?: boolean;
+      acceptedCrossJTargetLossAmount?: bigint;
+    };
   };
 
   // ON-CHAIN NONCE: Tracks the nonce stored on-chain

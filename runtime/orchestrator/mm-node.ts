@@ -389,8 +389,8 @@ const MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_CROSS_LEVELS_PER_PAIR = Math.max(
   1,
-  // Keep default cross depth small for bootstrap speed; account frames can now
-  // carry 1000 txs, and MAX_ACCOUNT_SWAP_OFFERS bounds env-driven depth.
+  // Account storage is bounded by encoded bytes, not frame transaction count.
+  // buildMarketMakerCrossOfferSpecs also caps aggregate levels per Account.
   Math.min(1000, Number(process.env['MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '3')),
 );
 const MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE = Math.max(
@@ -1128,6 +1128,39 @@ const getMarketMakerOfferLevel = (spec: Pick<MarketMakerOfferSpec, 'offerId'>): 
   return Number.isFinite(level) && level > 0 ? Math.floor(level) : Number.MAX_SAFE_INTEGER;
 };
 
+const selectByteBudgetedCrossSpecs = (
+  specs: readonly MarketMakerOfferSpec[],
+): MarketMakerOfferSpec[] => {
+  const routes = specs.map(spec => spec.crossJurisdiction).filter((route): route is CrossJurisdictionSwapRoute => Boolean(route));
+  if (routes.length === 0) return [];
+  const ordered = [...specs].sort((left, right) =>
+    getMarketMakerOfferLevel(left) - getMarketMakerOfferLevel(right) ||
+    compareStableText(left.pairId, right.pairId) ||
+    compareStableText(left.offerId, right.offerId));
+  const sourceTokens = routes.map(route => route.source.tokenId);
+  const targetTokens = routes.map(route => route.target.tokenId);
+  const minSource = Math.min(...sourceTokens);
+  const maxSource = Math.max(...sourceTokens);
+  const minTarget = Math.min(...targetTokens);
+  const maxTarget = Math.max(...targetTokens);
+  const selected: MarketMakerOfferSpec[] = [];
+  const take = (matches: (route: CrossJurisdictionSwapRoute) => boolean): void => {
+    const spec = ordered.find(candidate => {
+      const route = candidate.crossJurisdiction;
+      return !selected.includes(candidate) && Boolean(route && matches(route));
+    });
+    if (spec) selected.push(spec);
+  };
+  take(route => route.source.tokenId === minSource && route.target.tokenId === minTarget);
+  take(route => route.source.tokenId === maxSource);
+  take(route => route.target.tokenId === maxTarget);
+  for (const spec of ordered) {
+    if (selected.length >= LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS) break;
+    if (!selected.includes(spec)) selected.push(spec);
+  }
+  return selected.slice(0, LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS);
+};
+
 export const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]): MarketMakerOfferSpec[] => {
   const specs: MarketMakerOfferSpec[] = [];
   const defaultPairs = buildDefaultEntitySwapPairs(tokenIds);
@@ -1148,7 +1181,7 @@ export const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: num
     });
     const maxLevelsByAccountLimit = Math.max(
       1,
-      Math.floor(LIMITS.MAX_ACCOUNT_SWAP_OFFERS / Math.max(1, pairContexts.length * 2)),
+      Math.floor(LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS / Math.max(1, pairContexts.length * 2)),
     );
     const maxLevels = Math.min(
       MARKET_MAKER_MAX_LEVELS_PER_PAIR,
@@ -1338,6 +1371,7 @@ export const buildMarketMakerCrossOfferSpecs = (
     const sourceHubSuffix = sourceHub.entityId.slice(-6).toLowerCase();
     const targetHubSuffix = targetHub.entityId.slice(-6).toLowerCase();
 
+    const hubSpecStart = specs.length;
     for (const pair of crossPairs) {
       const market = deriveCanonicalCrossJurisdictionMarketForLegs(
         sourceJurisdictionRef,
@@ -1352,7 +1386,10 @@ export const buildMarketMakerCrossOfferSpecs = (
         : getSwapPairOrientation(pair.sourceTokenId, pair.targetTokenId);
       const pairPolicy = getSwapPairPolicyByBaseQuote(oriented.baseTokenId, oriented.quoteTokenId);
       const levelProfile = getMarketMakerLevelProfile(oriented.baseTokenId, oriented.quoteTokenId);
-      const levelCount = Math.min(MARKET_MAKER_CROSS_LEVELS_PER_PAIR, levelProfile.offsetsBps.length);
+      const levelCount = Math.min(
+        MARKET_MAKER_CROSS_LEVELS_PER_PAIR,
+        levelProfile.offsetsBps.length,
+      );
 
       for (let level = 0; level < levelCount; level += 1) {
         const offsetBps = levelProfile.offsetsBps[level]!;
@@ -1450,6 +1487,8 @@ export const buildMarketMakerCrossOfferSpecs = (
         }
       }
     }
+    const hubSpecs = specs.splice(hubSpecStart);
+    specs.push(...selectByteBudgetedCrossSpecs(hubSpecs));
   }
 
   return specs;
@@ -2137,7 +2176,10 @@ const buildMarketMakerCrossPlanSummary = (
     applicable: expectedRoutes > 0,
     expectedJobs,
     expectedRoutes,
-    expectedOffersPerRoute: maxPairsPerRoute * expectedOffersPerPair,
+    expectedOffersPerRoute: Math.min(
+      LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS,
+      maxPairsPerRoute * expectedOffersPerPair,
+    ),
     expectedOffersPerPair,
   };
 };
@@ -2164,10 +2206,7 @@ export const buildMarketMakerCrossHealth = (
         const specs = expectedByPair.get(pairId) ?? [];
         const expected = group.expectedPairs.get(pairId) ?? null;
         const offers = specs.filter(spec => hasFinalizedMarketMakerCrossOffer(env, spec)).length;
-        const expectedOffers = Math.max(
-          specs.length,
-          expected ? MARKET_MAKER_CROSS_LEVELS_PER_PAIR : 0,
-        );
+        const expectedOffers = specs.length;
         const sourceTokenIds = expected?.sourceTokenIds?.length
           ? expected.sourceTokenIds
           : normalizePositiveTokenIds(specs.map(spec => spec.crossJurisdiction?.source.tokenId ?? 0));
@@ -2213,13 +2252,12 @@ export const buildMarketMakerCrossHealth = (
 
   const expectedOffersPerRoute = expectedRouteCount > 0
     ? Math.max(0, ...Array.from(routeGroups.values()).map(group =>
-        Math.max(group.specs.length, group.expectedPairs.size * MARKET_MAKER_CROSS_LEVELS_PER_PAIR),
+        group.specs.length,
       ))
     : 0;
-  const expectedOffersPerPair = expectedRouteCount > 0 ? Math.max(MARKET_MAKER_CROSS_LEVELS_PER_PAIR, ...Array.from(routeGroups.values()).flatMap((group) => {
+  const expectedOffersPerPair = expectedRouteCount > 0 ? Math.max(0, ...Array.from(routeGroups.values()).flatMap((group) => {
     const counts = new Map<string, number>();
     for (const spec of group.specs) counts.set(spec.pairId, (counts.get(spec.pairId) || 0) + 1);
-    for (const pairId of group.expectedPairs.keys()) counts.set(pairId, Math.max(counts.get(pairId) || 0, MARKET_MAKER_CROSS_LEVELS_PER_PAIR));
     return Array.from(counts.values());
   })) : 0;
 

@@ -1890,18 +1890,18 @@ export async function ahb(env: Env): Promise<void> {
   // H10 AUDIT FIX: Verify solvency BEFORE dispute starts
   checkSolvency(env, TOTAL_SOLVENCY, 'PHASE 7 PRE-DISPUTE');
 
-  // 1) Bob creates disputeStart entity tx
-  console.log('\n📝 STEP 1: Bob creates disputeStart entity tx...');
+  // 1) Bob freezes the bilateral lane and removes any Account-owned book rows.
+  console.log('\n📝 STEP 1: Bob prepares dispute...');
   await process(env, [{
     entityId: bob.id,
     signerId: bob.signer,
     entityTxs: [{
-      type: 'disputeStart',
+      type: 'prepareDispute',
       data: {
         counterpartyEntityId: hub.id,
-        description: 'Enforce collateral after non-cooperative Hub'
-      }
-    }]
+        description: 'Enforce collateral after non-cooperative Hub',
+      },
+    }],
   }]);
 
   // 2) Bob broadcasts to J-machine
@@ -2176,19 +2176,17 @@ export async function ahb(env: Env): Promise<void> {
   };
 
   await reopenBobHub('phase8');
-  const edgeDisputeStartTx = {
-    type: 'disputeStart' as const,
-    data: {
-      counterpartyEntityId: hub.id,
-      description: 'Edge-case dispute start',
-    },
-  };
-
   // Start a fresh dispute (Bob starts again)
   await process(env, [{
     entityId: bob.id,
     signerId: bob.signer,
-    entityTxs: [edgeDisputeStartTx]
+    entityTxs: [{
+      type: 'prepareDispute',
+      data: {
+        counterpartyEntityId: hub.id,
+        description: 'Edge-case dispute prepare',
+      },
+    }],
   }]);
 
   let [, bobAfterEdgeStartAttempt] = findReplica(env, bob.id);

@@ -107,23 +107,13 @@ export function buildOpenAccountTx(targetEntityId: string, rebalancePolicy?: Ope
   };
 }
 
-export function buildPrepareDisputeTx(counterpartyEntityId: string, description?: string): EntityTxOf<'prepareDispute'> {
-  return {
-    type: 'prepareDispute',
-    data: {
-      counterpartyEntityId,
-      ...(description !== undefined ? { description } : {}),
-    },
-  };
-}
-
-export function buildDisputeStartTx(
+export function buildPrepareDisputeTx(
   counterpartyEntityId: string,
   description?: string,
   options: DisputeStartOptions = {},
-): EntityTxOf<'disputeStart'> {
+): EntityTxOf<'prepareDispute'> {
   return {
-    type: 'disputeStart',
+    type: 'prepareDispute',
     data: {
       counterpartyEntityId,
       ...(description !== undefined ? { description } : {}),

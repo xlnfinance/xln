@@ -35,7 +35,7 @@ export const handleCrossJurisdictionSalvageEntityTx = (
   entityState: EntityState,
   entityTx: CrossJurisdictionSalvageTx,
 ): CrossJurisdictionSalvageResult => {
-  const { routeId, binary, fillRatio, sourceEntityId, sourceCounterpartyEntityId, observedAt } = entityTx.data;
+  const { routeId, binary, fillRatio, sourceEntityId, sourceCounterpartyEntityId } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
   const claimedFillRatio = Math.floor(Number(fillRatio) || 0);
@@ -122,17 +122,14 @@ export const handleCrossJurisdictionSalvageEntityTx = (
         },
       },
       {
-        type: 'disputeStart',
+        type: 'prepareDispute',
         data: {
           counterpartyEntityId: targetHubEntityId,
+          description: `Cross-j salvage prepare ${routeId}`,
+          crossJurisdictionRouteId: routeId,
           starterInitialArguments: buildCrossJurisdictionStarterPullArguments(binary),
-          description:
-            `Cross-j salvage ${routeId} fill=${verifiedFillRatio}/${CROSS_J_MAX_FILL_RATIO} ` +
-            `source=${sourceEntityId.slice(-4)}:${sourceCounterpartyEntityId.slice(-4)}` +
-            (observedAt ? ` observed=${observedAt}` : ''),
         },
       },
-      { type: 'j_broadcast', data: {} },
     ],
   });
   addMessage(newState, `🌉 Cross-j salvage queued for ${routeId}: target dispute vs ${targetHubEntityId.slice(-4)}`);

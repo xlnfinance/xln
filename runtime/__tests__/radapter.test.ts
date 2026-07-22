@@ -38,6 +38,7 @@ import {
   MAX_ACTIVE_RUNTIME_ADAPTER_COMMAND_LANES,
 } from '../radapter/command-frontier';
 import { decodeBuffer, encodeBuffer } from '../storage/codec';
+import { prepareAccountStorageLayout } from '../storage/account-layout';
 import { MAX_PERSISTED_MERKLE_NODE_BYTES, prepareStorageStateHashes } from '../storage/hashes';
 import { verifyLiveStorageIntegrity } from '../storage/live-integrity';
 import {
@@ -57,6 +58,7 @@ import {
   textBytes,
 } from '../storage/keys';
 import { projectAccountDoc, projectEntityCoreDoc, projectEntityReplicaCoreView } from '../storage/projections';
+import { withRebranchedValues } from '../storage/rebranched-db';
 import { loadEntityAccountDocFromStorage, loadEntityStateFromStorage, loadEntityViewPageFromStorage } from '../storage/read';
 import type {
   RuntimeDbLike,
@@ -2693,6 +2695,52 @@ test('storage live recovery verifies doc values through merkle leaves', async ()
     if (previous === undefined) delete process.env['XLN_STORAGE_VERIFY_DOC_HASHES'];
     else process.env['XLN_STORAGE_VERIFY_DOC_HASHES'] = previous;
   }
+});
+
+test('storage live recovery hydrates a typed split Account through its logical layout', async () => {
+  const env = makeEnv();
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  const account = replica.state.accounts.get(counterpartyId)!;
+  account.pendingSignatures = Array.from(
+    { length: 160 },
+    (_, index) => `signature-${index.toString().padStart(3, '0')}-${'ab'.repeat(48)}`,
+  );
+  const head: StorageHead = {
+    schemaVersion: STORAGE_SCHEMA_VERSION,
+    latestHeight: env.height,
+    latestMaterializedHeight: env.height,
+    latestSnapshotHeight: 0,
+    snapshotPeriodFrames: 256,
+    retainSnapshots: 3,
+    epochMaxBytes: 1,
+    accountMerkleRadix: 16,
+    retainedHistoryBytes: 0,
+  };
+  const rawDb = makeMemoryDb([
+    [KEY_HEAD, encodeBuffer(head)],
+    [keyLiveEntity(entityId), encodeBuffer(projectEntityCoreDoc(replica.state))],
+  ]);
+  const db = withRebranchedValues(rawDb);
+  const layout = await prepareAccountStorageLayout(
+    db,
+    entityId,
+    counterpartyId,
+    keyLiveAccount(entityId, counterpartyId),
+    projectAccountDoc(account),
+  );
+  expect(layout.representation).toBe('fields');
+  const batch = db.batch();
+  for (const key of layout.dels) batch.del?.(key);
+  for (const put of layout.puts) batch.put(put.key, put.value);
+  await batch.write();
+
+  const restored = await loadEntityStateFromStorage({
+    env,
+    tryOpenDb: async () => true,
+    getRuntimeDb: () => db,
+    entityId,
+  });
+  expect(restored?.accounts.get(counterpartyId)?.pendingSignatures).toEqual(account.pendingSignatures);
 });
 
 test('storage live recovery rejects live docs that do not match merkle leaf value hashes', async () => {

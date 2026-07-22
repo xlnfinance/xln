@@ -1,7 +1,7 @@
 import { keccak256 } from 'ethers';
 
 import { HTLC } from '../../constants';
-import type { AccountMachine, EntityState, EntityTx, Env, HtlcLock } from '../../types';
+import type { AccountMachine, AccountTx, EntityState, EntityTx, Env, HtlcLock } from '../../types';
 import { encodeCanonicalEntityConsensusValue } from '../../entity/consensus/state-root';
 import {
   getCertifiedBoardNodeStore,
@@ -22,6 +22,21 @@ import {
 import { hashHtlcSecret } from './utils';
 
 export type HtlcOnionAdvanceTx = Extract<EntityTx, { type: 'htlcOnionAdvance' }>;
+export type HtlcEncryptedEnvelope = HtlcEnvelope | MultiRecipientCiphertext | string | undefined;
+
+export const committedHtlcLockEnvelope = (
+  account: AccountMachine,
+  lockId: string,
+): HtlcEncryptedEnvelope => {
+  for (const frame of [account.pendingFrame, account.currentFrame]) {
+    const tx = frame?.accountTxs.find(candidate =>
+      candidate.type === 'htlc_lock' && candidate.data.lockId === lockId) as
+      | Extract<AccountTx, { type: 'htlc_lock' }>
+      | undefined;
+    if (tx?.data.envelope !== undefined) return tx.data.envelope;
+  }
+  return undefined;
+};
 
 const exactKeys = (value: object, expected: readonly string[], code: string): void => {
   const actual = Object.keys(value).sort();
@@ -54,7 +69,7 @@ const normalizePositiveBigInt = (value: unknown, code: string): bigint => {
   return normalized;
 };
 
-export const encryptedHtlcLayer = (envelope: HtlcLock['envelope']): MultiRecipientCiphertext | null => {
+export const encryptedHtlcLayer = (envelope: HtlcEncryptedEnvelope): MultiRecipientCiphertext | null => {
   if (isMultiRecipientCiphertext(envelope)) return envelope;
   if (envelope && typeof envelope === 'object' && !Array.isArray(envelope)) {
     return isMultiRecipientCiphertext(envelope.innerEnvelope) ? envelope.innerEnvelope : null;
@@ -75,12 +90,12 @@ const accountAndLock = (
   state: EntityState,
   inboundEntityId: string,
   inboundLockId: string,
-): { account: AccountMachine; lock: HtlcLock } => {
+): HtlcLock => {
   const account = state.accounts.get(inboundEntityId);
   if (!account) throw new Error('HTLC_ONION_ADVANCE_INBOUND_ACCOUNT_MISSING');
   const lock = account.locks.get(inboundLockId);
   if (!lock) throw new Error('HTLC_ONION_ADVANCE_INBOUND_LOCK_MISSING');
-  return { account, lock };
+  return lock;
 };
 
 const layerContextHash = (state: EntityState, lock: HtlcLock): string =>
@@ -148,8 +163,9 @@ export const validateLocalCommittedHtlcLayer = async (
   env: Env,
   state: EntityState,
   lock: HtlcLock,
+  envelope: HtlcEncryptedEnvelope,
 ): Promise<MultiRecipientCiphertext> => {
-  const layer = encryptedHtlcLayer(lock.envelope);
+  const layer = encryptedHtlcLayer(envelope);
   if (!layer) throw new Error(`HTLC_ENCRYPTED_LAYER_REQUIRED:${lock.lockId}`);
   validateMultiRecipientCiphertext(
     layer,
@@ -302,7 +318,7 @@ export const validateHtlcOnionAdvanceTx = async (
   const live = tx.data.advance.kind === 'revealAccepted'
     ? null
     : accountAndLock(state, inboundEntityId, inboundLockId);
-  const lock = live?.lock;
+  const lock = live;
   const encryptedLayerHash = normalizeBytes32(
     tx.data.encryptedLayerHash,
     'HTLC_ONION_ADVANCE_LAYER_HASH_INVALID',
@@ -329,6 +345,17 @@ export const validateHtlcOnionAdvanceTx = async (
     }
   }
 
+  // The proposer decrypts the committed AccountTx onion once and publishes a
+  // signed deterministic advance. Validators bind that advance to the exact
+  // ciphertext through the hash retained in bilateral Account state; keeping
+  // the full nested onion in every subsequent Account snapshot is unnecessary.
+  const validateCommittedLayerHash = (): void => {
+    if (!lock?.envelopeHash) throw new Error('HTLC_ONION_ADVANCE_LAYER_HASH_MISSING');
+    if (encryptedLayerHash !== lock.envelopeHash.toLowerCase()) {
+      throw new Error('HTLC_ONION_ADVANCE_LAYER_HASH_MISMATCH');
+    }
+  };
+
   let advance: HtlcOnionAdvanceTx['data']['advance'];
   if (tx.data.advance.kind === 'final') {
     if (!lock) throw new Error('HTLC_ONION_ADVANCE_INBOUND_LOCK_MISSING');
@@ -337,10 +364,7 @@ export const validateHtlcOnionAdvanceTx = async (
       ...(tx.data.advance.description !== undefined ? ['description'] : []),
       ...(tx.data.advance.startedAtMs !== undefined ? ['startedAtMs'] : []),
     ], 'HTLC_ONION_ADVANCE_FINAL_FIELDS_INVALID');
-    const layer = await validateLocalCommittedHtlcLayer(env, state, lock);
-    if (encryptedLayerHash !== hashEncryptedHtlcLayer(layer)) {
-      throw new Error('HTLC_ONION_ADVANCE_LAYER_HASH_MISMATCH');
-    }
+    validateCommittedLayerHash();
     const secretOffer = await validateHtlcSecretOfferForLock(
       env,
       state,
@@ -436,10 +460,7 @@ export const validateHtlcOnionAdvanceTx = async (
       ['kind', 'nextHop', 'forwardAmount', 'innerEnvelope'],
       'HTLC_ONION_ADVANCE_FORWARD_FIELDS_INVALID',
     );
-    const layer = await validateLocalCommittedHtlcLayer(env, state, lock);
-    if (encryptedLayerHash !== hashEncryptedHtlcLayer(layer)) {
-      throw new Error('HTLC_ONION_ADVANCE_LAYER_HASH_MISMATCH');
-    }
+    validateCommittedLayerHash();
     const nextHop = normalizeEntityId(tx.data.advance.nextHop, 'HTLC_ONION_ADVANCE_NEXT_HOP_INVALID');
     const forwardAmount = normalizePositiveBigInt(
       tx.data.advance.forwardAmount,

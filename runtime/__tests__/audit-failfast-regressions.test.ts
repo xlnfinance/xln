@@ -75,7 +75,10 @@ import { applyEntityTx } from '../entity/tx/apply';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity/tx/handlers/account-cross-j-followups';
 import { buildCrossJurisdictionEntityOutput } from '../entity/tx/cross-j-outputs';
 import { handleHtlcOnionAdvance } from '../entity/tx/handlers/htlc-onion-advance';
-import { handleAdmitCrossJurisdictionBookOrderEntityTx } from '../entity/tx/handlers/cross-j-book-order';
+import {
+  handleAdmitCrossJurisdictionBookOrderEntityTx,
+  handleCrossJurisdictionBookOrderRemovedEntityTx,
+} from '../entity/tx/handlers/cross-j-book-order';
 import type { SwapOfferEvent } from '../entity/tx/handlers/account';
 import { handleDisputeFinalize, handleDisputeStart, handlePrepareDispute } from '../entity/tx/handlers/dispute';
 import { handleJAbortSentBatch } from '../entity/tx/handlers/j-abort-sent-batch';
@@ -144,7 +147,7 @@ import {
   computeHtlcSecretOfferContextHash,
 } from '../protocol/htlc/envelope';
 import { encryptBytesForValidatorManifest } from '../protocol/htlc/multi-recipient';
-import { buildHtlcOnionAdvanceTx } from '../protocol/htlc/onion-advance';
+import { buildHtlcOnionAdvanceTx, hashEncryptedHtlcLayer } from '../protocol/htlc/onion-advance';
 import { encodeHtlcSecretOffer, encodeOnionLayer } from '../protocol/htlc/onion-codec';
 import {
   computeEntityProfileCertificationHash,
@@ -8149,7 +8152,7 @@ describe('audit fail-fast regressions', () => {
       .toThrow('CROSS_J_PRICE_IMPROVEMENT_MODE_UNSUPPORTED:target-bonus-unsupported:target_bonus');
   });
 
-  test('disputeStart removes same-account orderbook rows before freezing the account', async () => {
+  test('prepareDispute removes same-account orderbook rows before disputeStart', async () => {
     const env = createEmptyEnv('dispute-start-orderbook-freeze');
     const hubId = `0x${'90'.repeat(32)}`;
     const userId = `0x${'91'.repeat(32)}`;
@@ -8190,10 +8193,10 @@ describe('audit fail-fast regressions', () => {
       referrals: new Map(),
     } as unknown as OrderbookExtState;
 
-    const result = await handleDisputeStart(
+    const result = await handlePrepareDispute(
       hubState,
       {
-        type: 'disputeStart',
+        type: 'prepareDispute',
         data: { counterpartyEntityId: userId },
       },
       env,
@@ -8204,7 +8207,7 @@ describe('audit fail-fast regressions', () => {
     expect(result.newState.messages.some((msg) => msg.includes('Dispute removed 1 local orderbook row'))).toBe(true);
   });
 
-  test('disputeStart routes remote cross-j removal from the committed book signer', async () => {
+  test('prepareDispute routes remote cross-j removal from the committed book signer', async () => {
     const env = createEmptyEnv('dispute-start-cross-j-remote-book');
     env.timestamp = 10_000;
     env.quietRuntimeLogs = true;
@@ -8257,10 +8260,12 @@ describe('audit fail-fast regressions', () => {
       crossJurisdiction: route,
     });
     state.accounts.set(sourceUser, account);
+    state.crossJurisdictionSwaps = new Map([[offerId, route]]);
+    mergeCrossJurisdictionBookAdmission(state, route, env.timestamp).status = 'admitted';
 
-    const result = await handleDisputeStart(
+    const result = await handlePrepareDispute(
       state,
-      { type: 'disputeStart', data: { counterpartyEntityId: sourceUser } },
+      { type: 'prepareDispute', data: { counterpartyEntityId: sourceUser } },
       env,
     );
 
@@ -8270,9 +8275,28 @@ describe('audit fail-fast regressions', () => {
       signerId: 'committed-book-owner-signer',
       entityTxs: [{
         type: 'removeCrossJurisdictionBookOrder',
-        data: { orderId: offerId, sourceEntityId: sourceUser, reason: 'account_dispute_start' },
+        data: { orderId: offerId, sourceEntityId: sourceUser, reason: 'account_dispute_prepare' },
       }],
     });
+
+    const afterAck = await handleCrossJurisdictionBookOrderRemovedEntityTx(
+      env,
+      result.newState,
+      {
+        type: 'crossJurisdictionBookOrderRemoved',
+        data: {
+          orderId: offerId,
+          sourceEntityId: sourceUser,
+          sourceAccountId: sourceUser,
+          route,
+          removedAt: env.timestamp,
+          reason: 'account_dispute_prepare',
+        },
+      },
+    );
+    const preparedAccount = afterAck.newState.accounts.get(sourceUser)!;
+    expect(preparedAccount.disputePrepare?.pendingOrderbookRemovalIds).toBeUndefined();
+    expect(afterAck.newState.messages.some((msg) => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
   });
 
   test('prepareDispute freezes account and removes orderbook rows without queuing on-chain disputeStart', async () => {
@@ -8368,12 +8392,17 @@ describe('audit fail-fast regressions', () => {
       createdAt: BigInt(hubState.timestamp),
     });
 
-    const result = await handleDisputeStart(
+    const prepared = await handlePrepareDispute(
       hubState,
       {
-        type: 'disputeStart',
+        type: 'prepareDispute',
         data: { counterpartyEntityId: userId },
       },
+      env,
+    );
+    const result = await handleDisputeStart(
+      prepared.newState,
+      { type: 'disputeStart', data: { counterpartyEntityId: userId } },
       env,
     );
 
@@ -8401,12 +8430,17 @@ describe('audit fail-fast regressions', () => {
       createdTimestamp: hubState.timestamp,
     });
 
-    const result = await handleDisputeStart(
+    const prepared = await handlePrepareDispute(
       hubState,
       {
-        type: 'disputeStart',
+        type: 'prepareDispute',
         data: { counterpartyEntityId: userId },
       },
+      env,
+    );
+    const result = await handleDisputeStart(
+      prepared.newState,
+      { type: 'disputeStart', data: { counterpartyEntityId: userId } },
       env,
     );
 
@@ -8602,7 +8636,7 @@ describe('audit fail-fast regressions', () => {
       senderIsLeft: true,
       createdHeight: 1,
       createdTimestamp: hubState.timestamp,
-      envelope: encryptedLayer,
+      envelopeHash: hashEncryptedHtlcLayer(encryptedLayer),
     });
     hubState.accounts.set(payerId, accountMachine);
     const lock = accountMachine.locks.get(lockId);
@@ -8645,12 +8679,17 @@ describe('audit fail-fast regressions', () => {
       ], hubId, userId),
     );
 
-    const result = await handleDisputeStart(
+    const prepared = await handlePrepareDispute(
       hubState,
       {
-        type: 'disputeStart',
+        type: 'prepareDispute',
         data: { counterpartyEntityId: userId },
       },
+      env,
+    );
+    const result = await handleDisputeStart(
+      prepared.newState,
+      { type: 'disputeStart', data: { counterpartyEntityId: userId } },
       env,
     );
 
@@ -8715,8 +8754,16 @@ describe('audit fail-fast regressions', () => {
       ], hubId, userId),
     );
 
-    const result = await handleDisputeStart(
+    const prepared = await handlePrepareDispute(
       hubState,
+      {
+        type: 'prepareDispute',
+        data: { counterpartyEntityId: userId },
+      },
+      env,
+    );
+    const result = await handleDisputeStart(
+      prepared.newState,
       {
         type: 'disputeStart',
         data: { counterpartyEntityId: userId, starterInitialArguments },
@@ -8809,12 +8856,17 @@ describe('audit fail-fast regressions', () => {
     account.pendingAccountInputSignerId = 'fixture-counterparty-signer';
     hubState.accounts.set(userId, account);
 
-    const result = await handleDisputeStart(
+    const prepared = await handlePrepareDispute(
       hubState,
       {
-        type: 'disputeStart',
+        type: 'prepareDispute',
         data: { counterpartyEntityId: userId },
       },
+      env,
+    );
+    const result = await handleDisputeStart(
+      prepared.newState,
+      { type: 'disputeStart', data: { counterpartyEntityId: userId } },
       env,
     );
 

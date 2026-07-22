@@ -1,8 +1,7 @@
 import { ethers } from 'ethers';
-import type { AccountMachine, AccountTx, EntityState } from '../../types';
+import type { AccountMachine, EntityState } from '../../types';
 import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
-import { asOfferId, type OfferId } from '../../orderbook/swap-keys';
-import { exactFillRatioToUint16, reduceExactFillRatio } from '../../orderbook/swap-execution';
+import { asOfferId, swapKey, type OfferId } from '../../orderbook/swap-keys';
 import { sortTransformerEntries } from '../transformer-ordering';
 import { decodeHashLadderBinary } from '../htlc/hash-ladder';
 import {
@@ -31,8 +30,6 @@ export type DisputeArgumentSnapshot = {
   side: DisputeArgumentSide;
   proofBodyStruct: ProofBodyStruct;
   plan: DisputeArgumentPlan;
-  appliedFrameHeight?: number;
-  appliedSwapFillFingerprints?: string[];
 };
 
 type PullArgumentBuckets = { binaries: string[] };
@@ -70,112 +67,16 @@ const hashHtlcSecret = (secret: string): string => {
   return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(['bytes32'], [secret])).toLowerCase();
 };
 
-const swapFillFingerprint = (tx: Extract<AccountTx, { type: 'swap_resolve' }>): string => {
-  const data = tx.data;
-  // A proof snapshot records fills already applied to that proof body. While
-  // building dispute calldata later, the same pending frame may still be
-  // present locally. We use this economic fingerprint only together with the
-  // applied frame height; value alone is not identity because two later fills can
-  // legitimately have identical amounts.
-  //
-  // Counterexample: hub sends 50%, then later signs a state where total progress
-  // is 75%, while the user is offline. If the 50% tx remains in pendingFrame and
-  // we blindly rebuild args, the 75% proof would receive the 50% residual again.
-  // The contract would see valid calldata, but it would settle the wrong amount.
-  return [
-    data.offerId,
-    data.fillRatio,
-    data.fillNumerator?.toString() ?? '',
-    data.fillDenominator?.toString() ?? '',
-    data.executionGiveAmount?.toString() ?? '',
-    data.executionWantAmount?.toString() ?? '',
-    data.cancelRemainder ? '1' : '0',
-  ].join('|');
-};
-
-const collectAppliedSwapFillFingerprints = (accountTxs: readonly AccountTx[] | undefined): string[] => {
-  if (!accountTxs?.length) return [];
-  const fingerprints: string[] = [];
-  for (const tx of accountTxs) {
-    if (tx.type !== 'swap_resolve') continue;
-    fingerprints.push(swapFillFingerprint(tx));
-  }
-  return fingerprints;
-};
-
-const optionalSwapResolveFillRatio = (
-  tx: Extract<AccountTx, { type: 'swap_resolve' }>,
-): number | null => {
-  const data = tx.data;
-  const hasExactNumerator = data.fillNumerator !== undefined;
-  const hasExactDenominator = data.fillDenominator !== undefined;
-  if (hasExactNumerator !== hasExactDenominator) return null;
-  if (!hasExactNumerator || !hasExactDenominator) {
-    return clampFillRatio(data.fillRatio);
-  }
-  if (
-    typeof data.fillNumerator !== 'bigint' ||
-    typeof data.fillDenominator !== 'bigint' ||
-    data.fillDenominator <= 0n
-  ) return null;
-
-  const projected = exactFillRatioToUint16(
-    reduceExactFillRatio(data.fillNumerator!, data.fillDenominator!),
-  );
-  const committed = clampFillRatio(data.fillRatio);
-  return committed === projected ? projected : null;
-};
-
 const buildPendingSwapFillRatios = (
-  account: AccountMachine,
+  entityState: EntityState,
+  counterpartyEntityId: string,
   snapshot: DisputeArgumentSnapshot,
 ): Map<OfferId, number> => {
   const ratios = new Map<OfferId, number>();
-  const invalidOffers = new Set<OfferId>();
-  const { plan } = snapshot;
-  const planned = new Set([...plan.leftSwapOfferIds, ...plan.rightSwapOfferIds]);
-  if (planned.size === 0) return ratios;
-  const alreadyApplied = new Set(snapshot.appliedSwapFillFingerprints ?? []);
-  const pendingFrameHeight = account.pendingFrame?.height;
-  const pendingFrameTxs = account.pendingFrame?.accountTxs ?? [];
-  const shouldSkipAppliedPendingFrame =
-    snapshot.appliedFrameHeight !== undefined &&
-    pendingFrameHeight === snapshot.appliedFrameHeight;
-  const recordOptionalFill = (
-    tx: Extract<AccountTx, { type: 'swap_resolve' }>,
-    fromAppliedPendingFrame: boolean,
-  ): void => {
-    if (!planned.has(tx.data.offerId)) return;
-    const offerId = asOfferId(tx.data.offerId);
-    const fingerprint = swapFillFingerprint(tx);
-    if (fromAppliedPendingFrame && alreadyApplied.has(fingerprint)) return;
-    if (
-      snapshot.appliedFrameHeight === undefined &&
-      alreadyApplied.has(fingerprint)
-    ) {
-      invalidOffers.add(offerId);
-      ratios.delete(offerId);
-      return;
-    }
-    const ratio = optionalSwapResolveFillRatio(tx);
-    if (ratio === null || invalidOffers.has(offerId) || ratios.has(offerId)) {
-      // Optional evidence for one offer must never hold the whole account
-      // hostage. Partial exact ratios, coarse/exact drift, or two competing
-      // fills prove nothing for this offer. Other positional offers remain
-      // usable, while the signed ProofBody itself is still required verbatim.
-      invalidOffers.add(offerId);
-      ratios.delete(offerId);
-      return;
-    }
-    ratios.set(offerId, ratio);
-  };
-  for (const tx of pendingFrameTxs) {
-    if (tx.type !== 'swap_resolve') continue;
-    recordOptionalFill(tx, shouldSkipAppliedPendingFrame);
-  }
-  for (const tx of account.mempool ?? []) {
-    if (tx.type !== 'swap_resolve') continue;
-    recordOptionalFill(tx, false);
+  for (const offerId of [...snapshot.plan.leftSwapOfferIds, ...snapshot.plan.rightSwapOfferIds]) {
+    const ratio = entityState.pendingSwapFillRatios?.get(swapKey(counterpartyEntityId, offerId));
+    if (ratio === undefined || !Number.isSafeInteger(ratio) || ratio <= 0 || ratio > MAX_FILL_RATIO) continue;
+    ratios.set(asOfferId(offerId), ratio);
   }
   return ratios;
 };
@@ -265,7 +166,6 @@ export function captureDisputeArgumentSnapshot(
   proofbodyHash: string,
   nonce: number,
   proofBodyStruct: ProofBodyStruct,
-  options: { appliedAccountTxs?: readonly AccountTx[]; appliedFrameHeight?: number } = {},
 ): DisputeArgumentSnapshot {
   // Capture the positional argument plan at the same moment the proof body is
   // signed. Later dispute code must follow this plan; current account maps may
@@ -298,8 +198,6 @@ export function captureDisputeArgumentSnapshot(
     side: account.leftEntity === account.proofHeader.fromEntity ? 'left' : 'right',
     proofBodyStruct,
     plan: { paymentHashlocks, leftSwapOfferIds, rightSwapOfferIds, leftPullIds, rightPullIds },
-    ...(options.appliedFrameHeight !== undefined ? { appliedFrameHeight: options.appliedFrameHeight } : {}),
-    appliedSwapFillFingerprints: collectAppliedSwapFillFingerprints(options.appliedAccountTxs),
   };
 }
 
@@ -340,7 +238,7 @@ export function buildDisputeArgumentsForSnapshot(
   // treated as adversarial optional evidence: malformed argument blobs become
   // empty/no-op so the sender cannot block finalization of unrelated claims.
   const snapshot = requireDisputeArgumentSnapshot(account, proofbodyHash, 'build');
-  const fillRatios = buildPendingSwapFillRatios(account, snapshot);
+  const fillRatios = buildPendingSwapFillRatios(entityState, counterpartyEntityId, snapshot);
   const resolves = collectPullResolves(account);
   const leftFillRatios = snapshot.plan.leftSwapOfferIds.map((offerId) => fillRatios.get(asOfferId(offerId)) ?? 0);
   const rightFillRatios = snapshot.plan.rightSwapOfferIds.map((offerId) => fillRatios.get(asOfferId(offerId)) ?? 0);

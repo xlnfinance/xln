@@ -5,6 +5,7 @@ import type { DeltaTransformer } from "../typechain-types/index.js";
 import { buildAccountProofBody } from "../../runtime/protocol/dispute/proof-builder.ts";
 import { buildPositionalSwapFillRatioBuckets } from "../../runtime/protocol/transformer-ordering.ts";
 import { asOfferId } from "../../runtime/orderbook/swap-keys.ts";
+import { deriveSwapOffdeltaChanges } from "../../runtime/orderbook/swap-execution.ts";
 import type { AccountMachine, SwapOffer } from "../../runtime/types.ts";
 
 const { ethers } = hre;
@@ -150,8 +151,13 @@ function applyExpectedSwapBatch(
   for (const swap of swaps) {
     const fillRatio = swap.ownerIsLeft ? rightFillRatios[rightIndex++] : leftFillRatios[leftIndex++];
     const ratio = BigInt(fillRatio || 0);
-    deltas[swap.addDeltaIndex] += (swap.addAmount * ratio) / MAX_FILL_RATIO;
-    deltas[swap.subDeltaIndex] -= (swap.subAmount * ratio) / MAX_FILL_RATIO;
+    const change = deriveSwapOffdeltaChanges(
+      swap.ownerIsLeft,
+      (swap.addAmount * ratio) / MAX_FILL_RATIO,
+      (swap.subAmount * ratio) / MAX_FILL_RATIO,
+    );
+    deltas[swap.addDeltaIndex] += change.give;
+    deltas[swap.subDeltaIndex] += change.want;
   }
   return deltas;
 }
@@ -207,8 +213,8 @@ describe("DeltaTransformer", function () {
 
     const result = await applyCanonical(transformer, [0, 0], encodedBatch, "0x", rightArguments);
 
-    expect(result[0]).to.equal(499);
-    expect(result[1]).to.equal(-999);
+    expect(result[0]).to.equal(-499);
+    expect(result[1]).to.equal(999);
   });
 
   it("treats malformed adversarial argument blobs as empty evidence", async function () {
@@ -492,10 +498,11 @@ describe("DeltaTransformer", function () {
       const ratio = BigInt(fillRatio);
       const addAmount = (BigInt(swap.addAmount) * ratio) / MAX_FILL_RATIO;
       const subAmount = (BigInt(swap.subAmount) * ratio) / MAX_FILL_RATIO;
-      if (swap.addDeltaIndex === 0) expected0 += addAmount;
-      if (swap.addDeltaIndex === 1) expected1 += addAmount;
-      if (swap.subDeltaIndex === 0) expected0 -= subAmount;
-      if (swap.subDeltaIndex === 1) expected1 -= subAmount;
+      const change = deriveSwapOffdeltaChanges(swap.ownerIsLeft, addAmount, subAmount);
+      if (swap.addDeltaIndex === 0) expected0 += change.give;
+      if (swap.addDeltaIndex === 1) expected1 += change.give;
+      if (swap.subDeltaIndex === 0) expected0 += change.want;
+      if (swap.subDeltaIndex === 1) expected1 += change.want;
     }
 
     expect(result[0]).to.equal(expected0);

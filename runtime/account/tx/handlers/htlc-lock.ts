@@ -17,6 +17,7 @@ import { FINANCIAL, LIMITS } from '../../../constants';
 import { ensureDelta } from '../delta-utils';
 import { addHold } from '../hold-utils';
 import { isHtlcTimelockExpired } from '../../htlc-deadline';
+import { encryptedHtlcLayer, hashEncryptedHtlcLayer } from '../../../protocol/htlc/onion-advance';
 
 export async function handleHtlcLock(
   accountMachine: AccountMachine,
@@ -26,7 +27,7 @@ export async function handleHtlcLock(
   currentHeight: number,
   _isValidation: boolean = false
 ): Promise<{ success: boolean; events: string[]; error?: string }> {
-  const { lockId, hashlock, timelock, revealBeforeHeight, amount, tokenId, envelope } = accountTx.data;
+  const { lockId, hashlock, timelock, revealBeforeHeight, amount, tokenId } = accountTx.data;
   const events: string[] = [];
 
   // Initialize locks Map if not present (defensive - should be initialized at account creation)
@@ -73,6 +74,15 @@ export async function handleHtlcLock(
   // 5. Determine sender perspective (Channel.ts: byLeft = frame proposer = sender)
   const senderIsLeft = byLeft;
 
+  // Account state retains only a compact commitment. The signed AccountTx is
+  // the authority for the full encrypted onion during post-commit processing.
+  const encryptedLayer = accountTx.data.envelope === undefined
+    ? null
+    : encryptedHtlcLayer(accountTx.data.envelope);
+  if (accountTx.data.envelope !== undefined && !encryptedLayer) {
+    return { success: false, error: 'HTLC lock envelope must be encrypted', events };
+  }
+
   // 6. Check available capacity (deriveDelta auto-deducts HTLC holds now)
   const derived = deriveDelta(delta, senderIsLeft);
 
@@ -95,7 +105,7 @@ export async function handleHtlcLock(
     senderIsLeft,
     createdHeight: accountMachine.currentHeight,
     createdTimestamp: currentTimestamp,
-    ...(envelope !== undefined && { envelope }),
+    ...(encryptedLayer ? { envelopeHash: hashEncryptedHtlcLayer(encryptedLayer) } : {}),
   };
 
   // 8. Update capacity hold (prevents double-spend)

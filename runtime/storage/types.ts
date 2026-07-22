@@ -66,7 +66,7 @@ export type StoragePersistenceBoundary =
   | 'after-authoritative-history-commit'
   | 'after-current-cache-commit'
   | 'after-frame-db-prune'
-  | 'after-snapshot-chunk'
+  | 'after-snapshot-body-batch'
   | 'after-snapshot-manifest'
   | 'after-snapshot-history-publish'
   | 'after-snapshot-retention-prune'
@@ -74,7 +74,7 @@ export type StoragePersistenceBoundary =
   | 'after-snapshot-history-head'
   | 'after-snapshot-current-head'
   | 'after-restore-current-fence'
-  | 'after-restore-current-clear-chunk'
+  | 'after-restore-current-clear-batch'
   | 'after-restore-current-body'
   | 'after-restore-authoritative-swap'
   | 'after-restore-current-head';
@@ -391,6 +391,8 @@ export type StorageDebugStats = {
   snapshotHeights: number[];
   liveEntityCount: number;
   liveAccountCount: number;
+  liveAccountFieldCount?: number;
+  liveAccountFieldBytes?: number;
   liveBookCount: number;
   merkleRootCount?: number;
   merkleBranchCount?: number;

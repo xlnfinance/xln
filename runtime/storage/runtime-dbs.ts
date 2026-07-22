@@ -9,7 +9,7 @@ import {
   verifyStorageTailIntegrity,
 } from './';
 import { assertStorageSafetyOverridesAllowed } from './safety';
-import { withChunkedValues } from './chunked-db';
+import { withRebranchedValues } from './rebranched-db';
 import {
   fsyncStorageParentDirectory,
   writeDurableStorageMarkerFile,
@@ -22,7 +22,7 @@ const storageLog = createStructuredLogger('runtime.storage');
 const formatStorageError = (error: unknown): string =>
   error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 
-const createChunkedLevel = (path: string): Level<Buffer, Buffer> => withChunkedValues(
+const createRebranchedLevel = (path: string): Level<Buffer, Buffer> => withRebranchedValues(
   new Level(path, { valueEncoding: 'buffer', keyEncoding: 'binary' }) as unknown as Level<Buffer, Buffer>,
 );
 
@@ -534,7 +534,7 @@ export const getStorageDb = (
   const fields = storageStateFields(role);
   const existing = state[fields.dbField] as Level<Buffer, Buffer> | undefined;
   if (existing) return existing;
-  const db = createChunkedLevel(resolveStorageDbPath(env, role));
+  const db = createRebranchedLevel(resolveStorageDbPath(env, role));
   state[fields.dbField] = db;
   return db;
 };
@@ -777,7 +777,7 @@ export const rotateStorageEpochDb = async (
     const nextPath = `${currentPath}-next-${snapshotHeight}`;
     const fs = await import('fs/promises');
     const currentDb = getStorageDb(env, deps, 'current');
-    const nextDb = createChunkedLevel(nextPath);
+    const nextDb = createRebranchedLevel(nextPath);
     await fs.rm(nextPath, { recursive: true, force: true });
     await nextDb.open();
     try {
@@ -828,7 +828,7 @@ export const getInfraDb = (
   const state = deps.ensureRuntimeState(env);
   if (!state.infraDb) {
     const path = resolveDbPath(env, 'infra');
-    state.infraDb = createChunkedLevel(path);
+    state.infraDb = createRebranchedLevel(path);
   }
   return state.infraDb;
 };
@@ -839,7 +839,7 @@ export const getFrameDb = (
 ): Level<Buffer, Buffer> => {
   const state = deps.ensureRuntimeState(env);
   if (!state.frameDb) {
-    state.frameDb = createChunkedLevel(resolveFrameDbPath(env));
+    state.frameDb = createRebranchedLevel(resolveFrameDbPath(env));
   }
   return state.frameDb as Level<Buffer, Buffer>;
 };

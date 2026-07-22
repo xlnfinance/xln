@@ -112,15 +112,64 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
   excluded because it can change without an RJEA input. Benchmark impact:
   868.04ms -> 870.33ms for 16 payments (+0.26%, 18.43 -> 18.38 TPS).
 - [x] Resolve the current branch's hash/domain/schema collision. The only
-  fresh-reset format is schema 7 with SHA-256, `xln.storage.frame` and
-  `storage-merkle-v1`; schema 6 is rejected at the HEAD boundary. No migration,
+  fresh-reset format is schema 8 with SHA-256, `xln.storage.frame` and
+  `storage-merkle-v1`; every older schema is rejected at the HEAD boundary. No migration,
   dual reader/writer or version-named compatibility format exists. Storage
   schema/codec/authoritative L1: 41/41 PASS, 129 assertions; types PASS. The
   inseparable descriptor also pins `xln.storage.postState`.
 - [x] Verify the previously failing 10 SIGKILL lineage cases on current HEAD;
   fix any remaining loss of certified lineage without inventing peer recovery.
-- [x] Register chunk prefix `0x7e`; prove delete/overwrite/checkpoint collection
-  cannot leak orphan chunks indefinitely; document truncated checksum scope.
+- [x] Replace the old content-addressed chunk layer with mutable binary
+  path-addressed rebranch nodes under `0x7e`. Values remain inline below
+  10,000 bytes and split only at that boundary; hashes verify content but never
+  address it. Same-key overwrite diffs physical pages, shrink/delete atomically
+  removes every obsolete node, and every physical value is strictly below the
+  limit. L1 storage/crash/radapter: 107/107 PASS plus exact split/collapse,
+  corruption and partial-write coverage.
+- [x] Keep small Accounts in one LevelDB row. Oversized Accounts split into
+  typed top-level field pages; `deltas`, `locks` and `swapOffers` remain one
+  page per whole collection and fail fast instead of branching if that page
+  reaches 10,000 bytes. Runtime enforces the same exact canonical-codec byte
+  bound before commit. The browser DB reader decodes schema-8 binary Merkle
+  namespaces, Account field manifests and physical rebranch nodes.
+- [x] Re-audit the mutable rebranch implementation. Confirmed stale physical
+  nodes and full-page rewrites were fixed atomically; duplicate diff mutations
+  are canonicalized to the existing puts-then-dels final state. Rejected the
+  audit's delete-then-recreate interpretation because that ordering is not a
+  representable `StorageDiffRecord` operation.
+- [x] Reproduce the later storage audits against the current candidate. The
+  orphan-delete, missing-prefix and epoch-copy claims are stale, but the full
+  live Entity loader did bypass the logical split-Account reader. It now reads
+  both inline and typed-field Accounts through `readAccountStorageLayout`,
+  verifies the reconstructed logical bytes and hydrates the exact Account.
+  Focused layout/radapter/rebranch/real-crash/restore evidence: 122/122 PASS,
+  1,101 assertions. There is no `0x25` collection-entry format.
+- [x] Verify the claim that the collection byte bound can partially mutate
+  consensus. Proposal and receiver validation mutate isolated Account clones;
+  real-state re-execution only follows the identical successful validation, so
+  the bound cannot publish a partially mutated Account. Keeping each complete
+  `deltas`, `locks` and `swapOffers` collection under 10,000 bytes is the
+  owner's explicit fail-fast policy, not a storage-derived financial formula.
+- [ ] Extend real-process crash coverage with actual split mutation, collapse,
+  delete and restore-clear physical trees; assert raw `0x7e` rows and logical
+  roots after every SIGKILL boundary.
+- [ ] Make storage diagnostics expose raw physical `0x7e` row count/bytes and
+  linked manifest -> branch -> leaf paths/checksums in the browser DB reader,
+  with laptop/mobile/wide screenshot E2E. The current reader decodes every
+  binary form but presents a flat physical list.
+- [ ] Add snapshot/epoch/rotation/prune and corruption matrices for oversized
+  typed Account/Entity/Book values, exact 9,999/10,000-byte boundaries,
+  missing/wrong/duplicate child paths and orphan-free recovery.
+- [ ] Replace the three immutable proof-history CAS families (`0x2a..0x2c`)
+  with snapshot-owned binary paths in a later schema. They are active retained
+  history DAGs, not the mutable hot-state/rebranch address space, so the audit's
+  P0 correctness claim is rejected; nevertheless their hash-addressed keys do
+  not match the owner's desired all-path-addressed final storage model.
+- [ ] In the same fresh schema, replace generic byte paging for oversized
+  Entity/Book/record values with schema-declared owner-path Patricia fields.
+  Keep small values inline, fixed binary IDs/namespaces in LevelDB keys and
+  content hashes only as parent integrity checks, never as key routes. Book
+  pair identity must use a compact typed binary codec rather than raw UTF-8.
 - [x] Add PID-reuse reproducer and bind writer ownership to process birth
   identity. A live writer cannot be stolen; a dead writer cannot block forever.
 - [x] Replace 83 manual dirty marks incrementally with reducer-returned
@@ -334,7 +383,7 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
 
 ## Candidate and release gate
 
-- Target: `v0.1.14` from `ai/mainnet-blockers` after every release blocker above
+- Target: `v0.1.16` from `main` after every release blocker taken for this cut
   is closed or explicitly rejected with evidence.
 - Current branch commits include deterministic startup, atomic routing groundwork
   and signer readiness. Freeze the exact SHA only when the final gate begins.
@@ -342,21 +391,27 @@ All items use `VERIFY -> FIX or REJECT WITH EVIDENCE -> L1/L2/L3`.
 - [x] Make signed release publication two-phase without a red remote tip:
   generate from a clean local metadata parent, then require `publish-check` to
   prove that signed source is contained in `origin/main` and the annotated tag.
-- [ ] L1 and L2 evidence for every changed invariant.
+- [x] L1 and L2 evidence for every changed invariant taken for this cut.
+  Final storage/radapter/crash pack: 122/122 PASS, 1,101 assertions; HTLC
+  encryption/state-bound pack: 177/177 PASS, 1,350 assertions; exact real
+  multiroute TC1-18 PASS in 272.7s.
 - [x] `VITE_DEV_PORT=18080 bun run check` exit 0; frozen core unchanged.
 - [ ] Full unit/storage/Merkle/WAL/SIGKILL/security/contract/RPC/BrowserVM gates.
 - [ ] Profile accountInput after correctness refactors; retain a CI metric and
   target <=50ms/tx per bilateral pair before publishing TPS claims.
-- [ ] Full deterministic E2E green with zero browser console errors. Do not open
+- [x] Full deterministic E2E green with zero browser console errors. Do not open
   or manually change the production site as a substitute for E2E.
+  Unified run `20260722-182326-707`: 119/119 isolated targets PASS in 445.7s,
+  browser errors 0, network failures 0, HTTP errors 0; warnings 64 are retained
+  as non-fatal QA evidence rather than hidden.
 - [ ] `bun run gate:release` and `bun run gate:mainnet` on the immutable SHA.
 - [ ] Review the full diff for hacks, compatibility branches, swallowed errors,
   randomness and undocumented security assumptions.
 - [ ] External audit handoff: keep `docs/security/external-audit-brief.md`
   current, deliver the immutable candidate and close every accepted finding
   before enabling real user funds.
-- [ ] Commit coherent fixes, push candidate, merge into clean `main`, rerun the
-  mandatory post-merge gate, tag/publish `v0.1.14`, fresh deploy/reset mainnet,
+- [ ] Commit coherent fixes on `main`, push the immutable candidate, rerun the
+  mandatory gate, tag/publish `v0.1.16`, fresh deploy/reset testnet production,
   and verify health. Stop before any irreversible action only if authority or
   owner-held credentials are actually required.
 

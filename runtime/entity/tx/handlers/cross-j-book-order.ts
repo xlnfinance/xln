@@ -45,6 +45,7 @@ import {
   crossJurisdictionRouteSignerHint,
 } from '../cross-j-outputs';
 import { hasQueuedCrossSwapAckForEntityState } from './account/orderbook-queue';
+import { draftPreparedDisputeStartIfReady } from './dispute';
 
 const deterministicEntityTimestamp = (state: EntityState, env: Env): number =>
   Number(state.timestamp || env.timestamp || 0);
@@ -395,8 +396,8 @@ const buildCrossJurisdictionBookRemovalAckOutput = (
   }], signerId);
 };
 
-export const handleCrossJurisdictionBookOrderRemovedEntityTx = (
-  _env: Env,
+export const handleCrossJurisdictionBookOrderRemovedEntityTx = async (
+  env: Env,
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'crossJurisdictionBookOrderRemoved' }>,
   options?: ApplyEntityTxOptions,
@@ -424,6 +425,23 @@ export const handleCrossJurisdictionBookOrderRemovedEntityTx = (
     entityTx.data.removedAt,
     entityTx.data.reason || 'cancel_request',
   );
+  const pendingDisputeRemovals = account.disputePrepare?.pendingOrderbookRemovalIds;
+  if ((account.status ?? 'active') === 'dispute_preparing' && pendingDisputeRemovals?.includes(route.orderId)) {
+    account.disputePrepare!.pendingOrderbookRemovalIds = pendingDisputeRemovals.filter(
+      (orderId) => orderId !== route.orderId,
+    );
+    if (account.disputePrepare!.pendingOrderbookRemovalIds.length === 0) {
+      delete account.disputePrepare!.pendingOrderbookRemovalIds;
+    }
+    addMessage(newState, `🌉 Cross-j dispute book removal confirmed ${route.orderId}`);
+    const drafted = await draftPreparedDisputeStartIfReady(
+      newState,
+      entityTx.data.sourceAccountId,
+      env,
+      options?.storageChanges,
+    );
+    return { newState: drafted.newState, outputs: drafted.outputs, mempoolOps: [] };
+  }
   const mempoolOps = hasQueuedCrossSwapAckForEntityState(
     newState,
     entityTx.data.sourceAccountId,

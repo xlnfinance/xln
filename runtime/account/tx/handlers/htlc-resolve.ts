@@ -16,6 +16,7 @@ import { validateMultiRecipientCiphertext } from '../../../protocol/htlc/multi-r
 import { createStructuredLogger, shortHash } from '../../../infra/logger';
 import { releaseHold } from '../hold-utils';
 import { isHtlcTimelockExpired } from '../../htlc-deadline';
+import { deriveTransferOffdeltaChange } from '../../delta-movement';
 
 const htlcResolveLog = createStructuredLogger('account.htlc');
 
@@ -34,7 +35,6 @@ export async function handleHtlcResolve(
   offerHash?: string;
   hashlock?: string;
   reason?: string;
-  finalRecipient?: boolean;
   amount?: bigint;
   tokenId?: number;
   description?: string;
@@ -176,8 +176,7 @@ export async function handleHtlcResolve(
   // 4. Apply outcome mutation after the hold guard. Failed resolves must be
   // no-ops on account balances and locks.
   if (outcome === 'secret') {
-    const canonicalDelta = lock.senderIsLeft ? -lock.amount : lock.amount;
-    delta.offdelta += canonicalDelta;
+    delta.offdelta += deriveTransferOffdeltaChange(lock.senderIsLeft, lock.amount);
     events.push(`🔓 HTLC resolved (secret): ${lock.amount} token ${lock.tokenId}`);
   } else {
     const reason = accountTx.data.reason;
@@ -188,32 +187,18 @@ export async function handleHtlcResolve(
   // 5. Remove lock
   accountMachine.locks.delete(lockId);
 
-  const finalRecipient = typeof lock.envelope === 'object'
-    && lock.envelope !== null
-    && 'finalRecipient' in lock.envelope
-    && (lock.envelope as { finalRecipient?: unknown }).finalRecipient === true;
-  const resolvedDescription =
-    typeof lock.envelope === 'object'
-    && lock.envelope !== null
-    && 'description' in lock.envelope
-    && typeof (lock.envelope as { description?: unknown }).description === 'string'
-      ? (lock.envelope as { description: string }).description
-      : undefined;
-
   const result: {
     success: boolean; events: string[]; error?: string;
     outcome?: 'offer' | 'secret' | 'error'; secret?: string; offerHash?: string;
     hashlock?: string; reason?: string;
-    finalRecipient?: boolean; amount?: bigint; tokenId?: number; description?: string;
+    amount?: bigint; tokenId?: number;
   } = { success: true, events, outcome, hashlock: lock.hashlock };
   if (outcome === 'secret' && 'secret' in accountTx.data) result.secret = accountTx.data.secret;
   if (outcome === 'secret' && 'offerHash' in accountTx.data) result.offerHash = accountTx.data.offerHash;
   if (outcome === 'error') result.reason = accountTx.data.reason || 'unknown';
   if (outcome === 'secret') {
-    result.finalRecipient = finalRecipient;
     result.amount = lock.amount;
     result.tokenId = lock.tokenId;
-    if (resolvedDescription) result.description = resolvedDescription;
   }
   return result;
 }

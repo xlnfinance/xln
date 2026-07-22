@@ -64,9 +64,8 @@ import { isCrossJurisdictionTerminalStatus } from '../../../extensions/cross-j';
 import { createStructuredLogger, shouldLogFullPayloads, shortHash, shortId } from '../../../infra/logger';
 import { crossJurisdictionRouteSignerHint } from '../cross-j-outputs';
 import {
-  isAccountControlTx,
+  freezeAccountForDispute,
   isDisputeStartedByLeft,
-  isDisputeEvidenceAccountTx,
 } from '../../../account/consensus/dispute-policy';
 
 const disputeLog = createStructuredLogger('entity.dispute');
@@ -257,8 +256,9 @@ const removeOrderbookRowForDispute = (
       data: {
         orderId: offerId,
         sourceEntityId,
+        sourceAccountId: counterpartyEntityId,
         route,
-        reason: 'account_dispute_start',
+        reason: 'account_dispute_prepare',
       },
     }],
   });
@@ -271,9 +271,10 @@ const removeDisputedAccountOrdersFromBook = (
   counterpartyEntityId: string,
   account: AccountMachine,
   storageChanges: RuntimeOverlayRecord[],
-): { localRemoved: number; remoteQueued: number } => {
+): { localRemoved: number; remoteQueued: number; remoteOrderIds: string[] } => {
   let localRemoved = 0;
   let remoteQueued = 0;
+  const remoteOrderIds: string[] = [];
   for (const [offerId, offer] of account.swapOffers ?? new Map<string, SwapOffer>()) {
     const result = removeOrderbookRowForDispute(
       state,
@@ -284,7 +285,10 @@ const removeDisputedAccountOrdersFromBook = (
       storageChanges,
     );
     if (result.localRemoved) localRemoved++;
-    if (result.remoteQueued) remoteQueued++;
+    if (result.remoteQueued) {
+      remoteQueued++;
+      remoteOrderIds.push(offerId);
+    }
   }
   if (localRemoved > 0 || remoteQueued > 0) {
     addMessage(
@@ -292,7 +296,7 @@ const removeDisputedAccountOrdersFromBook = (
       `⚔️ Dispute removed ${localRemoved} local orderbook row(s), queued ${remoteQueued} remote row removal(s)`,
     );
   }
-  return { localRemoved, remoteQueued };
+  return { localRemoved, remoteQueued, remoteOrderIds };
 };
 
 const collectDisputeEvidenceReadinessIssues = (
@@ -302,26 +306,9 @@ const collectDisputeEvidenceReadinessIssues = (
   const issues: string[] = [];
   const readyAfter = Number(account.disputePrepare?.readyAfter ?? 0);
   if (readyAfter > now) issues.push(`cooldown:${readyAfter - now}ms`);
+  const pendingOrderbookRemovals = account.disputePrepare?.pendingOrderbookRemovalIds?.length ?? 0;
+  if (pendingOrderbookRemovals > 0) issues.push(`orderbookRemovals:${pendingOrderbookRemovals}`);
   return issues;
-};
-
-const freezeOptimisticAccountTraffic = (
-  account: AccountMachine,
-  retainOptionalEvidence: boolean,
-): void => {
-  account.mempool = (account.mempool || []).filter((tx) => (
-    isAccountControlTx(tx.type) || (retainOptionalEvidence && isDisputeEvidenceAccountTx(tx))
-  ));
-  // A pending frame is an indivisible optimistic proposal. Applying only its
-  // evidence txs would invent a frame that neither side signed, so discard the
-  // whole proposal and build the dispute from the last committed account plus
-  // independently queued optional evidence.
-  delete account.pendingFrame;
-  delete account.pendingAccountInput;
-  delete account.pendingAccountInputSignerId;
-  delete account.clonedForValidation;
-  account.rollbackCount = 0;
-  delete account.lastRollbackFrameHash;
 };
 
 const markAccountDisputePreparing = (
@@ -329,6 +316,8 @@ const markAccountDisputePreparing = (
   account: AccountMachine,
   description: string,
   minCooldownMs: number,
+  pendingOrderbookRemovalIds: readonly string[],
+  startIntent: NonNullable<AccountMachine['disputePrepare']>['startIntent'],
 ): void => {
   const startedAt = Number(state.timestamp ?? 0);
   account.status = 'dispute_preparing';
@@ -336,13 +325,17 @@ const markAccountDisputePreparing = (
     startedAt,
     readyAfter: startedAt + Math.max(0, Math.floor(minCooldownMs)),
     reason: description || 'prepare-dispute',
+    ...(pendingOrderbookRemovalIds.length > 0
+      ? { pendingOrderbookRemovalIds: [...pendingOrderbookRemovalIds].sort() }
+      : {}),
+    ...(startIntent ? { startIntent } : {}),
   };
 
   // Freeze optimistic account traffic. Secrets observed later through
   // jurisdiction events can still be added to argument builders, but ordinary
   // bilateral proposals must not keep changing the proof/argument pair while
   // we are preparing an adversarial on-chain path.
-  freezeOptimisticAccountTraffic(account, true);
+  freezeAccountForDispute(account, true);
 };
 
 /**
@@ -356,7 +349,7 @@ const markAccountDisputePreparing = (
 export async function handlePrepareDispute(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'prepareDispute' }>,
-  _env: Env,
+  env: Env,
   storageChanges: RuntimeOverlayRecord[] = [],
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
   const { counterpartyEntityId, description = 'prepare-dispute', minCooldownMs = 0 } = entityTx.data;
@@ -371,9 +364,49 @@ export async function handlePrepareDispute(
     addMessage(newState, `ℹ️ Dispute already active/queued for ${counterpartyEntityId.slice(-4)}`);
     return { newState, outputs };
   }
+  if ((account.status ?? 'active') === 'dispute_preparing') {
+    const issues = collectDisputeEvidenceReadinessIssues(account, Number(newState.timestamp ?? 0));
+    if (issues.length === 0) {
+      return draftPreparedDisputeStartIfReady(newState, counterpartyEntityId, env, storageChanges);
+    }
+    addMessage(
+      newState,
+      issues.length > 0
+        ? `⏳ Dispute preparation still pending for ${counterpartyEntityId.slice(-4)}: ${issues.join('; ')}`
+        : `⏳ Dispute already prepared for ${counterpartyEntityId.slice(-4)}; queue disputeStart when ready`,
+    );
+    return { newState, outputs };
+  }
 
-  removeDisputedAccountOrdersFromBook(newState, outputs, counterpartyEntityId, account, storageChanges);
-  markAccountDisputePreparing(newState, account, description, minCooldownMs);
+  const removal = removeDisputedAccountOrdersFromBook(
+    newState,
+    outputs,
+    counterpartyEntityId,
+    account,
+    storageChanges,
+  );
+  markAccountDisputePreparing(
+    newState,
+    account,
+    description,
+    minCooldownMs,
+    removal.remoteOrderIds,
+    {
+      description,
+      ...(entityTx.data.crossJurisdictionRouteId !== undefined
+        ? { crossJurisdictionRouteId: entityTx.data.crossJurisdictionRouteId }
+        : {}),
+      ...(entityTx.data.starterInitialArguments !== undefined
+        ? { starterInitialArguments: entityTx.data.starterInitialArguments }
+        : {}),
+      ...(entityTx.data.allowUnsafeCrossJTargetDispute === true
+        ? { allowUnsafeCrossJTargetDispute: true }
+        : {}),
+      ...(entityTx.data.acceptedCrossJTargetLossAmount !== undefined
+        ? { acceptedCrossJTargetLossAmount: entityTx.data.acceptedCrossJTargetLossAmount }
+        : {}),
+    },
+  );
 
   const issues = collectDisputeEvidenceReadinessIssues(account, Number(newState.timestamp ?? 0));
   addMessage(
@@ -382,7 +415,54 @@ export async function handlePrepareDispute(
       ? `⏳ Dispute prepared vs ${counterpartyEntityId.slice(-4)}; waiting for stable evidence: ${issues.join('; ')}`
       : `⏳ Dispute prepared vs ${counterpartyEntityId.slice(-4)}; evidence currently stable, queue disputeStart when ready`,
   );
-  return { newState, outputs };
+  if (issues.length > 0) return { newState, outputs };
+  const drafted = await draftPreparedDisputeStartIfReady(
+    newState,
+    counterpartyEntityId,
+    env,
+    storageChanges,
+  );
+  return { newState: drafted.newState, outputs: [...outputs, ...drafted.outputs] };
+}
+
+export async function draftPreparedDisputeStartIfReady(
+  entityState: EntityState,
+  counterpartyEntityId: string,
+  env: Env,
+  storageChanges: RuntimeOverlayRecord[] = [],
+): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
+  const account = entityState.accounts.get(counterpartyEntityId);
+  if (!account || (account.status ?? 'active') !== 'dispute_preparing') {
+    return { newState: entityState, outputs: [] };
+  }
+  if (collectDisputeEvidenceReadinessIssues(account, Number(entityState.timestamp ?? 0)).length > 0) {
+    return { newState: entityState, outputs: [] };
+  }
+  const intent = account.disputePrepare?.startIntent;
+  return handleDisputeStart(
+    entityState,
+    {
+      type: 'disputeStart',
+      data: {
+        counterpartyEntityId,
+        ...(intent?.description !== undefined ? { description: intent.description } : {}),
+        ...(intent?.crossJurisdictionRouteId !== undefined
+          ? { crossJurisdictionRouteId: intent.crossJurisdictionRouteId }
+          : {}),
+        ...(intent?.starterInitialArguments !== undefined
+          ? { starterInitialArguments: intent.starterInitialArguments }
+          : {}),
+        ...(intent?.allowUnsafeCrossJTargetDispute === true
+          ? { allowUnsafeCrossJTargetDispute: true }
+          : {}),
+        ...(intent?.acceptedCrossJTargetLossAmount !== undefined
+          ? { acceptedCrossJTargetLossAmount: intent.acceptedCrossJTargetLossAmount }
+          : {}),
+      },
+    },
+    env,
+    storageChanges,
+  );
 }
 
 /**
@@ -392,7 +472,7 @@ export async function handleDisputeStart(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'disputeStart' }>,
   env: Env,
-  storageChanges: RuntimeOverlayRecord[] = [],
+  _storageChanges: RuntimeOverlayRecord[] = [],
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
   const {
     counterpartyEntityId,
@@ -408,10 +488,15 @@ export async function handleDisputeStart(
     if (!route || route.orderId !== crossJurisdictionRouteId) {
       throw new Error(`DISPUTE_START_CROSS_J_ROUTE_MISSING:${crossJurisdictionRouteId}`);
     }
-    if (
-      route.source.entityId.toLowerCase() !== newState.entityId.toLowerCase() ||
-      route.source.counterpartyEntityId.toLowerCase() !== counterpartyEntityId.toLowerCase()
-    ) {
+    const localEntityId = newState.entityId.toLowerCase();
+    const localCounterpartyId = counterpartyEntityId.toLowerCase();
+    const isSourceAccount =
+      route.source.entityId.toLowerCase() === localEntityId &&
+      route.source.counterpartyEntityId.toLowerCase() === localCounterpartyId;
+    const isTargetAccount =
+      route.target.counterpartyEntityId.toLowerCase() === localEntityId &&
+      route.target.entityId.toLowerCase() === localCounterpartyId;
+    if (!isSourceAccount && !isTargetAccount) {
       throw new Error(`DISPUTE_START_CROSS_J_ROUTE_ROLE_MISMATCH:${crossJurisdictionRouteId}`);
     }
     if (isCrossJurisdictionTerminalStatus(route.status) || !route.targetPull) {
@@ -456,7 +541,14 @@ export async function handleDisputeStart(
     addMessage(newState, `❌ Account with ${counterpartyEntityId.slice(-4)} is disputed - reopen required`);
     return { newState, outputs };
   }
-  freezeOptimisticAccountTraffic(account, true);
+  if (accountStatus !== 'dispute_preparing') {
+    addMessage(
+      newState,
+      `❌ Account with ${counterpartyEntityId.slice(-4)} must enter dispute preparation before disputeStart`,
+    );
+    return { newState, outputs };
+  }
+  freezeAccountForDispute(account, true);
   const readinessIssues = collectDisputeEvidenceReadinessIssues(
     account,
     Number(newState.timestamp ?? 0),
@@ -475,8 +567,6 @@ export async function handleDisputeStart(
     );
     return { newState, outputs };
   }
-
-  removeDisputedAccountOrdersFromBook(newState, outputs, counterpartyEntityId, account, storageChanges);
 
   // Use stored counterparty dispute hanko AND proofBodyHash (exchanged during bilateral consensus)
   // CRITICAL: Must use the SAME proofBodyHash that the hanko signed, not a fresh one!
@@ -771,7 +861,7 @@ export async function handleDisputeStart(
   // frames should progress on this account while dispute is in-flight.
   account.status = 'disputed';
   delete account.disputePrepare;
-  freezeOptimisticAccountTraffic(account, false);
+  freezeAccountForDispute(account, false);
   // Local placeholder for UX continuity: account stays visible as "active dispute"
   // immediately after queueing disputeStart, before on-chain DisputeStarted event arrives.
   // On-chain event will overwrite this with authoritative timeout/nonce data.
@@ -889,7 +979,7 @@ export async function handleDisputeFinalize(
     warnDisputeUnlessQuiet(env, 'finalize.cooperative_rejected', { counterparty: shortId(counterpartyEntityId) });
     return { newState, outputs };
   }
-  freezeOptimisticAccountTraffic(account, true);
+  freezeAccountForDispute(account, true);
 
   // Same readiness gate as disputeStart. If the counterparty starts first, we
   // still refuse to counter-finalize while evidence can change. Finalization

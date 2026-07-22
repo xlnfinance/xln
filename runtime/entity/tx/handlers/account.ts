@@ -31,9 +31,8 @@ import type {
   SwapCancelRequestEvent,
   SwapOfferEvent,
 } from './account/orderbook-offers';
-import { canProcessAccountTxForDisputeStatus } from '../../../account/consensus/dispute-policy';
 import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from '../../../account/consensus/flush';
-import { handleDisputeStart, handlePrepareDispute } from './dispute';
+import { handlePrepareDispute } from './dispute';
 import {
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardHash,
@@ -88,11 +87,40 @@ const accountInputSlowMs = (): number => {
 export const frozenAccountInputLogLevel = (
   account: Pick<AccountMachine, 'status' | 'activeDispute'>,
   input: Pick<AccountInput, 'kind'>,
-): 'info' | 'error' => {
+): 'info' | 'warn' | 'error' => {
+  // A signed ACK may legitimately be retried by the reliable transport after
+  // local dispute preparation or J submission. It is security-relevant and
+  // must remain visible, but it is an expected no-op rather than a Runtime
+  // fault. The frozen gate below still rejects it before any Account mutation.
+  if (input.kind === 'ack') return 'warn';
   const durableOnchainFreeze =
     account.status === 'disputed' &&
     (account.activeDispute?.observedOnChain === true || account.activeDispute === undefined);
   return durableOnchainFreeze && input.kind === 'frame_ack' ? 'info' : 'error';
+};
+
+export const canProcessFrozenAccountInput = (
+  status: AccountMachine['status'],
+  hasActiveDispute: boolean,
+  _hasAck: boolean,
+  frameTxTypes: readonly string[],
+): boolean => {
+  if ((status ?? 'active') === 'active') return true;
+  // Finalization removes activeDispute but deliberately leaves the Account
+  // closed. The only bilateral frame allowed through that terminal fence is
+  // the explicit reopen transition (and its exact ACK). Before finalization,
+  // activeDispute remains present from local draft through the on-chain event,
+  // so even a forged/retried reopen frame cannot bypass the freeze.
+  if (
+    status === 'disputed' &&
+    !hasActiveDispute &&
+    frameTxTypes.length === 1 &&
+    frameTxTypes[0] === 'reopen_disputed'
+  ) return true;
+  // No external AccountInput may extend a lane after dispute preparation has
+  // begun. This includes ACK-only inputs and apparent control proposals: the
+  // jurisdiction path is anchored to the last mutually signed ProofBody.
+  return false;
 };
 
 export { applyCommittedAccountFrameFollowups } from './account/committed-frame-followups';
@@ -306,23 +334,31 @@ export async function applyAccountInput(
   }
   checkpointProfile('accountResolve');
 
-  // Dispute freeze: this mirrors account/tx/apply.ts through
-  // canProcessAccountTxForDisputeStatus. During dispute_preparing we still allow
-  // evidence-only frames (pull_resolve/swap_resolve) to settle argument data.
-  // After disputeStart is queued/observed, only control traffic is allowed; the
-  // signed calldata hashes are already committed and must not drift.
+  // Dispute freeze happens at AccountInput ingress. Optional transformer
+  // evidence lives in Entity state; accepting even an ACK-only input here would
+  // let a late optimistic frame replace the exact signed proof selected for J.
   if ((accountMachine.status ?? 'active') !== 'active') {
-    const frameTxTypes = incomingProposal?.frame.accountTxs.map((tx) => tx.type) || [];
-    const allowedWhileDisputed = frameTxTypes.every((txType) =>
-      canProcessAccountTxForDisputeStatus(accountMachine.status, txType)
+    const proposalTxTypes = incomingProposal?.frame.accountTxs.map((tx) => tx.type) || [];
+    const pendingAckTxTypes = incomingAck
+      ? accountMachine.pendingFrame?.accountTxs.map((tx) => tx.type) ?? []
+      : [];
+    const frameTxTypes = proposalTxTypes.length > 0 ? proposalTxTypes : pendingAckTxTypes;
+    const allowedWhileDisputed = canProcessFrozenAccountInput(
+      accountMachine.status,
+      Boolean(accountMachine.activeDispute),
+      Boolean(incomingAck),
+      frameTxTypes,
     );
     if (!allowedWhileDisputed) {
       const dropMsg =
         `🛑 Frozen account input dropped for ${counterpartyId.slice(-4)} ` +
         `(height=${accountInputReferenceHeight(input) ?? 'n/a'}, txs=[${frameTxTypes.join(',')}], ack=${!!incomingAck})`;
-      const logFrozenInput = frozenAccountInputLogLevel(accountMachine, input) === 'info'
+      const severity = frozenAccountInputLogLevel(accountMachine, input);
+      const logFrozenInput = severity === 'info'
         ? accountHandlerLog.info
-        : accountHandlerLog.error;
+        : severity === 'warn'
+          ? accountHandlerLog.warn
+          : accountHandlerLog.error;
       logFrozenInput('input.dropped_frozen_account', {
         counterparty: shortId(counterpartyId),
         height: accountInputReferenceHeight(input) ?? null,
@@ -608,22 +644,11 @@ export async function applyAccountInput(
           armHtlcSecretAckTimeout(newState, route);
         }
       }
+      const startsBefore = newState.jBatchState?.batch.disputeStarts.length ?? 0;
       const prepared = await handlePrepareDispute(
         newState,
         {
           type: 'prepareDispute',
-          data: {
-            counterpartyEntityId: counterpartyId,
-            description: result.disputeRequired.reason,
-          },
-        },
-        env,
-      );
-      const startsBefore = prepared.newState.jBatchState?.batch.disputeStarts.length ?? 0;
-      const started = await handleDisputeStart(
-        prepared.newState,
-        {
-          type: 'disputeStart',
           data: {
             counterpartyEntityId: counterpartyId,
             description: 'late-htlc-secret-enforcement',
@@ -631,24 +656,27 @@ export async function applyAccountInput(
         },
         env,
       );
-      const startsAfter = started.newState.jBatchState?.batch.disputeStarts.length ?? 0;
-      const disputeOutputs = startsAfter > startsBefore
+      const startsAfter = prepared.newState.jBatchState?.batch.disputeStarts.length ?? 0;
+      const disputeStarted = startsAfter > startsBefore;
+      if (disputeStarted && prepared.newState.jBatchState) {
+        prepared.newState.jBatchState.autoBroadcastDraft = true;
+      }
+      const disputeOutputs = disputeStarted && !prepared.newState.jBatchState?.sentBatch
         ? [{
-            entityId: started.newState.entityId,
-            signerId: started.newState.config.validators[0]!,
+            entityId: prepared.newState.entityId,
+            signerId: prepared.newState.config.validators[0]!,
             entityTxs: [{ type: 'j_broadcast' as const, data: {} }],
           }]
         : [];
-      const disputeStarted = startsAfter > startsBefore;
       addMessage(
-        started.newState,
+        prepared.newState,
         disputeStarted
           ? `⚠️ Unsafe account frame rejected; dispute start queued`
           : `⚠️ Unsafe account frame rejected; dispute preparation awaits Hanko`,
       );
       return {
-        newState: started.newState,
-        outputs: [...outputs, ...prepared.outputs, ...started.outputs, ...disputeOutputs],
+        newState: prepared.newState,
+        outputs: [...outputs, ...prepared.outputs, ...disputeOutputs],
         mempoolOps,
         swapOffersCreated: allSwapOffersCreated,
         swapCancelRequests: allSwapCancelRequests,

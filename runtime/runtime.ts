@@ -6391,6 +6391,8 @@ export const inspectStorageDb = async (env: Env) => {
     snapshotHeights,
     liveEntityCount: current?.liveEntityCount ?? 0,
     liveAccountCount: current?.liveAccountCount ?? 0,
+    liveAccountFieldCount: current?.liveAccountFieldCount ?? 0,
+    liveAccountFieldBytes: current?.liveAccountFieldBytes ?? 0,
     liveBookCount: current?.liveBookCount ?? 0,
     frameBytes: history?.frameBytes ?? 0,
     diffBytes: history?.diffBytes ?? 0,

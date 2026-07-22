@@ -62,6 +62,26 @@ export async function handleSwapOffer(
       events,
     };
   }
+  const sameJurisdictionOfferCount = Array.from(accountMachine.swapOffers.values())
+    .filter(offer => !offer.crossJurisdiction).length;
+  if (!crossJurisdiction && sameJurisdictionOfferCount >= LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS) {
+    return {
+      success: false,
+      error: `Too many open same-j swap offers: max ${LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS}`,
+      events,
+    };
+  }
+  if (
+    crossJurisdiction &&
+    Array.from(accountMachine.swapOffers.values()).filter(offer => offer.crossJurisdiction).length >=
+      LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS
+  ) {
+    return {
+      success: false,
+      error: `Too many open cross-j swap offers: max ${LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS}`,
+      events,
+    };
+  }
 
   // 2. Validate amounts (network-wide bounds)
   if (giveAmount < FINANCIAL.MIN_PAYMENT_AMOUNT || giveAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {

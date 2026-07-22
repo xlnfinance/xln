@@ -150,7 +150,7 @@ export const buildStorageLiveReplicaMetaCommitment = (env: Env): {
         ...(replica.entityProviderActionSubmitState
           ? { entityProviderActionSubmitState: replica.entityProviderActionSubmitState }
           : {}),
-      }),
+      }, { omitSymbolKeys: true }),
     });
   }
   return { entries, digest: computeStorageReplicaMetaDigest(entries) };

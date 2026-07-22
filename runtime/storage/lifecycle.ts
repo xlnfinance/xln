@@ -5,6 +5,7 @@ import {
   KEY_FRAME,
   KEY_HEAD,
   KEY_LIVE_ACCOUNT,
+  KEY_LIVE_ACCOUNT_FIELD,
   KEY_LIVE_BOOK,
   KEY_LIVE_ENTITY,
   KEY_LIVE_REPLICA_META,
@@ -28,10 +29,12 @@ import {
   keySnapshotManifest,
   keySnapshotReplicaMetaPrefix,
   parseLiveBookKey,
+  parseLiveAccountKey,
   parseSnapshotAccountKey,
   parseSnapshotEntityKey,
   parseSnapshotManifestHeight,
 } from './keys';
+import { readAccountStorageLayout } from './account-layout';
 import type {
   RuntimeDbLike,
   StorageDoc,
@@ -115,6 +118,7 @@ export const seedFreshStorageEpoch = async (options: {
   const livePrefixes = [
     Buffer.from([KEY_LIVE_ENTITY]),
     Buffer.from([KEY_LIVE_ACCOUNT]),
+    Buffer.from([KEY_LIVE_ACCOUNT_FIELD]),
     Buffer.from([KEY_LIVE_BOOK]),
     Buffer.from([KEY_MERKLE_ROOT]),
     Buffer.from([KEY_MERKLE_BRANCH]),
@@ -263,28 +267,50 @@ export const createSnapshot = async (
   await pruneUnpublishedSnapshots(targetDb, onPersistenceBoundary);
   const liveDocPrefixes = [
     Buffer.from([KEY_LIVE_ENTITY]),
-    Buffer.from([KEY_LIVE_ACCOUNT]),
     Buffer.from([KEY_LIVE_BOOK]),
   ];
 
   let written = 0;
   let bytes = 0;
+  const snapshotBatchSize = 256;
   for (const prefix of liveDocPrefixes) {
     const copied = await copyKeyRange(sourceDb, targetDb, { prefix }, (key) => {
       if (key[0] === KEY_LIVE_ENTITY) {
         return Buffer.concat([Buffer.from([KEY_SNAPSHOT_ENTITY]), encodeHeight(height), key.subarray(1)]);
       }
-      if (key[0] === KEY_LIVE_ACCOUNT) {
-        return Buffer.concat([Buffer.from([KEY_SNAPSHOT_ACCOUNT]), encodeHeight(height), key.subarray(1)]);
-      }
       if (key[0] === KEY_LIVE_BOOK) {
         return Buffer.concat([Buffer.from([KEY_SNAPSHOT_BOOK]), encodeHeight(height), key.subarray(1)]);
       }
       return null;
-    }, async () => onPersistenceBoundary?.('after-snapshot-chunk'));
+    }, async () => onPersistenceBoundary?.('after-snapshot-body-batch'));
     written += copied.count;
     bytes += copied.bytes;
   }
+  let accountBatch = targetDb.batch();
+  let accountBatchCount = 0;
+  const flushAccounts = async (): Promise<void> => {
+    if (accountBatchCount === 0) return;
+    await writeBatch(accountBatch);
+    await onPersistenceBoundary?.('after-snapshot-body-batch');
+    accountBatch = targetDb.batch();
+    accountBatchCount = 0;
+  };
+  for await (const key of iterateKeys(sourceDb, { prefix: Buffer.from([KEY_LIVE_ACCOUNT]) })) {
+    const parsed = parseLiveAccountKey(key);
+    const stored = await readAccountStorageLayout(sourceDb, parsed.entityId, parsed.counterpartyId, key);
+    if (!stored) throw new Error(`STORAGE_SNAPSHOT_ACCOUNT_SOURCE_MISSING:${key.toString('hex')}`);
+    const snapshotKey = Buffer.concat([
+      Buffer.from([KEY_SNAPSHOT_ACCOUNT]),
+      encodeHeight(height),
+      key.subarray(1),
+    ]);
+    accountBatch.put(snapshotKey, stored.logicalValue);
+    accountBatchCount += 1;
+    written += 1;
+    bytes += snapshotKey.byteLength + stored.logicalValue.byteLength;
+    if (accountBatchCount >= snapshotBatchSize) await flushAccounts();
+  }
+  await flushAccounts();
   const replicaMetas = await copyKeyRange(
     targetDb,
     targetDb,
@@ -294,7 +320,7 @@ export const createSnapshot = async (
       encodeHeight(height),
       key.subarray(1),
     ]),
-    async () => onPersistenceBoundary?.('after-snapshot-chunk'),
+    async () => onPersistenceBoundary?.('after-snapshot-body-batch'),
   );
   written += replicaMetas.count;
   bytes += replicaMetas.bytes;

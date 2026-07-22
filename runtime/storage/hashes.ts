@@ -13,7 +13,13 @@ import {
   docRefCellKey,
   docRefForDoc,
   docValueKey,
+  liveKeyForDoc,
+  liveKeyForRef,
 } from './doc-refs';
+import {
+  prepareAccountStorageDelete,
+  prepareAccountStorageLayout,
+} from './account-layout';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
   KEY_LIVE_ENTITY,
@@ -871,13 +877,25 @@ export const prepareStorageStateHashes = async (options: {
   entityHashes: StorageFrameEntityHash[];
   entityHashDocs: Map<string, StorageEntityHashDoc>;
   docValueBuffers: Map<string, Buffer>;
+  docPuts: Array<{ key: Buffer; value: Buffer }>;
+  docDels: Buffer[];
   merklePuts: Array<{ key: Buffer; value: Buffer }>;
   merkleDels: Buffer[];
 }> => {
+  const effectivePuts = new Map<string, StorageDoc>();
+  for (const doc of options.puts) effectivePuts.set(liveKeyForDoc(doc).toString('hex'), doc);
+  const effectiveDels = new Map<string, StorageDocRef>();
+  for (const ref of options.dels) {
+    const keyHex = liveKeyForRef(ref).toString('hex');
+    effectivePuts.delete(keyHex);
+    effectiveDels.set(keyHex, ref);
+  }
   const entityHashDocs = options.entityHashDocs
     ? new Map(options.entityHashDocs)
     : await readAllEntityHashDocs(options.db);
   const docValueBuffers = new Map<string, Buffer>();
+  const docPuts: Array<{ key: Buffer; value: Buffer }> = [];
+  const docDels: Buffer[] = [];
   const touchedEntityIds = new Set<string>();
   const persistedEditors = new Map<string, PersistedEntityMerkleEditor>();
 
@@ -910,14 +928,40 @@ export const prepareStorageStateHashes = async (options: {
     });
   };
 
-  for (const doc of options.puts) {
+  for (const doc of effectivePuts.values()) {
     const ref = docRefForDoc(doc);
     const encoded = encodeStorageDocValue(doc);
     docValueBuffers.set(docValueKey(doc), encoded.buffer);
+    if (doc.family === 'account') {
+      const layout = await prepareAccountStorageLayout(
+        options.db,
+        normalizeEntityId(doc.entityId),
+        normalizeEntityId(doc.counterpartyId),
+        liveKeyForDoc(doc),
+        doc.value,
+      );
+      if (!layout.logicalValue.equals(encoded.buffer) || layout.logicalHash !== encoded.hash) {
+        throw new Error(`STORAGE_ACCOUNT_LAYOUT_LOGICAL_MISMATCH:${doc.entityId}:${doc.counterpartyId}`);
+      }
+      docPuts.push(...layout.puts);
+      docDels.push(...layout.dels);
+    } else {
+      docPuts.push({ key: liveKeyForDoc(doc), value: encoded.buffer });
+    }
     await updateEntityCell(ref.entityId, docRefCellKey(ref), encoded.hash);
   }
 
-  for (const ref of options.dels) {
+  for (const ref of effectiveDels.values()) {
+    if (ref.family === 'account') {
+      docDels.push(...await prepareAccountStorageDelete(
+        options.db,
+        normalizeEntityId(ref.entityId),
+        normalizeEntityId(ref.counterpartyId),
+        liveKeyForRef(ref),
+      ));
+    } else {
+      docDels.push(liveKeyForRef(ref));
+    }
     await updateEntityCell(ref.entityId, docRefCellKey(ref), null);
   }
 
@@ -943,6 +987,8 @@ export const prepareStorageStateHashes = async (options: {
     entityHashes,
     entityHashDocs,
     docValueBuffers,
+    docPuts,
+    docDels,
     merklePuts,
     merkleDels: Array.from(merkleDelsByKey.values()),
   };

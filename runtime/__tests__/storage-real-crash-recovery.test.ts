@@ -174,7 +174,7 @@ describe('real process storage crash recovery', () => {
     'after-authoritative-history-commit',
     'after-current-cache-commit',
     'after-frame-db-prune',
-    'after-snapshot-chunk',
+    'after-snapshot-body-batch',
     'after-snapshot-manifest',
     'after-snapshot-history-publish',
     'after-snapshot-retention-prune',
@@ -340,7 +340,7 @@ describe('real process storage crash recovery', () => {
   test('snapshot cleanup fails loud when HEAD publishes a manifest-less body', async () => {
     const dbRoot = dbRootPath;
     mkdirSync(dbRoot, { recursive: true });
-    const boundary: StoragePersistenceBoundary = 'after-snapshot-chunk';
+    const boundary: StoragePersistenceBoundary = 'after-snapshot-body-batch';
     const seed = `storage published orphan corruption ${process.pid} deterministic seed`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
     namespaces.push({ dbRoot, runtimeId });
@@ -379,7 +379,7 @@ describe('real process storage crash recovery', () => {
   }, 30_000);
 
   for (const boundary of [
-    'after-snapshot-chunk',
+    'after-snapshot-body-batch',
     'after-snapshot-manifest',
   ] satisfies StoragePersistenceBoundary[]) {
     test(`next writer collects the unpublished snapshot after SIGKILL ${boundary}`, async () => {

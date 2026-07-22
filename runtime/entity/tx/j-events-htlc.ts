@@ -201,9 +201,10 @@ export function queueCrossJurisdictionSourceDisputeFromTargetDispute(
 
   pushCrossJurisdictionEntityOutput(env, outputs, route.source.entityId, [
       {
-        type: 'disputeStart',
+        type: 'prepareDispute',
         data: {
           counterpartyEntityId: route.source.counterpartyEntityId,
+          description: `Cross-j source dispute prepare ${route.orderId}`,
           crossJurisdictionRouteId: route.orderId,
         },
       },

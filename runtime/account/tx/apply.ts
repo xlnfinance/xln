@@ -27,6 +27,7 @@ import { canProcessAccountTxForDisputeStatus } from '../consensus/dispute-policy
 import { createStructuredLogger } from '../../infra/logger';
 import type { AccountJClaimSession } from '../j-claim-session';
 import { invalidateAccountMapCommitment, type AccountCommittedMap } from '../map-commitment';
+import { assertChangedAccountCollectionsFitStorage } from '../collection-storage-bound';
 
 const accountTxLog = createStructuredLogger('account.tx');
 
@@ -37,7 +38,6 @@ type ApplyAccountTxResult = {
   secret?: string;
   hashlock?: string;
   timedOutHashlock?: string;
-  finalRecipient?: boolean;
   amount?: bigint;
   tokenId?: number;
   swapOfferCreated?: {
@@ -236,7 +236,6 @@ async function applyAccountTxMutation(
       if (resolveResult.error) ret.error = resolveResult.error;
       if (resolveResult.secret) ret.secret = resolveResult.secret;
       if (resolveResult.hashlock) ret.hashlock = resolveResult.hashlock;
-      if (resolveResult.finalRecipient !== undefined) ret.finalRecipient = resolveResult.finalRecipient;
       if (resolveResult.amount !== undefined) ret.amount = resolveResult.amount;
       if (resolveResult.tokenId !== undefined) ret.tokenId = resolveResult.tokenId;
       if (resolveResult.outcome === 'error' && resolveResult.hashlock) ret.timedOutHashlock = resolveResult.hashlock;
@@ -438,6 +437,9 @@ export async function applyAccountTx(
     jClaimSession,
     counterpartyCertifiedBoardHash,
   );
-  if (result.success) invalidateCommittedMapsForTx(accountMachine, accountTx, deltaKeysBeforeMutation);
+  if (result.success) {
+    assertChangedAccountCollectionsFitStorage(accountMachine, accountTx);
+    invalidateCommittedMapsForTx(accountMachine, accountTx, deltaKeysBeforeMutation);
+  }
   return result;
 }

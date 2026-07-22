@@ -178,12 +178,11 @@
   export let getCrossJTargetDisputeRisk: (counterpartyEntityId: string) => CrossJTargetDisputeRisk | null;
   export let formatCrossJTargetDisputeRisk: (risk: CrossJTargetDisputeRisk) => string;
   export let confirmAndQueueDisputeFinalize: (counterpartyEntityId: string, reason: string) => void | Promise<void>;
-  export let confirmAndQueueDisputeStart: (
+  export let confirmAndQueueDisputePrepare: (
     counterpartyEntityId: string,
     reason: string,
     options?: Record<string, unknown>,
   ) => void | Promise<void>;
-  export let confirmAndQueueDisputePrepare: (counterpartyEntityId: string, reason: string) => void | Promise<void>;
   export let addTokenToAccount: () => void | Promise<void>;
   export let handleOpenAccountTargetChange: (event: CustomEvent<{ value?: string }>) => void;
   export let openAccountWithFullId: (targetEntityId: string) => void | Promise<void>;
@@ -419,7 +418,6 @@
       {getCrossJTargetDisputeRisk}
       {formatCrossJTargetDisputeRisk}
       {confirmAndQueueDisputeFinalize}
-      {confirmAndQueueDisputeStart}
       {confirmAndQueueDisputePrepare}
       {addTokenToAccount}
       {submitRuntimeInput}

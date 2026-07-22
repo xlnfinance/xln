@@ -31,6 +31,8 @@ import { normalizeAccountWatchSeed } from '../../account/watch-seed.ts';
 import { HASHLADDER_MAX_FILL_RATIO } from '../htlc/hash-ladder.ts';
 import { assertDisputeProofBodyWithinContractLimits } from '../../jurisdiction/batch.ts';
 import { compareStableText } from '../serialization.ts';
+import { deriveSwapOffdeltaChanges } from '../../orderbook/swap-execution.ts';
+import { deriveTransferOffdeltaChange } from '../../account/delta-movement.ts';
 import {
   encodeDisputeProofHankoPayload,
   hashCooperativeDisputeProofHankoPayload,
@@ -109,8 +111,9 @@ function buildTransformerAllowances(batch: RuntimeBatch): RuntimeAllowance[] {
     addDeltaAllowance(allowances, payment.deltaIndex, payment.amount);
   }
   for (const swap of batch.swaps) {
-    addDeltaAllowance(allowances, swap.addDeltaIndex, swap.addAmount);
-    addDeltaAllowance(allowances, swap.subDeltaIndex, -swap.subAmount);
+    const change = deriveSwapOffdeltaChanges(swap.ownerIsLeft, swap.addAmount, swap.subAmount);
+    addDeltaAllowance(allowances, swap.addDeltaIndex, change.give);
+    addDeltaAllowance(allowances, swap.subDeltaIndex, change.want);
   }
   for (const pull of batch.pulls) {
     addDeltaAllowance(allowances, pull.deltaIndex, pull.amount);
@@ -183,10 +186,7 @@ export function buildAccountProofBody(
       throw new Error(`PROOF_BODY_LOCK_TOKEN_MISSING:${lockId}:${lock.tokenId}`);
     }
 
-    // Amount sign convention:
-    // If senderIsLeft=true, left is sending to right → positive amount
-    // If senderIsLeft=false, right is sending to left → negative amount
-    const signedAmount = lock.senderIsLeft ? lock.amount : -lock.amount;
+    const signedAmount = deriveTransferOffdeltaChange(lock.senderIsLeft, lock.amount);
     // HTLC lock timelocks are stored in runtime milliseconds; the on-chain
     // transformer compares seconds, so payments enter RuntimeBatch in seconds.
     const revealedUntilTimestamp = Math.floor(Number(lock.timelock) / 1000);

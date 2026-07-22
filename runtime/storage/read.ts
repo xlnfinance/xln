@@ -5,6 +5,7 @@ import { decodeBuffer, decodeValidatedBuffer } from './codec';
 import { docRefCellKey, docRefKey, docValueKey } from './doc-refs';
 import { storageMerkleCellHexKey } from './hashes';
 import {
+  KEY_LIVE_ACCOUNT,
   DEFAULT_ACCOUNT_MERKLE_RADIX,
   KEY_HEAD,
   KEY_LIVE_ENTITY,
@@ -40,6 +41,7 @@ import {
   prefixUpperBound,
   textBytes,
 } from './keys';
+import { readAccountStorageLayout } from './account-layout';
 import { iterateKeys, readRawOrNull, readValidatedOrNull } from './level';
 import { listSnapshotHeights } from './lifecycle';
 import { compareAscii } from './sorted-index';
@@ -547,8 +549,11 @@ const listAccountPageFromKeyspace = async (options: {
     const normalized = normalizeEntityId(counterpartyId);
     if (!isAfterAccountCursor(normalized, cursor, direction)) continue;
     if (overlay?.has(normalized)) continue;
+    const stored = key[0] === KEY_LIVE_ACCOUNT
+      ? await readAccountStorageLayout(db, options.entityId, counterpartyId, key)
+      : null;
     const doc = assertStorageAccountDocBinding(
-      decodeValidatedBuffer(await db.get(key), validateStorageAccountDocValue),
+      stored ? validateStorageAccountDocValue(stored.doc) : decodeValidatedBuffer(await db.get(key), validateStorageAccountDocValue),
       options.entityId,
       counterpartyId,
       'page',
@@ -890,16 +895,21 @@ const loadAccountDocAtHeight = async (
   const counterparty = normalizeEntityId(counterpartyId);
 
   if (liveStateReadable && targetHeight === latestMaterializedHeight) {
-    const raw = await readRawOrNull(db, keyLiveAccount(normalized, counterparty));
-    if (!raw) return null;
+    const stored = await readAccountStorageLayout(
+      db,
+      normalized,
+      counterparty,
+      keyLiveAccount(normalized, counterparty),
+    );
+    if (!stored) return null;
     await assertLiveDocHash({
       db,
       ref: { family: 'account', entityId: normalized, counterpartyId: counterparty },
-      raw,
+      raw: stored.logicalValue,
       enabled: storageVerifyDocHashesEnabled(),
     });
     return assertStorageAccountDocBinding(
-      decodeValidatedBuffer(raw, validateStorageAccountDocValue),
+      validateStorageAccountDocValue(stored.doc),
       normalized,
       counterparty,
       'live',
@@ -1216,15 +1226,21 @@ export const loadEntityStateFromStorage = async (options: {
     const accounts = new Map<string, StorageAccountDoc>();
     for await (const key of iterateKeys(db, { prefix: keyLiveAccountPrefix(entityId) })) {
       const parsed = parseLiveAccountKey(key);
-      const raw = await db.get(key);
+      const stored = await readAccountStorageLayout(
+        db,
+        parsed.entityId,
+        parsed.counterpartyId,
+        key,
+      );
+      if (!stored) throw new Error(`STORAGE_LIVE_ACCOUNT_LAYOUT_MISSING:${key.toString('hex')}`);
       await assertLiveDocHash({
         db,
         ref: { family: 'account', entityId: parsed.entityId, counterpartyId: parsed.counterpartyId },
-        raw,
+        raw: stored.logicalValue,
         enabled: verifyDocHashes,
       });
       const doc = assertStorageAccountDocBinding(
-        decodeValidatedBuffer(raw, validateStorageAccountDocValue),
+        validateStorageAccountDocValue(stored.doc),
         parsed.entityId,
         parsed.counterpartyId,
         'live-state',

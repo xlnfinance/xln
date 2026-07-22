@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { decodeBinaryPayload } from '@xln/runtime/storage/binary-codec';
+  import { STORAGE_ACCOUNT_FIELD_BY_TAG } from '@xln/runtime/storage/account-field-tags';
+  import { STORAGE_MERKLE_NAMESPACE_BY_TAG } from '@xln/runtime/storage/merkle-namespace-tags';
   import { compareStableText } from '$lib/utils/stableSort';
 
   type DbKindFilter = 'all' | 'core' | 'infra';
@@ -45,6 +47,7 @@
       }
     | {
         family: 'generic';
+        valueFormat?: 'rebranch-branch';
       };
 
   export let databaseNames: string[] = [];
@@ -92,6 +95,18 @@
     return Number(new DataView(bytes.buffer, bytes.byteOffset + offset, 8).getBigUint64(0, false));
   };
 
+  const readU16 = (bytes: Uint8Array, offset: number): number | null => (
+    bytes.byteLength < offset + 2
+      ? null
+      : new DataView(bytes.buffer, bytes.byteOffset + offset, 2).getUint16(0, false)
+  );
+
+  const readU32 = (bytes: Uint8Array, offset: number): number | null => (
+    bytes.byteLength < offset + 4
+      ? null
+      : new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0, false)
+  );
+
   const readEntityId = (bytes: Uint8Array, offset: number): string | null => {
     if (bytes.byteLength < offset + 32) return null;
     return `0x${bytesToFullHex(bytes.slice(offset, offset + 32))}`;
@@ -118,22 +133,57 @@
       const counterpartyId = readEntityId(bytes, 33);
       if (entityId && counterpartyId) return generic(`live/account/${entityId}/${counterpartyId}`);
     }
+    if (tag === 0x24 && bytes.byteLength === 66) {
+      const entityId = readEntityId(bytes, 1);
+      const counterpartyId = readEntityId(bytes, 33);
+      const field = STORAGE_ACCOUNT_FIELD_BY_TAG.get(bytes[65] ?? -1);
+      if (entityId && counterpartyId && field) return generic(`live/account-field/${entityId}/${counterpartyId}/${field}`);
+    }
     if (tag === 0x23) {
       const entityId = readEntityId(bytes, 1);
       const pairId = readTextAt(bytes, 33);
       if (entityId && pairId) return generic(`live/book/${entityId}/${pairId}`);
     }
-    if (tag === 0x26) return generic(`live/replica-meta/${readEntityId(bytes, 1) ?? bytesToFullHex(bytes)}`);
+    if (tag === 0x26 && bytes.byteLength === 65) {
+      return generic(`live/replica-meta/${readEntityId(bytes, 1)}/${readEntityId(bytes, 33)}`);
+    }
     if (tag === 0x27 || tag === 0x28 || tag === 0x29) {
       const family = tag === 0x27 ? 'merkle/root' : tag === 0x28 ? 'merkle/branch' : 'merkle/leaf';
       const entityId = readEntityId(bytes, 1);
-      const namespace = readTextAt(bytes, 33);
-      if (entityId && namespace) return generic(`${family}/${entityId}/${namespace}`);
+      const namespace = STORAGE_MERKLE_NAMESPACE_BY_TAG.get(bytes[33] ?? -1);
+      const path = bytes.byteLength > 34 ? `/${bytesToFullHex(bytes.slice(34))}` : '';
+      if (entityId && namespace) return generic(`${family}/${entityId}/${namespace}${path}`);
     }
-    if (tag === 0x31 || tag === 0x32 || tag === 0x33) {
+    if ((tag === 0x2a || tag === 0x2b || tag === 0x2c) && bytes.byteLength === 33) {
+      const family = tag === 0x2a ? 'certified-board' : tag === 0x2b ? 'consumption' : 'account-j-claim';
+      return generic(`${family}/${readEntityId(bytes, 1)}`);
+    }
+    if (tag === 0x31 || tag === 0x32 || tag === 0x33 || tag === 0x34) {
       const family = tag === 0x31 ? 'snapshot/entity' : tag === 0x32 ? 'snapshot/account' : 'snapshot/book';
       const entityId = readEntityId(bytes, 9);
-      if (height !== null && entityId) return generic(`${family}/${height}/${entityId}`);
+      const resolvedFamily = tag === 0x34 ? 'snapshot/replica-meta' : family;
+      if (height !== null && entityId) return generic(`${resolvedFamily}/${height}/${entityId}`);
+    }
+    if (tag === 0x7e) {
+      const logicalKeyBytes = readU16(bytes, 1);
+      if (logicalKeyBytes === null || bytes.byteLength < 3 + logicalKeyBytes + 1) return null;
+      const logicalKey = bytes.slice(3, 3 + logicalKeyBytes);
+      const decodedLogical = decodeStorageKey(logicalKey);
+      const logicalLabel = decodedLogical?.label ?? bytesToFullHex(logicalKey);
+      const kindOffset = 3 + logicalKeyBytes;
+      const kind = bytes[kindOffset];
+      if (kind === 0 && bytes.byteLength === kindOffset + 5) {
+        const page = readU32(bytes, kindOffset + 1);
+        return generic(`rebranch/${logicalLabel}/leaf/${page}`);
+      }
+      if (kind === 1 && bytes.byteLength >= kindOffset + 2) {
+        const pathBytes = bytes[kindOffset + 1] ?? 0;
+        if (bytes.byteLength !== kindOffset + 2 + pathBytes) return null;
+        return {
+          label: `rebranch/${logicalLabel}/branch/${bytesToFullHex(bytes.slice(kindOffset + 2)) || 'root'}`,
+          fields: { family: 'generic', valueFormat: 'rebranch-branch' },
+        };
+      }
     }
     if (tag === 0x00 && bytes.byteLength === 1) return generic('frame-db/head');
     if (tag === 0x01 && bytes.byteLength >= 73) {
@@ -314,6 +364,89 @@
     return null;
   };
 
+  const startsWith = (bytes: Uint8Array, prefix: readonly number[]): boolean => (
+    bytes.byteLength >= prefix.length && prefix.every((byte, index) => bytes[index] === byte)
+  );
+
+  const storageEnvelope = (bytes: Uint8Array, keyFields?: StorageKeyFields): DecodedBlob | null => {
+    const accountMagic = [0x58, 0x4c, 0x4e, 0x41, 0x46, 0x01] as const;
+    if (startsWith(bytes, accountMagic)) {
+      const logicalBytes = readU32(bytes, 6);
+      const fieldCount = readU16(bytes, 42);
+      const valid = logicalBytes !== null && fieldCount !== null && bytes.byteLength === 44 + fieldCount * 33;
+      const fields = valid
+        ? Array.from({ length: fieldCount }, (_, index) => {
+            const offset = 44 + index * 33;
+            const tag = bytes[offset] ?? -1;
+            return {
+              tag,
+              field: STORAGE_ACCOUNT_FIELD_BY_TAG.get(tag) ?? `unknown-${tag}`,
+              hash: `0x${bytesToFullHex(bytes.slice(offset + 1, offset + 33))}`,
+            };
+          })
+        : [];
+      const value = {
+        format: 'typed Account fields',
+        valid,
+        logicalBytes,
+        logicalHash: `0x${bytesToFullHex(bytes.slice(10, 42))}`,
+        fieldCount,
+        fields,
+      };
+      return {
+        label: valid ? 'xln/account-fields' : 'CORRUPT account-fields',
+        preview: `logical=${formatBytes(logicalBytes ?? 0)} fields=${fieldCount ?? '?'} valid=${valid}`,
+        pretty: prettyStringify(value),
+        byteLength: bytes.byteLength,
+      };
+    }
+
+    const rebranchMagic = [0x58, 0x4c, 0x4e, 0x52, 0x42, 0x01] as const;
+    if (startsWith(bytes, rebranchMagic)) {
+      const totalBytes = readU32(bytes, 6);
+      const leafCount = readU32(bytes, 10);
+      const rootKind = bytes[14] === 1 ? 'leaf' : bytes[14] === 2 ? 'branch' : 'invalid';
+      const pathBytes = bytes[15] ?? 0xff;
+      const hashOffset = 16 + pathBytes;
+      const valid = pathBytes <= 4 && bytes.byteLength === hashOffset + 48;
+      const value = {
+        format: 'mutable rebranch manifest',
+        valid,
+        totalBytes,
+        leafCount,
+        rootKind,
+        rootPath: bytesToFullHex(bytes.slice(16, hashOffset)),
+        rootHash: `0x${bytesToFullHex(bytes.slice(hashOffset, hashOffset + 32))}`,
+        checksum: `0x${bytesToFullHex(bytes.slice(hashOffset + 32, hashOffset + 48))}`,
+      };
+      return {
+        label: valid ? 'xln/rebranch-manifest' : 'CORRUPT rebranch-manifest',
+        preview: `${formatBytes(totalBytes ?? 0)} leaves=${leafCount ?? '?'} root=${rootKind} valid=${valid}`,
+        pretty: prettyStringify(value),
+        byteLength: bytes.byteLength,
+      };
+    }
+
+    if (keyFields?.family === 'generic' && keyFields.valueFormat === 'rebranch-branch') {
+      const pathBytes = bytes[1] ?? 0xff;
+      const childCount = readU16(bytes, 2 + pathBytes);
+      const value = {
+        format: 'mutable rebranch branch',
+        valid: bytes[0] === 1 && pathBytes <= 4 && childCount !== null,
+        path: bytesToFullHex(bytes.slice(2, 2 + pathBytes)),
+        childCount,
+        physicalBytes: bytes.byteLength,
+      };
+      return {
+        label: value.valid ? 'xln/rebranch-branch' : 'CORRUPT rebranch-branch',
+        preview: `path=${value.path || 'root'} children=${childCount ?? '?'} valid=${value.valid}`,
+        pretty: prettyStringify(value),
+        byteLength: bytes.byteLength,
+      };
+    }
+    return null;
+  };
+
   const decodeBlob = (value: unknown, keyFields?: StorageKeyFields): DecodedBlob => {
     if (typeof value === 'string') {
       const pretty = tryPrettyJson(value);
@@ -343,6 +476,8 @@
         byteLength: text.length,
       };
     }
+    const envelope = storageEnvelope(bytes, keyFields);
+    if (envelope) return envelope;
     const decodedPayload = tryDecodeXlnBinaryPayload(bytes);
     if (decodedPayload !== null) {
       const inspectable = inspectableValue(decodedPayload);

@@ -390,6 +390,12 @@ type EntityTxPayload =
         counterpartyEntityId: string;
         description?: string;
         minCooldownMs?: number;
+        /** Internal cross-j recovery binding retained until remote book cleanup ACKs. */
+        crossJurisdictionRouteId?: string;
+        /** Optional adversarial evidence; malformed values remain soft-fail/no-op in the transformer. */
+        starterInitialArguments?: string;
+        allowUnsafeCrossJTargetDispute?: boolean;
+        acceptedCrossJTargetLossAmount?: bigint;
       };
     }
   | {

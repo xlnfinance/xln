@@ -1638,7 +1638,6 @@ async function buildIncomingFrameAckMaterial(
         ackProofResult.proofBodyHash,
         ackSignedNonce,
         ackProofResult.proofBodyStruct,
-        { appliedAccountTxs: receivedFrame.accountTxs, appliedFrameHeight: receivedFrame.height },
       ),
     );
   }

@@ -3,6 +3,7 @@ import {
   KEY_DIFF,
   KEY_FRAME,
   KEY_LIVE_ACCOUNT,
+  KEY_LIVE_ACCOUNT_FIELD,
   KEY_LIVE_BOOK,
   KEY_LIVE_ENTITY,
   KEY_LIVE_REPLICA_META,
@@ -44,6 +45,7 @@ export const inspectStorage = async (options: {
     snapshotHeights,
     liveEntityStats,
     liveAccountStats,
+    liveAccountFieldStats,
     liveBookStats,
     liveReplicaMetaStats,
     merkleRootStats,
@@ -63,6 +65,7 @@ export const inspectStorage = async (options: {
     listSnapshotHeights(db),
     measurePrefixBytes(db, Buffer.from([KEY_LIVE_ENTITY])),
     measurePrefixBytes(db, Buffer.from([KEY_LIVE_ACCOUNT])),
+    measurePrefixBytes(db, Buffer.from([KEY_LIVE_ACCOUNT_FIELD])),
     measurePrefixBytes(db, Buffer.from([KEY_LIVE_BOOK])),
     measurePrefixBytes(db, Buffer.from([KEY_LIVE_REPLICA_META])),
     measurePrefixBytes(db, Buffer.from([KEY_MERKLE_ROOT])),
@@ -82,6 +85,7 @@ export const inspectStorage = async (options: {
   const liveBytes =
     liveEntityStats.bytes +
     liveAccountStats.bytes +
+    liveAccountFieldStats.bytes +
     liveBookStats.bytes +
     liveReplicaMetaStats.bytes +
     merkleRootStats.bytes +
@@ -100,6 +104,8 @@ export const inspectStorage = async (options: {
     snapshotHeights,
     liveEntityCount: liveEntityStats.count,
     liveAccountCount: liveAccountStats.count,
+    liveAccountFieldCount: liveAccountFieldStats.count,
+    liveAccountFieldBytes: liveAccountFieldStats.bytes,
     liveBookCount: liveBookStats.count,
     merkleRootCount: merkleRootStats.count,
     merkleBranchCount: merkleBranchStats.count,

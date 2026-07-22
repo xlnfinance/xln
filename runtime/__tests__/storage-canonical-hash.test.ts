@@ -7,6 +7,7 @@ import {
 } from '../storage/canonical-hash';
 import { computeStorageFrameHash, computeStoragePostStateHash } from '../storage/hashes';
 import { encodeBuffer } from '../storage/codec';
+import { buildStorageLiveReplicaMetaCommitment } from '../storage/replicas';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { applyCommand, createBook, replaceOrderbookPair } from '../orderbook';
@@ -483,4 +484,33 @@ test('immediate replica metadata encoding matches the isolated recovery projecti
 
   expect(actual.equals(expected)).toBeTrue();
   expect(replica.state.accounts.get(counterpartyId)?.clonedForValidation).toBeDefined();
+});
+
+test('live replica metadata omits transient commitment caches at every in-flight state level', () => {
+  const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  const validatorState = cloneEntityState(replica.state, true);
+  const transientEntityCache = Symbol('xln.entity.account-commitment-cache');
+  const transientAccountCache = Symbol('xln.account.commitment-cache');
+  Object.defineProperty(validatorState, transientEntityCache, {
+    configurable: true,
+    enumerable: false,
+    value: new Map(),
+  });
+  Object.defineProperty(validatorState.accounts.get(counterpartyId)!, transientAccountCache, {
+    configurable: true,
+    enumerable: false,
+    value: new Map(),
+  });
+  replica.validatorExecution = {
+    frameHash: `0x${'ab'.repeat(32)}`,
+    height: validatorState.height + 1,
+    state: validatorState,
+    outputs: [],
+    jOutputs: [],
+    hashesToSign: [],
+    storageChanges: [],
+  };
+
+  expect(() => buildStorageLiveReplicaMetaCommitment(env)).not.toThrow();
 });

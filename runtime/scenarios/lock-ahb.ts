@@ -1638,18 +1638,18 @@ export async function lockAhb(env: Env): Promise<void> {
     const hostageOfflineSigners = new Set([hub.signer]);
 
 
-    // Bob starts dispute on Hub-Bob account
-    console.log(`⚔️  STEP 1: Bob calls disputeStart on Hub-Bob account...`);
+    // Bob first freezes the Account and its orderbook surface, then submits J.
+    console.log(`⚔️  STEP 1: Bob prepares dispute on Hub-Bob account...`);
     await processWithOffline(env, [{
       entityId: bob.id,
       signerId: bob.signer,
       entityTxs: [{
-        type: 'disputeStart',
+        type: 'prepareDispute',
         data: {
           counterpartyEntityId: hub.id,
-          description: 'Hostage: Hub offline, revealing secret on-chain'
-        }
-      }]
+          description: 'Hostage: Hub offline, revealing secret on-chain',
+        },
+      }],
     }], hostageOfflineSigners, 'hostage-hub-offline');
     await convergeWithOffline(env, hostageOfflineSigners, 20, 'hostage-hub-offline');
 

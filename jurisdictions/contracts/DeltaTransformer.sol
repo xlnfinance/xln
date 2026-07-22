@@ -228,8 +228,17 @@ contract DeltaTransformer {
 
   function applySwap(int[] memory deltas, Swap memory swap, uint16 fillRatio) private pure {
     if (swap.addDeltaIndex >= deltas.length || swap.subDeltaIndex >= deltas.length) revert InvalidDeltaIndex();
-    deltas[swap.addDeltaIndex] += int(swap.addAmount * fillRatio / MAX_FILL_RATIO);
-    deltas[swap.subDeltaIndex] -= int(swap.subAmount * fillRatio / MAX_FILL_RATIO);
+    int give = int(swap.addAmount * fillRatio / MAX_FILL_RATIO);
+    int want = int(swap.subAmount * fillRatio / MAX_FILL_RATIO);
+    // Delta is LEFT's allocation. A left maker gives the give token (negative)
+    // and receives the want token (positive); a right maker is the inverse.
+    if (swap.ownerIsLeft) {
+      deltas[swap.addDeltaIndex] -= give;
+      deltas[swap.subDeltaIndex] += want;
+    } else {
+      deltas[swap.addDeltaIndex] += give;
+      deltas[swap.subDeltaIndex] -= want;
+    }
   }
 
   function applyPull(

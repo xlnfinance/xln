@@ -454,7 +454,6 @@ const cloneDisputeArgumentSnapshot = (
   nonce: snapshot.nonce,
   side: snapshot.side,
   proofBodyStruct: cloneProofBodyStruct(snapshot.proofBodyStruct) as ProofBodyStruct,
-  ...(snapshot.appliedFrameHeight !== undefined ? { appliedFrameHeight: snapshot.appliedFrameHeight } : {}),
   plan: {
     paymentHashlocks: [...snapshot.plan.paymentHashlocks],
     leftSwapOfferIds: [...snapshot.plan.leftSwapOfferIds],
@@ -462,9 +461,6 @@ const cloneDisputeArgumentSnapshot = (
     leftPullIds: [...snapshot.plan.leftPullIds],
     rightPullIds: [...snapshot.plan.rightPullIds],
   },
-  ...(snapshot.appliedSwapFillFingerprints
-    ? { appliedSwapFillFingerprints: [...snapshot.appliedSwapFillFingerprints] }
-    : {}),
 });
 
 const cloneDisputeEvidenceIntoAccount = (
@@ -1022,6 +1018,19 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
       deltas: Array.isArray(proofBody.deltas) ? [...proofBody.deltas] : [],
     },
     disputeConfig: { ...(account.disputeConfig ?? {}) },
+    ...(account.disputePrepare
+      ? {
+          disputePrepare: {
+            ...account.disputePrepare,
+            ...(account.disputePrepare.pendingOrderbookRemovalIds
+              ? { pendingOrderbookRemovalIds: [...account.disputePrepare.pendingOrderbookRemovalIds] }
+              : {}),
+            ...(account.disputePrepare.startIntent
+              ? { startIntent: { ...account.disputePrepare.startIntent } }
+              : {}),
+          },
+        }
+      : {}),
     leftPendingJClaims: { ...account.leftPendingJClaims },
     rightPendingJClaims: { ...account.rightPendingJClaims },
     lastFinalizedJHeight: account.lastFinalizedJHeight,

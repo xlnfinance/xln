@@ -25,7 +25,12 @@ import type { AccountMachine, AccountTx } from '../../../types';
 import { deriveDelta } from '../../utils';
 import { createDefaultDelta } from '../../../validation-utils';
 import { FINANCIAL } from '../../../constants';
-import { deriveExactSwapFillRatio, exactFillRatioToUint16, MAX_SWAP_FILL_RATIO } from '../../../orderbook/swap-execution';
+import {
+  deriveExactSwapFillRatio,
+  deriveSwapOffdeltaChanges,
+  exactFillRatioToUint16,
+  MAX_SWAP_FILL_RATIO,
+} from '../../../orderbook/swap-execution';
 import {
   computeSwapPriceTicks,
   requantizeRemainingSwapAtPrice,
@@ -323,17 +328,9 @@ export async function handleSwapResolve(
 
   // 6. Update deltas atomically if filling (at LIMIT PRICE)
   if (filledGive > 0n) {
-    // CANONICAL Delta semantics:
-    // - Left pays → offdelta DECREASES
-    // - Right pays → offdelta INCREASES
-
-    if (offer.makerIsLeft) {
-      giveDelta.offdelta -= filledGive;
-      wantDelta.offdelta += filledWant;
-    } else {
-      giveDelta.offdelta += filledGive;
-      wantDelta.offdelta -= filledWant;
-    }
+    const change = deriveSwapOffdeltaChanges(offer.makerIsLeft, filledGive, filledWant);
+    giveDelta.offdelta += change.give;
+    wantDelta.offdelta += change.want;
 
     events.push(`💱 Swap filled: ${filledGive} token${offer.giveTokenId} for ${filledWant} token${offer.wantTokenId}`);
   }

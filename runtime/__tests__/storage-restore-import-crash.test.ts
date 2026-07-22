@@ -25,7 +25,7 @@ const fixture = join(import.meta.dir, 'fixtures/storage-restore-import-crash-chi
 const namespaces: string[] = [];
 const boundaries = [
   ['after-restore-current-fence', 1],
-  ['after-restore-current-clear-chunk', 1],
+  ['after-restore-current-clear-batch', 1],
   ['after-restore-current-body', 1],
   ['after-restore-authoritative-swap', 2],
   ['after-restore-current-head', 2],
