@@ -4253,7 +4253,10 @@ function refreshStaleUncommittedSettlementSeals(state: EntityState): void {
       throw new Error(`SETTLEMENT_REFRESH_DEFERRED_CONFLICT:${accountId}:${existing}:${workspaceHash}`);
     }
     state.deferredAccountProposals.set(accountId, workspaceHash);
-    entityLog.warn('settlement.stale_seal_refreshed', {
+    // This is the expected deterministic recovery path after a same-height
+    // tiebreaker, not degraded operation. Keep the evidence without surfacing
+    // a false browser warning that would imply operator action is required.
+    entityLog.info('settlement.stale_seal_refreshed', {
       account: shortId(accountId),
       expectedNonce,
       staleNonces: staleSeals.map((tx) => tx.data.settlementNonce).sort((left, right) => left - right),
