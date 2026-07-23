@@ -1397,7 +1397,7 @@ const listDynamicPlaywrightTargets = (
   }));
 };
 
-const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
+export const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
   const out: PlaywrightTarget[] = [];
   const sourcePathForTarget = (file: string): string =>
     file.match(/^(.+\.spec\.ts)(?:::.*|:\d+(?::\d+)?)?$/)?.[1] || file;
@@ -1553,7 +1553,7 @@ const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
   return out;
 };
 
-const listPlaywrightSpecFiles = (includeAllSpecs: boolean): string[] => {
+export const listPlaywrightSpecFiles = (includeAllSpecs: boolean): string[] => {
   const excludedDefaultSpecs = new Set<string>([
     // Legacy shared-page AHB flow. Useful assertions were ported into
     // tests/e2e-ahb-isolated.spec.ts; keep this out of the canonical isolated bar.
