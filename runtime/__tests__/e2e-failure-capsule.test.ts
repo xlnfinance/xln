@@ -118,6 +118,7 @@ describe('isolated E2E first-failure diagnostics', () => {
       async fetch(request) {
         const path = new URL(request.url).pathname;
         if (path === '/api/health') return Response.json({ ok: true });
+        if (path === '/api/debug/incidents') return Response.json({ ok: true, incidents: [] });
         if (path === '/api/debug/entities') return new Response('{"entities":', { status: 200 });
         if (path === '/api/debug/events') return new Response('unavailable', { status: 503 });
         await Bun.sleep(250);
@@ -133,6 +134,10 @@ describe('isolated E2E first-failure diagnostics', () => {
       })).rejects.toThrow('E2E_FAILURE_FORENSICS_INCOMPLETE');
       expect(performance.now() - startedAt).toBeLessThan(150);
       expect(JSON.parse(readFileSync(join(outputDir, 'health.json'), 'utf8'))).toEqual({ ok: true });
+      expect(JSON.parse(readFileSync(join(outputDir, 'incidents.json'), 'utf8'))).toEqual({
+        ok: true,
+        incidents: [],
+      });
       expect(readFileSync(join(outputDir, 'entities.error.txt'), 'utf8')).toContain('E2E_JSON_INVALID');
       expect(readFileSync(join(outputDir, 'events.error.txt'), 'utf8')).toContain('HTTP_503');
       expect(readFileSync(join(outputDir, 'activity.error.txt'), 'utf8')).toContain('Timeout');

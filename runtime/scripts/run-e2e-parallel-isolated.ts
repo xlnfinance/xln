@@ -2498,11 +2498,33 @@ const prepareIsolatedE2EBuild = async (
 const forensicEndpoints = [
   { name: 'health', path: '/api/health' },
   { name: 'entities', path: '/api/debug/entities?limit=5000' },
+  { name: 'incidents', path: '/api/debug/incidents?state=open&limit=1000' },
   // The relay keeps a bounded 5k ring. Capture all of it: high-volume gossip
   // after a failure must not hide the earlier command/delivery transition.
   { name: 'events', path: '/api/debug/events?last=5000' },
   { name: 'activity', path: '/api/debug/activity?limit=500' },
 ] as const;
+
+const readFailureIncidentSummary = (
+  logsDir: string,
+  shard: number,
+): Array<{ code: string; count: number; runtimeId: string; fingerprint: string }> => {
+  const path = join(
+    deriveE2EShardPaths(logsDir, shard).resultsDir,
+    'failure-debug',
+    'incidents.json',
+  );
+  if (!existsSync(path)) return [];
+  const payload = parseJsonStrict(readFileSync(path, 'utf8'), path) as {
+    incidents?: Array<Record<string, unknown>>;
+  };
+  return (payload.incidents ?? []).slice(0, 8).map(incident => ({
+    code: String(incident['code'] || 'UNKNOWN'),
+    count: Math.max(1, Math.floor(Number(incident['count'] || 1))),
+    runtimeId: String(incident['runtimeId'] || 'none'),
+    fingerprint: String(incident['fingerprint'] || 'none'),
+  }));
+};
 
 const timeoutForensicError = (error: unknown, timeoutMs: number): unknown => {
   const description = formatErrorForLog(error);
@@ -3515,6 +3537,14 @@ async function main(): Promise<void> {
         }
         for (const attachment of capsule.attachments) {
           if (attachment.path) console.log(`      attachment[${attachment.name}]: ${attachment.path}`);
+        }
+      }
+      if (r.status === 'failed') {
+        for (const incident of readFailureIncidentSummary(logsDir, r.shard)) {
+          console.log(
+            `      incident: ${incident.code} count=${incident.count} ` +
+            `runtime=${incident.runtimeId} fingerprint=${incident.fingerprint}`,
+          );
         }
       }
       const steps = parseStepTimings(r.logPath)
