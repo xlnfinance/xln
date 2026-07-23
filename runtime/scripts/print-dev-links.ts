@@ -98,9 +98,8 @@ const browserRows: LinkRow[] = webHttp ? [
 const rows: LinkRow[] = [
   { label: 'wallet', url: `${web}/app` },
   ...browserRows,
-  { label: 'remote import read', url: keys.importUrl! },
-  { label: 'remote import admin', url: keys.adminImportUrl! },
-  { label: 'suggested runtimes', url: `${api}/api/runtime-import?access=read` },
+  { label: 'remote admin import', url: keys.adminImportUrl! },
+  { label: 'suggested runtimes', url: `${api}/api/runtime-import?access=admin` },
   { label: 'health admin', url: `${web}/health` },
   { label: 'qa cockpit', url: `${web}/qa` },
   { label: 'runs history', url: `${web}/runs` },

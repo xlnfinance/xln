@@ -172,6 +172,9 @@
   function formatKeyLabel(raw: string): string {
     const known: Record<string, string> = {
       offerId: 'Offer',
+      pullId: 'Pull',
+      crossJurisdiction: 'Cross-J leg',
+      crossJurisdictionRoute: 'Cross-J route',
       tokenId: 'Token',
       giveTokenId: 'Sell Token',
       wantTokenId: 'Buy Token',
@@ -275,6 +278,14 @@
         .map((hop) => entityLabel(hop));
       return { label, value: path.length > 0 ? path.join(' → ') : '-' };
     }
+    if ((key === 'crossJurisdiction' || key === 'crossJurisdictionRoute') && value && typeof value === 'object') {
+      const cross = value as Record<string, unknown>;
+      const orderId = String(cross['orderId'] || '-');
+      const leg = String(cross['leg'] || '').trim();
+      const status = String(cross['status'] || '').trim();
+      const parts = [orderId, leg, status].filter(Boolean);
+      return { label, value: parts.join(' · ') };
+    }
     if (key === 'observedAt') {
       const observedAt = toNumberSafe(value);
       if (observedAt === null || observedAt <= 0) return { label, value: '-' };
@@ -353,6 +364,9 @@
     const data = (tx?.data && typeof tx.data === 'object') ? (tx.data as Record<string, unknown>) : {};
     const orderedKeys = [
       'offerId',
+      'pullId',
+      'crossJurisdiction',
+      'crossJurisdictionRoute',
       'counterpartyEntityId',
       'fromEntityId',
       'toEntityId',

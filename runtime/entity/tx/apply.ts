@@ -77,6 +77,7 @@ import {
   handleRegisterCrossJurisdictionSwapEntityTx,
 } from './handlers/cross-j-setup';
 import { handleCrossJurisdictionFillNoticeEntityTx } from './handlers/cross-j-fill';
+import { handleCrossJurisdictionSettledEntityTx } from './handlers/cross-j-settled';
 import {
   handleMaterializeCrossJurisdictionClearEntityTx,
   handleRequestCrossJurisdictionClearEntityTx,
@@ -298,6 +299,7 @@ const entityTxDispatchers: Record<string, EntityTxDispatcher> = {
   materializeCrossJurisdictionSwap: (env, state, tx, options) => handleMaterializeCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'materializeCrossJurisdictionSwap' }>, options),
   registerCrossJurisdictionSwap: (env, state, tx, options) => handleRegisterCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'registerCrossJurisdictionSwap' }>, options),
   crossJurisdictionFillNotice: (_env, state, tx) => handleCrossJurisdictionFillNoticeEntityTx(state, tx as Extract<EntityTx, { type: 'crossJurisdictionFillNotice' }>),
+  crossJurisdictionSettled: (_env, state, tx) => handleCrossJurisdictionSettledEntityTx(state, tx as Extract<EntityTx, { type: 'crossJurisdictionSettled' }>),
   materializeCrossJurisdictionClear: (env, state, tx) => handleMaterializeCrossJurisdictionClearEntityTx(env, state, tx as Extract<EntityTx, { type: 'materializeCrossJurisdictionClear' }>),
   requestCrossJurisdictionClear: (env, state, tx, options) => handleRequestCrossJurisdictionClearEntityTx(env, state, tx as Extract<EntityTx, { type: 'requestCrossJurisdictionClear' }>, options?.storageChanges),
   crossJurisdictionSalvage: (env, state, tx) => handleCrossJurisdictionSalvageEntityTx(env, state, tx as Extract<EntityTx, { type: 'crossJurisdictionSalvage' }>),

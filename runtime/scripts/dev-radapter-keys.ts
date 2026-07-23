@@ -44,8 +44,8 @@ const outPath = resolve(readArg('--out', './db/dev/radapter-keys.json')!);
 const envOutPath = resolve(readArg('--env-out', './db/dev/radapter-keys.env')!);
 const suppressUrlLog = hasFlag('--suppress-url-log');
 const quiet = hasFlag('--quiet');
-const buildRuntimeImportSourceUrl = (access: 'read' | 'admin'): string =>
-  `${appOrigin}/app#${REMOTE_RUNTIME.IMPORT_SOURCE_HASH_PARAM}=${encodeURIComponent(`/api/runtime-import?access=${access}`)}`;
+const buildRuntimeImportSourceUrl = (): string =>
+  `${appOrigin}/app#${REMOTE_RUNTIME.IMPORT_SOURCE_HASH_PARAM}=${encodeURIComponent('/api/runtime-import?access=admin')}`;
 
 const seeds: Record<string, string> = {};
 const entries = RUNTIMES.map(runtime => {
@@ -59,13 +59,12 @@ const entries = RUNTIMES.map(runtime => {
   };
 });
 
-const importUrl = buildRuntimeImportSourceUrl('read');
-const adminImportUrl = buildRuntimeImportSourceUrl('admin');
+const adminImportUrl = buildRuntimeImportSourceUrl();
 
 const payload = {
   generatedAt: new Date().toISOString(),
   note: 'Local dev auth seeds. This file is under db/ and must not be committed. Runtime-bound capability tokens are issued by /api/runtime-import after the mesh boots.',
-  importUrl,
+  importUrl: adminImportUrl,
   adminImportUrl,
   entries,
 };
@@ -82,7 +81,7 @@ chmodSync(outPath, 0o600);
 chmodSync(envOutPath, 0o600);
 
 if (!quiet && !suppressUrlLog) {
-  console.log(importUrl);
+  console.log(adminImportUrl);
 }
 if (!quiet) {
   console.log(`XLN dev radapter keys written to ${outPath}`);

@@ -1,13 +1,7 @@
 <script lang="ts">
   import type { RoutedSwapRouteCandidate } from './routed-swap-planner';
 
-  export let liveOrderAmountInput = '';
   export let orderAmountInput = '';
-  export let latestOrderAmountDomValue = '';
-  export let hasLatestOrderAmountDomValue = false;
-  export let orderAmountRevision = 0;
-  export let orderAmountDomRevision = 0;
-  export let orderAmountNodeValue = '';
   export let giveToken = 0;
   export let wantToken = 0;
   export let giveTokenDecimals = 18;
@@ -34,13 +28,7 @@
   class="route-builder"
   class:cross-route={swapRouteMode === 'cross'}
   data-testid="swap-route-picker"
-  data-order-amount-input={liveOrderAmountInput}
   data-order-amount-state={orderAmountInput}
-  data-order-amount-dom={latestOrderAmountDomValue}
-  data-order-amount-has-dom={hasLatestOrderAmountDomValue ? 'true' : 'false'}
-  data-order-amount-revision={orderAmountRevision}
-  data-order-amount-dom-revision={orderAmountDomRevision}
-  data-order-amount-node={orderAmountNodeValue}
   data-give-token={giveToken}
   data-want-token={wantToken}
   data-give-decimals={giveTokenDecimals}

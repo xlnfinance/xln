@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { flushSync, tick } from 'svelte';
+  import { tick } from 'svelte';
   import type { AccountMachine, EntityReplica, Tab } from '$lib/types/ui';
   import { writable } from 'svelte/store';
   import type { BookState, CrossJurisdictionSwapRoute, Delta, EntityTx, Env } from '@xln/runtime/xln-api';
@@ -38,6 +38,7 @@
     maxBigInt,
     normalizeJurisdictionDisplayName,
     nonNegative,
+    orderbookLotsDisplayScale,
     parseCrossAssetKey,
     resolveHubIdCandidate,
     sameOrderbookPairLabel,
@@ -119,11 +120,6 @@
   export let counterpartyId: string = '';
   let orderbookScopeMode: 'aggregated' | 'selected' = 'selected';
   let swapPanelRoot: HTMLDivElement | null = null;
-  let orderAmountInputElement: HTMLInputElement | null = null;
-  let orderAmountRevision = 0;
-  let orderAmountDomRevision = 0;
-  let latestOrderAmountDomValue = '';
-  let hasLatestOrderAmountDomValue = false;
   let createOrderAccountId = '';
   let selectedBookAccountId = '';
   let activeOrderAccountId = '';
@@ -138,7 +134,6 @@
     priceTicks: bigint;
     displayPrice: string;
     inputPriceTicks: bigint;
-    sizeBaseWei: bigint;
     baseTokenId: number;
     quoteTokenId: number;
     accountId: string;
@@ -159,11 +154,13 @@
   const orderbookSnapshotCache = new Map<string, OrderbookSnapshot>();
   const orderbookSnapshotCacheSignatures = new Map<string, string>();
   const orderbookSnapshotCacheBumpedAt = new Map<string, number>();
-  const routedOrderAmountInput = writable('');
   let orderbookQuoteNonce = 0;
   let orderbookPairId = '1/2';
   let orderbookRefreshNonce = 0;
   let orderPercent = 100;
+  let amountEditedByUser = false;
+  let lastAutoAmountContextSignature = '';
+  let lastAutoAmountCapacity = -1n;
   let submitError = '';
   let pendingSwapFeedbackOfferId = '';
   let swapCompletionModal: SwapCompletionModal | null = null;
@@ -174,7 +171,6 @@
   let giveTokenId = '1';
   let wantTokenId = '2';
   let orderAmountInput = '';
-  let liveOrderAmountInput = '';
   let priceRatioInput = '';
   let giveAmount: bigint = 0n;
   let wantAmount: bigint = 0n;
@@ -189,6 +185,7 @@
   let lastOrderbookPairSelectCommit = '';
   let orderMode: 'buy-base' | 'sell-base' | 'none' = 'none';
   let limitPriceTicks: bigint | null = null;
+  let marketPriceTicks: bigint | null = null;
   let orderListTab: 'open' | 'closed' = 'open';
   let orderRouteFilter: 'all' | 'same' | 'cross' = 'all';
   let closedOrderStatusFilter: 'all' | ClosedOrderStatus = 'all';
@@ -1304,10 +1301,18 @@
   $: targetSelectableSwapTokenIds = new Set(tokenIdsForJurisdiction(targetJurisdictionLabel));
   $: giveTokenOptions = Array.from(sourceSelectableSwapTokenIds)
     .sort((a, b) => compareStableText(tokenSymbol(a), tokenSymbol(b)))
-    .map((tokenId) => ({ tokenId, symbol: tokenSymbol(tokenId) }));
+    .map((tokenId) => ({
+      tokenId,
+      symbol: tokenSymbol(tokenId),
+      label: tokenNetworkLabel(tokenId, sourceJurisdictionLabel, tokenSymbol),
+    }));
   $: wantTokenOptions = Array.from(targetSelectableSwapTokenIds)
     .sort((a, b) => compareStableText(tokenSymbol(a), tokenSymbol(b)))
-    .map((tokenId) => ({ tokenId, symbol: tokenSymbol(tokenId) }));
+    .map((tokenId) => ({
+      tokenId,
+      symbol: tokenSymbol(tokenId),
+      label: tokenNetworkLabel(tokenId, targetJurisdictionLabel, tokenSymbol),
+    }));
   $: swapTokenOptions = Array.from(new Set([...sourceSelectableSwapTokenIds, ...targetSelectableSwapTokenIds]))
     .sort((a, b) => compareStableText(tokenSymbol(a), tokenSymbol(b)))
     .map((tokenId) => ({ tokenId, symbol: tokenSymbol(tokenId) }));
@@ -1451,7 +1456,7 @@
   function computeCurrentReceiveAmountForFlip(): bigint {
     const fallbackAmount = canonicalWantAmount > 0n ? canonicalWantAmount : wantAmount;
     if (!parsedOrderbookPair) return fallbackAmount;
-    const currentGiveAmount = parseDecimalAmountToBigInt(liveOrderAmountInput, getTokenDecimals(giveToken));
+    const currentGiveAmount = parseDecimalAmountToBigInt(orderAmountInput, getTokenDecimals(giveToken));
     const explicitPriceTicks = selectedOrderLevel?.inputPriceTicks && selectedOrderLevel.inputPriceTicks > 0n
       ? selectedOrderLevel.inputPriceTicks
       : (selectedOrderLevel?.priceTicks && selectedOrderLevel.priceTicks > 0n ? selectedOrderLevel.priceTicks : limitPriceTicks);
@@ -1537,31 +1542,12 @@
     setSwapTokens(giveToken, nextWant);
   }
   function setOrderAmountInputValue(value: string): void {
-    const next = String(value || '');
-    flushSync(() => {
-      routedOrderAmountInput.set(next);
-      if (!hasLatestOrderAmountDomValue || latestOrderAmountDomValue !== next) {
-        latestOrderAmountDomValue = next;
-        hasLatestOrderAmountDomValue = true;
-        orderAmountDomRevision += 1;
-      }
-      if (orderAmountInput !== next) {
-        orderAmountInput = next;
-        orderAmountRevision += 1;
-      }
-    });
+    orderAmountInput = String(value || '');
   }
-  function handleOrderAmountInput(event: Event): void {
-    setOrderAmountInputValue(String((event.currentTarget as HTMLInputElement | null)?.value || ''));
+  function handleOrderAmountInput(value: string): void {
+    amountEditedByUser = true;
+    setOrderAmountInputValue(value);
   }
-  function handleSwapPanelAmountSync(event: Event): void {
-    const input = event.target instanceof HTMLInputElement && event.target.dataset['testid'] === 'swap-order-amount'
-      ? event.target
-      : null;
-    if (!input) return;
-    setOrderAmountInputValue(input.value);
-  }
-
   function tokenIconText(symbol: string): string {
     const text = String(symbol || '').trim();
     return text.slice(0, 1).toUpperCase() || '?';
@@ -1945,9 +1931,13 @@
     wantTokenPresentInAccount = hasTokenInAccount(activeOrderAccountId, wantToken);
     availableGiveCapacity = readOutCapacity(activeOrderAccountId, giveToken);
     availableWantInCapacity = readInCapacity(activeOrderAccountId, wantToken);
-    autoInboundCreditTarget = computeAutoInboundCreditTarget(activeOrderAccountId, wantToken, canonicalWantAmount);
     currentPeerCreditLimit = readPeerCreditLimit(activeOrderAccountId, wantToken);
   }
+  $: autoInboundCreditTarget = computeAutoInboundCreditTarget(
+    activeOrderAccountId,
+    wantToken,
+    canonicalWantAmount,
+  );
   $: {
     crossTargetInCapacity = selectedCrossTarget
       ? readInCapacityForReplica(selectedCrossTargetReplica, selectedCrossTarget.targetEntityId, selectedCrossTarget.targetHubEntityId, wantToken)
@@ -1987,6 +1977,31 @@
   $: formattedAvailableGive = Number.isFinite(giveToken) && giveToken > 0
     ? `${formattedAvailableGiveAmount} ${giveTokenSymbol}`
     : formattedAvailableGiveAmount;
+  $: {
+    const nextAutoAmountContextSignature = [
+      sourceEntityIdValue,
+      activeOrderAccountId,
+      giveToken,
+    ].join('::');
+    if (nextAutoAmountContextSignature !== lastAutoAmountContextSignature) {
+      lastAutoAmountContextSignature = nextAutoAmountContextSignature;
+      lastAutoAmountCapacity = -1n;
+      amountEditedByUser = false;
+    }
+    if (
+      !amountEditedByUser
+      && activeOrderAccountId
+      && Number.isFinite(giveToken)
+      && giveToken > 0
+      && availableGiveCapacity !== lastAutoAmountCapacity
+    ) {
+      lastAutoAmountCapacity = availableGiveCapacity;
+      const autoSelection = computeOrderAmountSelection(100);
+      orderPercent = 100;
+      orderAmountInput = autoSelection.amountInput;
+      if (autoSelection.priceInput !== null) priceRatioInput = autoSelection.priceInput;
+    }
+  }
   $: formattedAvailableWantInAmount = Number.isFinite(wantToken) && wantToken > 0
     ? formatAmount(availableWantInCapacity, wantToken)
     : availableWantInCapacity.toString();
@@ -2022,12 +2037,22 @@
   $: estimatedSpendLabel = Number.isFinite(giveToken) && giveToken > 0
     ? `${formatAmount(canonicalGiveAmount, giveToken)} ${giveTokenSymbol}`
     : canonicalGiveAmount.toString();
-  $: sourceAssetLabel = `${giveTokenSymbol} · ${sourceJurisdictionLabel}`;
-  $: targetAssetLabel = `${wantTokenSymbol} · ${targetJurisdictionLabel}`;
+  $: sourceAssetLabel = tokenNetworkLabel(giveToken, sourceJurisdictionLabel, tokenSymbol);
+  $: targetAssetLabel = tokenNetworkLabel(wantToken, targetJurisdictionLabel, tokenSymbol);
   $: swapRouteTitle = swapRouteMode === 'cross'
     ? `${sourceJurisdictionLabel} -> ${targetJurisdictionLabel}`
     : sourceJurisdictionLabel;
-  $: marketPriceTicks = resolveReferencePriceTicks();
+  // resolveReferencePriceTicks reads these values through a function boundary;
+  // enumerate them so a fresh book snapshot updates the visible best price.
+  $: {
+    orderMode;
+    tradeSide;
+    orderbookSnapshot;
+    orderbookPairId;
+    activeBookHubId;
+    activeOrderAccountId;
+    marketPriceTicks = resolveReferencePriceTicks();
+  }
   $: marketPriceLabel = marketPriceTicks && marketPriceTicks > 0n
     ? `${formatPriceTicks(marketPriceTicks)} ${quoteTokenSymbol}`
     : 'No market';
@@ -2254,18 +2279,28 @@
     selectedOrderLevel = null;
   }
 
-  function applyOrderPercent(percent: number) {
+  function computeOrderAmountSelection(percent: number): {
+    amountInput: string;
+    priceInput: string | null;
+  } {
     const clamped = Math.max(0, Math.min(100, Math.round(percent)));
-    orderPercent = clamped;
     const currentGiveCapacity = readOutCapacity(activeOrderAccountId, giveToken);
     if (!selectedOrderLevel) {
       const rawGive = (currentGiveCapacity * BigInt(clamped)) / 100n;
+      if (!limitPriceTicks || limitPriceTicks <= 0n) {
+        return {
+          amountInput: formatAmountForInput(rawGive, giveToken),
+          priceInput: null,
+        };
+      }
       const rawWant = orderMode === 'sell-base'
         ? quoteFromBase(rawGive, limitPriceTicks ?? 0n, baseTokenDecimals, quoteTokenDecimals)
         : baseFromQuote(rawGive, limitPriceTicks ?? 0n, baseTokenDecimals, quoteTokenDecimals);
-      const fillGive = prepareCanonicalOrder(rawGive, rawWant)?.effectiveGive ?? 0n;
-      setOrderAmountInputValue(formatAmountForInput(fillGive, giveToken));
-      return;
+      const fillGive = prepareCanonicalOrder(rawGive, rawWant)?.effectiveGive ?? rawGive;
+      return {
+        amountInput: formatAmountForInput(fillGive, giveToken),
+        priceInput: null,
+      };
     }
 
     const levelGiveTokenId = selectedOrderLevel.side === 'ask'
@@ -2282,11 +2317,9 @@
     const levelBaseDecimals = getTokenDecimals(selectedOrderLevel.baseTokenId);
     const levelQuoteDecimals = getTokenDecimals(selectedOrderLevel.quoteTokenId);
     const levelGiveCapacity = readOutCapacity(selectedLevelAccountId, levelGiveTokenId);
-    const maxFillGiveByBook = selectedOrderLevel.side === 'ask'
-      ? quoteFromBase(selectedOrderLevel.sizeBaseWei, selectedOrderLevel.priceTicks, levelBaseDecimals, levelQuoteDecimals)
-      : selectedOrderLevel.sizeBaseWei;
-    const maxFillGive = levelGiveCapacity < maxFillGiveByBook ? levelGiveCapacity : maxFillGiveByBook;
-    const rawGive = (maxFillGive * BigInt(clamped)) / 100n;
+    // A clicked level defines the limit price, not the order size. The matcher
+    // sweeps cumulative liquidity up to that limit; GTC keeps any remainder.
+    const rawGive = (levelGiveCapacity * BigInt(clamped)) / 100n;
     const explicitPriceTicks = selectedOrderLevel.inputPriceTicks > 0n
       ? selectedOrderLevel.inputPriceTicks
       : selectedOrderLevel.priceTicks;
@@ -2301,10 +2334,21 @@
     );
     const fillGive = requantized?.effectiveGive ?? 0n;
 
-    setOrderAmountInputValue(formatAmountForInput(fillGive, levelGiveTokenId));
-    priceRatioInput = selectedOrderLevel.displayPrice
-      ? normalizeDisplayPriceForInput(selectedOrderLevel.displayPrice)
-      : formatPriceTicks(selectedOrderLevel.priceTicks);
+    return {
+      amountInput: formatAmountForInput(fillGive, levelGiveTokenId),
+      priceInput: selectedOrderLevel.displayPrice
+        ? normalizeDisplayPriceForInput(selectedOrderLevel.displayPrice)
+        : formatPriceTicks(selectedOrderLevel.priceTicks),
+    };
+  }
+
+  function applyOrderPercent(percent: number, markUserEdit = true) {
+    const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+    const selection = computeOrderAmountSelection(clamped);
+    orderPercent = clamped;
+    amountEditedByUser = markUserEdit;
+    setOrderAmountInputValue(selection.amountInput);
+    if (selection.priceInput !== null) priceRatioInput = selection.priceInput;
   }
 
   function readLogicalNumber(value: unknown): number {
@@ -2519,7 +2563,6 @@
     setSwapTokens(nextGiveToken, nextWantToken, swapRouteMode === 'cross');
 
     const priceTicks = parsedPriceTicks;
-    const sizeBaseWei = lotsToBaseWei(rawSize, pair.baseTokenId);
     selectedOrderLevel = {
       side,
       priceTicks,
@@ -2528,7 +2571,6 @@
         typeof event.detail.displayPrice === 'string' ? event.detail.displayPrice : '',
         priceTicks,
       ),
-      sizeBaseWei,
       baseTokenId: pair.baseTokenId,
       quoteTokenId: pair.quoteTokenId,
       accountId: clickedAccountId,
@@ -2599,25 +2641,21 @@
     if (!activeXlnFunctions?.isReady || !activeXlnFunctions?.prepareSwapOrder) return null;
     if (!Number.isFinite(giveToken) || !Number.isFinite(wantToken) || giveToken <= 0 || wantToken <= 0) return null;
     if (rawGiveAmount <= 0n || rawWantAmount <= 0n) return null;
-    try {
-      const explicitPriceTicks = selectedOrderLevel?.inputPriceTicks && selectedOrderLevel.inputPriceTicks > 0n
-        ? selectedOrderLevel.inputPriceTicks
-        : limitPriceTicks;
-      if (explicitPriceTicks && explicitPriceTicks > 0n) {
-        const requantized = requantizeAtLimitPrice(
-          giveToken,
-          wantToken,
-          rawGiveAmount,
-          explicitPriceTicks,
-        );
-        if (requantized && requantized.effectiveGive > 0n && requantized.effectiveWant > 0n) {
-          return requantized;
-        }
+    const explicitPriceTicks = selectedOrderLevel?.inputPriceTicks && selectedOrderLevel.inputPriceTicks > 0n
+      ? selectedOrderLevel.inputPriceTicks
+      : limitPriceTicks;
+    if (explicitPriceTicks && explicitPriceTicks > 0n) {
+      const requantized = requantizeAtLimitPrice(
+        giveToken,
+        wantToken,
+        rawGiveAmount,
+        explicitPriceTicks,
+      );
+      if (requantized && requantized.effectiveGive > 0n && requantized.effectiveWant > 0n) {
+        return requantized;
       }
-      return activeXlnFunctions.prepareSwapOrder(giveToken, wantToken, rawGiveAmount, rawWantAmount);
-    } catch {
-      return null;
     }
+    return activeXlnFunctions.prepareSwapOrder(giveToken, wantToken, rawGiveAmount, rawWantAmount);
   }
 
   $: activeCrossMarket = (() => {
@@ -2717,20 +2755,10 @@
   })();
   $: baseTokenDecimals = getTokenDecimals(baseTokenId);
   $: quoteTokenDecimals = getTokenDecimals(quoteTokenId);
-  $: orderbookSizeDisplayScale = baseTokenDecimals > 12 ? 10 ** Math.max(0, baseTokenDecimals - 12) : 1;
+  $: orderbookSizeDisplayScale = orderbookLotsDisplayScale(baseTokenDecimals);
   $: giveTokenDecimals = getTokenDecimals(giveToken);
   $: limitPriceTicks = parseDisplayPriceTicks(priceRatioInput, 0n);
-  $: liveOrderAmountInput = (
-    $routedOrderAmountInput,
-    orderAmountRevision,
-    orderAmountDomRevision,
-    $routedOrderAmountInput || (
-      hasLatestOrderAmountDomValue
-        ? latestOrderAmountDomValue
-        : String(orderAmountInputElement?.value ?? orderAmountInput ?? '')
-    )
-  );
-  $: giveAmount = parseDecimalAmountToBigInt(liveOrderAmountInput, giveTokenDecimals);
+  $: giveAmount = parseDecimalAmountToBigInt(orderAmountInput, giveTokenDecimals);
   $: wantAmount = (() => {
     if (giveAmount <= 0n || !limitPriceTicks || limitPriceTicks <= 0n || !parsedOrderbookPair) return 0n;
     if (orderMode === 'sell-base') {
@@ -2741,7 +2769,17 @@
     }
     return 0n;
   })();
-  $: preparedOrder = prepareCanonicalOrder(giveAmount, wantAmount);
+  // Svelte cannot infer dependencies read inside prepareCanonicalOrder().
+  // List every preparation input here so a token/venue/level transition cannot
+  // leave a stale null prepared order after the amount DOM value is already live.
+  $: preparedOrder = (
+    activeXlnFunctions,
+    giveToken,
+    wantToken,
+    selectedOrderLevel,
+    limitPriceTicks,
+    prepareCanonicalOrder(giveAmount, wantAmount)
+  );
   $: canonicalPriceTicks = preparedOrder?.priceTicks ?? limitPriceTicks;
   $: canonicalGiveAmount = preparedOrder?.effectiveGive ?? 0n;
   $: canonicalWantAmount = preparedOrder?.effectiveWant ?? 0n;
@@ -3275,8 +3313,6 @@
 <div
   class="swap-panel"
   bind:this={swapPanelRoot}
-  on:input|capture={handleSwapPanelAmountSync}
-  on:change|capture={handleSwapPanelAmountSync}
 >
   <div class="trade-grid" class:book-open={showOrderbook}>
     <SwapTradeTicket
@@ -3297,8 +3333,7 @@
       {selectSourceEntityOption}
       {accountLabel}
       {entityAvatarSrc}
-      bind:orderAmountInput
-      bind:orderAmountInputElement
+      {orderAmountInput}
       {handleOrderAmountInput}
       {openTokenMenu}
       {toggleTokenMenu}
@@ -3363,11 +3398,6 @@
       {selectHubOption}
       {hubJurisdictionLabel}
       {applyOrderPercent}
-      {liveOrderAmountInput}
-      {latestOrderAmountDomValue}
-      {hasLatestOrderAmountDomValue}
-      {orderAmountRevision}
-      {orderAmountDomRevision}
       {giveTokenDecimals}
       {giveAmount}
       {canonicalGiveAmount}

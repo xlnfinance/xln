@@ -11,7 +11,7 @@
   type Row = RemoteRuntimeImportEntry & { index: number; status: string; detail: string };
   let mode: 'single' | 'bulk' = 'single';
   let label = '';
-  let access: RemoteRuntimeImportAccess = 'read';
+  const access: RemoteRuntimeImportAccess = 'admin';
   let wsUrl = '';
   let token = '';
   let bulkText = '';
@@ -72,12 +72,12 @@
   {#if mode === 'single'}
     <div class="form">
       <input bind:value={label} placeholder="Label" />
-      <select bind:value={access}><option value="read">inspect</option><option value="admin">admin</option></select>
+      <div class="access">admin</div>
       <input class="wide" bind:value={wsUrl} placeholder="ws://localhost:8080/rpc" />
       <input class="wide" bind:value={token} type="password" placeholder="xlnra1 capability token" />
     </div>
   {:else}
-    <textarea bind:value={bulkText} spellcheck="false" placeholder="Hub | read | ws://localhost:8080/rpc | xlnra1…"></textarea>
+    <textarea bind:value={bulkText} spellcheck="false" placeholder="Hub | admin | ws://localhost:8080/rpc | xlnra1.full…"></textarea>
   {/if}
   <button class="primary" disabled={working} on:click={() => void submit()}>{working ? 'Validating…' : 'Validate & attach'}</button>
   {#if failed.length > 0 && !working}<button class="retry" on:click={() => void importEntries(failed)}>Retry failed ({failed.length})</button>{/if}
@@ -95,9 +95,9 @@
 <style>
   .manager { height:100%; overflow:auto; box-sizing:border-box; padding:16px; background:#080d12; color:#e5edf3; }
   header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; } h2 { margin:3px 0 0; font-size:18px; } small { color:#7890a3; }
-  .tabs { display:flex; gap:4px; } button, input, select, textarea { border:1px solid #243b4c; border-radius:6px; background:#0c1720; color:#dcebf4; }
+  .tabs { display:flex; gap:4px; } button, input, .access, textarea { border:1px solid #243b4c; border-radius:6px; background:#0c1720; color:#dcebf4; }
   button { padding:7px 10px; cursor:pointer; } button.active, button.primary { border-color:#2887b5; background:#123248; } button:disabled { opacity:.5; cursor:wait; }
-  .form { display:grid; grid-template-columns:1fr 110px; gap:7px; } input, select { height:34px; padding:0 9px; box-sizing:border-box; } .wide { grid-column:1/-1; }
+  .form { display:grid; grid-template-columns:1fr 110px; gap:7px; } input, .access { height:34px; padding:0 9px; box-sizing:border-box; } .access { display:flex; align-items:center; } .wide { grid-column:1/-1; }
   textarea { width:100%; min-height:130px; padding:9px; box-sizing:border-box; resize:vertical; font:12px/1.4 ui-monospace,monospace; }
   .primary { width:100%; margin-top:8px; } .retry { margin-top:8px; color:#ffb8c3; border-color:#63313b; }
   .status { margin-top:10px; color:#8cdcff; } .error { padding:9px; white-space:pre-wrap; color:#ff8fa2; background:#1b0d12; border:1px solid #5c2933; }

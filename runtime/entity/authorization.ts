@@ -411,6 +411,21 @@ export const assertCertifiedOutputSemanticAuthority = (
       assertSemanticTarget(tx.type, target, route.source.counterpartyEntityId);
       return;
     }
+    case 'crossJurisdictionSettled': {
+      const route = requireSemanticRoute(currentState, tx.data.orderId);
+      const sourceUser = normalizeEntityRef(route.source.entityId);
+      const sourceHub = normalizeEntityRef(route.source.counterpartyEntityId);
+      if (target === sourceUser) {
+        assertSemanticSource(tx.type, source, [route.target.counterpartyEntityId]);
+      } else if (target === sourceHub) {
+        assertSemanticSource(tx.type, source, [route.target.entityId]);
+      } else {
+        throw new Error(
+          `CONSENSUS_OUTPUT_SEMANTIC_TARGET_MISMATCH:${tx.type}:${target}:${sourceUser},${sourceHub}`,
+        );
+      }
+      return;
+    }
     case 'crossPullClose': {
       const route = requireSemanticRoute(currentState, tx.data.proof.orderId, tx.data.route);
       assertSemanticSource(tx.type, source, [route.source.entityId]);
@@ -525,6 +540,7 @@ export const assertRuntimeOutputAuthorization = (
       throw new Error(`RUNTIME_OUTPUT_NESTED_PROTOCOL_TX_FORBIDDEN:${tx.type}`);
     }
     const suppliedRoute = tx.type === 'crossJurisdictionFillNotice' ||
+      tx.type === 'crossJurisdictionSettled' ||
       tx.type === 'applyCrossJurisdictionBookProgress' ||
       tx.type === 'removeCrossJurisdictionBookOrder' ||
       tx.type === 'requestCrossJurisdictionClear' ||
@@ -541,7 +557,9 @@ export const assertRuntimeOutputAuthorization = (
           candidate.data.route.orderId === tx.data.crossJurisdiction?.orderId)?.data.route
       : undefined;
     const semanticRoute = suppliedRoute ?? pairedPullRoute ?? (() => {
-      const orderId = tx.type === 'crossJurisdictionFillNotice' || tx.type === 'applyCrossJurisdictionBookProgress'
+      const orderId = tx.type === 'crossJurisdictionFillNotice' ||
+        tx.type === 'crossJurisdictionSettled' ||
+        tx.type === 'applyCrossJurisdictionBookProgress'
         ? tx.data.orderId
         : tx.type === 'removeCrossJurisdictionBookOrder' || tx.type === 'requestCrossJurisdictionClear'
           ? tx.data.orderId

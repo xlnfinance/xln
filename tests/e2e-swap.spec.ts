@@ -1996,6 +1996,9 @@ async function expectSelectedBooksHaveVisibleLiquidity(
         minSources: 1,
         maxSources: 1,
       });
+      const depth = await readOrderbookRowCounts(page);
+      expect(depth.asks, `${pairLabel} ${accountId} must expose 10 committed asks`).toBeGreaterThanOrEqual(10);
+      expect(depth.bids, `${pairLabel} ${accountId} must expose 10 committed bids`).toBeGreaterThanOrEqual(10);
     }
   }
   await ensureSwapScope(page, 'aggregated');
@@ -2018,6 +2021,12 @@ test.describe('E2E Swap Flow', () => {
     await timedStep('swap_pairs.create_runtime', () => createDemoRuntime(page, `swap-pairs-${Date.now()}`, randomMnemonic()));
     const runtimeRef = await timedStep('swap_pairs.ensure_hub_accounts', () => ensureDeterministicSwapAccounts(page, 3));
     await timedStep('swap_pairs.open_workspace', () => openSwapWorkspace(page));
+    const hubPrecedesLegs = await page.getByTestId('swap-any-builder').first().evaluate((builder) => {
+      const hub = builder.querySelector('[data-testid="swap-hub-selector"]');
+      const firstLeg = builder.querySelector('.swap-leg-card');
+      return Boolean(hub && firstLeg && (hub.compareDocumentPosition(firstLeg) & Node.DOCUMENT_POSITION_FOLLOWING));
+    });
+    expect(hubPrecedesLegs, 'Hub selector must be the first field before From/To').toBe(true);
     await timedStep('swap_pairs.check_mm_health', () => expectMarketMakerBooksHealthy(page));
     await timedStep('swap_pairs.check_aggregated_depth', () => expectAllCanonicalSwapPairsHaveLiquidity(page));
     await timedStep('swap_pairs.check_selected_depth', () =>

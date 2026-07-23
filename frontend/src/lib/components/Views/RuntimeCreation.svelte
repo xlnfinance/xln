@@ -180,8 +180,8 @@
     if (rt) void connectLiveRuntime(rt);
   }
 
-  function selectedRuntimeAccessLabel(): 'read' | 'admin' {
-    return liveRuntimes.find((r) => r.wsUrl === selectedRuntimeKey)?.access ?? 'read';
+  function selectedRuntimeAccessLabel(): 'admin' {
+    return liveRuntimes.find((r) => r.wsUrl === selectedRuntimeKey)?.access ?? 'admin';
   }
 
   // Auto-discovery suppresses transport failures only; reachable runtime-import readiness
@@ -197,7 +197,7 @@
     try {
       const apiBase = resolveConfiguredApiBase(window.location.origin);
       const url = new URL('/api/runtime-import', apiBase);
-      url.searchParams.set('access', 'read');
+      url.searchParams.set('access', 'admin');
       url.searchParams.set('ts', String(Date.now()));
       const res = await fetch(url.toString(), { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

@@ -26,6 +26,7 @@ import { resolveRuntimeSecurityIncident } from '../../../machine/security-incide
 import type { CrossJurisdictionSwapRoute, EntityState, EntityTx, Env, RuntimeOverlayRecord } from '../../../types';
 import { getSwapLotScale } from '../../../orderbook';
 import {
+  materializeCrossJurisdictionBookRemainder,
   removeCrossJurisdictionBookOrderByRouteId,
   resizeCrossJurisdictionBookOrderByRouteId,
 } from '../../../orderbook/cross-j';
@@ -327,7 +328,22 @@ export const applyCrossJurisdictionBookProgressToState = (
       storageChanges,
     );
     if (!resized) {
-      throw new Error(`CROSS_J_BOOK_PROGRESS_ORDER_MISSING: order=${route.orderId}`);
+      const materialized = materializeCrossJurisdictionBookRemainder(
+        newState,
+        {
+          pairId: marketOffer.pairId,
+          sourceEntityId: nextRoute.source.entityId,
+          orderId: nextRoute.orderId,
+          ownerId: marketOffer.makerId,
+          side: marketOffer.side,
+          priceTicks: marketOffer.priceTicks,
+          qtyLots,
+        },
+        storageChanges,
+      );
+      if (!materialized) {
+        throw new Error(`CROSS_J_BOOK_PROGRESS_ORDER_MISSING: order=${route.orderId}`);
+      }
     }
     return true;
   }

@@ -6,6 +6,8 @@ import {
   applyCrossJurisdictionFillProgress,
   assertCrossJurisdictionPriceImprovementMode,
   getCrossJurisdictionCommittedProofRatio,
+  getCrossJurisdictionCommittedFillAmounts,
+  hashCrossJurisdictionCloseBinary,
   isCrossJurisdictionTerminalStatus,
   transitionCrossJurisdictionRouteStatus,
   withCrossJurisdictionClaimProgress,
@@ -34,10 +36,46 @@ const normalizeEntityRef = (value: string): string => String(value || '').toLowe
 const committedCrossJurisdictionRatio = (route: CrossJurisdictionSwapRoute): number =>
   getCrossJurisdictionCommittedProofRatio(route);
 
+const assertSettledPullReplay = (
+  route: CrossJurisdictionSwapRoute,
+  fillRatio: number,
+  binary: string,
+  suppliedProof?: Extract<AccountTx, { type: 'cross_pull_close' }>['data']['proof'],
+): boolean => {
+  if (route.status !== 'settled') return false;
+  const proof = route.sourceCloseProof;
+  const committed = getCrossJurisdictionCommittedFillAmounts(route);
+  const binaryHash = hashCrossJurisdictionCloseBinary(binary);
+  if (
+    !proof ||
+    fillRatio !== committed.fillRatio ||
+    proof.fillRatio !== committed.fillRatio ||
+    normalizeEntityRef(proof.binaryHash) !== normalizeEntityRef(binaryHash) ||
+    proof.cumulativeSourceAmount !== committed.filledSourceAmount ||
+    proof.cumulativeTargetAmount !== committed.filledTargetAmount
+  ) {
+    throw new Error(`CROSS_J_SETTLED_PULL_REPLAY_MISMATCH: route=${route.orderId} ratio=${fillRatio}`);
+  }
+  if (
+    suppliedProof &&
+    (
+      suppliedProof.orderId !== proof.orderId ||
+      normalizeEntityRef(suppliedProof.routeHash) !== normalizeEntityRef(proof.routeHash) ||
+      suppliedProof.fillRatio !== proof.fillRatio ||
+      suppliedProof.cumulativeSourceAmount !== proof.cumulativeSourceAmount ||
+      suppliedProof.cumulativeTargetAmount !== proof.cumulativeTargetAmount ||
+      normalizeEntityRef(suppliedProof.binaryHash) !== normalizeEntityRef(proof.binaryHash)
+    )
+  ) {
+    throw new Error(`CROSS_J_SETTLED_PULL_PROOF_REPLAY_MISMATCH: route=${route.orderId}`);
+  }
+  return true;
+};
+
 const assertPullResolveAllowed = (
   route: CrossJurisdictionSwapRoute,
   fillRatio: number,
-  leg: 'source' | 'target',
+  leg: 'source' | 'target_user' | 'target_hub',
 ): void => {
   if (fillRatio <= 0) return;
   if (isCrossJurisdictionTerminalStatus(route.status)) {
@@ -46,8 +84,18 @@ const assertPullResolveAllowed = (
   if (leg === 'source' && route.status !== 'clearing' && route.status !== 'clear_requested') {
     throw new Error(`CROSS_J_PULL_RESOLVE_STATE_INVALID: route=${route.orderId} leg=source status=${route.status}`);
   }
-  if (leg === 'target' && route.status !== 'clearing' && route.status !== 'source_claimed') {
+  if (leg === 'target_user' && route.status !== 'clearing' && route.status !== 'source_claimed') {
     throw new Error(`CROSS_J_PULL_RESOLVE_STATE_INVALID: route=${route.orderId} leg=target status=${route.status}`);
+  }
+  if (
+    leg === 'target_hub' &&
+    route.status !== 'resting' &&
+    route.status !== 'partially_filled' &&
+    route.status !== 'clear_requested' &&
+    route.status !== 'clearing' &&
+    route.status !== 'source_claimed'
+  ) {
+    throw new Error(`CROSS_J_PULL_RESOLVE_STATE_INVALID: route=${route.orderId} leg=target_hub status=${route.status}`);
   }
   const committedRatio = committedCrossJurisdictionRatio(route);
   if (committedRatio > 0 && fillRatio > committedRatio) {
@@ -76,6 +124,80 @@ const backfillCommittedFillFromResolvedPull = (
     'CROSS_J_PULL_RESOLVE_NO_COMMITTED_FILL',
   );
   Object.assign(route, fillFields);
+};
+
+const settleTargetLegAndNotifySourceSibling = (
+  env: Env,
+  newState: EntityState,
+  route: CrossJurisdictionSwapRoute,
+  fillRatio: number,
+  binary: string,
+  closeProof: ReturnType<typeof buildCrossJurisdictionCloseProof> | undefined,
+  outputs: EntityInput[],
+  currentEntityId: string,
+): void => {
+  const targetUserId = normalizeEntityRef(route.target.counterpartyEntityId);
+  const targetHubId = normalizeEntityRef(route.target.entityId);
+  const sourceSiblingId = currentEntityId === targetUserId
+    ? route.source.entityId
+    : currentEntityId === targetHubId
+      ? route.source.counterpartyEntityId
+      : null;
+  if (!sourceSiblingId) {
+    throw new Error(`CROSS_J_TARGET_SETTLE_PARTICIPANT_INVALID: route=${route.orderId} entity=${newState.entityId}`);
+  }
+  if (!route.routeHash) {
+    throw new Error(`CROSS_J_TARGET_SETTLE_ROUTE_HASH_MISSING: route=${route.orderId}`);
+  }
+
+  const committed = getCrossJurisdictionCommittedFillAmounts(route);
+  if (committed.fillRatio !== fillRatio) {
+    throw new Error(
+      `CROSS_J_TARGET_SETTLE_RATIO_MISMATCH: route=${route.orderId} ` +
+        `resolved=${fillRatio} committed=${committed.fillRatio}`,
+    );
+  }
+  const proof = closeProof ?? buildCrossJurisdictionCloseProof(route, binary);
+  outputs.push(buildCrossJurisdictionEntityOutput(
+    env,
+    sourceSiblingId,
+    [{
+      type: 'crossJurisdictionSettled',
+      data: {
+        orderId: route.orderId,
+        routeHash: route.routeHash,
+        binary,
+        proof,
+      },
+    }],
+    requireRouteSignerHint(route, sourceSiblingId),
+  ));
+  crossJFollowupLog.debug('pull.target_settled.notify_source', {
+    route: shortOrder(route.orderId, 12),
+    source: shortId(sourceSiblingId),
+    ratio: fillRatio,
+  });
+};
+
+const transitionTargetLegSettled = (
+  route: CrossJurisdictionSwapRoute,
+  targetHubProjectionLagged: boolean,
+  updatedAt: number,
+): void => {
+  if (
+    targetHubProjectionLagged &&
+    route.status !== 'clearing' &&
+    route.status !== 'source_claimed' &&
+    route.status !== 'target_claimed'
+  ) {
+    // The target Hub does not receive the source User→target User relay. Its
+    // bilateral target Account nevertheless validates the source proof before
+    // committing this resolve. Preserve the FSM by materializing that locally
+    // skipped clearing projection before the terminal transition.
+    transitionCrossJurisdictionRouteStatus(route, 'clearing', updatedAt);
+  }
+  transitionCrossJurisdictionRouteStatus(route, 'settled', updatedAt);
+  route.settledAt = updatedAt;
 };
 
 const routeBookOwnerEntityId = (route: CrossJurisdictionSwapRoute): string =>
@@ -381,6 +503,19 @@ const applyPullResolveFollowup = (
       counterpartyEntityId === sourceHubId;
 
     if (isSourceHubResolve || isSourceUserResolve) {
+      if (assertSettledPullReplay(route, fillRatio, accountTx.data.binary)) {
+        if (isSourceHubResolve) {
+          removeOrRouteCrossJurisdictionBookOrder(
+            env,
+            newState,
+            route,
+            outputs,
+            'settled',
+            storageChanges,
+          );
+        }
+        continue;
+      }
       assertPullResolveAllowed(route, fillRatio, 'source');
       backfillCommittedFillFromResolvedPull(route, fillRatio, newState.timestamp);
       Object.assign(route, withCrossJurisdictionClaimProgress(route, fillRatio, newState.timestamp));
@@ -423,16 +558,30 @@ const applyPullResolveFollowup = (
       continue;
     }
 
-    if (
+    const isTargetUserResolve =
       route.targetPull?.pullId === accountTx.data.pullId &&
       currentEntityId === targetUserId &&
-      counterpartyEntityId === targetHubId
-    ) {
-      assertPullResolveAllowed(route, fillRatio, 'target');
+      counterpartyEntityId === targetHubId;
+    const isTargetHubResolve =
+      route.targetPull?.pullId === accountTx.data.pullId &&
+      currentEntityId === targetHubId &&
+      counterpartyEntityId === targetUserId;
+    if (isTargetUserResolve || isTargetHubResolve) {
+      if (assertSettledPullReplay(route, fillRatio, accountTx.data.binary)) continue;
+      assertPullResolveAllowed(route, fillRatio, isTargetHubResolve ? 'target_hub' : 'target_user');
       backfillCommittedFillFromResolvedPull(route, fillRatio, newState.timestamp);
       Object.assign(route, withCrossJurisdictionClaimProgress(route, fillRatio, newState.timestamp));
-      transitionCrossJurisdictionRouteStatus(route, 'settled', newState.timestamp);
-      route.settledAt = newState.timestamp;
+      transitionTargetLegSettled(route, isTargetHubResolve, newState.timestamp);
+      settleTargetLegAndNotifySourceSibling(
+        env,
+        newState,
+        route,
+        fillRatio,
+        accountTx.data.binary,
+        undefined,
+        outputs,
+        currentEntityId,
+      );
       crossJFollowupLog.debug('pull.resolve.settled', {
         route: shortOrder(route.orderId, 12),
         ratio: fillRatio,
@@ -477,6 +626,19 @@ const applyCrossPullCloseFollowup = (
       counterpartyEntityId === sourceHubId;
 
     if (isSourceHubClose || isSourceUserClose) {
+      if (assertSettledPullReplay(route, fillRatio, accountTx.data.binary, accountTx.data.proof)) {
+        if (isSourceHubClose) {
+          removeOrRouteCrossJurisdictionBookOrder(
+            env,
+            newState,
+            route,
+            outputs,
+            'settled',
+            storageChanges,
+          );
+        }
+        continue;
+      }
       assertPullResolveAllowed(route, fillRatio, 'source');
       backfillCommittedFillFromResolvedPull(route, fillRatio, newState.timestamp);
       Object.assign(route, withCrossJurisdictionClaimProgress(route, fillRatio, newState.timestamp));
@@ -513,18 +675,32 @@ const applyCrossPullCloseFollowup = (
       continue;
     }
 
-    if (
+    const isTargetUserClose =
       route.targetPull?.pullId === accountTx.data.pullId &&
       currentEntityId === targetUserId &&
-      counterpartyEntityId === targetHubId
-    ) {
-      assertPullResolveAllowed(route, fillRatio, 'target');
+      counterpartyEntityId === targetHubId;
+    const isTargetHubClose =
+      route.targetPull?.pullId === accountTx.data.pullId &&
+      currentEntityId === targetHubId &&
+      counterpartyEntityId === targetUserId;
+    if (isTargetUserClose || isTargetHubClose) {
+      if (assertSettledPullReplay(route, fillRatio, accountTx.data.binary, accountTx.data.proof)) continue;
+      assertPullResolveAllowed(route, fillRatio, isTargetHubClose ? 'target_hub' : 'target_user');
       backfillCommittedFillFromResolvedPull(route, fillRatio, newState.timestamp);
       Object.assign(route, withCrossJurisdictionClaimProgress(route, fillRatio, newState.timestamp));
       route.sourceCloseProof = accountTx.data.proof;
       route.targetCloseProof = accountTx.data.proof;
-      transitionCrossJurisdictionRouteStatus(route, 'settled', newState.timestamp);
-      route.settledAt = newState.timestamp;
+      transitionTargetLegSettled(route, isTargetHubClose, newState.timestamp);
+      settleTargetLegAndNotifySourceSibling(
+        env,
+        newState,
+        route,
+        fillRatio,
+        accountTx.data.binary,
+        accountTx.data.proof,
+        outputs,
+        currentEntityId,
+      );
       crossJFollowupLog.debug('pull.close.settled', {
         route: shortOrder(route.orderId, 12),
         ratio: fillRatio,

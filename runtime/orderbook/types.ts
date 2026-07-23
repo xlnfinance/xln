@@ -470,5 +470,10 @@ export function replaceOrderbookPair(ext: OrderbookExtState, pairId: string, boo
 }
 
 export function getOrderbookPairsForOrder(ext: OrderbookExtState, orderId: string): string[] {
-  return [...ensureOrderbookPairIndex(ext).get(orderId) ?? []];
+  const index = ensureOrderbookPairIndex(ext);
+  const indexedPairs = index.get(orderId) ?? [];
+  const livePairs = indexedPairs.filter((pairId) => ext.books.get(pairId)?.orders.has(orderId));
+  if (livePairs.length === 0) index.delete(orderId);
+  else if (livePairs.length !== indexedPairs.length) index.set(orderId, livePairs);
+  return [...livePairs];
 }

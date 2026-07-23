@@ -7,7 +7,7 @@ export const REMOTE_RUNTIME_IMPORT_STORAGE_KEY = REMOTE_RUNTIME.IMPORT_STORAGE_K
 export const REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY = REMOTE_RUNTIME.IMPORT_RESULT_STORAGE_KEY;
 export const MAX_REMOTE_RUNTIME_IMPORTS = REMOTE_RUNTIME.MAX_IMPORTS;
 
-export type RemoteRuntimeImportAccess = 'read' | 'admin';
+export type RemoteRuntimeImportAccess = 'admin';
 
 export type RemoteRuntimeImportEntry = {
   label: string;
@@ -34,7 +34,7 @@ export type RemoteRuntimeHubSummary = {
 
 export type StoredRemoteRuntimeImportEntry = RemoteRuntimeImportEntry & {
   runtimeId: string;
-  authLevel: 'inspect' | 'admin';
+  authLevel: 'admin';
   height: number;
   entityCount: number;
   importedAt: number;
@@ -56,7 +56,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const normalizeAccess = (value: unknown): RemoteRuntimeImportAccess => {
   const raw = String(value || '').trim().toLowerCase();
-  if (raw === 'read' || raw === 'inspect') return 'read';
   if (raw === 'admin' || raw === 'full' || raw === 'write') return 'admin';
   throw new Error(`REMOTE_RUNTIME_IMPORT_ACCESS_INVALID:${raw || 'missing'}`);
 };
@@ -100,7 +99,6 @@ export const readRemoteRuntimeTokenAudience = (token: string): string => {
 export const readRemoteRuntimeTokenAccess = (token: string): RemoteRuntimeImportAccess | '' => {
   const role = String(token || '').trim().split('.')[1]?.trim().toLowerCase();
   if (role === 'full' || role === 'admin' || role === 'write') return 'admin';
-  if (role === 'read' || role === 'inspect') return 'read';
   return '';
 };
 
@@ -122,7 +120,10 @@ export const describeRemoteRuntimeImportError = (
     return `${label}: connection failed. Check that the mesh is running and ${wsUrl || 'the WebSocket URL'} is reachable from the browser.`;
   }
   if (raw.startsWith('REMOTE_RUNTIME_ACCESS_MISMATCH:')) {
-    return `${label}: token role mismatch. Expected ${entry?.access ?? 'requested'} access, but the server returned a different capability.`;
+    return `${label}: a full admin capability is required, but the server returned a different token role.`;
+  }
+  if (raw.startsWith('REMOTE_RUNTIME_IMPORT_ADMIN_TOKEN_REQUIRED:')) {
+    return `Line ${raw.split(':')[1] || '?'} must contain a full admin capability token.`;
   }
   if (raw.startsWith('REMOTE_RUNTIME_TOKEN_EXPIRED:')) {
     return `${label}: token expired. Reopen the fresh import link from bun run dev.`;
@@ -147,7 +148,7 @@ export const describeRemoteRuntimeImportError = (
     return `Line ${raw.split(':')[1] || '?'} has no valid ws:// or wss:// runtime URL.`;
   }
   if (raw.startsWith('REMOTE_RUNTIME_IMPORT_ACCESS_MISSING:') || raw.startsWith('REMOTE_RUNTIME_IMPORT_ACCESS_INVALID:')) {
-    return `Line ${raw.split(':')[1] || '?'} must include read or admin access.`;
+    return `Line ${raw.split(':')[1] || '?'} must include admin access.`;
   }
   return raw;
 };
@@ -157,6 +158,9 @@ const entryFromUnknown = (value: unknown, index: number): RemoteRuntimeImportEnt
   const wsUrl = normalizeRemoteRuntimeWsUrl(String(value['wsUrl'] || value['ws'] || value['url'] || '').trim());
   const token = String(value['token'] || value['authKey'] || value['key'] || '').trim();
   if (!token.startsWith('xlnra1.')) throw new Error(`REMOTE_RUNTIME_IMPORT_TOKEN_INVALID:${index + 1}`);
+  if (readRemoteRuntimeTokenAccess(token) !== 'admin') {
+    throw new Error(`REMOTE_RUNTIME_IMPORT_ADMIN_TOKEN_REQUIRED:${index + 1}`);
+  }
   const access = normalizeAccess(value['access'] || value['role'] || value['mode']);
   const label = String(value['label'] || value['name'] || new URL(wsUrl).host || `runtime ${index + 1}`).trim();
   const entry = { label, access, wsUrl, token };
@@ -272,13 +276,16 @@ const entryFromLine = (line: string, index: number): RemoteRuntimeImportEntry =>
   const parts = tokenizeImportLine(line);
   const wsIndex = parts.findIndex(part => /^(wss?|https?):\/\//i.test(part));
   const tokenIndex = parts.findIndex(part => part.startsWith('xlnra1.'));
-  const accessIndex = parts.findIndex(part => /^(read|inspect|admin|full|write)$/i.test(part));
+  const accessIndex = parts.findIndex(part => /^(admin|full|write)$/i.test(part));
   if (wsIndex < 0) throw new Error(`REMOTE_RUNTIME_IMPORT_WS_MISSING:${index + 1}`);
   if (tokenIndex < 0) throw new Error(`REMOTE_RUNTIME_IMPORT_TOKEN_MISSING:${index + 1}`);
   if (accessIndex < 0) throw new Error(`REMOTE_RUNTIME_IMPORT_ACCESS_MISSING:${index + 1}`);
 
   const wsUrl = normalizeRemoteRuntimeWsUrl(parts[wsIndex]!);
   const token = parts[tokenIndex]!;
+  if (readRemoteRuntimeTokenAccess(token) !== 'admin') {
+    throw new Error(`REMOTE_RUNTIME_IMPORT_ADMIN_TOKEN_REQUIRED:${index + 1}`);
+  }
   const access = normalizeAccess(parts[accessIndex]);
   const labelParts = parts.filter((_, partIndex) => partIndex !== wsIndex && partIndex !== tokenIndex && partIndex !== accessIndex);
   const label = labelParts.join(' ').trim() || new URL(wsUrl).host;
@@ -352,19 +359,6 @@ export const mergeStoredRemoteRuntimeImports = (
   for (const entry of next) {
     const id = remoteRuntimeIdForWsUrl(entry.wsUrl);
     const existing = byId.get(id);
-    if (existing?.access === 'admin' && entry.access !== 'admin') {
-      byId.set(id, {
-        ...existing,
-        label: existing.label || entry.label,
-        height: Math.max(existing.height || 0, entry.height || 0),
-        entityCount: Math.max(existing.entityCount || 0, entry.entityCount || 0),
-        ...(entry.hubEntityId ? { hubEntityId: entry.hubEntityId } : {}),
-        ...(entry.hubName ? { hubName: entry.hubName } : {}),
-        ...(entry.hubJurisdiction ? { hubJurisdiction: entry.hubJurisdiction } : {}),
-        ...(entry.hubEntities?.length ? { hubEntities: entry.hubEntities } : {}),
-      });
-      continue;
-    }
     byId.set(id, {
       ...entry,
       ...(!entry.hubEntityId && existing?.hubEntityId ? { hubEntityId: existing.hubEntityId } : {}),
@@ -441,7 +435,7 @@ export const readStoredRemoteRuntimeImports = (
     entries.push({
       ...entry,
       runtimeId: String(source['runtimeId'] || remoteRuntimeIdForWsUrl(entry.wsUrl)).toLowerCase(),
-      authLevel: source['authLevel'] === 'admin' ? 'admin' : 'inspect',
+      authLevel: 'admin',
       height: Math.max(0, Math.floor(Number(source['height'] || 0))),
       entityCount: Math.max(0, Math.floor(Number(source['entityCount'] || 0))),
       importedAt: Math.max(0, Math.floor(Number(source['importedAt'] || 0))),
@@ -458,22 +452,13 @@ export const readStoredRemoteRuntimeImports = (
 
 export const resolveStoredRemoteRuntimeAuthKey = (
   wsUrl: string,
-  options: { requiredAccess?: RemoteRuntimeImportAccess } = {},
 ): string => {
   const normalizedWsUrl = normalizeRemoteRuntimeWsUrl(wsUrl);
   const targetId = remoteRuntimeIdForWsUrl(normalizedWsUrl);
   const entry = readStoredRemoteRuntimeImports().find(candidate =>
     remoteRuntimeIdForWsUrl(candidate.wsUrl) === targetId
   );
-  if (!entry) {
-    if (options.requiredAccess === 'admin') {
-      throw new Error(`REMOTE_RUNTIME_ACTIVE_ADMIN_TOKEN_MISSING:${normalizedWsUrl}`);
-    }
-    return '';
-  }
-  if (options.requiredAccess === 'admin' && entry.access !== 'admin') {
-    throw new Error(`REMOTE_RUNTIME_ACTIVE_ADMIN_TOKEN_MISSING:${normalizedWsUrl}`);
-  }
+  if (!entry) return '';
   assertRemoteRuntimeTokenFresh(entry);
   return entry.token;
 };

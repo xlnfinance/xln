@@ -31,25 +31,25 @@ import {
   selectPrimaryRemoteHubSummary,
 } from '../../frontend/src/lib/utils/remoteRuntimeValidation';
 
-const token = `xlnra1.read.${Date.now() + 60 * 60 * 1000}.aud.kid.jti.sig`;
+const token = `xlnra1.full.${Date.now() + 60 * 60 * 1000}.aud.kid.jti.sig`;
 
 const makeEntry = (index: number): string =>
-  `H${index} | read | ws://127.0.0.1:${8000 + index}/rpc | ${token}-${index}`;
+  `H${index} | admin | ws://127.0.0.1:${8000 + index}/rpc | ${token}-${index}`;
 
 const makeStored = (
   label: string,
   port: number,
   importedAt: number,
-  access: 'read' | 'admin' = 'read',
+  access: 'admin' = 'admin',
 ): StoredRemoteRuntimeImportEntry => {
   const wsUrl = `ws://127.0.0.1:${port}/rpc`;
   return {
     label,
     access,
     wsUrl,
-    token: access === 'admin' ? `${token.replace('read', 'full')}-${port}` : `${token}-${port}`,
+    token: `${token}-${port}`,
     runtimeId: remoteRuntimeIdForWsUrl(wsUrl),
-    authLevel: access === 'admin' ? 'admin' : 'inspect',
+    authLevel: 'admin',
     height: port,
     entityCount: 1,
     importedAt,
@@ -123,12 +123,12 @@ describe('remote runtime import manager utilities', () => {
         failedCount: 2,
         entries: [],
         failed: [
-          { index: 0, label: 'H1', access: 'read', wsUrl: 'ws://127.0.0.1:8001/rpc', reason: 'validation-1' },
-          { index: 1, label: 'H2', access: 'read', wsUrl: 'ws://127.0.0.1:8002/rpc', reason: 'validation-2' },
+          { index: 0, label: 'H1', access: 'admin', wsUrl: 'ws://127.0.0.1:8001/rpc', reason: 'validation-1' },
+          { index: 1, label: 'H2', access: 'admin', wsUrl: 'ws://127.0.0.1:8002/rpc', reason: 'validation-2' },
         ],
         checked: [
-          { index: 0, ok: false, label: 'H1', access: 'read', wsUrl: 'ws://127.0.0.1:8001/rpc', reason: 'validation-1' },
-          { index: 1, ok: false, label: 'H2', access: 'read', wsUrl: 'ws://127.0.0.1:8002/rpc', reason: 'validation-2' },
+          { index: 0, ok: false, label: 'H1', access: 'admin', wsUrl: 'ws://127.0.0.1:8001/rpc', reason: 'validation-1' },
+          { index: 1, ok: false, label: 'H2', access: 'admin', wsUrl: 'ws://127.0.0.1:8002/rpc', reason: 'validation-2' },
         ],
       });
   });
@@ -141,20 +141,20 @@ describe('remote runtime import manager utilities', () => {
   });
 
   test('preserves explicit IPv4 loopback for browser WebSocket connects', () => {
-    const [entry] = parseRemoteRuntimeImportText(`H1 | read | ws://127.0.0.1:8092/rpc | ${token}`);
+    const [entry] = parseRemoteRuntimeImportText(`H1 | admin | ws://127.0.0.1:8092/rpc | ${token}`);
     expect(entry?.wsUrl).toBe('ws://127.0.0.1:8092/rpc');
     expect(entry?.wsUrl).not.toContain('localhost');
   });
 
   test('rewrites localhost loopback to IPv4 for browser WebSocket connects', () => {
-    const [entry] = parseRemoteRuntimeImportText(`H1 | read | ws://localhost:8092/rpc | ${token}`);
+    const [entry] = parseRemoteRuntimeImportText(`H1 | admin | ws://localhost:8092/rpc | ${token}`);
     expect(entry?.wsUrl).toBe('ws://127.0.0.1:8092/rpc');
     expect(remoteRuntimeIdForWsUrl('ws://localhost:8092/rpc')).toBe('radapter:ws://127.0.0.1:8092/rpc');
   });
 
   test('rejects expired capability tokens before opening WebSocket', () => {
-    const expired = `xlnra1.read.${Date.now() - 1}.aud.kid.jti.sig`;
-    expect(() => parseRemoteRuntimeImportText(`H1 | read | ws://localhost:8092/rpc | ${expired}`))
+    const expired = `xlnra1.full.${Date.now() - 1}.aud.kid.jti.sig`;
+    expect(() => parseRemoteRuntimeImportText(`H1 | admin | ws://localhost:8092/rpc | ${expired}`))
       .toThrow('REMOTE_RUNTIME_TOKEN_EXPIRED:H1');
     expect(() => assertRemoteRuntimeTokenFresh({ label: 'H1', token: expired }))
       .toThrow('REMOTE_RUNTIME_TOKEN_EXPIRED:H1');
@@ -171,7 +171,7 @@ describe('remote runtime import manager utilities', () => {
 
   test('reads capability token access without trusting UI storage flags', () => {
     expect(readRemoteRuntimeTokenAccess(`xlnra1.full.${Date.now() + 60_000}.aud.kid.jti.sig`)).toBe('admin');
-    expect(readRemoteRuntimeTokenAccess(`xlnra1.read.${Date.now() + 60_000}.aud.kid.jti.sig`)).toBe('read');
+    expect(readRemoteRuntimeTokenAccess(`xlnra1.read.${Date.now() + 60_000}.aud.kid.jti.sig`)).toBe('');
     expect(readRemoteRuntimeTokenAccess('bad-token')).toBe('');
   });
 
@@ -179,7 +179,7 @@ describe('remote runtime import manager utilities', () => {
     const entries = parseRemoteRuntimeImportSourcePayload({
       manifest: {
         entries: [
-          { label: 'H1', access: 'read', wsUrl: 'ws://localhost:8092/rpc', token },
+          { label: 'H1', access: 'admin', wsUrl: 'ws://localhost:8092/rpc', token },
         ],
       },
     });
@@ -201,11 +201,11 @@ describe('remote runtime import manager utilities', () => {
       manifest: {
         entries: runtimeSpecs.map(([label, port], index) => ({
           label,
-          access: 'read',
+          access: 'admin',
           wsUrl: `ws://localhost:${port}/rpc`,
           token: `${token}-${label.toLowerCase()}`,
           runtimeId: `0x${String(index + 1).padStart(40, '0')}`,
-          authLevel: 'inspect',
+          authLevel: 'admin',
           height: 42 + index,
           entityCount: 1,
         })),
@@ -213,7 +213,7 @@ describe('remote runtime import manager utilities', () => {
     });
 
     expect(entries.map(entry => entry.label)).toEqual(['H1', 'H2', 'H3', 'MM', 'Custody']);
-    expect(entries.map(entry => entry.access)).toEqual(['read', 'read', 'read', 'read', 'read']);
+    expect(entries.map(entry => entry.access)).toEqual(['admin', 'admin', 'admin', 'admin', 'admin']);
     expect(entries.map(entry => entry.wsUrl)).toEqual([
       'ws://127.0.0.1:8092/rpc',
       'ws://127.0.0.1:8093/rpc',
@@ -231,8 +231,8 @@ describe('remote runtime import manager utilities', () => {
       reason: 'system-not-ok',
       manifest: {
         entries: [
-          { label: 'H1', access: 'read', wsUrl: 'ws://localhost:8092/rpc', token },
-          { label: 'H2', access: 'read', wsUrl: 'ws://localhost:8093/rpc', token },
+          { label: 'H1', access: 'admin', wsUrl: 'ws://localhost:8092/rpc', token },
+          { label: 'H2', access: 'admin', wsUrl: 'ws://localhost:8093/rpc', token },
         ],
       },
     });
@@ -281,25 +281,27 @@ describe('remote runtime import manager utilities', () => {
     expect(readStoredRemoteRuntimeImports().find(entry => entry.wsUrl === first.wsUrl)?.height).toBe(8080);
   });
 
-  test('merge import never downgrades a stored admin capability to read', () => {
-    const admin = makeStored('H1 admin', 8092, 1, 'admin');
-    const read = makeStored('H1 read', 8092, 2, 'read');
+  test('rejects read-only imports instead of downgrading wallet authority', () => {
+    expect(() => parseRemoteRuntimeImportText(
+      `H1 | read | ws://127.0.0.1:8092/rpc | xlnra1.read.${Date.now() + 60_000}.aud.kid.jti.sig`,
+    )).toThrow('REMOTE_RUNTIME_IMPORT_ACCESS_MISSING:1');
+  });
 
-    persistRemoteRuntimeImports([admin]);
-    const persisted = persistRemoteRuntimeImports([read], { merge: true });
-    const [entry] = persisted;
-
-    expect(persisted.length).toBe(1);
-    expect(entry?.access).toBe('admin');
-    expect(entry?.authLevel).toBe('admin');
-    expect(entry?.token).toBe(admin.token);
-    expect(readStoredRemoteRuntimeImports()[0]?.access).toBe('admin');
+  test('rejects a read token even when a manifest falsely labels it admin', () => {
+    expect(() => parseRemoteRuntimeImportSourcePayload({
+      entries: [{
+        label: 'H1',
+        access: 'admin',
+        wsUrl: 'ws://127.0.0.1:8092/rpc',
+        token: `xlnra1.read.${Date.now() + 60_000}.aud.kid.jti.sig`,
+      }],
+    })).toThrow('REMOTE_RUNTIME_IMPORT_ADMIN_TOKEN_REQUIRED:1');
   });
 
   test('fresh import merge prunes expired stored runtimes without accepting expired active tokens', () => {
     const expired = {
       ...makeStored('Custody', 8088, 1),
-      token: `xlnra1.read.${Date.now() - 1}.aud.kid.jti.sig`,
+      token: `xlnra1.full.${Date.now() - 1}.aud.kid.jti.sig`,
     };
     localStorage.setItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY, JSON.stringify([expired]));
 
@@ -351,7 +353,7 @@ describe('remote runtime import manager utilities', () => {
 
     expect(localStorage.getItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY)).toContain(admin.token);
     expect(sessionStorage.getItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY)).toBeNull();
-    expect(resolveStoredRemoteRuntimeAuthKey('ws://localhost:8092/rpc', { requiredAccess: 'admin' }))
+    expect(resolveStoredRemoteRuntimeAuthKey('ws://localhost:8092/rpc'))
       .toBe(admin.token);
   });
 
@@ -453,7 +455,7 @@ describe('remote runtime import manager utilities', () => {
         async connect(config: unknown) {
           connectedConfig = config;
           this.status = 'connected';
-          this.authLevel = 'inspect';
+          this.authLevel = 'admin';
         },
         disconnect() {
           disconnected = true;
@@ -622,16 +624,12 @@ describe('remote runtime import manager utilities', () => {
     const admin = makeStored('H1 admin', 8092, 1, 'admin');
     persistRemoteRuntimeImports([admin]);
 
-    expect(resolveStoredRemoteRuntimeAuthKey('ws://localhost:8092/rpc', { requiredAccess: 'admin' }))
+    expect(resolveStoredRemoteRuntimeAuthKey('ws://localhost:8092/rpc'))
       .toBe(admin.token);
   });
 
-  test('does not silently downgrade an active admin remote when the admin token is missing', () => {
-    const read = makeStored('H1 read', 8092, 1, 'read');
-    persistRemoteRuntimeImports([read]);
-
-    expect(() => resolveStoredRemoteRuntimeAuthKey('ws://127.0.0.1:8092/rpc', { requiredAccess: 'admin' }))
-      .toThrow('REMOTE_RUNTIME_ACTIVE_ADMIN_TOKEN_MISSING:ws://127.0.0.1:8092/rpc');
+  test('returns no credential when the admin token is missing', () => {
+    expect(resolveStoredRemoteRuntimeAuthKey('ws://127.0.0.1:8092/rpc')).toBe('');
   });
 
   test('removes saved remote runtime by real runtime id or endpoint alias', () => {
@@ -653,10 +651,10 @@ describe('remote runtime import manager utilities', () => {
 
     expect(xlnStore).toContain('runtimeOperations.hydrateRemoteRuntimeImports()');
     expect(xlnStore).toContain("new URL('/api/runtime-import', resolveConfiguredApiBase(window.location.origin))");
-    expect(xlnStore).toContain("importSource.searchParams.set('access', 'read')");
+    expect(xlnStore).toContain("importSource.searchParams.set('access', 'admin')");
     expect(xlnStore).not.toContain("importSource.searchParams.set('allowPartial', '1')");
     expect(xlnStore).toContain('runtimeOperations.hydrateRemoteRuntimeImportSource(importSource.toString(), { optional: true })');
-    expect(runtimeCreation).toContain("url.searchParams.set('access', 'read')");
+    expect(runtimeCreation).toContain("url.searchParams.set('access', 'admin')");
     expect(runtimeCreation).not.toContain("url.searchParams.set('allowPartial', '1')");
     expect(runtimeCreation).toContain('await runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString(), { optional: silent })');
     expect(runtimeCreation.match(/runtimeOperations\.hydrateRemoteRuntimeImportSource\(url\.toString\(\), \{ optional: silent \}\)/g))

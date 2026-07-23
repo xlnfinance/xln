@@ -2651,7 +2651,7 @@ test('pre-wallet live runtime selector connects suggested H1 runtime through the
   expect(h1Option?.value).toBe(h1Endpoint.wsUrl);
 
   await select.selectOption(h1Endpoint.wsUrl);
-  await expect(page.getByTestId('live-runtime-connect')).toContainText(/Connect · read/i);
+  await expect(page.getByTestId('live-runtime-connect')).toContainText(/Connect · admin/i);
   await page.getByTestId('live-runtime-connect').click();
   await page.waitForFunction((expectedRuntimeId) => {
     const runtimeView = (window as typeof window & { __xln?: { view?: { runtimeId?: string; height?: number } } }).__xln?.view;
@@ -2670,7 +2670,7 @@ test('pre-wallet live runtime selector connects suggested H1 runtime through the
     expectedWsUrl,
   }), h1Endpoint.wsUrl);
   expect(activeRemote.activeMode).toBe('remote');
-  expect(activeRemote.authLevel).toBe('inspect');
+  expect(activeRemote.authLevel).toBe('admin');
   expect(activeRemote.activeWsUrl).toBe(h1Endpoint.wsUrl);
   expect(activeRemote.importCount).toBeGreaterThanOrEqual(1);
   expect(activeRemote.url).toContain('/app');
@@ -2695,7 +2695,7 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
     expect(baseline.custody?.ok, `custody must be ready: ${JSON.stringify(baseline.custody ?? {})}`).toBe(true);
     expectMarketMakerBooksHealthy(baseline);
 
-    const importResponse = await page.request.get(`${API_BASE_URL}/api/runtime-import?access=read`, {
+    const importResponse = await page.request.get(`${API_BASE_URL}/api/runtime-import?access=admin`, {
       headers: { 'Cache-Control': 'no-store' },
       timeout: 10_000,
     });
@@ -2742,7 +2742,7 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
       expect(Array.from(labels), `import summary labels=${Array.from(labels).join(',')}`).toContain(label);
     }
     for (const entry of importSummary.entries) {
-      expect(entry.access, `${entry.label} imported access`).toBe('read');
+      expect(entry.access, `${entry.label} imported access`).toBe('admin');
       expect(entry.runtimeId, `${entry.label} runtime id`).toMatch(/^[a-z0-9:_-]+$/);
       expect(entry.runtimeId, `${entry.label} runtime id`).not.toMatch(/^radapter:/);
       expect(entry.entityCount, `${entry.label} entity count`).toBeGreaterThan(0);

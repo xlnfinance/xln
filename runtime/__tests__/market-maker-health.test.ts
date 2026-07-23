@@ -41,7 +41,14 @@ test('default market maker depth fits every quote leg and aggregate hold inside 
   );
   const aggregateGiveByToken = new Map<number, bigint>();
 
-  expect(specs).toHaveLength(18);
+  expect(specs).toHaveLength(60);
+  const offersByPairSide = new Map<string, number>();
+  for (const spec of specs) {
+    const side = spec.giveTokenId < spec.wantTokenId ? 'ask' : 'bid';
+    const key = `${spec.pairId}:${side}`;
+    offersByPairSide.set(key, (offersByPairSide.get(key) ?? 0) + 1);
+  }
+  expect(Array.from(offersByPairSide.values())).toEqual([10, 10, 10, 10, 10, 10]);
   expect(specs.length).toBeLessThanOrEqual(LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS);
   for (const spec of specs) {
     expect(spec.giveAmount).toBeLessThanOrEqual(getBootstrapCreditAmount(spec.giveTokenId));
@@ -229,7 +236,7 @@ test('five-token market maker depth remains canonical through Account and hub ad
   }
 
   const specs = buildMarketMakerOfferSpecs([hubEntityId], [1, 2, 3, 4, 5]);
-  expect(specs).toHaveLength(LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS);
+  expect(specs).toHaveLength(200);
   const rejected: string[] = [];
 
   for (const spec of specs) {
@@ -272,8 +279,8 @@ test('five-token market maker depth remains canonical through Account and hub ad
     if (materialized.kind === 'reject') rejected.push(`${spec.offerId}:${materialized.reason}`);
   }
 
-  expect(account.swapOffers.size).toBe(LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS);
-  expect(encodeBuffer(account.swapOffers).byteLength).toBeLessThan(LIMITS.MAX_STORAGE_VALUE_BYTES);
+  expect(account.swapOffers.size).toBe(200);
+  expect(encodeBuffer(account.swapOffers).byteLength).toBeGreaterThan(LIMITS.MAX_STORAGE_VALUE_BYTES);
   expect(rejected).toEqual([]);
 });
 
@@ -407,9 +414,7 @@ test('five-token jurisdiction keeps same-chain and cross depth inside one accoun
   const specs = [...buildMarketMakerOfferSpecs([sourceHub.entityId], sourceTokenIds), ...crossSpecs];
   const aggregateGiveByToken = new Map<number, bigint>();
 
-  expect(specs).toHaveLength(
-    LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS + LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS,
-  );
+  expect(specs).toHaveLength(350);
   expect(crossSpecs.some(spec => (spec.crossJurisdiction?.source.tokenId ?? 0) >= 4)).toBeTrue();
   expect(reverseCrossSpecs.some(spec => (spec.crossJurisdiction?.target.tokenId ?? 0) >= 4)).toBeTrue();
   for (const spec of specs) {
@@ -436,6 +441,25 @@ test('cross offer construction requires the deterministic Runtime-frame timestam
     [1],
     [1],
   )).toThrow('MARKET_MAKER_CROSS_TIMESTAMP_INVALID:0');
+});
+
+test('cross stablecoin depth fully covers a 300 USDC wallet order', () => {
+  const { env, contexts, visibleHubs } = buildBootstrapTopology();
+  addReplica(env, contexts[0]!.entityId, contexts[0]!.signerId);
+  addReplica(env, contexts[1]!.entityId, contexts[1]!.signerId);
+  const specs = buildMarketMakerCrossOfferSpecs(
+    env,
+    contexts[0]!,
+    contexts[1]!,
+    [visibleHubs[0]!],
+    [visibleHubs[1]!],
+    [1],
+    [1],
+  );
+  const sourceDepth = specs.reduce((sum, spec) => sum + spec.giveAmount, 0n);
+
+  expect(specs).toHaveLength(10);
+  expect(sourceDepth).toBeGreaterThanOrEqual(300n * 10n ** 6n);
 });
 
 test('runtime market maker health stays red when same-chain offers are committed but cross source offer is pending', () => {

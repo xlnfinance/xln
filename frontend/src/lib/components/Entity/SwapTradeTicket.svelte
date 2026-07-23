@@ -9,6 +9,7 @@
     type CrossSwapSetupStep,
   } from './swap-panel-helpers';
   import SwapPriceVenueControls from './SwapPriceVenueControls.svelte';
+  import SwapVenueSelector from './SwapVenueSelector.svelte';
   import SwapRouteBuilder from './SwapRouteBuilder.svelte';
 
   type SourceEntityOption = {
@@ -22,6 +23,7 @@
   type TokenOption = {
     tokenId: number;
     symbol: string;
+    label: string;
   };
 
   type RouteOption = {
@@ -67,8 +69,7 @@
   export let entityAvatarSrc: (entityIdValue: string) => string = () => '';
 
   export let orderAmountInput = '';
-  export let orderAmountInputElement: HTMLInputElement | null = null;
-  export let handleOrderAmountInput: (event: Event) => void = noop;
+  export let handleOrderAmountInput: (value: string) => void = noop;
 
   export let openTokenMenu: 'give' | 'want' | '' = '';
   export let toggleTokenMenu: (side: 'give' | 'want') => void = noop;
@@ -137,11 +138,6 @@
   export let hubJurisdictionLabel: (entityIdValue: string) => string = () => '';
   export let applyOrderPercent: (percent: number) => void = noop;
 
-  export let liveOrderAmountInput = '';
-  export let latestOrderAmountDomValue = '';
-  export let hasLatestOrderAmountDomValue = false;
-  export let orderAmountRevision = 0;
-  export let orderAmountDomRevision = 0;
   export let giveTokenDecimals = 18;
   export let giveAmount: bigint = 0n;
   export let canonicalGiveAmount: bigint = 0n;
@@ -189,6 +185,23 @@
     </button>
   </div>
   <div class="anyswap-builder" data-testid="swap-any-builder">
+    <SwapVenueSelector
+      bind:createOrderAccountId
+      {hubMenuOpen}
+      {activeOrderAccountId}
+      {selectedHubDisplayLabel}
+      {selectedHubLabel}
+      {selectedHubJurisdictionLabel}
+      {selectedHubOptions}
+      {toggleHubMenu}
+      {handleSelectedHubChange}
+      {selectHubOption}
+      {entityAvatarSrc}
+      {entityInitials}
+      {jurisdictionBadgeText}
+      {formatEntityNetworkLabel}
+      {hubJurisdictionLabel}
+    />
     <div class="swap-leg-card">
       <div class="leg-header">
         <span>From</span>
@@ -258,13 +271,12 @@
       <div class="leg-main">
         <input
           type="text"
-          bind:value={orderAmountInput}
-          bind:this={orderAmountInputElement}
+          value={orderAmountInput}
           inputmode="decimal"
           placeholder="0"
           data-testid="swap-order-amount"
           aria-label="Swap from amount"
-          on:input={handleOrderAmountInput}
+          on:input={(event) => handleOrderAmountInput((event.currentTarget as HTMLInputElement).value)}
         />
         <div class="token-select-wrap" data-swap-menu-root title={giveTokenSymbol}>
           <button
@@ -276,7 +288,7 @@
           >
             <span class={`token-dot token-${tokenClass(giveTokenSymbol)}`}>{tokenIconText(giveTokenSymbol)}</span>
             {#key giveTokenId}
-              <span class="token-select-visible" data-testid="swap-from-token-label">{giveTokenSymbol}</span>
+              <span class="token-select-visible" data-testid="swap-from-token-label">{sourceAssetLabel}</span>
             {/key}
             <span class="token-select-chevron" aria-hidden="true">⌄</span>
           </button>
@@ -288,7 +300,7 @@
             on:change={handleGiveTokenChange}
           >
             {#each giveTokenOptions as token}
-              <option value={String(token.tokenId)}>{token.symbol}</option>
+              <option value={String(token.tokenId)}>{token.label}</option>
             {/each}
           </select>
           {#if openTokenMenu === 'give'}
@@ -303,7 +315,7 @@
                   on:click|stopPropagation={() => selectGiveTokenOption(token.tokenId)}
                 >
                   <span class={`token-dot token-${tokenClass(token.symbol)}`}>{tokenIconText(token.symbol)}</span>
-                  <span>{token.symbol}</span>
+                  <span>{token.label}</span>
                 </button>
               {/each}
             </div>
@@ -312,7 +324,9 @@
       </div>
       <div class="leg-meta">
         <span>{sourceAssetLabel}</span>
-        <strong title={`Available ${formattedAvailableGive}`}>{formattedAvailableGiveAmount}</strong>
+        <strong data-testid="swap-available-stat" title={`Available ${formattedAvailableGive}`}>
+          Available: {formattedAvailableGiveAmount}
+        </strong>
       </div>
     </div>
 
@@ -440,7 +454,7 @@
           >
             <span class={`token-dot token-${tokenClass(wantTokenSymbol)}`}>{tokenIconText(wantTokenSymbol)}</span>
             {#key wantTokenId}
-              <span class="token-select-visible" data-testid="swap-to-token-label">{wantTokenSymbol}</span>
+              <span class="token-select-visible" data-testid="swap-to-token-label">{targetAssetLabel}</span>
             {/key}
             <span class="token-select-chevron" aria-hidden="true">⌄</span>
           </button>
@@ -452,7 +466,7 @@
             on:change={handleWantTokenChange}
           >
             {#each wantTokenOptions as token}
-              <option value={String(token.tokenId)}>{token.symbol}</option>
+              <option value={String(token.tokenId)}>{token.label}</option>
             {/each}
           </select>
           {#if openTokenMenu === 'want'}
@@ -467,7 +481,7 @@
                   on:click|stopPropagation={() => selectWantTokenOption(token.tokenId)}
                 >
                   <span class={`token-dot token-${tokenClass(token.symbol)}`}>{tokenIconText(token.symbol)}</span>
-                  <span>{token.symbol}</span>
+                  <span>{token.label}</span>
                 </button>
               {/each}
             </div>
@@ -483,41 +497,20 @@
 
   <SwapPriceVenueControls
     bind:priceRatioInput
-    bind:createOrderAccountId
     {quoteTokenSymbol}
     {marketPriceTicks}
     {marketPriceSideLabel}
     {marketPriceLabel}
     {bookVenueLabel}
-    {hubMenuOpen}
-    {activeOrderAccountId}
-    {selectedHubDisplayLabel}
-    {selectedHubLabel}
-    {selectedHubJurisdictionLabel}
-    {selectedHubOptions}
     {orderPercent}
     {handlePriceRatioInput}
     {stepPrice}
     {useMarketPrice}
-    {toggleHubMenu}
-    {handleSelectedHubChange}
-    {selectHubOption}
-    {entityAvatarSrc}
-    {entityInitials}
-    {jurisdictionBadgeText}
-    {formatEntityNetworkLabel}
-    {hubJurisdictionLabel}
     {applyOrderPercent}
   />
 
   <SwapRouteBuilder
-    {liveOrderAmountInput}
     {orderAmountInput}
-    {latestOrderAmountDomValue}
-    {hasLatestOrderAmountDomValue}
-    {orderAmountRevision}
-    {orderAmountDomRevision}
-    orderAmountNodeValue={String(orderAmountInputElement?.value ?? '')}
     {giveToken}
     {wantToken}
     {giveTokenDecimals}
@@ -540,12 +533,9 @@
     {manualRouteEstimateLabel}
   />
 
-  <div class="avbl-row size-stats">
-    <span data-testid="swap-available-stat">Available: <strong>{formattedAvailableGive}</strong></span>
-    {#if capacityWarning}
-      <span class="capacity-warn">{capacityWarning}</span>
-    {/if}
-  </div>
+  {#if capacityWarning}
+    <p class="capacity-warn">{capacityWarning}</p>
+  {/if}
 
   {#if autoCapacityNote}
     <p class="auto-capacity-note" data-testid="swap-auto-capacity-note">{autoCapacityNote}</p>

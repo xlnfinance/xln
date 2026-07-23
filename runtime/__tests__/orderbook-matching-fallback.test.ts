@@ -14,6 +14,7 @@ import {
   quoteAmountAtPrice,
   SWAP_LOT_SCALE,
 } from '../orderbook/types';
+import { removeCrossJurisdictionBookOrderByRouteId } from '../orderbook/cross-j';
 import { processOrderbookCancels, processOrderbookSwaps } from '../entity/tx/handlers/account';
 import { applyCrossJurisdictionBookProgressToState } from '../entity/tx/handlers/cross-j-book-order';
 import { handleSwapResolve } from '../account/tx/handlers/swap-resolve';
@@ -2805,6 +2806,32 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(admission?.pendingFill).toBeUndefined();
     expect(admission?.route.fillSeq).toBe(1);
     expect(() => processCommittedOrderbookSwaps(entityState, [] as any)).not.toThrow();
+
+    expect(removeCrossJurisdictionBookOrderByRouteId(
+      entityState,
+      'maker-entity',
+      'maker-cross-progress',
+      [],
+    )).toBe(true);
+    expect(getBookOrder(book, namespacedOrderId)).toBeNull();
+
+    const halfSourceAmount = 20_000n * lot;
+    const halfTargetAmount = quoteAmountAtPrice(2, 1, halfSourceAmount, 25_000_000n);
+    const materialized = applyCrossJurisdictionBookProgressToState(env, entityState, {
+      orderId: 'maker-cross-progress',
+      sourceEntityId: 'maker-entity',
+      fillSeq: 2,
+      incrementalSourceAmount: halfSourceAmount - filledSourceAmount,
+      incrementalTargetAmount: halfTargetAmount - filledTargetAmount,
+      cumulativeSourceAmount: halfSourceAmount,
+      cumulativeTargetAmount: halfTargetAmount,
+      cumulativeFillRatio: 32_768,
+      fillNumerator: 1n,
+      fillDenominator: 2n,
+      reason: 'committed_taker_remainder',
+    });
+    expect(materialized).toBe(true);
+    expect(getBookOrder(book, namespacedOrderId)?.qtyLots).toBe(20_000n);
   });
 
   test('suspends a cross-j order while its partial fill ack is pending', () => {

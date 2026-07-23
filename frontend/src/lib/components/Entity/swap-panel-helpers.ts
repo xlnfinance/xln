@@ -75,6 +75,13 @@ export type CrossSwapRuntimeInputPlan = {
   targetSetupTxs: EntityTx[];
 };
 
+export function orderbookLotsDisplayScale(tokenDecimals: number): number {
+  if (!Number.isInteger(tokenDecimals) || tokenDecimals < 0) {
+    throw new Error(`SWAP_TOKEN_DECIMALS_INVALID:${tokenDecimals}`);
+  }
+  return 10 ** Math.min(tokenDecimals, 6);
+}
+
 export function normalizeEntityId(value: string): string {
   return String(value || '').trim().toLowerCase();
 }

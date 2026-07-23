@@ -49,21 +49,17 @@ export const LIMITS = {
   /** Maximum active HTLC locks per bilateral account; 16-bit hashledger cross-j swaps need 16 live legs. */
   MAX_ACCOUNT_HTLC_LOCKS: 32,
 
-  /**
-   * Fast count guard sized below the canonical 10KB collection-byte limit.
-   * Aggregate fast guard; per-kind limits below reserve one bounded page for
-   * compact same-j rows plus larger cross-j rows.
-   */
-  MAX_ACCOUNT_SWAP_OFFERS: 23,
+  /** Aggregate live-offer guard; oversized maps are paged by Account storage. */
+  MAX_ACCOUNT_SWAP_OFFERS: 2000,
 
-  /** Compact same-j rows retained in one Account collection page. */
-  MAX_ACCOUNT_SAME_J_SWAP_OFFERS: 20,
+  /** Same-j live offers across all markets in one bilateral Account. */
+  MAX_ACCOUNT_SAME_J_SWAP_OFFERS: 1000,
 
-  /** Cross-j offers carry both signed legs and therefore have a tighter byte budget. */
-  MAX_ACCOUNT_CROSS_J_SWAP_OFFERS: 3,
+  /** Cross-j live offers across all routes in one bilateral Account. */
+  MAX_ACCOUNT_CROSS_J_SWAP_OFFERS: 1000,
 
   /** Maximum live offers for one maker, direction, and economic market. */
-  MAX_ACCOUNT_SWAP_OFFERS_PER_SIDE_PER_MARKET: 10,
+  MAX_ACCOUNT_SWAP_OFFERS_PER_SIDE_PER_MARKET: 20,
 
   /** Recent terminal swap lifecycle rows retained in the live Account projection. */
   MAX_ACCOUNT_TERMINAL_SWAP_HISTORY: 100,

@@ -33,7 +33,7 @@ export interface Runtime {
   seed?: string;                 // BrainVault seed backing this runtime (if any)
   vaultId?: string;              // Vault name bound to this runtime (if any)
   apiKey?: string;               // HMAC(seed, "read"|"write")
-  remoteAccess?: 'read' | 'admin';
+  remoteAccess?: 'admin';
   permissions: 'read' | 'write';
   status: 'connected' | 'syncing' | 'disconnected' | 'error';
   entityCount?: number;
@@ -124,7 +124,7 @@ const persistActiveRemoteRuntime = (runtime: Runtime): boolean => {
   if (typeof window === 'undefined' || runtime.type !== 'remote' || !runtime.wsUrl) return false;
   localStorage.setItem('xln-runtime-adapter-mode', 'remote');
   localStorage.setItem('xln-runtime-adapter-ws', runtime.wsUrl);
-  localStorage.setItem('xln-runtime-adapter-access', runtime.remoteAccess ?? (runtime.permissions === 'write' ? 'admin' : 'read'));
+  localStorage.setItem('xln-runtime-adapter-access', 'admin');
   localStorage.removeItem('xln-runtime-adapter-key');
   if (runtime.apiKey) sessionStorage.setItem('xln-runtime-adapter-key', runtime.apiKey);
   else sessionStorage.removeItem('xln-runtime-adapter-key');
@@ -199,7 +199,7 @@ const runtimeControllerAlreadyTargets = (runtime: Runtime, id: string): boolean 
   if (String(handle.runtimeId || handle.id || '').toLowerCase() !== id) return false;
   if (runtime.type === 'remote') {
     if (config?.mode !== 'remote' || !runtime.wsUrl || !config.wsUrl) return false;
-    const expectedAuth = runtime.remoteAccess === 'admin' ? 'admin' : 'inspect';
+    const expectedAuth = 'admin';
     return handle.authLevel === expectedAuth &&
       normalizeRemoteRuntimeWsUrl(config.wsUrl) === normalizeRemoteRuntimeWsUrl(runtime.wsUrl);
   }
@@ -226,7 +226,7 @@ const upsertRemoteImportEntry = (
     wsUrl: entry.wsUrl,
     apiKey: entry.token,
     remoteAccess: entry.access,
-    permissions: entry.access === 'admin' ? 'write' : 'read',
+    permissions: 'write',
     status: existing?.status === 'connected' ? 'connected' : 'disconnected',
     entityCount: Math.max(0, Math.floor(Number(entry.entityCount || existing?.entityCount || 0))),
     ...(hubEntityId ? { hubEntityId } : {}),
@@ -285,7 +285,7 @@ export const runtimeOperations = {
     const wsUrl = normalizeRemoteRuntimeWsUrl(uri);
     const entry: RemoteRuntimeImportEntry = {
       label: options.label || new URL(wsUrl).host,
-      access: options.access ?? 'read',
+      access: options.access ?? 'admin',
       wsUrl,
       token: apiKey,
     };

@@ -575,17 +575,12 @@ const resolveAppRuntimeAdapterConfig = async (): Promise<RuntimeAdapterConfig> =
     defaultRemoteAdapterWsUrl()
   ).trim();
   const normalizedWsUrl = normalizeWsConnectUrl(wsUrl);
-  const storedAccess = readStoredAdapterValue('xln-runtime-adapter-access').trim().toLowerCase();
   const storedAuthKey = readStoredAdapterValue('xln-runtime-adapter-key').trim();
   let restoredAuthKey = '';
-  if (storedAccess === 'admin') {
-    try {
-      restoredAuthKey = resolveStoredRemoteRuntimeAuthKey(normalizedWsUrl, { requiredAccess: 'admin' }).trim();
-    } catch (error) {
-      if (!storedAuthKey || readRemoteRuntimeTokenAccess(storedAuthKey) !== 'admin') throw error;
-    }
-  } else if (!storedAuthKey) {
+  try {
     restoredAuthKey = resolveStoredRemoteRuntimeAuthKey(normalizedWsUrl).trim();
+  } catch (error) {
+    if (!storedAuthKey || readRemoteRuntimeTokenAccess(storedAuthKey) !== 'admin') throw error;
   }
   if (restoredAuthKey) sessionStorage.setItem('xln-runtime-adapter-key', restoredAuthKey);
   const authKey = restoredAuthKey || storedAuthKey;
@@ -614,7 +609,10 @@ const upsertRuntimeSnapshot = (
   runtimes.update((map) => {
     const updated = new Map(map);
     const existing = updated.get(runtimeId);
-    const remoteAccess = authLevel === 'admin' ? 'admin' : 'read';
+    if (config.mode === 'remote' && authLevel !== 'admin') {
+      throw new Error(`REMOTE_RUNTIME_ADMIN_REQUIRED:${runtimeId}`);
+    }
+    const remoteAccess = 'admin';
     updated.set(runtimeId, {
       ...existing,
       id: runtimeId,
@@ -625,7 +623,7 @@ const upsertRuntimeSnapshot = (
       ...(config.seed ? { seed: config.seed } : {}),
       ...(config.authKey ? { apiKey: config.authKey } : {}),
       ...(config.mode === 'remote' ? { remoteAccess } : {}),
-      permissions: config.mode === 'remote' ? (authLevel === 'admin' ? 'write' : 'read') : 'write',
+      permissions: 'write',
       status: status === 'connected' ? 'connected' : status === 'connecting' ? 'syncing' : status,
       lastSynced: Date.now(),
     });
@@ -710,7 +708,8 @@ const upsertRemoteRuntimeProjectionMetadata = (
     options.runtimeId || config.runtimeId || remoteRuntimeIdFromConfig(config),
   );
   if (!runtimeId) return;
-  const remoteAccess = authLevel === 'admin' ? 'admin' : 'read';
+  if (authLevel !== 'admin') throw new Error(`REMOTE_RUNTIME_ADMIN_REQUIRED:${runtimeId}`);
+  const remoteAccess = 'admin';
   const entities = options.frame?.entities ?? [];
   const entitySummaries = remoteEntitySummariesFromEntities(entities);
   const hubEntities = remoteHubSummariesFromEntities(entities);
@@ -1058,7 +1057,7 @@ export async function initializeXLN(): Promise<Env | null> {
     runtimeOperations.hydrateRemoteRuntimeImports();
     if (typeof window !== 'undefined') {
       const importSource = new URL('/api/runtime-import', resolveConfiguredApiBase(window.location.origin));
-      importSource.searchParams.set('access', 'read');
+      importSource.searchParams.set('access', 'admin');
       void runtimeOperations.hydrateRemoteRuntimeImportSource(importSource.toString(), { optional: true });
     }
 

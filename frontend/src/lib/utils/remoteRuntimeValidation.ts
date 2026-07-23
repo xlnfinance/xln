@@ -254,7 +254,7 @@ export const buildRemoteRuntimeRecoveryPeerSources = (options: {
           if (adapter.status !== 'connected') {
             throw new Error(`REMOTE_RUNTIME_CONNECT_FAILED:${entry.wsUrl}:${adapter.status}`);
           }
-          const expectedAuthLevel = entry.access === 'admin' ? 'admin' : 'inspect';
+          const expectedAuthLevel = 'admin';
           if (adapter.authLevel !== expectedAuthLevel) {
             throw new Error(`REMOTE_RUNTIME_ACCESS_MISMATCH:${entry.label}:${expectedAuthLevel}:${adapter.authLevel || 'none'}`);
           }
@@ -295,7 +295,7 @@ export const validateRemoteRuntimeEntry = async (
     if (adapter.status !== 'connected') {
       throw new Error(`REMOTE_RUNTIME_CONNECT_FAILED:${entry.wsUrl}:${adapter.status}`);
     }
-    const expectedAuthLevel = entry.access === 'admin' ? 'admin' : 'inspect';
+    const expectedAuthLevel = 'admin';
     if (adapter.authLevel !== expectedAuthLevel) {
       throw new Error(`REMOTE_RUNTIME_ACCESS_MISMATCH:${entry.label}:${expectedAuthLevel}:${adapter.authLevel || 'none'}`);
     }

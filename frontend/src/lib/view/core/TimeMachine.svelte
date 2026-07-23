@@ -837,6 +837,14 @@
     />
     <span class="time-label end">{totalTime}</span>
     <button
+      class="dock-toggle-btn db-inspector-btn"
+      data-testid="open-leveldb-inspector"
+      on:click={() => appStateOperations.openDockPanel('leveldb-inspector')}
+      title="Inspect every browser LevelDB database"
+    >
+      🗄️ DB
+    </button>
+    <button
       class="dock-toggle-btn"
       data-testid="network-machine-mode-toggle"
       on:click={() => appStateOperations.setMode($appState.mode === 'dev' ? 'user' : 'dev')}
@@ -1058,6 +1066,10 @@
   .dock-toggle-btn:hover {
     background: rgba(168, 85, 247, 0.2);
     border-color: rgba(168, 85, 247, 0.5);
+  }
+
+  .db-inspector-btn {
+    margin-left: 0;
   }
 
   /* Frame Navigation */

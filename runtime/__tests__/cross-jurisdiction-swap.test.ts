@@ -120,6 +120,7 @@ import { buildLocalEntityProfile } from '../networking/gossip-helper';
 import { collectLocalProfileEncryptionAnnouncements } from '../networking/profile-encryption';
 import { LIMITS } from '../constants';
 import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
+import { assertRuntimeOutputAuthorization } from '../entity/authorization';
 import { cloneIsolatedRoutedEntityInputs } from '../protocol/runtime-input-clone';
 import { createDueScheduledWakeInputs } from '../machine/scheduled-wake';
 import { ACCOUNT_PENDING_RESEND_AFTER_MS } from '../entity/scheduler';
@@ -1946,7 +1947,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     )).toBe(false);
   });
 
-  test('target pull settlement does not duplicate source-side book removal', () => {
+  test('target user settlement closes its source user sibling without duplicating book removal', async () => {
     const env = createEmptyEnv('cross-target-remote-book-owner');
     env.timestamp = 10_000;
     env.quietRuntimeLogs = true;
@@ -1956,12 +1957,16 @@ describe('cross-jurisdiction hashledger swap', () => {
     const sourceHub = entity('ab');
     const targetHub = entity('ac');
     const targetUser = entity('ad');
+    const sourceSigner = addr('a9');
     const targetUserState = makeState(targetUser, addr('ae'), base, targetHub);
+    const sourceUserState = makeState(sourceUser, sourceSigner, eth, sourceHub);
+    addReplica(env, sourceUserState, sourceSigner);
     const route = buildPreparedCrossJurisdictionRoute({
       orderId: 'cross-target-remote-book-owner',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
       bookOwnerEntityId: sourceHub,
+      sourceSignerId: sourceSigner,
       sourceHubSignerId: addr('af'),
       source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
       target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
@@ -1978,9 +1983,15 @@ describe('cross-jurisdiction hashledger swap', () => {
       claimedRatio: 0x8000,
     };
     targetUserState.crossJurisdictionSwaps?.set(targetRoute.orderId, targetRoute);
+    sourceUserState.crossJurisdictionSwaps?.set(
+      targetRoute.orderId,
+      cloneCrossJurisdictionRoute(targetRoute),
+    );
     const privateSeed = deriveCrossJurisdictionPrivateSeed('cross-target-remote-book-owner-seed', targetRoute);
     const binary = buildCrossJurisdictionPullReveal(targetRoute, 0x8000, privateSeed).binary;
-    const outputs: any[] = [];
+    sourceUserState.crossJurisdictionSwaps!.get(targetRoute.orderId)!.sourceCloseProof =
+      buildCrossJurisdictionCloseProof(targetRoute, binary);
+    const outputs: EntityInput[] = [];
 
     expect(applyCommittedCrossJurisdictionAccountTxFollowup(env, targetUserState, targetHub, {
       type: 'pull_resolve',
@@ -1990,7 +2001,27 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
     }, outputs)).toBe(true);
     expect(targetUserState.crossJurisdictionSwaps?.get(targetRoute.orderId)?.status).toBe('settled');
-    expect(outputs).toHaveLength(0);
+    expect(outputs).toHaveLength(1);
+    expect(outputs[0]?.entityId).toBe(sourceUser);
+    expect(outputs[0]?.entityTxs?.map(tx => tx.type)).toEqual(['crossJurisdictionSettled']);
+    expect(outputs.some(output =>
+      output.entityTxs?.some(tx => tx.type === 'removeCrossJurisdictionBookOrder'),
+    )).toBe(false);
+
+    const terminalTxs = outputs[0]!.entityTxs!;
+    assertRuntimeOutputAuthorization(targetUser, sourceUser, terminalTxs, sourceUserState);
+    const sourceResult = await applyEntityTx(env, sourceUserState, terminalTxs[0]!);
+    expect(sourceResult.newState.crossJurisdictionSwaps?.get(targetRoute.orderId)?.status).toBe('settled');
+    expect(applyCommittedCrossJurisdictionAccountTxFollowup(
+      env,
+      sourceResult.newState,
+      sourceHub,
+      {
+        type: 'pull_resolve',
+        data: { pullId: targetRoute.sourcePull!.pullId, binary },
+      },
+      [],
+    )).toBe(true);
   });
 
   test('target pull settle backfills fill progress when fill ack mirror is delayed', () => {
@@ -2003,12 +2034,15 @@ describe('cross-jurisdiction hashledger swap', () => {
     const sourceHub = entity('ab');
     const targetHub = entity('ac');
     const targetUser = entity('ad');
+    const sourceSigner = addr('a9');
     const targetUserState = makeState(targetUser, addr('ae'), base, targetHub);
+    addReplica(env, makeState(sourceUser, sourceSigner, eth, sourceHub), sourceSigner);
     const route = buildPreparedCrossJurisdictionRoute({
       orderId: 'cross-target-delayed-fill-ack',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
       bookOwnerEntityId: sourceHub,
+      sourceSignerId: sourceSigner,
       sourceHubSignerId: addr('af'),
       source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
       target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
@@ -2042,6 +2076,94 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(updated?.fillSeq).toBe(1);
     expect(updated?.cumulativeFillRatio).toBe(0x8000);
     expect(updated?.claimedRatio).toBe(0x8000);
+    expect(outputs[0]?.entityTxs?.map((tx: EntityTx) => tx.type)).toEqual(['crossJurisdictionSettled']);
+  });
+
+  test('target hub settlement closes only its source hub sibling with exact commitment binding', async () => {
+    const seed = 'cross-target-hub-terminal';
+    const env = createEmptyEnv(seed);
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('ba');
+    const sourceHub = entity('bb');
+    const targetHub = entity('bc');
+    const targetUser = entity('bd');
+    const sourceHubSigner = addr('be');
+    const targetHubSigner = addr('bf');
+    const sourceHubState = makeState(sourceHub, sourceHubSigner, eth, sourceUser);
+    const targetHubState = makeState(targetHub, targetHubSigner, base, targetUser);
+    addReplica(env, sourceHubState, sourceHubSigner);
+    addReplica(env, targetHubState, targetHubSigner);
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-target-hub-terminal',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      bookOwnerEntityId: sourceHub,
+      sourceHubSignerId: sourceHubSigner,
+      targetHubSignerId: targetHubSigner,
+      source: {
+        jurisdiction: jref(eth),
+        entityId: sourceUser,
+        counterpartyEntityId: sourceHub,
+        tokenId: 1,
+        amount: 1_000n,
+      },
+      target: {
+        jurisdiction: jref(base),
+        entityId: targetHub,
+        counterpartyEntityId: targetUser,
+        tokenId: 1,
+        amount: 900n,
+      },
+      status: 'resting',
+      createdAt: env.timestamp,
+      updatedAt: env.timestamp,
+      expiresAt: 70_000,
+    }, { runtimeSeed: seed, sourceDisputeDelayMs: 5_000, now: env.timestamp });
+    const claimedRoute = {
+      ...route,
+      status: 'source_claimed' as const,
+      fillSeq: 1,
+      cumulativeFillRatio: 0x8000,
+      claimedRatio: 0x8000,
+    };
+    targetHubState.crossJurisdictionSwaps?.set(route.orderId, {
+      ...cloneCrossJurisdictionRoute(route),
+      status: 'resting',
+      fillSeq: 0,
+      cumulativeFillRatio: 0,
+      claimedRatio: 0,
+    });
+    sourceHubState.crossJurisdictionSwaps?.set(route.orderId, cloneCrossJurisdictionRoute(claimedRoute));
+    sourceHubState.crossJurisdictionSwaps!.get(route.orderId)!.status = 'clearing';
+    const binary = buildCrossJurisdictionPullReveal(
+      claimedRoute,
+      0x8000,
+      deriveCrossJurisdictionPrivateSeed(seed, claimedRoute),
+    ).binary;
+    const outputs: EntityInput[] = [];
+
+    expect(applyCommittedCrossJurisdictionAccountTxFollowup(env, targetHubState, targetUser, {
+      type: 'pull_resolve',
+      data: { pullId: claimedRoute.targetPull!.pullId, binary },
+    }, outputs)).toBe(true);
+    expect(targetHubState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('settled');
+    expect(outputs).toHaveLength(1);
+    expect(outputs[0]?.entityId).toBe(sourceHub);
+    assertRuntimeOutputAuthorization(targetHub, sourceHub, outputs[0]!.entityTxs!, sourceHubState);
+
+    const sourceResult = await applyEntityTx(env, sourceHubState, outputs[0]!.entityTxs![0]!);
+    expect(sourceResult.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('settled');
+    expect(sourceResult.newState.crossJurisdictionSwaps?.get(route.orderId)?.sourceCloseProof).toBeDefined();
+    const forged = structuredClone(
+      outputs[0]!.entityTxs![0]!,
+    ) as Extract<EntityTx, { type: 'crossJurisdictionSettled' }>;
+    forged.data.routeHash = `0x${'ff'.repeat(32)}`;
+    await expect(applyEntityTx(env, sourceHubState, forged)).rejects.toThrow(
+      'CROSS_J_SETTLED_ROUTE_HASH_MISMATCH',
+    );
   });
 
   test('cross-j route clones and storage projection keep only public route fields', () => {

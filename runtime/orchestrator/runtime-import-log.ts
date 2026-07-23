@@ -6,7 +6,7 @@ export type RuntimeImportLogManifest = {
 export type RuntimeImportLogInput = {
   manifest: RuntimeImportLogManifest;
   importUrl: string;
-  access: 'read' | 'admin';
+  access: 'admin';
   manifestPath: string;
   exposeUrl?: boolean;
 };

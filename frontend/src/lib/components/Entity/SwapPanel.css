@@ -58,7 +58,7 @@
     overflow: visible;
     background: #0a0c11;
     border-color: #242936;
-    box-shadow: 0 14px 42px rgba(0, 0, 0, 0.22);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
   }
 
   .swap-panel .section-orders {
@@ -85,8 +85,8 @@
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: 10px;
-    min-height: 32px;
-    margin-bottom: 10px;
+    min-height: 28px;
+    margin-bottom: 8px;
     color: #8b94a7;
     font-size: 11px;
     font-weight: 800;
@@ -130,13 +130,13 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: 0;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
   }
 
   .swap-panel .swap-leg-card {
     display: grid;
-    gap: 8px;
-    padding: 12px;
+    gap: 5px;
+    padding: 9px 10px;
     background: linear-gradient(180deg, #11141b 0%, #0d0f15 100%);
     border: 1px solid #252a36;
     border-radius: 8px;
@@ -214,7 +214,7 @@
     align-items: center;
     gap: 9px;
     width: 100%;
-    min-height: 42px;
+    min-height: 38px;
     padding: 4px 10px 4px 7px;
     border: 1px solid #232631;
     border-radius: 8px;
@@ -322,8 +322,8 @@
 
   .swap-panel .token-select-wrap {
     position: relative;
-    width: 132px;
-    min-width: 112px;
+    width: 174px;
+    min-width: 148px;
     min-height: 42px;
     box-sizing: border-box;
     flex-shrink: 0;
@@ -622,12 +622,12 @@
   .swap-panel .leg-main input {
     flex: 1;
     min-width: 0;
-    height: 48px;
+    height: 42px;
     padding: 0;
     border: none;
     background: transparent;
     color: #f3f4f6;
-    font-size: 26px;
+    font-size: 24px;
     font-weight: 800;
     text-align: left;
   }
@@ -666,8 +666,8 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
-    min-height: 36px;
-    margin: -4px 0;
+    min-height: 28px;
+    margin: -3px 0;
     position: relative;
     z-index: 1;
   }
@@ -695,9 +695,9 @@
 
   .swap-panel .quote-row,
   .swap-panel .venue-row {
-    min-height: 36px;
-    padding: 0 10px;
-    margin-bottom: 8px;
+    min-height: 34px;
+    padding: 0 8px;
+    margin-bottom: 6px;
     background: #0d0f15;
     border: 1px solid #202431;
     border-radius: 8px;
@@ -722,8 +722,11 @@
 
   .swap-panel .venue-row {
     display: grid;
-    grid-template-columns: minmax(80px, auto) minmax(0, 1fr);
+    grid-template-columns: 46px minmax(0, 1fr);
     justify-content: stretch;
+    padding: 5px 7px;
+    background: linear-gradient(180deg, #10131a 0%, #0b0d12 100%);
+    border-color: rgba(251, 191, 36, 0.22);
   }
 
   .swap-panel .venue-row select {

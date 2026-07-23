@@ -156,7 +156,7 @@ test('dev radapter keys can point app import links at the browser QA origin', ()
     expect(payload.adminImportUrl.startsWith('http://localhost:8085/app#runtime-import-src=')).toBe(true);
     expect(payload.importUrl).not.toContain('/radapter/manage#runtime-import-src=');
     expect(payload.adminImportUrl).not.toContain('/radapter/manage#runtime-import-src=');
-    expect(payload.importUrl).toContain('access%3Dread');
+    expect(payload.importUrl).toContain('access%3Dadmin');
     expect(payload.adminImportUrl).toContain('access%3Dadmin');
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -467,6 +467,42 @@ export function createBook(params: BookParams): BookState {
   };
 }
 
+/**
+ * Materialize a remainder only after its Account fill progress committed.
+ *
+ * A newly crossing taker never existed in the committed book: matching happens
+ * on a simulation clone. If that taker has a remainder, the committed ACK is
+ * the first point where the row is safe to persist. This API deliberately does
+ * no matching; callers must already hold consensus proof of the remainder.
+ */
+export function materializeCommittedRemainder(
+  state: BookState,
+  input: Pick<BookOrderState, 'orderId' | 'ownerId' | 'side' | 'priceTicks' | 'qtyLots'>,
+): BookState {
+  const mutable = state as MutableBookState;
+  if (input.qtyLots <= 0n || input.qtyLots > MAX_ORDERBOOK_QTY_LOTS) {
+    throw new Error(`BOOK_REMAINDER_QTY_INVALID: order=${input.orderId} qty=${input.qtyLots.toString()}`);
+  }
+  if (input.priceTicks <= 0n) {
+    throw new Error(`BOOK_REMAINDER_PRICE_INVALID: order=${input.orderId}`);
+  }
+  if (mutable.orders.has(input.orderId)) {
+    throw new Error(`BOOK_REMAINDER_DUPLICATE: order=${input.orderId}`);
+  }
+  if (mutable.orders.size >= mutable.params.maxOrders) {
+    throw new Error('Out of order slots');
+  }
+  const order: BookOrderState = {
+    ...input,
+    seq: mutable.nextSeq,
+    bucketId: bucketIdForPrice(input.priceTicks, mutable.params.bucketWidthTicks),
+  };
+  mutable.nextSeq += 1;
+  addRestingOrder(mutable, order);
+  bumpHash(mutable, 1, order.bucketId, order.qtyLots);
+  return state;
+}
+
 export function applyCommand(state: BookState, cmd: OrderCmd, options: ApplyCommandOptions = {}): { state: BookState; events: BookEvent[] } {
   /**
    * Hot-path note:

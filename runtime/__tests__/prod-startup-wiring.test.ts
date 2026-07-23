@@ -201,9 +201,9 @@ describe('production startup wiring', () => {
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const vaultStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/vaultStore.ts'), 'utf8');
 
-    expect(runtimeCreation).toContain("url.searchParams.set('access', 'read')");
+    expect(runtimeCreation).toContain("url.searchParams.set('access', 'admin')");
     expect(runtimeCreation).not.toContain("url.searchParams.set('allowPartial', '1')");
-    expect(xlnStore).toContain("importSource.searchParams.set('access', 'read')");
+    expect(xlnStore).toContain("importSource.searchParams.set('access', 'admin')");
     expect(xlnStore).not.toContain("importSource.searchParams.set('allowPartial', '1')");
     expect(deploy).toContain("location /api/recovery/");
     expect(deploy).toContain('proxy_pass http://127.0.0.1:9100;');
@@ -567,13 +567,13 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain("if (envFlagEnabled(process.env['XLN_HUB_VERBOSE_RUNTIME_LOGS'])) return;");
     expect(hubNode).toContain('env.quietRuntimeLogs = true;');
     expect(hubNode).toContain('configureHubRuntimeLogging(env);');
-    expect(hubNode).toContain("const LOG_HUB_INSPECT_URL = envFlagEnabled(process.env['XLN_HUB_INSPECT_URL_LOG']);");
-    const inspectUrlLog = hubNode.slice(hubNode.indexOf('if (LOG_HUB_INSPECT_URL) {'));
-    expect(inspectUrlLog).toContain("nodeLog.info('inspect_url.ready'");
-    expect(inspectUrlLog).toContain("nodeLog.warn('inspect_url.unavailable'");
-    expect(inspectUrlLog).not.toContain('[MESH-HUB] INSPECT_URL');
-    expect(hubNode.indexOf('if (LOG_HUB_INSPECT_URL) {')).toBeLessThan(
-      hubNode.indexOf("nodeLog.info('inspect_url.ready'"),
+    expect(hubNode).toContain("const LOG_HUB_ADMIN_URL = envFlagEnabled(process.env['XLN_HUB_ADMIN_URL_LOG']);");
+    const adminUrlLog = hubNode.slice(hubNode.indexOf('if (LOG_HUB_ADMIN_URL) {'));
+    expect(adminUrlLog).toContain("nodeLog.info('admin_url.ready'");
+    expect(adminUrlLog).toContain("nodeLog.warn('admin_url.unavailable'");
+    expect(adminUrlLog).not.toContain('[MESH-HUB] INSPECT_URL');
+    expect(hubNode.indexOf('if (LOG_HUB_ADMIN_URL) {')).toBeLessThan(
+      hubNode.indexOf("nodeLog.info('admin_url.ready'"),
     );
     expect(hubNode).not.toContain('persistRestoredEnvToDB');
     expect(hubNode).not.toContain('configureHubBootstrapStorage');
@@ -654,7 +654,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 45;');
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK)');
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK)');
-    expect(mmNode).toContain("MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '3'");
+    expect(mmNode).toContain("MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '10'");
     expect(mmNode).toContain("MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE'] || '1000'");
     expect(mmNode).toContain('pairs.slice(0, MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE)');
     expect(mmNode).toContain("MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '10'");
@@ -679,7 +679,7 @@ describe('production startup wiring', () => {
     expect(rpcAdapter).toContain("send('eth_blockNumber', [])");
     expect(rpcAdapter).toContain('J_WATCHER_BLOCK_NUMBER_INVALID');
     expect(rpcAdapter).toContain('async getCurrentBlockNumber(): Promise<number> {');
-    expect(rpcAdapter).toContain('return await readCurrentRpcBlockNumber();');
+    expect(rpcAdapter).toContain('return await readSafeWatcherBlockNumber();');
     expect(rpcAdapter).toContain('getFinalityDepth(): number {');
     expect(rpcAdapter).toContain('return resolveFinalityDepth(false);');
     expect(mmNode).toContain('const selectMarketMakerBootstrapTokenIds = (tokenIds: readonly number[]): number[] => {');

@@ -18,7 +18,8 @@ const ENTITY_TX_NESTING_LIMIT = 16;
 const ENTITY_TX_TYPES = [
   'accountInput', 'admitCrossJurisdictionBookOrder', 'applyCrossJurisdictionBookProgress',
   'cancelPull', 'certifyProfile', 'chat', 'chatMessage',
-  'consensusOutput', 'crossJurisdictionBookOrderRemoved', 'crossJurisdictionFillNotice', 'crossJurisdictionSalvage',
+  'consensusOutput', 'crossJurisdictionBookOrderRemoved', 'crossJurisdictionFillNotice',
+  'crossJurisdictionSalvage', 'crossJurisdictionSettled',
   'crossPullClose', 'directPayment', 'disputeFinalize', 'disputeStart', 'e2r',
   'entityCommand', 'entityProviderCancelAction', 'entityProviderReleaseControlShares',
   'entityProviderTransfer', 'extendCredit', 'hashlockPayment', 'htlcOnionAdvance', 'htlcPayment',

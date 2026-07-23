@@ -1679,8 +1679,8 @@ async function expectSwapTokens(page: Page, fromTokenId: number, toTokenId: numb
   const toSymbol = TOKEN_SYMBOL_BY_ID[toTokenId];
   expect(fromSymbol, `missing token symbol for ${fromTokenId}`).toBeTruthy();
   expect(toSymbol, `missing token symbol for ${toTokenId}`).toBeTruthy();
-  await expect(page.getByTestId('swap-from-token-label').first()).toHaveText(fromSymbol!, { timeout: 10_000 });
-  await expect(page.getByTestId('swap-to-token-label').first()).toHaveText(toSymbol!, { timeout: 10_000 });
+  await expect(page.getByTestId('swap-from-token-label').first()).toContainText(fromSymbol!, { timeout: 10_000 });
+  await expect(page.getByTestId('swap-to-token-label').first()).toContainText(toSymbol!, { timeout: 10_000 });
 }
 
 async function expectSwapAssetRoute(
@@ -1814,8 +1814,8 @@ async function placeCrossOrder(
     hubId: string;
     targetEntityId: string;
     side: 'buy' | 'sell';
-    amount: string;
-    price: string;
+    amount?: string;
+    price?: string;
     fromTokenId?: number;
     toTokenId?: number;
     clickBookSide?: 'ask' | 'bid';
@@ -1823,6 +1823,9 @@ async function placeCrossOrder(
     expectedClickToTokenId?: number;
     checkMultihopDeferred?: boolean;
     expectSetupConsent?: boolean;
+    expectedBookDepth?: number;
+    expectedAutoAmount?: number;
+    screenshotPath?: string;
   },
 ): Promise<string> {
   const flowStartedAt = Date.now();
@@ -1841,10 +1844,29 @@ async function placeCrossOrder(
     await selectCrossRoute(page, params.targetEntityId);
   }
   await expectCrossOrderbookReady(page);
+  if (params.expectedBookDepth) {
+    const orderbook = page.getByTestId('swap-orderbook').first();
+    await expect(orderbook.getByTestId('orderbook-ask-row')).toHaveCount(params.expectedBookDepth, { timeout: 30_000 });
+    await expect(orderbook.getByTestId('orderbook-bid-row')).toHaveCount(params.expectedBookDepth, { timeout: 30_000 });
+    const displayedSizes = await orderbook.locator('.size').allTextContents();
+    expect(displayedSizes, 'stable cross MM depth should be visibly sized in thousands of tokens')
+      .toEqual(expect.arrayContaining([expect.stringMatching(/K$/)]));
+    expect(displayedSizes, 'cross MM sizes must never expose raw million-lot counts')
+      .not.toEqual(expect.arrayContaining([expect.stringMatching(/M$/)]));
+  }
   await dismissSwapCompletionModal(page);
   if (params.checkMultihopDeferred) {
     await expectDirectCrossOrderbookReady(page);
     await expectCrossOrderbookReady(page);
+  }
+  if (params.expectedAutoAmount !== undefined) {
+    await expect
+      .poll(async () => Number(String(await page.getByTestId('swap-order-amount').first().inputValue()).replace(/,/g, '')), {
+        timeout: 10_000,
+        intervals: [50, 100, 200],
+        message: 'opening the swap form must default to 100% canonical source capacity',
+      })
+      .toBeCloseTo(params.expectedAutoAmount, 6);
   }
   if (params.clickBookSide) {
     const expectedFromTokenId = params.expectedClickFromTokenId ?? (params.clickBookSide === 'ask' ? USDC : WETH);
@@ -1866,8 +1888,19 @@ async function placeCrossOrder(
   const beforeRouteIds = new Set(beforeSubmit.routeSummaries.map(route => route.orderId));
   const beforeOfferIds = new Set(beforeSubmit.offerSummaries.map(offer => offer.offerId));
   const beforeMessageCount = beforeSubmit.messages.length;
-  await amountInput.fill(params.amount);
-  await priceInput.fill(params.price);
+  if (params.amount !== undefined) {
+    await amountInput.fill(params.amount);
+  } else {
+    const autoAmount = Number(String(await amountInput.inputValue()).replace(/,/g, ''));
+    expect(autoAmount, 'book click must populate a positive source amount').toBeGreaterThan(0);
+    if (params.expectedAutoAmount !== undefined) {
+      expect(autoAmount, 'book click must size from the full canonical source capacity').toBeCloseTo(params.expectedAutoAmount, 6);
+    }
+  }
+  if (params.screenshotPath) {
+    await page.screenshot({ path: params.screenshotPath, fullPage: true });
+  }
+  if (params.price !== undefined) await priceInput.fill(params.price);
   if (params.expectSetupConsent) {
     const consent = page.getByTestId('swap-setup-consent').first();
     await expect(consent, 'one-click cross swap must disclose automatic target setup').toBeVisible({ timeout: 10_000 });
@@ -1878,6 +1911,43 @@ async function placeCrossOrder(
     expect(errorText, 'auto-setup must replace the old manual create-account blocker')
       .not.toMatch(/create target account|account setup required/i);
   }
+  await expect.poll(async () => {
+    const routePicker = page.getByTestId('swap-route-picker').first();
+    const [receive, formErrorParts, amountState, parsedGiveAmount, canonicalGiveAmount] = await Promise.all([
+      page.getByTestId('swap-receive-amount').first().inputValue(),
+      page.getByTestId('swap-form-error').allTextContents(),
+      routePicker.getAttribute('data-order-amount-state'),
+      routePicker.getAttribute('data-give-amount'),
+      routePicker.getAttribute('data-canonical-give-amount'),
+    ]);
+    const diagnostics = {
+      receive,
+      formError: formErrorParts.join('\n').trim(),
+      amountState,
+      parsedGiveAmount,
+      canonicalGiveAmount,
+      price: await priceInput.inputValue(),
+      giveToken: await routePicker.getAttribute('data-give-token'),
+      wantToken: await routePicker.getAttribute('data-want-token'),
+      giveDecimals: await routePicker.getAttribute('data-give-decimals'),
+    };
+    const ready = (
+      Number(String(receive || '0').replace(/,/g, '')) > 0
+      && diagnostics.formError === ''
+      && parsedGiveAmount !== null
+      && parsedGiveAmount !== '0'
+      && canonicalGiveAmount !== null
+      && canonicalGiveAmount !== '0'
+    );
+    return {
+      ready,
+      diagnostics: ready ? '' : JSON.stringify(diagnostics),
+    };
+  }, {
+    timeout: 10_000,
+    intervals: [50, 100, 250],
+    message: 'cross-j manual amount must reach the canonical form state before submit',
+  }).toEqual({ ready: true, diagnostics: '' });
   await expect(submit).toBeEnabled({ timeout: 30_000 });
   emitPhaseTiming('pre_submit', flowStartedAt);
   const clickStartedAt = Date.now();
@@ -2899,6 +2969,154 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       minHubCount: 3,
     }));
     expectMarketMakerSameAndCrossBooksHealthy(baseline);
+  });
+
+  test('real MM full fill auto-closes and partial fill closes manually on both legs', { tag: '@functional' }, async ({ page }, testInfo) => {
+    const baseline = await timedStep('cross_j_mm_fill.ensure_baseline', () => ensureE2EBaseline(page, {
+      apiBaseUrl: API_BASE_URL,
+      requireMarketMaker: true,
+      requireHubMesh: true,
+      minHubCount: 3,
+    }));
+    expectMarketMakerSameAndCrossBooksHealthy(baseline);
+    const hubId = getPrimaryHubId(baseline);
+    const primaryHubApiBaseUrl = getPrimaryHubApiBaseUrl(baseline, hubId);
+    const primaryHubName = getPrimaryHubName(baseline, hubId);
+    const targetHub = await getSecondaryHubInfo(page, hubId, primaryHubName, primaryHubApiBaseUrl);
+
+    await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 });
+    const mnemonic = Wallet.createRandom().mnemonic!.phrase;
+    const source = await createRuntimeIdentityViaStore(page, 'cross-real-mm', mnemonic);
+    await waitForDefaultJurisdictionReplicas(page, 'cross-real-mm');
+    const target = await importRpc2SiblingEntity(page, mnemonic, 'cross-real-mm');
+    await connectRuntimeToHubWithCredit(page, source, hubId, '10000', SWAP_TOKENS);
+    await ensureDirectHubAccount(page, target, targetHub.entityId, SWAP_TOKENS, 150_000);
+    await faucetOffchain(page, primaryHubApiBaseUrl, source.entityId, hubId, USDC, '300');
+    await waitForOutCapAtLeast(page, source.entityId, hubId, USDC, tokenAmount(USDC, 300n));
+
+    const orderId = await placeCrossOrder(page, {
+      source,
+      hubId,
+      targetEntityId: target.entityId,
+      side: 'sell',
+      fromTokenId: USDC,
+      toTokenId: USDC,
+      clickBookSide: 'bid',
+      expectedClickFromTokenId: USDC,
+      expectedClickToTokenId: USDC,
+      expectedBookDepth: 10,
+      expectedAutoAmount: 300,
+      screenshotPath: testInfo.outputPath('cross-j-mm-10x10-hub-first.png'),
+    });
+    await expect(page.getByTestId('swap-from-token-label').first()).toContainText('USDC (Testnet)');
+    await expect(page.getByTestId('swap-to-token-label').first()).toContainText('USDC (Tron)');
+
+    await waitForCrossPullFlow(page, source, target, hubId, targetHub.entityId, {
+      sourceRouteId: orderId,
+      targetRouteId: orderId,
+    });
+    await waitForCrossOffersCleared(page, source, hubId, 'real MM USDC fill', { orderId });
+    await expect.poll(async () => {
+      await flushRuntime(page, 3);
+      const [sourceState, targetState] = await Promise.all([
+        readCrossState(page, source, hubId),
+        readCrossState(page, target, targetHub.entityId),
+      ]);
+      return {
+        sourcePulls: sourceState.pulls,
+        targetPulls: targetState.pulls,
+        sourcePending: sourceState.hasPendingFrame,
+        targetPending: targetState.hasPendingFrame,
+        sourceMempool: sourceState.mempoolTxs,
+        targetMempool: targetState.mempoolTxs,
+      };
+    }, {
+      timeout: 75_000,
+      intervals: [250, 500, 1000],
+      message: 'real MM cross-j fill must leave no pulls, pending frames, or Account mempool residue',
+    }).toEqual({
+      sourcePulls: 0,
+      targetPulls: 0,
+      sourcePending: false,
+      targetPending: false,
+      sourceMempool: [],
+      targetMempool: [],
+    });
+    const [filledSourceState, filledTargetState] = await Promise.all([
+      readCrossState(page, source, hubId),
+      readCrossState(page, target, targetHub.entityId),
+    ]);
+    expect(
+      filledSourceState.routeSummaries.find((route) => route.orderId === orderId)?.status,
+      'a fully matched source route must close automatically',
+    ).toBe('settled');
+    expect(
+      filledTargetState.routeSummaries.find((route) => route.orderId === orderId)?.status,
+      'a fully matched target route must close automatically',
+    ).toBe('settled');
+    await expect(page.getByTestId('swap-open-order-row')).toHaveCount(0, { timeout: 15_000 });
+
+    await enqueueEntityTxs(page, target.entityId, target.signerId, [{
+      type: 'extendCredit',
+      data: {
+        counterpartyEntityId: targetHub.entityId,
+        tokenId: USDC,
+        amount: tokenAmount(USDC, 100_000n),
+      },
+    }]);
+    await flushRuntime(page, 8);
+    await faucetOffchain(page, primaryHubApiBaseUrl, source.entityId, hubId, WETH, '15');
+    await waitForOutCapAtLeast(page, source.entityId, hubId, WETH, tokenAmount(WETH, 15n));
+    const partialOrderId = await placeCrossOrder(page, {
+      source,
+      hubId,
+      targetEntityId: target.entityId,
+      side: 'sell',
+      fromTokenId: WETH,
+      toTokenId: USDC,
+      clickBookSide: 'bid',
+      expectedClickFromTokenId: WETH,
+      expectedClickToTokenId: USDC,
+      amount: '15',
+    });
+    const partial = await waitForCrossPendingFill(page, source, hubId, 'real MM WETH partial', {
+      routeId: partialOrderId,
+    });
+    const clearButton = page.getByTestId('cross-swap-clear').first();
+    await expect(clearButton, 'real MM partial remainder must expose Clear + Close').toBeVisible({ timeout: 20_000 });
+    await clearButton.click({ force: true });
+    await flushRuntime(page, 5);
+    await Promise.all([
+      waitForCrossRouteStatus(page, source, hubId, partial.routeId, ['settled'], 'real MM source clear'),
+      waitForCrossRouteStatus(page, target, targetHub.entityId, partial.routeId, ['settled'], 'real MM target clear'),
+    ]);
+    await waitForCrossOffersCleared(page, source, hubId, 'real MM partial clear', { orderId: partial.routeId });
+    await expect.poll(async () => {
+      await flushRuntime(page, 3);
+      const [sourceState, targetState] = await Promise.all([
+        readCrossState(page, source, hubId),
+        readCrossState(page, target, targetHub.entityId),
+      ]);
+      return {
+        sourcePulls: sourceState.pulls,
+        targetPulls: targetState.pulls,
+        sourcePending: sourceState.hasPendingFrame,
+        targetPending: targetState.hasPendingFrame,
+        sourceMempool: sourceState.mempoolTxs,
+        targetMempool: targetState.mempoolTxs,
+      };
+    }, {
+      timeout: 75_000,
+      intervals: [250, 500, 1000],
+      message: 'real MM Clear + Close must release both pull legs and every Account queue',
+    }).toEqual({
+      sourcePulls: 0,
+      targetPulls: 0,
+      sourcePending: false,
+      targetPending: false,
+      sourceMempool: [],
+      targetMempool: [],
+    });
   });
 
   test('cross USDT/USDT orderbook resolves terminal no-market when the selected route relay has no snapshots', { tag: '@resilience' }, async ({ page }) => {

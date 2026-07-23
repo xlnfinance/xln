@@ -61,6 +61,7 @@ test('DockRoot defaults to Graph left plus pinned wallet and tools on the right'
     expect(source).toContain(`id: '${panelId}'`);
   }
   expect(source).toContain("import IndexedDbInspector from '$lib/components/Settings/IndexedDbInspector.svelte'");
+  expect(source).toContain('requestedDockPanel.subscribe');
   expect(source).toContain("import RemoteRuntimeManager from '$lib/components/Runtime/RemoteRuntimeManager.svelte'");
   expect(source).toContain("appStateOperations.setMode('user')");
   expect(source).toContain('showDockTimeMachine = !embedMode || $settings.showTimeMachine');

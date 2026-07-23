@@ -11,14 +11,14 @@ import {
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
 
 describe('mesh account bootstrap ownership', () => {
-  test('targets the same $1M notional for stablecoins and WETH at $1,000', () => {
+  test('targets the same $2M notional for stablecoins and WETH at $1,000', () => {
     const unit = 10n ** 18n;
 
-    expect(getBootstrapCreditAmount(1)).toBe(1_000_000n * 10n ** 6n);
-    expect(getBootstrapCreditAmount(3)).toBe(1_000_000n * 10n ** 6n);
-    expect(getBootstrapCreditAmount(2)).toBe(1_000n * unit);
-    expect(getBootstrapTokenAmount(1, 6)).toBe(1_000_000n * 10n ** 6n);
-    expect(getBootstrapTokenAmount(2, 18)).toBe(1_000n * unit);
+    expect(getBootstrapCreditAmount(1)).toBe(2_000_000n * 10n ** 6n);
+    expect(getBootstrapCreditAmount(3)).toBe(2_000_000n * 10n ** 6n);
+    expect(getBootstrapCreditAmount(2)).toBe(2_000n * unit);
+    expect(getBootstrapTokenAmount(1, 6)).toBe(2_000_000n * 10n ** 6n);
+    expect(getBootstrapTokenAmount(2, 18)).toBe(2_000n * unit);
   });
 
   test('assigns exactly one canonical opener per bilateral account', () => {

@@ -14,6 +14,19 @@ describe('prepareSwapOrder', () => {
     expect(prepared?.effectiveWant).toBe(wantAmount);
   });
 
+  test('prepares a full-capacity WETH sell at an exact MM book level', () => {
+    const giveAmount = 15n * 10n ** 18n;
+    const wantAmount = 37_492_500_000n;
+
+    const prepared = prepareSwapOrder(2, 1, giveAmount, wantAmount);
+
+    expect(prepared).not.toBeNull();
+    expect(prepared?.priceTicks).toBe(24_995_000n);
+    expect(prepared?.effectiveGive).toBe(giveAmount);
+    expect(prepared?.effectiveWant).toBe(wantAmount);
+    expect(prepared?.unspentGiveAmount).toBe(0n);
+  });
+
   test('uses one raw unit as the lot for six-decimal base assets', () => {
     const prepared = prepareSwapOrder(1, 3, 1n, 1n);
 

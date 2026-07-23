@@ -239,8 +239,8 @@ for (const marker of [
   "nodeLog.info('signer_keys.ready'",
   "nodeLog.info('faucet_provision.ready'",
   "nodeLog.info('runtime.ready'",
-  "nodeLog.info('inspect_url.ready'",
-  "nodeLog.warn('inspect_url.unavailable'",
+  "nodeLog.info('admin_url.ready'",
+  "nodeLog.warn('admin_url.unavailable'",
 ]) {
   assertIncludes(hubNode, marker, hubNodePath);
 }
@@ -633,7 +633,7 @@ for (const marker of [
   'Market snapshot enrichment failures use structured',
   'Orchestrator child stop timeout and unexpected child exit diagnostics use',
   'Orchestrator custody bootstrap, SIGTERM-during-reset, and initial reset',
-  'Hub inspect URL diagnostics use structured',
+  'Hub admin URL diagnostics use structured',
   'Hub/MM normal startup diagnostics use structured',
 ]) {
   assertIncludes(auditDoc, marker, auditDocPath);

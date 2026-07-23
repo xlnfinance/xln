@@ -99,6 +99,7 @@ function saveState(state: AppState) {
 
 // Create store
 export const appState = writable<AppState>(loadState());
+export const requestedDockPanel = writable<string | null>(null);
 
 // Auto-save on changes
 appState.subscribe(state => saveState(state));
@@ -112,6 +113,11 @@ export const appStateOperations = {
 
   setMode(mode: AppMode) {
     appState.update(s => ({ ...s, mode }));
+  },
+
+  openDockPanel(panelId: string) {
+    requestedDockPanel.set(panelId);
+    appState.update(s => ({ ...s, mode: 'dev' }));
   },
 
   // Landing visibility

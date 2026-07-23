@@ -43,7 +43,7 @@ describe('account economic swap limits', () => {
     expect(accountSwapMarketKey(offer('bid', true, 2, 1))).toBe('same:2>1');
   });
 
-  test('rejects the eleventh live offer before mutating Account state', async () => {
+  test('rejects the twenty-first live offer before mutating Account state', async () => {
     const limit = LIMITS.MAX_ACCOUNT_SWAP_OFFERS_PER_SIDE_PER_MARKET;
     const swapOffers = new Map(
       Array.from({ length: limit }, (_, index) => {
@@ -61,7 +61,7 @@ describe('account economic swap limits', () => {
     const result = await handleSwapOffer(account as Parameters<typeof handleSwapOffer>[0], {
       type: 'swap_offer',
       data: {
-        offerId: 'eleventh',
+        offerId: 'twenty-first',
         giveTokenId: 1,
         giveAmount: 1n,
         wantTokenId: 2,
@@ -71,11 +71,11 @@ describe('account economic swap limits', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain(`max ${limit}`);
-    expect(swapOffers.has('eleventh')).toBe(false);
+    expect(swapOffers.has('twenty-first')).toBe(false);
     expect(swapOffers.size).toBe(limit);
   });
 
-  test('rejects cross-j depth before its signed legs can exceed one storage page', async () => {
+  test('bounds cross-j live offers independently of paged physical storage', async () => {
     const limit = LIMITS.MAX_ACCOUNT_CROSS_J_SWAP_OFFERS;
     const swapOffers = new Map(
       Array.from({ length: limit }, (_, index) => {

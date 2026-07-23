@@ -12,7 +12,7 @@ test('runtime import stdout log omits token-bearing import URL and capability to
       {
         label: 'H1',
         wsUrl: 'ws://127.0.0.1:8091/rpc',
-        token: 'xlnra1.read.1797123456000.secret-token',
+        token: 'xlnra1.full.1797123456000.secret-token',
       },
       {
         label: 'Custody xlnra1.full.1797123456000.label-secret',
@@ -44,23 +44,23 @@ test('runtime import stdout log omits token-bearing import URL and capability to
   expect(line).not.toContain('qaToken');
 });
 
-test('token-bearing inspect URLs are logged without query or hash secrets', () => {
-  const inspectUrl = [
+test('token-bearing admin URLs are logged without query or hash secrets', () => {
+  const adminUrl = [
     'http://localhost:8080/app',
     '?runtime=remote',
     '&ws=ws%3A%2F%2F127.0.0.1%3A8091%2Frpc',
-    '&token=xlnra1.read.1797123456000.inspect-secret',
+    '&token=xlnra1.full.1797123456000.admin-secret',
     '#accounts',
   ].join('');
 
-  const redacted = redactTokenBearingUrlForLog(inspectUrl);
+  const redacted = redactTokenBearingUrlForLog(adminUrl);
 
   expect(redacted).toBe('http://localhost:8080/app');
   expect(redacted).not.toContain('runtime=remote');
   expect(redacted).not.toContain('ws=');
   expect(redacted).not.toContain('token=');
   expect(redacted).not.toContain('xlnra1.');
-  expect(redacted).not.toContain('inspect-secret');
+  expect(redacted).not.toContain('admin-secret');
 });
 
 test('runtime import stdout log can expose the full URL only when explicitly requested', () => {
@@ -68,17 +68,17 @@ test('runtime import stdout log can expose the full URL only when explicitly req
     expiresAt: 1_797_123_456_000,
     entries: [{ label: 'H1' }],
   } as unknown as RuntimeImportLogManifest;
-  const importUrl = 'https://localhost:8080/app#runtime-import=H1%20%7C%20read%20%7C%20ws%3A%2F%2Flocalhost%3A8092%2Frpc%20%7C%20xlnra1.read.secret';
+  const importUrl = 'https://localhost:8080/app#runtime-import=H1%20%7C%20admin%20%7C%20ws%3A%2F%2Flocalhost%3A8092%2Frpc%20%7C%20xlnra1.full.secret';
 
   const line = buildRuntimeImportLogLine({
     manifest,
     importUrl,
-    access: 'read',
+    access: 'admin',
     manifestPath: '/tmp/runtime-import-manifest.json',
     exposeUrl: true,
   });
 
   expect(line).toBe(importUrl);
-  expect(line).toContain('xlnra1.read.secret');
+  expect(line).toContain('xlnra1.full.secret');
   expect(line).not.toContain('wallet=');
 });

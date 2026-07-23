@@ -76,7 +76,14 @@ import {
   waitUntil,
   type MarketMakerEntityJurisdictionConfig,
 } from './mesh-common';
-import { buildDefaultEntitySwapPairs, getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenIdsForJurisdiction, getTokenInfo } from '../account/utils';
+import {
+  buildDefaultEntitySwapPairs,
+  getSwapPairOrientation,
+  getSwapPairPolicyByBaseQuote,
+  getTokenIdsForJurisdiction,
+  getTokenInfo,
+  isLiquidSwapToken,
+} from '../account/utils';
 import { LIMITS, SWAP as SWAP_CONSTANTS } from '../constants';
 import {
   baseAmountAtPrice,
@@ -388,9 +395,7 @@ const MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_CROSS_LEVELS_PER_PAIR = Math.max(
   1,
-  // Account storage is bounded by encoded bytes, not frame transaction count.
-  // buildMarketMakerCrossOfferSpecs also caps aggregate levels per Account.
-  Math.min(1000, Number(process.env['MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '3')),
+  Math.min(1000, Number(process.env['MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '10')),
 );
 const MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE = Math.max(
   1,
@@ -843,7 +848,7 @@ const getMarketMakerLevelProfile = (baseTokenId: number, quoteTokenId: number): 
   offsetsBps: readonly number[];
   baseSizes: readonly bigint[];
 } => {
-  if (baseTokenId === 1 && quoteTokenId === 3) {
+  if (isLiquidSwapToken(baseTokenId) && isLiquidSwapToken(quoteTokenId)) {
     return {
       offsetsBps: MARKET_MAKER_STABLE_LEVEL_OFFSETS_BPS,
       baseSizes: MARKET_MAKER_STABLE_LEVEL_BASE_SIZES.map(amount =>

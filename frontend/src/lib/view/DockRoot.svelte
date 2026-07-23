@@ -25,7 +25,7 @@
   import { settings } from '$lib/stores/settingsStore';
   import { refreshRuntimeView } from '$lib/stores/runtimeViewStore';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
-  import { appStateOperations } from '$lib/stores/appStateStore';
+  import { appStateOperations, requestedDockPanel } from '$lib/stores/appStateStore';
   import 'dockview/dist/styles/dockview.css';
 
   export let embedMode = false;
@@ -39,6 +39,7 @@
   let unsubOpenEntity: (() => void) | null = null;
   let unsubOpenJurisdiction: (() => void) | null = null;
   let unsubFocusPanel: (() => void) | null = null;
+  let unsubRequestedDockPanel: (() => void) | null = null;
   let activePanelDisposable: { dispose: () => void } | null = null;
   let saveLayoutTimer: ReturnType<typeof setTimeout> | null = null;
   let timeMachinePosition: 'bottom' | 'top' | 'left' | 'right' = 'bottom';
@@ -528,6 +529,18 @@
       const panel = dockview.getPanel(panelId);
       panel?.api.setActive();
     });
+
+    unsubRequestedDockPanel = requestedDockPanel.subscribe((panelId) => {
+      if (!panelId) return;
+      const panel = dockview.getPanel(panelId);
+      if (!panel) {
+        logDockRootDiagnostic('Requested Dock panel does not exist', { panelId });
+        requestedDockPanel.set(null);
+        return;
+      }
+      panel.api.setActive();
+      requestedDockPanel.set(null);
+    });
   });
 
   onDestroy(() => {
@@ -542,6 +555,7 @@
     unsubOpenEntity?.();
     unsubOpenJurisdiction?.();
     unsubFocusPanel?.();
+    unsubRequestedDockPanel?.();
     if (dockview) dockview.dispose();
   });
 </script>

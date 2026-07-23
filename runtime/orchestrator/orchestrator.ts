@@ -49,11 +49,6 @@ import { createHttpDrainTracker, stopServerGracefully } from './graceful-server'
 import { publicAggregatedHealth, resolveSocketPeerAddress } from '../server/health-redaction';
 import { isOperatorRequest, loadOrCreateOperatorToken } from './operator-access';
 import {
-  normalizeRuntimeImportAccess,
-  resolveRuntimeImportAccessForRequest,
-  type RuntimeImportAccess,
-} from './runtime-import-access';
-import {
   resolveOrchestratorSocketType,
   type AggregatedHealth,
   type CustodySupportState,
@@ -356,7 +351,7 @@ let custodySupport: CustodySupportState | null = null;
 
 type RuntimeImportManifestEntry = {
   label: string;
-  access: RuntimeImportAccess;
+  access: 'admin';
   wsUrl: string;
   token: string;
 };
@@ -368,7 +363,6 @@ type RuntimeImportManifest = {
   entries: RuntimeImportManifestEntry[];
 };
 
-const runtimeImportAccess = normalizeRuntimeImportAccess(process.env['XLN_RUNTIME_IMPORT_ACCESS']);
 const orchestratorOperatorTokenPath = process.env['XLN_ORCHESTRATOR_OPERATOR_TOKEN_PATH']?.trim()
   || join(args.dbRoot, 'operator-token');
 const orchestratorOperatorToken = loadOrCreateOperatorToken(
@@ -426,13 +420,12 @@ const buildCustodyRpcUrl = (daemonPort: number): string | null => {
 
 const deriveRuntimeImportToken = (
   seed: string,
-  access: 'read' | 'admin',
   audience: string,
   keyId: string,
   expiresAt: number,
 ): string => deriveRuntimeAdapterCapabilityToken(
   seed,
-  access === 'admin' ? 'full' : 'read',
+  'full',
   expiresAt,
   {
     audience,
@@ -441,23 +434,18 @@ const deriveRuntimeImportToken = (
   },
 );
 
-const buildRuntimeImportUrl = (manifest: RuntimeImportManifest): string => {
+const buildRuntimeImportUrl = (): string => {
   const url = new URL(args.walletUrl);
-  const accesses = new Set(manifest.entries.map(entry => entry.access));
-  if (accesses.size !== 1) {
-    throw new Error(`RUNTIME_IMPORT_URL_ACCESS_MISMATCH:${Array.from(accesses).join(',')}`);
-  }
-  const access = manifest.entries[0]?.access ?? runtimeImportAccess;
   url.pathname = '/app';
   url.search = '';
-  url.hash = `${REMOTE_RUNTIME.IMPORT_SOURCE_HASH_PARAM}=${encodeURIComponent(`/api/runtime-import?access=${access}`)}`;
+  url.hash = `${REMOTE_RUNTIME.IMPORT_SOURCE_HASH_PARAM}=${encodeURIComponent('/api/runtime-import?access=admin')}`;
   return url.toString();
 };
 
 const runtimeIdFromChild = (child: HubChild | MarketMakerChild): string =>
   String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '').trim().toLowerCase();
 
-const buildRuntimeImportManifest = (access: RuntimeImportAccess = runtimeImportAccess): RuntimeImportManifest | null => {
+const buildRuntimeImportManifest = (): RuntimeImportManifest | null => {
   const issuedAt = Date.now();
   const expiresAt = issuedAt + runtimeImportTokenTtlMs;
   const entries: RuntimeImportManifestEntry[] = [];
@@ -466,18 +454,18 @@ const buildRuntimeImportManifest = (access: RuntimeImportAccess = runtimeImportA
     if (!runtimeId) continue;
     entries.push({
       label: child.name,
-      access,
+      access: 'admin',
       wsUrl: buildRuntimeNodeRpcUrl(child.apiPort, child.publicPort),
-      token: deriveRuntimeImportToken(child.authSeed, access, runtimeId, child.name.toLowerCase(), expiresAt),
+      token: deriveRuntimeImportToken(child.authSeed, runtimeId, child.name.toLowerCase(), expiresAt),
     });
   }
   const marketMakerRuntimeId = runtimeIdFromChild(marketMakerChild);
   if (activeResetOptions.enableMarketMaker && marketMakerRuntimeId) {
     entries.push({
       label: marketMakerChild.name,
-      access,
+      access: 'admin',
       wsUrl: buildRuntimeNodeRpcUrl(marketMakerChild.apiPort, marketMakerChild.publicPort),
-      token: deriveRuntimeImportToken(marketMakerChild.authSeed, access, marketMakerRuntimeId, 'mm', expiresAt),
+      token: deriveRuntimeImportToken(marketMakerChild.authSeed, marketMakerRuntimeId, 'mm', expiresAt),
     });
   }
   if (activeResetOptions.enableCustody && custodySupport?.daemonAuthSeed && custodySupport.daemonAuthAudience) {
@@ -485,11 +473,10 @@ const buildRuntimeImportManifest = (access: RuntimeImportAccess = runtimeImportA
     if (custodyWsUrl) {
       entries.push({
         label: 'Custody',
-        access,
+        access: 'admin',
         wsUrl: custodyWsUrl,
         token: deriveRuntimeImportToken(
           custodySupport.daemonAuthSeed,
-          access,
           custodySupport.daemonAuthAudience,
           'custody',
           expiresAt,
@@ -518,7 +505,7 @@ const publishRuntimeImportManifest = async (): Promise<boolean> => {
     scheduleRuntimeImportManifestRefresh(null);
     return false;
   }
-  const importUrl = buildRuntimeImportUrl(manifest);
+  const importUrl = buildRuntimeImportUrl();
   mkdirSync(dirname(runtimeImportManifestPath), { recursive: true });
   writeFileSync(
     runtimeImportManifestPath,
@@ -528,7 +515,7 @@ const publishRuntimeImportManifest = async (): Promise<boolean> => {
   console.log(buildRuntimeImportLogLine({
     manifest,
     importUrl,
-    access: runtimeImportAccess,
+    access: 'admin',
     manifestPath: runtimeImportManifestPath,
     exposeUrl: runtimeImportLogUrlEnabled,
   }));
@@ -2918,15 +2905,7 @@ const server = Bun.serve({
       if (!readiness.ok) {
         const allowPartial = url.searchParams.get('allowPartial') === '1' && operatorAuthorized;
         if (allowPartial) {
-          const access = resolveRuntimeImportAccessForRequest(
-            url.searchParams.get('access'),
-            runtimeImportAccess,
-            operatorAuthorized,
-          );
-          if (!access.ok) {
-            return new Response(safeStringify({ error: access.error }), { status: access.status, headers });
-          }
-          const partialManifest = buildRuntimeImportManifest(access.access);
+          const partialManifest = buildRuntimeImportManifest();
           if (partialManifest) {
             return new Response(safeStringify({
               ok: true,
@@ -2940,7 +2919,7 @@ const server = Bun.serve({
               fatal: readiness.fatal,
               failure: readiness.failure,
               degraded: readiness.degraded,
-              importUrl: buildRuntimeImportUrl(partialManifest),
+              importUrl: buildRuntimeImportUrl(),
               manifest: partialManifest,
             }), { headers: { ...headers, 'Retry-After': '2' } });
           }
@@ -2963,15 +2942,7 @@ const server = Bun.serve({
           },
         }), { headers: { ...headers, 'Retry-After': '2' } });
       }
-      const access = resolveRuntimeImportAccessForRequest(
-        url.searchParams.get('access'),
-        runtimeImportAccess,
-        operatorAuthorized,
-      );
-      if (!access.ok) {
-        return new Response(safeStringify({ error: access.error }), { status: access.status, headers });
-      }
-      const manifest = buildRuntimeImportManifest(access.access);
+      const manifest = buildRuntimeImportManifest();
       if (!manifest) {
         return new Response(safeStringify({
           ok: false,
@@ -2984,7 +2955,7 @@ const server = Bun.serve({
           },
         }), { headers: { ...headers, 'Retry-After': '2' } });
       }
-      return new Response(safeStringify({ ok: true, ready: true, importUrl: buildRuntimeImportUrl(manifest), manifest }), { headers });
+      return new Response(safeStringify({ ok: true, ready: true, importUrl: buildRuntimeImportUrl(), manifest }), { headers });
     }
 
     if (pathname === '/api/metrics') {

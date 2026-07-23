@@ -64,7 +64,6 @@ export function normalizeRuntimeWsUrl(value: string): string {
 
 export function describeAuthKey(key: string): string {
   if (!key) return 'no key';
-  if (key.startsWith('xlnra1.read.')) return 'read capability';
   if (key.startsWith('xlnra1.full.') || key.startsWith('xlnra1.admin.')) return 'full capability';
   return `${key.slice(0, 6)}...${key.slice(-4)}`;
 }
@@ -82,9 +81,12 @@ export function remoteAcceptKey(wsUrl: string, authKey: string): string {
   return `${REMOTE_ACCEPT_PREFIX}${wsUrl}|${authKey.slice(0, 16)}|${authKey.slice(-16)}`;
 }
 
-export function remoteAccessFromAuthKey(authKey: string): 'read' | 'admin' {
+export function remoteAccessFromAuthKey(authKey: string): 'admin' {
   const role = String(authKey || '').split('.')[1]?.toLowerCase() || '';
-  return role === 'admin' || role === 'full' || role === 'write' ? 'admin' : 'read';
+  if (role !== 'admin' && role !== 'full' && role !== 'write') {
+    throw new Error('REMOTE_RUNTIME_ADMIN_CAPABILITY_REQUIRED');
+  }
+  return 'admin';
 }
 
 export function readRemoteRuntimeRequestFromUrl(): RemoteRuntimeRequest | null {
@@ -168,7 +170,7 @@ export function persistRemoteRuntimeRequest(request: RemoteRuntimeRequest): void
       wsUrl: request.wsUrl,
       token: request.authKey,
       runtimeId: readRemoteRuntimeTokenAudience(request.authKey) || remoteRuntimeIdForWsUrl(request.wsUrl),
-      authLevel: access === 'admin' ? 'admin' : 'inspect',
+      authLevel: 'admin',
       height: 0,
       entityCount: 0,
       importedAt: Date.now(),

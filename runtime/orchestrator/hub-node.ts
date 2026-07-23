@@ -565,7 +565,7 @@ const envFlagEnabled = (value: unknown): boolean => {
   const normalized = String(value ?? '').trim().toLowerCase();
   return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
 };
-const LOG_HUB_INSPECT_URL = envFlagEnabled(process.env['XLN_HUB_INSPECT_URL_LOG']);
+const LOG_HUB_ADMIN_URL = envFlagEnabled(process.env['XLN_HUB_ADMIN_URL_LOG']);
 
 const buildLocalHubSignerLabels = (): string[] => {
   const primary = resolveMeshJurisdictionConfig(resolvedArgs.rpcUrl);
@@ -594,7 +594,7 @@ const resolveOperatorAppUrl = (): string => {
   return 'http://localhost:8080/app';
 };
 
-const buildRuntimeInspectUrl = (env: Env): string | null => {
+const buildRuntimeAdminUrl = (env: Env): string | null => {
   const seed = resolveRuntimeAdapterAuthSeed(env);
   if (!seed) return null;
   const runtimeAdapterUrl = new URL(directWsUrl);
@@ -602,10 +602,10 @@ const buildRuntimeInspectUrl = (env: Env): string | null => {
   runtimeAdapterUrl.pathname = '/rpc';
   runtimeAdapterUrl.search = '';
   runtimeAdapterUrl.hash = '';
-  const token = deriveRuntimeAdapterCapabilityToken(seed, 'read', Date.now() + 60 * 60 * 1_000, {
+  const token = deriveRuntimeAdapterCapabilityToken(seed, 'full', Date.now() + 60 * 60 * 1_000, {
     audience: resolveRuntimeAdapterAuthAudience(env),
     keyId: String(resolvedArgs.name || 'hub').toLowerCase(),
-    tokenId: `inspect-${String(env.runtimeId || resolvedArgs.name || 'hub').toLowerCase()}-${Date.now()}`,
+    tokenId: `admin-${String(env.runtimeId || resolvedArgs.name || 'hub').toLowerCase()}-${Date.now()}`,
   });
   const url = new URL(resolveOperatorAppUrl());
   url.searchParams.set('runtime', 'remote');
@@ -2488,17 +2488,17 @@ const run = async (): Promise<void> => {
     api: apiUrl,
     relay: resolvedArgs.relayUrl,
   });
-  if (LOG_HUB_INSPECT_URL) {
+  if (LOG_HUB_ADMIN_URL) {
     try {
-      const inspectUrl = buildRuntimeInspectUrl(env);
-      if (inspectUrl) {
-        nodeLog.info('inspect_url.ready', {
+      const adminUrl = buildRuntimeAdminUrl(env);
+      if (adminUrl) {
+        nodeLog.info('admin_url.ready', {
           name: resolvedArgs.name,
-          url: redactTokenBearingUrlForLog(inspectUrl),
+          url: redactTokenBearingUrlForLog(adminUrl),
         });
       }
     } catch (error) {
-      nodeLog.warn('inspect_url.unavailable', {
+      nodeLog.warn('admin_url.unavailable', {
         name: resolvedArgs.name,
         error: error instanceof Error ? error.message : String(error),
       });

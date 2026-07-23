@@ -12,7 +12,7 @@ import {
 } from '../../frontend/src/lib/components/Views/runtime-creation-model';
 
 describe('runtime creation live runtime discovery', () => {
-  const token = `xlnra1.read.${Date.now() + 60_000}.aud.kid.jti.sig`;
+  const token = `xlnra1.full.${Date.now() + 60_000}.aud.kid.jti.sig`;
 
   test('formats runtime-import readiness as an explicit visible status', () => {
     expect(formatLiveRuntimeImportStatus({
@@ -57,7 +57,7 @@ describe('runtime creation live runtime discovery', () => {
           ['Custody', 8088],
         ].map(([label, port]) => ({
           label,
-          access: 'read',
+          access: 'admin',
           wsUrl: `ws://localhost:${port}/rpc`,
           token,
         })),
@@ -65,7 +65,7 @@ describe('runtime creation live runtime discovery', () => {
     });
 
     expect(choices.map(choice => choice.label)).toEqual(['H1', 'H2', 'H3', 'MM', 'Custody']);
-    expect(choices.map(choice => choice.access)).toEqual(['read', 'read', 'read', 'read', 'read']);
+    expect(choices.map(choice => choice.access)).toEqual(['admin', 'admin', 'admin', 'admin', 'admin']);
     expect(choices.map(choice => choice.wsUrl)).toEqual([
       'ws://127.0.0.1:8092/rpc',
       'ws://127.0.0.1:8093/rpc',
@@ -92,8 +92,8 @@ describe('runtime creation live runtime discovery', () => {
     expect(source).toContain('data-testid="live-runtime-select"');
     expect(source).toContain('data-testid="live-runtime-connect"');
     expect(source).toContain('liveRuntimesLoaded && !liveRuntimesError');
-    expect(source).toContain("url.searchParams.set('access', 'read')");
-    expect(source).not.toContain("url.searchParams.set('access', 'admin')");
+    expect(source).toContain("url.searchParams.set('access', 'admin')");
+    expect(source).not.toContain("url.searchParams.set('access', 'read')");
     expect(source).not.toContain("url.searchParams.set('allowPartial', '1')");
     expect(source).toContain('Auto-discovery suppresses transport failures only');
     expect(source).not.toContain('swallows errors');

@@ -464,6 +464,22 @@ type EntityTxPayload =
       };
     }
   | {
+      /**
+       * A committed target Account close advances the matching source sibling
+       * inside the same Runtime. This is a local protocol input, never a
+       * network receipt or an independently authorizable close.
+       */
+      type: 'crossJurisdictionSettled';
+      data: {
+        orderId: string;
+        routeHash: string;
+        /** The exact reveal already committed by the target bilateral Account. */
+        binary: string;
+        /** The source close proof already validated by that target Account. */
+        proof: CrossJurisdictionCloseProof;
+      };
+    }
+  | {
       type: 'requestCrossJurisdictionClear';
       data: {
         orderId: string;

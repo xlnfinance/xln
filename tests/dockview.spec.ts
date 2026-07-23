@@ -223,9 +223,11 @@ test.describe('dockview', () => {
     await expect(page.locator('.xln-pinned-dock-tab')).toHaveCount(0);
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.getByTestId('network-machine-mode-toggle')).toContainText('Dock');
+    await expect(page.getByTestId('open-leveldb-inspector')).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath('dockview-user-mobile.png'), fullPage: true });
-    await page.getByTestId('network-machine-mode-toggle').click();
+    await page.getByTestId('open-leveldb-inspector').click();
     await expect(page.locator('.xln-pinned-dock-tab')).toContainText('Main Wallet', { timeout: 60_000 });
+    await expect(page.getByTestId('leveldb-inspector')).toBeVisible({ timeout: 30_000 });
     await activateDockPanel(page, 'graph3d');
     await expect(page.locator('.graph3d-wrapper')).toBeVisible({ timeout: 30_000 });
     await expect.poll(async () => (await graphSnapshot(page)).nodes.length).toBeGreaterThan(0);

@@ -1,6 +1,14 @@
 import type { CrossJurisdictionSwapRoute, EntityState, RuntimeOverlayRecord } from '../types';
 import type { OrderbookExtState } from './index';
-import { applyCommand, getBookOrder, getOrderbookPairsForOrder, MAX_ORDERBOOK_QTY_LOTS, replaceOrderbookPair } from './index';
+import {
+  applyCommand,
+  getBookOrder,
+  getOrderbookPairsForOrder,
+  materializeCommittedRemainder,
+  MAX_ORDERBOOK_QTY_LOTS,
+  replaceOrderbookPair,
+  type Side,
+} from './index';
 import { invalidateBookOrderCommitment } from './commitment';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
@@ -135,3 +143,37 @@ export const resizeCrossJurisdictionBookOrderByRouteId = (
   nextQtyLots,
   storageChanges,
 );
+
+export const materializeCrossJurisdictionBookRemainder = (
+  state: EntityState,
+  input: {
+    pairId: string;
+    sourceEntityId: string;
+    orderId: string;
+    ownerId: string;
+    side: Side;
+    priceTicks: bigint;
+    qtyLots: bigint;
+  },
+  storageChanges: RuntimeOverlayRecord[],
+): boolean => {
+  const ext = state.orderbookExt as OrderbookExtState | undefined;
+  if (!ext) return false;
+  const namespacedOrderId = crossJurisdictionBookOrderIdFor(input.sourceEntityId, input.orderId);
+  const existingPairs = getOrderbookPairsForOrder(ext, namespacedOrderId);
+  if (existingPairs.length > 0) {
+    throw new Error(`ORDERBOOK_REMAINDER_ALREADY_PRESENT: order=${namespacedOrderId}`);
+  }
+  const book = ext.books.get(input.pairId);
+  if (!book) return false;
+  materializeCommittedRemainder(book, {
+    orderId: namespacedOrderId,
+    ownerId: input.ownerId,
+    side: input.side,
+    priceTicks: input.priceTicks,
+    qtyLots: input.qtyLots,
+  });
+  replaceOrderbookPair(ext, input.pairId, book);
+  storageChanges.push({ family: 'book', entityId: state.entityId, pairId: input.pairId });
+  return true;
+};

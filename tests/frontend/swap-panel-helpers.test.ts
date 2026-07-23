@@ -13,6 +13,7 @@ import {
   jurisdictionBadgeText,
   normalizeJurisdictionDisplayName,
   nonNegative,
+  orderbookLotsDisplayScale,
   parseCrossAssetKey,
   resolveHubIdCandidate,
   sameOrderbookPairLabel,
@@ -26,6 +27,13 @@ const tokenSymbol = (tokenId: number): string => {
 };
 
 describe('swap panel helpers', () => {
+  test('displays canonical orderbook lots in human token units for every decimal domain', () => {
+    expect(orderbookLotsDisplayScale(6)).toBe(1_000_000);
+    expect(orderbookLotsDisplayScale(18)).toBe(1_000_000);
+    expect(orderbookLotsDisplayScale(2)).toBe(100);
+    expect(() => orderbookLotsDisplayScale(-1)).toThrow('SWAP_TOKEN_DECIMALS_INVALID');
+  });
+
   test('builds a read-only runtime projection for swap display data', () => {
     const hubId = '0xHubA';
     const userId = '0xUserA';
@@ -392,17 +400,24 @@ describe('swap panel helpers', () => {
     expect(clearSlice).not.toContain("throw new Error('XLN environment not ready')");
   });
 
-  test('SwapPanel does not poll stale DOM over programmatic book amount selection', () => {
-    const source = Bun.file('frontend/src/lib/components/Entity/SwapPanel.svelte');
-    return source.text().then((text) => {
-      const panelSyncStart = text.indexOf('function handleSwapPanelAmountSync');
-      expect(panelSyncStart).toBeGreaterThan(0);
-      expect(text).toContain("event.target.dataset['testid'] === 'swap-order-amount'");
-      expect(text).not.toContain('function syncOrderAmountContainerAction');
-      expect(text).not.toContain('function syncOrderAmountInputFromContainer');
-      expect(text).not.toContain('window.setInterval(sync, 100)');
-      expect(text).not.toContain("querySelector<HTMLInputElement>('[data-testid=\"swap-order-amount\"]')");
-    });
+  test('SwapPanel keeps amount state only in the parent and parses that source directly', async () => {
+    const [panel, ticket] = await Promise.all([
+      Bun.file('frontend/src/lib/components/Entity/SwapPanel.svelte').text(),
+      Bun.file('frontend/src/lib/components/Entity/SwapTradeTicket.svelte').text(),
+    ]);
+
+    expect(panel).toContain('$: giveAmount = parseDecimalAmountToBigInt(orderAmountInput, giveTokenDecimals);');
+    expect(panel).toContain('function handleOrderAmountInput(value: string): void');
+    expect(panel).toContain('orderAmountInput = autoSelection.amountInput;');
+    expect(panel).toContain('function computeOrderAmountSelection(percent: number)');
+    expect(panel).toContain('orderbookSnapshot;\n    orderbookPairId;\n    activeBookHubId;');
+    expect(panel).not.toContain('liveOrderAmountInput');
+    expect(panel).not.toContain('routedOrderAmountInput');
+    expect(panel).not.toContain('handleSwapPanelAmountSync');
+    expect(panel).not.toContain('orderAmountRevision');
+    expect(panel).not.toContain('orderAmountInputElement');
+    expect(ticket).toContain('value={orderAmountInput}');
+    expect(ticket).not.toContain('bind:value={orderAmountInput}');
   });
 
   test('SwapPanel preserves a pinned orderbook level when token sync is idempotent', () => {
