@@ -108,6 +108,7 @@
     "test:system:parallel": "bun runtime/scripts/run-system-tests-parallel.ts",
     "test:system:parallel:stream": "bun runtime/scripts/run-system-tests-parallel.ts --stream",
     "test:e2e:flows": "bun runtime/scripts/run-e2e-parallel-isolated.ts --pw-project=chromium --pw-files=tests/e2e-user-journey.spec.ts,tests/e2e-rebalance-bar.spec.ts,tests/e2e-ahb-isolated.spec.ts,tests/e2e-multiroute-load.spec.ts",
+    "debug:incidents": "bun runtime/scripts/debug-incidents.ts",
     "dev:quick": "./dev-quick.sh",
     "dev:watch": "./dev-watch.sh",
     "dev:reset": "./reset-networks.sh",

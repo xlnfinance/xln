@@ -8,6 +8,11 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 0. Restore and prove production health
 
+- [ ] Make `/api/debug/incidents` the mandatory first diagnostic query:
+  browser, frontend, Runtime, managed-child, orchestrator and J-machine errors
+  must enter one redacted stream, group by root-cause fingerprint, survive
+  gossip flood/restart, and support unread/acknowledged/resolved state. Release
+  gates fail on unexplained open incidents.
 - [ ] Fix the Runtime-frame storage-handle publish bug that resurrects a
   closed LevelDB handle after byte-pressure epoch rotation. Keep the regression
   where rotation occurs after the live Runtime already owns open handles.

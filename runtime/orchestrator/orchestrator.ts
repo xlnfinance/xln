@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { REMOTE_RUNTIME } from '../constants';
-import { createStructuredLogger } from '../infra/logger';
+import { createStructuredLogger, registerStructuredLogSink } from '../infra/logger';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
 import { sanitizeChildProcessEnv } from '../server/child-process-env';
@@ -237,6 +237,19 @@ const jurisdictionsConfig: OrchestratorJurisdictionsConfig = {
 };
 
 const relayStore: RelayStore = createRelayStore('mesh-relay');
+registerStructuredLogSink((entry) => {
+  if (entry.level !== 'error') return;
+  pushDebugEvent(relayStore, {
+    event: 'error',
+    status: 'error',
+    reason: entry.message,
+    details: {
+      source: 'orchestrator',
+      severity: entry.level,
+      ...entry,
+    },
+  });
+});
 const relayHelloChallenges = createHelloChallengeRegistry();
 const routerConfig: RelayRouterConfig = {
   store: relayStore,
@@ -642,11 +655,13 @@ const writePrefixedLogChunk = (
   prefix: string,
   state: PrefixLogState,
   chunk: Buffer | string,
+  onLine?: (line: string) => void,
 ): void => {
   const text = `${state.pending}${chunk.toString()}`;
   const lines = text.split(/\r?\n/);
   state.pending = lines.pop() ?? '';
   for (const line of lines) {
+    onLine?.(line);
     stream.write(`${prefix} ${line}\n`);
   }
 };
@@ -655,8 +670,10 @@ const flushPrefixedLogChunk = (
   stream: NodeJS.WritableStream,
   prefix: string,
   state: PrefixLogState,
+  onLine?: (line: string) => void,
 ): void => {
   if (!state.pending) return;
+  onLine?.(state.pending);
   stream.write(`${prefix} ${state.pending}\n`);
   state.pending = '';
 };
@@ -1133,6 +1150,35 @@ const persistManagedChildFailure = (
 
 const persistedRuntimeHaltFingerprints = new Set<string>();
 
+const pushManagedChildIncident = (
+  child: RecoverableChild,
+  code: string,
+  message: string,
+  details: Record<string, unknown>,
+): void => {
+  const runtimeId = String(child.lastHealth?.runtimeId || child.lastInfo?.runtimeId || '').trim() || undefined;
+  pushDebugEvent(relayStore, {
+    event: 'error',
+    runtimeId,
+    status: 'fatal',
+    reason: code,
+    details: {
+      source: 'orchestrator',
+      severity: 'fatal',
+      message,
+      child: child.name,
+      ...details,
+    },
+  });
+};
+
+const captureManagedChildErrorLine = (child: RecoverableChild, line: string): void => {
+  const match = line.match(/^\[ERROR\]\[([^\]]+)\]\s+([^\s{]+)/);
+  if (!match) return;
+  const [, scope = 'runtime', message = 'MANAGED_CHILD_ERROR'] = match;
+  pushManagedChildIncident(child, message, message, { scope });
+};
+
 const observeManagedRuntimeHalt = (
   child: RecoverableChild,
   health: { runtime?: { halted?: boolean; fatalDebugPayload?: unknown } },
@@ -1152,6 +1198,10 @@ const observeManagedRuntimeHalt = (
   persistedRuntimeHaltFingerprints.add(decision.fingerprint);
   meshLog.error('runtime.halted', {
     child: child.name,
+    receiptPath,
+    fatal: health.runtime.fatalDebugPayload ?? null,
+  });
+  pushManagedChildIncident(child, 'RUNTIME_HALTED', reason, {
     receiptPath,
     fatal: health.runtime.fatalDebugPayload ?? null,
   });
@@ -1215,6 +1265,14 @@ const handleUnexpectedHubFailure = (
     code: observation.code,
     signal: observation.signal,
     reasonCode: decision.reasonCode,
+    fingerprint: decision.fingerprint,
+    identicalFailureCount: decision.count,
+    action: decision.action,
+    receiptPath,
+  });
+  pushManagedChildIncident(child, decision.reasonCode, observation.reason, {
+    code: observation.code,
+    signal: observation.signal,
     fingerprint: decision.fingerprint,
     identicalFailureCount: decision.count,
     action: decision.action,
@@ -1336,11 +1394,22 @@ const spawnHub = async (child: HubChild): Promise<void> => {
   });
   proc.stderr?.on('data', chunk => {
     pushChildLogLines(child.recentStderr, chunk);
-    writePrefixedLogChunk(process.stderr, `[${child.name}:err]`, stderrPrefixState, chunk);
+    writePrefixedLogChunk(
+      process.stderr,
+      `[${child.name}:err]`,
+      stderrPrefixState,
+      chunk,
+      line => captureManagedChildErrorLine(child, line),
+    );
   });
   proc.once('exit', (code, signal) => {
     flushPrefixedLogChunk(process.stdout, `[${child.name}]`, stdoutPrefixState);
-    flushPrefixedLogChunk(process.stderr, `[${child.name}:err]`, stderrPrefixState);
+    flushPrefixedLogChunk(
+      process.stderr,
+      `[${child.name}:err]`,
+      stderrPrefixState,
+      line => captureManagedChildErrorLine(child, line),
+    );
     const pid = proc.pid ?? null;
     const controlledStop = consumeControlledStop(pid);
     const isCurrentProc = child.proc === proc;
@@ -1437,11 +1506,22 @@ const spawnMarketMaker = async (): Promise<void> => {
   });
   proc.stderr?.on('data', chunk => {
     pushChildLogLines(marketMakerChild.recentStderr, chunk);
-    writePrefixedLogChunk(process.stderr, '[MM:err]', stderrPrefixState, chunk);
+    writePrefixedLogChunk(
+      process.stderr,
+      '[MM:err]',
+      stderrPrefixState,
+      chunk,
+      line => captureManagedChildErrorLine(marketMakerChild, line),
+    );
   });
   proc.once('exit', (code, signal) => {
     flushPrefixedLogChunk(process.stdout, '[MM]', stdoutPrefixState);
-    flushPrefixedLogChunk(process.stderr, '[MM:err]', stderrPrefixState);
+    flushPrefixedLogChunk(
+      process.stderr,
+      '[MM:err]',
+      stderrPrefixState,
+      line => captureManagedChildErrorLine(marketMakerChild, line),
+    );
     const pid = proc.pid ?? null;
     const controlledStop = consumeControlledStop(pid);
     const isCurrentProc = marketMakerChild.proc === proc;
@@ -1493,6 +1573,19 @@ const spawnMarketMaker = async (): Promise<void> => {
         identicalFailureCount: decision.count,
         receiptPath,
       });
+      pushManagedChildIncident(
+        marketMakerChild,
+        decision.reasonCode,
+        observation.reason,
+        {
+          code: observation.code,
+          signal: observation.signal,
+          fingerprint: decision.fingerprint,
+          identicalFailureCount: decision.count,
+          action: decision.action,
+          receiptPath,
+        },
+      );
       if (!resetState.inProgress || decision.action === 'fail-stop') {
         failFastUnexpectedChildExit(
           `MM exited unexpectedly code=${String(code)} signal=${String(signal)} phase=${String(marketMakerChild.lastStartupPhase)} receipt=${receiptPath}`,
@@ -2991,6 +3084,7 @@ const server = Bun.serve({
       relayStore,
       hubChildren,
       marketMakerChild,
+      operatorAuthorized,
       pollAllHubHealth,
       pollMarketMakerHealth,
       proxyAnyHubGet,

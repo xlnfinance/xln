@@ -76,6 +76,21 @@ export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
 
 export type StructuredLogFields = Record<string, unknown>;
 
+export type StructuredLogEvent = StructuredLogFields & {
+  ts: string;
+  level: LogLevel;
+  scope: string;
+  message: string;
+};
+
+type StructuredLogSink = (event: StructuredLogEvent) => void;
+const structuredLogSinks = new Set<StructuredLogSink>();
+
+export const registerStructuredLogSink = (sink: StructuredLogSink): (() => void) => {
+  structuredLogSinks.add(sink);
+  return () => structuredLogSinks.delete(sink);
+};
+
 const LOG_LEVEL_ORDER: Record<LogLevel, number> = {
   trace: 0,
   debug: 10,
@@ -146,13 +161,14 @@ export const emitStructuredLog = (
 ): void => {
   if (!shouldEmitLevel(level)) return;
   if (!shouldEmitScope(scope)) return;
-  const payload = {
+  const payload: StructuredLogEvent = {
     ts: new Date().toISOString(),
     level,
     scope,
     message,
     ...fields,
   };
+  for (const sink of structuredLogSinks) sink(payload);
   const line = process.env['XLN_LOG_FORMAT'] === 'json'
     ? safeStringify(payload)
     : `[${level.toUpperCase()}][${scope}] ${message}${Object.keys(fields).length ? ` ${safeStringify(fields)}` : ''}`;

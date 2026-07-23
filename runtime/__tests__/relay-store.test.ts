@@ -7,6 +7,7 @@ import {
   flushPendingMessages,
   isRelaySendResultFailure,
   pushDebugEvent,
+  setDebugIncidentState,
   storeVerifiedGossipProfile,
 } from '../relay/store';
 import type { Profile } from '../networking/gossip';
@@ -25,6 +26,55 @@ test('relay send result predicate matches websocket failure contract', () => {
   expect(isRelaySendResultFailure(0)).toBe(false);
   expect(isRelaySendResultFailure(1)).toBe(false);
   expect(isRelaySendResultFailure()).toBe(false);
+});
+
+test('relay incidents group repeated root errors and reopen after a new occurrence', () => {
+  const store = createRelayStore('relay-test');
+  const runtimeId = '0x1111111111111111111111111111111111111111';
+  const event = {
+    event: 'debug_event',
+    from: runtimeId,
+    details: {
+      payload: {
+        category: 'system',
+        level: 'error',
+        message: 'RUNTIME_LOOP_ERROR',
+        data: {
+          message: 'RUNTIME_FRAME_STORAGE_NOT-COMMITTED:Database is not open',
+        },
+      },
+    },
+  };
+  pushDebugEvent(store, event);
+  pushDebugEvent(store, event);
+
+  expect(store.debugIncidents.size).toBe(1);
+  const incident = Array.from(store.debugIncidents.values())[0]!;
+  expect(incident).toMatchObject({
+    state: 'unread',
+    source: 'system',
+    code: 'RUNTIME_FRAME_STORAGE_NOT_COMMITTED',
+    runtimeId,
+    count: 2,
+  });
+
+  setDebugIncidentState(store, incident.fingerprint, 'resolved');
+  expect(store.debugIncidents.get(incident.fingerprint)?.state).toBe('resolved');
+  pushDebugEvent(store, event);
+  expect(store.debugIncidents.get(incident.fingerprint)).toMatchObject({
+    state: 'unread',
+    count: 3,
+  });
+});
+
+test('transient delivery failures do not become unresolved incidents', () => {
+  const store = createRelayStore('relay-test');
+  pushDebugEvent(store, {
+    event: 'delivery',
+    status: 'rejected',
+    reason: 'ENTITY_INPUT_TARGET_NOT_CONNECTED',
+  });
+  expect(store.debugIncidents.size).toBe(0);
 });
 
 const makeProfile = (suffix: string, updatedAt = 1): Profile => {

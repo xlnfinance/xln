@@ -62,6 +62,23 @@ export type RelayDebugEvent = {
   details?: unknown;
 };
 
+export type RelayDebugIncidentState = 'unread' | 'acknowledged' | 'resolved';
+
+export type RelayDebugIncident = {
+  fingerprint: string;
+  state: RelayDebugIncidentState;
+  source: string;
+  code: string;
+  message: string;
+  runtimeId?: string | undefined;
+  firstSeen: number;
+  lastSeen: number;
+  count: number;
+  firstEventId: number;
+  lastEventId: number;
+  sample: RelayDebugEvent;
+};
+
 export type RelayDeliveryOutcome = DeliveryOutcome;
 
 export type RelayDeliveryResult = DeliveryResult;
@@ -76,12 +93,14 @@ export type RelayStore = {
   gossipProfiles: Map<string, { profile: Profile; timestamp: number }>;
   runtimeEncryptionKeys: Map<string, string>;
   debugEvents: RelayDebugEvent[];
+  debugIncidents: Map<string, RelayDebugIncident>;
   debugId: number;
   wsCounter: number;
   activeHubEntityIds: string[];
 };
 
 const MAX_DEBUG_EVENTS = 5000;
+const MAX_DEBUG_INCIDENTS = 1000;
 const MAX_PENDING_PER_CLIENT = 200;
 const MAX_PENDING_TARGETS = 10_000;
 const MAX_PENDING_TOTAL_BYTES = 256 * 1024 * 1024;
@@ -161,6 +180,7 @@ export const createRelayStore = (serverId: string, options: RelayStoreOptions = 
   gossipProfiles: new Map(),
   runtimeEncryptionKeys: new Map(),
   debugEvents: [],
+  debugIncidents: new Map(),
   debugId: 0,
   wsCounter: 0,
   activeHubEntityIds: [],
@@ -239,18 +259,147 @@ export const classifyRelayDeliveryEvent = (event: {
 // Debug events
 // ---------------------------------------------------------------------------
 
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+
+const boundedText = (value: unknown, maxLength = 1000): string =>
+  typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
+
+const incidentHash = (value: string): string => {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+};
+
+const classifyIncident = (
+  event: RelayDebugEvent,
+): Pick<RelayDebugIncident, 'fingerprint' | 'source' | 'code' | 'message' | 'runtimeId'> | null => {
+  const details = asRecord(event.details);
+  const payload = asRecord(details?.['payload']);
+  const payloadData = asRecord(payload?.['data']);
+  const severity = boundedText(
+    details?.['severity'] ?? details?.['level'] ?? payload?.['level'],
+    20,
+  ).toLowerCase();
+  const isError =
+    event.event === 'error' ||
+    event.event === 'browser_error' ||
+    severity === 'error' ||
+    severity === 'fatal' ||
+    event.status === 'error' ||
+    event.status === 'fatal' ||
+    (event.status === 'failed' && event.delivery?.fatal !== false) ||
+    event.delivery?.fatal === true;
+  if (!isError) return null;
+
+  const rawCode =
+    boundedText(payloadData?.['message'], 200) ||
+    boundedText(payload?.['message'], 200) ||
+    boundedText(details?.['code'], 200) ||
+    boundedText(event.reason, 200) ||
+    boundedText(details?.['message'], 200) ||
+    event.event;
+  const code = normalizeRuntimeFailureCode(rawCode);
+  const message =
+    boundedText(payloadData?.['message'], 2000) ||
+    boundedText(details?.['message'], 2000) ||
+    boundedText(event.reason, 2000) ||
+    boundedText(payload?.['message'], 2000) ||
+    code;
+  const source =
+    boundedText(details?.['source'], 80) ||
+    boundedText(payload?.['category'], 80) ||
+    (event.event === 'browser_error' ? 'browser' : event.event);
+  const runtimeId =
+    boundedText(event.runtimeId, 200) ||
+    boundedText(payload?.['runtimeId'], 200) ||
+    boundedText(event.from, 200) ||
+    undefined;
+  const stackHead =
+    boundedText(details?.['stack'], 4000).split('\n').slice(0, 2).join('\n') ||
+    boundedText(payloadData?.['stack'], 4000).split('\n').slice(0, 2).join('\n');
+  const genericCode = code === 'ERROR' || code === 'BROWSER_ERROR' || code.endsWith('_ERROR');
+  const basis = [code, runtimeId ?? '', genericCode ? message : '', stackHead].join('|');
+  return {
+    fingerprint: `${code.toLowerCase()}-${incidentHash(basis)}`,
+    source,
+    code,
+    message,
+    runtimeId,
+  };
+};
+
+const trimDebugIncidents = (store: RelayStore): void => {
+  if (store.debugIncidents.size <= MAX_DEBUG_INCIDENTS) return;
+  const candidates = Array.from(store.debugIncidents.values()).sort((left, right) => {
+    const leftResolved = left.state === 'resolved' ? 0 : 1;
+    const rightResolved = right.state === 'resolved' ? 0 : 1;
+    return leftResolved - rightResolved || left.lastSeen - right.lastSeen;
+  });
+  for (const incident of candidates.slice(0, store.debugIncidents.size - MAX_DEBUG_INCIDENTS)) {
+    store.debugIncidents.delete(incident.fingerprint);
+  }
+};
+
+const updateDebugIncident = (store: RelayStore, event: RelayDebugEvent): void => {
+  const classified = classifyIncident(event);
+  if (!classified) return;
+  const existing = store.debugIncidents.get(classified.fingerprint);
+  store.debugIncidents.set(classified.fingerprint, existing
+    ? {
+        ...existing,
+        state: 'unread',
+        message: classified.message,
+        runtimeId: classified.runtimeId,
+        lastSeen: event.ts,
+        count: existing.count + 1,
+        lastEventId: event.id,
+        sample: event,
+      }
+    : {
+        ...classified,
+        state: 'unread',
+        firstSeen: event.ts,
+        lastSeen: event.ts,
+        count: 1,
+        firstEventId: event.id,
+        lastEventId: event.id,
+        sample: event,
+      });
+  trimDebugIncidents(store);
+};
+
 export const pushDebugEvent = (store: RelayStore, event: Omit<RelayDebugEvent, 'id' | 'ts'>): void => {
   store.debugId += 1;
   const delivery = event.delivery ?? (event.event === 'delivery' ? classifyRelayDeliveryEvent(event) ?? undefined : undefined);
-  store.debugEvents.push({
+  const storedEvent: RelayDebugEvent = {
     id: store.debugId,
     ts: Date.now(),
     ...event,
     ...(delivery ? { delivery } : {}),
-  });
+  };
+  store.debugEvents.push(storedEvent);
+  updateDebugIncident(store, storedEvent);
   if (store.debugEvents.length > MAX_DEBUG_EVENTS) {
     store.debugEvents.shift();
   }
+};
+
+export const setDebugIncidentState = (
+  store: RelayStore,
+  fingerprint: string,
+  state: RelayDebugIncidentState,
+): RelayDebugIncident => {
+  const incident = store.debugIncidents.get(fingerprint);
+  if (!incident) throw new Error(`DEBUG_INCIDENT_NOT_FOUND:${fingerprint}`);
+  const updated = { ...incident, state };
+  store.debugIncidents.set(fingerprint, updated);
+  return updated;
 };
 
 // ---------------------------------------------------------------------------
@@ -526,6 +675,7 @@ export const clearPendingMessages = (store: RelayStore): void => {
 
 export const resetStore = (store: RelayStore): void => {
   store.debugEvents.length = 0;
+  store.debugIncidents.clear();
   store.debugId = 0;
   clearPendingMessages(store);
   store.runtimeEncryptionKeys.clear();

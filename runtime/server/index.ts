@@ -50,12 +50,13 @@ import {
   pushDebugEvent,
   removeClient,
 } from '../relay/store';
+import { maybeHandleRelayDebugRequest } from '../relay/debug-http';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay/router';
 import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
 import { createHelloChallengeRegistry } from '../networking/hello-challenge';
 import { createLocalDeliveryHandler } from '../relay/local-delivery';
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path';
-import { createStructuredLogger, shortId } from '../infra/logger';
+import { createStructuredLogger, registerStructuredLogSink, shortId } from '../infra/logger';
 import { startParentLivenessWatch } from '../orchestrator/parent-watch';
 import {
   buildMarketSnapshotForReplica,
@@ -293,6 +294,19 @@ const resolveConfiguredRelayUrl = (port?: number): string => {
 };
 
 let relayStore = createRelayStore(DEFAULT_OPTIONS.serverId ?? 'xln-server');
+registerStructuredLogSink((entry) => {
+  if (entry.level !== 'error') return;
+  pushDebugEvent(relayStore, {
+    event: 'error',
+    status: 'error',
+    reason: entry.message,
+    details: {
+      source: 'runtime-server',
+      severity: entry.level,
+      ...entry,
+    },
+  });
+});
 type ServerBootPhase = 'starting' | 'runtime' | 'bootstrap' | 'ready' | 'failed';
 let serverBootPhase: ServerBootPhase = 'starting';
 let serverBootError: string | null = null;
@@ -575,89 +589,15 @@ const handleApi = async (
     );
   }
 
-  // Relay debug timeline (single source for network + critical runtime events)
-  if (pathname === '/api/debug/events') {
-    const url = new URL(req.url);
-    const last = Math.max(1, Math.min(5000, Number(url.searchParams.get('last') || '200')));
-    const event = url.searchParams.get('event') || undefined;
-    const runtimeId = url.searchParams.get('runtimeId') || undefined;
-    const from = url.searchParams.get('from') || undefined;
-    const to = url.searchParams.get('to') || undefined;
-    const msgType = url.searchParams.get('msgType') || undefined;
-    const status = url.searchParams.get('status') || undefined;
-    const since = Number(url.searchParams.get('since') || '0');
-
-    let filtered = relayStore.debugEvents;
-    if (since > 0) filtered = filtered.filter(e => e.ts >= since);
-    if (event) filtered = filtered.filter(e => e.event === event);
-    if (runtimeId)
-      filtered = filtered.filter(e => e.runtimeId === runtimeId || e.from === runtimeId || e.to === runtimeId);
-    if (from) filtered = filtered.filter(e => e.from === from);
-    if (to) filtered = filtered.filter(e => e.to === to);
-    if (msgType) filtered = filtered.filter(e => e.msgType === msgType);
-    if (status) filtered = filtered.filter(e => e.status === status);
-
-    const events = filtered.slice(-last);
-    return new Response(
-      safeStringify({
-        ok: true,
-        total: relayStore.debugEvents.length,
-        returned: events.length,
-        serverTime: Date.now(),
-        filters: { last, event, runtimeId, from, to, msgType, status, since: Number.isFinite(since) ? since : 0 },
-        events,
-      }),
-      { headers },
-    );
-  }
-
-  if (pathname === '/api/debug/events/mark' && req.method === 'POST') {
-    const body = await req.json().catch(() => ({} as Record<string, unknown>));
-    const label = typeof body?.label === 'string' ? body.label.trim() : '';
-    if (!label) {
-      return new Response(
-        safeStringify({ ok: false, error: 'label is required' }),
-        { status: 400, headers },
-      );
-    }
-
-    const runtimeId = typeof body?.runtimeId === 'string' && body.runtimeId.trim().length > 0
-      ? body.runtimeId.trim()
-      : undefined;
-    const entityId = typeof body?.entityId === 'string' && body.entityId.trim().length > 0
-      ? body.entityId.trim()
-      : undefined;
-    const phase = typeof body?.phase === 'string' && body.phase.trim().length > 0
-      ? body.phase.trim()
-      : undefined;
-    const details = body?.details && typeof body.details === 'object'
-      ? body.details
-      : undefined;
-
-    pushDebugEvent(relayStore, {
-      event: 'e2e_phase',
-      runtimeId,
-      status: 'mark',
-      reason: label,
-      details: {
-        label,
-        phase,
-        entityId,
-        details,
-      },
-    });
-
-    return new Response(
-      safeStringify({
-        ok: true,
-        label,
-        runtimeId: runtimeId ?? null,
-        entityId: entityId ?? null,
-        phase: phase ?? null,
-      }),
-      { headers },
-    );
-  }
+  const relayDebugResponse = await maybeHandleRelayDebugRequest({
+    request: req,
+    pathname,
+    url: new URL(req.url),
+    headers,
+    store: relayStore,
+    operatorAuthorized,
+  });
+  if (relayDebugResponse) return relayDebugResponse;
 
   if (pathname === '/api/debug/activity' && env) {
     return await handleRuntimeActivityRequest(env, new URL(req.url), headers);

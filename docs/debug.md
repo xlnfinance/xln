@@ -6,11 +6,12 @@ If you touch runtime, networking, relay, or payment code, follow this file.
 
 ## Goal
 
-Use one timeline as source of truth:
+Use one event timeline and one root-cause incident view:
 
 - Relay timeline: `GET /api/debug/events`
+- Open incidents: `GET /api/debug/incidents?state=open`
 
-This endpoint must answer, for any incident:
+These endpoints must answer, for any incident:
 
 - Who sent what
 - To whom
@@ -26,7 +27,11 @@ Single-source pipeline:
 2. `runtime/machine/env-events.ts` forwards critical/high-signal events via P2P `debug_event`.
 3. WS client sends `debug_event` messages to relay.
 4. Relay stores all network and debug events in in-memory ring buffer.
-5. HTTP API serves filtered timeline at `/api/debug/events`.
+5. Browser telemetry sends `console.error`, `window.error`, unhandled promise
+   rejection and Svelte errors to `/api/debug/events/ingest`.
+6. Every error updates a separate fingerprinted incident registry. Gossip
+   traffic may rotate the event ring but cannot evict an active root cause.
+7. HTTP API serves the raw timeline and the grouped incident view.
 
 Core files:
 
@@ -35,6 +40,8 @@ Core files:
 - `runtime/networking/p2p.ts`
 - `runtime/networking/ws-protocol.ts`
 - `runtime/server/index.ts`
+- `runtime/relay/debug-http.ts`
+- `frontend/src/lib/debug/browser-telemetry.ts`
 
 ## Event Model
 
@@ -56,6 +63,9 @@ Key relay events:
 Buffer:
 
 - Ring buffer size: `MAX_RELAY_DEBUG_EVENTS = 5000`
+- Incident registry: 1,000 grouped root causes, evicting resolved/oldest first
+- Incident lifecycle: `unread -> acknowledged -> resolved`; a new occurrence
+  reopens the incident as `unread`
 
 ## HTTP Query API
 
@@ -81,7 +91,33 @@ curl -s "https://xln.finance/api/debug/events?last=200" | jq .
 curl -s "https://xln.finance/api/debug/events?event=error&last=200" | jq .
 curl -s "https://xln.finance/api/debug/events?runtimeId=0xabc...&since=1770470000000" | jq .
 curl -s "https://xln.finance/api/debug/events?msgType=entity_input&status=delivered&last=500" | jq .
+curl -s "http://127.0.0.1:8082/api/debug/incidents?state=open" | jq .
 ```
+
+Agent/operator shortcut:
+
+```bash
+bun run debug:incidents
+bun run debug:incidents -- --state=unread --ack
+bun run debug:incidents -- --resolve=<fingerprint>
+```
+
+The first command exits non-zero while any open incident exists. Run it before
+reading scattered log files and again after every fix. Resolve an incident
+only after its L1 and L2 regressions are green; a recurrence reopens it.
+
+## Root Cause, Not Log Volume
+
+- One storage failure followed by 1,000 rejected deliveries is one root
+  incident plus causal fallout, not 1,001 independent bugs.
+- Boot probes against children that have not reached their readiness barrier
+  are bootstrap state, not incidents.
+- Typed transient delivery outcomes remain timeline events but do not become
+  incidents. Fatal delivery outcomes do.
+- Every incident fingerprint binds source, normalized code, Runtime identity,
+  message and first stack location.
+- Incident API responses omit raw event payloads. Querying incidents must not
+  expose seeds, capabilities, signatures, ciphertext or financial arguments.
 
 ## Mandatory Instrumentation Contract
 
@@ -222,8 +258,8 @@ Current pipeline is strong but not perfect.
 Highest-value improvements:
 
 1. Add `traceId`/`paymentId` propagated end-to-end (route build -> HTLC lock -> resolve).
-2. Enforce schema validation for `debug_event` payloads (reject malformed producers).
-3. Persist relay debug buffer to disk (survive process restart).
+2. Enforce schema validation for Runtime `debug_event` payloads (browser intake is already bounded and validated).
+3. Persist incident state and a redacted rolling event stream to disk (survive process restart).
 4. Add retention tiers:
    - in-memory hot ring
    - compressed rolling files
