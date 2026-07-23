@@ -84,4 +84,4 @@ done
 
 echo "[qa-evidence] done."
 echo "[qa-evidence] verify page: curl -fsSI 'https://xln.finance/qa'"
-echo "[qa-evidence] verify API with a QA read token: /api/qa/runs?limit=5"
+echo "[qa-evidence] verify public API: curl -fsS 'https://xln.finance/api/qa/runs?limit=5'"

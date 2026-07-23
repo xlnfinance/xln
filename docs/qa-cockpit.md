@@ -21,6 +21,8 @@ Defined in `runtime/qa/report.ts`. Roots derive from `QA_EVIDENCE_ROOT` (default
 
 `runs` (history list) · `run` + `run/perf` (one run detail + perf) · `artifact?runId=&path=` (serves a file from a run dir; videos/traces/logs) · `stories` + `story-image?source=&path=` (gallery: `e2e-screenshots` from the tracked root, `qa-run` from run dirs) · `catalog` · `history` (+ `history/backfill`) · `retention` · `restart` / `restart/abort` / `restart-audit` (admin). The API reads files at request time, so an uploaded DB/run appears with **no server restart**.
 
+All read-only QA routes are public. Only mutating maintenance actions require `XLN_QA_ADMIN_TOKEN`; supplying an invalid token fails instead of silently downgrading access.
+
 ## UI sections
 
 Evidence Summary · Evidence Playlist + Artifacts Below Playback · Application Screens (curated gallery) · All Test Surfaces · Deterministic Scenarios · Canonical Ledger · Failure Inbox (triage by failure class) · Browser Health · Benchmarks · Maintenance (backfill / retention / restart).

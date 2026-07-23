@@ -39,7 +39,6 @@ import {
   type QaRunManifest,
 } from '../qa/report';
 
-const QA_READ_TOKEN = 'qa-read-test-token';
 const QA_ADMIN_TOKEN = 'qa-admin-test-token';
 const JSON_HEADERS = { 'content-type': 'application/json' };
 
@@ -54,24 +53,20 @@ const TEST_RESTART_FINGERPRINT = {
   trackedBytes: 1,
 };
 
-const qaRequest = (url: string, init: RequestInit = {}, token = QA_READ_TOKEN): Request => {
+const qaRequest = (url: string, init: RequestInit = {}, token = ''): Request => {
   const headers = new Headers(init.headers);
   if (token) headers.set('authorization', `Bearer ${token}`);
   return new Request(url, { ...init, headers });
 };
 
 const withQaAuthEnv = async <T>(work: () => Promise<T>): Promise<T> => {
-  const previousRead = process.env['XLN_QA_READ_TOKEN'];
   const previousAdmin = process.env['XLN_QA_ADMIN_TOKEN'];
   const previousDisabled = process.env['XLN_QA_AUTH_DISABLED'];
-  process.env['XLN_QA_READ_TOKEN'] = QA_READ_TOKEN;
   process.env['XLN_QA_ADMIN_TOKEN'] = QA_ADMIN_TOKEN;
   delete process.env['XLN_QA_AUTH_DISABLED'];
   try {
     return await work();
   } finally {
-    if (previousRead === undefined) delete process.env['XLN_QA_READ_TOKEN'];
-    else process.env['XLN_QA_READ_TOKEN'] = previousRead;
     if (previousAdmin === undefined) delete process.env['XLN_QA_ADMIN_TOKEN'];
     else process.env['XLN_QA_ADMIN_TOKEN'] = previousAdmin;
     if (previousDisabled === undefined) delete process.env['XLN_QA_AUTH_DISABLED'];
@@ -1057,11 +1052,9 @@ test('qa catalog and restart plan expose real runner commands', async () => {
   });
 });
 
-test('qa api without configured tokens is open only to local operator requests', async () => {
-  const previousRead = process.env['XLN_QA_READ_TOKEN'];
+test('qa api is public read-only and preserves local operator admin access', async () => {
   const previousAdmin = process.env['XLN_QA_ADMIN_TOKEN'];
   const previousDisabled = process.env['XLN_QA_AUTH_DISABLED'];
-  delete process.env['XLN_QA_READ_TOKEN'];
   delete process.env['XLN_QA_ADMIN_TOKEN'];
   delete process.env['XLN_QA_AUTH_DISABLED'];
   try {
@@ -1089,11 +1082,18 @@ test('qa api without configured tokens is open only to local operator requests',
       JSON_HEADERS,
       { operatorAuthorized: false },
     );
-    expect(publicResponse?.status).toBe(401);
-    expect((await publicResponse!.json() as { error?: string }).error).toBe('QA_AUTH_REQUIRED');
+    expect(publicResponse?.status).toBe(200);
+    const publicPayload = await publicResponse!.json() as {
+      ok?: boolean;
+      qaAuth?: { scope?: string; disabled?: boolean; actorKeyId?: string };
+      catalog?: unknown[];
+    };
+    expect(publicPayload.ok).toBe(true);
+    expect(publicPayload.qaAuth?.scope).toBe('read');
+    expect(publicPayload.qaAuth?.disabled).toBe(false);
+    expect(publicPayload.qaAuth?.actorKeyId).toBe('qa-public-read');
+    expect(Array.isArray(publicPayload.catalog)).toBe(true);
   } finally {
-    if (previousRead === undefined) delete process.env['XLN_QA_READ_TOKEN'];
-    else process.env['XLN_QA_READ_TOKEN'] = previousRead;
     if (previousAdmin === undefined) delete process.env['XLN_QA_ADMIN_TOKEN'];
     else process.env['XLN_QA_ADMIN_TOKEN'] = previousAdmin;
     if (previousDisabled === undefined) delete process.env['XLN_QA_AUTH_DISABLED'];
@@ -1101,17 +1101,17 @@ test('qa api without configured tokens is open only to local operator requests',
   }
 });
 
-test('qa api requires read token and admin token for restart operations', async () => {
+test('qa api allows anonymous reads and requires an admin token for restart operations', async () => {
   await withQaAuthEnv(async () => {
-    const missingToken = await maybeHandleQaRequest(
+    const publicCatalog = await maybeHandleQaRequest(
       new Request('http://127.0.0.1:8080/api/qa/catalog'),
       '/api/qa/catalog',
       JSON_HEADERS,
     );
-    expect(missingToken?.status).toBe(401);
-    expect((await missingToken!.json() as { error?: string }).error).toBe('QA_AUTH_REQUIRED');
+    expect(publicCatalog?.status).toBe(200);
+    expect((await publicCatalog!.json() as { qaAuth?: { scope?: string } }).qaAuth?.scope).toBe('read');
 
-    const readPlan = await maybeHandleQaRequest(
+    const publicPlan = await maybeHandleQaRequest(
       qaRequest('http://127.0.0.1:8080/api/qa/restart?mode=plan', {
         method: 'POST',
         body: JSON.stringify({
@@ -1122,8 +1122,8 @@ test('qa api requires read token and admin token for restart operations', async 
       '/api/qa/restart',
       JSON_HEADERS,
     );
-    expect(readPlan?.status).toBe(403);
-    expect((await readPlan!.json() as { error?: string }).error).toBe('QA_AUTH_ADMIN_REQUIRED');
+    expect(publicPlan?.status).toBe(403);
+    expect((await publicPlan!.json() as { error?: string }).error).toBe('QA_AUTH_ADMIN_REQUIRED');
 
     const adminCatalog = await maybeHandleQaRequest(
       qaRequest('http://127.0.0.1:8080/api/qa/catalog', {}, QA_ADMIN_TOKEN),
@@ -1131,6 +1131,14 @@ test('qa api requires read token and admin token for restart operations', async 
       JSON_HEADERS,
     );
     expect(adminCatalog?.status).toBe(200);
+
+    const invalidToken = await maybeHandleQaRequest(
+      qaRequest('http://127.0.0.1:8080/api/qa/catalog', {}, 'invalid-token'),
+      '/api/qa/catalog',
+      JSON_HEADERS,
+    );
+    expect(invalidToken?.status).toBe(401);
+    expect((await invalidToken!.json() as { error?: string }).error).toBe('QA_AUTH_INVALID');
   });
 });
 
@@ -1203,10 +1211,8 @@ test('qa read endpoints support ETag revalidation', async () => {
 
 test('qa auth disabled escape hatch is explicit and media responses stay same-origin', async () => {
   const previousDisabled = process.env['XLN_QA_AUTH_DISABLED'];
-  const previousRead = process.env['XLN_QA_READ_TOKEN'];
   const previousAdmin = process.env['XLN_QA_ADMIN_TOKEN'];
   process.env['XLN_QA_AUTH_DISABLED'] = '1';
-  delete process.env['XLN_QA_READ_TOKEN'];
   delete process.env['XLN_QA_ADMIN_TOKEN'];
   try {
     const storiesResponse = await maybeHandleQaRequest(
@@ -1233,8 +1239,6 @@ test('qa auth disabled escape hatch is explicit and media responses stay same-or
   } finally {
     if (previousDisabled === undefined) delete process.env['XLN_QA_AUTH_DISABLED'];
     else process.env['XLN_QA_AUTH_DISABLED'] = previousDisabled;
-    if (previousRead === undefined) delete process.env['XLN_QA_READ_TOKEN'];
-    else process.env['XLN_QA_READ_TOKEN'] = previousRead;
     if (previousAdmin === undefined) delete process.env['XLN_QA_ADMIN_TOKEN'];
     else process.env['XLN_QA_ADMIN_TOKEN'] = previousAdmin;
   }
@@ -1247,7 +1251,6 @@ test('qa restart env allowlist strips server secrets', () => {
     PW_TEST_HTML_REPORT_OPEN: 'never',
     PLAYWRIGHT_BROWSERS_PATH: '/tmp/pw',
     XLN_QA_ADMIN_TOKEN: 'admin-secret',
-    XLN_QA_READ_TOKEN: 'read-secret',
     SECRET_SENTINEL: 'must-not-leak',
     PRIVATE_KEY: 'must-not-leak',
   });
@@ -1256,7 +1259,6 @@ test('qa restart env allowlist strips server secrets', () => {
   expect(restartEnv.PW_TEST_HTML_REPORT_OPEN).toBe('never');
   expect(restartEnv.PLAYWRIGHT_BROWSERS_PATH).toBe('/tmp/pw');
   expect(restartEnv.XLN_QA_ADMIN_TOKEN).toBeUndefined();
-  expect(restartEnv.XLN_QA_READ_TOKEN).toBeUndefined();
   expect(restartEnv.SECRET_SENTINEL).toBeUndefined();
   expect(restartEnv.PRIVATE_KEY).toBeUndefined();
 });

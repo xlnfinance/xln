@@ -193,7 +193,7 @@
       <span>qa auth</span>
       <strong>{qaAuthLabel}</strong>
       <div>
-        <input bind:value={qaToken} type="password" autocomplete="off" placeholder="read token" />
+        <input bind:value={qaToken} type="password" autocomplete="off" placeholder="admin token (optional)" />
         <button type="button" onclick={saveToken}>Apply</button>
       </div>
     </div>

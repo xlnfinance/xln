@@ -1135,12 +1135,12 @@
       </div>
       {#if qaAuthLabel !== 'open'}
         <label>
-          <span>Bearer token</span>
+          <span>Admin token</span>
           <input
             bind:value={qaTokenInput}
             type="password"
             autocomplete="off"
-            placeholder="read/admin token"
+            placeholder="optional — admin actions only"
           />
         </label>
         <button class="mini-action" onclick={applyQaToken}>Apply</button>

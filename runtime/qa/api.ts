@@ -231,22 +231,16 @@ const qaAuthPayload = (auth: QaAuthContext): Record<string, unknown> => ({
 const authenticateQaRequest = (request: Request, operatorAuthorized: boolean): QaAuthContext | Response => {
   if (qaAuthDisabled()) return { scope: 'admin', disabled: true, actorKeyId: 'auth-disabled' };
 
-  const readTokens = splitTokenList(process.env['XLN_QA_READ_TOKEN']);
   const adminTokens = splitTokenList(process.env['XLN_QA_ADMIN_TOKEN']);
-  if (readTokens.length === 0 && adminTokens.length === 0) {
-    if (operatorAuthorized) {
+  const token = extractQaToken(request);
+  if (!token) {
+    if (operatorAuthorized && adminTokens.length === 0) {
       return { scope: 'admin', disabled: true, actorKeyId: 'qa-local-open' };
     }
-    return jsonResponse({ ok: false, error: 'QA_AUTH_REQUIRED' }, 401, {});
+    return { scope: 'read', disabled: false, actorKeyId: 'qa-public-read' };
   }
-
-  const token = extractQaToken(request);
-  if (!token) return jsonResponse({ ok: false, error: 'QA_AUTH_REQUIRED' }, 401, {});
   if (adminTokens.length > 0 && tokenMatches(token, adminTokens)) {
     return { scope: 'admin', disabled: false, actorKeyId: actorKeyIdForToken(token) };
-  }
-  if (readTokens.length > 0 && tokenMatches(token, readTokens)) {
-    return { scope: 'read', disabled: false, actorKeyId: actorKeyIdForToken(token) };
   }
   return jsonResponse({ ok: false, error: 'QA_AUTH_INVALID' }, 401, {});
 };

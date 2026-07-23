@@ -113,6 +113,11 @@ Audit claims enter this file only after reproduction against the current tree.
 
 ## Test system and QA
 
+- [ ] Make `/qa` the single public System & Quality cockpit. Put live Health
+  first, explain live signals versus immutable release evidence, move the
+  existing Health sections behind focused tabs, and redirect `/health` to the
+  matching QA tab while preserving `/api/health`. Cover mobile/laptop/wide
+  screenshots and all live-health failure states.
 - [ ] Split pure/storage/BrowserVM/stress gates and record per-file duration.
   Replace fixed waits with state predicates and reproduce one target 10x before
   calling it flaky.
