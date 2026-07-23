@@ -420,6 +420,12 @@ describe('production startup wiring', () => {
     expect(waitForMarketMakerReadyBody).not.toContain('buildAggregatedHealthResponse()');
     expect(waitForMarketMakerReadyBody).toContain('while (true)');
     expect(waitForMarketMakerReadyBody).not.toContain('const deadline =');
+    const waitForHubSelfReady = orchestrator.slice(
+      orchestrator.indexOf('const waitForHubSelfReady = async (child: HubChild): Promise<void> => {'),
+      orchestrator.indexOf('const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {'),
+    );
+    expect(waitForHubSelfReady).toContain('idleMs >= HUB_BASELINE_TIMEOUT_MS');
+    expect(waitForHubSelfReady).not.toContain('idleMs >= HUB_BASELINE_STALL_TIMEOUT_MS');
     expect(waitForMarketMakerReady.indexOf('if (marketMakerChild.exitCode !== null || marketMakerChild.exitSignal !== null)')).toBeLessThan(
       waitForMarketMakerReady.indexOf('health.marketMaker.ok'),
     );

@@ -2498,10 +2498,10 @@ const waitForHubSelfReady = async (child: HubChild): Promise<void> => {
       throw new Error(`${child.name}_SELF_READY_EXITED_EARLY code=${String(child.proc?.exitCode)} stderr=${safeStringify(child.recentStderr.slice(-8))}`);
     }
     const idleMs = Date.now() - startedAt;
-    if (idleMs >= HUB_BASELINE_STALL_TIMEOUT_MS) {
+    if (idleMs >= HUB_BASELINE_TIMEOUT_MS) {
       throw new Error(
-        `${child.name}_SELF_READY_STALLED idleMs=${idleMs} ` +
-        `timeoutMs=${HUB_BASELINE_STALL_TIMEOUT_MS} stderr=${safeStringify(child.recentStderr.slice(-8))}`,
+        `${child.name}_SELF_READY_TIMEOUT idleMs=${idleMs} ` +
+        `timeoutMs=${HUB_BASELINE_TIMEOUT_MS} stderr=${safeStringify(child.recentStderr.slice(-8))}`,
       );
     }
     await delay(250);
