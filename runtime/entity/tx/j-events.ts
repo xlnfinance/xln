@@ -37,6 +37,7 @@ import { mergeJEventClaimOps } from './j-events-account';
 import type { JEventApplyResult, JEventMempoolOp } from './j-events-types';
 import { appendBatchHistory, emptyOpBreakdown } from './j-events-history';
 import { applyHankoBatchProcessedEvent } from './j-events-batch';
+import { applyBatchOperationSkippedEvent } from './j-events-batch-skip';
 import {
   applyEntityProviderActionCancelled,
   applyEntityProviderActionExecuted,
@@ -901,6 +902,9 @@ async function applyFinalizedJEvent(
 
   } else if (event.type === 'DisputeFinalized') {
     applyDisputeFinalizedJEvent(context, disputeFinalizationEvidence);
+
+  } else if (event.type === 'BatchOperationSkipped') {
+    applyBatchOperationSkippedEvent(newState, event);
 
   } else if (event.type === 'HankoBatchProcessed') {
     await applyHankoBatchProcessedEvent({

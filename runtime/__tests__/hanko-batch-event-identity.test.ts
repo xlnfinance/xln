@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { ethers } from 'ethers';
 
 import { applyHankoBatchProcessedEvent } from '../entity/tx/j-events-batch';
+import { applyBatchOperationSkippedEvent } from '../entity/tx/j-events-batch-skip';
 import { generateLazyEntityId } from '../entity/factory';
 import { prepareSignedBatch } from '../hanko/batch';
 import { createJAdapter } from '../jadapter';
@@ -205,6 +206,57 @@ test('adapter decoding and persistence normalization preserve canonical batchHas
   })).toBeNull();
 });
 
+test('skipped-operation event binds to the exact pending batch and enters history', async () => {
+  const state = makeEntityState();
+  const [decoded] = rawEventToJEvents({
+    name: 'BatchOperationSkipped',
+    args: {
+      entityId: ENTITY_ID,
+      batchHash: PENDING_BATCH_HASH,
+      nonce: 7n,
+      operationType: 0n,
+      operationIndex: 2n,
+      reason: 0n,
+    },
+    blockNumber: 104,
+    blockHash: `0x${'ab'.repeat(32)}`,
+    transactionHash: `0x${'bc'.repeat(32)}`,
+    logIndex: 3,
+  }, ENTITY_ID);
+  if (!decoded || decoded.type !== 'BatchOperationSkipped') {
+    throw new Error('BATCH_OPERATION_SKIPPED_DECODE_FAILED');
+  }
+
+  expect(normalizeJurisdictionEvent(decoded)).toEqual(decoded);
+  applyBatchOperationSkippedEvent(state, decoded);
+  expect(state.jBatchState?.sentBatch?.skippedOperations).toEqual([{
+    operationType: 'reserveToReserve',
+    operationIndex: 2,
+    reason: 'insufficientBalance',
+  }]);
+
+  await applyHankoBatchProcessedEvent({
+    newState: state,
+    event: {
+      type: 'HankoBatchProcessed',
+      data: {
+        entityId: ENTITY_ID,
+        batchHash: PENDING_BATCH_HASH,
+        nonce: 7,
+        success: true,
+      },
+    },
+    transactionHash: `0x${'bc'.repeat(32)}`,
+    blockNumber: 104,
+    dirtyAccounts: new Set(),
+  });
+  expect(state.batchHistory?.[0]?.skippedOperations).toEqual([{
+    operationType: 'reserveToReserve',
+    operationIndex: 2,
+    reason: 'insufficientBalance',
+  }]);
+});
+
 test('BrowserVM production processBatch event finalizes only its exact runtime pending batch', async () => {
   const privateKey = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
   const signerAddress = new ethers.Wallet(privateKey).address;
@@ -255,6 +307,78 @@ test('BrowserVM production processBatch event finalizes only its exact runtime p
     expect(event.type === 'HankoBatchProcessed' ? event.data.batchHash : null).toBe(signed.batchHash);
     expect(state.jBatchState?.sentBatch).toBeUndefined();
     expect(state.batchHistory?.[0]?.batchHash).toBe(signed.batchHash);
+  } finally {
+    await adapter.close();
+  }
+}, 30_000);
+
+test('BrowserVM skips an underfunded operation and still finalizes its exact batch', async () => {
+  const privateKey = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
+  const signerAddress = new ethers.Wallet(privateKey).address;
+  const entityId = generateLazyEntityId([signerAddress], 1n).toLowerCase();
+  const adapter = await createJAdapter({ mode: 'browservm', chainId: 31337 });
+
+  try {
+    const batch = createEmptyBatch();
+    batch.reserveToReserve.push({
+      receivingEntity: `0x${'ef'.repeat(32)}`,
+      tokenId: 1,
+      amount: 1n,
+    });
+    const signed = prepareSignedBatch(
+      batch,
+      entityId,
+      privateKey,
+      31337n,
+      adapter.addresses.depository,
+      0n,
+    );
+    const receipt = await adapter.processBatch(
+      signed.encodedBatch,
+      signed.hankoData,
+      signed.nextNonce,
+    );
+    expect(receipt.events.map((event) => event.name)).toEqual([
+      'BatchOperationSkipped',
+      'HankoBatchProcessed',
+    ]);
+
+    const state = makeEntityState();
+    state.entityId = entityId;
+    state.jBatchState!.sentBatch = {
+      batch,
+      batchHash: signed.batchHash,
+      encodedBatch: signed.encodedBatch,
+      entityNonce: Number(signed.nextNonce),
+      firstSubmittedAt: 900,
+      lastSubmittedAt: 900,
+      submitAttempts: 1,
+    };
+    state.jBatchState!.entityNonce = 0;
+
+    for (const rawEvent of receipt.events) {
+      const [event] = rawEventToJEvents(rawEvent, entityId);
+      if (!event) throw new Error(`BROWSERVM_EVENT_DECODE_FAILED:${rawEvent.name}`);
+      if (event.type === 'BatchOperationSkipped') {
+        applyBatchOperationSkippedEvent(state, event);
+      } else if (event.type === 'HankoBatchProcessed') {
+        await applyHankoBatchProcessedEvent({
+          newState: state,
+          event,
+          transactionHash: receipt.txHash,
+          blockNumber: receipt.blockNumber,
+          dirtyAccounts: new Set(),
+        });
+      }
+    }
+
+    expect(state.jBatchState?.sentBatch).toBeUndefined();
+    expect(state.batchHistory?.[0]?.status).toBe('confirmed');
+    expect(state.batchHistory?.[0]?.skippedOperations).toEqual([{
+      operationType: 'reserveToReserve',
+      operationIndex: 0,
+      reason: 'insufficientBalance',
+    }]);
   } finally {
     await adapter.close();
   }

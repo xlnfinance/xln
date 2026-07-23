@@ -52,6 +52,9 @@ function appendSelfBatchHistory(opts: {
     jBlockNumber: Number(blockNumber || 0),
     ...(sentBatch?.batch ? { batch: cloneJBatch(sentBatch.batch) } : {}),
     ...(opBreakdown ? { operations: opBreakdown } : {}),
+    ...(sentBatch?.skippedOperations
+      ? { skippedOperations: structuredClone(sentBatch.skippedOperations) }
+      : {}),
     source: 'self-batch' as const,
   });
 }

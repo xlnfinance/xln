@@ -125,6 +125,17 @@ export type JurisdictionEvent =
       };
     })
   | (JEventMetadata & {
+      type: 'BatchOperationSkipped';
+      data: {
+        entityId: string;
+        batchHash: string;
+        nonce: number;
+        operationType: 0 | 1 | 2 | 3 | 4;
+        operationIndex: number;
+        reason: 0;
+      };
+    })
+  | (JEventMetadata & {
       type: 'HankoBatchProcessed';
       data: {
         entityId: string;

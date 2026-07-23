@@ -287,6 +287,14 @@ contract Depository is ReentrancyGuardLite {
   bytes32 public constant WATCHTOWER_COUNTER_DISPUTE_DOMAIN_SEPARATOR =
     keccak256("XLN_WATCHTOWER_COUNTER_DISPUTE_V1");
 
+  event BatchOperationSkipped(
+    bytes32 indexed entityId,
+    bytes32 indexed batchHash,
+    uint256 indexed nonce,
+    BatchOperationType operationType,
+    uint256 operationIndex,
+    BatchSkipReason reason
+  );
   event HankoBatchProcessed(bytes32 indexed entityId, bytes32 indexed batchHash, uint256 nonce, bool success);
   event WatchtowerCounterDisputeExecuted(
     address indexed tower,
@@ -317,7 +325,7 @@ contract Depository is ReentrancyGuardLite {
     if (!hankoValid || entityId == bytes32(0)) revert E4();
     if (nonce != entityNonces[entityId] + 1) revert E2();
     entityNonces[entityId] = nonce;
-    completeSuccess = _processBatch(entityId, batch);
+    completeSuccess = _processBatch(entityId, batch, batchHash, nonce);
     if (!completeSuccess) revert E4();
     emit HankoBatchProcessed(entityId, batchHash, nonce, completeSuccess);
   }
@@ -465,7 +473,12 @@ contract Depository is ReentrancyGuardLite {
     }
   }
 
-  function _processBatch(bytes32 entityId, Batch memory batch) private returns (bool completeSuccess) {
+  function _processBatch(
+    bytes32 entityId,
+    Batch memory batch,
+    bytes32 batchHash,
+    uint256 nonce
+  ) private returns (bool completeSuccess) {
     // SECURITY FIX: Aggregate flashloans by tokenId (prevent duplicate tokenId exploit)
     uint256[] memory flashloanTokenIds = new uint256[](batch.flashloans.length);
     uint256[] memory flashloanStarting = new uint256[](batch.flashloans.length);
@@ -517,25 +530,41 @@ contract Depository is ReentrancyGuardLite {
 
     // Process reserveToReserve transfers (the core functionality we need)
     for (uint i = 0; i < batch.reserveToReserve.length; i++) {
-      _reserveToReserve(entityId, batch.reserveToReserve[i]);
+      if (!_reserveToReserve(entityId, batch.reserveToReserve[i])) {
+        _emitInsufficientBalanceSkip(entityId, batchHash, nonce, BatchOperationType.ReserveToReserve, i);
+      }
     }
 
     // C2R shortcut: direct processing (no Settlement[] allocation)
     // Pure C2R = withdraw `amount` from my share of collateral to my reserve
     for (uint i = 0; i < batch.collateralToReserve.length; i++) {
-      if (!Account.processC2R(_reserves, _accounts, _collaterals, entityId, batch.collateralToReserve[i], entityProvider)) {
-        completeSuccess = false;
+      BatchItemResult c2rResult =
+        Account.processC2R(_reserves, _accounts, _collaterals, entityId, batch.collateralToReserve[i], entityProvider);
+      if (c2rResult == BatchItemResult.InvalidSignature) revert E4();
+      if (c2rResult == BatchItemResult.InsufficientBalance) {
+        _emitInsufficientBalanceSkip(entityId, batchHash, nonce, BatchOperationType.CollateralToReserve, i);
       }
     }
 
     // Delegate settlement diffs to Account library, handle debt forgiveness in Depository
     if (batch.settlements.length > 0) {
       _enforceSettlementOutflowDebts(batch.settlements);
-      if (!Account.processSettlements(_reserves, debtOutstanding, _accounts, _collaterals, entityId, batch.settlements, entityProvider)) {
-        completeSuccess = false;
-      }
+      BatchItemResult[] memory settlementResults = Account.processSettlements(
+        _reserves,
+        debtOutstanding,
+        _accounts,
+        _collaterals,
+        entityId,
+        batch.settlements,
+        entityProvider
+      );
       // Handle debt forgiveness (not in Account due to stack limits)
       for (uint i = 0; i < batch.settlements.length; i++) {
+        if (settlementResults[i] == BatchItemResult.InvalidSignature) revert E4();
+        if (settlementResults[i] == BatchItemResult.InsufficientBalance) {
+          _emitInsufficientBalanceSkip(entityId, batchHash, nonce, BatchOperationType.Settlement, i);
+          continue;
+        }
         Settlement memory s = batch.settlements[i];
         for (uint j = 0; j < s.forgiveDebtsInTokenIds.length; j++) {
           uint tokenId = s.forgiveDebtsInTokenIds[j];
@@ -566,14 +595,16 @@ contract Depository is ReentrancyGuardLite {
 
     for (uint i = 0; i < batch.reserveToCollateral.length; i++) {
       if(!(_reserveToCollateral(entityId, batch.reserveToCollateral[i]))){
-        completeSuccess = false;
+        _emitInsufficientBalanceSkip(entityId, batchHash, nonce, BatchOperationType.ReserveToCollateral, i);
       }
     }
 
     // Process external token withdrawals (decreases reserves)
     // Security: batch initiator can only withdraw from their own reserves
     for (uint i = 0; i < batch.reserveToExternalToken.length; i++) {
-      _reserveToExternalToken(entityId, batch.reserveToExternalToken[i]);
+      if (!_reserveToExternalToken(entityId, batch.reserveToExternalToken[i])) {
+        _emitInsufficientBalanceSkip(entityId, batchHash, nonce, BatchOperationType.ReserveToExternalToken, i);
+      }
     }
 
     // SECURITY FIX: Check aggregated flashloan return + burn
@@ -593,6 +624,23 @@ contract Depository is ReentrancyGuardLite {
 
     return completeSuccess;
 
+  }
+
+  function _emitInsufficientBalanceSkip(
+    bytes32 entityId,
+    bytes32 batchHash,
+    uint256 nonce,
+    BatchOperationType operationType,
+    uint256 operationIndex
+  ) private {
+    emit BatchOperationSkipped(
+      entityId,
+      batchHash,
+      nonce,
+      operationType,
+      operationIndex,
+      BatchSkipReason.InsufficientBalance
+    );
   }
 
   // MessageType enum is in Types.sol
@@ -713,12 +761,12 @@ contract Depository is ReentrancyGuardLite {
 
 
   // ReserveToExternalToken struct is in Types.sol
-  function _reserveToExternalToken(bytes32 entity, ReserveToExternalToken memory params) internal {
+  function _reserveToExternalToken(bytes32 entity, ReserveToExternalToken memory params) internal returns (bool) {
     if (params.amount == 0) revert E1();
     enforceDebts(entity, params.tokenId, DEBT_ENFORCEMENT_CHUNK);
 
     TokenMetadata memory meta = _tokens[params.tokenId];
-    if (params.amount > _spendableReserve(entity, params.tokenId)) revert E3();
+    if (params.amount > _spendableReserve(entity, params.tokenId)) return false;
     if (uint256(params.receivingEntity) > type(uint160).max) revert E2();
     address recipient = address(uint160(uint256(params.receivingEntity)));
     if (meta.tokenType == TypeERC721 && params.amount != 1) revert E1();
@@ -731,13 +779,15 @@ contract Depository is ReentrancyGuardLite {
     } else if (meta.tokenType == TypeERC1155) {
       IERC1155(meta.contractAddress).safeTransferFrom(address(this), recipient, uint(meta.externalTokenId), params.amount, "");
     }
+    return true;
   }
   // ReserveToReserve struct is in Types.sol
-  function _reserveToReserve(bytes32 entity, ReserveToReserve memory params) internal {
+  function _reserveToReserve(bytes32 entity, ReserveToReserve memory params) internal returns (bool) {
     enforceDebts(entity, params.tokenId, DEBT_ENFORCEMENT_CHUNK);
-    if (params.amount > _spendableReserve(entity, params.tokenId)) revert E3();
+    if (params.amount > _spendableReserve(entity, params.tokenId)) return false;
     _decreaseReserve(entity, params.tokenId, params.amount);
     _increaseReserve(params.receivingEntity, params.tokenId, params.amount);
+    return true;
   }
 
   // FIFO debt enforcement. `maxIterations == 0` drains without a slot cap.
@@ -812,6 +862,14 @@ contract Depository is ReentrancyGuardLite {
     // debts must be paid before any transfers from reserve 
     enforceDebts(entity, tokenId, DEBT_ENFORCEMENT_CHUNK);
 
+    uint256 totalAmount = 0;
+    for (uint i = 0; i < params.pairs.length; i++) {
+      uint256 amount = params.pairs[i].amount;
+      if (amount > uint256(type(int256).max)) revert E8();
+      totalAmount += amount;
+    }
+    if (totalAmount > _spendableReserve(entity, tokenId)) return false;
+
     for (uint i = 0; i < params.pairs.length; i++) {
       bytes32 counterentity = params.pairs[i].entity;
       uint amount = params.pairs[i].amount;
@@ -819,10 +877,8 @@ contract Depository is ReentrancyGuardLite {
       bytes memory acct_key = accountKey(receivingEntity, counterentity);
 
       
-      if (amount > _spendableReserve(entity, tokenId)) return false;
         AccountCollateral storage col = _collaterals[acct_key][tokenId];
         int256 signedAmount = int256(amount);
-        if (signedAmount < 0) revert E8();
 
         _decreaseReserve(entity, tokenId, amount);
         col.collateral += amount;

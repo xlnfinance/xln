@@ -44,6 +44,7 @@ export const CANONICAL_J_EVENTS = [
   'ReserveUpdated', 'SecretRevealed', 'AccountSettled',
   'ExternalWalletSnapshot', 'ExternalWalletDelta',
   'DisputeStarted', 'DisputeFinalized', 'DebtCreated', 'DebtEnforced', 'DebtForgiven', 'HankoBatchProcessed',
+  'BatchOperationSkipped',
   'EntityProviderActionExecuted', 'EntityProviderActionCancelled',
 ] as const;
 export type CanonicalJEvent = (typeof CANONICAL_J_EVENTS)[number];
@@ -586,6 +587,9 @@ export function isEventRelevantToEntity(event: RawJEvent, entityId: string): boo
     case 'HankoBatchProcessed':
       return normalize(args['entityId']) === normalizedEntity;
 
+    case 'BatchOperationSkipped':
+      return normalize(args['entityId']) === normalizedEntity;
+
     case 'EntityProviderActionExecuted':
     case 'EntityProviderActionCancelled':
       return normalize(args['entityId']) === normalizedEntity;
@@ -967,6 +971,28 @@ function rawEventToJEventPayloads(event: RawJEvent, entityId: string): Jurisdict
           success: Boolean(args['success']),
         },
       }];
+
+    case 'BatchOperationSkipped': {
+      const operationType = Number(args['operationType']);
+      const reason = Number(args['reason']);
+      if (!Number.isSafeInteger(operationType) || operationType < 0 || operationType > 4) {
+        throw new Error(`J_EVENT_BATCH_OPERATION_TYPE_INVALID:${String(args['operationType'])}`);
+      }
+      if (reason !== 0) {
+        throw new Error(`J_EVENT_BATCH_SKIP_REASON_INVALID:${String(args['reason'])}`);
+      }
+      return [{
+        type: 'BatchOperationSkipped',
+        data: {
+          entityId: String(args['entityId'] ?? ''),
+          batchHash: String(args['batchHash'] ?? ''),
+          nonce: Number(args['nonce']),
+          operationType: operationType as 0 | 1 | 2 | 3 | 4,
+          operationIndex: Number(args['operationIndex']),
+          reason: 0,
+        },
+      }];
+    }
 
     case 'EntityProviderActionExecuted': {
       const actionKind = Number(args['actionKind']);
