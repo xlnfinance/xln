@@ -104,12 +104,23 @@ ensure_clean_worktree_for_push() {
   fi
 }
 
+ensure_committed_contract_artifacts() {
+  local changes
+  changes="$(git status --short -- frontend/static/contracts jurisdictions/artifacts jurisdictions/typechain-types)"
+  if [ -n "$changes" ]; then
+    echo "CONTRACT_ARTIFACTS_NOT_COMMITTED" >&2
+    printf '%s\n' "$changes" >&2
+    exit 1
+  fi
+}
+
 build_remote_frontend_archive() {
   local deploy_build_number
   deploy_build_number="$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
   echo "[deploy] building production frontend locally: $deploy_build_number"
   bun install --frozen-lockfile
   ./scripts/sync-contract-artifacts.sh
+  ensure_committed_contract_artifacts
   ./scripts/build-runtime.sh
   (
     cd frontend
@@ -1013,8 +1024,12 @@ run_local_deploy() {
   echo "[deploy] installing root dependencies"
   bun install --frozen-lockfile
 
-  echo "[deploy] syncing contract artifacts"
-  ./scripts/sync-contract-artifacts.sh
+  if [ "${XLN_DEPLOY_USE_COMMITTED_CONTRACTS:-0}" = "1" ]; then
+    echo "[deploy] using committed contract artifacts"
+  else
+    echo "[deploy] syncing contract artifacts"
+    ./scripts/sync-contract-artifacts.sh
+  fi
 
   echo "[deploy] building browser runtime bundle"
   ./scripts/build-runtime.sh
@@ -1172,8 +1187,6 @@ if [ -n "$REMOTE_HOST" ]; then
   if [ "$PUSH" = "1" ]; then
     ensure_main_branch_for_push
     ensure_clean_worktree_for_push
-    echo "[deploy] pushing main to origin"
-    git push origin main
   fi
 
   ORIGIN_URL="$(git remote get-url origin 2>/dev/null || printf '%s' 'https://github.com/xlnfinance/xln.git')"
@@ -1192,6 +1205,11 @@ if [ -n "$REMOTE_HOST" ]; then
     echo "[deploy] uploading prebuilt frontend to $REMOTE_HOST"
     scp "$PREBUILT_FRONTEND_ARCHIVE" "$REMOTE_HOST:$remote_frontend_archive"
   fi
+  if [ "$PUSH" = "1" ]; then
+    ensure_clean_worktree_for_push
+    echo "[deploy] pushing main to origin"
+    git push origin main
+  fi
 
   # Remote deploy keeps the checkout self-healing. Frontend compilation happens on the
   # caller so Vite cannot OOM-kill live Anvil processes on the production host.
@@ -1206,7 +1224,7 @@ if [ -n "$REMOTE_HOST" ]; then
   if [ "$FRONTEND_ONLY" = "1" ]; then
     remote_cmd="$remote_cmd test -s frontend/build/index.html; echo '[deploy] frontend artifact installed without runtime restart';"
   else
-    remote_cmd="$remote_cmd ./deploy.sh --runtime-only"
+    remote_cmd="$remote_cmd XLN_DEPLOY_USE_COMMITTED_CONTRACTS=1 ./deploy.sh --runtime-only"
     if [ "$FRESH" = "1" ]; then
       remote_cmd="$remote_cmd --fresh"
     fi

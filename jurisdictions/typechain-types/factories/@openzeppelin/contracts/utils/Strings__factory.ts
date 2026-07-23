@@ -31,10 +31,20 @@ const _abi = [
     name: "StringsInsufficientHexLength",
     type: "error",
   },
+  {
+    inputs: [],
+    name: "StringsInvalidAddressFormat",
+    type: "error",
+  },
+  {
+    inputs: [],
+    name: "StringsInvalidChar",
+    type: "error",
+  },
 ] as const;
 
 const _bytecode =
-  "0x60808060405234601757603a9081601d823930815050f35b600080fdfe600080fdfea264697066735822122009f8fa5176b4adf015222358cb87a2eac6b6e500a1187460dbbe9a2f52cce26b64736f6c63430008180033";
+  "0x60808060405234601757603a9081601d823930815050f35b600080fdfe600080fdfea26469706673582212207e2a91b4e60851c618e13c31c731e47b51cc940c7631dfe467b1d62f0da0c01e64736f6c63430008180033";
 
 type StringsConstructorParams =
   | [signer?: Signer]

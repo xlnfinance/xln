@@ -176,12 +176,15 @@ describe('production startup wiring', () => {
     };
 
     expect(deploy).toContain('build_remote_frontend_archive');
+    expect(deploy).toContain('ensure_committed_contract_artifacts');
+    expect(deploy).toContain('CONTRACT_ARTIFACTS_NOT_COMMITTED');
     expect(deploy).toContain(
       'COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -C frontend -czf "$PREBUILT_FRONTEND_ARCHIVE" build',
     );
     expect(deploy).toContain('scp "$PREBUILT_FRONTEND_ARCHIVE" "$REMOTE_HOST:$remote_frontend_archive"');
     expect(deploy).toContain("tar -xzf '$remote_frontend_archive' -C frontend");
-    expect(deploy).toContain('remote_cmd="$remote_cmd ./deploy.sh --runtime-only"');
+    expect(deploy).toContain('remote_cmd="$remote_cmd XLN_DEPLOY_USE_COMMITTED_CONTRACTS=1 ./deploy.sh --runtime-only"');
+    expect(deploy).toContain('if [ "${XLN_DEPLOY_USE_COMMITTED_CONTRACTS:-0}" = "1" ]');
     expect(deploy).toContain('PRODUCTION_FRONTEND_BUILD_FORBIDDEN');
     expect(deploy).not.toContain('remote_cmd="$remote_cmd --frontend"');
     expect(deploy).toContain("frontend artifact installed without runtime restart");
