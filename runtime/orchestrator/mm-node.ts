@@ -70,6 +70,7 @@ import {
   hasCommittedAccountState,
   isCanonicalAccountOpener,
   isAccountConsensusReady,
+  serializeAccountDelta,
   settleRuntimeFor,
   sleep,
   summarizeRuntimeQuiescence,
@@ -3713,6 +3714,7 @@ const run = async (): Promise<void> => {
         tokenId,
         hasDelta: Boolean(account?.deltas?.has(tokenId)),
         outCapacity: account ? getEntityOutCapacity(account, entityId, tokenId).toString() : '0',
+        delta: serializeAccountDelta(account?.deltas?.get(tokenId)),
       })),
       runtime: {
         height: Number(env.height ?? 0),

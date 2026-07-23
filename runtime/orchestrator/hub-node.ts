@@ -129,6 +129,7 @@ import {
   hasQueuedOpenAccount,
   hasPairMutualCredits,
   isCanonicalAccountOpener,
+  serializeAccountDelta,
   settleRuntimeFor,
   sleep,
   summarizeRuntimeQuiescence,
@@ -1806,6 +1807,7 @@ const run = async (): Promise<void> => {
             tokenId,
             hasDelta: Boolean(account?.deltas?.has(tokenId)),
             hubOutCapacity: account ? getEntityOutCapacity(account, hubEntityId, tokenId).toString() : '0',
+            delta: serializeAccountDelta(account?.deltas?.get(tokenId)),
           })),
           runtime: {
             height: Number(env.height ?? 0),
