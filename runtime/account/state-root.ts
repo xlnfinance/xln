@@ -337,6 +337,16 @@ export const computeAccountStateSectionHashes = (
   ]),
 );
 
+/** Cold section oracle used only for fail-fast diagnostics and cache audits. */
+export const computeAccountStateSectionHashesCold = (
+  account: AccountMachine,
+): AccountStateSectionHashes => Object.fromEntries(
+  accountStateRootEntries(account, true).map(([path, value]) => [
+    path,
+    computeIntegrityDigest(encodeAccountStateValue(value)),
+  ]),
+);
+
 export const computeAccountStateRoot = (
   account: AccountMachine,
   timing?: AccountStateRootTiming,

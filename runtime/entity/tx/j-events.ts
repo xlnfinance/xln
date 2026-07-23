@@ -69,6 +69,7 @@ import {
   markBoardRotationResealsPending,
 } from './board-rotation-reseal';
 import { validateJEventRangeEnvelope } from '../../jurisdiction/j-event-range-validation';
+import { invalidateAccountMapCommitment } from '../../account/map-commitment';
 
 const jEventLog = createStructuredLogger('j.event');
 const normalizeSignerId = (value: unknown): string => String(value || '').trim().toLowerCase();
@@ -359,6 +360,9 @@ const clearDisputeSettledDeltas = (
   for (const tokenId of finalizedTokenIds) {
     const delta = account.deltas.get(tokenId);
     if (!delta) continue;
+    const changed = delta.collateral !== 0n || delta.ondelta !== 0n || delta.offdelta !== 0n ||
+      delta.leftHold !== 0n || delta.rightHold !== 0n ||
+      delta.leftAllowance !== 0n || delta.rightAllowance !== 0n;
     delta.collateral = 0n;
     delta.ondelta = 0n;
     delta.offdelta = 0n;
@@ -366,6 +370,7 @@ const clearDisputeSettledDeltas = (
     delta.rightHold = 0n;
     delta.leftAllowance = 0n;
     delta.rightAllowance = 0n;
+    if (changed) invalidateAccountMapCommitment(account, 'deltas', tokenId);
   }
 };
 
@@ -656,9 +661,11 @@ function applyDisputeFinalizedJEvent(
   // Drop off-chain intents from pre-dispute epoch.
   if (account.swapOffers.size > 0) {
     account.swapOffers.clear();
+    invalidateAccountMapCommitment(account, 'swapOffers');
   }
   if (account.locks.size > 0) {
     account.locks.clear();
+    invalidateAccountMapCommitment(account, 'locks');
   }
   // Keep exact bodies/snapshots alive through salvage and token cleanup above,
   // then retire the whole consumed epoch. A later bilateral frame can create a

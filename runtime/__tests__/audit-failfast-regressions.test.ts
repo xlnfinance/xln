@@ -9,7 +9,7 @@ import {
   proposeAccountFrame,
   validateAccountFrame,
 } from '../account/consensus/index';
-import { computeAccountStateRoot } from '../account/state-root';
+import { computeAccountStateRoot, computeAccountStateRootCold } from '../account/state-root';
 import { resolveCertifiedAccountCounterpartyProposer } from '../account/counterparty-route';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account/crypto';
@@ -6408,6 +6408,9 @@ describe('audit fail-fast regressions', () => {
       initialNonce: 7,
       finalizeQueued: true,
     } as AccountMachine['activeDispute'];
+    // Prime the incremental trie before the jurisdiction event mutates the
+    // same Delta objects in place. Dispute finalization must invalidate it.
+    computeAccountStateRoot(account);
     state.accounts.set(counterpartyId, account);
     state.jBatchState = {
       batch: {
@@ -6509,6 +6512,9 @@ describe('audit fail-fast regressions', () => {
     expect(finalizedDelta?.leftAllowance).toBe(0n);
     expect(finalizedDelta?.rightAllowance).toBe(0n);
     expect(finalized.newState.accounts.get(counterpartyId)?.jNonce).toBe(8);
+    const finalizedAccount = finalized.newState.accounts.get(counterpartyId);
+    if (!finalizedAccount) throw new Error('FINALIZED_ACCOUNT_MISSING');
+    expect(computeAccountStateRoot(finalizedAccount)).toBe(computeAccountStateRootCold(finalizedAccount));
 
     const failedBatchEvent: JurisdictionEvent = {
       type: 'HankoBatchProcessed',

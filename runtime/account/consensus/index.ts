@@ -55,6 +55,7 @@ import {
   computeAccountStateRoot,
   computeAccountStateRootCold,
   computeAccountStateSectionHashes,
+  computeAccountStateSectionHashesCold,
 } from '../state-root';
 import {
   commitStagedAccountCommitmentCache,
@@ -93,6 +94,7 @@ const assertLiveCommitMatchesFrame = (
   expectedRoot: string,
   side: 'proposer' | 'receiver',
   height: number,
+  validatedMachine?: AccountMachine,
 ): void => {
   const incrementalRoot = computeAccountStateRoot(accountMachine);
   const coldRoot = computeAccountStateRootCold(accountMachine);
@@ -103,7 +105,22 @@ const assertLiveCommitMatchesFrame = (
     expectedRoot,
     incrementalRoot,
     coldRoot,
-    sectionHashes: computeAccountStateSectionHashes(accountMachine),
+    incrementalSectionHashes: computeAccountStateSectionHashes(accountMachine),
+    coldSectionHashes: computeAccountStateSectionHashesCold(accountMachine),
+    liveFinancial: {
+      deltas: Array.from(accountMachine.deltas.entries()),
+      globalCreditLimits: accountMachine.globalCreditLimits,
+      jNonce: accountMachine.jNonce,
+      disputeConfig: accountMachine.disputeConfig,
+    },
+    ...(validatedMachine ? {
+      validatedFinancial: {
+        deltas: Array.from(validatedMachine.deltas.entries()),
+        globalCreditLimits: validatedMachine.globalCreditLimits,
+        jNonce: validatedMachine.jNonce,
+        disputeConfig: validatedMachine.disputeConfig,
+      },
+    } : {}),
   };
   accountLog.error('frame.live_commit_root_mismatch', details);
   throw new Error(`ACCOUNT_LIVE_COMMIT_ROOT_MISMATCH:${safeStringify(details)}`);
@@ -1525,6 +1542,7 @@ async function commitIncomingFrameOnRealState(
     receivedFrame.accountStateRoot,
     'receiver',
     receivedFrame.height,
+    validation.clonedMachine,
   );
 
   accountLog.debug('frame.commit.complete', {
