@@ -18,6 +18,7 @@ import {
 
 import { normalizeEntityId } from '../entity/id';
 import { getBatchSize, isBatchEmpty } from '../jurisdiction/batch';
+import { assertSealedJBatchBinding } from '../jurisdiction/sealed-batch';
 import type { BrowserVMState, Env, JTx, RuntimeTx } from '../types';
 import {
   CANONICAL_J_EVENTS,
@@ -466,6 +467,16 @@ export async function createBrowserVMAdapter(
     },
 
     async submitTx(jTx: JTx, options: { env: Env; signerId?: string; signerPrivateKey?: Uint8Array; timestamp?: number }): Promise<JSubmitResult> {
+      if (jTx.type === 'batch') {
+        try {
+          assertSealedJBatchBinding(jTx, {
+            chainId: config.chainId,
+            depositoryAddress: addresses.depository,
+          });
+        } catch (error) {
+          return makeJAdapterFailureResult(error);
+        }
+      }
       if (typeof options.timestamp === 'number') browserVM.setBlockTimestamp(options.timestamp);
 
       if (jTx.type === 'mint') {
@@ -535,31 +546,20 @@ export async function createBrowserVMAdapter(
         const batchData = jTx.data;
         const batch = batchData.batch;
         if (isBatchEmpty(batch)) return { success: true };
-        if (!batchData.hankoSignature || !batchData.encodedBatch || typeof batchData.entityNonce !== 'number') {
-          const missing = [
-            batchData.hankoSignature ? '' : 'hankoSignature',
-            batchData.encodedBatch ? '' : 'encodedBatch',
-            typeof batchData.entityNonce === 'number' ? '' : 'entityNonce',
-          ].filter(Boolean).join(',');
-          return {
-            success: false,
-            error: `J_BATCH_CONSENSUS_HANKO_MISSING:${normalizeEntityId(jTx.entityId)}:missing=${missing || 'unknown'}`,
-          };
-        }
 
         try {
           const externalBatch = batch.externalTokenToReserve.length > 0;
           const rawEvents = externalBatch && options.signerPrivateKey
             ? await browserVM.processBatchAs(
-                batchData.encodedBatch,
-                batchData.hankoSignature,
-                BigInt(batchData.entityNonce),
+                batchData.encodedBatch!,
+                batchData.hankoSignature!,
+                BigInt(batchData.entityNonce!),
                 options.signerPrivateKey,
               )
             : await browserVM.processBatch(
-                batchData.encodedBatch,
-                batchData.hankoSignature,
-                BigInt(batchData.entityNonce),
+                batchData.encodedBatch!,
+                batchData.hankoSignature!,
+                BigInt(batchData.entityNonce!),
               );
           const events = toJEvents(rawEvents);
           const receipt = receiptFromEvents(events);
