@@ -1,6 +1,6 @@
 {
   "name": "xlnfinance",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "description": "Local xln runtime daemon and browser wallet launcher.",
   "license": "AGPL-3.0",
   "type": "module",
