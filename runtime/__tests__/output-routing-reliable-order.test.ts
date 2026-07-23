@@ -805,6 +805,37 @@ describe('ordered reliable output lanes', () => {
     expect((env.pendingNetworkOutputs ?? []).map(reliableOrder)).toEqual([12]);
   });
 
+  test('an unbound deterministic ACK reissue cannot erase its durable receiver binding', () => {
+    const receiver = createEmptyEnv('bound-account-ack-reissue-receiver');
+    receiver.runtimeId = deriveSignerAddressSync(
+      'bound-account-ack-reissue-receiver',
+      '1',
+    ).toLowerCase();
+    registerSignerKey(
+      receiver,
+      receiver.runtimeId,
+      deriveSignerKeySync('bound-account-ack-reissue-receiver', '1'),
+    );
+    const bound = { ...accountAckOutput(42), runtimeId: receiver.runtimeId };
+    const { runtimeId: _runtimeId, ...unbound } = bound;
+    const identity = getReliableOutputIdentity(bound);
+    if (!identity) throw new Error('TEST_ACCOUNT_ACK_H42_IDENTITY_MISSING');
+    const receipt = createReliableDeliveryReceipt(receiver, identity, 'terminal');
+
+    for (const outputs of [[bound, unbound], [unbound, bound]]) {
+      const pendingNetworkOutputs = buildPendingNetworkOutputs(outputs);
+      expect(pendingNetworkOutputs).toHaveLength(1);
+      expect(pendingNetworkOutputs[0]?.runtimeId).toBe(receiver.runtimeId);
+      const sender = {
+        runtimeId: runtimeId('90'),
+        runtimeState: {},
+        pendingNetworkOutputs,
+      } as unknown as Env;
+      expect(applyReliableDeliveryReceipts(sender, [receipt])).toEqual({ removed: 1 });
+      expect(sender.pendingNetworkOutputs).toEqual([]);
+    }
+  });
+
   test('a delayed Account ACK H9 does not receipt-gate the causally proven H10 ACK', () => {
     const attempted: number[] = [];
     const env = {

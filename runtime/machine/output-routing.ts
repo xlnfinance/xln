@@ -925,6 +925,27 @@ export const mergeRoutedEntityOutput = <T extends RoutedEntityInput>(existing: T
     ) {
       throw new Error('ROUTE_RELIABLE_IDENTITY_MISMATCH');
     }
+    const existingRuntimeId = normalizeRuntimeId(existing.runtimeId);
+    const incomingRuntimeId = normalizeRuntimeId(incoming.runtimeId);
+    if (
+      existingRuntimeId &&
+      incomingRuntimeId &&
+      existingRuntimeId !== incomingRuntimeId
+    ) {
+      throw new Error(
+        `ROUTE_RELIABLE_RUNTIME_BINDING_CONFLICT:${existingReliable.kind}:${existingReliable.order}`,
+      );
+    }
+    // runtimeId is transport binding, not reliable evidence. Deterministic
+    // Entity replay can re-materialize the same signed output without that
+    // binding. Never let canonical payload selection erase the already
+    // verified destination: a receiver can then return an exact signed receipt
+    // that the restored sender cannot associate with its durable outbox.
+    const retainedRuntimeId = existingRuntimeId || incomingRuntimeId;
+    const retainRuntimeBinding = (output: T): T => {
+      if (retainedRuntimeId) output.runtimeId = retainedRuntimeId;
+      return output;
+    };
 
     if (existingReliable.kind === 'hash-precommit') {
       const normalizePrecommits = (
@@ -956,18 +977,22 @@ export const mergeRoutedEntityOutput = <T extends RoutedEntityInput>(existing: T
       existing.hashPrecommits = new Map(
         [...mergedPrecommits.entries()].sort(([left], [right]) => compareStableText(left, right)),
       );
-      return existing;
+      return retainRuntimeBinding(existing);
     }
 
     if (existingReliable.kind === 'entity-frame') {
       const existingIsCommit = carriesEntityCommitNotification(existing);
       const incomingIsCommit = carriesEntityCommitNotification(incoming);
       if (existingIsCommit !== incomingIsCommit) {
-        return incomingIsCommit ? overwriteRoutedEntityOutput(existing, incoming) : existing;
+        return retainRuntimeBinding(
+          incomingIsCommit ? overwriteRoutedEntityOutput(existing, incoming) : existing,
+        );
       }
     }
     const canonical = selectCanonicalReliableOutput(existing, incoming);
-    return canonical === existing ? existing : overwriteRoutedEntityOutput(existing, incoming);
+    return retainRuntimeBinding(
+      canonical === existing ? existing : overwriteRoutedEntityOutput(existing, incoming),
+    );
   }
 
   const existingAccountProposal = accountProposalOutputIdentity(existing);
