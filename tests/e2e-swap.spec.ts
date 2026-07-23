@@ -198,8 +198,14 @@ async function expectSwapTokens(page: Page, expected: { fromSymbol: string; toSy
   const toTokenId = SWAP_TOKEN_BY_SYMBOL[expected.toSymbol.toUpperCase()];
   expect(fromTokenId, `unsupported expected from token ${expected.fromSymbol}`).toBeTruthy();
   expect(toTokenId, `unsupported expected to token ${expected.toSymbol}`).toBeTruthy();
-  await expect(page.getByTestId('swap-from-token-label').first()).toHaveText(expected.fromSymbol, { timeout: 10_000 });
-  await expect(page.getByTestId('swap-to-token-label').first()).toHaveText(expected.toSymbol, { timeout: 10_000 });
+  await expect(page.getByTestId('swap-from-token-label').first()).toHaveText(
+    `${expected.fromSymbol} (Testnet)`,
+    { timeout: 10_000 },
+  );
+  await expect(page.getByTestId('swap-to-token-label').first()).toHaveText(
+    `${expected.toSymbol} (Testnet)`,
+    { timeout: 10_000 },
+  );
 }
 
 async function ensureSwapScope(page: Page, desired: 'aggregated' | 'selected'): Promise<void> {
