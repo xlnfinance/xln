@@ -123,7 +123,7 @@ import {
   buildJSubmitAttemptId,
   registerPendingCommittedJOutbox,
 } from '../machine/j-submit-state';
-import { safeStringify } from '../protocol/serialization';
+import { buffersEqual, safeStringify } from '../protocol/serialization';
 import type { ProofBodyStruct } from '../protocol/dispute/proof-body';
 import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/projections';
 import { validateStorageAccountDocValue } from '../storage/authoritative-schema';
@@ -6323,6 +6323,132 @@ describe('audit fail-fast regressions', () => {
       { type: 'add_delta', data: { tokenId: 2 } },
     ]);
     expect(rightAccount.rollbackCount).toBe(1);
+  });
+
+  test('deadline rejection preserves the complete live Account and warmed commitment cache', async () => {
+    const seed = 'deadline-rejection-complete-account-atomicity';
+    const env = createEmptyEnv(seed);
+    env.quietRuntimeLogs = true;
+    env.timestamp = 10_000;
+    env.browserVM = { getDepositoryAddress: () => hex20('dd') } as typeof env.browserVM;
+
+    const first = registerLazySigner(seed, '1');
+    const second = registerLazySigner(seed, '2');
+    const left = isLeftEntity(first.entityId, second.entityId) ? first : second;
+    const right = left === first ? second : first;
+    attachSigningReplica(env, left.entityId, left.signerId);
+    attachSigningReplica(env, right.entityId, right.signerId);
+
+    const receiver = makeProposalAccount(
+      [{ type: 'add_delta', data: { tokenId: 2 } }],
+      left.entityId,
+      right.entityId,
+    );
+    receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
+    receiver.deltas.set(1, {
+      ...createDefaultDelta(1),
+      rightCreditLimit: 100n,
+      rightHold: 5n,
+    });
+    receiver.locks.set('existing-lock', {
+      lockId: 'existing-lock',
+      hashlock: `0x${'31'.repeat(32)}`,
+      timelock: 100_000n,
+      revealBeforeHeight: 100,
+      amount: 5n,
+      tokenId: 1,
+      senderIsLeft: false,
+      createdHeight: 0,
+      createdTimestamp: 0,
+    });
+    receiver.swapOffers.set('existing-offer', {
+      offerId: 'existing-offer',
+      giveTokenId: 1,
+      giveAmount: 7n,
+      wantTokenId: 2,
+      wantAmount: 9n,
+      makerIsLeft: false,
+      createdHeight: 0,
+    });
+
+    const localPending = await proposeAccountFrame(env, receiver, env.timestamp);
+    if (!localPending.success || !localPending.accountInput) {
+      throw new Error(`TEST_LOCAL_PENDING_PROPOSAL_FAILED:${localPending.error ?? 'missing input'}`);
+    }
+    const beforeBytes = encodeBuffer(projectAccountDoc(receiver));
+    const beforeState = safeStringify(receiver);
+    const beforeRoot = computeAccountStateRoot(receiver);
+    expect(computeAccountStateRootCold(receiver)).toBe(beforeRoot);
+
+    const opaqueOffer = {
+      version: 'xln:htlc-multi-recipient:v1',
+      manifest: {
+        entityId: right.entityId,
+        threshold: 0,
+        attestations: [],
+        hash: `0x${'41'.repeat(32)}`,
+      },
+      profileCertification: {
+        profileHash: `0x${'42'.repeat(32)}`,
+        routingStateHash: `0x${'43'.repeat(32)}`,
+        hanko: `0x${'44'.repeat(65)}`,
+      },
+      contextHash: `0x${'45'.repeat(32)}`,
+      nonce: 'AAAAAAAAAAAAAAAA',
+      ciphertext: 'AAAA',
+      recipients: [],
+    } as MultiRecipientCiphertext;
+    const frame: AccountFrame = {
+      height: 1,
+      timestamp: env.timestamp,
+      jHeight: 0,
+      accountTxs: [{
+        type: 'htlc_resolve',
+        data: { lockId: 'existing-lock', outcome: 'offer', offer: opaqueOffer },
+      }, {
+        type: 'htlc_lock',
+        data: {
+          lockId: 'unsafe-lock',
+          hashlock: `0x${'51'.repeat(32)}`,
+          timelock: BigInt(env.timestamp + HTLC_ENFORCEMENT_RESERVE_MS),
+          revealBeforeHeight: 100,
+          amount: 1n,
+          tokenId: 1,
+        },
+      }],
+      prevFrameHash: 'genesis',
+      accountStateRoot: `0x${'00'.repeat(32)}`,
+      stateHash: '',
+      byLeft: true,
+      deltas: [],
+    };
+    frame.stateHash = await createFrameHash(frame);
+    const [frameHanko] = await signEntityHashes(env, left.entityId, left.signerId, [frame.stateHash]);
+    const rejected = await applyAccountInput(env, receiver, {
+      kind: 'frame',
+      fromEntityId: left.entityId,
+      toEntityId: right.entityId,
+      proposal: { frame, frameHanko: frameHanko! },
+    }, {
+      entityTimestamp: env.timestamp,
+      finalizedJHeight: 0,
+    });
+
+    expect(rejected.success).toBe(false);
+    expect(rejected.error).toContain('HTLC_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT');
+    expect(safeStringify(receiver)).toBe(beforeState);
+    expect(buffersEqual(encodeBuffer(projectAccountDoc(receiver)), beforeBytes)).toBeTrue();
+    expect(receiver.pendingFrame).toEqual(localPending.accountInput.proposal.frame);
+    expect(receiver.pendingAccountInput).toEqual(localPending.accountInput);
+    expect(receiver.mempool).toEqual([]);
+    expect(receiver.locks.get('existing-lock')?.secretOffer).toBeUndefined();
+    expect(receiver.swapOffers.get('existing-offer')?.giveAmount).toBe(7n);
+    const afterTiming: Parameters<typeof computeAccountStateRoot>[1] = {};
+    expect(computeAccountStateRoot(receiver, afterTiming)).toBe(beforeRoot);
+    expect(computeAccountStateRootCold(receiver)).toBe(beforeRoot);
+    for (const namespace of ['deltas', 'locks', 'swapOffers']) {
+      expect(afterTiming.mapStatus?.[namespace]).toMatchObject({ mode: 'cached', dirtyKeys: 0 });
+    }
   });
 
   test('Entity flush re-sends LEFT winning proposal after simultaneous-frame collision', async () => {

@@ -408,7 +408,7 @@ export const computeAccountStateRoot = (
     };
     if (timing) Object.assign(timing, profileRecord);
     if (isRuntimePerfProfileEnabled('XLN_ACCOUNT_STATE_ROOT_PROFILE', 'XLN_RUNTIME_PROCESS_PROFILE')) {
-      accountRootLog.warn('profile', {
+      accountRootLog.info('profile', {
         account: `${account.leftEntity.slice(-8)}:${account.rightEntity.slice(-8)}`,
         ...profileRecord,
       });

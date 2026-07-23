@@ -11,6 +11,9 @@ import {
   deriveSignerKeySync,
   signAccountFrame,
 } from '../../account/crypto';
+import { createEmptyAccountJClaimAccumulator } from '../../account/j-claim-accumulator';
+import { EMPTY_ACCOUNT_STATE_ROOT } from '../../account/state-root';
+import { deriveAccountWatchSeed } from '../../account/watch-seed';
 import { createEntityFrameHashFromStateRoot } from '../../entity/consensus/frame';
 import { getEntityLeaderState } from '../../entity/consensus/leader';
 import { generateLazyEntityId } from '../../entity/factory';
@@ -30,7 +33,8 @@ import {
   computeEntityFrameAuthorityRoot,
 } from '../../entity/consensus/state-root';
 import type { StoragePersistenceBoundary } from '../../storage';
-import type { CertifiedEntityFrameLink, JReplica, JurisdictionConfig } from '../../types';
+import type { AccountMachine, CertifiedEntityFrameLink, JReplica, JurisdictionConfig } from '../../types';
+import { createDefaultDelta } from '../../validation-utils';
 
 const [seed, requestedBoundary] = Bun.argv.slice(2);
 if (!seed || !requestedBoundary) throw new Error('seed and restore boundary are required');
@@ -92,6 +96,59 @@ enqueueRuntimeInput(env, {
 await processRuntime(env, []);
 const replica = Array.from(env.eReplicas.values())[0];
 if (!replica) throw new Error('restore import crash replica missing');
+const counterpartyId = `0x${'ff'.repeat(32)}`;
+const [leftEntity, rightEntity] = [entityId, counterpartyId].sort() as [string, string];
+const oversizedAccount: AccountMachine = {
+  leftEntity,
+  rightEntity,
+  domain: {
+    chainId: jurisdiction.chainId,
+    depositoryAddress: jurisdiction.depositoryAddress,
+  },
+  watchSeed: deriveAccountWatchSeed({
+    runtimeSeed: seed,
+    entityId,
+    counterpartyId,
+    timestamp: 0,
+  }),
+  status: 'active',
+  mempool: [],
+  currentFrame: {
+    height: 0,
+    timestamp: 0,
+    jHeight: 0,
+    accountTxs: [],
+    prevFrameHash: '',
+    accountStateRoot: EMPTY_ACCOUNT_STATE_ROOT,
+    deltas: [],
+    stateHash: '',
+    byLeft: entityId === leftEntity,
+  },
+  deltas: new Map(Array.from({ length: 400 }, (_, tokenId) => {
+    const delta = createDefaultDelta(tokenId);
+    delta.offdelta = BigInt(tokenId);
+    return [tokenId, delta];
+  })),
+  locks: new Map(),
+  swapOffers: new Map(),
+  pulls: new Map(),
+  globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+  currentHeight: 0,
+  pendingSignatures: [],
+  rollbackCount: 0,
+  proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
+  proofBody: { tokenIds: [], deltas: [] },
+  disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
+  jNonce: 0,
+  pendingWithdrawals: new Map(),
+  requestedRebalance: new Map(),
+  requestedRebalanceFeeState: new Map(),
+  shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
+  leftPendingJClaims: createEmptyAccountJClaimAccumulator(),
+  rightPendingJClaims: createEmptyAccountJClaimAccumulator(),
+  lastFinalizedJHeight: 0,
+};
+replica.state.accounts.set(counterpartyId, oversizedAccount);
 const consumptionIdentity = (height: number) => ({
   targetEntityId: entityId,
   sourceEntityId: `0x${'22'.repeat(32)}`,

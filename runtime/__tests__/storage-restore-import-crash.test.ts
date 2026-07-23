@@ -75,6 +75,10 @@ describe('restored checkpoint atomic publication', () => {
         ));
         expect(replica?.lastConsensusProgressAt).toBe(expectedHeight * 1_000);
         expect(replica?.state.consumptionAccumulator?.count).toBe(1n);
+        const oversizedAccount = replica?.state.accounts.get(`0x${'ff'.repeat(32)}`);
+        expect(oversizedAccount?.deltas.size).toBe(400);
+        expect(oversizedAccount?.deltas.get(0)?.offdelta).toBe(0n);
+        expect(oversizedAccount?.deltas.get(399)?.offdelta).toBe(399n);
         const firstIdentity = {
           targetEntityId: entityId,
           sourceEntityId: `0x${'22'.repeat(32)}`,

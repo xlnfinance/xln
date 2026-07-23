@@ -1097,7 +1097,8 @@ describe('runtime output routing', () => {
       resolveRuntimeIdForEntity: () => targetRuntimeId,
       resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
     });
-    expect(warnings).toEqual(['ROUTE_SEND_DEFERRED']);
+    expect(warnings).toEqual([]);
+    expect(infos).toEqual(['ROUTE_SEND_DEFERRED', 'ROUTE_SEND_DEFERRED']);
   });
 
   test('defers when neither direct dispatch nor P2P is available', () => {

@@ -755,7 +755,6 @@ const NETWORK_RETRY_MAX_MS = 30_000;
 // every few seconds is cheap. Letting that head inherit the 30s best-effort
 // backoff can cross the bilateral liveness alarm during a normal peer restart.
 const RELIABLE_NETWORK_RETRY_MAX_MS = 4_000;
-const NETWORK_RETRY_WARNING_ATTEMPT = 4;
 const RESTORED_RELIABLE_OUTPUTS_DUE = Symbol('restored-reliable-outputs-due');
 
 type RestoredReliableDueEnv = Env & { [RESTORED_RELIABLE_OUTPUTS_DUE]?: true };
@@ -1070,10 +1069,9 @@ const reportRetryableRouteDefer = (
     reliableIdentity: getReliableOutputIdentity(output),
     txTypes: (output.entityTxs ?? []).map(tx => tx.type),
   });
-  if (attempts >= NETWORK_RETRY_WARNING_ATTEMPT) {
-    env.warn?.('network', 'ROUTE_SEND_DEFERRED', payload);
-    return;
-  }
+  // A deferred output remains durably queued and retryable. Repetition is
+  // backpressure telemetry, not a degraded-state verdict; terminal delivery
+  // failures are reported by their explicit terminal path.
   env.info?.('network', 'ROUTE_SEND_DEFERRED', payload);
 };
 

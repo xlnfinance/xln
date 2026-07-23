@@ -130,31 +130,61 @@ describe('typed Account persistence rebranching', () => {
     ).toString('hex'))).toBeFalse();
   });
 
-  test('rebranches an oversized financial collection and restores it exactly', async () => {
-    const raw = new MemoryDb();
-    const db = withRebranchedValues(raw);
-    const doc = accountDoc(true) as unknown as { deltas: Map<number, unknown> };
-    doc.deltas = new Map(Array.from({ length: 400 }, (_, index) => [
-      index,
-      { tokenId: index, marker: `delta-${index}-${'x'.repeat(80)}` },
-    ]));
-    const layout = await prepareAccountStorageLayout(
-      db,
-      entityId,
-      counterpartyId,
-      keyLiveAccount(entityId, counterpartyId),
-      doc as unknown as StorageAccountDoc,
-    );
-    await applyLayout(db, layout);
-    expect((await readAccountStorageLayout(
-      db,
-      entityId,
-      counterpartyId,
-      keyLiveAccount(entityId, counterpartyId),
-    ))?.doc).toEqual(doc);
-    expect(Math.max(...Array.from(raw.rows.values(), (value) => value.byteLength)))
-      .toBeLessThan(MAX_INLINE_STORAGE_VALUE_BYTES);
-    expect(Array.from(raw.rows.keys()).some((key) => Number.parseInt(key.slice(0, 2), 16) === KEY_REBRANCH_NODE))
-      .toBeTrue();
+  test('rebranches every oversized financial collection and restores it exactly', async () => {
+    const variants = [
+      {
+        field: 'deltas',
+        tag: STORAGE_ACCOUNT_FIELD_TAG.deltas,
+        value: new Map(Array.from({ length: 400 }, (_, index) => [
+          index,
+          { tokenId: index, marker: `delta-${index}-${'x'.repeat(80)}` },
+        ])),
+      },
+      {
+        field: 'locks',
+        tag: STORAGE_ACCOUNT_FIELD_TAG.locks,
+        value: new Map(Array.from({ length: 400 }, (_, index) => [
+          `lock-${index}`,
+          { lockId: `lock-${index}`, marker: `lock-${index}-${'y'.repeat(80)}` },
+        ])),
+      },
+      {
+        field: 'swapOffers',
+        tag: STORAGE_ACCOUNT_FIELD_TAG.swapOffers,
+        value: new Map(Array.from({ length: 400 }, (_, index) => [
+          `offer-${index}`,
+          { offerId: `offer-${index}`, marker: `offer-${index}-${'z'.repeat(80)}` },
+        ])),
+      },
+    ] as const;
+
+    for (const variant of variants) {
+      const raw = new MemoryDb();
+      const db = withRebranchedValues(raw);
+      const doc = accountDoc(false) as unknown as Record<string, unknown>;
+      doc[variant.field] = variant.value;
+      const layout = await prepareAccountStorageLayout(
+        db,
+        entityId,
+        counterpartyId,
+        keyLiveAccount(entityId, counterpartyId),
+        doc as unknown as StorageAccountDoc,
+      );
+      expect(layout.representation).toBe('fields');
+      expect(layout.puts.some((put) => put.key.equals(
+        keyLiveAccountField(entityId, counterpartyId, variant.tag),
+      ))).toBeTrue();
+      await applyLayout(db, layout);
+      expect((await readAccountStorageLayout(
+        db,
+        entityId,
+        counterpartyId,
+        keyLiveAccount(entityId, counterpartyId),
+      ))?.doc).toEqual(doc);
+      expect(Math.max(...Array.from(raw.rows.values(), (value) => value.byteLength)))
+        .toBeLessThan(MAX_INLINE_STORAGE_VALUE_BYTES);
+      expect(Array.from(raw.rows.keys()).some((key) => Number.parseInt(key.slice(0, 2), 16) === KEY_REBRANCH_NODE))
+        .toBeTrue();
+    }
   });
 });

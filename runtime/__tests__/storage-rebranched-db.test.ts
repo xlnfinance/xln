@@ -10,6 +10,7 @@ class MemoryDb implements RuntimeDbLike {
   readonly rows = new Map<string, Buffer>();
   putCount = 0;
   delCount = 0;
+  lastBatchOperations: Array<{ kind: 'put' | 'del'; key: string }> = [];
 
   async get(key: Buffer): Promise<Buffer> {
     const value = this.rows.get(key.toString('hex'));
@@ -27,6 +28,10 @@ class MemoryDb implements RuntimeDbLike {
       put: (key: Buffer, value: Buffer) => operations.push({ kind: 'put', key, value }),
       del: (key: Buffer) => operations.push({ kind: 'del', key }),
       write: async () => {
+        this.lastBatchOperations = operations.map((operation) => ({
+          kind: operation.kind,
+          key: operation.key.toString('hex'),
+        }));
         for (const operation of operations) {
           if (operation.kind === 'put') {
             this.putCount += 1;
@@ -131,5 +136,44 @@ describe('path-addressed rebranched LevelDB values', () => {
     await db.put!(key, large);
     expect(raw.rows.size).toBeGreaterThan(1);
     expect(await db.get(key)).toEqual(large);
+  });
+
+  test('keeps prefix-related logical trees disjoint during branched-to-branched shrink', async () => {
+    const raw = new MemoryDb();
+    const db = withRebranchedValues(raw);
+    const shortKey = Buffer.from([0x24, 0x01]);
+    const prefixedKey = Buffer.from([0x24, 0x01, 0x02]);
+    const physicalPrefix = (key: Buffer): string => Buffer.concat([
+      Buffer.from([0x7e]),
+      Buffer.from([(key.byteLength >>> 8) & 0xff, key.byteLength & 0xff]),
+      key,
+    ]).toString('hex');
+    const physicalKeys = (key: Buffer): Set<string> => new Set(
+      Array.from(raw.rows.keys()).filter((candidate) => candidate.startsWith(physicalPrefix(key))),
+    );
+
+    const first = Buffer.alloc(40_000, 0x51);
+    const sibling = Buffer.alloc(32_000, 0x62);
+    await db.put!(shortKey, first);
+    await db.put!(prefixedKey, sibling);
+    const beforeShort = physicalKeys(shortKey);
+    const beforeSibling = physicalKeys(prefixedKey);
+    expect(beforeShort.size).toBeGreaterThan(1);
+    expect(beforeSibling.size).toBeGreaterThan(1);
+    expect(Array.from(beforeShort).some((key) => beforeSibling.has(key))).toBeFalse();
+
+    const smallerStillBranched = Buffer.alloc(20_000, 0x73);
+    await db.put!(shortKey, smallerStillBranched);
+    const afterShort = physicalKeys(shortKey);
+    const afterSibling = physicalKeys(prefixedKey);
+    expect(await db.get(shortKey)).toEqual(smallerStillBranched);
+    expect(await db.get(prefixedKey)).toEqual(sibling);
+    expect(afterShort.size).toBeLessThan(beforeShort.size);
+    expect(afterSibling).toEqual(beforeSibling);
+
+    const puts = new Set(raw.lastBatchOperations.filter((operation) => operation.kind === 'put').map((operation) => operation.key));
+    const dels = new Set(raw.lastBatchOperations.filter((operation) => operation.kind === 'del').map((operation) => operation.key));
+    expect(Array.from(puts).some((key) => dels.has(key))).toBeFalse();
+    expect(Array.from(beforeShort).filter((key) => !afterShort.has(key)).every((key) => dels.has(key))).toBeTrue();
   });
 });

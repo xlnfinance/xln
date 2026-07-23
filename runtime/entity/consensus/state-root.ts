@@ -734,7 +734,7 @@ export const computeCanonicalEntityConsensusStateHash = (state: EntityState): st
       .sort((left, right) => right.bytes - left.bytes)
       .slice(0, 10)
     : [];
-  entityRootLog.warn('profile', {
+  entityRootLog.info('profile', {
     entity: state.entityId.slice(-8),
     height: state.height,
     accounts: state.accounts.size,
