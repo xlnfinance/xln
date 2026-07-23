@@ -302,31 +302,29 @@ export const buildDurableRuntimeMachineSnapshot = (
     includeIngressWorkingState?: boolean;
     excludePersistedFrameDbRecords?: boolean;
   },
-): Record<string, unknown> => ({
-  ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
-  ...(env.activeJurisdiction ? { activeJurisdiction: env.activeJurisdiction } : {}),
-  ...(env.browserVMState ? { browserVMState: structuredClone(env.browserVMState) } : {}),
-  ...(env.runtimeConfig ? { runtimeConfig: structuredClone(env.runtimeConfig) } : {}),
-  ...(buildDurableRuntimeStateSnapshot(env, {
+): Record<string, unknown> => {
+  const runtimeState = buildDurableRuntimeStateSnapshot(env, {
     includeIngressWorkingState: options?.includeIngressWorkingState === true,
     excludePersistedFrameDbRecords: options?.excludePersistedFrameDbRecords === true,
-  }) ? {
-      runtimeState: buildDurableRuntimeStateSnapshot(env, {
-        includeIngressWorkingState: options?.includeIngressWorkingState === true,
-        excludePersistedFrameDbRecords: options?.excludePersistedFrameDbRecords === true,
-      }),
-    } : {}),
-  runtimeInput: withoutEphemeralScheduledWake(env.runtimeMempool ?? env.runtimeInput),
-  ...(env.pendingOutputs?.length ? { pendingOutputs: cloneRuntimeOutputs(env.pendingOutputs) } : {}),
-  ...(env.networkInbox?.length ? { networkInbox: cloneRuntimeOutputs(env.networkInbox) } : {}),
-  ...((options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs)?.length
-    ? { pendingNetworkOutputs: cloneRuntimeOutputs(options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs ?? []) }
-    : {}),
-  jReplicas: Array.from((env.jReplicas || new Map()).entries()).map(([key, replica]) => [
-    key,
-    buildDurableJReplicaSnapshot(replica),
-  ]),
-});
+  });
+  return {
+    ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
+    ...(env.activeJurisdiction ? { activeJurisdiction: env.activeJurisdiction } : {}),
+    ...(env.browserVMState ? { browserVMState: structuredClone(env.browserVMState) } : {}),
+    ...(env.runtimeConfig ? { runtimeConfig: structuredClone(env.runtimeConfig) } : {}),
+    ...(runtimeState ? { runtimeState } : {}),
+    runtimeInput: withoutEphemeralScheduledWake(env.runtimeMempool ?? env.runtimeInput),
+    ...(env.pendingOutputs?.length ? { pendingOutputs: cloneRuntimeOutputs(env.pendingOutputs) } : {}),
+    ...(env.networkInbox?.length ? { networkInbox: cloneRuntimeOutputs(env.networkInbox) } : {}),
+    ...((options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs)?.length
+      ? { pendingNetworkOutputs: cloneRuntimeOutputs(options?.pendingNetworkOutputs ?? env.pendingNetworkOutputs ?? []) }
+      : {}),
+    jReplicas: Array.from((env.jReplicas || new Map()).entries()).map(([key, replica]) => [
+      key,
+      buildDurableJReplicaSnapshot(replica),
+    ]),
+  };
+};
 
 /**
  * Project the part of a durable Runtime snapshot that deterministic frame
@@ -374,34 +372,37 @@ export const buildCanonicalRuntimeStateSnapshot = (
     compactTransient?: boolean;
     includeCertifiedBoardNodes?: boolean;
   },
-): Record<string, unknown> => ({
-  height: env.height,
-  timestamp: env.timestamp,
-  ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
-  ...(env.activeJurisdiction ? { activeJurisdiction: env.activeJurisdiction } : {}),
-  ...(options?.browserVMState ?? env.browserVMState ? { browserVMState: options?.browserVMState ?? env.browserVMState } : {}),
-  ...(env.runtimeConfig ? { runtimeConfig: structuredClone(env.runtimeConfig) } : {}),
-  ...(buildDurableRuntimeStateSnapshot(env, {
+): Record<string, unknown> => {
+  const runtimeState = buildDurableRuntimeStateSnapshot(env, {
     includeCertifiedBoardNodes: options?.includeCertifiedBoardNodes === true,
-  }) ? { runtimeState: buildDurableRuntimeStateSnapshot(env, {
-    includeCertifiedBoardNodes: options?.includeCertifiedBoardNodes === true,
-  }) } : {}),
-  runtimeInput: withoutEphemeralScheduledWake(env.runtimeMempool ?? env.runtimeInput),
-  ...(env.pendingOutputs ? { pendingOutputs: cloneRuntimeOutputs(env.pendingOutputs) } : {}),
-  ...(env.networkInbox ? { networkInbox: cloneRuntimeOutputs(env.networkInbox) } : {}),
-  ...(env.pendingNetworkOutputs ? { pendingNetworkOutputs: cloneRuntimeOutputs(env.pendingNetworkOutputs) } : {}),
-  eReplicas: Array.from(env.eReplicas.entries()).map(([replicaKey, replica]) => [
-    replicaKey,
-    buildCanonicalEntityReplicaSnapshot(
-      replica,
-      options?.compactTransient ? { compactTransient: true } : undefined,
-    ),
-  ]),
-  jReplicas: Array.from((env.jReplicas || new Map()).entries()).map(([replicaKey, jr]) => [
-    replicaKey,
-    buildCanonicalJReplicaSnapshot(jr),
-  ]),
-});
+  });
+  return {
+    height: env.height,
+    timestamp: env.timestamp,
+    ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
+    ...(env.activeJurisdiction ? { activeJurisdiction: env.activeJurisdiction } : {}),
+    ...(options?.browserVMState ?? env.browserVMState
+      ? { browserVMState: options?.browserVMState ?? env.browserVMState }
+      : {}),
+    ...(env.runtimeConfig ? { runtimeConfig: structuredClone(env.runtimeConfig) } : {}),
+    ...(runtimeState ? { runtimeState } : {}),
+    runtimeInput: withoutEphemeralScheduledWake(env.runtimeMempool ?? env.runtimeInput),
+    ...(env.pendingOutputs ? { pendingOutputs: cloneRuntimeOutputs(env.pendingOutputs) } : {}),
+    ...(env.networkInbox ? { networkInbox: cloneRuntimeOutputs(env.networkInbox) } : {}),
+    ...(env.pendingNetworkOutputs ? { pendingNetworkOutputs: cloneRuntimeOutputs(env.pendingNetworkOutputs) } : {}),
+    eReplicas: Array.from(env.eReplicas.entries()).map(([replicaKey, replica]) => [
+      replicaKey,
+      buildCanonicalEntityReplicaSnapshot(
+        replica,
+        options?.compactTransient ? { compactTransient: true } : undefined,
+      ),
+    ]),
+    jReplicas: Array.from((env.jReplicas || new Map()).entries()).map(([replicaKey, jr]) => [
+      replicaKey,
+      buildCanonicalJReplicaSnapshot(jr),
+    ]),
+  };
+};
 
 export const buildRuntimeCheckpointSnapshot = (env: Env): Record<string, unknown> => {
   return buildCanonicalRuntimeStateSnapshot(env, { includeCertifiedBoardNodes: true });
