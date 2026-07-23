@@ -1,11 +1,20 @@
 import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
-import { createXlnJsonRpcProvider } from '../jadapter';
+import { createXlnJsonRpcProvider, resolveJAdapterPrivateKey } from '../jadapter';
 import { createTronSigner } from '../jadapter/tron-signer';
 
 const PRIVATE_KEY = `0x${'11'.repeat(32)}`;
 
 describe('TRON signer boundary', () => {
+  test('requires an explicit watch-only boundary when a public-chain signer is absent', async () => {
+    const config = {
+      mode: 'tron' as const,
+      chainId: 3448148188,
+    };
+    expect(() => resolveJAdapterPrivateKey(config)).toThrow('privateKey is required');
+    expect(resolveJAdapterPrivateKey({ ...config, watchOnly: true })).toBeUndefined();
+  });
+
   test('derives the same EVM caller from Ethereum and TRON address formats', async () => {
     const provider = createXlnJsonRpcProvider('http://127.0.0.1:1/jsonrpc', 3448148188);
     const signer = await createTronSigner({

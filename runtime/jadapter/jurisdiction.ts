@@ -25,7 +25,10 @@ export const buildJAdapterConfigFromJurisdiction = (jurisdiction: JurisdictionCo
     chainId: jurisdiction.chainId ?? 31337,
     fromReplica: buildFromReplica(jurisdiction),
   };
-  if (!browserVM) config.rpcUrl = jurisdiction.address;
+  if (!browserVM) {
+    config.rpcUrl = jurisdiction.address;
+    config.watchOnly = true;
+  }
   return config;
 };
 

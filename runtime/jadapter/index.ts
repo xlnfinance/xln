@@ -38,6 +38,17 @@ export {
 export const DEV_CHAIN_IDS = new Set<number>([31337, 31338]);
 export const TRON_CHAIN_IDS = new Set<number>([728126428, 3448148188]);
 const DEFAULT_RPC_POLLING_INTERVAL_MS = 1_000;
+
+export const resolveJAdapterPrivateKey = (config: JAdapterConfig): string | undefined => {
+  if (config.privateKey) return config.privateKey;
+  if (DEV_CHAIN_IDS.has(config.chainId)) {
+    return process.env['JADAPTER_DEV_PRIVATE_KEY'] ?? DEFAULT_PRIVATE_KEY;
+  }
+  if (config.watchOnly) return undefined;
+  throw new Error(
+    `[JAdapter] privateKey is required for chainId=${config.chainId}. Refusing unsafe default key on non-dev chain.`,
+  );
+};
 const xlnJsonRpcProviderOptions = (
   network?: ethers.Networkish,
 ): ethers.JsonRpcApiProviderOptions => ({
@@ -119,15 +130,7 @@ export async function createJAdapter(config: JAdapterConfig): Promise<JAdapter> 
   const effectiveConfig: JAdapterConfig = config.mode === 'rpc' && TRON_CHAIN_IDS.has(config.chainId)
     ? { ...config, mode: 'tron' }
     : config;
-  const privateKey = (() => {
-    if (config.privateKey) return config.privateKey;
-    if (DEV_CHAIN_IDS.has(config.chainId)) {
-      return process.env['JADAPTER_DEV_PRIVATE_KEY'] ?? DEFAULT_PRIVATE_KEY;
-    }
-    throw new Error(
-      `[JAdapter] privateKey is required for chainId=${config.chainId}. Refusing unsafe default key on non-dev chain.`,
-    );
-  })();
+  const privateKey = resolveJAdapterPrivateKey(effectiveConfig);
 
   if (effectiveConfig.mode === 'browservm') {
     const { BrowserVMProvider } = await import('./browservm-provider');
@@ -142,6 +145,7 @@ export async function createJAdapter(config: JAdapterConfig): Promise<JAdapter> 
     const provider = new BrowserVMEthersProvider(browserVM);
 
     // Use NonceTrackingWallet to track nonce locally (VM uses skipNonce anyway)
+    if (!privateKey) throw new Error('BROWSERVM_SIGNER_KEY_REQUIRED');
     const signer = new NonceTrackingWallet(privateKey, provider);
 
     return createBrowserVMAdapter(effectiveConfig, provider, signer, browserVM);
@@ -155,15 +159,24 @@ export async function createJAdapter(config: JAdapterConfig): Promise<JAdapter> 
   const rpcUrl = normalizeLoopbackUrl(config.rpcUrl);
   const provider = createXlnJsonRpcProvider(rpcUrl, config.chainId);
   configureRpcPolling(provider);
-  const signer = effectiveConfig.mode === 'tron'
+  const tronApiKey = effectiveConfig.mode === 'tron'
+    ? effectiveConfig.tronApiKey || process.env['TRONGRID_API_KEY']
+    : undefined;
+  const signer = effectiveConfig.mode === 'tron' && privateKey
     ? await (await import('./tron-signer')).createTronSigner({
         provider,
         privateKey,
         rpcUrl,
         fullHost: effectiveConfig.tronFullHost,
-        apiKey: effectiveConfig.tronApiKey || process.env['TRONGRID_API_KEY'],
+        apiKey: tronApiKey,
       })
-    : new NonceTrackingWallet(privateKey, provider);
+    : privateKey
+      ? new NonceTrackingWallet(privateKey, provider)
+      : new ethers.VoidSigner(ethers.ZeroAddress, provider);
 
-  return createRpcAdapter({ ...effectiveConfig, rpcUrl }, provider, signer);
+  return createRpcAdapter({
+    ...effectiveConfig,
+    rpcUrl,
+    ...(tronApiKey ? { tronApiKey } : {}),
+  }, provider, signer);
 }

@@ -415,7 +415,9 @@ const jurisdictionEntry = (result) => ({
   contracts: result.contracts,
   explorer: result.chain.explorer,
   currency: result.chain.currency,
-  status: 'active',
+  // Deployment evidence never activates a jurisdiction. Promotion to active
+  // is a separate reviewed config change after authority-proof gates pass.
+  status: 'pending',
   description: `${result.chain.name} XLN deployment`,
   tokens: tokenConfig(result.chain, result.registeredTokens),
   ...(result.tronContracts ? { tronContracts: result.tronContracts } : {}),

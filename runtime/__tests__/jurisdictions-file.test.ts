@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readJurisdictionsFile } from '../orchestrator/jurisdictions-file';
+import { isActiveJurisdictionStatus } from '../jurisdiction/config';
 
 const tempRoots: string[] = [];
 
@@ -31,4 +32,11 @@ test('jurisdictions reader distinguishes a missing file from malformed JSON', ()
 test('jurisdictions reader returns a parsed object', () => {
   const filePath = tempPath('{"version":"3","jurisdictions":{}}');
   expect(readJurisdictionsFile(filePath)).toEqual({ version: '3', jurisdictions: {} });
+});
+
+test('runtime imports only explicitly active jurisdiction profiles', () => {
+  expect(isActiveJurisdictionStatus(undefined)).toBe(true);
+  expect(isActiveJurisdictionStatus('active')).toBe(true);
+  expect(isActiveJurisdictionStatus('pending')).toBe(false);
+  expect(isActiveJurisdictionStatus('disabled')).toBe(false);
 });

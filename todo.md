@@ -28,6 +28,9 @@ Audit claims enter this file only after reproduction against the current tree.
 - [ ] Prove Ethereum↔TRON cross-j terms, route hashes, block-time deadlines and
   both dispute paths. A second live-chain deployment needs funded Sepolia
   authority; local two-chain execution remains mandatory regardless.
+- [ ] Define and audit a TRON authority-proof domain before promoting Nile from
+  `pending` to `active`. TRON headers commit transactions, not receipt logs;
+  never synthesize an Ethereum receipt-MPT proof or trust one RPC witness.
 - [ ] Run L1/L2, `bun run check`, release gates and one immutable unified E2E.
   Commit, merge to clean `main`, remove the worktree/branch, push, tag, publish
   and deploy the testnet release only from that green SHA.

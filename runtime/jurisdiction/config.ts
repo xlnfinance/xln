@@ -18,6 +18,9 @@ import { isBrowser } from '../utils';
 
 const jurisdictionConfigLog = createStructuredLogger('runtime.jurisdiction_config');
 
+export const isActiveJurisdictionStatus = (value: unknown): boolean =>
+  String(value ?? 'active').trim().toLowerCase() === 'active';
+
 function getBrowserJurisdictionsUrl(): string {
   const suffix = `ts=${Date.now()}`;
   return `./api/jurisdictions?${suffix}`;
@@ -105,6 +108,11 @@ async function loadJurisdictionConfigs(): Promise<Map<string, JurisdictionConfig
 
     const jData = data as Record<string, unknown>;
     const contracts = jData['contracts'] as Record<string, string> | undefined;
+    const status = String(jData['status'] ?? 'active').trim().toLowerCase();
+    if (!isActiveJurisdictionStatus(status)) {
+      jurisdictionConfigLog.debug('entry_skipped_inactive', { key, status });
+      continue;
+    }
 
     let rpcUrl = jData['rpc'] as string;
 

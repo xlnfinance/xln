@@ -676,11 +676,18 @@ export async function createRpcAdapter(
     throw new Error('[JAdapter:rpc] processBatch requires a signer private key for Hanko signing');
   };
 
-  const signerForPrivateKey = (privateKey: string): Signer => {
+  const signerForPrivateKey = async (privateKey: string): Promise<Signer> => {
     const forkable = signer as Signer & { forPrivateKey?: (key: string) => Signer };
     if (config.mode === 'tron') {
-      if (!forkable.forPrivateKey) throw new Error('TRON_SIGNER_FORK_UNAVAILABLE');
-      return forkable.forPrivateKey(privateKey);
+      if (forkable.forPrivateKey) return forkable.forPrivateKey(privateKey);
+      const { createTronSigner } = await import('./tron-signer');
+      return createTronSigner({
+        provider,
+        privateKey,
+        rpcUrl: String(config.rpcUrl || ''),
+        fullHost: config.tronFullHost,
+        apiKey: config.tronApiKey || process.env['TRONGRID_API_KEY'],
+      });
     }
     return new ethers.Wallet(privateKey, provider);
   };
@@ -838,6 +845,53 @@ export async function createRpcAdapter(
   const readSafeWatcherBlockNumber = async (): Promise<number> =>
     isTronChainId(config.chainId) ? readTronSolidifiedBlockNumber() : readCurrentRpcBlockNumber();
 
+  const sendTronRpcCall = async (request: RpcBatchRequest): Promise<RpcBatchResponse> => {
+    const rpcUrl = String(config.rpcUrl || '').trim();
+    if (!rpcUrl) throw new Error('TRON_RPC_URL_MISSING');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const response = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(config.tronApiKey ? { 'TRON-PRO-API-KEY': config.tronApiKey } : {}),
+        },
+        body: JSON.stringify(request),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`TRON_RPC_HTTP:${request.method}:${response.status}`);
+      const payload = await response.json() as RpcBatchResponse;
+      if (payload.id !== request.id) {
+        throw new Error(`TRON_RPC_ID_MISMATCH:${request.method}:${request.id}:${String(payload.id)}`);
+      }
+      return payload;
+    } catch (error) {
+      if ((error as Error)?.name === 'AbortError') {
+        throw new Error(`TRON_RPC_TIMEOUT:${request.method}`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  const sendTronRpcCalls = async (
+    requests: readonly RpcBatchRequest[],
+  ): Promise<Map<number, RpcBatchResponse>> => {
+    const responses = new Map<number, RpcBatchResponse>();
+    let nextIndex = 0;
+    const worker = async (): Promise<void> => {
+      while (nextIndex < requests.length) {
+        const request = requests[nextIndex++];
+        if (!request) return;
+        responses.set(request.id, await sendTronRpcCall(request));
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(12, requests.length) }, worker));
+    return responses;
+  };
+
   const sendAuthenticatedRpcBatch = async (calls: readonly RpcBatchCall[]): Promise<unknown[]> => {
     if (calls.length === 0) return [];
     const rpcUrl = String(config.rpcUrl || '').trim();
@@ -848,7 +902,9 @@ export async function createRpcAdapter(
       method: call.method,
       params: call.params,
     }));
-    const responses = await sendRpcBatch(rpcUrl, batch);
+    const responses = isTronChainId(config.chainId)
+      ? await sendTronRpcCalls(batch)
+      : await sendRpcBatch(rpcUrl, batch);
     return batch.map((request) => {
       const response = responses.get(request.id);
       if (!response) throw new Error(`J_RECEIPT_BATCH_RESPONSE_MISSING:${request.id}:${request.method}`);
@@ -877,7 +933,9 @@ export async function createRpcAdapter(
         method: 'eth_getBlockByNumber',
         params: [ethers.toQuantity(jHeight), false],
       }));
-    const responses = await sendRpcBatch(rpcUrl, requests);
+    const responses = isTronChainId(config.chainId)
+      ? await sendTronRpcCalls(requests)
+      : await sendRpcBatch(rpcUrl, requests);
     const headers = requests.map(({ id }) => {
       const response = responses.get(id);
       const block = response?.result && typeof response.result === 'object'
@@ -1865,7 +1923,7 @@ export async function createRpcAdapter(
       }
     ): Promise<JEvent[]> {
       const walletPrivateKey = `0x${Buffer.from(signerPrivateKey).toString('hex')}`;
-      const signerWallet = signerForPrivateKey(walletPrivateKey);
+      const signerWallet = await signerForPrivateKey(walletPrivateKey);
       const signerAddress = await signerWallet.getAddress();
 
       const tokenType = options?.tokenType ?? 0;
@@ -1978,7 +2036,7 @@ export async function createRpcAdapter(
         tokenId?: number;
       },
     ): Promise<JEvent[]> {
-      const signerWallet = signerForPrivateKey(`0x${Buffer.from(signerPrivateKey).toString('hex')}`);
+      const signerWallet = await signerForPrivateKey(`0x${Buffer.from(signerPrivateKey).toString('hex')}`);
       const signerAddress = await signerWallet.getAddress();
       const erc20 = new ethers.Contract(tokenAddress, [
         'function allowance(address owner, address spender) view returns (uint256)',
@@ -2074,7 +2132,7 @@ export async function createRpcAdapter(
       to: string,
       amount: bigint,
     ): Promise<string> {
-      const signerWallet = signerForPrivateKey(`0x${Buffer.from(signerPrivateKey).toString('hex')}`);
+      const signerWallet = await signerForPrivateKey(`0x${Buffer.from(signerPrivateKey).toString('hex')}`);
       const erc20 = new ethers.Contract(tokenAddress, [
         'function transfer(address to, uint256 amount) returns (bool)',
       ], signerWallet);
@@ -2093,7 +2151,7 @@ export async function createRpcAdapter(
       to: string,
       amount: bigint,
     ): Promise<string> {
-      const signerWallet = signerForPrivateKey(`0x${Buffer.from(signerPrivateKey).toString('hex')}`);
+      const signerWallet = await signerForPrivateKey(`0x${Buffer.from(signerPrivateKey).toString('hex')}`);
       const tx = await signerWallet.sendTransaction({
         to,
         value: amount,
@@ -2140,6 +2198,15 @@ export async function createRpcAdapter(
           };
         }
         try {
+          if (config.watchOnly && !signerPrivateKey) {
+            throw new Error('JADAPTER_WATCH_ONLY_SIGNER_REQUIRED:entityProviderAction');
+          }
+          const actionSigner = signerPrivateKey
+            ? await signerForPrivateKey(`0x${Buffer.from(signerPrivateKey).toString('hex')}`)
+            : signer;
+          const submittingEntityProvider = entityProvider.connect(
+            actionSigner as unknown as Parameters<typeof entityProvider.connect>[0],
+          );
           assertEntityProviderActionJTxBinding(jTx, {
             chainId: config.chainId,
             entityProviderAddress: await getLiveEntityProviderAddress(),
@@ -2194,10 +2261,10 @@ export async function createRpcAdapter(
                     jTx.data.hankoSignature,
                   ];
             const method = (intent.payload.kind === 'entityTransferTokens'
-              ? entityProvider.entityTransferTokens
+              ? submittingEntityProvider.entityTransferTokens
               : intent.payload.kind === 'releaseControlShares'
-                ? entityProvider.releaseControlShares
-                : entityProvider.cancelEntityProviderAction) as unknown as UntypedActionMethod;
+                ? submittingEntityProvider.releaseControlShares
+                : submittingEntityProvider.cancelEntityProviderAction) as unknown as UntypedActionMethod;
             try {
               await method.staticCall(...args);
             } catch (error) {
@@ -2213,7 +2280,7 @@ export async function createRpcAdapter(
               1_500_000n,
             );
             const receipt = await sendSignerTxWithExplicitNonce(
-              signer,
+              actionSigner,
               `EntityProvider.${intent.payload.kind}`,
               (nonce, feeOverrides) => method(...args, { gasLimit, nonce, ...feeOverrides }),
             );
@@ -2299,23 +2366,25 @@ export async function createRpcAdapter(
                 `:got=${effectiveExternalSignerId}`,
             };
           }
-          let externalSubmitterWallet: Signer | null = null;
+          if (config.watchOnly && !signerPrivateKey) {
+            throw new Error(`JADAPTER_WATCH_ONLY_SIGNER_REQUIRED:batch:${normalizedId}`);
+          }
+          const submitterWallet = signerPrivateKey
+            ? await signerForPrivateKey(`0x${Buffer.from(signerPrivateKey).toString('hex')}`)
+            : null;
           if (batchRequiresExternalSubmitter) {
-            if (!signerPrivateKey) {
+            if (!submitterWallet) {
               throw new Error(`Missing signer private key for externalTokenToReserve batch from ${jTx.entityId.slice(-4)}`);
             }
-            externalSubmitterWallet = signerForPrivateKey(
-              `0x${Buffer.from(signerPrivateKey).toString('hex')}`,
-            );
-            const walletAddress = await externalSubmitterWallet.getAddress();
+            const walletAddress = await submitterWallet.getAddress();
             if (walletAddress.toLowerCase() !== expectedExternalSignerId.toLowerCase()) {
               throw new Error(
                 `EXTERNAL_BATCH_EOA_MISMATCH:${normalizedId}:expected=${expectedExternalSignerId}:wallet=${walletAddress}`,
               );
             }
           }
-          const submitterDepository = externalSubmitterWallet
-            ? depository.connect(externalSubmitterWallet as unknown as Parameters<typeof depository.connect>[0])
+          const submitterDepository = submitterWallet
+            ? depository.connect(submitterWallet as unknown as Parameters<typeof depository.connect>[0])
             : depository;
           // Consensus batches must arrive fully sealed by entity consensus.
           // Do not fall back to reading the live chain nonce and locally signing here:
@@ -2503,17 +2572,17 @@ export async function createRpcAdapter(
             for (let attempt = 1; attempt <= 2; attempt++) {
               try {
                 if (attempt > 1) {
-                  if (externalSubmitterWallet) {
-                    await resetSerializedSignerNonceFor(externalSubmitterWallet);
+                  if (submitterWallet) {
+                    await resetSerializedSignerNonceFor(submitterWallet);
                   } else {
                     await resetSerializedSignerNonce();
                   }
                   console.warn(`⚠️ [JAdapter:rpc] retrying processBatch after nonce sync (attempt ${attempt}/2)`);
                 }
-                const tx = externalSubmitterWallet
+                const tx = submitterWallet
                   ? await submitterDepository.processBatch(encodedBatch, hankoData, nextNonce, {
                       gasLimit,
-                      nonce: await allocateSerializedSignerNonceFor(externalSubmitterWallet),
+                      nonce: await allocateSerializedSignerNonceFor(submitterWallet),
                       ...resolvedFeeOverrides,
                     })
                   : await depository.processBatch(encodedBatch, hankoData, nextNonce, {

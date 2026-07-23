@@ -20,6 +20,7 @@ export interface JAdapterConfig {
   tronApiKey?: string;                // Server-side TronGrid API key
   stateFile?: string;                 // Anvil: --load-state, BrowserVM: import path
   privateKey?: string;                // Signer key (required for non-dev RPC chains)
+  watchOnly?: boolean;                // Explicit read/import adapter without a default signer
   watchPollMs?: number;               // Optional watcher polling interval override
   confirmationDepth?: number;         // Optional event finality depth override
   defaultDisputeDelayBlocks?: number; // Required when deploying a non-dev stack

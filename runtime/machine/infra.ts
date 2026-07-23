@@ -171,6 +171,7 @@ export const ensureLiveJAdapterForReplica = async (
   const adapterConfig: JAdapterConfig = {
     mode: hasRpcs ? 'rpc' : 'browservm',
     chainId,
+    ...(hasRpcs ? { watchOnly: true } : {}),
   };
 
   if (hasRpcs) {

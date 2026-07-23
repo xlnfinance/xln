@@ -460,6 +460,7 @@ export const prepareJurisdictionImportResult = async (
   const adapterConfig: JAdapterConfig = {
     mode: isBrowserVM ? 'browservm' : 'rpc',
     chainId: request.chainId,
+    ...(!isBrowserVM ? { watchOnly: true } : {}),
   };
   if (!isBrowserVM) {
     const rpcUrl = request.rpcs[0];

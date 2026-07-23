@@ -68,7 +68,7 @@
       },
       "explorer": "https://nile.tronscan.org",
       "currency": "TRX",
-      "status": "active",
+      "status": "pending",
       "description": "TRON Nile XLN deployment",
       "tokens": {
         "USDT": {
