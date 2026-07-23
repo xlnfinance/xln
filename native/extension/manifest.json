@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "xln finance",
   "short_name": "xln",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "description": "The complete xln wallet, packaged for Chrome.",
   "action": {
     "default_title": "Open xln",
