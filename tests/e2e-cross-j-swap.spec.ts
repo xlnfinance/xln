@@ -1999,7 +1999,7 @@ async function placeCrossOrder(
           };
         });
         lastSubmitState = {
-          ok: newRoutes.length > 0 || newOffers.length > 0 || newMessages.some((message) => /Cross-j swap/i.test(message)),
+          ok: newRoutes.length > 0 || newOffers.length > 0,
           routes: state.routes,
           offers: state.offers,
           newRoutes: newRoutes.map(route => ({ orderId: route.orderId, status: route.status })),
