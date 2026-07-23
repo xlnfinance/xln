@@ -330,7 +330,7 @@ async function selectCounterpartyInSwap(page: Page, preferredAccountId?: string)
 }
 
 async function readAvailableFromSizing(page: Page): Promise<number> {
-  const stat = page.locator('.swap-panel .size-stats span').filter({ hasText: /^Available:/ }).first();
+  const stat = page.getByTestId('swap-available-stat').first();
   await expect(stat).toBeVisible({ timeout: 20_000 });
   const text = String((await stat.textContent()) || '');
   const available = parseFirstNumber(text);
