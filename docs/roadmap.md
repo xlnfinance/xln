@@ -130,6 +130,37 @@ That means the roadmap should never depend on CBDCs for near-term relevance.
 - it does not restate the launch gates from `mainnet.md`
 - it does not promise timelines that outrun the current engineering reality
 
+## Post-launch engineering backlog
+
+These items are valuable but are not allowed to obscure the active mainnet
+blocker list:
+
+- CandidateExecution/FrameDraft copy-on-write execution, Account transition
+  journals, cached Entity Account-section commitments and extraction of the
+  large consensus facades after byte-identical differential evidence.
+- Event-driven dirty Account/book/deadline indexes, stable proposable queues,
+  one-signature representation reuse and internal verified-witness reuse.
+- Runtime-level CrossJCoordinator plus separate immutable CrossJTerms and
+  versioned CrossJProgress reducers.
+- Rich browser physical-storage inspector, unified QA/Health cockpit,
+  shareable detached history viewer and additional failure-inbox UX.
+- A future fresh typed mutable-path schema for generic oversized Entity/Book
+  records. There will be no compatibility reader before mainnet.
+
+## Company formation, IPO and takeover
+
+- Create an Entity and all seed-derived signers in one action, progressing from
+  founder 1-of-1 to directors 2-of-3 with restart persistence.
+- Mint separate control and dividend token classes owned initially by the
+  company treasury; the listing hub receives no ownership.
+- List treasury collateral through a chosen hub so buyers can immediately trade
+  USDT/UTC for shares; implement buybacks as ordinary treasury bids.
+- Allow a collateralized holder proving more than 50% of control to schedule a
+  board replacement after at least seven days without invalidating proofs early.
+- Cover issuance, partial sales, multiple buyers, failed and successful
+  takeovers, delayed rotation, replay and continued trading in one TradFi-style
+  screenshot flow.
+
 ## Historical Reference
 
 The older, more detailed roadmap snapshot was preserved at:

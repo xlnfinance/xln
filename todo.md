@@ -1,188 +1,99 @@
-# xln active TODO
+# xln mainnet TODO
 
-This is the only live TODO/NEXT file. It contains active work only. Completed
-work is deleted; git history and immutable release evidence preserve the proof.
-Audit claims enter this file only after reproduction against the current tree.
+This is the only active blocker list for deploying code trusted with real
+funds. It contains launch work only, ordered from fastest proof/fix to the
+hardest external gate. Completed work is deleted; long-term work belongs in
+`docs/roadmap.md`, and permanent rules belong in
+`docs/mainnet-engineering-principles.md`.
 
-## Non-negotiable architecture
+## 0. Restore and prove production health
 
-- [ ] Keep one implementation, persisted format and version. No legacy paths,
-  migrations, fallback readers/writers or parallel financial formulas before
-  mainnet; testnet resets onto the current format.
-- [ ] Keep RJEA pure and deterministic. Runtime enforces policy, WAL commit
-  precedes dispatch, errors fail loud, all finance uses canonical bigint
-  reducers, and frozen core changes require owner approval.
-- [ ] Keep Runtime signers derived immediately from the seed. Entity threshold
-  multisigners are the custody boundary; do not move Runtime policy into HSM.
-- [ ] Keep recovery trust order: operator backups, watchtowers, then hubs. Peer
-  state is neither authority nor an automatic recovery dependency.
+- [ ] Fix the Runtime-frame storage-handle publish bug that resurrects a
+  closed LevelDB handle after byte-pressure epoch rotation. Keep the regression
+  where rotation occurs after the live Runtime already owns open handles.
+- [ ] Make managed Runtime fatal halt terminate the child process so the
+  orchestrator performs bounded restart/recovery. Health must never present a
+  halted child or cached market-maker readiness as active.
+- [ ] Reproduce the production bootstrap locally with the production storage
+  byte threshold, then run beyond the first epoch rotation with H1/H2/H3/MM
+  healthy, no stale frames, no orphan processes and no growing empty-chain
+  disk workload.
+- [ ] Prove through Runtime state, public API and browser E2E that every
+  supported same-J pair exposes exactly 10 bids and 10 asks. Prove cross-J
+  full fill closes both legs and removes the user order; partial GTC remains
+  open until later fill or explicit close.
 
-## Current release — native TRON USDT
+## 1. Commit-boundary correctness
 
-- [ ] Finish the native TRON adapter gate: protobuf signing/broadcast, live
-  energy-based fee limits, SolidityNode finality, authenticated complete
-  receipts and exact EVM/base58/hex41 address parity.
-- [ ] Preserve the fresh Nile deployment with official USDT at internal token
-  ID 1 and immutable 28,800-block dispute delay. Re-run read plus real
-  approve/deposit after the candidate SHA is frozen.
-- [ ] Prove Ethereum↔TRON cross-j terms, route hashes, block-time deadlines and
-  both dispute paths. A second live-chain deployment needs funded Sepolia
-  authority; local two-chain execution remains mandatory regardless.
-- [ ] Define and audit a TRON authority-proof domain before promoting Nile from
-  `pending` to `active`. TRON headers commit transactions, not receipt logs;
-  never synthesize an Ethereum receipt-MPT proof or trust one RPC witness.
-- [ ] Run L1/L2, `bun run check`, release gates and one immutable unified E2E.
-  Commit, merge to clean `main`, remove the worktree/branch, push, tag, publish
-  and deploy the testnet release only from that green SHA.
-- [ ] Upload the final unified-run videos and evidence to the server after the
-  release; verify four story videos plus API evidence. Upload is not a code gate.
+- [ ] Return Account history, security incidents and storage invalidations as
+  `CandidateExecution.effects`; publish only with the exact committed Entity
+  hash. Rejection must leave external Env projections byte-identical.
+- [ ] Construct unknown Account genesis ephemerally and insert it only after an
+  accepted height-1 bilateral frame. Rejected input must not consume an
+  Account slot.
+- [ ] Keep proposer and receiver live-replay tripwires permanent: incremental
+  and cold roots must equal the signed `frame.accountStateRoot`, including a
+  forced validation/commit divergence fixture.
+- [ ] Keep cross-J opening as one signed two-leg envelope. Both Runtimes must
+  scratch-validate both Account inputs and their exact match before either leg
+  becomes an Entity frame; mismatch removes only that envelope and alerts.
 
-## P0 — commit-boundary correctness
+## 2. Transport and secret persistence
 
-- [ ] Make Account frame history, security incidents and storage invalidations
-  returned `CandidateExecution.effects`. Publish them only with the exact
-  committed Entity hash. A rejected proposal/replay must leave all external
-  Env projections byte-identical.
-- [ ] Construct unknown Account genesis ephemerally and insert it into
-  `state.accounts` only after an accepted height-1 bilateral frame. A rejected
-  input must not consume one of the bounded Account slots.
-- [ ] Make the implemented live replay tripwire a permanent regression gate:
-  proposer and receiver commit must prove both incremental and cold Account
-  roots equal the signed `frame.accountStateRoot`, including forced
-  validation/commit-path divergence fixtures.
+- [ ] Derive AEAD keys from X25519 with domain-separated HKDF-SHA256 and bind
+  protocol/from/to/type/source-frame/message-id as AAD. Replace Base64 with one
+  binary wire atomically; no legacy codec.
+- [ ] Add authenticated session-key rotation and prove recorded traffic cannot
+  be decrypted after later compromise of the static Runtime key.
+- [ ] Enforce WebSocket backpressure and per-Runtime byte/message rate limits
+  from one typed limit source shared by WS, Runtime ingress and Entity frames.
+- [ ] Stop persisting a full replay Runtime-machine projection in every WAL
+  frame. Store deterministic ingress, roots, frontier/outbox changes and
+  bounded checkpoints; prove crash/replay/import parity and WAL reduction.
+- [ ] Store each bilateral watch seed once in an encrypted Runtime secret
+  namespace and reference it from Account materialization. Prove backup,
+  restore and dispute recovery before removing plaintext duplication.
 
-## P1 — hot-hub execution, low-hanging first
+## 3. Crash, corruption and load evidence
 
-- [ ] Use the exact `directPayment` next-hop Account returned by the handler;
-  remove the post-payment scan of every Account.
-- [ ] Canonicalize Account map keys once at validation/insertion and use direct
-  `accounts.get(id)`; remove every case-insensitive linear lookup.
-- [ ] Validate each same-J resting pair once per matching pass, mirroring the
-  existing cross-J asserted-pair set.
-- [ ] Replace the repeatedly copied/filtered/sorted `proposableAccounts` Set
-  with one deterministic stable queue. Delete production `deterministicState`
-  after proving its callers use only `newState`.
-- [ ] Drive same-J/cross-J matching, fill/cancel drains and TTL work only from
-  dirty pair/admission/deadline indexes. Use deterministic crontab/min-heap
-  deadlines rather than scanning all persisted books each Entity frame.
-- [ ] Sign each single-signer digest once and derive both the Hanko envelope and
-  `collectedSigs` representation from that exact ECDSA result. Keep one signing
-  primitive and prove byte/exact-recovery parity before deleting the duplicate.
-- [ ] Carry an internal branded `VerifiedWitness` through one CandidateExecution
-  so certified-output and Account consensus do not recover the same nested
-  Hanko twice. Bind the brand to exact digest, entity and certified board hash;
-  never persist it or accept it from transport.
-
-## P1 — draft execution architecture
-
-- [ ] Introduce `CandidateExecution = state + effects + dirtyIndexes` and an
-  Entity `FrameDraft`: immutable base with copy-on-write only for touched
-  Accounts, books and maps. Differential tests must prove byte-identical roots.
-- [ ] Keep Account happy-path sequential optimistic application on one clone.
-  Replace the invalid-tx fallback's growing per-tx clones with a transition
-  journal/AccountDraft; commit once or replay once with the root tripwire.
-- [ ] Cache the Entity Account-section commitment and update it from touched
-  Account keys. Preserve the existing incremental Account/book commitments.
-- [ ] Extract evaluation, certification, commit and effects from the large
-  consensus facades only after byte-identical dual-run evidence. No big-bang
-  rewrite and no second production implementation.
-
-## P1 — cross-j locality
-
-- [ ] Move sibling inspection out of the Entity reducer into a Runtime
-  `CrossJCoordinator` that emits one immutable certified cohort manifest.
-  Entity replay receives only local state plus that certified input.
-- [ ] Split immutable hash-bound `CrossJTerms` from versioned `CrossJProgress`;
-  update progress only through one pure `reduceCrossJ(event)`.
-- [ ] Keep one two-leg opening envelope and synchronous scratch validation on
-  both Runtimes. Preserve manual whole-envelope retry and no opening receipt.
-
-## Security and persistence hardening
-
-- [ ] Replace raw X25519→AEAD keys with domain-separated HKDF-SHA256 and bind
-  ciphertext to protocol/from/to/type/source-frame/message-id AAD. Switch the
-  single testnet wire atomically to binary payloads; no Base64 or legacy codec.
-- [ ] Add authenticated session key rotation for forward secrecy after the
-  signed-profile key boundary is stable. Prove recorded traffic cannot be
-  decrypted after a later static Runtime-key compromise.
-- [ ] Add WebSocket buffered-byte backpressure and per-runtime message/byte
-  token buckets. Reconcile WS, Runtime ingress and Entity-frame byte limits
-  from one typed limit source and test exact boundaries.
-- [ ] Stop repeating the replay Runtime-machine projection in every history
-  frame. Persist deterministic ingress, roots, durable frontier/outbox changes
-  and bounded checkpoints; prove crash/replay/import parity and benchmark WAL
-  bytes before replacing the one current format.
-- [ ] Store each bilateral watch seed once in a Runtime-owned encrypted secret
-  namespace and reference it from materialized Account storage. Keep keys under
-  operator/runtime custody, not HSM policy; prove backup/restore and dispute
-  recovery before removing plaintext duplication.
-
-## Storage and recovery
-
-- [ ] Extend real SIGKILL coverage through split mutation, collapse, delete,
-  restore-clear and raw `0x7e` orphan/root assertions.
-- [ ] Add snapshot/epoch/rotation/prune and corruption matrices for oversized
+- [ ] Pass real SIGKILL recovery through split mutation, collapse, delete,
+  restore-clear and raw orphan/root assertions.
+- [ ] Pass snapshot/epoch/rotation/prune/corruption matrices for oversized
   typed Account/Entity/Book values and exact 9,999/10,000-byte boundaries.
-- [ ] Show linked manifest→branch→leaf physical paths, bytes and checksums in
-  the browser DB reader with laptop/mobile/wide screenshot E2E.
-- [ ] In one future fresh schema, replace proof-history CAS families and
-  generic oversized Entity/Book paging with typed mutable binary owner paths;
-  hashes remain integrity checks, never key routes.
-- [ ] Add deterministic SimNetwork/SimStorage seeded delay/reorder/drop/
-  partial-write/kill tests; preserve every red seed.
+- [ ] Add deterministic SimNetwork/SimStorage delay/reorder/drop/partial-write/
+  kill tests and retain every failing seed.
+- [ ] Profile the production bootstrap and growing-hub frame path locally.
+  Remove only measured full scans/clones/duplicate crypto; publish deterministic
+  1/1,000-tx and growing-hub median/p95/MAD budgets from a clean Bun cache.
 
-## Test system and QA
+## 4. Public Ethereum and TRON proof
 
-- [ ] Make `/qa` the single public System & Quality cockpit. Put live Health
-  first, explain live signals versus immutable release evidence, move the
-  existing Health sections behind focused tabs, and redirect `/health` to the
-  matching QA tab while preserving `/api/health`. Cover mobile/laptop/wide
-  screenshots and all live-health failure states.
-- [ ] Split pure/storage/BrowserVM/stress gates and record per-file duration.
-  Replace fixed waits with state predicates and reproduce one target 10x before
-  calling it flaky.
-- [ ] Make the Account hot-path benchmark reproducible from a clean Bun cache,
-  then record deterministic 1/1,000-tx and growing-hub scaling baselines. A
-  missing dependency is a gate failure, never a reason to omit measurements.
-- [ ] Make QA verdicts bind one `candidateId = gitHead + codeHash +
-  gateConfigHash`; record unit/contract/scenario/release results and comparable
-  median/p95/MAD baselines.
-- [ ] Add a failure-fingerprint inbox with exact narrow rerun commands; use a
-  small run index/event stream and lazy evidence instead of full polling.
-- [ ] Keep shareable history projections separate from exact recovery bundles
-  so a viewer does not disclose the complete financial Runtime state.
+- [ ] Finish the native TRON adapter: protobuf transaction signing/broadcast,
+  live energy fee limits, SolidityNode finality, complete authenticated
+  receipts and exact EVM/base58/hex41 address parity.
+- [ ] Freeze a candidate SHA, verify the existing Nile Depository with official
+  USDT token ID 1 and immutable 28,800-block dispute delay, then perform real
+  approve, deposit, cooperative withdrawal and both dispute paths.
+- [ ] Deploy the same candidate to Ethereum Sepolia and prove deposit,
+  settlement, cooperative withdrawal and both dispute paths against public RPC
+  receipts.
+- [ ] Prove Ethereum-Sepolia ↔ TRON-Nile cross-J full fill, partial GTC, manual
+  close, restart/replay, route hashes and chain-domain deadlines.
+- [ ] Define and independently review the TRON authority-proof domain. TRON
+  headers commit transactions rather than Ethereum receipt tries; never
+  synthesize an Ethereum MPT proof or trust one RPC witness.
 
-## Next release — company formation, IPO and takeover
+## 5. Immutable mainnet release pipeline
 
-- [ ] Add E2E company registration that creates the Entity and all seed-derived
-  signers in one user action: founder 1-of-1 → directors 2-of-3, with exact
-  board/Hanko and restart persistence checks.
-- [ ] Mint distinct native control and dividend classes. Company treasury owns
-  the initial supply; listing hub receives no ownership or custody.
-- [ ] Implement IPO as treasury collateral in the company's Account with the
-  selected hub. The company acts as maker, the hub creates the trading pair,
-  and buyers trade USDT/UTC for control or dividend shares immediately.
-- [ ] Implement buyback as an ordinary treasury bid for its own shares through
-  the same hub. Dividend cash payouts remain out of scope for this release.
-- [ ] Implement control takeover: a collateralized holder proving >50% control
-  can schedule board replacement after at least seven days. Activation must
-  preserve pre-existing proof validity until the delay expires, then reject old
-  board signatures without stopping trading or buybacks.
-- [ ] Cover founder issuance, partial sale, multiple buyers, failed 50%, valid
-  >50%, delayed rotation, old-signature rejection, restart/replay and continued
-  market operation in one screenshot-driven TradFi-style flow.
-
-## Mainnet acceptance
-
-- [ ] No artificial deposit cap. UI and docs state testnet risk; protocol
-  safety comes from invariant proofs, not a hidden amount branch.
-- [ ] Run `bun run gate:mainnet` on the exact immutable release SHA; never
-  substitute a narrower test profile for mainnet acceptance.
-- [ ] Complete external contract/runtime audit on an immutable SHA, full
-  conservation/fuzz/dispute/recovery gates, Ethereum and TRON testnets, release
-  rehearsal and production monitoring before enabling real funds.
-
-## External audit handoff
-
-- [ ] Publish the immutable SHA, reproducible gate commands, contract addresses,
-  deployment receipts and scoped known limitations for independent review.
+- [ ] Bind every result to
+  `candidateId = gitHead + codeHash + gateConfigHash`; store unit, contract,
+  scenario, browser, recovery, public-chain and release evidence together.
+- [ ] Run L1/L2 first, then exactly one unchanged-candidate unified full E2E,
+  `bun run check`, `bun run gate:release` and the uninterrupted
+  `bun run gate:mainnet`.
+- [ ] Complete an independent contract/runtime audit on the immutable SHA with
+  conservation, fuzz, dispute and recovery evidence plus public deployment
+  receipts and explicit known limitations.
+- [ ] Merge only the proven SHA into clean `main`, tag, publish, deploy the
+  production servers/contracts, verify live health and books, and upload the
+  unified story videos plus API evidence.

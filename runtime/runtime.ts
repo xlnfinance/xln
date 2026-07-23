@@ -4298,6 +4298,7 @@ type RuntimeFrameTransaction = {
   liveEnv: Env;
   workingEnv: Env;
   ingressBuffer: RuntimeFrameIngressBuffer;
+  sharedStateBaseline: Map<string, { present: boolean; value: unknown }>;
   liveFrameLogBaseLength: number;
   workingCleanLogBaseLength: number;
   liveAdapters: Set<JAdapter>;
@@ -4422,6 +4423,16 @@ const createRuntimeFrameTransaction = (liveEnv: Env): RuntimeFrameTransaction =>
   const workingEnv = cloneRuntimeFrameWorkingEnv(liveEnv);
   const workingMempool = ensureRuntimeMempool(workingEnv);
   const workingState = ensureRuntimeState(workingEnv);
+  const liveState = ensureRuntimeState(liveEnv);
+  const sharedStateBaseline = new Map(
+    [...RUNTIME_FRAME_SHARED_STATE_KEYS].map((key) => [
+      key,
+      {
+        present: Object.prototype.hasOwnProperty.call(liveState, key),
+        value: (liveState as Record<string, unknown>)[key],
+      },
+    ]),
+  );
   const concurrentMempool: RuntimeInput = { runtimeTxs: [], entityInputs: [] };
   const ingressBuffer = beginRuntimeFrameIngressBuffer(liveEnv);
   // Operational producers read the live Env while this private working Env is
@@ -4434,6 +4445,7 @@ const createRuntimeFrameTransaction = (liveEnv: Env): RuntimeFrameTransaction =>
     liveEnv,
     workingEnv,
     ingressBuffer,
+    sharedStateBaseline,
     liveFrameLogBaseLength: liveEnv.frameLogs.length,
     workingCleanLogBaseLength: workingState.cleanLogs?.length ?? 0,
     liveAdapters: new Set(Array.from(liveEnv.jReplicas.values())
@@ -4499,10 +4511,26 @@ const publishRuntimeFrameTransaction = (transaction: RuntimeFrameTransaction): E
   const concurrentMempool = ensureRuntimeMempool(liveEnv);
   const workingMempool = ensureRuntimeMempool(workingEnv);
   const liveOnlyState = new Map<string, unknown>();
+  const workingOwnedSharedState = new Map<string, unknown>();
   for (const key of new Set([...RUNTIME_FRAME_SHARED_STATE_KEYS, ...RUNTIME_FRAME_CONCURRENT_STATE_KEYS])) {
     if (Object.prototype.hasOwnProperty.call(liveState, key)) {
       liveOnlyState.set(key, (liveState as Record<string, unknown>)[key]);
     }
+  }
+  for (const key of RUNTIME_FRAME_SHARED_STATE_KEYS) {
+    const baseline = transaction.sharedStateBaseline.get(key) ?? { present: false, value: undefined };
+    const livePresent = Object.prototype.hasOwnProperty.call(liveState, key);
+    const liveValue = (liveState as Record<string, unknown>)[key];
+    const workingPresent = Object.prototype.hasOwnProperty.call(workingState, key);
+    const workingValue = (workingState as Record<string, unknown>)[key];
+    const liveChanged = livePresent !== baseline.present || !Object.is(liveValue, baseline.value);
+    const workingChanged = workingPresent !== baseline.present || !Object.is(workingValue, baseline.value);
+    if (!workingChanged) continue;
+    if (liveChanged && (livePresent !== workingPresent || !Object.is(liveValue, workingValue))) {
+      throw new Error(`RUNTIME_FRAME_SHARED_STATE_CONFLICT:${key}`);
+    }
+    if (workingPresent) workingOwnedSharedState.set(key, workingValue);
+    else workingOwnedSharedState.set(key, undefined);
   }
   const mergedHints = mergeRuntimeEntityHints(workingState.entityRuntimeHints, liveState.entityRuntimeHints);
   for (const key of Object.keys(liveState)) delete (liveState as Record<string, unknown>)[key];
@@ -4517,6 +4545,13 @@ const publishRuntimeFrameTransaction = (transaction: RuntimeFrameTransaction): E
     }
   }
   for (const [key, value] of liveOnlyState) (liveState as Record<string, unknown>)[key] = value;
+  for (const [key, value] of workingOwnedSharedState) {
+    if (value === undefined && !Object.prototype.hasOwnProperty.call(workingState, key)) {
+      delete (liveState as Record<string, unknown>)[key];
+    } else {
+      (liveState as Record<string, unknown>)[key] = value;
+    }
+  }
   if (mergedHints) liveState.entityRuntimeHints = mergedHints;
 
   const workingCleanLogTail = (workingState.cleanLogs ?? []).slice(transaction.workingCleanLogBaseLength);

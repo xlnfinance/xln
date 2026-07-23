@@ -392,20 +392,13 @@ const MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
   1,
   Number(process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '1000'),
 );
-const MARKET_MAKER_CROSS_LEVELS_PER_PAIR = Math.max(
-  1,
-  Math.min(1000, Number(process.env['MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '10')),
-);
+// One canonical visible ladder for every market. A production shell override
+// previously reduced cross-J to three levels while same-J exposed ten, so
+// health was green although users saw a materially thinner cross-J book.
+const MARKET_MAKER_LEVELS_PER_SIDE = 10;
 const MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE = Math.max(
   1,
   Math.min(1000, Number(process.env['MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE'] || '1000')),
-);
-const MARKET_MAKER_MAX_LEVELS_PER_PAIR = Math.max(
-  1,
-  Math.min(
-    1000,
-    Number(process.env['MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '10'),
-  ),
 );
 const MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL = String(
   process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL'] || '',
@@ -1187,7 +1180,7 @@ export const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: num
       Math.floor(LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS / Math.max(1, pairContexts.length * 2)),
     );
     const maxLevels = Math.min(
-      MARKET_MAKER_MAX_LEVELS_PER_PAIR,
+      MARKET_MAKER_LEVELS_PER_SIDE,
       maxLevelsByAccountLimit,
       pairContexts.reduce((max, entry) => Math.max(max, entry.levelProfile.offsetsBps.length), 0),
     );
@@ -1383,7 +1376,7 @@ export const buildMarketMakerCrossOfferSpecs = (
       const pairPolicy = getSwapPairPolicyByBaseQuote(oriented.baseTokenId, oriented.quoteTokenId);
       const levelProfile = getMarketMakerLevelProfile(oriented.baseTokenId, oriented.quoteTokenId);
       const levelCount = Math.min(
-        MARKET_MAKER_CROSS_LEVELS_PER_PAIR,
+        MARKET_MAKER_LEVELS_PER_SIDE,
         levelProfile.offsetsBps.length,
       );
 
@@ -2165,7 +2158,7 @@ const buildMarketMakerCrossPlanSummary = (
       );
     }
   }
-  const expectedOffersPerPair = expectedRoutes > 0 ? MARKET_MAKER_CROSS_LEVELS_PER_PAIR : 0;
+  const expectedOffersPerPair = expectedRoutes > 0 ? MARKET_MAKER_LEVELS_PER_SIDE : 0;
   return {
     applicable: expectedRoutes > 0,
     expectedJobs,

@@ -1288,7 +1288,8 @@ describe('storage frame journal retention', () => {
       storage: {
         ...(env.runtimeConfig?.storage || {}),
         snapshotPeriodFrames: 1000,
-        epochMaxBytes: 1,
+        retainSnapshots: 1,
+        epochMaxBytes: 1_000_000,
       },
     };
 
@@ -1321,6 +1322,24 @@ describe('storage frame journal retention', () => {
         },
       }],
       entityInputs: [],
+    });
+    await processRuntime(env, []);
+
+    // Production reaches the byte threshold after the live Env already owns
+    // open LevelDB handles. Rotation must replace those handles at publish;
+    // retaining the closed pre-rotation handle makes the next frame halt with
+    // "Database is not open".
+    env.runtimeConfig.storage.epochMaxBytes = 1;
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId,
+        signerId: signer,
+        entityTxs: [{
+          type: 'profile-update',
+          data: { profile: { entityId, name: 'rotation-trigger' } },
+        }],
+      }],
     });
     await processRuntime(env, []);
 

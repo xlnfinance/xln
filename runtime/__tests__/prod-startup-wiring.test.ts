@@ -320,7 +320,7 @@ describe('production startup wiring', () => {
     expect(script).toContain('export RELAY_URL=${RELAY_URL:-$INTERNAL_RELAY_URL}');
     expect(script).toContain('--relay-url "$RELAY_URL"');
     expect(script).toContain('--rpc2-url "$ANVIL_RPC2"');
-    expect(script).toContain('export XLN_RUNTIME_EXIT_ON_FATAL=${XLN_RUNTIME_EXIT_ON_FATAL:-0}');
+    expect(script).toContain('export XLN_RUNTIME_EXIT_ON_FATAL=1');
     expect(script).toContain('export XLN_STORAGE_WRITE_TIMEOUT_MS=${XLN_STORAGE_WRITE_TIMEOUT_MS:-60000}');
     expect(script).toContain('export XLN_SNAPSHOT_INTERVAL_FRAMES=${XLN_SNAPSHOT_INTERVAL_FRAMES:-1024}');
     expect(script).not.toContain('HUB_BOOTSTRAP_PAUSE_STORAGE');
@@ -337,8 +337,8 @@ describe('production startup wiring', () => {
     expect(script).toContain('export MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME=${MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME:-0}');
     expect(script).toContain('export MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME=${MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME:-0}');
     expect(script).toContain('export XLN_CUSTODY_PUBLIC_RPC_URL=${XLN_CUSTODY_PUBLIC_RPC_URL:-wss://custody.xln.finance/rpc}');
-    expect(script).toContain('export MARKET_MAKER_MAX_LEVELS_PER_PAIR=${MARKET_MAKER_MAX_LEVELS_PER_PAIR:-10}');
-    expect(script).toContain('export MARKET_MAKER_CROSS_LEVELS_PER_PAIR=${MARKET_MAKER_CROSS_LEVELS_PER_PAIR:-3}');
+    expect(script).not.toContain('MARKET_MAKER_MAX_LEVELS_PER_PAIR');
+    expect(script).not.toContain('MARKET_MAKER_CROSS_LEVELS_PER_PAIR');
     expect(script).toContain(
       'export MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE=${MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE:-1000}',
     );
@@ -489,7 +489,7 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('const buildRpcChildEnv = (): Record<string, string> => {');
     expect(orchestrator).toContain('const rpcProxyIndex = resolveRpcProxyIndex(pathname);');
     expect(orchestrator).toContain("return await proxyRpc(request, args.rpcUrls[rpcProxyIndex] || '', operatorAuthorized);");
-    expect(orchestrator).toContain("XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '0'");
+    expect(orchestrator.match(/XLN_RUNTIME_EXIT_ON_FATAL: '1'/g)).toHaveLength(2);
     expect(orchestrator).toContain("XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000'");
     expect(orchestrator).not.toContain('HUB_BOOTSTRAP_PAUSE_STORAGE');
     expect(orchestrator).not.toContain('HUB_READY_SNAPSHOT');
@@ -685,10 +685,10 @@ describe('production startup wiring', () => {
     );
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK)');
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK)');
-    expect(mmNode).toContain("MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '10'");
+    expect(mmNode).toContain('const MARKET_MAKER_LEVELS_PER_SIDE = 10;');
     expect(mmNode).toContain("MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE'] || '1000'");
     expect(mmNode).toContain('pairs.slice(0, MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE)');
-    expect(mmNode).toContain("MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '10'");
+    expect(mmNode).not.toContain("MARKET_MAKER_MAX_LEVELS_PER_PAIR']");
     expect(mmNode).not.toContain("MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '6'");
     expect(mmNode).not.toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '6'");
     expect(mmNode).not.toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '36'");
@@ -1539,8 +1539,8 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("XLN_ENTITY_FRAME_SLOW_MS: process.env['XLN_ENTITY_FRAME_SLOW_MS'] || '250'");
     expect(smoke).toContain('throw new Error(`LOCAL_PROD_SMOKE_MM_HEALTH_FAILED error=${message}`);');
     expect(smoke).toContain("if (message.includes('LOCAL_PROD_SMOKE_MM_HEALTH_FAILED')) throw error;");
-    expect(smoke).toContain("MARKET_MAKER_MAX_LEVELS_PER_PAIR: process.env['MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '10'");
-    expect(smoke).toContain("MARKET_MAKER_CROSS_LEVELS_PER_PAIR: process.env['MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '3'");
+    expect(smoke).not.toContain('MARKET_MAKER_MAX_LEVELS_PER_PAIR:');
+    expect(smoke).not.toContain('MARKET_MAKER_CROSS_LEVELS_PER_PAIR:');
     expect(smoke).toContain("process.env['MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE'] || '1000'");
     expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'");
     expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '1000'");
