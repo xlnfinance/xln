@@ -80,7 +80,7 @@ test.describe('dockview', () => {
     const importUrl = await resolveRuntimeImportAppUrl(page, {
       appBaseUrl: APP_BASE_URL,
       apiBaseUrl: API_BASE_URL,
-      access: 'read',
+      access: 'admin',
     });
     await page.goto(importUrl, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => {

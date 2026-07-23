@@ -23,10 +23,10 @@ export const resolveRuntimeImportAppUrl = async (
   options: {
     appBaseUrl: string;
     apiBaseUrl: string;
-    access?: 'read' | 'admin';
+    access?: 'admin';
   },
 ): Promise<string> => {
-  const access = options.access ?? 'read';
+  const access = options.access ?? 'admin';
   const bases = [
     options.appBaseUrl,
     options.apiBaseUrl,

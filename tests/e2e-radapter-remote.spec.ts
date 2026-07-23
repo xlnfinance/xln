@@ -53,7 +53,7 @@ type RuntimeImportSummary = {
 
 type RuntimeImportCapability = {
   label: string;
-  access: 'read' | 'admin';
+  access: 'admin';
   wsUrl: string;
   token: string;
 };
@@ -479,7 +479,7 @@ const resolveHubRuntimeEndpoint = async (
 
 const readRuntimeImportCapabilities = async (
   page: import('@playwright/test').Page,
-  access: 'read' | 'admin',
+  access: 'admin',
   timeoutMs = 60_000,
 ): Promise<RuntimeImportCapability[]> => {
   const startedAt = Date.now();
@@ -516,7 +516,7 @@ const readRuntimeImportCapabilities = async (
 const resolveRuntimeImportCapability = async (
   page: import('@playwright/test').Page,
   endpoint: HubRuntimeEndpoint,
-  access: 'read' | 'admin',
+  access: 'admin',
 ): Promise<RuntimeImportCapability> => {
   const entries = await readRuntimeImportCapabilities(page, access);
   const expectedWsUrl = normalizeRuntimeWsUrl(endpoint.wsUrl);
@@ -1006,7 +1006,7 @@ test('local runtime creation while remote is active switches controller to embed
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
   const wsUrl = h1Endpoint.wsUrl;
-  const key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
+  const key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
 
   await page.goto(`${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(key)}`, {
     waitUntil: 'domcontentloaded',
@@ -1019,7 +1019,7 @@ test('local runtime creation while remote is active switches controller to embed
       };
       return String((view as any).__xln?.view?.runtimeId || '') === runtimeId &&
         Number((view as any).__xln?.view?.height || 0) > 0 &&
-        (view as any).__xln?.adapter?.status().authLevel === 'inspect' &&
+        (view as any).__xln?.adapter?.status().authLevel === 'admin' &&
         localStorage.getItem('xln-runtime-adapter-ws') === ws;
     },
     { runtimeId: h1Endpoint.runtimeId, ws: wsUrl },
@@ -1320,10 +1320,10 @@ test('admin remote runtime opens swap workspace from RuntimeView projection', { 
   ).toEqual([]);
 });
 
-test('read remote runtime opens normal app workspace', { tag: '@functional' }, async ({ page }) => {
+test('admin remote runtime opens normal app workspace', { tag: '@functional' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
-  const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
+  const adminKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
   const consoleProblems: string[] = [];
   page.on('console', (message) => {
     const text = message.text();
@@ -1333,7 +1333,7 @@ test('read remote runtime opens normal app workspace', { tag: '@functional' }, a
   page.on('pageerror', (error) => consoleProblems.push(`pageerror: ${error.message}`));
 
   await page.goto(
-    `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(readKey)}#accounts`,
+    `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(adminKey)}#accounts`,
     { waitUntil: 'domcontentloaded' },
   );
 
@@ -1344,7 +1344,7 @@ test('read remote runtime opens normal app workspace', { tag: '@functional' }, a
         __xlnRuntimeAdapter?: { status: () => { connected?: boolean; authLevel?: string | null } };
       };
       const status = (view as any).__xln?.adapter?.status();
-      return status?.connected === true && status.authLevel === 'inspect' && Number((view as any).__xln?.view?.height || 0) > 0;
+      return status?.connected === true && status.authLevel === 'admin' && Number((view as any).__xln?.view?.height || 0) > 0;
     },
     null,
     { timeout: REMOTE_E2E_WAIT_MS },
@@ -1371,7 +1371,7 @@ test('read remote runtime opens normal app workspace', { tag: '@functional' }, a
     };
   });
 
-  expect(result.authLevel).toBe('inspect');
+  expect(result.authLevel).toBe('admin');
   expect(result.walletLens).toBe(false);
   expect(result.opsLens).toBe(false);
   expect(result.liquidityLens).toBe(false);
@@ -1386,14 +1386,14 @@ test('read remote runtime opens normal app workspace', { tag: '@functional' }, a
   ).toEqual([]);
 });
 
-test('inspect remote runtime does not expose RuntimeInput send and keeps account projection readable', { tag: '@resilience' }, async ({ page }) => {
+test('admin remote runtime keeps raw RuntimeInput send private and account projection readable', { tag: '@resilience' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const hubs = await waitForNamedHubs(page, ['h1'], { apiBaseUrl: API_BASE_URL });
   const h1 = String(hubs.h1 || '').toLowerCase();
   expect(h1).toMatch(/^0x[0-9a-f]{64}$/);
 
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
-  const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
+  const adminKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
   const consoleProblems: string[] = [];
   page.on('console', (message) => {
     const text = message.text();
@@ -1403,7 +1403,7 @@ test('inspect remote runtime does not expose RuntimeInput send and keeps account
   page.on('pageerror', (error) => consoleProblems.push(`pageerror: ${error.message}`));
 
   await page.goto(
-    `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(readKey)}#accounts`,
+    `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(adminKey)}#accounts`,
     { waitUntil: 'domcontentloaded' },
   );
 
@@ -1422,8 +1422,8 @@ test('inspect remote runtime does not expose RuntimeInput send and keeps account
       };
       const status = (view as any).__xln?.adapter?.status();
       return status?.connected === true &&
-        status.authLevel === 'inspect' &&
-        status.permissions === 'read' &&
+        status.authLevel === 'admin' &&
+        status.permissions === 'write' &&
         String((view as any).__xln?.view?.runtimeId || status.runtimeId || '') === expectedRuntimeId &&
         Number((view as any).__xln?.view?.height || 0) > 0;
     },
@@ -1479,10 +1479,10 @@ test('inspect remote runtime does not expose RuntimeInput send and keeps account
     };
   }, { hubId: h1 });
 
-  expect(result.authLevelBefore).toBe('inspect');
-  expect(result.authLevelAfter).toBe('inspect');
-  expect(result.permissionsBefore).toBe('read');
-  expect(result.permissionsAfter).toBe('read');
+  expect(result.authLevelBefore).toBe('admin');
+  expect(result.authLevelAfter).toBe('admin');
+  expect(result.permissionsBefore).toBe('write');
+  expect(result.permissionsAfter).toBe('write');
   expect(result.sendPresent).toBe(false);
   expect(result.beforeHeight).toBeGreaterThan(0);
   expect(result.afterHeight).toBeGreaterThanOrEqual(result.beforeHeight);
@@ -1499,7 +1499,7 @@ test('inspect remote runtime does not expose RuntimeInput send and keeps account
 test('address explorer bootstraps remote runtime projection outside app shell', { tag: '@functional' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
-  const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
+  const adminKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
   const consoleProblems: string[] = [];
   page.on('console', (message) => {
     const text = message.text();
@@ -1509,7 +1509,7 @@ test('address explorer bootstraps remote runtime projection outside app shell', 
   page.on('pageerror', (error) => consoleProblems.push(`pageerror: ${error.message}`));
 
   await page.goto(
-    `${APP_BASE_URL}/address?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(readKey)}`,
+    `${APP_BASE_URL}/address?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(adminKey)}`,
     { waitUntil: 'domcontentloaded' },
   );
 
@@ -1519,7 +1519,7 @@ test('address explorer bootstraps remote runtime projection outside app shell', 
         __xlnRuntimeAdapter?: { status: () => { connected?: boolean; authLevel?: string | null; height?: number } };
       };
       const status = (view as any).__xln?.adapter?.status();
-      return status?.connected === true && status.authLevel === 'inspect' && Number(status.height || 0) > 0;
+      return status?.connected === true && status.authLevel === 'admin' && Number(status.height || 0) > 0;
     },
     null,
     { timeout: REMOTE_E2E_WAIT_MS },
@@ -1551,7 +1551,7 @@ test('address explorer bootstraps remote runtime projection outside app shell', 
   expect(directory.rows).toBeGreaterThan(0);
   expect(directory.firstAddress).toMatch(/^0x[0-9a-f]{64}$/);
   expect(directory.adapter?.connected).toBe(true);
-  expect(directory.adapter?.authLevel).toBe('inspect');
+  expect(directory.adapter?.authLevel).toBe('admin');
   expect(directory.storageMode).toBe('remote');
   expect(directory.storageWs).toBe(h1Endpoint.wsUrl);
   expect(directory.sessionKeyPresent).toBe(true);
@@ -1577,7 +1577,6 @@ test('admin remote runtime opens settings projection without legacy Env settings
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
   const adminKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
-  const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
   const consoleProblems: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') consoleProblems.push(message.text());
@@ -1634,7 +1633,7 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
   const wsUrl = h1Endpoint.wsUrl;
-  const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
+  const adminKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
   const qaApiRequests: string[] = [];
   const debugProjectionRequests: string[] = [];
   const consoleProblems: string[] = [];
@@ -1694,17 +1693,17 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
 
   const adapterPanel = page.locator('#runtime-adapter');
   await adapterPanel.locator('input[placeholder="ws://127.0.0.1:8080/rpc"]').fill(wsUrl);
-  await adapterPanel.locator('input[placeholder="read/admin token"]').fill(readKey);
+  await adapterPanel.locator('input[placeholder="read/admin token"]').fill(adminKey);
   await adapterPanel.getByRole('button', { name: 'Connect', exact: true }).click();
   await expect(adapterPanel).toContainText('connected', { timeout: REMOTE_E2E_WAIT_MS });
-  await expect(adapterPanel).toContainText('inspect', { timeout: REMOTE_E2E_WAIT_MS });
+  await expect(adapterPanel).toContainText('admin', { timeout: REMOTE_E2E_WAIT_MS });
   await page.waitForFunction(() => {
     const panel = document.querySelector('#runtime-adapter');
     const text = panel?.textContent || '';
     return /Entities\s+[1-9]/.test(text) && /Latest\s+[1-9]/.test(text);
   }, null, { timeout: REMOTE_E2E_WAIT_MS });
 
-  await page.goto(`${APP_BASE_URL}/radapter?ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(readKey)}`, {
+  await page.goto(`${APP_BASE_URL}/radapter?ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(adminKey)}`, {
     waitUntil: 'domcontentloaded',
   });
   await expect(page).toHaveURL(/\/app#accounts$/);
@@ -1713,7 +1712,7 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
       __xlnRuntimeAdapter?: { status: () => { connected?: boolean; authLevel?: string | null } };
     };
     const status = (view as any).__xln?.adapter?.status();
-    return status?.connected === true && status.authLevel === 'inspect';
+    return status?.connected === true && status.authLevel === 'admin';
   }, null, { timeout: REMOTE_E2E_WAIT_MS });
   const appState = await page.evaluate(() => ({
     url: window.location.href,
@@ -1724,8 +1723,8 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
   expect(appState.url).not.toContain('runtime=remote');
   expect(appState.url).not.toContain('ws=');
   expect(appState.activeWsUrl).toBe(wsUrl);
-  expect(appState.storedAccess).toBe('read');
-  expect(appState.sessionKey).toBe(readKey);
+  expect(appState.storedAccess).toBe('admin');
+  expect(appState.sessionKey).toBe(adminKey);
   await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
 
   await page.goto(`${APP_BASE_URL}/admin`, { waitUntil: 'domcontentloaded' });
@@ -1787,10 +1786,11 @@ test('admin remote runtime control advances live state and exposes past frames',
   expect(h1).toMatch(/^0x[0-9a-f]{64}$/);
 
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
+  const h2Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H2');
   const wsUrl = h1Endpoint.wsUrl;
 
   const adminKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
-  const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
+  const staleSessionToken = (await resolveRuntimeImportCapability(page, h2Endpoint, 'admin')).token;
   await page.addInitScript(() => {
     localStorage.setItem('xln-settings', JSON.stringify({ showTimeMachine: true }));
   });
@@ -1911,7 +1911,7 @@ test('admin remote runtime control advances live state and exposes past frames',
   expect(openAccountAfterReload.hubStates.every((state) => ['open', 'opening', 'closed'].includes(state))).toBe(true);
   expect(openAccountAfterReload.missingEnvError).toBe(false);
 
-  await page.evaluate(({ storageKey, wsUrl: activeWsUrl, adminToken, readToken, runtimeId }) => {
+  await page.evaluate(({ storageKey, wsUrl: activeWsUrl, adminToken, staleToken, runtimeId }) => {
     localStorage.setItem(storageKey, JSON.stringify([{
       label: 'H1 admin registry restore',
       access: 'admin',
@@ -1923,12 +1923,12 @@ test('admin remote runtime control advances live state and exposes past frames',
       entityCount: 1,
       importedAt: 1,
     }]));
-    sessionStorage.setItem('xln-runtime-adapter-key', readToken);
+    sessionStorage.setItem('xln-runtime-adapter-key', staleToken);
   }, {
     storageKey: REMOTE_RUNTIME_IMPORT_STORAGE_KEY,
     wsUrl,
     adminToken: adminKey,
-    readToken: readKey,
+    staleToken: staleSessionToken,
     runtimeId: h1Endpoint.runtimeId,
   });
   await page.reload({ waitUntil: 'domcontentloaded' });
@@ -2453,7 +2453,7 @@ test('runtime dropdown switches app-imported remote runtimes without manager rou
   const h1WsUrl = h1Endpoint.wsUrl;
   const h2WsUrl = h2Endpoint.wsUrl;
 
-  const h1Key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
+  const h1Key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
   await page.goto(`${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1WsUrl)}&token=${encodeURIComponent(h1Key)}`, {
     waitUntil: 'domcontentloaded',
   });
