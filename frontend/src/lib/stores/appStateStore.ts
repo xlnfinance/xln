@@ -31,6 +31,8 @@ export interface AppState {
   // View mode (from viewModeStore)
   viewMode: ViewMode;
 
+  requestedDockPanel: string | null;
+
   // Hierarchical navigation (from navigationStore)
   navigation: NavigationSelection;
 }
@@ -61,6 +63,7 @@ function loadState(): AppState {
     mode: 'user',
     landingVisible: true,
     viewMode: 'home',
+    requestedDockPanel: null,
     navigation: {
       runtime: 'local',
       jurisdiction: null,
@@ -81,6 +84,7 @@ function loadState(): AppState {
     viewMode: (savedViewMode === 'home' || savedViewMode === 'settings' || savedViewMode === 'docs' ||
                savedViewMode === 'brainvault' || savedViewMode === 'panels' || savedViewMode === 'graph3d' ||
                savedViewMode === 'terminal') ? savedViewMode : 'home',
+    requestedDockPanel: null,
     navigation: {
       runtime: 'local',
       jurisdiction: null,
@@ -99,7 +103,6 @@ function saveState(state: AppState) {
 
 // Create store
 export const appState = writable<AppState>(loadState());
-export const requestedDockPanel = writable<string | null>(null);
 
 // Auto-save on changes
 appState.subscribe(state => saveState(state));
@@ -115,9 +118,14 @@ export const appStateOperations = {
     appState.update(s => ({ ...s, mode }));
   },
 
-  openDockPanel(panelId: string) {
-    requestedDockPanel.set(panelId);
-    appState.update(s => ({ ...s, mode: 'dev' }));
+  openDockPanel(panelId: string): void {
+    appState.update(s => ({ ...s, mode: 'dev', requestedDockPanel: panelId }));
+  },
+
+  clearDockPanelRequest(panelId: string): void {
+    appState.update(s => s.requestedDockPanel === panelId
+      ? { ...s, requestedDockPanel: null }
+      : s);
   },
 
   // Landing visibility
