@@ -9,6 +9,7 @@ import { openAccountWorkspaceTab } from './utils/e2e-account-workspace';
 import { resolveRuntimeImportAppUrl } from './utils/e2e-runtime-import';
 import { closeRuntimeContext } from './utils/e2e-runtime-shutdown.mts';
 import { deriveSignerAddressSync } from '../runtime/account/crypto';
+import { HUB_MESH_CREDIT_AMOUNT } from '../runtime/orchestrator/mesh-common';
 import { decodeRuntimeAdapterRequest } from '../runtime/radapter/codec';
 import { signRuntimeAdapterServerIdentity } from '../runtime/radapter/server-identity-signer';
 import type { RuntimeAdapterRequest } from '../runtime/radapter/types';
@@ -16,7 +17,6 @@ import type { Env } from '../runtime/types';
 
 const REMOTE_RUNTIME_IMPORT_STORAGE_KEY = 'xln-remote-runtime-imports';
 const REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY = 'xln-remote-runtime-import-last-result';
-const HUB_MESH_CREDIT_AMOUNT = '1000000000000';
 const REMOTE_E2E_WAIT_MS = 15_000;
 
 type RuntimeImportSummary = {
@@ -572,7 +572,8 @@ const expectHubMeshHealthy = (health: E2EHealthSnapshot): void => {
   const pairs = health.hubMesh?.pairs ?? [];
   for (const pair of pairs) {
     expect(pair.ok, `hub mesh pair ${pair.left}->${pair.right} must have mutual credit`).toBe(true);
-    expect(pair.expectedCreditAmount, `hub mesh pair ${pair.left}->${pair.right} credit amount`).toBe(HUB_MESH_CREDIT_AMOUNT);
+    expect(pair.expectedCreditAmount, `hub mesh pair ${pair.left}->${pair.right} credit amount`)
+      .toBe(HUB_MESH_CREDIT_AMOUNT.toString());
   }
 };
 
