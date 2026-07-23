@@ -1,8 +1,12 @@
 name: Distribution release
 
 on:
-  push:
-    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Immutable release tag to reproduce
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -14,6 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: { ref: "${{ inputs.tag }}" }
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: 1.3.14 }
       - name: Install source-check tooling
@@ -21,13 +26,14 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun install --frozen-lockfile
         working-directory: frontend
-      - run: bun run check
+      - run: bun run foundation-release:publish-check
 
   mac-launcher-desktop-chrome:
     needs: validate
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with: { ref: "${{ inputs.tag }}" }
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: 1.3.14 }
       - run: bun install --frozen-lockfile
@@ -49,6 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: { ref: "${{ inputs.tag }}" }
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: 1.3.14 }
       - uses: actions/setup-java@v4
@@ -74,6 +81,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: { ref: "${{ inputs.tag }}" }
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: 1.3.14 }
       - uses: actions/download-artifact@v4
@@ -98,7 +106,7 @@ jobs:
             assets+=("$asset")
           done < <(find native/dist/release-assets -type f -print0)
           test "${#assets[@]}" -gt 0
-          gh release create "${GITHUB_REF_NAME}" \
+          gh release create "${{ inputs.tag }}" \
             "${assets[@]}" \
             native/dist/release-manifest.json \
             native/dist/SHA256SUMS \
