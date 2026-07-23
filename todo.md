@@ -46,9 +46,10 @@ Audit claims enter this file only after reproduction against the current tree.
 - [ ] Construct unknown Account genesis ephemerally and insert it into
   `state.accounts` only after an accepted height-1 bilateral frame. A rejected
   input must not consume one of the bounded Account slots.
-- [ ] Keep the live replay tripwire permanent: after proposer and receiver
-  commit, incremental and cold Account roots must equal the signed
-  `frame.accountStateRoot`.
+- [ ] Make the implemented live replay tripwire a permanent regression gate:
+  proposer and receiver commit must prove both incremental and cold Account
+  roots equal the signed `frame.accountStateRoot`, including forced
+  validation/commit-path divergence fixtures.
 
 ## P1 — hot-hub execution, low-hanging first
 
@@ -64,6 +65,13 @@ Audit claims enter this file only after reproduction against the current tree.
 - [ ] Drive same-J/cross-J matching, fill/cancel drains and TTL work only from
   dirty pair/admission/deadline indexes. Use deterministic crontab/min-heap
   deadlines rather than scanning all persisted books each Entity frame.
+- [ ] Sign each single-signer digest once and derive both the Hanko envelope and
+  `collectedSigs` representation from that exact ECDSA result. Keep one signing
+  primitive and prove byte/exact-recovery parity before deleting the duplicate.
+- [ ] Carry an internal branded `VerifiedWitness` through one CandidateExecution
+  so certified-output and Account consensus do not recover the same nested
+  Hanko twice. Bind the brand to exact digest, entity and certified board hash;
+  never persist it or accept it from transport.
 
 ## P1 — draft execution architecture
 
@@ -108,6 +116,9 @@ Audit claims enter this file only after reproduction against the current tree.
 - [ ] Split pure/storage/BrowserVM/stress gates and record per-file duration.
   Replace fixed waits with state predicates and reproduce one target 10x before
   calling it flaky.
+- [ ] Make the Account hot-path benchmark reproducible from a clean Bun cache,
+  then record deterministic 1/1,000-tx and growing-hub scaling baselines. A
+  missing dependency is a gate failure, never a reason to omit measurements.
 - [ ] Make QA verdicts bind one `candidateId = gitHead + codeHash +
   gateConfigHash`; record unit/contract/scenario/release results and comparable
   median/p95/MAD baselines.
