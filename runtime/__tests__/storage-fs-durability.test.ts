@@ -9,7 +9,12 @@ import {
   type StorageDurabilityBoundary,
 } from '../storage/fs-durability';
 import {
+  closeFrameDb,
+  closeInfraDb,
   closeStorageDb,
+  getFrameDb,
+  getInfraDb,
+  getStorageDb,
   resolveDbPath,
   tryOpenStorageDb,
 } from '../storage/runtime-dbs';
@@ -121,5 +126,90 @@ describe('storage filesystem durability', () => {
       rmSync(markerPath, { force: true });
       rmSync(`${markerPath}.tmp`, { force: true });
     }
+  });
+
+  test('detaches a poisoned handle before close and rejects concurrent reuse', async () => {
+    let rejectClose: ((error: Error) => void) | null = null;
+    const closeFailure = new Promise<void>((_resolve, reject) => {
+      rejectClose = reject;
+    });
+    const poisonedHandle = {
+      close: () => closeFailure,
+    };
+    const env = {
+      height: 0,
+      timestamp: 0,
+      runtimeId: `storage-close-poison-${process.pid}-${Date.now()}`,
+      dbNamespace: `storage-close-poison-${process.pid}-${Date.now()}`,
+      runtimeState: {
+        storageDb: poisonedHandle,
+        storageDbOpenPromise: Promise.resolve(true),
+        storageVerifiedCurrentHeight: 7,
+      },
+    } as unknown as Env;
+    const deps = {
+      ensureRuntimeState: (target: Env) => (target.runtimeState ??= {}),
+    };
+
+    const closing = closeStorageDb(env);
+    expect(() => getStorageDb(env, deps)).toThrow(
+      'STORAGE_HANDLE_STATUS_CONFLICT:role=storage-current:status=closing',
+    );
+    expect(env.runtimeState?.storageDb).toBeNull();
+    expect(env.runtimeState?.storageDbOpenPromise).toBeNull();
+    expect(env.runtimeState?.storageVerifiedCurrentHeight).toBeUndefined();
+
+    rejectClose!(new Error('injected close failure'));
+    await expect(closing).rejects.toThrow('injected close failure');
+
+    const replacement = getStorageDb(env, deps);
+    expect(replacement).not.toBe(poisonedHandle);
+    await closeStorageDb(env);
+  });
+
+  test('frame and infra handles cannot escape after close starts', async () => {
+    const deferred = () => {
+      let resolve!: () => void;
+      const promise = new Promise<void>((done) => {
+        resolve = done;
+      });
+      return { promise, resolve };
+    };
+    const frameClose = deferred();
+    const infraClose = deferred();
+    const env = {
+      height: 0,
+      timestamp: 0,
+      runtimeId: `storage-close-all-${process.pid}-${Date.now()}`,
+      dbNamespace: `storage-close-all-${process.pid}-${Date.now()}`,
+      runtimeState: {
+        frameDb: { close: () => frameClose.promise },
+        frameDbOpenPromise: Promise.resolve(true),
+        storageVerifiedHistoryHeight: 9,
+        infraDb: { close: () => infraClose.promise },
+        infraDbOpenPromise: Promise.resolve(true),
+      },
+    } as unknown as Env;
+    const deps = {
+      ensureRuntimeState: (target: Env) => (target.runtimeState ??= {}),
+    };
+
+    const closingFrame = closeFrameDb(env);
+    const closingInfra = closeInfraDb(env);
+    expect(() => getFrameDb(env, deps)).toThrow(
+      'STORAGE_HANDLE_STATUS_CONFLICT:role=frames:status=closing',
+    );
+    expect(() => getInfraDb(env, deps)).toThrow(
+      'STORAGE_HANDLE_STATUS_CONFLICT:role=infra:status=closing',
+    );
+    expect(env.runtimeState?.frameDb).toBeNull();
+    expect(env.runtimeState?.frameDbOpenPromise).toBeNull();
+    expect(env.runtimeState?.storageVerifiedHistoryHeight).toBeUndefined();
+    expect(env.runtimeState?.infraDb).toBeNull();
+    expect(env.runtimeState?.infraDbOpenPromise).toBeNull();
+
+    frameClose.resolve();
+    infraClose.resolve();
+    await Promise.all([closingFrame, closingInfra]);
   });
 });
