@@ -240,7 +240,9 @@ const getReplicaSignerId = (replicaKey: string): string => {
   return idx === -1 ? '' : replicaKey.slice(idx + 1);
 };
 
-const GOSSIP_POLL_MS = 250; // Keep interactive account flows responsive without waiting on second-long ticks.
+// Relay push handles normal updates; exact cache misses use bounded on-demand
+// requests. This slow reconciliation only repairs missed push notifications.
+const GOSSIP_POLL_MS = 30_000;
 const PROFILE_ANNOUNCE_DEBOUNCE_MS = 25;
 const PROFILE_HEARTBEAT_MS = 15_000;
 const GOSSIP_FETCH_RETRY_DELAYS_MS = [40, 80, 160];
@@ -274,13 +276,16 @@ export class RuntimeP2P {
   private directClients = new Map<string, RuntimeWsClient>();
   private directClientUrls = new Map<string, string>();
   private directClientErrors = new Map<string, { at: number; error: string }>();
-  private verifiedProfileRoutes: Map<string, { runtimeId: string; lastUpdated: number }>;
+  private verifiedProfileRoutes: Map<string, {
+    runtimeId: string;
+    runtimeEncPubKey: string;
+    lastUpdated: number;
+  }>;
   private bootstrapPollTimer: ReturnType<typeof setTimeout> | null = null;
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private visibilityHandler: (() => void) | null = null;
   private focusHandler: (() => void) | null = null;
   private encryptionKeyPair: P2PKeyPair;
-  private peerRuntimeEncPubKeys = new Map<string, string>();
   private announceTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingAnnounceEntities = new Set<string>();
   private lastHeartbeatAnnounceAt = 0;
@@ -384,14 +389,7 @@ export class RuntimeP2P {
         useHelloAuth: true,
         encryptionKeyPair: this.encryptionKeyPair,
         onPeerEncryptionKey: (fromRuntimeId: string, pubKeyHex: string) => {
-          if (this.closing || this.closed) return;
-          const normalizedRuntimeId = normalizeRuntimeId(fromRuntimeId);
-          const normalizedKey = typeof pubKeyHex === 'string'
-            ? (pubKeyHex.startsWith('0x') ? pubKeyHex.toLowerCase() : `0x${pubKeyHex.toLowerCase()}`)
-            : '';
-          if (!normalizedRuntimeId) return;
-          if (!/^0x[0-9a-f]{64}$/.test(normalizedKey)) return;
-          this.peerRuntimeEncPubKeys.set(normalizedRuntimeId, normalizedKey);
+          this.handlePeerEncryptionKey(fromRuntimeId, pubKeyHex);
         },
         getTargetEncryptionKey: (targetRuntimeId: string) => {
           return this.resolveTargetEncryptionKey(targetRuntimeId);
@@ -458,7 +456,6 @@ export class RuntimeP2P {
     this.shutdownController.abort();
     this.stopPolling();
     this.unregisterVisibilityReconnect();
-    this.peerRuntimeEncPubKeys.clear();
     if (this.announceTimer) {
       clearTimeout(this.announceTimer);
       this.announceTimer = null;
@@ -545,20 +542,28 @@ export class RuntimeP2P {
   getQueueState(): { targetCount: number; totalMessages: number; oldestEntryAge: number; perTarget: Record<string, number> } {
     const pending = this.env.pendingNetworkOutputs ?? [];
     const perTarget: Record<string, number> = {};
+    let oldestTimestamp = Number.POSITIVE_INFINITY;
     for (const output of pending) {
       const targetId = String(output.runtimeId || 'unresolved');
       perTarget[targetId] = (perTarget[targetId] ?? 0) + 1;
+      const timestamp = Number(output.sourceRuntimeFrame?.timestamp);
+      if (Number.isSafeInteger(timestamp) && timestamp >= 0) {
+        oldestTimestamp = Math.min(oldestTimestamp, timestamp);
+      }
     }
     return {
       targetCount: Object.keys(perTarget).length,
       totalMessages: pending.length,
-      oldestEntryAge: 0,
+      oldestEntryAge: Number.isFinite(oldestTimestamp)
+        ? Math.max(0, Number(this.env.timestamp ?? oldestTimestamp) - oldestTimestamp)
+        : 0,
       perTarget,
     };
   }
 
   getVerifiedRuntimeRoute(entityId: string): { runtimeId: string; lastUpdated: number } | null {
-    return this.verifiedProfileRoutes.get(String(entityId || '').toLowerCase()) ?? null;
+    const route = this.verifiedProfileRoutes.get(String(entityId || '').toLowerCase());
+    return route ? { runtimeId: route.runtimeId, lastUpdated: route.lastUpdated } : null;
   }
 
   private rememberVerifiedProfileRoute(profile: Profile): void {
@@ -567,6 +572,7 @@ export class RuntimeP2P {
     if (existing && existing.lastUpdated >= profile.lastUpdated) return;
     this.verifiedProfileRoutes.set(key, {
       runtimeId: normalizeRuntimeId(profile.runtimeId),
+      runtimeEncPubKey: profile.runtimeEncPubKey,
       lastUpdated: profile.lastUpdated,
     });
     if (!this.env.runtimeState) this.env.runtimeState = {};
@@ -1496,49 +1502,45 @@ export class RuntimeP2P {
   private resolveTargetEncryptionKey(targetRuntimeId: string): Uint8Array | null {
     const normalizedTargetRuntimeId = normalizeRuntimeId(targetRuntimeId);
     if (!normalizedTargetRuntimeId) return null;
-    const hintedKey = this.peerRuntimeEncPubKeys.get(normalizedTargetRuntimeId);
-    if (hintedKey) {
-      try {
-        return hexToPubKey(hintedKey);
-      } catch {
-        this.peerRuntimeEncPubKeys.delete(normalizedTargetRuntimeId);
-      }
-    }
-    const profiles = this.env.gossip?.getProfiles?.() || [];
-    const keyStats = new Map<string, { count: number; latestTs: number }>();
-    for (const profile of profiles) {
-      if (normalizeRuntimeId(profile.runtimeId || '') !== normalizedTargetRuntimeId) continue;
-      const rawKey = profile.runtimeEncPubKey;
+    const signedKeys = new Set<string>();
+    for (const route of this.verifiedProfileRoutes.values()) {
+      if (normalizeRuntimeId(route.runtimeId) !== normalizedTargetRuntimeId) continue;
+      const rawKey = route.runtimeEncPubKey;
       if (typeof rawKey !== 'string' || rawKey.length === 0) continue;
       const normalizedKey = rawKey.startsWith('0x') ? rawKey.toLowerCase() : `0x${rawKey.toLowerCase()}`;
       if (!/^0x[0-9a-f]{64}$/.test(normalizedKey)) continue;
-      const ts = Number(profile.lastUpdated || 0);
-      const prev = keyStats.get(normalizedKey);
-      if (!prev) {
-        keyStats.set(normalizedKey, { count: 1, latestTs: ts });
-      } else {
-        prev.count += 1;
-        if (ts > prev.latestTs) prev.latestTs = ts;
-      }
+      signedKeys.add(normalizedKey);
     }
-    let selectedKey: string | null = null;
-    let selectedCount = -1;
-    let selectedTs = -1;
-    for (const [key, stat] of keyStats.entries()) {
-      if (
-        stat.count > selectedCount ||
-        (stat.count === selectedCount && stat.latestTs > selectedTs)
-      ) {
-        selectedKey = key;
-        selectedCount = stat.count;
-        selectedTs = stat.latestTs;
-      }
+    if (signedKeys.size > 1) {
+      throw new Error(`P2P_SIGNED_RUNTIME_KEY_CONFLICT: runtimeId=${normalizedTargetRuntimeId}`);
     }
+    const selectedKey = signedKeys.values().next().value as string | undefined;
     if (!selectedKey) return null;
+    return hexToPubKey(selectedKey);
+  }
+
+  private validateTransportEncryptionHint(fromRuntimeId: string, pubKeyHex: string): void {
+    if (this.closing || this.closed) return;
+    const normalizedRuntimeId = normalizeRuntimeId(fromRuntimeId);
+    if (!normalizedRuntimeId) return;
+    const signedKey = this.resolveTargetEncryptionKey(normalizedRuntimeId);
+    // Relay identities need not publish Entity profiles. Their transport hint
+    // is informational and never becomes encryption authority.
+    if (!signedKey) return;
+    const hintedKey = hexToPubKey(pubKeyHex);
+    if (signedKey.every((byte, index) => byte === hintedKey[index])) return;
+    throw new Error(`P2P_TRANSPORT_ENCRYPTION_KEY_MISMATCH: runtimeId=${normalizedRuntimeId}`);
+  }
+
+  private handlePeerEncryptionKey(fromRuntimeId: string, pubKeyHex: string): void {
     try {
-      return hexToPubKey(selectedKey);
-    } catch {
-      return null;
+      this.validateTransportEncryptionHint(fromRuntimeId, pubKeyHex);
+    } catch (error) {
+      this.env.warn('network', 'P2P_TRANSPORT_ENCRYPTION_KEY_REJECTED', {
+        runtimeId: normalizeRuntimeId(fromRuntimeId),
+        error: (error as Error).message,
+      });
+      throw error;
     }
   }
 
@@ -1579,14 +1581,7 @@ export class RuntimeP2P {
         return this.resolveTargetEncryptionKey(targetRuntimeId);
       },
       onPeerEncryptionKey: (fromRuntimeId: string, pubKeyHex: string) => {
-        if (this.closing || this.closed) return;
-        const normalizedRuntimeId = normalizeRuntimeId(fromRuntimeId);
-        const normalizedKey = typeof pubKeyHex === 'string'
-          ? (pubKeyHex.startsWith('0x') ? pubKeyHex.toLowerCase() : `0x${pubKeyHex.toLowerCase()}`)
-          : '';
-        if (!normalizedRuntimeId) return;
-        if (!/^0x[0-9a-f]{64}$/.test(normalizedKey)) return;
-        this.peerRuntimeEncPubKeys.set(normalizedRuntimeId, normalizedKey);
+        this.handlePeerEncryptionKey(fromRuntimeId, pubKeyHex);
       },
       onOpen: () => {
         if (this.closing || this.closed) return;

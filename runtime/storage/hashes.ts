@@ -367,6 +367,9 @@ const cloneMerklePathSet = (paths: Set<string>): number[][] =>
     .sort(compareStableText)
     .map(parseMerklePathKey);
 
+const sameMerklePath = (left: number[], right: number[]): boolean =>
+  left.length === right.length && left.every((slot, index) => slot === right[index]);
+
 class PersistedEntityMerkleEditor {
   private rootNodeLoaded = false;
   private rootNode: PersistedMerkleNode | null = null;
@@ -495,18 +498,29 @@ class PersistedEntityMerkleEditor {
     const rootKind = this.rootDoc.rootKind;
     const rootPath = this.rootDoc.rootPath ?? [];
     if (rootKind === 'empty' || this.leafCountValue === 0) {
+      if (this.rootDoc.rootHash !== EMPTY_RADIX_MERKLE_ROOT) {
+        throw new Error(`STORAGE_MERKLE_EMPTY_ROOT_HASH_MISMATCH: entity=${this.entityId}`);
+      }
       this.rootNode = null;
       return null;
     }
     if (rootKind === 'leaf') {
       this.rootNode = await this.loadLeaf(rootPath);
-      return this.rootNode;
-    }
-    if (rootKind === 'branch') {
+    } else if (rootKind === 'branch') {
       this.rootNode = await this.loadBranch(rootPath);
-      return this.rootNode;
+    } else {
+      throw new Error(`STORAGE_MERKLE_ROOT_UNSUPPORTED: entity=${this.entityId}`);
     }
-    throw new Error(`STORAGE_MERKLE_ROOT_UNSUPPORTED: entity=${this.entityId}`);
+    const computedRoot = computeRadixMerkleRootHash(
+      DEFAULT_ACCOUNT_MERKLE_RADIX,
+      this.rootNode.kind,
+      this.rootNode.path,
+      this.nodeHash(this.rootNode),
+    );
+    if (computedRoot !== this.rootDoc.rootHash) {
+      throw new Error(`STORAGE_MERKLE_ROOT_HASH_MISMATCH: entity=${this.entityId}`);
+    }
+    return this.rootNode;
   }
 
   private async loadLeaf(path: number[]): Promise<PersistedMerkleLeafNode> {
@@ -516,6 +530,22 @@ class PersistedEntityMerkleEditor {
       validateStorageMerkleLeafDocValue,
     );
     if (!doc) throw new Error(`STORAGE_MERKLE_LEAF_MISSING: entity=${this.entityId} path=${path.join('.')}`);
+    const keyBytes = Buffer.from(doc.key.slice(2), 'hex');
+    const expectedPath = radixMerklePathSlots(keyBytes, DEFAULT_ACCOUNT_MERKLE_RADIX);
+    const computedHash = computeRadixMerkleLeafHash(
+      keyBytes,
+      Buffer.from(doc.valueHash.slice(2), 'hex'),
+    );
+    if (
+      normalizeEntityId(doc.entityId) !== this.entityId ||
+      doc.namespace !== ENTITY_MERKLE_NAMESPACE ||
+      doc.radix !== DEFAULT_ACCOUNT_MERKLE_RADIX ||
+      !sameMerklePath(doc.path, path) ||
+      !sameMerklePath(doc.path, expectedPath) ||
+      doc.hash !== computedHash
+    ) {
+      throw new Error(`STORAGE_MERKLE_LEAF_INTEGRITY_MISMATCH: entity=${this.entityId} path=${path.join('.')}`);
+    }
     this.initialLeafPaths.add(merklePathKey(doc.path));
     return {
       kind: 'leaf',
@@ -533,6 +563,19 @@ class PersistedEntityMerkleEditor {
       validateStorageMerkleBranchDocValue,
     );
     if (!doc) throw new Error(`STORAGE_MERKLE_BRANCH_MISSING: entity=${this.entityId} path=${path.join('.')}`);
+    const computedHash = computeRadixMerkleBranchHash(
+      DEFAULT_ACCOUNT_MERKLE_RADIX,
+      doc.children.map((child) => [child.slot, child.hash]),
+    );
+    if (
+      normalizeEntityId(doc.entityId) !== this.entityId ||
+      doc.namespace !== ENTITY_MERKLE_NAMESPACE ||
+      doc.radix !== DEFAULT_ACCOUNT_MERKLE_RADIX ||
+      !sameMerklePath(doc.path, path) ||
+      doc.hash !== computedHash
+    ) {
+      throw new Error(`STORAGE_MERKLE_BRANCH_INTEGRITY_MISMATCH: entity=${this.entityId} path=${path.join('.')}`);
+    }
     this.initialBranchPaths.add(merklePathKey(doc.path));
     return {
       kind: 'branch',
@@ -550,12 +593,27 @@ class PersistedEntityMerkleEditor {
     };
   }
 
-  private async loadChild(ref: PersistedMerkleChildRef): Promise<PersistedMerkleNode> {
+  private async loadChild(parentPath: number[], ref: PersistedMerkleChildRef): Promise<PersistedMerkleNode> {
     if (ref.node) return ref.node;
-    ref.node = ref.kind === 'leaf'
+    const node = ref.kind === 'leaf'
       ? await this.loadLeaf(ref.path)
       : await this.loadBranch(ref.path);
-    return ref.node;
+    const edgeHash = computeRadixMerkleEdgeHash(
+      DEFAULT_ACCOUNT_MERKLE_RADIX,
+      parentPath,
+      node.kind,
+      node.path,
+      this.nodeHash(node),
+    );
+    if (
+      ref.kind !== node.kind ||
+      !sameMerklePath(ref.path, node.path) ||
+      ref.hash !== edgeHash
+    ) {
+      throw new Error(`STORAGE_MERKLE_CHILD_INTEGRITY_MISMATCH: entity=${this.entityId} path=${ref.path.join('.')}`);
+    }
+    ref.node = node;
+    return node;
   }
 
   private childRefFromNode(parentPath: number[], node: PersistedMerkleNode): PersistedMerkleChildRef {
@@ -661,7 +719,7 @@ class PersistedEntityMerkleEditor {
       return { node, existed: false, changed: true };
     }
 
-    const child = await this.loadChild(childRef);
+    const child = await this.loadChild(node.path, childRef);
     const result = await this.insertNode(child, leaf);
     if (!result.changed) return { node, existed: result.existed, changed: false };
     node.children.set(slot, this.childRefFromNode(node.path, result.node));
@@ -683,7 +741,7 @@ class PersistedEntityMerkleEditor {
     const slot = nodeSlotUnder(node.path, path);
     const childRef = node.children.get(slot);
     if (!childRef) return { node, deleted: false };
-    const child = await this.loadChild(childRef);
+    const child = await this.loadChild(node.path, childRef);
     const result = await this.deleteNode(child, path);
     if (!result.deleted) return { node, deleted: false };
     if (result.node) node.children.set(slot, this.childRefFromNode(node.path, result.node));
@@ -694,7 +752,7 @@ class PersistedEntityMerkleEditor {
     }
     if (node.children.size === 1) {
       const only = Array.from(node.children.values())[0]!;
-      return { node: await this.loadChild(only), deleted: true };
+      return { node: await this.loadChild(node.path, only), deleted: true };
     }
     return { node, deleted: true };
   }

@@ -16,6 +16,8 @@ import { liveKeyForDoc } from '../storage/doc-refs';
 import { prepareStorageStateHashes } from '../storage/hashes';
 import {
   KEY_HEAD,
+  KEY_MERKLE_BRANCH,
+  KEY_MERKLE_LEAF,
   STORAGE_SCHEMA_VERSION,
   keyCertifiedBoardNode,
   keyConsumptionNode,
@@ -28,6 +30,8 @@ import type {
   StorageDoc,
   StorageEntityCoreDoc,
   StorageHead,
+  StorageMerkleBranchDoc,
+  StorageMerkleLeafDoc,
   StorageRuntimeConfig,
 } from '../storage/types';
 import {
@@ -460,5 +464,47 @@ describe('storage crash recovery', () => {
     expect(second.entityHashDocs.get(entityId)?.cellCount).toBe(3);
     expectNoMerklePutDeleteOverlap(first);
     expectNoMerklePutDeleteOverlap(second);
+  });
+
+  test('incremental merkle edit rejects a corrupted persisted branch hash', async () => {
+    const a = accountId('1');
+    const b = accountId('2');
+    const initial = await prepareStorageStateHashes({
+      db: makeMemoryDb(),
+      puts: [accountPut(a, 1), accountPut(b, 1)],
+      dels: [],
+    });
+    const corrupted = merkleEntries(initial).map(([key, value]) => {
+      if (key[0] !== KEY_MERKLE_BRANCH) return [key, value] as [Buffer, Buffer];
+      const branch = decodeBuffer<StorageMerkleBranchDoc>(value);
+      return [key, encodeBuffer({ ...branch, hash: `0x${'ff'.repeat(32)}` })] as [Buffer, Buffer];
+    });
+
+    await expect(prepareStorageStateHashes({
+      db: makeMemoryDb(corrupted),
+      puts: [accountPut(a, 2)],
+      dels: [],
+    })).rejects.toThrow('STORAGE_MERKLE_BRANCH_INTEGRITY_MISMATCH');
+  });
+
+  test('incremental merkle edit rejects a corrupted persisted leaf hash', async () => {
+    const a = accountId('1');
+    const b = accountId('2');
+    const initial = await prepareStorageStateHashes({
+      db: makeMemoryDb(),
+      puts: [accountPut(a, 1), accountPut(b, 1)],
+      dels: [],
+    });
+    const corrupted = merkleEntries(initial).map(([key, value]) => {
+      if (key[0] !== KEY_MERKLE_LEAF) return [key, value] as [Buffer, Buffer];
+      const leaf = decodeBuffer<StorageMerkleLeafDoc>(value);
+      return [key, encodeBuffer({ ...leaf, hash: `0x${'ff'.repeat(32)}` })] as [Buffer, Buffer];
+    });
+
+    await expect(prepareStorageStateHashes({
+      db: makeMemoryDb(corrupted),
+      puts: [accountPut(a, 2)],
+      dels: [],
+    })).rejects.toThrow('STORAGE_MERKLE_LEAF_INTEGRITY_MISMATCH');
   });
 });

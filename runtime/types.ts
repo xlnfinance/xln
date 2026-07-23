@@ -1390,6 +1390,7 @@ export interface Env {
     runtimeFrameIngressBuffer?: RuntimeFrameIngressBuffer;
     verifiedProfileRoutes?: Map<string, {
       runtimeId: string;
+      runtimeEncPubKey: string;
       lastUpdated: number;
     }>;
     entityRuntimeHints?: Map<string, {

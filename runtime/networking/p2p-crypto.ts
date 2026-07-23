@@ -161,7 +161,7 @@ export function pubKeyToHex(pubKey: Uint8Array): string {
  */
 export function hexToPubKey(hex: string): Uint8Array {
   const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
-  if (clean.length !== 64) {
+  if (!/^[0-9a-fA-F]{64}$/.test(clean)) {
     throw new Error(`P2P_INVALID_PUBKEY: Expected 64 hex chars, got ${clean.length}`);
   }
   const bytes = new Uint8Array(32);

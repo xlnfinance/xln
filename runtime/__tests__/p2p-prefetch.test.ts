@@ -450,18 +450,20 @@ test('enqueueEntityInputsDelivery uses relay when direct transport is not author
 test('getQueueState reports the runtime-owned durable outbox', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   p2p.env = {
+    timestamp: 1_500,
     pendingNetworkOutputs: [{
       runtimeId: TARGET_RUNTIME_ID,
       entityId: SOURCE_ENTITY_ID,
       signerId: '0x2222222222222222222222222222222222222222',
       entityTxs: [],
+      sourceRuntimeFrame: { height: 7, timestamp: 1_000 },
     }],
   };
 
   expect(p2p.getQueueState()).toEqual({
     targetCount: 1,
     totalMessages: 1,
-    oldestEntryAge: 0,
+    oldestEntryAge: 500,
     perTarget: { [TARGET_RUNTIME_ID]: 1 },
   });
 });
@@ -473,6 +475,7 @@ test('verified profile routes advance monotonically and never replay backward', 
   const profile = (runtimeId: string, lastUpdated: number) => ({
     entityId: SOURCE_ENTITY_ID,
     runtimeId,
+    runtimeEncPubKey: `0x${'11'.repeat(32)}`,
     lastUpdated,
   });
 

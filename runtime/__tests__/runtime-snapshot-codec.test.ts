@@ -54,7 +54,11 @@ describe('runtime snapshot codec', () => {
     env.runtimeState = {
       verifiedProfileRoutes: new Map([[
         `0x${'44'.repeat(32)}`,
-        { runtimeId: `0x${'55'.repeat(20)}`, lastUpdated: 123 },
+        {
+          runtimeId: `0x${'55'.repeat(20)}`,
+          runtimeEncPubKey: `0x${'56'.repeat(32)}`,
+          lastUpdated: 123,
+        },
       ]]),
       runtimeAdapterCommandFrontiers: new Map([[
         `0x${'65'.repeat(32)}`,
