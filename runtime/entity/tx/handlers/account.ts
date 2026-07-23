@@ -239,9 +239,10 @@ export async function applyAccountInput(
       throw new Error(error);
     }
     const incomingFrameHeight = Number(accountInputReferenceHeight(input) ?? 0);
-    if (incomingFrameHeight > 1) {
+    if (!incomingProposal || incomingFrameHeight !== 1) {
+      const code = incomingFrameHeight > 1 ? 'ACCOUNT_SYNC_REQUIRED' : 'ACCOUNT_GENESIS_FRAME_REQUIRED';
       const error =
-        `ACCOUNT_SYNC_REQUIRED: entity=${shortId(newState.entityId)} ` +
+        `${code}: entity=${shortId(newState.entityId)} ` +
         `counterparty=${shortId(counterpartyId)} inputHeight=${incomingFrameHeight}`;
       addMessage(newState, error);
       throw new Error(error);
@@ -321,11 +322,7 @@ export async function applyAccountInput(
     };
     accountMachine.currentFrame.accountStateRoot = computeAccountStateRoot(accountMachine);
     accountMachine.currentFrame.stateHash = accountMachine.currentFrame.accountStateRoot;
-
-    // Store with counterparty ID as key (simpler than canonical)
-    // Type assertion safe: accountMachine was just created above in this block
-    upsertSortedStringMapEntry(newState.accounts, counterpartyId, accountMachine as AccountMachine);
-    accountHandlerLog.debug('machine.created', { counterparty: shortId(counterpartyId) });
+    accountHandlerLog.debug('machine.candidate_created', { counterparty: shortId(counterpartyId) });
   }
 
   // FINTECH-SAFETY: Ensure accountMachine exists
@@ -517,6 +514,14 @@ export async function applyAccountInput(
         };
       };
       const committedFrameEntries = result.committedFrames ?? [];
+      const committedInboundGenesis = committedFrameEntries.some(({ frame }) => frame.height === 1);
+      if (createdAccount) {
+        if (!committedInboundGenesis) {
+          throw new Error(`ACCOUNT_GENESIS_COMMIT_REQUIRED:${counterpartyId}`);
+        }
+        upsertSortedStringMapEntry(newState.accounts, counterpartyId, accountMachine);
+        accountHandlerLog.debug('machine.created', { counterparty: shortId(counterpartyId) });
+      }
 
       for (const { frame: committedFrame, committedViaNewFrame } of committedFrameEntries) {
         if (!committedFrame?.accountTxs) continue;
@@ -567,7 +572,6 @@ export async function applyAccountInput(
           }
         }
       }
-      const committedInboundGenesis = committedFrameEntries.some(({ frame }) => frame.height === 1);
       if (createdAccount && committedInboundGenesis && newState.hubRebalanceConfig) {
         const localSide = newState.entityId.toLowerCase() === accountMachine.leftEntity.toLowerCase()
           ? 'left'
@@ -614,6 +618,19 @@ export async function applyAccountInput(
       }
       checkpointProfile('postConsensus');
     } else if (result.disputeRequired) {
+      if (createdAccount) {
+        addMessage(newState, `⚠️ Rejected uncommitted account genesis from ${counterpartyId.slice(-8)}`);
+        return {
+          newState,
+          outputs,
+          mempoolOps,
+          swapOffersCreated: allSwapOffersCreated,
+          swapCancelRequests: allSwapCancelRequests,
+          swapOffersCancelled: allSwapOffersCancelled,
+          ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
+          ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
+        };
+      }
       if (result.disputeRequired.signedFrame) {
         accountMachine.shadow.rejectedFrameEvidence = {
           reason: result.disputeRequired.reason,
