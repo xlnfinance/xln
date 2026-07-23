@@ -2,6 +2,7 @@ export type HubRuntimeHealthInput = {
   processExitCode: number | null | undefined;
   hasHealth: boolean;
   hasSelfRelayPresence: boolean;
+  runtimeHalted: boolean;
 };
 
 export type HubRuntimeHealth = {
@@ -15,7 +16,7 @@ export type ResetHealthInput = {
 };
 
 export const deriveHubRuntimeHealth = (input: HubRuntimeHealthInput): HubRuntimeHealth => ({
-  online: input.processExitCode === null && input.hasHealth,
+  online: input.processExitCode === null && input.hasHealth && !input.runtimeHalted,
   selfRelayPresence: input.hasSelfRelayPresence,
 });
 

@@ -7,6 +7,7 @@ test('orchestrator health treats hub process health separately from relay self-p
     processExitCode: null,
     hasHealth: true,
     hasSelfRelayPresence: false,
+    runtimeHalted: false,
   });
 
   expect(health.online).toBe(true);
@@ -18,19 +19,34 @@ test('orchestrator health does not mark hubs online without a live process and h
     processExitCode: undefined,
     hasHealth: true,
     hasSelfRelayPresence: true,
+    runtimeHalted: false,
   }).online).toBe(false);
 
   expect(deriveHubRuntimeHealth({
     processExitCode: null,
     hasHealth: false,
     hasSelfRelayPresence: true,
+    runtimeHalted: false,
   }).online).toBe(false);
 
   expect(deriveHubRuntimeHealth({
     processExitCode: 1,
     hasHealth: true,
     hasSelfRelayPresence: true,
+    runtimeHalted: false,
   }).online).toBe(false);
+});
+
+test('orchestrator health fails closed when a live runtime has halted', () => {
+  expect(deriveHubRuntimeHealth({
+    processExitCode: null,
+    hasHealth: true,
+    hasSelfRelayPresence: true,
+    runtimeHalted: true,
+  })).toEqual({
+    online: false,
+    selfRelayPresence: true,
+  });
 });
 
 test('orchestrator health latches a reset failure until a fresh reset clears it', () => {

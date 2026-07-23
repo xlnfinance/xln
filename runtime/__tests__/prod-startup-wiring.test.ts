@@ -400,7 +400,9 @@ describe('production startup wiring', () => {
     expect(custodyBootstrap).toContain('startupSignerSeed: options.seed');
     expect(custodyBootstrap).toContain('startupSignerLabel: options.signerLabel');
     expect(standaloneServer).toContain('const STARTUP_SIGNER = (() => {');
-    expect(standaloneServer).toContain('localSigners: STARTUP_SIGNER ? [STARTUP_SIGNER] : []');
+    expect(standaloneServer).toContain('localSigners: [');
+    expect(standaloneServer).toContain('...(STARTUP_SIGNER ? [STARTUP_SIGNER] : [])');
+    expect(standaloneServer).toContain('...(LOCAL_RUNTIME_OWNER ? [{ label: LOCAL_RUNTIME_OWNER.label }] : [])');
     expect(standaloneServer).not.toContain('registerSignerKey(');
     expect(standaloneServer).not.toContain('globalJAdapter?.close().catch(() => undefined)');
     expect(standaloneServer).toContain('updateJurisdictionsJson(');

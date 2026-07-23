@@ -1582,7 +1582,9 @@ const buildChildProcessHealth = (): AggregatedHealth['process']['children'] => {
       pid: child.proc?.pid ?? null,
       leasePid: lease?.pid ?? null,
       leaseOwnerId: lease?.ownerId ?? null,
-      online: child.proc?.exitCode === null && child.proc?.signalCode === null,
+      online: child.proc?.exitCode === null &&
+        child.proc?.signalCode === null &&
+        child.lastHealth?.runtime?.halted !== true,
       exitCode: child.exitCode,
       exitSignal: child.exitSignal,
       startedAt: child.startedAt,
@@ -1605,7 +1607,9 @@ const buildChildProcessHealth = (): AggregatedHealth['process']['children'] => {
       pid: marketMakerChild.proc?.pid ?? null,
       leasePid: mmLease?.pid ?? null,
       leaseOwnerId: mmLease?.ownerId ?? null,
-      online: marketMakerChild.proc?.exitCode === null && marketMakerChild.proc?.signalCode === null,
+      online: marketMakerChild.proc?.exitCode === null &&
+        marketMakerChild.proc?.signalCode === null &&
+        marketMakerChild.lastHealth?.runtime?.halted !== true,
       exitCode: marketMakerChild.exitCode,
       exitSignal: marketMakerChild.exitSignal,
       startedAt: marketMakerChild.startedAt,
@@ -1945,6 +1949,7 @@ const computeAggregatedHealth = (options: {
       processExitCode: child.exitSignal !== null ? 1 : child.proc?.exitCode,
       hasHealth: Boolean(child.lastHealth),
       hasSelfRelayPresence: relayOnline,
+      runtimeHalted: child.lastHealth?.runtime?.halted === true,
     });
     return {
       entityId,
@@ -2033,7 +2038,8 @@ const computeAggregatedHealth = (options: {
   const marketMakerOnline = marketMakerChild.proc?.exitCode === null &&
     marketMakerChild.proc?.signalCode === null &&
     marketMakerChild.exitCode === null &&
-    marketMakerChild.exitSignal === null;
+    marketMakerChild.exitSignal === null &&
+    marketMakerChild.lastHealth?.runtime?.halted !== true;
   const custodyOnline = Boolean(
     custodySupport?.identity.entityId
     && custodySupport.daemonChild.proc.exitCode === null

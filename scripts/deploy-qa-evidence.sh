@@ -53,7 +53,7 @@ if [ "$DB_ONLY" = "0" ]; then
   fi
 fi
 
-rsync_opts=(-az --partial --progress)
+rsync_opts=(-az --partial --stats)
 [ "$DRY_RUN" = "1" ] && rsync_opts+=(--dry-run)
 
 echo "[qa-evidence] remote=$REMOTE_HOST root=$REMOTE_ROOT"
@@ -83,4 +83,5 @@ for r in "${RUNS[@]:-}"; do
 done
 
 echo "[qa-evidence] done."
-echo "[qa-evidence] verify: curl -s 'https://xln.finance/api/qa/runs?limit=5'"
+echo "[qa-evidence] verify page: curl -fsSI 'https://xln.finance/qa'"
+echo "[qa-evidence] verify API with a QA read token: /api/qa/runs?limit=5"
