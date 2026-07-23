@@ -62,6 +62,10 @@ const buildPackage = (): void => {
   const version = assertVersions();
   if (!skipBuild) {
     run('bun', ['run', 'build']);
+    // The frontend embeds contract artifacts. A freshly merged checkout can still
+    // have ignored Hardhat artifacts from the previous source revision, so compile
+    // from the current Solidity sources before copy-static-files consumes them.
+    run('bun', ['run', 'compile'], join(ROOT, 'jurisdictions'));
     run('bun', ['run', 'build'], join(ROOT, 'frontend'));
   }
   rmSync(DIST_DIR, { recursive: true, force: true });
