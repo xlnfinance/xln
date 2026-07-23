@@ -1,6 +1,6 @@
 import { clearJurisdictionsCache, loadJurisdictions } from '../jurisdiction/jurisdiction-loader';
 import { getJurisdictionIdentityRef } from '../jurisdiction/jurisdiction-runtime';
-import { normalizeLoopbackUrl, toPublicRpcUrl } from '../networking/loopback-url';
+import { isLoopbackUrl, normalizeLoopbackUrl, toPublicRpcUrl } from '../networking/loopback-url';
 
 export type MeshJurisdictionConfig = {
   name: string;
@@ -80,6 +80,9 @@ export const isSecondaryJurisdictionConfig = (
   const normalizedName = String(jurisdiction.name || '').trim().toLowerCase();
   const normalizedRpc = String(jurisdiction.rpc || '').trim();
   if (primaryRpc && normalizedRpc === primaryRpc) return false;
+  const localPrimary = isLoopbackUrl(primaryRpc) || String(primaryRpc || '').trim().startsWith('/');
+  const localCandidate = isLoopbackUrl(normalizedRpc) || normalizedRpc.startsWith('/');
+  if (localPrimary && !localCandidate) return false;
   return normalizedKey === 'tron' || normalizedKey === 'rpc2' || normalizedName.includes('tron') || normalizedRpc.includes('/rpc2');
 };
 

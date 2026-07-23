@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import {
   resetMeshJurisdictionsCache,
   resolveMeshJurisdictionConfig,
+  resolveSecondaryJurisdictions,
 } from '../orchestrator/mesh-jurisdictions';
 
 const writeJurisdictions = (payload: Record<string, unknown>): string => {
@@ -105,6 +106,20 @@ describe('mesh jurisdiction config resolution', () => {
       },
     }, () => {
       expect(() => resolveMeshJurisdictionConfig('/rpc')).toThrow('JURISDICTION_NOT_FOUND');
+    });
+  });
+
+  test('keeps public TRON deployments out of an ephemeral local mesh', () => {
+    withJurisdictions({
+      version: '1',
+      jurisdictions: {
+        localTron: stack('Tron', '/rpc2', '0x2200000000000000000000000000000000000000', '0x2300000000000000000000000000000000000000'),
+        nile: stack('TRON Nile', 'https://nile.trongrid.io/jsonrpc', '0x3300000000000000000000000000000000000000', '0x3400000000000000000000000000000000000000'),
+      },
+    }, () => {
+      const secondary = resolveSecondaryJurisdictions('http://127.0.0.1:8545');
+
+      expect(secondary.map((entry) => entry.name)).toEqual(['Tron']);
     });
   });
 });
