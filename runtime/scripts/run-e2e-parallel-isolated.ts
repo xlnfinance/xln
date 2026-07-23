@@ -2430,6 +2430,7 @@ const prepareIsolatedE2EBuild = async (
   cpSync(join(frontendRoot, 'static'), artifacts.publicDir, { recursive: true });
   const buildLogPath = join(logsDir, 'build-runtime.log');
   const buildLog = createWriteStream(buildLogPath, { flags: 'w' });
+  const canonicalSvelteKitOutDir = join(frontendRoot, '.svelte-kit');
   try {
     const staticResult = await runE2ECommand('node', ['copy-static-files.js'], {
       cwd: frontendRoot,
@@ -2457,7 +2458,6 @@ const prepareIsolatedE2EBuild = async (
         env: sanitizeChildProcessEnv({
           ...process.env,
           XLN_RUNTIME_BUNDLE_PATH: artifacts.runtimeBundlePath,
-          XLN_SVELTE_KIT_OUT_DIR: relative(frontendRoot, artifacts.svelteKitOutDir),
           XLN_SVELTE_BUILD_DIR: relative(frontendRoot, artifacts.frontendBuildDir),
           VITE_PUBLIC_DIR: relative(frontendRoot, artifacts.publicDir),
           VITE_CACHE_DIR: relative(frontendRoot, join(artifacts.cacheRoot, 'vite-cache')),
@@ -2477,6 +2477,8 @@ const prepareIsolatedE2EBuild = async (
         `frontend=${formatE2ECommandResult(frontendBuildResult)}:log=${buildLogPath}`,
       );
     }
+    rmSync(artifacts.svelteKitOutDir, { recursive: true, force: true });
+    cpSync(canonicalSvelteKitOutDir, artifacts.svelteKitOutDir, { recursive: true });
   } finally {
     buildLog.end();
     await finished(buildLog);

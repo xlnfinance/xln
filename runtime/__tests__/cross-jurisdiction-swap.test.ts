@@ -702,19 +702,22 @@ describe('cross-jurisdiction hashledger swap', () => {
       { isReplay: false, routingDeps: makeLocalCrossJRoutingDeps() },
     );
 
-    expect(env.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)?.state.height).toBe(sourceHeight + 4);
-    expect(env.eReplicas.get(`${targetHub}:${targetHubSigner}`)?.state.height).toBe(targetHeight + 4);
+    expect(env.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)?.state.height).toBe(sourceHeight + 3);
+    expect(env.eReplicas.get(`${targetHub}:${targetHubSigner}`)?.state.height).toBe(targetHeight + 3);
     expect(env.eReplicas.get(`${targetHub}:${targetHubSigner}`)?.state.crossJurisdictionSwaps?.get(intent.orderId)?.routeHash)
       .toBe(intent.routeHash);
     expect(pass.appliedEntityInputs.map(input => input.entityId)).toEqual([sourceHub, targetHub]);
     expect(pass.localCrossJurisdictionEventTrace.map(input => input.entityId)).toEqual([
       sourceHub,
       targetHub,
-      sourceHub,
-      targetHub,
       targetHub,
       sourceHub,
     ]);
+    expect(pass.localCrossJurisdictionEventTrace.map(input =>
+      input.entityTxs[0]?.type === 'runtimeOutput'
+        ? input.entityTxs[0].data.entityTxs.length
+        : 0,
+    )).toEqual([2, 2, 1, 1]);
     const crossJOrderIds = (txs: readonly AccountTx[]): string[] => txs.flatMap(tx => {
       if (tx.type === 'pull_lock') return tx.data.crossJurisdiction?.orderId ?? [];
       if (tx.type === 'swap_offer') return tx.data.crossJurisdiction?.orderId ?? [];
@@ -744,8 +747,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(new Set(crossJOrderIds(targetAccount.pendingFrame?.accountTxs ?? []))).toEqual(registeredOrderIds);
     expect(sourceAccount.mempool).toEqual([]);
     expect(targetAccount.mempool).toEqual([]);
-    expect(env.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)?.state.height).toBe(sourceHeight + 5);
-    expect(env.eReplicas.get(`${targetHub}:${targetHubSigner}`)?.state.height).toBe(targetHeight + 5);
+    expect(env.eReplicas.get(`${sourceHub}:${sourceHubSigner}`)?.state.height).toBe(sourceHeight + 4);
+    expect(env.eReplicas.get(`${targetHub}:${targetHubSigner}`)?.state.height).toBe(targetHeight + 4);
     expect(wakePass.entityOutbox.map(output => ({
       entityId: output.entityId,
       txTypes: output.entityTxs?.map(tx => tx.type) ?? [],

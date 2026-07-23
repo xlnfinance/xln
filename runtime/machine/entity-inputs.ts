@@ -181,18 +181,21 @@ export const applyMergedEntityInputs = async (
   };
 
   const routeCommittedEntityOutputs = (outputs: RoutedEntityInput[]): void => {
+    // Outputs from one committed Entity frame are one causal wave. Coalesce
+    // only inside that wave; merging with commands already in the drain queue
+    // could move a later response across its producing Entity-frame barrier.
+    const localCommands: CrossJCommand[] = [];
+    const localCommandIndexes = new Map<string, number>();
     for (const output of outputs) {
       if (isCrossJCommandEnvelope(output)) {
         const command = decodeCrossJCommand(env, output);
-        const tail = crossJCommandQueue.at(-1);
-        if (
-          tail &&
-          tail.sourceEntityId === command.sourceEntityId &&
-          tail.targetEntityId === command.targetEntityId
-        ) {
-          tail.entityTxs.push(...command.entityTxs);
+        const key = `${command.sourceEntityId}\0${command.targetEntityId}`;
+        const existingIndex = localCommandIndexes.get(key);
+        if (existingIndex !== undefined) {
+          localCommands[existingIndex]!.entityTxs.push(...command.entityTxs);
         } else {
-          crossJCommandQueue.push(command);
+          localCommandIndexes.set(key, localCommands.length);
+          localCommands.push(command);
         }
         continue;
       }
@@ -201,6 +204,7 @@ export const applyMergedEntityInputs = async (
       }
       entityOutbox.push(output);
     }
+    crossJCommandQueue.push(...localCommands);
   };
 
   const drainImmediateCrossJurisdictionOutputs = async (): Promise<void> => {

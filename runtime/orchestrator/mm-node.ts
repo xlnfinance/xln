@@ -357,12 +357,11 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
       String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK),
   ),
 );
-// The canonical testnet mesh has three source hubs. Their largest combined
-// direction is 45 offers, so admitting all three in one Runtime frame remains
-// below the 64-transaction Entity-frame cap and avoids an unnecessary network
-// roundtrip for the third hub.
+// Each source-hub Entity independently admits at most 45 intents per frame.
+// Bootstrap may fill all three independent hub groups in one wave; the old
+// global limit of 45 serialized them into needless consensus roundtrips.
 const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 45;
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 45;
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 135;
 const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   1,
   Number(
@@ -2553,14 +2552,7 @@ const maintainMarketMakerCrossQuotes = async (
             compareStableText(left.offerId, right.offerId),
           );
         candidateCount += missingCandidates.length;
-        const selectedPairs = new Set<string>();
-        const selectedCandidates: MarketMakerOfferSpec[] = [];
-        for (const spec of missingCandidates) {
-          if (selectedPairs.has(spec.pairId)) continue;
-          selectedPairs.add(spec.pairId);
-          selectedCandidates.push(spec);
-          if (selectedCandidates.length >= allowedNewOffers) break;
-        }
+        const selectedCandidates = missingCandidates.slice(0, allowedNewOffers);
         for (const spec of selectedCandidates) {
           const route = spec.crossJurisdiction!;
           await submitCrossJurisdictionIntent(env, route);

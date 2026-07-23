@@ -1505,7 +1505,8 @@ const PROFILE_CONFIGS = {
   },
 };
 
-const outputDir = path.join(__dirname, '../../frontend/static/');
+const frontendDir = path.resolve(__dirname, '../../frontend');
+const outputDir = path.resolve(frontendDir, process.env.XLN_STATIC_DIR || 'static');
 const writeChunks = !process.argv.includes('--no-chunks');
 const chunkTokenLimit = writeChunks ? parseChunkTokenLimit() : null;
 

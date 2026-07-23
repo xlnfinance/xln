@@ -285,6 +285,33 @@ describe('production startup wiring', () => {
     expect(packageJson.scripts['test:all:quick']).not.toContain('--skip-build');
     expect(packageJson.scripts['test:all:smoke']).not.toContain('--skip-build');
   });
+
+  test('isolated frontend builds generate llms context in their requested static directory', () => {
+    const generator = readFileSync(join(repoRoot, 'scripts/debug/gpt.cjs'), 'utf8');
+    const runner = readFileSync(
+      join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'),
+      'utf8',
+    );
+
+    expect(generator).toContain(
+      "const outputDir = path.resolve(frontendDir, process.env.XLN_STATIC_DIR || 'static');",
+    );
+    expect(generator).not.toContain(
+      "const outputDir = path.join(__dirname, '../../frontend/static/');",
+    );
+    expect(runner).toContain(
+      'cpSync(canonicalSvelteKitOutDir, artifacts.svelteKitOutDir, { recursive: true });',
+    );
+    const isolatedBuild = extractSourceBlock(
+      runner,
+      'const prepareIsolatedE2EBuild = async',
+      'const forensicEndpoints = [',
+    );
+    expect(isolatedBuild).not.toContain(
+      'XLN_SVELTE_KIT_OUT_DIR: relative(frontendRoot, artifacts.svelteKitOutDir)',
+    );
+  });
+
   test('start-server exposes the secondary Tron RPC to the orchestrator and children', () => {
     const script = readFileSync(join(repoRoot, 'scripts/start-server.sh'), 'utf8');
     expect(script).toContain('RPC2_PORT="${ANVIL2_PORT:-$(xln_rpc2_port)}"');
@@ -322,7 +349,7 @@ describe('production startup wiring', () => {
       'export MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK=${MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK:-45}',
     );
     expect(script).toContain(
-      'export MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK=${MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:-45}',
+      'export MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK=${MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:-135}',
     );
 
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
@@ -651,7 +678,11 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_OFFERS_PER_ACCOUNT_PER_TICK)');
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK)');
     expect(mmNode).toContain('const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 45;');
-    expect(mmNode).toContain('const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 45;');
+    expect(mmNode).toContain('const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 135;');
+    expect(mmNode).not.toContain('const selectedPairs = new Set<string>();');
+    expect(mmNode).toContain(
+      'const selectedCandidates = missingCandidates.slice(0, allowedNewOffers);',
+    );
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK)');
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK)');
     expect(mmNode).toContain("MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '10'");
@@ -816,8 +847,11 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('ready: pairs.length > 0 && pairs.every(pair => pair.ready) && blockers.length === 0');
     expect(mmNode).not.toContain('const finalizedByPair = countFinalizedCrossOffersByPair(env, targetSpecs);');
     expect(mmNode).not.toContain('(finalizedByPair.get(spec.pairId) || 0) === 0');
-    expect(mmNode).toContain('const selectedPairs = new Set<string>();');
-    expect(mmNode).toContain('if (selectedPairs.has(spec.pairId)) continue;');
+    expect(mmNode).not.toContain('const selectedPairs = new Set<string>();');
+    expect(mmNode).not.toContain('if (selectedPairs.has(spec.pairId)) continue;');
+    expect(mmNode).toContain(
+      'const selectedCandidates = missingCandidates.slice(0, allowedNewOffers);',
+    );
     expect(mmNode).toContain('cross.routes.every((route) => route.depthReady)');
     expect(mmNode).toContain('ok: hubsDepthReady && crossDepthReady');
     expect(mmNode).toContain('countCommittedMarketMakerOffersForHub(env, mmEntityId, hubEntityId)');
@@ -1392,7 +1426,7 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK:");
     expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '45'");
     expect(smoke).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:");
-    expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '45'");
+    expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '135'");
     expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '3'");
     expect(mmNode).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '3'");
     expect(mmNode).toContain('remainingSourceHubGroups -= 1;');
