@@ -488,6 +488,7 @@ export async function createRpcAdapter(
   provider: ethers.JsonRpcProvider,
   signer: Signer
 ): Promise<JAdapter> {
+  const watchOnly = Boolean(config.watchOnly && !DEV_CHAIN_IDS.has(config.chainId));
   const traceEnabled = process.env['JADAPTER_TRACE'] === '1';
   const mintDebugEnabled = process.env['XLN_JADAPTER_MINT_DEBUG'] === '1';
   let quietLogs = false;
@@ -2198,10 +2199,10 @@ export async function createRpcAdapter(
           };
         }
         try {
-          if (config.watchOnly && !signerPrivateKey) {
+          if (watchOnly && !signerPrivateKey) {
             throw new Error('JADAPTER_WATCH_ONLY_SIGNER_REQUIRED:entityProviderAction');
           }
-          const actionSigner = signerPrivateKey
+          const actionSigner = watchOnly && signerPrivateKey
             ? await signerForPrivateKey(`0x${Buffer.from(signerPrivateKey).toString('hex')}`)
             : signer;
           const submittingEntityProvider = entityProvider.connect(
@@ -2366,10 +2367,10 @@ export async function createRpcAdapter(
                 `:got=${effectiveExternalSignerId}`,
             };
           }
-          if (config.watchOnly && !signerPrivateKey) {
+          if (watchOnly && !signerPrivateKey) {
             throw new Error(`JADAPTER_WATCH_ONLY_SIGNER_REQUIRED:batch:${normalizedId}`);
           }
-          const submitterWallet = signerPrivateKey
+          const submitterWallet = signerPrivateKey && (watchOnly || batchRequiresExternalSubmitter)
             ? await signerForPrivateKey(`0x${Buffer.from(signerPrivateKey).toString('hex')}`)
             : null;
           if (batchRequiresExternalSubmitter) {
