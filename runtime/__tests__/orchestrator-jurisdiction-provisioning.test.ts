@@ -148,9 +148,11 @@ test('orchestrator provisions exact primary contracts before RPC import', async 
     expect(await rpcCall(rpcUrl, 'eth_blockNumber')).toBe(blockAfterDeploy);
     const persisted = JSON.parse(await readFile(jurisdictionsPath, 'utf8')) as
       { jurisdictions: { primary: {
+        blockTimeMs: number;
         contracts: Record<string, string>;
         entityProviderDeploymentBlock: number;
       } } };
+    expect(persisted.jurisdictions.primary.blockTimeMs).toBe(10_000);
     expect(persisted.jurisdictions.primary.contracts).toEqual(first.contracts);
     expect(persisted.jurisdictions.primary.entityProviderDeploymentBlock)
       .toBe(first.entityProviderDeploymentBlock);
@@ -362,6 +364,8 @@ test('secondary RPC stack reuses deterministic addresses across reset retries', 
         };
       } };
     expect(first.jurisdictions.tron.contracts).toEqual(primary.contracts);
+    expect(first.jurisdictions.primary.blockTimeMs).toBe(10_000);
+    expect(first.jurisdictions.tron.blockTimeMs).toBe(10_000);
     expect(first.jurisdictions.primary.entityProviderDeploymentBlock)
       .toBe(primary.entityProviderDeploymentBlock);
     expect(first.jurisdictions.tron.entityProviderDeploymentBlock).toBeGreaterThan(0);

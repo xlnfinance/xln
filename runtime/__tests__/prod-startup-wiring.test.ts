@@ -2087,17 +2087,24 @@ describe('production startup wiring', () => {
   test('secondary anvil uses a persistent Tron chain id and state file', () => {
     const anvil = readFileSync(join(repoRoot, 'scripts/start-anvil.sh'), 'utf8');
     const anvil2 = readFileSync(join(repoRoot, 'scripts/start-anvil2.sh'), 'utf8');
+    const jurisdictions = JSON.parse(
+      readFileSync(join(repoRoot, 'jurisdictions/jurisdictions.json'), 'utf8'),
+    ) as { jurisdictions: Record<string, { blockTimeMs?: number }> };
     expect(anvil).toContain('ANVIL_CHAIN_ID="${ANVIL_CHAIN_ID:-31337}"');
     expect(anvil).toContain('--chain-id "$ANVIL_CHAIN_ID"');
     expect(anvil).toContain('--prune-history "$ANVIL_PRUNE_HISTORY"');
     expect(anvil).toContain('--state "$ANVIL_STATE"');
     expect(anvil).toContain('--state-interval "$ANVIL_STATE_INTERVAL"');
     expect(anvil).toContain('ANVIL_STATE_INTERVAL="${ANVIL_STATE_INTERVAL:-60}"');
+    expect(anvil).toContain('ANVIL_BLOCK_TIME=10');
     expect(anvil).toContain('exec anvil --host 0.0.0.0');
     expect(anvil).toContain('ANVIL_PRODUCTION_RESET_REQUIRES_ONE_SHOT_AUTHORIZATION');
     expect(anvil).toContain('ANVIL_PORT_ALREADY_BOUND');
     expect(anvil).not.toContain('| tee');
-    expect(anvil).not.toContain('--mixed-mining');
+    expect(anvil).toContain('--mixed-mining');
+    for (const key of ['arrakis', 'wakanda', 'tron']) {
+      expect(jurisdictions.jurisdictions[key]?.blockTimeMs).toBe(10_000);
+    }
     expect(anvil).toContain('JDB_ROOT="${XLN_JDB_ROOT:-$REPO_ROOT/data}"');
     expect(anvil2).toContain('ANVIL_CHAIN_ID="${ANVIL2_CHAIN_ID:-31338}"');
     expect(anvil2).toContain('ANVIL_STATE="${ANVIL2_STATE:-${XLN_JDB_ROOT:-$REPO_ROOT/data}/anvil2-state.json}"');

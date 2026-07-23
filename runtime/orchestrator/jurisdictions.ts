@@ -47,6 +47,8 @@ type ProvisionedRpcStack = Pick<
   'contracts' | 'entityProviderDeploymentBlock'
 >;
 
+export const LOCAL_TESTNET_BLOCK_TIME_MS = 10_000;
+
 const resolveRepoJurisdictionsJsonPath = (): string => {
   const repoUrl = new URL('../../jurisdictions/jurisdictions.json', import.meta.url);
   return resolve(decodeURIComponent(repoUrl.pathname));
@@ -269,6 +271,8 @@ export const provisionPrimaryRpcJurisdictionStack = async (
   if (!primary) throw new Error('PRIMARY_RPC_JURISDICTION_UNRESOLVED');
   const jurisdiction = payload.jurisdictions?.[primary.key];
   if (!jurisdiction) throw new Error(`PRIMARY_RPC_JURISDICTION_MISSING:${primary.key}`);
+  const blockTimeChanged = jurisdiction['blockTimeMs'] !== LOCAL_TESTNET_BLOCK_TIME_MS;
+  jurisdiction['blockTimeMs'] = LOCAL_TESTNET_BLOCK_TIME_MS;
   const rpcUrl = String(config.rpcUrls?.[1] || '').trim();
   if (!rpcUrl) throw new Error('PRIMARY_RPC_URL_MISSING');
   const chainId = await readRpcChainId(rpcUrl);
@@ -298,7 +302,7 @@ export const provisionPrimaryRpcJurisdictionStack = async (
       };
   const { contracts, entityProviderDeploymentBlock } = provisioned;
   await assertCanonicalRpcContractStack(rpcUrl, contracts, 'PRIMARY_RPC');
-  if (deployed || configuredDeploymentBlockMissing) {
+  if (deployed || configuredDeploymentBlockMissing || blockTimeChanged) {
     persistPrimaryRpcStack(
       config,
       payload,
@@ -367,7 +371,7 @@ export const deployRpc2JurisdictionStack = async (config: OrchestratorJurisdicti
     chainId,
     entityProviderDeploymentBlock,
     rpc: toPublicRpcUrl(config.rpc2Url, '/rpc2'),
-    blockTimeMs: 1_000,
+    blockTimeMs: LOCAL_TESTNET_BLOCK_TIME_MS,
     explorer: '',
     currency: 'TRX',
     status: 'active',

@@ -10,7 +10,9 @@ source "$REPO_ROOT/scripts/lib/port-layout.sh"
 JDB_ROOT="${XLN_JDB_ROOT:-$REPO_ROOT/data}"
 ANVIL_STATE="${ANVIL_STATE:-$JDB_ROOT/anvil-state.json}"
 ANVIL_LOG="${ANVIL_LOG:-$REPO_ROOT/logs/anvil.log}"
-ANVIL_BLOCK_TIME="${ANVIL_BLOCK_TIME:-1}"
+# Transactions mine immediately; only idle heartbeat blocks use this interval.
+# This keeps testnet UX fast without emitting 86,400 empty blocks per day.
+ANVIL_BLOCK_TIME=10
 ANVIL_PORT="${ANVIL_PORT:-$(xln_rpc_port)}"
 ANVIL_CHAIN_ID="${ANVIL_CHAIN_ID:-31337}"
 ANVIL_TMPDIR="${ANVIL_TMPDIR:-$JDB_ROOT/tmp}"
@@ -76,6 +78,7 @@ fi
 exec anvil --host 0.0.0.0 --port "$ANVIL_PORT" \
       --chain-id "$ANVIL_CHAIN_ID" \
       --quiet \
+      --mixed-mining \
       --block-time "$ANVIL_BLOCK_TIME" \
       --block-gas-limit 60000000 \
       --code-size-limit 65536 \
