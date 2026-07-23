@@ -46,7 +46,7 @@ describe("Entity Control-Shares System", function () {
         Account: await account.getAddress()
       }
     });
-    depository = await DepositoryFactory.deploy(await entityProvider.getAddress());
+    depository = await DepositoryFactory.deploy(await entityProvider.getAddress(), 5760);
     await depository.waitForDeployment();
 
     // Create mock board hashes

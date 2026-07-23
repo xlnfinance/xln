@@ -51,7 +51,11 @@ import type {
 import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
 import { signEntityHashes, verifyHankoForHash } from '../../hanko/signing';
 import { getReplicaByEntityId } from '../../entity/replica';
-import { computeAccountStateRoot, computeAccountStateSectionHashes } from '../state-root';
+import {
+  computeAccountStateRoot,
+  computeAccountStateRootCold,
+  computeAccountStateSectionHashes,
+} from '../state-root';
 import {
   commitStagedAccountCommitmentCache,
   discardStagedAccountCommitmentCache,
@@ -83,6 +87,27 @@ export type {
 
 const accountLog = createStructuredLogger('account');
 const STALE_ACCOUNT_FRAME_WARNING_MS = 5 * 60_000;
+
+const assertLiveCommitMatchesFrame = (
+  accountMachine: AccountMachine,
+  expectedRoot: string,
+  side: 'proposer' | 'receiver',
+  height: number,
+): void => {
+  const incrementalRoot = computeAccountStateRoot(accountMachine);
+  const coldRoot = computeAccountStateRootCold(accountMachine);
+  if (incrementalRoot === expectedRoot && coldRoot === expectedRoot) return;
+  const details = {
+    side,
+    height,
+    expectedRoot,
+    incrementalRoot,
+    coldRoot,
+    sectionHashes: computeAccountStateSectionHashes(accountMachine),
+  };
+  accountLog.error('frame.live_commit_root_mismatch', details);
+  throw new Error(`ACCOUNT_LIVE_COMMIT_ROOT_MISMATCH:${safeStringify(details)}`);
+};
 
 export {
   getIncomingAccountDeadlineViolation,
@@ -691,6 +716,12 @@ async function handlePendingFrameAck(
   }
 
   commitStagedAccountCommitmentCache(accountMachine);
+  assertLiveCommitMatchesFrame(
+    accountMachine,
+    accountMachine.pendingFrame.accountStateRoot,
+    'proposer',
+    accountMachine.pendingFrame.height,
+  );
 
   accountLog.debug('frame.commit.complete', {
     side: 'proposer',
@@ -1489,6 +1520,12 @@ async function commitIncomingFrameOnRealState(
   }
 
   forkAccountCommitmentCache(validation.clonedMachine, accountMachine);
+  assertLiveCommitMatchesFrame(
+    accountMachine,
+    receivedFrame.accountStateRoot,
+    'receiver',
+    receivedFrame.height,
+  );
 
   accountLog.debug('frame.commit.complete', {
     side: 'receiver',

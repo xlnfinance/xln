@@ -167,7 +167,7 @@ describe('cross-jurisdiction security invariants', () => {
     })).rejects.toThrow('CROSS_J_CLEAR_CORRUPT_ROUTE');
   });
 
-  test('target-side disputeStart reaches exact hanko preflight even when optional pull arguments are unavailable', async () => {
+  test('target-side prepareDispute drafts through exact hanko preflight when optional pull arguments are unavailable', async () => {
     const env = createEmptyEnv('cross-target-dispute-needs-source-args');
     env.timestamp = 2_000;
     env.quietRuntimeLogs = true;
@@ -192,7 +192,7 @@ describe('cross-jurisdiction security invariants', () => {
     state.crossJurisdictionSwaps?.set(route.orderId, route);
 
     const result = await applyEntityTx(env, state, {
-      type: 'disputeStart',
+      type: 'prepareDispute',
       data: { counterpartyEntityId: route.target.entityId },
     });
 
@@ -200,7 +200,7 @@ describe('cross-jurisdiction security invariants', () => {
     expect(result.newState.messages.at(-1)).toContain('Missing counterparty dispute hanko');
   });
 
-  test('target-side disputeStart with pull arguments reaches normal hanko preflight', async () => {
+  test('target-side prepareDispute preserves pull arguments through normal hanko preflight', async () => {
     const env = createEmptyEnv('cross-target-dispute-with-source-args');
     env.timestamp = 2_000;
     env.quietRuntimeLogs = true;
@@ -230,7 +230,7 @@ describe('cross-jurisdiction security invariants', () => {
     const starterInitialArguments = ethers.AbiCoder.defaultAbiCoder().encode(['bytes[]'], [[pullArgs]]);
 
     const result = await applyEntityTx(env, state, {
-      type: 'disputeStart',
+      type: 'prepareDispute',
       data: { counterpartyEntityId: route.target.entityId, starterInitialArguments },
     });
 

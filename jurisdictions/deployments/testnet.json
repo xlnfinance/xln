@@ -1,58 +1,7 @@
 {
-  "version": "3",
-  "lastUpdated": "2026-07-23T02:05:01.094Z",
+  "profile": "testnet",
+  "deployedAt": "2026-07-23T02:05:01.094Z",
   "jurisdictions": {
-    "arrakis": {
-      "name": "Testnet",
-      "chainId": 31337,
-      "rpc": "http://127.0.0.1:20740",
-      "blockTimeMs": 1000,
-      "contracts": {
-        "account": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
-        "depository": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
-        "entityProvider": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
-        "deltaTransformer": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
-      },
-      "explorer": "http://localhost:8545",
-      "currency": "SPICE",
-      "status": "active",
-      "description": "Primary local testnet",
-      "rebalancePolicyUsd": {
-        "r2cRequestSoftLimit": 500,
-        "hardLimit": 10000,
-        "maxFee": 15
-      }
-    },
-    "wakanda": {
-      "name": "Testnet",
-      "chainId": 31337,
-      "rpc": "/rpc",
-      "blockTimeMs": 1000,
-      "contracts": {
-        "entityProvider": "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707",
-        "depository": "0x0165878A594ca255338adfa4d48449f69242Eb8F"
-      },
-      "explorer": "http://localhost:8545",
-      "currency": "VIBRANIUM",
-      "status": "pending",
-      "description": "Alias on shared local anvil (single-chain demo mode)"
-    },
-    "tron": {
-      "name": "Tron",
-      "chainId": 31338,
-      "rpc": "/rpc2",
-      "blockTimeMs": 1000,
-      "explorer": "",
-      "currency": "TRX",
-      "status": "active",
-      "description": "Second local EVM chain used to simulate Tron cross-jurisdiction swaps",
-      "contracts": {
-        "account": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
-        "depository": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
-        "entityProvider": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
-        "deltaTransformer": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
-      }
-    },
     "tron-nile": {
       "name": "TRON Nile",
       "chainId": 3448148188,
@@ -114,17 +63,5 @@
         }
       }
     }
-  },
-  "defaults": {
-    "timeout": 30000,
-    "retryAttempts": 3,
-    "gasLimit": 1000000,
-    "rebalancePolicyUsd": {
-      "r2cRequestSoftLimit": 500,
-      "hardLimit": 10000,
-      "maxFee": 15
-    }
-  },
-  "deployVersion": "chains-testnet-2026-07-23T02:05:01.094Z",
-  "networkVersion": "chains-testnet-2026-07-23T02:05:01.094Z"
+  }
 }

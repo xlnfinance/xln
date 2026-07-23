@@ -1,19 +1,19 @@
-import type { JReplica, JurisdictionConfig } from '../types';
+import type { JurisdictionConfig } from '../types';
 import { getAvailableJurisdictions } from '../jurisdiction/config';
 import { createJAdapter } from './index';
-import type { JAdapter, JAdapterConfig } from './types';
+import type { JAdapter, JAdapterConfig, JAdapterReplicaConnection } from './types';
 import { getRegisteredBrowserVMJurisdiction } from './browservm-registry';
 
-const buildFromReplica = (jurisdiction: JurisdictionConfig): JReplica =>
+const buildFromReplica = (jurisdiction: JurisdictionConfig): JAdapterReplicaConnection =>
   ({
-    chainId: jurisdiction.chainId,
+    ...(jurisdiction.chainId !== undefined ? { chainId: jurisdiction.chainId } : {}),
     depositoryAddress: jurisdiction.depositoryAddress,
     entityProviderAddress: jurisdiction.entityProviderAddress,
     contracts: {
       depository: jurisdiction.depositoryAddress,
       entityProvider: jurisdiction.entityProviderAddress,
     },
-  }) as JReplica;
+  });
 
 export const isBrowserVMJurisdiction = (jurisdiction: JurisdictionConfig): boolean =>
   String(jurisdiction.address || '').startsWith('browservm://');

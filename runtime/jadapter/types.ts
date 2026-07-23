@@ -8,19 +8,24 @@ import type { Address } from '@ethereumjs/util';
 import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../jurisdictions/typechain-types/index.ts';
 import type { JAdapterFailure, JReplica, JTx, BrowserVMState, Env } from '../types';
 
-export type JAdapterMode = 'browservm' | 'anvil' | 'rpc';
+export type JAdapterMode = 'browservm' | 'anvil' | 'rpc' | 'tron';
+
+export type JAdapterReplicaConnection = Partial<JReplica>;
 
 export interface JAdapterConfig {
   mode: JAdapterMode;
   chainId: number;
   rpcUrl?: string;                    // Required for anvil/rpc
+  tronFullHost?: string;              // Required for TRON writes; defaults from rpcUrl
+  tronApiKey?: string;                // Server-side TronGrid API key
   stateFile?: string;                 // Anvil: --load-state, BrowserVM: import path
   privateKey?: string;                // Signer key (required for non-dev RPC chains)
   watchPollMs?: number;               // Optional watcher polling interval override
   confirmationDepth?: number;         // Optional event finality depth override
+  defaultDisputeDelayBlocks?: number; // Required when deploying a non-dev stack
   txWaitTimeoutMs?: number;           // Optional tx wait timeout override
   txWaitConfirms?: number;            // Optional tx.wait confirmations override
-  fromReplica?: JReplica;             // Sync addresses from existing replica
+  fromReplica?: JAdapterReplicaConnection; // Connect to an already deployed stack
   browserVMState?: BrowserVMState;    // Import BrowserVM state directly
 }
 

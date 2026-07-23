@@ -128,7 +128,7 @@ describe("Hanko Authorization", function () {
         Account: await account.getAddress()
       }
     });
-    depository = await DepositoryFactory.deploy(await entityProvider.getAddress());
+    depository = await DepositoryFactory.deploy(await entityProvider.getAddress(), 5760);
     await depository.waitForDeployment();
 
     return { depository, entityProvider, admin, entity1, entity2 };

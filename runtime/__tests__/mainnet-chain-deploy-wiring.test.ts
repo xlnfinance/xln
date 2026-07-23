@@ -60,28 +60,38 @@ describe('mainnet chain deployment wiring', () => {
     expect(script).toContain("TRON_NILE_RPC");
     expect(script).toContain("TRONGRID_API_KEY");
     expect(script).toContain("TRON_MAINNET_USDT");
+    expect(script).toContain("base58: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'");
+    expect(script).toContain("base58: 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf'");
+    expect(script).toContain("deployTronContract(tronWeb, 'EntityProvider', [foundationRecipient])");
+    expect(script).toContain('[entityProvider.base58, chain.disputeDelayBlocks]');
+    expect(script).toContain('disputeDelayBlocks: 28_800');
+    expect(script).toContain('TRON_DISPUTE_DELAY_MISMATCH');
+    expect(script).toContain('registerExternalToken(0, usdt.base58, 0)');
+    expect(script).toContain('TRON_USDT_REGISTRATION_MISMATCH');
     expect(script).toContain('Mainnet deployment requires --yes');
+    expect(script).toContain('DEPLOYMENT_ALREADY_EXISTS');
+    expect(script).toContain('without explicit --replace');
     expect(script).toContain('patchLinkReferences');
     expect(script).toContain('TRON bytecode still contains unresolved library link placeholders');
   });
 
-  test('TRON compiler wrapper uses TronBox solc artifacts outside git', () => {
+  test('TRON compiler uses pinned standard-json solc artifacts outside git', () => {
     const compile = readFileSync(join(repoRoot, 'jurisdictions/scripts/compile-tron.cjs'), 'utf8');
     const ignore = readFileSync(join(repoRoot, 'jurisdictions/.gitignore'), 'utf8');
-    expect(compile).toContain("require('tronbox/build/components/WorkflowCompile')");
-    expect(compile).toContain("version: compilerVersion");
+    expect(compile).toContain("const expectedCompiler = '0.8.25'");
+    expect(compile).toContain("[solcCli, '--standard-json']");
+    expect(compile).toContain('TRON_SOLC_VERSION_MISMATCH');
     expect(compile).toContain("viaIR: true");
+    expect(compile).toContain("evmVersion: 'shanghai'");
     expect(ignore).toContain('/build-tron');
   });
 
-  test('TRON RPC watcher requires solidified finality depth instead of EVM fallback', () => {
+  test('TRON RPC watcher reads the SolidityNode solidified head instead of guessing a depth', () => {
     const rpc = readFileSync(join(repoRoot, 'runtime/jadapter/rpc.ts'), 'utf8');
     expect(rpc).toContain('const TRON_CHAIN_IDS = new Set<number>([728126428, 3448148188])');
-    expect(rpc).toContain('const TRON_FINALITY_DEPTH = 19');
-    expect(rpc).toContain('if (isTronChainId(config.chainId) && configuredDepth < TRON_FINALITY_DEPTH)');
-    expect(rpc).toContain('if (isTronChainId(config.chainId)) return TRON_FINALITY_DEPTH;');
-    expect(rpc.indexOf('if (isTronChainId(config.chainId)) return TRON_FINALITY_DEPTH;')).toBeLessThan(
-      rpc.indexOf('return 2;'),
-    );
+    expect(rpc).toContain('/walletsolidity/getnowblock');
+    expect(rpc).toContain('TRON_CONFIRMATION_DEPTH_FORBIDDEN');
+    expect(rpc).toContain('isTronChainId(config.chainId) ? readTronSolidifiedBlockNumber()');
+    expect(rpc).not.toContain('TRON_FINALITY_DEPTH');
   });
 });

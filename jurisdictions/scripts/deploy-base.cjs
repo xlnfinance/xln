@@ -108,7 +108,11 @@ async function main() {
       Account: accountAddress,
     },
   });
-  const depository = await Depository.deploy(entityProviderAddress);
+  const disputeDelayBlocks = Number(process.env.XLN_DISPUTE_DELAY_BLOCKS);
+  if (!Number.isSafeInteger(disputeDelayBlocks) || disputeDelayBlocks <= 0 || disputeDelayBlocks > 65_535) {
+    throw new Error(`XLN_DISPUTE_DELAY_BLOCKS_INVALID:${process.env.XLN_DISPUTE_DELAY_BLOCKS || 'missing'}`);
+  }
+  const depository = await Depository.deploy(entityProviderAddress, disputeDelayBlocks);
   await depository.waitForDeployment();
   const depositoryAddress = await depository.getAddress();
   console.log(`   ✅ Depository deployed: ${depositoryAddress}`);

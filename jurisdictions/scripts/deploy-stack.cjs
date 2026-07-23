@@ -3,6 +3,11 @@
  * Usage: npx hardhat run scripts/deploy-stack.cjs --network localhost
  */
 const hre = require("hardhat");
+
+const disputeDelayBlocks = Number(process.env.XLN_DISPUTE_DELAY_BLOCKS);
+if (!Number.isSafeInteger(disputeDelayBlocks) || disputeDelayBlocks <= 0 || disputeDelayBlocks > 65_535) {
+  throw new Error(`XLN_DISPUTE_DELAY_BLOCKS_INVALID:${process.env.XLN_DISPUTE_DELAY_BLOCKS || 'missing'}`);
+}
 const { mkdirSync, writeFileSync } = require("node:fs");
 const { dirname } = require("node:path");
 
@@ -38,7 +43,7 @@ async function main() {
       Account: accountAddr,
     },
   });
-  const depository = await Depository.deploy(entityProviderAddr);
+  const depository = await Depository.deploy(entityProviderAddr, disputeDelayBlocks);
   await depository.waitForDeployment();
   const depositoryAddr = await depository.getAddress();
   console.log(`   Depository: ${depositoryAddr}`);

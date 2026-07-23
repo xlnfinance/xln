@@ -46,7 +46,7 @@ const deployFixture = async () => {
   const depositoryFactory = await ethers.getContractFactory('Depository', {
     libraries: { Account: await account.getAddress() },
   });
-  const depository = await depositoryFactory.deploy(await entityProvider.getAddress()) as Depository;
+  const depository = await depositoryFactory.deploy(await entityProvider.getAddress(), 5760) as Depository;
   await depository.waitForDeployment();
   return { depository, signer0, signer1 };
 };

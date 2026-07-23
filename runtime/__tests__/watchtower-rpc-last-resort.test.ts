@@ -233,7 +233,7 @@ describe('watchtower rpc last-resort integration', () => {
       'contracts/Account.sol:Account': await account.getAddress(),
     });
     const depositoryFactory = new ContractFactory(depositoryArtifact.abi, linkedDepositoryBytecode, left);
-    const depository = await depositoryFactory.deploy(await entityProvider.getAddress(), {
+    const depository = await depositoryFactory.deploy(await entityProvider.getAddress(), 5_760, {
       gasLimit: 60_000_000n,
       nonce: await nextNonce(left),
     });
@@ -520,7 +520,7 @@ describe('watchtower rpc last-resort integration', () => {
       'contracts/Account.sol:Account': await account.getAddress(),
     });
     const depositoryFactory = new ContractFactory(depositoryArtifact.abi, linkedDepositoryBytecode, left);
-    const depository = await depositoryFactory.deploy(await entityProvider.getAddress(), {
+    const depository = await depositoryFactory.deploy(await entityProvider.getAddress(), 5_760, {
       gasLimit: 60_000_000n,
       nonce: await nextNonce(left),
     });

@@ -107,7 +107,7 @@ describe('canonical on-chain Hanko domains', function () {
     const depositoryFactory = await ethers.getContractFactory('Depository', {
       libraries: { Account: await account.getAddress() },
     });
-    const depository = await depositoryFactory.deploy(await entityProvider.getAddress());
+    const depository = await depositoryFactory.deploy(await entityProvider.getAddress(), 5760);
     await depository.waitForDeployment();
 
     const encodedBoard = encodeSingleSignerBoard(entitySigner.address);

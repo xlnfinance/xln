@@ -401,10 +401,11 @@ export class BrowserVMProvider {
       console.warn('[BrowserVM] No library placeholders found in Depository bytecode');
     }
 
-    // Encode constructor args: constructor(address _entityProvider)
+    // BrowserVM uses the local deterministic policy; live jurisdictions pass
+    // their block-time-specific immutable value from the deployment profile.
     const constructorArgs = ethers.AbiCoder.defaultAbiCoder().encode(
-      ['address'],
-      [this.entityProviderAddress.toString()]
+      ['address', 'uint256'],
+      [this.entityProviderAddress.toString(), 5_760]
     );
     const deployData = linkedBytecode + constructorArgs.slice(2); // Remove 0x from args
 

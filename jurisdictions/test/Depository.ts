@@ -256,7 +256,7 @@ describe("Depository", function () {
         Account: await account.getAddress()
       }
     });
-    depository = await DepositoryFactory.deploy(await entityProvider.getAddress());
+    depository = await DepositoryFactory.deploy(await entityProvider.getAddress(), 5760);
     await depository.waitForDeployment();
 
     // Deploy ERC20 mock contract

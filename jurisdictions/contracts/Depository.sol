@@ -65,7 +65,7 @@ contract Depository is ReentrancyGuardLite {
   // not tuned via mutable admin setters.
   // Fixed dispute window policy. Local tests fast-forward blocks explicitly;
   // production deployments must not ship with a minutes-long challenge window.
-  uint256 public constant defaultDisputeDelay = 5760; // ~24h at 15s blocks
+  uint256 public immutable defaultDisputeDelay;
   
 
   mapping (bytes32 => mapping (uint => Debt[])) public _debts;
@@ -215,9 +215,10 @@ contract Depository is ReentrancyGuardLite {
   // Efficient token lookup: packedToken -> internalTokenId
   mapping(bytes32 => uint256) public tokenToId;
 
-  constructor(address _entityProvider) {
-    if (_entityProvider == address(0)) revert E7();
+  constructor(address _entityProvider, uint256 _defaultDisputeDelay) {
+    if (_entityProvider == address(0) || _defaultDisputeDelay == 0 || _defaultDisputeDelay > 65_535) revert E7();
     entityProvider = _entityProvider;
+    defaultDisputeDelay = _defaultDisputeDelay;
     admin = msg.sender;
     _tokens.push(TokenMetadata({ contractAddress: address(0), externalTokenId: 0, tokenType: TypeERC20 }));
   }

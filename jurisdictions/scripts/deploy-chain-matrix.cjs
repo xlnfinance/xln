@@ -10,9 +10,14 @@ const jurisdictionsPath = path.join(repoRoot, 'jurisdictions.json');
 
 const ETH_MAINNET_USDT = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
 const TRON_MAINNET_USDT = {
-  base58: 'TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj',
+  base58: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
   hex41: '0x41a614f803b6fd780986a42c78ec9c7f77e6ded13c',
   evm: '0xa614f803b6fd780986a42c78ec9c7f77e6ded13c',
+};
+const TRON_NILE_USDT = {
+  base58: 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf',
+  hex41: '0x41eca9bc828a3005b9a3b909f2cc5c2a54794de05f',
+  evm: '0xeca9bc828a3005b9a3b909f2cc5c2a54794de05f',
 };
 
 const profiles = {
@@ -26,6 +31,7 @@ const profiles = {
       rpcEnv: 'ETH_SEPOLIA_RPC',
       currency: 'ETH',
       explorer: 'https://sepolia.etherscan.io',
+      disputeDelayBlocks: 7_200,
       usdtEnv: 'ETH_SEPOLIA_USDT',
     },
     tron: {
@@ -39,7 +45,8 @@ const profiles = {
       defaultFullHost: 'https://nile.trongrid.io',
       currency: 'TRX',
       explorer: 'https://nile.tronscan.org',
-      usdtEnv: 'TRON_NILE_USDT',
+      disputeDelayBlocks: 28_800,
+      usdtAddress: TRON_NILE_USDT,
     },
   },
   mainnet: {
@@ -52,6 +59,7 @@ const profiles = {
       rpcEnv: 'ETH_MAINNET_RPC',
       currency: 'ETH',
       explorer: 'https://etherscan.io',
+      disputeDelayBlocks: 7_200,
       usdtAddress: ETH_MAINNET_USDT,
     },
     tron: {
@@ -65,6 +73,7 @@ const profiles = {
       defaultFullHost: 'https://api.trongrid.io',
       currency: 'TRX',
       explorer: 'https://tronscan.org',
+      disputeDelayBlocks: 28_800,
       usdtAddress: TRON_MAINNET_USDT,
     },
   },
@@ -78,12 +87,14 @@ const parseArgs = () => {
     skipCompile: false,
     writeJurisdictions: false,
     yes: false,
+    replace: false,
   };
   for (const arg of process.argv.slice(2)) {
     if (arg === '--dry-run') out.dryRun = true;
     else if (arg === '--skip-compile') out.skipCompile = true;
     else if (arg === '--write-jurisdictions') out.writeJurisdictions = true;
     else if (arg === '--yes') out.yes = true;
+    else if (arg === '--replace') out.replace = true;
     else if (arg.startsWith('--profile=')) out.profile = arg.slice('--profile='.length);
     else if (arg.startsWith('--chain=')) out.chain = arg.slice('--chain='.length);
     else throw new Error(`Unknown argument: ${arg}`);
@@ -169,7 +180,10 @@ const deployEvm = async (chain, options) => {
   mkdirSync(deploymentsDir, { recursive: true });
   const outputPath = path.join(deploymentsDir, `${chain.id}.json`);
   run('bunx', ['hardhat', 'run', 'scripts/deploy-stack.cjs', '--network', chain.hardhatNetwork], {
-    env: { XLN_DEPLOY_OUTPUT: outputPath },
+    env: {
+      XLN_DEPLOY_OUTPUT: outputPath,
+      XLN_DISPUTE_DELAY_BLOCKS: String(chain.disputeDelayBlocks),
+    },
   });
   const deployed = JSON.parse(readFileSync(outputPath, 'utf8'));
   return { chain, preflight, ...deployed };
@@ -241,16 +255,43 @@ const linkBytecode = (artifact, libraries) => {
 const deployTronContract = async (tronWeb, contractName, parameters = [], libraries = {}) => {
   const artifact = loadTronArtifact(contractName);
   const bytecode = linkBytecode(artifact, libraries);
-  const contract = await tronWeb.contract().new({
+  const options = {
     abi: artifact.abi,
     bytecode,
     feeLimit: Number(process.env.TRON_FEE_LIMIT || '15000000000'),
     callValue: 0,
-    userFeePercentage: Number(process.env.TRON_USER_FEE_PERCENTAGE || '1'),
+    userFeePercentage: Number(process.env.TRON_USER_FEE_PERCENTAGE || '100'),
     originEnergyLimit: Number(process.env.TRON_ORIGIN_ENERGY_LIMIT || '10000000'),
     parameters,
-  });
-  return tronAddressInfo(tronWeb, contract.address);
+  };
+  const transaction = await tronWeb.transactionBuilder.createSmartContract(
+    options,
+    tronWeb.defaultAddress.base58,
+  );
+  const signed = await tronWeb.trx.sign(transaction, tronWeb.defaultPrivateKey);
+  const broadcast = await tronWeb.trx.sendRawTransaction(signed);
+  if (!broadcast?.result) throw new Error(`TRON_DEPLOY_BROADCAST_FAILED:${contractName}:${JSON.stringify(broadcast)}`);
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const receipt = await tronWeb.trx.getTransactionInfo(signed.txID);
+    if (Object.keys(receipt || {}).length > 0) {
+      if (receipt.receipt?.result !== 'SUCCESS') {
+        throw new Error(
+          `TRON_DEPLOY_EXECUTION_FAILED:${contractName}:${signed.txID}:` +
+          `${receipt.receipt?.result || 'UNKNOWN'}:${receipt.resMessage || ''}`,
+        );
+      }
+      if (!Number.isSafeInteger(receipt.blockNumber) || receipt.blockNumber < 1) {
+        throw new Error(`TRON_DEPLOY_BLOCK_MISSING:${contractName}:${signed.txID}`);
+      }
+      return {
+        ...tronAddressInfo(tronWeb, signed.contract_address),
+        deploymentBlock: receipt.blockNumber,
+        transactionHash: signed.txID,
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+  }
+  throw new Error(`TRON_DEPLOY_RECEIPT_TIMEOUT:${contractName}:${signed.txID}`);
 };
 
 const deployTron = async (chain, options) => {
@@ -268,21 +309,58 @@ const deployTron = async (chain, options) => {
     privateKey,
   });
 
+  const rawUsdtAddress = chain.usdtAddress || (chain.usdtEnv ? process.env[chain.usdtEnv] : undefined);
+  if (!rawUsdtAddress) throw new Error(`${chain.usdtEnv || `${chain.id} USDT address`} is required`);
+  const usdt = tronAddressInfo(
+    tronWeb,
+    typeof rawUsdtAddress === 'string' ? rawUsdtAddress : rawUsdtAddress.base58,
+  );
+  if (typeof rawUsdtAddress === 'object') {
+    for (const field of ['base58', 'hex41', 'evm']) {
+      if (String(rawUsdtAddress[field]).toLowerCase() !== String(usdt[field]).toLowerCase()) {
+        throw new Error(`TRON_TOKEN_ADDRESS_MISMATCH:${chain.id}:${field}`);
+      }
+    }
+  }
+
   const account = await deployTronContract(tronWeb, 'Account');
-  const entityProvider = await deployTronContract(tronWeb, 'EntityProvider');
+  const foundationRecipient = tronWeb.defaultAddress.base58;
+  const entityProvider = await deployTronContract(tronWeb, 'EntityProvider', [foundationRecipient]);
   const depository = await deployTronContract(
     tronWeb,
     'Depository',
-    [entityProvider.base58],
+    [entityProvider.base58, chain.disputeDelayBlocks],
     { Account: account },
   );
   const deltaTransformer = await deployTronContract(tronWeb, 'DeltaTransformer');
+  const depositoryArtifact = loadTronArtifact('Depository');
+  const depositoryContract = await tronWeb.contract(depositoryArtifact.abi, depository.base58);
+  await depositoryContract.registerExternalToken(0, usdt.base58, 0).send({
+    feeLimit: Number(process.env.TRON_FEE_LIMIT || '15000000000'),
+    shouldPollResponse: true,
+  });
+  const tokenCount = BigInt((await depositoryContract.getTokensLength().call()).toString());
+  const disputeDelayBlocks = Number((await depositoryContract.defaultDisputeDelay().call()).toString());
+  const token = await depositoryContract._tokens(1).call();
+  const registeredAddress = tronAddressInfo(tronWeb, token.contractAddress ?? token[0]);
+  if (tokenCount !== 2n || registeredAddress.evm.toLowerCase() !== usdt.evm.toLowerCase()) {
+    throw new Error(
+      `TRON_USDT_REGISTRATION_MISMATCH:count=${tokenCount}:expected=${usdt.evm}:actual=${registeredAddress.evm}`,
+    );
+  }
+  if (disputeDelayBlocks !== chain.disputeDelayBlocks) {
+    throw new Error(
+      `TRON_DISPUTE_DELAY_MISMATCH:expected=${chain.disputeDelayBlocks}:actual=${disputeDelayBlocks}`,
+    );
+  }
 
   return {
     chain,
     preflight,
     network: chain.id,
     chainId: chain.chainId,
+    defaultDisputeDelayBlocks: disputeDelayBlocks,
+    entityProviderDeploymentBlock: entityProvider.deploymentBlock,
     contracts: {
       account: account.evm,
       entityProvider: entityProvider.evm,
@@ -295,10 +373,26 @@ const deployTron = async (chain, options) => {
       depository,
       deltaTransformer,
     },
+    registeredTokens: { USDT: { ...usdt, tokenId: 1, decimals: 6 } },
   };
 };
 
-const tokenConfig = (chain) => {
+const tokenConfig = (chain, registeredTokens) => {
+  if (registeredTokens?.USDT) {
+    return {
+      USDT: {
+        symbol: 'USDT',
+        decimals: registeredTokens.USDT.decimals,
+        tokenId: registeredTokens.USDT.tokenId,
+        address: registeredTokens.USDT.evm,
+        tron: {
+          base58: registeredTokens.USDT.base58,
+          hex41: registeredTokens.USDT.hex41,
+          evm: registeredTokens.USDT.evm,
+        },
+      },
+    };
+  }
   const raw = chain.usdtAddress || (chain.usdtEnv ? process.env[chain.usdtEnv] : undefined);
   if (!raw) return {};
   return {
@@ -316,12 +410,14 @@ const jurisdictionEntry = (result) => ({
   chainId: result.chain.chainId,
   rpc: result.preflight.url,
   blockTimeMs: result.chain.kind === 'tron' ? 3000 : 12000,
+  defaultDisputeDelayBlocks: result.defaultDisputeDelayBlocks ?? result.chain.disputeDelayBlocks,
+  entityProviderDeploymentBlock: result.entityProviderDeploymentBlock,
   contracts: result.contracts,
   explorer: result.chain.explorer,
   currency: result.chain.currency,
   status: 'active',
   description: `${result.chain.name} XLN deployment`,
-  tokens: tokenConfig(result.chain),
+  tokens: tokenConfig(result.chain, result.registeredTokens),
   ...(result.tronContracts ? { tronContracts: result.tronContracts } : {}),
 });
 
@@ -356,6 +452,25 @@ const selectChains = (profile, chainSelector) => {
   throw new Error(`Unknown --chain=${chainSelector}`);
 };
 
+const readJsonIfPresent = (file) => existsSync(file)
+  ? JSON.parse(readFileSync(file, 'utf8'))
+  : undefined;
+
+const assertFreshDeploymentTargets = (profileName, chains, options) => {
+  if (options.dryRun || options.replace) return;
+  const configured = readJsonIfPresent(jurisdictionsPath)?.jurisdictions || {};
+  const recorded = readJsonIfPresent(path.join(deploymentsDir, `${profileName}.json`))?.jurisdictions || {};
+  const existing = chains
+    .map((chain) => chain.id)
+    .filter((id) => configured[id] || recorded[id]);
+  if (existing.length > 0) {
+    throw new Error(
+      `DEPLOYMENT_ALREADY_EXISTS:${existing.join(',')}:` +
+      'refusing to broadcast replacement transactions without explicit --replace',
+    );
+  }
+};
+
 const main = async () => {
   const options = parseArgs();
   const profile = profiles[options.profile];
@@ -365,6 +480,7 @@ const main = async () => {
   }
 
   const selected = selectChains(profile, options.chain);
+  assertFreshDeploymentTargets(options.profile, selected, options);
   const results = [];
   for (const chain of selected) {
     console.log(`[deploy-chains] preflight ${chain.id}`);

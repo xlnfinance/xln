@@ -124,7 +124,6 @@ import {
 } from '../entity/entity-provider-action';
 
 const TRON_CHAIN_IDS = new Set<number>([728126428, 3448148188]);
-const TRON_FINALITY_DEPTH = 19;
 const rpcLog = createStructuredLogger('jadapter.rpc');
 
 type TxFinalizationEvidence = Omit<DisputeFinalizationEvidence, 'sender' | 'finalProofbodyHash'>;
@@ -614,6 +613,26 @@ export async function createRpcAdapter(
   const applyGasHeadroom = (value: bigint): bigint =>
     (value * BigInt(GAS_HEADROOM_BPS) + 9_999n) / 10_000n;
 
+  const estimateProcessBatchGas = async (
+    estimate: () => Promise<bigint>,
+  ): Promise<{ gasLimit: bigint; usedFallback: boolean; error?: unknown }> => {
+    if (config.mode === 'tron') {
+      return { gasLimit: applyGasHeadroom(await estimate()), usedFallback: false };
+    }
+    return estimateGasWithHeadroomResult(estimate, PROCESS_BATCH_GAS_FLOOR);
+  };
+
+  const resolveProcessBatchGasLimit = (gasLimit: bigint): bigint =>
+    config.mode === 'tron' ? gasLimit : applyProcessBatchGasFloor(gasLimit);
+
+  const resolveDeploymentDisputeDelayBlocks = (): number => {
+    const raw = config.defaultDisputeDelayBlocks ?? (DEV_CHAIN_IDS.has(config.chainId) ? 5_760 : NaN);
+    if (!Number.isSafeInteger(raw) || raw <= 0 || raw > 65_535) {
+      throw new Error(`JADAPTER_DEPLOY_DISPUTE_DELAY_INVALID:${String(raw)}`);
+    }
+    return raw;
+  };
+
   const formatReserveMintDebug = (mint: JReserveMint | undefined): string => {
     if (!mint) return 'none';
     return JSON.stringify({
@@ -624,6 +643,7 @@ export async function createRpcAdapter(
   };
 
   const buildFeeOverrides = async (): Promise<FeeOverrides> => {
+    if (config.mode === 'tron') return {};
     const feeData = await provider.getFeeData();
     if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
       return {
@@ -656,6 +676,15 @@ export async function createRpcAdapter(
     throw new Error('[JAdapter:rpc] processBatch requires a signer private key for Hanko signing');
   };
 
+  const signerForPrivateKey = (privateKey: string): Signer => {
+    const forkable = signer as Signer & { forPrivateKey?: (key: string) => Signer };
+    if (config.mode === 'tron') {
+      if (!forkable.forPrivateKey) throw new Error('TRON_SIGNER_FORK_UNAVAILABLE');
+      return forkable.forPrivateKey(privateKey);
+    }
+    return new ethers.Wallet(privateKey, provider);
+  };
+
   const processSignedBatch = async (
     entityId: string,
     batch: import('../jurisdiction/batch').JBatch,
@@ -681,11 +710,10 @@ export async function createRpcAdapter(
           ? depository.connect(txSigner as unknown as Parameters<typeof depository.connect>[0])
           : depository;
         const feeOverrides = await buildFeeOverrides();
-        const estimatedGasLimit = await estimateGasWithHeadroom(
+        const gasEstimate = await estimateProcessBatchGas(
           () => depositoryWithSigner.processBatch.estimateGas(encodedBatch, hankoData, nextNonce),
-          PROCESS_BATCH_GAS_FLOOR,
         );
-        const gasLimit = applyProcessBatchGasFloor(estimatedGasLimit);
+        const gasLimit = resolveProcessBatchGasLimit(gasEstimate.gasLimit);
 
         const tx = await depositoryWithSigner.processBatch(encodedBatch, hankoData, nextNonce, {
           gasLimit,
@@ -761,16 +789,13 @@ export async function createRpcAdapter(
     if (scenarioMode || DEV_CHAIN_IDS.has(config.chainId)) return 0;
     if (config.confirmationDepth !== undefined && Number.isFinite(config.confirmationDepth)) {
       const configuredDepth = Math.max(0, Math.floor(config.confirmationDepth));
-      if (isTronChainId(config.chainId) && configuredDepth < TRON_FINALITY_DEPTH) {
-        throw new Error(
-          `TRON watcher confirmationDepth=${configuredDepth} is unsafe; ` +
-            `require at least ${TRON_FINALITY_DEPTH} confirmations or a solidified-block RPC source`,
-        );
+      if (isTronChainId(config.chainId) && configuredDepth !== 0) {
+        throw new Error('TRON_CONFIRMATION_DEPTH_FORBIDDEN: use the SolidityNode solidified head');
       }
       return configuredDepth;
     }
     if (config.chainId === 1) return 12;
-    if (isTronChainId(config.chainId)) return TRON_FINALITY_DEPTH;
+    if (isTronChainId(config.chainId)) return 0;
     return 2;
   };
 
@@ -787,6 +812,31 @@ export async function createRpcAdapter(
     }
     return blockNumber;
   };
+
+  const readTronSolidifiedBlockNumber = async (): Promise<number> => {
+    const fullHost = String(config.tronFullHost || config.rpcUrl || '')
+      .replace(/\/jsonrpc\/?$/i, '')
+      .replace(/\/$/, '');
+    if (!fullHost) throw new Error('TRON_FULL_HOST_MISSING');
+    const response = await fetch(`${fullHost}/walletsolidity/getnowblock`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(config.tronApiKey ? { 'TRON-PRO-API-KEY': config.tronApiKey } : {}),
+      },
+      body: '{}',
+    });
+    if (!response.ok) throw new Error(`TRON_SOLIDIFIED_HEAD_HTTP:${response.status}`);
+    const payload = await response.json() as { block_header?: { raw_data?: { number?: unknown } } };
+    const blockNumber = Number(payload.block_header?.raw_data?.number);
+    if (!Number.isSafeInteger(blockNumber) || blockNumber < 0) {
+      throw new Error(`TRON_SOLIDIFIED_HEAD_INVALID:${String(payload.block_header?.raw_data?.number)}`);
+    }
+    return blockNumber;
+  };
+
+  const readSafeWatcherBlockNumber = async (): Promise<number> =>
+    isTronChainId(config.chainId) ? readTronSolidifiedBlockNumber() : readCurrentRpcBlockNumber();
 
   const sendAuthenticatedRpcBatch = async (calls: readonly RpcBatchCall[]): Promise<unknown[]> => {
     if (calls.length === 0) return [];
@@ -924,6 +974,7 @@ export async function createRpcAdapter(
     );
   };
   const allocateSerializedSignerNonceFor = async (activeSigner: Signer): Promise<number> => {
+    if (config.mode === 'tron') return 0;
     const signerKey = await getSerializedSignerKey(activeSigner);
     const chainNonce = await readSignerTxNonceFor(activeSigner);
     const cachedNonce = nextSerializedSignerNonces.has(signerKey)
@@ -1283,9 +1334,11 @@ export async function createRpcAdapter(
           });
         }
       }
-      const depositoryContract = await depositoryFactory.deploy(addresses.entityProvider, {
-        gasLimit: deployGasLimit,
-      });
+      const depositoryContract = await depositoryFactory.deploy(
+        addresses.entityProvider,
+        resolveDeploymentDisputeDelayBlocks(),
+        { gasLimit: deployGasLimit },
+      );
       await depositoryContract.waitForDeployment();
       addresses.depository = await depositoryContract.getAddress();
       depository = Depository__factory.connect(addresses.depository, asFactoryRunner(signer));
@@ -1698,7 +1751,7 @@ export async function createRpcAdapter(
             [encodedBatch, hankoData, nonce],
             {
               gasFallback: PROCESS_BATCH_GAS_FLOOR,
-              minimumGasLimit: PROCESS_BATCH_GAS_FLOOR,
+              ...(config.mode === 'tron' ? {} : { minimumGasLimit: PROCESS_BATCH_GAS_FLOOR }),
               txNonce: await allocateSerializedSignerNonce(),
               resetSignerNonce: true,
             },
@@ -1811,11 +1864,9 @@ export async function createRpcAdapter(
         internalTokenId?: number;
       }
     ): Promise<JEvent[]> {
-      const signerWallet = new ethers.Wallet(
-        '0x' + Buffer.from(signerPrivateKey).toString('hex'),
-        provider
-      );
-      const signerAddress = signerWallet.address;
+      const walletPrivateKey = `0x${Buffer.from(signerPrivateKey).toString('hex')}`;
+      const signerWallet = signerForPrivateKey(walletPrivateKey);
+      const signerAddress = await signerWallet.getAddress();
 
       const tokenType = options?.tokenType ?? 0;
       const externalTokenIdRaw = options?.externalTokenId ?? 0n;
@@ -1885,7 +1936,7 @@ export async function createRpcAdapter(
         externalTokenId,
         internalTokenId,
       });
-      const receipt = await processSignedBatch(entityId, batch, signerWallet, signerWallet.privateKey);
+      const receipt = await processSignedBatch(entityId, batch, signerWallet, walletPrivateKey);
       const normalizedEntityId = normalizeEntityId(entityId);
       const batchProcessed = receipt.events.find((event) =>
         event.name === 'HankoBatchProcessed' &&
@@ -1927,10 +1978,8 @@ export async function createRpcAdapter(
         tokenId?: number;
       },
     ): Promise<JEvent[]> {
-      const signerWallet = new ethers.Wallet(
-        '0x' + Buffer.from(signerPrivateKey).toString('hex'),
-        provider,
-      );
+      const signerWallet = signerForPrivateKey(`0x${Buffer.from(signerPrivateKey).toString('hex')}`);
+      const signerAddress = await signerWallet.getAddress();
       const erc20 = new ethers.Contract(tokenAddress, [
         'function allowance(address owner, address spender) view returns (uint256)',
         'function approve(address spender, uint256 amount) returns (bool)',
@@ -1955,7 +2004,7 @@ export async function createRpcAdapter(
       if (!spenderCode || spenderCode === '0x') {
         throw new Error(`approveErc20 invalid spender contract: ${spender}`);
       }
-      const currentAllowance = await allowanceFn(signerWallet.address, spender);
+      const currentAllowance = await allowanceFn(signerAddress, spender);
       if (currentAllowance === amount) return [];
       const toApprovalDelta = (receipt: RpcReceipt, allowance: bigint): JEvent[] => {
         const entityId = normalizeEntityId(options?.entityId || '');
@@ -1965,7 +2014,7 @@ export async function createRpcAdapter(
           receiptHash: receipt.hash,
           logs: receipt.logs,
           tokenAddress,
-          owner: signerWallet.address,
+          owner: signerAddress,
           spender,
           allowance,
         });
@@ -1973,7 +2022,7 @@ export async function createRpcAdapter(
           name: 'ExternalWalletDelta',
           args: {
             entityId,
-            owner: signerWallet.address.toLowerCase(),
+            owner: signerAddress.toLowerCase(),
             tokenAddress: tokenAddress.toLowerCase(),
             tokenId,
             spender: spender.toLowerCase(),
@@ -2012,9 +2061,9 @@ export async function createRpcAdapter(
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        const nativeBalance = await provider.getBalance(signerWallet.address).catch(() => null);
+        const nativeBalance = await provider.getBalance(signerAddress).catch(() => null);
         throw new Error(
-          `approveErc20 failed owner=${signerWallet.address} token=${tokenAddress} spender=${spender} currentAllowance=${currentAllowance} requested=${amount} nativeBalance=${nativeBalance ?? 'unknown'} cause=${message}`,
+          `approveErc20 failed owner=${signerAddress} token=${tokenAddress} spender=${spender} currentAllowance=${currentAllowance} requested=${amount} nativeBalance=${nativeBalance ?? 'unknown'} cause=${message}`,
         );
       }
     },
@@ -2025,10 +2074,7 @@ export async function createRpcAdapter(
       to: string,
       amount: bigint,
     ): Promise<string> {
-      const signerWallet = new ethers.Wallet(
-        '0x' + Buffer.from(signerPrivateKey).toString('hex'),
-        provider,
-      );
+      const signerWallet = signerForPrivateKey(`0x${Buffer.from(signerPrivateKey).toString('hex')}`);
       const erc20 = new ethers.Contract(tokenAddress, [
         'function transfer(address to, uint256 amount) returns (bool)',
       ], signerWallet);
@@ -2047,10 +2093,7 @@ export async function createRpcAdapter(
       to: string,
       amount: bigint,
     ): Promise<string> {
-      const signerWallet = new ethers.Wallet(
-        '0x' + Buffer.from(signerPrivateKey).toString('hex'),
-        provider,
-      );
+      const signerWallet = signerForPrivateKey(`0x${Buffer.from(signerPrivateKey).toString('hex')}`);
       const tx = await signerWallet.sendTransaction({
         to,
         value: amount,
@@ -2256,20 +2299,21 @@ export async function createRpcAdapter(
                 `:got=${effectiveExternalSignerId}`,
             };
           }
-          const externalSubmitterWallet = batchRequiresExternalSubmitter
-            ? (() => {
-                if (!signerPrivateKey) {
-                  throw new Error(`Missing signer private key for externalTokenToReserve batch from ${jTx.entityId.slice(-4)}`);
-                }
-                const wallet = new ethers.Wallet(`0x${Buffer.from(signerPrivateKey).toString('hex')}`, provider);
-                if (wallet.address.toLowerCase() !== expectedExternalSignerId.toLowerCase()) {
-                  throw new Error(
-                    `EXTERNAL_BATCH_EOA_MISMATCH:${normalizedId}:expected=${expectedExternalSignerId}:wallet=${wallet.address}`,
-                  );
-                }
-                return wallet;
-              })()
-            : null;
+          let externalSubmitterWallet: Signer | null = null;
+          if (batchRequiresExternalSubmitter) {
+            if (!signerPrivateKey) {
+              throw new Error(`Missing signer private key for externalTokenToReserve batch from ${jTx.entityId.slice(-4)}`);
+            }
+            externalSubmitterWallet = signerForPrivateKey(
+              `0x${Buffer.from(signerPrivateKey).toString('hex')}`,
+            );
+            const walletAddress = await externalSubmitterWallet.getAddress();
+            if (walletAddress.toLowerCase() !== expectedExternalSignerId.toLowerCase()) {
+              throw new Error(
+                `EXTERNAL_BATCH_EOA_MISMATCH:${normalizedId}:expected=${expectedExternalSignerId}:wallet=${walletAddress}`,
+              );
+            }
+          }
           const submitterDepository = externalSubmitterWallet
             ? depository.connect(externalSubmitterWallet as unknown as Parameters<typeof depository.connect>[0])
             : depository;
@@ -2353,11 +2397,10 @@ export async function createRpcAdapter(
             console.log(`📦 [JAdapter:rpc] processBatch (${getBatchSize(batch)} ops) nonce=${nextNonce}`);
             // ERC20 approvals are explicit user actions handled before batching.
             // submitTx must not mutate external allowances as a hidden side effect.
-            const gasEstimate = await estimateGasWithHeadroomResult(
+            const gasEstimate = await estimateProcessBatchGas(
               () => submitterDepository.processBatch.estimateGas(encodedBatch, hankoData, nextNonce),
-              PROCESS_BATCH_GAS_FLOOR,
             );
-            const gasLimit = applyProcessBatchGasFloor(gasEstimate.gasLimit);
+            const gasLimit = resolveProcessBatchGasLimit(gasEstimate.gasLimit);
             const resolvedFeeOverrides = await buildFeeOverrides();
             const requestedFeeOverrides = batchData.feeOverrides;
             if (requestedFeeOverrides?.maxFeePerGasWei) {
@@ -3051,7 +3094,8 @@ export async function createRpcAdapter(
           pollStep = 'eth_blockNumber';
           const currentBlock = await readCurrentRpcBlockNumber();
           if (watcherPollCancelled()) return;
-          const safeToBlock = currentBlock - confirmationDepth;
+          const safeHead = await readSafeWatcherBlockNumber();
+          const safeToBlock = safeHead - confirmationDepth;
           if (safeToBlock <= 0) return;
           const watcherReplica = findWatcherJurisdictionReplica(
             activeEnv,
@@ -3627,7 +3671,7 @@ export async function createRpcAdapter(
       // Explicit watcher drains are finality barriers. JsonRpcProvider may
       // cache getBlockNumber() across a just-mined registration receipt, which
       // would let bootstrap stop one block before its authority evidence.
-      return await readCurrentRpcBlockNumber();
+      return await readSafeWatcherBlockNumber();
     },
 
     getWatcherScanProgress() {

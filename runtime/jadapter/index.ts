@@ -9,7 +9,8 @@
  * Modes:
  *   - browservm: In-memory EVM (@ethereumjs/vm), no server needed
  *   - anvil: Local testnet via Foundry's Anvil
- *   - rpc: Real chains (mainnet, testnet)
+ *   - rpc: EVM chains (mainnet, testnet)
+ *   - tron: TRON JSON-RPC reads + native protobuf transaction writes
  *
  * @license AGPL-3.0
  * Copyright (C) 2025 XLN Finance
@@ -35,6 +36,7 @@ export {
  * Used to gate mint/debugFundReserves and disable confirmation depth.
  */
 export const DEV_CHAIN_IDS = new Set<number>([31337, 31338]);
+export const TRON_CHAIN_IDS = new Set<number>([728126428, 3448148188]);
 const DEFAULT_RPC_POLLING_INTERVAL_MS = 1_000;
 const xlnJsonRpcProviderOptions = (
   network?: ethers.Networkish,
@@ -114,6 +116,9 @@ class NonceTrackingWallet extends ethers.Wallet {
  * Create a JAdapter for interacting with J-Machine
  */
 export async function createJAdapter(config: JAdapterConfig): Promise<JAdapter> {
+  const effectiveConfig: JAdapterConfig = config.mode === 'rpc' && TRON_CHAIN_IDS.has(config.chainId)
+    ? { ...config, mode: 'tron' }
+    : config;
   const privateKey = (() => {
     if (config.privateKey) return config.privateKey;
     if (DEV_CHAIN_IDS.has(config.chainId)) {
@@ -124,7 +129,7 @@ export async function createJAdapter(config: JAdapterConfig): Promise<JAdapter> 
     );
   })();
 
-  if (config.mode === 'browservm') {
+  if (effectiveConfig.mode === 'browservm') {
     const { BrowserVMProvider } = await import('./browservm-provider');
     const browserVM = new BrowserVMProvider();
     await browserVM.init({ chainId: config.chainId });
@@ -139,18 +144,26 @@ export async function createJAdapter(config: JAdapterConfig): Promise<JAdapter> 
     // Use NonceTrackingWallet to track nonce locally (VM uses skipNonce anyway)
     const signer = new NonceTrackingWallet(privateKey, provider);
 
-    return createBrowserVMAdapter(config, provider, signer, browserVM);
+    return createBrowserVMAdapter(effectiveConfig, provider, signer, browserVM);
   }
 
-  // anvil and rpc modes both use RPC adapter
+  // anvil, EVM RPC, and TRON share the same ABI/receipt adapter. TRON swaps
+  // only the signer transport because java-tron does not accept Ethereum raw txs.
   if (!config.rpcUrl) {
-    throw new Error('rpcUrl required for anvil/rpc mode');
+    throw new Error('rpcUrl required for anvil/rpc/tron mode');
   }
   const rpcUrl = normalizeLoopbackUrl(config.rpcUrl);
   const provider = createXlnJsonRpcProvider(rpcUrl, config.chainId);
   configureRpcPolling(provider);
-  // Use NonceTrackingWallet for rapid sequential txs (anvil deploys many contracts)
-  const signer = new NonceTrackingWallet(privateKey, provider);
+  const signer = effectiveConfig.mode === 'tron'
+    ? await (await import('./tron-signer')).createTronSigner({
+        provider,
+        privateKey,
+        rpcUrl,
+        fullHost: effectiveConfig.tronFullHost,
+        apiKey: effectiveConfig.tronApiKey || process.env['TRONGRID_API_KEY'],
+      })
+    : new NonceTrackingWallet(privateKey, provider);
 
-  return createRpcAdapter({ ...config, rpcUrl }, provider, signer);
+  return createRpcAdapter({ ...effectiveConfig, rpcUrl }, provider, signer);
 }

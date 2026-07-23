@@ -50,6 +50,7 @@
     "test:persistence:cli": "bun runtime/scripts/run-with-test-cleanup.ts --reason=persistence-cli -- bun runtime/scripts/persistence-wal-smoke.ts",
     "test:watchtower:smoke": "bun runtime/scripts/run-with-test-cleanup.ts --reason=watchtower-smoke -- bun runtime/scripts/watchtower-smoke.ts",
     "test:rpc-settlement": "bun runtime/scripts/run-with-test-cleanup.ts --reason=rpc-settlement -- bun runtime/scripts/rpc-settlement-parity.ts",
+    "test:tron:nile": "bun runtime/scripts/tron-nile-smoke.ts",
     "test:p2p:relay": "bun runtime/scripts/run-with-test-cleanup.ts --reason=p2p-relay -- bun runtime/scenarios/p2p-relay.ts",
     "soak:quick": "bun runtime/scripts/run-soak-gate.ts --profile=quick --iterations=2",
     "perf:runtime": "bun runtime/scripts/analyze-runtime-perf.ts",
@@ -212,7 +213,7 @@
     "mocha": "^10.8.2",
     "playwright": "^1.61.1",
     "prettier": "^3.9.5",
-    "tronbox": "^4.9.0",
+    "solc": "0.8.25",
     "tronweb": "^6.4.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"

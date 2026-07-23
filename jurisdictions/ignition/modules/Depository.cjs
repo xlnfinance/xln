@@ -3,6 +3,7 @@ const { buildModule } = require("@nomicfoundation/hardhat-ignition/modules");
 const DepositoryModule = buildModule("DepositoryModule", (m) => {
   console.log("🔍 IGNITION: Starting deployment...");
   const foundationRecipient = m.getParameter("foundationRecipient", m.getAccount(0));
+  const disputeDelayBlocks = m.getParameter("defaultDisputeDelayBlocks", 5760);
 
   // 1. Deploy EntityProvider FIRST
   const entityProvider = m.contract('EntityProvider', [foundationRecipient]);
@@ -12,7 +13,7 @@ const DepositoryModule = buildModule("DepositoryModule", (m) => {
   const accountLibrary = m.library('Account');
 
   // 3. Deploy Depository with immutable EP address
-  const depository = m.contract('Depository', [entityProvider], {
+  const depository = m.contract('Depository', [entityProvider, disputeDelayBlocks], {
     id: 'Depository',
     libraries: {
       Account: accountLibrary
