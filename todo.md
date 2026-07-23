@@ -97,6 +97,26 @@ Audit claims enter this file only after reproduction against the current tree.
 - [ ] Keep one two-leg opening envelope and synchronous scratch validation on
   both Runtimes. Preserve manual whole-envelope retry and no opening receipt.
 
+## Security and persistence hardening
+
+- [ ] Replace raw X25519→AEAD keys with domain-separated HKDF-SHA256 and bind
+  ciphertext to protocol/from/to/type/source-frame/message-id AAD. Switch the
+  single testnet wire atomically to binary payloads; no Base64 or legacy codec.
+- [ ] Add authenticated session key rotation for forward secrecy after the
+  signed-profile key boundary is stable. Prove recorded traffic cannot be
+  decrypted after a later static Runtime-key compromise.
+- [ ] Add WebSocket buffered-byte backpressure and per-runtime message/byte
+  token buckets. Reconcile WS, Runtime ingress and Entity-frame byte limits
+  from one typed limit source and test exact boundaries.
+- [ ] Stop repeating the replay Runtime-machine projection in every history
+  frame. Persist deterministic ingress, roots, durable frontier/outbox changes
+  and bounded checkpoints; prove crash/replay/import parity and benchmark WAL
+  bytes before replacing the one current format.
+- [ ] Store each bilateral watch seed once in a Runtime-owned encrypted secret
+  namespace and reference it from materialized Account storage. Keep keys under
+  operator/runtime custody, not HSM policy; prove backup/restore and dispute
+  recovery before removing plaintext duplication.
+
 ## Storage and recovery
 
 - [ ] Extend real SIGKILL coverage through split mutation, collapse, delete,
