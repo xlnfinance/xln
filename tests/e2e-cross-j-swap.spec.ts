@@ -3599,9 +3599,13 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         to: optionTexts('[data-testid="swap-to-token-select"]'),
       };
     });
-    expect(tokenOptions.from, 'Tron source token list must expose Tron-only assets').toEqual(expect.arrayContaining(['TRX', 'SUN']));
-    expect(tokenOptions.to, 'Testnet target token list must not leak Tron-only assets').not.toEqual(expect.arrayContaining(['TRX']));
-    expect(tokenOptions.to, 'Testnet target token list must not leak Tron-only assets').not.toEqual(expect.arrayContaining(['SUN']));
+    expect(tokenOptions.from, 'Tron source token list must expose Tron-only assets').toEqual(
+      expect.arrayContaining(['TRX (Tron)', 'SUN (Tron)']),
+    );
+    expect(
+      tokenOptions.to.some((label) => /^(TRX|SUN)(?:\s|\(|$)/.test(label)),
+      'Testnet target token list must not leak Tron-only assets',
+    ).toBe(false);
     await expect(
       page.getByTestId('orderbook-bid-row').first().locator('.price'),
       'cross WETH/USDT price must be displayed as USDT per WETH, not inverted WETH per USDT',
