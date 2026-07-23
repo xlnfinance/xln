@@ -1,9 +1,9 @@
 # xln mainnet TODO
 
-This is the only active blocker list for deploying code trusted with real
-funds. It contains launch work only, ordered from fastest proof/fix to the
-hardest external gate. Completed work is deleted; long-term work belongs in
-`docs/roadmap.md`, and permanent rules belong in
+This is the only live TODO/NEXT file and the active blocker list for deploying
+code trusted with real funds. It contains launch work only, ordered from
+fastest proof/fix to the hardest external gate. Completed work is deleted;
+long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 `docs/mainnet-engineering-principles.md`.
 
 ## 0. Restore and prove production health
