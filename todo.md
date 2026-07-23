@@ -137,6 +137,13 @@ Audit claims enter this file only after reproduction against the current tree.
 
 - [ ] No artificial deposit cap. UI and docs state testnet risk; protocol
   safety comes from invariant proofs, not a hidden amount branch.
+- [ ] Run `bun run gate:mainnet` on the exact immutable release SHA; never
+  substitute a narrower test profile for mainnet acceptance.
 - [ ] Complete external contract/runtime audit on an immutable SHA, full
   conservation/fuzz/dispute/recovery gates, Ethereum and TRON testnets, release
   rehearsal and production monitoring before enabling real funds.
+
+## External audit handoff
+
+- [ ] Publish the immutable SHA, reproducible gate commands, contract addresses,
+  deployment receipts and scoped known limitations for independent review.
