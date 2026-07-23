@@ -39,8 +39,6 @@ type AccountFieldsManifest = {
   fields: Array<{ field: StorageAccountField; tag: number; hash: string }>;
 };
 
-const UNBRANCHED_COLLECTION_FIELDS = new Set<StorageAccountField>(['deltas', 'locks', 'swapOffers']);
-
 const FIELD_BY_TAG = STORAGE_ACCOUNT_FIELD_BY_TAG;
 
 const u16 = (value: number): Buffer => {
@@ -131,15 +129,6 @@ const accountFieldKey = (
   tag: number,
 ): Buffer => keyLiveAccountField(entityId, counterpartyId, tag);
 
-const assertUnbranchedCollectionSize = (entry: AccountFieldEntry): void => {
-  if (UNBRANCHED_COLLECTION_FIELDS.has(entry.field) && entry.value.byteLength >= MAX_INLINE_STORAGE_VALUE_BYTES) {
-    throw new Error(
-      `STORAGE_ACCOUNT_COLLECTION_TOO_LARGE:field=${entry.field}:bytes=${entry.value.byteLength}:` +
-      `maxExclusive=${MAX_INLINE_STORAGE_VALUE_BYTES}`,
-    );
-  }
-};
-
 export const prepareAccountStorageLayout = async (
   db: RuntimeDbLike,
   entityId: string,
@@ -168,7 +157,6 @@ export const prepareAccountStorageLayout = async (
   const nextTags = new Set(fields.map((entry) => entry.tag));
   const rootValue = encodeManifest(logicalValue, logicalHash, fields);
   const changedFields = fields.filter((entry) => previousHashes.get(entry.tag) !== entry.hash);
-  for (const entry of changedFields) assertUnbranchedCollectionSize(entry);
   return {
     representation: 'fields',
     logicalValue,

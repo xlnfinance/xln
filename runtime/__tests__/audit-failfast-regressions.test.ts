@@ -21,6 +21,7 @@ import { handleHtlcResolve } from '../account/tx/handlers/htlc-resolve';
 import { createSettlementWorkspaceHash } from '../account/tx/handlers/settle-transition';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { buildHashLadderProof, revealHashLadder } from '../protocol/htlc/hash-ladder';
+import type { MultiRecipientCiphertext } from '../protocol/htlc/multi-recipient';
 import { checkAutoRebalance, handleRequestCollateral } from '../account/tx/handlers/request-collateral';
 import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
 import { createFrameHash, MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame';
@@ -2649,6 +2650,43 @@ describe('audit fail-fast regressions', () => {
       frame,
       { entityTimestamp: 100_000, finalizedJHeight: 50 },
     )?.reason).toContain('HTLC_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT');
+  });
+
+  test('receiver-local preflight never mutates a live HTLC while simulating an offer', () => {
+    const account = makeProposalAccount([], 'alice', 'hub');
+    account.locks.set('offer-lock', {
+      lockId: 'offer-lock',
+      hashlock: `0x${'44'.repeat(32)}`,
+      timelock: 300_000n,
+      revealBeforeHeight: 100,
+      amount: 100n,
+      tokenId: 1,
+      senderIsLeft: true,
+      createdHeight: 0,
+      createdTimestamp: 0,
+    });
+    const before = structuredClone(account.locks);
+    const beforeRoot = computeAccountStateRootCold(account);
+    const offer: MultiRecipientCiphertext = {
+      version: 'xln:htlc-multi-recipient:v1',
+      manifest: {} as MultiRecipientCiphertext['manifest'],
+      profileCertification: {} as MultiRecipientCiphertext['profileCertification'],
+      contextHash: `0x${'45'.repeat(32)}`,
+      nonce: 'AAAAAAAAAAAAAAAA',
+      ciphertext: 'AAAA',
+      recipients: [],
+    };
+
+    expect(getIncomingAccountDeadlineViolation(
+      account,
+      makeIncomingAccountFrame(account, {
+        type: 'htlc_resolve',
+        data: { lockId: 'offer-lock', outcome: 'offer', offer },
+      }, false),
+      { entityTimestamp: 100_000, finalizedJHeight: 50 },
+    )).toBeUndefined();
+    expect(account.locks).toEqual(before);
+    expect(computeAccountStateRootCold(account)).toBe(beforeRoot);
   });
 
   test('receiver-local preflight follows pull cancellation before checking reused ids', () => {

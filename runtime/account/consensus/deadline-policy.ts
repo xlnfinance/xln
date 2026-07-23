@@ -38,6 +38,13 @@ const normalizedFillRatio = (value: unknown): number =>
 
 const deadlineViolation = (reason: string): IncomingDeadlineViolation => ({ reason, evidenceSecrets: [] });
 
+// Deadline admission is speculative: a rejected frame must leave the live
+// Account byte-identical. A Map clone alone still aliases HtlcLock values, so
+// simulating an `offer` would otherwise publish secretOffer before consensus.
+const cloneLocks = (account: AccountMachine): Map<string, HtlcLock> => new Map(
+  Array.from(account.locks, ([lockId, lock]) => [lockId, { ...lock }]),
+);
+
 const clonePulls = (account: AccountMachine): Map<string, PullCommitment> => new Map(
   Array.from(account.pulls?.entries() ?? [], ([pullId, pull]) => [pullId, { ...pull }]),
 );
@@ -61,7 +68,7 @@ export function getIncomingAccountDeadlineViolation(
   frame: AccountFrame,
   context: AccountInputSecurityContext,
 ): IncomingDeadlineViolation | undefined {
-  const locks = new Map(account.locks);
+  const locks = cloneLocks(account);
   const pulls = clonePulls(account);
   if (typeof frame.byLeft !== 'boolean') {
     return deadlineViolation('ACCOUNT_FRAME_PROPOSER_SIDE_MISSING');

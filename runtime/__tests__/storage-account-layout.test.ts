@@ -9,8 +9,6 @@ import {
 import { KEY_REBRANCH_NODE, keyLiveAccount, keyLiveAccountField } from '../storage/keys';
 import { withRebranchedValues } from '../storage/rebranched-db';
 import type { RuntimeDbLike, StorageAccountDoc } from '../storage/types';
-import { assertChangedAccountCollectionsFitStorage } from '../account/collection-storage-bound';
-import type { AccountMachine, AccountTx } from '../types';
 
 class MemoryDb implements RuntimeDbLike {
   readonly rows = new Map<string, Buffer>();
@@ -132,30 +130,31 @@ describe('typed Account persistence rebranching', () => {
     ).toString('hex'))).toBeFalse();
   });
 
-  test('fails fast instead of branching an oversized financial collection', async () => {
-    const db = withRebranchedValues(new MemoryDb());
+  test('rebranches an oversized financial collection and restores it exactly', async () => {
+    const raw = new MemoryDb();
+    const db = withRebranchedValues(raw);
     const doc = accountDoc(true) as unknown as { deltas: Map<number, unknown> };
     doc.deltas = new Map(Array.from({ length: 400 }, (_, index) => [
       index,
       { tokenId: index, marker: `delta-${index}-${'x'.repeat(80)}` },
     ]));
-    await expect(prepareAccountStorageLayout(
+    const layout = await prepareAccountStorageLayout(
       db,
       entityId,
       counterpartyId,
       keyLiveAccount(entityId, counterpartyId),
       doc as unknown as StorageAccountDoc,
-    )).rejects.toThrow('STORAGE_ACCOUNT_COLLECTION_TOO_LARGE:field=deltas');
-  });
-
-  test('runtime rejects an oversized collection before persistence', () => {
-    const account = accountDoc(true) as unknown as AccountMachine;
-    account.deltas = new Map(Array.from({ length: 400 }, (_, index) => [
-      index,
-      { tokenId: index, marker: `delta-${index}-${'x'.repeat(80)}` },
-    ])) as AccountMachine['deltas'];
-    const tx = { type: 'add_delta', data: { tokenId: 401 } } as AccountTx;
-    expect(() => assertChangedAccountCollectionsFitStorage(account, tx))
-      .toThrow('ACCOUNT_COLLECTION_STORAGE_LIMIT_EXCEEDED:field=deltas');
+    );
+    await applyLayout(db, layout);
+    expect((await readAccountStorageLayout(
+      db,
+      entityId,
+      counterpartyId,
+      keyLiveAccount(entityId, counterpartyId),
+    ))?.doc).toEqual(doc);
+    expect(Math.max(...Array.from(raw.rows.values(), (value) => value.byteLength)))
+      .toBeLessThan(MAX_INLINE_STORAGE_VALUE_BYTES);
+    expect(Array.from(raw.rows.keys()).some((key) => Number.parseInt(key.slice(0, 2), 16) === KEY_REBRANCH_NODE))
+      .toBeTrue();
   });
 });

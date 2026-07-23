@@ -27,6 +27,15 @@ export type AccountStateRootDebugRecord = {
 
 export type AccountStateSectionHashes = Readonly<Record<string, string>>;
 
+export type AccountCommitmentSectionDetail = Readonly<{
+  locksRoot: string;
+  pullsRoot: string;
+  swapOffersRoot: string;
+  subcontractsRoot: string;
+  lendingIntentsRoot: string;
+  settlementWorkspaceHash: string | null;
+}>;
+
 export type AccountStateRootTiming = {
   totalMs?: number;
   phases?: {
@@ -346,6 +355,30 @@ export const computeAccountStateSectionHashesCold = (
     computeIntegrityDigest(encodeAccountStateValue(value)),
   ]),
 );
+
+const accountCommitmentSectionDetail = (
+  account: AccountMachine,
+  cold: boolean,
+): AccountCommitmentSectionDetail => ({
+  locksRoot: computeAccountMapCommitment(account, 'locks', encodeAccountStateValue, cold),
+  pullsRoot: computeAccountMapCommitment(account, 'pulls', encodeAccountStateValue, cold),
+  swapOffersRoot: computeAccountMapCommitment(account, 'swapOffers', encodeAccountStateValue, cold),
+  subcontractsRoot: computeAccountMapCommitment(account, 'subcontracts', encodeAccountStateValue, cold),
+  lendingIntentsRoot: computeAccountMapCommitment(account, 'lendingIntents', encodeAccountStateValue, cold),
+  settlementWorkspaceHash: account.settlementWorkspace === undefined
+    ? null
+    : computeIntegrityDigest(encodeAccountStateValue(account.settlementWorkspace)),
+});
+
+/** Exact per-map breakdown emitted only after a commitment-section mismatch. */
+export const computeAccountCommitmentSectionDetail = (
+  account: AccountMachine,
+): AccountCommitmentSectionDetail => accountCommitmentSectionDetail(account, false);
+
+/** Cold per-map oracle for commitment-section mismatch diagnostics. */
+export const computeAccountCommitmentSectionDetailCold = (
+  account: AccountMachine,
+): AccountCommitmentSectionDetail => accountCommitmentSectionDetail(account, true);
 
 export const computeAccountStateRoot = (
   account: AccountMachine,

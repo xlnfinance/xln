@@ -52,6 +52,8 @@ import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-bu
 import { signEntityHashes, verifyHankoForHash } from '../../hanko/signing';
 import { getReplicaByEntityId } from '../../entity/replica';
 import {
+  computeAccountCommitmentSectionDetail,
+  computeAccountCommitmentSectionDetailCold,
   computeAccountStateRoot,
   computeAccountStateRootCold,
   computeAccountStateSectionHashes,
@@ -107,6 +109,16 @@ const assertLiveCommitMatchesFrame = (
     coldRoot,
     incrementalSectionHashes: computeAccountStateSectionHashes(accountMachine),
     coldSectionHashes: computeAccountStateSectionHashesCold(accountMachine),
+    incrementalCommitments: computeAccountCommitmentSectionDetail(accountMachine),
+    coldCommitments: computeAccountCommitmentSectionDetailCold(accountMachine),
+    pendingFrameTxTypes: accountMachine.pendingFrame?.accountTxs.map((tx) => tx.type) ?? [],
+    commitmentEntryCounts: {
+      locks: accountMachine.locks.size,
+      pulls: accountMachine.pulls?.size ?? 0,
+      swapOffers: accountMachine.swapOffers.size,
+      subcontracts: accountMachine.subcontracts?.size ?? 0,
+      lendingIntents: accountMachine.lendingIntents?.size ?? 0,
+    },
     liveFinancial: {
       deltas: Array.from(accountMachine.deltas.entries()),
       globalCreditLimits: accountMachine.globalCreditLimits,

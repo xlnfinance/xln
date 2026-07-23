@@ -27,7 +27,6 @@ import { canProcessAccountTxForDisputeStatus } from '../consensus/dispute-policy
 import { createStructuredLogger } from '../../infra/logger';
 import type { AccountJClaimSession } from '../j-claim-session';
 import { invalidateAccountMapCommitment, type AccountCommittedMap } from '../map-commitment';
-import { assertChangedAccountCollectionsFitStorage } from '../collection-storage-bound';
 
 const accountTxLog = createStructuredLogger('account.tx');
 
@@ -437,7 +436,6 @@ export async function applyAccountTx(
     counterpartyCertifiedBoardHash,
   );
   if (result.success) {
-    assertChangedAccountCollectionsFitStorage(accountMachine, accountTx);
     invalidateCommittedMapsForTx(accountMachine, accountTx, deltaKeysBeforeMutation);
   }
   return result;
