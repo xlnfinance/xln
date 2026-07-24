@@ -183,6 +183,8 @@ const deployEvm = async (chain, options) => {
     env: {
       XLN_DEPLOY_OUTPUT: outputPath,
       XLN_DISPUTE_DELAY_BLOCKS: String(chain.disputeDelayBlocks),
+      XLN_STABLECOIN_ADDRESS: String(chain.usdtEnv ? process.env[chain.usdtEnv] || '' : ''),
+      XLN_DEPLOY_TEST_STABLECOIN: chain.id === 'ethereum-sepolia' && !process.env[chain.usdtEnv] ? '1' : '0',
     },
   });
   const deployed = JSON.parse(readFileSync(outputPath, 'utf8'));
@@ -387,17 +389,20 @@ const deployTron = async (chain, options) => {
 
 const tokenConfig = (chain, registeredTokens) => {
   if (registeredTokens?.USDT) {
+    const token = registeredTokens.USDT;
     return {
       USDT: {
         symbol: 'USDT',
-        decimals: registeredTokens.USDT.decimals,
-        tokenId: registeredTokens.USDT.tokenId,
-        address: registeredTokens.USDT.evm,
+        decimals: token.decimals,
+        tokenId: token.tokenId,
+        address: token.evm || token.address,
+        ...(token.base58 && token.hex41 && token.evm ? {
         tron: {
-          base58: registeredTokens.USDT.base58,
-          hex41: registeredTokens.USDT.hex41,
-          evm: registeredTokens.USDT.evm,
+          base58: token.base58,
+          hex41: token.hex41,
+          evm: token.evm,
         },
+        } : {}),
       },
     };
   }
@@ -434,12 +439,16 @@ const jurisdictionEntry = (result) => ({
 
 const writeDeploymentOutputs = (profileName, results, writeJurisdictions) => {
   mkdirSync(deploymentsDir, { recursive: true });
+  const deploymentPath = path.join(deploymentsDir, `${profileName}.json`);
+  const existingDeployments = readJsonIfPresent(deploymentPath)?.jurisdictions || {};
   const deployPayload = {
     profile: profileName,
     deployedAt: new Date().toISOString(),
-    jurisdictions: Object.fromEntries(results.map((result) => [result.chain.id, jurisdictionEntry(result)])),
+    jurisdictions: {
+      ...existingDeployments,
+      ...Object.fromEntries(results.map((result) => [result.chain.id, jurisdictionEntry(result)])),
+    },
   };
-  const deploymentPath = path.join(deploymentsDir, `${profileName}.json`);
   writeFileSync(deploymentPath, JSON.stringify(deployPayload, null, 2));
   console.log(`[deploy-chains] wrote ${path.relative(repoRoot, deploymentPath)}`);
 

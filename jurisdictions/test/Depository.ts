@@ -741,6 +741,43 @@ describe("Depository", function () {
     expect(await noReturnToken.balanceOf(user1.address)).to.equal(2_500n);
   });
 
+  it("uses exact balance deltas for false-return ERC20 deposits and withdrawals", async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const FalseReturnERC20 = await hre.ethers.getContractFactory("FalseReturnERC20Mock");
+    const token = await FalseReturnERC20.deploy(1_000_000n);
+    await token.waitForDeployment();
+    const actor = lazyActor(user0, 0);
+    const recipientEntity = addressEntityId(user1.address);
+
+    await depository.registerExternalToken(0, await token.getAddress(), 0);
+    await token.approve(await depository.getAddress(), 10_000n);
+    const deposit = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, emptyBatch({
+      externalTokenToReserve: [{
+        entity: ethers.ZeroHash,
+        contractAddress: await token.getAddress(),
+        externalTokenId: 0,
+        tokenType: 0,
+        internalTokenId: 0,
+        amount: 10_000n,
+      }],
+    }));
+    await depository.connect(user0).processBatch(deposit.encodedBatch, deposit.hankoData, deposit.nonce);
+
+    const tokenId = (await depository.getTokensLength()) - 1n;
+    const withdrawal = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, emptyBatch({
+      reserveToExternalToken: [{ receivingEntity: recipientEntity, tokenId, amount: 2_500n }],
+    }));
+    await depository.connect(user0).processBatch(
+      withdrawal.encodedBatch,
+      withdrawal.hankoData,
+      withdrawal.nonce,
+    );
+
+    expect(await depository._reserves(actor.entityId, tokenId)).to.equal(7_500n);
+    expect(await token.balanceOf(await depository.getAddress())).to.equal(7_500n);
+    expect(await token.balanceOf(user1.address)).to.equal(2_500n);
+  });
+
   it("rejects fee-on-transfer ERC20 withdrawals without reducing reserve", async function () {
     const { depository } = await loadFixture(deployFixture);
     const FeeToken = await hre.ethers.getContractFactory("FeeOnTransferERC20");

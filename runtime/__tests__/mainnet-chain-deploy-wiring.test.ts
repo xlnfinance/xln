@@ -32,7 +32,11 @@ describe('mainnet chain deployment wiring', () => {
     expect(stack).toContain('entityProviderDeploymentBlock: entityProviderDeployment.deploymentBlock');
     expect(stack).toContain('evmContracts:');
     expect(stack).toContain('transactionHash: transaction.hash');
+    expect(stack).toContain('STABLECOIN_TOKEN_ID_MISMATCH');
+    expect(stack).toContain('registeredTokens:');
     expect(matrix).toContain('result.evmContracts ? { evmContracts: result.evmContracts }');
+    expect(matrix).toContain("XLN_DEPLOY_TEST_STABLECOIN: chain.id === 'ethereum-sepolia'");
+    expect(matrix).toContain('...existingDeployments');
     expect(matrix).toContain("run('bunx', ['--bun', 'hardhat', 'compile'])");
     expect(matrix).toContain("run('bunx', ['--bun', 'hardhat', 'run'");
   });
