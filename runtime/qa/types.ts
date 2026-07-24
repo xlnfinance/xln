@@ -1,4 +1,5 @@
 import type { QaSeveritySignal } from './severity';
+import type { QaCandidateIdentity } from './candidate';
 
 export type { QaSeverity, QaSeverityEvidence, QaSeveritySignal } from './severity';
 
@@ -237,6 +238,8 @@ export type QaFailureCapsule = {
 };
 
 export type QaShardManifest = {
+  candidateId?: string;
+  gateConfigHash?: string;
   shard: number;
   status: 'passed' | 'failed' | 'cancelled' | 'unknown';
   resultClass?: 'passed' | 'playwright' | 'runtime-fatal' | 'startup' | 'runner' | 'cancelled';
@@ -269,6 +272,8 @@ export type QaShardManifest = {
 
 export type QaRunManifest = {
   manifestVersion: number;
+  candidate?: QaCandidateIdentity;
+  gateConfig?: Record<string, unknown>;
   runId: string;
   createdAt: number;
   completedAt: number | null;

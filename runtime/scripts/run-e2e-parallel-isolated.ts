@@ -68,6 +68,10 @@ import type {
   QaSlowStep,
   QaTestCategory,
 } from '../qa/types';
+import {
+  assertQaCandidateIdentity,
+  buildQaCandidateIdentity,
+} from '../qa/candidate';
 import { assertMinDiskFree } from '../orchestrator/storage-monitor';
 import { compareStableText } from '../protocol/serialization';
 import { sanitizeChildProcessEnv } from '../server/child-process-env';
@@ -251,6 +255,60 @@ type RunTask = {
   tags: string[];
   testCategory: QaTestCategory;
 };
+
+export const buildE2EGateConfig = (
+  args: CliArgs,
+  tasks: readonly RunTask[],
+): Record<string, unknown> => ({
+  schemaVersion: 1,
+  runner: 'run-e2e-parallel-isolated',
+  manifestVersion: QA_RUN_MANIFEST_VERSION,
+  args: {
+    shards: args.shards,
+    basePort: args.basePort,
+    stackTimeoutMs: args.stackTimeoutMs,
+    testTimeoutMs: args.testTimeoutMs,
+    phaseWarnMs: args.phaseWarnMs,
+    anvilBin: args.anvilBin,
+    maxFailures: args.maxFailures,
+    maxMmConcurrency: args.maxMmConcurrency,
+    maxResetConcurrency: args.maxResetConcurrency,
+    workersPerShard: args.workersPerShard,
+    videoMode: args.videoMode,
+    traceMode: args.traceMode,
+    screenshotMode: args.screenshotMode,
+    reporter: args.reporter,
+    qaCategory: args.qaCategory ?? null,
+    pwGrep: args.pwGrep ?? null,
+    pwProject: args.pwProject ?? null,
+    pwFiles: [...args.pwFiles],
+    batchFiles: args.batchFiles,
+    includeAllSpecs: args.includeAllSpecs,
+    excludeMarketMaker: args.excludeMarketMaker,
+    marketMakerOnly: args.marketMakerOnly,
+    strictBrowserHealth: args.strictBrowserHealth,
+    skipBuild: args.skipBuild,
+    startAt: args.startAt,
+    preserveArtifacts: args.preserveArtifacts,
+    prewaitHealth: args.prewaitHealth,
+  },
+  tasks: tasks
+    .slice()
+    .sort((left, right) => left.shard - right.shard)
+    .map(task => ({
+      shard: task.shard,
+      totalShards: task.totalShards,
+      pwTargets: [...task.pwTargets],
+      requireMarketMaker: task.requireMarketMaker,
+      requireCustody: task.requireCustody,
+      usePlaywrightShard: task.usePlaywrightShard,
+      scenario: task.scenario,
+      title: task.title ?? null,
+      grep: task.grep ?? null,
+      tags: [...task.tags].sort(compareStableText),
+      testCategory: task.testCategory,
+    })),
+});
 
 type JsonRecord = Record<string, unknown>;
 type HealthPayload = JsonRecord;
@@ -1104,6 +1162,12 @@ const writeRunManifest = (
   codeFingerprint: QaCodeFingerprint,
   primaryFailure: E2EPrimaryFailureIdentity | null,
 ): QaRunManifest => {
+  const gateConfig = buildE2EGateConfig(args, tasks);
+  const candidate = buildQaCandidateIdentity({
+    gitHead: codeFingerprint.gitHead,
+    codeHash: codeFingerprint.codeHash,
+    gateConfig,
+  });
   const taskByShard = new Map(tasks.map(task => [task.shard, task] as const));
   const shards = results
     .slice()
@@ -1121,6 +1185,8 @@ const writeRunManifest = (
       const logTail = redactQaSecretText(tailLog(result.logPath));
       const error = result.error ? redactQaSecretText(result.error) : null;
       return {
+        candidateId: candidate.candidateId,
+        gateConfigHash: candidate.gateConfigHash,
         shard: result.shard,
         status,
         resultClass: result.resultClass,
@@ -1167,6 +1233,8 @@ const writeRunManifest = (
   }
   let manifest: QaRunManifest = applyQaRunSeverity({
     manifestVersion: QA_RUN_MANIFEST_VERSION,
+    candidate,
+    gateConfig,
     runId: logsDir.split('/').at(-1) || logsDir,
     createdAt,
     completedAt: Date.now(),
@@ -1202,6 +1270,7 @@ const writeRunManifest = (
   });
   manifest.benchmark = compareQaRunWithHistory(manifest);
   manifest = applyQaRunSeverity(manifest);
+  assertQaCandidateIdentity(manifest.candidate, manifest.gateConfig);
   assertQaReleaseRunSeverity(manifest);
   writeFileSync(join(logsDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
   recordQaRunHistory(manifest, logsDir);
@@ -3559,6 +3628,8 @@ async function main(): Promise<void> {
     console.log(`Git HEAD: ${codeFingerprint.gitHead ?? 'unknown'}`);
     console.log(`Code hash: ${codeFingerprint.codeHash}`);
     console.log(`Build input hash: ${codeFingerprint.buildInputHash}`);
+    console.log(`Candidate ID: ${manifest.candidate?.candidateId ?? 'missing'}`);
+    console.log(`Gate config hash: ${manifest.candidate?.gateConfigHash ?? 'missing'}`);
     console.log(`Logs: ${logsDir}`);
     if (failureState.primaryFailure) {
       console.log(

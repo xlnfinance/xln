@@ -12,11 +12,17 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   browser, frontend, Runtime, managed-child, orchestrator and J-machine errors
   must enter one redacted stream, group by root-cause fingerprint, survive
   gossip flood/restart, and support unread/acknowledged/resolved state. Release
-  gates fail on unexplained open incidents.
+  gates fail on unexplained open incidents. All money controls must derive
+  readiness from the same Runtime lifecycle gate and perform zero enqueue while
+  halted, quiescing or restoring.
 - [ ] Reproduce the production bootstrap locally with the production storage
   byte threshold, then run beyond the first epoch rotation with H1/H2/H3/MM
   healthy, no stale frames, no orphan processes and no growing empty-chain
   disk workload.
+- [ ] Make market-maker `/api/health` authoritative: top-level readiness stays
+  false until `offers-ready`, gossip is complete and every required same-J and
+  cross-J book has exact expected depth. Liveness must remain a separate field;
+  no E2E may begin swaps from process-alive/profile-visible alone.
 - [ ] Prove through Runtime state, public API and browser E2E that every
   supported same-J pair exposes exactly 10 bids and 10 asks. Prove cross-J
   full fill closes both legs and removes the user order; partial GTC remains
@@ -108,9 +114,10 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 7. Immutable mainnet release pipeline
 
-- [ ] Bind every result to
-  `candidateId = gitHead + codeHash + gateConfigHash`; store unit, contract,
-  scenario, browser, recovery, public-chain and release evidence together.
+- [ ] Extend the candidate binding already enforced for isolated E2E run/shard
+  manifests to unit, contract, scenario, recovery, public-chain and final
+  release evidence. One `candidateId = gitHead + codeHash + gateConfigHash`
+  must identify the entire immutable evidence set.
 - [ ] Run L1/L2 first, then exactly one unchanged-candidate unified full E2E,
   `bun run check`, `bun run gate:release` and the uninterrupted
   `bun run gate:mainnet`.

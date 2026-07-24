@@ -15,6 +15,8 @@ import {
   qaRunTestCategory as categoryFromTests,
   qaTestCategoryFromTags,
 } from './test-categories';
+import type { QaCandidateIdentity } from './candidate';
+import { assertQaCandidateIdentity } from './candidate';
 
 export type { QaSeverity, QaSeverityEvidence, QaSeveritySignal } from './severity';
 
@@ -282,6 +284,8 @@ export type QaFailureCapsule = {
 };
 
 export type QaShardManifest = {
+  candidateId?: string;
+  gateConfigHash?: string;
   shard: number;
   status: 'passed' | 'failed' | 'cancelled' | 'unknown';
   resultClass?: 'passed' | 'playwright' | 'runtime-fatal' | 'startup' | 'runner' | 'cancelled';
@@ -314,6 +318,8 @@ export type QaShardManifest = {
 
 export type QaRunManifest = {
   manifestVersion: number;
+  candidate?: QaCandidateIdentity;
+  gateConfig?: Record<string, unknown>;
   runId: string;
   createdAt: number;
   completedAt: number | null;
@@ -366,7 +372,7 @@ export type QaRunSummary = Omit<QaRunManifest, 'perf' | 'shards'> & {
   childCpuP95Pct: number | null;
 };
 
-export const QA_RUN_MANIFEST_VERSION = 4;
+export const QA_RUN_MANIFEST_VERSION = 5;
 
 export type QaSystemVerdictStatus = 'PASS' | 'DEGRADED' | 'FAIL' | 'UNKNOWN';
 
@@ -1105,6 +1111,11 @@ const qaVerdictRunExclusion = (run: QaRunSummary, now: number): string | null =>
   }
   if (Object.prototype.hasOwnProperty.call(run.args ?? {}, 'fixture')) return 'fixture run';
   if (run.code?.dirty !== false) return run.code?.dirty ? 'dirty worktree' : 'clean fingerprint missing';
+  try {
+    assertQaCandidateHeaderBinding(run);
+  } catch {
+    return 'candidate binding invalid';
+  }
   return null;
 };
 
@@ -1883,12 +1894,45 @@ export const assertQaReleaseRunSeverity = (run: QaRunManifest): void => {
   }
   const derived = categoryFromTests(shardCategories as QaTestCategory[]);
   if (run.testCategory !== derived) throw new Error('QA_RUN_TEST_CATEGORY_MISMATCH');
+  if (run.manifestVersion < 5) return;
+  assertQaRunCandidateBinding(run);
+};
+
+export const assertQaRunCandidateBinding = (run: QaRunManifest): void => {
+  if (run.manifestVersion < 5) return;
+  const identity = assertQaCandidateHeaderBinding(run);
+  for (const shard of run.shards) {
+    if (
+      shard.candidateId !== identity.candidateId ||
+      shard.gateConfigHash !== identity.gateConfigHash
+    ) {
+      throw new Error(`QA_SHARD_CANDIDATE_MISMATCH:${shard.shard}`);
+    }
+  }
+};
+
+export const assertQaCandidateHeaderBinding = (
+  run: Pick<QaRunManifest, 'manifestVersion' | 'candidate' | 'gateConfig' | 'code'>,
+): QaCandidateIdentity => {
+  if (run.manifestVersion < 5) {
+    throw new Error('QA_CANDIDATE_SCHEMA_UNSUPPORTED');
+  }
+  const identity = assertQaCandidateIdentity(run.candidate, run.gateConfig);
+  if (
+    run.code?.gitHead !== identity.gitHead ||
+    run.code?.codeHash !== identity.codeHash
+  ) {
+    throw new Error('QA_CANDIDATE_CODE_FINGERPRINT_MISMATCH');
+  }
+  return identity;
 };
 
 const parseManifestJson = (value: unknown): QaRunManifest | null => {
   if (typeof value !== 'string' || !value.trim()) return null;
   try {
-    return applyQaRunSeverity(JSON.parse(value) as QaRunManifest);
+    const run = applyQaRunSeverity(JSON.parse(value) as QaRunManifest);
+    assertQaRunCandidateBinding(run);
+    return run;
   } catch {
     return null;
   }
@@ -3111,6 +3155,7 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
     try {
       parsed = JSON.parse(raw) as QaRunManifest;
       if (!Array.isArray(parsed.shards)) throw new Error('QA_MANIFEST_SHARDS_MISSING');
+      assertQaRunCandidateBinding(parsed);
     } catch (error) {
       return await buildCorruptManifestRun(runId, runDir, error, raw);
     }
@@ -3338,6 +3383,8 @@ export const resolveQaStoryScreenshotPath = async (
 
 export const summarizeQaRun = (run: QaRunManifest): QaRunSummary => ({
   manifestVersion: run.manifestVersion,
+  ...(run.candidate ? { candidate: run.candidate } : {}),
+  ...(run.gateConfig ? { gateConfig: run.gateConfig } : {}),
   severity: run.severity,
   reason: run.reason,
   since: run.since,
