@@ -75,6 +75,7 @@ test('bulk restore decodes each tail diff once for every Entity', async () => {
     retainSnapshots: 3,
     epochMaxBytes: 1,
     accountMerkleRadix: 16,
+    epochReplayBytes: 0,
     retainedHistoryBytes: 0,
   };
   const store = new Map<string, Buffer>([

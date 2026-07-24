@@ -64,6 +64,7 @@ describe('secondary storage error severity', () => {
         retainSnapshots: 3,
         epochMaxBytes: 268_435_456,
         accountMerkleRadix: 16,
+        epochReplayBytes: 0,
         retainedHistoryBytes: 0,
       }),
       { sync: true },

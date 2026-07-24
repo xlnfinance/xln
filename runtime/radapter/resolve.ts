@@ -557,6 +557,7 @@ const headFromEnv = (env: Env): StorageHead => {
     retainSnapshots: Math.max(1, Number(storage?.retainSnapshots ?? DEFAULT_RETAIN_SNAPSHOTS)),
     epochMaxBytes: Math.max(1, Number(storage?.epochMaxBytes ?? DEFAULT_EPOCH_MAX_BYTES)),
     accountMerkleRadix: storage?.accountMerkleRadix === 256 ? 256 : DEFAULT_ACCOUNT_MERKLE_RADIX,
+    epochReplayBytes: 0,
     retainedHistoryBytes: 0,
   };
 };

@@ -143,6 +143,7 @@ export const seedFreshStorageEpoch = async (options: {
       ...head,
       latestMaterializedHeight: options.snapshotHeight,
       latestSnapshotHeight: options.snapshotHeight,
+      epochReplayBytes: 0,
       retainedHistoryBytes: 0,
     } satisfies StorageHead),
   );

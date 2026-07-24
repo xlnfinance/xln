@@ -33,7 +33,7 @@ import {
   verifyStorageTailIntegrity,
 } from '../storage';
 import { getPerfMs } from '../utils';
-import { decodeBuffer, encodeBuffer } from '../storage/codec';
+import { decodeBuffer, encodeBuffer, writeBatch } from '../storage/codec';
 import { readRawOrNull } from '../storage/level';
 import {
   KEY_HEAD,
@@ -1326,10 +1326,21 @@ describe('storage frame journal retention', () => {
     await processRuntime(env, []);
 
     // Production reaches the byte threshold after the live Env already owns
-    // open LevelDB handles. Rotation must replace those handles at publish;
-    // retaining the closed pre-rotation handle makes the next frame halt with
-    // "Database is not open".
-    env.runtimeConfig.storage.epochMaxBytes = 1;
+    // open LevelDB handles. Force that exact boundary without shrinking the
+    // configured epoch below one ordinary frame: after rotation the unchanged
+    // threshold must allow the next frame instead of rotating forever.
+    const preRotationHistoryHead = await readStorageHead(getFrameDb(env));
+    if (!preRotationHistoryHead) throw new Error('rotation test history head missing');
+    const forcedEpochHead = {
+      ...preRotationHistoryHead,
+      epochReplayBytes: preRotationHistoryHead.epochMaxBytes,
+    };
+    const forceHistory = getFrameDb(env).batch();
+    forceHistory.put(KEY_HEAD, encodeBuffer(forcedEpochHead));
+    await writeBatch(forceHistory);
+    const forceCurrent = getRuntimeStorageDb(env).batch();
+    forceCurrent.put(KEY_HEAD, encodeBuffer(forcedEpochHead));
+    await writeBatch(forceCurrent);
     enqueueRuntimeInput(env, {
       runtimeTxs: [],
       entityInputs: [{
@@ -1355,6 +1366,8 @@ describe('storage frame journal retention', () => {
     expect(currentHead?.latestHeight).toBe(historyHead?.latestHeight);
     expect(currentHead?.latestMaterializedHeight).toBe(snapshotHeight);
     expect(currentHead?.latestSnapshotHeight).toBe(snapshotHeight);
+    expect(currentHead?.epochReplayBytes).toBe(0);
+    expect(historyHead?.epochReplayBytes).toBe(0);
     expect(currentHead?.retainedHistoryBytes).toBe(0);
     expect(historyHead?.retainedHistoryBytes ?? 0).toBeGreaterThan(0);
     expect(await readRawOrNull(getFrameDb(env), keySnapshotManifest(snapshotHeight))).toBeTruthy();
@@ -1362,7 +1375,6 @@ describe('storage frame journal retention', () => {
     expect(await readRawOrNull(getFrameDb(env), keyDiff(snapshotHeight))).toBeNull();
     expect(await readRawOrNull(getRuntimeStorageDb(env), keyFrame(snapshotHeight))).toBeNull();
 
-    env.runtimeConfig.storage.epochMaxBytes = 1_000_000;
     enqueueRuntimeInput(env, {
       runtimeTxs: [],
       entityInputs: [{
@@ -1376,6 +1388,11 @@ describe('storage frame journal retention', () => {
     });
     await processRuntime(env, []);
     expect(await getPersistedLatestHeight(env)).toBe(latestAfterRotation + 1);
+    const postRotationHistoryHead = await readStorageHead(getFrameDb(env));
+    expect(postRotationHistoryHead?.latestSnapshotHeight).toBe(snapshotHeight);
+    expect(postRotationHistoryHead?.epochReplayBytes ?? 0).toBeGreaterThan(0);
+    expect(postRotationHistoryHead?.epochReplayBytes ?? Number.POSITIVE_INFINITY)
+      .toBeLessThan(preRotationHistoryHead.epochMaxBytes);
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);

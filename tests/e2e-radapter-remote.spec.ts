@@ -132,6 +132,7 @@ const installOneMillionRuntimeAdapterSocket = async (page: import('@playwright/t
       retainSnapshots: 3,
       epochMaxBytes: 1,
       accountMerkleRadix: 16,
+      epochReplayBytes: 0,
       retainedHistoryBytes: 4096,
     };
     const counterparties = Array.from({ length: 10 }, (_, index) => `0x${(index + 1).toString(16).padStart(64, '0')}`);
@@ -2116,6 +2117,7 @@ test('admin remote runtime control advances live state and exposes past frames',
       latestHeight: Number(head.latestHeight || 0),
       latestSnapshotHeight: Number(head.latestSnapshotHeight || 0),
       snapshotPeriodFrames: Number(head.snapshotPeriodFrames || 0),
+      epochReplayBytes: 0,
       retainedHistoryBytes: Number(head.retainedHistoryBytes || 0),
       checkpointHeights: checkpoints.map((entry) => Number(entry.height || 0)),
     };

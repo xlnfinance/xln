@@ -178,6 +178,7 @@ const head = (latestHeight: number, latestMaterializedHeight: number): StorageHe
   retainSnapshots: config.retainSnapshots,
   epochMaxBytes: config.epochMaxBytes,
   accountMerkleRadix: config.accountMerkleRadix,
+  epochReplayBytes: 0,
   retainedHistoryBytes: 0,
 });
 

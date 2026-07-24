@@ -39,10 +39,16 @@ export const validateStorageHeadValue = (value: unknown): StorageHead => {
   requireExactBoundaryKeys(head, [
     'schemaVersion', 'latestHeight', 'latestMaterializedHeight', 'latestSnapshotHeight',
     'snapshotPeriodFrames', 'retainSnapshots', 'epochMaxBytes', 'accountMerkleRadix',
-    'retainedHistoryBytes',
+    'epochReplayBytes', 'retainedHistoryBytes',
   ], [], `${code}_FIELDS`);
   assertStorageSchemaVersion(head['schemaVersion'], 'storage-head');
-  for (const key of ['latestHeight', 'latestMaterializedHeight', 'latestSnapshotHeight', 'retainedHistoryBytes']) {
+  for (const key of [
+    'latestHeight',
+    'latestMaterializedHeight',
+    'latestSnapshotHeight',
+    'epochReplayBytes',
+    'retainedHistoryBytes',
+  ]) {
     requireBoundaryInteger(head[key], `${code}_${key}`);
   }
   requireBoundaryInteger(head['snapshotPeriodFrames'], `${code}_SNAPSHOT_PERIOD`, 1);

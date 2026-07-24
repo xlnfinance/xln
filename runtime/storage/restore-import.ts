@@ -59,7 +59,10 @@ export type RestoredStorageBaseOptions = {
   timestamp: number;
   docs: StorageDoc[];
   replicaMetas: ReplicaMetaEntry[];
-  headConfig: Omit<StorageHead, 'latestHeight' | 'latestMaterializedHeight' | 'latestSnapshotHeight' | 'retainedHistoryBytes'>;
+  headConfig: Omit<
+    StorageHead,
+    'latestHeight' | 'latestMaterializedHeight' | 'latestSnapshotHeight' | 'epochReplayBytes' | 'retainedHistoryBytes'
+  >;
   canonicalStateHash: string;
   canonicalEntityHashes: StorageFrameEntityHash[];
   runtimeMachine: Record<string, unknown>;
@@ -348,6 +351,7 @@ export const replaceRestoredStorageBase = async (
     latestHeight: options.height,
     latestMaterializedHeight: options.height,
     latestSnapshotHeight: options.height,
+    epochReplayBytes: 0,
     retainedHistoryBytes,
   };
   const historyEntries = [

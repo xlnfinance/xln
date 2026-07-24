@@ -352,6 +352,7 @@ const makeHead = (height: number): StorageHead => ({
   retainSnapshots: 3,
   epochMaxBytes: 256 * 1024 * 1024,
   accountMerkleRadix: 16,
+  epochReplayBytes: 0,
   retainedHistoryBytes: 0,
 });
 
@@ -692,6 +693,7 @@ const runSnapshotRotationProbe = async (
       ...head,
       retainSnapshots: cli.rotationRetainSnapshots,
       epochMaxBytes: cli.rotationEpochBytes,
+      epochReplayBytes: cli.rotationEpochBytes + 1,
       retainedHistoryBytes: cli.rotationEpochBytes + 1,
     };
     const historyBatch = historyDb.batch();

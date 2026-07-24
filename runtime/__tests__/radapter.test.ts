@@ -776,6 +776,7 @@ test('current stored view frame overlays local identity without mixing a later l
       retainSnapshots: 3,
       epochMaxBytes: 1,
       accountMerkleRadix: 16,
+      epochReplayBytes: 0,
       retainedHistoryBytes: 0,
     }),
     loadEntityViewPage: async () => {
@@ -935,6 +936,7 @@ test('runtime adapter live graph-frame never reads a prunable storage generation
       retainSnapshots: 3,
       epochMaxBytes: 1,
       accountMerkleRadix: 16,
+      epochReplayBytes: 0,
       retainedHistoryBytes: 0,
     }),
     loadEntityViewPage: async () => {
@@ -973,6 +975,7 @@ test('runtime adapter explicit graph-frame height uses exact RDB state even at t
     retainSnapshots: 3,
     epochMaxBytes: 1,
     accountMerkleRadix: 16,
+    epochReplayBytes: 0,
     retainedHistoryBytes: 0,
   };
 
@@ -1088,6 +1091,7 @@ test('runtime adapter graph-frame wire DTO stays below budget near topology limi
       retainSnapshots: 3,
       epochMaxBytes: 1_073_741_824,
       accountMerkleRadix: 16,
+      epochReplayBytes: 0,
       retainedHistoryBytes: 262_144,
     },
     runtimeId: 'runtime:scale-test',
@@ -1341,6 +1345,7 @@ test('runtime adapter historical batch without entityId defaults to live entity 
       retainSnapshots: 3,
       epochMaxBytes: 1,
       accountMerkleRadix: 16,
+      epochReplayBytes: 0,
       retainedHistoryBytes: 0,
     }),
     listEntityIdsAtHeight: async () => [staleEntityId, emptyEntityId, entityId],
@@ -1450,6 +1455,7 @@ test('runtime adapter timeline-index returns a bounded compact timestamp page', 
       retainSnapshots: 3,
       epochMaxBytes: 1_000,
       accountMerkleRadix: 16,
+      epochReplayBytes: 0,
       retainedHistoryBytes: 1_000,
     }),
     readFrame: async (height) => frames.get(height) ?? null,
@@ -1611,6 +1617,7 @@ test('runtime adapter historical view frame uses paged storage loader instead of
       retainSnapshots: 3,
       epochMaxBytes: 1,
       accountMerkleRadix: 16,
+      epochReplayBytes: 0,
       retainedHistoryBytes: 0,
     }),
     listEntityIdsAtHeight: async () => [entityId],
@@ -1654,6 +1661,7 @@ test('runtime adapter historical view frame skips missing non-active summaries w
       retainSnapshots: 3,
       epochMaxBytes: 1,
       accountMerkleRadix: 16,
+      epochReplayBytes: 0,
       retainedHistoryBytes: 0,
     }),
     listEntityIdsAtHeight: async () => [missingEntityId, entityId],
@@ -1683,6 +1691,7 @@ test('runtime adapter historical view frame skips missing non-active summaries w
       retainSnapshots: 3,
       epochMaxBytes: 1,
       accountMerkleRadix: 16,
+      epochReplayBytes: 0,
       retainedHistoryBytes: 0,
     }),
     listEntityIdsAtHeight: async () => [missingEntityId, entityId],
@@ -1717,6 +1726,7 @@ test('runtime adapter live view-frame stays live if env height advances during p
         retainSnapshots: 3,
         epochMaxBytes: 1,
         accountMerkleRadix: 16,
+        epochReplayBytes: 0,
         retainedHistoryBytes: 0,
       };
     },
@@ -1761,6 +1771,7 @@ test('runtime adapter history-frame-batch returns bounded historical view frames
       retainSnapshots: 3,
       epochMaxBytes: 1,
       accountMerkleRadix: 16,
+      epochReplayBytes: 0,
       retainedHistoryBytes: 0,
     }),
     listEntityIdsAtHeight: async () => [entityId],
@@ -1808,6 +1819,7 @@ test('runtime adapter history-frame-batch marks missing storage diffs unavailabl
       retainSnapshots: 3,
       epochMaxBytes: 1,
       accountMerkleRadix: 16,
+      epochReplayBytes: 0,
       retainedHistoryBytes: 0,
     }),
     listEntityIdsAtHeight: async () => [entityId],
@@ -2018,6 +2030,7 @@ test('runtime adapter historical head reads persisted storage head', async () =>
       retainSnapshots: 3,
       epochMaxBytes: 1,
       accountMerkleRadix: 16,
+      epochReplayBytes: 0,
       retainedHistoryBytes: 123,
     }),
   }, 'head', { atHeight: env.height - 1 });
@@ -2038,6 +2051,7 @@ test('runtime adapter current head exposes persisted snapshot cadence when stora
     retainSnapshots: 3,
     epochMaxBytes: 1,
     accountMerkleRadix: 16,
+    epochReplayBytes: 0,
     retainedHistoryBytes: 1234,
   };
 
@@ -2071,6 +2085,7 @@ test('runtime adapter current head preserves persisted snapshot cadence when sto
     retainSnapshots: 3,
     epochMaxBytes: 1,
     accountMerkleRadix: 16,
+    epochReplayBytes: 0,
     retainedHistoryBytes: 4321,
   };
 
@@ -2097,6 +2112,7 @@ test('runtime adapter rejects historical reads beyond the persisted storage head
     retainSnapshots: 3,
     epochMaxBytes: 1,
     accountMerkleRadix: 16,
+    epochReplayBytes: 0,
     retainedHistoryBytes: 0,
   };
   let listedEntities = false;
@@ -2191,6 +2207,7 @@ test('runtime adapter current view frame prefers storage page loader when curren
       retainSnapshots: 3,
       epochMaxBytes: 1,
       accountMerkleRadix: 16,
+      epochReplayBytes: 0,
       retainedHistoryBytes: 0,
     }),
     loadEntityViewPage: async (requestedEntityId, height) => {
@@ -2268,6 +2285,7 @@ test('runtime adapter 1M account view-frame stays aggregate-first and under wire
       retainSnapshots: 3,
       epochMaxBytes: 1,
       accountMerkleRadix: 16,
+      epochReplayBytes: 0,
       retainedHistoryBytes: 0,
     }),
     loadEntityViewPage: async () => {
@@ -2552,6 +2570,7 @@ test('storage-backed historical view pages support desc account and book cursors
     retainSnapshots: 3,
     epochMaxBytes: 1,
     accountMerkleRadix: 16,
+    epochReplayBytes: 0,
     retainedHistoryBytes: 0,
   };
   const manifest: StorageSnapshotManifest = { height: snapshotHeight, createdAt: 400, docCount: 7 };
@@ -2614,6 +2633,7 @@ test('storage readers reject requested heights beyond the persisted head', async
     retainSnapshots: 3,
     epochMaxBytes: 1,
     accountMerkleRadix: 16,
+    epochReplayBytes: 0,
     retainedHistoryBytes: 0,
   };
   const db = makeMemoryDb([
@@ -2665,6 +2685,7 @@ test('storage live recovery verifies doc values through merkle leaves', async ()
       retainSnapshots: 3,
       epochMaxBytes: 1,
       accountMerkleRadix: 16,
+      epochReplayBytes: 0,
       retainedHistoryBytes: 0,
     };
     const coreDoc = projectEntityCoreDoc(replica.state);
@@ -2714,6 +2735,7 @@ test('storage live recovery hydrates a typed split Account through its logical l
     retainSnapshots: 3,
     epochMaxBytes: 1,
     accountMerkleRadix: 16,
+    epochReplayBytes: 0,
     retainedHistoryBytes: 0,
   };
   const rawDb = makeMemoryDb([
@@ -2759,6 +2781,7 @@ test('storage live recovery rejects live docs that do not match merkle leaf valu
       retainSnapshots: 3,
       epochMaxBytes: 1,
       accountMerkleRadix: 16,
+      epochReplayBytes: 0,
       retainedHistoryBytes: 0,
     };
     const coreDoc = projectEntityCoreDoc(replica.state);
@@ -2817,6 +2840,7 @@ test('storage live recovery can deep verify merkle side records', async () => {
       retainSnapshots: 3,
       epochMaxBytes: 1,
       accountMerkleRadix: 16,
+      epochReplayBytes: 0,
       retainedHistoryBytes: 0,
     };
     const entries: Array<[Buffer, Buffer]> = [
