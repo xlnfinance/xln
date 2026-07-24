@@ -7,6 +7,7 @@ import {
   buildSingleSignerHanko,
   computeDepositoryBatchHash,
   deriveHardhatPrivateKey,
+  deployEntityProvider,
   emptyBatch,
   encodeBatch,
   singleSignerLazyEntityId,
@@ -35,9 +36,7 @@ const orderedActors = (first: Actor, second: Actor): [Actor, Actor] =>
 
 const deployFixture = async () => {
   const [signer0, signer1] = await ethers.getSigners();
-  const entityProviderFactory = await ethers.getContractFactory('EntityProvider');
-  const entityProvider = await entityProviderFactory.deploy(signer0.address);
-  await entityProvider.waitForDeployment();
+  const entityProvider = await deployEntityProvider(signer0.address);
   const accountFactory = await ethers.getContractFactory('Account');
   const account = await accountFactory.deploy();
   await account.waitForDeployment();
@@ -83,8 +82,6 @@ describe('settlement finality events', function () {
         diffs: [],
         forgiveDebtsInTokenIds: forgiveTokenIds,
         sig: settlementHanko,
-        entityProvider: ethers.ZeroAddress,
-        hankoData: '0x',
         nonce: settlementNonce,
       }],
     });

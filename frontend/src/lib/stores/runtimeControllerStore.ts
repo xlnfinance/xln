@@ -21,6 +21,8 @@ export type RuntimeHandle = {
   status: RuntimeAdapterStatus;
   height: number;
   authLevel: RuntimeAdapterAuthLevel | null;
+  commandReady: boolean;
+  commandReadyReason: string | null;
 };
 
 type RuntimeControllerConnectDeps = {
@@ -37,6 +39,8 @@ const emptyHandle: RuntimeHandle = {
   status: 'disconnected',
   height: 0,
   authLevel: null,
+  commandReady: false,
+  commandReadyReason: 'adapter-disconnected',
 };
 
 export const runtimeAdapter = writable<RuntimeAdapter | null>(null);
@@ -85,6 +89,8 @@ const publishRuntimeAdapterState = (adapter: RuntimeAdapter | null = activeAdapt
     status,
     height,
     authLevel,
+    commandReady: adapter?.commandReady ?? false,
+    commandReadyReason: adapter?.commandReadyReason ?? 'adapter-disconnected',
   });
 };
 

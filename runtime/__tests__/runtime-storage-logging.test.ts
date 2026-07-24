@@ -9,7 +9,7 @@ test('runtime storage DB boundary uses structured logging without direct console
 
   expect(source).toContain("const storageLog = createStructuredLogger('runtime.storage');");
   expect(source).toContain("storageLog.warn('storage_db.blocked'");
-  expect(source).toContain("storageLog.error('runtime_db.open_failed'");
+  expect(source).toContain("storageLog.error('storage_db.open_failed'");
   expect(source).toContain("storageLog.warn('storage_epoch.recover_complete_interrupted'");
   expect(source).not.toContain('console.');
   expect(source).not.toContain('[storage-epoch]');

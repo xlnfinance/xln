@@ -2,11 +2,15 @@
   import { tick } from 'svelte';
   import type { AccountMachine, EntityReplica, Tab } from '$lib/types/ui';
   import { writable } from 'svelte/store';
-  import type { BookState, CrossJurisdictionSwapRoute, Delta, EntityTx, Env } from '@xln/runtime/xln-api';
+  import type {
+    BookState,
+    Env,
+    SwapAccountCapacityView,
+    SwapInboundCapacityPlan,
+  } from '@xln/runtime/xln-api';
   import {
     deriveCanonicalCrossJurisdictionBookOwnerForLegs,
     deriveCanonicalCrossJurisdictionMarketForLegs,
-    deriveCanonicalCrossJurisdictionVenueIdForLegs,
     getJurisdictionStackId,
     getBestAsk,
     getBestBid,
@@ -29,15 +33,11 @@
   import { formatEntityId } from '$lib/utils/format';
   import {
     buildSwapPanelRuntimeView,
-    buildCrossSwapRuntimeInputPlan,
     buildCrossSwapSetupSteps,
     crossOrderbookPairLabel,
     firstAvailableHubId,
     formatEntityNetworkLabel,
-    getTokenMapValue,
-    maxBigInt,
     normalizeJurisdictionDisplayName,
-    nonNegative,
     orderbookLotsDisplayScale,
     parseCrossAssetKey,
     resolveHubIdCandidate,
@@ -45,7 +45,6 @@
     tokenNetworkLabel,
     type CrossSwapSetupStep,
     type SwapPanelRuntimeView,
-    type TokenKeyedMap,
   } from './swap-panel-helpers';
   import {
     compareStableText,
@@ -72,7 +71,6 @@
     validateSwapForm,
   } from './swap-order-math';
   import {
-    buildDeterministicSwapOfferId as buildSwapOfferId,
     buildRoutedRouteCandidates as buildRoutedRouteCandidatesPure,
     estimateRoutedHopOutput,
     orderbookSnapshotCacheKey,
@@ -237,6 +235,7 @@
   let showManualRouteRecommendation = false;
   let lastPriceContextSignature = '';
   let preservePriceOnNextContextChange = false;
+  let preserveAmountOnNextContextChange = false;
   let selectedSourceEntityValue = '';
   let routeDetailsOpen = false;
   let openTokenMenu: 'give' | 'want' | '' = '';
@@ -582,20 +581,6 @@
     quoteKey: string;
   };
 
-  function getAccountDelta(counterpartyEntityId: string, tokenIdValue: number): { delta: Delta; isLeft: boolean } | null {
-    if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0 || !sourceEntityIdValue) return null;
-    const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
-    const account = currentReplica?.state?.accounts?.get?.(resolvedCounterparty);
-    const deltas = account?.deltas as TokenKeyedMap<Delta> | undefined;
-    if (!(deltas instanceof Map)) return null;
-    const delta = getTokenMapValue(deltas, tokenIdValue);
-    if (!delta) return null;
-    return {
-      delta,
-      isLeft: sourceEntityIdValue < String(resolvedCounterparty).toLowerCase(),
-    };
-  }
-
   function getReplicaJurisdictionName(candidate: EntityReplica | null | undefined): string {
     const state = candidate?.state as { config?: { jurisdiction?: { name?: unknown } } } | undefined;
     const byConfig = String(state?.config?.jurisdiction?.name || '').trim();
@@ -614,24 +599,23 @@
     return '';
   }
 
-  function getAccountDeltaForReplica(
+  function readAccountCapacityForReplica(
     candidate: EntityReplica | null | undefined,
     ownerEntityId: string,
     counterpartyEntityId: string,
     tokenIdValue: number,
-  ): { delta: Delta; isLeft: boolean } | null {
-    const owner = String(ownerEntityId || '').trim();
-    const counterparty = String(counterpartyEntityId || '').trim();
-    if (!candidate || !owner || !counterparty || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return null;
+  ): SwapAccountCapacityView | null {
+    if (!activeXlnFunctions?.readSwapAccountCapacity) return null;
+    const owner = String(ownerEntityId || '').trim().toLowerCase();
+    const counterparty = String(counterpartyEntityId || '').trim().toLowerCase();
+    if (!candidate || !owner || !counterparty || !Number.isSafeInteger(tokenIdValue) || tokenIdValue <= 0) return null;
     const account = candidate.state?.accounts?.get?.(counterparty);
-    const deltas = account?.deltas as TokenKeyedMap<Delta> | undefined;
-    if (!(deltas instanceof Map)) return null;
-    const delta = getTokenMapValue(deltas, tokenIdValue);
-    if (!delta) return null;
-    return {
-      delta,
-      isLeft: owner.toLowerCase() < counterparty.toLowerCase(),
-    };
+    return activeXlnFunctions.readSwapAccountCapacity({
+      account: account ?? null,
+      ownerEntityId: owner,
+      counterpartyEntityId: counterparty,
+      tokenId: tokenIdValue,
+    });
   }
 
   function hasTokenInReplicaAccount(
@@ -640,11 +624,12 @@
     counterpartyEntityId: string,
     tokenIdValue: number,
   ): boolean {
-    if (!candidate || !counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return false;
-    const account = candidate.state?.accounts?.get?.(counterpartyEntityId);
-    const deltas = account?.deltas as TokenKeyedMap<Delta> | undefined;
-    if (!(deltas instanceof Map)) return false;
-    return getTokenMapValue(deltas, tokenIdValue) !== undefined;
+    return readAccountCapacityForReplica(
+      candidate,
+      ownerEntityId,
+      counterpartyEntityId,
+      tokenIdValue,
+    )?.tokenActive ?? false;
   }
 
   function readInCapacityForReplica(
@@ -653,16 +638,12 @@
     counterpartyEntityId: string,
     tokenIdValue: number,
   ): bigint {
-    const accountDelta = getAccountDeltaForReplica(candidate, ownerEntityId, counterpartyEntityId, tokenIdValue);
-    if (!accountDelta || !activeXlnFunctions?.deriveDelta) return 0n;
-    try {
-      const derived = activeXlnFunctions.deriveDelta(accountDelta.delta, accountDelta.isLeft);
-      const inCapacityRaw = (derived as { inCapacity?: unknown })?.inCapacity;
-      if (typeof inCapacityRaw === 'bigint') return inCapacityRaw;
-      return toBigIntSafe(inCapacityRaw) ?? 0n;
-    } catch {
-      return 0n;
-    }
+    return readAccountCapacityForReplica(
+      candidate,
+      ownerEntityId,
+      counterpartyEntityId,
+      tokenIdValue,
+    )?.inCapacity ?? 0n;
   }
 
   function buildSourceEntityOptions(
@@ -1506,12 +1487,14 @@
       createOrderAccountId = reverseSelection.sourceHubEntityId;
       commitRouteSelection({ route: reverseSelection.route, target: reverseSelection.target });
       preservePriceOnNextContextChange = false;
+      preserveAmountOnNextContextChange = true;
       setSwapTokens(nextGiveToken, nextWantToken, true);
       priceRatioInput = '';
       hasUserEditedPriceInput = false;
       hasAutoSuggestedInitialPrice = false;
     } else {
       preservePriceOnNextContextChange = true;
+      preserveAmountOnNextContextChange = true;
       setSwapTokens(nextGiveToken, nextWantToken);
     }
     if (!isCrossReverse && nextPriceInput) {
@@ -1787,50 +1770,30 @@
   }
 
   function readOutCapacity(counterpartyEntityId: string, tokenIdValue: number): bigint {
-    const accountDelta = getAccountDelta(counterpartyEntityId, tokenIdValue);
-    if (!accountDelta || !activeXlnFunctions?.deriveDelta) return 0n;
-    try {
-      const derived = activeXlnFunctions.deriveDelta(accountDelta.delta, accountDelta.isLeft);
-      const outCapacityRaw = (derived as { outCapacity?: unknown })?.outCapacity;
-      if (typeof outCapacityRaw === 'bigint') return outCapacityRaw;
-      return toBigIntSafe(outCapacityRaw) ?? 0n;
-    } catch {
-      return 0n;
-    }
+    return readAccountCapacityForReplica(
+      currentReplica,
+      sourceEntityIdValue,
+      resolveCounterpartyId(counterpartyEntityId),
+      tokenIdValue,
+    )?.outCapacity ?? 0n;
   }
 
   function hasTokenInAccount(counterpartyEntityId: string, tokenIdValue: number): boolean {
-    if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return false;
-    const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
-    const account = currentReplica?.state?.accounts?.get?.(resolvedCounterparty);
-    const deltas = account?.deltas as TokenKeyedMap<Delta> | undefined;
-    if (!(deltas instanceof Map)) return false;
-    return getTokenMapValue(deltas, tokenIdValue) !== undefined;
+    return readAccountCapacityForReplica(
+      currentReplica,
+      sourceEntityIdValue,
+      resolveCounterpartyId(counterpartyEntityId),
+      tokenIdValue,
+    )?.tokenActive ?? false;
   }
 
   function readInCapacity(counterpartyEntityId: string, tokenIdValue: number): bigint {
-    const accountDelta = getAccountDelta(counterpartyEntityId, tokenIdValue);
-    if (!accountDelta || !activeXlnFunctions?.deriveDelta) return 0n;
-    try {
-      const derived = activeXlnFunctions.deriveDelta(accountDelta.delta, accountDelta.isLeft);
-      const inCapacityRaw = (derived as { inCapacity?: unknown })?.inCapacity;
-      if (typeof inCapacityRaw === 'bigint') return inCapacityRaw;
-      return toBigIntSafe(inCapacityRaw) ?? 0n;
-    } catch {
-      return 0n;
-    }
-  }
-
-  function readAccountDelta(counterpartyEntityId: string, tokenIdValue: number): Delta | null {
-    return getAccountDelta(counterpartyEntityId, tokenIdValue)?.delta ?? null;
-  }
-
-  function readPeerCreditLimit(counterpartyEntityId: string, tokenIdValue: number): bigint {
-    const delta = readAccountDelta(counterpartyEntityId, tokenIdValue);
-    if (!delta || !sourceEntityIdValue) return 0n;
-    const isLeft = sourceEntityIdValue < String(resolveCounterpartyId(counterpartyEntityId)).toLowerCase();
-    const raw = isLeft ? delta.rightCreditLimit : delta.leftCreditLimit;
-    return nonNegative(toBigIntSafe(raw) ?? 0n);
+    return readAccountCapacityForReplica(
+      currentReplica,
+      sourceEntityIdValue,
+      resolveCounterpartyId(counterpartyEntityId),
+      tokenIdValue,
+    )?.inCapacity ?? 0n;
   }
 
   function findReplicaByEntityId(entityId: string, view: SwapPanelRuntimeView = swapRuntimeView): EntityReplica | null {
@@ -1847,82 +1810,65 @@
     return candidate.state?.accounts instanceof Map && candidate.state.accounts.has(counterparty);
   }
 
-  function readPeerCreditLimitForReplica(
-    candidate: EntityReplica | null | undefined,
-    ownerEntityId: string,
-    counterpartyEntityId: string,
-    tokenIdValue: number,
-  ): bigint {
-    const accountDelta = getAccountDeltaForReplica(candidate, ownerEntityId, counterpartyEntityId, tokenIdValue);
-    if (!accountDelta) return 0n;
-    const raw = accountDelta.isLeft ? accountDelta.delta.rightCreditLimit : accountDelta.delta.leftCreditLimit;
-    return nonNegative(toBigIntSafe(raw) ?? 0n);
-  }
-
-  function computeAutoInboundCreditTarget(
-    counterpartyEntityId: string,
-    tokenIdValue: number,
-    desiredInboundAmount: bigint,
-  ): bigint | null {
-    if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0 || desiredInboundAmount <= 0n) return null;
-    if (!activeXlnFunctions?.deriveDelta || !sourceEntityIdValue) return desiredInboundAmount;
-    const accountDelta = getAccountDelta(counterpartyEntityId, tokenIdValue);
-    if (!accountDelta) return desiredInboundAmount;
-    const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
-    try {
-      const derived = activeXlnFunctions.deriveDelta(accountDelta.delta, accountDelta.isLeft) as {
-        inCapacity?: unknown;
-        inPeerCredit?: unknown;
-        outPeerCredit?: unknown;
-      };
-      const inCapacity = nonNegative(toBigIntSafe(derived.inCapacity) ?? 0n);
-      if (inCapacity >= desiredInboundAmount) return null;
-
-      const inPeerCredit = nonNegative(toBigIntSafe(derived.inPeerCredit) ?? 0n);
-      const inWithoutPeerCredit = inCapacity > inPeerCredit ? inCapacity - inPeerCredit : 0n;
-      const neededPeerCredit = desiredInboundAmount > inWithoutPeerCredit ? desiredInboundAmount - inWithoutPeerCredit : 0n;
-
-      const currentPeerLimit = readPeerCreditLimit(resolvedCounterparty, tokenIdValue);
-      const outPeerDebt = nonNegative(toBigIntSafe(derived.outPeerCredit) ?? 0n);
-      const targetPeerLimit = outPeerDebt + neededPeerCredit;
-      if (targetPeerLimit > currentPeerLimit) return targetPeerLimit;
-      return null;
-    } catch {
-      return desiredInboundAmount;
-    }
-  }
-
-  function computeAutoInboundCreditTargetForReplica(
+  function planInboundCapacityForReplica(
     candidate: EntityReplica | null | undefined,
     ownerEntityId: string,
     counterpartyEntityId: string,
     tokenIdValue: number,
     desiredInboundAmount: bigint,
-  ): bigint | null {
-    if (!hasReplicaAccount(candidate, counterpartyEntityId)) return null;
-    if (!Number.isFinite(tokenIdValue) || tokenIdValue <= 0 || desiredInboundAmount <= 0n) return null;
-    const accountDelta = getAccountDeltaForReplica(candidate, ownerEntityId, counterpartyEntityId, tokenIdValue);
-    if (!accountDelta || !activeXlnFunctions?.deriveDelta) return desiredInboundAmount;
-    try {
-      const derived = activeXlnFunctions.deriveDelta(accountDelta.delta, accountDelta.isLeft) as {
-        inCapacity?: unknown;
-        inPeerCredit?: unknown;
-        outPeerCredit?: unknown;
-      };
-      const inCapacity = nonNegative(toBigIntSafe(derived.inCapacity) ?? 0n);
-      if (inCapacity >= desiredInboundAmount) return null;
-
-      const inPeerCredit = nonNegative(toBigIntSafe(derived.inPeerCredit) ?? 0n);
-      const inWithoutPeerCredit = inCapacity > inPeerCredit ? inCapacity - inPeerCredit : 0n;
-      const neededPeerCredit = desiredInboundAmount > inWithoutPeerCredit ? desiredInboundAmount - inWithoutPeerCredit : 0n;
-      const currentPeerLimit = readPeerCreditLimitForReplica(candidate, ownerEntityId, counterpartyEntityId, tokenIdValue);
-      const outPeerDebt = nonNegative(toBigIntSafe(derived.outPeerCredit) ?? 0n);
-      const targetPeerLimit = outPeerDebt + neededPeerCredit;
-      if (targetPeerLimit > currentPeerLimit) return targetPeerLimit;
+    allowOpenAccount: boolean,
+  ): SwapInboundCapacityPlan | null {
+    if (!activeXlnFunctions?.planSwapInboundCapacity) return null;
+    const owner = String(ownerEntityId || '').trim().toLowerCase();
+    const counterparty = String(counterpartyEntityId || '').trim().toLowerCase();
+    if (!owner || !counterparty || !Number.isSafeInteger(tokenIdValue) || tokenIdValue <= 0 || desiredInboundAmount <= 0n) {
       return null;
-    } catch {
-      return desiredInboundAmount;
     }
+    const account = candidate?.state?.accounts?.get?.(counterparty) ?? null;
+    return activeXlnFunctions.planSwapInboundCapacity({
+      account,
+      ownerEntityId: owner,
+      counterpartyEntityId: counterparty,
+      tokenId: tokenIdValue,
+      requiredInboundAmount: desiredInboundAmount,
+      allowOpenAccount,
+    });
+  }
+
+  async function waitForCrossTargetCapacity(
+    targetEntityId: string,
+    targetHubEntityId: string,
+    tokenIdValue: number,
+    requiredInboundAmount: bigint,
+    timeoutMs = 20_000,
+  ): Promise<void> {
+    const startedAt = performance.now();
+    let lastReason = 'target account is not projected';
+    while (performance.now() - startedAt < timeoutMs) {
+      const targetReplica = findReplicaByEntityId(targetEntityId);
+      const targetAccount = targetReplica?.state?.accounts?.get?.(targetHubEntityId) ?? null;
+      try {
+        const capacityPlan = activeXlnFunctions?.planSwapInboundCapacity({
+          account: targetAccount,
+          ownerEntityId: targetEntityId,
+          counterpartyEntityId: targetHubEntityId,
+          tokenId: tokenIdValue,
+          requiredInboundAmount,
+          allowOpenAccount: false,
+        });
+        if (capacityPlan && capacityPlan.setupTxs.length === 0) return;
+        lastReason = `current=${capacityPlan?.currentInboundCapacity ?? 0n}`;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!message.startsWith('SWAP_INBOUND_ACCOUNT_MISSING:')) throw error;
+        lastReason = message;
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error(
+      `SWAP_CROSS_TARGET_SETUP_COMMIT_TIMEOUT:entity=${targetEntityId}:hub=${targetHubEntityId}:` +
+        `token=${tokenIdValue}:required=${requiredInboundAmount}:last=${lastReason}`,
+    );
   }
 
   function isInboundCapacityValidationError(reason: string): boolean {
@@ -1938,33 +1884,38 @@
     wantTokenPresentInAccount = hasTokenInAccount(activeOrderAccountId, wantToken);
     availableGiveCapacity = readOutCapacity(activeOrderAccountId, giveToken);
     availableWantInCapacity = readInCapacity(activeOrderAccountId, wantToken);
-    currentPeerCreditLimit = readPeerCreditLimit(activeOrderAccountId, wantToken);
   }
-  $: autoInboundCreditTarget = computeAutoInboundCreditTarget(
-    activeOrderAccountId,
-    wantToken,
-    canonicalWantAmount,
-  );
   $: {
-    crossTargetInCapacity = selectedCrossTarget
-      ? readInCapacityForReplica(selectedCrossTargetReplica, selectedCrossTarget.targetEntityId, selectedCrossTarget.targetHubEntityId, wantToken)
-      : 0n;
+    const sameInboundPlan = planInboundCapacityForReplica(
+      currentReplica,
+      sourceEntityIdValue,
+      resolveCounterpartyId(activeOrderAccountId),
+      wantToken,
+      canonicalWantAmount,
+      false,
+    );
+    autoInboundCreditTarget = sameInboundPlan?.requiredPeerCreditLimit ?? null;
+    currentPeerCreditLimit = sameInboundPlan?.currentPeerCreditLimit ?? 0n;
+  }
+  $: {
     crossDesiredInboundAmount = canonicalWantAmount;
-    crossAutoInboundCreditTarget = selectedCrossTarget && crossTargetHasAccount
-      ? computeAutoInboundCreditTargetForReplica(
+    const crossInboundPlan = (
+      selectedCrossTarget
+      && crossDesiredInboundAmount > 0n
+      && (crossTargetHasAccount || canAutoOpenCrossTargetAccount)
+    )
+      ? planInboundCapacityForReplica(
           selectedCrossTargetReplica,
           selectedCrossTarget.targetEntityId,
           selectedCrossTarget.targetHubEntityId,
           wantToken,
           crossDesiredInboundAmount,
+          canAutoOpenCrossTargetAccount,
         )
-      : selectedCrossTarget && needsCrossTargetAccountSetup && crossDesiredInboundAmount > 0n
-        ? maxBigInt(defaultCreditLimitForToken(wantToken), crossDesiredInboundAmount)
-        : null;
-    const currentPeerCreditLimit = selectedCrossTarget && crossTargetHasAccount
-      ? readPeerCreditLimitForReplica(selectedCrossTargetReplica, selectedCrossTarget.targetEntityId, selectedCrossTarget.targetHubEntityId, wantToken)
-      : 0n;
-    crossCurrentPeerCreditLimit = currentPeerCreditLimit;
+      : null;
+    crossTargetInCapacity = crossInboundPlan?.currentInboundCapacity ?? 0n;
+    crossAutoInboundCreditTarget = crossInboundPlan?.requiredPeerCreditLimit ?? null;
+    crossCurrentPeerCreditLimit = crossInboundPlan?.currentPeerCreditLimit ?? 0n;
     needsCrossTargetCreditSetup = Boolean(
       swapRouteMode === 'cross'
       && selectedCrossTarget
@@ -1993,7 +1944,12 @@
     if (nextAutoAmountContextSignature !== lastAutoAmountContextSignature) {
       lastAutoAmountContextSignature = nextAutoAmountContextSignature;
       lastAutoAmountCapacity = -1n;
-      amountEditedByUser = false;
+      if (preserveAmountOnNextContextChange) {
+        preserveAmountOnNextContextChange = false;
+        amountEditedByUser = true;
+      } else {
+        amountEditedByUser = false;
+      }
     }
     if (
       !amountEditedByUser
@@ -2492,30 +2448,6 @@
     handleSelectedHubChange(option.value);
   }
 
-  function defaultCreditLimitForToken(tokenIdValue: number): bigint {
-    const decimals = BigInt(Math.max(0, getTokenDecimals(tokenIdValue)));
-    return 10_000n * 10n ** decimals;
-  }
-
-  function computeCrossTargetCreditLimit(
-    target: CrossTargetOption,
-    targetReplica: EntityReplica | null,
-    tokenIdValue: number,
-    requiredInboundAmount: bigint,
-  ): bigint | null {
-    if (requiredInboundAmount <= 0n) return null;
-    if (!hasReplicaAccount(targetReplica, target.targetHubEntityId)) {
-      return maxBigInt(defaultCreditLimitForToken(tokenIdValue), requiredInboundAmount);
-    }
-    return computeAutoInboundCreditTargetForReplica(
-      targetReplica,
-      target.targetEntityId,
-      target.targetHubEntityId,
-      tokenIdValue,
-      requiredInboundAmount,
-    );
-  }
-
   function handleOrderbookLevelClick(event: CustomEvent<SwapOrderbookLevelClickDetail>) {
     submitError = '';
     const pair = parsedOrderbookPair;
@@ -3005,140 +2937,63 @@
         throw new Error(liveValidationReason);
       }
 
+      if (!activeXlnFunctions?.planSwapCommand) {
+        throw new Error('SWAP_COMMAND_PLANNER_UNAVAILABLE');
+      }
       const { logicalTimestamp: logicalNow, logicalHeight } = resolveSwapLogicalClock(currentReplica);
-      const offerId = buildSwapOfferId({
-        logicalTimestamp: logicalNow,
-        logicalHeight,
-        sourceEntityId,
-        counterpartyEntityId: resolvedCounterparty,
-        sellToken: giveToken,
-        buyToken: wantToken,
-        sellAmount: effectiveGiveAmount,
-        buyAmount: effectiveWantAmount,
-        priceTicks: canonicalPriceTicks,
-        routeValue: liveSelectedRouteValue,
-      });
-      const requiredInboundCreditLimit = computeAutoInboundCreditTarget(
-        resolvedCounterparty,
-        wantToken,
-        effectiveWantAmount,
-      );
-      const currentInboundCreditLimit = readPeerCreditLimit(resolvedCounterparty, wantToken);
-      const shouldAutoPrepareInbound = (
-        swapRouteMode === 'same'
-        &&
-        requiredInboundCreditLimit !== null
-        && requiredInboundCreditLimit > currentInboundCreditLimit
-        && isInboundCapacityValidationError(liveValidationReason)
-      );
       const targetRoute = selectedCrossTarget;
       const targetReplica = targetRoute ? findReplicaByEntityId(targetRoute.targetEntityId) : null;
-      const requiredTargetInboundAmount = effectiveWantAmount;
-      const requiredTargetInboundCreditLimit = targetRoute
-        ? computeCrossTargetCreditLimit(targetRoute, targetReplica, wantToken, requiredTargetInboundAmount)
-        : null;
       const targetAccountExists = Boolean(targetRoute && hasReplicaAccount(targetReplica, targetRoute.targetHubEntityId));
-      const currentTargetInboundCreditLimit = targetRoute && targetAccountExists
-        ? readPeerCreditLimitForReplica(targetReplica, targetRoute.targetEntityId, targetRoute.targetHubEntityId, wantToken)
-        : 0n;
-      const shouldAutoOpenCrossTargetAccount = Boolean(
-        swapRouteMode === 'cross'
-        && targetRoute
-        && !targetAccountExists,
-      );
-      const shouldAutoPrepareCrossInbound = Boolean(
-        swapRouteMode === 'cross'
-        && requiredTargetInboundCreditLimit !== null
-        && requiredTargetInboundCreditLimit > currentTargetInboundCreditLimit,
-      );
-      const now = logicalNow;
-      const crossJurisdiction = (() => {
-        if (swapRouteMode !== 'cross') return null;
-        if (!targetRoute) throw new Error('Select target jurisdiction account.');
-        const sourceJurisdiction = getReplicaJurisdictionName(currentReplica);
-        const sourceJurisdictionRef = getReplicaJurisdictionRef(currentReplica);
-        if (!sourceJurisdiction) throw new Error('Source jurisdiction is not available.');
-        if (!sourceJurisdictionRef) throw new Error('Source jurisdiction stack is not available.');
-        if (!targetRoute.targetJurisdiction) throw new Error('Target jurisdiction is not available.');
-        if (!targetRoute.targetJurisdictionRef) throw new Error('Target jurisdiction stack is not available.');
-        if (sourceJurisdictionRef === targetRoute.targetJurisdictionRef) {
-          throw new Error('Cross-j route requires different jurisdictions.');
-        }
-        const bookOwnerEntityId = deriveCanonicalCrossJurisdictionBookOwnerForLegs(
-          sourceJurisdictionRef,
-          resolvedCounterparty,
-          targetRoute.targetJurisdictionRef,
-          targetRoute.targetHubEntityId,
-        );
-        const sourceHubSignerId = resolveSignerId(resolvedCounterparty);
-        const targetHubSignerId = resolveSignerId(targetRoute.targetHubEntityId);
-        const bookHubSignerId = bookOwnerEntityId.toLowerCase() === resolvedCounterparty.toLowerCase()
-          ? sourceHubSignerId
-          : bookOwnerEntityId.toLowerCase() === targetRoute.targetHubEntityId.toLowerCase()
-            ? targetHubSignerId
-            : resolveSignerId(bookOwnerEntityId);
-        return {
-          orderId: offerId,
-          bookOwnerEntityId,
-          venueId: deriveCanonicalCrossJurisdictionVenueIdForLegs(sourceJurisdictionRef, giveToken, targetRoute.targetJurisdictionRef, wantToken),
-          makerEntityId: sourceEntityId,
-          hubEntityId: bookOwnerEntityId,
-          sourceSignerId: signerId,
-          sourceHubSignerId,
-          targetHubSignerId,
-          targetSignerId: targetRoute.targetSignerId,
-          bookHubSignerId,
-          source: {
-            jurisdiction: sourceJurisdictionRef,
-            entityId: sourceEntityId,
-            counterpartyEntityId: resolvedCounterparty,
-            tokenId: giveToken,
-            amount: effectiveGiveAmount,
-          },
-          target: {
-            jurisdiction: targetRoute.targetJurisdictionRef,
-            entityId: targetRoute.targetHubEntityId,
-            counterpartyEntityId: targetRoute.targetEntityId,
-            tokenId: wantToken,
-            amount: effectiveWantAmount,
-          },
-          priceTicks: canonicalPriceTicks,
-          priceImprovementMode: 'source_savings',
-          status: 'intent',
-          createdAt: now,
-          updatedAt: now,
-          expiresAt: now + 24 * 60 * 60 * 1000,
-        } satisfies CrossJurisdictionSwapRoute;
-      })();
-      const entityTxs: EntityTx[] = [];
-      if (shouldAutoPrepareInbound) {
-        entityTxs.push({
-          type: 'extendCredit' as const,
-          data: {
-            counterpartyEntityId: resolvedCounterparty,
-            tokenId: wantToken,
-            amount: requiredInboundCreditLimit,
-          },
-        });
+      const sourceJurisdictionRef = getReplicaJurisdictionRef(currentReplica);
+      if (!sourceJurisdictionRef) throw new Error('Source jurisdiction stack is not available.');
+      if (swapRouteMode === 'cross' && !targetRoute) {
+        throw new Error('Select target jurisdiction account.');
       }
+      const sourceHubSignerId = resolveSignerId(resolvedCounterparty);
+      const commandPlan = activeXlnFunctions.planSwapCommand({
+        mode: swapRouteMode,
+        logicalTimestamp: logicalNow,
+        logicalHeight,
+        routeValue: liveSelectedRouteValue,
+        giveTokenId: giveToken,
+        wantTokenId: wantToken,
+        giveAmount,
+        priceTicks: canonicalPriceTicks,
+        source: {
+          entityId: sourceEntityId,
+          signerId,
+          hubEntityId: resolvedCounterparty,
+          hubSignerId: sourceHubSignerId,
+          jurisdiction: sourceJurisdictionRef,
+          account: currentReplica?.state?.accounts?.get?.(resolvedCounterparty) ?? null,
+        },
+        ...(targetRoute ? {
+          target: {
+            entityId: targetRoute.targetEntityId,
+            signerId: targetRoute.targetSignerId,
+            hubEntityId: targetRoute.targetHubEntityId,
+            hubSignerId: resolveSignerId(targetRoute.targetHubEntityId),
+            jurisdiction: targetRoute.targetJurisdictionRef,
+            account: targetReplica?.state?.accounts?.get?.(targetRoute.targetHubEntityId) ?? null,
+          },
+          allowOpenTargetAccount: !targetAccountExists,
+        } : {}),
+        expiresInMs: 24 * 60 * 60 * 1_000,
+      });
+      const offerId = commandPlan.offerId;
+      effectiveGiveAmount = commandPlan.preparedOrder.effectiveGive;
+      effectiveWantAmount = commandPlan.preparedOrder.effectiveWant;
+      canonicalPriceTicks = commandPlan.preparedOrder.priceTicks;
+      const crossJurisdiction = commandPlan.crossJurisdictionIntent;
 
-      if (crossJurisdiction && targetRoute) {
+      if (commandPlan.mode === 'cross') {
+        if (!targetRoute) throw new Error('SWAP_COMMAND_TARGET_REQUIRED');
         const crossSubmitStartedAt = performance.now();
         performance.measure('xln.cross_j.handler_to_plan', {
           start: placementStartedAt,
           end: crossSubmitStartedAt,
         });
-        const crossInputPlan = buildCrossSwapRuntimeInputPlan({
-          route: crossJurisdiction,
-          targetEntityId: targetRoute.targetEntityId,
-          targetSignerId: targetRoute.targetSignerId,
-          targetHubEntityId: targetRoute.targetHubEntityId,
-          tokenId: wantToken,
-          requiredCreditLimit: requiredTargetInboundCreditLimit,
-          shouldOpenTargetAccount: shouldAutoOpenCrossTargetAccount,
-          shouldExtendTargetCredit: shouldAutoPrepareCrossInbound,
-        });
-        if (crossInputPlan.targetSetupTxs.length > 0) {
+        if (commandPlan.targetSetupInput) {
           const prewarmStartedAt = performance.now();
           await prewarmCounterpartyProfiles(runtimeEnv, [targetRoute.targetHubEntityId]);
           performance.measure('xln.cross_j.profile_prewarm', {
@@ -3147,10 +3002,16 @@
           });
         }
         const runtimeSubmitStartedAt = performance.now();
-        if (crossInputPlan.setupInput) {
-          await submitRuntimeInput(crossInputPlan.setupInput);
+        if (commandPlan.targetSetupInput) {
+          await submitRuntimeInput(commandPlan.targetSetupInput);
+          await waitForCrossTargetCapacity(
+            targetRoute.targetEntityId,
+            targetRoute.targetHubEntityId,
+            wantToken,
+            commandPlan.preparedOrder.effectiveWant,
+          );
         }
-        await submitActiveCrossJurisdictionIntent(crossJurisdiction);
+        await submitActiveCrossJurisdictionIntent(commandPlan.crossJurisdictionIntent);
         performance.measure('xln.cross_j.runtime_submit', {
           start: runtimeSubmitStartedAt,
           end: performance.now(),
@@ -3160,23 +3021,7 @@
           end: performance.now(),
         });
       } else {
-        entityTxs.push({
-          type: 'placeSwapOffer' as const,
-          data: {
-            offerId,
-            counterpartyEntityId: resolvedCounterparty,
-            giveTokenId: giveToken,
-            giveAmount: effectiveGiveAmount,
-            wantTokenId: wantToken,
-            wantAmount: effectiveWantAmount,
-            priceTicks: canonicalPriceTicks,
-          },
-        });
-        await submitEntityInputs([{
-          entityId: sourceEntityId,
-          signerId,
-          entityTxs,
-        }]);
+        await submitRuntimeInput(commandPlan.runtimeInput);
       }
 
       orderbookRefreshNonce += 1;

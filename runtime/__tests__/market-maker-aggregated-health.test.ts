@@ -1,8 +1,44 @@
 import { describe, expect, test } from 'bun:test';
-import { buildAggregatedMarketMakerHealth } from '../orchestrator/market-maker-aggregated-health';
+import {
+  buildAggregatedMarketMakerHealth,
+  countMarketSnapshotOrderDepth,
+  isExactMarketSnapshotOrderDepth,
+  mergeMarketSnapshotOrderDepth,
+} from '../orchestrator/market-maker-aggregated-health';
 import type { MarketMakerHealthPayload } from '../orchestrator/orchestrator-types';
 
 describe('aggregated market maker health', () => {
+  test('treats configured depth as an exact per-side invariant', () => {
+    const exact = countMarketSnapshotOrderDepth({
+      format: 'exact-price-levels',
+      hubEntityId: '0xhub',
+      pairId: '1/2',
+      depth: 10,
+      displayDecimals: 4,
+      priceScale: '1000000',
+      bucketWidthTicks: null,
+      bids: [{ price: '1', size: '1', total: '1', orderCount: 4 }],
+      asks: [
+        { price: '2', size: '1', total: '1', orderCount: 6 },
+        { price: '3', size: '1', total: '1', orderCount: 4 },
+      ],
+      spread: null,
+      spreadPercent: '-',
+      source: 'orderbookExt',
+      updatedAt: 1,
+      entityHeight: 1,
+      entityStateHash: null,
+      hubUpdatedAt: 1,
+    });
+    expect(exact).toEqual({ bidOffers: 4, askOffers: 10 });
+    expect(isExactMarketSnapshotOrderDepth(exact, 10)).toBe(false);
+    expect(isExactMarketSnapshotOrderDepth(
+      mergeMarketSnapshotOrderDepth(exact, { bidOffers: 10, askOffers: 9 }),
+      10,
+    )).toBe(true);
+    expect(isExactMarketSnapshotOrderDepth({ bidOffers: 10, askOffers: 20 }, 10)).toBe(false);
+  });
+
   test('preserves full-depth diagnostics from child health', () => {
     const health: MarketMakerHealthPayload = {
       entityId: '0xmm',

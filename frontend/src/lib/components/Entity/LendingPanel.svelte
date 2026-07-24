@@ -174,7 +174,7 @@
   }
 
   async function refreshLendingState(): Promise<void> {
-    if (!selectedHubEntityId || !normalizedEntityId) {
+    if (!isLive || !selectedHubEntityId || !normalizedEntityId) {
       state = null;
       return;
     }
@@ -281,7 +281,7 @@
     });
   }
 
-  $: lendingStateKey = selectedHubEntityId && normalizedEntityId && selectedTokenId
+  $: lendingStateKey = isLive && selectedHubEntityId && normalizedEntityId && selectedTokenId
     ? `${selectedHubEntityId.toLowerCase()}:${normalizedEntityId}:${selectedTokenId}`
     : '';
   $: if (lendingStateKey && lendingStateKey !== lastAutoRefreshKey) {
@@ -299,7 +299,7 @@
       <div class="eyebrow">Lending</div>
       <h3>Hub Credit Market</h3>
     </div>
-    <button class="icon-button" type="button" on:click={refreshLendingState} disabled={loading} aria-label="Refresh lending state" data-testid="lending-refresh">
+    <button class="icon-button" type="button" on:click={refreshLendingState} disabled={!isLive || loading} aria-label="Refresh lending state" data-testid="lending-refresh">
       <RefreshCw size={16} />
     </button>
   </div>

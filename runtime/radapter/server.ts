@@ -18,6 +18,7 @@ import { RuntimeAdapterError, toRuntimeAdapterErrorPayload } from './errors';
 import { consumeToken, createTokenBucket, tokenRetryAfterMs, type TokenBucket } from './rate-limit';
 import { resolveRuntimeAdapterRead } from './resolve';
 import { createStructuredLogger } from '../infra/logger';
+import { assertRuntimeCommandReady, getRuntimeCommandReadiness } from '../machine/lifecycle';
 import { safeStringify } from '../protocol/serialization';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import type {
@@ -109,8 +110,17 @@ const clients = new Map<RuntimeAdapterSocket, AdapterClientState>();
 let attachedEnv: Env | null = null;
 let detachEnvChange: (() => void) | null = null;
 const RUNTIME_ADAPTER_BACKPRESSURE_DEFAULT_BYTES = 2 * 1024 * 1024;
+const RUNTIME_ADAPTER_PENDING_READ_LOG_MS = 1_000;
 const runtimeAdapterLog = createStructuredLogger('runtime.radapter');
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+const requireRuntimeCommandReady = (env: Env): void => {
+  try {
+    assertRuntimeCommandReady(env);
+  } catch (error) {
+    throw new RuntimeAdapterError('E_COMMAND_PENDING', errorMessage(error), true, 250);
+  }
+};
 
 type PendingRuntimeAdapterCommand = {
   sequence: number;
@@ -418,7 +428,14 @@ export const broadcastRuntimeAdapterTick = (env: Env): void => {
   prunePendingCommands(env);
   if (clients.size === 0) return;
   const height = Math.max(0, Math.floor(Number(env.height ?? 0)));
-  const message = encodeRuntimeAdapterMessageForBrowser({ v: XLN_PROTOCOL_VERSION, op: 'tick', height });
+  const readiness = getRuntimeCommandReadiness(env);
+  const message = encodeRuntimeAdapterMessageForBrowser({
+    v: XLN_PROTOCOL_VERSION,
+    op: 'tick',
+    height,
+    commandReady: readiness.ready,
+    commandReadyReason: readiness.reason,
+  });
   const now = Date.now();
   for (const [ws, state] of clients.entries()) {
     if (state.authExpiresAtMs !== null && state.authExpiresAtMs <= now) {
@@ -521,11 +538,14 @@ export const handleRuntimeAdapterMessage = async (
       state.commandFrontierExpiresAtMs = commandLaneKind === 'owner' ? null : auth.expiresAtMs;
       prunePendingCommands(env);
       const commandFrontier = readRuntimeAdapterCommandFrontier(env, state.commandLaneId);
+      const readiness = getRuntimeCommandReadiness(env);
       sendOk(ws, msg.id, {
         authLevel: auth.level,
         commandLaneKind,
         expiresAtMs: auth.expiresAtMs,
         currentHeight: Math.max(0, Math.floor(Number(env.height ?? 0))),
+        commandReady: readiness.ready,
+        commandReadyReason: readiness.reason,
         nextCommandSequence: (commandFrontier?.lastContiguousSequence ?? 0) + 1,
         ...identity,
       }, diagnostic());
@@ -535,33 +555,61 @@ export const handleRuntimeAdapterMessage = async (
     if (msg.op === 'read') {
       requireAuth(state, 'inspect');
       requireBucket(state.readBucket, 'read');
-      const payload = await resolveRuntimeAdapterRead({
-        env,
-        ...(deps.readHead ? { readHead: () => deps.readHead?.(env) ?? Promise.resolve(null) } : {}),
-        ...(deps.readFrame ? { readFrame: (height) => deps.readFrame?.(env, height) ?? Promise.resolve(null) } : {}),
-        ...(deps.listCheckpoints ? { listCheckpoints: () => deps.listCheckpoints?.(env) ?? Promise.resolve([]) } : {}),
-        ...(deps.loadEntityState ? { loadEntityState: (entityId, height) => deps.loadEntityState?.(env, entityId, height) ?? Promise.resolve(null) } : {}),
-        ...(deps.loadEntityAccountDoc ? { loadEntityAccountDoc: (entityId, counterpartyId, height) => deps.loadEntityAccountDoc?.(env, entityId, counterpartyId, height) ?? Promise.resolve(null) } : {}),
-        ...(deps.loadEntityViewPage ? { loadEntityViewPage: (entityId, height, query) => deps.loadEntityViewPage?.(env, entityId, height, query) ?? Promise.resolve(null) } : {}),
-        ...(deps.listEntityIdsAtHeight ? { listEntityIdsAtHeight: (height) => deps.listEntityIdsAtHeight?.(env, height) ?? Promise.resolve([]) } : {}),
-        ...(deps.readActivityPage ? { readActivityPage: (opts) => deps.readActivityPage?.(env, opts) ?? Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'activity reader did not return')) } : {}),
-        ...(deps.readReceipt ? { readReceipt: (id) => deps.readReceipt?.(id) ?? null } : {}),
-        ...(deps.readFrameReceipts ? {
-          readFrameReceipts: (query?: RuntimeAdapterReadQuery) =>
-            deps.readFrameReceipts?.(env, query) ?? Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'frame receipt reader did not return')),
-        } : {}),
-        ...(deps.findPaymentRoutes ? {
-          findPaymentRoutes: (query?: RuntimeAdapterReadQuery) =>
-            deps.findPaymentRoutes?.(env, query) ?? Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'payment route reader did not return')),
-        } : {}),
-      }, msg.path, msg.query);
-      sendOk(ws, msg.id, payload, diagnostic());
+      const startedAt = Date.now();
+      const readDiagnostic = {
+        path: msg.path,
+        query: compactReadQueryForLog(msg.query),
+        runtimeId: String(env.runtimeId || '') || null,
+        height: Math.max(0, Math.floor(Number(env.height ?? 0))),
+      };
+      const pendingTimer = setTimeout(() => {
+        runtimeAdapterLog.warn('read.pending', {
+          ...readDiagnostic,
+          elapsedMs: Date.now() - startedAt,
+        });
+      }, RUNTIME_ADAPTER_PENDING_READ_LOG_MS);
+      try {
+        const payload = await resolveRuntimeAdapterRead({
+          env,
+          ...(deps.readHead ? { readHead: () => deps.readHead?.(env) ?? Promise.resolve(null) } : {}),
+          ...(deps.readFrame ? { readFrame: (height) => deps.readFrame?.(env, height) ?? Promise.resolve(null) } : {}),
+          ...(deps.listCheckpoints ? { listCheckpoints: () => deps.listCheckpoints?.(env) ?? Promise.resolve([]) } : {}),
+          ...(deps.loadEntityState ? { loadEntityState: (entityId, height) => deps.loadEntityState?.(env, entityId, height) ?? Promise.resolve(null) } : {}),
+          ...(deps.loadEntityAccountDoc ? { loadEntityAccountDoc: (entityId, counterpartyId, height) => deps.loadEntityAccountDoc?.(env, entityId, counterpartyId, height) ?? Promise.resolve(null) } : {}),
+          ...(deps.loadEntityViewPage ? { loadEntityViewPage: (entityId, height, query) => deps.loadEntityViewPage?.(env, entityId, height, query) ?? Promise.resolve(null) } : {}),
+          ...(deps.listEntityIdsAtHeight ? { listEntityIdsAtHeight: (height) => deps.listEntityIdsAtHeight?.(env, height) ?? Promise.resolve([]) } : {}),
+          ...(deps.readActivityPage ? { readActivityPage: (opts) => deps.readActivityPage?.(env, opts) ?? Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'activity reader did not return')) } : {}),
+          ...(deps.readReceipt ? { readReceipt: (id) => deps.readReceipt?.(id) ?? null } : {}),
+          ...(deps.readFrameReceipts ? {
+            readFrameReceipts: (query?: RuntimeAdapterReadQuery) =>
+              deps.readFrameReceipts?.(env, query) ?? Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'frame receipt reader did not return')),
+          } : {}),
+          ...(deps.findPaymentRoutes ? {
+            findPaymentRoutes: (query?: RuntimeAdapterReadQuery) =>
+              deps.findPaymentRoutes?.(env, query) ?? Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'payment route reader did not return')),
+          } : {}),
+        }, msg.path, msg.query);
+        const resolvedAt = Date.now();
+        sendOk(ws, msg.id, payload, diagnostic());
+        const completedAt = Date.now();
+        if (completedAt - startedAt >= RUNTIME_ADAPTER_PENDING_READ_LOG_MS) {
+          runtimeAdapterLog.warn('read.slow', {
+            ...readDiagnostic,
+            resolveMs: resolvedAt - startedAt,
+            encodeSendMs: completedAt - resolvedAt,
+            totalMs: completedAt - startedAt,
+          });
+        }
+      } finally {
+        clearTimeout(pendingTimer);
+      }
       return true;
     }
 
     if (msg.op === 'cross-j-intent') {
       requireAuth(state, 'admin');
       requireBucket(state.sendBucket, 'send');
+      requireRuntimeCommandReady(env);
       if (deps.isMutatingIngressReady?.() === false) {
         throw new RuntimeAdapterError(
           'E_COMMAND_PENDING',
@@ -591,6 +639,7 @@ export const handleRuntimeAdapterMessage = async (
     if (msg.op === 'send') {
       requireAuth(state, 'admin');
       requireBucket(state.sendBucket, 'send');
+      requireRuntimeCommandReady(env);
       if (deps.isMutatingIngressReady?.() === false) {
         throw new RuntimeAdapterError(
           'E_COMMAND_PENDING',

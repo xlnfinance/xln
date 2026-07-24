@@ -18,6 +18,13 @@ type BootstrapMetrics = {
   workDir: string;
   eventsJsonl?: string;
   marketMakerEventsJsonl?: string;
+  epochRotations?: Array<{
+    runtime: 'H1' | 'H2' | 'H3' | 'MM';
+    currentHeight: number;
+    previousHeight: number;
+    latestSnapshotHeight: number;
+    epochMaxBytes: number;
+  }>;
   templateDir?: string;
 };
 
@@ -32,6 +39,7 @@ type SoundcheckResult = {
   metricsPath: string;
   eventsJsonl?: string;
   marketMakerEventsJsonl?: string;
+  epochRotations?: BootstrapMetrics['epochRotations'];
 };
 
 const repoRoot = process.cwd();
@@ -145,6 +153,12 @@ const runSmoke = async (
         XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS: process.env['XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS'] || '5000',
         XLN_LOCAL_PROD_SMOKE_POST_BOOTSTRAP_STABILITY_MS:
           process.env['XLN_LOCAL_PROD_SMOKE_POST_BOOTSTRAP_STABILITY_MS'] || '1000',
+        // Soundcheck templates must exercise snapshot + bounded WAL-tail
+        // restore. The production cadence stays sparse; using it here makes a
+        // small synthetic template replay its entire high-amplification boot
+        // history and turns the mesh SLO into a machine-load race.
+        XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES:
+          process.env['XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES'] || '32',
         ...extraEnv,
       },
       stdio: 'inherit',
@@ -174,6 +188,7 @@ const runSmoke = async (
     metricsPath,
     eventsJsonl: metrics.eventsJsonl || eventsJsonl,
     ...(metrics.marketMakerEventsJsonl ? { marketMakerEventsJsonl: metrics.marketMakerEventsJsonl } : {}),
+    ...(metrics.epochRotations ? { epochRotations: metrics.epochRotations } : {}),
   };
 };
 

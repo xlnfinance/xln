@@ -10,6 +10,7 @@ import {
   hashCrossJurisdictionCloseBinary,
   isCrossJurisdictionTerminalStatus,
   transitionCrossJurisdictionRouteStatus,
+  withCrossJurisdictionCloseProofProgress,
   withCrossJurisdictionClaimProgress,
 } from '../../../extensions/cross-j/index';
 import { deriveCanonicalCrossJurisdictionBookOwner } from '../../../extensions/cross-j/market';
@@ -181,19 +182,16 @@ const settleTargetLegAndNotifySourceSibling = (
 
 const transitionTargetLegSettled = (
   route: CrossJurisdictionSwapRoute,
-  targetHubProjectionLagged: boolean,
   updatedAt: number,
 ): void => {
   if (
-    targetHubProjectionLagged &&
     route.status !== 'clearing' &&
     route.status !== 'source_claimed' &&
     route.status !== 'target_claimed'
   ) {
-    // The target Hub does not receive the source User→target User relay. Its
-    // bilateral target Account nevertheless validates the source proof before
-    // committing this resolve. Preserve the FSM by materializing that locally
-    // skipped clearing projection before the terminal transition.
+    // The Hub-authored atomic Account close is the authoritative transition.
+    // Either bilateral participant may still have a resting route projection
+    // when that same frame commits, so materialize clearing before settlement.
     transitionCrossJurisdictionRouteStatus(route, 'clearing', updatedAt);
   }
   transitionCrossJurisdictionRouteStatus(route, 'settled', updatedAt);
@@ -524,37 +522,12 @@ const applyPullResolveFollowup = (
       transitionCrossJurisdictionRouteStatus(route, 'source_claimed', newState.timestamp);
 
       // The same Account frame commits on both source participants. Hub-source
-      // updates its sibling-owned book; user-source relays the proof only to its
-      // user-target sibling. No diagonal hub→user Entity message exists.
+      // updates its sibling-owned book. Target settlement is already the second
+      // leg of the Hub-authored atomic Account cohort; source-user must never
+      // author or relay target close economics.
       if (isSourceHubResolve) {
         removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'source_claimed', storageChanges);
-        continue;
       }
-
-      const targetPull = route.targetPull;
-      if (!targetPull) continue;
-      const targetEntityTxs: EntityTx[] = [{
-        type: 'crossPullClose',
-        data: {
-          counterpartyEntityId: route.target.entityId,
-          pullId: targetPull.pullId,
-          binary: accountTx.data.binary,
-          proof,
-          route: cloneCrossJurisdictionRoute(route),
-          description: `Cross-j ${route.orderId} target close ${fillRatio}/${CROSS_J_MAX_FILL_RATIO}`,
-        },
-      }];
-      outputs.push(buildCrossJurisdictionEntityOutput(
-        env,
-        route.target.counterpartyEntityId,
-        targetEntityTxs,
-        requireRouteSignerHint(route, route.target.counterpartyEntityId),
-      ));
-      crossJFollowupLog.debug('pull.resolve.relay_target', {
-        route: shortOrder(route.orderId, 12),
-        target: shortId(route.target.counterpartyEntityId),
-        ratio: fillRatio,
-      });
       continue;
     }
 
@@ -571,7 +544,7 @@ const applyPullResolveFollowup = (
       assertPullResolveAllowed(route, fillRatio, isTargetHubResolve ? 'target_hub' : 'target_user');
       backfillCommittedFillFromResolvedPull(route, fillRatio, newState.timestamp);
       Object.assign(route, withCrossJurisdictionClaimProgress(route, fillRatio, newState.timestamp));
-      transitionTargetLegSettled(route, isTargetHubResolve, newState.timestamp);
+      transitionTargetLegSettled(route, newState.timestamp);
       settleTargetLegAndNotifySourceSibling(
         env,
         newState,
@@ -640,36 +613,19 @@ const applyCrossPullCloseFollowup = (
         continue;
       }
       assertPullResolveAllowed(route, fillRatio, 'source');
-      backfillCommittedFillFromResolvedPull(route, fillRatio, newState.timestamp);
-      Object.assign(route, withCrossJurisdictionClaimProgress(route, fillRatio, newState.timestamp));
+      Object.assign(
+        route,
+        withCrossJurisdictionCloseProofProgress(route, accountTx.data.proof, newState.timestamp),
+      );
       route.sourceCloseProof = accountTx.data.proof;
-      transitionCrossJurisdictionRouteStatus(route, 'source_claimed', newState.timestamp);
+      route.targetCloseProof = accountTx.data.proof;
+      transitionTargetLegSettled(route, newState.timestamp);
 
-      const targetPull = route.targetPull;
-      if (isSourceUserClose && targetPull) {
-        outputs.push(buildCrossJurisdictionEntityOutput(
-          env,
-          route.target.counterpartyEntityId,
-          [{
-            type: 'crossPullClose',
-            data: {
-              counterpartyEntityId: route.target.entityId,
-              pullId: targetPull.pullId,
-              binary: accountTx.data.binary,
-              proof: accountTx.data.proof,
-              route: cloneCrossJurisdictionRoute(route),
-              description: `Cross-j ${route.orderId} target close ${fillRatio}/${CROSS_J_MAX_FILL_RATIO}`,
-            },
-          }],
-          requireRouteSignerHint(route, route.target.counterpartyEntityId),
-        ));
-      }
       if (isSourceHubClose) {
-        removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'source_claimed', storageChanges);
+        removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'settled', storageChanges);
       }
-      crossJFollowupLog.debug('pull.close.relay_target', {
+      crossJFollowupLog.debug('pull.close.source_committed', {
         route: shortOrder(route.orderId, 12),
-        target: shortId(route.target.counterpartyEntityId),
         ratio: fillRatio,
       });
       continue;
@@ -685,22 +641,17 @@ const applyCrossPullCloseFollowup = (
       counterpartyEntityId === targetUserId;
     if (isTargetUserClose || isTargetHubClose) {
       if (assertSettledPullReplay(route, fillRatio, accountTx.data.binary, accountTx.data.proof)) continue;
-      assertPullResolveAllowed(route, fillRatio, isTargetHubClose ? 'target_hub' : 'target_user');
-      backfillCommittedFillFromResolvedPull(route, fillRatio, newState.timestamp);
-      Object.assign(route, withCrossJurisdictionClaimProgress(route, fillRatio, newState.timestamp));
+      // Account consensus already proved that the target Hub authored this
+      // cross_pull_close. currentEntityId only identifies which side is
+      // projecting the committed bilateral frame; it never changes authorship.
+      assertPullResolveAllowed(route, fillRatio, 'target_hub');
+      Object.assign(
+        route,
+        withCrossJurisdictionCloseProofProgress(route, accountTx.data.proof, newState.timestamp),
+      );
       route.sourceCloseProof = accountTx.data.proof;
       route.targetCloseProof = accountTx.data.proof;
-      transitionTargetLegSettled(route, isTargetHubClose, newState.timestamp);
-      settleTargetLegAndNotifySourceSibling(
-        env,
-        newState,
-        route,
-        fillRatio,
-        accountTx.data.binary,
-        accountTx.data.proof,
-        outputs,
-        currentEntityId,
-      );
+      transitionTargetLegSettled(route, newState.timestamp);
       crossJFollowupLog.debug('pull.close.settled', {
         route: shortOrder(route.orderId, 12),
         ratio: fillRatio,

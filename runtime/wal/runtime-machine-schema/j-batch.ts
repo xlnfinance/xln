@@ -53,7 +53,7 @@ export const validateJBatch = (value: unknown, code: string): void => {
   requireExactBoundaryKeys(batch, [
     'reserveToExternalToken', 'externalTokenToReserve', 'reserveToReserve',
     'reserveToCollateral', 'collateralToReserve', 'settlements', 'disputeStarts',
-    'disputeFinalizations', 'flashloans', 'revealSecrets', 'hub_id',
+    'disputeFinalizations', 'flashloans', 'revealSecrets',
   ], [], `${code}_FIELDS`);
   validateRecordArray(batch['reserveToExternalToken'], `${code}_R2E`, {
     receivingEntity: string, tokenId: integer, amount: bigint,
@@ -82,8 +82,6 @@ export const validateJBatch = (value: unknown, code: string): void => {
     forgiveDebtsInTokenIds: (ids, idsCode) => requireArray(ids, idsCode).forEach((id, index) =>
       requireBoundaryInteger(id, `${idsCode}_${index}`)),
     sig: string,
-    entityProvider: string,
-    hankoData: string,
     nonce: integer,
   });
   validateRecordArray(batch['disputeStarts'], `${code}_DISPUTE_STARTS`, {
@@ -97,5 +95,4 @@ export const validateJBatch = (value: unknown, code: string): void => {
   });
   validateRecordArray(batch['flashloans'], `${code}_FLASHLOANS`, { tokenId: integer, amount: bigint });
   validateRecordArray(batch['revealSecrets'], `${code}_REVEAL_SECRETS`, { transformer: string, secret: string });
-  requireBoundaryInteger(batch['hub_id'], `${code}_HUB_ID`);
 };

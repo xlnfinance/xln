@@ -72,6 +72,7 @@ export type StoragePersistenceBoundary =
   | 'after-replay-prune'
   | 'after-snapshot-history-head'
   | 'after-snapshot-current-head'
+  | 'after-epoch-history-head-reset'
   | 'after-restore-current-fence'
   | 'after-restore-current-clear-batch'
   | 'after-restore-current-body'
@@ -93,6 +94,7 @@ export type StorageHead = {
   retainSnapshots: number;
   epochMaxBytes: number;
   accountMerkleRadix: RadixMerkleRadix;
+  epochReplayBytes: number;
   retainedHistoryBytes: number;
 };
 

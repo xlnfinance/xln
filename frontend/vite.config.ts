@@ -2,7 +2,6 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 import type { Plugin, PreviewServer, ViteDevServer } from 'vite';
 import fs from 'fs';
-import net from 'net';
 import http from 'node:http';
 import https from 'node:https';
 import { execSync } from 'node:child_process';
@@ -252,35 +251,7 @@ function manualClientChunk(id: string): string | undefined {
 	return 'vendor';
 }
 
-async function assertPortAvailable(port: number, host: string): Promise<void> {
-	return new Promise((resolve, reject) => {
-		const server = net.createServer();
-
-		server.once('error', (err: NodeJS.ErrnoException) => {
-			if (err.code === 'EADDRINUSE') {
-				console.error(`\n❌ Port ${port} is already in use.`);
-				console.error('Please stop the process that is using it, then retry.');
-				console.error(`\nFind the process:\n  lsof -nP -iTCP:${port} -sTCP:LISTEN`);
-				console.error(`Kill it (example):\n  lsof -ti TCP:${port} | xargs kill -9\n`);
-				process.exit(1);
-			}
-			reject(err);
-		});
-
-		server.once('listening', () => {
-			server.close(() => resolve());
-		});
-
-		server.listen(port, host);
-	});
-}
-
-export default defineConfig(async ({ command }) => {
-	if (command === 'serve') {
-		await assertPortAvailable(DEV_PORT, DEV_HOST);
-	}
-
-	return {
+export default defineConfig({
 	plugins: [
 		runtimeBundlePlugin(),
 		sveltekit(),
@@ -371,5 +342,4 @@ export default defineConfig(async ({ command }) => {
 			'../../jurisdictions/typechain-types/index.ts': TYPECHAIN_INDEX,
 		}
 	}
-	};
 });

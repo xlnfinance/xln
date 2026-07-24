@@ -10,13 +10,12 @@ export const BATCH_ABI = [
     'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve,' +
     'tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral,' +
     'tuple(bytes32 counterparty, uint256 tokenId, uint256 amount, uint256 nonce, bytes sig)[] collateralToReserve,' +
-    'tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig, address entityProvider, bytes hankoData, uint256 nonce)[] settlements,' +
+    'tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig, uint256 nonce)[] settlements,' +
     'tuple(bytes32 counterentity, uint256 nonce, bytes32 proofbodyHash, tuple(bytes32 watchSeed, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) initialProofbody, bytes32 watchSeed, bytes sig, bytes starterInitialArguments, bytes starterIncrementedArguments)[] disputeStarts,' +
     'tuple(bytes32 counterentity, uint256 initialNonce, uint256 finalNonce, bytes32 initialProofbodyHash, tuple(bytes32 watchSeed, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes starterArguments, bytes otherArguments, bytes sig, bool startedByLeft, bool cooperative)[] disputeFinalizations,' +
     'tuple(bytes32 entity, address contractAddress, uint96 externalTokenId, uint8 tokenType, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve,' +
     'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken,' +
-    'tuple(address transformer, bytes32 secret)[] revealSecrets,' +
-    'uint256 hub_id' +
+    'tuple(address transformer, bytes32 secret)[] revealSecrets' +
   ')'
 ];
 
@@ -47,6 +46,18 @@ export const singleSignerLazyEntityId = (address: string): string => {
 export const deriveHardhatPrivateKey = (index: number): string =>
   ethers.HDNodeWallet.fromPhrase(DEFAULT_HARDHAT_MNEMONIC, undefined, `m/44'/60'/0'/0/${index}`).privateKey;
 
+export const deployEntityProvider = async (foundationRecipient: string) => {
+  const HankoVerifier = await ethers.getContractFactory('HankoVerifier');
+  const hankoVerifier = await HankoVerifier.deploy();
+  await hankoVerifier.waitForDeployment();
+  const EntityProvider = await ethers.getContractFactory('EntityProvider', {
+    libraries: { HankoVerifier: await hankoVerifier.getAddress() },
+  });
+  const entityProvider = await EntityProvider.deploy(foundationRecipient);
+  await entityProvider.waitForDeployment();
+  return entityProvider;
+};
+
 export const encodeBatch = (batch: unknown): string =>
   ethers.AbiCoder.defaultAbiCoder().encode(BATCH_ABI, [batch]);
 
@@ -61,7 +72,6 @@ export const emptyBatch = (overrides: Record<string, unknown> = {}): Record<stri
   externalTokenToReserve: [],
   reserveToExternalToken: [],
   revealSecrets: [],
-  hub_id: 0,
   ...overrides,
 });
 
@@ -84,6 +94,24 @@ export const buildSingleSignerHanko = (entityId: string, hash: string, privateKe
     [1],
     1,
   ]]);
+};
+
+export const buildFoundationAction = async (
+  provider: {
+    entityActionNonces(entityId: string): Promise<bigint>;
+    computeFoundationActionHash(actionType: string, argumentsHash: string, actionNonce: bigint): Promise<string>;
+  },
+  actionType: string,
+  argumentsHash: string,
+  privateKey = deriveHardhatPrivateKey(0),
+): Promise<{ hankoData: string; actionNonce: bigint }> => {
+  const foundationId = ethers.zeroPadValue(ethers.toBeHex(1), 32);
+  const actionNonce = await provider.entityActionNonces(foundationId) + 1n;
+  const actionHash = await provider.computeFoundationActionHash(actionType, argumentsHash, actionNonce);
+  return {
+    hankoData: buildSingleSignerHanko(foundationId, actionHash, privateKey),
+    actionNonce,
+  };
 };
 
 export const buildClaimsHanko = (

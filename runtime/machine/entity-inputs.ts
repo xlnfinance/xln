@@ -10,6 +10,7 @@ import {
 } from './entity-routing';
 import { safeStringify } from '../protocol/serialization';
 import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
+import { accountInputAck, accountInputProposal } from '../account/consensus/flush';
 import type { EntityInput, EntityReplica, EntityTx, Env, JInput, RoutedEntityInput } from '../types';
 import { resolveEntityProposerId } from '../state-helpers';
 import { validateEntityOutput } from '../validation-utils';
@@ -17,6 +18,10 @@ import { nodeProcess } from './platform';
 import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../infra/perf-runtime-flags';
 import { DEBUG, getPerfMs } from '../utils';
 import { createStructuredLogger, logError, shortId } from '../infra/logger';
+import {
+  classifyEntityInputApplyFailure,
+  type EntityInputApplyFailureKind,
+} from '../entity/tx/invariant-errors';
 
 const entityInputLog = createStructuredLogger('runtime.entity_inputs');
 
@@ -66,6 +71,7 @@ export class RuntimeEntityInputApplyError extends Error {
   readonly sourceRuntimeHeight: number | undefined;
   readonly sourceRuntimeTimestamp: number | undefined;
   readonly trustedLocalCrossJurisdiction: boolean;
+  readonly failureKind: EntityInputApplyFailureKind;
 
   constructor(
     input: RoutedEntityInput,
@@ -86,10 +92,15 @@ export class RuntimeEntityInputApplyError extends Error {
     this.sourceRuntimeHeight = input.sourceRuntimeFrame?.height;
     this.sourceRuntimeTimestamp = input.sourceRuntimeFrame?.timestamp;
     this.trustedLocalCrossJurisdiction = trustedLocalCrossJurisdiction;
+    this.failureKind = classifyEntityInputApplyFailure(cause);
   }
 
   get isRemoteIngress(): boolean {
     return this.sourceRuntimeId.length > 0 && !this.trustedLocalCrossJurisdiction;
+  }
+
+  get isQuarantinableRemoteIngress(): boolean {
+    return this.isRemoteIngress && this.failureKind === 'malformed-ingress';
   }
 }
 
@@ -106,6 +117,7 @@ type CrossJCommand = {
 export interface RuntimeEntityInputApplyOptions {
   isReplay: boolean;
   routingDeps: RuntimeEntityRoutingDeps;
+  beforeEntityApply?: (entityId: string) => void;
 }
 
 export const collectAppliedAccountSenderHints = (input: RoutedEntityInput): string[] => {
@@ -161,22 +173,44 @@ export const applyMergedEntityInputs = async (
     input: RoutedEntityInput,
     replica: EntityReplica,
   ): RuntimeEntityInputApplyResult['inputOutcomes'][number]['committedAccountFrames'] => {
-    const counterparties = new Set(getEffectiveEntityInputTxs(input).flatMap(tx =>
-      tx.type === 'accountInput' ? [tx.data.fromEntityId.toLowerCase()] : []));
-    return [...counterparties].map(counterpartyEntityId => {
+    const accountInputs = getEffectiveEntityInputTxs(input).flatMap(tx =>
+      tx.type === 'accountInput' && (accountInputProposal(tx.data) || accountInputAck(tx.data))
+        ? [tx.data]
+        : []);
+    return accountInputs.flatMap(accountInput => {
+      const counterpartyEntityId = accountInput.fromEntityId.toLowerCase();
       const account = [...replica.state.accounts.entries()].find(([entityId]) =>
         entityId.toLowerCase() === counterpartyEntityId)?.[1];
-      if (!account) {
-        throw new Error(
-          `RUNTIME_COMMITTED_ACCOUNT_FRAME_MISSING:entity=${input.entityId}:` +
-          `counterparty=${counterpartyEntityId}`,
-        );
-      }
-      return {
-        counterpartyEntityId,
-        height: account.currentFrame.height,
-        stateHash: String(account.currentFrame.stateHash || '').toLowerCase(),
-      };
+      // A malformed/rejected genesis Account frame deliberately commits no
+      // Account while the surrounding Entity input can still commit its
+      // warning. Absence is therefore negative evidence for cross-J atomic
+      // admission, not a Runtime invariant failure.
+      if (!account) return [];
+      const finalHeight = account.currentFrame.height;
+      const finalStateHash = String(account.currentFrame.stateHash || '').toLowerCase();
+      const proposal = accountInputProposal(accountInput);
+      const ack = accountInputAck(accountInput);
+      const proposalCommitted = proposal?.frame.height === finalHeight &&
+        String(proposal.frame.stateHash || '').toLowerCase() === finalStateHash;
+      const ackCommitted = ack && (
+        (ack.height === finalHeight && String(ack.frameHash || '').toLowerCase() === finalStateHash) ||
+        (proposalCommitted &&
+          proposal.frame.height === ack.height + 1 &&
+          String(proposal.frame.prevFrameHash || '').toLowerCase() ===
+            String(ack.frameHash || '').toLowerCase())
+      );
+      return [
+        ...(ackCommitted ? [{
+          counterpartyEntityId,
+          height: ack.height,
+          stateHash: String(ack.frameHash || '').toLowerCase(),
+        }] : []),
+        ...(proposalCommitted ? [{
+          counterpartyEntityId,
+          height: proposal.frame.height,
+          stateHash: String(proposal.frame.stateHash || '').toLowerCase(),
+        }] : []),
+      ];
     });
   };
 
@@ -255,6 +289,7 @@ export const applyMergedEntityInputs = async (
           'Immediate cross-j local output target replica missing state',
           { replicaKey },
         );
+        options.beforeEntityApply?.(entityInput.entityId);
         const result = await applyEntityInputToReplica(
           env,
           entityReplica,
@@ -349,23 +384,6 @@ export const applyMergedEntityInputs = async (
       );
     }
 
-    const localEntityReplicaKey = findReplicaKeyInsensitive(env, entityInput.entityId, null);
-    if (!localEntityReplicaKey) {
-      const dropDetails = {
-        entityId: entityInput.entityId,
-        signerId: entityInput.signerId,
-        txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
-        knownEntities: Array.from(env.eReplicas.keys()).map(k => String(k).split(':')[0]).filter(Boolean),
-      };
-      env.error('network', 'REJECT_ENTITY_INPUT_UNKNOWN_ENTITY', dropDetails, entityInput.entityId);
-      assertRuntimeIngress(
-        false,
-        'RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET',
-        'Entity input target does not exist in local runtime',
-        dropDetails,
-      );
-    }
-
     const actualSignerId = entityInput.signerId.trim();
 
     assertRuntimeIngress(
@@ -377,9 +395,15 @@ export const applyMergedEntityInputs = async (
 
     let replicaKey = `${entityInput.entityId}:${actualSignerId}`;
     let entityReplica = env.eReplicas.get(replicaKey);
+    let localReplicaKeys: string[] = [];
 
     if (!entityReplica) {
-      const insensitiveMatch = findReplicaKeyInsensitive(env, entityInput.entityId, actualSignerId);
+      localReplicaKeys = findReplicaKeysForEntityInsensitive(env, entityInput.entityId);
+      const signerNorm = actualSignerId.toLowerCase();
+      const insensitiveMatch = localReplicaKeys.find((key) => {
+        const [, candidateSignerId] = String(key).split(':');
+        return String(candidateSignerId || '').toLowerCase() === signerNorm;
+      });
       if (insensitiveMatch) {
         replicaKey = insensitiveMatch;
         entityReplica = env.eReplicas.get(insensitiveMatch);
@@ -387,8 +411,22 @@ export const applyMergedEntityInputs = async (
     }
 
     if (!entityReplica) {
-      const localReplicaKeys = findReplicaKeysForEntityInsensitive(env, entityInput.entityId);
       const txTypes = (entityInput.entityTxs || []).map(tx => tx.type);
+      if (localReplicaKeys.length === 0) {
+        const dropDetails = {
+          entityId: entityInput.entityId,
+          signerId: entityInput.signerId,
+          txTypes,
+          knownEntities: Array.from(env.eReplicas.keys()).map(k => String(k).split(':')[0]).filter(Boolean),
+        };
+        env.error('network', 'REJECT_ENTITY_INPUT_UNKNOWN_ENTITY', dropDetails, entityInput.entityId);
+        assertRuntimeIngress(
+          false,
+          'RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET',
+          'Entity input target does not exist in local runtime',
+          dropDetails,
+        );
+      }
       if (localReplicaKeys.length === 1 && txTypes.length === 0) {
         replicaKey = localReplicaKeys[0]!;
         entityReplica = env.eReplicas.get(replicaKey);
@@ -406,11 +444,7 @@ export const applyMergedEntityInputs = async (
         entityId: entityInput.entityId,
         resolvedSignerId: actualSignerId,
         inputSignerId: entityInput.signerId,
-        knownReplicas: Array.from(env.eReplicas.keys()).filter(k =>
-          String(k)
-            .toLowerCase()
-            .startsWith(`${String(entityInput.entityId).toLowerCase()}:`),
-        ),
+        knownReplicas: localReplicaKeys,
       };
       env.error('network', 'REJECT_ENTITY_INPUT_REPLICA_NOT_FOUND', missingReplicaDetails, entityInput.entityId);
       assertRuntimeIngress(
@@ -421,6 +455,7 @@ export const applyMergedEntityInputs = async (
       );
     }
 
+    options.beforeEntityApply?.(entityInput.entityId);
     const result = await applyEntityInputToReplica(env, entityReplica, replicaKey, entityInput, actualSignerId, isReplay);
     inputOutcomes.push({
       inputIndex,
@@ -649,6 +684,10 @@ const applyEntityInputToReplica = async (
 const findReplicaKeyInsensitive = (env: Env, entityId: string, signerId?: string | null): string | null => {
   const entityNorm = String(entityId || '').toLowerCase();
   const signerNorm = signerId ? String(signerId).toLowerCase() : null;
+  if (signerNorm) {
+    const directKey = `${entityNorm}:${signerNorm}`;
+    if (env.eReplicas.has(directKey)) return directKey;
+  }
   for (const key of env.eReplicas.keys()) {
     const [repEntityId, repSignerId] = String(key).split(':');
     if (!repEntityId || String(repEntityId).toLowerCase() !== entityNorm) continue;

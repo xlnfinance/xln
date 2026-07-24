@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { spawn as spawnChild, type ChildProcess } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -23,11 +24,13 @@ import {
   buildQaRegressionReport,
   buildQaRunLedger,
   buildQaSystemVerdict,
+  assertQaRunCandidateBinding,
   classifyQaArtifactSensitivity,
   classifyQaShardFailure,
   compareQaBenchmarkRuns,
   formatQaRunIdUtc,
   QA_HISTORY_DB_PATH,
+  QA_RUN_MANIFEST_VERSION,
   listQaStoryScreenshots,
   purgeQaRunsOlderThan,
   readQaRun,
@@ -38,6 +41,7 @@ import {
   summarizeQaRun,
   type QaRunManifest,
 } from '../qa/report';
+import { buildQaCandidateIdentity } from '../qa/candidate';
 
 const QA_ADMIN_TOKEN = 'qa-admin-test-token';
 const JSON_HEADERS = { 'content-type': 'application/json' };
@@ -223,6 +227,29 @@ const benchmarkRun = (
     hasTrace: false,
   }],
 } as QaRunManifest);
+
+const asCurrentQaRun = (run: QaRunManifest): QaRunManifest => {
+  const gitHead = createHash('sha1').update(String(run.code?.gitHead ?? run.runId)).digest('hex');
+  const codeHash = createHash('sha256').update(String(run.code?.codeHash ?? run.runId)).digest('hex');
+  const gateConfig = { schemaVersion: 1, fixtureRunId: run.runId };
+  const candidate = buildQaCandidateIdentity({ gitHead, codeHash, gateConfig });
+  return applyQaRunSeverity({
+    ...run,
+    manifestVersion: QA_RUN_MANIFEST_VERSION,
+    candidate,
+    gateConfig,
+    code: {
+      ...run.code!,
+      gitHead,
+      codeHash,
+    },
+    shards: run.shards.map(shard => ({
+      ...shard,
+      candidateId: candidate.candidateId,
+      gateConfigHash: candidate.gateConfigHash,
+    })),
+  });
+};
 
 test('qa severity never reports a fail-fast cancelled shard as passed', () => {
   const passed = benchmarkRun('cancelled-shard', 1_000, 800);
@@ -417,6 +444,13 @@ test('qa severity model normalizes legacy runs and gates release manifests', () 
   const missingReason = { ...legacy, manifestVersion: 3 } as Record<string, unknown>;
   delete missingReason['reason'];
   expect(() => assertQaReleaseRunSeverity(missingReason as QaRunManifest)).toThrow('QA_RUN_REASON_REQUIRED');
+
+  const current = asCurrentQaRun(benchmarkRun('candidate-bound', 1000, 800));
+  expect(() => assertQaRunCandidateBinding(current)).not.toThrow();
+  expect(() => assertQaRunCandidateBinding({
+    ...current,
+    shards: [{ ...current.shards[0]!, candidateId: '0'.repeat(64) }],
+  })).toThrow('QA_SHARD_CANDIDATE_MISMATCH');
 });
 
 test('qa system verdict is schema-backed by latest run severity', () => {
@@ -427,10 +461,9 @@ test('qa system verdict is schema-backed by latest run severity', () => {
   expect(empty.reason).toBe('No QA runs yet');
 
   const baseline = benchmarkRun('20260623-215959-999', 1000, 800);
-  const failedCurrent = {
-    ...benchmarkRun('20260623-225959-999', 1300, 1100, 'new-code', 'new-head'),
-    manifestVersion: 4,
-  };
+  const failedCurrent = asCurrentQaRun(
+    benchmarkRun('20260623-225959-999', 1300, 1100, 'new-code', 'new-head'),
+  );
   const failedRun = applyQaRunSeverity({
     ...failedCurrent,
     status: 'failed',
@@ -467,6 +500,7 @@ test('qa system verdict is schema-backed by latest run severity', () => {
       }],
     }],
   });
+
   const failed = buildQaSystemVerdict([summarizeQaRun(failedRun)], now);
   expect(failed.schemaVersion).toBe(1);
   expect(failed.status).toBe('FAIL');
@@ -476,10 +510,7 @@ test('qa system verdict is schema-backed by latest run severity', () => {
   expect(failed.regressionStatus).toBe('slower');
   expect(failed.browserErrorCount).toBe(1);
 
-  const passedRun = {
-    ...benchmarkRun('20260623-235959-999', 900, 700),
-    manifestVersion: 4,
-  };
+  const passedRun = asCurrentQaRun(benchmarkRun('20260623-235959-999', 900, 700));
   const passed = buildQaSystemVerdict([summarizeQaRun(passedRun)], now);
   expect(passed.status).toBe('PASS');
   expect(passed.activeCount).toBe(0);
@@ -488,23 +519,17 @@ test('qa system verdict is schema-backed by latest run severity', () => {
 
 test('qa system verdict excludes future fixture dirty and unknown-schema runs', () => {
   const now = Date.UTC(2026, 5, 24);
-  const eligible = {
-    ...benchmarkRun('20260623-235959-995', 900, 700),
-    manifestVersion: 4,
-  };
+  const eligible = asCurrentQaRun(benchmarkRun('20260623-235959-995', 900, 700));
   const future = {
-    ...benchmarkRun('20991231-235959-999', 900, 700),
-    manifestVersion: 4,
+    ...asCurrentQaRun(benchmarkRun('20991231-235959-999', 900, 700)),
     createdAt: Date.UTC(2099, 11, 31, 23, 59, 59, 999),
   };
   const fixture = {
-    ...benchmarkRun('20260623-235959-998', 900, 700),
-    manifestVersion: 4,
+    ...asCurrentQaRun(benchmarkRun('20260623-235959-998', 900, 700)),
     args: { fixture: 'qa-cockpit' },
   };
   const dirty = {
-    ...benchmarkRun('20260623-235959-997', 900, 700),
-    manifestVersion: 4,
+    ...asCurrentQaRun(benchmarkRun('20260623-235959-997', 900, 700)),
     code: { ...eligible.code!, dirty: true },
   };
   const unknownSchema = {
@@ -1803,9 +1828,8 @@ test('qa runs endpoint reads SQLite summaries without requiring run logs', async
   deleteQaHistoryRows([runId]);
   try {
     const base = benchmarkRun(runId, 2345, 1200);
-    const run: QaRunManifest = {
+    const run = asCurrentQaRun({
       ...base,
-      manifestVersion: 4,
       createdAt,
       completedAt: createdAt + 2345,
       status: 'failed',
@@ -1851,7 +1875,7 @@ test('qa runs endpoint reads SQLite summaries without requiring run logs', async
           contentType: 'video/webm',
         }],
       }],
-    };
+    });
     recordQaRunHistory(run, runDir);
     await rm(runDir, { recursive: true, force: true });
 

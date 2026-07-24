@@ -1,4 +1,12 @@
-import type { AccountFrame, AccountTx, EntityState, Env, HtlcNoteKey, HtlcRoute } from '../../../../types';
+import type {
+  AccountFrame,
+  AccountTx,
+  EntityCandidateEffect,
+  EntityState,
+  Env,
+  HtlcNoteKey,
+  HtlcRoute,
+} from '../../../../types';
 import { HEAVY_LOGS } from '../../../../utils';
 import { cancelHook as cancelScheduledHook } from '../../../scheduler';
 import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../../htlc-route-lifecycle';
@@ -26,15 +34,18 @@ function emitOriginatedHtlcFinalized(
   state: EntityState,
   route: HtlcRoute,
   accountTx: Extract<AccountTx, { type: 'htlc_resolve' }>,
+  candidateEffects: EntityCandidateEffect[],
 ): void {
-  if (!env?.emit || accountTx.data.outcome !== 'secret') return;
+  if (accountTx.data.outcome !== 'secret') return;
   if (route.inboundEntity || route.outboundLockId !== accountTx.data.lockId) return;
   const description =
     state.htlcNotes?.get(`lock:${accountTx.data.lockId}` as HtlcNoteKey)
     ?? state.htlcNotes?.get(`hashlock:${route.hashlock}` as HtlcNoteKey)
     ?? undefined;
-  env.emit('HtlcFinalized', {
-    ...buildHtlcFinalizedEventPayload({
+  candidateEffects.push({
+    kind: 'runtimeEvent',
+    eventName: 'HtlcFinalized',
+    data: buildHtlcFinalizedEventPayload({
       entityId: state.entityId,
       fromEntity: state.entityId,
       ...(route.outboundEntity ? { toEntity: route.outboundEntity } : {}),
@@ -262,8 +273,9 @@ export function applyCommittedAccountFrameFollowups(
   newState: EntityState,
   counterpartyId: string,
   committedFrame: AccountFrame,
-  mempoolOps: MempoolOp[] = [],
-  env?: Env,
+  mempoolOps: MempoolOp[],
+  env: Env | undefined,
+  candidateEffects: EntityCandidateEffect[],
 ): void {
   if (HEAVY_LOGS) {
     accountFollowupLog.debug('frame.commit', {
@@ -308,8 +320,10 @@ export function applyCommittedAccountFrameFollowups(
               const description =
                 newState.htlcNotes?.get(`lock:${accountTx.data.lockId}`)
                 ?? newState.htlcNotes?.get(`hashlock:${hashlock}`);
-              env?.emit('HtlcReceived', {
-                ...buildHtlcReceivedEventPayload({
+              candidateEffects.push({
+                kind: 'runtimeEvent',
+                eventName: 'HtlcReceived',
+                data: buildHtlcReceivedEventPayload({
                   entityId: newState.entityId,
                   fromEntity: counterpartyId,
                   toEntity: newState.entityId,
@@ -333,7 +347,7 @@ export function applyCommittedAccountFrameFollowups(
             // onion hook recreate the downstream lock forever.
             continue;
           }
-          emitOriginatedHtlcFinalized(env, newState, route, accountTx);
+          emitOriginatedHtlcFinalized(env, newState, route, accountTx, candidateEffects);
           terminateHtlcRoute(newState, hashlock, newState.timestamp);
         }
       }

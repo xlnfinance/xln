@@ -662,8 +662,23 @@
   const onboardingRequiredForRuntime = $derived(!isRemoteRuntime && $activeRuntimeStore?.requiresOnboarding !== false);
   const showVaultGate = $derived(!isRemoteRuntime && (!hasSigner || activeVaultLocked));
   const showVaultPanelVisible = $derived(showVaultGate || $showVaultPanel);
+  let mountedRemoteRuntimeId = $state('');
+  $effect(() => {
+    if (!isRemoteRuntime) {
+      mountedRemoteRuntimeId = '';
+      return;
+    }
+    if (
+      $runtimeView.frame &&
+      runtimeProjectionMatchesRuntime($runtimeView.runtimeId, $runtimeControllerHandle.runtimeId)
+    ) {
+      mountedRemoteRuntimeId = $runtimeControllerHandle.runtimeId;
+    }
+  });
   const remoteWorkspaceAvailable = $derived(
-    isRemoteRuntime && $runtimeControllerHandle.status === 'connected',
+    isRemoteRuntime &&
+    Boolean(mountedRemoteRuntimeId) &&
+    mountedRemoteRuntimeId === $runtimeControllerHandle.runtimeId,
   );
   const workspaceEnv = $derived.by<RuntimeFrame | null>(() =>
     isRemoteRuntime ? null : currentFrame,

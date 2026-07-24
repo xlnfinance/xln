@@ -2,6 +2,7 @@ import type {
   AccountInput,
   AccountMachine,
   AccountTx,
+  EntityCandidateEffect,
   EntityInput,
   EntityState,
   Env,
@@ -32,12 +33,13 @@ type HtlcFollowupContext = {
   accountMachine: AccountMachine;
   outputs: EntityInput[];
   mempoolOps: MempoolOp[];
+  candidateEffects: EntityCandidateEffect[];
 };
 
 type RevealedSecret = { secret: string; hashlock: string };
 type HtlcSecretFollowupContext = Pick<
   HtlcFollowupContext,
-  'env' | 'state' | 'newState' | 'outputs' | 'mempoolOps'
+  'env' | 'state' | 'newState' | 'outputs' | 'mempoolOps' | 'candidateEffects'
 >;
 
 const getJurisdictionId = (state: EntityState, env: Env): string =>
@@ -108,7 +110,7 @@ export function applyPendingForwardFollowup(ctx: HtlcFollowupContext): void {
 }
 
 export function applyHtlcTimeoutFollowups(ctx: HtlcFollowupContext, timedOutHashlocks: string[]): void {
-  const { env, state, newState, mempoolOps } = ctx;
+  const { state, newState, mempoolOps, candidateEffects } = ctx;
   for (const timedOutHashlock of timedOutHashlocks) {
     const route = newState.htlcRoutes.get(timedOutHashlock);
     if (!route) continue;
@@ -121,10 +123,14 @@ export function applyHtlcTimeoutFollowups(ctx: HtlcFollowupContext, timedOutHash
         },
       });
     } else {
-      env.emit('HtlcFailed', {
-        hashlock: timedOutHashlock,
-        reason: 'timeout',
-        entityId: state.entityId,
+      candidateEffects.push({
+        kind: 'runtimeEvent',
+        eventName: 'HtlcFailed',
+        data: {
+          hashlock: timedOutHashlock,
+          reason: 'timeout',
+          entityId: state.entityId,
+        },
       });
     }
     if (route.outboundLockId) newState.lockBook.delete(route.outboundLockId);
@@ -133,7 +139,7 @@ export function applyHtlcTimeoutFollowups(ctx: HtlcFollowupContext, timedOutHash
 }
 
 export function applyHtlcSecretFollowups(ctx: HtlcSecretFollowupContext, revealedSecrets: RevealedSecret[]): void {
-  const { env, state, newState, outputs, mempoolOps } = ctx;
+  const { env, state, newState, outputs, mempoolOps, candidateEffects } = ctx;
   if (HEAVY_LOGS) accountFollowupLog.debug('htlc.secret_check', { secrets: revealedSecrets.length });
 
   for (const { secret, hashlock } of revealedSecrets) {
@@ -181,8 +187,10 @@ export function applyHtlcSecretFollowups(ctx: HtlcSecretFollowupContext, reveale
       }], relay.targetSignerId);
     }
     terminateHtlcRoute(newState, hashlock, newState.timestamp);
-    env.emit('HtlcFinalized', {
-      ...buildHtlcFinalizedEventPayload({
+    candidateEffects.push({
+      kind: 'runtimeEvent',
+      eventName: 'HtlcFinalized',
+      data: buildHtlcFinalizedEventPayload({
         entityId: state.entityId,
         fromEntity: state.entityId,
         ...(route.outboundEntity ? { toEntity: route.outboundEntity } : {}),

@@ -50,12 +50,14 @@ import {
   pushDebugEvent,
   removeClient,
 } from '../relay/store';
+import { openRelayIncidentJournal } from '../relay/incident-journal';
+import { maybeHandleRelayDebugRequest } from '../relay/debug-http';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay/router';
 import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
 import { createHelloChallengeRegistry } from '../networking/hello-challenge';
 import { createLocalDeliveryHandler } from '../relay/local-delivery';
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path';
-import { createStructuredLogger, shortId } from '../infra/logger';
+import { createStructuredLogger, registerStructuredLogSink, shortId } from '../infra/logger';
 import { startParentLivenessWatch } from '../orchestrator/parent-watch';
 import {
   buildMarketSnapshotForReplica,
@@ -119,6 +121,7 @@ import { readInheritedChildSecrets } from '../orchestrator/child-secrets';
 import { createLocalPairingController } from './local-pairing';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { buildLocalRuntimeOwner, ensureLocalRuntimeOwner } from './local-runtime-owner';
+import { dbRootPath } from '../machine/platform';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -293,6 +296,20 @@ const resolveConfiguredRelayUrl = (port?: number): string => {
 };
 
 let relayStore = createRelayStore(DEFAULT_OPTIONS.serverId ?? 'xln-server');
+registerStructuredLogSink((entry) => {
+  if (entry.level !== 'error') return;
+  const severity = entry['severity'] === 'fatal' ? 'fatal' : 'error';
+  pushDebugEvent(relayStore, {
+    event: 'error',
+    status: severity,
+    reason: typeof entry['code'] === 'string' ? entry['code'] : entry.message,
+    details: {
+      source: 'runtime-server',
+      severity,
+      ...entry,
+    },
+  });
+});
 type ServerBootPhase = 'starting' | 'runtime' | 'bootstrap' | 'ready' | 'failed';
 let serverBootPhase: ServerBootPhase = 'starting';
 let serverBootError: string | null = null;
@@ -316,22 +333,30 @@ const installProcessSafetyGuards = (): void => {
   process.on('unhandledRejection', reason => {
     const message = reason instanceof Error ? reason.message : String(reason);
     const stack = reason instanceof Error ? reason.stack : undefined;
-    serverLog.error('process.unhandled_rejection', { message });
-    pushDebugEvent(relayStore, {
-      event: 'error',
-      reason: 'UNHANDLED_REJECTION',
-      details: { message, stack },
-    });
+    try {
+      serverLog.error('process.unhandled_rejection', {
+        code: 'UNHANDLED_REJECTION',
+        severity: 'fatal',
+        message,
+        stack,
+      });
+    } finally {
+      process.exit(1);
+    }
   });
 
   process.on('uncaughtException', error => {
     const message = getErrorMessage(error, 'Unknown uncaught exception');
-    serverLog.error('process.uncaught_exception', { message });
-    pushDebugEvent(relayStore, {
-      event: 'error',
-      reason: 'UNCAUGHT_EXCEPTION',
-      details: { message, stack: error?.stack },
-    });
+    try {
+      serverLog.error('process.uncaught_exception', {
+        code: 'UNCAUGHT_EXCEPTION',
+        severity: 'fatal',
+        message,
+        stack: error?.stack,
+      });
+    } finally {
+      process.exit(1);
+    }
   });
 };
 
@@ -575,89 +600,15 @@ const handleApi = async (
     );
   }
 
-  // Relay debug timeline (single source for network + critical runtime events)
-  if (pathname === '/api/debug/events') {
-    const url = new URL(req.url);
-    const last = Math.max(1, Math.min(5000, Number(url.searchParams.get('last') || '200')));
-    const event = url.searchParams.get('event') || undefined;
-    const runtimeId = url.searchParams.get('runtimeId') || undefined;
-    const from = url.searchParams.get('from') || undefined;
-    const to = url.searchParams.get('to') || undefined;
-    const msgType = url.searchParams.get('msgType') || undefined;
-    const status = url.searchParams.get('status') || undefined;
-    const since = Number(url.searchParams.get('since') || '0');
-
-    let filtered = relayStore.debugEvents;
-    if (since > 0) filtered = filtered.filter(e => e.ts >= since);
-    if (event) filtered = filtered.filter(e => e.event === event);
-    if (runtimeId)
-      filtered = filtered.filter(e => e.runtimeId === runtimeId || e.from === runtimeId || e.to === runtimeId);
-    if (from) filtered = filtered.filter(e => e.from === from);
-    if (to) filtered = filtered.filter(e => e.to === to);
-    if (msgType) filtered = filtered.filter(e => e.msgType === msgType);
-    if (status) filtered = filtered.filter(e => e.status === status);
-
-    const events = filtered.slice(-last);
-    return new Response(
-      safeStringify({
-        ok: true,
-        total: relayStore.debugEvents.length,
-        returned: events.length,
-        serverTime: Date.now(),
-        filters: { last, event, runtimeId, from, to, msgType, status, since: Number.isFinite(since) ? since : 0 },
-        events,
-      }),
-      { headers },
-    );
-  }
-
-  if (pathname === '/api/debug/events/mark' && req.method === 'POST') {
-    const body = await req.json().catch(() => ({} as Record<string, unknown>));
-    const label = typeof body?.label === 'string' ? body.label.trim() : '';
-    if (!label) {
-      return new Response(
-        safeStringify({ ok: false, error: 'label is required' }),
-        { status: 400, headers },
-      );
-    }
-
-    const runtimeId = typeof body?.runtimeId === 'string' && body.runtimeId.trim().length > 0
-      ? body.runtimeId.trim()
-      : undefined;
-    const entityId = typeof body?.entityId === 'string' && body.entityId.trim().length > 0
-      ? body.entityId.trim()
-      : undefined;
-    const phase = typeof body?.phase === 'string' && body.phase.trim().length > 0
-      ? body.phase.trim()
-      : undefined;
-    const details = body?.details && typeof body.details === 'object'
-      ? body.details
-      : undefined;
-
-    pushDebugEvent(relayStore, {
-      event: 'e2e_phase',
-      runtimeId,
-      status: 'mark',
-      reason: label,
-      details: {
-        label,
-        phase,
-        entityId,
-        details,
-      },
-    });
-
-    return new Response(
-      safeStringify({
-        ok: true,
-        label,
-        runtimeId: runtimeId ?? null,
-        entityId: entityId ?? null,
-        phase: phase ?? null,
-      }),
-      { headers },
-    );
-  }
+  const relayDebugResponse = await maybeHandleRelayDebugRequest({
+    request: req,
+    pathname,
+    url: new URL(req.url),
+    headers,
+    store: relayStore,
+    operatorAuthorized,
+  });
+  if (relayDebugResponse) return relayDebugResponse;
 
   if (pathname === '/api/debug/activity' && env) {
     return await handleRuntimeActivityRequest(env, new URL(req.url), headers);
@@ -790,10 +741,19 @@ const handleApi = async (
 };
 
 export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Promise<void> {
-  installProcessSafetyGuards();
   const options = { ...DEFAULT_OPTIONS, ...opts };
+  const incidentJournalPath = String(
+    process.env['XLN_SERVER_DEBUG_INCIDENT_JOURNAL_PATH'] || `${dbRootPath}.debug-incidents.jsonl`,
+  ).trim();
+  const incidentJournal = openRelayIncidentJournal(incidentJournalPath);
+  relayStore = createRelayStore(options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server', {
+    initialDebugId: incidentJournal.debugId,
+    initialIncidents: incidentJournal.incidents,
+    debugIdAllocator: () => incidentJournal.allocateDebugId(),
+    incidentSink: incident => incidentJournal.record(incident),
+  });
+  installProcessSafetyGuards();
   serverLog.info('start', { port: options.port, host: options.host, staticDir: options.staticDir });
-  relayStore = createRelayStore(options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server');
   marketSubscriptionStack.clear();
   const internalRelayUrl = resolveConfiguredRelayUrl(options.port);
   serverBootStartedAt = Date.now();
@@ -1070,7 +1030,15 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     env.runtimeState.directEntityInputsDispatch = (targetRuntimeId, envelope, ingressTimestamp) =>
       sendEntityInputDirectViaRelaySocketDelivery(runtimeEnv, targetRuntimeId, envelope, ingressTimestamp);
     env.runtimeState.canUseConnectedRelayFallback = hasConnectedEncryptedRelayClient;
-    startRuntimeLoop(env);
+    startRuntimeLoop(env, {
+      onFatal: async payload => {
+        serverLog.error('runtime.loop_fatal', {
+          ...payload,
+          runtimeId: runtimeEnv.runtimeId,
+          severity: 'fatal',
+        });
+      },
+    });
     serverLog.info('runtime.loop.started');
 
     // Initialize J-adapter (anvil for testnet, browserVM for local)

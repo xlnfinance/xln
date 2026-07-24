@@ -68,6 +68,10 @@ import type {
   QaSlowStep,
   QaTestCategory,
 } from '../qa/types';
+import {
+  assertQaCandidateIdentity,
+  buildQaCandidateIdentity,
+} from '../qa/candidate';
 import { assertMinDiskFree } from '../orchestrator/storage-monitor';
 import { compareStableText } from '../protocol/serialization';
 import { sanitizeChildProcessEnv } from '../server/child-process-env';
@@ -251,6 +255,60 @@ type RunTask = {
   tags: string[];
   testCategory: QaTestCategory;
 };
+
+export const buildE2EGateConfig = (
+  args: CliArgs,
+  tasks: readonly RunTask[],
+): Record<string, unknown> => ({
+  schemaVersion: 1,
+  runner: 'run-e2e-parallel-isolated',
+  manifestVersion: QA_RUN_MANIFEST_VERSION,
+  args: {
+    shards: args.shards,
+    basePort: args.basePort,
+    stackTimeoutMs: args.stackTimeoutMs,
+    testTimeoutMs: args.testTimeoutMs,
+    phaseWarnMs: args.phaseWarnMs,
+    anvilBin: args.anvilBin,
+    maxFailures: args.maxFailures,
+    maxMmConcurrency: args.maxMmConcurrency,
+    maxResetConcurrency: args.maxResetConcurrency,
+    workersPerShard: args.workersPerShard,
+    videoMode: args.videoMode,
+    traceMode: args.traceMode,
+    screenshotMode: args.screenshotMode,
+    reporter: args.reporter,
+    qaCategory: args.qaCategory ?? null,
+    pwGrep: args.pwGrep ?? null,
+    pwProject: args.pwProject ?? null,
+    pwFiles: [...args.pwFiles],
+    batchFiles: args.batchFiles,
+    includeAllSpecs: args.includeAllSpecs,
+    excludeMarketMaker: args.excludeMarketMaker,
+    marketMakerOnly: args.marketMakerOnly,
+    strictBrowserHealth: args.strictBrowserHealth,
+    skipBuild: args.skipBuild,
+    startAt: args.startAt,
+    preserveArtifacts: args.preserveArtifacts,
+    prewaitHealth: args.prewaitHealth,
+  },
+  tasks: tasks
+    .slice()
+    .sort((left, right) => left.shard - right.shard)
+    .map(task => ({
+      shard: task.shard,
+      totalShards: task.totalShards,
+      pwTargets: [...task.pwTargets],
+      requireMarketMaker: task.requireMarketMaker,
+      requireCustody: task.requireCustody,
+      usePlaywrightShard: task.usePlaywrightShard,
+      scenario: task.scenario,
+      title: task.title ?? null,
+      grep: task.grep ?? null,
+      tags: [...task.tags].sort(compareStableText),
+      testCategory: task.testCategory,
+    })),
+});
 
 type JsonRecord = Record<string, unknown>;
 type HealthPayload = JsonRecord;
@@ -806,6 +864,22 @@ const parseArgs = (): CliArgs => {
   };
 };
 
+export const ISOLATED_E2E_RUNNER_USAGE = [
+  'Usage: bun runtime/scripts/run-e2e-parallel-isolated.ts [options]',
+  '',
+  'Target selection:',
+  '  --pw-files=<file[,file...]>   Exact Playwright specs',
+  '  --pw-grep=<pattern>           Exact test-title filter',
+  '  --qa-category=<category>      functional | resilience',
+  '  --all                         Include every E2E spec',
+  '',
+  'Isolation:',
+  '  --shards=<count>              Isolated stack count',
+  '  --base-port=<port>            First isolated port (default 20000)',
+  '  --workers-per-shard=<count>   Playwright workers per stack',
+  '  --strict-browser-health       Fail on unapproved browser/runtime incidents',
+].join('\n');
+
 const RUNNER_LOCK_PATH = resolve(process.cwd(), '.logs', 'e2e-parallel', '.runner-lock.json');
 
 const readRunnerLock = (): E2ERunnerLock | null => readE2ERunnerLock(RUNNER_LOCK_PATH);
@@ -1104,6 +1178,12 @@ const writeRunManifest = (
   codeFingerprint: QaCodeFingerprint,
   primaryFailure: E2EPrimaryFailureIdentity | null,
 ): QaRunManifest => {
+  const gateConfig = buildE2EGateConfig(args, tasks);
+  const candidate = buildQaCandidateIdentity({
+    gitHead: codeFingerprint.gitHead,
+    codeHash: codeFingerprint.codeHash,
+    gateConfig,
+  });
   const taskByShard = new Map(tasks.map(task => [task.shard, task] as const));
   const shards = results
     .slice()
@@ -1121,6 +1201,8 @@ const writeRunManifest = (
       const logTail = redactQaSecretText(tailLog(result.logPath));
       const error = result.error ? redactQaSecretText(result.error) : null;
       return {
+        candidateId: candidate.candidateId,
+        gateConfigHash: candidate.gateConfigHash,
         shard: result.shard,
         status,
         resultClass: result.resultClass,
@@ -1167,6 +1249,8 @@ const writeRunManifest = (
   }
   let manifest: QaRunManifest = applyQaRunSeverity({
     manifestVersion: QA_RUN_MANIFEST_VERSION,
+    candidate,
+    gateConfig,
     runId: logsDir.split('/').at(-1) || logsDir,
     createdAt,
     completedAt: Date.now(),
@@ -1202,6 +1286,7 @@ const writeRunManifest = (
   });
   manifest.benchmark = compareQaRunWithHistory(manifest);
   manifest = applyQaRunSeverity(manifest);
+  assertQaCandidateIdentity(manifest.candidate, manifest.gateConfig);
   assertQaReleaseRunSeverity(manifest);
   writeFileSync(join(logsDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
   recordQaRunHistory(manifest, logsDir);
@@ -1397,7 +1482,7 @@ const listDynamicPlaywrightTargets = (
   }));
 };
 
-const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
+export const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
   const out: PlaywrightTarget[] = [];
   const sourcePathForTarget = (file: string): string =>
     file.match(/^(.+\.spec\.ts)(?:::.*|:\d+(?::\d+)?)?$/)?.[1] || file;
@@ -1553,7 +1638,7 @@ const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
   return out;
 };
 
-const listPlaywrightSpecFiles = (includeAllSpecs: boolean): string[] => {
+export const listPlaywrightSpecFiles = (includeAllSpecs: boolean): string[] => {
   const excludedDefaultSpecs = new Set<string>([
     // Legacy shared-page AHB flow. Useful assertions were ported into
     // tests/e2e-ahb-isolated.spec.ts; keep this out of the canonical isolated bar.
@@ -2498,11 +2583,33 @@ const prepareIsolatedE2EBuild = async (
 const forensicEndpoints = [
   { name: 'health', path: '/api/health' },
   { name: 'entities', path: '/api/debug/entities?limit=5000' },
+  { name: 'incidents', path: '/api/debug/incidents?state=open&limit=1000' },
   // The relay keeps a bounded 5k ring. Capture all of it: high-volume gossip
   // after a failure must not hide the earlier command/delivery transition.
   { name: 'events', path: '/api/debug/events?last=5000' },
   { name: 'activity', path: '/api/debug/activity?limit=500' },
 ] as const;
+
+const readFailureIncidentSummary = (
+  logsDir: string,
+  shard: number,
+): Array<{ code: string; count: number; runtimeId: string; fingerprint: string }> => {
+  const path = join(
+    deriveE2EShardPaths(logsDir, shard).resultsDir,
+    'failure-debug',
+    'incidents.json',
+  );
+  if (!existsSync(path)) return [];
+  const payload = parseJsonStrict(readFileSync(path, 'utf8'), path) as {
+    incidents?: Array<Record<string, unknown>>;
+  };
+  return (payload.incidents ?? []).slice(0, 8).map(incident => ({
+    code: String(incident['code'] || 'UNKNOWN'),
+    count: Math.max(1, Math.floor(Number(incident['count'] || 1))),
+    runtimeId: String(incident['runtimeId'] || 'none'),
+    fingerprint: String(incident['fingerprint'] || 'none'),
+  }));
+};
 
 const timeoutForensicError = (error: unknown, timeoutMs: number): unknown => {
   const description = formatErrorForLog(error);
@@ -3265,6 +3372,10 @@ const runShard = async (
 };
 
 async function main(): Promise<void> {
+  if (process.argv.slice(2).some(arg => arg === '--help' || arg === '-h')) {
+    console.log(ISOLATED_E2E_RUNNER_USAGE);
+    return;
+  }
   const args = parseArgs();
   // Artifact retention changes only deletion policy. Every top-level run must
   // still acquire a fresh lease so Playwright children can prove that their
@@ -3517,6 +3628,14 @@ async function main(): Promise<void> {
           if (attachment.path) console.log(`      attachment[${attachment.name}]: ${attachment.path}`);
         }
       }
+      if (r.status === 'failed') {
+        for (const incident of readFailureIncidentSummary(logsDir, r.shard)) {
+          console.log(
+            `      incident: ${incident.code} count=${incident.count} ` +
+            `runtime=${incident.runtimeId} fingerprint=${incident.fingerprint}`,
+          );
+        }
+      }
       const steps = parseStepTimings(r.logPath)
         .sort((a, b) => b.ms - a.ms)
         .slice(0, 8);
@@ -3529,6 +3648,8 @@ async function main(): Promise<void> {
     console.log(`Git HEAD: ${codeFingerprint.gitHead ?? 'unknown'}`);
     console.log(`Code hash: ${codeFingerprint.codeHash}`);
     console.log(`Build input hash: ${codeFingerprint.buildInputHash}`);
+    console.log(`Candidate ID: ${manifest.candidate?.candidateId ?? 'missing'}`);
+    console.log(`Gate config hash: ${manifest.candidate?.gateConfigHash ?? 'missing'}`);
     console.log(`Logs: ${logsDir}`);
     if (failureState.primaryFailure) {
       console.log(

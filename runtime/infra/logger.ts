@@ -10,6 +10,7 @@
 
 import { PERFORMANCE } from '../constants';
 import { safeStringify } from '../protocol/serialization';
+import { redactTelemetryValue } from './telemetry-redaction';
 
 // Log filtering system for debugging
 export interface LogConfig {
@@ -55,7 +56,8 @@ export function setFailFastErrors(enabled: boolean): void {
 }
 
 function formatLogArgs(args: unknown[]): string {
-  return args.map(arg => {
+  return args.map(rawArg => {
+    const arg = redactTelemetryValue(rawArg);
     if (typeof arg === 'string') return arg;
     if (typeof arg === 'bigint') return `${arg.toString()}n`;
     try {
@@ -75,6 +77,21 @@ export function shouldLog(category: keyof LogConfig): boolean {
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
 
 export type StructuredLogFields = Record<string, unknown>;
+
+export type StructuredLogEvent = StructuredLogFields & {
+  ts: string;
+  level: LogLevel;
+  scope: string;
+  message: string;
+};
+
+type StructuredLogSink = (event: StructuredLogEvent) => void;
+const structuredLogSinks = new Set<StructuredLogSink>();
+
+export const registerStructuredLogSink = (sink: StructuredLogSink): (() => void) => {
+  structuredLogSinks.add(sink);
+  return () => structuredLogSinks.delete(sink);
+};
 
 const LOG_LEVEL_ORDER: Record<LogLevel, number> = {
   trace: 0,
@@ -108,9 +125,6 @@ const shouldEmitScope = (scope: string): boolean => {
   const [root] = normalized.split(/[.:]/);
   return Boolean(root && scopes.has(root));
 };
-
-export const shouldLogFullPayloads = (): boolean =>
-  configuredLevel() === 'trace' || String(process.env['XLN_LOG_FULL_PAYLOADS'] || '').trim() === '1';
 
 export const shortId = (value: unknown, chars = 4): string => {
   const text = String(value || '').trim();
@@ -146,16 +160,19 @@ export const emitStructuredLog = (
 ): void => {
   if (!shouldEmitLevel(level)) return;
   if (!shouldEmitScope(scope)) return;
-  const payload = {
+  const redactedFields = redactTelemetryValue(fields) as StructuredLogFields;
+  const redactedMessage = redactTelemetryValue(message) as string;
+  const payload: StructuredLogEvent = {
+    ...redactedFields,
     ts: new Date().toISOString(),
     level,
     scope,
-    message,
-    ...fields,
+    message: redactedMessage,
   };
+  for (const sink of structuredLogSinks) sink(payload);
   const line = process.env['XLN_LOG_FORMAT'] === 'json'
     ? safeStringify(payload)
-    : `[${level.toUpperCase()}][${scope}] ${message}${Object.keys(fields).length ? ` ${safeStringify(fields)}` : ''}`;
+    : `[${level.toUpperCase()}][${scope}] ${redactedMessage}${Object.keys(redactedFields).length ? ` ${safeStringify(redactedFields)}` : ''}`;
   if (level === 'error') console.error(line);
   else if (level === 'warn') {
     const warnSink = process.env['XLN_LOG_WARN_STDOUT'] === '1' ? console.log : console.warn;
@@ -181,19 +198,20 @@ export const createStructuredLogger = (scope: string, baseFields: StructuredLogF
 export function log(category: keyof LogConfig, level: LogLevel, ...args: unknown[]): void {
   if (shouldLog(category)) {
     const prefix = `[${category}]`;
+    const redactedArgs = args.map(arg => redactTelemetryValue(arg));
     switch (level) {
       case 'error':
-        console.error(prefix, ...args);
+        console.error(prefix, ...redactedArgs);
         break;
       case 'warn':
-        console.warn(prefix, ...args);
+        console.warn(prefix, ...redactedArgs);
         break;
       case 'info':
-        console.info(prefix, ...args);
+        console.info(prefix, ...redactedArgs);
         break;
       case 'debug':
       default:
-        console.log(prefix, ...args);
+        console.log(prefix, ...redactedArgs);
         break;
     }
   }

@@ -81,6 +81,7 @@ const requirements: CoverageRequirement[] = [
     file: 'tests/e2e-cross-j-swap.spec.ts',
     patterns: [
       'two users can place full, partial, and disputed cross-j swaps through the shared swap builder',
+      'real MM full fill auto-closes and partial fill closes manually on both legs',
       'swap-route-select',
       'requestCrossJurisdictionClear',
       'Cross-j salvage queued',
@@ -101,10 +102,12 @@ const requirements: CoverageRequirement[] = [
     file: 'frontend/src/lib/components/Entity/SwapPanel.svelte',
     patterns: [
       '<SwapTradeTicket',
-      "type: 'placeSwapOffer'",
+      '{placeSwapOffer}',
       '<SwapOrderList',
       '{requestCrossClear}',
       'submitActiveCrossJurisdictionIntent',
+      'submitRuntimeInput(commandPlan.targetSetupInput)',
+      'submitRuntimeInput(commandPlan.runtimeInput)',
     ],
   },
   {
@@ -121,9 +124,8 @@ const requirements: CoverageRequirement[] = [
     area: 'frontend',
     file: 'frontend/src/lib/components/Entity/swap-panel-helpers.ts',
     patterns: [
-      'buildCrossSwapRuntimeInputPlan',
-      'setupInput',
-      'targetSetupTxs',
+      'buildCrossSwapSetupSteps',
+      "CrossSwapSetupStepId = 'target-account' | 'target-credit'",
     ],
   },
   {
@@ -149,7 +151,8 @@ const requirements: CoverageRequirement[] = [
     patterns: [
       'direct cancelPull cannot release a committed cross-j partial fill',
       'account-layer pull_cancel cannot release a committed cross-j partial fill',
-      'target pull resolve verifies relay binary and enters clearing before account commit',
+      'cross-j close proposals are accepted only as one exact source+target cohort',
+      'target user cannot resolve a cross-j pull even after observing the Hub proof',
       'production cross-j API exposes only hashledger orderbook flow',
     ],
   },

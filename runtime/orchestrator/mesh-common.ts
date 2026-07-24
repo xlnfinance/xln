@@ -319,6 +319,19 @@ export const getAccountDelta = (
   return account.deltas.get(tokenId) ?? null;
 };
 
+export const serializeAccountDelta = (delta: Delta | null | undefined): Record<string, string> | null =>
+  delta
+    ? {
+        collateral: String(delta.collateral ?? 0n),
+        ondelta: String(delta.ondelta ?? 0n),
+        offdelta: String(delta.offdelta ?? 0n),
+        leftCreditLimit: String(delta.leftCreditLimit ?? 0n),
+        rightCreditLimit: String(delta.rightCreditLimit ?? 0n),
+        leftHold: String(delta.leftHold ?? 0n),
+        rightHold: String(delta.rightHold ?? 0n),
+      }
+    : null;
+
 export const getCreditGrantedByEntity = (
   account: AccountMachine,
   ownerEntityId: string,

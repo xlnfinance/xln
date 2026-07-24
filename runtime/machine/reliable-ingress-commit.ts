@@ -25,6 +25,7 @@ import {
 import {
   assertReceiverSourceLaneCapacity,
   ensureReliableIngressState,
+  receiverSourceLaneKeys,
 } from './reliable-ingress-state';
 import { splitRoutedOutputByDeliveryLane } from './output-routing';
 import {
@@ -40,6 +41,11 @@ export type ReliableIngressCommit = {
   targetRuntimeIds: string[];
   previousActive: ReliableDeliveryReceipt | undefined;
   previousTerminal: ReliableDeliveryReceipt | undefined;
+};
+
+type ReliableIngressMutationContext = {
+  state: NonNullable<Env['runtimeState']>;
+  sourceLaneKeys: Set<string>;
 };
 
 const snapshotIngressMutation = (
@@ -81,11 +87,12 @@ const assertTerminalAdvance = (
 
 const installTerminalFrontier = (
   env: Env,
+  context: ReliableIngressMutationContext,
   key: string,
   identity: ReliableDeliveryIdentity,
 ): ReliableDeliveryReceipt => {
-  const state = ensureReliableIngressState(env);
-  assertReceiverSourceLaneCapacity(state, key);
+  const { state, sourceLaneKeys } = context;
+  assertReceiverSourceLaneCapacity(state, key, sourceLaneKeys);
   const previous = state.reliableIngressTerminalWatermarks!.get(key);
   const nextIdentity = assertTerminalAdvance(previous, identity);
   if (previous && reliableReceiptCoversIdentity(previous, nextIdentity)) return previous;
@@ -109,9 +116,10 @@ const installTerminalFrontier = (
 
 const refreshTerminalFrontiers = (
   env: Env,
+  context: ReliableIngressMutationContext,
   shouldRefresh: (frontierKey: string, identity: ReliableDeliveryIdentity) => boolean = () => true,
 ): ReliableIngressCommit[] => {
-  const state = ensureReliableIngressState(env);
+  const { state } = context;
   const commits: ReliableIngressCommit[] = [];
   for (const [frontierKey, active] of state.reliableIngressReceiptLedger!) {
     const identity = active.body.identity;
@@ -131,14 +139,17 @@ const refreshTerminalFrontiers = (
       !appliedJPrefixRoundCommitted
     ) continue;
     const commit = snapshotIngressMutation(env, null, frontierKey, null, []);
-    installTerminalFrontier(env, frontierKey, identity);
+    installTerminalFrontier(env, context, frontierKey, identity);
     commits.push(commit);
   }
   return commits;
 };
 
-const commitTerminalPendingIngress = (env: Env): ReliableIngressCommit[] => {
-  const state = ensureReliableIngressState(env);
+const commitTerminalPendingIngress = (
+  env: Env,
+  context: ReliableIngressMutationContext,
+): ReliableIngressCommit[] => {
+  const { state } = context;
   const commits: ReliableIngressCommit[] = [];
   for (const [key, pending] of state.pendingReliableIngress!) {
     if (state.reliableIngressCommitting!.has(key)) continue;
@@ -150,7 +161,7 @@ const commitTerminalPendingIngress = (env: Env): ReliableIngressCommit[] => {
     for (const sourceRuntimeId of targets) {
       const frontierKey = receiverFrontierKey(sourceRuntimeId, pending.identity);
       const commit = snapshotIngressMutation(env, key, frontierKey, null, [sourceRuntimeId]);
-      const receipt = installTerminalFrontier(env, frontierKey, pending.identity);
+      const receipt = installTerminalFrontier(env, context, frontierKey, pending.identity);
       commits.push({ ...commit, receipt });
     }
     state.reliableIngressCommitting!.add(key);
@@ -160,11 +171,12 @@ const commitTerminalPendingIngress = (env: Env): ReliableIngressCommit[] => {
 
 const installActiveFrontier = (
   env: Env,
+  context: ReliableIngressMutationContext,
   key: string,
   identity: ReliableDeliveryIdentity,
 ): ReliableDeliveryReceipt => {
-  const state = ensureReliableIngressState(env);
-  assertReceiverSourceLaneCapacity(state, key);
+  const { state, sourceLaneKeys } = context;
+  assertReceiverSourceLaneCapacity(state, key, sourceLaneKeys);
   const terminal = state.reliableIngressTerminalWatermarks!.get(key);
   if (terminal && reliableReceiptCoversIdentity(terminal, identity)) return terminal;
   const active = state.reliableIngressReceiptLedger!.get(key);
@@ -183,12 +195,13 @@ const installActiveFrontier = (
 
 const planAppliedIngressCommit = (
   env: Env,
+  context: ReliableIngressMutationContext,
   input: RoutedEntityInput,
   identity: ReliableDeliveryIdentity,
 ): ReliableIngressCommit[] => {
   const authenticatedStaleJPrefix = isAuthenticatedAppliedStaleJPrefixInput(env, input, identity);
   if (!authenticatedStaleJPrefix) assertReliableIdentityDurableInPostState(env, input, identity);
-  const state = ensureReliableIngressState(env);
+  const { state } = context;
   const key = reliableIdentityExactKey(identity);
   const targets = new Set(state.pendingReliableIngress!.get(key)?.targetRuntimeIds ?? []);
   const inputSourceRuntimeId = normalizeRuntimeId(input.from);
@@ -199,8 +212,8 @@ const planAppliedIngressCommit = (
     const frontierKey = receiverFrontierKey(sourceRuntimeId, identity);
     const commit = snapshotIngressMutation(env, key, frontierKey, null, [sourceRuntimeId]);
     const receipt = terminal
-      ? installTerminalFrontier(env, frontierKey, identity)
-      : installActiveFrontier(env, frontierKey, identity);
+      ? installTerminalFrontier(env, context, frontierKey, identity)
+      : installActiveFrontier(env, context, frontierKey, identity);
     return { ...commit, receipt };
   });
   state.reliableIngressCommitting!.add(key);
@@ -213,6 +226,10 @@ export const commitReliableIngress = (
   appliedInputs: readonly RoutedEntityInput[],
 ): ReliableIngressCommit[] => {
   const state = ensureReliableIngressState(env);
+  const context: ReliableIngressMutationContext = {
+    state,
+    sourceLaneKeys: receiverSourceLaneKeys(state),
+  };
   const commits: ReliableIngressCommit[] = [];
   try {
     const reliableApplied = appliedInputs.flatMap(input =>
@@ -242,14 +259,14 @@ export const commitReliableIngress = (
     // Evaluate only the exact Account predecessor against the authenticated
     // post-state before installing its contiguous successor. Other protocol
     // lanes retain their existing plan-then-refresh semantics.
-    commits.push(...refreshTerminalFrontiers(env, (frontierKey, identity) =>
+    commits.push(...refreshTerminalFrontiers(env, context, (frontierKey, identity) =>
       identity.kind === 'account-ack' &&
       contiguousAccountSuccessors.get(frontierKey)?.has(identity.height + 1) === true));
     for (const { input, identity } of commitEligible) {
-      commits.push(...planAppliedIngressCommit(env, input, identity));
+      commits.push(...planAppliedIngressCommit(env, context, input, identity));
     }
-    commits.push(...refreshTerminalFrontiers(env));
-    commits.push(...commitTerminalPendingIngress(env));
+    commits.push(...refreshTerminalFrontiers(env, context));
+    commits.push(...commitTerminalPendingIngress(env, context));
     return commits;
   } catch (error) {
     rollbackReliableIngressCommit(env, commits);

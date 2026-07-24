@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { createEmptyEnv } from '../runtime';
 import { resolveStorageRuntimeConfig } from '../storage';
+import { DEFAULT_EPOCH_MAX_BYTES } from '../storage/keys';
 
 describe('storage config', () => {
   test('uses sparse full-state checkpoints without weakening per-frame WAL chaining', () => {
@@ -10,6 +11,8 @@ describe('storage config', () => {
     expect(resolveStorageRuntimeConfig(env).canonicalHashPeriodFrames).toBe(0);
     expect(resolveStorageRuntimeConfig(env).materializePeriodFrames).toBe(100);
     expect(resolveStorageRuntimeConfig(env).snapshotPeriodFrames).toBe(10_000);
+    expect(resolveStorageRuntimeConfig(env).epochMaxBytes).toBe(16 * 1024 ** 3);
+    expect(DEFAULT_EPOCH_MAX_BYTES).toBe(16 * 1024 ** 3);
     env.runtimeConfig = { storage: { canonicalHashPeriodFrames: 37 } };
     expect(resolveStorageRuntimeConfig(env).canonicalHashPeriodFrames).toBe(37);
   });
@@ -34,6 +37,40 @@ describe('storage config', () => {
     const tenTiB = 10 * 1024 ** 4;
     env.runtimeConfig = { storage: { frameDbMaxBytes: tenTiB } };
     expect(resolveStorageRuntimeConfig(env).frameDbMaxBytes).toBe(tenTiB);
+  });
+
+  test('persists a fail-fast epoch byte override into each fresh Runtime config', () => {
+    const previous = process.env['XLN_STORAGE_EPOCH_MAX_BYTES'];
+    try {
+      process.env['XLN_STORAGE_EPOCH_MAX_BYTES'] = '33554432';
+      const env = createEmptyEnv('forced-production-epoch');
+      expect(env.runtimeConfig?.storage?.epochMaxBytes).toBe(33_554_432);
+      expect(resolveStorageRuntimeConfig(env).epochMaxBytes).toBe(33_554_432);
+
+      process.env['XLN_STORAGE_EPOCH_MAX_BYTES'] = '0';
+      expect(() => createEmptyEnv('invalid-forced-production-epoch'))
+        .toThrow('RUNTIME_CONFIG_STORAGE_EPOCH_MAX_BYTES_INVALID:0');
+    } finally {
+      if (previous === undefined) delete process.env['XLN_STORAGE_EPOCH_MAX_BYTES'];
+      else process.env['XLN_STORAGE_EPOCH_MAX_BYTES'] = previous;
+    }
+  });
+
+  test('persists a fail-fast snapshot cadence override into each fresh Runtime config', () => {
+    const previous = process.env['XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES'];
+    try {
+      process.env['XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES'] = '32';
+      const env = createEmptyEnv('forced-soundcheck-snapshot-cadence');
+      expect(env.runtimeConfig?.storage?.snapshotPeriodFrames).toBe(32);
+      expect(resolveStorageRuntimeConfig(env).snapshotPeriodFrames).toBe(32);
+
+      process.env['XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES'] = '0';
+      expect(() => createEmptyEnv('invalid-forced-snapshot-cadence'))
+        .toThrow('RUNTIME_CONFIG_STORAGE_SNAPSHOT_PERIOD_FRAMES_INVALID:0');
+    } finally {
+      if (previous === undefined) delete process.env['XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES'];
+      else process.env['XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES'] = previous;
+    }
   });
 
   test('rejects invalid booleans, canonical periods, and merkle radix', () => {

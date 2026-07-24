@@ -33,7 +33,7 @@ import {
   verifyStorageTailIntegrity,
 } from '../storage';
 import { getPerfMs } from '../utils';
-import { decodeBuffer, encodeBuffer } from '../storage/codec';
+import { decodeBuffer, encodeBuffer, writeBatch } from '../storage/codec';
 import { readRawOrNull } from '../storage/level';
 import {
   KEY_HEAD,
@@ -1288,7 +1288,8 @@ describe('storage frame journal retention', () => {
       storage: {
         ...(env.runtimeConfig?.storage || {}),
         snapshotPeriodFrames: 1000,
-        epochMaxBytes: 1,
+        retainSnapshots: 1,
+        epochMaxBytes: 1_000_000,
       },
     };
 
@@ -1324,6 +1325,35 @@ describe('storage frame journal retention', () => {
     });
     await processRuntime(env, []);
 
+    // Production reaches the byte threshold after the live Env already owns
+    // open LevelDB handles. Force that exact boundary without shrinking the
+    // configured epoch below one ordinary frame: after rotation the unchanged
+    // threshold must allow the next frame instead of rotating forever.
+    const preRotationHistoryHead = await readStorageHead(getFrameDb(env));
+    if (!preRotationHistoryHead) throw new Error('rotation test history head missing');
+    const forcedEpochHead = {
+      ...preRotationHistoryHead,
+      epochReplayBytes: preRotationHistoryHead.epochMaxBytes,
+    };
+    const forceHistory = getFrameDb(env).batch();
+    forceHistory.put(KEY_HEAD, encodeBuffer(forcedEpochHead));
+    await writeBatch(forceHistory);
+    const forceCurrent = getRuntimeStorageDb(env).batch();
+    forceCurrent.put(KEY_HEAD, encodeBuffer(forcedEpochHead));
+    await writeBatch(forceCurrent);
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId,
+        signerId: signer,
+        entityTxs: [{
+          type: 'profile-update',
+          data: { profile: { entityId, name: 'rotation-trigger' } },
+        }],
+      }],
+    });
+    await processRuntime(env, []);
+
     const latestAfterRotation = await getPersistedLatestHeight(env);
     expect(latestAfterRotation).toBeGreaterThan(0);
     expect(existsSync(`${namespacePath}-storage-current`)).toBe(true);
@@ -1336,6 +1366,8 @@ describe('storage frame journal retention', () => {
     expect(currentHead?.latestHeight).toBe(historyHead?.latestHeight);
     expect(currentHead?.latestMaterializedHeight).toBe(snapshotHeight);
     expect(currentHead?.latestSnapshotHeight).toBe(snapshotHeight);
+    expect(currentHead?.epochReplayBytes).toBe(0);
+    expect(historyHead?.epochReplayBytes).toBe(0);
     expect(currentHead?.retainedHistoryBytes).toBe(0);
     expect(historyHead?.retainedHistoryBytes ?? 0).toBeGreaterThan(0);
     expect(await readRawOrNull(getFrameDb(env), keySnapshotManifest(snapshotHeight))).toBeTruthy();
@@ -1343,7 +1375,6 @@ describe('storage frame journal retention', () => {
     expect(await readRawOrNull(getFrameDb(env), keyDiff(snapshotHeight))).toBeNull();
     expect(await readRawOrNull(getRuntimeStorageDb(env), keyFrame(snapshotHeight))).toBeNull();
 
-    env.runtimeConfig.storage.epochMaxBytes = 1_000_000;
     enqueueRuntimeInput(env, {
       runtimeTxs: [],
       entityInputs: [{
@@ -1357,6 +1388,11 @@ describe('storage frame journal retention', () => {
     });
     await processRuntime(env, []);
     expect(await getPersistedLatestHeight(env)).toBe(latestAfterRotation + 1);
+    const postRotationHistoryHead = await readStorageHead(getFrameDb(env));
+    expect(postRotationHistoryHead?.latestSnapshotHeight).toBe(snapshotHeight);
+    expect(postRotationHistoryHead?.epochReplayBytes ?? 0).toBeGreaterThan(0);
+    expect(postRotationHistoryHead?.epochReplayBytes ?? Number.POSITIVE_INFINITY)
+      .toBeLessThan(preRotationHistoryHead.epochMaxBytes);
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
@@ -1364,6 +1400,20 @@ describe('storage frame journal retention', () => {
     const restored = await loadEnvFromDB(runtimeId, seed);
     expect(restored?.height).toBe(latestAfterRotation + 1);
     if (restored) {
+      enqueueRuntimeInput(restored, {
+        runtimeTxs: [],
+        entityInputs: [{
+          entityId,
+          signerId: signer,
+          entityTxs: [{
+            type: 'profile-update',
+            data: { profile: { entityId, name: 'post-rotation-restored-frame' } },
+          }],
+        }],
+      });
+      await processRuntime(restored, []);
+      expect(restored.height).toBe(latestAfterRotation + 2);
+      expect(await getPersistedLatestHeight(restored)).toBe(latestAfterRotation + 2);
       await closeRuntimeDb(restored);
       await closeInfraDb(restored);
     }

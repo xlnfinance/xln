@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  assertRuntimeCommandReady,
   inferRuntimeLifecyclePhase,
   transitionRuntimeLifecycle,
 } from '../machine/lifecycle';
@@ -36,6 +37,25 @@ describe('runtime lifecycle', () => {
     const state: NonNullable<Env['runtimeState']> = { lifecyclePhase: 'halted', halted: true };
     expect(() => transitionRuntimeLifecycle(state, 'running')).toThrow(
       /RUNTIME_LIFECYCLE_INVALID_TRANSITION: halted->running/,
+    );
+  });
+
+  test('admits commands only while running without a persistence fence', () => {
+    const env = createEmptyEnv('runtime-command-readiness');
+
+    for (const phase of ['booting', 'quiescing', 'stopped', 'halted'] as const) {
+      env.runtimeState = { lifecyclePhase: phase };
+      expect(() => assertRuntimeCommandReady(env)).toThrow(
+        `RUNTIME_COMMAND_NOT_READY:phase=${phase}`,
+      );
+    }
+
+    env.runtimeState = { lifecyclePhase: 'running', loopActive: true };
+    expect(() => assertRuntimeCommandReady(env)).not.toThrow();
+
+    env.runtimeState.persistencePaused = true;
+    expect(() => assertRuntimeCommandReady(env)).toThrow(
+      'RUNTIME_COMMAND_NOT_READY:persistence-fenced',
     );
   });
 

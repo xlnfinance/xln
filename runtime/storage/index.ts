@@ -11,6 +11,7 @@ import {
   putFrameDbCommit,
 } from './frame-db';
 import {
+  canonicalizeStorageDoc,
   computeStorageFrameHash,
   computeStoragePostStateHash,
   prepareStorageCanonicalStateHashes,
@@ -243,6 +244,7 @@ const defaultStorageHead = (config: Required<StorageRuntimeConfig>): StorageHead
     retainSnapshots: config.retainSnapshots,
     epochMaxBytes: config.epochMaxBytes,
     accountMerkleRadix: config.accountMerkleRadix,
+    epochReplayBytes: 0,
     retainedHistoryBytes: 0,
   });
 
@@ -262,7 +264,7 @@ const readHead = async (db: RuntimeDbLike, config: Required<StorageRuntimeConfig
 
 const buildDiffRecord = (height: number, puts: StorageDoc[], dels: StorageDocRef[]): StorageDiffRecord => ({
   height,
-  puts,
+  puts: puts.map(canonicalizeStorageDoc),
   dels,
 });
 
@@ -324,6 +326,7 @@ const storageHeadsEqual = (left: StorageHead, right: StorageHead): boolean =>
   left.retainSnapshots === right.retainSnapshots &&
   left.epochMaxBytes === right.epochMaxBytes &&
   left.accountMerkleRadix === right.accountMerkleRadix &&
+  left.epochReplayBytes === right.epochReplayBytes &&
   left.retainedHistoryBytes === right.retainedHistoryBytes;
 
 const synchronizeCertifiedBoardNodes = async (
@@ -817,7 +820,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   // prefix before appending permits at most one WAL frame of overshoot while
   // keeping ordinary frames free of full-state projection work.
   const snapshotRequiredByBytes =
-    head.retainedHistoryBytes + encodeBuffer(appliedRuntimeInput).byteLength >= config.epochMaxBytes;
+    head.epochReplayBytes + encodeBuffer(appliedRuntimeInput).byteLength >= config.epochMaxBytes;
   const shouldMaterialize =
     options.env.height === 1 ||
     options.env.height % config.materializePeriodFrames === 0 ||
@@ -1112,6 +1115,15 @@ export const saveRuntimeFrameToStorage = async (options: {
     pendingBoardHistoryBytes +
     pendingConsumptionHistoryBytes +
     pendingAccountJClaimHistoryBytes;
+  const projectedEpochReplayBytes =
+    head.epochReplayBytes +
+    frameKey.byteLength +
+    frameBuffer.byteLength +
+    diffKey.byteLength +
+    diffBuffer.byteLength +
+    pendingBoardHistoryBytes +
+    pendingConsumptionHistoryBytes +
+    pendingAccountJClaimHistoryBytes;
   let frameDbBytes = 0;
   let frameDbPrunedBytes = 0;
   let frameDbRetainedBytes = 0;
@@ -1199,6 +1211,7 @@ export const saveRuntimeFrameToStorage = async (options: {
     retainSnapshots: config.retainSnapshots,
     epochMaxBytes: config.epochMaxBytes,
     accountMerkleRadix: config.accountMerkleRadix,
+    epochReplayBytes: projectedEpochReplayBytes,
     retainedHistoryBytes: projectedReplayBytes,
   };
   historyBatch.put(KEY_HEAD, encodeBuffer(nextHead));
@@ -1346,6 +1359,16 @@ export const saveRuntimeFrameToStorage = async (options: {
   if (epochRotated && snapDocs > 0 && options.rotateEpochDb) {
     const rotated = await options.rotateEpochDb(options.env, latestSnapshotHeight, options.env.timestamp);
     epochDbRotated = rotated !== false;
+    if (epochDbRotated) {
+      const rotatedHistoryHead = {
+        ...(await readHead(historyDb, config)),
+        epochReplayBytes: 0,
+      } satisfies StorageHead;
+      const resetEpochBatch = historyDb.batch();
+      resetEpochBatch.put(KEY_HEAD, encodeBuffer(rotatedHistoryHead));
+      await writeBatch(resetEpochBatch, { sync: true });
+      await options.onPersistenceBoundary?.('after-epoch-history-head-reset');
+    }
     options.onPersistenceProgress?.('snapshot-epoch-rotation-done');
   }
 

@@ -29,6 +29,14 @@ type PublicHealthFailureSignal = {
   fatal: boolean;
 };
 
+type PublicDebugIncident = {
+  code: string;
+  count: number;
+  fingerprint: string;
+  runtimeId: string | null;
+  state: string;
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
@@ -269,8 +277,43 @@ export const getFatalDegradedReasons = (degraded: unknown): string[] => {
 export const getFatalHealthFailures = (failures: unknown): PublicHealthFailureSignal[] =>
   publicHealthFailureSignals(failures).filter(failure => failure.fatal === true);
 
+export const getBlockingOpenIncidents = (incidents: unknown): PublicDebugIncident[] => {
+  if (!Array.isArray(incidents)) return [];
+  return incidents.flatMap((value): PublicDebugIncident[] => {
+    if (!isRecord(value)) return [];
+    const code = String(value['code'] || '').trim();
+    const fingerprint = String(value['fingerprint'] || '').trim();
+    const state = String(value['state'] || '').trim();
+    if (!code || !fingerprint || !state || state === 'resolved') return [];
+    const runtimeId = String(value['runtimeId'] || '').trim();
+    return [{
+      code,
+      count: Math.max(1, Math.floor(Number(value['count'] || 1))),
+      fingerprint,
+      runtimeId: runtimeId || null,
+      state,
+    }];
+  });
+};
+
 const main = async (): Promise<void> => {
   const args = parseArgs();
+  const incidentsRes = await fetchWithTimeout(
+    `${args.baseUrl}/api/debug/incidents?state=open&limit=1000`,
+    args.timeoutMs,
+  );
+  requireCondition(incidentsRes.ok, `/api/debug/incidents HTTP ${incidentsRes.status}`);
+  const incidentsPayload = await incidentsRes.json() as { ok?: unknown; incidents?: unknown };
+  requireCondition(
+    incidentsPayload.ok === true && Array.isArray(incidentsPayload.incidents),
+    `/api/debug/incidents invalid response`,
+  );
+  const blockingIncidents = getBlockingOpenIncidents(incidentsPayload.incidents);
+  requireCondition(
+    blockingIncidents.length === 0,
+    `OPEN_DEBUG_INCIDENTS_BLOCK_RELEASE:${JSON.stringify(blockingIncidents)}`,
+  );
+
   const healthRes = await fetchWithTimeout(`${args.baseUrl}/api/health`, args.timeoutMs);
   requireCondition(healthRes.ok, `/api/health HTTP ${healthRes.status}`);
   const health = await healthRes.json() as {
@@ -354,6 +397,7 @@ const main = async (): Promise<void> => {
     hubCount: Array.isArray(health.hubs) ? health.hubs.length : null,
     expectedTowers: args.expectedTowers,
     towerCount: towerHealth.length,
+    openIncidents: blockingIncidents.length,
   }, null, 2));
 };
 

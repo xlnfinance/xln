@@ -4,13 +4,10 @@ import {
   batchOpCount,
   cloneJBatch,
   isBatchEmpty,
-  mergeBatchOps,
   type BatchOpBreakdown,
 } from '../../jurisdiction/batch';
 import { addMessage } from '../../state-helpers';
-import { filterActiveDisputeFinalizations } from './dispute-finalize-guards';
 import { appendBatchHistory } from './j-events-history';
-import { findAccountEntryByCounterparty } from './j-events-account-lookup';
 import { createStructuredLogger } from '../../infra/logger';
 
 const jEventBatchLog = createStructuredLogger('j.event.batch');
@@ -67,13 +64,12 @@ export async function applyHankoBatchProcessedEvent(opts: {
   dirtyAccounts: Set<string>;
   outputs?: EntityInput[];
 }): Promise<void> {
-  const { newState, event, transactionHash, blockNumber, dirtyAccounts } = opts;
+  const { newState, event, transactionHash, blockNumber } = opts;
   const outputs = opts.outputs ?? [];
-  const { entityId: batchEntityId, batchHash, nonce, success } = event.data as {
+  const { entityId: batchEntityId, batchHash, nonce } = event.data as {
     entityId: string;
     batchHash: string;
     nonce: number;
-    success: boolean;
   };
 
   if (String(batchEntityId || '').toLowerCase() !== String(newState.entityId || '').toLowerCase()) {
@@ -128,50 +124,13 @@ export async function applyHankoBatchProcessedEvent(opts: {
       batchHash: eventBatchHash,
       pendingNonce: sentBatch?.entityNonce,
       pendingBatchHash: sentBatch?.batchHash,
-      success,
     });
-    return;
-  }
-
-  if (success) {
-    if (newState.jBatchState) {
-      const opCount = sentBatch ? batchOpCount(sentBatch.batch) : 0;
-      const opBreakdown = sentBatch ? batchOpBreakdown(sentBatch.batch) : undefined;
-
-      appendSelfBatchHistory({
-        state: newState,
-        sentBatch,
-        opCount,
-        opBreakdown,
-        nonce,
-        blockNumber,
-        transactionHash,
-        status: 'confirmed',
-      });
-
-      delete newState.jBatchState.sentBatch;
-      newState.jBatchState.status = isBatchEmpty(newState.jBatchState.batch) ? 'empty' : 'accumulating';
-      syncEntityNonce(newState, nonce);
-      if (newState.jBatchState.autoBroadcastDraft && !isBatchEmpty(newState.jBatchState.batch)) {
-        const signerId = newState.config.validators[0];
-        if (!signerId) throw new Error('J_BATCH_AUTO_BROADCAST_SIGNER_MISSING');
-        outputs.push({
-          entityId: newState.entityId,
-          signerId,
-          entityTxs: [{ type: 'j_broadcast', data: {} }],
-        });
-      }
-    }
-    addMessage(newState, `✅ jBatch finalized (nonce ${nonce}) | Block ${blockNumber}`);
     return;
   }
 
   if (newState.jBatchState) {
     const opCount = sentBatch ? batchOpCount(sentBatch.batch) : 0;
     const opBreakdown = sentBatch ? batchOpBreakdown(sentBatch.batch) : undefined;
-    newState.jBatchState.status = 'failed';
-    newState.jBatchState.failedAttempts++;
-    syncEntityNonce(newState, nonce);
 
     appendSelfBatchHistory({
       state: newState,
@@ -181,43 +140,21 @@ export async function applyHankoBatchProcessedEvent(opts: {
       nonce,
       blockNumber,
       transactionHash,
-      status: 'failed',
+      status: 'confirmed',
     });
 
-    if (sentBatch) {
-      const requeueBatch = cloneJBatch(sentBatch.batch);
-      const { removed, droppedCounterparties } = filterActiveDisputeFinalizations(newState, requeueBatch);
-      if (removed > 0) {
-        addMessage(newState, `🧹 Filtered ${removed} stale dispute-finalize op(s) from failed batch requeue`);
-      }
-      mergeBatchOps(newState.jBatchState.batch, requeueBatch);
-      for (const fin of requeueBatch.disputeFinalizations || []) {
-        const accountEntry = findAccountEntryByCounterparty(newState, String(fin.counterentity || ''));
-        const account = accountEntry?.[1];
-        if (account?.activeDispute) {
-          account.activeDispute.finalizeQueued = false;
-          dirtyAccounts.add(String(accountEntry?.[0] || fin.counterentity || '').toLowerCase());
-        }
-      }
-      for (const counterpartyId of droppedCounterparties) {
-        const accountEntry = findAccountEntryByCounterparty(newState, counterpartyId);
-        const account = accountEntry?.[1];
-        if (account?.activeDispute) {
-          account.activeDispute.finalizeQueued = false;
-          dirtyAccounts.add(String(accountEntry?.[0] || counterpartyId).toLowerCase());
-        }
-      }
-    }
     delete newState.jBatchState.sentBatch;
-    newState.jBatchState.status = isBatchEmpty(newState.jBatchState.batch) ? 'failed' : 'accumulating';
-  }
-
-  for (const [accountId, account] of newState.accounts.entries()) {
-    if (account.shadow.rebalance.submittedAtByToken.size > 0) {
-      account.shadow.rebalance.submittedAtByToken.clear();
-      dirtyAccounts.add(String(accountId).toLowerCase());
+    newState.jBatchState.status = isBatchEmpty(newState.jBatchState.batch) ? 'empty' : 'accumulating';
+    syncEntityNonce(newState, nonce);
+    if (newState.jBatchState.autoBroadcastDraft && !isBatchEmpty(newState.jBatchState.batch)) {
+      const signerId = newState.config.validators[0];
+      if (!signerId) throw new Error('J_BATCH_AUTO_BROADCAST_SIGNER_MISSING');
+      outputs.push({
+        entityId: newState.entityId,
+        signerId,
+        entityTxs: [{ type: 'j_broadcast', data: {} }],
+      });
     }
   }
-  jEventBatchLog.warn('failed_on_chain', { nonce });
-  addMessage(newState, `⚠️ jBatch failed (nonce ${nonce}) - use j_clear_batch to abort | Block ${blockNumber}`);
+  addMessage(newState, `✅ jBatch finalized (nonce ${nonce}) | Block ${blockNumber}`);
 }

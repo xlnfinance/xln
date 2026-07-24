@@ -2,6 +2,7 @@
 /* tslint:disable */
 /* eslint-disable */
 export type { EntityProviderSupplyHarness } from "./EntityProviderSupplyHarness";
+export type { FeeOnTransferERC20 } from "./FeeOnTransferERC20";
 export type { HashLadderHarness } from "./HashLadderHarness";
 export type { MockEntityProvider } from "./MockEntityProvider";
 export type { NoReturnERC20Mock } from "./NoReturnERC20Mock";

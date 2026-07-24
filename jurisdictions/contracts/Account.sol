@@ -48,14 +48,6 @@ library Account {
   );
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
-  event FatalTokenError(
-    uint256 indexed tokenId,
-    bytes32 indexed debtor,
-    uint256 requestedDebt,
-    uint256 acceptedDebt,
-    uint256 supply,
-    uint256 outstanding
-  );
   // These signatures intentionally match Depository's public event ABI. The
   // library executes by DELEGATECALL, so logs are emitted from Depository.
   event TransformerClauseSkipped(
@@ -121,31 +113,22 @@ library Account {
     return _readFixedTokenSupply(tokenType, token, externalTokenId);
   }
 
-  function addCappedDebt(
+  function addDebt(
     mapping(bytes32 => mapping(uint256 => Debt[])) storage debts,
     mapping(bytes32 => mapping(uint256 => uint256)) storage debtIndex,
     mapping(bytes32 => mapping(uint256 => uint256)) storage debtOutstanding,
     bytes32 debtor,
     uint256 tokenId,
     bytes32 creditor,
-    uint256 requested,
-    uint8 tokenType,
-    address token,
-    uint96 externalTokenId
-  ) external returns (uint256 accepted) {
+    uint256 amount
+  ) external {
+    if (amount == 0) return;
     uint256 outstanding = debtOutstanding[debtor][tokenId];
-    (uint256 supply, bool validSupply) = _readFixedTokenSupply(tokenType, token, externalTokenId);
-    uint256 available = validSupply && supply > outstanding ? supply - outstanding : 0;
-    accepted = requested < available ? requested : available;
-    if (accepted != requested) {
-      emit FatalTokenError(tokenId, debtor, requested, accepted, supply, outstanding);
-    }
-    if (accepted == 0) return 0;
-    debts[debtor][tokenId].push(Debt({ amount: accepted, creditor: creditor }));
+    debts[debtor][tokenId].push(Debt({ amount: amount, creditor: creditor }));
     uint256 index = debts[debtor][tokenId].length - 1;
     if (index == 0) debtIndex[debtor][tokenId] = 0;
-    debtOutstanding[debtor][tokenId] = outstanding + accepted;
-    emit DebtCreated(debtor, creditor, tokenId, accepted, index);
+    debtOutstanding[debtor][tokenId] = outstanding + amount;
+    emit DebtCreated(debtor, creditor, tokenId, amount, index);
   }
 
   function increaseReserve(
@@ -154,6 +137,15 @@ library Account {
     uint256 tokenId,
     uint256 amount
   ) external {
+    _increaseReserve(reserves, entity, tokenId, amount);
+  }
+
+  function _increaseReserve(
+    mapping(bytes32 => mapping(uint256 => uint256)) storage reserves,
+    bytes32 entity,
+    uint256 tokenId,
+    uint256 amount
+  ) private {
     if (amount == 0) return;
     uint256 current = reserves[entity][tokenId];
     uint256 limit = uint256(type(int256).max);
@@ -886,14 +878,20 @@ library Account {
     // NONCE CHECK: signedNonce > storedNonce (strictly greater)
     if (c2r.nonce <= _accounts[acct_key].nonce) revert E2();
 
-    // Reconstruct diffs for signature verification (C2R is a calldata shortcut)
+    uint amount = c2r.amount;
+    if (amount > uint256(type(int256).max)) revert E8();
+    int256 signedAmount = int256(amount);
+
+    // Reconstruct diffs for signature verification (C2R is a calldata shortcut).
+    // Every financial delta lives in the signed int256 domain. Checking before
+    // conversion is consensus-critical: uint256 -> int256 otherwise wraps.
     SettlementDiff[] memory diffs = new SettlementDiff[](1);
     diffs[0] = SettlementDiff({
       tokenId: c2r.tokenId,
-      leftDiff: isLeft ? int(c2r.amount) : int(0),
-      rightDiff: isLeft ? int(0) : int(c2r.amount),
-      collateralDiff: -int(c2r.amount),
-      ondeltaDiff: isLeft ? -int(c2r.amount) : int(0)
+      leftDiff: isLeft ? signedAmount : int256(0),
+      rightDiff: isLeft ? int256(0) : signedAmount,
+      collateralDiff: -signedAmount,
+      ondeltaDiff: isLeft ? -signedAmount : int256(0)
     });
 
     // Verify counterparty signature (hash includes signedNonce, not storedNonce)
@@ -906,15 +904,13 @@ library Account {
 
     // Apply diffs
     uint tokenId = c2r.tokenId;
-    uint amount = c2r.amount;
     AccountCollateral storage col = _collaterals[acct_key][tokenId];
     if (col.collateral < amount) return BatchItemResult.InsufficientBalance;
 
-    _reserves[entityId][tokenId] += amount;
-    emit ReserveUpdated(entityId, tokenId, _reserves[entityId][tokenId]);
+    _increaseReserve(_reserves, entityId, tokenId, amount);
     col.collateral -= amount;
     if (isLeft) {
-      col.ondelta -= int(amount);
+      col.ondelta -= signedAmount;
     }
 
     // SET nonce (not increment)

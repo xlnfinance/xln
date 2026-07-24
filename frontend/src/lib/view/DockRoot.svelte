@@ -25,7 +25,7 @@
   import { settings } from '$lib/stores/settingsStore';
   import { refreshRuntimeView } from '$lib/stores/runtimeViewStore';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
-  import { appStateOperations, requestedDockPanel } from '$lib/stores/appStateStore';
+  import { appStateOperations } from '$lib/stores/appStateStore';
   import 'dockview/dist/styles/dockview.css';
 
   export let embedMode = false;
@@ -33,15 +33,18 @@
   export let runtimeFrameHistory: Writable<EnvSnapshot[]>;
   export let runtimeFrameTimeIndex: Writable<number>;
   export let runtimeFrameIsLive: Writable<boolean>;
+  export let requestedPanelId: string | null = null;
 
   let container: HTMLDivElement;
   let dockview: DockviewComponent;
   let unsubOpenEntity: (() => void) | null = null;
   let unsubOpenJurisdiction: (() => void) | null = null;
   let unsubFocusPanel: (() => void) | null = null;
-  let unsubRequestedDockPanel: (() => void) | null = null;
   let activePanelDisposable: { dispose: () => void } | null = null;
   let saveLayoutTimer: ReturnType<typeof setTimeout> | null = null;
+  let workspaceReadyFrame: number | null = null;
+  let workspaceReady = false;
+  let pendingRequestedPanelId: string | null = null;
   let timeMachinePosition: 'bottom' | 'top' | 'left' | 'right' = 'bottom';
   let collapsed = false;
   let showSidebarInEmbed = false;
@@ -90,9 +93,47 @@
     return 'wallet-main';
   }
 
+  function completeRequestedPanelActivation(panelId: string): void {
+    if (pendingRequestedPanelId !== panelId) return;
+    pendingRequestedPanelId = null;
+    appStateOperations.clearDockPanelRequest(panelId);
+  }
+
+  function activateRequestedPanel(): boolean {
+    if (!workspaceReady || !pendingRequestedPanelId) return false;
+    const panelId = pendingRequestedPanelId;
+    const panel = dockview.getPanel(panelId);
+    if (!panel) {
+      logDockRootDiagnostic('Requested Dock panel does not exist', { panelId });
+      pendingRequestedPanelId = null;
+      appStateOperations.clearDockPanelRequest(panelId);
+      return false;
+    }
+    panel.api.setActive();
+    const activePanelId = dockview.activePanel?.id || dockview.activePanel?.api?.id;
+    if (activePanelId !== panelId) return false;
+    completeRequestedPanelActivation(panelId);
+    return true;
+  }
+
+  function markWorkspaceReady(): void {
+    if (workspaceReadyFrame !== null) cancelAnimationFrame(workspaceReadyFrame);
+    workspaceReadyFrame = requestAnimationFrame(() => {
+      workspaceReadyFrame = null;
+      workspaceReady = true;
+      if (pendingRequestedPanelId) activateRequestedPanel();
+      else dockview.getPanel('wallet-main')?.api.setActive();
+    });
+  }
+
   function entityIdFromPanelId(panelId: string): string | null {
     if (!panelId.startsWith('entity-')) return null;
     return panelId.slice('entity-'.length).trim().toLowerCase();
+  }
+
+  $: if (requestedPanelId) {
+    pendingRequestedPanelId = requestedPanelId;
+    activateRequestedPanel();
   }
 
   function showEntityPanelStatus(target: HTMLElement, message: string, isError = false): void {
@@ -378,7 +419,9 @@
         position: mobileDockLayout
           ? { direction: 'within', referencePanel: 'graph3d' }
           : { direction: 'right', referencePanel: 'graph3d' },
-        inactive: mobileDockLayout,
+        inactive: pendingRequestedPanelId
+          ? pendingRequestedPanelId !== 'wallet-main'
+          : mobileDockLayout,
       });
 
       ensurePanel({
@@ -389,7 +432,7 @@
           ? { direction: 'within', referencePanel: 'graph3d' }
           : { direction: 'below', referencePanel: 'wallet-main' },
         ...(mobileDockLayout
-          ? { inactive: true }
+          ? { inactive: pendingRequestedPanelId !== 'architect' }
           : { initialHeight: Math.max(240, Math.floor(window.innerHeight * 0.32)) }),
       });
 
@@ -400,7 +443,7 @@
         position: mobileDockLayout
           ? { direction: 'within', referencePanel: 'graph3d' }
           : { direction: 'right', referencePanel: 'architect' },
-        inactive: true,
+        inactive: pendingRequestedPanelId !== 'jurisdiction',
       });
 
       for (const panel of [
@@ -418,7 +461,7 @@
         ensurePanel({
           ...panel,
           position: { direction: 'within', referencePanel: 'jurisdiction' },
-          inactive: true,
+          inactive: pendingRequestedPanelId !== panel.id,
         });
       }
     };
@@ -431,18 +474,17 @@
           const config = JSON.parse(savedLayout);
           if (config.dockview) dockview.fromJSON(config.dockview);
           ensureWorkspacePanels();
+          markWorkspaceReady();
         } catch (err) {
           logDockRootDiagnostic('Layout restore failed; clearing saved workspace layout', err);
           localStorage.removeItem('xln-workspace-layout');
           localStorage.removeItem('xln-dockview-layout');
           localStorage.removeItem('dockview-layout');
+          markWorkspaceReady();
         }
       }, 100);
     } else {
-      setTimeout(() => {
-        const primaryPanel = dockview.getPanel('wallet-main');
-        primaryPanel?.api.setActive();
-      }, 0);
+      markWorkspaceReady();
     }
 
     const graph3dApi = dockview.getPanel('graph3d');
@@ -530,20 +572,15 @@
       panel?.api.setActive();
     });
 
-    unsubRequestedDockPanel = requestedDockPanel.subscribe((panelId) => {
-      if (!panelId) return;
-      const panel = dockview.getPanel(panelId);
-      if (!panel) {
-        logDockRootDiagnostic('Requested Dock panel does not exist', { panelId });
-        requestedDockPanel.set(null);
-        return;
-      }
-      panel.api.setActive();
-      requestedDockPanel.set(null);
-    });
   });
 
   onDestroy(() => {
+    workspaceReady = false;
+    pendingRequestedPanelId = null;
+    if (workspaceReadyFrame !== null) {
+      cancelAnimationFrame(workspaceReadyFrame);
+      workspaceReadyFrame = null;
+    }
     if (saveLayoutTimer) {
       clearTimeout(saveLayoutTimer);
       saveLayoutTimer = null;
@@ -555,7 +592,6 @@
     unsubOpenEntity?.();
     unsubOpenJurisdiction?.();
     unsubFocusPanel?.();
-    unsubRequestedDockPanel?.();
     if (dockview) dockview.dispose();
   });
 </script>

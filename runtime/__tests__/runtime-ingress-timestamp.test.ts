@@ -145,6 +145,15 @@ describe('runtime ingress timestamp', () => {
     expect(startCalls).toBe(0);
   });
 
+  test('direct process entry rejects a sticky-halted runtime before applying work', async () => {
+    const env = createIsolatedEnv('direct-process-halt');
+    env.runtimeState = { lifecyclePhase: 'halted', halted: true };
+    const heightBefore = env.height;
+
+    await expect(process(env)).rejects.toThrow('RUNTIME_PROCESS_HALTED');
+    expect(env.height).toBe(heightBefore);
+  });
+
   test('restored runtime does not fire future hooks without new ingress timestamp', async () => {
     const env = createIsolatedEnv('runtime-ingress-timestamp-seed');
     env.quietRuntimeLogs = true;

@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { REMOTE_RUNTIME } from '../constants';
-import { createStructuredLogger } from '../infra/logger';
+import { createStructuredLogger, registerStructuredLogSink } from '../infra/logger';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
 import { sanitizeChildProcessEnv } from '../server/child-process-env';
@@ -18,6 +18,7 @@ import {
   stopManagedChild,
 } from './custody-bootstrap';
 import {
+  clearDebugTimeline,
   createRelayStore,
   clearPendingMessages,
   normalizeRuntimeKey,
@@ -25,6 +26,7 @@ import {
   removeClient,
   type RelayStore,
 } from '../relay/store';
+import { openRelayIncidentJournal } from '../relay/incident-journal';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay/router';
 import { closeRelayClientsForReset } from '../relay/reset';
 import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
@@ -87,6 +89,13 @@ import {
 } from './managed-runtime-leases';
 import { buildPrometheusMetrics } from './prometheus';
 import { deriveHubRuntimeHealth, deriveResetHealthOk } from './health-model';
+import {
+  buildAggregatedMarketMakerHealth,
+  countMarketSnapshotOrderDepth,
+  isExactMarketSnapshotOrderDepth,
+  mergeMarketSnapshotOrderDepth,
+  type MarketSnapshotOrderDepth,
+} from './market-maker-aggregated-health';
 import { buildPublicHubDiscoveryPayload } from './public-discovery';
 import {
   assertOrchestratorResetAllowed,
@@ -127,7 +136,6 @@ import {
   normalizeMarketMakerHealthPayload,
 } from './market-maker-health-payload';
 import { createMarketMakerChildPoller } from './market-maker-child-poll';
-import { buildAggregatedMarketMakerHealth } from './market-maker-aggregated-health';
 import {
   evaluateHubBaselineDeadlines,
   type HubBaselineProgressState,
@@ -135,13 +143,21 @@ import {
 import { resolveRuntimeImportReadiness } from './runtime-import-readiness';
 import { persistChildFailureReceipt, type ChildFailureReceipt } from './child-failure-diagnostics';
 import {
+  attachManagedChildFatalIpc,
+  type ManagedChildFatalReport,
+} from './managed-child-fatal-ipc';
+import {
   decideChildFailure,
   selectChildFailureReason,
   shouldCaptureUnexpectedChildExit,
   type ChildFailureDecision,
   type ChildFailureObservation,
 } from './child-recovery-policy';
-import { buildRuntimeHealthFailures, classifyRuntimeBootstrapStageFailure } from '../protocol/failure-taxonomy';
+import {
+  buildRuntimeHealthFailures,
+  classifyRuntimeBootstrapStageFailure,
+  normalizeRuntimeFailureCode,
+} from '../protocol/failure-taxonomy';
 import { STORAGE_WRITER_LOCK_TTL_MS } from '../storage/runtime-dbs';
 import {
   deriveMeshChildSeed,
@@ -208,10 +224,6 @@ const orchestratorCodeFingerprint = (() => {
 })();
 const staleReapEnabled = process.env['XLN_SKIP_STALE_REAP'] !== '1';
 const BOOTSTRAP_EVENT_TAIL_BYTES = 64 * 1024;
-const MARKET_MAKER_INFO_TIMEOUT_MS = Math.max(
-  500,
-  Math.min(CHILD_HEALTH_TIMEOUT_MS, Math.floor(Number(process.env['XLN_MARKET_MAKER_INFO_TIMEOUT_MS'] || '1500'))),
-);
 const MARKET_MAKER_FULL_HEALTH_TIMEOUT_MS = Math.max(
   CHILD_HEALTH_TIMEOUT_MS,
   Math.floor(Number(process.env['XLN_MARKET_MAKER_FULL_HEALTH_TIMEOUT_MS'] || '60000')),
@@ -225,6 +237,10 @@ const relayUrl = args.relayUrl;
 const shardJurisdictionsPath = join(args.dbRoot, 'jurisdictions.json');
 const controlPlaneDir = join(args.dbRoot, '.control-plane');
 const childDiagnosticsDir = join(controlPlaneDir, 'diagnostics');
+const debugIncidentJournalPath = String(
+  process.env['XLN_DEBUG_INCIDENT_JOURNAL_PATH'] || `${args.dbRoot}.debug-incidents.jsonl`,
+).trim();
+const debugIncidentJournal = openRelayIncidentJournal(debugIncidentJournalPath);
 const managedRuntimeLeases = createManagedRuntimeLeaseManager({
   controlPlaneDir,
   ownerId: orchestratorOwnerId,
@@ -236,7 +252,25 @@ const jurisdictionsConfig: OrchestratorJurisdictionsConfig = {
   ephemeralTestnet: args.resetAllowed,
 };
 
-const relayStore: RelayStore = createRelayStore('mesh-relay');
+const relayStore: RelayStore = createRelayStore('mesh-relay', {
+  initialDebugId: debugIncidentJournal.debugId,
+  initialIncidents: debugIncidentJournal.incidents,
+  debugIdAllocator: () => debugIncidentJournal.allocateDebugId(),
+  incidentSink: incident => debugIncidentJournal.record(incident),
+});
+registerStructuredLogSink((entry) => {
+  if (entry.level !== 'error') return;
+  pushDebugEvent(relayStore, {
+    event: 'error',
+    status: 'error',
+    reason: entry.message,
+    details: {
+      source: 'orchestrator',
+      severity: entry.level,
+      ...entry,
+    },
+  });
+});
 const relayHelloChallenges = createHelloChallengeRegistry();
 const routerConfig: RelayRouterConfig = {
   store: relayStore,
@@ -642,11 +676,13 @@ const writePrefixedLogChunk = (
   prefix: string,
   state: PrefixLogState,
   chunk: Buffer | string,
+  onLine?: (line: string) => void,
 ): void => {
   const text = `${state.pending}${chunk.toString()}`;
   const lines = text.split(/\r?\n/);
   state.pending = lines.pop() ?? '';
   for (const line of lines) {
+    onLine?.(line);
     stream.write(`${prefix} ${line}\n`);
   }
 };
@@ -655,8 +691,10 @@ const flushPrefixedLogChunk = (
   stream: NodeJS.WritableStream,
   prefix: string,
   state: PrefixLogState,
+  onLine?: (line: string) => void,
 ): void => {
   if (!state.pending) return;
+  onLine?.(state.pending);
   stream.write(`${prefix} ${state.pending}\n`);
   state.pending = '';
 };
@@ -697,8 +735,7 @@ const clearRelayState = (): void => {
   relayStore.gossipProfiles.clear();
   relayStore.runtimeEncryptionKeys.clear();
   relayStore.activeHubEntityIds = [];
-  relayStore.debugEvents.length = 0;
-  relayStore.debugId = 0;
+  clearDebugTimeline(relayStore);
   relayStore.wsCounter = 0;
   marketSubscriptionStack.clear();
 };
@@ -709,39 +746,53 @@ const recordFetchFailure = (
   url: string,
   kind: 'http' | 'transport' | 'decode' | 'payload',
   detail: string,
+  expectedPending = false,
 ): void => {
   const now = Date.now();
   const fingerprint = `${kind}:${detail}`;
   const previous = fetchFailureLog.get(url);
   if (previous?.fingerprint === fingerprint && now - previous.loggedAt < 5_000) return;
   fetchFailureLog.set(url, { fingerprint, loggedAt: now });
-  meshLog.warn('health_fetch.failed', { url, kind, detail });
+  if (expectedPending) {
+    meshLog.info('health_fetch.pending', { url, kind, detail });
+  } else {
+    meshLog.warn('health_fetch.failed', { url, kind, detail });
+  }
 };
 
-const fetchJson = async <T>(url: string, timeoutMs = 2_000): Promise<T | null> => {
+const fetchJson = async <T>(
+  url: string,
+  timeoutMs = 2_000,
+  expectedPending = false,
+): Promise<T | null> => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetchLoopback(url, { signal: controller.signal });
     if (!response.ok) {
-      recordFetchFailure(url, 'http', `status=${response.status}`);
+      recordFetchFailure(url, 'http', `status=${response.status}`, expectedPending);
       return null;
     }
     let payload: unknown;
     try {
       payload = await response.json();
     } catch (error) {
-      recordFetchFailure(url, 'decode', serializeError(error));
+      recordFetchFailure(url, 'decode', serializeError(error), expectedPending);
       return null;
     }
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-      recordFetchFailure(url, 'payload', `type=${Array.isArray(payload) ? 'array' : typeof payload}`);
+      recordFetchFailure(
+        url,
+        'payload',
+        `type=${Array.isArray(payload) ? 'array' : typeof payload}`,
+        expectedPending,
+      );
       return null;
     }
     fetchFailureLog.delete(url);
     return payload as T;
   } catch (error) {
-    recordFetchFailure(url, 'transport', serializeError(error));
+    recordFetchFailure(url, 'transport', serializeError(error), expectedPending);
     return null;
   } finally {
     clearTimeout(timer);
@@ -866,9 +917,10 @@ const pollHubHealth = async (child: HubChild): Promise<void> => {
   const apiBase = `http://${args.host}:${child.apiPort}`;
   const infoUrl = `${apiBase}/api/info`;
   const healthUrl = `${apiBase}/api/health`;
+  const awaitingFirstHealth = child.lastInfo === null && child.lastHealth === null;
   const [rawInfo, rawHealth] = await Promise.all([
-    fetchJson<unknown>(infoUrl, CHILD_HEALTH_TIMEOUT_MS),
-    fetchJson<unknown>(healthUrl, CHILD_HEALTH_TIMEOUT_MS),
+    fetchJson<unknown>(infoUrl, CHILD_HEALTH_TIMEOUT_MS, awaitingFirstHealth),
+    fetchJson<unknown>(healthUrl, CHILD_HEALTH_TIMEOUT_MS, awaitingFirstHealth),
   ]);
   if (
     child.proc !== proc ||
@@ -921,13 +973,12 @@ const pollAllHubHealth = async (): Promise<void> => {
 const marketMakerPoller = createMarketMakerChildPoller({
   child: marketMakerChild,
   host: args.host,
-  infoTimeoutMs: MARKET_MAKER_INFO_TIMEOUT_MS,
   healthTimeoutMs: CHILD_HEALTH_TIMEOUT_MS,
   fullHealthTimeoutMs: MARKET_MAKER_FULL_HEALTH_TIMEOUT_MS,
-  fetchJson,
+  fetchJson: <T>(url: string, timeoutMs?: number) =>
+    fetchJson<T>(url, timeoutMs, marketMakerChild.lastHealth === null),
 });
 
-const pollMarketMakerInfo = marketMakerPoller.pollInfo;
 const pollMarketMakerHealth = async (): Promise<void> => {
   await marketMakerPoller.pollHealth();
   if (marketMakerChild.lastHealth) {
@@ -942,7 +993,6 @@ const refreshChildHealthForResponse = async (): Promise<void> => {
   await Promise.race([
     Promise.allSettled([
       pollAllHubHealth(),
-      pollMarketMakerInfo(),
       pollMarketMakerHealth(),
     ]).then(() => undefined),
     delay(HEALTH_RESPONSE_REFRESH_TIMEOUT_MS).then(() => undefined),
@@ -1098,6 +1148,7 @@ const failFastUnexpectedChildExit = (message: string): void => {
 };
 
 type RecoverableChild = HubChild | MarketMakerChild;
+const managedChildFatalRoot = new Map<string, string>();
 
 const persistManagedChildFailure = (
   child: RecoverableChild,
@@ -1133,6 +1184,75 @@ const persistManagedChildFailure = (
 
 const persistedRuntimeHaltFingerprints = new Set<string>();
 
+const pushManagedChildIncident = (
+  child: RecoverableChild,
+  code: string,
+  message: string,
+  details: Record<string, unknown>,
+): string => {
+  const runtimeId = String(child.lastHealth?.runtimeId || child.lastInfo?.runtimeId || '').trim() || undefined;
+  const incident = pushDebugEvent(relayStore, {
+    event: 'error',
+    ...(managedChildFatalRoot.get(child.name)
+      ? { rootFingerprint: managedChildFatalRoot.get(child.name) }
+      : {}),
+    runtimeId,
+    status: 'fatal',
+    reason: code,
+    details: {
+      source: 'orchestrator',
+      severity: 'fatal',
+      message,
+      child: child.name,
+      ...details,
+    },
+  });
+  if (!incident) throw new Error(`MANAGED_CHILD_FATAL_INCIDENT_NOT_CLASSIFIED:${child.name}:${code}`);
+  return incident.fingerprint;
+};
+
+const persistManagedChildFatalReport = (
+  child: RecoverableChild,
+  report: ManagedChildFatalReport,
+): string => {
+  const incident = pushDebugEvent(relayStore, {
+    event: 'error',
+    runtimeId: report.runtimeId || undefined,
+    status: 'fatal',
+    reason: report.code,
+    details: {
+      source: 'runtime',
+      severity: 'fatal',
+      message: report.message,
+      child: child.name,
+      height: report.height,
+      timestamp: report.timestamp,
+      transport: 'local-ipc',
+    },
+  });
+  if (!incident) throw new Error(`MANAGED_CHILD_FATAL_INCIDENT_NOT_CLASSIFIED:${child.name}:${report.code}`);
+  managedChildFatalRoot.set(child.name, incident.fingerprint);
+  return incident.fingerprint;
+};
+
+const captureManagedChildErrorLine = (child: RecoverableChild, line: string): void => {
+  const match = line.match(/^\[ERROR\]\[([^\]]+)\]\s+([^\s{]+)/);
+  if (!match) return;
+  const [, scope = 'runtime', phase = 'MANAGED_CHILD_ERROR'] = match;
+  const jsonStart = line.indexOf('{', match[0].length);
+  let structuredError = '';
+  if (jsonStart >= 0) {
+    try {
+      const parsed = JSON.parse(line.slice(jsonStart)) as { error?: unknown; message?: unknown };
+      structuredError = String(parsed.error || parsed.message || '').trim();
+    } catch {
+      structuredError = '';
+    }
+  }
+  const message = structuredError || phase;
+  pushManagedChildIncident(child, normalizeRuntimeFailureCode(message), message, { scope, phase });
+};
+
 const observeManagedRuntimeHalt = (
   child: RecoverableChild,
   health: { runtime?: { halted?: boolean; fatalDebugPayload?: unknown } },
@@ -1152,6 +1272,10 @@ const observeManagedRuntimeHalt = (
   persistedRuntimeHaltFingerprints.add(decision.fingerprint);
   meshLog.error('runtime.halted', {
     child: child.name,
+    receiptPath,
+    fatal: health.runtime.fatalDebugPayload ?? null,
+  });
+  pushManagedChildIncident(child, 'RUNTIME_HALTED', reason, {
     receiptPath,
     fatal: health.runtime.fatalDebugPayload ?? null,
   });
@@ -1220,6 +1344,14 @@ const handleUnexpectedHubFailure = (
     action: decision.action,
     receiptPath,
   });
+  pushManagedChildIncident(child, decision.reasonCode, observation.reason, {
+    code: observation.code,
+    signal: observation.signal,
+    fingerprint: decision.fingerprint,
+    identicalFailureCount: decision.count,
+    action: decision.action,
+    receiptPath,
+  });
   if (decision.action === 'fail-stop') {
     failFastUnexpectedChildExit(
       `${child.name} repeated ${decision.reasonCode} ${decision.count} times; receipt=${receiptPath}`,
@@ -1230,7 +1362,8 @@ const handleUnexpectedHubFailure = (
   child.recoveryInProgress = true;
   child.restartTimer = setTimeout(() => {
     child.restartTimer = null;
-    void spawnHub(child).then(() => {
+    void spawnHub(child).then(async () => {
+      await waitForHubSelfReady(child);
       child.recoveryInProgress = false;
       meshLog.info('child.respawned_from_checkpoint', {
         child: child.name,
@@ -1297,7 +1430,6 @@ const spawnHub = async (child: HubChild): Promise<void> => {
     ...(child.deployTokens ? ['--deploy-tokens'] : []),
   ];
   child.startedAt = Date.now();
-  child.recoveryInProgress = false;
   child.exitedAt = null;
   child.exitCode = null;
   child.exitSignal = null;
@@ -1306,9 +1438,10 @@ const spawnHub = async (child: HubChild): Promise<void> => {
   child.lastInfo = null;
   child.recentStdout = [];
   child.recentStderr = [];
+  managedChildFatalRoot.delete(child.name);
   const proc = spawn('bun', cmd, {
     cwd: process.cwd(),
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     env: sanitizeChildProcessEnv({
       ...buildManagedRuntimeChildSecretEnv(process.env),
       XLN_DB_PATH: child.dbPath,
@@ -1318,7 +1451,6 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       XLN_ORCHESTRATOR_PID: String(process.pid),
       XLN_ORCHESTRATOR_OWNER_ID: orchestratorOwnerId,
       XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(STARTUP_TIMEOUT_MS),
-      XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '0',
       XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000',
       XLN_LOG_LEVEL: process.env['XLN_HUB_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn',
     }),
@@ -1327,6 +1459,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
   if (!proc.pid) {
     throw new Error(`${child.name}_SPAWN_FAILED_NO_PID`);
   }
+  attachManagedChildFatalIpc(proc, report => persistManagedChildFatalReport(child, report));
   await managedRuntimeLeases.writeLease(spec, proc.pid, child.startedAt ?? Date.now());
   const stdoutPrefixState: PrefixLogState = { pending: '' };
   const stderrPrefixState: PrefixLogState = { pending: '' };
@@ -1336,11 +1469,22 @@ const spawnHub = async (child: HubChild): Promise<void> => {
   });
   proc.stderr?.on('data', chunk => {
     pushChildLogLines(child.recentStderr, chunk);
-    writePrefixedLogChunk(process.stderr, `[${child.name}:err]`, stderrPrefixState, chunk);
+    writePrefixedLogChunk(
+      process.stderr,
+      `[${child.name}:err]`,
+      stderrPrefixState,
+      chunk,
+      line => captureManagedChildErrorLine(child, line),
+    );
   });
   proc.once('exit', (code, signal) => {
     flushPrefixedLogChunk(process.stdout, `[${child.name}]`, stdoutPrefixState);
-    flushPrefixedLogChunk(process.stderr, `[${child.name}:err]`, stderrPrefixState);
+    flushPrefixedLogChunk(
+      process.stderr,
+      `[${child.name}:err]`,
+      stderrPrefixState,
+      line => captureManagedChildErrorLine(child, line),
+    );
     const pid = proc.pid ?? null;
     const controlledStop = consumeControlledStop(pid);
     const isCurrentProc = child.proc === proc;
@@ -1402,9 +1546,10 @@ const spawnMarketMaker = async (): Promise<void> => {
   marketMakerChild.lastStartupPhase = null;
   marketMakerChild.recentStdout = [];
   marketMakerChild.recentStderr = [];
+  managedChildFatalRoot.delete(marketMakerChild.name);
   const proc = spawn('bun', cmd, {
     cwd: process.cwd(),
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     env: sanitizeChildProcessEnv({
       ...buildManagedRuntimeChildSecretEnv(process.env),
       XLN_DB_PATH: marketMakerChild.dbPath,
@@ -1414,7 +1559,6 @@ const spawnMarketMaker = async (): Promise<void> => {
       XLN_ORCHESTRATOR_PID: String(process.pid),
       XLN_ORCHESTRATOR_OWNER_ID: orchestratorOwnerId,
       XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(STARTUP_TIMEOUT_MS),
-      XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '0',
       XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000',
       XLN_STORAGE_SYNC_WRITES: process.env['XLN_STORAGE_SYNC_WRITES'] ?? '1',
       XLN_DISABLE_RUNTIME_RESTORE: process.env['XLN_MARKET_MAKER_DISABLE_RESTORE'] ?? process.env['XLN_DISABLE_RUNTIME_RESTORE'] ?? '0',
@@ -1428,6 +1572,10 @@ const spawnMarketMaker = async (): Promise<void> => {
   if (!proc.pid) {
     throw new Error('MM_SPAWN_FAILED_NO_PID');
   }
+  attachManagedChildFatalIpc(
+    proc,
+    report => persistManagedChildFatalReport(marketMakerChild, report),
+  );
   await managedRuntimeLeases.writeLease(spec, proc.pid, marketMakerChild.startedAt ?? Date.now());
   const stdoutPrefixState: PrefixLogState = { pending: '' };
   const stderrPrefixState: PrefixLogState = { pending: '' };
@@ -1437,11 +1585,22 @@ const spawnMarketMaker = async (): Promise<void> => {
   });
   proc.stderr?.on('data', chunk => {
     pushChildLogLines(marketMakerChild.recentStderr, chunk);
-    writePrefixedLogChunk(process.stderr, '[MM:err]', stderrPrefixState, chunk);
+    writePrefixedLogChunk(
+      process.stderr,
+      '[MM:err]',
+      stderrPrefixState,
+      chunk,
+      line => captureManagedChildErrorLine(marketMakerChild, line),
+    );
   });
   proc.once('exit', (code, signal) => {
     flushPrefixedLogChunk(process.stdout, '[MM]', stdoutPrefixState);
-    flushPrefixedLogChunk(process.stderr, '[MM:err]', stderrPrefixState);
+    flushPrefixedLogChunk(
+      process.stderr,
+      '[MM:err]',
+      stderrPrefixState,
+      line => captureManagedChildErrorLine(marketMakerChild, line),
+    );
     const pid = proc.pid ?? null;
     const controlledStop = consumeControlledStop(pid);
     const isCurrentProc = marketMakerChild.proc === proc;
@@ -1493,6 +1652,19 @@ const spawnMarketMaker = async (): Promise<void> => {
         identicalFailureCount: decision.count,
         receiptPath,
       });
+      pushManagedChildIncident(
+        marketMakerChild,
+        decision.reasonCode,
+        observation.reason,
+        {
+          code: observation.code,
+          signal: observation.signal,
+          fingerprint: decision.fingerprint,
+          identicalFailureCount: decision.count,
+          action: decision.action,
+          receiptPath,
+        },
+      );
       if (!resetState.inProgress || decision.action === 'fail-stop') {
         failFastUnexpectedChildExit(
           `MM exited unexpectedly code=${String(code)} signal=${String(signal)} phase=${String(marketMakerChild.lastStartupPhase)} receipt=${receiptPath}`,
@@ -2184,19 +2356,10 @@ const computeAggregatedHealth = (options: {
   };
 };
 
-const countSnapshotOrders = (snapshot: MarketSnapshotPayload | undefined): number => {
-  const countSide = (levels: MarketSnapshotPayload['bids'] | undefined): number =>
-    (levels ?? []).reduce((sum, level) => {
-      const orderCount = Number(level.orderCount);
-      return sum + (Number.isFinite(orderCount) && orderCount > 0 ? Math.floor(orderCount) : 1);
-    }, 0);
-  return countSide(snapshot?.bids) + countSide(snapshot?.asks);
-};
-
 const fetchRouteMarketSnapshots = async (
   hubEntityId: string,
   pairIds: string[],
-): Promise<Map<string, number>> => {
+): Promise<Map<string, MarketSnapshotOrderDepth>> => {
   const child = getHubChildByEntityId(hubEntityId);
   if (!child || pairIds.length === 0) return new Map();
   if (child.proc?.exitCode !== null || child.proc?.signalCode !== null || !child.lastHealth) return new Map();
@@ -2210,7 +2373,10 @@ const fetchRouteMarketSnapshots = async (
     });
     return new Map();
   }
-  return new Map(snapshots.map((snapshot) => [snapshot.pairId, countSnapshotOrders(snapshot)]));
+  return new Map(snapshots.map((snapshot) => [
+    snapshot.pairId,
+    countMarketSnapshotOrderDepth(snapshot),
+  ]));
 };
 
 const recomputeHealthWithMarketMaker = (
@@ -2255,44 +2421,38 @@ const enrichMarketMakerCrossFromHubSnapshots = async (health: AggregatedHealth):
     ]);
     const pairs = (route.pairs ?? []).map((pair) => {
       const pairId = String(pair.pairId || '');
-      const sourceOffers = sourceSnapshots.get(pairId) ?? 0;
-      const targetOffers = targetSnapshots.get(pairId) ?? 0;
-      const offers = Math.max(Number(pair.offers || 0), sourceOffers, targetOffers);
       const expectedOffers = Math.max(1, Number(pair.expectedOffers || health.marketMaker.cross.expectedOffersPerPair || 1));
+      const sourceObserved = sourceSnapshots.get(pairId);
+      const targetObserved = targetSnapshots.get(pairId);
+      const observations = [sourceObserved, targetObserved]
+        .filter((depth): depth is MarketSnapshotOrderDepth => depth !== undefined);
+      const observed = mergeMarketSnapshotOrderDepth(
+        ...observations,
+      );
       return {
         ...pair,
-        offers,
-        ready: offers > 0,
-        depthReady: offers >= expectedOffers,
         expectedOffers,
+        bidOffers: observed.bidOffers,
+        askOffers: observed.askOffers,
+        snapshotDepthExact: isExactMarketSnapshotOrderDepth(observed, expectedOffers),
       };
     });
-    const offers = pairs.reduce((sum, pair) => sum + pair.offers, 0);
-    const expectedOffers = pairs.reduce((sum, pair) => sum + Number(pair.expectedOffers || 0), 0);
     return {
       ...route,
-      offers,
-      ready: route.ready === true || (pairs.length > 0 && pairs.every(pair => pair.ready)),
-      depthReady: expectedOffers > 0 &&
-        offers >= expectedOffers &&
-        pairs.every(pair => pair.depthReady),
       pairs,
     };
   }));
   const enrichedCross = {
     ...cross,
     routes,
-    ok: (cross.expectedRoutes > 0 ? routes.length >= cross.expectedRoutes : routes.length > 0) &&
-      routes.every(route => route.depthReady),
   };
-  const sameChainReady = !health.marketMaker.enabled ||
-    (health.marketMaker.hubs.length === HUB_NAMES.length && health.marketMaker.hubs.every(hub => hub.depthReady));
-  const marketMaker = {
-    ...health.marketMaker,
-    ok: !health.marketMaker.enabled || (sameChainReady && enrichedCross.ok),
-    cross: enrichedCross,
+  return {
+    ...health,
+    marketMaker: {
+      ...health.marketMaker,
+      cross: enrichedCross,
+    },
   };
-  return recomputeHealthWithMarketMaker(health, marketMaker);
 };
 
 type CustodyMePayload = {
@@ -2317,9 +2477,18 @@ const buildAggregatedHealthResponse = async (
     return health;
   }
 
+  const custodyBootstrapPending = custodySupport === null;
   const liveCustody =
-    await fetchJson<CustodyMePayload>(`https://127.0.0.1:${health.custody.servicePort}/api/me`, 1_500)
-    ?? await fetchJson<CustodyMePayload>(`http://127.0.0.1:${health.custody.servicePort}/api/me`, 1_500);
+    await fetchJson<CustodyMePayload>(
+      `https://127.0.0.1:${health.custody.servicePort}/api/me`,
+      1_500,
+      custodyBootstrapPending,
+    )
+    ?? await fetchJson<CustodyMePayload>(
+      `http://127.0.0.1:${health.custody.servicePort}/api/me`,
+      1_500,
+      custodyBootstrapPending,
+    );
   const liveEntityId = String(liveCustody?.custody?.entityId || '').trim();
   if (!liveEntityId) {
     return health;
@@ -2481,7 +2650,7 @@ const waitForHubSelfReady = async (child: HubChild): Promise<void> => {
     if (child.lastInfo !== null || child.lastHealth !== null) {
       return;
     }
-    if (!child.recoveryInProgress && (child.proc?.exitCode !== null || child.proc?.signalCode !== null)) {
+    if (child.proc?.exitCode !== null || child.proc?.signalCode !== null) {
       throw new Error(`${child.name}_SELF_READY_EXITED_EARLY code=${String(child.proc?.exitCode)} stderr=${safeStringify(child.recentStderr.slice(-8))}`);
     }
     const idleMs = Date.now() - startedAt;
@@ -2991,6 +3160,7 @@ const server = Bun.serve({
       relayStore,
       hubChildren,
       marketMakerChild,
+      operatorAuthorized,
       pollAllHubHealth,
       pollMarketMakerHealth,
       proxyAnyHubGet,

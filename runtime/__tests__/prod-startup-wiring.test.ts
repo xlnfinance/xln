@@ -61,6 +61,23 @@ describe('production startup wiring', () => {
     );
   });
 
+  test('release gate proves replacement idempotency at both external I/O boundaries', () => {
+    const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
+    const coreE2e = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-core.ts'), 'utf8');
+    for (const crashTest of [
+      'runtime/__tests__/reliable-delivery-receipts.test.ts',
+      'runtime/__tests__/reliable-local-catchup-real-crash.test.ts',
+      'runtime/__tests__/reliable-frontier-real-crash.test.ts',
+      'runtime/__tests__/j-submit-crash-recovery.test.ts',
+      'runtime/__tests__/j-submit-real-rpc-crash-recovery.test.ts',
+    ]) {
+      expect(releaseGate).toContain(crashTest);
+    }
+    expect(coreE2e).toContain(
+      'H2 process replacement restores authoritative health and exact 10x10 public book',
+    );
+  });
+
   test('bounded soak stays separate from the release gate', () => {
     const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
 
@@ -167,6 +184,49 @@ describe('production startup wiring', () => {
     expect(orchestrator).not.toContain('HUB_READY_SNAPSHOT');
     expect(orchestrator).not.toContain('prepare-ready-snapshot');
     expect(orchestrator).not.toContain('resume-ready-snapshot');
+  });
+
+  test('orchestrator restores the durable incident journal outside resettable runtime state', () => {
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    expect(orchestrator).toContain("process.env['XLN_DEBUG_INCIDENT_JOURNAL_PATH'] || `${args.dbRoot}.debug-incidents.jsonl`");
+    expect(orchestrator).toContain('initialDebugId: debugIncidentJournal.debugId');
+    expect(orchestrator).toContain('initialIncidents: debugIncidentJournal.incidents');
+    expect(orchestrator).toContain('incidentSink: incident => debugIncidentJournal.record(incident)');
+    expect(orchestrator).not.toContain('relayStore.debugId = 0');
+  });
+
+  test('standalone runtime fsyncs fatal incidents before exiting', () => {
+    const server = readFileSync(join(repoRoot, 'runtime/server/index.ts'), 'utf8');
+    expect(server).toContain(
+      "process.env['XLN_SERVER_DEBUG_INCIDENT_JOURNAL_PATH'] || `${dbRootPath}.debug-incidents.jsonl`",
+    );
+    expect(server).toContain('initialDebugId: incidentJournal.debugId');
+    expect(server).toContain('initialIncidents: incidentJournal.incidents');
+    expect(server).toContain('incidentSink: incident => incidentJournal.record(incident)');
+
+    const startLoop = server.indexOf('startRuntimeLoop(env, {');
+    const fatalSink = server.indexOf("serverLog.error('runtime.loop_fatal'", startLoop);
+    expect(startLoop).toBeGreaterThan(0);
+    expect(fatalSink).toBeGreaterThan(startLoop);
+    expect(server.match(/finally \{\n\s+process\.exit\(1\);\n\s+\}/g)).toHaveLength(2);
+  });
+
+  test('managed runtime fatal exits only after parent incident fsync acknowledgement', () => {
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
+    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const runtime = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
+
+    expect(orchestrator.match(/stdio: \['pipe', 'pipe', 'pipe', 'ipc'\]/g)).toHaveLength(2);
+    expect(orchestrator.match(/attachManagedChildFatalIpc\(/g)).toHaveLength(2);
+    expect(orchestrator).toContain('persistManagedChildFatalReport(child, report)');
+    expect(orchestrator).toContain('persistManagedChildFatalReport(marketMakerChild, report)');
+    expect(hubNode).toContain('await reportManagedChildFatal({');
+    expect(mmNode).toContain('await reportManagedChildFatal({');
+    const report = runtime.indexOf('await config.onFatal({');
+    const exit = runtime.indexOf('runtimeProcess.exit(1);', report);
+    expect(report).toBeGreaterThan(0);
+    expect(exit).toBeGreaterThan(report);
   });
 
   test('production frontend deploy builds off-host and uploads a complete artifact', () => {
@@ -320,7 +380,7 @@ describe('production startup wiring', () => {
     expect(script).toContain('export RELAY_URL=${RELAY_URL:-$INTERNAL_RELAY_URL}');
     expect(script).toContain('--relay-url "$RELAY_URL"');
     expect(script).toContain('--rpc2-url "$ANVIL_RPC2"');
-    expect(script).toContain('export XLN_RUNTIME_EXIT_ON_FATAL=${XLN_RUNTIME_EXIT_ON_FATAL:-0}');
+    expect(script).not.toContain('XLN_RUNTIME_EXIT_ON_FATAL');
     expect(script).toContain('export XLN_STORAGE_WRITE_TIMEOUT_MS=${XLN_STORAGE_WRITE_TIMEOUT_MS:-60000}');
     expect(script).toContain('export XLN_SNAPSHOT_INTERVAL_FRAMES=${XLN_SNAPSHOT_INTERVAL_FRAMES:-1024}');
     expect(script).not.toContain('HUB_BOOTSTRAP_PAUSE_STORAGE');
@@ -337,8 +397,8 @@ describe('production startup wiring', () => {
     expect(script).toContain('export MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME=${MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME:-0}');
     expect(script).toContain('export MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME=${MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME:-0}');
     expect(script).toContain('export XLN_CUSTODY_PUBLIC_RPC_URL=${XLN_CUSTODY_PUBLIC_RPC_URL:-wss://custody.xln.finance/rpc}');
-    expect(script).toContain('export MARKET_MAKER_MAX_LEVELS_PER_PAIR=${MARKET_MAKER_MAX_LEVELS_PER_PAIR:-10}');
-    expect(script).toContain('export MARKET_MAKER_CROSS_LEVELS_PER_PAIR=${MARKET_MAKER_CROSS_LEVELS_PER_PAIR:-3}');
+    expect(script).not.toContain('MARKET_MAKER_MAX_LEVELS_PER_PAIR');
+    expect(script).not.toContain('MARKET_MAKER_CROSS_LEVELS_PER_PAIR');
     expect(script).toContain(
       'export MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE=${MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE:-1000}',
     );
@@ -366,7 +426,7 @@ describe('production startup wiring', () => {
     expect(orchestratorConfig).toContain("const RPC_PROXY_INDEXES = [1, 2, 3, 4, 5, 6, 7, 8] as const;");
     expect(orchestratorConfig).toContain("readPositiveIntEnv('XLN_CHILD_HEALTH_TIMEOUT_MS', 30_000)");
     expect(orchestrator).toContain('const relayUrl = args.relayUrl;');
-    expect(orchestrator).toContain("process.env['XLN_MARKET_MAKER_INFO_TIMEOUT_MS'] || '1500'");
+    expect(orchestrator).not.toContain('XLN_MARKET_MAKER_INFO_TIMEOUT_MS');
     expect(orchestrator).toContain("process.env['XLN_CHILD_SHUTDOWN_QUIESCE_MS'] || '5000'");
     expect(orchestrator).toContain('const CHILD_RESET_QUIESCE_TIMEOUT_MS = 45_000;');
     expect(orchestrator).toContain("meshLog.warn('child.stop_timeout_sigkill'");
@@ -388,19 +448,15 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('let hubHealthPollInFlight: Promise<void> | null = null;');
     expect(orchestrator).toContain('if (hubHealthPollInFlight) return hubHealthPollInFlight;');
     expect(orchestrator).toContain('const marketMakerPoller = createMarketMakerChildPoller({');
-    expect(orchestrator).toContain('const pollMarketMakerInfo = marketMakerPoller.pollInfo;');
     expect(orchestrator).toContain('const pollMarketMakerHealth = async (): Promise<void> => {');
     expect(orchestrator).toContain('observeManagedRuntimeHalt(marketMakerChild, marketMakerChild.lastHealth);');
     expect(marketMakerPoller).toContain('let healthPollInFlight: Promise<void> | null = null;');
-    expect(marketMakerPoller).toContain('let infoPollInFlight: Promise<void> | null = null;');
     expect(marketMakerPoller).toContain('if (healthPollInFlight) return healthPollInFlight;');
-    expect(marketMakerPoller).toContain('if (infoPollInFlight) return infoPollInFlight;');
     expect(marketMakerPoller).toContain("fetchJson<MarketMakerHealthPayload>(`${apiBase()}/api/health`, healthTimeoutMs)");
     expect(orchestrator).not.toContain('const [health, info] = await Promise.all([');
-    expect(marketMakerPoller).toContain("fetchJson<MarketMakerInfoPayload>(`${apiBase()}/api/info`, infoTimeoutMs)");
-    expect(orchestrator).not.toContain('if (!marketMakerChild.lastInfo) {');
-    expect(marketMakerPoller).toContain('const applyInfo = (info: MarketMakerInfoPayload, proc: ChildProcess): void => {');
-    expect(marketMakerPoller).toContain('child.lastInfo = { ...(child.lastInfo || {}), ...info };');
+    expect(marketMakerPoller).not.toContain('/api/info');
+    expect(orchestrator).not.toContain('pollMarketMakerInfo');
+    expect(marketMakerPoller).toContain('child.lastInfo = nextInfo;');
     expect(marketMakerPoller).toContain('if (!isCurrentProc(proc)) return;');
     expect(orchestrator).toContain('normalizeMarketMakerHealthPayload');
     expect(marketMakerPoller).toContain('type RawMarketMakerHealthPayload');
@@ -456,14 +512,11 @@ describe('production startup wiring', () => {
     expect(waitForMarketMakerReady.indexOf('if (marketMakerChild.exitCode !== null || marketMakerChild.exitSignal !== null)')).toBeLessThan(
       waitForMarketMakerReady.indexOf('health.marketMaker.ok'),
     );
-    expect(marketMakerPoller.indexOf("fetchJson<MarketMakerInfoPayload>(`${apiBase()}/api/info`, infoTimeoutMs)")).toBeLessThan(
-      marketMakerPoller.indexOf("fetchJson<MarketMakerHealthPayload>(`${apiBase()}/api/health`, healthTimeoutMs)"),
-    );
+    expect(marketMakerPoller).not.toContain('/api/info');
     expect(marketMakerPoller).toContain('const applyHealth = (');
     expect(marketMakerPoller).toContain('child.lastHealth = health;');
-    expect(marketMakerPoller).toContain('options: { trustStartupPhase: boolean },');
-    expect(marketMakerPoller).toContain('if (health.startupPhase !== undefined && (options.trustStartupPhase || !nextInfo.startupPhase)) {');
-    expect(marketMakerPoller).toContain('if (health) applyHealth(health, proc, { trustStartupPhase: !infoFresh });');
+    expect(marketMakerPoller).toContain('if (health.startupPhase !== undefined) {');
+    expect(marketMakerPoller).toContain('if (health) applyHealth(health, proc);');
     const lastStartupPhaseUpdate = marketMakerPoller.slice(marketMakerPoller.indexOf('child.lastStartupPhase = String('));
     expect(lastStartupPhaseUpdate.indexOf('child.lastInfo?.startupPhase ||')).toBeLessThan(
       lastStartupPhaseUpdate.indexOf('child.lastHealth?.startupPhase ||'),
@@ -471,7 +524,12 @@ describe('production startup wiring', () => {
     expect(marketMakerAggregation).toContain('MARKET_MAKER_HUB_DEPTH_NOT_READY');
     expect(marketMakerAggregation).toContain('depthReady: route.depthReady === true');
     expect(marketMakerAggregation).toContain('expectedOffers: Number(pair.expectedOffers || 0)');
-    expect(orchestrator).toContain('health.marketMaker.hubs.every(hub => hub.depthReady)');
+    const snapshotEnrichment = orchestrator.slice(
+      orchestrator.indexOf('const enrichMarketMakerCrossFromHubSnapshots = async'),
+      orchestrator.indexOf('type CustodyMePayload ='),
+    );
+    expect(snapshotEnrichment).toContain('snapshotDepthExact: isExactMarketSnapshotOrderDepth');
+    expect(snapshotEnrichment).not.toContain('recomputeHealthWithMarketMaker');
     expect(orchestrator).toContain('syncCanonicalJurisdictionsFromShard(jurisdictionsConfig)');
     expect(orchestrator).toContain('const primaryJurisdiction = resolvePrimaryHubJurisdictionFallback(jurisdictionsConfig);');
     expect(orchestrator).toContain('jurisdictionId: primaryJurisdiction.key');
@@ -489,7 +547,7 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('const buildRpcChildEnv = (): Record<string, string> => {');
     expect(orchestrator).toContain('const rpcProxyIndex = resolveRpcProxyIndex(pathname);');
     expect(orchestrator).toContain("return await proxyRpc(request, args.rpcUrls[rpcProxyIndex] || '', operatorAuthorized);");
-    expect(orchestrator).toContain("XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '0'");
+    expect(orchestrator).not.toContain('XLN_RUNTIME_EXIT_ON_FATAL');
     expect(orchestrator).toContain("XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000'");
     expect(orchestrator).not.toContain('HUB_BOOTSTRAP_PAUSE_STORAGE');
     expect(orchestrator).not.toContain('HUB_READY_SNAPSHOT');
@@ -497,8 +555,8 @@ describe('production startup wiring', () => {
     expect(runtimeEntityRouting).not.toContain('deps.startRuntimeLoop(env);');
     expect(runtimeEntityRouting).not.toContain('processRuntime(env)');
     expect(runtimeEntityRouting).not.toContain('queueMicrotask(() =>');
-    expect(runtimeMainSource).toContain('const shouldExitOnRuntimeFatal = (runtimeProcess = getRuntimeProcessGlobal()): boolean =>');
     expect(runtimeMainSource).toContain("runtimeProcess.exit(1);");
+    expect(runtimeMainSource).not.toContain('shouldExitOnRuntimeFatal');
     expect(orchestrator).toContain("XLN_STORAGE_SYNC_WRITES: process.env['XLN_STORAGE_SYNC_WRITES'] ?? '1'");
     expect(orchestrator).not.toContain('XLN_MARKET_MAKER_DISABLE_STORAGE');
     expect(orchestrator).toContain("XLN_DISABLE_RUNTIME_RESTORE: process.env['XLN_MARKET_MAKER_DISABLE_RESTORE'] ?? process.env['XLN_DISABLE_RUNTIME_RESTORE'] ?? '0'");
@@ -685,10 +743,10 @@ describe('production startup wiring', () => {
     );
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK)');
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK)');
-    expect(mmNode).toContain("MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '10'");
+    expect(mmNode).toContain('const MARKET_MAKER_LEVELS_PER_SIDE = 10;');
     expect(mmNode).toContain("MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE'] || '1000'");
     expect(mmNode).toContain('pairs.slice(0, MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE)');
-    expect(mmNode).toContain("MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '10'");
+    expect(mmNode).not.toContain("MARKET_MAKER_MAX_LEVELS_PER_PAIR']");
     expect(mmNode).not.toContain("MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '6'");
     expect(mmNode).not.toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '6'");
     expect(mmNode).not.toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '36'");
@@ -1063,7 +1121,7 @@ describe('production startup wiring', () => {
 
   test('hub exposes restored entities before its loop while MM imports every entity before P2P', () => {
     const hubSource = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
-    const hubP2PStart = hubSource.indexOf('const p2p = startP2P(env, {');
+    const hubP2PStart = hubSource.indexOf('p2p = startP2P(env, {');
     const hubP2PReady = hubSource.indexOf("if (!p2p) throw new Error('P2P_START_FAILED');", hubP2PStart);
     const hubLoopStart = hubSource.indexOf('startRuntimeLoop(env, {', hubP2PReady);
     expect(hubP2PStart).toBeGreaterThan(0);
@@ -1188,6 +1246,8 @@ describe('production startup wiring', () => {
     expect(radapterRemote).toContain('allowAutoReset: false');
     expect(orchestrator).toContain('const publishRuntimeImportManifest = async (): Promise<boolean> => {');
     expect(orchestrator).toContain('const health = await buildAggregatedHealthResponse();');
+    expect(orchestrator).toContain('const custodyBootstrapPending = custodySupport === null;');
+    expect(orchestrator).toContain('custodyBootstrapPending,');
     expect(orchestrator).toContain('const readiness = resolveRuntimeImportReadiness(health);');
     expect(orchestrator).toContain('if (!readiness.ok) {');
     expect(orchestrator).toContain("const allowPartial = url.searchParams.get('allowPartial') === '1' && operatorAuthorized;");
@@ -1259,6 +1319,11 @@ describe('production startup wiring', () => {
     const healthBuilder = mmNode.slice(healthBuilderStart, publishHealthStart);
     expect(healthBuilder).toContain("const marketMakerHealth = startupPhase === 'offers-ready'");
     expect(healthBuilder).toContain(': { ...rawMarketMakerHealth, ok: false };');
+    expect(healthBuilder).toContain('const readiness = deriveMarketMakerChildReadiness({');
+    expect(healthBuilder).toContain('marketMakerReady: marketMakerHealth.ok === true');
+    expect(healthBuilder).toContain('ok: readiness.ready');
+    expect(healthBuilder).toContain('live: readiness.live');
+    expect(healthBuilder).toContain('ready: readiness.ready');
     expect(healthBuilder).toContain('...marketMakerHealth');
     expect(healthBuilder).toContain('quiescence: summarizeRuntimeQuiescence(env)');
     expect(healthBuilder).toContain('expectedRoutes: 0');
@@ -1359,6 +1424,11 @@ describe('production startup wiring', () => {
     expect(packageJson).toContain('"prod:bootstrap:template": "bun runtime/scripts/run-with-test-cleanup.ts --reason=bootstrap-template -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=template"');
     expect(packageJson).toContain('"prod:bootstrap:clone": "bun runtime/scripts/run-with-test-cleanup.ts --reason=bootstrap-clone --keep-test-artifacts -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=clone"');
     expect(packageJson).toContain('"prod:bootstrap:hydrate": "bun runtime/scripts/run-with-test-cleanup.ts --reason=bootstrap-hydrate --keep-test-artifacts -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=hydrate"');
+    expect(packageJson).toContain('"prod:bootstrap:rotation": "XLN_STORAGE_EPOCH_MAX_BYTES=33554432 XLN_LOCAL_PROD_SMOKE_REQUIRE_EPOCH_ROTATION=1');
+    expect(smoke).toContain('await commitPostRotationProofFrames();');
+    expect(smoke).toContain("recordStage('storage-epoch:post-rotation-frames-committed');");
+    expect(smoke).toContain("recordStage('storage-epoch:verified', epochRotations);");
+    expect(smoke).toContain('LOCAL_PROD_SMOKE_STORAGE_POST_ROTATION_FRAME_MISSING');
     expect(soundcheck).toContain("import { createConnection } from 'node:net';");
     expect(soundcheck).toContain('const localProdSmokePortOffsets = [0, 1, 4, 7, 8, 10, 11, 12, 13];');
     expect(soundcheck).toContain("const defaultPortBase = mode === 'clone' ? 19800 : mode === 'hydrate' ? 19900 : 19700;");
@@ -1539,8 +1609,8 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("XLN_ENTITY_FRAME_SLOW_MS: process.env['XLN_ENTITY_FRAME_SLOW_MS'] || '250'");
     expect(smoke).toContain('throw new Error(`LOCAL_PROD_SMOKE_MM_HEALTH_FAILED error=${message}`);');
     expect(smoke).toContain("if (message.includes('LOCAL_PROD_SMOKE_MM_HEALTH_FAILED')) throw error;");
-    expect(smoke).toContain("MARKET_MAKER_MAX_LEVELS_PER_PAIR: process.env['MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '10'");
-    expect(smoke).toContain("MARKET_MAKER_CROSS_LEVELS_PER_PAIR: process.env['MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '3'");
+    expect(smoke).not.toContain('MARKET_MAKER_MAX_LEVELS_PER_PAIR:');
+    expect(smoke).not.toContain('MARKET_MAKER_CROSS_LEVELS_PER_PAIR:');
     expect(smoke).toContain("process.env['MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE'] || '1000'");
     expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'");
     expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '1000'");
@@ -1629,10 +1699,10 @@ describe('production startup wiring', () => {
     expect(packageJson).toContain('"test:contracts:full": "bun runtime/scripts/run-with-test-cleanup.ts --reason=contracts --child-cwd=jurisdictions -- sh -c \\"bunx hardhat test test/*.ts test/*.cjs\\""');
     expect(packageJson).toContain('"test:e2e:release": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --exclude-market-maker');
     expect(packageJson).toContain('"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --market-maker-only');
-    expect(packageJson).toContain('"test:e2e:full": "bun runtime/scripts/run-e2e-parallel-isolated.ts --all --shards=8 --workers-per-shard=1 --max-mm-concurrency=2');
+    expect(packageJson).toContain('"test:e2e:full": "bun runtime/scripts/run-e2e-parallel-isolated.ts --all --strict-browser-health --shards=8 --workers-per-shard=1 --max-mm-concurrency=2');
     expect(packageJson).toContain('"test:e2e:release": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --exclude-market-maker --strict-browser-health --shards=8');
     expect(packageJson).toContain('"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --market-maker-only --strict-browser-health --shards=8 --workers-per-shard=1 --max-mm-concurrency=2');
-    expect(packageJson).toContain('"test:e2e:all": "bun runtime/scripts/run-e2e-parallel-isolated.ts --all --shards=8 --workers-per-shard=1 --max-mm-concurrency=2');
+    expect(packageJson).toContain('"test:e2e:all": "bun runtime/scripts/run-e2e-parallel-isolated.ts --all --strict-browser-health --shards=8 --workers-per-shard=1 --max-mm-concurrency=2');
     expect(packageJson).toContain('"test:p2p:relay": "bun runtime/scripts/run-with-test-cleanup.ts --reason=p2p-relay -- bun runtime/scenarios/p2p-relay.ts"');
     expect(bootstrapSoundcheck).toContain("XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO: process.env['XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO'] || '1'");
     expect(bootstrapSoundcheck).toContain("XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS: process.env['XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS'] || '5000'");
@@ -1643,6 +1713,7 @@ describe('production startup wiring', () => {
     expect(runner).not.toContain("XLN_MIN_DISK_FREE_BYTES: process.env['XLN_MIN_DISK_FREE_BYTES'] || '1'");
     expect(runner).toContain("...(process.env['XLN_MIN_DISK_FREE_BYTES']");
     expect(releaseGate).toContain("{ name: 'bootstrap soundcheck', command: 'bun run prod:bootstrap:soundcheck', timeoutMs: 1_200_000 }");
+    expect(releaseGate).toContain("{ name: 'bootstrap epoch rotation', command: 'bun run prod:bootstrap:rotation', timeoutMs: 1_200_000 }");
     expect(releaseGate).toContain("{ name: 'real WebSocket P2P relay', command: 'bun run test:p2p:relay', timeoutMs: 240_000 }");
     expect(releaseGate).toContain("{ name: 'frontend generated aliases', command: 'cd frontend && bunx svelte-kit sync', timeoutMs: 60_000 }");
     expect(releaseGate.indexOf("'frontend generated aliases'")).toBeLessThan(releaseGate.indexOf("'runtime core unit tests'"));
@@ -1829,6 +1900,21 @@ describe('production startup wiring', () => {
     expect(driveQuotes).toContain("if (mode === 'steady') return true;");
     expect(meshCommon).toContain('const queuedEntityTxsFor = (env: Env, targetEntityId: string): EntityTx[] => {');
     expect(meshCommon).toContain('export const hasQueuedExtendCredit = (');
+  });
+
+  test('frontend command submission never starts or directly drives the runtime loop', () => {
+    const xlnStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/xlnStore.ts'), 'utf8');
+    const drainStart = xlnStore.indexOf('const drainLocalRuntimeInput = async (');
+    const drainEnd = xlnStore.indexOf('const normalizeRuntimeIdentifier =', drainStart);
+    const submitStart = xlnStore.indexOf('export async function dispatchRuntimeInputToRuntimeEnv');
+    const submitEnd = xlnStore.indexOf('\nexport ', submitStart + 1);
+
+    expect(drainStart).toBeGreaterThan(0);
+    expect(drainEnd).toBeGreaterThan(drainStart);
+    expect(submitStart).toBeGreaterThan(0);
+    expect(submitEnd).toBeGreaterThan(submitStart);
+    expect(xlnStore.slice(drainStart, drainEnd)).not.toContain('xln.process(');
+    expect(xlnStore.slice(submitStart, submitEnd)).not.toContain('xln.startRuntimeLoop(');
   });
 
   test('isolated E2E failure forensics never opens the live database and records every HTTP failure', () => {

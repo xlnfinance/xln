@@ -6,4 +6,9 @@ interface IEntityProvider {
     external
     view
     returns (bytes32 entityId, bool success);
+
+  function verifyCurrentHankoSignature(bytes calldata hankoData, bytes32 hash)
+    external
+    view
+    returns (bytes32 entityId, bool success);
 }

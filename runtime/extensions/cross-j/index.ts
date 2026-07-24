@@ -756,6 +756,23 @@ export function cloneCrossJurisdictionCloseProof(
   };
 }
 
+export function withCrossJurisdictionCloseProofProgress(
+  route: CrossJurisdictionSwapRoute,
+  proof: CrossJurisdictionCloseProof,
+  updatedAt: number,
+): CrossJurisdictionSwapRoute {
+  return {
+    ...route,
+    cumulativeFillRatio: proof.fillRatio,
+    claimedRatio: proof.fillRatio,
+    filledSourceAmount: proof.cumulativeSourceAmount,
+    filledTargetAmount: proof.cumulativeTargetAmount,
+    sourceClaimed: proof.cumulativeSourceAmount,
+    targetClaimed: proof.cumulativeTargetAmount,
+    updatedAt,
+  };
+}
+
 export function buildCrossJurisdictionCloseProof(
   route: CrossJurisdictionSwapRoute,
   binary: string,
@@ -1065,8 +1082,10 @@ export function cloneCrossJurisdictionCarrierRoute<T extends { crossJurisdiction
 export const cloneCrossJurisdictionSwapOfferRoute = (offer: SwapOffer): SwapOffer =>
   cloneCrossJurisdictionCarrierRoute({ ...offer });
 
-export const cloneCrossJurisdictionSwapHistoryRoute = (entry: SwapOrderHistoryEntry): SwapOrderHistoryEntry =>
-  cloneCrossJurisdictionCarrierRoute({ ...entry });
+export const cloneCrossJurisdictionSwapHistoryRoute = (entry: SwapOrderHistoryEntry): SwapOrderHistoryEntry => ({
+  ...cloneCrossJurisdictionCarrierRoute({ ...entry }),
+  resolves: entry.resolves.map(resolve => ({ ...resolve })),
+});
 
 export function cloneCrossJurisdictionAccountTxRoute(tx: AccountTx): AccountTx {
   if (tx.type === 'pull_lock' && tx.data.crossJurisdiction) {

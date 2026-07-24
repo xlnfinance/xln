@@ -46,7 +46,7 @@ import {
   buildAccountProofBodyFromEnv,
   requireAccountDeltaTransformerAddress,
 } from '../../../account/consensus/helpers';
-import { inspectHankoForHash, verifyHankoForHash } from '../../../hanko/signing';
+import { verifyHankoForHash } from '../../../hanko/signing';
 import {
   getCertifiedBoardNodeStore,
   resolveObserverCertifiedBoardHash,
@@ -61,7 +61,7 @@ import { removeBookOrderById } from '../../../orderbook/cross-j';
 import { swapKey } from '../../../orderbook/swap-keys';
 import { crossJurisdictionBookOwnerRef } from '../../../extensions/cross-j/orderbook';
 import { isCrossJurisdictionTerminalStatus } from '../../../extensions/cross-j';
-import { createStructuredLogger, shouldLogFullPayloads, shortHash, shortId } from '../../../infra/logger';
+import { createStructuredLogger, shortHash, shortId } from '../../../infra/logger';
 import { crossJurisdictionRouteSignerHint } from '../cross-j-outputs';
 import {
   freezeAccountForDispute,
@@ -736,41 +736,6 @@ export async function handleDisputeStart(
       );
     }
     const disputeHashSource = storedDisputeHash ? 'stored+recomputed' : 'recomputed';
-    if (shouldLogFullPayloads()) {
-      const hankoDebug = await inspectHankoForHash(counterpartyDisputeHanko, exactDisputeHash);
-      const matchingClaim = hankoDebug.claims.find(
-        (claim) => String(claim.entityId).toLowerCase() === String(counterpartyEntityId).toLowerCase(),
-      );
-      disputeLog.debug('start.preflight_payload', {
-        contractGuard: 'EntityProvider.sol:469 require(entityId == boardHash)',
-        entityId: entityState.entityId,
-        counterpartyEntityId,
-        signedNonce,
-        nonceSource,
-        jNonce,
-        proofHeaderNonce: account.proofHeader.nextProofNonce,
-        storedCounterpartyDisputeProofNonce: account.counterpartyDisputeProofNonce,
-        proofBodyHash: proofBodyHashToUse,
-        disputeHashSource,
-        disputeHash: exactDisputeHash,
-        depositoryAddress: hankoDomain.depositoryAddress,
-        hankoBytes: Math.max(counterpartyDisputeHanko.length - 2, 0) / 2,
-        recoveredAddresses: hankoDebug.recoveredAddresses,
-        matchingClaim: matchingClaim
-          ? {
-              entityId: matchingClaim.entityId,
-              threshold: matchingClaim.threshold,
-              entityIndexes: matchingClaim.entityIndexes,
-              weights: matchingClaim.weights,
-              boardEntityIds: matchingClaim.boardEntityIds,
-              reconstructedBoardHash: matchingClaim.reconstructedBoardHash,
-              entityMatchesBoardHash:
-                String(matchingClaim.entityId).toLowerCase() ===
-                String(matchingClaim.reconstructedBoardHash).toLowerCase(),
-            }
-          : null,
-      });
-    }
     const counterpartyBoardHash = resolveObserverCertifiedBoardHash(
       entityState,
       getCertifiedBoardNodeStore(env),

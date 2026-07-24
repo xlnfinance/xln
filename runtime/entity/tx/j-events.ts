@@ -1,4 +1,5 @@
 import type {
+  EntityCandidateEffect,
   AccountMachine,
   EntityInput,
   EntityState,
@@ -117,6 +118,7 @@ export const applyJEvent = async (
   entityState: EntityState,
   data: JurisdictionEventData,
   env: Env,
+  candidateEffects: EntityCandidateEffect[] = [],
 ): Promise<JEventApplyResult> => {
   const activeProposerId = normalizeSignerId(getEntityLeaderState(entityState).activeValidatorId);
   // Reject unauthorized senders before canonicalizing attacker-controlled bytes.
@@ -185,6 +187,7 @@ export const applyJEvent = async (
         event,
         env,
         block.disputeFinalizationEvidence ?? [],
+        candidateEffects,
       );
       state = result.newState;
       mempoolOps.push(...result.mempoolOps);
@@ -619,16 +622,15 @@ function applyDisputeFinalizedJEvent(
     });
   }
 
-  // Drop stale local draft dispute-finalize ops for this account. If the dispute
-  // is already finalized on-chain, re-broadcasting it can revert a future batch.
+  // Drop only the unsealed draft. sentBatch is the immutable payload authorized
+  // by its Hanko: changing it would detach batch/encodedBatch/batchHash. The
+  // runtime submit lane reconciles that exact sealed attempt against the
+  // finalized dispute before any retry and retires it by exact receipt.
   const removedDraft = scrubDisputeFinalizationsForCounterparty(
     newState.jBatchState?.batch,
     candidateCounterpartyId,
   );
-  const removedSent = scrubDisputeFinalizationsForCounterparty(
-    newState.jBatchState?.sentBatch?.batch,
-    candidateCounterpartyId,
-  );
+  const removedSent = 0;
   const removed = removedDraft + removedSent;
   jEventLog.info('dispute_finalized.applied', {
     entity: shortId(entityIdNorm),
@@ -679,6 +681,7 @@ async function applyFinalizedJEvent(
   event: JurisdictionEvent,
   env: Env,
   disputeFinalizationEvidence: DisputeFinalizationEvidence[] = [],
+  candidateEffects: EntityCandidateEffect[] = [],
 ): Promise<JEventApplyResult> {
   const blockNumber = event.blockNumber ?? 0;
   const transactionHash = event.transactionHash || 'unknown';
@@ -852,9 +855,9 @@ async function applyFinalizedJEvent(
       accountId: counterpartyEntityId as string,
       tx: { type: 'j_event_claim', data: { jHeight, jBlockHash, events: [eventCopy] } },
     });
-    const p2p = env.runtimeState?.p2p as { sendDebugEvent?: (payload: unknown) => boolean } | undefined;
-    if (typeof p2p?.sendDebugEvent === 'function') {
-      p2p.sendDebugEvent({
+    candidateEffects.push({
+      kind: 'debug',
+      payload: {
         level: 'info',
         code: 'REB_STEP',
         step: 4,
@@ -864,8 +867,8 @@ async function applyFinalizedJEvent(
         counterpartyId: String(counterpartyEntityId),
         tokenId: tokenIdNum,
         jHeight,
-      });
-    }
+      },
+    });
 
     const collDisplay = (Number(collateral) / (10 ** decimals)).toFixed(4);
     addMessage(newState, `⚖️ OBSERVED: ${tokenSymbol} ${cpShort} | coll=${collDisplay} | j-block ${blockNumber} (awaiting 2-of-2)`);

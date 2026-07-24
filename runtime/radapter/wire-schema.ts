@@ -224,11 +224,26 @@ const validateResponse = (message: Record<string, unknown>): RuntimeAdapterRespo
 };
 
 const validatePush = (message: Record<string, unknown>): RuntimeAdapterPush => {
-  requireExactBoundaryKeys(message, ['v', 'op', 'height'], [], 'RADAPTER_PUSH_FIELDS_INVALID');
+  requireExactBoundaryKeys(
+    message,
+    ['v', 'op', 'height', 'commandReady', 'commandReadyReason'],
+    [],
+    'RADAPTER_PUSH_FIELDS_INVALID',
+  );
   if (message['v'] !== XLN_PROTOCOL_VERSION || message['op'] !== 'tick') {
     throw new Error('RADAPTER_PUSH_TYPE_INVALID');
   }
   requireBoundaryInteger(message['height'], 'RADAPTER_PUSH_HEIGHT_INVALID');
+  if (typeof message['commandReady'] !== 'boolean') throw new Error('RADAPTER_PUSH_COMMAND_READY_INVALID');
+  if (message['commandReadyReason'] !== null && typeof message['commandReadyReason'] !== 'string') {
+    throw new Error('RADAPTER_PUSH_COMMAND_READY_REASON_INVALID');
+  }
+  if (message['commandReady'] === true && message['commandReadyReason'] !== null) {
+    throw new Error('RADAPTER_PUSH_COMMAND_READY_REASON_INVALID');
+  }
+  if (message['commandReady'] === false && !String(message['commandReadyReason'] || '').trim()) {
+    throw new Error('RADAPTER_PUSH_COMMAND_READY_REASON_INVALID');
+  }
   return message as unknown as RuntimeAdapterPush;
 };
 

@@ -10,8 +10,9 @@ import { applyCommittedAccountFrameFollowups } from '../entity/tx/handlers/accou
 import { applyHtlcSecretFollowups } from '../entity/tx/handlers/account/committed-htlc-followups';
 import { handleResolveHtlcLockEntityTx } from '../entity/tx/handlers/htlc-direct';
 import { pruneSettledOriginatedHtlcRoutes } from '../entity/tx/htlc-route-lifecycle';
+import { publishEntityCandidateEffects } from '../machine/env-events';
 import { createEmptyEnv } from '../runtime';
-import type { AccountMachine, EntityReplica } from '../types';
+import type { AccountMachine, EntityCandidateEffect, EntityReplica } from '../types';
 
 const makeReplica = (entityId: string, counterpartyId: string): EntityReplica => {
   const account: AccountMachine = {
@@ -238,6 +239,7 @@ describe('htlc event contract and dispute tail', () => {
     });
     replica.state.htlcNotes.set(`hashlock:${hashlock}`, 'uid:customer-7');
 
+    const candidateEffects: EntityCandidateEffect[] = [];
     applyCommittedAccountFrameFollowups(replica.state, counterpartyId, {
       height: 1,
       timestamp: replica.state.timestamp,
@@ -255,8 +257,10 @@ describe('htlc event contract and dispute tail', () => {
       deltas: [],
       stateHash: `0x${'66'.repeat(32)}`,
       byLeft: true,
-    }, [], env);
+    }, [], env, candidateEffects);
 
+    expect(env.frameLogs.filter((entry) => entry.message === 'HtlcReceived')).toHaveLength(0);
+    publishEntityCandidateEffects(env, candidateEffects);
     expect(env.frameLogs.filter((entry) => entry.message === 'HtlcReceived')).toHaveLength(1);
     expect(env.frameLogs.find((entry) => entry.message === 'HtlcReceived')?.data).toMatchObject({
       entityId,
@@ -382,7 +386,7 @@ describe('htlc event contract and dispute tail', () => {
       deltas: [],
       stateHash: '',
       byLeft: true,
-    });
+    }, [], undefined, []);
 
     expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
     expect(replica.state.crontabState?.hooks.has(`htlc-secret-ack:${hashlock}`)).toBe(false);
@@ -420,7 +424,7 @@ describe('htlc event contract and dispute tail', () => {
       deltas: [],
       stateHash: '',
       byLeft: true,
-    });
+    }, [], undefined, []);
 
     expect(replica.state.htlcRoutes.has(hashlock)).toBe(true);
 
@@ -434,6 +438,7 @@ describe('htlc event contract and dispute tail', () => {
       newState: replica.state,
       outputs: [],
       mempoolOps,
+      candidateEffects: [],
     }, [{ hashlock, secret }]);
 
     expect(mempoolOps).toEqual([{
@@ -483,6 +488,7 @@ describe('htlc event contract and dispute tail', () => {
       createdTimestamp: replica.state.timestamp - 1000,
     });
 
+    const candidateEffects: EntityCandidateEffect[] = [];
     applyCommittedAccountFrameFollowups(replica.state, counterpartyId, {
       height: 1,
       timestamp: replica.state.timestamp,
@@ -499,11 +505,13 @@ describe('htlc event contract and dispute tail', () => {
       deltas: [],
       stateHash: '',
       byLeft: true,
-    }, [], env);
+    }, [], env, candidateEffects);
 
-    const finalizedEvents = env.frameLogs.filter((entry) => entry.message === 'HtlcFinalized');
     expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
     expect(account.mempool).toEqual([]);
+    expect(env.frameLogs.filter((entry) => entry.message === 'HtlcFinalized')).toHaveLength(0);
+    publishEntityCandidateEffects(env, candidateEffects);
+    const finalizedEvents = env.frameLogs.filter((entry) => entry.message === 'HtlcFinalized');
     expect(finalizedEvents).toHaveLength(1);
     expect(finalizedEvents[0]?.data).toMatchObject({
       entityId,
@@ -566,7 +574,7 @@ describe('htlc event contract and dispute tail', () => {
       deltas: [],
       stateHash: accountFrameHash,
       byLeft: true,
-    }, [], env);
+    }, [], env, []);
 
     expect(replica.state.htlcRoutes.get(hashlock)).toMatchObject({
       acceptedOfferHash: offerHash,
@@ -575,15 +583,19 @@ describe('htlc event contract and dispute tail', () => {
     });
     expect(env.frameLogs.some((entry) => entry.message === 'HtlcFinalized')).toBe(false);
 
+    const candidateEffects: EntityCandidateEffect[] = [];
     applyHtlcSecretFollowups({
       env,
       state: replica.state,
       newState: replica.state,
       outputs: [],
       mempoolOps: [],
+      candidateEffects,
     }, [{ hashlock, secret }]);
 
     expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
+    expect(env.frameLogs.filter((entry) => entry.message === 'HtlcFinalized')).toHaveLength(0);
+    publishEntityCandidateEffects(env, candidateEffects);
     expect(env.frameLogs.filter((entry) => entry.message === 'HtlcFinalized')).toHaveLength(1);
   });
 

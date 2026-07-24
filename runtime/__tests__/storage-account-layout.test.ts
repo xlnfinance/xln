@@ -6,41 +6,11 @@ import {
   readAccountStorageLayout,
   STORAGE_ACCOUNT_FIELD_TAG,
 } from '../storage/account-layout';
+import { encodeBuffer } from '../storage/codec';
 import { KEY_REBRANCH_NODE, keyLiveAccount, keyLiveAccountField } from '../storage/keys';
 import { withRebranchedValues } from '../storage/rebranched-db';
 import type { RuntimeDbLike, StorageAccountDoc } from '../storage/types';
-
-class MemoryDb implements RuntimeDbLike {
-  readonly rows = new Map<string, Buffer>();
-
-  async get(key: Buffer): Promise<Buffer> {
-    const value = this.rows.get(key.toString('hex'));
-    if (!value) {
-      const error = new Error('NotFound') as Error & { code?: string };
-      error.code = 'LEVEL_NOT_FOUND';
-      throw error;
-    }
-    return Buffer.from(value);
-  }
-
-  batch() {
-    const operations: Array<{ kind: 'put'; key: Buffer; value: Buffer } | { kind: 'del'; key: Buffer }> = [];
-    return {
-      put: (key: Buffer, value: Buffer) => operations.push({ kind: 'put', key, value }),
-      del: (key: Buffer) => operations.push({ kind: 'del', key }),
-      write: async () => {
-        for (const operation of operations) {
-          if (operation.kind === 'put') this.rows.set(operation.key.toString('hex'), Buffer.from(operation.value));
-          else this.rows.delete(operation.key.toString('hex'));
-        }
-      },
-    };
-  }
-
-  async *keys(): AsyncIterable<Buffer> {
-    for (const key of Array.from(this.rows.keys()).sort()) yield Buffer.from(key, 'hex');
-  }
-}
+import { MemoryRuntimeDb } from './fixtures/memory-runtime-db';
 
 const entityId = `0x${'11'.repeat(32)}`;
 const counterpartyId = `0x${'22'.repeat(32)}`;
@@ -60,6 +30,23 @@ const accountDoc = (large: boolean, status = 'active'): StorageAccountDoc => ({
   ])),
 } as unknown as StorageAccountDoc);
 
+const accountDocWithEncodedSize = (targetBytes: number): StorageAccountDoc => {
+  let low = 0;
+  let high = targetBytes * 2;
+  while (low <= high) {
+    const length = Math.floor((low + high) / 2);
+    const doc = {
+      ...accountDoc(false),
+      hankoSignature: 'x'.repeat(length),
+    } as StorageAccountDoc;
+    const encodedBytes = encodeBuffer(doc).byteLength;
+    if (encodedBytes === targetBytes) return doc;
+    if (encodedBytes < targetBytes) low = length + 1;
+    else high = length - 1;
+  }
+  throw new Error(`TEST_ACCOUNT_ENCODED_SIZE_UNREACHABLE:${targetBytes}`);
+};
+
 const applyLayout = async (
   db: RuntimeDbLike,
   layout: Awaited<ReturnType<typeof prepareAccountStorageLayout>>,
@@ -71,8 +58,44 @@ const applyLayout = async (
 };
 
 describe('typed Account persistence rebranching', () => {
+  test('switches the complete Account layout exactly at 10,000 encoded bytes', async () => {
+    const raw = new MemoryRuntimeDb();
+    const db = withRebranchedValues(raw);
+    const rootKey = keyLiveAccount(entityId, counterpartyId);
+    const inlineDoc = accountDocWithEncodedSize(MAX_INLINE_STORAGE_VALUE_BYTES - 1);
+    const splitDoc = accountDocWithEncodedSize(MAX_INLINE_STORAGE_VALUE_BYTES);
+
+    const inline = await prepareAccountStorageLayout(
+      db,
+      entityId,
+      counterpartyId,
+      rootKey,
+      inlineDoc,
+    );
+    expect(inline.logicalValue.byteLength).toBe(9_999);
+    expect(inline.representation).toBe('inline');
+    await applyLayout(db, inline);
+
+    const split = await prepareAccountStorageLayout(
+      db,
+      entityId,
+      counterpartyId,
+      rootKey,
+      splitDoc,
+    );
+    expect(split.logicalValue.byteLength).toBe(10_000);
+    expect(split.representation).toBe('fields');
+    await applyLayout(db, split);
+    expect((await readAccountStorageLayout(
+      db,
+      entityId,
+      counterpartyId,
+      rootKey,
+    ))?.logicalValue).toEqual(split.logicalValue);
+  });
+
   test('keeps small Accounts inline and rebranches oversized Accounts by typed field', async () => {
-    const raw = new MemoryDb();
+    const raw = new MemoryRuntimeDb();
     const db = withRebranchedValues(raw);
     const rootKey = keyLiveAccount(entityId, counterpartyId);
 
@@ -102,7 +125,7 @@ describe('typed Account persistence rebranching', () => {
   });
 
   test('rewrites only the changed typed field and collapses deterministically when small again', async () => {
-    const raw = new MemoryDb();
+    const raw = new MemoryRuntimeDb();
     const db = withRebranchedValues(raw);
     const rootKey = keyLiveAccount(entityId, counterpartyId);
     const first = await prepareAccountStorageLayout(db, entityId, counterpartyId, rootKey, accountDoc(true));
@@ -159,7 +182,7 @@ describe('typed Account persistence rebranching', () => {
     ] as const;
 
     for (const variant of variants) {
-      const raw = new MemoryDb();
+      const raw = new MemoryRuntimeDb();
       const db = withRebranchedValues(raw);
       const doc = accountDoc(false) as unknown as Record<string, unknown>;
       doc[variant.field] = variant.value;

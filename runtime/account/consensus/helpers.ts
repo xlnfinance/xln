@@ -1,4 +1,4 @@
-import type { AccountMachine, AccountTx, Delta, Env } from '../../types';
+import type { AccountMachine, AccountTx, Delta, EntityCandidateEffect, Env } from '../../types';
 import { createStructuredLogger } from '../../infra/logger';
 import { txFingerprint } from '../../state-helpers';
 import {
@@ -19,16 +19,6 @@ export const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 
 export const isEntityId32 = (value: unknown): value is string =>
   typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
-
-type DebugEventEmitter = {
-  sendDebugEvent(payload: Record<string, unknown>): void;
-};
-
-const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter =>
-  typeof value === 'object' &&
-  value !== null &&
-  'sendDebugEvent' in value &&
-  typeof value.sendDebugEvent === 'function';
 
 export const summarizeDeltasForLog = (deltas: Map<number, Delta>) =>
   Array.from(deltas.entries()).map(([tokenId, delta]) => ({
@@ -164,26 +154,27 @@ type TokenizedAccountTx = AccountTx & {
 export { resolveAutoRebalanceFeePolicy };
 
 export async function runPostFrameAutoRebalanceCheck(
-  env: Env,
+  _env: Env,
   accountMachine: AccountMachine,
   ourEntityId: string,
   counterpartyEntityId: string,
   frameHeight: number,
   owningEntityIsHub: boolean,
+  candidateEffects: EntityCandidateEffect[] = [],
 ): Promise<AccountTx[]> {
   try {
-    const p2p = env.runtimeState?.p2p;
     const emitRebalanceDebug = (payload: Record<string, unknown>) => {
-      if (isDebugEventEmitter(p2p)) {
-        p2p.sendDebugEvent({
+      candidateEffects.push({
+        kind: 'debug',
+        payload: {
           level: 'info',
           code: 'REB_STEP',
           step: 1,
           accountId: counterpartyEntityId,
           frameHeight,
           ...payload,
-        });
-      }
+        },
+      });
     };
     const emitSkip = (reason: string) => {
       emitRebalanceDebug({

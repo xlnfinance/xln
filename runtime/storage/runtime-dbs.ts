@@ -16,8 +16,31 @@ import {
 } from './fs-durability';
 
 type RuntimeState = NonNullable<Env['runtimeState']>;
+type RuntimeDbHandleRole = 'storage-current' | 'storage-previous' | 'frames' | 'infra';
 
 const storageLog = createStructuredLogger('runtime.storage');
+const closingRuntimeDbHandles = new Set<string>();
+
+const runtimeDbHandleKey = (env: Env, role: RuntimeDbHandleRole): string => {
+  if (role === 'storage-current') return resolveStorageDbPath(env, 'current');
+  if (role === 'storage-previous') return resolveStorageDbPath(env, 'previous');
+  if (role === 'frames') return resolveFrameDbPath(env);
+  return resolveDbPath(env, 'infra');
+};
+
+const beginRuntimeDbClose = (env: Env, role: RuntimeDbHandleRole): void => {
+  closingRuntimeDbHandles.add(runtimeDbHandleKey(env, role));
+};
+
+const endRuntimeDbClose = (env: Env, role: RuntimeDbHandleRole): void => {
+  closingRuntimeDbHandles.delete(runtimeDbHandleKey(env, role));
+};
+
+const assertRuntimeDbNotClosing = (env: Env, role: RuntimeDbHandleRole): void => {
+  if (closingRuntimeDbHandles.has(runtimeDbHandleKey(env, role))) {
+    throw new Error(`STORAGE_HANDLE_STATUS_CONFLICT:role=${role}:status=closing`);
+  }
+};
 
 const formatStorageError = (error: unknown): string =>
   error instanceof Error ? `${error.name}: ${error.message}` : String(error);
@@ -530,6 +553,7 @@ export const getStorageDb = (
   deps: RuntimeStorageDbDeps,
   role: StorageDbRole = 'current',
 ): Level<Buffer, Buffer> => {
+  assertRuntimeDbNotClosing(env, role === 'current' ? 'storage-current' : 'storage-previous');
   const state = deps.ensureRuntimeState(env);
   const fields = storageStateFields(role);
   const existing = state[fields.dbField] as Level<Buffer, Buffer> | undefined;
@@ -548,15 +572,19 @@ export const closeStorageDb = async (
   const fields = storageStateFields(role);
   const db = state[fields.dbField] as Level<Buffer, Buffer> | undefined;
   if (!db) return;
+  const handleRole = role === 'current' ? 'storage-current' : 'storage-previous';
+  beginRuntimeDbClose(env, handleRole);
+  state[fields.dbField] = null;
+  state[fields.openField] = null;
+  if (role === 'previous') delete state.storageVerifiedPreviousHeight;
+  else delete state.storageVerifiedCurrentHeight;
   try {
     await db.close();
-    state[fields.dbField] = null;
-    state[fields.openField] = null;
-    if (role === 'previous') delete state.storageVerifiedPreviousHeight;
-    else delete state.storageVerifiedCurrentHeight;
   } catch (error) {
     storageLog.warn('storage_db.close_failed', { role, error: formatStorageError(error) });
     throw error;
+  } finally {
+    endRuntimeDbClose(env, handleRole);
   }
 };
 
@@ -825,6 +853,7 @@ export const getInfraDb = (
   env: Env,
   deps: RuntimeStorageDbDeps,
 ): Level<Buffer, Buffer> => {
+  assertRuntimeDbNotClosing(env, 'infra');
   const state = deps.ensureRuntimeState(env);
   if (!state.infraDb) {
     const path = resolveDbPath(env, 'infra');
@@ -837,6 +866,7 @@ export const getFrameDb = (
   env: Env,
   deps: RuntimeStorageDbDeps,
 ): Level<Buffer, Buffer> => {
+  assertRuntimeDbNotClosing(env, 'frames');
   const state = deps.ensureRuntimeState(env);
   if (!state.frameDb) {
     state.frameDb = createRebranchedLevel(resolveFrameDbPath(env));
@@ -848,27 +878,34 @@ export const closeFrameDb = async (env: Env): Promise<void> => {
   const state = env.runtimeState;
   const db = state?.frameDb as Level<Buffer, Buffer> | undefined;
   if (!db) return;
+  beginRuntimeDbClose(env, 'frames');
+  state!.frameDb = null;
+  state!.frameDbOpenPromise = null;
+  delete state!.storageVerifiedHistoryHeight;
   try {
     await db.close();
-    state!.frameDb = null;
-    state!.frameDbOpenPromise = null;
-    delete state!.storageVerifiedHistoryHeight;
   } catch (error) {
     storageLog.warn('frame_db.close_failed', { error: formatStorageError(error) });
     throw error;
+  } finally {
+    endRuntimeDbClose(env, 'frames');
   }
 };
 
 export const closeInfraDb = async (env: Env): Promise<void> => {
   const state = env.runtimeState;
   if (!state?.infraDb) return;
+  const db = state.infraDb;
+  beginRuntimeDbClose(env, 'infra');
+  state.infraDb = null;
+  state.infraDbOpenPromise = null;
   try {
-    await state.infraDb.close();
-    state.infraDb = null;
-    state.infraDbOpenPromise = null;
+    await db.close();
   } catch (error) {
     storageLog.warn('infra_db.close_failed', { error: formatStorageError(error) });
     throw error;
+  } finally {
+    endRuntimeDbClose(env, 'infra');
   }
 };
 

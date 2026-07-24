@@ -138,6 +138,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.HankoCodec__factory>;
     getContractFactory(
+      name: "HankoVerifier",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.HankoVerifier__factory>;
+    getContractFactory(
       name: "HashLadder",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.HashLadder__factory>;
@@ -157,6 +161,10 @@ declare module "hardhat/types/runtime" {
       name: "EntityProviderSupplyHarness",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.EntityProviderSupplyHarness__factory>;
+    getContractFactory(
+      name: "FeeOnTransferERC20",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.FeeOnTransferERC20__factory>;
     getContractFactory(
       name: "HashLadderHarness",
       signerOrOptions?: ethers.Signer | FactoryOptions
@@ -338,6 +346,11 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.HankoCodec>;
     getContractAt(
+      name: "HankoVerifier",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.HankoVerifier>;
+    getContractAt(
       name: "HashLadder",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -362,6 +375,11 @@ declare module "hardhat/types/runtime" {
       address: string | ethers.Addressable,
       signer?: ethers.Signer
     ): Promise<Contracts.EntityProviderSupplyHarness>;
+    getContractAt(
+      name: "FeeOnTransferERC20",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.FeeOnTransferERC20>;
     getContractAt(
       name: "HashLadderHarness",
       address: string | ethers.Addressable,
@@ -518,6 +536,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.HankoCodec>;
     deployContract(
+      name: "HankoVerifier",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.HankoVerifier>;
+    deployContract(
       name: "HashLadder",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.HashLadder>;
@@ -537,6 +559,10 @@ declare module "hardhat/types/runtime" {
       name: "EntityProviderSupplyHarness",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.EntityProviderSupplyHarness>;
+    deployContract(
+      name: "FeeOnTransferERC20",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.FeeOnTransferERC20>;
     deployContract(
       name: "HashLadderHarness",
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -718,6 +744,11 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.HankoCodec>;
     deployContract(
+      name: "HankoVerifier",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.HankoVerifier>;
+    deployContract(
       name: "HashLadder",
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -742,6 +773,11 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.EntityProviderSupplyHarness>;
+    deployContract(
+      name: "FeeOnTransferERC20",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.FeeOnTransferERC20>;
     deployContract(
       name: "HashLadderHarness",
       args: any[],

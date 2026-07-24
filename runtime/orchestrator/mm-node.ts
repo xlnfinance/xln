@@ -24,6 +24,7 @@ import { createRuntimeIngressReceiptStore } from '../server/ingress-receipts';
 import { isLocalOperatorRequest, resolveSocketPeerAddress } from '../server/health-redaction';
 import { requiresLocalNodeOperator } from '../server/node-http-access';
 import { handleRuntimeInputStatus } from '../server/runtime-input-control';
+import { reportManagedChildFatal } from './managed-child-fatal-ipc';
 import { drainJWatcherBacklog } from '../jadapter/backlog-drain';
 import {
   getP2PState,
@@ -70,6 +71,7 @@ import {
   hasCommittedAccountState,
   isCanonicalAccountOpener,
   isAccountConsensusReady,
+  serializeAccountDelta,
   settleRuntimeFor,
   sleep,
   summarizeRuntimeQuiescence,
@@ -131,6 +133,7 @@ import {
   isBootstrapWorkWithinDeadline,
   updateBootstrapWorkStartedAt,
 } from './bootstrap-progress-deadline';
+import { deriveMarketMakerChildReadiness } from './market-maker-child-readiness';
 
 type Args = {
   name: string;
@@ -392,20 +395,13 @@ const MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
   1,
   Number(process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '1000'),
 );
-const MARKET_MAKER_CROSS_LEVELS_PER_PAIR = Math.max(
-  1,
-  Math.min(1000, Number(process.env['MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '10')),
-);
+// One canonical visible ladder for every market. A production shell override
+// previously reduced cross-J to three levels while same-J exposed ten, so
+// health was green although users saw a materially thinner cross-J book.
+const MARKET_MAKER_LEVELS_PER_SIDE = 10;
 const MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE = Math.max(
   1,
   Math.min(1000, Number(process.env['MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE'] || '1000')),
-);
-const MARKET_MAKER_MAX_LEVELS_PER_PAIR = Math.max(
-  1,
-  Math.min(
-    1000,
-    Number(process.env['MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '10'),
-  ),
 );
 const MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL = String(
   process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL'] || '',
@@ -1187,7 +1183,7 @@ export const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: num
       Math.floor(LIMITS.MAX_ACCOUNT_SAME_J_SWAP_OFFERS / Math.max(1, pairContexts.length * 2)),
     );
     const maxLevels = Math.min(
-      MARKET_MAKER_MAX_LEVELS_PER_PAIR,
+      MARKET_MAKER_LEVELS_PER_SIDE,
       maxLevelsByAccountLimit,
       pairContexts.reduce((max, entry) => Math.max(max, entry.levelProfile.offsetsBps.length), 0),
     );
@@ -1383,7 +1379,7 @@ export const buildMarketMakerCrossOfferSpecs = (
       const pairPolicy = getSwapPairPolicyByBaseQuote(oriented.baseTokenId, oriented.quoteTokenId);
       const levelProfile = getMarketMakerLevelProfile(oriented.baseTokenId, oriented.quoteTokenId);
       const levelCount = Math.min(
-        MARKET_MAKER_CROSS_LEVELS_PER_PAIR,
+        MARKET_MAKER_LEVELS_PER_SIDE,
         levelProfile.offsetsBps.length,
       );
 
@@ -1543,7 +1539,7 @@ const isSameQuoteJobDepthReady = (env: Env, job: SameQuoteJob): boolean => {
       job.context.entityId,
       job.hub.entityId,
       pair,
-    ) >= expected;
+    ) === expected;
   });
 };
 
@@ -2165,7 +2161,7 @@ const buildMarketMakerCrossPlanSummary = (
       );
     }
   }
-  const expectedOffersPerPair = expectedRoutes > 0 ? MARKET_MAKER_CROSS_LEVELS_PER_PAIR : 0;
+  const expectedOffersPerPair = expectedRoutes > 0 ? MARKET_MAKER_LEVELS_PER_SIDE : 0;
   return {
     applicable: expectedRoutes > 0,
     expectedJobs,
@@ -2211,7 +2207,7 @@ export const buildMarketMakerCrossHealth = (
           pairId,
           offers,
           ready: expectedOffers > 0 && offers > 0,
-          depthReady: expectedOffers > 0 && offers >= expectedOffers,
+          depthReady: expectedOffers > 0 && offers === expectedOffers,
           expectedOffers,
           sourceTokenIds,
           targetTokenIds,
@@ -2233,7 +2229,7 @@ export const buildMarketMakerCrossHealth = (
       targetHubEntityId: group.targetHubEntityId,
       offers,
       ready: pairs.length > 0 && pairs.every(pair => pair.ready) && blockers.length === 0,
-      depthReady: expectedOffers > 0 && offers >= expectedOffers && pairs.every(pair => pair.depthReady),
+      depthReady: expectedOffers > 0 && offers === expectedOffers && pairs.every(pair => pair.depthReady),
       blockers,
       pairs,
     };
@@ -2844,7 +2840,7 @@ export const getMarketMakerHealth = (
         pairId: pair.pairId,
         offers: pairOffers,
         ready: accountReady && expectedPairOffers > 0 && pairOffers > 0,
-        depthReady: accountReady && expectedPairOffers > 0 && pairOffers >= expectedPairOffers,
+        depthReady: accountReady && expectedPairOffers > 0 && pairOffers === expectedPairOffers,
         expectedOffers: expectedPairOffers,
       };
     });
@@ -2852,7 +2848,7 @@ export const getMarketMakerHealth = (
       hubEntityId,
       offers,
       ready: accountReady && expectedHubOffers > 0 && pairHealth.every((pair) => pair.ready),
-      depthReady: accountReady && expectedHubOffers > 0 && offers >= expectedHubOffers && pairHealth.every((pair) => pair.depthReady),
+      depthReady: accountReady && expectedHubOffers > 0 && offers === expectedHubOffers && pairHealth.every((pair) => pair.depthReady),
       blockers: blocker ? [blocker] : [],
       pairs: pairHealth,
     };
@@ -3331,6 +3327,12 @@ const run = async (): Promise<void> => {
     tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS,
     maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
     maxEntityTxsPerFrame: MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
+    onFatal: async payload => {
+      await reportManagedChildFatal({
+        runtimeId: String(env.runtimeId || ''),
+        ...payload,
+      });
+    },
   });
   let startupPhase = 'boot';
   let externalIngressReady = false;
@@ -3616,8 +3618,17 @@ const run = async (): Promise<void> => {
       ? rawMarketMakerHealth
       : { ...rawMarketMakerHealth, ok: false };
     const runtimeHalted = env.runtimeState?.halted === true;
+    const gossipReady = visibleHubs.length === resolvedArgs.meshHubNames.length;
+    const readiness = deriveMarketMakerChildReadiness({
+      runtimeHalted,
+      startupPhase,
+      gossipReady,
+      marketMakerReady: marketMakerHealth.ok === true,
+    });
     cachedHealthResponseJson = safeStringify({
-      ok: !runtimeHalted && visibleHubs.length === resolvedArgs.meshHubNames.length,
+      ok: readiness.ready,
+      live: readiness.live,
+      ready: readiness.ready,
       name: resolvedArgs.name,
       height: Math.max(0, Math.floor(Number(env.height || 0))),
       entityId: activeEntityId,
@@ -3641,7 +3652,7 @@ const run = async (): Promise<void> => {
       gossip: {
         visibleHubNames: visibleHubs.map(profile => profile.name),
         visibleHubIds: visibleHubs.map(profile => profile.entityId),
-        ready: visibleHubs.length === resolvedArgs.meshHubNames.length,
+        ready: gossipReady,
       },
       bootstrap: {
         readyHash: bootstrapReadyHash,
@@ -3720,6 +3731,7 @@ const run = async (): Promise<void> => {
         tokenId,
         hasDelta: Boolean(account?.deltas?.has(tokenId)),
         outCapacity: account ? getEntityOutCapacity(account, entityId, tokenId).toString() : '0',
+        delta: serializeAccountDelta(account?.deltas?.get(tokenId)),
       })),
       runtime: {
         height: Number(env.height ?? 0),

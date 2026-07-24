@@ -1,22 +1,25 @@
-import { expect, test } from './global-setup.mts';
+import { allowBrowserIssue, allowDebugIncident, expect, test } from './global-setup.mts';
 import {
   APP_BASE_URL,
   API_BASE_URL,
   ensureE2EBaseline,
+  getHealth,
   waitForNamedHubs,
 } from './utils/e2e-baseline';
 import { openAccountWorkspaceTab } from './utils/e2e-account-workspace';
 import { resolveRuntimeImportAppUrl } from './utils/e2e-runtime-import';
 import { closeRuntimeContext } from './utils/e2e-runtime-shutdown.mts';
 import { deriveSignerAddressSync } from '../runtime/account/crypto';
+import { HUB_MESH_CREDIT_AMOUNT } from '../runtime/orchestrator/mesh-common';
 import { decodeRuntimeAdapterRequest } from '../runtime/radapter/codec';
 import { signRuntimeAdapterServerIdentity } from '../runtime/radapter/server-identity-signer';
+import { deriveRuntimeAdapterCapabilityToken } from '../runtime/radapter/auth';
 import type { RuntimeAdapterRequest } from '../runtime/radapter/types';
 import type { Env } from '../runtime/types';
+import { captureLocatorScreenshot } from './utils/e2e-screenshots';
 
 const REMOTE_RUNTIME_IMPORT_STORAGE_KEY = 'xln-remote-runtime-imports';
 const REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY = 'xln-remote-runtime-import-last-result';
-const HUB_MESH_CREDIT_AMOUNT = '1000000000000';
 const REMOTE_E2E_WAIT_MS = 15_000;
 
 type RuntimeImportSummary = {
@@ -53,7 +56,7 @@ type RuntimeImportSummary = {
 
 type RuntimeImportCapability = {
   label: string;
-  access: 'read' | 'admin';
+  access: 'admin';
   wsUrl: string;
   token: string;
 };
@@ -75,9 +78,11 @@ type AdminControlProbe = {
 type RuntimeAdapterDebugSurface = {
   query: {
     head: <T = unknown>() => Promise<T>;
+    frame: <T = unknown>(height: number) => Promise<T>;
     entities: <T = unknown>(query?: Record<string, unknown>) => Promise<T>;
     viewFrame: <T = unknown>(query?: Record<string, unknown>) => Promise<T>;
     historyFrameBatch: <T = unknown>(query: Record<string, unknown>) => Promise<T>;
+    timelineIndex: <T = unknown>(query?: Record<string, unknown>) => Promise<T>;
     activity: <T = unknown>(query: Record<string, unknown>) => Promise<T>;
     solvencySummary: <T = unknown>(query?: Record<string, unknown>) => Promise<T>;
     checkpoints: <T = unknown>() => Promise<T>;
@@ -93,8 +98,19 @@ type RuntimeAdapterDebugSurface = {
 
 type E2EHealthSnapshot = Awaited<ReturnType<typeof ensureE2EBaseline>>;
 
-const installOneMillionRuntimeAdapterSocket = async (page: import('@playwright/test').Page): Promise<void> => {
+const installOneMillionRuntimeAdapterSocket = async (
+  page: import('@playwright/test').Page,
+  options: {
+    authLevel?: 'inspect' | 'admin';
+    commandReady?: boolean;
+    commandReadyReason?: string | null;
+  } = {},
+): Promise<{ runtimeId: string; wsUrl: string }> => {
   const runtimeSeed = 'one-million-runtime-adapter-fixture';
+  const wsUrl = 'ws://one-million-runtime.invalid/rpc';
+  const authLevel = options.authLevel ?? 'inspect';
+  const commandReady = options.commandReady ?? true;
+  const commandReadyReason = commandReady ? null : options.commandReadyReason ?? 'phase=halted';
   const identityEnv = {
     runtimeSeed,
     runtimeId: deriveSignerAddressSync(runtimeSeed, '1').toLowerCase(),
@@ -108,10 +124,12 @@ const installOneMillionRuntimeAdapterSocket = async (page: import('@playwright/t
       ...(request.op === 'auth'
         ? {
             authPayload: {
-              authLevel: 'inspect' as const,
+              authLevel,
               commandLaneKind: 'capability' as const,
               currentHeight: 42,
               nextCommandSequence: 1,
+              commandReady,
+              commandReadyReason,
               ...signRuntimeAdapterServerIdentity(identityEnv, request.challenge),
             },
           }
@@ -132,6 +150,7 @@ const installOneMillionRuntimeAdapterSocket = async (page: import('@playwright/t
       retainSnapshots: 3,
       epochMaxBytes: 1,
       accountMerkleRadix: 16,
+      epochReplayBytes: 0,
       retainedHistoryBytes: 4096,
     };
     const counterparties = Array.from({ length: 10 }, (_, index) => `0x${(index + 1).toString(16).padStart(64, '0')}`);
@@ -211,6 +230,7 @@ const installOneMillionRuntimeAdapterSocket = async (page: import('@playwright/t
       maxPayloadBytes: 0,
       viewFrameBytes: 0,
       maxAccountItems: 0,
+      requestOps: {} as Record<string, number>,
       events: [] as string[],
     };
     (window as unknown as { __xlnOneMillionRuntimeAdapterStats: typeof stats }).__xlnOneMillionRuntimeAdapterStats = stats;
@@ -263,6 +283,7 @@ const installOneMillionRuntimeAdapterSocket = async (page: import('@playwright/t
           }>;
         }).__xlnDecodeOneMillionRuntimeAdapterRequest;
         void decodeRequest(bytes).then((request) => {
+          stats.requestOps[request.op] = (stats.requestOps[request.op] ?? 0) + 1;
           const payload = request.op === 'auth'
             ? request.authPayload
             : request.path === 'head'
@@ -298,6 +319,7 @@ const installOneMillionRuntimeAdapterSocket = async (page: import('@playwright/t
       value: OneMillionRuntimeAdapterSocket,
     });
   });
+  return { runtimeId: String(identityEnv.runtimeId), wsUrl };
 };
 
 const readAdminControlProbe = async (
@@ -479,7 +501,7 @@ const resolveHubRuntimeEndpoint = async (
 
 const readRuntimeImportCapabilities = async (
   page: import('@playwright/test').Page,
-  access: 'read' | 'admin',
+  access: 'admin',
   timeoutMs = 60_000,
 ): Promise<RuntimeImportCapability[]> => {
   const startedAt = Date.now();
@@ -516,7 +538,7 @@ const readRuntimeImportCapabilities = async (
 const resolveRuntimeImportCapability = async (
   page: import('@playwright/test').Page,
   endpoint: HubRuntimeEndpoint,
-  access: 'read' | 'admin',
+  access: 'admin',
 ): Promise<RuntimeImportCapability> => {
   const entries = await readRuntimeImportCapabilities(page, access);
   const expectedWsUrl = normalizeRuntimeWsUrl(endpoint.wsUrl);
@@ -572,7 +594,8 @@ const expectHubMeshHealthy = (health: E2EHealthSnapshot): void => {
   const pairs = health.hubMesh?.pairs ?? [];
   for (const pair of pairs) {
     expect(pair.ok, `hub mesh pair ${pair.left}->${pair.right} must have mutual credit`).toBe(true);
-    expect(pair.expectedCreditAmount, `hub mesh pair ${pair.left}->${pair.right} credit amount`).toBe(HUB_MESH_CREDIT_AMOUNT);
+    expect(pair.expectedCreditAmount, `hub mesh pair ${pair.left}->${pair.right} credit amount`)
+      .toBe(HUB_MESH_CREDIT_AMOUNT.toString());
   }
 };
 
@@ -1006,7 +1029,7 @@ test('local runtime creation while remote is active switches controller to embed
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
   const wsUrl = h1Endpoint.wsUrl;
-  const key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
+  const key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
 
   await page.goto(`${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(key)}`, {
     waitUntil: 'domcontentloaded',
@@ -1019,7 +1042,7 @@ test('local runtime creation while remote is active switches controller to embed
       };
       return String((view as any).__xln?.view?.runtimeId || '') === runtimeId &&
         Number((view as any).__xln?.view?.height || 0) > 0 &&
-        (view as any).__xln?.adapter?.status().authLevel === 'inspect' &&
+        (view as any).__xln?.adapter?.status().authLevel === 'admin' &&
         localStorage.getItem('xln-runtime-adapter-ws') === ws;
     },
     { runtimeId: h1Endpoint.runtimeId, ws: wsUrl },
@@ -1320,10 +1343,10 @@ test('admin remote runtime opens swap workspace from RuntimeView projection', { 
   ).toEqual([]);
 });
 
-test('read remote runtime opens normal app workspace', { tag: '@functional' }, async ({ page }) => {
+test('admin remote runtime opens normal app workspace', { tag: '@functional' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
-  const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
+  const adminKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
   const consoleProblems: string[] = [];
   page.on('console', (message) => {
     const text = message.text();
@@ -1333,7 +1356,7 @@ test('read remote runtime opens normal app workspace', { tag: '@functional' }, a
   page.on('pageerror', (error) => consoleProblems.push(`pageerror: ${error.message}`));
 
   await page.goto(
-    `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(readKey)}#accounts`,
+    `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(adminKey)}#accounts`,
     { waitUntil: 'domcontentloaded' },
   );
 
@@ -1344,7 +1367,7 @@ test('read remote runtime opens normal app workspace', { tag: '@functional' }, a
         __xlnRuntimeAdapter?: { status: () => { connected?: boolean; authLevel?: string | null } };
       };
       const status = (view as any).__xln?.adapter?.status();
-      return status?.connected === true && status.authLevel === 'inspect' && Number((view as any).__xln?.view?.height || 0) > 0;
+      return status?.connected === true && status.authLevel === 'admin' && Number((view as any).__xln?.view?.height || 0) > 0;
     },
     null,
     { timeout: REMOTE_E2E_WAIT_MS },
@@ -1371,7 +1394,7 @@ test('read remote runtime opens normal app workspace', { tag: '@functional' }, a
     };
   });
 
-  expect(result.authLevel).toBe('inspect');
+  expect(result.authLevel).toBe('admin');
   expect(result.walletLens).toBe(false);
   expect(result.opsLens).toBe(false);
   expect(result.liquidityLens).toBe(false);
@@ -1386,14 +1409,14 @@ test('read remote runtime opens normal app workspace', { tag: '@functional' }, a
   ).toEqual([]);
 });
 
-test('inspect remote runtime does not expose RuntimeInput send and keeps account projection readable', { tag: '@resilience' }, async ({ page }) => {
+test('admin remote runtime keeps raw RuntimeInput send private and account projection readable', { tag: '@resilience' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const hubs = await waitForNamedHubs(page, ['h1'], { apiBaseUrl: API_BASE_URL });
   const h1 = String(hubs.h1 || '').toLowerCase();
   expect(h1).toMatch(/^0x[0-9a-f]{64}$/);
 
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
-  const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
+  const adminKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
   const consoleProblems: string[] = [];
   page.on('console', (message) => {
     const text = message.text();
@@ -1403,7 +1426,7 @@ test('inspect remote runtime does not expose RuntimeInput send and keeps account
   page.on('pageerror', (error) => consoleProblems.push(`pageerror: ${error.message}`));
 
   await page.goto(
-    `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(readKey)}#accounts`,
+    `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(adminKey)}#accounts`,
     { waitUntil: 'domcontentloaded' },
   );
 
@@ -1422,8 +1445,8 @@ test('inspect remote runtime does not expose RuntimeInput send and keeps account
       };
       const status = (view as any).__xln?.adapter?.status();
       return status?.connected === true &&
-        status.authLevel === 'inspect' &&
-        status.permissions === 'read' &&
+        status.authLevel === 'admin' &&
+        status.permissions === 'write' &&
         String((view as any).__xln?.view?.runtimeId || status.runtimeId || '') === expectedRuntimeId &&
         Number((view as any).__xln?.view?.height || 0) > 0;
     },
@@ -1479,10 +1502,10 @@ test('inspect remote runtime does not expose RuntimeInput send and keeps account
     };
   }, { hubId: h1 });
 
-  expect(result.authLevelBefore).toBe('inspect');
-  expect(result.authLevelAfter).toBe('inspect');
-  expect(result.permissionsBefore).toBe('read');
-  expect(result.permissionsAfter).toBe('read');
+  expect(result.authLevelBefore).toBe('admin');
+  expect(result.authLevelAfter).toBe('admin');
+  expect(result.permissionsBefore).toBe('write');
+  expect(result.permissionsAfter).toBe('write');
   expect(result.sendPresent).toBe(false);
   expect(result.beforeHeight).toBeGreaterThan(0);
   expect(result.afterHeight).toBeGreaterThanOrEqual(result.beforeHeight);
@@ -1499,7 +1522,7 @@ test('inspect remote runtime does not expose RuntimeInput send and keeps account
 test('address explorer bootstraps remote runtime projection outside app shell', { tag: '@functional' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
-  const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
+  const adminKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
   const consoleProblems: string[] = [];
   page.on('console', (message) => {
     const text = message.text();
@@ -1509,7 +1532,7 @@ test('address explorer bootstraps remote runtime projection outside app shell', 
   page.on('pageerror', (error) => consoleProblems.push(`pageerror: ${error.message}`));
 
   await page.goto(
-    `${APP_BASE_URL}/address?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(readKey)}`,
+    `${APP_BASE_URL}/address?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(adminKey)}`,
     { waitUntil: 'domcontentloaded' },
   );
 
@@ -1519,7 +1542,7 @@ test('address explorer bootstraps remote runtime projection outside app shell', 
         __xlnRuntimeAdapter?: { status: () => { connected?: boolean; authLevel?: string | null; height?: number } };
       };
       const status = (view as any).__xln?.adapter?.status();
-      return status?.connected === true && status.authLevel === 'inspect' && Number(status.height || 0) > 0;
+      return status?.connected === true && status.authLevel === 'admin' && Number(status.height || 0) > 0;
     },
     null,
     { timeout: REMOTE_E2E_WAIT_MS },
@@ -1551,7 +1574,7 @@ test('address explorer bootstraps remote runtime projection outside app shell', 
   expect(directory.rows).toBeGreaterThan(0);
   expect(directory.firstAddress).toMatch(/^0x[0-9a-f]{64}$/);
   expect(directory.adapter?.connected).toBe(true);
-  expect(directory.adapter?.authLevel).toBe('inspect');
+  expect(directory.adapter?.authLevel).toBe('admin');
   expect(directory.storageMode).toBe('remote');
   expect(directory.storageWs).toBe(h1Endpoint.wsUrl);
   expect(directory.sessionKeyPresent).toBe(true);
@@ -1577,7 +1600,6 @@ test('admin remote runtime opens settings projection without legacy Env settings
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
   const adminKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
-  const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
   const consoleProblems: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') consoleProblems.push(message.text());
@@ -1634,7 +1656,7 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
   const wsUrl = h1Endpoint.wsUrl;
-  const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
+  const adminKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
   const qaApiRequests: string[] = [];
   const debugProjectionRequests: string[] = [];
   const consoleProblems: string[] = [];
@@ -1694,17 +1716,17 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
 
   const adapterPanel = page.locator('#runtime-adapter');
   await adapterPanel.locator('input[placeholder="ws://127.0.0.1:8080/rpc"]').fill(wsUrl);
-  await adapterPanel.locator('input[placeholder="read/admin token"]').fill(readKey);
+  await adapterPanel.locator('input[placeholder="read/admin token"]').fill(adminKey);
   await adapterPanel.getByRole('button', { name: 'Connect', exact: true }).click();
   await expect(adapterPanel).toContainText('connected', { timeout: REMOTE_E2E_WAIT_MS });
-  await expect(adapterPanel).toContainText('inspect', { timeout: REMOTE_E2E_WAIT_MS });
+  await expect(adapterPanel).toContainText('admin', { timeout: REMOTE_E2E_WAIT_MS });
   await page.waitForFunction(() => {
     const panel = document.querySelector('#runtime-adapter');
     const text = panel?.textContent || '';
     return /Entities\s+[1-9]/.test(text) && /Latest\s+[1-9]/.test(text);
   }, null, { timeout: REMOTE_E2E_WAIT_MS });
 
-  await page.goto(`${APP_BASE_URL}/radapter?ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(readKey)}`, {
+  await page.goto(`${APP_BASE_URL}/radapter?ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(adminKey)}`, {
     waitUntil: 'domcontentloaded',
   });
   await expect(page).toHaveURL(/\/app#accounts$/);
@@ -1713,7 +1735,7 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
       __xlnRuntimeAdapter?: { status: () => { connected?: boolean; authLevel?: string | null } };
     };
     const status = (view as any).__xln?.adapter?.status();
-    return status?.connected === true && status.authLevel === 'inspect';
+    return status?.connected === true && status.authLevel === 'admin';
   }, null, { timeout: REMOTE_E2E_WAIT_MS });
   const appState = await page.evaluate(() => ({
     url: window.location.href,
@@ -1724,8 +1746,8 @@ test('health admin keeps QA evidence link-only and runtime adapter local', { tag
   expect(appState.url).not.toContain('runtime=remote');
   expect(appState.url).not.toContain('ws=');
   expect(appState.activeWsUrl).toBe(wsUrl);
-  expect(appState.storedAccess).toBe('read');
-  expect(appState.sessionKey).toBe(readKey);
+  expect(appState.storedAccess).toBe('admin');
+  expect(appState.sessionKey).toBe(adminKey);
   await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
 
   await page.goto(`${APP_BASE_URL}/admin`, { waitUntil: 'domcontentloaded' });
@@ -1780,6 +1802,328 @@ test('health runtime adapter renders 1M aggregate snapshot without freezing', { 
   expect(stats?.maxAccountItems).toBe(10);
 });
 
+test('halted remote runtime disables wallet commands and links the root incident', { tag: '@resilience' }, async ({ page }, testInfo) => {
+  const fixture = await installOneMillionRuntimeAdapterSocket(page, {
+    authLevel: 'admin',
+    commandReady: false,
+    commandReadyReason: 'phase=halted',
+  });
+  const token = deriveRuntimeAdapterCapabilityToken(
+    'halted-runtime-e2e-capability',
+    'admin',
+    Date.now() + 60_000,
+    { audience: fixture.runtimeId },
+  );
+  const fingerprint = 'runtime-halted-e2e12345';
+  await page.route('**/api/debug/incidents?**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        incidents: [{
+          fingerprint,
+          code: 'RUNTIME_HALTED',
+          runtimeId: fixture.runtimeId,
+        }],
+      }),
+    });
+  });
+
+  await page.goto(
+    `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(fixture.wsUrl)}&token=${encodeURIComponent(token)}#accounts`,
+    { waitUntil: 'domcontentloaded' },
+  );
+  await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  const gate = page.getByTestId('runtime-command-gate');
+  await expect(gate).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.getByTestId('runtime-command-gate-reason')).toHaveText('phase=halted');
+  await expect(page.getByTestId('runtime-command-gate-incident')).toHaveText(fingerprint);
+
+  let faucetPosts = 0;
+  await page.route('**/api/faucet/**', async route => {
+    if (route.request().method() === 'POST') faucetPosts += 1;
+    await route.fulfill({ status: 503, contentType: 'application/json', body: '{"success":false}' });
+  });
+
+  await page.getByTestId('tab-assets').click();
+  const assetFaucet = page.getByTestId('external-faucet-USDC');
+  await expect(assetFaucet).toBeDisabled();
+  await assetFaucet.evaluate((button: HTMLButtonElement) => button.click());
+
+  await openAccountWorkspaceTab(page, 'open');
+  await expect(page.getByTestId('open-account-submit')).toBeDisabled();
+  await openAccountWorkspaceTab(page, 'send');
+  await expect(page.getByText('Payments are only available in LIVE mode.')).toBeVisible();
+  await openAccountWorkspaceTab(page, 'swap');
+  await expect(page.getByTestId('swap-submit-order')).toBeDisabled();
+  await openAccountWorkspaceTab(page, 'lending');
+  await expect(page.getByTestId('lending-offer-submit')).toBeDisabled();
+
+  const mutationCounts = await page.evaluate(() => {
+    const stats = (window as unknown as {
+      __xlnOneMillionRuntimeAdapterStats?: { requestOps?: Record<string, number> };
+    }).__xlnOneMillionRuntimeAdapterStats;
+    return { sends: Number(stats?.requestOps?.['send'] || 0) };
+  });
+  expect(mutationCounts).toEqual({ sends: 0 });
+  expect(faucetPosts).toBe(0);
+  const readiness = await page.evaluate(() => {
+    const status = (window as typeof window & {
+      __xln?: { adapter?: { status?: () => Record<string, unknown> } };
+    }).__xln?.adapter?.status?.();
+    return {
+      ready: status?.['commandReady'],
+      reason: status?.['commandReadyReason'],
+    };
+  });
+  expect(readiness).toEqual({ ready: false, reason: 'phase=halted' });
+  await captureLocatorScreenshot(gate, testInfo, 'runtime-command-gate-halted.png', {
+    ux: {
+      title: 'Runtime fail-stop command gate',
+      group: 'system-health',
+      description: 'Canonical halted state disables wallet money actions and links the durable root incident.',
+      platform: 'desktop',
+      tags: ['runtime', 'incident', 'fail-stop'],
+    },
+  });
+});
+
+test('real H2 replacement gates browser money commands until verified restore', { tag: '@resilience' }, async ({ page }, testInfo) => {
+  test.setTimeout(180_000);
+  allowBrowserIssue({
+    type: 'console',
+    severity: 'error',
+    message: /WebSocket connection to 'ws:\/\/127\.0\.0\.1:\d+\/rpc' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED/,
+  });
+  allowBrowserIssue({
+    type: 'http',
+    severity: 'error',
+    status: 503,
+    url: '/api/external-wallet/snapshot',
+  });
+  allowBrowserIssue({
+    type: 'console',
+    severity: 'error',
+    message: 'Failed to load resource: the server responded with a status of 503',
+    url: '/app#accounts',
+  });
+  allowDebugIncident({
+    source: 'orchestrator',
+    code: 'CHILD_UNEXPECTED_EXIT',
+    message: 'child.unexpected_exit',
+  });
+  allowDebugIncident({
+    source: 'orchestrator',
+    code: 'H2_UNEXPECTED_EXIT',
+    message: 'H2_UNEXPECTED_EXIT code=null signal=SIGKILL',
+  });
+
+  const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
+  const hubs = await waitForNamedHubs(page, ['h1', 'h2'], { apiBaseUrl: API_BASE_URL });
+  const h1 = String(hubs.h1 || '').toLowerCase();
+  const h2Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H2');
+  const adminKey = (await resolveRuntimeImportCapability(page, h2Endpoint, 'admin')).token;
+
+  await page.goto(
+    `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h2Endpoint.wsUrl)}&token=${encodeURIComponent(adminKey)}#accounts`,
+    { waitUntil: 'domcontentloaded' },
+  );
+  await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect.poll(async () => await page.evaluate(() => {
+    const status = (window as any).__xln?.adapter?.status?.();
+    return {
+      connected: status?.connected === true,
+      authLevel: String(status?.authLevel || ''),
+      commandReady: status?.commandReady === true,
+      runtimeId: String((window as any).__xln?.view?.runtimeId || '').toLowerCase(),
+    };
+  }), {
+    timeout: 30_000,
+    intervals: [100, 250, 500],
+  }).toEqual({
+    connected: true,
+    authLevel: 'admin',
+    commandReady: true,
+    runtimeId: h2Endpoint.runtimeId,
+  });
+
+  await openAccountWorkspaceTab(page, 'open');
+  const recipient = page.locator('input[placeholder="Select or paste entity ID"]:visible').first();
+  await expect(recipient).toBeVisible();
+  await recipient.fill(h1);
+  const submit = page.getByTestId('open-account-submit');
+  await expect(submit).toBeEnabled();
+
+  const beforeStatus = await page.evaluate(() => {
+    const status = (window as any).__xln?.adapter?.status?.();
+    return {
+      height: Number(status?.height || 0),
+      runtimeId: String((window as any).__xln?.view?.runtimeId || '').toLowerCase(),
+    };
+  });
+  const beforePersisted = await page.evaluate(async () => {
+    const adapter = (window as any).__xln?.adapter;
+    const head = await adapter.query.head();
+    const latestHeight = Number(head?.latestHeight || 0);
+    const frame = await adapter.query.frame(latestHeight);
+    return {
+      latestHeight,
+      frameHash: String(frame?.frameHash || ''),
+      postStateHash: String(frame?.postStateHash || ''),
+      stateHash: String(frame?.stateHash || ''),
+      canonicalStateHash: String(frame?.canonicalStateHash || ''),
+      commitment: String(frame?.postStateHash || ''),
+    };
+  });
+  expect(beforePersisted.latestHeight).toBeGreaterThan(0);
+  expect(beforePersisted.commitment).toMatch(/^0x[0-9a-f]{64}$/);
+  const beforeHealth = await getHealth(page, API_BASE_URL);
+  const h2Process = beforeHealth?.process?.children?.find(child => child.role === 'hub' && child.name === 'H2');
+  expect(h2Process?.online, `H2 process missing before replacement: ${JSON.stringify(beforeHealth?.process ?? {})}`).toBe(true);
+  expect(h2Process?.pid, 'H2 PID must be visible to the isolated local operator test').toBeGreaterThan(0);
+  const oldPid = Number(h2Process!.pid);
+  const oldRestartCount = Number(h2Process!.restartCount ?? 0);
+
+  await page.evaluate(() => {
+    const global = window as typeof window & {
+      __xln?: { adapter?: { status?: () => Record<string, unknown> } };
+      __xlnH2TransitionProbe?: {
+        samples: Array<Record<string, unknown>>;
+        timer: ReturnType<typeof setInterval>;
+      };
+    };
+    const samples: Array<Record<string, unknown>> = [];
+    const sample = (): void => {
+      const status = global.__xln?.adapter?.status?.();
+      const next = {
+        at: performance.now(),
+        connected: status?.['connected'] === true,
+        authLevel: String(status?.['authLevel'] || ''),
+        commandReady: status?.['commandReady'] === true,
+        reason: String(status?.['commandReadyReason'] || ''),
+        gate: document.querySelector('[data-testid="runtime-command-gate"]') !== null,
+        unavailable: document.querySelector('[data-testid="entity-workspace-action-unavailable"]') !== null,
+        submitDisabled: (document.querySelector('[data-testid="open-account-submit"]') as HTMLButtonElement | null)?.disabled ?? null,
+      };
+      const previous = samples.at(-1);
+      if (!previous || JSON.stringify({ ...previous, at: 0 }) !== JSON.stringify({ ...next, at: 0 })) {
+        samples.push(next);
+      }
+    };
+    sample();
+    global.__xlnH2TransitionProbe = { samples, timer: setInterval(sample, 10) };
+  });
+
+  process.kill(oldPid, 'SIGKILL');
+
+  await expect.poll(async () => await page.evaluate(() =>
+    (window as any).__xlnH2TransitionProbe?.samples?.some((sample: any) => sample.commandReady === false) === true
+  ), {
+    timeout: 15_000,
+    intervals: [25, 50, 100],
+  }).toBe(true);
+  const transitionProbe = await page.evaluate(() => {
+    const probe = (window as any).__xlnH2TransitionProbe;
+    if (probe?.timer) clearInterval(probe.timer);
+    return probe?.samples ?? [];
+  });
+  await testInfo.attach('h2-runtime-transition.json', {
+    body: Buffer.from(JSON.stringify(transitionProbe, null, 2)),
+    contentType: 'application/json',
+  });
+
+  const gate = page.getByTestId('runtime-command-gate');
+  await expect(gate).toBeVisible({ timeout: 15_000 });
+  await expect(submit).toBeDisabled();
+  await expect(page.getByTestId('runtime-command-gate-reason')).toHaveText(
+    /adapter-(?:error|connecting|disconnected)|phase=(?:quiescing|restoring|halted)/,
+  );
+  await expect(page.getByTestId('runtime-command-gate-incident')).toHaveText(
+    /^h2_unexpected_exit-/,
+    { timeout: 15_000 },
+  );
+  await captureLocatorScreenshot(gate, testInfo, 'runtime-command-gate-real-h2-replacement.png', {
+    ux: {
+      title: 'Real H2 replacement command gate',
+      group: 'system-health',
+      description: 'A live admin wallet disables money commands and links the durable H2 root incident during managed replacement.',
+      platform: 'desktop',
+      tags: ['runtime', 'incident', 'restart', 'fail-stop'],
+    },
+  });
+
+  await expect.poll(async () => {
+    const health = await getHealth(page, API_BASE_URL);
+    const child = health?.process?.children?.find(candidate => candidate.role === 'hub' && candidate.name === 'H2');
+    return {
+      replaced: Number(child?.pid ?? 0) > 0 && Number(child?.pid) !== oldPid,
+      restarted: Number(child?.restartCount ?? 0) > oldRestartCount,
+      online: child?.online === true,
+      systemOk: health?.systemOk === true,
+    };
+  }, {
+    timeout: 90_000,
+    intervals: [250, 500, 1_000],
+    message: 'orchestrator must replace H2 and restore authoritative health',
+  }).toEqual({
+    replaced: true,
+    restarted: true,
+    online: true,
+    systemOk: true,
+  });
+
+  await expect.poll(async () => await page.evaluate(() => {
+    const status = (window as any).__xln?.adapter?.status?.();
+    return {
+      connected: status?.connected === true,
+      authLevel: String(status?.authLevel || ''),
+      commandReady: status?.commandReady === true,
+      runtimeId: String((window as any).__xln?.view?.runtimeId || '').toLowerCase(),
+    };
+  }), {
+    timeout: 60_000,
+    intervals: [250, 500, 1_000],
+    message: 'browser adapter must reconnect to the same verified H2 runtime',
+  }).toEqual({
+    connected: true,
+    authLevel: 'admin',
+    commandReady: true,
+    runtimeId: beforeStatus.runtimeId,
+  });
+  await expect(gate).toBeHidden();
+  await expect(submit).toBeEnabled();
+  const restoredHeight = await page.evaluate(() =>
+    Number((window as any).__xln?.adapter?.status?.().height || 0),
+  );
+  expect(restoredHeight).toBeGreaterThanOrEqual(beforeStatus.height);
+  const restoredPersisted = await page.evaluate(async (committedHeight) => {
+    const adapter = (window as any).__xln?.adapter;
+    const head = await adapter.query.head();
+    const frame = await adapter.query.frame(committedHeight);
+    return {
+      latestHeight: Number(head?.latestHeight || 0),
+      frameHash: String(frame?.frameHash || ''),
+      postStateHash: String(frame?.postStateHash || ''),
+      stateHash: String(frame?.stateHash || ''),
+      canonicalStateHash: String(frame?.canonicalStateHash || ''),
+      commitment: String(frame?.postStateHash || ''),
+    };
+  }, beforePersisted.latestHeight);
+  expect(restoredPersisted.latestHeight).toBeGreaterThanOrEqual(beforePersisted.latestHeight);
+  expect(restoredPersisted).toMatchObject({
+    frameHash: beforePersisted.frameHash,
+    postStateHash: beforePersisted.postStateHash,
+    stateHash: beforePersisted.stateHash,
+    canonicalStateHash: beforePersisted.canonicalStateHash,
+    commitment: beforePersisted.commitment,
+  });
+  await testInfo.attach('h2-committed-state-recovery.json', {
+    body: Buffer.from(JSON.stringify({ before: beforePersisted, restored: restoredPersisted }, null, 2)),
+    contentType: 'application/json',
+  });
+});
+
 test('admin remote runtime control advances live state and exposes past frames', { tag: '@functional' }, async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const hubs = await waitForNamedHubs(page, ['h1'], { apiBaseUrl: API_BASE_URL });
@@ -1787,10 +2131,11 @@ test('admin remote runtime control advances live state and exposes past frames',
   expect(h1).toMatch(/^0x[0-9a-f]{64}$/);
 
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
+  const h2Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H2');
   const wsUrl = h1Endpoint.wsUrl;
 
   const adminKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
-  const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
+  const staleSessionToken = (await resolveRuntimeImportCapability(page, h2Endpoint, 'admin')).token;
   await page.addInitScript(() => {
     localStorage.setItem('xln-settings', JSON.stringify({ showTimeMachine: true }));
   });
@@ -1911,7 +2256,7 @@ test('admin remote runtime control advances live state and exposes past frames',
   expect(openAccountAfterReload.hubStates.every((state) => ['open', 'opening', 'closed'].includes(state))).toBe(true);
   expect(openAccountAfterReload.missingEnvError).toBe(false);
 
-  await page.evaluate(({ storageKey, wsUrl: activeWsUrl, adminToken, readToken, runtimeId }) => {
+  await page.evaluate(({ storageKey, wsUrl: activeWsUrl, adminToken, staleToken, runtimeId }) => {
     localStorage.setItem(storageKey, JSON.stringify([{
       label: 'H1 admin registry restore',
       access: 'admin',
@@ -1923,12 +2268,12 @@ test('admin remote runtime control advances live state and exposes past frames',
       entityCount: 1,
       importedAt: 1,
     }]));
-    sessionStorage.setItem('xln-runtime-adapter-key', readToken);
+    sessionStorage.setItem('xln-runtime-adapter-key', staleToken);
   }, {
     storageKey: REMOTE_RUNTIME_IMPORT_STORAGE_KEY,
     wsUrl,
     adminToken: adminKey,
-    readToken: readKey,
+    staleToken: staleSessionToken,
     runtimeId: h1Endpoint.runtimeId,
   });
   await page.reload({ waitUntil: 'domcontentloaded' });
@@ -2115,6 +2460,7 @@ test('admin remote runtime control advances live state and exposes past frames',
       latestHeight: Number(head.latestHeight || 0),
       latestSnapshotHeight: Number(head.latestSnapshotHeight || 0),
       snapshotPeriodFrames: Number(head.snapshotPeriodFrames || 0),
+      epochReplayBytes: 0,
       retainedHistoryBytes: Number(head.retainedHistoryBytes || 0),
       checkpointHeights: checkpoints.map((entry) => Number(entry.height || 0)),
     };
@@ -2453,7 +2799,7 @@ test('runtime dropdown switches app-imported remote runtimes without manager rou
   const h1WsUrl = h1Endpoint.wsUrl;
   const h2WsUrl = h2Endpoint.wsUrl;
 
-  const h1Key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
+  const h1Key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
   await page.goto(`${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1WsUrl)}&token=${encodeURIComponent(h1Key)}`, {
     waitUntil: 'domcontentloaded',
   });

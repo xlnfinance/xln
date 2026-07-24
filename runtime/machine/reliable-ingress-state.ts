@@ -28,7 +28,11 @@ export const receiverSourceLaneKeys = (
 export const assertReceiverSourceLaneCapacity = (
   state: NonNullable<Env['runtimeState']>,
   candidateKey: string,
-): void => assertReliableIngressSourceLaneCapacity(receiverSourceLaneKeys(state), candidateKey);
+  knownKeys = receiverSourceLaneKeys(state),
+): void => {
+  assertReliableIngressSourceLaneCapacity(knownKeys, candidateKey);
+  knownKeys.add(candidateKey);
+};
 
 export const ensureReliableIngressState = (
   env: Env,

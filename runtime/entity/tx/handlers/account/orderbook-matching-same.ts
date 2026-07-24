@@ -11,7 +11,7 @@ import {
 } from '../../../../orderbook';
 import { SWAP as SWAP_CONSTANTS } from '../../../../constants';
 import type { SwapPairPolicy } from '../../../../account/utils';
-import { createStructuredLogger, shortId, shortOrder, shouldLogFullPayloads } from '../../../../infra/logger';
+import { createStructuredLogger, shortId, shortOrder } from '../../../../infra/logger';
 import { HEAVY_LOGS } from '../../../../utils';
 import {
   type NormalizedOrderbookOffer,
@@ -264,8 +264,6 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
     }
     const {
       pairId: bookKey,
-      base,
-      quote,
       side,
       priceTicks,
       qtyLots,
@@ -529,27 +527,6 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
             fillPct: plan.fillPct,
             cancel: plan.cancelRemainder,
             source: plan.offerSource,
-          });
-        }
-        if (shouldLogFullPayloads()) {
-          orderbookSameLog.trace('resolve.payload', {
-            accountId,
-            offerId,
-            namespacedOrderId,
-            offerSource: plan.offerSource,
-            side,
-            baseTokenId: base,
-            quoteTokenId: quote,
-            originalLots: fill.originalLots,
-            filledLots: fill.filledLots,
-            weightedCost: fill.weightedCost.toString(),
-            executionBaseWei: plan.trace.executionBaseWei.toString(),
-            executionQuoteWei: plan.trace.executionQuoteWei.toString(),
-            orderStillInBook: !plan.cancelRemainder,
-            offerGiveTokenId: plan.trace.offerGiveTokenId,
-            offerWantTokenId: plan.trace.offerWantTokenId,
-            offerGiveAmount: plan.trace.offerGiveAmount.toString(),
-            offerQuantizedGive: plan.trace.offerQuantizedGive.toString(),
           });
         }
       }

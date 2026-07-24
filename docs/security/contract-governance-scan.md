@@ -23,8 +23,8 @@ tests.
   runs after the last-resort window.
 - Local-dev helpers are chain-gated to Anvil chain IDs `31337` and `31338` and
   require the immutable deployer `admin`.
-- Foundation-only naming/quota functions are token-gated through
-  `onlyFoundation`, not `Ownable`.
+- Foundation-only naming/quota functions require a replay-protected Hanko
+  from the exact current Foundation board; holding one control token grants no admin authority.
 - Entity governance mutation paths require either governance caller validation
   or entity Hanko authorization with `entityActionNonces`.
 - No `tx.origin`, `selfdestruct`, `Ownable`, or `onlyOwner` usage exists in

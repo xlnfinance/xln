@@ -40,6 +40,79 @@ const assertFailure = (
   requireCondition(failure.fatal === expected.fatal, `fatal mismatch for ${failure.code}`);
 };
 
+const fatalIncidentRoutes = [
+  {
+    name: 'browser',
+    steps: [
+      ['frontend/src/hooks.client.ts', ['installBrowserErrorTelemetry();', "captureBrowserError('svelte_error', error);"]],
+      ['frontend/src/lib/debug/browser-telemetry.ts', [
+        "captureBrowserError('console_error'",
+        "captureBrowserError('window_error'",
+        "captureBrowserError('unhandled_rejection'",
+        "fetch('/api/debug/events/ingest'",
+      ]],
+      ['runtime/relay/debug-http.ts', ["event: 'browser_error'", "source: 'browser'"]],
+      ['runtime/orchestrator/orchestrator.ts', ['incidentSink: incident => debugIncidentJournal.record(incident)']],
+    ],
+  },
+  {
+    name: 'managed-runtime',
+    steps: [
+      ['runtime/runtime.ts', ['await config.onFatal({', 'runtimeProcess.exit(1);']],
+      ['runtime/orchestrator/hub-node.ts', ['onFatal: async payload => {', 'await reportManagedChildFatal({']],
+      ['runtime/orchestrator/mm-node.ts', ['onFatal: async payload => {', 'await reportManagedChildFatal({']],
+      ['runtime/orchestrator/managed-child-fatal-ipc.ts', [
+        "type: 'xln:managed-child-fatal'",
+        "type: 'xln:managed-child-fatal-ack'",
+        'persisted: true',
+      ]],
+      ['runtime/orchestrator/orchestrator.ts', [
+        'attachManagedChildFatalIpc(',
+        'persistManagedChildFatalReport(',
+        'incidentSink: incident => debugIncidentJournal.record(incident)',
+      ]],
+    ],
+  },
+  {
+    name: 'standalone-runtime',
+    steps: [
+      ['runtime/server/index.ts', [
+        "process.env['XLN_SERVER_DEBUG_INCIDENT_JOURNAL_PATH'] || `${dbRootPath}.debug-incidents.jsonl`",
+        'incidentSink: incident => incidentJournal.record(incident)',
+        'startRuntimeLoop(env, {',
+        'onFatal: async payload => {',
+        "serverLog.error('runtime.loop_fatal'",
+      ]],
+    ],
+  },
+  {
+    name: 'orchestrator',
+    steps: [
+      ['runtime/orchestrator/orchestrator.ts', [
+        'pushManagedChildIncident(',
+        'persistOrchestratorFailure(',
+        'incidentSink: incident => debugIncidentJournal.record(incident)',
+      ]],
+    ],
+  },
+  {
+    name: 'jurisdiction-submit',
+    steps: [
+      ['runtime/machine/j-submit.ts', ['J_SUBMIT_FATAL:', "queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'terminalFailure'"]],
+      ['runtime/runtime.ts', ['await process(env);', 'await config.onFatal({']],
+    ],
+  },
+] as const;
+
+for (const route of fatalIncidentRoutes) {
+  for (const [path, markers] of route.steps) {
+    const source = readText(path);
+    for (const marker of markers) {
+      assertIncludes(source, marker, `${route.name}:${path}`);
+    }
+  }
+}
+
 const expectedEmpty = classifyRuntimeFaucetFailure('FAUCET_ACCOUNT_NOT_OPEN', 'account has no open faucet line');
 assertFailure(expectedEmpty, {
   category: 'ExpectedEmpty',
@@ -579,6 +652,27 @@ const validationUtilsPath = 'runtime/validation-utils.ts';
 const validationUtils = readText(validationUtilsPath);
 assertNotIncludes(validationUtils, 'console.', validationUtilsPath);
 
+for (const marker of [
+  'failureKind: EntityInputApplyFailureKind',
+  'classifyEntityInputApplyFailure(cause)',
+  "this.failureKind === 'malformed-ingress'",
+]) {
+  assertIncludes(runtimeEntityInputs, marker, runtimeEntityInputsPath);
+}
+
+const runtimeSourcePath = 'runtime/runtime.ts';
+const runtimeSource = readText(runtimeSourcePath);
+assertIncludes(
+  runtimeSource,
+  'error.isQuarantinableRemoteIngress',
+  runtimeSourcePath,
+);
+assertNotIncludes(
+  runtimeSource,
+  'error instanceof RuntimeEntityInputApplyError && error.isRemoteIngress',
+  runtimeSourcePath,
+);
+
 for (const [path, markers] of [
   ['runtime/__tests__/failure-taxonomy.test.ts', ['runtime failure taxonomy', 'J_BATCH_LIMIT_EXCEEDED']],
   ['runtime/__tests__/audit-failfast-regressions.test.ts', [
@@ -586,6 +680,11 @@ for (const [path, markers] of [
     'DIRECT_PAYMENT_ROUTE_START_INVALID',
     'DIRECT_PAYMENT_ROUTE_END_INVALID',
     'DIRECT_PAYMENT_NEXT_HOP_ACCOUNT_MISSING',
+    'remote-invariant-failure-fatal',
+    'remote-storage-failure-fatal',
+    'remote-local-bug-fatal',
+    "expect(storage.failureKind).toBe('storage')",
+    "expect(localBug.failureKind).toBe('local-bug')",
   ]],
   ['runtime/__tests__/runtime-import-readiness.test.ts', ['runtime import readiness gate', 'fatal: true']],
   ['runtime/__tests__/health-redaction.test.ts', ['public aggregated health strips child process ids', 'Latest /api/health child refresh window']],

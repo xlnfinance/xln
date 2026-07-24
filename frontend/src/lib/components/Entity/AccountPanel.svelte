@@ -16,6 +16,7 @@
   export let replica: EntityReplica | null = null;
   export let entityNames: Map<string, string> = new Map();
   export let pendingFaucetKeys: Set<string> = new Set();
+  export let commandsReady = false;
 
   const dispatch = createEventDispatcher();
 
@@ -531,7 +532,8 @@
               <svelte:fragment slot="actions">
                 <button
                   class="delta-faucet"
-                  disabled={isFaucetPending(td.tokenId)}
+                  disabled={!commandsReady || isFaucetPending(td.tokenId)}
+                  title={commandsReady ? 'Request faucet funds' : 'Runtime is not ready for financial actions'}
                   on:click|stopPropagation={() => handleFaucet(td.tokenId)}
                 >
                   {isFaucetPending(td.tokenId) ? 'Funding...' : 'Faucet'}

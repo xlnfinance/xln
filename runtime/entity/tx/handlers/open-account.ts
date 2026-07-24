@@ -1,5 +1,12 @@
 import { isLeftEntity } from '../../id';
-import type { Delta, EntityInput, EntityState, EntityTx, Env } from '../../../types';
+import type {
+  Delta,
+  EntityCandidateEffect,
+  EntityInput,
+  EntityState,
+  EntityTx,
+  Env,
+} from '../../../types';
 import { scaleWholeTokenAmount } from '../../../types';
 import { formatEntityId } from '../../../utils';
 import { upsertSortedStringMapEntry } from '../../../storage/sorted-index';
@@ -70,9 +77,10 @@ const assertRequestedRebalancePolicy = (
 };
 
 export const handleOpenAccountEntityTx = (
-  env: Env,
+  _env: Env,
   entityState: EntityState,
   entityTx: OpenAccountEntityTx,
+  candidateEffects: EntityCandidateEffect[] = [],
 ): OpenAccountResult => {
   const targetEntityId = entityTx.data.targetEntityId;
   if (!isEntityId32(targetEntityId)) {
@@ -118,9 +126,13 @@ export const handleOpenAccountEntityTx = (
   const createdLocalAccount = !existingAccountKey;
   const accountKey = existingAccountKey ?? counterpartyId;
   if (createdLocalAccount) {
-    env.emit('AccountOpening', {
-      entityId: entityState.entityId,
-      counterpartyId: targetEntityId,
+    candidateEffects.push({
+      kind: 'runtimeEvent',
+      eventName: 'AccountOpening',
+      data: {
+        entityId: entityState.entityId,
+        counterpartyId: targetEntityId,
+      },
     });
 
     const initialDeltas = new Map<number, Delta>();

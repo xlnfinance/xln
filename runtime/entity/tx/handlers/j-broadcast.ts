@@ -85,7 +85,7 @@ export async function handleJBroadcast(
   };
 
   const depositoryAddress = requireUsableContractAddress('depository', jurisdiction.depositoryAddress);
-  const entityProviderAddress = requireUsableContractAddress('entity_provider', jurisdiction.entityProviderAddress);
+  requireUsableContractAddress('entity_provider', jurisdiction.entityProviderAddress);
   const chainId = BigInt(jurisdiction.chainId ?? 0);
   if (!chainId) {
     addMessage(newState, '❌ Missing chainId');
@@ -108,12 +108,6 @@ export async function handleJBroadcast(
   // Contract expects currentNonce + 1 for a new submission.
   const nextNonce = currentEntityNonce + 1n;
 
-  // Set entityProvider on settlements before encoding
-  for (const settlement of newState.jBatchState.batch.settlements) {
-    if (settlement.diffs.length > 0 || settlement.forgiveDebtsInTokenIds.length > 0) {
-      settlement.entityProvider = entityProviderAddress;
-    }
-  }
   assertJBatchWithinContractLimits(newState.jBatchState.batch, 'j_broadcast');
 
   const encodedBatch = encodeJBatch(newState.jBatchState.batch);

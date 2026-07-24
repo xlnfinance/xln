@@ -37,3 +37,22 @@ export const transitionRuntimeLifecycle = (
 
 export const runtimeCanScheduleWork = (state: RuntimeState): boolean =>
   inferRuntimeLifecyclePhase(state) === 'running';
+
+export type RuntimeCommandReadiness =
+  | { ready: true; reason: null }
+  | { ready: false; reason: string };
+
+export const getRuntimeCommandReadiness = (env: Env): RuntimeCommandReadiness => {
+  const state = env.runtimeState ?? {};
+  const phase = inferRuntimeLifecyclePhase(state);
+  if (phase !== 'running') return { ready: false, reason: `phase=${phase}` };
+  if (state.persistencePaused === true || state.persistenceQuiescing === true) {
+    return { ready: false, reason: 'persistence-fenced' };
+  }
+  return { ready: true, reason: null };
+};
+
+export const assertRuntimeCommandReady = (env: Env): void => {
+  const readiness = getRuntimeCommandReadiness(env);
+  if (!readiness.ready) throw new Error(`RUNTIME_COMMAND_NOT_READY:${readiness.reason}`);
+};

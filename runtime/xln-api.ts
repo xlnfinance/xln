@@ -82,6 +82,19 @@ export type { CompletedBatch, JBatch, JBatchState } from './jurisdiction/batch';
 export type { JAdapter, JEvent } from './jadapter/types';
 export type { BookState, OrderbookExtState, PreparedSwapOrder } from './orderbook';
 export type {
+  SwapAccountCapacityView,
+  SwapAccountCapacityViewInput,
+  SwapInboundCapacityPlan,
+  SwapInboundCapacityPlanInput,
+} from './account/swap-inbound-plan';
+export type {
+  CrossJurisdictionSwapCommandPlan,
+  SameJurisdictionSwapCommandPlan,
+  SwapCommandPlan,
+  SwapCommandPlanInput,
+  SwapCommandPreparedOrder,
+} from './account/swap-command-plan';
+export type {
   MppChallenge,
   MppChallengeBindingInput,
   MppCredential,
@@ -191,6 +204,7 @@ import type {
   RuntimeAdapterGraphAccountPage,
   RuntimeAdapterGraphEntityCore,
   RuntimeAdapterGraphFrame,
+  RuntimeAdapterFrameSummary,
   RuntimeAdapterHistoryFrameBatch,
   RuntimeAdapterViewFrame,
   resolveRuntimeAdapterRead,
@@ -238,6 +252,7 @@ export type {
   RuntimeAdapterGraphAccountPage,
   RuntimeAdapterGraphEntityCore,
   RuntimeAdapterGraphFrame,
+  RuntimeAdapterFrameSummary,
   RuntimeAdapterHistoryFrameBatch,
 	  RuntimeAdapterViewFrame,
 	  RuntimeAdapterActivityPage,
@@ -349,7 +364,6 @@ export interface XLNModule {
     env: Env,
     params: import('./machine/jurisdiction-api').DebtEnforcementRuntimeInputParams,
   ) => RuntimeInput;
-  processJBlockEvents?: (env: Env) => Promise<void>;
   applyJEventsToEnv?: (
     env: Env,
     events: import('./jadapter/types').JEvent[],
@@ -508,6 +522,10 @@ export interface XLNModule {
 
   // Runtime operations
   applyRuntimeInput: (env: Env, input: RuntimeInput) => Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }>;
+  planSwapInboundCapacity: typeof import('./account/swap-inbound-plan').planSwapInboundCapacity;
+  readSwapAccountCapacity: typeof import('./account/swap-inbound-plan').readSwapAccountCapacity;
+  planSwapCommand: typeof import('./account/swap-command-plan').planSwapCommand;
+  validateRuntimeInputAdmission: (env: Env, input: RuntimeInput) => void;
   enqueueRuntimeInput: (env: Env, input: RuntimeInput) => void;
   startRuntimeLoop?: (env: Env) => () => void;
   resumeRuntimeLoop: (env: Env) => () => void;
@@ -723,8 +741,6 @@ export interface XLNModule {
   resolveEntityIdentifier: (identifier: string) => Promise<string | null>;
   searchEntityNames: (query: string) => Promise<string[]>;
   requestNamedEntity: (env: Env, name: string) => Promise<Env>;
-  assignNameOnChain: (env: Env, entityId: string, name: string) => Promise<Env>;
-  transferNameBetweenEntities: (env: Env, name: string, fromEntityId: string, toEntityId: string) => Promise<Env>;
 
   setBrowserVMJurisdiction: (env: Env, depositoryAddress: string, browserVMInstance?: unknown) => void;
   getBrowserVMInstance: (env?: Env) => unknown | null;

@@ -80,8 +80,6 @@ export interface JBatch {
     }>;
     forgiveDebtsInTokenIds: number[];
     sig: string; // Hanko signature (required when there are changes)
-    entityProvider: string; // EntityProvider address
-    hankoData: string; // Hanko signature data
     nonce: number; // Settlement nonce
   }>;
 
@@ -120,9 +118,6 @@ export interface JBatch {
     transformer: string;
     secret: string;
   }>;
-
-  // Hub ID (for gas tracking)
-  hub_id: number;
 }
 
 /** Batch lifecycle: current accumulates, sentBatch tracks one in-flight submission */
@@ -321,7 +316,6 @@ export function createEmptyBatch(): JBatch {
     externalTokenToReserve: [],
     reserveToExternalToken: [],
     revealSecrets: [],
-    hub_id: 0,
   };
 }
 
@@ -375,7 +369,6 @@ export function cloneJBatch(batch: JBatch): JBatch {
       externalTokenToReserve: batch.externalTokenToReserve.map(op => ({ ...op })),
       reserveToExternalToken: batch.reserveToExternalToken.map(op => ({ ...op })),
       revealSecrets: batch.revealSecrets.map(op => ({ ...op })),
-      hub_id: batch.hub_id,
     };
   }
 }
@@ -388,13 +381,12 @@ const DEPOSITORY_BATCH_ABI =
     'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve,' +
     'tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral,' +
     'tuple(bytes32 counterparty, uint256 tokenId, uint256 amount, uint256 nonce, bytes sig)[] collateralToReserve,' +
-    'tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig, address entityProvider, bytes hankoData, uint256 nonce)[] settlements,' +
+    'tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig, uint256 nonce)[] settlements,' +
     'tuple(bytes32 counterentity, uint256 nonce, bytes32 proofbodyHash, tuple(bytes32 watchSeed, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) initialProofbody, bytes32 watchSeed, bytes sig, bytes starterInitialArguments, bytes starterIncrementedArguments)[] disputeStarts,' +
     'tuple(bytes32 counterentity, uint256 initialNonce, uint256 finalNonce, bytes32 initialProofbodyHash, tuple(bytes32 watchSeed, int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes starterArguments, bytes otherArguments, bytes sig, bool startedByLeft, bool cooperative)[] disputeFinalizations,' +
     'tuple(bytes32 entity, address contractAddress, uint96 externalTokenId, uint8 tokenType, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve,' +
     'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken,' +
-    'tuple(address transformer, bytes32 secret)[] revealSecrets,' +
-    'uint256 hub_id' +
+    'tuple(address transformer, bytes32 secret)[] revealSecrets' +
   ')';
 const DEPOSITORY_BATCH_PARAM = ethers.ParamType.from(DEPOSITORY_BATCH_ABI);
 
@@ -588,7 +580,6 @@ export function summarizeBatch(batch: JBatch): Record<string, unknown> {
     externalTokenToReserve: { count: batch.externalTokenToReserve.length, sample: sample(batch.externalTokenToReserve) },
     reserveToExternalToken: { count: batch.reserveToExternalToken.length, sample: sample(batch.reserveToExternalToken) },
     revealSecrets: { count: batch.revealSecrets.length, sample: sample(batch.revealSecrets) },
-    hub_id: batch.hub_id,
   };
 }
 
@@ -986,8 +977,6 @@ const isExactSettlementRetry = (
     return other !== undefined && sameUnsignedInteger(tokenId, other);
   })
   && sameHexBytes(existing.sig, candidate.sig)
-  && sameHexBytes(existing.entityProvider, candidate.entityProvider)
-  && sameHexBytes(existing.hankoData, candidate.hankoData)
   && sameUnsignedInteger(existing.nonce, candidate.nonce)
 );
 
@@ -1008,8 +997,6 @@ export function batchAddSettlement(
   }>,
   forgiveDebtsInTokenIds: number[] = [],
   sig?: string,
-  entityProvider: string = '0x0000000000000000000000000000000000000000',
-  hankoData: string = '0x',
   nonce: number = 0,
   initiatorEntity?: string,
   disablePureC2RShortcut: boolean = false,
@@ -1041,8 +1028,6 @@ export function batchAddSettlement(
     diffs,
     forgiveDebtsInTokenIds,
     sig: sig || '',
-    entityProvider,
-    hankoData,
     nonce,
   };
 
@@ -1270,50 +1255,4 @@ export function getBatchSize(batch: JBatch): number {
     batch.reserveToExternalToken.length +
     batch.revealSecrets.length
   );
-}
-
-/**
- * Check if batch should be broadcast
- * Triggers: batch full, timeout, or manual flush
- */
-export function shouldBroadcastBatch(
-  jBatchState: JBatchState,
-  currentTimestamp: number
-): boolean {
-  if (jBatchState.sentBatch) {
-    return false;
-  }
-
-  if (isBatchEmpty(jBatchState.batch)) {
-    return false;
-  }
-
-  const batchSize = getBatchSize(jBatchState.batch);
-  const MAX_BATCH_SIZE = J_BATCH_CONTRACT_LIMITS.maxTotalOps; // Max operations per batch
-  const BATCH_TIMEOUT_MS = 5000; // Broadcast every 5s even if not full
-  const limitIssue = getJBatchContractLimitIssue(jBatchState.batch);
-  if (limitIssue) {
-    console.warn(`📦 jBatch: contract limit exceeded (${limitIssue}) - refusing auto-broadcast until split`);
-    return false;
-  }
-
-  // Trigger 1: Batch is full
-  if (batchSize >= MAX_BATCH_SIZE) {
-    jBatchLog.debug('broadcast.full', {
-      batchSize,
-      maxBatchSize: MAX_BATCH_SIZE,
-    });
-    return true;
-  }
-
-  // Trigger 2: Timeout since last broadcast
-  const timeSinceLastBroadcast = currentTimestamp - jBatchState.lastBroadcast;
-  if (timeSinceLastBroadcast >= BATCH_TIMEOUT_MS) {
-    jBatchLog.debug('broadcast.timeout', {
-      elapsedMs: timeSinceLastBroadcast,
-    });
-    return true;
-  }
-
-  return false;
 }

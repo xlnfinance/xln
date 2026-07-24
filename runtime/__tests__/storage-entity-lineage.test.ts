@@ -30,8 +30,10 @@ import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import { decodeBuffer } from '../storage/codec';
 import {
   applyCertifiedEntityLineagePlan,
+  beginRuntimeCheckpointLineageRefresh,
   buildCertifiedEntityLineagePlan,
   buildRuntimeCheckpointLineagePlan,
+  refreshRuntimeCheckpointLineageForEntity,
 } from '../storage/entity-lineage';
 import { buildStorageReplicaMetaCommitment } from '../storage/replicas';
 import type { StorageReplicaMeta } from '../storage/types';
@@ -307,6 +309,58 @@ describe('certified Entity storage lineage', () => {
     observerState.messages.push('tampered after certification');
     expect(() => buildRuntimeCheckpointLineagePlan(env))
       .toThrow('STORAGE_RUNTIME_CHECKPOINT_STATE_MISMATCH');
+  });
+
+  test('refreshes only the touched Entity checkpoint lineage', () => {
+    const { env, signerId, genesis } = makeRuntime('storage-lineage-touched-only');
+    installReplica(env, signerId, genesis, { anchor: genesisAnchor(genesis) });
+
+    const idleSignerId = deriveSignerAddressSync(env.runtimeSeed!, 'idle').toLowerCase();
+    registerSignerKey(env, idleSignerId, deriveSignerKeySync(env.runtimeSeed!, 'idle'));
+    const idleState = structuredClone(genesis);
+    idleState.entityId = generateLazyEntityId([idleSignerId], 1n).toLowerCase();
+    idleState.config = {
+      ...idleState.config,
+      threshold: 1n,
+      validators: [idleSignerId],
+      shares: { [idleSignerId]: 1n },
+    };
+    const idleReplica: EntityReplica = {
+      entityId: idleState.entityId,
+      signerId: idleSignerId,
+      state: idleState,
+      mempool: [],
+      isProposer: true,
+      certifiedFrameAnchor: genesisAnchor(idleState),
+    };
+    env.eReplicas.set(`${idleState.entityId}:${idleSignerId}`, idleReplica);
+    const idleAnchorBefore = structuredClone(idleReplica.certifiedFrameAnchor);
+
+    env.height = 7;
+    refreshRuntimeCheckpointLineageForEntity(env, genesis.entityId);
+
+    expect(env.eReplicas.get(`${genesis.entityId}:${signerId}`)?.certifiedFrameAnchor
+      ?.runtimeCheckpoint?.runtimeHeight).toBe(7);
+    expect(idleReplica.certifiedFrameAnchor).toEqual(idleAnchorBefore);
+  });
+
+  test('rolls back checkpoint preparation when an Entity input commits no frame', async () => {
+    const { env, signerId, genesis } = makeRuntime('storage-lineage-noop-refresh');
+    const replica = installReplica(env, signerId, genesis, { anchor: genesisAnchor(genesis) });
+    const anchorBefore = structuredClone(replica.certifiedFrameAnchor);
+    env.height = 7;
+
+    const noOpGuard = beginRuntimeCheckpointLineageRefresh(env, genesis.entityId);
+    expect(replica.certifiedFrameAnchor?.runtimeCheckpoint?.runtimeHeight).toBe(7);
+    expect(noOpGuard.finalize()).toBe(false);
+    expect(replica.certifiedFrameAnchor).toEqual(anchorBefore);
+
+    const committed = await certifyNextFrame(env, signerId, genesis, []);
+    const commitGuard = beginRuntimeCheckpointLineageRefresh(env, genesis.entityId);
+    replica.state = committed.state;
+    replica.certifiedFrameLineage = [committed.link];
+    expect(commitGuard.finalize()).toBe(true);
+    expect(replica.certifiedFrameAnchor?.runtimeCheckpoint?.runtimeHeight).toBe(7);
   });
 
   test('rebases certified lineage into the atomic runtime WAL checkpoint', async () => {

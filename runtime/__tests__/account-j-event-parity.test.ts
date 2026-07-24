@@ -106,7 +106,7 @@ describe('account J-event validate/commit parity', () => {
     const initial = machine();
     const firstSession = createAccountJClaimSession(runtime);
     const leftClaim = prepareAccountJClaimTx(initial, rawClaim(), DOMAIN, firstSession);
-    expect(handleJEventClaim(initial, leftClaim, true, 99, false, LEFT, () => {}, runtime, firstSession).success)
+    expect(handleJEventClaim(initial, leftClaim, true, 99, false, LEFT, [], runtime, firstSession).success)
       .toBe(true);
     cacheCommittedAccountJClaimNodeChanges(runtime, firstSession.changes());
     expect(initial.leftPendingJClaims.count).toBe(1n);
@@ -118,10 +118,10 @@ describe('account J-event validate/commit parity', () => {
     const validationSession = createAccountJClaimSession(runtime);
     const commitSession = createAccountJClaimSession(runtime);
     const validationResult = handleJEventClaim(
-      validation, rightClaim, false, 100, true, LEFT, () => {}, runtime, validationSession,
+      validation, rightClaim, false, 100, true, LEFT, [], runtime, validationSession,
     );
     const commitResult = handleJEventClaim(
-      commit, rightClaim, false, 100, false, LEFT, () => {}, runtime, commitSession,
+      commit, rightClaim, false, 100, false, LEFT, [], runtime, commitSession,
     );
 
     expect(validationResult.success).toBe(true);

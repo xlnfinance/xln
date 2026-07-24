@@ -6,6 +6,7 @@ export type AccountWorkspaceTabId =
   | 'receive'
   | 'swap'
   | 'move'
+  | 'lending'
   | 'history'
   | 'configure'
   | 'activity'

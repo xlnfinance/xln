@@ -556,7 +556,7 @@ const cloneEntityStateWithPolicy = (
     }
   }
 
-  if (entityState.jBatchState && !cloned.jBatchState) {
+  if (entityState.jBatchState) {
     cloned.jBatchState = cloneJBatchState(entityState.jBatchState);
   }
   if (entityState.lending) {
@@ -855,6 +855,7 @@ const cloneEntityReplicaWithPolicy = (
         outputs: replica.validatorExecution.outputs.map(cloneIsolatedEntityInput),
         jOutputs: replica.validatorExecution.jOutputs.map(output => structuredClone(output)),
         hashesToSign: replica.validatorExecution.hashesToSign.map(hash => ({ ...hash })),
+        candidateEffects: structuredClone(replica.validatorExecution.candidateEffects),
         storageChanges: replica.validatorExecution.storageChanges.map(change => ({ ...change })),
         ...(replica.validatorExecution.consumptionNodeChanges
           ? { consumptionNodeChanges: structuredClone(replica.validatorExecution.consumptionNodeChanges) }

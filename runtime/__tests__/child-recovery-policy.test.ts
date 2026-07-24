@@ -24,17 +24,26 @@ describe('managed child recovery policy', () => {
     expect(decision).toMatchObject({ action: 'fail-stop', count: 1, backoffMs: 0 });
   });
 
-  test('persists an unhandled Runtime-loop fatal on its first occurrence', () => {
-    const decision = decideChildFailure({}, crash(
+  test('immediately recovers Runtime-loop fatals but fail-stops an identical crash loop', () => {
+    const first = decideChildFailure({}, crash(
+      '[ERROR][runtime] loop.error {"message":"CROSS_J_LOCAL_EVENT_REJECTED:order=42"}',
+    ));
+    const second = decideChildFailure(first.counts, crash(
+      '[ERROR][runtime] loop.error {"message":"CROSS_J_LOCAL_EVENT_REJECTED:order=42"}',
+    ));
+    const third = decideChildFailure(second.counts, crash(
       '[ERROR][runtime] loop.error {"message":"CROSS_J_LOCAL_EVENT_REJECTED:order=42"}',
     ));
 
-    expect(decision).toMatchObject({
-      action: 'fail-stop',
+    expect(first).toMatchObject({
+      action: 'recover',
       count: 1,
       backoffMs: 0,
       reasonCode: 'CROSS_J_LOCAL_EVENT_REJECTED',
     });
+    expect(second).toMatchObject({ action: 'recover', count: 2, backoffMs: 0 });
+    expect(third).toMatchObject({ action: 'fail-stop', count: 3, backoffMs: 0 });
+    expect(new Set([first.fingerprint, second.fingerprint, third.fingerprint]).size).toBe(1);
   });
 
   test('recovers transient failures twice and fail-stops on the third identical failure', () => {

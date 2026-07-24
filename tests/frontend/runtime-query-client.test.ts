@@ -15,6 +15,7 @@ test('runtime query client exposes typed projection reads and bounded cache', ()
 
   expect(source).toContain('export class RuntimeQueryClient');
   expect(source).toContain('readHead()');
+  expect(source).toContain('readFrameSummary');
   expect(source).toContain('readEntities');
   expect(source).toContain('readViewFrame');
   expect(source).toContain('readHistoryFrameBatch');
@@ -171,6 +172,22 @@ test('runtime query cache is live-height aware but keeps historical reads pinned
   expect(reads).toHaveLength(3);
 });
 
+test('runtime query client reads one exact committed frame summary', async () => {
+  const reads: string[] = [];
+  const adapter = {
+    read: async (path: string) => {
+      reads.push(path);
+      return { height: 12, stateHash: '0x12' };
+    },
+  };
+  const queryClient = new RuntimeQueryClient(() => adapter as never, 'runtime-frame-summary-test');
+
+  expect(await queryClient.readFrameSummary(12)).toEqual({ height: 12, stateHash: '0x12' });
+  expect(reads).toEqual(['frame/12']);
+  await expect(queryClient.readFrameSummary(0)).rejects.toThrow('RUNTIME_FRAME_HEIGHT_INVALID');
+  await expect(queryClient.readFrameSummary(Number.NaN)).rejects.toThrow('RUNTIME_FRAME_HEIGHT_INVALID');
+});
+
 test('runtime query cache never pins a lagging live projection to a newer adapter height', async () => {
   clearRuntimeQueryCache();
   let readNumber = 0;
@@ -289,6 +306,7 @@ test('runtime controller exposes only typed debug projection queries', () => {
 
   expect(queryClientSource).toContain('query: {');
   expect(queryClientSource).toContain('runtimeQueryClient.readHead()');
+  expect(queryClientSource).toContain('runtimeQueryClient.readFrameSummary(height)');
   expect(queryClientSource).toContain('runtimeQueryClient.readEntities(query)');
   expect(queryClientSource).toContain('runtimeQueryClient.readViewFrame(query)');
   expect(queryClientSource).toContain('runtimeQueryClient.readHistoryFrameBatch(query)');

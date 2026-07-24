@@ -83,7 +83,7 @@ export const assertReliableIngressSourceLaneCapacity = (
   existingKeys: Iterable<string>,
   candidateKey: string,
 ): void => {
-  const keys = new Set(existingKeys);
+  const keys = existingKeys instanceof Set ? existingKeys : new Set(existingKeys);
   if (keys.size > MAX_RELIABLE_INGRESS_SOURCE_LANES) {
     throw new Error(
       `RELIABLE_INGRESS_SOURCE_LANE_BOUND_CORRUPTION:` +

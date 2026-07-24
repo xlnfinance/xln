@@ -1,6 +1,7 @@
 import {
   CROSS_J_MAX_FILL_RATIO,
   buildCrossJurisdictionCloseProof,
+  cloneCrossJurisdictionRoute,
   getCrossJurisdictionCommittedFillAmounts,
   transitionCrossJurisdictionRouteStatus,
   withCanonicalCrossJurisdictionRouteHash,
@@ -18,6 +19,7 @@ import {
   findCrossJurisdictionOfferRoute,
   mergeCrossJurisdictionRoute,
 } from '../cross-jurisdiction-helpers';
+import { pushCrossJurisdictionEntityOutput } from '../cross-j-outputs';
 import type { MempoolOp } from './account';
 
 type CrossJurisdictionClearTx = Extract<EntityTx, { type: 'requestCrossJurisdictionClear' }>;
@@ -176,13 +178,34 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
       return { newState, outputs, mempoolOps };
     }
     const requestedAt = deterministicEntityTimestamp(newState, env);
+    const targetCommandRoute = cloneCrossJurisdictionRoute(canonicalRoute);
+    targetCommandRoute.sourceCloseProof = proof;
+    transitionCrossJurisdictionRouteStatus(targetCommandRoute, 'clearing', requestedAt);
+    pushCrossJurisdictionEntityOutput(
+      env,
+      outputs,
+      canonicalRoute.target.entityId,
+      [{
+        type: 'crossPullClose',
+        data: {
+          counterpartyEntityId: canonicalRoute.target.counterpartyEntityId,
+          pullId: canonicalRoute.targetPull.pullId,
+          binary: '0x',
+          proof,
+          route: targetCommandRoute,
+          description: `Cross-j ${orderId} paired pure-cancel target close`,
+        },
+      }],
+      canonicalRoute.targetHubSignerId,
+    );
+    canonicalRoute.sourceCloseProof = proof;
     transitionCrossJurisdictionRouteStatus(canonicalRoute, 'clearing', requestedAt);
     canonicalRoute.pendingClearRequestedAt = requestedAt;
     canonicalRoute.clearingPolicy = 'cancel_and_clear';
     newState.crossJurisdictionSwaps?.set(orderId, canonicalRoute);
     const firstValidator = entityState.config.validators[0];
     if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
-    addMessage(newState, `🌉 Cross-j clear ${orderId} queued pure cancel close`);
+    addMessage(newState, `🌉 Cross-j clear ${orderId} queued atomic Hub pure-cancel close`);
     return { newState, outputs, mempoolOps };
   }
 
@@ -300,10 +323,38 @@ export const handleMaterializeCrossJurisdictionClearEntityTx = (
       },
     });
   }
+  const targetCommandRoute = cloneCrossJurisdictionRoute(route);
+  targetCommandRoute.sourceCloseProof = expectedProof;
+  transitionCrossJurisdictionRouteStatus(
+    targetCommandRoute,
+    'clearing',
+    deterministicEntityTimestamp(newState, env),
+  );
+  pushCrossJurisdictionEntityOutput(
+    env,
+    outputs,
+    route.target.entityId,
+    [{
+      type: 'crossPullClose',
+      data: {
+        counterpartyEntityId: route.target.counterpartyEntityId,
+        pullId: route.targetPull.pullId,
+        binary,
+        proof: expectedProof,
+        route: targetCommandRoute,
+        description: `Cross-j ${route.orderId} paired target close ${fillRatio}/${CROSS_J_MAX_FILL_RATIO}`,
+      },
+    }],
+    route.targetHubSignerId,
+  );
+  route.sourceCloseProof = expectedProof;
   transitionCrossJurisdictionRouteStatus(route, 'clearing', deterministicEntityTimestamp(newState, env));
   newState.crossJurisdictionSwaps?.set(orderId, route);
   const firstValidator = entityState.config.validators[0];
   if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
-  addMessage(newState, `🌉 Cross-j clear ${orderId} queued verified ratio=${fillRatio}/${CROSS_J_MAX_FILL_RATIO}`);
+  addMessage(
+    newState,
+    `🌉 Cross-j clear ${orderId} queued atomic Hub source+target close ratio=${fillRatio}/${CROSS_J_MAX_FILL_RATIO}`,
+  );
   return { newState, outputs, mempoolOps };
 };

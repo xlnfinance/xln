@@ -3,7 +3,7 @@
  * Routes AccountTx to the handler that mutates one bilateral account clone/state.
  */
 
-import type { AccountMachine, AccountTx, Env } from '../../types';
+import type { AccountMachine, AccountTx, EntityCandidateEffect, Env } from '../../types';
 import { getAccountPerspective } from '../../state-helpers';
 import { handleAddDelta } from './handlers/add-delta';
 import { handleSetCreditLimit } from './handlers/set-credit-limit';
@@ -56,17 +56,8 @@ type ApplyAccountTxResult = {
   swapOfferCancelled?: { offerId: string; accountId: string; makerId?: string };
   pullResolved?: { pullId: string; fillRatio: number };
   pullCancelled?: { pullId: string; status: 'cancelled' | 'already-closed' };
+  candidateEffects?: EntityCandidateEffect[];
 };
-
-type DebugEventEmitter = {
-  sendDebugEvent(payload: Record<string, unknown>): void;
-};
-
-const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter =>
-  typeof value === 'object' &&
-  value !== null &&
-  'sendDebugEvent' in value &&
-  typeof value.sendDebugEvent === 'function';
 
 /**
  * Apply a single AccountTx inside bilateral consensus.
@@ -87,21 +78,22 @@ async function applyAccountTxMutation(
   env?: Env,
   jClaimSession?: AccountJClaimSession,
   counterpartyCertifiedBoardHash?: string,
+  candidateEffects: EntityCandidateEffect[] = [],
 ): Promise<ApplyAccountTxResult> {
   // Derive counterparty from canonical left/right using proofHeader's fromEntity as "me"
   const myEntityId = accountMachine.proofHeader.fromEntity;
   const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
 
   const emitRebalanceDebug = (payload: Record<string, unknown>) => {
-    const p2p = env?.runtimeState?.p2p;
-    if (isDebugEventEmitter(p2p)) {
-      p2p.sendDebugEvent({
+    candidateEffects.push({
+      kind: 'debug',
+      payload: {
         level: 'info',
         code: 'REB_STEP',
         accountId: counterparty,
         ...payload,
-      });
-    }
+      },
+    });
   };
 
   if (!canProcessAccountTxForDisputeStatus(accountMachine.status, accountTx.type)) {
@@ -155,13 +147,17 @@ async function applyAccountTxMutation(
         const requested = accountMachine.requestedRebalance.get(tokenId) ?? 0n;
         const feeState = accountMachine.requestedRebalanceFeeState?.get(tokenId);
         if (env && !isValidation) {
-          env.emit('request_collateral_committed', {
-            entityId: myEntityId,
-            accountId: counterparty,
-            tokenId,
-            requestedAmount: requested.toString(),
-            prepaidFee: String(feeState?.feePaidUpfront ?? 0n),
-            requestedAt: Number(feeState?.requestedAt ?? currentTimestamp),
+          candidateEffects.push({
+            kind: 'runtimeEvent',
+            eventName: 'request_collateral_committed',
+            data: {
+              entityId: myEntityId,
+              accountId: counterparty,
+              tokenId,
+              requestedAmount: requested.toString(),
+              prepaidFee: String(feeState?.feePaidUpfront ?? 0n),
+              requestedAt: Number(feeState?.requestedAt ?? currentTimestamp),
+            },
           });
         }
         emitRebalanceDebug({
@@ -203,7 +199,7 @@ async function applyAccountTxMutation(
         currentTimestamp,
         isValidation,
         myEntityId,
-        emitRebalanceDebug,
+        candidateEffects,
         env,
         jClaimSession,
       );
@@ -424,6 +420,7 @@ export async function applyAccountTx(
   counterpartyCertifiedBoardHash?: string,
 ): Promise<ApplyAccountTxResult> {
   const deltaKeysBeforeMutation = swapDeltaKeys(accountMachine, accountTx);
+  const candidateEffects: EntityCandidateEffect[] = [];
   const result = await applyAccountTxMutation(
     accountMachine,
     accountTx,
@@ -434,9 +431,10 @@ export async function applyAccountTx(
     env,
     jClaimSession,
     counterpartyCertifiedBoardHash,
+    candidateEffects,
   );
   if (result.success) {
     invalidateCommittedMapsForTx(accountMachine, accountTx, deltaKeysBeforeMutation);
   }
-  return result;
+  return candidateEffects.length > 0 ? { ...result, candidateEffects } : result;
 }

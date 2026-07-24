@@ -47,7 +47,16 @@
  * method names to concrete handlers via a static registry.
  */
 
-import type { Env, EntityReplica, EntityInput, SettlementOp, EntityTx, AccountInput, HashToSign } from '../types';
+import type {
+  AccountInput,
+  EntityCandidateEffect,
+  EntityInput,
+  EntityReplica,
+  EntityTx,
+  Env,
+  HashToSign,
+  SettlementOp,
+} from '../types';
 import type { CrontabState, CrontabTaskMethod, CrontabTaskState, ScheduledHook } from './scheduler-types';
 import { isLeftEntity } from './id';
 import { deriveDelta } from '../account/utils';
@@ -96,6 +105,7 @@ type CrontabExecutionContext = {
   manualBroadcastInInput: boolean;
   hashesToSign?: HashToSign[];
   accountChanges: Set<string>;
+  candidateEffects?: EntityCandidateEffect[];
 };
 
 /** Emit liveness diagnostics only from the canonical post-frame state. */
@@ -127,16 +137,6 @@ export const emitCommittedPendingFrameWarnings = (
     }
   }
 };
-
-type DebugEventEmitter = {
-  sendDebugEvent(payload: Record<string, unknown>): void;
-};
-
-const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter =>
-  typeof value === 'object' &&
-  value !== null &&
-  'sendDebugEvent' in value &&
-  typeof value.sendDebugEvent === 'function';
 
 type CrontabTaskHandler = (
   env: Env,
@@ -795,15 +795,15 @@ async function hubRebalanceHandler(
     : 1;
   const hubId = replica.entityId;
   const emitRebalanceDebug = (payload: Record<string, unknown>) => {
-    const p2p = _env.runtimeState?.p2p;
-    if (isDebugEventEmitter(p2p)) {
-      p2p.sendDebugEvent({
+    (context.candidateEffects ??= []).push({
+      kind: 'debug',
+      payload: {
         level: 'info',
         code: 'REB_STEP',
         hubId,
         ...payload,
-      });
-    }
+      },
+    });
   };
 
   // ═══════════════════════════════════════════════════════════════════

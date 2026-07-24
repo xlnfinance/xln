@@ -59,7 +59,12 @@ describe('BrowserVM JAdapter boundary', () => {
       await adapter.depository.entityProvider();
       await adapter.depository.getTokensLength();
       await adapter.getReserves(ethers.ZeroHash, 1);
-      await adapter.getErc20Balance(adapter.addresses.depository, ethers.ZeroAddress);
+      const token = (await adapter.getTokenRegistry()).find(candidate => candidate.symbol === 'USDC');
+      if (!token) throw new Error('BROWSERVM_USDC_REGISTRY_ENTRY_MISSING');
+      await adapter.getErc20Balance(token.address, ethers.ZeroAddress);
+      await expect(
+        adapter.getErc20Balance(adapter.addresses.depository, ethers.ZeroAddress),
+      ).rejects.toThrow('BROWSERVM_ERC20_BALANCE_READ_FAILED');
       expect(await adapter.getDebts?.(ethers.ZeroHash, 1)).toEqual([]);
       const after = ethers.hexlify(await capture());
       expect(after).toBe(before);

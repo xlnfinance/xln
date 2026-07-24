@@ -20,13 +20,23 @@ import type {
 } from "../common";
 
 export interface IEntityProviderInterface extends Interface {
-  getFunction(nameOrSignature: "verifyHankoSignature"): FunctionFragment;
+  getFunction(
+    nameOrSignature: "verifyCurrentHankoSignature" | "verifyHankoSignature"
+  ): FunctionFragment;
 
+  encodeFunctionData(
+    functionFragment: "verifyCurrentHankoSignature",
+    values: [BytesLike, BytesLike]
+  ): string;
   encodeFunctionData(
     functionFragment: "verifyHankoSignature",
     values: [BytesLike, BytesLike]
   ): string;
 
+  decodeFunctionResult(
+    functionFragment: "verifyCurrentHankoSignature",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(
     functionFragment: "verifyHankoSignature",
     data: BytesLike
@@ -76,6 +86,12 @@ export interface IEntityProvider extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
+  verifyCurrentHankoSignature: TypedContractMethod<
+    [hankoData: BytesLike, hash: BytesLike],
+    [[string, boolean] & { entityId: string; success: boolean }],
+    "view"
+  >;
+
   verifyHankoSignature: TypedContractMethod<
     [hankoData: BytesLike, hash: BytesLike],
     [[string, boolean] & { entityId: string; success: boolean }],
@@ -86,6 +102,13 @@ export interface IEntityProvider extends BaseContract {
     key: string | FunctionFragment
   ): T;
 
+  getFunction(
+    nameOrSignature: "verifyCurrentHankoSignature"
+  ): TypedContractMethod<
+    [hankoData: BytesLike, hash: BytesLike],
+    [[string, boolean] & { entityId: string; success: boolean }],
+    "view"
+  >;
   getFunction(
     nameOrSignature: "verifyHankoSignature"
   ): TypedContractMethod<

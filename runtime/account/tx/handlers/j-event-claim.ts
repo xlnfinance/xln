@@ -1,4 +1,4 @@
-import type { AccountMachine, AccountTx, Env } from '../../../types';
+import type { AccountMachine, AccountTx, EntityCandidateEffect, Env } from '../../../types';
 import type { AccountJClaimSession } from '../../j-claim-session';
 import { getAccountPerspective } from '../../../state-helpers';
 import { applyAccountJClaimTransition } from '../../j-claim-transition';
@@ -15,7 +15,7 @@ export function handleJEventClaim(
   _currentTimestamp: number,
   isValidation: boolean,
   myEntityId: string,
-  emitRebalanceDebug: (payload: Record<string, unknown>) => void,
+  candidateEffects: EntityCandidateEffect[],
   env: Env,
   session: AccountJClaimSession,
 ): { success: boolean; events: string[]; error?: string } {
@@ -58,23 +58,29 @@ export function handleJEventClaim(
   );
   const delta = accountMachine.deltas.get(settledTokenId);
   if (!isValidation) {
-    env.emit('account_settled_finalized_bilateral', {
+    const data = {
       entityId: myEntityId,
       accountId: counterparty,
       tokenId: settledTokenId,
       jHeight,
       collateral: String(delta?.collateral ?? 0n),
       ondelta: String(delta?.ondelta ?? 0n),
+    };
+    candidateEffects.push({
+      kind: 'runtimeEvent',
+      eventName: 'account_settled_finalized_bilateral',
+      data,
     });
-    emitRebalanceDebug({
-      step: 5,
-      status: 'ok',
-      event: 'account_settled_finalized_bilateral',
-      jHeight,
-      accountId: counterparty,
-      tokenId: settledTokenId,
-      collateral: String(delta?.collateral ?? 0n),
-      ondelta: String(delta?.ondelta ?? 0n),
+    candidateEffects.push({
+      kind: 'debug',
+      payload: {
+        level: 'info',
+        code: 'REB_STEP',
+        step: 5,
+        status: 'ok',
+        event: 'account_settled_finalized_bilateral',
+        ...data,
+      },
     });
   }
   return { success: true, events: ['✅ J-event claim finalized bilaterally'] };

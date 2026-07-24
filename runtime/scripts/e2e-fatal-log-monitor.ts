@@ -17,9 +17,10 @@ export const RUNTIME_FATAL_LOG_PATTERNS: RegExp[] = [
   /Runtime loop error/,
   /\[ERROR\]\[runtime\] loop\.error/,
   /ROUTE_NO_P2P/,
-  /child\.unexpected_exit/,
   /ENTITY_FRAME_TX_FAILED/,
 ];
+
+const UNEXPECTED_CHILD_EXIT_PATTERN = /child\.unexpected_exit/;
 
 export type FatalLogHit = {
   pattern: string;
@@ -31,8 +32,32 @@ export type IncrementalRuntimeFatalLogScanner = {
   scan: () => FatalLogHit | null;
 };
 
-const findFatalPattern = (line: string): RegExp | undefined =>
-  RUNTIME_FATAL_LOG_PATTERNS.find(candidate => candidate.test(line));
+const isRecoverableUnexpectedChildExit = (line: string): boolean => {
+  const markerIndex = line.indexOf('child.unexpected_exit');
+  if (markerIndex < 0 || line.includes('child.unexpected_exit.stop_failed')) return false;
+  const payloadIndex = line.indexOf('{', markerIndex);
+  if (payloadIndex < 0) return false;
+  try {
+    const payload = JSON.parse(line.slice(payloadIndex)) as unknown;
+    return (
+      typeof payload === 'object'
+      && payload !== null
+      && 'action' in payload
+      && payload.action === 'recover'
+    );
+  } catch {
+    return false;
+  }
+};
+
+const findFatalPattern = (line: string): RegExp | undefined => {
+  if (UNEXPECTED_CHILD_EXIT_PATTERN.test(line)) {
+    return isRecoverableUnexpectedChildExit(line)
+      ? undefined
+      : UNEXPECTED_CHILD_EXIT_PATTERN;
+  }
+  return RUNTIME_FATAL_LOG_PATTERNS.find(candidate => candidate.test(line));
+};
 
 const isMissingFile = (error: unknown): boolean =>
   (error as NodeJS.ErrnoException)?.code === 'ENOENT';
@@ -166,7 +191,7 @@ export const findRuntimeFatalLogLines = (path: string, maxLines = 12): string[] 
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i] || '';
-    if (!RUNTIME_FATAL_LOG_PATTERNS.some(pattern => pattern.test(line))) continue;
+    if (!findFatalPattern(line)) continue;
     out.push(`${i + 1}: ${line.slice(0, 500)}`);
     if (out.length >= maxLines) break;
   }

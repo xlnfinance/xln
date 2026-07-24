@@ -68,7 +68,7 @@ bun run prod:health
 
 - The history frame DB is authoritative for runtime replay.
 - On startup and before durable writes, the current materialized DB is reconciled from history if it lagged after a crash.
-- `storage.epochMaxBytes` is the byte trigger for a full storage epoch rotation. When retained replay bytes cross the limit, the runtime writes a full snapshot into the history frame DB, prunes replay diffs covered by the retained snapshot, seeds a fresh `*-storage-current` DB from live rows plus Merkle rows, and leaves the replaced DB at `*-storage-previous`.
+- `storage.epochMaxBytes` is the byte trigger for a full storage epoch rotation. The normal runtime default is 16 GiB; small values belong only in explicit rotation tests and smoke drills. When the current epoch's replay bytes cross the limit, the runtime writes a full snapshot into the history frame DB, prunes replay diffs covered by the retained snapshot, seeds a fresh `*-storage-current` DB from live rows plus Merkle rows, and leaves the replaced DB at `*-storage-previous`.
 - Treat `*-frames` as the recovery source of truth. `*-storage-previous` is an archive/debug candidate after the new `*-storage-current` opens and `/api/health` is green; do not delete or move `*-frames` while investigating storage incidents.
 - For high-load hub drills, use the rotation benchmarks:
 

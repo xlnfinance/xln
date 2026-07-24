@@ -5,11 +5,11 @@ import { STORAGE_MERKLE_NAMESPACE_TAG, type StorageMerkleNamespace } from './mer
 export { STORAGE_MERKLE_NAMESPACE_TAG, type StorageMerkleNamespace } from './merkle-namespace-tags';
 
 /**
- * Schema 8 is the only supported fresh-reset format. Merkle namespaces and
- * paths use compact binary keys; schema 7 used string namespace bytes and a
- * generic content-addressed large-value layer.
+ * Schema 9 is the only supported fresh-reset format. It separates the
+ * per-epoch replay-byte rotation counter from total retained history bytes.
+ * Schema 8 overloaded retainedHistoryBytes for both roles.
  */
-export const STORAGE_SCHEMA_VERSION = 8;
+export const STORAGE_SCHEMA_VERSION = 9;
 
 export const STORAGE_FRAME_FORMAT = Object.freeze({
   schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -52,7 +52,7 @@ export const assertStorageSchemaVersion = (
 };
 export const DEFAULT_SNAPSHOT_PERIOD_FRAMES = 10_000;
 export const DEFAULT_RETAIN_SNAPSHOTS = 2;
-export const DEFAULT_EPOCH_MAX_BYTES = 256 * 1024 * 1024;
+export const DEFAULT_EPOCH_MAX_BYTES = 16 * 1024 * 1024 * 1024;
 export const DEFAULT_FRAME_DB_MAX_BYTES = 1024 * 1024 * 1024;
 export const DEFAULT_FRAME_DB_RETAIN_FRAMES = 100_000;
 export const DEFAULT_MATERIALIZE_PERIOD_FRAMES = 100;

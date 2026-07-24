@@ -137,6 +137,9 @@ const runtimeIdFromRuntimeAdapterConfig = (config: RuntimeAdapterConfig): string
 
 export interface FrontendXlnFunctions {
   deriveDelta: XLNModule['deriveDelta'];
+  planSwapInboundCapacity: XLNModule['planSwapInboundCapacity'];
+  readSwapAccountCapacity: XLNModule['readSwapAccountCapacity'];
+  planSwapCommand: XLNModule['planSwapCommand'];
   formatTokenAmount: (tokenId: number, amount: bigint | null | undefined) => string;
   getTokenInfo: XLNModule['getTokenInfo'];
   getKnownTokenIds: XLNModule['getKnownTokenIds'];
@@ -861,6 +864,8 @@ const createEmbeddedRuntimeAdapter = async (
   };
   return new xln.EmbeddedRuntimeAdapter({
     getEnv: getLiveEnv,
+    validateRuntimeInputAdmission: (env, input) =>
+      xln.validateRuntimeInputAdmission(unwrapLiveRuntimeEnv(env) ?? env, input),
     enqueueRuntimeInput: (env, input) => xln.enqueueRuntimeInput(unwrapLiveRuntimeEnv(env) ?? env, input),
     submitCrossJurisdictionIntent: async (env, route) => {
       await xln.submitCrossJurisdictionIntent(unwrapLiveRuntimeEnv(env) ?? env, route);
@@ -917,12 +922,20 @@ export const switchAppRuntimeAdapter = async (config: RuntimeAdapterConfig): Pro
     stopP2PPoll();
 
     const adapter = await connectRuntimeAdapter(normalizedConfig);
+    const authenticatedRemoteAccess = adapter.authLevel;
+    if (authenticatedRemoteAccess !== 'admin') {
+      throw new Error(`REMOTE_RUNTIME_ADMIN_REQUIRED:${adapter.runtimeId || remoteRuntimeIdFromConfig(normalizedConfig)}`);
+    }
+    // A transient socket loss clears the adapter's current auth handshake, not
+    // the capability that was already authenticated for this runtime session.
+    // Keep the projection's admin authority while commandReady independently
+    // fail-closes every mutation until reconnect + re-auth completes.
     unregisterRuntimeControllerChange = onRuntimeControllerChange(() => {
       scheduleRuntimeProjectionRefresh();
     });
     unregisterRuntimeControllerStatus = onRuntimeControllerStatus((status) => {
       if (!isCurrentRuntimeAdapterConfig(normalizedConfig)) return;
-      upsertRemoteRuntimeProjectionMetadata(normalizedConfig, status, adapter.authLevel, {
+      upsertRemoteRuntimeProjectionMetadata(normalizedConfig, status, authenticatedRemoteAccess, {
         runtimeId: adapter.runtimeId || remoteRuntimeIdFromConfig(normalizedConfig),
       });
       if (status === 'connected') scheduleRuntimeProjectionRefresh();
@@ -1337,14 +1350,10 @@ const drainLocalRuntimeInput = async (
       Math.max(afterHeight, Math.floor(Number(env.height || 0))),
     );
     if (persistedHeight !== null) return persistedHeight;
-    const beforeHeight = Number(env.height || 0);
-    await xln.process(env, undefined, 0);
-    publishLocalRuntimeEnvIfActive(env);
-    const committedAfterProcess = findCommittedEmbeddedRuntimeInputHeight(env.history ?? [], input, afterHeight);
-    if (committedAfterProcess !== null) return committedAfterProcess;
-    if (Number(env.height || 0) === beforeHeight) {
-      await sleep(25);
-    }
+    // The runtime loop created with this Env is the only owner allowed to call
+    // process(). Command submission only enqueues and observes its durable
+    // commit; a UI waiter must never become a second transition driver.
+    await sleep(25);
     if (Date.now() - startedAt > 4_000) break;
   }
   throw new Error(
@@ -1558,9 +1567,6 @@ const routeRuntimeInput = async (
       return null;
     }
     assertLocalRuntimeInputIngressOpen(runtimeEnv);
-    if (!runtimeEnv.scenarioMode && typeof xln.startRuntimeLoop === 'function') {
-      xln.startRuntimeLoop(runtimeEnv);
-    }
     if (input.entityInputs?.length) {
       const ready = await waitForOpenAccountCounterpartyProfiles(runtimeEnv, input.entityInputs, OPEN_ACCOUNT_PROFILE_WAIT_TIMEOUT_MS);
       if (!ready) {
@@ -1758,6 +1764,9 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
 
     return {
       deriveDelta: failFn('deriveDelta'),
+      planSwapInboundCapacity: failFn('planSwapInboundCapacity'),
+      readSwapAccountCapacity: failFn('readSwapAccountCapacity'),
+      planSwapCommand: failFn('planSwapCommand'),
       formatTokenAmount: failFn('formatTokenAmount'),
       getTokenInfo: failFn('getTokenInfo'),
       getKnownTokenIds: failFn('getKnownTokenIds'),
@@ -1817,6 +1826,9 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
   const readyFunctions: FrontendXlnFunctions = {
     // Account utilities
     deriveDelta: $xlnInstance.deriveDelta,
+    planSwapInboundCapacity: $xlnInstance.planSwapInboundCapacity,
+    readSwapAccountCapacity: $xlnInstance.readSwapAccountCapacity,
+    planSwapCommand: $xlnInstance.planSwapCommand,
     // Frontend display formatter with configurable precision from Settings.
     // Signature used across UI: formatTokenAmount(tokenId, amount).
     formatTokenAmount: formatTokenAmountUi,

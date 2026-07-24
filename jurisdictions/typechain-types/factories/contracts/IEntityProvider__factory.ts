@@ -22,6 +22,35 @@ const _abi = [
         type: "bytes32",
       },
     ],
+    name: "verifyCurrentHankoSignature",
+    outputs: [
+      {
+        internalType: "bytes32",
+        name: "entityId",
+        type: "bytes32",
+      },
+      {
+        internalType: "bool",
+        name: "success",
+        type: "bool",
+      },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      {
+        internalType: "bytes",
+        name: "hankoData",
+        type: "bytes",
+      },
+      {
+        internalType: "bytes32",
+        name: "hash",
+        type: "bytes32",
+      },
+    ],
     name: "verifyHankoSignature",
     outputs: [
       {

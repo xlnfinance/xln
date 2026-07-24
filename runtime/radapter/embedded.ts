@@ -11,11 +11,13 @@ import type {
 	} from './types';
 import { RuntimeAdapterError } from './errors';
 import { resolveRuntimeAdapterRead, type RuntimeAdapterResolveContext } from './resolve';
+import { assertRuntimeCommandReady, getRuntimeCommandReadiness } from '../machine/lifecycle';
 
 export type EmbeddedRuntimeAdapterDeps = {
   getEnv: () => Env | null;
   main?: (seed?: string | null) => Promise<Env>;
   enqueueRuntimeInput: (env: Env, input: RuntimeInput) => void;
+  validateRuntimeInputAdmission: (env: Env, input: RuntimeInput) => void;
   submitCrossJurisdictionIntent: (
     env: Env,
     route: CrossJurisdictionSwapRoute,
@@ -65,6 +67,17 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
     return 'admin';
   }
 
+  get commandReady(): boolean {
+    const env = this.resolveEnv();
+    return this.currentStatus === 'connected' && env !== null && getRuntimeCommandReadiness(env).ready;
+  }
+
+  get commandReadyReason(): string | null {
+    const env = this.resolveEnv();
+    if (this.currentStatus !== 'connected' || !env) return `adapter-${this.currentStatus}`;
+    return getRuntimeCommandReadiness(env).reason;
+  }
+
   async connect(config: RuntimeAdapterConfig): Promise<void> {
     if (config.mode !== 'embedded') throw new RuntimeAdapterError('E_BAD_QUERY', 'EmbeddedRuntimeAdapter requires mode=embedded');
     this.setStatus('connecting');
@@ -99,19 +112,22 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
     return resolveRuntimeAdapterRead<T>({ env, ...this.deps.buildReadContext?.(env) }, path, query);
   }
 
-	  send(input: RuntimeInput): Promise<RuntimeAdapterSendResult> {
+  async send(input: RuntimeInput): Promise<RuntimeAdapterSendResult> {
     const env = this.resolveEnv();
-    if (!env) return Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'embedded runtime env is not ready', true));
+    if (!env) throw new RuntimeAdapterError('E_INTERNAL', 'embedded runtime env is not ready', true);
+    this.requireCommandReady(env);
+    this.deps.validateRuntimeInputAdmission(env, input);
     this.deps.enqueueRuntimeInput(env, input);
-    return Promise.resolve({ height: Math.max(0, Math.floor(Number(env.height ?? 0))) });
+    return { height: Math.max(0, Math.floor(Number(env.height ?? 0))) };
   }
 
-  submitCrossJurisdictionIntent(
+  async submitCrossJurisdictionIntent(
     route: CrossJurisdictionSwapRoute,
   ): Promise<RuntimeAdapterCrossJurisdictionIntentResult> {
     const env = this.resolveEnv();
-    if (!env) return Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'embedded runtime env is not ready', true));
-    return this.deps.submitCrossJurisdictionIntent(env, route);
+    if (!env) throw new RuntimeAdapterError('E_INTERNAL', 'embedded runtime env is not ready', true);
+    this.requireCommandReady(env);
+    return await this.deps.submitCrossJurisdictionIntent(env, route);
   }
 
   control<T = unknown>(action: RuntimeAdapterControlAction): Promise<T> {
@@ -141,5 +157,18 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
 
   private resolveEnv(): Env | null {
     return this.deps.getEnv() ?? this.env;
+  }
+
+  private requireCommandReady(env: Env): void {
+    try {
+      assertRuntimeCommandReady(env);
+    } catch (error) {
+      throw new RuntimeAdapterError(
+        'E_COMMAND_PENDING',
+        error instanceof Error ? error.message : String(error),
+        true,
+        250,
+      );
+    }
   }
 }

@@ -89,6 +89,19 @@ const makeReplica = (state: EntityState, signer: string, isProposer: boolean): E
 });
 
 describe('runtime scheduled wake', () => {
+  test('rejects an Entity frame timestamp regression before applying transactions', async () => {
+    const proposer = signerId('30');
+    const state = makeState(entityId('20'), proposer, 2_000);
+    const env = createEmptyEnv('entity-frame-timestamp-regression');
+    env.timestamp = 2_100;
+
+    await expect(applyEntityFrame(env, state, [], 1_999)).rejects.toThrow(
+      'ENTITY_FRAME_TIMESTAMP_REGRESSION:previous=2000:proposed=1999',
+    );
+    expect(state.timestamp).toBe(2_000);
+    expect(state.height).toBe(0);
+  });
+
   test('a pending account frame does not activate the unrelated one-second hub rebalance task', () => {
     const id = entityId('20');
     const proposer = signerId('30');

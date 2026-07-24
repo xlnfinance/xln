@@ -43,6 +43,7 @@ import type { EntityProvider } from '../typechain-types/contracts/EntityProvider
 import {
   buildSingleSignerHanko,
   deriveHardhatPrivateKey,
+  deployEntityProvider,
   emptyBatch,
   encodeBatch,
   singleSignerLazyEntityId,
@@ -91,10 +92,8 @@ describe('canonical on-chain Hanko domains', function () {
     const [admin, entitySigner, recipient] = await ethers.getSigners();
     const entityPrivateKey = deriveHardhatPrivateKey(1);
 
-    const entityProviderFactory = await ethers.getContractFactory('EntityProvider');
-    const entityProvider = await entityProviderFactory.deploy(admin.address);
-    const otherEntityProvider = await entityProviderFactory.deploy(admin.address);
-    await Promise.all([entityProvider.waitForDeployment(), otherEntityProvider.waitForDeployment()]);
+    const entityProvider = await deployEntityProvider(admin.address);
+    const otherEntityProvider = await deployEntityProvider(admin.address);
 
     const accountFactory = await ethers.getContractFactory('Account');
     const account = await accountFactory.deploy();

@@ -1,6 +1,13 @@
 import { isLeftEntity } from '../../id';
 import { FINANCIAL } from '../../../constants';
-import type { AccountTx, EntityInput, EntityState, EntityTx, Env } from '../../../types';
+import type {
+  AccountTx,
+  EntityCandidateEffect,
+  EntityInput,
+  EntityState,
+  EntityTx,
+  Env,
+} from '../../../types';
 import { formatEntityId } from '../../../utils';
 import { createStructuredLogger, logError, shortId } from '../../../infra/logger';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
@@ -25,6 +32,7 @@ export const handleDirectPaymentEntityTx = async (
   env: Env,
   entityState: EntityState,
   entityTx: DirectPaymentEntityTx,
+  candidateEffects: EntityCandidateEffect[] = [],
 ): Promise<DirectPaymentResult> => {
   const trace = (message: string, fields: Record<string, unknown> = {}): void => {
     if (env.quietRuntimeLogs !== true) directPaymentLog.debug(message, fields);
@@ -33,13 +41,6 @@ export const handleDirectPaymentEntityTx = async (
     sourceEntityId: entityState.entityId,
     targetEntityId: entityTx.data.targetEntityId,
     route: entityTx.data.route,
-  });
-  env.emit('HtlcInitiated', {
-    fromEntity: entityState.entityId,
-    toEntity: entityTx.data.targetEntityId,
-    tokenId: entityTx.data.tokenId,
-    amount: entityTx.data.amount.toString(),
-    route,
   });
   trace('start', {
     from: shortId(entityState.entityId),
@@ -75,6 +76,17 @@ export const handleDirectPaymentEntityTx = async (
   }
 
   if (route.length === 1 && route[0] === targetEntityId) {
+    candidateEffects.push({
+      kind: 'runtimeEvent',
+      eventName: 'HtlcInitiated',
+      data: {
+        fromEntity: entityState.entityId,
+        toEntity: targetEntityId,
+        tokenId,
+        amount: amount.toString(),
+        route,
+      },
+    });
     trace('final_destination', { entity: shortId(entityState.entityId), tokenId, amount: amount.toString() });
     addMessage(newState, `💰 Received payment of ${amount} (token ${tokenId})`);
     return { newState, outputs: [] };
@@ -128,6 +140,17 @@ export const handleDirectPaymentEntityTx = async (
     newState,
     `💸 Sending ${amount} (token ${tokenId}) to ${formatEntityId(targetEntityId)} via ${route.length - 1} hops`,
   );
+  candidateEffects.push({
+    kind: 'runtimeEvent',
+    eventName: 'HtlcInitiated',
+    data: {
+      fromEntity: entityState.entityId,
+      toEntity: targetEntityId,
+      tokenId,
+      amount: amount.toString(),
+      route,
+    },
+  });
 
   trace('bilateral.queued', { nextHop: shortId(nextHop) });
 

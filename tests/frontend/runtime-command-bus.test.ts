@@ -745,6 +745,9 @@ test('lending mutations use the signer runtime command path instead of unauthent
   expect(source).toContain("type: 'lendingOffer'");
   expect(source).toContain("type: 'lendingBorrow'");
   expect(source).toContain("type: 'lendingRepay'");
+  expect(source).toContain('if (!isLive || !selectedHubEntityId || !normalizedEntityId)');
+  expect(source).toContain('$: lendingStateKey = isLive && selectedHubEntityId');
+  expect(source).toContain('disabled={!isLive || loading}');
   expect(source).not.toContain("postLending('/api/lending/");
   expect(source).not.toContain('recordRuntimeIngressReceipt');
 });
@@ -752,12 +755,19 @@ test('lending mutations use the signer runtime command path instead of unauthent
 test('server-side faucet requests publish upstream runtime ingress receipts when provided', () => {
   const panelSource = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
   const faucetSource = readFileSync('frontend/src/lib/components/Entity/account-faucet.ts', 'utf8');
+  const assetFaucetSource = readFileSync('frontend/src/lib/components/Entity/AssetFaucetCard.svelte', 'utf8');
+  const assetsSource = readFileSync('frontend/src/lib/components/Entity/EntityAssetsTab.svelte', 'utf8');
 
   expect(faucetSource).toContain('receipt?: {');
   expect(panelSource).toContain('recordRuntimeIngressReceipt');
   expect(panelSource).toContain('function recordServerIngressReceipt');
   expect(panelSource).toContain('recordServerIngressReceipt(result);');
   expect(panelSource).toContain('statusUrl: result.statusUrl ?? null');
+  expect(panelSource).toContain("notifyUserActionError('asset-faucet', 'Runtime is not ready for financial actions')");
+  expect(panelSource).toContain("notifyUserActionError('offchain-faucet', 'Runtime is not ready for financial actions')");
+  expect(assetFaucetSource).toContain('export let ready = false');
+  expect(assetFaucetSource.match(/disabled={!ready \\|\\| submitting}/g)).toHaveLength(3);
+  expect(assetsSource).toContain('ready={activeIsLive}');
 });
 
 test('ui mutation surfaces do not use legacy enqueue entrypoints', () => {

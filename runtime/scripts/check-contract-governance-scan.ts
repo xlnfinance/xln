@@ -28,6 +28,20 @@ const assertFunctionHeaderIncludes = (source: string, path: string, name: string
   }
 };
 
+const getFunctionBody = (source: string, name: string, path: string): string => {
+  const header = getFunctionHeader(source, name, path);
+  const headerStart = source.indexOf(header.replace(/ /g, ''));
+  const nameOffset = source.indexOf(`function ${name}`);
+  const bodyStart = source.indexOf('{', Math.max(0, nameOffset, headerStart));
+  if (bodyStart < 0) throw new Error(`${path} ${name} body missing`);
+  let depth = 0;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    if (source[index] === '{') depth += 1;
+    else if (source[index] === '}' && --depth === 0) return source.slice(bodyStart, index + 1);
+  }
+  throw new Error(`${path} ${name} body is unterminated`);
+};
+
 const externalOrPublicFunctions = (source: string): string[] => {
   const functions: string[] = [];
   const pattern = /^\s*function\s+([A-Za-z0-9_]+)\s*\([\s\S]*?\)\s*([^{;]*)[{;]/gm;
@@ -57,17 +71,20 @@ const assertFunctionAllowlist = (source: string, path: string, allowed: string[]
 
 const depositoryPath = 'jurisdictions/contracts/Depository.sol';
 const entityProviderPath = 'jurisdictions/contracts/EntityProvider.sol';
+const hankoVerifierPath = 'jurisdictions/contracts/HankoVerifier.sol';
 const accountPath = 'jurisdictions/contracts/Account.sol';
 const auditDocPath = 'docs/security/contract-governance-scan.md';
 
 const depository = readText(depositoryPath);
 const entityProvider = readText(entityProviderPath);
+const hankoVerifier = readText(hankoVerifierPath);
 const account = readText(accountPath);
 const auditDoc = readText(auditDocPath);
 
 for (const [path, source] of [
   [depositoryPath, depository],
   [entityProviderPath, entityProvider],
+  [hankoVerifierPath, hankoVerifier],
   [accountPath, account],
 ] as const) {
   for (const forbidden of ['tx.origin', 'selfdestruct', 'onlyOwner', 'Ownable']) {
@@ -93,11 +110,11 @@ assertFunctionAllowlist(depository, depositoryPath, [
 assertFunctionAllowlist(entityProvider, entityProviderPath, [
   'activateBoard',
   'assignName',
-  'batchVerifyHankoSignatures',
   'cancelBoardProposal',
   'cancelEntityProviderAction',
   'computeBoardProposalCancelHash',
   'computeBoardProposalHash',
+  'computeFoundationActionHash',
   'entityTransferTokens',
   'encodeEntityTransferHankoPayload',
   'encodeBoardProposalCancelHankoPayload',
@@ -121,6 +138,7 @@ assertFunctionAllowlist(entityProvider, entityProviderPath, [
   'setReservedName',
   'transferName',
   'verifyHankoSignature',
+  'verifyCurrentHankoSignature',
 ]);
 
 assertIncludes(depository, 'address public immutable admin;', depositoryPath);
@@ -143,14 +161,21 @@ assertIncludes(depository, 'if (block.number + lastResortWindowBlocks < account.
 assertIncludes(depository, 'msg.sender,\n          entityId,', depositoryPath);
 assertIncludes(depository, 'if (!valid || recoveredEntity != entityId) revert E4();', depositoryPath);
 
-for (const [name, required] of [
-  ['assignName', 'external onlyFoundation'],
-  ['transferName', 'external onlyFoundation'],
-  ['setReservedName', 'external onlyFoundation'],
-  ['setNameQuota', 'external onlyFoundation'],
-  ['foundationRegisterEntity', 'external onlyFoundation'],
+assertNotIncludes(entityProvider, 'onlyFoundation', entityProviderPath);
+assertIncludes(entityProvider, '_verifyCurrentHankoSignature(hankoData, actionHash)', entityProviderPath);
+assertIncludes(entityProvider, 'entityActionNonces[foundationId] = actionNonce;', entityProviderPath);
+for (const name of [
+  'assignName',
+  'transferName',
+  'setReservedName',
+  'setNameQuota',
+  'foundationRegisterEntity',
 ] as const) {
-  assertFunctionHeaderIncludes(entityProvider, entityProviderPath, name, required);
+  assertIncludes(
+    getFunctionBody(entityProvider, name, entityProviderPath),
+    '_authorizeFoundation(',
+    `${entityProviderPath}:${name}`,
+  );
 }
 for (const [name, requiredText] of [
   ['proposeBoard', '_requireBoardAuthority(entityId, proposerType, proposalHash, authorizations);'],
@@ -162,10 +187,10 @@ for (const [name, requiredText] of [
   assertIncludes(entityProvider, requiredText, `${entityProviderPath}:${name}`);
 }
 assertIncludes(entityProvider, 'require(block.number >= entities[entityId].activateAtBlock, "Delay period not met");', entityProviderPath);
-assertIncludes(entityProvider, 'if (signatureCount == 0)', entityProviderPath);
-assertIncludes(entityProvider, 'if (signer == address(0)) return (bytes32(0), false);', entityProviderPath);
-assertIncludes(entityProvider, 'if (referencedClaimIndex >= claimIndex) revert InvalidHankoClaimOrder();', entityProviderPath);
-assertIncludes(entityProvider, 'revert DuplicateHankoClaimEntity();', entityProviderPath);
+assertIncludes(hankoVerifier, 'if (signatureCount == 0 || hanko.claims.length == 0)', hankoVerifierPath);
+assertIncludes(hankoVerifier, 'if (signer == address(0)) return new address[](0);', hankoVerifierPath);
+assertIncludes(hankoVerifier, 'if (nestedIndex >= claimIndex) revert InvalidHankoClaimOrder();', hankoVerifierPath);
+assertIncludes(hankoVerifier, 'revert DuplicateHankoClaimEntity();', hankoVerifierPath);
 assertNotIncludes(entityProvider, 'eoaVotingPower', entityProviderPath);
 assertIncludes(entityProvider, 'entityActionNonces[entityId] = actionNonce;', entityProviderPath);
 assertIncludes(entityProvider, 'event EntityProviderActionExecuted(', entityProviderPath);
@@ -182,7 +207,7 @@ for (const marker of [
   'bun run security:contract-governance',
   'Depository production write path is `processBatch()`',
   'Local-dev helpers are chain-gated',
-  'Foundation-only naming/quota functions are token-gated',
+  'Foundation-only naming/quota functions require a replay-protected Hanko',
   'No `tx.origin`, `selfdestruct`, `Ownable`, or `onlyOwner` usage',
 ]) {
   assertIncludes(auditDoc, marker, auditDocPath);

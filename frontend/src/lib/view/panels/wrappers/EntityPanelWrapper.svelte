@@ -58,8 +58,25 @@
   const activeHistory = $derived.by<EnvSnapshot[]>(() => runtimeFrameHistory ? ($runtimeFrameHistory ?? []) : []);
   const activeTimeIndex = $derived.by<number>(() => runtimeFrameTimeIndex ? ($runtimeFrameTimeIndex ?? -1) : -1);
   const activeIsLive = $derived.by<boolean>(() => runtimeFrameIsLive ? ($runtimeFrameIsLive ?? true) : true);
+  let mountedRemoteRuntimeId = $state('');
+  $effect(() => {
+    if (!isRemoteRuntime) {
+      mountedRemoteRuntimeId = '';
+      return;
+    }
+    if ($runtimeControllerHandle.status === 'connected' && $runtimeControllerHandle.runtimeId) {
+      mountedRemoteRuntimeId = $runtimeControllerHandle.runtimeId;
+    }
+  });
   const canMountWorkspace = $derived.by<boolean>(() =>
-    Boolean(activeEnv || (isRemoteRuntime && $runtimeControllerHandle.status === 'connected')),
+    Boolean(
+      activeEnv ||
+      (
+        isRemoteRuntime &&
+        mountedRemoteRuntimeId &&
+        mountedRemoteRuntimeId === $runtimeControllerHandle.runtimeId
+      ),
+    ),
   );
 
   function goToLive(): void {

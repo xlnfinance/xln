@@ -57,6 +57,7 @@
   export let embedMode = false;
   export let scenarioId = '';
   export let userMode = false;
+  export let requestedPanelId: string | null = null;
 
   type RuntimeLogEntry = {
     id?: number;
@@ -404,6 +405,7 @@
       runtimeFrameHistory={localHistoryStore}
       runtimeFrameTimeIndex={localTimeIndex}
       runtimeFrameIsLive={localIsLive}
+      {requestedPanelId}
     />
   {:catch err}
     <div class="view-error">

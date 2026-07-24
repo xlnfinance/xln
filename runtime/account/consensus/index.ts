@@ -8,8 +8,8 @@ import type {
   AccountFrame,
   AccountTx,
   AccountInput,
+  EntityCandidateEffect,
   Env,
-  EntityState,
   Delta,
   HankoString,
 } from '../../types';
@@ -22,9 +22,9 @@ import { isLeft } from '../utils';
 import { HEAVY_LOGS } from '../../utils';
 import { safeStringify } from '../../protocol/serialization';
 import { applyAccountTx } from '../tx/apply';
-import { appendAccountFrameHistoryView, getAccountFrameHistoryView, recordAccountFrameHistory } from '../../machine/env-events';
-import { deriveAccountFrameOffdeltas, deriveAccountFrameTokenIds } from '../frame';
-import { createStructuredLogger, shortHash, shortId, shouldLogFullPayloads } from '../../infra/logger';
+import { appendAccountFrameHistoryView, getAccountFrameHistoryView } from '../../machine/env-events';
+import { deriveAccountFrameTokenIds } from '../frame';
+import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import {
   createFrameHash,
   getAccountFrameValidationError,
@@ -628,6 +628,7 @@ async function handlePendingFrameAck(
   committedFrames: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }>,
   committedJClaims: AccountJClaimSession,
   securityContext: AccountInputSecurityContext,
+  candidateEffects: EntityCandidateEffect[],
 ): Promise<PendingFrameAckResult> {
   const ack = accountInputAck(input);
   const proposal = accountInputProposal(input);
@@ -701,13 +702,6 @@ async function handlePendingFrameAck(
     tokens: tokenIds,
     state: shortHash(frameHash),
   });
-  if (shouldLogFullPayloads()) {
-    accountLog.trace('frame.commit.payload', {
-      txs: accountMachine.pendingFrame.accountTxs,
-      offdeltas: deriveAccountFrameOffdeltas(accountMachine.pendingFrame).map(d => d.toString()),
-    });
-  }
-
   // PROPOSER COMMIT: Re-execute txs on REAL state (Channel.ts pattern)
   // This eliminates fragile manual field copying
   const { counterparty: cpForLog } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
@@ -732,6 +726,7 @@ async function handlePendingFrameAck(
       env,
       committedJClaims,
     );
+    candidateEffects.push(...(commitResult.candidateEffects ?? []));
     if (!commitResult.success) {
       accountLog.error('frame.commit.failed', { side: 'proposer', type: tx.type, error: commitResult.error });
       throw new Error(
@@ -758,14 +753,6 @@ async function handlePendingFrameAck(
     height: accountMachine.pendingFrame.height,
     tokens: accountMachine.deltas.size,
   });
-  if (shouldLogFullPayloads()) {
-    accountLog.trace('frame.commit.deltas', {
-      side: 'proposer',
-      counterparty: shortId(cpForLog),
-      deltas: summarizeDeltasForLog(accountMachine.deltas),
-    });
-  }
-
   // Clean up clone (no longer needed with re-execution)
   delete accountMachine.clonedForValidation;
 
@@ -786,13 +773,6 @@ async function handlePendingFrameAck(
 
   const committedFrame = cloneAccountFrame(accountMachine.pendingFrame);
   committedFrames.push({ frame: committedFrame, committedViaNewFrame: false });
-  recordAccountFrameHistory(env, {
-    entityId: accountMachine.proofHeader.fromEntity,
-    counterpartyId: input.fromEntityId,
-    accountHeight: committedFrame.height,
-    source: 'ackCommit',
-    frame: committedFrame,
-  });
   // Past bilateral frames are not future-consensus state. Keep only a
   // non-enumerable UI/debug view; durable history lives in the frame DB.
   appendAccountFrameHistoryView(accountMachine, committedFrame);
@@ -827,6 +807,7 @@ async function handlePendingFrameAck(
     input.fromEntityId,
     committedHeight,
     securityContext.owningEntityIsHub,
+    candidateEffects,
   );
   if (ackAutoRebalanceTxs.length > 0) {
     appendAccountMempoolTxs(accountMachine, ackAutoRebalanceTxs, 'accountConsensus:ackAutoRebalance');
@@ -1402,13 +1383,6 @@ async function validateIncomingFrameOnClone(
     height: receivedFrame.height,
     txs: receivedFrame.accountTxs.map(tx => tx.type),
   });
-  if (shouldLogFullPayloads()) {
-    accountLog.trace('frame.receiver_initial_deltas', {
-      height: receivedFrame.height,
-      deltas: summarizeDeltasForLog(clonedMachine.deltas),
-    });
-  }
-
   for (const accountTx of receivedFrame.accountTxs) {
     const beforeSettlement = captureSettlementVector(clonedMachine);
     const result = await applyAccountTx(
@@ -1518,6 +1492,7 @@ async function commitIncomingFrameOnRealState(
   committedFrames: AccountCommittedFrame[],
   committedJClaims: AccountJClaimSession,
   securityContext: AccountInputSecurityContext,
+  candidateEffects: EntityCandidateEffect[],
 ): Promise<void> {
   const { counterparty: cpForCommitLog } = getAccountPerspective(accountMachine, ourEntityId);
   if (HEAVY_LOGS) {
@@ -1540,6 +1515,7 @@ async function commitIncomingFrameOnRealState(
       committedJClaims,
       securityContext.counterpartyCertifiedBoardHash,
     );
+    candidateEffects.push(...(commitResult.candidateEffects ?? []));
 
     if (!commitResult.success) {
       accountLog.error('frame.commit.failed', { side: 'receiver', type: tx.type, error: commitResult.error });
@@ -1563,14 +1539,6 @@ async function commitIncomingFrameOnRealState(
     height: receivedFrame.height,
     tokens: accountMachine.deltas.size,
   });
-  if (shouldLogFullPayloads()) {
-    accountLog.trace('frame.commit.deltas', {
-      side: 'receiver',
-      counterparty: shortId(cpForCommitLog),
-      deltas: summarizeDeltasForLog(accountMachine.deltas),
-    });
-  }
-
   if (validation.clonedMachine.pendingForwards?.length) {
     accountMachine.pendingForwards = validation.clonedMachine.pendingForwards;
     accountLog.debug('pending_forwards.copied', {
@@ -1591,13 +1559,6 @@ async function commitIncomingFrameOnRealState(
 
   const committedFrame = cloneAccountFrame(receivedFrame);
   committedFrames.push({ frame: committedFrame, committedViaNewFrame: true });
-  recordAccountFrameHistory(env, {
-    entityId: accountMachine.proofHeader.fromEntity,
-    counterpartyId: input.fromEntityId,
-    accountHeight: committedFrame.height,
-    source: 'peerCommit',
-    frame: committedFrame,
-  });
   appendAccountFrameHistoryView(accountMachine, committedFrame);
   accountLog.debug('frame.indexed', { source: 'peerCommit', height: receivedFrame.height });
 
@@ -1611,6 +1572,7 @@ async function commitIncomingFrameOnRealState(
     input.fromEntityId,
     receivedFrame.height,
     securityContext.owningEntityIsHub,
+    candidateEffects,
   );
   if (postCommitAutoRebalanceTxs.length > 0) {
     appendAccountMempoolTxs(
@@ -1880,6 +1842,7 @@ async function handleIncomingAccountFrame(
   committedFrames: AccountCommittedFrame[],
   committedJClaims: AccountJClaimSession,
   securityContext: AccountInputSecurityContext,
+  candidateEffects: EntityCandidateEffect[],
 ): Promise<IncomingFrameResult> {
   if (!accountInputProposal(input)) {
     return { kind: 'not_applicable' };
@@ -1965,6 +1928,7 @@ async function handleIncomingAccountFrame(
     committedFrames,
     committedJClaims,
     securityContext,
+    candidateEffects,
   );
 
   return {
@@ -2010,13 +1974,18 @@ export async function applyAccountInput(
   }
   const { normalizedInputHeight } = heightNormalization;
   const committedFrames: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }> = [];
+  const candidateEffects: EntityCandidateEffect[] = [];
 
   const events: string[] = [];
   const timedOutHashlocks: string[] = [];
   const committedJClaims = createAccountJClaimSession(env, accountJClaimNodeStore);
   const finish = (result: HandleAccountInputResult): HandleAccountInputResult => {
     const accountJClaimNodeChanges = committedJClaims.changes();
-    return accountJClaimNodeChanges ? { ...result, accountJClaimNodeChanges } : result;
+    return {
+      ...result,
+      ...(candidateEffects.length > 0 ? { candidateEffects } : {}),
+      ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
+    };
   };
   let ackProcessed = false;
   // Replay protection: frame chain (height + prevFrameHash) checked at :836
@@ -2067,6 +2036,7 @@ export async function applyAccountInput(
     committedFrames,
     committedJClaims,
     securityContext,
+    candidateEffects,
   );
   if (pendingAckResult.kind === 'return') return finish(pendingAckResult.result);
   if (pendingAckResult.kind === 'fallthrough') ackProcessed = true;
@@ -2129,6 +2099,7 @@ export async function applyAccountInput(
     committedFrames,
     committedJClaims,
     securityContext,
+    candidateEffects,
   );
   if (incomingFrameResult.kind === 'return') return finish(incomingFrameResult.result);
 
@@ -2164,33 +2135,4 @@ export async function applyAccountInput(
 export function addToAccountMempool(accountMachine: AccountMachine, accountTx: AccountTx): boolean {
   appendAccountMempoolTx(accountMachine, accountTx, 'accountConsensus:externalAdmission');
   return true;
-}
-
-export function shouldProposeFrame(accountMachine: AccountMachine): boolean {
-  const should = accountMachine.mempool.length > 0 && !accountMachine.pendingFrame;
-  if (HEAVY_LOGS) {
-    accountLog.debug('proposal.should_propose', {
-      mempool: accountMachine.mempool.length,
-      pendingFrame: Boolean(accountMachine.pendingFrame),
-      result: should,
-    });
-  }
-  return should;
-}
-
-export function getAccountsToProposeFrames(entityState: EntityState): string[] {
-  const accountsToProposeFrames: string[] = [];
-
-  if (!entityState.accounts || !(entityState.accounts instanceof Map)) {
-    accountLog.warn('entity.accounts.invalid', { type: typeof entityState.accounts });
-    return accountsToProposeFrames;
-  }
-
-  for (const [accountKey, accountMachine] of entityState.accounts) {
-    if (shouldProposeFrame(accountMachine)) {
-      accountsToProposeFrames.push(accountKey);
-    }
-  }
-
-  return accountsToProposeFrames;
 }

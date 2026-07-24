@@ -67,6 +67,20 @@ const GENERATED_TEST_ARTIFACT_DIRS = [
   'native/extension/dist',
 ];
 
+// Unit tests own only their scratch databases and direct test outputs. They
+// must never erase completed browser/bootstrap evidence from a different gate:
+// that evidence is bound to an immutable candidate and may be the only
+// reproducible record of a long production-shaped run.
+const UNIT_TEST_ARTIFACT_DIRS = [
+  '.tmp-tests',
+  'db-tmp',
+  'test-results',
+  'tests/test-results',
+  'frontend/test-results',
+  'e2e/test-results',
+  'debates/test-results',
+];
+
 const BUDGETED_WORKSPACE_PATHS = [
   '.logs',
   'db',
@@ -97,7 +111,7 @@ type CleanupOptions = {
   argv?: string[];
   env?: Record<string, string | undefined>;
   reason: string;
-  scope?: 'all' | 'e2e';
+  scope?: 'all' | 'e2e' | 'unit';
   skipIfAlreadyDone?: boolean;
   log?: (message: string) => void;
 };
@@ -512,7 +526,12 @@ export const cleanupTestArtifactsBeforeRun = (options: CleanupOptions): TestArti
 
   assertNoLiveE2eRunnerLock(cwd);
 
-  const cleanupPaths = options.scope === 'e2e' ? E2E_TEST_ARTIFACT_DIRS : GENERATED_TEST_ARTIFACT_DIRS;
+  const cleanupPaths =
+    options.scope === 'e2e'
+      ? E2E_TEST_ARTIFACT_DIRS
+      : options.scope === 'unit'
+        ? UNIT_TEST_ARTIFACT_DIRS
+        : GENERATED_TEST_ARTIFACT_DIRS;
   const removed: string[] = [];
   for (const relativePath of cleanupPaths) {
     const absolutePath = join(cwd, relativePath);

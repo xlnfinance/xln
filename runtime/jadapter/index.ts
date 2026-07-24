@@ -24,11 +24,9 @@ export { DEFAULT_PRIVATE_KEY } from './helpers';
 export * from './browservm-registry';
 export * from './jurisdiction';
 export {
-  assignNameOnChain,
   debugFundReserves,
   getEntityInfoFromChain,
   submitProcessBatch,
-  transferNameBetweenEntities,
 } from './runtime-api';
 
 /**

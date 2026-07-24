@@ -1,7 +1,42 @@
 import type { AggregatedHealth, MarketMakerHealthPayload } from './orchestrator-types';
 import { classifyRuntimeMarketMakerFailure, type RuntimeFailureSignal } from '../protocol/failure-taxonomy';
+import type { MarketSnapshotPayload } from '../relay/market-snapshot';
 
 type AggregatedMarketMakerHealth = AggregatedHealth['marketMaker'];
+
+export type MarketSnapshotOrderDepth = Readonly<{
+  bidOffers: number;
+  askOffers: number;
+}>;
+
+export const countMarketSnapshotOrderDepth = (
+  snapshot: MarketSnapshotPayload | undefined,
+): MarketSnapshotOrderDepth => {
+  const countSide = (levels: MarketSnapshotPayload['bids'] | undefined): number =>
+    (levels ?? []).reduce((sum, level) => {
+      const orderCount = Number(level.orderCount);
+      return sum + (Number.isFinite(orderCount) && orderCount > 0 ? Math.floor(orderCount) : 1);
+    }, 0);
+  return {
+    bidOffers: countSide(snapshot?.bids),
+    askOffers: countSide(snapshot?.asks),
+  };
+};
+
+export const mergeMarketSnapshotOrderDepth = (
+  ...depths: readonly MarketSnapshotOrderDepth[]
+): MarketSnapshotOrderDepth => ({
+  bidOffers: Math.max(0, ...depths.map(depth => depth.bidOffers)),
+  askOffers: Math.max(0, ...depths.map(depth => depth.askOffers)),
+});
+
+export const isExactMarketSnapshotOrderDepth = (
+  depth: MarketSnapshotOrderDepth,
+  expectedPerSide: number,
+): boolean =>
+  expectedPerSide > 0 &&
+  depth.bidOffers === expectedPerSide &&
+  depth.askOffers === expectedPerSide;
 
 type BuildAggregatedMarketMakerHealthParams = {
   mmEnabled: boolean;
@@ -148,7 +183,7 @@ export const buildAggregatedMarketMakerHealth = ({
     const existing = hubsById.get(hubEntityId);
     const offers = existing?.offers ?? 0;
     const depthReady = existing?.depthReady === true ||
-      (!!expectedOffersPerHub && offers >= expectedOffersPerHub);
+      (!!expectedOffersPerHub && offers === expectedOffersPerHub);
     const ready = existing?.ready === true || depthReady;
     return {
       hubEntityId,

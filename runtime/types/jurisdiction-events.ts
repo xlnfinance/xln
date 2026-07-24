@@ -141,7 +141,6 @@ export type JurisdictionEvent =
         entityId: string;
         batchHash: string;
         nonce: number;
-        success: boolean;
       };
     })
   | (JEventMetadata & {

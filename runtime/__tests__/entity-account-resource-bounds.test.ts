@@ -1,20 +1,23 @@
 import { expect, spyOn, test } from 'bun:test';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
-import { addToAccountMempool } from '../account/consensus';
+import { addToAccountMempool, proposeAccountFrame } from '../account/consensus';
+import { createFrameHash } from '../account/consensus/frame';
 import { prependUniqueMempoolTxs } from '../account/consensus/helpers';
-import { EMPTY_ACCOUNT_STATE_ROOT } from '../account/state-root';
+import { computeAccountStateRoot, EMPTY_ACCOUNT_STATE_ROOT } from '../account/state-root';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
 import { LIMITS } from '../constants';
 import { applyEntityInput } from '../entity/consensus';
 import { assertEntityAccountInsertionCapacity } from '../entity/account-capacity';
-import { encodeBoard, hashBoard } from '../entity/factory';
+import { encodeBoard, generateLazyEntityId, hashBoard } from '../entity/factory';
+import { isLeftEntity } from '../entity/id';
 import { applyAccountInput } from '../entity/tx/handlers/account';
 import { handleOpenAccountEntityTx } from '../entity/tx/handlers/open-account';
 import { handleRollbackTimedOutFramesEntityTx } from '../entity/tx/handlers/htlc-direct';
 import { createEmptyEnv } from '../runtime';
 import { hydrateAccountDocFromStorage, hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
+import { signEntityHashes } from '../hanko/signing';
 import type {
   AccountMachine,
   AccountTx,
@@ -216,6 +219,95 @@ test('inbound mirrored-account insertion rejects capacity overflow before state 
   }, env)).rejects.toThrow('ENTITY_ACCOUNT_LIMIT_EXCEEDED');
   expect(state.accounts.size).toBe(LIMITS.MAX_ACCOUNTS_PER_ENTITY);
   expect(state.accounts.has(counterpartyId)).toBe(false);
+});
+
+test('only an accepted signed genesis can reserve an Account slot', async () => {
+  const env = createEmptyEnv('rejected-account-genesis');
+  env.timestamp = 1_000;
+  env.quietRuntimeLogs = true;
+  const sourceSignerId = deriveSignerAddressSync(env.runtimeSeed!, 'source').toLowerCase();
+  const targetSignerId = deriveSignerAddressSync(env.runtimeSeed!, 'target').toLowerCase();
+  registerSignerKey(env, sourceSignerId, deriveSignerKeySync(env.runtimeSeed!, 'source'));
+  registerSignerKey(env, targetSignerId, deriveSignerKeySync(env.runtimeSeed!, 'target'));
+  const sourceEntityId = generateLazyEntityId([sourceSignerId], 1n).toLowerCase();
+  const targetEntityId = generateLazyEntityId([targetSignerId], 1n).toLowerCase();
+  env.jReplicas.set('resource-bounds', {
+    name: 'resource-bounds',
+    chainId: jurisdiction.chainId,
+    rpcs: [],
+    depositoryAddress: jurisdiction.depositoryAddress,
+    entityProviderAddress: jurisdiction.entityProviderAddress,
+    contracts: {
+      depository: jurisdiction.depositoryAddress,
+      entityProvider: jurisdiction.entityProviderAddress,
+      account: `0x${'66'.repeat(20)}`,
+      deltaTransformer: `0x${'77'.repeat(20)}`,
+    },
+    blockNumber: 0n,
+    stateRoot: null,
+    mempool: [],
+    blockDelayMs: 0,
+    lastBlockTimestamp: 0,
+    position: { x: 0, y: 0, z: 0 },
+  });
+  const entityState = (id: string, signerId: string): EntityState => ({
+    ...makeState(),
+    entityId: id,
+    config: {
+      ...makeState().config,
+      validators: [signerId],
+      shares: { [signerId]: 1n },
+    },
+  });
+  const sourceState = entityState(sourceEntityId, sourceSignerId);
+  const targetState = entityState(targetEntityId, targetSignerId);
+  env.eReplicas.set(`${sourceEntityId}:${sourceSignerId}`, {
+    entityId: sourceEntityId,
+    signerId: sourceSignerId,
+    isProposer: true,
+    mempool: [],
+    state: sourceState,
+  });
+  env.eReplicas.set(`${targetEntityId}:${targetSignerId}`, {
+    entityId: targetEntityId,
+    signerId: targetSignerId,
+    isProposer: true,
+    mempool: [],
+    state: targetState,
+  });
+
+  const proposer = makeAccount([
+    { type: 'set_credit_limit', data: { tokenId: 1, amount: 100n } },
+  ]);
+  proposer.leftEntity = isLeftEntity(sourceEntityId, targetEntityId) ? sourceEntityId : targetEntityId;
+  proposer.rightEntity = isLeftEntity(sourceEntityId, targetEntityId) ? targetEntityId : sourceEntityId;
+  proposer.currentFrame.byLeft = sourceEntityId === proposer.leftEntity;
+  proposer.proofHeader = { fromEntity: sourceEntityId, toEntity: targetEntityId, nextProofNonce: 1 };
+  proposer.currentFrame.accountStateRoot = computeAccountStateRoot(proposer);
+  proposer.currentFrame.stateHash = proposer.currentFrame.accountStateRoot;
+
+  const proposed = await proposeAccountFrame(env, proposer, env.timestamp, 0);
+  if (!proposed.success || !proposed.accountInput?.proposal) {
+    throw new Error(proposed.error || 'TEST_ACCOUNT_GENESIS_PROPOSAL_REQUIRED');
+  }
+  const invalidInput = structuredClone(proposed.accountInput);
+  invalidInput.proposal.frame.accountStateRoot = `0x${'99'.repeat(32)}`;
+  invalidInput.proposal.frame.stateHash = await createFrameHash(invalidInput.proposal.frame);
+  const [frameHanko] = await signEntityHashes(
+    env,
+    sourceEntityId,
+    sourceSignerId,
+    [invalidInput.proposal.frame.stateHash],
+  );
+  invalidInput.proposal.frameHanko = frameHanko!;
+
+  await applyAccountInput(targetState, invalidInput, env).catch(() => undefined);
+  expect(targetState.accounts.has(sourceEntityId)).toBe(false);
+  expect(targetState.accounts.size).toBe(0);
+
+  await applyAccountInput(targetState, proposed.accountInput, env);
+  expect(targetState.accounts.get(sourceEntityId)?.currentHeight).toBe(1);
+  expect(targetState.accounts.size).toBe(1);
 });
 
 test('Account validation and storage hydration reject an undrainable mempool', () => {

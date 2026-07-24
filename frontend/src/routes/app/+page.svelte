@@ -14,4 +14,5 @@
   networkMode="simnet"
   {embedMode}
   userMode={$appState.mode === 'user'}
+  requestedPanelId={$appState.requestedDockPanel}
 />

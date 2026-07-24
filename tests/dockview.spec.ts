@@ -80,7 +80,7 @@ test.describe('dockview', () => {
     const importUrl = await resolveRuntimeImportAppUrl(page, {
       appBaseUrl: APP_BASE_URL,
       apiBaseUrl: API_BASE_URL,
-      access: 'read',
+      access: 'admin',
     });
     await page.goto(importUrl, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => {
@@ -182,9 +182,10 @@ test.describe('dockview', () => {
 
     await activateDockPanel(page, 'settings');
     await expect(page.getByTestId('dock-settings-panel')).toBeVisible();
+    await expect(page.getByRole('button', { name: '🗄️ Storage', exact: true })).toHaveClass(/active/);
+    await expect(page.getByTestId('leveldb-inspector')).toBeVisible();
     await page.getByRole('button', { name: /Advanced/ }).click();
     await expect(page.getByTestId('network-machine-timeline-mode')).toHaveValue('all-frames');
-    await expect(page.getByRole('button', { name: /LevelDB Inspector/ })).toBeVisible();
     await expect(page.locator('.tab-style-card')).toHaveCount(6);
     await page.getByRole('button', { name: '📐 Layout', exact: true }).click();
     await page.getByTestId('dock-entity-open-mode').selectOption('new-tab');

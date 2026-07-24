@@ -5,8 +5,11 @@ const DepositoryModule = buildModule("DepositoryModule", (m) => {
   const foundationRecipient = m.getParameter("foundationRecipient", m.getAccount(0));
   const disputeDelayBlocks = m.getParameter("defaultDisputeDelayBlocks", 5760);
 
-  // 1. Deploy EntityProvider FIRST
-  const entityProvider = m.contract('EntityProvider', [foundationRecipient]);
+  // 1. Deploy the verifier library and linked EntityProvider first
+  const hankoVerifier = m.library('HankoVerifier');
+  const entityProvider = m.contract('EntityProvider', [foundationRecipient], {
+    libraries: { HankoVerifier: hankoVerifier },
+  });
   console.log("🔍 IGNITION: EntityProvider deployed");
 
   // 2. Deploy Account library

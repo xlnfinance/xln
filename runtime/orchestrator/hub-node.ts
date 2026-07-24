@@ -41,6 +41,7 @@ import { requireDeliveryDelivered } from '../protocol/payments/delivery-result';
 import { createStructuredLogger } from '../infra/logger';
 import { getPerfMs } from '../utils';
 import { handleMeshBootstrapLoopError } from './mesh-bootstrap-fail-fast';
+import { reportManagedChildFatal } from './managed-child-fatal-ipc';
 import {
   advanceBootstrapProgress,
   beginBootstrapProgress,
@@ -129,6 +130,7 @@ import {
   hasQueuedOpenAccount,
   hasPairMutualCredits,
   isCanonicalAccountOpener,
+  serializeAccountDelta,
   settleRuntimeFor,
   sleep,
   summarizeRuntimeQuiescence,
@@ -1569,6 +1571,7 @@ const run = async (): Promise<void> => {
   };
   let activeJAdapter: JAdapter | null = null;
   let activeTokenCatalog: JTokenInfo[] = [];
+  let p2p: ReturnType<typeof startP2P>;
   let externalIngressReady = false;
   let meshLoop: ReturnType<typeof setInterval> | null = null;
   let meshLoopInFlight = false;
@@ -1621,7 +1624,15 @@ const run = async (): Promise<void> => {
     faucetSignerLabel: FAUCET_SIGNER_LABEL,
     faucetWalletEthTarget: FAUCET_WALLET_ETH_TARGET,
     faucetTokenTargetUnits: FAUCET_TOKEN_TARGET_UNITS,
-    emitDebugEvent: () => {},
+    emitDebugEvent: entry => {
+      if (p2p?.sendDebugEvent(entry)) return;
+      if (entry.event === 'error') {
+        nodeLog.error('debug_event.delivery_failed', {
+          reason: entry.reason,
+          status: entry.status,
+        });
+      }
+    },
     fundBrowserVmWallet: async () => false,
   });
 
@@ -1806,6 +1817,7 @@ const run = async (): Promise<void> => {
             tokenId,
             hasDelta: Boolean(account?.deltas?.has(tokenId)),
             hubOutCapacity: account ? getEntityOutCapacity(account, hubEntityId, tokenId).toString() : '0',
+            delta: serializeAccountDelta(account?.deltas?.get(tokenId)),
           })),
           runtime: {
             height: Number(env.height ?? 0),
@@ -2208,7 +2220,7 @@ const run = async (): Promise<void> => {
   });
 
   const p2pConnectStartedAt = startTiming('p2p_connect');
-  const p2p = startP2P(env, {
+  p2p = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
     wsUrl: directWsUrl,
     preferRelayForEntityInput: true,
@@ -2221,6 +2233,12 @@ const run = async (): Promise<void> => {
     tickDelayMs: HUB_RUNTIME_TICK_DELAY_MS,
     maxEntityInputsPerFrame: HUB_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
     maxEntityTxsPerFrame: HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
+    onFatal: async payload => {
+      await reportManagedChildFatal({
+        runtimeId: String(env.runtimeId || ''),
+        ...payload,
+      });
+    },
   });
   finishTiming('p2p_connect', p2pConnectStartedAt);
 

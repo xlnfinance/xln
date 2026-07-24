@@ -265,10 +265,6 @@ const decodeTaggedJson = (value: unknown): unknown => {
   }
 };
 
-export function bigIntReplacer(_key: string, value: unknown): unknown {
-  return normalizeSerializableValue(value, {}, []);
-}
-
 /**
  * Deterministic JSON.stringify replacement with BigInt/Map/Set/Uint8Array support.
  */
@@ -284,26 +280,6 @@ export function safeStringify(obj: unknown, space?: number): string {
 /** Authoritative codec variant: never drops a named field from the payload. */
 export const serializeCanonicalTaggedJson = (value: unknown): string =>
   stringifyCanonical(value, { includeVolatileKeys: true });
-
-/**
- * BigInt-safe console logging for debugging.
- */
-export function safeLog(message: string, obj?: unknown): void {
-  if (obj !== undefined) {
-    try {
-      console.log(message, safeStringify(obj, 2));
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      console.log(message, `[Unserializable: ${detail}]`);
-    }
-  } else {
-    console.log(message);
-  }
-}
-
-export function bigIntReviver(_key: string, value: unknown): unknown {
-  return decodeTaggedJson(value);
-}
 
 /**
  * BigInt-safe JSON.parse replacement.

@@ -1,10 +1,15 @@
 #!/usr/bin/env bun
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { appendFileSync, cpSync, existsSync, mkdirSync, openSync, rmSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, rmSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { Level } from 'level';
+import { readStorageHead } from '../storage';
+import { withRebranchedValues } from '../storage/rebranched-db';
+import type { StorageHead } from '../storage/types';
+import { RemoteRuntimeAdapter } from '../radapter/remote';
 import {
   E2E_FATAL_LOG_TAIL_LINES,
   findFirstRuntimeFatalLogHit,
@@ -21,6 +26,14 @@ import {
 type ManagedProcess = {
   name: string;
   proc: ChildProcess;
+};
+
+type EpochRotationEvidence = {
+  runtime: 'H1' | 'H2' | 'H3' | 'MM';
+  currentHeight: number;
+  previousHeight: number;
+  latestSnapshotHeight: number;
+  epochMaxBytes: number;
 };
 
 type HealthPayload = {
@@ -119,6 +132,7 @@ type BootstrapMetrics = {
   workDir: string;
   eventsJsonl: string;
   marketMakerEventsJsonl: string;
+  epochRotations?: EpochRotationEvidence[];
   templateDir?: string;
 };
 
@@ -147,6 +161,14 @@ const postBootstrapStabilityMs = Math.max(
   0,
   Number(process.env['XLN_LOCAL_PROD_SMOKE_POST_BOOTSTRAP_STABILITY_MS'] || '2000'),
 );
+const requireEpochRotation = process.env['XLN_LOCAL_PROD_SMOKE_REQUIRE_EPOCH_ROTATION'] === '1';
+const expectedEpochMaxBytes = Number(process.env['XLN_STORAGE_EPOCH_MAX_BYTES'] || '0');
+if (
+  requireEpochRotation &&
+  (!Number.isSafeInteger(expectedEpochMaxBytes) || expectedEpochMaxBytes < 1)
+) {
+  throw new Error(`LOCAL_PROD_SMOKE_EPOCH_MAX_BYTES_INVALID:${String(expectedEpochMaxBytes)}`);
+}
 const smokeStartedAt = Date.now();
 const stages: BootstrapStage[] = [];
 const recordedStages = new Set<string>();
@@ -299,6 +321,129 @@ const startManaged = (name: string, command: string, args: string[], env: Record
   });
   closeSync(out);
   children.push({ name, proc });
+};
+
+const readClosedStorageHead = async (path: string): Promise<StorageHead> => {
+  const db = withRebranchedValues(
+    new Level(path, { valueEncoding: 'buffer', keyEncoding: 'binary' }) as unknown as Level<Buffer, Buffer>,
+  );
+  await db.open();
+  try {
+    const head = await readStorageHead(db);
+    if (!head) throw new Error(`LOCAL_PROD_SMOKE_STORAGE_HEAD_MISSING:${path}`);
+    return head;
+  } finally {
+    await db.close();
+  }
+};
+
+const inspectEpochRotations = async (): Promise<EpochRotationEvidence[]> => {
+  const runtimes = [
+    ['H1', 'h1'],
+    ['H2', 'h2'],
+    ['H3', 'h3'],
+    ['MM', 'mm'],
+  ] as const;
+  const evidence: EpochRotationEvidence[] = [];
+  for (const [runtime, directory] of runtimes) {
+    const runtimeDir = join(workDir, 'prod-mesh', directory);
+    const currentEntry = readdirSync(runtimeDir).find(entry => entry.endsWith('-storage-current'));
+    if (!currentEntry) {
+      throw new Error(`LOCAL_PROD_SMOKE_STORAGE_CURRENT_MISSING:${runtime}:${runtimeDir}`);
+    }
+    const currentPath = join(runtimeDir, currentEntry);
+    const previousPath = `${currentPath.slice(0, -'-storage-current'.length)}-storage-previous`;
+    if (!existsSync(previousPath)) {
+      throw new Error(`LOCAL_PROD_SMOKE_STORAGE_ROTATION_MISSING:${runtime}:${previousPath}`);
+    }
+    const [current, previous] = await Promise.all([
+      readClosedStorageHead(currentPath),
+      readClosedStorageHead(previousPath),
+    ]);
+    if (current.epochMaxBytes !== expectedEpochMaxBytes || previous.epochMaxBytes !== expectedEpochMaxBytes) {
+      throw new Error(
+        `LOCAL_PROD_SMOKE_STORAGE_EPOCH_CONFIG_DRIFT:${runtime}:` +
+        `expected=${expectedEpochMaxBytes}:current=${current.epochMaxBytes}:previous=${previous.epochMaxBytes}`,
+      );
+    }
+    if (current.latestHeight <= previous.latestHeight) {
+      throw new Error(
+        `LOCAL_PROD_SMOKE_STORAGE_POST_ROTATION_FRAME_MISSING:${runtime}:` +
+        `current=${current.latestHeight}:previous=${previous.latestHeight}`,
+      );
+    }
+    evidence.push({
+      runtime,
+      currentHeight: current.latestHeight,
+      previousHeight: previous.latestHeight,
+      latestSnapshotHeight: current.latestSnapshotHeight,
+      epochMaxBytes: current.epochMaxBytes,
+    });
+  }
+  return evidence;
+};
+
+const commitPostRotationProofFrames = async (): Promise<void> => {
+  const manifestPath = join(workDir, 'prod-mesh', 'runtime-import-manifest.json');
+  const parsed = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+    manifest?: {
+      entries?: Array<{ access?: string; label?: string; token?: string; wsUrl?: string }>;
+    };
+  };
+  const entries = parsed.manifest?.entries ?? [];
+  await Promise.all((['H1', 'H2', 'H3', 'MM'] as const).map(async (label) => {
+    const entry = entries.find(candidate =>
+      candidate.label === label &&
+      candidate.access === 'admin' &&
+      typeof candidate.token === 'string' &&
+      typeof candidate.wsUrl === 'string'
+    );
+    if (!entry?.token || !entry.wsUrl) {
+      throw new Error(`LOCAL_PROD_SMOKE_EPOCH_ADMIN_RUNTIME_MISSING:${label}`);
+    }
+    const adapter = new RemoteRuntimeAdapter();
+    try {
+      await adapter.connect({
+        mode: 'remote',
+        wsUrl: entry.wsUrl,
+        authKey: entry.token,
+        requestTimeoutMs: 5_000,
+      });
+      const commandSequence = adapter.nextCommandSequence;
+      if (!commandSequence) {
+        throw new Error(`LOCAL_PROD_SMOKE_EPOCH_COMMAND_FRONTIER_MISSING:${label}`);
+      }
+      // The first marker may itself be the byte-threshold rotation frame. The
+      // second must therefore commit through the newly published live handle.
+      for (let proofIndex = 0; proofIndex < 2; proofIndex++) {
+        const sequence = commandSequence + proofIndex;
+        const commandId = `epoch-rotation-proof-${label.toLowerCase()}-${proofIndex + 1}`;
+        const deadline = Date.now() + 20_000;
+        let result = await adapter.send(
+          { runtimeTxs: [], entityInputs: [] },
+          { commandId, commandSequence: sequence },
+        );
+        while (result.status !== 'observed' && Date.now() < deadline) {
+          // The production admin lane intentionally replenishes five sends per
+          // second. Poll below that rate instead of weakening the real limiter.
+          await sleep(250);
+          result = await adapter.send(
+            { runtimeTxs: [], entityInputs: [] },
+            { commandId, commandSequence: sequence },
+          );
+        }
+        if (result.status !== 'observed') {
+          throw new Error(
+            `LOCAL_PROD_SMOKE_EPOCH_PROOF_FRAME_NOT_OBSERVED:` +
+            `${label}:proof=${proofIndex + 1}:height=${result.height}`,
+          );
+        }
+      }
+    } finally {
+      adapter.disconnect();
+    }
+  }));
+  recordStage('storage-epoch:post-rotation-frames-committed');
 };
 
 const copySnapshotTemplate = (sourceDir: string, targetDir: string): void => {
@@ -855,8 +1000,6 @@ const main = async (): Promise<void> => {
       process.env['MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '0',
     XLN_RUNTIME_PROCESS_SLOW_MS: process.env['XLN_RUNTIME_PROCESS_SLOW_MS'] || '250',
     XLN_ENTITY_FRAME_SLOW_MS: process.env['XLN_ENTITY_FRAME_SLOW_MS'] || '250',
-    MARKET_MAKER_MAX_LEVELS_PER_PAIR: process.env['MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '10',
-    MARKET_MAKER_CROSS_LEVELS_PER_PAIR: process.env['MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '3',
     MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE:
       process.env['MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE'] || '1000',
     MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK:
@@ -932,6 +1075,14 @@ const main = async (): Promise<void> => {
     }
     recordStage('post-bootstrap:stable', summarizeHealth(postBootstrapHealth));
   }
+  let epochRotations: EpochRotationEvidence[] | undefined;
+  if (requireEpochRotation) {
+    assertNoFatalChildLogs('pre-epoch-inspection');
+    await commitPostRotationProofFrames();
+    await stopManaged();
+    epochRotations = await inspectEpochRotations();
+    recordStage('storage-epoch:verified', epochRotations);
+  }
   const metrics: BootstrapMetrics = {
     schema: 'xln-local-prod-bootstrap-benchmark-v1',
     elapsedMs: Date.now() - smokeStartedAt,
@@ -945,6 +1096,7 @@ const main = async (): Promise<void> => {
     workDir,
     eventsJsonl: eventsJsonlPath,
     marketMakerEventsJsonl: marketMakerEventsJsonlPath,
+    ...(epochRotations ? { epochRotations } : {}),
     ...(useSnapshotTemplate ? { templateDir } : {}),
   };
   const metricsPath = process.env['XLN_LOCAL_PROD_SMOKE_METRICS_JSON'] || join(workDir, 'bootstrap-metrics.json');

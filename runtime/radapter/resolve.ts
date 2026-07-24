@@ -234,6 +234,7 @@ export type RuntimeAdapterFrameSummary = {
   timestamp: number;
   prevFrameHash?: string;
   frameHash?: string;
+  postStateHash: string;
   stateHash: string;
   hashMode?: StorageFrameRecord['hashMode'];
   materializedState?: boolean;
@@ -557,6 +558,7 @@ const headFromEnv = (env: Env): StorageHead => {
     retainSnapshots: Math.max(1, Number(storage?.retainSnapshots ?? DEFAULT_RETAIN_SNAPSHOTS)),
     epochMaxBytes: Math.max(1, Number(storage?.epochMaxBytes ?? DEFAULT_EPOCH_MAX_BYTES)),
     accountMerkleRadix: storage?.accountMerkleRadix === 256 ? 256 : DEFAULT_ACCOUNT_MERKLE_RADIX,
+    epochReplayBytes: 0,
     retainedHistoryBytes: 0,
   };
 };
@@ -995,7 +997,6 @@ const compactJBatchForView = (batch: JBatch | undefined): JBatch | undefined => 
       diffs: compactArrayTail(op.diffs, 100) ?? [],
       forgiveDebtsInTokenIds: compactArrayTail(op.forgiveDebtsInTokenIds, 100) ?? [],
       sig: op.sig ? '[redacted]' : '',
-      hankoData: op.hankoData ? '[redacted]' : '',
     })),
     disputeStarts: (compactArrayTail(batch.disputeStarts, BATCH_VIEW_OP_LIMIT) ?? []).map((op) => ({
       ...op,
@@ -1018,7 +1019,6 @@ const compactJBatchForView = (batch: JBatch | undefined): JBatch | undefined => 
       ...op,
       secret: op.secret ? '[redacted]' : '',
     })),
-    hub_id: batch.hub_id,
   };
 };
 
@@ -1269,56 +1269,6 @@ const compactViewPageForRemote = (entityId: string, view: {
   },
 });
 
-const storageHeadCanServeHeight = async (
-  ctx: RuntimeAdapterResolveContext,
-  height: number,
-): Promise<boolean> => {
-  if (height < 1) return false;
-  if (!ctx.readHead) return false;
-  const head = await ctx.readHead();
-  if (!head) return false;
-  return latestHeadHeight(head) >= height;
-};
-
-const loadStorageViewPageIfAvailable = async (
-  ctx: RuntimeAdapterResolveContext,
-  entityId: string,
-  height: number,
-  query?: RuntimeAdapterReadQuery,
-): Promise<{
-  core: RuntimeAdapterEntityCoreDoc;
-  accounts: RuntimeAdapterAccountPage;
-  books: RuntimeAdapterBookPage;
-} | null> => {
-  if (!ctx.loadEntityViewPage) return null;
-  if (!await storageHeadCanServeHeight(ctx, height)) return null;
-  const stored = await ctx.loadEntityViewPage!(entityId, height, query);
-  return stored ?? null;
-};
-
-type RuntimeAdapterReplicaLocalCoreOverlay = {
-  signerId: string;
-  isProposer: boolean;
-  entityEncPubKey: string;
-  entityEncPrivKey: '';
-  htlcNotes?: EntityState['htlcNotes'];
-};
-
-const snapshotReplicaLocalCoreOverlay = (
-  replica: EntityReplica | null | undefined,
-): RuntimeAdapterReplicaLocalCoreOverlay | null => {
-  if (!replica) return null;
-  return {
-    signerId: normalizeEntityId(replica.signerId),
-    isProposer: replica.isProposer,
-    entityEncPubKey: replica.state.entityEncPubKey,
-    entityEncPrivKey: '',
-    ...(replica.state.htlcNotes instanceof Map
-      ? { htlcNotes: new Map(replica.state.htlcNotes) }
-      : {}),
-  };
-};
-
 const loadViewPageForHeight = async (
   ctx: RuntimeAdapterResolveContext,
   entityId: string,
@@ -1330,14 +1280,7 @@ const loadViewPageForHeight = async (
   accounts: RuntimeAdapterAccountPage;
   books: RuntimeAdapterBookPage;
 }> => {
-  if (isCurrentHeight) {
-    const localCore = snapshotReplicaLocalCoreOverlay(findReplica(ctx.env, entityId));
-    const stored = await loadStorageViewPageIfAvailable(ctx, entityId, height, query);
-    if (!stored) return projectLiveEntityViewPage(ctx, entityId, query);
-    return localCore
-      ? { ...stored, core: { ...stored.core, ...localCore } }
-      : stored;
-  }
+  if (isCurrentHeight) return projectLiveEntityViewPage(ctx, entityId, query);
   return await loadRequiredEntityViewPage(ctx, entityId, height, query);
 };
 
@@ -1761,6 +1704,7 @@ const compactFrameRecordForRemote = (frame: StorageFrameRecord): RuntimeAdapterF
     timestamp: frame.timestamp,
     ...(frame.prevFrameHash ? { prevFrameHash: frame.prevFrameHash } : {}),
     ...(frame.frameHash ? { frameHash: frame.frameHash } : {}),
+    postStateHash: frame.postStateHash,
     stateHash: frame.stateHash,
     ...(frame.hashMode ? { hashMode: frame.hashMode } : {}),
     ...(frame.materializedState !== undefined ? { materializedState: frame.materializedState } : {}),
@@ -1966,13 +1910,6 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
         const limit = readBoundedLimit(query?.accountsLimit ?? query?.limit, 10);
         const isCurrentHeight = height === null || targetHeight === envHeight(ctx.env);
         if (isCurrentHeight) {
-          const stored = ctx.loadEntityAccountDoc && await storageHeadCanServeHeight(ctx, targetHeight)
-            ? await ctx.loadEntityAccountDoc(entityId, accountId, targetHeight)
-            : null;
-          if (stored) {
-            const page = singleAccountPage(accountId, compactAccountDocForView(stored), limit);
-            return { ...page, summary: accountPageSummaryForView(entityId, page) } as T;
-          }
           const replica = findReplica(ctx.env, entityId);
           if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${normalizeEntityId(entityId)}`);
           const account = replica.state.accounts.get(accountId);

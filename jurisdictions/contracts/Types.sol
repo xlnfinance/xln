@@ -137,8 +137,6 @@ struct Settlement {
   SettlementDiff[] diffs;
   uint[] forgiveDebtsInTokenIds;
   bytes sig;
-  address entityProvider;  // Legacy ABI field; Depository now uses its immutable provider
-  bytes hankoData;         // Reserved for off-chain tooling/debug payloads
   uint256 nonce;
 }
 
@@ -205,7 +203,6 @@ struct Batch {
   ExternalTokenToReserve[] externalTokenToReserve;
   ReserveToExternalToken[] reserveToExternalToken;
   SecretReveal[] revealSecrets;
-  uint hub_id;  // Reserved for runtime/off-chain metadata
 }
 
 // ========== ENUMS ==========

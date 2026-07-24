@@ -215,7 +215,6 @@ export interface DepositoryInterface extends Interface {
       | "DebtForgiven"
       | "DisputeFinalized"
       | "DisputeStarted"
-      | "FatalTokenError"
       | "HankoBatchProcessed"
       | "ReserveUpdated"
       | "SecretRevealed"
@@ -654,55 +653,21 @@ export namespace DisputeStartedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
-export namespace FatalTokenErrorEvent {
-  export type InputTuple = [
-    tokenId: BigNumberish,
-    debtor: BytesLike,
-    requestedDebt: BigNumberish,
-    acceptedDebt: BigNumberish,
-    supply: BigNumberish,
-    outstanding: BigNumberish
-  ];
-  export type OutputTuple = [
-    tokenId: bigint,
-    debtor: string,
-    requestedDebt: bigint,
-    acceptedDebt: bigint,
-    supply: bigint,
-    outstanding: bigint
-  ];
-  export interface OutputObject {
-    tokenId: bigint;
-    debtor: string;
-    requestedDebt: bigint;
-    acceptedDebt: bigint;
-    supply: bigint;
-    outstanding: bigint;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
 export namespace HankoBatchProcessedEvent {
   export type InputTuple = [
     entityId: BytesLike,
     batchHash: BytesLike,
-    nonce: BigNumberish,
-    success: boolean
+    nonce: BigNumberish
   ];
   export type OutputTuple = [
     entityId: string,
     batchHash: string,
-    nonce: bigint,
-    success: boolean
+    nonce: bigint
   ];
   export interface OutputObject {
     entityId: string;
     batchHash: string;
     nonce: bigint;
-    success: boolean;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -1345,13 +1310,6 @@ export interface Depository extends BaseContract {
     DisputeStartedEvent.OutputObject
   >;
   getEvent(
-    key: "FatalTokenError"
-  ): TypedContractEvent<
-    FatalTokenErrorEvent.InputTuple,
-    FatalTokenErrorEvent.OutputTuple,
-    FatalTokenErrorEvent.OutputObject
-  >;
-  getEvent(
     key: "HankoBatchProcessed"
   ): TypedContractEvent<
     HankoBatchProcessedEvent.InputTuple,
@@ -1490,18 +1448,7 @@ export interface Depository extends BaseContract {
       DisputeStartedEvent.OutputObject
     >;
 
-    "FatalTokenError(uint256,bytes32,uint256,uint256,uint256,uint256)": TypedContractEvent<
-      FatalTokenErrorEvent.InputTuple,
-      FatalTokenErrorEvent.OutputTuple,
-      FatalTokenErrorEvent.OutputObject
-    >;
-    FatalTokenError: TypedContractEvent<
-      FatalTokenErrorEvent.InputTuple,
-      FatalTokenErrorEvent.OutputTuple,
-      FatalTokenErrorEvent.OutputObject
-    >;
-
-    "HankoBatchProcessed(bytes32,bytes32,uint256,bool)": TypedContractEvent<
+    "HankoBatchProcessed(bytes32,bytes32,uint256)": TypedContractEvent<
       HankoBatchProcessedEvent.InputTuple,
       HankoBatchProcessedEvent.OutputTuple,
       HankoBatchProcessedEvent.OutputObject

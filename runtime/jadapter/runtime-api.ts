@@ -54,20 +54,6 @@ export const submitProcessBatch = async (
   };
 };
 
-export const assignNameOnChain = async (
-  name: string,
-  entityNumber: number,
-  jurisdiction: JurisdictionConfig,
-): Promise<{ txHash: string }> => {
-  const { entityProvider } = await connectJurisdictionContracts(jurisdiction);
-  const tx = await entityProvider.assignName(name, entityNumber);
-  const receipt = await tx.wait();
-  if (!receipt || receipt.status === 0) {
-    throw new Error(`assignName failed for ${name}`);
-  }
-  return { txHash: receipt.hash };
-};
-
 export const getEntityInfoFromChain = async (
   entityId: string,
   jurisdiction: JurisdictionConfig,
@@ -101,19 +87,4 @@ export const getEntityInfoFromChain = async (
       error instanceof Error ? { cause: error } : undefined,
     );
   }
-};
-
-export const transferNameBetweenEntities = async (
-  name: string,
-  _fromNumber: number,
-  toNumber: number,
-  jurisdiction: JurisdictionConfig,
-): Promise<string> => {
-  const { entityProvider } = await connectJurisdictionContracts(jurisdiction);
-  const tx = await entityProvider.transferName(name, toNumber);
-  const receipt = await tx.wait();
-  if (!receipt || receipt.status === 0) {
-    throw new Error(`transferName failed for ${name}`);
-  }
-  return receipt.hash;
 };

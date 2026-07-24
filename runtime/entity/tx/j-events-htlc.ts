@@ -8,7 +8,7 @@ import type {
 import { addMessage } from '../../state-helpers';
 import { decodeHashLadderBinary } from '../../protocol/htlc/hash-ladder';
 import { CROSS_J_MAX_FILL_RATIO, isCrossJurisdictionTerminalStatus } from '../../extensions/cross-j/index';
-import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
+import { createStructuredLogger, shortHash } from '../../infra/logger';
 import { pushCrossJurisdictionEntityOutput } from './cross-j-outputs';
 import type { JEventMempoolOp } from './j-events-types';
 
@@ -154,10 +154,10 @@ export function queueCrossJurisdictionSalvageFromArgumentList(
   if (pullBinaries.length === 0) return false;
 
   const route = findCrossJurisdictionRouteForSourceDispute(state, counterpartyId);
-  if (!route) {
-    jEventHtlcLog.warn('crossj.salvage_route_missing', { source: shortId(state.entityId), counterparty: shortId(counterpartyId) });
-    return false;
-  }
+  // Both bilateral peers observe the same dispute arguments, but only the
+  // source route owner can forward a pull reveal to the target sibling.
+  // Absence here means "not this observer", not missing durable state.
+  if (!route) return false;
 
   const best = pullBinaries.reduce((acc, item) => item.fillRatio > acc.fillRatio ? item : acc, pullBinaries[0]!);
   pushCrossJurisdictionEntityOutput(env, outputs, route.target.counterpartyEntityId, [{

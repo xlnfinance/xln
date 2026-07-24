@@ -40,8 +40,22 @@ assertIncludes(invariant, "'SWAP_REQUEST_',", invariantPath);
 const frontendPath = 'frontend/src/lib/components/Entity/SwapPanel.svelte';
 const frontend = readText(frontendPath);
 assertIncludes(frontend, "type: 'proposeCancelSwap'", frontendPath);
+assertIncludes(frontend, 'activeXlnFunctions.planSwapCommand({', frontendPath);
+assertIncludes(frontend, 'await submitRuntimeInput(commandPlan.runtimeInput);', frontendPath);
+assertIncludes(frontend, 'await waitForCrossTargetCapacity(', frontendPath);
+assertIncludes(frontend, 'await submitActiveCrossJurisdictionIntent(commandPlan.crossJurisdictionIntent);', frontendPath);
 assertNotIncludes(frontend, "type: 'cancelSwap'", frontendPath);
 assertNotIncludes(frontend, "type: 'cancelSwapOffer'", frontendPath);
+assertNotIncludes(frontend, 'buildDeterministicSwapOfferId', frontendPath);
+assertNotIncludes(frontend, 'satisfies CrossJurisdictionSwapRoute', frontendPath);
+
+const commandPlanPath = 'runtime/account/swap-command-plan.ts';
+const commandPlan = readText(commandPlanPath);
+assertIncludes(commandPlan, 'readSwapAccountCapacity({', commandPlanPath);
+assertIncludes(commandPlan, 'planSwapInboundCapacity({', commandPlanPath);
+assertIncludes(commandPlan, 'assertCrossJurisdictionSwapTargetReadyInEnv', commandPlanPath);
+const commandRoutePath = 'runtime/account/swap-command-route.ts';
+assertIncludes(readText(commandRoutePath), 'withCanonicalCrossJurisdictionRouteHash({', commandRoutePath);
 
 const activityPath = 'runtime/api/activity-history.ts';
 const activity = readText(activityPath);

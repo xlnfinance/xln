@@ -107,7 +107,7 @@ import {
 import { getRuntimeJurisdictionHeight } from '../jurisdiction/height';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { buildLocalJPrefixAttestation } from '../jurisdiction/j-prefix-consensus';
-import { createEmptyBatch } from '../jurisdiction/batch';
+import { createEmptyBatch, encodeJBatch } from '../jurisdiction/batch';
 import {
   getCertifiedBoardNodeStore,
   resolveCertifiedRegisteredBoardHash,
@@ -116,9 +116,14 @@ import {
 import { applyCommand, createBook, getBookOrder, getSwapLotScale, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, type OrderbookExtState } from '../orderbook';
 import { process, createEmptyEnv, registerEntityRuntimeHint, sendEntityInput, validateRuntimeInputAdmission } from '../runtime';
 import { createJReplica } from '../scenarios/boot';
-import { applyMergedEntityInputs } from '../machine/entity-inputs';
+import {
+  applyMergedEntityInputs,
+  RuntimeEntityInputApplyError,
+} from '../machine/entity-inputs';
+import { MalformedEntityFrameInputError } from '../entity/tx/invariant-errors';
 import { applyStorageChanges } from '../machine/env-events';
 import { submitRuntimeJOutbox } from '../machine/j-submit';
+import { registerStructuredLogSink } from '../infra/logger';
 import {
   buildJSubmitAttemptId,
   registerPendingCommittedJOutbox,
@@ -129,6 +134,7 @@ import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/proj
 import { validateStorageAccountDocValue } from '../storage/authoritative-schema';
 import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec';
 import { createDefaultDelta } from '../validation-utils';
+import { cloneEntityState } from '../state-helpers';
 import {
   buildDisputeArgumentsForSnapshot,
   captureDisputeArgumentSnapshot,
@@ -911,7 +917,7 @@ describe('audit fail-fast regressions', () => {
         isProposer: true,
         state,
       });
-      return { env, entityId, signerId };
+      return { env, entityId, signerId, state };
     };
     const invalidEntityTx = {
       type: 'definitely_unknown_entity_tx',
@@ -935,6 +941,100 @@ describe('audit fail-fast regressions', () => {
       entityTxs: [invalidEntityTx],
     }])).rejects.toThrow('ENTITY_FRAME_TX_FAILED: type=definitely_unknown_entity_tx');
     expect(local.env.runtimeState?.quarantinedRuntimeInputs ?? []).toHaveLength(0);
+
+    const malformed = new RuntimeEntityInputApplyError({
+      from: `0x${'ce'.repeat(20)}`,
+      entityId: remote.entityId,
+      signerId: remote.signerId,
+      entityTxs: [invalidEntityTx],
+    } as any, false, new MalformedEntityFrameInputError(
+      'definitely_unknown_entity_tx',
+      'ENTITY_TX_UNHANDLED',
+    ));
+    expect(malformed.failureKind).toBe('malformed-ingress');
+    expect(malformed.isQuarantinableRemoteIngress).toBe(true);
+
+    const storage = new RuntimeEntityInputApplyError({
+      from: `0x${'cf'.repeat(20)}`,
+      entityId: remote.entityId,
+      signerId: remote.signerId,
+    }, false, new Error('STORAGE_NODE_HASH_MISMATCH'));
+    expect(storage.failureKind).toBe('storage');
+    expect(storage.isQuarantinableRemoteIngress).toBe(false);
+
+    const localBug = new RuntimeEntityInputApplyError({
+      from: `0x${'d0'.repeat(20)}`,
+      entityId: remote.entityId,
+      signerId: remote.signerId,
+    }, false, new TypeError('unexpected undefined state'));
+    expect(localBug.failureKind).toBe('local-bug');
+    expect(localBug.isQuarantinableRemoteIngress).toBe(false);
+
+    const applyRemoteAgainstBrokenState = async (
+      seed: string,
+      failure: Error,
+    ): Promise<RuntimeEntityInputApplyError> => {
+      const broken = makeRuntime(seed);
+      Object.defineProperty(broken.state, 'height', {
+        configurable: true,
+        get: () => {
+          throw failure;
+        },
+      });
+      try {
+        await applyMergedEntityInputs(broken.env, [{
+          from: `0x${'d3'.repeat(20)}`,
+          entityId: broken.entityId,
+          signerId: broken.signerId,
+          entityTxs: [],
+        }], [], {
+          isReplay: false,
+          routingDeps: {
+            ensureRuntimeState: targetEnv => targetEnv.runtimeState!,
+            enqueueRuntimeInputs: () => {},
+            extractEntityId: replicaKey => replicaKey.split(':')[0] ?? '',
+            hasLocalSignerForEntity: () => true,
+            hasLocalSignerForEntitySigner: () => true,
+            resolveSoleLocalSignerForEntity: () => broken.signerId,
+            getP2P: () => null,
+          },
+        });
+      } catch (error) {
+        expect(error).toBeInstanceOf(RuntimeEntityInputApplyError);
+        return error as RuntimeEntityInputApplyError;
+      }
+      throw new Error('TEST_REMOTE_BROKEN_STATE_DID_NOT_FAIL');
+    };
+    expect((await applyRemoteAgainstBrokenState(
+      'remote-storage-failure-fatal',
+      new Error('STORAGE_NODE_HASH_MISMATCH'),
+    )).failureKind).toBe('storage');
+    expect((await applyRemoteAgainstBrokenState(
+      'remote-local-bug-fatal',
+      new TypeError('unexpected undefined state'),
+    )).failureKind).toBe('local-bug');
+
+    const invariant = makeRuntime('remote-invariant-failure-fatal');
+    const authorizedInvariantTxs = await buildQuorumAuthorizedFrameTxs(
+      invariant.env,
+      invariant.state,
+      [{
+        type: 'directPayment',
+        data: {
+          targetEntityId: `0x${'d1'.repeat(32)}`,
+          tokenId: 1,
+          amount: 1n,
+          route: [],
+        },
+      } as any],
+    );
+    await expect(process(invariant.env, [{
+      from: `0x${'d2'.repeat(20)}`,
+      entityId: invariant.entityId,
+      signerId: invariant.signerId,
+      entityTxs: authorizedInvariantTxs,
+    }])).rejects.toThrow('DIRECT_PAYMENT_ROUTE_REQUIRED');
+    expect(invariant.env.runtimeState?.quarantinedRuntimeInputs ?? []).toHaveLength(0);
   });
 
   test('local signer resolution prefers an available local signer over stale config validator fallback', () => {
@@ -1030,6 +1130,7 @@ describe('audit fail-fast regressions', () => {
 
   test('runtime input admission rejects tx-bearing stale signer before enqueue', () => {
     const env = createEmptyEnv('runtime-input-admission-stale-signer');
+    env.runtimeState = { lifecyclePhase: 'running', loopActive: true };
     env.scenarioMode = false;
     env.quietRuntimeLogs = true;
     const { entityId, signerId } = registerLazySigner('runtime-input-admission-stale-signer', '1');
@@ -1086,6 +1187,7 @@ describe('audit fail-fast regressions', () => {
 
   test('runtime input admission accounts for importReplica earlier in the same batch', () => {
     const env = createEmptyEnv('runtime-input-admission-import-replica');
+    env.runtimeState = { lifecyclePhase: 'running', loopActive: true };
     env.scenarioMode = false;
     env.quietRuntimeLogs = true;
     const entityId = `0x${'9f'.repeat(32)}`;
@@ -1192,6 +1294,27 @@ describe('audit fail-fast regressions', () => {
     expect(salvageOutput?.entityId).toBe(targetUser);
     expect(salvageOutput?.signerId).toBe(targetSigner);
     expect(salvageOutput?.signerId).not.toBe(staleGossipSigner);
+
+    const observerWarnings: string[] = [];
+    const unregisterSink = registerStructuredLogSink((event) => {
+      if (event.level === 'warn') observerWarnings.push(event.message);
+    });
+    try {
+      const peerObserver = makeEntityState(sourceHub);
+      const peerOutputs: EntityInput[] = [];
+      expect(queueCrossJurisdictionSalvageFromArgumentList(
+        env,
+        peerObserver,
+        peerOutputs,
+        sourceUser,
+        [starterInitialArguments],
+        123,
+      )).toBe(false);
+      expect(peerOutputs).toEqual([]);
+    } finally {
+      unregisterSink();
+    }
+    expect(observerWarnings).toEqual([]);
   });
 
   test('runtime ingress still rejects stale signer hints when local target signer is ambiguous', async () => {
@@ -6538,7 +6661,7 @@ describe('audit fail-fast regressions', () => {
     expect(accountMachine.mempool).toEqual([firstTx, lateTx]);
   });
 
-  test('DisputeFinalized scrubs stale sentBatch finalize and failed Hanko does not resurrect it', async () => {
+  test('DisputeFinalized scrubs draft finalize without mutating sealed sentBatch', async () => {
     const entityId = `0x${'12'.repeat(32)}`;
     const counterpartyId = `0x${'34'.repeat(32)}`;
     const state = makeEntityState(entityId);
@@ -6655,6 +6778,10 @@ describe('audit fail-fast regressions', () => {
       disputeFinalizationEvidence,
       jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
     });
+    const sealedBatchBefore = encodeJBatch(state.jBatchState.sentBatch!.batch);
+    state.jBatchState.sentBatch!.encodedBatch = sealedBatchBefore;
+    const clonedSealedBatch = cloneEntityState(state).jBatchState!.sentBatch!.batch;
+    expect(safeStringify(clonedSealedBatch)).toBe(safeStringify(state.jBatchState.sentBatch!.batch));
     const finalized = await applyJEventRange(state, {
       from: '1',
       observedAt: 2000,
@@ -6668,7 +6795,9 @@ describe('audit fail-fast regressions', () => {
 
     expect(finalized.newState.accounts.get(counterpartyId)?.activeDispute).toBeUndefined();
     expect(finalized.newState.jBatchState?.batch.disputeFinalizations.length).toBe(0);
-    expect(finalized.newState.jBatchState?.sentBatch?.batch.disputeFinalizations.length).toBe(0);
+    expect(finalized.newState.jBatchState?.sentBatch?.batch.disputeFinalizations.length).toBe(1);
+    expect(finalized.newState.jBatchState?.sentBatch?.encodedBatch).toBe(sealedBatchBefore);
+    expect(encodeJBatch(finalized.newState.jBatchState!.sentBatch!.batch)).toBe(sealedBatchBefore);
     const finalizedDelta = finalized.newState.accounts.get(counterpartyId)?.deltas.get(1);
     expect(finalizedDelta?.collateral).toBe(0n);
     expect(finalizedDelta?.ondelta).toBe(0n);
@@ -6680,33 +6809,6 @@ describe('audit fail-fast regressions', () => {
     if (!finalizedAccount) throw new Error('FINALIZED_ACCOUNT_MISSING');
     expect(computeAccountStateRoot(finalizedAccount)).toBe(computeAccountStateRootCold(finalizedAccount));
 
-    const failedBatchEvent: JurisdictionEvent = {
-      type: 'HankoBatchProcessed',
-      data: {
-        entityId,
-        batchHash: `0x${'78'.repeat(32)}`,
-        nonce: 7,
-        success: false,
-      },
-    };
-    const signedFailedBatch = prepareJEventInput(env, entityId, '1', {
-      blockNumber: 23,
-      blockHash: `0x${'77'.repeat(32)}`,
-      transactionHash: `0x${'66'.repeat(32)}`,
-      events: [failedBatchEvent],
-      jurisdictionRef: getJEventJurisdictionRef(finalized.newState.config.jurisdiction),
-    });
-    const failed = await applyJEventRange(finalized.newState, {
-      from: '1',
-      observedAt: 3000,
-      blockNumber: 23,
-      blockHash: `0x${'77'.repeat(32)}`,
-      transactionHash: `0x${'66'.repeat(32)}`,
-      ...signedFailedBatch,
-      event: failedBatchEvent,
-    }, env);
-
-    expect(failed.newState.jBatchState?.batch.disputeFinalizations.length).toBe(0);
   });
 
   test('DisputeFinalized rejects missing signed final body before mutating account state', async () => {
@@ -7300,84 +7402,6 @@ describe('audit fail-fast regressions', () => {
       { entityId, signerId, entityTxs: [{ type: 'j_rebroadcast', data: {} }] },
     )).rejects.toThrow(/Cannot rebroadcast terminal J-submit/);
   });
-
-  test('HankoBatchProcessed(false) drops stale dispute finalize when on-chain nonce already moved even before DisputeFinalized arrives', async () => {
-    const entityId = `0x${'91'.repeat(32)}`;
-    const counterpartyId = `0x${'92'.repeat(32)}`;
-    const state = makeEntityState(entityId);
-    const account = makeProposalAccount([], entityId, counterpartyId);
-    account.activeDispute = {
-      startedByLeft: true,
-      disputeTimeout: 123,
-      initialProofbodyHash: `0x${'93'.repeat(32)}`,
-      initialNonce: 7,
-      finalizeQueued: true,
-    } as AccountMachine['activeDispute'];
-    account.jNonce = 7;
-    state.accounts.set(counterpartyId, account);
-    state.jBatchState = {
-      batch: createEmptyBatch(),
-      jurisdiction: null,
-      lastBroadcast: 0,
-      broadcastCount: 0,
-      failedAttempts: 0,
-      status: 'sent',
-      sentBatch: {
-        batch: {
-          ...createEmptyBatch(),
-          disputeFinalizations: [{
-            counterentity: counterpartyId,
-            initialNonce: 7,
-            finalNonce: 7,
-            initialProofbodyHash: `0x${'94'.repeat(32)}`,
-            finalProofbody: makeEmptyProofBody(),
-            starterArguments: '0x',
-            otherArguments: '0x',
-            sig: '0x',
-            startedByLeft: true,
-            cooperative: false,
-          }],
-        },
-        batchHash: `0x${'95'.repeat(32)}`,
-        encodedBatch: '0x',
-        entityNonce: 7,
-        firstSubmittedAt: 1000,
-        lastSubmittedAt: 1000,
-        submitAttempts: 1,
-      },
-      entityNonce: 7,
-    } as EntityState['jBatchState'];
-
-    const env = createEmptyEnv('failed-batch-stale-finalize');
-    const failedBatchEvent: JurisdictionEvent = {
-      type: 'HankoBatchProcessed',
-      data: {
-        entityId,
-        batchHash: `0x${'95'.repeat(32)}`,
-        nonce: 7,
-        success: false,
-      },
-    };
-    const signedFailedBatch = prepareJEventInput(env, entityId, '1', {
-      blockNumber: 23,
-      blockHash: `0x${'96'.repeat(32)}`,
-      transactionHash: `0x${'97'.repeat(32)}`,
-      events: [failedBatchEvent],
-      jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
-    });
-    const failed = await applyJEventRange(state, {
-      from: '1',
-      observedAt: 3000,
-      blockNumber: 23,
-      blockHash: `0x${'96'.repeat(32)}`,
-      transactionHash: `0x${'97'.repeat(32)}`,
-      ...signedFailedBatch,
-      event: failedBatchEvent,
-    }, env);
-
-    expect(failed.newState.jBatchState?.batch.disputeFinalizations.length).toBe(0);
-  });
-
 
   test('htlc_lock refuses to add more than the configured per-account cap', async () => {
     const accountMachine = {

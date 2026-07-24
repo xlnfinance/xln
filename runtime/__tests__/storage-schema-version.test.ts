@@ -25,6 +25,7 @@ const currentHead = (schemaVersion: number): StorageHead => ({
   retainSnapshots: 3,
   epochMaxBytes: 256 * 1024 * 1024,
   accountMerkleRadix: 16,
+  epochReplayBytes: 1_024,
   retainedHistoryBytes: 1_024,
 });
 
@@ -76,12 +77,12 @@ describe('storage schema boundary', () => {
     await expect(readStorageHead(memoryDbWithHead(currentHead(6)))).rejects.toThrow(
       `STORAGE_SCHEMA_MISMATCH:stored=6:current=${STORAGE_SCHEMA_VERSION}:boundary=storage-head`,
     );
-    expect(STORAGE_SCHEMA_VERSION).toBe(8);
+    expect(STORAGE_SCHEMA_VERSION).toBe(9);
   });
 
   test('pins the one current frame format as one inseparable descriptor', () => {
     expect(STORAGE_FRAME_FORMAT).toEqual({
-      schemaVersion: 8,
+      schemaVersion: 9,
       domain: 'xln.storage.frame',
       postStateDomain: 'xln.storage.postState',
       algorithmId: 'sha256',

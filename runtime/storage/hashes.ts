@@ -39,6 +39,7 @@ import {
 } from './keys';
 import { iterateKeys, readRawOrNull, readValidatedOrNull } from './level';
 import {
+  validateStorageBookDocValue,
   validateStorageMerkleBranchDocValue,
   validateStorageMerkleLeafDocValue,
   validateStorageMerkleRootDocValue,
@@ -67,7 +68,12 @@ import type {
   StorageMerkleRootDoc,
 } from './types';
 
-type StorageDocEncodedValue = { buffer: Buffer; hash: string; hashBytes: Buffer };
+type StorageDocEncodedValue = {
+  doc: StorageDoc;
+  buffer: Buffer;
+  hash: string;
+  hashBytes: Buffer;
+};
 
 const ENTITY_MERKLE_NAMESPACE = 'runtime-roots' as const;
 /** Strict upper bound for one physical Merkle node value in LevelDB. */
@@ -113,11 +119,23 @@ const merkleCellPathBytes = (path: string): Buffer => {
   return Buffer.from(raw.slice(2), 'hex');
 };
 
-const encodeStorageDocValue = (doc: StorageDoc): StorageDocEncodedValue => {
+export const canonicalizeStorageDoc = (doc: StorageDoc): StorageDoc => {
+  if (doc.family !== 'book') return doc;
+  return {
+    ...doc,
+    value: validateStorageBookDocValue(structuredClone(doc.value)),
+  };
+};
+
+const encodeStorageDocValue = (input: StorageDoc): StorageDocEncodedValue => {
+  // Validators normalize/warm derived caches (notably orderbook commitment
+  // hashes). Hash and persist that exact canonical value so a read/validate/
+  // re-encode cycle cannot change the Merkle leaf.
+  const doc = canonicalizeStorageDoc(input);
   const buffer = encodeBuffer(doc.value);
   const hash = hashBuffer(buffer);
   const hashBytes = Buffer.from(hash.slice(2), 'hex');
-  return { buffer, hash, hashBytes };
+  return { doc, buffer, hash, hashBytes };
 };
 
 const encodeMerkleUint64 = (value: string, label: string): Buffer => {
@@ -987,24 +1005,27 @@ export const prepareStorageStateHashes = async (options: {
   };
 
   for (const doc of effectivePuts.values()) {
-    const ref = docRefForDoc(doc);
     const encoded = encodeStorageDocValue(doc);
-    docValueBuffers.set(docValueKey(doc), encoded.buffer);
-    if (doc.family === 'account') {
+    const canonicalDoc = encoded.doc;
+    const ref = docRefForDoc(canonicalDoc);
+    docValueBuffers.set(docValueKey(canonicalDoc), encoded.buffer);
+    if (canonicalDoc.family === 'account') {
       const layout = await prepareAccountStorageLayout(
         options.db,
-        normalizeEntityId(doc.entityId),
-        normalizeEntityId(doc.counterpartyId),
-        liveKeyForDoc(doc),
-        doc.value,
+        normalizeEntityId(canonicalDoc.entityId),
+        normalizeEntityId(canonicalDoc.counterpartyId),
+        liveKeyForDoc(canonicalDoc),
+        canonicalDoc.value,
       );
       if (!layout.logicalValue.equals(encoded.buffer) || layout.logicalHash !== encoded.hash) {
-        throw new Error(`STORAGE_ACCOUNT_LAYOUT_LOGICAL_MISMATCH:${doc.entityId}:${doc.counterpartyId}`);
+        throw new Error(
+          `STORAGE_ACCOUNT_LAYOUT_LOGICAL_MISMATCH:${canonicalDoc.entityId}:${canonicalDoc.counterpartyId}`,
+        );
       }
       docPuts.push(...layout.puts);
       docDels.push(...layout.dels);
     } else {
-      docPuts.push({ key: liveKeyForDoc(doc), value: encoded.buffer });
+      docPuts.push({ key: liveKeyForDoc(canonicalDoc), value: encoded.buffer });
     }
     await updateEntityCell(ref.entityId, docRefCellKey(ref), encoded.hash);
   }

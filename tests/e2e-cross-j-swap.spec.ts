@@ -1,4 +1,4 @@
-import { test, expect, type BrowserContext, type Page } from './global-setup.mts';
+import { allowDebugIncident, test, expect, type BrowserContext, type Page } from './global-setup.mts';
 import { AbiCoder, HDNodeWallet, Mnemonic, Wallet, getIndexedAccountPath, keccak256, toUtf8Bytes } from 'ethers';
 import { deriveDelta, getTokenInfo } from '../runtime/account/utils';
 import { ensureE2EBaseline, type E2EHealthResponse } from './utils/e2e-baseline';
@@ -8,6 +8,7 @@ import { enqueueEntityTxs } from './utils/e2e-runtime-input';
 import { requireIsolatedBaseUrl } from './utils/e2e-isolated-env';
 import { timedStep } from './utils/e2e-timing.mts';
 import { hasSilentRelayMarketSubscribe, installSilentRelayWebSocket } from './utils/e2e-silent-relay';
+import type { MarketSnapshotPayload } from '../runtime/relay/market-snapshot';
 
 const INIT_TIMEOUT = 30_000;
 const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
@@ -81,6 +82,19 @@ type RuntimeIdentity = {
   runtimeId: string;
 };
 
+type CrossDeltaSnapshot = Readonly<{
+  tokenId: number;
+  collateral: string;
+  ondelta: string;
+  offdelta: string;
+  leftCreditLimit: string;
+  rightCreditLimit: string;
+  leftAllowance: string;
+  rightAllowance: string;
+  leftHold: string;
+  rightHold: string;
+}>;
+
 type JurisdictionIdentity = RuntimeIdentity & {
   jurisdictionName: string;
 };
@@ -136,11 +150,16 @@ function expectMarketMakerSameAndCrossBooksHealthy(health: E2EHealthResponse): v
   expect(marketMaker?.hubs?.length ?? 0, 'market maker must publish same-chain books for all primary hubs').toBeGreaterThanOrEqual(3);
   for (const hub of marketMaker?.hubs ?? []) {
     expect(hub.ready, `same-chain MM hub ${hub.hubEntityId} must be ready`).toBe(true);
-    expect(hub.offers, `same-chain MM hub ${hub.hubEntityId} must expose resting offers`).toBeGreaterThan(0);
+    expect(hub.depthReady, `same-chain MM hub ${hub.hubEntityId} must expose exact configured depth`).toBe(true);
+    let expectedHubOffers = 0;
     for (const pair of hub.pairs ?? []) {
       expect(pair.ready, `same-chain MM pair ${pair.pairId} on hub ${hub.hubEntityId} must be ready`).toBe(true);
-      expect(pair.offers, `same-chain MM pair ${pair.pairId} on hub ${hub.hubEntityId} must expose offers`).toBeGreaterThan(0);
+      expect(pair.depthReady, `same-chain MM pair ${pair.pairId} on hub ${hub.hubEntityId} must expose exact configured depth`).toBe(true);
+      expect(pair.expectedOffers, `same-chain MM pair ${pair.pairId} must declare expected depth`).toBeGreaterThan(0);
+      expect(pair.offers, `same-chain MM pair ${pair.pairId} must contain exactly its configured offers`).toBe(pair.expectedOffers);
+      expectedHubOffers += Number(pair.expectedOffers);
     }
+    expect(hub.offers, `same-chain MM hub ${hub.hubEntityId} must contain only its configured offers`).toBe(expectedHubOffers);
   }
 
   const cross = marketMaker?.cross;
@@ -188,13 +207,80 @@ function expectMarketMakerSameAndCrossBooksHealthy(health: E2EHealthResponse): v
   expect(tronOnlyLeaksIntoTestnet, 'Testnet side must not publish Tron-only token ids').toEqual([]);
   for (const route of cross?.routes ?? []) {
     expect(route.ready, `cross MM route ${route.sourceHubEntityId}->${route.targetHubEntityId} must be ready`).toBe(true);
-    expect(route.offers, `cross MM route ${route.sourceHubEntityId}->${route.targetHubEntityId} must expose offers`).toBeGreaterThan(0);
+    expect(route.depthReady, `cross MM route ${route.sourceHubEntityId}->${route.targetHubEntityId} must expose exact configured depth`).toBe(true);
     expect(route.sourceJurisdiction, 'cross MM route source jurisdiction must be present').not.toEqual(route.targetJurisdiction);
+    let expectedRouteOffers = 0;
     for (const pair of route.pairs ?? []) {
       expect(pair.ready, `cross MM pair ${pair.pairId} on ${route.sourceHubEntityId}->${route.targetHubEntityId} must be ready`).toBe(true);
-      expect(pair.offers, `cross MM pair ${pair.pairId} on ${route.sourceHubEntityId}->${route.targetHubEntityId} must expose offers`).toBeGreaterThan(0);
+      expect(pair.depthReady, `cross MM pair ${pair.pairId} on ${route.sourceHubEntityId}->${route.targetHubEntityId} must expose exact configured depth`).toBe(true);
+      expect(pair.expectedOffers, `cross MM pair ${pair.pairId} must declare expected depth`).toBeGreaterThan(0);
+      expect(pair.offers, `cross MM pair ${pair.pairId} must contain exactly its configured offers`).toBe(pair.expectedOffers);
+      expectedRouteOffers += Number(pair.expectedOffers);
     }
+    expect(route.offers, `cross MM route ${route.sourceHubEntityId}->${route.targetHubEntityId} must contain only configured offers`).toBe(expectedRouteOffers);
   }
+}
+
+async function readFullMeshHealth(page: Page): Promise<E2EHealthResponse> {
+  const response = await page.request.get(`${API_BASE_URL}/api/health?full=1&marketSnapshots=1`);
+  expect(response.ok(), `full mesh health failed: ${response.status()} ${await response.text()}`).toBe(true);
+  return await response.json() as E2EHealthResponse;
+}
+
+async function readOpenDebugIncidents(page: Page): Promise<Array<{
+  fingerprint: string;
+  code: string;
+  message: string;
+}>> {
+  const response = await page.request.get(`${API_BASE_URL}/api/debug/incidents?state=open&limit=1000`);
+  expect(response.ok(), `debug incident query failed: ${response.status()} ${await response.text()}`).toBe(true);
+  const body = await response.json() as { incidents?: unknown };
+  return Array.isArray(body.incidents)
+    ? body.incidents.flatMap((value) => {
+        if (!value || typeof value !== 'object') return [];
+        const incident = value as Record<string, unknown>;
+        const fingerprint = String(incident.fingerprint || '');
+        return fingerprint
+          ? [{
+              fingerprint,
+              code: String(incident.code || ''),
+              message: String(incident.message || ''),
+            }]
+          : [];
+      })
+    : [];
+}
+
+async function readHubPairSnapshot(
+  page: Page,
+  hub: NonNullable<E2EHealthResponse['hubs']>[number],
+  pairId: string,
+): Promise<MarketSnapshotPayload> {
+  const apiBase = String(hub.apiUrl || '').replace(/\/$/, '');
+  expect(apiBase, `hub API missing for ${String(hub.name || hub.entityId || 'unknown')}`).toMatch(/^https?:\/\//);
+  const hubEntityId = String(hub.entityId || '');
+  const response = await page.request.get(
+    `${apiBase}/api/market/snapshots?hubEntityId=${encodeURIComponent(hubEntityId)}` +
+    `&pair=${encodeURIComponent(pairId)}&depth=10`,
+  );
+  expect(response.ok(), `hub market snapshot failed: ${response.status()} ${await response.text()}`).toBe(true);
+  const payload = await response.json() as { snapshots?: MarketSnapshotPayload[] };
+  const snapshot = payload.snapshots?.find(candidate => candidate.pairId === pairId);
+  expect(snapshot, `hub ${String(hub.name || hubEntityId)} snapshot missing pair ${pairId}`).toBeTruthy();
+  return snapshot!;
+}
+
+function expectExactTenByTen(snapshot: MarketSnapshotPayload, context: string): void {
+  expect(snapshot.bids, `${context} must expose exactly 10 bid levels`).toHaveLength(10);
+  expect(snapshot.asks, `${context} must expose exactly 10 ask levels`).toHaveLength(10);
+  expect(
+    snapshot.bids.reduce((sum, level) => sum + Number(level.orderCount ?? 1), 0),
+    `${context} must contain exactly 10 bid orders`,
+  ).toBe(10);
+  expect(
+    snapshot.asks.reduce((sum, level) => sum + Number(level.orderCount ?? 1), 0),
+    `${context} must contain exactly 10 ask orders`,
+  ).toBe(10);
 }
 
 function getPrimaryHubApiBaseUrl(health: E2EHealthResponse, primaryHubId: string): string {
@@ -1999,7 +2085,7 @@ async function placeCrossOrder(
           };
         });
         lastSubmitState = {
-          ok: newRoutes.length > 0 || newOffers.length > 0 || newMessages.some((message) => /Cross-j swap/i.test(message)),
+          ok: newRoutes.length > 0 || newOffers.length > 0,
           routes: state.routes,
           offers: state.offers,
           newRoutes: newRoutes.map(route => ({ orderId: route.orderId, status: route.status })),
@@ -2139,6 +2225,9 @@ async function readCrossState(
   runtimeMempoolInputs: Array<{ entityId: string; signerId: string; txTypes: string[]; frame: boolean; precommits: number }>;
   p2pState: { exists: boolean; connected: boolean; queue: unknown; directPeers: unknown };
   recoveryBarrier: boolean;
+  ownerIsLeft: boolean;
+  deltas: Record<string, CrossDeltaSnapshot>;
+  currentFrameFees: Record<string, string>;
 }> {
   return await page.evaluate(({ identity, hubId }) => {
     const env = (window as CrossRuntimeWindow).isolatedEnv;
@@ -2184,15 +2273,17 @@ async function readCrossState(
     const routeSummaries = [];
     for (const route of state?.crossJurisdictionSwaps?.values?.() || []) {
       const status = String(route?.status || '');
+      const orderId = String(route?.orderId || '');
+      const filledTargetAmount = BigInt(route?.filledTargetAmount ?? route?.targetClaimed ?? 0n);
       if (status === 'settled') settledRoutes += 1;
       if (status === 'source_claimed' || status === 'target_claimed' || status === 'settled') claimedRoutes += 1;
       routeSummaries.push({
-        orderId: String(route?.orderId || ''),
+        orderId,
         status,
         fillSeq: Number(route?.fillSeq || 0),
         cumulativeFillRatio: Number(route?.cumulativeFillRatio || route?.claimedRatio || 0),
         filledSourceAmount: String(route?.filledSourceAmount ?? route?.sourceClaimed ?? '0'),
-        filledTargetAmount: String(route?.filledTargetAmount ?? route?.targetClaimed ?? '0'),
+        filledTargetAmount: String(filledTargetAmount),
         sourcePull: Boolean(route?.sourcePull),
         targetPull: Boolean(route?.targetPull),
         sourcePullId: String(route?.sourcePull?.pullId || ''),
@@ -2259,8 +2350,103 @@ async function readCrossState(
         directPeers: env?.runtimeState?.p2p?.getDirectPeerState?.() || null,
       },
       recoveryBarrier: Boolean(env?.runtimeState?.recoveryBackupBarrier),
+      ownerIsLeft: entityNeedle === String(account?.leftEntity || '').toLowerCase(),
+      currentFrameFees: Array.from(account?.currentFrame?.accountTxs || []).reduce(
+        (fees: Record<string, string>, tx: any) => {
+          const tokenId = Number(tx?.data?.feeTokenId ?? -1);
+          const feeAmount = BigInt(tx?.data?.feeAmount ?? 0n);
+          if (tokenId < 0 || feeAmount <= 0n) return fees;
+          const key = String(tokenId);
+          fees[key] = String(BigInt(fees[key] ?? '0') + feeAmount);
+          return fees;
+        },
+        {},
+      ),
+      deltas: Object.fromEntries(
+        Array.from(account?.deltas?.entries?.() || []).map(([tokenId, delta]: [unknown, any]) => [
+          String(tokenId),
+          {
+            tokenId: Number(tokenId),
+            collateral: String(delta?.collateral ?? 0n),
+            ondelta: String(delta?.ondelta ?? 0n),
+            offdelta: String(delta?.offdelta ?? 0n),
+            leftCreditLimit: String(delta?.leftCreditLimit ?? 0n),
+            rightCreditLimit: String(delta?.rightCreditLimit ?? 0n),
+            leftAllowance: String(delta?.leftAllowance ?? 0n),
+            rightAllowance: String(delta?.rightAllowance ?? 0n),
+            leftHold: String(delta?.leftHold ?? 0n),
+            rightHold: String(delta?.rightHold ?? 0n),
+          },
+        ]),
+      ),
     };
   }, { identity, hubId });
+}
+
+async function readHubCrossDeltas(
+  page: Page,
+  hubEntityId: string,
+  counterpartyEntityId: string,
+  tokenIds: readonly number[],
+): Promise<Record<string, CrossDeltaSnapshot>> {
+  const response = await page.request.get(`${API_BASE_URL}/api/hub/account-status`, {
+    params: {
+      hubEntityId,
+      counterpartyEntityId,
+      tokenIds: tokenIds.join(','),
+    },
+  });
+  const body = await response.json().catch(() => null) as any;
+  expect(response.ok(), `hub Account financial status failed: ${JSON.stringify(body)}`).toBe(true);
+  expect(body?.success).toBe(true);
+  return Object.fromEntries(
+    (Array.isArray(body?.tokens) ? body.tokens : []).map((token: any) => [
+      String(token?.tokenId),
+      {
+        ...token?.delta,
+        tokenId: Number(token?.tokenId),
+        leftAllowance: String(token?.delta?.leftAllowance ?? 0),
+        rightAllowance: String(token?.delta?.rightAllowance ?? 0),
+      },
+    ]),
+  );
+}
+
+function expectCrossTransfer(
+  before: CrossDeltaSnapshot,
+  after: CrossDeltaSnapshot,
+  amount: bigint,
+  ownerIsLeft: boolean,
+  direction: 'spend' | 'receive',
+  label: string,
+  feeAmount = 0n,
+): void {
+  expect(amount, `${label} amount must be positive`).toBeGreaterThan(0n);
+  expect(feeAmount, `${label} fee must not be negative`).toBeGreaterThanOrEqual(0n);
+  expect(feeAmount, `${label} fee must not consume the transfer`).toBeLessThan(amount);
+  const canonicalSign = direction === 'spend'
+    ? (ownerIsLeft ? -1n : 1n)
+    : (ownerIsLeft ? 1n : -1n);
+  const deriveSnapshot = (snapshot: CrossDeltaSnapshot) => deriveDelta({
+    tokenId: snapshot.tokenId,
+    collateral: BigInt(snapshot.collateral),
+    ondelta: BigInt(snapshot.ondelta),
+    offdelta: BigInt(snapshot.offdelta),
+    leftCreditLimit: BigInt(snapshot.leftCreditLimit),
+    rightCreditLimit: BigInt(snapshot.rightCreditLimit),
+    leftAllowance: BigInt(snapshot.leftAllowance),
+    rightAllowance: BigInt(snapshot.rightAllowance),
+    leftHold: BigInt(snapshot.leftHold),
+    rightHold: BigInt(snapshot.rightHold),
+  }, ownerIsLeft);
+  expect(
+    deriveSnapshot(after).delta - deriveSnapshot(before).delta,
+    `${label} must apply the exact canonical delta net of its signed fee`,
+  ).toBe(canonicalSign * (amount - feeAmount));
+  expect(
+    { leftHold: after.leftHold, rightHold: after.rightHold },
+    `${label} must clear both bilateral holds`,
+  ).toEqual({ leftHold: '0', rightHold: '0' });
 }
 
 async function waitForCrossPullFlow(
@@ -2971,6 +3157,107 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
     expectMarketMakerSameAndCrossBooksHealthy(baseline);
   });
 
+  test('H2 process replacement restores authoritative health and exact 10x10 public book', { tag: '@resilience' }, async ({ page }) => {
+    allowDebugIncident({
+      source: 'orchestrator',
+      code: 'CHILD_UNEXPECTED_EXIT',
+      message: 'child.unexpected_exit',
+    });
+    allowDebugIncident({
+      source: 'orchestrator',
+      code: 'H2_UNEXPECTED_EXIT',
+      message: 'H2_UNEXPECTED_EXIT code=null signal=SIGKILL',
+    });
+    const baseline = await ensureE2EBaseline(page, {
+      apiBaseUrl: API_BASE_URL,
+      requireMarketMaker: true,
+      requireHubMesh: true,
+      minHubCount: 3,
+    });
+    expectMarketMakerSameAndCrossBooksHealthy(baseline);
+
+    const before = await readFullMeshHealth(page);
+    const h2Process = before.process?.children?.find(child => child.role === 'hub' && child.name === 'H2');
+    const h2Hub = before.hubs?.find(hub => hub.name === 'H2');
+    expect(h2Process?.online, `H2 process missing before replacement: ${JSON.stringify(before.process ?? {})}`).toBe(true);
+    expect(h2Process?.pid, 'H2 PID must be visible to the isolated local operator test').toBeGreaterThan(0);
+    expect(h2Hub?.entityId, `H2 hub identity missing: ${JSON.stringify(before.hubs ?? [])}`).toMatch(/^0x[0-9a-f]{64}$/i);
+    const oldPid = Number(h2Process!.pid);
+    const oldRestartCount = Number(h2Process!.restartCount ?? 0);
+    const beforeSnapshot = await readHubPairSnapshot(page, h2Hub!, '1/2');
+    expectExactTenByTen(beforeSnapshot, 'H2 pre-restart USDC/WETH book');
+    const h2CrossPairId = before.marketMaker?.cross?.routes
+      ?.find(route => normalizeId(route.sourceHubEntityId) === normalizeId(h2Hub!.entityId))
+      ?.pairs?.find(pair => Number(pair.expectedOffers ?? 0) === 10)?.pairId;
+    expect(h2CrossPairId, 'H2 must publish a configured cross-j pair before restart').toBeTruthy();
+    const beforeCrossSnapshot = await readHubPairSnapshot(page, h2Hub!, h2CrossPairId!);
+    expectExactTenByTen(beforeCrossSnapshot, 'H2 pre-restart cross-j book');
+
+    process.kill(oldPid, 'SIGKILL');
+
+    await expect.poll(async () => {
+      const health = await readFullMeshHealth(page);
+      return health.systemOk;
+    }, {
+      timeout: 15_000,
+      intervals: [50, 100, 250],
+      message: 'global health must become non-ready while H2 is unavailable',
+    }).toBe(false);
+
+    let h2IncidentFingerprint = '';
+    await expect.poll(async () => {
+      const incidents = await readOpenDebugIncidents(page);
+      const incident = incidents.find(candidate =>
+        candidate.code.includes('H2_UNEXPECTED_EXIT') ||
+        candidate.message.includes('H2_UNEXPECTED_EXIT'),
+      );
+      h2IncidentFingerprint = incident?.fingerprint ?? '';
+      return h2IncidentFingerprint;
+    }, {
+      timeout: 15_000,
+      intervals: [50, 100, 250],
+      message: 'H2 failure must be durable in the parent incident registry before replacement',
+    }).toMatch(/^h2_unexpected_exit-/);
+
+    await expect.poll(async () => {
+      const health = await readFullMeshHealth(page);
+      const child = health.process?.children?.find(candidate => candidate.role === 'hub' && candidate.name === 'H2');
+      const hub = health.hubs?.find(candidate => candidate.name === 'H2');
+      return {
+        replaced: Number(child?.pid ?? 0) > 0 && Number(child?.pid) !== oldPid,
+        restarted: Number(child?.restartCount ?? 0) > oldRestartCount,
+        processOnline: child?.online === true,
+        hubOnline: hub?.online === true,
+        systemOk: health.systemOk === true,
+      };
+    }, {
+      timeout: 90_000,
+      intervals: [250, 500, 1000],
+      message: 'orchestrator must replace H2 and restore authoritative live health',
+    }).toEqual({
+      replaced: true,
+      restarted: true,
+      processOnline: true,
+      hubOnline: true,
+      systemOk: true,
+    });
+
+    const restored = await readFullMeshHealth(page);
+    expectMarketMakerSameAndCrossBooksHealthy(restored);
+    expect(
+      (await readOpenDebugIncidents(page)).some(incident => incident.fingerprint === h2IncidentFingerprint),
+      'H2 root incident must remain queryable after managed replacement',
+    ).toBe(true);
+    const restoredH2 = restored.hubs?.find(hub => hub.name === 'H2');
+    expect(restoredH2?.entityId).toBe(h2Hub!.entityId);
+    const restoredSnapshot = await readHubPairSnapshot(page, restoredH2!, '1/2');
+    expectExactTenByTen(restoredSnapshot, 'H2 restored USDC/WETH book');
+    expect(restoredSnapshot.entityHeight).toBeGreaterThanOrEqual(beforeSnapshot.entityHeight);
+    const restoredCrossSnapshot = await readHubPairSnapshot(page, restoredH2!, h2CrossPairId!);
+    expectExactTenByTen(restoredCrossSnapshot, 'H2 restored cross-j book');
+    expect(restoredCrossSnapshot.entityHeight).toBeGreaterThanOrEqual(beforeCrossSnapshot.entityHeight);
+  });
+
   test('real MM full fill auto-closes and partial fill closes manually on both legs', { tag: '@functional' }, async ({ page }, testInfo) => {
     const baseline = await timedStep('cross_j_mm_fill.ensure_baseline', () => ensureE2EBaseline(page, {
       apiBaseUrl: API_BASE_URL,
@@ -2993,6 +3280,12 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
     await ensureDirectHubAccount(page, target, targetHub.entityId, SWAP_TOKENS, 150_000);
     await faucetOffchain(page, primaryHubApiBaseUrl, source.entityId, hubId, USDC, '300');
     await waitForOutCapAtLeast(page, source.entityId, hubId, USDC, tokenAmount(USDC, 300n));
+    const [fullSourceBefore, fullTargetBefore] = await Promise.all([
+      readCrossState(page, source, hubId),
+      readCrossState(page, target, targetHub.entityId),
+    ]);
+    expect(fullSourceBefore.deltas[String(USDC)], 'source USDC delta must exist before full fill').toBeDefined();
+    expect(fullTargetBefore.deltas[String(USDC)], 'target USDC delta must exist before full fill').toBeDefined();
 
     const orderId = await placeCrossOrder(page, {
       source,
@@ -3054,6 +3347,46 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       filledTargetState.routeSummaries.find((route) => route.orderId === orderId)?.status,
       'a fully matched target route must close automatically',
     ).toBe('settled');
+    const filledSourceRoute = filledSourceState.routeSummaries.find((route) => route.orderId === orderId);
+    const filledTargetRoute = filledTargetState.routeSummaries.find((route) => route.orderId === orderId);
+    expect(filledSourceRoute, 'full source route must remain inspectable in Account history').toBeDefined();
+    expect(filledTargetRoute, 'full target route must remain inspectable in Account history').toBeDefined();
+    expect(filledTargetRoute?.filledSourceAmount).toBe(filledSourceRoute?.filledSourceAmount);
+    expect(filledTargetRoute?.filledTargetAmount).toBe(filledSourceRoute?.filledTargetAmount);
+    expect(BigInt(filledSourceRoute!.filledSourceAmount), 'full fill must consume the selected 300 USDC').toBe(tokenAmount(USDC, 300n));
+    const fullSourceAfter = filledSourceState.deltas[String(USDC)];
+    const fullTargetAfter = filledTargetState.deltas[String(USDC)];
+    await expect.poll(async () => {
+      const [sourceHubDeltas, targetHubDeltas] = await Promise.all([
+        readHubCrossDeltas(page, hubId, source.entityId, [USDC]),
+        readHubCrossDeltas(page, targetHub.entityId, target.entityId, [USDC]),
+      ]);
+      return {
+        source: sourceHubDeltas[String(USDC)],
+        target: targetHubDeltas[String(USDC)],
+      };
+    }, {
+      timeout: 20_000,
+      intervals: [100, 250, 500],
+      message: 'both Hubs must commit the exact paired Account ACKs after full fill',
+    }).toEqual({ source: fullSourceAfter, target: fullTargetAfter });
+    expectCrossTransfer(
+      fullSourceBefore.deltas[String(USDC)],
+      fullSourceAfter,
+      BigInt(filledSourceRoute!.filledSourceAmount),
+      fullSourceBefore.ownerIsLeft,
+      'spend',
+      'full source Account',
+    );
+    expectCrossTransfer(
+      fullTargetBefore.deltas[String(USDC)],
+      fullTargetAfter,
+      BigInt(filledTargetRoute!.filledTargetAmount),
+      fullTargetBefore.ownerIsLeft,
+      'receive',
+      'full target Account',
+      BigInt(filledTargetState.currentFrameFees[String(USDC)] ?? '0'),
+    );
     await expect(page.getByTestId('swap-open-order-row')).toHaveCount(0, { timeout: 15_000 });
 
     await enqueueEntityTxs(page, target.entityId, target.signerId, [{
@@ -3067,6 +3400,12 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
     await flushRuntime(page, 8);
     await faucetOffchain(page, primaryHubApiBaseUrl, source.entityId, hubId, WETH, '15');
     await waitForOutCapAtLeast(page, source.entityId, hubId, WETH, tokenAmount(WETH, 15n));
+    const [partialSourceBefore, partialTargetBefore] = await Promise.all([
+      readCrossState(page, source, hubId),
+      readCrossState(page, target, targetHub.entityId),
+    ]);
+    expect(partialSourceBefore.deltas[String(WETH)], 'source WETH delta must exist before partial fill').toBeDefined();
+    expect(partialTargetBefore.deltas[String(USDC)], 'target USDC delta must exist before partial fill').toBeDefined();
     const partialOrderId = await placeCrossOrder(page, {
       source,
       hubId,
@@ -3082,6 +3421,27 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
     const partial = await waitForCrossPendingFill(page, source, hubId, 'real MM WETH partial', {
       routeId: partialOrderId,
     });
+    await waitForCrossRouteMaterialized(
+      page,
+      target,
+      targetHub.entityId,
+      partial.routeId,
+      'real MM target partial financial leg',
+    );
+    const [pendingSourceState, pendingTargetState] = await Promise.all([
+      readCrossState(page, source, hubId),
+      readCrossState(page, target, targetHub.entityId),
+    ]);
+    expect(
+      BigInt(pendingSourceState.deltas[String(WETH)].leftHold) +
+      BigInt(pendingSourceState.deltas[String(WETH)].rightHold),
+      'partial source remainder must remain held until explicit Clear',
+    ).toBeGreaterThan(0n);
+    expect(
+      BigInt(pendingTargetState.deltas[String(USDC)].leftHold) +
+      BigInt(pendingTargetState.deltas[String(USDC)].rightHold),
+      'partial target remainder must remain held until explicit Clear',
+    ).toBeGreaterThan(0n);
     const clearButton = page.getByTestId('cross-swap-clear').first();
     await expect(clearButton, 'real MM partial remainder must expose Clear + Close').toBeVisible({ timeout: 20_000 });
     await clearButton.click({ force: true });
@@ -3117,6 +3477,53 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       sourceMempool: [],
       targetMempool: [],
     });
+    const [partialSourceAfter, partialTargetAfter] = await Promise.all([
+      readCrossState(page, source, hubId),
+      readCrossState(page, target, targetHub.entityId),
+    ]);
+    const partialSourceRoute = partialSourceAfter.routeSummaries.find((route) => route.orderId === partial.routeId);
+    const partialTargetRoute = partialTargetAfter.routeSummaries.find((route) => route.orderId === partial.routeId);
+    expect(partialSourceRoute, 'cleared source route must remain inspectable in Account history').toBeDefined();
+    expect(partialTargetRoute, 'cleared target route must remain inspectable in Account history').toBeDefined();
+    expect(partialSourceRoute?.cumulativeFillRatio).toBe(partial.ratio);
+    expect(partialSourceRoute?.filledSourceAmount).toBe(partialTargetRoute?.filledSourceAmount);
+    expect(partialSourceRoute?.filledTargetAmount).toBe(partialTargetRoute?.filledTargetAmount);
+    expect(BigInt(partialSourceRoute!.filledSourceAmount)).toBeGreaterThan(0n);
+    expect(BigInt(partialSourceRoute!.filledSourceAmount)).toBeLessThan(tokenAmount(WETH, 15n));
+    await expect.poll(async () => {
+      const [sourceHubDeltas, targetHubDeltas] = await Promise.all([
+        readHubCrossDeltas(page, hubId, source.entityId, [WETH]),
+        readHubCrossDeltas(page, targetHub.entityId, target.entityId, [USDC]),
+      ]);
+      return {
+        source: sourceHubDeltas[String(WETH)],
+        target: targetHubDeltas[String(USDC)],
+      };
+    }, {
+      timeout: 20_000,
+      intervals: [100, 250, 500],
+      message: 'both Hubs must commit the exact paired Account ACKs after partial Clear',
+    }).toEqual({
+      source: partialSourceAfter.deltas[String(WETH)],
+      target: partialTargetAfter.deltas[String(USDC)],
+    });
+    expectCrossTransfer(
+      partialSourceBefore.deltas[String(WETH)],
+      partialSourceAfter.deltas[String(WETH)],
+      BigInt(partialSourceRoute!.filledSourceAmount),
+      partialSourceBefore.ownerIsLeft,
+      'spend',
+      'partial source Account',
+    );
+    expectCrossTransfer(
+      partialTargetBefore.deltas[String(USDC)],
+      partialTargetAfter.deltas[String(USDC)],
+      BigInt(partialTargetRoute!.filledTargetAmount),
+      partialTargetBefore.ownerIsLeft,
+      'receive',
+      'partial target Account',
+      BigInt(partialTargetAfter.currentFrameFees[String(USDC)] ?? '0'),
+    );
   });
 
   test('cross USDT/USDT orderbook resolves terminal no-market when the selected route relay has no snapshots', { tag: '@resilience' }, async ({ page }) => {
@@ -3464,13 +3871,39 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
     await timedStep('cross_j_auto_setup.wait_target_account', () =>
       waitForAccountReady(page, target, targetHub.entityId, [USDC], 90_000),
     );
+    const expectedTargetAmount = 24_900_000n;
     await expect
-      .poll(async () => (await inCap(page, target.entityId, targetHub.entityId, USDC)) > 0n, {
+      .poll(async () => page.evaluate(({ entityId, hubId, tokenId }) => {
+        const env = (window as CrossRuntimeWindow).isolatedEnv;
+        const owner = String(entityId).toLowerCase();
+        const counterparty = String(hubId).toLowerCase();
+        const replica = Array.from(env?.eReplicas?.values?.() || []).find((candidate: any) =>
+          String(candidate?.state?.entityId || candidate?.entityId || '').toLowerCase() === owner);
+        const account = replica?.state?.accounts?.get?.(counterparty);
+        const delta = account?.deltas?.get?.(tokenId);
+        if (!account || !delta) return null;
+        const ownerIsLeft = owner === String(account.leftEntity || '').toLowerCase();
+        return {
+          peerCreditLimit: String(ownerIsLeft ? delta.rightCreditLimit : delta.leftCreditLimit),
+          inboundHold: String(ownerIsLeft ? delta.rightHold : delta.leftHold),
+        };
+      }, {
+        entityId: target.entityId,
+        hubId: targetHub.entityId,
+        tokenId: USDC,
+      }), {
         timeout: 30_000,
         intervals: [250, 500, 1000],
-        message: 'one-click cross swap must leave target inbound USDC capacity available',
+        message: 'one-click cross swap must grant and lock only the exact target USDC amount',
       })
-      .toBe(true);
+      .toEqual({
+        peerCreditLimit: expectedTargetAmount.toString(),
+        inboundHold: expectedTargetAmount.toString(),
+      });
+    expect(
+      await inCap(page, target.entityId, targetHub.entityId, USDC),
+      'the exact target credit is fully reserved by the cross-j pull',
+    ).toBe(0n);
     expectBrowserConsoleClean(browserConsole, 'cross_j_auto_setup');
   });
 
@@ -3599,9 +4032,13 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         to: optionTexts('[data-testid="swap-to-token-select"]'),
       };
     });
-    expect(tokenOptions.from, 'Tron source token list must expose Tron-only assets').toEqual(expect.arrayContaining(['TRX', 'SUN']));
-    expect(tokenOptions.to, 'Testnet target token list must not leak Tron-only assets').not.toEqual(expect.arrayContaining(['TRX']));
-    expect(tokenOptions.to, 'Testnet target token list must not leak Tron-only assets').not.toEqual(expect.arrayContaining(['SUN']));
+    expect(tokenOptions.from, 'Tron source token list must expose Tron-only assets').toEqual(
+      expect.arrayContaining(['TRX (Tron)', 'SUN (Tron)']),
+    );
+    expect(
+      tokenOptions.to.some((label) => /^(TRX|SUN)(?:\s|\(|$)/.test(label)),
+      'Testnet target token list must not leak Tron-only assets',
+    ).toBe(false);
     await expect(
       page.getByTestId('orderbook-bid-row').first().locator('.price'),
       'cross WETH/USDT price must be displayed as USDT per WETH, not inverted WETH per USDT',

@@ -175,6 +175,8 @@ export interface RuntimeAdapter {
   readonly nextCommandSequence: number | null;
   readonly commandLaneKind: RuntimeAdapterCommandLaneKind | null;
   readonly authLevel: RuntimeAdapterAuthLevel | null;
+  readonly commandReady: boolean;
+  readonly commandReadyReason: string | null;
 
   connect(config: RuntimeAdapterConfig): Promise<void>;
   disconnect(): void;
@@ -221,6 +223,8 @@ export type RuntimeAdapterPush = {
   v: XlnProtocolVersion;
   op: 'tick';
   height: number;
+  commandReady: boolean;
+  commandReadyReason: string | null;
 };
 
 export type RuntimeAdapterEntitySummary = {

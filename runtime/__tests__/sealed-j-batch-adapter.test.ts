@@ -49,11 +49,9 @@ test('BrowserVM adapter rejects a mismatched sealed batch before mutating chain 
     });
     const afterRoot = await adapter.captureStateRoot!();
 
-    expect(result).toMatchObject({
-      success: false,
-      error: 'J_BATCH_ENCODING_MISMATCH',
-      failure: { category: 'terminal' },
-    });
+    expect(result.success).toBe(false);
+    expect(result.error).toStartWith('J_BATCH_ENCODING_MISMATCH:');
+    expect(result.failure).toMatchObject({ category: 'terminal' });
     expect(afterRoot).toEqual(beforeRoot);
   } finally {
     await adapter.close();

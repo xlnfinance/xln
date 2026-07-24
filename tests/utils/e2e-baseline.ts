@@ -34,10 +34,16 @@ export type E2EMarketMakerHubHealth = {
   hubEntityId: string;
   offers: number;
   ready: boolean;
+  depthReady?: boolean;
   pairs?: Array<{
     pairId: string;
     offers: number;
     ready: boolean;
+    depthReady?: boolean;
+    expectedOffers?: number;
+    bidOffers?: number;
+    askOffers?: number;
+    snapshotDepthExact?: boolean;
     sourceTokenIds?: number[];
     targetTokenIds?: number[];
   }>;
@@ -50,10 +56,16 @@ export type E2EMarketMakerCrossRouteHealth = {
   targetHubEntityId: string;
   offers: number;
   ready: boolean;
+  depthReady?: boolean;
   pairs?: Array<{
     pairId: string;
     offers: number;
     ready: boolean;
+    depthReady?: boolean;
+    expectedOffers?: number;
+    bidOffers?: number;
+    askOffers?: number;
+    snapshotDepthExact?: boolean;
   }>;
 };
 
@@ -139,6 +151,15 @@ export type E2EHealthResponse = {
   };
   bootstrapReserves?: E2EBootstrapReserveHealth;
   hubs?: E2EHubHealth[];
+  process?: {
+    children?: Array<{
+      role?: 'hub' | 'market-maker';
+      name?: string;
+      pid?: number | null;
+      online?: boolean;
+      restartCount?: number;
+    }>;
+  };
 };
 
 export type E2EBaselineOptions = {

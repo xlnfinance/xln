@@ -7,6 +7,7 @@
   export let selectedSymbol = '';
   export let supportsReserve = false;
   export let canShowAccountFaucet = false;
+  export let ready = false;
   export let submitting = false;
   export let submitFaucet: (target: FaucetTarget) => void | Promise<void>;
 </script>
@@ -23,7 +24,7 @@
       class="btn-table-action faucet"
       data-testid={`external-faucet-${selectedSymbol}`}
       on:click={() => submitFaucet('external')}
-      disabled={submitting}
+      disabled={!ready || submitting}
     >
       External
     </button>
@@ -32,7 +33,7 @@
         class="btn-table-action deposit"
         data-testid={`reserve-faucet-${selectedSymbol}`}
         on:click={() => submitFaucet('reserve')}
-        disabled={submitting}
+        disabled={!ready || submitting}
         title="Faucet reserve"
       >
         Reserve
@@ -43,7 +44,7 @@
         class="btn-table-action faucet"
         data-testid={`account-faucet-${selectedSymbol}`}
         on:click={() => submitFaucet('account')}
-        disabled={submitting}
+        disabled={!ready || submitting}
         title="Faucet first account"
       >
         Account

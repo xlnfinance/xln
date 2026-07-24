@@ -1,5 +1,6 @@
 import { compareStableText, safeStringify } from '../protocol/serialization';
-import { pushDebugEvent, type RelayStore } from '../relay/store';
+import { maybeHandleRelayDebugRequest } from '../relay/debug-http';
+import type { RelayStore } from '../relay/store';
 import { buildKnownProfileBundle } from '../server/gossip-profiles';
 import { getDebugEntityEntries } from './public-discovery';
 import type { HubChild, MarketMakerChild } from './orchestrator-types';
@@ -13,13 +14,11 @@ type OrchestratorDebugApiDeps = {
   relayStore: RelayStore;
   hubChildren: HubChild[];
   marketMakerChild: MarketMakerChild;
+  operatorAuthorized: boolean;
   pollAllHubHealth: () => Promise<void>;
   pollMarketMakerHealth: () => Promise<void>;
   proxyAnyHubGet: (request: Request, path: string) => Promise<Response>;
 };
-
-const optionalString = (value: unknown): string | undefined =>
-  typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 
 const handleDebugEntities = async (deps: OrchestratorDebugApiDeps): Promise<Response> => {
   await deps.pollAllHubHealth();
@@ -89,79 +88,6 @@ const handleGossipProfile = (deps: OrchestratorDebugApiDeps): Response => {
     }),
     { headers: deps.headers },
   );
-};
-
-const handleDebugEvents = (deps: OrchestratorDebugApiDeps): Response => {
-  const last = Math.max(1, Math.min(5000, Number(deps.url.searchParams.get('last') || '200')));
-  const event = deps.url.searchParams.get('event') || undefined;
-  const runtimeId = deps.url.searchParams.get('runtimeId') || undefined;
-  const from = deps.url.searchParams.get('from') || undefined;
-  const to = deps.url.searchParams.get('to') || undefined;
-  const msgType = deps.url.searchParams.get('msgType') || undefined;
-  const status = deps.url.searchParams.get('status') || undefined;
-  const since = Number(deps.url.searchParams.get('since') || '0');
-
-  let filtered = deps.relayStore.debugEvents;
-  if (since > 0) filtered = filtered.filter((entry) => entry.ts >= since);
-  if (event) filtered = filtered.filter((entry) => entry.event === event);
-  if (runtimeId) {
-    filtered = filtered.filter((entry) =>
-      entry.runtimeId === runtimeId || entry.from === runtimeId || entry.to === runtimeId,
-    );
-  }
-  if (from) filtered = filtered.filter((entry) => entry.from === from);
-  if (to) filtered = filtered.filter((entry) => entry.to === to);
-  if (msgType) filtered = filtered.filter((entry) => entry.msgType === msgType);
-  if (status) filtered = filtered.filter((entry) => entry.status === status);
-
-  const events = filtered.slice(-last);
-  return new Response(safeStringify({
-    ok: true,
-    total: deps.relayStore.debugEvents.length,
-    returned: events.length,
-    serverTime: Date.now(),
-    filters: {
-      last,
-      event,
-      runtimeId,
-      from,
-      to,
-      msgType,
-      status,
-      since: Number.isFinite(since) ? since : 0,
-    },
-    events,
-  }), { headers: deps.headers });
-};
-
-const handleDebugEventsMark = async (deps: OrchestratorDebugApiDeps): Promise<Response> => {
-  const body = await deps.request.json().catch(() => ({} as Record<string, unknown>));
-  const label = optionalString(body?.label) ?? '';
-  if (!label) {
-    return new Response(safeStringify({ ok: false, error: 'label is required' }), {
-      status: 400,
-      headers: deps.headers,
-    });
-  }
-  const runtimeId = optionalString(body?.runtimeId);
-  const entityId = optionalString(body?.entityId);
-  const phase = optionalString(body?.phase);
-  const details =
-    body?.details && typeof body.details === 'object'
-      ? body.details
-      : undefined;
-  pushDebugEvent(deps.relayStore, {
-    event: 'e2e_phase',
-    runtimeId,
-    status: 'marked',
-    details: {
-      label,
-      ...(entityId ? { entityId } : {}),
-      ...(phase ? { phase } : {}),
-      ...(details ? { details } : {}),
-    },
-  });
-  return new Response(safeStringify({ ok: true, label }), { headers: deps.headers });
 };
 
 const handleDebugRelay = (deps: OrchestratorDebugApiDeps): Response =>
@@ -246,6 +172,15 @@ const handleDebugActivity = async (deps: OrchestratorDebugApiDeps): Promise<Resp
 export const maybeHandleOrchestratorDebugApi = async (
   deps: OrchestratorDebugApiDeps,
 ): Promise<Response | null> => {
+  const relayDebugResponse = await maybeHandleRelayDebugRequest({
+    request: deps.request,
+    pathname: deps.pathname,
+    url: deps.url,
+    headers: deps.headers,
+    store: deps.relayStore,
+    operatorAuthorized: deps.operatorAuthorized,
+  });
+  if (relayDebugResponse) return relayDebugResponse;
   if (deps.pathname === '/api/debug/entities') {
     return await handleDebugEntities(deps);
   }
@@ -255,14 +190,8 @@ export const maybeHandleOrchestratorDebugApi = async (
   if (deps.pathname === '/api/debug/reserve' && deps.request.method === 'GET') {
     return await deps.proxyAnyHubGet(deps.request, `${deps.pathname}${deps.url.search}`);
   }
-  if (deps.pathname === '/api/debug/events') {
-    return handleDebugEvents(deps);
-  }
   if (deps.pathname === '/api/debug/activity' && deps.request.method === 'GET') {
     return await handleDebugActivity(deps);
-  }
-  if (deps.pathname === '/api/debug/events/mark' && deps.request.method === 'POST') {
-    return await handleDebugEventsMark(deps);
   }
   if (deps.pathname === '/api/debug/relay') {
     return handleDebugRelay(deps);

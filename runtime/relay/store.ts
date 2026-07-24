@@ -24,6 +24,7 @@ import {
   selectProfileBatch,
   type GossipProfileBatchRequest,
 } from './profile-batch';
+import { redactTelemetryValue } from '../infra/telemetry-redaction';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,6 +50,7 @@ export type RelayDebugEvent = {
   id: number;
   ts: number;
   event: string;
+  rootFingerprint?: string | undefined;
   runtimeId?: string | undefined;
   from?: string | undefined;
   to?: string | undefined;
@@ -60,6 +62,23 @@ export type RelayDebugEvent = {
   queueSize?: number | undefined;
   delivery?: RelayDeliveryResult | undefined;
   details?: unknown;
+};
+
+export type RelayDebugIncidentState = 'unread' | 'acknowledged' | 'resolved';
+
+export type RelayDebugIncident = {
+  fingerprint: string;
+  state: RelayDebugIncidentState;
+  source: string;
+  code: string;
+  message: string;
+  runtimeId?: string | undefined;
+  firstSeen: number;
+  lastSeen: number;
+  count: number;
+  firstEventId: number;
+  lastEventId: number;
+  sample: RelayDebugEvent;
 };
 
 export type RelayDeliveryOutcome = DeliveryOutcome;
@@ -76,12 +95,16 @@ export type RelayStore = {
   gossipProfiles: Map<string, { profile: Profile; timestamp: number }>;
   runtimeEncryptionKeys: Map<string, string>;
   debugEvents: RelayDebugEvent[];
+  debugIncidents: Map<string, RelayDebugIncident>;
   debugId: number;
+  debugIdAllocator?: (() => number) | undefined;
+  incidentSink?: ((incident: RelayDebugIncident) => void) | undefined;
   wsCounter: number;
   activeHubEntityIds: string[];
 };
 
 const MAX_DEBUG_EVENTS = 5000;
+const MAX_DEBUG_INCIDENTS = 1000;
 const MAX_PENDING_PER_CLIENT = 200;
 const MAX_PENDING_TARGETS = 10_000;
 const MAX_PENDING_TOTAL_BYTES = 256 * 1024 * 1024;
@@ -128,9 +151,13 @@ type PendingRelayMessage = {
   enqueuedAt: number;
 };
 
-type RelayStoreOptions = {
+export type RelayStoreOptions = {
   pendingLimits?: Partial<RelayPendingLimits>;
   maxGossipProfiles?: number;
+  initialDebugId?: number;
+  initialIncidents?: Iterable<RelayDebugIncident>;
+  debugIdAllocator?: () => number;
+  incidentSink?: (incident: RelayDebugIncident) => void;
 };
 
 export type RelayPendingDeliveryResult = {
@@ -146,25 +173,36 @@ export type RelayPendingDeliveryResult = {
 // Factory
 // ---------------------------------------------------------------------------
 
-export const createRelayStore = (serverId: string, options: RelayStoreOptions = {}): RelayStore => ({
-  serverId,
-  clients: new Map(),
-  pendingMessages: new Map(),
-  pendingMessageBytes: 0,
-  pendingLimits: {
-    maxPerTarget: options.pendingLimits?.maxPerTarget ?? MAX_PENDING_PER_CLIENT,
-    maxTargets: options.pendingLimits?.maxTargets ?? MAX_PENDING_TARGETS,
-    maxTotalBytes: options.pendingLimits?.maxTotalBytes ?? MAX_PENDING_TOTAL_BYTES,
-    maxAgeMs: options.pendingLimits?.maxAgeMs ?? MAX_PENDING_MESSAGE_AGE_MS,
-  },
-  maxGossipProfiles: Math.max(1, Math.floor(Number(options.maxGossipProfiles ?? MAX_GOSSIP_PROFILES))),
-  gossipProfiles: new Map(),
-  runtimeEncryptionKeys: new Map(),
-  debugEvents: [],
-  debugId: 0,
-  wsCounter: 0,
-  activeHubEntityIds: [],
-});
+export const createRelayStore = (serverId: string, options: RelayStoreOptions = {}): RelayStore => {
+  const initialIncidents = Array.from(options.initialIncidents ?? []);
+  const debugIncidents = new Map(initialIncidents.map(incident => [incident.fingerprint, incident]));
+  const debugId = Math.max(
+    Math.max(0, Math.floor(Number(options.initialDebugId ?? 0))),
+    ...initialIncidents.map(incident => incident.lastEventId),
+  );
+  return {
+    serverId,
+    clients: new Map(),
+    pendingMessages: new Map(),
+    pendingMessageBytes: 0,
+    pendingLimits: {
+      maxPerTarget: options.pendingLimits?.maxPerTarget ?? MAX_PENDING_PER_CLIENT,
+      maxTargets: options.pendingLimits?.maxTargets ?? MAX_PENDING_TARGETS,
+      maxTotalBytes: options.pendingLimits?.maxTotalBytes ?? MAX_PENDING_TOTAL_BYTES,
+      maxAgeMs: options.pendingLimits?.maxAgeMs ?? MAX_PENDING_MESSAGE_AGE_MS,
+    },
+    maxGossipProfiles: Math.max(1, Math.floor(Number(options.maxGossipProfiles ?? MAX_GOSSIP_PROFILES))),
+    gossipProfiles: new Map(),
+    runtimeEncryptionKeys: new Map(),
+    debugEvents: [],
+    debugIncidents,
+    debugId,
+    ...(options.debugIdAllocator ? { debugIdAllocator: options.debugIdAllocator } : {}),
+    ...(options.incidentSink ? { incidentSink: options.incidentSink } : {}),
+    wsCounter: 0,
+    activeHubEntityIds: [],
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -239,18 +277,177 @@ export const classifyRelayDeliveryEvent = (event: {
 // Debug events
 // ---------------------------------------------------------------------------
 
-export const pushDebugEvent = (store: RelayStore, event: Omit<RelayDebugEvent, 'id' | 'ts'>): void => {
-  store.debugId += 1;
-  const delivery = event.delivery ?? (event.event === 'delivery' ? classifyRelayDeliveryEvent(event) ?? undefined : undefined);
-  store.debugEvents.push({
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+
+const boundedText = (value: unknown, maxLength = 1000): string =>
+  typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
+
+const incidentHash = (value: string): string => {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+};
+
+const normalizeRootFingerprint = (value: unknown): string =>
+  typeof value === 'string' && /^[a-z0-9][a-z0-9._:-]{7,199}$/i.test(value.trim())
+    ? value.trim().toLowerCase()
+    : '';
+
+export const classifyDebugIncident = (
+  event: RelayDebugEvent,
+): Pick<RelayDebugIncident, 'fingerprint' | 'source' | 'code' | 'message' | 'runtimeId'> | null => {
+  const details = asRecord(event.details);
+  const payload = asRecord(details?.['payload']);
+  const payloadData = asRecord(payload?.['data']);
+  const severity = boundedText(
+    details?.['severity'] ?? details?.['level'] ?? payload?.['level'],
+    20,
+  ).toLowerCase();
+  const isError =
+    event.event === 'error' ||
+    event.event === 'browser_error' ||
+    severity === 'error' ||
+    severity === 'fatal' ||
+    event.status === 'error' ||
+    event.status === 'fatal' ||
+    (event.status === 'failed' && event.delivery?.fatal !== false) ||
+    event.delivery?.fatal === true;
+  if (!isError) return null;
+
+  const rawCode =
+    boundedText(payloadData?.['message'], 200) ||
+    boundedText(payload?.['message'], 200) ||
+    boundedText(details?.['code'], 200) ||
+    boundedText(event.reason, 200) ||
+    boundedText(details?.['message'], 200) ||
+    event.event;
+  const code = normalizeRuntimeFailureCode(rawCode);
+  const message =
+    boundedText(payloadData?.['message'], 2000) ||
+    boundedText(details?.['message'], 2000) ||
+    boundedText(event.reason, 2000) ||
+    boundedText(payload?.['message'], 2000) ||
+    code;
+  const source =
+    boundedText(details?.['source'], 80) ||
+    boundedText(payload?.['category'], 80) ||
+    (event.event === 'browser_error' ? 'browser' : event.event);
+  const runtimeId =
+    boundedText(event.runtimeId, 200) ||
+    boundedText(payload?.['runtimeId'], 200) ||
+    boundedText(event.from, 200) ||
+    undefined;
+  const stackHead =
+    boundedText(details?.['stack'], 4000).split('\n').slice(0, 2).join('\n') ||
+    boundedText(payloadData?.['stack'], 4000).split('\n').slice(0, 2).join('\n');
+  const genericCode = code === 'ERROR' || code === 'BROWSER_ERROR' || code.endsWith('_ERROR');
+  const basis = [code, runtimeId ?? '', genericCode ? message : '', stackHead].join('|');
+  return {
+    fingerprint: normalizeRootFingerprint(event.rootFingerprint) || `${code.toLowerCase()}-${incidentHash(basis)}`,
+    source,
+    code,
+    message,
+    runtimeId,
+  };
+};
+
+const trimDebugIncidents = (store: RelayStore): void => {
+  if (store.debugIncidents.size <= MAX_DEBUG_INCIDENTS) return;
+  const candidates = Array.from(store.debugIncidents.values()).sort((left, right) => {
+    const leftResolved = left.state === 'resolved' ? 0 : 1;
+    const rightResolved = right.state === 'resolved' ? 0 : 1;
+    return leftResolved - rightResolved || left.lastSeen - right.lastSeen;
+  });
+  for (const incident of candidates.slice(0, store.debugIncidents.size - MAX_DEBUG_INCIDENTS)) {
+    store.debugIncidents.delete(incident.fingerprint);
+  }
+};
+
+const updateDebugIncident = (store: RelayStore, event: RelayDebugEvent): RelayDebugIncident | null => {
+  const classified = classifyDebugIncident(event);
+  if (!classified) return null;
+  const existing = store.debugIncidents.get(classified.fingerprint);
+  store.debugIncidents.set(classified.fingerprint, existing
+    ? {
+        ...existing,
+        state: 'unread',
+        message: classified.message,
+        runtimeId: classified.runtimeId,
+        lastSeen: event.ts,
+        count: existing.count + 1,
+        lastEventId: event.id,
+        sample: event,
+      }
+    : {
+        ...classified,
+        state: 'unread',
+        firstSeen: event.ts,
+        lastSeen: event.ts,
+        count: 1,
+        firstEventId: event.id,
+        lastEventId: event.id,
+        sample: event,
+      });
+  trimDebugIncidents(store);
+  const persisted = store.debugIncidents.get(classified.fingerprint);
+  if (persisted) store.incidentSink?.(persisted);
+  return persisted ?? null;
+};
+
+export const pushDebugEvent = (
+  store: RelayStore,
+  event: Omit<RelayDebugEvent, 'id' | 'ts'>,
+): RelayDebugIncident | null => {
+  const nextDebugId = store.debugIdAllocator?.() ?? store.debugId + 1;
+  if (!Number.isSafeInteger(nextDebugId) || nextDebugId <= store.debugId) {
+    throw new Error(`DEBUG_EVENT_ID_INVALID:current=${store.debugId}:next=${String(nextDebugId)}`);
+  }
+  store.debugId = nextDebugId;
+  const redactedEvent = redactTelemetryValue(event) as Omit<RelayDebugEvent, 'id' | 'ts'>;
+  const delivery = redactedEvent.delivery ??
+    (redactedEvent.event === 'delivery' ? classifyRelayDeliveryEvent(redactedEvent) ?? undefined : undefined);
+  const storedEvent: RelayDebugEvent = {
     id: store.debugId,
     ts: Date.now(),
-    ...event,
+    ...redactedEvent,
     ...(delivery ? { delivery } : {}),
-  });
+  };
+  store.debugEvents.push(storedEvent);
+  const incident = updateDebugIncident(store, storedEvent);
   if (store.debugEvents.length > MAX_DEBUG_EVENTS) {
     store.debugEvents.shift();
   }
+  return incident;
+};
+
+export const setDebugIncidentState = (
+  store: RelayStore,
+  fingerprint: string,
+  state: RelayDebugIncidentState,
+): RelayDebugIncident => {
+  const incident = store.debugIncidents.get(fingerprint);
+  if (!incident) throw new Error(`DEBUG_INCIDENT_NOT_FOUND:${fingerprint}`);
+  const updated = { ...incident, state };
+  store.debugIncidents.set(fingerprint, updated);
+  store.incidentSink?.(updated);
+  return updated;
+};
+
+/**
+ * Clear the high-volume event timeline while retaining grouped incidents.
+ *
+ * Event ids are cursors, so they must remain monotonic for the lifetime of the
+ * incident registry. Resetting debugId while incidents survive makes afterId
+ * queries skip new events until the counter catches up to its old value.
+ */
+export const clearDebugTimeline = (store: RelayStore): void => {
+  store.debugEvents.length = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -526,6 +723,7 @@ export const clearPendingMessages = (store: RelayStore): void => {
 
 export const resetStore = (store: RelayStore): void => {
   store.debugEvents.length = 0;
+  store.debugIncidents.clear();
   store.debugId = 0;
   clearPendingMessages(store);
   store.runtimeEncryptionKeys.clear();

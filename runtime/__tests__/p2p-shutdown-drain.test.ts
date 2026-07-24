@@ -20,10 +20,18 @@ test('offline reliable-receipt target is an explicit info-level retry race', () 
   expect(info).toEqual(['RELIABLE_RECEIPT_TARGET_OFFLINE']);
   expect(warnings).toEqual([]);
 
+  reportRelayClientError(env, 'ws://relay', new Error('ENTITY_INPUT_TARGET_NOT_CONNECTED'));
+  expect(info).toEqual(['RELIABLE_RECEIPT_TARGET_OFFLINE', 'ENTITY_INPUT_TARGET_OFFLINE']);
+  expect(warnings).toEqual([]);
+
   reportRelayClientError(env, 'ws://relay', new Error(
     'INBOUND_ENTITY_RUNTIME_QUIESCING: entity=0x11 signer=0x22 txTypes=consensusOutput',
   ));
-  expect(info).toEqual(['RELIABLE_RECEIPT_TARGET_OFFLINE', 'WS_CLIENT_RETRYABLE_BACKPRESSURE']);
+  expect(info).toEqual([
+    'RELIABLE_RECEIPT_TARGET_OFFLINE',
+    'ENTITY_INPUT_TARGET_OFFLINE',
+    'WS_CLIENT_RETRYABLE_BACKPRESSURE',
+  ]);
   expect(warnings).toEqual([]);
 
   reportRelayClientError(env, 'ws://relay', new Error('unexpected transport failure'));

@@ -11,6 +11,7 @@ export { ERC20Mock__factory } from "./ERC20Mock__factory";
 export { ERC721Mock__factory } from "./ERC721Mock__factory";
 export { EntityProvider__factory } from "./EntityProvider__factory";
 export { HankoCodec__factory } from "./HankoCodec__factory";
+export { HankoVerifier__factory } from "./HankoVerifier__factory";
 export { HashLadder__factory } from "./HashLadder__factory";
 export { IDeltaTransformer__factory } from "./IDeltaTransformer__factory";
 export { IDepository__factory } from "./IDepository__factory";

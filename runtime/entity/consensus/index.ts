@@ -24,6 +24,7 @@ import type {
   ConsensusOutputOrigin,
   EntityInput,
   EntityFrameAuthority,
+  EntityCandidateEffect,
   EntityLeaderCertificate,
   EntityLeaderTimeoutVote,
   EntityReplica,
@@ -56,7 +57,6 @@ import {
   shortHash,
   shortId,
   shortOrder,
-  shouldLogFullPayloads,
 } from '../../infra/logger';
 import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from '../../account/consensus/flush';
 import { resolveCertifiedAccountCounterpartyProposer } from '../../account/counterparty-route';
@@ -71,6 +71,7 @@ import {
 } from '../../state-helpers';
 import {
   applyStorageChanges,
+  publishEntityCandidateEffects,
   recordEntityFrameHistory,
 } from '../../machine/env-events';
 import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from '../../machine/security-incidents';
@@ -173,6 +174,7 @@ import {
   sealHankoWitnessInState,
   type HankoWitnessEntry,
 } from './hanko-witness';
+import { MalformedEntityFrameInputError } from '../tx/invariant-errors';
 import {
   assignCertifiedOutputIdentities,
   assertCertifiedOutputSemanticIdentity,
@@ -841,6 +843,7 @@ const replayPreparedFrameForRelay = async (
     collectedHashes = [],
     outputs,
     jOutputs,
+    candidateEffects,
     storageChanges,
     consumptionNodeChanges,
     accountJClaimNodeChanges,
@@ -889,6 +892,7 @@ const replayPreparedFrameForRelay = async (
     outputs,
     jOutputs,
     hashesToSign: manifest,
+    candidateEffects,
     storageChanges,
     ...(consumptionNodeChanges ? { consumptionNodeChanges } : {}),
     ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
@@ -2251,6 +2255,7 @@ async function handleCommitNotification(context: ApplyEntityInputContext): Promi
       collectedHashes: replayedCollectedHashes = [],
       outputs: replayedOutputs,
       jOutputs: replayedJOutputs,
+      candidateEffects,
       storageChanges,
       consumptionNodeChanges,
       accountJClaimNodeChanges,
@@ -2306,6 +2311,7 @@ async function handleCommitNotification(context: ApplyEntityInputContext): Promi
       outputs: replayedOutputs,
       jOutputs: replayedJOutputs,
       hashesToSign: expectedHashesToSign,
+      candidateEffects,
       storageChanges,
       ...(consumptionNodeChanges ? { consumptionNodeChanges } : {}),
       ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
@@ -2437,6 +2443,7 @@ async function handleCommitNotification(context: ApplyEntityInputContext): Promi
     workingReplica,
     buildCertifiedEntityFrameLink(workingReplica.state.entityId, proposedFrame, workingReplica.state),
   );
+  publishEntityCandidateEffects(env, execution.candidateEffects);
   pruneReplicaFinalizedJHistory(workingReplica);
 
   const committedTxs = proposedFrame.txs;
@@ -2576,6 +2583,7 @@ async function handleProposedFramePrecommit(context: ApplyEntityInputContext): P
     collectedHashes: validatorCollectedHashes = [],
     outputs: validatorOutputs,
     jOutputs: validatorJOutputs,
+    candidateEffects,
     storageChanges,
     consumptionNodeChanges,
     accountJClaimNodeChanges,
@@ -2707,6 +2715,7 @@ async function handleProposedFramePrecommit(context: ApplyEntityInputContext): P
     outputs: validatorOutputs,
     jOutputs: validatorJOutputs,
     hashesToSign,
+    candidateEffects,
     storageChanges,
     ...(consumptionNodeChanges ? { consumptionNodeChanges } : {}),
     ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
@@ -2968,6 +2977,7 @@ async function handleHashPrecommits(context: ApplyEntityInputContext): Promise<A
     workingReplica,
     buildCertifiedEntityFrameLink(workingReplica.state.entityId, committedFrame, workingReplica.state),
   );
+  publishEntityCandidateEffects(env, execution.candidateEffects);
   const committedTxs = committedFrame.txs;
   if (committedTxs.length > 0) {
     workingReplica.mempool = removeCommittedTxsFromMempool(workingReplica.mempool, committedTxs);
@@ -3187,13 +3197,6 @@ export const applyEntityInput = async (
     const voteTransactions = suppliedEntityTxs.filter(tx => tx.type === 'vote');
     if (voteTransactions.length > 0) {
       entityLog.debug('vote.mempool', { signer: shortId(workingReplica.signerId), count: voteTransactions.length });
-      if (shouldLogFullPayloads()) entityLog.trace('vote.payload', { txs: voteTransactions });
-    }
-
-    if (shouldLogFullPayloads()) {
-      for (const tx of admittedEntityTxs) {
-        entityLog.trace('tx.payload', { type: tx.type, data: tx.data });
-      }
     }
     if (trustedLocalCrossJurisdiction) {
       if (!localCanPropose) {
@@ -3391,6 +3394,7 @@ export const applyEntityInput = async (
       newState: newEntityState,
       outputs: frameOutputs,
       jOutputs: frameJOutputs,
+      candidateEffects,
       storageChanges,
       collectedHashes = [],
       consumptionNodeChanges,
@@ -3537,6 +3541,7 @@ export const applyEntityInput = async (
         { stateRoot: singleSignerStateRoot, authority: singleSignerAuthority },
       ),
     );
+    publishEntityCandidateEffects(env, candidateEffects);
     pruneReplicaFinalizedJHistory(workingReplica);
     await runLocalPostCommitHooks(env, workingReplica, entityOutbox);
     workingReplica.lastConsensusProgressAt = env.timestamp;
@@ -3634,6 +3639,7 @@ export const applyEntityInput = async (
       newState: newEntityState,
       outputs: proposalOutputs,
       jOutputs: proposalJOutputs,
+      candidateEffects,
       storageChanges,
       collectedHashes = [],
       consumptionNodeChanges,
@@ -3714,6 +3720,7 @@ export const applyEntityInput = async (
       outputs: proposalOutputs,
       jOutputs: proposalJOutputs,
       hashesToSign,
+      candidateEffects,
       storageChanges,
       ...(consumptionNodeChanges ? { consumptionNodeChanges } : {}),
       ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
@@ -3797,6 +3804,7 @@ type ApplyEntityTxsInOrderContext = {
   accountJClaimNewNodes: Map<string, AccountJClaimNode>;
   accountJClaimReplacedNodeHashes: Set<string>;
   accountJClaimNodeStore: AccountJClaimNodeStore;
+  candidateEffects: EntityCandidateEffect[];
   storageChanges: RuntimeOverlayRecord[];
   /** Set only after the enclosing SignedEntityCommand has been fully verified. */
   authorizedCommand?: true | undefined;
@@ -3972,6 +3980,7 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
       hashesToSign,
       mempoolOps,
       storageChanges,
+      candidateEffects,
       requiredAccountResponse,
       swapOffersCreated,
       swapCancelRequests,
@@ -3985,10 +3994,11 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
       accountJClaimNodeStore: context.accountJClaimNodeStore,
     });
     if (skippedError) {
-      throw new Error(`ENTITY_FRAME_TX_FAILED: type=${String(entityTx.type)} error=${skippedError}`);
+      throw new MalformedEntityFrameInputError(String(entityTx.type), skippedError);
     }
     currentEntityState = newState;
     context.storageChanges.push(...storageChanges);
+    context.candidateEffects.push(...candidateEffects);
     if (accountJClaimNodeChanges) {
       for (const { hash, node } of accountJClaimNodeChanges.newNodes) {
         context.accountJClaimNewNodes.set(hash, node);
@@ -4789,6 +4799,7 @@ export const applyEntityFrame = async (
   deterministicState: EntityState;
   outputs: EntityInput[];
   jOutputs: JInput[];
+  candidateEffects: EntityCandidateEffect[];
   storageChanges: RuntimeOverlayRecord[];
   // Hashes emitted during frame processing that need entity-quorum signing
   collectedHashes?: Array<{
@@ -4814,11 +4825,6 @@ export const applyEntityFrame = async (
     frameProfileMarks[label] = Math.round(getPerfMs() - frameProfileStartMs);
   };
   entityLog.debug('frame.apply', { txs: entityTxs.map(tx => tx.type) });
-  if (shouldLogFullPayloads()) {
-    entityTxs.forEach((tx, index) => {
-      entityLog.trace('frame.tx_payload', { index, type: tx.type, data: tx.data });
-    });
-  }
 
   // Work on a clone so failed frame construction cannot leak mutations.
   const authorityNormalizedState = normalizeEntityProposalBoard(
@@ -4839,15 +4845,9 @@ export const applyEntityFrame = async (
     throw new Error(`ENTITY_FRAME_TIMESTAMP_INVALID:${String(effectiveFrameTimestamp)}`);
   }
   if (effectiveFrameTimestamp < currentEntityState.timestamp) {
-    entityLog.warn('frame.timestamp_regressed_accepted', {
-      entityId: currentEntityState.entityId,
-      previousHeight: currentEntityState.height,
-      nextHeight: currentEntityState.height + 1,
-      previousTimestamp: currentEntityState.timestamp,
-      proposedTimestamp: effectiveFrameTimestamp,
-      regressionMs: currentEntityState.timestamp - effectiveFrameTimestamp,
-      runtimeTimestamp: env.timestamp,
-    });
+    throw new Error(
+      `ENTITY_FRAME_TIMESTAMP_REGRESSION:previous=${currentEntityState.timestamp}:proposed=${effectiveFrameTimestamp}`,
+    );
   }
   currentEntityState.timestamp = effectiveFrameTimestamp;
   const allOutputs: EntityInput[] = [];
@@ -4862,6 +4862,7 @@ export const applyEntityFrame = async (
   const accountJClaimNewNodes = new Map<string, AccountJClaimNode>();
   const accountJClaimReplacedNodeHashes = new Set<string>();
   const storageChanges: RuntimeOverlayRecord[] = [];
+  const candidateEffects: EntityCandidateEffect[] = [];
   const committedAccountJClaimNodes = getAccountJClaimNodeStore(env);
   const accountJClaimNodeStore: AccountJClaimNodeStore = {
     get: hash => accountJClaimNewNodes.get(hash) ?? committedAccountJClaimNodes.get(hash),
@@ -4901,6 +4902,7 @@ export const applyEntityFrame = async (
     accountJClaimNewNodes,
     accountJClaimReplacedNodeHashes,
     accountJClaimNodeStore,
+    candidateEffects,
     storageChanges,
   });
   markFrameProfile('entityTxLoop');
@@ -4924,6 +4926,7 @@ export const applyEntityFrame = async (
       deterministicState: cloneEntityState(currentEntityState),
       outputs: allOutputs,
       jOutputs: allJOutputs,
+      candidateEffects,
       storageChanges: mergeStorageOverlayRecords(undefined, storageChanges),
       collectedHashes,
       ...(consumptionNewNodes.size > 0 || consumptionReplacedNodeHashes.size > 0
@@ -5053,6 +5056,7 @@ export const applyEntityFrame = async (
     deterministicState,
     outputs: allOutputs,
     jOutputs: allJOutputs,
+    candidateEffects,
     storageChanges: mergeStorageOverlayRecords(undefined, storageChanges),
     collectedHashes,
     ...(consumptionNewNodes.size > 0 || consumptionReplacedNodeHashes.size > 0

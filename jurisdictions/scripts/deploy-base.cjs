@@ -86,11 +86,18 @@ async function main() {
   // ═══════════════════════════════════════════════════════════════════
   console.log("\n─── Step 2: Deploying EntityProvider ───");
 
-  const EntityProvider = await hre.ethers.getContractFactory("EntityProvider");
+  const HankoVerifier = await hre.ethers.getContractFactory("HankoVerifier");
+  const hankoVerifier = await HankoVerifier.deploy();
+  await hankoVerifier.waitForDeployment();
+  const hankoVerifierAddress = await hankoVerifier.getAddress();
+  const EntityProvider = await hre.ethers.getContractFactory("EntityProvider", {
+    libraries: { HankoVerifier: hankoVerifierAddress },
+  });
   const entityProvider = await EntityProvider.deploy(foundationRecipient);
   await entityProvider.waitForDeployment();
   const entityProviderAddress = await entityProvider.getAddress();
   console.log(`   ✅ EntityProvider deployed: ${entityProviderAddress}`);
+  console.log(`   ✅ HankoVerifier deployed: ${hankoVerifierAddress}`);
 
   // ═══════════════════════════════════════════════════════════════════
   // Step 3: Deploy Account library and Depository

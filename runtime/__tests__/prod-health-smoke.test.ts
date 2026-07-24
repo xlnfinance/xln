@@ -1,8 +1,10 @@
 import { expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 
 import {
   buildProdHealthFailureSummary,
   buildTowerHealthUrl,
+  getBlockingOpenIncidents,
   getFatalDegradedReasons,
   getFatalHealthFailures,
   validateHubTopology,
@@ -26,6 +28,43 @@ test('prod health smoke treats typed fatal failures as authoritative', () => {
     retryable: false,
     fatal: true,
   }]);
+});
+
+test('prod health smoke blocks every unresolved incident without leaking messages', () => {
+  const incidents = getBlockingOpenIncidents([
+    {
+      code: 'H2_UNEXPECTED_EXIT',
+      count: 2,
+      fingerprint: 'h2_unexpected_exit-deadbeef',
+      runtimeId: '0x1234',
+      state: 'acknowledged',
+      message: 'private filesystem path',
+      sample: { secret: 'never expose' },
+    },
+    {
+      code: 'OLD',
+      fingerprint: 'old-resolved',
+      state: 'resolved',
+    },
+  ]);
+  expect(incidents).toEqual([{
+    code: 'H2_UNEXPECTED_EXIT',
+    count: 2,
+    fingerprint: 'h2_unexpected_exit-deadbeef',
+    runtimeId: '0x1234',
+    state: 'acknowledged',
+  }]);
+  expect(JSON.stringify(incidents)).not.toContain('private filesystem path');
+  expect(JSON.stringify(incidents)).not.toContain('never expose');
+});
+
+test('prod health smoke queries unresolved incidents before ordinary health', () => {
+  const source = readFileSync('runtime/scripts/prod-health-smoke.ts', 'utf8');
+  const incidentQuery = source.indexOf("`${args.baseUrl}/api/debug/incidents?state=open&limit=1000`");
+  const healthQuery = source.indexOf("`${args.baseUrl}/api/health`");
+  expect(incidentQuery).toBeGreaterThan(0);
+  expect(healthQuery).toBeGreaterThan(incidentQuery);
+  expect(source).toContain('OPEN_DEBUG_INCIDENTS_BLOCK_RELEASE');
 });
 
 test('prod health smoke reports hub relay-presence diagnostics', () => {

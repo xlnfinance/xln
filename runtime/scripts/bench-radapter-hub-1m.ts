@@ -7,6 +7,7 @@ import { Level } from 'level';
 import type { ServerWebSocket } from 'bun';
 import { ethers } from 'ethers';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
+import { transitionRuntimeLifecycle } from '../machine/lifecycle';
 
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
 import { decodeRuntimeAdapterRequest } from '../radapter/codec';
@@ -325,7 +326,7 @@ const seedBooks = (state: EntityState, count: number): void => {
 const makeEnv = (seed: string, entityId: string, state: EntityState): Env => {
   const runtimeId = deriveRuntimeIdFromSeed(seed);
   if (!runtimeId) throw new Error('BENCH_RUNTIME_ID_DERIVATION_FAILED');
-  return {
+  const env = {
     height: state.height,
     timestamp: state.timestamp,
     runtimeSeed: seed,
@@ -341,6 +342,11 @@ const makeEnv = (seed: string, entityId: string, state: EntityState): Env => {
     ]),
     runtimeState: {},
   } as Env;
+  // This benchmark owns its command consumer below; the synthetic Runtime is
+  // fully booted once that consumer exists. Keep the production readiness
+  // fence intact instead of teaching the adapter to accept commands in booting.
+  transitionRuntimeLifecycle(env.runtimeState!, 'running');
+  return env;
 };
 
 const makeHead = (height: number): StorageHead => ({
@@ -352,6 +358,7 @@ const makeHead = (height: number): StorageHead => ({
   retainSnapshots: 3,
   epochMaxBytes: 256 * 1024 * 1024,
   accountMerkleRadix: 16,
+  epochReplayBytes: 0,
   retainedHistoryBytes: 0,
 });
 
@@ -692,6 +699,7 @@ const runSnapshotRotationProbe = async (
       ...head,
       retainSnapshots: cli.rotationRetainSnapshots,
       epochMaxBytes: cli.rotationEpochBytes,
+      epochReplayBytes: cli.rotationEpochBytes + 1,
       retainedHistoryBytes: cli.rotationEpochBytes + 1,
     };
     const historyBatch = historyDb.batch();

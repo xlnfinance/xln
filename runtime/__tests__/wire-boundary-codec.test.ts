@@ -133,7 +133,7 @@ describe('rAdapter trusted decode boundary', () => {
         ok: false,
         error: { code: 'E_BAD_QUERY', message: 'bad', retryable: false },
       },
-      tick: { v: 1, op: 'tick', height: 1 },
+      tick: { v: 1, op: 'tick', height: 1, commandReady: true, commandReadyReason: null },
     } satisfies Record<string, RuntimeAdapterWireMessage>;
     const expected = {
       auth: '0x815bbc35b560e10d2e786331870725f223a394f86715911f3de984bdd1daa8f8',
@@ -141,7 +141,7 @@ describe('rAdapter trusted decode boundary', () => {
       send: '0x710ca84bb36e77be6e6362c8039ace7b53fe26c1a7f4e6e5b3e58051b4633078',
       ok: '0x2130fe297611af9f54e231850d447eae7c1d39e9357a970e291f0f900363b42d',
       error: '0x6aaee897bbac946f5a952c2321086eab0b7f7d7ae841c9973a8e0d9a82b556af',
-      tick: '0x85ba11e27ec274a7739f21688eab151498d16cab5717c366bad056b85d856ac7',
+      tick: '0x266ba5fbb38e955c1cdeb40209dadc2bcd64a3673363737e5e9753011d37608d',
     } as const;
 
     expect(Object.fromEntries(Object.entries(variants).map(([name, value]) => [
@@ -154,7 +154,13 @@ describe('rAdapter trusted decode boundary', () => {
     const messages = [
       { v: 1 as const, id: 'auth-1', op: 'auth' as const, challenge: `0x${'11'.repeat(32)}` },
       { v: 1 as const, inReplyTo: 'auth-1', ok: true as const, payload: { authLevel: 'inspect' } },
-      { v: 1 as const, op: 'tick' as const, height: 9 },
+      {
+        v: 1 as const,
+        op: 'tick' as const,
+        height: 9,
+        commandReady: false,
+        commandReadyReason: 'phase=halted',
+      },
     ];
     for (const message of messages) {
       expect(decodeRuntimeAdapterMessage(encodeRuntimeAdapterMessage(message))).toEqual(message);
@@ -182,6 +188,7 @@ describe('rAdapter trusted decode boundary', () => {
     ['missing request id', encodeBinaryPayload({ v: 1, op: 'read', path: 'head' }, 'msgpack')],
     ['missing read path', encodeBinaryPayload({ v: 1, id: 'x', op: 'read' }, 'msgpack')],
     ['type-confused tick height', encodeBinaryPayload({ v: 1, op: 'tick', height: '9' }, 'msgpack')],
+    ['missing tick readiness', encodeBinaryPayload({ v: 1, op: 'tick', height: 9 }, 'msgpack')],
     ['type-confused response status', encodeBinaryPayload({ v: 1, inReplyTo: 'x', ok: 'true', payload: null }, 'msgpack')],
     ['missing send input arrays', encodeBinaryPayload({
       v: 1,
