@@ -556,7 +556,7 @@ const cloneEntityStateWithPolicy = (
     }
   }
 
-  if (entityState.jBatchState && !cloned.jBatchState) {
+  if (entityState.jBatchState) {
     cloned.jBatchState = cloneJBatchState(entityState.jBatchState);
   }
   if (entityState.lending) {

@@ -252,7 +252,6 @@ import {
   getReliableOutputIdentity,
   getNextNetworkRetryTimestamp,
   hasReadyPendingNetworkOutputs,
-  markPendingCrossJAdmissionOutputsReady,
   markRestoredReliableOutputsDue,
   MAX_PENDING_NETWORK_OUTPUTS,
   planEntityOutputs,
@@ -994,19 +993,6 @@ const getRuntimeWorkReason = (env: Env): string | null => {
 };
 
 export const hasRuntimeWork = (env: Env): boolean => getRuntimeWorkReason(env) !== null;
-
-export const retryPendingCrossJAdmissionEnvelopes = (
-  env: Env,
-  targetRuntimeId?: string,
-): number => {
-  const ready = markPendingCrossJAdmissionOutputsReady(
-    env,
-    getRuntimeOutputRoutingDeps(),
-    targetRuntimeId,
-  );
-  if (ready > 0) requestRuntimeLoopWake(env);
-  return ready;
-};
 
 const collectAccountMempoolWakeInputs = (env: Env): EntityInput[] => {
   const wakeInputs: EntityInput[] = [];
@@ -4660,6 +4646,9 @@ const abortRuntimeFrameTransaction = async (
 export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0) => {
   const liveEnv = env;
   const processState = ensureRuntimeState(env);
+  if (inferRuntimeLifecyclePhase(processState) === 'halted') {
+    throw new Error('RUNTIME_PROCESS_HALTED');
+  }
   while (processState.processingPromise) {
     await processState.processingPromise;
   }

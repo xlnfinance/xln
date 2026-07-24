@@ -1,10 +1,12 @@
 import type { JTx } from '../types';
 import {
   assertJBatchWithinContractLimits,
+  batchOpCount,
   computeBatchHankoHash,
   encodeJBatch,
   getBatchSize,
 } from './batch';
+import { keccak256 } from 'ethers';
 
 type BatchJTx = Extract<JTx, { type: 'batch' }>;
 
@@ -46,7 +48,14 @@ export const assertSealedJBatchBinding = (
 
   const expectedEncodedBatch = encodeJBatch(data.batch);
   if (normalizedHex(data.encodedBatch!) !== normalizedHex(expectedEncodedBatch)) {
-    throw new Error('J_BATCH_ENCODING_MISMATCH');
+    throw new Error(
+      `J_BATCH_ENCODING_MISMATCH:` +
+      `storedHash=${keccak256(data.encodedBatch!)}:` +
+      `encodedHash=${keccak256(expectedEncodedBatch)}:` +
+      `storedBytes=${(data.encodedBatch!.length - 2) / 2}:` +
+      `encodedBytes=${(expectedEncodedBatch.length - 2) / 2}:` +
+      `ops=${batchOpCount(data.batch)}`,
+    );
   }
 
   const expectedBatchHash = computeBatchHankoHash(

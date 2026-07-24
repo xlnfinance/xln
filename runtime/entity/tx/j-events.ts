@@ -622,16 +622,15 @@ function applyDisputeFinalizedJEvent(
     });
   }
 
-  // Drop stale local draft dispute-finalize ops for this account. If the dispute
-  // is already finalized on-chain, re-broadcasting it can revert a future batch.
+  // Drop only the unsealed draft. sentBatch is the immutable payload authorized
+  // by its Hanko: changing it would detach batch/encodedBatch/batchHash. The
+  // runtime submit lane reconciles that exact sealed attempt against the
+  // finalized dispute before any retry and retires it by exact receipt.
   const removedDraft = scrubDisputeFinalizationsForCounterparty(
     newState.jBatchState?.batch,
     candidateCounterpartyId,
   );
-  const removedSent = scrubDisputeFinalizationsForCounterparty(
-    newState.jBatchState?.sentBatch?.batch,
-    candidateCounterpartyId,
-  );
+  const removedSent = 0;
   const removed = removedDraft + removedSent;
   jEventLog.info('dispute_finalized.applied', {
     entity: shortId(entityIdNorm),

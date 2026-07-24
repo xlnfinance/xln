@@ -107,7 +107,7 @@ import {
 import { getRuntimeJurisdictionHeight } from '../jurisdiction/height';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { buildLocalJPrefixAttestation } from '../jurisdiction/j-prefix-consensus';
-import { createEmptyBatch } from '../jurisdiction/batch';
+import { createEmptyBatch, encodeJBatch } from '../jurisdiction/batch';
 import {
   getCertifiedBoardNodeStore,
   resolveCertifiedRegisteredBoardHash,
@@ -134,6 +134,7 @@ import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/proj
 import { validateStorageAccountDocValue } from '../storage/authoritative-schema';
 import { decodeValidatedBuffer, encodeBuffer } from '../storage/codec';
 import { createDefaultDelta } from '../validation-utils';
+import { cloneEntityState } from '../state-helpers';
 import {
   buildDisputeArgumentsForSnapshot,
   captureDisputeArgumentSnapshot,
@@ -6660,7 +6661,7 @@ describe('audit fail-fast regressions', () => {
     expect(accountMachine.mempool).toEqual([firstTx, lateTx]);
   });
 
-  test('DisputeFinalized scrubs stale sentBatch finalize and failed Hanko does not resurrect it', async () => {
+  test('DisputeFinalized scrubs draft finalize without mutating sealed sentBatch', async () => {
     const entityId = `0x${'12'.repeat(32)}`;
     const counterpartyId = `0x${'34'.repeat(32)}`;
     const state = makeEntityState(entityId);
@@ -6777,6 +6778,10 @@ describe('audit fail-fast regressions', () => {
       disputeFinalizationEvidence,
       jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
     });
+    const sealedBatchBefore = encodeJBatch(state.jBatchState.sentBatch!.batch);
+    state.jBatchState.sentBatch!.encodedBatch = sealedBatchBefore;
+    const clonedSealedBatch = cloneEntityState(state).jBatchState!.sentBatch!.batch;
+    expect(safeStringify(clonedSealedBatch)).toBe(safeStringify(state.jBatchState.sentBatch!.batch));
     const finalized = await applyJEventRange(state, {
       from: '1',
       observedAt: 2000,
@@ -6790,7 +6795,9 @@ describe('audit fail-fast regressions', () => {
 
     expect(finalized.newState.accounts.get(counterpartyId)?.activeDispute).toBeUndefined();
     expect(finalized.newState.jBatchState?.batch.disputeFinalizations.length).toBe(0);
-    expect(finalized.newState.jBatchState?.sentBatch?.batch.disputeFinalizations.length).toBe(0);
+    expect(finalized.newState.jBatchState?.sentBatch?.batch.disputeFinalizations.length).toBe(1);
+    expect(finalized.newState.jBatchState?.sentBatch?.encodedBatch).toBe(sealedBatchBefore);
+    expect(encodeJBatch(finalized.newState.jBatchState!.sentBatch!.batch)).toBe(sealedBatchBefore);
     const finalizedDelta = finalized.newState.accounts.get(counterpartyId)?.deltas.get(1);
     expect(finalizedDelta?.collateral).toBe(0n);
     expect(finalizedDelta?.ondelta).toBe(0n);
