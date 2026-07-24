@@ -366,7 +366,7 @@ describe('production startup wiring', () => {
     expect(orchestratorConfig).toContain("const RPC_PROXY_INDEXES = [1, 2, 3, 4, 5, 6, 7, 8] as const;");
     expect(orchestratorConfig).toContain("readPositiveIntEnv('XLN_CHILD_HEALTH_TIMEOUT_MS', 30_000)");
     expect(orchestrator).toContain('const relayUrl = args.relayUrl;');
-    expect(orchestrator).toContain("process.env['XLN_MARKET_MAKER_INFO_TIMEOUT_MS'] || '1500'");
+    expect(orchestrator).not.toContain('XLN_MARKET_MAKER_INFO_TIMEOUT_MS');
     expect(orchestrator).toContain("process.env['XLN_CHILD_SHUTDOWN_QUIESCE_MS'] || '5000'");
     expect(orchestrator).toContain('const CHILD_RESET_QUIESCE_TIMEOUT_MS = 45_000;');
     expect(orchestrator).toContain("meshLog.warn('child.stop_timeout_sigkill'");
@@ -388,19 +388,15 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('let hubHealthPollInFlight: Promise<void> | null = null;');
     expect(orchestrator).toContain('if (hubHealthPollInFlight) return hubHealthPollInFlight;');
     expect(orchestrator).toContain('const marketMakerPoller = createMarketMakerChildPoller({');
-    expect(orchestrator).toContain('const pollMarketMakerInfo = marketMakerPoller.pollInfo;');
     expect(orchestrator).toContain('const pollMarketMakerHealth = async (): Promise<void> => {');
     expect(orchestrator).toContain('observeManagedRuntimeHalt(marketMakerChild, marketMakerChild.lastHealth);');
     expect(marketMakerPoller).toContain('let healthPollInFlight: Promise<void> | null = null;');
-    expect(marketMakerPoller).toContain('let infoPollInFlight: Promise<void> | null = null;');
     expect(marketMakerPoller).toContain('if (healthPollInFlight) return healthPollInFlight;');
-    expect(marketMakerPoller).toContain('if (infoPollInFlight) return infoPollInFlight;');
     expect(marketMakerPoller).toContain("fetchJson<MarketMakerHealthPayload>(`${apiBase()}/api/health`, healthTimeoutMs)");
     expect(orchestrator).not.toContain('const [health, info] = await Promise.all([');
-    expect(marketMakerPoller).toContain("fetchJson<MarketMakerInfoPayload>(`${apiBase()}/api/info`, infoTimeoutMs)");
-    expect(orchestrator).not.toContain('if (!marketMakerChild.lastInfo) {');
-    expect(marketMakerPoller).toContain('const applyInfo = (info: MarketMakerInfoPayload, proc: ChildProcess): void => {');
-    expect(marketMakerPoller).toContain('child.lastInfo = { ...(child.lastInfo || {}), ...info };');
+    expect(marketMakerPoller).not.toContain('/api/info');
+    expect(orchestrator).not.toContain('pollMarketMakerInfo');
+    expect(marketMakerPoller).toContain('child.lastInfo = nextInfo;');
     expect(marketMakerPoller).toContain('if (!isCurrentProc(proc)) return;');
     expect(orchestrator).toContain('normalizeMarketMakerHealthPayload');
     expect(marketMakerPoller).toContain('type RawMarketMakerHealthPayload');
@@ -456,14 +452,11 @@ describe('production startup wiring', () => {
     expect(waitForMarketMakerReady.indexOf('if (marketMakerChild.exitCode !== null || marketMakerChild.exitSignal !== null)')).toBeLessThan(
       waitForMarketMakerReady.indexOf('health.marketMaker.ok'),
     );
-    expect(marketMakerPoller.indexOf("fetchJson<MarketMakerInfoPayload>(`${apiBase()}/api/info`, infoTimeoutMs)")).toBeLessThan(
-      marketMakerPoller.indexOf("fetchJson<MarketMakerHealthPayload>(`${apiBase()}/api/health`, healthTimeoutMs)"),
-    );
+    expect(marketMakerPoller).not.toContain('/api/info');
     expect(marketMakerPoller).toContain('const applyHealth = (');
     expect(marketMakerPoller).toContain('child.lastHealth = health;');
-    expect(marketMakerPoller).toContain('options: { trustStartupPhase: boolean },');
-    expect(marketMakerPoller).toContain('if (health.startupPhase !== undefined && (options.trustStartupPhase || !nextInfo.startupPhase)) {');
-    expect(marketMakerPoller).toContain('if (health) applyHealth(health, proc, { trustStartupPhase: !infoFresh });');
+    expect(marketMakerPoller).toContain('if (health.startupPhase !== undefined) {');
+    expect(marketMakerPoller).toContain('if (health) applyHealth(health, proc);');
     const lastStartupPhaseUpdate = marketMakerPoller.slice(marketMakerPoller.indexOf('child.lastStartupPhase = String('));
     expect(lastStartupPhaseUpdate.indexOf('child.lastInfo?.startupPhase ||')).toBeLessThan(
       lastStartupPhaseUpdate.indexOf('child.lastHealth?.startupPhase ||'),

@@ -208,10 +208,6 @@ const orchestratorCodeFingerprint = (() => {
 })();
 const staleReapEnabled = process.env['XLN_SKIP_STALE_REAP'] !== '1';
 const BOOTSTRAP_EVENT_TAIL_BYTES = 64 * 1024;
-const MARKET_MAKER_INFO_TIMEOUT_MS = Math.max(
-  500,
-  Math.min(CHILD_HEALTH_TIMEOUT_MS, Math.floor(Number(process.env['XLN_MARKET_MAKER_INFO_TIMEOUT_MS'] || '1500'))),
-);
 const MARKET_MAKER_FULL_HEALTH_TIMEOUT_MS = Math.max(
   CHILD_HEALTH_TIMEOUT_MS,
   Math.floor(Number(process.env['XLN_MARKET_MAKER_FULL_HEALTH_TIMEOUT_MS'] || '60000')),
@@ -726,39 +722,53 @@ const recordFetchFailure = (
   url: string,
   kind: 'http' | 'transport' | 'decode' | 'payload',
   detail: string,
+  expectedPending = false,
 ): void => {
   const now = Date.now();
   const fingerprint = `${kind}:${detail}`;
   const previous = fetchFailureLog.get(url);
   if (previous?.fingerprint === fingerprint && now - previous.loggedAt < 5_000) return;
   fetchFailureLog.set(url, { fingerprint, loggedAt: now });
-  meshLog.warn('health_fetch.failed', { url, kind, detail });
+  if (expectedPending) {
+    meshLog.info('health_fetch.pending', { url, kind, detail });
+  } else {
+    meshLog.warn('health_fetch.failed', { url, kind, detail });
+  }
 };
 
-const fetchJson = async <T>(url: string, timeoutMs = 2_000): Promise<T | null> => {
+const fetchJson = async <T>(
+  url: string,
+  timeoutMs = 2_000,
+  expectedPending = false,
+): Promise<T | null> => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetchLoopback(url, { signal: controller.signal });
     if (!response.ok) {
-      recordFetchFailure(url, 'http', `status=${response.status}`);
+      recordFetchFailure(url, 'http', `status=${response.status}`, expectedPending);
       return null;
     }
     let payload: unknown;
     try {
       payload = await response.json();
     } catch (error) {
-      recordFetchFailure(url, 'decode', serializeError(error));
+      recordFetchFailure(url, 'decode', serializeError(error), expectedPending);
       return null;
     }
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-      recordFetchFailure(url, 'payload', `type=${Array.isArray(payload) ? 'array' : typeof payload}`);
+      recordFetchFailure(
+        url,
+        'payload',
+        `type=${Array.isArray(payload) ? 'array' : typeof payload}`,
+        expectedPending,
+      );
       return null;
     }
     fetchFailureLog.delete(url);
     return payload as T;
   } catch (error) {
-    recordFetchFailure(url, 'transport', serializeError(error));
+    recordFetchFailure(url, 'transport', serializeError(error), expectedPending);
     return null;
   } finally {
     clearTimeout(timer);
@@ -883,9 +893,10 @@ const pollHubHealth = async (child: HubChild): Promise<void> => {
   const apiBase = `http://${args.host}:${child.apiPort}`;
   const infoUrl = `${apiBase}/api/info`;
   const healthUrl = `${apiBase}/api/health`;
+  const awaitingFirstHealth = child.lastInfo === null && child.lastHealth === null;
   const [rawInfo, rawHealth] = await Promise.all([
-    fetchJson<unknown>(infoUrl, CHILD_HEALTH_TIMEOUT_MS),
-    fetchJson<unknown>(healthUrl, CHILD_HEALTH_TIMEOUT_MS),
+    fetchJson<unknown>(infoUrl, CHILD_HEALTH_TIMEOUT_MS, awaitingFirstHealth),
+    fetchJson<unknown>(healthUrl, CHILD_HEALTH_TIMEOUT_MS, awaitingFirstHealth),
   ]);
   if (
     child.proc !== proc ||
@@ -938,13 +949,12 @@ const pollAllHubHealth = async (): Promise<void> => {
 const marketMakerPoller = createMarketMakerChildPoller({
   child: marketMakerChild,
   host: args.host,
-  infoTimeoutMs: MARKET_MAKER_INFO_TIMEOUT_MS,
   healthTimeoutMs: CHILD_HEALTH_TIMEOUT_MS,
   fullHealthTimeoutMs: MARKET_MAKER_FULL_HEALTH_TIMEOUT_MS,
-  fetchJson,
+  fetchJson: <T>(url: string, timeoutMs?: number) =>
+    fetchJson<T>(url, timeoutMs, marketMakerChild.lastHealth === null),
 });
 
-const pollMarketMakerInfo = marketMakerPoller.pollInfo;
 const pollMarketMakerHealth = async (): Promise<void> => {
   await marketMakerPoller.pollHealth();
   if (marketMakerChild.lastHealth) {
@@ -959,7 +969,6 @@ const refreshChildHealthForResponse = async (): Promise<void> => {
   await Promise.race([
     Promise.allSettled([
       pollAllHubHealth(),
-      pollMarketMakerInfo(),
       pollMarketMakerHealth(),
     ]).then(() => undefined),
     delay(HEALTH_RESPONSE_REFRESH_TIMEOUT_MS).then(() => undefined),

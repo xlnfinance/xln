@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { ChildProcess } from 'node:child_process';
 import { createMarketMakerChildPoller } from '../orchestrator/market-maker-child-poll';
-import type { MarketMakerChild, MarketMakerHealthPayload, MarketMakerInfoPayload } from '../orchestrator/orchestrator-types';
+import type { MarketMakerChild, MarketMakerHealthPayload } from '../orchestrator/orchestrator-types';
 
 const createDeferred = <T>() => {
   let resolve!: (value: T) => void;
@@ -38,28 +38,18 @@ const createChild = (): MarketMakerChild => {
 };
 
 describe('market maker child poller', () => {
-  test('refreshes info independently while shared health poll is still in flight', async () => {
+  test('uses one cached health request for identity, phase and readiness', async () => {
     const child = createChild();
     const health = createDeferred<MarketMakerHealthPayload | null>();
     const calls: string[] = [];
-    let infoCalls = 0;
 
     const poller = createMarketMakerChildPoller({
       child,
       host: '127.0.0.1',
-      infoTimeoutMs: 50,
       healthTimeoutMs: 30_000,
       fullHealthTimeoutMs: 50,
       fetchJson: async <T>(url: string): Promise<T | null> => {
         calls.push(url);
-        if (url.endsWith('/api/info')) {
-          infoCalls += 1;
-          return {
-            runtimeId: `runtime-${infoCalls}`,
-            entityId: `entity-${infoCalls}`,
-            startupPhase: `info-${infoCalls}`,
-          } satisfies MarketMakerInfoPayload as T;
-        }
         if (url.endsWith('/api/health')) {
           return await health.promise as T | null;
         }
@@ -67,13 +57,8 @@ describe('market maker child poller', () => {
       },
     });
 
-    const healthPoll = poller.pollHealth();
-    await poller.pollInfo();
-
-    expect(infoCalls).toBe(2);
-    expect(child.lastInfo?.runtimeId).toBe('runtime-2');
-    expect(child.lastStartupPhase).toBe('info-2');
-    expect(calls.filter(url => url.endsWith('/api/health'))).toHaveLength(1);
+    const firstPoll = poller.pollHealth();
+    const concurrentPoll = poller.pollHealth();
 
     health.resolve({
       runtimeId: 'runtime-health',
@@ -87,10 +72,15 @@ describe('market maker child poller', () => {
         hubs: [],
       },
     });
-    await healthPoll;
+    await Promise.all([firstPoll, concurrentPoll]);
 
     expect(child.lastHealth?.runtimeId).toBe('runtime-health');
-    expect(child.lastInfo?.startupPhase).toBe('info-2');
-    expect(child.lastStartupPhase).toBe('info-2');
+    expect(child.lastInfo).toMatchObject({
+      runtimeId: 'runtime-health',
+      entityId: 'entity-health',
+      startupPhase: 'health-late',
+    });
+    expect(child.lastStartupPhase).toBe('health-late');
+    expect(calls).toEqual(['http://127.0.0.1:21040/api/health']);
   });
 });
