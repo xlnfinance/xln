@@ -20,4 +20,7 @@ TODO and cannot be “completed”.
   they exceed the typed physical size boundary.
 - Completed work is removed from `todo.md`; immutable commits, tags and release
   evidence preserve history.
-
+- Every external audit is verified against the current reachable code before
+  action. Add only confirmed, still-open mainnet work to `todo.md`; reject false
+  positives and do not re-add fixes already proven by tests and immutable
+  commits.

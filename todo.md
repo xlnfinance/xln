@@ -38,10 +38,12 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 3. Ingress and contract boundedness — P0/P1, partly approval required
 
-- [ ] Bind every submitted J-batch object byte-for-byte to its sealed
-  `encodedBatch`, chain/depository/nonce domain and hash before either BrowserVM
-  or RPC mutation. Integrate the completed `ai/jbatch-binding` change only
-  after owner approval and rerun the real adapter regressions.
+- [ ] Integrate `main`'s canonical per-operation best-effort J-batch execution
+  together with byte-for-byte binding of every submitted object to its sealed
+  `encodedBatch`, chain/depository/nonce domain and hash before BrowserVM or RPC
+  mutation. Preserve this candidate's contract P0 hardening, regenerate the
+  single ABI/artifact/typechain set, and rerun the real adapter regressions.
+  This consensus/contract merge requires owner approval.
 - [ ] Classify remote Entity-input failures by typed cause. Only malformed
   unauthenticated ingress may be quarantined; storage errors, state-machine
   contradictions and local bugs must halt. Prove every class through the real
