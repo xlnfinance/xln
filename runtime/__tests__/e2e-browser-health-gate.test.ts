@@ -83,6 +83,7 @@ describe('isolated E2E browser health gate', () => {
     expect(capture).toBeGreaterThan(0);
     expect(quiesce).toBeGreaterThan(capture);
     expect(fixture).toContain("root['liveRuntimeSnapshot']");
+    expect(fixture).toContain("root['liveRuntimeSnapshot'] ?? root['view']");
     expect(fixture).toContain('wire.stringifyJson(runtimeSnapshot)');
     expect(fixture).toContain('browser-runtime-${index + 1}.json');
     expect(fixture).toContain('testInfo.outputPath(artifactName)');

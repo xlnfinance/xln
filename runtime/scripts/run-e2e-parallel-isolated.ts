@@ -864,6 +864,22 @@ const parseArgs = (): CliArgs => {
   };
 };
 
+export const ISOLATED_E2E_RUNNER_USAGE = [
+  'Usage: bun runtime/scripts/run-e2e-parallel-isolated.ts [options]',
+  '',
+  'Target selection:',
+  '  --pw-files=<file[,file...]>   Exact Playwright specs',
+  '  --pw-grep=<pattern>           Exact test-title filter',
+  '  --qa-category=<category>      functional | resilience',
+  '  --all                         Include every E2E spec',
+  '',
+  'Isolation:',
+  '  --shards=<count>              Isolated stack count',
+  '  --base-port=<port>            First isolated port (default 20000)',
+  '  --workers-per-shard=<count>   Playwright workers per stack',
+  '  --strict-browser-health       Fail on unapproved browser/runtime incidents',
+].join('\n');
+
 const RUNNER_LOCK_PATH = resolve(process.cwd(), '.logs', 'e2e-parallel', '.runner-lock.json');
 
 const readRunnerLock = (): E2ERunnerLock | null => readE2ERunnerLock(RUNNER_LOCK_PATH);
@@ -3356,6 +3372,10 @@ const runShard = async (
 };
 
 async function main(): Promise<void> {
+  if (process.argv.slice(2).some(arg => arg === '--help' || arg === '-h')) {
+    console.log(ISOLATED_E2E_RUNNER_USAGE);
+    return;
+  }
   const args = parseArgs();
   // Artifact retention changes only deletion policy. Every top-level run must
   // still acquire a fresh lease so Playwright children can prove that their

@@ -187,8 +187,7 @@ test('remote adapter resolver restores active auth from the remote runtime regis
   const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   expect(source).toContain('resolveStoredRemoteRuntimeAuthKey');
   expect(source).toContain("const storedAuthKey = readStoredAdapterValue('xln-runtime-adapter-key').trim()");
-  expect(source).toContain("if (storedAccess === 'admin')");
-  expect(source).toContain("resolveStoredRemoteRuntimeAuthKey(normalizedWsUrl, { requiredAccess: 'admin' })");
+  expect(source).toContain('restoredAuthKey = resolveStoredRemoteRuntimeAuthKey(normalizedWsUrl).trim()');
   expect(source).toContain("readRemoteRuntimeTokenAccess(storedAuthKey) !== 'admin'");
   expect(source).toContain('const authKey = restoredAuthKey || storedAuthKey;');
   expect(source).toContain("sessionStorage.setItem('xln-runtime-adapter-key', restoredAuthKey)");
@@ -541,6 +540,24 @@ test('runtime controller handle carries selected runtime identity', () => {
   expect(xlnStoreSource).toContain('remoteRuntimeIdFromConfig(normalizedConfig)');
 });
 
+test('authenticated remote admin authority survives transport reconnect while command readiness fail-closes', () => {
+  const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
+  const remoteSource = readFileSync('runtime/radapter/remote.ts', 'utf8');
+  const switchStart = source.indexOf('export const switchAppRuntimeAdapter =');
+  const callbackStart = source.indexOf('unregisterRuntimeControllerStatus = onRuntimeControllerStatus', switchStart);
+  const callbackEnd = source.indexOf("if (status === 'connected')", callbackStart);
+  const callbackSource = source.slice(callbackStart, callbackEnd);
+
+  expect(source).toContain('const authenticatedRemoteAccess = adapter.authLevel;');
+  expect(source).toContain("if (authenticatedRemoteAccess !== 'admin') {");
+  expect(callbackSource).toContain('authenticatedRemoteAccess, {');
+  expect(callbackSource).not.toContain('adapter.authLevel, {');
+  expect(remoteSource).toContain('disconnect(): void {');
+  expect(remoteSource).toContain('this.level = null;');
+  expect(remoteSource.slice(remoteSource.indexOf('private handleClose(): void'), remoteSource.indexOf('private scheduleReconnect(): void')))
+    .not.toContain('this.level = null;');
+});
+
 test('vault restore rebinds RuntimeController to the restored embedded runtime', () => {
   const source = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
   const restoreStart = source.indexOf('const resolvedActive = findRuntimeByIdCaseInsensitive');
@@ -658,7 +675,8 @@ test('accepted remote runtime links persist into the shared runtime registry', (
   expect(persistSource).toContain("sessionStorage.setItem('xln-runtime-adapter-key', request.authKey)");
   expect(persistSource).toContain('persistRemoteRuntimeImports([{');
   expect(persistSource).toContain('runtimeId: readRemoteRuntimeTokenAudience(request.authKey) || remoteRuntimeIdForWsUrl(request.wsUrl)');
-  expect(persistSource).toContain("authLevel: access === 'admin' ? 'admin' : 'inspect'");
+  expect(persistSource).toContain("authLevel: 'admin'");
+  expect(persistSource).not.toContain("authLevel: access === 'admin' ? 'admin' : 'inspect'");
   expect(persistSource).toContain('], { merge: true })');
   expect(persistSource).not.toContain("localStorage.setItem('xln-runtime-adapter-key'");
 });

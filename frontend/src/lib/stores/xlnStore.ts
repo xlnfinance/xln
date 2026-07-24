@@ -921,12 +921,20 @@ export const switchAppRuntimeAdapter = async (config: RuntimeAdapterConfig): Pro
     stopP2PPoll();
 
     const adapter = await connectRuntimeAdapter(normalizedConfig);
+    const authenticatedRemoteAccess = adapter.authLevel;
+    if (authenticatedRemoteAccess !== 'admin') {
+      throw new Error(`REMOTE_RUNTIME_ADMIN_REQUIRED:${adapter.runtimeId || remoteRuntimeIdFromConfig(normalizedConfig)}`);
+    }
+    // A transient socket loss clears the adapter's current auth handshake, not
+    // the capability that was already authenticated for this runtime session.
+    // Keep the projection's admin authority while commandReady independently
+    // fail-closes every mutation until reconnect + re-auth completes.
     unregisterRuntimeControllerChange = onRuntimeControllerChange(() => {
       scheduleRuntimeProjectionRefresh();
     });
     unregisterRuntimeControllerStatus = onRuntimeControllerStatus((status) => {
       if (!isCurrentRuntimeAdapterConfig(normalizedConfig)) return;
-      upsertRemoteRuntimeProjectionMetadata(normalizedConfig, status, adapter.authLevel, {
+      upsertRemoteRuntimeProjectionMetadata(normalizedConfig, status, authenticatedRemoteAccess, {
         runtimeId: adapter.runtimeId || remoteRuntimeIdFromConfig(normalizedConfig),
       });
       if (status === 'connected') scheduleRuntimeProjectionRefresh();

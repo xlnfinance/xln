@@ -15,11 +15,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   J-submit, and unresolved incidents block release. All money controls must
   derive readiness from the same Runtime lifecycle gate and perform zero
   enqueue while halted, quiescing or restoring.
-- [ ] Extend the proven halted banner/root-incident link and disabled money
-  controls to a real browser running → quiescing/restoring → running process
-  transition. The remote halted screenshot, adapter propagation and zero
-  enqueue/transport/J-submit are already green; the remaining proof must use
-  the real fatal/restart path rather than a mocked adapter status.
 ## 1. Commit-boundary correctness — P0, approval required
 
 - [ ] Reject Entity-frame timestamp regression before transaction application.

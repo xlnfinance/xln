@@ -88,7 +88,10 @@
       ? (tabEntityId || runtimeActiveEntityId)
       : tabEntityId;
     const selectedAtHeight = $runtimeView.atHeight;
-    const nextKey = `${selectedRuntimeId}|${handle.status}|${entityId}|${selectedAtHeight ?? 'live'}`;
+    // Connection state is not projection identity. Keep the last certified
+    // frame mounted while the adapter reconnects so the command gate can
+    // disable mutations without erasing the user's workspace.
+    const nextKey = `${selectedRuntimeId}|${entityId}|${selectedAtHeight ?? 'live'}`;
     if (
       runtimeProjectionMatchesRuntime($runtimeView.runtimeId, selectedRuntimeId)
       && projectionFrameMatchesEntity($runtimeView.frame, entityId)

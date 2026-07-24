@@ -53,7 +53,8 @@ test('entity workspace shell consumes a projected workspace view instead of trav
   expect(source).toContain('? (tabEntityId || runtimeActiveEntityId)');
   expect(source).not.toContain('tabEntityId && tabEntityId === runtimeActiveEntityId ? tabEntityId : runtimeActiveEntityId');
   expect(source).toContain(': tabEntityId;');
-  expect(source).toContain('${selectedRuntimeId}|${handle.status}|${entityId}');
+  expect(source).toContain("${selectedRuntimeId}|${entityId}|${selectedAtHeight ?? 'live'}");
+  expect(source).not.toContain('${selectedRuntimeId}|${handle.status}|${entityId}');
   expect(source).toContain('runtimeProjectionMatchesRuntime($runtimeView.runtimeId, selectedRuntimeId)');
   expect(source).not.toContain('entity-workspace-readonly');
   expect(source).not.toContain('readOnlyReason');
@@ -238,6 +239,10 @@ test('user mode remote workspace mounts from RuntimeView instead of Env replica 
   expect(userMode).not.toContain('liveEnv={currentLiveRuntimeEnv ?? $runtimeFrameEnv}');
   expect(userMode).not.toContain('liveEnvResolver={() => currentLiveRuntimeEnv ?? $runtimeFrameEnv}');
   expect(userMode).toContain('remoteWorkspaceAvailable');
+  expect(userMode).toContain('mountedRemoteRuntimeId = $runtimeControllerHandle.runtimeId');
+  expect(userMode).toContain('runtimeProjectionMatchesRuntime($runtimeView.runtimeId, $runtimeControllerHandle.runtimeId)');
+  expect(userMode).toContain('mountedRemoteRuntimeId === $runtimeControllerHandle.runtimeId');
+  expect(userMode).not.toContain("isRemoteRuntime && $runtimeControllerHandle.status === 'connected'");
   expect(userMode).toContain("viewMode === 'entity' && (currentFrame || remoteWorkspaceAvailable)");
   expect(userMode).not.toContain('appRuntimeAdapterMode');
   expect(userMode).not.toContain('appRuntimeAdapterActiveEntityId');
@@ -275,7 +280,8 @@ test('user mode remote workspace mounts from RuntimeView instead of Env replica 
   expect(dockWrapper).toContain("import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';");
   expect(dockWrapper).toContain("const isRemoteRuntime = $derived.by<boolean>(() => $runtimeControllerHandle.mode === 'remote');");
   expect(dockWrapper).toContain('if (isRemoteRuntime) return null;');
-  expect(dockWrapper).toContain("activeEnv || (isRemoteRuntime && $runtimeControllerHandle.status === 'connected')");
+  expect(dockWrapper).toContain("if ($runtimeControllerHandle.status === 'connected' && $runtimeControllerHandle.runtimeId)");
+  expect(dockWrapper).toContain('mountedRemoteRuntimeId === $runtimeControllerHandle.runtimeId');
   expect(dockWrapper).toContain('function resolveLiveEnv(): Env | null');
   expect(dockWrapper).toContain('return isRemoteRuntime ? null : activeEnv;');
   expect(dockWrapper).toContain('{#if canMountWorkspace}');

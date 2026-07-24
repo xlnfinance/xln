@@ -4328,9 +4328,12 @@ test('storage entity hash docs persist root metadata only', async () => {
   expect(coldDelete.merklePuts.length).toBeLessThan(50);
 });
 
-test('remote runtime adapter reports connected only after auth and accepts lower remote ticks', async () => {
+test('remote runtime adapter reports connected only after auth and retains authority through reconnect', async () => {
   const previousWebSocket = globalThis.WebSocket;
-  let socket: { onmessage: ((event: { data: unknown }) => void) | null } | null = null;
+  let socket: {
+    onmessage: ((event: { data: unknown }) => void) | null;
+    onclose: (() => void) | null;
+  } | null = null;
   let transportSendCount = 0;
   const identityEnv = makeEnv();
 
@@ -4431,7 +4434,13 @@ test('remote runtime adapter reports connected only after auth and accepts lower
     expect(() => adapter.submitCrossJurisdictionIntent({} as CrossJurisdictionSwapRoute))
       .toThrow('RUNTIME_COMMAND_NOT_READY:phase=halted');
     expect(transportSendCount).toBe(sendsBeforeRejectedCommands);
+    socket?.onclose?.();
+    expect(adapter.status).toBe('error');
+    expect(adapter.authLevel).toBe('inspect');
+    expect(adapter.commandReady).toBe(false);
+    expect(adapter.commandReadyReason).toBe('adapter-error');
     adapter.disconnect();
+    expect(adapter.authLevel).toBe(null);
   } finally {
     (globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = previousWebSocket;
   }

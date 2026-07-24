@@ -169,6 +169,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
   disconnect(): void {
     this.intentionalClose = true;
     this.terminalAuthFailure = false;
+    this.level = null;
     this.fingerprint = null;
     this.nextSequence = null;
     this.laneKind = null;
@@ -273,7 +274,6 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
 
   private handleClose(): void {
     this.ws = null;
-    this.level = null;
     this.laneKind = null;
     this.setServerCommandReadiness(false, 'adapter-disconnected');
     this.failPending(new RuntimeAdapterError('E_INTERNAL', 'runtime adapter socket closed', true));

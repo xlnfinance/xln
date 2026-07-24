@@ -289,7 +289,7 @@ const captureFailedRuntimeSnapshots = async (
         if (typeof wire?.stringifyJson !== 'function') {
           throw new Error('E2E_FAILURE_DEBUG_SERIALIZER_MISSING');
         }
-        const runtimeSnapshot = root['liveRuntimeSnapshot'];
+        const runtimeSnapshot = root['liveRuntimeSnapshot'] ?? root['view'];
         if (!runtimeSnapshot) throw new Error('E2E_FAILURE_RUNTIME_SNAPSHOT_MISSING');
         return wire.stringifyJson(runtimeSnapshot);
       }));

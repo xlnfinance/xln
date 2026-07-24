@@ -1,8 +1,9 @@
-import { expect, test } from './global-setup.mts';
+import { allowBrowserIssue, allowDebugIncident, expect, test } from './global-setup.mts';
 import {
   APP_BASE_URL,
   API_BASE_URL,
   ensureE2EBaseline,
+  getHealth,
   waitForNamedHubs,
 } from './utils/e2e-baseline';
 import { openAccountWorkspaceTab } from './utils/e2e-account-workspace';
@@ -1855,6 +1856,188 @@ test('halted remote runtime disables wallet commands and links the root incident
       tags: ['runtime', 'incident', 'fail-stop'],
     },
   });
+});
+
+test('real H2 replacement gates browser money commands until verified restore', { tag: '@resilience' }, async ({ page }, testInfo) => {
+  test.setTimeout(180_000);
+  allowBrowserIssue({
+    type: 'console',
+    severity: 'error',
+    message: /WebSocket connection to 'ws:\/\/127\.0\.0\.1:\d+\/rpc' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED/,
+  });
+  allowDebugIncident({
+    source: 'orchestrator',
+    code: 'CHILD_UNEXPECTED_EXIT',
+    message: 'child.unexpected_exit',
+  });
+  allowDebugIncident({
+    source: 'orchestrator',
+    code: 'H2_UNEXPECTED_EXIT',
+    message: 'H2_UNEXPECTED_EXIT code=null signal=SIGKILL',
+  });
+
+  const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
+  const hubs = await waitForNamedHubs(page, ['h1', 'h2'], { apiBaseUrl: API_BASE_URL });
+  const h1 = String(hubs.h1 || '').toLowerCase();
+  const h2Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H2');
+  const adminKey = (await resolveRuntimeImportCapability(page, h2Endpoint, 'admin')).token;
+
+  await page.goto(
+    `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h2Endpoint.wsUrl)}&token=${encodeURIComponent(adminKey)}#accounts`,
+    { waitUntil: 'domcontentloaded' },
+  );
+  await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect.poll(async () => await page.evaluate(() => {
+    const status = (window as any).__xln?.adapter?.status?.();
+    return {
+      connected: status?.connected === true,
+      authLevel: String(status?.authLevel || ''),
+      commandReady: status?.commandReady === true,
+      runtimeId: String((window as any).__xln?.view?.runtimeId || '').toLowerCase(),
+    };
+  }), {
+    timeout: 30_000,
+    intervals: [100, 250, 500],
+  }).toEqual({
+    connected: true,
+    authLevel: 'admin',
+    commandReady: true,
+    runtimeId: h2Endpoint.runtimeId,
+  });
+
+  await openAccountWorkspaceTab(page, 'open');
+  const recipient = page.locator('input[placeholder="Select or paste entity ID"]:visible').first();
+  await expect(recipient).toBeVisible();
+  await recipient.fill(h1);
+  const submit = page.getByTestId('open-account-submit');
+  await expect(submit).toBeEnabled();
+
+  const beforeStatus = await page.evaluate(() => {
+    const status = (window as any).__xln?.adapter?.status?.();
+    return {
+      height: Number(status?.height || 0),
+      runtimeId: String((window as any).__xln?.view?.runtimeId || '').toLowerCase(),
+    };
+  });
+  const beforeHealth = await getHealth(page, API_BASE_URL);
+  const h2Process = beforeHealth?.process?.children?.find(child => child.role === 'hub' && child.name === 'H2');
+  expect(h2Process?.online, `H2 process missing before replacement: ${JSON.stringify(beforeHealth?.process ?? {})}`).toBe(true);
+  expect(h2Process?.pid, 'H2 PID must be visible to the isolated local operator test').toBeGreaterThan(0);
+  const oldPid = Number(h2Process!.pid);
+  const oldRestartCount = Number(h2Process!.restartCount ?? 0);
+
+  await page.evaluate(() => {
+    const global = window as typeof window & {
+      __xln?: { adapter?: { status?: () => Record<string, unknown> } };
+      __xlnH2TransitionProbe?: {
+        samples: Array<Record<string, unknown>>;
+        timer: ReturnType<typeof setInterval>;
+      };
+    };
+    const samples: Array<Record<string, unknown>> = [];
+    const sample = (): void => {
+      const status = global.__xln?.adapter?.status?.();
+      const next = {
+        at: performance.now(),
+        connected: status?.['connected'] === true,
+        authLevel: String(status?.['authLevel'] || ''),
+        commandReady: status?.['commandReady'] === true,
+        reason: String(status?.['commandReadyReason'] || ''),
+        gate: document.querySelector('[data-testid="runtime-command-gate"]') !== null,
+        unavailable: document.querySelector('[data-testid="entity-workspace-action-unavailable"]') !== null,
+        submitDisabled: (document.querySelector('[data-testid="open-account-submit"]') as HTMLButtonElement | null)?.disabled ?? null,
+      };
+      const previous = samples.at(-1);
+      if (!previous || JSON.stringify({ ...previous, at: 0 }) !== JSON.stringify({ ...next, at: 0 })) {
+        samples.push(next);
+      }
+    };
+    sample();
+    global.__xlnH2TransitionProbe = { samples, timer: setInterval(sample, 10) };
+  });
+
+  process.kill(oldPid, 'SIGKILL');
+
+  await expect.poll(async () => await page.evaluate(() =>
+    (window as any).__xlnH2TransitionProbe?.samples?.some((sample: any) => sample.commandReady === false) === true
+  ), {
+    timeout: 15_000,
+    intervals: [25, 50, 100],
+  }).toBe(true);
+  const transitionProbe = await page.evaluate(() => {
+    const probe = (window as any).__xlnH2TransitionProbe;
+    if (probe?.timer) clearInterval(probe.timer);
+    return probe?.samples ?? [];
+  });
+  await testInfo.attach('h2-runtime-transition.json', {
+    body: Buffer.from(JSON.stringify(transitionProbe, null, 2)),
+    contentType: 'application/json',
+  });
+
+  const gate = page.getByTestId('runtime-command-gate');
+  await expect(gate).toBeVisible({ timeout: 15_000 });
+  await expect(submit).toBeDisabled();
+  await expect(page.getByTestId('runtime-command-gate-reason')).toHaveText(
+    /adapter-(?:error|connecting|disconnected)|phase=(?:quiescing|restoring|halted)/,
+  );
+  await expect(page.getByTestId('runtime-command-gate-incident')).toHaveText(
+    /^h2_unexpected_exit-/,
+    { timeout: 15_000 },
+  );
+  await captureLocatorScreenshot(gate, testInfo, 'runtime-command-gate-real-h2-replacement.png', {
+    ux: {
+      title: 'Real H2 replacement command gate',
+      group: 'system-health',
+      description: 'A live admin wallet disables money commands and links the durable H2 root incident during managed replacement.',
+      platform: 'desktop',
+      tags: ['runtime', 'incident', 'restart', 'fail-stop'],
+    },
+  });
+
+  await expect.poll(async () => {
+    const health = await getHealth(page, API_BASE_URL);
+    const child = health?.process?.children?.find(candidate => candidate.role === 'hub' && candidate.name === 'H2');
+    return {
+      replaced: Number(child?.pid ?? 0) > 0 && Number(child?.pid) !== oldPid,
+      restarted: Number(child?.restartCount ?? 0) > oldRestartCount,
+      online: child?.online === true,
+      systemOk: health?.systemOk === true,
+    };
+  }, {
+    timeout: 90_000,
+    intervals: [250, 500, 1_000],
+    message: 'orchestrator must replace H2 and restore authoritative health',
+  }).toEqual({
+    replaced: true,
+    restarted: true,
+    online: true,
+    systemOk: true,
+  });
+
+  await expect.poll(async () => await page.evaluate(() => {
+    const status = (window as any).__xln?.adapter?.status?.();
+    return {
+      connected: status?.connected === true,
+      authLevel: String(status?.authLevel || ''),
+      commandReady: status?.commandReady === true,
+      runtimeId: String((window as any).__xln?.view?.runtimeId || '').toLowerCase(),
+    };
+  }), {
+    timeout: 60_000,
+    intervals: [250, 500, 1_000],
+    message: 'browser adapter must reconnect to the same verified H2 runtime',
+  }).toEqual({
+    connected: true,
+    authLevel: 'admin',
+    commandReady: true,
+    runtimeId: beforeStatus.runtimeId,
+  });
+  await expect(gate).toBeHidden();
+  await expect(submit).toBeEnabled();
+  const restoredHeight = await page.evaluate(() =>
+    Number((window as any).__xln?.adapter?.status?.().height || 0),
+  );
+  expect(restoredHeight).toBeGreaterThanOrEqual(beforeStatus.height);
 });
 
 test('admin remote runtime control advances live state and exposes past frames', { tag: '@functional' }, async ({ page }) => {

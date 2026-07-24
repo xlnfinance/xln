@@ -37,6 +37,22 @@ const createE2EBuildCacheFixture = (root: string, codeHash: string) => {
 };
 
 describe('isolated E2E runner resources', () => {
+  test('--help prints usage without acquiring a lease or starting a stack', () => {
+    const root = mkdtempSync(join(tmpdir(), 'xln-e2e-help-'));
+    try {
+      const script = resolve('runtime/scripts/run-e2e-parallel-isolated.ts');
+      const result = spawnSync('bun', [script, '--help'], {
+        cwd: root,
+        encoding: 'utf8',
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain('Usage: bun runtime/scripts/run-e2e-parallel-isolated.ts');
+      expect(existsSync(join(root, '.logs'))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('keeps every shard port away from the canonical dev stack', () => {
     assertE2EShardPortsIsolated(20_000, 64);
     const ports = deriveE2EShardPorts(20_000, 0);
