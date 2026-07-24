@@ -45,11 +45,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 - [ ] Replace the unbounded `_forgiveDebtsBetweenEntities` queue scan with an
   indexed or bounded-continuation structure. Prove exact debt conservation and
   bounded gas with adversarial creditor ordering.
-- [ ] Add the missing cross-contract board-epoch regression: after A→B
-  activation, A must fail every new `processBatch` operation and watchtower
-  owner authorization during the historical-proof grace window, while B
-  succeeds. Keep previous-board acceptance only for historical Account proof
-  verification.
 - [ ] Remove the remaining proven pre-mainnet compatibility ABI/state:
   migrate V1 settlement `diffsToOps` and `position.xlnomy`, then delete unused
   contract `resolveEntityId` and ineffective `hashToBlock/cleanSecret`. Use one
