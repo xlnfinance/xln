@@ -162,21 +162,26 @@ export class TronSigner extends ethers.AbstractSigner<ethers.JsonRpcProvider> {
 
   override async sendTransaction(tx: ethers.TransactionRequest): Promise<ethers.TransactionResponse> {
     const call = await this.#resolveCall(tx);
-    const requestedEnergy = BigInt(await tx.gasLimit || await this.estimateGas(tx));
-    const energyFee = await this.#readEnergyFee();
-    const estimatedFeeLimit = requestedEnergy * BigInt(energyFee);
-    if (estimatedFeeLimit > BigInt(this.#maxFeeLimit)) {
-      throw new Error(
-        `TRON_TRANSACTION_FEE_LIMIT_EXCEEDED:required=${estimatedFeeLimit}:maximum=${this.#maxFeeLimit}`,
-      );
-    }
-    const feeLimit = Number(estimatedFeeLimit);
-    if (!Number.isSafeInteger(feeLimit) || feeLimit <= 0) {
-      throw new Error(`TRON_TRANSACTION_FEE_LIMIT_INVALID:${String(feeLimit)}`);
-    }
-    const unsigned = call.data === '0x'
-      ? await this.#tronWeb.transactionBuilder.sendTrx(call.to, call.callValue, this.#owner)
-      : await this.#tronWeb.transactionBuilder.triggerSmartContract(
+    let unsigned: Awaited<ReturnType<TronWebInstance['transactionBuilder']['sendTrx']>>;
+    if (call.data === '0x') {
+      // Native TRX transfers consume bandwidth, not smart-contract Energy.
+      // Estimating Energy here misclassifies a fresh recipient as a missing
+      // contract and prevents the transfer that would activate the account.
+      unsigned = await this.#tronWeb.transactionBuilder.sendTrx(call.to, call.callValue, this.#owner);
+    } else {
+      const requestedEnergy = BigInt(await tx.gasLimit || await this.estimateGas(tx));
+      const energyFee = await this.#readEnergyFee();
+      const estimatedFeeLimit = requestedEnergy * BigInt(energyFee);
+      if (estimatedFeeLimit > BigInt(this.#maxFeeLimit)) {
+        throw new Error(
+          `TRON_TRANSACTION_FEE_LIMIT_EXCEEDED:required=${estimatedFeeLimit}:maximum=${this.#maxFeeLimit}`,
+        );
+      }
+      const feeLimit = Number(estimatedFeeLimit);
+      if (!Number.isSafeInteger(feeLimit) || feeLimit <= 0) {
+        throw new Error(`TRON_TRANSACTION_FEE_LIMIT_INVALID:${String(feeLimit)}`);
+      }
+      unsigned = await this.#tronWeb.transactionBuilder.triggerSmartContract(
           call.to,
           '',
           { input: call.data.slice(2), callValue: call.callValue, feeLimit },
@@ -188,6 +193,7 @@ export class TronSigner extends ethers.AbstractSigner<ethers.JsonRpcProvider> {
           }
           return triggered.transaction;
         });
+    }
     const signed = await this.#tronWeb.trx.sign(unsigned, this.#privateKey);
     if (!signed?.signature?.length) throw new Error('TRON_TRANSACTION_SIGNATURE_MISSING');
     const broadcast = await this.#tronWeb.trx.sendRawTransaction(signed);

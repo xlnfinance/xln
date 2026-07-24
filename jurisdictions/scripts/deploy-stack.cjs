@@ -98,6 +98,56 @@ async function main() {
   );
   console.log(`   DeltaTransformer: ${deltaTransformerAddr}`);
 
+  // 5. Register the canonical external stablecoin as tokenId 1. Public
+  // testnets deploy an explicit faucet token when no address is configured;
+  // mainnet callers must provide the real token address.
+  let stablecoinAddress = String(process.env.XLN_STABLECOIN_ADDRESS || "").trim();
+  let stablecoinDeployment;
+  if (!stablecoinAddress) {
+    if (process.env.XLN_DEPLOY_TEST_STABLECOIN !== "1") {
+      throw new Error("XLN_STABLECOIN_ADDRESS_REQUIRED");
+    }
+    const ERC20Mock = await hre.ethers.getContractFactory("ERC20Mock");
+    const stablecoin = await ERC20Mock.deploy(
+      "Tether USD Test",
+      "USDT",
+      6,
+      hre.ethers.parseUnits("1000000", 6),
+    );
+    await stablecoin.waitForDeployment();
+    stablecoinAddress = await stablecoin.getAddress();
+    stablecoinDeployment = await deploymentEvidence(
+      stablecoin,
+      stablecoinAddress,
+      "TEST_STABLECOIN",
+    );
+  } else {
+    stablecoinAddress = hre.ethers.getAddress(stablecoinAddress);
+  }
+  const stablecoin = new hre.ethers.Contract(
+    stablecoinAddress,
+    ["function decimals() external view returns (uint8)"],
+    deployer,
+  );
+  const stablecoinDecimals = Number(await stablecoin.decimals());
+  if (stablecoinDecimals !== 6) {
+    throw new Error(`STABLECOIN_DECIMALS_MISMATCH:expected=6:actual=${stablecoinDecimals}`);
+  }
+  const registration = await depository.registerExternalToken(0, stablecoinAddress, 0);
+  const registrationReceipt = await registration.wait();
+  if (!registrationReceipt || registrationReceipt.status !== 1) {
+    throw new Error("STABLECOIN_REGISTRATION_RECEIPT_INVALID");
+  }
+  const tokenReference = hre.ethers.keccak256(hre.ethers.AbiCoder.defaultAbiCoder().encode(
+    ["uint8", "address", "uint96"],
+    [0, stablecoinAddress, 0],
+  ));
+  const stablecoinTokenId = await depository.tokenToId(tokenReference);
+  if (stablecoinTokenId !== 1n) {
+    throw new Error(`STABLECOIN_TOKEN_ID_MISMATCH:expected=1:actual=${stablecoinTokenId}`);
+  }
+  console.log(`   USDT: ${stablecoinAddress} (tokenId 1)`);
+
   const result = {
     network: hre.network.name,
     chainId: Number(network.chainId),
@@ -117,6 +167,18 @@ async function main() {
       entityProvider: entityProviderDeployment,
       depository: depositoryDeployment,
       deltaTransformer: deltaTransformerDeployment,
+      ...(stablecoinDeployment ? { stablecoin: stablecoinDeployment } : {}),
+      stablecoinRegistration: {
+        transactionHash: registration.hash,
+        blockNumber: registrationReceipt.blockNumber,
+      },
+    },
+    registeredTokens: {
+      USDT: {
+        address: stablecoinAddress,
+        tokenId: Number(stablecoinTokenId),
+        decimals: stablecoinDecimals,
+      },
     },
   };
 

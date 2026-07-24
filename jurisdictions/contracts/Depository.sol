@@ -255,8 +255,12 @@ contract Depository is ReentrancyGuardLite {
   function _safeERC20Call(address token, bytes memory data) private {
     (bool success, bytes memory returndata) = token.call(data);
     if (!success) revert E3();
-    if (returndata.length == 0) return;
-    if (returndata.length < 32 || !abi.decode(returndata, (bool))) revert E3();
+    // Old Tether deployments, including Nile USDT, may execute the transfer
+    // and still return ABI `false`. The boolean therefore cannot be the
+    // financial authority. Both callers verify exact token balance deltas
+    // immediately after this call; that rejects no-op, short and fee-taking
+    // transfers while supporting no-return and false-return ERC20s.
+    if (returndata.length != 0 && returndata.length != 32) revert E3();
   }
 
   function _safeERC20TransferFrom(address token, address from, address to, uint256 amount) private {

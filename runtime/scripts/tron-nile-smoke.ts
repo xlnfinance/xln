@@ -1,13 +1,22 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { ethers } from 'ethers';
 import { createJAdapter } from '../jadapter';
+import { prepareSignedBatch } from '../hanko/batch';
+import { createEmptyBatch } from '../jurisdiction/batch';
 import { readAuthenticatedReceiptRange } from '../jadapter/receipt-reader';
 
 const depositArgument = process.argv.slice(2).find((arg) => arg.startsWith('--deposit-usdt='));
+const withdrawArgument = process.argv.slice(2).find((arg) => arg.startsWith('--withdraw-usdt='));
 const depositAmount = depositArgument ? BigInt(depositArgument.slice('--deposit-usdt='.length)) : 0n;
+const withdrawAmount = withdrawArgument ? BigInt(withdrawArgument.slice('--withdraw-usdt='.length)) : 0n;
 const privateKey = process.env['TRON_NILE_PRIVATE_KEY'] || '';
 if (depositAmount < 0n) throw new Error('TRON_NILE_DEPOSIT_AMOUNT_NEGATIVE');
-if (depositAmount > 0n && !privateKey) {
+if (withdrawAmount < 0n) throw new Error('TRON_NILE_WITHDRAW_AMOUNT_NEGATIVE');
+if (depositAmount > 0n && withdrawAmount > 0n) {
+  throw new Error('TRON_NILE_SINGLE_WRITE_MODE_REQUIRED');
+}
+if ((depositAmount > 0n || withdrawAmount > 0n) && !privateKey) {
   throw new Error('TRON_NILE_PRIVATE_KEY_REQUIRED_FOR_WRITE');
 }
 
@@ -70,7 +79,7 @@ try {
   if (!registeredUsdt || registeredUsdt.address.toLowerCase() !== usdt.address.toLowerCase()) {
     throw new Error('TRON_NILE_USDT_REGISTRY_MISMATCH');
   }
-  if (depositAmount === 0n) {
+  if (depositAmount === 0n && withdrawAmount === 0n) {
     console.log(JSON.stringify({
       kind: 'TRON_NILE_READ_SMOKE',
       chainId: adapter.chainId,
@@ -84,43 +93,86 @@ try {
   }
 
   const foundationEntityId = `0x${'00'.repeat(31)}01`;
+  const keyBytes = Uint8Array.from(Buffer.from(privateKey.replace(/^0x/, ''), 'hex'));
   const before = await adapter.getReserves(foundationEntityId, 1);
-  const events = await adapter.externalTokenToReserve(
-    Uint8Array.from(Buffer.from(privateKey.replace(/^0x/, ''), 'hex')),
-    foundationEntityId,
-    usdt.address,
-    depositAmount,
-    { internalTokenId: 1 },
-  );
-  const reserveEvent = events.find((event) => event.name === 'ReserveUpdated');
-  if (!reserveEvent) throw new Error('TRON_NILE_RESERVE_UPDATED_MISSING');
-  const after = await adapter.getReserves(foundationEntityId, 1);
-  if (after !== before + depositAmount) {
-    throw new Error(`TRON_NILE_RESERVE_DELTA_MISMATCH:before=${before}:after=${after}:amount=${depositAmount}`);
+  let transactionHash: string;
+  let blockNumber: number;
+  let authenticatedAddresses: string[];
+  let after: bigint;
+  if (depositAmount > 0n) {
+    const events = await adapter.externalTokenToReserve(
+      keyBytes,
+      foundationEntityId,
+      usdt.address,
+      depositAmount,
+      { internalTokenId: 1 },
+    );
+    const reserveEvent = events.find((event) => event.name === 'ReserveUpdated');
+    if (!reserveEvent) throw new Error('TRON_NILE_RESERVE_UPDATED_MISSING');
+    after = await adapter.getReserves(foundationEntityId, 1);
+    if (after !== before + depositAmount) {
+      throw new Error(`TRON_NILE_RESERVE_DELTA_MISMATCH:before=${before}:after=${after}:amount=${depositAmount}`);
+    }
+    transactionHash = reserveEvent.transactionHash;
+    blockNumber = reserveEvent.blockNumber;
+    authenticatedAddresses = [contracts['depository'], usdt.address];
+  } else {
+    const recipient = new ethers.Wallet(privateKey).address;
+    const recipientEntityId = ethers.zeroPadValue(recipient, 32);
+    const tokenBefore = await adapter.getErc20Balance(usdt.address, recipient);
+    const currentNonce = await adapter.getEntityNonce(foundationEntityId);
+    const batch = createEmptyBatch();
+    batch.reserveToExternalToken.push({
+      receivingEntity: recipientEntityId,
+      tokenId: 1,
+      amount: withdrawAmount,
+    });
+    const signed = prepareSignedBatch(
+      batch,
+      foundationEntityId,
+      keyBytes,
+      BigInt(adapter.chainId),
+      contracts['depository'],
+      currentNonce,
+    );
+    const receipt = await adapter.processBatch(signed.encodedBatch, signed.hankoData, signed.nextNonce);
+    after = await adapter.getReserves(foundationEntityId, 1);
+    const tokenAfter = await adapter.getErc20Balance(usdt.address, recipient);
+    if (after !== before - withdrawAmount) {
+      throw new Error(`TRON_NILE_WITHDRAW_RESERVE_DELTA_MISMATCH:before=${before}:after=${after}:amount=${withdrawAmount}`);
+    }
+    if (tokenAfter !== tokenBefore + withdrawAmount) {
+      throw new Error(
+        `TRON_NILE_WITHDRAW_TOKEN_DELTA_MISMATCH:before=${tokenBefore}:after=${tokenAfter}:amount=${withdrawAmount}`,
+      );
+    }
+    transactionHash = receipt.txHash;
+    blockNumber = receipt.blockNumber;
+    authenticatedAddresses = [contracts['depository'], contracts['entityProvider'], usdt.address];
   }
 
   const deadline = Date.now() + 180_000;
-  while (await getSolidifiedBlockNumber() < reserveEvent.blockNumber) {
-    if (Date.now() >= deadline) throw new Error(`TRON_NILE_SOLIDIFICATION_TIMEOUT:${reserveEvent.blockNumber}`);
+  while (await getSolidifiedBlockNumber() < blockNumber) {
+    if (Date.now() >= deadline) throw new Error(`TRON_NILE_SOLIDIFICATION_TIMEOUT:${blockNumber}`);
     await new Promise((resolve) => setTimeout(resolve, 3_000));
   }
   const authenticated = await readAuthenticatedReceiptRange(
     (method, params) => rpcProvider.send(method, [...params]),
-    reserveEvent.blockNumber,
-    reserveEvent.blockNumber,
-    [contracts['depository'], usdt.address],
+    blockNumber,
+    blockNumber,
+    authenticatedAddresses,
     { commitment: 'tron-complete-receipts' },
   );
-  if (!authenticated.logs.some((log) => log.transactionHash === reserveEvent.transactionHash.toLowerCase())) {
-    throw new Error(`TRON_NILE_AUTHENTICATED_RECEIPT_MISSING:${reserveEvent.transactionHash}`);
+  if (!authenticated.logs.some((log) => log.transactionHash === transactionHash.toLowerCase())) {
+    throw new Error(`TRON_NILE_AUTHENTICATED_RECEIPT_MISSING:${transactionHash}`);
   }
   console.log(JSON.stringify({
-    kind: 'TRON_NILE_DEPOSIT_SMOKE',
-    amount: depositAmount.toString(),
+    kind: depositAmount > 0n ? 'TRON_NILE_DEPOSIT_SMOKE' : 'TRON_NILE_WITHDRAW_SMOKE',
+    amount: (depositAmount || withdrawAmount).toString(),
     before: before.toString(),
     after: after.toString(),
-    blockNumber: reserveEvent.blockNumber,
-    transactionHash: reserveEvent.transactionHash,
+    blockNumber,
+    transactionHash,
     authenticatedLogs: authenticated.logs.length,
     defaultDisputeDelayBlocks: onchainDelay,
   }));

@@ -7,9 +7,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 `docs/mainnet-engineering-principles.md`.
 
 ## 1. Contract boundedness — P0/P1, owner-approved
-- [ ] Replace the unbounded `_forgiveDebtsBetweenEntities` queue scan with an
-  indexed or bounded-continuation structure. Prove exact debt conservation and
-  bounded gas with adversarial creditor ordering.
 - [ ] Remove the remaining proven pre-mainnet compatibility ABI/state:
   migrate V1 settlement `diffsToOps` and `position.xlnomy`, then delete unused
   contract `resolveEntityId` and ineffective `hashToBlock/cleanSecret`. Use one

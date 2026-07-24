@@ -43,3 +43,39 @@ contract NoReturnERC20Mock {
     balanceOf[to] += amount;
   }
 }
+
+contract FalseReturnERC20Mock {
+  uint8 public constant decimals = 18;
+  uint256 public totalSupply;
+  mapping(address => uint256) public balanceOf;
+  mapping(address => mapping(address => uint256)) public allowance;
+
+  constructor(uint256 initialSupply) {
+    balanceOf[msg.sender] = initialSupply;
+    totalSupply = initialSupply;
+  }
+
+  function approve(address spender, uint256 amount) external returns (bool) {
+    allowance[msg.sender][spender] = amount;
+    return false;
+  }
+
+  function transfer(address to, uint256 amount) external returns (bool) {
+    _move(msg.sender, to, amount);
+    return false;
+  }
+
+  function transferFrom(address from, address to, uint256 amount) external returns (bool) {
+    uint256 currentAllowance = allowance[from][msg.sender];
+    require(currentAllowance >= amount, "allowance");
+    allowance[from][msg.sender] = currentAllowance - amount;
+    _move(from, to, amount);
+    return false;
+  }
+
+  function _move(address from, address to, uint256 amount) private {
+    require(balanceOf[from] >= amount, "balance");
+    balanceOf[from] -= amount;
+    balanceOf[to] += amount;
+  }
+}
