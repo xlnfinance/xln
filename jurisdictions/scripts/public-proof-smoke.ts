@@ -7,6 +7,7 @@ import { ethers } from 'ethers';
 import { generateLazyEntityId } from '../../runtime/entity/factory';
 import { buildSingleSignerHanko, prepareSignedBatch } from '../../runtime/hanko/batch';
 import {
+  hashCooperativeDisputeProofHankoPayload,
   hashCooperativeUpdateHankoPayload,
   hashDisputeProofHankoPayload,
 } from '../../runtime/hanko/onchain-domain';
@@ -31,10 +32,12 @@ const privateKey = String(process.env['PUBLIC_CHAIN_PRIVATE_KEY'] || '').trim();
 const jurisdictionId = argument('--jurisdiction') || '';
 const depositAmount = BigInt(argument('--deposit') || '1000');
 const settlementAmount = BigInt(argument('--settle') || '100');
+const withdrawalAmount = BigInt(argument('--withdraw') || '50');
+const allowTestTokenMint = process.env['PUBLIC_PROOF_ALLOW_TEST_TOKEN_MINT'] === '1';
 if (!/^0x[0-9a-f]{64}$/i.test(privateKey)) throw new Error('PUBLIC_PROOF_PRIVATE_KEY_REQUIRED');
 if (!jurisdictionId) throw new Error('PUBLIC_PROOF_JURISDICTION_REQUIRED');
-if (depositAmount <= settlementAmount || settlementAmount <= 0n) {
-  throw new Error(`PUBLIC_PROOF_AMOUNTS_INVALID:${depositAmount}:${settlementAmount}`);
+if (depositAmount <= settlementAmount + withdrawalAmount || settlementAmount <= 0n || withdrawalAmount <= 0n) {
+  throw new Error(`PUBLIC_PROOF_AMOUNTS_INVALID:${depositAmount}:${settlementAmount}:${withdrawalAmount}`);
 }
 
 const allJurisdictions = JSON.parse(
@@ -52,15 +55,24 @@ const token = new ethers.Contract(
   [
     'function approve(address spender,uint256 amount) returns (bool)',
     'function allowance(address owner,address spender) view returns (uint256)',
+    'function balanceOf(address owner) view returns (uint256)',
+    'function mint(address to,uint256 amount)',
   ],
   wallet,
 );
-const foundationEntityId = ethers.zeroPadValue('0x01', 32);
+const tokenAllowance = token.getFunction('allowance');
+const tokenApprove = token.getFunction('approve');
+const tokenBalanceOf = token.getFunction('balanceOf');
+const tokenMint = token.getFunction('mint');
+const ownerEntityId = generateLazyEntityId([wallet.address], 1n);
 const counterpartyPrivateKey = ethers.keccak256(
   ethers.solidityPacked(['string', 'bytes32'], ['xln:public-proof-counterparty', privateKey]),
 );
 const counterpartyWallet = new ethers.Wallet(counterpartyPrivateKey);
 const counterpartyEntityId = generateLazyEntityId([counterpartyWallet.address], 1n);
+const ownerIsLeft = BigInt(ownerEntityId) < BigInt(counterpartyEntityId);
+const leftEntityId = ownerIsLeft ? ownerEntityId : counterpartyEntityId;
+const rightEntityId = ownerIsLeft ? counterpartyEntityId : ownerEntityId;
 const domain = {
   chainId: BigInt(jurisdiction.chainId),
   depositoryAddress: jurisdiction.contracts.depository,
@@ -88,10 +100,10 @@ const gasOverrides = async (
 const sendBatch = async (
   batch: JBatch,
 ): Promise<ethers.TransactionReceipt> => {
-  const currentNonce = await depository.entityNonces(foundationEntityId);
+  const currentNonce = await depository.entityNonces(ownerEntityId);
   const signed = prepareSignedBatch(
     batch,
-    foundationEntityId,
+    ownerEntityId,
     privateKey,
     BigInt(jurisdiction.chainId),
     jurisdiction.contracts.depository,
@@ -145,13 +157,36 @@ try {
     throw new Error(`PUBLIC_PROOF_DELAY_MISMATCH:${onchainDelay}:${jurisdiction.defaultDisputeDelayBlocks}`);
   }
 
-  const allowance = await token.allowance(wallet.address, jurisdiction.contracts.depository) as bigint;
+  const accountKey = await depository.accountKey(ownerEntityId, counterpartyEntityId);
+  const accountBefore = await depository._accounts(accountKey);
+  const ownerReserveBefore = await depository._reserves(ownerEntityId, 1) as bigint;
+  const counterpartyReserveBefore = await depository._reserves(counterpartyEntityId, 1) as bigint;
+  let tokenMintTransactionHash: string | null = null;
+  const tokenBalance = await tokenBalanceOf(wallet.address) as bigint;
+  if (tokenBalance < depositAmount) {
+    if (!allowTestTokenMint) {
+      throw new Error(
+        `PUBLIC_PROOF_TOKEN_BALANCE_INSUFFICIENT:` +
+        `balance=${tokenBalance}:required=${depositAmount}`,
+      );
+    }
+    const mint = await tokenMint(
+      wallet.address,
+      depositAmount - tokenBalance,
+      await gasOverrides(() => tokenMint.estimateGas(wallet.address, depositAmount - tokenBalance)),
+    );
+    const receipt = await mint.wait();
+    if (!receipt || receipt.status !== 1) throw new Error(`PUBLIC_PROOF_TEST_TOKEN_MINT_FAILED:${mint.hash}`);
+    tokenMintTransactionHash = mint.hash;
+  }
+
+  const allowance = await tokenAllowance(wallet.address, jurisdiction.contracts.depository) as bigint;
   if (allowance < depositAmount) {
-    const approval = await token.approve(
+    const approval = await tokenApprove(
       jurisdiction.contracts.depository,
       ethers.MaxUint256,
       await gasOverrides(
-        () => token.approve.estimateGas(jurisdiction.contracts.depository, ethers.MaxUint256),
+        () => tokenApprove.estimateGas(jurisdiction.contracts.depository, ethers.MaxUint256),
       ),
     );
     await approval.wait();
@@ -159,7 +194,7 @@ try {
 
   const deposit = createEmptyBatch();
   deposit.externalTokenToReserve.push({
-    entity: foundationEntityId,
+    entity: ownerEntityId,
     contractAddress: jurisdiction.tokens.USDT.address,
     externalTokenId: 0n,
     tokenType: 0,
@@ -168,12 +203,11 @@ try {
   });
   const depositReceipt = await sendBatch(deposit);
 
-  const accountKey = await depository.accountKey(foundationEntityId, counterpartyEntityId);
-  const settlementNonce = 1n;
+  const settlementNonce = (accountBefore.nonce as bigint) + 1n;
   const diffs = [{
     tokenId: 1,
-    leftDiff: -settlementAmount,
-    rightDiff: settlementAmount,
+    leftDiff: ownerIsLeft ? -settlementAmount : settlementAmount,
+    rightDiff: ownerIsLeft ? settlementAmount : -settlementAmount,
     collateralDiff: 0n,
     ondeltaDiff: 0n,
   }];
@@ -186,8 +220,8 @@ try {
   );
   const settlement = createEmptyBatch();
   settlement.settlements.push({
-    leftEntity: foundationEntityId,
-    rightEntity: counterpartyEntityId,
+    leftEntity: leftEntityId,
+    rightEntity: rightEntityId,
     diffs,
     forgiveDebtsInTokenIds: [],
     sig: buildSingleSignerHanko(counterpartyEntityId, settlementHash, counterpartyPrivateKey),
@@ -195,10 +229,10 @@ try {
   });
   const settlementReceipt = await sendBatch(settlement);
 
-  const replayNonce = await depository.entityNonces(foundationEntityId) + 1n;
+  const replayNonce = await depository.entityNonces(ownerEntityId) + 1n;
   const replaySigned = prepareSignedBatch(
     settlement,
-    foundationEntityId,
+    ownerEntityId,
     privateKey,
     BigInt(jurisdiction.chainId),
     jurisdiction.contracts.depository,
@@ -213,7 +247,39 @@ try {
     'E2',
   );
 
-  const disputeNonce = 2n;
+  const cooperativeNonce = settlementNonce + 1n;
+  const cooperativeHash = hashCooperativeDisputeProofHankoPayload(
+    domain,
+    accountKey,
+    cooperativeNonce,
+    proofBodyHash,
+    ethers.keccak256('0x'),
+  );
+  const cooperativeClose = createEmptyBatch();
+  cooperativeClose.disputeFinalizations.push({
+    counterentity: counterpartyEntityId,
+    initialNonce: Number(settlementNonce),
+    finalNonce: Number(cooperativeNonce),
+    initialProofbodyHash: ethers.ZeroHash,
+    finalProofbody: proofBody,
+    starterArguments: '0x',
+    otherArguments: '0x',
+    sig: buildSingleSignerHanko(counterpartyEntityId, cooperativeHash, counterpartyPrivateKey),
+    // The inner Hanko belongs to counterparty, so this flag describes the
+    // counterparty's side, not the outer batch signer.
+    startedByLeft: !ownerIsLeft,
+    cooperative: true,
+  });
+  const cooperativeCloseReceipt = await sendBatch(cooperativeClose);
+  const cooperativelyClosedAccount = await depository._accounts(accountKey);
+  if (cooperativelyClosedAccount.nonce !== cooperativeNonce) {
+    throw new Error(
+      `PUBLIC_PROOF_COOPERATIVE_CLOSE_NONCE_MISMATCH:` +
+      `${cooperativelyClosedAccount.nonce}:${cooperativeNonce}`,
+    );
+  }
+
+  const disputeNonce = cooperativeNonce + 1n;
   const disputeHash = hashDisputeProofHankoPayload(
     domain,
     accountKey,
@@ -246,13 +312,13 @@ try {
     starterArguments: '0x',
     otherArguments: '0x',
     sig: '0x',
-    startedByLeft: true,
+    startedByLeft: ownerIsLeft,
     cooperative: false,
   });
-  const tooEarlyNonce = await depository.entityNonces(foundationEntityId);
+  const tooEarlyNonce = await depository.entityNonces(ownerEntityId);
   const tooEarly = prepareSignedBatch(
     finalization,
-    foundationEntityId,
+    ownerEntityId,
     privateKey,
     BigInt(jurisdiction.chainId),
     jurisdiction.contracts.depository,
@@ -275,21 +341,49 @@ try {
     throw new Error('PUBLIC_PROOF_DISPUTE_NOT_FINALIZED');
   }
 
-  const foundationReserve = await depository._reserves(foundationEntityId, 1);
+  const tokenBalanceBeforeWithdrawal = await tokenBalanceOf(wallet.address) as bigint;
+  const withdrawal = createEmptyBatch();
+  withdrawal.reserveToExternalToken.push({
+    receivingEntity: ethers.zeroPadValue(wallet.address, 32),
+    tokenId: 1,
+    amount: withdrawalAmount,
+  });
+  const withdrawalReceipt = await sendBatch(withdrawal);
+  const tokenBalanceAfterWithdrawal = await tokenBalanceOf(wallet.address) as bigint;
+  if (tokenBalanceAfterWithdrawal !== tokenBalanceBeforeWithdrawal + withdrawalAmount) {
+    throw new Error(
+      `PUBLIC_PROOF_WITHDRAWAL_TOKEN_DELTA_MISMATCH:` +
+      `before=${tokenBalanceBeforeWithdrawal}:after=${tokenBalanceAfterWithdrawal}:amount=${withdrawalAmount}`,
+    );
+  }
+
+  const ownerReserve = await depository._reserves(ownerEntityId, 1);
   const counterpartyReserve = await depository._reserves(counterpartyEntityId, 1);
+  const expectedOwnerReserve = ownerReserveBefore + depositAmount - settlementAmount - withdrawalAmount;
+  const expectedCounterpartyReserve = counterpartyReserveBefore + settlementAmount;
+  if (ownerReserve !== expectedOwnerReserve || counterpartyReserve !== expectedCounterpartyReserve) {
+    throw new Error(
+      `PUBLIC_PROOF_RESERVE_PARITY_MISMATCH:` +
+      `owner=${ownerReserve}:${expectedOwnerReserve}:` +
+      `counterparty=${counterpartyReserve}:${expectedCounterpartyReserve}`,
+    );
+  }
   console.log(JSON.stringify({
     kind: 'PUBLIC_PROOF_SMOKE',
     jurisdictionId,
     compiler: '0.8.36',
-    foundationEntityId,
+    ownerEntityId,
     counterpartyEntityId,
     accountKey,
+    tokenMintTransactionHash,
     depositTransactionHash: depositReceipt.hash,
     settlementTransactionHash: settlementReceipt.hash,
+    cooperativeCloseTransactionHash: cooperativeCloseReceipt.hash,
     disputeStartTransactionHash: disputeStartReceipt.hash,
     disputeFinalizeTransactionHash: finalizationReceipt.hash,
+    withdrawalTransactionHash: withdrawalReceipt.hash,
     disputeDelayBlocks: onchainDelay,
-    foundationReserve: foundationReserve.toString(),
+    ownerReserve: ownerReserve.toString(),
     counterpartyReserve: counterpartyReserve.toString(),
   }));
 } finally {

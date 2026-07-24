@@ -60,22 +60,14 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   descriptors; then introduce Runtime→Entity→Account COW only behind
   byte-identical differential roots and measured clone counters.
 
-## 4. Public Ethereum and TRON proof — P0 release blocker, open
+## 4. Public Ethereum proof — P0 release blocker, open
 
-- [ ] Finish the native TRON adapter: protobuf transaction signing/broadcast,
-  live energy fee limits, SolidityNode finality, complete authenticated
-  receipts and exact EVM/base58/hex41 address parity.
-- [ ] Freeze a candidate SHA, verify the existing Nile Depository with official
-  USDT token ID 1 and immutable 28,800-block dispute delay, then perform real
-  approve, deposit, cooperative withdrawal and both dispute paths.
-- [ ] Deploy the same candidate to Ethereum Sepolia and prove deposit,
-  settlement, cooperative withdrawal and both dispute paths against public RPC
-  receipts.
-- [ ] Prove Ethereum-Sepolia ↔ TRON-Nile cross-J full fill, partial GTC, manual
-  close, restart/replay, route hashes and chain-domain deadlines.
-- [ ] Define and independently review the TRON authority-proof domain. TRON
-  headers commit transactions rather than Ethereum receipt tries; never
-  synthesize an Ethereum MPT proof or trust one RPC witness.
+- [ ] Freeze a candidate SHA and prove the verified Ethereum Sepolia stack with
+  real approve, deposit, settlement, cooperative withdrawal, replay rejection
+  and both dispute paths against authenticated public-chain receipts.
+- [ ] Prove Runtime ↔ Sepolia reserve/debt parity, restart/replay and
+  chain-domain deadlines. The public-chain E2E must exercise full-fill and
+  partial-GTC cross-J lifecycle with the Sepolia leg, including manual close.
 
 ## 5. Immutable mainnet release pipeline — P0 release blocker, open
 
