@@ -145,6 +145,7 @@
   bind:selectedSymbol={faucetAssetSymbol}
   supportsReserve={faucetSupportsReserve}
   {canShowAccountFaucet}
+  ready={activeIsLive}
   submitting={assetFaucetSubmitting}
   submitFaucet={submitAssetFaucet}
 />

@@ -230,6 +230,7 @@ const installOneMillionRuntimeAdapterSocket = async (
       maxPayloadBytes: 0,
       viewFrameBytes: 0,
       maxAccountItems: 0,
+      requestOps: {} as Record<string, number>,
       events: [] as string[],
     };
     (window as unknown as { __xlnOneMillionRuntimeAdapterStats: typeof stats }).__xlnOneMillionRuntimeAdapterStats = stats;
@@ -282,6 +283,7 @@ const installOneMillionRuntimeAdapterSocket = async (
           }>;
         }).__xlnDecodeOneMillionRuntimeAdapterRequest;
         void decodeRequest(bytes).then((request) => {
+          stats.requestOps[request.op] = (stats.requestOps[request.op] ?? 0) + 1;
           const payload = request.op === 'auth'
             ? request.authPayload
             : request.path === 'head'
@@ -1837,8 +1839,35 @@ test('halted remote runtime disables wallet commands and links the root incident
   await expect(gate).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
   await expect(page.getByTestId('runtime-command-gate-reason')).toHaveText('phase=halted');
   await expect(page.getByTestId('runtime-command-gate-incident')).toHaveText(fingerprint);
+
+  let faucetPosts = 0;
+  await page.route('**/api/faucet/**', async route => {
+    if (route.request().method() === 'POST') faucetPosts += 1;
+    await route.fulfill({ status: 503, contentType: 'application/json', body: '{"success":false}' });
+  });
+
+  await page.getByTestId('tab-assets').click();
+  const assetFaucet = page.getByTestId('external-faucet-USDC');
+  await expect(assetFaucet).toBeDisabled();
+  await assetFaucet.evaluate((button: HTMLButtonElement) => button.click());
+
   await openAccountWorkspaceTab(page, 'open');
   await expect(page.getByTestId('open-account-submit')).toBeDisabled();
+  await openAccountWorkspaceTab(page, 'send');
+  await expect(page.getByText('Payments are only available in LIVE mode.')).toBeVisible();
+  await openAccountWorkspaceTab(page, 'swap');
+  await expect(page.getByTestId('swap-submit-order')).toBeDisabled();
+  await openAccountWorkspaceTab(page, 'lending');
+  await expect(page.getByTestId('lending-offer-submit')).toBeDisabled();
+
+  const mutationCounts = await page.evaluate(() => {
+    const stats = (window as unknown as {
+      __xlnOneMillionRuntimeAdapterStats?: { requestOps?: Record<string, number> };
+    }).__xlnOneMillionRuntimeAdapterStats;
+    return { sends: Number(stats?.requestOps?.['send'] || 0) };
+  });
+  expect(mutationCounts).toEqual({ sends: 0 });
+  expect(faucetPosts).toBe(0);
   const readiness = await page.evaluate(() => {
     const status = (window as typeof window & {
       __xln?: { adapter?: { status?: () => Record<string, unknown> } };

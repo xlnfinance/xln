@@ -1503,6 +1503,10 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     }
   }
   async function faucetOffchain(hubEntityId: string, tokenId: number = 1) {
+    if (!activeCommandsReady) {
+      notifyUserActionError('offchain-faucet', 'Runtime is not ready for financial actions');
+      return;
+    }
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) {
       notifyUserActionError('offchain-faucet', 'Active entity missing for offchain faucet');
@@ -3238,6 +3242,10 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     }
   }
   async function submitAssetFaucet(target: 'external' | 'reserve' | 'account'): Promise<void> {
+    if (!activeCommandsReady) {
+      notifyUserActionError('asset-faucet', 'Runtime is not ready for financial actions');
+      return;
+    }
     if (assetFaucetSubmitting) return;
     assetFaucetSubmitting = true;
     try {

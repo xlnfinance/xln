@@ -12,9 +12,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   the durable incident registry. Add one explicit producer/sink coverage matrix
   so a newly introduced fatal boundary cannot bypass the registry.
 - [ ] Prove a managed child replacement at an external-I/O boundary cannot
-  duplicate remote dispatch or J-submit. Parameterize the real halted Runtime
-  browser test across faucet, pay, swap, lending and account commands and assert
-  zero enqueue while halted, quiescing or restoring.
+  duplicate remote dispatch or J-submit.
 ## 1. Commit-boundary correctness — P0, approval required
 
 - [ ] Reject Entity-frame timestamp regression before transaction application.
