@@ -6,7 +6,7 @@ fastest proof/fix to the hardest external gate. Completed work is deleted;
 long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 `docs/mainnet-engineering-principles.md`.
 
-## 0. Restore and prove production health
+## 0. Restore and prove production health — P0, open
 
 - [ ] Make the existing durable `/api/debug/incidents` registry the mandatory
   first diagnostic query and release gate. Route every remaining frontend,
@@ -20,7 +20,17 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   info events, and enforce allowlisted metadata plus sink-level redaction: raw
   Account/Entity inputs, Hanko, ciphertext, seeds and dispute evidence must
   never enter console, JSONL or the debug API.
-## 1. Commit-boundary correctness
+- [ ] Publish the canonical Runtime command readiness through both embedded and
+  remote adapters. Every wallet money control must disable from that exact
+  state, not from a UI approximation. Prove running → quiescing/restoring/halted
+  transitions in the real adapter with zero enqueue, transport or J-submit
+  side effects and a visible root-incident reference.
+- [ ] Make top-level market-maker health depend on every configured child,
+  authenticated peer and required book. After a clean start and after forced
+  child replacement, prove the public same-J and cross-J books contain exactly
+  the configured 10 bid + 10 ask levels before health becomes ready.
+
+## 1. Commit-boundary correctness — P0, approval required
 
 - [ ] Reject Entity-frame timestamp regression before transaction application.
   Deadline admission uses the monotonic Entity/J clock. A late bilateral
@@ -28,7 +38,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   HTLC/pull evidence valid because acceptance never uses that timestamp as the
   receiver's clock.
 
-## 2. Runtime-owned financial planning
+## 2. Runtime-owned financial planning — P0, open
 
 - [ ] Finish one immutable Runtime swap-command plan containing canonical
   capacity, quantization and target-account preparation. Commit target setup
@@ -36,7 +46,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   and planner failure produces zero financial transactions. Canonical capacity
   reads and exact credit without the former 10,000-token floor are complete.
 
-## 3. Ingress and contract boundedness
+## 3. Ingress and contract boundedness — P0/P1, partly approval required
 
 - [ ] Bind every submitted J-batch object byte-for-byte to its sealed
   `encodedBatch`, chain/depository/nonce domain and hash before either BrowserVM
@@ -56,7 +66,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   currently live infrastructure, not dead code; do not delete it as an audit
   shortcut.
 
-## 4. Transport and secret persistence
+## 4. Transport and secret persistence — P0/P1, approval required
 
 - [ ] Derive AEAD keys from X25519 with domain-separated HKDF-SHA256 and bind
   protocol/from/to/type/source-frame/message-id as AAD. Replace Base64 with one
@@ -78,7 +88,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   namespace and reference it from Account materialization. Prove backup,
   restore and dispute recovery before removing plaintext duplication.
 
-## 5. Crash, corruption and load evidence
+## 5. Crash, corruption and load evidence — P1, open
 
 - [ ] Pass snapshot/epoch/rotation/prune/corruption matrices for oversized
   typed Account/Entity/Book values and exact 9,999/10,000-byte boundaries.
@@ -93,14 +103,15 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 - [ ] Profile the production bootstrap and growing-hub frame path locally.
   Remove only measured full scans/clones/duplicate crypto; publish deterministic
   1/1,000-tx and growing-hub median/p95/MAD budgets from a clean Bun cache.
-  Measure the duplicate Account wake scan and per-frame verified-profile clone;
-  replace them only with dirty/versioned indexes proven equivalent.
+  Measure the duplicate Account wake scan, per-frame verified-profile clone and
+  repeated cross-J preview application; replace them only with dirty/versioned
+  indexes or structural preflight proven byte-identical.
 - [ ] Replace case-insensitive Account scans and repeated signer/pair lookups
   with canonical direct indexes, including exact cross-J replica/account
   descriptors; then introduce Runtime→Entity→Account COW only behind
   byte-identical differential roots and measured clone counters.
 
-## 6. Public Ethereum and TRON proof
+## 6. Public Ethereum and TRON proof — P0 release blocker, open
 
 - [ ] Finish the native TRON adapter: protobuf transaction signing/broadcast,
   live energy fee limits, SolidityNode finality, complete authenticated
@@ -117,7 +128,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   headers commit transactions rather than Ethereum receipt tries; never
   synthesize an Ethereum MPT proof or trust one RPC witness.
 
-## 7. Immutable mainnet release pipeline
+## 7. Immutable mainnet release pipeline — P0 release blocker, open
 
 - [ ] Extend the candidate binding already enforced for isolated E2E run/shard
   manifests to unit, contract, scenario, recovery, public-chain and final
