@@ -8,9 +8,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 0. Complete production-health coverage — P0, open
 
-- [ ] Route every remaining frontend, orchestrator and J-machine fatal through
-  the durable incident registry. Add one explicit producer/sink coverage matrix
-  so a newly introduced fatal boundary cannot bypass the registry.
 - [ ] Prove a managed child replacement at an external-I/O boundary cannot
   duplicate remote dispatch or J-submit.
 ## 1. Commit-boundary correctness — P0, approval required

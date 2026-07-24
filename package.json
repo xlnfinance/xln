@@ -148,7 +148,7 @@
     "test:governance": "bun runtime/scripts/run-with-test-cleanup.ts --reason=governance --child-cwd=jurisdictions -- bunx hardhat test --grep governance",
     "test:entity": "bun runtime/scripts/run-with-test-cleanup.ts --reason=entity --child-cwd=jurisdictions -- bunx hardhat test --grep entity",
     "check": "bun run check:src && bun run check:frontend-file-size && bun run check:frontend",
-    "check:src": "bun run check:single-live-todo && bun run frozen-core:check && bun run check:e2e-categories && bun run check:runtime-doc-paths && bun run check:derive-delta-invariants && bun run check:no-weak-collections && bun run check:no-manual-delta-math && bun run check:no-active-infra-in-state-machine && bun run check:no-pre-mainnet-legacy && bun run check:runtime-types",
+    "check:src": "bun run check:single-live-todo && bun run frozen-core:check && bun run check:e2e-categories && bun run check:runtime-doc-paths && bun run check:derive-delta-invariants && bun run check:no-weak-collections && bun run check:no-manual-delta-math && bun run check:no-active-infra-in-state-machine && bun run check:no-pre-mainnet-legacy && bun run security:failure-taxonomy && bun run check:runtime-types",
     "check:e2e-categories": "bun runtime/scripts/check-e2e-test-categories.ts",
     "check:frontend": "cd frontend && bun run check",
     "check:frontend-file-size": "bun runtime/scripts/check-frontend-file-size.ts",

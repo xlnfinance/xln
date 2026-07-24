@@ -178,6 +178,22 @@ describe('production startup wiring', () => {
     expect(orchestrator).not.toContain('relayStore.debugId = 0');
   });
 
+  test('standalone runtime fsyncs fatal incidents before exiting', () => {
+    const server = readFileSync(join(repoRoot, 'runtime/server/index.ts'), 'utf8');
+    expect(server).toContain(
+      "process.env['XLN_SERVER_DEBUG_INCIDENT_JOURNAL_PATH'] || `${dbRootPath}.debug-incidents.jsonl`",
+    );
+    expect(server).toContain('initialDebugId: incidentJournal.debugId');
+    expect(server).toContain('initialIncidents: incidentJournal.incidents');
+    expect(server).toContain('incidentSink: incident => incidentJournal.record(incident)');
+
+    const startLoop = server.indexOf('startRuntimeLoop(env, {');
+    const fatalSink = server.indexOf("serverLog.error('runtime.loop_fatal'", startLoop);
+    expect(startLoop).toBeGreaterThan(0);
+    expect(fatalSink).toBeGreaterThan(startLoop);
+    expect(server.match(/finally \{\n\s+process\.exit\(1\);\n\s+\}/g)).toHaveLength(2);
+  });
+
   test('managed runtime fatal exits only after parent incident fsync acknowledgement', () => {
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');

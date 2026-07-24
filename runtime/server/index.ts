@@ -50,6 +50,7 @@ import {
   pushDebugEvent,
   removeClient,
 } from '../relay/store';
+import { openRelayIncidentJournal } from '../relay/incident-journal';
 import { maybeHandleRelayDebugRequest } from '../relay/debug-http';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay/router';
 import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
@@ -120,6 +121,7 @@ import { readInheritedChildSecrets } from '../orchestrator/child-secrets';
 import { createLocalPairingController } from './local-pairing';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { buildLocalRuntimeOwner, ensureLocalRuntimeOwner } from './local-runtime-owner';
+import { dbRootPath } from '../machine/platform';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -296,13 +298,14 @@ const resolveConfiguredRelayUrl = (port?: number): string => {
 let relayStore = createRelayStore(DEFAULT_OPTIONS.serverId ?? 'xln-server');
 registerStructuredLogSink((entry) => {
   if (entry.level !== 'error') return;
+  const severity = entry['severity'] === 'fatal' ? 'fatal' : 'error';
   pushDebugEvent(relayStore, {
     event: 'error',
-    status: 'error',
-    reason: entry.message,
+    status: severity,
+    reason: typeof entry['code'] === 'string' ? entry['code'] : entry.message,
     details: {
       source: 'runtime-server',
-      severity: entry.level,
+      severity,
       ...entry,
     },
   });
@@ -330,22 +333,30 @@ const installProcessSafetyGuards = (): void => {
   process.on('unhandledRejection', reason => {
     const message = reason instanceof Error ? reason.message : String(reason);
     const stack = reason instanceof Error ? reason.stack : undefined;
-    serverLog.error('process.unhandled_rejection', { message });
-    pushDebugEvent(relayStore, {
-      event: 'error',
-      reason: 'UNHANDLED_REJECTION',
-      details: { message, stack },
-    });
+    try {
+      serverLog.error('process.unhandled_rejection', {
+        code: 'UNHANDLED_REJECTION',
+        severity: 'fatal',
+        message,
+        stack,
+      });
+    } finally {
+      process.exit(1);
+    }
   });
 
   process.on('uncaughtException', error => {
     const message = getErrorMessage(error, 'Unknown uncaught exception');
-    serverLog.error('process.uncaught_exception', { message });
-    pushDebugEvent(relayStore, {
-      event: 'error',
-      reason: 'UNCAUGHT_EXCEPTION',
-      details: { message, stack: error?.stack },
-    });
+    try {
+      serverLog.error('process.uncaught_exception', {
+        code: 'UNCAUGHT_EXCEPTION',
+        severity: 'fatal',
+        message,
+        stack: error?.stack,
+      });
+    } finally {
+      process.exit(1);
+    }
   });
 };
 
@@ -730,10 +741,19 @@ const handleApi = async (
 };
 
 export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Promise<void> {
-  installProcessSafetyGuards();
   const options = { ...DEFAULT_OPTIONS, ...opts };
+  const incidentJournalPath = String(
+    process.env['XLN_SERVER_DEBUG_INCIDENT_JOURNAL_PATH'] || `${dbRootPath}.debug-incidents.jsonl`,
+  ).trim();
+  const incidentJournal = openRelayIncidentJournal(incidentJournalPath);
+  relayStore = createRelayStore(options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server', {
+    initialDebugId: incidentJournal.debugId,
+    initialIncidents: incidentJournal.incidents,
+    debugIdAllocator: () => incidentJournal.allocateDebugId(),
+    incidentSink: incident => incidentJournal.record(incident),
+  });
+  installProcessSafetyGuards();
   serverLog.info('start', { port: options.port, host: options.host, staticDir: options.staticDir });
-  relayStore = createRelayStore(options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server');
   marketSubscriptionStack.clear();
   const internalRelayUrl = resolveConfiguredRelayUrl(options.port);
   serverBootStartedAt = Date.now();
@@ -1010,7 +1030,15 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     env.runtimeState.directEntityInputsDispatch = (targetRuntimeId, envelope, ingressTimestamp) =>
       sendEntityInputDirectViaRelaySocketDelivery(runtimeEnv, targetRuntimeId, envelope, ingressTimestamp);
     env.runtimeState.canUseConnectedRelayFallback = hasConnectedEncryptedRelayClient;
-    startRuntimeLoop(env);
+    startRuntimeLoop(env, {
+      onFatal: async payload => {
+        serverLog.error('runtime.loop_fatal', {
+          ...payload,
+          runtimeId: runtimeEnv.runtimeId,
+          severity: 'fatal',
+        });
+      },
+    });
     serverLog.info('runtime.loop.started');
 
     // Initialize J-adapter (anvil for testnet, browserVM for local)
