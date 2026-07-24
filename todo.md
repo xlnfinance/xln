@@ -13,6 +13,11 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   Account frame may retain its signed timestamp, but cannot make expired
   HTLC/pull evidence valid because acceptance never uses that timestamp as the
   receiver's clock.
+- [ ] Return rebalance/debug/history notifications as typed candidate effects
+  and publish them only after the exact Entity hash commits. Remove direct
+  `p2p.sendDebugEvent` calls from Account reducers and J-event mutation paths;
+  rejected validation, proposer/validator replay and restart must publish zero,
+  one and still one canonical fingerprint respectively.
 
 ## 1. Ingress and contract boundedness — P0/P1, partly approval required
 
@@ -58,6 +63,16 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 3. Crash, corruption and load evidence — P1, open
 
+- [ ] Strengthen cross-J browser E2E from lifecycle-only evidence to exact
+  financial evidence across all four source/target Account perspectives.
+  Full fill must close the order and clear pulls/holds; partial GTC must retain
+  only the exact remainder until manual Clear; restart must preserve history
+  and restore exactly 10 bids plus 10 asks.
+- [ ] Add one real Anvil contract-event dispute E2E after payment, HTLC,
+  same-J/cross-J swap and pull state. Exercise malformed/oversized optional
+  transformer arguments, compare final Depository reserves/debts to the
+  canonical Runtime preview, and SIGKILL at WAL-before-dispatch and
+  dispatch-before-receipt without double application.
 - [ ] Profile the production bootstrap and growing-hub frame path locally.
   Remove only measured full scans/clones/duplicate crypto; publish deterministic
   1/1,000-tx and growing-hub median/p95/MAD budgets from a clean Bun cache.
