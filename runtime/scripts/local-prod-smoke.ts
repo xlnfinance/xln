@@ -420,7 +420,9 @@ const commitPostRotationProofFrames = async (): Promise<void> => {
         { commandId, commandSequence },
       );
       while (result.status !== 'observed' && Date.now() < deadline) {
-        await sleep(50);
+        // The production admin lane intentionally replenishes five sends per
+        // second. Poll below that rate instead of weakening the real limiter.
+        await sleep(250);
         result = await adapter.send(
           { runtimeTxs: [], entityInputs: [] },
           { commandId, commandSequence },
