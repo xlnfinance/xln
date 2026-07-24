@@ -56,6 +56,23 @@ describe('storage config', () => {
     }
   });
 
+  test('persists a fail-fast snapshot cadence override into each fresh Runtime config', () => {
+    const previous = process.env['XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES'];
+    try {
+      process.env['XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES'] = '32';
+      const env = createEmptyEnv('forced-soundcheck-snapshot-cadence');
+      expect(env.runtimeConfig?.storage?.snapshotPeriodFrames).toBe(32);
+      expect(resolveStorageRuntimeConfig(env).snapshotPeriodFrames).toBe(32);
+
+      process.env['XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES'] = '0';
+      expect(() => createEmptyEnv('invalid-forced-snapshot-cadence'))
+        .toThrow('RUNTIME_CONFIG_STORAGE_SNAPSHOT_PERIOD_FRAMES_INVALID:0');
+    } finally {
+      if (previous === undefined) delete process.env['XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES'];
+      else process.env['XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES'] = previous;
+    }
+  });
+
   test('rejects invalid booleans, canonical periods, and merkle radix', () => {
     const env = createEmptyEnv('invalid-storage-shapes');
     env.runtimeConfig = { storage: { enabled: 'maybe' as never } };

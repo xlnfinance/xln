@@ -645,6 +645,22 @@ const ensureRuntimeConfig = (env: Env): NonNullable<Env['runtimeConfig']> => {
       epochMaxBytes,
     };
   }
+  const storageSnapshotPeriodEnv = readRuntimeEnv('XLN_STORAGE_SNAPSHOT_PERIOD_FRAMES');
+  if (
+    storageSnapshotPeriodEnv !== undefined &&
+    env.runtimeConfig.storage?.snapshotPeriodFrames === undefined
+  ) {
+    const snapshotPeriodFrames = Number(storageSnapshotPeriodEnv);
+    if (!Number.isSafeInteger(snapshotPeriodFrames) || snapshotPeriodFrames < 1) {
+      throw new Error(
+        `RUNTIME_CONFIG_STORAGE_SNAPSHOT_PERIOD_FRAMES_INVALID:${storageSnapshotPeriodEnv}`,
+      );
+    }
+    env.runtimeConfig.storage = {
+      ...(env.runtimeConfig.storage || {}),
+      snapshotPeriodFrames,
+    };
+  }
   const configuredSnapshotInterval = env.runtimeConfig.snapshotIntervalFrames;
   if (!Number.isFinite(configuredSnapshotInterval ?? NaN) || (configuredSnapshotInterval ?? 0) < 1) {
     env.runtimeConfig.snapshotIntervalFrames = DEFAULT_SNAPSHOT_INTERVAL_FRAMES;
