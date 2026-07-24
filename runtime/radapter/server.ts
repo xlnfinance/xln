@@ -18,6 +18,7 @@ import { RuntimeAdapterError, toRuntimeAdapterErrorPayload } from './errors';
 import { consumeToken, createTokenBucket, tokenRetryAfterMs, type TokenBucket } from './rate-limit';
 import { resolveRuntimeAdapterRead } from './resolve';
 import { createStructuredLogger } from '../infra/logger';
+import { assertRuntimeCommandReady } from '../machine/lifecycle';
 import { safeStringify } from '../protocol/serialization';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import type {
@@ -111,6 +112,14 @@ let detachEnvChange: (() => void) | null = null;
 const RUNTIME_ADAPTER_BACKPRESSURE_DEFAULT_BYTES = 2 * 1024 * 1024;
 const runtimeAdapterLog = createStructuredLogger('runtime.radapter');
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+const requireRuntimeCommandReady = (env: Env): void => {
+  try {
+    assertRuntimeCommandReady(env);
+  } catch (error) {
+    throw new RuntimeAdapterError('E_COMMAND_PENDING', errorMessage(error), true, 250);
+  }
+};
 
 type PendingRuntimeAdapterCommand = {
   sequence: number;
@@ -562,6 +571,7 @@ export const handleRuntimeAdapterMessage = async (
     if (msg.op === 'cross-j-intent') {
       requireAuth(state, 'admin');
       requireBucket(state.sendBucket, 'send');
+      requireRuntimeCommandReady(env);
       if (deps.isMutatingIngressReady?.() === false) {
         throw new RuntimeAdapterError(
           'E_COMMAND_PENDING',
@@ -591,6 +601,7 @@ export const handleRuntimeAdapterMessage = async (
     if (msg.op === 'send') {
       requireAuth(state, 'admin');
       requireBucket(state.sendBucket, 'send');
+      requireRuntimeCommandReady(env);
       if (deps.isMutatingIngressReady?.() === false) {
         throw new RuntimeAdapterError(
           'E_COMMAND_PENDING',

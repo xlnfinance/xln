@@ -116,6 +116,10 @@ const makeEnv = (): Env => ({
   height: 7,
   timestamp: 700,
   runtimeSeed: 'seed',
+  runtimeState: {
+    lifecyclePhase: 'running',
+    loopActive: true,
+  },
   eReplicas: new Map<string, EntityReplica>([
     [`${entityId}:signer`, {
       entityId,
@@ -3141,6 +3145,66 @@ test('runtime adapter cross-j intent requires admin and bypasses the durable com
   expect(enqueued).toBe(0);
 });
 
+test('runtime adapter rejects send and cross-j before either reaches a halted runtime', async () => {
+  const messages: unknown[] = [];
+  const socket = { send: (message: unknown) => { messages.push(message); } };
+  const env = makeEnv();
+  let enqueued = 0;
+  let submitted = 0;
+  const deps = {
+    enqueueRuntimeInput: () => { enqueued += 1; },
+    submitCrossJurisdictionIntent: async () => { submitted += 1; },
+  };
+
+  await handleRuntimeAdapterMessage(socket, {
+    v: 1,
+    id: 'auth-admin-halted',
+    op: 'auth',
+    key: deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000),
+    challenge: adapterAuthChallenge,
+  }, env, deps);
+  messages.length = 0;
+  env.runtimeState = { lifecyclePhase: 'halted', halted: true };
+
+  await handleRuntimeAdapterMessage(socket, {
+    v: 1,
+    id: 'send-halted',
+    op: 'send',
+    commandId: 'halted-command-0001',
+    commandSequence: 1,
+    input: { runtimeTxs: [], entityInputs: [] },
+  }, env, deps);
+  const sendResponse = decodeTestRuntimeAdapterMessage<{
+    ok: false;
+    error: { code: string; message: string; retryable: boolean };
+  }>(messages.pop());
+  expect(sendResponse.ok).toBe(false);
+  expect(sendResponse.error).toMatchObject({
+    code: 'E_COMMAND_PENDING',
+    message: 'RUNTIME_COMMAND_NOT_READY:phase=halted',
+    retryable: true,
+  });
+
+  await handleRuntimeAdapterMessage(socket, {
+    v: 1,
+    id: 'cross-j-halted',
+    op: 'cross-j-intent',
+    route: { orderId: 'halted-cross-j' } as CrossJurisdictionSwapRoute,
+  }, env, deps);
+  const crossJResponse = decodeTestRuntimeAdapterMessage<{
+    ok: false;
+    error: { code: string; message: string; retryable: boolean };
+  }>(messages.pop());
+  expect(crossJResponse.ok).toBe(false);
+  expect(crossJResponse.error).toMatchObject({
+    code: 'E_COMMAND_PENDING',
+    message: 'RUNTIME_COMMAND_NOT_READY:phase=halted',
+    retryable: true,
+  });
+  expect(enqueued).toBe(0);
+  expect(submitted).toBe(0);
+});
+
 test('runtime adapter keeps one command retryable until startup J catch-up completes', async () => {
   const messages: unknown[] = [];
   const socket = { send: (message: unknown) => { messages.push(message); } };
@@ -3797,11 +3861,13 @@ test('embedded adapter sends to the latest active env after runtime switch', asy
   const writtenEnv: Env[] = [];
   const adapter = new EmbeddedRuntimeAdapter({
     getEnv: () => currentEnv,
+    validateRuntimeInputAdmission: () => {},
     enqueueRuntimeInput: (env, input) => {
       writtenEnv.push(env);
       expect(input.entityInputs?.[0]?.entityId).toBe(entityId);
       env.height = Math.max(0, Math.floor(Number(env.height ?? 0))) + 1;
     },
+    submitCrossJurisdictionIntent: async () => ({ delivered: true }),
     registerEnvChangeCallback: () => () => {},
   });
 
@@ -3821,6 +3887,31 @@ test('embedded adapter sends to the latest active env after runtime switch', asy
   expect(staleEnv.height).toBe(1);
   expect(activeEnv.height).toBe(6);
   expect(adapter.currentHeight).toBe(6);
+});
+
+test('embedded adapter rejects money commands after the runtime stops accepting work', async () => {
+  const env = makeEnv();
+  let enqueued = 0;
+  let submitted = 0;
+  const adapter = new EmbeddedRuntimeAdapter({
+    getEnv: () => env,
+    validateRuntimeInputAdmission: () => {},
+    enqueueRuntimeInput: () => { enqueued += 1; },
+    submitCrossJurisdictionIntent: async () => {
+      submitted += 1;
+      return { delivered: true };
+    },
+    registerEnvChangeCallback: () => () => {},
+  });
+  await adapter.connect({ mode: 'embedded' });
+
+  env.runtimeState = { lifecyclePhase: 'halted', halted: true };
+  await expect(adapter.send({ runtimeTxs: [], entityInputs: [] }))
+    .rejects.toThrow('RUNTIME_COMMAND_NOT_READY:phase=halted');
+  await expect(adapter.submitCrossJurisdictionIntent({} as CrossJurisdictionSwapRoute))
+    .rejects.toThrow('RUNTIME_COMMAND_NOT_READY:phase=halted');
+  expect(enqueued).toBe(0);
+  expect(submitted).toBe(0);
 });
 
 test('remote adapter can inspect and control a hub over the rpc wire', async () => {

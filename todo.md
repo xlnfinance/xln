@@ -24,18 +24,11 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 1. Commit-boundary correctness
 
-- [ ] Reject Entity and Account frame timestamp regression before transaction
-  application. Deadline admission must use one monotonic Entity/J clock; late
-  HTLC/pull evidence must never become valid by signing an older timestamp.
-- [ ] Return Account history, security incidents and storage invalidations as
-  `CandidateExecution.effects`; publish only with the exact committed Entity
-  hash. Rejection must leave external Env projections byte-identical.
-- [ ] Keep proposer and receiver live-replay tripwires permanent: incremental
-  and cold roots must equal the signed `frame.accountStateRoot`, including a
-  forced validation/commit divergence fixture.
-- [ ] Keep cross-J opening as one signed two-leg envelope. Both Runtimes must
-  scratch-validate both Account inputs and their exact match before either leg
-  becomes an Entity frame; mismatch removes only that envelope and alerts.
+- [ ] Reject Entity-frame timestamp regression before transaction application.
+  Deadline admission uses the monotonic Entity/J clock. A late bilateral
+  Account frame may retain its signed timestamp, but cannot make expired
+  HTLC/pull evidence valid because acceptance never uses that timestamp as the
+  receiver's clock.
 
 ## 2. Runtime-owned financial planning
 
@@ -44,8 +37,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   bytes; planner failure produces zero financial transactions.
 - [ ] Remove the arbitrary 10,000-token cross-J credit floor. A new account gets
   only the exact required inbound credit, visibly separated from swap amount.
-- [ ] Add a shared runtime-command readiness gate at UI, adapter and server
-  enqueue boundaries; halted/quiescing/not-ready means zero money commands.
 
 ## 3. Transport and secret persistence
 

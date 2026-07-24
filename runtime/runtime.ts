@@ -289,6 +289,7 @@ import {
   refreshScheduledWakeIndex,
 } from './machine/scheduled-wake';
 import {
+  assertRuntimeCommandReady,
   inferRuntimeLifecyclePhase,
   transitionRuntimeLifecycle,
 } from './machine/lifecycle';
@@ -2068,6 +2069,7 @@ const resolveSoleLocalSignerForEntity = (env: Env, entityId: string): string | n
 };
 
 export const validateRuntimeInputAdmission = (env: Env, runtimeInput: RuntimeInput): void => {
+  assertRuntimeCommandReady(env);
   if (!runtimeInput) {
     throw new Error('RUNTIME_INPUT_ADMISSION_REJECTED: Null runtime input provided');
   }
@@ -7347,6 +7349,7 @@ export async function submitCrossJurisdictionIntent(
   env: Env,
   route: CrossJurisdictionSwapRoute,
 ): Promise<CrossJurisdictionSwapSubmitResult> {
+  assertRuntimeCommandReady(env);
   const canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
   if (canonicalRoute.status !== 'intent' || canonicalRoute.sourcePull || canonicalRoute.targetPull) {
     throw new Error(`CROSS_J_INTENT_STATE_INVALID:${canonicalRoute.orderId}`);

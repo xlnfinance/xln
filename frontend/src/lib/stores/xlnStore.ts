@@ -861,6 +861,8 @@ const createEmbeddedRuntimeAdapter = async (
   };
   return new xln.EmbeddedRuntimeAdapter({
     getEnv: getLiveEnv,
+    validateRuntimeInputAdmission: (env, input) =>
+      xln.validateRuntimeInputAdmission(unwrapLiveRuntimeEnv(env) ?? env, input),
     enqueueRuntimeInput: (env, input) => xln.enqueueRuntimeInput(unwrapLiveRuntimeEnv(env) ?? env, input),
     submitCrossJurisdictionIntent: async (env, route) => {
       await xln.submitCrossJurisdictionIntent(unwrapLiveRuntimeEnv(env) ?? env, route);

@@ -37,3 +37,14 @@ export const transitionRuntimeLifecycle = (
 
 export const runtimeCanScheduleWork = (state: RuntimeState): boolean =>
   inferRuntimeLifecyclePhase(state) === 'running';
+
+export const assertRuntimeCommandReady = (env: Env): void => {
+  const state = env.runtimeState ?? {};
+  const phase = inferRuntimeLifecyclePhase(state);
+  if (phase !== 'running') {
+    throw new Error(`RUNTIME_COMMAND_NOT_READY:phase=${phase}`);
+  }
+  if (state.persistencePaused === true || state.persistenceQuiescing === true) {
+    throw new Error('RUNTIME_COMMAND_NOT_READY:persistence-fenced');
+  }
+};

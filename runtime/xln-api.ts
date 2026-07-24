@@ -508,6 +508,7 @@ export interface XLNModule {
 
   // Runtime operations
   applyRuntimeInput: (env: Env, input: RuntimeInput) => Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }>;
+  validateRuntimeInputAdmission: (env: Env, input: RuntimeInput) => void;
   enqueueRuntimeInput: (env: Env, input: RuntimeInput) => void;
   startRuntimeLoop?: (env: Env) => () => void;
   resumeRuntimeLoop: (env: Env) => () => void;

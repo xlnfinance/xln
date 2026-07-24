@@ -1030,6 +1030,7 @@ describe('audit fail-fast regressions', () => {
 
   test('runtime input admission rejects tx-bearing stale signer before enqueue', () => {
     const env = createEmptyEnv('runtime-input-admission-stale-signer');
+    env.runtimeState = { lifecyclePhase: 'running', loopActive: true };
     env.scenarioMode = false;
     env.quietRuntimeLogs = true;
     const { entityId, signerId } = registerLazySigner('runtime-input-admission-stale-signer', '1');
@@ -1086,6 +1087,7 @@ describe('audit fail-fast regressions', () => {
 
   test('runtime input admission accounts for importReplica earlier in the same batch', () => {
     const env = createEmptyEnv('runtime-input-admission-import-replica');
+    env.runtimeState = { lifecyclePhase: 'running', loopActive: true };
     env.scenarioMode = false;
     env.quietRuntimeLogs = true;
     const entityId = `0x${'9f'.repeat(32)}`;
