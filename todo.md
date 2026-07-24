@@ -6,7 +6,18 @@ fastest proof/fix to the hardest external gate. Completed work is deleted;
 long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 `docs/mainnet-engineering-principles.md`.
 
-## 0. Contract boundedness — P0/P1, owner-approved
+## 0. Cross-j atomic close — P0, confirmed
+
+- [ ] Remove user-authored cross-j close economics. The Hub Runtime must build
+  the exact source and target close legs from committed fill state, transport
+  them in one atomic Runtime envelope, and both receiving sibling Entities must
+  validate identical route hash, binary and cumulative source/target amounts
+  before either bilateral Account frame can commit. Standalone or mismatched
+  close legs must apply neither leg, emit one security incident, and require a
+  fresh Hub close cohort; prove full, partial/manual, replay and forged-amount
+  cases end to end.
+
+## 1. Contract boundedness — P0/P1, owner-approved
 - [ ] Replace the unbounded `_forgiveDebtsBetweenEntities` queue scan with an
   indexed or bounded-continuation structure. Prove exact debt conservation and
   bounded gas with adversarial creditor ordering.
@@ -17,7 +28,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   currently live infrastructure, not dead code; do not delete it as an audit
   shortcut.
 
-## 1. Transport and secret persistence — P0/P1, owner-approved
+## 2. Transport and secret persistence — P0/P1, owner-approved
 
 - [ ] Derive AEAD keys from X25519 with domain-separated HKDF-SHA256 and bind
   protocol/from/to/type/source-frame/message-id as AAD. Replace Base64 with one
@@ -41,7 +52,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   namespace and reference it from Account materialization. Prove backup,
   restore and dispute recovery before removing plaintext duplication.
 
-## 2. Crash, corruption and load evidence — P1, open
+## 3. Crash, corruption and load evidence — P1, open
 - [ ] Add one real Anvil contract-event dispute E2E after payment, HTLC,
   same-J/cross-J swap and pull state. Exercise malformed/oversized optional
   transformer arguments, compare final Depository reserves/debts to the
@@ -63,7 +74,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   descriptors; then introduce Runtime→Entity→Account COW only behind
   byte-identical differential roots and measured clone counters.
 
-## 3. Public Ethereum and TRON proof — P0 release blocker, open
+## 4. Public Ethereum and TRON proof — P0 release blocker, open
 
 - [ ] Finish the native TRON adapter: protobuf transaction signing/broadcast,
   live energy fee limits, SolidityNode finality, complete authenticated
@@ -80,7 +91,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   headers commit transactions rather than Ethereum receipt tries; never
   synthesize an Ethereum MPT proof or trust one RPC witness.
 
-## 4. Immutable mainnet release pipeline — P0 release blocker, open
+## 5. Immutable mainnet release pipeline — P0 release blocker, open
 
 - [ ] Extend the candidate binding already enforced for isolated E2E run/shard
   manifests to unit, contract, scenario, recovery, public-chain and final

@@ -372,8 +372,20 @@ export async function handleCrossPullClose(
   }
 
   const beneficiaryIsLeft = pull.amount > 0n;
-  if (byLeft !== beneficiaryIsLeft) {
-    return { success: false, error: `Only the pull beneficiary can close cross-j pull`, events };
+  // Cross-j close economics are authored by the Hub Runtime as one exact
+  // source+target cohort. The source Hub is the source-pull beneficiary; the
+  // target Hub is the target-pull payer. Letting the target User (beneficiary)
+  // propose its own close would let it choose cumulative settlement amounts
+  // that the target pull commitment alone does not bind.
+  const authorizedHubIsLeft = binding.leg === 'source'
+    ? beneficiaryIsLeft
+    : !beneficiaryIsLeft;
+  if (byLeft !== authorizedHubIsLeft) {
+    return {
+      success: false,
+      error: `Only the ${binding.leg} Hub can close cross-j pull`,
+      events,
+    };
   }
 
   const delta = ensureDelta(accountMachine, pull.tokenId);

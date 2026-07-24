@@ -173,11 +173,12 @@ export const applyMergedEntityInputs = async (
     input: RoutedEntityInput,
     replica: EntityReplica,
   ): RuntimeEntityInputApplyResult['inputOutcomes'][number]['committedAccountFrames'] => {
-    const counterparties = new Set(getEffectiveEntityInputTxs(input).flatMap(tx =>
+    const accountInputs = getEffectiveEntityInputTxs(input).flatMap(tx =>
       tx.type === 'accountInput' && (accountInputProposal(tx.data) || accountInputAck(tx.data))
-        ? [tx.data.fromEntityId.toLowerCase()]
-        : []));
-    return [...counterparties].flatMap(counterpartyEntityId => {
+        ? [tx.data]
+        : []);
+    return accountInputs.flatMap(accountInput => {
+      const counterpartyEntityId = accountInput.fromEntityId.toLowerCase();
       const account = [...replica.state.accounts.entries()].find(([entityId]) =>
         entityId.toLowerCase() === counterpartyEntityId)?.[1];
       // A malformed/rejected genesis Account frame deliberately commits no
@@ -185,11 +186,31 @@ export const applyMergedEntityInputs = async (
       // warning. Absence is therefore negative evidence for cross-J atomic
       // admission, not a Runtime invariant failure.
       if (!account) return [];
-      return [{
-        counterpartyEntityId,
-        height: account.currentFrame.height,
-        stateHash: String(account.currentFrame.stateHash || '').toLowerCase(),
-      }];
+      const finalHeight = account.currentFrame.height;
+      const finalStateHash = String(account.currentFrame.stateHash || '').toLowerCase();
+      const proposal = accountInputProposal(accountInput);
+      const ack = accountInputAck(accountInput);
+      const proposalCommitted = proposal?.frame.height === finalHeight &&
+        String(proposal.frame.stateHash || '').toLowerCase() === finalStateHash;
+      const ackCommitted = ack && (
+        (ack.height === finalHeight && String(ack.frameHash || '').toLowerCase() === finalStateHash) ||
+        (proposalCommitted &&
+          proposal.frame.height === ack.height + 1 &&
+          String(proposal.frame.prevFrameHash || '').toLowerCase() ===
+            String(ack.frameHash || '').toLowerCase())
+      );
+      return [
+        ...(ackCommitted ? [{
+          counterpartyEntityId,
+          height: ack.height,
+          stateHash: String(ack.frameHash || '').toLowerCase(),
+        }] : []),
+        ...(proposalCommitted ? [{
+          counterpartyEntityId,
+          height: proposal.frame.height,
+          stateHash: String(proposal.frame.stateHash || '').toLowerCase(),
+        }] : []),
+      ];
     });
   };
 

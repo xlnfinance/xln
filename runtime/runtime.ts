@@ -2552,6 +2552,7 @@ export const prepareAtomicCrossJAccountInputs = async (
             inputIndex: entry.inputIndex,
             kind: entry.outcome.kind,
             entityFrameCommitted: entry.entityFrameCommitted,
+            committedAccountFrames: entry.committedAccountFrames,
           })),
           localCrossJurisdictionEvents: preview.localCrossJurisdictionEventTrace.map(input => ({
             entityId: input.entityId,

@@ -123,6 +123,34 @@ const crossPulls = (
   accountTxs.filter((tx): tx is Extract<AccountTx, { type: 'pull_lock' }> =>
     tx.type === 'pull_lock' && tx.data.crossJurisdiction?.leg === leg);
 
+type CrossJCloseTx = Extract<AccountTx, { type: 'cross_pull_close' }>;
+
+const crossCloses = (
+  accountTxs: readonly AccountTx[],
+  leg: 'source' | 'target',
+): CrossJCloseTx[] => accountTxs.filter((tx): tx is CrossJCloseTx => {
+  if (tx.type !== 'cross_pull_close') return false;
+  return tx.data.pullId === (
+    leg === 'source'
+      ? tx.data.proof.sourcePullId
+      : tx.data.proof.targetPullId
+  );
+});
+
+const crossCloseKey = (tx: CrossJCloseTx): string => safeStringify({
+  operation: 'close',
+  orderId: tx.data.proof.orderId,
+  routeHash: String(tx.data.proof.routeHash || '').toLowerCase(),
+  sourcePullId: tx.data.proof.sourcePullId,
+  targetPullId: tx.data.proof.targetPullId,
+  fillRatio: tx.data.proof.fillRatio,
+  cumulativeSourceAmount: tx.data.proof.cumulativeSourceAmount,
+  cumulativeTargetAmount: tx.data.proof.cumulativeTargetAmount,
+  binaryHash: String(tx.data.proof.binaryHash || '').toLowerCase(),
+  closeMode: tx.data.proof.closeMode,
+  binary: tx.data.binary,
+});
+
 const effectiveAccountInputs = (input: RoutedEntityInput): AccountInput[] =>
   getEffectiveEntityInputTxs(input).flatMap(tx => tx.type === 'accountInput' ? [tx.data] : []);
 
@@ -251,6 +279,25 @@ const pairedPullListsMatch = (
   return true;
 };
 
+const pairedCloseListsMatch = (
+  sourceCloses: readonly CrossJCloseTx[],
+  targetCloses: readonly CrossJCloseTx[],
+): boolean => {
+  if (sourceCloses.length !== targetCloses.length) return false;
+  for (const sourceClose of sourceCloses) {
+    const key = crossCloseKey(sourceClose);
+    const matchingTargets = targetCloses.filter(targetClose =>
+      crossCloseKey(targetClose) === key);
+    if (matchingTargets.length !== 1) return false;
+    const targetClose = matchingTargets[0]!;
+    if (
+      sourceClose.data.pullId !== sourceClose.data.proof.sourcePullId ||
+      targetClose.data.pullId !== targetClose.data.proof.targetPullId
+    ) return false;
+  }
+  return true;
+};
+
 export type CrossJAccountInputPair = {
   pairKey: string;
   phase: 'proposal' | 'ack';
@@ -299,6 +346,8 @@ type CrossJAdmissionFrameCandidate = {
   frame: AccountFrame;
   sourcePulls: Array<Extract<AccountTx, { type: 'pull_lock' }>>;
   targetPulls: Array<Extract<AccountTx, { type: 'pull_lock' }>>;
+  sourceCloses: CrossJCloseTx[];
+  targetCloses: CrossJCloseTx[];
   alreadyCommitted: boolean;
   valid: boolean;
 };
@@ -312,13 +361,23 @@ const buildCrossJProposalFrameCandidate = (
   if (!proposal) return null;
   const sourcePulls = crossPulls(proposal.frame.accountTxs, 'source');
   const targetPulls = crossPulls(proposal.frame.accountTxs, 'target');
-  if (sourcePulls.length === 0 && targetPulls.length === 0) return null;
+  const sourceCloses = crossCloses(proposal.frame.accountTxs, 'source');
+  const targetCloses = crossCloses(proposal.frame.accountTxs, 'target');
+  if (
+    sourcePulls.length === 0 &&
+    targetPulls.length === 0 &&
+    sourceCloses.length === 0 &&
+    targetCloses.length === 0
+  ) return null;
   const source = sourceAdmissionCandidate(input, inputIndex, accountInput);
   const target = targetProposalCandidate(input, inputIndex, accountInput);
-  const routeKeys = [...sourcePulls, ...targetPulls].map(pull => admissionKey(
-    pull.data.crossJurisdiction!.orderId,
-    pull.data.crossJurisdiction!.routeHash,
-  ));
+  const routeKeys = [
+    ...[...sourcePulls, ...targetPulls].map(pull => `open\u0000${admissionKey(
+      pull.data.crossJurisdiction!.orderId,
+      pull.data.crossJurisdiction!.routeHash,
+    )}`),
+    ...[...sourceCloses, ...targetCloses].map(crossCloseKey),
+  ];
   return {
     inputIndex,
     pairKey: exactAdmissionPairKey(input, routeKeys, 'proposal'),
@@ -328,6 +387,8 @@ const buildCrossJProposalFrameCandidate = (
     frame: proposal.frame,
     sourcePulls,
     targetPulls,
+    sourceCloses,
+    targetCloses,
     alreadyCommitted: false,
     valid: new Set(routeKeys).size === routeKeys.length &&
       (sourcePulls.length === 0 || source !== null) &&
@@ -355,11 +416,21 @@ const buildCrossJAckFrameCandidate = (
   if (!frame) return null;
   const sourcePulls = crossPulls(frame.accountTxs, 'source');
   const targetPulls = crossPulls(frame.accountTxs, 'target');
-  if (sourcePulls.length === 0 && targetPulls.length === 0) return null;
-  const routeKeys = [...sourcePulls, ...targetPulls].map(pull => admissionKey(
-    pull.data.crossJurisdiction!.orderId,
-    pull.data.crossJurisdiction!.routeHash,
-  ));
+  const sourceCloses = crossCloses(frame.accountTxs, 'source');
+  const targetCloses = crossCloses(frame.accountTxs, 'target');
+  if (
+    sourcePulls.length === 0 &&
+    targetPulls.length === 0 &&
+    sourceCloses.length === 0 &&
+    targetCloses.length === 0
+  ) return null;
+  const routeKeys = [
+    ...[...sourcePulls, ...targetPulls].map(pull => `open\u0000${admissionKey(
+      pull.data.crossJurisdiction!.orderId,
+      pull.data.crossJurisdiction!.routeHash,
+    )}`),
+    ...[...sourceCloses, ...targetCloses].map(crossCloseKey),
+  ];
   return {
     inputIndex,
     pairKey: exactAdmissionPairKey(input, routeKeys, 'ack'),
@@ -369,6 +440,8 @@ const buildCrossJAckFrameCandidate = (
     frame,
     sourcePulls,
     targetPulls,
+    sourceCloses,
+    targetCloses,
     alreadyCommitted: frame === account?.currentFrame,
     valid: new Set(routeKeys).size === routeKeys.length,
   };
@@ -382,7 +455,9 @@ const admissionFramesMatch = (
   left.pairKey === right.pairKey &&
   left.originKey === right.originKey &&
   pairedPullListsMatch(left.sourcePulls, right.targetPulls) &&
-  pairedPullListsMatch(right.sourcePulls, left.targetPulls);
+  pairedPullListsMatch(right.sourcePulls, left.targetPulls) &&
+  pairedCloseListsMatch(left.sourceCloses, right.targetCloses) &&
+  pairedCloseListsMatch(right.sourceCloses, left.targetCloses);
 
 /** Structural only; monetary approval happens in the state-aware selector. */
 export const selectPotentialCrossJAccountInputPairs = (
@@ -455,9 +530,9 @@ const collectCrossJAdmissionCandidates = (
 });
 
 /**
- * Opening has two atomic phases: both Hub proposals at the User Runtime, then
- * both User ACKs at the Hub Runtime. Every pair must come from one exact source
- * Runtime frame. Later fill/close traffic remains ordinary bilateral traffic.
+ * Opening and closing both cross-j legs are atomic Runtime cohorts. Proposals
+ * and ACKs must carry the exact source/target pair from one source Runtime
+ * frame; a standalone monetary leg is dropped before Account consensus.
  */
 export const selectMatchedCrossJAccountInputPairs = (
   env: Env,
@@ -976,7 +1051,8 @@ export const validateInboundP2PEntityInputsEnvelope = (
     effectiveAccountInputs(input).some(accountInput => {
       const proposal = accountInputProposal(accountInput);
       return proposal?.frame.accountTxs.some(tx =>
-        tx.type === 'pull_lock' && tx.data.crossJurisdiction) === true;
+        (tx.type === 'pull_lock' && tx.data.crossJurisdiction) ||
+        tx.type === 'cross_pull_close') === true;
     }) ? [inputIndex] : []);
   if (crossJProposalIndexes.length > 0 || atomicPair) {
     const pairs = selectPotentialCrossJAccountInputPairs(validatedInputs);

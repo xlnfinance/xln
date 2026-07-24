@@ -756,6 +756,23 @@ export function cloneCrossJurisdictionCloseProof(
   };
 }
 
+export function withCrossJurisdictionCloseProofProgress(
+  route: CrossJurisdictionSwapRoute,
+  proof: CrossJurisdictionCloseProof,
+  updatedAt: number,
+): CrossJurisdictionSwapRoute {
+  return {
+    ...route,
+    cumulativeFillRatio: proof.fillRatio,
+    claimedRatio: proof.fillRatio,
+    filledSourceAmount: proof.cumulativeSourceAmount,
+    filledTargetAmount: proof.cumulativeTargetAmount,
+    sourceClaimed: proof.cumulativeSourceAmount,
+    targetClaimed: proof.cumulativeTargetAmount,
+    updatedAt,
+  };
+}
+
 export function buildCrossJurisdictionCloseProof(
   route: CrossJurisdictionSwapRoute,
   binary: string,

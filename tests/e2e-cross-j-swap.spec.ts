@@ -3354,14 +3354,22 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
     expect(filledTargetRoute?.filledSourceAmount).toBe(filledSourceRoute?.filledSourceAmount);
     expect(filledTargetRoute?.filledTargetAmount).toBe(filledSourceRoute?.filledTargetAmount);
     expect(BigInt(filledSourceRoute!.filledSourceAmount), 'full fill must consume the selected 300 USDC').toBe(tokenAmount(USDC, 300n));
-    const fullHubDeltas = await Promise.all([
-      readHubCrossDeltas(page, hubId, source.entityId, [USDC]),
-      readHubCrossDeltas(page, targetHub.entityId, target.entityId, [USDC]),
-    ]);
     const fullSourceAfter = filledSourceState.deltas[String(USDC)];
     const fullTargetAfter = filledTargetState.deltas[String(USDC)];
-    expect(fullHubDeltas[0][String(USDC)], 'source-hub USDC delta must exist after full fill').toEqual(fullSourceAfter);
-    expect(fullHubDeltas[1][String(USDC)], 'target-hub USDC delta must exist after full fill').toEqual(fullTargetAfter);
+    await expect.poll(async () => {
+      const [sourceHubDeltas, targetHubDeltas] = await Promise.all([
+        readHubCrossDeltas(page, hubId, source.entityId, [USDC]),
+        readHubCrossDeltas(page, targetHub.entityId, target.entityId, [USDC]),
+      ]);
+      return {
+        source: sourceHubDeltas[String(USDC)],
+        target: targetHubDeltas[String(USDC)],
+      };
+    }, {
+      timeout: 20_000,
+      intervals: [100, 250, 500],
+      message: 'both Hubs must commit the exact paired Account ACKs after full fill',
+    }).toEqual({ source: fullSourceAfter, target: fullTargetAfter });
     expectCrossTransfer(
       fullSourceBefore.deltas[String(USDC)],
       fullSourceAfter,
@@ -3482,16 +3490,23 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
     expect(partialSourceRoute?.filledTargetAmount).toBe(partialTargetRoute?.filledTargetAmount);
     expect(BigInt(partialSourceRoute!.filledSourceAmount)).toBeGreaterThan(0n);
     expect(BigInt(partialSourceRoute!.filledSourceAmount)).toBeLessThan(tokenAmount(WETH, 15n));
-    const partialHubDeltas = await Promise.all([
-      readHubCrossDeltas(page, hubId, source.entityId, [WETH]),
-      readHubCrossDeltas(page, targetHub.entityId, target.entityId, [USDC]),
-    ]);
-    expect(partialHubDeltas[0][String(WETH)], 'source-hub WETH delta must match after Clear').toEqual(
-      partialSourceAfter.deltas[String(WETH)],
-    );
-    expect(partialHubDeltas[1][String(USDC)], 'target-hub USDC delta must match after Clear').toEqual(
-      partialTargetAfter.deltas[String(USDC)],
-    );
+    await expect.poll(async () => {
+      const [sourceHubDeltas, targetHubDeltas] = await Promise.all([
+        readHubCrossDeltas(page, hubId, source.entityId, [WETH]),
+        readHubCrossDeltas(page, targetHub.entityId, target.entityId, [USDC]),
+      ]);
+      return {
+        source: sourceHubDeltas[String(WETH)],
+        target: targetHubDeltas[String(USDC)],
+      };
+    }, {
+      timeout: 20_000,
+      intervals: [100, 250, 500],
+      message: 'both Hubs must commit the exact paired Account ACKs after partial Clear',
+    }).toEqual({
+      source: partialSourceAfter.deltas[String(WETH)],
+      target: partialTargetAfter.deltas[String(USDC)],
+    });
     expectCrossTransfer(
       partialSourceBefore.deltas[String(WETH)],
       partialSourceAfter.deltas[String(WETH)],

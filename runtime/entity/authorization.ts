@@ -428,11 +428,15 @@ export const assertCertifiedOutputSemanticAuthority = (
     }
     case 'crossPullClose': {
       const route = requireSemanticRoute(currentState, tx.data.proof.orderId, tx.data.route);
-      assertSemanticSource(tx.type, source, [route.source.entityId]);
-      assertSemanticTarget(tx.type, target, route.target.counterpartyEntityId);
-      if (normalizeEntityRef(tx.data.counterpartyEntityId) !== normalizeEntityRef(route.target.entityId)) {
+      assertSemanticSource(tx.type, source, [route.source.counterpartyEntityId]);
+      assertSemanticTarget(tx.type, target, route.target.entityId);
+      if (
+        normalizeEntityRef(tx.data.counterpartyEntityId) !==
+        normalizeEntityRef(route.target.counterpartyEntityId)
+      ) {
         throw new Error(
-          `CONSENSUS_OUTPUT_CROSS_PULL_COUNTERPARTY_MISMATCH:${tx.data.counterpartyEntityId}:${route.target.entityId}`,
+          `CONSENSUS_OUTPUT_CROSS_PULL_COUNTERPARTY_MISMATCH:` +
+          `${tx.data.counterpartyEntityId}:${route.target.counterpartyEntityId}`,
         );
       }
       return;
