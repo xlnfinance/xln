@@ -348,6 +348,7 @@ import {
   type ReliableReceiptSenderCheckpoint,
 } from './machine/reliable-delivery';
 import { reliableIdentityExactKey } from './machine/reliable-frontier';
+import { mergeDurableReceiptOnlyInputs } from './machine/reliable-durable-inputs';
 import { restoreDurableOutputRetryState } from './machine/durable-output-retry';
 import { submitRuntimeJOutbox } from './machine/j-submit';
 import {
@@ -2896,27 +2897,6 @@ const applyRuntimeInput = async (
     }
     markApplyProfile('finalize');
 
-    const endTime = getPerfMs();
-    const applyElapsedMs = Math.round(endTime - startTime);
-    if (RUNTIME_APPLY_PROFILE || applyElapsedMs >= RUNTIME_APPLY_SLOW_MS) {
-      runtimeLog.info('apply.profile', {
-        height: env.height,
-        elapsedMs: applyElapsedMs,
-        runtimeTxs: mergedRuntimeTxs.length,
-        entityInputs: appliedEntityInputs.length,
-        entityTxs: appliedEntityInputs.reduce((sum, input) => sum + Number(input.entityTxs?.length || 0), 0),
-        outputs: entityOutbox.length,
-        jOutputs: jOutbox.length,
-        phases: cumulativeMarksToPhases(applyProfileMarks, applyElapsedMs),
-      });
-    }
-    if (DEBUG) {
-      runtimeLog.debug('tick.completed', {
-        height: env.height - 1,
-        elapsedMs: applyElapsedMs,
-      });
-    }
-
     const durableReliableIngressSources = new Map<string, Set<string>>();
     for (const commit of reliableIngressCommits) {
       if (!commit.key) continue;
@@ -2956,38 +2936,15 @@ const applyRuntimeInput = async (
         if (lane.from) return [lane];
         return [...sources].sort().map(source => ({ ...lane, from: source }));
       }));
-    const persistedEntityInputs = [...appliedEntityInputs];
-    for (const input of durableReceiptOnlyInputs) {
-      const inputSourceRuntimeId = normalizeRuntimeId(input.from);
-      if (!inputSourceRuntimeId) {
-        throw new Error('RUNTIME_RELIABLE_DURABLE_INPUT_SOURCE_MISSING');
-      }
-      const persistedInput: RoutedEntityInput = { ...input, from: inputSourceRuntimeId };
-      const inputIdentity = getInputReliableIdentity(input);
-      const inputKey = inputIdentity ? reliableIdentityExactKey(inputIdentity) : null;
-      const matchingIndex = inputKey === null ? -1 : persistedEntityInputs.findIndex(candidate =>
-        splitRoutedOutputByDeliveryLane(candidate).some(lane => {
-          const identity = getInputReliableIdentity(lane);
-          return identity !== null && reliableIdentityExactKey(identity) === inputKey;
-        }));
-      if (matchingIndex < 0) {
-        persistedEntityInputs.push(persistedInput);
-        continue;
-      }
-      const existing = persistedEntityInputs[matchingIndex]!;
-      if (!existing.from) {
-        // `existing` may be the canonical merge of several independently
-        // certified delivery lanes. Provenance annotates that applied batch;
-        // replacing it with one receipt lane silently drops the other txs
-        // from WAL and makes crash replay build a different Entity frame.
-        persistedEntityInputs[matchingIndex] = { ...existing, from: inputSourceRuntimeId };
-      } else if (normalizeRuntimeId(existing.from) !== inputSourceRuntimeId) {
-        throw new Error(
-          `RUNTIME_RELIABLE_APPLIED_INPUT_SOURCE_CONFLICT:` +
-          `${normalizeRuntimeId(existing.from)}:${inputSourceRuntimeId}`,
-        );
-      }
-    }
+    // `existing` may be the canonical merge of several independently
+    // certified delivery lanes. Provenance annotates that applied batch;
+    // replacing it with one receipt lane silently drops the other txs from WAL
+    // and makes crash replay build a different Entity frame.
+    const persistedEntityInputs = mergeDurableReceiptOnlyInputs(
+      appliedEntityInputs,
+      durableReceiptOnlyInputs,
+    );
+    markApplyProfile('durableReceiptInputs');
     const appliedRuntimeInput: RuntimeInput = {
       runtimeTxs: mergedRuntimeTxs,
       entityInputs: persistedEntityInputs,
@@ -2996,6 +2953,25 @@ const applyRuntimeInput = async (
         ? { reliableReceipts: runtimeInput.reliableReceipts }
         : {}),
     };
+    const applyElapsedMs = Math.round(getPerfMs() - startTime);
+    if (RUNTIME_APPLY_PROFILE || applyElapsedMs >= RUNTIME_APPLY_SLOW_MS) {
+      runtimeLog.info('apply.profile', {
+        height: env.height,
+        elapsedMs: applyElapsedMs,
+        runtimeTxs: mergedRuntimeTxs.length,
+        entityInputs: appliedEntityInputs.length,
+        entityTxs: appliedEntityInputs.reduce((sum, input) => sum + Number(input.entityTxs?.length || 0), 0),
+        outputs: entityOutbox.length,
+        jOutputs: jOutbox.length,
+        phases: cumulativeMarksToPhases(applyProfileMarks, applyElapsedMs),
+      });
+    }
+    if (DEBUG) {
+      runtimeLog.debug('tick.completed', {
+        height: env.height - 1,
+        elapsedMs: applyElapsedMs,
+      });
+    }
     return {
       entityOutbox,
       mergedInputs: preparedEntityInputs.inputs,
