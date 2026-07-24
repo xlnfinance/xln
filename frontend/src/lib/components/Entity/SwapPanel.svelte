@@ -107,6 +107,7 @@
   import SwapCompletionDialog from './SwapCompletionDialog.svelte';
   import SwapOrderbookSection from './SwapOrderbookSection.svelte';
   import SwapTradeTicket from './SwapTradeTicket.svelte';
+  import SwapTicketV2 from './SwapTicketV2.svelte';
   import type { SwapOrderbookLevelClickDetail, SwapOrderbookPairOption } from './swap-orderbook-view';
   import './SwapPanel.css';
 
@@ -124,6 +125,12 @@
   let selectedBookAccountId = '';
   let activeOrderAccountId = '';
   let showOrderbook = true;
+  let useTicketV2 = typeof localStorage !== 'undefined' && localStorage.getItem('xln-swap-ticket-v2') === '1';
+
+  function toggleTicketV2(): void {
+    useTicketV2 = !useTicketV2;
+    localStorage.setItem('xln-swap-ticket-v2', useTicketV2 ? '1' : '0');
+  }
   let selectedRouteEntityId = '';
   let selectedRouteEntityName = '';
   let selectedRouteJurisdictionLabel = '';
@@ -3314,7 +3321,68 @@
   class="swap-panel"
   bind:this={swapPanelRoot}
 >
+  <div class="ticket-version-row">
+    <button
+      type="button"
+      class="ticket-version-toggle"
+      class:active={useTicketV2}
+      data-testid="swap-ticket-v2-toggle"
+      aria-pressed={useTicketV2}
+      on:click={toggleTicketV2}
+    >
+      {useTicketV2 ? 'Classic view' : 'New view'}
+    </button>
+  </div>
   <div class="trade-grid" class:book-open={showOrderbook}>
+    {#if useTicketV2}
+      <SwapTicketV2
+        bind:showOrderbook
+        bind:createOrderAccountId
+        {selectedHubOptions}
+        {handleSelectedHubChange}
+        {hubJurisdictionLabel}
+        {selectedSourceEntityValue}
+        {sourceEntityOptions}
+        {handleSourceEntityChange}
+        {orderAmountInput}
+        {handleOrderAmountInput}
+        bind:giveTokenId
+        {giveTokenOptions}
+        {handleGiveTokenChange}
+        {giveTokenSymbol}
+        {formattedAvailableGiveAmount}
+        {flipSwapTokens}
+        bind:routeSelectElement
+        bind:selectedRouteValue
+        {visibleRouteOptions}
+        {handleRouteSelectChange}
+        bind:wantTokenId
+        {wantTokenOptions}
+        {handleWantTokenChange}
+        {wantTokenSymbol}
+        {wantAmount}
+        {wantToken}
+        {formatAmount}
+        {targetCapacityLabel}
+        {tokenClass}
+        {tokenIconText}
+        bind:priceRatioInput
+        {quoteTokenSymbol}
+        {handlePriceRatioInput}
+        {stepPrice}
+        {useMarketPrice}
+        {marketPriceTicks}
+        {marketPriceLabel}
+        {capacityWarning}
+        {autoCapacityNote}
+        {crossSwapSetupSteps}
+        {placingSwapOffer}
+        {swapActionDisabledReason}
+        {placeSwapOffer}
+        {swapSubmitLabel}
+        {submitError}
+      />
+    {:else}
     <SwapTradeTicket
       bind:showOrderbook
       {swapRouteMode}
@@ -3426,6 +3494,7 @@
       {swapSubmitLabel}
       {submitError}
     />
+    {/if}
 
     {#if showOrderbook}
       <SwapOrderbookSection

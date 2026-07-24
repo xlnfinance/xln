@@ -126,6 +126,29 @@
     color: #f8d36f;
   }
 
+  .swap-panel .ticket-version-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 8px;
+  }
+
+  .swap-panel .ticket-version-toggle {
+    height: 26px;
+    padding: 0 10px;
+    border: 1px solid #2b3040;
+    border-radius: 7px;
+    background: #11141b;
+    color: #a7afbd;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .swap-panel .ticket-version-toggle.active {
+    border-color: #3a4152;
+    color: #e8eaed;
+  }
+
   .swap-panel .anyswap-builder {
     display: grid;
     grid-template-columns: minmax(0, 1fr);

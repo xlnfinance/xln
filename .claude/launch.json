@@ -1,0 +1,21 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "xln-frontend",
+      "url": "https://localhost:8080",
+      "port": 8080
+    },
+    {
+      "name": "xln-frontend-http",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "frontend",
+      "env": {
+        "XLN_VITE_FORCE_HTTP": "1",
+        "VITE_DEV_PORT": "8099"
+      },
+      "port": 8099
+    }
+  ]
+}

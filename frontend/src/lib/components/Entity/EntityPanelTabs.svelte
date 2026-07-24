@@ -3916,8 +3916,8 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     min-width: 0;
   }
 
-  .content :global(input:not([type="range"]):not([type="checkbox"]):not(.entity-input-field):not(.move-amount-input):not(.move-external-input)),
-  .content :global(select:not(.move-token-select)) {
+  .content :global(input:not([type="range"]):not([type="checkbox"]):not(.entity-input-field):not(.move-amount-input):not(.move-external-input):not(.v2-amount):not(.v2-rate-input)),
+  .content :global(select:not(.move-token-select):not(.v2-native)) {
     background: color-mix(in srgb, var(--theme-input-bg, #09090b) 88%, transparent) !important;
     border: 1px solid color-mix(in srgb, var(--theme-input-border, #27272a) 82%, transparent) !important;
     border-radius: 6px !important;
@@ -3926,8 +3926,8 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     font-size: 13px !important;
   }
 
-  .content :global(input:not([type="range"]):not([type="checkbox"]):focus),
-  .content :global(select:focus) {
+  .content :global(input:not([type="range"]):not([type="checkbox"]):not(.v2-amount):not(.v2-rate-input):focus),
+  .content :global(select:not(.v2-native):focus) {
     outline: none !important;
     border-color: var(--theme-input-focus, #fbbf24) !important;
   }
