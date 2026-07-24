@@ -43,10 +43,15 @@ const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const p2pLog = createStructuredLogger('p2p');
 const MIN_GOSSIP_POLL_MS = 250;
 const SLOW_BROWSER_TIMER_MS = 32;
+const ENTITY_INPUT_TARGET_OFFLINE = 'ENTITY_INPUT_TARGET_NOT_CONNECTED';
 const RELIABLE_RECEIPT_TARGET_OFFLINE = 'ENTITY_INPUT_RECEIPT_TARGET_NOT_CONNECTED';
 const RETRYABLE_INGRESS_BACKPRESSURE = 'INBOUND_ENTITY_RUNTIME_QUIESCING:';
 
 export const reportRelayClientError = (env: Env, relay: string, error: Error): void => {
+  if (error.message === ENTITY_INPUT_TARGET_OFFLINE) {
+    env.info('network', 'ENTITY_INPUT_TARGET_OFFLINE', { relay, error: error.message });
+    return;
+  }
   if (error.message === RELIABLE_RECEIPT_TARGET_OFFLINE) {
     env.info('network', 'RELIABLE_RECEIPT_TARGET_OFFLINE', { relay, error: error.message });
     return;
