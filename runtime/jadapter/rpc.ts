@@ -80,6 +80,7 @@ import {
   parseKnownDepositoryLog,
 } from './depository-event-codec';
 import { decodeJBatch, getBatchSize, isBatchEmpty, preflightBatchForE2 } from '../jurisdiction/batch';
+import { assertSealedJBatchBinding } from '../jurisdiction/sealed-batch';
 import { requireUsableContractAddress } from '../jurisdiction/contract-address';
 import { prepareSignedBatch } from '../hanko/batch';
 import { hashDisputeProofHankoPayload } from '../hanko/onchain-domain';
@@ -2178,6 +2179,17 @@ export async function createRpcAdapter(
     // === High-level J-tx submission ===
     async submitTx(jTx: JTx, options: { env: Env; signerId?: string; signerPrivateKey?: Uint8Array; timestamp?: number }): Promise<JSubmitResult> {
       const { env, signerId, signerPrivateKey, timestamp } = options;
+
+      if (jTx.type === 'batch') {
+        try {
+          assertSealedJBatchBinding(jTx, {
+            chainId: config.chainId,
+            depositoryAddress: addresses.depository,
+          });
+        } catch (error) {
+          return makeJAdapterFailureResult(error);
+        }
+      }
 
       console.log(`📤 [JAdapter:rpc] submitTx type=${jTx.type} entity=${jTx.entityId.slice(-4)}`);
 

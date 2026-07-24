@@ -13,8 +13,9 @@
 
 import type { EntityState, EntityTx, EntityInput } from '../../../types';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
-import { initJBatch, batchAddReserveToReserve, getEffectiveDraftReserveBalance } from '../../../jurisdiction/batch';
+import { initJBatch, batchAddReserveToReserve } from '../../../jurisdiction/batch';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
+import { getReserveCandidateIssue } from './j-batch-reserve-admission';
 
 const jBatchActionLog = createStructuredLogger('entity.jbatch');
 
@@ -27,19 +28,19 @@ export async function handleR2R(
   const outputs: EntityInput[] = [];
 
   // Validate: Do we have enough reserve?
-  const currentReserve = getEffectiveDraftReserveBalance(
-    entityState.entityId,
-    entityState.reserves.get(tokenId) || 0n,
-    entityState.jBatchState?.batch,
+  const reserveIssue = getReserveCandidateIssue(entityState, {
+    type: 'reserveToReserve',
+    receivingEntity: toEntityId,
     tokenId,
-  );
-  if (currentReserve < amount) {
-    const msg = `❌ Insufficient reserve: have ${currentReserve}, need ${amount} token ${tokenId}`;
+    amount,
+  });
+  if (reserveIssue) {
+    const msg = `❌ Insufficient spendable reserve: have ${reserveIssue.availableAfterDebt}, need ${amount} token ${tokenId}`;
     addMessage(newState, msg);
     jBatchActionLog.error('r2r.insufficient_reserve', {
       entity: shortId(entityState.entityId),
       tokenId,
-      currentReserve: currentReserve.toString(),
+      currentReserve: reserveIssue.availableAfterDebt.toString(),
       amount: amount.toString(),
     });
     throw new Error(msg);

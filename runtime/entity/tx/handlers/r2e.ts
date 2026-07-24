@@ -8,7 +8,8 @@
 
 import type { EntityInput, EntityState, EntityTx } from '../../../types';
 import { addMessage, cloneEntityState } from '../../../state-helpers';
-import { batchAddReserveToExternal, getEffectiveDraftReserveBalance, initJBatch } from '../../../jurisdiction/batch';
+import { batchAddReserveToExternal, initJBatch } from '../../../jurisdiction/batch';
+import { getReserveCandidateIssue } from './j-batch-reserve-admission';
 
 export async function handleR2E(
   entityState: EntityState,
@@ -18,14 +19,14 @@ export async function handleR2E(
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
 
-  const currentReserve = getEffectiveDraftReserveBalance(
-    entityState.entityId,
-    entityState.reserves.get(tokenId) || 0n,
-    entityState.jBatchState?.batch,
+  const reserveIssue = getReserveCandidateIssue(entityState, {
+    type: 'reserveToExternalToken',
+    receivingEntity,
     tokenId,
-  );
-  if (currentReserve < amount) {
-    const message = `❌ Insufficient reserve: have ${currentReserve}, need ${amount} token ${tokenId}`;
+    amount,
+  });
+  if (reserveIssue) {
+    const message = `❌ Insufficient spendable reserve: have ${reserveIssue.availableAfterDebt}, need ${amount} token ${tokenId}`;
     addMessage(newState, message);
     throw new Error(message);
   }

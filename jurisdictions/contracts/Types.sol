@@ -207,6 +207,24 @@ struct Batch {
 
 // ========== ENUMS ==========
 
+enum BatchItemResult {
+  Applied,
+  InvalidSignature,
+  InsufficientBalance
+}
+
+enum BatchOperationType {
+  ReserveToReserve,
+  CollateralToReserve,
+  Settlement,
+  ReserveToCollateral,
+  ReserveToExternalToken
+}
+
+enum BatchSkipReason {
+  InsufficientBalance
+}
+
 enum MessageType {
   CooperativeUpdate,
   DisputeProof,

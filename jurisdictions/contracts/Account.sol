@@ -844,12 +844,18 @@ library Account {
     bytes32 entityId,
     Settlement[] memory settlements,
     address entityProvider
-  ) external returns (bool completeSuccess) {
-    completeSuccess = true;
+  ) external returns (BatchItemResult[] memory results) {
+    results = new BatchItemResult[](settlements.length);
     for (uint i = 0; i < settlements.length; i++) {
-      if (!_settleDiffs(_reserves, debtOutstanding, _accounts, _collaterals, entityId, settlements[i], entityProvider)) {
-        completeSuccess = false;
-      }
+      results[i] = _settleDiffs(
+        _reserves,
+        debtOutstanding,
+        _accounts,
+        _collaterals,
+        entityId,
+        settlements[i],
+        entityProvider
+      );
     }
   }
 
@@ -861,7 +867,7 @@ library Account {
     bytes32 entityId,
     CollateralToReserve memory c2r,
     address entityProvider
-  ) external returns (bool) {
+  ) external returns (BatchItemResult) {
     bool isLeft = entityId < c2r.counterparty;
     bytes32 leftEntity = isLeft ? entityId : c2r.counterparty;
     bytes32 rightEntity = isLeft ? c2r.counterparty : entityId;
@@ -893,13 +899,13 @@ library Account {
 
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(c2r.sig, hash);
     if (!valid || recoveredEntity != c2r.counterparty) {
-      return false;
+      return BatchItemResult.InvalidSignature;
     }
 
     // Apply diffs
     uint tokenId = c2r.tokenId;
     AccountCollateral storage col = _collaterals[acct_key][tokenId];
-    if (col.collateral < amount) revert E3();
+    if (col.collateral < amount) return BatchItemResult.InsufficientBalance;
 
     _increaseReserve(_reserves, entityId, tokenId, amount);
     col.collateral -= amount;
@@ -928,7 +934,7 @@ library Account {
     });
     emit AccountSettled(settled);
 
-    return true;
+    return BatchItemResult.Applied;
   }
 
   /// @notice Process dispute starts only
@@ -957,7 +963,7 @@ library Account {
     bytes32 initiator,
     Settlement memory s,
     address entityProvider
-  ) internal returns (bool) {
+  ) internal returns (BatchItemResult) {
     bytes32 leftEntity = s.leftEntity;
     bytes32 rightEntity = s.rightEntity;
     if (leftEntity == rightEntity || leftEntity >= rightEntity) revert E2();
@@ -994,20 +1000,39 @@ library Account {
 
     try IEntityProvider(entityProvider).verifyHankoSignature(s.sig, hash) returns (bytes32 recoveredEntity, bool valid) {
       if (!valid || recoveredEntity != counterparty) {
-        return false;
+        return BatchItemResult.InvalidSignature;
       }
     } catch {
-      return false;
+      return BatchItemResult.InvalidSignature;
+    }
+
+    // A settlement is one signed bilateral state transition. Check every
+    // balance first so an expected state race skips the whole settlement,
+    // never a prefix of its token diffs.
+    for (uint j = 0; j < s.diffs.length; j++) {
+      SettlementDiff memory diff = s.diffs[j];
+      uint tokenId = diff.tokenId;
+      if (diff.leftDiff + diff.rightDiff + diff.collateralDiff != 0) revert E2();
+      if (
+        diff.leftDiff < 0 &&
+        _spendableReserve(_reserves, debtOutstanding, leftEntity, tokenId) < uint(-diff.leftDiff)
+      ) return BatchItemResult.InsufficientBalance;
+      if (
+        diff.rightDiff < 0 &&
+        _spendableReserve(_reserves, debtOutstanding, rightEntity, tokenId) < uint(-diff.rightDiff)
+      ) return BatchItemResult.InsufficientBalance;
+      if (
+        diff.collateralDiff < 0 &&
+        _collaterals[acct_key][tokenId].collateral < uint(-diff.collateralDiff)
+      ) return BatchItemResult.InsufficientBalance;
     }
 
     // Apply diffs
     for (uint j = 0; j < s.diffs.length; j++) {
       SettlementDiff memory diff = s.diffs[j];
       uint tokenId = diff.tokenId;
-      if (diff.leftDiff + diff.rightDiff + diff.collateralDiff != 0) revert E2();
 
       if (diff.leftDiff < 0) {
-        if (_spendableReserve(_reserves, debtOutstanding, leftEntity, tokenId) < uint(-diff.leftDiff)) revert E3();
         _reserves[leftEntity][tokenId] -= uint(-diff.leftDiff);
         emit ReserveUpdated(leftEntity, tokenId, _reserves[leftEntity][tokenId]);
       } else if (diff.leftDiff > 0) {
@@ -1016,7 +1041,6 @@ library Account {
       }
 
       if (diff.rightDiff < 0) {
-        if (_spendableReserve(_reserves, debtOutstanding, rightEntity, tokenId) < uint(-diff.rightDiff)) revert E3();
         _reserves[rightEntity][tokenId] -= uint(-diff.rightDiff);
         emit ReserveUpdated(rightEntity, tokenId, _reserves[rightEntity][tokenId]);
       } else if (diff.rightDiff > 0) {
@@ -1026,7 +1050,6 @@ library Account {
 
       AccountCollateral storage col = _collaterals[acct_key][tokenId];
       if (diff.collateralDiff < 0) {
-        if (col.collateral < uint(-diff.collateralDiff)) revert E3();
         col.collateral -= uint(-diff.collateralDiff);
       } else if (diff.collateralDiff > 0) {
         col.collateral += uint(diff.collateralDiff);
@@ -1094,7 +1117,7 @@ library Account {
     });
     emit AccountSettled(settled);
 
-    return true;
+    return BatchItemResult.Applied;
   }
 
   function _spendableReserve(

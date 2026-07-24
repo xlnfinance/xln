@@ -208,6 +208,7 @@ export interface DepositoryInterface extends Interface {
   getEvent(
     nameOrSignatureOrTopic:
       | "AccountSettled"
+      | "BatchOperationSkipped"
       | "CooperativeClose"
       | "DebtCreated"
       | "DebtEnforced"
@@ -440,6 +441,37 @@ export namespace AccountSettledEvent {
   export type OutputTuple = [settled: AccountSettlementStructOutput[]];
   export interface OutputObject {
     settled: AccountSettlementStructOutput[];
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace BatchOperationSkippedEvent {
+  export type InputTuple = [
+    entityId: BytesLike,
+    batchHash: BytesLike,
+    nonce: BigNumberish,
+    operationType: BigNumberish,
+    operationIndex: BigNumberish,
+    reason: BigNumberish
+  ];
+  export type OutputTuple = [
+    entityId: string,
+    batchHash: string,
+    nonce: bigint,
+    operationType: bigint,
+    operationIndex: bigint,
+    reason: bigint
+  ];
+  export interface OutputObject {
+    entityId: string;
+    batchHash: string;
+    nonce: bigint;
+    operationType: bigint;
+    operationIndex: bigint;
+    reason: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -1229,6 +1261,13 @@ export interface Depository extends BaseContract {
     AccountSettledEvent.OutputObject
   >;
   getEvent(
+    key: "BatchOperationSkipped"
+  ): TypedContractEvent<
+    BatchOperationSkippedEvent.InputTuple,
+    BatchOperationSkippedEvent.OutputTuple,
+    BatchOperationSkippedEvent.OutputObject
+  >;
+  getEvent(
     key: "CooperativeClose"
   ): TypedContractEvent<
     CooperativeCloseEvent.InputTuple,
@@ -1330,6 +1369,17 @@ export interface Depository extends BaseContract {
       AccountSettledEvent.InputTuple,
       AccountSettledEvent.OutputTuple,
       AccountSettledEvent.OutputObject
+    >;
+
+    "BatchOperationSkipped(bytes32,bytes32,uint256,uint8,uint256,uint8)": TypedContractEvent<
+      BatchOperationSkippedEvent.InputTuple,
+      BatchOperationSkippedEvent.OutputTuple,
+      BatchOperationSkippedEvent.OutputObject
+    >;
+    BatchOperationSkipped: TypedContractEvent<
+      BatchOperationSkippedEvent.InputTuple,
+      BatchOperationSkippedEvent.OutputTuple,
+      BatchOperationSkippedEvent.OutputObject
     >;
 
     "CooperativeClose(bytes32,bytes32,uint256)": TypedContractEvent<

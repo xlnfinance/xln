@@ -3,7 +3,6 @@ import { describe, expect, test } from 'bun:test';
 import {
   createEmptyBatch,
   getDraftBatchReserveDelta,
-  getEffectiveDraftReserveBalance,
   simulateDraftBatchReserveAvailability,
 } from '../jurisdiction/batch';
 
@@ -22,7 +21,6 @@ describe('j-batch draft reserve availability', () => {
     });
 
     expect(getDraftBatchReserveDelta(entityId, batch, 1)).toBe(22n);
-    expect(getEffectiveDraftReserveBalance(entityId, 0n, batch, 1)).toBe(22n);
 
     batch.reserveToExternalToken.push({
       receivingEntity: `0x${'33'.repeat(32)}`,
@@ -31,7 +29,6 @@ describe('j-batch draft reserve availability', () => {
     });
 
     expect(getDraftBatchReserveDelta(entityId, batch, 1)).toBe(0n);
-    expect(getEffectiveDraftReserveBalance(entityId, 0n, batch, 1)).toBe(0n);
   });
 
   test('tracks net draft reserve after mixed incoming and outgoing ops', () => {
@@ -65,7 +62,6 @@ describe('j-batch draft reserve availability', () => {
     });
 
     expect(getDraftBatchReserveDelta(entityId, batch, 1)).toBe(8n);
-    expect(getEffectiveDraftReserveBalance(entityId, 2n, batch, 1)).toBe(10n);
   });
 
   test('treats outgoing debts as senior claim before reserve withdrawal', () => {
@@ -192,6 +188,114 @@ describe('j-batch draft reserve availability', () => {
     const simulation = simulateDraftBatchReserveAvailability(entityId, new Map([[1, 0n]]), batch, new Map());
 
     expect(simulation.issues).toHaveLength(0);
+    expect(simulation.reservesByToken.get(1) ?? 0n).toBe(0n);
+  });
+
+  test('pre-enforces settlement debts and skips only the now-insolvent settlement', () => {
+    const entityId = `0x${'12'.repeat(32)}`;
+    const counterparty = `0x${'34'.repeat(32)}`;
+    const batch = createEmptyBatch();
+    batch.settlements.push(
+      {
+        leftEntity: entityId,
+        rightEntity: counterparty,
+        diffs: [{
+          tokenId: 1,
+          leftDiff: 100n,
+          rightDiff: -100n,
+          collateralDiff: 0n,
+          ondeltaDiff: 0n,
+        }],
+        forgiveDebtsInTokenIds: [],
+        sig: '0x1234',
+        entityProvider: `0x${'56'.repeat(20)}`,
+        hankoData: '0x',
+        nonce: 1,
+      },
+      {
+        leftEntity: entityId,
+        rightEntity: counterparty,
+        diffs: [{
+          tokenId: 1,
+          leftDiff: -100n,
+          rightDiff: 100n,
+          collateralDiff: 0n,
+          ondeltaDiff: 0n,
+        }],
+        forgiveDebtsInTokenIds: [],
+        sig: '0x5678',
+        entityProvider: `0x${'56'.repeat(20)}`,
+        hankoData: '0x',
+        nonce: 2,
+      },
+    );
+
+    const simulation = simulateDraftBatchReserveAvailability(
+      entityId,
+      new Map([[1, 0n]]),
+      batch,
+      new Map([[1, 50n]]),
+    );
+
+    expect(simulation.issues).toHaveLength(1);
+    expect(simulation.issues[0]).toMatchObject({
+      tokenId: 1,
+      opType: 'settlement',
+      opIndex: 1,
+      failureMode: 'skipped',
+      requiredAmount: 100n,
+      availableAfterDebt: 50n,
+      remainingDebtAfterSweep: 50n,
+    });
+    expect(simulation.reservesByToken.get(1)).toBe(100n);
+    expect(simulation.outgoingDebtByToken.get(1)).toBe(50n);
+  });
+
+  test('continues after a skipped reserve operation', () => {
+    const entityId = `0x${'78'.repeat(32)}`;
+    const batch = createEmptyBatch();
+    batch.reserveToReserve.push(
+      { receivingEntity: `0x${'89'.repeat(32)}`, tokenId: 1, amount: 6n },
+      { receivingEntity: `0x${'9a'.repeat(32)}`, tokenId: 2, amount: 4n },
+    );
+
+    const simulation = simulateDraftBatchReserveAvailability(
+      entityId,
+      new Map([[1, 5n], [2, 10n]]),
+      batch,
+      new Map(),
+    );
+
+    expect(simulation.issues).toHaveLength(1);
+    expect(simulation.issues[0]).toMatchObject({
+      opType: 'reserveToReserve',
+      opIndex: 0,
+      failureMode: 'skipped',
+    });
+    expect(simulation.reservesByToken.get(1)).toBe(5n);
+    expect(simulation.reservesByToken.get(2)).toBe(6n);
+  });
+
+  test('marks unreturned flashloan as a whole-batch revert', () => {
+    const entityId = `0x${'ab'.repeat(32)}`;
+    const batch = createEmptyBatch();
+    batch.flashloans.push({ tokenId: 1, amount: 10n });
+    batch.reserveToReserve.push({
+      receivingEntity: `0x${'cd'.repeat(32)}`,
+      tokenId: 1,
+      amount: 10n,
+    });
+
+    const simulation = simulateDraftBatchReserveAvailability(entityId, new Map(), batch, new Map());
+
+    expect(simulation.issues).toHaveLength(1);
+    expect(simulation.issues[0]).toMatchObject({
+      tokenId: 1,
+      opType: 'flashloan',
+      failureMode: 'batchRevert',
+      requiredAmount: 10n,
+      availableAfterDebt: 0n,
+    });
     expect(simulation.reservesByToken.get(1) ?? 0n).toBe(0n);
   });
 });

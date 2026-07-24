@@ -19,8 +19,9 @@
 import type { EntityState, EntityTx, EntityInput, AccountTx, JInput } from '../../../types';
 import { QUOTE_EXPIRY_MS } from '../../../types';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
-import { batchAddReserveToCollateral, getEffectiveDraftReserveBalance, initJBatch } from '../../../jurisdiction/batch';
+import { batchAddReserveToCollateral, initJBatch } from '../../../jurisdiction/batch';
 import { createStructuredLogger, formatAmount, shortId } from '../../../infra/logger';
+import { getReserveCandidateIssue } from './j-batch-reserve-admission';
 
 type MempoolOp = { accountId: string; tx: AccountTx };
 
@@ -47,21 +48,22 @@ export async function handleR2C(
   const mempoolOps: MempoolOp[] = [];
 
   // Validate: Do we have enough reserve?
-  const currentReserve = getEffectiveDraftReserveBalance(
-    entityState.entityId,
-    entityState.reserves.get(tokenId) || 0n,
-    entityState.jBatchState?.batch,
+  const reserveIssue = getReserveCandidateIssue(entityState, {
+    type: 'reserveToCollateral',
+    receivingEntity,
+    counterparty: counterpartyId,
     tokenId,
-  );
-  if (currentReserve < amount) {
+    amount,
+  });
+  if (reserveIssue) {
     r2cLog.debug('reserve.insufficient', {
       entity: shortId(entityState.entityId),
       tokenId,
-      currentReserve: formatAmount(currentReserve),
+      currentReserve: formatAmount(reserveIssue.availableAfterDebt),
       amount: formatAmount(amount),
     });
     addMessage(newState,
-      `❌ Insufficient reserve for collateral deposit: have ${currentReserve}, need ${amount} token ${tokenId}`
+      `❌ Insufficient spendable reserve for collateral deposit: have ${reserveIssue.availableAfterDebt}, need ${amount} token ${tokenId}`
     );
     return { newState, outputs };
   }

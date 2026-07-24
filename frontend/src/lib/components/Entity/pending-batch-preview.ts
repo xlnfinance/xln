@@ -319,13 +319,19 @@ export function formatBatchReserveIssue(
   const tokenLabel = pendingBatchTokenAmountLabel(issue.tokenId, issue.requiredAmount, options).replace(/^[\d.,\s]+/, '').trim();
   const spendable = pendingBatchTokenAmountLabel(issue.tokenId, issue.availableAfterDebt, options);
   const debtClaim = pendingBatchTokenAmountLabel(issue.tokenId, issue.debtClaimPaid, options);
+  if (issue.opType === 'flashloan') {
+    return `Batch will revert: flashloan requires ${pendingBatchTokenAmountLabel(issue.tokenId, issue.requiredAmount, options)}, but only ${spendable} remains.`;
+  }
+  if (issue.opType === 'settlement') {
+    return `Settlement will be skipped: debt sweep consumes ${debtClaim} first, leaving only ${spendable} spendable.`;
+  }
   if (issue.opType === 'reserveToExternalToken') {
-    return `Reserve withdrawal will fail: debt sweep consumes ${debtClaim} first, leaving only ${spendable} spendable.`;
+    return `Reserve withdrawal will be skipped: debt sweep consumes ${debtClaim} first, leaving only ${spendable} spendable.`;
   }
   if (issue.opType === 'reserveToCollateral') {
-    return `Reserve → Account will fail for ${tokenLabel}: debt sweep consumes ${debtClaim} first, leaving only ${spendable}.`;
+    return `Reserve → Account will be skipped for ${tokenLabel}: debt sweep consumes ${debtClaim} first, leaving only ${spendable}.`;
   }
-  return `Reserve → Reserve will fail for ${tokenLabel}: debt sweep consumes ${debtClaim} first, leaving only ${spendable}.`;
+  return `Reserve → Reserve will be skipped for ${tokenLabel}: debt sweep consumes ${debtClaim} first, leaving only ${spendable}.`;
 }
 
 export function getPendingBatchReserveIssue(options: {

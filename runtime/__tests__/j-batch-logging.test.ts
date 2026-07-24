@@ -9,7 +9,7 @@ import { cloneJBatch, initJBatch } from '../jurisdiction/batch';
 import { createEmptyEnv } from '../runtime';
 import { hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectEntityCoreDoc } from '../storage/projections';
-import type { EntityState, EntityTx, Env } from '../types';
+import type { DebtEntry, EntityState, EntityTx, Env } from '../types';
 
 const entityId = `0x${'aa'.repeat(32)}`;
 const counterpartyId = `0x${'bb'.repeat(32)}`;
@@ -72,6 +72,38 @@ test('entity j-batch operation handler state transitions are unchanged', async (
   const mintResult = await handleMintReserves(makeEntityState(), mintTx, {} as Env);
   expect(mintResult.jOutputs).toEqual([]);
   expect(mintResult.newState.messages.at(-1)).toContain('Jurisdiction unavailable for mint');
+});
+
+test('r2r admission treats open debt as senior to reserve', async () => {
+  const state = makeEntityState();
+  const debt = {
+    debtId: `${entityId}:1:0:1:0x01`,
+    tokenId: 1,
+    debtor: entityId,
+    creditor: counterpartyId,
+    counterparty: counterpartyId,
+    direction: 'out',
+    createdAmount: 50n,
+    paidAmount: 0n,
+    remainingAmount: 50n,
+    createdDebtIndex: 0,
+    currentDebtIndex: 0,
+    status: 'open',
+    createdAtBlock: 1,
+    createdTxHash: `0x${'01'.repeat(32)}`,
+    lastUpdatedBlock: 1,
+    lastUpdatedTxHash: `0x${'01'.repeat(32)}`,
+    lastEventType: 'DebtCreated',
+  } satisfies DebtEntry;
+  state.outDebtsByToken = new Map([[1, new Map([[debt.debtId, debt]])]]);
+  const tx = {
+    type: 'r2r',
+    data: { toEntityId: counterpartyId, tokenId: 1, amount: 60n },
+  } satisfies EntityTx;
+
+  await expect(handleR2R(state, tx)).rejects.toThrow(
+    'Insufficient spendable reserve: have 50, need 60 token 1',
+  );
 });
 
 test('removed legacy settlement commands cannot mutate the jurisdiction batch', async () => {

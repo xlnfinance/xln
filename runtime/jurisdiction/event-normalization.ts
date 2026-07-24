@@ -386,6 +386,40 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
     };
   }
 
+  if (type === 'BatchOperationSkipped') {
+    const entityId = normalizeEntity(data['entityId']);
+    const batchHash = typeof data['batchHash'] === 'string' ? data['batchHash'].trim().toLowerCase() : '';
+    const nonce = normalizeInt(data['nonce']);
+    const operationType = normalizeInt(data['operationType']);
+    const operationIndex = normalizeInt(data['operationIndex']);
+    const reason = normalizeInt(data['reason']);
+    if (
+      !entityId ||
+      !/^0x[0-9a-f]{64}$/.test(entityId) ||
+      !/^0x[0-9a-f]{64}$/.test(batchHash) ||
+      nonce === null ||
+      nonce < 1 ||
+      operationType === null ||
+      operationType < 0 ||
+      operationType > 4 ||
+      operationIndex === null ||
+      operationIndex < 0 ||
+      reason !== 0
+    ) return null;
+    return {
+      ...meta,
+      type,
+      data: {
+        entityId,
+        batchHash,
+        nonce,
+        operationType: operationType as 0 | 1 | 2 | 3 | 4,
+        operationIndex,
+        reason: 0,
+      },
+    };
+  }
+
   if (type === 'EntityProviderActionExecuted') {
     const entityId = normalizeEntity(data['entityId']);
     const actionNonce = normalizeBigNumberish(data['actionNonce']);
