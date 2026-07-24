@@ -6,17 +6,6 @@ fastest proof/fix to the hardest external gate. Completed work is deleted;
 long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 `docs/mainnet-engineering-principles.md`.
 
-## 0. Cross-j atomic close — P0, confirmed
-
-- [ ] Remove user-authored cross-j close economics. The Hub Runtime must build
-  the exact source and target close legs from committed fill state, transport
-  them in one atomic Runtime envelope, and both receiving sibling Entities must
-  validate identical route hash, binary and cumulative source/target amounts
-  before either bilateral Account frame can commit. Standalone or mismatched
-  close legs must apply neither leg, emit one security incident, and require a
-  fresh Hub close cohort; prove full, partial/manual, replay and forged-amount
-  cases end to end.
-
 ## 1. Contract boundedness — P0/P1, owner-approved
 - [ ] Replace the unbounded `_forgiveDebtsBetweenEntities` queue scan with an
   indexed or bounded-continuation structure. Prove exact debt conservation and

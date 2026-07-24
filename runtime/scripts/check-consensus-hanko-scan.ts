@@ -23,9 +23,11 @@ const assertOrder = (text: string, path: string, markers: string[]): void => {
 };
 
 const accountConsensusPath = 'runtime/account/consensus/index.ts';
+const accountHandlerPath = 'runtime/entity/tx/handlers/account.ts';
 const accountProposePath = 'runtime/account/consensus/propose.ts';
 const accountFramePath = 'runtime/account/consensus/frame.ts';
 const entityConsensusPath = 'runtime/entity/consensus/index.ts';
+const envEventsPath = 'runtime/machine/env-events.ts';
 const entityFramePath = 'runtime/entity/consensus/frame.ts';
 const hankoSigningPath = 'runtime/hanko/signing.ts';
 const hankoCodecPath = 'runtime/hanko/codec.ts';
@@ -39,9 +41,11 @@ const accountContractPath = 'jurisdictions/contracts/Account.sol';
 const auditDocPath = 'docs/security/consensus-hanko-scan.md';
 
 const accountConsensus = readText(accountConsensusPath);
+const accountHandler = readText(accountHandlerPath);
 const accountPropose = readText(accountProposePath);
 const accountFrame = readText(accountFramePath);
 const entityConsensus = readText(entityConsensusPath);
+const envEvents = readText(envEventsPath);
 const entityFrame = readText(entityFramePath);
 const hankoSigning = readText(hankoSigningPath);
 const hankoCodec = readText(hankoCodecPath);
@@ -87,8 +91,45 @@ assertOrder(accountConsensus, accountConsensusPath, [
   "throw new Error(`Frame ${receivedFrame.height} commit failed: ${tx.type} - ${commitResult.error}`);",
   "assertNoUnilateralSettlementMutation(accountMachine, beforeSettlement, tx, 'receiver/commit');",
   'const committedFrame = cloneAccountFrame(receivedFrame);',
-  'recordAccountFrameHistory(env, {',
+  'committedFrames.push({ frame: committedFrame, committedViaNewFrame: true });',
 ]);
+assertNotMatches(
+  accountConsensus,
+  /\brecordAccountFrameHistory\b/,
+  accountConsensusPath,
+  'speculative Account history publication',
+);
+assertOrder(accountHandler, accountHandlerPath, [
+  'const committedFrameEntries = result.committedFrames ?? [];',
+  'for (const { frame, committedViaNewFrame } of committedFrameEntries) {',
+  'candidateEffects.push({',
+  "kind: 'accountFrameHistory',",
+]);
+assertOrder(envEvents, envEventsPath, [
+  'export const publishEntityCandidateEffects = (',
+  "if (effect.kind === 'accountFrameHistory') {",
+  'recordAccountFrameHistory(env, effect);',
+]);
+const candidatePublicationCount = entityConsensus.match(/publishEntityCandidateEffects\(env, /g)?.length ?? 0;
+if (candidatePublicationCount !== 3) {
+  throw new Error(
+    `${entityConsensusPath} must publish candidate effects in exactly three Entity commit paths; found ${candidatePublicationCount}`,
+  );
+}
+for (const publication of entityConsensus.matchAll(/publishEntityCandidateEffects\(env, /g)) {
+  const publicationIndex = publication.index;
+  const committedStateIndex = entityConsensus.lastIndexOf('workingReplica.state = committedState;', publicationIndex);
+  const certifiedFrameIndex = entityConsensus.lastIndexOf('appendCertifiedEntityFrameLink(', publicationIndex);
+  if (
+    committedStateIndex < 0 ||
+    certifiedFrameIndex < committedStateIndex ||
+    certifiedFrameIndex > publicationIndex
+  ) {
+    throw new Error(
+      `${entityConsensusPath} publishes candidate effects before committed state and certified Entity frame`,
+    );
+  }
+}
 
 assertOrder(entityConsensus, entityConsensusPath, [
   'const getEntityMempoolAdmissionError = (',

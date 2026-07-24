@@ -124,7 +124,7 @@ const todoPath = 'todo.md';
 const todo = readText(todoPath);
 for (const marker of [
   'bun run gate:mainnet',
-  'External audit handoff',
+  'independent contract/runtime audit',
 ]) {
   assertIncludes(todo, marker, todoPath);
 }
