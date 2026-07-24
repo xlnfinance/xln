@@ -438,6 +438,13 @@ export const withRebranchedValues = <T extends RawDb>(db: T): T => new Proxy(db,
         await batch.write(options);
       };
     }
+    if (property === 'del') {
+      return async (key: Buffer, options?: { sync?: boolean }): Promise<void> => {
+        const batch = rebranchedBatch(target);
+        batch.del!(key);
+        await batch.write(options);
+      };
+    }
     if (property === 'batch') return () => rebranchedBatch(target);
     if (property === 'keys') return (options?: { gte?: Buffer; lt?: Buffer; reverse?: boolean }) => logicalKeys(target, options);
     const value = Reflect.get(target, property, receiver);

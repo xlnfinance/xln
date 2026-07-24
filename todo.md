@@ -69,8 +69,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 5. Crash, corruption and load evidence
 
-- [ ] Pass real SIGKILL recovery through split mutation, collapse, delete,
-  restore-clear and raw orphan/root assertions.
 - [ ] Pass snapshot/epoch/rotation/prune/corruption matrices for oversized
   typed Account/Entity/Book values and exact 9,999/10,000-byte boundaries.
 - [ ] Add deterministic SimNetwork/SimStorage delay/reorder/drop/partial-write/
