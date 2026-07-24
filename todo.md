@@ -19,11 +19,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   byte threshold, then run beyond the first epoch rotation with H1/H2/H3/MM
   healthy, no stale frames, no orphan processes and no growing empty-chain
   disk workload.
-- [ ] Extend the exact-depth browser matrix across every supported same-J pair:
-  each must render exactly the configured 10 bids and 10 asks, with no hidden
-  missing or surplus offers. Keep the existing authoritative health/API
-  equality assertions as the precondition for every browser check.
-
 ## 1. Commit-boundary correctness
 
 - [ ] Reject Entity-frame timestamp regression before transaction application.
