@@ -363,23 +363,6 @@ export const applyMergedEntityInputs = async (
       );
     }
 
-    const localEntityReplicaKey = findReplicaKeyInsensitive(env, entityInput.entityId, null);
-    if (!localEntityReplicaKey) {
-      const dropDetails = {
-        entityId: entityInput.entityId,
-        signerId: entityInput.signerId,
-        txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
-        knownEntities: Array.from(env.eReplicas.keys()).map(k => String(k).split(':')[0]).filter(Boolean),
-      };
-      env.error('network', 'REJECT_ENTITY_INPUT_UNKNOWN_ENTITY', dropDetails, entityInput.entityId);
-      assertRuntimeIngress(
-        false,
-        'RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET',
-        'Entity input target does not exist in local runtime',
-        dropDetails,
-      );
-    }
-
     const actualSignerId = entityInput.signerId.trim();
 
     assertRuntimeIngress(
@@ -391,9 +374,15 @@ export const applyMergedEntityInputs = async (
 
     let replicaKey = `${entityInput.entityId}:${actualSignerId}`;
     let entityReplica = env.eReplicas.get(replicaKey);
+    let localReplicaKeys: string[] = [];
 
     if (!entityReplica) {
-      const insensitiveMatch = findReplicaKeyInsensitive(env, entityInput.entityId, actualSignerId);
+      localReplicaKeys = findReplicaKeysForEntityInsensitive(env, entityInput.entityId);
+      const signerNorm = actualSignerId.toLowerCase();
+      const insensitiveMatch = localReplicaKeys.find((key) => {
+        const [, candidateSignerId] = String(key).split(':');
+        return String(candidateSignerId || '').toLowerCase() === signerNorm;
+      });
       if (insensitiveMatch) {
         replicaKey = insensitiveMatch;
         entityReplica = env.eReplicas.get(insensitiveMatch);
@@ -401,8 +390,22 @@ export const applyMergedEntityInputs = async (
     }
 
     if (!entityReplica) {
-      const localReplicaKeys = findReplicaKeysForEntityInsensitive(env, entityInput.entityId);
       const txTypes = (entityInput.entityTxs || []).map(tx => tx.type);
+      if (localReplicaKeys.length === 0) {
+        const dropDetails = {
+          entityId: entityInput.entityId,
+          signerId: entityInput.signerId,
+          txTypes,
+          knownEntities: Array.from(env.eReplicas.keys()).map(k => String(k).split(':')[0]).filter(Boolean),
+        };
+        env.error('network', 'REJECT_ENTITY_INPUT_UNKNOWN_ENTITY', dropDetails, entityInput.entityId);
+        assertRuntimeIngress(
+          false,
+          'RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET',
+          'Entity input target does not exist in local runtime',
+          dropDetails,
+        );
+      }
       if (localReplicaKeys.length === 1 && txTypes.length === 0) {
         replicaKey = localReplicaKeys[0]!;
         entityReplica = env.eReplicas.get(replicaKey);
@@ -420,11 +423,7 @@ export const applyMergedEntityInputs = async (
         entityId: entityInput.entityId,
         resolvedSignerId: actualSignerId,
         inputSignerId: entityInput.signerId,
-        knownReplicas: Array.from(env.eReplicas.keys()).filter(k =>
-          String(k)
-            .toLowerCase()
-            .startsWith(`${String(entityInput.entityId).toLowerCase()}:`),
-        ),
+        knownReplicas: localReplicaKeys,
       };
       env.error('network', 'REJECT_ENTITY_INPUT_REPLICA_NOT_FOUND', missingReplicaDetails, entityInput.entityId);
       assertRuntimeIngress(
@@ -664,6 +663,10 @@ const applyEntityInputToReplica = async (
 const findReplicaKeyInsensitive = (env: Env, entityId: string, signerId?: string | null): string | null => {
   const entityNorm = String(entityId || '').toLowerCase();
   const signerNorm = signerId ? String(signerId).toLowerCase() : null;
+  if (signerNorm) {
+    const directKey = `${entityNorm}:${signerNorm}`;
+    if (env.eReplicas.has(directKey)) return directKey;
+  }
   for (const key of env.eReplicas.keys()) {
     const [repEntityId, repSignerId] = String(key).split(':');
     if (!repEntityId || String(repEntityId).toLowerCase() !== entityNorm) continue;
