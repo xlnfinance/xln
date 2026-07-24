@@ -11,7 +11,7 @@ import {
   readFrameDbHead,
   readFrameDbRuntimeActivity,
 } from '../storage/frame-db';
-import { decodeBuffer, encodeBuffer } from '../storage/codec';
+import { decodeBuffer, decodeValidatedBuffer, encodeBuffer } from '../storage/codec';
 import { liveKeyForDoc } from '../storage/doc-refs';
 import { prepareStorageStateHashes } from '../storage/hashes';
 import {
@@ -48,6 +48,9 @@ import {
 } from '../entity/consumption-accumulator';
 import { getConsumptionNodeStore } from '../entity/consumption-store';
 import { createEmptyEnv } from '../runtime';
+import { createBook } from '../orderbook/core';
+import { validateStorageBookDocValue } from '../storage/authoritative-schema';
+import { computeIntegrityDigest } from '../infra/integrity-checksum';
 
 const entityId = `0x${'11'.repeat(32)}`;
 type PreparedStorageHashes = Awaited<ReturnType<typeof prepareStorageStateHashes>>;
@@ -383,6 +386,33 @@ describe('storage crash recovery', () => {
 
     expect(prepared.entityHashes).toHaveLength(1);
     expect(prepared.entityHashes[0]?.entityId).toBe(entityId);
+  });
+
+  test('hashes the canonical persisted book value after commitment caches warm', async () => {
+    const bookDoc: StorageDoc = {
+      family: 'book',
+      entityId,
+      pairId: '1/2',
+      value: createBook({ bucketWidthTicks: 100n, maxOrders: 32, stpPolicy: 1 }),
+    };
+    const prepared = await prepareStorageStateHashes({
+      db: makeMemoryDb(),
+      puts: [bookDoc],
+      dels: [],
+    });
+    const logicalKey = liveKeyForDoc(bookDoc);
+    const persisted = prepared.docPuts.find(({ key }) => key.equals(logicalKey))?.value;
+    expect(persisted).toBeDefined();
+
+    const validated = decodeValidatedBuffer(persisted!, validateStorageBookDocValue);
+    const canonicalHash = computeIntegrityDigest(encodeBuffer(validated));
+    const leaf = prepared.merklePuts
+      .filter(({ key }) => key[0] === KEY_MERKLE_LEAF)
+      .map(({ value }) => decodeBuffer<StorageMerkleLeafDoc>(value))
+      .find(({ key }) => key.startsWith('0x03'));
+
+    expect(leaf?.valueHash).toBe(canonicalHash);
+    expect(computeIntegrityDigest(persisted!)).toBe(canonicalHash);
   });
 
   test('merkle flush diff cancels split then collapse in one frame', async () => {

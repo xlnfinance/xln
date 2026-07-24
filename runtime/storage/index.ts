@@ -11,6 +11,7 @@ import {
   putFrameDbCommit,
 } from './frame-db';
 import {
+  canonicalizeStorageDoc,
   computeStorageFrameHash,
   computeStoragePostStateHash,
   prepareStorageCanonicalStateHashes,
@@ -263,7 +264,7 @@ const readHead = async (db: RuntimeDbLike, config: Required<StorageRuntimeConfig
 
 const buildDiffRecord = (height: number, puts: StorageDoc[], dels: StorageDocRef[]): StorageDiffRecord => ({
   height,
-  puts,
+  puts: puts.map(canonicalizeStorageDoc),
   dels,
 });
 
