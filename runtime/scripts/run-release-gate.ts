@@ -81,7 +81,7 @@ const quickSteps: GateStep[] = [
   { name: 'diff whitespace check', command: 'git diff --check', timeoutMs: 30_000 },
 ];
 
-const ciSteps: GateStep[] = [
+const ciPreE2eSteps: GateStep[] = [
   ...quickSteps,
   { name: 'flow E2E coverage contract', command: 'bun run test:e2e:coverage', timeoutMs: 30_000 },
   { name: 'frontend check', command: 'bun run check:frontend', timeoutMs: 180_000 },
@@ -91,17 +91,25 @@ const ciSteps: GateStep[] = [
   { name: 'storage WAL smoke', command: 'bun run test:persistence:cli', timeoutMs: 120_000 },
   { name: 'watchtower smoke', command: 'bun run test:watchtower:smoke', timeoutMs: 120_000 },
   { name: 'bootstrap soundcheck', command: 'bun run prod:bootstrap:soundcheck', timeoutMs: 1_200_000 },
+];
+
+const ciSteps: GateStep[] = [
+  ...ciPreE2eSteps,
   { name: 'fast E2E gate', command: 'bun run test:e2e:fast', timeoutMs: 900_000 },
 ];
 
 const releaseSteps: GateStep[] = [
-  ...ciSteps,
+  ...ciPreE2eSteps,
   { name: 'bootstrap epoch rotation', command: 'bun run prod:bootstrap:rotation', timeoutMs: 1_200_000 },
   { name: 'deterministic replay oracle', command: 'bun run check:determinism', timeoutMs: 600_000 },
   { name: 'real WebSocket P2P relay', command: 'bun run test:p2p:relay', timeoutMs: 240_000 },
-  { name: 'core E2E gate', command: 'bun run test:e2e:core', timeoutMs: 1_200_000 },
   { name: 'RPC system scenarios', command: 'bun run test:system:parallel', timeoutMs: 1_200_000 },
   { name: 'hub 10k storage benchmark', command: 'bun run bench:radapter:hub10k', timeoutMs: 1_200_000 },
+  { name: 'frozen core final', command: 'bun run frozen-core:check', timeoutMs: 30_000 },
+  { name: 'Foundation release Hanko', command: 'bun run foundation-release:verify', timeoutMs: 30_000 },
+  // Full browser E2E is intentionally last. A failure in any cheaper release
+  // check must never invalidate an expensive 125-target evidence run.
+  { name: 'full E2E gate', command: 'bun run test:e2e:full', timeoutMs: 1_800_000 },
 ];
 
 // A release candidate has not been deployed yet, so querying the current production
@@ -111,11 +119,7 @@ const releaseSteps: GateStep[] = [
 const profileSteps: Record<GateProfile, GateStep[]> = {
   quick: [...quickSteps, { name: 'frozen core final', command: 'bun run frozen-core:check', timeoutMs: 30_000 }],
   ci: [...ciSteps, { name: 'frozen core final', command: 'bun run frozen-core:check', timeoutMs: 30_000 }],
-  release: [
-    ...releaseSteps,
-    { name: 'frozen core final', command: 'bun run frozen-core:check', timeoutMs: 30_000 },
-    { name: 'Foundation release Hanko', command: 'bun run foundation-release:verify', timeoutMs: 30_000 },
-  ],
+  release: releaseSteps,
 };
 
 function parseProfile(): GateProfile {
@@ -195,6 +199,10 @@ function printSummary(profile: GateProfile, results: StepResult[]): void {
 async function main(): Promise<void> {
   const profile = parseProfile();
   const steps = profileSteps[profile];
+  if (process.argv.includes('--plan')) {
+    printPlan(profile, steps);
+    return;
+  }
   cleanupTestArtifactsBeforeRun({ reason: `release-gate:${profile}` });
   process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1';
   if (profile !== 'quick') assertMinDiskFree();
