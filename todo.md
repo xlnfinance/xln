@@ -53,11 +53,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 - [ ] Replace the unbounded `_forgiveDebtsBetweenEntities` queue scan with an
   indexed or bounded-continuation structure. Prove exact debt conservation and
   bounded gas with adversarial creditor ordering.
-- [ ] Lock the already-corrected Foundation authority and name registry into one
-  adversarial contract gate: every mutation requires the current Foundation
-  Hanko plus exact nonce, minority control-token ownership grants no admin
-  capability, and arbitrary assign/transfer sequences preserve a bijective
-  `name ↔ entity` mapping.
 - [ ] Remove the remaining proven pre-mainnet compatibility ABI/state:
   migrate V1 settlement `diffsToOps` and `position.xlnomy`, then delete unused
   contract `resolveEntityId` and ineffective `hashToBlock/cleanSecret`. Use one

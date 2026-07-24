@@ -28,6 +28,20 @@ const assertFunctionHeaderIncludes = (source: string, path: string, name: string
   }
 };
 
+const getFunctionBody = (source: string, name: string, path: string): string => {
+  const header = getFunctionHeader(source, name, path);
+  const headerStart = source.indexOf(header.replace(/ /g, ''));
+  const nameOffset = source.indexOf(`function ${name}`);
+  const bodyStart = source.indexOf('{', Math.max(0, nameOffset, headerStart));
+  if (bodyStart < 0) throw new Error(`${path} ${name} body missing`);
+  let depth = 0;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    if (source[index] === '{') depth += 1;
+    else if (source[index] === '}' && --depth === 0) return source.slice(bodyStart, index + 1);
+  }
+  throw new Error(`${path} ${name} body is unterminated`);
+};
+
 const externalOrPublicFunctions = (source: string): string[] => {
   const functions: string[] = [];
   const pattern = /^\s*function\s+([A-Za-z0-9_]+)\s*\([\s\S]*?\)\s*([^{;]*)[{;]/gm;
@@ -150,6 +164,19 @@ assertIncludes(depository, 'if (!valid || recoveredEntity != entityId) revert E4
 assertNotIncludes(entityProvider, 'onlyFoundation', entityProviderPath);
 assertIncludes(entityProvider, '_verifyCurrentHankoSignature(hankoData, actionHash)', entityProviderPath);
 assertIncludes(entityProvider, 'entityActionNonces[foundationId] = actionNonce;', entityProviderPath);
+for (const name of [
+  'assignName',
+  'transferName',
+  'setReservedName',
+  'setNameQuota',
+  'foundationRegisterEntity',
+] as const) {
+  assertIncludes(
+    getFunctionBody(entityProvider, name, entityProviderPath),
+    '_authorizeFoundation(',
+    `${entityProviderPath}:${name}`,
+  );
+}
 for (const [name, requiredText] of [
   ['proposeBoard', '_requireBoardAuthority(entityId, proposerType, proposalHash, authorizations);'],
   ['cancelBoardProposal', '_requireBoardAuthority(entityId, proposerType, cancelHash, authorizations);'],
