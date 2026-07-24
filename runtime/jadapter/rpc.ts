@@ -2194,7 +2194,7 @@ export async function createRpcAdapter(
           return { success: true };
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
-          console.error(`❌ [JAdapter:rpc] Debt enforcement failed: ${msg}`);
+          rpcLog.error('debt_enforcement.failed', { entityId, tokenId, error: msg });
           return makeJAdapterFailureResult(error);
         }
       }
@@ -2613,14 +2613,18 @@ export async function createRpcAdapter(
                 }
                 await resetSerializedSignerNonce();
                 const msg = error instanceof Error ? error.message : String(error);
-                console.error(`❌ [JAdapter:rpc] processBatch failed: ${msg}`);
+                rpcLog.error('process_batch.failed', {
+                  entityId: normalizedId,
+                  attempt,
+                  error: msg,
+                });
                 return makeJAdapterFailureResult(error);
               }
             }
             return { success: false, error: 'processBatch failed after nonce retry' };
           } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
-            console.error(`❌ [JAdapter:rpc] processBatch failed: ${msg}`);
+            rpcLog.error('process_batch.failed', { entityId: normalizedId, error: msg });
             return makeJAdapterFailureResult(error);
           }
         });
@@ -2644,7 +2648,7 @@ export async function createRpcAdapter(
           return { success: true, events, ...(typeof blockNumber === 'number' ? { blockNumber } : {}) };
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
-          console.error(`❌ [JAdapter:rpc] Mint failed: ${msg}`);
+          rpcLog.error('mint.failed', { entityId, tokenId, error: msg });
           return makeJAdapterFailureResult(error);
         }
       }
@@ -3152,7 +3156,7 @@ export async function createRpcAdapter(
           message: watcherFatalError,
           lastSyncedBlock,
         });
-        console.error('[JAdapter:rpc] watcher halted after fatal error:', watcherFatalError);
+        rpcLog.error('watcher.already_halted', { error: watcherFatalError });
         return;
       }
       const doPoll = (): Promise<void> => {
@@ -3677,7 +3681,7 @@ export async function createRpcAdapter(
             toBlock: pollToBlock,
             lastSyncedBlock,
           });
-          console.error('[JAdapter:rpc] fatal watcher error; exiting:', fatalPayload);
+          rpcLog.error('watcher.fatal_exit', fatalPayload);
           haltProcessForFatalWatcherError(fatalPayload);
         }).finally(() => {
           pollInFlight = null;

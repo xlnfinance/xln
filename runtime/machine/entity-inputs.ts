@@ -10,6 +10,7 @@ import {
 } from './entity-routing';
 import { safeStringify } from '../protocol/serialization';
 import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
+import { accountInputAck, accountInputProposal } from '../account/consensus/flush';
 import type { EntityInput, EntityReplica, EntityTx, Env, JInput, RoutedEntityInput } from '../types';
 import { resolveEntityProposerId } from '../state-helpers';
 import { validateEntityOutput } from '../validation-utils';
@@ -162,21 +163,22 @@ export const applyMergedEntityInputs = async (
     replica: EntityReplica,
   ): RuntimeEntityInputApplyResult['inputOutcomes'][number]['committedAccountFrames'] => {
     const counterparties = new Set(getEffectiveEntityInputTxs(input).flatMap(tx =>
-      tx.type === 'accountInput' ? [tx.data.fromEntityId.toLowerCase()] : []));
-    return [...counterparties].map(counterpartyEntityId => {
+      tx.type === 'accountInput' && (accountInputProposal(tx.data) || accountInputAck(tx.data))
+        ? [tx.data.fromEntityId.toLowerCase()]
+        : []));
+    return [...counterparties].flatMap(counterpartyEntityId => {
       const account = [...replica.state.accounts.entries()].find(([entityId]) =>
         entityId.toLowerCase() === counterpartyEntityId)?.[1];
-      if (!account) {
-        throw new Error(
-          `RUNTIME_COMMITTED_ACCOUNT_FRAME_MISSING:entity=${input.entityId}:` +
-          `counterparty=${counterpartyEntityId}`,
-        );
-      }
-      return {
+      // A malformed/rejected genesis Account frame deliberately commits no
+      // Account while the surrounding Entity input can still commit its
+      // warning. Absence is therefore negative evidence for cross-J atomic
+      // admission, not a Runtime invariant failure.
+      if (!account) return [];
+      return [{
         counterpartyEntityId,
         height: account.currentFrame.height,
         stateHash: String(account.currentFrame.stateHash || '').toLowerCase(),
-      };
+      }];
     });
   };
 

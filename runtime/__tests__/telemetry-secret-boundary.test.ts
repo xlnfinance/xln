@@ -96,3 +96,21 @@ test('consensus logging has no raw payload escape hatch', () => {
   expect(sources).not.toContain("'vote.payload'");
   expect(sources).not.toContain("'start.preflight_payload'");
 });
+
+test('J adapters route failures through structured telemetry and never synthesize zero reads', () => {
+  const repoRoot = join(import.meta.dir, '..', '..');
+  const browserVm = readFileSync(join(repoRoot, 'runtime/jadapter/browservm-provider.ts'), 'utf8');
+  const rpc = readFileSync(join(repoRoot, 'runtime/jadapter/rpc.ts'), 'utf8');
+
+  expect(browserVm).not.toContain('console.error');
+  expect(rpc).not.toContain('console.error');
+  expect(browserVm).not.toContain('if (result.execResult.exceptionError) return 0n;');
+  expect(browserVm).not.toContain(
+    'if (accountKeyResult.execResult.exceptionError) return { collateral: 0n, ondelta: 0n };',
+  );
+  expect(browserVm).not.toContain(
+    'if (result.execResult.exceptionError) return { collateral: 0n, ondelta: 0n };',
+  );
+  expect(browserVm).toContain("createStructuredLogger('jadapter.browservm')");
+  expect(rpc).toContain("createStructuredLogger('jadapter.rpc')");
+});

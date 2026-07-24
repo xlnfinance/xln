@@ -26,6 +26,7 @@ import {
   Depository__factory,
 } from '../../jurisdictions/typechain-types/index.ts';
 import { safeStringify } from '../protocol/serialization.js';
+import { createStructuredLogger } from '../infra/logger';
 import { isLeftEntity, normalizeEntityId } from '../entity/id';
 import type { EntityProviderActionIntent } from '../types/entity-provider-actions';
 import {
@@ -68,6 +69,8 @@ import {
 
 export type { EVMEvent } from './browservm-events';
 export type { BrowserVmChainCheckpoint } from './browservm-state';
+
+const browserVmLog = createStructuredLogger('jadapter.browservm');
 
 const BLOCK_GAS_LIMIT = 200_000_000n; // Simnet headroom for large deploys/batches
 // BrowserVM shares the local-dev chain id with Anvil, so deploying from nonce
@@ -372,7 +375,9 @@ export class BrowserVMProvider {
       }, { common: this.common }).sign(this.deployerPrivKey));
 
     if (result.execResult.exceptionError) {
-      console.error('[BrowserVM] Account deployment failed:', result.execResult.exceptionError);
+      browserVmLog.error('deploy.account_failed', {
+        error: String(result.execResult.exceptionError),
+      });
       throw new Error(`Account deployment failed: ${result.execResult.exceptionError}`);
     }
 
@@ -424,7 +429,9 @@ export class BrowserVMProvider {
       }, { common: this.common }).sign(this.deployerPrivKey));
 
     if (result.execResult.exceptionError) {
-      console.error('[BrowserVM] Depository deployment failed:', result.execResult.exceptionError);
+      browserVmLog.error('deploy.depository_failed', {
+        error: String(result.execResult.exceptionError),
+      });
       throw new Error(`Depository deployment failed: ${result.execResult.exceptionError}`);
     }
 
@@ -463,7 +470,9 @@ export class BrowserVMProvider {
       }, { common: this.common }).sign(this.deployerPrivKey));
 
     if (result.execResult.exceptionError) {
-      console.error('[BrowserVM] EntityProvider deployment failed:', result.execResult.exceptionError);
+      browserVmLog.error('deploy.entity_provider_failed', {
+        error: String(result.execResult.exceptionError),
+      });
       throw new Error(`EntityProvider deployment failed: ${result.execResult.exceptionError}`);
     }
 
@@ -501,7 +510,9 @@ export class BrowserVMProvider {
       }, { common: this.common }).sign(this.deployerPrivKey));
 
     if (result.execResult.exceptionError) {
-      console.error('[BrowserVM] DeltaTransformer deployment failed:', result.execResult.exceptionError);
+      browserVmLog.error('deploy.delta_transformer_failed', {
+        error: String(result.execResult.exceptionError),
+      });
       throw new Error(`DeltaTransformer deployment failed: ${result.execResult.exceptionError}`);
     }
 
@@ -668,7 +679,11 @@ export class BrowserVMProvider {
       data: hexToBytes(callData as `0x${string}`),
       gasLimit: 100000n,
     });
-    if (result.execResult.exceptionError) return 0n;
+    if (result.execResult.exceptionError) {
+      const error = String(result.execResult.exceptionError);
+      browserVmLog.error('read.erc20_balance_failed', { tokenAddress, owner, error });
+      throw new Error(`BROWSERVM_ERC20_BALANCE_READ_FAILED:${error}`);
+    }
     const decoded = this.erc20Interface!.decodeFunctionResult('balanceOf', result.execResult.returnValue);
     return decoded[0];
   }
@@ -688,7 +703,11 @@ export class BrowserVMProvider {
       data: hexToBytes(callData as `0x${string}`),
       gasLimit: 100000n,
     });
-    if (result.execResult.exceptionError) return 0n;
+    if (result.execResult.exceptionError) {
+      const error = String(result.execResult.exceptionError);
+      browserVmLog.error('read.erc20_allowance_failed', { tokenAddress, owner, spender, error });
+      throw new Error(`BROWSERVM_ERC20_ALLOWANCE_READ_FAILED:${error}`);
+    }
     const decoded = this.erc20Interface!.decodeFunctionResult('allowance', result.execResult.returnValue);
     return decoded[0];
   }
@@ -904,12 +923,16 @@ export class BrowserVMProvider {
     });
 
     if (result.execResult.exceptionError) {
-      console.error(`[BrowserVM] getReserves failed:`, result.execResult.exceptionError);
-      return 0n;
+      const error = String(result.execResult.exceptionError);
+      browserVmLog.error('read.reserves_failed', { entityId, tokenId, error });
+      throw new Error(`BROWSERVM_GET_RESERVES_FAILED:${error}`);
     }
 
     const returnData = result.execResult.returnValue;
-    if (!returnData || returnData.length === 0) return 0n;
+    if (!returnData || returnData.length === 0) {
+      browserVmLog.error('read.reserves_empty', { entityId, tokenId });
+      throw new Error('BROWSERVM_GET_RESERVES_EMPTY');
+    }
 
     // Decode return value using ethers Interface
     const decoded = this.depositoryInterface.decodeFunctionResult('_reserves', returnData);
@@ -933,12 +956,16 @@ export class BrowserVMProvider {
     });
 
     if (result.execResult.exceptionError) {
-      console.error(`[BrowserVM] getTokensLength failed:`, result.execResult.exceptionError);
-      return 0;
+      const error = String(result.execResult.exceptionError);
+      browserVmLog.error('read.tokens_length_failed', { error });
+      throw new Error(`BROWSERVM_GET_TOKENS_LENGTH_FAILED:${error}`);
     }
 
     const returnData = result.execResult.returnValue;
-    if (returnData.length === 0) return 0;
+    if (returnData.length === 0) {
+      browserVmLog.error('read.tokens_length_empty');
+      throw new Error('BROWSERVM_GET_TOKENS_LENGTH_EMPTY');
+    }
 
     const decoded = this.depositoryInterface.decodeFunctionResult('getTokensLength', returnData);
     return Number(decoded[0]);
@@ -1044,7 +1071,11 @@ export class BrowserVMProvider {
       data: hexToBytes(accountKeyData as `0x${string}`),
       gasLimit: 100000n,
     });
-    if (accountKeyResult.execResult.exceptionError) return { collateral: 0n, ondelta: 0n };
+    if (accountKeyResult.execResult.exceptionError) {
+      const error = String(accountKeyResult.execResult.exceptionError);
+      browserVmLog.error('read.account_key_failed', { entityId, counterpartyId, tokenId, error });
+      throw new Error(`BROWSERVM_ACCOUNT_KEY_READ_FAILED:${error}`);
+    }
     const accountKeyDecoded = this.depositoryInterface.decodeFunctionResult(
       'accountKey',
       accountKeyResult.execResult.returnValue
@@ -1060,9 +1091,16 @@ export class BrowserVMProvider {
       gasLimit: 100000n,
     });
 
-    if (result.execResult.exceptionError) return { collateral: 0n, ondelta: 0n };
+    if (result.execResult.exceptionError) {
+      const error = String(result.execResult.exceptionError);
+      browserVmLog.error('read.collateral_failed', { entityId, counterpartyId, tokenId, error });
+      throw new Error(`BROWSERVM_COLLATERAL_READ_FAILED:${error}`);
+    }
     const returnData = result.execResult.returnValue;
-    if (!returnData || returnData.length === 0) return { collateral: 0n, ondelta: 0n };
+    if (!returnData || returnData.length === 0) {
+      browserVmLog.error('read.collateral_empty', { entityId, counterpartyId, tokenId });
+      throw new Error('BROWSERVM_COLLATERAL_READ_EMPTY');
+    }
 
     // _collaterals returns AccountCollateral struct: { collateral: uint256, ondelta: int256 }
     const decoded = this.depositoryInterface.decodeFunctionResult('_collaterals', returnData);
@@ -1369,8 +1407,9 @@ export class BrowserVMProvider {
       }, { common: this.common }).sign(this.deployerPrivKey));
 
     if (result.execResult.exceptionError) {
-      console.error(`[BrowserVM] enforceDebts failed:`, result.execResult.exceptionError);
-      throw new Error(`enforceDebts failed: ${String(result.execResult.exceptionError)}`);
+      const error = String(result.execResult.exceptionError);
+      browserVmLog.error('write.enforce_debts_failed', { entityId, tokenId, error });
+      throw new Error(`enforceDebts failed: ${error}`);
     }
     console.log(`[BrowserVM] Enforced debts for ${entityId.slice(0, 10)}...`);
   }
@@ -1735,7 +1774,9 @@ export class BrowserVMProvider {
       gasLimit: 100000n,
     });
     if (result.execResult.exceptionError) {
-      return 0n;
+      const error = String(result.execResult.exceptionError);
+      browserVmLog.error('read.entity_nonce_failed', { entityId: normalizedEntityId, error });
+      throw new Error(`BROWSERVM_ENTITY_NONCE_READ_FAILED:${error}`);
     }
     const decoded = this.depositoryInterface.decodeFunctionResult('entityNonces', result.execResult.returnValue);
     return BigInt(decoded[0]);
@@ -1952,8 +1993,9 @@ export class BrowserVMProvider {
     });
 
     if (result.execResult.exceptionError) {
-      console.error(`[BrowserVM] getNextEntityNumber failed: ${result.execResult.exceptionError}`);
-      return 1;
+      const error = String(result.execResult.exceptionError);
+      browserVmLog.error('read.next_entity_number_failed', { error });
+      throw new Error(`BROWSERVM_GET_NEXT_ENTITY_NUMBER_FAILED:${error}`);
     }
 
     const decoded = this.entityProviderInterface.decodeFunctionResult('nextNumber', result.execResult.returnValue);
@@ -1975,8 +2017,9 @@ export class BrowserVMProvider {
     });
 
     if (result.execResult.exceptionError) {
-      console.error(`[BrowserVM] getEntityInfo failed: ${result.execResult.exceptionError}`);
-      return { exists: false };
+      const error = String(result.execResult.exceptionError);
+      browserVmLog.error('read.entity_info_failed', { entityId, error });
+      throw new Error(`BROWSERVM_GET_ENTITY_INFO_FAILED:${error}`);
     }
 
     // Decode: (bool exists, bytes32 currentBoardHash, bytes32 proposedBoardHash, uint256 registrationBlock, string name)
@@ -2085,7 +2128,9 @@ export class BrowserVMProvider {
       localStorage.setItem(key, json);
       this.log(`[BrowserVM] Saved state to localStorage: ${key} (${(json.length / 1024).toFixed(1)}KB)`);
     } catch (err) {
-      console.error('[BrowserVM] Failed to save state:', err);
+      browserVmLog.error('state.save_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
       throw err;
     }
   }
@@ -2113,9 +2158,10 @@ export class BrowserVMProvider {
       this.log(`[BrowserVM] Loaded state from localStorage: ${key} (v${cachedVersion})`);
       return true;
     } catch (err) {
-      console.error('[BrowserVM] Failed to load state:', err);
-      this.clearLocalStorage(key);
-      return false;
+      browserVmLog.error('state.load_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
     }
   }
 
@@ -2507,7 +2553,10 @@ export class BrowserVMProvider {
       const info = await this.getEntityInfo(entityId);
       console.log(`[BrowserVM]   Verified entity ${entityNum}: stored boardHash=${info.currentBoardHash?.slice(0, 18)}...`);
       if (info.currentBoardHash !== boardHashes[i]) {
-        console.error(`[BrowserVM] ⚠️ Hash mismatch! Expected ${boardHashes[i]}, got ${info.currentBoardHash}`);
+        throw new Error(
+          `BROWSERVM_ENTITY_BOARD_HASH_MISMATCH:entity=${entityId}:` +
+          `expected=${String(boardHashes[i])}:actual=${String(info.currentBoardHash)}`,
+        );
       }
     }
 

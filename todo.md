@@ -10,10 +10,12 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 - [ ] Make the existing durable `/api/debug/incidents` registry the mandatory
   first diagnostic query and release gate. Route every remaining frontend,
-  Runtime, managed-child, orchestrator and J-machine fatal into it; prove a root
-  incident survives gossip flood/restart and blocks release until resolved.
-  All money controls must derive readiness from the same Runtime lifecycle gate
-  and perform zero enqueue while halted, quiescing or restoring.
+  Runtime, managed-child, orchestrator and J-machine fatal into it. Prove one
+  root incident survives gossip flood/restart, the failed child exits non-zero,
+  its replacement restores the exact committed height/root without duplicate
+  dispatch or J-submit, and unresolved incidents block release. All money
+  controls must derive readiness from the same Runtime lifecycle gate and
+  perform zero enqueue while halted, quiescing or restoring.
 ## 1. Commit-boundary correctness
 
 - [ ] Reject Entity-frame timestamp regression before transaction application.
@@ -43,6 +45,11 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 - [ ] Replace the unbounded `_forgiveDebtsBetweenEntities` queue scan with an
   indexed or bounded-continuation structure. Prove exact debt conservation and
   bounded gas with adversarial creditor ordering.
+- [ ] Add the missing cross-contract board-epoch regression: after A→B
+  activation, A must fail every new `processBatch` operation and watchtower
+  owner authorization during the historical-proof grace window, while B
+  succeeds. Keep previous-board acceptance only for historical Account proof
+  verification.
 - [ ] Remove the remaining proven pre-mainnet compatibility ABI/state:
   migrate V1 settlement `diffsToOps` and `position.xlnomy`, then delete unused
   contract `resolveEntityId` and ineffective `hashToBlock/cleanSecret`. Use one
@@ -113,7 +120,9 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   must identify the entire immutable evidence set.
 - [ ] Run L1/L2 first, then exactly one unchanged-candidate unified full E2E,
   `bun run check`, `bun run gate:release` and the uninterrupted
-  `bun run gate:mainnet`.
+  `bun run gate:mainnet`. Every financial browser E2E must use the same
+  mandatory console/page/request fatal guard; eventual DOM success cannot hide
+  a browser or Runtime error.
 - [ ] Complete an independent contract/runtime audit on the immutable SHA with
   conservation, fuzz, dispute and recovery evidence plus public deployment
   receipts and explicit known limitations.
