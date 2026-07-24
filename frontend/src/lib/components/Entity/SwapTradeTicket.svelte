@@ -209,6 +209,7 @@
           <button
             type="button"
             class="entity-select-button"
+            data-testid="swap-source-account-button"
             aria-haspopup="listbox"
             aria-expanded={sourceMenuOpen}
             title={selectedSourceEntityLabel}
@@ -240,7 +241,12 @@
             {/each}
           </select>
           {#if sourceMenuOpen}
-            <div class="entity-menu" role="listbox" aria-label="Source account">
+            <div
+              class="entity-menu"
+              role="listbox"
+              aria-label="Source account"
+              data-testid="swap-source-account-menu"
+            >
               {#each sourceEntityOptions as option}
                 <button
                   type="button"

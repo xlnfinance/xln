@@ -200,10 +200,9 @@ async function captureSwapVisualStates(
     tags: ['swap', 'orderbook'],
   });
 
-  const sourceButton = page.locator('.swap-panel .anyswap-builder .entity-select-wrap').first()
-    .locator('button.entity-select-button').first();
+  const sourceButton = page.getByTestId('swap-source-account-button').first();
   await sourceButton.click();
-  await expect(page.locator('.swap-panel .entity-menu[aria-label="Source account"]').first()).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId('swap-source-account-menu').first()).toBeVisible({ timeout: 10_000 });
   await captureUxLocator(swapPanel, output, `${prefix}-swap-source-menu.png`, {
     title: `${platform} swap source picker`,
     group: 'Swap',
