@@ -3928,8 +3928,12 @@ test('embedded adapter rejects money commands after the runtime stops accepting 
     registerEnvChangeCallback: () => () => {},
   });
   await adapter.connect({ mode: 'embedded' });
+  expect(adapter.commandReady).toBe(true);
+  expect(adapter.commandReadyReason).toBe(null);
 
   env.runtimeState = { lifecyclePhase: 'halted', halted: true };
+  expect(adapter.commandReady).toBe(false);
+  expect(adapter.commandReadyReason).toBe('phase=halted');
   await expect(adapter.send({ runtimeTxs: [], entityInputs: [] }))
     .rejects.toThrow('RUNTIME_COMMAND_NOT_READY:phase=halted');
   await expect(adapter.submitCrossJurisdictionIntent({} as CrossJurisdictionSwapRoute))
@@ -4345,6 +4349,7 @@ test('storage entity hash docs persist root metadata only', async () => {
 test('remote runtime adapter reports connected only after auth and accepts lower remote ticks', async () => {
   const previousWebSocket = globalThis.WebSocket;
   let socket: { onmessage: ((event: { data: unknown }) => void) | null } | null = null;
+  let transportSendCount = 0;
   const identityEnv = makeEnv();
 
   class DelayedAuthWebSocket {
@@ -4366,6 +4371,7 @@ test('remote runtime adapter reports connected only after auth and accepts lower
     }
 
     send(raw: unknown): void {
+      transportSendCount += 1;
       const request = decodeTestRuntimeAdapterMessage<{ id: string; op: string; challenge?: string }>(raw);
       if (request.op !== 'auth') return;
       const identity = signRuntimeAdapterServerIdentity(identityEnv, request.challenge || '');
@@ -4380,6 +4386,8 @@ test('remote runtime adapter reports connected only after auth and accepts lower
               commandLaneKind: 'capability',
               currentHeight: 10,
               nextCommandSequence: 1,
+              commandReady: true,
+              commandReadyReason: null,
               ...identity,
             },
           }),
@@ -4417,16 +4425,30 @@ test('remote runtime adapter reports connected only after auth and accepts lower
     expect(adapter.status).toBe('connected');
     expect(adapter.authLevel).toBe('inspect');
     expect(adapter.currentHeight).toBe(10);
+    expect(adapter.commandReady).toBe(true);
+    expect(adapter.commandReadyReason).toBe(null);
 
     socket?.onmessage?.({
       data: encodeRuntimeAdapterMessage({
         v: 1,
         op: 'tick',
         height: 2,
+        commandReady: false,
+        commandReadyReason: 'phase=halted',
       }),
     });
     expect(adapter.currentHeight).toBe(2);
+    expect(adapter.commandReady).toBe(false);
+    expect(adapter.commandReadyReason).toBe('phase=halted');
     expect(heights).toContain(2);
+    const sendsBeforeRejectedCommands = transportSendCount;
+    expect(() => adapter.send(
+      { runtimeTxs: [], entityInputs: [] },
+      { commandId: 'command-halted-0001', commandSequence: 1 },
+    )).toThrow('RUNTIME_COMMAND_NOT_READY:phase=halted');
+    expect(() => adapter.submitCrossJurisdictionIntent({} as CrossJurisdictionSwapRoute))
+      .toThrow('RUNTIME_COMMAND_NOT_READY:phase=halted');
+    expect(transportSendCount).toBe(sendsBeforeRejectedCommands);
     adapter.disconnect();
   } finally {
     (globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = previousWebSocket;

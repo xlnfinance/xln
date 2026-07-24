@@ -65,6 +65,26 @@ const heightFromPayload = (payload: unknown): number => {
   return Math.max(direct, headHeight);
 };
 
+const parseCommandReadiness = (
+  value: Record<string, unknown>,
+): { ready: boolean; reason: string | null } => {
+  const ready = value['commandReady'];
+  const reason = value['commandReadyReason'];
+  if (typeof ready !== 'boolean') {
+    throw new RuntimeAdapterError('E_UNAUTHORIZED', 'runtime adapter server omitted canonical command readiness');
+  }
+  if (ready) {
+    if (reason !== null) {
+      throw new RuntimeAdapterError('E_UNAUTHORIZED', 'runtime adapter server returned contradictory command readiness');
+    }
+    return { ready: true, reason: null };
+  }
+  if (typeof reason !== 'string' || !reason.trim()) {
+    throw new RuntimeAdapterError('E_UNAUTHORIZED', 'runtime adapter server omitted command readiness reason');
+  }
+  return { ready: false, reason: reason.trim() };
+};
+
 export class RemoteRuntimeAdapter implements RuntimeAdapter {
   readonly mode = 'remote' as const;
 
@@ -85,6 +105,8 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
   private fingerprint: string | null = null;
   private nextSequence: number | null = null;
   private laneKind: RuntimeAdapterCommandLaneKind | null = null;
+  private serverCommandReady = false;
+  private serverCommandReadyReason: string | null = 'adapter-disconnected';
 
   get status(): RuntimeAdapterStatus {
     return this.currentStatus;
@@ -114,6 +136,15 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     return this.level;
   }
 
+  get commandReady(): boolean {
+    return this.currentStatus === 'connected' && this.serverCommandReady;
+  }
+
+  get commandReadyReason(): string | null {
+    if (this.currentStatus !== 'connected') return `adapter-${this.currentStatus}`;
+    return this.serverCommandReady ? null : this.serverCommandReadyReason;
+  }
+
   async connect(config: RuntimeAdapterConfig): Promise<void> {
     if (config.mode !== 'remote') throw new RuntimeAdapterError('E_BAD_QUERY', 'RemoteRuntimeAdapter requires mode=remote');
     if (!config.wsUrl) throw new RuntimeAdapterError('E_BAD_QUERY', 'wsUrl is required');
@@ -122,6 +153,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     this.fingerprint = null;
     this.nextSequence = null;
     this.laneKind = null;
+    this.setServerCommandReadiness(false, 'adapter-connecting');
     this.intentionalClose = false;
     this.terminalAuthFailure = false;
     try {
@@ -140,6 +172,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     this.fingerprint = null;
     this.nextSequence = null;
     this.laneKind = null;
+    this.setServerCommandReadiness(false, 'adapter-disconnected');
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -168,6 +201,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     if (!Number.isSafeInteger(commandSequence) || commandSequence <= 0) {
       throw new RuntimeAdapterError('E_BAD_QUERY', 'remote runtime send requires a positive commandSequence');
     }
+    this.requireCommandReady();
     return this.request<RuntimeAdapterSendResult>({ op: 'send', commandId, commandSequence, input })
       .then((result) => {
         this.nextSequence = Math.max(this.nextSequence ?? 1, commandSequence + 1);
@@ -181,6 +215,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     // M1 deliberately bypasses the durable RuntimeInput command lane. An
     // offline Hub is not a financial failure: the user may manually resubmit
     // the same canonical orderId after reconnecting.
+    this.requireCommandReady();
     return this.request<RuntimeAdapterCrossJurisdictionIntentResult>({
       op: 'cross-j-intent',
       route,
@@ -240,6 +275,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     this.ws = null;
     this.level = null;
     this.laneKind = null;
+    this.setServerCommandReadiness(false, 'adapter-disconnected');
     this.failPending(new RuntimeAdapterError('E_INTERNAL', 'runtime adapter socket closed', true));
     this.setStatus(this.terminalAuthFailure ? 'error' : this.intentionalClose ? 'disconnected' : 'error');
     this.scheduleReconnect();
@@ -265,6 +301,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       this.level = null;
       this.nextSequence = null;
       this.laneKind = null;
+      this.setServerCommandReadiness(false, 'adapter-auth-failed');
       this.failPending(error);
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer);
@@ -304,6 +341,8 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       commandLaneKind: RuntimeAdapterCommandLaneKind;
       currentHeight?: number;
       nextCommandSequence?: number;
+      commandReady: boolean;
+      commandReadyReason: string | null;
     }>({
       op: 'auth',
       key: this.config.authKey,
@@ -338,6 +377,8 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       throw new RuntimeAdapterError('E_UNAUTHORIZED', 'runtime adapter server returned an invalid command frontier');
     }
     this.nextSequence = nextCommandSequence;
+    const readiness = parseCommandReadiness(response);
+    this.setServerCommandReadiness(readiness.ready, readiness.reason);
     this.noteHeight(response.currentHeight, { allowDecrease: true });
   }
 
@@ -357,6 +398,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     }
 
     if ('op' in message && message.op === 'tick') {
+      this.setServerCommandReadiness(message.commandReady, message.commandReadyReason);
       this.noteHeight(message.height, { allowDecrease: true });
       return;
     }
@@ -415,5 +457,24 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       pending.reject(error);
     }
     this.pending.clear();
+  }
+
+  private setServerCommandReadiness(ready: boolean, reason: string | null): void {
+    const changed = this.serverCommandReady !== ready || this.serverCommandReadyReason !== reason;
+    this.serverCommandReady = ready;
+    this.serverCommandReadyReason = reason;
+    if (changed) {
+      for (const cb of this.changeCbs) cb(this.height);
+    }
+  }
+
+  private requireCommandReady(): void {
+    if (this.commandReady) return;
+    throw new RuntimeAdapterError(
+      'E_COMMAND_PENDING',
+      `RUNTIME_COMMAND_NOT_READY:${this.commandReadyReason || 'unknown'}`,
+      true,
+      250,
+    );
   }
 }

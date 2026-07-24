@@ -18,7 +18,7 @@ import { RuntimeAdapterError, toRuntimeAdapterErrorPayload } from './errors';
 import { consumeToken, createTokenBucket, tokenRetryAfterMs, type TokenBucket } from './rate-limit';
 import { resolveRuntimeAdapterRead } from './resolve';
 import { createStructuredLogger } from '../infra/logger';
-import { assertRuntimeCommandReady } from '../machine/lifecycle';
+import { assertRuntimeCommandReady, getRuntimeCommandReadiness } from '../machine/lifecycle';
 import { safeStringify } from '../protocol/serialization';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import type {
@@ -427,7 +427,14 @@ export const broadcastRuntimeAdapterTick = (env: Env): void => {
   prunePendingCommands(env);
   if (clients.size === 0) return;
   const height = Math.max(0, Math.floor(Number(env.height ?? 0)));
-  const message = encodeRuntimeAdapterMessageForBrowser({ v: XLN_PROTOCOL_VERSION, op: 'tick', height });
+  const readiness = getRuntimeCommandReadiness(env);
+  const message = encodeRuntimeAdapterMessageForBrowser({
+    v: XLN_PROTOCOL_VERSION,
+    op: 'tick',
+    height,
+    commandReady: readiness.ready,
+    commandReadyReason: readiness.reason,
+  });
   const now = Date.now();
   for (const [ws, state] of clients.entries()) {
     if (state.authExpiresAtMs !== null && state.authExpiresAtMs <= now) {
@@ -530,11 +537,14 @@ export const handleRuntimeAdapterMessage = async (
       state.commandFrontierExpiresAtMs = commandLaneKind === 'owner' ? null : auth.expiresAtMs;
       prunePendingCommands(env);
       const commandFrontier = readRuntimeAdapterCommandFrontier(env, state.commandLaneId);
+      const readiness = getRuntimeCommandReadiness(env);
       sendOk(ws, msg.id, {
         authLevel: auth.level,
         commandLaneKind,
         expiresAtMs: auth.expiresAtMs,
         currentHeight: Math.max(0, Math.floor(Number(env.height ?? 0))),
+        commandReady: readiness.ready,
+        commandReadyReason: readiness.reason,
         nextCommandSequence: (commandFrontier?.lastContiguousSequence ?? 0) + 1,
         ...identity,
       }, diagnostic());

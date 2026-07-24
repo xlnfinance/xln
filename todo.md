@@ -20,11 +20,10 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   info events, and enforce allowlisted metadata plus sink-level redaction: raw
   Account/Entity inputs, Hanko, ciphertext, seeds and dispute evidence must
   never enter console, JSONL or the debug API.
-- [ ] Publish the canonical Runtime command readiness through both embedded and
-  remote adapters. Every wallet money control must disable from that exact
-  state, not from a UI approximation. Prove running → quiescing/restoring/halted
-  transitions in the real adapter with zero enqueue, transport or J-submit
-  side effects and a visible root-incident reference.
+- [ ] Show the canonical halted/readiness reason and durable root-incident
+  reference beside disabled wallet money controls. Cover the real browser
+  running → quiescing/restoring/halted transition with screenshot evidence;
+  adapter propagation and zero enqueue/transport/J-submit are already proven.
 - [ ] Make top-level market-maker health depend on every configured child,
   authenticated peer and required book. After a clean start and after forced
   child replacement, prove the public same-J and cross-J books contain exactly

@@ -11,7 +11,7 @@ import type {
 	} from './types';
 import { RuntimeAdapterError } from './errors';
 import { resolveRuntimeAdapterRead, type RuntimeAdapterResolveContext } from './resolve';
-import { assertRuntimeCommandReady } from '../machine/lifecycle';
+import { assertRuntimeCommandReady, getRuntimeCommandReadiness } from '../machine/lifecycle';
 
 export type EmbeddedRuntimeAdapterDeps = {
   getEnv: () => Env | null;
@@ -65,6 +65,17 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
 
   get authLevel(): RuntimeAdapterAuthLevel | null {
     return 'admin';
+  }
+
+  get commandReady(): boolean {
+    const env = this.resolveEnv();
+    return this.currentStatus === 'connected' && env !== null && getRuntimeCommandReadiness(env).ready;
+  }
+
+  get commandReadyReason(): string | null {
+    const env = this.resolveEnv();
+    if (this.currentStatus !== 'connected' || !env) return `adapter-${this.currentStatus}`;
+    return getRuntimeCommandReadiness(env).reason;
   }
 
   async connect(config: RuntimeAdapterConfig): Promise<void> {

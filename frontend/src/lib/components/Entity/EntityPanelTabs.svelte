@@ -550,7 +550,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       to: moveToEndpoint,
       amountInput: moveAmount,
       executing: moveExecuting,
-      activeIsLive,
+      activeIsLive: activeCommandsReady,
       awaitingCounterparty: isMoveAwaitingCounterparty(),
       hasSentBatch,
       sourceAccountId: getCurrentMoveSourceAccountId(),
@@ -573,7 +573,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   let moveAllowanceAssetIdentity = '';
   let moveAllowanceMetadataLoading = false;
   $: moveAllowanceRouteEnabled = assetWorkspaceTab === 'move'
-    && activeIsLive
+    && activeCommandsReady
     && routeRequiresExplicitExternalAllowance(moveFromEndpoint, moveToEndpoint);
   $: moveAllowanceContextSignature = buildMoveAllowanceContextSignature({
     enabled: moveAllowanceRouteEnabled,
@@ -813,6 +813,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   $: activeEnv = env;
   $: activeLiveEnv = liveEnv;
   $: activeIsLive = isLive;
+  $: activeCommandsReady = activeIsLive && $runtimeControllerHandle.commandReady;
   $: fallbackRuntimeEnv = getRuntimeEnv(activeEnv);
   $: actionRuntimeEnv = activeLiveEnv ?? (typeof liveEnvResolver === 'function' ? liveEnvResolver() : null) ?? fallbackRuntimeEnv;
   $: displayEnv = activeIsLive ? (actionRuntimeEnv ?? activeEnv) : activeEnv;
@@ -3642,7 +3643,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
           <EntityAssetsTab
             {replica}
             {tab}
-            {activeIsLive}
+            activeIsLive={activeCommandsReady}
             profileByEntityId={panelView.profileByEntityId}
             entityNames={panelView.entityNames}
             {currentExternalEoaValue}
@@ -3739,7 +3740,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
             {tab}
             {activeEnv}
             {liveRuntimeEnv}
-            {activeIsLive}
+            activeIsLive={activeCommandsReady}
             {actionRuntimeEnv}
             {canOpenAccounts}
             {submitRuntimeInput}
@@ -3865,7 +3866,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
             reserveCount={replica.state?.reserves?.size ?? 0}
             proposalCount={replica.state?.proposals?.size ?? 0}
             isHub={replica.state?.profile?.isHub === true || Boolean((replica.state as { orderbookHubProfile?: unknown })?.orderbookHubProfile)}
-            {activeIsLive}
+            activeIsLive={activeCommandsReady}
             runtimeEnv={getRuntimeEnv(actionRuntimeEnv)}
             consensusView={buildEntityConsensusSettingsView(
               replica,
