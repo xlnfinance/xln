@@ -320,7 +320,7 @@ describe('production startup wiring', () => {
     expect(script).toContain('export RELAY_URL=${RELAY_URL:-$INTERNAL_RELAY_URL}');
     expect(script).toContain('--relay-url "$RELAY_URL"');
     expect(script).toContain('--rpc2-url "$ANVIL_RPC2"');
-    expect(script).toContain('export XLN_RUNTIME_EXIT_ON_FATAL=1');
+    expect(script).not.toContain('XLN_RUNTIME_EXIT_ON_FATAL');
     expect(script).toContain('export XLN_STORAGE_WRITE_TIMEOUT_MS=${XLN_STORAGE_WRITE_TIMEOUT_MS:-60000}');
     expect(script).toContain('export XLN_SNAPSHOT_INTERVAL_FRAMES=${XLN_SNAPSHOT_INTERVAL_FRAMES:-1024}');
     expect(script).not.toContain('HUB_BOOTSTRAP_PAUSE_STORAGE');
@@ -489,7 +489,7 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('const buildRpcChildEnv = (): Record<string, string> => {');
     expect(orchestrator).toContain('const rpcProxyIndex = resolveRpcProxyIndex(pathname);');
     expect(orchestrator).toContain("return await proxyRpc(request, args.rpcUrls[rpcProxyIndex] || '', operatorAuthorized);");
-    expect(orchestrator.match(/XLN_RUNTIME_EXIT_ON_FATAL: '1'/g)).toHaveLength(2);
+    expect(orchestrator).not.toContain('XLN_RUNTIME_EXIT_ON_FATAL');
     expect(orchestrator).toContain("XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000'");
     expect(orchestrator).not.toContain('HUB_BOOTSTRAP_PAUSE_STORAGE');
     expect(orchestrator).not.toContain('HUB_READY_SNAPSHOT');
@@ -497,8 +497,8 @@ describe('production startup wiring', () => {
     expect(runtimeEntityRouting).not.toContain('deps.startRuntimeLoop(env);');
     expect(runtimeEntityRouting).not.toContain('processRuntime(env)');
     expect(runtimeEntityRouting).not.toContain('queueMicrotask(() =>');
-    expect(runtimeMainSource).toContain('const shouldExitOnRuntimeFatal = (runtimeProcess = getRuntimeProcessGlobal()): boolean =>');
     expect(runtimeMainSource).toContain("runtimeProcess.exit(1);");
+    expect(runtimeMainSource).not.toContain('shouldExitOnRuntimeFatal');
     expect(orchestrator).toContain("XLN_STORAGE_SYNC_WRITES: process.env['XLN_STORAGE_SYNC_WRITES'] ?? '1'");
     expect(orchestrator).not.toContain('XLN_MARKET_MAKER_DISABLE_STORAGE');
     expect(orchestrator).toContain("XLN_DISABLE_RUNTIME_RESTORE: process.env['XLN_MARKET_MAKER_DISABLE_RESTORE'] ?? process.env['XLN_DISABLE_RUNTIME_RESTORE'] ?? '0'");

@@ -56,7 +56,6 @@ export XLN_MESH_CUSTODY_DAEMON_PORT=${XLN_MESH_CUSTODY_DAEMON_PORT:-$(xln_custod
 # Public radapter URL for the custody daemon (nginx custody.xln.finance/rpc -> 127.0.0.1:8088),
 # so custody shows up + connects in the wallet's "Connect to live runtime" dropdown.
 export XLN_CUSTODY_PUBLIC_RPC_URL=${XLN_CUSTODY_PUBLIC_RPC_URL:-wss://custody.xln.finance/rpc}
-export XLN_RUNTIME_EXIT_ON_FATAL=1
 export XLN_STORAGE_WRITE_TIMEOUT_MS=${XLN_STORAGE_WRITE_TIMEOUT_MS:-60000}
 # Managed testnet nodes rebuild from genesis during bootstrap. The generic
 # five-frame developer cadence snapshots four CPU-heavy runtimes at once and

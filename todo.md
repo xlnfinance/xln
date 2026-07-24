@@ -13,9 +13,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   must enter one redacted stream, group by root-cause fingerprint, survive
   gossip flood/restart, and support unread/acknowledged/resolved state. Release
   gates fail on unexplained open incidents.
-- [ ] Make managed Runtime fatal halt terminate the child process so the
-  orchestrator performs bounded restart/recovery. Health must never present a
-  halted child or cached market-maker readiness as active.
 - [ ] Reproduce the production bootstrap locally with the production storage
   byte threshold, then run beyond the first epoch rotation with H1/H2/H3/MM
   healthy, no stale frames, no orphan processes and no growing empty-chain

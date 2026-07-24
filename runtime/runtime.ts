@@ -1418,7 +1418,7 @@ export function startRuntimeLoop(env: Env, config?: RuntimeLoopConfig): () => vo
             },
           );
           const runtimeProcess = getRuntimeProcessGlobal();
-          if (shouldExitOnRuntimeFatal(runtimeProcess) && runtimeProcess?.exit) {
+          if (runtimeProcess?.exit) {
             runtimeProcess.exit(1);
           }
           // Fail-fast: stop runtime loop on any unhandled runtime error.
@@ -5514,10 +5514,6 @@ const getRuntimeProcessGlobal = (): RuntimeProcessGlobal | null => {
   const candidate = (globalThis as typeof globalThis & { process?: RuntimeProcessGlobal }).process;
   return candidate && typeof candidate === 'object' ? candidate : null;
 };
-
-const shouldExitOnRuntimeFatal = (runtimeProcess = getRuntimeProcessGlobal()): boolean =>
-  typeof runtimeProcess?.exit === 'function' &&
-  String(runtimeProcess.env?.['XLN_RUNTIME_EXIT_ON_FATAL'] || '').trim() === '1';
 
 const shouldRequireCanonicalStorageAudit = (runtimeProcess = getRuntimeProcessGlobal()): boolean => {
   const raw = String(runtimeProcess?.env?.['XLN_STORAGE_VERIFY_CANONICAL'] || '').trim().toLowerCase();
