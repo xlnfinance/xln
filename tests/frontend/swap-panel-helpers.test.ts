@@ -2,17 +2,13 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   buildSwapPanelRuntimeView,
-  buildCrossSwapRuntimeInputPlan,
-  buildCrossTargetSetupTxs,
   buildCrossSwapSetupSteps,
   crossOrderbookPairLabel,
   entityInitials,
   firstAvailableHubId,
   formatEntityNetworkLabel,
-  getTokenMapValue,
   jurisdictionBadgeText,
   normalizeJurisdictionDisplayName,
-  nonNegative,
   orderbookLotsDisplayScale,
   parseCrossAssetKey,
   resolveHubIdCandidate,
@@ -169,18 +165,13 @@ describe('swap panel helpers', () => {
     expect(crossOrderbookPairLabel(1, 'arrakis', 2, 'Base Sepolia', tokenSymbol)).toBe('WETH (arrakis) - USDC (Base Sepolia)');
   });
 
-  test('formats compact identity markers and token maps', () => {
+  test('formats compact identity markers', () => {
     expect(entityInitials('0xabcdef', 'Grace Tron')).toBe('GR');
     expect(entityInitials('0xabcdef')).toBe('0X');
     expect(jurisdictionBadgeText('Base Sepolia')).toBe('BS');
     expect(jurisdictionBadgeText('arrakis')).toBe('AR');
     expect(jurisdictionBadgeText('')).toBe('J');
 
-    expect(getTokenMapValue(new Map<number, string>([[1, 'number-key']]), 1)).toBe('number-key');
-    expect(getTokenMapValue(new Map<string, string>([['2', 'string-key']]), 2)).toBe('string-key');
-    expect(getTokenMapValue(undefined, 2)).toBeUndefined();
-    expect(nonNegative(-1n)).toBe(0n);
-    expect(nonNegative(2n)).toBe(2n);
   });
 
   test('builds cross-swap setup consent steps only for missing preparation', () => {
@@ -244,97 +235,15 @@ describe('swap panel helpers', () => {
     ]);
   });
 
-  test('builds target setup txs for one-click cross swaps', () => {
-    expect(buildCrossTargetSetupTxs({
-      shouldOpenAccount: true,
-      shouldExtendCredit: true,
-      targetHubEntityId: '0xhub',
-      tokenId: 1,
-      requiredCreditLimit: 10_000n,
-    })).toEqual([{
-      type: 'openAccount',
-      data: {
-        targetEntityId: '0xhub',
-        tokenId: 1,
-        creditAmount: 10_000n,
-      },
-    }]);
-
-    expect(buildCrossTargetSetupTxs({
-      shouldOpenAccount: false,
-      shouldExtendCredit: true,
-      targetHubEntityId: '0xhub',
-      tokenId: 1,
-      requiredCreditLimit: 250n,
-    })).toEqual([{
-      type: 'extendCredit',
-      data: {
-        counterpartyEntityId: '0xhub',
-        tokenId: 1,
-        amount: 250n,
-      },
-    }]);
-
-    expect(buildCrossTargetSetupTxs({
-      shouldOpenAccount: false,
-      shouldExtendCredit: false,
-      targetHubEntityId: '0xhub',
-      tokenId: 1,
-      requiredCreditLimit: 250n,
-    })).toEqual([]);
-
-    expect(() => buildCrossTargetSetupTxs({
-      shouldOpenAccount: true,
-      shouldExtendCredit: false,
-      targetHubEntityId: '0xhub',
-      tokenId: 1,
-      requiredCreditLimit: 0n,
-    })).toThrow('positive inbound credit limit');
-  });
-
-  test('builds only target setup input; M1 stays an unsigned best-effort intent', () => {
-    const route = {
-      orderId: 'order-1',
-      makerEntityId: '0xsource',
-      hubEntityId: '0xbookhub',
-      source: { entityId: '0xsource', counterpartyEntityId: '0xsourcehub', tokenId: 1, amount: 100n },
-      target: { entityId: '0xtargethub', counterpartyEntityId: '0xtarget', tokenId: 2, amount: 200n },
-    } as never;
-
-    const plan = buildCrossSwapRuntimeInputPlan({
-      route,
-      targetEntityId: '0xTARGET',
-      targetSignerId: '0xTargetSigner',
-      targetHubEntityId: '0xTargetHub',
-      tokenId: 2,
-      requiredCreditLimit: 10_000n,
-      shouldOpenTargetAccount: true,
-      shouldExtendTargetCredit: true,
-    });
-
-    expect(plan.setupInput?.entityInputs).toEqual([
-      {
-        entityId: '0xtarget',
-        signerId: '0xTargetSigner',
-        entityTxs: [{
-          type: 'openAccount',
-          data: {
-            targetEntityId: '0xTargetHub',
-            tokenId: 2,
-            creditAmount: 10_000n,
-          },
-        }],
-      },
-    ]);
-  });
-
-  test('SwapPanel uses ordered RuntimeInput plans for cross swap setup', () => {
+  test('SwapPanel submits the exact Runtime-owned inbound plan before cross intent', () => {
     const source = Bun.file('frontend/src/lib/components/Entity/SwapPanel.svelte');
     return source.text().then((text) => {
-      expect(text).toContain('buildCrossSwapRuntimeInputPlan');
-      expect(text).toContain('crossInputPlan.targetSetupTxs.length > 0');
-      expect(text).toContain('await submitRuntimeInput(crossInputPlan.setupInput)');
+      expect(text).toContain('activeXlnFunctions.planSwapInboundCapacity');
+      expect(text).toContain('const targetSetupTxs = [...targetInboundPlan.setupTxs]');
+      expect(text).toContain('await submitRuntimeInput({');
       expect(text).toContain('await submitActiveCrossJurisdictionIntent(crossJurisdiction)');
+      expect(text).not.toContain('activeXlnFunctions.deriveDelta');
+      expect(text).not.toContain('10_000n * 10n ** decimals');
       expect(text).not.toContain('crossCommandEnv');
       expect(text).not.toContain('submitRuntimeInput(crossCommandEnv, runtimeInput)');
       expect(text).not.toContain('await submitRuntimeInput(nextEnv, crossInputPlan.requestInput)');
@@ -387,7 +296,8 @@ describe('swap panel helpers', () => {
     expect(resolverSlice).toContain('resolveProjectedSignerId(entityId)');
     expect(resolverSlice).not.toContain("throw new Error('XLN environment not ready')");
     expect(placeSlice).toContain('resolveSwapLogicalClock(currentReplica)');
-    expect(placeSlice).toContain('await submitRuntimeInput(crossInputPlan.setupInput)');
+    expect(placeSlice).toContain('const targetSetupTxs = [...targetInboundPlan.setupTxs]');
+    expect(placeSlice).toContain('await submitRuntimeInput({');
     expect(placeSlice).toContain('await submitActiveCrossJurisdictionIntent(crossJurisdiction)');
     expect(placeSlice).toContain('await submitEntityInputs([{');
     expect(placeSlice).toContain('await prewarmCounterpartyProfiles(runtimeEnv, [targetRoute.targetHubEntityId])');

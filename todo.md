@@ -32,13 +32,28 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 2. Runtime-owned financial planning
 
-- [ ] Move swap capacity, quantization and auto-credit preparation into one
-  Runtime pure planner. UI renders the immutable plan and submits its exact
-  bytes; planner failure produces zero financial transactions.
-- [ ] Remove the arbitrary 10,000-token cross-J credit floor. A new account gets
-  only the exact required inbound credit, visibly separated from swap amount.
+- [ ] Finish one immutable Runtime swap-command plan containing canonical
+  capacity, quantization and target-account preparation. Commit target setup
+  before dispatching cross-J M1; UI only renders/submits the exact plan bytes
+  and planner failure produces zero financial transactions. Canonical capacity
+  reads and exact credit without the former 10,000-token floor are complete.
 
-## 3. Transport and secret persistence
+## 3. Ingress and contract boundedness
+
+- [ ] Classify remote Entity-input failures by typed cause. Only malformed
+  unauthenticated ingress may be quarantined; storage errors, state-machine
+  contradictions and local bugs must halt. Prove every class through the real
+  `applyMergedEntityInputs` path.
+- [ ] Replace the unbounded `_forgiveDebtsBetweenEntities` queue scan with an
+  indexed or bounded-continuation structure. Prove exact debt conservation and
+  bounded gas with adversarial creditor ordering.
+- [ ] Delete proven pre-mainnet compatibility state and code after a full import
+  graph: V1 settlement `diffsToOps`, `position.xlnomy`, deprecated Env
+  `browserVM/evms`, unused `processJBlockEvents`/`resolveEntityId`, and the
+  ineffective `hashToBlock/cleanSecret` path. Use one schema/ABI change with no
+  legacy decoder or fallback.
+
+## 4. Transport and secret persistence
 
 - [ ] Derive AEAD keys from X25519 with domain-separated HKDF-SHA256 and bind
   protocol/from/to/type/source-frame/message-id as AAD. Replace Base64 with one
@@ -54,7 +69,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   namespace and reference it from Account materialization. Prove backup,
   restore and dispute recovery before removing plaintext duplication.
 
-## 4. Crash, corruption and load evidence
+## 5. Crash, corruption and load evidence
 
 - [ ] Pass real SIGKILL recovery through split mutation, collapse, delete,
   restore-clear and raw orphan/root assertions.
@@ -69,7 +84,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   with canonical direct indexes; then introduce Runtime→Entity→Account COW only
   behind byte-identical differential roots and measured clone counters.
 
-## 5. Public Ethereum and TRON proof
+## 6. Public Ethereum and TRON proof
 
 - [ ] Finish the native TRON adapter: protobuf transaction signing/broadcast,
   live energy fee limits, SolidityNode finality, complete authenticated
@@ -86,11 +101,15 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   headers commit transactions rather than Ethereum receipt tries; never
   synthesize an Ethereum MPT proof or trust one RPC witness.
 
-## 6. Immutable mainnet release pipeline
+## 7. Immutable mainnet release pipeline
 
 - [ ] Bind every result to
   `candidateId = gitHead + codeHash + gateConfigHash`; store unit, contract,
   scenario, browser, recovery, public-chain and release evidence together.
+- [ ] Make one shared Playwright fixture fail every functional E2E on unexpected
+  browser `console.error`, `pageerror`, failed request or unresolved debug
+  incident. Narrow explicit allowlists only; individual specs cannot silently
+  omit the guard.
 - [ ] Run L1/L2 first, then exactly one unchanged-candidate unified full E2E,
   `bun run check`, `bun run gate:release` and the uninterrupted
   `bun run gate:mainnet`.

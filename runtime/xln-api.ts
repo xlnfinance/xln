@@ -82,6 +82,12 @@ export type { CompletedBatch, JBatch, JBatchState } from './jurisdiction/batch';
 export type { JAdapter, JEvent } from './jadapter/types';
 export type { BookState, OrderbookExtState, PreparedSwapOrder } from './orderbook';
 export type {
+  SwapAccountCapacityView,
+  SwapAccountCapacityViewInput,
+  SwapInboundCapacityPlan,
+  SwapInboundCapacityPlanInput,
+} from './account/swap-inbound-plan';
+export type {
   MppChallenge,
   MppChallengeBindingInput,
   MppCredential,
@@ -508,6 +514,8 @@ export interface XLNModule {
 
   // Runtime operations
   applyRuntimeInput: (env: Env, input: RuntimeInput) => Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }>;
+  planSwapInboundCapacity: typeof import('./account/swap-inbound-plan').planSwapInboundCapacity;
+  readSwapAccountCapacity: typeof import('./account/swap-inbound-plan').readSwapAccountCapacity;
   validateRuntimeInputAdmission: (env: Env, input: RuntimeInput) => void;
   enqueueRuntimeInput: (env: Env, input: RuntimeInput) => void;
   startRuntimeLoop?: (env: Env) => () => void;

@@ -2,7 +2,14 @@
   import { tick } from 'svelte';
   import type { AccountMachine, EntityReplica, Tab } from '$lib/types/ui';
   import { writable } from 'svelte/store';
-  import type { BookState, CrossJurisdictionSwapRoute, Delta, EntityTx, Env } from '@xln/runtime/xln-api';
+  import type {
+    BookState,
+    CrossJurisdictionSwapRoute,
+    EntityTx,
+    Env,
+    SwapAccountCapacityView,
+    SwapInboundCapacityPlan,
+  } from '@xln/runtime/xln-api';
   import {
     deriveCanonicalCrossJurisdictionBookOwnerForLegs,
     deriveCanonicalCrossJurisdictionMarketForLegs,
@@ -29,15 +36,11 @@
   import { formatEntityId } from '$lib/utils/format';
   import {
     buildSwapPanelRuntimeView,
-    buildCrossSwapRuntimeInputPlan,
     buildCrossSwapSetupSteps,
     crossOrderbookPairLabel,
     firstAvailableHubId,
     formatEntityNetworkLabel,
-    getTokenMapValue,
-    maxBigInt,
     normalizeJurisdictionDisplayName,
-    nonNegative,
     orderbookLotsDisplayScale,
     parseCrossAssetKey,
     resolveHubIdCandidate,
@@ -45,7 +48,6 @@
     tokenNetworkLabel,
     type CrossSwapSetupStep,
     type SwapPanelRuntimeView,
-    type TokenKeyedMap,
   } from './swap-panel-helpers';
   import {
     compareStableText,
@@ -575,20 +577,6 @@
     quoteKey: string;
   };
 
-  function getAccountDelta(counterpartyEntityId: string, tokenIdValue: number): { delta: Delta; isLeft: boolean } | null {
-    if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0 || !sourceEntityIdValue) return null;
-    const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
-    const account = currentReplica?.state?.accounts?.get?.(resolvedCounterparty);
-    const deltas = account?.deltas as TokenKeyedMap<Delta> | undefined;
-    if (!(deltas instanceof Map)) return null;
-    const delta = getTokenMapValue(deltas, tokenIdValue);
-    if (!delta) return null;
-    return {
-      delta,
-      isLeft: sourceEntityIdValue < String(resolvedCounterparty).toLowerCase(),
-    };
-  }
-
   function getReplicaJurisdictionName(candidate: EntityReplica | null | undefined): string {
     const state = candidate?.state as { config?: { jurisdiction?: { name?: unknown } } } | undefined;
     const byConfig = String(state?.config?.jurisdiction?.name || '').trim();
@@ -607,24 +595,23 @@
     return '';
   }
 
-  function getAccountDeltaForReplica(
+  function readAccountCapacityForReplica(
     candidate: EntityReplica | null | undefined,
     ownerEntityId: string,
     counterpartyEntityId: string,
     tokenIdValue: number,
-  ): { delta: Delta; isLeft: boolean } | null {
-    const owner = String(ownerEntityId || '').trim();
-    const counterparty = String(counterpartyEntityId || '').trim();
-    if (!candidate || !owner || !counterparty || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return null;
+  ): SwapAccountCapacityView | null {
+    if (!activeXlnFunctions?.readSwapAccountCapacity) return null;
+    const owner = String(ownerEntityId || '').trim().toLowerCase();
+    const counterparty = String(counterpartyEntityId || '').trim().toLowerCase();
+    if (!candidate || !owner || !counterparty || !Number.isSafeInteger(tokenIdValue) || tokenIdValue <= 0) return null;
     const account = candidate.state?.accounts?.get?.(counterparty);
-    const deltas = account?.deltas as TokenKeyedMap<Delta> | undefined;
-    if (!(deltas instanceof Map)) return null;
-    const delta = getTokenMapValue(deltas, tokenIdValue);
-    if (!delta) return null;
-    return {
-      delta,
-      isLeft: owner.toLowerCase() < counterparty.toLowerCase(),
-    };
+    return activeXlnFunctions.readSwapAccountCapacity({
+      account: account ?? null,
+      ownerEntityId: owner,
+      counterpartyEntityId: counterparty,
+      tokenId: tokenIdValue,
+    });
   }
 
   function hasTokenInReplicaAccount(
@@ -633,11 +620,12 @@
     counterpartyEntityId: string,
     tokenIdValue: number,
   ): boolean {
-    if (!candidate || !counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return false;
-    const account = candidate.state?.accounts?.get?.(counterpartyEntityId);
-    const deltas = account?.deltas as TokenKeyedMap<Delta> | undefined;
-    if (!(deltas instanceof Map)) return false;
-    return getTokenMapValue(deltas, tokenIdValue) !== undefined;
+    return readAccountCapacityForReplica(
+      candidate,
+      ownerEntityId,
+      counterpartyEntityId,
+      tokenIdValue,
+    )?.tokenActive ?? false;
   }
 
   function readInCapacityForReplica(
@@ -646,16 +634,12 @@
     counterpartyEntityId: string,
     tokenIdValue: number,
   ): bigint {
-    const accountDelta = getAccountDeltaForReplica(candidate, ownerEntityId, counterpartyEntityId, tokenIdValue);
-    if (!accountDelta || !activeXlnFunctions?.deriveDelta) return 0n;
-    try {
-      const derived = activeXlnFunctions.deriveDelta(accountDelta.delta, accountDelta.isLeft);
-      const inCapacityRaw = (derived as { inCapacity?: unknown })?.inCapacity;
-      if (typeof inCapacityRaw === 'bigint') return inCapacityRaw;
-      return toBigIntSafe(inCapacityRaw) ?? 0n;
-    } catch {
-      return 0n;
-    }
+    return readAccountCapacityForReplica(
+      candidate,
+      ownerEntityId,
+      counterpartyEntityId,
+      tokenIdValue,
+    )?.inCapacity ?? 0n;
   }
 
   function buildSourceEntityOptions(
@@ -1780,50 +1764,30 @@
   }
 
   function readOutCapacity(counterpartyEntityId: string, tokenIdValue: number): bigint {
-    const accountDelta = getAccountDelta(counterpartyEntityId, tokenIdValue);
-    if (!accountDelta || !activeXlnFunctions?.deriveDelta) return 0n;
-    try {
-      const derived = activeXlnFunctions.deriveDelta(accountDelta.delta, accountDelta.isLeft);
-      const outCapacityRaw = (derived as { outCapacity?: unknown })?.outCapacity;
-      if (typeof outCapacityRaw === 'bigint') return outCapacityRaw;
-      return toBigIntSafe(outCapacityRaw) ?? 0n;
-    } catch {
-      return 0n;
-    }
+    return readAccountCapacityForReplica(
+      currentReplica,
+      sourceEntityIdValue,
+      resolveCounterpartyId(counterpartyEntityId),
+      tokenIdValue,
+    )?.outCapacity ?? 0n;
   }
 
   function hasTokenInAccount(counterpartyEntityId: string, tokenIdValue: number): boolean {
-    if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return false;
-    const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
-    const account = currentReplica?.state?.accounts?.get?.(resolvedCounterparty);
-    const deltas = account?.deltas as TokenKeyedMap<Delta> | undefined;
-    if (!(deltas instanceof Map)) return false;
-    return getTokenMapValue(deltas, tokenIdValue) !== undefined;
+    return readAccountCapacityForReplica(
+      currentReplica,
+      sourceEntityIdValue,
+      resolveCounterpartyId(counterpartyEntityId),
+      tokenIdValue,
+    )?.tokenActive ?? false;
   }
 
   function readInCapacity(counterpartyEntityId: string, tokenIdValue: number): bigint {
-    const accountDelta = getAccountDelta(counterpartyEntityId, tokenIdValue);
-    if (!accountDelta || !activeXlnFunctions?.deriveDelta) return 0n;
-    try {
-      const derived = activeXlnFunctions.deriveDelta(accountDelta.delta, accountDelta.isLeft);
-      const inCapacityRaw = (derived as { inCapacity?: unknown })?.inCapacity;
-      if (typeof inCapacityRaw === 'bigint') return inCapacityRaw;
-      return toBigIntSafe(inCapacityRaw) ?? 0n;
-    } catch {
-      return 0n;
-    }
-  }
-
-  function readAccountDelta(counterpartyEntityId: string, tokenIdValue: number): Delta | null {
-    return getAccountDelta(counterpartyEntityId, tokenIdValue)?.delta ?? null;
-  }
-
-  function readPeerCreditLimit(counterpartyEntityId: string, tokenIdValue: number): bigint {
-    const delta = readAccountDelta(counterpartyEntityId, tokenIdValue);
-    if (!delta || !sourceEntityIdValue) return 0n;
-    const isLeft = sourceEntityIdValue < String(resolveCounterpartyId(counterpartyEntityId)).toLowerCase();
-    const raw = isLeft ? delta.rightCreditLimit : delta.leftCreditLimit;
-    return nonNegative(toBigIntSafe(raw) ?? 0n);
+    return readAccountCapacityForReplica(
+      currentReplica,
+      sourceEntityIdValue,
+      resolveCounterpartyId(counterpartyEntityId),
+      tokenIdValue,
+    )?.inCapacity ?? 0n;
   }
 
   function findReplicaByEntityId(entityId: string, view: SwapPanelRuntimeView = swapRuntimeView): EntityReplica | null {
@@ -1840,82 +1804,29 @@
     return candidate.state?.accounts instanceof Map && candidate.state.accounts.has(counterparty);
   }
 
-  function readPeerCreditLimitForReplica(
-    candidate: EntityReplica | null | undefined,
-    ownerEntityId: string,
-    counterpartyEntityId: string,
-    tokenIdValue: number,
-  ): bigint {
-    const accountDelta = getAccountDeltaForReplica(candidate, ownerEntityId, counterpartyEntityId, tokenIdValue);
-    if (!accountDelta) return 0n;
-    const raw = accountDelta.isLeft ? accountDelta.delta.rightCreditLimit : accountDelta.delta.leftCreditLimit;
-    return nonNegative(toBigIntSafe(raw) ?? 0n);
-  }
-
-  function computeAutoInboundCreditTarget(
-    counterpartyEntityId: string,
-    tokenIdValue: number,
-    desiredInboundAmount: bigint,
-  ): bigint | null {
-    if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0 || desiredInboundAmount <= 0n) return null;
-    if (!activeXlnFunctions?.deriveDelta || !sourceEntityIdValue) return desiredInboundAmount;
-    const accountDelta = getAccountDelta(counterpartyEntityId, tokenIdValue);
-    if (!accountDelta) return desiredInboundAmount;
-    const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
-    try {
-      const derived = activeXlnFunctions.deriveDelta(accountDelta.delta, accountDelta.isLeft) as {
-        inCapacity?: unknown;
-        inPeerCredit?: unknown;
-        outPeerCredit?: unknown;
-      };
-      const inCapacity = nonNegative(toBigIntSafe(derived.inCapacity) ?? 0n);
-      if (inCapacity >= desiredInboundAmount) return null;
-
-      const inPeerCredit = nonNegative(toBigIntSafe(derived.inPeerCredit) ?? 0n);
-      const inWithoutPeerCredit = inCapacity > inPeerCredit ? inCapacity - inPeerCredit : 0n;
-      const neededPeerCredit = desiredInboundAmount > inWithoutPeerCredit ? desiredInboundAmount - inWithoutPeerCredit : 0n;
-
-      const currentPeerLimit = readPeerCreditLimit(resolvedCounterparty, tokenIdValue);
-      const outPeerDebt = nonNegative(toBigIntSafe(derived.outPeerCredit) ?? 0n);
-      const targetPeerLimit = outPeerDebt + neededPeerCredit;
-      if (targetPeerLimit > currentPeerLimit) return targetPeerLimit;
-      return null;
-    } catch {
-      return desiredInboundAmount;
-    }
-  }
-
-  function computeAutoInboundCreditTargetForReplica(
+  function planInboundCapacityForReplica(
     candidate: EntityReplica | null | undefined,
     ownerEntityId: string,
     counterpartyEntityId: string,
     tokenIdValue: number,
     desiredInboundAmount: bigint,
-  ): bigint | null {
-    if (!hasReplicaAccount(candidate, counterpartyEntityId)) return null;
-    if (!Number.isFinite(tokenIdValue) || tokenIdValue <= 0 || desiredInboundAmount <= 0n) return null;
-    const accountDelta = getAccountDeltaForReplica(candidate, ownerEntityId, counterpartyEntityId, tokenIdValue);
-    if (!accountDelta || !activeXlnFunctions?.deriveDelta) return desiredInboundAmount;
-    try {
-      const derived = activeXlnFunctions.deriveDelta(accountDelta.delta, accountDelta.isLeft) as {
-        inCapacity?: unknown;
-        inPeerCredit?: unknown;
-        outPeerCredit?: unknown;
-      };
-      const inCapacity = nonNegative(toBigIntSafe(derived.inCapacity) ?? 0n);
-      if (inCapacity >= desiredInboundAmount) return null;
-
-      const inPeerCredit = nonNegative(toBigIntSafe(derived.inPeerCredit) ?? 0n);
-      const inWithoutPeerCredit = inCapacity > inPeerCredit ? inCapacity - inPeerCredit : 0n;
-      const neededPeerCredit = desiredInboundAmount > inWithoutPeerCredit ? desiredInboundAmount - inWithoutPeerCredit : 0n;
-      const currentPeerLimit = readPeerCreditLimitForReplica(candidate, ownerEntityId, counterpartyEntityId, tokenIdValue);
-      const outPeerDebt = nonNegative(toBigIntSafe(derived.outPeerCredit) ?? 0n);
-      const targetPeerLimit = outPeerDebt + neededPeerCredit;
-      if (targetPeerLimit > currentPeerLimit) return targetPeerLimit;
+    allowOpenAccount: boolean,
+  ): SwapInboundCapacityPlan | null {
+    if (!activeXlnFunctions?.planSwapInboundCapacity) return null;
+    const owner = String(ownerEntityId || '').trim().toLowerCase();
+    const counterparty = String(counterpartyEntityId || '').trim().toLowerCase();
+    if (!owner || !counterparty || !Number.isSafeInteger(tokenIdValue) || tokenIdValue <= 0 || desiredInboundAmount <= 0n) {
       return null;
-    } catch {
-      return desiredInboundAmount;
     }
+    const account = candidate?.state?.accounts?.get?.(counterparty) ?? null;
+    return activeXlnFunctions.planSwapInboundCapacity({
+      account,
+      ownerEntityId: owner,
+      counterpartyEntityId: counterparty,
+      tokenId: tokenIdValue,
+      requiredInboundAmount: desiredInboundAmount,
+      allowOpenAccount,
+    });
   }
 
   function isInboundCapacityValidationError(reason: string): boolean {
@@ -1931,33 +1842,38 @@
     wantTokenPresentInAccount = hasTokenInAccount(activeOrderAccountId, wantToken);
     availableGiveCapacity = readOutCapacity(activeOrderAccountId, giveToken);
     availableWantInCapacity = readInCapacity(activeOrderAccountId, wantToken);
-    currentPeerCreditLimit = readPeerCreditLimit(activeOrderAccountId, wantToken);
   }
-  $: autoInboundCreditTarget = computeAutoInboundCreditTarget(
-    activeOrderAccountId,
-    wantToken,
-    canonicalWantAmount,
-  );
   $: {
-    crossTargetInCapacity = selectedCrossTarget
-      ? readInCapacityForReplica(selectedCrossTargetReplica, selectedCrossTarget.targetEntityId, selectedCrossTarget.targetHubEntityId, wantToken)
-      : 0n;
+    const sameInboundPlan = planInboundCapacityForReplica(
+      currentReplica,
+      sourceEntityIdValue,
+      resolveCounterpartyId(activeOrderAccountId),
+      wantToken,
+      canonicalWantAmount,
+      false,
+    );
+    autoInboundCreditTarget = sameInboundPlan?.requiredPeerCreditLimit ?? null;
+    currentPeerCreditLimit = sameInboundPlan?.currentPeerCreditLimit ?? 0n;
+  }
+  $: {
     crossDesiredInboundAmount = canonicalWantAmount;
-    crossAutoInboundCreditTarget = selectedCrossTarget && crossTargetHasAccount
-      ? computeAutoInboundCreditTargetForReplica(
+    const crossInboundPlan = (
+      selectedCrossTarget
+      && crossDesiredInboundAmount > 0n
+      && (crossTargetHasAccount || canAutoOpenCrossTargetAccount)
+    )
+      ? planInboundCapacityForReplica(
           selectedCrossTargetReplica,
           selectedCrossTarget.targetEntityId,
           selectedCrossTarget.targetHubEntityId,
           wantToken,
           crossDesiredInboundAmount,
+          canAutoOpenCrossTargetAccount,
         )
-      : selectedCrossTarget && needsCrossTargetAccountSetup && crossDesiredInboundAmount > 0n
-        ? maxBigInt(defaultCreditLimitForToken(wantToken), crossDesiredInboundAmount)
-        : null;
-    const currentPeerCreditLimit = selectedCrossTarget && crossTargetHasAccount
-      ? readPeerCreditLimitForReplica(selectedCrossTargetReplica, selectedCrossTarget.targetEntityId, selectedCrossTarget.targetHubEntityId, wantToken)
-      : 0n;
-    crossCurrentPeerCreditLimit = currentPeerCreditLimit;
+      : null;
+    crossTargetInCapacity = crossInboundPlan?.currentInboundCapacity ?? 0n;
+    crossAutoInboundCreditTarget = crossInboundPlan?.requiredPeerCreditLimit ?? null;
+    crossCurrentPeerCreditLimit = crossInboundPlan?.currentPeerCreditLimit ?? 0n;
     needsCrossTargetCreditSetup = Boolean(
       swapRouteMode === 'cross'
       && selectedCrossTarget
@@ -2485,30 +2401,6 @@
     handleSelectedHubChange(option.value);
   }
 
-  function defaultCreditLimitForToken(tokenIdValue: number): bigint {
-    const decimals = BigInt(Math.max(0, getTokenDecimals(tokenIdValue)));
-    return 10_000n * 10n ** decimals;
-  }
-
-  function computeCrossTargetCreditLimit(
-    target: CrossTargetOption,
-    targetReplica: EntityReplica | null,
-    tokenIdValue: number,
-    requiredInboundAmount: bigint,
-  ): bigint | null {
-    if (requiredInboundAmount <= 0n) return null;
-    if (!hasReplicaAccount(targetReplica, target.targetHubEntityId)) {
-      return maxBigInt(defaultCreditLimitForToken(tokenIdValue), requiredInboundAmount);
-    }
-    return computeAutoInboundCreditTargetForReplica(
-      targetReplica,
-      target.targetEntityId,
-      target.targetHubEntityId,
-      tokenIdValue,
-      requiredInboundAmount,
-    );
-  }
-
   function handleOrderbookLevelClick(event: CustomEvent<SwapOrderbookLevelClickDetail>) {
     submitError = '';
     const pair = parsedOrderbookPair;
@@ -3011,39 +2903,42 @@
         priceTicks: canonicalPriceTicks,
         routeValue: liveSelectedRouteValue,
       });
-      const requiredInboundCreditLimit = computeAutoInboundCreditTarget(
+      const sameInboundPlan = planInboundCapacityForReplica(
+        currentReplica,
+        sourceEntityId,
         resolvedCounterparty,
         wantToken,
         effectiveWantAmount,
+        false,
       );
-      const currentInboundCreditLimit = readPeerCreditLimit(resolvedCounterparty, wantToken);
+      if (
+        swapRouteMode === 'same'
+        && isInboundCapacityValidationError(liveValidationReason)
+        && sameInboundPlan === null
+      ) {
+        throw new Error('SWAP_INBOUND_PLAN_UNAVAILABLE');
+      }
       const shouldAutoPrepareInbound = (
         swapRouteMode === 'same'
-        &&
-        requiredInboundCreditLimit !== null
-        && requiredInboundCreditLimit > currentInboundCreditLimit
+        && (sameInboundPlan?.setupTxs.length ?? 0) > 0
         && isInboundCapacityValidationError(liveValidationReason)
       );
       const targetRoute = selectedCrossTarget;
       const targetReplica = targetRoute ? findReplicaByEntityId(targetRoute.targetEntityId) : null;
-      const requiredTargetInboundAmount = effectiveWantAmount;
-      const requiredTargetInboundCreditLimit = targetRoute
-        ? computeCrossTargetCreditLimit(targetRoute, targetReplica, wantToken, requiredTargetInboundAmount)
-        : null;
       const targetAccountExists = Boolean(targetRoute && hasReplicaAccount(targetReplica, targetRoute.targetHubEntityId));
-      const currentTargetInboundCreditLimit = targetRoute && targetAccountExists
-        ? readPeerCreditLimitForReplica(targetReplica, targetRoute.targetEntityId, targetRoute.targetHubEntityId, wantToken)
-        : 0n;
-      const shouldAutoOpenCrossTargetAccount = Boolean(
-        swapRouteMode === 'cross'
-        && targetRoute
-        && !targetAccountExists,
-      );
-      const shouldAutoPrepareCrossInbound = Boolean(
-        swapRouteMode === 'cross'
-        && requiredTargetInboundCreditLimit !== null
-        && requiredTargetInboundCreditLimit > currentTargetInboundCreditLimit,
-      );
+      const targetInboundPlan = swapRouteMode === 'cross' && targetRoute
+        ? planInboundCapacityForReplica(
+            targetReplica,
+            targetRoute.targetEntityId,
+            targetRoute.targetHubEntityId,
+            wantToken,
+            effectiveWantAmount,
+            !targetAccountExists,
+          )
+        : null;
+      if (swapRouteMode === 'cross' && targetRoute && targetInboundPlan === null) {
+        throw new Error('SWAP_CROSS_TARGET_INBOUND_PLAN_UNAVAILABLE');
+      }
       const now = logicalNow;
       const crossJurisdiction = (() => {
         if (swapRouteMode !== 'cross') return null;
@@ -3105,33 +3000,20 @@
       })();
       const entityTxs: EntityTx[] = [];
       if (shouldAutoPrepareInbound) {
-        entityTxs.push({
-          type: 'extendCredit' as const,
-          data: {
-            counterpartyEntityId: resolvedCounterparty,
-            tokenId: wantToken,
-            amount: requiredInboundCreditLimit,
-          },
-        });
+        entityTxs.push(...(sameInboundPlan?.setupTxs ?? []));
       }
 
       if (crossJurisdiction && targetRoute) {
+        if (!targetInboundPlan) {
+          throw new Error('SWAP_CROSS_TARGET_INBOUND_PLAN_UNAVAILABLE');
+        }
         const crossSubmitStartedAt = performance.now();
         performance.measure('xln.cross_j.handler_to_plan', {
           start: placementStartedAt,
           end: crossSubmitStartedAt,
         });
-        const crossInputPlan = buildCrossSwapRuntimeInputPlan({
-          route: crossJurisdiction,
-          targetEntityId: targetRoute.targetEntityId,
-          targetSignerId: targetRoute.targetSignerId,
-          targetHubEntityId: targetRoute.targetHubEntityId,
-          tokenId: wantToken,
-          requiredCreditLimit: requiredTargetInboundCreditLimit,
-          shouldOpenTargetAccount: shouldAutoOpenCrossTargetAccount,
-          shouldExtendTargetCredit: shouldAutoPrepareCrossInbound,
-        });
-        if (crossInputPlan.targetSetupTxs.length > 0) {
+        const targetSetupTxs = [...targetInboundPlan.setupTxs];
+        if (targetSetupTxs.length > 0) {
           const prewarmStartedAt = performance.now();
           await prewarmCounterpartyProfiles(runtimeEnv, [targetRoute.targetHubEntityId]);
           performance.measure('xln.cross_j.profile_prewarm', {
@@ -3140,8 +3022,15 @@
           });
         }
         const runtimeSubmitStartedAt = performance.now();
-        if (crossInputPlan.setupInput) {
-          await submitRuntimeInput(crossInputPlan.setupInput);
+        if (targetSetupTxs.length > 0) {
+          await submitRuntimeInput({
+            runtimeTxs: [],
+            entityInputs: [{
+              entityId: targetRoute.targetEntityId,
+              signerId: targetRoute.targetSignerId,
+              entityTxs: targetSetupTxs,
+            }],
+          });
         }
         await submitActiveCrossJurisdictionIntent(crossJurisdiction);
         performance.measure('xln.cross_j.runtime_submit', {

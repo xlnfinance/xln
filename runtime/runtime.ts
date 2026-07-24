@@ -293,6 +293,16 @@ import {
   inferRuntimeLifecyclePhase,
   transitionRuntimeLifecycle,
 } from './machine/lifecycle';
+export {
+  planSwapInboundCapacity,
+  readSwapAccountCapacity,
+} from './account/swap-inbound-plan';
+export type {
+  SwapAccountCapacityView,
+  SwapAccountCapacityViewInput,
+  SwapInboundCapacityPlan,
+  SwapInboundCapacityPlanInput,
+} from './account/swap-inbound-plan';
 import {
   enqueueRuntimeInputs as enqueueRuntimeInputsWithDeps,
   ensureRuntimeMempool,

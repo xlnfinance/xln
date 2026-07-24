@@ -2,16 +2,12 @@ import { formatEntityId } from '$lib/utils/format';
 import type { EntityReplica } from '$lib/types/ui';
 import type {
   BookState,
-  CrossJurisdictionSwapRoute,
   EntityState,
-  EntityTx,
   Env,
   EnvSnapshot,
   Profile as GossipProfile,
-  RuntimeInput,
 } from '@xln/runtime/xln-api';
 
-export type TokenKeyedMap<V> = Map<number, V> | Map<string, V>;
 export type TokenSymbolFormatter = (tokenIdValue: number) => string;
 export type HubCandidatePredicate = (entityIdValue: string) => boolean;
 export type CrossSwapSetupStepId = 'target-account' | 'target-credit';
@@ -50,29 +46,6 @@ export type CrossSwapSetupStep = {
   id: CrossSwapSetupStepId;
   label: string;
   detail: string;
-};
-
-export type CrossTargetSetupTx =
-  | {
-      type: 'openAccount';
-      data: {
-        targetEntityId: string;
-        tokenId: number;
-        creditAmount: bigint;
-      };
-    }
-  | {
-      type: 'extendCredit';
-      data: {
-        counterpartyEntityId: string;
-        tokenId: number;
-        amount: bigint;
-      };
-    };
-
-export type CrossSwapRuntimeInputPlan = {
-  setupInput: RuntimeInput | null;
-  targetSetupTxs: EntityTx[];
 };
 
 export function orderbookLotsDisplayScale(tokenDecimals: number): number {
@@ -334,21 +307,6 @@ export function jurisdictionBadgeText(jurisdiction: string): string {
   return (words[0] || clean).slice(0, 2).toUpperCase();
 }
 
-export function getTokenMapValue<V>(map: TokenKeyedMap<V> | undefined, tokenIdValue: number): V | undefined {
-  if (!(map instanceof Map) || !Number.isFinite(tokenIdValue)) return undefined;
-  const byNumber = (map as Map<number, V>).get(tokenIdValue);
-  if (byNumber !== undefined) return byNumber;
-  return (map as Map<string, V>).get(String(tokenIdValue));
-}
-
-export function nonNegative(value: bigint): bigint {
-  return value < 0n ? 0n : value;
-}
-
-export function maxBigInt(left: bigint, right: bigint): bigint {
-  return left > right ? left : right;
-}
-
 export function buildCrossSwapSetupSteps(input: {
   routeMode: 'same' | 'cross';
   targetAccountReady: boolean;
@@ -389,79 +347,4 @@ export function buildCrossSwapSetupSteps(input: {
   }
 
   return steps;
-}
-
-export function buildCrossTargetSetupTxs(input: {
-  shouldOpenAccount: boolean;
-  shouldExtendCredit: boolean;
-  targetHubEntityId: string;
-  tokenId: number;
-  requiredCreditLimit: bigint | null;
-}): CrossTargetSetupTx[] {
-  const targetHubEntityId = String(input.targetHubEntityId || '').trim();
-  if (!targetHubEntityId) return [];
-
-  if (input.shouldOpenAccount) {
-    if (input.requiredCreditLimit === null || input.requiredCreditLimit <= 0n) {
-      throw new Error('Target account setup requires a positive inbound credit limit.');
-    }
-    return [{
-      type: 'openAccount',
-      data: {
-        targetEntityId: targetHubEntityId,
-        tokenId: input.tokenId,
-        creditAmount: input.requiredCreditLimit,
-      },
-    }];
-  }
-
-  if (!input.shouldExtendCredit || input.requiredCreditLimit === null) return [];
-  return [{
-    type: 'extendCredit',
-    data: {
-      counterpartyEntityId: targetHubEntityId,
-      tokenId: input.tokenId,
-      amount: input.requiredCreditLimit,
-    },
-  }];
-}
-
-export function buildCrossSwapRuntimeInputPlan(input: {
-  route: CrossJurisdictionSwapRoute;
-  targetEntityId: string;
-  targetSignerId: string;
-  targetHubEntityId: string;
-  tokenId: number;
-  requiredCreditLimit: bigint | null;
-  shouldOpenTargetAccount: boolean;
-  shouldExtendTargetCredit: boolean;
-}): CrossSwapRuntimeInputPlan {
-  const targetEntityId = normalizeEntityId(input.targetEntityId);
-  const targetSignerId = String(input.targetSignerId || '').trim();
-  if (!targetEntityId) throw new Error('Cross swap target entity is required.');
-  if (!targetSignerId) throw new Error('Cross swap target signer is required.');
-
-  const targetSetupTxs = buildCrossTargetSetupTxs({
-    shouldOpenAccount: input.shouldOpenTargetAccount,
-    shouldExtendCredit: input.shouldExtendTargetCredit,
-    targetHubEntityId: input.targetHubEntityId,
-    tokenId: input.tokenId,
-    requiredCreditLimit: input.requiredCreditLimit,
-  }) as EntityTx[];
-
-  const setupInput: RuntimeInput | null = targetSetupTxs.length > 0
-    ? {
-        runtimeTxs: [],
-        entityInputs: [{
-          entityId: targetEntityId,
-          signerId: targetSignerId,
-          entityTxs: targetSetupTxs,
-        }],
-      }
-    : null;
-
-  return {
-    setupInput,
-    targetSetupTxs,
-  };
 }

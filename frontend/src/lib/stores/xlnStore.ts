@@ -137,6 +137,8 @@ const runtimeIdFromRuntimeAdapterConfig = (config: RuntimeAdapterConfig): string
 
 export interface FrontendXlnFunctions {
   deriveDelta: XLNModule['deriveDelta'];
+  planSwapInboundCapacity: XLNModule['planSwapInboundCapacity'];
+  readSwapAccountCapacity: XLNModule['readSwapAccountCapacity'];
   formatTokenAmount: (tokenId: number, amount: bigint | null | undefined) => string;
   getTokenInfo: XLNModule['getTokenInfo'];
   getKnownTokenIds: XLNModule['getKnownTokenIds'];
@@ -1760,6 +1762,8 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
 
     return {
       deriveDelta: failFn('deriveDelta'),
+      planSwapInboundCapacity: failFn('planSwapInboundCapacity'),
+      readSwapAccountCapacity: failFn('readSwapAccountCapacity'),
       formatTokenAmount: failFn('formatTokenAmount'),
       getTokenInfo: failFn('getTokenInfo'),
       getKnownTokenIds: failFn('getKnownTokenIds'),
@@ -1819,6 +1823,8 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
   const readyFunctions: FrontendXlnFunctions = {
     // Account utilities
     deriveDelta: $xlnInstance.deriveDelta,
+    planSwapInboundCapacity: $xlnInstance.planSwapInboundCapacity,
+    readSwapAccountCapacity: $xlnInstance.readSwapAccountCapacity,
     // Frontend display formatter with configurable precision from Settings.
     // Signature used across UI: formatTokenAmount(tokenId, amount).
     formatTokenAmount: formatTokenAmountUi,

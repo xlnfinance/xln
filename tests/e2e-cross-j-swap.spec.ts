@@ -3464,13 +3464,39 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
     await timedStep('cross_j_auto_setup.wait_target_account', () =>
       waitForAccountReady(page, target, targetHub.entityId, [USDC], 90_000),
     );
+    const expectedTargetAmount = 24_900_000n;
     await expect
-      .poll(async () => (await inCap(page, target.entityId, targetHub.entityId, USDC)) > 0n, {
+      .poll(async () => page.evaluate(({ entityId, hubId, tokenId }) => {
+        const env = (window as CrossRuntimeWindow).isolatedEnv;
+        const owner = String(entityId).toLowerCase();
+        const counterparty = String(hubId).toLowerCase();
+        const replica = Array.from(env?.eReplicas?.values?.() || []).find((candidate: any) =>
+          String(candidate?.state?.entityId || candidate?.entityId || '').toLowerCase() === owner);
+        const account = replica?.state?.accounts?.get?.(counterparty);
+        const delta = account?.deltas?.get?.(tokenId);
+        if (!account || !delta) return null;
+        const ownerIsLeft = owner === String(account.leftEntity || '').toLowerCase();
+        return {
+          peerCreditLimit: String(ownerIsLeft ? delta.rightCreditLimit : delta.leftCreditLimit),
+          inboundHold: String(ownerIsLeft ? delta.rightHold : delta.leftHold),
+        };
+      }, {
+        entityId: target.entityId,
+        hubId: targetHub.entityId,
+        tokenId: USDC,
+      }), {
         timeout: 30_000,
         intervals: [250, 500, 1000],
-        message: 'one-click cross swap must leave target inbound USDC capacity available',
+        message: 'one-click cross swap must grant and lock only the exact target USDC amount',
       })
-      .toBe(true);
+      .toEqual({
+        peerCreditLimit: expectedTargetAmount.toString(),
+        inboundHold: expectedTargetAmount.toString(),
+      });
+    expect(
+      await inCap(page, target.entityId, targetHub.entityId, USDC),
+      'the exact target credit is fully reserved by the cross-j pull',
+    ).toBe(0n);
     expectBrowserConsoleClean(browserConsole, 'cross_j_auto_setup');
   });
 
