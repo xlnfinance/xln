@@ -7,6 +7,7 @@ import {
   signAccountFrame,
 } from '../account/crypto';
 import { applyAccountInput } from '../account/consensus';
+import { computeAccountStateRoot } from '../account/state-root';
 import { generateLazyEntityId } from '../entity/factory';
 import { initCrontab } from '../entity/scheduler';
 import {
@@ -154,6 +155,7 @@ test('ACK commit retains the counterparty Hanko needed for later board reseal', 
     height: 1,
     timestamp: 1,
     prevFrameHash: digest('00'),
+    accountStateRoot: computeAccountStateRoot(account),
     stateHash: frameHash,
   };
 
