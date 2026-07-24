@@ -61,6 +61,23 @@ describe('production startup wiring', () => {
     );
   });
 
+  test('release gate proves replacement idempotency at both external I/O boundaries', () => {
+    const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
+    const coreE2e = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-core.ts'), 'utf8');
+    for (const crashTest of [
+      'runtime/__tests__/reliable-delivery-receipts.test.ts',
+      'runtime/__tests__/reliable-local-catchup-real-crash.test.ts',
+      'runtime/__tests__/reliable-frontier-real-crash.test.ts',
+      'runtime/__tests__/j-submit-crash-recovery.test.ts',
+      'runtime/__tests__/j-submit-real-rpc-crash-recovery.test.ts',
+    ]) {
+      expect(releaseGate).toContain(crashTest);
+    }
+    expect(coreE2e).toContain(
+      'H2 process replacement restores authoritative health and exact 10x10 public book',
+    );
+  });
+
   test('bounded soak stays separate from the release gate', () => {
     const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
 

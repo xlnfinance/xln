@@ -6,11 +6,7 @@ fastest proof/fix to the hardest external gate. Completed work is deleted;
 long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 `docs/mainnet-engineering-principles.md`.
 
-## 0. Complete production-health coverage — P0, open
-
-- [ ] Prove a managed child replacement at an external-I/O boundary cannot
-  duplicate remote dispatch or J-submit.
-## 1. Commit-boundary correctness — P0, approval required
+## 0. Commit-boundary correctness — P0, approval required
 
 - [ ] Reject Entity-frame timestamp regression before transaction application.
   Deadline admission uses the monotonic Entity/J clock. A late bilateral
@@ -18,7 +14,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   HTLC/pull evidence valid because acceptance never uses that timestamp as the
   receiver's clock.
 
-## 2. Runtime-owned financial planning — P0, open
+## 1. Runtime-owned financial planning — P0, open
 
 - [ ] Finish one immutable Runtime swap-command plan containing canonical
   capacity, quantization and target-account preparation. Commit target setup
@@ -26,7 +22,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   and planner failure produces zero financial transactions. Canonical capacity
   reads and exact credit without the former 10,000-token floor are complete.
 
-## 3. Ingress and contract boundedness — P0/P1, partly approval required
+## 2. Ingress and contract boundedness — P0/P1, partly approval required
 
 - [ ] Integrate `main`'s canonical per-operation best-effort J-batch execution
   together with byte-for-byte binding of every submitted object to its sealed
@@ -48,7 +44,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   currently live infrastructure, not dead code; do not delete it as an audit
   shortcut.
 
-## 4. Transport and secret persistence — P0/P1, approval required
+## 3. Transport and secret persistence — P0/P1, approval required
 
 - [ ] Derive AEAD keys from X25519 with domain-separated HKDF-SHA256 and bind
   protocol/from/to/type/source-frame/message-id as AAD. Replace Base64 with one
@@ -72,7 +68,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   namespace and reference it from Account materialization. Prove backup,
   restore and dispute recovery before removing plaintext duplication.
 
-## 5. Crash, corruption and load evidence — P1, open
+## 4. Crash, corruption and load evidence — P1, open
 
 - [ ] Profile the production bootstrap and growing-hub frame path locally.
   Remove only measured full scans/clones/duplicate crypto; publish deterministic
@@ -90,7 +86,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   descriptors; then introduce Runtime→Entity→Account COW only behind
   byte-identical differential roots and measured clone counters.
 
-## 6. Public Ethereum and TRON proof — P0 release blocker, open
+## 5. Public Ethereum and TRON proof — P0 release blocker, open
 
 - [ ] Finish the native TRON adapter: protobuf transaction signing/broadcast,
   live energy fee limits, SolidityNode finality, complete authenticated
@@ -107,7 +103,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   headers commit transactions rather than Ethereum receipt tries; never
   synthesize an Ethereum MPT proof or trust one RPC witness.
 
-## 7. Immutable mainnet release pipeline — P0 release blocker, open
+## 6. Immutable mainnet release pipeline — P0 release blocker, open
 
 - [ ] Extend the candidate binding already enforced for isolated E2E run/shard
   manifests to unit, contract, scenario, recovery, public-chain and final

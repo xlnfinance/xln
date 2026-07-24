@@ -48,6 +48,7 @@ import {
 } from '../runtime';
 import { readStorageFrameRecord } from '../storage';
 import { buildRouteOutputKey, getReliableOutputIdentity } from '../machine/output-routing';
+import { computeAccountStateRoot } from '../account/state-root';
 import type {
   AccountMachine,
   DeliverableEntityInput,
@@ -603,7 +604,7 @@ describe('durable scoped reliable delivery receipts', () => {
       height: 10,
       timestamp: 2_000,
       prevFrameHash: account.currentFrame.stateHash,
-      accountStateRoot: `0x${'20'.repeat(32)}`,
+      accountStateRoot: computeAccountStateRoot(account),
       stateHash: `0x${'10'.repeat(32)}`,
     };
     const ackHanko = await buildQuorumHanko(receiver, sourceEntityId, pendingFrame.stateHash, [{

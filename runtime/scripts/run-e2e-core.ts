@@ -23,6 +23,7 @@ const CORE_E2E_TITLES = [
   'one resting maker order can be matched by two isolated takers until fully closed',
   'swap round-trip both directions clears holds and updates closed history on both peers',
   'bidirectional payments survive across two isolated browser contexts',
+  'H2 process replacement restores authoritative health and exact 10x10 public book',
   'two users can place full, partial, and disputed cross-j swaps through the shared swap builder',
   'restores runtime and opens the pay screen from hash params',
 ];
