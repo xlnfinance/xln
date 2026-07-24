@@ -64,6 +64,7 @@ const rootTestArgs = [
 
 cleanupTestArtifactsBeforeRun({
   reason: 'unit-tests',
+  scope: 'unit',
   argv: rawArgs,
 });
 

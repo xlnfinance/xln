@@ -157,6 +157,33 @@ describe('test artifact cleanup', () => {
     }
   });
 
+  test('unit cleanup removes unit scratch without deleting immutable gate evidence', () => {
+    const root = makeTempWorkspace();
+    try {
+      writeFile(root, '.logs/e2e-parallel/candidate-run/manifest.json');
+      writeFile(root, '.logs/bootstrap-soundcheck/candidate-run/summary.json');
+      writeFile(root, 'db-tmp/runtime/state.ldb');
+      writeFile(root, 'tests/test-results/unit-output.txt');
+
+      const summary = cleanupTestArtifactsBeforeRun({
+        cwd: root,
+        env: {},
+        argv: [],
+        reason: 'unit',
+        scope: 'unit',
+        log: () => undefined,
+      });
+
+      expect(summary.removed).toEqual(['db-tmp', 'tests/test-results']);
+      expect(existsSync(join(root, 'db-tmp'))).toBe(false);
+      expect(existsSync(join(root, 'tests/test-results'))).toBe(false);
+      expect(existsSync(join(root, '.logs/e2e-parallel/candidate-run/manifest.json'))).toBe(true);
+      expect(existsSync(join(root, '.logs/bootstrap-soundcheck/candidate-run/summary.json'))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('preserve mode still enforces the workspace budget', () => {
     const root = makeTempWorkspace();
     try {
