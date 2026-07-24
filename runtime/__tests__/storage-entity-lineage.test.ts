@@ -32,6 +32,7 @@ import {
   applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,
   buildRuntimeCheckpointLineagePlan,
+  refreshRuntimeCheckpointLineageForEntity,
 } from '../storage/entity-lineage';
 import { buildStorageReplicaMetaCommitment } from '../storage/replicas';
 import type { StorageReplicaMeta } from '../storage/types';
@@ -307,6 +308,39 @@ describe('certified Entity storage lineage', () => {
     observerState.messages.push('tampered after certification');
     expect(() => buildRuntimeCheckpointLineagePlan(env))
       .toThrow('STORAGE_RUNTIME_CHECKPOINT_STATE_MISMATCH');
+  });
+
+  test('refreshes only the touched Entity checkpoint lineage', () => {
+    const { env, signerId, genesis } = makeRuntime('storage-lineage-touched-only');
+    installReplica(env, signerId, genesis, { anchor: genesisAnchor(genesis) });
+
+    const idleSignerId = deriveSignerAddressSync(env.runtimeSeed!, 'idle').toLowerCase();
+    registerSignerKey(env, idleSignerId, deriveSignerKeySync(env.runtimeSeed!, 'idle'));
+    const idleState = structuredClone(genesis);
+    idleState.entityId = generateLazyEntityId([idleSignerId], 1n).toLowerCase();
+    idleState.config = {
+      ...idleState.config,
+      threshold: 1n,
+      validators: [idleSignerId],
+      shares: { [idleSignerId]: 1n },
+    };
+    const idleReplica: EntityReplica = {
+      entityId: idleState.entityId,
+      signerId: idleSignerId,
+      state: idleState,
+      mempool: [],
+      isProposer: true,
+      certifiedFrameAnchor: genesisAnchor(idleState),
+    };
+    env.eReplicas.set(`${idleState.entityId}:${idleSignerId}`, idleReplica);
+    const idleAnchorBefore = structuredClone(idleReplica.certifiedFrameAnchor);
+
+    env.height = 7;
+    refreshRuntimeCheckpointLineageForEntity(env, genesis.entityId);
+
+    expect(env.eReplicas.get(`${genesis.entityId}:${signerId}`)?.certifiedFrameAnchor
+      ?.runtimeCheckpoint?.runtimeHeight).toBe(7);
+    expect(idleReplica.certifiedFrameAnchor).toEqual(idleAnchorBefore);
   });
 
   test('rebases certified lineage into the atomic runtime WAL checkpoint', async () => {

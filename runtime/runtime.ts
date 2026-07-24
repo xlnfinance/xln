@@ -403,6 +403,7 @@ import {
   applyCertifiedEntityLineagePlan,
   buildCertifiedEntityLineagePlan,
   buildRuntimeCheckpointLineagePlan,
+  refreshRuntimeCheckpointLineageForEntity,
 } from './storage/entity-lineage';
 import {
   assertCertifiedRegistrationEvidenceStore,
@@ -2740,6 +2741,13 @@ const applyRuntimeInput = async (
       applyReliableDeliveryReceipts(env, runtimeInput.reliableReceipts);
     }
     const runtimeTxJOutbox: JInput[] = [];
+    const refreshedLineageEntityIds = new Set<string>();
+    const refreshLineageBeforeEntityApply = (rawEntityId: string, force = false): void => {
+      const entityId = rawEntityId.trim().toLowerCase();
+      if (!force && refreshedLineageEntityIds.has(entityId)) return;
+      refreshRuntimeCheckpointLineageForEntity(env, entityId);
+      refreshedLineageEntityIds.add(entityId);
+    };
     // RuntimeTxs are replayable R-machine commands. Most are local metadata
     // transitions; retryJSubmit additionally materializes a sealed post-commit
     // J side effect whose attempt record is persisted before external I/O.
@@ -2747,20 +2755,19 @@ const applyRuntimeInput = async (
       runtimeTxJOutbox.push(...await applyRuntimeTx(env, runtimeTx, {
         isReplay,
       }));
+      if (runtimeTx.type === 'importReplica') {
+        // A repeated import can add another validator-local replica for the
+        // same Entity in this R-frame, so rebuild that Entity's replica-set
+        // anchor after every import rather than relying on the touched set.
+        refreshLineageBeforeEntityApply(runtimeTx.entityId, true);
+      }
     }
     markApplyProfile('runtimeTxs');
 
-    // Seal every certified H0 anchor before an Entity input can advance that
-    // replica to H1. Storage is intentionally written from the post-state, so
-    // attempting to reconstruct the anchor only at commit time would have
-    // already lost the only authoritative H0 state. This also covers an entity
-    // imported and advanced in the same Runtime frame.
-    // Earlier certified Entity frames already live in the frame DB. Advance
-    // the tiny local anchor to the exact finalized endpoint before applying
-    // this R-frame; otherwise pruning RAM to the latest E-frame would leave an
-    // old anchor and manufacture a gap on the next commit. This is metadata,
-    // not a full-state snapshot or a replacement for historical replay.
-    applyCertifiedEntityLineagePlan(env, buildRuntimeCheckpointLineagePlan(env));
+    // Seal each Entity at most once immediately before its first E-frame in
+    // this R-frame. Internal cross-j cascades use the same hook. Subsequent
+    // commits for that Entity intentionally retain the contiguous links until
+    // the enclosing Runtime WAL commit.
     markApplyProfile('lineage');
 
     const routingDeps = getRuntimeEntityRoutingDeps();
@@ -2777,7 +2784,7 @@ const applyRuntimeInput = async (
       env,
       preparedEntityInputs.inputs,
       initialJOutbox,
-      { isReplay, routingDeps },
+      { isReplay, routingDeps, beforeEntityApply: refreshLineageBeforeEntityApply },
     );
     if (preparedEntityInputs.pairs.length > 0) {
       runtimeLog.info('crossj.atomic_pair_commit', {

@@ -117,6 +117,7 @@ type CrossJCommand = {
 export interface RuntimeEntityInputApplyOptions {
   isReplay: boolean;
   routingDeps: RuntimeEntityRoutingDeps;
+  beforeEntityApply?: (entityId: string) => void;
 }
 
 export const collectAppliedAccountSenderHints = (input: RoutedEntityInput): string[] => {
@@ -267,6 +268,7 @@ export const applyMergedEntityInputs = async (
           'Immediate cross-j local output target replica missing state',
           { replicaKey },
         );
+        options.beforeEntityApply?.(entityInput.entityId);
         const result = await applyEntityInputToReplica(
           env,
           entityReplica,
@@ -433,6 +435,7 @@ export const applyMergedEntityInputs = async (
       );
     }
 
+    options.beforeEntityApply?.(entityInput.entityId);
     const result = await applyEntityInputToReplica(env, entityReplica, replicaKey, entityInput, actualSignerId, isReplay);
     inputOutcomes.push({
       inputIndex,

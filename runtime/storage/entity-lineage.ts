@@ -1145,6 +1145,34 @@ export const buildRuntimeCheckpointLineagePlan = (
   return { lookup, lineageByReplicaKey, anchorByReplicaKey };
 };
 
+/**
+ * Seal only the Entity that is about to enter an Entity-frame transition.
+ * Untouched Entity anchors stay byte-identical; a later full storage
+ * checkpoint still validates and republishes the complete replica set.
+ */
+export const refreshRuntimeCheckpointLineageForEntity = (
+  env: Env,
+  rawEntityId: string,
+): void => {
+  const entityId = normalizeEntityId(rawEntityId);
+  const replicas = new Map(
+    [...env.eReplicas.entries()].filter(([, replica]) =>
+      normalizeEntityId(replica.entityId || replica.state.entityId || '') === entityId),
+  );
+  if (replicas.size === 0) {
+    throw new Error(`STORAGE_RUNTIME_CHECKPOINT_ENTITY_MISSING:${entityId}`);
+  }
+  const plan = buildRuntimeCheckpointLineagePlan({ ...env, eReplicas: replicas });
+  for (const [replicaKey, replica] of replicas) {
+    const lineage = plan.lineageByReplicaKey.get(replicaKey);
+    if (lineage && lineage.length > 0) replica.certifiedFrameLineage = structuredClone(lineage);
+    else delete replica.certifiedFrameLineage;
+    const anchor = plan.anchorByReplicaKey.get(replicaKey);
+    if (anchor) replica.certifiedFrameAnchor = structuredClone(anchor);
+    else delete replica.certifiedFrameAnchor;
+  }
+};
+
 export const applyCertifiedEntityLineagePlan = (
   env: Env,
   plan: CertifiedEntityLineagePlan,

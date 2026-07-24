@@ -67,11 +67,8 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   one ephemeral `proposableAccountKeys` queue and a canonical
   `(entityId, signerId) → replicaKey` map rebuilt on restore/import. Record
   `frameCloneMs`, cloned replica/account/profile counts, estimated cloned bytes
-  and cross-J preview clone time. Stop rebuilding and hashing the full Runtime
-  checkpoint-lineage plan before every ordinary frame: seal the exact touched
-  Entity endpoints and reserve a full replica-set checkpoint for its real
-  persistence boundary. A frame touching one account must not scale linearly
-  when untouched accounts grow from 10,000 to 100,000.
+  and cross-J preview clone time. A frame touching one account must not scale
+  linearly when untouched accounts grow from 10,000 to 100,000.
 - [ ] Replace case-insensitive Account scans and repeated signer/pair lookups
   with canonical direct indexes, including exact cross-J replica/account
   descriptors; then introduce Runtime→Entity→Account COW only behind
