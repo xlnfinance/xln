@@ -1280,8 +1280,10 @@ const runtimeInputHasWork = (runtimeInput: RuntimeInput): boolean =>
   (runtimeInput.reliableReceipts?.length ?? 0) > 0;
 
 const getRuntimeInputQuarantineReason = (error: unknown, message: string): string | null => {
-  if (error instanceof RuntimeEntityInputApplyError && error.isRemoteIngress) {
-    return 'REMOTE_ENTITY_INPUT_APPLY_FAILED';
+  if (error instanceof RuntimeEntityInputApplyError) {
+    return error.isQuarantinableRemoteIngress
+      ? 'REMOTE_ENTITY_INPUT_APPLY_FAILED'
+      : null;
   }
   return QUARANTINABLE_RUNTIME_INPUT_ERROR_MARKERS.find(marker => message.includes(marker)) ?? null;
 };

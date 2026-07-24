@@ -652,6 +652,27 @@ const validationUtilsPath = 'runtime/validation-utils.ts';
 const validationUtils = readText(validationUtilsPath);
 assertNotIncludes(validationUtils, 'console.', validationUtilsPath);
 
+for (const marker of [
+  'failureKind: EntityInputApplyFailureKind',
+  'classifyEntityInputApplyFailure(cause)',
+  "this.failureKind === 'malformed-ingress'",
+]) {
+  assertIncludes(runtimeEntityInputs, marker, runtimeEntityInputsPath);
+}
+
+const runtimeSourcePath = 'runtime/runtime.ts';
+const runtimeSource = readText(runtimeSourcePath);
+assertIncludes(
+  runtimeSource,
+  'error.isQuarantinableRemoteIngress',
+  runtimeSourcePath,
+);
+assertNotIncludes(
+  runtimeSource,
+  'error instanceof RuntimeEntityInputApplyError && error.isRemoteIngress',
+  runtimeSourcePath,
+);
+
 for (const [path, markers] of [
   ['runtime/__tests__/failure-taxonomy.test.ts', ['runtime failure taxonomy', 'J_BATCH_LIMIT_EXCEEDED']],
   ['runtime/__tests__/audit-failfast-regressions.test.ts', [
@@ -659,6 +680,11 @@ for (const [path, markers] of [
     'DIRECT_PAYMENT_ROUTE_START_INVALID',
     'DIRECT_PAYMENT_ROUTE_END_INVALID',
     'DIRECT_PAYMENT_NEXT_HOP_ACCOUNT_MISSING',
+    'remote-invariant-failure-fatal',
+    'remote-storage-failure-fatal',
+    'remote-local-bug-fatal',
+    "expect(storage.failureKind).toBe('storage')",
+    "expect(localBug.failureKind).toBe('local-bug')",
   ]],
   ['runtime/__tests__/runtime-import-readiness.test.ts', ['runtime import readiness gate', 'fatal: true']],
   ['runtime/__tests__/health-redaction.test.ts', ['public aggregated health strips child process ids', 'Latest /api/health child refresh window']],

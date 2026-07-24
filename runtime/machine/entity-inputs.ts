@@ -18,6 +18,10 @@ import { nodeProcess } from './platform';
 import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../infra/perf-runtime-flags';
 import { DEBUG, getPerfMs } from '../utils';
 import { createStructuredLogger, logError, shortId } from '../infra/logger';
+import {
+  classifyEntityInputApplyFailure,
+  type EntityInputApplyFailureKind,
+} from '../entity/tx/invariant-errors';
 
 const entityInputLog = createStructuredLogger('runtime.entity_inputs');
 
@@ -67,6 +71,7 @@ export class RuntimeEntityInputApplyError extends Error {
   readonly sourceRuntimeHeight: number | undefined;
   readonly sourceRuntimeTimestamp: number | undefined;
   readonly trustedLocalCrossJurisdiction: boolean;
+  readonly failureKind: EntityInputApplyFailureKind;
 
   constructor(
     input: RoutedEntityInput,
@@ -87,10 +92,15 @@ export class RuntimeEntityInputApplyError extends Error {
     this.sourceRuntimeHeight = input.sourceRuntimeFrame?.height;
     this.sourceRuntimeTimestamp = input.sourceRuntimeFrame?.timestamp;
     this.trustedLocalCrossJurisdiction = trustedLocalCrossJurisdiction;
+    this.failureKind = classifyEntityInputApplyFailure(cause);
   }
 
   get isRemoteIngress(): boolean {
     return this.sourceRuntimeId.length > 0 && !this.trustedLocalCrossJurisdiction;
+  }
+
+  get isQuarantinableRemoteIngress(): boolean {
+    return this.isRemoteIngress && this.failureKind === 'malformed-ingress';
   }
 }
 

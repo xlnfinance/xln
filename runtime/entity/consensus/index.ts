@@ -172,6 +172,7 @@ import {
   sealHankoWitnessInState,
   type HankoWitnessEntry,
 } from './hanko-witness';
+import { MalformedEntityFrameInputError } from '../tx/invariant-errors';
 import {
   assignCertifiedOutputIdentities,
   assertCertifiedOutputSemanticIdentity,
@@ -3977,7 +3978,7 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
       accountJClaimNodeStore: context.accountJClaimNodeStore,
     });
     if (skippedError) {
-      throw new Error(`ENTITY_FRAME_TX_FAILED: type=${String(entityTx.type)} error=${skippedError}`);
+      throw new MalformedEntityFrameInputError(String(entityTx.type), skippedError);
     }
     currentEntityState = newState;
     context.storageChanges.push(...storageChanges);

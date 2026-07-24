@@ -22,10 +22,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   mutation. Preserve this candidate's contract P0 hardening, regenerate the
   single ABI/artifact/typechain set, and rerun the real adapter regressions.
   This consensus/contract merge requires owner approval.
-- [ ] Classify remote Entity-input failures by typed cause. Only malformed
-  unauthenticated ingress may be quarantined; storage errors, state-machine
-  contradictions and local bugs must halt. Prove every class through the real
-  `applyMergedEntityInputs` path.
 - [ ] Replace the unbounded `_forgiveDebtsBetweenEntities` queue scan with an
   indexed or bounded-continuation structure. Prove exact debt conservation and
   bounded gas with adversarial creditor ordering.

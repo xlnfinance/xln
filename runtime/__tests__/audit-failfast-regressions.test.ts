@@ -116,7 +116,11 @@ import {
 import { applyCommand, createBook, getBookOrder, getSwapLotScale, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, type OrderbookExtState } from '../orderbook';
 import { process, createEmptyEnv, registerEntityRuntimeHint, sendEntityInput, validateRuntimeInputAdmission } from '../runtime';
 import { createJReplica } from '../scenarios/boot';
-import { applyMergedEntityInputs } from '../machine/entity-inputs';
+import {
+  applyMergedEntityInputs,
+  RuntimeEntityInputApplyError,
+} from '../machine/entity-inputs';
+import { MalformedEntityFrameInputError } from '../entity/tx/invariant-errors';
 import { applyStorageChanges } from '../machine/env-events';
 import { submitRuntimeJOutbox } from '../machine/j-submit';
 import {
@@ -911,7 +915,7 @@ describe('audit fail-fast regressions', () => {
         isProposer: true,
         state,
       });
-      return { env, entityId, signerId };
+      return { env, entityId, signerId, state };
     };
     const invalidEntityTx = {
       type: 'definitely_unknown_entity_tx',
@@ -935,6 +939,100 @@ describe('audit fail-fast regressions', () => {
       entityTxs: [invalidEntityTx],
     }])).rejects.toThrow('ENTITY_FRAME_TX_FAILED: type=definitely_unknown_entity_tx');
     expect(local.env.runtimeState?.quarantinedRuntimeInputs ?? []).toHaveLength(0);
+
+    const malformed = new RuntimeEntityInputApplyError({
+      from: `0x${'ce'.repeat(20)}`,
+      entityId: remote.entityId,
+      signerId: remote.signerId,
+      entityTxs: [invalidEntityTx],
+    } as any, false, new MalformedEntityFrameInputError(
+      'definitely_unknown_entity_tx',
+      'ENTITY_TX_UNHANDLED',
+    ));
+    expect(malformed.failureKind).toBe('malformed-ingress');
+    expect(malformed.isQuarantinableRemoteIngress).toBe(true);
+
+    const storage = new RuntimeEntityInputApplyError({
+      from: `0x${'cf'.repeat(20)}`,
+      entityId: remote.entityId,
+      signerId: remote.signerId,
+    }, false, new Error('STORAGE_NODE_HASH_MISMATCH'));
+    expect(storage.failureKind).toBe('storage');
+    expect(storage.isQuarantinableRemoteIngress).toBe(false);
+
+    const localBug = new RuntimeEntityInputApplyError({
+      from: `0x${'d0'.repeat(20)}`,
+      entityId: remote.entityId,
+      signerId: remote.signerId,
+    }, false, new TypeError('unexpected undefined state'));
+    expect(localBug.failureKind).toBe('local-bug');
+    expect(localBug.isQuarantinableRemoteIngress).toBe(false);
+
+    const applyRemoteAgainstBrokenState = async (
+      seed: string,
+      failure: Error,
+    ): Promise<RuntimeEntityInputApplyError> => {
+      const broken = makeRuntime(seed);
+      Object.defineProperty(broken.state, 'height', {
+        configurable: true,
+        get: () => {
+          throw failure;
+        },
+      });
+      try {
+        await applyMergedEntityInputs(broken.env, [{
+          from: `0x${'d3'.repeat(20)}`,
+          entityId: broken.entityId,
+          signerId: broken.signerId,
+          entityTxs: [],
+        }], [], {
+          isReplay: false,
+          routingDeps: {
+            ensureRuntimeState: targetEnv => targetEnv.runtimeState!,
+            enqueueRuntimeInputs: () => {},
+            extractEntityId: replicaKey => replicaKey.split(':')[0] ?? '',
+            hasLocalSignerForEntity: () => true,
+            hasLocalSignerForEntitySigner: () => true,
+            resolveSoleLocalSignerForEntity: () => broken.signerId,
+            getP2P: () => null,
+          },
+        });
+      } catch (error) {
+        expect(error).toBeInstanceOf(RuntimeEntityInputApplyError);
+        return error as RuntimeEntityInputApplyError;
+      }
+      throw new Error('TEST_REMOTE_BROKEN_STATE_DID_NOT_FAIL');
+    };
+    expect((await applyRemoteAgainstBrokenState(
+      'remote-storage-failure-fatal',
+      new Error('STORAGE_NODE_HASH_MISMATCH'),
+    )).failureKind).toBe('storage');
+    expect((await applyRemoteAgainstBrokenState(
+      'remote-local-bug-fatal',
+      new TypeError('unexpected undefined state'),
+    )).failureKind).toBe('local-bug');
+
+    const invariant = makeRuntime('remote-invariant-failure-fatal');
+    const authorizedInvariantTxs = await buildQuorumAuthorizedFrameTxs(
+      invariant.env,
+      invariant.state,
+      [{
+        type: 'directPayment',
+        data: {
+          targetEntityId: `0x${'d1'.repeat(32)}`,
+          tokenId: 1,
+          amount: 1n,
+          route: [],
+        },
+      } as any],
+    );
+    await expect(process(invariant.env, [{
+      from: `0x${'d2'.repeat(20)}`,
+      entityId: invariant.entityId,
+      signerId: invariant.signerId,
+      entityTxs: authorizedInvariantTxs,
+    }])).rejects.toThrow('DIRECT_PAYMENT_ROUTE_REQUIRED');
+    expect(invariant.env.runtimeState?.quarantinedRuntimeInputs ?? []).toHaveLength(0);
   });
 
   test('local signer resolution prefers an available local signer over stale config validator fallback', () => {
