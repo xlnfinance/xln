@@ -232,6 +232,7 @@
   let showManualRouteRecommendation = false;
   let lastPriceContextSignature = '';
   let preservePriceOnNextContextChange = false;
+  let preserveAmountOnNextContextChange = false;
   let selectedSourceEntityValue = '';
   let routeDetailsOpen = false;
   let openTokenMenu: 'give' | 'want' | '' = '';
@@ -1483,12 +1484,14 @@
       createOrderAccountId = reverseSelection.sourceHubEntityId;
       commitRouteSelection({ route: reverseSelection.route, target: reverseSelection.target });
       preservePriceOnNextContextChange = false;
+      preserveAmountOnNextContextChange = true;
       setSwapTokens(nextGiveToken, nextWantToken, true);
       priceRatioInput = '';
       hasUserEditedPriceInput = false;
       hasAutoSuggestedInitialPrice = false;
     } else {
       preservePriceOnNextContextChange = true;
+      preserveAmountOnNextContextChange = true;
       setSwapTokens(nextGiveToken, nextWantToken);
     }
     if (!isCrossReverse && nextPriceInput) {
@@ -1902,7 +1905,12 @@
     if (nextAutoAmountContextSignature !== lastAutoAmountContextSignature) {
       lastAutoAmountContextSignature = nextAutoAmountContextSignature;
       lastAutoAmountCapacity = -1n;
-      amountEditedByUser = false;
+      if (preserveAmountOnNextContextChange) {
+        preserveAmountOnNextContextChange = false;
+        amountEditedByUser = true;
+      } else {
+        amountEditedByUser = false;
+      }
     }
     if (
       !amountEditedByUser
