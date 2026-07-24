@@ -217,6 +217,7 @@ xln.formatEntity(xln.getEnv().eReplicas.values().next().value.state)
 - Test progression must be L1 narrow -> L2 targeted flow -> L3 broad gate; avoid large e2e batches while a single failure is still being isolated.
 - Every visual feature requires screenshot-driven E2E coverage at its key states. Inspect and score every screenshot, fix every visible defect before reporting completion, and verify mobile/iPhone, laptop, and wide desktop/Mac Studio viewports so all users receive the same polished result.
 - Runtime memory is live state, not an archive: retain only the latest finalized R/E/A state plus an in-flight candidate needed by future inputs. Persist historical Runtime inputs and certified Entity/Account frames in their dedicated LevelDB history stores; inspection reads from disk on demand.
+- Never restart, reset, or replace a live durable Runtime because source, test, scenario, or tooling files changed. `bun run dev` starts each Runtime process once; applying new backend code requires an explicit operator restart. Agent edits and test runs must never mutate, stop, or hot-reload the user's active dev stack.
 ## 🔍 EXTERNAL AUDIT RULE
 
 **Never blindly trust subagent or external audit findings.**

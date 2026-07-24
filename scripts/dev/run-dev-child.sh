@@ -162,16 +162,6 @@ case "$role" in
       ANVIL_RPC2="http://localhost:${RPC2_PORT}" \
       XLN_MESH_RESET_ALLOWED=1 \
       XLN_AUTO_PROVISION_EXTERNAL_FAUCET="${XLN_AUTO_PROVISION_EXTERNAL_FAUCET:-1}" \
-      bun --no-orphans runtime/scripts/watch-process-tree.ts \
-        --label MESH \
-        --watch-root "$REPO_ROOT/runtime" \
-        --ignore-prefix scripts \
-        --ignore-prefix __tests__ \
-        --ignore-prefix scenarios \
-        --debounce-ms "${XLN_DEV_WATCH_DEBOUNCE_MS:-100}" \
-        --term-timeout-ms "${XLN_DEV_MESH_TERM_TIMEOUT_MS:-15000}" \
-        --kill-timeout-ms "${XLN_DEV_MESH_KILL_TIMEOUT_MS:-2000}" \
-        -- \
       bun --no-orphans runtime/orchestrator/orchestrator.ts \
         --host 127.0.0.1 \
         --port "$API_PORT" \
