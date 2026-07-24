@@ -132,6 +132,7 @@ import {
   isBootstrapWorkWithinDeadline,
   updateBootstrapWorkStartedAt,
 } from './bootstrap-progress-deadline';
+import { deriveMarketMakerChildReadiness } from './market-maker-child-readiness';
 
 type Args = {
   name: string;
@@ -3610,8 +3611,17 @@ const run = async (): Promise<void> => {
       ? rawMarketMakerHealth
       : { ...rawMarketMakerHealth, ok: false };
     const runtimeHalted = env.runtimeState?.halted === true;
+    const gossipReady = visibleHubs.length === resolvedArgs.meshHubNames.length;
+    const readiness = deriveMarketMakerChildReadiness({
+      runtimeHalted,
+      startupPhase,
+      gossipReady,
+      marketMakerReady: marketMakerHealth.ok === true,
+    });
     cachedHealthResponseJson = safeStringify({
-      ok: !runtimeHalted && visibleHubs.length === resolvedArgs.meshHubNames.length,
+      ok: readiness.ready,
+      live: readiness.live,
+      ready: readiness.ready,
       name: resolvedArgs.name,
       height: Math.max(0, Math.floor(Number(env.height || 0))),
       entityId: activeEntityId,
@@ -3635,7 +3645,7 @@ const run = async (): Promise<void> => {
       gossip: {
         visibleHubNames: visibleHubs.map(profile => profile.name),
         visibleHubIds: visibleHubs.map(profile => profile.entityId),
-        ready: visibleHubs.length === resolvedArgs.meshHubNames.length,
+        ready: gossipReady,
       },
       bootstrap: {
         readyHash: bootstrapReadyHash,

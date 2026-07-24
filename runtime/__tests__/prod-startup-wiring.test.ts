@@ -1259,6 +1259,11 @@ describe('production startup wiring', () => {
     const healthBuilder = mmNode.slice(healthBuilderStart, publishHealthStart);
     expect(healthBuilder).toContain("const marketMakerHealth = startupPhase === 'offers-ready'");
     expect(healthBuilder).toContain(': { ...rawMarketMakerHealth, ok: false };');
+    expect(healthBuilder).toContain('const readiness = deriveMarketMakerChildReadiness({');
+    expect(healthBuilder).toContain('marketMakerReady: marketMakerHealth.ok === true');
+    expect(healthBuilder).toContain('ok: readiness.ready');
+    expect(healthBuilder).toContain('live: readiness.live');
+    expect(healthBuilder).toContain('ready: readiness.ready');
     expect(healthBuilder).toContain('...marketMakerHealth');
     expect(healthBuilder).toContain('quiescence: summarizeRuntimeQuiescence(env)');
     expect(healthBuilder).toContain('expectedRoutes: 0');
@@ -1629,10 +1634,10 @@ describe('production startup wiring', () => {
     expect(packageJson).toContain('"test:contracts:full": "bun runtime/scripts/run-with-test-cleanup.ts --reason=contracts --child-cwd=jurisdictions -- sh -c \\"bunx hardhat test test/*.ts test/*.cjs\\""');
     expect(packageJson).toContain('"test:e2e:release": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --exclude-market-maker');
     expect(packageJson).toContain('"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --market-maker-only');
-    expect(packageJson).toContain('"test:e2e:full": "bun runtime/scripts/run-e2e-parallel-isolated.ts --all --shards=8 --workers-per-shard=1 --max-mm-concurrency=2');
+    expect(packageJson).toContain('"test:e2e:full": "bun runtime/scripts/run-e2e-parallel-isolated.ts --all --strict-browser-health --shards=8 --workers-per-shard=1 --max-mm-concurrency=2');
     expect(packageJson).toContain('"test:e2e:release": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --exclude-market-maker --strict-browser-health --shards=8');
     expect(packageJson).toContain('"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --market-maker-only --strict-browser-health --shards=8 --workers-per-shard=1 --max-mm-concurrency=2');
-    expect(packageJson).toContain('"test:e2e:all": "bun runtime/scripts/run-e2e-parallel-isolated.ts --all --shards=8 --workers-per-shard=1 --max-mm-concurrency=2');
+    expect(packageJson).toContain('"test:e2e:all": "bun runtime/scripts/run-e2e-parallel-isolated.ts --all --strict-browser-health --shards=8 --workers-per-shard=1 --max-mm-concurrency=2');
     expect(packageJson).toContain('"test:p2p:relay": "bun runtime/scripts/run-with-test-cleanup.ts --reason=p2p-relay -- bun runtime/scenarios/p2p-relay.ts"');
     expect(bootstrapSoundcheck).toContain("XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO: process.env['XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO'] || '1'");
     expect(bootstrapSoundcheck).toContain("XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS: process.env['XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS'] || '5000'");
