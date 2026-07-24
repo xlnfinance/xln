@@ -4,7 +4,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ContractFactory, HDNodeWallet, JsonRpcProvider, Wallet, ethers } from 'ethers';
+import { Contract, ContractFactory, HDNodeWallet, JsonRpcProvider, Wallet, ethers } from 'ethers';
 
 import { buildSingleSignerHanko } from '../hanko/batch';
 import { computeBatchHankoHash, createEmptyBatch, encodeJBatch, type JBatch } from '../jurisdiction/batch';
@@ -158,6 +158,51 @@ const loadArtifact = async (artifactPath: string): Promise<{
   bytecode: string;
 }> => JSON.parse(await readFile(artifactPath, 'utf8')) as { abi: unknown[]; bytecode: string };
 
+const deployWatchtowerContracts = async (
+  deployer: Wallet,
+  nextNonce: (wallet: Wallet) => Promise<number>,
+): Promise<Contract> => {
+  const artifact = async (contractPath: string): Promise<{ abi: unknown[]; bytecode: string }> =>
+    loadArtifact(join(process.cwd(), `jurisdictions/artifacts/contracts/${contractPath}`));
+  const accountArtifact = await artifact('Account.sol/Account.json');
+  const hankoVerifierArtifact = await artifact('HankoVerifier.sol/HankoVerifier.json');
+  const entityProviderArtifact = await artifact('EntityProvider.sol/EntityProvider.json');
+  const depositoryArtifact = await artifact('Depository.sol/Depository.json');
+
+  const deploy = async (
+    contractArtifact: { abi: unknown[]; bytecode: string },
+    bytecode: string,
+    args: unknown[] = [],
+  ): Promise<Contract> => {
+    const contract = await new ContractFactory(contractArtifact.abi, bytecode, deployer)
+      .deploy(...args, { nonce: await nextNonce(deployer) });
+    await contract.waitForDeployment();
+    return contract;
+  };
+
+  const account = await deploy(accountArtifact, accountArtifact.bytecode);
+  const hankoVerifier = await deploy(hankoVerifierArtifact, hankoVerifierArtifact.bytecode);
+  const entityProvider = await deploy(
+    entityProviderArtifact,
+    linkArtifactBytecode(entityProviderArtifact.bytecode, {
+      'contracts/HankoVerifier.sol:HankoVerifier': await hankoVerifier.getAddress(),
+    }),
+    [deployer.address],
+  );
+  const depository = await new ContractFactory(
+    depositoryArtifact.abi,
+    linkArtifactBytecode(depositoryArtifact.bytecode, {
+      'contracts/Account.sol:Account': await account.getAddress(),
+    }),
+    deployer,
+  ).deploy(await entityProvider.getAddress(), 5_760, {
+    gasLimit: 60_000_000n,
+    nonce: await nextNonce(deployer),
+  });
+  await depository.waitForDeployment();
+  return depository;
+};
+
 const signDepositoryBatch = async (
   depository: Contract,
   entityId: string,
@@ -217,27 +262,7 @@ describe('watchtower rpc last-resort integration', () => {
           { wallet: left, entityId: generateLazyEntityId([left.address], 1n).toLowerCase(), privateKey: derivePrivateKey(0) },
         ];
 
-    const accountArtifact = await loadArtifact(join(process.cwd(), 'jurisdictions/artifacts/contracts/Account.sol/Account.json'));
-    const entityProviderArtifact = await loadArtifact(join(process.cwd(), 'jurisdictions/artifacts/contracts/EntityProvider.sol/EntityProvider.json'));
-    const depositoryArtifact = await loadArtifact(join(process.cwd(), 'jurisdictions/artifacts/contracts/Depository.sol/Depository.json'));
-
-    const accountFactory = new ContractFactory(accountArtifact.abi, accountArtifact.bytecode, left);
-    const account = await accountFactory.deploy({ nonce: await nextNonce(left) });
-    await account.waitForDeployment();
-
-    const entityProviderFactory = new ContractFactory(entityProviderArtifact.abi, entityProviderArtifact.bytecode, left);
-    const entityProvider = await entityProviderFactory.deploy(left.address, { nonce: await nextNonce(left) });
-    await entityProvider.waitForDeployment();
-
-    const linkedDepositoryBytecode = linkArtifactBytecode(depositoryArtifact.bytecode, {
-      'contracts/Account.sol:Account': await account.getAddress(),
-    });
-    const depositoryFactory = new ContractFactory(depositoryArtifact.abi, linkedDepositoryBytecode, left);
-    const depository = await depositoryFactory.deploy(await entityProvider.getAddress(), 5_760, {
-      gasLimit: 60_000_000n,
-      nonce: await nextNonce(left),
-    });
-    await depository.waitForDeployment();
+    const depository = await deployWatchtowerContracts(left, nextNonce);
 
     const tokenId = 1n;
     const disputeNonce = 1n;
@@ -504,27 +529,7 @@ describe('watchtower rpc last-resort integration', () => {
           { wallet: left, entityId: generateLazyEntityId([left.address], 1n).toLowerCase(), privateKey: derivePrivateKey(0) },
         ];
 
-    const accountArtifact = await loadArtifact(join(process.cwd(), 'jurisdictions/artifacts/contracts/Account.sol/Account.json'));
-    const entityProviderArtifact = await loadArtifact(join(process.cwd(), 'jurisdictions/artifacts/contracts/EntityProvider.sol/EntityProvider.json'));
-    const depositoryArtifact = await loadArtifact(join(process.cwd(), 'jurisdictions/artifacts/contracts/Depository.sol/Depository.json'));
-
-    const accountFactory = new ContractFactory(accountArtifact.abi, accountArtifact.bytecode, left);
-    const account = await accountFactory.deploy({ nonce: await nextNonce(left) });
-    await account.waitForDeployment();
-
-    const entityProviderFactory = new ContractFactory(entityProviderArtifact.abi, entityProviderArtifact.bytecode, left);
-    const entityProvider = await entityProviderFactory.deploy(left.address, { nonce: await nextNonce(left) });
-    await entityProvider.waitForDeployment();
-
-    const linkedDepositoryBytecode = linkArtifactBytecode(depositoryArtifact.bytecode, {
-      'contracts/Account.sol:Account': await account.getAddress(),
-    });
-    const depositoryFactory = new ContractFactory(depositoryArtifact.abi, linkedDepositoryBytecode, left);
-    const depository = await depositoryFactory.deploy(await entityProvider.getAddress(), 5_760, {
-      gasLimit: 60_000_000n,
-      nonce: await nextNonce(left),
-    });
-    await depository.waitForDeployment();
+    const depository = await deployWatchtowerContracts(left, nextNonce);
 
     const tokenId = 1n;
     const disputeNonce = 1n;
