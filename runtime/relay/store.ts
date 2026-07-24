@@ -405,6 +405,17 @@ export const setDebugIncidentState = (
   return updated;
 };
 
+/**
+ * Clear the high-volume event timeline while retaining grouped incidents.
+ *
+ * Event ids are cursors, so they must remain monotonic for the lifetime of the
+ * incident registry. Resetting debugId while incidents survive makes afterId
+ * queries skip new events until the counter catches up to its old value.
+ */
+export const clearDebugTimeline = (store: RelayStore): void => {
+  store.debugEvents.length = 0;
+};
+
 // ---------------------------------------------------------------------------
 // Gossip profiles
 // ---------------------------------------------------------------------------

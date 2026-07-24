@@ -18,6 +18,7 @@ import {
   stopManagedChild,
 } from './custody-bootstrap';
 import {
+  clearDebugTimeline,
   createRelayStore,
   clearPendingMessages,
   normalizeRuntimeKey,
@@ -710,8 +711,7 @@ const clearRelayState = (): void => {
   relayStore.gossipProfiles.clear();
   relayStore.runtimeEncryptionKeys.clear();
   relayStore.activeHubEntityIds = [];
-  relayStore.debugEvents.length = 0;
-  relayStore.debugId = 0;
+  clearDebugTimeline(relayStore);
   relayStore.wsCounter = 0;
   marketSubscriptionStack.clear();
 };

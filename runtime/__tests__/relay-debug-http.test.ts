@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { maybeHandleRelayDebugRequest } from '../relay/debug-http';
-import { createRelayStore, pushDebugEvent } from '../relay/store';
+import { clearDebugTimeline, createRelayStore, pushDebugEvent } from '../relay/store';
 
 const call = async (
   store: ReturnType<typeof createRelayStore>,
@@ -72,5 +72,25 @@ test('incident state mutation requires operator authorization', async () => {
   }, true)).toMatchObject({
     status: 200,
     body: { ok: true, incident: { state: 'resolved' } },
+  });
+});
+
+test('timeline reset preserves monotonic incident cursors', async () => {
+  const store = createRelayStore('relay-test');
+  pushDebugEvent(store, { event: 'error', reason: 'FIRST_FATAL', status: 'fatal' });
+  const firstEventId = store.debugId;
+
+  clearDebugTimeline(store);
+  expect(store.debugEvents).toHaveLength(0);
+  expect(store.debugIncidents.size).toBe(1);
+  expect(store.debugId).toBe(firstEventId);
+
+  pushDebugEvent(store, { event: 'error', reason: 'SECOND_FATAL', status: 'fatal' });
+  expect(store.debugId).toBe(firstEventId + 1);
+  const queried = await call(store, `/api/debug/incidents?state=open&afterId=${firstEventId}`);
+  expect(queried.body.incidents).toHaveLength(1);
+  expect(queried.body.incidents[0]).toMatchObject({
+    code: 'SECOND_FATAL',
+    lastEventId: firstEventId + 1,
   });
 });
