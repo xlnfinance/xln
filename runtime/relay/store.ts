@@ -97,6 +97,7 @@ export type RelayStore = {
   debugEvents: RelayDebugEvent[];
   debugIncidents: Map<string, RelayDebugIncident>;
   debugId: number;
+  debugIdAllocator?: (() => number) | undefined;
   incidentSink?: ((incident: RelayDebugIncident) => void) | undefined;
   wsCounter: number;
   activeHubEntityIds: string[];
@@ -155,6 +156,7 @@ export type RelayStoreOptions = {
   maxGossipProfiles?: number;
   initialDebugId?: number;
   initialIncidents?: Iterable<RelayDebugIncident>;
+  debugIdAllocator?: () => number;
   incidentSink?: (incident: RelayDebugIncident) => void;
 };
 
@@ -195,6 +197,7 @@ export const createRelayStore = (serverId: string, options: RelayStoreOptions = 
     debugEvents: [],
     debugIncidents,
     debugId,
+    ...(options.debugIdAllocator ? { debugIdAllocator: options.debugIdAllocator } : {}),
     ...(options.incidentSink ? { incidentSink: options.incidentSink } : {}),
     wsCounter: 0,
     activeHubEntityIds: [],
@@ -401,7 +404,11 @@ export const pushDebugEvent = (
   store: RelayStore,
   event: Omit<RelayDebugEvent, 'id' | 'ts'>,
 ): RelayDebugIncident | null => {
-  store.debugId += 1;
+  const nextDebugId = store.debugIdAllocator?.() ?? store.debugId + 1;
+  if (!Number.isSafeInteger(nextDebugId) || nextDebugId <= store.debugId) {
+    throw new Error(`DEBUG_EVENT_ID_INVALID:current=${store.debugId}:next=${String(nextDebugId)}`);
+  }
+  store.debugId = nextDebugId;
   const redactedEvent = redactTelemetryValue(event) as Omit<RelayDebugEvent, 'id' | 'ts'>;
   const delivery = redactedEvent.delivery ??
     (redactedEvent.event === 'delivery' ? classifyRelayDeliveryEvent(redactedEvent) ?? undefined : undefined);

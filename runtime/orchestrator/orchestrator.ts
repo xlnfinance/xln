@@ -255,6 +255,7 @@ const jurisdictionsConfig: OrchestratorJurisdictionsConfig = {
 const relayStore: RelayStore = createRelayStore('mesh-relay', {
   initialDebugId: debugIncidentJournal.debugId,
   initialIncidents: debugIncidentJournal.incidents,
+  debugIdAllocator: () => debugIncidentJournal.allocateDebugId(),
   incidentSink: incident => debugIncidentJournal.record(incident),
 });
 registerStructuredLogSink((entry) => {

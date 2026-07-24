@@ -22,6 +22,7 @@ import type {
 const JOURNAL_SCHEMA = 'xln-debug-incident-v1';
 const MAX_RESTORED_INCIDENTS = 1_000;
 const COMPACT_AFTER_BYTES = 16 * 1024 * 1024;
+const DEBUG_ID_RESERVATION_SIZE = 1_000_000;
 
 type PersistedIncident = Omit<RelayDebugIncident, 'sample'>;
 
@@ -31,10 +32,17 @@ type IncidentJournalRecord = {
   incident: PersistedIncident;
 };
 
+type IncidentCursorRecord = {
+  schema: typeof JOURNAL_SCHEMA;
+  debugId: number;
+  kind: 'cursor';
+};
+
 export type RelayIncidentJournal = {
   path: string;
   debugId: number;
   incidents: RelayDebugIncident[];
+  allocateDebugId(): number;
   record(incident: RelayDebugIncident): void;
 };
 
@@ -88,7 +96,7 @@ const validatePersistedIncident = (value: unknown): PersistedIncident => {
   };
 };
 
-const validateRecord = (value: unknown): IncidentJournalRecord => {
+const validateRecord = (value: unknown): IncidentJournalRecord | IncidentCursorRecord => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('DEBUG_INCIDENT_JOURNAL_RECORD_INVALID');
   }
@@ -96,11 +104,11 @@ const validateRecord = (value: unknown): IncidentJournalRecord => {
   if (input['schema'] !== JOURNAL_SCHEMA) {
     throw new Error(`DEBUG_INCIDENT_JOURNAL_SCHEMA_INVALID:${String(input['schema'])}`);
   }
-  return {
-    schema: JOURNAL_SCHEMA,
-    debugId: finiteInteger(input['debugId'], 'DEBUG_ID'),
-    incident: validatePersistedIncident(input['incident']),
-  };
+  const debugId = finiteInteger(input['debugId'], 'DEBUG_ID');
+  if (input['kind'] === 'cursor' && input['incident'] === undefined) {
+    return { schema: JOURNAL_SCHEMA, debugId, kind: 'cursor' };
+  }
+  return { schema: JOURNAL_SCHEMA, debugId, incident: validatePersistedIncident(input['incident']) };
 };
 
 const withoutSample = (incident: RelayDebugIncident): PersistedIncident => {
@@ -181,8 +189,12 @@ const readJournal = (path: string): { debugId: number; incidents: PersistedIncid
     if (!line) continue;
     try {
       const record = validateRecord(JSON.parse(line));
-      debugId = Math.max(debugId, record.debugId, record.incident.lastEventId);
-      latest.set(record.incident.fingerprint, record.incident);
+      debugId = Math.max(
+        debugId,
+        record.debugId,
+        'incident' in record ? record.incident.lastEventId : 0,
+      );
+      if ('incident' in record) latest.set(record.incident.fingerprint, record.incident);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`DEBUG_INCIDENT_JOURNAL_CORRUPT:line=${index + 1}:${message}`);
@@ -194,6 +206,8 @@ const readJournal = (path: string): { debugId: number; incidents: PersistedIncid
 export const openRelayIncidentJournal = (path: string): RelayIncidentJournal => {
   const restored = readJournal(path);
   let debugId = restored.debugId;
+  let nextDebugId = debugId + 1;
+  let reservedThrough = debugId;
   const latest = new Map(restored.incidents.map(incident => [incident.fingerprint, incident]));
   const compact = (): void => {
     const retained = selectRetained(latest.values());
@@ -210,8 +224,28 @@ export const openRelayIncidentJournal = (path: string): RelayIncidentJournal => 
   };
   return {
     path,
-    debugId,
+    get debugId() {
+      return debugId;
+    },
     incidents: restored.incidents.map(restoreIncident),
+    allocateDebugId(): number {
+      if (nextDebugId > reservedThrough) {
+        reservedThrough = Math.max(
+          reservedThrough + DEBUG_ID_RESERVATION_SIZE,
+          nextDebugId + DEBUG_ID_RESERVATION_SIZE - 1,
+        );
+        debugId = reservedThrough;
+        appendDurable(
+          path,
+          `${safeStringify({
+            schema: JOURNAL_SCHEMA,
+            debugId: reservedThrough,
+            kind: 'cursor',
+          } satisfies IncidentCursorRecord)}\n`,
+        );
+      }
+      return nextDebugId++;
+    },
     record(incident: RelayDebugIncident): void {
       const persisted = withoutSample(incident);
       debugId = Math.max(debugId, persisted.lastEventId);

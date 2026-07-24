@@ -28,6 +28,7 @@ const storeFromJournal = (path: string) => {
     store: createRelayStore('relay-test', {
       initialDebugId: journal.debugId,
       initialIncidents: journal.incidents,
+      debugIdAllocator: () => journal.allocateDebugId(),
       incidentSink: incident => journal.record(incident),
     }),
   };
@@ -53,7 +54,7 @@ test('incident journal restores grouped state and monotonic cursors after restar
   const beforeRestartId = first.store.debugId;
 
   const restarted = storeFromJournal(path);
-  expect(restarted.store.debugId).toBe(beforeRestartId);
+  expect(restarted.store.debugId).toBeGreaterThan(beforeRestartId);
   expect(restarted.store.debugIncidents.get(fingerprint)).toMatchObject({
     state: 'acknowledged',
     count: 2,
@@ -67,12 +68,46 @@ test('incident journal restores grouped state and monotonic cursors after restar
     reason: 'STORAGE_NOT_OPEN',
     status: 'fatal',
   });
-  expect(restarted.store.debugId).toBe(beforeRestartId + 1);
+  expect(restarted.store.debugId).toBeGreaterThan(beforeRestartId);
   expect(restarted.store.debugIncidents.get(fingerprint)).toMatchObject({
     state: 'unread',
     count: 3,
-    lastEventId: beforeRestartId + 1,
+    lastEventId: restarted.store.debugId,
   });
+});
+
+test('root incident survives 100,000 lower-priority events and restart', () => {
+  const path = journalPath();
+  const first = storeFromJournal(path);
+  const root = pushDebugEvent(first.store, {
+    event: 'error',
+    runtimeId: 'runtime-a',
+    reason: 'RUNTIME_STORAGE_FATAL',
+    status: 'fatal',
+  });
+  expect(root).not.toBeNull();
+
+  for (let index = 0; index < 100_000; index += 1) {
+    pushDebugEvent(first.store, {
+      event: 'gossip',
+      runtimeId: 'runtime-noise',
+      status: 'info',
+      reason: `GOSSIP_NOISE_${index % 10}`,
+    });
+  }
+
+  expect(first.store.debugEvents).toHaveLength(5_000);
+  expect(first.store.debugIncidents.get(root!.fingerprint)).toMatchObject({
+    state: 'unread',
+    count: 1,
+  });
+  const restarted = storeFromJournal(path);
+  expect(restarted.store.debugIncidents.get(root!.fingerprint)).toMatchObject({
+    state: 'unread',
+    code: 'RUNTIME_STORAGE_FATAL',
+    count: 1,
+  });
+  expect(restarted.store.debugId).toBeGreaterThan(100_001);
 });
 
 test('incident journal discards only a torn final append and remains writable', () => {
@@ -87,7 +122,7 @@ test('incident journal discards only a torn final append and remains writable', 
 
   const restarted = storeFromJournal(path);
   expect(restarted.store.debugIncidents.size).toBe(2);
-  expect(restarted.store.debugId).toBe(2);
+  expect(restarted.store.debugId).toBeGreaterThan(2);
 });
 
 test('incident journal fails fast on complete corruption and persists no secrets', () => {

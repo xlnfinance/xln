@@ -14,9 +14,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   replaced from the exact committed height/root without duplicate dispatch or
   J-submit, and unresolved incidents block release. All money controls must
   derive readiness from the same Runtime lifecycle gate and perform zero
-  enqueue while halted, quiescing or restoring. Retain fatal/error separately
-  from noisy info events and prove the root remains queryable after child
-  death, restart and at least 100,000 lower-priority gossip/debug events.
+  enqueue while halted, quiescing or restoring.
 - [ ] Extend the proven halted banner/root-incident link and disabled money
   controls to a real browser running → quiescing/restoring → running process
   transition. The remote halted screenshot, adapter propagation and zero
