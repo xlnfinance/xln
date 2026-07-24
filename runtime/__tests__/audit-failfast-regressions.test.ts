@@ -123,6 +123,7 @@ import {
 import { MalformedEntityFrameInputError } from '../entity/tx/invariant-errors';
 import { applyStorageChanges } from '../machine/env-events';
 import { submitRuntimeJOutbox } from '../machine/j-submit';
+import { registerStructuredLogSink } from '../infra/logger';
 import {
   buildJSubmitAttemptId,
   registerPendingCommittedJOutbox,
@@ -1292,6 +1293,27 @@ describe('audit fail-fast regressions', () => {
     expect(salvageOutput?.entityId).toBe(targetUser);
     expect(salvageOutput?.signerId).toBe(targetSigner);
     expect(salvageOutput?.signerId).not.toBe(staleGossipSigner);
+
+    const observerWarnings: string[] = [];
+    const unregisterSink = registerStructuredLogSink((event) => {
+      if (event.level === 'warn') observerWarnings.push(event.message);
+    });
+    try {
+      const peerObserver = makeEntityState(sourceHub);
+      const peerOutputs: EntityInput[] = [];
+      expect(queueCrossJurisdictionSalvageFromArgumentList(
+        env,
+        peerObserver,
+        peerOutputs,
+        sourceUser,
+        [starterInitialArguments],
+        123,
+      )).toBe(false);
+      expect(peerOutputs).toEqual([]);
+    } finally {
+      unregisterSink();
+    }
+    expect(observerWarnings).toEqual([]);
   });
 
   test('runtime ingress still rejects stale signer hints when local target signer is ambiguous', async () => {
