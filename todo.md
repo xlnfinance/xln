@@ -12,9 +12,11 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   first diagnostic query and release gate. Route every remaining frontend,
   orchestrator and J-machine fatal into it. Prove a failed managed child is
   replaced from the exact committed height/root without duplicate dispatch or
-  J-submit, and unresolved incidents block release. All money controls must
-  derive readiness from the same Runtime lifecycle gate and perform zero
-  enqueue while halted, quiescing or restoring.
+  J-submit, and unresolved incidents block release. A fatal/error root must
+  survive an info/gossip flood, child restart and cursor resume, while secret
+  sentinels never reach any sink. All money controls must derive readiness from
+  the same Runtime lifecycle gate and perform zero enqueue while halted,
+  quiescing or restoring.
 - [ ] Extend the proven halted banner/root-incident link and disabled money
   controls to a real browser running → quiescing/restoring → running process
   transition. The remote halted screenshot, adapter propagation and zero
@@ -51,6 +53,11 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 - [ ] Replace the unbounded `_forgiveDebtsBetweenEntities` queue scan with an
   indexed or bounded-continuation structure. Prove exact debt conservation and
   bounded gas with adversarial creditor ordering.
+- [ ] Lock the already-corrected Foundation authority and name registry into one
+  adversarial contract gate: every mutation requires the current Foundation
+  Hanko plus exact nonce, minority control-token ownership grants no admin
+  capability, and arbitrary assign/transfer sequences preserve a bijective
+  `name ↔ entity` mapping.
 - [ ] Remove the remaining proven pre-mainnet compatibility ABI/state:
   migrate V1 settlement `diffsToOps` and `position.xlnomy`, then delete unused
   contract `resolveEntityId` and ineffective `hashToBlock/cleanSecret`. Use one
@@ -82,6 +89,9 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 5. Crash, corruption and load evidence — P1, open
 
+- [ ] Force repeated storage epoch rotations with SIGKILL at every persistence
+  boundary. After each restore, prove exact WAL height, Runtime/Entity/Account
+  roots, one live current handle, and a successful next-frame commit.
 - [ ] Profile the production bootstrap and growing-hub frame path locally.
   Remove only measured full scans/clones/duplicate crypto; publish deterministic
   1/1,000-tx and growing-hub median/p95/MAD budgets from a clean Bun cache.
