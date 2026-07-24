@@ -19,14 +19,10 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   byte threshold, then run beyond the first epoch rotation with H1/H2/H3/MM
   healthy, no stale frames, no orphan processes and no growing empty-chain
   disk workload.
-- [ ] Make market-maker `/api/health` authoritative: top-level readiness stays
-  false until `offers-ready`, gossip is complete and every required same-J and
-  cross-J book has exact expected depth. Liveness must remain a separate field;
-  no E2E may begin swaps from process-alive/profile-visible alone.
-- [ ] Prove through Runtime state, public API and browser E2E that every
-  supported same-J pair exposes exactly 10 bids and 10 asks. Prove cross-J
-  full fill closes both legs and removes the user order; partial GTC remains
-  open until later fill or explicit close.
+- [ ] Extend the exact-depth browser matrix across every supported same-J pair:
+  each must render exactly the configured 10 bids and 10 asks, with no hidden
+  missing or surplus offers. Keep the existing authoritative health/API
+  equality assertions as the precondition for every browser check.
 
 ## 1. Commit-boundary correctness
 
