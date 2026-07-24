@@ -138,6 +138,11 @@ import {
   setAccountFrameHistoryView,
 } from './machine/env-events';
 import { recordRuntimeSecurityIncident } from './machine/security-incidents';
+import {
+  assertRuntimeFrameStorageState,
+  reconcileRuntimeFrameSharedState,
+  type RuntimeFrameSharedStateSnapshot,
+} from './machine/runtime-frame-shared-state';
 import { accountInputAck, accountInputProposal } from './account/consensus/flush';
 import { getEffectiveEntityInputTxs } from './entity/consensus/output-envelope';
 import {
@@ -4306,7 +4311,7 @@ type RuntimeFrameTransaction = {
   liveEnv: Env;
   workingEnv: Env;
   ingressBuffer: RuntimeFrameIngressBuffer;
-  sharedStateBaseline: Map<string, { present: boolean; value: unknown }>;
+  sharedStateBaseline: Map<string, RuntimeFrameSharedStateSnapshot>;
   liveFrameLogBaseLength: number;
   workingCleanLogBaseLength: number;
   liveAdapters: Set<JAdapter>;
@@ -4517,49 +4522,31 @@ const publishRuntimeFrameTransaction = (transaction: RuntimeFrameTransaction): E
   const workingState = ensureRuntimeState(workingEnv);
   const concurrentMempool = ensureRuntimeMempool(liveEnv);
   const workingMempool = ensureRuntimeMempool(workingEnv);
-  const liveOnlyState = new Map<string, unknown>();
-  const workingOwnedSharedState = new Map<string, unknown>();
-  for (const key of new Set([...RUNTIME_FRAME_SHARED_STATE_KEYS, ...RUNTIME_FRAME_CONCURRENT_STATE_KEYS])) {
-    if (Object.prototype.hasOwnProperty.call(liveState, key)) {
-      liveOnlyState.set(key, (liveState as Record<string, unknown>)[key]);
-    }
-  }
-  for (const key of RUNTIME_FRAME_SHARED_STATE_KEYS) {
-    const baseline = transaction.sharedStateBaseline.get(key) ?? { present: false, value: undefined };
-    const livePresent = Object.prototype.hasOwnProperty.call(liveState, key);
-    const liveValue = (liveState as Record<string, unknown>)[key];
-    const workingPresent = Object.prototype.hasOwnProperty.call(workingState, key);
-    const workingValue = (workingState as Record<string, unknown>)[key];
-    const liveChanged = livePresent !== baseline.present || !Object.is(liveValue, baseline.value);
-    const workingChanged = workingPresent !== baseline.present || !Object.is(workingValue, baseline.value);
-    if (!workingChanged) continue;
-    if (liveChanged && (livePresent !== workingPresent || !Object.is(liveValue, workingValue))) {
-      throw new Error(`RUNTIME_FRAME_SHARED_STATE_CONFLICT:${key}`);
-    }
-    if (workingPresent) workingOwnedSharedState.set(key, workingValue);
-    else workingOwnedSharedState.set(key, undefined);
-  }
+  const liveRecord = liveState as Record<string, unknown>;
+  const workingRecord = workingState as Record<string, unknown>;
+  const selectedSharedState = reconcileRuntimeFrameSharedState(
+    transaction.sharedStateBaseline,
+    liveRecord,
+    workingRecord,
+    RUNTIME_FRAME_SHARED_STATE_KEYS,
+  );
   const mergedHints = mergeRuntimeEntityHints(workingState.entityRuntimeHints, liveState.entityRuntimeHints);
-  for (const key of Object.keys(liveState)) delete (liveState as Record<string, unknown>)[key];
+  const nextState: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(workingState)) {
     if (!RUNTIME_FRAME_SHARED_STATE_KEYS.has(key) && !RUNTIME_FRAME_CONCURRENT_STATE_KEYS.has(key)) {
-      (liveState as Record<string, unknown>)[key] = value;
-    } else if (RUNTIME_FRAME_SHARED_STATE_KEYS.has(key) && !liveOnlyState.has(key)) {
-      // Infra handles opened by this frame (notably LevelDB on the first
-      // persisted frame) must remain attached after publish. Existing live
-      // handles still win below so concurrent infra cannot be overwritten.
-      (liveState as Record<string, unknown>)[key] = value;
+      nextState[key] = value;
     }
   }
-  for (const [key, value] of liveOnlyState) (liveState as Record<string, unknown>)[key] = value;
-  for (const [key, value] of workingOwnedSharedState) {
-    if (value === undefined && !Object.prototype.hasOwnProperty.call(workingState, key)) {
-      delete (liveState as Record<string, unknown>)[key];
-    } else {
-      (liveState as Record<string, unknown>)[key] = value;
-    }
+  for (const key of RUNTIME_FRAME_CONCURRENT_STATE_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(liveRecord, key)) nextState[key] = liveRecord[key];
   }
-  if (mergedHints) liveState.entityRuntimeHints = mergedHints;
+  for (const [key, snapshot] of selectedSharedState) {
+    if (snapshot.present) nextState[key] = snapshot.value;
+  }
+  if (mergedHints) nextState['entityRuntimeHints'] = mergedHints;
+  assertRuntimeFrameStorageState(nextState);
+  for (const key of Object.keys(liveState)) delete liveRecord[key];
+  Object.assign(liveRecord, nextState);
 
   const workingCleanLogTail = (workingState.cleanLogs ?? []).slice(transaction.workingCleanLogBaseLength);
   if (workingCleanLogTail.length > 0) {

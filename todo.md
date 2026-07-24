@@ -29,11 +29,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   transition. The remote halted screenshot, adapter propagation and zero
   enqueue/transport/J-submit are already green; the remaining proof must use
   the real fatal/restart path rather than a mocked adapter status.
-- [ ] Make top-level market-maker health depend on every configured child,
-  authenticated peer and required book. After a clean start and after forced
-  child replacement, prove the public same-J and cross-J books contain exactly
-  the configured 10 bid + 10 ask levels before health becomes ready.
-
 ## 1. Commit-boundary correctness — P0, approval required
 
 - [ ] Reject Entity-frame timestamp regression before transaction application.
@@ -94,14 +89,9 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 5. Crash, corruption and load evidence — P1, open
 
-- [ ] Pass snapshot/epoch/rotation/prune/corruption matrices for oversized
-  typed Account/Entity/Book values and exact 9,999/10,000-byte boundaries.
-  Include Runtime-frame shared-resource ownership: working handle replacement
-  must atomically publish its matching open promise/generation, concurrent
-  live/working replacement must fail with a typed conflict, current and
-  previous handles must never alias, a closed handle must never publish, and
-  forced rotation → next commit → restart → next commit must preserve exact
-  WAL height and canonical roots.
+- [ ] Pass the remaining snapshot/epoch/rotation/prune/corruption matrices for
+  oversized typed Account/Entity/Book values and exact 9,999/10,000-byte
+  boundaries.
 - [ ] Add deterministic SimNetwork/SimStorage delay/reorder/drop/partial-write/
   kill tests and retain every failing seed.
 - [ ] Profile the production bootstrap and growing-hub frame path locally.
