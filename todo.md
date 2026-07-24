@@ -19,11 +19,16 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   under one stable root fingerprint, retain fatal/error separately from noisy
   info events, and enforce allowlisted metadata plus sink-level redaction: raw
   Account/Entity inputs, Hanko, ciphertext, seeds and dispute evidence must
-  never enter console, JSONL or the debug API.
-- [ ] Show the canonical halted/readiness reason and durable root-incident
-  reference beside disabled wallet money controls. Cover the real browser
-  running → quiescing/restoring/halted transition with screenshot evidence;
-  adapter propagation and zero enqueue/transport/J-submit are already proven.
+  never enter console, JSONL or the debug API. A fatal must leave the child over
+  an acknowledged local control/IPC channel before exit; the parent-owned
+  operational journal, not the possibly broken Runtime LevelDB, is authoritative.
+  Prove the root and causal chain remain queryable after child death, restart
+  and at least 100,000 lower-priority gossip/debug events.
+- [ ] Extend the proven halted banner/root-incident link and disabled money
+  controls to a real browser running → quiescing/restoring → running process
+  transition. The remote halted screenshot, adapter propagation and zero
+  enqueue/transport/J-submit are already green; the remaining proof must use
+  the real fatal/restart path rather than a mocked adapter status.
 - [ ] Make top-level market-maker health depend on every configured child,
   authenticated peer and required book. After a clean start and after forced
   child replacement, prove the public same-J and cross-J books contain exactly
@@ -104,7 +109,10 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   1/1,000-tx and growing-hub median/p95/MAD budgets from a clean Bun cache.
   Measure the duplicate Account wake scan, per-frame verified-profile clone and
   repeated cross-J preview application; replace them only with dirty/versioned
-  indexes or structural preflight proven byte-identical.
+  indexes or structural preflight proven byte-identical. Record
+  `frameCloneMs`, cloned replica/account/profile counts, estimated cloned bytes
+  and cross-J preview clone time. A frame touching one account must not scale
+  linearly when untouched accounts grow from 10,000 to 100,000.
 - [ ] Replace case-insensitive Account scans and repeated signer/pair lookups
   with canonical direct indexes, including exact cross-J replica/account
   descriptors; then introduce Runtime→Entity→Account COW only behind

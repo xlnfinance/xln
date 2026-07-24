@@ -8,6 +8,7 @@
   export let replica: EntityReplica | null = null;
   export let entityNames: Map<string, string> = new Map();
   export let pendingOffchainFaucetKeys: Set<string> = new Set();
+  export let commandsReady = false;
   export let handleBackToAccounts: () => void = () => {};
   export let handleAccountFaucet: (event: CustomEvent<{ counterpartyId: string; tokenId: number }>) => void = () => {};
   export let handleAccountPanelGoToOpenAccounts: () => void = () => {};
@@ -21,6 +22,7 @@
       entityId={tab.entityId}
       {replica}
       {entityNames}
+      {commandsReady}
       pendingFaucetKeys={pendingOffchainFaucetKeys}
       on:back={handleBackToAccounts}
       on:faucet={handleAccountFaucet}

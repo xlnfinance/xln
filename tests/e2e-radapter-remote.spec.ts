@@ -12,8 +12,10 @@ import { deriveSignerAddressSync } from '../runtime/account/crypto';
 import { HUB_MESH_CREDIT_AMOUNT } from '../runtime/orchestrator/mesh-common';
 import { decodeRuntimeAdapterRequest } from '../runtime/radapter/codec';
 import { signRuntimeAdapterServerIdentity } from '../runtime/radapter/server-identity-signer';
+import { deriveRuntimeAdapterCapabilityToken } from '../runtime/radapter/auth';
 import type { RuntimeAdapterRequest } from '../runtime/radapter/types';
 import type { Env } from '../runtime/types';
+import { captureLocatorScreenshot } from './utils/e2e-screenshots';
 
 const REMOTE_RUNTIME_IMPORT_STORAGE_KEY = 'xln-remote-runtime-imports';
 const REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY = 'xln-remote-runtime-import-last-result';
@@ -93,8 +95,19 @@ type RuntimeAdapterDebugSurface = {
 
 type E2EHealthSnapshot = Awaited<ReturnType<typeof ensureE2EBaseline>>;
 
-const installOneMillionRuntimeAdapterSocket = async (page: import('@playwright/test').Page): Promise<void> => {
+const installOneMillionRuntimeAdapterSocket = async (
+  page: import('@playwright/test').Page,
+  options: {
+    authLevel?: 'inspect' | 'admin';
+    commandReady?: boolean;
+    commandReadyReason?: string | null;
+  } = {},
+): Promise<{ runtimeId: string; wsUrl: string }> => {
   const runtimeSeed = 'one-million-runtime-adapter-fixture';
+  const wsUrl = 'ws://one-million-runtime.invalid/rpc';
+  const authLevel = options.authLevel ?? 'inspect';
+  const commandReady = options.commandReady ?? true;
+  const commandReadyReason = commandReady ? null : options.commandReadyReason ?? 'phase=halted';
   const identityEnv = {
     runtimeSeed,
     runtimeId: deriveSignerAddressSync(runtimeSeed, '1').toLowerCase(),
@@ -108,10 +121,12 @@ const installOneMillionRuntimeAdapterSocket = async (page: import('@playwright/t
       ...(request.op === 'auth'
         ? {
             authPayload: {
-              authLevel: 'inspect' as const,
+              authLevel,
               commandLaneKind: 'capability' as const,
               currentHeight: 42,
               nextCommandSequence: 1,
+              commandReady,
+              commandReadyReason,
               ...signRuntimeAdapterServerIdentity(identityEnv, request.challenge),
             },
           }
@@ -299,6 +314,7 @@ const installOneMillionRuntimeAdapterSocket = async (page: import('@playwright/t
       value: OneMillionRuntimeAdapterSocket,
     });
   });
+  return { runtimeId: String(identityEnv.runtimeId), wsUrl };
 };
 
 const readAdminControlProbe = async (
@@ -1779,6 +1795,66 @@ test('health runtime adapter renders 1M aggregate snapshot without freezing', { 
   expect(stats?.sentCount).toBeGreaterThanOrEqual(3);
   expect(stats?.viewFrameBytes ?? Number.POSITIVE_INFINITY).toBeLessThan(100_000);
   expect(stats?.maxAccountItems).toBe(10);
+});
+
+test('halted remote runtime disables wallet commands and links the root incident', { tag: '@resilience' }, async ({ page }, testInfo) => {
+  const fixture = await installOneMillionRuntimeAdapterSocket(page, {
+    authLevel: 'admin',
+    commandReady: false,
+    commandReadyReason: 'phase=halted',
+  });
+  const token = deriveRuntimeAdapterCapabilityToken(
+    'halted-runtime-e2e-capability',
+    'admin',
+    Date.now() + 60_000,
+    { audience: fixture.runtimeId },
+  );
+  const fingerprint = 'runtime-halted-e2e12345';
+  await page.route('**/api/debug/incidents?**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        incidents: [{
+          fingerprint,
+          code: 'RUNTIME_HALTED',
+          runtimeId: fixture.runtimeId,
+        }],
+      }),
+    });
+  });
+
+  await page.goto(
+    `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(fixture.wsUrl)}&token=${encodeURIComponent(token)}#accounts`,
+    { waitUntil: 'domcontentloaded' },
+  );
+  await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  const gate = page.getByTestId('runtime-command-gate');
+  await expect(gate).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.getByTestId('runtime-command-gate-reason')).toHaveText('phase=halted');
+  await expect(page.getByTestId('runtime-command-gate-incident')).toHaveText(fingerprint);
+  await openAccountWorkspaceTab(page, 'open');
+  await expect(page.getByTestId('open-account-submit')).toBeDisabled();
+  const readiness = await page.evaluate(() => {
+    const status = (window as typeof window & {
+      __xln?: { adapter?: { status?: () => Record<string, unknown> } };
+    }).__xln?.adapter?.status?.();
+    return {
+      ready: status?.['commandReady'],
+      reason: status?.['commandReadyReason'],
+    };
+  });
+  expect(readiness).toEqual({ ready: false, reason: 'phase=halted' });
+  await captureLocatorScreenshot(gate, testInfo, 'runtime-command-gate-halted.png', {
+    ux: {
+      title: 'Runtime fail-stop command gate',
+      group: 'system-health',
+      description: 'Canonical halted state disables wallet money actions and links the durable root incident.',
+      platform: 'desktop',
+      tags: ['runtime', 'incident', 'fail-stop'],
+    },
+  });
 });
 
 test('admin remote runtime control advances live state and exposes past frames', { tag: '@functional' }, async ({ page }) => {

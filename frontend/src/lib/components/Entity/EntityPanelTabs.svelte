@@ -44,6 +44,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   import EntityFocusedAccountView from './EntityFocusedAccountView.svelte';
   import EntityPanelChrome from './EntityPanelChrome.svelte';
   import EntityPanelHeroTabs from './EntityPanelHeroTabs.svelte';
+  import RuntimeCommandGateBanner from './RuntimeCommandGateBanner.svelte';
   import EntitySelectionEmptyState from './EntitySelectionEmptyState.svelte';
   import EntitySettingsProjectionPanel from './EntitySettingsProjectionPanel.svelte';
   import { buildEntityConsensusSettingsView } from './entity-consensus-settings';
@@ -3586,6 +3587,15 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   />
 
   <main class="main-scroll">
+    {#if activeIsLive}
+      <RuntimeCommandGateBanner
+        ready={activeCommandsReady}
+        reason={$runtimeControllerHandle.commandReadyReason}
+        runtimeId={$runtimeControllerHandle.runtimeId}
+        apiBase={resolveApiBase()}
+      />
+    {/if}
+
     {#if !tab.entityId || !tab.signerId}
       <EntitySelectionEmptyState
         {tab}
@@ -3608,6 +3618,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
         {replica}
         entityNames={panelView.entityNames}
         {pendingOffchainFaucetKeys}
+        commandsReady={activeCommandsReady}
         {handleBackToAccounts}
         {handleAccountFaucet}
         {handleAccountPanelGoToOpenAccounts}

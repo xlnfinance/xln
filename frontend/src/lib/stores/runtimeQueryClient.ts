@@ -200,6 +200,8 @@ const exposeRuntimeAdapterDebugSurface = (): void => {
         mode: handle.mode,
         endpoint: handle.endpoint,
         permissions: handle.permissions,
+        commandReady: handle.commandReady,
+        commandReadyReason: handle.commandReadyReason,
       };
     },
   }));

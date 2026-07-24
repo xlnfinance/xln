@@ -66,6 +66,7 @@
         />
         <button
           class="btn-add"
+          data-testid="open-account-submit"
           on:click={() => openAccountWithFullId(openAccountEntityId)}
           disabled={!activeIsLive || !openAccountEntityId.trim()}
         >
