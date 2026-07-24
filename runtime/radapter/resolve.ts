@@ -234,6 +234,7 @@ export type RuntimeAdapterFrameSummary = {
   timestamp: number;
   prevFrameHash?: string;
   frameHash?: string;
+  postStateHash: string;
   stateHash: string;
   hashMode?: StorageFrameRecord['hashMode'];
   materializedState?: boolean;
@@ -1703,6 +1704,7 @@ const compactFrameRecordForRemote = (frame: StorageFrameRecord): RuntimeAdapterF
     timestamp: frame.timestamp,
     ...(frame.prevFrameHash ? { prevFrameHash: frame.prevFrameHash } : {}),
     ...(frame.frameHash ? { frameHash: frame.frameHash } : {}),
+    postStateHash: frame.postStateHash,
     stateHash: frame.stateHash,
     ...(frame.hashMode ? { hashMode: frame.hashMode } : {}),
     ...(frame.materializedState !== undefined ? { materializedState: frame.materializedState } : {}),

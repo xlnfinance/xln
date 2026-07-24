@@ -1410,6 +1410,7 @@ test('runtime adapter frame read returns compact summary without raw runtime inp
 
   expect(summary.runtimeInput).toBeUndefined();
   expect(summary.overlayRecords).toBeUndefined();
+  expect(summary.postStateHash).toBe('post-state');
   expect(summary.runtimeInputCounts).toEqual({
     runtimeTxs: 1,
     jInputs: 0,

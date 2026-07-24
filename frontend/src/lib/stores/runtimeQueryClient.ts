@@ -4,6 +4,7 @@ import type {
   RuntimeAdapter,
   RuntimeAdapterActivityPage,
   RuntimeAdapterEntitySummary,
+  RuntimeAdapterFrameSummary,
   RuntimeAdapterHistoryFrameBatch,
   RuntimeAdapterReadQuery,
   RuntimeAdapterSolvencySummary,
@@ -130,6 +131,14 @@ export class RuntimeQueryClient {
     return this.cachedRead<StorageHead>('head');
   }
 
+  async readFrameSummary(height: number): Promise<RuntimeAdapterFrameSummary> {
+    const normalized = Math.floor(Number(height));
+    if (!Number.isSafeInteger(normalized) || normalized < 1) {
+      throw new Error('RUNTIME_FRAME_HEIGHT_INVALID');
+    }
+    return this.read<RuntimeAdapterFrameSummary>(`frame/${normalized}`);
+  }
+
   readEntities(query?: RuntimeAdapterReadQuery): Promise<RuntimeAdapterEntitySummary[]> {
     return this.cachedRead<RuntimeAdapterEntitySummary[]>('entities', query);
   }
@@ -180,6 +189,7 @@ const exposeRuntimeAdapterDebugSurface = (): void => {
   registerDebugSurface('adapter', () => ({
     query: {
       head: async () => runtimeQueryClient.readHead(),
+      frame: async (height: number) => runtimeQueryClient.readFrameSummary(height),
       entities: async (query?: RuntimeAdapterReadQuery) => runtimeQueryClient.readEntities(query),
       viewFrame: async (query: RuntimeAdapterReadQuery = {}) => runtimeQueryClient.readViewFrame(query),
       historyFrameBatch: async (query: RuntimeAdapterReadQuery) => runtimeQueryClient.readHistoryFrameBatch(query),

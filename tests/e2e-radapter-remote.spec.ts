@@ -78,9 +78,11 @@ type AdminControlProbe = {
 type RuntimeAdapterDebugSurface = {
   query: {
     head: <T = unknown>() => Promise<T>;
+    frame: <T = unknown>(height: number) => Promise<T>;
     entities: <T = unknown>(query?: Record<string, unknown>) => Promise<T>;
     viewFrame: <T = unknown>(query?: Record<string, unknown>) => Promise<T>;
     historyFrameBatch: <T = unknown>(query: Record<string, unknown>) => Promise<T>;
+    timelineIndex: <T = unknown>(query?: Record<string, unknown>) => Promise<T>;
     activity: <T = unknown>(query: Record<string, unknown>) => Promise<T>;
     solvencySummary: <T = unknown>(query?: Record<string, unknown>) => Promise<T>;
     checkpoints: <T = unknown>() => Promise<T>;
@@ -1919,6 +1921,22 @@ test('real H2 replacement gates browser money commands until verified restore', 
       runtimeId: String((window as any).__xln?.view?.runtimeId || '').toLowerCase(),
     };
   });
+  const beforePersisted = await page.evaluate(async () => {
+    const adapter = (window as any).__xln?.adapter;
+    const head = await adapter.query.head();
+    const latestHeight = Number(head?.latestHeight || 0);
+    const frame = await adapter.query.frame(latestHeight);
+    return {
+      latestHeight,
+      frameHash: String(frame?.frameHash || ''),
+      postStateHash: String(frame?.postStateHash || ''),
+      stateHash: String(frame?.stateHash || ''),
+      canonicalStateHash: String(frame?.canonicalStateHash || ''),
+      commitment: String(frame?.postStateHash || ''),
+    };
+  });
+  expect(beforePersisted.latestHeight).toBeGreaterThan(0);
+  expect(beforePersisted.commitment).toMatch(/^0x[0-9a-f]{64}$/);
   const beforeHealth = await getHealth(page, API_BASE_URL);
   const h2Process = beforeHealth?.process?.children?.find(child => child.role === 'hub' && child.name === 'H2');
   expect(h2Process?.online, `H2 process missing before replacement: ${JSON.stringify(beforeHealth?.process ?? {})}`).toBe(true);
@@ -2038,6 +2056,31 @@ test('real H2 replacement gates browser money commands until verified restore', 
     Number((window as any).__xln?.adapter?.status?.().height || 0),
   );
   expect(restoredHeight).toBeGreaterThanOrEqual(beforeStatus.height);
+  const restoredPersisted = await page.evaluate(async (committedHeight) => {
+    const adapter = (window as any).__xln?.adapter;
+    const head = await adapter.query.head();
+    const frame = await adapter.query.frame(committedHeight);
+    return {
+      latestHeight: Number(head?.latestHeight || 0),
+      frameHash: String(frame?.frameHash || ''),
+      postStateHash: String(frame?.postStateHash || ''),
+      stateHash: String(frame?.stateHash || ''),
+      canonicalStateHash: String(frame?.canonicalStateHash || ''),
+      commitment: String(frame?.postStateHash || ''),
+    };
+  }, beforePersisted.latestHeight);
+  expect(restoredPersisted.latestHeight).toBeGreaterThanOrEqual(beforePersisted.latestHeight);
+  expect(restoredPersisted).toMatchObject({
+    frameHash: beforePersisted.frameHash,
+    postStateHash: beforePersisted.postStateHash,
+    stateHash: beforePersisted.stateHash,
+    canonicalStateHash: beforePersisted.canonicalStateHash,
+    commitment: beforePersisted.commitment,
+  });
+  await testInfo.attach('h2-committed-state-recovery.json', {
+    body: Buffer.from(JSON.stringify({ before: beforePersisted, restored: restoredPersisted }, null, 2)),
+    contentType: 'application/json',
+  });
 });
 
 test('admin remote runtime control advances live state and exposes past frames', { tag: '@functional' }, async ({ page }) => {

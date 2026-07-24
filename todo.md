@@ -6,15 +6,15 @@ fastest proof/fix to the hardest external gate. Completed work is deleted;
 long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 `docs/mainnet-engineering-principles.md`.
 
-## 0. Restore and prove production health — P0, open
+## 0. Complete production-health coverage — P0, open
 
-- [ ] Make the existing durable `/api/debug/incidents` registry the mandatory
-  first diagnostic query and release gate. Route every remaining frontend,
-  orchestrator and J-machine fatal into it. Prove a failed managed child is
-  replaced from the exact committed height/root without duplicate dispatch or
-  J-submit, and unresolved incidents block release. All money controls must
-  derive readiness from the same Runtime lifecycle gate and perform zero
-  enqueue while halted, quiescing or restoring.
+- [ ] Route every remaining frontend, orchestrator and J-machine fatal through
+  the durable incident registry. Add one explicit producer/sink coverage matrix
+  so a newly introduced fatal boundary cannot bypass the registry.
+- [ ] Prove a managed child replacement at an external-I/O boundary cannot
+  duplicate remote dispatch or J-submit. Parameterize the real halted Runtime
+  browser test across faucet, pay, swap, lending and account commands and assert
+  zero enqueue while halted, quiescing or restoring.
 ## 1. Commit-boundary correctness — P0, approval required
 
 - [ ] Reject Entity-frame timestamp regression before transaction application.
