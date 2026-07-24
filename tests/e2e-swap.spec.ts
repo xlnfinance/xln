@@ -1941,9 +1941,9 @@ async function expectAllCanonicalSwapPairsHaveLiquidity(page: Page): Promise<voi
         message: `orderbook for ${pairLabel} should have visible liquidity from 3 hubs`,
       })
       .toEqual(expect.objectContaining({
-        asks: expect.any(Number),
-        bids: expect.any(Number),
-        rows: expect.any(Number),
+        asks: 10,
+        bids: 10,
+        rows: 20,
         sources: 3,
       }));
     await expect(page.getByTestId('orderbook-source-status').first()).toHaveText(/^Sources:\s*3$/i, { timeout: 15_000 });
@@ -2053,11 +2053,16 @@ async function expectMarketMakerBooksHealthy(page: Page): Promise<void> {
   expect(hubs.length, 'market maker health must expose 3 hubs').toBeGreaterThanOrEqual(3);
   for (const hub of hubs) {
     expect(hub.ready, `market maker hub ${hub.hubEntityId} must be ready`).toBe(true);
-    expect(hub.offers, `market maker hub ${hub.hubEntityId} must expose resting offers`).toBeGreaterThan(0);
+    expect(hub.depthReady, `market maker hub ${hub.hubEntityId} must expose exact configured depth`).toBe(true);
+    let expectedHubOffers = 0;
     for (const pair of hub.pairs ?? []) {
       expect(pair.ready, `market maker pair ${pair.pairId} on hub ${hub.hubEntityId} must be ready`).toBe(true);
-      expect(pair.offers, `market maker pair ${pair.pairId} on hub ${hub.hubEntityId} must expose resting offers`).toBeGreaterThan(0);
+      expect(pair.depthReady, `market maker pair ${pair.pairId} on hub ${hub.hubEntityId} must expose exact configured depth`).toBe(true);
+      expect(pair.expectedOffers, `market maker pair ${pair.pairId} must declare expected depth`).toBeGreaterThan(0);
+      expect(pair.offers, `market maker pair ${pair.pairId} must contain only configured offers`).toBe(pair.expectedOffers);
+      expectedHubOffers += Number(pair.expectedOffers);
     }
+    expect(hub.offers, `market maker hub ${hub.hubEntityId} must contain only configured offers`).toBe(expectedHubOffers);
   }
 }
 
@@ -2085,8 +2090,8 @@ async function expectSelectedBooksHaveVisibleLiquidity(
         maxSources: 1,
       });
       const depth = await readOrderbookRowCounts(page);
-      expect(depth.asks, `${pairLabel} ${accountId} must expose 10 committed asks`).toBeGreaterThanOrEqual(10);
-      expect(depth.bids, `${pairLabel} ${accountId} must expose 10 committed bids`).toBeGreaterThanOrEqual(10);
+      expect(depth.asks, `${pairLabel} ${accountId} must expose exactly 10 committed asks`).toBe(10);
+      expect(depth.bids, `${pairLabel} ${accountId} must expose exactly 10 committed bids`).toBe(10);
     }
   }
   await ensureSwapScope(page, 'aggregated');
@@ -2103,7 +2108,7 @@ test.describe('E2E Swap Flow', () => {
     }));
   });
 
-  test('swap shows visible depth on all canonical pairs and selected books', { tag: '@functional' }, async ({ page }) => {
+  test('swap shows visible depth on all canonical pairs and selected books', { tag: '@functional' }, async ({ page }, testInfo) => {
     await timedStep('swap_pairs.goto_app', () => gotoApp(page));
     await timedStep('swap_pairs.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
     await timedStep('swap_pairs.create_runtime', () => createDemoRuntime(page, `swap-pairs-${Date.now()}`, randomMnemonic()));
@@ -2117,8 +2122,10 @@ test.describe('E2E Swap Flow', () => {
     expect(hubPrecedesLegs, 'Hub selector must be the first field before From/To').toBe(true);
     await timedStep('swap_pairs.check_mm_health', () => expectMarketMakerBooksHealthy(page));
     await timedStep('swap_pairs.check_aggregated_depth', () => expectAllCanonicalSwapPairsHaveLiquidity(page));
+    await capturePageScreenshot(page, testInfo, 'same-j-aggregated-exact-10x10.png');
     await timedStep('swap_pairs.check_selected_depth', () =>
       expectSelectedBooksHaveVisibleLiquidity(page, CANONICAL_SWAP_PAIR_LABELS, runtimeRef.hubIds.slice(0, 3)));
+    await capturePageScreenshot(page, testInfo, 'same-j-selected-exact-10x10.png');
   });
 
 	  test('swap orderbook shows terminal no-market state when relay stream never returns a snapshot', { tag: '@resilience' }, async ({ page }) => {
