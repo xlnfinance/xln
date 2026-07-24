@@ -6,7 +6,7 @@ fastest proof/fix to the hardest external gate. Completed work is deleted;
 long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 `docs/mainnet-engineering-principles.md`.
 
-## 0. Commit-boundary correctness — P0, approval required
+## 0. Commit-boundary correctness — P0, owner-approved
 
 - [ ] Reject Entity-frame timestamp regression before transaction application.
   Deadline admission uses the monotonic Entity/J clock. A late bilateral
@@ -19,14 +19,14 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   rejected validation, proposer/validator replay and restart must publish zero,
   one and still one canonical fingerprint respectively.
 
-## 1. Ingress and contract boundedness — P0/P1, partly approval required
+## 1. Ingress and contract boundedness — P0/P1, owner-approved
 
 - [ ] Integrate `main`'s canonical per-operation best-effort J-batch execution
   together with byte-for-byte binding of every submitted object to its sealed
   `encodedBatch`, chain/depository/nonce domain and hash before BrowserVM or RPC
   mutation. Preserve this candidate's contract P0 hardening, regenerate the
   single ABI/artifact/typechain set, and rerun the real adapter regressions.
-  This consensus/contract merge requires owner approval.
+  Owner approved the canonical semantics and removal of legacy paths.
 - [ ] Replace the unbounded `_forgiveDebtsBetweenEntities` queue scan with an
   indexed or bounded-continuation structure. Prove exact debt conservation and
   bounded gas with adversarial creditor ordering.
@@ -37,7 +37,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   currently live infrastructure, not dead code; do not delete it as an audit
   shortcut.
 
-## 2. Transport and secret persistence — P0/P1, approval required
+## 2. Transport and secret persistence — P0/P1, owner-approved
 
 - [ ] Derive AEAD keys from X25519 with domain-separated HKDF-SHA256 and bind
   protocol/from/to/type/source-frame/message-id as AAD. Replace Base64 with one

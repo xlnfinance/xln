@@ -1065,8 +1065,10 @@ export function cloneCrossJurisdictionCarrierRoute<T extends { crossJurisdiction
 export const cloneCrossJurisdictionSwapOfferRoute = (offer: SwapOffer): SwapOffer =>
   cloneCrossJurisdictionCarrierRoute({ ...offer });
 
-export const cloneCrossJurisdictionSwapHistoryRoute = (entry: SwapOrderHistoryEntry): SwapOrderHistoryEntry =>
-  cloneCrossJurisdictionCarrierRoute({ ...entry });
+export const cloneCrossJurisdictionSwapHistoryRoute = (entry: SwapOrderHistoryEntry): SwapOrderHistoryEntry => ({
+  ...cloneCrossJurisdictionCarrierRoute({ ...entry }),
+  resolves: entry.resolves.map(resolve => ({ ...resolve })),
+});
 
 export function cloneCrossJurisdictionAccountTxRoute(tx: AccountTx): AccountTx {
   if (tx.type === 'pull_lock' && tx.data.crossJurisdiction) {

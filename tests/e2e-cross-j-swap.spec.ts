@@ -82,6 +82,19 @@ type RuntimeIdentity = {
   runtimeId: string;
 };
 
+type CrossDeltaSnapshot = Readonly<{
+  tokenId: number;
+  collateral: string;
+  ondelta: string;
+  offdelta: string;
+  leftCreditLimit: string;
+  rightCreditLimit: string;
+  leftAllowance: string;
+  rightAllowance: string;
+  leftHold: string;
+  rightHold: string;
+}>;
+
 type JurisdictionIdentity = RuntimeIdentity & {
   jurisdictionName: string;
 };
@@ -2212,6 +2225,9 @@ async function readCrossState(
   runtimeMempoolInputs: Array<{ entityId: string; signerId: string; txTypes: string[]; frame: boolean; precommits: number }>;
   p2pState: { exists: boolean; connected: boolean; queue: unknown; directPeers: unknown };
   recoveryBarrier: boolean;
+  ownerIsLeft: boolean;
+  deltas: Record<string, CrossDeltaSnapshot>;
+  currentFrameFees: Record<string, string>;
 }> {
   return await page.evaluate(({ identity, hubId }) => {
     const env = (window as CrossRuntimeWindow).isolatedEnv;
@@ -2257,15 +2273,17 @@ async function readCrossState(
     const routeSummaries = [];
     for (const route of state?.crossJurisdictionSwaps?.values?.() || []) {
       const status = String(route?.status || '');
+      const orderId = String(route?.orderId || '');
+      const filledTargetAmount = BigInt(route?.filledTargetAmount ?? route?.targetClaimed ?? 0n);
       if (status === 'settled') settledRoutes += 1;
       if (status === 'source_claimed' || status === 'target_claimed' || status === 'settled') claimedRoutes += 1;
       routeSummaries.push({
-        orderId: String(route?.orderId || ''),
+        orderId,
         status,
         fillSeq: Number(route?.fillSeq || 0),
         cumulativeFillRatio: Number(route?.cumulativeFillRatio || route?.claimedRatio || 0),
         filledSourceAmount: String(route?.filledSourceAmount ?? route?.sourceClaimed ?? '0'),
-        filledTargetAmount: String(route?.filledTargetAmount ?? route?.targetClaimed ?? '0'),
+        filledTargetAmount: String(filledTargetAmount),
         sourcePull: Boolean(route?.sourcePull),
         targetPull: Boolean(route?.targetPull),
         sourcePullId: String(route?.sourcePull?.pullId || ''),
@@ -2332,8 +2350,103 @@ async function readCrossState(
         directPeers: env?.runtimeState?.p2p?.getDirectPeerState?.() || null,
       },
       recoveryBarrier: Boolean(env?.runtimeState?.recoveryBackupBarrier),
+      ownerIsLeft: entityNeedle === String(account?.leftEntity || '').toLowerCase(),
+      currentFrameFees: Array.from(account?.currentFrame?.accountTxs || []).reduce(
+        (fees: Record<string, string>, tx: any) => {
+          const tokenId = Number(tx?.data?.feeTokenId ?? -1);
+          const feeAmount = BigInt(tx?.data?.feeAmount ?? 0n);
+          if (tokenId < 0 || feeAmount <= 0n) return fees;
+          const key = String(tokenId);
+          fees[key] = String(BigInt(fees[key] ?? '0') + feeAmount);
+          return fees;
+        },
+        {},
+      ),
+      deltas: Object.fromEntries(
+        Array.from(account?.deltas?.entries?.() || []).map(([tokenId, delta]: [unknown, any]) => [
+          String(tokenId),
+          {
+            tokenId: Number(tokenId),
+            collateral: String(delta?.collateral ?? 0n),
+            ondelta: String(delta?.ondelta ?? 0n),
+            offdelta: String(delta?.offdelta ?? 0n),
+            leftCreditLimit: String(delta?.leftCreditLimit ?? 0n),
+            rightCreditLimit: String(delta?.rightCreditLimit ?? 0n),
+            leftAllowance: String(delta?.leftAllowance ?? 0n),
+            rightAllowance: String(delta?.rightAllowance ?? 0n),
+            leftHold: String(delta?.leftHold ?? 0n),
+            rightHold: String(delta?.rightHold ?? 0n),
+          },
+        ]),
+      ),
     };
   }, { identity, hubId });
+}
+
+async function readHubCrossDeltas(
+  page: Page,
+  hubEntityId: string,
+  counterpartyEntityId: string,
+  tokenIds: readonly number[],
+): Promise<Record<string, CrossDeltaSnapshot>> {
+  const response = await page.request.get(`${API_BASE_URL}/api/hub/account-status`, {
+    params: {
+      hubEntityId,
+      counterpartyEntityId,
+      tokenIds: tokenIds.join(','),
+    },
+  });
+  const body = await response.json().catch(() => null) as any;
+  expect(response.ok(), `hub Account financial status failed: ${JSON.stringify(body)}`).toBe(true);
+  expect(body?.success).toBe(true);
+  return Object.fromEntries(
+    (Array.isArray(body?.tokens) ? body.tokens : []).map((token: any) => [
+      String(token?.tokenId),
+      {
+        ...token?.delta,
+        tokenId: Number(token?.tokenId),
+        leftAllowance: String(token?.delta?.leftAllowance ?? 0),
+        rightAllowance: String(token?.delta?.rightAllowance ?? 0),
+      },
+    ]),
+  );
+}
+
+function expectCrossTransfer(
+  before: CrossDeltaSnapshot,
+  after: CrossDeltaSnapshot,
+  amount: bigint,
+  ownerIsLeft: boolean,
+  direction: 'spend' | 'receive',
+  label: string,
+  feeAmount = 0n,
+): void {
+  expect(amount, `${label} amount must be positive`).toBeGreaterThan(0n);
+  expect(feeAmount, `${label} fee must not be negative`).toBeGreaterThanOrEqual(0n);
+  expect(feeAmount, `${label} fee must not consume the transfer`).toBeLessThan(amount);
+  const canonicalSign = direction === 'spend'
+    ? (ownerIsLeft ? -1n : 1n)
+    : (ownerIsLeft ? 1n : -1n);
+  const deriveSnapshot = (snapshot: CrossDeltaSnapshot) => deriveDelta({
+    tokenId: snapshot.tokenId,
+    collateral: BigInt(snapshot.collateral),
+    ondelta: BigInt(snapshot.ondelta),
+    offdelta: BigInt(snapshot.offdelta),
+    leftCreditLimit: BigInt(snapshot.leftCreditLimit),
+    rightCreditLimit: BigInt(snapshot.rightCreditLimit),
+    leftAllowance: BigInt(snapshot.leftAllowance),
+    rightAllowance: BigInt(snapshot.rightAllowance),
+    leftHold: BigInt(snapshot.leftHold),
+    rightHold: BigInt(snapshot.rightHold),
+  }, ownerIsLeft);
+  expect(
+    deriveSnapshot(after).delta - deriveSnapshot(before).delta,
+    `${label} must apply the exact canonical delta net of its signed fee`,
+  ).toBe(canonicalSign * (amount - feeAmount));
+  expect(
+    { leftHold: after.leftHold, rightHold: after.rightHold },
+    `${label} must clear both bilateral holds`,
+  ).toEqual({ leftHold: '0', rightHold: '0' });
 }
 
 async function waitForCrossPullFlow(
@@ -3167,6 +3280,12 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
     await ensureDirectHubAccount(page, target, targetHub.entityId, SWAP_TOKENS, 150_000);
     await faucetOffchain(page, primaryHubApiBaseUrl, source.entityId, hubId, USDC, '300');
     await waitForOutCapAtLeast(page, source.entityId, hubId, USDC, tokenAmount(USDC, 300n));
+    const [fullSourceBefore, fullTargetBefore] = await Promise.all([
+      readCrossState(page, source, hubId),
+      readCrossState(page, target, targetHub.entityId),
+    ]);
+    expect(fullSourceBefore.deltas[String(USDC)], 'source USDC delta must exist before full fill').toBeDefined();
+    expect(fullTargetBefore.deltas[String(USDC)], 'target USDC delta must exist before full fill').toBeDefined();
 
     const orderId = await placeCrossOrder(page, {
       source,
@@ -3228,6 +3347,38 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       filledTargetState.routeSummaries.find((route) => route.orderId === orderId)?.status,
       'a fully matched target route must close automatically',
     ).toBe('settled');
+    const filledSourceRoute = filledSourceState.routeSummaries.find((route) => route.orderId === orderId);
+    const filledTargetRoute = filledTargetState.routeSummaries.find((route) => route.orderId === orderId);
+    expect(filledSourceRoute, 'full source route must remain inspectable in Account history').toBeDefined();
+    expect(filledTargetRoute, 'full target route must remain inspectable in Account history').toBeDefined();
+    expect(filledTargetRoute?.filledSourceAmount).toBe(filledSourceRoute?.filledSourceAmount);
+    expect(filledTargetRoute?.filledTargetAmount).toBe(filledSourceRoute?.filledTargetAmount);
+    expect(BigInt(filledSourceRoute!.filledSourceAmount), 'full fill must consume the selected 300 USDC').toBe(tokenAmount(USDC, 300n));
+    const fullHubDeltas = await Promise.all([
+      readHubCrossDeltas(page, hubId, source.entityId, [USDC]),
+      readHubCrossDeltas(page, targetHub.entityId, target.entityId, [USDC]),
+    ]);
+    const fullSourceAfter = filledSourceState.deltas[String(USDC)];
+    const fullTargetAfter = filledTargetState.deltas[String(USDC)];
+    expect(fullHubDeltas[0][String(USDC)], 'source-hub USDC delta must exist after full fill').toEqual(fullSourceAfter);
+    expect(fullHubDeltas[1][String(USDC)], 'target-hub USDC delta must exist after full fill').toEqual(fullTargetAfter);
+    expectCrossTransfer(
+      fullSourceBefore.deltas[String(USDC)],
+      fullSourceAfter,
+      BigInt(filledSourceRoute!.filledSourceAmount),
+      fullSourceBefore.ownerIsLeft,
+      'spend',
+      'full source Account',
+    );
+    expectCrossTransfer(
+      fullTargetBefore.deltas[String(USDC)],
+      fullTargetAfter,
+      BigInt(filledTargetRoute!.filledTargetAmount),
+      fullTargetBefore.ownerIsLeft,
+      'receive',
+      'full target Account',
+      BigInt(filledTargetState.currentFrameFees[String(USDC)] ?? '0'),
+    );
     await expect(page.getByTestId('swap-open-order-row')).toHaveCount(0, { timeout: 15_000 });
 
     await enqueueEntityTxs(page, target.entityId, target.signerId, [{
@@ -3241,6 +3392,12 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
     await flushRuntime(page, 8);
     await faucetOffchain(page, primaryHubApiBaseUrl, source.entityId, hubId, WETH, '15');
     await waitForOutCapAtLeast(page, source.entityId, hubId, WETH, tokenAmount(WETH, 15n));
+    const [partialSourceBefore, partialTargetBefore] = await Promise.all([
+      readCrossState(page, source, hubId),
+      readCrossState(page, target, targetHub.entityId),
+    ]);
+    expect(partialSourceBefore.deltas[String(WETH)], 'source WETH delta must exist before partial fill').toBeDefined();
+    expect(partialTargetBefore.deltas[String(USDC)], 'target USDC delta must exist before partial fill').toBeDefined();
     const partialOrderId = await placeCrossOrder(page, {
       source,
       hubId,
@@ -3256,6 +3413,27 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
     const partial = await waitForCrossPendingFill(page, source, hubId, 'real MM WETH partial', {
       routeId: partialOrderId,
     });
+    await waitForCrossRouteMaterialized(
+      page,
+      target,
+      targetHub.entityId,
+      partial.routeId,
+      'real MM target partial financial leg',
+    );
+    const [pendingSourceState, pendingTargetState] = await Promise.all([
+      readCrossState(page, source, hubId),
+      readCrossState(page, target, targetHub.entityId),
+    ]);
+    expect(
+      BigInt(pendingSourceState.deltas[String(WETH)].leftHold) +
+      BigInt(pendingSourceState.deltas[String(WETH)].rightHold),
+      'partial source remainder must remain held until explicit Clear',
+    ).toBeGreaterThan(0n);
+    expect(
+      BigInt(pendingTargetState.deltas[String(USDC)].leftHold) +
+      BigInt(pendingTargetState.deltas[String(USDC)].rightHold),
+      'partial target remainder must remain held until explicit Clear',
+    ).toBeGreaterThan(0n);
     const clearButton = page.getByTestId('cross-swap-clear').first();
     await expect(clearButton, 'real MM partial remainder must expose Clear + Close').toBeVisible({ timeout: 20_000 });
     await clearButton.click({ force: true });
@@ -3291,6 +3469,46 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       sourceMempool: [],
       targetMempool: [],
     });
+    const [partialSourceAfter, partialTargetAfter] = await Promise.all([
+      readCrossState(page, source, hubId),
+      readCrossState(page, target, targetHub.entityId),
+    ]);
+    const partialSourceRoute = partialSourceAfter.routeSummaries.find((route) => route.orderId === partial.routeId);
+    const partialTargetRoute = partialTargetAfter.routeSummaries.find((route) => route.orderId === partial.routeId);
+    expect(partialSourceRoute, 'cleared source route must remain inspectable in Account history').toBeDefined();
+    expect(partialTargetRoute, 'cleared target route must remain inspectable in Account history').toBeDefined();
+    expect(partialSourceRoute?.cumulativeFillRatio).toBe(partial.ratio);
+    expect(partialSourceRoute?.filledSourceAmount).toBe(partialTargetRoute?.filledSourceAmount);
+    expect(partialSourceRoute?.filledTargetAmount).toBe(partialTargetRoute?.filledTargetAmount);
+    expect(BigInt(partialSourceRoute!.filledSourceAmount)).toBeGreaterThan(0n);
+    expect(BigInt(partialSourceRoute!.filledSourceAmount)).toBeLessThan(tokenAmount(WETH, 15n));
+    const partialHubDeltas = await Promise.all([
+      readHubCrossDeltas(page, hubId, source.entityId, [WETH]),
+      readHubCrossDeltas(page, targetHub.entityId, target.entityId, [USDC]),
+    ]);
+    expect(partialHubDeltas[0][String(WETH)], 'source-hub WETH delta must match after Clear').toEqual(
+      partialSourceAfter.deltas[String(WETH)],
+    );
+    expect(partialHubDeltas[1][String(USDC)], 'target-hub USDC delta must match after Clear').toEqual(
+      partialTargetAfter.deltas[String(USDC)],
+    );
+    expectCrossTransfer(
+      partialSourceBefore.deltas[String(WETH)],
+      partialSourceAfter.deltas[String(WETH)],
+      BigInt(partialSourceRoute!.filledSourceAmount),
+      partialSourceBefore.ownerIsLeft,
+      'spend',
+      'partial source Account',
+    );
+    expectCrossTransfer(
+      partialTargetBefore.deltas[String(USDC)],
+      partialTargetAfter.deltas[String(USDC)],
+      BigInt(partialTargetRoute!.filledTargetAmount),
+      partialTargetBefore.ownerIsLeft,
+      'receive',
+      'partial target Account',
+      BigInt(partialTargetAfter.currentFrameFees[String(USDC)] ?? '0'),
+    );
   });
 
   test('cross USDT/USDT orderbook resolves terminal no-market when the selected route relay has no snapshots', { tag: '@resilience' }, async ({ page }) => {

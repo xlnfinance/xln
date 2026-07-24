@@ -12,6 +12,7 @@
   import { panelBridge } from '../utils/panelBridge';
   import { setFrontendVerboseLogging } from '../utils/frontendLogger';
   import ConsolePanel from './ConsolePanel.svelte';
+  import IndexedDbInspector from '$lib/components/Settings/IndexedDbInspector.svelte';
   import TabStylePicker from '$lib/components/Settings/TabStylePicker.svelte';
   import { TAB_STYLE_OPTIONS } from '$lib/utils/ui-style-options';
   import { settings as appSettings, settingsOperations } from '$lib/stores/settingsStore';
@@ -108,7 +109,7 @@
   };
 
   let settings: ViewSettings = { ...DEFAULT_SETTINGS };
-  let activeCategory: 'scene' | 'camera' | 'entities' | 'effects' | 'performance' | 'console' | 'advanced' | 'layout' = 'scene';
+  let activeCategory: 'storage' | 'scene' | 'camera' | 'entities' | 'effects' | 'performance' | 'console' | 'advanced' | 'layout' = 'storage';
 
   // Layout config state
   let layoutJson = '';
@@ -360,6 +361,12 @@
 
   <div class="category-tabs">
     <button
+      class:active={activeCategory === 'storage'}
+      on:click={() => activeCategory = 'storage'}
+    >
+      🗄️ Storage
+    </button>
+    <button
       class:active={activeCategory === 'scene'}
       on:click={() => activeCategory = 'scene'}
     >
@@ -410,7 +417,10 @@
   </div>
 
   <div class="settings-content">
-    {#if activeCategory === 'scene'}
+    {#if activeCategory === 'storage'}
+      <IndexedDbInspector />
+
+    {:else if activeCategory === 'scene'}
       <h4>Scene Configuration</h4>
 
       <div class="setting-group">
@@ -813,7 +823,6 @@
       <p class="section-copy">These tools are available because Dock is the developer workspace. They are never hidden behind a second dev flag.</p>
 
       <div class="tool-grid">
-        <button on:click={() => focusDockPanel('leveldb-inspector')}>🗄️ LevelDB Inspector</button>
         <button on:click={() => focusDockPanel('runtime-diagnostics')}>🩺 Verify / Checkpoints</button>
         <button on:click={() => focusDockPanel('runtime-manager')}>🌐 Runtime Manager</button>
         <button on:click={() => focusDockPanel('entity-audit')}>🔎 Entity Audit</button>

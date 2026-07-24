@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { createEmptyEnv } from '../runtime';
 import { resolveStorageRuntimeConfig } from '../storage';
+import { DEFAULT_EPOCH_MAX_BYTES } from '../storage/keys';
 
 describe('storage config', () => {
   test('uses sparse full-state checkpoints without weakening per-frame WAL chaining', () => {
@@ -10,6 +11,8 @@ describe('storage config', () => {
     expect(resolveStorageRuntimeConfig(env).canonicalHashPeriodFrames).toBe(0);
     expect(resolveStorageRuntimeConfig(env).materializePeriodFrames).toBe(100);
     expect(resolveStorageRuntimeConfig(env).snapshotPeriodFrames).toBe(10_000);
+    expect(resolveStorageRuntimeConfig(env).epochMaxBytes).toBe(16 * 1024 ** 3);
+    expect(DEFAULT_EPOCH_MAX_BYTES).toBe(16 * 1024 ** 3);
     env.runtimeConfig = { storage: { canonicalHashPeriodFrames: 37 } };
     expect(resolveStorageRuntimeConfig(env).canonicalHashPeriodFrames).toBe(37);
   });

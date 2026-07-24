@@ -2243,7 +2243,13 @@ describe('cross-jurisdiction hashledger swap', () => {
         crossJurisdiction: { ...route, __debugOnly: secret('b9') },
         cancelRequested: false,
         lastUpdatedHeight: 0,
-        resolves: [],
+        resolves: [{
+          fillRatio: 1,
+          fillNumerator: 1n,
+          fillDenominator: 1n,
+          cancelRemainder: false,
+          height: 1,
+        }],
       } as any,
     ]]);
 
@@ -2261,6 +2267,14 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(clonedAccount.swapOffers.get(route.orderId).crossJurisdiction.__debugOnly).toBeUndefined();
     expect(clonedAccount.mempool[0].data.crossJurisdiction.__debugOnly).toBeUndefined();
     expect(clonedAccount.swapOrderHistory.get(route.orderId).crossJurisdiction.__debugOnly).toBeUndefined();
+    clonedAccount.swapOrderHistory.get(route.orderId).resolves.push({
+      fillRatio: 2,
+      fillNumerator: 2n,
+      fillDenominator: 1n,
+      cancelRemainder: false,
+      height: 2,
+    });
+    expect(account.swapOrderHistory.get(route.orderId)?.resolves).toHaveLength(1);
     expect(projectedAccount.swapOffers.get(route.orderId).crossJurisdiction.__debugOnly).toBeUndefined();
     expect(projectedAccount.mempool[0].data.crossJurisdiction.__debugOnly).toBeUndefined();
     expect(projectedAccount.swapOrderHistory.get(route.orderId).crossJurisdiction.__debugOnly).toBeUndefined();
