@@ -30,6 +30,7 @@ import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import { decodeBuffer } from '../storage/codec';
 import {
   applyCertifiedEntityLineagePlan,
+  beginRuntimeCheckpointLineageRefresh,
   buildCertifiedEntityLineagePlan,
   buildRuntimeCheckpointLineagePlan,
   refreshRuntimeCheckpointLineageForEntity,
@@ -341,6 +342,25 @@ describe('certified Entity storage lineage', () => {
     expect(env.eReplicas.get(`${genesis.entityId}:${signerId}`)?.certifiedFrameAnchor
       ?.runtimeCheckpoint?.runtimeHeight).toBe(7);
     expect(idleReplica.certifiedFrameAnchor).toEqual(idleAnchorBefore);
+  });
+
+  test('rolls back checkpoint preparation when an Entity input commits no frame', async () => {
+    const { env, signerId, genesis } = makeRuntime('storage-lineage-noop-refresh');
+    const replica = installReplica(env, signerId, genesis, { anchor: genesisAnchor(genesis) });
+    const anchorBefore = structuredClone(replica.certifiedFrameAnchor);
+    env.height = 7;
+
+    const noOpGuard = beginRuntimeCheckpointLineageRefresh(env, genesis.entityId);
+    expect(replica.certifiedFrameAnchor?.runtimeCheckpoint?.runtimeHeight).toBe(7);
+    expect(noOpGuard.finalize()).toBe(false);
+    expect(replica.certifiedFrameAnchor).toEqual(anchorBefore);
+
+    const committed = await certifyNextFrame(env, signerId, genesis, []);
+    const commitGuard = beginRuntimeCheckpointLineageRefresh(env, genesis.entityId);
+    replica.state = committed.state;
+    replica.certifiedFrameLineage = [committed.link];
+    expect(commitGuard.finalize()).toBe(true);
+    expect(replica.certifiedFrameAnchor?.runtimeCheckpoint?.runtimeHeight).toBe(7);
   });
 
   test('rebases certified lineage into the atomic runtime WAL checkpoint', async () => {

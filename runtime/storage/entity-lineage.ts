@@ -1173,6 +1173,67 @@ export const refreshRuntimeCheckpointLineageForEntity = (
   }
 };
 
+export type RuntimeCheckpointLineageRefreshGuard = Readonly<{
+  finalize: () => boolean;
+}>;
+
+/**
+ * Refreshing a checkpoint anchor is preparation for an Entity-frame commit,
+ * not an independent Runtime transition. If the attempted input is a
+ * duplicate/no-op and no local replica head advances, restore the exact prior
+ * metadata so the WAL remains a pure function of its persisted Runtime input.
+ */
+export const beginRuntimeCheckpointLineageRefresh = (
+  env: Env,
+  rawEntityId: string,
+): RuntimeCheckpointLineageRefreshGuard => {
+  const entityId = normalizeEntityId(rawEntityId);
+  const snapshots = [...env.eReplicas.entries()]
+    .filter(([, replica]) =>
+      normalizeEntityId(replica.entityId || replica.state.entityId || '') === entityId)
+    .map(([replicaKey, replica]) => ({
+      replicaKey,
+      height: replica.state.height,
+      frameHash: replicaHead(replica),
+      certifiedFrameLineage: replica.certifiedFrameLineage
+        ? structuredClone(replica.certifiedFrameLineage)
+        : undefined,
+      certifiedFrameAnchor: replica.certifiedFrameAnchor
+        ? structuredClone(replica.certifiedFrameAnchor)
+        : undefined,
+    }));
+  if (snapshots.length === 0) {
+    throw new Error(`STORAGE_RUNTIME_CHECKPOINT_ENTITY_MISSING:${entityId}`);
+  }
+  refreshRuntimeCheckpointLineageForEntity(env, entityId);
+  return {
+    finalize: (): boolean => {
+      const advanced = snapshots.some(snapshot => {
+        const replica = env.eReplicas.get(snapshot.replicaKey);
+        if (!replica) {
+          throw new Error(`STORAGE_RUNTIME_CHECKPOINT_REPLICA_DISAPPEARED:${snapshot.replicaKey}`);
+        }
+        return replica.state.height !== snapshot.height || replicaHead(replica) !== snapshot.frameHash;
+      });
+      if (advanced) return true;
+      for (const snapshot of snapshots) {
+        const replica = env.eReplicas.get(snapshot.replicaKey)!;
+        if (snapshot.certifiedFrameLineage) {
+          replica.certifiedFrameLineage = structuredClone(snapshot.certifiedFrameLineage);
+        } else {
+          delete replica.certifiedFrameLineage;
+        }
+        if (snapshot.certifiedFrameAnchor) {
+          replica.certifiedFrameAnchor = structuredClone(snapshot.certifiedFrameAnchor);
+        } else {
+          delete replica.certifiedFrameAnchor;
+        }
+      }
+      return false;
+    },
+  };
+};
+
 export const applyCertifiedEntityLineagePlan = (
   env: Env,
   plan: CertifiedEntityLineagePlan,

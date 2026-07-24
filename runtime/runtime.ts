@@ -401,6 +401,7 @@ import {
 } from './storage/canonical-hash';
 import {
   applyCertifiedEntityLineagePlan,
+  beginRuntimeCheckpointLineageRefresh,
   buildCertifiedEntityLineagePlan,
   buildRuntimeCheckpointLineagePlan,
   refreshRuntimeCheckpointLineageForEntity,
@@ -2741,12 +2742,20 @@ const applyRuntimeInput = async (
       applyReliableDeliveryReceipts(env, runtimeInput.reliableReceipts);
     }
     const runtimeTxJOutbox: JInput[] = [];
-    const refreshedLineageEntityIds = new Set<string>();
+    const lineageRefreshGuards = new Map<
+      string,
+      ReturnType<typeof beginRuntimeCheckpointLineageRefresh>
+    >();
     const refreshLineageBeforeEntityApply = (rawEntityId: string, force = false): void => {
       const entityId = rawEntityId.trim().toLowerCase();
-      if (!force && refreshedLineageEntityIds.has(entityId)) return;
-      refreshRuntimeCheckpointLineageForEntity(env, entityId);
-      refreshedLineageEntityIds.add(entityId);
+      if (force) {
+        lineageRefreshGuards.get(entityId)?.finalize();
+        lineageRefreshGuards.delete(entityId);
+        refreshRuntimeCheckpointLineageForEntity(env, entityId);
+        return;
+      }
+      if (lineageRefreshGuards.has(entityId)) return;
+      lineageRefreshGuards.set(entityId, beginRuntimeCheckpointLineageRefresh(env, entityId));
     };
     // RuntimeTxs are replayable R-machine commands. Most are local metadata
     // transitions; retryJSubmit additionally materializes a sealed post-commit
@@ -2786,6 +2795,7 @@ const applyRuntimeInput = async (
       initialJOutbox,
       { isReplay, routingDeps, beforeEntityApply: refreshLineageBeforeEntityApply },
     );
+    for (const guard of lineageRefreshGuards.values()) guard.finalize();
     if (preparedEntityInputs.pairs.length > 0) {
       runtimeLog.info('crossj.atomic_pair_commit', {
         pairCount: preparedEntityInputs.pairs.length,
