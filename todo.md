@@ -18,7 +18,9 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 - [ ] Reproduce the production bootstrap locally with the production storage
   byte threshold, then run beyond the first epoch rotation with H1/H2/H3/MM
   healthy, no stale frames, no orphan processes and no growing empty-chain
-  disk workload.
+  disk workload. Prove the working-frame replacement becomes the one open live
+  current handle, current/previous never alias, concurrent replacement fails
+  closed, and the next frame commits after rotation and restore.
 ## 1. Commit-boundary correctness
 
 - [ ] Reject Entity-frame timestamp regression before transaction application.
@@ -82,9 +84,12 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 - [ ] Profile the production bootstrap and growing-hub frame path locally.
   Remove only measured full scans/clones/duplicate crypto; publish deterministic
   1/1,000-tx and growing-hub median/p95/MAD budgets from a clean Bun cache.
+  Measure the duplicate Account wake scan and per-frame verified-profile clone;
+  replace them only with dirty/versioned indexes proven equivalent.
 - [ ] Replace case-insensitive Account scans and repeated signer/pair lookups
-  with canonical direct indexes; then introduce Runtime→Entity→Account COW only
-  behind byte-identical differential roots and measured clone counters.
+  with canonical direct indexes, including exact cross-J replica/account
+  descriptors; then introduce Runtime→Entity→Account COW only behind
+  byte-identical differential roots and measured clone counters.
 
 ## 6. Public Ethereum and TRON proof
 

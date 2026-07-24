@@ -2417,9 +2417,18 @@ const buildAggregatedHealthResponse = async (
     return health;
   }
 
+  const custodyBootstrapPending = custodySupport === null;
   const liveCustody =
-    await fetchJson<CustodyMePayload>(`https://127.0.0.1:${health.custody.servicePort}/api/me`, 1_500)
-    ?? await fetchJson<CustodyMePayload>(`http://127.0.0.1:${health.custody.servicePort}/api/me`, 1_500);
+    await fetchJson<CustodyMePayload>(
+      `https://127.0.0.1:${health.custody.servicePort}/api/me`,
+      1_500,
+      custodyBootstrapPending,
+    )
+    ?? await fetchJson<CustodyMePayload>(
+      `http://127.0.0.1:${health.custody.servicePort}/api/me`,
+      1_500,
+      custodyBootstrapPending,
+    );
   const liveEntityId = String(liveCustody?.custody?.entityId || '').trim();
   if (!liveEntityId) {
     return health;

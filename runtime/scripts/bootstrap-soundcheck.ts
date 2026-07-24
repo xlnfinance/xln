@@ -18,6 +18,13 @@ type BootstrapMetrics = {
   workDir: string;
   eventsJsonl?: string;
   marketMakerEventsJsonl?: string;
+  epochRotations?: Array<{
+    runtime: 'H1' | 'H2' | 'H3' | 'MM';
+    currentHeight: number;
+    previousHeight: number;
+    latestSnapshotHeight: number;
+    epochMaxBytes: number;
+  }>;
   templateDir?: string;
 };
 
@@ -32,6 +39,7 @@ type SoundcheckResult = {
   metricsPath: string;
   eventsJsonl?: string;
   marketMakerEventsJsonl?: string;
+  epochRotations?: BootstrapMetrics['epochRotations'];
 };
 
 const repoRoot = process.cwd();
@@ -174,6 +182,7 @@ const runSmoke = async (
     metricsPath,
     eventsJsonl: metrics.eventsJsonl || eventsJsonl,
     ...(metrics.marketMakerEventsJsonl ? { marketMakerEventsJsonl: metrics.marketMakerEventsJsonl } : {}),
+    ...(metrics.epochRotations ? { epochRotations: metrics.epochRotations } : {}),
   };
 };
 

@@ -91,6 +91,7 @@ const ciSteps: GateStep[] = [
 
 const releaseSteps: GateStep[] = [
   ...ciSteps,
+  { name: 'bootstrap epoch rotation', command: 'bun run prod:bootstrap:rotation', timeoutMs: 1_200_000 },
   { name: 'deterministic replay oracle', command: 'bun run check:determinism', timeoutMs: 600_000 },
   { name: 'real WebSocket P2P relay', command: 'bun run test:p2p:relay', timeoutMs: 240_000 },
   { name: 'core E2E gate', command: 'bun run test:e2e:core', timeoutMs: 1_200_000 },

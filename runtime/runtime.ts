@@ -7,6 +7,7 @@ import {
   dbRootPath,
   isProductionRuntime,
   nodeProcess,
+  readRuntimeEnv,
   runtimeIsBrowser,
   yieldRuntimeIoTurn,
 } from './machine/platform';
@@ -603,6 +604,20 @@ const ensureRuntimeConfig = (env: Env): NonNullable<Env['runtimeConfig']> => {
       minFrameDelayMs: 0,
       loopIntervalMs: isProductionRuntime ? 25 : 0,
       snapshotIntervalFrames: DEFAULT_SNAPSHOT_INTERVAL_FRAMES,
+    };
+  }
+  const storageEpochMaxBytesEnv = readRuntimeEnv('XLN_STORAGE_EPOCH_MAX_BYTES');
+  if (
+    storageEpochMaxBytesEnv !== undefined &&
+    env.runtimeConfig.storage?.epochMaxBytes === undefined
+  ) {
+    const epochMaxBytes = Number(storageEpochMaxBytesEnv);
+    if (!Number.isSafeInteger(epochMaxBytes) || epochMaxBytes < 1) {
+      throw new Error(`RUNTIME_CONFIG_STORAGE_EPOCH_MAX_BYTES_INVALID:${storageEpochMaxBytesEnv}`);
+    }
+    env.runtimeConfig.storage = {
+      ...(env.runtimeConfig.storage || {}),
+      epochMaxBytes,
     };
   }
   const configuredSnapshotInterval = env.runtimeConfig.snapshotIntervalFrames;

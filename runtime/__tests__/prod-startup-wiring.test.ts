@@ -1181,6 +1181,8 @@ describe('production startup wiring', () => {
     expect(radapterRemote).toContain('allowAutoReset: false');
     expect(orchestrator).toContain('const publishRuntimeImportManifest = async (): Promise<boolean> => {');
     expect(orchestrator).toContain('const health = await buildAggregatedHealthResponse();');
+    expect(orchestrator).toContain('const custodyBootstrapPending = custodySupport === null;');
+    expect(orchestrator).toContain('custodyBootstrapPending,');
     expect(orchestrator).toContain('const readiness = resolveRuntimeImportReadiness(health);');
     expect(orchestrator).toContain('if (!readiness.ok) {');
     expect(orchestrator).toContain("const allowPartial = url.searchParams.get('allowPartial') === '1' && operatorAuthorized;");
@@ -1357,6 +1359,9 @@ describe('production startup wiring', () => {
     expect(packageJson).toContain('"prod:bootstrap:template": "bun runtime/scripts/run-with-test-cleanup.ts --reason=bootstrap-template -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=template"');
     expect(packageJson).toContain('"prod:bootstrap:clone": "bun runtime/scripts/run-with-test-cleanup.ts --reason=bootstrap-clone --keep-test-artifacts -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=clone"');
     expect(packageJson).toContain('"prod:bootstrap:hydrate": "bun runtime/scripts/run-with-test-cleanup.ts --reason=bootstrap-hydrate --keep-test-artifacts -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=hydrate"');
+    expect(packageJson).toContain('"prod:bootstrap:rotation": "XLN_STORAGE_EPOCH_MAX_BYTES=33554432 XLN_LOCAL_PROD_SMOKE_REQUIRE_EPOCH_ROTATION=1');
+    expect(smoke).toContain("recordStage('storage-epoch:verified', epochRotations);");
+    expect(smoke).toContain('LOCAL_PROD_SMOKE_STORAGE_POST_ROTATION_FRAME_MISSING');
     expect(soundcheck).toContain("import { createConnection } from 'node:net';");
     expect(soundcheck).toContain('const localProdSmokePortOffsets = [0, 1, 4, 7, 8, 10, 11, 12, 13];');
     expect(soundcheck).toContain("const defaultPortBase = mode === 'clone' ? 19800 : mode === 'hydrate' ? 19900 : 19700;");
@@ -1641,6 +1646,7 @@ describe('production startup wiring', () => {
     expect(runner).not.toContain("XLN_MIN_DISK_FREE_BYTES: process.env['XLN_MIN_DISK_FREE_BYTES'] || '1'");
     expect(runner).toContain("...(process.env['XLN_MIN_DISK_FREE_BYTES']");
     expect(releaseGate).toContain("{ name: 'bootstrap soundcheck', command: 'bun run prod:bootstrap:soundcheck', timeoutMs: 1_200_000 }");
+    expect(releaseGate).toContain("{ name: 'bootstrap epoch rotation', command: 'bun run prod:bootstrap:rotation', timeoutMs: 1_200_000 }");
     expect(releaseGate).toContain("{ name: 'real WebSocket P2P relay', command: 'bun run test:p2p:relay', timeoutMs: 240_000 }");
     expect(releaseGate).toContain("{ name: 'frontend generated aliases', command: 'cd frontend && bunx svelte-kit sync', timeoutMs: 60_000 }");
     expect(releaseGate.indexOf("'frontend generated aliases'")).toBeLessThan(releaseGate.indexOf("'runtime core unit tests'"));

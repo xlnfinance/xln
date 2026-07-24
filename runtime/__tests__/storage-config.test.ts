@@ -36,6 +36,23 @@ describe('storage config', () => {
     expect(resolveStorageRuntimeConfig(env).frameDbMaxBytes).toBe(tenTiB);
   });
 
+  test('persists a fail-fast epoch byte override into each fresh Runtime config', () => {
+    const previous = process.env['XLN_STORAGE_EPOCH_MAX_BYTES'];
+    try {
+      process.env['XLN_STORAGE_EPOCH_MAX_BYTES'] = '33554432';
+      const env = createEmptyEnv('forced-production-epoch');
+      expect(env.runtimeConfig?.storage?.epochMaxBytes).toBe(33_554_432);
+      expect(resolveStorageRuntimeConfig(env).epochMaxBytes).toBe(33_554_432);
+
+      process.env['XLN_STORAGE_EPOCH_MAX_BYTES'] = '0';
+      expect(() => createEmptyEnv('invalid-forced-production-epoch'))
+        .toThrow('RUNTIME_CONFIG_STORAGE_EPOCH_MAX_BYTES_INVALID:0');
+    } finally {
+      if (previous === undefined) delete process.env['XLN_STORAGE_EPOCH_MAX_BYTES'];
+      else process.env['XLN_STORAGE_EPOCH_MAX_BYTES'] = previous;
+    }
+  });
+
   test('rejects invalid booleans, canonical periods, and merkle radix', () => {
     const env = createEmptyEnv('invalid-storage-shapes');
     env.runtimeConfig = { storage: { enabled: 'maybe' as never } };
