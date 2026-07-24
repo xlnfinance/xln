@@ -82,9 +82,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 5. Crash, corruption and load evidence — P1, open
 
-- [ ] Pass the remaining snapshot/epoch/rotation/prune/corruption matrices for
-  oversized typed Account/Entity/Book values and exact 9,999/10,000-byte
-  boundaries.
 - [ ] Add deterministic SimNetwork/SimStorage delay/reorder/drop/partial-write/
   kill tests and retain every failing seed.
 - [ ] Profile the production bootstrap and growing-hub frame path locally.
