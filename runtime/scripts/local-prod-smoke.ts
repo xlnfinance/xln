@@ -9,6 +9,7 @@ import { Level } from 'level';
 import { readStorageHead } from '../storage';
 import { withRebranchedValues } from '../storage/rebranched-db';
 import type { StorageHead } from '../storage/types';
+import { RemoteRuntimeAdapter } from '../radapter/remote';
 import {
   E2E_FATAL_LOG_TAIL_LINES,
   findFirstRuntimeFatalLogHit,
@@ -380,6 +381,61 @@ const inspectEpochRotations = async (): Promise<EpochRotationEvidence[]> => {
     });
   }
   return evidence;
+};
+
+const commitPostRotationProofFrames = async (): Promise<void> => {
+  const manifestPath = join(workDir, 'prod-mesh', 'runtime-import-manifest.json');
+  const parsed = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+    manifest?: {
+      entries?: Array<{ access?: string; label?: string; token?: string; wsUrl?: string }>;
+    };
+  };
+  const entries = parsed.manifest?.entries ?? [];
+  await Promise.all((['H1', 'H2', 'H3', 'MM'] as const).map(async (label) => {
+    const entry = entries.find(candidate =>
+      candidate.label === label &&
+      candidate.access === 'admin' &&
+      typeof candidate.token === 'string' &&
+      typeof candidate.wsUrl === 'string'
+    );
+    if (!entry?.token || !entry.wsUrl) {
+      throw new Error(`LOCAL_PROD_SMOKE_EPOCH_ADMIN_RUNTIME_MISSING:${label}`);
+    }
+    const adapter = new RemoteRuntimeAdapter();
+    try {
+      await adapter.connect({
+        mode: 'remote',
+        wsUrl: entry.wsUrl,
+        authKey: entry.token,
+        requestTimeoutMs: 5_000,
+      });
+      const commandSequence = adapter.nextCommandSequence;
+      if (!commandSequence) {
+        throw new Error(`LOCAL_PROD_SMOKE_EPOCH_COMMAND_FRONTIER_MISSING:${label}`);
+      }
+      const commandId = `epoch-rotation-proof-${label.toLowerCase()}`;
+      const deadline = Date.now() + 20_000;
+      let result = await adapter.send(
+        { runtimeTxs: [], entityInputs: [] },
+        { commandId, commandSequence },
+      );
+      while (result.status !== 'observed' && Date.now() < deadline) {
+        await sleep(50);
+        result = await adapter.send(
+          { runtimeTxs: [], entityInputs: [] },
+          { commandId, commandSequence },
+        );
+      }
+      if (result.status !== 'observed') {
+        throw new Error(
+          `LOCAL_PROD_SMOKE_EPOCH_PROOF_FRAME_NOT_OBSERVED:${label}:height=${result.height}`,
+        );
+      }
+    } finally {
+      adapter.disconnect();
+    }
+  }));
+  recordStage('storage-epoch:post-rotation-frames-committed');
 };
 
 const copySnapshotTemplate = (sourceDir: string, targetDir: string): void => {
@@ -1014,6 +1070,7 @@ const main = async (): Promise<void> => {
   let epochRotations: EpochRotationEvidence[] | undefined;
   if (requireEpochRotation) {
     assertNoFatalChildLogs('pre-epoch-inspection');
+    await commitPostRotationProofFrames();
     await stopManaged();
     epochRotations = await inspectEpochRotations();
     recordStage('storage-epoch:verified', epochRotations);

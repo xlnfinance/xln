@@ -1360,6 +1360,8 @@ describe('production startup wiring', () => {
     expect(packageJson).toContain('"prod:bootstrap:clone": "bun runtime/scripts/run-with-test-cleanup.ts --reason=bootstrap-clone --keep-test-artifacts -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=clone"');
     expect(packageJson).toContain('"prod:bootstrap:hydrate": "bun runtime/scripts/run-with-test-cleanup.ts --reason=bootstrap-hydrate --keep-test-artifacts -- bun runtime/scripts/bootstrap-soundcheck.ts --mode=hydrate"');
     expect(packageJson).toContain('"prod:bootstrap:rotation": "XLN_STORAGE_EPOCH_MAX_BYTES=33554432 XLN_LOCAL_PROD_SMOKE_REQUIRE_EPOCH_ROTATION=1');
+    expect(smoke).toContain('await commitPostRotationProofFrames();');
+    expect(smoke).toContain("recordStage('storage-epoch:post-rotation-frames-committed');");
     expect(smoke).toContain("recordStage('storage-epoch:verified', epochRotations);");
     expect(smoke).toContain('LOCAL_PROD_SMOKE_STORAGE_POST_ROTATION_FRAME_MISSING');
     expect(soundcheck).toContain("import { createConnection } from 'node:net';");
