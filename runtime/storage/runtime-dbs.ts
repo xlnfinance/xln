@@ -19,23 +19,25 @@ type RuntimeState = NonNullable<Env['runtimeState']>;
 type RuntimeDbHandleRole = 'storage-current' | 'storage-previous' | 'frames' | 'infra';
 
 const storageLog = createStructuredLogger('runtime.storage');
-const closingRuntimeDbHandles = new WeakMap<Env, Set<RuntimeDbHandleRole>>();
+const closingRuntimeDbHandles = new Set<string>();
+
+const runtimeDbHandleKey = (env: Env, role: RuntimeDbHandleRole): string => {
+  if (role === 'storage-current') return resolveStorageDbPath(env, 'current');
+  if (role === 'storage-previous') return resolveStorageDbPath(env, 'previous');
+  if (role === 'frames') return resolveFrameDbPath(env);
+  return resolveDbPath(env, 'infra');
+};
 
 const beginRuntimeDbClose = (env: Env, role: RuntimeDbHandleRole): void => {
-  const closing = closingRuntimeDbHandles.get(env) ?? new Set<RuntimeDbHandleRole>();
-  closing.add(role);
-  closingRuntimeDbHandles.set(env, closing);
+  closingRuntimeDbHandles.add(runtimeDbHandleKey(env, role));
 };
 
 const endRuntimeDbClose = (env: Env, role: RuntimeDbHandleRole): void => {
-  const closing = closingRuntimeDbHandles.get(env);
-  if (!closing) return;
-  closing.delete(role);
-  if (closing.size === 0) closingRuntimeDbHandles.delete(env);
+  closingRuntimeDbHandles.delete(runtimeDbHandleKey(env, role));
 };
 
 const assertRuntimeDbNotClosing = (env: Env, role: RuntimeDbHandleRole): void => {
-  if (closingRuntimeDbHandles.get(env)?.has(role)) {
+  if (closingRuntimeDbHandles.has(runtimeDbHandleKey(env, role))) {
     throw new Error(`STORAGE_HANDLE_STATUS_CONFLICT:role=${role}:status=closing`);
   }
 };
