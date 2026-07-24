@@ -62,8 +62,10 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 - [ ] Derive AEAD keys from X25519 with domain-separated HKDF-SHA256 and bind
   protocol/from/to/type/source-frame/message-id as AAD. Replace Base64 with one
-  binary wire atomically, reject low-order/shared-zero keys, and keep strict
-  signed-profile key authority; no legacy codec.
+  binary wire atomically, reject low-order/shared-zero keys, keep strict
+  signed-profile key authority, and reject duplicate authenticated session
+  sequence/message IDs through one bounded replay window before dispatch; no
+  legacy codec.
 - [ ] Mutually authenticate the direct hello challenge, both Runtime IDs and
   the responder encryption key. Add authenticated session-key rotation and
   prove recorded traffic cannot be decrypted after later compromise of the
@@ -87,7 +89,9 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   1/1,000-tx and growing-hub median/p95/MAD budgets from a clean Bun cache.
   Measure the duplicate Account wake scan, per-frame verified-profile clone and
   repeated cross-J preview application; replace them only with dirty/versioned
-  indexes or structural preflight proven byte-identical. Record
+  indexes or structural preflight proven byte-identical. The first indexes are
+  one ephemeral `proposableAccountKeys` queue and a canonical
+  `(entityId, signerId) → replicaKey` map rebuilt on restore/import. Record
   `frameCloneMs`, cloned replica/account/profile counts, estimated cloned bytes
   and cross-J preview clone time. A frame touching one account must not scale
   linearly when untouched accounts grow from 10,000 to 100,000.
