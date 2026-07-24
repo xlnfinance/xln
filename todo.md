@@ -55,11 +55,17 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 - [ ] Derive AEAD keys from X25519 with domain-separated HKDF-SHA256 and bind
   protocol/from/to/type/source-frame/message-id as AAD. Replace Base64 with one
-  binary wire atomically; no legacy codec.
-- [ ] Add authenticated session-key rotation and prove recorded traffic cannot
-  be decrypted after later compromise of the static Runtime key.
+  binary wire atomically, reject low-order/shared-zero keys, and keep strict
+  signed-profile key authority; no legacy codec.
+- [ ] Mutually authenticate the direct hello challenge, both Runtime IDs and
+  the responder encryption key. Add authenticated session-key rotation and
+  prove recorded traffic cannot be decrypted after later compromise of the
+  static Runtime key.
 - [ ] Enforce WebSocket backpressure and per-Runtime byte/message rate limits
   from one typed limit source shared by WS, Runtime ingress and Entity frames.
+  Replace 250 ms bootstrap polling overrides with authenticated initial sync,
+  relay push updates, a monotonic cursor, exact lookup on cache miss and bounded
+  30–60 second reconciliation.
 - [ ] Stop persisting a full replay Runtime-machine projection in every WAL
   frame. Store deterministic ingress, roots, frontier/outbox changes and
   bounded checkpoints; prove crash/replay/import parity and WAL reduction.
