@@ -67,7 +67,6 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
       runtimeInput: { runtimeTxs: [], entityInputs: [] },
       history: [],
       gossip: createGossipLayer(),
-      evms: new Map(),
       frameLogs: [],
       log: (msg: string) => console.log(msg),
       info: () => {},

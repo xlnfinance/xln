@@ -51,11 +51,12 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 - [ ] Replace the unbounded `_forgiveDebtsBetweenEntities` queue scan with an
   indexed or bounded-continuation structure. Prove exact debt conservation and
   bounded gas with adversarial creditor ordering.
-- [ ] Delete proven pre-mainnet compatibility state and code after a full import
-  graph: V1 settlement `diffsToOps`, `position.xlnomy`, deprecated Env
-  `browserVM/evms`, unused `processJBlockEvents`/`resolveEntityId`, and the
-  ineffective `hashToBlock/cleanSecret` path. Use one schema/ABI change with no
-  legacy decoder or fallback.
+- [ ] Remove the remaining proven pre-mainnet compatibility ABI/state:
+  migrate V1 settlement `diffsToOps` and `position.xlnomy`, then delete unused
+  contract `resolveEntityId` and ineffective `hashToBlock/cleanSecret`. Use one
+  schema/ABI change with no legacy decoder or fallback. `Env.browserVM` is
+  currently live infrastructure, not dead code; do not delete it as an audit
+  shortcut.
 
 ## 4. Transport and secret persistence
 

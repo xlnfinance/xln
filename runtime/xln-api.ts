@@ -355,7 +355,6 @@ export interface XLNModule {
     env: Env,
     params: import('./machine/jurisdiction-api').DebtEnforcementRuntimeInputParams,
   ) => RuntimeInput;
-  processJBlockEvents?: (env: Env) => Promise<void>;
   applyJEventsToEnv?: (
     env: Env,
     events: import('./jadapter/types').JEvent[],

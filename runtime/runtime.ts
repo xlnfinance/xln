@@ -2285,24 +2285,6 @@ const notifyRuntimeFrameCommitted = (
   }
 };
 
-/**
- * Process any pending j-events after j-block finalization
- * Called automatically after each BrowserVM batch execution
- * This is the R-machine routing j-events from jReplicas to eReplicas
- */
-export const processJBlockEvents = async (env: Env): Promise<void> => {
-  if (!env) {
-    runtimeLog.warn('jblock.env_missing');
-    return;
-  }
-
-  const mempool = ensureRuntimeMempool(env);
-  const pending = mempool.entityInputs.length;
-  if (pending === 0) return;
-
-  runtimeLog.debug('jblock.queued', { pending });
-};
-
 const crossJPairIndexesThatDidNotCommit = (
   pairs: ReturnType<typeof selectMatchedCrossJAccountInputPairs>['pairs'],
   outcomes: Awaited<ReturnType<typeof applyMergedEntityInputs>>['inputOutcomes'],
@@ -3131,7 +3113,7 @@ export {
   searchEntityNames,
   setBrowserVMJurisdiction,
   getBrowserVMInstance,
-  // getEnv, initEnv, processJBlockEvents - already exported inline above
+  // getEnv and initEnv are already exported inline above
   submitProcessBatch,
   debugFundReserves,
   // Account utilities (destructured from AccountUtils)
@@ -3320,7 +3302,6 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
     // BrowserVM will be lazily initialized on first adapter use
     browserVM: null,
     // EVM instances (unified interface) - use createEVM() to add
-    evms: new Map(),
   };
 
   // Attach event emission methods (EVM-style)
@@ -4423,7 +4404,6 @@ const cloneRuntimeFrameWorkingEnv = (sourceEnv: Env): Env => {
     frameLogs: structuredClone(sourceEnv.frameLogs),
     history: [...sourceEnv.history],
     gossip: createRuntimeFrameGossipSnapshot(sourceEnv),
-    evms: new Map(sourceEnv.evms),
     ...(sourceEnv.extra ? { extra: structuredClone(sourceEnv.extra) } : {}),
   };
   attachEventEmitters(workingEnv);
@@ -4588,7 +4568,6 @@ const publishRuntimeFrameTransaction = (transaction: RuntimeFrameTransaction): E
   else liveEnv.browserVMState = workingEnv.browserVMState;
   if (workingEnv.jAdapter === undefined) delete liveEnv.jAdapter;
   else liveEnv.jAdapter = workingEnv.jAdapter;
-  liveEnv.evms = workingEnv.evms;
   if (workingEnv.overlay === undefined) delete liveEnv.overlay;
   else liveEnv.overlay = workingEnv.overlay;
   if (workingEnv.pendingOutputs === undefined) delete liveEnv.pendingOutputs;
