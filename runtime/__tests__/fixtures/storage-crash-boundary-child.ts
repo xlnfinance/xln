@@ -60,9 +60,12 @@ import { collectDueJSubmitRuntimeTxs } from '../../machine/j-submit-scheduler';
 import { registerPendingCommittedJOutbox } from '../../machine/j-submit-state';
 import { applyRuntimeTx } from '../../machine/tx-handlers';
 import {
+  readStorageHead,
   saveRuntimeFrameToStorage,
   type StoragePersistenceBoundary,
 } from '../../storage';
+import { encodeBuffer } from '../../storage/codec';
+import { KEY_HEAD } from '../../storage/keys';
 import { getPerfMs } from '../../utils';
 import type {
   CertifiedRegistrationEvidence,
@@ -460,6 +463,19 @@ if (!recoveryLagMode && !recoveryBoardRootLagMode) {
     getPerfMs,
     formatPerfMs: (value) => Math.round(value * 1_000) / 1_000,
   });
+  const historyHead = await readStorageHead(getFrameDb(env));
+  const currentHead = await readStorageHead(getRuntimeStorageDb(env));
+  if (!historyHead || !currentHead) throw new Error('crash fixture epoch head missing');
+  await getFrameDb(env).put(
+    KEY_HEAD,
+    encodeBuffer({ ...historyHead, epochReplayBytes: historyHead.epochMaxBytes }),
+    { sync: true },
+  );
+  await getRuntimeStorageDb(env).put(
+    KEY_HEAD,
+    encodeBuffer({ ...currentHead, epochReplayBytes: currentHead.epochMaxBytes }),
+    { sync: true },
+  );
   // Live process() assigns the new Runtime frame's height and timestamp before
   // applying its input. Replay does the same, so attempt bytes stay identical.
   env.height += 1;

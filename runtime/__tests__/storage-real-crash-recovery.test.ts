@@ -182,7 +182,7 @@ describe('real process storage crash recovery', () => {
     'after-snapshot-history-head',
     'after-snapshot-current-head',
   ] satisfies StoragePersistenceBoundary[]) {
-    test(`restores exact replica progress after SIGKILL ${boundary}`, async () => {
+    test(`restores exact replica progress after SIGKILL during forced epoch rotation ${boundary}`, async () => {
       const dbRoot = dbRootPath;
       mkdirSync(dbRoot, { recursive: true });
       const seed = `storage real crash ${process.pid} ${boundary} deterministic seed`;
@@ -330,6 +330,22 @@ describe('real process storage crash recovery', () => {
         expect(await readStorageHead(currentDb)).toEqual(historyHead);
         expect(await readRawOrNull(currentDb, keyLiveReplicaMeta(entityId, signerB))).toBeNull();
         expect(await readRawOrNull(currentDb, keyLiveReplicaMeta(entityId, signerA))).toBeNull();
+
+        restored.height += 1;
+        restored.timestamp += 1;
+        await saveEnvToDB(restored, { runtimeTxs: [], entityInputs: [] }, []);
+        const committedHead = await readStorageHead(getFrameDb(restored));
+        expect(committedHead?.latestHeight).toBe(3);
+        const committedFrame = await readStorageFrameRecord(getFrameDb(restored), 3);
+        expect(committedFrame?.canonicalStateHash).toBe(computeCanonicalStateHashFromEnv(restored));
+        expect(await tryOpenStorageDb(restored, 'current')).toBe(true);
+        const liveCurrentDb = getRuntimeStorageDb(restored, 'current');
+        expect(liveCurrentDb.status).toBe('open');
+        if (await tryOpenStorageDb(restored, 'previous')) {
+          const livePreviousDb = getRuntimeStorageDb(restored, 'previous');
+          expect(livePreviousDb).not.toBe(liveCurrentDb);
+          expect(livePreviousDb.status).toBe('open');
+        }
       } finally {
         await closeRuntimeDb(restored);
         await closeInfraDb(restored);
