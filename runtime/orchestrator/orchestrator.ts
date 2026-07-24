@@ -89,6 +89,13 @@ import {
 } from './managed-runtime-leases';
 import { buildPrometheusMetrics } from './prometheus';
 import { deriveHubRuntimeHealth, deriveResetHealthOk } from './health-model';
+import {
+  buildAggregatedMarketMakerHealth,
+  countMarketSnapshotOrderDepth,
+  isExactMarketSnapshotOrderDepth,
+  mergeMarketSnapshotOrderDepth,
+  type MarketSnapshotOrderDepth,
+} from './market-maker-aggregated-health';
 import { buildPublicHubDiscoveryPayload } from './public-discovery';
 import {
   assertOrchestratorResetAllowed,
@@ -129,7 +136,6 @@ import {
   normalizeMarketMakerHealthPayload,
 } from './market-maker-health-payload';
 import { createMarketMakerChildPoller } from './market-maker-child-poll';
-import { buildAggregatedMarketMakerHealth } from './market-maker-aggregated-health';
 import {
   evaluateHubBaselineDeadlines,
   type HubBaselineProgressState,
@@ -1306,7 +1312,8 @@ const handleUnexpectedHubFailure = (
   child.recoveryInProgress = true;
   child.restartTimer = setTimeout(() => {
     child.restartTimer = null;
-    void spawnHub(child).then(() => {
+    void spawnHub(child).then(async () => {
+      await waitForHubSelfReady(child);
       child.recoveryInProgress = false;
       meshLog.info('child.respawned_from_checkpoint', {
         child: child.name,
@@ -1373,7 +1380,6 @@ const spawnHub = async (child: HubChild): Promise<void> => {
     ...(child.deployTokens ? ['--deploy-tokens'] : []),
   ];
   child.startedAt = Date.now();
-  child.recoveryInProgress = false;
   child.exitedAt = null;
   child.exitCode = null;
   child.exitSignal = null;
@@ -2293,19 +2299,10 @@ const computeAggregatedHealth = (options: {
   };
 };
 
-const countSnapshotOrders = (snapshot: MarketSnapshotPayload | undefined): number => {
-  const countSide = (levels: MarketSnapshotPayload['bids'] | undefined): number =>
-    (levels ?? []).reduce((sum, level) => {
-      const orderCount = Number(level.orderCount);
-      return sum + (Number.isFinite(orderCount) && orderCount > 0 ? Math.floor(orderCount) : 1);
-    }, 0);
-  return countSide(snapshot?.bids) + countSide(snapshot?.asks);
-};
-
 const fetchRouteMarketSnapshots = async (
   hubEntityId: string,
   pairIds: string[],
-): Promise<Map<string, number>> => {
+): Promise<Map<string, MarketSnapshotOrderDepth>> => {
   const child = getHubChildByEntityId(hubEntityId);
   if (!child || pairIds.length === 0) return new Map();
   if (child.proc?.exitCode !== null || child.proc?.signalCode !== null || !child.lastHealth) return new Map();
@@ -2319,7 +2316,10 @@ const fetchRouteMarketSnapshots = async (
     });
     return new Map();
   }
-  return new Map(snapshots.map((snapshot) => [snapshot.pairId, countSnapshotOrders(snapshot)]));
+  return new Map(snapshots.map((snapshot) => [
+    snapshot.pairId,
+    countMarketSnapshotOrderDepth(snapshot),
+  ]));
 };
 
 const recomputeHealthWithMarketMaker = (
@@ -2364,44 +2364,38 @@ const enrichMarketMakerCrossFromHubSnapshots = async (health: AggregatedHealth):
     ]);
     const pairs = (route.pairs ?? []).map((pair) => {
       const pairId = String(pair.pairId || '');
-      const sourceOffers = sourceSnapshots.get(pairId) ?? 0;
-      const targetOffers = targetSnapshots.get(pairId) ?? 0;
-      const offers = Math.max(Number(pair.offers || 0), sourceOffers, targetOffers);
       const expectedOffers = Math.max(1, Number(pair.expectedOffers || health.marketMaker.cross.expectedOffersPerPair || 1));
+      const sourceObserved = sourceSnapshots.get(pairId);
+      const targetObserved = targetSnapshots.get(pairId);
+      const observations = [sourceObserved, targetObserved]
+        .filter((depth): depth is MarketSnapshotOrderDepth => depth !== undefined);
+      const observed = mergeMarketSnapshotOrderDepth(
+        ...observations,
+      );
       return {
         ...pair,
-        offers,
-        ready: offers > 0,
-        depthReady: offers >= expectedOffers,
         expectedOffers,
+        bidOffers: observed.bidOffers,
+        askOffers: observed.askOffers,
+        snapshotDepthExact: isExactMarketSnapshotOrderDepth(observed, expectedOffers),
       };
     });
-    const offers = pairs.reduce((sum, pair) => sum + pair.offers, 0);
-    const expectedOffers = pairs.reduce((sum, pair) => sum + Number(pair.expectedOffers || 0), 0);
     return {
       ...route,
-      offers,
-      ready: route.ready === true || (pairs.length > 0 && pairs.every(pair => pair.ready)),
-      depthReady: expectedOffers > 0 &&
-        offers >= expectedOffers &&
-        pairs.every(pair => pair.depthReady),
       pairs,
     };
   }));
   const enrichedCross = {
     ...cross,
     routes,
-    ok: (cross.expectedRoutes > 0 ? routes.length >= cross.expectedRoutes : routes.length > 0) &&
-      routes.every(route => route.depthReady),
   };
-  const sameChainReady = !health.marketMaker.enabled ||
-    (health.marketMaker.hubs.length === HUB_NAMES.length && health.marketMaker.hubs.every(hub => hub.depthReady));
-  const marketMaker = {
-    ...health.marketMaker,
-    ok: !health.marketMaker.enabled || (sameChainReady && enrichedCross.ok),
-    cross: enrichedCross,
+  return {
+    ...health,
+    marketMaker: {
+      ...health.marketMaker,
+      cross: enrichedCross,
+    },
   };
-  return recomputeHealthWithMarketMaker(health, marketMaker);
 };
 
 type CustodyMePayload = {
@@ -2599,7 +2593,7 @@ const waitForHubSelfReady = async (child: HubChild): Promise<void> => {
     if (child.lastInfo !== null || child.lastHealth !== null) {
       return;
     }
-    if (!child.recoveryInProgress && (child.proc?.exitCode !== null || child.proc?.signalCode !== null)) {
+    if (child.proc?.exitCode !== null || child.proc?.signalCode !== null) {
       throw new Error(`${child.name}_SELF_READY_EXITED_EARLY code=${String(child.proc?.exitCode)} stderr=${safeStringify(child.recentStderr.slice(-8))}`);
     }
     const idleMs = Date.now() - startedAt;

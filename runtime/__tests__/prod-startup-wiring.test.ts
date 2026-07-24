@@ -473,7 +473,12 @@ describe('production startup wiring', () => {
     expect(marketMakerAggregation).toContain('MARKET_MAKER_HUB_DEPTH_NOT_READY');
     expect(marketMakerAggregation).toContain('depthReady: route.depthReady === true');
     expect(marketMakerAggregation).toContain('expectedOffers: Number(pair.expectedOffers || 0)');
-    expect(orchestrator).toContain('health.marketMaker.hubs.every(hub => hub.depthReady)');
+    const snapshotEnrichment = orchestrator.slice(
+      orchestrator.indexOf('const enrichMarketMakerCrossFromHubSnapshots = async'),
+      orchestrator.indexOf('type CustodyMePayload ='),
+    );
+    expect(snapshotEnrichment).toContain('snapshotDepthExact: isExactMarketSnapshotOrderDepth');
+    expect(snapshotEnrichment).not.toContain('recomputeHealthWithMarketMaker');
     expect(orchestrator).toContain('syncCanonicalJurisdictionsFromShard(jurisdictionsConfig)');
     expect(orchestrator).toContain('const primaryJurisdiction = resolvePrimaryHubJurisdictionFallback(jurisdictionsConfig);');
     expect(orchestrator).toContain('jurisdictionId: primaryJurisdiction.key');

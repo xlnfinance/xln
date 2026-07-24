@@ -1,4 +1,4 @@
-import { test, expect, type BrowserContext, type Page } from './global-setup.mts';
+import { allowDebugIncident, test, expect, type BrowserContext, type Page } from './global-setup.mts';
 import { AbiCoder, HDNodeWallet, Mnemonic, Wallet, getIndexedAccountPath, keccak256, toUtf8Bytes } from 'ethers';
 import { deriveDelta, getTokenInfo } from '../runtime/account/utils';
 import { ensureE2EBaseline, type E2EHealthResponse } from './utils/e2e-baseline';
@@ -8,6 +8,7 @@ import { enqueueEntityTxs } from './utils/e2e-runtime-input';
 import { requireIsolatedBaseUrl } from './utils/e2e-isolated-env';
 import { timedStep } from './utils/e2e-timing.mts';
 import { hasSilentRelayMarketSubscribe, installSilentRelayWebSocket } from './utils/e2e-silent-relay';
+import type { MarketSnapshotPayload } from '../runtime/relay/market-snapshot';
 
 const INIT_TIMEOUT = 30_000;
 const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
@@ -205,6 +206,44 @@ function expectMarketMakerSameAndCrossBooksHealthy(health: E2EHealthResponse): v
     }
     expect(route.offers, `cross MM route ${route.sourceHubEntityId}->${route.targetHubEntityId} must contain only configured offers`).toBe(expectedRouteOffers);
   }
+}
+
+async function readFullMeshHealth(page: Page): Promise<E2EHealthResponse> {
+  const response = await page.request.get(`${API_BASE_URL}/api/health?full=1&marketSnapshots=1`);
+  expect(response.ok(), `full mesh health failed: ${response.status()} ${await response.text()}`).toBe(true);
+  return await response.json() as E2EHealthResponse;
+}
+
+async function readHubPairSnapshot(
+  page: Page,
+  hub: NonNullable<E2EHealthResponse['hubs']>[number],
+  pairId: string,
+): Promise<MarketSnapshotPayload> {
+  const apiBase = String(hub.apiUrl || '').replace(/\/$/, '');
+  expect(apiBase, `hub API missing for ${String(hub.name || hub.entityId || 'unknown')}`).toMatch(/^https?:\/\//);
+  const hubEntityId = String(hub.entityId || '');
+  const response = await page.request.get(
+    `${apiBase}/api/market/snapshots?hubEntityId=${encodeURIComponent(hubEntityId)}` +
+    `&pair=${encodeURIComponent(pairId)}&depth=10`,
+  );
+  expect(response.ok(), `hub market snapshot failed: ${response.status()} ${await response.text()}`).toBe(true);
+  const payload = await response.json() as { snapshots?: MarketSnapshotPayload[] };
+  const snapshot = payload.snapshots?.find(candidate => candidate.pairId === pairId);
+  expect(snapshot, `hub ${String(hub.name || hubEntityId)} snapshot missing pair ${pairId}`).toBeTruthy();
+  return snapshot!;
+}
+
+function expectExactTenByTen(snapshot: MarketSnapshotPayload, context: string): void {
+  expect(snapshot.bids, `${context} must expose exactly 10 bid levels`).toHaveLength(10);
+  expect(snapshot.asks, `${context} must expose exactly 10 ask levels`).toHaveLength(10);
+  expect(
+    snapshot.bids.reduce((sum, level) => sum + Number(level.orderCount ?? 1), 0),
+    `${context} must contain exactly 10 bid orders`,
+  ).toBe(10);
+  expect(
+    snapshot.asks.reduce((sum, level) => sum + Number(level.orderCount ?? 1), 0),
+    `${context} must contain exactly 10 ask orders`,
+  ).toBe(10);
 }
 
 function getPrimaryHubApiBaseUrl(health: E2EHealthResponse, primaryHubId: string): string {
@@ -2979,6 +3018,88 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       minHubCount: 3,
     }));
     expectMarketMakerSameAndCrossBooksHealthy(baseline);
+  });
+
+  test('H2 process replacement restores authoritative health and exact 10x10 public book', { tag: '@resilience' }, async ({ page }) => {
+    allowDebugIncident({
+      source: 'orchestrator',
+      code: 'CHILD_UNEXPECTED_EXIT',
+      message: 'child.unexpected_exit',
+    });
+    allowDebugIncident({
+      source: 'orchestrator',
+      code: 'H2_UNEXPECTED_EXIT',
+      message: 'H2_UNEXPECTED_EXIT code=null signal=SIGKILL',
+    });
+    const baseline = await ensureE2EBaseline(page, {
+      apiBaseUrl: API_BASE_URL,
+      requireMarketMaker: true,
+      requireHubMesh: true,
+      minHubCount: 3,
+    });
+    expectMarketMakerSameAndCrossBooksHealthy(baseline);
+
+    const before = await readFullMeshHealth(page);
+    const h2Process = before.process?.children?.find(child => child.role === 'hub' && child.name === 'H2');
+    const h2Hub = before.hubs?.find(hub => hub.name === 'H2');
+    expect(h2Process?.online, `H2 process missing before replacement: ${JSON.stringify(before.process ?? {})}`).toBe(true);
+    expect(h2Process?.pid, 'H2 PID must be visible to the isolated local operator test').toBeGreaterThan(0);
+    expect(h2Hub?.entityId, `H2 hub identity missing: ${JSON.stringify(before.hubs ?? [])}`).toMatch(/^0x[0-9a-f]{64}$/i);
+    const oldPid = Number(h2Process!.pid);
+    const oldRestartCount = Number(h2Process!.restartCount ?? 0);
+    const beforeSnapshot = await readHubPairSnapshot(page, h2Hub!, '1/2');
+    expectExactTenByTen(beforeSnapshot, 'H2 pre-restart USDC/WETH book');
+    const h2CrossPairId = before.marketMaker?.cross?.routes
+      ?.find(route => normalizeId(route.sourceHubEntityId) === normalizeId(h2Hub!.entityId))
+      ?.pairs?.find(pair => Number(pair.expectedOffers ?? 0) === 10)?.pairId;
+    expect(h2CrossPairId, 'H2 must publish a configured cross-j pair before restart').toBeTruthy();
+    const beforeCrossSnapshot = await readHubPairSnapshot(page, h2Hub!, h2CrossPairId!);
+    expectExactTenByTen(beforeCrossSnapshot, 'H2 pre-restart cross-j book');
+
+    process.kill(oldPid, 'SIGKILL');
+
+    await expect.poll(async () => {
+      const health = await readFullMeshHealth(page);
+      return health.systemOk;
+    }, {
+      timeout: 15_000,
+      intervals: [50, 100, 250],
+      message: 'global health must become non-ready while H2 is unavailable',
+    }).toBe(false);
+
+    await expect.poll(async () => {
+      const health = await readFullMeshHealth(page);
+      const child = health.process?.children?.find(candidate => candidate.role === 'hub' && candidate.name === 'H2');
+      const hub = health.hubs?.find(candidate => candidate.name === 'H2');
+      return {
+        replaced: Number(child?.pid ?? 0) > 0 && Number(child?.pid) !== oldPid,
+        restarted: Number(child?.restartCount ?? 0) > oldRestartCount,
+        processOnline: child?.online === true,
+        hubOnline: hub?.online === true,
+        systemOk: health.systemOk === true,
+      };
+    }, {
+      timeout: 90_000,
+      intervals: [250, 500, 1000],
+      message: 'orchestrator must replace H2 and restore authoritative live health',
+    }).toEqual({
+      replaced: true,
+      restarted: true,
+      processOnline: true,
+      hubOnline: true,
+      systemOk: true,
+    });
+
+    const restored = await readFullMeshHealth(page);
+    expectMarketMakerSameAndCrossBooksHealthy(restored);
+    const restoredH2 = restored.hubs?.find(hub => hub.name === 'H2');
+    expect(restoredH2?.entityId).toBe(h2Hub!.entityId);
+    const restoredSnapshot = await readHubPairSnapshot(page, restoredH2!, '1/2');
+    expectExactTenByTen(restoredSnapshot, 'H2 restored USDC/WETH book');
+    expect(restoredSnapshot.entityHeight).toBeGreaterThanOrEqual(beforeSnapshot.entityHeight);
+    const restoredCrossSnapshot = await readHubPairSnapshot(page, restoredH2!, h2CrossPairId!);
+    expectExactTenByTen(restoredCrossSnapshot, 'H2 restored cross-j book');
+    expect(restoredCrossSnapshot.entityHeight).toBeGreaterThanOrEqual(beforeCrossSnapshot.entityHeight);
   });
 
   test('real MM full fill auto-closes and partial fill closes manually on both legs', { tag: '@functional' }, async ({ page }, testInfo) => {

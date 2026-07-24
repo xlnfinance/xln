@@ -1538,7 +1538,7 @@ const isSameQuoteJobDepthReady = (env: Env, job: SameQuoteJob): boolean => {
       job.context.entityId,
       job.hub.entityId,
       pair,
-    ) >= expected;
+    ) === expected;
   });
 };
 
@@ -2206,7 +2206,7 @@ export const buildMarketMakerCrossHealth = (
           pairId,
           offers,
           ready: expectedOffers > 0 && offers > 0,
-          depthReady: expectedOffers > 0 && offers >= expectedOffers,
+          depthReady: expectedOffers > 0 && offers === expectedOffers,
           expectedOffers,
           sourceTokenIds,
           targetTokenIds,
@@ -2228,7 +2228,7 @@ export const buildMarketMakerCrossHealth = (
       targetHubEntityId: group.targetHubEntityId,
       offers,
       ready: pairs.length > 0 && pairs.every(pair => pair.ready) && blockers.length === 0,
-      depthReady: expectedOffers > 0 && offers >= expectedOffers && pairs.every(pair => pair.depthReady),
+      depthReady: expectedOffers > 0 && offers === expectedOffers && pairs.every(pair => pair.depthReady),
       blockers,
       pairs,
     };
@@ -2839,7 +2839,7 @@ export const getMarketMakerHealth = (
         pairId: pair.pairId,
         offers: pairOffers,
         ready: accountReady && expectedPairOffers > 0 && pairOffers > 0,
-        depthReady: accountReady && expectedPairOffers > 0 && pairOffers >= expectedPairOffers,
+        depthReady: accountReady && expectedPairOffers > 0 && pairOffers === expectedPairOffers,
         expectedOffers: expectedPairOffers,
       };
     });
@@ -2847,7 +2847,7 @@ export const getMarketMakerHealth = (
       hubEntityId,
       offers,
       ready: accountReady && expectedHubOffers > 0 && pairHealth.every((pair) => pair.ready),
-      depthReady: accountReady && expectedHubOffers > 0 && offers >= expectedHubOffers && pairHealth.every((pair) => pair.depthReady),
+      depthReady: accountReady && expectedHubOffers > 0 && offers === expectedHubOffers && pairHealth.every((pair) => pair.depthReady),
       blockers: blocker ? [blocker] : [],
       pairs: pairHealth,
     };

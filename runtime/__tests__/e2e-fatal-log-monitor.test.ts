@@ -85,6 +85,51 @@ test('cross-j pair-drop warnings remain observable without killing the E2E stack
   });
 });
 
+test('recoverable child exits remain observable without aborting the E2E stack', () => {
+  withLog(path => {
+    const scanner = createIncrementalRuntimeFatalLogScanner(path);
+    appendFileSync(
+      path,
+      '[ERROR][mesh.orchestrator] child.unexpected_exit '
+      + '{"child":"H2","action":"recover","reasonCode":"SIGKILL"}\n',
+    );
+    expect(scanner.scan()).toBeNull();
+
+    appendFileSync(
+      path,
+      '[ERROR][mesh.orchestrator] child.unexpected_exit '
+      + '{"child":"H2","action":"fail-stop","reasonCode":"RUNTIME_LOOP_HALTED"}\n',
+    );
+    expect(scanner.scan()).toMatchObject({
+      pattern: '/child\\.unexpected_exit/',
+      lineNumber: 2,
+    });
+  });
+});
+
+test('malformed or unclassified child exits fail closed', () => {
+  withLog(path => {
+    const scanner = createIncrementalRuntimeFatalLogScanner(path);
+    appendFileSync(
+      path,
+      '[ERROR][mesh.orchestrator] child.unexpected_exit {"child":"H2","action":"recover"\n',
+    );
+    expect(scanner.scan()).toMatchObject({
+      pattern: '/child\\.unexpected_exit/',
+      lineNumber: 1,
+    });
+  });
+
+  withLog(path => {
+    const scanner = createIncrementalRuntimeFatalLogScanner(path);
+    appendFileSync(path, '[ERROR][mesh.orchestrator] child.unexpected_exit {"message":"fatal"}\n');
+    expect(scanner.scan()).toMatchObject({
+      pattern: '/child\\.unexpected_exit/',
+      lineNumber: 1,
+    });
+  });
+});
+
 test('isolated E2E runner polls through the incremental scanner', () => {
   const runner = readFileSync(
     join(process.cwd(), 'runtime/scripts/run-e2e-parallel-isolated.ts'),

@@ -268,6 +268,9 @@ export type MarketMakerCrossRouteHealthPayload = {
     ready: boolean;
     depthReady?: boolean;
     expectedOffers?: number;
+    bidOffers?: number;
+    askOffers?: number;
+    snapshotDepthExact?: boolean;
     sourceTokenIds?: number[];
     targetTokenIds?: number[];
   }>;
@@ -458,6 +461,9 @@ export type AggregatedHealth = {
         ready: boolean;
         depthReady?: boolean;
         expectedOffers?: number;
+        bidOffers?: number;
+        askOffers?: number;
+        snapshotDepthExact?: boolean;
         sourceTokenIds?: number[];
         targetTokenIds?: number[];
       }>;

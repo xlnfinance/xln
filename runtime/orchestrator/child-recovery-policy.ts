@@ -77,7 +77,10 @@ export const decideChildFailure = (
   const terminalBootstrapFailure = isTerminalBootstrapFailureReasonCode(reasonCode);
   const runtimeLoopFatal = isRuntimeLoopFatalReason(observation.reason);
   return {
-    action: terminalBootstrapFailure || runtimeLoopFatal || count >= MAX_IDENTICAL_CHILD_FAILURES
+    // A Runtime fatal must exit the broken child, but the first occurrence is
+    // not evidence that the durable checkpoint is poisoned. Recover it
+    // immediately; only an identical crash loop exhausts the bounded budget.
+    action: terminalBootstrapFailure || count >= MAX_IDENTICAL_CHILD_FAILURES
       ? 'fail-stop'
       : 'recover',
     backoffMs: terminalBootstrapFailure || runtimeLoopFatal ? 0 : Math.min(10_000, count * 2_000),
