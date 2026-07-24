@@ -8,13 +8,12 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 0. Restore and prove production health
 
-- [ ] Make `/api/debug/incidents` the mandatory first diagnostic query:
-  browser, frontend, Runtime, managed-child, orchestrator and J-machine errors
-  must enter one redacted stream, group by root-cause fingerprint, survive
-  gossip flood/restart, and support unread/acknowledged/resolved state. Release
-  gates fail on unexplained open incidents. All money controls must derive
-  readiness from the same Runtime lifecycle gate and perform zero enqueue while
-  halted, quiescing or restoring.
+- [ ] Make the existing durable `/api/debug/incidents` registry the mandatory
+  first diagnostic query and release gate. Route every remaining frontend,
+  Runtime, managed-child, orchestrator and J-machine fatal into it; prove a root
+  incident survives gossip flood/restart and blocks release until resolved.
+  All money controls must derive readiness from the same Runtime lifecycle gate
+  and perform zero enqueue while halted, quiescing or restoring.
 ## 1. Commit-boundary correctness
 
 - [ ] Reject Entity-frame timestamp regression before transaction application.

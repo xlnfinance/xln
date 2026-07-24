@@ -169,6 +169,15 @@ describe('production startup wiring', () => {
     expect(orchestrator).not.toContain('resume-ready-snapshot');
   });
 
+  test('orchestrator restores the durable incident journal outside resettable runtime state', () => {
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    expect(orchestrator).toContain("process.env['XLN_DEBUG_INCIDENT_JOURNAL_PATH'] || `${args.dbRoot}.debug-incidents.jsonl`");
+    expect(orchestrator).toContain('initialDebugId: debugIncidentJournal.debugId');
+    expect(orchestrator).toContain('initialIncidents: debugIncidentJournal.incidents');
+    expect(orchestrator).toContain('incidentSink: incident => debugIncidentJournal.record(incident)');
+    expect(orchestrator).not.toContain('relayStore.debugId = 0');
+  });
+
   test('production frontend deploy builds off-host and uploads a complete artifact', () => {
     const deploy = readFileSync(join(repoRoot, 'deploy.sh'), 'utf8');
     const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {

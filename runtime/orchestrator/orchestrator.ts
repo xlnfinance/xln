@@ -26,6 +26,7 @@ import {
   removeClient,
   type RelayStore,
 } from '../relay/store';
+import { openRelayIncidentJournal } from '../relay/incident-journal';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay/router';
 import { closeRelayClientsForReset } from '../relay/reset';
 import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
@@ -222,6 +223,10 @@ const relayUrl = args.relayUrl;
 const shardJurisdictionsPath = join(args.dbRoot, 'jurisdictions.json');
 const controlPlaneDir = join(args.dbRoot, '.control-plane');
 const childDiagnosticsDir = join(controlPlaneDir, 'diagnostics');
+const debugIncidentJournalPath = String(
+  process.env['XLN_DEBUG_INCIDENT_JOURNAL_PATH'] || `${args.dbRoot}.debug-incidents.jsonl`,
+).trim();
+const debugIncidentJournal = openRelayIncidentJournal(debugIncidentJournalPath);
 const managedRuntimeLeases = createManagedRuntimeLeaseManager({
   controlPlaneDir,
   ownerId: orchestratorOwnerId,
@@ -233,7 +238,11 @@ const jurisdictionsConfig: OrchestratorJurisdictionsConfig = {
   ephemeralTestnet: args.resetAllowed,
 };
 
-const relayStore: RelayStore = createRelayStore('mesh-relay');
+const relayStore: RelayStore = createRelayStore('mesh-relay', {
+  initialDebugId: debugIncidentJournal.debugId,
+  initialIncidents: debugIncidentJournal.incidents,
+  incidentSink: incident => debugIncidentJournal.record(incident),
+});
 registerStructuredLogSink((entry) => {
   if (entry.level !== 'error') return;
   pushDebugEvent(relayStore, {

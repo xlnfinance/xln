@@ -26,7 +26,8 @@ Single-source pipeline:
 1. Runtime code emits structured events through `env.warn`, `env.error`, `env.emit`.
 2. `runtime/machine/env-events.ts` forwards critical/high-signal events via P2P `debug_event`.
 3. WS client sends `debug_event` messages to relay.
-4. Relay stores all network and debug events in in-memory ring buffer.
+4. Relay stores the high-volume network/debug timeline in an in-memory ring
+   and grouped error incidents in a separate durable journal.
 5. Browser telemetry sends `console.error`, `window.error`, unhandled promise
    rejection and Svelte errors to `/api/debug/events/ingest`.
 6. Every error updates a separate fingerprinted incident registry. Gossip
@@ -66,6 +67,11 @@ Buffer:
 - Incident registry: 1,000 grouped root causes, evicting resolved/oldest first
 - Incident lifecycle: `unread -> acknowledged -> resolved`; a new occurrence
   reopens the incident as `unread`
+- Orchestrator incident journal:
+  `${XLN_DEBUG_INCIDENT_JOURNAL_PATH:-<dbRoot>.debug-incidents.jsonl}`. Every
+  mutation is redacted, appended and fsynced; reset keeps monotonic cursors,
+  restart restores state, a torn final append is discarded, and complete
+  corruption fails startup.
 
 ## HTTP Query API
 
@@ -259,7 +265,8 @@ Highest-value improvements:
 
 1. Add `traceId`/`paymentId` propagated end-to-end (route build -> HTLC lock -> resolve).
 2. Enforce schema validation for Runtime `debug_event` payloads (browser intake is already bounded and validated).
-3. Persist incident state and a redacted rolling event stream to disk (survive process restart).
+3. Persist a redacted rolling copy of the high-volume event timeline; grouped
+   incident state is already durable.
 4. Add retention tiers:
    - in-memory hot ring
    - compressed rolling files

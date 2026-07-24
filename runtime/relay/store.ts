@@ -96,6 +96,7 @@ export type RelayStore = {
   debugEvents: RelayDebugEvent[];
   debugIncidents: Map<string, RelayDebugIncident>;
   debugId: number;
+  incidentSink?: ((incident: RelayDebugIncident) => void) | undefined;
   wsCounter: number;
   activeHubEntityIds: string[];
 };
@@ -148,9 +149,12 @@ type PendingRelayMessage = {
   enqueuedAt: number;
 };
 
-type RelayStoreOptions = {
+export type RelayStoreOptions = {
   pendingLimits?: Partial<RelayPendingLimits>;
   maxGossipProfiles?: number;
+  initialDebugId?: number;
+  initialIncidents?: Iterable<RelayDebugIncident>;
+  incidentSink?: (incident: RelayDebugIncident) => void;
 };
 
 export type RelayPendingDeliveryResult = {
@@ -166,26 +170,35 @@ export type RelayPendingDeliveryResult = {
 // Factory
 // ---------------------------------------------------------------------------
 
-export const createRelayStore = (serverId: string, options: RelayStoreOptions = {}): RelayStore => ({
-  serverId,
-  clients: new Map(),
-  pendingMessages: new Map(),
-  pendingMessageBytes: 0,
-  pendingLimits: {
-    maxPerTarget: options.pendingLimits?.maxPerTarget ?? MAX_PENDING_PER_CLIENT,
-    maxTargets: options.pendingLimits?.maxTargets ?? MAX_PENDING_TARGETS,
-    maxTotalBytes: options.pendingLimits?.maxTotalBytes ?? MAX_PENDING_TOTAL_BYTES,
-    maxAgeMs: options.pendingLimits?.maxAgeMs ?? MAX_PENDING_MESSAGE_AGE_MS,
-  },
-  maxGossipProfiles: Math.max(1, Math.floor(Number(options.maxGossipProfiles ?? MAX_GOSSIP_PROFILES))),
-  gossipProfiles: new Map(),
-  runtimeEncryptionKeys: new Map(),
-  debugEvents: [],
-  debugIncidents: new Map(),
-  debugId: 0,
-  wsCounter: 0,
-  activeHubEntityIds: [],
-});
+export const createRelayStore = (serverId: string, options: RelayStoreOptions = {}): RelayStore => {
+  const initialIncidents = Array.from(options.initialIncidents ?? []);
+  const debugIncidents = new Map(initialIncidents.map(incident => [incident.fingerprint, incident]));
+  const debugId = Math.max(
+    Math.max(0, Math.floor(Number(options.initialDebugId ?? 0))),
+    ...initialIncidents.map(incident => incident.lastEventId),
+  );
+  return {
+    serverId,
+    clients: new Map(),
+    pendingMessages: new Map(),
+    pendingMessageBytes: 0,
+    pendingLimits: {
+      maxPerTarget: options.pendingLimits?.maxPerTarget ?? MAX_PENDING_PER_CLIENT,
+      maxTargets: options.pendingLimits?.maxTargets ?? MAX_PENDING_TARGETS,
+      maxTotalBytes: options.pendingLimits?.maxTotalBytes ?? MAX_PENDING_TOTAL_BYTES,
+      maxAgeMs: options.pendingLimits?.maxAgeMs ?? MAX_PENDING_MESSAGE_AGE_MS,
+    },
+    maxGossipProfiles: Math.max(1, Math.floor(Number(options.maxGossipProfiles ?? MAX_GOSSIP_PROFILES))),
+    gossipProfiles: new Map(),
+    runtimeEncryptionKeys: new Map(),
+    debugEvents: [],
+    debugIncidents,
+    debugId,
+    ...(options.incidentSink ? { incidentSink: options.incidentSink } : {}),
+    wsCounter: 0,
+    activeHubEntityIds: [],
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -373,6 +386,8 @@ const updateDebugIncident = (store: RelayStore, event: RelayDebugEvent): void =>
         sample: event,
       });
   trimDebugIncidents(store);
+  const persisted = store.debugIncidents.get(classified.fingerprint);
+  if (persisted) store.incidentSink?.(persisted);
 };
 
 export const pushDebugEvent = (store: RelayStore, event: Omit<RelayDebugEvent, 'id' | 'ts'>): void => {
@@ -402,6 +417,7 @@ export const setDebugIncidentState = (
   if (!incident) throw new Error(`DEBUG_INCIDENT_NOT_FOUND:${fingerprint}`);
   const updated = { ...incident, state };
   store.debugIncidents.set(fingerprint, updated);
+  store.incidentSink?.(updated);
   return updated;
 };
 
