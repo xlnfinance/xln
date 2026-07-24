@@ -88,6 +88,13 @@ export type {
   SwapInboundCapacityPlanInput,
 } from './account/swap-inbound-plan';
 export type {
+  CrossJurisdictionSwapCommandPlan,
+  SameJurisdictionSwapCommandPlan,
+  SwapCommandPlan,
+  SwapCommandPlanInput,
+  SwapCommandPreparedOrder,
+} from './account/swap-command-plan';
+export type {
   MppChallenge,
   MppChallengeBindingInput,
   MppCredential,
@@ -517,6 +524,7 @@ export interface XLNModule {
   applyRuntimeInput: (env: Env, input: RuntimeInput) => Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }>;
   planSwapInboundCapacity: typeof import('./account/swap-inbound-plan').planSwapInboundCapacity;
   readSwapAccountCapacity: typeof import('./account/swap-inbound-plan').readSwapAccountCapacity;
+  planSwapCommand: typeof import('./account/swap-command-plan').planSwapCommand;
   validateRuntimeInputAdmission: (env: Env, input: RuntimeInput) => void;
   enqueueRuntimeInput: (env: Env, input: RuntimeInput) => void;
   startRuntimeLoop?: (env: Env) => () => void;

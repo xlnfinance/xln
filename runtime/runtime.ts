@@ -239,6 +239,9 @@ import {
   requantizeRemainingSwapAtPrice,
 } from './orderbook';
 import {
+  assertCrossJurisdictionSwapTargetReadyInEnv,
+} from './account/swap-command-plan';
+import {
   buildCrossJurisdictionSwapSubmission,
   type CrossJurisdictionSwapSubmitParams,
   type CrossJurisdictionSwapSubmitResult,
@@ -310,6 +313,19 @@ export type {
   SwapInboundCapacityPlan,
   SwapInboundCapacityPlanInput,
 } from './account/swap-inbound-plan';
+export {
+  assertCrossJurisdictionSwapTargetReady,
+  assertCrossJurisdictionSwapTargetReadyInEnv,
+  buildDeterministicSwapOfferId,
+  planSwapCommand,
+} from './account/swap-command-plan';
+export type {
+  CrossJurisdictionSwapCommandPlan,
+  SameJurisdictionSwapCommandPlan,
+  SwapCommandPlan,
+  SwapCommandPlanInput,
+  SwapCommandPreparedOrder,
+} from './account/swap-command-plan';
 import {
   enqueueRuntimeInputs as enqueueRuntimeInputsWithDeps,
   ensureRuntimeMempool,
@@ -7366,6 +7382,7 @@ export async function submitCrossJurisdictionIntent(
   if (canonicalRoute.status !== 'intent' || canonicalRoute.sourcePull || canonicalRoute.targetPull) {
     throw new Error(`CROSS_J_INTENT_STATE_INVALID:${canonicalRoute.orderId}`);
   }
+  assertCrossJurisdictionSwapTargetReadyInEnv(env, canonicalRoute);
   const routing = getRuntimeOutputRoutingDeps();
   const targetRuntimeId = routing.resolveRuntimeIdForCrossJurisdictionEntity(
     env,

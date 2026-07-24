@@ -4,8 +4,6 @@
   import { writable } from 'svelte/store';
   import type {
     BookState,
-    CrossJurisdictionSwapRoute,
-    EntityTx,
     Env,
     SwapAccountCapacityView,
     SwapInboundCapacityPlan,
@@ -13,7 +11,6 @@
   import {
     deriveCanonicalCrossJurisdictionBookOwnerForLegs,
     deriveCanonicalCrossJurisdictionMarketForLegs,
-    deriveCanonicalCrossJurisdictionVenueIdForLegs,
     getJurisdictionStackId,
     getBestAsk,
     getBestBid,
@@ -74,7 +71,6 @@
     validateSwapForm,
   } from './swap-order-math';
   import {
-    buildDeterministicSwapOfferId as buildSwapOfferId,
     buildRoutedRouteCandidates as buildRoutedRouteCandidatesPure,
     estimateRoutedHopOutput,
     orderbookSnapshotCacheKey,
@@ -1832,6 +1828,42 @@
     });
   }
 
+  async function waitForCrossTargetCapacity(
+    targetEntityId: string,
+    targetHubEntityId: string,
+    tokenIdValue: number,
+    requiredInboundAmount: bigint,
+    timeoutMs = 20_000,
+  ): Promise<void> {
+    const startedAt = performance.now();
+    let lastReason = 'target account is not projected';
+    while (performance.now() - startedAt < timeoutMs) {
+      const targetReplica = findReplicaByEntityId(targetEntityId);
+      const targetAccount = targetReplica?.state?.accounts?.get?.(targetHubEntityId) ?? null;
+      try {
+        const capacityPlan = activeXlnFunctions?.planSwapInboundCapacity({
+          account: targetAccount,
+          ownerEntityId: targetEntityId,
+          counterpartyEntityId: targetHubEntityId,
+          tokenId: tokenIdValue,
+          requiredInboundAmount,
+          allowOpenAccount: false,
+        });
+        if (capacityPlan && capacityPlan.setupTxs.length === 0) return;
+        lastReason = `current=${capacityPlan?.currentInboundCapacity ?? 0n}`;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!message.startsWith('SWAP_INBOUND_ACCOUNT_MISSING:')) throw error;
+        lastReason = message;
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error(
+      `SWAP_CROSS_TARGET_SETUP_COMMIT_TIMEOUT:entity=${targetEntityId}:hub=${targetHubEntityId}:` +
+        `token=${tokenIdValue}:required=${requiredInboundAmount}:last=${lastReason}`,
+    );
+  }
+
   function isInboundCapacityValidationError(reason: string): boolean {
     if (!reason) return false;
     return reason.startsWith('Inbound token is not active in this account.')
@@ -2898,130 +2930,63 @@
         throw new Error(liveValidationReason);
       }
 
-      const { logicalTimestamp: logicalNow, logicalHeight } = resolveSwapLogicalClock(currentReplica);
-      const offerId = buildSwapOfferId({
-        logicalTimestamp: logicalNow,
-        logicalHeight,
-        sourceEntityId,
-        counterpartyEntityId: resolvedCounterparty,
-        sellToken: giveToken,
-        buyToken: wantToken,
-        sellAmount: effectiveGiveAmount,
-        buyAmount: effectiveWantAmount,
-        priceTicks: canonicalPriceTicks,
-        routeValue: liveSelectedRouteValue,
-      });
-      const sameInboundPlan = planInboundCapacityForReplica(
-        currentReplica,
-        sourceEntityId,
-        resolvedCounterparty,
-        wantToken,
-        effectiveWantAmount,
-        false,
-      );
-      if (
-        swapRouteMode === 'same'
-        && isInboundCapacityValidationError(liveValidationReason)
-        && sameInboundPlan === null
-      ) {
-        throw new Error('SWAP_INBOUND_PLAN_UNAVAILABLE');
+      if (!activeXlnFunctions?.planSwapCommand) {
+        throw new Error('SWAP_COMMAND_PLANNER_UNAVAILABLE');
       }
-      const shouldAutoPrepareInbound = (
-        swapRouteMode === 'same'
-        && (sameInboundPlan?.setupTxs.length ?? 0) > 0
-        && isInboundCapacityValidationError(liveValidationReason)
-      );
+      const { logicalTimestamp: logicalNow, logicalHeight } = resolveSwapLogicalClock(currentReplica);
       const targetRoute = selectedCrossTarget;
       const targetReplica = targetRoute ? findReplicaByEntityId(targetRoute.targetEntityId) : null;
       const targetAccountExists = Boolean(targetRoute && hasReplicaAccount(targetReplica, targetRoute.targetHubEntityId));
-      const targetInboundPlan = swapRouteMode === 'cross' && targetRoute
-        ? planInboundCapacityForReplica(
-            targetReplica,
-            targetRoute.targetEntityId,
-            targetRoute.targetHubEntityId,
-            wantToken,
-            effectiveWantAmount,
-            !targetAccountExists,
-          )
-        : null;
-      if (swapRouteMode === 'cross' && targetRoute && targetInboundPlan === null) {
-        throw new Error('SWAP_CROSS_TARGET_INBOUND_PLAN_UNAVAILABLE');
+      const sourceJurisdictionRef = getReplicaJurisdictionRef(currentReplica);
+      if (!sourceJurisdictionRef) throw new Error('Source jurisdiction stack is not available.');
+      if (swapRouteMode === 'cross' && !targetRoute) {
+        throw new Error('Select target jurisdiction account.');
       }
-      const now = logicalNow;
-      const crossJurisdiction = (() => {
-        if (swapRouteMode !== 'cross') return null;
-        if (!targetRoute) throw new Error('Select target jurisdiction account.');
-        const sourceJurisdiction = getReplicaJurisdictionName(currentReplica);
-        const sourceJurisdictionRef = getReplicaJurisdictionRef(currentReplica);
-        if (!sourceJurisdiction) throw new Error('Source jurisdiction is not available.');
-        if (!sourceJurisdictionRef) throw new Error('Source jurisdiction stack is not available.');
-        if (!targetRoute.targetJurisdiction) throw new Error('Target jurisdiction is not available.');
-        if (!targetRoute.targetJurisdictionRef) throw new Error('Target jurisdiction stack is not available.');
-        if (sourceJurisdictionRef === targetRoute.targetJurisdictionRef) {
-          throw new Error('Cross-j route requires different jurisdictions.');
-        }
-        const bookOwnerEntityId = deriveCanonicalCrossJurisdictionBookOwnerForLegs(
-          sourceJurisdictionRef,
-          resolvedCounterparty,
-          targetRoute.targetJurisdictionRef,
-          targetRoute.targetHubEntityId,
-        );
-        const sourceHubSignerId = resolveSignerId(resolvedCounterparty);
-        const targetHubSignerId = resolveSignerId(targetRoute.targetHubEntityId);
-        const bookHubSignerId = bookOwnerEntityId.toLowerCase() === resolvedCounterparty.toLowerCase()
-          ? sourceHubSignerId
-          : bookOwnerEntityId.toLowerCase() === targetRoute.targetHubEntityId.toLowerCase()
-            ? targetHubSignerId
-            : resolveSignerId(bookOwnerEntityId);
-        return {
-          orderId: offerId,
-          bookOwnerEntityId,
-          venueId: deriveCanonicalCrossJurisdictionVenueIdForLegs(sourceJurisdictionRef, giveToken, targetRoute.targetJurisdictionRef, wantToken),
-          makerEntityId: sourceEntityId,
-          hubEntityId: bookOwnerEntityId,
-          sourceSignerId: signerId,
-          sourceHubSignerId,
-          targetHubSignerId,
-          targetSignerId: targetRoute.targetSignerId,
-          bookHubSignerId,
-          source: {
-            jurisdiction: sourceJurisdictionRef,
-            entityId: sourceEntityId,
-            counterpartyEntityId: resolvedCounterparty,
-            tokenId: giveToken,
-            amount: effectiveGiveAmount,
-          },
+      const sourceHubSignerId = resolveSignerId(resolvedCounterparty);
+      const commandPlan = activeXlnFunctions.planSwapCommand({
+        mode: swapRouteMode,
+        logicalTimestamp: logicalNow,
+        logicalHeight,
+        routeValue: liveSelectedRouteValue,
+        giveTokenId: giveToken,
+        wantTokenId: wantToken,
+        giveAmount,
+        priceTicks: canonicalPriceTicks,
+        source: {
+          entityId: sourceEntityId,
+          signerId,
+          hubEntityId: resolvedCounterparty,
+          hubSignerId: sourceHubSignerId,
+          jurisdiction: sourceJurisdictionRef,
+          account: currentReplica?.state?.accounts?.get?.(resolvedCounterparty) ?? null,
+        },
+        ...(targetRoute ? {
           target: {
+            entityId: targetRoute.targetEntityId,
+            signerId: targetRoute.targetSignerId,
+            hubEntityId: targetRoute.targetHubEntityId,
+            hubSignerId: resolveSignerId(targetRoute.targetHubEntityId),
             jurisdiction: targetRoute.targetJurisdictionRef,
-            entityId: targetRoute.targetHubEntityId,
-            counterpartyEntityId: targetRoute.targetEntityId,
-            tokenId: wantToken,
-            amount: effectiveWantAmount,
+            account: targetReplica?.state?.accounts?.get?.(targetRoute.targetHubEntityId) ?? null,
           },
-          priceTicks: canonicalPriceTicks,
-          priceImprovementMode: 'source_savings',
-          status: 'intent',
-          createdAt: now,
-          updatedAt: now,
-          expiresAt: now + 24 * 60 * 60 * 1000,
-        } satisfies CrossJurisdictionSwapRoute;
-      })();
-      const entityTxs: EntityTx[] = [];
-      if (shouldAutoPrepareInbound) {
-        entityTxs.push(...(sameInboundPlan?.setupTxs ?? []));
-      }
+          allowOpenTargetAccount: !targetAccountExists,
+        } : {}),
+        expiresInMs: 24 * 60 * 60 * 1_000,
+      });
+      const offerId = commandPlan.offerId;
+      effectiveGiveAmount = commandPlan.preparedOrder.effectiveGive;
+      effectiveWantAmount = commandPlan.preparedOrder.effectiveWant;
+      canonicalPriceTicks = commandPlan.preparedOrder.priceTicks;
+      const crossJurisdiction = commandPlan.crossJurisdictionIntent;
 
-      if (crossJurisdiction && targetRoute) {
-        if (!targetInboundPlan) {
-          throw new Error('SWAP_CROSS_TARGET_INBOUND_PLAN_UNAVAILABLE');
-        }
+      if (commandPlan.mode === 'cross') {
+        if (!targetRoute) throw new Error('SWAP_COMMAND_TARGET_REQUIRED');
         const crossSubmitStartedAt = performance.now();
         performance.measure('xln.cross_j.handler_to_plan', {
           start: placementStartedAt,
           end: crossSubmitStartedAt,
         });
-        const targetSetupTxs = [...targetInboundPlan.setupTxs];
-        if (targetSetupTxs.length > 0) {
+        if (commandPlan.targetSetupInput) {
           const prewarmStartedAt = performance.now();
           await prewarmCounterpartyProfiles(runtimeEnv, [targetRoute.targetHubEntityId]);
           performance.measure('xln.cross_j.profile_prewarm', {
@@ -3030,17 +2995,16 @@
           });
         }
         const runtimeSubmitStartedAt = performance.now();
-        if (targetSetupTxs.length > 0) {
-          await submitRuntimeInput({
-            runtimeTxs: [],
-            entityInputs: [{
-              entityId: targetRoute.targetEntityId,
-              signerId: targetRoute.targetSignerId,
-              entityTxs: targetSetupTxs,
-            }],
-          });
+        if (commandPlan.targetSetupInput) {
+          await submitRuntimeInput(commandPlan.targetSetupInput);
+          await waitForCrossTargetCapacity(
+            targetRoute.targetEntityId,
+            targetRoute.targetHubEntityId,
+            wantToken,
+            commandPlan.preparedOrder.effectiveWant,
+          );
         }
-        await submitActiveCrossJurisdictionIntent(crossJurisdiction);
+        await submitActiveCrossJurisdictionIntent(commandPlan.crossJurisdictionIntent);
         performance.measure('xln.cross_j.runtime_submit', {
           start: runtimeSubmitStartedAt,
           end: performance.now(),
@@ -3050,23 +3014,7 @@
           end: performance.now(),
         });
       } else {
-        entityTxs.push({
-          type: 'placeSwapOffer' as const,
-          data: {
-            offerId,
-            counterpartyEntityId: resolvedCounterparty,
-            giveTokenId: giveToken,
-            giveAmount: effectiveGiveAmount,
-            wantTokenId: wantToken,
-            wantAmount: effectiveWantAmount,
-            priceTicks: canonicalPriceTicks,
-          },
-        });
-        await submitEntityInputs([{
-          entityId: sourceEntityId,
-          signerId,
-          entityTxs,
-        }]);
+        await submitRuntimeInput(commandPlan.runtimeInput);
       }
 
       orderbookRefreshNonce += 1;

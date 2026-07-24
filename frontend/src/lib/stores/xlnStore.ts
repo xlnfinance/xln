@@ -139,6 +139,7 @@ export interface FrontendXlnFunctions {
   deriveDelta: XLNModule['deriveDelta'];
   planSwapInboundCapacity: XLNModule['planSwapInboundCapacity'];
   readSwapAccountCapacity: XLNModule['readSwapAccountCapacity'];
+  planSwapCommand: XLNModule['planSwapCommand'];
   formatTokenAmount: (tokenId: number, amount: bigint | null | undefined) => string;
   getTokenInfo: XLNModule['getTokenInfo'];
   getKnownTokenIds: XLNModule['getKnownTokenIds'];
@@ -1772,6 +1773,7 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
       deriveDelta: failFn('deriveDelta'),
       planSwapInboundCapacity: failFn('planSwapInboundCapacity'),
       readSwapAccountCapacity: failFn('readSwapAccountCapacity'),
+      planSwapCommand: failFn('planSwapCommand'),
       formatTokenAmount: failFn('formatTokenAmount'),
       getTokenInfo: failFn('getTokenInfo'),
       getKnownTokenIds: failFn('getKnownTokenIds'),
@@ -1833,6 +1835,7 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
     deriveDelta: $xlnInstance.deriveDelta,
     planSwapInboundCapacity: $xlnInstance.planSwapInboundCapacity,
     readSwapAccountCapacity: $xlnInstance.readSwapAccountCapacity,
+    planSwapCommand: $xlnInstance.planSwapCommand,
     // Frontend display formatter with configurable precision from Settings.
     // Signature used across UI: formatTokenAmount(tokenId, amount).
     formatTokenAmount: formatTokenAmountUi,

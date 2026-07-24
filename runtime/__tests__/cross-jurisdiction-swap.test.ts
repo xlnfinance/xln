@@ -24,6 +24,7 @@ import {
   createEmptyEnv,
   handleInboundP2PEntityInputs,
   prepareAtomicCrossJAccountInputs,
+  submitCrossJurisdictionIntent,
   submitCrossJurisdictionSwap,
 } from '../runtime';
 import { buildCrossJurisdictionSwapSubmission } from '../machine/jurisdiction-api';
@@ -1267,6 +1268,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     hubEnv.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     hubEnv.quietRuntimeLogs = true;
+    env.runtimeState!.lifecyclePhase = 'running';
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const base = makeJurisdiction('Base', 8453, '21', '22');
     installJurisdictions(env, eth, base);
@@ -1357,6 +1359,18 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(relayAttempts).toBe(3);
     expect([...hubEnv.runtimeState!.securityIncidents!.values()].map(incident => incident.code))
       .toContain('CROSS_J_INTENT_ORDER_ID_CONFLICT');
+    const targetReceivingAccount = targetUserState.accounts.get(targetHub)!;
+    const targetReceivingDelta = targetReceivingAccount.deltas.get(1)!;
+    const previousLeftCredit = targetReceivingDelta.leftCreditLimit;
+    const previousRightCredit = targetReceivingDelta.rightCreditLimit;
+    targetReceivingDelta.leftCreditLimit = 0n;
+    targetReceivingDelta.rightCreditLimit = 0n;
+    await expect(submitCrossJurisdictionIntent(env, result.route))
+      .rejects.toThrow('CROSS_J_TARGET_INBOUND_NOT_READY');
+    expect(directAttempts).toBe(3);
+    expect(relayAttempts).toBe(3);
+    targetReceivingDelta.leftCreditLimit = previousLeftCredit;
+    targetReceivingDelta.rightCreditLimit = previousRightCredit;
 
     const queued = hubEnv.runtimeMempool?.entityInputs ?? [];
     expect(result.hashlock).toBeUndefined();
