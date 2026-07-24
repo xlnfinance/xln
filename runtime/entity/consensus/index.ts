@@ -56,7 +56,6 @@ import {
   shortHash,
   shortId,
   shortOrder,
-  shouldLogFullPayloads,
 } from '../../infra/logger';
 import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from '../../account/consensus/flush';
 import { resolveCertifiedAccountCounterpartyProposer } from '../../account/counterparty-route';
@@ -3187,13 +3186,6 @@ export const applyEntityInput = async (
     const voteTransactions = suppliedEntityTxs.filter(tx => tx.type === 'vote');
     if (voteTransactions.length > 0) {
       entityLog.debug('vote.mempool', { signer: shortId(workingReplica.signerId), count: voteTransactions.length });
-      if (shouldLogFullPayloads()) entityLog.trace('vote.payload', { txs: voteTransactions });
-    }
-
-    if (shouldLogFullPayloads()) {
-      for (const tx of admittedEntityTxs) {
-        entityLog.trace('tx.payload', { type: tx.type, data: tx.data });
-      }
     }
     if (trustedLocalCrossJurisdiction) {
       if (!localCanPropose) {
@@ -4814,11 +4806,6 @@ export const applyEntityFrame = async (
     frameProfileMarks[label] = Math.round(getPerfMs() - frameProfileStartMs);
   };
   entityLog.debug('frame.apply', { txs: entityTxs.map(tx => tx.type) });
-  if (shouldLogFullPayloads()) {
-    entityTxs.forEach((tx, index) => {
-      entityLog.trace('frame.tx_payload', { index, type: tx.type, data: tx.data });
-    });
-  }
 
   // Work on a clone so failed frame construction cannot leak mutations.
   const authorityNormalizedState = normalizeEntityProposalBoard(

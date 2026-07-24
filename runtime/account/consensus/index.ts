@@ -23,8 +23,8 @@ import { HEAVY_LOGS } from '../../utils';
 import { safeStringify } from '../../protocol/serialization';
 import { applyAccountTx } from '../tx/apply';
 import { appendAccountFrameHistoryView, getAccountFrameHistoryView, recordAccountFrameHistory } from '../../machine/env-events';
-import { deriveAccountFrameOffdeltas, deriveAccountFrameTokenIds } from '../frame';
-import { createStructuredLogger, shortHash, shortId, shouldLogFullPayloads } from '../../infra/logger';
+import { deriveAccountFrameTokenIds } from '../frame';
+import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import {
   createFrameHash,
   getAccountFrameValidationError,
@@ -701,13 +701,6 @@ async function handlePendingFrameAck(
     tokens: tokenIds,
     state: shortHash(frameHash),
   });
-  if (shouldLogFullPayloads()) {
-    accountLog.trace('frame.commit.payload', {
-      txs: accountMachine.pendingFrame.accountTxs,
-      offdeltas: deriveAccountFrameOffdeltas(accountMachine.pendingFrame).map(d => d.toString()),
-    });
-  }
-
   // PROPOSER COMMIT: Re-execute txs on REAL state (Channel.ts pattern)
   // This eliminates fragile manual field copying
   const { counterparty: cpForLog } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
@@ -758,14 +751,6 @@ async function handlePendingFrameAck(
     height: accountMachine.pendingFrame.height,
     tokens: accountMachine.deltas.size,
   });
-  if (shouldLogFullPayloads()) {
-    accountLog.trace('frame.commit.deltas', {
-      side: 'proposer',
-      counterparty: shortId(cpForLog),
-      deltas: summarizeDeltasForLog(accountMachine.deltas),
-    });
-  }
-
   // Clean up clone (no longer needed with re-execution)
   delete accountMachine.clonedForValidation;
 
@@ -1402,13 +1387,6 @@ async function validateIncomingFrameOnClone(
     height: receivedFrame.height,
     txs: receivedFrame.accountTxs.map(tx => tx.type),
   });
-  if (shouldLogFullPayloads()) {
-    accountLog.trace('frame.receiver_initial_deltas', {
-      height: receivedFrame.height,
-      deltas: summarizeDeltasForLog(clonedMachine.deltas),
-    });
-  }
-
   for (const accountTx of receivedFrame.accountTxs) {
     const beforeSettlement = captureSettlementVector(clonedMachine);
     const result = await applyAccountTx(
@@ -1563,14 +1541,6 @@ async function commitIncomingFrameOnRealState(
     height: receivedFrame.height,
     tokens: accountMachine.deltas.size,
   });
-  if (shouldLogFullPayloads()) {
-    accountLog.trace('frame.commit.deltas', {
-      side: 'receiver',
-      counterparty: shortId(cpForCommitLog),
-      deltas: summarizeDeltasForLog(accountMachine.deltas),
-    });
-  }
-
   if (validation.clonedMachine.pendingForwards?.length) {
     accountMachine.pendingForwards = validation.clonedMachine.pendingForwards;
     accountLog.debug('pending_forwards.copied', {

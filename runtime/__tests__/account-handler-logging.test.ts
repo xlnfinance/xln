@@ -102,8 +102,8 @@ test('account input without frame or settlement action fails fast', async () => 
         chainId: jurisdiction.chainId!,
         depositoryAddress: jurisdiction.depositoryAddress,
       },
-    }, env)).rejects.toThrow('ACCOUNT_INPUT_EMPTY');
-    expect(state.messages.at(-1)).toContain('ACCOUNT_INPUT_EMPTY');
+    }, env)).rejects.toThrow('ACCOUNT_GENESIS_FRAME_REQUIRED');
+    expect(state.messages.at(-1)).toContain('ACCOUNT_GENESIS_FRAME_REQUIRED');
   } finally {
     if (previousScopes === undefined) delete process.env['XLN_LOG_SCOPES'];
     else process.env['XLN_LOG_SCOPES'] = previousScopes;

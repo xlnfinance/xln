@@ -24,6 +24,7 @@ import {
   selectProfileBatch,
   type GossipProfileBatchRequest,
 } from './profile-batch';
+import { redactTelemetryValue } from '../infra/telemetry-redaction';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -376,11 +377,13 @@ const updateDebugIncident = (store: RelayStore, event: RelayDebugEvent): void =>
 
 export const pushDebugEvent = (store: RelayStore, event: Omit<RelayDebugEvent, 'id' | 'ts'>): void => {
   store.debugId += 1;
-  const delivery = event.delivery ?? (event.event === 'delivery' ? classifyRelayDeliveryEvent(event) ?? undefined : undefined);
+  const redactedEvent = redactTelemetryValue(event) as Omit<RelayDebugEvent, 'id' | 'ts'>;
+  const delivery = redactedEvent.delivery ??
+    (redactedEvent.event === 'delivery' ? classifyRelayDeliveryEvent(redactedEvent) ?? undefined : undefined);
   const storedEvent: RelayDebugEvent = {
     id: store.debugId,
     ts: Date.now(),
-    ...event,
+    ...redactedEvent,
     ...(delivery ? { delivery } : {}),
   };
   store.debugEvents.push(storedEvent);

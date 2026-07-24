@@ -495,7 +495,7 @@ import {
   getSignerDisplayInfo,
   log,
 } from './utils';
-import { createStructuredLogger, logError } from './infra/logger';
+import { createStructuredLogger, logError, shortId } from './infra/logger';
 import type { PersistedFrameJournal } from './storage/types';
 import { verifyStorageTailIntegrity } from './storage/verify';
 import {
@@ -2653,7 +2653,11 @@ const applyRuntimeInput = async (
       } catch (error) {
         logError('RUNTIME_TICK', `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityInput[${i}] before merge!`, {
           error: (error as Error).message,
-          input,
+          entityId: shortId(input?.entityId, 12),
+          signerId: shortId(input?.signerId, 12),
+          sourceRuntimeId: shortId(input?.from, 12),
+          sourceRuntimeHeight: (input as Partial<RoutedEntityInput>).sourceRuntimeFrame?.height ?? null,
+          entityTxTypes: Array.isArray(input?.entityTxs) ? input.entityTxs.map(tx => tx?.type) : [],
         });
         throw error; // Fail fast
       }
