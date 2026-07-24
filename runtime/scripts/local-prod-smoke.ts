@@ -413,25 +413,31 @@ const commitPostRotationProofFrames = async (): Promise<void> => {
       if (!commandSequence) {
         throw new Error(`LOCAL_PROD_SMOKE_EPOCH_COMMAND_FRONTIER_MISSING:${label}`);
       }
-      const commandId = `epoch-rotation-proof-${label.toLowerCase()}`;
-      const deadline = Date.now() + 20_000;
-      let result = await adapter.send(
-        { runtimeTxs: [], entityInputs: [] },
-        { commandId, commandSequence },
-      );
-      while (result.status !== 'observed' && Date.now() < deadline) {
-        // The production admin lane intentionally replenishes five sends per
-        // second. Poll below that rate instead of weakening the real limiter.
-        await sleep(250);
-        result = await adapter.send(
+      // The first marker may itself be the byte-threshold rotation frame. The
+      // second must therefore commit through the newly published live handle.
+      for (let proofIndex = 0; proofIndex < 2; proofIndex++) {
+        const sequence = commandSequence + proofIndex;
+        const commandId = `epoch-rotation-proof-${label.toLowerCase()}-${proofIndex + 1}`;
+        const deadline = Date.now() + 20_000;
+        let result = await adapter.send(
           { runtimeTxs: [], entityInputs: [] },
-          { commandId, commandSequence },
+          { commandId, commandSequence: sequence },
         );
-      }
-      if (result.status !== 'observed') {
-        throw new Error(
-          `LOCAL_PROD_SMOKE_EPOCH_PROOF_FRAME_NOT_OBSERVED:${label}:height=${result.height}`,
-        );
+        while (result.status !== 'observed' && Date.now() < deadline) {
+          // The production admin lane intentionally replenishes five sends per
+          // second. Poll below that rate instead of weakening the real limiter.
+          await sleep(250);
+          result = await adapter.send(
+            { runtimeTxs: [], entityInputs: [] },
+            { commandId, commandSequence: sequence },
+          );
+        }
+        if (result.status !== 'observed') {
+          throw new Error(
+            `LOCAL_PROD_SMOKE_EPOCH_PROOF_FRAME_NOT_OBSERVED:` +
+            `${label}:proof=${proofIndex + 1}:height=${result.height}`,
+          );
+        }
       }
     } finally {
       adapter.disconnect();
