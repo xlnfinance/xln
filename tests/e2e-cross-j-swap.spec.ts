@@ -136,11 +136,16 @@ function expectMarketMakerSameAndCrossBooksHealthy(health: E2EHealthResponse): v
   expect(marketMaker?.hubs?.length ?? 0, 'market maker must publish same-chain books for all primary hubs').toBeGreaterThanOrEqual(3);
   for (const hub of marketMaker?.hubs ?? []) {
     expect(hub.ready, `same-chain MM hub ${hub.hubEntityId} must be ready`).toBe(true);
-    expect(hub.offers, `same-chain MM hub ${hub.hubEntityId} must expose resting offers`).toBeGreaterThan(0);
+    expect(hub.depthReady, `same-chain MM hub ${hub.hubEntityId} must expose exact configured depth`).toBe(true);
+    let expectedHubOffers = 0;
     for (const pair of hub.pairs ?? []) {
       expect(pair.ready, `same-chain MM pair ${pair.pairId} on hub ${hub.hubEntityId} must be ready`).toBe(true);
-      expect(pair.offers, `same-chain MM pair ${pair.pairId} on hub ${hub.hubEntityId} must expose offers`).toBeGreaterThan(0);
+      expect(pair.depthReady, `same-chain MM pair ${pair.pairId} on hub ${hub.hubEntityId} must expose exact configured depth`).toBe(true);
+      expect(pair.expectedOffers, `same-chain MM pair ${pair.pairId} must declare expected depth`).toBeGreaterThan(0);
+      expect(pair.offers, `same-chain MM pair ${pair.pairId} must contain exactly its configured offers`).toBe(pair.expectedOffers);
+      expectedHubOffers += Number(pair.expectedOffers);
     }
+    expect(hub.offers, `same-chain MM hub ${hub.hubEntityId} must contain only its configured offers`).toBe(expectedHubOffers);
   }
 
   const cross = marketMaker?.cross;
@@ -188,12 +193,17 @@ function expectMarketMakerSameAndCrossBooksHealthy(health: E2EHealthResponse): v
   expect(tronOnlyLeaksIntoTestnet, 'Testnet side must not publish Tron-only token ids').toEqual([]);
   for (const route of cross?.routes ?? []) {
     expect(route.ready, `cross MM route ${route.sourceHubEntityId}->${route.targetHubEntityId} must be ready`).toBe(true);
-    expect(route.offers, `cross MM route ${route.sourceHubEntityId}->${route.targetHubEntityId} must expose offers`).toBeGreaterThan(0);
+    expect(route.depthReady, `cross MM route ${route.sourceHubEntityId}->${route.targetHubEntityId} must expose exact configured depth`).toBe(true);
     expect(route.sourceJurisdiction, 'cross MM route source jurisdiction must be present').not.toEqual(route.targetJurisdiction);
+    let expectedRouteOffers = 0;
     for (const pair of route.pairs ?? []) {
       expect(pair.ready, `cross MM pair ${pair.pairId} on ${route.sourceHubEntityId}->${route.targetHubEntityId} must be ready`).toBe(true);
-      expect(pair.offers, `cross MM pair ${pair.pairId} on ${route.sourceHubEntityId}->${route.targetHubEntityId} must expose offers`).toBeGreaterThan(0);
+      expect(pair.depthReady, `cross MM pair ${pair.pairId} on ${route.sourceHubEntityId}->${route.targetHubEntityId} must expose exact configured depth`).toBe(true);
+      expect(pair.expectedOffers, `cross MM pair ${pair.pairId} must declare expected depth`).toBeGreaterThan(0);
+      expect(pair.offers, `cross MM pair ${pair.pairId} must contain exactly its configured offers`).toBe(pair.expectedOffers);
+      expectedRouteOffers += Number(pair.expectedOffers);
     }
+    expect(route.offers, `cross MM route ${route.sourceHubEntityId}->${route.targetHubEntityId} must contain only configured offers`).toBe(expectedRouteOffers);
   }
 }
 

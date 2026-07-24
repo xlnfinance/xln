@@ -34,10 +34,13 @@ export type E2EMarketMakerHubHealth = {
   hubEntityId: string;
   offers: number;
   ready: boolean;
+  depthReady?: boolean;
   pairs?: Array<{
     pairId: string;
     offers: number;
     ready: boolean;
+    depthReady?: boolean;
+    expectedOffers?: number;
     sourceTokenIds?: number[];
     targetTokenIds?: number[];
   }>;
@@ -50,10 +53,13 @@ export type E2EMarketMakerCrossRouteHealth = {
   targetHubEntityId: string;
   offers: number;
   ready: boolean;
+  depthReady?: boolean;
   pairs?: Array<{
     pairId: string;
     offers: number;
     ready: boolean;
+    depthReady?: boolean;
+    expectedOffers?: number;
   }>;
 };
 
