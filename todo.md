@@ -12,11 +12,9 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   first diagnostic query and release gate. Route every remaining frontend,
   orchestrator and J-machine fatal into it. Prove a failed managed child is
   replaced from the exact committed height/root without duplicate dispatch or
-  J-submit, and unresolved incidents block release. A fatal/error root must
-  survive an info/gossip flood, child restart and cursor resume, while secret
-  sentinels never reach any sink. All money controls must derive readiness from
-  the same Runtime lifecycle gate and perform zero enqueue while halted,
-  quiescing or restoring.
+  J-submit, and unresolved incidents block release. All money controls must
+  derive readiness from the same Runtime lifecycle gate and perform zero
+  enqueue while halted, quiescing or restoring.
 - [ ] Extend the proven halted banner/root-incident link and disabled money
   controls to a real browser running → quiescing/restoring → running process
   transition. The remote halted screenshot, adapter propagation and zero
