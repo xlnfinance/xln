@@ -4827,15 +4827,9 @@ export const applyEntityFrame = async (
     throw new Error(`ENTITY_FRAME_TIMESTAMP_INVALID:${String(effectiveFrameTimestamp)}`);
   }
   if (effectiveFrameTimestamp < currentEntityState.timestamp) {
-    entityLog.warn('frame.timestamp_regressed_accepted', {
-      entityId: currentEntityState.entityId,
-      previousHeight: currentEntityState.height,
-      nextHeight: currentEntityState.height + 1,
-      previousTimestamp: currentEntityState.timestamp,
-      proposedTimestamp: effectiveFrameTimestamp,
-      regressionMs: currentEntityState.timestamp - effectiveFrameTimestamp,
-      runtimeTimestamp: env.timestamp,
-    });
+    throw new Error(
+      `ENTITY_FRAME_TIMESTAMP_REGRESSION:previous=${currentEntityState.timestamp}:proposed=${effectiveFrameTimestamp}`,
+    );
   }
   currentEntityState.timestamp = effectiveFrameTimestamp;
   const allOutputs: EntityInput[] = [];

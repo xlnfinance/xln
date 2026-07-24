@@ -7,26 +7,13 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 `docs/mainnet-engineering-principles.md`.
 
 ## 0. Commit-boundary correctness — P0, owner-approved
-
-- [ ] Reject Entity-frame timestamp regression before transaction application.
-  Deadline admission uses the monotonic Entity/J clock. A late bilateral
-  Account frame may retain its signed timestamp, but cannot make expired
-  HTLC/pull evidence valid because acceptance never uses that timestamp as the
-  receiver's clock.
 - [ ] Return rebalance/debug/history notifications as typed candidate effects
   and publish them only after the exact Entity hash commits. Remove direct
   `p2p.sendDebugEvent` calls from Account reducers and J-event mutation paths;
   rejected validation, proposer/validator replay and restart must publish zero,
   one and still one canonical fingerprint respectively.
 
-## 1. Ingress and contract boundedness — P0/P1, owner-approved
-
-- [ ] Integrate `main`'s canonical per-operation best-effort J-batch execution
-  together with byte-for-byte binding of every submitted object to its sealed
-  `encodedBatch`, chain/depository/nonce domain and hash before BrowserVM or RPC
-  mutation. Preserve this candidate's contract P0 hardening, regenerate the
-  single ABI/artifact/typechain set, and rerun the real adapter regressions.
-  Owner approved the canonical semantics and removal of legacy paths.
+## 1. Contract boundedness — P0/P1, owner-approved
 - [ ] Replace the unbounded `_forgiveDebtsBetweenEntities` queue scan with an
   indexed or bounded-continuation structure. Prove exact debt conservation and
   bounded gas with adversarial creditor ordering.
@@ -62,12 +49,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   restore and dispute recovery before removing plaintext duplication.
 
 ## 3. Crash, corruption and load evidence — P1, open
-
-- [ ] Strengthen cross-J browser E2E from lifecycle-only evidence to exact
-  financial evidence across all four source/target Account perspectives.
-  Full fill must close the order and clear pulls/holds; partial GTC must retain
-  only the exact remainder until manual Clear; restart must preserve history
-  and restore exactly 10 bids plus 10 asks.
 - [ ] Add one real Anvil contract-event dispute E2E after payment, HTLC,
   same-J/cross-J swap and pull state. Exercise malformed/oversized optional
   transformer arguments, compare final Depository reserves/debts to the
