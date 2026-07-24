@@ -17,7 +17,7 @@ test('portable contract artifacts carry bounded immutable metadata without build
   const root = join(import.meta.dir, '..', '..');
   const immutableGroupCounts = new Map<string, number>();
 
-  for (const contractName of ['Account', 'Depository', 'EntityProvider', 'DeltaTransformer']) {
+  for (const contractName of ['Account', 'Depository', 'EntityProvider', 'HankoVerifier', 'DeltaTransformer']) {
     const artifact = JSON.parse(readFileSync(
       join(root, 'frontend', 'static', 'contracts', `${contractName}.json`),
       'utf8',

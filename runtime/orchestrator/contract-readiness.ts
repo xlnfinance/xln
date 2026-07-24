@@ -30,12 +30,14 @@ const CONTRACT_ARTIFACT_NAMES = {
   depository: 'Depository',
   entityProvider: 'EntityProvider',
   deltaTransformer: 'DeltaTransformer',
+  hankoVerifier: 'HankoVerifier',
 } as const;
+type CanonicalArtifactKey = keyof typeof CONTRACT_ARTIFACT_NAMES;
 
-let canonicalArtifacts: Record<(typeof REQUIRED_RPC_CONTRACT_KEYS)[number], ContractArtifact> | null = null;
+let canonicalArtifacts: Record<CanonicalArtifactKey, ContractArtifact> | null = null;
 
 const validateCanonicalArtifact = (
-  key: (typeof REQUIRED_RPC_CONTRACT_KEYS)[number],
+  key: CanonicalArtifactKey,
   value: unknown,
 ): ContractArtifact => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -132,26 +134,29 @@ const readRpcContractCodes = async (
   }));
 };
 
-const loadCanonicalArtifacts = (): Record<(typeof REQUIRED_RPC_CONTRACT_KEYS)[number], ContractArtifact> => {
+const loadCanonicalArtifacts = (): Record<CanonicalArtifactKey, ContractArtifact> => {
   if (canonicalArtifacts) return canonicalArtifacts;
-  canonicalArtifacts = Object.fromEntries(REQUIRED_RPC_CONTRACT_KEYS.map((key) => {
+  canonicalArtifacts = Object.fromEntries((Object.keys(CONTRACT_ARTIFACT_NAMES) as CanonicalArtifactKey[]).map((key) => {
     const name = CONTRACT_ARTIFACT_NAMES[key];
     const path = fileURLToPath(new URL(`../../frontend/static/contracts/${name}.json`, import.meta.url));
     const artifact = validateCanonicalArtifact(key, JSON.parse(readFileSync(path, 'utf8')));
     return [key, artifact];
-  })) as Record<(typeof REQUIRED_RPC_CONTRACT_KEYS)[number], ContractArtifact>;
+  })) as Record<CanonicalArtifactKey, ContractArtifact>;
   return canonicalArtifacts;
 };
 
 const linkDeployedBytecode = (
   artifact: ContractArtifact,
-  accountAddress: string,
+  libraryAddresses: Readonly<Record<string, string>>,
 ): string => {
   let hex = artifact.deployedBytecode.slice(2);
   for (const libraries of Object.values(artifact.deployedLinkReferences)) {
     for (const [libraryName, references] of Object.entries(libraries)) {
-      if (libraryName !== 'Account') throw new Error(`RPC_CANONICAL_LIBRARY_UNSUPPORTED:${libraryName}`);
-      const address = accountAddress.slice(2).toLowerCase();
+      const libraryAddress = String(libraryAddresses[libraryName] || '');
+      if (!/^0x[0-9a-fA-F]{40}$/.test(libraryAddress)) {
+        throw new Error(`RPC_CANONICAL_LIBRARY_ADDRESS_MISSING:${libraryName}`);
+      }
+      const address = libraryAddress.slice(2).toLowerCase();
       for (const reference of references) {
         if (reference.length !== 20) throw new Error(`RPC_CANONICAL_LIBRARY_LENGTH_INVALID:${libraryName}`);
         const offset = reference.start * 2;
@@ -160,6 +165,46 @@ const linkDeployedBytecode = (
     }
   }
   return `0x${hex}`;
+};
+
+const readLinkedLibraryAddress = (
+  artifact: ContractArtifact,
+  actualCode: string,
+  libraryName: string,
+): string => {
+  const references = Object.values(artifact.deployedLinkReferences)
+    .flatMap(libraries => libraries[libraryName] ?? []);
+  if (references.length === 0) throw new Error(`RPC_CANONICAL_LIBRARY_REFERENCE_MISSING:${libraryName}`);
+  const actual = actualCode.slice(2);
+  const addresses = new Set(references.map((reference) => {
+    if (reference.length !== 20) throw new Error(`RPC_CANONICAL_LIBRARY_LENGTH_INVALID:${libraryName}`);
+    const value = actual.slice(reference.start * 2, (reference.start + reference.length) * 2);
+    if (!/^[0-9a-fA-F]{40}$/.test(value) || /^0{40}$/.test(value)) {
+      throw new Error(`RPC_CANONICAL_LIBRARY_VALUE_INVALID:${libraryName}`);
+    }
+    return `0x${value.toLowerCase()}`;
+  }));
+  if (addresses.size !== 1) throw new Error(`RPC_CANONICAL_LIBRARY_BINDING_INCONSISTENT:${libraryName}`);
+  return [...addresses][0]!;
+};
+
+const readRpcCodeAt = async (
+  rpcUrl: string,
+  address: string,
+  context: string,
+  timeoutMs: number,
+): Promise<string> => {
+  const responses = await fetchRpcBatch(rpcUrl, [{
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'eth_getCode',
+    params: [address, 'latest'],
+  }], timeoutMs);
+  const entry = responses.get(1);
+  if (!entry || entry.error || typeof entry.result !== 'string') {
+    throw new Error(`${context}_CODE_RESULT_INVALID:${String(entry?.error?.message || 'missing')}`);
+  }
+  return entry.result;
 };
 
 const materializeImmutableReferences = (
@@ -230,9 +275,27 @@ export const assertCanonicalRpcContractStack = async (
   if (invalid.length > 0) throw new Error(`${context}_CONTRACTS_INVALID:${invalid.join(',')}`);
   const artifacts = loadCanonicalArtifacts();
   const codes = await readRpcContractCodes(rpcUrl, contracts, timeoutMs);
+  const entityProviderCode = String(codes.get('entityProvider'));
+  const hankoVerifierAddress = readLinkedLibraryAddress(
+    artifacts.entityProvider,
+    entityProviderCode,
+    'HankoVerifier',
+  );
+  const hankoVerifierCode = await readRpcCodeAt(
+    rpcUrl,
+    hankoVerifierAddress,
+    `${context}_HANKO_VERIFIER`,
+    timeoutMs,
+  );
+  if (hankoVerifierCode.toLowerCase() !== artifacts.hankoVerifier.deployedBytecode.toLowerCase()) {
+    throw new Error(`${context}_CODE_MISMATCH:hankoVerifier`);
+  }
   for (const key of REQUIRED_RPC_CONTRACT_KEYS) {
     const actual = String(codes.get(key)).toLowerCase();
-    const linkedExpected = linkDeployedBytecode(artifacts[key], String(contracts.account));
+    const linkedExpected = linkDeployedBytecode(artifacts[key], {
+      Account: String(contracts.account),
+      HankoVerifier: hankoVerifierAddress,
+    });
     const expected = materializeImmutableReferences(key, artifacts[key], linkedExpected, actual, contracts, context);
     const normalizedExpected = expected.toLowerCase();
     if (actual !== normalizedExpected) {
