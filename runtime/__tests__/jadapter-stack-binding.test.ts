@@ -8,6 +8,7 @@ import { ethers } from 'ethers';
 
 import {
   EntityProvider__factory,
+  HankoVerifier__factory,
   ERC721Mock__factory,
   SupplyLivenessHarness__factory,
 } from '../../jurisdictions/typechain-types/index.ts';
@@ -17,6 +18,21 @@ import { createTokenCatalogController } from '../server/token-catalog';
 import type { JReplica } from '../types';
 
 const CHAIN_ID = 31_337;
+
+const deployEntityProvider = async (signer: ethers.Signer) => {
+  const verifier = await new HankoVerifier__factory(signer).deploy({ gasLimit: 15_000_000n });
+  await verifier.waitForDeployment();
+  const bytecode = EntityProvider__factory.linkBytecode({
+    'contracts/HankoVerifier.sol:HankoVerifier': await verifier.getAddress(),
+  });
+  const provider = await new ethers.ContractFactory(
+    EntityProvider__factory.abi,
+    bytecode,
+    signer,
+  ).deploy(await signer.getAddress(), { gasLimit: 15_000_000n });
+  await provider.waitForDeployment();
+  return provider;
+};
 
 type ManagedAnvil = {
   child: ChildProcessWithoutNullStreams;
@@ -116,12 +132,7 @@ test('RPC fromReplica rejects a live EntityProvider not bound to the Depository'
     );
     await deployed.deployStack();
 
-    const secondProvider = await new ethers.ContractFactory(
-      EntityProvider__factory.abi,
-      EntityProvider__factory.bytecode,
-      deployed.signer,
-    ).deploy(await deployed.signer.getAddress());
-    await secondProvider.waitForDeployment();
+    const secondProvider = await deployEntityProvider(deployed.signer);
     const secondProviderAddress = await secondProvider.getAddress();
     expect(await deployed.provider.getCode(secondProviderAddress)).not.toBe('0x');
     expect((await deployed.depository.entityProvider()).toLowerCase()).toBe(
@@ -219,12 +230,7 @@ test('BrowserVM restore rejects state metadata pointing at a second live EntityP
   const source = await createJAdapter({ mode: 'browservm', chainId: CHAIN_ID });
   try {
     await source.deployStack();
-    const secondProvider = await new ethers.ContractFactory(
-      EntityProvider__factory.abi,
-      EntityProvider__factory.bytecode,
-      source.signer,
-    ).deploy(await source.signer.getAddress(), { gasLimit: 100_000_000n });
-    await secondProvider.waitForDeployment();
+    const secondProvider = await deployEntityProvider(source.signer);
     const secondProviderAddress = await secondProvider.getAddress();
     expect(await source.provider.getCode(secondProviderAddress)).not.toBe('0x');
     expect((await source.depository.entityProvider()).toLowerCase()).toBe(

@@ -23,19 +23,17 @@ import type {
   TypedContractMethod,
 } from "../../common";
 
-export declare namespace EntityProvider {
-  export type EntityArticlesStruct = {
-    controlDelay: BigNumberish;
-    dividendDelay: BigNumberish;
-    foundationDelay: BigNumberish;
-  };
+export type EntityArticlesStruct = {
+  controlDelay: BigNumberish;
+  dividendDelay: BigNumberish;
+  foundationDelay: BigNumberish;
+};
 
-  export type EntityArticlesStructOutput = [
-    controlDelay: bigint,
-    dividendDelay: bigint,
-    foundationDelay: bigint
-  ] & { controlDelay: bigint; dividendDelay: bigint; foundationDelay: bigint };
-}
+export type EntityArticlesStructOutput = [
+  controlDelay: bigint,
+  dividendDelay: bigint,
+  foundationDelay: bigint
+] & { controlDelay: bigint; dividendDelay: bigint; foundationDelay: bigint };
 
 export interface EntityProviderSupplyHarnessInterface extends Interface {
   getFunction(
@@ -43,7 +41,13 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
       | "BOARD_GRACE_PERIOD"
       | "BOARD_PROPOSAL_CANCEL_DOMAIN"
       | "BOARD_PROPOSAL_DOMAIN"
+      | "FOUNDATION_ACTION_DOMAIN"
+      | "FOUNDATION_ASSIGN_NAME"
       | "FOUNDATION_ENTITY"
+      | "FOUNDATION_REGISTER_ENTITY"
+      | "FOUNDATION_SET_NAME_QUOTA"
+      | "FOUNDATION_SET_RESERVED_NAME"
+      | "FOUNDATION_TRANSFER_NAME"
       | "MAX_SHARE_SUPPORTERS"
       | "TOTAL_CONTROL_SUPPLY"
       | "TOTAL_DIVIDEND_SUPPLY"
@@ -51,7 +55,6 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
       | "assignName"
       | "balanceOf"
       | "balanceOfBatch"
-      | "batchVerifyHankoSignatures"
       | "boardActionNonces"
       | "boardEpochs"
       | "cancelBoardProposal"
@@ -60,6 +63,7 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
       | "computeBoardProposalHash"
       | "computeCancelEntityProviderActionHankoHash"
       | "computeEntityTransferHankoHash"
+      | "computeFoundationActionHash"
       | "computeReleaseControlSharesHankoHash"
       | "encodeBoardProposalCancelHankoPayload"
       | "encodeBoardProposalHankoPayload"
@@ -96,6 +100,7 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
       | "supportsInterface"
       | "transferName"
       | "uri"
+      | "verifyCurrentHankoSignature"
       | "verifyHankoSignature"
   ): FunctionFragment;
 
@@ -108,6 +113,7 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
       | "EntityProviderActionCancelled"
       | "EntityProviderActionExecuted"
       | "EntityRegistered"
+      | "FoundationActionExecuted"
       | "FoundationBootstrapped"
       | "GovernanceEnabled"
       | "NameAssigned"
@@ -131,7 +137,31 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
     values?: undefined
   ): string;
   encodeFunctionData(
+    functionFragment: "FOUNDATION_ACTION_DOMAIN",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "FOUNDATION_ASSIGN_NAME",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
     functionFragment: "FOUNDATION_ENTITY",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "FOUNDATION_REGISTER_ENTITY",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "FOUNDATION_SET_NAME_QUOTA",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "FOUNDATION_SET_RESERVED_NAME",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "FOUNDATION_TRANSFER_NAME",
     values?: undefined
   ): string;
   encodeFunctionData(
@@ -152,7 +182,7 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "assignName",
-    values: [string, BigNumberish]
+    values: [string, BigNumberish, BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "balanceOf",
@@ -161,10 +191,6 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
   encodeFunctionData(
     functionFragment: "balanceOfBatch",
     values: [AddressLike[], BigNumberish[]]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "batchVerifyHankoSignatures",
-    values: [BytesLike[], BytesLike[]]
   ): string;
   encodeFunctionData(
     functionFragment: "boardActionNonces",
@@ -203,6 +229,10 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
       BigNumberish,
       BigNumberish
     ]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "computeFoundationActionHash",
+    values: [BytesLike, BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "computeReleaseControlSharesHankoHash",
@@ -263,7 +293,7 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "foundationRegisterEntity",
-    values: [BytesLike, EntityProvider.EntityArticlesStruct]
+    values: [BytesLike, EntityArticlesStruct, BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "getEntityFromToken",
@@ -360,11 +390,11 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "setNameQuota",
-    values: [AddressLike, BigNumberish]
+    values: [AddressLike, BigNumberish, BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "setReservedName",
-    values: [string, boolean]
+    values: [string, boolean, BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "supportsInterface",
@@ -372,9 +402,13 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "transferName",
-    values: [string, BigNumberish]
+    values: [string, BigNumberish, BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(functionFragment: "uri", values: [BigNumberish]): string;
+  encodeFunctionData(
+    functionFragment: "verifyCurrentHankoSignature",
+    values: [BytesLike, BytesLike]
+  ): string;
   encodeFunctionData(
     functionFragment: "verifyHankoSignature",
     values: [BytesLike, BytesLike]
@@ -393,7 +427,31 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "FOUNDATION_ACTION_DOMAIN",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "FOUNDATION_ASSIGN_NAME",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "FOUNDATION_ENTITY",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "FOUNDATION_REGISTER_ENTITY",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "FOUNDATION_SET_NAME_QUOTA",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "FOUNDATION_SET_RESERVED_NAME",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "FOUNDATION_TRANSFER_NAME",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -416,10 +474,6 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
   decodeFunctionResult(functionFragment: "balanceOf", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "balanceOfBatch",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "batchVerifyHankoSignatures",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -452,6 +506,10 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "computeEntityTransferHankoHash",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "computeFoundationActionHash",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -586,6 +644,10 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "uri", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "verifyCurrentHankoSignature",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(
     functionFragment: "verifyHankoSignature",
     data: BytesLike
@@ -763,6 +825,28 @@ export namespace EntityRegisteredEvent {
     entityId: string;
     entityNumber: bigint;
     boardHash: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace FoundationActionExecutedEvent {
+  export type InputTuple = [
+    actionType: BytesLike,
+    actionNonce: BigNumberish,
+    argumentsHash: BytesLike
+  ];
+  export type OutputTuple = [
+    actionType: string,
+    actionNonce: bigint,
+    argumentsHash: string
+  ];
+  export interface OutputObject {
+    actionType: string;
+    actionNonce: bigint;
+    argumentsHash: string;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -998,7 +1082,19 @@ export interface EntityProviderSupplyHarness extends BaseContract {
 
   BOARD_PROPOSAL_DOMAIN: TypedContractMethod<[], [string], "view">;
 
+  FOUNDATION_ACTION_DOMAIN: TypedContractMethod<[], [string], "view">;
+
+  FOUNDATION_ASSIGN_NAME: TypedContractMethod<[], [string], "view">;
+
   FOUNDATION_ENTITY: TypedContractMethod<[], [bigint], "view">;
+
+  FOUNDATION_REGISTER_ENTITY: TypedContractMethod<[], [string], "view">;
+
+  FOUNDATION_SET_NAME_QUOTA: TypedContractMethod<[], [string], "view">;
+
+  FOUNDATION_SET_RESERVED_NAME: TypedContractMethod<[], [string], "view">;
+
+  FOUNDATION_TRANSFER_NAME: TypedContractMethod<[], [string], "view">;
 
   MAX_SHARE_SUPPORTERS: TypedContractMethod<[], [bigint], "view">;
 
@@ -1013,7 +1109,12 @@ export interface EntityProviderSupplyHarness extends BaseContract {
   >;
 
   assignName: TypedContractMethod<
-    [name: string, entityNumber: BigNumberish],
+    [
+      name: string,
+      entityNumber: BigNumberish,
+      hankoData: BytesLike,
+      actionNonce: BigNumberish
+    ],
     [void],
     "nonpayable"
   >;
@@ -1027,12 +1128,6 @@ export interface EntityProviderSupplyHarness extends BaseContract {
   balanceOfBatch: TypedContractMethod<
     [accounts: AddressLike[], ids: BigNumberish[]],
     [bigint[]],
-    "view"
-  >;
-
-  batchVerifyHankoSignatures: TypedContractMethod<
-    [hankoDataArray: BytesLike[], hashes: BytesLike[]],
-    [[string[], boolean[]] & { entityIds: string[]; results: boolean[] }],
     "view"
   >;
 
@@ -1101,6 +1196,16 @@ export interface EntityProviderSupplyHarness extends BaseContract {
       to: AddressLike,
       tokenId: BigNumberish,
       amount: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+
+  computeFoundationActionHash: TypedContractMethod<
+    [
+      actionType: BytesLike,
+      argumentsHash: BytesLike,
       actionNonce: BigNumberish
     ],
     [string],
@@ -1190,7 +1295,7 @@ export interface EntityProviderSupplyHarness extends BaseContract {
         bigint,
         bigint,
         bigint,
-        EntityProvider.EntityArticlesStructOutput
+        EntityArticlesStructOutput
       ] & {
         currentBoardHash: string;
         previousBoardHash: string;
@@ -1199,7 +1304,7 @@ export interface EntityProviderSupplyHarness extends BaseContract {
         activateAtBlock: bigint;
         registrationBlock: bigint;
         proposerType: bigint;
-        articles: EntityProvider.EntityArticlesStructOutput;
+        articles: EntityArticlesStructOutput;
       }
     ],
     "view"
@@ -1222,7 +1327,12 @@ export interface EntityProviderSupplyHarness extends BaseContract {
   >;
 
   foundationRegisterEntity: TypedContractMethod<
-    [boardHash: BytesLike, articles: EntityProvider.EntityArticlesStruct],
+    [
+      boardHash: BytesLike,
+      articles: EntityArticlesStruct,
+      hankoData: BytesLike,
+      actionNonce: BigNumberish
+    ],
     [bigint],
     "nonpayable"
   >;
@@ -1365,13 +1475,23 @@ export interface EntityProviderSupplyHarness extends BaseContract {
   >;
 
   setNameQuota: TypedContractMethod<
-    [user: AddressLike, quota: BigNumberish],
+    [
+      user: AddressLike,
+      quota: BigNumberish,
+      hankoData: BytesLike,
+      actionNonce: BigNumberish
+    ],
     [void],
     "nonpayable"
   >;
 
   setReservedName: TypedContractMethod<
-    [name: string, reserved: boolean],
+    [
+      name: string,
+      reserved: boolean,
+      hankoData: BytesLike,
+      actionNonce: BigNumberish
+    ],
     [void],
     "nonpayable"
   >;
@@ -1383,12 +1503,23 @@ export interface EntityProviderSupplyHarness extends BaseContract {
   >;
 
   transferName: TypedContractMethod<
-    [name: string, newEntityNumber: BigNumberish],
+    [
+      name: string,
+      newEntityNumber: BigNumberish,
+      hankoData: BytesLike,
+      actionNonce: BigNumberish
+    ],
     [void],
     "nonpayable"
   >;
 
   uri: TypedContractMethod<[arg0: BigNumberish], [string], "view">;
+
+  verifyCurrentHankoSignature: TypedContractMethod<
+    [hankoData: BytesLike, hash: BytesLike],
+    [[string, boolean] & { entityId: string; success: boolean }],
+    "view"
+  >;
 
   verifyHankoSignature: TypedContractMethod<
     [hankoData: BytesLike, hash: BytesLike],
@@ -1410,8 +1541,26 @@ export interface EntityProviderSupplyHarness extends BaseContract {
     nameOrSignature: "BOARD_PROPOSAL_DOMAIN"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
+    nameOrSignature: "FOUNDATION_ACTION_DOMAIN"
+  ): TypedContractMethod<[], [string], "view">;
+  getFunction(
+    nameOrSignature: "FOUNDATION_ASSIGN_NAME"
+  ): TypedContractMethod<[], [string], "view">;
+  getFunction(
     nameOrSignature: "FOUNDATION_ENTITY"
   ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "FOUNDATION_REGISTER_ENTITY"
+  ): TypedContractMethod<[], [string], "view">;
+  getFunction(
+    nameOrSignature: "FOUNDATION_SET_NAME_QUOTA"
+  ): TypedContractMethod<[], [string], "view">;
+  getFunction(
+    nameOrSignature: "FOUNDATION_SET_RESERVED_NAME"
+  ): TypedContractMethod<[], [string], "view">;
+  getFunction(
+    nameOrSignature: "FOUNDATION_TRANSFER_NAME"
+  ): TypedContractMethod<[], [string], "view">;
   getFunction(
     nameOrSignature: "MAX_SHARE_SUPPORTERS"
   ): TypedContractMethod<[], [bigint], "view">;
@@ -1427,7 +1576,12 @@ export interface EntityProviderSupplyHarness extends BaseContract {
   getFunction(
     nameOrSignature: "assignName"
   ): TypedContractMethod<
-    [name: string, entityNumber: BigNumberish],
+    [
+      name: string,
+      entityNumber: BigNumberish,
+      hankoData: BytesLike,
+      actionNonce: BigNumberish
+    ],
     [void],
     "nonpayable"
   >;
@@ -1443,13 +1597,6 @@ export interface EntityProviderSupplyHarness extends BaseContract {
   ): TypedContractMethod<
     [accounts: AddressLike[], ids: BigNumberish[]],
     [bigint[]],
-    "view"
-  >;
-  getFunction(
-    nameOrSignature: "batchVerifyHankoSignatures"
-  ): TypedContractMethod<
-    [hankoDataArray: BytesLike[], hashes: BytesLike[]],
-    [[string[], boolean[]] & { entityIds: string[]; results: boolean[] }],
     "view"
   >;
   getFunction(
@@ -1526,6 +1673,17 @@ export interface EntityProviderSupplyHarness extends BaseContract {
       to: AddressLike,
       tokenId: BigNumberish,
       amount: BigNumberish,
+      actionNonce: BigNumberish
+    ],
+    [string],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "computeFoundationActionHash"
+  ): TypedContractMethod<
+    [
+      actionType: BytesLike,
+      argumentsHash: BytesLike,
       actionNonce: BigNumberish
     ],
     [string],
@@ -1622,7 +1780,7 @@ export interface EntityProviderSupplyHarness extends BaseContract {
         bigint,
         bigint,
         bigint,
-        EntityProvider.EntityArticlesStructOutput
+        EntityArticlesStructOutput
       ] & {
         currentBoardHash: string;
         previousBoardHash: string;
@@ -1631,7 +1789,7 @@ export interface EntityProviderSupplyHarness extends BaseContract {
         activateAtBlock: bigint;
         registrationBlock: bigint;
         proposerType: bigint;
-        articles: EntityProvider.EntityArticlesStructOutput;
+        articles: EntityArticlesStructOutput;
       }
     ],
     "view"
@@ -1658,7 +1816,12 @@ export interface EntityProviderSupplyHarness extends BaseContract {
   getFunction(
     nameOrSignature: "foundationRegisterEntity"
   ): TypedContractMethod<
-    [boardHash: BytesLike, articles: EntityProvider.EntityArticlesStruct],
+    [
+      boardHash: BytesLike,
+      articles: EntityArticlesStruct,
+      hankoData: BytesLike,
+      actionNonce: BigNumberish
+    ],
     [bigint],
     "nonpayable"
   >;
@@ -1810,14 +1973,24 @@ export interface EntityProviderSupplyHarness extends BaseContract {
   getFunction(
     nameOrSignature: "setNameQuota"
   ): TypedContractMethod<
-    [user: AddressLike, quota: BigNumberish],
+    [
+      user: AddressLike,
+      quota: BigNumberish,
+      hankoData: BytesLike,
+      actionNonce: BigNumberish
+    ],
     [void],
     "nonpayable"
   >;
   getFunction(
     nameOrSignature: "setReservedName"
   ): TypedContractMethod<
-    [name: string, reserved: boolean],
+    [
+      name: string,
+      reserved: boolean,
+      hankoData: BytesLike,
+      actionNonce: BigNumberish
+    ],
     [void],
     "nonpayable"
   >;
@@ -1827,13 +2000,25 @@ export interface EntityProviderSupplyHarness extends BaseContract {
   getFunction(
     nameOrSignature: "transferName"
   ): TypedContractMethod<
-    [name: string, newEntityNumber: BigNumberish],
+    [
+      name: string,
+      newEntityNumber: BigNumberish,
+      hankoData: BytesLike,
+      actionNonce: BigNumberish
+    ],
     [void],
     "nonpayable"
   >;
   getFunction(
     nameOrSignature: "uri"
   ): TypedContractMethod<[arg0: BigNumberish], [string], "view">;
+  getFunction(
+    nameOrSignature: "verifyCurrentHankoSignature"
+  ): TypedContractMethod<
+    [hankoData: BytesLike, hash: BytesLike],
+    [[string, boolean] & { entityId: string; success: boolean }],
+    "view"
+  >;
   getFunction(
     nameOrSignature: "verifyHankoSignature"
   ): TypedContractMethod<
@@ -1890,6 +2075,13 @@ export interface EntityProviderSupplyHarness extends BaseContract {
     EntityRegisteredEvent.InputTuple,
     EntityRegisteredEvent.OutputTuple,
     EntityRegisteredEvent.OutputObject
+  >;
+  getEvent(
+    key: "FoundationActionExecuted"
+  ): TypedContractEvent<
+    FoundationActionExecutedEvent.InputTuple,
+    FoundationActionExecutedEvent.OutputTuple,
+    FoundationActionExecutedEvent.OutputObject
   >;
   getEvent(
     key: "FoundationBootstrapped"
@@ -2024,6 +2216,17 @@ export interface EntityProviderSupplyHarness extends BaseContract {
       EntityRegisteredEvent.InputTuple,
       EntityRegisteredEvent.OutputTuple,
       EntityRegisteredEvent.OutputObject
+    >;
+
+    "FoundationActionExecuted(bytes32,uint256,bytes32)": TypedContractEvent<
+      FoundationActionExecutedEvent.InputTuple,
+      FoundationActionExecutedEvent.OutputTuple,
+      FoundationActionExecutedEvent.OutputObject
+    >;
+    FoundationActionExecuted: TypedContractEvent<
+      FoundationActionExecutedEvent.InputTuple,
+      FoundationActionExecutedEvent.OutputTuple,
+      FoundationActionExecutedEvent.OutputObject
     >;
 
     "FoundationBootstrapped(address,bytes32,uint256,uint256)": TypedContractEvent<

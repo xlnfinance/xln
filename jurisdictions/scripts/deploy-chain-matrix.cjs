@@ -325,7 +325,13 @@ const deployTron = async (chain, options) => {
 
   const account = await deployTronContract(tronWeb, 'Account');
   const foundationRecipient = tronWeb.defaultAddress.base58;
-  const entityProvider = await deployTronContract(tronWeb, 'EntityProvider', [foundationRecipient]);
+  const hankoVerifier = await deployTronContract(tronWeb, 'HankoVerifier');
+  const entityProvider = await deployTronContract(
+    tronWeb,
+    'EntityProvider',
+    [foundationRecipient],
+    { HankoVerifier: hankoVerifier },
+  );
   const depository = await deployTronContract(
     tronWeb,
     'Depository',

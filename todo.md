@@ -13,9 +13,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   must enter one redacted stream, group by root-cause fingerprint, survive
   gossip flood/restart, and support unread/acknowledged/resolved state. Release
   gates fail on unexplained open incidents.
-- [ ] Fix the Runtime-frame storage-handle publish bug that resurrects a
-  closed LevelDB handle after byte-pressure epoch rotation. Keep the regression
-  where rotation occurs after the live Runtime already owns open handles.
 - [ ] Make managed Runtime fatal halt terminate the child process so the
   orchestrator performs bounded restart/recovery. Health must never present a
   halted child or cached market-maker readiness as active.
@@ -30,12 +27,12 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 1. Commit-boundary correctness
 
+- [ ] Reject Entity and Account frame timestamp regression before transaction
+  application. Deadline admission must use one monotonic Entity/J clock; late
+  HTLC/pull evidence must never become valid by signing an older timestamp.
 - [ ] Return Account history, security incidents and storage invalidations as
   `CandidateExecution.effects`; publish only with the exact committed Entity
   hash. Rejection must leave external Env projections byte-identical.
-- [ ] Construct unknown Account genesis ephemerally and insert it only after an
-  accepted height-1 bilateral frame. Rejected input must not consume an
-  Account slot.
 - [ ] Keep proposer and receiver live-replay tripwires permanent: incremental
   and cold roots must equal the signed `frame.accountStateRoot`, including a
   forced validation/commit divergence fixture.
@@ -43,7 +40,17 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   scratch-validate both Account inputs and their exact match before either leg
   becomes an Entity frame; mismatch removes only that envelope and alerts.
 
-## 2. Transport and secret persistence
+## 2. Runtime-owned financial planning
+
+- [ ] Move swap capacity, quantization and auto-credit preparation into one
+  Runtime pure planner. UI renders the immutable plan and submits its exact
+  bytes; planner failure produces zero financial transactions.
+- [ ] Remove the arbitrary 10,000-token cross-J credit floor. A new account gets
+  only the exact required inbound credit, visibly separated from swap amount.
+- [ ] Add a shared runtime-command readiness gate at UI, adapter and server
+  enqueue boundaries; halted/quiescing/not-ready means zero money commands.
+
+## 3. Transport and secret persistence
 
 - [ ] Derive AEAD keys from X25519 with domain-separated HKDF-SHA256 and bind
   protocol/from/to/type/source-frame/message-id as AAD. Replace Base64 with one
@@ -59,7 +66,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   namespace and reference it from Account materialization. Prove backup,
   restore and dispute recovery before removing plaintext duplication.
 
-## 3. Crash, corruption and load evidence
+## 4. Crash, corruption and load evidence
 
 - [ ] Pass real SIGKILL recovery through split mutation, collapse, delete,
   restore-clear and raw orphan/root assertions.
@@ -70,8 +77,11 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 - [ ] Profile the production bootstrap and growing-hub frame path locally.
   Remove only measured full scans/clones/duplicate crypto; publish deterministic
   1/1,000-tx and growing-hub median/p95/MAD budgets from a clean Bun cache.
+- [ ] Replace case-insensitive Account scans and repeated signer/pair lookups
+  with canonical direct indexes; then introduce Runtime→Entity→Account COW only
+  behind byte-identical differential roots and measured clone counters.
 
-## 4. Public Ethereum and TRON proof
+## 5. Public Ethereum and TRON proof
 
 - [ ] Finish the native TRON adapter: protobuf transaction signing/broadcast,
   live energy fee limits, SolidityNode finality, complete authenticated
@@ -88,7 +98,7 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   headers commit transactions rather than Ethereum receipt tries; never
   synthesize an Ethereum MPT proof or trust one RPC witness.
 
-## 5. Immutable mainnet release pipeline
+## 6. Immutable mainnet release pipeline
 
 - [ ] Bind every result to
   `candidateId = gitHead + codeHash + gateConfigHash`; store unit, contract,

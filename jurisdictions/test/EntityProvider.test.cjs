@@ -1,5 +1,25 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
+const FOUNDATION_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const FOUNDATION_ID = ethers.zeroPadValue(ethers.toBeHex(1), 32);
+
+async function entityProviderFactory() {
+  const HankoVerifier = await ethers.getContractFactory("HankoVerifier");
+  const verifier = await HankoVerifier.deploy();
+  await verifier.waitForDeployment();
+  return ethers.getContractFactory("EntityProvider", {
+    libraries: { HankoVerifier: await verifier.getAddress() },
+  });
+}
+
+function singleSignerHanko(hash, privateKey = FOUNDATION_PRIVATE_KEY) {
+  const signature = new ethers.SigningKey(privateKey).sign(hash);
+  const packed = ethers.concat([signature.r, signature.s, signature.v === 28 ? "0x01" : "0x00"]);
+  return ethers.AbiCoder.defaultAbiCoder().encode(
+    ["tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,uint32,uint32,uint32)[])"],
+    [[[], packed, [[FOUNDATION_ID, [0], [1], 1, 0, 0, 0]]]],
+  );
+}
 
 describe("EntityProvider with Automatic Governance", function () {
   let entityProvider;
@@ -24,16 +44,22 @@ describe("EntityProvider with Automatic Governance", function () {
     [owner, alice, bob, carol] = await ethers.getSigners();
     
     // Deploy EntityProvider
-    const EntityProvider = await ethers.getContractFactory("EntityProvider");
+    const EntityProvider = await entityProviderFactory();
     entityProvider = await EntityProvider.deploy(owner.address);
     await entityProvider.waitForDeployment();
     
     foundationEntityId = await entityProvider.FOUNDATION_ENTITY();
   });
 
+  async function foundationAuthorization(actionType, argumentsHash) {
+    const actionNonce = await entityProvider.entityActionNonces(FOUNDATION_ID) + 1n;
+    const actionHash = await entityProvider.computeFoundationActionHash(actionType, argumentsHash, actionNonce);
+    return { actionNonce, hankoData: singleSignerHanko(actionHash) };
+  }
+
   describe("Foundation Setup", function () {
     it("rejects a zero foundation recipient", async function () {
-      const EntityProvider = await ethers.getContractFactory("EntityProvider");
+      const EntityProvider = await entityProviderFactory();
       await expect(EntityProvider.deploy(ethers.ZeroAddress)).to.be.revertedWith("Invalid foundation recipient");
     });
 
@@ -53,8 +79,7 @@ describe("EntityProvider with Automatic Governance", function () {
       expect(await entityProvider.balanceOf(owner.address, dividendTokenId)).to.equal(expectedSupply);
     });
 
-    it("Should allow foundation token holders to use foundation functions", async function () {
-      // Owner has foundation tokens directly from constructor bootstrap.
+    it("Should authorize foundation functions with the current Foundation Hanko", async function () {
       const [foundationControlTokenId] = await entityProvider.getTokenIds(1);
       expect(await entityProvider.balanceOf(owner.address, foundationControlTokenId)).to.equal(100_000_000_000n);
       
@@ -62,7 +87,55 @@ describe("EntityProvider with Automatic Governance", function () {
       const boardHash = ethers.keccak256(ethers.toUtf8Bytes("test_board"));
       await entityProvider.registerNumberedEntity(boardHash);
       
-      await expect(entityProvider.connect(owner).assignName("testname", 2)).to.not.be.reverted;
+      const argumentsHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+        ["string", "uint256"],
+        ["testname", 2],
+      ));
+      const authorization = await foundationAuthorization(
+        await entityProvider.FOUNDATION_ASSIGN_NAME(),
+        argumentsHash,
+      );
+      await expect(entityProvider.connect(alice).assignName(
+        "testname",
+        2,
+        authorization.hankoData,
+        authorization.actionNonce,
+      )).to.not.be.reverted;
+    });
+
+    it("keeps name forward and reverse mappings bijective on replacement", async function () {
+      await entityProvider.registerNumberedEntity(ethers.keccak256(ethers.toUtf8Bytes("board-2")));
+      await entityProvider.registerNumberedEntity(ethers.keccak256(ethers.toUtf8Bytes("board-3")));
+      for (const [name, entityNumber] of [["alpha", 2], ["beta", 3]]) {
+        const argumentsHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+          ["string", "uint256"],
+          [name, entityNumber],
+        ));
+        const authorization = await foundationAuthorization(
+          await entityProvider.FOUNDATION_ASSIGN_NAME(),
+          argumentsHash,
+        );
+        await entityProvider.assignName(name, entityNumber, authorization.hankoData, authorization.actionNonce);
+      }
+      const transferArgumentsHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+        ["string", "uint256"],
+        ["alpha", 3],
+      ));
+      const transferAuthorization = await foundationAuthorization(
+        await entityProvider.FOUNDATION_TRANSFER_NAME(),
+        transferArgumentsHash,
+      );
+      await entityProvider.transferName(
+        "alpha",
+        3,
+        transferAuthorization.hankoData,
+        transferAuthorization.actionNonce,
+      );
+
+      expect(await entityProvider.nameToNumber("beta")).to.equal(0n);
+      expect(await entityProvider.numberToName(2)).to.equal("");
+      expect(await entityProvider.numberToName(3)).to.equal("alpha");
+      expect(await entityProvider.nameToNumber("alpha")).to.equal(3n);
     });
   });
 
@@ -105,7 +178,20 @@ describe("EntityProvider with Automatic Governance", function () {
         foundationDelay: 5000
       };
       
-      await expect(entityProvider.connect(owner).foundationRegisterEntity(boardHash, customArticles)).to.not.be.reverted;
+      const argumentsHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+        ["bytes32", "tuple(uint32 controlDelay,uint32 dividendDelay,uint32 foundationDelay)"],
+        [boardHash, customArticles],
+      ));
+      const authorization = await foundationAuthorization(
+        await entityProvider.FOUNDATION_REGISTER_ENTITY(),
+        argumentsHash,
+      );
+      await expect(entityProvider.connect(alice).foundationRegisterEntity(
+        boardHash,
+        customArticles,
+        authorization.hankoData,
+        authorization.actionNonce,
+      )).to.not.be.reverted;
       
       const entityNumber = 2;
       const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
@@ -234,14 +320,14 @@ describe("EntityProvider with Automatic Governance", function () {
   });
 
   describe("Foundation Access Control", function () {
-    it("Should prevent non-foundation holders from using foundation functions", async function () {
+    it("Should reject calls without a valid current Foundation Hanko", async function () {
       const boardHash = ethers.keccak256(ethers.toUtf8Bytes("test_board"));
       await entityProvider.registerNumberedEntity(boardHash);
       
       // Alice doesn't have foundation tokens
       await expect(
-        entityProvider.connect(alice).assignName("testname", 2)
-      ).to.be.revertedWith("Only foundation token holders");
+        entityProvider.connect(alice).assignName("testname", 2, singleSignerHanko(ethers.ZeroHash), 1)
+      ).to.be.revertedWithCustomError(entityProvider, "InvalidFoundationAuthorization");
     });
   });
 

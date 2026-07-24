@@ -89,3 +89,4 @@ if (acknowledge) {
   console.log(`DEBUG_INCIDENTS_ACKNOWLEDGED count=${result.incidents.length}`);
 }
 if (result.incidents.length > 0) process.exitCode = 1;
+export {};

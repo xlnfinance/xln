@@ -964,7 +964,6 @@ function rawEventToJEventPayloads(event: RawJEvent, entityId: string): Jurisdict
           entityId: String(args['entityId'] ?? ''),
           batchHash: String(args['batchHash'] ?? ''),
           nonce: Number(args['nonce']),
-          success: Boolean(args['success']),
         },
       }];
 

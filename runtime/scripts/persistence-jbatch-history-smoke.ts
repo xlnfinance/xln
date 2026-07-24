@@ -188,7 +188,6 @@ async function main() {
                 entityId,
                 batchHash: sentBatch.batchHash,
                 nonce,
-                success: true,
               },
             },
           ], nonce + 1, `0x${String(nonce).padStart(64, '0')}`);

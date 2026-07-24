@@ -9,6 +9,7 @@ import {
   buildClaimsHanko,
   buildSingleSignerHanko,
   computeDepositoryBatchHash,
+  deployEntityProvider,
   deriveHardhatPrivateKey,
   emptyBatch,
   encodeBatch,
@@ -113,9 +114,7 @@ describe("Hanko Authorization", function () {
     [admin, entity1, entity2] = await hre.ethers.getSigners();
 
     // Deploy EntityProvider
-    const EntityProviderFactory = await hre.ethers.getContractFactory("EntityProvider");
-    entityProvider = await EntityProviderFactory.deploy(admin.address);
-    await entityProvider.waitForDeployment();
+    entityProvider = await deployEntityProvider(admin.address);
 
     // Deploy Account library first
     const AccountFactory = await hre.ethers.getContractFactory("Account");
@@ -154,6 +153,25 @@ describe("Hanko Authorization", function () {
     await expect(
       depository.processBatch(encodeBatch(emptyBatch()), emptyHanko, 1)
     ).to.be.revertedWithCustomError(depository, "E4");
+  });
+
+  it("bounds Hanko bytes and aggregate entity slots before quadratic verification", async function () {
+    const { entityProvider } = await loadFixture(deployFixture);
+    await expect(
+      entityProvider.verifyHankoSignature(
+        ethers.hexlify(new Uint8Array(64 * 1024 + 1)),
+        ethers.ZeroHash,
+      )
+    ).to.be.revertedWithCustomError(entityProvider, "HankoProofTooLarge");
+
+    const oversizedShape = ethers.AbiCoder.defaultAbiCoder().encode(HANKO_ABI, [[
+      Array.from({ length: 257 }, (_, index) => ethers.zeroPadValue(ethers.toBeHex(index + 1), 32)),
+      "0x",
+      [],
+    ]]);
+    await expect(
+      entityProvider.verifyHankoSignature(oversizedShape, ethers.ZeroHash)
+    ).to.be.revertedWithCustomError(entityProvider, "HankoProofTooLarge");
   });
 
   it("processBatch accepts a correctly signed single-signer reserve transfer", async function () {

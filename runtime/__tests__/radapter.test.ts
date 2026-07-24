@@ -1213,7 +1213,6 @@ test('runtime adapter view-frame exposes compact pending j-batch operations for 
       externalTokenToReserve: [],
       reserveToExternalToken: [],
       revealSecrets: [],
-      hub_id: 0,
     },
     jurisdiction: null,
     lastBroadcast: 0,
@@ -2404,7 +2403,6 @@ test('runtime adapter view-frame excludes unbounded core internals from remote s
             settlements?: Array<{
               note?: string;
               sig?: string;
-              hankoData?: string;
             }>;
           };
         };
@@ -2424,7 +2422,6 @@ test('runtime adapter view-frame excludes unbounded core internals from remote s
   expect(core?.jBatchState?.batch?.settlements?.length ?? 0).toBeLessThanOrEqual(50);
   expect(core?.jBatchState?.batch?.settlements?.[0]?.note?.length ?? 0).toBeLessThanOrEqual(200);
   expect(core?.jBatchState?.batch?.settlements?.[0]?.sig).toBe('');
-  expect(core?.jBatchState?.batch?.settlements?.[0]?.hankoData).toBe('');
 });
 
 test('runtime adapter view-frame excludes unbounded account internals from remote snapshots', async () => {

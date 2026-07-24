@@ -99,14 +99,12 @@ import {
 } from './entity/factory';
 import { assertPersistedLocalEntityCryptoKeys } from './entity/crypto';
 import {
-  assignNameOnChain,
   getBrowserVMInstance,
   debugFundReserves,
   getEntityInfoFromChain,
   getJurisdictionByAddress,
   setBrowserVMJurisdiction,
   submitProcessBatch,
-  transferNameBetweenEntities,
 } from './jadapter';
 import { getAvailableJurisdictions } from './jurisdiction/config';
 import {
@@ -3076,7 +3074,6 @@ export const queueEntityInput = async (
 
 export {
   applyRuntimeInput,
-  assignNameOnChain,
   clearDatabase,
   classifyBilateralState,
   getAccountBarVisual,
@@ -3121,7 +3118,6 @@ export {
   // getEnv, initEnv, processJBlockEvents - already exported inline above
   submitProcessBatch,
   debugFundReserves,
-  transferNameBetweenEntities,
   // Account utilities (destructured from AccountUtils)
   deriveDelta,
   isLeft,

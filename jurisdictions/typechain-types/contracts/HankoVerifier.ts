@@ -3,9 +3,7 @@
 /* eslint-disable */
 import type {
   BaseContract,
-  BytesLike,
   FunctionFragment,
-  Result,
   Interface,
   ContractRunner,
   ContractMethod,
@@ -16,38 +14,15 @@ import type {
   TypedDeferredTopicFilter,
   TypedEventLog,
   TypedListener,
-  TypedContractMethod,
 } from "../common";
 
-export interface IEntityProviderInterface extends Interface {
-  getFunction(
-    nameOrSignature: "verifyCurrentHankoSignature" | "verifyHankoSignature"
-  ): FunctionFragment;
+export interface HankoVerifierInterface extends Interface {}
 
-  encodeFunctionData(
-    functionFragment: "verifyCurrentHankoSignature",
-    values: [BytesLike, BytesLike]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "verifyHankoSignature",
-    values: [BytesLike, BytesLike]
-  ): string;
-
-  decodeFunctionResult(
-    functionFragment: "verifyCurrentHankoSignature",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "verifyHankoSignature",
-    data: BytesLike
-  ): Result;
-}
-
-export interface IEntityProvider extends BaseContract {
-  connect(runner?: ContractRunner | null): IEntityProvider;
+export interface HankoVerifier extends BaseContract {
+  connect(runner?: ContractRunner | null): HankoVerifier;
   waitForDeployment(): Promise<this>;
 
-  interface: IEntityProviderInterface;
+  interface: HankoVerifierInterface;
 
   queryFilter<TCEvent extends TypedContractEvent>(
     event: TCEvent,
@@ -86,36 +61,9 @@ export interface IEntityProvider extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
-  verifyCurrentHankoSignature: TypedContractMethod<
-    [hankoData: BytesLike, hash: BytesLike],
-    [[string, boolean] & { entityId: string; success: boolean }],
-    "view"
-  >;
-
-  verifyHankoSignature: TypedContractMethod<
-    [hankoData: BytesLike, hash: BytesLike],
-    [[string, boolean] & { entityId: string; success: boolean }],
-    "view"
-  >;
-
   getFunction<T extends ContractMethod = ContractMethod>(
     key: string | FunctionFragment
   ): T;
-
-  getFunction(
-    nameOrSignature: "verifyCurrentHankoSignature"
-  ): TypedContractMethod<
-    [hankoData: BytesLike, hash: BytesLike],
-    [[string, boolean] & { entityId: string; success: boolean }],
-    "view"
-  >;
-  getFunction(
-    nameOrSignature: "verifyHankoSignature"
-  ): TypedContractMethod<
-    [hankoData: BytesLike, hash: BytesLike],
-    [[string, boolean] & { entityId: string; success: boolean }],
-    "view"
-  >;
 
   filters: {};
 }

@@ -6,6 +6,15 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
+async function entityProviderFactory() {
+  const HankoVerifier = await ethers.getContractFactory("HankoVerifier");
+  const verifier = await HankoVerifier.deploy();
+  await verifier.waitForDeployment();
+  return ethers.getContractFactory("EntityProvider", {
+    libraries: { HankoVerifier: await verifier.getAddress() },
+  });
+}
+
 describe("Entity Control-Shares System", function () {
   let entityProvider;
   let depository;
@@ -31,7 +40,7 @@ describe("Entity Control-Shares System", function () {
     [owner, entity1, entity2, investor1, investor2] = await ethers.getSigners();
 
     // Deploy EntityProvider
-    const EntityProviderFactory = await ethers.getContractFactory("EntityProvider");
+    const EntityProviderFactory = await entityProviderFactory();
     entityProvider = await EntityProviderFactory.deploy(owner.address);
     await entityProvider.waitForDeployment();
 

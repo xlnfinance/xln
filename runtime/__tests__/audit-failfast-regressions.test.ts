@@ -6680,33 +6680,6 @@ describe('audit fail-fast regressions', () => {
     if (!finalizedAccount) throw new Error('FINALIZED_ACCOUNT_MISSING');
     expect(computeAccountStateRoot(finalizedAccount)).toBe(computeAccountStateRootCold(finalizedAccount));
 
-    const failedBatchEvent: JurisdictionEvent = {
-      type: 'HankoBatchProcessed',
-      data: {
-        entityId,
-        batchHash: `0x${'78'.repeat(32)}`,
-        nonce: 7,
-        success: false,
-      },
-    };
-    const signedFailedBatch = prepareJEventInput(env, entityId, '1', {
-      blockNumber: 23,
-      blockHash: `0x${'77'.repeat(32)}`,
-      transactionHash: `0x${'66'.repeat(32)}`,
-      events: [failedBatchEvent],
-      jurisdictionRef: getJEventJurisdictionRef(finalized.newState.config.jurisdiction),
-    });
-    const failed = await applyJEventRange(finalized.newState, {
-      from: '1',
-      observedAt: 3000,
-      blockNumber: 23,
-      blockHash: `0x${'77'.repeat(32)}`,
-      transactionHash: `0x${'66'.repeat(32)}`,
-      ...signedFailedBatch,
-      event: failedBatchEvent,
-    }, env);
-
-    expect(failed.newState.jBatchState?.batch.disputeFinalizations.length).toBe(0);
   });
 
   test('DisputeFinalized rejects missing signed final body before mutating account state', async () => {
@@ -7300,84 +7273,6 @@ describe('audit fail-fast regressions', () => {
       { entityId, signerId, entityTxs: [{ type: 'j_rebroadcast', data: {} }] },
     )).rejects.toThrow(/Cannot rebroadcast terminal J-submit/);
   });
-
-  test('HankoBatchProcessed(false) drops stale dispute finalize when on-chain nonce already moved even before DisputeFinalized arrives', async () => {
-    const entityId = `0x${'91'.repeat(32)}`;
-    const counterpartyId = `0x${'92'.repeat(32)}`;
-    const state = makeEntityState(entityId);
-    const account = makeProposalAccount([], entityId, counterpartyId);
-    account.activeDispute = {
-      startedByLeft: true,
-      disputeTimeout: 123,
-      initialProofbodyHash: `0x${'93'.repeat(32)}`,
-      initialNonce: 7,
-      finalizeQueued: true,
-    } as AccountMachine['activeDispute'];
-    account.jNonce = 7;
-    state.accounts.set(counterpartyId, account);
-    state.jBatchState = {
-      batch: createEmptyBatch(),
-      jurisdiction: null,
-      lastBroadcast: 0,
-      broadcastCount: 0,
-      failedAttempts: 0,
-      status: 'sent',
-      sentBatch: {
-        batch: {
-          ...createEmptyBatch(),
-          disputeFinalizations: [{
-            counterentity: counterpartyId,
-            initialNonce: 7,
-            finalNonce: 7,
-            initialProofbodyHash: `0x${'94'.repeat(32)}`,
-            finalProofbody: makeEmptyProofBody(),
-            starterArguments: '0x',
-            otherArguments: '0x',
-            sig: '0x',
-            startedByLeft: true,
-            cooperative: false,
-          }],
-        },
-        batchHash: `0x${'95'.repeat(32)}`,
-        encodedBatch: '0x',
-        entityNonce: 7,
-        firstSubmittedAt: 1000,
-        lastSubmittedAt: 1000,
-        submitAttempts: 1,
-      },
-      entityNonce: 7,
-    } as EntityState['jBatchState'];
-
-    const env = createEmptyEnv('failed-batch-stale-finalize');
-    const failedBatchEvent: JurisdictionEvent = {
-      type: 'HankoBatchProcessed',
-      data: {
-        entityId,
-        batchHash: `0x${'95'.repeat(32)}`,
-        nonce: 7,
-        success: false,
-      },
-    };
-    const signedFailedBatch = prepareJEventInput(env, entityId, '1', {
-      blockNumber: 23,
-      blockHash: `0x${'96'.repeat(32)}`,
-      transactionHash: `0x${'97'.repeat(32)}`,
-      events: [failedBatchEvent],
-      jurisdictionRef: getJEventJurisdictionRef(state.config.jurisdiction),
-    });
-    const failed = await applyJEventRange(state, {
-      from: '1',
-      observedAt: 3000,
-      blockNumber: 23,
-      blockHash: `0x${'96'.repeat(32)}`,
-      transactionHash: `0x${'97'.repeat(32)}`,
-      ...signedFailedBatch,
-      event: failedBatchEvent,
-    }, env);
-
-    expect(failed.newState.jBatchState?.batch.disputeFinalizations.length).toBe(0);
-  });
-
 
   test('htlc_lock refuses to add more than the configured per-account cap', async () => {
     const accountMachine = {

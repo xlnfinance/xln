@@ -512,8 +512,6 @@ export async function handleSettleExecute(
       diffs,
       forgiveTokenIds,
       counterpartyHanko!,
-      jurisdiction.entityProviderAddress,
-      '0x',
       signedNonce,
       entityState.entityId,
       disableC2RShortcut,

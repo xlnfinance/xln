@@ -3,7 +3,9 @@ import { expect } from 'chai';
 import hre from 'hardhat';
 
 import {
+  buildFoundationAction,
   buildSingleSignerHanko,
+  deployEntityProvider,
   deriveHardhatPrivateKey,
   singleSignerLazyEntityId,
 } from './helpers/hanko.ts';
@@ -44,10 +46,23 @@ const signDigest = (signerIndex: number, digest: string): string =>
 async function fixture(articles = ARTICLES) {
   const signers = await ethers.getSigners();
   const [foundation, currentBoard] = signers;
-  const EntityProvider = await ethers.getContractFactory('EntityProvider');
-  const provider = await EntityProvider.deploy(foundation.address);
-  await provider.waitForDeployment();
-  await provider.foundationRegisterEntity(singleSignerLazyEntityId(currentBoard.address), articles);
+  const provider = await deployEntityProvider(foundation.address);
+  const initialBoardHash = singleSignerLazyEntityId(currentBoard.address);
+  const argumentsHash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+    ['bytes32', 'tuple(uint32 controlDelay,uint32 dividendDelay,uint32 foundationDelay)'],
+    [initialBoardHash, articles],
+  ));
+  const authorization = await buildFoundationAction(
+    provider,
+    await provider.FOUNDATION_REGISTER_ENTITY(),
+    argumentsHash,
+  );
+  await provider.foundationRegisterEntity(
+    initialBoardHash,
+    articles,
+    authorization.hankoData,
+    authorization.actionNonce,
+  );
 
   const address = entityAddress(2n);
   const [controlTokenId, dividendTokenId] = await provider.getTokenIds(2);

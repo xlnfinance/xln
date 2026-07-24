@@ -2,6 +2,7 @@
 /* tslint:disable */
 /* eslint-disable */
 export { EntityProviderSupplyHarness__factory } from "./EntityProviderSupplyHarness__factory";
+export { FeeOnTransferERC20__factory } from "./FeeOnTransferERC20__factory";
 export { HashLadderHarness__factory } from "./HashLadderHarness__factory";
 export { MockEntityProvider__factory } from "./MockEntityProvider__factory";
 export { NoReturnERC20Mock__factory } from "./NoReturnERC20Mock__factory";

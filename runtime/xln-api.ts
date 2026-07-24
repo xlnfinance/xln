@@ -723,8 +723,6 @@ export interface XLNModule {
   resolveEntityIdentifier: (identifier: string) => Promise<string | null>;
   searchEntityNames: (query: string) => Promise<string[]>;
   requestNamedEntity: (env: Env, name: string) => Promise<Env>;
-  assignNameOnChain: (env: Env, entityId: string, name: string) => Promise<Env>;
-  transferNameBetweenEntities: (env: Env, name: string, fromEntityId: string, toEntityId: string) => Promise<Env>;
 
   setBrowserVMJurisdiction: (env: Env, depositoryAddress: string, browserVMInstance?: unknown) => void;
   getBrowserVMInstance: (env?: Env) => unknown | null;

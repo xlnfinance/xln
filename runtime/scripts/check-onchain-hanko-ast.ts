@@ -29,7 +29,7 @@ type BuildMap = Record<SourceName, BuildInfo>;
 
 const CONTRACT_ROOT = 'jurisdictions/contracts';
 const EIP_170_MAX_DEPLOYED_BYTES = 24_576;
-const SOURCE_NAMES = ['Account', 'Depository', 'EntityProvider', 'HankoCodec', 'HankoEncoding'] as const;
+const SOURCE_NAMES = ['Account', 'Depository', 'EntityProvider', 'HankoVerifier', 'HankoCodec', 'HankoEncoding'] as const;
 
 const fail = (message: string): never => {
   throw new Error(`ONCHAIN_HANKO_AST_VIOLATION: ${message}`);
@@ -195,7 +195,7 @@ export const checkOnchainHankoAst = (): void => {
   ) as Record<SourceName, AstNode>;
 
   const sizes: string[] = [];
-  for (const name of ['Account', 'Depository', 'EntityProvider']) {
+  for (const name of ['Account', 'Depository', 'EntityProvider', 'HankoVerifier']) {
     const artifact = JSON.parse(readFileSync(artifactPath(name), 'utf8')) as { deployedBytecode: string };
     const bytes = (artifact.deployedBytecode.length - 2) / 2;
     if (bytes > EIP_170_MAX_DEPLOYED_BYTES) fail(`${name} deployed bytecode=${bytes}`);
@@ -319,18 +319,19 @@ export const checkOnchainHankoAst = (): void => {
     }
   }
 
-  const internalVerifyConsumers = functions(contracts.EntityProvider)
-    .filter((fn) => calledNames(fn).includes('_verifyHankoSignature'))
+  const libraryVerifyConsumers = functions(contracts.EntityProvider)
+    .filter((fn) => calledNames(fn).includes('verify'))
     .map((fn) => String(fn.name));
-  assertExact(internalVerifyConsumers, [
-    'verifyHankoSignature', 'batchVerifyHankoSignatures',
-  ], 'EntityProvider canonical Hanko verifier consumers');
+  assertExact(libraryVerifyConsumers, [
+    'verifyHankoSignature', 'verifyCurrentHankoSignature', '_verifyCurrentHankoSignature',
+  ], 'EntityProvider linked Hanko verifier consumers');
 
   const currentVerifyConsumers = functions(contracts.EntityProvider)
     .filter((fn) => calledNames(fn).includes('_verifyCurrentHankoSignature'))
     .map((fn) => String(fn.name));
   assertExact(currentVerifyConsumers, [
     '_requireBoardAuthority',
+    '_authorizeFoundation',
     'entityTransferTokens', 'cancelEntityProviderAction', 'releaseControlShares',
   ], 'EntityProvider current-only Hanko verifier consumers');
 
@@ -340,8 +341,14 @@ export const checkOnchainHankoAst = (): void => {
   assertExact(verifyConsumers, [
     'Account.verifyDisputeProofHanko',
     'Account.verifyCooperativeProofHanko', 'Account.processC2R', 'Account._settleDiffs', 'Account._disputeStart',
-    'Depository.processBatch', 'Depository.watchtowerCounterDispute',
   ], 'verifyHankoSignature consumers');
+
+  const currentInterfaceVerifyConsumers = (['Account', 'Depository', 'EntityProvider'] as const).flatMap((contractName) =>
+    functions(contracts[contractName]!).filter((fn) => calledNames(fn).includes('verifyCurrentHankoSignature'))
+      .map((fn) => `${contractName}.${String(fn.name)}`));
+  assertExact(currentInterfaceVerifyConsumers, [
+    'Depository.processBatch', 'Depository.watchtowerCounterDispute',
+  ], 'verifyCurrentHankoSignature consumers');
 
   const finalProofConsumers = (['Account', 'Depository', 'EntityProvider'] as const).flatMap((contractName) =>
     functions(contracts[contractName]!).filter((fn) => calledNames(fn).includes('verifyFinalDisputeProofHanko'))
@@ -363,7 +370,7 @@ export const checkOnchainHankoAst = (): void => {
     fail(`MessageType slot 2 must remain reserved for FinalDisputeProof: ${messageTypeMembers?.join(',') ?? 'missing'}`);
   }
 
-  for (const contractName of ['Account', 'Depository', 'EntityProvider', 'HankoEncoding'] as const) {
+  for (const contractName of ['Account', 'Depository', 'EntityProvider', 'HankoVerifier', 'HankoEncoding'] as const) {
     let referencesCodec = false;
     walk(contracts[contractName]!, (node) => {
       if (node.name === 'HankoCodec') referencesCodec = true;

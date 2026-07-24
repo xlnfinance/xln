@@ -106,14 +106,6 @@ contract Depository is ReentrancyGuardLite {
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
   event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, uint256 remainingAmount, uint256 newDebtIndex);
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
-  event FatalTokenError(
-    uint256 indexed tokenId,
-    bytes32 indexed debtor,
-    uint256 requestedDebt,
-    uint256 acceptedDebt,
-    uint256 supply,
-    uint256 outstanding
-  );
   enum TransformerSkipReason {
     None,
     NoCode,
@@ -287,7 +279,7 @@ contract Depository is ReentrancyGuardLite {
   bytes32 public constant WATCHTOWER_COUNTER_DISPUTE_DOMAIN_SEPARATOR =
     keccak256("XLN_WATCHTOWER_COUNTER_DISPUTE_V1");
 
-  event HankoBatchProcessed(bytes32 indexed entityId, bytes32 indexed batchHash, uint256 nonce, bool success);
+  event HankoBatchProcessed(bytes32 indexed entityId, bytes32 indexed batchHash, uint256 nonce);
   event WatchtowerCounterDisputeExecuted(
     address indexed tower,
     bytes32 indexed entityId,
@@ -310,7 +302,7 @@ contract Depository is ReentrancyGuardLite {
     Account.validateDisputeProofs(batch.disputeStarts, batch.disputeFinalizations);
     bytes32 batchHash = Account.computeBatchHankoHash(DOMAIN_SEPARATOR, encodedBatch, nonce);
     (bytes32 entityId, bool hankoValid) =
-      EntityProvider(entityProvider).verifyHankoSignature(
+      EntityProvider(entityProvider).verifyCurrentHankoSignature(
         hankoData,
         batchHash
       );
@@ -319,7 +311,7 @@ contract Depository is ReentrancyGuardLite {
     entityNonces[entityId] = nonce;
     completeSuccess = _processBatch(entityId, batch);
     if (!completeSuccess) revert E4();
-    emit HankoBatchProcessed(entityId, batchHash, nonce, completeSuccess);
+    emit HankoBatchProcessed(entityId, batchHash, nonce);
   }
 
   /// @notice Hash that an entity authorizes for a tower-only delayed counter-dispute.
@@ -394,7 +386,7 @@ contract Depository is ReentrancyGuardLite {
 
     bytes32 finalProofbodyHash = keccak256(abi.encode(params.finalProofbody));
     (bytes32 recoveredEntity, bool valid) =
-      EntityProvider(entityProvider).verifyHankoSignature(
+      EntityProvider(entityProvider).verifyCurrentHankoSignature(
         ownerAuthorizationHanko,
         computeWatchtowerCounterDisputeHash(
           msg.sender,
@@ -608,22 +600,15 @@ contract Depository is ReentrancyGuardLite {
     if (creditor == bytes32(0)) revert E2();
     if (debtor == creditor) revert E2();
     if (amount == 0) revert E1();
-    TokenMetadata memory token = tokenId < _tokens.length
-      ? _tokens[tokenId]
-      : TokenMetadata({ contractAddress: address(0), externalTokenId: 0, tokenType: type(uint8).max });
-    uint256 accepted = Account.addCappedDebt(
+    Account.addDebt(
       _debts,
       _debtIndex,
       debtOutstanding,
       debtor,
       tokenId,
       creditor,
-      amount,
-      token.tokenType,
-      token.contractAddress,
-      token.externalTokenId
+      amount
     );
-    if (accepted == 0) return;
     _activeDebtsByToken[debtor][tokenId]++;
   }
 
@@ -725,7 +710,17 @@ contract Depository is ReentrancyGuardLite {
     _decreaseReserve(entity, params.tokenId, params.amount);
 
     if (meta.tokenType == TypeERC20) {
+      uint256 senderBalanceBefore = IERC20(meta.contractAddress).balanceOf(address(this));
+      uint256 recipientBalanceBefore = IERC20(meta.contractAddress).balanceOf(recipient);
       _safeERC20Transfer(meta.contractAddress, recipient, params.amount);
+      uint256 senderBalanceAfter = IERC20(meta.contractAddress).balanceOf(address(this));
+      uint256 recipientBalanceAfter = IERC20(meta.contractAddress).balanceOf(recipient);
+      if (
+        senderBalanceBefore < params.amount ||
+        senderBalanceAfter != senderBalanceBefore - params.amount ||
+        recipientBalanceAfter < recipientBalanceBefore ||
+        recipientBalanceAfter - recipientBalanceBefore != params.amount
+      ) revert E11();
     } else if (meta.tokenType == TypeERC721) {
       IERC721(meta.contractAddress).transferFrom(address(this), recipient, uint(meta.externalTokenId));
     } else if (meta.tokenType == TypeERC1155) {

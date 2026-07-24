@@ -5,6 +5,7 @@ import hre from 'hardhat';
 import {
   buildClaimsHanko,
   buildSingleSignerHanko,
+  deployEntityProvider,
   deriveHardhatPrivateKey,
   singleSignerLazyEntityId,
 } from './helpers/hanko.ts';
@@ -31,9 +32,7 @@ const anchoredEntityMemberBoardHash = (anchor: string, memberEntityId: string): 
 describe('EntityProvider board rotation grace', function () {
   async function fixture() {
     const [foundation, oldSigner, newSigner, dividendHolder, outsider] = await ethers.getSigners();
-    const EntityProvider = await ethers.getContractFactory('EntityProvider');
-    const provider = await EntityProvider.deploy(foundation.address);
-    await provider.waitForDeployment();
+    const provider = await deployEntityProvider(foundation.address);
 
     const oldBoardHash = singleSignerLazyEntityId(oldSigner.address);
     const newBoardHash = singleSignerLazyEntityId(newSigner.address);
@@ -134,6 +133,13 @@ describe('EntityProvider board rotation grace', function () {
     expect(await provider.verifyHankoSignature(newHanko, digest)).to.deep.equal([entityId, true]);
     expect(await provider.verifyHankoSignature(oldNestedHanko, digest)).to.deep.equal([parentId, true]);
     expect(await provider.verifyHankoSignature(newNestedHanko, digest)).to.deep.equal([parentId, true]);
+    expect(await provider.verifyCurrentHankoSignature(oldHanko, digest)).to.deep.equal([ethers.ZeroHash, false]);
+    expect(await provider.verifyCurrentHankoSignature(newHanko, digest)).to.deep.equal([entityId, true]);
+    expect(await provider.verifyCurrentHankoSignature(oldNestedHanko, digest)).to.deep.equal([
+      ethers.ZeroHash,
+      false,
+    ]);
+    expect(await provider.verifyCurrentHankoSignature(newNestedHanko, digest)).to.deep.equal([parentId, true]);
 
     await time.setNextBlockTimestamp(Number(validUntil) - 1);
     await mine(1);

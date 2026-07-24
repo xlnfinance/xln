@@ -5,7 +5,7 @@
  * Verifies:
  * - batch includes unilateral R->C + bilateral proofed C->R in same submit
  * - C->R shortcut ops carry hanko signature + nonce
- * - HankoBatchProcessed(success=true) finalizes batch
+ * - HankoBatchProcessed finalizes the exact batch
  * - AccountSettled reaches both sides and collateral updates bilaterally
  */
 
@@ -38,10 +38,10 @@ function hasFinalizedEvent(replica: EntityReplica, type: string): boolean {
   return false;
 }
 
-function hasSuccessfulHankoBatch(replica: EntityReplica): boolean {
+function hasFinalizedHankoBatch(replica: EntityReplica): boolean {
   for (const block of replica.state.jBlockChain || []) {
     for (const event of block.events || []) {
-      if (event?.type === 'HankoBatchProcessed' && event?.data?.success === true) {
+      if (event?.type === 'HankoBatchProcessed') {
         return true;
       }
     }
@@ -268,7 +268,7 @@ export async function runProcessBatchScenario(_existingEnv?: Env): Promise<Env> 
 
   assert(!hubFinal.state.jBatchState?.sentBatch, 'sentBatch cleared after confirmation', env);
   assert(hubFinal.state.jBatchState?.status === 'empty', `jBatchState.status=empty (got ${hubFinal.state.jBatchState?.status})`, env);
-  assert(hasSuccessfulHankoBatch(hubFinal), 'hub finalized HankoBatchProcessed(success=true)', env);
+  assert(hasFinalizedHankoBatch(hubFinal), 'hub finalized HankoBatchProcessed', env);
 
   assert(hasFinalizedEvent(hubFinal, 'AccountSettled'), 'hub finalized AccountSettled event', env);
   assert(hasFinalizedEvent(spenderAFinal, 'AccountSettled'), 'spender A finalized AccountSettled event', env);

@@ -27,13 +27,20 @@ async function main() {
   const accountAddr = await account.getAddress();
   console.log(`   Account: ${accountAddr}`);
 
-  // 2. Deploy EntityProvider
-  console.log("2️⃣ Deploying EntityProvider...");
-  const EntityProvider = await hre.ethers.getContractFactory("EntityProvider");
+  // 2. Deploy bounded Hanko verifier and linked EntityProvider
+  console.log("2️⃣ Deploying HankoVerifier + EntityProvider...");
+  const HankoVerifier = await hre.ethers.getContractFactory("HankoVerifier");
+  const hankoVerifier = await HankoVerifier.deploy();
+  await hankoVerifier.waitForDeployment();
+  const hankoVerifierAddr = await hankoVerifier.getAddress();
+  const EntityProvider = await hre.ethers.getContractFactory("EntityProvider", {
+    libraries: { HankoVerifier: hankoVerifierAddr },
+  });
   const entityProvider = await EntityProvider.deploy(foundationRecipient);
   await entityProvider.waitForDeployment();
   const entityProviderAddr = await entityProvider.getAddress();
   console.log(`   EntityProvider: ${entityProviderAddr}`);
+  console.log(`   HankoVerifier: ${hankoVerifierAddr}`);
   console.log(`   Foundation recipient: ${foundationRecipient}`);
 
   // 3. Deploy Depository (needs Account library linked)

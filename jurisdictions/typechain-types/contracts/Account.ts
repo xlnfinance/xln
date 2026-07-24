@@ -197,7 +197,6 @@ export interface AccountInterface extends Interface {
       | "DebtCreated"
       | "DebtForgiven"
       | "DisputeStarted"
-      | "FatalTokenError"
       | "ReserveUpdated"
       | "TransformerClauseSkipped"
       | "TransformerDeltaClamped"
@@ -373,37 +372,6 @@ export namespace DisputeStartedEvent {
     starterInitialArguments: string;
     starterIncrementedArguments: string;
     disputeTimeout: bigint;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace FatalTokenErrorEvent {
-  export type InputTuple = [
-    tokenId: BigNumberish,
-    debtor: BytesLike,
-    requestedDebt: BigNumberish,
-    acceptedDebt: BigNumberish,
-    supply: BigNumberish,
-    outstanding: BigNumberish
-  ];
-  export type OutputTuple = [
-    tokenId: bigint,
-    debtor: string,
-    requestedDebt: bigint,
-    acceptedDebt: bigint,
-    supply: bigint,
-    outstanding: bigint
-  ];
-  export interface OutputObject {
-    tokenId: bigint;
-    debtor: string;
-    requestedDebt: bigint;
-    acceptedDebt: bigint;
-    supply: bigint;
-    outstanding: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -709,13 +677,6 @@ export interface Account extends BaseContract {
     DisputeStartedEvent.OutputObject
   >;
   getEvent(
-    key: "FatalTokenError"
-  ): TypedContractEvent<
-    FatalTokenErrorEvent.InputTuple,
-    FatalTokenErrorEvent.OutputTuple,
-    FatalTokenErrorEvent.OutputObject
-  >;
-  getEvent(
     key: "ReserveUpdated"
   ): TypedContractEvent<
     ReserveUpdatedEvent.InputTuple,
@@ -780,17 +741,6 @@ export interface Account extends BaseContract {
       DisputeStartedEvent.InputTuple,
       DisputeStartedEvent.OutputTuple,
       DisputeStartedEvent.OutputObject
-    >;
-
-    "FatalTokenError(uint256,bytes32,uint256,uint256,uint256,uint256)": TypedContractEvent<
-      FatalTokenErrorEvent.InputTuple,
-      FatalTokenErrorEvent.OutputTuple,
-      FatalTokenErrorEvent.OutputObject
-    >;
-    FatalTokenError: TypedContractEvent<
-      FatalTokenErrorEvent.InputTuple,
-      FatalTokenErrorEvent.OutputTuple,
-      FatalTokenErrorEvent.OutputObject
     >;
 
     "ReserveUpdated(bytes32,uint256,uint256)": TypedContractEvent<

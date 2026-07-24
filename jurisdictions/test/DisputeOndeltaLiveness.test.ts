@@ -7,6 +7,7 @@ import {
   buildSingleSignerHanko,
   computeDepositoryBatchHash,
   deriveHardhatPrivateKey,
+  deployEntityProvider,
   emptyBatch,
   encodeBatch,
   singleSignerLazyEntityId,
@@ -37,9 +38,7 @@ const orderedActors = (first: Actor, second: Actor): [Actor, Actor] =>
 
 const deployFixture = async () => {
   const [signer0, signer1] = await ethers.getSigners();
-  const entityProviderFactory = await ethers.getContractFactory('EntityProvider');
-  const entityProvider = await entityProviderFactory.deploy(signer0.address);
-  await entityProvider.waitForDeployment();
+  const entityProvider = await deployEntityProvider(signer0.address);
   const accountFactory = await ethers.getContractFactory('Account');
   const account = await accountFactory.deploy();
   await account.waitForDeployment();
@@ -242,23 +241,16 @@ describe('dispute ondelta liveness', function () {
         startedByLeft: true,
         cooperative: false,
       }],
-    }))).to.emit(depository, 'FatalTokenError').withArgs(
-      tokenId,
-      left.entityId,
-      1n << 255n,
-      INT256_MAX,
-      INT256_MAX,
-      0n,
-    );
+    }))).to.not.be.reverted;
 
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(collateralAmount);
-    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(INT256_MAX);
+    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(1n << 255n);
     const collateral = await depository._collaterals(accountKey, tokenId);
     expect(collateral.collateral).to.equal(0n);
     expect(collateral.ondelta).to.equal(0n);
   });
 
-  it('finalizes every dispute while capping aggregate debt to the token supply', async function () {
+  it('finalizes every dispute with exact debt independent of token supply', async function () {
     const { depository, signer0 } = await loadFixture(deployFixture);
     const signers = await ethers.getSigners();
     const debtor = actor(signer0, 0);
@@ -327,25 +319,15 @@ describe('dispute ondelta liveness', function () {
           cooperative: false,
         }],
       }));
-      if (index === 0) {
-        await expect(finalization).to.not.be.reverted;
-      } else {
-        await expect(finalization).to.emit(depository, 'FatalTokenError').withArgs(
-          tokenId,
-          debtor.entityId,
-          requestedDebts[index],
-          index === 1 ? 40n : 0n,
-          100n,
-          index === 1 ? 60n : 100n,
-        );
-      }
+      await expect(finalization).to.not.be.reverted;
     }
 
-    expect(await depository.debtOutstanding(debtor.entityId, tokenId)).to.equal(100n);
-    expect(await depository._activeDebtsByToken(debtor.entityId, tokenId)).to.equal(2n);
+    expect(await depository.debtOutstanding(debtor.entityId, tokenId)).to.equal(130n);
+    expect(await depository._activeDebtsByToken(debtor.entityId, tokenId)).to.equal(3n);
     expect(await depository.entityNonces(debtor.entityId)).to.equal(4n);
     expect((await depository._debts(debtor.entityId, tokenId, 0)).amount).to.equal(60n);
-    expect((await depository._debts(debtor.entityId, tokenId, 1)).amount).to.equal(40n);
+    expect((await depository._debts(debtor.entityId, tokenId, 1)).amount).to.equal(60n);
+    expect((await depository._debts(debtor.entityId, tokenId, 2)).amount).to.equal(10n);
     for (let index = 0; index < disputes.length; index++) {
       expect((await depository._accounts(disputes[index]!.accountKey)).disputeHash).to.equal(ethers.ZeroHash);
     }
@@ -374,7 +356,7 @@ describe('dispute ondelta liveness', function () {
     expect(await depository.getTokensLength()).to.equal(1n);
   });
 
-  it('finalizes an adversarial unknown-token proof as zero debt with fatal evidence', async function () {
+  it('finalizes an adversarial unknown-token proof as exact internal debt', async function () {
     const { depository, signer0, signer1 } = await loadFixture(deployFixture);
     const debtor = actor(signer0, 0);
     const creditor = actor(signer1, 1);
@@ -418,16 +400,9 @@ describe('dispute ondelta liveness', function () {
         startedByLeft: debtorIsLeft,
         cooperative: false,
       }],
-    }))).to.emit(depository, 'FatalTokenError').withArgs(
-      tokenId,
-      debtor.entityId,
-      requested,
-      0n,
-      0n,
-      0n,
-    );
+    }))).to.not.be.reverted;
 
-    expect(await depository.debtOutstanding(debtor.entityId, tokenId)).to.equal(0n);
+    expect(await depository.debtOutstanding(debtor.entityId, tokenId)).to.equal(requested);
     expect((await depository._accounts(accountKey)).disputeHash).to.equal(ethers.ZeroHash);
   });
 
@@ -480,16 +455,9 @@ describe('dispute ondelta liveness', function () {
           startedByLeft: debtorIsLeft,
           cooperative: false,
         }],
-      }), 15_000_000n)).to.emit(depository, 'FatalTokenError').withArgs(
-        tokenId,
-        debtor.entityId,
-        60n,
-        0n,
-        0n,
-        0n,
-      );
+      }), 15_000_000n)).to.not.be.reverted;
 
-      expect(await depository.debtOutstanding(debtor.entityId, tokenId)).to.equal(0n);
+      expect(await depository.debtOutstanding(debtor.entityId, tokenId)).to.equal(60n);
       expect((await depository._accounts(accountKey)).disputeHash).to.equal(ethers.ZeroHash);
     });
   }

@@ -45,9 +45,9 @@ const USDC = 1;
 const ONE = 10n ** 18n;
 const usd = (amount: number | bigint) => BigInt(amount) * ONE;
 
-const hasSuccessfulHankoBatch = (replica: EntityReplica): boolean =>
+const hasFinalizedHankoBatch = (replica: EntityReplica): boolean =>
   (replica.state.jBlockChain || []).some(block =>
-    (block.events || []).some(event => event.type === 'HankoBatchProcessed' && event.data?.success === true),
+    (block.events || []).some(event => event.type === 'HankoBatchProcessed'),
   );
 
 const importBoardReplicas = (entityId: string, config: ConsensusConfig, x: number) =>
@@ -435,7 +435,7 @@ export async function multiSig(env: Env): Promise<void> {
       for (const validator of board.validators) {
         const replica = env.eReplicas.get(`${board.id}:${validator}`);
         assert(!!replica, `${board.name} validator ${validator} replica exists`);
-        assert(hasSuccessfulHankoBatch(replica!), `${board.name} validator ${validator} finalized HankoBatchProcessed`);
+        assert(hasFinalizedHankoBatch(replica!), `${board.name} validator ${validator} finalized HankoBatchProcessed`);
         assert(
           !replica!.proposal && !replica!.lockedFrame && replica!.mempool.length === 0,
           `${board.name} validator ${validator} is idle after J finality`,

@@ -30,7 +30,6 @@ const addSettlement = (
     diffs?: typeof settlementDiff[];
     forgiveness?: number[];
     sig?: string;
-    hankoData?: string;
     nonce?: number;
     disablePureC2RShortcut?: boolean;
   } = {},
@@ -41,8 +40,6 @@ const addSettlement = (
   overrides.diffs ?? [settlementDiff],
   overrides.forgiveness ?? [],
   overrides.sig ?? '0x1234',
-  entityProvider,
-  overrides.hankoData ?? '0xabcd',
   overrides.nonce ?? 7,
   leftEntity,
   overrides.disablePureC2RShortcut ?? true,
@@ -94,7 +91,6 @@ describe('j-batch contract limits', () => {
     for (const conflicting of [
       { diffs: [{ ...settlementDiff, leftDiff: -2n, rightDiff: 2n }] },
       { sig: '0x5678' },
-      { hankoData: '0xbeef' },
       { nonce: 8 },
     ]) {
       const state = initJBatch();

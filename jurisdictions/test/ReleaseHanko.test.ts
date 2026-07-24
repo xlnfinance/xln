@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import hre from 'hardhat';
+import { deployEntityProvider } from './helpers/hanko.ts';
 
 import {
   createFoundationReleaseBoard,
@@ -17,9 +18,7 @@ const PRIVATE_KEYS = [
 describe('Foundation release Hanko parity', function () {
   it('verifies the exact 2-of-3 release Hanko in EntityProvider.sol', async function () {
     const [deployer] = await ethers.getSigners();
-    const factory = await ethers.getContractFactory('EntityProvider');
-    const provider = await factory.deploy(deployer.address);
-    await provider.waitForDeployment();
+    const provider = await deployEntityProvider(deployer.address);
 
     const addresses = PRIVATE_KEYS.map((key) => ethers.computeAddress(new ethers.SigningKey(key).publicKey));
     const board = createFoundationReleaseBoard(addresses, 2);

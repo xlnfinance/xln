@@ -995,7 +995,6 @@ const compactJBatchForView = (batch: JBatch | undefined): JBatch | undefined => 
       diffs: compactArrayTail(op.diffs, 100) ?? [],
       forgiveDebtsInTokenIds: compactArrayTail(op.forgiveDebtsInTokenIds, 100) ?? [],
       sig: op.sig ? '[redacted]' : '',
-      hankoData: op.hankoData ? '[redacted]' : '',
     })),
     disputeStarts: (compactArrayTail(batch.disputeStarts, BATCH_VIEW_OP_LIMIT) ?? []).map((op) => ({
       ...op,
@@ -1018,7 +1017,6 @@ const compactJBatchForView = (batch: JBatch | undefined): JBatch | undefined => 
       ...op,
       secret: op.secret ? '[redacted]' : '',
     })),
-    hub_id: batch.hub_id,
   };
 };
 

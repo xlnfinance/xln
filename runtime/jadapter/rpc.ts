@@ -18,6 +18,7 @@ import {
   Account__factory,
   Depository__factory,
   EntityProvider__factory,
+  HankoVerifier__factory,
   DeltaTransformer__factory,
   ERC20Mock__factory,
 } from '../../jurisdictions/typechain-types/index.ts';
@@ -582,8 +583,8 @@ export async function createRpcAdapter(
     runner as Parameters<typeof Account__factory.connect>[1];
   const makeAccountFactory = (runner: unknown): Account__factory =>
     new (Account__factory as unknown as new (runner: unknown) => Account__factory)(runner);
-  const makeEntityProviderFactory = (runner: unknown): EntityProvider__factory =>
-    new (EntityProvider__factory as unknown as new (runner: unknown) => EntityProvider__factory)(runner);
+  const makeHankoVerifierFactory = (runner: unknown): HankoVerifier__factory =>
+    new (HankoVerifier__factory as unknown as new (runner: unknown) => HankoVerifier__factory)(runner);
   const makeDeltaTransformerFactory = (runner: unknown): DeltaTransformer__factory =>
     new (DeltaTransformer__factory as unknown as new (runner: unknown) => DeltaTransformer__factory)(runner);
   const makeErc20MockFactory = (runner: unknown): ERC20Mock__factory =>
@@ -1299,8 +1300,7 @@ export async function createRpcAdapter(
     const exact = logs.filter((log) => {
       const parsed = depository.interface.parseLog({ topics: [...log.topics], data: log.data });
       return parsed?.name === 'HankoBatchProcessed' &&
-        BigInt(parsed.args['nonce']) === entityNonce &&
-        parsed.args['success'] === true;
+        BigInt(parsed.args['nonce']) === entityNonce;
     });
     if (exact.length > 1) {
       throw new Error(
@@ -1346,10 +1346,22 @@ export async function createRpcAdapter(
       account = accountContract;
       rpcLog.debug('contracts.deploy.account', { chainId: config.chainId, account: addresses.account });
 
-      // Deploy EntityProvider
-      const entityProviderFactory = makeEntityProviderFactory(signer);
+      // Deploy and link the bounded Hanko verifier before EntityProvider.
+      const hankoVerifierFactory = makeHankoVerifierFactory(signer);
+      const hankoVerifierContract = await hankoVerifierFactory.deploy();
+      await hankoVerifierContract.waitForDeployment();
+      const hankoVerifierAddress = await hankoVerifierContract.getAddress();
+      const linkedEntityProviderBytecode = linkArtifactBytecode(
+        EntityProvider__factory.bytecode,
+        { 'contracts/HankoVerifier.sol:HankoVerifier': hankoVerifierAddress },
+      );
+      const entityProviderFactory = new ethers.ContractFactory(
+        EntityProvider__factory.abi,
+        linkedEntityProviderBytecode,
+        signer,
+      );
       const foundationRecipient = await signer.getAddress();
-      const entityProviderContract = await entityProviderFactory.deploy(foundationRecipient);
+      const entityProviderContract = await entityProviderFactory.deploy(foundationRecipient) as unknown as EntityProvider;
       await entityProviderContract.waitForDeployment();
       const entityProviderReceipt = await entityProviderContract.deploymentTransaction()?.wait();
       if (!entityProviderReceipt || !Number.isSafeInteger(entityProviderReceipt.blockNumber)) {
@@ -1362,6 +1374,7 @@ export async function createRpcAdapter(
         chainId: config.chainId,
         entityProvider: addresses.entityProvider,
         foundationRecipient,
+        hankoVerifier: hankoVerifierAddress,
       });
 
       // Deploy Depository (needs Account library linked)
@@ -2330,11 +2343,8 @@ export async function createRpcAdapter(
           );
         }
 
-        // Validate settlement signatures + entityProvider
+        // Validate bilateral settlement signatures before submission.
         for (const settlement of batch.settlements) {
-          if (!settlement.entityProvider || settlement.entityProvider === '0x0000000000000000000000000000000000000000') {
-            settlement.entityProvider = await getLiveEntityProviderAddress();
-          }
           if (settlement.diffs.length > 0 && settlement.sig === '0x') {
             return { success: false, error: `Settlement missing hanko sig` };
           }

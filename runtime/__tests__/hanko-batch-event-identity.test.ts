@@ -68,7 +68,6 @@ test('finalized different batch at the pending nonce quarantines the now-unexecu
       entityId: ENTITY_ID,
       batchHash: STALE_BATCH_HASH,
       nonce: 7,
-      success: true,
     },
   } as unknown as JurisdictionEvent;
 
@@ -96,7 +95,6 @@ test('only an exact nonce and canonical batch hash finalizes the pending batch',
       entityId: ENTITY_ID,
       batchHash: PENDING_BATCH_HASH.toUpperCase().replace('0X', '0x'),
       nonce: 7,
-      success: true,
     },
   };
 
@@ -132,7 +130,6 @@ test('finality releases a protocol-forced draft broadcast without mixing it into
         entityId: ENTITY_ID,
         batchHash: PENDING_BATCH_HASH,
         nonce: 7,
-        success: true,
       },
     },
     transactionHash: `0x${'78'.repeat(32)}`,
@@ -150,7 +147,7 @@ test('finality releases a protocol-forced draft broadcast without mixing it into
   }]);
 });
 
-test('an older stale event cannot requeue or mark a newer pending batch failed', async () => {
+test('an older stale event cannot mutate a newer pending batch', async () => {
   const state = makeEntityState();
   const staleFailure: JurisdictionEvent = {
     type: 'HankoBatchProcessed',
@@ -158,7 +155,6 @@ test('an older stale event cannot requeue or mark a newer pending batch failed',
       entityId: ENTITY_ID,
       batchHash: STALE_BATCH_HASH,
       nonce: 6,
-      success: false,
     },
   };
 
@@ -183,7 +179,6 @@ test('adapter decoding and persistence normalization preserve canonical batchHas
       entityId: ENTITY_ID,
       batchHash: PENDING_BATCH_HASH,
       nonce: 7n,
-      success: true,
     },
     blockNumber: 103,
     blockHash: `0x${'99'.repeat(32)}`,
@@ -196,12 +191,11 @@ test('adapter decoding and persistence normalization preserve canonical batchHas
     entityId: ENTITY_ID,
     batchHash: PENDING_BATCH_HASH,
     nonce: 7,
-    success: true,
   });
   expect(normalizeJurisdictionEvent(decoded)).toEqual(decoded);
   expect(normalizeJurisdictionEvent({
     type: 'HankoBatchProcessed',
-    data: { entityId: ENTITY_ID, nonce: 7, success: true },
+    data: { entityId: ENTITY_ID, nonce: 7 },
   })).toBeNull();
 });
 

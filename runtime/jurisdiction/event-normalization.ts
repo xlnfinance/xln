@@ -377,13 +377,12 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
       !/^0x[0-9a-f]{64}$/.test(entityId) ||
       !/^0x[0-9a-f]{64}$/.test(batchHash) ||
       nonce === null ||
-      nonce < 1 ||
-      typeof data['success'] !== 'boolean'
+      nonce < 1
     ) return null;
     return {
       ...meta,
       type,
-      data: { entityId, batchHash, nonce, success: data['success'] },
+      data: { entityId, batchHash, nonce },
     };
   }
 

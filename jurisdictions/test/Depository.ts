@@ -9,6 +9,7 @@ import {
   addressEntityId,
   buildSingleSignerHanko,
   computeDepositoryBatchHash,
+  deployEntityProvider,
   deriveHardhatPrivateKey,
   emptyBatch,
   encodeBatch,
@@ -241,9 +242,7 @@ describe("Depository", function () {
     [user0, user1] = await hre.ethers.getSigners();
 
     // Deploy EntityProvider
-    const EntityProviderFactory = await hre.ethers.getContractFactory("EntityProvider");
-    const entityProvider = await EntityProviderFactory.deploy(user0.address);
-    await entityProvider.waitForDeployment();
+    const entityProvider = await deployEntityProvider(user0.address);
 
     // Deploy Account library first
     const AccountFactory = await hre.ethers.getContractFactory("Account");
@@ -572,7 +571,7 @@ describe("Depository", function () {
     await expect(
       depository.connect(user0).processBatch(deposit.encodedBatch, deposit.hankoData, deposit.nonce)
     ).to.emit(depository, "HankoBatchProcessed")
-      .withArgs(actor.entityId, deposit.batchHash, deposit.nonce, true);
+      .withArgs(actor.entityId, deposit.batchHash, deposit.nonce);
 
     const erc20id = (await depository.getTokensLength()) - 1n;
     expect(await depository._reserves(actor.entityId, erc20id)).to.equal(10_000n);
@@ -621,7 +620,7 @@ describe("Depository", function () {
     await expect(
       depository.connect(user0).processBatch(deposit.encodedBatch, deposit.hankoData, deposit.nonce)
     ).to.emit(depository, "HankoBatchProcessed")
-      .withArgs(actor.entityId, deposit.batchHash, deposit.nonce, true);
+      .withArgs(actor.entityId, deposit.batchHash, deposit.nonce);
 
     const tokenId = (await depository.getTokensLength()) - 1n;
     expect(await depository._reserves(actor.entityId, tokenId)).to.equal(10_000n);
@@ -639,6 +638,42 @@ describe("Depository", function () {
 
     expect(await depository._reserves(actor.entityId, tokenId)).to.equal(7_500n);
     expect(await noReturnToken.balanceOf(user1.address)).to.equal(2_500n);
+  });
+
+  it("rejects fee-on-transfer ERC20 withdrawals without reducing reserve", async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const FeeToken = await hre.ethers.getContractFactory("FeeOnTransferERC20");
+    const token = await FeeToken.deploy(1_000_000n);
+    await token.waitForDeployment();
+    const actor = lazyActor(user0, 0);
+    const recipientEntity = addressEntityId(user1.address);
+
+    await depository.registerExternalToken(0, await token.getAddress(), 0);
+    await token.approve(await depository.getAddress(), 10_000n);
+    const depositBatch = emptyBatch({
+      externalTokenToReserve: [{
+        entity: ethers.ZeroHash,
+        contractAddress: await token.getAddress(),
+        externalTokenId: 0,
+        tokenType: 0,
+        internalTokenId: 0,
+        amount: 10_000n,
+      }],
+    });
+    const deposit = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, depositBatch);
+    await depository.connect(user0).processBatch(deposit.encodedBatch, deposit.hankoData, deposit.nonce);
+
+    const tokenId = (await depository.getTokensLength()) - 1n;
+    expect(await depository._reserves(actor.entityId, tokenId)).to.equal(9_900n);
+    const withdrawBatch = emptyBatch({
+      reserveToExternalToken: [{ receivingEntity: recipientEntity, tokenId, amount: 1_000n }],
+    });
+    const withdraw = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, withdrawBatch);
+    await expect(
+      depository.connect(user0).processBatch(withdraw.encodedBatch, withdraw.hankoData, withdraw.nonce)
+    ).to.be.revertedWithCustomError(depository, "E11");
+    expect(await depository._reserves(actor.entityId, tokenId)).to.equal(9_900n);
+    expect(await token.balanceOf(user1.address)).to.equal(0n);
   });
 
   it("rejects zero-amount ERC721 withdrawals instead of transferring the NFT for free", async function () {
@@ -745,8 +780,6 @@ describe("Depository", function () {
       diffs,
       forgiveDebtsInTokenIds: [],
       sig: settlementSig,
-      entityProvider: ethers.ZeroAddress,
-      hankoData: "0x",
       nonce: settlementNonce,
     };
 
@@ -784,8 +817,6 @@ describe("Depository", function () {
       diffs: [],
       forgiveDebtsInTokenIds: [],
       sig: "0x",
-      entityProvider: ethers.ZeroAddress,
-      hankoData: "0x",
       nonce: settlementNonce,
     };
 
@@ -882,8 +913,6 @@ describe("Depository", function () {
         diffs: settlementDiffs,
         forgiveDebtsInTokenIds: [],
         sig: settlementSig,
-        entityProvider: ethers.ZeroAddress,
-        hankoData: "0x",
         nonce: settlementNonce,
       }],
     });
@@ -925,6 +954,30 @@ describe("Depository", function () {
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(0n);
   });
 
+  it("rejects C2R amounts outside the signed int256 domain before mutation", async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const tokenId = 1n;
+    const amount = 1n << 255n;
+    const batch = emptyBatch({
+      collateralToReserve: [{
+        counterparty: right.entityId,
+        tokenId,
+        amount,
+        nonce: 1n,
+        sig: "0x",
+      }],
+    });
+    const signed = await signDepositoryBatch(depository, left.entityId, left.privateKey, batch);
+    const accountKey = await accountKeyFor(depository, left.entityId, right.entityId);
+
+    await expect(
+      depository.connect(left.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce)
+    ).to.be.revertedWithCustomError(depository, "E8");
+    expect(await depository._reserves(left.entityId, tokenId)).to.equal(0n);
+    expect((await depository._accounts(accountKey)).nonce).to.equal(0n);
+  });
+
   it("rejects duplicate tokenIds inside one settlement diff", async function () {
     const { depository } = await loadFixture(deployFixture);
 
@@ -962,8 +1015,6 @@ describe("Depository", function () {
         diffs,
         forgiveDebtsInTokenIds: [],
         sig: settlementSig,
-        entityProvider: ethers.ZeroAddress,
-        hankoData: "0x",
         nonce: settlementNonce,
       }],
     });
@@ -1174,8 +1225,6 @@ describe("Depository", function () {
           diffs,
           forgiveDebtsInTokenIds: [],
           sig: settlementSig,
-          entityProvider: ethers.ZeroAddress,
-          hankoData: "0x",
           nonce: settlementNonce,
         }],
       }),
@@ -2080,14 +2129,10 @@ describe("Depository", function () {
     );
     const receipt = await tx.wait();
     const skips = decodedEvents(receipt, "TransformerClauseSkipped");
-    const fatals = decodedEvents(receipt, "FatalTokenError");
     expect(skips).to.have.length(1);
     expect(skips[0]?.reason).to.equal(TRANSFORMER_SKIP_REASON.unrepresentableBaseDelta);
-    expect(fatals).to.have.length(1);
-    expect(fatals[0]?.requestedDebt).to.equal(1n << 255n);
-    expect(fatals[0]?.acceptedDebt).to.equal((1n << 255n) - 1n);
     expect(await depository.debtOutstanding(dispute.left.entityId, tokenId))
-      .to.equal((1n << 255n) - 1n);
+      .to.equal(1n << 255n);
   });
 
   it("executes the runtime maximum swap book inside the bounded transformer call", async function () {
@@ -2662,8 +2707,6 @@ describe("Depository", function () {
         diffs: blockedSettlementDiffs,
         forgiveDebtsInTokenIds: [],
         sig: blockedSettlementSig,
-        entityProvider: ethers.ZeroAddress,
-        hankoData: "0x",
         nonce: blockedSettlementNonce,
       }],
     });
@@ -2802,8 +2845,6 @@ describe("Depository", function () {
         diffs,
         forgiveDebtsInTokenIds: [],
         sig: settlementSig,
-        entityProvider: ethers.ZeroAddress,
-        hankoData: "0x",
         nonce: settlementNonce,
       }],
     });

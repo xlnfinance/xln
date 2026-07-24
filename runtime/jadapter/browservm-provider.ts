@@ -20,6 +20,7 @@ import { ethers } from 'ethers';
 import {
   Account__factory,
   EntityProvider__factory,
+  HankoVerifier__factory,
   DeltaTransformer__factory,
   ERC20Mock__factory,
   Depository__factory,
@@ -201,6 +202,7 @@ export class BrowserVMProvider {
   private accountAddress: Address | null = null;
   private depositoryAddress: Address | null = null;
   private entityProviderAddress: Address | null = null;
+  private hankoVerifierAddress: Address | null = null;
   private entityProviderDeploymentBlock = 0;
   private deltaTransformerAddress: Address | null = null;
   private deployerPrivKey: Uint8Array;
@@ -209,6 +211,7 @@ export class BrowserVMProvider {
   private accountArtifact: ContractArtifact | null = null;
   private depositoryArtifact: ContractArtifact | null = null;
   private entityProviderArtifact: ContractArtifact | null = null;
+  private hankoVerifierArtifact: ContractArtifact | null = null;
   private deltaTransformerArtifact: ContractArtifact | null = null;
   private erc20Artifact: ContractArtifact | null = null;
   private depositoryInterface: ethers.Interface | null = null;
@@ -287,6 +290,7 @@ export class BrowserVMProvider {
     this.accountArtifact = { abi: Account__factory.abi, bytecode: Account__factory.bytecode };
     this.depositoryArtifact = { abi: Depository__factory.abi, bytecode: Depository__factory.bytecode };
     this.entityProviderArtifact = { abi: EntityProvider__factory.abi, bytecode: EntityProvider__factory.bytecode };
+    this.hankoVerifierArtifact = { abi: HankoVerifier__factory.abi, bytecode: HankoVerifier__factory.bytecode };
     this.deltaTransformerArtifact = { abi: DeltaTransformer__factory.abi, bytecode: DeltaTransformer__factory.bytecode };
     this.erc20Artifact = { abi: ERC20Mock__factory.abi, bytecode: ERC20Mock__factory.bytecode };
     console.log('[BrowserVM] Loaded artifacts from typechain factories');
@@ -317,8 +321,9 @@ export class BrowserVMProvider {
     await this.vm.stateManager.putAccount(this.deployerAddress, deployerAccount);
     console.log(`[BrowserVM] Deployer funded: ${this.deployerAddress.toString()}`);
 
-    // Deploy contracts in order: Account (library) → EntityProvider → Depository(EP) → DeltaTransformer
+    // Deploy contracts in dependency order.
     await this.deployAccount();
+    await this.deployHankoVerifier();
     await this.deployEntityProvider();
     await this.deployDepository();  // Now requires EntityProvider address
     await this.deployDeltaTransformer();
@@ -337,6 +342,7 @@ export class BrowserVMProvider {
     this.accountAddress = null;
     this.depositoryAddress = null;
     this.entityProviderAddress = null;
+    this.hankoVerifierAddress = null;
     this.entityProviderDeploymentBlock = 0;
     this.deltaTransformerAddress = null;
     this.nonce = 0n;
@@ -436,11 +442,17 @@ export class BrowserVMProvider {
   /** Deploy EntityProvider contract */
   private async deployEntityProvider(): Promise<void> {
     console.log('[BrowserVM] Deploying EntityProvider...');
+    if (!this.hankoVerifierAddress) {
+      throw new Error('HankoVerifier library must be deployed before EntityProvider');
+    }
+    const linkedBytecode = EntityProvider__factory.linkBytecode({
+      'contracts/HankoVerifier.sol:HankoVerifier': this.hankoVerifierAddress.toString(),
+    });
     const constructorArgs = ethers.AbiCoder.defaultAbiCoder().encode(
       ['address'],
       [this.deployerAddress.toString()]
     );
-    const deployData = `${this.entityProviderArtifact!.bytecode}${constructorArgs.slice(2)}`;
+    const deployData = `${linkedBytecode}${constructorArgs.slice(2)}`;
 
     const { result } = await this.runTxWithNonce(this.deployerAddress, (currentNonce) =>
       createLegacyTx({
@@ -458,6 +470,23 @@ export class BrowserVMProvider {
     this.entityProviderAddress = result.createdAddress!;
     this.entityProviderDeploymentBlock = Number(this.getBlockNumber());
     console.log(`[BrowserVM] EntityProvider deployed at: ${this.entityProviderAddress?.toString() ?? 'null'}`);
+  }
+
+  /** Deploy the bounded Hanko verification library linked by EntityProvider. */
+  private async deployHankoVerifier(): Promise<void> {
+    console.log('[BrowserVM] Deploying HankoVerifier library...');
+    const { result } = await this.runTxWithNonce(this.deployerAddress, (currentNonce) =>
+      createLegacyTx({
+        gasLimit: 100000000n,
+        gasPrice: 10n,
+        data: this.hankoVerifierArtifact!.bytecode as `0x${string}`,
+        nonce: currentNonce,
+      }, { common: this.common }).sign(this.deployerPrivKey));
+    if (result.execResult.exceptionError) {
+      throw new Error(`HankoVerifier deployment failed: ${result.execResult.exceptionError}`);
+    }
+    this.hankoVerifierAddress = result.createdAddress!;
+    console.log(`[BrowserVM] HankoVerifier deployed at: ${this.hankoVerifierAddress.toString()}`);
   }
 
   /** Deploy DeltaTransformer contract (HTLC + Swap transformer) */
@@ -1751,8 +1780,7 @@ export class BrowserVMProvider {
     }).filter((log) => {
       const parsed = this.depositoryInterface!.parseLog({ topics: log.topics, data: log.data });
       return parsed?.name === 'HankoBatchProcessed' &&
-        BigInt(parsed.args['nonce']) === entityNonce &&
-        parsed.args['success'] === true;
+        BigInt(parsed.args['nonce']) === entityNonce;
     });
     if (logs.length > 1) {
       throw new Error(
@@ -1847,8 +1875,6 @@ export class BrowserVMProvider {
       diffs,
       forgiveDebtsInTokenIds,
       finalSig,
-      this.entityProviderAddress?.toString() || ethers.ZeroAddress,
-      '0x',
       settlementNonce,
     );
     const signerWallet = this.getSigningWallet(leftEntity);
