@@ -1,4 +1,11 @@
-import type { EntityReplica, EntityState, EntityTx, Env, HashToSign } from '../../../types';
+import type {
+  EntityCandidateEffect,
+  EntityReplica,
+  EntityState,
+  EntityTx,
+  Env,
+  HashToSign,
+} from '../../../types';
 import { executeCrontab } from '../../scheduler';
 import { assertScheduledWakeMatchesState } from '../../../machine/scheduled-wake';
 import { isCollectiveEntityActionTx } from '../../authorization';
@@ -22,10 +29,12 @@ export const handleScheduledWakeEntityTx = async (
   };
   const hashesToSign: HashToSign[] = [];
   const accountChanges = new Set<string>();
+  const candidateEffects: EntityCandidateEffect[] = [];
   const outputs = await executeCrontab(env, replica, state.crontabState, {
     manualBroadcastInInput,
     hashesToSign,
     accountChanges,
+    candidateEffects,
   });
   const approvedEntityTxs: EntityTx[] = [];
   const externalOutputs = outputs.filter((output) => {
@@ -47,5 +56,6 @@ export const handleScheduledWakeEntityTx = async (
     ...(approvedEntityTxs.length > 0 ? { approvedEntityTxs } : {}),
     ...(hashesToSign.length > 0 ? { hashesToSign } : {}),
     ...(accountChanges.size > 0 ? { accountChanges: [...accountChanges].sort() } : {}),
+    ...(candidateEffects.length > 0 ? { candidateEffects } : {}),
   };
 };

@@ -1387,13 +1387,13 @@ describe('atomic settlement Account transition', () => {
     const firstSession = createAccountJClaimSession(env);
     const leftClaim = prepareAccountJClaimTx(account, rawClaim, domain, firstSession);
     expect(handleJEventClaim(
-      account, leftClaim, true, 2_000, false, LEFT, () => {}, env, firstSession,
+      account, leftClaim, true, 2_000, false, LEFT, [], env, firstSession,
     ).success).toBe(true);
     cacheCommittedAccountJClaimNodeChanges(env, firstSession.changes());
     const secondSession = createAccountJClaimSession(env);
     const rightClaim = prepareAccountJClaimTx(account, rawClaim, domain, secondSession);
     expect(handleJEventClaim(
-      account, rightClaim, false, 2_001, false, LEFT, () => {}, env, secondSession,
+      account, rightClaim, false, 2_001, false, LEFT, [], env, secondSession,
     ).success).toBe(true);
 
     expect(account.lastFinalizedJHeight).toBe(7);

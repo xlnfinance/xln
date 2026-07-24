@@ -14,6 +14,7 @@ import type {
   AccountMachine,
   CertifiedEntityFrameLink,
   EntityState,
+  EntityCandidateEffect,
   Env,
   LogCategory,
   FrameLogEntry,
@@ -96,6 +97,13 @@ const getPendingAuditEvents = (env: Env): Array<Record<string, unknown>> => {
   if (!env.runtimeState) env.runtimeState = {};
   if (!env.runtimeState.pendingAuditEvents) env.runtimeState.pendingAuditEvents = [];
   return env.runtimeState.pendingAuditEvents;
+};
+
+const queuePendingAuditEvent = (env: Env, payload: Record<string, unknown>): void => {
+  const pending = getPendingAuditEvents(env);
+  const encoded = encodeCanonicalEntityConsensusValue(payload);
+  if (pending.some((candidate) => encodeCanonicalEntityConsensusValue(candidate) === encoded)) return;
+  pending.push(structuredClone(payload));
 };
 
 export const flushPendingAuditEvents = (env: Env): void => {
@@ -269,7 +277,26 @@ export const recordAccountFrameHistory = (
   const counterpartyId = String(record.counterpartyId || '').toLowerCase();
   const accountHeight = Number(record.accountHeight || record.frame?.height || 0);
   if (!entityId || !counterpartyId || !Number.isFinite(accountHeight) || accountHeight <= 0) return;
-  getPendingFrameDbRecords(env).push({
+  const pending = getPendingFrameDbRecords(env);
+  const existing = pending.find((candidate): candidate is Extract<RuntimeFrameDbRecord, { kind: 'accountFrame' }> => (
+    candidate.kind === 'accountFrame' &&
+    candidate.entityId === entityId &&
+    candidate.counterpartyId === counterpartyId &&
+    candidate.accountHeight === Math.floor(accountHeight) &&
+    candidate.source === record.source
+  ));
+  if (existing) {
+    if (
+      encodeCanonicalEntityConsensusValue(existing.frame) !==
+      encodeCanonicalEntityConsensusValue(record.frame)
+    ) {
+      throw new Error(
+        `FRAME_DB_ACCOUNT_FRAME_FORK:entity=${entityId}:counterparty=${counterpartyId}:height=${accountHeight}`,
+      );
+    }
+    return;
+  }
+  pending.push({
     kind: 'accountFrame',
     entityId,
     counterpartyId,
@@ -278,6 +305,21 @@ export const recordAccountFrameHistory = (
     frame: structuredClone(record.frame),
   });
   applyRuntimeStorageChanges(env, [{ family: 'account', entityId, counterpartyId }]);
+};
+
+export const publishEntityCandidateEffects = (
+  env: Env,
+  effects: readonly EntityCandidateEffect[],
+): void => {
+  for (const effect of effects) {
+    if (effect.kind === 'accountFrameHistory') {
+      recordAccountFrameHistory(env, effect);
+    } else if (effect.kind === 'runtimeEvent') {
+      env.emit(effect.eventName, effect.data);
+    } else {
+      queuePendingAuditEvent(env, effect.payload);
+    }
+  }
 };
 
 export const recordEntityFrameHistory = (

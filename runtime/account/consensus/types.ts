@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountInput, AccountTx, HankoString } from '../../types';
+import type { AccountFrame, AccountInput, AccountTx, EntityCandidateEffect, HankoString } from '../../types';
 import type { AccountJClaimNodeChanges } from '../../types/account-j-claims';
 
 export type AccountConsensusHashToSign = {
@@ -30,6 +30,7 @@ export type AccountConsensusFrameResult = {
   swapCancelRequests?: Array<{ offerId: string; accountId: string }>;
   swapOffersCancelled?: Array<{ offerId: string; accountId: string }>;
   hashesToSign?: AccountConsensusHashToSign[];
+  candidateEffects?: EntityCandidateEffect[];
 };
 
 export type ProposeAccountFrameResult = AccountConsensusFrameResult & {

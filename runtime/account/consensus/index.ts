@@ -8,6 +8,7 @@ import type {
   AccountFrame,
   AccountTx,
   AccountInput,
+  EntityCandidateEffect,
   Env,
   Delta,
   HankoString,
@@ -21,7 +22,7 @@ import { isLeft } from '../utils';
 import { HEAVY_LOGS } from '../../utils';
 import { safeStringify } from '../../protocol/serialization';
 import { applyAccountTx } from '../tx/apply';
-import { appendAccountFrameHistoryView, getAccountFrameHistoryView, recordAccountFrameHistory } from '../../machine/env-events';
+import { appendAccountFrameHistoryView, getAccountFrameHistoryView } from '../../machine/env-events';
 import { deriveAccountFrameTokenIds } from '../frame';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import {
@@ -627,6 +628,7 @@ async function handlePendingFrameAck(
   committedFrames: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }>,
   committedJClaims: AccountJClaimSession,
   securityContext: AccountInputSecurityContext,
+  candidateEffects: EntityCandidateEffect[],
 ): Promise<PendingFrameAckResult> {
   const ack = accountInputAck(input);
   const proposal = accountInputProposal(input);
@@ -724,6 +726,7 @@ async function handlePendingFrameAck(
       env,
       committedJClaims,
     );
+    candidateEffects.push(...(commitResult.candidateEffects ?? []));
     if (!commitResult.success) {
       accountLog.error('frame.commit.failed', { side: 'proposer', type: tx.type, error: commitResult.error });
       throw new Error(
@@ -770,13 +773,6 @@ async function handlePendingFrameAck(
 
   const committedFrame = cloneAccountFrame(accountMachine.pendingFrame);
   committedFrames.push({ frame: committedFrame, committedViaNewFrame: false });
-  recordAccountFrameHistory(env, {
-    entityId: accountMachine.proofHeader.fromEntity,
-    counterpartyId: input.fromEntityId,
-    accountHeight: committedFrame.height,
-    source: 'ackCommit',
-    frame: committedFrame,
-  });
   // Past bilateral frames are not future-consensus state. Keep only a
   // non-enumerable UI/debug view; durable history lives in the frame DB.
   appendAccountFrameHistoryView(accountMachine, committedFrame);
@@ -811,6 +807,7 @@ async function handlePendingFrameAck(
     input.fromEntityId,
     committedHeight,
     securityContext.owningEntityIsHub,
+    candidateEffects,
   );
   if (ackAutoRebalanceTxs.length > 0) {
     appendAccountMempoolTxs(accountMachine, ackAutoRebalanceTxs, 'accountConsensus:ackAutoRebalance');
@@ -1495,6 +1492,7 @@ async function commitIncomingFrameOnRealState(
   committedFrames: AccountCommittedFrame[],
   committedJClaims: AccountJClaimSession,
   securityContext: AccountInputSecurityContext,
+  candidateEffects: EntityCandidateEffect[],
 ): Promise<void> {
   const { counterparty: cpForCommitLog } = getAccountPerspective(accountMachine, ourEntityId);
   if (HEAVY_LOGS) {
@@ -1517,6 +1515,7 @@ async function commitIncomingFrameOnRealState(
       committedJClaims,
       securityContext.counterpartyCertifiedBoardHash,
     );
+    candidateEffects.push(...(commitResult.candidateEffects ?? []));
 
     if (!commitResult.success) {
       accountLog.error('frame.commit.failed', { side: 'receiver', type: tx.type, error: commitResult.error });
@@ -1560,13 +1559,6 @@ async function commitIncomingFrameOnRealState(
 
   const committedFrame = cloneAccountFrame(receivedFrame);
   committedFrames.push({ frame: committedFrame, committedViaNewFrame: true });
-  recordAccountFrameHistory(env, {
-    entityId: accountMachine.proofHeader.fromEntity,
-    counterpartyId: input.fromEntityId,
-    accountHeight: committedFrame.height,
-    source: 'peerCommit',
-    frame: committedFrame,
-  });
   appendAccountFrameHistoryView(accountMachine, committedFrame);
   accountLog.debug('frame.indexed', { source: 'peerCommit', height: receivedFrame.height });
 
@@ -1580,6 +1572,7 @@ async function commitIncomingFrameOnRealState(
     input.fromEntityId,
     receivedFrame.height,
     securityContext.owningEntityIsHub,
+    candidateEffects,
   );
   if (postCommitAutoRebalanceTxs.length > 0) {
     appendAccountMempoolTxs(
@@ -1849,6 +1842,7 @@ async function handleIncomingAccountFrame(
   committedFrames: AccountCommittedFrame[],
   committedJClaims: AccountJClaimSession,
   securityContext: AccountInputSecurityContext,
+  candidateEffects: EntityCandidateEffect[],
 ): Promise<IncomingFrameResult> {
   if (!accountInputProposal(input)) {
     return { kind: 'not_applicable' };
@@ -1934,6 +1928,7 @@ async function handleIncomingAccountFrame(
     committedFrames,
     committedJClaims,
     securityContext,
+    candidateEffects,
   );
 
   return {
@@ -1979,13 +1974,18 @@ export async function applyAccountInput(
   }
   const { normalizedInputHeight } = heightNormalization;
   const committedFrames: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }> = [];
+  const candidateEffects: EntityCandidateEffect[] = [];
 
   const events: string[] = [];
   const timedOutHashlocks: string[] = [];
   const committedJClaims = createAccountJClaimSession(env, accountJClaimNodeStore);
   const finish = (result: HandleAccountInputResult): HandleAccountInputResult => {
     const accountJClaimNodeChanges = committedJClaims.changes();
-    return accountJClaimNodeChanges ? { ...result, accountJClaimNodeChanges } : result;
+    return {
+      ...result,
+      ...(candidateEffects.length > 0 ? { candidateEffects } : {}),
+      ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
+    };
   };
   let ackProcessed = false;
   // Replay protection: frame chain (height + prevFrameHash) checked at :836
@@ -2036,6 +2036,7 @@ export async function applyAccountInput(
     committedFrames,
     committedJClaims,
     securityContext,
+    candidateEffects,
   );
   if (pendingAckResult.kind === 'return') return finish(pendingAckResult.result);
   if (pendingAckResult.kind === 'fallthrough') ackProcessed = true;
@@ -2098,6 +2099,7 @@ export async function applyAccountInput(
     committedFrames,
     committedJClaims,
     securityContext,
+    candidateEffects,
   );
   if (incomingFrameResult.kind === 'return') return finish(incomingFrameResult.result);
 

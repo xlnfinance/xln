@@ -7,7 +7,14 @@
  * and outer ciphertext bindings; frame hashes commit the opaque bytes exactly.
  */
 
-import type { AccountTx, EntityInput, EntityState, EntityTx, Env } from '../../../types';
+import type {
+  AccountTx,
+  EntityCandidateEffect,
+  EntityInput,
+  EntityState,
+  EntityTx,
+  Env,
+} from '../../../types';
 import { addMessage, cloneEntityState } from '../../../state-helpers';
 import { deriveDelta } from '../../../account/utils';
 import { validatePreparedHtlcPayment } from '../../../protocol/htlc/payment-admission';
@@ -21,6 +28,7 @@ export async function handleHtlcPayment(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'htlcPayment' }>,
   env: Env,
+  candidateEffects: EntityCandidateEffect[] = [],
 ): Promise<{
   newState: EntityState;
   outputs: EntityInput[];
@@ -99,19 +107,23 @@ export async function handleHtlcPayment(
   const mempoolOps = [{ accountId: prepared.nextHop, tx: accountTx }];
   // Persist the audit event only after this replay has built the exact AccountTx.
   // Emitting before account/capacity validation made rejected payments look sent.
-  env.emit('HtlcInitiated', {
-    entityId: entityState.entityId,
-    fromEntity: entityState.entityId,
-    toEntity: prepared.targetEntityId,
-    tokenId: prepared.tokenId,
-    amount: prepared.recipientAmount.toString(),
-    senderAmount: prepared.senderLockAmount.toString(),
-    fee: prepared.totalFee.toString(),
-    hashlock: prepared.hashlock,
-    lockId: prepared.lockId,
-    route: prepared.route,
-    ...(prepared.description ? { description: prepared.description } : {}),
-    startedAtMs: prepared.startedAtMs,
+  candidateEffects.push({
+    kind: 'runtimeEvent',
+    eventName: 'HtlcInitiated',
+    data: {
+      entityId: entityState.entityId,
+      fromEntity: entityState.entityId,
+      toEntity: prepared.targetEntityId,
+      tokenId: prepared.tokenId,
+      amount: prepared.recipientAmount.toString(),
+      senderAmount: prepared.senderLockAmount.toString(),
+      fee: prepared.totalFee.toString(),
+      hashlock: prepared.hashlock,
+      lockId: prepared.lockId,
+      route: prepared.route,
+      ...(prepared.description ? { description: prepared.description } : {}),
+      startedAtMs: prepared.startedAtMs,
+    },
   });
   newState.lockBook.set(prepared.lockId, {
     lockId: prepared.lockId,

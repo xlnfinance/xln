@@ -1,4 +1,14 @@
-import type { AccountInput, EntityState, EntityTx, Env, EntityInput, JInput, HashType, RuntimeOverlayRecord } from '../../types';
+import type {
+  AccountInput,
+  EntityState,
+  EntityTx,
+  Env,
+  EntityInput,
+  JInput,
+  HashType,
+  RuntimeOverlayRecord,
+  EntityCandidateEffect,
+} from '../../types';
 import type { AccountJClaimNodeStore } from '../../types/account-j-claims';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import {
@@ -107,6 +117,7 @@ export interface ApplyEntityTxResult {
   newState: EntityState;
   outputs: EntityInput[];
   storageChanges: RuntimeOverlayRecord[];
+  candidateEffects: EntityCandidateEffect[];
   jOutputs?: JInput[];
   // Pure events for entity-level orchestration
   mempoolOps?: MempoolOp[];
@@ -129,10 +140,13 @@ export interface ApplyEntityTxOptions {
   accountJClaimNodeStore?: AccountJClaimNodeStore;
   /** Reducer-local collector; interpreted only after the enclosing Entity frame commits. */
   storageChanges?: RuntimeOverlayRecord[];
+  /** Notification collector bound to the same candidate frame. */
+  candidateEffects?: EntityCandidateEffect[];
 }
 
-export type EntityTxReducerResult = Omit<ApplyEntityTxResult, 'storageChanges'> & {
+export type EntityTxReducerResult = Omit<ApplyEntityTxResult, 'storageChanges' | 'candidateEffects'> & {
   accountChanges?: string[];
+  candidateEffects?: EntityCandidateEffect[];
 };
 
 type EntityTxDispatcher = (
@@ -150,24 +164,41 @@ const handleJEventEntityTx: EntityTxDispatcher = async (env, entityState, entity
       events?: Array<{ type?: string; transactionHash?: string; data?: Record<string, unknown> }>;
     }>;
   };
+  const candidateEffects: EntityCandidateEffect[] = [];
   let emitted = false;
   for (const block of jEventData.blocks ?? []) {
     for (const event of block.events ?? []) {
-      env.emit('JEventReceived', {
-        ...(event.data ?? {}),
-        entityId: entityState.entityId,
-        eventType: event.type ?? 'unknown',
-        blockNumber: block.blockNumber,
-        txHash: event.transactionHash,
+      candidateEffects.push({
+        kind: 'runtimeEvent',
+        eventName: 'JEventReceived',
+        data: {
+          ...(event.data ?? {}),
+          entityId: entityState.entityId,
+          eventType: event.type ?? 'unknown',
+          blockNumber: block.blockNumber,
+          txHash: event.transactionHash,
+        },
       });
       emitted = true;
     }
   }
-  if (!emitted) env.emit('JEventReceived', { entityId: entityState.entityId, eventType: 'liveness' });
-  const { newState, mempoolOps, outputs, dirtyAccounts, hashesToSign } = await applyJEvent(entityState, entityTx.data, env);
+  if (!emitted) {
+    candidateEffects.push({
+      kind: 'runtimeEvent',
+      eventName: 'JEventReceived',
+      data: { entityId: entityState.entityId, eventType: 'liveness' },
+    });
+  }
+  const { newState, mempoolOps, outputs, dirtyAccounts, hashesToSign } = await applyJEvent(
+    entityState,
+    entityTx.data,
+    env,
+    candidateEffects,
+  );
   return {
     newState,
     outputs: outputs || [],
+    candidateEffects,
     mempoolOps: mempoolOps || [],
     accountChanges: dirtyAccounts,
     ...(hashesToSign && hashesToSign.length > 0 ? { hashesToSign } : {}),
@@ -182,6 +213,7 @@ const handleAccountInputEntityTx: EntityTxDispatcher = async (env, entityState, 
     outputs: result.outputs,
     mempoolOps: result.mempoolOps,
     accountChanges: [entityTx.data.fromEntityId],
+    candidateEffects: result.candidateEffects,
     swapOffersCreated: result.swapOffersCreated,
     swapCancelRequests: result.swapCancelRequests,
     swapOffersCancelled: result.swapOffersCancelled,
@@ -240,19 +272,35 @@ const entityTxDispatchers: Record<string, EntityTxDispatcher> = {
   initOrderbookExt: (_env, state, tx) => handleInitOrderbookExtEntityTx(state, tx as Extract<EntityTx, { type: 'initOrderbookExt' }>),
   j_event: handleJEventEntityTx,
   accountInput: handleAccountInputEntityTx,
-  openAccount: (env, state, tx) => handleOpenAccountEntityTx(env, state, tx as Extract<EntityTx, { type: 'openAccount' }>),
-  htlcPayment: (env, state, tx) => handleHtlcPayment(state, tx as Extract<EntityTx, { type: 'htlcPayment' }>, env),
-  htlcOnionAdvance: (env, state, tx) => handleHtlcOnionAdvance(
+  openAccount: (env, state, tx, options) => handleOpenAccountEntityTx(
+    env,
+    state,
+    tx as Extract<EntityTx, { type: 'openAccount' }>,
+    options?.candidateEffects ?? [],
+  ),
+  htlcPayment: (env, state, tx, options) => handleHtlcPayment(
+    state,
+    tx as Extract<EntityTx, { type: 'htlcPayment' }>,
+    env,
+    options?.candidateEffects ?? [],
+  ),
+  htlcOnionAdvance: (env, state, tx, options) => handleHtlcOnionAdvance(
     env,
     state,
     tx as Extract<EntityTx, { type: 'htlcOnionAdvance' }>,
+    options?.candidateEffects ?? [],
   ),
   hashlockPayment: (env, state, tx) => handleHashlockPaymentEntityTx(env, state, tx as Extract<EntityTx, { type: 'hashlockPayment' }>),
   resolveHtlcLock: (_env, state, tx) => handleResolveHtlcLockEntityTx(state, tx as Extract<EntityTx, { type: 'resolveHtlcLock' }>),
   processHtlcTimeouts: (_env, state, tx) => handleProcessHtlcTimeoutsEntityTx(state, tx as Extract<EntityTx, { type: 'processHtlcTimeouts' }>),
   rollbackTimedOutFrames: (_env, state, tx) => handleRollbackTimedOutFramesEntityTx(state, tx as Extract<EntityTx, { type: 'rollbackTimedOutFrames' }>),
   manualHtlcLock: (_env, state, tx) => handleManualHtlcLockEntityTx(state, tx as Extract<EntityTx, { type: 'manualHtlcLock' }>),
-  directPayment: (env, state, tx) => handleDirectPaymentEntityTx(env, state, tx as Extract<EntityTx, { type: 'directPayment' }>),
+  directPayment: (env, state, tx, options) => handleDirectPaymentEntityTx(
+    env,
+    state,
+    tx as Extract<EntityTx, { type: 'directPayment' }>,
+    options?.candidateEffects ?? [],
+  ),
   r2c: (_env, state, tx) => handleR2C(state, tx as Extract<EntityTx, { type: 'r2c' }>),
   e2r: (_env, state, tx) => handleE2R(state, tx as Extract<EntityTx, { type: 'e2r' }>),
   r2r: (_env, state, tx) => handleR2R(state, tx as Extract<EntityTx, { type: 'r2r' }>),
@@ -325,20 +373,23 @@ export const applyEntityTx = async (
 ): Promise<ApplyEntityTxResult> => {
   if (!entityTx) {
     logError('ENTITY_TX', `❌ EntityTx is undefined!`);
-    return { newState: entityState, outputs: [], storageChanges: [] };
+    return { newState: entityState, outputs: [], storageChanges: [], candidateEffects: [] };
   }
 
   try {
     const dispatcher = entityTxDispatchers[String(entityTx.type)];
     if (dispatcher) {
       const reducerStorageChanges: RuntimeOverlayRecord[] = [];
+      const reducerCandidateEffects: EntityCandidateEffect[] = [];
       const { accountChanges = [], ...result } = await dispatcher(env, entityState, entityTx, {
         ...options,
         storageChanges: reducerStorageChanges,
+        candidateEffects: reducerCandidateEffects,
       });
       const entityId = result.newState.entityId.toLowerCase();
       return {
         ...result,
+        candidateEffects: [...reducerCandidateEffects, ...(result.candidateEffects ?? [])],
         storageChanges: [
           { family: 'entity', entityId },
           ...Array.from(new Set(accountChanges.map(accountId => accountId.toLowerCase())))
@@ -351,7 +402,7 @@ export const applyEntityTx = async (
 
     const skippedError = `ENTITY_TX_UNHANDLED: type=${String(entityTx.type)}`;
     entityTxLog.warn('unhandled', { type: String(entityTx.type) });
-    return { newState: entityState, outputs: [], storageChanges: [], jOutputs: [], skippedError };
+    return { newState: entityState, outputs: [], storageChanges: [], candidateEffects: [], jOutputs: [], skippedError };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (shouldRethrowEntityTxError(error)) {
@@ -359,6 +410,13 @@ export const applyEntityTx = async (
       throw error;
     }
     entityTxLog.debug('skipped_error', { type: String(entityTx.type), error: message });
-    return { newState: entityState, outputs: [], storageChanges: [], jOutputs: [], skippedError: message };
+    return {
+      newState: entityState,
+      outputs: [],
+      storageChanges: [],
+      candidateEffects: [],
+      jOutputs: [],
+      skippedError: message,
+    };
   }
 };

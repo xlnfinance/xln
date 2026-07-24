@@ -114,7 +114,7 @@ const commit = async (
   const result = await applyAccountTx(state.accounts.get(counterparty)!, tx, byLeft, timestamp, 0, false);
   expect(result.success, result.error).toBe(true);
   const followups: MempoolOp[] = [];
-  applyCommittedAccountFrameFollowups(state, counterparty, frame(tx, byLeft, timestamp), followups);
+  applyCommittedAccountFrameFollowups(state, counterparty, frame(tx, byLeft, timestamp), followups, undefined, []);
   return followups;
 };
 

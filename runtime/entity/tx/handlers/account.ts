@@ -1,4 +1,11 @@
-import type { AccountInput, EntityState, Env, EntityInput, AccountMachine } from '../../../types';
+import type {
+  AccountInput,
+  EntityState,
+  Env,
+  EntityInput,
+  AccountMachine,
+  EntityCandidateEffect,
+} from '../../../types';
 import { applyAccountInput as applyConsensusAccountInput } from '../../../account/consensus/index';
 import { addMessage, addMessages, emitScopedEvents } from '../../../state-helpers';
 import { createStructuredLogger, shortId } from '../../../infra/logger';
@@ -146,6 +153,7 @@ export interface AccountHandlerResult {
   // Multi-signer: Hashes that need entity-quorum signing
   hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute' | 'settlement'; context: string }>;
   accountJClaimNodeChanges?: AccountJClaimNodeChanges;
+  candidateEffects: EntityCandidateEffect[];
 }
 
 export async function applyAccountInput(
@@ -188,6 +196,7 @@ export async function applyAccountInput(
   const allSwapOffersCreated: SwapOfferEvent[] = [];
   const allSwapCancelRequests: SwapCancelRequestEvent[] = [];
   const allSwapOffersCancelled: SwapCancelEvent[] = [];
+  const candidateEffects: EntityCandidateEffect[] = [];
   // Multi-signer: Collect hashes during processing (not scanning)
   const allHashesToSign: Array<{
     hash: string;
@@ -369,6 +378,7 @@ export async function applyAccountInput(
         swapOffersCreated: allSwapOffersCreated,
         swapCancelRequests: allSwapCancelRequests,
         swapOffersCancelled: allSwapOffersCancelled,
+        candidateEffects,
         ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
       };
     }
@@ -455,6 +465,7 @@ export async function applyAccountInput(
     }
 
     if (result.success) {
+      candidateEffects.push(...(result.candidateEffects ?? []));
       addMessages(newState, result.events);
       emitScopedEvents(
         env,
@@ -513,6 +524,16 @@ export async function applyAccountInput(
         };
       };
       const committedFrameEntries = result.committedFrames ?? [];
+      for (const { frame, committedViaNewFrame } of committedFrameEntries) {
+        candidateEffects.push({
+          kind: 'accountFrameHistory',
+          entityId: accountMachine.proofHeader.fromEntity,
+          counterpartyId: input.fromEntityId,
+          accountHeight: frame.height,
+          source: committedViaNewFrame ? 'peerCommit' : 'ackCommit',
+          frame: structuredClone(frame),
+        });
+      }
       const committedInboundGenesis = committedFrameEntries.some(({ frame }) => frame.height === 1);
       if (createdAccount) {
         if (!committedInboundGenesis) {
@@ -524,7 +545,14 @@ export async function applyAccountInput(
 
       for (const { frame: committedFrame, committedViaNewFrame } of committedFrameEntries) {
         if (!committedFrame?.accountTxs) continue;
-        applyCommittedAccountFrameFollowups(newState, counterpartyId, committedFrame, mempoolOps, env);
+        applyCommittedAccountFrameFollowups(
+          newState,
+          counterpartyId,
+          committedFrame,
+          mempoolOps,
+          env,
+          candidateEffects,
+        );
 
         for (const accountTx of committedFrame.accountTxs) {
           const settlementFollowup = await processCommittedSettlementTransitionFollowup(
@@ -550,7 +578,7 @@ export async function applyAccountInput(
           );
           if (!crossJurisdictionFollowupHandled) {
             await applyCommittedHtlcLockFollowup(
-              { env, state, newState, input, accountMachine, outputs, mempoolOps },
+              { env, state, newState, input, accountMachine, outputs, mempoolOps, candidateEffects },
               accountTx,
               committedViaNewFrame,
             );
@@ -584,9 +612,19 @@ export async function applyAccountInput(
           });
         }
       }
-      applyPendingForwardFollowup({ env, state, newState, input, accountMachine, outputs, mempoolOps });
-      applyHtlcTimeoutFollowups({ env, state, newState, input, accountMachine, outputs, mempoolOps }, result.timedOutHashlocks || []);
-      applyHtlcSecretFollowups({ env, state, newState, outputs, mempoolOps }, result.revealedSecrets || []);
+      const htlcFollowupContext = {
+        env,
+        state,
+        newState,
+        input,
+        accountMachine,
+        outputs,
+        mempoolOps,
+        candidateEffects,
+      };
+      applyPendingForwardFollowup(htlcFollowupContext);
+      applyHtlcTimeoutFollowups(htlcFollowupContext, result.timedOutHashlocks || []);
+      applyHtlcSecretFollowups(htlcFollowupContext, result.revealedSecrets || []);
       if (committedFrameEntries.length > 0) {
         pruneUnreachableDisputeEvidence(accountMachine, newState.jBatchState);
       }
@@ -626,6 +664,7 @@ export async function applyAccountInput(
           swapOffersCreated: allSwapOffersCreated,
           swapCancelRequests: allSwapCancelRequests,
           swapOffersCancelled: allSwapOffersCancelled,
+          candidateEffects,
           ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
           ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
         };
@@ -696,6 +735,7 @@ export async function applyAccountInput(
         swapOffersCreated: allSwapOffersCreated,
         swapCancelRequests: allSwapCancelRequests,
         swapOffersCancelled: allSwapOffersCancelled,
+        candidateEffects,
         ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
         ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
       };
@@ -712,6 +752,7 @@ export async function applyAccountInput(
         swapOffersCreated: allSwapOffersCreated,
         swapCancelRequests: allSwapCancelRequests,
         swapOffersCancelled: allSwapOffersCancelled,
+        candidateEffects,
         ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
         ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),
       };
@@ -743,6 +784,7 @@ export async function applyAccountInput(
     swapOffersCreated: allSwapOffersCreated,
     swapCancelRequests: allSwapCancelRequests,
     swapOffersCancelled: allSwapOffersCancelled,
+    candidateEffects,
     ...(requiredAccountResponse ? { requiredAccountResponse } : {}),
     ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
     ...(accountJClaimNodeChanges ? { accountJClaimNodeChanges } : {}),

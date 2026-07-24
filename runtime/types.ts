@@ -14,6 +14,7 @@ import type {
 import type { HankoString } from './types/hanko';
 import type {
   AccountInput,
+  AccountFrame,
   AccountMachine,
   AccountTx,
   AccountFrameDbRecord,
@@ -1099,6 +1100,25 @@ export interface CertifiedEntityLineageAnchor {
   };
 }
 
+export type EntityCandidateEffect =
+  | {
+      kind: 'accountFrameHistory';
+      entityId: string;
+      counterpartyId: string;
+      accountHeight: number;
+      source: Extract<RuntimeFrameDbRecord, { kind: 'accountFrame' }>['source'];
+      frame: AccountFrame;
+    }
+  | {
+      kind: 'runtimeEvent';
+      eventName: string;
+      data: Record<string, unknown>;
+    }
+  | {
+      kind: 'debug';
+      payload: Record<string, unknown>;
+    };
+
 /**
  * Validator-private result of replaying one exact proposed frame.
  *
@@ -1113,6 +1133,8 @@ export interface ValidatorEntityFrameExecution {
   outputs: EntityInput[];
   jOutputs: JInput[];
   hashesToSign: HashToSign[];
+  /** Notifications interpreted only after this exact frame commits. */
+  candidateEffects: EntityCandidateEffect[];
   /** Storage invalidations interpreted only after this exact frame commits. */
   storageChanges: RuntimeOverlayRecord[];
   /** Validator-computed CAS delta, published only when this exact frame commits. */

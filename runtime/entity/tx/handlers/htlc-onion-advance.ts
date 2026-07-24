@@ -7,7 +7,14 @@ import {
 } from '../../../protocol/htlc/onion-advance';
 import { calculateDirectionalFeePPM, calculateHopFee, sanitizeBaseFee, sanitizeFeePPM } from '../../../routing/fees';
 import { addMessage, cloneEntityState } from '../../../state-helpers';
-import type { AccountTx, EntityInput, EntityState, Env, HtlcRoute } from '../../../types';
+import type {
+  AccountTx,
+  EntityCandidateEffect,
+  EntityInput,
+  EntityState,
+  Env,
+  HtlcRoute,
+} from '../../../types';
 import { setHtlcRouteNote, terminateHtlcRoute } from '../htlc-route-lifecycle';
 import { applyHtlcSecretFollowups } from './account/committed-htlc-followups';
 
@@ -192,6 +199,7 @@ export const handleHtlcOnionAdvance = async (
   env: Env,
   entityState: EntityState,
   rawTx: HtlcOnionAdvanceTx,
+  candidateEffects: EntityCandidateEffect[] = [],
 ): Promise<Result> => {
   const validated = await validateHtlcOnionAdvanceTx(env, entityState, rawTx);
   const tx = validated.tx;
@@ -202,7 +210,7 @@ export const handleHtlcOnionAdvance = async (
   else if (tx.data.advance.kind === 'acceptOffer') applyAcceptOfferAdvance(newState, tx, mempoolOps);
   else if (tx.data.advance.kind === 'revealAccepted') {
     applyHtlcSecretFollowups(
-      { env, state: entityState, newState, outputs, mempoolOps },
+      { env, state: entityState, newState, outputs, mempoolOps, candidateEffects },
       [{ secret: tx.data.advance.secret, hashlock: tx.data.hashlock }],
     );
   } else applyForwardAdvance(newState, tx, mempoolOps);
