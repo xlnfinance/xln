@@ -165,6 +165,9 @@ case "$role" in
       bun --no-orphans runtime/scripts/watch-process-tree.ts \
         --label MESH \
         --watch-root "$REPO_ROOT/runtime" \
+        --ignore-prefix scripts \
+        --ignore-prefix __tests__ \
+        --ignore-prefix scenarios \
         --debounce-ms "${XLN_DEV_WATCH_DEBOUNCE_MS:-100}" \
         --term-timeout-ms "${XLN_DEV_MESH_TERM_TIMEOUT_MS:-15000}" \
         --kill-timeout-ms "${XLN_DEV_MESH_KILL_TIMEOUT_MS:-2000}" \

@@ -1,0 +1,57 @@
+{
+  "network": "ethereum-sepolia",
+  "chainId": 11155111,
+  "deployer": "0x5D7f16DfD53a208CB521d81Cd9786b05C3FF73F9",
+  "foundationRecipient": "0x5D7f16DfD53a208CB521d81Cd9786b05C3FF73F9",
+  "entityProviderDeploymentBlock": 11342296,
+  "contracts": {
+    "account": "0x80A16823ACb72c9bf1452F76bfD03855B1549c46",
+    "hankoVerifier": "0x46013070666fCdc24e004Ca3D4099B68F5c03BDd",
+    "entityProvider": "0x5A6A6D8bF6734C271aE44dd7BE9A12d36ad7f5b6",
+    "depository": "0x08B90838CCCF1BE3437146eC546CaC5BB3E22272",
+    "deltaTransformer": "0xB89313055f687aAAf54A5bfE6B099fCC342a94B2"
+  },
+  "evmContracts": {
+    "account": {
+      "address": "0x80A16823ACb72c9bf1452F76bfD03855B1549c46",
+      "deploymentBlock": 11342293,
+      "transactionHash": "0xaa03e0fd9a1a50a9679c52b8e78f4ab7b59f55d2b489952cbce861587e98554d"
+    },
+    "hankoVerifier": {
+      "address": "0x46013070666fCdc24e004Ca3D4099B68F5c03BDd",
+      "deploymentBlock": 11342295,
+      "transactionHash": "0xdda38dbc4a9c4cdac741bc01b2387a1e084c239ffd83ba0ef253241c49c97541"
+    },
+    "entityProvider": {
+      "address": "0x5A6A6D8bF6734C271aE44dd7BE9A12d36ad7f5b6",
+      "deploymentBlock": 11342296,
+      "transactionHash": "0xa4df190ac3cc6cc666c04945468c17f21eb58cbe13fabe0ba138f7f2b1628ac2"
+    },
+    "depository": {
+      "address": "0x08B90838CCCF1BE3437146eC546CaC5BB3E22272",
+      "deploymentBlock": 11342297,
+      "transactionHash": "0x3a18323e91f78061d70b8975adc9c6865e0a1556ce8fb00677dee6d270bdf942"
+    },
+    "deltaTransformer": {
+      "address": "0xB89313055f687aAAf54A5bfE6B099fCC342a94B2",
+      "deploymentBlock": 11342299,
+      "transactionHash": "0x2e40d4b3134fb8f0f3ed36352e8277a471919b8e77bd9a10e50bf457c071c092"
+    },
+    "stablecoin": {
+      "address": "0xFE53f87F2AF38e3c8CD800939863a3E09e7aF51e",
+      "deploymentBlock": 11342300,
+      "transactionHash": "0x714fa830db95faed7b4b46b46ab81aceee560551629ba24f227a23bc91306dba"
+    },
+    "stablecoinRegistration": {
+      "transactionHash": "0x46e7c1c83ef85f4842319bea967897412d95c6a77b260c244ba792299623d2d6",
+      "blockNumber": 11342301
+    }
+  },
+  "registeredTokens": {
+    "USDT": {
+      "address": "0xFE53f87F2AF38e3c8CD800939863a3E09e7aF51e",
+      "tokenId": 1,
+      "decimals": 6
+    }
+  }
+}

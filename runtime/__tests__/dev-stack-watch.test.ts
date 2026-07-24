@@ -47,6 +47,9 @@ const pidAlive = (pid: number): boolean => {
 test('dev stack restarts backend services when source changes', () => {
   expect(script).toContain('bun --no-orphans runtime/scripts/watch-process-tree.ts');
   expect(script).toContain('--watch-root "$REPO_ROOT/runtime"');
+  expect(script).toContain('--ignore-prefix scripts');
+  expect(script).toContain('--ignore-prefix __tests__');
+  expect(script).toContain('--ignore-prefix scenarios');
   expect(script).toContain('bun --no-orphans runtime/orchestrator/orchestrator.ts');
   expect(script).toContain('bun --no-orphans --watch runtime/watchtower/standalone-server.ts');
 });
@@ -119,6 +122,56 @@ test('configured MESH supervisor reaps its exact process group before restart', 
     rmSync(root, { recursive: true, force: true });
   }
 }, 12_000);
+
+test('MESH supervisor ignores tests, scenarios, and operational scripts', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'xln-dev-watch-ignore-'));
+  const sourceRoot = join(root, 'source');
+  const ignoredRoot = join(sourceRoot, 'scripts');
+  const ignoredPath = join(ignoredRoot, 'smoke.ts');
+  const mainPath = join(root, 'main.ts');
+  const pidLogPath = join(root, 'children.pid');
+  mkdirSync(ignoredRoot, { recursive: true });
+  writeFileSync(ignoredPath, 'export const smoke = 1;\n', 'utf8');
+  writeFileSync(mainPath, [
+    "import { appendFileSync } from 'node:fs';",
+    "appendFileSync(process.argv[2]!, `${process.pid}\\n`, 'utf8');",
+    'await new Promise<void>(() => {});',
+  ].join('\n'), 'utf8');
+
+  const watcher = spawn('bun', [
+    'runtime/scripts/watch-process-tree.ts',
+    '--label', 'MESH_IGNORE_TEST',
+    '--watch-root', sourceRoot,
+    '--ignore-prefix', 'scripts',
+    '--debounce-ms', '20',
+    '--term-timeout-ms', '100',
+    '--kill-timeout-ms', '1000',
+    '--', 'bun', mainPath, pidLogPath,
+  ], {
+    cwd: resolve(import.meta.dir, '../..'),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let watcherStderr = '';
+  watcher.stderr.on('data', chunk => { watcherStderr += String(chunk); });
+  const watcherExit = new Promise<void>(resolveExit => watcher.once('exit', () => resolveExit()));
+  try {
+    await waitFor(() => {
+      if (watcher.exitCode !== null) throw new Error(`DEV_WATCH_IGNORE_EARLY_EXIT:${watcherStderr}`);
+      return readPids(pidLogPath).length === 1;
+    });
+    writeFileSync(ignoredPath, 'export const smoke = 2;\n', 'utf8');
+    await Bun.sleep(250);
+    expect(readPids(pidLogPath)).toHaveLength(1);
+  } finally {
+    watcher.kill('SIGTERM');
+    await Promise.race([watcherExit, Bun.sleep(1_000)]);
+    if (watcher.exitCode === null && watcher.signalCode === null) watcher.kill('SIGKILL');
+    for (const pid of readPids(pidLogPath)) {
+      try { process.kill(pid, 'SIGKILL'); } catch {}
+    }
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 5_000);
 
 test('dev cleanup only reaps canonical dev ports and db paths', () => {
   expect(cleanSlate).toContain('RPC2_PORT="$(xln_rpc2_port)"');

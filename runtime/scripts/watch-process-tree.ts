@@ -8,6 +8,7 @@ import { stopProcessGroup } from './process-group';
 type SupervisorOptions = Readonly<{
   label: string;
   watchRoots: string[];
+  ignorePrefixes: string[];
   debounceMs: number;
   termTimeoutMs: number;
   killTimeoutMs: number;
@@ -18,6 +19,7 @@ type SupervisorOptions = Readonly<{
 type MutableOptions = {
   label: string;
   watchRoots: string[];
+  ignorePrefixes: string[];
   debounceMs: number;
   termTimeoutMs: number;
   killTimeoutMs: number;
@@ -51,6 +53,11 @@ const readOption = (args: string[], index: number, name: string): { value: strin
 const applyOption = (options: MutableOptions, name: string, value: string): void => {
   if (name === 'label') options.label = value;
   if (name === 'watch-root') options.watchRoots.push(resolve(value));
+  if (name === 'ignore-prefix') {
+    const normalized = value.replaceAll('\\', '/').replace(/^\.?\//, '').replace(/\/+$/, '');
+    if (!normalized || normalized.includes('..')) throw new Error(`DEV_WATCH_IGNORE_PREFIX_INVALID:${value}`);
+    options.ignorePrefixes.push(`${normalized}/`);
+  }
   if (name === 'debounce-ms') {
     options.debounceMs = readPositiveInteger(value, 'DEV_WATCH_DEBOUNCE_MS', 10_000);
   }
@@ -78,10 +85,22 @@ export const parseDevWatchSupervisorArgs = (argv: string[]): SupervisorOptions =
   const [command, ...commandArgs] = argv.slice(separator + 1);
   if (!command) throw new Error('DEV_WATCH_COMMAND_REQUIRED');
   const options: MutableOptions = {
-    label: '', watchRoots: [], debounceMs: 100, termTimeoutMs: 15_000, killTimeoutMs: 2_000,
+    label: '',
+    watchRoots: [],
+    ignorePrefixes: [],
+    debounceMs: 100,
+    termTimeoutMs: 15_000,
+    killTimeoutMs: 2_000,
   };
   const flags = argv.slice(0, separator);
-  const allowed = new Set(['label', 'watch-root', 'debounce-ms', 'term-timeout-ms', 'kill-timeout-ms']);
+  const allowed = new Set([
+    'label',
+    'watch-root',
+    'ignore-prefix',
+    'debounce-ms',
+    'term-timeout-ms',
+    'kill-timeout-ms',
+  ]);
   for (let index = 0; index < flags.length; index += 1) {
     const arg = flags[index] || '';
     const name = arg.replace(/^--/, '').split('=')[0] || '';
@@ -91,6 +110,7 @@ export const parseDevWatchSupervisorArgs = (argv: string[]): SupervisorOptions =
     index = parsed.next;
   }
   options.watchRoots = [...new Set(options.watchRoots)];
+  options.ignorePrefixes = [...new Set(options.ignorePrefixes)];
   validateOptions(options);
   return { ...options, command, commandArgs };
 };
@@ -107,9 +127,15 @@ const stopGeneration = async (generation: Generation, options: SupervisorOptions
   });
 };
 
-const shouldRestartForPath = (filename: string | Buffer | null): boolean => (
-  filename === null || /\.(?:[cm]?[jt]sx?|json)$/i.test(String(filename))
-);
+const shouldRestartForPath = (
+  filename: string | Buffer | null,
+  ignorePrefixes: readonly string[],
+): boolean => {
+  if (filename === null) return true;
+  const normalized = String(filename).replaceAll('\\', '/').replace(/^\.?\//, '');
+  if (ignorePrefixes.some((prefix) => normalized.startsWith(prefix))) return false;
+  return /\.(?:[cm]?[jt]sx?|json)$/i.test(normalized);
+};
 
 class DevProcessTreeSupervisor {
   private active: Generation | null = null;
@@ -220,7 +246,9 @@ class DevProcessTreeSupervisor {
   private startWatchers(): void {
     for (const root of this.options.watchRoots) {
       const watcher = watch(root, { recursive: true }, (eventType, filename) => {
-        if (shouldRestartForPath(filename)) this.requestRestart(`${eventType}:${String(filename || root)}`);
+        if (shouldRestartForPath(filename, this.options.ignorePrefixes)) {
+          this.requestRestart(`${eventType}:${String(filename || root)}`);
+        }
       });
       watcher.on('error', error => this.fail(error));
       this.watchers.push(watcher);
