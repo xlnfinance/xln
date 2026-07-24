@@ -214,6 +214,30 @@ async function readFullMeshHealth(page: Page): Promise<E2EHealthResponse> {
   return await response.json() as E2EHealthResponse;
 }
 
+async function readOpenDebugIncidents(page: Page): Promise<Array<{
+  fingerprint: string;
+  code: string;
+  message: string;
+}>> {
+  const response = await page.request.get(`${API_BASE_URL}/api/debug/incidents?state=open&limit=1000`);
+  expect(response.ok(), `debug incident query failed: ${response.status()} ${await response.text()}`).toBe(true);
+  const body = await response.json() as { incidents?: unknown };
+  return Array.isArray(body.incidents)
+    ? body.incidents.flatMap((value) => {
+        if (!value || typeof value !== 'object') return [];
+        const incident = value as Record<string, unknown>;
+        const fingerprint = String(incident.fingerprint || '');
+        return fingerprint
+          ? [{
+              fingerprint,
+              code: String(incident.code || ''),
+              message: String(incident.message || ''),
+            }]
+          : [];
+      })
+    : [];
+}
+
 async function readHubPairSnapshot(
   page: Page,
   hub: NonNullable<E2EHealthResponse['hubs']>[number],
@@ -3067,6 +3091,21 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       message: 'global health must become non-ready while H2 is unavailable',
     }).toBe(false);
 
+    let h2IncidentFingerprint = '';
+    await expect.poll(async () => {
+      const incidents = await readOpenDebugIncidents(page);
+      const incident = incidents.find(candidate =>
+        candidate.code.includes('H2_UNEXPECTED_EXIT') ||
+        candidate.message.includes('H2_UNEXPECTED_EXIT'),
+      );
+      h2IncidentFingerprint = incident?.fingerprint ?? '';
+      return h2IncidentFingerprint;
+    }, {
+      timeout: 15_000,
+      intervals: [50, 100, 250],
+      message: 'H2 failure must be durable in the parent incident registry before replacement',
+    }).toMatch(/^h2_unexpected_exit-/);
+
     await expect.poll(async () => {
       const health = await readFullMeshHealth(page);
       const child = health.process?.children?.find(candidate => candidate.role === 'hub' && candidate.name === 'H2');
@@ -3092,6 +3131,10 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
 
     const restored = await readFullMeshHealth(page);
     expectMarketMakerSameAndCrossBooksHealthy(restored);
+    expect(
+      (await readOpenDebugIncidents(page)).some(incident => incident.fingerprint === h2IncidentFingerprint),
+      'H2 root incident must remain queryable after managed replacement',
+    ).toBe(true);
     const restoredH2 = restored.hubs?.find(hub => hub.name === 'H2');
     expect(restoredH2?.entityId).toBe(h2Hub!.entityId);
     const restoredSnapshot = await readHubPairSnapshot(page, restoredH2!, '1/2');
