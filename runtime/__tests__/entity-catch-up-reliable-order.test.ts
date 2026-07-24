@@ -73,6 +73,11 @@ import {
   restoreDurableRuntimeSnapshot,
 } from '../wal/snapshot';
 import type { PersistedFrameJournal } from '../storage/types';
+import {
+  DeterministicFaults,
+  faultMatrixSeeds,
+  withFaultSeed,
+} from './fixtures/deterministic-faults';
 
 const TEST_RUN_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -416,6 +421,119 @@ describe('ordered reliable Entity catch-up', () => {
     expect(h1Commits[0]!.receipt!.body.identity.frameHash).toBe(heightOne.frame.hash);
     expect(h2Commits[0]!.receipt!.body.identity.frameHash).toBe(heightTwo.frame.hash);
   });
+
+  for (const faultSeed of faultMatrixSeeds()) {
+    test(`converges after deterministic delay/reorder/drop/duplicate/restart seed=${faultSeed}`, async () =>
+      withFaultSeed(faultSeed, async () => {
+        const faults = new DeterministicFaults(faultSeed);
+        const entitySeed = `entity-fault-matrix-${faultSeed}`;
+        const receiverSeed = `entity-fault-receiver-${faultSeed}`;
+        const sender = createRuntime(`entity-fault-sender-${faultSeed}`);
+        let receiver = createRuntime(receiverSeed);
+        const signerId = deriveSignerAddressSync(entitySeed, '1').toLowerCase();
+        const signerKey = deriveSignerKeySync(entitySeed, '1');
+        registerSignerKey(receiver, signerId, signerKey);
+        const initialState = createEntityState(signerId);
+        installReplica(receiver, initialState, signerId);
+
+        const outputs: DeliverableEntityInput[] = [];
+        let certifiedState = initialState;
+        for (let height = 1; height <= 4; height += 1) {
+          const certified = await buildCommitCertificate(
+            receiver,
+            certifiedState,
+            signerId,
+            height * 100,
+          );
+          outputs.push(deliverable(
+            receiver.runtimeId!,
+            initialState.entityId,
+            signerId,
+            certified.frame,
+          ));
+          certifiedState = certified.nextState;
+        }
+        sender.pendingNetworkOutputs = structuredClone(outputs);
+
+        const restart = (): void => {
+          const replica = receiver.eReplicas.get(`${initialState.entityId}:${signerId}`);
+          if (!replica) throw new Error('FAULT_MATRIX_REPLICA_MISSING');
+          const machine = buildDurableRuntimeMachineSnapshot(receiver);
+          const restarted = createRuntime(receiverSeed);
+          registerSignerKey(restarted, signerId, signerKey);
+          restarted.eReplicas.set(
+            `${initialState.entityId}:${signerId}`,
+            structuredClone(replica),
+          );
+          restoreDurableRuntimeSnapshot(restarted, machine);
+          receiver = restarted;
+        };
+
+        const deliver = async (input: DeliverableEntityInput): Promise<void> => {
+          const registration = registerReliableIngress(
+            receiver,
+            sender.runtimeId!,
+            input,
+          );
+          if (registration.kind === 'receipt') {
+            applyReliableDeliveryReceipts(sender, [registration.receipt]);
+            return;
+          }
+          if (registration.kind !== 'enqueue') return;
+          const result = await applyMergedEntityInputs(receiver, [input], [], {
+            isReplay: false,
+            routingDeps,
+          });
+          const commits = commitReliableIngress(receiver, result.appliedEntityInputs);
+          if (result.appliedEntityInputs.length === 0) {
+            releaseUncommittedReliableIngress(receiver, [input], []);
+            return;
+          }
+          finalizeReliableIngressCommit(receiver, commits);
+          applyReliableDeliveryReceipts(
+            sender,
+            commits.flatMap(commit => commit.receipt ? [commit.receipt] : []),
+          );
+        };
+
+        // Force every fault class once before the seeded schedule takes over:
+        // H4 arrives before H1, H2 is dropped, H3 is delayed, the receiver
+        // restarts, and H1 is duplicated across the durable receipt boundary.
+        await deliver(outputs[3]!);
+        const delayedUntil = new Map([[3, 3 + faults.pick(3)]]);
+        restart();
+        await deliver(outputs[0]!);
+        await deliver(outputs[0]!);
+
+        const attempts = new Map<number, number>();
+        for (let tick = 1; tick <= 128 && sender.pendingNetworkOutputs!.length > 0; tick += 1) {
+          const eligible = sender.pendingNetworkOutputs!.filter(input => {
+            const height = input.proposedFrame?.height;
+            return height !== undefined && (delayedUntil.get(height) ?? 0) <= tick;
+          });
+          if (eligible.length === 0) continue;
+          const input = structuredClone(eligible[faults.pick(eligible.length)]!);
+          const height = input.proposedFrame!.height;
+          const attempt = (attempts.get(height) ?? 0) + 1;
+          attempts.set(height, attempt);
+          if (attempt < 4 && faults.oneIn(5)) continue;
+          if (attempt < 4 && faults.oneIn(5)) {
+            delayedUntil.set(height, tick + 1 + faults.pick(4));
+            continue;
+          }
+          await deliver(input);
+          if (faults.oneIn(4)) await deliver(input);
+          if (tick === 2 + faults.pick(4)) restart();
+        }
+
+        expect(sender.pendingNetworkOutputs).toEqual([]);
+        expect(receiver.eReplicas.get(
+          `${initialState.entityId}:${signerId}`,
+        )?.state.height).toBe(4);
+        expect(receiver.runtimeState?.pendingReliableIngress?.size ?? 0).toBe(0);
+        expect(receiver.runtimeState?.reliableIngressTerminalWatermarks?.size).toBe(1);
+      }));
+  }
 
   test('local valid H+2 remains durable across defer/restart and commits after H+1', async () => {
     const entitySeed = `entity-catch-up-local-${TEST_RUN_ID}`;

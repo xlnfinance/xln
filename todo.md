@@ -82,8 +82,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 5. Crash, corruption and load evidence — P1, open
 
-- [ ] Add deterministic SimNetwork/SimStorage delay/reorder/drop/partial-write/
-  kill tests and retain every failing seed.
 - [ ] Profile the production bootstrap and growing-hub frame path locally.
   Remove only measured full scans/clones/duplicate crypto; publish deterministic
   1/1,000-tx and growing-hub median/p95/MAD budgets from a clean Bun cache.

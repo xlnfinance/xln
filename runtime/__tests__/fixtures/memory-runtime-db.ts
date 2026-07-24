@@ -61,3 +61,61 @@ export class MemoryRuntimeDb implements RuntimeDbLike {
     yield* keys;
   }
 }
+
+export class TornBatchRuntimeDb implements RuntimeDbLike {
+  private appliedOperationsBeforeFailure: number | null = null;
+
+  constructor(readonly durable: MemoryRuntimeDb) {}
+
+  arm(appliedOperationsBeforeFailure: number): void {
+    if (
+      !Number.isSafeInteger(appliedOperationsBeforeFailure) ||
+      appliedOperationsBeforeFailure < 0
+    ) {
+      throw new Error(
+        `TORN_BATCH_OPERATION_COUNT_INVALID:${appliedOperationsBeforeFailure}`,
+      );
+    }
+    this.appliedOperationsBeforeFailure = appliedOperationsBeforeFailure;
+  }
+
+  get(key: Buffer): Promise<Buffer> {
+    return this.durable.get(key);
+  }
+
+  batch() {
+    const operations: MemoryOperation[] = [];
+    return {
+      put: (key: Buffer, value: Buffer) => operations.push({
+        kind: 'put',
+        key: Buffer.from(key),
+        value: Buffer.from(value),
+      }),
+      del: (key: Buffer) => operations.push({ kind: 'del', key: Buffer.from(key) }),
+      write: async () => {
+        const limit = this.appliedOperationsBeforeFailure;
+        this.appliedOperationsBeforeFailure = null;
+        const durableBatch = this.durable.batch();
+        for (const operation of limit === null ? operations : operations.slice(0, limit)) {
+          if (operation.kind === 'put') durableBatch.put(operation.key, operation.value);
+          else durableBatch.del?.(operation.key);
+        }
+        await durableBatch.write();
+        if (limit !== null) {
+          throw new Error(
+            `SIM_STORAGE_TORN_BATCH:applied=${Math.min(limit, operations.length)}:` +
+            `planned=${operations.length}`,
+          );
+        }
+      },
+    };
+  }
+
+  keys(options?: {
+    gte?: Buffer;
+    lt?: Buffer;
+    reverse?: boolean;
+  }): AsyncIterable<Buffer> {
+    return this.durable.keys(options);
+  }
+}
