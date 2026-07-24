@@ -2094,7 +2094,6 @@ async function expectSelectedBooksHaveVisibleLiquidity(
       expect(depth.bids, `${pairLabel} ${accountId} must expose exactly 10 committed bids`).toBe(10);
     }
   }
-  await ensureSwapScope(page, 'aggregated');
 }
 
 test.describe('E2E Swap Flow', () => {
@@ -2126,6 +2125,7 @@ test.describe('E2E Swap Flow', () => {
     await timedStep('swap_pairs.check_selected_depth', () =>
       expectSelectedBooksHaveVisibleLiquidity(page, CANONICAL_SWAP_PAIR_LABELS, runtimeRef.hubIds.slice(0, 3)));
     await capturePageScreenshot(page, testInfo, 'same-j-selected-exact-10x10.png');
+    await ensureSwapScope(page, 'aggregated');
   });
 
 	  test('swap orderbook shows terminal no-market state when relay stream never returns a snapshot', { tag: '@resilience' }, async ({ page }) => {
