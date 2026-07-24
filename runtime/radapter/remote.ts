@@ -427,7 +427,12 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       const timeoutMs = Math.max(1_000, Number(this.config?.requestTimeoutMs ?? 15_000));
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new RuntimeAdapterError('E_INTERNAL', `runtime adapter request timed out: ${body.op}`, true));
+        const requestLabel = body.op === 'read' ? `${body.op}:${body.path}` : body.op;
+        reject(new RuntimeAdapterError(
+          'E_INTERNAL',
+          `runtime adapter request timed out: ${requestLabel} after ${timeoutMs}ms (pending=${this.pending.size})`,
+          true,
+        ));
       }, timeoutMs);
       const pending: PendingRequest = {
         op: body.op,

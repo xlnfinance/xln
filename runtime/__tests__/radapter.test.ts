@@ -2177,17 +2177,10 @@ test('runtime adapter historical account search uses the point storage loader', 
   expect(viewPageCalled).toBe(false);
 });
 
-test('runtime adapter current view frame prefers storage page loader when current height is persisted', async () => {
+test('runtime adapter current view frame projects live state without replaying persisted history', async () => {
   const env = makeEnv();
   const replica = Array.from(env.eReplicas.values())[0]!;
-  const storedOnlyCounterpartyId = `0x${'cc'.repeat(32)}`;
-  const account = replica.state.accounts.get(counterpartyId)!;
-  const storedDoc = projectAccountDoc({
-    ...account,
-    rightEntity: storedOnlyCounterpartyId,
-    proofHeader: { ...account.proofHeader, toEntity: storedOnlyCounterpartyId },
-  });
-  let pagedLoadCalled: { entityId: string; height: number } | null = null;
+  let pagedLoadCalled = false;
 
   const frame = await resolveRuntimeAdapterRead<{
     activeEntity: {
@@ -2210,37 +2203,25 @@ test('runtime adapter current view frame prefers storage page loader when curren
       epochReplayBytes: 0,
       retainedHistoryBytes: 0,
     }),
-    loadEntityViewPage: async (requestedEntityId, height) => {
-      pagedLoadCalled = { entityId: requestedEntityId, height };
-      return {
-        core: projectEntityReplicaCoreView(replica.state, replica),
-        accounts: {
-          items: [storedDoc],
-          nextCursor: 'next-page',
-          firstCursor: storedOnlyCounterpartyId,
-          lastCursor: storedOnlyCounterpartyId,
-          pageIndex: 0,
-          pageCount: 1_000_000,
-          totalItems: 1_000_000,
-          limit: 1,
-        },
-        books: { items: [], nextCursor: null, pageIndex: 0, pageCount: 0, totalItems: 0, limit: 1 },
-      };
+    loadEntityViewPage: async () => {
+      pagedLoadCalled = true;
+      throw new Error('current view-frame must not replay persisted history');
     },
   }, 'view-frame', { accountsLimit: 1 });
 
-  expect(pagedLoadCalled).toEqual({ entityId, height: env.height });
+  expect(pagedLoadCalled).toBe(false);
   expect(frame.activeEntity?.accounts.items).toHaveLength(1);
-  expect(frame.activeEntity?.accounts.items[0]?.rightEntity).toBe(storedOnlyCounterpartyId);
+  expect(frame.activeEntity?.accounts.items[0]?.rightEntity).toBe(counterpartyId);
   expect(frame.activeEntity?.accounts.summary).toMatchObject({
-    totalItems: 1_000_000,
+    totalItems: 1,
     visibleItems: 1,
-    sampleIds: [storedOnlyCounterpartyId],
+    sampleIds: [counterpartyId],
   });
 });
 
-test('runtime adapter 1M account view-frame stays aggregate-first and under wire budget', async () => {
+test('runtime adapter historical 1M account view-frame stays aggregate-first and under wire budget', async () => {
   const env = makeEnv();
+  env.height = 2;
   const replica = Array.from(env.eReplicas.values())[0]!;
   const account = replica.state.accounts.get(counterpartyId)!;
   let loaderCalls = 0;
@@ -2288,6 +2269,7 @@ test('runtime adapter 1M account view-frame stays aggregate-first and under wire
       epochReplayBytes: 0,
       retainedHistoryBytes: 0,
     }),
+    listEntityIdsAtHeight: async () => [entityId],
     loadEntityViewPage: async () => {
       loaderCalls += 1;
       return {
@@ -2305,11 +2287,11 @@ test('runtime adapter 1M account view-frame stays aggregate-first and under wire
         books: { items: [], nextCursor: null, pageIndex: 0, pageCount: 0, totalItems: 0, limit: 10 },
       };
     },
-  }, 'view-frame', { entityId, accountsLimit: 10, booksLimit: 10 });
+  }, 'view-frame', { entityId, atHeight: 1, accountsLimit: 10, booksLimit: 10 });
   const elapsedMs = Date.now() - startedAt;
   const encoded = encodeRuntimeAdapterMessage({ v: 1, inReplyTo: 'budget', ok: true, payload: frame });
 
-  expect(loaderCalls).toBe(1);
+  expect(loaderCalls).toBe(2);
   expect(elapsedMs).toBeLessThan(100);
   expect(encoded.byteLength).toBeLessThan(100_000);
   expect(frame.activeEntity?.accounts.items).toHaveLength(10);
