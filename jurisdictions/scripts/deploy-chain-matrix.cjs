@@ -176,10 +176,10 @@ const deployEvm = async (chain, options) => {
 
   requireHexPrivateKey();
   if (!process.env[chain.rpcEnv]) throw new Error(`${chain.rpcEnv} is required for ${chain.id}`);
-  run('bunx', ['hardhat', 'compile']);
+  run('bunx', ['--bun', 'hardhat', 'compile']);
   mkdirSync(deploymentsDir, { recursive: true });
   const outputPath = path.join(deploymentsDir, `${chain.id}.json`);
-  run('bunx', ['hardhat', 'run', 'scripts/deploy-stack.cjs', '--network', chain.hardhatNetwork], {
+  run('bunx', ['--bun', 'hardhat', 'run', 'scripts/deploy-stack.cjs', '--network', chain.hardhatNetwork], {
     env: {
       XLN_DEPLOY_OUTPUT: outputPath,
       XLN_DISPUTE_DELAY_BLOCKS: String(chain.disputeDelayBlocks),
@@ -369,12 +369,14 @@ const deployTron = async (chain, options) => {
     entityProviderDeploymentBlock: entityProvider.deploymentBlock,
     contracts: {
       account: account.evm,
+      hankoVerifier: hankoVerifier.evm,
       entityProvider: entityProvider.evm,
       depository: depository.evm,
       deltaTransformer: deltaTransformer.evm,
     },
     tronContracts: {
       account,
+      hankoVerifier,
       entityProvider,
       depository,
       deltaTransformer,
@@ -426,6 +428,7 @@ const jurisdictionEntry = (result) => ({
   status: 'pending',
   description: `${result.chain.name} XLN deployment`,
   tokens: tokenConfig(result.chain, result.registeredTokens),
+  ...(result.evmContracts ? { evmContracts: result.evmContracts } : {}),
   ...(result.tronContracts ? { tronContracts: result.tronContracts } : {}),
 });
 

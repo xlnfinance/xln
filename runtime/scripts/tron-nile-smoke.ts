@@ -1,14 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createJAdapter } from '../jadapter';
-import { DEFAULT_PRIVATE_KEY } from '../jadapter/helpers';
 import { readAuthenticatedReceiptRange } from '../jadapter/receipt-reader';
 
-const args = new Set(process.argv.slice(2));
 const depositArgument = process.argv.slice(2).find((arg) => arg.startsWith('--deposit-usdt='));
 const depositAmount = depositArgument ? BigInt(depositArgument.slice('--deposit-usdt='.length)) : 0n;
-const privateKey = process.env['TRON_NILE_PRIVATE_KEY'] || (args.has('--use-public-dev-key') ? DEFAULT_PRIVATE_KEY : '');
-if (!privateKey) throw new Error('TRON_NILE_PRIVATE_KEY_REQUIRED');
+const privateKey = process.env['TRON_NILE_PRIVATE_KEY'] || '';
+if (depositAmount < 0n) throw new Error('TRON_NILE_DEPOSIT_AMOUNT_NEGATIVE');
+if (depositAmount > 0n && !privateKey) {
+  throw new Error('TRON_NILE_PRIVATE_KEY_REQUIRED_FOR_WRITE');
+}
 
 const configPath = resolve(process.cwd(), 'jurisdictions/jurisdictions.json');
 const config = JSON.parse(readFileSync(configPath, 'utf8')) as {
@@ -44,6 +45,7 @@ const adapter = await createJAdapter({
   rpcUrl,
   tronFullHost: fullHost,
   ...(privateKey ? { privateKey } : {}),
+  ...(!privateKey ? { watchOnly: true } : {}),
   fromReplica: {
     contracts,
     depositoryAddress: contracts['depository'],

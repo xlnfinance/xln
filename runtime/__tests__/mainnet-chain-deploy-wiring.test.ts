@@ -24,6 +24,19 @@ describe('mainnet chain deployment wiring', () => {
     expect(script).toContain('USDC_DECIMALS_MISMATCH');
   });
 
+  test('EVM deployment evidence retains every linked contract receipt and watcher start block', () => {
+    const stack = readFileSync(join(repoRoot, 'jurisdictions/scripts/deploy-stack.cjs'), 'utf8');
+    const matrix = readFileSync(join(repoRoot, 'jurisdictions/scripts/deploy-chain-matrix.cjs'), 'utf8');
+    expect(stack).toContain('deploymentEvidence');
+    expect(stack).toContain('hankoVerifier: hankoVerifierAddr');
+    expect(stack).toContain('entityProviderDeploymentBlock: entityProviderDeployment.deploymentBlock');
+    expect(stack).toContain('evmContracts:');
+    expect(stack).toContain('transactionHash: transaction.hash');
+    expect(matrix).toContain('result.evmContracts ? { evmContracts: result.evmContracts }');
+    expect(matrix).toContain("run('bunx', ['--bun', 'hardhat', 'compile'])");
+    expect(matrix).toContain("run('bunx', ['--bun', 'hardhat', 'run'");
+  });
+
   test('hardhat has explicit Ethereum testnet and mainnet networks', () => {
     const config = readFileSync(join(repoRoot, 'jurisdictions/hardhat.config.ts'), 'utf8');
     expect(config).toContain('"ethereum-sepolia"');
@@ -62,7 +75,12 @@ describe('mainnet chain deployment wiring', () => {
     expect(script).toContain("TRON_MAINNET_USDT");
     expect(script).toContain("base58: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'");
     expect(script).toContain("base58: 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf'");
-    expect(script).toContain("deployTronContract(tronWeb, 'EntityProvider', [foundationRecipient])");
+    expect(script).toContain(
+      "const hankoVerifier = await deployTronContract(tronWeb, 'HankoVerifier');",
+    );
+    expect(script).toContain('{ HankoVerifier: hankoVerifier }');
+    expect(script).toContain('hankoVerifier: hankoVerifier.evm');
+    expect(script).toContain('hankoVerifier,');
     expect(script).toContain('[entityProvider.base58, chain.disputeDelayBlocks]');
     expect(script).toContain('disputeDelayBlocks: 28_800');
     expect(script).toContain('TRON_DISPUTE_DELAY_MISMATCH');
@@ -93,5 +111,13 @@ describe('mainnet chain deployment wiring', () => {
     expect(rpc).toContain('TRON_CONFIRMATION_DEPTH_FORBIDDEN');
     expect(rpc).toContain('isTronChainId(config.chainId) ? readTronSolidifiedBlockNumber()');
     expect(rpc).not.toContain('TRON_FINALITY_DEPTH');
+  });
+
+  test('TRON Nile read smoke is watch-only and requires a key only for writes', () => {
+    const smoke = readFileSync(join(repoRoot, 'runtime/scripts/tron-nile-smoke.ts'), 'utf8');
+    expect(smoke).toContain("!privateKey ? { watchOnly: true }");
+    expect(smoke).toContain('TRON_NILE_PRIVATE_KEY_REQUIRED_FOR_WRITE');
+    expect(smoke).not.toContain('DEFAULT_PRIVATE_KEY');
+    expect(smoke).not.toContain('--use-public-dev-key');
   });
 });
