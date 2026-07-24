@@ -35,7 +35,7 @@ describe('Chrome extension wallet policy', () => {
 		expect(manifest.externally_connectable.matches).toContain('https://xln.finance/*');
 		expect(manifest.externally_connectable.matches).not.toContain('https://*/*');
 		expect(manifest.name).toBe('xln finance');
-		expect(manifest.version).toBe('0.1.26');
+		expect(manifest.version).toBe('0.1.27');
 		expect(manifest.action.default_popup).toBeUndefined();
 	});
 });

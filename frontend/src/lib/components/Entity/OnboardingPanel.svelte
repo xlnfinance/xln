@@ -51,6 +51,7 @@
     buildOnboardingHubOpenRuntimeInput,
     buildOnboardingProfileRuntimeInput,
     emptyOnboardingRuntimeProjection,
+    selectAdvertisedAutoJoinCandidates,
     type OnboardingHubCandidate,
     type OnboardingRuntimeTarget,
     type OnboardingRuntimeProjection,
@@ -471,15 +472,26 @@
       .some((candidate) => normalizeEntityId(candidate) === normalizedCounterpartyId);
   }
 
-  function getHubEntityIds(target: OnboardingTarget): string[] {
-    const discovered: string[] = [];
+  type HubDiscovery = {
+    advertisedHubEntityIds: string[];
+    eligibleHubEntityIds: string[];
+  };
+
+  function getProjectedHubDiscovery(target: OnboardingTarget): HubDiscovery {
+    const advertisedHubEntityIds: string[] = [];
+    const eligibleHubEntityIds: string[] = [];
     const add = (value: unknown) => {
       const id = String(value || '').trim();
       if (!id) return;
       if (normalizeEntityId(id) === normalizeEntityId(target.entityId)) return;
-      if (hasProjectedCounterpartyAccount(target.entityId, id)) return;
-      if (!discovered.some(existing => normalizeEntityId(existing) === normalizeEntityId(id))) {
-        discovered.push(id);
+      if (!advertisedHubEntityIds.some(existing => normalizeEntityId(existing) === normalizeEntityId(id))) {
+        advertisedHubEntityIds.push(id);
+      }
+      if (
+        !hasProjectedCounterpartyAccount(target.entityId, id)
+        && !eligibleHubEntityIds.some(existing => normalizeEntityId(existing) === normalizeEntityId(id))
+      ) {
+        eligibleHubEntityIds.push(id);
       }
     };
 
@@ -489,11 +501,13 @@
       add(candidate.entityId);
     }
 
-    return discovered;
+    return { advertisedHubEntityIds, eligibleHubEntityIds };
   }
 
-  async function fetchPublicHubEntityIds(target: OnboardingTarget): Promise<string[]> {
-    if (typeof window === 'undefined') return [];
+  async function fetchPublicHubDiscovery(target: OnboardingTarget): Promise<HubDiscovery> {
+    if (typeof window === 'undefined') {
+      return { advertisedHubEntityIds: [], eligibleHubEntityIds: [] };
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 1200);
     try {
@@ -504,7 +518,8 @@
       if (!response.ok) throw new Error(`HTTP_${response.status}`);
       const payload = await response.json() as PublicHubResponse;
       if (payload.ok !== true) throw new Error('RESPONSE_NOT_OK');
-      const out: string[] = [];
+      const advertisedHubEntityIds: string[] = [];
+      const eligibleHubEntityIds: string[] = [];
       for (const hub of payload.hubs || []) {
         if (!hub?.entityId || hub.metadata?.isHub !== true) continue;
         const normalized = normalizeEntityId(hub.entityId);
@@ -518,66 +533,116 @@
           ...(jurisdictionKey ? { jurisdictionKey } : {}),
         };
         if (!targetJurisdictionMatches(target, candidate)) continue;
-        if (hasProjectedCounterpartyAccount(target.entityId, hub.entityId)) continue;
-        if (!out.some(existing => normalizeEntityId(existing) === normalized)) out.push(hub.entityId);
+        if (!advertisedHubEntityIds.some(existing => normalizeEntityId(existing) === normalized)) {
+          advertisedHubEntityIds.push(hub.entityId);
+        }
+        if (
+          !hasProjectedCounterpartyAccount(target.entityId, hub.entityId)
+          && !eligibleHubEntityIds.some(existing => normalizeEntityId(existing) === normalized)
+        ) {
+          eligibleHubEntityIds.push(hub.entityId);
+        }
       }
-      return out;
+      return { advertisedHubEntityIds, eligibleHubEntityIds };
     } finally {
       clearTimeout(timer);
     }
   }
 
-  async function queueAutoHubJoinsForTarget(joinCount: number, target: OnboardingTarget): Promise<number> {
-    if (joinCount <= 0 || !target.entityId || !target.signerId) return 0;
+  async function queueAutoHubJoinsForTarget(
+    joinCount: number,
+    target: OnboardingTarget,
+  ): Promise<{ joined: number; required: boolean }> {
+    if (joinCount <= 0 || !target.entityId || !target.signerId) {
+      return { joined: 0, required: false };
+    }
 
-    const waitForCandidates = async (): Promise<string[]> => {
+    const waitForCandidates = async (): Promise<{
+      required: boolean;
+      hubEntityIds: string[];
+    }> => {
       const timeoutMs = 3_000;
       const pollMs = 100;
       const startedAt = Date.now();
-      let best: string[] = [];
+      let best: HubDiscovery = {
+        advertisedHubEntityIds: [],
+        eligibleHubEntityIds: [],
+      };
       let discoveryFailure = '';
 
       while (Date.now() - startedAt < timeoutMs) {
-        const ids = getHubEntityIds(target);
-        const localCandidateCount = new Set(ids.map(normalizeEntityId).filter(Boolean)).size;
-        if (localCandidateCount < joinCount) {
-          try {
-            ids.push(...await fetchPublicHubEntityIds(target));
-            discoveryFailure = '';
-          } catch (discoveryError) {
-            discoveryFailure = discoveryError instanceof Error
-              ? discoveryError.message
-              : String(discoveryError);
-          }
+        const projected = getProjectedHubDiscovery(target);
+        let publicDiscovery: HubDiscovery | null = null;
+        try {
+          publicDiscovery = await fetchPublicHubDiscovery(target);
+          discoveryFailure = '';
+        } catch (discoveryError) {
+          discoveryFailure = discoveryError instanceof Error
+            ? discoveryError.message
+            : String(discoveryError);
         }
-        const currentCandidates = Array.from(new Map(ids.map(id => [normalizeEntityId(id), id])).values())
-          .filter((hubId) => !hasProjectedCounterpartyAccount(target.entityId, hubId));
-        if (currentCandidates.length > best.length) best = currentCandidates;
-        if (currentCandidates.length >= joinCount) return currentCandidates.slice(0, joinCount);
+
+        const mergeIds = (...groups: string[][]): string[] =>
+          Array.from(new Map(groups.flat().map(id => [normalizeEntityId(id), id])).values());
+        const current: HubDiscovery = {
+          advertisedHubEntityIds: mergeIds(
+            projected.advertisedHubEntityIds,
+            publicDiscovery?.advertisedHubEntityIds || [],
+          ),
+          eligibleHubEntityIds: mergeIds(
+            projected.eligibleHubEntityIds,
+            publicDiscovery?.eligibleHubEntityIds || [],
+          ).filter((hubId) => !hasProjectedCounterpartyAccount(target.entityId, hubId)),
+        };
+        best = {
+          advertisedHubEntityIds: mergeIds(
+            best.advertisedHubEntityIds,
+            current.advertisedHubEntityIds,
+          ),
+          eligibleHubEntityIds: current.eligibleHubEntityIds.length > best.eligibleHubEntityIds.length
+            ? current.eligibleHubEntityIds
+            : best.eligibleHubEntityIds,
+        };
+
+        // A successful public discovery with no hub for this jurisdiction is
+        // authoritative availability, not an onboarding failure. The sibling
+        // Entity was already created and profiled above; there is simply no
+        // bilateral hub account to open yet.
+        if (publicDiscovery && current.advertisedHubEntityIds.length === 0) {
+          return { required: false, hubEntityIds: [] };
+        }
+        if (current.eligibleHubEntityIds.length >= joinCount) {
+          return selectAdvertisedAutoJoinCandidates({
+            requested: joinCount,
+            advertisedHubEntityIds: current.advertisedHubEntityIds,
+            eligibleHubEntityIds: current.eligibleHubEntityIds,
+          });
+        }
         await sleep(pollMs);
       }
 
-      if (best.length < joinCount) {
+      if (best.eligibleHubEntityIds.length < joinCount) {
         if (discoveryFailure) {
           throw new Error(
-            `ONBOARDING_HUB_DISCOVERY_FAILED:requested=${joinCount}:found=${best.length}:cause=${discoveryFailure}`,
+            `ONBOARDING_HUB_DISCOVERY_FAILED:requested=${joinCount}:found=${best.eligibleHubEntityIds.length}:cause=${discoveryFailure}`,
           );
         }
-        throw new Error(
-          `ONBOARDING_HUB_CAPACITY_INSUFFICIENT:requested=${joinCount}:found=${best.length}`,
-        );
       }
-      return best.slice(0, joinCount);
+      return selectAdvertisedAutoJoinCandidates({
+        requested: joinCount,
+        advertisedHubEntityIds: best.advertisedHubEntityIds,
+        eligibleHubEntityIds: best.eligibleHubEntityIds,
+      });
     };
 
     const tokenDecimals = $xlnFunctions.getTokenInfo(1).decimals;
     const rebalancePolicy = getOpenAccountRebalancePolicyData(tokenDecimals);
-    if (!rebalancePolicy) return 0;
+    if (!rebalancePolicy) return { joined: 0, required: false };
 
-    const candidates = await waitForCandidates();
-    if (candidates.length === 0) return 0;
-    const readyCandidates = candidates.filter((hubId) => !hasProjectedCounterpartyAccount(target.entityId, hubId));
-    if (readyCandidates.length === 0) return 0;
+    const selection = await waitForCandidates();
+    if (!selection.required) return { joined: 0, required: false };
+    const readyCandidates = selection.hubEntityIds
+      .filter((hubId) => !hasProjectedCounterpartyAccount(target.entityId, hubId));
 
     const creditAmount = 10_000n * 10n ** BigInt(tokenDecimals);
     await submitRuntimeInput(buildOnboardingHubOpenRuntimeInput({
@@ -588,18 +653,24 @@
       rebalancePolicy,
     }));
 
-    return readyCandidates.length;
+    return { joined: readyCandidates.length, required: true };
   }
 
-  async function queueAutoHubJoins(joinCount: number, targets: OnboardingTarget[]): Promise<number> {
+  async function queueAutoHubJoins(
+    joinCount: number,
+    targets: OnboardingTarget[],
+  ): Promise<{ joined: number; requiredTargets: number }> {
     // Each lane owns an independent bilateral account set. Primary and cross-j
     // sibling entities must both open committed hub accounts during onboarding;
     // otherwise the UI can select a sibling that exists but cannot route.
     let joined = 0;
+    let requiredTargets = 0;
     for (const target of targets) {
-      joined += await queueAutoHubJoinsForTarget(joinCount, target);
+      const result = await queueAutoHubJoinsForTarget(joinCount, target);
+      joined += result.joined;
+      if (result.required) requiredTargets += 1;
     }
-    return joined;
+    return { joined, requiredTargets };
   }
 
   async function waitForEnabledOnboardingTargets(): Promise<{
@@ -656,10 +727,11 @@
       const autoJoinTargets = autoJoinCount > 0
         ? targets.filter((target) => !hasAnyCounterpartyAccount(target.entityId))
         : targets;
-      const autoJoinedCount = await queueAutoHubJoins(autoJoinCount, autoJoinTargets);
+      const autoJoinResult = await queueAutoHubJoins(autoJoinCount, autoJoinTargets);
+      const autoJoinedCount = autoJoinResult.joined;
       assertCommittedAutoJoinCount({
         requestedPerTarget: autoJoinCount,
-        targetCount: autoJoinTargets.length,
+        targetCount: autoJoinResult.requiredTargets,
         committedCount: autoJoinedCount,
       });
 

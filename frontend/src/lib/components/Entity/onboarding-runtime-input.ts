@@ -45,6 +45,11 @@ export type CommittedAutoJoinCount = {
   committedCount: number;
 };
 
+export type AdvertisedAutoJoinSelection = {
+  required: boolean;
+  hubEntityIds: string[];
+};
+
 const normalizeSignerId = (value: unknown): string =>
   String(value || '').trim().toLowerCase();
 
@@ -86,6 +91,32 @@ export function assertCommittedAutoJoinCount(counts: CommittedAutoJoinCount): nu
     );
   }
   return committedCount;
+}
+
+export function selectAdvertisedAutoJoinCandidates(input: {
+  requested: number;
+  advertisedHubEntityIds: string[];
+  eligibleHubEntityIds: string[];
+}): AdvertisedAutoJoinSelection {
+  const requested = Math.max(0, Math.floor(Number(input.requested)));
+  const advertised = new Set(
+    input.advertisedHubEntityIds.map(normalizeEntityId).filter(Boolean),
+  );
+  if (requested === 0 || advertised.size === 0) {
+    return { required: false, hubEntityIds: [] };
+  }
+
+  const eligible = Array.from(new Map(
+    input.eligibleHubEntityIds
+      .map((entityId) => [normalizeEntityId(entityId), entityId] as const)
+      .filter(([entityId]) => Boolean(entityId) && advertised.has(entityId)),
+  ).values());
+  if (eligible.length < requested) {
+    throw new Error(
+      `ONBOARDING_HUB_CAPACITY_INSUFFICIENT:requested=${requested}:found=${eligible.length}`,
+    );
+  }
+  return { required: true, hubEntityIds: eligible.slice(0, requested) };
 }
 
 export function buildOnboardingProfileRuntimeInput(

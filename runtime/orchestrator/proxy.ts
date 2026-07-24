@@ -333,7 +333,11 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
         code: 'ENTITY_HUB_PROXY_ENTITY_NOT_FOUND',
         error: `Entity hub not found for entityId=${requestedEntityId || 'missing'}`,
       })), {
-        status: 404,
+        // The orchestrator cannot distinguish an unknown Entity from a known
+        // hub while its managed process is being replaced and has not
+        // republished /api/info yet. Tell clients to retry; never turn a
+        // transient restart into a permanent "not found" result.
+        status: 503,
         headers: proxyHeaders(),
       });
     }

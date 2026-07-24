@@ -66,19 +66,33 @@ const isTron = jurisdictionId.startsWith('tron-');
 const keyBytes = ethers.getBytes(privateKey);
 const walletAddress = new ethers.Wallet(privateKey).address;
 const foundationEntityId = ethers.zeroPadValue('0x01', 32);
+const configuredDisputeDelayBlocks = jurisdiction.defaultDisputeDelayBlocks;
+if (!Number.isSafeInteger(configuredDisputeDelayBlocks) || configuredDisputeDelayBlocks! <= 0) {
+  throw new Error(`PUBLIC_SMOKE_DISPUTE_DELAY_INVALID:${String(configuredDisputeDelayBlocks)}`);
+}
+const accountAddress = contracts['account'];
+const depositoryAddress = contracts['depository'];
+const entityProviderAddress = contracts['entityProvider'];
+const deltaTransformerAddress = contracts['deltaTransformer'];
+const tokenAddress = token.address;
 const adapter = await createJAdapter({
   mode: isTron ? 'tron' : 'rpc',
   chainId,
   rpcUrl,
   privateKey,
-  defaultDisputeDelayBlocks: jurisdiction.defaultDisputeDelayBlocks,
+  defaultDisputeDelayBlocks: configuredDisputeDelayBlocks!,
   txWaitConfirms: 1,
   txWaitTimeoutMs: 180_000,
   ...(isTron ? { tronFullHost: rpcUrl.replace(/\/jsonrpc\/?$/i, '') } : {}),
   fromReplica: {
-    contracts,
-    depositoryAddress: contracts['depository'],
-    entityProviderAddress: contracts['entityProvider'],
+    contracts: {
+      account: accountAddress,
+      depository: depositoryAddress,
+      entityProvider: entityProviderAddress,
+      deltaTransformer: deltaTransformerAddress,
+    },
+    depositoryAddress,
+    entityProviderAddress,
     entityProviderDeploymentBlock: deploymentBlock,
   },
 });
@@ -94,7 +108,7 @@ const authenticate = async (
     (method, params) => provider.send(method, [...params]),
     blockNumber,
     blockNumber,
-    [contracts['depository'], contracts['entityProvider'], token.address!],
+    [depositoryAddress, entityProviderAddress, tokenAddress],
     isTron ? { commitment: 'tron-complete-receipts' } : { commitment: 'ethereum-trie' },
   );
   if (!authenticated.logs.some((log) => log.transactionHash === transactionHash.toLowerCase())) {
@@ -106,28 +120,28 @@ const authenticate = async (
 try {
   const registry = await adapter.getTokenRegistry();
   const registered = registry.find((entry) => entry.tokenId === 1);
-  if (!registered || registered.address.toLowerCase() !== token.address.toLowerCase()) {
+  if (!registered || registered.address.toLowerCase() !== tokenAddress.toLowerCase()) {
     throw new Error(`PUBLIC_SMOKE_USDT_REGISTRY_MISMATCH:${jurisdictionId}`);
   }
-  const configuredDelay = Number(jurisdiction.defaultDisputeDelayBlocks);
+  const configuredDelay = Number(configuredDisputeDelayBlocks);
   const onchainDelay = Number(await adapter.depository.defaultDisputeDelay());
   if (!Number.isSafeInteger(configuredDelay) || configuredDelay !== onchainDelay) {
     throw new Error(`PUBLIC_SMOKE_DISPUTE_DELAY_MISMATCH:${configuredDelay}:${onchainDelay}`);
   }
 
   const reserveBefore = await adapter.getReserves(foundationEntityId, 1);
-  const tokenBefore = await adapter.getErc20Balance(token.address, walletAddress);
+  const tokenBefore = await adapter.getErc20Balance(tokenAddress, walletAddress);
   const depositEvents = await adapter.externalTokenToReserve(
     keyBytes,
     foundationEntityId,
-    token.address,
+    tokenAddress,
     depositAmount,
     { internalTokenId: 1 },
   );
   const depositEvent = depositEvents.find((event) => event.name === 'ReserveUpdated');
   if (!depositEvent) throw new Error('PUBLIC_SMOKE_DEPOSIT_EVENT_MISSING');
   const reserveAfterDeposit = await adapter.getReserves(foundationEntityId, 1);
-  const tokenAfterDeposit = await adapter.getErc20Balance(token.address, walletAddress);
+  const tokenAfterDeposit = await adapter.getErc20Balance(tokenAddress, walletAddress);
   if (reserveAfterDeposit !== reserveBefore + depositAmount) {
     throw new Error(`PUBLIC_SMOKE_DEPOSIT_RESERVE_MISMATCH:${reserveBefore}:${reserveAfterDeposit}`);
   }
@@ -151,7 +165,7 @@ try {
     foundationEntityId,
     keyBytes,
     BigInt(chainId),
-    contracts['depository'],
+    depositoryAddress,
     currentNonce,
   );
   const withdrawal = await adapter.processBatch(
@@ -160,7 +174,7 @@ try {
     signed.nextNonce,
   );
   const reserveAfterWithdrawal = await adapter.getReserves(foundationEntityId, 1);
-  const tokenAfterWithdrawal = await adapter.getErc20Balance(token.address, walletAddress);
+  const tokenAfterWithdrawal = await adapter.getErc20Balance(tokenAddress, walletAddress);
   if (reserveAfterWithdrawal !== reserveAfterDeposit - withdrawAmount) {
     throw new Error(
       `PUBLIC_SMOKE_WITHDRAW_RESERVE_MISMATCH:${reserveAfterDeposit}:${reserveAfterWithdrawal}`,

@@ -249,7 +249,9 @@ const jurisdictionsConfig: OrchestratorJurisdictionsConfig = {
   shardJurisdictionsPath,
   rpc2Url: args.rpc2Url,
   rpcUrls: args.rpcUrls,
-  ephemeralTestnet: args.resetAllowed,
+  // Reset authority and network isolation are different capabilities. Dev is
+  // resettable but must still expose configured public jurisdictions.
+  ephemeralTestnet: process.env['XLN_EPHEMERAL_TESTNET'] === '1',
 };
 
 const relayStore: RelayStore = createRelayStore('mesh-relay', {

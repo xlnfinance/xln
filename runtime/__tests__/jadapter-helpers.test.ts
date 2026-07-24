@@ -191,6 +191,7 @@ describe('jadapter helper cursors', () => {
       },
     ))).toBe(true);
     expect(isTransientRpcUnavailableError(new Error('RPC_BATCH_HTTP_500'))).toBe(true);
+    expect(isTransientRpcUnavailableError(new Error('RPC_BATCH_TIMEOUT:5000'))).toBe(true);
     expect(isTransientRpcUnavailableError(new SyntaxError('Unexpected end of JSON input'))).toBe(true);
     expect(isTransientRpcUnavailableError(
       new Error('J_HISTORY_HEADER_MISSING:height=34 error=none'),

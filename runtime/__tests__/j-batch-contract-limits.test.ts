@@ -4,6 +4,7 @@ import {
   J_BATCH_CONTRACT_LIMITS,
   assertJBatchWithinContractLimits,
   batchAddRevealSecret,
+  batchAddReserveToCollateral,
   batchAddSettlement,
   cloneJBatch,
   createEmptyBatch,
@@ -46,6 +47,32 @@ const addSettlement = (
 );
 
 describe('j-batch contract limits', () => {
+  test('R2C builder mirrors the aggregate 256-pair contract work bound', () => {
+    const state = initJBatch();
+    for (let tokenId = 1; tokenId <= 4; tokenId += 1) {
+      for (let index = 0; index < 64; index += 1) {
+        batchAddReserveToCollateral(
+          state,
+          leftEntity,
+          `0x${(tokenId * 64 + index).toString(16).padStart(64, '0')}`,
+          tokenId,
+          1n,
+        );
+      }
+    }
+    expect(getJBatchContractLimitIssue(state.batch)).toBeNull();
+
+    const before = cloneJBatch(state.batch);
+    expect(() => batchAddReserveToCollateral(
+      state,
+      leftEntity,
+      `0x${'ff'.repeat(32)}`,
+      5,
+      1n,
+    )).toThrow('J_BATCH_LIMIT_EXCEEDED: reserveToCollateral.pairs total 257/256');
+    expect(state.batch).toEqual(before);
+  });
+
   test('mirrors Depository MAX_BATCH_SECRET_REVEALS before submission', () => {
     expect(J_BATCH_CONTRACT_LIMITS.maxSecretReveals).toBe(32);
     const batch = createEmptyBatch();

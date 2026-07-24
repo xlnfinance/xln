@@ -60,7 +60,10 @@ async function selectScenario(page: Page, scenario: Scenario): Promise<void> {
 
 async function runToPhase(page: Page, scenario: Scenario, phase: string): Promise<void> {
   await selectScenario(page, scenario);
-  await setRange(page, 'Playback', '3');
+  // Keep each phase visible for a full polling interval. At 3× the shortest
+  // phase lasts ~233 ms, so a busy browser can observe the label and advance
+  // again before Playwright clicks Pause.
+  await setRange(page, 'Playback', '1');
   await page.locator('button[aria-label="Play simulation"]').click();
   await expect(page.locator('.playback-card > span')).toContainText(phase, { timeout: 15_000 });
   await pause(page);

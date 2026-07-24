@@ -5,6 +5,7 @@ import {
   assertCommittedAutoJoinCount,
   buildOnboardingHubOpenRuntimeInput,
   buildOnboardingProfileRuntimeInput,
+  selectAdvertisedAutoJoinCandidates,
 } from '../../frontend/src/lib/components/Entity/onboarding-runtime-input';
 import { getOpenAccountRebalancePolicyData } from '../../frontend/src/lib/utils/onboardingPreferences';
 
@@ -137,6 +138,32 @@ test('onboarding completion requires every requested hub account to commit', () 
   })).toThrow('ONBOARDING_AUTO_JOIN_INCOMPLETE:requested=4:committed=3');
 });
 
+test('onboarding creates every jurisdiction entity but only requires advertised hub lanes', () => {
+  expect(selectAdvertisedAutoJoinCandidates({
+    requested: 1,
+    advertisedHubEntityIds: [],
+    eligibleHubEntityIds: [],
+  })).toEqual({ required: false, hubEntityIds: [] });
+
+  expect(selectAdvertisedAutoJoinCandidates({
+    requested: 1,
+    advertisedHubEntityIds: [HUB_A],
+    eligibleHubEntityIds: [HUB_A],
+  })).toEqual({ required: true, hubEntityIds: [HUB_A] });
+
+  expect(() => selectAdvertisedAutoJoinCandidates({
+    requested: 2,
+    advertisedHubEntityIds: [HUB_A],
+    eligibleHubEntityIds: [HUB_A],
+  })).toThrow('ONBOARDING_HUB_CAPACITY_INSUFFICIENT:requested=2:found=1');
+
+  expect(() => selectAdvertisedAutoJoinCandidates({
+    requested: 1,
+    advertisedHubEntityIds: [HUB_A],
+    eligibleHubEntityIds: [],
+  })).toThrow('ONBOARDING_HUB_CAPACITY_INSUFFICIENT:requested=1:found=0');
+});
+
 test('OnboardingPanel uses injected runtime projection and RuntimeInput helpers', () => {
   const source = readFileSync('frontend/src/lib/components/Entity/OnboardingPanel.svelte', 'utf8');
   const parent = readFileSync('frontend/src/lib/view/UserModePanel.svelte', 'utf8');
@@ -145,6 +172,7 @@ test('OnboardingPanel uses injected runtime projection and RuntimeInput helpers'
   expect(source).toContain('emptyOnboardingRuntimeProjection');
   expect(source).toContain('buildOnboardingProfileRuntimeInput');
   expect(source).toContain('buildOnboardingHubOpenRuntimeInput');
+  expect(source).toContain('selectAdvertisedAutoJoinCandidates');
   expect(source).toContain('submitRuntimeInput(buildOnboardingProfileRuntimeInput');
   expect(source).toContain('submitRuntimeInput(buildOnboardingHubOpenRuntimeInput');
   expect(source).not.toContain('export let runtimeEnv');
@@ -165,9 +193,10 @@ test('OnboardingPanel uses injected runtime projection and RuntimeInput helpers'
 
 test('OnboardingPanel never hides hub discovery or policy fallback failures', () => {
   const source = readFileSync('frontend/src/lib/components/Entity/OnboardingPanel.svelte', 'utf8');
+  const inputSource = readFileSync('frontend/src/lib/components/Entity/onboarding-runtime-input.ts', 'utf8');
 
   expect(source).toContain('ONBOARDING_HUB_DISCOVERY_FAILED');
-  expect(source).toContain('ONBOARDING_HUB_CAPACITY_INSUFFICIENT');
+  expect(inputSource).toContain('ONBOARDING_HUB_CAPACITY_INSUFFICIENT');
   expect(source).toContain('policyDefaultsNotice');
   expect(source).toContain('data-testid="onboarding-policy-defaults-notice"');
   expect(source).not.toContain("catch {\n      // Keep local defaults if /api/jurisdictions isn't available yet.\n    }");

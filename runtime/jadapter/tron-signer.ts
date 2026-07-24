@@ -3,6 +3,13 @@ import type { TronWeb as TronWebInstance } from 'tronweb';
 import { safeStringify } from '../protocol/serialization';
 
 type TronWebConstructor = typeof import('tronweb')['TronWeb'];
+type TronTransferTransaction = Awaited<
+  ReturnType<TronWebInstance['transactionBuilder']['sendTrx']>
+>;
+type TronTriggerResult = Awaited<
+  ReturnType<TronWebInstance['transactionBuilder']['triggerSmartContract']>
+>;
+type TronContractTransaction = NonNullable<TronTriggerResult['transaction']>;
 
 const DEFAULT_TRON_FEE_LIMIT = 15_000_000_000;
 const DEFAULT_TRON_POLL_MS = 3_000;
@@ -162,7 +169,7 @@ export class TronSigner extends ethers.AbstractSigner<ethers.JsonRpcProvider> {
 
   override async sendTransaction(tx: ethers.TransactionRequest): Promise<ethers.TransactionResponse> {
     const call = await this.#resolveCall(tx);
-    let unsigned: Awaited<ReturnType<TronWebInstance['transactionBuilder']['sendTrx']>>;
+    let unsigned: TronTransferTransaction | TronContractTransaction;
     if (call.data === '0x') {
       // Native TRX transfers consume bandwidth, not smart-contract Energy.
       // Estimating Energy here misclassifies a fresh recipient as a missing

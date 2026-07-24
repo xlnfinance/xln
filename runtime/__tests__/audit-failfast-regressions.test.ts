@@ -2564,6 +2564,102 @@ describe('audit fail-fast regressions', () => {
     });
   });
 
+  test('signed stale settlement seal is rejected without mutating or disputing the account', async () => {
+    const seed = 'signed-stale-settlement-seal';
+    const env = createEmptyEnv(seed);
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const first = registerLazySigner(seed, '1');
+    const second = registerLazySigner(seed, '2');
+    const left = isLeftEntity(first.entityId, second.entityId) ? first : second;
+    const right = left === first ? second : first;
+    attachSigningReplica(env, left.entityId, left.signerId);
+    attachSigningReplica(env, right.entityId, right.signerId);
+
+    const receiver = makeProposalAccount([], left.entityId, right.entityId);
+    receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
+    receiver.deltas.set(1, {
+      ...createDefaultDelta(1),
+      leftCreditLimit: 10n,
+    });
+    const workspaceResult = await applyAccountTx(
+      receiver,
+      {
+        type: 'settle_transition',
+        data: {
+          kind: 'upsert',
+          version: 1,
+          ops: [{ type: 'r2r', tokenId: 1, amount: 1n }],
+          executorIsLeft: true,
+        },
+      },
+      true,
+      env.timestamp,
+    );
+    expect(workspaceResult.success).toBe(true);
+    receiver.proofHeader.nextProofNonce = 9;
+    const workspaceHash = receiver.settlementWorkspace!.workspaceHash;
+    const staleSeal: AccountTx = {
+      type: 'settle_transition',
+      data: {
+        kind: 'seal',
+        version: 1,
+        workspaceHash,
+        settlementNonce: 8,
+        settlementHash: `0x${'81'.repeat(32)}`,
+        postProof: {
+          nonce: 9,
+          proofBodyHash: `0x${'82'.repeat(32)}`,
+          disputeHash: `0x${'83'.repeat(32)}`,
+          hanko: '0x1234',
+        },
+        settlementHanko: '0x5678',
+      },
+    };
+    const staleFrame = makeIncomingAccountFrame(
+      receiver,
+      staleSeal,
+      true,
+      env.timestamp,
+      0,
+    );
+    staleFrame.prevFrameHash = 'genesis';
+    staleFrame.stateHash = await createFrameHash(staleFrame);
+    const [frameHanko] = await signEntityHashes(env, left.entityId, left.signerId, [staleFrame.stateHash]);
+    if (!frameHanko) throw new Error('SIGNED_STALE_SETTLEMENT_FRAME_HANKO_MISSING');
+    const accountInput: AccountInput = {
+      kind: 'frame',
+      fromEntityId: left.entityId,
+      toEntityId: right.entityId,
+      domain: structuredClone(receiver.domain),
+      proposal: { frame: staleFrame, frameHanko },
+    };
+    const before = safeStringify(receiver);
+
+    const accountResult = await applyAccountInput(env, receiver, accountInput, {
+      entityTimestamp: env.timestamp,
+      finalizedJHeight: 0,
+    });
+    expect(accountResult.success).toBe(false);
+    expect(accountResult.rejected?.reason).toContain('SETTLEMENT_SEAL_NONCE_MISMATCH:8:9');
+    expect(accountResult.disputeRequired).toBeUndefined();
+    expect(safeStringify(receiver)).toBe(before);
+
+    const receiverState = makeEntityState(right.entityId);
+    receiverState.config = makeSingleSignerConfigFor(right.signerId);
+    receiverState.timestamp = env.timestamp;
+    receiverState.accounts.set(left.entityId, cloneAccountMachine(receiver));
+    const applied = await applyEntityTx(env, receiverState, {
+      type: 'accountInput',
+      data: accountInput,
+    });
+    const rejectedAccount = applied.newState.accounts.get(left.entityId)!;
+    expect(rejectedAccount.status).toBe('active');
+    expect(rejectedAccount.currentHeight).toBe(0);
+    expect(rejectedAccount.shadow.rejectedFrameEvidence).toBeUndefined();
+    expect(applied.newState.jBatchState?.batch.disputeStarts ?? []).toHaveLength(0);
+  });
+
   test('receiver-local preflight rejects stale creation of unenforceable HTLC and pull locks', () => {
     const account = makeProposalAccount([], 'alice', 'hub');
     const context = { entityTimestamp: 100_000, finalizedJHeight: 50 };
@@ -6446,6 +6542,70 @@ describe('audit fail-fast regressions', () => {
       { type: 'add_delta', data: { tokenId: 2 } },
     ]);
     expect(rightAccount.rollbackCount).toBe(1);
+  });
+
+  test('LEFT yields a same-height collision when the peer proof consumes its settlement nonce', async () => {
+    const seed = 'settlement-nonce-collision-left-yields';
+    const env = createEmptyEnv(seed);
+    env.quietRuntimeLogs = true;
+    env.timestamp = 10_000;
+    env.browserVM = { getDepositoryAddress: () => hex20('dd') } as typeof env.browserVM;
+
+    const first = registerLazySigner(seed, '1');
+    const second = registerLazySigner(seed, '2');
+    const left = isLeftEntity(first.entityId, second.entityId) ? first : second;
+    const right = left === first ? second : first;
+    attachSigningReplica(env, left.entityId, left.signerId);
+    attachSigningReplica(env, right.entityId, right.signerId);
+
+    const staleSettlementSeal: AccountTx = {
+      type: 'settle_transition',
+      data: {
+        kind: 'seal',
+        version: 1,
+        workspaceHash: `0x${'71'.repeat(32)}`,
+        settlementNonce: 1,
+        settlementHash: `0x${'72'.repeat(32)}`,
+        postProof: {
+          nonce: 2,
+          proofBodyHash: `0x${'73'.repeat(32)}`,
+          disputeHash: `0x${'74'.repeat(32)}`,
+          hanko: '0x1234',
+        },
+        settlementHanko: '0x5678',
+      },
+    };
+    const leftAccount = makeProposalAccount([], left.entityId, right.entityId);
+    setSyntheticPendingAccountProposal(leftAccount, [staleSettlementSeal], env.timestamp);
+
+    const rightAccount = makeProposalAccount(
+      [{ type: 'add_delta', data: { tokenId: 2 } }],
+      left.entityId,
+      right.entityId,
+    );
+    rightAccount.proofHeader = {
+      fromEntity: right.entityId,
+      toEntity: left.entityId,
+      nextProofNonce: 0,
+    };
+    const rightProposal = await proposeAccountFrame(env, rightAccount, env.timestamp);
+    if (
+      !rightProposal.success ||
+      !rightProposal.accountInput ||
+      rightProposal.accountInput.kind !== 'frame' ||
+      !rightProposal.accountInput.proposal.disputeSeal
+    ) {
+      throw new Error(`RIGHT_NONCE_COLLISION_PROPOSAL_FAILED:${rightProposal.error ?? 'missing signed proof'}`);
+    }
+    expect(rightProposal.accountInput.proposal.disputeSeal.proofNonce).toBe(1);
+
+    const result = await applyAccountInput(env, leftAccount, rightProposal.accountInput);
+    expect(result.success).toBe(true);
+    expect(result.events).toContainEqual(expect.stringContaining('LEFT-YIELDS'));
+    expect(leftAccount.currentHeight).toBe(1);
+    expect(leftAccount.pendingFrame).toBeUndefined();
+    expect(leftAccount.mempool).toEqual([staleSettlementSeal]);
+    expect(leftAccount.rollbackCount).toBe(1);
   });
 
   test('deadline rejection preserves the complete live Account and warmed commitment cache', async () => {

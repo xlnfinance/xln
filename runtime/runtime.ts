@@ -1064,7 +1064,7 @@ const hasAccountMempoolWakeInput = (env: Env): boolean => {
   return false;
 };
 
-const prioritizeJEventFrame = (
+export const prioritizeJEventFrame = (
   runtimeInput: RuntimeInput,
   mempool: RuntimeInput,
   timestamp: number,
@@ -1078,12 +1078,24 @@ const prioritizeJEventFrame = (
     const otherTxs = entityTxs.filter((tx) => tx?.type !== 'j_event');
     const hasNonTxPayload =
       !!input.proposedFrame ||
+      !!input.hashPrecommitFrame ||
       (!!input.hashPrecommits && input.hashPrecommits.size > 0) ||
       (!!input.jPrefixAttestations && input.jPrefixAttestations.size > 0) ||
       !!input.leaderTimeoutVote;
 
     if (jEventTxs.length > 0) {
-      priorityInputs.push({ ...input, entityTxs: jEventTxs });
+      // Consensus lanes are not Entity transactions. If a mixed envelope is
+      // split at the J-event barrier, those lanes must remain exclusively on
+      // the deferred copy or the next Runtime frame would replay them.
+      const {
+        proposedFrame: _proposedFrame,
+        hashPrecommitFrame: _hashPrecommitFrame,
+        hashPrecommits: _hashPrecommits,
+        jPrefixAttestations: _jPrefixAttestations,
+        leaderTimeoutVote: _leaderTimeoutVote,
+        ...transactionLane
+      } = input;
+      priorityInputs.push({ ...transactionLane, entityTxs: jEventTxs });
     }
 
     if (otherTxs.length > 0 || hasNonTxPayload) {

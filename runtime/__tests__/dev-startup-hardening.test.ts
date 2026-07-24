@@ -135,6 +135,18 @@ test('dev cleanup reaps only owner-recorded processes and only deletes the dev s
   expect(child).toContain('register_owned_dev_process');
 });
 
+test('ordinary dev startup preserves compatible state and resets only on contract changes', () => {
+  const setup = readFileSync(join(repoRoot, 'scripts/dev/prepare-start.sh'), 'utf8');
+  const packageJson = readFileSync(join(repoRoot, 'package.json'), 'utf8');
+  expect(packageJson).toContain('"dev:setup": "./scripts/dev/prepare-start.sh"');
+  expect(setup).toContain('stop_owned_dev_processes');
+  expect(setup).toContain('previous_fingerprint');
+  expect(setup).toContain('contract bytecode changed; resetting only local JDB/RDB');
+  expect(setup).toContain('rm -rf -- "$DEV_RDB_ROOT" "$DEV_JDB_ROOT"');
+  expect(setup).not.toContain('rm -rf -- "$DEV_DATA_ROOT"');
+  expect(setup).not.toContain('db-tmp');
+});
+
 test('dev ownership rejects a stale PID file that points at a foreign process', async () => {
   const root = mkdtempSync(join(tmpdir(), 'xln-dev-owner-'));
   tempRoots.push(root);

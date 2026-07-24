@@ -43,3 +43,22 @@ test('node jurisdiction load stays quiet for valid canonical config', async () =
 
   expect(messages).toEqual([]);
 });
+
+test('canonical Sepolia deployment is active and usable through the runtime loader', async () => {
+  const jurisdictions = await getAvailableJurisdictions();
+  const sepolia = jurisdictions.find((entry) => entry.chainId === 11_155_111);
+
+  expect(sepolia).toEqual({
+    name: 'Ethereum Sepolia',
+    chainId: 11_155_111,
+    blockTimeMs: 12_000,
+    address: 'https://ethereum-sepolia-rpc.publicnode.com',
+    entityProviderAddress: '0x210061A68c17FEe851407c8d00aa27cFF6Ce399c',
+    depositoryAddress: '0xC7757F7A9857d41820Ef96b80a2f811e2976cf0B',
+    rebalancePolicyUsd: {
+      r2cRequestSoftLimit: 500,
+      hardLimit: 10_000,
+      maxFee: 15,
+    },
+  });
+});

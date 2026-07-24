@@ -31,7 +31,7 @@ const profiles = {
       rpcEnv: 'ETH_SEPOLIA_RPC',
       currency: 'ETH',
       explorer: 'https://sepolia.etherscan.io',
-      disputeDelayBlocks: 7_200,
+      disputeDelayBlocks: 25,
       usdtEnv: 'ETH_SEPOLIA_USDT',
     },
     tron: {

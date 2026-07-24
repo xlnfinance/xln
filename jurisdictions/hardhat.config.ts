@@ -9,10 +9,11 @@ const deployerAccounts = () => {
 };
 const requiredRpcPlaceholder = (envName: string) => process.env[envName] || "http://127.0.0.1:0";
 const typechainOutDir = process.env.XLN_TYPECHAIN_OUT_DIR || "typechain-types";
+const etherscanApiKey = process.env.ETHERSCAN_API_KEY || "";
 
 const config: HardhatUserConfig = {
   solidity: {
-    version: "0.8.24",
+    version: "0.8.36",
     settings: {
       optimizer: {
         enabled: true,
@@ -24,6 +25,10 @@ const config: HardhatUserConfig = {
   typechain: {
     outDir: typechainOutDir,
     target: "ethers-v6",
+  },
+  etherscan: {
+    enabled: etherscanApiKey.length > 0,
+    apiKey: etherscanApiKey,
   },
   networks: {
     localhost: {

@@ -104,8 +104,13 @@ import {
  */
 export const PROCESS_BATCH_GAS_FLOOR = 10_000_000n;
 
-export const applyProcessBatchGasFloor = (estimatedGasLimit: bigint): bigint =>
-  estimatedGasLimit < PROCESS_BATCH_GAS_FLOOR ? PROCESS_BATCH_GAS_FLOOR : estimatedGasLimit;
+export const applyProcessBatchGasFloor = (
+  estimatedGasLimit: bigint,
+  hasDisputeFinalization: boolean,
+): bigint =>
+  hasDisputeFinalization && estimatedGasLimit < PROCESS_BATCH_GAS_FLOOR
+    ? PROCESS_BATCH_GAS_FLOOR
+    : estimatedGasLimit;
 import { nodeProcess, runtimeIsBrowser } from '../machine/platform';
 import {
   readAuthenticatedReceiptRange,
@@ -391,7 +396,7 @@ export const decodeStandardSolidityRevertData = (
 };
 
 export const isTransientRpcUnavailableError = (error: unknown): boolean =>
-  /J_HISTORY_HEADER_MISSING:height=\d+ error=none|J_RECEIPT_RANGE_REORG|J_RECEIPT_RANGE_PARENT_MISMATCH|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|Failed to fetch|NetworkError|Load failed|Unexpected end of JSON input|PROXY_UPSTREAM_TIMEOUT|RPC_BATCH_HTTP_50[0234]|50[0234] (Bad Gateway|Gateway Timeout|Service Unavailable|Internal Server Error)|server response 50[0234]|responseStatus["': ]+50[0234]/i
+  /J_HISTORY_HEADER_MISSING:height=\d+ error=none|J_RECEIPT_RANGE_REORG|J_RECEIPT_RANGE_PARENT_MISMATCH|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|Failed to fetch|NetworkError|Load failed|Unexpected end of JSON input|PROXY_UPSTREAM_TIMEOUT|RPC_BATCH_TIMEOUT:\d+|RPC_BATCH_HTTP_50[0234]|50[0234] (Bad Gateway|Gateway Timeout|Service Unavailable|Internal Server Error)|server response 50[0234]|responseStatus["': ]+50[0234]/i
     .test(rpcErrorText(error));
 
 export const shouldEmitExternalWalletBalanceDelta = (
@@ -625,8 +630,13 @@ export async function createRpcAdapter(
     return estimateGasWithHeadroomResult(estimate, PROCESS_BATCH_GAS_FLOOR);
   };
 
-  const resolveProcessBatchGasLimit = (gasLimit: bigint): bigint =>
-    config.mode === 'tron' ? gasLimit : applyProcessBatchGasFloor(gasLimit);
+  const resolveProcessBatchGasLimit = (
+    gasLimit: bigint,
+    hasDisputeFinalization: boolean,
+  ): bigint =>
+    config.mode === 'tron'
+      ? gasLimit
+      : applyProcessBatchGasFloor(gasLimit, hasDisputeFinalization);
 
   const resolveDeploymentDisputeDelayBlocks = (): number => {
     const raw = config.defaultDisputeDelayBlocks ?? (DEV_CHAIN_IDS.has(config.chainId) ? 5_760 : NaN);
@@ -723,7 +733,10 @@ export async function createRpcAdapter(
         const gasEstimate = await estimateProcessBatchGas(
           () => depositoryWithSigner.processBatch.estimateGas(encodedBatch, hankoData, nextNonce),
         );
-        const gasLimit = resolveProcessBatchGasLimit(gasEstimate.gasLimit);
+        const gasLimit = resolveProcessBatchGasLimit(
+          gasEstimate.gasLimit,
+          batch.disputeFinalizations.length > 0,
+        );
 
         const tx = await depositoryWithSigner.processBatch(encodedBatch, hankoData, nextNonce, {
           gasLimit,
@@ -1818,13 +1831,16 @@ export async function createRpcAdapter(
     async processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<JBatchReceipt> {
       return runSerializedBatch(async () => {
         try {
+          const batch = decodeJBatch(encodedBatch);
           const receipt = await sendTypedTx(
             'processBatch',
             depository.processBatch,
             [encodedBatch, hankoData, nonce],
             {
               gasFallback: PROCESS_BATCH_GAS_FLOOR,
-              ...(config.mode === 'tron' ? {} : { minimumGasLimit: PROCESS_BATCH_GAS_FLOOR }),
+              ...(config.mode === 'tron' || batch.disputeFinalizations.length === 0
+                ? {}
+                : { minimumGasLimit: PROCESS_BATCH_GAS_FLOOR }),
               txNonce: await allocateSerializedSignerNonce(),
               resetSignerNonce: true,
             },
@@ -2492,7 +2508,10 @@ export async function createRpcAdapter(
             const gasEstimate = await estimateProcessBatchGas(
               () => submitterDepository.processBatch.estimateGas(encodedBatch, hankoData, nextNonce),
             );
-            const gasLimit = resolveProcessBatchGasLimit(gasEstimate.gasLimit);
+            const gasLimit = resolveProcessBatchGasLimit(
+              gasEstimate.gasLimit,
+              batch.disputeFinalizations.length > 0,
+            );
             const resolvedFeeOverrides = await buildFeeOverrides();
             const requestedFeeOverrides = batchData.feeOverrides;
             if (requestedFeeOverrides?.maxFeePerGasWei) {
@@ -3190,7 +3209,13 @@ export async function createRpcAdapter(
           pollStep = 'eth_blockNumber';
           const currentBlock = await readCurrentRpcBlockNumber();
           if (watcherPollCancelled()) return;
-          const safeHead = await readSafeWatcherBlockNumber();
+          // Ethereum finality is expressed by confirmationDepth below, so its
+          // current and safe watcher heads have the same RPC source. Reuse the
+          // authenticated read above instead of polling eth_blockNumber twice.
+          // TRON is different: only SolidityNode exposes the solidified head.
+          const safeHead = isTronChainId(config.chainId)
+            ? await readSafeWatcherBlockNumber()
+            : currentBlock;
           const safeToBlock = safeHead - confirmationDepth;
           if (safeToBlock <= 0) return;
           const watcherReplica = findWatcherJurisdictionReplica(

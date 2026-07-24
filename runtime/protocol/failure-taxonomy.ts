@@ -40,7 +40,7 @@ const HEALTH_DEGRADED_CODES: Record<string, string> = {
 };
 
 const TRANSPORT_FAILURE_CATEGORIES: Record<string, RuntimeFailureCategory> = {
-  ENTITY_HUB_PROXY_ENTITY_NOT_FOUND: 'ExpectedEmpty',
+  ENTITY_HUB_PROXY_ENTITY_NOT_FOUND: 'TransientRace',
   FAUCET_HUB_NOT_FOUND: 'ExpectedEmpty',
   NO_HEALTHY_HUB_API_AVAILABLE: 'TransientRace',
   PROXY_UPSTREAM_TIMEOUT: 'TransientRace',

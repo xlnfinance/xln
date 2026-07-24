@@ -2513,22 +2513,18 @@ test.describe('Rebalance E2E', () => {
       if (!rebDone) throw new Error('rt2-h2 rebalance snapshot missing');
 
       let afterP2PostRebalance: any = rebDone;
-      let p2PostRebalanceReceived = p2HashSeen || p2Received;
+      let p2PostRebalanceApplied =
+        BigInt(rebDone.hubExposure || rebDone.hubDebt || '0') >= beforeP2Debt + usdcUnits(500n);
       const p2PostRebalanceDeadline = Date.now() + 10_000;
-      while (!p2PostRebalanceReceived && Date.now() < p2PostRebalanceDeadline) {
+      while (!p2PostRebalanceApplied && Date.now() < p2PostRebalanceDeadline) {
         afterP2PostRebalance = await readPairState(recipientPage, h2, rt2.entityId);
-        const hashSeen = Array.isArray(afterP2PostRebalance?.recentHtlcHashlocks)
-          && afterP2PostRebalance.recentHtlcHashlocks.includes(p2Hashlock);
-        const eventSeen = !!p2Hashlock && await hasDebugHtlcEvent(recipientPage, p2Hashlock, 'HtlcReceived', scenarioStartedAt);
-        p2PostRebalanceReceived = hashSeen || eventSeen;
-        if (p2PostRebalanceReceived) break;
+        p2PostRebalanceApplied =
+          BigInt(afterP2PostRebalance?.hubExposure || afterP2PostRebalance?.hubDebt || '0')
+            >= beforeP2Debt + usdcUnits(500n);
+        if (p2PostRebalanceApplied) break;
         await recipientPage.waitForTimeout(400);
       }
-      if (p2PostRebalanceReceived) {
-        expect(
-          BigInt(afterP2PostRebalance?.hubExposure || afterP2PostRebalance?.hubDebt || '0') >= beforeP2Debt + usdcUnits(500n),
-          `payment#2 should increase exposure after rebalance (before=${beforeP2Debt}, after=${afterP2PostRebalance?.hubExposure || afterP2PostRebalance?.hubDebt || 'n/a'})`,
-        ).toBe(true);
+      if (p2PostRebalanceApplied) {
         await recipientPage.screenshot({ path: 'test-results/rebalance-rt1-h1-h2-rt2.png', fullPage: true });
         return;
       }

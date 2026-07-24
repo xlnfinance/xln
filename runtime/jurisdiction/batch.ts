@@ -200,6 +200,7 @@ export const J_BATCH_CONTRACT_LIMITS = {
   maxDisputeStarts: 8,
   maxDisputeFinalizations: 8,
   maxReserveToCollateralPairs: 64,
+  maxReserveToCollateralPairsTotal: 256,
   maxSecretReveals: 32,
   maxEncodedBatchBytes: 256 * 1024,
   maxDisputeProofBodyBytes: 176 * 1024,
@@ -258,6 +259,19 @@ export function getJBatchContractLimitIssue(batch: JBatch): string | null {
     if (op.pairs.length > J_BATCH_CONTRACT_LIMITS.maxReserveToCollateralPairs) {
       return `reserveToCollateral[${index}].pairs ${op.pairs.length}/${J_BATCH_CONTRACT_LIMITS.maxReserveToCollateralPairs}`;
     }
+  }
+  const reserveToCollateralPairCount = batch.reserveToCollateral.reduce(
+    (count, operation) => count + operation.pairs.length,
+    0,
+  );
+  if (
+    reserveToCollateralPairCount
+    > J_BATCH_CONTRACT_LIMITS.maxReserveToCollateralPairsTotal
+  ) {
+    return (
+      `reserveToCollateral.pairs total ${reserveToCollateralPairCount}/`
+      + `${J_BATCH_CONTRACT_LIMITS.maxReserveToCollateralPairsTotal}`
+    );
   }
   for (const [index, settlement] of batch.settlements.entries()) {
     if (settlement.diffs.length > J_BATCH_CONTRACT_LIMITS.maxSettlementDiffs) {
@@ -865,6 +879,16 @@ export function batchAddReserveToCollateral(
     if (pair) {
       pair.amount += amount; // Aggregate
     } else {
+      const totalPairs = jBatchState.batch.reserveToCollateral.reduce(
+        (count, operation) => count + operation.pairs.length,
+        0,
+      );
+      requireArrayRoom(
+        'reserveToCollateral.pairs total',
+        totalPairs,
+        1,
+        J_BATCH_CONTRACT_LIMITS.maxReserveToCollateralPairsTotal,
+      );
       requireArrayRoom(
         'reserveToCollateral.pairs',
         existing.pairs.length,
@@ -875,6 +899,16 @@ export function batchAddReserveToCollateral(
     }
   } else {
     requireBatchRoom(jBatchState.batch, 'reserveToCollateral');
+    const totalPairs = jBatchState.batch.reserveToCollateral.reduce(
+      (count, operation) => count + operation.pairs.length,
+      0,
+    );
+    requireArrayRoom(
+      'reserveToCollateral.pairs total',
+      totalPairs,
+      1,
+      J_BATCH_CONTRACT_LIMITS.maxReserveToCollateralPairsTotal,
+    );
     // Create new entry
     jBatchState.batch.reserveToCollateral.push({
       tokenId,

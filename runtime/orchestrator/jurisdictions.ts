@@ -462,8 +462,33 @@ export const seedShardJurisdictions = (config: OrchestratorJurisdictionsConfig):
   if (!existsSync(seedPath)) {
     throw new Error(`JURISDICTIONS_SEED_MISSING canonical=${canonicalPath} repo=${resolveRepoJurisdictionsJsonPath()}`);
   }
+  const rawSeed = readFileSync(seedPath, 'utf8');
+  const seed = config.ephemeralTestnet === true
+    ? isolateEphemeralJurisdictions(config, rawSeed)
+    : rawSeed;
   mkdirSync(dirname(config.shardJurisdictionsPath), { recursive: true });
-  writeFileSync(config.shardJurisdictionsPath, readFileSync(seedPath, 'utf8'), 'utf8');
+  writeFileSync(config.shardJurisdictionsPath, seed, 'utf8');
+};
+
+/**
+ * An isolated E2E shard owns only its local RPC domains. Importing an unrelated
+ * public chain would make deterministic local tests depend on Internet latency
+ * and could halt an otherwise healthy wallet when that external RPC times out.
+ */
+export const isolateEphemeralJurisdictions = (
+  config: OrchestratorJurisdictionsConfig,
+  raw: string,
+): string => {
+  const payload = JSON.parse(raw) as ShardJurisdictionsFile;
+  const primary = selectPrimaryHubJurisdiction(payload, config);
+  if (!primary) throw new Error('EPHEMERAL_PRIMARY_JURISDICTION_UNRESOLVED');
+  for (const [key, jurisdiction] of Object.entries(payload.jurisdictions ?? {})) {
+    if (key === primary.key || isRpc2Jurisdiction(config, key, jurisdiction)) continue;
+    if (String(jurisdiction['status'] ?? 'active').trim().toLowerCase() === 'active') {
+      jurisdiction['status'] = 'pending';
+    }
+  }
+  return `${JSON.stringify(payload, null, 2)}\n`;
 };
 
 export const syncCanonicalJurisdictionsFromShard = (config: OrchestratorJurisdictionsConfig): void => {

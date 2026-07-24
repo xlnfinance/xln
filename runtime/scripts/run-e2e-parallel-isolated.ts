@@ -2967,6 +2967,7 @@ const runShard = async (
           XLN_JDB_ROOT: shardPaths.jdbRoot,
           XLN_STORAGE_HISTORY_PATH: join(shardPaths.rdbRoot, 'storage-health-history.json'),
           XLN_JURISDICTIONS_PATH: join(dbPath, 'jurisdictions.json'),
+          XLN_EPHEMERAL_TESTNET: '1',
           XLN_MESH_ROOT_SEED: `xln-e2e-mesh-root:${dbPath}`,
           XLN_MESH_RUNTIME_SEEDS_JSON: JSON.stringify({
             H1: 'xln-e2e-h1',
@@ -3391,9 +3392,19 @@ async function main(): Promise<void> {
   mkdirSync(logsDir, { recursive: true });
   const codeFingerprint = computeCodeFingerprint();
   const sourceDriftProbe = computeRepositorySourceDriftProbe();
+  let acceptedSourceDriftProbe = sourceDriftProbe;
   const codeDriftGuard = createE2ECodeDriftGuard({
     expectedCodeHash: sourceDriftProbe,
-    computeCodeHash: computeRepositorySourceDriftProbe,
+    computeCodeHash: () => {
+      const currentProbe = computeRepositorySourceDriftProbe();
+      if (currentProbe === acceptedSourceDriftProbe) return sourceDriftProbe;
+      // Generators may atomically publish byte-identical files and therefore
+      // change mtimes. Confirm a cheap stat-probe mismatch against content
+      // before aborting a long run.
+      if (computeCodeFingerprint().codeHash !== codeFingerprint.codeHash) return currentProbe;
+      acceptedSourceDriftProbe = currentProbe;
+      return sourceDriftProbe;
+    },
   });
 
   console.log('\n' + '='.repeat(72));

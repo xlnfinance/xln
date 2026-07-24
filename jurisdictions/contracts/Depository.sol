@@ -97,6 +97,12 @@ contract Depository is ReentrancyGuardLite {
   // liveness envelope; transformer calls dynamically yield to that reserve.
   uint256 private constant MAX_ENCODED_BATCH_BYTES = 256 * 1024;
   uint256 private constant MAX_RESERVE_TO_COLLATERAL_PAIRS = 64;
+  // One top-level R2C item can fan out to many bilateral accounts. Bounding
+  // only the outer and inner arrays independently admitted 50 * 64 cold
+  // collateral writes (~200M gas), so an otherwise valid signed batch could
+  // never be mined. 256 distinct pairs stays inside the 15M liveness envelope;
+  // larger transfers remain losslessly expressible across sequential nonces.
+  uint256 private constant MAX_BATCH_RESERVE_TO_COLLATERAL_PAIRS_TOTAL = 256;
   // Runtime permits up to 1,000 open swaps in one account proof. The canonical
   // DeltaTransformer path is regression-tested below this cap; hostile code is
   // still unable to consume the caller's post-call finalization reserve.
@@ -464,9 +470,13 @@ contract Depository is ReentrancyGuardLite {
     if (batch.reserveToExternalToken.length > MAX_BATCH_RESERVE_TO_EXTERNAL) revert E10();
     if (batch.revealSecrets.length > MAX_BATCH_SECRET_REVEALS) revert E10();
 
+    uint256 reserveToCollateralPairs;
     for (uint i = 0; i < batch.reserveToCollateral.length; i++) {
-      if (batch.reserveToCollateral[i].pairs.length > MAX_RESERVE_TO_COLLATERAL_PAIRS) revert E10();
+      uint256 pairCount = batch.reserveToCollateral[i].pairs.length;
+      if (pairCount > MAX_RESERVE_TO_COLLATERAL_PAIRS) revert E10();
+      reserveToCollateralPairs += pairCount;
     }
+    if (reserveToCollateralPairs > MAX_BATCH_RESERVE_TO_COLLATERAL_PAIRS_TOTAL) revert E10();
   }
 
   function _processBatch(

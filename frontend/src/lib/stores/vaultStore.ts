@@ -1,5 +1,5 @@
 import { writable, get, derived } from 'svelte/store';
-import { HDNodeWallet, Mnemonic, Wallet, getAddress, getIndexedAccountPath, keccak256, toUtf8Bytes } from 'ethers';
+import { HDNodeWallet, Mnemonic, Wallet, getAddress, getIndexedAccountPath } from 'ethers';
 import type {
   ConsensusConfig,
   EncryptedRuntimeRecoveryBundleV1,
@@ -52,6 +52,7 @@ import {
   installRuntimeCommandJournalKeys,
   lockRuntimeCommandJournal,
 } from './runtimeCommandJournalKeyring';
+import { deriveJurisdictionSignerIndex } from '../../../../runtime/jurisdiction/signer-derivation';
 
 // Types
 export interface Signer {
@@ -523,14 +524,6 @@ const buildSignerEntityConfig = (
     },
   };
 };
-
-function deriveJurisdictionSignerIndex(jurisdiction: string): number {
-  const key = normalizeJurisdictionKey(jurisdiction);
-  if (!key) throw new Error('Jurisdiction is required for jurisdiction signer derivation');
-  const digest = keccak256(toUtf8Bytes(`xln:jurisdiction-signer:v1:${key}`));
-  const bucket = Number(BigInt(digest) % 1_000_000n);
-  return 100_000 + bucket;
-}
 
 function getSignerDerivationIndex(signer: Signer | null | undefined): number {
   return Number.isInteger(signer?.derivationIndex) ? Number(signer!.derivationIndex) : Number(signer?.index ?? 0);

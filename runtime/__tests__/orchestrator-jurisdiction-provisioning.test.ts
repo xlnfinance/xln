@@ -11,6 +11,7 @@ import { findMissingRpcContractCode } from '../orchestrator/contract-readiness';
 import {
   assertDeterministicRpcStackAddresses,
   deployRpc2JurisdictionStack,
+  isolateEphemeralJurisdictions,
   provisionPrimaryRpcJurisdictionStack,
   readShardJurisdictions,
   type OrchestratorJurisdictionsConfig,
@@ -21,6 +22,31 @@ import { stopProcess, type ManagedChildProcess } from '../scripts/e2e-managed-pr
 
 const CHAIN_ID = 31_337;
 const CHAIN_ID_2 = 31_338;
+
+test('ephemeral shards never import unrelated public RPC jurisdictions', () => {
+  const config: OrchestratorJurisdictionsConfig = {
+    shardJurisdictionsPath: '/unused',
+    rpc2Url: 'http://127.0.0.1:8546',
+    rpcUrls: {
+      1: 'http://127.0.0.1:8545',
+      2: 'http://127.0.0.1:8546',
+    },
+    ephemeralTestnet: true,
+  };
+  const isolated = JSON.parse(isolateEphemeralJurisdictions(config, JSON.stringify({
+    version: '3',
+    jurisdictions: {
+      arrakis: { name: 'Testnet', primary: true, status: 'active', rpc: '/rpc' },
+      tron: { name: 'Tron', status: 'active', rpc: '/rpc2' },
+      sepolia: { name: 'Ethereum Sepolia', status: 'active', rpc: 'https://rpc.example' },
+    },
+  }))) as { jurisdictions: Record<string, { status: string }> };
+
+  expect(isolated.jurisdictions.arrakis?.status).toBe('active');
+  expect(isolated.jurisdictions.tron?.status).toBe('active');
+  expect(isolated.jurisdictions.sepolia?.status).toBe('pending');
+});
+
 test('cross-chain stack address mismatch fails before runtime import', () => {
   const primary = {
     account: `0x${'11'.repeat(20)}`,

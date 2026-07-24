@@ -49,6 +49,7 @@ import type {
   ProposeAccountFrameResult,
 } from './types';
 import { createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
+import { getMinimumSafeSettlementNonce } from '../../protocol/settlement/operations';
 import { signEntityHashes, verifyHankoForHash } from '../../hanko/signing';
 import { getReplicaByEntityId } from '../../entity/replica';
 import {
@@ -858,6 +859,38 @@ type IncomingFrameResult =
   | { kind: 'not_applicable' }
   | { kind: 'return'; result: HandleAccountInputResult };
 
+const isRefreshableStaleIncomingSettlementSeal = (
+  account: AccountMachine,
+  frame: AccountFrame,
+  error: string | undefined,
+): boolean => {
+  const match = /^Frame application failed: SETTLEMENT_SEAL_NONCE_MISMATCH:(\d+):(\d+):j=\d+:next=\d+:local=\d+:peer=\d+$/
+    .exec(error ?? '');
+  if (!match) return false;
+
+  const suppliedNonce = Number(match[1]);
+  const requiredNonce = Number(match[2]);
+  if (
+    !Number.isSafeInteger(suppliedNonce) ||
+    !Number.isSafeInteger(requiredNonce) ||
+    suppliedNonce >= requiredNonce ||
+    requiredNonce !== getMinimumSafeSettlementNonce(account)
+  ) {
+    return false;
+  }
+
+  const workspace = account.settlementWorkspace;
+  if (!workspace || workspace.nonceAtSign !== undefined) return false;
+  const matchingSeals = frame.accountTxs.filter((tx) =>
+    tx.type === 'settle_transition' &&
+    tx.data.kind === 'seal' &&
+    tx.data.settlementNonce === suppliedNonce &&
+    tx.data.version === workspace.version &&
+    tx.data.workspaceHash.toLowerCase() === workspace.workspaceHash.toLowerCase()
+  );
+  return matchingSeals.length === 1;
+};
+
 type AccountAckTarget = {
   pendingHeight: number;
   bundledNewFrameHeight: number | undefined;
@@ -983,6 +1016,7 @@ function resolveSameHeightIncomingFrame(
   receivedFrame: AccountFrame,
   events: string[],
   committedFrames: AccountCommittedFrame[],
+  validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined,
 ): HandleAccountInputResult | true | undefined {
   if (!(accountMachine.pendingFrame && receivedFrame.height === accountMachine.pendingFrame.height)) {
     return undefined;
@@ -998,7 +1032,15 @@ function resolveSameHeightIncomingFrame(
     });
   }
 
-  if (isLeftEntity) {
+  const pendingSettlementNonceConflict = validatedCounterpartyDisputeSeal
+    ? accountMachine.pendingFrame.accountTxs.some((tx) =>
+        tx.type === 'settle_transition' &&
+        tx.data.kind === 'seal' &&
+        tx.data.settlementNonce <= validatedCounterpartyDisputeSeal.nonce
+      )
+    : false;
+
+  if (isLeftEntity && !pendingSettlementNonceConflict) {
     events.push(`📤 LEFT-WINS: Ignored RIGHT's frame ${receivedFrame.height} (waiting for their ACK)`);
     if (accountMachine.mempool.length > 0) {
       events.push(`⚠️ LEFT has ${accountMachine.mempool.length} pending txs while waiting for RIGHT's ACK`);
@@ -1021,6 +1063,18 @@ function resolveSameHeightIncomingFrame(
       events,
       ...(committedFrames.length > 0 && { committedFrames }),
     };
+  }
+
+  if (isLeftEntity) {
+    // LEFT normally wins a same-height collision. A settlement authorization
+    // cannot win after the peer has produced a valid dispute proof at the same
+    // or a higher shared Account-contract nonce: the peer signature already
+    // makes that nonce unsafe to reuse for settlement. Yield to the peer frame,
+    // then restore and rebuild our pending transactions at the next nonce.
+    events.push(
+      `🔄 LEFT-YIELDS: peer proof nonce ${validatedCounterpartyDisputeSeal!.nonce} ` +
+      `invalidated our pending settlement nonce`,
+    );
   }
 
   const receivedHash = receivedFrame.stateHash;
@@ -1106,6 +1160,7 @@ async function preflightIncomingAccountFrame(
   events: string[],
   committedFrames: AccountCommittedFrame[],
   securityContext: AccountInputSecurityContext,
+  validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined,
 ): Promise<IncomingFramePreflightResult> {
   const receivedFrame = accountInputProposal(input)?.frame;
   if (!receivedFrame) {
@@ -1268,6 +1323,7 @@ async function preflightIncomingAccountFrame(
     receivedFrame,
     events,
     committedFrames,
+    validatedCounterpartyDisputeSeal,
   );
   if (sameHeightResolution !== true && sameHeightResolution) {
     return { kind: 'return', result: sameHeightResolution };
@@ -1857,6 +1913,7 @@ async function handleIncomingAccountFrame(
     events,
     committedFrames,
     securityContext,
+    validatedCounterpartyDisputeSeal,
   );
   if (preflight.kind === 'return') {
     if (!preflight.result.success && !preflight.result.disputeRequired) {
@@ -1885,6 +1942,27 @@ async function handleIncomingAccountFrame(
   );
   if (validationResult.kind === 'return') {
     if (!validationResult.result.success) {
+      if (
+        isRefreshableStaleIncomingSettlementSeal(
+          accountMachine,
+          preflight.receivedFrame,
+          validationResult.result.error,
+        )
+      ) {
+        accountLog.warn('frame.stale_settlement_seal_rejected', {
+          height: preflight.receivedFrame.height,
+          error: validationResult.result.error,
+        });
+        return {
+          kind: 'return',
+          result: {
+            ...validationResult.result,
+            rejected: {
+              reason: validationResult.result.error ?? 'Stale settlement seal rejected',
+            },
+          },
+        };
+      }
       const proposal = accountInputProposal(input)!;
       if (!proposal.frameHanko) throw new Error('INBOUND_ACCOUNT_FRAME_HANKO_MISSING_AFTER_VALIDATION');
       return {

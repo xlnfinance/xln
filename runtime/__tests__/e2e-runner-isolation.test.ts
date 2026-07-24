@@ -186,6 +186,7 @@ describe('isolated E2E runner resources', () => {
     );
 
     expect(playwrightEnv).toContain("XLN_JURISDICTIONS_PATH: join(dbPath, 'jurisdictions.json')");
+    expect(runner).toContain("XLN_EPHEMERAL_TESTNET: '1'");
   });
 
   test('payment smoke shortcut runs through one isolated shard', () => {

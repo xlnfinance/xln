@@ -2313,15 +2313,15 @@ describe('production startup wiring', () => {
       fatal?: boolean;
     };
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(503);
     expect(body.code).toBe('ENTITY_HUB_PROXY_ENTITY_NOT_FOUND');
-    expect(body.category).toBe('ExpectedEmpty');
-    expect(body.retryable).toBe(false);
+    expect(body.category).toBe('TransientRace');
+    expect(body.retryable).toBe(true);
     expect(body.fatal).toBe(false);
     expect(body.failure).toMatchObject({
-      category: 'ExpectedEmpty',
+      category: 'TransientRace',
       code: 'ENTITY_HUB_PROXY_ENTITY_NOT_FOUND',
-      retryable: false,
+      retryable: true,
       fatal: false,
     });
     expect(body.error).toContain(entityId);
