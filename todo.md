@@ -10,20 +10,13 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 - [ ] Make the existing durable `/api/debug/incidents` registry the mandatory
   first diagnostic query and release gate. Route every remaining frontend,
-  Runtime, managed-child, orchestrator and J-machine fatal into it. Prove one
-  root incident survives gossip flood/restart, the failed child exits non-zero,
-  its replacement restores the exact committed height/root without duplicate
-  dispatch or J-submit, and unresolved incidents block release. All money
-  controls must derive readiness from the same Runtime lifecycle gate and
-  perform zero enqueue while halted, quiescing or restoring. Group consequences
-  under one stable root fingerprint, retain fatal/error separately from noisy
-  info events, and enforce allowlisted metadata plus sink-level redaction: raw
-  Account/Entity inputs, Hanko, ciphertext, seeds and dispute evidence must
-  never enter console, JSONL or the debug API. A fatal must leave the child over
-  an acknowledged local control/IPC channel before exit; the parent-owned
-  operational journal, not the possibly broken Runtime LevelDB, is authoritative.
-  Prove the root and causal chain remain queryable after child death, restart
-  and at least 100,000 lower-priority gossip/debug events.
+  orchestrator and J-machine fatal into it. Prove a failed managed child is
+  replaced from the exact committed height/root without duplicate dispatch or
+  J-submit, and unresolved incidents block release. All money controls must
+  derive readiness from the same Runtime lifecycle gate and perform zero
+  enqueue while halted, quiescing or restoring. Retain fatal/error separately
+  from noisy info events and prove the root remains queryable after child
+  death, restart and at least 100,000 lower-priority gossip/debug events.
 - [ ] Extend the proven halted banner/root-incident link and disabled money
   controls to a real browser running → quiescing/restoring → running process
   transition. The remote halted screenshot, adapter propagation and zero

@@ -24,6 +24,7 @@ import { createRuntimeIngressReceiptStore } from '../server/ingress-receipts';
 import { isLocalOperatorRequest, resolveSocketPeerAddress } from '../server/health-redaction';
 import { requiresLocalNodeOperator } from '../server/node-http-access';
 import { handleRuntimeInputStatus } from '../server/runtime-input-control';
+import { reportManagedChildFatal } from './managed-child-fatal-ipc';
 import { drainJWatcherBacklog } from '../jadapter/backlog-drain';
 import {
   getP2PState,
@@ -3326,6 +3327,12 @@ const run = async (): Promise<void> => {
     tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS,
     maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
     maxEntityTxsPerFrame: MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
+    onFatal: async payload => {
+      await reportManagedChildFatal({
+        runtimeId: String(env.runtimeId || ''),
+        ...payload,
+      });
+    },
   });
   let startupPhase = 'boot';
   let externalIngressReady = false;

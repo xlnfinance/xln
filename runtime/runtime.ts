@@ -138,6 +138,7 @@ import {
   setAccountFrameHistoryView,
 } from './machine/env-events';
 import { recordRuntimeSecurityIncident } from './machine/security-incidents';
+import { normalizeRuntimeFailureCode } from './protocol/failure-taxonomy';
 import {
   assertRuntimeFrameStorageState,
   reconcileRuntimeFrameSharedState,
@@ -1360,6 +1361,12 @@ export type RuntimeLoopConfig = {
   tickDelayMs?: number;
   maxEntityInputsPerFrame?: number;
   maxEntityTxsPerFrame?: number;
+  onFatal?: (payload: {
+    code: string;
+    message: string;
+    height: number;
+    timestamp: number;
+  }) => void | Promise<void>;
 };
 
 export function startRuntimeLoop(env: Env, config?: RuntimeLoopConfig): () => void {
@@ -1432,7 +1439,6 @@ export function startRuntimeLoop(env: Env, config?: RuntimeLoopConfig): () => vo
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const stack = error instanceof Error ? error.stack : undefined;
-          runtimeLog.error('loop.error', { message, ...(stack ? { stack } : {}) });
           transitionRuntimeLifecycle(state, 'halted');
           state.fatalDebugPayload = {
             message,
@@ -1440,6 +1446,21 @@ export function startRuntimeLoop(env: Env, config?: RuntimeLoopConfig): () => vo
             height: Math.max(0, env.height ?? 0),
             timestamp: Math.max(0, env.timestamp ?? 0),
           };
+          if (config?.onFatal) {
+            try {
+              await config.onFatal({
+                code: normalizeRuntimeFailureCode(message),
+                message,
+                height: Math.max(0, env.height ?? 0),
+                timestamp: Math.max(0, env.timestamp ?? 0),
+              });
+            } catch (reportError) {
+              runtimeLog.error('loop.fatal_report_failed', {
+                error: reportError instanceof Error ? reportError.message : String(reportError),
+              });
+            }
+          }
+          runtimeLog.error('loop.error', { message, ...(stack ? { stack } : {}) });
           emitRuntimeLoopError(
             env,
             'RUNTIME_LOOP_ERROR',

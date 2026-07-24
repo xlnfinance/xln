@@ -143,13 +143,21 @@ import {
 import { resolveRuntimeImportReadiness } from './runtime-import-readiness';
 import { persistChildFailureReceipt, type ChildFailureReceipt } from './child-failure-diagnostics';
 import {
+  attachManagedChildFatalIpc,
+  type ManagedChildFatalReport,
+} from './managed-child-fatal-ipc';
+import {
   decideChildFailure,
   selectChildFailureReason,
   shouldCaptureUnexpectedChildExit,
   type ChildFailureDecision,
   type ChildFailureObservation,
 } from './child-recovery-policy';
-import { buildRuntimeHealthFailures, classifyRuntimeBootstrapStageFailure } from '../protocol/failure-taxonomy';
+import {
+  buildRuntimeHealthFailures,
+  classifyRuntimeBootstrapStageFailure,
+  normalizeRuntimeFailureCode,
+} from '../protocol/failure-taxonomy';
 import { STORAGE_WRITER_LOCK_TTL_MS } from '../storage/runtime-dbs';
 import {
   deriveMeshChildSeed,
@@ -1139,6 +1147,7 @@ const failFastUnexpectedChildExit = (message: string): void => {
 };
 
 type RecoverableChild = HubChild | MarketMakerChild;
+const managedChildFatalRoot = new Map<string, string>();
 
 const persistManagedChildFailure = (
   child: RecoverableChild,
@@ -1179,10 +1188,13 @@ const pushManagedChildIncident = (
   code: string,
   message: string,
   details: Record<string, unknown>,
-): void => {
+): string => {
   const runtimeId = String(child.lastHealth?.runtimeId || child.lastInfo?.runtimeId || '').trim() || undefined;
-  pushDebugEvent(relayStore, {
+  const incident = pushDebugEvent(relayStore, {
     event: 'error',
+    ...(managedChildFatalRoot.get(child.name)
+      ? { rootFingerprint: managedChildFatalRoot.get(child.name) }
+      : {}),
     runtimeId,
     status: 'fatal',
     reason: code,
@@ -1194,13 +1206,50 @@ const pushManagedChildIncident = (
       ...details,
     },
   });
+  if (!incident) throw new Error(`MANAGED_CHILD_FATAL_INCIDENT_NOT_CLASSIFIED:${child.name}:${code}`);
+  return incident.fingerprint;
+};
+
+const persistManagedChildFatalReport = (
+  child: RecoverableChild,
+  report: ManagedChildFatalReport,
+): string => {
+  const incident = pushDebugEvent(relayStore, {
+    event: 'error',
+    runtimeId: report.runtimeId || undefined,
+    status: 'fatal',
+    reason: report.code,
+    details: {
+      source: 'runtime',
+      severity: 'fatal',
+      message: report.message,
+      child: child.name,
+      height: report.height,
+      timestamp: report.timestamp,
+      transport: 'local-ipc',
+    },
+  });
+  if (!incident) throw new Error(`MANAGED_CHILD_FATAL_INCIDENT_NOT_CLASSIFIED:${child.name}:${report.code}`);
+  managedChildFatalRoot.set(child.name, incident.fingerprint);
+  return incident.fingerprint;
 };
 
 const captureManagedChildErrorLine = (child: RecoverableChild, line: string): void => {
   const match = line.match(/^\[ERROR\]\[([^\]]+)\]\s+([^\s{]+)/);
   if (!match) return;
-  const [, scope = 'runtime', message = 'MANAGED_CHILD_ERROR'] = match;
-  pushManagedChildIncident(child, message, message, { scope });
+  const [, scope = 'runtime', phase = 'MANAGED_CHILD_ERROR'] = match;
+  const jsonStart = line.indexOf('{', match[0].length);
+  let structuredError = '';
+  if (jsonStart >= 0) {
+    try {
+      const parsed = JSON.parse(line.slice(jsonStart)) as { error?: unknown; message?: unknown };
+      structuredError = String(parsed.error || parsed.message || '').trim();
+    } catch {
+      structuredError = '';
+    }
+  }
+  const message = structuredError || phase;
+  pushManagedChildIncident(child, normalizeRuntimeFailureCode(message), message, { scope, phase });
 };
 
 const observeManagedRuntimeHalt = (
@@ -1388,9 +1437,10 @@ const spawnHub = async (child: HubChild): Promise<void> => {
   child.lastInfo = null;
   child.recentStdout = [];
   child.recentStderr = [];
+  managedChildFatalRoot.delete(child.name);
   const proc = spawn('bun', cmd, {
     cwd: process.cwd(),
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     env: sanitizeChildProcessEnv({
       ...buildManagedRuntimeChildSecretEnv(process.env),
       XLN_DB_PATH: child.dbPath,
@@ -1408,6 +1458,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
   if (!proc.pid) {
     throw new Error(`${child.name}_SPAWN_FAILED_NO_PID`);
   }
+  attachManagedChildFatalIpc(proc, report => persistManagedChildFatalReport(child, report));
   await managedRuntimeLeases.writeLease(spec, proc.pid, child.startedAt ?? Date.now());
   const stdoutPrefixState: PrefixLogState = { pending: '' };
   const stderrPrefixState: PrefixLogState = { pending: '' };
@@ -1494,9 +1545,10 @@ const spawnMarketMaker = async (): Promise<void> => {
   marketMakerChild.lastStartupPhase = null;
   marketMakerChild.recentStdout = [];
   marketMakerChild.recentStderr = [];
+  managedChildFatalRoot.delete(marketMakerChild.name);
   const proc = spawn('bun', cmd, {
     cwd: process.cwd(),
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     env: sanitizeChildProcessEnv({
       ...buildManagedRuntimeChildSecretEnv(process.env),
       XLN_DB_PATH: marketMakerChild.dbPath,
@@ -1519,6 +1571,10 @@ const spawnMarketMaker = async (): Promise<void> => {
   if (!proc.pid) {
     throw new Error('MM_SPAWN_FAILED_NO_PID');
   }
+  attachManagedChildFatalIpc(
+    proc,
+    report => persistManagedChildFatalReport(marketMakerChild, report),
+  );
   await managedRuntimeLeases.writeLease(spec, proc.pid, marketMakerChild.startedAt ?? Date.now());
   const stdoutPrefixState: PrefixLogState = { pending: '' };
   const stderrPrefixState: PrefixLogState = { pending: '' };

@@ -50,6 +50,7 @@ export type RelayDebugEvent = {
   id: number;
   ts: number;
   event: string;
+  rootFingerprint?: string | undefined;
   runtimeId?: string | undefined;
   from?: string | undefined;
   to?: string | undefined;
@@ -290,7 +291,12 @@ const incidentHash = (value: string): string => {
   return (hash >>> 0).toString(16).padStart(8, '0');
 };
 
-const classifyIncident = (
+const normalizeRootFingerprint = (value: unknown): string =>
+  typeof value === 'string' && /^[a-z0-9][a-z0-9._:-]{7,199}$/i.test(value.trim())
+    ? value.trim().toLowerCase()
+    : '';
+
+export const classifyDebugIncident = (
   event: RelayDebugEvent,
 ): Pick<RelayDebugIncident, 'fingerprint' | 'source' | 'code' | 'message' | 'runtimeId'> | null => {
   const details = asRecord(event.details);
@@ -340,7 +346,7 @@ const classifyIncident = (
   const genericCode = code === 'ERROR' || code === 'BROWSER_ERROR' || code.endsWith('_ERROR');
   const basis = [code, runtimeId ?? '', genericCode ? message : '', stackHead].join('|');
   return {
-    fingerprint: `${code.toLowerCase()}-${incidentHash(basis)}`,
+    fingerprint: normalizeRootFingerprint(event.rootFingerprint) || `${code.toLowerCase()}-${incidentHash(basis)}`,
     source,
     code,
     message,
@@ -360,9 +366,9 @@ const trimDebugIncidents = (store: RelayStore): void => {
   }
 };
 
-const updateDebugIncident = (store: RelayStore, event: RelayDebugEvent): void => {
-  const classified = classifyIncident(event);
-  if (!classified) return;
+const updateDebugIncident = (store: RelayStore, event: RelayDebugEvent): RelayDebugIncident | null => {
+  const classified = classifyDebugIncident(event);
+  if (!classified) return null;
   const existing = store.debugIncidents.get(classified.fingerprint);
   store.debugIncidents.set(classified.fingerprint, existing
     ? {
@@ -388,9 +394,13 @@ const updateDebugIncident = (store: RelayStore, event: RelayDebugEvent): void =>
   trimDebugIncidents(store);
   const persisted = store.debugIncidents.get(classified.fingerprint);
   if (persisted) store.incidentSink?.(persisted);
+  return persisted ?? null;
 };
 
-export const pushDebugEvent = (store: RelayStore, event: Omit<RelayDebugEvent, 'id' | 'ts'>): void => {
+export const pushDebugEvent = (
+  store: RelayStore,
+  event: Omit<RelayDebugEvent, 'id' | 'ts'>,
+): RelayDebugIncident | null => {
   store.debugId += 1;
   const redactedEvent = redactTelemetryValue(event) as Omit<RelayDebugEvent, 'id' | 'ts'>;
   const delivery = redactedEvent.delivery ??
@@ -402,10 +412,11 @@ export const pushDebugEvent = (store: RelayStore, event: Omit<RelayDebugEvent, '
     ...(delivery ? { delivery } : {}),
   };
   store.debugEvents.push(storedEvent);
-  updateDebugIncident(store, storedEvent);
+  const incident = updateDebugIncident(store, storedEvent);
   if (store.debugEvents.length > MAX_DEBUG_EVENTS) {
     store.debugEvents.shift();
   }
+  return incident;
 };
 
 export const setDebugIncidentState = (

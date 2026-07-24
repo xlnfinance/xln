@@ -178,6 +178,24 @@ describe('production startup wiring', () => {
     expect(orchestrator).not.toContain('relayStore.debugId = 0');
   });
 
+  test('managed runtime fatal exits only after parent incident fsync acknowledgement', () => {
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
+    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const runtime = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
+
+    expect(orchestrator.match(/stdio: \['pipe', 'pipe', 'pipe', 'ipc'\]/g)).toHaveLength(2);
+    expect(orchestrator.match(/attachManagedChildFatalIpc\(/g)).toHaveLength(2);
+    expect(orchestrator).toContain('persistManagedChildFatalReport(child, report)');
+    expect(orchestrator).toContain('persistManagedChildFatalReport(marketMakerChild, report)');
+    expect(hubNode).toContain('await reportManagedChildFatal({');
+    expect(mmNode).toContain('await reportManagedChildFatal({');
+    const report = runtime.indexOf('await config.onFatal({');
+    const exit = runtime.indexOf('runtimeProcess.exit(1);', report);
+    expect(report).toBeGreaterThan(0);
+    expect(exit).toBeGreaterThan(report);
+  });
+
   test('production frontend deploy builds off-host and uploads a complete artifact', () => {
     const deploy = readFileSync(join(repoRoot, 'deploy.sh'), 'utf8');
     const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
@@ -1070,7 +1088,7 @@ describe('production startup wiring', () => {
 
   test('hub exposes restored entities before its loop while MM imports every entity before P2P', () => {
     const hubSource = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
-    const hubP2PStart = hubSource.indexOf('const p2p = startP2P(env, {');
+    const hubP2PStart = hubSource.indexOf('p2p = startP2P(env, {');
     const hubP2PReady = hubSource.indexOf("if (!p2p) throw new Error('P2P_START_FAILED');", hubP2PStart);
     const hubLoopStart = hubSource.indexOf('startRuntimeLoop(env, {', hubP2PReady);
     expect(hubP2PStart).toBeGreaterThan(0);
