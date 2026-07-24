@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { summarizeQaBrowserIssues, type QaBrowserIssue } from '../qa/report';
 import { assertE2EBrowserHealthGate } from '../scripts/run-e2e-parallel-isolated';
@@ -64,19 +64,20 @@ describe('isolated E2E browser health gate', () => {
     expect(() => assertE2EBrowserHealthGate(health, true)).not.toThrow();
   });
 
-  test('release and market-maker scripts opt into strict browser health only', () => {
+  test('every isolated E2E command opts into strict browser health', () => {
     const packageJson = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
     };
-    expect(packageJson.scripts['test:e2e:release']).toContain('--strict-browser-health');
-    expect(packageJson.scripts['test:e2e:mm']).toContain('--strict-browser-health');
-    expect(packageJson.scripts['test:e2e:full']).not.toContain('--strict-browser-health');
-    expect(packageJson.scripts['test:e2e:parallel:isolated']).not.toContain('--strict-browser-health');
+    const bypasses = Object.entries(packageJson.scripts)
+      .filter(([, command]) => command.includes('run-e2e-parallel-isolated.ts'))
+      .filter(([, command]) => !command.includes('--strict-browser-health'))
+      .map(([name]) => name);
+    expect(bypasses).toEqual([]);
   });
 
   test('failed browser tests attach the full tagged runtime snapshot before quiesce', () => {
-    const fixture = readFileSync(resolve(process.cwd(), 'tests/global-setup.ts'), 'utf8');
-    const capture = fixture.indexOf('captureFailedRuntimeSnapshots(testInfo, pages)');
+    const fixture = readFileSync(resolve(process.cwd(), 'tests/global-setup.mts'), 'utf8');
+    const capture = fixture.indexOf('captureFailedRuntimeSnapshots(');
     const quiesce = fixture.indexOf('quiesceRuntimePages(pages)');
 
     expect(capture).toBeGreaterThan(0);
@@ -88,6 +89,23 @@ describe('isolated E2E browser health gate', () => {
     expect(fixture).toContain("await writeFile(artifactPath, snapshot, 'utf8')");
     expect(fixture).toContain('path: artifactPath');
     expect(fixture).toContain('Promise.allSettled(');
-    expect(fixture).toContain('E2E_FAILURE_HOOK_SECONDARY_ERRORS');
+    expect(fixture).toContain('E2E_FAILURE_HOOK_ERRORS');
+  });
+
+  test('every root Playwright spec uses the mandatory global fixture', () => {
+    const testsDir = resolve(process.cwd(), 'tests');
+    const bypasses = readdirSync(testsDir)
+      .filter(file => file.endsWith('.spec.ts'))
+      .filter(file => !readFileSync(resolve(testsDir, file), 'utf8')
+        .includes("from './global-setup.mts'"));
+    expect(bypasses).toEqual([]);
+  });
+
+  test('the global fixture fails per test on browser errors and new open incidents', () => {
+    const fixture = readFileSync(resolve(process.cwd(), 'tests/global-setup.mts'), 'utf8');
+    expect(fixture).toContain('unexpectedBrowserErrors(');
+    expect(fixture).toContain('unexpectedOpenIncidents(');
+    expect(fixture).toContain('incidentCursorByTestId');
+    expect(fixture).toContain('E2E_GLOBAL_ERROR_GUARD_FAILED');
   });
 });

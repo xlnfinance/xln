@@ -110,10 +110,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 - [ ] Bind every result to
   `candidateId = gitHead + codeHash + gateConfigHash`; store unit, contract,
   scenario, browser, recovery, public-chain and release evidence together.
-- [ ] Make one shared Playwright fixture fail every functional E2E on unexpected
-  browser `console.error`, `pageerror`, failed request or unresolved debug
-  incident. Narrow explicit allowlists only; individual specs cannot silently
-  omit the guard.
 - [ ] Run L1/L2 first, then exactly one unchanged-candidate unified full E2E,
   `bun run check`, `bun run gate:release` and the uninterrupted
   `bun run gate:mainnet`.

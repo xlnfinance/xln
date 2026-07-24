@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './global-setup.mts';
 import { signRuntimeAdapterServerIdentity } from '../runtime/radapter/server-identity-signer';
 import { verifyRuntimeAdapterServerIdentity } from '../runtime/radapter/server-identity';
 
@@ -18,23 +18,6 @@ const SERVER_FINGERPRINT = verifyRuntimeAdapterServerIdentity(
   RUNTIME_ID,
 ).identityFingerprint;
 const OTHER_SERVER_FINGERPRINT = `0x${'ef'.repeat(32)}`;
-const browserFailures = new Map<Page, string[]>();
-
-test.beforeEach(async ({ page }) => {
-  const failures: string[] = [];
-  browserFailures.set(page, failures);
-  page.on('console', message => {
-    if (message.type() === 'error' || message.type() === 'warning') failures.push(`${message.type()}: ${message.text()}`);
-  });
-  page.on('pageerror', error => failures.push(`pageerror: ${error.message}`));
-});
-
-test.afterEach(async ({ page }) => {
-  const failures = browserFailures.get(page) ?? [];
-  browserFailures.delete(page);
-  expect(failures).toEqual([]);
-});
-
 const deleteJournal = async (page: Page): Promise<void> => {
   await page.evaluate(async (dbName) => new Promise<void>((resolve, reject) => {
     const request = indexedDB.deleteDatabase(dbName);
