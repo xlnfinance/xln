@@ -1350,14 +1350,10 @@ const drainLocalRuntimeInput = async (
       Math.max(afterHeight, Math.floor(Number(env.height || 0))),
     );
     if (persistedHeight !== null) return persistedHeight;
-    const beforeHeight = Number(env.height || 0);
-    await xln.process(env, undefined, 0);
-    publishLocalRuntimeEnvIfActive(env);
-    const committedAfterProcess = findCommittedEmbeddedRuntimeInputHeight(env.history ?? [], input, afterHeight);
-    if (committedAfterProcess !== null) return committedAfterProcess;
-    if (Number(env.height || 0) === beforeHeight) {
-      await sleep(25);
-    }
+    // The runtime loop created with this Env is the only owner allowed to call
+    // process(). Command submission only enqueues and observes its durable
+    // commit; a UI waiter must never become a second transition driver.
+    await sleep(25);
     if (Date.now() - startedAt > 4_000) break;
   }
   throw new Error(
@@ -1571,9 +1567,6 @@ const routeRuntimeInput = async (
       return null;
     }
     assertLocalRuntimeInputIngressOpen(runtimeEnv);
-    if (!runtimeEnv.scenarioMode && typeof xln.startRuntimeLoop === 'function') {
-      xln.startRuntimeLoop(runtimeEnv);
-    }
     if (input.entityInputs?.length) {
       const ready = await waitForOpenAccountCounterpartyProfiles(runtimeEnv, input.entityInputs, OPEN_ACCOUNT_PROFILE_WAIT_TIMEOUT_MS);
       if (!ready) {

@@ -1902,6 +1902,21 @@ describe('production startup wiring', () => {
     expect(meshCommon).toContain('export const hasQueuedExtendCredit = (');
   });
 
+  test('frontend command submission never starts or directly drives the runtime loop', () => {
+    const xlnStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/xlnStore.ts'), 'utf8');
+    const drainStart = xlnStore.indexOf('const drainLocalRuntimeInput = async (');
+    const drainEnd = xlnStore.indexOf('const normalizeRuntimeIdentifier =', drainStart);
+    const submitStart = xlnStore.indexOf('export async function dispatchRuntimeInputToRuntimeEnv');
+    const submitEnd = xlnStore.indexOf('\nexport ', submitStart + 1);
+
+    expect(drainStart).toBeGreaterThan(0);
+    expect(drainEnd).toBeGreaterThan(drainStart);
+    expect(submitStart).toBeGreaterThan(0);
+    expect(submitEnd).toBeGreaterThan(submitStart);
+    expect(xlnStore.slice(drainStart, drainEnd)).not.toContain('xln.process(');
+    expect(xlnStore.slice(submitStart, submitEnd)).not.toContain('xln.startRuntimeLoop(');
+  });
+
   test('isolated E2E failure forensics never opens the live database and records every HTTP failure', () => {
     const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
     const forensicsStart = runner.indexOf('const captureShardFailureForensics = async (');

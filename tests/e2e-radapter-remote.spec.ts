@@ -1896,6 +1896,18 @@ test('real H2 replacement gates browser money commands until verified restore', 
     severity: 'error',
     message: /WebSocket connection to 'ws:\/\/127\.0\.0\.1:\d+\/rpc' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED/,
   });
+  allowBrowserIssue({
+    type: 'http',
+    severity: 'error',
+    status: 503,
+    url: '/api/external-wallet/snapshot',
+  });
+  allowBrowserIssue({
+    type: 'console',
+    severity: 'error',
+    message: 'Failed to load resource: the server responded with a status of 503',
+    url: '/app#accounts',
+  });
   allowDebugIncident({
     source: 'orchestrator',
     code: 'CHILD_UNEXPECTED_EXIT',
