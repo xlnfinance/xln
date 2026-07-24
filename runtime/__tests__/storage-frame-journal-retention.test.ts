@@ -1400,6 +1400,20 @@ describe('storage frame journal retention', () => {
     const restored = await loadEnvFromDB(runtimeId, seed);
     expect(restored?.height).toBe(latestAfterRotation + 1);
     if (restored) {
+      enqueueRuntimeInput(restored, {
+        runtimeTxs: [],
+        entityInputs: [{
+          entityId,
+          signerId: signer,
+          entityTxs: [{
+            type: 'profile-update',
+            data: { profile: { entityId, name: 'post-rotation-restored-frame' } },
+          }],
+        }],
+      });
+      await processRuntime(restored, []);
+      expect(restored.height).toBe(latestAfterRotation + 2);
+      expect(await getPersistedLatestHeight(restored)).toBe(latestAfterRotation + 2);
       await closeRuntimeDb(restored);
       await closeInfraDb(restored);
     }

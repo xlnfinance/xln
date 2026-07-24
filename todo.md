@@ -15,7 +15,11 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   its replacement restores the exact committed height/root without duplicate
   dispatch or J-submit, and unresolved incidents block release. All money
   controls must derive readiness from the same Runtime lifecycle gate and
-  perform zero enqueue while halted, quiescing or restoring.
+  perform zero enqueue while halted, quiescing or restoring. Group consequences
+  under one stable root fingerprint, retain fatal/error separately from noisy
+  info events, and enforce allowlisted metadata plus sink-level redaction: raw
+  Account/Entity inputs, Hanko, ciphertext, seeds and dispute evidence must
+  never enter console, JSONL or the debug API.
 ## 1. Commit-boundary correctness
 
 - [ ] Reject Entity-frame timestamp regression before transaction application.
@@ -78,6 +82,12 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 - [ ] Pass snapshot/epoch/rotation/prune/corruption matrices for oversized
   typed Account/Entity/Book values and exact 9,999/10,000-byte boundaries.
+  Include Runtime-frame shared-resource ownership: working handle replacement
+  must atomically publish its matching open promise/generation, concurrent
+  live/working replacement must fail with a typed conflict, current and
+  previous handles must never alias, a closed handle must never publish, and
+  forced rotation → next commit → restart → next commit must preserve exact
+  WAL height and canonical roots.
 - [ ] Add deterministic SimNetwork/SimStorage delay/reorder/drop/partial-write/
   kill tests and retain every failing seed.
 - [ ] Profile the production bootstrap and growing-hub frame path locally.
