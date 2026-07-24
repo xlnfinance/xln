@@ -15,12 +15,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   gates fail on unexplained open incidents. All money controls must derive
   readiness from the same Runtime lifecycle gate and perform zero enqueue while
   halted, quiescing or restoring.
-- [ ] Reproduce the production bootstrap locally with the production storage
-  byte threshold, then run beyond the first epoch rotation with H1/H2/H3/MM
-  healthy, no stale frames, no orphan processes and no growing empty-chain
-  disk workload. Prove the working-frame replacement becomes the one open live
-  current handle, current/previous never alias, concurrent replacement fails
-  closed, and the next frame commits after rotation and restore.
 ## 1. Commit-boundary correctness
 
 - [ ] Reject Entity-frame timestamp regression before transaction application.
