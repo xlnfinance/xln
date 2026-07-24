@@ -9,7 +9,6 @@ import type {
   AccountTx,
   AccountInput,
   Env,
-  EntityState,
   Delta,
   HankoString,
 } from '../../types';
@@ -2134,33 +2133,4 @@ export async function applyAccountInput(
 export function addToAccountMempool(accountMachine: AccountMachine, accountTx: AccountTx): boolean {
   appendAccountMempoolTx(accountMachine, accountTx, 'accountConsensus:externalAdmission');
   return true;
-}
-
-export function shouldProposeFrame(accountMachine: AccountMachine): boolean {
-  const should = accountMachine.mempool.length > 0 && !accountMachine.pendingFrame;
-  if (HEAVY_LOGS) {
-    accountLog.debug('proposal.should_propose', {
-      mempool: accountMachine.mempool.length,
-      pendingFrame: Boolean(accountMachine.pendingFrame),
-      result: should,
-    });
-  }
-  return should;
-}
-
-export function getAccountsToProposeFrames(entityState: EntityState): string[] {
-  const accountsToProposeFrames: string[] = [];
-
-  if (!entityState.accounts || !(entityState.accounts instanceof Map)) {
-    accountLog.warn('entity.accounts.invalid', { type: typeof entityState.accounts });
-    return accountsToProposeFrames;
-  }
-
-  for (const [accountKey, accountMachine] of entityState.accounts) {
-    if (shouldProposeFrame(accountMachine)) {
-      accountsToProposeFrames.push(accountKey);
-    }
-  }
-
-  return accountsToProposeFrames;
 }

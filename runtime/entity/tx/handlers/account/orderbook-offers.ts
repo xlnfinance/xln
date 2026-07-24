@@ -1,7 +1,6 @@
 import type {
   AccountMachine,
   CrossJurisdictionSwapRoute,
-  EntityState,
   SwapOffer,
 } from '../../../../types';
 import { computeSwapPriceTicks, type BookState } from '../../../../orderbook';
@@ -113,39 +112,3 @@ export const compareSwapOffersForOrderbook = <T extends NormalizedOrderbookOffer
 
 export const sortSwapOffersForOrderbook = <T extends NormalizedOrderbookOffer>(swapOffers: readonly T[]): T[] =>
   [...swapOffers].sort(compareSwapOffersForOrderbook);
-
-export const collectOpenSwapOffersForOrderbook = (hubState: EntityState): NormalizedOrderbookOffer[] =>
-  sortSwapOffersForOrderbook(
-    Array.from(hubState.accounts.entries()).flatMap(([accountId, account]) =>
-      Array.from(account.swapOffers.entries()).flatMap(([offerId, offer]) => {
-        if (
-          !offer ||
-          typeof offer.giveTokenId !== 'number' ||
-          typeof offer.wantTokenId !== 'number' ||
-          typeof offer.giveAmount !== 'bigint' ||
-          typeof offer.wantAmount !== 'bigint'
-        ) {
-          return [];
-        }
-        return [
-          normalizeSwapOfferForOrderbook(
-            {
-              offerId: String(offerId),
-              makerIsLeft: offer.makerIsLeft,
-              fromEntity: account.leftEntity,
-              toEntity: account.rightEntity,
-              createdHeight: offer.createdHeight,
-              giveTokenId: offer.giveTokenId,
-              giveAmount: offer.giveAmount,
-              wantTokenId: offer.wantTokenId,
-              wantAmount: offer.wantAmount,
-              priceTicks: offer.priceTicks,
-              timeInForce: offer.timeInForce,
-              ...(offer.crossJurisdiction ? { crossJurisdiction: offer.crossJurisdiction } : {}),
-            },
-            accountId,
-          ),
-        ];
-      }),
-    ),
-  );

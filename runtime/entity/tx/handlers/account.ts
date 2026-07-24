@@ -49,7 +49,6 @@ import { getPerfMs } from '../../../utils';
 
 export type { MempoolOp } from './account/orderbook-queue';
 export {
-  collectOpenSwapOffersForOrderbook,
   compareSwapOffersForOrderbook,
   normalizeSwapOfferForOrderbook,
   sortSwapOffersForOrderbook,
