@@ -20,6 +20,8 @@ import { isLeftEntity } from '../../id';
 import { scheduleHook as scheduleCrontabHook } from '../../scheduler';
 import { upsertSortedStringMapEntry } from '../../../storage/sorted-index';
 import { normalizeAccountWatchSeed } from '../../../account/watch-seed';
+import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../../account/default-tokens';
+import { resolveJurisdictionRebalanceDefaults } from '../../../account/rebalance-policy-defaults';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from './account-cross-j-followups';
 import { applyCommittedAccountFrameFollowups } from './account/committed-frame-followups';
 import {
@@ -328,6 +330,16 @@ export async function applyAccountInput(
       },
       jNonce: 0,
     };
+    // The opening side seeds its local rebalance policy in openAccount. The side
+    // that first learns of the account from an inbound genesis frame must seed
+    // the same jurisdiction defaults, or checkAutoRebalance returns early on an
+    // empty policy map and this side can never auto-request collateral.
+    for (const policyTokenId of DEFAULT_ACCOUNT_TOKEN_IDS) {
+      accountMachine.shadow.rebalance.policy.set(
+        policyTokenId,
+        resolveJurisdictionRebalanceDefaults(newState, policyTokenId),
+      );
+    }
     accountMachine.currentFrame.accountStateRoot = computeAccountStateRoot(accountMachine);
     accountMachine.currentFrame.stateHash = accountMachine.currentFrame.accountStateRoot;
     accountHandlerLog.debug('machine.candidate_created', { counterparty: shortId(counterpartyId) });

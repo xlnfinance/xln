@@ -395,8 +395,12 @@ export const decodeStandardSolidityRevertData = (
   }
 };
 
+// HTTP 429 is a throttle, not a failed endpoint: a shared public RPC rate-limits
+// by IP and recovers on its own. Treating it as fatal permanently halted the
+// jurisdiction watcher, and every later restart short-circuited on the recorded
+// fatal. It belongs with 503, which already lives in this list.
 export const isTransientRpcUnavailableError = (error: unknown): boolean =>
-  /J_HISTORY_HEADER_MISSING:height=\d+ error=none|J_RECEIPT_RANGE_REORG|J_RECEIPT_RANGE_PARENT_MISMATCH|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|Failed to fetch|NetworkError|Load failed|Unexpected end of JSON input|PROXY_UPSTREAM_TIMEOUT|RPC_BATCH_TIMEOUT:\d+|RPC_BATCH_HTTP_50[0234]|50[0234] (Bad Gateway|Gateway Timeout|Service Unavailable|Internal Server Error)|server response 50[0234]|responseStatus["': ]+50[0234]/i
+  /J_HISTORY_HEADER_MISSING:height=\d+ error=none|J_RECEIPT_RANGE_REORG|J_RECEIPT_RANGE_PARENT_MISMATCH|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|Failed to fetch|NetworkError|Load failed|Unexpected end of JSON input|PROXY_UPSTREAM_TIMEOUT|RPC_BATCH_TIMEOUT:\d+|RPC_BATCH_HTTP_429|RPC_BATCH_HTTP_50[0234]|429 Too Many Requests|50[0234] (Bad Gateway|Gateway Timeout|Service Unavailable|Internal Server Error)|server response (429|50[0234])|responseStatus["': ]+(429|50[0234])/i
     .test(rpcErrorText(error));
 
 export const shouldEmitExternalWalletBalanceDelta = (

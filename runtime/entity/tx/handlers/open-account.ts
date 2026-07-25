@@ -7,7 +7,6 @@ import type {
   EntityTx,
   Env,
 } from '../../../types';
-import { scaleWholeTokenAmount } from '../../../types';
 import { formatEntityId } from '../../../utils';
 import { upsertSortedStringMapEntry } from '../../../storage/sorted-index';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
@@ -25,8 +24,7 @@ import {
 import { appendAccountMempoolTxs } from '../../../account/mempool';
 import { assertEntityAccountInsertionCapacity } from '../../account-capacity';
 import { createEmptyAccountJClaimAccumulator } from '../../../account/j-claim-accumulator';
-import { getDefaultRebalancePolicyForToken } from '../../../account/rebalance-defaults';
-import { getTokenInfo } from '../../../account/utils';
+import { resolveJurisdictionRebalanceDefaults } from '../../../account/rebalance-policy-defaults';
 import { buildHubRebalancePolicyTx } from './account-admin';
 
 type OpenAccountEntityTx = Extract<EntityTx, { type: 'openAccount' }>;
@@ -40,28 +38,6 @@ type OpenAccountResult = {
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 const isEntityId32 = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
 const openAccountLog = createStructuredLogger('account.open');
-
-const scaleWholePolicyAmount = (tokenId: number, value: number): bigint => {
-  if (!Number.isFinite(value) || value < 0) {
-    throw new Error(`REBALANCE_POLICY_USD_INVALID:token=${tokenId}:value=${String(value)}`);
-  }
-  return scaleWholeTokenAmount(BigInt(Math.floor(value)), getTokenInfo(tokenId).decimals);
-};
-
-const resolveJurisdictionRebalanceDefaults = (
-  entityState: EntityState,
-  tokenId: number,
-): { r2cRequestSoftLimit: bigint; hardLimit: bigint; maxAcceptableFee: bigint } => {
-  const raw = entityState.config?.jurisdiction?.rebalancePolicyUsd;
-  if (!raw) return getDefaultRebalancePolicyForToken(tokenId);
-  const r2cRequestSoftLimit = scaleWholePolicyAmount(tokenId, raw.r2cRequestSoftLimit);
-  const hardLimit = scaleWholePolicyAmount(tokenId, raw.hardLimit);
-  const maxAcceptableFee = scaleWholePolicyAmount(tokenId, raw.maxFee);
-  if (r2cRequestSoftLimit <= 0n || hardLimit < r2cRequestSoftLimit) {
-    throw new Error(`REBALANCE_POLICY_USD_INVALID:token=${tokenId}`);
-  }
-  return { r2cRequestSoftLimit, hardLimit, maxAcceptableFee };
-};
 
 const assertRequestedRebalancePolicy = (
   tokenId: number,
