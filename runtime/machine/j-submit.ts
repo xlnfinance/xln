@@ -468,6 +468,30 @@ export async function submitRuntimeJOutbox(
         continue;
       }
 
+      // jBatchState.entityNonce only advances on an observed HankoBatchProcessed
+      // event. If this runtime never observed the events for nonces the chain has
+      // already consumed, every batch is signed with a nonce the Depository
+      // rejects, the event never arrives, and the nonce never advances: the hub
+      // retries the same rejected nonce forever while looking healthy. Name that
+      // divergence instead of letting it loop silently. This read stays in the
+      // validator-private submit path and never enters consensus state.
+      if (jTx.type === 'batch' && jTx.data.entityNonce !== undefined) {
+        const intendedNonce = BigInt(jTx.data.entityNonce);
+        const chainNonce = await jAdapter.getEntityNonce(jTx.entityId);
+        if (chainNonce >= intendedNonce) {
+          const message =
+            `J_BATCH_NONCE_BEHIND_CHAIN:entity=${jTx.entityId}:intended=${intendedNonce}:chain=${chainNonce}`;
+          jSubmitLog.error('tx.nonce_behind_chain', {
+            entityId: shortId(jTx.entityId),
+            jurisdictionName: jInput.jurisdictionName,
+            intendedNonce: intendedNonce.toString(),
+            chainNonce: chainNonce.toString(),
+          });
+          queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'terminalFailure', { message });
+          continue;
+        }
+      }
+
       const submitData = jTx.data as { signerId?: unknown } | undefined;
       const submitSignerId = typeof submitData?.signerId === 'string' ? submitData.signerId : undefined;
       const submitSignerPrivateKey = submitSignerId ? getLocalSignerPrivateKey(env, submitSignerId) : null;
