@@ -285,7 +285,7 @@ export const applyRetryJSubmitRuntimeTx = (env: Env, tx: RetryJSubmitTx): JInput
   if (previous?.terminalFailure || previous?.lastResultOutcome === 'reconciled') return [];
   if (
     previous &&
-    previous.lastResultOutcome !== 'deferred' &&
+    previous.lastResultOutcome !== 'eventBarrier' &&
     previous.submitAttempts > 0 &&
     env.timestamp < previous.lastSubmittedAt + ENTITY_J_SUBMIT_FALLBACK_MS
   ) return [];

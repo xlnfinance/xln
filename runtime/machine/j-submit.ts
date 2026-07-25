@@ -317,7 +317,7 @@ export async function submitRuntimeJOutbox(
       // any sealed attempt is still live; never infer that decision from RPC.
       for (const jTx of activeJTxs) {
         if (jTx.type === 'batch') {
-          queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'deferred', {
+          queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'eventBarrier', {
             message: 'authenticated-j-events-before-submit',
           });
         } else if (isEntityProviderActionJTx(jTx)) {

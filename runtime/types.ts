@@ -610,7 +610,7 @@ export type RuntimeTx =
         attemptId: string;
         attemptNumber: number;
         attemptedAt: number;
-        outcome: 'submitted' | 'deferred' | 'transientFailure' | 'terminalFailure' | 'reconciled';
+        outcome: 'submitted' | 'eventBarrier' | 'transientFailure' | 'terminalFailure' | 'reconciled';
         message?: string;
         adapterFailure?: JAdapterFailure;
         txHash?: string;
@@ -1188,7 +1188,7 @@ export interface EntityReplica {
     };
     lastResultAttemptId?: string;
     lastResultAt?: number;
-    lastResultOutcome?: 'submitted' | 'deferred' | 'transientFailure' | 'terminalFailure' | 'reconciled';
+    lastResultOutcome?: 'submitted' | 'eventBarrier' | 'transientFailure' | 'terminalFailure' | 'reconciled';
     /** Canonical full payload of lastResultAttemptId; detects conflicting WAL duplicates. */
     lastResultFingerprint?: string;
     /** Bounded durable fingerprints for recent processed attempt IDs. */

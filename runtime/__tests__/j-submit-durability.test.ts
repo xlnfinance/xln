@@ -147,10 +147,10 @@ describe('durable validator-local J submit state', () => {
     expect(queued).toHaveLength(1);
     expect(queued[0]).toMatchObject({
       type: 'recordJSubmitResult',
-      data: { outcome: 'deferred', message: 'authenticated-j-events-before-submit' },
+      data: { outcome: 'eventBarrier', message: 'authenticated-j-events-before-submit' },
     });
     await applyRuntimeTx(env, queued[0]!, { isReplay: true });
-    expect(replica.jSubmitState?.lastResultOutcome).toBe('deferred');
+    expect(replica.jSubmitState?.lastResultOutcome).toBe('eventBarrier');
     expect(collectDueJSubmitRuntimeTxs(env, env.timestamp)).toHaveLength(1);
   });
 
