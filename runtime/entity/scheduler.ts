@@ -783,6 +783,14 @@ async function hubRebalanceHandler(
   const localEntityTxs: EntityTx[] = [];
   const signerId = resolveEntityProposerId(_env, replica.entityId, 'hub-rebalance');
   const now = replica.state.timestamp; // DETERMINISTIC: use entity's own timestamp
+  // A submission timeout must not be measured on the entity's own frame clock.
+  // state.timestamp only advances when this entity commits a frame, and a
+  // pending sentBatch blocks this handler from producing one, so the age froze
+  // at the value it had when the batch was sent and the stale threshold could
+  // never be reached: the hub latched on an unconfirmed batch forever.
+  // jBatchState.sentBatch.lastSubmittedAt is stamped from env.timestamp, so the
+  // comparison has to read the same clock.
+  const submitClockNow = _env.timestamp;
   const strategy = normalizeRebalanceMatchingStrategy(replica.state.hubRebalanceConfig.matchingStrategy);
   const rebalanceLiquidityFeeBps =
     replica.state.hubRebalanceConfig.rebalanceLiquidityFeeBps ??
@@ -823,7 +831,7 @@ async function hubRebalanceHandler(
   let abortStaleSentBatchReason: string | null = null;
   if (replica.state.jBatchState.sentBatch) {
     const sentBatch = replica.state.jBatchState.sentBatch;
-    const ageMs = now - (sentBatch.lastSubmittedAt || replica.state.jBatchState.lastBroadcast || 0);
+    const ageMs = submitClockNow - (sentBatch.lastSubmittedAt || replica.state.jBatchState.lastBroadcast || 0);
     if (ageMs <= HUB_PENDING_BROADCAST_STALE_MS) {
       console.warn(
         `⏳ Hub rebalance blocked: sentBatch pending age=${ageMs}ms nonce=${sentBatch.entityNonce} (entity=${hubId.slice(-4)})`,
