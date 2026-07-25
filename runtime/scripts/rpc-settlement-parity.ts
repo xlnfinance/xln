@@ -1,40 +1,63 @@
 #!/usr/bin/env bun
+/**
+ * RPC settlement parity harness.
+ *
+ * Proves that J-events decoded from a submitted batch receipt hash identically
+ * to the same events refetched from the chain, and that reserves moved exactly
+ * as the batch declared.
+ *
+ * Modes:
+ *   deploy  Bring up a stack and write a deployment descriptor. Nothing else.
+ *   attach  Read a descriptor and run parity against that already deployed
+ *           stack. Never deploys, so it is safe against a public chain whose
+ *           sources are already verified.
+ *   all     Deploy and run parity in one process (default; local anvil flow).
+ */
 
-import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { ethers } from 'ethers';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-import { DEFAULT_PRIVATE_KEY, createJAdapter, createXlnJsonRpcProvider } from '../jadapter';
-import { createEmptyBatch } from '../jurisdiction/batch';
-import { prepareSignedBatch } from '../hanko/batch';
-import { generateLazyEntityId } from '../entity/factory';
-import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
-import { parseReceiptLogsToJEvents, rawEventToJEvents, type RawJEventArgs } from '../jadapter/helpers';
+import { DEFAULT_PRIVATE_KEY, DEV_CHAIN_IDS, createJAdapter } from '../jadapter';
+import type { JAdapter } from '../jadapter/types';
+import { startAnvil, stopAnvil, waitForRpcReady, type ManagedAnvil } from './rpc-settlement-anvil';
+import { runParity } from './rpc-settlement-run';
+import {
+  readJurisdictionDeployment,
+  readParityDeployment,
+  toParityDeployment,
+  toReplicaConnection,
+  writeParityDeployment,
+  type ParityDeployment,
+} from './rpc-settlement-deployment';
+
+type Mode = 'deploy' | 'attach' | 'all';
 
 type Args = {
+  mode: Mode;
   rpcUrl: string;
   chainId: number;
   spawnAnvil: boolean;
   anvilPort: number;
   keepAnvil: boolean;
+  deploymentPath?: string;
+  deploymentOut: string;
+  tokenAddress?: string;
 };
 
-type ManagedAnvil = {
-  child: ChildProcess;
-  tmpRoot: string;
+type Jurisdiction = {
+  chainId: number;
+  rpc: string;
+  tokens?: { USDT?: { address?: string } };
 };
 
 let activeAnvil: ManagedAnvil | null = null;
 let keepActiveAnvil = false;
 
-const parseArgs = (): Args => {
+const readFlags = (): Map<string, string | true> => {
   const flags = new Map<string, string | true>();
   for (let index = 2; index < process.argv.length; index += 1) {
     const current = process.argv[index];
-    if (!current) continue;
-    if (!current.startsWith('--')) continue;
+    if (!current || !current.startsWith('--')) continue;
     const [inlineKeyRaw, inlineValue] = current.split('=', 2);
     const inlineKey = inlineKeyRaw || current;
     if (inlineValue !== undefined) {
@@ -49,218 +72,128 @@ const parseArgs = (): Args => {
     flags.set(current, next);
     index += 1;
   }
-  const chainId = Number(flags.get('--chain-id') || 31337);
+  return flags;
+};
+
+const parseMode = (raw: string | true | undefined): Mode => {
+  const value = raw === undefined ? 'all' : String(raw);
+  if (value === 'deploy' || value === 'attach' || value === 'all') return value;
+  throw new Error(`PARITY_MODE_INVALID:${value}`);
+};
+
+const loadJurisdiction = (id: string): Jurisdiction => {
+  const path = fileURLToPath(new URL('../../jurisdictions/jurisdictions.json', import.meta.url));
+  const catalog = JSON.parse(readFileSync(path, 'utf8')) as {
+    jurisdictions: Record<string, Jurisdiction>;
+  };
+  const entry = catalog.jurisdictions[id];
+  if (!entry) throw new Error(`PARITY_JURISDICTION_UNKNOWN:${id}`);
+  return entry;
+};
+
+const parseArgs = (): Args => {
+  const flags = readFlags();
+  const mode = parseMode(flags.get('--mode'));
+  const jurisdictionId = flags.get('--jurisdiction');
+
+  let chainId = Number(flags.get('--chain-id') || 31337);
+  let rpcUrl = flags.get('--rpc-url') ? String(flags.get('--rpc-url')) : '';
+  let tokenAddress = flags.get('--token') ? String(flags.get('--token')) : undefined;
+  let deploymentPath = flags.get('--deployment') ? String(flags.get('--deployment')) : undefined;
+
+  if (typeof jurisdictionId === 'string') {
+    const jurisdiction = loadJurisdiction(jurisdictionId);
+    chainId = Number(jurisdiction.chainId);
+    rpcUrl = rpcUrl || jurisdiction.rpc;
+    tokenAddress = tokenAddress ?? jurisdiction.tokens?.USDT?.address;
+    deploymentPath = deploymentPath ?? `jurisdictions/deployments/${jurisdictionId}.json`;
+  }
+
   const anvilPort = Number(flags.get('--anvil-port') || 18545);
-  const spawnAnvil = !flags.has('--no-spawn-anvil');
-  const rpcUrl = String(flags.get('--rpc-url') || process.env['ANVIL_RPC'] || `http://127.0.0.1:${anvilPort}`);
-  if (!Number.isFinite(chainId) || chainId <= 0) throw new Error(`Invalid --chain-id=${chainId}`);
-  if (!Number.isFinite(anvilPort) || anvilPort <= 0) throw new Error(`Invalid --anvil-port=${anvilPort}`);
-  return {
-    rpcUrl,
+  if (!Number.isFinite(chainId) || chainId <= 0) throw new Error(`PARITY_CHAIN_ID_INVALID:${chainId}`);
+  if (!Number.isFinite(anvilPort) || anvilPort <= 0) throw new Error(`PARITY_ANVIL_PORT_INVALID:${anvilPort}`);
+
+  const resolvedRpc = rpcUrl || process.env['ANVIL_RPC'] || `http://127.0.0.1:${anvilPort}`;
+  const args: Args = {
+    mode,
+    rpcUrl: resolvedRpc,
     chainId: Math.floor(chainId),
-    spawnAnvil,
+    // Only the single-process flow may spawn its own chain. A spawned anvil dies
+    // with this process, so deploy mode must target a chain that outlives it,
+    // and attach mode by definition already has one. A non-dev chain is never
+    // local, so spawning would race a real endpoint.
+    spawnAnvil: mode === 'all' && !flags.has('--no-spawn-anvil') && DEV_CHAIN_IDS.has(Math.floor(chainId)),
     anvilPort: Math.floor(anvilPort),
     keepAnvil: flags.has('--keep-anvil'),
+    deploymentOut: String(flags.get('--deployment-out') || '.logs/rpc-settlement/deployment.json'),
   };
+  if (deploymentPath !== undefined) args.deploymentPath = deploymentPath;
+  if (tokenAddress !== undefined) args.tokenAddress = tokenAddress;
+  return args;
 };
 
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * A non-dev chain must never fall back to the well-known anvil key. The key is
+ * read from the environment and never logged.
+ */
+const resolvePrivateKey = (chainId: number): string => {
+  if (DEV_CHAIN_IDS.has(chainId)) return DEFAULT_PRIVATE_KEY;
+  const key = String(process.env['PUBLIC_CHAIN_PRIVATE_KEY'] || '').trim();
+  if (!/^0x[0-9a-f]{64}$/i.test(key)) throw new Error(`PARITY_PUBLIC_CHAIN_PRIVATE_KEY_REQUIRED:${chainId}`);
+  return key;
+};
 
-const waitForRpcReady = async (rpcUrl: string, timeoutMs = 20_000): Promise<void> => {
-  const provider = createXlnJsonRpcProvider(rpcUrl);
-  const deadline = Date.now() + timeoutMs;
-  let lastError = 'unknown';
-  while (Date.now() < deadline) {
-    try {
-      await provider.getBlockNumber();
-      await provider.destroy();
-      return;
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
-      await sleep(250);
-    }
+const loadDeployment = (args: Args): ParityDeployment => {
+  if (!args.deploymentPath) throw new Error('PARITY_DEPLOYMENT_PATH_REQUIRED');
+  const deployment = args.deploymentPath.includes('jurisdictions/deployments/')
+    ? readJurisdictionDeployment(args.deploymentPath)
+    : readParityDeployment(args.deploymentPath);
+  if (deployment.chainId !== args.chainId) {
+    throw new Error(`PARITY_DEPLOYMENT_CHAIN_MISMATCH:${deployment.chainId}:${args.chainId}`);
   }
-  await provider.destroy();
-  throw new Error(`RPC not ready at ${rpcUrl}: ${lastError}`);
+  return deployment;
 };
 
-const waitForAnvilExit = async (child: ChildProcess, timeoutMs: number): Promise<boolean> => {
-  if (child.exitCode !== null || child.signalCode !== null) return true;
-  return await Promise.race([
-    new Promise<boolean>((resolve) => child.once('exit', () => resolve(true))),
-    sleep(timeoutMs).then(() => false),
-  ]);
+const openAdapter = async (args: Args, privateKey: string): Promise<JAdapter> => {
+  const base = { mode: 'rpc' as const, chainId: args.chainId, rpcUrl: args.rpcUrl, privateKey };
+  if (args.mode !== 'attach') return await createJAdapter(base);
+  return await createJAdapter({ ...base, fromReplica: toReplicaConnection(loadDeployment(args)) });
 };
-
-const stopAnvil = async (managed: ManagedAnvil | null, keepAnvil: boolean): Promise<void> => {
-  if (!managed || keepAnvil) return;
-  const { child, tmpRoot } = managed;
-  if (child.exitCode === null && child.signalCode === null) {
-    child.kill('SIGTERM');
-    const exited = await waitForAnvilExit(child, 3_000);
-    if (!exited && child.exitCode === null && child.signalCode === null) {
-      child.kill('SIGKILL');
-      await waitForAnvilExit(child, 3_000);
-    }
-  }
-  await rm(tmpRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-};
-
-const startAnvil = async (args: Args): Promise<ManagedAnvil | null> => {
-  if (!args.spawnAnvil) return null;
-  const anvilTmpRoot = await mkdtemp(join(tmpdir(), 'xln-rpc-settlement-anvil-'));
-  const child = spawn('anvil', [
-    '--host', '127.0.0.1',
-    '--port', String(args.anvilPort),
-    '--chain-id', String(args.chainId),
-    '--mixed-mining',
-    '--block-time', '1',
-    '--block-gas-limit', '60000000',
-    '--code-size-limit', '65536',
-    '--prune-history', '256',
-    '--state', join(anvilTmpRoot, 'state.json'),
-  ], {
-    stdio: ['ignore', 'ignore', 'pipe'],
-    env: { ...process.env, TMPDIR: anvilTmpRoot },
-  });
-  child.stderr?.on('data', chunk => process.stderr.write(`[anvil] ${chunk.toString()}`));
-  return { child, tmpRoot: anvilTmpRoot };
-};
-
-const toJurisdictionHash = (
-  events: Array<{ name: string; args?: Record<string, unknown>; blockNumber?: number; blockHash?: string; transactionHash?: string }>,
-  entityId: string,
-): string => canonicalJurisdictionEventsHash(
-  events.flatMap((event) => {
-    const rawEvent: {
-      name: string;
-      args: RawJEventArgs;
-      blockNumber?: number;
-      blockHash?: string;
-      transactionHash?: string;
-    } = {
-      name: event.name,
-      args: (event.args ?? {}) as RawJEventArgs,
-    };
-    if (event.blockNumber !== undefined) rawEvent.blockNumber = event.blockNumber;
-    if (event.blockHash !== undefined) rawEvent.blockHash = event.blockHash;
-    if (event.transactionHash !== undefined) rawEvent.transactionHash = event.transactionHash;
-    return rawEventToJEvents(rawEvent, entityId);
-  }),
-);
 
 const main = async (): Promise<void> => {
   const args = parseArgs();
-  activeAnvil = await startAnvil(args);
+  if (args.spawnAnvil) activeAnvil = await startAnvil({ chainId: args.chainId, port: args.anvilPort });
   keepActiveAnvil = args.keepAnvil;
   const cleanup = async (): Promise<void> => {
     const managed = activeAnvil;
     activeAnvil = null;
-    await stopAnvil(managed, args.keepAnvil);
+    await stopAnvil(managed, keepActiveAnvil);
   };
-  process.on('SIGINT', () => {
-    void cleanup().finally(() => process.exit(130));
-  });
-  process.on('SIGTERM', () => {
-    void cleanup().finally(() => process.exit(143));
-  });
+  process.on('SIGINT', () => { void cleanup().finally(() => process.exit(130)); });
+  process.on('SIGTERM', () => { void cleanup().finally(() => process.exit(143)); });
 
   await waitForRpcReady(args.rpcUrl);
-  const provider = createXlnJsonRpcProvider(args.rpcUrl);
-  const adapter = await createJAdapter({
-    mode: 'rpc',
-    chainId: args.chainId,
-    rpcUrl: args.rpcUrl,
-  });
-  await adapter.deployStack();
+  const privateKey = resolvePrivateKey(args.chainId);
+  const adapter = await openAdapter(args, privateKey);
+  if (args.mode !== 'attach') await adapter.deployStack();
 
-  const signerAddress = new ethers.Wallet(DEFAULT_PRIVATE_KEY).address;
-  const sourceEntity = generateLazyEntityId([signerAddress], 1n).toLowerCase();
-  const targetEntity = generateLazyEntityId(['0x70997970C51812dc3A010C7d01b50e0d17dc79C8'], 1n).toLowerCase();
-  const tokenId = 1;
-  const startingAmount = 1_000n;
-  const transferAmount = 123n;
-
-  await adapter.debugFundReserves(sourceEntity, tokenId, startingAmount);
-  const beforeSource = await adapter.getReserves(sourceEntity, tokenId);
-  const beforeTarget = await adapter.getReserves(targetEntity, tokenId);
-
-  const batch = createEmptyBatch();
-  batch.reserveToReserve.push({
-    receivingEntity: targetEntity,
-    tokenId,
-    amount: transferAmount,
-  });
-
-  const nonce = await adapter.getEntityNonce(sourceEntity);
-  const { encodedBatch, hankoData, nextNonce } = prepareSignedBatch(
-    batch,
-    sourceEntity,
-    DEFAULT_PRIVATE_KEY,
-    BigInt(args.chainId),
-    adapter.addresses.depository,
-    nonce,
-  );
-  const receipt = await adapter.processBatch(encodedBatch, hankoData, nextNonce);
-  const minedReceipt = await provider.getTransactionReceipt(receipt.txHash);
-  if (!minedReceipt) throw new Error(`Missing transaction receipt for ${receipt.txHash}`);
-
-  const fetchedLogs = await provider.getLogs({
-    blockHash: minedReceipt.blockHash,
-  });
-  const fetchedEvents = parseReceiptLogsToJEvents({
-    logs: fetchedLogs.map(log => ({
-      address: log.address,
-      topics: log.topics,
-      data: log.data,
-      index: log.index,
-    })),
-    blockNumber: minedReceipt.blockNumber,
-    blockHash: minedReceipt.blockHash,
-    hash: receipt.txHash,
-  }, [
-    { address: adapter.addresses.depository, interface: adapter.depository.interface },
-    { address: adapter.addresses.entityProvider, interface: adapter.entityProvider.interface },
-  ]);
-
-  const receiptHash = toJurisdictionHash(receipt.events, sourceEntity);
-  const fetchedHash = toJurisdictionHash(fetchedEvents, sourceEntity);
-  if (receiptHash !== fetchedHash) {
-    throw new Error(`RPC event parity mismatch: receipt=${receiptHash} fetched=${fetchedHash}`);
+  if (args.mode === 'deploy') {
+    const deployment = toParityDeployment(
+      args.chainId,
+      adapter.addresses,
+      adapter.entityProviderDeploymentBlock,
+    );
+    const written = writeParityDeployment(args.deploymentOut, deployment);
+    await adapter.close();
+    await cleanup();
+    console.log('✅ rpc-settlement-parity deployed');
+    console.log(JSON.stringify({ kind: 'RPC_SETTLEMENT_DEPLOYMENT', path: written, ...deployment }, null, 2));
+    return;
   }
 
-  const afterSource = await adapter.getReserves(sourceEntity, tokenId);
-  const afterTarget = await adapter.getReserves(targetEntity, tokenId);
-  if (beforeSource - transferAmount !== afterSource) {
-    throw new Error(`Source reserve mismatch: before=${beforeSource} after=${afterSource}`);
-  }
-  if (beforeTarget + transferAmount !== afterTarget) {
-    throw new Error(`Target reserve mismatch: before=${beforeTarget} after=${afterTarget}`);
-  }
-
+  await runParity(adapter, args, privateKey);
   await adapter.close();
-  await provider.destroy();
   await cleanup();
-
-  console.log('✅ rpc-settlement-parity passed');
-  console.log(JSON.stringify({
-    rpcUrl: args.rpcUrl,
-    chainId: args.chainId,
-    sourceEntity,
-    targetEntity,
-    txHash: receipt.txHash,
-    blockNumber: receipt.blockNumber,
-    eventCount: receipt.events.length,
-    fetchedEventCount: fetchedEvents.length,
-    eventsHash: receiptHash,
-    reserves: {
-      beforeSource: beforeSource.toString(),
-      afterSource: afterSource.toString(),
-      beforeTarget: beforeTarget.toString(),
-      afterTarget: afterTarget.toString(),
-    },
-  }, null, 2));
 };
 
 main().catch(async (error) => {

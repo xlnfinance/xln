@@ -78,8 +78,15 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   is not among these receipts because the deployer allowance was already
   `MaxUint256` from an earlier run of the same script; the approve branch is
   still exercised whenever allowance is short.
-- [ ] Prove Runtime ↔ Sepolia reserve/debt parity, restart/replay and
-  chain-domain deadlines.
+- [x] Prove Runtime ↔ Sepolia reserve parity and J-event parity. Proven by
+  `bun runtime/scripts/rpc-settlement-parity.ts --mode=attach
+  --jurisdiction=ethereum-sepolia`: reserves `1750 → 1627` / `0 → 123`, and
+  events decoded from the receipt hash identically to the same events refetched
+  from the chain. Receipt
+  `0xe3b7370d960c8901f506a5239c4395c72b50e1a1c95574bdef413d20d73d9f6d`
+  (block `11344290`, `status=1`), re-read independently from public RPC.
+- [ ] Prove Runtime ↔ Sepolia debt parity, restart/replay and chain-domain
+  deadlines. Reserve parity above does not cover any of these three.
 - [ ] Prove the cross-J lifecycle with the Sepolia leg: full fill, partial GTC
   and manual close.
 - [ ] Freeze one unchanged candidate SHA and re-run the above as immutable
