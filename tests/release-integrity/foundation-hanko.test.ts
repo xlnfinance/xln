@@ -45,6 +45,17 @@ const ENVELOPE: ReleaseEnvelope = {
 };
 
 describe('Foundation release Hanko', () => {
+  test('keeps every distributable package on the canonical release version', () => {
+    const version = readFileSync(resolve(ROOT, 'VERSION'), 'utf8').trim();
+    const packageVersion = (path: string): string =>
+      (JSON.parse(readFileSync(resolve(ROOT, path), 'utf8')) as { version: string }).version;
+
+    expect(packageVersion('package.json')).toBe(version);
+    expect(packageVersion('frontend/package.json')).toBe(version);
+    expect(packageVersion('packages/npm/xlnfinance/package.json')).toBe(version);
+    expect(CURRENT_XLN_RELEASE_VERSION).toBe(version);
+  });
+
   test('produces an EntityProvider-compatible 2-of-3 lazy entity proof', () => {
     const board = createFoundationReleaseBoard(ADDRESSES, 2);
     const attestation = signReleaseEnvelope(ENVELOPE, board, PRIVATE_KEYS);
