@@ -62,29 +62,6 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
 
 ## 4. Public Ethereum proof — P0 release blocker, open
 
-- [x] Prove the verified Ethereum Sepolia stack (solc `0.8.36`, chainId
-  `11155111`, dispute delay 25 blocks) with real deposit, settlement, replay
-  rejection and both dispute paths against authenticated public-chain receipts.
-  Proven at `53e8e1259` via `jurisdictions/scripts/public-proof-smoke.ts`;
-  all six receipts re-read from public RPC at `status=1`:
-  - deposit `0x496d0153122f2d0da032a9cb97a314212ea4e6031573f09da966ca7a552fc3b1`
-  - settlement `0x424f32a0c653e8aa0a65d3a7a1ef6c2b9ca51810dc86e7521d64cf08781df8c4`
-  - cooperative close `0x26bab4a22eba568e8d5c92631bc67d1141ddbdb309408a1f7410ed74d526bd23`
-  - dispute start `0x691055f154635d92a971c6e7f2073c3614111ea4203565485219647a819288bc`
-  - unilateral finalize `0x96ef86c469b4929345af035ae360f0ffee5ff306b5dcf11aaab5b21df020b8c3`
-  - withdrawal `0x4f742db29eb31f2aecbf2494038ca4d34cb61a7dfb02b131b7e22aeba9982e3e`
-
-  Reserve parity held on chain: `900 + 1000 - 100 - 50 = 1750`. ERC-20 `approve`
-  is not among these receipts because the deployer allowance was already
-  `MaxUint256` from an earlier run of the same script; the approve branch is
-  still exercised whenever allowance is short.
-- [x] Prove Runtime ↔ Sepolia reserve parity and J-event parity. Proven by
-  `bun runtime/scripts/rpc-settlement-parity.ts --mode=attach
-  --jurisdiction=ethereum-sepolia`: reserves `1750 → 1627` / `0 → 123`, and
-  events decoded from the receipt hash identically to the same events refetched
-  from the chain. Receipt
-  `0xe3b7370d960c8901f506a5239c4395c72b50e1a1c95574bdef413d20d73d9f6d`
-  (block `11344290`, `status=1`), re-read independently from public RPC.
 - [ ] Prove Runtime ↔ Sepolia debt parity, restart/replay and chain-domain
   deadlines. Reserve parity above does not cover any of these three.
 - [ ] Prove the cross-J lifecycle with the Sepolia leg: full fill, partial GTC

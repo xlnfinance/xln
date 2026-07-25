@@ -9,7 +9,7 @@ summarizes why those items matter and how they fit the protocol.
 
 ## Current Snapshot
 
-**Date:** 2026-07-09
+**Date:** 2026-07-25
 **State:** current `main` is production-demo/public-testnet grade, not mainnet-ready.
 
 What is true now:
@@ -94,6 +94,18 @@ When docs disagree, use this order:
 
 ## Recently Closed On Current `main`
 
+- Ethereum Sepolia was proven with solc `0.8.36`, chain ID `11155111`, a
+  25-block dispute delay, and authenticated `status=1` receipts for deposit,
+  settlement, replay rejection, cooperative close, dispute start, unilateral
+  finalize, and withdrawal. The proof script is
+  `jurisdictions/scripts/public-proof-smoke.ts` at `53e8e1259`; reserve parity
+  held at `900 + 1000 - 100 - 50 = 1750`.
+- Runtime ↔ Sepolia reserve and J-event parity was proven with
+  `runtime/scripts/rpc-settlement-parity.ts --mode=attach
+  --jurisdiction=ethereum-sepolia`: reserves moved `1750 → 1627` / `0 → 123`,
+  and receipt events matched an independent chain refetch. Evidence receipt:
+  `0xe3b7370d960c8901f506a5239c4395c72b50e1a1c95574bdef413d20d73d9f6d`
+  at block `11344290`.
 - `bun run gate:release` passed, including source checks, runtime core unit
   tests, soundcheck, frontend check, contract full suite, RPC settlement parity,
   security audit pack, persistence, watchtower, fast E2E, bounded soak, core

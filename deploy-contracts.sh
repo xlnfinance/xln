@@ -21,6 +21,32 @@ CONTRACT_8546_DEP=""
 CONTRACT_8547_EP=""
 CONTRACT_8547_DEP=""
 
+rpc_block_number() {
+    local port="$1" hex
+    hex=$(curl -s -X POST -H 'Content-Type: application/json' \
+        --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+        "http://127.0.0.1:${port}" | sed -n 's/.*"result":"0x\([0-9a-fA-F]*\)".*/\1/p')
+    [ -n "$hex" ] || return 1
+    printf '%d\n' "$((16#$hex))"
+}
+
+# Hardhat Ignition refuses to start while transactions from the deployer are
+# younger than 5 confirmations (IGN403). EntityProvider is deployed with a raw
+# transaction immediately before the Ignition run, so the Depository deploy has
+# to wait for those confirmations or it fails every time.
+wait_for_confirmations() {
+    local port="$1" needed="$2" start now tries=0
+    start=$(rpc_block_number "$port") || return 1
+    while [ "$tries" -lt 120 ]; do
+        now=$(rpc_block_number "$port") || return 1
+        if [ "$((now - start))" -ge "$needed" ]; then return 0; fi
+        sleep 1
+        tries=$((tries + 1))
+    done
+    echo "   ❌ Timed out waiting for $needed confirmations on port $port"
+    return 1
+}
+
 deploy_to_network() {
     local port=$1
     local network_name=$2
@@ -73,22 +99,16 @@ deploy_to_network() {
     
     # Force fresh compilation.
     echo "   🔧 Compiling contracts..."
-    if ! npx hardhat compile --force 2>&1; then
+    if ! bunx hardhat compile --force 2>&1; then
         echo "   ❌ Contract compilation failed"
         cd ..
         return 1
     fi
 
-    # HARD FAIL: always regenerate typechain from fresh artifacts.
-    echo "   🔧 Regenerating TypeChain types from artifacts..."
-    if ! find artifacts/contracts -name '*.json' ! -name '*.dbg.json' -print0 | \
-        xargs -0 npx typechain --target ethers-v6 --out-dir typechain-types; then
-        echo "   ❌ TypeChain generation failed"
-        cd ..
-        return 1
-    fi
-
-    # HARD FAIL: critical factories must exist and include required methods.
+    # Hardhat compile owns the single canonical TypeChain generation configured
+    # by this project. Running typechain again against a flat artifact list
+    # creates a second, incompatible directory layout and dirties every deploy.
+    # HARD FAIL: critical generated factories must exist and include required methods.
     depository_factory_file=$(find typechain-types/factories -name 'Depository__factory.ts' | head -n 1 || true)
     if [ -z "$depository_factory_file" ]; then
       echo "   ❌ Missing TypeChain Depository factory (Depository__factory.ts)"
@@ -126,7 +146,7 @@ deploy_to_network() {
     echo "   🧪 Running contract tests before deployment..."
     echo "   🔍 Running EntityProvider tests..."
     if ls test/EntityProvider* >/dev/null 2>&1; then
-        if ! npx hardhat test test/EntityProvider* --network hardhat 2>&1 | tee "../logs/test-entityprovider-$port.log"; then
+        if ! bunx hardhat test test/EntityProvider* --network hardhat 2>&1 | tee "../logs/test-entityprovider-$port.log"; then
             echo "   ❌ EntityProvider tests failed! Stopping deployment."
             cd ..
             return 1
@@ -188,6 +208,12 @@ deploy_to_network() {
     local entityprovider_address
     entityprovider_address=$(echo "$entityprovider_output" | grep "DEPLOYED_ADDRESS=" | cut -d'=' -f2)
     echo "   ✅ EntityProvider: $entityprovider_address"
+
+    echo "   ⏳ Waiting for EntityProvider confirmations before Ignition..."
+    if ! wait_for_confirmations "$port" 6; then
+        cd ..
+        return 1
+    fi
 
     echo "   🔧 Deploying Depository..."
     # Deploy Depository using ignition; accept prompts if any
