@@ -18,7 +18,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { ref: "${{ inputs.tag }}" }
+        # publish-check proves that the signed source commit is an ancestor of
+        # both origin/main and the release tag, so the validation checkout must
+        # include the tag's history instead of only its tip.
+        with:
+          ref: "${{ inputs.tag }}"
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: 1.3.14 }
       - name: Install source-check tooling
