@@ -35,7 +35,8 @@ export type RuntimeJSubmitDeps = {
 };
 
 const hasJHistoryTx = (input: EntityInput): boolean =>
-  (input.entityTxs ?? []).some((tx) => tx?.type === 'j_event');
+  (input.entityTxs ?? []).some((tx) => tx?.type === 'j_event') ||
+  (input.jPrefixAttestations?.size ?? 0) > 0;
 
 const captureQueuedEntityInputs = (env: Env): EntityInput[] => {
   const mempool = env.runtimeMempool ?? env.runtimeInput;
@@ -73,135 +74,19 @@ const pollSubmittedJEventsBeforeFollowups = async (env: Env, jAdapter: { pollNow
   }
 };
 
+const awaitAuthenticatedJEventsBeforeSubmit = async (
+  env: Env,
+  jAdapter: { pollNow?: () => Promise<void> },
+): Promise<number> => {
+  const alreadyQueued = captureQueuedEntityInputs(env).filter(hasJHistoryTx).length;
+  if (alreadyQueued > 0) return alreadyQueued;
+  if (typeof jAdapter.pollNow !== 'function') return 0;
+  const beforePoll = captureQueuedEntityInputs(env);
+  await jAdapter.pollNow();
+  return prioritizeJEventsQueuedAfterSubmit(env, beforePoll);
+};
+
 const normalizedEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
-
-type DisputeFinalizeClaim = { counterparty: string };
-
-const getDisputeFinalizeClaims = (jTx: JTx): DisputeFinalizeClaim[] => {
-  if (jTx.type !== 'batch') return [];
-  return (jTx.data.batch.disputeFinalizations || []).map((op) => ({
-    counterparty: normalizedEntityId(op.counterentity),
-  })).filter((claim) => claim.counterparty);
-};
-
-type DisputeAccountReader = {
-  getAccountInfo?: (
-    entityId: string,
-    counterpartyId: string,
-  ) => Promise<{ disputeHash: string; disputeTimeout: bigint }>;
-  hasProcessedBatch?: (
-    entityId: string,
-    batchHash: string,
-    entityNonce: bigint,
-  ) => Promise<boolean>;
-};
-
-const ZERO_BYTES32 = `0x${'0'.repeat(64)}`;
-
-const hasStaleDisputeFinalizeOnChain = async (
-  jAdapter: DisputeAccountReader,
-  entityId: string,
-  claims: DisputeFinalizeClaim[],
-): Promise<boolean> => {
-  if (typeof jAdapter.getAccountInfo !== 'function') return false;
-  for (const claim of claims) {
-    const account = await jAdapter.getAccountInfo(entityId, claim.counterparty);
-    const disputeHash = normalizedEntityId(account.disputeHash);
-    if (disputeHash === ZERO_BYTES32 && account.disputeTimeout === 0n) return true;
-  }
-  return false;
-};
-
-const reconcileFinalizedDispute = async (
-  env: Env,
-  jAdapter: DisputeAccountReader,
-  jTx: JTx,
-  deps: RuntimeJSubmitDeps,
-  reason: 'counterparty-finalized-before-submit' | 'counterparty-finalized-after-submit-failure',
-): Promise<boolean> => {
-  if (jTx.type !== 'batch') return false;
-  const claims = getDisputeFinalizeClaims(jTx);
-  if (claims.length === 0) return false;
-  const entityId = normalizedEntityId(jTx.entityId);
-  try {
-    if (!await hasStaleDisputeFinalizeOnChain(jAdapter, entityId, claims)) return false;
-  } catch (error) {
-    jSubmitLog.warn('dispute_finalize.reconcile_read_failed', {
-      entityId: shortId(jTx.entityId),
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return false;
-  }
-
-  const signerId = normalizedEntityId(jTx.data.signerId);
-  if (!signerId) throw new Error(`J_SUBMIT_FATAL: STALE_DISPUTE_FINALIZE_SIGNER_MISSING:${jTx.entityId}`);
-  deps.enqueueRuntimeInputs(env, [{
-    entityId: jTx.entityId,
-    signerId,
-    entityTxs: [{
-      type: 'j_abort_sent_batch',
-      data: { reason, requeueToCurrent: true },
-    }],
-  }], undefined, undefined, env.timestamp);
-  jSubmitLog.warn('dispute_finalize.stale_reconciled', {
-    entityId: shortId(jTx.entityId),
-    counterparties: claims.map(({ counterparty }) => shortId(counterparty)),
-    phase: reason,
-  });
-  return true;
-};
-
-const reconcileExactProcessedBatch = async (
-  env: Env,
-  jAdapter: DisputeAccountReader,
-  jTx: JTx,
-  deps: RuntimeJSubmitDeps,
-): Promise<boolean> => {
-  if (
-    jTx.type !== 'batch' ||
-    typeof jAdapter.hasProcessedBatch !== 'function' ||
-    typeof jTx.data.entityNonce !== 'number' ||
-    !jTx.data.batchHash
-  ) return false;
-  const matched = await jAdapter.hasProcessedBatch(
-    jTx.entityId,
-    jTx.data.batchHash,
-    BigInt(jTx.data.entityNonce),
-  );
-  if (!matched) return false;
-  const signerId = normalizedEntityId(jTx.data.signerId);
-  if (!signerId) throw new Error(`J_SUBMIT_FATAL: PROCESSED_BATCH_SIGNER_MISSING:${jTx.entityId}`);
-  deps.enqueueRuntimeInputs(env, [{
-    entityId: jTx.entityId,
-    signerId,
-    entityTxs: [{
-      type: 'j_abort_sent_batch',
-      data: { reason: 'exact-onchain-batch-receipt', requeueToCurrent: false },
-    }],
-  }], undefined, undefined, env.timestamp);
-  jSubmitLog.warn('sealed_batch.exact_receipt_reconciled', {
-    entityId: shortId(jTx.entityId),
-    batchHash: jTx.data.batchHash,
-    entityNonce: jTx.data.entityNonce,
-  });
-  return true;
-};
-
-const reconcilePermanentSubmitFailure = async (
-  env: Env,
-  jAdapter: DisputeAccountReader,
-  jTx: JTx,
-  deps: RuntimeJSubmitDeps,
-): Promise<boolean> => (
-  await reconcileExactProcessedBatch(env, jAdapter, jTx, deps) ||
-  await reconcileFinalizedDispute(
-    env,
-    jAdapter,
-    jTx,
-    deps,
-    'counterparty-finalized-after-submit-failure',
-  )
-);
 
 const validateSealedBatchJTx = (jTx: JTx): void => {
   if (jTx.type !== 'batch') return;
@@ -424,6 +309,18 @@ export async function submitRuntimeJOutbox(
       continue;
     }
 
+    const authenticatedJInputs = await awaitAuthenticatedJEventsBeforeSubmit(env, jAdapter);
+    if (authenticatedJInputs > 0) {
+      // Chain observations enter the deterministic machine only as authenticated
+      // J inputs. Let the next durable frame apply them before deciding whether
+      // any sealed attempt is still live; never infer that decision from RPC.
+      jSubmitLog.info('outbox.deferred_for_j_events', {
+        jurisdictionName: jInput.jurisdictionName,
+        authenticatedJInputs,
+      });
+      continue;
+    }
+
     for (const jTx of activeJTxs) {
       jSubmitLog.debug('tx.submit_start', {
         type: jTx.type,
@@ -457,40 +354,9 @@ export async function submitRuntimeJOutbox(
         }
         continue;
       }
-      if (await reconcileFinalizedDispute(
-        env,
-        jAdapter,
-        jTx,
-        deps,
-        'counterparty-finalized-before-submit',
-      )) {
-        if (jTx.type === 'batch') queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'reconciled');
-        continue;
-      }
-
-      // jBatchState.entityNonce only advances on an observed HankoBatchProcessed
-      // event. If this runtime never observed the events for nonces the chain has
-      // already consumed, every batch is signed with a nonce the Depository
-      // rejects, the event never arrives, and the nonce never advances: the hub
-      // retries the same rejected nonce forever while looking healthy. Name that
-      // divergence instead of letting it loop silently. This read stays in the
-      // validator-private submit path and never enters consensus state.
-      if (jTx.type === 'batch' && jTx.data.entityNonce !== undefined) {
-        const intendedNonce = BigInt(jTx.data.entityNonce);
-        const chainNonce = await jAdapter.getEntityNonce(jTx.entityId);
-        if (chainNonce >= intendedNonce) {
-          const message =
-            `J_BATCH_NONCE_BEHIND_CHAIN:entity=${jTx.entityId}:intended=${intendedNonce}:chain=${chainNonce}`;
-          jSubmitLog.error('tx.nonce_behind_chain', {
-            entityId: shortId(jTx.entityId),
-            jurisdictionName: jInput.jurisdictionName,
-            intendedNonce: intendedNonce.toString(),
-            chainNonce: chainNonce.toString(),
-          });
-          queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'terminalFailure', { message });
-          continue;
-        }
-      }
+      // The sealed nonce is derived from EntityState. Jurisdiction finality may
+      // change EntityState only through authenticated JEvents; submit-side RPC
+      // reads are not consensus evidence and must never reconcile this attempt.
 
       const submitData = jTx.data as { signerId?: unknown } | undefined;
       const submitSignerId = typeof submitData?.signerId === 'string' ? submitData.signerId : undefined;
@@ -528,10 +394,6 @@ export async function submitRuntimeJOutbox(
             continue;
           }
           throw new Error(`J_SUBMIT_TRANSIENT: ${message}`);
-        }
-        if (await reconcilePermanentSubmitFailure(env, jAdapter, jTx, deps)) {
-          if (jTx.type === 'batch') queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'reconciled');
-          continue;
         }
         if (jTx.type === 'batch') {
           queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'terminalFailure', {
@@ -594,10 +456,6 @@ export async function submitRuntimeJOutbox(
             continue;
           }
           throw new Error(`J_SUBMIT_TRANSIENT: ${message}`);
-        }
-        if (await reconcilePermanentSubmitFailure(env, jAdapter, jTx, deps)) {
-          if (jTx.type === 'batch') queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'reconciled');
-          continue;
         }
         if (jTx.type === 'batch') {
           queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'terminalFailure', {

@@ -4050,7 +4050,7 @@ describe('audit fail-fast regressions', () => {
     expect(state.jBatchState?.sentBatch?.terminalFailure).toBeUndefined();
   });
 
-  test('submitRuntimeJOutbox reconciles an on-chain finalized dispute before submitting its stale batch', async () => {
+  test('submitRuntimeJOutbox never reads contract account state to reconcile a dispute batch', async () => {
     const entityId = `0x${'ac'.repeat(32)}`;
     const counterpartyId = `0x${'bd'.repeat(32)}`;
     const signerId = `0x${'ce'.repeat(20)}`;
@@ -4097,13 +4097,13 @@ describe('audit fail-fast regressions', () => {
       state,
     } as EntityReplica);
     let submitCalls = 0;
+    let accountReadCalls = 0;
     env.jReplicas = new Map([['Testnet', {
       jadapter: {
-        getAccountInfo: async () => ({
-          nonce: 4n,
-          disputeHash: `0x${'00'.repeat(32)}`,
-          disputeTimeout: 0n,
-        }),
+        getAccountInfo: async () => {
+          accountReadCalls += 1;
+          throw new Error('contract account state must not be read by runtime');
+        },
         submitTx: async () => {
           submitCalls += 1;
           return { success: true, events: [], txHash: `0x${'18'.repeat(32)}` };
@@ -4146,19 +4146,13 @@ describe('audit fail-fast regressions', () => {
       enqueueRuntimeInputs: (_env, inputs) => queuedInputs.push(...(inputs ?? [])),
     });
 
-    expect(submitCalls).toBe(1);
+    expect(accountReadCalls).toBe(0);
+    expect(submitCalls).toBe(2);
     expect(state.jBatchState?.sentBatch).toBeDefined();
-    expect(queuedInputs).toEqual([{
-      entityId,
-      signerId,
-      entityTxs: [{
-        type: 'j_abort_sent_batch',
-        data: { reason: 'counterparty-finalized-before-submit', requeueToCurrent: true },
-      }],
-    }]);
+    expect(queuedInputs).toEqual([]);
   });
 
-  test('submitRuntimeJOutbox reconciles on-chain finality observed after a failed submit and continues', async () => {
+  test('submitRuntimeJOutbox classifies submit results without reading contract finality', async () => {
     const entityId = `0x${'ca'.repeat(32)}`;
     const counterpartyId = `0x${'cb'.repeat(32)}`;
     const signerId = `0x${'cc'.repeat(20)}`;
@@ -4172,9 +4166,7 @@ describe('audit fail-fast regressions', () => {
       jadapter: {
         getAccountInfo: async () => {
           accountReadCalls += 1;
-          return accountReadCalls === 1
-            ? { nonce: 7n, disputeHash: `0x${'ab'.repeat(32)}`, disputeTimeout: 123n }
-            : { nonce: 8n, disputeHash: `0x${'00'.repeat(32)}`, disputeTimeout: 0n };
+          throw new Error('contract account state must not be read by runtime');
         },
         submitTx: async () => {
           submitCalls += 1;
@@ -4186,6 +4178,7 @@ describe('audit fail-fast regressions', () => {
       },
     } as any]]);
     const queuedInputs: EntityInput[] = [];
+    const queuedRuntimeTxs: RuntimeTx[] = [];
     const disputeBatch = {
       ...createEmptyBatch(),
       disputeFinalizations: [{
@@ -4232,19 +4225,18 @@ describe('audit fail-fast regressions', () => {
         timestamp: env.timestamp,
       } as any],
     }], {
-      enqueueRuntimeInputs: (_env, inputs) => queuedInputs.push(...(inputs ?? [])),
+      enqueueRuntimeInputs: (_env, inputs, runtimeTxs) => {
+        queuedInputs.push(...(inputs ?? []));
+        queuedRuntimeTxs.push(...(runtimeTxs ?? []));
+      },
     });
 
-    expect(accountReadCalls).toBe(2);
+    expect(accountReadCalls).toBe(0);
     expect(submitCalls).toBe(2);
-    expect(queuedInputs).toEqual([{
-      entityId,
-      signerId,
-      entityTxs: [{
-        type: 'j_abort_sent_batch',
-        data: { reason: 'counterparty-finalized-after-submit-failure', requeueToCurrent: true },
-      }],
-    }]);
+    expect(queuedInputs).toEqual([]);
+    expect(queuedRuntimeTxs.map((tx) => (
+      tx.type === 'recordJSubmitResult' ? tx.data.outcome : tx.type
+    ))).toEqual(['terminalFailure', 'submitted']);
   });
 
   test('submitRuntimeJOutbox keeps E5 fatal without matching finalized-dispute evidence', async () => {

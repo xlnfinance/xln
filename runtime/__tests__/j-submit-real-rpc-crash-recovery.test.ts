@@ -38,8 +38,9 @@ type RecoveryProof = {
   pendingBefore: number;
   pendingAfter: number;
   submitAttempts: number;
-  resultOutcome: string;
-  resultAttemptId: string;
+  resultOutcome: string | null;
+  resultAttemptId: string | null;
+  entityNonce: number;
   nextRetryTimestampBefore: number | null;
   restoredTimestamp: number;
   finalTimestamp: number;
@@ -147,7 +148,7 @@ const runFixture = async (
   return { exitCode, signalCode: child.signalCode, stdout, stderr };
 };
 
-test('reconciles a mined processBatch after the runtime is SIGKILLed before its result is durable', async () => {
+test('applies a mined processBatch JEvent after the runtime is SIGKILLed before its result is durable', async () => {
   const anvil = await startAnvil();
   const testRoot = await mkdtemp(join(tmpdir(), 'xln-j-submit-real-rpc-test-'));
   const dbRoot = join(testRoot, 'db');
@@ -185,8 +186,9 @@ test('reconciles a mined processBatch after the runtime is SIGKILLed before its 
     expect(recoveryProof.pendingBefore).toBe(1);
     expect(recoveryProof.pendingAfter).toBe(0);
     expect(recoveryProof.submitAttempts).toBe(1);
-    expect(recoveryProof.resultOutcome).toBe('reconciled');
-    expect(recoveryProof.resultAttemptId).toBe(crashProof.attemptId);
+    expect(recoveryProof.resultOutcome).toBeNull();
+    expect(recoveryProof.resultAttemptId).toBeNull();
+    expect(recoveryProof.entityNonce).toBe(1);
     expect(recoveryProof.nextRetryTimestampBefore).toBeNull();
     expect(recoveryProof.finalTimestamp).toBeGreaterThanOrEqual(recoveryProof.restoredTimestamp);
     expect(recoveryProof.finalTimestamp).toBeLessThan(recoveryProof.retryBackoffAt);

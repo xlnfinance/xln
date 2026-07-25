@@ -38,7 +38,7 @@ describe('J submit crash recovery', () => {
     cleanupRuntimeId = '';
   });
 
-  test('reconciles an exact BrowserVM batch receipt after the submit result is lost', async () => {
+  test('recovers a lost submit result from an authenticated BrowserVM JEvent', async () => {
     mkdirSync(dbRootPath, { recursive: true });
     const seed = `J submit real crash ${process.pid} deterministic seed`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
@@ -119,6 +119,7 @@ describe('J submit crash recovery', () => {
     if (sealedAttempt?.type !== 'batch') {
       throw new Error('real terminal rejection sealed batch attempt missing');
     }
+    await jadapter.stopWatchingAndWait?.();
     await jadapter.processBatch(
       sealedAttempt.data.encodedBatch,
       sealedAttempt.data.hankoSignature,
@@ -140,19 +141,27 @@ describe('J submit crash recovery', () => {
     beforeIo.scenarioMode = true;
     beforeIo.quietRuntimeLogs = true;
     beforeIo.jReplicas.get(jurisdiction.name)!.jadapter = jadapter;
-    const consensusStateBeforeResult = structuredClone(findReplica(beforeIo, sender.id).state);
     const consensusHashBeforeResult = computeCanonicalEntityHash(findReplica(beforeIo, sender.id)).hash;
     expect(beforeIo.runtimeState?.pendingCommittedJOutbox).toHaveLength(1);
+
+    await jadapter.stopWatchingAndWait?.();
+    jadapter.startWatching(beforeIo);
+    await jadapter.pollNow?.();
+    expect(beforeIo.runtimeMempool?.entityInputs.some((input) => (
+      input.entityId.toLowerCase() === sender.id.toLowerCase() &&
+      (input.jPrefixAttestations?.size ?? 0) > 0
+    ))).toBe(true);
 
     await processRuntime(beforeIo, []);
     const queuedResult = beforeIo.runtimeMempool?.runtimeTxs[0];
     expect(queuedResult?.type).toBe('recordJSubmitResult');
-    if (queuedResult?.type !== 'recordJSubmitResult') throw new Error('exact receipt result was not queued');
+    if (queuedResult?.type !== 'recordJSubmitResult') throw new Error('JEvent reconciliation result was not queued');
     expect(queuedResult.data.outcome).toBe('reconciled');
-    expect(queuedResult.data.message).toBeUndefined();
+    expect(queuedResult.data.message).toBe('committed-batch-cancelled-before-submit');
     expect(findReplica(beforeIo, sender.id).jSubmitState?.terminalFailure).toBeUndefined();
-    expect(findReplica(beforeIo, sender.id).state).toEqual(consensusStateBeforeResult);
-    expect(computeCanonicalEntityHash(findReplica(beforeIo, sender.id)).hash).toBe(consensusHashBeforeResult);
+    expect(findReplica(beforeIo, sender.id).state.jBatchState?.entityNonce).toBe(1);
+    expect(findReplica(beforeIo, sender.id).state.jBatchState?.sentBatch).toBeUndefined();
+    expect(computeCanonicalEntityHash(findReplica(beforeIo, sender.id)).hash).not.toBe(consensusHashBeforeResult);
     await closeRuntimeDb(beforeIo);
     await closeInfraDb(beforeIo);
 
@@ -162,17 +171,17 @@ describe('J submit crash recovery', () => {
     afterIo.quietRuntimeLogs = true;
     expect(afterIo.runtimeState?.pendingCommittedJOutbox).toHaveLength(1);
     expect(findReplica(afterIo, sender.id).jSubmitState?.terminalFailure).toBeUndefined();
+    expect(findReplica(afterIo, sender.id).state.jBatchState?.entityNonce).toBe(1);
+    expect(findReplica(afterIo, sender.id).state.jBatchState?.sentBatch).toBeUndefined();
     afterIo.jReplicas.get(jurisdiction.name)!.jadapter = jadapter;
     await processRuntime(afterIo, []);
-    const replayedResult = afterIo.runtimeMempool?.runtimeTxs[0];
-    expect(replayedResult?.type).toBe('recordJSubmitResult');
-    if (replayedResult?.type !== 'recordJSubmitResult') throw new Error('replayed exact receipt result missing');
-    expect(replayedResult.data.outcome).toBe('reconciled');
-    expect(replayedResult.data.message).toBeUndefined();
     await processRuntime(afterIo, []);
+    expect(afterIo.runtimeState?.pendingCommittedJOutbox ?? []).toEqual([]);
     expect(findReplica(afterIo, sender.id).state.jBatchState?.sentBatch).toBeUndefined();
     const consensusHashAfterReconcile = computeCanonicalEntityHash(findReplica(afterIo, sender.id)).hash;
-    expect(consensusHashAfterReconcile).not.toBe(consensusHashBeforeResult);
+    expect(consensusHashAfterReconcile).toBe(
+      computeCanonicalEntityHash(findReplica(beforeIo, sender.id)).hash,
+    );
     await closeRuntimeDb(afterIo);
     await closeInfraDb(afterIo);
 
@@ -181,7 +190,7 @@ describe('J submit crash recovery', () => {
     try {
       const finalReplica = findReplica(afterResult, sender.id);
       expect(finalReplica.jSubmitState?.submitAttempts).toBe(1);
-      expect(finalReplica.jSubmitState?.lastResultOutcome).toBe('reconciled');
+      expect(finalReplica.jSubmitState?.lastResultOutcome).toBeUndefined();
       expect(finalReplica.jSubmitState?.terminalFailure).toBeUndefined();
       expect(finalReplica.state.jBatchState?.sentBatch).toBeUndefined();
       expect(afterResult.runtimeState?.pendingCommittedJOutbox ?? []).toEqual([]);

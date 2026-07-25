@@ -7,10 +7,13 @@ const TARGETS = [
   'runtime/entity/tx/handlers/j-broadcast.ts',
   'runtime/account/consensus/index.ts',
   'runtime/entity/consensus/index.ts',
+  'runtime/machine/j-submit.ts',
 ];
 
 const BANNED_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /\.getAccountInfo\s*\(/g, label: 'jadapter.getAccountInfo' },
+  { pattern: /\.getEntityNonce\s*\(/g, label: 'jadapter.getEntityNonce' },
+  { pattern: /\.hasProcessedBatch\s*\(/g, label: 'jadapter.hasProcessedBatch' },
   { pattern: /\.defaultDisputeDelay\s*\(/g, label: 'depository.defaultDisputeDelay' },
   { pattern: /\._collaterals\s*\(/g, label: 'depository._collaterals' },
   { pattern: /\.provider\.getBlockNumber\s*\(/g, label: 'provider.getBlockNumber' },

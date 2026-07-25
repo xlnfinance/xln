@@ -256,12 +256,15 @@ const runRecoverPhase = async (): Promise<void> => {
   const nextRetryTimestampBefore = getNextJSubmitRetryTimestamp(restored);
   assertEqual(nextRetryTimestampBefore, null, 'pending-attempt-must-not-schedule-second-attempt');
 
+  await adapter.stopWatchingAndWait?.();
+  adapter.startWatching(restored);
+  await adapter.pollNow?.();
   await driveUntil(
     restored,
     () => (restored.runtimeState?.pendingCommittedJOutbox?.length ?? 0) === 0 &&
       findReplica(restored, proof.senderId).state.jBatchState?.sentBatch === undefined &&
-      findReplica(restored, proof.senderId).jSubmitState?.lastResultOutcome === 'reconciled',
-    'chain-consumed-attempt-reconciled',
+      findReplica(restored, proof.senderId).state.jBatchState?.entityNonce === proof.entityNonce,
+    'authenticated-j-event-applied',
   );
   const reconciledReplica = findReplica(restored, proof.senderId);
   const canonicalHash = computeCanonicalEntityHash(reconciledReplica).hash;
@@ -270,7 +273,7 @@ const runRecoverPhase = async (): Promise<void> => {
   const finalTimestamp = restored.timestamp;
   const retryBackoffAt = proof.lastSubmittedAt + ENTITY_J_SUBMIT_FALLBACK_MS;
   const resultAttemptId = reconciledReplica.jSubmitState?.lastResultAttemptId;
-  assertEqual(resultAttemptId, proof.attemptId, 'reconciled-attempt-id');
+  assertEqual(resultAttemptId, undefined, 'submit-result-must-not-replace-j-event-authority');
   assertEqual(reconciledReplica.jSubmitState?.submitAttempts, 1, 'no-second-submit-attempt');
   if (finalTimestamp >= retryBackoffAt) {
     fail(`reconcile-waited-for-backoff:backoffAt=${retryBackoffAt}:actual=${finalTimestamp}`);
@@ -311,8 +314,9 @@ const runRecoverPhase = async (): Promise<void> => {
     pendingBefore: pendingBefore.length,
     pendingAfter: reopened.runtimeState?.pendingCommittedJOutbox?.length ?? 0,
     submitAttempts: reopenedReplica.jSubmitState?.submitAttempts,
-    resultOutcome: reopenedReplica.jSubmitState?.lastResultOutcome,
-    resultAttemptId: reopenedReplica.jSubmitState?.lastResultAttemptId,
+    resultOutcome: reopenedReplica.jSubmitState?.lastResultOutcome ?? null,
+    resultAttemptId: reopenedReplica.jSubmitState?.lastResultAttemptId ?? null,
+    entityNonce: reopenedReplica.state.jBatchState?.entityNonce,
     nextRetryTimestampBefore,
     restoredTimestamp,
     finalTimestamp,
