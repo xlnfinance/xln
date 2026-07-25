@@ -53,6 +53,7 @@ describe('Foundation release Hanko', () => {
     expect(packageVersion('package.json')).toBe(version);
     expect(packageVersion('frontend/package.json')).toBe(version);
     expect(packageVersion('packages/npm/xlnfinance/package.json')).toBe(version);
+    expect(packageVersion('native/extension/manifest.json')).toBe(version);
     expect(CURRENT_XLN_RELEASE_VERSION).toBe(version);
   });
 
