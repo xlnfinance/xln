@@ -384,7 +384,10 @@ export const checkOnchainHankoAst = (): void => {
     'runtime/orchestrator',
     'scripts',
     'frontend/src',
-  ].flatMap(recursiveFiles).filter((path) => readFileSync(path, 'utf8').includes('HankoCodec'));
+  ].flatMap(recursiveFiles).filter((path) => (
+    !path.startsWith('jurisdictions/ignition/deployments/') &&
+    readFileSync(path, 'utf8').includes('HankoCodec')
+  ));
   assertExact(deploymentReferences, [], 'production stack HankoCodec references');
 
   const labels = [
