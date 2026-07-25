@@ -126,7 +126,7 @@ describe('durable validator-local J submit state', () => {
     env.runtimeMempool!.entityInputs.push({
       entityId,
       signerId,
-      jPrefixAttestations: new Map([[signerId, {} as never]]),
+      entityTxs: [{ type: 'j_event', data: {} as never }],
     });
     env.jReplicas = new Map([[jurisdictionName, {
       jadapter: {
@@ -152,6 +152,38 @@ describe('durable validator-local J submit state', () => {
     await applyRuntimeTx(env, queued[0]!, { isReplay: true });
     expect(replica.jSubmitState?.lastResultOutcome).toBe('eventBarrier');
     expect(collectDueJSubmitRuntimeTxs(env, env.timestamp)).toHaveLength(1);
+  });
+
+  test('empty J-prefix liveness does not starve an otherwise valid submit', async () => {
+    const { env, jOutbox } = await commitAttempt();
+    let submitCalls = 0;
+    env.jReplicas = new Map([[jurisdictionName, {
+      jadapter: {
+        pollNow: async () => {
+          env.runtimeMempool!.entityInputs.push({
+            entityId,
+            signerId,
+            jPrefixAttestations: new Map([[signerId, { blocks: [] } as never]]),
+          });
+        },
+        submitTx: async () => {
+          submitCalls += 1;
+          return { success: true, events: [] };
+        },
+      },
+    } as never]]);
+    const queued: Parameters<typeof applyRuntimeTx>[1][] = [];
+
+    await submitRuntimeJOutbox(env, jOutbox, {
+      enqueueRuntimeInputs: (_target, _inputs, runtimeTxs) => queued.push(...(runtimeTxs ?? [])),
+    });
+
+    expect(submitCalls).toBe(1);
+    expect(queued).toHaveLength(1);
+    expect(queued[0]).toMatchObject({
+      type: 'recordJSubmitResult',
+      data: { outcome: 'submitted' },
+    });
   });
 
   test('structured adapter failure and bounded message survive the durable replica snapshot', async () => {

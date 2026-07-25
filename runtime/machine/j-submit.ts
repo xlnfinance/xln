@@ -34,9 +34,16 @@ export type RuntimeJSubmitDeps = {
   enqueueRuntimeInputs: RuntimeJOutboxQueue;
 };
 
-const hasJHistoryTx = (input: EntityInput): boolean =>
+// Empty prefix attestations prove only chain liveness. They contain no event
+// body, cannot advance an Entity nonce, and therefore must not starve a sealed
+// submit while the watcher keeps extending an otherwise empty chain. A prefix
+// with blocks is different: applying those authenticated events may retire the
+// sealed nonce, so external I/O must wait for that deterministic frame.
+const hasSemanticJHistoryTx = (input: EntityInput): boolean =>
   (input.entityTxs ?? []).some((tx) => tx?.type === 'j_event') ||
-  (input.jPrefixAttestations?.size ?? 0) > 0;
+  [...(input.jPrefixAttestations?.values() ?? [])].some(
+    (attestation) => attestation.blocks.length > 0,
+  );
 
 const captureQueuedEntityInputs = (env: Env): EntityInput[] => {
   const mempool = env.runtimeMempool ?? env.runtimeInput;
@@ -50,10 +57,10 @@ const prioritizeJEventsQueuedAfterSubmit = (env: Env, beforePoll: EntityInput[])
   if (current.length <= beforePoll.length) return 0;
 
   const newlyQueued = current.slice(beforePoll.length);
-  const newlyQueuedJEvents = newlyQueued.filter(hasJHistoryTx);
+  const newlyQueuedJEvents = newlyQueued.filter(hasSemanticJHistoryTx);
   if (newlyQueuedJEvents.length === 0) return 0;
 
-  const newlyQueuedOtherInputs = newlyQueued.filter((input) => !hasJHistoryTx(input));
+  const newlyQueuedOtherInputs = newlyQueued.filter((input) => !hasSemanticJHistoryTx(input));
   // Chain receipts caused by the just-submitted J batch must be visible before
   // same-entity local follow-ups already queued for the next R-frame. Otherwise
   // a follow-up such as j_broadcast can observe a stale sentBatch latch and
@@ -78,7 +85,7 @@ const awaitAuthenticatedJEventsBeforeSubmit = async (
   env: Env,
   jAdapter: { pollNow?: () => Promise<void> },
 ): Promise<number> => {
-  const alreadyQueued = captureQueuedEntityInputs(env).filter(hasJHistoryTx).length;
+  const alreadyQueued = captureQueuedEntityInputs(env).filter(hasSemanticJHistoryTx).length;
   if (alreadyQueued > 0) return alreadyQueued;
   if (typeof jAdapter.pollNow !== 'function') return 0;
   const beforePoll = captureQueuedEntityInputs(env);

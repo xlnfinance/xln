@@ -632,6 +632,23 @@ async function faucet(page: Page, userEntityId: string, hubEntityId: string): Pr
   expect(false, `faucet failed: status=${lastStatus} body=${JSON.stringify(lastBody)}`).toBe(true);
 }
 
+async function injectEmptyTestnetLiveness(page: Page): Promise<number> {
+  const bursts = 1;
+  for (let index = 0; index < bursts; index += 1) {
+    const response = await page.request.post(`${APP_BASE_URL}/api/rpc`, {
+      data: { jsonrpc: '2.0', id: index + 1, method: 'anvil_mine', params: ['0x64'] },
+    });
+    const body = await response.json().catch(async () => ({ error: (await response.text()).slice(0, 500) }));
+    if (!response.ok() || body?.error) {
+      throw new Error(
+        `E2E_TESTNET_LIVENESS_MINE_FAILED:${response.status()}:${JSON.stringify(body?.error ?? body)}`,
+      );
+    }
+    await page.waitForTimeout(250);
+  }
+  return bursts;
+}
+
 async function faucetAmount(page: Page, userEntityId: string, hubEntityId: string, amountUsd: string) {
   const runtimeId = await page.evaluate(() => (window as any).isolatedEnv?.runtimeId || null);
   expect(runtimeId, 'runtimeId must exist before faucetAmount').toBeTruthy();
@@ -1471,6 +1488,10 @@ test.describe('Rebalance E2E', () => {
 
     // Drive from committed account state. The faucet endpoint only confirms input acceptance;
     // rebalance must be tested after the account frame actually advances.
+    // Keep the local Testnet watcher producing authenticated empty-prefix
+    // liveness while the sixth faucet crosses the soft limit. Empty prefixes
+    // cannot change the Entity nonce and must not starve the J submit.
+    const emptyLiveness = injectEmptyTestnetLiveness(page);
     const firstTrigger = await timedStep('rebalance.drive_to_first_request', () =>
       driveFaucetsUntilRequestCollateralCommitted(page, {
         entityId,
@@ -1531,10 +1552,12 @@ test.describe('Rebalance E2E', () => {
       }
     });
     const firstSecuredCycleMs = Date.now() - start;
+    const livenessBursts = await emptyLiveness;
+    expect(livenessBursts).toBe(1);
     expect(
       firstSecuredCycleMs,
       `first secured rebalance cycle should complete promptly on anvil (got ${firstSecuredCycleMs}ms)`,
-    ).toBeLessThanOrEqual(10_000);
+    ).toBeLessThanOrEqual(5_000);
 
     const diagnostics = await readRebalanceDiagnostics(page, hubId);
     const rebalanceSteps = await readRebalanceStepEvents(page, scenarioStartedAt);
