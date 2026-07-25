@@ -23,7 +23,12 @@ import {
 import { verifyAccountSignature } from '../../account/crypto';
 import { hashProofBodyStruct } from '../../protocol/dispute/proof-builder';
 import { buildAccountProofBodyFromEnv } from '../../account/consensus/helpers';
-import { assertDisputeProofBodyWithinContractLimits } from '../../jurisdiction/batch';
+import {
+  assertDisputeProofBodyWithinContractLimits,
+  cloneJBatch,
+  isBatchEmpty,
+  mergeBatchOps,
+} from '../../jurisdiction/batch';
 import { canonicalizeProofBodyStruct } from './handlers/dispute';
 import { applyDebtCreated, applyDebtEnforced, applyDebtForgiven } from './j-events-debt';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
@@ -112,6 +117,23 @@ const syncJBatchEntityNonceFromEvent = (
     state.jBatchState.entityNonce = nonce;
     addMessage(state, `↻ Synced J batch nonce from event (${current} → ${nonce})`);
   }
+};
+
+const retireSentBatchInvalidatedByDisputeFinality = (
+  state: EntityState,
+  counterpartyId: string,
+): number => {
+  const jBatchState = state.jBatchState;
+  const sentBatch = jBatchState?.sentBatch;
+  if (!jBatchState || !sentBatch) return 0;
+  const remainingBatch = cloneJBatch(sentBatch.batch);
+  const removed = scrubDisputeFinalizationsForCounterparty(remainingBatch, counterpartyId);
+  if (removed === 0) return 0;
+
+  mergeBatchOps(jBatchState.batch, remainingBatch);
+  delete jBatchState.sentBatch;
+  jBatchState.status = isBatchEmpty(jBatchState.batch) ? 'empty' : 'accumulating';
+  return removed;
 };
 
 export const applyJEvent = async (
@@ -622,15 +644,17 @@ function applyDisputeFinalizedJEvent(
     });
   }
 
-  // Drop only the unsealed draft. sentBatch is the immutable payload authorized
-  // by its Hanko: changing it would detach batch/encodedBatch/batchHash. The
-  // runtime submit lane reconciles that exact sealed attempt against the
-  // finalized dispute before any retry and retires it by exact receipt.
+  // Counterparty finality proves that any sealed local batch carrying the same
+  // dispute finalization can no longer execute. Self-finality is different:
+  // HankoBatchProcessed from the same block still owns exact batch confirmation.
+  // Keep the immutable payload untouched and requeue only valid remaining ops.
   const removedDraft = scrubDisputeFinalizationsForCounterparty(
     newState.jBatchState?.batch,
     candidateCounterpartyId,
   );
-  const removedSent = 0;
+  const removedSent = weAreFinalizer
+    ? 0
+    : retireSentBatchInvalidatedByDisputeFinality(newState, candidateCounterpartyId);
   const removed = removedDraft + removedSent;
   jEventLog.info('dispute_finalized.applied', {
     entity: shortId(entityIdNorm),

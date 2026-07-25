@@ -1674,6 +1674,7 @@ export function validateProposedEntityFrame(value: unknown, context: string): Pr
 const SUBMIT_RESULT_FINGERPRINT_LIMIT = 256;
 const SUBMIT_RESULT_OUTCOMES = new Set([
   'submitted',
+  'deferred',
   'transientFailure',
   'terminalFailure',
   'reconciled',

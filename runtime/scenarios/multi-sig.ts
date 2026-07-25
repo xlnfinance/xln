@@ -349,8 +349,8 @@ export async function multiSig(env: Env): Promise<void> {
       assertBeforeQuorum: () =>
         assertReserve(env, alice.id, alice.validators, 0n, 'Alice mint remains unapplied before governance quorum'),
     });
-    assertReserve(env, alice.id, alice.validators, usd(1_000), 'Alice governance-approved mint');
     await syncChain(env, 5);
+    assertReserve(env, alice.id, alice.validators, usd(1_000), 'Alice governance-approved mint');
 
     await executeCollectiveWithVotes(env, {
       entityId: registered.id,
@@ -368,8 +368,8 @@ export async function multiSig(env: Env): Promise<void> {
           'Registered mint remains unapplied before governance quorum',
         ),
     });
-    assertReserve(env, registered.id, registered.validators, usd(1_000), 'Registered governance-approved mint');
     await syncChain(env, 5);
+    assertReserve(env, registered.id, registered.validators, usd(1_000), 'Registered governance-approved mint');
 
     console.log('\\n🔍 Checking reserve state across all validators...');
     const setupHeights: number[] = [];

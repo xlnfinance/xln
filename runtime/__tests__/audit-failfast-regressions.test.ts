@@ -6813,7 +6813,7 @@ describe('audit fail-fast regressions', () => {
     expect(accountMachine.mempool).toEqual([firstTx, lateTx]);
   });
 
-  test('DisputeFinalized scrubs draft finalize without mutating sealed sentBatch', async () => {
+  test('DisputeFinalized retires an invalidated sealed batch and requeues its remaining operations', async () => {
     const entityId = `0x${'12'.repeat(32)}`;
     const counterpartyId = `0x${'34'.repeat(32)}`;
     const state = makeEntityState(entityId);
@@ -6875,6 +6875,11 @@ describe('audit fail-fast regressions', () => {
       sentBatch: {
         batch: {
           ...createEmptyBatch(),
+          reserveToReserve: [{
+            receivingEntity: `0x${'56'.repeat(32)}`,
+            tokenId: 1,
+            amount: 25n,
+          }],
           disputeFinalizations: [{
             counterentity: counterpartyId,
             initialNonce: 7,
@@ -6902,16 +6907,16 @@ describe('audit fail-fast regressions', () => {
     const disputeFinalizedEvent: JurisdictionEvent = {
       type: 'DisputeFinalized',
       data: {
-          sender: entityId,
-          counterentity: counterpartyId,
-          initialNonce: 7,
-          initialProofbodyHash: finalProofbodyHash,
+        sender: counterpartyId,
+        counterentity: entityId,
+        initialNonce: 7,
+        initialProofbodyHash: finalProofbodyHash,
         finalProofbodyHash,
       },
     };
     const disputeFinalizationEvidence: DisputeFinalizationEvidence[] = [{
-      sender: entityId,
-      counterentity: counterpartyId,
+      sender: counterpartyId,
+      counterentity: entityId,
       initialNonce: '7',
       finalNonce: '7',
       initialProofbodyHash: finalProofbodyHash,
@@ -6947,9 +6952,15 @@ describe('audit fail-fast regressions', () => {
 
     expect(finalized.newState.accounts.get(counterpartyId)?.activeDispute).toBeUndefined();
     expect(finalized.newState.jBatchState?.batch.disputeFinalizations.length).toBe(0);
-    expect(finalized.newState.jBatchState?.sentBatch?.batch.disputeFinalizations.length).toBe(1);
-    expect(finalized.newState.jBatchState?.sentBatch?.encodedBatch).toBe(sealedBatchBefore);
-    expect(encodeJBatch(finalized.newState.jBatchState!.sentBatch!.batch)).toBe(sealedBatchBefore);
+    expect(finalized.newState.jBatchState?.batch.reserveToReserve).toEqual([{
+      receivingEntity: `0x${'56'.repeat(32)}`,
+      tokenId: 1,
+      amount: 25n,
+    }]);
+    expect(finalized.newState.jBatchState?.sentBatch).toBeUndefined();
+    expect(finalized.newState.jBatchState?.status).toBe('accumulating');
+    expect(state.jBatchState?.sentBatch?.encodedBatch).toBe(sealedBatchBefore);
+    expect(encodeJBatch(state.jBatchState!.sentBatch!.batch)).toBe(sealedBatchBefore);
     const finalizedDelta = finalized.newState.accounts.get(counterpartyId)?.deltas.get(1);
     expect(finalizedDelta?.collateral).toBe(0n);
     expect(finalizedDelta?.ondelta).toBe(0n);

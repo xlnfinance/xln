@@ -310,18 +310,33 @@ export async function submitRuntimeJOutbox(
     }
 
     const authenticatedJInputs = await awaitAuthenticatedJEventsBeforeSubmit(env, jAdapter);
+    let submitJTxs = activeJTxs;
     if (authenticatedJInputs > 0) {
       // Chain observations enter the deterministic machine only as authenticated
       // J inputs. Let the next durable frame apply them before deciding whether
       // any sealed attempt is still live; never infer that decision from RPC.
+      for (const jTx of activeJTxs) {
+        if (jTx.type === 'batch') {
+          queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'deferred', {
+            message: 'authenticated-j-events-before-submit',
+          });
+        } else if (isEntityProviderActionJTx(jTx)) {
+          queueEntityProviderActionResult(env, deps, jInput.jurisdictionName, jTx, 'transientFailure', {
+            message: 'authenticated-j-events-before-submit',
+          });
+        }
+      }
+      submitJTxs = activeJTxs.filter(
+        (jTx) => jTx.type !== 'batch' && !isEntityProviderActionJTx(jTx),
+      );
       jSubmitLog.info('outbox.deferred_for_j_events', {
         jurisdictionName: jInput.jurisdictionName,
         authenticatedJInputs,
       });
-      continue;
+      if (submitJTxs.length === 0) continue;
     }
 
-    for (const jTx of activeJTxs) {
+    for (const jTx of submitJTxs) {
       jSubmitLog.debug('tx.submit_start', {
         type: jTx.type,
         entityId: shortId(jTx.entityId),

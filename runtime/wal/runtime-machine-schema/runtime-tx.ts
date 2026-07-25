@@ -22,7 +22,7 @@ import {
   validateRegistrationEvidence,
 } from './registrations';
 
-const SUBMIT_OUTCOMES = new Set(['submitted', 'transientFailure', 'terminalFailure', 'reconciled']);
+const SUBMIT_OUTCOMES = new Set(['submitted', 'deferred', 'transientFailure', 'terminalFailure', 'reconciled']);
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const BYTES32 = /^0x[0-9a-fA-F]{64}$/;
 

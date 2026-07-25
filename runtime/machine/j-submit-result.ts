@@ -96,7 +96,7 @@ const assertValidJSubmitResult = (data: RecordJSubmitResultTx['data']): void => 
   if (data.attemptId !== expectedAttemptId) {
     throw new Error(`J_SUBMIT_RESULT_ATTEMPT_ID_MISMATCH:${data.attemptId}:${expectedAttemptId}`);
   }
-  if (!['submitted', 'transientFailure', 'terminalFailure', 'reconciled'].includes(data.outcome)) {
+  if (!['submitted', 'deferred', 'transientFailure', 'terminalFailure', 'reconciled'].includes(data.outcome)) {
     throw new Error(`J_SUBMIT_RESULT_OUTCOME_INVALID:${String(data.outcome)}`);
   }
   assertValidAdapterFailure(data);
@@ -216,6 +216,8 @@ const nextJSubmitState = (
   };
   if (tx.data.outcome === 'submitted') {
     if (tx.data.txHash) next.txHash = tx.data.txHash;
+    delete next.lastFailure;
+  } else if (tx.data.outcome === 'deferred') {
     delete next.lastFailure;
   } else if (tx.data.outcome === 'transientFailure' || tx.data.outcome === 'terminalFailure') {
     const message = String(tx.data.message || 'unknown');

@@ -261,7 +261,10 @@ export const applyRetryJSubmitRuntimeTx = (env: Env, tx: RetryJSubmitTx): JInput
     !isMatchingJSubmitBatch(sent, tx.data.batchHash, tx.data.entityNonce) ||
     tx.data.batchGeneration !== replica.state.jBatchState?.broadcastCount
   ) {
-    throw new Error(`J_SUBMIT_COMMITTED_BATCH_MISMATCH:${tx.data.entityId}:${tx.data.entityNonce}`);
+    // Runtime retry intents are durable scheduling hints. An authenticated
+    // JEvent may retire or replace the sealed batch before this queued hint is
+    // applied; the old hint must become a no-op, never resurrect old payload.
+    return [];
   }
   // A finalized exact chain event can prove that this nonce was consumed by a
   // different batch after the retry intent was queued. The intent is then a
@@ -282,6 +285,7 @@ export const applyRetryJSubmitRuntimeTx = (env: Env, tx: RetryJSubmitTx): JInput
   if (previous?.terminalFailure || previous?.lastResultOutcome === 'reconciled') return [];
   if (
     previous &&
+    previous.lastResultOutcome !== 'deferred' &&
     previous.submitAttempts > 0 &&
     env.timestamp < previous.lastSubmittedAt + ENTITY_J_SUBMIT_FALLBACK_MS
   ) return [];

@@ -36,6 +36,16 @@ describe('durable validator-local J submit state', () => {
     });
   });
 
+  test('queued retry becomes a no-op after authenticated finality retires its sealed batch', async () => {
+    const { env, replica } = makeFixture();
+    const [retry] = collectDueJSubmitRuntimeTxs(env, env.timestamp);
+    if (!retry) throw new Error('retry fixture missing');
+    delete replica.state.jBatchState?.sentBatch;
+
+    expect(await applyRuntimeTx(env, retry, { isReplay: true })).toEqual([]);
+    expect(replica.jSubmitState).toBeUndefined();
+  });
+
   test('finalized nonce-collision quarantine suppresses retries and reconciles a durable outbox before I/O', async () => {
     const { env, replica, retry, jOutbox } = await commitAttempt();
     const sent = replica.state.jBatchState?.sentBatch;
@@ -108,6 +118,40 @@ describe('durable validator-local J submit state', () => {
 
     expect(collectDueJSubmitRuntimeTxs(env, 2_000 + ENTITY_J_SUBMIT_FALLBACK_MS - 1)).toEqual([]);
     expect(collectDueJSubmitRuntimeTxs(env, 2_000 + ENTITY_J_SUBMIT_FALLBACK_MS)).toHaveLength(1);
+  });
+
+  test('authenticated J input defers external I/O and makes the batch immediately retryable', async () => {
+    const { env, replica, jOutbox } = await commitAttempt();
+    let submitCalls = 0;
+    env.runtimeMempool!.entityInputs.push({
+      entityId,
+      signerId,
+      jPrefixAttestations: new Map([[signerId, {} as never]]),
+    });
+    env.jReplicas = new Map([[jurisdictionName, {
+      jadapter: {
+        pollNow: async () => {},
+        submitTx: async () => {
+          submitCalls += 1;
+          return { success: true, events: [] };
+        },
+      },
+    } as never]]);
+    const queued: Parameters<typeof applyRuntimeTx>[1][] = [];
+
+    await submitRuntimeJOutbox(env, jOutbox, {
+      enqueueRuntimeInputs: (_target, _inputs, runtimeTxs) => queued.push(...(runtimeTxs ?? [])),
+    });
+
+    expect(submitCalls).toBe(0);
+    expect(queued).toHaveLength(1);
+    expect(queued[0]).toMatchObject({
+      type: 'recordJSubmitResult',
+      data: { outcome: 'deferred', message: 'authenticated-j-events-before-submit' },
+    });
+    await applyRuntimeTx(env, queued[0]!, { isReplay: true });
+    expect(replica.jSubmitState?.lastResultOutcome).toBe('deferred');
+    expect(collectDueJSubmitRuntimeTxs(env, env.timestamp)).toHaveLength(1);
   });
 
   test('structured adapter failure and bounded message survive the durable replica snapshot', async () => {

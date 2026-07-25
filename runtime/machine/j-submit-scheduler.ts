@@ -52,6 +52,9 @@ const nextRetryAt = (replica: EntityReplica): number | null => {
   const local = getMatchingJSubmitState(replica);
   if (!local || local.submitAttempts <= 0) return 0;
   if (local.terminalFailure || local.lastResultOutcome === 'reconciled') return null;
+  if (local.lastResultOutcome === 'deferred') {
+    return local.lastResultAt ?? local.lastSubmittedAt;
+  }
   return local.lastSubmittedAt + ENTITY_J_SUBMIT_FALLBACK_MS;
 };
 
