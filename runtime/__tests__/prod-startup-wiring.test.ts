@@ -1022,6 +1022,18 @@ describe('production startup wiring', () => {
     }
   });
 
+  test('production bootstrap starts stateful Anvil chains sequentially', () => {
+    const smoke = readFileSync(join(repoRoot, 'runtime/scripts/local-prod-smoke.ts'), 'utf8');
+    const primaryStart = smoke.indexOf("startManaged('anvil',");
+    const primaryReady = smoke.indexOf("await waitForRpc(rpcPort, '0x7a69', 'Testnet')");
+    const secondaryStart = smoke.indexOf("startManaged('anvil2',");
+    const secondaryReady = smoke.indexOf("await waitForRpc(rpc2Port, '0x7a6a', 'Tron')");
+    expect(primaryStart).toBeGreaterThan(0);
+    expect(primaryReady).toBeGreaterThan(primaryStart);
+    expect(secondaryStart).toBeGreaterThan(primaryReady);
+    expect(secondaryReady).toBeGreaterThan(secondaryStart);
+  });
+
   test('isolated e2e outer timeout exceeds every declared Playwright test timeout', () => {
     const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
     const configured = runner.match(/const DEFAULT_E2E_TEST_TIMEOUT_MS = ([\d_]+);/);

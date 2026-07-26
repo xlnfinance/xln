@@ -958,14 +958,17 @@ const main = async (): Promise<void> => {
     ANVIL_LOG: join(workDir, 'anvil.log'),
     ANVIL_TMPDIR: join(workDir, 'anvil-tmp'),
   });
+  await waitForRpc(rpcPort, '0x7a69', 'Testnet');
+
+  // Anvil persists state through a process-global Foundry temp directory.
+  // Starting two stateful chains concurrently can collide on the same
+  // timestamp-derived temp path and kill both before either binds its port.
   startManaged('anvil2', 'scripts/start-anvil2.sh', useSnapshotTemplate ? [] : ['--reset'], {
     XLN_PORT_BASE: String(portBase),
     ANVIL2_STATE: join(workDir, 'anvil2-state.json'),
     ANVIL2_LOG: join(workDir, 'anvil2.log'),
     ANVIL_TMPDIR: join(workDir, 'anvil2-tmp'),
   });
-
-  await waitForRpc(rpcPort, '0x7a69', 'Testnet');
   await waitForRpc(rpc2Port, '0x7a6a', 'Tron');
 
   startManaged('server', 'scripts/start-server.sh', [], {
