@@ -66,7 +66,7 @@ const normalizeIngressTimestamp = (env: Env, explicitTimestamp?: number): number
  * Normalize all runtime ingress into one mutable mempool object. This is still
  * pre-consensus: queued inputs are observable work, not committed state.
  */
-export const enqueueRuntimeInputs = (
+export const enqueueRuntimeInputsWithDeps = (
   env: Env,
   deps: RuntimeInputQueueDeps,
   inputs?: EntityInput[],
@@ -143,7 +143,7 @@ export const enqueueRuntimeInput = (env: Env, runtimeInput: RuntimeInput): void 
   const ingressTimestamp = env.scenarioMode
     ? (runtimeInput.timestamp ?? env.timestamp ?? 0)
     : (runtimeInput.timestamp ?? getWallClockMs());
-  enqueueRuntimeInputs(
+  enqueueRuntimeInputsWithDeps(
     env,
     { ensureRuntimeState, requestRuntimeLoopWake },
     runtimeInput.entityInputs,

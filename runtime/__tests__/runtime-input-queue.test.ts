@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { enqueueRuntimeInputs } from '../machine/input-queue';
+import { enqueueRuntimeInputsWithDeps } from '../machine/input-queue';
 import type { Env, RuntimeInput } from '../types';
 
 const makeEnv = (): Env => ({
@@ -27,7 +27,7 @@ test('enqueueRuntimeInputs timestamps work and wakes the loop', () => {
   const env = makeEnv();
   let wakeCount = 0;
 
-  enqueueRuntimeInputs(
+  enqueueRuntimeInputsWithDeps(
     env,
     {
       ensureRuntimeState: (targetEnv) => {
@@ -63,7 +63,7 @@ test('enqueueRuntimeInputs preserves already accepted internal continuations dur
   };
   let wakeCount = 0;
 
-  enqueueRuntimeInputs(
+  enqueueRuntimeInputsWithDeps(
     env,
     {
       ensureRuntimeState: () => env.runtimeState!,
@@ -88,7 +88,7 @@ test('enqueueRuntimeInputs rejects work after quiesce has paused durable persist
     persistencePaused: true,
   };
 
-  expect(() => enqueueRuntimeInputs(
+  expect(() => enqueueRuntimeInputsWithDeps(
     env,
     {
       ensureRuntimeState: () => env.runtimeState!,

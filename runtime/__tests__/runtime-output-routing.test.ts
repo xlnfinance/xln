@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { handleInboundP2PEntityInput, resolveRuntimeIdForEntity } from '../machine/entity-routing';
+import { routeInboundP2PEntityInput, resolveRuntimeIdForEntity } from '../machine/entity-routing';
 import {
   buildPendingNetworkOutputs,
   buildRouteOutputKey,
@@ -1633,7 +1633,7 @@ describe('runtime output routing', () => {
       error: (_scope: string, code: string) => errors.push(code),
     } as unknown as Env;
 
-    expect(() => handleInboundP2PEntityInput(env, runtimeId('12'), {
+    expect(() => routeInboundP2PEntityInput(env, runtimeId('12'), {
       runtimeId: runtimeId('11'),
       entityId: localEntityId,
       signerId: staleSignerId,
@@ -1677,7 +1677,7 @@ describe('runtime output routing', () => {
       error: (_scope: string, code: string) => errors.push(code),
     } as unknown as Env;
 
-    expect(() => handleInboundP2PEntityInput(env, runtimeId('12'), {
+    expect(() => routeInboundP2PEntityInput(env, runtimeId('12'), {
       runtimeId: runtimeId('11'),
       entityId: targetEntityId,
       signerId,
@@ -1719,7 +1719,7 @@ describe('runtime output routing', () => {
       error: (_scope: string, code: string) => errors.push(code),
     } as unknown as Env;
 
-    expect(() => handleInboundP2PEntityInput(env, runtimeId('12'), {
+    expect(() => routeInboundP2PEntityInput(env, runtimeId('12'), {
       runtimeId: runtimeId('11'),
       entityId: localEntityId,
       signerId,
@@ -1765,7 +1765,7 @@ describe('runtime output routing', () => {
       error: (_scope: string, code: string) => errors.push(code),
     } as unknown as Env;
 
-    expect(() => handleInboundP2PEntityInput(env, runtimeId('12'), {
+    expect(() => routeInboundP2PEntityInput(env, runtimeId('12'), {
       runtimeId: runtimeId('11'),
       entityId: localEntityId,
       signerId,
@@ -1821,7 +1821,7 @@ describe('runtime output routing', () => {
       hashPrecommits: new Map([[runtimeId('88'), [`0x${'89'.repeat(65)}`]]]),
     };
 
-    expect(handleInboundP2PEntityInput(env, sourceRuntimeId, input, {
+    expect(routeInboundP2PEntityInput(env, sourceRuntimeId, input, {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       enqueueRuntimeInputs: (_targetEnv, inputs) => enqueued.push(...(inputs ?? [])),
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',

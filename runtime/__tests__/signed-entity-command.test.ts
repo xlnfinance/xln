@@ -42,7 +42,7 @@ import {
   buildCrossJurisdictionPullBinding,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../extensions/cross-j';
-import { handleInboundP2PEntityInput } from '../machine/entity-routing';
+import { routeInboundP2PEntityInput } from '../machine/entity-routing';
 import {
   buildValidatorEncryptionBoard,
   createLocalValidatorEncryptionAttestation,
@@ -322,7 +322,7 @@ describe('signed Entity command admission', () => {
       error: () => {},
     } as unknown as Env;
 
-    expect(() => handleInboundP2PEntityInput(env, address('44'), {
+    expect(() => routeInboundP2PEntityInput(env, address('44'), {
       entityId: targetEntityId,
       signerId: targetSignerId,
       entityTxs: [{
@@ -346,7 +346,7 @@ describe('signed Entity command admission', () => {
     const command = buildSignedEntityCommand(env, state, signerId, [chatCommand(signerId)]);
     const enqueued: RoutedEntityInput[] = [];
     const peer = address('44');
-    const result = handleInboundP2PEntityInput(env, peer, {
+    const result = routeInboundP2PEntityInput(env, peer, {
       entityId: state.entityId,
       signerId,
       from: address('55'),

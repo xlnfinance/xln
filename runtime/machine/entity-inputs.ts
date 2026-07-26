@@ -5,7 +5,7 @@ import {
 } from '../extensions/cross-j/boundary';
 import {
   collectCrossJurisdictionRemoteEntityHints,
-  registerEntityRuntimeHint,
+  registerEntityRuntimeHintWithDeps,
   type RuntimeEntityRoutingDeps,
 } from './entity-routing';
 import { safeStringify } from '../protocol/serialization';
@@ -472,7 +472,7 @@ export const applyMergedEntityInputs = async (
         ...collectCrossJurisdictionRemoteEntityHints(env, entityInput, entityInput.from, routingDeps),
       ]);
       for (const hintedEntityId of appliedRouteHints) {
-        registerEntityRuntimeHint(env, hintedEntityId, entityInput.from, routingDeps);
+        registerEntityRuntimeHintWithDeps(env, hintedEntityId, entityInput.from, routingDeps);
       }
     }
     const inputElapsedMs = Math.round(getPerfMs() - inputProfileStartedAt);

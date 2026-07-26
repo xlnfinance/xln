@@ -36,7 +36,7 @@ export type RuntimeWakeDeps = {
  */
 export { entityNeedsPeriodicWake };
 
-export const hasDueEntityHooks = (env: Env, deps: RuntimeWakeDeps): boolean => {
+export const hasDueEntityHooksWithDeps = (env: Env, deps: RuntimeWakeDeps): boolean => {
   const dueAt = getNextScheduledWakeTimestamp(env);
   const jDueAt = getNextJSubmitRetryTimestamp(env);
   const actionDueAt = getNextEntityProviderActionRetryTimestamp(env);
@@ -46,7 +46,7 @@ export const hasDueEntityHooks = (env: Env, deps: RuntimeWakeDeps): boolean => {
     (actionDueAt !== null && actionDueAt <= now);
 };
 
-export const getEarliestWallClockDueTimestamp = (env: Env, _deps: RuntimeWakeDeps): number | null => {
+export const getEarliestWallClockDueTimestampWithDeps = (env: Env, _deps: RuntimeWakeDeps): number | null => {
   const wallClockNow = getWallClockMs();
   const due = [
     getNextScheduledWakeTimestamp(env),
@@ -57,7 +57,7 @@ export const getEarliestWallClockDueTimestamp = (env: Env, _deps: RuntimeWakeDep
   return due.length > 0 ? Math.min(...due) : null;
 };
 
-export const getNextWallClockWakeTimestamp = (env: Env, _deps: RuntimeWakeDeps): number | null => {
+export const getNextWallClockWakeTimestampWithDeps = (env: Env, _deps: RuntimeWakeDeps): number | null => {
   const due = [
     getNextScheduledWakeTimestamp(env),
     getNextJSubmitRetryTimestamp(env),
@@ -72,7 +72,7 @@ export const getNextWallClockWakeTimestamp = (env: Env, _deps: RuntimeWakeDeps):
  * replayed inside the signed entity frame, so proposer and validators execute
  * the same crontab transition.
  */
-export const generateHookPings = (
+export const generateHookPingsWithDeps = (
   env: Env,
   deps: RuntimeWakeDeps,
   nowMs = deps.getRuntimeNowMs(env),

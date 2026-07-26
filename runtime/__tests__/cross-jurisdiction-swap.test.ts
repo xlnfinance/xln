@@ -22,7 +22,7 @@ import {
 import { prepareLocallyAuthoredEntityTxs } from '../entity/command';
 import {
   createEmptyEnv,
-  handleInboundP2PEntityInputs,
+  routeInboundP2PEntityInputs,
   prepareAtomicCrossJAccountInputs,
   submitCrossJurisdictionIntent,
   submitCrossJurisdictionSwap,
@@ -87,7 +87,7 @@ import { applyMergedEntityInputs } from '../machine/entity-inputs';
 import { crossBookQtyLots } from '../entity/tx/handlers/account/orderbook-matching-cross';
 import {
   createRuntimeOutputRoutingDeps,
-  registerEntityRuntimeHint,
+  registerEntityRuntimeHintWithDeps,
   selectPotentialCrossJAccountInputPairs,
   selectMatchedCrossJAccountInputPairs,
   validateInboundP2PEntityInputsEnvelope,
@@ -1423,10 +1423,10 @@ describe('cross-jurisdiction hashledger swap', () => {
     addReplica(hubEnv, sourceHubState, sourceHubSigner);
     addReplica(hubEnv, targetHubState, targetHubSigner);
     const routingDeps = makeLocalCrossJRoutingDeps();
-    registerEntityRuntimeHint(env, sourceHub, hubEnv.runtimeId!, routingDeps);
-    registerEntityRuntimeHint(env, targetHub, hubEnv.runtimeId!, routingDeps);
-    registerEntityRuntimeHint(hubEnv, sourceUser, env.runtimeId!, routingDeps);
-    registerEntityRuntimeHint(hubEnv, targetUser, env.runtimeId!, routingDeps);
+    registerEntityRuntimeHintWithDeps(env, sourceHub, hubEnv.runtimeId!, routingDeps);
+    registerEntityRuntimeHintWithDeps(env, targetHub, hubEnv.runtimeId!, routingDeps);
+    registerEntityRuntimeHintWithDeps(hubEnv, sourceUser, env.runtimeId!, routingDeps);
+    registerEntityRuntimeHintWithDeps(hubEnv, targetUser, env.runtimeId!, routingDeps);
     let directAttempts = 0;
     let relayAttempts = 0;
     env.runtimeState!.directEntityInputsDispatch = targetRuntimeId => {
@@ -1438,7 +1438,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       enqueueEntityInputsDelivery: (targetRuntimeId: string, envelope: RuntimeEntityInputsEnvelope) => {
         expect(targetRuntimeId).toBe(hubEnv.runtimeId);
         relayAttempts += 1;
-        handleInboundP2PEntityInputs(hubEnv, env.runtimeId!, envelope);
+        routeInboundP2PEntityInputs(hubEnv, env.runtimeId!, envelope);
         return deliveryAccepted('TEST_UNSIGNED_CROSS_J_INTENT_RELAYED');
       },
     } as any;

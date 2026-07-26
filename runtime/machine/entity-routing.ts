@@ -732,7 +732,7 @@ export const resolveRuntimeIdForCrossJurisdictionEntity = (
   return resolveRuntimeIdForEntity(env, entityId, deps);
 };
 
-export const registerEntityRuntimeHint = (
+export const registerEntityRuntimeHintWithDeps = (
   env: Env,
   entityId: string,
   runtimeId: string,
@@ -896,7 +896,7 @@ export const validateInboundP2PEntityInput = (
   return { kind: 'accepted' };
 };
 
-export const handleInboundP2PEntityInput = (
+export const routeInboundP2PEntityInput = (
   env: Env,
   from: string,
   input: RoutedEntityInput,
@@ -1072,7 +1072,7 @@ export const validateInboundP2PEntityInputsEnvelope = (
   return validatedInputs;
 };
 
-export const handleInboundP2PEntityInputs = (
+export const routeInboundP2PEntityInputs = (
   env: Env,
   from: string,
   envelope: RuntimeEntityInputsEnvelope,

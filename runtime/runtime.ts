@@ -47,7 +47,6 @@ import {
   type EntityInputCausalTrace,
 } from './infra/account-causal-trace';
 import {
-  cloneIsolatedEntityInput,
   cloneIsolatedRoutedEntityInputs,
   cloneIsolatedRuntimeInput,
   cloneIsolatedRuntimeSnapshot,
@@ -61,7 +60,6 @@ import {
   buildCanonicalJReplicaSnapshot,
   buildDurableRuntimeMachineSnapshot,
   buildReplayVerifiableRuntimeMachineSnapshot,
-  buildRuntimeCheckpointSnapshot,
   authorizeRestoredRuntimeInput,
   normalizePersistedSnapshotInPlace,
   projectReplayVerifiableRuntimeMachine,
@@ -214,10 +212,8 @@ import {
 } from './ids';
 import {
   createProfileUpdateTx,
-  getEntityDisplayInfo as getEntityDisplayInfoFromProfileOriginal,
-  resolveEntityName as resolveEntityNameOriginal,
-  searchEntityNames as searchEntityNamesOriginal,
 } from './routing/name-resolution';
+import * as nameResolution from './routing/name-resolution';
 import { decode, encode } from './storage/snapshot-coder'; // encode used in exports
 import {
   deriveDelta,
@@ -273,9 +269,9 @@ import {
 } from './networking/local-profile-lifecycle';
 import {
   createRuntimeOutputRoutingDeps,
-  handleInboundP2PEntityInput as routeInboundP2PEntityInput,
-  handleInboundP2PEntityInputs as routeInboundP2PEntityInputs,
-  registerEntityRuntimeHint as registerEntityRuntimeHintForRouting,
+  routeInboundP2PEntityInput,
+  routeInboundP2PEntityInputs,
+  registerEntityRuntimeHintWithDeps,
   selectMatchedCrossJAccountInputPairs,
   validateInboundP2PEntityInput,
   validateInboundP2PEntityInputsEnvelope,
@@ -283,13 +279,13 @@ import {
   type RuntimeEntityRoutingDeps,
 } from './machine/entity-routing';
 import {
-  entityNeedsPeriodicWake as entityNeedsPeriodicWakeForRuntime,
-  generateHookPings as generateRuntimeHookPings,
-  getEarliestWallClockDueTimestamp as getEarliestRuntimeWallClockDueTimestamp,
-  getNextWallClockWakeTimestamp as getNextRuntimeWallClockWakeTimestamp,
-  hasDueEntityHooks as hasDueRuntimeEntityHooks,
+  generateHookPingsWithDeps,
+  getEarliestWallClockDueTimestampWithDeps,
+  getNextWallClockWakeTimestampWithDeps,
+  hasDueEntityHooksWithDeps,
   type RuntimeWakeDeps,
 } from './machine/wake';
+export { entityNeedsPeriodicWake } from './machine/wake';
 import {
   assertScheduledWakeTxAuthorized,
   copyLocalScheduledWakeAuthorization,
@@ -326,7 +322,7 @@ export type {
   SwapCommandPreparedOrder,
 } from './account/swap-command-plan';
 import {
-  enqueueRuntimeInputs as enqueueRuntimeInputsWithDeps,
+  enqueueRuntimeInputsWithDeps,
   ensureRuntimeMempool,
   requestRuntimeLoopWake,
   type RuntimeInputQueueDeps,
@@ -376,11 +372,11 @@ import { classifyBilateralState, getAccountBarVisual } from './account/view-stat
 import { calculateSolvency, verifySolvency } from './account/solvency';
 import {
   formatTokenAmount,
-  formatTokenAmount as formatTokenAmountEthers,
+  formatTokenAmountEthers,
   parseTokenAmount,
   convertTokenPrecision,
-  calculatePercentage as calculatePercentageEthers,
-  formatAssetAmount as formatAssetAmountEthers,
+  calculatePercentageEthers,
+  formatAssetAmountEthers,
   BigIntMath,
   FINANCIAL_CONSTANTS,
 } from './account/financial-utils';
@@ -422,17 +418,12 @@ import {
   hydrateAccountJClaimRootNodesFromStorage,
   hydrateCertifiedBoardRootNodesFromStorage,
   hydrateConsumptionRootNodesFromStorage,
-  inspectStorage,
   listStorageSnapshotEntityIds,
   listStorageSnapshotHeights,
   listStorageSnapshotReplicaMetas,
   listStorageReplicaMetas,
-  loadEntityAccountDocFromStorage,
-  loadEntityStateFromStorage,
   loadEntityStatesAtHeightFromStorage,
-  loadEntityViewPageFromStorage,
   readFrameDbAccountFrames,
-  readFrameDbEntityFrames,
   readFrameDbRuntimeActivity,
   readStorageFrameRecord,
   readStorageHead,
@@ -468,7 +459,6 @@ import { assertStorageSafetyOverridesAllowed } from './storage/safety';
 import { storageOverlayRecordKey } from './storage/overlay';
 import type { StorageDoc, StoragePersistenceBoundaryHook } from './storage/types';
 import { evaluateStorageProgressDeadline } from './storage/progress-deadline';
-import type { RuntimeAdapterReadQuery } from './radapter';
 import {
   assertCertifiedJHistoryIntegrity,
   assertValidatorJHistoryMatchesCertifiedAnchor,
@@ -502,8 +492,6 @@ import {
   validateEntityInput,
 } from './validation-utils';
 import type {
-  AccountFrame,
-  CertifiedEntityFrameLink,
   CrossJurisdictionSwapRoute,
   EntityInput,
   EntityReplica,
@@ -536,25 +524,15 @@ import {
 } from './utils';
 import { createStructuredLogger, logError, shortId } from './infra/logger';
 import type { PersistedFrameJournal } from './storage/types';
-import { verifyStorageTailIntegrity } from './storage/verify';
 import {
-  buildRuntimeActivityEvents,
-  dedupeRuntimeActivityEvents,
-  type PersistedActivityJournal,
-  type RuntimeActivityEvent,
-  type RuntimeActivityFilters,
-} from './api/activity-history';
+  buildRecoveryJournalFromStorageFrame,
+  createPersistenceQueries,
+} from './persistence/queries';
 import {
   assertRuntimeRecoveryBundleAuthenticity,
-  buildRuntimeRecoveryBundle,
-  buildRuntimeRecoveryCheckpointBundle,
 } from './recovery/bundle';
-import { buildRuntimeRecording, validateRuntimeRecording } from './recovery/recording';
 import type {
-  RuntimeRecording,
   RuntimeRecoveryBundleV1,
-  RuntimeRecoveryMetaV1,
-  RuntimeRecoverySignerV1,
 } from './recovery/types';
 import {
   ensureLiveJAdapterForReplica,
@@ -569,23 +547,15 @@ import {
 } from './machine/infra-gossip-store';
 import {
   closeFrameDb,
-  closeInfraDb as closeInfraDbStorage,
   closeStorageDb,
   deriveRuntimeIdFromSeed,
-  getFrameDb as getFrameDbStorage,
-  getInfraDb as getInfraDbStorage,
-  getStorageDb as getStorageDbStorage,
   normalizeDbNamespace,
-  resolveFrameDbPath,
-  resolveStorageDbPath,
-  rotateStorageEpochDb as rotateStorageEpochDbStorage,
-  tryOpenFrameDb as tryOpenFrameDbStorage,
-  tryOpenStorageDb as tryOpenStorageDbStorage,
   withStorageConsistentRead,
   withStorageWriterLock,
   type RuntimeStorageDbDeps,
   type StorageDbRole,
 } from './storage/runtime-dbs';
+import * as runtimeDbs from './storage/runtime-dbs';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -678,22 +648,22 @@ export const getRuntimeStorageDb = (env: Env, role: StorageDbRole = 'current'): 
   getStorageDb(env, role);
 
 const getStorageDb = (env: Env, role: StorageDbRole = 'current'): Level<Buffer, Buffer> =>
-  getStorageDbStorage(env, getRuntimeStorageDbDeps(), role);
+  runtimeDbs.getStorageDb(env, getRuntimeStorageDbDeps(), role);
 
 export const getInfraDb = (env: Env): Level<Buffer, Buffer> =>
-  getInfraDbStorage(env, getRuntimeStorageDbDeps());
+  runtimeDbs.getInfraDb(env, getRuntimeStorageDbDeps());
 
 export const getFrameDb = (env: Env): Level<Buffer, Buffer> =>
-  getFrameDbStorage(env, getRuntimeStorageDbDeps());
+  runtimeDbs.getFrameDb(env, getRuntimeStorageDbDeps());
 
 export const tryOpenStorageDb = (env: Env, role: StorageDbRole = 'current'): Promise<boolean> =>
-  tryOpenStorageDbStorage(env, getRuntimeStorageDbDeps(), role);
+  runtimeDbs.tryOpenStorageDb(env, getRuntimeStorageDbDeps(), role);
 
 const rotateStorageEpochDb = (env: Env, snapshotHeight: number, timestamp = env.timestamp): Promise<boolean> =>
-  rotateStorageEpochDbStorage(env, getRuntimeStorageDbDeps(), snapshotHeight, timestamp);
+  runtimeDbs.rotateStorageEpochDb(env, getRuntimeStorageDbDeps(), snapshotHeight, timestamp);
 
 export const tryOpenFrameDb = (env: Env): Promise<boolean> =>
-  tryOpenFrameDbStorage(env, getRuntimeStorageDbDeps());
+  runtimeDbs.tryOpenFrameDb(env, getRuntimeStorageDbDeps());
 
 const throwSettledErrors = (results: PromiseSettledResult<unknown>[], code: string): void => {
   const errors = results
@@ -725,7 +695,7 @@ export const closeInfraDb = async (env: Env): Promise<void> => {
   const state = ensureRuntimeState(env);
   state.infraDbClosing = true;
   await drainInfraDbWrites(env);
-  await closeInfraDbStorage(env);
+  await runtimeDbs.closeInfraDb(env);
 };
 
 const waitForRuntimeLoopWake = async (env: Env): Promise<void> => {
@@ -1149,16 +1119,14 @@ const getRuntimeWakeDeps = (): RuntimeWakeDeps => ({
   getRuntimeNowMs,
 });
 
-export const entityNeedsPeriodicWake = entityNeedsPeriodicWakeForRuntime;
-
 const hasDueEntityHooks = (env: Env): boolean =>
-  hasDueRuntimeEntityHooks(env, getRuntimeWakeDeps());
+  hasDueEntityHooksWithDeps(env, getRuntimeWakeDeps());
 
 const getEarliestWallClockDueTimestamp = (env: Env): number | null =>
-  getEarliestRuntimeWallClockDueTimestamp(env, getRuntimeWakeDeps());
+  getEarliestWallClockDueTimestampWithDeps(env, getRuntimeWakeDeps());
 
 const getNextWallClockWakeTimestamp = (env: Env): number | null => {
-  const entityDueAt = getNextRuntimeWallClockWakeTimestamp(env, getRuntimeWakeDeps());
+  const entityDueAt = getNextWallClockWakeTimestampWithDeps(env, getRuntimeWakeDeps());
   const networkDueAt = getNextNetworkRetryTimestamp(env, getRuntimeOutputRoutingDeps());
   if (entityDueAt === null) return networkDueAt;
   if (networkDueAt === null) return entityDueAt;
@@ -1169,7 +1137,7 @@ const generateHookPings = (env: Env, nowMs = getRuntimeNowMs(env), queuedAt = en
   // Quiesce drains only work accepted before its ingress fence. Scheduled
   // hooks remain durable for resume and must not extend the shutdown drain.
   if (env.runtimeState?.persistenceQuiescing) return;
-  generateRuntimeHookPings(env, getRuntimeWakeDeps(), nowMs, queuedAt);
+  generateHookPingsWithDeps(env, getRuntimeWakeDeps(), nowMs, queuedAt);
 };
 
 const isRuntimeFrameReady = (env: Env, now: number, overrideDelayMs?: number): boolean => {
@@ -1790,7 +1758,7 @@ export const deriveRuntimeId = (seed: string): string => {
 // scheduleNetworkProcess removed — loop is always-on via startRuntimeLoop()
 
 export const registerEntityRuntimeHint = (env: Env, entityId: string, runtimeId: string): void => {
-  registerEntityRuntimeHintForRouting(env, entityId, runtimeId, getRuntimeEntityRoutingDeps());
+  registerEntityRuntimeHintWithDeps(env, entityId, runtimeId, getRuntimeEntityRoutingDeps());
 };
 
 export const MAX_RUNTIME_J_INPUTS = 256;
@@ -6289,180 +6257,6 @@ const hydrateAccountFrameHistoryViews = async (env: Env, limit = 0): Promise<voi
   }
 };
 
-export const getPersistedLatestHeight = async (env: Env): Promise<number> => {
-  return resolvePersistedLatestHeight(env);
-};
-
-export const loadEntityStateFromStorageDb = async (
-  env: Env,
-  entityId: string,
-  height?: number,
-): Promise<EntityState | null> => {
-  const state = await loadEntityStateFromStorage({
-    env,
-    tryOpenDb: tryOpenFrameDb,
-    getRuntimeDb: getFrameDb,
-    entityId,
-    ...(height === undefined ? {} : { height }),
-    liveStateReadable: false,
-  });
-  if (state) assertCertifiedJHistoryIntegrity(state);
-  return state;
-};
-
-export const loadEntityAccountDocFromStorageDb = async (
-  env: Env,
-  entityId: string,
-  counterpartyId: string,
-  height?: number,
-) => {
-  return loadEntityAccountDocFromStorage({
-    env,
-    tryOpenDb: tryOpenFrameDb,
-    getRuntimeDb: getFrameDb,
-    entityId,
-    counterpartyId,
-    ...(height === undefined ? {} : { height }),
-    liveStateReadable: false,
-  });
-};
-
-export const loadEntityViewPageFromStorageDb = async (
-  env: Env,
-  entityId: string,
-  height: number,
-  query?: RuntimeAdapterReadQuery,
-) => {
-  const accountQuery = {
-    ...(query?.cursor ? { cursor: query.cursor } : {}),
-    ...(query?.accountsCursor ? { cursor: query.accountsCursor } : {}),
-    ...(query?.accountsLimit !== undefined ? { limit: query.accountsLimit } : query?.limit !== undefined ? { limit: query.limit } : {}),
-    ...(query?.sortDir ? { sortDir: query.sortDir } : {}),
-  };
-  const bookCursor = query?.booksCursor ?? (query?.accountsCursor ? undefined : query?.cursor);
-  const bookQuery = {
-    ...(bookCursor ? { cursor: bookCursor } : {}),
-    ...(query?.booksLimit !== undefined ? { limit: query.booksLimit } : query?.limit !== undefined ? { limit: query.limit } : {}),
-  };
-  return loadEntityViewPageFromStorage({
-    env,
-    tryOpenDb: tryOpenFrameDb,
-    getRuntimeDb: getFrameDb,
-    entityId,
-    height,
-    accountQuery,
-    bookQuery,
-    liveStateReadable: false,
-  });
-};
-
-export const inspectStorageDb = async (env: Env) => {
-  const current = await inspectStorage({
-    env,
-    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
-    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
-  });
-  const history = await inspectStorage({
-    env,
-    tryOpenDb: tryOpenFrameDb,
-    getRuntimeDb: getFrameDb,
-  });
-  if (!current && !history) return null;
-
-  const epochs = [
-    current
-      ? {
-          role: 'current' as const,
-          path: resolveStorageDbPath(env, 'current'),
-          latestHeight: current.head?.latestHeight ?? 0,
-          latestSnapshotHeight: current.head?.latestSnapshotHeight ?? 0,
-          frameCount: current.frameCount,
-          diffCount: current.diffCount,
-          snapshotCount: current.snapshotHeights.length,
-          liveBytes: current.liveBytes,
-          historyBytes: current.historyBytes,
-          totalBytes: current.totalBytes,
-        }
-      : null,
-    history
-      ? {
-          role: 'history' as const,
-          path: resolveFrameDbPath(env),
-          latestHeight: history.head?.latestHeight ?? 0,
-          latestSnapshotHeight: history.head?.latestSnapshotHeight ?? 0,
-          frameCount: history.frameCount,
-          diffCount: history.diffCount,
-          snapshotCount: history.snapshotHeights.length,
-          liveBytes: history.liveBytes,
-          historyBytes: history.historyBytes,
-          totalBytes: history.totalBytes,
-        }
-      : null,
-  ].filter(Boolean);
-
-  const snapshotHeights = Array.from(
-    new Set([...(history?.snapshotHeights ?? [])]),
-  ).sort((left, right) => left - right);
-
-  return {
-    head: history?.head ?? current?.head ?? null,
-    frameCount: history?.frameCount ?? 0,
-    diffCount: history?.diffCount ?? 0,
-    snapshotHeights,
-    liveEntityCount: current?.liveEntityCount ?? 0,
-    liveAccountCount: current?.liveAccountCount ?? 0,
-    liveAccountFieldCount: current?.liveAccountFieldCount ?? 0,
-    liveAccountFieldBytes: current?.liveAccountFieldBytes ?? 0,
-    liveBookCount: current?.liveBookCount ?? 0,
-    frameBytes: history?.frameBytes ?? 0,
-    diffBytes: history?.diffBytes ?? 0,
-    snapshotBytes: history?.snapshotBytes ?? 0,
-    liveBytes: current?.liveBytes ?? 0,
-    historyBytes: history?.historyBytes ?? 0,
-    totalBytes: (current?.liveBytes ?? 0) + (history?.historyBytes ?? 0),
-    maxFrameBytes: history?.maxFrameBytes ?? 0,
-    maxDiffBytes: history?.maxDiffBytes ?? 0,
-    maxSnapshotBytes: history?.maxSnapshotBytes ?? 0,
-    epochDbs: epochs,
-  };
-};
-
-export const listPersistedCheckpointHeights = async (env: Env): Promise<number[]> => {
-  return resolvePersistedCheckpointHeights(env);
-};
-
-export const readPersistedStorageHead = async (env: Env): Promise<StorageHead | null> => {
-  if (!(await tryOpenFrameDb(env))) return null;
-  return readStorageHead(getFrameDb(env));
-};
-
-const buildRecoveryJournalFromStorageFrame = (
-  frame: StorageFrameRecord,
-  logs: FrameLogEntry[] = [],
-): PersistedFrameJournal => ({
-  height: frame.height,
-  timestamp: frame.timestamp,
-  replicaMetaDigest: frame.replicaMetaDigest,
-  postStateHash: frame.postStateHash,
-  replicaMetaCheckpoint: frame.replicaMetaCheckpoint,
-  replicaMetaStateMode: frame.replicaMetaStateMode,
-  runtimeInput: frame.runtimeInput,
-  ...(frame.pendingRuntimeInput
-    ? { pendingRuntimeInput: cloneIsolatedRuntimeInput(frame.pendingRuntimeInput) }
-    : {}),
-  ...(frame.runtimeOutputs?.length
-    ? { runtimeOutputs: cloneIsolatedRoutedEntityInputs(frame.runtimeOutputs) }
-    : {}),
-  ...(frame.runtimeOutputRetryState?.length
-    ? { runtimeOutputRetryState: structuredClone(frame.runtimeOutputRetryState) }
-    : {}),
-  ...(frame.runtimeMachine
-    ? { runtimeMachine: cloneIsolatedRuntimeSnapshot(frame.runtimeMachine) }
-    : {}),
-  ...(frame.runtimeStateHash ? { runtimeStateHash: frame.runtimeStateHash } : {}),
-  logs,
-});
-
 const verifyPersistedFrameState = (
   env: Env,
   persistedFrame: StorageFrameRecord,
@@ -6599,151 +6393,6 @@ export const verifyRuntimeChain = async (
     expectedCanonicalStateHash,
     actualCanonicalStateHash,
   };
-};
-
-export const verifyLiveRuntimeStorage = async (env: Env): Promise<{
-  ok: true;
-  runtimeId: string;
-  latestHeight: number;
-  checkedFrames: number;
-}> => {
-  const ready = await tryOpenFrameDb(env);
-  if (!ready) throw new Error('LIVE_RUNTIME_STORAGE_UNAVAILABLE');
-  return withStorageConsistentRead(env, async () => {
-    const result = await verifyStorageTailIntegrity(getFrameDb(env));
-    return { ok: true, runtimeId: String(env.runtimeId || ''), ...result };
-  });
-};
-
-export const readPersistedFrameJournal = async (env: Env, height: number): Promise<PersistedFrameJournal | null> => {
-  const frame = await readPersistedStorageFrameRecord(env, height);
-  if (!frame) return null;
-  let logs: FrameLogEntry[] = [];
-  if (await tryOpenFrameDb(env)) {
-    try {
-      const activity = await readFrameDbRuntimeActivity(getFrameDb(env), height);
-      if (activity?.logs) logs = activity.logs;
-    } catch (error) {
-      throw new Error(
-        `STORAGE_ACTIVITY_JOURNAL_READ_FAILED:height=${height}:` +
-        `${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
-  return buildRecoveryJournalFromStorageFrame(frame, logs);
-};
-
-/**
- * Read the bounded display/activity journal without depending on replay frames.
- * Snapshot publication intentionally prunes non-checkpoint replay frames; the
- * compact activity row is the authoritative source for user-facing receipts.
- */
-type StoredPersistedActivityJournal = PersistedActivityJournal & {
-  logs: FrameLogEntry[];
-};
-
-export const readPersistedRuntimeActivityJournal = async (
-  env: Env,
-  height: number,
-): Promise<StoredPersistedActivityJournal | null> => {
-  const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
-  if (targetHeight <= 0) {
-    throw new Error(`STORAGE_ACTIVITY_JOURNAL_HEIGHT_INVALID:${String(height)}`);
-  }
-  if (!(await tryOpenFrameDb(env))) {
-    throw new Error(`STORAGE_ACTIVITY_JOURNAL_DB_OPEN_FAILED:height=${targetHeight}`);
-  }
-  try {
-    const activity = await readFrameDbRuntimeActivity(getFrameDb(env), targetHeight);
-    if (!activity) return null;
-    return {
-      height: targetHeight,
-      timestamp: activity.timestamp,
-      runtimeInput: {
-        runtimeTxs: [],
-        entityInputs: activity.runtimeInput.entityInputs.map(input =>
-          cloneIsolatedEntityInput(input as EntityInput)),
-        ...(activity.runtimeInput.jInputs
-          ? { jInputs: activity.runtimeInput.jInputs.map(input => structuredClone(input)) }
-          : {}),
-      },
-      logs: activity.logs.map((entry) => ({ ...entry })),
-    };
-  } catch (error) {
-    throw new Error(
-      `STORAGE_ACTIVITY_JOURNAL_READ_FAILED:height=${targetHeight}:` +
-      `${error instanceof Error ? error.message : String(error)}`,
-      { cause: error },
-    );
-  }
-};
-
-export const readPersistedAccountFrameHistory = async (
-  env: Env,
-  entityId: string,
-  counterpartyId: string,
-  limit = 50,
-  opts?: { maxRuntimeHeight?: number; maxAccountHeight?: number },
-): Promise<AccountFrame[]> => {
-  if (!(await tryOpenFrameDb(env))) return [];
-  const maxRuntimeHeight = Number.isFinite(Number(opts?.maxRuntimeHeight))
-    ? Math.max(0, Math.floor(Number(opts?.maxRuntimeHeight)))
-    : Number.POSITIVE_INFINITY;
-  const maxAccountHeight = Number.isFinite(Number(opts?.maxAccountHeight))
-    ? Math.max(0, Math.floor(Number(opts?.maxAccountHeight)))
-    : Number.POSITIVE_INFINITY;
-  const boundedLimit = Math.max(1, Math.min(1000, Math.floor(Number(limit || 50))));
-  const records = await readFrameDbAccountFrames(getFrameDb(env), entityId, counterpartyId, {
-    limit: boundedLimit,
-    ...(Number.isSafeInteger(maxRuntimeHeight) ? { maxRuntimeHeight } : {}),
-    ...(Number.isSafeInteger(maxAccountHeight) ? { maxAccountHeight } : {}),
-  });
-  return records.map((record) => structuredClone(record.frame));
-};
-
-export const readPersistedEntityFrameHistory = async (
-  env: Env,
-  entityId: string,
-  limit = 50,
-  opts?: { maxRuntimeHeight?: number; maxEntityHeight?: number },
-): Promise<CertifiedEntityFrameLink[]> => {
-  if (!(await tryOpenFrameDb(env))) return [];
-  const maxRuntimeHeight = Number.isFinite(Number(opts?.maxRuntimeHeight))
-    ? Math.max(0, Math.floor(Number(opts?.maxRuntimeHeight)))
-    : Number.POSITIVE_INFINITY;
-  const maxEntityHeight = Number.isFinite(Number(opts?.maxEntityHeight))
-    ? Math.max(0, Math.floor(Number(opts?.maxEntityHeight)))
-    : Number.POSITIVE_INFINITY;
-  const boundedLimit = Math.max(1, Math.min(1000, Math.floor(Number(limit || 50))));
-  const records = await readFrameDbEntityFrames(getFrameDb(env), entityId, {
-    limit: boundedLimit,
-    ...(Number.isSafeInteger(maxRuntimeHeight) ? { maxRuntimeHeight } : {}),
-    ...(Number.isSafeInteger(maxEntityHeight) ? { maxEntityHeight } : {}),
-  });
-  return records.map((record) => structuredClone(record.link));
-};
-
-export const readPersistedFrameJournals = async (
-  env: Env,
-  opts?: {
-    fromHeight?: number;
-    toHeight?: number;
-    limit?: number;
-  },
-): Promise<PersistedFrameJournal[]> => {
-  const latestHeight = await resolvePersistedLatestHeight(env);
-  if (latestHeight <= 0) return [];
-  const fromHeight = Math.max(1, Math.floor(opts?.fromHeight ?? 1));
-  const boundedToHeight = Math.max(fromHeight, Math.floor(opts?.toHeight ?? latestHeight));
-  const toHeight = Math.min(latestHeight, boundedToHeight);
-  const limit = Math.max(1, Math.min(10_000, Math.floor(opts?.limit ?? 200)));
-  const pageToHeight = Math.min(toHeight, fromHeight + limit - 1);
-  const receipts: PersistedFrameJournal[] = [];
-  for (let height = fromHeight; height <= pageToHeight; height += 1) {
-    const receipt = await readPersistedFrameJournal(env, height);
-    if (receipt) receipts.push(receipt);
-  }
-  return receipts;
 };
 
 type PersistedReplayTarget = {
@@ -6904,235 +6553,37 @@ const loadEnvFromStorageByReplay = async (
   }
 };
 
-export type PersistedRuntimeActivityPage = {
-  ok: true;
-  runtimeId?: string | undefined;
-  latestHeight: number;
-  fromHeight: number;
-  toHeight: number;
-  scannedFrames: number;
-  returned: number;
-  limit: number;
-  scanLimit: number;
-  nextBeforeHeight: number | null;
-  filters: RuntimeActivityFilters;
-  events: RuntimeActivityEvent[];
-};
-
-export const readPersistedRuntimeActivityPage = async (
-  env: Env,
-  opts: RuntimeActivityFilters & {
-    beforeHeight?: number | undefined;
-    limit?: number | undefined;
-    scanLimit?: number | undefined;
-  } = {},
-): Promise<PersistedRuntimeActivityPage> => {
-  const latestHeight = await resolvePersistedLatestHeight(env);
-  const limit = Math.max(1, Math.min(500, Math.floor(Number(opts.limit ?? 100))));
-  const scanLimit = Math.max(1, Math.min(1000, Math.floor(Number(opts.scanLimit ?? 100))));
-  if (latestHeight <= 0) {
-    return {
-      ok: true,
-      runtimeId: env.runtimeId,
-      latestHeight: 0,
-      fromHeight: 0,
-      toHeight: 0,
-      scannedFrames: 0,
-      returned: 0,
-      limit,
-      scanLimit,
-      nextBeforeHeight: null,
-      filters: opts,
-      events: [],
-    };
-  }
-
-  const startHeight = Math.max(
-    1,
-    Math.min(
-      latestHeight,
-      Number.isFinite(Number(opts.beforeHeight)) ? Math.floor(Number(opts.beforeHeight)) : latestHeight,
-    ),
-  );
-  const events: RuntimeActivityEvent[] = [];
-  let scannedFrames = 0;
-  let height = startHeight;
-  let uniqueEventCount = 0;
-  for (; height >= 1 && scannedFrames < scanLimit && uniqueEventCount < limit; height -= 1) {
-    const activity = await readPersistedRuntimeActivityJournal(env, height);
-    scannedFrames += 1;
-    if (!activity) continue;
-    events.push(...buildRuntimeActivityEvents(activity, opts));
-    uniqueEventCount = dedupeRuntimeActivityEvents(events).length;
-  }
-
-  const returned = dedupeRuntimeActivityEvents(events).slice(0, limit).map((event) => ({
-    ...event,
-    ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
-    id: env.runtimeId ? `${env.runtimeId}:${event.id}` : event.id,
-  }));
-  return {
-    ok: true,
-    runtimeId: env.runtimeId,
-    latestHeight,
-    fromHeight: Math.max(1, height + 1),
-    toHeight: startHeight,
-    scannedFrames,
-    returned: returned.length,
-    limit,
-    scanLimit,
-    nextBeforeHeight: height >= 1 ? height : null,
-    filters: opts,
-    events: returned,
-  };
-};
-
-export const readPersistedCheckpointSnapshot = async (
-  env: Env,
-  height: number,
-): Promise<Record<string, unknown> | null> => {
-  const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
-  if (targetHeight <= 0) return null;
-  return withStorageConsistentRead(env, async () => {
-    const restored = await loadEnvFromStorageByReplay(
-      env.runtimeId,
-      env.runtimeSeed,
-      targetHeight,
-      { prunedTargetReturnsNull: true },
-    );
-    if (!restored || restored.env.height !== targetHeight) {
-      if (restored?.env) await closeRuntimeDb(restored.env);
-      return null;
-    }
-    try {
-      return buildRuntimeCheckpointSnapshot(restored.env);
-    } finally {
-      await closeRuntimeDb(restored.env);
-    }
-  });
-};
-
-const MAX_RUNTIME_RECORDING_JOURNAL_FRAMES = 10_000;
-
-export const buildPersistedRuntimeRecording = async (
-  env: Env,
-  options: {
-    signers: RuntimeRecoverySignerV1[];
-    meta?: RuntimeRecoveryMetaV1;
-    createdAt?: number;
-  },
-): Promise<RuntimeRecording> => {
-  const createdAt = Math.max(0, Math.floor(Number(options.createdAt ?? Date.now())));
-  const latestHeight = await getPersistedLatestHeight(env);
-  if (latestHeight !== env.height) {
-    throw new Error(
-      `RUNTIME_RECORDING_LIVE_HEAD_MISMATCH:persisted=${latestHeight}:env=${env.height}`,
-    );
-  }
-  if (latestHeight <= 0) {
-    return buildRuntimeRecording([
-      buildRuntimeRecoveryBundle(env, { ...options, createdAt, kind: 'snapshot' }),
-    ], createdAt);
-  }
-
-  const minimumBaseHeight = Math.max(1, latestHeight - MAX_RUNTIME_RECORDING_JOURNAL_FRAMES);
-  const checkpointHeights = (await listPersistedCheckpointHeights(env))
-    .filter(height => height >= minimumBaseHeight && height <= latestHeight)
-    .sort((left, right) => left - right);
-  let baseHeight = latestHeight;
-  let checkpoint: Record<string, unknown> | null = null;
-  for (const candidateHeight of checkpointHeights) {
-    const candidate = await readPersistedCheckpointSnapshot(env, candidateHeight);
-    if (!candidate) continue;
-    baseHeight = candidateHeight;
-    checkpoint = candidate;
-    break;
-  }
-  if (!checkpoint) {
-    return buildRuntimeRecording([
-      buildRuntimeRecoveryBundle(env, { ...options, createdAt, kind: 'snapshot' }),
-    ], createdAt);
-  }
-  const snapshotBundle = buildRuntimeRecoveryCheckpointBundle(env, {
-    ...options,
-    checkpoint,
-    createdAt,
-  });
-  if (baseHeight === latestHeight) {
-    return buildRuntimeRecording([snapshotBundle], createdAt);
-  }
-
-  const expectedFrameCount = latestHeight - baseHeight;
-  const frames = await readPersistedFrameJournals(env, {
-    fromHeight: baseHeight + 1,
-    toHeight: latestHeight,
-    limit: expectedFrameCount,
-  });
-  if (
-    frames.length !== expectedFrameCount
-    || frames[0]?.height !== baseHeight + 1
-    || frames.at(-1)?.height !== latestHeight
-  ) {
-    throw new Error(
-      `RUNTIME_RECORDING_JOURNAL_INCOMPLETE:base=${baseHeight}:target=${latestHeight}:` +
-      `expected=${expectedFrameCount}:actual=${frames.length}`,
-    );
-  }
-  const tailBundle = buildRuntimeRecoveryBundle(env, {
-    ...options,
-    createdAt,
-    kind: 'journal_tail',
-    baseCheckpoint: {
-      height: baseHeight,
-      hash: snapshotBundle.checkpointHash!,
-    },
-    frames,
-  });
-  return buildRuntimeRecording([snapshotBundle, tailBundle], createdAt);
-};
-
-export type DetachedRuntimeRecordingAdapter = {
-  readonly runtimeId: string;
-  readonly baseHeight: number;
-  readonly targetHeight: number;
-  readAtHeight(height: number): Promise<Env>;
-  close(): Promise<void>;
-};
-
-export const openDetachedRuntimeRecording = (
-  recording: RuntimeRecording,
-  runtimeSeed: string,
-): DetachedRuntimeRecordingAdapter => {
-  const validated = validateRuntimeRecording(recording);
-  let closed = false;
-  let activeProjection: Env | null = null;
-  return {
-    runtimeId: validated.runtimeId,
-    baseHeight: validated.baseHeight,
-    targetHeight: validated.targetHeight,
-    async readAtHeight(height: number): Promise<Env> {
-      if (closed) throw new Error('RUNTIME_RECORDING_ADAPTER_CLOSED');
-      if (!Number.isSafeInteger(height) || height < validated.baseHeight || height > validated.targetHeight) {
-        throw new Error(
-          `RUNTIME_RECORDING_HEIGHT_UNAVAILABLE:height=${height}:` +
-          `range=${validated.baseHeight}-${validated.targetHeight}`,
-        );
-      }
-      activeProjection = await restoreEnvFromRecoveryBundles(validated.bundles, {
-        runtimeSeed,
-        runtimeId: validated.runtimeId,
-        targetHeight: height,
-        readOnly: true,
-      });
-      return activeProjection;
-    },
-    async close(): Promise<void> {
-      if (closed) return;
-      closed = true;
-      activeProjection = null;
-    },
-  };
-};
+export const {
+  getPersistedLatestHeight,
+  loadEntityStateFromStorageDb,
+  loadEntityAccountDocFromStorageDb,
+  loadEntityViewPageFromStorageDb,
+  inspectStorageDb,
+  listPersistedCheckpointHeights,
+  readPersistedStorageHead,
+  verifyLiveRuntimeStorage,
+  readPersistedFrameJournal,
+  readPersistedRuntimeActivityJournal,
+  readPersistedAccountFrameHistory,
+  readPersistedEntityFrameHistory,
+  readPersistedFrameJournals,
+  readPersistedRuntimeActivityPage,
+  readPersistedCheckpointSnapshot,
+  buildPersistedRuntimeRecording,
+  openDetachedRuntimeRecording,
+} = createPersistenceQueries({
+  tryOpenStorageDb,
+  getStorageDb,
+  tryOpenFrameDb,
+  getFrameDb,
+  resolvePersistedLatestHeight,
+  resolvePersistedCheckpointHeights,
+  readPersistedStorageFrameRecord,
+  loadEnvFromStorageByReplay,
+  closeRuntimeDb,
+  restoreEnvFromRecoveryBundles,
+  withStorageConsistentRead,
+});
 
 export const loadEnvFromDB = async (
   runtimeId?: string | null,
@@ -7308,9 +6759,12 @@ export type {
 // === NAME RESOLUTION WRAPPERS (override imports) ===
 // Runtime no longer keeps a module-global env/db; these pure wrappers expose
 // deterministic name formatting for callers that do not own an Env.
-const searchEntityNames = (query: string, limit?: number) => searchEntityNamesOriginal(null, query, limit);
-const resolveEntityName = (entityId: string) => resolveEntityNameOriginal(null, entityId);
-const getEntityDisplayInfoFromProfile = (entityId: string) => getEntityDisplayInfoFromProfileOriginal(null, entityId);
+const searchEntityNames = (query: string, limit?: number) =>
+  nameResolution.searchEntityNames(null, query, limit);
+const resolveEntityName = (entityId: string) =>
+  nameResolution.resolveEntityName(null, entityId);
+const getEntityDisplayInfoFromProfile = (entityId: string) =>
+  nameResolution.getEntityDisplayInfo(null, entityId);
 
 // Avatar functions are already imported and exported above
 
