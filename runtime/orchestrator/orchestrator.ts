@@ -108,6 +108,7 @@ import {
   hasShardRpc2Jurisdiction,
   provisionPrimaryRpcJurisdictionStack,
   readShardJurisdictions,
+  resetLocalAnvilChains,
   resolvePrimaryHubJurisdictionFallback,
   seedShardJurisdictions,
   syncCanonicalJurisdictionsFromShard,
@@ -2750,6 +2751,12 @@ const runReset = async (options: OrchestratorResetOptions = configuredResetOptio
     const clearStartedAt = startTiming('reset_clear_state');
     clearRelayState();
     await reapStaleManagedChildren();
+    if (!preserveState && process.env['USE_ANVIL'] === 'true') {
+      await resetLocalAnvilChains(jurisdictionsConfig);
+      meshLog.info('local_anvil.reset_complete', {
+        rpcUrls: Object.values(jurisdictionsConfig.rpcUrls ?? {}).filter(Boolean).length,
+      });
+    }
     if (preserveState) {
       if (!existsSync(args.dbRoot)) {
         throw new Error(`PRESERVE_STATE_DB_ROOT_MISSING:${args.dbRoot}`);

@@ -49,6 +49,44 @@ type ProvisionedRpcStack = Pick<
 
 export const LOCAL_TESTNET_BLOCK_TIME_MS = 10_000;
 
+const requireLocalAnvilRpcUrl = (rawUrl: string): string => {
+  const url = new URL(rawUrl);
+  const hostname = url.hostname.toLowerCase();
+  if (
+    (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+    (hostname !== 'localhost' && hostname !== '127.0.0.1' && hostname !== '::1')
+  ) {
+    throw new Error(`LOCAL_ANVIL_RESET_RPC_FORBIDDEN:${rawUrl}`);
+  }
+  return url.toString();
+};
+
+const resetLocalAnvilRpc = async (rawUrl: string): Promise<void> => {
+  const rpcUrl = requireLocalAnvilRpcUrl(rawUrl);
+  const response = await fetch(rpcUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'anvil_reset', params: [] }),
+  });
+  if (!response.ok) throw new Error(`LOCAL_ANVIL_RESET_HTTP_${response.status}:${rpcUrl}`);
+  const payload = await response.json() as { error?: { message?: string } };
+  if (payload.error) {
+    throw new Error(`LOCAL_ANVIL_RESET_FAILED:${rpcUrl}:${payload.error.message || 'unknown'}`);
+  }
+};
+
+export const resetLocalAnvilChains = async (
+  config: OrchestratorJurisdictionsConfig,
+): Promise<void> => {
+  const rpcUrls = new Set(
+    [...Object.values(config.rpcUrls ?? {}), config.rpc2Url]
+      .map(value => String(value || '').trim())
+      .filter(Boolean),
+  );
+  if (rpcUrls.size === 0) throw new Error('LOCAL_ANVIL_RESET_RPC_MISSING');
+  await Promise.all([...rpcUrls].map(resetLocalAnvilRpc));
+};
+
 const resolveRepoJurisdictionsJsonPath = (): string => {
   const repoUrl = new URL('../../jurisdictions/jurisdictions.json', import.meta.url);
   return resolve(decodeURIComponent(repoUrl.pathname));

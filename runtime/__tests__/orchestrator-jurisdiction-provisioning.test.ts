@@ -14,6 +14,7 @@ import {
   isolateEphemeralJurisdictions,
   provisionPrimaryRpcJurisdictionStack,
   readShardJurisdictions,
+  resetLocalAnvilChains,
   type OrchestratorJurisdictionsConfig,
 } from '../orchestrator/jurisdictions';
 import { createEmptyEnv, enqueueRuntimeInput, process as processRuntime } from '../runtime';
@@ -122,6 +123,34 @@ const startAnvil = (port: number, chainId: number, root: string, stateFile: stri
   ],
   { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, TMPDIR: root } },
 ) as ManagedChildProcess;
+
+test('local reset clears Anvil history and refuses non-loopback RPCs', async () => {
+  const port = await reservePort();
+  const root = await mkdtemp(join(tmpdir(), 'xln-local-anvil-reset-'));
+  const rpcUrl = `http://127.0.0.1:${port}`;
+  const child = startAnvil(port, CHAIN_ID, root, 'state.json');
+  try {
+    await waitForRpc(rpcUrl);
+    await rpcCall(rpcUrl, 'anvil_mine', ['0x10']);
+    expect(Number.parseInt(String(await rpcCall(rpcUrl, 'eth_blockNumber')).slice(2), 16)).toBeGreaterThan(0);
+
+    await resetLocalAnvilChains({
+      shardJurisdictionsPath: '/unused',
+      rpc2Url: '',
+      rpcUrls: { 1: rpcUrl },
+    });
+
+    expect(await rpcCall(rpcUrl, 'eth_blockNumber')).toBe('0x0');
+    await expect(resetLocalAnvilChains({
+      shardJurisdictionsPath: '/unused',
+      rpc2Url: '',
+      rpcUrls: { 1: 'https://ethereum-sepolia-rpc.publicnode.com' },
+    })).rejects.toThrow('LOCAL_ANVIL_RESET_RPC_FORBIDDEN');
+  } finally {
+    await stopProcess(child, 3_000);
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
+});
 
 test('orchestrator provisions exact primary contracts before RPC import', async () => {
   const port = await reservePort();
