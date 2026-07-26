@@ -3,6 +3,7 @@ import {
   batchOpBreakdown,
   batchOpCount,
   cloneJBatch,
+  initJBatch,
   isBatchEmpty,
   type BatchOpBreakdown,
 } from '../../jurisdiction/batch';
@@ -81,6 +82,12 @@ export async function applyHankoBatchProcessedEvent(opts: {
     throw new Error(`J_BATCH_EVENT_NONCE_INVALID:${String(nonce)}`);
   }
 
+  // HankoBatchProcessed is the authoritative Entity-state nonce input. A hub
+  // can receive finalized bootstrap/maintenance batches before it ever needs
+  // to build a local batch, so lazy batch initialization must not discard
+  // those nonces. Otherwise the first later rebalance restarts at nonce 1 and
+  // can never pass Depository's strictly sequential nonce check.
+  newState.jBatchState ??= initJBatch();
   const sentBatch = newState.jBatchState?.sentBatch;
   const matchesPending = !!sentBatch &&
     sentBatch.entityNonce === nonce &&

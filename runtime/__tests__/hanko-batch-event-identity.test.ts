@@ -88,6 +88,30 @@ test('finalized different batch at the pending nonce quarantines the now-unexecu
   expect(state.batchHistory).toBeUndefined();
 });
 
+test('finalized batch initializes lazy batch state and preserves its nonce for the first later submit', async () => {
+  const state = makeEntityState();
+  delete state.jBatchState;
+
+  await applyHankoBatchProcessedEvent({
+    newState: state,
+    event: {
+      type: 'HankoBatchProcessed',
+      data: {
+        entityId: ENTITY_ID,
+        batchHash: STALE_BATCH_HASH,
+        nonce: 7,
+      },
+    },
+    transactionHash: `0x${'67'.repeat(32)}`,
+    blockNumber: 100,
+    dirtyAccounts: new Set(),
+  });
+
+  expect(state.jBatchState?.entityNonce).toBe(7);
+  expect(state.jBatchState?.status).toBe('empty');
+  expect(state.jBatchState?.sentBatch).toBeUndefined();
+});
+
 test('only an exact nonce and canonical batch hash finalizes the pending batch', async () => {
   const state = makeEntityState();
   const matchingEvent: JurisdictionEvent = {

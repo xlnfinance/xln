@@ -34,14 +34,13 @@ contract_fingerprint="$(
       "$ROOT_DIR/frontend/static/contracts/DeltaTransformer.json"
   } | shasum -a 256 | awk '{print $1}'
 )"
-previous_fingerprint="$(cat "$CONTRACT_FINGERPRINT_FILE" 2>/dev/null || true)"
-
-if [[ "$previous_fingerprint" != "$contract_fingerprint" ]] && {
-  [[ -d "$DEV_RDB_ROOT" ]] || compgen -G "$DEV_JDB_ROOT/anvil-*-state.json" >/dev/null;
-}; then
-  echo "[dev:setup] contract bytecode changed; resetting only local JDB/RDB"
-  rm -rf -- "$DEV_RDB_ROOT" "$DEV_JDB_ROOT"
-fi
+# The local dev stack is an ephemeral testnet. Runtime state and Anvil state
+# form one consistency domain, so preserving either side across `bun run dev`
+# can pair a fresh Entity nonce with an old Depository nonce (or vice versa).
+# Always recreate both together; operator/durable environments do not use this
+# dev setup script.
+echo "[dev:setup] resetting ephemeral local JDB/RDB"
+rm -rf -- "$DEV_RDB_ROOT" "$DEV_JDB_ROOT"
 
 mkdir -p "$DEV_RDB_ROOT" "$DEV_JDB_ROOT" "$DEV_PID_DIR"
 if [[ ! -f "$DEV_RDB_ROOT/jurisdictions.json" ]]; then
@@ -50,4 +49,4 @@ fi
 fingerprint_tmp="${CONTRACT_FINGERPRINT_FILE}.tmp.$$"
 printf '%s\n' "$contract_fingerprint" > "$fingerprint_tmp"
 mv "$fingerprint_tmp" "$CONTRACT_FINGERPRINT_FILE"
-echo "[dev:setup] local contract state compatible"
+echo "[dev:setup] fresh local contract/runtime state ready"

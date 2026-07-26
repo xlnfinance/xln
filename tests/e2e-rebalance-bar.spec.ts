@@ -426,6 +426,14 @@ async function discoverHub(page: Page): Promise<string> {
   return hubs.h3;
 }
 
+async function discoverPrimaryHub(page: Page): Promise<string> {
+  // H1 performs Testnet bootstrap/maintenance batches before user traffic, so
+  // its Entity nonce is already non-zero when the first user rebalance starts.
+  // This is the production-shaped lazy-jBatch nonce lifecycle.
+  const hubs = await waitForNamedHubs(page, ['h1'], { apiBaseUrl: API_BASE_URL });
+  return hubs.h1;
+}
+
 async function waitForHubProfile(page: Page, hubId: string) {
   const ok = await page.evaluate(async ({ hubId }) => {
     const env = (window as any).isolatedEnv;
@@ -1474,7 +1482,7 @@ test.describe('Rebalance E2E', () => {
     await timedStep('rebalance.ensure_runtime_online', () => ensureRuntimeOnline(page, 'post-create'));
 
     const { entityId, signerId } = await timedStep('rebalance.get_local_entity', () => getLocalEntity(page));
-    const hubId = await timedStep('rebalance.discover_hub', () => discoverHub(page));
+    const hubId = await timedStep('rebalance.discover_hub', () => discoverPrimaryHub(page));
     const hubIsLeft = hubId.toLowerCase() < entityId.toLowerCase();
     await timedStep('rebalance.wait_hub_profile', () => waitForHubProfile(page, hubId));
     await timedStep('rebalance.connect_hub', () => connectHub(page, entityId, signerId, hubId));
@@ -1829,7 +1837,7 @@ test.describe('Rebalance E2E', () => {
     await timedStep('rebalance_persist.ensure_runtime_online', () => ensureRuntimeOnline(page, 'rebalance-persist-post-create'));
 
     const { entityId, signerId } = await timedStep('rebalance_persist.get_local_entity', () => getLocalEntity(page));
-    const hubId = await timedStep('rebalance_persist.discover_hub', () => discoverHub(page));
+    const hubId = await timedStep('rebalance_persist.discover_hub', () => discoverPrimaryHub(page));
     await timedStep('rebalance_persist.wait_hub_profile', () => waitForHubProfile(page, hubId));
     await timedStep('rebalance_persist.connect_hub', () => connectHub(page, entityId, signerId, hubId));
     scenarioStartedAt = Date.now();
