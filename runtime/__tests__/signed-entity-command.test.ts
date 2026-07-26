@@ -1240,12 +1240,12 @@ describe('signed Entity command admission', () => {
         }],
       },
       {
-        source: sourceUser,
-        target: targetUser,
+        source: sourceHub,
+        target: targetHub,
         txs: [{
           type: 'crossPullClose',
           data: {
-            counterpartyEntityId: targetHub,
+            counterpartyEntityId: targetUser,
             pullId: 'target-pull', binary: '01', proof: closeProof, route,
           },
         }],

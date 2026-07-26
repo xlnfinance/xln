@@ -247,7 +247,7 @@ describe('two-validator replay uses Entity-certified jurisdiction height', () =>
     const leading = await handleDisputeStart(state, tx, envFor(130, 5_760));
 
     expect(lagging.outputs).toEqual(leading.outputs);
-    expect(lagging.newState.accounts.get(peerEntityId)?.activeDispute?.disputeTimeout).toBe(0);
+    expect(lagging.newState.accounts.get(peerEntityId)?.activeDispute).toBeUndefined();
     expect(computeCanonicalEntityConsensusStateHash(lagging.newState))
       .toBe(computeCanonicalEntityConsensusStateHash(leading.newState));
   });

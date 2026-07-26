@@ -405,7 +405,9 @@ describe('debt ledger', () => {
     const result = await applyEntityTx(env, state, { type: 'j_event', data });
     expect(findOnlyDebt(result.newState, 'out').remainingAmount).toBe(5n);
     expect(Object.hasOwn(findOnlyDebt(result.newState, 'out'), 'updates')).toBe(false);
-    expect(env.frameLogs.filter((entry) => entry.message === 'JEventReceived').map((entry) => entry.data?.['eventType']))
+    expect(result.candidateEffects
+      .filter((effect) => effect.kind === 'runtimeEvent' && effect.eventName === 'JEventReceived')
+      .map((effect) => effect.kind === 'runtimeEvent' ? effect.data?.['eventType'] : undefined))
       .toEqual(['DebtCreated', 'DebtEnforced']);
   });
 });

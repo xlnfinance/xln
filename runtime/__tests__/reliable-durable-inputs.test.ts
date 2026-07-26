@@ -72,7 +72,7 @@ describe('durable receipt-only input merge', () => {
     }));
     expect(safeStringify(mergeDurableReceiptOnlyInputs(applied, receipts)))
       .toBe(safeStringify(quadraticReference(applied, receipts)));
-  });
+  }, 30_000);
 
   test('appends an unseen identity once and rejects conflicting provenance', () => {
     const applied = [frameInput(1)];

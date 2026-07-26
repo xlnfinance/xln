@@ -23,6 +23,7 @@ import { buildQuorumHanko, getEntityConfigBoardHash, verifyHankoForHash } from '
 import type {
   AccountMachine,
   CertifiedRegistrationEvidence,
+  EntityCandidateEffect,
   EntityState,
   Env,
   JurisdictionConfig,
@@ -1566,10 +1567,13 @@ describe('multisig HTLC validator encryption', () => {
     }, `0x${'bd'.repeat(32)}`));
     env.gossip = undefined;
 
-    const result = await handleHtlcPayment(state, prepared, env);
+    const candidateEffects: EntityCandidateEffect[] = [];
+    const result = await handleHtlcPayment(state, prepared, env, candidateEffects);
     expect(result.mempoolOps).toHaveLength(1);
-    expect(emitted).toHaveLength(1);
-    expect(emitted[0]).toMatchObject({
+    expect(emitted).toHaveLength(0);
+    expect(candidateEffects).toHaveLength(1);
+    expect(candidateEffects[0]).toMatchObject({
+      kind: 'runtimeEvent',
       eventName: 'HtlcInitiated',
       data: {
         entityId: SENDER_ID,

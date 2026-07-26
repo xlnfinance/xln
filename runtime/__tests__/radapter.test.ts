@@ -625,8 +625,8 @@ test('runtime adapter direct read paths return compact read snapshots', async ()
     [`0x${'bb'.repeat(32)}`]: { args: 'a'.repeat(100_000) },
   };
   account.settlementWorkspace = { notes: 'w'.repeat(100_000) };
-  account.swapOrderHistory = new Map([['history', { note: 'h'.repeat(100_000) }]]);
-  account.swapClosedOrders = new Map([['closed', { note: 'c'.repeat(100_000) }]]);
+  account.swapOrderHistory = new Map([['history', { note: 'h'.repeat(100_000), resolves: [] }]]);
+  account.swapClosedOrders = new Map([['closed', { note: 'c'.repeat(100_000), resolves: [] }]]);
   replica.state.entityEncPrivKey = 'private-key';
   replica.state.nonces = new Map(Array.from({ length: 500 }, (_, index) => [
     `0x${index.toString(16).padStart(64, '0')}`,
@@ -2481,11 +2481,11 @@ test('runtime adapter view-frame excludes unbounded account internals from remot
   account.settlementWorkspace = { notes: 's'.repeat(500_000) };
   account.swapOrderHistory = new Map(Array.from({ length: 20_000 }, (_, index) => [
     `history-${index}`,
-    { offerId: `history-${index}`, status: 'closed', note: 'h'.repeat(120) },
+    { offerId: `history-${index}`, status: 'closed', note: 'h'.repeat(120), resolves: [] },
   ]));
   account.swapClosedOrders = new Map(Array.from({ length: 20_000 }, (_, index) => [
     `closed-${index}`,
-    { offerId: `closed-${index}`, status: 'closed', note: 'c'.repeat(120) },
+    { offerId: `closed-${index}`, status: 'closed', note: 'c'.repeat(120), resolves: [] },
   ]));
 
   const frame = await resolveRuntimeAdapterRead<{

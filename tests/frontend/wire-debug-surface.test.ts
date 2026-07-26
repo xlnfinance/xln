@@ -9,8 +9,20 @@ describe('browser wire debug surface', () => {
     expect(wireDebug.decode(peer)).toEqual({ type: 'ping', v: 1 });
     expect(wireDebug.decodeWs(peer)).toEqual({ type: 'ping' });
 
-    const adapter = wireDebug.encodeRadapter({ v: 1, op: 'tick', height: 9 });
-    expect(wireDebug.decodeRadapter(adapter)).toEqual({ v: 1, op: 'tick', height: 9 });
+    const adapter = wireDebug.encodeRadapter({
+      v: 1,
+      op: 'tick',
+      height: 9,
+      commandReady: true,
+      commandReadyReason: null,
+    });
+    expect(wireDebug.decodeRadapter(adapter)).toEqual({
+      v: 1,
+      op: 'tick',
+      height: 9,
+      commandReady: true,
+      commandReadyReason: null,
+    });
   });
 
   test('keeps tagged JSON readable and BigInt-safe', () => {

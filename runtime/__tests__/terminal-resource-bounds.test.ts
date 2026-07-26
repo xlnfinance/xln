@@ -202,6 +202,7 @@ test('timeout terminal activity is emitted before its HTLC notes are removed', (
   state.htlcNotes?.set(`hashlock:${hashlock}`, 'timeout note');
   state.htlcNotes?.set(`lock:${lockId}`, 'timeout note');
   const env = createEmptyEnv('terminal-note-timeout');
+  const candidateEffects = [];
 
   applyHtlcTimeoutFollowups({
     env,
@@ -211,9 +212,10 @@ test('timeout terminal activity is emitted before its HTLC notes are removed', (
     accountMachine: account,
     outputs: [],
     mempoolOps: [],
+    candidateEffects,
   }, [hashlock]);
 
-  expect(env.frameLogs.some((entry) => entry.message === 'HtlcFailed')).toBe(true);
+  expect(candidateEffects.some((effect) => effect.kind === 'runtimeEvent' && effect.eventName === 'HtlcFailed')).toBe(true);
   expect(state.htlcRoutes).toHaveLength(0);
   expect(state.htlcNotes).toHaveLength(0);
 });

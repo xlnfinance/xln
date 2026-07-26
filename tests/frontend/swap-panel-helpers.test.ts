@@ -235,13 +235,13 @@ describe('swap panel helpers', () => {
     ]);
   });
 
-  test('SwapPanel submits the exact Runtime-owned inbound plan before cross intent', () => {
+  test('SwapPanel submits the exact Runtime-owned command plan before cross intent', () => {
     const source = Bun.file('frontend/src/lib/components/Entity/SwapPanel.svelte');
     return source.text().then((text) => {
-      expect(text).toContain('activeXlnFunctions.planSwapInboundCapacity');
-      expect(text).toContain('const targetSetupTxs = [...targetInboundPlan.setupTxs]');
-      expect(text).toContain('await submitRuntimeInput({');
-      expect(text).toContain('await submitActiveCrossJurisdictionIntent(crossJurisdiction)');
+      expect(text).toContain('activeXlnFunctions.planSwapCommand');
+      expect(text).toContain('if (commandPlan.targetSetupInput)');
+      expect(text).toContain('await submitRuntimeInput(commandPlan.targetSetupInput)');
+      expect(text).toContain('await submitActiveCrossJurisdictionIntent(commandPlan.crossJurisdictionIntent)');
       expect(text).not.toContain('activeXlnFunctions.deriveDelta');
       expect(text).not.toContain('10_000n * 10n ** decimals');
       expect(text).not.toContain('crossCommandEnv');
@@ -296,10 +296,9 @@ describe('swap panel helpers', () => {
     expect(resolverSlice).toContain('resolveProjectedSignerId(entityId)');
     expect(resolverSlice).not.toContain("throw new Error('XLN environment not ready')");
     expect(placeSlice).toContain('resolveSwapLogicalClock(currentReplica)');
-    expect(placeSlice).toContain('const targetSetupTxs = [...targetInboundPlan.setupTxs]');
-    expect(placeSlice).toContain('await submitRuntimeInput({');
-    expect(placeSlice).toContain('await submitActiveCrossJurisdictionIntent(crossJurisdiction)');
-    expect(placeSlice).toContain('await submitEntityInputs([{');
+    expect(placeSlice).toContain('activeXlnFunctions.planSwapCommand({');
+    expect(placeSlice).toContain('await submitRuntimeInput(commandPlan.targetSetupInput)');
+    expect(placeSlice).toContain('await submitActiveCrossJurisdictionIntent(commandPlan.crossJurisdictionIntent)');
     expect(placeSlice).toContain('await prewarmCounterpartyProfiles(runtimeEnv, [targetRoute.targetHubEntityId])');
     expect(placeSlice).not.toContain("throw new Error('XLN environment not ready')");
     expect(placeSlice).not.toContain('env.timestamp');

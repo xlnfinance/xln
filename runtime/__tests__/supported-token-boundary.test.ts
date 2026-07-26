@@ -15,7 +15,7 @@ describe('supported-token metadata boundary', () => {
       tokenId: number,
       decimals: number,
     ) => bigint;
-    expect(getCredit(1, usdc!.decimals)).toBe(1_000_000n * 10n ** 6n);
+    expect(getCredit(1, usdc!.decimals)).toBe(2_000_000n * 10n ** 6n);
   });
 
   test('unknown compact token IDs never invent 18-decimal metadata', () => {

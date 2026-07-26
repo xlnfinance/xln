@@ -282,6 +282,7 @@ describe('external wallet observed state', () => {
       mempool: [],
       hankoWitness: new Map(),
     };
+    env.timestamp = seededReplica.state.timestamp;
     const headerHash = (height: number): string => `0x${height.toString(16).padStart(64, '0')}`;
     seededReplica.jHistory = {
       jurisdictionRef: getJEventJurisdictionRef(JURISDICTION),

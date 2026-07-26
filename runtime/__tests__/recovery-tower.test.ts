@@ -338,6 +338,8 @@ describe('runtime recovery tower', () => {
       outputs: [],
       jOutputs: [],
       hashesToSign: [],
+      candidateEffects: [],
+      storageChanges: [],
     };
     env.browserVMState = {
       stateRoot: `0x${'c3'.repeat(32)}`,

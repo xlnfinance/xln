@@ -726,6 +726,7 @@ describe('registered Entity certified board authority', () => {
     const registration = event('EntityRegistered', oldBoard);
     const rotation = event('BoardActivated', newBoard, { height: 3, previousBoardHash: oldBoard });
     const baseState = makeState(registeredEntityId, signerA, jurisdiction);
+    env.timestamp = baseState.timestamp;
     baseState.config = oldConfig;
     baseState.prevFrameHash = blockHash('aa');
     baseState.leaderState = { activeValidatorId: signerA, view: 0, changedAtHeight: 0 };

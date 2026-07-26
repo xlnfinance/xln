@@ -4,7 +4,6 @@ import {
   buildAddTokenToAccountTx,
   buildBroadcastTx,
   buildDisputeFinalizeTx,
-  buildDisputeStartTx,
   buildExternalToReserveTx,
   buildMovePostSettleTxs,
   buildOpenAccountTx,
@@ -74,14 +73,20 @@ describe('entity action tx builders', () => {
   });
 
   test('builds account lifecycle and dispute txs', () => {
-    expect(buildSettlementApproveTx(hubId)).toEqual({ type: 'settle_approve', data: { counterpartyEntityId: hubId } });
+    const workspaceHash = `0x${'12'.repeat(32)}`;
+    expect(buildSettlementApproveTx(hubId, workspaceHash)).toEqual({
+      type: 'settle_approve',
+      data: { counterpartyEntityId: hubId, workspaceHash },
+    });
     expect(buildOpenAccountTx(hubId)).toEqual({ type: 'openAccount', data: { targetEntityId: hubId } });
-    expect(buildPrepareDisputeTx(hubId, 'prep')).toEqual({ type: 'prepareDispute', data: { counterpartyEntityId: hubId, description: 'prep' } });
-    expect(buildDisputeStartTx(hubId, 'start', { allowUnsafeCrossJTargetDispute: true, acceptedCrossJTargetLossAmount: 10n })).toEqual({
-      type: 'disputeStart',
+    expect(buildPrepareDisputeTx(hubId, 'prep', {
+      allowUnsafeCrossJTargetDispute: true,
+      acceptedCrossJTargetLossAmount: 10n,
+    })).toEqual({
+      type: 'prepareDispute',
       data: {
         counterpartyEntityId: hubId,
-        description: 'start',
+        description: 'prep',
         allowUnsafeCrossJTargetDispute: true,
         acceptedCrossJTargetLossAmount: 10n,
       },

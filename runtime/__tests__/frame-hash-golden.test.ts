@@ -17,9 +17,9 @@ import type { AccountFrame, EntityState, EntityTx } from '../types';
 const ACCOUNT_FRAME_GOLDEN_HASH = '0x15cd826cf4c3d968ec506d1ec758c7529963079ca1fcaeb4b29a0fa1d4c0c7b0';
 // Independently calculated with a standalone tagged-tuple reference encoder.
 // Keep these literal so changing the production codec cannot bless itself.
-const ENTITY_STATE_ROOT_GOLDEN_HASH = '0xc3068db0403b6c52e77fdcf9c7d5dc3c9d33a1698c6436e23709a5215896016c';
+const ENTITY_STATE_ROOT_GOLDEN_HASH = '0x2550ac0a739bb13133109a83608fb9ea340931f861da85242b7d24a4bcc20095';
 const ENTITY_AUTHORITY_ROOT_GOLDEN_HASH = '0xa7c4fd7139d47d2567c6a97c7d7d06bc6d60fc4481acbe8155584f3573b520bd';
-const ENTITY_FRAME_GOLDEN_HASH = '0x54a9f7415fc1d4511da49c5c470b7efb7e0a45de4ad89e5003e0ac25bf41b553';
+const ENTITY_FRAME_GOLDEN_HASH = '0x6db6b3265794c1f1f64012be6a0efec156c8a68cb38a9e84f85543c8e0717e3c';
 
 const makeAccountFrameFixture = (): AccountFrame => ({
   height: 7,

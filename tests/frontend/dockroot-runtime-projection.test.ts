@@ -61,7 +61,8 @@ test('DockRoot defaults to Graph left plus pinned wallet and tools on the right'
     expect(source).toContain(`id: '${panelId}'`);
   }
   expect(source).toContain("import IndexedDbInspector from '$lib/components/Settings/IndexedDbInspector.svelte'");
-  expect(source).toContain('requestedDockPanel.subscribe');
+  expect(source).toContain('export let requestedPanelId: string | null = null');
+  expect(source).toContain('appStateOperations.clearDockPanelRequest(panelId)');
   expect(source).toContain("import RemoteRuntimeManager from '$lib/components/Runtime/RemoteRuntimeManager.svelte'");
   expect(source).toContain("appStateOperations.setMode('user')");
   expect(source).toContain('showDockTimeMachine = !embedMode || $settings.showTimeMachine');
@@ -106,7 +107,7 @@ test('Dock entity opening replaces the pinned wallet by default and supports exp
   expect(settings).toContain('Replace pinned Main Wallet');
   expect(settings).toContain('Open a new entity tab');
   expect(settings).toContain('data-testid="network-machine-timeline-mode"');
-  expect(settings).toContain("focusDockPanel('leveldb-inspector')");
+  expect(settings).toContain("focusDockPanel('runtime-diagnostics')");
   expect(settings).toContain("focusDockPanel('entity-audit')");
   expect(settings).toContain('TabStylePicker');
 });

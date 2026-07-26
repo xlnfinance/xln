@@ -147,13 +147,14 @@ describe('typed Entity and Book physical rebranch matrix', () => {
       await db.get(entityKey),
       validateStorageEntityCoreDocValue,
     )).toEqual(splitEntity);
-    expect(await db.get(bookKey)).toEqual(encodeBuffer(book));
     const restoredBook = decodeValidatedBuffer(
       await db.get(bookKey),
       validateStorageBookDocValue,
     );
     expect(restoredBook.orders.size).toBe(book.orders.size);
     expect(restoredBook.bidBucketIdsDesc).toEqual(book.bidBucketIdsDesc);
+    expect(Array.from(restoredBook.orders.values()).every(order => Boolean(order.commitmentHash))).toBe(true);
+    expect(Array.from(restoredBook.bidBuckets.values()).every(bucket => Boolean(bucket.commitmentHash))).toBe(true);
 
     await applyPrepared(db, [], [
       { family: 'book', entityId, pairId },

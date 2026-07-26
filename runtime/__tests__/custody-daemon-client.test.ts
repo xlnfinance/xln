@@ -60,6 +60,8 @@ describe('custody daemon rAdapter transport', () => {
                 commandLaneKind: 'capability',
                 currentHeight: 7,
                 nextCommandSequence: 1,
+                commandReady: true,
+                commandReadyReason: null,
                 ...identity,
               },
             }),
@@ -141,6 +143,8 @@ describe('custody daemon rAdapter transport', () => {
             commandLaneKind: 'owner',
             currentHeight: 7,
             nextCommandSequence: 9,
+            commandReady: true,
+            commandReadyReason: null,
             ...signRuntimeAdapterServerIdentity(identityEnv, request.challenge),
           };
         } else if (request.op === 'send') {

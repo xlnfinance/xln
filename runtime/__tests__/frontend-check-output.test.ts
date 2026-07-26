@@ -40,7 +40,7 @@ describe('frontend check output', () => {
     expect(workflow).toContain('git diff --exit-code -- frontend/static/contracts');
     expect(workflow).toContain("hashFiles('bun.lock', 'package.json', 'frontend/bun.lock', 'frontend/package.json')");
     expect(workflow).toContain('bun install --frozen-lockfile');
-    expect(workflow).toContain('node_modules\n            frontend/node_modules');
+    expect(workflow).toContain('path: ~/.bun/install/cache');
   });
 
   test('require-all-contract-sources rejects stale bundled artifacts', () => {
@@ -50,7 +50,7 @@ describe('frontend check output', () => {
       mkdirSync(join(fixtureFrontend, 'static', 'contracts'), { recursive: true });
       writeFileSync(join(fixtureFrontend, 'copy-static-files.js'), readFileSync(join(repoRoot, 'frontend/copy-static-files.js')));
       writeFileSync(join(fixtureFrontend, 'docs-catalog.js'), readFileSync(join(repoRoot, 'frontend/docs-catalog.js')));
-      for (const contract of ['Account', 'Depository', 'EntityProvider', 'DeltaTransformer', 'ERC20Mock']) {
+      for (const contract of ['Account', 'Depository', 'EntityProvider', 'HankoVerifier', 'DeltaTransformer', 'ERC20Mock']) {
         writeFileSync(join(fixtureFrontend, 'static', 'contracts', `${contract}.json`), '{}\n');
       }
 

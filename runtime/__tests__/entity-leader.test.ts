@@ -458,6 +458,7 @@ describe('entity leader policy', () => {
       outputs: structuredClone(replay.outputs),
       jOutputs: structuredClone(replay.jOutputs),
       hashesToSign: structuredClone(hashesToSign),
+      candidateEffects: structuredClone(replay.candidateEffects),
       storageChanges: structuredClone(replay.storageChanges),
     };
     failoverReplica.jPrefixRound = mergeJPrefixAttestations(failoverEnv, base, undefined, heads);
@@ -613,6 +614,7 @@ describe('entity leader policy', () => {
         outputs: structuredClone(preparedResult.outputs),
         jOutputs: structuredClone(preparedResult.jOutputs),
         hashesToSign: structuredClone(preparedManifest),
+        candidateEffects: structuredClone(preparedResult.candidateEffects),
         storageChanges: structuredClone(preparedResult.storageChanges),
       },
       isProposer: false,

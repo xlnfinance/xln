@@ -323,7 +323,7 @@ describe('production startup wiring', () => {
     const signerConfig = extractSourceBlock(
       vaultStore,
       'const buildSignerEntityConfig = (',
-      'function deriveJurisdictionSignerIndex',
+      'function getSignerDerivationIndex',
     );
     const primaryEntityCreation = extractSourceBlock(
       vaultStore,
@@ -1010,7 +1010,7 @@ describe('production startup wiring', () => {
   test('non-production Anvil harnesses keep bounded history in memory', () => {
     const harnesses = [
       'runtime/scripts/run-e2e-parallel-isolated.ts',
-      'runtime/scripts/rpc-settlement-parity.ts',
+      'runtime/scripts/rpc-settlement-anvil.ts',
       'runtime/scripts/dev-anvil-stack.ts',
       'runtime/scripts/run-system-tests-parallel.ts',
       'runtime/scenarios/boot.ts',
