@@ -169,17 +169,12 @@ export function applyHtlcSecretFollowups(ctx: HtlcSecretFollowupContext, reveale
         accountId: route.inboundEntity,
         tx: { type: 'htlc_resolve', data: { lockId: route.inboundLockId, outcome: 'secret', secret } },
       });
-      // A self-cycle is both the terminal recipient and the original payer.
-      // Once its final offer reveals a verified preimage, waiting for every
-      // intermediary to relay that same preimage back is redundant. Resolve
-      // both signed Account legs from this Entity frame; each peer still must
-      // commit its own bilateral frame, so this does not bypass consensus.
-      if (route.originated && route.outboundEntity && route.outboundLockId) {
-        mempoolOps.push({
-          accountId: route.outboundEntity,
-          tx: { type: 'htlc_resolve', data: { lockId: route.outboundLockId, outcome: 'secret', secret } },
-        });
-      }
+      // Never also resolve an originated self-cycle's outbound lock here.
+      // The same entity may be both route origin and terminal recipient, but
+      // each intermediary must still learn the preimage from its committed
+      // downstream Account frame and propagate it upstream. Closing the first
+      // and last legs together would hide a broken middle-hop propagation path
+      // and can leave asymmetric commitments across a crash or dispute.
       armHtlcSecretAckTimeout(newState, route);
       continue;
     }

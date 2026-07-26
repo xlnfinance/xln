@@ -455,7 +455,7 @@ describe('htlc event contract and dispute tail', () => {
     expect(replica.state.crontabState?.hooks.has(`htlc-secret-ack:${hashlock}`)).toBe(true);
   });
 
-  test('queues both self-cycle resolutions from the frame that reveals the secret', () => {
+  test('queues only the inbound self-cycle resolution until the secret propagates back', () => {
     const entityId = `0x${'11'.repeat(32)}`;
     const inboundEntityId = `0x${'22'.repeat(32)}`;
     const outboundEntityId = `0x${'33'.repeat(32)}`;
@@ -486,10 +486,6 @@ describe('htlc event contract and dispute tail', () => {
       {
         accountId: inboundEntityId,
         tx: { type: 'htlc_resolve', data: { lockId: 'self-inbound', outcome: 'secret', secret } },
-      },
-      {
-        accountId: outboundEntityId,
-        tx: { type: 'htlc_resolve', data: { lockId: 'self-outbound', outcome: 'secret', secret } },
       },
     ]);
   });
