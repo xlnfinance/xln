@@ -1258,6 +1258,7 @@ describe('production startup wiring', () => {
     const appLayout = readFileSync(join(repoRoot, 'frontend/src/routes/app/+layout.svelte'), 'utf8');
     const importFlow = readFileSync(join(repoRoot, 'frontend/src/lib/utils/remoteRuntimeImportFlow.ts'), 'utf8');
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    const bootstrapTimeline = readFileSync(join(repoRoot, 'runtime/orchestrator/bootstrap-timeline.ts'), 'utf8');
     const isolatedRunner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
 
     expect(baseline).toContain('allowAutoReset?: boolean;');
@@ -1280,8 +1281,8 @@ describe('production startup wiring', () => {
     expect(orchestrator).not.toContain('status: readiness.status, headers');
     expect(orchestrator).toContain('clearRuntimeImportManifestFile();');
     expect(orchestrator).toContain('scheduleRuntimeImportManifestRefresh(null);');
-    expect(orchestrator).toContain('const preflightComplete = resetClear.completedAt !== null && params.storageOk;');
-    expect(orchestrator).toContain('const custodyState = params.custodyOk ? true : custodyStarted ? false : null;');
+    expect(bootstrapTimeline).toContain('const preflightComplete = resetClear.completedAt !== null && params.storageOk;');
+    expect(bootstrapTimeline).toContain('const custodyState = params.custodyOk ? true : custodyStarted ? false : null;');
     expect(orchestrator).toContain('clearRuntimeImportManifestFile();\n  const preserveState');
     expect(orchestrator).not.toContain('await persistHubReadySnapshots();\n    publishRuntimeImportManifest();');
     expect(orchestrator).toContain(
@@ -1874,15 +1875,15 @@ describe('production startup wiring', () => {
   });
 
   test('bootstrap timeline stages expose typed failure metadata', () => {
-    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    const bootstrapTimeline = readFileSync(join(repoRoot, 'runtime/orchestrator/bootstrap-timeline.ts'), 'utf8');
     const types = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator-types.ts'), 'utf8');
     const healthRedaction = readFileSync(join(repoRoot, 'runtime/server/health-redaction.ts'), 'utf8');
 
     expect(types).toContain('failure: RuntimeFailureSignal | null;');
-    expect(orchestrator).toContain('classifyRuntimeBootstrapStageFailure');
-    expect(orchestrator).toContain('const withBootstrapStageFailure = (');
-    expect(orchestrator).toContain('failure: classifyRuntimeBootstrapStageFailure(stage.key, stage.status, stage.reason)');
-    expect(orchestrator).toContain('].map(withBootstrapStageFailure),');
+    expect(bootstrapTimeline).toContain('classifyRuntimeBootstrapStageFailure');
+    expect(bootstrapTimeline).toContain('const withBootstrapStageFailure = (');
+    expect(bootstrapTimeline).toContain('failure: classifyRuntimeBootstrapStageFailure(stage.key, stage.status, stage.reason)');
+    expect(bootstrapTimeline).toContain('].map(withBootstrapStageFailure),');
     expect(healthRedaction).toContain("failure: publicFailureSignal(valueOf(stage, 'failure'))");
   });
 

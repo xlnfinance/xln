@@ -2,8 +2,7 @@
 
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { cpus, freemem, loadavg, totalmem } from 'node:os';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { scheduler } from 'node:timers/promises';
 import { compareStableText, safeStringify } from '../protocol/serialization';
@@ -38,7 +37,7 @@ import {
   encodeMarketWireMessage,
   type MarketWireRequest,
 } from '../relay/market-wire';
-import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync, type StorageHealth } from './storage-monitor';
+import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync } from './storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';
 import { serveRuntimeBundle, serveStatic } from '../server/static-assets';
 import { handleWatchtowerProxy } from '../server/watchtower-proxy';
@@ -49,6 +48,7 @@ import {
 } from '../server/assistant-proxy';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { publicAggregatedHealth, resolveSocketPeerAddress } from '../server/health-redaction';
+import { resolveRequestClientIp } from '../server/relay-direct';
 import { isOperatorRequest, loadOrCreateOperatorToken } from './operator-access';
 import {
   resolveOrchestratorSocketType,
@@ -64,7 +64,6 @@ import {
 } from './orchestrator-types';
 import {
   CHILD_HEALTH_TIMEOUT_MS,
-  CHILD_LOG_RING_MAX,
   HEALTH_RESPONSE_REFRESH_TIMEOUT_MS,
   HUB_BASELINE_TIMEOUT_MS,
   HUB_BASELINE_STALL_TIMEOUT_MS,
@@ -72,7 +71,6 @@ import {
   HUB_NAMES,
   HUB_PROFILES_READY_TIMEOUT_MS,
   HUB_REQUIRED_TOKEN_COUNT,
-  MARKET_MAKER_READY_TIMEOUT_MS,
   RELAY_MARKET_MAX_SUBSCRIPTION_CELLS,
   RELAY_MARKET_MAX_SUBSCRIPTIONS,
   RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP,
@@ -137,6 +135,14 @@ import {
   normalizeMarketMakerHealthPayload,
 } from './market-maker-health-payload';
 import { createMarketMakerChildPoller } from './market-maker-child-poll';
+import { createBootstrapTimelineTools } from './bootstrap-timeline';
+import { createProcessHealthBuilder } from './process-health';
+import {
+  flushPrefixedLogChunk,
+  pushChildLogLines,
+  type PrefixLogState,
+  writePrefixedLogChunk,
+} from './child-log-buffer';
 import {
   evaluateHubBaselineDeadlines,
   type HubBaselineProgressState,
@@ -156,7 +162,6 @@ import {
 } from './child-recovery-policy';
 import {
   buildRuntimeHealthFailures,
-  classifyRuntimeBootstrapStageFailure,
   normalizeRuntimeFailureCode,
 } from '../protocol/failure-taxonomy';
 import { STORAGE_WRITER_LOCK_TTL_MS } from '../storage/runtime-dbs';
@@ -172,27 +177,7 @@ import {
   resolveResetCapabilityHealth,
   type OrchestratorResetOptions,
 } from './reset-coordinator';
-
-const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
-  const totalBytes = Number(storage.disk.totalBytes || 0);
-  const usedBytes = Number(storage.disk.usedBytes || 0);
-  const freeBytes = Number(storage.disk.freeBytes || 0);
-  const shortfallBytes = Number(storage.shortfallBytes || 0);
-  const toGiB = (value: number): number => Math.round((value / 1024 ** 3) * 100) / 100;
-  return {
-    ok: storage.ok,
-    minFreeBytes: storage.minFreeBytes,
-    shortfallBytes,
-    freeBytes,
-    usedBytes,
-    totalBytes,
-    shortfallGiB: toGiB(shortfallBytes),
-    freeGiB: toGiB(freeBytes),
-    usedGiB: toGiB(usedBytes),
-    totalGiB: toGiB(totalBytes),
-    usedPct: totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 10000) / 100 : 0,
-  };
-};
+import { buildDiskSummary } from './disk-health';
 
 const args = parseArgs();
 const orchestratorOwnerId = `${process.pid}:${Date.now()}:${randomUUID()}`;
@@ -224,7 +209,6 @@ const orchestratorCodeFingerprint = (() => {
   };
 })();
 const staleReapEnabled = process.env['XLN_SKIP_STALE_REAP'] !== '1';
-const BOOTSTRAP_EVENT_TAIL_BYTES = 64 * 1024;
 const MARKET_MAKER_FULL_HEALTH_TIMEOUT_MS = Math.max(
   CHILD_HEALTH_TIMEOUT_MS,
   Math.floor(Number(process.env['XLN_MARKET_MAKER_FULL_HEALTH_TIMEOUT_MS'] || '60000')),
@@ -628,85 +612,6 @@ const warnBootstrapTailRead = (message: string, path: string, error: unknown): v
   if (key === lastBootstrapTailWarning) return;
   lastBootstrapTailWarning = key;
   meshLog.warn(message, { path, error: errorMessage });
-};
-
-const readTailText = (path: string, maxBytes: number): string | null => {
-  if (!path || !existsSync(path)) return null;
-  let fd: number | null = null;
-  try {
-    const stat = statSync(path);
-    if (!stat.isFile() || stat.size <= 0) return null;
-    const length = Math.min(stat.size, Math.max(1, maxBytes));
-    const buffer = Buffer.alloc(length);
-    fd = openSync(path, 'r');
-    const offset = Math.max(0, stat.size - length);
-    const bytesRead = readSync(fd, buffer, 0, length, offset);
-    return buffer.toString('utf8', 0, bytesRead);
-  } catch (error) {
-    warnBootstrapTailRead('bootstrap_events_tail_read_failed', path, error);
-    return null;
-  } finally {
-    if (fd !== null) {
-      try {
-        closeSync(fd);
-      } catch (error) {
-        warnBootstrapTailRead('bootstrap_events_tail_close_failed', path, error);
-      }
-    }
-  }
-};
-
-const marketMakerBootstrapEventsPath = (): string =>
-  String(process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL'] || '').trim() ||
-  join(marketMakerChild.dbPath, 'bootstrap-events.jsonl');
-
-const pushChildLogLines = (target: string[], chunk: Buffer | string): void => {
-  const text = chunk.toString();
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    target.push(line.slice(0, 1000));
-  }
-  if (target.length > CHILD_LOG_RING_MAX) {
-    target.splice(0, target.length - CHILD_LOG_RING_MAX);
-  }
-};
-
-type PrefixLogState = { pending: string };
-
-const writePrefixedLogChunk = (
-  stream: NodeJS.WritableStream,
-  prefix: string,
-  state: PrefixLogState,
-  chunk: Buffer | string,
-  onLine?: (line: string) => void,
-): void => {
-  const text = `${state.pending}${chunk.toString()}`;
-  const lines = text.split(/\r?\n/);
-  state.pending = lines.pop() ?? '';
-  for (const line of lines) {
-    onLine?.(line);
-    stream.write(`${prefix} ${line}\n`);
-  }
-};
-
-const flushPrefixedLogChunk = (
-  stream: NodeJS.WritableStream,
-  prefix: string,
-  state: PrefixLogState,
-  onLine?: (line: string) => void,
-): void => {
-  if (!state.pending) return;
-  onLine?.(state.pending);
-  stream.write(`${prefix} ${state.pending}\n`);
-  state.pending = '';
-};
-
-const resolveRequestClientIp = (request: Request): string => {
-  const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-  const realIp = request.headers.get('x-real-ip')?.trim();
-  const cfIp = request.headers.get('cf-connecting-ip')?.trim();
-  return forwarded || realIp || cfIp || 'direct';
 };
 
 const stopProcess = async (proc: ChildProcess | null): Promise<void> => {
@@ -1734,359 +1639,27 @@ const stopAllChildren = async (options: StopAllChildrenOptions = {}): Promise<vo
   managedRuntimeLeases.removeLease(managedSpecForMarketMaker());
 };
 
-const buildChildProcessHealth = (): AggregatedHealth['process']['children'] => {
-  const hubEntries = hubChildren.map((child) => {
-    const spec = managedSpecForHub(child);
-    const lease = managedRuntimeLeases.readLease(spec);
-    return {
-      role: spec.role,
-      name: spec.name,
-      pid: child.proc?.pid ?? null,
-      leasePid: lease?.pid ?? null,
-      leaseOwnerId: lease?.ownerId ?? null,
-      online: child.proc?.exitCode === null &&
-        child.proc?.signalCode === null &&
-        child.lastHealth?.runtime?.halted !== true,
-      exitCode: child.exitCode,
-      exitSignal: child.exitSignal,
-      startedAt: child.startedAt,
-      exitedAt: child.exitedAt,
-      restartCount: child.restartCount,
-      apiPort: spec.apiPort,
-      dbPath: spec.dbPath,
-      lastErrorLine: child.recentStderr.at(-1) ?? null,
-      recentStdout: child.recentStdout.slice(-10),
-      recentStderr: child.recentStderr.slice(-10),
-    };
-  });
-  const mmSpec = managedSpecForMarketMaker();
-  const mmLease = managedRuntimeLeases.readLease(mmSpec);
-  return [
-    ...hubEntries,
-    {
-      role: mmSpec.role,
-      name: mmSpec.name,
-      pid: marketMakerChild.proc?.pid ?? null,
-      leasePid: mmLease?.pid ?? null,
-      leaseOwnerId: mmLease?.ownerId ?? null,
-      online: marketMakerChild.proc?.exitCode === null &&
-        marketMakerChild.proc?.signalCode === null &&
-        marketMakerChild.lastHealth?.runtime?.halted !== true,
-      exitCode: marketMakerChild.exitCode,
-      exitSignal: marketMakerChild.exitSignal,
-      startedAt: marketMakerChild.startedAt,
-      exitedAt: marketMakerChild.exitedAt,
-      restartCount: marketMakerChild.restartCount,
-      apiPort: mmSpec.apiPort,
-      dbPath: mmSpec.dbPath,
-      lastErrorLine: marketMakerChild.recentStderr.at(-1) ?? null,
-      recentStdout: marketMakerChild.recentStdout.slice(-10),
-      recentStderr: marketMakerChild.recentStderr.slice(-10),
-    },
-  ];
-};
-
-const buildProcessHealth = (): AggregatedHealth['process'] => {
-  const mem = process.memoryUsage();
-  const totalMemory = totalmem();
-  const freeMemory = freemem();
-  return {
-    pid: process.pid,
-    ownerId: orchestratorOwnerId,
-    uptimeSec: Math.round(process.uptime()),
-    rssBytes: mem.rss,
-    heapUsedBytes: mem.heapUsed,
-    loadavg: loadavg(),
-    cpuCount: cpus().length,
-    memory: {
-      freeBytes: freeMemory,
-      totalBytes: totalMemory,
-      freePct: totalMemory > 0 ? Math.round((freeMemory / totalMemory) * 10000) / 100 : 0,
-    },
-    children: buildChildProcessHealth(),
-  };
-};
-
-type LastBootstrapEvent = {
-  event: string;
-  stage: string | null;
-  at: string | null;
-  height: number | null;
-  backlog: unknown;
-  readyHash: string | null;
-  runtimeStateHash: string | null;
-  entityStateHash: string | null;
-};
-
-const readLastMarketMakerBootstrapEvent = (): LastBootstrapEvent | null => {
-  const tail = readTailText(marketMakerBootstrapEventsPath(), BOOTSTRAP_EVENT_TAIL_BYTES);
-  if (!tail) return null;
-  const lines = tail.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    try {
-      const parsed = JSON.parse(lines[i]!) as unknown;
-      if (!isRecord(parsed)) continue;
-      const event = String(parsed['event'] || '').trim();
-      if (!event) continue;
-      return {
-        event,
-        stage: String(parsed['stage'] || '').trim() || null,
-        at: String(parsed['at'] || '').trim() || null,
-        height: toFiniteNumber(parsed['height']),
-        backlog: parsed['backlog'],
-        readyHash: String(parsed['hash'] || '').trim() || null,
-        runtimeStateHash: String(parsed['runtimeStateHash'] || '').trim() || null,
-        entityStateHash: String(parsed['entityStateHash'] || '').trim() || null,
-      };
-    } catch {
-      // The bounded tail can start mid-line; keep scanning older complete lines.
-    }
-  }
-  return null;
-};
-
-const summarizeBootstrapBacklog = (value: unknown): AggregatedHealth['bootstrapTimeline']['backlog'] => {
-  if (!isRecord(value)) return null;
-  const queuedInputs = Array.isArray(value['queuedEntityInputs']) ? value['queuedEntityInputs'] : [];
-  const queuedEntityTxCount = queuedInputs.reduce((sum, entry) => {
-    if (!isRecord(entry)) return sum;
-    return sum + Math.max(0, Math.floor(Number(entry['txCount'] || 0)));
-  }, 0);
-  const runtimeTxs = Math.max(0, Math.floor(Number(value['runtimeTxs'] || 0)));
-  const entityInputs = Math.max(0, Math.floor(Number(value['entityInputs'] || 0)));
-  const jInputs = Math.max(0, Math.floor(Number(value['jInputs'] || 0)));
-  const processing = value['processing'] === true;
-  return {
-    processing,
-    runtimeTxs,
-    entityInputs,
-    jInputs,
-    queuedEntityInputCount: queuedInputs.length,
-    queuedEntityTxCount,
-    total: runtimeTxs + entityInputs + jInputs + (processing ? 1 : 0),
-  };
-};
-
-const emptyBootstrapBacklog = (): NonNullable<AggregatedHealth['bootstrapTimeline']['backlog']> => ({
-  processing: false,
-  runtimeTxs: 0,
-  entityInputs: 0,
-  jInputs: 0,
-  queuedEntityInputCount: 0,
-  queuedEntityTxCount: 0,
-  total: 0,
+const buildProcessHealth = createProcessHealthBuilder({
+  hubChildren,
+  marketMakerChild,
+  ownerId: orchestratorOwnerId,
+  managedSpecForHub,
+  managedSpecForMarketMaker,
+  readLease: (spec) => managedRuntimeLeases.readLease(spec),
 });
 
-const timingFor = (stage: keyof typeof timings): TimingMap[string] => timings[stage] ?? { startedAt: null, completedAt: null, ms: null };
-
-const stageStatus = (
-  ok: boolean | null,
-  options: { active?: boolean; disabled?: boolean } = {},
-): AggregatedHealth['bootstrapTimeline']['stages'][number]['status'] => {
-  if (options.disabled) return 'disabled';
-  if (ok === true) return 'done';
-  if (options.active) return 'active';
-  if (ok === false) return 'blocked';
-  return 'pending';
-};
-
-const withBootstrapStageFailure = (
-  stage: Omit<AggregatedHealth['bootstrapTimeline']['stages'][number], 'failure'>,
-): AggregatedHealth['bootstrapTimeline']['stages'][number] => ({
-  ...stage,
-  failure: classifyRuntimeBootstrapStageFailure(stage.key, stage.status, stage.reason),
+const {
+  buildBootstrapTimeline,
+  readLastMarketMakerBootstrapEvent,
+} = createBootstrapTimelineTools({
+  getLastHealthResponseRefreshMs: () => lastHealthResponseRefreshMs,
+  isRecord,
+  marketMakerChild,
+  resetState,
+  timings,
+  toFiniteNumber,
+  warnTailRead: warnBootstrapTailRead,
 });
-
-const buildBootstrapTimeline = (params: {
-  storageOk: boolean;
-  resetOk: boolean;
-  hubsOnline: boolean;
-  onlineHubs: number;
-  totalHubs: number;
-  hubMeshOk: boolean;
-  directOpenLinks: number;
-  mmEnabled: boolean;
-  marketMakerActive: boolean;
-  sameChainOk: boolean;
-  crossOk: boolean;
-  mmOk: boolean;
-  mmStartupPhase: string | null;
-  mmOfferTotal: number;
-  mmExpectedTotal: number;
-  crossRouteCount: number;
-  expectedCrossRoutes: number;
-  custodyEnabled: boolean;
-  custodyOk: boolean;
-  bootstrapReservesOk: boolean;
-  bootstrapReserveTargetsMet: boolean;
-  reserveEntityCount: number;
-}): AggregatedHealth['bootstrapTimeline'] => {
-  const lastEvent = readLastMarketMakerBootstrapEvent();
-  const mmBootstrap = marketMakerChild.lastHealth?.bootstrap ?? marketMakerChild.lastInfo?.bootstrap ?? null;
-  const readyHash = String(mmBootstrap?.readyHash || '').trim() || lastEvent?.readyHash || null;
-  const runtimeStateHash = String(mmBootstrap?.runtimeStateHash || '').trim() || lastEvent?.runtimeStateHash || null;
-  const entityStateHash = String(mmBootstrap?.entityStateHash || '').trim() || lastEvent?.entityStateHash || null;
-  const eventReadyAt = lastEvent?.event === 'ready-hash' && lastEvent.at ? Date.parse(lastEvent.at) : null;
-  const readyAt = toFiniteNumber(mmBootstrap?.readyAt) ?? (Number.isFinite(eventReadyAt) ? eventReadyAt : null);
-  const infoBacklog = (marketMakerChild.lastInfo as { runtimeBacklog?: unknown } | null)?.runtimeBacklog;
-  const backlog = summarizeBootstrapBacklog(lastEvent?.backlog ?? infoBacklog);
-  const resetClear = timingFor('reset_clear_state');
-  const resetTotal = timingFor('reset_total');
-  const resetHubs = timingFor('reset_wait_hubs');
-  const resetMarketMaker = timingFor('reset_market_maker');
-  const resetCustody = timingFor('reset_custody');
-  const preflightComplete = resetClear.completedAt !== null && params.storageOk;
-  const preflightActive = resetClear.startedAt !== null && resetClear.completedAt === null && params.storageOk;
-  const preflightState = preflightComplete ? true : params.storageOk ? null : false;
-  const custodyStarted = resetCustody.startedAt !== null;
-  const custodyState = params.custodyOk ? true : custodyStarted ? false : null;
-  const fallbackLastEvent = resetTotal.completedAt
-    ? {
-      event: resetState.lastError ? 'reset-failed' : 'reset-complete',
-      stage: 'orchestrator',
-      at: new Date(resetTotal.completedAt).toISOString(),
-      height: null,
-    }
-    : null;
-
-  return {
-    readyHash,
-    runtimeStateHash,
-    entityStateHash,
-    readyAt,
-    healthPoll: {
-      actualMs: lastHealthResponseRefreshMs,
-      budgetMs: HEALTH_RESPONSE_REFRESH_TIMEOUT_MS,
-    },
-    backlog: backlog ?? emptyBootstrapBacklog(),
-    lastEvent: lastEvent
-      ? {
-        event: lastEvent.event,
-        stage: lastEvent.stage,
-        at: lastEvent.at,
-        height: lastEvent.height,
-      }
-      : fallbackLastEvent,
-    stages: [
-      {
-        key: 'preflight',
-        label: 'Preflight',
-        status: stageStatus(preflightState, { active: preflightActive }),
-        reason: resetState.lastError || (params.storageOk ? 'Reset and storage preflight clear' : 'Storage gate blocked'),
-        budgetMs: STARTUP_TIMEOUT_MS,
-        actualMs: resetClear.ms,
-        startedAt: resetClear.startedAt,
-        completedAt: resetClear.completedAt,
-        evidence: [
-          { label: 'storage ok', value: params.storageOk },
-          { label: 'reset state cleared', value: resetClear.completedAt !== null },
-        ],
-      },
-      {
-        key: 'hub-mesh',
-        label: 'Hub Mesh',
-        status: stageStatus(params.hubMeshOk, { active: params.hubsOnline && !params.hubMeshOk }),
-        reason: params.hubMeshOk ? 'All hub mesh accounts and credits are ready' : 'Hub mesh is still converging',
-        budgetMs: HUB_BASELINE_TIMEOUT_MS,
-        actualMs: resetHubs.ms,
-        startedAt: resetHubs.startedAt,
-        completedAt: resetHubs.completedAt,
-        evidence: [
-          { label: 'online hubs', value: params.onlineHubs },
-          { label: 'total hubs', value: params.totalHubs },
-          { label: 'direct links', value: params.directOpenLinks },
-        ],
-      },
-      {
-        key: 'same-chain',
-        label: 'Same-Chain Books',
-        status: stageStatus(params.sameChainOk, { active: params.marketMakerActive && !params.sameChainOk, disabled: !params.mmEnabled }),
-        reason: params.mmEnabled ? 'Market maker same-chain orderbooks have full configured depth' : 'Market maker disabled',
-        budgetMs: MARKET_MAKER_READY_TIMEOUT_MS,
-        actualMs: null,
-        startedAt: resetMarketMaker.startedAt,
-        completedAt: null,
-        evidence: [
-          { label: 'offers', value: params.mmOfferTotal },
-          { label: 'expected', value: params.mmExpectedTotal },
-        ],
-      },
-      {
-        key: 'cross-chain',
-        label: 'Cross-Chain Routes',
-        status: stageStatus(params.crossOk, { active: params.marketMakerActive && !params.crossOk, disabled: !params.mmEnabled }),
-        reason: params.mmEnabled ? 'Cross-jurisdiction routes have full configured depth' : 'Market maker disabled',
-        budgetMs: MARKET_MAKER_READY_TIMEOUT_MS,
-        actualMs: null,
-        startedAt: resetMarketMaker.startedAt,
-        completedAt: null,
-        evidence: [
-          { label: 'routes', value: params.crossRouteCount },
-          { label: 'expected', value: params.expectedCrossRoutes },
-        ],
-      },
-      {
-        key: 'market-maker',
-        label: 'Market Maker',
-        status: stageStatus(params.mmOk, { active: params.marketMakerActive && !params.mmOk, disabled: !params.mmEnabled }),
-        reason: params.mmEnabled ? `Market maker phase ${params.mmStartupPhase || 'unknown'}` : 'Market maker disabled',
-        budgetMs: MARKET_MAKER_READY_TIMEOUT_MS,
-        actualMs: resetMarketMaker.ms,
-        startedAt: resetMarketMaker.startedAt,
-        completedAt: resetMarketMaker.completedAt,
-        evidence: [
-          { label: 'phase', value: params.mmStartupPhase || 'unknown' },
-          { label: 'ready hash', value: readyHash ? 'present' : 'missing' },
-        ],
-      },
-      {
-        key: 'custody',
-        label: 'Custody',
-        status: stageStatus(custodyState, {
-          active: params.custodyEnabled && custodyStarted && resetCustody.completedAt === null && !params.custodyOk,
-          disabled: !params.custodyEnabled,
-        }),
-        reason: params.custodyEnabled ? 'Custody daemon and service health' : 'Custody disabled for this boot',
-        budgetMs: null,
-        actualMs: resetCustody.ms,
-        startedAt: resetCustody.startedAt,
-        completedAt: resetCustody.completedAt,
-        evidence: [
-          { label: 'enabled', value: params.custodyEnabled },
-        ],
-      },
-      {
-        key: 'health-poll',
-        label: 'Health Poll',
-        status: stageStatus(lastHealthResponseRefreshMs !== null, { active: lastHealthResponseRefreshMs === null }),
-        reason: 'Latest /api/health child refresh window',
-        budgetMs: HEALTH_RESPONSE_REFRESH_TIMEOUT_MS,
-        actualMs: lastHealthResponseRefreshMs,
-        startedAt: null,
-        completedAt: null,
-        evidence: [
-          { label: 'budget', value: HEALTH_RESPONSE_REFRESH_TIMEOUT_MS, unit: 'ms' },
-          { label: 'actual', value: lastHealthResponseRefreshMs, unit: 'ms' },
-        ],
-      },
-      {
-        key: 'ready-hash',
-        label: 'Ready Hash',
-        status: stageStatus(Boolean(readyHash), { active: params.mmEnabled && params.mmOk && !readyHash, disabled: !params.mmEnabled }),
-        reason: readyHash ? 'Market maker persisted bootstrap-ready fingerprint' : 'Ready hash is not available yet',
-        budgetMs: null,
-        actualMs: null,
-        startedAt: null,
-        completedAt: readyAt,
-        evidence: [
-          { label: 'ready at', value: readyAt },
-          { label: 'reserve entities', value: params.reserveEntityCount },
-          { label: 'reserve targets', value: params.bootstrapReservesOk && params.bootstrapReserveTargetsMet },
-        ],
-      },
-    ].map(withBootstrapStageFailure),
-  };
-};
 
 const computeAggregatedHealth = (options: {
   marketMakerHealthOverride?: MarketMakerHealthPayload | null | undefined;
