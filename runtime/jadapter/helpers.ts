@@ -8,7 +8,7 @@ import { ethers } from 'ethers';
 import type { JEvent } from './types';
 import type { DisputeFinalizationEvidence, EntityInput, Env, JPrefixAttestation, JReplica, JurisdictionConfig, JurisdictionEvent, RuntimeInput, RuntimeTx, ValidatorJBlockHeader, ValidatorJEventBlock } from '../types';
 import { createEmptyBatch, type JBatch } from '../jurisdiction/batch';
-import { enqueueRuntimeInput } from '../runtime';
+import { enqueueRuntimeInput } from '../machine/input-queue';
 import { createStructuredLogger, shortId } from '../infra/logger';
 import {
   canonicalDisputeFinalizationEvidenceHash,

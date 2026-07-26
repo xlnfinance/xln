@@ -130,6 +130,13 @@ describe('jadapter helper cursors', () => {
     expect(source).not.toContain('console.');
   });
 
+  test('jadapter ingress depends on the machine queue, not the runtime facade', () => {
+    const source = readFileSync(join(process.cwd(), 'runtime/jadapter/helpers.ts'), 'utf8');
+
+    expect(source).toContain("from '../machine/input-queue'");
+    expect(source).not.toMatch(/from ['"]\.\.\/runtime(?:\.ts)?['"]/);
+  });
+
   test('RPC wallet snapshot reads fail fast on partial RPC errors', () => {
     expect(readRequiredRpcBatchBigInt(new Map([[1, { id: 1, result: '0x2a' }]]), 1, 'balance')).toBe(42n);
     expect(() => readRequiredRpcBatchBigInt(new Map(), 1, 'balance')).toThrow(/EXTERNAL_WALLET_SNAPSHOT_RPC_MISSING/);

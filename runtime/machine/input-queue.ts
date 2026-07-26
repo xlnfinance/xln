@@ -9,6 +9,7 @@ import type {
 } from '../types';
 import { getWallClockMs } from '../utils';
 import { createStructuredLogger } from '../infra/logger';
+import { ensureRuntimeState } from './runtime-state';
 
 const runtimeInputQueueLog = createStructuredLogger('runtime.input_queue');
 
@@ -20,6 +21,18 @@ export type RuntimeInputQueueDeps = {
 export type RuntimeInputQueueOptions = {
   /** Pre-fence work, including a deterministic continuation of that work. */
   acceptedBeforeQuiesce?: boolean;
+};
+
+export const requestRuntimeLoopWake = (env: Env): void => {
+  const state = ensureRuntimeState(env);
+  if (state.halted) return;
+  const wakeLoop = state.wakeLoop;
+  if (wakeLoop) {
+    state.wakeLoop = null;
+    wakeLoop();
+    return;
+  }
+  state.wakeRequested = true;
 };
 
 const shouldLogRuntimeInputDebug = (): boolean => {
@@ -124,4 +137,19 @@ export const enqueueRuntimeInputs = (
         : Math.max(mempool.queuedAt, targetQueuedAt);
     deps.requestRuntimeLoopWake(env);
   }
+};
+
+export const enqueueRuntimeInput = (env: Env, runtimeInput: RuntimeInput): void => {
+  const ingressTimestamp = env.scenarioMode
+    ? (runtimeInput.timestamp ?? env.timestamp ?? 0)
+    : (runtimeInput.timestamp ?? getWallClockMs());
+  enqueueRuntimeInputs(
+    env,
+    { ensureRuntimeState, requestRuntimeLoopWake },
+    runtimeInput.entityInputs,
+    runtimeInput.runtimeTxs,
+    runtimeInput.jInputs,
+    ingressTimestamp,
+    runtimeInput.reliableReceipts,
+  );
 };

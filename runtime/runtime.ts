@@ -328,9 +328,12 @@ export type {
 import {
   enqueueRuntimeInputs as enqueueRuntimeInputsWithDeps,
   ensureRuntimeMempool,
+  requestRuntimeLoopWake,
   type RuntimeInputQueueDeps,
   type RuntimeInputQueueOptions,
 } from './machine/input-queue';
+export { enqueueRuntimeInput } from './machine/input-queue';
+import { ensureRuntimeState } from './machine/runtime-state';
 import {
   applyReliableDeliveryReceipts,
   captureReliableReceiptSenderCheckpoint,
@@ -667,38 +670,6 @@ const ensureRuntimeConfig = (env: Env): NonNullable<Env['runtimeConfig']> => {
   return env.runtimeConfig;
 };
 
-const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
-  if (!env.runtimeState) {
-    env.runtimeState = {
-      lifecyclePhase: 'booting',
-      loopActive: false,
-      halted: false,
-      loopPromise: null,
-      stopLoop: null,
-      wakeLoop: null,
-      wakeRequested: false,
-      inFlightEntityInputs: 0,
-      p2p: null,
-      pendingP2PConfig: null,
-      lastP2PConfig: null,
-      directEntityInputsDispatch: null,
-      directReliableReceiptDispatch: null,
-      canUseConnectedRelayFallback: null,
-      recoveryBackupBarrier: null,
-    };
-  }
-  if (!env.runtimeState.entityRuntimeHints) {
-    env.runtimeState.entityRuntimeHints = new Map();
-  }
-  if (!env.runtimeState.lifecyclePhase) {
-    env.runtimeState.lifecyclePhase = inferRuntimeLifecyclePhase(env.runtimeState);
-  }
-  if (!env.runtimeState.watcherDedupCounter) {
-    env.runtimeState.watcherDedupCounter = { value: 0 };
-  }
-  return env.runtimeState;
-};
-
 const getRuntimeStorageDbDeps = (): RuntimeStorageDbDeps => ({
   ensureRuntimeState,
 });
@@ -755,18 +726,6 @@ export const closeInfraDb = async (env: Env): Promise<void> => {
   state.infraDbClosing = true;
   await drainInfraDbWrites(env);
   await closeInfraDbStorage(env);
-};
-
-const requestRuntimeLoopWake = (env: Env): void => {
-  const state = ensureRuntimeState(env);
-  if (state.halted) return;
-  const wakeLoop = state.wakeLoop;
-  if (wakeLoop) {
-    state.wakeLoop = null;
-    wakeLoop();
-    return;
-  }
-  state.wakeRequested = true;
 };
 
 const waitForRuntimeLoopWake = async (env: Env): Promise<void> => {
@@ -953,20 +912,6 @@ const drainInfraDbWrites = async (env: Env): Promise<void> => {
   while (state.infraDbPendingWrites && state.infraDbPendingWrites.size > 0) {
     await Promise.allSettled([...state.infraDbPendingWrites]);
   }
-};
-
-export const enqueueRuntimeInput = (env: Env, runtimeInput: RuntimeInput): void => {
-  const ingressTimestamp = env.scenarioMode
-    ? (runtimeInput.timestamp ?? env.timestamp ?? 0)
-    : (runtimeInput.timestamp ?? getWallClockMs());
-  enqueueRuntimeInputs(
-    env,
-    runtimeInput.entityInputs,
-    runtimeInput.runtimeTxs,
-    runtimeInput.jInputs,
-    ingressTimestamp,
-    runtimeInput.reliableReceipts,
-  );
 };
 
 const getRuntimeWorkReason = (env: Env): string | null => {
