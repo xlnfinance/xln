@@ -45,6 +45,8 @@ import { enqueueEntityTxs } from './utils/e2e-runtime-input';
  * Why:
  * Using (outCollateral + outPeerCredit) over-triggers after the first successful top-up
  * and causes a new request_collateral on almost every small payment/faucet click.
+ * A committed pending request is immutable; later exposure waits for the next
+ * threshold cycle after the corresponding finalized event.
  */
 const INIT_TIMEOUT = 30_000;
 const USDC_TOKEN_ID = 1;
@@ -2042,9 +2044,9 @@ test.describe('Rebalance E2E', () => {
     expect(criticalConsole.length, `critical consensus/runtime errors during reload persistence flow:\n${criticalConsole.join('\n')}`).toBe(0);
   });
 
-  // Scenario: while one request_collateral batch is already submitted, extra debt may top up
-  // the pending request, but it must not enqueue a second J batch before the first finalize.
-  test('edge: pending request_collateral must not duplicate J batch before first settlement finalize', { tag: '@resilience' }, async ({ page }) => {
+  // Scenario: six faucets cross the 500 soft limit. Two more faucets while that
+  // request is pending remain below a fresh soft limit and must not top it up.
+  test('edge: rapid 8 faucets keep the sub-soft tail out of the pending collateral batch', { tag: '@resilience' }, async ({ page }) => {
     let scenarioStartedAt = 0;
     await timedStep('rebalance_edge.reset_server', () => resetProdServer(page));
     await page.addInitScript(() => {
@@ -2091,6 +2093,7 @@ test.describe('Rebalance E2E', () => {
     const lowerHub = hubId.toLowerCase();
     const pendingSnapshot: any = firstTrigger.snapshot;
     const firstRequestCommit: any = firstTrigger.committed;
+    expect(firstTrigger.faucets, 'the first request must start only after six 100-unit faucets').toBe(6);
     await markE2EPhase(page, 'rebalance_edge.request_committed', {
       phase: 'trigger-confirmed',
       entityId,
@@ -2103,16 +2106,15 @@ test.describe('Rebalance E2E', () => {
     });
     expect(firstRequestCommit, 'expected request_collateral_committed before first finalize').toBeTruthy();
 
-    // While pending, add more debt. A request top-up is valid; a second J-batch
-    // submission before the first finalize is not.
-    for (let i = 0; i < 3; i++) {
+    // Clicks seven and eight add less than a new 500-unit soft limit.
+    for (let i = 0; i < 2; i++) {
       await faucet(page, entityId, hubId);
       await page.waitForTimeout(100);
     }
     await markE2EPhase(page, 'rebalance_edge.second_burst_while_pending_done', {
       phase: 'duplicate-guard',
       entityId,
-      details: { hubId, count: 3 },
+      details: { hubId, count: 2 },
     });
     await page.waitForTimeout(1500);
 
@@ -2152,15 +2154,9 @@ test.describe('Rebalance E2E', () => {
       frameEvents,
     });
     expect(
-      logicalReqCommits.length >= 1,
-      `expected at least one request_collateral commit before first finalize: raw=${JSON.stringify(reqCommits, null, 2)} logical=${JSON.stringify(logicalReqCommits, null, 2)}\n${debugDump}`,
-    ).toBe(true);
-    for (let i = 1; i < logicalReqCommits.length; i++) {
-      expect(
-        BigInt(logicalReqCommits[i]?.requestedAmount || '0') > BigInt(logicalReqCommits[i - 1]?.requestedAmount || '0'),
-        `request_collateral top-ups must strictly increase target amount before first finalize: logical=${JSON.stringify(logicalReqCommits, null, 2)}\n${debugDump}`,
-      ).toBe(true);
-    }
+      logicalReqCommits.length,
+      `clicks seven and eight must not top up the first request below a fresh soft limit: raw=${JSON.stringify(reqCommits, null, 2)} logical=${JSON.stringify(logicalReqCommits, null, 2)}\n${debugDump}`,
+    ).toBe(1);
     expect(
       logicalBatchAdds.length,
       `request_collateral J-batch duplicated before first finalize: raw=${JSON.stringify(batchAdds, null, 2)} logical=${JSON.stringify(logicalBatchAdds, null, 2)} requests=${JSON.stringify(logicalReqCommits, null, 2)}\n${debugDump}`,

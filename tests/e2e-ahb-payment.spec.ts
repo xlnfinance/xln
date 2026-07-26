@@ -11,7 +11,7 @@
 import { test, expect, type Page } from './global-setup.mts';
 import { ethers } from 'ethers';
 import { deriveDelta } from '../runtime/account/utils';
-import { APP_BASE_URL, API_BASE_URL, resetProdServer } from './utils/e2e-baseline';
+import { APP_BASE_URL, API_BASE_URL, resetProdServer, waitForNamedHubs } from './utils/e2e-baseline';
 import {
   listRenderedCounterpartyIds,
   getRenderedOutboundForAccount,
@@ -366,28 +366,6 @@ async function getHubFeeConfig(page: Page, hubId: string): Promise<{ feePPM: big
     feePPM: BigInt(fee.feePPM || String(DEFAULT_FEE_PPM)),
     baseFee: BigInt(baseFeeNorm || '0'),
   };
-}
-
-/** Discover all hubs visible in gossip */
-async function discoverHubs(page: Page): Promise<string[]> {
-  const apiBaseUrl = await getActiveApiBase(page);
-  for (let i = 0; i < 45; i++) {
-    try {
-      const r = await page.request.get(`${apiBaseUrl}/api/debug/entities`);
-      if (r.ok()) {
-        const data = await r.json();
-        const ids = (Array.isArray((data as any)?.entities) ? (data as any).entities : [])
-          .filter((e: any) => e?.isHub === true)
-          .map((h: any) => h?.entityId)
-          .filter((id: any): id is string => typeof id === 'string');
-        const unique: string[] = Array.from(new Set(ids));
-        if (unique.length > 0) return unique;
-      }
-    } catch {}
-
-    await page.waitForTimeout(1000);
-  }
-  return [];
 }
 
 /** Find a self-payment cycle route using gossip + local account edges */
@@ -845,6 +823,7 @@ async function attemptOverspend(page: Page, to: string, route: string[], amount:
   const errorText = await expectUiPaymentNoRoute(page, {
     recipientEntityId: to,
     amount,
+    tokenId: 1,
     routeEntityIds: route,
   });
   console.log(`[E2E] Overspend rejected by route preflight: ${errorText}`);
@@ -950,10 +929,9 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     // ── 3. Discover hubs ─────────────────────────────────────────
     console.log('[E2E] 3. Discover hubs');
-    const hubs = await discoverHubs(page);
-    expect(hubs.length, 'Need at least one hub visible in gossip').toBeGreaterThan(0);
-    const hubId = hubs[0]!;
-    const preferredThreeHubs = hubs.slice(0, 3);
+    const namedHubs = await waitForNamedHubs(page, ['H1', 'H2', 'H3']);
+    const preferredThreeHubs = [namedHubs.h1!, namedHubs.h2!, namedHubs.h3!];
+    const hubId = preferredThreeHubs[0]!;
     const aliceSetupHubs = [hubId];
     console.log(`[E2E] Primary hub: ${hubId.slice(0, 16)}`);
     console.log(`[E2E] Alice setup hubs: ${aliceSetupHubs.map((hub) => hub.slice(0, 10)).join(', ')}`);
@@ -1250,7 +1228,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     // ── Summary ───────────────────────────────────────────────────
     console.log('[E2E] 10. Self-pay obfuscated loop route');
-    console.log(`[E2E] Hubs discovered: ${hubs.map(h => h.slice(0, 10)).join(', ')}`);
+    console.log(`[E2E] Hubs selected: ${preferredThreeHubs.map(h => h.slice(0, 10)).join(', ')}`);
     const requireThreeHubs = preferredThreeHubs.length >= 3;
     if (requireThreeHubs) {
       const existingCounterparties = await connectedCounterparties(page, alice!.entityId);

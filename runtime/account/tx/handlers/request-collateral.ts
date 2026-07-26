@@ -47,7 +47,14 @@ export function handleRequestCollateral(
   }
 
   const existingRequest = accountMachine.requestedRebalance.get(tokenId) ?? 0n;
-  const existingFeeState = accountMachine.requestedRebalanceFeeState?.get(tokenId);
+  if (existingRequest > 0n) {
+    return {
+      success: true,
+      events: [
+        `ℹ️ request_collateral skipped: pending request is immutable token=${tokenId} amount=${existingRequest}`,
+      ],
+    };
+  }
 
   // Deterministic request amount comes from frame payload.
   // Do not recompute from live outPeerCredit at commit time, otherwise the same tx
@@ -74,14 +81,6 @@ export function handleRequestCollateral(
   if (feeToken === tokenId) {
     effectiveRequest = effectiveAmount > effectiveFeeTarget ? effectiveAmount - effectiveFeeTarget : 0n;
   }
-  if (existingRequest > 0n && effectiveRequest <= existingRequest) {
-    return {
-      success: true,
-      events: [
-        `ℹ️ request_collateral skipped: pending request already covers target token=${tokenId} amount=${existingRequest}`,
-      ],
-    };
-  }
   if (effectiveRequest <= 0n) {
     return {
       success: true,
@@ -92,21 +91,19 @@ export function handleRequestCollateral(
   }
 
   const requesterFeeCapacity = deriveDelta(feeDelta, requesterIsLeft).outCapacity;
-  const existingFeePaid = existingRequest > 0n ? (existingFeeState?.feePaidUpfront ?? 0n) : 0n;
-  const feeTopup = effectiveFeeTarget > existingFeePaid ? effectiveFeeTarget - existingFeePaid : 0n;
-  if (feeTopup > requesterFeeCapacity) {
+  if (effectiveFeeTarget > requesterFeeCapacity) {
     return {
       success: false,
       events: [],
-      error: `request_collateral: insufficient fee capacity in token ${feeToken} (${requesterFeeCapacity} < ${feeTopup})`,
+      error: `request_collateral: insufficient fee capacity in token ${feeToken} (${requesterFeeCapacity} < ${effectiveFeeTarget})`,
     };
   }
 
   // Convention: positive offdelta means LEFT has more.
   // requester pays hub upfront here. All no-op exits are above this mutation.
-  if (feeTopup > 0n) {
-    if (requesterIsLeft) feeDelta.offdelta -= feeTopup;
-    else feeDelta.offdelta += feeTopup;
+  if (effectiveFeeTarget > 0n) {
+    if (requesterIsLeft) feeDelta.offdelta -= effectiveFeeTarget;
+    else feeDelta.offdelta += effectiveFeeTarget;
   }
 
   if (!accountMachine.requestedRebalanceFeeState) {
@@ -117,8 +114,7 @@ export function handleRequestCollateral(
   // Hub's hubRebalanceHandler will pick this up and add R→C to jBatch.
   accountMachine.requestedRebalance.set(tokenId, effectiveRequest);
   accountMachine.requestedRebalanceFeeState.set(tokenId, {
-    requestId: existingFeeState?.requestId ??
-      `rebalance:${requesterIsLeft ? 'left' : 'right'}:${tokenId}:${accountMachine.currentHeight + 1}`,
+    requestId: `rebalance:${requesterIsLeft ? 'left' : 'right'}:${tokenId}:${accountMachine.currentHeight + 1}`,
     feeTokenId: feeToken,
     feePaidUpfront: effectiveFeeTarget,
     requestedAmount: effectiveRequest,
@@ -129,9 +125,7 @@ export function handleRequestCollateral(
 
   const feeDisplay = effectiveFeeTarget > 0n ? `, prepaidFee=${effectiveFeeTarget}` : '';
   const events = [
-    existingRequest > 0n
-      ? `🔄 Collateral request topped up: ${existingRequest}→${effectiveRequest} token ${tokenId}${feeDisplay}, feeTopup=${feeTopup} (hub will deposit R→C)`
-      : `🔄 Collateral requested: ${effectiveRequest} token ${tokenId}${feeDisplay}, feeTopup=${feeTopup} (hub will deposit R→C)`,
+    `🔄 Collateral requested: ${effectiveRequest} token ${tokenId}${feeDisplay} (hub will deposit R→C)`,
   ];
 
   return { success: true, events };
@@ -187,10 +181,9 @@ export function checkAutoRebalance(
 ): AccountTx[] {
   const result: AccountTx[] = [];
 
-  // New rebalance cycles must not start during settlement. A pending request,
-  // however, may be topped up when more credit is consumed before the in-flight
-  // settlement finalizes; otherwise a small unsecured tail can remain forever
-  // below the soft limit.
+  // New rebalance cycles must not start during settlement. A committed request
+  // is immutable until its finalized event clears it. New exposure accumulates
+  // independently and is considered by the next cycle after finalization.
   const settlementInFlight = !!accountMachine.settlementWorkspace;
 
   if (accountMachine.shadow.rebalance.policy.size === 0) {
@@ -211,6 +204,8 @@ export function checkAutoRebalance(
 
     const derived = deriveDelta(delta, isLeft);
     const outPeerCredit = derived.outPeerCredit;
+    const existingRequest = accountMachine.requestedRebalance.get(tokenId) ?? 0n;
+    if (existingRequest > 0n) continue;
     // Rebalance trigger must be based ONLY on uncollateralized peer credit usage.
     //
     // deriveDelta semantics:
@@ -247,20 +242,10 @@ export function checkAutoRebalance(
       // Keep dedupe semantics aligned with committed request state:
       // handleRequestCollateral stores requestedRebalance as net amount
       // when fee token equals request token.
-      const netRequestedTarget = outPeerCredit > feeAmount ? outPeerCredit - feeAmount : 0n;
-      if (netRequestedTarget <= 0n) {
-        continue;
-      }
-      const existingRequest = accountMachine.requestedRebalance.get(tokenId);
+      if (outPeerCredit <= feeAmount) continue;
       if (settlementInFlight && (!existingRequest || existingRequest <= 0n)) {
         continue;
       }
-      if (existingRequest && existingRequest > 0n) {
-        if (netRequestedTarget <= existingRequest) {
-          continue;
-        }
-      }
-
       result.push({
         type: 'request_collateral',
         data: {

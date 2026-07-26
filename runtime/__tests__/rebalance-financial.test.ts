@@ -75,7 +75,7 @@ describe('rebalance financial transitions', () => {
     expect(state.requestedRebalanceFeeState.get(7)?.refund).toBeUndefined();
   });
 
-  test('covered request is a true no-op before fee top-up mutation', () => {
+  test('pending request is immutable before any fee mutation', () => {
     const state = account();
     state.requestedRebalance = new Map([[1, 100n]]);
     state.requestedRebalanceFeeState = new Map([[1, requestState('covered', 1, 10n)]]);

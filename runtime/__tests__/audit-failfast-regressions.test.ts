@@ -4603,7 +4603,7 @@ describe('audit fail-fast regressions', () => {
     expect(feeDelta.offdelta).toBe(100n);
   });
 
-  test('request_collateral tops up an existing pending request without resubmitting in-flight batch', () => {
+  test('request_collateral keeps an existing pending request immutable', () => {
     const delta = {
       tokenId: 1,
       collateral: 0n,
@@ -4641,13 +4641,13 @@ describe('audit fail-fast regressions', () => {
     );
 
     expect(result.success).toBe(true);
-    expect(accountMachine.requestedRebalance.get(1)).toBe(780n);
-    expect(accountMachine.requestedRebalanceFeeState.get(1)?.feePaidUpfront).toBe(20n);
+    expect(accountMachine.requestedRebalance.get(1)).toBe(590n);
+    expect(accountMachine.requestedRebalanceFeeState.get(1)?.feePaidUpfront).toBe(10n);
     expect(accountMachine.shadow.rebalance.submittedAtByToken.get(1)).toBe(123);
-    expect(delta.offdelta).toBe(990n);
+    expect(delta.offdelta).toBe(1_000n);
   });
 
-  test('auto-rebalance allows pending request top-up during settlement', () => {
+  test('auto-rebalance never tops up an existing pending request', () => {
     const usd = 10n ** 18n;
     const accountMachine = {
       leftEntity: `0x${'11'.repeat(32)}`,
@@ -4695,9 +4695,16 @@ describe('audit fail-fast regressions', () => {
       `0x${'ff'.repeat(32)}`,
     );
 
-    expect(txs).toHaveLength(1);
-    expect(txs[0]?.type).toBe('request_collateral');
-    expect(txs[0]?.data.amount).toBe(800n * usd);
+    expect(txs).toHaveLength(0);
+
+    const delta = accountMachine.deltas.get(1);
+    if (!delta) throw new Error('TEST_REBALANCE_DELTA_MISSING');
+    delta.offdelta = 2_590n * usd;
+    expect(checkAutoRebalance(
+      accountMachine as Parameters<typeof checkAutoRebalance>[0],
+      `0x${'11'.repeat(32)}`,
+      `0x${'ff'.repeat(32)}`,
+    )).toHaveLength(0);
   });
 
   test('auto-rebalance fee policy ignores live sibling topology', () => {
@@ -4993,13 +5000,12 @@ describe('audit fail-fast regressions', () => {
     expect('rebalancePolicy' in result.newState.accounts.get(hubId)!).toBe(false);
   });
 
-  test('auto-rebalance tops up pending request fee when liquidity fee grows', () => {
+  test('auto-rebalance does not top up pending request fee when liquidity fee grows', () => {
     const usd = 10n ** 18n;
     const previousRequest = 590n * usd;
-    const outPeerCredit = 1_000n * usd;
+    const outPeerCredit = 1_100n * usd;
     const previousFee = 150_100_000_000_000_000n;
-    const requiredFee = 200_000_000_000_000_000n;
-    const feeTopup = requiredFee - previousFee;
+    const requiredFee = 210_000_000_000_000_000n;
     const delta = {
       tokenId: 1,
       collateral: previousRequest,
@@ -5047,10 +5053,7 @@ describe('audit fail-fast regressions', () => {
       `0x${'ff'.repeat(32)}`,
     );
 
-    expect(txs).toHaveLength(1);
-    expect(txs[0]?.type).toBe('request_collateral');
-    expect(txs[0]?.data.amount).toBe(outPeerCredit);
-    expect(txs[0]?.data.feeAmount).toBe(requiredFee);
+    expect(txs).toHaveLength(0);
 
     const result = handleRequestCollateral(
       accountMachine as Parameters<typeof handleRequestCollateral>[0],
@@ -5063,11 +5066,11 @@ describe('audit fail-fast regressions', () => {
     );
 
     expect(result.success).toBe(true);
-    expect(accountMachine.requestedRebalance.get(1)).toBe(outPeerCredit - requiredFee);
-    expect(accountMachine.requestedRebalanceFeeState.get(1)?.feePaidUpfront).toBe(requiredFee);
-    expect(accountMachine.requestedRebalanceFeeState.get(1)?.requestedAmount).toBe(outPeerCredit - requiredFee);
+    expect(accountMachine.requestedRebalance.get(1)).toBe(previousRequest);
+    expect(accountMachine.requestedRebalanceFeeState.get(1)?.feePaidUpfront).toBe(previousFee);
+    expect(accountMachine.requestedRebalanceFeeState.get(1)?.requestedAmount).toBe(previousRequest);
     expect(accountMachine.shadow.rebalance.submittedAtByToken.get(1)).toBe(123);
-    expect(delta.offdelta).toBe(previousRequest + outPeerCredit - feeTopup);
+    expect(delta.offdelta).toBe(previousRequest + outPeerCredit);
   });
 
   test('entity proposal fails fast when prevFrameHash is missing above genesis', async () => {
