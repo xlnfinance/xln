@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
+import { scheduler } from 'node:timers/promises';
 
 import { createHttpDrainTracker, stopServerGracefully } from '../orchestrator/graceful-server';
 import { startParentLivenessWatch } from '../orchestrator/parent-watch';
@@ -57,7 +57,7 @@ test('parent watch still fails closed on missing parent pid', async () => {
         lost += 1;
       }, 1);
 
-      await delay(0);
+      await scheduler.wait(0);
       stop();
       expect(lost).toBe(1);
     } finally {
@@ -109,7 +109,7 @@ test('managed child survives with its parent and exits after the exact parent is
         childExited = true;
         break;
       }
-      await delay(25);
+      await scheduler.wait(25);
     }
     expect(childExited).toBe(true);
   } finally {

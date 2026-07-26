@@ -11,7 +11,7 @@ import {
   isEntityReplicaRelevantToWatcher,
 } from './watcher';
 import { safeStringify } from '../protocol/serialization';
-import { setTimeout as delay } from 'node:timers/promises';
+import { scheduler } from 'node:timers/promises';
 
 export const J_WATCHER_DRAIN_STALL_TIMEOUT_MS = 60_000;
 const J_WATCHER_DRAIN_RETRY_DELAY_MS = 100;
@@ -301,7 +301,7 @@ export const drainJWatcherBacklog = async (
       // RPC watchers intentionally absorb transient read races. Avoid a hot
       // loop while the same bounded target is retried, but retain a hard stall
       // deadline so a lost watcher cannot hide behind that retry policy.
-      await delay(J_WATCHER_DRAIN_RETRY_DELAY_MS);
+      await scheduler.wait(J_WATCHER_DRAIN_RETRY_DELAY_MS);
     }
     // Freeze the captured target while Entity consensus finalizes it. Polling
     // a continuously advancing chain here creates a moving target: every slow

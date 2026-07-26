@@ -1,4 +1,4 @@
-import { setTimeout as delay } from 'node:timers/promises';
+import { scheduler } from 'node:timers/promises';
 
 export type StopProcessGroupOptions = Readonly<{
   pid: number;
@@ -34,7 +34,7 @@ export const waitForProcessGroupExit = async (pid: number, timeoutMs: number): P
   const deadline = performance.now() + timeoutMs;
   while (performance.now() < deadline) {
     if (!processGroupIsAlive(pid)) return true;
-    await delay(25);
+    await scheduler.wait(25);
   }
   return !processGroupIsAlive(pid);
 };

@@ -16,7 +16,7 @@ import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { mkdirSync, createWriteStream, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
-import { setTimeout as delay } from 'node:timers/promises';
+import { scheduler } from 'node:timers/promises';
 import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
@@ -144,7 +144,7 @@ async function waitForRpcReady(rpcUrl: string, timeoutMs: number): Promise<void>
     } catch {
       // retry
     }
-    await delay(200);
+    await scheduler.wait(200);
   }
   throw new Error(`RPC not ready on ${rpcUrl} (expected chainId=31337 within ${timeoutMs}ms)`);
 }
@@ -154,7 +154,7 @@ async function stopProcess(proc: PipedChildProcess | null): Promise<void> {
   proc.kill('SIGTERM');
   const startedAt = Date.now();
   while (proc.exitCode === null && Date.now() - startedAt < 3000) {
-    await delay(100);
+    await scheduler.wait(100);
   }
   if (proc.exitCode === null) {
     proc.kill('SIGKILL');

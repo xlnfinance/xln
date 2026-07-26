@@ -1,4 +1,4 @@
-import { setTimeout as sleep } from 'node:timers/promises';
+import { scheduler } from 'node:timers/promises';
 
 type RpcResponse = {
   result?: unknown;
@@ -62,7 +62,7 @@ const waitForExpectedChain = async (): Promise<void> => {
       lastError = message;
     }
     const remainingAfterAttempt = timeoutMs - (performance.now() - startedAt);
-    if (remainingAfterAttempt > 0) await sleep(Math.min(100, remainingAfterAttempt));
+    if (remainingAfterAttempt > 0) await scheduler.wait(Math.min(100, remainingAfterAttempt));
   }
   throw new Error(
     `DEV_RPC_READY_TIMEOUT:url=${rpcUrl.href} expectedChainId=${expectedChainId} timeoutMs=${timeoutMs} lastError=${lastError}`,

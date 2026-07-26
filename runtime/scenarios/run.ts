@@ -13,7 +13,7 @@ import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { createWriteStream, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
-import { setTimeout as delay } from 'node:timers/promises';
+import { scheduler } from 'node:timers/promises';
 import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
@@ -165,7 +165,7 @@ async function stopProcess(proc: PipedChildProcess | null): Promise<void> {
   proc.kill('SIGTERM');
   const deadline = Date.now() + 4000;
   while (proc.exitCode === null && Date.now() < deadline) {
-    await delay(100);
+    await scheduler.wait(100);
   }
   if (proc.exitCode === null) proc.kill('SIGKILL');
 }

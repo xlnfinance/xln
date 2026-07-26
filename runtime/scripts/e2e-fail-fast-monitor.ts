@@ -2,7 +2,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
+import { scheduler } from 'node:timers/promises';
 import {
   E2E_FATAL_LOG_TAIL_LINES,
   findFirstRuntimeFatalLogHit,
@@ -64,7 +64,7 @@ const stopRunner = async (): Promise<void> => {
   } catch (error) {
     console.error(`[e2e-monitor] SIGTERM failed pid=${lock.pid}`, error);
   }
-  await delay(3_000);
+  await scheduler.wait(3_000);
   if (!isE2ERunnerProcessAlive(lock.pid)) return;
   try {
     process.kill(lock.pid, 'SIGKILL');
@@ -105,7 +105,7 @@ const main = async (): Promise<void> => {
       process.exit(1);
     }
     if (once) break;
-    await delay(intervalMs);
+    await scheduler.wait(intervalMs);
   }
 
   const dir = resolveLogsDir();

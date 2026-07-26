@@ -32,7 +32,7 @@ import {
 import { availableParallelism, freemem, loadavg, totalmem } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { finished } from 'node:stream/promises';
-import { setTimeout as delay } from 'node:timers/promises';
+import { scheduler } from 'node:timers/promises';
 import {
   applyQaRunSeverity,
   assertQaReleaseRunSeverity,
@@ -1824,12 +1824,12 @@ export const freeE2EPorts = async (
   const first = assertE2EPortOwners(readE2EListeningPortPids(normalizedPorts));
   if (first.size === 0) return;
   signalE2EPortOwners(first, 'SIGTERM', log);
-  await delay(300);
+  await scheduler.wait(300);
 
   const second = assertE2EPortOwners(readE2EListeningPortPids(normalizedPorts));
   if (second.size > 0) {
     signalE2EPortOwners(second, 'SIGKILL', log);
-    await delay(150);
+    await scheduler.wait(150);
   }
 
   const remain = assertE2EPortOwners(readE2EListeningPortPids(normalizedPorts));
@@ -1870,7 +1870,7 @@ const killPids = async (pids: number[], label: string): Promise<void> => {
       console.warn(`[preflight] SIGTERM failed pid=${pid}`, error);
     }
   }
-  await delay(1_000);
+  await scheduler.wait(1_000);
   for (const pid of unique) {
     if (!isE2ERunnerProcessAlive(pid)) continue;
     try {
@@ -1879,7 +1879,7 @@ const killPids = async (pids: number[], label: string): Promise<void> => {
       console.warn(`[preflight] SIGKILL failed pid=${pid}`, error);
     }
   }
-  await delay(250);
+  await scheduler.wait(250);
 };
 
 const reapStaleIsolatedE2EProcesses = async (currentLogsDir: string): Promise<void> => {
@@ -1919,8 +1919,8 @@ const assertE2EShardNotAborted = (signal?: AbortSignal): void => {
 const e2eRetryDelay = async (ms: number, signal?: AbortSignal): Promise<void> => {
   assertE2EShardNotAborted(signal);
   try {
-    if (signal) await delay(ms, undefined, { signal });
-    else await delay(ms);
+    if (signal) await scheduler.wait(ms, { signal });
+    else await scheduler.wait(ms);
   } catch (error) {
     assertE2EShardNotAborted(signal);
     throw error;
@@ -3224,7 +3224,7 @@ const runShard = async (
       });
     }
 
-    await delay(250);
+    await scheduler.wait(250);
     await flushLog(log, '[runner] playwright passed; scanning runtime fatal markers\n');
     const runtimeFatalLines = findRuntimeFatalLogLines(logPath);
     if (runtimeFatalLines.length > 0) {
@@ -3254,7 +3254,7 @@ const runShard = async (
       { label: 'api', proc: api, termTimeoutMs: 35_000 },
     ]);
     await stopShardRuntimePorts(apiPort, log);
-    await delay(250);
+    await scheduler.wait(250);
     await flushLog(log, '[runner] api stopped; scanning runtime fatal markers\n');
     const postTeardownFatalLines = findRuntimeFatalLogLines(logPath);
     const monitorFatalReason = String(teardownReason || '').startsWith('E2E_FATAL_RUNTIME_LOG')
@@ -3546,7 +3546,7 @@ async function main(): Promise<void> {
           if (task.requireMarketMaker) activeMarketMakerTasks += 1;
           return { taskIndex, task };
         }
-        await delay(250);
+        await scheduler.wait(250);
       }
       return null;
     };

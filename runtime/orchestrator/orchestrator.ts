@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { cpus, freemem, loadavg, totalmem } from 'node:os';
 import { dirname, join } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
+import { scheduler } from 'node:timers/promises';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { REMOTE_RUNTIME } from '../constants';
 import { createStructuredLogger, registerStructuredLogSink } from '../infra/logger';
@@ -714,7 +714,7 @@ const stopProcess = async (proc: ChildProcess | null): Promise<void> => {
   proc.kill('SIGTERM');
   const deadline = Date.now() + CHILD_GRACEFUL_SHUTDOWN_MS;
   while (proc.exitCode === null && proc.signalCode === null && Date.now() < deadline) {
-    await delay(100);
+    await scheduler.wait(100);
   }
   if (proc.exitCode === null && proc.signalCode === null) {
     meshLog.warn('child.stop_timeout_sigkill', {
@@ -724,7 +724,7 @@ const stopProcess = async (proc: ChildProcess | null): Promise<void> => {
     proc.kill('SIGKILL');
     const killDeadline = Date.now() + CHILD_GRACEFUL_SHUTDOWN_MS;
     while (proc.exitCode === null && proc.signalCode === null && Date.now() < killDeadline) {
-      await delay(100);
+      await scheduler.wait(100);
     }
     if (proc.exitCode === null && proc.signalCode === null) {
       throw new Error(`CHILD_STOP_TIMEOUT pid=${proc.pid ?? 'unknown'}`);
@@ -998,7 +998,7 @@ const refreshChildHealthForResponse = async (): Promise<void> => {
       pollAllHubHealth(),
       pollMarketMakerHealth(),
     ]).then(() => undefined),
-    delay(HEALTH_RESPONSE_REFRESH_TIMEOUT_MS).then(() => undefined),
+    scheduler.wait(HEALTH_RESPONSE_REFRESH_TIMEOUT_MS).then(() => undefined),
   ]);
   lastHealthResponseRefreshMs = Date.now() - startedAt;
 };
@@ -1705,7 +1705,7 @@ const stopAllChildren = async (options: StopAllChildrenOptions = {}): Promise<vo
   // Initial reset often has no owned children yet. Do not probe random old listeners on the same ports.
   for (let round = 0; round < quiesceRounds && quiesceUrls.length > 0; round += 1) {
     await Promise.all(quiesceUrls.map((url) => postJson(url, quiesceTimeoutMs)));
-    await delay(quiescePauseMs);
+    await scheduler.wait(quiescePauseMs);
   }
 
   const hubProcs = hubChildren.map((child) => {
@@ -2545,7 +2545,7 @@ const waitForHubBaseline = async (): Promise<void> => {
           if (!directGraceStartedAt) directGraceStartedAt = Date.now();
           const waitedMs = Date.now() - directGraceStartedAt;
           if (waitedMs < HUB_DIRECT_LINK_BASELINE_GRACE_MS) {
-            await delay(250);
+            await scheduler.wait(250);
             continue;
           }
           if (!warnedDirectGrace) {
@@ -2569,7 +2569,7 @@ const waitForHubBaseline = async (): Promise<void> => {
         `status=${safeStringify(lastStatus)} health=${safeStringify(health)}`,
       );
     }
-    await delay(250);
+    await scheduler.wait(250);
   }
 };
 
@@ -2594,7 +2594,7 @@ const waitForHubProfilesReady = async (): Promise<void> => {
     ))) {
       throw new Error(`HUB_PROFILES_READY_EXIT ${safeStringify(computeAggregatedHealth().hubs)}`);
     }
-    await delay(250);
+    await scheduler.wait(250);
   }
   console.warn(
     `[MESH] continuing after gossip profile grace: timeoutMs=${HUB_PROFILES_READY_TIMEOUT_MS} visible=${safeStringify(lastVisibleByHub)}`,
@@ -2627,9 +2627,9 @@ const waitForMarketMakerReady = async (): Promise<void> => {
         // A crashed writer may leave a valid lease behind until its fencing TTL
         // expires. Reusing the namespace sooner would correctly fail closed and
         // waste the retry, so wait out the lease before spawning its successor.
-        await delay(MARKET_MAKER_RESTART_FENCING_GRACE_MS);
+        await scheduler.wait(MARKET_MAKER_RESTART_FENCING_GRACE_MS);
         await spawnMarketMaker();
-        await delay(500);
+        await scheduler.wait(500);
         continue;
       }
       throw new Error(
@@ -2642,7 +2642,7 @@ const waitForMarketMakerReady = async (): Promise<void> => {
     ) {
       return;
     }
-    await delay(250);
+    await scheduler.wait(250);
   }
 };
 
@@ -2663,7 +2663,7 @@ const waitForHubSelfReady = async (child: HubChild): Promise<void> => {
         `timeoutMs=${HUB_BASELINE_TIMEOUT_MS} stderr=${safeStringify(child.recentStderr.slice(-8))}`,
       );
     }
-    await delay(250);
+    await scheduler.wait(250);
   }
 };
 
@@ -2721,7 +2721,7 @@ const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {
         `status=${safeStringify(lastStatus)}`,
       );
     }
-    await delay(250);
+    await scheduler.wait(250);
   }
 };
 

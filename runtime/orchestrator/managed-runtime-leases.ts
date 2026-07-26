@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
+import { scheduler } from 'node:timers/promises';
 import { createStructuredLogger } from '../infra/logger';
 import { safeStringify } from '../protocol/serialization';
 import type { ManagedRuntimeLease, ManagedRuntimeSpec } from './orchestrator-types';
@@ -25,7 +25,7 @@ const managedLeaseLog = createStructuredLogger('orchestrator.managed_leases');
 
 const defaultProcessOps: ManagedProcessOps = {
   kill: (pid, signal) => process.kill(pid, signal),
-  sleep: delay,
+  sleep: ms => scheduler.wait(ms),
 };
 
 const isPidAlive = (pid: number, ops: ManagedProcessOps = defaultProcessOps): boolean => {
