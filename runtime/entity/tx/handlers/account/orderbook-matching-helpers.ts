@@ -1,4 +1,4 @@
-import { LIMITS, SWAP as SWAP_CONSTANTS } from '../../../../constants';
+import { LIMITS, SWAP_CONSTANTS } from '../../../../constants';
 import {
   baseAmountFromLots,
   canonicalPair,
@@ -419,7 +419,7 @@ export const rejectEventsForOrder = (
     (event): event is Extract<BookEvent, { type: 'REJECT' }> => event.type === 'REJECT' && event.orderId === orderId,
   );
 
-export const tradeEvents = (events: readonly BookEvent[]): Extract<BookEvent, { type: 'TRADE' }>[] =>
+export const collectTradeEvents = (events: readonly BookEvent[]): Extract<BookEvent, { type: 'TRADE' }>[] =>
   events.filter((event): event is Extract<BookEvent, { type: 'TRADE' }> => event.type === 'TRADE');
 
 export const aggregateCrossTradeFills = (

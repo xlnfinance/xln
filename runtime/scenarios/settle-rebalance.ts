@@ -19,7 +19,7 @@
 
 import type { Env, SettlementDiff, SettlementOp } from '../types';
 import {
-  getProcess, advanceScenarioTime, enableStrictScenario, converge as convergeRuntime, syncChain,
+  getProcess, advanceScenarioTime, enableStrictScenario, converge, syncChain,
   assert, findReplica, usd, snap,
 } from './helpers';
 import { bootScenario, registerEntities, type RegisteredEntity } from './boot';
@@ -32,7 +32,7 @@ import { startRuntimeHistoryTraceForTesting } from '../history-retention';
 import { ethers } from 'ethers';
 
 const USDC = 1;
-const converge = (env: Env, maxCycles = 15): Promise<void> => convergeRuntime(env, maxCycles);
+const convergeScenario = (env: Env, maxCycles = 15): Promise<void> => converge(env, maxCycles);
 
 const requireRegisteredEntity = (
   entity: RegisteredEntity | undefined,
@@ -145,7 +145,7 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
     }]);
     await process(env);
   }
-  await converge(env);
+  await convergeScenario(env);
 
   // Hub extends credit to all users + users extend credit back
   for (const user of users) {
@@ -162,7 +162,7 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
     }]);
     for (let i = 0; i < 3; i++) await process(env);
   }
-  await converge(env);
+  await convergeScenario(env);
 
   // Initial R→C deposit: Hub deposits $5K collateral per account
   const r2cTxs = users.map(user => ({
@@ -243,7 +243,7 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
     entityId: alice.id, signerId: alice.signer,
     entityTxs: [{ type: 'settle_propose', data: { counterpartyEntityId: hub.id, ops: depositOps, memo: 'deposit' } }]
   }]);
-  await converge(env);
+  await convergeScenario(env);
 
   const aliceWs1 = findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.settlementWorkspace;
   assert(aliceWs1?.version === 1, 'Workspace should be version 1', env);
@@ -309,7 +309,7 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
     entityId: hub.id, signerId: hub.signer,
     entityTxs: [{ type: 'settle_propose', data: { counterpartyEntityId: alice.id, ops: hubTakeOps, memo: 'reject me' } }]
   }]);
-  await converge(env);
+  await convergeScenario(env);
 
   // Workspace must exist on Alice side before explicit reject.
   const aliceWsReject = findReplica(env, alice.id)[1].state.accounts.get(hub.id)?.settlementWorkspace;
@@ -319,7 +319,7 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
     entityId: alice.id, signerId: alice.signer,
     entityTxs: [{ type: 'settle_reject', data: { counterpartyEntityId: hub.id, reason: 'nope' } }]
   }]);
-  await converge(env);
+  await convergeScenario(env);
 
   const aliceAccAfterReject = findReplica(env, alice.id)[1].state.accounts.get(hub.id);
   assert(!aliceAccAfterReject?.settlementWorkspace, 'Workspace should be cleared after reject', env);
@@ -348,7 +348,7 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
     }]
   }]);
   for (let i = 0; i < 6; i++) await process(env);
-  await converge(env);
+  await convergeScenario(env);
 
   // Charlie → Hub → Dave: $12K
   await process(env, [{
@@ -361,7 +361,7 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
     }]
   }]);
   for (let i = 0; i < 6; i++) await process(env);
-  await converge(env);
+  await convergeScenario(env);
 
   console.log = originalLog;
   console.log('--- TEST 5 PASSED: imbalances created ---');
@@ -401,7 +401,7 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
     }]);
     for (let i = 0; i < 3; i++) await process(env);
   }
-  await converge(env);
+  await convergeScenario(env);
 
   // Hub declares as hub
   await process(env, [{
@@ -410,7 +410,7 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
   }]);
   // Hub activation releases two independent Account rebalance lanes plus
   // their shared on-chain batch/finality round; keep the bound explicit.
-  await converge(env, 30);
+  await convergeScenario(env, 30);
 
   const hubConfig = findReplica(env, hub.id)[1].state.hubRebalanceConfig;
   assert(hubConfig, 'Hub config should be set', env);
@@ -535,13 +535,13 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
   advanceTime(31000);
   await process(env, [{ entityId: hub.id, signerId: hub.signer, entityTxs: [] }]);
   for (let i = 0; i < 15; i++) { advanceTime(100); await process(env); }
-  await converge(env);
+  await convergeScenario(env);
 
   // Cycle 2: Hub executes signed settlements + deposits
   advanceTime(31000);
   await process(env, [{ entityId: hub.id, signerId: hub.signer, entityTxs: [] }]);
   for (let i = 0; i < 15; i++) { advanceTime(100); await process(env); }
-  await converge(env);
+  await convergeScenario(env);
 
   // Check jBatch has ops
   const hubBatch = findReplica(env, hub.id)[1].state.jBatchState?.batch;
@@ -574,7 +574,7 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
     advanceTime(31000);
     await process(env, [{ entityId: hub.id, signerId: hub.signer, entityTxs: [] }]);
     for (let i = 0; i < 15; i++) { advanceTime(100); await process(env); }
-    await converge(env);
+    await convergeScenario(env);
 
     const hubBatch2 = findReplica(env, hub.id)[1].state.jBatchState?.batch;
     const totalOps2 = (hubBatch2?.reserveToCollateral?.length || 0) +

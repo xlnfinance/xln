@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs';
+import { promises } from 'node:fs';
 import path from 'node:path';
 import { runDeterminismTests } from '../scenarios/determinism-test';
 
@@ -41,10 +41,10 @@ const isCodeFile = (rel: string): boolean => /\.(ts|tsx|js|jsx)$/.test(rel) && !
 const shouldSkip = (rel: string): boolean => EXCLUDE_PARTS.some((part) => rel.includes(part));
 
 async function walk(absPath: string): Promise<string[]> {
-  const stat = await fs.stat(absPath);
+  const stat = await promises.stat(absPath);
   if (stat.isFile()) return [absPath];
 
-  const entries = await fs.readdir(absPath, { withFileTypes: true });
+  const entries = await promises.readdir(absPath, { withFileTypes: true });
   const files: string[] = [];
   for (const entry of entries) {
     const abs = path.join(absPath, entry.name);
@@ -105,7 +105,7 @@ async function runStaticDeterminismGuard(): Promise<void> {
   const files = await listTargetFiles();
   const violations: Violation[] = [];
   for (const file of files) {
-    const text = await fs.readFile(path.join(ROOT, file), 'utf8');
+    const text = await promises.readFile(path.join(ROOT, file), 'utf8');
     violations.push(...findViolations(file, text));
   }
 

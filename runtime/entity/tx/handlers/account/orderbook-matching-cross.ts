@@ -36,7 +36,7 @@ import {
   createEmptyPairBook,
   parseNamespacedOrderId,
   rejectEventsForOrder,
-  tradeEvents as collectTradeEvents,
+  collectTradeEvents,
 } from './orderbook-matching-helpers';
 
 const orderbookCrossLog = createStructuredLogger('orderbook.cross');

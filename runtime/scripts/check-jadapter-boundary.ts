@@ -5,7 +5,7 @@
  * instead of going through JAdapter (submit/watch).
  */
 
-import { promises as fs } from 'fs';
+import { promises } from 'fs';
 import path from 'path';
 
 const ROOT = process.cwd();
@@ -39,7 +39,7 @@ type Violation = {
 };
 
 async function walk(dir: string): Promise<string[]> {
-  const entries = await fs.readdir(dir, { withFileTypes: true });
+  const entries = await promises.readdir(dir, { withFileTypes: true });
   const out: string[] = [];
   for (const entry of entries) {
     if (entry.name === 'node_modules' || entry.name === 'dist') continue;
@@ -118,7 +118,7 @@ async function main(): Promise<void> {
 
   for (const fileRel of scoped) {
     const abs = path.join(ROOT, fileRel);
-    const text = await fs.readFile(abs, 'utf8');
+    const text = await promises.readFile(abs, 'utf8');
     violations.push(...findViolations(text, fileRel));
   }
 

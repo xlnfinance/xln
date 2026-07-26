@@ -144,7 +144,7 @@ export const HTLC = {
 // SWAP / ORDERBOOK
 // ═══════════════════════════════════════════════════════════════
 
-export const SWAP = {
+export const SWAP_CONSTANTS = {
   /** Soft warning: limit price deviates >10% from best available */
   PRICE_WARN_BPS: 1000, // 10%
 

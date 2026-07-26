@@ -86,7 +86,7 @@ import {
   getTokenInfo,
   isLiquidSwapToken,
 } from '../account/utils';
-import { LIMITS, SWAP as SWAP_CONSTANTS } from '../constants';
+import { LIMITS, SWAP_CONSTANTS } from '../constants';
 import {
   baseAmountAtPrice,
   baseAmountAtPriceCeil,

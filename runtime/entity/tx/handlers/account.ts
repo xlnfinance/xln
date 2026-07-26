@@ -17,7 +17,7 @@ import {
   sameAccountStateDomain,
 } from '../../../account/state-root';
 import { isLeftEntity } from '../../id';
-import { scheduleHook as scheduleCrontabHook } from '../../scheduler';
+import { scheduleHook } from '../../scheduler';
 import { upsertSortedStringMapEntry } from '../../../storage/sorted-index';
 import { normalizeAccountWatchSeed } from '../../../account/watch-seed';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../../account/default-tokens';
@@ -497,7 +497,7 @@ export async function applyAccountInput(
       // still want it to react quickly after any committed account frame.
       // Schedule a one-shot global rebalance kick for the next crontab wake-up.
       if (newState.hubRebalanceConfig && newState.crontabState) {
-        scheduleCrontabHook(newState.crontabState, {
+        scheduleHook(newState.crontabState, {
           id: 'hub-rebalance-kick',
           triggerAt: newState.timestamp,
           type: 'hub_rebalance_kick',

@@ -14,7 +14,7 @@ import { cloneEntityState, addMessage } from '../../state-helpers';
 import { getTokenInfo } from '../../account/utils';
 import { CANONICAL_J_EVENTS } from '../../jadapter/helpers';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
-import { scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from '../scheduler';
+import { scheduleHook, cancelHook } from '../scheduler';
 import { scrubDisputeFinalizationsForCounterparty } from './dispute-finalize-guards';
 import { normalizeJurisdictionEvents } from '../../jurisdiction/event-normalization';
 import {
@@ -527,7 +527,7 @@ async function applyDisputeStartedJEvent(context: FinalizedJEventContext): Promi
       Number.isFinite(Number(newState.timestamp)) && Number(newState.timestamp) >= 0
         ? Number(newState.timestamp)
         : 0;
-    scheduleCrontabHook(newState.crontabState, {
+    scheduleHook(newState.crontabState, {
       id: `dispute-deadline:${counterpartyId.toLowerCase()}`,
       triggerAt: logicalTimestamp + kickoffDelayMs,
       type: 'dispute_deadline',
@@ -612,7 +612,7 @@ function applyDisputeFinalizedJEvent(
     delete account.activeDispute;
     addMessage(newState, `✅ DISPUTE FINALIZED with ${counterpartyId.slice(-4)} (nonce ${Number(initialNonce)})`);
     if (newState.crontabState) {
-      cancelCrontabHook(newState.crontabState, `dispute-deadline:${counterpartyId.toLowerCase()}`);
+      cancelHook(newState.crontabState, `dispute-deadline:${counterpartyId.toLowerCase()}`);
     }
   } else {
     jEventLog.warn('dispute_finalized.no_active_dispute', { counterparty: shortId(counterpartyId) });
@@ -777,7 +777,7 @@ async function applyFinalizedJEvent(
       if (event.data.entityId.toLowerCase() === newState.entityId.toLowerCase()) {
         if (reseal.dirtyAccounts.length > 0) {
           if (!newState.crontabState) throw new Error('BOARD_RESEAL_CRONTAB_MISSING');
-          scheduleCrontabHook(newState.crontabState, {
+          scheduleHook(newState.crontabState, {
             id: BOARD_RESEAL_HOOK_ID,
             triggerAt: newState.timestamp,
             type: 'board_reseal',
@@ -788,7 +788,7 @@ async function applyFinalizedJEvent(
             },
           });
         } else if (newState.crontabState) {
-          cancelCrontabHook(newState.crontabState, BOARD_RESEAL_HOOK_ID);
+          cancelHook(newState.crontabState, BOARD_RESEAL_HOOK_ID);
         }
       }
     }

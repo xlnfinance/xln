@@ -1,4 +1,4 @@
-import { promises as fs } from 'fs';
+import { promises } from 'fs';
 import path from 'path';
 import { compareStableText } from '../protocol/serialization';
 
@@ -17,10 +17,10 @@ function toRel(abs: string): string {
 }
 
 async function walk(absPath: string): Promise<string[]> {
-  const stat = await fs.stat(absPath);
+  const stat = await promises.stat(absPath);
   if (stat.isFile()) return [absPath];
 
-  const entries = await fs.readdir(absPath, { withFileTypes: true });
+  const entries = await promises.readdir(absPath, { withFileTypes: true });
   const out: string[] = [];
   for (const entry of entries) {
     const abs = path.join(absPath, entry.name);
@@ -46,7 +46,7 @@ async function main(): Promise<void> {
 
   const violations: FileSizeViolation[] = [];
   for (const rel of files) {
-    const text = await fs.readFile(path.join(ROOT, rel), 'utf8');
+    const text = await promises.readFile(path.join(ROOT, rel), 'utf8');
     const lines = countLines(text);
     if (lines > MAX_FRONTEND_FILE_LINES) {
       violations.push({ file: rel, lines });

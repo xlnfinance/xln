@@ -9,7 +9,7 @@
  * - Add `DELTA_MATH_ALLOWED` in-line for truly intentional cases.
  */
 
-import { promises as fs } from 'fs';
+import { promises } from 'fs';
 import path from 'path';
 
 type Violation = {
@@ -57,11 +57,11 @@ function isCodeFile(rel: string): boolean {
 }
 
 async function walk(absPath: string): Promise<string[]> {
-  const stat = await fs.stat(absPath);
+  const stat = await promises.stat(absPath);
   if (stat.isFile()) {
     return [absPath];
   }
-  const entries = await fs.readdir(absPath, { withFileTypes: true });
+  const entries = await promises.readdir(absPath, { withFileTypes: true });
   const out: string[] = [];
   for (const entry of entries) {
     const abs = path.join(absPath, entry.name);
@@ -114,7 +114,7 @@ async function main(): Promise<void> {
   const violations: Violation[] = [];
   for (const rel of scoped) {
     const abs = path.join(ROOT, rel);
-    const text = await fs.readFile(abs, 'utf8');
+    const text = await promises.readFile(abs, 'utf8');
     violations.push(...findViolations(rel, text));
   }
 

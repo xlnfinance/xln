@@ -3,10 +3,6 @@
 import { ethers, getIndexedAccountPath, HDNodeWallet, Mnemonic } from 'ethers';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type {
-  ContractRunner as JurisdictionContractRunner,
-  Signer as JurisdictionSigner,
-} from 'ethers';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { createExternalWalletApi } from '../api/external-wallet-api';
 import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
@@ -16,7 +12,7 @@ import { TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction, getDefaultToke
 import { DEV_CHAIN_IDS } from '../jadapter';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import {
-  normalizeJurisdictionKey as normalizePublicJurisdictionKey,
+  normalizeJurisdictionKey,
   selectWritableJurisdictionKey,
   type WritableJurisdictionEntry,
 } from '../jurisdiction/jurisdiction-key';
@@ -315,7 +311,7 @@ type JurisdictionsFile = {
 const normalizeJurisdictionDisplayName = (value: unknown): string =>
   String(value || '').trim();
 
-const normalizeJurisdictionKey = (value: unknown): string =>
+const normalizeJurisdictionName = (value: unknown): string =>
   normalizeJurisdictionDisplayName(value).trim().toLowerCase();
 
 const resolveJReplicaForJurisdictionName = (
@@ -337,7 +333,7 @@ const resolveJReplicaForJurisdictionIdentity = (
 ): { name: string; replica: JReplica } | null => {
   const explicitRef = isJurisdictionStackRef(jurisdiction) ? String(jurisdiction).trim().toLowerCase() : '';
   const targetRef = explicitRef || getJurisdictionIdentityRef(jurisdiction);
-  const targetName = normalizeJurisdictionKey(typeof jurisdiction === 'string'
+  const targetName = normalizeJurisdictionName(typeof jurisdiction === 'string'
     ? jurisdiction
     : (jurisdiction as { name?: unknown; jurisdictionName?: unknown } | null | undefined)?.name ||
       (jurisdiction as { jurisdictionName?: unknown } | null | undefined)?.jurisdictionName);
@@ -348,7 +344,7 @@ const resolveJReplicaForJurisdictionIdentity = (
       if (getJurisdictionIdentityRef(candidate) === targetRef) return { name, replica };
       continue;
     }
-    if (targetName && normalizeJurisdictionKey(candidate.name || name) === targetName) {
+    if (targetName && normalizeJurisdictionName(candidate.name || name) === targetName) {
       return { name, replica };
     }
   }
@@ -835,7 +831,7 @@ const buildRuntimeJurisdictionsPayload = (env: Env): string | null => {
     normalizeJurisdictionDisplayName(replica.name || activeName) ||
     normalizeJurisdictionDisplayName(activeName) ||
     'primary';
-  const jurisdictionKey = normalizePublicJurisdictionKey(activeName || displayName);
+  const jurisdictionKey = normalizeJurisdictionKey(activeName || displayName);
   return JSON.stringify({
     version,
     deployVersion: networkVersion,
@@ -905,7 +901,7 @@ const deployDefaultTokensOnRpc = async (jadapter: JAdapter, jurisdictionName = '
     chainId: Number((jadapter as { chainId?: number }).chainId),
   });
   console.log(`Deploying default tokens on dev chain: ${desiredTokens.map(token => token.symbol).join(',')}`);
-  const signer = jadapter.signer as unknown as JurisdictionSigner;
+  const signer = jadapter.signer as unknown as ethers.Signer;
   const erc20Factory = new ERC20Mock__factory(signer);
   for (const token of desiredTokens) {
     if (existingSymbols.has(String(token.symbol || '').trim().toUpperCase())) {
@@ -923,7 +919,7 @@ const deployDefaultTokensOnRpc = async (jadapter: JAdapter, jurisdictionName = '
     const approveTx = await tokenContract.approve(depositoryAddress, TOKEN_REGISTRATION_AMOUNT);
     await approveTx.wait();
 
-    const registerTx = await jadapter.depository.connect(signer as unknown as JurisdictionContractRunner).adminRegisterExternalToken({
+    const registerTx = await jadapter.depository.connect(signer as unknown as ethers.ContractRunner).adminRegisterExternalToken({
       entity: ethers.ZeroHash,
       contractAddress: tokenAddress,
       externalTokenId: 0,

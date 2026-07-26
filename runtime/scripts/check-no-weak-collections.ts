@@ -1,4 +1,4 @@
-import { promises as fs } from 'fs';
+import { promises } from 'fs';
 import path from 'path';
 
 type Violation = {
@@ -25,10 +25,10 @@ const isCodeFile = (rel: string): boolean => /\.(ts|tsx|js|jsx|svelte)$/.test(re
 const shouldSkip = (rel: string): boolean => EXCLUDE_PARTS.some((part) => rel.includes(part));
 
 async function walk(absPath: string): Promise<string[]> {
-  const stat = await fs.stat(absPath);
+  const stat = await promises.stat(absPath);
   if (stat.isFile()) return [absPath];
 
-  const entries = await fs.readdir(absPath, { withFileTypes: true });
+  const entries = await promises.readdir(absPath, { withFileTypes: true });
   const files: string[] = [];
   for (const entry of entries) {
     const abs = path.join(absPath, entry.name);
@@ -59,7 +59,7 @@ async function main(): Promise<void> {
 
   const violations: Violation[] = [];
   for (const rel of files.map(toRel).filter(isCodeFile).filter((file) => !shouldSkip(file))) {
-    const text = await fs.readFile(path.join(ROOT, rel), 'utf8');
+    const text = await promises.readFile(path.join(ROOT, rel), 'utf8');
     violations.push(...findViolations(rel, text));
   }
 

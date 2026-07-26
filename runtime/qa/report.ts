@@ -12,7 +12,7 @@ import {
   type QaSeveritySignal,
 } from './severity';
 import {
-  qaRunTestCategory as categoryFromTests,
+  qaRunTestCategory,
   qaTestCategoryFromTags,
 } from './test-categories';
 import type { QaCandidateIdentity } from './candidate';
@@ -1041,7 +1041,7 @@ const explicitRunTestCategory = (value: unknown): QaRunTestCategory | null =>
     ? value
     : null;
 
-export const qaRunTestCategory = (
+export const deriveQaRunTestCategory = (
   run: Pick<QaRunManifest, 'testCategory' | 'args' | 'shards'>,
 ): QaRunTestCategory => {
   const explicit = explicitRunTestCategory(run.testCategory);
@@ -1049,7 +1049,7 @@ export const qaRunTestCategory = (
   const shardCategories = run.shards.map((shard) =>
     shard.testCategory ?? qaTestCategoryFromTags(shard.tags ?? []));
   if (shardCategories.length > 0 && shardCategories.every(Boolean)) {
-    return categoryFromTests(shardCategories as QaTestCategory[]);
+    return qaRunTestCategory(shardCategories as QaTestCategory[]);
   }
   const args = run.args ?? {};
   const argCategory = explicitRunTestCategory(args['qaCategory'] ?? args['testCategory']);
@@ -1068,14 +1068,14 @@ export const qaRunSuiteKey = (run: Pick<QaRunManifest, 'testCategory' | 'args' |
     pwFiles: Array.isArray(args['pwFiles'])
       ? args['pwFiles'].map(normalizeSuiteText).sort(compareStableText)
       : normalizeSuiteText(args['pwFiles']),
-    testCategory: qaRunTestCategory(run),
+    testCategory: deriveQaRunTestCategory(run),
     shards: run.shards.map(runShardIdentity).sort(compareStableText),
   };
   return createHash('sha256').update(JSON.stringify(source)).digest('hex').slice(0, 24);
 };
 
 export const qaRunSuiteLabel = (run: Pick<QaRunManifest, 'testCategory' | 'args' | 'shards'>): string => {
-  const testCategory = qaRunTestCategory(run);
+  const testCategory = deriveQaRunTestCategory(run);
   const prefix = testCategory === 'unknown' ? '' : `${testCategory} · `;
   if (run.shards.length === 1) {
     const shard = run.shards[0]!;
@@ -1421,7 +1421,7 @@ export const assertQaReleaseRunSeverity = (run: QaRunManifest): void => {
   if (shardCategories.some((category) => category === null)) {
     throw new Error('QA_RUN_TEST_CATEGORY_REQUIRED');
   }
-  const derived = categoryFromTests(shardCategories as QaTestCategory[]);
+  const derived = qaRunTestCategory(shardCategories as QaTestCategory[]);
   if (run.testCategory !== derived) throw new Error('QA_RUN_TEST_CATEGORY_MISMATCH');
   if (run.manifestVersion < 5) return;
   assertQaRunCandidateBinding(run);
@@ -2928,7 +2928,7 @@ export const summarizeQaRun = (run: QaRunManifest): QaRunSummary => ({
   suiteKey: qaRunSuiteKey(run),
   suiteLabel: qaRunSuiteLabel(run),
   category: qaRunCategory(run),
-  testCategory: qaRunTestCategory(run),
+  testCategory: deriveQaRunTestCategory(run),
   ...(run.code ? { code: run.code } : {}),
   ...(run.perf ? { perf: summarizeQaPerf(run.perf) } : {}),
   browserHealth: run.browserHealth ?? summarizeQaRunBrowserHealth(run),

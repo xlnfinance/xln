@@ -31,8 +31,9 @@ import { verifyHankoForHash } from '../../../hanko/signing';
 import {
   compileOps,
   getNextSettlementNonce,
-  userAutoApprove as userAutoApproveByDiff,
+  userAutoApprove,
 } from '../../../protocol/settlement/operations';
+export { userAutoApprove };
 import { createStructuredLogger, shortId } from '../../../infra/logger';
 import {
   getCertifiedBoardNodeStore,
@@ -687,10 +688,6 @@ export async function processSettleAction(
 /**
  * Auto-approve logic for end users (operates on compiled diffs)
  */
-export function userAutoApprove(diff: SettlementDiff, iAmLeft: boolean): boolean {
-  return userAutoApproveByDiff(diff, iAmLeft);
-}
-
 /**
  * Check if workspace ops are safe to auto-approve (compiles then checks)
  */

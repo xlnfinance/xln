@@ -9,7 +9,7 @@ import {
   type BookState,
   type OrderbookExtState,
 } from '../../../../orderbook';
-import { SWAP as SWAP_CONSTANTS } from '../../../../constants';
+import { SWAP_CONSTANTS } from '../../../../constants';
 import type { SwapPairPolicy } from '../../../../account/utils';
 import { createStructuredLogger, shortId, shortOrder } from '../../../../infra/logger';
 import { HEAVY_LOGS } from '../../../../utils';
@@ -33,7 +33,7 @@ import {
   parseNamespacedOrderId,
   rejectEventsForOrder,
   resolvePairBandReference,
-  tradeEvents as collectTradeEvents,
+  collectTradeEvents,
 } from './orderbook-matching-helpers';
 
 const orderbookSameLog = createStructuredLogger('orderbook.same');

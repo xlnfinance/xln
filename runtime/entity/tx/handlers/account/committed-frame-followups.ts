@@ -8,7 +8,7 @@ import type {
   HtlcRoute,
 } from '../../../../types';
 import { HEAVY_LOGS } from '../../../../utils';
-import { cancelHook as cancelScheduledHook } from '../../../scheduler';
+import { cancelHook } from '../../../scheduler';
 import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../../htlc-route-lifecycle';
 import { buildHtlcFinalizedEventPayload, buildHtlcReceivedEventPayload } from '../../../../protocol/htlc/events';
 import {
@@ -300,7 +300,7 @@ export function applyCommittedAccountFrameFollowups(
       }
       newState.lockBook.delete(accountTx.data.lockId);
       if (newState.crontabState) {
-        cancelScheduledHook(newState.crontabState, `htlc-timeout:${accountTx.data.lockId}`);
+        cancelHook(newState.crontabState, `htlc-timeout:${accountTx.data.lockId}`);
       }
       if (accountTx.data.outcome === 'secret') {
         for (const [hashlock, route] of newState.htlcRoutes.entries()) {

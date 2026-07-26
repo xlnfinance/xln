@@ -1,9 +1,9 @@
 import type { AccountTx, EntityState, HtlcLock, HtlcNoteKey, HtlcRoute } from '../../types';
 import { LIMITS } from '../../constants';
 import {
-  cancelHook as cancelScheduledHook,
+  cancelHook,
   HTLC_SECRET_ACK_TIMEOUT_MS,
-  scheduleHook as scheduleCrontabHook,
+  scheduleHook,
 } from '../scheduler';
 
 const assertEndpoint = (
@@ -71,7 +71,7 @@ export function armHtlcSecretAckTimeout(
   route.secretAckPending = true;
   route.secretAckStartedAt = state.timestamp;
   route.secretAckDeadlineAt = deadline;
-  scheduleCrontabHook(state.crontabState, {
+  scheduleHook(state.crontabState, {
     id: `htlc-secret-ack:${route.hashlock}`,
     triggerAt: deadline,
     type: 'htlc_secret_ack_timeout',
@@ -116,7 +116,7 @@ export function terminateHtlcRoute(
   route.secretAckPending = false;
   route.secretAckedAt = timestamp;
   if (state.crontabState) {
-    cancelScheduledHook(state.crontabState, `htlc-secret-ack:${route.hashlock}`);
+    cancelHook(state.crontabState, `htlc-secret-ack:${route.hashlock}`);
   }
   const notes = state.htlcNotes;
   if (notes) {

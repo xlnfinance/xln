@@ -2,11 +2,11 @@ import { ethers } from 'ethers';
 import { registerSignerKey } from '../account/crypto';
 import { serializeTaggedJson } from '../protocol/serialization';
 import { getControlBodyErrorStatus } from './auth';
-import type { parseTaggedControlBody as parseTaggedControlBodyType } from './auth';
+import type { parseTaggedControlBody } from './auth';
 import type { Env } from '../types';
 
 type SignerControlDeps = {
-  parseTaggedControlBody: typeof parseTaggedControlBodyType;
+  parseTaggedControlBody: typeof parseTaggedControlBody;
   env: Env;
 };
 

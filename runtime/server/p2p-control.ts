@@ -1,12 +1,12 @@
 import type { Env } from '../types';
 import { serializeTaggedJson } from '../protocol/serialization';
 import { getControlBodyErrorStatus } from './auth';
-import type { parseTaggedControlBody as parseTaggedControlBodyType } from './auth';
-import type { startP2P as startP2PType } from '../runtime';
+import type { parseTaggedControlBody } from './auth';
+import type { startP2P } from '../runtime';
 
 type P2PControlDeps = {
-  parseTaggedControlBody: typeof parseTaggedControlBodyType;
-  startP2P: typeof startP2PType;
+  parseTaggedControlBody: typeof parseTaggedControlBody;
+  startP2P: typeof startP2P;
 };
 
 export const handleP2PControl = async (

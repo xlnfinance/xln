@@ -2,13 +2,13 @@ import type { Env, RuntimeInput } from '../types';
 import { serializeTaggedJson } from '../protocol/serialization';
 import { getControlBodyErrorStatus } from './auth';
 import type { createRuntimeIngressReceiptStore } from './ingress-receipts';
-import type { parseTaggedControlBody as parseTaggedControlBodyType } from './auth';
-import type { enqueueRuntimeInput as enqueueRuntimeInputType } from '../runtime';
+import type { parseTaggedControlBody } from './auth';
+import type { enqueueRuntimeInput } from '../runtime';
 
 type RuntimeInputControlDeps = {
-  enqueueRuntimeInput: typeof enqueueRuntimeInputType;
+  enqueueRuntimeInput: typeof enqueueRuntimeInput;
   validateRuntimeInputAdmission(env: Env, runtimeInput: RuntimeInput): void;
-  parseTaggedControlBody: typeof parseTaggedControlBodyType;
+  parseTaggedControlBody: typeof parseTaggedControlBody;
   receipts: ReturnType<typeof createRuntimeIngressReceiptStore>;
   getCurrentRuntimeHeight(env: Env | null): number;
   buildStatusUrl(id: string): string;

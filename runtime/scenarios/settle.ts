@@ -12,8 +12,8 @@
 
 import type { Env, SettlementDiff, SettlementOp } from '../types';
 import { compileOps } from '../protocol/settlement/operations';
-import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain as syncChainHelper, findReplica, setScenarioStorageEnabled, converge, processUntil, processJEvents } from './helpers';
-import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, isScenarioJAdapterMissingError, createJReplica, createJurisdictionConfig, registerEntities as bootRegisterEntities } from './boot';
+import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain, findReplica, setScenarioStorageEnabled, converge, processUntil, processJEvents } from './helpers';
+import { bindScenarioJReplica, ensureJAdapter, getScenarioJAdapter, isScenarioJAdapterMissingError, createJReplica, createJurisdictionConfig, registerEntities } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { formatRuntime } from '../qa/runtime-ascii';
 import { createGossipLayer } from '../networking/gossip';
@@ -124,7 +124,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   const jurisdiction = createJurisdictionConfig(JURISDICTION, jadapter.addresses.depository, jadapter.addresses.entityProvider);
 
   // Register entities: Alice(signer=2) and Hub(signer=3)
-  const registered = await bootRegisterEntities(env, jadapter, [
+  const registered = await registerEntities(env, jadapter, [
     { name: 'Alice', signer: '2', position: { x: -30, y: -30, z: 0 } },
     { name: 'Hub',   signer: '3', position: { x: 30, y: -30, z: 0 } },
   ], jurisdiction);
@@ -367,7 +367,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
     signerId: ALICE_SIGNER,
     entityTxs: [{ type: 'j_broadcast', data: {} }],
   }]);
-  await syncChainHelper(env, 5);
+  await syncChain(env, 5);
   const clearedAccount = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
   assert(!clearedAccount?.settlementWorkspace, 'Executed auto-approved workspace should finalize and clear', env);
 
@@ -575,7 +575,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   }]);
 
   // Sync chain events — poll JAdapter + process events through runtime
-  await syncChainHelper(env, 5);
+  await syncChain(env, 5);
 
   const aliceState = findReplica(env, ALICE_ID)[1].state;
   assert(!aliceState.accounts.get(HUB_ID)?.settlementWorkspace, 'Workspace should be cleared after execute', env);

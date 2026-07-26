@@ -83,9 +83,9 @@ import {
 import { decodeRuntimeAdapterRequest, runtimeAdapterMessageByteLength } from '../radapter/codec';
 import {
   getRelayClientIp,
-  hasConnectedEncryptedRelayClient as hasConnectedEncryptedRelayClientInStore,
+  hasConnectedEncryptedRelayClient,
   resolveRequestClientIp,
-  sendEntityInputDirectViaRelaySocketDelivery as sendEntityInputDirectViaRelaySocketDeliveryInStore,
+  sendEntityInputDirectViaRelaySocketDelivery,
   type RelaySocket,
 } from './relay-direct';
 import { createServerRpcMessageHandler } from './rpc-ws';
@@ -316,15 +316,15 @@ let serverBootError: string | null = null;
 let serverBootStartedAt = 0;
 let serverBootCompletedAt: number | null = null;
 
-const sendEntityInputDirectViaRelaySocketDelivery = (
+const sendDirectEntityInput = (
   env: Env,
   targetRuntimeId: string,
   envelope: RuntimeEntityInputsEnvelope,
   ingressTimestamp?: number,
-) => sendEntityInputDirectViaRelaySocketDeliveryInStore(relayStore, env, targetRuntimeId, envelope, logOneShot, ingressTimestamp);
+) => sendEntityInputDirectViaRelaySocketDelivery(relayStore, env, targetRuntimeId, envelope, logOneShot, ingressTimestamp);
 
-const hasConnectedEncryptedRelayClient = (targetRuntimeId: string): boolean =>
-  hasConnectedEncryptedRelayClientInStore(relayStore, targetRuntimeId);
+const hasDirectRelayClient = (targetRuntimeId: string): boolean =>
+  hasConnectedEncryptedRelayClient(relayStore, targetRuntimeId);
 
 const installProcessSafetyGuards = (): void => {
   if (processGuardsInstalled) return;
@@ -1028,8 +1028,8 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     serverLog.info('runtime.log_mode', { mode: env.quietRuntimeLogs ? 'quiet' : 'verbose' });
     env.runtimeState = env.runtimeState ?? {};
     env.runtimeState.directEntityInputsDispatch = (targetRuntimeId, envelope, ingressTimestamp) =>
-      sendEntityInputDirectViaRelaySocketDelivery(runtimeEnv, targetRuntimeId, envelope, ingressTimestamp);
-    env.runtimeState.canUseConnectedRelayFallback = hasConnectedEncryptedRelayClient;
+      sendDirectEntityInput(runtimeEnv, targetRuntimeId, envelope, ingressTimestamp);
+    env.runtimeState.canUseConnectedRelayFallback = hasDirectRelayClient;
     startRuntimeLoop(env, {
       onFatal: async payload => {
         serverLog.error('runtime.loop_fatal', {

@@ -18,7 +18,7 @@ import {
   getProcess,
   usd,
   ensureSignerKeysFromSeed,
-  converge as _converge,
+  converge,
   findReplica,
   processJEvents,
   setScenarioStorageEnabled,
@@ -54,7 +54,7 @@ const requireEntity = (entity: Entity | undefined, name: string): Entity => {
   return entity;
 };
 
-const converge = (env: Env, maxCycles = 15) => _converge(env, maxCycles);
+const convergeScenario = (env: Env, maxCycles = 15) => converge(env, maxCycles);
 
 type AccountJProgress = {
   lastFinalizedJHeight: number;
@@ -176,7 +176,7 @@ export async function runRebalanceScenario(): Promise<void> {
         findReplica(env, hub.id)[1].state.accounts.get(counterpartyId)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
       if (current === expected) return;
       await syncChain();
-      await converge(env);
+      await convergeScenario(env);
     }
     const current =
       findReplica(env, hub.id)[1].state.accounts.get(counterpartyId)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
@@ -212,7 +212,7 @@ export async function runRebalanceScenario(): Promise<void> {
     }]);
     await process(env); // Hub receives and creates account
   }
-  await converge(env);
+  await convergeScenario(env);
 
   // Verify accounts exist
   const hubState = findReplica(env, hub.id)[1].state;
@@ -237,7 +237,7 @@ export async function runRebalanceScenario(): Promise<void> {
       },
     }],
   }]);
-  await converge(env);
+  await convergeScenario(env);
 
   // ══════════════════════════════════════════════════════════════
   // EXTEND CREDIT: Hub extends credit to all users
@@ -316,7 +316,7 @@ export async function runRebalanceScenario(): Promise<void> {
   env.timestamp += 150;
   await process(env); // J-processor fires batch
   await syncChain();  // Poll events + process
-  await converge(env);
+  await convergeScenario(env);
 
   // Wait for the finalized AccountSettled J-events to land in bilateral state before asserting.
   // The on-chain R→C batch can be mined before the runtime ingests and finalizes its resulting J-events.
@@ -349,7 +349,7 @@ export async function runRebalanceScenario(): Promise<void> {
     }]
   }]);
   for (let i = 0; i < 6; i++) await process(env);
-  await converge(env);
+  await convergeScenario(env);
 
   // Charlie → Dave $12K via directPayment (routed through Hub)
   await process(env, [{
@@ -367,7 +367,7 @@ export async function runRebalanceScenario(): Promise<void> {
     }]
   }]);
   for (let i = 0; i < 6; i++) await process(env);
-  await converge(env);
+  await convergeScenario(env);
 
   // ══════════════════════════════════════════════════════════════
   // REBALANCE POLICIES: Users set their own (CRITICAL-3: auth)
@@ -395,7 +395,7 @@ export async function runRebalanceScenario(): Promise<void> {
     await process(env); // ACK
     await process(env); // Extra round
   }
-  await converge(env);
+  await convergeScenario(env);
   console.log('✅ Rebalance policies set by Bob + Dave');
 
   // Verify imbalances using deriveDelta
@@ -431,7 +431,7 @@ export async function runRebalanceScenario(): Promise<void> {
       data: { matchingStrategy: 'amount', routingFeePPM: 1, baseFee: 0n, minCollateralThreshold: 0n },
     }]
   }]);
-  await converge(env);
+  await convergeScenario(env);
 
   const hubConfigSet = findReplica(env, hub.id)[1].state.hubRebalanceConfig;
   assert(hubConfigSet, 'Hub config not set', env);
@@ -477,7 +477,7 @@ export async function runRebalanceScenario(): Promise<void> {
     advanceTime(100);
     await process(env);
   }
-  await converge(env);
+  await convergeScenario(env);
 
   // Debug: Check state after Cycle 1
   console.log('\n  [After Cycle 1] State:');
@@ -511,14 +511,14 @@ export async function runRebalanceScenario(): Promise<void> {
     advanceTime(100);
     await process(env);
   }
-  await converge(env);
+  await convergeScenario(env);
 
   // Let watcher + bilateral j_event_claim consensus finalize AccountSettled on both sides.
   for (let i = 0; i < 6; i++) {
     advanceTime(350);
     await process(env);
     await syncChain();
-    await converge(env);
+    await convergeScenario(env);
   }
 
   const hubAfterBroadcast = findReplica(env, hub.id)[1].state;
@@ -559,7 +559,7 @@ export async function runRebalanceScenario(): Promise<void> {
   if (rebalanceTargetUserIds.length === 0) {
     // Race guard: confirmed batch can precede local bilateral j-event apply by one tick.
     await syncChain();
-    await converge(env);
+    await convergeScenario(env);
     const hubAfterOneMoreSync = findReplica(env, hub.id)[1].state;
     rebalanceTargetUserIds = getRebalanceTargets(hubAfterOneMoreSync);
   }
@@ -783,7 +783,7 @@ export async function runRebalanceScenario(): Promise<void> {
       advanceTime(350);
       await process(env);
       await syncChain();
-      await converge(env);
+      await convergeScenario(env);
     }
 
     const after = getPendingRequests();
