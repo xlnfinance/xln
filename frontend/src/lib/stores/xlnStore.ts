@@ -168,7 +168,6 @@ export interface FrontendXlnFunctions {
   getEntityShortId: XLNModule['getEntityShortId'];
   formatEntityId: XLNModule['formatEntityId'];
   formatEntityDisplay: XLNModule['formatEntityDisplay'];
-  formatShortEntityId: XLNModule['formatShortEntityId'];
   hashToAvatar: XLNModule['hashToAvatar'];
   generateEntityAvatar: XLNModule['generateEntityAvatar'];
   generateSignerAvatar: XLNModule['generateSignerAvatar'];
@@ -1795,7 +1794,6 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
       getEntityShortId: failFn('getEntityShortId'),
       formatEntityId: failFn('formatEntityId'),
       formatEntityDisplay: failFn('formatEntityDisplay'),
-      formatShortEntityId: failFn('formatShortEntityId'),
       // Display-only helpers must not crash early boot paths like /app#pay deep links.
       hashToAvatar: (() => '') as FrontendXlnFunctions['hashToAvatar'],
       generateEntityAvatar: (() => '') as FrontendXlnFunctions['generateEntityAvatar'],
@@ -1895,7 +1893,6 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
 
     formatEntityId: $xlnInstance.formatEntityId,
     formatEntityDisplay: $xlnInstance.formatEntityDisplay,
-    formatShortEntityId: $xlnInstance.formatShortEntityId,
 
     // Avatar generation (using XLN instance functions)
     hashToAvatar: (seed: string, size: number = 40): string => {

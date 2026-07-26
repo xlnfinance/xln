@@ -387,7 +387,7 @@
   function formatEntityMeta(value: string | null | undefined): string {
     const entityId = String(value || '').trim();
     if (!entityId) return '';
-    const short = activeXlnFunctions?.formatShortEntityId?.(entityId);
+    const short = activeXlnFunctions?.getEntityShortId?.(entityId);
     return String(short || truncateMiddle(entityId, 10, 6)).trim();
   }
 

@@ -1,5 +1,6 @@
 import { writable } from 'svelte/store';
 import type { XLNModule } from '@xln/runtime/xln-api';
+import { isXLNModuleLoaded } from '@xln/runtime/xln-api-guard';
 import { registerDebugSurface } from '$lib/utils/debugSurface';
 import '$lib/utils/wireDebug';
 
@@ -16,7 +17,10 @@ export async function getXLN(): Promise<XLNModule> {
 	xlnLoadPromise = (async () => {
 		// Cache-bust runtime module per page load; stale runtime.js caused prod-debug desync.
 		const runtimeUrl = new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href;
-		const loaded = (await import(/* @vite-ignore */ runtimeUrl)) as XLNModule;
+		const loaded: unknown = await import(/* @vite-ignore */ runtimeUrl);
+		if (!isXLNModuleLoaded(loaded)) {
+			throw new Error('RUNTIME_API_MISMATCH: runtime.js is missing required bootstrap exports');
+		}
 		const runtimeMeta = loaded as XLNModule & { RUNTIME_SCHEMA_VERSION?: number };
 		const loadedSchema = Number(runtimeMeta.RUNTIME_SCHEMA_VERSION ?? NaN);
 		if (!Number.isFinite(loadedSchema) || loadedSchema < 1) {

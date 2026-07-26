@@ -170,8 +170,6 @@ import type { EntityId, SignerId, ReplicaKey } from './ids';
 import type {
   Env,
   Delta,
-  DerivedDelta,
-  EntityProfile,
   JurisdictionConfig,
   ConsensusConfig,
   CrossJurisdictionSwapRoute,
@@ -181,20 +179,9 @@ import type {
   AccountMachine,
 } from './types';
 import type { BoardMemberInput } from './entity/factory';
-import type {
-  EncryptedRuntimeRecoveryBundleV1,
-  RuntimeRecording,
-  RuntimeRecoveryBundleV1,
-  RuntimeRecoveryMetaV1,
-  RuntimeRecoverySignerV1,
-  TowerLastResortPayloadV1,
-  TowerModeV1,
-} from './recovery/types';
 import type { JAdapter } from './jadapter/types';
-import type { PersistedFrameJournal } from './storage/types';
 import type { EmbeddedRuntimeAdapter } from './radapter/embedded';
 import type { RemoteRuntimeAdapter } from './radapter/remote';
-import type { PersistedActivityJournal, RuntimeActivityFilters } from './api/activity-history';
 import type { RuntimeEntityInputRoutingResult } from './machine/output-routing';
 import type {
   RuntimeAdapterAccountPage,
@@ -212,7 +199,6 @@ import type {
 import type {
 	  RuntimeAdapterActivityPage,
 	  RuntimeAdapterEntitySummary,
-	  RuntimeAdapterReadQuery,
 	  RuntimeAdapterSolvencySummary,
 	  RuntimeAdapterTimelineIndexPage,
 	  RuntimeAdapterTimelineFrame,
@@ -319,25 +305,11 @@ export interface SignerDisplayInfo {
   avatar: string;
 }
 
-/**
- * Financial constants exported by runtime
- */
-export interface FinancialConstants {
-  PRECISION_18: bigint;
-  PRECISION_6: bigint;
-  MAX_SAFE_BIGINT: bigint;
-  MIN_SAFE_BIGINT: bigint;
-}
-
-/**
- * BigInt math utilities
- */
-export interface BigIntMathUtils {
-  min: (...values: bigint[]) => bigint;
-  max: (...values: bigint[]) => bigint;
-  abs: (value: bigint) => bigint;
-  clamp: (value: bigint, min: bigint, max: bigint) => bigint;
-}
+/** Exact financial utility shapes exported by runtime. */
+export type FinancialConstants =
+  typeof import('./account/financial-utils').FINANCIAL_CONSTANTS;
+export type BigIntMathUtils =
+  typeof import('./account/financial-utils').BigIntMath;
 
 /**
  * XLN Module Interface - defines all exports from runtime.js
@@ -346,8 +318,8 @@ export interface BigIntMathUtils {
  */
 export interface XLNModule {
   // Core lifecycle
-  main: (runtimeSeedOverride?: string | null) => Promise<Env>;
-  process: (env: Env, inputs?: unknown[], delay?: number) => Promise<Env>;
+  main: typeof import('./runtime').main;
+  process: typeof import('./runtime').process;
   hasRuntimeWork?: (env: Env) => boolean;
   registerEnvChangeCallback: (env: Env, callback: (env: Env) => void) => (() => void);
   registerRecoveryBackupBarrier?: (
@@ -431,42 +403,49 @@ export interface XLNModule {
   deriveSignerKeySync: (seed: Uint8Array | string, signerId: string) => Uint8Array;
 
   // Account utilities
-  deriveDelta: (delta: Delta, isLeft: boolean) => DerivedDelta;
-  isLeft: (entityId: string, counterpartyId: string) => boolean;
-  formatTokenAmount: (tokenId: number, amount: bigint | null | undefined) => string;
-  getTokenInfo: (tokenId: number) => { symbol: string; name: string; decimals: number; color: string };
-  getKnownTokenIds: () => number[];
-  getTokenIdsForJurisdiction: (input?: { name?: string | null; chainId?: number | null } | string | null) => number[];
-  isLiquidSwapToken: (tokenId: number) => boolean;
-  getSwapPairOrientation: (tokenA: number, tokenB: number) => { baseTokenId: number; quoteTokenId: number; pairId: string };
-  getDefaultSwapTradingPairs: () => Array<{ baseTokenId: number; quoteTokenId: number; pairId: string }>;
-  listOpenSwapOffers: (state: Pick<EntityState, 'accounts'>) => import('./types').SwapBookEntry[];
-  computeSwapPriceTicks: (giveTokenId: number, wantTokenId: number, giveAmount: bigint, wantAmount: bigint) => bigint;
-  getSwapLotScale: (baseTokenId: number) => bigint;
-  prepareSwapOrder: (giveTokenId: number, wantTokenId: number, giveAmount: bigint, wantAmount: bigint) => import('./orderbook').PreparedSwapOrder | null;
-  quantizeSwapOrder: (giveTokenId: number, wantTokenId: number, giveAmount: bigint, wantAmount: bigint) => { effectiveGive: bigint; effectiveWant: bigint; priceTicks: bigint } | null;
-  requantizeRemainingSwapAtPrice: (
-    giveTokenId: number,
-    wantTokenId: number,
-    remainingGiveAmount: bigint,
-    priceTicks: bigint,
-  ) => { effectiveGive: bigint; effectiveWant: bigint; releasedGiveDust: bigint } | null;
-  createDemoDelta: () => Delta;
-  getDefaultCreditLimit: (tokenId: number) => bigint;
+  deriveDelta: typeof import('./account/utils').deriveDelta;
+  isLeft: typeof import('./account/utils').isLeft;
+  formatTokenAmount:
+    typeof import('./account/financial-utils').formatTokenAmount;
+  getTokenInfo: typeof import('./account/utils').getTokenInfo;
+  getKnownTokenIds: typeof import('./account/utils').getKnownTokenIds;
+  getTokenIdsForJurisdiction:
+    typeof import('./account/utils').getTokenIdsForJurisdiction;
+  isLiquidSwapToken: typeof import('./account/utils').isLiquidSwapToken;
+  getSwapPairOrientation:
+    typeof import('./account/utils').getSwapPairOrientation;
+  getDefaultSwapTradingPairs:
+    typeof import('./account/utils').getDefaultSwapTradingPairs;
+  listOpenSwapOffers:
+    typeof import('./orderbook/open-swap-offers').listOpenSwapOffers;
+  computeSwapPriceTicks: typeof import('./orderbook').computeSwapPriceTicks;
+  getSwapLotScale: typeof import('./orderbook').getSwapLotScale;
+  prepareSwapOrder: typeof import('./orderbook').prepareSwapOrder;
+  quantizeSwapOrder: typeof import('./orderbook').quantizeSwapOrder;
+  requantizeRemainingSwapAtPrice:
+    typeof import('./orderbook').requantizeRemainingSwapAtPrice;
+  createDemoDelta: typeof import('./account/utils').createDemoDelta;
+  getDefaultCreditLimit:
+    typeof import('./account/utils').getDefaultCreditLimit;
 
   // Financial utilities (ethers.js-based)
-  formatTokenAmountEthers: (amount: bigint, decimals: number) => string;
-  parseTokenAmount: (amount: string, decimals: number) => bigint;
-  convertTokenPrecision: (amount: bigint, fromDecimals: number, toDecimals: number) => bigint;
-  calculatePercentageEthers: (amount: bigint, percentage: number) => bigint;
-  formatAssetAmountEthers: (amount: bigint, symbol: string, decimals: number) => string;
+  formatTokenAmountEthers:
+    typeof import('./account/financial-utils').formatTokenAmount;
+  parseTokenAmount:
+    typeof import('./account/financial-utils').parseTokenAmount;
+  convertTokenPrecision:
+    typeof import('./account/financial-utils').convertTokenPrecision;
+  calculatePercentageEthers:
+    typeof import('./account/financial-utils').calculatePercentage;
+  formatAssetAmountEthers:
+    typeof import('./account/financial-utils').formatAssetAmount;
   BigIntMath: BigIntMathUtils;
   FINANCIAL_CONSTANTS: FinancialConstants;
 
   // Serialization
-  safeStringify: (obj: unknown, space?: number) => string;
-  encode: (data: unknown) => Uint8Array;
-  decode: (data: Uint8Array) => unknown;
+  safeStringify: typeof import('./protocol/serialization').safeStringify;
+  encode: typeof import('./storage/snapshot-coder').encode;
+  decode: typeof import('./storage/snapshot-coder').decode;
 
   // Machine Payments Protocol core compatibility
   canonicalizeMppJson: (value: unknown) => string;
@@ -490,11 +469,14 @@ export interface XLNModule {
   isDelta: (obj: unknown) => obj is Delta;
 
   // Profile management
-  createProfileUpdateTx: (profile: Partial<EntityProfile>) => unknown;
+  createProfileUpdateTx:
+    typeof import('./routing/name-resolution').createProfileUpdateTx;
 
   // Jurisdiction management
-  getAvailableJurisdictions: () => Promise<JurisdictionConfig[]>;
-  getJurisdictionByAddress: (address: string) => JurisdictionConfig | undefined;
+  getAvailableJurisdictions:
+    typeof import('./jurisdiction/config').getAvailableJurisdictions;
+  getJurisdictionByAddress:
+    typeof import('./jadapter').getJurisdictionByAddress;
 
   // Entity creation
   generateLazyEntityId: (validators: readonly BoardMemberInput[], threshold: bigint) => string;
@@ -570,180 +552,101 @@ export interface XLNModule {
   };
 
   // Database operations
-  clearDB: (env?: Env) => Promise<void>;
-  clearDatabase: () => Promise<void>;
-  saveEnvToDB: (env: Env) => Promise<void>;
-  persistRestoredEnvToDB: (env: Env) => Promise<void>;
-  restoreEnvFromCheckpointSnapshot: (
-    snapshot: Record<string, unknown>,
-    options?: { runtimeSeed?: string | null; runtimeId?: string | null },
-  ) => Promise<Env>;
-  restoreEnvFromRecoveryBundles: (
-    bundles: RuntimeRecoveryBundleV1[],
-    options?: {
-      runtimeSeed?: string | null;
-      runtimeId?: string | null;
-      targetHeight?: number;
-      readOnly?: boolean;
-    },
-  ) => Promise<Env>;
-  loadEnvFromDB: (
-    runtimeId?: string | null,
-    runtimeSeed?: string | null,
-    options?: LoadEnvFromDbOptions,
-  ) => Promise<Env | null>;
-  getPersistedLatestHeight: (env: Env) => Promise<number>;
-  readPersistedRuntimeActivityPage: (
-    env: Env,
-    opts?: RuntimeActivityFilters & {
-      beforeHeight?: number | undefined;
-      limit?: number | undefined;
-      scanLimit?: number | undefined;
-    },
-  ) => Promise<RuntimeAdapterActivityPage>;
-  readPersistedStorageHead: (env: Env) => Promise<import('./storage/types').StorageHead | null>;
-  readPersistedStorageFrameRecord: (env: Env, height: number) => Promise<import('./storage/types').StorageFrameRecord | null>;
-  listPersistedCheckpointHeights: (env: Env) => Promise<number[]>;
-  listPersistedEntityIdsAtHeight: (env: Env, height: number) => Promise<string[]>;
-  loadEntityStateFromStorageDb: (env: Env, entityId: string, height?: number) => Promise<EntityState | null>;
-  loadEntityAccountDocFromStorageDb: (
-    env: Env,
-    entityId: string,
-    counterpartyId: string,
-    height?: number,
-  ) => Promise<import('./storage/types').StorageAccountDoc | null>;
-  loadEntityViewPageFromStorageDb: (
-    env: Env,
-    entityId: string,
-    height: number,
-    query?: RuntimeAdapterReadQuery,
-  ) => Promise<import('./storage').StorageEntityViewPage | null>;
-  verifyRuntimeChain: (
-    runtimeId?: string | null,
-    runtimeSeed?: string | null,
-    options?: { fromSnapshotHeight?: number },
-  ) => Promise<VerifyRuntimeChainResult>;
-  verifyLiveRuntimeStorage: (env: Env) => Promise<{
-    ok: true;
-    runtimeId: string;
-    latestHeight: number;
-    checkedFrames: number;
-  }>;
-  readPersistedFrameJournal: (env: Env, height: number) => Promise<PersistedFrameJournal | null>;
-  readPersistedRuntimeActivityJournal: (env: Env, height: number) => Promise<PersistedActivityJournal | null>;
-  readPersistedFrameJournals: (
-    env: Env,
-    opts?: {
-      fromHeight?: number;
-      toHeight?: number;
-      limit?: number;
-    },
-  ) => Promise<PersistedFrameJournal[]>;
-  readPersistedCheckpointSnapshot: (env: Env, height: number) => Promise<Record<string, unknown> | null>;
-  buildRuntimeRecoveryBundle: (
-    env: Env,
-    options: {
-      signers: RuntimeRecoverySignerV1[];
-      meta?: RuntimeRecoveryMetaV1;
-      createdAt?: number;
-      kind?: 'snapshot' | 'journal_tail';
-      baseCheckpoint?: { height: number; hash: string };
-      frames?: PersistedFrameJournal[];
-    },
-  ) => RuntimeRecoveryBundleV1;
-  buildPersistedRuntimeRecording: (
-    env: Env,
-    options: {
-      signers: RuntimeRecoverySignerV1[];
-      meta?: RuntimeRecoveryMetaV1;
-      createdAt?: number;
-    },
-  ) => Promise<RuntimeRecording>;
-  openDetachedRuntimeRecording: (
-    recording: RuntimeRecording,
-    runtimeSeed: string,
-  ) => {
-    readonly runtimeId: string;
-    readonly baseHeight: number;
-    readonly targetHeight: number;
-    readAtHeight(height: number): Promise<Env>;
-    close(): Promise<void>;
-  };
-  encryptRuntimeRecoveryBundle: (
-    bundle: RuntimeRecoveryBundleV1,
-    runtimeSeed: string,
-  ) => Promise<EncryptedRuntimeRecoveryBundleV1>;
-  decryptRuntimeRecoveryBundle: (
-    bundle: EncryptedRuntimeRecoveryBundleV1,
-    runtimeSeed: string,
-  ) => Promise<RuntimeRecoveryBundleV1>;
-  deriveRuntimeRecoveryActionLookupKey: (
-    runtimeId: string,
-    runtimeSeed: string,
-    entityId: string,
-    counterentity: string,
-  ) => string;
-  deriveRuntimeRecoveryLookupKey: (runtimeId: string, runtimeSeed: string) => string;
-  buildTowerAppointmentOwnerMessage: (
-    runtimeId: string,
-    towerMode: TowerModeV1,
-    lookupKey: string,
-    slot: number,
-    bundleHash: string,
-    height: number,
-    signedAt: number,
-    lastResortPayload?: TowerLastResortPayloadV1 | null,
-  ) => string;
-  computeWatchtowerCounterDisputeAuthorizationHash: (
-    chainId: number,
-    depositoryAddress: string,
-    towerAddress: string,
-    entityId: string,
-    counterentity: string,
-    finalNonce: number,
-    finalProofbodyHash: string,
-    lastResortWindowBlocks: number,
-    appointmentSequence: number,
-  ) => string;
-  encryptTowerPayloadForWatchSeed: (
-    plaintext: string,
-    watchSeed: string,
-  ) => Promise<string>;
-  decryptTowerPayloadWithWatchSeed: (
-    payloadJson: string,
-    watchSeed: string,
-  ) => Promise<string>;
-  buildSingleSignerHanko: (
-    entityId: string,
-    hash: string,
-    privateKey: string | Uint8Array,
-  ) => string;
+  clearDB: typeof import('./runtime').clearDB;
+  clearDatabase: typeof import('./runtime').clearDatabase;
+  saveEnvToDB: typeof import('./runtime').saveEnvToDB;
+  persistRestoredEnvToDB:
+    typeof import('./runtime').persistRestoredEnvToDB;
+  restoreEnvFromCheckpointSnapshot:
+    typeof import('./runtime').restoreEnvFromCheckpointSnapshot;
+  restoreEnvFromRecoveryBundles:
+    typeof import('./runtime').restoreEnvFromRecoveryBundles;
+  loadEnvFromDB: typeof import('./runtime').loadEnvFromDB;
+  getPersistedLatestHeight:
+    typeof import('./runtime').getPersistedLatestHeight;
+  readPersistedRuntimeActivityPage:
+    typeof import('./runtime').readPersistedRuntimeActivityPage;
+  readPersistedStorageHead:
+    typeof import('./runtime').readPersistedStorageHead;
+  readPersistedStorageFrameRecord:
+    typeof import('./runtime').readPersistedStorageFrameRecord;
+  listPersistedCheckpointHeights:
+    typeof import('./runtime').listPersistedCheckpointHeights;
+  listPersistedEntityIdsAtHeight:
+    typeof import('./runtime').listPersistedEntityIdsAtHeight;
+  loadEntityStateFromStorageDb:
+    typeof import('./runtime').loadEntityStateFromStorageDb;
+  loadEntityAccountDocFromStorageDb:
+    typeof import('./runtime').loadEntityAccountDocFromStorageDb;
+  loadEntityViewPageFromStorageDb:
+    typeof import('./runtime').loadEntityViewPageFromStorageDb;
+  verifyRuntimeChain: typeof import('./runtime').verifyRuntimeChain;
+  verifyLiveRuntimeStorage:
+    typeof import('./runtime').verifyLiveRuntimeStorage;
+  readPersistedFrameJournal:
+    typeof import('./runtime').readPersistedFrameJournal;
+  readPersistedRuntimeActivityJournal:
+    typeof import('./runtime').readPersistedRuntimeActivityJournal;
+  readPersistedFrameJournals:
+    typeof import('./runtime').readPersistedFrameJournals;
+  readPersistedCheckpointSnapshot:
+    typeof import('./runtime').readPersistedCheckpointSnapshot;
+  buildRuntimeRecoveryBundle:
+    typeof import('./runtime').buildRuntimeRecoveryBundle;
+  buildPersistedRuntimeRecording:
+    typeof import('./runtime').buildPersistedRuntimeRecording;
+  openDetachedRuntimeRecording:
+    typeof import('./runtime').openDetachedRuntimeRecording;
+  encryptRuntimeRecoveryBundle:
+    typeof import('./runtime').encryptRuntimeRecoveryBundle;
+  decryptRuntimeRecoveryBundle:
+    typeof import('./runtime').decryptRuntimeRecoveryBundle;
+  deriveRuntimeRecoveryActionLookupKey:
+    typeof import('./runtime').deriveRuntimeRecoveryActionLookupKey;
+  deriveRuntimeRecoveryLookupKey:
+    typeof import('./runtime').deriveRuntimeRecoveryLookupKey;
+  buildTowerAppointmentOwnerMessage:
+    typeof import('./runtime').buildTowerAppointmentOwnerMessage;
+  computeWatchtowerCounterDisputeAuthorizationHash:
+    typeof import('./runtime').computeWatchtowerCounterDisputeAuthorizationHash;
+  encryptTowerPayloadForWatchSeed:
+    typeof import('./runtime').encryptTowerPayloadForWatchSeed;
+  decryptTowerPayloadWithWatchSeed:
+    typeof import('./runtime').decryptTowerPayloadWithWatchSeed;
+  buildSingleSignerHanko:
+    typeof import('./runtime').buildSingleSignerHanko;
 
   // Blockchain operations
-  submitProcessBatch: (env: Env, jurisdiction: JurisdictionConfig, entityId: string, batch: unknown, signerId?: string) => Promise<{ transaction: unknown; receipt: unknown }>;
-  debugFundReserves: (env: Env, entityId: string, tokenAddress: string, amount: bigint) => Promise<Env>;
+  submitProcessBatch: typeof import('./jadapter').submitProcessBatch;
+  debugFundReserves: typeof import('./jadapter').debugFundReserves;
 
   // History and snapshots
-  getHistory: (env: Env) => Env[];
-  getSnapshot: (env: Env, index: number) => Env | null;
-  getCurrentHistoryIndex: (env: Env) => number;
-  getCleanLogs: (env: Env) => string;
-  clearCleanLogs: (env: Env) => void;
-  copyCleanLogs: (env: Env) => Promise<string>;
+  getHistory: typeof import('./runtime').getHistory;
+  getSnapshot: typeof import('./runtime').getSnapshot;
+  getCurrentHistoryIndex: typeof import('./runtime').getCurrentHistoryIndex;
+  getCleanLogs: typeof import('./runtime').getCleanLogs;
+  clearCleanLogs: typeof import('./runtime').clearCleanLogs;
+  copyCleanLogs: typeof import('./runtime').copyCleanLogs;
 
   // Entity detection
-  detectEntityType: (entityId: string) => string;
-  isEntityRegistered: (env: Env, entityId: string) => boolean;
-  getEntityInfoFromChain: (entityId: string) => Promise<unknown>;
+  detectEntityType: typeof import('./entity/factory').detectEntityType;
+  isEntityRegistered:
+    typeof import('./entity/factory').isEntityRegistered;
+  getEntityInfoFromChain:
+    typeof import('./jadapter').getEntityInfoFromChain;
 
   // Name operations
-  resolveEntityName: (name: string) => Promise<string | null>;
-  resolveEntityIdentifier: (identifier: string) => Promise<string | null>;
-  searchEntityNames: (query: string) => Promise<string[]>;
-  requestNamedEntity: (env: Env, name: string) => Promise<Env>;
+  resolveEntityName:
+    (entityId: string) => ReturnType<typeof import('./routing/name-resolution').resolveEntityName>;
+  resolveEntityIdentifier:
+    typeof import('./entity/factory').resolveEntityIdentifier;
+  searchEntityNames:
+    (query: string, limit?: number) => ReturnType<typeof import('./routing/name-resolution').searchEntityNames>;
+  requestNamedEntity: typeof import('./entity/factory').requestNamedEntity;
 
-  setBrowserVMJurisdiction: (env: Env, depositoryAddress: string, browserVMInstance?: unknown) => void;
-  getBrowserVMInstance: (env?: Env) => unknown | null;
+  setBrowserVMJurisdiction:
+    typeof import('./jadapter').setBrowserVMJurisdiction;
+  getBrowserVMInstance: typeof import('./jadapter').getBrowserVMInstance;
 
   // Networking helpers
   sendEntityInput: (env: Env, input: EntityInput) => RuntimeEntityInputRoutingResult;
@@ -751,12 +654,14 @@ export interface XLNModule {
   ensureGossipProfiles?: (env: Env, entityIds: string[]) => Promise<boolean>;
 
   // Entity display helpers
-  getEntityDisplayInfoFromProfile: (profile: EntityProfile) => EntityDisplayInfo;
-  formatShortEntityId: (entityId: string) => string;
+  getEntityDisplayInfoFromProfile:
+    (entityId: string) => Promise<{ name: string; avatar: string }>;
 
   // Bilateral consensus state
-  classifyBilateralState: (myAccount: unknown, peerCurrentHeight: number | undefined, isLeft: boolean) => { state: string; isLeftEntity: boolean; shouldRollback: boolean; pendingHeight: number | null; mempoolCount: number };
-  getAccountBarVisual: (leftState: unknown, rightState: unknown) => { glowColor: string | null; glowSide: string | null; glowIntensity: number; isDashed: boolean; pulseSpeed: number };
+  classifyBilateralState:
+    typeof import('./account/view-state').classifyBilateralState;
+  getAccountBarVisual:
+    typeof import('./account/view-state').getAccountBarVisual;
 
   // Runtime adapter contract (embedded and remote share the same read resolver)
   EmbeddedRuntimeAdapter: typeof EmbeddedRuntimeAdapter;
@@ -764,15 +669,33 @@ export interface XLNModule {
   resolveRuntimeAdapterRead: typeof resolveRuntimeAdapterRead;
 }
 
+type RequiredKeys<T extends object> = {
+  [K in keyof T]-?: object extends Pick<T, K> ? never : K;
+}[keyof T];
+
+type RequiredXLNModule = Pick<XLNModule, RequiredKeys<XLNModule>>;
+type RuntimeModuleExports = typeof import('./runtime');
+
 /**
- * Type guard for checking if XLN module is loaded
+ * Compile-time diagnostics for the browser runtime boundary.
+ *
+ * `XLNModule` is necessarily handwritten because the frontend loads runtime.js
+ * dynamically. These aliases make that boundary fail compilation when a
+ * required export disappears or its implementation stops satisfying the
+ * declared frontend contract.
  */
-export function isXLNModuleLoaded(module: unknown): module is XLNModule {
-  return (
-    typeof module === 'object' &&
-    module !== null &&
-    'main' in module &&
-    'extractEntityId' in module &&
-    'parseReplicaKey' in module
-  );
-}
+export type XLNRuntimeMissingRequiredExports = Exclude<
+  keyof RequiredXLNModule,
+  keyof RuntimeModuleExports
+>;
+
+export type XLNRuntimeIncompatibleRequiredExports = {
+  [K in Extract<keyof RequiredXLNModule, keyof RuntimeModuleExports>]:
+    RuntimeModuleExports[K] extends RequiredXLNModule[K] ? never : K;
+}[Extract<keyof RequiredXLNModule, keyof RuntimeModuleExports>];
+
+type AssertNever<T extends never> = T;
+
+export type XLNRuntimeModuleConformance = AssertNever<
+  XLNRuntimeMissingRequiredExports | XLNRuntimeIncompatibleRequiredExports
+>;
