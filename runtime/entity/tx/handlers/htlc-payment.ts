@@ -83,6 +83,7 @@ export async function handleHtlcPayment(
     tokenId: prepared.tokenId,
     amount: prepared.recipientAmount,
     startedAtMs: prepared.startedAtMs,
+    originated: true,
     outboundEntity: prepared.nextHop,
     outboundLockId: prepared.lockId,
     createdTimestamp: newState.timestamp,

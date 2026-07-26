@@ -24,7 +24,11 @@ import {
   switchToRuntime,
 } from './utils/e2e-demo-users';
 import { expectUiPaymentNoRoute, prepareUiPayment, submitUiPayment } from './utils/e2e-pay-ui';
-import { getPersistedReceiptCursor, waitForPersistedFrameEvent, waitForPersistedFrameEventMatch } from './utils/e2e-runtime-receipts';
+import {
+  getPersistedReceiptCursor,
+  waitForPersistedFrameEvent,
+  waitForPersistedFrameEventMatch,
+} from './utils/e2e-runtime-receipts';
 import { timedStep } from './utils/e2e-timing.mts';
 
 const INIT_TIMEOUT = 30_000;
@@ -402,19 +406,11 @@ async function findSelfCycleRoute(
       }
     }
 
-    // Prefer explicit obfuscated loop when 3 required hubs are provided:
-    // self -> H1 -> H2 -> H3 -> self
-    if (Array.isArray(requiredHubs) && requiredHubs.length >= 3) {
-      const [h1, h2, h3] = requiredHubs.map((h: string) => String(h));
+    // Prefer the exact named cycle when every edge is certified.
+    if (Array.isArray(requiredHubs) && requiredHubs.length >= 2) {
+      const candidate = [selfEntityId, ...requiredHubs.map(String), selfEntityId];
       const has = (a: string, b: string) => adjacency.get(a)?.has(b) === true;
-      if (
-        has(selfEntityId, h1) &&
-        has(h1, h2) &&
-        has(h2, h3) &&
-        has(h3, selfEntityId)
-      ) {
-        return [selfEntityId, h1, h2, h3, selfEntityId];
-      }
+      if (candidate.slice(1).every((to, index) => has(candidate[index]!, to))) return candidate;
     }
 
     const MAX_HOPS = 8;
@@ -929,9 +925,9 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     // ── 3. Discover hubs ─────────────────────────────────────────
     console.log('[E2E] 3. Discover hubs');
-    const namedHubs = await waitForNamedHubs(page, ['H1', 'H2', 'H3']);
-    const preferredThreeHubs = [namedHubs.h1!, namedHubs.h2!, namedHubs.h3!];
-    const hubId = preferredThreeHubs[0]!;
+    const namedHubs = await waitForNamedHubs(page, ['H1', 'H2']);
+    const cycleHubs = [namedHubs.h1!, namedHubs.h2!];
+    const hubId = cycleHubs[0]!;
     const aliceSetupHubs = [hubId];
     console.log(`[E2E] Primary hub: ${hubId.slice(0, 16)}`);
     console.log(`[E2E] Alice setup hubs: ${aliceSetupHubs.map((hub) => hub.slice(0, 10)).join(', ')}`);
@@ -1228,33 +1224,26 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     // ── Summary ───────────────────────────────────────────────────
     console.log('[E2E] 10. Self-pay obfuscated loop route');
-    console.log(`[E2E] Hubs selected: ${preferredThreeHubs.map(h => h.slice(0, 10)).join(', ')}`);
-    const requireThreeHubs = preferredThreeHubs.length >= 3;
-    if (requireThreeHubs) {
-      const existingCounterparties = await connectedCounterparties(page, alice!.entityId);
-      const missingCycleHubs = preferredThreeHubs.filter(
-        (candidate) => !existingCounterparties.has(candidate.toLowerCase()),
-      );
-      for (const candidate of missingCycleHubs) {
-        console.log(`[E2E] 10.i Connect Alice to cycle hub ${candidate.slice(0, 16)}`);
-        await connectActiveRuntimeToHub(page, candidate);
-      }
+    console.log(`[E2E] Hubs selected: ${cycleHubs.map(h => h.slice(0, 10)).join(', ')}`);
+    const existingCounterparties = await connectedCounterparties(page, alice!.entityId);
+    for (const candidate of cycleHubs.filter(hub => !existingCounterparties.has(hub.toLowerCase()))) {
+      console.log(`[E2E] 10.i Connect Alice to cycle hub ${candidate.slice(0, 16)}`);
+      await connectActiveRuntimeToHub(page, candidate);
     }
     const selfRoute = await findSelfCycleRoute(
       page,
       alice!.entityId,
-      requireThreeHubs ? 3 : 2,
-      requireThreeHubs ? preferredThreeHubs : [],
+      2,
+      cycleHubs,
     );
     expect(
       selfRoute.length,
-      requireThreeHubs
-        ? 'Need explicit A->H1->H2->H3->A self-route when 3 hubs are visible'
-        : 'Need at least A->X->Y->A route',
-    ).toBeGreaterThanOrEqual(requireThreeHubs ? 5 : 4);
+      'Need explicit A->H1->H2->A self-route',
+    ).toBe(4);
     console.log(`[E2E] Self route selected: ${selfRoute.map(r => r.slice(0, 10)).join(' -> ')}`);
 
     const selfBefore = await outCap(page, alice!.entityId, hubId);
+    const selfCursor = await getPersistedReceiptCursor(page);
     const selfAfter = await timedStep(`ahb.self_route_${selfRoute.length - 2}_hops.send_to_outcap`, async () => {
       await pay(page, alice!.entityId, alice!.signerId, alice!.entityId, selfRoute, toUsdcUnits(1));
       await expect.poll(async () => {
@@ -1273,6 +1262,25 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     });
     console.log(`[E2E] Self-pay OUT via hub: ${selfBefore} → ${selfAfter}`);
     expect(selfAfter, 'Self-pay should not increase outbound unexpectedly').toBeLessThanOrEqual(selfBefore);
+    const selfReceived = await waitForPersistedFrameEventMatch(page, {
+      cursor: selfCursor,
+      eventName: 'HtlcReceived',
+      entityId: alice!.entityId,
+    });
+    const selfHashlock = String(selfReceived.data?.hashlock || '').toLowerCase();
+    const selfFinalized = await waitForPersistedFrameEventMatch(page, {
+      cursor: selfCursor,
+      eventName: 'HtlcFinalized',
+      entityId: alice!.entityId,
+      predicate: event => String(event.data?.hashlock || '').toLowerCase() === selfHashlock,
+    });
+    const revealToFinalizeMs =
+      Number(selfFinalized.data?.finalizedAtMs || 0) - Number(selfReceived.data?.receivedAtMs || 0);
+    expect(revealToFinalizeMs, 'Self-pay finalization cannot precede recipient reveal').toBeGreaterThanOrEqual(0);
+    console.log(
+      `[E2E-TIMING] ahb.self_pay_reveal_to_finalize ${revealToFinalizeMs}ms ` +
+      `(runtimeFrames=${selfFinalized.frameHeight - selfReceived.frameHeight})`,
+    );
 
     const lockInfo = await page.evaluate((eid) => {
       const env = (window as any).isolatedEnv;

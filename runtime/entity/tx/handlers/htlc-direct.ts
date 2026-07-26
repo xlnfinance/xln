@@ -99,6 +99,7 @@ export const handleHashlockPaymentEntityTx = (
     tokenId: Number(tokenId),
     amount: amountBig,
     startedAtMs,
+    originated: true,
     outboundEntity: normalizedTarget,
     outboundLockId: lockId,
     ...(entityTx.data.crossJurisdictionRelay ? { crossJurisdictionRelay: entityTx.data.crossJurisdictionRelay } : {}),

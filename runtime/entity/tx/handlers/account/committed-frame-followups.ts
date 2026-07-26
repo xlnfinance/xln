@@ -37,7 +37,7 @@ function emitOriginatedHtlcFinalized(
   candidateEffects: EntityCandidateEffect[],
 ): void {
   if (accountTx.data.outcome !== 'secret') return;
-  if (route.inboundEntity || route.outboundLockId !== accountTx.data.lockId) return;
+  if ((!route.originated && route.inboundEntity) || route.outboundLockId !== accountTx.data.lockId) return;
   const description =
     state.htlcNotes?.get(`lock:${accountTx.data.lockId}` as HtlcNoteKey)
     ?? state.htlcNotes?.get(`hashlock:${route.hashlock}` as HtlcNoteKey)
@@ -306,8 +306,9 @@ export function applyCommittedAccountFrameFollowups(
         for (const [hashlock, route] of newState.htlcRoutes.entries()) {
           const resolvesInbound = route.inboundLockId === accountTx.data.lockId;
           const resolvesOriginatedOutbound =
-            route.outboundLockId === accountTx.data.lockId && !route.inboundEntity;
-          const resolvesForwardedOutbound = route.outboundLockId === accountTx.data.lockId && Boolean(route.inboundEntity);
+            route.outboundLockId === accountTx.data.lockId && (route.originated || !route.inboundEntity);
+          const resolvesForwardedOutbound =
+            route.outboundLockId === accountTx.data.lockId && Boolean(route.inboundEntity) && !route.originated;
           if (!resolvesInbound && !resolvesOriginatedOutbound && !resolvesForwardedOutbound) continue;
           if ('offerHash' in accountTx.data) {
             if (resolvesForwardedOutbound || resolvesOriginatedOutbound) {
@@ -348,6 +349,11 @@ export function applyCommittedAccountFrameFollowups(
             continue;
           }
           emitOriginatedHtlcFinalized(env, newState, route, accountTx, candidateEffects);
+          if (route.originated && route.inboundEntity) {
+            if (resolvesInbound) route.inboundSettled = true;
+            if (resolvesOriginatedOutbound) route.outboundSettled = true;
+            if (!route.inboundSettled || !route.outboundSettled) continue;
+          }
           terminateHtlcRoute(newState, hashlock, newState.timestamp);
         }
       }

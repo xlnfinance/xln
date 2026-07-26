@@ -131,6 +131,8 @@ export interface HtlcRoute {
   tokenId?: number;
   amount?: bigint;
   startedAtMs?: number;
+  /** True when this Entity created the payment; remains true for a self-cycle's returning hop. */
+  originated?: true;
 
   // Inbound hop (who sent us this HTLC)
   inboundEntity?: string;
@@ -139,6 +141,9 @@ export interface HtlcRoute {
   // Outbound hop (who we forwarded to)
   outboundEntity?: string;
   outboundLockId?: string;
+  /** Self-cycle legs may commit in either order and are retained until both are terminal. */
+  inboundSettled?: true;
+  outboundSettled?: true;
 
   // Resolution
   secret?: string;
