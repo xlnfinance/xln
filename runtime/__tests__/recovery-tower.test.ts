@@ -11,7 +11,7 @@ import {
   createEmptyEnv,
   enqueueRuntimeInput,
   openDetachedRuntimeRecording,
-  process as processRuntime,
+  processRuntime,
   restoreEnvFromCheckpointSnapshot,
   restoreEnvFromRecoveryBundles,
   readPersistedFrameJournal,

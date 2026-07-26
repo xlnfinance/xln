@@ -14,7 +14,7 @@ import {
   getFrameDb,
   listPersistedCheckpointHeights,
   loadEnvFromDB,
-  process as processRuntime,
+  processRuntime,
   readPersistedStorageHead,
   verifyRuntimeChain,
 } from '../runtime';

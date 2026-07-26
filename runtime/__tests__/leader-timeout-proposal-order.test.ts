@@ -14,7 +14,7 @@ import {
 } from '../entity/consensus/leader';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { initCrontab } from '../entity/scheduler';
-import { applyRuntimeInput, createEmptyEnv, process as processRuntime } from '../runtime';
+import { applyRuntimeInput, createEmptyEnv, processRuntime } from '../runtime';
 import type {
   ConsensusConfig,
   EntityInput,

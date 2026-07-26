@@ -65,7 +65,7 @@ export const createProfileUpdateTx = (
   };
 };
 
-export const searchEntityNames = async (
+export const searchRuntimeEntityNames = async (
   env: Env | null | undefined,
   query: string,
   limit: number = 10,
@@ -94,7 +94,7 @@ export const searchEntityNames = async (
   return matches.slice(0, Math.max(1, Math.floor(limit)));
 };
 
-export const resolveEntityName = async (
+export const resolveRuntimeEntityName = async (
   env: Env | null | undefined,
   entityId: string,
 ): Promise<string | null> => {
@@ -103,7 +103,7 @@ export const resolveEntityName = async (
   return collectProfiles(env).get(normalizedEntityId)?.name ?? formatEntityDisplay(normalizedEntityId);
 };
 
-export const getEntityDisplayInfo = async (
+export const getRuntimeEntityDisplayInfo = async (
   env: Env | null | undefined,
   entityId: string,
 ): Promise<{ name: string; avatar: string }> => {

@@ -2,7 +2,7 @@ import {
   closeInfraDb,
   closeRuntimeDb,
   loadEnvFromDB,
-  process as processRuntime,
+  processRuntime,
 } from '../../runtime';
 import { deriveSignerAddressSync } from '../../account/crypto';
 import { getNextJSubmitRetryTimestamp } from '../../machine/j-submit-scheduler';

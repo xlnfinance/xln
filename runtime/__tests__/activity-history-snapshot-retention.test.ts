@@ -7,7 +7,7 @@ import {
   createEmptyEnv,
   enqueueRuntimeInput,
   getFrameDb,
-  process as processRuntime,
+  processRuntime,
   readPersistedFrameJournal,
   readPersistedRuntimeActivityJournal,
   readPersistedRuntimeActivityPage,

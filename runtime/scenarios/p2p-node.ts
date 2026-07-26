@@ -4,7 +4,7 @@
  */
 
 import { startStandaloneRelayServer } from '../relay/standalone-server';
-import { main, startP2P, process as runtimeProcess, enqueueRuntimeInput, createLazyEntity, generateLazyEntityId, getActiveJAdapter, startRuntimeLoop } from '../runtime.ts';
+import { main, startP2P, processRuntime, enqueueRuntimeInput, createLazyEntity, generateLazyEntityId, getActiveJAdapter, startRuntimeLoop } from '../runtime.ts';
 import { createLocalDeliveryHandler } from '../relay/local-delivery';
 import { getEntityReplicaById } from '../server/entity-lookup';
 import { processUntil } from './helpers';
@@ -182,10 +182,10 @@ const waitForReserveBalance = async (
   for (let round = 1; round <= maxRounds; round++) {
     if (getReserveBalance(env, entityId, signerId, tokenId) >= minAmount) return;
 
-    await runtimeProcess(env);
+    await processRuntime(env);
     if (typeof jadapter.pollNow === 'function') {
       await jadapter.pollNow();
-      await runtimeProcess(env);
+      await processRuntime(env);
     }
 
     if (getReserveBalance(env, entityId, signerId, tokenId) >= minAmount) return;
@@ -667,8 +667,8 @@ const run = async () => {
       ],
       entityInputs: [],
     });
-    await runtimeProcess(env);
-    await runtimeProcess(env);
+    await processRuntime(env);
+    await processRuntime(env);
 
     // J-event watching is handled by JAdapter.startWatching() per-jReplica
     console.log(`P2P_JADAPTER_READY role=${role} rpc=${rpcUrl}`);
@@ -687,8 +687,8 @@ const run = async () => {
       ],
       entityInputs: [],
     });
-    await runtimeProcess(env);
-    await runtimeProcess(env);
+    await processRuntime(env);
+    await processRuntime(env);
 
     const browserReplica = env.jReplicas.get(jurisdictionName);
     const browserAdapter = browserReplica?.jadapter;
@@ -754,7 +754,7 @@ const run = async () => {
     ],
     entityInputs: [],
   });
-  await runtimeProcess(env);
+  await processRuntime(env);
 
   console.log(`🔧 P2P_CONFIG: role=${role} entityId=${entityId.slice(-4)}`);
 
@@ -790,8 +790,8 @@ const run = async () => {
     // RPC watcher default poll is 15s; force immediate fetch so reserve sync is not timing-sensitive.
     if (typeof jadapter.pollNow === 'function') {
       await jadapter.pollNow();
-      await runtimeProcess(env);
-      await runtimeProcess(env);
+      await processRuntime(env);
+      await processRuntime(env);
     }
     await waitForReserveBalance(env, entityId, signerId, USDC, FAUCET_DEPOSIT_AMOUNT, `${role}-faucet`);
     console.log(`P2P_FAUCET_READY role=${role} token=${usdcToken.symbol} reserve=${getReserveBalance(env, entityId, signerId, USDC)}`);
@@ -837,7 +837,7 @@ const run = async () => {
     );
 
     // Mutual credit: Hub extends to Alice, Alice extends to Hub
-    await runtimeProcess(env, [
+    await processRuntime(env, [
       {
         entityId,
         signerId,
@@ -893,7 +893,7 @@ const run = async () => {
 
     // Hub stays alive processing messages (don't exit, keep processing networkInbox)
     while (true) {
-      await runtimeProcess(env);
+      await processRuntime(env);
       await new Promise(resolve => setTimeout(resolve, 100));  // Process every 100ms
     }
   }
@@ -909,7 +909,7 @@ const run = async () => {
   // Otherwise hub can't route ACKs back to us
   await waitForHubToHaveOurProfile(env, entityId, refreshGossip);
 
-  await runtimeProcess(env, [
+  await processRuntime(env, [
     { entityId, signerId, entityTxs: [{ type: 'openAccount', data: { targetEntityId: hubProfile.entityId } }] },
   ]);
 
@@ -923,7 +923,7 @@ const run = async () => {
 
   // STEP 2: CLIENT extends credit to HUB (mutual credit)
   console.log(`${role.toUpperCase()}: Extending credit back to hub...`);
-  await runtimeProcess(env, [
+  await processRuntime(env, [
     {
       entityId,
       signerId,
@@ -973,7 +973,7 @@ const run = async () => {
         throw new Error(`R2R_INSUFFICIENT_RESERVE: have=${reserveBefore} need=${R2R_AMOUNT}`);
       }
 
-      await runtimeProcess(env, [
+      await processRuntime(env, [
         {
           entityId,
           signerId,
@@ -998,10 +998,10 @@ const run = async () => {
           settled = true;
           break;
         }
-        await runtimeProcess(env);
+        await processRuntime(env);
         if (typeof jadapter.pollNow === 'function') {
           await jadapter.pollNow();
-          await runtimeProcess(env);
+          await processRuntime(env);
         }
         if (round % 10 === 0) {
           console.log(
@@ -1033,7 +1033,7 @@ const run = async () => {
     const secret = ethers.keccak256(ethers.toUtf8Bytes(`htlc-${entityId}-${bobProfile.entityId}`));
     const hashlock = hashHtlcSecret(secret);
 
-    await runtimeProcess(env, [
+    await processRuntime(env, [
       {
         entityId,
         signerId,
@@ -1099,7 +1099,7 @@ const run = async () => {
       throw new Error(`ACCOUNT_NOT_ACKED: ${hubProfile.entityId.slice(-4)}`);
     }
     const creditAmount = usd(500_000);
-    await runtimeProcess(env, [
+    await processRuntime(env, [
       {
         entityId,
         signerId,

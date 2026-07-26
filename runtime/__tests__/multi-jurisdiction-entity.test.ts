@@ -7,7 +7,7 @@ import {
   closeRuntimeDb,
   createEmptyEnv,
   enqueueRuntimeInput,
-  process as processRuntime,
+  processRuntime,
 } from '../runtime';
 import { applyEntityTx } from '../entity/tx/apply';
 import {

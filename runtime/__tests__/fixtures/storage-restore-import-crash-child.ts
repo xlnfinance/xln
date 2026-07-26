@@ -3,7 +3,7 @@ import {
   enqueueRuntimeInput,
   getRuntimeStorageDb,
   persistRestoredEnvToDB,
-  process as processRuntime,
+  processRuntime,
   registerSignerKey,
 } from '../../runtime';
 import {

@@ -3,7 +3,7 @@ import {
   createEmptyEnv,
   enqueueRuntimeInput,
   getFrameDb,
-  process as processRuntime,
+  processRuntime,
 } from '../../runtime';
 import { readStorageFrameRecord } from '../../storage';
 import {

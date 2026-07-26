@@ -14,7 +14,7 @@ import { applyEntityFrame, applyEntityInput } from '../entity/consensus/index';
 import {
   createEmptyEnv,
   hasRuntimeWork,
-  process as processRuntime,
+  processRuntime,
   registerRuntimeFrameCommitCallback,
   waitForRuntimeWorkDrained,
 } from '../runtime';

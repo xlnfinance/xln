@@ -4,7 +4,7 @@ import {
   closeInfraDb,
   createEmptyEnv,
   enqueueRuntimeInput,
-  process as processRuntime,
+  processRuntime,
   loadEnvFromDB,
   closeRuntimeDb,
 } from '../runtime.ts';

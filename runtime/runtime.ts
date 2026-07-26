@@ -60,7 +60,11 @@ import {
 } from './account/crypto';
 import { normalizeRuntimeId } from './networking/runtime-id';
 import { extractEntityId, extractSignerId } from './ids';
-import * as nameResolution from './routing/name-resolution';
+import {
+  getRuntimeEntityDisplayInfo,
+  resolveRuntimeEntityName,
+  searchRuntimeEntityNames,
+} from './routing/name-resolution';
 import { assertCrossJurisdictionSwapTargetReadyInEnv } from './account/swap-command-plan';
 import {
   buildCrossJurisdictionSwapSubmission,
@@ -195,7 +199,7 @@ const runtimeLog = createStructuredLogger('runtime');
 
 const runtimeLoopApi = createRuntimeLoopApi({
   notifyEnvChange: env => notifyEnvChange(env),
-  process: (env, inputs, runtimeDelay) => process(env, inputs, runtimeDelay),
+  processRuntime: (env, inputs, runtimeDelay) => processRuntime(env, inputs, runtimeDelay),
   waitForRuntimeProcessingIdle: (env, timeoutMs) => waitForRuntimeProcessingIdle(env, timeoutMs),
   getRuntimeProcessGlobal: () => getRuntimeProcessGlobal(),
   runtimeInputHasQueuedWork: input => runtimeInputHasQueuedWork(input),
@@ -1552,7 +1556,7 @@ const abortRuntimeFrameTransaction = async (transaction: RuntimeFrameTransaction
 // === CONSENSUS PROCESSING ===
 // ONE TICK = ONE ITERATION. No cascade. E→E communication always requires new tick.
 
-export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0) => {
+export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0) => {
   const liveEnv = env;
   const processState = ensureRuntimeState(env);
   if (inferRuntimeLifecyclePhase(processState) === 'halted') {
@@ -2588,9 +2592,11 @@ export type {
 // === NAME RESOLUTION WRAPPERS (override imports) ===
 // Runtime no longer keeps a module-global env/db; these pure wrappers expose
 // deterministic name formatting for callers that do not own an Env.
-const searchEntityNames = (query: string, limit?: number) => nameResolution.searchEntityNames(null, query, limit);
-const resolveEntityName = (entityId: string) => nameResolution.resolveEntityName(null, entityId);
-const getEntityDisplayInfoFromProfile = (entityId: string) => nameResolution.getEntityDisplayInfo(null, entityId);
+const searchEntityNames = (query: string, limit?: number) =>
+  searchRuntimeEntityNames(null, query, limit);
+const resolveEntityName = (entityId: string) => resolveRuntimeEntityName(null, entityId);
+const getEntityDisplayInfoFromProfile = (entityId: string) =>
+  getRuntimeEntityDisplayInfo(null, entityId);
 
 // Avatar functions are already imported and exported above
 

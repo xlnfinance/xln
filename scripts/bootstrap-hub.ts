@@ -6,7 +6,7 @@
  * Idempotent: safe to run multiple times.
  */
 
-import { main, process as runtimeProcess } from '../runtime/runtime.ts';
+import { main, processRuntime } from '../runtime/runtime.ts';
 import {
   deriveSignerKeySync,
   deriveSignerAddressSync,
@@ -147,7 +147,7 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
       },
     });
 
-    await runtimeProcess(env, []);
+    await processRuntime(env, []);
     bootstrapLog.info('hub.entity_created', {
       name: hubConfig.name,
       entityId,
@@ -199,7 +199,7 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
       },
     ],
   });
-  await runtimeProcess(env, []);
+  await processRuntime(env, []);
 
   if (env.gossip?.getHubs) {
     const hubs = env.gossip.getHubs();

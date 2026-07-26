@@ -19,7 +19,7 @@ import {
   getRuntimeStorageDb,
   handleInboundP2PEntityInput,
   handleInboundReliableReceipt,
-  process as processRuntime,
+  processRuntime,
 } from '../runtime';
 import {
   createReliableDeliveryReceipt,

@@ -19,7 +19,7 @@ import {
 } from '../entity/consensus/state-root';
 import { generateLazyEntityId } from '../entity/factory';
 import { applyRuntimeStorageChanges } from '../machine/env-events';
-import { createEmptyEnv, enqueueRuntimeInput, process as processRuntime } from '../runtime';
+import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../runtime';
 import { recoverStorageDbFromHistory, saveRuntimeFrameToStorage } from '../storage';
 import { keyConsumptionNode } from '../storage/keys';
 import { hydrateConsumptionRootNodesFromStorage } from '../storage/read';

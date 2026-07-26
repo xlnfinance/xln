@@ -6,7 +6,7 @@ import {
   createEmptyEnv,
   enqueueRuntimeInput,
   loadEnvFromDB,
-  process as processRuntime,
+  processRuntime,
 } from '../runtime.ts';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';

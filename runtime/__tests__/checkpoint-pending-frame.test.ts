@@ -9,7 +9,7 @@ import {
   listPersistedCheckpointHeights,
   loadEnvFromDB,
   main,
-  process as processRuntime,
+  processRuntime,
   verifyRuntimeChain,
 } from '../runtime.ts';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';

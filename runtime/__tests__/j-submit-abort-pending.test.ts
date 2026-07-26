@@ -5,7 +5,7 @@ import {
   closeInfraDb,
   closeRuntimeDb,
   loadEnvFromDB,
-  process as processRuntime,
+  processRuntime,
   registerRecoveryBackupBarrier,
 } from '../runtime';
 import { deriveSignerAddressSync } from '../account/crypto';

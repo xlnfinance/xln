@@ -4,7 +4,7 @@ import {
   enqueueRuntimeInput,
   getFrameDb,
   getRuntimeStorageDb,
-  process as processRuntime,
+  processRuntime,
   tryOpenStorageDb,
   tryOpenFrameDb,
 } from '../../runtime';

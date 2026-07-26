@@ -19,7 +19,7 @@ import {
   enqueueRuntimeInput,
   generateLazyEntityId,
   loadEnvFromDB,
-  process as processRuntime,
+  processRuntime,
 } from '../runtime';
 
 const TEST_RUN_ID = `${globalThis.process.pid}-${Date.now()}`;

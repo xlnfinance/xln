@@ -31,7 +31,7 @@ import {
   closeInfraDb,
   closeRuntimeDb,
   main,
-  process as runtimeProcess,
+  processRuntime,
   enqueueRuntimeInput,
   validateRuntimeInputAdmission,
   handleInboundP2PEntityInputs,
@@ -4067,7 +4067,7 @@ const run = async (): Promise<void> => {
 
   startupPhase = 'j-catchup';
   startJurisdictionWatchers(env);
-  const watcherDrain = await drainJWatcherBacklog(env, async currentEnv => runtimeProcess(currentEnv));
+  const watcherDrain = await drainJWatcherBacklog(env, async currentEnv => processRuntime(currentEnv));
   externalIngressReady = true;
   nodeLog.info('startup.j_catchup_ready', {
     jurisdictions: watcherDrain.length,

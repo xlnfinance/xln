@@ -106,12 +106,18 @@ import type {
 import { clearInfraGossipProfiles } from '../machine/infra-gossip-store';
 import {
   closeFrameDb,
+  closeInfraDb,
   closeStorageDb,
+  getFrameDb,
+  getInfraDb,
+  getStorageDb,
   normalizeDbNamespace,
+  rotateStorageEpochDb,
+  tryOpenFrameDb,
+  tryOpenStorageDb,
   type RuntimeStorageDbDeps,
   type StorageDbRole,
 } from './../storage/runtime-dbs';
-import * as runtimeDbs from './../storage/runtime-dbs';
 import { createStructuredLogger } from '../infra/logger';
 
 type RuntimeModule = typeof import('../runtime');
@@ -123,7 +129,7 @@ type RuntimeFrameIngressTransaction = {
 
 export type RuntimeLoopApiDeps = {
   notifyEnvChange(env: Env): void;
-  process: RuntimeModule['process'];
+  processRuntime: RuntimeModule['processRuntime'];
   waitForRuntimeProcessingIdle: RuntimeModule['waitForRuntimeProcessingIdle'];
   getRuntimeProcessGlobal(): { exit?: (code: number) => unknown } | null;
   runtimeInputHasQueuedWork(input: RuntimeInput): boolean;
@@ -132,7 +138,7 @@ export type RuntimeLoopApiDeps = {
 const runtimeLog = createStructuredLogger('runtime');
 
 export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
-  const { notifyEnvChange, process, waitForRuntimeProcessingIdle, getRuntimeProcessGlobal, runtimeInputHasQueuedWork } =
+  const { notifyEnvChange, processRuntime, waitForRuntimeProcessingIdle, getRuntimeProcessGlobal, runtimeInputHasQueuedWork } =
     deps;
 
   const registerEnvChangeCallback = (env: Env, callback: (env: Env) => void): (() => void) => {
@@ -209,22 +215,22 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
   });
 
   const getRuntimeStorageDb = (env: Env, role: StorageDbRole = 'current'): Level<Buffer, Buffer> =>
-    getStorageDb(env, role);
+    getManagedStorageDb(env, role);
 
-  const getStorageDb = (env: Env, role: StorageDbRole = 'current'): Level<Buffer, Buffer> =>
-    runtimeDbs.getStorageDb(env, getRuntimeStorageDbDeps(), role);
+  const getManagedStorageDb = (env: Env, role: StorageDbRole = 'current'): Level<Buffer, Buffer> =>
+    getStorageDb(env, getRuntimeStorageDbDeps(), role);
 
-  const getInfraDb = (env: Env): Level<Buffer, Buffer> => runtimeDbs.getInfraDb(env, getRuntimeStorageDbDeps());
+  const getManagedInfraDb = (env: Env): Level<Buffer, Buffer> => getInfraDb(env, getRuntimeStorageDbDeps());
 
-  const getFrameDb = (env: Env): Level<Buffer, Buffer> => runtimeDbs.getFrameDb(env, getRuntimeStorageDbDeps());
+  const getManagedFrameDb = (env: Env): Level<Buffer, Buffer> => getFrameDb(env, getRuntimeStorageDbDeps());
 
-  const tryOpenStorageDb = (env: Env, role: StorageDbRole = 'current'): Promise<boolean> =>
-    runtimeDbs.tryOpenStorageDb(env, getRuntimeStorageDbDeps(), role);
+  const tryOpenManagedStorageDb = (env: Env, role: StorageDbRole = 'current'): Promise<boolean> =>
+    tryOpenStorageDb(env, getRuntimeStorageDbDeps(), role);
 
-  const rotateStorageEpochDb = (env: Env, snapshotHeight: number, timestamp = env.timestamp): Promise<boolean> =>
-    runtimeDbs.rotateStorageEpochDb(env, getRuntimeStorageDbDeps(), snapshotHeight, timestamp);
+  const rotateManagedStorageEpochDb = (env: Env, snapshotHeight: number, timestamp = env.timestamp): Promise<boolean> =>
+    rotateStorageEpochDb(env, getRuntimeStorageDbDeps(), snapshotHeight, timestamp);
 
-  const tryOpenFrameDb = (env: Env): Promise<boolean> => runtimeDbs.tryOpenFrameDb(env, getRuntimeStorageDbDeps());
+  const tryOpenManagedFrameDb = (env: Env): Promise<boolean> => tryOpenFrameDb(env, getRuntimeStorageDbDeps());
 
   const throwSettledErrors = (results: PromiseSettledResult<unknown>[], code: string): void => {
     const errors = results
@@ -252,11 +258,11 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     throwSettledErrors(closed, 'RUNTIME_DB_CLOSE_FAILED');
   };
 
-  const closeInfraDb = async (env: Env): Promise<void> => {
+  const closeManagedInfraDb = async (env: Env): Promise<void> => {
     const state = ensureRuntimeState(env);
     state.infraDbClosing = true;
     await drainInfraDbWrites(env);
-    await runtimeDbs.closeInfraDb(env);
+    await closeInfraDb(env);
   };
 
   const waitForRuntimeLoopWake = async (env: Env): Promise<void> => {
@@ -388,7 +394,7 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     const state = ensureRuntimeState(env);
     if (state.infraDbClosing) return false;
     if (!state.infraDbOpenPromise) {
-      const db = getInfraDb(env);
+      const db = getManagedInfraDb(env);
       state.infraDbOpenPromise = (async () => {
         try {
           await db.open();
@@ -418,7 +424,7 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     }
   }
 
-  const infraGossipDbAccess = { tryOpenInfraDb, getInfraDb };
+  const infraGossipDbAccess = { tryOpenInfraDb, getInfraDb: getManagedInfraDb };
 
   const trackInfraDbWrite = (env: Env, promise: Promise<void>): void => {
     const state = ensureRuntimeState(env);
@@ -921,7 +927,7 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
                 await sleep(remainingDelayMs);
                 continue;
               }
-              await process(env);
+              await processRuntime(env);
               // Zero configured delay means no throttling; it must not mean an
               // unbounded microtask chain that prevents WebSocket ACK delivery.
               await yieldRuntimeIoTurn();
@@ -1132,7 +1138,7 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
         // persistence fence (for example, a J observation queued immediately
         // before a wallet switch). Drain it through the one canonical runtime
         // transition instead of dropping it or resurrecting external ingress.
-        await process(env);
+        await processRuntime(env);
         continue;
       }
       requestRuntimeLoopWake(env);
@@ -1752,14 +1758,14 @@ export const createRuntimeLoopApi = (deps: RuntimeLoopApiDeps) => {
     failfastAssert,
     ensureRuntimeConfig,
     getRuntimeStorageDb,
-    getStorageDb,
-    getInfraDb,
-    getFrameDb,
-    tryOpenStorageDb,
-    rotateStorageEpochDb,
-    tryOpenFrameDb,
+    getStorageDb: getManagedStorageDb,
+    getInfraDb: getManagedInfraDb,
+    getFrameDb: getManagedFrameDb,
+    tryOpenStorageDb: tryOpenManagedStorageDb,
+    rotateStorageEpochDb: rotateManagedStorageEpochDb,
+    tryOpenFrameDb: tryOpenManagedFrameDb,
     closeRuntimeDb,
-    closeInfraDb,
+    closeInfraDb: closeManagedInfraDb,
     getCleanLogs,
     clearCleanLogs,
     copyCleanLogs,

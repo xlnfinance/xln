@@ -20,7 +20,7 @@ import {
   computeEntityFrameAuthorityRoot,
 } from '../entity/consensus/state-root';
 import { applyRuntimeStorageChanges } from '../machine/env-events';
-import { createEmptyEnv, enqueueRuntimeInput, process as processRuntime } from '../runtime';
+import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../runtime';
 import { inspectStorage, saveRuntimeFrameToStorage } from '../storage';
 import {
   KEY_CERTIFIED_BOARD_NODE,

@@ -319,7 +319,7 @@ export type BigIntMathUtils =
 export interface XLNModule {
   // Core lifecycle
   main: typeof import('./runtime').main;
-  process: typeof import('./runtime').process;
+  processRuntime: typeof import('./runtime').processRuntime;
   hasRuntimeWork?: (env: Env) => boolean;
   registerEnvChangeCallback: (env: Env, callback: (env: Env) => void) => (() => void);
   registerRecoveryBackupBarrier?: (
@@ -636,12 +636,10 @@ export interface XLNModule {
     typeof import('./jadapter').getEntityInfoFromChain;
 
   // Name operations
-  resolveEntityName:
-    (entityId: string) => ReturnType<typeof import('./routing/name-resolution').resolveEntityName>;
+  resolveEntityName: typeof import('./runtime').resolveEntityName;
   resolveEntityIdentifier:
     typeof import('./entity/factory').resolveEntityIdentifier;
-  searchEntityNames:
-    (query: string, limit?: number) => ReturnType<typeof import('./routing/name-resolution').searchEntityNames>;
+  searchEntityNames: typeof import('./runtime').searchEntityNames;
   requestNamedEntity: typeof import('./entity/factory').requestNamedEntity;
 
   setBrowserVMJurisdiction:

@@ -1,5 +1,5 @@
 import {
-  process as processRuntime,
+  processRuntime,
   registerRecoveryBackupBarrier,
 } from '../../runtime';
 import { deriveSignerAddressSync } from '../../account/crypto';

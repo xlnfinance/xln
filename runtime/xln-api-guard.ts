@@ -2,7 +2,7 @@ import type { XLNModule } from './xln-api';
 
 const REQUIRED_BOOTSTRAP_FUNCTIONS = [
   'main',
-  'process',
+  'processRuntime',
   'getEnv',
   'registerEnvChangeCallback',
   'enqueueRuntimeInput',

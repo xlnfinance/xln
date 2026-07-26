@@ -6,7 +6,7 @@ import {
   getFrameDb,
   getRuntimeStorageDb,
   persistRestoredEnvToDB,
-  process as processRuntime,
+  processRuntime,
   tryOpenStorageDb,
   tryOpenFrameDb,
 } from '../../runtime';

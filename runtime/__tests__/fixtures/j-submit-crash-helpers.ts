@@ -1,7 +1,7 @@
 import { rmSync } from 'fs';
 import { join } from 'path';
 
-import { process as processRuntime } from '../../runtime';
+import { processRuntime } from '../../runtime';
 import { dbRootPath } from '../../machine/platform';
 import type { EntityInput, Env } from '../../types';
 

@@ -119,7 +119,7 @@ const fatalIncidentRoutes = [
         'runtime/machine/j-submit.ts',
         ['J_SUBMIT_FATAL:', "queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'terminalFailure'"],
       ],
-      ['runtime/engine/loop.ts', ['await process(env);', 'await config.onFatal({']],
+      ['runtime/engine/loop.ts', ['await processRuntime(env);', 'await config.onFatal({']],
     ],
   },
 ] as const;

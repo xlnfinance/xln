@@ -15,7 +15,7 @@ let cachedProcess: ProcessFn | null = null;
 export const getProcess = async (): Promise<ProcessFn> => {
   if (!cachedProcess) {
     const runtime = await import('../runtime');
-    cachedProcess = runtime.process;
+    cachedProcess = runtime.processRuntime;
   }
   return cachedProcess;
 };

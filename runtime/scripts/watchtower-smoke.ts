@@ -12,7 +12,7 @@ import {
   closeRuntimeDb,
   createEmptyEnv,
   enqueueRuntimeInput,
-  process as processRuntime,
+  processRuntime,
 } from '../runtime';
 import { buildRuntimeRecoveryBundle } from '../recovery/bundle';
 import {

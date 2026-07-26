@@ -5,7 +5,7 @@ import { Wallet, hexlify, keccak256, toUtf8Bytes } from 'ethers';
 
 import { deriveSignerKeySync } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
-import { createEmptyEnv, enqueueRuntimeInput, process as processRuntime } from '../runtime.ts';
+import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../runtime.ts';
 import { buildRuntimeRecoveryBundle } from '../recovery/bundle';
 import { buildTowerAppointmentOwnerMessage, encryptRuntimeRecoveryBundle } from '../recovery/crypto';
 import type { JReplica, JurisdictionConfig, TowerAppointmentV1 } from '../xln-api';

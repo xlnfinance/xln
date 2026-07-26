@@ -20,7 +20,7 @@ import {
   closeRuntimeDb,
   createEmptyEnv,
   loadEnvFromDB,
-  process as processRuntime,
+  processRuntime,
   saveEnvToDB,
 } from '../runtime';
 import { dbRootPath } from '../machine/platform';

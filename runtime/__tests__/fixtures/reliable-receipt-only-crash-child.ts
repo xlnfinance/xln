@@ -4,7 +4,7 @@ import { registerReliableIngress } from '../../machine/reliable-delivery';
 import {
   createEmptyEnv,
   enqueueRuntimeInput,
-  process as processRuntime,
+  processRuntime,
 } from '../../runtime';
 import type { DeliverableEntityInput } from '../../types';
 import {

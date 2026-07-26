@@ -90,7 +90,7 @@ import {
   closeInfraDb,
   closeRuntimeDb,
   main,
-  process as runtimeProcess,
+  processRuntime,
   enqueueRuntimeInput,
   handleInboundP2PEntityInputs,
   handleInboundReliableReceipt,
@@ -2086,8 +2086,8 @@ const run = async (): Promise<void> => {
     }],
     entityInputs: [],
   });
-  await runtimeProcess(env);
-  await runtimeProcess(env);
+  await processRuntime(env);
+  await processRuntime(env);
   finishTiming('import_j', importJStartedAt);
 
   const hubBootstrapStartedAt = startTiming('hub_bootstrap');
@@ -2149,8 +2149,8 @@ const run = async (): Promise<void> => {
         }],
         entityInputs: [],
       });
-      await runtimeProcess(env);
-      await runtimeProcess(env);
+      await processRuntime(env);
+      await processRuntime(env);
     } else {
       nodeLog.debug('sibling_jurisdiction.reusing', {
         jurisdiction: secondaryName,
@@ -2212,7 +2212,7 @@ const run = async (): Promise<void> => {
   }
 
   startJurisdictionWatchers(env);
-  const watcherDrain = await drainJWatcherBacklog(env, async currentEnv => runtimeProcess(currentEnv));
+  const watcherDrain = await drainJWatcherBacklog(env, async currentEnv => processRuntime(currentEnv));
   externalIngressReady = true;
   nodeLog.info('startup.j_catchup_ready', {
     jurisdictions: watcherDrain.length,

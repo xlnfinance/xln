@@ -26,7 +26,7 @@ import {
   createEmptyEnv,
   enqueueRuntimeInput,
   loadEnvFromDB,
-  process as processRuntime,
+  processRuntime,
   readPersistedFrameJournal,
   restoreEnvFromRecoveryBundles,
 } from '../runtime';

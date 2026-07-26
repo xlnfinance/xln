@@ -38,7 +38,7 @@ let _processWithStep: ((env: Env, inputs?: EntityInput[], delay?: number, single
 const getProcess = async () => {
   if (!_process) {
     const runtime = await import('../runtime');
-    _process = runtime.process;
+    _process = runtime.processRuntime;
   }
   if (!_processWithStep) {
     _processWithStep = async (env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => {

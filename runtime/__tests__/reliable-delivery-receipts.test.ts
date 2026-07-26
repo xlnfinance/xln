@@ -44,7 +44,7 @@ import {
   createEmptyEnv,
   getFrameDb,
   handleInboundReliableReceipt,
-  process as processRuntime,
+  processRuntime,
 } from '../runtime';
 import { readStorageFrameRecord } from '../storage';
 import { buildRouteOutputKey, getReliableOutputIdentity } from '../machine/output-routing';

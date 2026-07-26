@@ -7,7 +7,7 @@ import {
   closeRuntimeDb,
   createEmptyEnv,
   enqueueRuntimeInput,
-  process as processRuntime,
+  processRuntime,
   readPersistedEntityFrameHistory,
 } from '../runtime';
 import {

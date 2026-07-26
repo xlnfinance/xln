@@ -9,7 +9,7 @@ import {
   getFrameDb,
   loadEnvFromDB,
   persistRestoredEnvToDB,
-  process as processRuntime,
+  processRuntime,
   registerSignerKey,
 } from '../runtime';
 import {

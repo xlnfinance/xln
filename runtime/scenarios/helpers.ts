@@ -20,7 +20,7 @@ let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boole
 export const getProcess = async () => {
   if (!_process) {
     const runtime = await import('../runtime');
-    _process = runtime.process;
+    _process = runtime.processRuntime;
   }
   return _process;
 };
@@ -31,7 +31,7 @@ export const getProcess = async () => {
 export const commitRuntimeInput = async (env: Env, runtimeInput: RuntimeInput): Promise<Env> => {
   const runtime = await import('../runtime');
   runtime.enqueueRuntimeInput(env, runtimeInput);
-  return runtime.process(env);
+  return runtime.processRuntime(env);
 };
 
 export { checkSolvency } from './solvency-check';

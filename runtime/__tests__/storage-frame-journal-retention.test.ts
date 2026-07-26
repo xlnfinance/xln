@@ -15,7 +15,7 @@ import {
   listPersistedCheckpointHeights,
   loadEntityStateFromStorageDb,
   loadEnvFromDB,
-  process as processRuntime,
+  processRuntime,
   readPersistedAccountFrameHistory,
   readPersistedCheckpointSnapshot,
   readPersistedFrameJournal,

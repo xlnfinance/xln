@@ -478,7 +478,7 @@ async function handleGrid(
   console.log(`  ✅ Created ${results.length} entities in grid formation`);
 
   // Phase 2: Create connections along each axis (INCREMENTAL - skip existing)
-  const { process } = await import('../runtime.js');
+  const { processRuntime } = await import('../runtime.js');
   const connectionInputs: EntityInput[] = [];
 
   // Helper to check if account already exists
@@ -562,7 +562,7 @@ async function handleGrid(
 
   console.log(`  🔗 Creating ${connectionInputs.length} new grid connections...`);
   if (connectionInputs.length > 0) {
-    await process(env, connectionInputs);
+    await processRuntime(env, connectionInputs);
   }
   console.log(`  ✅ Grid complete: ${total} total entities, ${connectionInputs.length} new connections`);
 }
@@ -626,7 +626,7 @@ async function handleLazyGrid(
   console.log(`  ⚡ LAZY: Created ${total} in-browser entities`);
 
   // Create connections (same as normal grid)
-  const { process } = await import('../runtime.js');
+  const { processRuntime } = await import('../runtime.js');
   const connectionInputs: EntityInput[] = [];
 
   const gridId = (x: number, y: number, z: number) => `${x}_${y}_${z}`;
@@ -713,7 +713,7 @@ async function handleLazyGrid(
   }
 
   console.log(`  🔗 Creating ${connectionInputs.length} lazy connections...`);
-  await process(env, connectionInputs);
+  await processRuntime(env, connectionInputs);
   console.log(`  ✅ LAZY grid complete: ${total} entities, ${connectionInputs.length} connections`);
 }
 
@@ -749,7 +749,7 @@ async function handlePayRandom(
 
   console.log(`  💸 Found ${allEntityIds.length} entities in network`);
 
-  const { process } = await import('../runtime.js');
+  const { processRuntime } = await import('../runtime.js');
 
   // Send payments one at a time with 1 second delay
   for (let i = 0; i < count; i++) {
@@ -793,7 +793,7 @@ async function handlePayRandom(
 
     console.log(`  💸 Payment ${i + 1}/${count}: ${sourceEntityId.slice(0,8)} → ${destEntityId.slice(0,8)} (${amount} tokens)`);
 
-    await process(env, [{
+    await processRuntime(env, [{
       entityId: sourceEntityId,
       signerId: signerId,
       entityTxs: [{
@@ -849,9 +849,9 @@ async function handleR2R(
 
   console.log(`  💸 R2R: ${fromIndex} → ${toIndex} (${amount} tokens)`);
 
-  const { process } = await import('../runtime.js');
+  const { processRuntime } = await import('../runtime.js');
 
-  await process(env, [{
+  await processRuntime(env, [{
     entityId: fromEntityId,
     signerId: fromReplica.signerId,
     entityTxs: [{
@@ -897,9 +897,9 @@ async function handleFund(
 
   console.log(`  💸 Fund: ${entityIndex} receives ${amount} tokens`);
 
-  const { process } = await import('../runtime.js');
+  const { processRuntime } = await import('../runtime.js');
 
-  await process(env, [{
+  await processRuntime(env, [{
     entityId: entityId,
     signerId: replica.signerId,
     entityTxs: [{
@@ -937,9 +937,9 @@ async function handleOpenAccount(
   console.log(`  🔗 ${entityId} openAccount ${counterpartyScenarioId}`);
 
   // Execute openAccount transaction through XLN
-  const { process } = await import('../runtime.js');
+  const { processRuntime } = await import('../runtime.js');
 
-  await process(env, [
+  await processRuntime(env, [
     {
       entityId: fromAddress,
       signerId: String(entityId),

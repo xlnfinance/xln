@@ -53,7 +53,7 @@ import {
   cacheCertifiedBoardNodes,
   getCertifiedBoardNodeStore,
 } from '../jurisdiction/board-registry';
-import { applyRuntimeInput, createEmptyEnv, enqueueRuntimeInput, process as processRuntime } from '../runtime';
+import { applyRuntimeInput, createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../runtime';
 import { buildQuorumHanko, verifyHankoForHash } from '../hanko/signing';
 import { hydrateEntityStateFromStorage } from '../storage/hydration';
 import { projectEntityCoreDoc } from '../storage/projections';

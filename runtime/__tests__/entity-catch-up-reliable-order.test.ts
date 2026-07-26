@@ -45,7 +45,7 @@ import {
   closeInfraDb,
   createEmptyEnv,
   enqueueRuntimeInput,
-  process as processRuntime,
+  processRuntime,
   restoreEnvFromRecoveryBundles,
 } from '../runtime';
 import {

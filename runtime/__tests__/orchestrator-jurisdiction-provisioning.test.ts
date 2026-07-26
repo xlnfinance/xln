@@ -17,7 +17,7 @@ import {
   resetLocalAnvilChains,
   type OrchestratorJurisdictionsConfig,
 } from '../orchestrator/jurisdictions';
-import { createEmptyEnv, enqueueRuntimeInput, process as processRuntime } from '../runtime';
+import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../runtime';
 import { setScenarioStorageEnabled } from '../scenarios/helpers';
 import { stopProcess, type ManagedChildProcess } from '../scripts/e2e-managed-process';
 

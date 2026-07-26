@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import {
   createEmptyEnv,
   enqueueRuntimeInput,
-  process as processRuntime,
+  processRuntime,
 } from '../runtime';
 import {
   deriveSignerAddressSync,

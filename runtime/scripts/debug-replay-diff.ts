@@ -3,7 +3,7 @@ import { join } from 'path';
 import {
   createEmptyEnv,
   enqueueRuntimeInput,
-  process as processRuntime,
+  processRuntime,
   readPersistedFrameJournal,
   closeRuntimeDb,
   closeInfraDb,

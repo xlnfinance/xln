@@ -6,7 +6,7 @@ import {
   enqueueRuntimeInput,
   getPersistedLatestHeight,
   listPersistedCheckpointHeights,
-  process as processRuntime,
+  processRuntime,
   loadEnvFromDB,
   closeRuntimeDb,
 } from '../runtime.ts';

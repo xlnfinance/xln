@@ -70,7 +70,7 @@ import {
 import { serializeTaggedJson } from '../protocol/serialization';
 import {
   createEmptyEnv,
-  process as processRuntime,
+  processRuntime,
   startP2P,
   stopP2PAndWait,
 } from '../runtime';

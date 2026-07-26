@@ -16,7 +16,7 @@ import {
   buildDurableRuntimeMachineSnapshot,
   restoreDurableRuntimeSnapshot,
 } from '../wal/snapshot';
-import { createEmptyEnv, process as processRuntime } from '../runtime';
+import { createEmptyEnv, processRuntime } from '../runtime';
 import type { Env } from '../types';
 import {
   buildCatchupFixtureCertificate,

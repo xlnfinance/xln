@@ -9,7 +9,7 @@ import {
   closeRuntimeDb,
   getFrameDb,
   loadEnvFromDB,
-  process as processRuntime,
+  processRuntime,
 } from '../runtime';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import { readStorageFrameRecord } from '../storage';

@@ -38,7 +38,7 @@ let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boole
 const getProcess = async () => {
   if (!_process) {
     const runtime = await import('../runtime');
-    _process = runtime.process;
+    _process = runtime.processRuntime;
   }
   return _process;
 };
