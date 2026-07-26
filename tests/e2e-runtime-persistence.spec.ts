@@ -654,7 +654,7 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     await gotoApp(page, { appBaseUrl: APP_BASE_URL, settleMs: 600 });
   });
 
-  test('reload restores complex runtime WAL chain from genesis snapshot when #nosnapshot is set', { tag: '@resilience' }, async ({ page, browser }) => {
+  test('reload restores complex runtime from a retained checkpoint plus WAL tail', { tag: '@resilience' }, async ({ page, browser }) => {
     const bobContext = await browser.newContext({ ignoreHTTPSErrors: true });
     const bobPage = await bobContext.newPage();
     const attachPersistenceConsole = (targetPage: Page, label: string) => targetPage.on('console', msg => {
@@ -705,6 +705,13 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
 
     await waitForPairIdle(page, hubId);
     await waitForPairIdle(bobPage, hubId);
+    await expect
+      .poll(async () => Number((await runtimeDbMeta(page)).checkpoint || 0), {
+        message: 'Alice must persist a non-genesis checkpoint before creating a WAL tail',
+        timeout: 60_000,
+      })
+      .toBeGreaterThan(1);
+    await setSnapshotInterval(page, 1_000);
 
     await placeNonMarketableSwapOrder(page, hubId);
     await expect
@@ -727,9 +734,14 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     expect(aliceBefore.runtimeHeight).toBeGreaterThan(0);
     expect(Number(aliceDbBefore.checkpoint || 0), 'Alice must have a non-genesis checkpoint before forced replay').toBeGreaterThan(1);
     expect(Number(aliceDbBefore.latest || 0)).toBeGreaterThanOrEqual(Number(aliceDbBefore.checkpoint || 0));
+    expect(
+      aliceDbBefore.frameTimeline.some((frame: { h?: number; missing?: boolean }) =>
+        !frame.missing && Number(frame.h || 0) > Number(aliceDbBefore.checkpoint || 0)),
+      'Alice must have a persisted WAL tail before reload',
+    ).toBe(true);
     expect(aliceSwapBefore.accountSwapOffersSize).toBe(0);
 
-    await page.goto(`${APP_BASE_URL}/app?nosnapshot=1#nosnapshot=1`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${APP_BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => {
       const loadingVisible = Boolean(document.querySelector('.loading-screen'));
       const errorVisible = Boolean(document.querySelector('.error-screen'));

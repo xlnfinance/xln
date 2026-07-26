@@ -34,7 +34,10 @@ const assertFailure = (
   expected: Pick<RuntimeFailureSignal, 'category' | 'code' | 'retryable' | 'fatal'>,
 ): void => {
   requireCondition(isRuntimeFailureSignal(failure), `invalid failure signal: ${JSON.stringify(failure)}`);
-  requireCondition(failure.category === expected.category, `category mismatch: ${failure.category} !== ${expected.category}`);
+  requireCondition(
+    failure.category === expected.category,
+    `category mismatch: ${failure.category} !== ${expected.category}`,
+  );
   requireCondition(failure.code === expected.code, `code mismatch: ${failure.code} !== ${expected.code}`);
   requireCondition(failure.retryable === expected.retryable, `retryable mismatch for ${failure.code}`);
   requireCondition(failure.fatal === expected.fatal, `fatal mismatch for ${failure.code}`);
@@ -44,13 +47,19 @@ const fatalIncidentRoutes = [
   {
     name: 'browser',
     steps: [
-      ['frontend/src/hooks.client.ts', ['installBrowserErrorTelemetry();', "captureBrowserError('svelte_error', error);"]],
-      ['frontend/src/lib/debug/browser-telemetry.ts', [
-        "captureBrowserError('console_error'",
-        "captureBrowserError('window_error'",
-        "captureBrowserError('unhandled_rejection'",
-        "fetch('/api/debug/events/ingest'",
-      ]],
+      [
+        'frontend/src/hooks.client.ts',
+        ['installBrowserErrorTelemetry();', "captureBrowserError('svelte_error', error);"],
+      ],
+      [
+        'frontend/src/lib/debug/browser-telemetry.ts',
+        [
+          "captureBrowserError('console_error'",
+          "captureBrowserError('window_error'",
+          "captureBrowserError('unhandled_rejection'",
+          "fetch('/api/debug/events/ingest'",
+        ],
+      ],
       ['runtime/relay/debug-http.ts', ["event: 'browser_error'", "source: 'browser'"]],
       ['runtime/orchestrator/orchestrator.ts', ['incidentSink: incident => debugIncidentJournal.record(incident)']],
     ],
@@ -58,48 +67,59 @@ const fatalIncidentRoutes = [
   {
     name: 'managed-runtime',
     steps: [
-      ['runtime/runtime.ts', ['await config.onFatal({', 'runtimeProcess.exit(1);']],
+      ['runtime/engine/loop.ts', ['await config.onFatal({', 'runtimeProcess.exit(1);']],
       ['runtime/orchestrator/hub-node.ts', ['onFatal: async payload => {', 'await reportManagedChildFatal({']],
       ['runtime/orchestrator/mm-node.ts', ['onFatal: async payload => {', 'await reportManagedChildFatal({']],
-      ['runtime/orchestrator/managed-child-fatal-ipc.ts', [
-        "type: 'xln:managed-child-fatal'",
-        "type: 'xln:managed-child-fatal-ack'",
-        'persisted: true',
-      ]],
-      ['runtime/orchestrator/orchestrator.ts', [
-        'attachManagedChildFatalIpc(',
-        'persistManagedChildFatalReport(',
-        'incidentSink: incident => debugIncidentJournal.record(incident)',
-      ]],
+      [
+        'runtime/orchestrator/managed-child-fatal-ipc.ts',
+        ["type: 'xln:managed-child-fatal'", "type: 'xln:managed-child-fatal-ack'", 'persisted: true'],
+      ],
+      [
+        'runtime/orchestrator/orchestrator.ts',
+        [
+          'attachManagedChildFatalIpc(',
+          'persistManagedChildFatalReport(',
+          'incidentSink: incident => debugIncidentJournal.record(incident)',
+        ],
+      ],
     ],
   },
   {
     name: 'standalone-runtime',
     steps: [
-      ['runtime/server/index.ts', [
-        "process.env['XLN_SERVER_DEBUG_INCIDENT_JOURNAL_PATH'] || `${dbRootPath}.debug-incidents.jsonl`",
-        'incidentSink: incident => incidentJournal.record(incident)',
-        'startRuntimeLoop(env, {',
-        'onFatal: async payload => {',
-        "serverLog.error('runtime.loop_fatal'",
-      ]],
+      [
+        'runtime/server/index.ts',
+        [
+          "process.env['XLN_SERVER_DEBUG_INCIDENT_JOURNAL_PATH'] || `${dbRootPath}.debug-incidents.jsonl`",
+          'incidentSink: incident => incidentJournal.record(incident)',
+          'startRuntimeLoop(env, {',
+          'onFatal: async payload => {',
+          "serverLog.error('runtime.loop_fatal'",
+        ],
+      ],
     ],
   },
   {
     name: 'orchestrator',
     steps: [
-      ['runtime/orchestrator/orchestrator.ts', [
-        'pushManagedChildIncident(',
-        'persistOrchestratorFailure(',
-        'incidentSink: incident => debugIncidentJournal.record(incident)',
-      ]],
+      [
+        'runtime/orchestrator/orchestrator.ts',
+        [
+          'pushManagedChildIncident(',
+          'persistOrchestratorFailure(',
+          'incidentSink: incident => debugIncidentJournal.record(incident)',
+        ],
+      ],
     ],
   },
   {
     name: 'jurisdiction-submit',
     steps: [
-      ['runtime/machine/j-submit.ts', ['J_SUBMIT_FATAL:', "queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'terminalFailure'"]],
-      ['runtime/runtime.ts', ['await process(env);', 'await config.onFatal({']],
+      [
+        'runtime/machine/j-submit.ts',
+        ['J_SUBMIT_FATAL:', "queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'terminalFailure'"],
+      ],
+      ['runtime/engine/loop.ts', ['await process(env);', 'await config.onFatal({']],
     ],
   },
 ] as const;
@@ -221,9 +241,15 @@ const readinessHealth: Parameters<typeof resolveRuntimeImportReadiness>[0] = {
 };
 const readiness = resolveRuntimeImportReadiness(readinessHealth);
 requireCondition(readiness.ok === false, 'runtime import readiness must fail on fatal typed failure');
-requireCondition(readiness.code === 'OPERATOR_CONFIG_INVALID', `readiness code mismatch: ${readiness.ok ? 'ok' : readiness.code}`);
+requireCondition(
+  readiness.code === 'OPERATOR_CONFIG_INVALID',
+  `readiness code mismatch: ${readiness.ok ? 'ok' : readiness.code}`,
+);
 requireCondition(readiness.fatal === true, 'runtime import readiness fatal flag was not propagated');
-requireCondition(readiness.failure.code === 'OPERATOR_CONFIG_INVALID', 'runtime import readiness failure payload missing code');
+requireCondition(
+  readiness.failure.code === 'OPERATOR_CONFIG_INVALID',
+  'runtime import readiness failure payload missing code',
+);
 
 const publicHealth = publicAggregatedHealth({
   coreOk: false,
@@ -232,13 +258,15 @@ const publicHealth = publicAggregatedHealth({
   failures: [contradiction],
   marketMaker: { enabled: true, ok: false, failure: contradiction },
   bootstrapTimeline: {
-    stages: [{
-      key: 'ready-hash',
-      label: 'Ready hash',
-      status: 'blocked',
-      reason: 'secret timeline reason',
-      failure: transient,
-    }],
+    stages: [
+      {
+        key: 'ready-hash',
+        label: 'Ready hash',
+        status: 'blocked',
+        reason: 'secret timeline reason',
+        failure: transient,
+      },
+    ],
   },
 });
 const publicHealthText = JSON.stringify(publicHealth);
@@ -378,42 +406,66 @@ for (const [path, markers] of [
   ['runtime/server/faucet-failure.ts', ['classifyRuntimeFaucetFailure', 'failure,']],
   ['runtime/server/offchain-faucet.ts', ['faucetFailureBody']],
   ['runtime/server/reserve-faucet.ts', ['faucetFailureBody']],
-  ['runtime/api/external-wallet-api.ts', [
-    "createStructuredLogger('server.external_wallet')",
-    "faucet.erc20.failed",
-    "snapshot.failed",
-    "faucet.gas.failed",
-  ]],
+  [
+    'runtime/api/external-wallet-api.ts',
+    ["createStructuredLogger('server.external_wallet')", 'faucet.erc20.failed', 'snapshot.failed', 'faucet.gas.failed'],
+  ],
   ['runtime/entity/tx/invariant-errors.ts', ["'DIRECT_PAYMENT_',", "'SWAP_REQUEST_',"]],
-  ['runtime/entity/tx/handlers/direct-payment.ts', [
-    "createStructuredLogger('entity.payment')",
-    'DIRECT_PAYMENT_${code}:${detail}',
-    "'NEXT_HOP_ACCOUNT_MISSING'",
-  ]],
-  ['runtime/protocol/payments/route.ts', [
-    'requireCommittedDirectPaymentRoute',
-    "'ROUTE_START_INVALID'",
-    "'ROUTE_END_INVALID'",
-  ]],
+  [
+    'runtime/entity/tx/handlers/direct-payment.ts',
+    ["createStructuredLogger('entity.payment')", 'DIRECT_PAYMENT_${code}:${detail}', "'NEXT_HOP_ACCOUNT_MISSING'"],
+  ],
+  [
+    'runtime/protocol/payments/route.ts',
+    ['requireCommittedDirectPaymentRoute', "'ROUTE_START_INVALID'", "'ROUTE_END_INVALID'"],
+  ],
   ['runtime/entity/tx/handlers/basic.ts', ["createStructuredLogger('entity.basic')"]],
   ['runtime/entity/tx/proposals.ts', ["createStructuredLogger('entity.basic')"]],
-  ['runtime/entity/factory.ts', ["createStructuredLogger('entity.factory')", 'lazy.create', 'numbered.register_failed']],
+  [
+    'runtime/entity/factory.ts',
+    ["createStructuredLogger('entity.factory')", 'lazy.create', 'numbered.register_failed'],
+  ],
   ['runtime/entity/consensus/index.ts', ["createStructuredLogger('entity')", 'frame.profile', 'frame.apply']],
-  ['runtime/machine/entity-inputs.ts', ["createStructuredLogger('runtime.entity_inputs')", 'inputs.profile', 'replay.merged_input']],
+  [
+    'runtime/machine/entity-inputs.ts',
+    ["createStructuredLogger('runtime.entity_inputs')", 'inputs.profile', 'replay.merged_input'],
+  ],
   ['runtime/machine/input-queue.ts', ["createStructuredLogger('runtime.input_queue')", 'interesting_entity_inputs']],
   ['runtime/machine/p2p-lifecycle.ts', ["createStructuredLogger('p2p.lifecycle')", 'detach.close_failed']],
   ['runtime/relay/standalone-server.ts', ["createStructuredLogger('relay.standalone')", 'service.listen']],
-  ['runtime/entity/consensus/input-merge.ts', ["createStructuredLogger('entity.input.merge')", 'frame.conflict', 'duplicates.deduped']],
+  [
+    'runtime/entity/consensus/input-merge.ts',
+    ["createStructuredLogger('entity.input.merge')", 'frame.conflict', 'duplicates.deduped'],
+  ],
   ['runtime/entity/tx/handlers/account.ts', ["createStructuredLogger('account.handler')", 'ACCOUNT_INPUT_EMPTY']],
   ['runtime/entity/tx/handlers/open-account.ts', ["createStructuredLogger('account.open')"]],
-  ['runtime/entity/tx/handlers/account/committed-frame-followups.ts', ["createStructuredLogger('account.followup')", 'frame.commit', 'frame.tx']],
-  ['runtime/entity/tx/handlers/account/committed-htlc-followups.ts', ["createStructuredLogger('account.followup')", 'htlc.secret_check']],
-  ['runtime/account/consensus/index.ts', ["createStructuredLogger('account')", 'frame.prev_hash_mismatch', 'frame.state_root_mismatch']],
-  ['runtime/account/consensus/propose.ts', ["createStructuredLogger('account')", 'frame.validation_failed', 'proposal.profile']],
+  [
+    'runtime/entity/tx/handlers/account/committed-frame-followups.ts',
+    ["createStructuredLogger('account.followup')", 'frame.commit', 'frame.tx'],
+  ],
+  [
+    'runtime/entity/tx/handlers/account/committed-htlc-followups.ts',
+    ["createStructuredLogger('account.followup')", 'htlc.secret_check'],
+  ],
+  [
+    'runtime/account/consensus/index.ts',
+    ["createStructuredLogger('account')", 'frame.prev_hash_mismatch', 'frame.state_root_mismatch'],
+  ],
+  [
+    'runtime/account/consensus/propose.ts',
+    ["createStructuredLogger('account')", 'frame.validation_failed', 'proposal.profile'],
+  ],
   ['runtime/account/tx/apply.ts', ["createStructuredLogger('account.tx')", 'account_frame.rejected']],
   ['runtime/entity/tx/handlers/account/orderbook-matching-same.ts', ["createStructuredLogger('orderbook.same')"]],
   ['runtime/machine/tx-handlers.ts', ["createStructuredLogger('runtime.tx')", 'replica.import_start']],
-  ['runtime/machine/jurisdiction-import.ts', ["createStructuredLogger('runtime.jurisdiction_import')", 'jurisdiction.import_failed', 'jurisdiction.import_retry']],
+  [
+    'runtime/machine/jurisdiction-import.ts',
+    [
+      "createStructuredLogger('runtime.jurisdiction_import')",
+      'jurisdiction.import_failed',
+      'jurisdiction.import_retry',
+    ],
+  ],
   ['runtime/entity/tx/handlers/r2r.ts', ["createStructuredLogger('entity.jbatch')"]],
   ['runtime/entity/tx/handlers/mint-reserves.ts', ["createStructuredLogger('entity.jbatch')"]],
   ['runtime/entity/tx/handlers/j-broadcast.ts', ["createStructuredLogger('entity.jbatch')"]],
@@ -427,23 +479,60 @@ for (const [path, markers] of [
   ['runtime/account/utils.ts', ["logDebug('ACCOUNT_STATE'", 'deriveDelta.return']],
   ['runtime/validation-utils.ts', ['ACCOUNT_DELTAS_MISSING', 'ACCOUNT_DELTAS_INVALID_TOKEN_ID']],
   ['runtime/runtime.ts', ["createStructuredLogger('runtime')", 'apply.profile', 'process.profile', 'joutbox.incoming']],
-  ['runtime/machine/infra.ts', ["createStructuredLogger('runtime.infra')", 'jadapter.restore_retry', 'jadapter.restore_failed']],
-  ['runtime/machine/infra-gossip-store.ts', ["createStructuredLogger('runtime.infra_gossip')", 'profile.restore_failed']],
-  ['runtime/storage/runtime-dbs.ts', ["createStructuredLogger('runtime.storage')", 'storage_db.blocked', 'storage_db.open_failed']],
+  [
+    'runtime/machine/infra.ts',
+    ["createStructuredLogger('runtime.infra')", 'jadapter.restore_retry', 'jadapter.restore_failed'],
+  ],
+  [
+    'runtime/machine/infra-gossip-store.ts',
+    ["createStructuredLogger('runtime.infra_gossip')", 'profile.restore_failed'],
+  ],
+  [
+    'runtime/storage/runtime-dbs.ts',
+    ["createStructuredLogger('runtime.storage')", 'storage_db.blocked', 'storage_db.open_failed'],
+  ],
   ['runtime/storage/index.ts', ["createStructuredLogger('runtime.storage')", 'persist.frame']],
-  ['runtime/watchtower/standalone-server.ts', ["createStructuredLogger('watchtower.standalone')", 'service.listen', 'sweep.failed', 'push_sweep.failed']],
+  [
+    'runtime/watchtower/standalone-server.ts',
+    ["createStructuredLogger('watchtower.standalone')", 'service.listen', 'sweep.failed', 'push_sweep.failed'],
+  ],
   ['runtime/watchtower/dispute-watch.ts', ["createStructuredLogger('watchtower.dispute_watch')", 'target.failed']],
-  ['runtime/orchestrator/graceful-server.ts', ["createStructuredLogger('orchestrator.lifecycle')", 'http.shutdown_timeout']],
-  ['runtime/orchestrator/managed-runtime-leases.ts', ["createStructuredLogger('orchestrator.managed_leases')", 'stale_processes.kill', 'lease.unreadable_ignored']],
-  ['runtime/orchestrator/parent-watch.ts', ["createStructuredLogger('orchestrator.parent_watch')", 'missing_parent_pid', 'parent_pid_missing']],
-  ['runtime/jurisdiction/config.ts', ["createStructuredLogger('runtime.jurisdiction_config')", 'browser_api_unavailable', 'JURISDICTIONS_BROWSER_CONFIG_INVALID']],
-  ['runtime/jurisdiction/jurisdiction-loader.ts', ["createStructuredLogger('runtime.jurisdiction_loader')", 'config_missing_using_defaults', 'DEFAULT_LAST_UPDATED']],
+  [
+    'runtime/orchestrator/graceful-server.ts',
+    ["createStructuredLogger('orchestrator.lifecycle')", 'http.shutdown_timeout'],
+  ],
+  [
+    'runtime/orchestrator/managed-runtime-leases.ts',
+    ["createStructuredLogger('orchestrator.managed_leases')", 'stale_processes.kill', 'lease.unreadable_ignored'],
+  ],
+  [
+    'runtime/orchestrator/parent-watch.ts',
+    ["createStructuredLogger('orchestrator.parent_watch')", 'missing_parent_pid', 'parent_pid_missing'],
+  ],
+  [
+    'runtime/jurisdiction/config.ts',
+    [
+      "createStructuredLogger('runtime.jurisdiction_config')",
+      'browser_api_unavailable',
+      'JURISDICTIONS_BROWSER_CONFIG_INVALID',
+    ],
+  ],
+  [
+    'runtime/jurisdiction/jurisdiction-loader.ts',
+    ["createStructuredLogger('runtime.jurisdiction_loader')", 'config_missing_using_defaults', 'DEFAULT_LAST_UPDATED'],
+  ],
   ['runtime/radapter/server.ts', ["createStructuredLogger('runtime.radapter')", 'response_too_large']],
   ['runtime/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],
-  ['runtime/machine/j-submit.ts', ["createStructuredLogger('runtime.jsubmit')", 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL', 'tx.submit_failed']],
+  [
+    'runtime/machine/j-submit.ts',
+    ["createStructuredLogger('runtime.jsubmit')", 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL', 'tx.submit_failed'],
+  ],
   ['runtime/machine/j-submit-result.ts', ['classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL']],
   ['runtime/orchestrator/market-maker-aggregated-health.ts', ['classifyRuntimeMarketMakerFailure', 'failure,']],
-  ['runtime/protocol/payments/delivery-result.ts', ['export type DeliveryResult', 'failure?: RuntimeFailureSignal', 'deliveryFailure']],
+  [
+    'runtime/protocol/payments/delivery-result.ts',
+    ['export type DeliveryResult', 'failure?: RuntimeFailureSignal', 'deliveryFailure'],
+  ],
 ] as const) {
   const text = readText(path);
   for (const marker of markers) assertIncludes(text, marker, path);
@@ -541,7 +630,11 @@ for (const relayLoggingPath of [
 ]) {
   assertNotIncludes(readText(relayLoggingPath), 'console.', relayLoggingPath);
 }
-assertNotIncludes(readText('runtime/relay/standalone-server.ts'), '[WS] Runtime relay', 'runtime/relay/standalone-server.ts');
+assertNotIncludes(
+  readText('runtime/relay/standalone-server.ts'),
+  '[WS] Runtime relay',
+  'runtime/relay/standalone-server.ts',
+);
 
 const solvencyPath = 'runtime/account/solvency.ts';
 const solvency = readText(solvencyPath);
@@ -660,13 +753,9 @@ for (const marker of [
   assertIncludes(runtimeEntityInputs, marker, runtimeEntityInputsPath);
 }
 
-const runtimeSourcePath = 'runtime/runtime.ts';
+const runtimeSourcePath = 'runtime/engine/loop.ts';
 const runtimeSource = readText(runtimeSourcePath);
-assertIncludes(
-  runtimeSource,
-  'error.isQuarantinableRemoteIngress',
-  runtimeSourcePath,
-);
+assertIncludes(runtimeSource, 'error.isQuarantinableRemoteIngress', runtimeSourcePath);
 assertNotIncludes(
   runtimeSource,
   'error instanceof RuntimeEntityInputApplyError && error.isRemoteIngress',
@@ -675,42 +764,108 @@ assertNotIncludes(
 
 for (const [path, markers] of [
   ['runtime/__tests__/failure-taxonomy.test.ts', ['runtime failure taxonomy', 'J_BATCH_LIMIT_EXCEEDED']],
-  ['runtime/__tests__/audit-failfast-regressions.test.ts', [
-    'direct payment fails loud for invalid route topology',
-    'DIRECT_PAYMENT_ROUTE_START_INVALID',
-    'DIRECT_PAYMENT_ROUTE_END_INVALID',
-    'DIRECT_PAYMENT_NEXT_HOP_ACCOUNT_MISSING',
-    'remote-invariant-failure-fatal',
-    'remote-storage-failure-fatal',
-    'remote-local-bug-fatal',
-    "expect(storage.failureKind).toBe('storage')",
-    "expect(localBug.failureKind).toBe('local-bug')",
-  ]],
+  [
+    'runtime/__tests__/audit-failfast-regressions.test.ts',
+    [
+      'direct payment fails loud for invalid route topology',
+      'DIRECT_PAYMENT_ROUTE_START_INVALID',
+      'DIRECT_PAYMENT_ROUTE_END_INVALID',
+      'DIRECT_PAYMENT_NEXT_HOP_ACCOUNT_MISSING',
+      'remote-invariant-failure-fatal',
+      'remote-storage-failure-fatal',
+      'remote-local-bug-fatal',
+      "expect(storage.failureKind).toBe('storage')",
+      "expect(localBug.failureKind).toBe('local-bug')",
+    ],
+  ],
   ['runtime/__tests__/runtime-import-readiness.test.ts', ['runtime import readiness gate', 'fatal: true']],
-  ['runtime/__tests__/health-redaction.test.ts', ['public aggregated health strips child process ids', 'Latest /api/health child refresh window']],
+  [
+    'runtime/__tests__/health-redaction.test.ts',
+    ['public aggregated health strips child process ids', 'Latest /api/health child refresh window'],
+  ],
   ['runtime/__tests__/prod-health-smoke.test.ts', ['getFatalHealthFailures']],
-  ['runtime/__tests__/entity-factory-logging.test.ts', ['entity factory uses structured logging without direct console output', 'entity.factory']],
-  ['runtime/__tests__/entity-consensus-logging.test.ts', ['entity consensus core uses structured logging only', 'frame.profile']],
-  ['runtime/__tests__/runtime-entity-input-logging.test.ts', ['runtime entity input j-output collection logs stay behind structured debug logging', 'inputs.profile']],
-  ['runtime/__tests__/entity-input-merge.test.ts', ['uses structured logging without direct console output', 'entity.input.merge']],
+  [
+    'runtime/__tests__/entity-factory-logging.test.ts',
+    ['entity factory uses structured logging without direct console output', 'entity.factory'],
+  ],
+  [
+    'runtime/__tests__/entity-consensus-logging.test.ts',
+    ['entity consensus core uses structured logging only', 'frame.profile'],
+  ],
+  [
+    'runtime/__tests__/runtime-entity-input-logging.test.ts',
+    ['runtime entity input j-output collection logs stay behind structured debug logging', 'inputs.profile'],
+  ],
+  [
+    'runtime/__tests__/entity-input-merge.test.ts',
+    ['uses structured logging without direct console output', 'entity.input.merge'],
+  ],
   ['runtime/__tests__/settlement-ops.test.ts', ['SETTLEMENT_UNKNOWN_OP_TYPE', 'without console fallback']],
-  ['runtime/__tests__/account-tx-apply-logging.test.ts', ['account_frame without direct console output', 'account_frame.rejected']],
-  ['runtime/__tests__/account-followup-logging.test.ts', ['account committed followups use structured logging only', 'account.followup']],
-  ['runtime/__tests__/account-consensus-logging.test.ts', ['account consensus core uses structured logging only', 'frame.state_root_mismatch']],
-  ['runtime/__tests__/account-propose-logging.test.ts', ['account frame proposal path uses structured logging only', 'proposal.profile']],
-  ['runtime/__tests__/debt-ledger.test.ts', ['debt ledger divergence without direct console warning', 'DEBT_LEDGER_DIVERGENCE']],
+  [
+    'runtime/__tests__/account-tx-apply-logging.test.ts',
+    ['account_frame without direct console output', 'account_frame.rejected'],
+  ],
+  [
+    'runtime/__tests__/account-followup-logging.test.ts',
+    ['account committed followups use structured logging only', 'account.followup'],
+  ],
+  [
+    'runtime/__tests__/account-consensus-logging.test.ts',
+    ['account consensus core uses structured logging only', 'frame.state_root_mismatch'],
+  ],
+  [
+    'runtime/__tests__/account-propose-logging.test.ts',
+    ['account frame proposal path uses structured logging only', 'proposal.profile'],
+  ],
+  [
+    'runtime/__tests__/debt-ledger.test.ts',
+    ['debt ledger divergence without direct console warning', 'DEBT_LEDGER_DIVERGENCE'],
+  ],
   ['runtime/__tests__/validation-utils.test.ts', ['validateAccountDeltas fails loud', 'ACCOUNT_DELTAS_MISSING']],
-  ['runtime/__tests__/relay-router.test.ts', ['relay router and local delivery verbose diagnostics use structured logging', 'relay.local_delivery']],
-  ['runtime/__tests__/runtime-ws-recovery.test.ts', ['standalone relay uses structured startup logging', 'relay.standalone']],
-  ['runtime/__tests__/solvency-logging.test.ts', ['solvency diagnostics use structured logging only', 'runtime.solvency']],
-  ['runtime/__tests__/runtime-storage-logging.test.ts', ['runtime storage DB boundary uses structured logging without direct console output', 'runtime.storage']],
-  ['runtime/__tests__/watchtower-standalone.test.ts', ['uses structured logging without direct console output', 'watchtower.standalone']],
-  ['runtime/__tests__/push-dispute-wake.test.ts', ['uses structured logging without direct console output', 'watchtower.dispute_watch']],
-  ['runtime/__tests__/orchestrator-lifecycle-logging.test.ts', ['orchestrator lifecycle helpers use structured logging without direct console output', 'orchestrator.lifecycle']],
-  ['runtime/__tests__/jurisdiction-config-logging.test.ts', ['jurisdiction config loader uses structured logging without direct console output', 'runtime.jurisdiction_config']],
-  ['runtime/__tests__/jurisdiction-loader-logging.test.ts', ['jurisdiction loader diagnostics', 'runtime.jurisdiction_loader']],
-  ['runtime/__tests__/external-wallet-api.test.ts', ['external wallet API uses structured logging instead of raw console output', 'server.external_wallet']],
-  ['runtime/__tests__/radapter.test.ts', ['runtime adapter server diagnostics use structured logging only', 'runtime.radapter']],
+  [
+    'runtime/__tests__/relay-router.test.ts',
+    ['relay router and local delivery verbose diagnostics use structured logging', 'relay.local_delivery'],
+  ],
+  [
+    'runtime/__tests__/runtime-ws-recovery.test.ts',
+    ['standalone relay uses structured startup logging', 'relay.standalone'],
+  ],
+  [
+    'runtime/__tests__/solvency-logging.test.ts',
+    ['solvency diagnostics use structured logging only', 'runtime.solvency'],
+  ],
+  [
+    'runtime/__tests__/runtime-storage-logging.test.ts',
+    ['runtime storage DB boundary uses structured logging without direct console output', 'runtime.storage'],
+  ],
+  [
+    'runtime/__tests__/watchtower-standalone.test.ts',
+    ['uses structured logging without direct console output', 'watchtower.standalone'],
+  ],
+  [
+    'runtime/__tests__/push-dispute-wake.test.ts',
+    ['uses structured logging without direct console output', 'watchtower.dispute_watch'],
+  ],
+  [
+    'runtime/__tests__/orchestrator-lifecycle-logging.test.ts',
+    ['orchestrator lifecycle helpers use structured logging without direct console output', 'orchestrator.lifecycle'],
+  ],
+  [
+    'runtime/__tests__/jurisdiction-config-logging.test.ts',
+    ['jurisdiction config loader uses structured logging without direct console output', 'runtime.jurisdiction_config'],
+  ],
+  [
+    'runtime/__tests__/jurisdiction-loader-logging.test.ts',
+    ['jurisdiction loader diagnostics', 'runtime.jurisdiction_loader'],
+  ],
+  [
+    'runtime/__tests__/external-wallet-api.test.ts',
+    ['external wallet API uses structured logging instead of raw console output', 'server.external_wallet'],
+  ],
+  [
+    'runtime/__tests__/radapter.test.ts',
+    ['runtime adapter server diagnostics use structured logging only', 'runtime.radapter'],
+  ],
 ] as const) {
   const text = readText(path);
   for (const marker of markers) assertIncludes(text, marker, path);
