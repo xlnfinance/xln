@@ -22,6 +22,15 @@ const readMarketMakerNodeSource = (): string => [
   'mm-node-run.ts',
 ].map(readMarketMakerNodeModule).join('\n');
 
+const readRpcAdapterSource = (): string => [
+  'rpc.ts',
+  'rpc-public.ts',
+  'rpc-adapter.ts',
+  'rpc-lifecycle.ts',
+  'rpc-reads.ts',
+  'rpc-wallet-writes.ts',
+].map(file => readFileSync(join(repoRoot, 'runtime/jadapter', file), 'utf8')).join('\n');
+
 const extractSourceBlock = (source: string, marker: string, nextMarker: string): string => {
   const start = source.indexOf(marker);
   expect(start).toBeGreaterThanOrEqual(0);
@@ -596,7 +605,7 @@ describe('production startup wiring', () => {
     const runtimeTxHandlers = readFileSync(join(repoRoot, 'runtime/runtime/tx-handlers.ts'), 'utf8');
     const jurisdictionImport = readFileSync(join(repoRoot, 'runtime/runtime/jurisdiction-import.ts'), 'utf8');
     const jadapterTypes = readFileSync(join(repoRoot, 'runtime/jadapter/types.ts'), 'utf8');
-    const rpcAdapter = readFileSync(join(repoRoot, 'runtime/jadapter/rpc.ts'), 'utf8');
+    const rpcAdapter = readRpcAdapterSource();
     expect(hubNode).toContain("nodeLog.error('jurisdiction_contracts.code_missing'");
     expect(bootstrapHub).toContain('const blockTimeMs = requireJurisdictionBlockTimeMs({ name, blockTimeMs: jr.blockTimeMs });');
     expect(bootstrapHub).toContain('blockTimeMs,');
@@ -2367,7 +2376,7 @@ describe('production startup wiring', () => {
   });
 
   test('RPC watcher pauses during persistence quiesce instead of entering j-event ingress', () => {
-    const rpc = readFileSync(join(repoRoot, 'runtime/jadapter/rpc.ts'), 'utf8');
+    const rpc = readRpcAdapterSource();
     const pauseHelper = rpc.indexOf('const isJEventIngressPaused = (activeEnv: Env): boolean =>');
     const earlyPause = rpc.indexOf("pauseJEventWatcherForQuiesce({ step: 'before-block-number' });");
     const batchPause = rpc.indexOf("step: 'before-process-event-batch'");

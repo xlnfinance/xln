@@ -9,8 +9,17 @@ const readMarketMakerNodeSource = (): string => [
   'mm-node-run.ts',
 ].map(file => readFileSync(join(process.cwd(), 'runtime/orchestrator', file), 'utf8')).join('\n');
 
+const readRpcAdapterSource = (): string => [
+  'rpc.ts',
+  'rpc-public.ts',
+  'rpc-adapter.ts',
+  'rpc-lifecycle.ts',
+  'rpc-reads.ts',
+  'rpc-wallet-writes.ts',
+].map(file => readFileSync(join(process.cwd(), 'runtime/jadapter', file), 'utf8')).join('\n');
+
 test('rpc jadapter startup and watcher lifecycle logs stay structured', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/jadapter/rpc.ts'), 'utf8');
+  const source = readRpcAdapterSource();
 
   expect(source).toContain("const rpcLog = createStructuredLogger('jadapter.rpc');");
   for (const noisyStartupString of [

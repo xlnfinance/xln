@@ -2,7 +2,17 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 
 const repoRoot = new URL('../..', import.meta.url).pathname;
-const readSource = (path: string): string => readFileSync(`${repoRoot}/${path}`, 'utf8');
+const readSource = (path: string): string => {
+  if (path !== 'runtime/jadapter/rpc.ts') return readFileSync(`${repoRoot}/${path}`, 'utf8');
+  return [
+    'rpc.ts',
+    'rpc-public.ts',
+    'rpc-adapter.ts',
+    'rpc-lifecycle.ts',
+    'rpc-reads.ts',
+    'rpc-wallet-writes.ts',
+  ].map(file => readFileSync(`${repoRoot}/runtime/jadapter/${file}`, 'utf8')).join('\n');
+};
 
 describe('determinism cleanup lifecycle', () => {
   test('determinism harness stops runtime loop and managed anvil after each run', () => {

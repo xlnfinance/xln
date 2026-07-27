@@ -3,6 +3,14 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const repoRoot = process.cwd();
+const readRpcAdapterSource = (): string => [
+  'rpc.ts',
+  'rpc-public.ts',
+  'rpc-adapter.ts',
+  'rpc-lifecycle.ts',
+  'rpc-reads.ts',
+  'rpc-wallet-writes.ts',
+].map(file => readFileSync(join(repoRoot, 'runtime/jadapter', file), 'utf8')).join('\n');
 
 describe('mainnet chain deployment wiring', () => {
   test('root scripts expose one-click testnet and mainnet chain deploy commands', () => {
@@ -109,7 +117,7 @@ describe('mainnet chain deployment wiring', () => {
   });
 
   test('TRON RPC watcher reads the SolidityNode solidified head instead of guessing a depth', () => {
-    const rpc = readFileSync(join(repoRoot, 'runtime/jadapter/rpc.ts'), 'utf8');
+    const rpc = readRpcAdapterSource();
     expect(rpc).toContain('const TRON_CHAIN_IDS = new Set<number>([728126428, 3448148188])');
     expect(rpc).toContain('/walletsolidity/getnowblock');
     expect(rpc).toContain('TRON_CONFIRMATION_DEPTH_FORBIDDEN');

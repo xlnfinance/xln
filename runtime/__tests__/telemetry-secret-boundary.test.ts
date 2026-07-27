@@ -10,6 +10,15 @@ import {
 import { createRelayStore, pushDebugEvent } from '../relay/store';
 import { safeStringify } from '../protocol/serialization';
 
+const readRpcAdapterSource = (repoRoot: string): string => [
+  'rpc.ts',
+  'rpc-public.ts',
+  'rpc-adapter.ts',
+  'rpc-lifecycle.ts',
+  'rpc-reads.ts',
+  'rpc-wallet-writes.ts',
+].map(file => readFileSync(join(repoRoot, 'runtime/jadapter', file), 'utf8')).join('\n');
+
 const sentinels = {
   seed: 'seed-sentinel-never-log',
   privateKey: 'private-key-sentinel-never-log',
@@ -102,7 +111,7 @@ test('consensus logging has no raw payload escape hatch', () => {
 test('J adapters route failures through structured telemetry and never synthesize zero reads', () => {
   const repoRoot = join(import.meta.dir, '..', '..');
   const browserVm = readFileSync(join(repoRoot, 'runtime/jadapter/browservm-provider.ts'), 'utf8');
-  const rpc = readFileSync(join(repoRoot, 'runtime/jadapter/rpc.ts'), 'utf8');
+  const rpc = readRpcAdapterSource(repoRoot);
 
   expect(browserVm).not.toContain('console.error');
   expect(rpc).not.toContain('console.error');

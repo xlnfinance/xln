@@ -40,7 +40,15 @@ const hankoClaimsPath = 'runtime/hanko/claims.ts';
 const hankoBatchPath = 'runtime/hanko/batch.ts';
 const onchainHankoDomainPath = 'runtime/hanko/onchain-domain.ts';
 const jBatchPath = 'runtime/jurisdiction/batch.ts';
-const rpcAdapterPath = 'runtime/jadapter/rpc.ts';
+const rpcAdapterPaths = [
+  'runtime/jadapter/rpc.ts',
+  'runtime/jadapter/rpc-public.ts',
+  'runtime/jadapter/rpc-adapter.ts',
+  'runtime/jadapter/rpc-lifecycle.ts',
+  'runtime/jadapter/rpc-reads.ts',
+  'runtime/jadapter/rpc-wallet-writes.ts',
+];
+const rpcAdapterPath = rpcAdapterPaths.join(', ');
 const depositoryPath = 'jurisdictions/contracts/Depository.sol';
 const accountContractPath = 'jurisdictions/contracts/Account.sol';
 const auditDocPath = 'docs/security/consensus-hanko-scan.md';
@@ -58,7 +66,7 @@ const hankoClaims = readText(hankoClaimsPath);
 const hankoBatch = readText(hankoBatchPath);
 const onchainHankoDomain = readText(onchainHankoDomainPath);
 const jBatch = readText(jBatchPath);
-const rpcAdapter = readText(rpcAdapterPath);
+const rpcAdapter = rpcAdapterPaths.map(readText).join('\n');
 const depository = readText(depositoryPath);
 const accountContract = readText(accountContractPath);
 const auditDoc = readText(auditDocPath);

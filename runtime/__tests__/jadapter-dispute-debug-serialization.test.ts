@@ -7,7 +7,14 @@ describe('JAdapter dispute diagnostics', () => {
     const diagnostics = [{ nonce: 7n, threshold: 2n, entityIndexes: [0n, 1n] }];
     expect(() => safeStringify(diagnostics)).not.toThrow();
 
-    const source = await Bun.file(new URL('../jadapter/rpc.ts', import.meta.url)).text();
+    const source = await Promise.all([
+      'rpc.ts',
+      'rpc-public.ts',
+      'rpc-adapter.ts',
+      'rpc-lifecycle.ts',
+      'rpc-reads.ts',
+      'rpc-wallet-writes.ts',
+    ].map(file => Bun.file(new URL(`../jadapter/${file}`, import.meta.url)).text())).then(parts => parts.join('\n'));
     expect(source).toContain('disputeStart.batch ${safeStringify(disputeStartDebug)}');
     expect(source).toContain('disputeStart=${safeStringify(disputeStartDebug)}');
     expect(source).not.toContain('JSON.stringify(disputeStartDebug)');
