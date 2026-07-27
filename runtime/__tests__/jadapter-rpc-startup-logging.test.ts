@@ -42,7 +42,7 @@ test('rpc jadapter startup and watcher lifecycle logs stay structured', () => {
 });
 
 test('runtime dev startup status logs stay structured', () => {
-  const runtime = readFileSync(join(process.cwd(), 'runtime/runtime.ts'), 'utf8');
+  const runtime = readFileSync(join(process.cwd(), 'runtime/runtime-core.ts'), 'utf8');
   const runtimeLoop = readFileSync(join(process.cwd(), 'runtime/engine/loop.ts'), 'utf8');
   const hubNode = readFileSync(join(process.cwd(), 'runtime/orchestrator/hub-node.ts'), 'utf8');
   const marketMakerNode = readMarketMakerNodeSource();

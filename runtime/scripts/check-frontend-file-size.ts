@@ -18,6 +18,9 @@ const GENERATED_PATH_PARTS = [
   '/typechain-types/',
   '/build/',
   '/.svelte-kit/',
+  // Foundry installs third-party Solidity sources here. They are dependencies,
+  // not handwritten xln code, and include generated console helpers >10k LOC.
+  '/jurisdictions/lib/',
 ];
 
 function toRel(abs: string): string {

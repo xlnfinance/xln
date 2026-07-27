@@ -15,7 +15,7 @@ import {
 import {
   isRpc2Jurisdiction,
   selectPrimaryHubJurisdiction,
-  type HubJurisdictionEntry as ShardJurisdictionEntry,
+  type HubJurisdictionEntry,
   type PrimaryHubJurisdiction,
 } from './jurisdiction-select';
 
@@ -28,7 +28,7 @@ export type OrchestratorJurisdictionsConfig = {
 
 type ShardJurisdictionsFile = Record<string, unknown> & {
   version?: unknown;
-  jurisdictions?: Record<string, ShardJurisdictionEntry>;
+  jurisdictions?: Record<string, HubJurisdictionEntry>;
   defaults?: Record<string, unknown>;
 };
 
@@ -105,7 +105,7 @@ const parseRpcIndex = (value: string): number | null => {
 const resolvePublicRpcPath = (
   config: OrchestratorJurisdictionsConfig,
   key: string,
-  jurisdiction: ShardJurisdictionEntry,
+  jurisdiction: HubJurisdictionEntry,
 ): string => {
   const rpc = String(jurisdiction.rpc || '').trim();
   const normalizedRpc = normalizeLoopbackUrl(rpc);
@@ -441,7 +441,7 @@ export const deployRpc2JurisdictionStack = async (config: OrchestratorJurisdicti
 
 const assertPublicActiveRpcDeploymentMetadata = (
   key: string,
-  jurisdiction: ShardJurisdictionEntry,
+  jurisdiction: HubJurisdictionEntry,
 ): void => {
   const status = String(jurisdiction['status'] ?? 'active').trim().toLowerCase();
   const hasRpc = String(jurisdiction.rpc ?? '').trim().length > 0;

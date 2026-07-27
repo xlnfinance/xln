@@ -12,7 +12,7 @@ const ROOT = process.cwd();
 const RUNTIME_DIR = path.join(ROOT, 'runtime');
 
 const DIRECT_EVM_ALLOWLIST = new Set<string>([
-  'runtime/runtime.ts',
+  'runtime/runtime-core.ts',
   'runtime/server/index.ts',
   'runtime/state-helpers.ts',
   'runtime/server/cli.ts',

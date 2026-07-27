@@ -4,15 +4,15 @@ import { resolve } from 'node:path';
 const banned = [
   {
     symbol: 'processJBlockEvents',
-    files: ['runtime/runtime.ts', 'runtime/xln-api.ts'],
+    files: ['runtime/runtime.ts', 'runtime/runtime-core.ts', 'runtime/runtime-public-api.ts', 'runtime/xln-api.ts'],
   },
   {
     symbol: 'evms:',
-    files: ['runtime/types.ts', 'runtime/runtime.ts', 'runtime/scenarios/settle.ts'],
+    files: ['runtime/types.ts', 'runtime/runtime.ts', 'runtime/runtime-core.ts', 'runtime/scenarios/settle.ts'],
   },
   {
     symbol: '.evms',
-    files: ['runtime/runtime.ts'],
+    files: ['runtime/runtime.ts', 'runtime/runtime-core.ts'],
   },
 ] as const;
 

@@ -17,6 +17,11 @@ import { resolveRuntimeImportReadiness } from '../orchestrator/runtime-import-re
 
 const readText = (path: string): string => {
   const splitSources: Record<string, string[]> = {
+    'runtime/runtime.ts': [
+      'runtime/runtime.ts',
+      'runtime/runtime-core.ts',
+      'runtime/runtime-public-api.ts',
+    ],
     'runtime/orchestrator/mm-node.ts': [
       'runtime/orchestrator/mm-node.ts',
       'runtime/orchestrator/mm-node-core.ts',

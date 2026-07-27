@@ -154,7 +154,7 @@ describe('production startup wiring', () => {
   });
 
   test('canonical runtime commit persists the durable outbox before backup and dispatch', () => {
-    const runtime = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
+    const runtime = readFileSync(join(repoRoot, 'runtime/runtime-core.ts'), 'utf8');
     const recovery = readFileSync(join(repoRoot, 'runtime/recovery/restore.ts'), 'utf8');
     const durableOutbox = recovery.indexOf('env.pendingNetworkOutputs = buildPendingNetworkOutputs([');
     const plan = runtime.indexOf('applyDeterministicRuntimeOutputPlan(env, entityOutbox, outputRoutingDeps)');
@@ -754,7 +754,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain(
       'if (hasJurisdictionReplica(env, jurisdiction) && hasLiveJurisdictionAdapter(env, jurisdiction)) return;',
     );
-    const runtimeSource = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
+    const runtimeSource = readFileSync(join(repoRoot, 'runtime/runtime-core.ts'), 'utf8');
     expect(runtimeLoopSource).toContain(
       'const runtimeLoopTickDelayMs = Math.max(0, Math.floor(Number(config?.tickDelayMs ?? 0)));',
     );
@@ -1176,7 +1176,7 @@ describe('production startup wiring', () => {
   });
 
   test('managed runtime teardown stops J-event producers before draining runtime and network IO', () => {
-    const runtimeMain = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
+    const runtimeMain = readFileSync(join(repoRoot, 'runtime/runtime-core.ts'), 'utf8');
     const runtimeLoop = readFileSync(join(repoRoot, 'runtime/engine/loop.ts'), 'utf8');
     const nodeQuiesce = readFileSync(join(repoRoot, 'runtime/orchestrator/node-runtime-quiesce.ts'), 'utf8');
     const sources = [

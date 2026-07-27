@@ -12,7 +12,7 @@ const readMarketMakerNodeSource = (): string => [
 ].map(file => readFileSync(join(repoRoot, 'runtime/orchestrator', file), 'utf8')).join('\n');
 
 test('bootstrap uses the canonical WAL-before-dispatch commit path', () => {
-  const runtime = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
+  const runtime = readFileSync(join(repoRoot, 'runtime/runtime-core.ts'), 'utf8');
   const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
   const mmNode = readMarketMakerNodeSource();
   const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
