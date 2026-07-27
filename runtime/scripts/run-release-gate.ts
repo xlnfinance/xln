@@ -26,7 +26,12 @@ type StepResult = {
 };
 
 const RUNTIME_CORE_TESTS = [
-  'runtime/__tests__/audit-failfast-regressions.test.ts',
+  'runtime/__tests__/audit-failfast-regressions-part-1.test.ts',
+  'runtime/__tests__/audit-failfast-regressions-part-2.test.ts',
+  'runtime/__tests__/audit-failfast-regressions-part-3.test.ts',
+  'runtime/__tests__/audit-failfast-regressions-part-4.test.ts',
+  'runtime/__tests__/audit-failfast-regressions-part-5.test.ts',
+  'runtime/__tests__/audit-failfast-regressions-part-6.test.ts',
   'runtime/__tests__/storage-canonical-hash.test.ts',
   'runtime/__tests__/storage-crash-recovery.test.ts',
   'runtime/__tests__/storage-frame-journal-retention.test.ts',
@@ -35,7 +40,10 @@ const RUNTIME_CORE_TESTS = [
   'runtime/__tests__/reliable-frontier-real-crash.test.ts',
   'runtime/__tests__/j-submit-crash-recovery.test.ts',
   'runtime/__tests__/j-submit-real-rpc-crash-recovery.test.ts',
-  'runtime/__tests__/cross-jurisdiction-swap.test.ts',
+  'runtime/__tests__/cross-jurisdiction-swap-part-1.test.ts',
+  'runtime/__tests__/cross-jurisdiction-swap-part-2a.test.ts',
+  'runtime/__tests__/cross-jurisdiction-swap-part-2b.test.ts',
+  'runtime/__tests__/cross-jurisdiction-swap-part-3.test.ts',
   'runtime/__tests__/relay-router.test.ts',
   'runtime/__tests__/direct-runtime-bun.test.ts',
   'runtime/__tests__/p2p-direct-policy.test.ts',

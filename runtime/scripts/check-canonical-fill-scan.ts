@@ -16,7 +16,17 @@ import { MAX_SWAP_FILL_RATIO, exactFillRatioToUint16 } from '../orderbook/swap-e
 import { UINT16_MAX } from '../constants';
 import type { AccountTx, CrossJurisdictionSwapRoute } from '../types';
 
-const readText = (path: string): string => readFileSync(path, 'utf8');
+const readText = (path: string): string => {
+  if (path !== 'runtime/__tests__/audit-failfast-regressions.test.ts') return readFileSync(path, 'utf8');
+  return [
+    'runtime/__tests__/audit-failfast-regressions-part-1.test.ts',
+    'runtime/__tests__/audit-failfast-regressions-part-2.test.ts',
+    'runtime/__tests__/audit-failfast-regressions-part-3.test.ts',
+    'runtime/__tests__/audit-failfast-regressions-part-4.test.ts',
+    'runtime/__tests__/audit-failfast-regressions-part-5.test.ts',
+    'runtime/__tests__/audit-failfast-regressions-part-6.test.ts',
+  ].map(file => readFileSync(file, 'utf8')).join('\n');
+};
 
 const requireCondition = (condition: unknown, message: string): void => {
   if (!condition) throw new Error(message);

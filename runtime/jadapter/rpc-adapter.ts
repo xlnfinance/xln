@@ -51,9 +51,7 @@ import { readAuthenticatedReceiptRange, type RpcBatchCall } from './receipt-root
 import { createRpcLifecycleMethods } from './rpc-lifecycle';
 import { readAndAssertRpcChainId } from './rpc-network';
 import {
-  ExternalWalletTrackedOwnerCursor,
   PROCESS_BATCH_GAS_FLOOR,
-  TxFinalizationEvidence,
   applyProcessBatchGasFloor,
   decodeDisputeFinalizationEvidenceCalldata,
   decodeStandardSolidityRevertData,
@@ -67,6 +65,8 @@ import {
   shouldEmitExternalWalletBalanceDelta,
   toFinalizationDecimal,
   toFinalizationHex,
+  type ExternalWalletTrackedOwnerCursor,
+  type TxFinalizationEvidence,
 } from './rpc-public';
 import { createRpcReadMethods } from './rpc-reads';
 import {

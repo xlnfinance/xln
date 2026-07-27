@@ -1276,7 +1276,10 @@ describe('production startup wiring', () => {
 
   test('prod remote runtime import e2e cannot reset the shared prod mesh implicitly', () => {
     const baseline = readFileSync(join(repoRoot, 'tests/utils/e2e-baseline.ts'), 'utf8');
-    const radapterRemote = readFileSync(join(repoRoot, 'tests/e2e-radapter-remote.spec.ts'), 'utf8');
+    const radapterRemote = [
+      'tests/e2e-radapter-remote-part-1.spec.ts',
+      'tests/e2e-radapter-remote-part-2.spec.ts',
+    ].map(file => readFileSync(join(repoRoot, file), 'utf8')).join('\n');
     const appLayout = readFileSync(join(repoRoot, 'frontend/src/routes/app/+layout.svelte'), 'utf8');
     const importFlow = readFileSync(join(repoRoot, 'frontend/src/lib/utils/remoteRuntimeImportFlow.ts'), 'utf8');
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');

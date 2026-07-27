@@ -14,31 +14,31 @@ const FAST_E2E_TARGETS = [
     title: 'fresh runtimes can open accounts, faucet, pay, and reload persisted state',
   },
   {
-    file: 'tests/e2e-radapter-remote.spec.ts',
+    file: 'tests/e2e-radapter-remote-part-1.spec.ts',
     title: 'remote /app opens an existing hub runtime through radapter',
   },
   {
-    file: 'tests/e2e-radapter-remote.spec.ts',
+    file: 'tests/e2e-radapter-remote-part-1.spec.ts',
     title: 'health admin keeps QA evidence link-only and runtime adapter local',
   },
   {
-    file: 'tests/e2e-radapter-remote.spec.ts',
+    file: 'tests/e2e-radapter-remote-part-2.spec.ts',
     title: 'admin remote runtime control advances live state and exposes past frames',
   },
   {
-    file: 'tests/e2e-radapter-remote.spec.ts',
+    file: 'tests/e2e-radapter-remote-part-1.spec.ts',
     title: 'context dropdown groups H1 H2 H3 remote runtimes',
   },
   {
-    file: 'tests/e2e-radapter-remote.spec.ts',
+    file: 'tests/e2e-radapter-remote-part-1.spec.ts',
     title: 'admin remote runtime keeps raw RuntimeInput send private and account projection readable',
   },
   {
-    file: 'tests/e2e-radapter-remote.spec.ts',
+    file: 'tests/e2e-radapter-remote-part-2.spec.ts',
     title: 'runtime dropdown switches app-imported remote runtimes without manager route',
   },
   {
-    file: 'tests/e2e-radapter-remote.spec.ts',
+    file: 'tests/e2e-radapter-remote-part-2.spec.ts',
     title: 'bulk remote runtime import link validates mesh, custody, and market maker runtimes in browser',
   },
   {

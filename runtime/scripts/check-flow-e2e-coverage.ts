@@ -8,7 +8,15 @@ type CoverageRequirement = {
   patterns: string[];
 };
 
-const readText = (path: string): string => readFileSync(path, 'utf8');
+const readText = (path: string): string => {
+  if (path !== 'runtime/__tests__/cross-jurisdiction-swap.test.ts') return readFileSync(path, 'utf8');
+  return [
+    'runtime/__tests__/cross-jurisdiction-swap-part-1.test.ts',
+    'runtime/__tests__/cross-jurisdiction-swap-part-2a.test.ts',
+    'runtime/__tests__/cross-jurisdiction-swap-part-2b.test.ts',
+    'runtime/__tests__/cross-jurisdiction-swap-part-3.test.ts',
+  ].map(file => readFileSync(file, 'utf8')).join('\n');
+};
 
 const includesAll = (text: string, patterns: string[], file: string): string[] => {
   const missing: string[] = [];

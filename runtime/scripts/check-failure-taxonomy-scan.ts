@@ -16,10 +16,28 @@ import { publicAggregatedHealth } from '../server/health-redaction';
 import { resolveRuntimeImportReadiness } from '../orchestrator/runtime-import-readiness';
 
 const readText = (path: string): string => {
-  if (path !== 'runtime/orchestrator/mm-node.ts') return readFileSync(path, 'utf8');
-  return ['mm-node.ts', 'mm-node-core.ts', 'mm-node-health.ts', 'mm-node-run.ts']
-    .map(file => readFileSync(`runtime/orchestrator/${file}`, 'utf8'))
-    .join('\n');
+  const splitSources: Record<string, string[]> = {
+    'runtime/orchestrator/mm-node.ts': [
+      'runtime/orchestrator/mm-node.ts',
+      'runtime/orchestrator/mm-node-core.ts',
+      'runtime/orchestrator/mm-node-health.ts',
+      'runtime/orchestrator/mm-node-run.ts',
+    ],
+    'runtime/__tests__/audit-failfast-regressions.test.ts': [
+      'runtime/__tests__/audit-failfast-regressions-part-1.test.ts',
+      'runtime/__tests__/audit-failfast-regressions-part-2.test.ts',
+      'runtime/__tests__/audit-failfast-regressions-part-3.test.ts',
+      'runtime/__tests__/audit-failfast-regressions-part-4.test.ts',
+      'runtime/__tests__/audit-failfast-regressions-part-5.test.ts',
+      'runtime/__tests__/audit-failfast-regressions-part-6.test.ts',
+    ],
+    'runtime/__tests__/radapter.test.ts': [
+      'runtime/__tests__/radapter-part-1.test.ts',
+      'runtime/__tests__/radapter-part-2.test.ts',
+      'runtime/__tests__/radapter-part-3.test.ts',
+    ],
+  };
+  return (splitSources[path] ?? [path]).map(file => readFileSync(file, 'utf8')).join('\n');
 };
 
 const assertIncludes = (text: string, needle: string, path: string): void => {

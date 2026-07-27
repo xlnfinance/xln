@@ -302,7 +302,10 @@ test('runtime controller exposes only typed debug projection queries', () => {
   const queryClientSource = readFileSync('frontend/src/lib/stores/runtimeQueryClient.ts', 'utf8');
   const appTypes = readFileSync('frontend/src/app.d.ts', 'utf8');
   const storeSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
-  const remoteE2ESource = readFileSync('tests/e2e-radapter-remote.spec.ts', 'utf8');
+  const remoteE2ESource = [
+    'tests/e2e-radapter-remote-part-1.spec.ts',
+    'tests/e2e-radapter-remote-part-2.spec.ts',
+  ].map(file => readFileSync(file, 'utf8')).join('\n');
 
   expect(queryClientSource).toContain('query: {');
   expect(queryClientSource).toContain('runtimeQueryClient.readHead()');
