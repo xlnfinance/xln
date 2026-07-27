@@ -61,14 +61,15 @@ test('keeps one typed primary failure while cancelled neighbors do not consume t
 
 test('runner skips HTTP forensics for fail-fast cancellations and forces trace on exact reruns', () => {
   const runner = readFileSync('runtime/scripts/run-e2e-parallel-isolated.ts', 'utf8');
+  const report = readFileSync('runtime/scripts/e2e-run-report.ts', 'utf8');
 
   expect(runner).toContain("resultClass: 'cancelled'");
   expect(runner).toContain('isE2EGlobalFailFastAbortSignal(signal)');
   expect(runner).toContain('return finishCancelled();');
   expect(runner).toContain("!String(teardownReason || '').startsWith('E2E_FATAL_RUNTIME_LOG')");
   expect(runner).toContain("traceMode: 'retain-on-failure'");
-  expect(runner).toContain('primaryFailureShard: primaryFailure?.shard ?? null');
-  expect(runner).toContain('primaryFailureCapsule: primaryFailure?.failureCapsule ?? null');
+  expect(report).toContain('primaryFailureShard: primaryFailure?.shard ?? null');
+  expect(report).toContain('primaryFailureCapsule: primaryFailure?.failureCapsule ?? null');
 });
 
 test('preserves a product failure when shard cleanup also fails', () => {

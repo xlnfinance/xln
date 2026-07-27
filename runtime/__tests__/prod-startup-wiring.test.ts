@@ -1667,6 +1667,7 @@ describe('production startup wiring', () => {
 
   test('isolated e2e runner fails fast on fatal shard log markers', () => {
     const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
+    const isolatedRuntime = readFileSync(join(repoRoot, 'runtime/scripts/e2e-isolated-runtime.ts'), 'utf8');
     const fatalHelper = readFileSync(join(repoRoot, 'runtime/scripts/e2e-fatal-log-monitor.ts'), 'utf8');
     const runnerLockHelper = readFileSync(join(repoRoot, 'runtime/scripts/e2e-runner-lock.ts'), 'utf8');
     const standaloneMonitor = readFileSync(join(repoRoot, 'runtime/scripts/e2e-fail-fast-monitor.ts'), 'utf8');
@@ -1763,7 +1764,7 @@ describe('production startup wiring', () => {
     expect(e2eCoreRunner).toContain("import { sanitizeChildProcessEnv } from '../server/child-process-env';");
     expect(e2eCoreRunner).toContain('env: sanitizeChildProcessEnv(process.env)');
     expect(runner).toContain("import { sanitizeChildProcessEnv } from '../server/child-process-env';");
-    expect(runner).toContain('env: sanitizeChildProcessEnv(process.env)');
+    expect(isolatedRuntime).toContain('env: sanitizeChildProcessEnv(process.env)');
     expect(runner).toContain("XLN_AUTO_PROVISION_EXTERNAL_FAUCET: process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] ?? '1'");
     expect(allTestsFast).toContain('env: sanitizeChildProcessEnv(env)');
     expect(allTestsFast).toContain('const e2eEnv = withoutTestArtifactCleanupDoneEnv(childEnv);');

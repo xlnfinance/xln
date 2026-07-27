@@ -171,11 +171,11 @@ describe('isolated E2E runner resources', () => {
   });
 
   test('resumed runs resolve manifest metadata by stable shard id', () => {
-    const runner = readFileSync('runtime/scripts/run-e2e-parallel-isolated.ts', 'utf8');
+    const report = readFileSync('runtime/scripts/e2e-run-report.ts', 'utf8');
 
-    expect(runner).toContain('const taskByShard = new Map(tasks.map(task => [task.shard, task] as const));');
-    expect(runner).toContain('const task = taskByShard.get(result.shard);');
-    expect(runner).not.toContain('const task = tasks[result.shard];');
+    expect(report).toContain('const taskByShard = new Map(tasks.map(task => [task.shard, task] as const));');
+    expect(report).toContain('const task = taskByShard.get(result.shard);');
+    expect(report).not.toContain('const task = tasks[result.shard];');
   });
 
   test('passes the provisioned shard jurisdiction registry into Playwright-owned child runtimes', () => {
