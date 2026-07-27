@@ -15,6 +15,7 @@ import {
 import { connectHub } from './utils/e2e-connect';
 import { startDisputeFromManageUi } from './utils/e2e-account-workspace';
 import { requireIsolatedBaseUrl } from './utils/e2e-isolated-env';
+import { quiesceRuntimePage } from './utils/e2e-runtime-shutdown.mts';
 import { deriveSignerAddressSync, deriveSignerKeySync } from '../runtime/account/crypto';
 import {
   buildPushRegistrationMessage,
@@ -699,6 +700,7 @@ test('settings registers and revokes signed push wake token through browser UI',
     await page.waitForTimeout(2_500);
     expect(capture.notifications).toHaveLength(1);
   } finally {
+    await quiesceRuntimePage(page);
     if (tower?.proc.exitCode === null) tower.proc.kill('SIGTERM');
     await capture.close();
   }

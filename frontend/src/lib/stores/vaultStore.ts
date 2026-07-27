@@ -264,6 +264,7 @@ let runtimeResumeTrigger: (() => void) | null = null;
 const runtimeEnvChangeUnsubscribers = new Map<string, () => void>();
 const runtimeRecoveryBarrierUnsubscribers = new Map<string, () => void>();
 const runtimeRecoveryUploadTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const runtimeRecoveryUploads = new Map<string, Set<Promise<void>>>();
 const runtimeRecoveryUploadMeta = new Map<string, {
   lastUploadedHeight: number;
   lastBundleHash: string | null;
@@ -1639,6 +1640,26 @@ async function uploadRuntimeRecoverySnapshot(
   persistRuntimeMetadataSnapshot();
 }
 
+function trackRuntimeRecoveryUpload(runtimeId: string, upload: Promise<void>): Promise<void> {
+  const active = runtimeRecoveryUploads.get(runtimeId) ?? new Set<Promise<void>>();
+  runtimeRecoveryUploads.set(runtimeId, active);
+  const tracked = upload.finally(() => {
+    active.delete(tracked);
+    if (active.size === 0) runtimeRecoveryUploads.delete(runtimeId);
+  });
+  active.add(tracked);
+  return tracked;
+}
+
+async function drainRuntimeRecoveryUploads(runtimeId: string): Promise<void> {
+  // A debounced upload may already own a socket when shutdown begins. Keep the
+  // tower alive until every such request settles; otherwise clean shutdown can
+  // manufacture a connection failure after all application work has completed.
+  while (runtimeRecoveryUploads.has(runtimeId)) {
+    await Promise.allSettled(Array.from(runtimeRecoveryUploads.get(runtimeId) ?? []));
+  }
+}
+
 function scheduleRuntimeRecoveryUpload(
   runtimeId: string,
   env: Env,
@@ -1652,7 +1673,10 @@ function scheduleRuntimeRecoveryUpload(
     normalizedRuntimeId,
     setTimeout(() => {
       runtimeRecoveryUploadTimers.delete(normalizedRuntimeId);
-      void uploadRuntimeRecoverySnapshot(normalizedRuntimeId, unwrapLiveRuntimeEnv(env) ?? env, xln).catch((error) => {
+      void trackRuntimeRecoveryUpload(
+        normalizedRuntimeId,
+        uploadRuntimeRecoverySnapshot(normalizedRuntimeId, unwrapLiveRuntimeEnv(env) ?? env, xln),
+      ).catch((error) => {
         errorLog.log(
           `Tower recovery upload failed for ${normalizedRuntimeId.slice(0, 12)}`,
           'Runtime Recovery',
@@ -2999,6 +3023,7 @@ export const vaultOperations = {
         // That drain may commit an Account frame and emit its ACK; removing the
         // barrier first would let the peer advance past the latest tower backup.
         unregisterRuntimeEnvChange(runtimeId);
+        await drainRuntimeRecoveryUploads(normalizeRuntimeId(runtimeId));
       } catch (error) {
         throw new Error(
           `RUNTIME_QUIESCE_ENTRY_FAILED:${normalizeRuntimeId(runtimeId)}:${error instanceof Error ? error.message : String(error)}`,
