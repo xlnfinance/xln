@@ -700,7 +700,10 @@ describe('production startup wiring', () => {
     expect(runtimeLoopSource).toContain('const applyEntityTxFrameCap =');
     expect(runtimeLoopSource).toContain('mempool.entityInputs = [...deferredInputs, ...mempool.entityInputs];');
     expect(runtimeSource).not.toContain('prepareCrossJurisdictionEntityInputs');
-    const entityConsensusSource = readFileSync(join(repoRoot, 'runtime/entity/consensus/index.ts'), 'utf8');
+    const entityConsensusSource = readFileSync(
+      join(repoRoot, 'runtime/entity/consensus/input-consensus.ts'),
+      'utf8',
+    );
     expect(entityConsensusSource).toContain('appendDefaultProposerCrossJMaterializations');
     expect(runtimeSource.indexOf('runtimeInput.entityInputs = await prepareHtlcPaymentEntityInputs('))
       .toBeGreaterThan(runtimeSource.lastIndexOf('applyEntityInputFrameCap('));

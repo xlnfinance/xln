@@ -6,7 +6,9 @@ const TARGETS = [
   'runtime/entity/tx/handlers/dispute.ts',
   'runtime/entity/tx/handlers/j-broadcast.ts',
   'runtime/account/consensus/index.ts',
-  'runtime/entity/consensus/index.ts',
+  'runtime/entity/consensus/shared.ts',
+  'runtime/entity/consensus/input-consensus.ts',
+  'runtime/entity/consensus/frame-application.ts',
   'runtime/runtime/j-submit.ts',
 ];
 

@@ -26,7 +26,12 @@ const accountConsensusPath = 'runtime/account/consensus/index.ts';
 const accountHandlerPath = 'runtime/entity/tx/handlers/account.ts';
 const accountProposePath = 'runtime/account/consensus/propose.ts';
 const accountFramePath = 'runtime/account/consensus/frame.ts';
-const entityConsensusPath = 'runtime/entity/consensus/index.ts';
+const entityConsensusPaths = [
+  'runtime/entity/consensus/shared.ts',
+  'runtime/entity/consensus/input-consensus.ts',
+  'runtime/entity/consensus/frame-application.ts',
+];
+const entityConsensusPath = entityConsensusPaths.join(', ');
 const envEventsPath = 'runtime/runtime/env-events.ts';
 const entityFramePath = 'runtime/entity/consensus/frame.ts';
 const hankoSigningPath = 'runtime/hanko/signing.ts';
@@ -44,7 +49,7 @@ const accountConsensus = readText(accountConsensusPath);
 const accountHandler = readText(accountHandlerPath);
 const accountPropose = readText(accountProposePath);
 const accountFrame = readText(accountFramePath);
-const entityConsensus = readText(entityConsensusPath);
+const entityConsensus = entityConsensusPaths.map(readText).join('\n');
 const envEvents = readText(envEventsPath);
 const entityFrame = readText(entityFramePath);
 const hankoSigning = readText(hankoSigningPath);

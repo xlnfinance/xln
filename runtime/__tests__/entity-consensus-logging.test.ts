@@ -3,7 +3,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 test('entity consensus core uses structured logging only', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/entity/consensus/index.ts'), 'utf8');
+  const source = [
+    'shared.ts',
+    'input-consensus.ts',
+    'frame-application.ts',
+  ].map(file => readFileSync(join(process.cwd(), 'runtime/entity/consensus', file), 'utf8')).join('\n');
 
   expect(source).toContain("createStructuredLogger('entity')");
   expect(source).toContain("entityLog.info('frame.profile'");

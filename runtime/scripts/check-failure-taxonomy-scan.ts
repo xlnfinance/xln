@@ -432,7 +432,8 @@ for (const [path, markers] of [
     'runtime/entity/factory.ts',
     ["createStructuredLogger('entity.factory')", 'lazy.create', 'numbered.register_failed'],
   ],
-  ['runtime/entity/consensus/index.ts', ["createStructuredLogger('entity')", 'frame.profile', 'frame.apply']],
+  ['runtime/entity/consensus/shared.ts', ["createStructuredLogger('entity')"]],
+  ['runtime/entity/consensus/frame-application.ts', ['frame.profile', 'frame.apply']],
   [
     'runtime/runtime/entity-inputs.ts',
     ["createStructuredLogger('runtime.entity_inputs')", 'inputs.profile', 'replay.merged_input'],
@@ -667,9 +668,13 @@ const entityInputMergePath = 'runtime/entity/consensus/input-merge.ts';
 const entityInputMerge = readText(entityInputMergePath);
 assertNotIncludes(entityInputMerge, 'console.', entityInputMergePath);
 
-const entityConsensusPath = 'runtime/entity/consensus/index.ts';
-const entityConsensus = readText(entityConsensusPath);
-assertNotIncludes(entityConsensus, 'console.', entityConsensusPath);
+for (const entityConsensusPath of [
+  'runtime/entity/consensus/shared.ts',
+  'runtime/entity/consensus/input-consensus.ts',
+  'runtime/entity/consensus/frame-application.ts',
+]) {
+  assertNotIncludes(readText(entityConsensusPath), 'console.', entityConsensusPath);
+}
 
 const runtimeEntityInputsPath = 'runtime/runtime/entity-inputs.ts';
 const runtimeEntityInputs = readText(runtimeEntityInputsPath);

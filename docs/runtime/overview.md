@@ -12,7 +12,7 @@ If you only have 1-2 hours, read files in this order:
    Public runtime API and compatibility entry point.
 2. `runtime/runtime/lifecycle.ts`, `runtime/runtime/input-queue.ts`, `runtime/runtime/entity-inputs.ts`, `runtime/runtime/output-routing.ts`
    Single-writer loop, ingress, entity dispatch, and durable output routing.
-3. `runtime/entity/consensus/index.ts`, `runtime/entity/consensus/frame.ts`, `runtime/entity/consensus/leader.ts`
+3. `runtime/entity/consensus/input-consensus.ts`, `runtime/entity/consensus/frame-application.ts`, `runtime/entity/consensus/leader.ts`
    Entity-frame proposal, quorum validation, commit, and ordered leader failover.
 4. `runtime/account/consensus/index.ts`, `runtime/account/consensus/frame.ts`, `runtime/account/consensus/deadline-policy.ts`
    Bilateral account proposal/ACK, secondary-manifest validation, and receiver-local deadline policy.

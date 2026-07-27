@@ -80,7 +80,9 @@ test('consensus logging has no raw payload escape hatch', () => {
   const sources = [
     'runtime/runtime.ts',
     'runtime/account/consensus/index.ts',
-    'runtime/entity/consensus/index.ts',
+    'runtime/entity/consensus/shared.ts',
+    'runtime/entity/consensus/input-consensus.ts',
+    'runtime/entity/consensus/frame-application.ts',
     'runtime/entity/tx/handlers/account/orderbook-matching-same.ts',
     'runtime/entity/tx/handlers/dispute.ts',
     'runtime/infra/logger.ts',
