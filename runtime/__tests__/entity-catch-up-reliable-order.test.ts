@@ -32,15 +32,15 @@ import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observati
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { markLocalJAuthorityRuntimeTx } from '../jurisdiction/registration-evidence';
 import { buildRuntimeRecoveryBundle } from '../recovery/bundle';
-import { applyMergedEntityInputs } from '../machine/entity-inputs';
-import type { RuntimeEntityRoutingDeps } from '../machine/entity-routing';
+import { applyMergedEntityInputs } from '../runtime/entity-inputs';
+import type { RuntimeEntityRoutingDeps } from '../runtime/entity-routing';
 import {
   applyReliableDeliveryReceipts,
   commitReliableIngress,
   finalizeReliableIngressCommit,
   registerReliableIngress,
   releaseUncommittedReliableIngress,
-} from '../machine/reliable-delivery';
+} from '../runtime/reliable-delivery';
 import {
   closeInfraDb,
   createEmptyEnv,

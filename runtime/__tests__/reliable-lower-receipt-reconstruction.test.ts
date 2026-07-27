@@ -6,11 +6,11 @@ import {
   finalizeReliableIngressCommit,
   registerReliableIngress,
   rollbackReliableIngressCommit,
-} from '../machine/reliable-delivery';
+} from '../runtime/reliable-delivery';
 import {
   MAX_RELIABLE_INGRESS_SOURCE_LANES,
   receiverFrontierKey,
-} from '../machine/reliable-frontier';
+} from '../runtime/reliable-frontier';
 import {
   buildCanonicalEntityReplicaSnapshot,
   buildDurableRuntimeMachineSnapshot,

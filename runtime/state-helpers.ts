@@ -32,7 +32,7 @@ import {
   cloneIsolatedAccountInput,
 } from './protocol/account-input-clone';
 import { isLeftEntity } from './entity/id';
-import { getAccountFrameHistoryView, setAccountFrameHistoryView } from './machine/env-events';
+import { getAccountFrameHistoryView, setAccountFrameHistoryView } from './runtime/env-events';
 import { getLocalSignerPrivateKey } from './account/crypto';
 import { cloneJBatch, type CompletedBatch, type JBatchState } from './jurisdiction/batch';
 import {

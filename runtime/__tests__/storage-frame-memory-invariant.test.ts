@@ -20,7 +20,7 @@ import {
   ACCOUNT_FRAME_HISTORY_VIEW_LIMIT,
   appendAccountFrameHistoryView,
   getAccountFrameHistoryView,
-} from '../machine/env-events';
+} from '../runtime/env-events';
 import type { AccountMachine, Env, JReplica } from '../types';
 
 const created: Env[] = [];

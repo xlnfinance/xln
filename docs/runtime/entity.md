@@ -1,6 +1,6 @@
 # Entity Machine
 
-[Up: runtime machine](./machine.md) | [Down: account machine](./account.md) | [Side: jurisdiction machine](./jurisdiction.md) | [Transactions](./entity-transactions.md)
+[Up: runtime machine](./runtime.md) | [Down: account machine](./account.md) | [Side: jurisdiction machine](./jurisdiction.md) | [Transactions](./entity-transactions.md)
 
 The E-machine is replicated state owned by one entity board. The proposer builds an entity frame; every validator replays the same transactions, rebuilds every emitted secondary hash locally, and signs only an exact manifest match.
 

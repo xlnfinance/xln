@@ -7,7 +7,7 @@ import {
   deriveLocalEntityCryptoKeys,
 } from '../entity/crypto';
 import { createEmptyEnv, generateLazyEntityId } from '../runtime';
-import { applyRuntimeTx } from '../machine/tx-handlers';
+import { applyRuntimeTx } from '../runtime/tx-handlers';
 
 const testJurisdiction = {
   address: `0x${'22'.repeat(20)}`,

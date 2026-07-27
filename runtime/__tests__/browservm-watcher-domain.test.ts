@@ -6,7 +6,7 @@ import {
   applyCompleteImportJurisdiction,
   buildJurisdictionImportRequestHash,
   normalizeJurisdictionImportRequest,
-} from '../machine/jurisdiction-import';
+} from '../runtime/jurisdiction-import';
 import { createEmptyEnv } from '../runtime';
 import { createJReplica } from '../scenarios/boot';
 import { validateBrowserVmState } from '../wal/runtime-machine-schema/browser';

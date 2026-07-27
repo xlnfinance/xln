@@ -24,7 +24,7 @@ import {
   resolveObserverCertifiedBoardHash,
 } from '../jurisdiction/board-registry';
 import type { CertifiedBoardPatriciaNode } from '../types/entity-board-registry';
-import { dbRootPath } from '../machine/platform';
+import { dbRootPath } from '../runtime/platform';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import { buildCertifiedEntityLineagePlan } from '../storage/entity-lineage';
 import {

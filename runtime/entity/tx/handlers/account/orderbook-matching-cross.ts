@@ -1,5 +1,5 @@
 import type { EntityState, Env } from '../../../../types';
-import { recordRuntimeSecurityIncident } from '../../../../machine/security-incidents';
+import { recordRuntimeSecurityIncident } from '../../../../runtime/security-incidents';
 import {
   applyCommand,
   getBookOrder,

@@ -124,7 +124,7 @@ import {
   buildDurableRuntimeMachineSnapshot,
   buildReplayVerifiableRuntimeMachineSnapshot,
 } from '../wal/snapshot';
-import { buildDurableOutputRetryState } from '../machine/durable-output-retry';
+import { buildDurableOutputRetryState } from '../runtime/durable-output-retry';
 import { verifyStorageSnapshotIntegrity } from './verify';
 import {
   validateAccountJClaimNodeValue,

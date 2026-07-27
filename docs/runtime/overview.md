@@ -10,7 +10,7 @@ If you only have 1-2 hours, read files in this order:
 
 1. `runtime/runtime.ts`
    Public runtime API and compatibility entry point.
-2. `runtime/machine/lifecycle.ts`, `runtime/machine/input-queue.ts`, `runtime/machine/entity-inputs.ts`, `runtime/machine/output-routing.ts`
+2. `runtime/runtime/lifecycle.ts`, `runtime/runtime/input-queue.ts`, `runtime/runtime/entity-inputs.ts`, `runtime/runtime/output-routing.ts`
    Single-writer loop, ingress, entity dispatch, and durable output routing.
 3. `runtime/entity/consensus/index.ts`, `runtime/entity/consensus/frame.ts`, `runtime/entity/consensus/leader.ts`
    Entity-frame proposal, quorum validation, commit, and ordered leader failover.
@@ -20,7 +20,7 @@ If you only have 1-2 hours, read files in this order:
    Entity-tx dispatcher and domain entry points.
 6. `runtime/account/tx/apply.ts`
    Bilateral account-tx dispatcher.
-7. `runtime/jurisdiction/history-consensus.ts`, `runtime/jurisdiction/event-observation.ts`, `runtime/machine/j-submit.ts`
+7. `runtime/jurisdiction/history-consensus.ts`, `runtime/jurisdiction/event-observation.ts`, `runtime/runtime/j-submit.ts`
    Per-validator J-block histories, quorum-prefix finality, observation, and durable submission.
 8. `runtime/storage/`, `runtime/wal/snapshot.ts`
    Snapshot/WAL/materialization and local integrity hashes.
@@ -33,7 +33,7 @@ If you only have 1-2 hours, read files in this order:
 
 - `runtime/runtime.ts`
   Owns the runtime loop, frame persistence, env lifecycle, and top-level API.
-- `runtime/machine/`
+- `runtime/runtime/`
   Owns lifecycle, input admission, scheduled wakes, routing, and persistence orchestration.
 - `runtime/entity/consensus/`
   Own entity-frame consensus, proposal hashing, and cross-j orderbook orchestration.
@@ -58,7 +58,7 @@ If you only have 1-2 hours, read files in this order:
 
 ## Folder Readmes
 
-- [Runtime machine](./machine.md)
+- [Runtime machine](./runtime.md)
 - [Entity machine](./entity.md)
 - [Account machine](./account.md)
 - [Jurisdiction machine](./jurisdiction.md)
@@ -80,7 +80,7 @@ If you only have 1-2 hours, read files in this order:
 These files define correctness and are the first audit target:
 
 - `runtime/runtime.ts`
-- `runtime/machine/`
+- `runtime/runtime/`
 - `runtime/entity/consensus/`
 - `runtime/account/consensus/`
 - `runtime/entity/tx/`

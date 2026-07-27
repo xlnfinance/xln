@@ -1,4 +1,4 @@
-import { normalizeJurisdictionImportRequest } from '../../machine/jurisdiction-import';
+import { normalizeJurisdictionImportRequest } from '../../runtime/jurisdiction-import';
 import { validateRuntimeAdapterCommandMarker } from '../../radapter/command-frontier';
 import type { JurisdictionImportRequest, RuntimeTx } from '../../types';
 import { validateBrowserVmState } from './browser';

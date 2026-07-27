@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import { reportDirectClientError, reportRelayClientError, RuntimeP2P } from '../networking/p2p';
 import { RuntimeWsClient } from '../networking/ws-client';
 import { deriveEncryptionKeyPair } from '../networking/p2p-crypto';
-import { stopRuntimeP2P, stopRuntimeP2PAndWait } from '../machine/p2p-lifecycle';
+import { stopRuntimeP2P, stopRuntimeP2PAndWait } from '../runtime/p2p-lifecycle';
 import { createEmptyEnv } from '../runtime';
 import type { Env } from '../types';
 

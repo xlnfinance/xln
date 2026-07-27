@@ -1425,7 +1425,7 @@ export interface Env {
       targetRuntimeId: string,
       envelope: RuntimeEntityInputsEnvelope,
       ingressTimestamp?: number,
-    ) => import('./machine/output-routing').RuntimeDirectEntityInputDispatchResult) | null;
+    ) => import('./runtime/output-routing').RuntimeDirectEntityInputDispatchResult) | null;
     directReliableReceiptDispatch?: ((
       targetRuntimeId: string,
       receipt: ReliableDeliveryReceipt,

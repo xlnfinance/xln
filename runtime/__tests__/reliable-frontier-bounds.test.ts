@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { advanceReliableFrontier } from '../machine/reliable-frontier';
+import { advanceReliableFrontier } from '../runtime/reliable-frontier';
 import type { ReliableDeliveryIdentity } from '../types';
 
 const entityId = `0x${'71'.repeat(32)}`;

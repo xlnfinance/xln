@@ -18,7 +18,7 @@ import {
 import { getAccountJClaimNodeStore } from '../account/j-claim-store';
 import { generateLazyEntityId } from '../entity/factory';
 import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
-import { dbRootPath } from '../machine/platform';
+import { dbRootPath } from '../runtime/platform';
 import { decodeBuffer, encodeBuffer } from '../storage/codec';
 import { keyAccountJClaimNode, keyDiff } from '../storage/keys';
 import { hydrateAccountJClaimRootNodesFromStorage } from '../storage/read';

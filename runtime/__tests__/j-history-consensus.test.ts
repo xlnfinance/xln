@@ -23,7 +23,7 @@ import {
   signAccountFrame,
   verifyAccountSignature,
 } from '../account/crypto';
-import { applyRuntimeTx } from '../machine/tx-handlers';
+import { applyRuntimeTx } from '../runtime/tx-handlers';
 import { markLocalJAuthorityRuntimeTx } from '../jurisdiction/registration-evidence';
 import {
   assertCertifiedJHistoryIntegrity,

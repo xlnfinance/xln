@@ -1,10 +1,10 @@
 import { getSignerPrivateKeyIfAvailable, prewarmSignerKeyCache } from '../account/crypto';
 import { createStructuredLogger } from '../infra/logger';
 import { extractEntityId, extractSignerId } from '../ids';
-import { attachEventEmitters } from '../machine/env-events';
-import { ensureRuntimeMempool } from '../machine/input-queue';
-import { persistGossipProfileToInfraDb } from '../machine/infra-gossip-store';
-import { ensureRuntimeState } from '../machine/runtime-state';
+import { attachEventEmitters } from '../runtime/env-events';
+import { ensureRuntimeMempool } from '../runtime/input-queue';
+import { persistGossipProfileToInfraDb } from '../runtime/infra-gossip-store';
+import { ensureRuntimeState } from '../runtime/runtime-state';
 import { createGossipLayer, type Profile } from '../networking/gossip';
 import { buildLocalEntityProfile } from '../networking/gossip-helper';
 import { deriveRuntimeIdFromSeed, normalizeDbNamespace } from '../storage/runtime-dbs';

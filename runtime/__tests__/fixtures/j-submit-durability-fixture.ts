@@ -1,9 +1,9 @@
 import { createEmptyEnv } from '../../runtime';
-import { applyRuntimeTx } from '../../machine/tx-handlers';
+import { applyRuntimeTx } from '../../runtime/tx-handlers';
 import {
   registerPendingCommittedJOutbox,
-} from '../../machine/j-submit-state';
-import { collectDueJSubmitRuntimeTxs } from '../../machine/j-submit-scheduler';
+} from '../../runtime/j-submit-state';
+import { collectDueJSubmitRuntimeTxs } from '../../runtime/j-submit-scheduler';
 import { createEmptyBatch } from '../../jurisdiction/batch';
 import type { EntityReplica, EntityState } from '../../types';
 

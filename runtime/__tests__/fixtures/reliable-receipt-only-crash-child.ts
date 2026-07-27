@@ -1,6 +1,6 @@
 import { deriveSignerAddressSync } from '../../account/crypto';
 import { markLocalJAuthorityRuntimeTx } from '../../jurisdiction/registration-evidence';
-import { registerReliableIngress } from '../../machine/reliable-delivery';
+import { registerReliableIngress } from '../../runtime/reliable-delivery';
 import {
   createEmptyEnv,
   enqueueRuntimeInput,

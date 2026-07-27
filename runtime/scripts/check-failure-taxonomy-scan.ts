@@ -116,7 +116,7 @@ const fatalIncidentRoutes = [
     name: 'jurisdiction-submit',
     steps: [
       [
-        'runtime/machine/j-submit.ts',
+        'runtime/runtime/j-submit.ts',
         ['J_SUBMIT_FATAL:', "queueBatchResult(env, deps, jInput.jurisdictionName, jTx, 'terminalFailure'"],
       ],
       ['runtime/engine/loop.ts', ['await processRuntime(env);', 'await config.onFatal({']],
@@ -434,11 +434,11 @@ for (const [path, markers] of [
   ],
   ['runtime/entity/consensus/index.ts', ["createStructuredLogger('entity')", 'frame.profile', 'frame.apply']],
   [
-    'runtime/machine/entity-inputs.ts',
+    'runtime/runtime/entity-inputs.ts',
     ["createStructuredLogger('runtime.entity_inputs')", 'inputs.profile', 'replay.merged_input'],
   ],
-  ['runtime/machine/input-queue.ts', ["createStructuredLogger('runtime.input_queue')", 'interesting_entity_inputs']],
-  ['runtime/machine/p2p-lifecycle.ts', ["createStructuredLogger('p2p.lifecycle')", 'detach.close_failed']],
+  ['runtime/runtime/input-queue.ts', ["createStructuredLogger('runtime.input_queue')", 'interesting_entity_inputs']],
+  ['runtime/runtime/p2p-lifecycle.ts', ["createStructuredLogger('p2p.lifecycle')", 'detach.close_failed']],
   ['runtime/relay/standalone-server.ts', ["createStructuredLogger('relay.standalone')", 'service.listen']],
   [
     'runtime/entity/consensus/input-merge.ts',
@@ -464,9 +464,9 @@ for (const [path, markers] of [
   ],
   ['runtime/account/tx/apply.ts', ["createStructuredLogger('account.tx')", 'account_frame.rejected']],
   ['runtime/entity/tx/handlers/account/orderbook-matching-same.ts', ["createStructuredLogger('orderbook.same')"]],
-  ['runtime/machine/tx-handlers.ts', ["createStructuredLogger('runtime.tx')", 'replica.import_start']],
+  ['runtime/runtime/tx-handlers.ts', ["createStructuredLogger('runtime.tx')", 'replica.import_start']],
   [
-    'runtime/machine/jurisdiction-import.ts',
+    'runtime/runtime/jurisdiction-import.ts',
     [
       "createStructuredLogger('runtime.jurisdiction_import')",
       'jurisdiction.import_failed',
@@ -487,11 +487,11 @@ for (const [path, markers] of [
   ['runtime/validation-utils.ts', ['ACCOUNT_DELTAS_MISSING', 'ACCOUNT_DELTAS_INVALID_TOKEN_ID']],
   ['runtime/runtime.ts', ["createStructuredLogger('runtime')", 'apply.profile', 'process.profile', 'joutbox.incoming']],
   [
-    'runtime/machine/infra.ts',
+    'runtime/runtime/infra.ts',
     ["createStructuredLogger('runtime.infra')", 'jadapter.restore_retry', 'jadapter.restore_failed'],
   ],
   [
-    'runtime/machine/infra-gossip-store.ts',
+    'runtime/runtime/infra-gossip-store.ts',
     ["createStructuredLogger('runtime.infra_gossip')", 'profile.restore_failed'],
   ],
   [
@@ -531,10 +531,10 @@ for (const [path, markers] of [
   ['runtime/radapter/server.ts', ["createStructuredLogger('runtime.radapter')", 'response_too_large']],
   ['runtime/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],
   [
-    'runtime/machine/j-submit.ts',
+    'runtime/runtime/j-submit.ts',
     ["createStructuredLogger('runtime.jsubmit')", 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL', 'tx.submit_failed'],
   ],
-  ['runtime/machine/j-submit-result.ts', ['classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL']],
+  ['runtime/runtime/j-submit-result.ts', ['classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL']],
   ['runtime/orchestrator/market-maker-aggregated-health.ts', ['classifyRuntimeMarketMakerFailure', 'failure,']],
   [
     'runtime/protocol/payments/delivery-result.ts',
@@ -564,21 +564,21 @@ for (const legacyRuntimeLogMarker of [
   assertNotIncludes(runtimeCore, legacyRuntimeLogMarker, runtimeCorePath);
 }
 
-const runtimeTxHandlersPath = 'runtime/machine/tx-handlers.ts';
+const runtimeTxHandlersPath = 'runtime/runtime/tx-handlers.ts';
 const runtimeTxHandlers = readText(runtimeTxHandlersPath);
 assertNotIncludes(runtimeTxHandlers, 'console.', runtimeTxHandlersPath);
 
-const runtimeJSubmitPath = 'runtime/machine/j-submit.ts';
+const runtimeJSubmitPath = 'runtime/runtime/j-submit.ts';
 const runtimeJSubmit = readText(runtimeJSubmitPath);
 assertNotIncludes(runtimeJSubmit, 'console.', runtimeJSubmitPath);
 assertNotIncludes(runtimeJSubmit, '[J-SUBMIT]', runtimeJSubmitPath);
 assertNotIncludes(runtimeJSubmit, '[SIDE-EFFECT]', runtimeJSubmitPath);
 
-const runtimeInfraPath = 'runtime/machine/infra.ts';
+const runtimeInfraPath = 'runtime/runtime/infra.ts';
 const runtimeInfra = readText(runtimeInfraPath);
 assertNotIncludes(runtimeInfra, 'console.', runtimeInfraPath);
 
-const runtimeInfraGossipPath = 'runtime/machine/infra-gossip-store.ts';
+const runtimeInfraGossipPath = 'runtime/runtime/infra-gossip-store.ts';
 const runtimeInfraGossip = readText(runtimeInfraGossipPath);
 assertNotIncludes(runtimeInfraGossip, 'console.', runtimeInfraGossipPath);
 assertNotIncludes(runtimeInfraGossip, '[infra-db]', runtimeInfraGossipPath);
@@ -621,12 +621,12 @@ const jurisdictionLoader = readText(jurisdictionLoaderPath);
 assertNotIncludes(jurisdictionLoader, 'console.', jurisdictionLoaderPath);
 assertNotIncludes(jurisdictionLoader, 'new Date()', jurisdictionLoaderPath);
 
-const runtimeInputQueuePath = 'runtime/machine/input-queue.ts';
+const runtimeInputQueuePath = 'runtime/runtime/input-queue.ts';
 const runtimeInputQueue = readText(runtimeInputQueuePath);
 assertNotIncludes(runtimeInputQueue, 'console.', runtimeInputQueuePath);
 assertNotIncludes(runtimeInputQueue, '[enqueueRuntimeInput]', runtimeInputQueuePath);
 
-const runtimeP2PLifecyclePath = 'runtime/machine/p2p-lifecycle.ts';
+const runtimeP2PLifecyclePath = 'runtime/runtime/p2p-lifecycle.ts';
 const runtimeP2PLifecycle = readText(runtimeP2PLifecyclePath);
 assertNotIncludes(runtimeP2PLifecycle, 'console.', runtimeP2PLifecyclePath);
 
@@ -671,7 +671,7 @@ const entityConsensusPath = 'runtime/entity/consensus/index.ts';
 const entityConsensus = readText(entityConsensusPath);
 assertNotIncludes(entityConsensus, 'console.', entityConsensusPath);
 
-const runtimeEntityInputsPath = 'runtime/machine/entity-inputs.ts';
+const runtimeEntityInputsPath = 'runtime/runtime/entity-inputs.ts';
 const runtimeEntityInputs = readText(runtimeEntityInputsPath);
 assertNotIncludes(runtimeEntityInputs, 'console.', runtimeEntityInputsPath);
 

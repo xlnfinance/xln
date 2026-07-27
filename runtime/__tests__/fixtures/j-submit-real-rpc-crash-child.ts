@@ -5,7 +5,7 @@ import {
   processRuntime,
 } from '../../runtime';
 import { deriveSignerAddressSync } from '../../account/crypto';
-import { getNextJSubmitRetryTimestamp } from '../../machine/j-submit-scheduler';
+import { getNextJSubmitRetryTimestamp } from '../../runtime/j-submit-scheduler';
 import { ENTITY_J_SUBMIT_FALLBACK_MS } from '../../entity/consensus/leader';
 import { computeCanonicalEntityHash } from '../../storage/canonical-hash';
 import {

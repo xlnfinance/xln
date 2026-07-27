@@ -7,7 +7,7 @@ import type {
   HashToSign,
 } from '../../../types';
 import { executeCrontab } from '../../scheduler';
-import { assertScheduledWakeMatchesState } from '../../../machine/scheduled-wake';
+import { assertScheduledWakeMatchesState } from '../../../runtime/scheduled-wake';
 import { isCollectiveEntityActionTx } from '../../authorization';
 
 type ScheduledWakeTx = Extract<EntityTx, { type: 'scheduledWake' }>;

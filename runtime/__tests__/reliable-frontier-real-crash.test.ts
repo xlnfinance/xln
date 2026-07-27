@@ -8,12 +8,12 @@ import {
   loadEnvFromDB,
 } from '../runtime';
 import { deriveSignerAddressSync } from '../account/crypto';
-import { getReliableDeliveryReceiptValidationError } from '../machine/reliable-delivery';
+import { getReliableDeliveryReceiptValidationError } from '../runtime/reliable-delivery';
 import {
   receiverFrontierKey,
   senderFrontierKey,
-} from '../machine/reliable-frontier';
-import { dbRootPath } from '../machine/platform';
+} from '../runtime/reliable-frontier';
+import { dbRootPath } from '../runtime/platform';
 import type { Env, ReliableDeliveryReceipt } from '../types';
 
 const fixture = join(import.meta.dir, 'fixtures/reliable-frontier-crash-child.ts');

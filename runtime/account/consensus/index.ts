@@ -22,7 +22,7 @@ import { isLeft } from '../utils';
 import { HEAVY_LOGS } from '../../utils';
 import { safeStringify } from '../../protocol/serialization';
 import { applyAccountTx } from '../tx/apply';
-import { appendAccountFrameHistoryView, getAccountFrameHistoryView } from '../../machine/env-events';
+import { appendAccountFrameHistoryView, getAccountFrameHistoryView } from '../../runtime/env-events';
 import { deriveAccountFrameTokenIds } from '../frame';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import {

@@ -18,7 +18,7 @@ import {
   releaseUncommittedReliableIngress,
   rollbackReliableDeliveryReceipts,
   rollbackReliableIngressCommit,
-} from '../machine/reliable-delivery';
+} from '../runtime/reliable-delivery';
 import { canonicalJEventRangeHash, EMPTY_J_HISTORY_ROOT } from '../jurisdiction/history-consensus';
 import {
   buildLocalJPrefixAttestation,
@@ -30,7 +30,7 @@ import {
   hashCertifiedEntityOutputSemantic,
 } from '../entity/consensus/output-certification';
 import { generateLazyEntityId } from '../entity/factory';
-import { applyMergedEntityInputs } from '../machine/entity-inputs';
+import { applyMergedEntityInputs } from '../runtime/entity-inputs';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../wal/snapshot';
 import {
@@ -47,7 +47,7 @@ import {
   processRuntime,
 } from '../runtime';
 import { readStorageFrameRecord } from '../storage';
-import { buildRouteOutputKey, getReliableOutputIdentity } from '../machine/output-routing';
+import { buildRouteOutputKey, getReliableOutputIdentity } from '../runtime/output-routing';
 import { computeAccountStateRoot } from '../account/state-root';
 import type {
   AccountMachine,

@@ -18,7 +18,7 @@ import {
   getCertifiedBoardNodeStore,
   getCertifiedBoardStackKey,
 } from '../../jurisdiction/board-registry';
-import { applyRuntimeTx } from '../../machine/tx-handlers';
+import { applyRuntimeTx } from '../../runtime/tx-handlers';
 
 const zeroBloom = `0x${'00'.repeat(256)}`;
 const heightHash = (value: number): string => {

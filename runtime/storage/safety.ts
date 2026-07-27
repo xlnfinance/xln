@@ -1,4 +1,4 @@
-import { runtimeProcessEnv } from '../machine/platform';
+import { runtimeProcessEnv } from '../runtime/platform';
 
 const truthyEnv = (name: string): boolean => {
   const raw = String(runtimeProcessEnv?.[name] ?? '').trim().toLowerCase();

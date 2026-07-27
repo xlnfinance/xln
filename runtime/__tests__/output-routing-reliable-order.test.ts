@@ -14,11 +14,11 @@ import {
   sendEntityInputWithRouting,
   splitPendingOutputsByRetryWindow,
   type RuntimeOutputRoutingDeps,
-} from '../machine/output-routing';
+} from '../runtime/output-routing';
 import {
   applyReliableDeliveryReceipts,
   createReliableDeliveryReceipt,
-} from '../machine/reliable-delivery';
+} from '../runtime/reliable-delivery';
 import {
   deriveSignerAddressSync,
   deriveSignerKeySync,

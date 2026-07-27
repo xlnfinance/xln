@@ -4,7 +4,7 @@ import {
   buildPendingNetworkOutputs,
   buildRouteOutputKey,
   getReliableOutputIdentity,
-} from '../machine/output-routing';
+} from '../runtime/output-routing';
 import { safeStringify } from '../protocol/serialization';
 import {
   assignCertifiedOutputIdentities,

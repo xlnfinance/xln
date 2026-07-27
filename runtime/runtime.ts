@@ -1,5 +1,5 @@
 import { TIMING } from './constants';
-import { dbRootPath, nodeProcess, runtimeIsBrowser } from './machine/platform';
+import { dbRootPath, nodeProcess, runtimeIsBrowser } from './runtime/platform';
 import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from './infra/perf-runtime-flags';
 
 // Bump this on runtime bundle changes that must be reflected in frontend immediately.
@@ -43,13 +43,13 @@ import {
 import type { JAdapter } from './jadapter';
 import { setBrowserVMJurisdiction } from './jadapter';
 import { createGossipLayer } from './networking/gossip';
-import { attachEventEmitters, clearPendingAuditEvents, flushPendingAuditEvents } from './machine/env-events';
-import { recordRuntimeSecurityIncident } from './machine/security-incidents';
+import { attachEventEmitters, clearPendingAuditEvents, flushPendingAuditEvents } from './runtime/env-events';
+import { recordRuntimeSecurityIncident } from './runtime/security-incidents';
 import {
   assertRuntimeFrameStorageState,
   reconcileRuntimeFrameSharedState,
   type RuntimeFrameSharedStateSnapshot,
-} from './machine/runtime-frame-shared-state';
+} from './runtime/runtime-frame-shared-state';
 import { accountInputAck, accountInputProposal } from './account/consensus/flush';
 import { getEffectiveEntityInputTxs } from './entity/consensus/output-envelope';
 import {
@@ -70,14 +70,14 @@ import {
   buildCrossJurisdictionSwapSubmission,
   type CrossJurisdictionSwapSubmitParams,
   type CrossJurisdictionSwapSubmitResult,
-} from './machine/jurisdiction-api';
+} from './runtime/jurisdiction-api';
 import {
   buildPendingNetworkOutputs,
   dispatchEntityOutputs,
   markRestoredReliableOutputsDue,
   rescheduleDeferredOutputs,
   splitRoutedOutputByDeliveryLane,
-} from './machine/output-routing';
+} from './runtime/output-routing';
 import { isDeliveryDelivered, requireDeliveryResult } from './protocol/payments/delivery-result';
 import { prepareHtlcPaymentEntityInputs } from './protocol/htlc/payment-admission';
 import { copyDeterministicHtlcTestSecretCapability } from './protocol/htlc/test-secret-capability';
@@ -85,16 +85,16 @@ import {
   announceCertifiedLocalProfiles,
   collectDueLocalProfileCertificationInputs,
 } from './networking/local-profile-lifecycle';
-import { selectMatchedCrossJAccountInputPairs, type RuntimeEntityRoutingDeps } from './machine/entity-routing';
-export { entityNeedsPeriodicWake } from './machine/wake';
+import { selectMatchedCrossJAccountInputPairs, type RuntimeEntityRoutingDeps } from './runtime/entity-routing';
+export { entityNeedsPeriodicWake } from './runtime/wake';
 export * from './public-utilities';
 import {
   assertScheduledWakeTxAuthorized,
   copyLocalScheduledWakeAuthorization,
   rebuildScheduledWakeIndex,
   refreshScheduledWakeIndex,
-} from './machine/scheduled-wake';
-import { assertRuntimeCommandReady, inferRuntimeLifecyclePhase, transitionRuntimeLifecycle } from './machine/lifecycle';
+} from './runtime/scheduled-wake';
+import { assertRuntimeCommandReady, inferRuntimeLifecyclePhase, transitionRuntimeLifecycle } from './runtime/lifecycle';
 export { planSwapInboundCapacity, readSwapAccountCapacity } from './account/swap-inbound-plan';
 export type {
   SwapAccountCapacityView,
@@ -115,9 +115,9 @@ export type {
   SwapCommandPlanInput,
   SwapCommandPreparedOrder,
 } from './account/swap-command-plan';
-import { ensureRuntimeMempool } from './machine/input-queue';
-export { enqueueRuntimeInput } from './machine/input-queue';
-import { ensureRuntimeState } from './machine/runtime-state';
+import { ensureRuntimeMempool } from './runtime/input-queue';
+export { enqueueRuntimeInput } from './runtime/input-queue';
+import { ensureRuntimeState } from './runtime/runtime-state';
 import {
   applyReliableDeliveryReceipts,
   captureReliableReceiptSenderCheckpoint,
@@ -130,20 +130,20 @@ import {
   rollbackReliableIngressCommit,
   type ReliableIngressCommit,
   type ReliableReceiptSenderCheckpoint,
-} from './machine/reliable-delivery';
-import { reliableIdentityExactKey } from './machine/reliable-frontier';
-import { mergeDurableReceiptOnlyInputs } from './machine/reliable-durable-inputs';
-import { submitRuntimeJOutbox } from './machine/j-submit';
+} from './runtime/reliable-delivery';
+import { reliableIdentityExactKey } from './runtime/reliable-frontier';
+import { mergeDurableReceiptOnlyInputs } from './runtime/reliable-durable-inputs';
+import { submitRuntimeJOutbox } from './runtime/j-submit';
 import {
   copyLocalJSubmitRuntimeTxAuthorization,
   registerPendingCommittedJOutbox,
   splitJOutboxForDurableSubmit,
-} from './machine/j-submit-state';
-import { copyLocalEntityProviderActionRuntimeTxAuthorization } from './machine/entity-provider-action-submit-auth';
-import { applyRuntimeTx } from './machine/tx-handlers';
+} from './runtime/j-submit-state';
+import { copyLocalEntityProviderActionRuntimeTxAuthorization } from './runtime/entity-provider-action-submit-auth';
+import { applyRuntimeTx } from './runtime/tx-handlers';
 import { copyLocalRuntimeAdapterCommandAuthorization } from './radapter/command-frontier-auth';
-import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from './machine/entity-inputs';
-import { applyEntityHeightDurabilityBarrier } from './machine/entity-height-barrier';
+import { applyMergedEntityInputs, RuntimeEntityInputApplyError } from './runtime/entity-inputs';
+import { applyEntityHeightDurabilityBarrier } from './runtime/entity-height-barrier';
 import { cloneTrustedEntityReplica } from './state-helpers';
 import { safeStringify } from './protocol/serialization';
 import { validateJInputs } from './wal/runtime-machine-schema/j';
@@ -155,7 +155,7 @@ import { copyLocalJAuthorityRuntimeTxAuthorization } from './jurisdiction/regist
 import {
   copyLocalJImportResultRuntimeTxAuthorization,
   materializePendingJurisdictionImportResults,
-} from './machine/jurisdiction-import';
+} from './runtime/jurisdiction-import';
 import { saveRuntimeFrameToStorage } from './storage';
 export { resolveRuntimeAdapterRead, EmbeddedRuntimeAdapter, RemoteRuntimeAdapter } from './radapter';
 export type {
@@ -186,11 +186,11 @@ import { DEBUG, log } from './utils';
 import { createStructuredLogger, logError, shortId } from './infra/logger';
 import { createPersistenceQueries } from './persistence/queries';
 import { createRuntimeStorageApi } from './persistence/runtime-storage';
-import { rehydrateRestoredRuntimeInfra, type TrustedJurisdictionRpcBinding } from './machine/infra';
+import { rehydrateRestoredRuntimeInfra, type TrustedJurisdictionRpcBinding } from './runtime/infra';
 import { createRuntimeLoopApi } from './engine/loop';
 import { createRuntimeRecoveryApi } from './recovery/restore';
 import { createRuntimeStateApi } from './state/create';
-import { loadGossipProfilesFromInfraDb } from './machine/infra-gossip-store';
+import { loadGossipProfilesFromInfraDb } from './runtime/infra-gossip-store';
 import { withStorageConsistentRead } from './storage/runtime-dbs';
 
 const runtimeLog = createStructuredLogger('runtime');
@@ -2515,7 +2515,7 @@ export const clearDB = async (env?: Env): Promise<void> => {
   }
 };
 
-export { scenarios } from './machine/scenarios';
+export { scenarios } from './runtime/scenarios';
 export { parseScenario, mergeAndSortEvents } from './scenarios/parser.js';
 export { executeScenario } from './scenarios/executor.js';
 export { SCENARIOS, getScenario, getScenariosByTag, type ScenarioMetadata } from './scenarios/index.js';
@@ -2609,13 +2609,13 @@ export {
   getEntityJAdapter,
   buildDebtEnforcementRuntimeInputFromProjection,
   buildDebtEnforcementRuntimeInput,
-} from './machine/jurisdiction-api';
+} from './runtime/jurisdiction-api';
 export type {
   CrossJurisdictionSwapSubmitParams,
   CrossJurisdictionSwapSubmitResult,
   DebtEnforcementProjectionRuntimeInputParams,
   DebtEnforcementRuntimeInputParams,
-} from './machine/jurisdiction-api';
+} from './runtime/jurisdiction-api';
 
 export async function submitCrossJurisdictionIntent(
   env: Env,

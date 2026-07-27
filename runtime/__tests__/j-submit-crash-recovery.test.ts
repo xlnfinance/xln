@@ -10,8 +10,8 @@ import {
   registerRecoveryBackupBarrier,
 } from '../runtime';
 import { deriveSignerAddressSync } from '../account/crypto';
-import { getNextJSubmitRetryTimestamp } from '../machine/j-submit-scheduler';
-import { dbRootPath } from '../machine/platform';
+import { getNextJSubmitRetryTimestamp } from '../runtime/j-submit-scheduler';
+import { dbRootPath } from '../runtime/platform';
 import { computeCanonicalEntityHash } from '../storage/canonical-hash';
 import { bootScenario, fundEntities, registerEntities } from '../scenarios/boot';
 import {

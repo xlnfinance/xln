@@ -28,7 +28,7 @@ import {
   validateStorageEntityCoreDocValue,
 } from './schema-state-docs';
 import { validateDurableRuntimeMachineSnapshot } from '../wal/runtime-machine-schema';
-import { validateDurableOutputRetryState } from '../machine/durable-output-retry';
+import { validateDurableOutputRetryState } from '../runtime/durable-output-retry';
 
 export * from './schema-state-docs';
 export * from './schema-merkle-cas';

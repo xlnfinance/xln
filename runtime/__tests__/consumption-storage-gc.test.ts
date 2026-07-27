@@ -18,7 +18,7 @@ import {
   computeEntityFrameAuthorityRoot,
 } from '../entity/consensus/state-root';
 import { generateLazyEntityId } from '../entity/factory';
-import { applyRuntimeStorageChanges } from '../machine/env-events';
+import { applyRuntimeStorageChanges } from '../runtime/env-events';
 import { createEmptyEnv, enqueueRuntimeInput, processRuntime } from '../runtime';
 import { recoverStorageDbFromHistory, saveRuntimeFrameToStorage } from '../storage';
 import { keyConsumptionNode } from '../storage/keys';

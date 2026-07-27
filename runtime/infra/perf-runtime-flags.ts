@@ -1,4 +1,4 @@
-import { readRuntimeEnv } from '../machine/platform';
+import { readRuntimeEnv } from '../runtime/platform';
 
 /**
  * Runtime profiling is operational instrumentation, never consensus state.

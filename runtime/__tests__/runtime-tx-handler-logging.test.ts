@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 test('runtime tx import logs use structured logging and invalid j-height fails closed', () => {
-  const txHandlers = readFileSync(join(process.cwd(), 'runtime/machine/tx-handlers.ts'), 'utf8');
-  const jurisdictionImport = readFileSync(join(process.cwd(), 'runtime/machine/jurisdiction-import.ts'), 'utf8');
+  const txHandlers = readFileSync(join(process.cwd(), 'runtime/runtime/tx-handlers.ts'), 'utf8');
+  const jurisdictionImport = readFileSync(join(process.cwd(), 'runtime/runtime/jurisdiction-import.ts'), 'utf8');
   const runtime = readFileSync(join(process.cwd(), 'runtime/runtime.ts'), 'utf8');
 
   expect(txHandlers).toContain("const runtimeTxLog = createStructuredLogger('runtime.tx');");

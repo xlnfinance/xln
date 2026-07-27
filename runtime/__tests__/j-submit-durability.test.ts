@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 
-import { applyRuntimeTx } from '../machine/tx-handlers';
+import { applyRuntimeTx } from '../runtime/tx-handlers';
 import {
   makeJSubmitResultRuntimeTx,
   MAX_J_SUBMIT_FAILURE_MESSAGE_CHARS,
   registerPendingCommittedJOutbox,
-} from '../machine/j-submit-state';
-import { J_SUBMIT_RESULT_FINGERPRINT_LIMIT } from '../machine/j-submit-result';
-import { collectDueJSubmitRuntimeTxs } from '../machine/j-submit-scheduler';
-import { submitRuntimeJOutbox } from '../machine/j-submit';
+} from '../runtime/j-submit-state';
+import { J_SUBMIT_RESULT_FINGERPRINT_LIMIT } from '../runtime/j-submit-result';
+import { collectDueJSubmitRuntimeTxs } from '../runtime/j-submit-scheduler';
+import { submitRuntimeJOutbox } from '../runtime/j-submit';
 import { ENTITY_J_SUBMIT_FALLBACK_MS } from '../entity/consensus/leader';
 import { createEmptyBatch } from '../jurisdiction/batch';
 import { computeCanonicalEntityHash } from '../storage/canonical-hash';

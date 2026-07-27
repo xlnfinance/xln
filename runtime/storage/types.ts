@@ -23,7 +23,7 @@ import type {
   RuntimeOverlayRecord,
   SwapOffer,
 } from '../types';
-import type { DurableOutputRetryState } from '../machine/durable-output-retry';
+import type { DurableOutputRetryState } from '../runtime/durable-output-retry';
 import type { RadixMerkleRadix, RadixMerkleRootKind } from './merkle';
 import type { StorageMerkleNamespace } from './keys';
 

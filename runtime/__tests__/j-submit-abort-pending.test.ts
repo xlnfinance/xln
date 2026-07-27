@@ -9,7 +9,7 @@ import {
   registerRecoveryBackupBarrier,
 } from '../runtime';
 import { deriveSignerAddressSync } from '../account/crypto';
-import { dbRootPath } from '../machine/platform';
+import { dbRootPath } from '../runtime/platform';
 import { bootScenario, fundEntities, registerEntities } from '../scenarios/boot';
 import {
   cleanupRuntimeStorage,

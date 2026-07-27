@@ -122,7 +122,7 @@ import { areMarketMakerHubTransportsReady } from './mm-transport';
 import { computeCanonicalEntityHashesFromEnv, computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import { MARKET_MAKER_BOOTSTRAP_STALL_TIMEOUT_MS } from './orchestrator-config';
 import { requireDeliveryDelivered } from '../protocol/payments/delivery-result';
-import { getReliableOutputIdentity } from '../machine/output-routing';
+import { getReliableOutputIdentity } from '../runtime/output-routing';
 import {
   buildMarketMakerBootstrapEntityStateHashFromCanonicalHashes,
   marketMakerBootstrapProgressSignature,

@@ -11,7 +11,7 @@ import type {
 	} from './types';
 import { RuntimeAdapterError } from './errors';
 import { resolveRuntimeAdapterRead, type RuntimeAdapterResolveContext } from './resolve';
-import { assertRuntimeCommandReady, getRuntimeCommandReadiness } from '../machine/lifecycle';
+import { assertRuntimeCommandReady, getRuntimeCommandReadiness } from '../runtime/lifecycle';
 
 export type EmbeddedRuntimeAdapterDeps = {
   getEnv: () => Env | null;

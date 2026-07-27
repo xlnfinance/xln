@@ -4,7 +4,7 @@ import {
   reconcileRuntimeFrameSharedState,
   type RuntimeFrameSharedStateGroup,
   type RuntimeFrameSharedStateSnapshot,
-} from '../machine/runtime-frame-shared-state';
+} from '../runtime/runtime-frame-shared-state';
 
 const CURRENT_GROUP: readonly RuntimeFrameSharedStateGroup[] = [{
   name: 'storage-current',

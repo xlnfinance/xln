@@ -4,7 +4,7 @@ import {
   clearPendingAuditEvents,
   flushPendingAuditEvents,
   publishEntityCandidateEffects,
-} from '../machine/env-events';
+} from '../runtime/env-events';
 import { createEmptyEnv } from '../runtime';
 
 test('high-signal env.emit reaches debug relay only after commit flush', () => {

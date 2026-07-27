@@ -41,7 +41,7 @@ import {
 } from '../jurisdiction/j-prefix-consensus';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { createEmptyEnv } from '../runtime';
-import { applyRuntimeTx } from '../machine/tx-handlers';
+import { applyRuntimeTx } from '../runtime/tx-handlers';
 import type { EntityReplica, Env, JReplica, JurisdictionConfig } from '../types';
 
 const makeJReplica = (
@@ -133,7 +133,7 @@ describe('jadapter helper cursors', () => {
   test('jadapter ingress depends on the machine queue, not the runtime facade', () => {
     const source = readFileSync(join(process.cwd(), 'runtime/jadapter/helpers.ts'), 'utf8');
 
-    expect(source).toContain("from '../machine/input-queue'");
+    expect(source).toContain("from '../runtime/input-queue'");
     expect(source).not.toMatch(/from ['"]\.\.\/runtime(?:\.ts)?['"]/);
   });
 

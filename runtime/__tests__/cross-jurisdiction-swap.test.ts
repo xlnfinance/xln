@@ -27,7 +27,7 @@ import {
   submitCrossJurisdictionIntent,
   submitCrossJurisdictionSwap,
 } from '../runtime';
-import { buildCrossJurisdictionSwapSubmission } from '../machine/jurisdiction-api';
+import { buildCrossJurisdictionSwapSubmission } from '../runtime/jurisdiction-api';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import type {
   AccountTx,
@@ -75,7 +75,7 @@ import { buildCrossJurisdictionPendingFillFromAck } from '../extensions/cross-j/
 import { committedCrossJSourceDisputeDelayMs } from '../extensions/cross-j/prepared-route';
 import { deriveCanonicalCrossJurisdictionBookOwnerForLegs, deriveCanonicalCrossJurisdictionMarketForLegs } from '../extensions/cross-j/market';
 import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenIdsForJurisdiction } from '../account/utils';
-import { normalizeEntitySwapTradingPairs } from '../machine/swap-pairs';
+import { normalizeEntitySwapTradingPairs } from '../runtime/swap-pairs';
 import { verifyHashLadderBinary } from '../protocol/htlc/hash-ladder';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, quoteAmountAtPrice } from '../orderbook/types';
 import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../protocol/dispute/proof-builder';
@@ -83,7 +83,7 @@ import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '..
 import { signEntityHashes } from '../hanko/signing';
 import { hashCertifiedEntityOutputSemantic } from '../entity/consensus/output-certification';
 import { queueCrossJurisdictionSourceDisputeFromTargetDispute } from '../entity/tx/j-events-htlc';
-import { applyMergedEntityInputs } from '../machine/entity-inputs';
+import { applyMergedEntityInputs } from '../runtime/entity-inputs';
 import { crossBookQtyLots } from '../entity/tx/handlers/account/orderbook-matching-cross';
 import {
   createRuntimeOutputRoutingDeps,
@@ -92,7 +92,7 @@ import {
   selectMatchedCrossJAccountInputPairs,
   validateInboundP2PEntityInputsEnvelope,
   type RuntimeEntityRoutingDeps,
-} from '../machine/entity-routing';
+} from '../runtime/entity-routing';
 import {
   buildPendingNetworkOutputs,
   buildRouteOutputKey,
@@ -101,7 +101,7 @@ import {
   pruneReceiptedReliableOutputs,
   rescheduleDeferredOutputs,
   splitPendingOutputsByRetryWindow,
-} from '../machine/output-routing';
+} from '../runtime/output-routing';
 import { deliveryAccepted, deliveryDeferred } from '../protocol/payments/delivery-result';
 import {
   addReplica,
@@ -124,7 +124,7 @@ import { LIMITS } from '../constants';
 import { getEffectiveEntityInputTxs } from '../entity/consensus/output-envelope';
 import { assertRuntimeOutputAuthorization } from '../entity/authorization';
 import { cloneIsolatedRoutedEntityInputs } from '../protocol/runtime-input-clone';
-import { createDueScheduledWakeInputs } from '../machine/scheduled-wake';
+import { createDueScheduledWakeInputs } from '../runtime/scheduled-wake';
 import { ACCOUNT_PENDING_RESEND_AFTER_MS } from '../entity/scheduler';
 
 const makeLocalCrossJRoutingDeps = (): RuntimeEntityRoutingDeps => ({

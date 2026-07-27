@@ -8,10 +8,10 @@ import type {
   RuntimeInput,
 } from '../types';
 import { cloneEntityReplica } from '../state-helpers';
-import { markRestoredJSubmitRuntimeTxs } from '../machine/j-submit-state';
+import { markRestoredJSubmitRuntimeTxs } from '../runtime/j-submit-state';
 import { markRestoredJAuthorityRuntimeTxs } from '../jurisdiction/registration-evidence';
-import { markRestoredJImportResultRuntimeTxs } from '../machine/jurisdiction-import';
-import { markRestoredEntityProviderActionRuntimeTxs } from '../machine/entity-provider-action-submit-auth';
+import { markRestoredJImportResultRuntimeTxs } from '../runtime/jurisdiction-import';
+import { markRestoredEntityProviderActionRuntimeTxs } from '../runtime/entity-provider-action-submit-auth';
 import {
   collectReachableCertifiedBoardNodes,
   getCertifiedBoardNodeStore,

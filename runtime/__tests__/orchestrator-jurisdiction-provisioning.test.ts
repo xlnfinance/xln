@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { JAdapter } from '../jadapter/types';
-import { normalizeJurisdictionImportRequest } from '../machine/jurisdiction-import';
+import { normalizeJurisdictionImportRequest } from '../runtime/jurisdiction-import';
 import { findMissingRpcContractCode } from '../orchestrator/contract-readiness';
 import {
   assertDeterministicRpcStackAddresses,

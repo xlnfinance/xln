@@ -47,8 +47,8 @@ import { foldJHistoryRoot, EMPTY_J_HISTORY_ROOT } from '../jurisdiction/history-
 import { buildLocalJPrefixAttestation } from '../jurisdiction/j-prefix-consensus';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { createEmptyEnv, restoreEnvFromCheckpointSnapshot } from '../runtime';
-import { getReliableOutputIdentity } from '../machine/output-routing';
-import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../machine/scheduled-wake';
+import { getReliableOutputIdentity } from '../runtime/output-routing';
+import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../runtime/scheduled-wake';
 import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
 import { cloneEntityState } from '../state-helpers';
 import type {

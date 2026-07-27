@@ -5,13 +5,13 @@ import { computeAddress, hexlify } from 'ethers';
 
 import { getSignerPrivateKey } from '../account/crypto';
 import { getRegisteredBrowserVMJurisdiction } from '../jadapter';
-import { dbRootPath } from '../machine/platform';
+import { dbRootPath } from '../runtime/platform';
 import { bootScenario } from '../scenarios/boot';
 import { setScenarioStorageEnabled } from '../scenarios/helpers';
 import {
   buildJurisdictionImportRequestHash,
   normalizeJurisdictionImportRequest,
-} from '../machine/jurisdiction-import';
+} from '../runtime/jurisdiction-import';
 import {
   createEmptyEnv,
   closeInfraDb,

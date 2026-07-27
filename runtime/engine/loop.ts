@@ -5,12 +5,12 @@ import {
   isProductionRuntime,
   readRuntimeEnv,
   yieldRuntimeIoTurn,
-} from '../machine/platform';
+} from '../runtime/platform';
 import { getWallClockMs } from './../utils';
 import { accountHasProposableMempool } from './../entity/consensus/account-mempool-eligibility';
 import { isEntityActiveLeader } from './../entity/consensus/leader';
 import type { JAdapter } from './../jadapter';
-import { recordRuntimeSecurityIncident } from '../machine/security-incidents';
+import { recordRuntimeSecurityIncident } from '../runtime/security-incidents';
 import { normalizeRuntimeFailureCode } from './../protocol/failure-taxonomy';
 import { deriveSignerAddressSync, getSignerPrivateKeyIfAvailable } from './../account/crypto';
 import { normalizeRuntimeId } from './../networking/runtime-id';
@@ -26,7 +26,7 @@ import {
   type P2PConfig,
   type P2PConnectionState,
   type RuntimeP2PLifecycleDeps,
-} from '../machine/p2p-lifecycle';
+} from '../runtime/p2p-lifecycle';
 import { extractEntityId, extractSignerId } from './../ids';
 import {
   getNextNetworkRetryTimestamp,
@@ -35,8 +35,8 @@ import {
   sendEntityInputWithRouting,
   type RuntimeEntityInputRoutingResult,
   type RuntimeOutputRoutingDeps,
-} from '../machine/output-routing';
-import { runtimeInputRequiresOutboxCapacity } from '../machine/admission';
+} from '../runtime/output-routing';
+import { runtimeInputRequiresOutboxCapacity } from '../runtime/admission';
 import { isDeliveryDelivered } from './../protocol/payments/delivery-result';
 import {
   createRuntimeOutputRoutingDeps,
@@ -47,40 +47,40 @@ import {
   validateInboundP2PEntityInputsEnvelope,
   type RuntimeInboundEntityInputOptions,
   type RuntimeEntityRoutingDeps,
-} from '../machine/entity-routing';
+} from '../runtime/entity-routing';
 import {
   generateHookPingsWithDeps,
   getEarliestWallClockDueTimestampWithDeps,
   getNextWallClockWakeTimestampWithDeps,
   hasDueEntityHooksWithDeps,
   type RuntimeWakeDeps,
-} from '../machine/wake';
+} from '../runtime/wake';
 import {
   assertScheduledWakeTxAuthorized,
   deleteScheduledWakeIndex,
   rebuildScheduledWakeIndex,
-} from '../machine/scheduled-wake';
+} from '../runtime/scheduled-wake';
 import {
   assertRuntimeCommandReady,
   inferRuntimeLifecyclePhase,
   transitionRuntimeLifecycle,
-} from '../machine/lifecycle';
+} from '../runtime/lifecycle';
 import {
   enqueueRuntimeInputsWithDeps,
   ensureRuntimeMempool,
   requestRuntimeLoopWake,
   type RuntimeInputQueueDeps,
   type RuntimeInputQueueOptions,
-} from '../machine/input-queue';
-import { ensureRuntimeState } from '../machine/runtime-state';
-import { registerReliableReceiptIngress } from '../machine/reliable-delivery';
+} from '../runtime/input-queue';
+import { ensureRuntimeState } from '../runtime/runtime-state';
+import { registerReliableReceiptIngress } from '../runtime/reliable-delivery';
 import {
   clearRuntimeCleanLogs,
   copyRuntimeCleanLogs,
   getRuntimeCleanLogs,
   type RuntimeCleanLogDeps,
-} from '../machine/clean-logs';
-import { RuntimeEntityInputApplyError } from '../machine/entity-inputs';
+} from '../runtime/clean-logs';
+import { RuntimeEntityInputApplyError } from '../runtime/entity-inputs';
 import { safeStringify } from './../protocol/serialization';
 import {
   entityRequiresJPrefixCertificate,
@@ -103,7 +103,7 @@ import type {
   RuntimeInput,
   RuntimeTx,
 } from './../types';
-import { clearInfraGossipProfiles } from '../machine/infra-gossip-store';
+import { clearInfraGossipProfiles } from '../runtime/infra-gossip-store';
 import {
   closeFrameDb,
   closeInfraDb,

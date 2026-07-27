@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
-import { mergeDurableReceiptOnlyInputs } from '../machine/reliable-durable-inputs';
-import { getInputReliableIdentity } from '../machine/reliable-receipt';
-import { reliableIdentityExactKey } from '../machine/reliable-frontier';
-import { splitRoutedOutputByDeliveryLane } from '../machine/output-routing';
+import { mergeDurableReceiptOnlyInputs } from '../runtime/reliable-durable-inputs';
+import { getInputReliableIdentity } from '../runtime/reliable-receipt';
+import { reliableIdentityExactKey } from '../runtime/reliable-frontier';
+import { splitRoutedOutputByDeliveryLane } from '../runtime/output-routing';
 import { safeStringify } from '../protocol/serialization';
 import type { RoutedEntityInput } from '../types';
 

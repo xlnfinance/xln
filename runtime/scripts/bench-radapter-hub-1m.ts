@@ -7,7 +7,7 @@ import { Level } from 'level';
 import type { ServerWebSocket } from 'bun';
 import { ethers } from 'ethers';
 import { createEmptyAccountJClaimAccumulator } from '../account/j-claim-accumulator';
-import { transitionRuntimeLifecycle } from '../machine/lifecycle';
+import { transitionRuntimeLifecycle } from '../runtime/lifecycle';
 
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
 import { decodeRuntimeAdapterRequest } from '../radapter/codec';

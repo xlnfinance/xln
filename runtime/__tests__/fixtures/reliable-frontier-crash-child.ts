@@ -13,8 +13,8 @@ import {
 import {
   receiverFrontierKey,
   senderFrontierKey,
-} from '../../machine/reliable-frontier';
-import { applyRuntimeStorageChanges } from '../../machine/env-events';
+} from '../../runtime/reliable-frontier';
+import { applyRuntimeStorageChanges } from '../../runtime/env-events';
 import { serializeTaggedJson } from '../../protocol/serialization';
 import {
   createCatchupFixtureState,

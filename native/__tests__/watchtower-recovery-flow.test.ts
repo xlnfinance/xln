@@ -20,7 +20,7 @@ import {
 import { createDefaultDelta } from '../../runtime/validation-utils';
 import type { AccountMachine } from '../../runtime/types';
 import { runWatchtowerSweep } from '../../runtime/watchtower/action';
-import { dbRootPath } from '../../runtime/machine/platform';
+import { dbRootPath } from '../../runtime/runtime/platform';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const servers: StandaloneWatchtowerServer[] = [];

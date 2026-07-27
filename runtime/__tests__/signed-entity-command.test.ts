@@ -42,7 +42,7 @@ import {
   buildCrossJurisdictionPullBinding,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../extensions/cross-j';
-import { routeInboundP2PEntityInput } from '../machine/entity-routing';
+import { routeInboundP2PEntityInput } from '../runtime/entity-routing';
 import {
   buildValidatorEncryptionBoard,
   createLocalValidatorEncryptionAttestation,

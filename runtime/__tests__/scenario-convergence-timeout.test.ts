@@ -7,8 +7,8 @@ import {
   convergeWithOffline,
   processWithOffline,
 } from '../scenarios/helpers';
-import { buildRouteOutputKey } from '../machine/output-routing';
-import { registerReliableIngress } from '../machine/reliable-delivery';
+import { buildRouteOutputKey } from '../runtime/output-routing';
+import { registerReliableIngress } from '../runtime/reliable-delivery';
 import type { DeliverableEntityInput, JPrefixAttestation } from '../types';
 import { htlcRouteConvergenceCycleBudget } from '../scenarios/test-economy';
 

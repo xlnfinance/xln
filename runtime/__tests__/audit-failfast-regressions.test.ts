@@ -119,15 +119,15 @@ import { createJReplica } from '../scenarios/boot';
 import {
   applyMergedEntityInputs,
   RuntimeEntityInputApplyError,
-} from '../machine/entity-inputs';
+} from '../runtime/entity-inputs';
 import { MalformedEntityFrameInputError } from '../entity/tx/invariant-errors';
-import { applyStorageChanges } from '../machine/env-events';
-import { submitRuntimeJOutbox } from '../machine/j-submit';
+import { applyStorageChanges } from '../runtime/env-events';
+import { submitRuntimeJOutbox } from '../runtime/j-submit';
 import { registerStructuredLogSink } from '../infra/logger';
 import {
   buildJSubmitAttemptId,
   registerPendingCommittedJOutbox,
-} from '../machine/j-submit-state';
+} from '../runtime/j-submit-state';
 import { buffersEqual, safeStringify } from '../protocol/serialization';
 import type { ProofBodyStruct } from '../protocol/dispute/proof-body';
 import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/projections';

@@ -37,8 +37,8 @@ import {
   mergeJPrefixAttestations,
 } from '../jurisdiction/j-prefix-consensus';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
-import { commitReliableIngress } from '../machine/reliable-delivery';
-import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../machine/scheduled-wake';
+import { commitReliableIngress } from '../runtime/reliable-delivery';
+import { createDueScheduledWakeInputs, refreshScheduledWakeIndex } from '../runtime/scheduled-wake';
 import { applyRuntimeInput, createEmptyEnv } from '../runtime';
 import type {
   ConsensusConfig,

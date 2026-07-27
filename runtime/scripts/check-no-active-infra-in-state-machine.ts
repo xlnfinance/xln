@@ -7,7 +7,7 @@ const TARGETS = [
   'runtime/entity/tx/handlers/j-broadcast.ts',
   'runtime/account/consensus/index.ts',
   'runtime/entity/consensus/index.ts',
-  'runtime/machine/j-submit.ts',
+  'runtime/runtime/j-submit.ts',
 ];
 
 const BANNED_PATTERNS: Array<{ pattern: RegExp; label: string }> = [

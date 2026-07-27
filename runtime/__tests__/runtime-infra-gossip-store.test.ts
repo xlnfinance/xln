@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { loadGossipProfilesFromInfraDb } from '../machine/infra-gossip-store';
+import { loadGossipProfilesFromInfraDb } from '../runtime/infra-gossip-store';
 import { serializeTaggedJson } from '../protocol/serialization';
 import { clearGossip, closeInfraDb, createEmptyEnv, getInfraDb, tryOpenInfraDb } from '../runtime';
 import { resolveDbPath } from '../storage/runtime-dbs';
@@ -58,7 +58,7 @@ class FakeInfraDb {
 }
 
 test('runtime infra gossip restore diagnostics use structured logging', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/machine/infra-gossip-store.ts'), 'utf8');
+  const source = readFileSync(join(process.cwd(), 'runtime/runtime/infra-gossip-store.ts'), 'utf8');
 
   expect(source).toContain("const infraGossipLog = createStructuredLogger('runtime.infra_gossip');");
   expect(source).toContain("infraGossipLog.warn('profile.restore_failed'");

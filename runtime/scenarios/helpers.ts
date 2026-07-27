@@ -10,8 +10,8 @@ import { getTokenInfo } from '../account/utils';
 import { createGossipLayer } from '../networking/gossip';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { drainJWatcherBacklog } from '../jadapter/backlog-drain';
-import { buildRouteOutputKey } from '../machine/output-routing';
-import { releaseUncommittedReliableIngress } from '../machine/reliable-delivery';
+import { buildRouteOutputKey } from '../runtime/output-routing';
+import { releaseUncommittedReliableIngress } from '../runtime/reliable-delivery';
 import { accountHasProposableMempool } from '../entity/consensus/account-mempool-eligibility';
 
 // Lazy-loaded process to avoid circular deps

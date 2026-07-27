@@ -104,7 +104,7 @@ export type {
 } from './agent-payments/mpp';
 export type { RuntimeActivityEvent, RuntimeActivityFilters } from './api/activity-history';
 export type { DeliveryOutcome, DeliveryResult } from './protocol/payments/delivery-result';
-export type { RuntimeEntityInputRoutingResult } from './machine/output-routing';
+export type { RuntimeEntityInputRoutingResult } from './runtime/output-routing';
 export type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
@@ -182,7 +182,7 @@ import type { BoardMemberInput } from './entity/factory';
 import type { JAdapter } from './jadapter/types';
 import type { EmbeddedRuntimeAdapter } from './radapter/embedded';
 import type { RemoteRuntimeAdapter } from './radapter/remote';
-import type { RuntimeEntityInputRoutingResult } from './machine/output-routing';
+import type { RuntimeEntityInputRoutingResult } from './runtime/output-routing';
 import type {
   RuntimeAdapterAccountPage,
   RuntimeAdapterBookPage,
@@ -330,11 +330,11 @@ export interface XLNModule {
   getActiveJAdapter?: (env: Env | null) => JAdapter | null;
   getEntityJAdapter: (env: Env, entityId: string, signerId?: string) => JAdapter | null;
   buildDebtEnforcementRuntimeInputFromProjection: (
-    params: import('./machine/jurisdiction-api').DebtEnforcementProjectionRuntimeInputParams,
+    params: import('./runtime/jurisdiction-api').DebtEnforcementProjectionRuntimeInputParams,
   ) => RuntimeInput;
   buildDebtEnforcementRuntimeInput: (
     env: Env,
-    params: import('./machine/jurisdiction-api').DebtEnforcementRuntimeInputParams,
+    params: import('./runtime/jurisdiction-api').DebtEnforcementRuntimeInputParams,
   ) => RuntimeInput;
   applyJEventsToEnv?: (
     env: Env,

@@ -9,9 +9,9 @@ import {
   applyTrustedJurisdictionRpcBindings,
   ensureLiveJAdapterForReplica,
   normalizeRestoredJReplicas,
-} from '../machine/infra';
+} from '../runtime/infra';
 import { buildBrowserVMJurisdiction, createJAdapter } from '../jadapter';
-import { applyImportJurisdictionIntent } from '../machine/jurisdiction-import';
+import { applyImportJurisdictionIntent } from '../runtime/jurisdiction-import';
 import { createEmptyEnv } from '../runtime';
 import { getJurisdictionIdentityRef } from '../jurisdiction/jurisdiction-runtime';
 

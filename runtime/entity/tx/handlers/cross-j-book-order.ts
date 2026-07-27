@@ -22,7 +22,7 @@ import {
   markCrossJurisdictionBookRemovalCommitted,
   mergeCrossJurisdictionBookAdmission,
 } from '../../../extensions/cross-j/orderbook';
-import { resolveRuntimeSecurityIncident } from '../../../machine/security-incidents';
+import { resolveRuntimeSecurityIncident } from '../../../runtime/security-incidents';
 import type { CrossJurisdictionSwapRoute, EntityState, EntityTx, Env, RuntimeOverlayRecord } from '../../../types';
 import { getSwapLotScale } from '../../../orderbook';
 import {

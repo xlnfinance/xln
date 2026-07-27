@@ -190,7 +190,7 @@ for (const [path, markers] of [
     'export const classifyUndeliveredDelivery',
     'export const deliveryFailure',
   ]],
-  ['runtime/machine/output-routing.ts', [
+  ['runtime/runtime/output-routing.ts', [
     'enqueueEntityInputsDelivery(targetRuntimeId: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): DeliveryResult;',
     'export type RuntimeEntityInputRoutingResult = {',
     'delivery: DeliveryResult;',

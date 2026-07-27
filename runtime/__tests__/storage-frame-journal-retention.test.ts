@@ -46,7 +46,7 @@ import {
 } from '../storage/keys';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
-import { buildRouteOutputKey } from '../machine/output-routing';
+import { buildRouteOutputKey } from '../runtime/output-routing';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import type { StorageEntityCoreDoc, StorageFrameRecord } from '../storage/types';
 import type { DeliverableEntityInput, JReplica, JurisdictionConfig } from '../types';

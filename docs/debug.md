@@ -24,7 +24,7 @@ These endpoints must answer, for any incident:
 Single-source pipeline:
 
 1. Runtime code emits structured events through `env.warn`, `env.error`, `env.emit`.
-2. `runtime/machine/env-events.ts` forwards critical/high-signal events via P2P `debug_event`.
+2. `runtime/runtime/env-events.ts` forwards critical/high-signal events via P2P `debug_event`.
 3. WS client sends `debug_event` messages to relay.
 4. Relay stores the high-volume network/debug timeline in an in-memory ring
    and grouped error incidents in a separate durable journal.
@@ -36,7 +36,7 @@ Single-source pipeline:
 
 Core files:
 
-- `runtime/machine/env-events.ts`
+- `runtime/runtime/env-events.ts`
 - `runtime/networking/ws-client.ts`
 - `runtime/networking/p2p.ts`
 - `runtime/networking/ws-protocol.ts`

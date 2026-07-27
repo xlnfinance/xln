@@ -4,7 +4,7 @@ import {
   assertRuntimeCommandReady,
   inferRuntimeLifecyclePhase,
   transitionRuntimeLifecycle,
-} from '../machine/lifecycle';
+} from '../runtime/lifecycle';
 import {
   createEmptyEnv,
   resumeRuntimeAfterPersistenceQuiesce,

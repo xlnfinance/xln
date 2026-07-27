@@ -121,7 +121,7 @@ import { readInheritedChildSecrets } from '../orchestrator/child-secrets';
 import { createLocalPairingController } from './local-pairing';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { buildLocalRuntimeOwner, ensureLocalRuntimeOwner } from './local-runtime-owner';
-import { dbRootPath } from '../machine/platform';
+import { dbRootPath } from '../runtime/platform';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;

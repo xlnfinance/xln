@@ -5,7 +5,7 @@ import {
   commitReliableIngress,
   finalizeReliableIngressCommit,
   registerReliableIngress,
-} from '../machine/reliable-delivery';
+} from '../runtime/reliable-delivery';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../wal/snapshot';
 import { createEmptyEnv } from '../runtime';
 import type { DeliverableEntityInput, EntityReplica, Env, JPrefixAttestation } from '../types';

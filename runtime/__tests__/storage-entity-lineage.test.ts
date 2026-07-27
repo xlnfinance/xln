@@ -24,7 +24,7 @@ import {
 } from '../entity/consensus/state-root';
 import { generateLazyEntityId } from '../entity/factory';
 import { initCrontab } from '../entity/scheduler';
-import { applyRuntimeTx } from '../machine/tx-handlers';
+import { applyRuntimeTx } from '../runtime/tx-handlers';
 import { createEmptyEnv } from '../runtime';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import { decodeBuffer } from '../storage/codec';

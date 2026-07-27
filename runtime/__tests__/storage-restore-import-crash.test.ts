@@ -11,7 +11,7 @@ import {
 } from '../runtime';
 import { deriveSignerAddressSync } from '../account/crypto';
 import { generateLazyEntityId } from '../entity/factory';
-import { dbRootPath } from '../machine/platform';
+import { dbRootPath } from '../runtime/platform';
 import { readStorageHead, recoverStorageDbFromHistory } from '../storage';
 import type { StoragePersistenceBoundary } from '../storage/types';
 import {

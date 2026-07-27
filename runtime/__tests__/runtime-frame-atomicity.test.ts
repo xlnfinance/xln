@@ -4,7 +4,7 @@ import { join } from 'path';
 
 import { generateLazyEntityId } from '../entity/factory';
 import { initCrontab } from '../entity/scheduler';
-import { dbRootPath } from '../machine/platform';
+import { dbRootPath } from '../runtime/platform';
 import { safeStringify } from '../protocol/serialization';
 import { cloneIsolatedRuntimeSnapshot } from '../protocol/runtime-input-clone';
 import {
@@ -24,7 +24,7 @@ import {
 import {
   createReliableDeliveryReceipt,
   getInputReliableIdentity,
-} from '../machine/reliable-delivery';
+} from '../runtime/reliable-delivery';
 import { decodeBuffer, encodeBuffer } from '../storage/codec';
 import { KEY_HEAD } from '../storage/keys';
 import { readStorageHead } from '../storage';
@@ -580,7 +580,7 @@ describe('runtime frame atomicity', () => {
 
       expect(failure).toBeInstanceOf(Error);
       expect((failure as Error).message).toBe('RUNTIME_TX_UNKNOWN: deliberatelyInvalidRuntimeTx');
-      expect((failure as Error).stack).toContain('runtime/machine/tx-handlers.ts');
+      expect((failure as Error).stack).toContain('runtime/runtime/tx-handlers.ts');
       expect((failure as Error).stack).not.toContain('console.error:');
     } finally {
       restoreStrictScenario();

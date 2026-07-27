@@ -18,7 +18,7 @@ import { initCrontab } from '../entity/scheduler';
 import {
   createDueScheduledWakeInputs,
   refreshScheduledWakeIndex,
-} from '../machine/scheduled-wake';
+} from '../runtime/scheduled-wake';
 import {
   buildPendingNetworkOutputs,
   dispatchEntityOutputs,
@@ -26,13 +26,13 @@ import {
   getReliableOutputIdentity,
   sendEntityInputWithRouting,
   type RuntimeOutputRoutingDeps,
-} from '../machine/output-routing';
+} from '../runtime/output-routing';
 import {
   applyReliableDeliveryReceipts,
   commitReliableIngress,
   registerReliableIngress,
   releaseUncommittedReliableIngress,
-} from '../machine/reliable-delivery';
+} from '../runtime/reliable-delivery';
 import { deliveryAccepted, deliveryFailure } from '../protocol/payments/delivery-result';
 import { applyRuntimeInput, createEmptyEnv } from '../runtime';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../wal/snapshot';

@@ -66,7 +66,7 @@ Top 100 simplification targets:
 54. `runtime/jadapter/types.ts` — remove legacy/dead adapter methods and tighten surface to required production calls only.
 55. `runtime/jadapter/jurisdiction.ts` — merge or delete if it only proxies `jurisdiction-config` and adapter connect.
 56. `runtime/jadapter/browservm-registry.ts` — delete once runtime/browser no longer store BrowserVM instance directly.
-57. `runtime/machine/infra.ts` — centralize all infra-only objects here and forbid them in state handlers.
+57. `runtime/runtime/infra.ts` — centralize all infra-only objects here and forbid them in state handlers.
 58. `runtime/account/crypto.ts` — split signer derivation, cache, and browser storage concerns.
 59. `runtime/networking/p2p.ts` — split transport, profile propagation, and debug event paths.
 60. `runtime/networking/profile-signing.ts` — centralize profile hash building and hanko verification with other signing modules.

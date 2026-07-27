@@ -25,7 +25,7 @@ import {
   computeCanonicalEntityConsensusStateHash,
   computeEntityFrameAuthorityRoot,
 } from '../entity/consensus/state-root';
-import { applyRuntimeStorageChanges } from '../machine/env-events';
+import { applyRuntimeStorageChanges } from '../runtime/env-events';
 import { recoverStorageDbFromHistory, saveRuntimeFrameToStorage } from '../storage';
 import { decodeBuffer } from '../storage/codec';
 import { KEY_HEAD, keyConsumptionNode, keyDiff, keyLiveEntity } from '../storage/keys';

@@ -3,7 +3,7 @@ import {
   deriveSignerKeySync,
   registerSignerKey,
 } from '../../account/crypto';
-import { registerReliableIngress } from '../../machine/reliable-delivery';
+import { registerReliableIngress } from '../../runtime/reliable-delivery';
 import { createEmptyEnv } from '../../runtime';
 import type { DeliverableEntityInput } from '../../types';
 

@@ -4,7 +4,7 @@ import {
   runtimeAdapterCommandLaneId,
 } from '../radapter/command-frontier';
 import { markLocalRuntimeAdapterCommandTx } from '../radapter/command-frontier-auth';
-import { applyRuntimeTx } from '../machine/tx-handlers';
+import { applyRuntimeTx } from '../runtime/tx-handlers';
 import { buildDurableRuntimeMachineSnapshot, restoreDurableRuntimeSnapshot } from '../wal/snapshot';
 import { createEmptyEnv } from '../runtime';
 

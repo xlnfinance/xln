@@ -48,7 +48,7 @@ import {
   cloneIsolatedEntityLeaderTimeoutVote,
   cloneIsolatedProposedEntityFrame,
 } from '../../protocol/runtime-input-clone';
-import { nodeProcess } from '../../machine/platform';
+import { nodeProcess } from '../../runtime/platform';
 import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../infra/perf-runtime-flags';
 import { mergeStorageOverlayRecords } from '../../storage/overlay';
 import {
@@ -73,8 +73,8 @@ import {
   applyStorageChanges,
   publishEntityCandidateEffects,
   recordEntityFrameHistory,
-} from '../../machine/env-events';
-import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from '../../machine/security-incidents';
+} from '../../runtime/env-events';
+import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from '../../runtime/security-incidents';
 import { LIMITS } from '../../constants';
 import { signAccountFrame as signFrame, verifyAccountSignature as verifyFrame } from '../../account/crypto';
 import { appendAccountMempoolTx } from '../../account/mempool';
@@ -95,7 +95,7 @@ import {
   type NormalizedOrderbookOffer,
   type WorkingOrderbookOffer,
 } from '../../orderbook/swap-execution';
-import { assertScheduledWakeFrameOrder } from '../../machine/scheduled-wake';
+import { assertScheduledWakeFrameOrder } from '../../runtime/scheduled-wake';
 import { replaceOrderbookPair, type OrderbookExtState } from '../../orderbook';
 import {
   emitCommittedPendingFrameWarnings,

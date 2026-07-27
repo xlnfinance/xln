@@ -2,7 +2,7 @@ import { rmSync } from 'fs';
 import { join } from 'path';
 
 import { processRuntime } from '../../runtime';
-import { dbRootPath } from '../../machine/platform';
+import { dbRootPath } from '../../runtime/platform';
 import type { EntityInput, Env } from '../../types';
 
 export const crashBoundaryFixture = join(import.meta.dir, 'j-submit-crash-boundary-child.ts');

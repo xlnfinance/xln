@@ -14,7 +14,7 @@ import {
 } from '../entity/consensus/leader';
 import { generateLazyEntityId } from '../entity/factory';
 import { initCrontab } from '../entity/scheduler';
-import { dbRootPath } from '../machine/platform';
+import { dbRootPath } from '../runtime/platform';
 import {
   buildRuntimeRecoveryBundle,
   validateRuntimeRecoveryBundle,

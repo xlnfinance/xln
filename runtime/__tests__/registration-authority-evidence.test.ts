@@ -13,7 +13,7 @@ import {
   buildRegistrationEvidenceDigest,
   computeRegistrationEvidenceHash,
 } from '../jurisdiction/registration-evidence';
-import { applyRuntimeTx } from '../machine/tx-handlers';
+import { applyRuntimeTx } from '../runtime/tx-handlers';
 import { createEmptyEnv } from '../runtime';
 import { buildCertifiedEntityLineagePlan } from '../storage/entity-lineage';
 import type { EntityReplica, Env, JReplica, JurisdictionConfig } from '../types';

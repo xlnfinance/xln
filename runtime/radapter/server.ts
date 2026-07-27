@@ -18,7 +18,7 @@ import { RuntimeAdapterError, toRuntimeAdapterErrorPayload } from './errors';
 import { consumeToken, createTokenBucket, tokenRetryAfterMs, type TokenBucket } from './rate-limit';
 import { resolveRuntimeAdapterRead } from './resolve';
 import { createStructuredLogger } from '../infra/logger';
-import { assertRuntimeCommandReady, getRuntimeCommandReadiness } from '../machine/lifecycle';
+import { assertRuntimeCommandReady, getRuntimeCommandReadiness } from '../runtime/lifecycle';
 import { safeStringify } from '../protocol/serialization';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import type {

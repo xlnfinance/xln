@@ -23,7 +23,7 @@ import {
   processRuntime,
   saveEnvToDB,
 } from '../runtime';
-import { dbRootPath } from '../machine/platform';
+import { dbRootPath } from '../runtime/platform';
 import type { AccountMachine, EntityReplica, EntityState, EntityTx, Env, JReplica, RoutedEntityInput } from '../types';
 import { getPerfMs } from '../utils';
 import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';

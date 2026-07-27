@@ -1130,10 +1130,10 @@ xln/
     account/utils.ts             ${fileSizes['runtime/account/utils.ts'] || '?'} lines - deriveDelta() RCPAN calculation
     protocol/serialization.ts       ${fileSizes['runtime/protocol/serialization.ts'] || '?'} lines - BigInt serialization
     account/crypto.ts            ${fileSizes['runtime/account/crypto.ts'] || '?'} lines - Signature verification
-    machine/jurisdiction-api.ts  ${fileSizes['runtime/machine/jurisdiction-api.ts'] || '?'} lines - J-adapter / on-chain integration
+    machine/jurisdiction-api.ts  ${fileSizes['runtime/runtime/jurisdiction-api.ts'] || '?'} lines - J-adapter / on-chain integration
 
     swap/cross-j/orderbook:
-      machine/swap-pairs.ts       ${fileSizes['runtime/machine/swap-pairs.ts'] || '?'} lines - Same-chain pair orientation/policies
+      machine/swap-pairs.ts       ${fileSizes['runtime/runtime/swap-pairs.ts'] || '?'} lines - Same-chain pair orientation/policies
       orderbook/swap-execution.ts           ${fileSizes['runtime/orderbook/swap-execution.ts'] || '?'} lines - Swap lifecycle helpers
       extensions/cross-j/index.ts       ${fileSizes['runtime/extensions/cross-j/index.ts'] || '?'} lines - Cross-j route hashes and fill progress
       extensions/cross-j/market.ts ${fileSizes['runtime/extensions/cross-j/market.ts'] || '?'} lines - Cross-j market derivation

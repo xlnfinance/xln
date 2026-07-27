@@ -7,7 +7,7 @@ import {
   waitForRuntimeWorkDrained,
   type RuntimeLoopConfig,
 } from '../runtime';
-import { transitionRuntimeLifecycle } from '../machine/lifecycle';
+import { transitionRuntimeLifecycle } from '../runtime/lifecycle';
 import type { Env, RuntimeP2PConfigLike } from '../types';
 
 export type NodeRuntimeQuiesceOptions = {

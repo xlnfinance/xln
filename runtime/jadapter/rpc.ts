@@ -111,7 +111,7 @@ export const applyProcessBatchGasFloor = (
   hasDisputeFinalization && estimatedGasLimit < PROCESS_BATCH_GAS_FLOOR
     ? PROCESS_BATCH_GAS_FLOOR
     : estimatedGasLimit;
-import { nodeProcess, runtimeIsBrowser } from '../machine/platform';
+import { nodeProcess, runtimeIsBrowser } from '../runtime/platform';
 import {
   readAuthenticatedReceiptRange,
   type AuthenticatedReceiptRange,

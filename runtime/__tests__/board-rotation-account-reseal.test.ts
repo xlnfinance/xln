@@ -19,8 +19,8 @@ import {
   commitReliableIngress,
   finalizeReliableIngressCommit,
   registerReliableIngress,
-} from '../machine/reliable-delivery';
-import { buildPendingNetworkOutputs, getReliableOutputIdentity } from '../machine/output-routing';
+} from '../runtime/reliable-delivery';
+import { buildPendingNetworkOutputs, getReliableOutputIdentity } from '../runtime/output-routing';
 import { createEmptyEnv } from '../runtime';
 import { hydrateAccountDocFromStorage } from '../storage/hydration';
 import { projectAccountDoc } from '../storage/projections';

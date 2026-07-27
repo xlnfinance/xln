@@ -1,5 +1,5 @@
 import { Level } from 'level';
-import { runtimeIsBrowser } from './../machine/platform';
+import { runtimeIsBrowser } from './../runtime/platform';
 import { getPerfMs } from './../utils';
 import { cloneIsolatedRoutedEntityInputs, cloneIsolatedRuntimeInput } from './../protocol/runtime-input-clone';
 import { requireBoundaryInteger } from './../protocol/boundary-validation';
@@ -17,12 +17,12 @@ import {
   dropOverlay,
   peekPendingFrameDbRecords,
   setAccountFrameHistoryView,
-} from './../machine/env-events';
+} from './../runtime/env-events';
 import { normalizeRuntimeId } from './../networking/runtime-id';
 import { formatReplicaKey, createReplicaKey } from './../ids';
-import { transitionRuntimeLifecycle } from './../machine/lifecycle';
-import { ensureRuntimeState } from './../machine/runtime-state';
-import { restoreDurableOutputRetryState } from './../machine/durable-output-retry';
+import { transitionRuntimeLifecycle } from './../runtime/lifecycle';
+import { ensureRuntimeState } from './../runtime/runtime-state';
+import { restoreDurableOutputRetryState } from './../runtime/durable-output-retry';
 import { cloneEntityState } from './../state-helpers';
 import { safeStringify } from './../protocol/serialization';
 import {

@@ -9,7 +9,7 @@ import { buildJEventRangeDigest, canonicalJEventRangeHash } from '../jurisdictio
 import { assertFrameJPrefix, buildLocalJPrefixAttestation } from '../jurisdiction/j-prefix-consensus';
 import { recordValidatorJHistory } from '../jurisdiction/local-history';
 import { markLocalJAuthorityRuntimeTx } from '../jurisdiction/registration-evidence';
-import { applyRuntimeTx } from '../machine/tx-handlers';
+import { applyRuntimeTx } from '../runtime/tx-handlers';
 import { createEmptyEnv } from '../runtime';
 import type { EntityInput, EntityReplica, EntityState } from '../types';
 

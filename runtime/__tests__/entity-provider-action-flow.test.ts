@@ -25,23 +25,23 @@ import { buildQuorumHanko, verifyHankoForHash } from '../hanko/signing';
 import { buildSingleSignerHanko } from '../hanko/batch';
 import {
   applyRetryEntityProviderActionRuntimeTx,
-} from '../machine/entity-provider-action-submit-state';
+} from '../runtime/entity-provider-action-submit-state';
 import {
   assertEntityProviderActionRuntimeTxAuthorized,
   markLocalEntityProviderActionRuntimeTx,
-} from '../machine/entity-provider-action-submit-auth';
+} from '../runtime/entity-provider-action-submit-auth';
 import {
   applyRecordEntityProviderActionResultRuntimeTx,
   makeEntityProviderActionResultRuntimeTx,
-} from '../machine/entity-provider-action-submit-result';
+} from '../runtime/entity-provider-action-submit-result';
 import {
   collectDueEntityProviderActionRuntimeTxs,
   getNextEntityProviderActionRetryTimestamp,
-} from '../machine/entity-provider-action-submit-scheduler';
+} from '../runtime/entity-provider-action-submit-scheduler';
 import {
   registerPendingCommittedJOutbox,
   splitJOutboxForDurableSubmit,
-} from '../machine/j-submit-state';
+} from '../runtime/j-submit-state';
 import { createEmptyEnv } from '../runtime';
 import { createJAdapter } from '../jadapter';
 import {

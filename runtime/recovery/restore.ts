@@ -1,6 +1,6 @@
 import { Level } from 'level';
 import { ethers } from 'ethers';
-import { nodeProcess, runtimeIsBrowser } from '../machine/platform';
+import { nodeProcess, runtimeIsBrowser } from '../runtime/platform';
 import {
   cloneIsolatedRoutedEntityInputs,
   cloneIsolatedRuntimeInput,
@@ -34,7 +34,7 @@ import {
   getAccountJClaimNodeStore,
   getLiveAccountJClaimAccumulatorStates,
 } from './../account/j-claim-store';
-import { clearPendingAuditEvents, dropPendingFrameDbRecords, peekPendingFrameDbRecords } from '../machine/env-events';
+import { clearPendingAuditEvents, dropPendingFrameDbRecords, peekPendingFrameDbRecords } from '../runtime/env-events';
 import { getCachedSignerPrivateKey, getLocalSignerPrivateKey } from './../account/crypto';
 import type { Profile } from './../networking/gossip';
 import { normalizeRuntimeId } from './../networking/runtime-id';
@@ -47,9 +47,9 @@ import {
   splitRoutedOutputByDeliveryLane,
   splitPendingOutputsByRetryWindow,
   type RuntimeOutputRoutingDeps,
-} from '../machine/output-routing';
-import { refreshScheduledWakeIndex } from '../machine/scheduled-wake';
-import { ensureRuntimeState } from '../machine/runtime-state';
+} from '../runtime/output-routing';
+import { refreshScheduledWakeIndex } from '../runtime/scheduled-wake';
+import { ensureRuntimeState } from '../runtime/runtime-state';
 import {
   applyReliableDeliveryReceipts,
   finalizeReliableIngressCommit,
@@ -57,9 +57,9 @@ import {
   registerReliableReceiptIngress,
   matchReceiptsToOutputs,
   type ReliableIngressCommit,
-} from '../machine/reliable-delivery';
-import { restoreDurableOutputRetryState } from '../machine/durable-output-retry';
-import { registerPendingCommittedJOutbox, splitJOutboxForDurableSubmit } from '../machine/j-submit-state';
+} from '../runtime/reliable-delivery';
+import { restoreDurableOutputRetryState } from '../runtime/durable-output-retry';
+import { registerPendingCommittedJOutbox, splitJOutboxForDurableSubmit } from '../runtime/j-submit-state';
 import { clearReplayOutputSignerHints, installReplayOutputSignerHints } from './../state-helpers';
 import { safeStringify } from './../protocol/serialization';
 import {
@@ -102,9 +102,9 @@ import { clearDatabase } from './../utils';
 import type { PersistedFrameJournal } from './../storage/types';
 import { assertRuntimeRecoveryBundleAuthenticity } from './../recovery/bundle';
 import type { RuntimeRecoveryBundleV1 } from './../recovery/types';
-import { ensureLiveJAdapterForReplica, rehydrateRestoredRuntimeInfra } from '../machine/infra';
+import { ensureLiveJAdapterForReplica, rehydrateRestoredRuntimeInfra } from '../runtime/infra';
 import { findWatcherJurisdictionReplica } from './../jadapter/helpers';
-import { loadGossipProfilesFromInfraDb } from '../machine/infra-gossip-store';
+import { loadGossipProfilesFromInfraDb } from '../runtime/infra-gossip-store';
 import { normalizeDbNamespace, type StorageDbRole, withStorageWriterLock } from './../storage/runtime-dbs';
 import { createStructuredLogger } from '../infra/logger';
 

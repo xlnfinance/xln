@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { isTransientJAdapterStartupError } from '../jadapter/retry';
 import { makeJAdapterFailureResult } from '../jadapter/failure';
-import { isTransientJSubmitFailure } from '../machine/j-submit';
+import { isTransientJSubmitFailure } from '../runtime/j-submit';
 
 const ethersError = (code: string, message: string): Error & { code: string } =>
   Object.assign(new Error(message), { code });

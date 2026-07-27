@@ -3,7 +3,7 @@ import { mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 
 import { deriveSignerAddressSync, getCachedSignerPrivateKey } from '../account/crypto';
-import { dbRootPath } from '../machine/platform';
+import { dbRootPath } from '../runtime/platform';
 import {
   closeInfraDb,
   closeRuntimeDb,
