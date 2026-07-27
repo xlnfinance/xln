@@ -2,6 +2,13 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+const readMarketMakerNodeSource = (): string => [
+  'mm-node.ts',
+  'mm-node-core.ts',
+  'mm-node-health.ts',
+  'mm-node-run.ts',
+].map(file => readFileSync(join(process.cwd(), 'runtime/orchestrator', file), 'utf8')).join('\n');
+
 test('rpc jadapter startup and watcher lifecycle logs stay structured', () => {
   const source = readFileSync(join(process.cwd(), 'runtime/jadapter/rpc.ts'), 'utf8');
 
@@ -27,8 +34,9 @@ test('rpc jadapter startup and watcher lifecycle logs stay structured', () => {
 
 test('runtime dev startup status logs stay structured', () => {
   const runtime = readFileSync(join(process.cwd(), 'runtime/runtime.ts'), 'utf8');
+  const runtimeLoop = readFileSync(join(process.cwd(), 'runtime/engine/loop.ts'), 'utf8');
   const hubNode = readFileSync(join(process.cwd(), 'runtime/orchestrator/hub-node.ts'), 'utf8');
-  const marketMakerNode = readFileSync(join(process.cwd(), 'runtime/orchestrator/mm-node.ts'), 'utf8');
+  const marketMakerNode = readMarketMakerNodeSource();
   const orchestrator = readFileSync(join(process.cwd(), 'runtime/orchestrator/orchestrator.ts'), 'utf8');
   const wsClient = readFileSync(join(process.cwd(), 'runtime/networking/ws-client.ts'), 'utf8');
   const bootstrapHub = readFileSync(join(process.cwd(), 'scripts/bootstrap-hub.ts'), 'utf8');
@@ -41,10 +49,10 @@ test('runtime dev startup status logs stay structured', () => {
     .filter((line) => line.includes('console.'));
 
   expect(runtime).not.toContain('console.log(`JAdapter watcher started for jReplica');
-  expect(runtime).toContain("runtimeLog.debug('jadapter_watcher.started'");
-  expect(runtime).toContain("throw new Error('RUNTIME_DB_CLOSE_LOOP_DRAIN_TIMEOUT')");
-  expect(runtime).toContain("throwSettledErrors(shutdown, 'RUNTIME_DB_CLOSE_QUIESCE_FAILED')");
-  expect(runtime).toContain("runtimeLog.error('loop.error'");
+  expect(runtimeLoop).toContain("runtimeLog.debug('jadapter_watcher.started'");
+  expect(runtimeLoop).toContain("throw new Error('RUNTIME_DB_CLOSE_LOOP_DRAIN_TIMEOUT')");
+  expect(runtimeLoop).toContain("throwSettledErrors(shutdown, 'RUNTIME_DB_CLOSE_QUIESCE_FAILED')");
+  expect(runtimeLoop).toContain("runtimeLog.error('loop.error'");
   expect(runtimeConsoleLines).toEqual([
     "console.log(`\\n⏸️  FRAME STEPPING: Stopped at frame ${env.height}`);",
     "console.log('═'.repeat(80));",

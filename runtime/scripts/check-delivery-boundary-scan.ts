@@ -19,7 +19,12 @@ import {
 
 const repoRoot = process.cwd();
 
-const readText = (path: string): string => readFileSync(path, 'utf8');
+const readText = (path: string): string => {
+  if (path !== 'runtime/orchestrator/mm-node.ts') return readFileSync(path, 'utf8');
+  return ['mm-node.ts', 'mm-node-core.ts', 'mm-node-health.ts', 'mm-node-run.ts']
+    .map(file => readFileSync(join(repoRoot, 'runtime/orchestrator', file), 'utf8'))
+    .join('\n');
+};
 
 const assertIncludes = (text: string, needle: string, path: string): void => {
   if (!text.includes(needle)) throw new Error(`${path} is missing required text: ${needle}`);
@@ -244,14 +249,15 @@ const p2pSource = readText('runtime/networking/p2p.ts');
 assertNotIncludes(p2pSource, 'pendingByRuntime', 'runtime/networking/p2p.ts');
 assertNotIncludes(p2pSource, 'flushPending', 'runtime/networking/p2p.ts');
 
-const runtimeTs = readText('runtime/runtime.ts');
-assertIncludes(runtimeTs, '): RuntimeEntityInputRoutingResult => {', 'runtime/runtime.ts');
-assertIncludes(runtimeTs, 'return sendEntityInputWithRouting(env, input, getRuntimeOutputRoutingDeps());', 'runtime/runtime.ts');
-const sendEntityInputStart = runtimeTs.indexOf('export const sendEntityInput =');
-const sendEntityInputEnd = runtimeTs.indexOf('export const startP2P', sendEntityInputStart);
-const sendEntityInputSource = runtimeTs.slice(sendEntityInputStart, sendEntityInputEnd);
-assertNotIncludes(sendEntityInputSource, 'return true', 'runtime/runtime.ts');
-assertNotIncludes(sendEntityInputSource, 'return false', 'runtime/runtime.ts');
+const runtimeLoopPath = 'runtime/engine/loop.ts';
+const runtimeLoop = readText(runtimeLoopPath);
+assertIncludes(runtimeLoop, '): RuntimeEntityInputRoutingResult => {', runtimeLoopPath);
+assertIncludes(runtimeLoop, 'return sendEntityInputWithRouting(env, input, getRuntimeOutputRoutingDeps());', runtimeLoopPath);
+const sendEntityInputStart = runtimeLoop.indexOf('const sendEntityInput =');
+const sendEntityInputEnd = runtimeLoop.indexOf('const startP2P', sendEntityInputStart);
+const sendEntityInputSource = runtimeLoop.slice(sendEntityInputStart, sendEntityInputEnd);
+assertNotIncludes(sendEntityInputSource, 'return true', runtimeLoopPath);
+assertNotIncludes(sendEntityInputSource, 'return false', runtimeLoopPath);
 
 const relayDirectTs = readText('runtime/server/relay-direct.ts');
 assertNotIncludes(relayDirectTs, '[RELAY] Direct dispatch', 'runtime/server/relay-direct.ts');

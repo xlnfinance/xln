@@ -12,6 +12,16 @@ import {
 
 const repoRoot = process.cwd();
 
+const readMarketMakerNodeModule = (file: string): string =>
+  readFileSync(join(repoRoot, 'runtime/orchestrator', file), 'utf8');
+
+const readMarketMakerNodeSource = (): string => [
+  'mm-node.ts',
+  'mm-node-core.ts',
+  'mm-node-health.ts',
+  'mm-node-run.ts',
+].map(readMarketMakerNodeModule).join('\n');
+
 const extractSourceBlock = (source: string, marker: string, nextMarker: string): string => {
   const start = source.indexOf(marker);
   expect(start).toBeGreaterThanOrEqual(0);
@@ -39,7 +49,7 @@ describe('production startup wiring', () => {
 
     for (const source of [
       readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8'),
-      readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8'),
+      readMarketMakerNodeSource(),
     ]) {
       const upgrade = source.indexOf('const directUpgrade = directRuntimeWs.maybeUpgrade(request, serverRef);');
       const guard = source.indexOf('if (requiresLocalNodeOperator(url) && !operatorAuthorized)', upgrade);
@@ -108,7 +118,7 @@ describe('production startup wiring', () => {
   });
 
   test('market-maker revalidates bootstrap completion after yielding to ingress', () => {
-    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const mmNode = readMarketMakerNodeSource();
     const armedBranchStart = mmNode.indexOf('if (bootstrapCompletionCheckArmed && canCheckBootstrapCompletion()) {');
     const armedBranchEnd = mmNode.indexOf('bootstrapCompletionCheckArmed = false;', armedBranchStart);
     const armedBranch = mmNode.slice(armedBranchStart, armedBranchEnd);
@@ -125,7 +135,7 @@ describe('production startup wiring', () => {
   });
 
   test('market-maker READY is derived synchronously from the already committed live Env', () => {
-    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const mmNode = readMarketMakerNodeSource();
     const finalize = extractSourceBlock(
       mmNode,
       'const finalizeMarketMakerBootstrapState = (): MarketMakerBootstrapFinalization =>',
@@ -138,7 +148,7 @@ describe('production startup wiring', () => {
   });
 
   test('market-maker rechecks completion immediately before publishing READY', () => {
-    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const mmNode = readMarketMakerNodeSource();
     const mark = extractSourceBlock(mmNode, 'const markOffersReady = async', 'const waitForBootstrapOffers = async');
     const firstCheck = mark.indexOf('if (!canCheckBootstrapCompletion()) return false;');
     const yieldIndex = mark.indexOf('await yieldMarketMakerApi();', firstCheck);
@@ -166,7 +176,7 @@ describe('production startup wiring', () => {
   });
 
   test('market-maker never disables WAL during bootstrap', () => {
-    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const mmNode = readMarketMakerNodeSource();
     expect(mmNode).not.toContain('MARKET_MAKER_DISABLE_STORAGE');
     expect(mmNode).not.toContain('MARKET_MAKER_PERSIST_READY_SNAPSHOT');
     expect(mmNode).not.toContain('bootstrapReadySnapshotPersisted');
@@ -217,7 +227,7 @@ describe('production startup wiring', () => {
   test('managed runtime fatal exits only after parent incident fsync acknowledgement', () => {
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
-    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const mmNode = readMarketMakerNodeSource();
     const runtimeLoop = readFileSync(join(repoRoot, 'runtime/engine/loop.ts'), 'utf8');
 
     expect(orchestrator.match(/stdio: \['pipe', 'pipe', 'pipe', 'ipc'\]/g)).toHaveLength(2);
@@ -582,7 +592,7 @@ describe('production startup wiring', () => {
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const bootstrapHub = readFileSync(join(repoRoot, 'scripts/bootstrap-hub.ts'), 'utf8');
     const serverJurisdictions = readFileSync(join(repoRoot, 'runtime/server/jurisdictions.ts'), 'utf8');
-    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const mmNode = readMarketMakerNodeSource();
     const runtimeTxHandlers = readFileSync(join(repoRoot, 'runtime/runtime/tx-handlers.ts'), 'utf8');
     const jurisdictionImport = readFileSync(join(repoRoot, 'runtime/runtime/jurisdiction-import.ts'), 'utf8');
     const jadapterTypes = readFileSync(join(repoRoot, 'runtime/jadapter/types.ts'), 'utf8');
@@ -1075,7 +1085,7 @@ describe('production startup wiring', () => {
     const nodeQuiesce = readFileSync(join(repoRoot, 'runtime/orchestrator/node-runtime-quiesce.ts'), 'utf8');
     const sources = [
       readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8'),
-      readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8'),
+      readMarketMakerNodeSource(),
     ];
 
     expect(runtimeMain).toContain('stopJurisdictionWatchersAndWait,');
@@ -1123,7 +1133,7 @@ describe('production startup wiring', () => {
   });
 
   test('market-maker control lifecycle exists before the HTTP server accepts teardown', () => {
-    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const mmNode = readMarketMakerNodeSource();
     const serverStart = mmNode.indexOf('const server = Bun.serve({');
     const lifecycleDeclarations = [
       'let shuttingDown = false;',
@@ -1148,7 +1158,7 @@ describe('production startup wiring', () => {
     expect(hubP2PReady).toBeGreaterThan(hubP2PStart);
     expect(hubLoopStart).toBeGreaterThan(hubP2PReady);
 
-    const mmSource = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const mmSource = readMarketMakerNodeSource();
     const mmLoopStart = mmSource.indexOf('startRuntimeLoop(env, {');
     const mmPrimaryContext = mmSource.indexOf('const primaryMmContext = await createMarketMakerEntityContext(', mmLoopStart);
     const mmSecondaryContexts = mmSource.indexOf('for (const [index, secondary] of secondaryJurisdictions.entries())', mmPrimaryContext);
@@ -1309,7 +1319,7 @@ describe('production startup wiring', () => {
   });
 
   test('market maker cross readiness only expects feasible cross specs', () => {
-    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const mmNode = readMarketMakerNodeSource();
     const buildExpectedStart = mmNode.indexOf('const buildExpectedMarketMakerCrossRouteGroups = (');
     const buildHealthStart = mmNode.indexOf('const buildMarketMakerCrossHealth = (');
     expect(buildExpectedStart).toBeGreaterThan(0);
@@ -1323,7 +1333,7 @@ describe('production startup wiring', () => {
   });
 
   test('market maker health route serves cached bootstrap readiness without scanning state', () => {
-    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const mmNode = readMarketMakerNodeSource();
     const mmProgress = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-bootstrap-progress.ts'), 'utf8');
     const healthRouteStart = mmNode.indexOf("if (pathname === '/api/health')");
     const controlRouteStart = mmNode.indexOf("if (pathname === '/api/control/p2p/stop'");
@@ -1364,7 +1374,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('bootstrapCompletionHealth = buildMarketMakerHealthSnapshot({ includeCross: true });');
     expect(mmNode).toContain('cachedMarketMakerHealth = bootstrapCompletionHealth;');
     expect(mmNode).toContain('rebuildCachedHealthResponseJson();');
-    expect(mmNode).toContain("import { computeCanonicalEntityHashesFromEnv, computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';");
+    expect(readMarketMakerNodeModule('mm-node-health.ts')).toContain('computeCanonicalEntityHashesFromEnv');
+    expect(readMarketMakerNodeModule('mm-node-run.ts')).toContain('computeCanonicalStateHashFromEnv');
     expect(mmNode).toContain('export const buildMarketMakerBootstrapEntityStateHash = (env: Env): string =>');
     expect(mmProgress).toContain("schema: 'market-maker-bootstrap-entity-state-v1'");
     expect(mmNode).toContain('const fingerprint = buildMarketMakerBootstrapFingerprint(');
@@ -1409,7 +1420,7 @@ describe('production startup wiring', () => {
   });
 
   test('market maker info route keeps cross debug opt-in off the hot path', () => {
-    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const mmNode = readMarketMakerNodeSource();
     const infoRouteStart = mmNode.indexOf("if (pathname === '/api/info')");
     const fullHealthRouteStart = mmNode.indexOf("if (pathname === '/api/health/full'");
     const healthRouteStart = mmNode.indexOf("if (pathname === '/api/health')", fullHealthRouteStart + 1);
@@ -1439,7 +1450,7 @@ describe('production startup wiring', () => {
     const packageJson = readFileSync(join(repoRoot, 'package.json'), 'utf8');
     const smoke = readFileSync(join(repoRoot, 'runtime/scripts/local-prod-smoke.ts'), 'utf8');
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
-    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const mmNode = readMarketMakerNodeSource();
     const benchmark = readFileSync(join(repoRoot, 'runtime/scripts/bootstrap-benchmark.ts'), 'utf8');
     const soundcheck = readFileSync(join(repoRoot, 'runtime/scripts/bootstrap-soundcheck.ts'), 'utf8');
 
@@ -1892,7 +1903,7 @@ describe('production startup wiring', () => {
   });
 
   test('market maker quote hot path is producer-only after runtime loop starts', () => {
-    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const mmNode = readMarketMakerNodeSource();
     const meshCommon = readFileSync(join(repoRoot, 'runtime/orchestrator/mesh-common.ts'), 'utf8');
     const ensureStart = mmNode.indexOf('const ensureMarketMakerHubConnectivity = async (');
     const readyStart = mmNode.indexOf('const isMarketMakerConnectivityReady = (');
@@ -1957,7 +1968,7 @@ describe('production startup wiring', () => {
   });
 
   test('market maker bootstrap never sends hub-side credit inputs itself', () => {
-    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const mmNode = readMarketMakerNodeSource();
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     const ensureStart = mmNode.indexOf('const ensureMarketMakerHubConnectivity = async (');
     const readyStart = mmNode.indexOf('const isMarketMakerConnectivityReady = (');
@@ -1982,7 +1993,7 @@ describe('production startup wiring', () => {
 
   test('hub and market maker prefer authenticated direct entity delivery with relay fallback', () => {
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
-    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const mmNode = readMarketMakerNodeSource();
     const p2p = readFileSync(join(repoRoot, 'runtime/networking/p2p.ts'), 'utf8');
 
     expect(p2p).toContain('preferRelayForEntityInput?: boolean;');

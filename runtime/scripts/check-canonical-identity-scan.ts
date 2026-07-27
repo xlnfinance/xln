@@ -9,7 +9,12 @@ import {
 } from '../jurisdiction/jurisdiction-runtime';
 import type { Env, JReplica } from '../types';
 
-const readText = (path: string): string => readFileSync(path, 'utf8');
+const readText = (path: string): string => {
+  if (path !== 'runtime/orchestrator/mm-node.ts') return readFileSync(path, 'utf8');
+  return ['mm-node.ts', 'mm-node-core.ts', 'mm-node-health.ts', 'mm-node-run.ts']
+    .map(file => readFileSync(`runtime/orchestrator/${file}`, 'utf8'))
+    .join('\n');
+};
 
 const assertIncludes = (text: string, needle: string, path: string): void => {
   if (!text.includes(needle)) throw new Error(`${path} is missing required text: ${needle}`);
