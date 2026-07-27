@@ -32,12 +32,15 @@ const REBALANCE_POLICY = {
 
 const sourceEnv = () => ({
   eReplicas: new Map([
-    [`${SOURCE}:${SIGNER}`, {
-      state: {
-        entityId: SOURCE,
-        config: { jurisdiction: JURISDICTION },
+    [
+      `${SOURCE}:${SIGNER}`,
+      {
+        state: {
+          entityId: SOURCE,
+          config: { jurisdiction: JURISDICTION },
+        },
       },
-    }],
+    ],
   ]),
 });
 
@@ -52,25 +55,29 @@ const hub = {
 
 test('hub open-account readiness accepts remote snapshots with a published hub route', async () => {
   expect(hubHasPublishedRuntimeRoute(hub)).toBe(true);
-  await expect(ensureHubOpenAccountProfileReady({
-    env: sourceEnv() as never,
-    sourceEntityId: SOURCE,
-    hub,
-    seedProfiles: async () => ({ ready: false }),
-    timeoutMs: 100,
-  })).resolves.toBeUndefined();
+  await expect(
+    ensureHubOpenAccountProfileReady({
+      env: sourceEnv() as never,
+      sourceEntityId: SOURCE,
+      hub,
+      seedProfiles: async () => ({ ready: false }),
+      timeoutMs: 100,
+    }),
+  ).resolves.toBeUndefined();
 });
 
 test('hub open-account readiness rejects self-account attempts before profile checks', async () => {
-  await expect(ensureHubOpenAccountProfileReady({
-    env: sourceEnv() as never,
-    sourceEntityId: SOURCE,
-    hub: { ...hub, entityId: SOURCE },
-    seedProfiles: async () => {
-      throw new Error('seed should not run for self-account');
-    },
-    timeoutMs: 100,
-  })).rejects.toThrow('Cannot open an account with the same entity');
+  await expect(
+    ensureHubOpenAccountProfileReady({
+      env: sourceEnv() as never,
+      sourceEntityId: SOURCE,
+      hub: { ...hub, entityId: SOURCE },
+      seedProfiles: async () => {
+        throw new Error('seed should not run for self-account');
+      },
+      timeoutMs: 100,
+    }),
+  ).rejects.toThrow('Cannot open an account with the same entity');
   expect(isSameEntityId(SOURCE.toUpperCase(), SOURCE.toLowerCase())).toBe(true);
 });
 
@@ -87,13 +94,15 @@ test('hub open-account readiness rejects live runtimes without a usable route', 
     },
   };
 
-  await expect(ensureHubOpenAccountProfileReady({
-    env: env as never,
-    sourceEntityId: SOURCE,
-    hub,
-    seedProfiles: async () => ({ ready: false, error: 'not found' }),
-    timeoutMs: 100,
-  })).rejects.toThrow('Hub routing profile is not ready');
+  await expect(
+    ensureHubOpenAccountProfileReady({
+      env: env as never,
+      sourceEntityId: SOURCE,
+      hub,
+      seedProfiles: async () => ({ ready: false, error: 'not found' }),
+      timeoutMs: 100,
+    }),
+  ).rejects.toThrow('Hub routing profile is not ready');
 });
 
 test('hub open-account actions require admin auth for remote runtimes', () => {
@@ -101,8 +110,9 @@ test('hub open-account actions require admin auth for remote runtimes', () => {
   expect(canSubmitHubOpenAccount({ adapterMode: 'remote', authLevel: 'inspect' })).toBe(false);
   expect(canSubmitHubOpenAccount({ adapterMode: 'remote', authLevel: null })).toBe(false);
   expect(canSubmitHubOpenAccount({ adapterMode: 'remote', authLevel: 'admin' })).toBe(true);
-  expect(getHubOpenAccountPermissionError({ adapterMode: 'remote', authLevel: 'inspect' }))
-    .toBe(HUB_OPEN_ACCOUNT_REQUIRES_ADMIN);
+  expect(getHubOpenAccountPermissionError({ adapterMode: 'remote', authLevel: 'inspect' })).toBe(
+    HUB_OPEN_ACCOUNT_REQUIRES_ADMIN,
+  );
   expect(HUB_OPEN_ACCOUNT_REQUIRES_ADMIN).toBe('Account opening requires admin runtime access.');
 });
 
@@ -120,15 +130,17 @@ test('hub open-account command builds an explicit RuntimeInput batch', () => {
   expect(input.entityInputs).toHaveLength(1);
   expect(input.entityInputs[0]?.entityId).toBe(SOURCE.toLowerCase());
   expect(input.entityInputs[0]?.signerId).toBe(SIGNER);
-  expect(input.entityInputs[0]?.entityTxs).toEqual([{
-    type: 'openAccount',
-    data: {
-      targetEntityId: HUB.toLowerCase(),
-      creditAmount: 10_000n,
-      tokenId: 7,
-      rebalancePolicy: REBALANCE_POLICY,
+  expect(input.entityInputs[0]?.entityTxs).toEqual([
+    {
+      type: 'openAccount',
+      data: {
+        targetEntityId: HUB.toLowerCase(),
+        creditAmount: 10_000n,
+        tokenId: 7,
+        rebalancePolicy: REBALANCE_POLICY,
+      },
     },
-  }]);
+  ]);
 });
 
 test('direct open-account command builds an explicit RuntimeInput batch', () => {
@@ -143,52 +155,66 @@ test('direct open-account command builds an explicit RuntimeInput batch', () => 
   expect(input.entityInputs).toHaveLength(1);
   expect(input.entityInputs[0]?.entityId).toBe(SOURCE.toLowerCase());
   expect(input.entityInputs[0]?.signerId).toBe(SIGNER);
-  expect(input.entityInputs[0]?.entityTxs).toEqual([{
-    type: 'openAccount',
-    data: {
-      targetEntityId: HUB.toLowerCase(),
-      rebalancePolicy: REBALANCE_POLICY,
+  expect(input.entityInputs[0]?.entityTxs).toEqual([
+    {
+      type: 'openAccount',
+      data: {
+        targetEntityId: HUB.toLowerCase(),
+        rebalancePolicy: REBALANCE_POLICY,
+      },
     },
-  }]);
+  ]);
 });
 
 test('direct open-account command rejects malformed command targets', () => {
-  expect(() => buildDirectOpenAccountRuntimeInput({
-    sourceEntityId: SOURCE,
-    signerId: SIGNER,
-    targetEntityId: SOURCE,
-  })).toThrow('Cannot open an account with the same entity');
-  expect(() => buildDirectOpenAccountRuntimeInput({
-    sourceEntityId: SOURCE,
-    signerId: '',
-    targetEntityId: HUB,
-  })).toThrow('Signer is required');
-  expect(() => buildDirectOpenAccountRuntimeInput({
-    sourceEntityId: SOURCE,
-    signerId: SIGNER,
-    targetEntityId: '',
-  })).toThrow('Target entity is required');
+  expect(() =>
+    buildDirectOpenAccountRuntimeInput({
+      sourceEntityId: SOURCE,
+      signerId: SIGNER,
+      targetEntityId: SOURCE,
+    }),
+  ).toThrow('Cannot open an account with the same entity');
+  expect(() =>
+    buildDirectOpenAccountRuntimeInput({
+      sourceEntityId: SOURCE,
+      signerId: '',
+      targetEntityId: HUB,
+    }),
+  ).toThrow('Signer is required');
+  expect(() =>
+    buildDirectOpenAccountRuntimeInput({
+      sourceEntityId: SOURCE,
+      signerId: SIGNER,
+      targetEntityId: '',
+    }),
+  ).toThrow('Target entity is required');
 });
 
 test('hub open-account command rejects malformed command targets', () => {
-  expect(() => buildHubOpenAccountRuntimeInput({
-    sourceEntityId: SOURCE,
-    signerId: SIGNER,
-    hubEntityId: SOURCE,
-    creditAmount: 1n,
-  })).toThrow('Cannot open an account with the same entity');
-  expect(() => buildHubOpenAccountRuntimeInput({
-    sourceEntityId: SOURCE,
-    signerId: '',
-    hubEntityId: HUB,
-    creditAmount: 1n,
-  })).toThrow('Signer is required');
-  expect(() => buildHubOpenAccountRuntimeInput({
-    sourceEntityId: SOURCE,
-    signerId: SIGNER,
-    hubEntityId: HUB,
-    creditAmount: 0n,
-  })).toThrow('credit amount must be positive');
+  expect(() =>
+    buildHubOpenAccountRuntimeInput({
+      sourceEntityId: SOURCE,
+      signerId: SIGNER,
+      hubEntityId: SOURCE,
+      creditAmount: 1n,
+    }),
+  ).toThrow('Cannot open an account with the same entity');
+  expect(() =>
+    buildHubOpenAccountRuntimeInput({
+      sourceEntityId: SOURCE,
+      signerId: '',
+      hubEntityId: HUB,
+      creditAmount: 1n,
+    }),
+  ).toThrow('Signer is required');
+  expect(() =>
+    buildHubOpenAccountRuntimeInput({
+      sourceEntityId: SOURCE,
+      signerId: SIGNER,
+      hubEntityId: HUB,
+      creditAmount: 0n,
+    }),
+  ).toThrow('credit amount must be positive');
 });
 
 test('hub discovery projection exposes same-jurisdiction hubs and account status', () => {
@@ -199,46 +225,55 @@ test('hub discovery projection exposes same-jurisdiction hubs and account status
     currentHeight: 7,
   };
   const replicas = new Map([
-    [`${SOURCE}:${SIGNER}`, {
-      entityId: SOURCE,
-      state: {
+    [
+      `${SOURCE}:${SIGNER}`,
+      {
         entityId: SOURCE,
-        config: { jurisdiction: JURISDICTION },
-        accounts: new Map([[HUB, account]]),
-      },
-    }],
-    [`${HUB}:${SIGNER}`, {
-      entityId: HUB,
-      state: {
-        entityId: HUB,
-        timestamp: 42,
-        config: { jurisdiction: JURISDICTION },
-        accounts: new Map([[SOURCE, account]]),
-        profile: {
-          name: 'H1',
-          bio: 'hub',
-          isHub: true,
-          routingFeePPM: 25,
+        state: {
+          entityId: SOURCE,
+          config: { jurisdiction: JURISDICTION },
+          accounts: new Map([[HUB, account]]),
         },
       },
-    }],
-    [`0x${'66'.repeat(32)}:${SIGNER}`, {
-      entityId: `0x${'66'.repeat(32)}`,
-      state: {
-        entityId: `0x${'66'.repeat(32)}`,
-        config: {
-          jurisdiction: {
-            ...JURISDICTION,
-            chainId: 31338,
+    ],
+    [
+      `${HUB}:${SIGNER}`,
+      {
+        entityId: HUB,
+        state: {
+          entityId: HUB,
+          timestamp: 42,
+          config: { jurisdiction: JURISDICTION },
+          accounts: new Map([[SOURCE, account]]),
+          profile: {
+            name: 'H1',
+            bio: 'hub',
+            isHub: true,
+            routingFeePPM: 25,
           },
         },
-        accounts: new Map(),
-        profile: {
-          name: 'foreign',
-          isHub: true,
+      },
+    ],
+    [
+      `0x${'66'.repeat(32)}:${SIGNER}`,
+      {
+        entityId: `0x${'66'.repeat(32)}`,
+        state: {
+          entityId: `0x${'66'.repeat(32)}`,
+          config: {
+            jurisdiction: {
+              ...JURISDICTION,
+              chainId: 31338,
+            },
+          },
+          accounts: new Map(),
+          profile: {
+            name: 'foreign',
+            isHub: true,
+          },
         },
       },
-    }],
+    ],
   ]);
 
   const projection = buildHubDiscoveryProjection({
@@ -246,7 +281,7 @@ test('hub discovery projection exposes same-jurisdiction hubs and account status
     runtimeId: RUNTIME,
     replicas: replicas as never,
     formatRawProfile: () => 'raw-profile',
-    avatarForEntity: (entityId) => `avatar:${entityId}`,
+    avatarForEntity: entityId => `avatar:${entityId}`,
   });
 
   expect(projection.entityJurisdictionKey).toBe(hubDiscoveryJurisdictionKey(JURISDICTION));
@@ -265,43 +300,48 @@ test('hub discovery projection exposes same-jurisdiction hubs and account status
 
 test('hub discovery projection exposes same-jurisdiction hub profiles without full hub replicas', () => {
   const replicas = new Map([
-    [`${SOURCE}:${SIGNER}`, {
-      entityId: SOURCE,
-      state: {
+    [
+      `${SOURCE}:${SIGNER}`,
+      {
         entityId: SOURCE,
-        config: { jurisdiction: JURISDICTION },
-        accounts: new Map(),
+        state: {
+          entityId: SOURCE,
+          config: { jurisdiction: JURISDICTION },
+          accounts: new Map(),
+        },
       },
-    }],
+    ],
   ]);
 
   const projection = buildHubDiscoveryProjection({
     entityId: SOURCE,
     runtimeId: RUNTIME,
     replicas: replicas as never,
-    profiles: [{
-      entityId: HUB,
-      name: 'H1',
-      avatar: 'avatar-url',
-      bio: 'profile hub',
-      website: 'https://hub.example',
-      lastUpdated: 99,
-      runtimeId: RUNTIME,
-      runtimeEncPubKey: '',
-      publicAccounts: [SOURCE],
-      wsUrl: 'ws://127.0.0.1:3333',
-      relays: [],
-      metadata: {
-        entityEncPubKey: '',
-        isHub: true,
-        hubName: 'H1',
-        routingFeePPM: 17,
-        baseFee: 0n,
-        board: { threshold: 1, validators: [] },
-        jurisdiction: JURISDICTION,
-      },
-      accounts: [],
-    } as never],
+    profiles: [
+      {
+        entityId: HUB,
+        name: 'H1',
+        avatar: 'avatar-url',
+        bio: 'profile hub',
+        website: 'https://hub.example',
+        lastUpdated: 99,
+        runtimeId: RUNTIME,
+        runtimeEncPubKey: '',
+        publicAccounts: [SOURCE],
+        wsUrl: 'ws://127.0.0.1:3333',
+        relays: [],
+        metadata: {
+          entityEncPubKey: '',
+          isHub: true,
+          hubName: 'H1',
+          routingFeePPM: 17,
+          baseFee: 0n,
+          board: { threshold: 1, validators: [] },
+          jurisdiction: JURISDICTION,
+        },
+        accounts: [],
+      } as never,
+    ],
     formatRawProfile: () => 'raw-profile',
   });
 
@@ -318,29 +358,34 @@ test('hub discovery projection exposes same-jurisdiction hub profiles without fu
 
 test('hub discovery projection exposes same-jurisdiction remote runtime hubs without full hub replicas', () => {
   const replicas = new Map([
-    [`${SOURCE}:${SIGNER}`, {
-      entityId: SOURCE,
-      state: {
+    [
+      `${SOURCE}:${SIGNER}`,
+      {
         entityId: SOURCE,
-        config: { jurisdiction: JURISDICTION },
-        accounts: new Map(),
+        state: {
+          entityId: SOURCE,
+          config: { jurisdiction: JURISDICTION },
+          accounts: new Map(),
+        },
       },
-    }],
+    ],
   ]);
 
   const projection = buildHubDiscoveryProjection({
     entityId: SOURCE,
     runtimeId: RUNTIME,
     replicas: replicas as never,
-    remoteHubs: [{
-      entityId: HUB,
-      name: 'Remote H1',
-      runtimeId: 'radapter:ws://127.0.0.1:8092/rpc',
-      wsUrl: 'ws://127.0.0.1:8092/rpc',
-      jurisdiction: JURISDICTION,
-      height: 123,
-    }],
-    avatarForEntity: (entityId) => `avatar:${entityId}`,
+    remoteHubs: [
+      {
+        entityId: HUB,
+        name: 'Remote H1',
+        runtimeId: 'radapter:ws://127.0.0.1:8092/rpc',
+        wsUrl: 'ws://127.0.0.1:8092/rpc',
+        jurisdiction: JURISDICTION,
+        height: 123,
+      },
+    ],
+    avatarForEntity: entityId => `avatar:${entityId}`,
   });
 
   expect(projection.localHubs).toHaveLength(1);
@@ -362,12 +407,14 @@ test('hub discovery remote hubs are projected from runtime registry outside Enti
       wsUrl: 'ws://127.0.0.1:8092/rpc',
       permissions: 'write',
       status: 'connected',
-      hubEntities: [{
-        entityId: HUB,
-        label: 'H1',
-        height: 123,
-        jurisdiction: JURISDICTION,
-      }],
+      hubEntities: [
+        {
+          entityId: HUB,
+          label: 'H1',
+          height: 123,
+          jurisdiction: JURISDICTION,
+        },
+      ],
       lastSynced: 456,
     },
     {
@@ -410,8 +457,8 @@ test('hub discovery remote hubs are projected from runtime registry outside Enti
   });
 
   const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
-  expect(tabs).toContain('buildHubDiscoveryRemoteHubsFromRuntimes($runtimeHandles.values())');
-  expect(tabs).not.toContain('remoteHubCandidates = Array.from($runtimeHandles.values()).flatMap');
+  expect(tabs).toContain('buildHubDiscoveryRemoteHubsFromRuntimes($runtimes.values())');
+  expect(tabs).not.toContain('remoteHubCandidates = Array.from($runtimes.values()).flatMap');
 });
 
 test('hub discovery projection tracks connected fetched hubs without local hub replicas', () => {
@@ -421,14 +468,17 @@ test('hub discovery projection tracks connected fetched hubs without local hub r
     currentFrame: { height: 3 },
   };
   const replicas = new Map([
-    [`${SOURCE}:${SIGNER}`, {
-      entityId: SOURCE,
-      state: {
+    [
+      `${SOURCE}:${SIGNER}`,
+      {
         entityId: SOURCE,
-        config: { jurisdiction: JURISDICTION },
-        accounts: new Map([[HUB, account]]),
+        state: {
+          entityId: SOURCE,
+          config: { jurisdiction: JURISDICTION },
+          accounts: new Map([[HUB, account]]),
+        },
       },
-    }],
+    ],
   ]);
 
   const projection = buildHubDiscoveryProjection({
@@ -444,23 +494,29 @@ test('hub discovery projection tracks connected fetched hubs without local hub r
 
 test('hub discovery projection marks uncommitted account as opening', () => {
   const replicas = new Map([
-    [`${SOURCE}:${SIGNER}`, {
-      entityId: SOURCE,
-      state: {
+    [
+      `${SOURCE}:${SIGNER}`,
+      {
         entityId: SOURCE,
-        config: { jurisdiction: JURISDICTION },
-        accounts: new Map([[HUB, { leftEntity: SOURCE, rightEntity: HUB }]]),
+        state: {
+          entityId: SOURCE,
+          config: { jurisdiction: JURISDICTION },
+          accounts: new Map([[HUB, { leftEntity: SOURCE, rightEntity: HUB }]]),
+        },
       },
-    }],
-    [`${HUB}:${SIGNER}`, {
-      entityId: HUB,
-      state: {
+    ],
+    [
+      `${HUB}:${SIGNER}`,
+      {
         entityId: HUB,
-        config: { jurisdiction: JURISDICTION },
-        accounts: new Map(),
-        profile: { name: 'H1', isHub: true },
+        state: {
+          entityId: HUB,
+          config: { jurisdiction: JURISDICTION },
+          accounts: new Map(),
+          profile: { name: 'H1', isHub: true },
+        },
       },
-    }],
+    ],
   ]);
 
   const projection = buildHubDiscoveryProjection({
@@ -520,13 +576,13 @@ test('HubDiscoveryPanel renders a supplied projection instead of scanning eRepli
   expect(accountWorkspace).toContain('{submitRuntimeInput}');
   expect(tabs).toContain('canOpenAccounts = canSubmitHubOpenAccount');
   expect(tabs).toContain('profiles: directoryPanelView.profiles?.length ? directoryPanelView.profiles : panelProfiles');
-  expect(tabs).toContain("import { runtimes as runtimeHandles } from '../../stores/runtimeStore'");
+  expect(tabs).toMatch(/import \{ runtimes \} from ["']\.\.\/\.\.\/stores\/runtimeStore["']/);
   expect(tabs).toContain('remoteHubs: remoteHubCandidates');
   expect(tabs).toContain('if (!canOpenAccounts)');
   expect(tabs).toContain('buildDirectOpenAccountRuntimeInput');
-  expect(tabs).toContain('await submitRuntimeInput(buildDirectOpenAccountRuntimeInput');
+  expect(tabs).toMatch(/await submitPanelRuntimeInput\(\s*buildDirectOpenAccountRuntimeInput/);
   expect(tabs).toContain('{canOpenAccounts}');
-  expect(tabs).toContain('{submitRuntimeInput}');
+  expect(tabs).toContain('submitRuntimeInput={submitPanelRuntimeInput}');
   const directOpenStart = tabs.indexOf('async function openAccountWithFullId');
   const nextFunctionStart = tabs.indexOf('function confirmDisputeAction', directOpenStart);
   expect(directOpenStart).toBeGreaterThan(0);
@@ -541,7 +597,7 @@ test('HubDiscoveryPanel renders a supplied projection instead of scanning eRepli
   expect(source).not.toContain('getEntityJurisdictionKey(');
   expect(source).not.toContain('appRuntimeAdapterMode');
   expect(source).not.toContain('runtimeAdapterAuthLevel');
-  expect(tabs).toContain("import { runtimeControllerHandle } from '../../stores/runtimeControllerStore'");
+  expect(tabs).toMatch(/import \{ runtimeControllerHandle \} from ["']\.\.\/\.\.\/stores\/runtimeControllerStore["']/);
   expect(tabs).toContain('adapterMode: $runtimeControllerHandle.mode');
   expect(tabs).toContain('authLevel: $runtimeControllerHandle.authLevel');
   expect(tabs).not.toContain('appRuntimeAdapterMode');

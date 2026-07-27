@@ -14,7 +14,7 @@ export const showVaultPanel = showVault;
 export const vaultUiOperations = {
   requestDeriveNewVault() {
     showVault.set(true);
-    deriveRequest.update((n) => n + 1);
+    deriveRequest.update(n => n + 1);
   },
   showVault() {
     showVault.set(true);

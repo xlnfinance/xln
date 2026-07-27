@@ -3,143 +3,114 @@
  * committed account/J-layer side effects back into the runtime.
  */
 
-import { verifyAccountSignature as verifyFrame } from '../../account/crypto';
+import { verifyAccountSignature } from '../../account/crypto';
 import { LIMITS } from '../../constants';
-import { buildCrossJurisdictionFillId,CROSS_J_PENDING_FILL_ACK_TTL_MS } from '../../extensions/cross-j/fill-ack';
+import { buildCrossJurisdictionFillId, CROSS_J_PENDING_FILL_ACK_TTL_MS } from '../../extensions/cross-j/fill-ack';
 import { cloneCrossJurisdictionAccountTxRoute } from '../../extensions/cross-j/index';
+import { getEntityConfigBoardHash } from '../../hanko/signing';
+import { createStructuredLogger, logError, shortId, shortOrder } from '../../infra/logger';
+import { isRuntimePerfProfileEnabled, readRuntimePerfSlowMs } from '../../infra/perf-runtime-flags';
+import { getCertifiedBoardNodeStore, resolveObserverCertifiedBoardRecord } from '../../jurisdiction/board-registry';
 import {
-getEntityConfigBoardHash
-} from '../../hanko/signing';
-import {
-createStructuredLogger,
-logError,
-shortId,
-shortOrder
-} from '../../infra/logger';
-import { isRuntimePerfProfileEnabled,readRuntimePerfSlowMs } from '../../infra/perf-runtime-flags';
-import { getCertifiedBoardNodeStore,resolveObserverCertifiedBoardRecord } from '../../jurisdiction/board-registry';
-import {
-assertFrameJPrefix,
-buildLocalJPrefixAttestation,
-entityRequiresJPrefixCertificate,
-getLocalJPrefixAttestableHeight,
-hasCurrentRoundJPrefixAttestation,
-hasDueLocalJPrefixAdvance,
-hasPendingLocalJEvent,
-mergeJPrefixAttestations
+  assertFrameJPrefix,
+  buildLocalJPrefixAttestation,
+  entityRequiresJPrefixCertificate,
+  getLocalJPrefixAttestableHeight,
+  hasCurrentRoundJPrefixAttestation,
+  hasDueLocalJPrefixAdvance,
+  hasPendingLocalJEvent,
+  mergeJPrefixAttestations,
 } from '../../jurisdiction/j-prefix-consensus';
 import {
-getJEventRangeValidationError,
-getValidatorJContiguousThroughHeight,
-isCertifiedJHistoryCorruption,
-pruneFinalizedValidatorJHistory,
+  getJEventRangeValidationError,
+  getValidatorJContiguousThroughHeight,
+  isCertifiedJHistoryCorruption,
+  pruneFinalizedValidatorJHistory,
 } from '../../jurisdiction/local-history';
+import { getEntityFrameJRangeBudgetError, selectEntityTxsWithinJRangeBudget } from '../../jurisdiction/range-budget';
 import {
-getEntityFrameJRangeBudgetError,
-selectEntityTxsWithinJRangeBudget
-} from '../../jurisdiction/range-budget';
-import {
-deterministicEntityTimestamp,
-findAccountByCounterparty,
-findCrossJurisdictionBookAdmissionForAck,
-getCrossJurisdictionBookAdmissionError,
-isCrossJurisdictionBookAdmissionPending,
-normalizeEntityRef
+  deterministicEntityTimestamp,
+  findAccountByCounterparty,
+  findCrossJurisdictionBookAdmissionForAck,
+  getCrossJurisdictionBookAdmissionError,
+  isCrossJurisdictionBookAdmissionPending,
+  normalizeEntityRef,
 } from '../../orderbook/cross-j-orderbook';
 import {
-markWorkingOrderbookOffer,
-type NormalizedOrderbookOffer,
-type WorkingOrderbookOffer
+  markWorkingOrderbookOffer,
+  type NormalizedOrderbookOffer,
+  type WorkingOrderbookOffer,
 } from '../../orderbook/swap-execution';
-import {
-cloneIsolatedProposedEntityFrame
-} from '../../protocol/runtime-input-clone';
-import { compareStableText,safeStringify } from '../../protocol/serialization';
-import {
-recordEntityFrameHistory
-} from '../../runtime/env-events';
+import { cloneIsolatedProposedEntityFrame } from '../../protocol/runtime-input-clone';
+import { compareStableText, safeStringify } from '../../protocol/serialization';
+import { recordEntityFrameHistory } from '../../runtime/env-events';
 import { nodeProcess } from '../../runtime/platform';
-import { recordRuntimeSecurityIncident,resolveRuntimeSecurityIncident } from '../../runtime/security-incidents';
+import { recordRuntimeSecurityIncident, resolveRuntimeSecurityIncident } from '../../runtime/security-incidents';
 import type {
-AccountTx,
-CertifiedEntityFrameLink,
-ConsensusConfig,
-ConsensusOutputOrigin,
-EntityFrameAuthority,
-EntityInput,
-EntityLeaderCertificate,
-EntityLeaderTimeoutVote,
-EntityReplica,
-EntityState,
-EntityTx,
-Env,
-HankoString,
-HashToSign,
-ProposedEntityFrame,
-RuntimeOverlayRecord,
-ValidatorEntityFrameExecution
+  AccountTx,
+  CertifiedEntityFrameLink,
+  ConsensusConfig,
+  ConsensusOutputOrigin,
+  EntityFrameAuthority,
+  EntityInput,
+  EntityLeaderCertificate,
+  EntityLeaderTimeoutVote,
+  EntityReplica,
+  EntityState,
+  EntityTx,
+  Env,
+  HankoString,
+  HashToSign,
+  ProposedEntityFrame,
+  RuntimeOverlayRecord,
+  ValidatorEntityFrameExecution,
 } from '../../types';
 import { log } from '../../utils';
 import { validateProposedEntityFrame } from '../../validation-utils';
 import {
-applyConsumptionOutput,
-createConsumptionProof,
-createEmptyConsumptionAccumulator,
-getConsumptionKey,
-type ConsumptionNode,
-type ConsumptionOutputIdentity,
+  applyConsumptionOutput,
+  createConsumptionProof,
+  createEmptyConsumptionAccumulator,
+  getConsumptionKey,
+  type ConsumptionNode,
+  type ConsumptionOutputIdentity,
 } from '../consumption-accumulator';
-import {
-getConsumptionNodeStore
-} from '../consumption-store';
-import {
-selectCrossJCommitPhaseTxs
-} from '../cross-j-proposer-materialization';
-import {
-emitDefaultProposerHtlcOnionAdvances
-} from '../htlc-onion-post-commit';
-import {
-collectCommittedCrossJurisdictionCancelAcks
-} from '../tx/handlers/account';
+import { getConsumptionNodeStore } from '../consumption-store';
+import { selectCrossJCommitPhaseTxs } from '../cross-j-proposer-materialization';
+import { emitDefaultProposerHtlcOnionAdvances } from '../htlc-onion-post-commit';
+import { collectCommittedCrossJurisdictionCancelAcks } from '../tx/handlers/account';
 import { queueAccountMempoolTx } from './account-mempool-queue';
+import { createEntityFrameHashFromStateRoot, selectEntityFrameTxByteBudget } from './frame';
 import {
-createEntityFrameHashFromStateRoot,
-selectEntityFrameTxByteBudget
-} from './frame';
-import {
-assertEntityLeaderVoteMatchesState,
-getEntityLeaderState,
-hashEntityLeaderVoteBody,
-isEntityActiveLeader,
-leaderVoteCollectionKey,
-type EntityLeaderStateView
+  assertEntityLeaderVoteMatchesState,
+  getEntityLeaderState,
+  hashEntityLeaderVoteBody,
+  isEntityActiveLeader,
+  leaderVoteCollectionKey,
+  type EntityLeaderStateView,
 } from './leader';
 import {
-assertCertifiedOutputSemanticIdentity,
-buildCertifiedEntityOutputHashes,
-buildConsensusOutputOriginForState,
-hashCertifiedEntityOutput,
-isLocalRuntimeProtocolOutput,
-isNonMutatingEntityWakeOutput,
-normalizeConsensusOutputOrigin,
-resolveConsensusOutputBoardAuthority
+  assertCertifiedOutputSemanticIdentity,
+  buildCertifiedEntityOutputHashes,
+  buildConsensusOutputOriginForState,
+  hashCertifiedEntityOutput,
+  isLocalRuntimeProtocolOutput,
+  isNonMutatingEntityWakeOutput,
+  normalizeConsensusOutputOrigin,
+  resolveConsensusOutputBoardAuthority,
 } from './output-certification';
 import { orderCertifiedOutputsBySequence } from './output-envelope';
-import { classifyEntityConsensusStateQuotaTransition,measureEntityConsensusStateBytes } from './state-quota';
+import { classifyEntityConsensusStateQuotaTransition, measureEntityConsensusStateBytes } from './state-quota';
 import {
-buildEntityFrameAuthority,
-computeCanonicalEntityConsensusStateHash,
-computeEntityFrameAuthorityRoot,
-encodeCanonicalEntityConsensusValue
+  buildEntityFrameAuthority,
+  computeCanonicalEntityConsensusStateHash,
+  computeEntityFrameAuthorityRoot,
+  encodeCanonicalEntityConsensusValue,
 } from './state-root';
 
 export { CROSS_J_PENDING_FILL_ACK_TTL_MS } from '../../extensions/cross-j/fill-ack';
 export { createEntityFrameHash } from './frame';
-export {
-mergeEntityInputs,
-prioritizeEntityConsensusInputs,
-prioritizeProtocolEntityInputs
-} from './input-merge';
+export { mergeEntityInputs, prioritizeEntityConsensusInputs, prioritizeProtocolEntityInputs } from './input-merge';
 
 const consumptionStateMeasurement = (state: EntityState) =>
   measureEntityConsensusStateBytes(state, {
@@ -206,8 +177,7 @@ const ENTITY_FRAME_PROFILE =
 const ENTITY_FRAME_SLOW_MS = Math.max(0, Number(nodeProcess?.env?.['XLN_ENTITY_FRAME_SLOW_MS'] || '1000'));
 export const entityFrameProfileEnabled = (): boolean =>
   ENTITY_FRAME_PROFILE || isRuntimePerfProfileEnabled('XLN_ENTITY_FRAME_PROFILE', 'XLN_ENTITY_INPUT_PROFILE');
-export const entityFrameSlowMs = (): number =>
-  readRuntimePerfSlowMs('XLN_ENTITY_FRAME_SLOW_MS', ENTITY_FRAME_SLOW_MS);
+export const entityFrameSlowMs = (): number => readRuntimePerfSlowMs('XLN_ENTITY_FRAME_SLOW_MS', ENTITY_FRAME_SLOW_MS);
 export const entityLog = createStructuredLogger('entity');
 
 export const getReplicaJRangeValidationError = (env: Env, replica: EntityReplica, txs: EntityTx[]): string | null => {
@@ -222,7 +192,7 @@ export const getReplicaJRangeValidationError = (env: Env, replica: EntityReplica
         replica.jHistory,
         tx.data,
         activeProposerId,
-        (signerId, digest, signature) => verifyFrame(env, signerId, digest, signature),
+        (signerId, digest, signature) => verifyAccountSignature(env, signerId, digest, signature),
       );
       if (error) return error;
     }
@@ -436,7 +406,7 @@ export const verifyHashPrecommitSignatures = (
       log.error(`❌ ${context}: missing signature[${i}] from ${signerId}`);
       return false;
     }
-    if (!verifyFrame(env, signerId, hashInfo.hash, sig)) {
+    if (!verifyAccountSignature(env, signerId, hashInfo.hash, sig)) {
       log.error(
         `❌ ${context}: invalid ${hashInfo.type} signature[${i}] from ${signerId} ` +
           `hash=${hashInfo.hash.slice(0, 30)}... context=${hashInfo.context}`,
@@ -457,21 +427,9 @@ export const hasVerifiedPreparedQuorum = (
   if (!hashes?.length || hashes[0]?.type !== 'entityFrame' || hashes[0]?.hash !== frame.hash) {
     throw new Error(`${context}_MANIFEST_INVALID:${frame.hash}`);
   }
-  const signatures = normalizePrecommitBundles(
-    state.config,
-    frame.collectedSigs ?? new Map(),
-    context,
-  );
+  const signatures = normalizePrecommitBundles(state.config, frame.collectedSigs ?? new Map(), context);
   for (const [signerId, bundle] of signatures) {
-    if (!verifyHashPrecommitSignatures(
-      env,
-      signerId,
-      hashes,
-      frame.hash,
-      frame.height,
-      bundle,
-      context,
-    )) {
+    if (!verifyHashPrecommitSignatures(env, signerId, hashes, frame.hash, frame.height, bundle, context)) {
       throw new Error(`${context}_SIGNATURE_INVALID:${frame.hash}:${signerId}`);
     }
   }
@@ -554,7 +512,7 @@ export const verifyEntityLeaderCertificate = (
     if (!state.config.validators.some(validator => validator.toLowerCase() === signerId)) return false;
     if (vote.voterId.toLowerCase() !== signerId) return false;
     if (leaderVoteCollectionKey(vote) !== leaderVoteCollectionKey(certificate)) return false;
-    if (!verifyFrame(env, signerId, hashEntityLeaderVoteBody(vote), vote.signature)) return false;
+    if (!verifyAccountSignature(env, signerId, hashEntityLeaderVoteBody(vote), vote.signature)) return false;
     validSigners.push(signerId);
   }
   try {
@@ -818,26 +776,32 @@ export const wrapCertifiedEntityOutputs = (
     if (isLocalRuntimeProtocolOutput(output)) {
       if (!emitLocalRuntimeOutputs) return [];
       const targetEntityId = output.entityId.trim().toLowerCase();
-      const localTarget = Array.from(env.eReplicas.values()).some(replica =>
-        replica.entityId.toLowerCase() === targetEntityId &&
-        replica.signerId.toLowerCase() === output.signerId.toLowerCase());
+      const localTarget = Array.from(env.eReplicas.values()).some(
+        replica =>
+          replica.entityId.toLowerCase() === targetEntityId &&
+          replica.signerId.toLowerCase() === output.signerId.toLowerCase(),
+      );
       if (!localTarget) {
         throw new Error(`RUNTIME_OUTPUT_TARGET_NOT_LOCAL:${targetEntityId}:${output.signerId}`);
       }
       if (!output.entityTxs?.length) throw new Error(`RUNTIME_OUTPUT_ENTITY_TXS_MISSING:index=${outputIndex}`);
-      return [{
-        entityId: targetEntityId,
-        signerId: output.signerId.toLowerCase(),
-        entityTxs: [{
-          type: 'runtimeOutput',
-          data: {
-            protocol: 'cross-j',
-            sourceEntityId: sourceState.entityId.toLowerCase(),
-            targetEntityId,
-            entityTxs: structuredClone(output.entityTxs),
-          },
-        }],
-      }];
+      return [
+        {
+          entityId: targetEntityId,
+          signerId: output.signerId.toLowerCase(),
+          entityTxs: [
+            {
+              type: 'runtimeOutput',
+              data: {
+                protocol: 'cross-j',
+                sourceEntityId: sourceState.entityId.toLowerCase(),
+                targetEntityId,
+                entityTxs: structuredClone(output.entityTxs),
+              },
+            },
+          ],
+        },
+      ];
     }
     const outputHash = outputHashes.find(
       hashInfo => hashInfo.context === `entity-output:${frame.height}:${outputIndex}`,
@@ -871,20 +835,22 @@ export const wrapCertifiedEntityOutputs = (
     if (!entityTxs) throw new Error(`CONSENSUS_OUTPUT_ENTITY_TXS_MISSING:index=${outputIndex}`);
     const routedOutput = structuredClone(output);
     delete routedOutput.certifiedOutputIdentity;
-    return [{
-      ...routedOutput,
-      entityTxs: [
-        {
-          type: 'consensusOutput',
-          data: {
-            origin,
-            outputHanko,
-            targetEntityId,
-            entityTxs: structuredClone(entityTxs),
+    return [
+      {
+        ...routedOutput,
+        entityTxs: [
+          {
+            type: 'consensusOutput',
+            data: {
+              origin,
+              outputHanko,
+              targetEntityId,
+              entityTxs: structuredClone(entityTxs),
+            },
           },
-        },
-      ],
-    }];
+        ],
+      },
+    ];
   });
 };
 
@@ -1371,7 +1337,11 @@ export function getPrevFrameHash(state: EntityState): string {
   );
 }
 
-export const assertFrameParentMatchesState = (state: EntityState, frame: ProposedEntityFrame, context: string): void => {
+export const assertFrameParentMatchesState = (
+  state: EntityState,
+  frame: ProposedEntityFrame,
+  context: string,
+): void => {
   const expected = getPrevFrameHash(state);
   if (frame.parentFrameHash !== expected) {
     throw new Error(`${context}:expected=${expected}:received=${frame.parentFrameHash}:height=${frame.height}`);
@@ -1715,4 +1685,3 @@ export const shouldAutoPropose = (replica: EntityReplica, _config: ConsensusConf
 
   return hasMempool && isProposer && !hasProposal;
 };
-

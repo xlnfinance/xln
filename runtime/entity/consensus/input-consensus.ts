@@ -3,147 +3,118 @@
  * committed account/J-layer side effects back into the runtime.
  */
 
-import { signAccountFrame as signFrame,verifyAccountSignature as verifyFrame } from '../../account/crypto';
+import { signAccountFrame, verifyAccountSignature } from '../../account/crypto';
 import { cacheCommittedAccountJClaimNodeChanges } from '../../account/j-claim-store';
-import {
-assertEntityConfigBoardAuthority,
-buildQuorumHanko,
-signEntityHashes
-} from '../../hanko/signing';
-import {
-logError,
-shortHash,
-shortId
-} from '../../infra/logger';
+import { assertEntityConfigBoardAuthority, buildQuorumHanko, signEntityHashes } from '../../hanko/signing';
+import { logError, shortHash, shortId } from '../../infra/logger';
 import { cumulativeMarksToPhases } from '../../infra/perf-profile';
 import {
-assertFrameJPrefix,
-buildCertifiedJPrefixTx,
-buildJPrefixCertificate,
-entityRequiresJPrefixCertificate,
-getJPrefixAttestationTemporalDisposition,
-hasDueLocalJPrefixAdvance,
-hasPendingLocalJEvent,
-isFrozenBaseJPrefixRollAuthorized,
-mergeJPrefixAttestations,
-verifyOutOfRoundJPrefixAttestation
+  assertFrameJPrefix,
+  buildCertifiedJPrefixTx,
+  buildJPrefixCertificate,
+  entityRequiresJPrefixCertificate,
+  getJPrefixAttestationTemporalDisposition,
+  hasDueLocalJPrefixAdvance,
+  hasPendingLocalJEvent,
+  isFrozenBaseJPrefixRollAuthorized,
+  mergeJPrefixAttestations,
+  verifyOutOfRoundJPrefixAttestation,
 } from '../../jurisdiction/j-prefix-consensus';
 import {
-cloneIsolatedEntityInput,
-cloneIsolatedEntityLeaderCertificate,
-cloneIsolatedEntityLeaderTimeoutVote,
-cloneIsolatedProposedEntityFrame,
+  cloneIsolatedEntityInput,
+  cloneIsolatedEntityLeaderCertificate,
+  cloneIsolatedEntityLeaderTimeoutVote,
+  cloneIsolatedProposedEntityFrame,
 } from '../../protocol/runtime-input-clone';
-import {
-applyStorageChanges,
-publishEntityCandidateEffects
-} from '../../runtime/env-events';
+import { applyStorageChanges, publishEntityCandidateEffects } from '../../runtime/env-events';
 import { nodeProcess } from '../../runtime/platform';
-import {
-cloneEntityReplica,
-removeCommittedTxsFromMempool
-} from '../../state-helpers';
+import { cloneEntityReplica, removeCommittedTxsFromMempool } from '../../state-helpers';
 import type {
-EntityInput,
-EntityLeaderTimeoutVote,
-EntityReplica,
-EntityState,
-EntityTx,
-Env,
-HankoString,
-JInput,
-ProposedEntityFrame,
-ValidatorEntityFrameExecution
+  EntityInput,
+  EntityLeaderTimeoutVote,
+  EntityReplica,
+  EntityState,
+  EntityTx,
+  Env,
+  HankoString,
+  JInput,
+  ProposedEntityFrame,
+  ValidatorEntityFrameExecution,
 } from '../../types';
-import { DEBUG,formatEntityDisplay,getPerfMs,HEAVY_LOGS,log } from '../../utils';
-import {
-prepareLocallyAuthoredEntityTxs
-} from '../command';
-import {
-cacheCommittedConsumptionNodeChanges
-} from '../consumption-store';
-import {
-appendDefaultProposerCrossJMaterializations
-} from '../cross-j-proposer-materialization';
-import {
-appendDefaultProposerAcceptedHtlcReveals
-} from '../htlc-onion-post-commit';
-import {
-emitCommittedPendingFrameWarnings
-} from '../scheduler';
+import { DEBUG, formatEntityDisplay, getPerfMs, HEAVY_LOGS, log } from '../../utils';
+import { prepareLocallyAuthoredEntityTxs } from '../command';
+import { cacheCommittedConsumptionNodeChanges } from '../consumption-store';
+import { appendDefaultProposerCrossJMaterializations } from '../cross-j-proposer-materialization';
+import { appendDefaultProposerAcceptedHtlcReveals } from '../htlc-onion-post-commit';
+import { emitCommittedPendingFrameWarnings } from '../scheduler';
 import { assertLocalJRebroadcastAllowed } from '../tx/handlers/j-rebroadcast';
 import { accountHasProposableMempool } from './account-mempool-eligibility';
+import { createEntityFrameHashFromStateRoot, isCanonicalEntityFrameDigest } from './frame';
 import {
-createEntityFrameHashFromStateRoot,
-isCanonicalEntityFrameDigest
-} from './frame';
-import {
-attachHankoWitnessToOutputs,
-buildEntityHashesToSign,
-getEntityHashManifestMismatch,
-isWitnessHashType,
-normalizeProposedFrameCollectedSigs,
-pruneHankoWitnessToReachableState,
-sealHankoWitnessInState,
-type HankoWitnessEntry,
+  attachHankoWitnessToOutputs,
+  buildEntityHashesToSign,
+  getEntityHashManifestMismatch,
+  isWitnessHashType,
+  normalizeProposedFrameCollectedSigs,
+  pruneHankoWitnessToReachableState,
+  sealHankoWitnessInState,
+  type HankoWitnessEntry,
 } from './hanko-witness';
 import { prioritizeScheduledWakeTransactions } from './input-merge';
 import {
-assertEntityLeaderVoteMatchesState,
-buildEntityLeaderCertificate,
-copyLocalEntityLeaderTimeoutVoteAuthorization,
-getEntityLeaderState,
-getEntityQuorumSafetyWarning,
-getReplicaProposalLeader,
-hashEntityLeaderVoteBody,
-isEntityActiveLeader,
-isLocalEntityLeaderTimeoutVote,
-isReplicaProposalLeader,
-leaderVoteCollectionKey
+  assertEntityLeaderVoteMatchesState,
+  buildEntityLeaderCertificate,
+  copyLocalEntityLeaderTimeoutVoteAuthorization,
+  getEntityLeaderState,
+  getEntityQuorumSafetyWarning,
+  getReplicaProposalLeader,
+  hashEntityLeaderVoteBody,
+  isEntityActiveLeader,
+  isLocalEntityLeaderTimeoutVote,
+  isReplicaProposalLeader,
+  leaderVoteCollectionKey,
 } from './leader';
+import { buildCertifiedEntityOutputHashes } from './output-certification';
 import {
-buildCertifiedEntityOutputHashes
-} from './output-certification';
-import {
-buildEntityFrameAuthority,
-computeCanonicalEntityConsensusStateHash,
-computeEntityFrameAuthorityRoot,
-encodeCanonicalEntityConsensusValue
+  buildEntityFrameAuthority,
+  computeCanonicalEntityConsensusStateHash,
+  computeEntityFrameAuthorityRoot,
+  encodeCanonicalEntityConsensusValue,
 } from './state-root';
 
 import { applyEntityFrame } from './frame-application';
 import {
-appendCertifiedEntityFrameLink,
-assertFrameParentMatchesState,
-assertProposerJRangesMatchLocalHistory,
-buildCertifiedEntityFrameLink,
-calculateQuorumPower,
-emitCommittedEntitySizeLog,
-ensureLocalJPrefixAttestation,
-entityFrameProfileEnabled,
-entityFrameSlowMs,
-entityLog,
-expectedCommittedLeaderState,
-getEntityMempoolAdmissionError,
-getFrameJPrefixValidationError,
-getPrevFrameHash,
-getReplicaJRangeValidationError,
-getValidatorExecutionForFrame,
-hasVerifiedPreparedQuorum,
-isJPrefixLocalFreshnessRace,
-isSingleSignerEntity,
-normalizePrecommitBundles,
-prepareCommittedEntitySizeLog,
-pruneReplicaFinalizedJHistory,
-runLocalPostCommitHooks,
-selectPreparedFrameFromCertificate,
-selectProposableEntityTxs,
-validateEntityInput,
-validateEntityReplica,
-validateProposedFrameLeader,
-validateVotingPower,
-verifyHashPrecommitSignatures,
-wrapCertifiedEntityOutputs,
+  appendCertifiedEntityFrameLink,
+  assertFrameParentMatchesState,
+  assertProposerJRangesMatchLocalHistory,
+  buildCertifiedEntityFrameLink,
+  calculateQuorumPower,
+  emitCommittedEntitySizeLog,
+  ensureLocalJPrefixAttestation,
+  entityFrameProfileEnabled,
+  entityFrameSlowMs,
+  entityLog,
+  expectedCommittedLeaderState,
+  getEntityMempoolAdmissionError,
+  getFrameJPrefixValidationError,
+  getPrevFrameHash,
+  getReplicaJRangeValidationError,
+  getValidatorExecutionForFrame,
+  hasVerifiedPreparedQuorum,
+  isJPrefixLocalFreshnessRace,
+  isSingleSignerEntity,
+  normalizePrecommitBundles,
+  prepareCommittedEntitySizeLog,
+  pruneReplicaFinalizedJHistory,
+  runLocalPostCommitHooks,
+  selectPreparedFrameFromCertificate,
+  selectProposableEntityTxs,
+  validateEntityInput,
+  validateEntityReplica,
+  validateProposedFrameLeader,
+  validateVotingPower,
+  verifyHashPrecommitSignatures,
+  wrapCertifiedEntityOutputs,
 } from './shared';
 
 const replayPreparedFrameForRelay = async (
@@ -334,7 +305,8 @@ const handleJPrefixAttestations = (context: ApplyEntityInputContext): ApplyEntit
     if (
       hasDueLocalJPrefixAdvance(workingReplica.state, workingReplica.jHistory) &&
       ensureLocalJPrefixAttestation(env, workingReplica, entityOutbox, false)
-    ) return null;
+    )
+      return null;
     return commitEntityConsensusInput(context);
   }
   const priorRound = workingReplica.jPrefixRound;
@@ -401,7 +373,7 @@ async function handleLeaderTimeoutVote(context: ApplyEntityInputContext): Promis
     if (voterId !== workingReplica.signerId.toLowerCase() || incoming.signature) {
       return rejectEntityConsensusInput(context);
     }
-    vote = { ...incoming, signature: await signFrame(env, workingReplica.signerId, voteHash) };
+    vote = { ...incoming, signature: await signAccountFrame(env, workingReplica.signerId, voteHash) };
     // The scheduler creates an explicitly local unsigned intent. Consensus turns
     // it into the signed protocol value, and that exact value must enter the WAL
     // and reliable-receipt path. Persisting the unsigned intent would lose its
@@ -419,7 +391,7 @@ async function handleLeaderTimeoutVote(context: ApplyEntityInputContext): Promis
         leaderTimeoutVote: vote,
       });
     }
-  } else if (!verifyFrame(env, voterId, voteHash, incoming.signature)) {
+  } else if (!verifyAccountSignature(env, voterId, voteHash, incoming.signature)) {
     return rejectEntityConsensusInput(context);
   }
 
@@ -447,12 +419,7 @@ async function handleLeaderTimeoutVote(context: ApplyEntityInputContext): Promis
     let preparedFrame: ProposedEntityFrame | null;
     try {
       const localLockHasPreparedQuorum = workingReplica.lockedFrame
-        ? hasVerifiedPreparedQuorum(
-            env,
-            workingReplica.state,
-            workingReplica.lockedFrame,
-            'ENTITY_PREPARED_LOCAL_LOCK',
-          )
+        ? hasVerifiedPreparedQuorum(env, workingReplica.state, workingReplica.lockedFrame, 'ENTITY_PREPARED_LOCAL_LOCK')
         : false;
       preparedFrame = selectPreparedFrameFromCertificate(env, workingReplica.state, certificate);
       if (!preparedFrame && localLockHasPreparedQuorum && workingReplica.lockedFrame) {
@@ -902,16 +869,18 @@ async function handleProposedFramePrecommit(context: ApplyEntityInputContext): P
   const localVotedView = Math.max(
     -1,
     ...[...(workingReplica.leaderVotes?.values() ?? [])]
-      .filter(vote =>
-        vote.voterId.trim().toLowerCase() === localValidatorId &&
-        vote.targetHeight === proposedFrame.height &&
-        vote.signature.length > 0,
+      .filter(
+        vote =>
+          vote.voterId.trim().toLowerCase() === localValidatorId &&
+          vote.targetHeight === proposedFrame.height &&
+          vote.signature.length > 0,
       )
       .map(vote => vote.toView),
   );
-  const certifiedView = workingReplica.pendingLeaderCertificate?.targetHeight === proposedFrame.height
-    ? workingReplica.pendingLeaderCertificate.toView
-    : -1;
+  const certifiedView =
+    workingReplica.pendingLeaderCertificate?.targetHeight === proposedFrame.height
+      ? workingReplica.pendingLeaderCertificate.toView
+      : -1;
   if (Math.max(localVotedView, certifiedView) > effectiveProposalView) {
     // A validator that already signed a higher-view timeout must not later
     // sign the superseded proposal merely because transport reordered lanes.
@@ -1033,7 +1002,7 @@ async function handleProposedFramePrecommit(context: ApplyEntityInputContext): P
     validatorNewState,
   );
   const allSignatures = await Promise.all(
-    hashesToSign.map(hashInfo => signFrame(env, workingReplica.signerId, hashInfo.hash)),
+    hashesToSign.map(hashInfo => signAccountFrame(env, workingReplica.signerId, hashInfo.hash)),
   );
   entityLog.debug('proposal.hashes_signed', { count: allSignatures.length });
 
@@ -1403,11 +1372,7 @@ export const applyEntityInput = async (
     throw new Error(`CROSS_J_LOCAL_COMMAND_SINGLE_SIGNER_REQUIRED:${entityReplica.entityId}`);
   }
   let trustedLocalEntityTxs: EntityTx[] = [];
-  const admissionError = getEntityMempoolAdmissionError(
-    entityReplica,
-    entityInput,
-    trustedLocalCrossJurisdiction,
-  );
+  const admissionError = getEntityMempoolAdmissionError(entityReplica, entityInput, trustedLocalCrossJurisdiction);
   if (admissionError) {
     log.error(`❌ Entity mempool admission rejected for ${entityInput.entityId}: ${admissionError}`);
     return {
@@ -1537,17 +1502,14 @@ export const applyEntityInput = async (
   // self-wake is also allowed to trigger proposer-local work whose public
   // result must be signed into consensus, such as cross-J pull commitments.
   const suppliedEntityTxs = entityInput.entityTxs ?? [];
-  const secretAwareEntityTxs = localCanPropose && suppliedEntityTxs.length > 0
-    ? await appendDefaultProposerAcceptedHtlcReveals(env, workingReplica, suppliedEntityTxs)
-    : suppliedEntityTxs;
+  const secretAwareEntityTxs =
+    localCanPropose && suppliedEntityTxs.length > 0
+      ? await appendDefaultProposerAcceptedHtlcReveals(env, workingReplica, suppliedEntityTxs)
+      : suppliedEntityTxs;
   // The default source-hub signer owns the private cross-J ladder seed. During
   // leader failover it signs its individual materialization command locally;
   // the normal non-leader forwarding path delivers it to the active proposer.
-  const admittedEntityTxs = appendDefaultProposerCrossJMaterializations(
-    env,
-    workingReplica,
-    secretAwareEntityTxs,
-  );
+  const admittedEntityTxs = appendDefaultProposerCrossJMaterializations(env, workingReplica, secretAwareEntityTxs);
   if (nodeProcess?.env?.['XLN_STORAGE_DEBUG_REPLICA_META'] === '1') {
     entityLog.info('replica_meta.admission_debug', {
       entityId: workingReplica.entityId,
@@ -1626,7 +1588,8 @@ export const applyEntityInput = async (
     trustedLocalEntityTxs.length > 0 ||
     workingReplica.mempool.length > 0 ||
     Array.from(workingReplica.state.accounts.values()).some(account =>
-      accountHasProposableMempool(account, workingReplica.state));
+      accountHasProposableMempool(account, workingReplica.state),
+    );
   if (entityInput.jPrefixAttestations || hasLocalConsensusWork) {
     // Commit/proposal notifications above may advance the parent Entity height.
     // Only sign after those terminal paths so this validator never emits a head
@@ -1642,16 +1605,13 @@ export const applyEntityInput = async (
       mempool: workingReplica.mempool.length,
       localRuntimeMempool: trustedLocalEntityTxs.length,
       hasProposal: Boolean(workingReplica.proposal),
-      txs: [
-        ...trustedLocalEntityTxs,
-        ...workingReplica.mempool,
-      ].map(tx => tx.type),
+      txs: [...trustedLocalEntityTxs, ...workingReplica.mempool].map(tx => tx.type),
     });
   }
 
   const isSingleSigner = isSingleSignerEntity(workingReplica.state);
-  const hasProposableAccountMempool = Array.from(workingReplica.state.accounts.values()).some(
-    account => accountHasProposableMempool(account, workingReplica.state),
+  const hasProposableAccountMempool = Array.from(workingReplica.state.accounts.values()).some(account =>
+    accountHasProposableMempool(account, workingReplica.state),
   );
   let proposalJPrefixCertificate =
     localCanPropose && workingReplica.jPrefixRound
@@ -1722,10 +1682,7 @@ export const applyEntityInput = async (
       reason: proposalSelection.reason ?? null,
     });
   }
-  if (
-    trustedLocalCrossJurisdiction &&
-    proposalTxs.length !== trustedLocalProposalTxs.length
-  ) {
+  if (trustedLocalCrossJurisdiction && proposalTxs.length !== trustedLocalProposalTxs.length) {
     throw new Error(
       `CROSS_J_LOCAL_COMMAND_PARTIAL_FRAME_FORBIDDEN:${workingReplica.entityId}:` +
         `selected=${proposalTxs.length}:required=${trustedLocalProposalTxs.length}`,
@@ -1818,7 +1775,7 @@ export const applyEntityInput = async (
     const collectedSigs = new Map<string, string[]>([
       [
         workingReplica.signerId.toLowerCase(),
-        await Promise.all(hashesToSign.map(hashInfo => signFrame(env, workingReplica.signerId, hashInfo.hash))),
+        await Promise.all(hashesToSign.map(hashInfo => signAccountFrame(env, workingReplica.signerId, hashInfo.hash))),
       ],
     ]);
     checkpointConsensusProfile('signatures');
@@ -1903,12 +1860,10 @@ export const applyEntityInput = async (
     appendCertifiedEntityFrameLink(
       env,
       workingReplica,
-      buildCertifiedEntityFrameLink(
-        workingReplica.state.entityId,
-        singleSignerFrame,
-        workingReplica.state,
-        { stateRoot: singleSignerStateRoot, authority: singleSignerAuthority },
-      ),
+      buildCertifiedEntityFrameLink(workingReplica.state.entityId, singleSignerFrame, workingReplica.state, {
+        stateRoot: singleSignerStateRoot,
+        authority: singleSignerAuthority,
+      }),
     );
     publishEntityCandidateEffects(env, candidateEffects);
     pruneReplicaFinalizedJHistory(workingReplica);
@@ -1937,9 +1892,7 @@ export const applyEntityInput = async (
       outputs: entityOutbox,
       jOutputs: jOutbox,
       workingReplica,
-      ...(phaseContext.canonicalAppliedInput
-        ? { canonicalAppliedInput: phaseContext.canonicalAppliedInput }
-        : {}),
+      ...(phaseContext.canonicalAppliedInput ? { canonicalAppliedInput: phaseContext.canonicalAppliedInput } : {}),
     };
   }
 
@@ -1960,8 +1913,7 @@ export const applyEntityInput = async (
     }
     workingReplica.validatorExecution = await replayPreparedFrameForRelay(env, workingReplica, preparedFrame);
     workingReplica.proposal = cloneIsolatedProposedEntityFrame(preparedFrame);
-    workingReplica.proposal.leader.relayCertificate =
-      cloneIsolatedEntityLeaderCertificate(relayCertificate);
+    workingReplica.proposal.leader.relayCertificate = cloneIsolatedEntityLeaderCertificate(relayCertificate);
     for (const validatorId of workingReplica.state.config.validators) {
       if (validatorId.toLowerCase() === workingReplica.signerId.toLowerCase()) continue;
       entityOutbox.push({
@@ -2062,7 +2014,7 @@ export const applyEntityInput = async (
       workingReplica.state.config,
       proposedNewState,
     );
-    const selfSigs = await Promise.all(hashesToSign.map(h => signFrame(env, workingReplica.signerId, h.hash)));
+    const selfSigs = await Promise.all(hashesToSign.map(h => signAccountFrame(env, workingReplica.signerId, h.hash)));
 
     const proposal: ProposedEntityFrame = {
       height: newHeight,
@@ -2149,9 +2101,6 @@ export const applyEntityInput = async (
     outputs: entityOutbox,
     jOutputs: jOutbox,
     workingReplica,
-    ...(phaseContext.canonicalAppliedInput
-      ? { canonicalAppliedInput: phaseContext.canonicalAppliedInput }
-      : {}),
+    ...(phaseContext.canonicalAppliedInput ? { canonicalAppliedInput: phaseContext.canonicalAppliedInput } : {}),
   };
 };
-

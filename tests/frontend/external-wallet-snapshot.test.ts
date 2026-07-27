@@ -10,28 +10,25 @@ import {
   resolveExternalWalletFinalityDepth,
 } from '../../frontend/src/lib/components/Entity/external-wallet-snapshot';
 
-const adapterFixture = (input: {
-  head?: unknown;
-  finalityDepth?: unknown;
-  blockHash?: string | null;
-}) => ({
+const adapterFixture = (input: { head?: unknown; finalityDepth?: unknown; blockHash?: string | null }) => ({
   getCurrentBlockNumber: input.head === undefined ? undefined : async () => input.head,
   getFinalityDepth: input.finalityDepth === undefined ? undefined : () => input.finalityDepth,
   provider: {
     getBlockNumber: async () => input.head ?? 10,
-    getBlock: async (height: number) => input.blockHash === null
-      ? null
-      : { number: height, hash: input.blockHash ?? `0xblock${height}` },
+    getBlock: async (height: number) =>
+      input.blockHash === null ? null : { number: height, hash: input.blockHash ?? `0xblock${height}` },
   },
 });
 
 describe('external wallet snapshot helpers', () => {
   test('requires bigint snapshot fields and exact array counts', () => {
     expect(requireExternalSnapshotBigInt(7n, 'nativeBalance')).toBe(7n);
-    expect(() => requireExternalSnapshotBigInt(null, 'nativeBalance'))
-      .toThrow('EXTERNAL_WALLET_SNAPSHOT_FIELD_MISSING:nativeBalance');
-    expect(() => assertExternalSnapshotCount([1, 2], 3, 'allowances'))
-      .toThrow('EXTERNAL_WALLET_SNAPSHOT_FIELD_COUNT_MISMATCH:allowances:expected=3:actual=2');
+    expect(() => requireExternalSnapshotBigInt(null, 'nativeBalance')).toThrow(
+      'EXTERNAL_WALLET_SNAPSHOT_FIELD_MISSING:nativeBalance',
+    );
+    expect(() => assertExternalSnapshotCount([1, 2], 3, 'allowances')).toThrow(
+      'EXTERNAL_WALLET_SNAPSHOT_FIELD_COUNT_MISMATCH:allowances:expected=3:actual=2',
+    );
   });
 
   test('normalizes optional token ids conservatively', () => {
@@ -56,14 +53,18 @@ describe('external wallet snapshot helpers', () => {
   });
 
   test('fails loud on invalid finality, head, unavailable source, or missing block hash', async () => {
-    expect(() => resolveExternalWalletFinalityDepth(adapterFixture({ finalityDepth: -1 }) as any))
-      .toThrow('EXTERNAL_WALLET_SNAPSHOT_FINALITY_INVALID:-1');
-    await expect(readExternalWalletSnapshotSource(adapterFixture({ head: -1 }) as any))
-      .rejects.toThrow('EXTERNAL_WALLET_SNAPSHOT_HEAD_INVALID:-1');
-    await expect(readExternalWalletSnapshotSource(adapterFixture({ head: 1, finalityDepth: 2 }) as any))
-      .rejects.toThrow('EXTERNAL_WALLET_SNAPSHOT_FINALITY_UNAVAILABLE:head=1:depth=2');
-    await expect(readExternalWalletSnapshotSource(adapterFixture({ head: 3, finalityDepth: 1, blockHash: null }) as any))
-      .rejects.toThrow('EXTERNAL_WALLET_SNAPSHOT_BLOCK_HASH_MISSING:2');
+    expect(() => resolveExternalWalletFinalityDepth(adapterFixture({ finalityDepth: -1 }) as any)).toThrow(
+      'EXTERNAL_WALLET_SNAPSHOT_FINALITY_INVALID:-1',
+    );
+    await expect(readExternalWalletSnapshotSource(adapterFixture({ head: -1 }) as any)).rejects.toThrow(
+      'EXTERNAL_WALLET_SNAPSHOT_HEAD_INVALID:-1',
+    );
+    await expect(
+      readExternalWalletSnapshotSource(adapterFixture({ head: 1, finalityDepth: 2 }) as any),
+    ).rejects.toThrow('EXTERNAL_WALLET_SNAPSHOT_FINALITY_UNAVAILABLE:head=1:depth=2');
+    await expect(
+      readExternalWalletSnapshotSource(adapterFixture({ head: 3, finalityDepth: 1, blockHash: null }) as any),
+    ).rejects.toThrow('EXTERNAL_WALLET_SNAPSHOT_BLOCK_HASH_MISSING:2');
   });
 
   test('cancels an in-flight local observation after runtime switch or quiesce', () => {
@@ -78,7 +79,9 @@ describe('external wallet snapshot helpers', () => {
 
     expect(resolveExternalWalletSnapshotIngress('0xabc', running)).toBe('apply');
     expect(resolveExternalWalletSnapshotIngress('0xabc', quiescing)).toBe('cancel-runtime-quiescing');
-    expect(resolveExternalWalletSnapshotIngress('0xabc', { ...running, runtimeId: '0xdef' })).toBe('cancel-runtime-changed');
+    expect(resolveExternalWalletSnapshotIngress('0xabc', { ...running, runtimeId: '0xdef' })).toBe(
+      'cancel-runtime-changed',
+    );
     expect(resolveExternalWalletSnapshotIngress('0xabc', null)).toBe('cancel-runtime-changed');
     expect(() => resolveExternalWalletSnapshotIngress('', running)).toThrow(
       'EXTERNAL_WALLET_SNAPSHOT_RUNTIME_ID_MISSING',
@@ -95,16 +98,18 @@ describe('external wallet snapshot helpers', () => {
     expect(fetchSource).not.toContain("$runtimeControllerHandle.mode === 'remote' && !envAtStart");
     expect(fetchSource).not.toContain('!envAtStart) {');
     expect(fetchSource).toContain('const xln = envAtStart ? await getXLN() : null;');
-    expect(fetchSource).toContain("const jadapter = envAtStart && xln ? getCurrentEntityJAdapter(xln, envAtStart, 'fetch-external-tokens') : null;");
+    expect(fetchSource).toContain('getCurrentEntityJAdapter(xln, envAtStart, "fetch-external-tokens")');
     expect(fetchSource).toContain('const tokenList = await getTokenList(jadapter, runtimeId, jurisdiction);');
-    expect(fetchSource).toContain('const spender = resolveExternalWalletSpender(jadapter, jurisdiction);');
+    expect(fetchSource).toContain(
+      'resolveExternalWalletSpender(jadapter, jurisdiction, panelView.jurisdictions ?? [])',
+    );
     expect(source).toContain('const snapshot = await requestExternalWalletSnapshot(');
-    expect(source).toContain("if (!snapshot) {");
+    expect(source).toContain('if (!snapshot) {');
   });
 
   test('local wallet reads never certify an incomplete jurisdiction block', () => {
-    const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
-    const start = source.indexOf('async function requestExternalWalletSnapshot');
+    const source = readFileSync('frontend/src/lib/components/Entity/external-wallet-reader.ts', 'utf8');
+    const start = source.indexOf('export async function requestExternalWalletSnapshot');
     const end = source.indexOf('function buildExternalWalletStateSyncSignature', start);
     expect(start).toBeGreaterThan(0);
     expect(end).toBeGreaterThan(start);
@@ -115,9 +120,10 @@ describe('external wallet snapshot helpers', () => {
 
   test('live wallet balances refresh through read-only snapshots without producing consensus input', () => {
     const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
-    expect(source).toContain('signal: AbortSignal.timeout(EXTERNAL_WALLET_REQUEST_TIMEOUT_MS)');
+    const reader = readFileSync('frontend/src/lib/components/Entity/external-wallet-reader.ts', 'utf8');
+    expect(reader).toContain('signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)');
     expect(source).toContain('const externalWalletRefresh = window.setInterval(() => {');
-    expect(source).toContain("document.visibilityState !== 'visible' || !activeIsLive");
+    expect(source).toMatch(/document\.visibilityState !== ["']visible["'] \|\| !activeIsLive/);
     expect(source).toContain('void fetchExternalTokens(true);');
     expect(source).toContain('window.clearInterval(externalWalletRefresh);');
     expect(source).not.toContain("'external-wallet-snapshot-ui-local'");
@@ -125,9 +131,12 @@ describe('external wallet snapshot helpers', () => {
 
   test('external wallet snapshot transport failures are non-fatal persistent diagnostics', () => {
     const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
-    expect(source).toContain('function isExternalWalletSnapshotTransportFailure(message: string): boolean');
-    expect(source).toContain("logEntityPanelDiagnostic('External token snapshot unavailable', { error: message });");
-    expect(source).toContain("logEntityPanelDiagnostic('Failed to fetch external tokens', { error: message });");
+    const reader = readFileSync('frontend/src/lib/components/Entity/external-wallet-reader.ts', 'utf8');
+    expect(reader).toContain('function isExternalWalletSnapshotTransportFailure(message: string): boolean');
+    expect(source).toMatch(
+      /logEntityPanelDiagnostic\(["']External token snapshot unavailable["'], \{ error: message \}\)/,
+    );
+    expect(source).toMatch(/logEntityPanelDiagnostic\(["']Failed to fetch external tokens["'], \{ error: message \}\)/);
     expect(source).not.toContain('console.warn');
     expect(source).not.toContain('console.error');
     expect(source).not.toContain('console.info');

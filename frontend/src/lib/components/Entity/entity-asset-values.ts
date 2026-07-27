@@ -1,6 +1,9 @@
 import type { AccountMachine } from '@xln/runtime/xln-api';
+import { ZeroAddress } from 'ethers';
 import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
 import { amountToUsd, getAssetUsdPrice } from '$lib/utils/assetPricing';
+import type { AssetLedgerRow, AssetLedgerTotals } from './asset-ledger';
+import type { ExternalToken } from './entity-asset-catalog';
 import { requireTokenDecimals } from './token-metadata';
 
 export type AssetTokenInfo = {
@@ -112,11 +115,7 @@ export function getAssetValueUsd(amount: bigint, info: AssetTokenInfo, symbolOve
 }
 
 export function getExternalTokenValueUsd(token: ExternalTokenValueInput): number {
-  return amountToUsd(
-    token.balance,
-    requireTokenDecimals(token.decimals, token.symbol),
-    token.symbol,
-  );
+  return amountToUsd(token.balance, requireTokenDecimals(token.decimals, token.symbol), token.symbol);
 }
 
 export function calculatePortfolioValueUsd(
@@ -137,13 +136,14 @@ export function createEntityAssetValueFormatters(input: {
 }): EntityAssetValueFormatters {
   return {
     formatAmount: (amount, decimals) => formatTokenAmount(amount, decimals, input.tokenPrecision),
-    formatCompact: (value) => formatCompactUsd(value, input.compactNumbers),
-    formatApproxUsd: (value) => formatApproxUsd(value, input.compactNumbers),
+    formatCompact: value => formatCompactUsd(value, input.compactNumbers),
+    formatApproxUsd: value => formatApproxUsd(value, input.compactNumbers),
     formatUsdExact,
     getAssetPrice: getAssetPriceUsd,
-    getAssetValue: (tokenId, amount, symbolOverride) => getAssetValueUsd(amount, input.getTokenInfo(tokenId), symbolOverride),
+    getAssetValue: (tokenId, amount, symbolOverride) =>
+      getAssetValueUsd(amount, input.getTokenInfo(tokenId), symbolOverride),
     getExternalValue: getExternalTokenValueUsd,
-    calculatePortfolioValue: (reserves) => calculatePortfolioValueUsd(reserves, input.getTokenInfo),
+    calculatePortfolioValue: reserves => calculatePortfolioValueUsd(reserves, input.getTokenInfo),
   };
 }
 
@@ -174,7 +174,8 @@ export function buildAccountPortfolioData(options: {
     for (const [tokenId, delta] of account.deltas.entries()) {
       const info = options.getTokenInfo(Number(tokenId));
       const symbol = info.symbol ?? 'UNK';
-      const isLeftEntity = String(options.localEntityId || '').toLowerCase() < String(counterpartyId || '').toLowerCase();
+      const isLeftEntity =
+        String(options.localEntityId || '').toLowerCase() < String(counterpartyId || '').toLowerCase();
       const derived = options.deriveDelta?.(delta, isLeftEntity);
       if (!derived) continue;
 
@@ -187,4 +188,120 @@ export function buildAccountPortfolioData(options: {
 
   out.total = out.outbound;
   return out;
+}
+
+export function buildAccountSpendableByToken(options: {
+  accounts: Map<string, AccountMachine> | undefined;
+  localEntityId: string;
+  deriveDelta: FrontendXlnFunctions['deriveDelta'] | undefined;
+}): Map<number, bigint> {
+  const totals = new Map<number, bigint>();
+  if (!options.accounts || !options.localEntityId || !options.deriveDelta) return totals;
+  for (const [counterpartyId, account] of options.accounts.entries()) {
+    if (!(account?.deltas instanceof Map)) continue;
+    const isLeftEntity = options.localEntityId.toLowerCase() < String(counterpartyId || '').toLowerCase();
+    for (const [tokenId, delta] of account.deltas.entries()) {
+      const numericTokenId = Number(tokenId);
+      if (!Number.isFinite(numericTokenId) || numericTokenId <= 0) continue;
+      const spendable = options.deriveDelta(delta, isLeftEntity)?.outCapacity ?? 0n;
+      if (spendable > 0n) totals.set(numericTokenId, (totals.get(numericTokenId) ?? 0n) + spendable);
+    }
+  }
+  return totals;
+}
+
+export function buildAssetLedger(options: {
+  externalTokens: ExternalToken[];
+  reserves: Map<number, bigint>;
+  accountSpendable: Map<number, bigint>;
+  getExternalValue(token: ExternalToken): number;
+  getAssetValue(tokenId: number, amount: bigint, symbol?: string): number;
+  resolveReserveTokenMeta(tokenId: number): { symbol: string; decimals: number };
+  compareSymbols(left: string, right: string): number;
+}): { rows: AssetLedgerRow[]; totals: AssetLedgerTotals } {
+  const rows = new Map<string, AssetLedgerRow>();
+  const valueFor = (tokenId: number, amount: bigint, symbol: string) => options.getAssetValue(tokenId, amount, symbol);
+
+  for (const token of options.externalTokens) {
+    const isReserve = typeof token.tokenId === 'number' && token.tokenId > 0;
+    const reserveBalance = isReserve ? (options.reserves.get(token.tokenId!) ?? 0n) : 0n;
+    const accountBalance = isReserve ? (options.accountSpendable.get(token.tokenId!) ?? 0n) : 0n;
+    const externalUsd = options.getExternalValue(token);
+    const reserveUsd = isReserve ? valueFor(token.tokenId!, reserveBalance, token.symbol) : 0;
+    const accountUsd = isReserve ? valueFor(token.tokenId!, accountBalance, token.symbol) : 0;
+    rows.set(
+      typeof token.tokenId === 'number'
+        ? `token:${token.tokenId}`
+        : `address:${String(token.address || '')
+            .trim()
+            .toLowerCase()}`,
+      {
+        symbol: token.symbol,
+        address: token.address,
+        decimals: token.decimals,
+        tokenId: token.tokenId,
+        isNative: token.symbol === 'ETH' || token.address === ZeroAddress,
+        externalBalance: token.balance,
+        reserveBalance,
+        accountBalance,
+        externalUsd,
+        reserveUsd,
+        accountUsd,
+        totalUsd: externalUsd + reserveUsd + accountUsd,
+        ...(token.readError ? { externalError: token.readError } : {}),
+      },
+    );
+  }
+
+  for (const tokenId of new Set([...options.reserves.keys(), ...options.accountSpendable.keys()])) {
+    if (!Number.isFinite(tokenId) || tokenId <= 0 || rows.has(`token:${tokenId}`)) continue;
+    const info = options.resolveReserveTokenMeta(tokenId);
+    const reserveBalance = options.reserves.get(tokenId) ?? 0n;
+    const accountBalance = options.accountSpendable.get(tokenId) ?? 0n;
+    const reserveUsd = valueFor(tokenId, reserveBalance, info.symbol);
+    const accountUsd = valueFor(tokenId, accountBalance, info.symbol);
+    rows.set(`token:${tokenId}`, {
+      symbol: info.symbol,
+      address: '',
+      decimals: info.decimals,
+      tokenId,
+      isNative: false,
+      externalBalance: 0n,
+      reserveBalance,
+      accountBalance,
+      externalUsd: 0,
+      reserveUsd,
+      accountUsd,
+      totalUsd: reserveUsd + accountUsd,
+    });
+  }
+
+  const nativeKey = `address:${ZeroAddress.toLowerCase()}`;
+  if (!rows.has(nativeKey)) {
+    rows.set(nativeKey, {
+      symbol: 'ETH',
+      address: ZeroAddress,
+      decimals: 18,
+      tokenId: undefined,
+      isNative: true,
+      externalBalance: 0n,
+      reserveBalance: 0n,
+      accountBalance: 0n,
+      externalUsd: 0,
+      reserveUsd: 0,
+      accountUsd: 0,
+      totalUsd: 0,
+    });
+  }
+
+  const result = [...rows.values()].sort((left, right) => options.compareSymbols(left.symbol, right.symbol));
+  const totals = result.reduce<AssetLedgerTotals>(
+    (sum, row) => ({
+      externalUsd: sum.externalUsd + row.externalUsd,
+      reserveUsd: sum.reserveUsd + row.reserveUsd,
+      accountUsd: sum.accountUsd + row.accountUsd,
+    }),
+    { externalUsd: 0, reserveUsd: 0, accountUsd: 0 },
+  );
+  return { rows: result, totals };
 }

@@ -1,1131 +1,191 @@
-import { writable, get, derived } from 'svelte/store';
-import { HDNodeWallet, Mnemonic, Wallet, getAddress, getIndexedAccountPath } from 'ethers';
+import { derived, get, writable } from 'svelte/store';
+
+import { Wallet } from 'ethers';
+
 import type {
-  ConsensusConfig,
   EncryptedRuntimeRecoveryBundleV1,
   Env,
   JurisdictionConfig,
   PersistedFrameJournal,
-  RoutedEntityInput,
   RuntimeInput,
-  TowerLastResortPayloadV1,
-  TowerCounterDisputeRemedy,
   RuntimeRecoveryBundleV1,
-  RuntimeRecoveryMetaV1,
-  RuntimeRecoverySignerV1,
-  TowerModeV1,
   TowerAppointmentV1,
+  TowerCounterDisputeRemedy,
+  TowerLastResortPayloadV1,
   TowerReceiptV1,
   XLNModule,
 } from '@xln/runtime/xln-api';
-import { runtimeOperations, runtimes, activeRuntimeId } from './runtimeStore';
+
+import { activeRuntimeId, runtimeOperations, runtimes } from './runtimeStore';
+
 import {
-  setXlnEnvironment,
-  resolveRelayUrls,
-  getXLN,
-  xlnInstance,
-  submitEntityInputs as submitXlnEntityInputs,
   dispatchRuntimeInputToRuntimeEnv,
+  getXLN,
+  resolveRelayUrls,
   resumeRemoteRuntimeCommandIntents,
+  setXlnEnvironment,
+  submitEntityInputs as submitXlnEntityInputs,
+  xlnInstance,
 } from './xlnStore';
+
 import { settings } from './settingsStore';
+
 import { toasts } from './toastStore';
+
 import { errorLog } from './errorLogStore';
-import { writeSavedCollateralPolicy, writeHubJoinPreference } from '../utils/onboardingPreferences';
+
+import { writeHubJoinPreference, writeSavedCollateralPolicy } from '../utils/onboardingPreferences';
+
 import { writeOnboardingCompleteForEntities } from '../utils/onboardingState';
+
 import { tabOperations } from './tabStore';
+
 import { isInactiveTabStandby } from '../utils/activeTabLock';
+
 import { unwrapLiveRuntimeEnv } from '../utils/liveRuntimeEnv';
+
 import { registerDebugSurface } from '../utils/debugSurface';
+
 import { generateLazyEntityIdPreview } from '../utils/lazyEntityId';
+
 import { parseStorageSchemaMismatch } from '../utils/storageSchemaRecovery';
+
 import {
   deleteVaultDeviceKey,
   protectVaultSecrets,
-  redactVaultRuntimeForPersistence,
   sameVaultProtectionLease,
   unprotectVaultSecrets,
   type ProtectedVaultSecrets,
   type VaultUnlockDurationMs,
 } from '../security/vaultProtection';
-import {
-  installRuntimeCommandJournalKeys,
-  lockRuntimeCommandJournal,
-} from './runtimeCommandJournalKeyring';
+
+import { lockRuntimeCommandJournal } from './runtimeCommandJournalKeyring';
+
 import { deriveJurisdictionSignerIndex } from '../../../../runtime/jurisdiction/signer-derivation';
 
-// Types
-export interface Signer {
-  index: number; // signer list index
-  derivationIndex?: number; // HD account index; defaults to the visible signer index when absent
-  address: string;
-  name: string;
-  entityId?: string; // Auto-created entity for this signer
-  jurisdiction?: string; // Preferred jurisdiction for this signer/runtime lane
-}
+import {
+  findRuntimeByIdCaseInsensitive,
+  hasConnectedJurisdictionAdapter,
+  hasRuntimeJurisdictionAddresses,
+  listDefaultJurisdictionImports,
+  resolveJurisdictionConfig,
+  resolveJurisdictionRpc,
+  resolveRpcUrl,
+  stringifyTowerPayload,
+  waitForCondition,
+} from './vault-helpers';
 
-export interface RecoveryTowerConfig {
-  id?: string;
-  url: string;
-  towerMode?: TowerModeV1;
-  enabled?: boolean;
-}
+import {
+  RECOVERY_SNAPSHOT_INTERVAL_FRAMES,
+  RECOVERY_TOWER_STATUS_LIMIT,
+  RECOVERY_UPLOAD_DEBOUNCE_MS,
+  RUNTIME_P2P_SHUTDOWN_TIMEOUT_MS,
+  WATCHTOWER_LAST_RESORT_WINDOW_BLOCKS,
+  WATCHTOWER_SAFETY_MARGIN_BLOCKS,
+  applyRecoveryBundleMetadata,
+  buildDefaultRuntimeRecoveryConfig,
+  buildRuntimeRecoveryMeta,
+  buildRuntimeRecoverySigners,
+  buildSignerEntityConfig,
+  buildTowerRequestUrl,
+  deriveAddress,
+  derivePrivateKey,
+  discoverRuntimeRecoveryCandidates,
+  fetchTowerServerInfo,
+  findEntityReplicaByEntityAndSigner,
+  findEntityReplicaByEntityId,
+  findJReplicaByName,
+  getConfiguredRecoveryTowers,
+  getEntityReplicaJurisdictionName,
+  getJReplicaContractAddress,
+  getJReplicaJurisdictionName,
+  getReplayMeta,
+  getRuntimeP2PHandle,
+  getSignerDerivationIndex,
+  installVaultRuntimeCommandJournalKeys,
+  mergeRuntimeRecoveryTowerReceipts,
+  normalizeEntityId,
+  normalizeJurisdictionKey,
+  normalizeRecoveryTowerConfigs,
+  normalizeRuntimeId,
+  requireEntityProviderDeploymentBlock,
+  requireJurisdictionBlockTimeMs,
+  runtimeCreationInFlight,
+  schemaMismatchRecoveryRuntimeIds,
+  serializeVaultState,
+  shouldSkipRuntimeRecoveryUploadAtHeight,
+  signerCreationInFlight,
+  summarizeRuntimeRecoveryTowerFailure,
+  summarizeRuntimeRecoveryTowerReceipt,
+  type CreateRuntimeOptions,
+  type FaucetResult,
+  type FrameLogEntry,
+  type HealthMachine,
+  type HealthPayload,
+  type ImportedJMachineConfig,
+  type JurisdictionsPayload,
+  type RecoveryTowerConfig,
+  type Runtime,
+  type RuntimeRecoveryCandidate,
+  type RuntimeRecoveryConfig,
+  type RuntimeRecoveryTowerFailureSummary,
+  type RuntimeRecoveryTowerReceiptSummary,
+  type RuntimesState,
+  type Signer,
+  type TowerServerInfo,
+} from './vault-recovery';
+import { buildDelayedLastResortAppointmentsForTower } from './vault-watchtower';
+import {
+  summarizeHealth,
+  resolveJurisdictionChainId,
+  fetchJurisdictions,
+  fundSignerWalletViaFaucet,
+  fundRuntimeSignersInBrowserVM,
+} from './vault-bootstrap';
+import { runtimeInputWorkSummary, runtimeQuiesceWorkSummary } from './vault-lifecycle-helpers';
+export { buildDelayedLastResortAppointmentsForTower } from './vault-watchtower';
 
-export interface RuntimeRecoveryTowerReceiptSummary {
-  towerUrl: string;
-  towerMode: TowerModeV1;
-  height: number;
-  bundleHash: string;
-  sequence: number;
-  receivedAt: number;
-  slot?: number;
-  storedBytes?: number;
-  maxStoredBytes?: number;
-  expiresAt?: number;
-  appointmentSequence?: number | null;
-}
+export type {
+  RecoveryTowerConfig,
+  RecoveryTowerSetupMode,
+  Runtime,
+  RuntimeRecoveryCandidate,
+  RuntimeRecoveryCandidateSource,
+  RuntimeRecoveryConfig,
+  RuntimeRecoveryDiscoveryFailure,
+  RuntimeRecoveryDiscoveryResult,
+  RuntimeRecoveryFailureCategory,
+  RuntimeRecoveryPeerRequest,
+  RuntimeRecoveryPeerSource,
+  RuntimeRecoveryTowerFailureSummary,
+  RuntimeRecoveryTowerReceiptSummary,
+  RuntimesState,
+  Signer,
+} from './vault-recovery';
 
-export interface RuntimeRecoveryTowerFailureSummary {
-  towerUrl: string;
-  towerMode: TowerModeV1;
-  checkedAt: number;
-  error: string;
-}
-
-export interface RuntimeRecoveryConfig {
-  towers?: RecoveryTowerConfig[];
-  useDefaultTowers?: boolean;
-  waitForTowerReceipts?: boolean;
-  minSuccessfulTowers?: number;
-  maxStoredBytes?: number;
-  lastKnownStoredBytes?: number;
-  lastQuotaWarningAt?: number;
-  lastTowerUploadAttemptAt?: number;
-  lastTowerUploadAttemptHeight?: number;
-  lastTowerReceipts?: RuntimeRecoveryTowerReceiptSummary[];
-  lastTowerFailures?: RuntimeRecoveryTowerFailureSummary[];
-}
-
-export interface Runtime {
-  id: string; // signer EOA (0xABCD...)
-  label: string; // user-chosen name ("MyWallet")
-  seed: string; // canonical 24-word mnemonic
-  mnemonic12?: string; // optional 12-word compatibility mnemonic
-  devicePassphrase?: string; // optional BrainVault device passphrase (if available)
-  protectedSecrets?: ProtectedVaultSecrets;
-  signers: Signer[];
-  activeSignerIndex: number;
-  loginType?: 'manual' | 'demo';
-  requiresOnboarding?: boolean;
-  recovery?: RuntimeRecoveryConfig;
-  createdAt: number;
-  env?: Env | null;
-}
-
-const runtimeCreationInFlight = new Map<string, Promise<void>>();
-const signerCreationInFlight = new Map<string, Promise<Signer | null>>();
-const schemaMismatchRecoveryRuntimeIds = new Set<string>();
-
-type CreateRuntimeOptions = {
-  loginType?: 'manual' | 'demo' | undefined;
-  requiresOnboarding?: boolean | undefined;
-  devicePassphrase?: string | undefined;
-  mnemonic12?: string | undefined;
-  recovery?: RuntimeRecoveryConfig | undefined;
-  skipRecoveryRestore?: boolean | undefined;
-  recoveryCandidate?: RuntimeRecoveryCandidate | undefined;
-  unlockDurationMs?: VaultUnlockDurationMs | undefined;
-};
-
-export type RecoveryTowerSetupMode = 'official' | 'backup_only' | 'local_only';
-
-type ImportedJMachineConfig = {
-  name: string;
-  mode: 'browservm' | 'rpc';
-  chainId: number;
-  ticker: string;
-  rpcs: string[];
-  blockTimeMs: number;
-  entityProviderDeploymentBlock?: number;
-  contracts?: {
-    depository?: string;
-    entityProvider?: string;
-    account?: string;
-    deltaTransformer?: string;
-  };
-};
-type ApiJurisdictionConfig = JurisdictionConfig & {
-  rpc?: string;
-  rpcs?: string[];
-  primary?: boolean;
-  contracts: {
-    depository: string;
-    entityProvider: string;
-    account: string;
-    deltaTransformer: string;
-  };
-};
-
-const requireContractAddress = (value: string | null | undefined, label: string): string => {
-  const raw = String(value || '').trim();
-  if (!raw) {
-    throw new Error(`MISSING_${label.toUpperCase()}_ADDRESS`);
-  }
-  try {
-    return getAddress(raw);
-  } catch {
-    throw new Error(`INVALID_${label.toUpperCase()}_ADDRESS: ${raw}`);
-  }
-};
-
-const requireEntityProviderDeploymentBlock = (
-  value: unknown,
-  context: string,
-): number => {
-  const block = Number(value);
-  if (!Number.isSafeInteger(block) || block < 1) {
-    throw new Error(`[${context}] ENTITY_PROVIDER_DEPLOYMENT_BLOCK_INVALID: ${String(value)}`);
-  }
-  return block;
-};
-
-const requireJurisdictionBlockTimeMs = (value: unknown, context: string): number => {
-  const blockTimeMs = Number(value);
-  if (!Number.isSafeInteger(blockTimeMs) || blockTimeMs <= 0) {
-    throw new Error(`[${context}] JURISDICTION_BLOCK_TIME_INVALID: ${String(value)}`);
-  }
-  return blockTimeMs;
-};
-
-export interface RuntimesState {
-  runtimes: Record<string, Runtime>;
-  activeRuntimeId: string | null;
-}
+export {
+  buildRuntimeRecoveryConfigForMode,
+  classifyRuntimeRecoveryDiscoveryFailure,
+  discoverRuntimeRecoveryCandidates,
+  fetchTowerServerInfo,
+  mergeRuntimeRecoveryTowerReceipts,
+  parseRuntimeRecoveryCandidateFile,
+  resolveDefaultRecoveryTowerUrls,
+  shouldSkipRuntimeRecoveryUploadAtHeight,
+  summarizeRuntimeRecoveryTowerFailure,
+  summarizeRuntimeRecoveryTowerReceipt,
+} from './vault-recovery';
 
 // Default state
 const defaultState: RuntimesState = {
   runtimes: {},
-  activeRuntimeId: null
+  activeRuntimeId: null,
 };
 
-// Storage key
-const VAULT_STORAGE_KEY = 'xln-vaults';
-export const DEFAULT_VAULT_UNLOCK_DURATION_MS: VaultUnlockDurationMs = 600_000;
-const vaultLockTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const BROWSER_GOSSIP_POLL_MS = 250;
-const loggedLiveJAdapterReimports = new Set<string>();
-const normalizeRuntimeId = (value: string | null | undefined): string => {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  try {
-    return getAddress(raw).toLowerCase();
-  } catch {
-    return '';
-  }
-};
-
-const normalizeEntityId = (value: string | null | undefined): string => String(value || '').trim().toLowerCase();
-
-const serializeVaultState = (state: RuntimesState): string => JSON.stringify({
-  activeRuntimeId: state.activeRuntimeId,
-  runtimes: Object.fromEntries(
-    Object.entries(state.runtimes).map(([runtimeId, runtime]) => [
-      runtimeId,
-      redactVaultRuntimeForPersistence(runtime as unknown as Record<string, unknown>),
-    ]),
-  ),
-});
-
-// Main store
-export const runtimesState = writable<RuntimesState>(defaultState);
-export const vaultStorageLoaded = writable(false);
-
-// Derived stores
-export const activeRuntime = derived(runtimesState, ($state) => {
-  if (!$state.activeRuntimeId) return null;
-  return $state.runtimes[$state.activeRuntimeId] || null;
-});
-
-export const activeSigner = derived(activeRuntime, ($runtime) => {
-  if (!$runtime) return null;
-  return $runtime.signers[$runtime.activeSignerIndex] || null;
-});
-
-export const allRuntimes = derived(runtimesState, ($state) => {
-  return Object.values($state.runtimes).sort((a, b) => b.createdAt - a.createdAt);
-});
-
-let initializePromise: Promise<void> | null = null;
-let initialized = false;
-let resumeListenerRegistered = false;
-let resumeRefreshPromise: Promise<boolean> | null = null;
-let runtimeSyncChannel: BroadcastChannel | null = null;
-let runtimeResumeTrigger: (() => void) | null = null;
-const runtimeEnvChangeUnsubscribers = new Map<string, () => void>();
-const runtimeRecoveryBarrierUnsubscribers = new Map<string, () => void>();
-const runtimeRecoveryUploadTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const runtimeRecoveryUploads = new Map<string, Set<Promise<void>>>();
-const runtimeRecoveryUploadMeta = new Map<string, {
-  lastUploadedHeight: number;
-  lastBundleHash: string | null;
-  lastSnapshotHeight: number;
-  lastSnapshotHash: string | null;
-}>();
-const recoveryTowerInfoCache = new Map<string, { fetchedAt: number; info: TowerServerInfo }>();
-
-const RECOVERY_UPLOAD_DEBOUNCE_MS = 1_500;
-const RECOVERY_SNAPSHOT_INTERVAL_FRAMES = 10_000;
-const RUNTIME_P2P_SHUTDOWN_TIMEOUT_MS = 10_000;
-const RECOVERY_TOWER_INFO_TTL_MS = 60_000;
-// Keep this aligned with Depository.defaultDisputeDelay. Towers are not meant to
-// intervene for most of the dispute window; they only become eligible in the final
-// last-resort slice after the user had ample time to answer personally.
-const DEFAULT_DISPUTE_WINDOW_BLOCKS = 5760;
-const WATCHTOWER_LAST_RESORT_WINDOW_BLOCKS = Math.max(1, Math.ceil(DEFAULT_DISPUTE_WINDOW_BLOCKS * 0.2));
-const WATCHTOWER_SAFETY_MARGIN_BLOCKS = 12;
-const RECOVERY_TOWER_STATUS_LIMIT = 16;
-
-export const shouldSkipRuntimeRecoveryUploadAtHeight = (
-  previous: { lastUploadedHeight: number; lastBundleHash: string | null } | undefined,
-  height: unknown,
-): boolean => {
-  const currentHeight = Math.max(0, Math.floor(Number(height || 0)));
-  const previousHeight = Math.max(0, Math.floor(Number(previous?.lastUploadedHeight || 0)));
-  return Boolean(previous?.lastBundleHash && currentHeight <= previousHeight);
-};
-
-type FrameLogEntry = Env['frameLogs'][number];
-type HealthMachine = { name?: string; status?: string; chainId?: number; lastBlock?: unknown };
-type HealthPayload = {
-  timestamp?: number;
-  reset?: { inProgress?: boolean; lastError?: unknown };
-  system?: { runtime?: boolean } | null;
-  jMachines?: HealthMachine[];
-};
-type JurisdictionsPayload = { version?: string; jurisdictions: Record<string, ApiJurisdictionConfig> };
-type FaucetResult = { success?: boolean; txHash?: string; error?: string };
-type RuntimeP2PHandle = {
-  isConnected?: () => boolean;
-  isConnecting?: () => boolean;
-  connect?: () => void;
-  refreshGossip?: () => void;
-  getReconnectState?: () => { attempt: number; nextAt: number } | null;
-};
-
-type TowerRestorePayload = {
-  ok: boolean;
-  receipt?: TowerReceiptV1;
-  bundle?: EncryptedRuntimeRecoveryBundleV1;
-  bundles?: EncryptedRuntimeRecoveryBundleV1[];
-  error?: string;
-};
-
-type TowerDiscoverPayload = {
-  ok: boolean;
-  lookupKey?: string;
-  available?: boolean;
-  latestReceipt?: TowerReceiptV1 | null;
-  error?: string;
-};
-
-export type RuntimeRecoveryCandidateSource = 'tower' | 'file' | 'peer';
-export type RuntimeRecoveryFailureCategory = 'ExpectedEmpty' | 'TransientRace' | 'Contradiction';
-
-export type RuntimeRecoveryDiscoveryFailure = {
-  source: Exclude<RuntimeRecoveryCandidateSource, 'file'>;
-  sourceLabel: string;
-  category: RuntimeRecoveryFailureCategory;
-  code: string;
-  message: string;
-};
-
-export type RuntimeRecoveryPeerRequest = {
-  runtimeId: string;
-  lookupKey: string;
-};
-
-export type RuntimeRecoveryPeerSource = {
-  id?: string;
-  label: string;
-  fetchBundles: (request: RuntimeRecoveryPeerRequest) => Promise<unknown>;
-};
-
-export type RuntimeRecoveryCandidate = {
-  id: string;
-  source: RuntimeRecoveryCandidateSource;
-  sourceLabel: string;
-  towerUrl?: string;
-  peerId?: string;
-  receipt?: TowerReceiptV1;
-  encryptedBundles: EncryptedRuntimeRecoveryBundleV1[];
-  bundles: RuntimeRecoveryBundleV1[];
-  tipBundle: RuntimeRecoveryBundleV1;
-  metadataBundle: RuntimeRecoveryBundleV1;
-  runtimeId: string;
-  runtimeHeight: number;
-  createdAt: number;
-  signerCount: number;
-  checkpointHash: string;
-  bundleCount: number;
-};
-
-export type RuntimeRecoveryDiscoveryResult = {
-  runtimeId: string;
-  lookupKey: string;
-  candidates: RuntimeRecoveryCandidate[];
-  errors: string[];
-  failures: RuntimeRecoveryDiscoveryFailure[];
-  checkedTowers: number;
-  checkedPeers: number;
-};
-
-type TowerServerInfo = {
-  ok: boolean;
-  service?: string;
-  towerId?: string;
-  signerAddress?: string;
-  maxStoredBytesPerLookupKey?: number;
-  maxBundlesPerLookupKey?: number;
-};
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
-
-const getRuntimeP2PHandle = (xln: XLNModule, env: Env): RuntimeP2PHandle | null => {
-  const candidate = xln.getP2P(unwrapLiveRuntimeEnv(env) ?? env);
-  return isRecord(candidate) ? (candidate as RuntimeP2PHandle) : null;
-};
-
-const getReplayMeta = (env: Env): unknown | null => {
-  const value = Reflect.get(env as object, '__replayMeta');
-  return value === undefined ? null : value;
-};
-
-// HD derivation helper
-function deriveAddress(seed: string, index: number): string {
-  const mnemonic = Mnemonic.fromPhrase(seed);
-  const hdNode = HDNodeWallet.fromMnemonic(mnemonic, getIndexedAccountPath(index));
-  return hdNode.address.toLowerCase();
-}
-
-function derivePrivateKey(seed: string, index: number): string {
-  const mnemonic = Mnemonic.fromPhrase(seed);
-  const hdNode = HDNodeWallet.fromMnemonic(mnemonic, getIndexedAccountPath(index));
-  return hdNode.privateKey;
-}
-
-const installVaultRuntimeCommandJournalKeys = async (
-  runtimeIdValue: string,
-  seed: string,
-): Promise<void> => {
-  const runtimeId = normalizeRuntimeId(runtimeIdValue);
-  if (!runtimeId || normalizeRuntimeId(deriveAddress(seed, 0)) !== runtimeId) {
-    throw new Error('RUNTIME_COMMAND_JOURNAL_VAULT_ID_MISMATCH');
-  }
-  await installRuntimeCommandJournalKeys(runtimeId, seed);
-};
-
-const normalizeJurisdictionKey = (value: string | null | undefined): string =>
-  String(value || '').trim().toLowerCase();
-
-type RuntimeJReplica = Env['jReplicas'] extends Map<string, infer T> ? T : never;
-type RuntimeEntityReplica = Env['eReplicas'] extends Map<string, infer T> ? T : never;
-
-const getJReplicaJurisdictionName = (replica: RuntimeJReplica | null | undefined, fallback = ''): string =>
-  String(replica?.name || fallback || '').trim();
-
-const findJReplicaByName = (env: Env, name: string): RuntimeJReplica | undefined => {
-  const normalized = normalizeJurisdictionKey(name);
-  if (!normalized) return undefined;
-  const direct = env.jReplicas?.get(name);
-  if (direct) return direct;
-  for (const replica of env.jReplicas?.values?.() || []) {
-    if (normalizeJurisdictionKey(replica?.name) === normalized) return replica;
-  }
-  return undefined;
-};
-
-const getEntityReplicaJurisdictionName = (replica: RuntimeEntityReplica | null | undefined): string =>
-  String(replica?.state?.config?.jurisdiction?.name || '').trim();
-
-const getEntityReplicaEntityId = (key: string, replica: RuntimeEntityReplica | null | undefined): string =>
-  String(replica?.entityId || replica?.state?.entityId || String(key || '').split(':')[0] || '').trim().toLowerCase();
-
-const findEntityReplicaByEntityId = (env: Env, entityId: string): RuntimeEntityReplica | undefined => {
-  const target = normalizeEntityId(entityId);
-  if (!target) return undefined;
-  for (const [key, replica] of env.eReplicas?.entries?.() || []) {
-    if (getEntityReplicaEntityId(String(key), replica) === target) return replica;
-  }
-  return undefined;
-};
-
-const findEntityReplicaByEntityAndSigner = (
-  env: Env,
-  entityId: string,
-  signerId: string,
-): RuntimeEntityReplica | undefined => {
-  const targetEntity = normalizeEntityId(entityId);
-  const targetSigner = normalizeRuntimeId(signerId);
-  if (!targetEntity || !targetSigner) return undefined;
-  for (const [key, replica] of env.eReplicas?.entries?.() || []) {
-    const [keyEntityId, keySignerId] = String(key || '').split(':');
-    const replicaEntity = getEntityReplicaEntityId(String(key), replica);
-    const replicaSigner = normalizeRuntimeId(replica?.signerId || keySignerId || '');
-    if ((replicaEntity || normalizeEntityId(keyEntityId)) === targetEntity && replicaSigner === targetSigner) {
-      return replica;
-    }
-  }
-  return undefined;
-};
-
-const getJReplicaContractAddress = (
-  replica: RuntimeJReplica,
-  label: 'depository' | 'entity_provider',
-): string => {
-  const contractKey = label === 'entity_provider' ? 'entityProvider' : 'depository';
-  return requireContractAddress(
-    replica[`${contractKey}Address` as keyof RuntimeJReplica] as string | undefined
-      || replica.contracts?.[contractKey]
-      || replica.jadapter?.addresses?.[contractKey],
-    label,
-  );
-};
-
-const buildSignerEntityConfig = (
-  signerAddress: string,
-  jReplica: RuntimeJReplica,
-  preferredJurisdictionName: string,
-  fallbackChainId: number,
-): ConsensusConfig => {
-  const jurisdictionName = getJReplicaJurisdictionName(jReplica, preferredJurisdictionName);
-  if (!jurisdictionName) throw new Error('ENTITY_JURISDICTION_MISSING');
-  const depositoryAddress = getJReplicaContractAddress(jReplica, 'depository');
-  const entityProviderAddress = getJReplicaContractAddress(jReplica, 'entity_provider');
-  const rpcAddress = String(jReplica.rpcs?.[0] || '').trim();
-  const chainId = Number(jReplica.chainId ?? jReplica.jadapter?.chainId ?? fallbackChainId);
-  const blockTimeMs = Number(jReplica.blockTimeMs);
-  if (!Number.isFinite(chainId) || chainId <= 0) {
-    throw new Error(`ENTITY_JURISDICTION_CHAIN_ID_MISSING: ${jurisdictionName}`);
-  }
-  if (!Number.isSafeInteger(blockTimeMs) || blockTimeMs <= 0) {
-    throw new Error(`ENTITY_JURISDICTION_BLOCK_TIME_MISSING: ${jurisdictionName}`);
-  }
-  return {
-    mode: 'proposer-based',
-    threshold: 1n,
-    validators: [signerAddress],
-    shares: { [signerAddress]: 1n },
-    jurisdiction: {
-      address: rpcAddress || `jreplica://${jurisdictionName}`,
-      name: jurisdictionName,
-      chainId,
-      blockTimeMs,
-      entityProviderAddress,
-      depositoryAddress,
-    },
-  };
-};
-
-function getSignerDerivationIndex(signer: Signer | null | undefined): number {
-  return Number.isInteger(signer?.derivationIndex) ? Number(signer!.derivationIndex) : Number(signer?.index ?? 0);
-}
-
-const parseRecoveryTowerUrls = (value: unknown): string[] => {
-  if (Array.isArray(value)) {
-    return value
-      .map((entry) => {
-        if (typeof entry === 'string') return entry;
-        if (entry && typeof entry === 'object' && typeof (entry as { url?: unknown }).url === 'string') {
-          return String((entry as { url: string }).url);
-        }
-        return '';
-      })
-      .map((url) => String(url || '').trim())
-      .filter(Boolean);
-  }
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (!trimmed) return [];
-    try {
-      return parseRecoveryTowerUrls(JSON.parse(trimmed));
-    } catch {
-      return trimmed.split(',').map((entry) => entry.trim()).filter(Boolean);
-    }
-  }
-  return [];
-};
-
-export const resolveDefaultRecoveryTowerUrls = (options: {
-  hostname: string;
-  globalUrls?: unknown;
-  localUrls?: unknown;
-  envUrls?: unknown;
-}): string[] => {
-  const globalTowerUrls = parseRecoveryTowerUrls(options.globalUrls);
-  if (globalTowerUrls.length > 0) return globalTowerUrls;
-  const localTowerUrls = parseRecoveryTowerUrls(options.localUrls);
-  if (localTowerUrls.length > 0) return localTowerUrls;
-  const envTowerUrls = parseRecoveryTowerUrls(options.envUrls);
-  if (envTowerUrls.length > 0) return envTowerUrls;
-  const hostname = String(options.hostname || '').trim().toLowerCase();
-  // Local/dev environments should not assume an always-on watchtower. Recovery towers
-  // there must be configured explicitly, otherwise fresh wallet creation gets blocked by
-  // an unrelated localhost dependency.
-  if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    return [];
-  }
-  return ['https://xln.finance'];
-};
-
-const defaultRecoveryTowerUrls = (): string[] => {
-  if (typeof window === 'undefined') return ['https://xln.finance'];
-  const w = window as Window & { __XLN_WATCHTOWERS__?: unknown };
-  let localUrls: string | null = null;
-  try {
-    localUrls = localStorage.getItem('xln-watchtower-urls');
-  } catch {
-    // Recovery should not fail because local tower preferences are unreadable.
-  }
-  return resolveDefaultRecoveryTowerUrls({
-    hostname: window.location.hostname,
-    globalUrls: w.__XLN_WATCHTOWERS__,
-    localUrls,
-    envUrls: import.meta.env?.['VITE_XLN_WATCHTOWER_URL'],
-  });
-};
-
-const normalizeTowerBaseUrl = (url: string): string => String(url || '').trim().replace(/\/+$/, '');
-
-const normalizeRecoveryTowerMode = (mode: unknown): TowerModeV1 =>
-  mode === 'delayed_last_resort' ? mode : 'blind_backup';
-
-const normalizeRecoveryTowerConfigs = (towers: RecoveryTowerConfig[] | undefined): RecoveryTowerConfig[] => {
-  const deduped = new Map<string, RecoveryTowerConfig>();
-  for (const tower of towers || []) {
-    const url = normalizeTowerBaseUrl(tower.url);
-    if (!url || tower.enabled === false) continue;
-    deduped.set(url, {
-      ...tower,
-      id: tower.id || `tower-${deduped.size + 1}`,
-      url,
-      towerMode: normalizeRecoveryTowerMode(tower.towerMode),
-      enabled: true,
-    });
-  }
-  return [...deduped.values()];
-};
-
-const nonNegativeInteger = (value: unknown): number => {
-  const parsed = Math.floor(Number(value ?? 0));
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-};
-
-const optionalNonNegativeInteger = (value: unknown): number | undefined => {
-  if (value === null || value === undefined || value === '') return undefined;
-  return nonNegativeInteger(value);
-};
-
-const compactRecoveryError = (error: unknown): string => {
-  const text = error instanceof Error ? error.message : String(error || 'unknown');
-  return text.replace(/\s+/g, ' ').trim().slice(0, 240) || 'unknown';
-};
-
-export const summarizeRuntimeRecoveryTowerReceipt = (
-  tower: RecoveryTowerConfig,
-  receipt: TowerReceiptV1,
-): RuntimeRecoveryTowerReceiptSummary => {
-  const towerUrl = normalizeTowerBaseUrl(tower.url || receipt.towerId || '');
-  const storedBytes = optionalNonNegativeInteger(receipt.storedBytes);
-  const maxStoredBytes = optionalNonNegativeInteger(receipt.maxStoredBytes);
-  const expiresAt = optionalNonNegativeInteger(receipt.expiresAt);
-  return {
-    towerUrl,
-    towerMode: normalizeRecoveryTowerMode(receipt.towerMode || tower.towerMode),
-    height: nonNegativeInteger(receipt.height),
-    bundleHash: String(receipt.bundleHash || '').trim().toLowerCase(),
-    sequence: nonNegativeInteger(receipt.sequence),
-    receivedAt: nonNegativeInteger(receipt.receivedAt),
-    ...(receipt.slot !== undefined ? { slot: nonNegativeInteger(receipt.slot) } : {}),
-    ...(storedBytes !== undefined ? { storedBytes } : {}),
-    ...(maxStoredBytes !== undefined ? { maxStoredBytes } : {}),
-    ...(expiresAt !== undefined ? { expiresAt } : {}),
-    ...(receipt.appointmentSequence !== undefined ? { appointmentSequence: receipt.appointmentSequence } : {}),
-  };
-};
-
-export const summarizeRuntimeRecoveryTowerFailure = (
-  tower: RecoveryTowerConfig,
-  error: unknown,
-  checkedAt: number,
-): RuntimeRecoveryTowerFailureSummary => ({
-  towerUrl: normalizeTowerBaseUrl(tower.url),
-  towerMode: normalizeRecoveryTowerMode(tower.towerMode),
-  checkedAt: nonNegativeInteger(checkedAt),
-  error: compactRecoveryError(error),
-});
-
-const receiptSummaryKey = (receipt: RuntimeRecoveryTowerReceiptSummary): string =>
-  `${receipt.towerUrl}|${receipt.towerMode}|${receipt.slot ?? 0}`;
-
-export const mergeRuntimeRecoveryTowerReceipts = (
-  previous: RuntimeRecoveryTowerReceiptSummary[] | undefined,
-  current: RuntimeRecoveryTowerReceiptSummary[],
-): RuntimeRecoveryTowerReceiptSummary[] => {
-  const deduped = new Map<string, RuntimeRecoveryTowerReceiptSummary>();
-  for (const receipt of [...current, ...(previous || [])]) {
-    const key = receiptSummaryKey(receipt);
-    if (!deduped.has(key)) deduped.set(key, receipt);
-  }
-  return [...deduped.values()]
-    .sort((left, right) =>
-      right.receivedAt - left.receivedAt ||
-      right.height - left.height ||
-      right.sequence - left.sequence
-    )
-    .slice(0, RECOVERY_TOWER_STATUS_LIMIT);
-};
-
-const buildDefaultRecoveryTowerConfigs = (): RecoveryTowerConfig[] =>
-  defaultRecoveryTowerUrls().map((url, index) => ({
-    id: `official-${index + 1}`,
-    url: normalizeTowerBaseUrl(url),
-    // The official tower does both jobs: encrypted backup storage and delayed
-    // last-resort counter-dispute. Blind backups are still uploaded for every
-    // configured tower; this mode only opts the same endpoint into the active
-    // rescue appointment channel too.
-    towerMode: 'delayed_last_resort' as const,
-    enabled: true,
-  }));
-
-const buildDefaultRuntimeRecoveryConfig = (): RuntimeRecoveryConfig => ({
-  useDefaultTowers: false,
-  waitForTowerReceipts: false,
-  towers: buildDefaultRecoveryTowerConfigs(),
-});
-
-export const buildRuntimeRecoveryConfigForMode = (
-  mode: RecoveryTowerSetupMode,
-  options: {
-    officialTowerUrl?: string | null;
-    manualTowers?: RecoveryTowerConfig[];
-    previous?: RuntimeRecoveryConfig | null;
-  } = {},
-): RuntimeRecoveryConfig => {
-  const manualTowers = normalizeRecoveryTowerConfigs(options.manualTowers);
-  const officialTowerUrl = normalizeTowerBaseUrl(options.officialTowerUrl || defaultRecoveryTowerUrls()[0] || '');
-  const towers: RecoveryTowerConfig[] = [];
-
-  if (mode !== 'local_only' && officialTowerUrl) {
-    towers.push({
-      id: 'official-watchtower',
-      url: officialTowerUrl,
-      towerMode: mode === 'backup_only' ? 'blind_backup' : 'delayed_last_resort',
-      enabled: true,
-    });
-  }
-
-  for (const tower of manualTowers) {
-    if (towers.some((existing) => existing.url === tower.url)) continue;
-    towers.push(tower);
-  }
-
-  return {
-    ...(options.previous || {}),
-    useDefaultTowers: false,
-    waitForTowerReceipts: options.previous?.waitForTowerReceipts === true,
-    towers,
-  };
-};
-
-const buildTowerRequestUrl = (towerUrl: string, towerPath: string): string => {
-  const normalizedBaseUrl = normalizeTowerBaseUrl(towerUrl);
-  const normalizedPath = towerPath.startsWith('/') ? towerPath : `/${towerPath}`;
-  if (typeof window !== 'undefined') {
-    const pageUrl = new URL(window.location.href);
-    const targetUrl = new URL(`${normalizedBaseUrl}/`);
-    const isSecurePage = pageUrl.protocol === 'https:';
-    const isLocalInsecureTower =
-      targetUrl.protocol === 'http:'
-      && (targetUrl.hostname === '127.0.0.1' || targetUrl.hostname === 'localhost');
-    if (isSecurePage && isLocalInsecureTower) {
-      const proxyUrl = new URL('/api/watchtower-proxy', pageUrl.origin);
-      proxyUrl.searchParams.set('target', normalizedBaseUrl);
-      proxyUrl.searchParams.set('path', normalizedPath);
-      return proxyUrl.toString();
-    }
-  }
-  return new URL(normalizedPath, `${normalizedBaseUrl}/`).toString();
-};
-
-const getConfiguredRecoveryTowers = (runtime: Runtime | null | undefined): RecoveryTowerConfig[] => {
-  const explicit = (runtime?.recovery?.towers || [])
-    .map((tower) => ({
-      ...tower,
-      url: normalizeTowerBaseUrl(tower.url),
-      towerMode: normalizeRecoveryTowerMode(tower.towerMode),
-      enabled: tower.enabled !== false,
-    }))
-    .filter((tower) => !!tower.url && tower.enabled !== false);
-  const fallback = runtime?.recovery?.useDefaultTowers === false
-    ? []
-    : buildDefaultRecoveryTowerConfigs();
-  const deduped = new Map<string, RecoveryTowerConfig>();
-  for (const tower of explicit) {
-    if (!tower.url) continue;
-    deduped.set(tower.url, tower);
-  }
-  for (const tower of fallback) {
-    if (!tower.url || deduped.has(tower.url)) continue;
-    deduped.set(tower.url, tower);
-  }
-  return [...deduped.values()];
-};
-
-export async function fetchTowerServerInfo(towerUrl: string): Promise<TowerServerInfo> {
-  const normalizedUrl = normalizeTowerBaseUrl(towerUrl);
-  const cached = recoveryTowerInfoCache.get(normalizedUrl);
-  const now = Date.now();
-  if (cached && now - cached.fetchedAt < RECOVERY_TOWER_INFO_TTL_MS) {
-    return cached.info;
-  }
-  const response = await fetch(buildTowerRequestUrl(normalizedUrl, '/api/tower/healthz'), {
-    method: 'GET',
-    headers: { accept: 'application/json' },
-  });
-  if (!response.ok) {
-    throw new Error(`TOWER_INFO_HTTP_${response.status}`);
-  }
-  const payload = await response.json() as TowerServerInfo;
-  if (!payload.ok) {
-    throw new Error(`TOWER_INFO_INVALID:${normalizedUrl}`);
-  }
-  recoveryTowerInfoCache.set(normalizedUrl, { fetchedAt: now, info: payload });
-  return payload;
-}
-
-async function towerHasRecoveryBundle(tower: RecoveryTowerConfig, lookupKey: string): Promise<boolean> {
-  const discoverUrl = buildTowerRequestUrl(tower.url, '/api/recovery/discover');
-  const response = await fetch(discoverUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ lookupKey }),
-  });
-  if (!response.ok) {
-    throw new Error(`HTTP_${response.status}`);
-  }
-  const payload = await response.json() as TowerDiscoverPayload;
-  if (!payload.ok) {
-    if (payload.error === 'TOWER_BUNDLE_NOT_FOUND') return false;
-    throw new Error(String(payload.error || 'unknown'));
-  }
-  return payload.available === true;
-}
-
-const isEncryptedRuntimeRecoveryBundle = (value: unknown): value is EncryptedRuntimeRecoveryBundleV1 => {
-  if (!isRecord(value)) return false;
-  return value['version'] === 1
-    && typeof value['runtimeId'] === 'string'
-    && typeof value['lookupKey'] === 'string'
-    && typeof value['bundleHash'] === 'string'
-    && typeof value['iv'] === 'string'
-    && typeof value['ciphertext'] === 'string';
-};
-
-const extractEncryptedRecoveryBundles = (payload: unknown): EncryptedRuntimeRecoveryBundleV1[] => {
-  if (isEncryptedRuntimeRecoveryBundle(payload)) return [payload];
-  if (!isRecord(payload)) return [];
-  const rawBundles = Array.isArray(payload['bundles'])
-    ? payload['bundles']
-    : payload['bundle']
-      ? [payload['bundle']]
-      : [];
-  return rawBundles.filter(isEncryptedRuntimeRecoveryBundle);
-};
-
-const getBundleReferenceHash = (bundle: RuntimeRecoveryBundleV1): string =>
-  String(bundle.checkpointHash || bundle.baseCheckpointHash || '').trim().toLowerCase();
-
-const sortRecoveryBundlesByTip = (
-  left: RuntimeRecoveryBundleV1,
-  right: RuntimeRecoveryBundleV1,
-): number => {
-  if (right.runtimeHeight !== left.runtimeHeight) return right.runtimeHeight - left.runtimeHeight;
-  return right.createdAt - left.createdAt;
-};
-
-const sortRecoveryCandidatesByTip = (
-  left: RuntimeRecoveryCandidate,
-  right: RuntimeRecoveryCandidate,
-): number => {
-  if (right.runtimeHeight !== left.runtimeHeight) return right.runtimeHeight - left.runtimeHeight;
-  if (right.createdAt !== left.createdAt) return right.createdAt - left.createdAt;
-  return (right.receipt?.sequence || 0) - (left.receipt?.sequence || 0);
-};
-
-const normalizeRecoveryFailureCode = (message: string): string => {
-  const code = message.trim().split(/[\s:]/)[0] || 'UNKNOWN';
-  return code.replace(/[^A-Z0-9_]/gi, '_').toUpperCase();
-};
-
-export const classifyRuntimeRecoveryDiscoveryFailure = (input: {
-  source: Exclude<RuntimeRecoveryCandidateSource, 'file'>;
-  sourceLabel: string;
-  message: string;
-}): RuntimeRecoveryDiscoveryFailure => {
-  const message = String(input.message || 'unknown').trim() || 'unknown';
-  const code = normalizeRecoveryFailureCode(message);
-  const lower = message.toLowerCase();
-  const category: RuntimeRecoveryFailureCategory =
-    code === 'TOWER_BUNDLE_NOT_FOUND' ||
-    code === 'PEER_RECOVERY_BUNDLE_EMPTY' ||
-    code === 'RECOVERY_CANDIDATE_EMPTY' ||
-    code === 'HTTP_404'
-      ? 'ExpectedEmpty'
-      : code.startsWith('HTTP_5') ||
-        code === 'HTTP_408' ||
-        code === 'HTTP_409' ||
-        code === 'HTTP_425' ||
-        code === 'HTTP_429' ||
-        lower.includes('timeout') ||
-        lower.includes('offline') ||
-        lower.includes('connect') ||
-        lower.includes('network') ||
-        lower.includes('fetch') ||
-        code === 'RECOVERY_REQUEST_SEND_FAILED' ||
-        code === 'RECOVERY_REQUEST_SOCKET_CLOSED' ||
-        code === 'RECOVERY_REQUEST_SOCKET_PAUSED'
-        ? 'TransientRace'
-        : 'Contradiction';
-  return {
-    source: input.source,
-    sourceLabel: String(input.sourceLabel || input.source).trim() || input.source,
-    category,
-    code,
-    message,
-  };
-};
-
-const recoveryFailureErrorText = (failure: RuntimeRecoveryDiscoveryFailure): string =>
-  `${failure.sourceLabel}:${failure.message}`;
-
-const buildRuntimeRecoveryCandidate = async (
-  input: {
-    source: RuntimeRecoveryCandidateSource;
-    sourceLabel: string;
-    seed: string;
-    expectedRuntimeId: string;
-    encryptedBundles: EncryptedRuntimeRecoveryBundleV1[];
-    xln: XLNModule;
-    towerUrl?: string;
-    peerId?: string;
-    receipt?: TowerReceiptV1;
-  },
-): Promise<RuntimeRecoveryCandidate> => {
-  if (input.encryptedBundles.length === 0) {
-    throw new Error('RECOVERY_CANDIDATE_EMPTY');
-  }
-  const bundles: RuntimeRecoveryBundleV1[] = [];
-  for (const encryptedBundle of input.encryptedBundles) {
-    bundles.push(await input.xln.decryptRuntimeRecoveryBundle(encryptedBundle, input.seed));
-  }
-  if (bundles.length === 0) throw new Error('RECOVERY_CANDIDATE_EMPTY');
-  for (const bundle of bundles) {
-    const runtimeId = normalizeRuntimeId(bundle.runtimeId);
-    if (!runtimeId || runtimeId !== input.expectedRuntimeId) {
-      throw new Error(`RECOVERY_CANDIDATE_RUNTIME_ID_MISMATCH: expected=${input.expectedRuntimeId} actual=${String(bundle.runtimeId || 'none')}`);
-    }
-  }
-
-  const tipBundle = [...bundles].sort(sortRecoveryBundlesByTip)[0]!;
-  const metadataBundle = bundles.find((bundle) => (bundle.kind ?? 'snapshot') === 'snapshot') ?? tipBundle;
-  const checkpointHash = getBundleReferenceHash(metadataBundle) || getBundleReferenceHash(tipBundle);
-  const sourceKey = input.towerUrl || input.sourceLabel;
-  const id = [
-    input.source,
-    sourceKey,
-    tipBundle.runtimeHeight,
-    tipBundle.createdAt,
-    checkpointHash || input.encryptedBundles[0]?.bundleHash || 'no-hash',
-  ].join(':');
-
-  return {
-    id,
-    source: input.source,
-    sourceLabel: input.sourceLabel,
-    ...(input.towerUrl ? { towerUrl: input.towerUrl } : {}),
-    ...(input.peerId ? { peerId: input.peerId } : {}),
-    ...(input.receipt ? { receipt: input.receipt } : {}),
-    encryptedBundles: input.encryptedBundles,
-    bundles,
-    tipBundle,
-    metadataBundle,
-    runtimeId: input.expectedRuntimeId,
-    runtimeHeight: tipBundle.runtimeHeight,
-    createdAt: Math.max(tipBundle.createdAt, metadataBundle.createdAt),
-    signerCount: metadataBundle.signers.length,
-    checkpointHash,
-    bundleCount: bundles.length,
-  };
-};
-
-export async function parseRuntimeRecoveryCandidateFile(
-  seed: string,
-  fileContents: string,
-  options: { sourceLabel?: string; xln?: XLNModule } = {},
-): Promise<RuntimeRecoveryCandidate> {
-  const xln = options.xln || await getXLN();
-  if (typeof xln.decryptRuntimeRecoveryBundle !== 'function') {
-    throw new Error('RECOVERY_DECRYPT_UNAVAILABLE');
-  }
-  const runtimeId = normalizeRuntimeId(deriveAddress(seed, 0));
-  if (!runtimeId) throw new Error('RECOVERY_RUNTIME_ID_INVALID');
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(fileContents);
-  } catch {
-    throw new Error('RECOVERY_BACKUP_FILE_JSON_INVALID');
-  }
-  const encryptedBundles = extractEncryptedRecoveryBundles(parsed);
-  if (encryptedBundles.length === 0) {
-    throw new Error('RECOVERY_BACKUP_FILE_EMPTY');
-  }
-  return buildRuntimeRecoveryCandidate({
-    source: 'file',
-    sourceLabel: options.sourceLabel || 'Local backup file',
-    seed,
-    expectedRuntimeId: runtimeId,
-    encryptedBundles,
-    xln,
-  });
-}
-
-export async function discoverRuntimeRecoveryCandidates(
-  seed: string,
-  options: {
-    recovery?: RuntimeRecoveryConfig;
-    towers?: RecoveryTowerConfig[];
-    peers?: RuntimeRecoveryPeerSource[];
-    xln?: XLNModule;
-  } = {},
-): Promise<RuntimeRecoveryDiscoveryResult> {
-  const xln = options.xln || await getXLN();
-  if (
-    typeof xln.decryptRuntimeRecoveryBundle !== 'function' ||
-    typeof xln.deriveRuntimeRecoveryLookupKey !== 'function'
-  ) {
-    throw new Error('RECOVERY_DISCOVERY_UNAVAILABLE');
-  }
-  const runtimeId = normalizeRuntimeId(deriveAddress(seed, 0));
-  if (!runtimeId) throw new Error('RECOVERY_RUNTIME_ID_INVALID');
-  const lookupKey = xln.deriveRuntimeRecoveryLookupKey(runtimeId, seed);
-  const runtimeProbe: Runtime = {
-    id: runtimeId,
-    label: 'Recovery probe',
-    seed,
-    signers: [],
-    activeSignerIndex: 0,
-    recovery: options.recovery || (options.towers
-      ? { useDefaultTowers: false, towers: options.towers }
-      : buildDefaultRuntimeRecoveryConfig()),
-    createdAt: Date.now(),
-  };
-  const towers = getConfiguredRecoveryTowers(runtimeProbe);
-  const candidates: RuntimeRecoveryCandidate[] = [];
-  const errors: string[] = [];
-  const failures: RuntimeRecoveryDiscoveryFailure[] = [];
-  const peers = options.peers || [];
-  const recordFailure = (
-    source: Exclude<RuntimeRecoveryCandidateSource, 'file'>,
-    sourceLabel: string,
-    message: string,
-  ): void => {
-    const failure = classifyRuntimeRecoveryDiscoveryFailure({ source, sourceLabel, message });
-    failures.push(failure);
-    if (failure.category !== 'ExpectedEmpty') {
-      errors.push(recoveryFailureErrorText(failure));
-    }
-  };
-
-  for (const tower of towers) {
-    try {
-      if (!await towerHasRecoveryBundle(tower, lookupKey)) {
-        recordFailure('tower', tower.url, 'TOWER_BUNDLE_NOT_FOUND');
-        continue;
-      }
-      const restoreUrl = buildTowerRequestUrl(tower.url, '/api/tower/restore');
-      const response = await fetch(restoreUrl, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ lookupKey }),
-      });
-      if (response.status === 404) {
-        recordFailure('tower', tower.url, 'HTTP_404');
-        continue;
-      }
-      if (!response.ok) {
-        recordFailure('tower', tower.url, `HTTP_${response.status}`);
-        continue;
-      }
-      const payload = await response.json() as TowerRestorePayload;
-      const encryptedBundles = extractEncryptedRecoveryBundles(payload);
-      if (!payload.ok || encryptedBundles.length === 0) {
-        if (payload.error === 'TOWER_BUNDLE_NOT_FOUND') {
-          recordFailure('tower', tower.url, 'TOWER_BUNDLE_NOT_FOUND');
-          continue;
-        }
-        recordFailure('tower', tower.url, String(payload.error || 'unknown'));
-        continue;
-      }
-      candidates.push(await buildRuntimeRecoveryCandidate({
-        source: 'tower',
-        sourceLabel: tower.url,
-        towerUrl: tower.url,
-        ...(payload.receipt ? { receipt: payload.receipt } : {}),
-        seed,
-        expectedRuntimeId: runtimeId,
-        encryptedBundles,
-        xln,
-      }));
-    } catch (error) {
-      recordFailure('tower', tower.url, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  for (const peer of peers) {
-    const sourceLabel = String(peer.label || peer.id || 'Peer').trim() || 'Peer';
-    try {
-      const payload = await peer.fetchBundles({ runtimeId, lookupKey });
-      const encryptedBundles = extractEncryptedRecoveryBundles(payload);
-      if (encryptedBundles.length === 0) {
-        recordFailure('peer', sourceLabel, 'PEER_RECOVERY_BUNDLE_EMPTY');
-        continue;
-      }
-      candidates.push(await buildRuntimeRecoveryCandidate({
-        source: 'peer',
-        sourceLabel,
-        ...(peer.id ? { peerId: peer.id } : {}),
-        seed,
-        expectedRuntimeId: runtimeId,
-        encryptedBundles,
-        xln,
-      }));
-    } catch (error) {
-      recordFailure('peer', sourceLabel, error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  candidates.sort(sortRecoveryCandidatesByTip);
-  return {
-    runtimeId,
-    lookupKey,
-    candidates,
-    errors,
-    failures,
-    checkedTowers: towers.length,
-    checkedPeers: peers.length,
-  };
-}
-
+/**
+ * Installs a verified recovery candidate only after the previous environment
+ * has stopped producing inputs and closed its persistence handles.
+ */
 export async function restoreRuntimeEnvFromRecoveryCandidate(
   runtime: Runtime,
   xln: XLNModule,
@@ -1134,14 +194,14 @@ export async function restoreRuntimeEnvFromRecoveryCandidate(
   const runtimeId = normalizeRuntimeId(runtime.id);
   if (!runtimeId) throw new Error('RECOVERY_RESTORE_RUNTIME_ID_INVALID');
   if (normalizeRuntimeId(candidate.runtimeId) !== runtimeId) {
-    throw new Error(`RECOVERY_RESTORE_CANDIDATE_RUNTIME_ID_MISMATCH: runtime=${runtimeId} candidate=${candidate.runtimeId}`);
+    throw new Error(
+      `RECOVERY_RESTORE_CANDIDATE_RUNTIME_ID_MISMATCH: runtime=${runtimeId} candidate=${candidate.runtimeId}`,
+    );
   }
   applyRecoveryBundleMetadata(runtime, candidate.metadataBundle);
   await registerRuntimeSignerKeys(runtime, xln);
   const existingEntry = get(runtimes).get(runtimeId);
-  const existingEnv = existingEntry?.env
-    ? (unwrapLiveRuntimeEnv(existingEntry.env) ?? existingEntry.env)
-    : null;
+  const existingEnv = existingEntry?.env ? (unwrapLiveRuntimeEnv(existingEntry.env) ?? existingEntry.env) : null;
   if (existingEnv) {
     unregisterRuntimeEnvChange(runtimeId);
     await suspendRuntimeEnvActivity(existingEnv, xln);
@@ -1157,87 +217,68 @@ export async function restoreRuntimeEnvFromRecoveryCandidate(
   return { env: restoredEnv, bundle: candidate.tipBundle };
 }
 
-const buildRuntimeRecoverySigners = (runtime: Runtime): RuntimeRecoverySignerV1[] =>
-  (runtime.signers || [])
-    .map((signer, index) => ({
-      index,
-      derivationIndex: getSignerDerivationIndex(signer),
-      address: normalizeRuntimeId(signer.address),
-      name: String(signer.name || `Signer ${index + 1}`),
-      ...(signer.entityId ? { entityId: normalizeEntityId(signer.entityId) } : {}),
-      ...(signer.jurisdiction ? { jurisdiction: String(signer.jurisdiction).trim() } : {}),
-    }))
-    .filter((signer) => !!signer.address);
+// Storage key
+const VAULT_STORAGE_KEY = 'xln-vaults';
 
-const buildRuntimeRecoveryMeta = (runtime: Runtime): RuntimeRecoveryMetaV1 => ({
-  label: runtime.label,
-  activeSignerIndex: Math.max(0, Math.floor(Number(runtime.activeSignerIndex || 0))),
-  loginType: runtime.loginType === 'demo' ? 'demo' : 'manual',
-  ...(typeof runtime.requiresOnboarding === 'boolean'
-    ? { requiresOnboarding: runtime.requiresOnboarding }
-    : {}),
-  createdAt: runtime.createdAt,
+export const DEFAULT_VAULT_UNLOCK_DURATION_MS: VaultUnlockDurationMs = 600_000;
+
+const vaultLockTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+const BROWSER_GOSSIP_POLL_MS = 250;
+
+const loggedLiveJAdapterReimports = new Set<string>();
+
+// Main store
+export const runtimesState = writable<RuntimesState>(defaultState);
+
+export const vaultStorageLoaded = writable(false);
+
+// Derived stores
+export const activeRuntime = derived(runtimesState, $state => {
+  if (!$state.activeRuntimeId) return null;
+  return $state.runtimes[$state.activeRuntimeId] || null;
 });
 
-const applyRecoveryBundleMetadata = (runtime: Runtime, bundle: RuntimeRecoveryBundleV1): boolean => {
-  let changed = false;
-  const restoredSigners = [...bundle.signers]
-    .sort((left, right) => left.index - right.index)
-    .map((signer, index) => ({
-      index,
-      ...(Number.isFinite(Number(signer.derivationIndex))
-        ? { derivationIndex: Math.max(0, Math.floor(Number(signer.derivationIndex))) }
-        : {}),
-      address: normalizeRuntimeId(signer.address),
-      name: String(signer.name || `Signer ${index + 1}`),
-      ...(signer.entityId ? { entityId: normalizeEntityId(signer.entityId) } : {}),
-      ...(signer.jurisdiction ? { jurisdiction: String(signer.jurisdiction).trim() } : {}),
-    }))
-    .filter((signer) => !!signer.address);
+export const activeSigner = derived(activeRuntime, $runtime => {
+  if (!$runtime) return null;
+  return $runtime.signers[$runtime.activeSignerIndex] || null;
+});
 
-  const nextLabel = String(bundle.meta?.label || runtime.label || 'Runtime').trim() || 'Runtime';
-  if (runtime.label !== nextLabel) {
-    runtime.label = nextLabel;
-    changed = true;
-  }
-  if (restoredSigners.length > 0) {
-    const current = JSON.stringify(runtime.signers);
-    const incoming = JSON.stringify(restoredSigners);
-    if (current !== incoming) {
-      runtime.signers = restoredSigners;
-      changed = true;
-    }
-  }
+export const allRuntimes = derived(runtimesState, $state => {
+  return Object.values($state.runtimes).sort((a, b) => b.createdAt - a.createdAt);
+});
 
-  const nextActiveSignerIndex = Math.max(
-    0,
-    Math.min(
-      restoredSigners.length > 0 ? restoredSigners.length - 1 : Math.max(0, runtime.signers.length - 1),
-      Math.floor(Number(bundle.meta?.activeSignerIndex ?? runtime.activeSignerIndex ?? 0)),
-    ),
-  );
-  if (runtime.activeSignerIndex !== nextActiveSignerIndex) {
-    runtime.activeSignerIndex = nextActiveSignerIndex;
-    changed = true;
+let initializePromise: Promise<void> | null = null;
+
+let initialized = false;
+
+let resumeListenerRegistered = false;
+
+let resumeRefreshPromise: Promise<boolean> | null = null;
+
+let runtimeSyncChannel: BroadcastChannel | null = null;
+
+let runtimeResumeTrigger: (() => void) | null = null;
+
+const runtimeEnvChangeUnsubscribers = new Map<string, () => void>();
+
+const runtimeRecoveryBarrierUnsubscribers = new Map<string, () => void>();
+
+const runtimeRecoveryUploadTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+const runtimeRecoveryUploads = new Map<string, Set<Promise<void>>>();
+
+const runtimeRecoveryUploadMeta = new Map<
+  string,
+  {
+    lastUploadedHeight: number;
+    lastBundleHash: string | null;
+    lastSnapshotHeight: number;
+    lastSnapshotHash: string | null;
   }
-  const nextLoginType = bundle.meta?.loginType === 'demo' ? 'demo' : 'manual';
-  if (runtime.loginType !== nextLoginType) {
-    runtime.loginType = nextLoginType;
-    changed = true;
-  }
-  if (typeof bundle.meta?.requiresOnboarding === 'boolean' && runtime.requiresOnboarding !== bundle.meta.requiresOnboarding) {
-    runtime.requiresOnboarding = bundle.meta.requiresOnboarding;
-    changed = true;
-  }
-  if (Number.isFinite(Number(bundle.meta?.createdAt || 0))) {
-    const nextCreatedAt = Math.max(0, Math.floor(Number(bundle.meta?.createdAt || runtime.createdAt)));
-    if (runtime.createdAt !== nextCreatedAt) {
-      runtime.createdAt = nextCreatedAt;
-      changed = true;
-    }
-  }
-  return changed;
-};
+>();
+
+const recoveryTowerInfoCache = new Map<string, { fetchedAt: number; info: TowerServerInfo }>();
 
 const persistRuntimeMetadataSnapshot = (): void => {
   try {
@@ -1275,12 +316,15 @@ const scheduleVaultLock = (runtime: Runtime): void => {
   const unlockUntil = expectedProtection?.unlockUntil;
   if (unlockUntil === null || unlockUntil === undefined) return;
   const delay = Math.max(0, unlockUntil - Date.now());
-  vaultLockTimers.set(runtimeId, setTimeout(() => {
-    vaultLockTimers.delete(runtimeId);
-    void vaultOperations.lockRuntime(runtimeId, expectedProtection).catch(error => {
-      errorLog.log('Timed wallet lock failed', 'Runtime Security', { runtimeId, error });
-    });
-  }, delay));
+  vaultLockTimers.set(
+    runtimeId,
+    setTimeout(() => {
+      vaultLockTimers.delete(runtimeId);
+      void vaultOperations.lockRuntime(runtimeId, expectedProtection).catch(error => {
+        errorLog.log('Timed wallet lock failed', 'Runtime Security', { runtimeId, error });
+      });
+    }, delay),
+  );
 };
 
 const protectRuntimeForDevice = async (
@@ -1290,10 +334,14 @@ const protectRuntimeForDevice = async (
 ): Promise<void> => {
   if (!runtime.seed) throw new Error(`RUNTIME_LOCKED:${runtime.id}`);
   const previousProtection = runtime.protectedSecrets;
-  const nextProtection = await protectVaultSecrets(runtime.id, {
-    seed: runtime.seed,
-    ...(runtime.mnemonic12 ? { mnemonic12: runtime.mnemonic12 } : {}),
-  }, durationMs);
+  const nextProtection = await protectVaultSecrets(
+    runtime.id,
+    {
+      seed: runtime.seed,
+      ...(runtime.mnemonic12 ? { mnemonic12: runtime.mnemonic12 } : {}),
+    },
+    durationMs,
+  );
   runtime.protectedSecrets = nextProtection;
   delete runtime.devicePassphrase;
   try {
@@ -1339,7 +387,7 @@ const updateRuntimeRecoveryMetadata = (
   const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
   if (!normalizedRuntimeId) return null;
   let updatedRuntime: Runtime | null = null;
-  runtimesState.update((state) => {
+  runtimesState.update(state => {
     const runtime = state.runtimes[normalizedRuntimeId];
     if (!runtime) return state;
     const nextRecovery = update(runtime.recovery || {});
@@ -1364,7 +412,7 @@ const updateRuntimeRecoveryMetadata = (
   const runtimeEntry = get(runtimes).get(normalizedRuntimeId);
   const entryEnv = runtimeEntry?.env || null;
   if (entryEnv) {
-    runtimes.update((currentRuntimes) => {
+    runtimes.update(currentRuntimes => {
       const updated = new Map(currentRuntimes);
       updated.set(normalizedRuntimeId, runtimeToEntry(updatedRuntime!, entryEnv));
       return updated;
@@ -1389,22 +437,26 @@ export async function tryRestoreRuntimeEnvFromTower(
   const runtimeId = normalizeRuntimeId(runtime.id);
   if (!runtimeId || !runtime.seed) return null;
 
-  const discovery = await discoverRuntimeRecoveryCandidates(runtime.seed, runtime.recovery
-    ? { recovery: runtime.recovery, xln }
-    : { xln });
+  const discovery = await discoverRuntimeRecoveryCandidates(
+    runtime.seed,
+    runtime.recovery ? { recovery: runtime.recovery, xln } : { xln },
+  );
   if (discovery.candidates.length === 0) {
     if (discovery.errors.length > 0) {
-      throw new Error(`[VaultStore] Tower restore failed for ${runtimeId.slice(0, 12)}: ${discovery.errors.join(' | ')}`);
+      throw new Error(
+        `[VaultStore] Tower restore failed for ${runtimeId.slice(0, 12)}: ${discovery.errors.join(' | ')}`,
+      );
     }
     return null;
   }
 
   const best = discovery.candidates[0]!;
   if (discovery.candidates.length > 1) {
-    const conflictingSameHeight = discovery.candidates.some((candidate) =>
-      candidate !== best
-      && candidate.runtimeHeight === best.runtimeHeight
-      && candidate.checkpointHash !== best.checkpointHash,
+    const conflictingSameHeight = discovery.candidates.some(
+      candidate =>
+        candidate !== best &&
+        candidate.runtimeHeight === best.runtimeHeight &&
+        candidate.checkpointHash !== best.checkpointHash,
     );
     if (conflictingSameHeight) {
       errorLog.log(
@@ -1417,11 +469,7 @@ export async function tryRestoreRuntimeEnvFromTower(
   return restoreRuntimeEnvFromRecoveryCandidate(runtime, xln, best);
 }
 
-async function uploadRuntimeRecoverySnapshot(
-  runtimeId: string,
-  env: Env,
-  xln: XLNModule,
-): Promise<void> {
+async function uploadRuntimeRecoverySnapshot(runtimeId: string, env: Env, xln: XLNModule): Promise<void> {
   if (
     typeof xln.buildRuntimeRecoveryBundle !== 'function' ||
     typeof xln.encryptRuntimeRecoveryBundle !== 'function' ||
@@ -1467,8 +515,9 @@ async function uploadRuntimeRecoverySnapshot(
       limit: RECOVERY_SNAPSHOT_INTERVAL_FRAMES,
     });
     const expectedFrames = height - baseSnapshotHeight;
-    const contiguous = frames.length === expectedFrames
-      && frames.every((frame, index) => Math.max(0, Math.floor(Number(frame.height || 0))) === fromHeight + index);
+    const contiguous =
+      frames.length === expectedFrames &&
+      frames.every((frame, index) => Math.max(0, Math.floor(Number(frame.height || 0))) === fromHeight + index);
     if (contiguous) {
       backupSlot = 1;
       bundle = xln.buildRuntimeRecoveryBundle(env, {
@@ -1486,7 +535,11 @@ async function uploadRuntimeRecoverySnapshot(
     }
   }
   const encrypted = await xln.encryptRuntimeRecoveryBundle(bundle, runtime.seed);
-  if (previous && previous.lastBundleHash === encrypted.bundleHash && previous.lastUploadedHeight === encrypted.height) {
+  if (
+    previous &&
+    previous.lastBundleHash === encrypted.bundleHash &&
+    previous.lastUploadedHeight === encrypted.height
+  ) {
     return;
   }
 
@@ -1520,7 +573,7 @@ async function uploadRuntimeRecoverySnapshot(
   let successfulTowers = 0;
   const errors: string[] = [];
   let maxObservedStoredBytes = runtime.recovery?.lastKnownStoredBytes ?? 0;
-  const delayedTowers = towers.filter((tower) => tower.towerMode === 'delayed_last_resort');
+  const delayedTowers = towers.filter(tower => tower.towerMode === 'delayed_last_resort');
   const activeTowerErrors: string[] = [];
   const uploadCheckedAt = Date.now();
   const receiptSummaries: RuntimeRecoveryTowerReceiptSummary[] = [];
@@ -1534,17 +587,20 @@ async function uploadRuntimeRecoverySnapshot(
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(appointment),
       });
-      const payload = await response.json() as { ok: boolean; error?: string; receipt?: TowerReceiptV1 };
+      const payload = (await response.json()) as { ok: boolean; error?: string; receipt?: TowerReceiptV1 };
       if (!response.ok || !payload.ok) {
         const errorText = String(payload.error || `HTTP_${response.status}`);
         errors.push(`${tower.url}:${errorText}`);
         failureSummaries.push(summarizeRuntimeRecoveryTowerFailure(tower, errorText, uploadCheckedAt));
         if (errorText.startsWith('TOWER_QUOTA_EXCEEDED')) {
-          updateRuntimeRecoveryMetadata(normalizedRuntimeId, (previousRecovery) => ({
+          updateRuntimeRecoveryMetadata(normalizedRuntimeId, previousRecovery => ({
             ...previousRecovery,
             lastQuotaWarningAt: Date.now(),
           }));
-          toasts.warning('Recovery backup quota exceeded. Runtime state is larger than the free tower allowance.', 8_000);
+          toasts.warning(
+            'Recovery backup quota exceeded. Runtime state is larger than the free tower allowance.',
+            8_000,
+          );
         }
         continue;
       }
@@ -1587,15 +643,18 @@ async function uploadRuntimeRecoverySnapshot(
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(upload.appointment),
         });
-        const payload = await response.json() as { ok: boolean; error?: string; receipt?: TowerReceiptV1 };
+        const payload = (await response.json()) as { ok: boolean; error?: string; receipt?: TowerReceiptV1 };
         if (!response.ok || !payload.ok) {
           const errorText = String(payload.error || `HTTP_${response.status}`);
           if (errorText.startsWith('TOWER_QUOTA_EXCEEDED')) {
-            updateRuntimeRecoveryMetadata(normalizedRuntimeId, (previousRecovery) => ({
+            updateRuntimeRecoveryMetadata(normalizedRuntimeId, previousRecovery => ({
               ...previousRecovery,
               lastQuotaWarningAt: Date.now(),
             }));
-            toasts.warning('Watchtower dispute backup quota exceeded. Last-resort coverage is incomplete until the runtime state shrinks or quota is raised.', 8_000);
+            toasts.warning(
+              'Watchtower dispute backup quota exceeded. Last-resort coverage is incomplete until the runtime state shrinks or quota is raised.',
+              8_000,
+            );
           }
           throw new Error(`${upload.triggerHint}:${errorText}`);
         }
@@ -1612,7 +671,7 @@ async function uploadRuntimeRecoverySnapshot(
     }
   }
 
-  updateRuntimeRecoveryMetadata(normalizedRuntimeId, (previousRecovery) => ({
+  updateRuntimeRecoveryMetadata(normalizedRuntimeId, previousRecovery => ({
     ...previousRecovery,
     towers,
     lastKnownStoredBytes: maxObservedStoredBytes,
@@ -1622,20 +681,24 @@ async function uploadRuntimeRecoverySnapshot(
     lastTowerFailures: failureSummaries.slice(0, RECOVERY_TOWER_STATUS_LIMIT),
   }));
   if (successfulTowers < minSuccessfulTowers) {
-    throw new Error(`[VaultStore] Tower appointment failed for ${normalizedRuntimeId.slice(0, 12)}: ${errors.join(' | ') || 'no tower accepted backup'}`);
+    throw new Error(
+      `[VaultStore] Tower appointment failed for ${normalizedRuntimeId.slice(0, 12)}: ${errors.join(' | ') || 'no tower accepted backup'}`,
+    );
   }
   if (activeTowerErrors.length > 0) {
-    throw new Error(`[VaultStore] Tower last-resort appointment failed for ${normalizedRuntimeId.slice(0, 12)}: ${activeTowerErrors.join(' | ')}`);
+    throw new Error(
+      `[VaultStore] Tower last-resort appointment failed for ${normalizedRuntimeId.slice(0, 12)}: ${activeTowerErrors.join(' | ')}`,
+    );
   }
   runtimeRecoveryUploadMeta.set(normalizedRuntimeId, {
     lastUploadedHeight: encrypted.height,
     lastBundleHash: encrypted.bundleHash,
-    lastSnapshotHeight: (bundle.kind ?? 'snapshot') === 'snapshot'
-      ? encrypted.height
-      : previous?.lastSnapshotHeight ?? 0,
-    lastSnapshotHash: (bundle.kind ?? 'snapshot') === 'snapshot'
-      ? String(bundle.checkpointHash || '').toLowerCase()
-      : previous?.lastSnapshotHash ?? null,
+    lastSnapshotHeight:
+      (bundle.kind ?? 'snapshot') === 'snapshot' ? encrypted.height : (previous?.lastSnapshotHeight ?? 0),
+    lastSnapshotHash:
+      (bundle.kind ?? 'snapshot') === 'snapshot'
+        ? String(bundle.checkpointHash || '').toLowerCase()
+        : (previous?.lastSnapshotHash ?? null),
   });
   persistRuntimeMetadataSnapshot();
 }
@@ -1660,11 +723,7 @@ async function drainRuntimeRecoveryUploads(runtimeId: string): Promise<void> {
   }
 }
 
-function scheduleRuntimeRecoveryUpload(
-  runtimeId: string,
-  env: Env,
-  xln: XLNModule,
-): void {
+function scheduleRuntimeRecoveryUpload(runtimeId: string, env: Env, xln: XLNModule): void {
   const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
   if (!normalizedRuntimeId) return;
   const existingTimer = runtimeRecoveryUploadTimers.get(normalizedRuntimeId);
@@ -1676,48 +735,14 @@ function scheduleRuntimeRecoveryUpload(
       void trackRuntimeRecoveryUpload(
         normalizedRuntimeId,
         uploadRuntimeRecoverySnapshot(normalizedRuntimeId, unwrapLiveRuntimeEnv(env) ?? env, xln),
-      ).catch((error) => {
-        errorLog.log(
-          `Tower recovery upload failed for ${normalizedRuntimeId.slice(0, 12)}`,
-          'Runtime Recovery',
-          { runtimeId: normalizedRuntimeId, error },
-        );
+      ).catch(error => {
+        errorLog.log(`Tower recovery upload failed for ${normalizedRuntimeId.slice(0, 12)}`, 'Runtime Recovery', {
+          runtimeId: normalizedRuntimeId,
+          error,
+        });
       });
     }, RECOVERY_UPLOAD_DEBOUNCE_MS),
   );
-}
-
-const findRuntimeByIdCaseInsensitive = (
-  runtimeMap: Record<string, Runtime>,
-  requestedId: string | null | undefined,
-): { key: string; runtime: Runtime } | null => {
-  if (!requestedId) return null;
-  const direct = runtimeMap[requestedId];
-  if (direct) return { key: requestedId, runtime: direct };
-  const requestedLower = requestedId.toLowerCase();
-  for (const [key, runtime] of Object.entries(runtimeMap)) {
-    if (key.toLowerCase() === requestedLower || runtime.id.toLowerCase() === requestedLower) {
-      return { key, runtime };
-    }
-  }
-  return null;
-};
-
-async function waitForCondition(
-  check: () => boolean,
-  label: string,
-  timeoutMs = 30_000,
-  intervalMs = 50,
-  describeTimeout?: () => string,
-): Promise<void> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const ready = check();
-    if (ready) return;
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  const details = describeTimeout?.();
-  throw new Error(`[VaultStore] Timeout waiting for condition: ${label}${details ? `\n${details}` : ''}`);
 }
 
 const getLiveRuntimeEnvForId = (runtimeId: string, fallback?: Env | null): Env | null => {
@@ -1730,7 +755,10 @@ const getRuntimeFatalDiagnostics = (env: Env, replicaName?: string): string => {
   const frameLogs = env.frameLogs;
   const cleanLogs = Array.isArray(env.runtimeState?.cleanLogs) ? env.runtimeState.cleanLogs : [];
   const recentErrors = frameLogs
-    .filter((entry: FrameLogEntry) => entry.level === 'error' || entry.message === 'RUNTIME_LOOP_ERROR' || entry.message === 'RUNTIME_LOOP_HALTED')
+    .filter(
+      (entry: FrameLogEntry) =>
+        entry.level === 'error' || entry.message === 'RUNTIME_LOOP_ERROR' || entry.message === 'RUNTIME_LOOP_HALTED',
+    )
     .slice(-3)
     .map((entry: FrameLogEntry) => ({
       level: entry.level ?? null,
@@ -1811,7 +839,7 @@ async function ensureRuntimePipelineAlive(runtime: Runtime | null, xln: XLNModul
       if (p2p.isConnected() || p2p.isConnecting?.()) {
         break;
       }
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
     if (p2p.isConnected()) {
       // no-op
@@ -1827,462 +855,6 @@ async function ensureRuntimePipelineAlive(runtime: Runtime | null, xln: XLNModul
 
   if (p2p && typeof p2p.refreshGossip === 'function') {
     p2p.refreshGossip();
-  }
-}
-
-const hasRuntimeJurisdictionAddresses = (replica: unknown): boolean => {
-  const candidate = replica as {
-    depositoryAddress?: unknown;
-    entityProviderAddress?: unknown;
-    contracts?: {
-      account?: unknown;
-      depository?: unknown;
-      entityProvider?: unknown;
-      deltaTransformer?: unknown;
-    };
-  } | null;
-  const depository =
-    typeof candidate?.depositoryAddress === 'string' && candidate.depositoryAddress.length > 0
-      ? candidate.depositoryAddress
-      : (typeof candidate?.contracts?.depository === 'string' ? candidate.contracts.depository : '');
-  const entityProvider =
-    typeof candidate?.entityProviderAddress === 'string' && candidate.entityProviderAddress.length > 0
-      ? candidate.entityProviderAddress
-      : (typeof candidate?.contracts?.entityProvider === 'string' ? candidate.contracts.entityProvider : '');
-  const account = typeof candidate?.contracts?.account === 'string' ? candidate.contracts.account : '';
-  const deltaTransformer = typeof candidate?.contracts?.deltaTransformer === 'string'
-    ? candidate.contracts.deltaTransformer
-    : '';
-  return Boolean(depository && entityProvider && account && deltaTransformer);
-};
-
-const hasConnectedJurisdictionAdapter = (replica: unknown): boolean => {
-  const candidate = replica as {
-    jadapter?: {
-      addresses?: { depository?: string; entityProvider?: string };
-      depository?: unknown;
-      entityProvider?: unknown;
-    };
-  } | null;
-  return Boolean(
-    candidate?.jadapter?.addresses?.depository &&
-      candidate?.jadapter?.addresses?.entityProvider &&
-      candidate?.jadapter?.depository &&
-      candidate?.jadapter?.entityProvider,
-  );
-};
-
-const resolveJurisdictionConfig = (jurisdictions: JurisdictionsPayload): ApiJurisdictionConfig => {
-  const usable = Object.values(jurisdictions.jurisdictions || {}).filter(hasUsableJurisdictionConfig);
-  const selected = usable.find(isPrimaryJurisdictionConfig) ?? usable[0];
-  if (!selected) {
-    throw new Error('No jurisdictions found in /api/jurisdictions');
-  }
-  return selected;
-};
-
-const isPrimaryJurisdictionConfig = (config: ApiJurisdictionConfig): boolean =>
-  config.primary === true;
-
-const hasUsableJurisdictionConfig = (config: ApiJurisdictionConfig): boolean => {
-  const status = String((config as { status?: unknown })?.status || 'active').trim().toLowerCase();
-  return status === 'active' &&
-    Boolean(config?.contracts?.depository && config?.contracts?.entityProvider && resolveJurisdictionRpc(config));
-};
-
-const resolveDefaultJurisdictionImportName = (
-  key: string,
-  config: ApiJurisdictionConfig,
-  index: number,
-): string => {
-  const rawName = String(config.name || key).trim();
-  return rawName || (index === 0 ? 'primary' : `Jurisdiction ${index + 1}`);
-};
-
-const listDefaultJurisdictionImports = (jurisdictions: JurisdictionsPayload): Array<{ key: string; name: string; config: ApiJurisdictionConfig }> => {
-  const entries = Object.entries(jurisdictions.jurisdictions || {})
-    .filter(([, config]) => hasUsableJurisdictionConfig(config));
-  if (entries.length === 0) return [];
-  const primary = resolveJurisdictionConfig(jurisdictions);
-  const primaryKey = entries.find(([, config]) => config === primary)?.[0] || 'primary';
-  const ordered = [
-    [primaryKey, primary] as const,
-    ...entries.filter(([key, config]) => key !== primaryKey && config !== primary),
-  ];
-  const seen = new Set<string>();
-  return ordered.flatMap(([key, config], index) => {
-    const name = resolveDefaultJurisdictionImportName(key, config, index);
-    const normalized = normalizeJurisdictionKey(name);
-    if (!normalized || seen.has(normalized)) return [];
-    seen.add(normalized);
-    return [{ key, name, config }];
-  });
-};
-
-const resolveJurisdictionRpc = (config: ApiJurisdictionConfig): string =>
-  config.rpc ?? config.rpcs?.[0] ?? '';
-
-const resolveRpcUrl = (rpc: string, baseOrigin?: string): string => {
-  if (!rpc) throw new Error('Missing RPC URL in /api/jurisdictions');
-  if (typeof window !== 'undefined' && rpc.startsWith('/rpc/')) {
-    const origin = baseOrigin ?? window.location.origin;
-    return new URL('/rpc', origin).toString();
-  }
-  if (typeof window !== 'undefined' && rpc.startsWith('http')) {
-    try {
-      const parsed = new URL(rpc);
-      if (parsed.pathname.startsWith('/rpc/')) {
-        return `${parsed.origin}/rpc`;
-      }
-      const isLocal = parsed.hostname === 'localhost';
-      if (isLocal) {
-        // Route localhost RPC through same-origin RPC bridge.
-        const origin = baseOrigin ?? window.location.origin;
-        return new URL('/rpc', origin).toString();
-      }
-    } catch {
-      // fall through
-    }
-  }
-  if (rpc.startsWith('http')) return rpc;
-  if (typeof window !== 'undefined') {
-    const origin = baseOrigin ?? window.location.origin;
-    return new URL(rpc, origin).toString();
-  }
-  return rpc;
-};
-
-// Tower remedies carry dispute proof bodies, which still contain bigint deltas.
-// JSON.stringify would throw here and silently break last-resort tower coverage,
-// so we normalize bigint leaves into decimal strings before upload.
-const stringifyTowerPayload = (value: unknown): string =>
-  JSON.stringify(value, (_key, candidate) => typeof candidate === 'bigint' ? candidate.toString() : candidate);
-
-type LastResortTowerAppointmentUpload = {
-  tower: RecoveryTowerConfig;
-  appointment: TowerAppointmentV1;
-  lookupKey: string;
-  triggerHint: string;
-};
-
-export async function buildDelayedLastResortAppointmentsForTower(
-  runtime: Runtime,
-  env: Env,
-  xln: XLNModule,
-  tower: RecoveryTowerConfig,
-  towerSignerAddress: string,
-  encryptedBundle: EncryptedRuntimeRecoveryBundleV1,
-): Promise<LastResortTowerAppointmentUpload[]> {
-  if (
-    typeof xln.deriveRuntimeRecoveryActionLookupKey !== 'function' ||
-    typeof xln.computeWatchtowerCounterDisputeAuthorizationHash !== 'function' ||
-    typeof xln.buildTowerAppointmentOwnerMessage !== 'function' ||
-    typeof xln.buildSingleSignerHanko !== 'function' ||
-    typeof xln.encryptTowerPayloadForWatchSeed !== 'function'
-  ) {
-    return [];
-  }
-
-  const normalizedRuntimeId = normalizeRuntimeId(runtime.id);
-  if (!normalizedRuntimeId || !runtime.seed) return [];
-
-  const rootWallet = new Wallet(derivePrivateKey(runtime.seed, 0));
-  const uploads = new Map<string, LastResortTowerAppointmentUpload>();
-
-  // We publish one last-resort appointment per concrete bilateral account.
-  // The tower never gets spend authority. It only receives the latest
-  // counterparty-signed proof plus a narrow owner authorization bound to the
-  // tower address, the exact account pair, and the last-resort window.
-  for (const signer of runtime.signers || []) {
-    const entityId = normalizeEntityId(signer.entityId);
-    const signerAddress = normalizeRuntimeId(signer.address);
-    if (!entityId || !signerAddress) continue;
-
-    const replica = findEntityReplicaByEntityAndSigner(env, entityId, signerAddress);
-    if (!replica?.state?.accounts || !(replica.state.accounts instanceof Map)) continue;
-
-    const jurisdictionName =
-      getEntityReplicaJurisdictionName(replica)
-      || String(signer.jurisdiction || '').trim()
-      || String(env.activeJurisdiction || '').trim();
-    const jReplica = findJReplicaByName(env, jurisdictionName);
-    if (!jReplica) continue;
-
-    let depositoryAddress = '';
-    try {
-      depositoryAddress = getJReplicaContractAddress(jReplica, 'depository');
-    } catch {
-      continue;
-    }
-    const chainId = Number(jReplica.chainId ?? jReplica.jadapter?.chainId ?? 0);
-    if (!Number.isFinite(chainId) || chainId <= 0) continue;
-
-    const rpcBase = String(jReplica.rpcs?.[0] || '').trim();
-    if (!rpcBase) continue;
-    const rpcUrl = resolveRpcUrl(rpcBase);
-    const signerPrivateKey = derivePrivateKey(runtime.seed, getSignerDerivationIndex(signer));
-
-    for (const [rawCounterpartyId, account] of replica.state.accounts.entries()) {
-      const counterpartyId = normalizeEntityId(rawCounterpartyId);
-      const proofNonce = Math.max(0, Math.floor(Number(account?.counterpartyDisputeProofNonce || 0)));
-      const proofBodyHash = String(account?.counterpartyDisputeProofBodyHash || '').trim().toLowerCase();
-      const proofHanko = String(account?.counterpartyDisputeProofHanko || '').trim();
-      const proofBody = proofBodyHash ? account?.disputeProofBodiesByHash?.[proofBodyHash] : null;
-      const watchSeed = String(account?.watchSeed || '').trim().toLowerCase();
-      if (!counterpartyId || proofNonce <= 0 || !proofBodyHash || !proofHanko || !proofBody || typeof proofBody !== 'object' || !/^0x[0-9a-f]{64}$/.test(watchSeed)) {
-        continue;
-      }
-
-      const appointmentSequence = proofNonce;
-      const lookupKey = xln.deriveRuntimeRecoveryActionLookupKey(
-        normalizedRuntimeId,
-        runtime.seed,
-        entityId,
-        counterpartyId,
-      );
-      const ownerAuthorizationHash = xln.computeWatchtowerCounterDisputeAuthorizationHash(
-        chainId,
-        depositoryAddress,
-        towerSignerAddress,
-        entityId,
-        counterpartyId,
-        proofNonce,
-        proofBodyHash,
-        WATCHTOWER_LAST_RESORT_WINDOW_BLOCKS,
-        appointmentSequence,
-      );
-      const ownerAuthorizationHanko = xln.buildSingleSignerHanko(
-        entityId,
-        ownerAuthorizationHash,
-        signerPrivateKey,
-      );
-
-      const finalProofbody = structuredClone(proofBody as Record<string, unknown>);
-      const transformers = finalProofbody['transformers'];
-      let leftArguments = '0x';
-      let rightArguments = '0x';
-      if (Array.isArray(transformers) && transformers.length > 0) {
-        if (typeof xln.buildDisputeArgumentsForSnapshot !== 'function') {
-          throw new Error('WATCHTOWER_ARGUMENT_BUILDER_UNAVAILABLE');
-        }
-        const leftEntityId = normalizeEntityId(account.leftEntity);
-        const rightEntityId = normalizeEntityId(account.rightEntity);
-        const watchedSide = leftEntityId === entityId
-          ? 'left'
-          : rightEntityId === entityId
-            ? 'right'
-            : null;
-        if (!watchedSide) {
-          throw new Error(`WATCHTOWER_ACCOUNT_SIDE_UNKNOWN:${entityId}:${counterpartyId}`);
-        }
-        // The remedy is a counter-dispute payload for the watched entity. Store
-        // only the watched side arguments here. The dispute starter's side is
-        // bound by DisputeStarted and must be injected by tower action from the
-        // on-chain event, otherwise a stale/local guess can fail the hash check or
-        // reveal the wrong transformer evidence.
-        const builtArguments = xln.buildDisputeArgumentsForSnapshot(
-          account,
-          replica.state,
-          counterpartyId,
-          proofBodyHash,
-          { secretsSide: watchedSide },
-        );
-        if (watchedSide === 'left') leftArguments = builtArguments.leftArguments;
-        else rightArguments = builtArguments.rightArguments;
-      }
-      if (String(finalProofbody['watchSeed'] || '').trim().toLowerCase() !== watchSeed) {
-        throw new Error(`WATCHTOWER_PROOF_BODY_WATCH_SEED_MISMATCH:${entityId}:${counterpartyId}`);
-      }
-      const remedy: TowerCounterDisputeRemedy = {
-        version: 1,
-        type: 'counter_dispute_remedy',
-        rpcUrl,
-        chainId,
-        depositoryAddress,
-        watchedEntityId: entityId,
-        towerAddress: towerSignerAddress,
-        lastResortWindowBlocks: WATCHTOWER_LAST_RESORT_WINDOW_BLOCKS,
-        appointmentSequence,
-        ownerAuthorizationHanko,
-        latestProof: {
-          counterentity: counterpartyId,
-          finalNonce: proofNonce,
-          finalProofbody,
-          leftArguments,
-          rightArguments,
-          sig: proofHanko,
-        },
-      };
-      const serializedRemedy = stringifyTowerPayload(remedy);
-      const encryptedRemedy = await xln.encryptTowerPayloadForWatchSeed(serializedRemedy, watchSeed);
-      const triggerHint = `chain:${chainId}:acct:${entityId}:${counterpartyId}`;
-      const lastResortPayload: TowerLastResortPayloadV1 = {
-        triggerHint,
-        watch: {
-          rpcUrl,
-          chainId,
-          depositoryAddress,
-          watchedEntityId: entityId,
-          counterentity: counterpartyId,
-        },
-        encryptedRemedy,
-        actionKind: 'counter_dispute_only',
-        appointmentSequence,
-        proofNonce,
-        proofBodyHash,
-        responseMode: 'last_resort',
-        lastResortWindowBlocks: WATCHTOWER_LAST_RESORT_WINDOW_BLOCKS,
-        safetyMarginBlocks: WATCHTOWER_SAFETY_MARGIN_BLOCKS,
-      };
-      const signedAt = Date.now();
-      const ownerProofSignature = await rootWallet.signMessage(
-        xln.buildTowerAppointmentOwnerMessage(
-          normalizedRuntimeId,
-          'delayed_last_resort',
-          lookupKey,
-          0,
-          encryptedBundle.bundleHash,
-          encryptedBundle.height,
-          signedAt,
-          lastResortPayload,
-        ),
-      );
-      const nextUpload: LastResortTowerAppointmentUpload = {
-        tower,
-        lookupKey,
-        triggerHint,
-        appointment: {
-          type: 'tower_appointment',
-          version: 1,
-          towerMode: 'delayed_last_resort',
-          lookupKey,
-          slot: 0,
-          // Last-resort appointments use a separate blind lookup namespace so towers
-          // cannot infer backup availability from the action channel and vice
-          // versa. The ciphertext stays opaque to the tower either way.
-          bundle: {
-            ...encryptedBundle,
-            lookupKey,
-          },
-          lastResortPayload,
-          ownerProof: {
-            runtimeId: normalizedRuntimeId,
-            signedAt,
-            signature: ownerProofSignature,
-          },
-        },
-      };
-      const previous = uploads.get(lookupKey);
-      if (!previous || (previous.appointment.lastResortPayload?.proofNonce || 0) < proofNonce) {
-        uploads.set(lookupKey, nextUpload);
-      }
-    }
-  }
-
-  return [...uploads.values()];
-}
-
-const summarizeHealth = (payload: HealthPayload | null): Record<string, unknown> => {
-  if (!payload) return {};
-  return {
-    timestamp: payload.timestamp,
-    resetInProgress: payload?.reset?.inProgress ?? null,
-    resetError: payload?.reset?.lastError ?? null,
-    system: payload?.system ?? null,
-    jMachines: Array.isArray(payload?.jMachines)
-      ? payload.jMachines.map((j: HealthMachine) => ({
-          name: j?.name,
-          status: j?.status,
-          chainId: j?.chainId,
-          lastBlock: j?.lastBlock,
-        }))
-      : [],
-  };
-};
-
-const resolveJurisdictionChainId = (config: JurisdictionConfig, context: string): number => {
-  const chainId = Number(config.chainId || 31337);
-  if (!Number.isFinite(chainId) || chainId <= 0) {
-    throw new Error(`[${context}] CHAIN_ID_INVALID: ${String(config.chainId)}`);
-  }
-  return Math.floor(chainId);
-};
-
-const fetchJurisdictions = async (baseOrigin?: string): Promise<JurisdictionsPayload> => {
-  const primaryOrigin = baseOrigin ?? (typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance');
-  const configuredApiBase =
-    typeof window !== 'undefined'
-      ? (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__?.trim() || null
-      : null;
-  const bust = `ts=${Date.now()}`;
-  const candidates = configuredApiBase
-    ? Array.from(new Set([
-        `${configuredApiBase}/api/jurisdictions?${bust}`,
-        `${primaryOrigin}/api/jurisdictions?${bust}`,
-      ]))
-    : [`${primaryOrigin}/api/jurisdictions?${bust}`];
-
-  let lastError: unknown = null;
-  for (const url of candidates) {
-    try {
-      const resp = await fetch(url, {
-        cache: 'no-store',
-        headers: {
-          'cache-control': 'no-cache, no-store, must-revalidate',
-          pragma: 'no-cache',
-        },
-      });
-      if (!resp.ok) {
-        lastError = new Error(`HTTP ${resp.status}`);
-        continue;
-      }
-      const payload = (await resp.json()) as JurisdictionsPayload;
-      return payload;
-    } catch (err) {
-      lastError = err;
-    }
-  }
-  throw lastError ?? new Error('Failed to fetch /api/jurisdictions');
-};
-
-async function fundSignerWalletViaFaucet(address: string): Promise<void> {
-  try {
-    // Call testnet faucet API (Faucet A - ERC20 to wallet)
-    const apiBase = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
-    const response = await fetch(`${apiBase}/api/faucet/erc20`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        userAddress: address,
-        tokenSymbol: 'USDC',
-        amount: '100'
-      })
-    });
-
-    const raw = await response.text();
-    let result: FaucetResult | null = null;
-    if (raw) {
-      try { result = JSON.parse(raw); } catch { /* ignore */ }
-    }
-
-    if (!response.ok) {
-      const errorMsg = result?.error || `Faucet failed (${response.status})`;
-      errorLog.log('Faucet failed', 'Runtime Funding', { address, error: errorMsg });
-      return;
-    }
-
-    if (!result?.success) {
-      errorLog.log('Faucet failed', 'Runtime Funding', { address, error: result?.error || 'Unknown faucet error' });
-    }
-  } catch (err) {
-    errorLog.log('Failed to call faucet', 'Runtime Funding', { address, error: err });
-  }
-}
-
-async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<void> {
-  if (!runtime) return;
-  for (const signer of runtime.signers) {
-    await fundSignerWalletViaFaucet(signer.address);
   }
 }
 
@@ -2325,11 +897,7 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
     unregisterRuntimeEnvChange(normalizedRuntimeId);
     runtimeRecoveryUploadMeta.delete(normalizedRuntimeId);
   } catch (err) {
-    errorLog.log(
-      `Failed to cleanup runtime ${runtimeId.slice(0, 12)}`,
-      'Runtime Cleanup',
-      { runtimeId, error: err },
-    );
+    errorLog.log(`Failed to cleanup runtime ${runtimeId.slice(0, 12)}`, 'Runtime Cleanup', { runtimeId, error: err });
     throw err;
   }
 }
@@ -2346,60 +914,8 @@ async function stopRuntimeEnv(env: Env): Promise<void> {
   }
 }
 
-const runtimeInputWorkSummary = (input: RuntimeInput | undefined) => ({
-  runtimeTxs: (input?.runtimeTxs ?? []).map(tx => tx.type === 'importReplica'
-    ? {
-        type: tx.type,
-        entityId: tx.entityId,
-        signerId: tx.signerId,
-        jurisdiction: tx.data.config.jurisdiction?.name ?? null,
-        profileName: tx.data.profileName ?? null,
-      }
-    : { type: tx.type }),
-  entityInputs: (input?.entityInputs ?? []).map(entityInput => ({
-    entityId: entityInput.entityId,
-    signerId: entityInput.signerId,
-    txs: (entityInput.entityTxs ?? []).map(tx => tx.type),
-  })),
-  jInputs: input?.jInputs?.length ?? 0,
-  reliableReceipts: input?.reliableReceipts?.length ?? 0,
-  queuedAt: input?.queuedAt ?? null,
-});
-
-const runtimeQuiesceWorkSummary = (env: Env) => ({
-  runtimeId: env.runtimeId ?? null,
-  scenarioMode: Boolean(env.scenarioMode),
-  height: env.height,
-  timestamp: env.timestamp,
-  lifecycle: env.runtimeState?.lifecyclePhase ?? null,
-  persistencePaused: Boolean(env.runtimeState?.persistencePaused),
-  persistenceQuiescing: Boolean(env.runtimeState?.persistenceQuiescing),
-  processing: Boolean(env.runtimeState?.processingPromise),
-  inFlightEntityInputs: env.runtimeState?.inFlightEntityInputs ?? 0,
-  pendingCommittedJOutbox: env.runtimeState?.pendingCommittedJOutbox?.length ?? 0,
-  pendingJurisdictionImports: env.runtimeState?.pendingJurisdictionImports?.size ?? 0,
-  mempool: runtimeInputWorkSummary(env.runtimeMempool ?? env.runtimeInput),
-  pendingOutputs: env.pendingOutputs?.length ?? 0,
-  networkInbox: env.networkInbox?.length ?? 0,
-  pendingNetworkOutputs: env.pendingNetworkOutputs?.length ?? 0,
-  jurisdictions: Array.from(env.jReplicas.entries(), ([name, replica]) => ({
-    name,
-    mode: replica.jadapter?.mode ?? null,
-    watching: replica.jadapter?.isWatching?.() ?? false,
-  })),
-  replicas: Array.from(env.eReplicas.entries()).flatMap(([key, replica]) => {
-    const accounts = Array.from(replica.state.accounts.entries()).flatMap(([counterpartyId, account]) =>
-      account.mempool.length > 0 || account.pendingFrame
-        ? [{ counterpartyId, mempool: account.mempool.length, pendingFrame: account.pendingFrame?.height ?? null }]
-        : []);
-    if (replica.mempool.length === 0 && !replica.proposal && !replica.lockedFrame && accounts.length === 0) return [];
-    return [{ key, mempool: replica.mempool.map(tx => tx.type), proposal: replica.proposal?.height ?? null,
-      lockedFrame: replica.lockedFrame?.height ?? null, accounts }];
-  }),
-});
-
 async function suspendRuntimeEnvActivity(env: Env, loadedXln?: XLNModule): Promise<void> {
-  const xln = loadedXln ?? await getXLN();
+  const xln = loadedXln ?? (await getXLN());
   const failures: string[] = [];
 
   // Fence new P2P/J ingress before draining work that was already accepted.
@@ -2423,7 +939,7 @@ async function suspendRuntimeEnvActivity(env: Env, loadedXln?: XLNModule): Promi
   } catch (error) {
     failures.push(
       `runtime_work:${error instanceof Error ? error.message : String(error)}` +
-      `:${JSON.stringify(runtimeQuiesceWorkSummary(env))}`,
+        `:${JSON.stringify(runtimeQuiesceWorkSummary(env))}`,
     );
   }
 
@@ -2452,12 +968,14 @@ async function suspendInactiveRuntimeActivity(activeRuntimeId: string): Promise<
   const normalizedActiveRuntimeId = normalizeRuntimeId(activeRuntimeId);
   if (!normalizedActiveRuntimeId) return;
   const entries = Array.from(get(runtimes).entries());
-  await Promise.all(entries.map(async ([runtimeId, entry]) => {
-    if (normalizeRuntimeId(runtimeId) === normalizedActiveRuntimeId) return;
-    if (entry?.type !== 'local' || !entry.env) return;
-    const env = unwrapLiveRuntimeEnv(entry.env) ?? entry.env;
-    await suspendRuntimeEnvActivity(env);
-  }));
+  await Promise.all(
+    entries.map(async ([runtimeId, entry]) => {
+      if (normalizeRuntimeId(runtimeId) === normalizedActiveRuntimeId) return;
+      if (entry?.type !== 'local' || !entry.env) return;
+      const env = unwrapLiveRuntimeEnv(entry.env) ?? entry.env;
+      await suspendRuntimeEnvActivity(env);
+    }),
+  );
 }
 
 function unregisterRuntimeEnvChange(runtimeId: string): void {
@@ -2480,11 +998,7 @@ function unregisterRuntimeEnvChange(runtimeId: string): void {
   }
 }
 
-function registerRuntimeEnvChange(
-  runtimeId: string,
-  env: Env,
-  xln: XLNModule,
-): void {
+function registerRuntimeEnvChange(runtimeId: string, env: Env, xln: XLNModule): void {
   const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
   const normalizedRuntimeId = normalizeRuntimeId(runtimeId || runtimeEnv.runtimeId);
   if (!normalizedRuntimeId) {
@@ -2496,7 +1010,7 @@ function registerRuntimeEnvChange(
   if (recovery?.waitForTowerReceipts === true && typeof xln.registerRecoveryBackupBarrier === 'function') {
     runtimeRecoveryBarrierUnsubscribers.set(
       normalizedRuntimeId,
-      xln.registerRecoveryBackupBarrier(runtimeEnv, async (backupEnv) => {
+      xln.registerRecoveryBackupBarrier(runtimeEnv, async backupEnv => {
         await uploadRuntimeRecoverySnapshot(normalizedRuntimeId, unwrapLiveRuntimeEnv(backupEnv) ?? backupEnv, xln);
       }),
     );
@@ -2510,10 +1024,7 @@ function registerRuntimeEnvChange(
     scheduleRuntimeRecoveryUpload(normalizedRuntimeId, nextEnv, xln);
   };
 
-  runtimeEnvChangeUnsubscribers.set(
-    normalizedRuntimeId,
-    xln.registerEnvChangeCallback(runtimeEnv, onEnvChange),
-  );
+  runtimeEnvChangeUnsubscribers.set(normalizedRuntimeId, xln.registerEnvChangeCallback(runtimeEnv, onEnvChange));
   onEnvChange(runtimeEnv);
 }
 
@@ -2539,7 +1050,10 @@ async function registerRuntimeSignerKeys(runtime: Runtime, xln: XLNModule): Prom
   for (const signer of runtime.signers) {
     const privateKey = derivePrivateKey(runtime.seed, getSignerDerivationIndex(signer));
     const privateKeyBytes = new Uint8Array(
-      privateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
+      privateKey
+        .slice(2)
+        .match(/.{2}/g)!
+        .map(byte => parseInt(byte, 16)),
     );
     xln.registerSignerKey(runtime.seed, signer.address, privateKeyBytes);
   }
@@ -2558,7 +1072,7 @@ async function resetRuntimePersistence(runtime: Runtime, xln: XLNModule): Promis
   if (liveRuntimeEntry?.env) {
     await stopRuntimeEnv(unwrapLiveRuntimeEnv(liveRuntimeEntry.env) ?? liveRuntimeEntry.env);
   }
-  runtimes.update((currentRuntimes) => {
+  runtimes.update(currentRuntimes => {
     const runtimeEntry = currentRuntimes.get(runtimeIdLower);
     if (!runtimeEntry) return currentRuntimes;
     const updated = new Map(currentRuntimes);
@@ -2603,7 +1117,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     if (!signerMetadataChanged) return;
     const currentState = get(runtimesState);
     if (!findRuntimeByIdCaseInsensitive(currentState.runtimes, runtime.id)?.runtime) return;
-    runtimesState.update((state) => ({
+    runtimesState.update(state => ({
       ...state,
       runtimes: {
         ...state.runtimes,
@@ -2613,31 +1127,28 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     persistRuntimeMetadataSnapshot();
   };
 
-  const restoreFromTower = async (
-    reason: 'missing_local_env' | 'invalid_local_env',
-  ): Promise<boolean> => {
+  const restoreFromTower = async (reason: 'missing_local_env' | 'invalid_local_env'): Promise<boolean> => {
     try {
       const towerRestored = await tryRestoreRuntimeEnvFromTower(runtime, xln);
       if (!towerRestored) return false;
       env = towerRestored.env;
       restoredFromTower = true;
       signerMetadataChanged = true;
-      errorLog.log(
-        `Restored runtime ${runtime.id.slice(0, 12)} from tower after ${reason}`,
-        'Runtime Restore',
-        { runtimeId: runtime.id, reason },
-      );
+      errorLog.log(`Restored runtime ${runtime.id.slice(0, 12)} from tower after ${reason}`, 'Runtime Restore', {
+        runtimeId: runtime.id,
+        reason,
+      });
       return true;
     } catch (error) {
       if (strictRestore) {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`[VaultStore] Tower restore failed for ${runtime.id.slice(0, 12)}: ${message}`);
       }
-      errorLog.log(
-        'Failed to restore env from tower; continuing with local recovery path',
-        'Runtime Restore',
-        { runtimeId: runtime.id, reason, error },
-      );
+      errorLog.log('Failed to restore env from tower; continuing with local recovery path', 'Runtime Restore', {
+        runtimeId: runtime.id,
+        reason,
+        error,
+      });
       return false;
     }
   };
@@ -2672,11 +1183,10 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
       );
       throw new Error(`[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: ${message}`);
     } else {
-      errorLog.log(
-        'Failed to load env from DB; falling back to fresh import',
-        'Runtime Restore',
-        { runtimeId: runtime.id, error },
-      );
+      errorLog.log('Failed to load env from DB; falling back to fresh import', 'Runtime Restore', {
+        runtimeId: runtime.id,
+        error,
+      });
       env = null;
     }
   }
@@ -2693,13 +1203,13 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
 
   if (env && (!env.jReplicas || env.jReplicas.size === 0)) {
     if (strictRestore && !restoredFromTower) {
-      throw new Error(`[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: restored env missing jReplicas`);
+      throw new Error(
+        `[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: restored env missing jReplicas`,
+      );
     }
-    errorLog.log(
-      'Restored env missing J-replicas; retrying tower restore before local re-import',
-      'Runtime Restore',
-      { runtimeId: runtime.id },
-    );
+    errorLog.log('Restored env missing J-replicas; retrying tower restore before local re-import', 'Runtime Restore', {
+      runtimeId: runtime.id,
+    });
     env = null;
     if (!restoredFromTower) {
       await restoreFromTower('invalid_local_env');
@@ -2729,16 +1239,19 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     for (const signer of runtime.signers || []) {
       if (!signer?.entityId) continue;
       if (!hasEntityReplica(signer.entityId)) {
-        const restoredEntityKeys = env.eReplicas
-          ? Array.from(env.eReplicas.keys()).map((key) => String(key))
-          : [];
+        const restoredEntityKeys = env.eReplicas ? Array.from(env.eReplicas.keys()).map(key => String(key)) : [];
         errorLog.log(
           `[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: missing restored entity ${signer.entityId.slice(0, 12)}`,
           'Runtime Restore',
-          { runtimeId: runtime.id, signerEntityId: signer.entityId, restoredEntityKeys, replayMeta: getReplayMeta(env) },
+          {
+            runtimeId: runtime.id,
+            signerEntityId: signer.entityId,
+            restoredEntityKeys,
+            replayMeta: getReplayMeta(env),
+          },
         );
         throw new Error(
-          `[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: missing restored entity ${signer.entityId.slice(0, 12)}`
+          `[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: missing restored entity ${signer.entityId.slice(0, 12)}`,
         );
       }
     }
@@ -2747,15 +1260,10 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
   const jurisdictions = await fetchJurisdictions(baseOrigin);
   const primaryConfig = resolveJurisdictionConfig(jurisdictions);
-  const primaryBlockTimeMs = requireJurisdictionBlockTimeMs(
-    primaryConfig.blockTimeMs,
-    'VaultStore.restore.primary',
-  );
+  const primaryBlockTimeMs = requireJurisdictionBlockTimeMs(primaryConfig.blockTimeMs, 'VaultStore.restore.primary');
   const defaultJurisdictionImports = listDefaultJurisdictionImports(jurisdictions);
   const primaryJurisdictionName =
-    defaultJurisdictionImports[0]?.name ||
-    String(primaryConfig.name || 'primary').trim() ||
-    'primary';
+    defaultJurisdictionImports[0]?.name || String(primaryConfig.name || 'primary').trim() || 'primary';
   const rpcUrl = resolveRpcUrl(resolveJurisdictionRpc(primaryConfig), baseOrigin);
   const chainId = resolveJurisdictionChainId(primaryConfig, 'VaultStore.restore');
 
@@ -2769,22 +1277,24 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
       xln,
       env,
       {
-        runtimeTxs: [{
-          type: 'importJ',
-          data: {
-            name: primaryJurisdictionName,
-            chainId,
-            ticker: 'USDC',
-            rpcs: [rpcUrl],
-            entityProviderDeploymentBlock: requireEntityProviderDeploymentBlock(
-              primaryConfig.entityProviderDeploymentBlock,
-              'VaultStore.restore.importJ',
-            ),
-            blockTimeMs: primaryBlockTimeMs,
-            contracts: primaryConfig.contracts,
-          }
-        }],
-        entityInputs: []
+        runtimeTxs: [
+          {
+            type: 'importJ',
+            data: {
+              name: primaryJurisdictionName,
+              chainId,
+              ticker: 'USDC',
+              rpcs: [rpcUrl],
+              entityProviderDeploymentBlock: requireEntityProviderDeploymentBlock(
+                primaryConfig.entityProviderDeploymentBlock,
+                'VaultStore.restore.importJ',
+              ),
+              blockTimeMs: primaryBlockTimeMs,
+              contracts: primaryConfig.contracts,
+            },
+          },
+        ],
+        entityInputs: [],
       },
       () => hasRuntimeJurisdictionAddresses(findJReplicaByName(env!, primaryJurisdictionName)),
       `importJ(${primaryJurisdictionName})`,
@@ -2822,22 +1332,24 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
       xln,
       env,
       {
-        runtimeTxs: [{
-          type: 'importJ',
-          data: {
-            name: primaryJurisdictionName,
-            chainId,
-            ticker: 'USDC',
-            rpcs: [rpcUrl],
-            entityProviderDeploymentBlock: requireEntityProviderDeploymentBlock(
-              primaryConfig.entityProviderDeploymentBlock,
-              'VaultStore.restore.repairImportJ',
-            ),
-            blockTimeMs: primaryBlockTimeMs,
-            contracts: primaryConfig.contracts,
-          }
-        }],
-        entityInputs: []
+        runtimeTxs: [
+          {
+            type: 'importJ',
+            data: {
+              name: primaryJurisdictionName,
+              chainId,
+              ticker: 'USDC',
+              rpcs: [rpcUrl],
+              entityProviderDeploymentBlock: requireEntityProviderDeploymentBlock(
+                primaryConfig.entityProviderDeploymentBlock,
+                'VaultStore.restore.repairImportJ',
+              ),
+              blockTimeMs: primaryBlockTimeMs,
+              contracts: primaryConfig.contracts,
+            },
+          },
+        ],
+        entityInputs: [],
       },
       () => hasRuntimeJurisdictionAddresses(findJReplicaByName(env!, primaryJurisdictionName)),
       `repairImportJ(${primaryJurisdictionName})`,
@@ -2860,16 +1372,15 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     const preferredJurisdictionName = String(signer.jurisdiction || primaryJurisdictionName).trim();
     const jReplica = findJReplicaByName(env, preferredJurisdictionName);
     if (!jReplica) {
-      const message =
-        `[VaultStore] Missing signer jurisdiction ${preferredJurisdictionName} for entity ${entityId.slice(0, 12)}`;
+      const message = `[VaultStore] Missing signer jurisdiction ${preferredJurisdictionName} for entity ${entityId.slice(0, 12)}`;
       if (normalizeJurisdictionKey(preferredJurisdictionName) === normalizeJurisdictionKey(primaryJurisdictionName)) {
         throw new Error(message);
       }
-      errorLog.log(
-        `${message}; waiting for jurisdiction import`,
-        'Runtime Restore',
-        { runtimeId: runtime.id, entityId, preferredJurisdictionName },
-      );
+      errorLog.log(`${message}; waiting for jurisdiction import`, 'Runtime Restore', {
+        runtimeId: runtime.id,
+        entityId,
+        preferredJurisdictionName,
+      });
       continue;
     }
 
@@ -2884,7 +1395,10 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
       );
     }
 
-    if (exactReplica && normalizeJurisdictionKey(getEntityReplicaJurisdictionName(exactReplica)) === targetJurisdictionKey) {
+    if (
+      exactReplica &&
+      normalizeJurisdictionKey(getEntityReplicaJurisdictionName(exactReplica)) === targetJurisdictionKey
+    ) {
       continue;
     }
 
@@ -2899,17 +1413,19 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
       xln,
       env,
       {
-        runtimeTxs: [{
-          type: 'importReplica',
-          entityId,
-          signerId: signerAddress,
-          data: {
-            isProposer: true,
-            config: entityConfig,
-            profileName: runtime.label,
-          }
-        }],
-        entityInputs: []
+        runtimeTxs: [
+          {
+            type: 'importReplica',
+            entityId,
+            signerId: signerAddress,
+            data: {
+              isProposer: true,
+              config: entityConfig,
+              profileName: runtime.label,
+            },
+          },
+        ],
+        entityInputs: [],
       },
       () => {
         const repaired = findEntityReplicaByEntityAndSigner(env!, entityId, signerAddress);
@@ -2936,7 +1452,7 @@ function registerRuntimeResumeListener(): void {
   const triggerRefresh = () => {
     if (isInactiveTabStandby()) return;
     if (document.visibilityState !== 'visible') return;
-    void vaultOperations.refreshActiveRuntimeFromDbIfBehind().catch((error) => {
+    void vaultOperations.refreshActiveRuntimeFromDbIfBehind().catch(error => {
       errorLog.log('Resume refresh failed', 'Runtime Resume', error);
     });
   };
@@ -2953,12 +1469,8 @@ function registerRuntimeResumeListener(): void {
       const runtimeEntry = get(runtimes).get(runtimeId);
       const currentHeight = Number(runtimeEntry?.env?.height ?? 0);
       if (height <= currentHeight) return;
-      void vaultOperations.refreshActiveRuntimeFromDbIfBehind().catch((error) => {
-        errorLog.log(
-          'Broadcast refresh failed',
-          'Runtime Resume',
-          { runtimeId, height, currentHeight, error },
-        );
+      void vaultOperations.refreshActiveRuntimeFromDbIfBehind().catch(error => {
+        errorLog.log('Broadcast refresh failed', 'Runtime Resume', { runtimeId, height, currentHeight, error });
       });
     };
   }
@@ -2978,13 +1490,13 @@ export function shutdownRuntimeResumeListener(): void {
   resumeListenerRegistered = false;
 }
 
-  // Runtime operations
+// Runtime operations
 export const vaultOperations = {
   beginRuntimePageUnload(): void {
     shutdownRuntimeResumeListener();
     const localEnvs = Array.from(get(runtimes).values())
-      .filter((entry) => entry.type === 'local' && entry.env)
-      .map((entry) => unwrapLiveRuntimeEnv(entry.env) ?? entry.env)
+      .filter(entry => entry.type === 'local' && entry.env)
+      .map(entry => unwrapLiveRuntimeEnv(entry.env) ?? entry.env)
       .filter((env): env is Env => Boolean(env));
     if (localEnvs.length === 0) return;
 
@@ -3012,25 +1524,27 @@ export const vaultOperations = {
   async suspendAllRuntimeActivity(): Promise<void> {
     shutdownRuntimeResumeListener();
     const entries = Array.from(get(runtimes).entries());
-    await Promise.all(entries.map(async ([runtimeId, entry]) => {
-      if (!entry?.env) {
-        unregisterRuntimeEnvChange(runtimeId);
-        return;
-      }
-      try {
-        await stopRuntimeEnv(unwrapLiveRuntimeEnv(entry.env) ?? entry.env);
-        // Keep the recovery barrier installed while accepted ingress drains.
-        // That drain may commit an Account frame and emit its ACK; removing the
-        // barrier first would let the peer advance past the latest tower backup.
-        unregisterRuntimeEnvChange(runtimeId);
-        await drainRuntimeRecoveryUploads(normalizeRuntimeId(runtimeId));
-      } catch (error) {
-        throw new Error(
-          `RUNTIME_QUIESCE_ENTRY_FAILED:${normalizeRuntimeId(runtimeId)}:${error instanceof Error ? error.message : String(error)}`,
-          { cause: error },
-        );
-      }
-    }));
+    await Promise.all(
+      entries.map(async ([runtimeId, entry]) => {
+        if (!entry?.env) {
+          unregisterRuntimeEnvChange(runtimeId);
+          return;
+        }
+        try {
+          await stopRuntimeEnv(unwrapLiveRuntimeEnv(entry.env) ?? entry.env);
+          // Keep the recovery barrier installed while accepted ingress drains.
+          // That drain may commit an Account frame and emit its ACK; removing the
+          // barrier first would let the peer advance past the latest tower backup.
+          unregisterRuntimeEnvChange(runtimeId);
+          await drainRuntimeRecoveryUploads(normalizeRuntimeId(runtimeId));
+        } catch (error) {
+          throw new Error(
+            `RUNTIME_QUIESCE_ENTRY_FAILED:${normalizeRuntimeId(runtimeId)}:${error instanceof Error ? error.message : String(error)}`,
+            { cause: error },
+          );
+        }
+      }),
+    );
   },
 
   async refreshActiveRuntimeFromDbIfBehind(): Promise<boolean> {
@@ -3049,7 +1563,7 @@ export const vaultOperations = {
       const xln = await getXLN();
       if (typeof xln.getPersistedLatestHeight !== 'function') return false;
 
-      const persistedLatestHeight = Number(await xln.getPersistedLatestHeight(env) || 0);
+      const persistedLatestHeight = Number((await xln.getPersistedLatestHeight(env)) || 0);
       const currentHeight = Number(env.height || 0);
       if (persistedLatestHeight <= currentHeight) return false;
 
@@ -3058,7 +1572,7 @@ export const vaultOperations = {
       unregisterRuntimeEnvChange(runtimeId);
       await stopRuntimeEnv(env);
 
-      runtimes.update((currentRuntimes) => {
+      runtimes.update(currentRuntimes => {
         const updated = new Map(currentRuntimes);
         updated.set(runtimeId, runtimeToEntry(runtime, refreshedEnv));
         return updated;
@@ -3089,7 +1603,7 @@ export const vaultOperations = {
     let env = get(runtimes).get(runtimeId)?.env as Env | undefined;
     if (!env) {
       env = await buildOrRestoreRuntimeEnv(runtime, xln, true);
-      runtimes.update((currentRuntimes) => {
+      runtimes.update(currentRuntimes => {
         const updated = new Map(currentRuntimes);
         updated.set(runtimeId, runtimeToEntry(runtime, env!));
         return updated;
@@ -3111,19 +1625,25 @@ export const vaultOperations = {
           ? { entityProviderDeploymentBlock: existing.entityProviderDeploymentBlock }
           : {}),
         contracts: {
-          depository: String(existing?.depositoryAddress || existing?.contracts?.depository || config.contracts?.depository || ''),
-          entityProvider: String(existing?.entityProviderAddress || existing?.contracts?.entityProvider || config.contracts?.entityProvider || ''),
+          depository: String(
+            existing?.depositoryAddress || existing?.contracts?.depository || config.contracts?.depository || '',
+          ),
+          entityProvider: String(
+            existing?.entityProviderAddress ||
+              existing?.contracts?.entityProvider ||
+              config.contracts?.entityProvider ||
+              '',
+          ),
           account: String(existing?.contracts?.account || config.contracts?.account || ''),
           deltaTransformer: String(existing?.contracts?.deltaTransformer || config.contracts?.deltaTransformer || ''),
         },
       };
     }
     if (existing) {
-      errorLog.log(
-        `J-machine "${config.name}" exists without a live adapter; re-importing`,
-        'J-Machine Import',
-        { runtimeId, jurisdiction: config.name },
-      );
+      errorLog.log(`J-machine "${config.name}" exists without a live adapter; re-importing`, 'J-Machine Import', {
+        runtimeId,
+        jurisdiction: config.name,
+      });
     }
 
     ensureRuntimeLoopRunning(runtimeEnv, xln, `import-jmachine:${config.name}`);
@@ -3131,31 +1651,35 @@ export const vaultOperations = {
       xln,
       runtimeEnv,
       {
-        runtimeTxs: [{
-          type: 'importJ',
-          data: {
-            name: config.name,
-            chainId: config.chainId,
-            ticker: config.ticker,
-            rpcs: config.mode === 'browservm' ? [] : config.rpcs,
-            ...(config.mode === 'rpc'
-              ? {
-                  entityProviderDeploymentBlock: requireEntityProviderDeploymentBlock(
-                    config.entityProviderDeploymentBlock,
-                    'VaultStore.importJMachine',
-                  ),
-                }
-              : {}),
-            blockTimeMs: config.blockTimeMs,
-            ...(config.contracts ? { contracts: config.contracts } : {}),
-          }
-        }],
-        entityInputs: []
+        runtimeTxs: [
+          {
+            type: 'importJ',
+            data: {
+              name: config.name,
+              chainId: config.chainId,
+              ticker: config.ticker,
+              rpcs: config.mode === 'browservm' ? [] : config.rpcs,
+              ...(config.mode === 'rpc'
+                ? {
+                    entityProviderDeploymentBlock: requireEntityProviderDeploymentBlock(
+                      config.entityProviderDeploymentBlock,
+                      'VaultStore.importJMachine',
+                    ),
+                  }
+                : {}),
+              blockTimeMs: config.blockTimeMs,
+              ...(config.contracts ? { contracts: config.contracts } : {}),
+            },
+          },
+        ],
+        entityInputs: [],
       },
       () => {
         const latestEnv = getLatestEnv();
         if (latestEnv.runtimeState?.loopActive === false) {
-          throw new Error(`importJ(${config.name}) failed: runtime loop halted\n${getRuntimeFatalDiagnostics(latestEnv, config.name)}`);
+          throw new Error(
+            `importJ(${config.name}) failed: runtime loop halted\n${getRuntimeFatalDiagnostics(latestEnv, config.name)}`,
+          );
         }
         return hasRuntimeJurisdictionAddresses(latestEnv.jReplicas?.get?.(config.name));
       },
@@ -3172,7 +1696,7 @@ export const vaultOperations = {
     );
 
     const finalEnv = getLatestEnv();
-    runtimes.update((currentRuntimes) => {
+    runtimes.update(currentRuntimes => {
       const updated = new Map(currentRuntimes);
       updated.set(runtimeId, runtimeToEntry(runtime, finalEnv));
       return updated;
@@ -3187,8 +1711,15 @@ export const vaultOperations = {
         ? { entityProviderDeploymentBlock: imported.entityProviderDeploymentBlock }
         : {}),
       contracts: {
-        depository: String(imported?.depositoryAddress || imported?.contracts?.depository || config.contracts?.depository || ''),
-        entityProvider: String(imported?.entityProviderAddress || imported?.contracts?.entityProvider || config.contracts?.entityProvider || ''),
+        depository: String(
+          imported?.depositoryAddress || imported?.contracts?.depository || config.contracts?.depository || '',
+        ),
+        entityProvider: String(
+          imported?.entityProviderAddress ||
+            imported?.contracts?.entityProvider ||
+            config.contracts?.entityProvider ||
+            '',
+        ),
         account: String(imported?.contracts?.account || config.contracts?.account || ''),
         deltaTransformer: String(imported?.contracts?.deltaTransformer || config.contracts?.deltaTransformer || ''),
       },
@@ -3236,7 +1767,7 @@ export const vaultOperations = {
     if (!normalizedRuntimeId) throw new Error('No active runtime selected');
 
     let updatedRuntime: Runtime | null = null;
-    runtimesState.update((state) => {
+    runtimesState.update(state => {
       const runtime = state.runtimes[normalizedRuntimeId];
       if (!runtime) throw new Error(`Runtime not found: ${normalizedRuntimeId}`);
       updatedRuntime = {
@@ -3262,7 +1793,7 @@ export const vaultOperations = {
     const runtimeEntry = get(runtimes).get(normalizedRuntimeId);
     const entryEnv = runtimeEntry?.env || null;
     if (entryEnv) {
-      runtimes.update((currentRuntimes) => {
+      runtimes.update(currentRuntimes => {
         const updated = new Map(currentRuntimes);
         updated.set(normalizedRuntimeId, runtimeToEntry(updatedRuntime!, entryEnv));
         return updated;
@@ -3289,7 +1820,7 @@ export const vaultOperations = {
     const restoredEnv = restored.env;
     const updatedRuntime = { ...runtime };
 
-    runtimesState.update((state) => ({
+    runtimesState.update(state => ({
       ...state,
       runtimes: {
         ...state.runtimes,
@@ -3299,7 +1830,7 @@ export const vaultOperations = {
     }));
     this.saveToStorage();
 
-    runtimes.update((currentRuntimes) => {
+    runtimes.update(currentRuntimes => {
       const updated = new Map(currentRuntimes);
       updated.set(normalizedRuntimeId, runtimeToEntry(updatedRuntime, restoredEnv));
       return updated;
@@ -3383,9 +1914,10 @@ export const vaultOperations = {
         const normalizedActiveId = normalizeRuntimeId(parsed?.activeRuntimeId || '');
         runtimesState.set({
           runtimes: normalizedRuntimes,
-          activeRuntimeId: normalizedActiveId && normalizedRuntimes[normalizedActiveId]
-            ? normalizedActiveId
-            : (Object.keys(normalizedRuntimes)[0] || null),
+          activeRuntimeId:
+            normalizedActiveId && normalizedRuntimes[normalizedActiveId]
+              ? normalizedActiveId
+              : Object.keys(normalizedRuntimes)[0] || null,
         });
       }
       vaultStorageLoaded.set(true);
@@ -3456,7 +1988,7 @@ export const vaultOperations = {
     }
 
     let releaseRuntimeCreation!: () => void;
-    const runtimeCreationBarrier = new Promise<void>((resolve) => {
+    const runtimeCreationBarrier = new Promise<void>(resolve => {
       releaseRuntimeCreation = resolve;
     });
     runtimeCreationInFlight.set(id, runtimeCreationBarrier);
@@ -3469,9 +2001,7 @@ export const vaultOperations = {
 
     const loginType = options.loginType === 'demo' ? 'demo' : 'manual';
     const requiresOnboarding =
-      typeof options.requiresOnboarding === 'boolean'
-        ? options.requiresOnboarding
-        : loginType !== 'demo';
+      typeof options.requiresOnboarding === 'boolean' ? options.requiresOnboarding : loginType !== 'demo';
 
     const runtime: Runtime = {
       id,
@@ -3479,18 +2009,20 @@ export const vaultOperations = {
       seed,
       ...(options.mnemonic12 ? { mnemonic12: options.mnemonic12 } : {}),
       ...(options.devicePassphrase ? { devicePassphrase: options.devicePassphrase } : {}),
-      signers: [{
-        index: 0,
-        address: firstAddress,
-        name: 'Signer 1'
-      }],
+      signers: [
+        {
+          index: 0,
+          address: firstAddress,
+          name: 'Signer 1',
+        },
+      ],
       activeSignerIndex: 0,
       loginType,
       requiresOnboarding,
-      recovery: options.recovery || (options.skipRecoveryRestore
-        ? { useDefaultTowers: false, towers: [] }
-        : buildDefaultRuntimeRecoveryConfig()),
-      createdAt: Date.now()
+      recovery:
+        options.recovery ||
+        (options.skipRecoveryRestore ? { useDefaultTowers: false, towers: [] } : buildDefaultRuntimeRecoveryConfig()),
+      createdAt: Date.now(),
     };
     const previousActiveRuntimeId = currentState.activeRuntimeId;
 
@@ -3544,47 +2076,49 @@ export const vaultOperations = {
         );
         const defaultJurisdictionImports = listDefaultJurisdictionImports(jurisdictions);
         const primaryJurisdictionName =
-          defaultJurisdictionImports[0]?.name ||
-          String(primaryConfig.name || 'primary').trim() ||
-          'primary';
+          defaultJurisdictionImports[0]?.name || String(primaryConfig.name || 'primary').trim() || 'primary';
         const secondaryJurisdictionImports = defaultJurisdictionImports.slice(1);
         const rpcUrl = resolveRpcUrl(resolveJurisdictionRpc(primaryConfig), baseOrigin);
         const chainId = resolveJurisdictionChainId(primaryConfig, 'VaultStore.createRuntime');
 
-      // Import the same primary jurisdiction name that hub profiles advertise.
+        // Import the same primary jurisdiction name that hub profiles advertise.
         await enqueueAndAwait(
           xln,
           newEnv,
-        {
-          runtimeTxs: [{
-            type: 'importJ',
-            data: {
-              name: primaryJurisdictionName,
-              chainId,
-              ticker: 'USDC',
-              rpcs: [rpcUrl],
-              entityProviderDeploymentBlock: requireEntityProviderDeploymentBlock(
-                primaryConfig.entityProviderDeploymentBlock,
-                'VaultStore.createRuntime.primary',
-              ),
-              blockTimeMs: primaryBlockTimeMs,
-              contracts: primaryConfig.contracts,
-              startAtCurrentBlock: false,
+          {
+            runtimeTxs: [
+              {
+                type: 'importJ',
+                data: {
+                  name: primaryJurisdictionName,
+                  chainId,
+                  ticker: 'USDC',
+                  rpcs: [rpcUrl],
+                  entityProviderDeploymentBlock: requireEntityProviderDeploymentBlock(
+                    primaryConfig.entityProviderDeploymentBlock,
+                    'VaultStore.createRuntime.primary',
+                  ),
+                  blockTimeMs: primaryBlockTimeMs,
+                  contracts: primaryConfig.contracts,
+                  startAtCurrentBlock: false,
+                },
+              },
+            ],
+            entityInputs: [],
+          },
+          () => {
+            const replica = findJReplicaByName(newEnv!, primaryJurisdictionName);
+            if (hasRuntimeJurisdictionAddresses(replica)) return true;
+            if (newEnv?.runtimeState?.loopActive === false) {
+              throw new Error(
+                `createRuntime.importJ(${primaryJurisdictionName}) failed: runtime loop halted\n${getRuntimeFatalDiagnostics(newEnv)}`,
+              );
             }
-          }],
-          entityInputs: []
-        },
-        () => {
-          const replica = findJReplicaByName(newEnv!, primaryJurisdictionName);
-          if (hasRuntimeJurisdictionAddresses(replica)) return true;
-          if (newEnv?.runtimeState?.loopActive === false) {
-            throw new Error(`createRuntime.importJ(${primaryJurisdictionName}) failed: runtime loop halted\n${getRuntimeFatalDiagnostics(newEnv)}`);
-          }
-          return false;
-        },
-        `createRuntime.importJ(${primaryJurisdictionName})`,
-        45_000,
-        () => getRuntimeFatalDiagnostics(newEnv!, primaryJurisdictionName),
+            return false;
+          },
+          `createRuntime.importJ(${primaryJurisdictionName})`,
+          45_000,
+          () => getRuntimeFatalDiagnostics(newEnv!, primaryJurisdictionName),
         );
         await waitForCondition(
           () => hasRuntimeJurisdictionAddresses(findJReplicaByName(newEnv!, primaryJurisdictionName)),
@@ -3596,101 +2130,106 @@ export const vaultOperations = {
         markPerf('import_j_testnet');
 
         for (const secondary of secondaryJurisdictionImports) {
-        const secondaryRpcUrl = resolveRpcUrl(resolveJurisdictionRpc(secondary.config), baseOrigin);
-        const secondaryChainId = resolveJurisdictionChainId(secondary.config, `VaultStore.createRuntime.${secondary.name}`);
-        await enqueueAndAwait(
-          xln,
-          newEnv,
-          {
-            runtimeTxs: [{
-              type: 'importJ',
-              data: {
-                name: secondary.name,
-                chainId: secondaryChainId,
-                ticker: String((secondary.config as { currency?: unknown }).currency || 'USDC'),
-                rpcs: [secondaryRpcUrl],
-                entityProviderDeploymentBlock: requireEntityProviderDeploymentBlock(
-                  secondary.config.entityProviderDeploymentBlock,
-                  `VaultStore.createRuntime.${secondary.name}`,
-                ),
-                blockTimeMs: requireJurisdictionBlockTimeMs(
-                  secondary.config.blockTimeMs,
-                  `VaultStore.createRuntime.${secondary.name}`,
-                ),
-                contracts: secondary.config.contracts,
-                startAtCurrentBlock: false,
-              },
-            }],
-            entityInputs: [],
-          },
-          () => hasRuntimeJurisdictionAddresses(newEnv?.jReplicas?.get?.(secondary.name)),
-          `createRuntime.importJ(${secondary.name})`,
-          45_000,
-        );
-        await waitForCondition(
-          () => hasRuntimeJurisdictionAddresses(newEnv?.jReplicas?.get?.(secondary.name)),
-          `createRuntime.importJ(${secondary.name}).addresses`,
-          45_000,
-        );
+          const secondaryRpcUrl = resolveRpcUrl(resolveJurisdictionRpc(secondary.config), baseOrigin);
+          const secondaryChainId = resolveJurisdictionChainId(
+            secondary.config,
+            `VaultStore.createRuntime.${secondary.name}`,
+          );
+          await enqueueAndAwait(
+            xln,
+            newEnv,
+            {
+              runtimeTxs: [
+                {
+                  type: 'importJ',
+                  data: {
+                    name: secondary.name,
+                    chainId: secondaryChainId,
+                    ticker: String((secondary.config as { currency?: unknown }).currency || 'USDC'),
+                    rpcs: [secondaryRpcUrl],
+                    entityProviderDeploymentBlock: requireEntityProviderDeploymentBlock(
+                      secondary.config.entityProviderDeploymentBlock,
+                      `VaultStore.createRuntime.${secondary.name}`,
+                    ),
+                    blockTimeMs: requireJurisdictionBlockTimeMs(
+                      secondary.config.blockTimeMs,
+                      `VaultStore.createRuntime.${secondary.name}`,
+                    ),
+                    contracts: secondary.config.contracts,
+                    startAtCurrentBlock: false,
+                  },
+                },
+              ],
+              entityInputs: [],
+            },
+            () => hasRuntimeJurisdictionAddresses(newEnv?.jReplicas?.get?.(secondary.name)),
+            `createRuntime.importJ(${secondary.name})`,
+            45_000,
+          );
+          await waitForCondition(
+            () => hasRuntimeJurisdictionAddresses(newEnv?.jReplicas?.get?.(secondary.name)),
+            `createRuntime.importJ(${secondary.name}).addresses`,
+            45_000,
+          );
         }
 
-      // === MVP: Create entity ===
-      // Create entity config (single-signer, threshold 1)
+        // === MVP: Create entity ===
+        // Create entity config (single-signer, threshold 1)
         const signerAddress = firstAddress;
 
-      // Get contract addresses from imported J-machine
+        // Get contract addresses from imported J-machine
         const jReplica = findJReplicaByName(newEnv, primaryJurisdictionName);
         if (!jReplica) {
           throw new Error(`${primaryJurisdictionName} J-machine not found after import`);
         }
-      // Lazy entity IDs are board hashes generated from the sorted validator set.
+        // Lazy entity IDs are board hashes generated from the sorted validator set.
         const entityId = generateLazyEntityIdPreview([signerAddress], 1n);
-        const entityConfig = buildSignerEntityConfig(
-          signerAddress,
-          jReplica,
-          primaryJurisdictionName,
-          chainId,
-        );
+        const entityConfig = buildSignerEntityConfig(signerAddress, jReplica, primaryJurisdictionName, chainId);
 
-      // CRITICAL: Register the canonical signer key with runtime BEFORE importing entity.
-      // The wallet/runtime signer for index 0 is the BIP44 account-path key derived above;
-      // the entity uses the resulting EOA address as signerId, so consensus/J-batch signing
-      // must reuse this exact private key instead of deriving a second one from other labels.
+        // CRITICAL: Register the canonical signer key with runtime BEFORE importing entity.
+        // The wallet/runtime signer for index 0 is the BIP44 account-path key derived above;
+        // the entity uses the resulting EOA address as signerId, so consensus/J-batch signing
+        // must reuse this exact private key instead of deriving a second one from other labels.
         const signerPrivateKey = derivePrivateKey(seed, 0);
         const privateKeyBytes = new Uint8Array(
-          signerPrivateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
+          signerPrivateKey
+            .slice(2)
+            .match(/.{2}/g)!
+            .map(byte => parseInt(byte, 16)),
         );
         xln.registerSignerKey(newEnv, signerAddress, privateKeyBytes);
         markPerf('register_signer_key');
 
-      // Import entity replica into runtime
+        // Import entity replica into runtime
         await enqueueAndAwait(
           xln,
           newEnv,
-        {
-          runtimeTxs: [{
-            type: 'importReplica',
-            entityId: entityId,
-            signerId: signerAddress,
-            data: {
-              isProposer: true,
-              config: entityConfig,
-              profileName: name,
+          {
+            runtimeTxs: [
+              {
+                type: 'importReplica',
+                entityId: entityId,
+                signerId: signerAddress,
+                data: {
+                  isProposer: true,
+                  config: entityConfig,
+                  profileName: name,
+                },
+              },
+            ],
+            entityInputs: [],
+          },
+          () => {
+            const reps = newEnv?.eReplicas;
+            if (!reps?.keys) return false;
+            const entityIdNorm = String(entityId).toLowerCase();
+            for (const key of reps.keys()) {
+              const [repEntityId] = String(key).split(':');
+              if (String(repEntityId || '').toLowerCase() === entityIdNorm) return true;
             }
-          }],
-          entityInputs: []
-        },
-        () => {
-          const reps = newEnv?.eReplicas;
-          if (!reps?.keys) return false;
-          const entityIdNorm = String(entityId).toLowerCase();
-          for (const key of reps.keys()) {
-            const [repEntityId] = String(key).split(':');
-            if (String(repEntityId || '').toLowerCase() === entityIdNorm) return true;
-          }
-          return false;
-        },
-        `createRuntime.importReplica(${entityId.slice(0, 12)})`,
+            return false;
+          },
+          `createRuntime.importReplica(${entityId.slice(0, 12)})`,
         );
         markPerf('import_entity_replica');
 
@@ -3700,50 +2239,55 @@ export const vaultOperations = {
         await fundSignerWalletViaFaucet(signerAddress);
 
         for (const secondary of secondaryJurisdictionImports) {
-        const jReplicaSecondary = findJReplicaByName(newEnv, secondary.name);
-        if (!jReplicaSecondary) throw new Error(`${secondary.name} J-machine not found after import`);
-        const derivationIndex = deriveJurisdictionSignerIndex(secondary.name);
-        const secondaryAddress = deriveAddress(seed, derivationIndex);
-        const secondaryPrivateKey = derivePrivateKey(seed, derivationIndex);
-        const secondaryPrivateKeyBytes = new Uint8Array(
-          secondaryPrivateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
-        );
-        xln.registerSignerKey(newEnv, secondaryAddress, secondaryPrivateKeyBytes);
-        const secondaryEntityId = generateLazyEntityIdPreview([secondaryAddress], 1n);
-        const secondaryChainId = Number(jReplicaSecondary.chainId ?? secondary.config.chainId ?? chainId);
-        const secondaryEntityConfig = buildSignerEntityConfig(
-          secondaryAddress,
-          jReplicaSecondary,
-          secondary.name,
-          Number.isFinite(secondaryChainId) && secondaryChainId > 0 ? secondaryChainId : chainId,
-        );
-        await enqueueAndAwait(
-          xln,
-          newEnv,
-          {
-            runtimeTxs: [{
-              type: 'importReplica',
-              entityId: secondaryEntityId,
-              signerId: secondaryAddress,
-              data: {
-                isProposer: true,
-                config: secondaryEntityConfig,
-                profileName: `${name} ${secondary.name}`,
-              },
-            }],
-            entityInputs: [],
-          },
-          () => Boolean(findEntityReplicaByEntityAndSigner(newEnv!, secondaryEntityId, secondaryAddress)),
-          `createRuntime.importReplica(${secondary.name}:${secondaryEntityId.slice(0, 12)})`,
-        );
-        runtime.signers.push({
-          index: runtime.signers.length,
-          derivationIndex,
-          address: secondaryAddress,
-          name: `${secondary.name} Signer`,
-          jurisdiction: secondary.name,
-          entityId: secondaryEntityId,
-        });
+          const jReplicaSecondary = findJReplicaByName(newEnv, secondary.name);
+          if (!jReplicaSecondary) throw new Error(`${secondary.name} J-machine not found after import`);
+          const derivationIndex = deriveJurisdictionSignerIndex(secondary.name);
+          const secondaryAddress = deriveAddress(seed, derivationIndex);
+          const secondaryPrivateKey = derivePrivateKey(seed, derivationIndex);
+          const secondaryPrivateKeyBytes = new Uint8Array(
+            secondaryPrivateKey
+              .slice(2)
+              .match(/.{2}/g)!
+              .map(byte => parseInt(byte, 16)),
+          );
+          xln.registerSignerKey(newEnv, secondaryAddress, secondaryPrivateKeyBytes);
+          const secondaryEntityId = generateLazyEntityIdPreview([secondaryAddress], 1n);
+          const secondaryChainId = Number(jReplicaSecondary.chainId ?? secondary.config.chainId ?? chainId);
+          const secondaryEntityConfig = buildSignerEntityConfig(
+            secondaryAddress,
+            jReplicaSecondary,
+            secondary.name,
+            Number.isFinite(secondaryChainId) && secondaryChainId > 0 ? secondaryChainId : chainId,
+          );
+          await enqueueAndAwait(
+            xln,
+            newEnv,
+            {
+              runtimeTxs: [
+                {
+                  type: 'importReplica',
+                  entityId: secondaryEntityId,
+                  signerId: secondaryAddress,
+                  data: {
+                    isProposer: true,
+                    config: secondaryEntityConfig,
+                    profileName: `${name} ${secondary.name}`,
+                  },
+                },
+              ],
+              entityInputs: [],
+            },
+            () => Boolean(findEntityReplicaByEntityAndSigner(newEnv!, secondaryEntityId, secondaryAddress)),
+            `createRuntime.importReplica(${secondary.name}:${secondaryEntityId.slice(0, 12)})`,
+          );
+          runtime.signers.push({
+            index: runtime.signers.length,
+            derivationIndex,
+            address: secondaryAddress,
+            name: `${secondary.name} Signer`,
+            jurisdiction: secondary.name,
+            entityId: secondaryEntityId,
+          });
         }
         if (!requiresOnboarding) {
           writeSavedCollateralPolicy({
@@ -3757,24 +2301,20 @@ export const vaultOperations = {
           // (primary Testnet plus cross-j siblings such as Tron). Onboarding is
           // runtime-level, so never leave a sibling lane looking like signup.
           writeOnboardingCompleteForEntities(
-            runtime.signers.map((signer) => signer.entityId || '').filter(Boolean),
+            runtime.signers.map(signer => signer.entityId || '').filter(Boolean),
             true,
           );
         }
       }
       await installVaultRuntimeCommandJournalKeys(runtime.id, runtime.seed);
-      await protectRuntimeForDevice(
-        runtime,
-        options.unlockDurationMs ?? DEFAULT_VAULT_UNLOCK_DURATION_MS,
-        () => {
-          runtimesState.update(state => ({
-            ...state,
-            runtimes: { ...state.runtimes, [id]: runtime },
-            activeRuntimeId: id,
-          }));
-          persistVaultStateOrThrow();
-        },
-      );
+      await protectRuntimeForDevice(runtime, options.unlockDurationMs ?? DEFAULT_VAULT_UNLOCK_DURATION_MS, () => {
+        runtimesState.update(state => ({
+          ...state,
+          runtimes: { ...state.runtimes, [id]: runtime },
+          activeRuntimeId: id,
+        }));
+        persistVaultStateOrThrow();
+      });
       markPerf('persist_runtime_state');
 
       // Add to runtimes store
@@ -3811,44 +2351,41 @@ export const vaultOperations = {
       finishRuntimeCreation();
       return runtime;
     } catch (error) {
-      errorLog.log(
-        `createRuntime failed for ${id.slice(0, 12)}`,
-        'Runtime Creation',
-        { runtimeId: id, error },
-      );
+      errorLog.log(`createRuntime failed for ${id.slice(0, 12)}`, 'Runtime Creation', { runtimeId: id, error });
       try {
         if (runtimeId) {
           lockRuntimeCommandJournal(runtimeId);
           await cleanupRuntimeEnv(runtimeId);
         }
       } catch (cleanupError) {
-        errorLog.log(
-          `Failed to cleanup partial runtime ${id.slice(0, 12)}`,
-          'Runtime Creation',
-          { runtimeId: id, cleanupRuntimeId: runtimeId, error: cleanupError },
-        );
+        errorLog.log(`Failed to cleanup partial runtime ${id.slice(0, 12)}`, 'Runtime Creation', {
+          runtimeId: id,
+          cleanupRuntimeId: runtimeId,
+          error: cleanupError,
+        });
       }
-      runtimesState.update((state) => {
+      runtimesState.update(state => {
         const nextRuntimes = { ...state.runtimes };
         delete nextRuntimes[id];
         return {
           ...state,
           runtimes: nextRuntimes,
-          activeRuntimeId: previousActiveRuntimeId && nextRuntimes[previousActiveRuntimeId]
-            ? previousActiveRuntimeId
-            : null,
+          activeRuntimeId:
+            previousActiveRuntimeId && nextRuntimes[previousActiveRuntimeId] ? previousActiveRuntimeId : null,
         };
       });
       this.saveToStorage();
-      runtimes.update((entries) => {
+      runtimes.update(entries => {
         const updated = new Map(entries);
         updated.delete(runtimeId);
         return updated;
       });
       if (normalizeRuntimeId(get(activeRuntimeId) || '') === runtimeId) {
-        runtimeOperations.setActiveRuntimeId(previousActiveRuntimeId && currentState.runtimes[String(previousActiveRuntimeId)]
-          ? previousActiveRuntimeId
-          : '');
+        runtimeOperations.setActiveRuntimeId(
+          previousActiveRuntimeId && currentState.runtimes[String(previousActiveRuntimeId)]
+            ? previousActiveRuntimeId
+            : '',
+        );
       }
       finishRuntimeCreation();
       throw error;
@@ -3918,9 +2455,7 @@ export const vaultOperations = {
     if (timer) clearTimeout(timer);
     vaultLockTimers.delete(normalizedRuntimeId);
     const runtimeEntry = get(runtimes).get(normalizedRuntimeId);
-    const runtimeEnv = runtimeEntry?.env
-      ? (unwrapLiveRuntimeEnv(runtimeEntry.env) ?? runtimeEntry.env)
-      : null;
+    const runtimeEnv = runtimeEntry?.env ? (unwrapLiveRuntimeEnv(runtimeEntry.env) ?? runtimeEntry.env) : null;
     let lockError: unknown;
     try {
       if (protectionToDelete) {
@@ -3978,7 +2513,7 @@ export const vaultOperations = {
 
     runtimesState.update(state => ({
       ...state,
-      activeRuntimeId: resolvedRuntimeId
+      activeRuntimeId: resolvedRuntimeId,
     }));
     this.saveToStorage();
     await suspendInactiveRuntimeActivity(resolvedRuntimeId);
@@ -3997,7 +2532,10 @@ export const vaultOperations = {
       for (const signer of runtime.signers) {
         const privateKey = derivePrivateKey(runtime.seed, getSignerDerivationIndex(signer));
         const privateKeyBytes = new Uint8Array(
-          privateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
+          privateKey
+            .slice(2)
+            .match(/.{2}/g)!
+            .map(byte => parseInt(byte, 16)),
         );
         xln.registerSignerKey(runtime.seed, signer.address, privateKeyBytes);
       }
@@ -4038,7 +2576,9 @@ export const vaultOperations = {
 
     const jurisdictionKey = normalizeJurisdictionKey(jurisdiction);
     if (jurisdictionKey) {
-      const existing = runtime.signers.find((signer) => normalizeJurisdictionKey(signer.jurisdiction) === jurisdictionKey);
+      const existing = runtime.signers.find(
+        signer => normalizeJurisdictionKey(signer.jurisdiction) === jurisdictionKey,
+      );
       if (existing) return existing;
     }
 
@@ -4068,7 +2608,10 @@ export const vaultOperations = {
       const xln = await getXLN();
       const privateKey = derivePrivateKey(runtime.seed, derivationIndex);
       const privateKeyBytes = new Uint8Array(
-        privateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
+        privateKey
+          .slice(2)
+          .match(/.{2}/g)!
+          .map(byte => parseInt(byte, 16)),
       );
       xln.registerSignerKey(runtime.seed, address, privateKeyBytes);
 
@@ -4077,7 +2620,9 @@ export const vaultOperations = {
       const runtimeEntry = get(runtimes).get(runtime.id);
       const runtimeEnv = runtimeEntry?.env ? (unwrapLiveRuntimeEnv(runtimeEntry.env) ?? runtimeEntry.env) : null;
       if (!runtimeEnv) {
-        throw new Error(`[VaultStore] Cannot auto-create signer entity without active runtime env: runtime=${runtime.id}`);
+        throw new Error(
+          `[VaultStore] Cannot auto-create signer entity without active runtime env: runtime=${runtime.id}`,
+        );
       }
       const entityId = await autoCreateEntityForSigner(address, runtimeEnv, jurisdiction);
       const committedSigner: Signer = entityId ? { ...newSigner, entityId } : newSigner;
@@ -4140,9 +2685,9 @@ export const vaultOperations = {
         ...state.runtimes,
         [runtime.id]: {
           ...runtime,
-          activeSignerIndex: index
-        }
-      }
+          activeSignerIndex: index,
+        },
+      },
     }));
 
     this.saveToStorage();
@@ -4162,11 +2707,9 @@ export const vaultOperations = {
         ...state.runtimes,
         [runtime.id]: {
           ...runtime,
-          signers: runtime.signers.map((s, i) =>
-            i === index ? { ...s, name } : s
-          )
-        }
-      }
+          signers: runtime.signers.map((s, i) => (i === index ? { ...s, name } : s)),
+        },
+      },
     }));
 
     this.saveToStorage();
@@ -4186,11 +2729,9 @@ export const vaultOperations = {
         ...state.runtimes,
         [runtime.id]: {
           ...runtime,
-          signers: runtime.signers.map((s, i) =>
-            i === signerIndex ? { ...s, entityId } : s
-          )
-        }
-      }
+          signers: runtime.signers.map((s, i) => (i === signerIndex ? { ...s, entityId } : s)),
+        },
+      },
     }));
 
     this.saveToStorage();
@@ -4205,13 +2746,11 @@ export const vaultOperations = {
     runtimesState.update(state => {
       const { [normalizedRuntimeId]: removed, ...remaining } = state.runtimes;
       const remainingIds = Object.keys(remaining);
-      nextActiveId = state.activeRuntimeId === normalizedRuntimeId
-        ? (remainingIds[0] || null)
-        : state.activeRuntimeId;
+      nextActiveId = state.activeRuntimeId === normalizedRuntimeId ? remainingIds[0] || null : state.activeRuntimeId;
 
       return {
         runtimes: remaining,
-        activeRuntimeId: nextActiveId
+        activeRuntimeId: nextActiveId,
       };
     });
 
@@ -4273,11 +2812,7 @@ export const vaultOperations = {
       for (const runtime of Object.values(loaded.runtimes)) {
         if (runtime.seed) {
           if (!runtime.protectedSecrets) {
-            await protectRuntimeForDevice(
-              runtime,
-              DEFAULT_VAULT_UNLOCK_DURATION_MS,
-              persistVaultStateOrThrow,
-            );
+            await protectRuntimeForDevice(runtime, DEFAULT_VAULT_UNLOCK_DURATION_MS, persistVaultStateOrThrow);
             migratedPlaintext = true;
           } else {
             scheduleVaultLock(runtime);
@@ -4309,7 +2844,7 @@ export const vaultOperations = {
           const env = await buildOrRestoreRuntimeEnv(runtime, xln, true);
           if (normalizeRuntimeId(env?.runtimeId || '') !== runtimeId) {
             throw new Error(
-              `[VaultStore.initialize] Runtime isolation mismatch: slot=${runtimeId} env.runtimeId=${String(env?.runtimeId || 'none')}`
+              `[VaultStore.initialize] Runtime isolation mismatch: slot=${runtimeId} env.runtimeId=${String(env?.runtimeId || 'none')}`,
             );
           }
           runtimes.update(r => {
@@ -4329,10 +2864,7 @@ export const vaultOperations = {
       const currentSharedRuntime = currentSelected ? sharedRuntimes.get(currentSelected) : null;
       const keepCurrentSelection = !!(
         currentSelected &&
-        (
-          latest.runtimes[currentSelected] ||
-          currentSharedRuntime?.type === 'remote'
-        )
+        (latest.runtimes[currentSelected] || currentSharedRuntime?.type === 'remote')
       );
       const activeId = keepCurrentSelection
         ? currentSelected
@@ -4340,16 +2872,14 @@ export const vaultOperations = {
       runtimeOperations.setActiveRuntimeId(activeId);
       const runtimeEntry = activeId ? sharedRuntimes.get(activeId) : null;
       const runtimeMeta = activeId ? latest.runtimes[activeId] : null;
-      const runtimeToSync = runtimeMeta && runtimeEntry?.env
-        ? { ...runtimeMeta, env: runtimeEntry.env }
-        : runtimeMeta;
+      const runtimeToSync = runtimeMeta && runtimeEntry?.env ? { ...runtimeMeta, env: runtimeEntry.env } : runtimeMeta;
       if (activeId && runtimeToSync?.env && normalizeRuntimeId(runtimeToSync.env.runtimeId || '') !== activeId) {
         throw new Error(
-          `[VaultStore.initialize] Active runtime env mismatch: active=${activeId} env.runtimeId=${String(runtimeToSync.env.runtimeId || 'none')}`
+          `[VaultStore.initialize] Active runtime env mismatch: active=${activeId} env.runtimeId=${String(runtimeToSync.env.runtimeId || 'none')}`,
         );
       }
       if (runtimeToSync?.seed) {
-        const activeXln = xln ?? await getXLN();
+        const activeXln = xln ?? (await getXLN());
         await ensureRuntimePipelineAlive(runtimeToSync as Runtime, activeXln);
         await runtimeOperations.selectRuntime(activeId);
       }
@@ -4407,7 +2937,11 @@ export const vaultOperations = {
   },
 
   // === MVP: Send tokens to another entity ===
-  async sendTokens(toEntityId: string, amount: bigint, tokenId: number = 1): Promise<{ success: boolean; error?: string }> {
+  async sendTokens(
+    toEntityId: string,
+    amount: bigint,
+    tokenId: number = 1,
+  ): Promise<{ success: boolean; error?: string }> {
     const current = get(runtimesState);
     if (!current.activeRuntimeId) return { success: false, error: 'No active runtime' };
 
@@ -4421,14 +2955,18 @@ export const vaultOperations = {
       const env = runtimeEntry?.env ? (unwrapLiveRuntimeEnv(runtimeEntry.env) ?? runtimeEntry.env) : null;
       if (!env) return { success: false, error: 'Runtime env unavailable' };
 
-      await submitXlnEntityInputs([{
-        entityId: signer.entityId,
-        signerId: signer.address,
-        entityTxs: [{
-          type: 'r2r',
-          data: { toEntityId, tokenId, amount },
-        }],
-      }]);
+      await submitXlnEntityInputs([
+        {
+          entityId: signer.entityId,
+          signerId: signer.address,
+          entityTxs: [
+            {
+              type: 'r2r',
+              data: { toEntityId, tokenId, amount },
+            },
+          ],
+        },
+      ]);
       return { success: true };
     } catch (err) {
       errorLog.log('Send failed', 'Runtime Send', {
@@ -4446,7 +2984,7 @@ export const vaultOperations = {
   getActiveEntityId(): string | null {
     const signer = get(activeSigner);
     return signer?.entityId || null;
-  }
+  },
 };
 
 registerDebugSurface('vault', () => vaultOperations);

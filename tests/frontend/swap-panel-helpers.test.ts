@@ -36,44 +36,55 @@ describe('swap panel helpers', () => {
     const book = { bids: [], asks: [] };
     const frame = {
       gossip: {
-        profiles: new Map([[
-          hubId,
-          {
-            entityId: hubId,
-            name: 'H1',
-            metadata: { isHub: true, jurisdiction: { name: 'Tron' } },
-          },
-        ]]),
+        profiles: new Map([
+          [
+            hubId,
+            {
+              entityId: hubId,
+              name: 'H1',
+              metadata: { isHub: true, jurisdiction: { name: 'Tron' } },
+            },
+          ],
+        ]),
       },
       eReplicas: new Map([
-        [`${userId}:0xSignerA`, {
-          entityId: userId,
-          signerId: '0xSignerA',
-          state: {
+        [
+          `${userId}:0xSignerA`,
+          {
             entityId: userId,
-            accounts: new Map(),
-            config: { jurisdiction: { name: 'Testnet' } },
+            signerId: '0xSignerA',
+            state: {
+              entityId: userId,
+              accounts: new Map(),
+              config: { jurisdiction: { name: 'Testnet' } },
+            },
           },
-        }],
-        [`${userId}:0xSignerB`, {
-          entityId: userId,
-          signerId: '0xSignerB',
-          state: {
+        ],
+        [
+          `${userId}:0xSignerB`,
+          {
             entityId: userId,
-            accounts: new Map(),
-            config: { jurisdiction: { name: 'Testnet' } },
+            signerId: '0xSignerB',
+            state: {
+              entityId: userId,
+              accounts: new Map(),
+              config: { jurisdiction: { name: 'Testnet' } },
+            },
           },
-        }],
-        [`${hubId}:0xSignerH`, {
-          entityId: hubId,
-          signerId: '0xSignerH',
-          state: {
+        ],
+        [
+          `${hubId}:0xSignerH`,
+          {
             entityId: hubId,
-            accounts: new Map(),
-            orderbookExt: { books: new Map([['1/2', book]]) },
-            config: { jurisdiction: { name: 'Tron' } },
+            signerId: '0xSignerH',
+            state: {
+              entityId: hubId,
+              accounts: new Map(),
+              orderbookExt: { books: new Map([['1/2', book]]) },
+              config: { jurisdiction: { name: 'Tron' } },
+            },
           },
-        }],
+        ],
       ]),
     };
 
@@ -82,7 +93,7 @@ describe('swap panel helpers', () => {
     expect(view.entityNames.get(hubId.toLowerCase())).toBe('H1');
     expect(view.isHubEntity(hubId)).toBe(true);
     expect(view.getHubProfile(hubId)?.name).toBe('H1');
-    expect(view.localReplicas.map((replica) => replica.entityId)).toEqual([userId, hubId]);
+    expect(view.localReplicas.map(replica => replica.entityId)).toEqual([userId, hubId]);
     expect(view.getPairBook(hubId, '1/2')).toBe(book);
     expect(view.getPairBook(userId, '1/2')).toBeNull();
   });
@@ -92,42 +103,47 @@ describe('swap panel helpers', () => {
     const userId = '0xUserProjection';
     const book = { bids: [], asks: [] };
     const view = buildSwapPanelRuntimeView({
-      profiles: [{
-        entityId: hubId,
-        name: 'H projection',
-        metadata: { isHub: true, jurisdiction: { name: 'Testnet' } },
-      }],
+      profiles: [
+        {
+          entityId: hubId,
+          name: 'H projection',
+          metadata: { isHub: true, jurisdiction: { name: 'Testnet' } },
+        },
+      ],
       entityNames: new Map([[userId, 'User projection']]),
       replicas: new Map([
-        [`${userId}:0xSignerProjection`, {
-          entityId: userId,
-          signerId: '0xSignerProjection',
-          state: {
+        [
+          `${userId}:0xSignerProjection`,
+          {
             entityId: userId,
-            accounts: new Map(),
-            config: { jurisdiction: { name: 'Testnet' } },
+            signerId: '0xSignerProjection',
+            state: {
+              entityId: userId,
+              accounts: new Map(),
+              config: { jurisdiction: { name: 'Testnet' } },
+            },
           },
-        }],
-        [`${hubId}:0xSignerProjection`, {
-          entityId: hubId,
-          signerId: '0xSignerProjection',
-          state: {
+        ],
+        [
+          `${hubId}:0xSignerProjection`,
+          {
             entityId: hubId,
-            accounts: new Map(),
-            orderbookExt: { books: new Map([['1/2', book]]) },
-            config: { jurisdiction: { name: 'Testnet' } },
+            signerId: '0xSignerProjection',
+            state: {
+              entityId: hubId,
+              accounts: new Map(),
+              orderbookExt: { books: new Map([['1/2', book]]) },
+              config: { jurisdiction: { name: 'Testnet' } },
+            },
           },
-        }],
+        ],
       ]),
     });
 
     expect(view.entityNames.get(hubId.toLowerCase())).toBe('H projection');
     expect(view.entityNames.get(userId.toLowerCase())).toBe('User projection');
     expect(view.isHubEntity(hubId)).toBe(true);
-    expect(view.localReplicaEntries.map((entry) => entry.entityId)).toEqual([
-      userId.toLowerCase(),
-      hubId.toLowerCase(),
-    ]);
+    expect(view.localReplicaEntries.map(entry => entry.entityId)).toEqual([userId.toLowerCase(), hubId.toLowerCase()]);
     expect(view.getPairBook(hubId, '1/2')).toBe(book);
   });
 
@@ -162,7 +178,9 @@ describe('swap panel helpers', () => {
 
     expect(tokenNetworkLabel(1, 'wakanda', tokenSymbol)).toBe('WETH (wakanda)');
     expect(sameOrderbookPairLabel(1, 2, 'Base Sepolia', tokenSymbol)).toBe('WETH-USDC (Base Sepolia)');
-    expect(crossOrderbookPairLabel(1, 'arrakis', 2, 'Base Sepolia', tokenSymbol)).toBe('WETH (arrakis) - USDC (Base Sepolia)');
+    expect(crossOrderbookPairLabel(1, 'arrakis', 2, 'Base Sepolia', tokenSymbol)).toBe(
+      'WETH (arrakis) - USDC (Base Sepolia)',
+    );
   });
 
   test('formats compact identity markers', () => {
@@ -171,57 +189,64 @@ describe('swap panel helpers', () => {
     expect(jurisdictionBadgeText('Base Sepolia')).toBe('BS');
     expect(jurisdictionBadgeText('arrakis')).toBe('AR');
     expect(jurisdictionBadgeText('')).toBe('J');
-
   });
 
   test('builds cross-swap setup consent steps only for missing preparation', () => {
-    expect(buildCrossSwapSetupSteps({
-      routeMode: 'same',
-      targetAccountReady: false,
-      canOpenTargetAccount: true,
-      needsCreditLimit: true,
-      targetHubLabel: 'H1',
-      targetJurisdictionLabel: 'Tron',
-      creditLimitLabel: '10,000 USDC',
-      creditIncreaseLabel: '+10,000 USDC',
-      tokenSymbol: 'USDC',
-    })).toEqual([]);
+    expect(
+      buildCrossSwapSetupSteps({
+        routeMode: 'same',
+        targetAccountReady: false,
+        canOpenTargetAccount: true,
+        needsCreditLimit: true,
+        targetHubLabel: 'H1',
+        targetJurisdictionLabel: 'Tron',
+        creditLimitLabel: '10,000 USDC',
+        creditIncreaseLabel: '+10,000 USDC',
+        tokenSymbol: 'USDC',
+      }),
+    ).toEqual([]);
 
-    expect(buildCrossSwapSetupSteps({
-      routeMode: 'cross',
-      targetAccountReady: true,
-      canOpenTargetAccount: false,
-      needsCreditLimit: false,
-      targetHubLabel: 'H1',
-      targetJurisdictionLabel: 'Tron',
-      creditLimitLabel: '',
-      creditIncreaseLabel: '',
-      tokenSymbol: 'USDC',
-    })).toEqual([]);
+    expect(
+      buildCrossSwapSetupSteps({
+        routeMode: 'cross',
+        targetAccountReady: true,
+        canOpenTargetAccount: false,
+        needsCreditLimit: false,
+        targetHubLabel: 'H1',
+        targetJurisdictionLabel: 'Tron',
+        creditLimitLabel: '',
+        creditIncreaseLabel: '',
+        tokenSymbol: 'USDC',
+      }),
+    ).toEqual([]);
 
-    expect(buildCrossSwapSetupSteps({
-      routeMode: 'cross',
-      targetAccountReady: false,
-      canOpenTargetAccount: false,
-      needsCreditLimit: true,
-      targetHubLabel: 'H1',
-      targetJurisdictionLabel: 'Tron',
-      creditLimitLabel: '10,000 USDC',
-      creditIncreaseLabel: '+10,000 USDC',
-      tokenSymbol: 'USDC',
-    })).toEqual([]);
+    expect(
+      buildCrossSwapSetupSteps({
+        routeMode: 'cross',
+        targetAccountReady: false,
+        canOpenTargetAccount: false,
+        needsCreditLimit: true,
+        targetHubLabel: 'H1',
+        targetJurisdictionLabel: 'Tron',
+        creditLimitLabel: '10,000 USDC',
+        creditIncreaseLabel: '+10,000 USDC',
+        tokenSymbol: 'USDC',
+      }),
+    ).toEqual([]);
 
-    expect(buildCrossSwapSetupSteps({
-      routeMode: 'cross',
-      targetAccountReady: false,
-      canOpenTargetAccount: true,
-      needsCreditLimit: true,
-      targetHubLabel: 'H1',
-      targetJurisdictionLabel: 'Tron',
-      creditLimitLabel: '10,000 USDC',
-      creditIncreaseLabel: '+10,000 USDC',
-      tokenSymbol: 'USDC',
-    })).toEqual([
+    expect(
+      buildCrossSwapSetupSteps({
+        routeMode: 'cross',
+        targetAccountReady: false,
+        canOpenTargetAccount: true,
+        needsCreditLimit: true,
+        targetHubLabel: 'H1',
+        targetJurisdictionLabel: 'Tron',
+        creditLimitLabel: '10,000 USDC',
+        creditIncreaseLabel: '+10,000 USDC',
+        tokenSymbol: 'USDC',
+      }),
+    ).toEqual([
       {
         id: 'target-account',
         label: 'Create target account',
@@ -237,7 +262,7 @@ describe('swap panel helpers', () => {
 
   test('SwapPanel submits the exact Runtime-owned command plan before cross intent', () => {
     const source = Bun.file('frontend/src/lib/components/Entity/SwapPanel.svelte');
-    return source.text().then((text) => {
+    return source.text().then(text => {
       expect(text).toContain('activeXlnFunctions.planSwapCommand');
       expect(text).toContain('if (commandPlan.targetSetupInput)');
       expect(text).toContain('await submitRuntimeInput(commandPlan.targetSetupInput)');
@@ -303,9 +328,11 @@ describe('swap panel helpers', () => {
     expect(placeSlice).not.toContain("throw new Error('XLN environment not ready')");
     expect(placeSlice).not.toContain('env.timestamp');
     expect(placeSlice).not.toContain('env.height');
-    expect(cancelSlice).toContain('await submitEntityInputs([{');
+    expect(cancelSlice).toContain('await submitEntityInputs(');
+    expect(cancelSlice).toContain("type: 'proposeCancelSwap'");
     expect(cancelSlice).not.toContain("throw new Error('XLN environment not ready')");
-    expect(clearSlice).toContain('await submitEntityInputs([{');
+    expect(clearSlice).toContain('await submitEntityInputs(');
+    expect(clearSlice).toContain("type: 'requestCrossJurisdictionClear'");
     expect(clearSlice).not.toContain("throw new Error('XLN environment not ready')");
   });
 
@@ -319,7 +346,7 @@ describe('swap panel helpers', () => {
     expect(panel).toContain('function handleOrderAmountInput(value: string): void');
     expect(panel).toContain('orderAmountInput = autoSelection.amountInput;');
     expect(panel).toContain('function computeOrderAmountSelection(percent: number)');
-    expect(panel).toContain('orderbookSnapshot;\n    orderbookPairId;\n    activeBookHubId;');
+    expect(panel).toMatch(/orderbookSnapshot;\s+orderbookPairId;\s+activeBookHubId;/);
     expect(panel).not.toContain('liveOrderAmountInput');
     expect(panel).not.toContain('routedOrderAmountInput');
     expect(panel).not.toContain('handleSwapPanelAmountSync');
@@ -331,7 +358,7 @@ describe('swap panel helpers', () => {
 
   test('SwapPanel preserves a pinned orderbook level when token sync is idempotent', () => {
     const source = Bun.file('frontend/src/lib/components/Entity/SwapPanel.svelte');
-    return source.text().then((text) => {
+    return source.text().then(text => {
       const setTokensStart = text.indexOf('function setSwapTokens');
       const nextFunctionStart = text.indexOf('function buildReverseCrossRouteSelection');
       expect(setTokensStart).toBeGreaterThan(0);
@@ -339,7 +366,9 @@ describe('swap panel helpers', () => {
       const setTokensSource = text.slice(setTokensStart, nextFunctionStart);
       expect(setTokensSource).toContain('const previousGiveTokenId = String(giveTokenId);');
       expect(setTokensSource).toContain('const previousWantTokenId = String(wantTokenId);');
-      expect(setTokensSource).toContain('const tokensChanged = previousGiveTokenId !== nextGiveTokenId || previousWantTokenId !== nextWantTokenId;');
+      expect(setTokensSource).toContain(
+        'const tokensChanged = previousGiveTokenId !== nextGiveTokenId || previousWantTokenId !== nextWantTokenId;',
+      );
       expect(setTokensSource).toContain('if (tokensChanged) selectedOrderLevel = null;');
       expect(setTokensSource).not.toContain('wantTokenId = String(nextWantToken);\n    selectedOrderLevel = null;');
     });

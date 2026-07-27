@@ -4,12 +4,17 @@
  */
 
 import type { AccountFrame, AccountInput, AccountMachine, AccountTx, Delta, Env } from '../../types';
-import { cloneAccountFrame, cloneAccountMachine, getAccountPerspective, removeCommittedTxsFromMempool } from '../../state-helpers';
+import {
+  cloneAccountFrame,
+  cloneAccountMachine,
+  getAccountPerspective,
+  removeCommittedTxsFromMempool,
+} from '../../state-helpers';
 import { isLeft } from '../utils';
 import { getPerfMs, HEAVY_LOGS } from '../../utils';
 import { safeStringify } from '../../protocol/serialization';
 import { cloneIsolatedAccountInput } from '../../protocol/account-input-clone';
-import { validateAccountFrame as validateAccountFrameStrict } from '../../validation-utils';
+import { validateAccountFrame } from '../../validation-utils';
 import { applyAccountTx } from '../tx/apply';
 import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { createFrameHash, MAX_ACCOUNT_FRAME_TXS, MAX_FRAME_SIZE_BYTES } from './frame';
@@ -27,11 +32,7 @@ import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '..
 import { MEMPOOL_LIMIT } from './constants';
 import type { AccountConsensusHashToSign, AccountSwapOfferCreated, ProposeAccountFrameResult } from './types';
 import { getReplicaByEntityId } from '../../entity/replica';
-import {
-  computeAccountStateRoot,
-  computeAccountStateSectionHashes,
-  type AccountStateRootTiming,
-} from '../state-root';
+import { computeAccountStateRoot, computeAccountStateSectionHashes, type AccountStateRootTiming } from '../state-root';
 import { stageAccountCommitmentCache } from '../map-commitment';
 import { createAccountJClaimSession } from '../j-claim-session';
 import { prepareAccountJClaimTx } from '../j-claim-transition';
@@ -54,11 +55,12 @@ const accountProposalSlowMs = (): number =>
 
 const shouldUseOptimisticProposalBatch = (txs: readonly AccountTx[]): boolean =>
   txs.length > 1 &&
-  txs.every((tx) =>
-    tx.type === 'swap_resolve' ||
-    tx.type === 'cross_swap_fill_ack' ||
-    tx.type === 'pull_lock' ||
-    tx.type === 'swap_offer',
+  txs.every(
+    tx =>
+      tx.type === 'swap_resolve' ||
+      tx.type === 'cross_swap_fill_ack' ||
+      tx.type === 'pull_lock' ||
+      tx.type === 'swap_offer',
   );
 
 const isCrossJurisdictionPullResolveTx = (
@@ -92,7 +94,7 @@ const isRefreshableStaleSettlementSeal = (
     workspace.nonceAtSign === undefined &&
     tx.data.version === workspace.version &&
     tx.data.workspaceHash.toLowerCase() === workspace.workspaceHash.toLowerCase() &&
-    tx.data.settlementNonce !== getNextSettlementNonce(account)
+    tx.data.settlementNonce !== getNextSettlementNonce(account),
   );
 };
 
@@ -243,9 +245,10 @@ export async function proposeAccountFrame(
   const jClaimSession = createAccountJClaimSession(env, accountJClaimNodeStore);
 
   const processOnMachine = async (machine: AccountMachine, accountTx: AccountTx) => {
-    const preparedTx = accountTx.type === 'j_event_claim'
-      ? prepareAccountJClaimTx(machine, accountTx, getAccountStateDomain(machine), jClaimSession)
-      : accountTx;
+    const preparedTx =
+      accountTx.type === 'j_event_claim'
+        ? prepareAccountJClaimTx(machine, accountTx, getAccountStateDomain(machine), jClaimSession)
+        : accountTx;
     const beforeSettlement = captureSettlementVector(machine);
     const result = await applyAccountTx(
       machine,
@@ -346,8 +349,7 @@ export async function proposeAccountFrame(
         }
         if (accountTx.type === 'settle_transition') {
           throw new Error(
-            `SETTLEMENT_TRANSITION_PROPOSAL_FAILED:${accountTx.data.kind}:` +
-              `${result.error || 'validation_failed'}`,
+            `SETTLEMENT_TRANSITION_PROPOSAL_FAILED:${accountTx.data.kind}:` + `${result.error || 'validation_failed'}`,
           );
         }
         if (accountTx.type === 'cross_swap_fill_ack') {
@@ -411,9 +413,10 @@ export async function proposeAccountFrame(
       failedHtlcLocks?: Array<{ hashlock: string; reason: string }>;
     } = {
       success: false,
-      error: deferredTxCount > 0
-        ? `Transactions deferred until signed settlement finalizes: ${deferredTxCount}`
-        : 'All transactions failed validation',
+      error:
+        deferredTxCount > 0
+          ? `Transactions deferred until signed settlement finalizes: ${deferredTxCount}`
+          : 'All transactions failed validation',
       events: allEvents,
     };
     if (failedHtlcLocks.length > 0) earlyResult.failedHtlcLocks = failedHtlcLocks;
@@ -489,7 +492,7 @@ export async function proposeAccountFrame(
 
   let newFrame: AccountFrame;
   try {
-    newFrame = validateAccountFrameStrict(frameData, 'proposeAccountFrame');
+    newFrame = validateAccountFrame(frameData, 'proposeAccountFrame');
   } catch (error) {
     accountLog.warn('frame.validation_failed', { error: error instanceof Error ? error.message : String(error) });
     return {
@@ -521,9 +524,7 @@ export async function proposeAccountFrame(
   if (!signingSignerId) {
     return { success: false, error: `Entity ${signingEntityId.slice(-4)} has no validators`, events };
   }
-  const directSigner = signingReplica.state.config.validators.length === 1
-    ? signingSignerId
-    : undefined;
+  const directSigner = signingReplica.state.config.validators.length === 1 ? signingSignerId : undefined;
 
   if (!quiet) {
     accountLog.debug(directSigner ? 'hanko.sign' : 'hanko.defer_to_entity_quorum', {
@@ -578,12 +579,10 @@ export async function proposeAccountFrame(
   let frameHanko: string | undefined;
   let disputeHanko: string | undefined;
   if (directSigner) {
-    [frameHanko, disputeHanko] = await signEntityHashes(
-      env,
-      signingEntityId,
-      directSigner,
-      [newFrame.stateHash, ...(disputeHash ? [disputeHash] : [])],
-    );
+    [frameHanko, disputeHanko] = await signEntityHashes(env, signingEntityId, directSigner, [
+      newFrame.stateHash,
+      ...(disputeHash ? [disputeHash] : []),
+    ]);
     if (!frameHanko) {
       return { success: false, error: 'Failed to build frame hanko', events };
     }
@@ -622,10 +621,7 @@ export async function proposeAccountFrame(
   // Remove only the transactions that actually made it into the proposed frame.
   // This function is async and can yield while hashing/signing; late arrivals must
   // remain queued for the next frame instead of being silently wiped by position.
-  accountMachine.mempool = removeCommittedTxsFromMempool(
-    accountMachine.mempool,
-    [...txsToRemove, ...validMempoolTxs],
-  );
+  accountMachine.mempool = removeCommittedTxsFromMempool(accountMachine.mempool, [...txsToRemove, ...validMempoolTxs]);
 
   events.push(`🚀 Proposed frame ${newFrame.height} with ${newFrame.accountTxs.length} transactions`);
 
@@ -636,45 +632,48 @@ export async function proposeAccountFrame(
     reusableAck.counterpartyEntityId.toLowerCase() === accountMachine.proofHeader.toEntity.toLowerCase() &&
     Number(reusableAck.height) === Number(newFrame.height) - 1 &&
     Number(accountMachine.currentHeight) === Number(reusableAck.height);
-  const disputeSeal = proofChanged && disputeHash ? {
-    ...(disputeHanko ? { hanko: disputeHanko } : {}),
-    hash: disputeHash,
-    proofBodyHash: proofResult.proofBodyHash,
-    proofNonce: signedProofNonce,
-  } : (
-    accountMachine.currentDisputeProofHanko &&
-    accountMachine.currentDisputeHash &&
-    accountMachine.currentDisputeProofBodyHash?.toLowerCase() === proofResult.proofBodyHash.toLowerCase() &&
-    Number(accountMachine.currentDisputeProofNonce ?? 0) > Number(clonedMachine.jNonce ?? 0)
+  const disputeSeal =
+    proofChanged && disputeHash
       ? {
-          hanko: accountMachine.currentDisputeProofHanko,
-          hash: accountMachine.currentDisputeHash,
-          proofBodyHash: accountMachine.currentDisputeProofBodyHash,
-          proofNonce: accountMachine.currentDisputeProofNonce!,
+          ...(disputeHanko ? { hanko: disputeHanko } : {}),
+          hash: disputeHash,
+          proofBodyHash: proofResult.proofBodyHash,
+          proofNonce: signedProofNonce,
         }
-      : undefined
-  );
+      : accountMachine.currentDisputeProofHanko &&
+          accountMachine.currentDisputeHash &&
+          accountMachine.currentDisputeProofBodyHash?.toLowerCase() === proofResult.proofBodyHash.toLowerCase() &&
+          Number(accountMachine.currentDisputeProofNonce ?? 0) > Number(clonedMachine.jNonce ?? 0)
+        ? {
+            hanko: accountMachine.currentDisputeProofHanko,
+            hash: accountMachine.currentDisputeHash,
+            proofBodyHash: accountMachine.currentDisputeProofBodyHash,
+            proofNonce: accountMachine.currentDisputeProofNonce!,
+          }
+        : undefined;
   const proposal = {
     frame: outboundFrame,
     ...(frameHanko ? { frameHanko } : {}),
     ...(disputeSeal ? { disputeSeal } : {}),
   };
-  const accountInput: Extract<AccountInput, { kind: 'frame' | 'frame_ack' }> = shouldBundlePreviousAck ? {
-    kind: 'frame_ack',
-    fromEntityId: accountMachine.proofHeader.fromEntity,
-    toEntityId: accountMachine.proofHeader.toEntity,
-    domain: structuredClone(accountMachine.domain),
-    watchSeed: accountMachine.watchSeed,
-    ack: structuredClone(reusableAck.response.ack),
-    proposal,
-  } : {
-    kind: 'frame',
-    fromEntityId: accountMachine.proofHeader.fromEntity,
-    toEntityId: accountMachine.proofHeader.toEntity,
-    domain: structuredClone(accountMachine.domain),
-    watchSeed: accountMachine.watchSeed,
-    proposal,
-  };
+  const accountInput: Extract<AccountInput, { kind: 'frame' | 'frame_ack' }> = shouldBundlePreviousAck
+    ? {
+        kind: 'frame_ack',
+        fromEntityId: accountMachine.proofHeader.fromEntity,
+        toEntityId: accountMachine.proofHeader.toEntity,
+        domain: structuredClone(accountMachine.domain),
+        watchSeed: accountMachine.watchSeed,
+        ack: structuredClone(reusableAck.response.ack),
+        proposal,
+      }
+    : {
+        kind: 'frame',
+        fromEntityId: accountMachine.proofHeader.fromEntity,
+        toEntityId: accountMachine.proofHeader.toEntity,
+        domain: structuredClone(accountMachine.domain),
+        watchSeed: accountMachine.watchSeed,
+        proposal,
+      };
   if (!shouldBundlePreviousAck && reusableAck && Number(reusableAck.height) < Number(accountMachine.currentHeight)) {
     delete accountMachine.lastOutboundFrameAck;
   }
@@ -689,7 +688,9 @@ export async function proposeAccountFrame(
       type: 'accountFrame',
       context: `account:${counterparty.slice(-8)}:frame:${newFrame.height}`,
     },
-    ...(disputeHash ? [{ hash: disputeHash, type: 'dispute' as const, context: `account:${counterparty.slice(-8)}:dispute` }] : []),
+    ...(disputeHash
+      ? [{ hash: disputeHash, type: 'dispute' as const, context: `account:${counterparty.slice(-8)}:dispute` }]
+      : []),
   ];
 
   const finalResult: ProposeAccountFrameResult = {
@@ -711,7 +712,7 @@ export async function proposeAccountFrame(
       counterparty: shortId(counterparty, 8),
       height: newFrame.height,
       txs: newFrame.accountTxs.length,
-      txTypes: Array.from(new Set(newFrame.accountTxs.map((tx) => tx.type))).sort(),
+      txTypes: Array.from(new Set(newFrame.accountTxs.map(tx => tx.type))).sort(),
       optimisticBatch: canOptimisticallyValidateBatch && !optimisticBatchFailed,
       totalMs: profileTotalMs,
       phases: cumulativeMarksToPhases(profileCheckpoints, profileTotalMs),

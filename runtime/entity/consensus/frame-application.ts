@@ -3,135 +3,112 @@
  * committed account/J-layer side effects back into the runtime.
  */
 
-import { accountInputAck,accountInputProposal,accountInputReferenceHeight } from '../../account/consensus/flush';
+import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from '../../account/consensus/flush';
 import { proposeAccountFrame } from '../../account/consensus/propose';
 import { resolveCertifiedAccountCounterpartyProposer } from '../../account/counterparty-route';
 import { getAccountJClaimNodeStore } from '../../account/j-claim-store';
 import { appendAccountMempoolTx } from '../../account/mempool';
 import {
-assertCanonicalSettlementWorkspace,
-hasPendingSettlementTransition,
+  assertCanonicalSettlementWorkspace,
+  hasPendingSettlementTransition,
 } from '../../account/tx/handlers/settle-transition';
 import { markCrossJurisdictionBookAdmissionResolving } from '../../extensions/cross-j/orderbook';
-import {
-logError,
-shortHash,
-shortId,
-shortOrder
-} from '../../infra/logger';
+import { logError, shortHash, shortId, shortOrder } from '../../infra/logger';
 import { cumulativeMarksToPhases } from '../../infra/perf-profile';
+import { assertEntityFrameJRangeBudget } from '../../jurisdiction/range-budget';
+import { replaceOrderbookPair, type OrderbookExtState } from '../../orderbook';
 import {
-assertEntityFrameJRangeBudget
-} from '../../jurisdiction/range-budget';
-import { replaceOrderbookPair,type OrderbookExtState } from '../../orderbook';
-import {
-applyCommittedSwapCancelsToOrderbook,
-crossJurisdictionBookOwnerRef,
-deterministicEntityTimestamp,
-normalizeEntityRef
+  applyCommittedSwapCancelsToOrderbook,
+  crossJurisdictionBookOwnerRef,
+  deterministicEntityTimestamp,
+  normalizeEntityRef,
 } from '../../orderbook/cross-j-orderbook';
-import {
-swapKey,
-type WorkingOrderbookOffer
-} from '../../orderbook/swap-execution';
+import { swapKey, type WorkingOrderbookOffer } from '../../orderbook/swap-execution';
 import { computeHtlcEnvelopeContextHash } from '../../protocol/htlc/envelope';
 import { validateMultiRecipientCiphertext } from '../../protocol/htlc/multi-recipient';
 import { encryptedHtlcLayer } from '../../protocol/htlc/onion-advance';
-import { compareStableText,safeStringify } from '../../protocol/serialization';
+import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { getNextSettlementNonce } from '../../protocol/settlement/operations';
 import { assertScheduledWakeFrameOrder } from '../../runtime/scheduled-wake';
 import {
-addMessages,
-cloneEntityState,
-emitScopedEvents,
-getAccountPerspective,
-resolveEntityProposerId
+  addMessages,
+  cloneEntityState,
+  emitScopedEvents,
+  getAccountPerspective,
+  resolveEntityProposerId,
 } from '../../state-helpers';
 import { mergeStorageOverlayRecords } from '../../storage/overlay';
 import type {
-AccountInput,
-AccountTx,
-EntityCandidateEffect,
-EntityInput,
-EntityState,
-EntityTx,
-Env,
-HashType,
-JInput,
-RuntimeOverlayRecord
+  AccountInput,
+  AccountTx,
+  EntityCandidateEffect,
+  EntityInput,
+  EntityState,
+  EntityTx,
+  Env,
+  HashType,
+  JInput,
+  RuntimeOverlayRecord,
 } from '../../types';
-import type { AccountJClaimNode,AccountJClaimNodeChanges,AccountJClaimNodeStore } from '../../types/account-j-claims';
+import type { AccountJClaimNode, AccountJClaimNodeChanges, AccountJClaimNodeStore } from '../../types/account-j-claims';
 import { getPerfMs } from '../../utils';
 import {
-assertRuntimeOutputAuthorization,
-isCollectiveEntityActionTx,
-isIndividualEntityCommandTx,
+  assertRuntimeOutputAuthorization,
+  isCollectiveEntityActionTx,
+  isIndividualEntityCommandTx,
 } from '../authorization';
 import {
-advanceEntityCommandNonce,
-assertSignedEntityCommand,
-getEntityCommandDisposition,
-normalizeEntityCommandNonceBoard
+  advanceEntityCommandNonce,
+  assertSignedEntityCommand,
+  getEntityCommandDisposition,
+  normalizeEntityCommandNonceBoard,
 } from '../command';
 import { isEntityCommandForbiddenTx } from '../command-codec';
 import {
-applyConsumptionOutput,
-createEmptyConsumptionAccumulator,
-type ConsumptionNode
+  applyConsumptionOutput,
+  createEmptyConsumptionAccumulator,
+  type ConsumptionNode,
 } from '../consumption-accumulator';
+import { type ConsumptionNodeChanges } from '../consumption-store';
 import {
-type ConsumptionNodeChanges
-} from '../consumption-store';
-import {
-entityTxContainsAccountTransition,
-entityTxContainsCrossJSetup,
-selectCrossJOpeningAccountProposalTxs
+  entityTxContainsAccountTransition,
+  entityTxContainsCrossJSetup,
+  selectCrossJOpeningAccountProposalTxs,
 } from '../cross-j-proposer-materialization';
-import {
-cancelHook as cancelCrontabHook,
-initCrontab,
-scheduleHook as scheduleCrontabHook
-} from '../scheduler';
+import { cancelHook, initCrontab, scheduleHook } from '../scheduler';
 import { applyEntityTx } from '../tx';
 import {
-normalizeSwapOfferForOrderbook,
-processOrderbookCancels,
-processOrderbookSwaps,
-routeRemoteCrossJurisdictionBookCancels,
-type SwapCancelEvent,
-type SwapCancelRequestEvent,
-type SwapOfferEvent
+  normalizeSwapOfferForOrderbook,
+  processOrderbookCancels,
+  processOrderbookSwaps,
+  routeRemoteCrossJurisdictionBookCancels,
+  type SwapCancelEvent,
+  type SwapCancelRequestEvent,
+  type SwapOfferEvent,
 } from '../tx/handlers/account';
 import { buildCurrentEntityProfileHashToSign } from '../tx/handlers/profile-certification';
 import { buildSettlementSealDraft } from '../tx/handlers/settle';
-import { pruneSettledOriginatedHtlcRoutes,terminateHtlcRoute } from '../tx/htlc-route-lifecycle';
+import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../tx/htlc-route-lifecycle';
 import { MalformedEntityFrameInputError } from '../tx/invariant-errors';
 import { normalizeEntityProposalBoard } from '../tx/proposals';
 import { accountHasProposableMempool } from './account-mempool-eligibility';
 import { queueAccountMempoolTx } from './account-mempool-queue';
-import {
-assertEntityFrameTxByteBudget
-} from './frame';
-import {
-assignCertifiedOutputIdentities,
-verifyCertifiedEntityOutput
-} from './output-certification';
-import {
-invalidateEntityAccountCommitment
-} from './state-root';
+import { assertEntityFrameTxByteBudget } from './frame';
+import { assignCertifiedOutputIdentities, verifyCertifiedEntityOutput } from './output-certification';
+import { invalidateEntityAccountCommitment } from './state-root';
 
 import {
-admitOrderbookOfferForMatching,
-buildConsumptionOutputIdentity,
-buildCrossJurisdictionFillNoticeOutput,
-drainCommittedCrossJurisdictionCancelAcks,
-drainPendingCrossJurisdictionFillAcks,
-entityFrameProfileEnabled,
-entityFrameSlowMs,
-entityLog,
-isSelfBoardAuthorityTransitionFrame,
-ownsSourceHubRouteForFillAck,
-stashPendingCrossJurisdictionFillAck,
+  admitOrderbookOfferForMatching,
+  buildConsumptionOutputIdentity,
+  buildCrossJurisdictionFillNoticeOutput,
+  drainCommittedCrossJurisdictionCancelAcks,
+  drainPendingCrossJurisdictionFillAcks,
+  entityFrameProfileEnabled,
+  entityFrameSlowMs,
+  entityLog,
+  isSelfBoardAuthorityTransitionFrame,
+  ownsSourceHubRouteForFillAck,
+  stashPendingCrossJurisdictionFillAck,
 } from './shared';
 
 type ApplyEntityTxsInOrderContext = {
@@ -172,11 +149,7 @@ const recordFrameAccountChange = (
   storageChanges.push({ family: 'account', entityId, counterpartyId });
 };
 
-const recordFrameBookChange = (
-  storageChanges: RuntimeOverlayRecord[],
-  entityId: string,
-  pairId: string,
-): void => {
+const recordFrameBookChange = (storageChanges: RuntimeOverlayRecord[], entityId: string, pairId: string): void => {
   storageChanges.push({ family: 'book', entityId, pairId });
 };
 
@@ -423,7 +396,7 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
 
           if (tx.type === 'htlc_lock' && tx.data?.timelock && tx.data?.lockId) {
             if (currentEntityState.crontabState) {
-              scheduleCrontabHook(currentEntityState.crontabState, {
+              scheduleHook(currentEntityState.crontabState, {
                 id: `htlc-timeout:${tx.data.lockId}`,
                 triggerAt: Number(tx.data.timelock),
                 type: 'htlc_timeout',
@@ -434,7 +407,7 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
 
           if (tx.type === 'htlc_resolve' && tx.data?.lockId) {
             if (currentEntityState.crontabState) {
-              cancelCrontabHook(currentEntityState.crontabState, `htlc-timeout:${tx.data.lockId}`);
+              cancelHook(currentEntityState.crontabState, `htlc-timeout:${tx.data.lockId}`);
             }
           }
         } else if (tx.type === 'cross_swap_fill_ack') {
@@ -530,10 +503,7 @@ type ProposePendingAccountFramesContext = {
   storageChanges: RuntimeOverlayRecord[];
 };
 
-const certifiedAccountOutputSignerHint = (
-  targetEntityId: string,
-  input: AccountInput,
-): string | null => {
+const certifiedAccountOutputSignerHint = (targetEntityId: string, input: AccountInput): string | null => {
   const proposal = accountInputProposal(input);
   if (!proposal) return null;
   const target = targetEntityId.toLowerCase();
@@ -551,19 +521,15 @@ const certifiedAccountOutputSignerHint = (
       timelock: tx.data.timelock,
       revealBeforeHeight: tx.data.revealBeforeHeight,
     });
-    const canonicalLayer = validateMultiRecipientCiphertext(
-      encryptedLayer,
-      target,
-      expectedContextHash,
-    );
-    const signerId = String(canonicalLayer.recipients[0]?.signerId || '').trim().toLowerCase();
+    const canonicalLayer = validateMultiRecipientCiphertext(encryptedLayer, target, expectedContextHash);
+    const signerId = String(canonicalLayer.recipients[0]?.signerId || '')
+      .trim()
+      .toLowerCase();
     if (!signerId) throw new Error(`ACCOUNT_OUTPUT_CERTIFIED_SIGNER_MISSING:${tx.data.lockId}`);
     signerIds.add(signerId);
   }
   if (signerIds.size > 1) {
-    throw new Error(
-      `ACCOUNT_OUTPUT_CERTIFIED_SIGNER_CONFLICT:${target}:${[...signerIds].sort().join(',')}`,
-    );
+    throw new Error(`ACCOUNT_OUTPUT_CERTIFIED_SIGNER_CONFLICT:${target}:${[...signerIds].sort().join(',')}`);
   }
   return signerIds.values().next().value ?? null;
 };
@@ -577,7 +543,9 @@ function materializeDeferredSettlementApprovals(
 ): void {
   const deferred = state.deferredAccountProposals;
   if (!deferred || deferred.size === 0) return;
-  for (const [accountId, approvedHash] of [...deferred.entries()].sort(([left], [right]) => compareStableText(left, right))) {
+  for (const [accountId, approvedHash] of [...deferred.entries()].sort(([left], [right]) =>
+    compareStableText(left, right),
+  )) {
     const account = state.accounts.get(accountId);
     if (!account) throw new Error(`SETTLEMENT_DEFERRED_ACCOUNT_MISSING:${accountId}`);
     if (account.pendingFrame || hasPendingSettlementTransition(account)) continue;
@@ -594,10 +562,7 @@ function materializeDeferredSettlementApprovals(
       continue;
     }
     const peerSealPinsAccountState = Boolean(
-      workspace.settlementHash ||
-      workspace.leftHanko ||
-      workspace.rightHanko ||
-      workspace.postSettlementDisputeProof,
+      workspace.settlementHash || workspace.leftHanko || workspace.rightHanko || workspace.postSettlementDisputeProof,
     );
     // An unsigned workspace must wait for ordinary Account work to drain: that
     // work can change the post-settlement proof we are about to sign. Once a
@@ -620,21 +585,21 @@ type SettlementSealTx = Omit<SettlementTransitionTx, 'data'> & {
   data: Extract<SettlementTransitionTx['data'], { kind: 'seal' }>;
 };
 
-function refreshStaleUncommittedSettlementSeals(
-  state: EntityState,
-  storageChanges: RuntimeOverlayRecord[],
-): void {
-  for (const [accountId, account] of [...state.accounts.entries()].sort(([left], [right]) => compareStableText(left, right))) {
+function refreshStaleUncommittedSettlementSeals(state: EntityState, storageChanges: RuntimeOverlayRecord[]): void {
+  for (const [accountId, account] of [...state.accounts.entries()].sort(([left], [right]) =>
+    compareStableText(left, right),
+  )) {
     const workspace = account.settlementWorkspace;
     if (!workspace || workspace.nonceAtSign !== undefined || account.pendingFrame) continue;
     const workspaceHash = assertCanonicalSettlementWorkspace(account, workspace);
     const expectedNonce = getNextSettlementNonce(account);
-    const staleSeals = account.mempool.filter((tx): tx is SettlementSealTx =>
-      tx.type === 'settle_transition' &&
-      tx.data.kind === 'seal' &&
-      tx.data.version === workspace.version &&
-      tx.data.workspaceHash.toLowerCase() === workspaceHash &&
-      tx.data.settlementNonce !== expectedNonce
+    const staleSeals = account.mempool.filter(
+      (tx): tx is SettlementSealTx =>
+        tx.type === 'settle_transition' &&
+        tx.data.kind === 'seal' &&
+        tx.data.version === workspace.version &&
+        tx.data.workspaceHash.toLowerCase() === workspaceHash &&
+        tx.data.settlementNonce !== expectedNonce,
     );
     if (staleSeals.length === 0) continue;
 
@@ -644,7 +609,7 @@ function refreshStaleUncommittedSettlementSeals(
     // deterministically request a fresh Entity-quorum witness for this exact
     // workspace at the new nonce.
     const staleSet = new Set<AccountTx>(staleSeals);
-    account.mempool = account.mempool.filter((tx) => !staleSet.has(tx));
+    account.mempool = account.mempool.filter(tx => !staleSet.has(tx));
     recordFrameAccountChange(storageChanges, state.entityId, accountId);
     state.deferredAccountProposals ??= new Map();
     const existing = state.deferredAccountProposals.get(accountId);
@@ -658,7 +623,7 @@ function refreshStaleUncommittedSettlementSeals(
     entityLog.info('settlement.stale_seal_refreshed', {
       account: shortId(accountId),
       expectedNonce,
-      staleNonces: staleSeals.map((tx) => tx.data.settlementNonce).sort((left, right) => left - right),
+      staleNonces: staleSeals.map(tx => tx.data.settlementNonce).sort((left, right) => left - right),
     });
   }
 }
@@ -758,9 +723,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
       }
     }
 
-    const finalAccountInput = proposal?.success && proposal.accountInput
-      ? proposal.accountInput
-      : requiredResponse;
+    const finalAccountInput = proposal?.success && proposal.accountInput ? proposal.accountInput : requiredResponse;
     if (!finalAccountInput) continue;
     if (requiredResponse) {
       const requiredAck = accountInputAck(requiredResponse);
@@ -770,37 +733,28 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
       if (requiredAck && (!finalAck || safeStringify(finalAck) !== safeStringify(requiredAck))) {
         throw new Error(`ACCOUNT_REQUIRED_ACK_NOT_BUNDLED:${accountKey}:${requiredAck.height}`);
       }
-      if (
-        requiredProposal &&
-        (!finalProposal || safeStringify(finalProposal) !== safeStringify(requiredProposal))
-      ) {
-        throw new Error(
-          `ACCOUNT_REQUIRED_PROPOSAL_NOT_PRESERVED:${accountKey}:${requiredProposal.frame.height}`,
-        );
+      if (requiredProposal && (!finalProposal || safeStringify(finalProposal) !== safeStringify(requiredProposal))) {
+        throw new Error(`ACCOUNT_REQUIRED_PROPOSAL_NOT_PRESERVED:${accountKey}:${requiredProposal.frame.height}`);
       }
     }
 
     {
-      const encryptedTargetSignerId = certifiedAccountOutputSignerHint(
-        finalAccountInput.toEntityId,
-        finalAccountInput,
-      );
+      const encryptedTargetSignerId = certifiedAccountOutputSignerHint(finalAccountInput.toEntityId, finalAccountInput);
       const certifiedTargetSignerId = await resolveCertifiedAccountCounterpartyProposer(
         env,
         accountMachine,
         finalAccountInput.toEntityId,
       );
-      if (
-        encryptedTargetSignerId &&
-        certifiedTargetSignerId &&
-        encryptedTargetSignerId !== certifiedTargetSignerId
-      ) {
+      if (encryptedTargetSignerId && certifiedTargetSignerId && encryptedTargetSignerId !== certifiedTargetSignerId) {
         throw new Error(
           `ACCOUNT_OUTPUT_SIGNER_HINT_CONFLICT:${finalAccountInput.toEntityId}:` +
-          `${encryptedTargetSignerId}:${certifiedTargetSignerId}`,
+            `${encryptedTargetSignerId}:${certifiedTargetSignerId}`,
         );
       }
-      const targetSignerId = encryptedTargetSignerId ?? certifiedTargetSignerId ?? resolveEntityProposerId(
+      const targetSignerId =
+        encryptedTargetSignerId ??
+        certifiedTargetSignerId ??
+        resolveEntityProposerId(
           env,
           finalAccountInput.toEntityId,
           `account flush output ${currentEntityState.entityId}->${finalAccountInput.toEntityId}`,
@@ -1062,11 +1016,7 @@ function applySwapCancelRequests(context: ApplySwapCancelRequestsContext): void 
   const { env, currentEntityState, allSwapCancelRequests, proposableAccounts, allOutputs, storageChanges } = context;
   if (allSwapCancelRequests.length === 0) return;
 
-  const routedCancels = routeRemoteCrossJurisdictionBookCancels(
-    env,
-    currentEntityState,
-    allSwapCancelRequests,
-  );
+  const routedCancels = routeRemoteCrossJurisdictionBookCancels(env, currentEntityState, allSwapCancelRequests);
   allOutputs.push(...routedCancels.outputs);
   for (const { accountId, tx } of routedCancels.mempoolOps) {
     if (tx.type !== 'cross_swap_fill_ack') {
@@ -1074,9 +1024,7 @@ function applySwapCancelRequests(context: ApplySwapCancelRequestsContext): void 
     }
     const account = currentEntityState.accounts.get(accountId);
     if (!account) {
-      throw new Error(
-        `CROSS_J_CANCEL_ACK_ACCOUNT_MISSING:account=${accountId}:offer=${tx.data.offerId}`,
-      );
+      throw new Error(`CROSS_J_CANCEL_ACK_ACCOUNT_MISSING:account=${accountId}:offer=${tx.data.offerId}`);
     }
     if (!queueAccountMempoolTx(account, tx)) continue;
     proposableAccounts.add(accountId);
@@ -1336,13 +1284,7 @@ export const applyEntityFrame = async (
   drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts, storageChanges);
   drainCommittedCrossJurisdictionCancelAcks(currentEntityState, proposableAccounts, storageChanges);
   refreshStaleUncommittedSettlementSeals(currentEntityState, storageChanges);
-  materializeDeferredSettlementApprovals(
-    env,
-    currentEntityState,
-    proposableAccounts,
-    collectedHashes,
-    storageChanges,
-  );
+  materializeDeferredSettlementApprovals(env, currentEntityState, proposableAccounts, collectedHashes, storageChanges);
   for (const accountId of proposableAccounts) {
     invalidateEntityAccountCommitment(currentEntityState, accountId);
   }
@@ -1431,4 +1373,3 @@ export const applyEntityFrame = async (
 /**
  * Calculate quorum power based on validator shares
  */
-
