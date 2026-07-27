@@ -3,7 +3,7 @@ import { ZeroAddress } from 'ethers';
 import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
 import { amountToUsd, getAssetUsdPrice } from '$lib/utils/assetPricing';
 import type { AssetLedgerRow, AssetLedgerTotals } from './asset-ledger';
-import type { ExternalToken } from './entity-asset-catalog';
+import { getExternalTokenIdentityKey, type ExternalToken } from './entity-asset-catalog';
 import { requireTokenDecimals } from './token-metadata';
 
 export type AssetTokenInfo = {
@@ -229,28 +229,21 @@ export function buildAssetLedger(options: {
     const externalUsd = options.getExternalValue(token);
     const reserveUsd = isReserve ? valueFor(token.tokenId!, reserveBalance, token.symbol) : 0;
     const accountUsd = isReserve ? valueFor(token.tokenId!, accountBalance, token.symbol) : 0;
-    rows.set(
-      typeof token.tokenId === 'number'
-        ? `token:${token.tokenId}`
-        : `address:${String(token.address || '')
-            .trim()
-            .toLowerCase()}`,
-      {
-        symbol: token.symbol,
-        address: token.address,
-        decimals: token.decimals,
-        tokenId: token.tokenId,
-        isNative: token.symbol === 'ETH' || token.address === ZeroAddress,
-        externalBalance: token.balance,
-        reserveBalance,
-        accountBalance,
-        externalUsd,
-        reserveUsd,
-        accountUsd,
-        totalUsd: externalUsd + reserveUsd + accountUsd,
-        ...(token.readError ? { externalError: token.readError } : {}),
-      },
-    );
+    rows.set(getExternalTokenIdentityKey(token), {
+      symbol: token.symbol,
+      address: token.address,
+      decimals: token.decimals,
+      tokenId: token.tokenId,
+      isNative: token.symbol === 'ETH' || token.address === ZeroAddress,
+      externalBalance: token.balance,
+      reserveBalance,
+      accountBalance,
+      externalUsd,
+      reserveUsd,
+      accountUsd,
+      totalUsd: externalUsd + reserveUsd + accountUsd,
+      ...(token.readError ? { externalError: token.readError } : {}),
+    });
   }
 
   for (const tokenId of new Set([...options.reserves.keys(), ...options.accountSpendable.keys()])) {

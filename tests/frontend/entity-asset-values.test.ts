@@ -4,6 +4,7 @@ import type { AccountMachine } from '../../runtime/types/account';
 import type { FrontendXlnFunctions } from '../../frontend/src/lib/stores/xlnStore';
 import {
   buildAccountPortfolioData,
+  buildAssetLedger,
   calculatePortfolioValueUsd,
   createEntityAssetValueFormatters,
   formatApproxUsd,
@@ -95,6 +96,31 @@ describe('entity asset value helpers', () => {
       outOurCredit: 1,
       count: 1,
       total: 5,
+    });
+  });
+
+  test('keeps one native ETH ledger row when the external snapshot uses token id zero', () => {
+    const result = buildAssetLedger({
+      externalTokens: [{
+        symbol: 'ETH',
+        address: '0x0000000000000000000000000000000000000000',
+        balance: 10n,
+        decimals: 18,
+        tokenId: 0,
+      }],
+      reserves: new Map(),
+      accountSpendable: new Map(),
+      getExternalValue: () => 0,
+      getAssetValue: () => 0,
+      resolveReserveTokenMeta: () => ({ symbol: 'UNKNOWN', decimals: 18 }),
+      compareSymbols: (left, right) => left.localeCompare(right),
+    });
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]).toMatchObject({
+      symbol: 'ETH',
+      isNative: true,
+      externalBalance: 10n,
     });
   });
 });
