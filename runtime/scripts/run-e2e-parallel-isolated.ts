@@ -570,8 +570,8 @@ export const batchPlaywrightTargetsByFile = (
   return [...groups.values()];
 };
 
-const extractTopLevelTestTitle = (line: string): string | undefined => {
-  const match = line.match(/^\s*test(?:\.(?:only|fail))?\(\s*(['"`])((?:\\.|.)*?)\1/);
+const extractTopLevelTestTitle = (source: string): string | undefined => {
+  const match = source.match(/^\s*test(?:\.(?:only|fail))?\(\s*(['"`])((?:\\.|[\s\S])*?)\1/);
   return match?.[2]?.replace(/\\(['"`])/g, '$1').trim() || undefined;
 };
 
@@ -700,12 +700,18 @@ export const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] =
     const block: string[] = [];
     let depth = initialDepth;
     let endIndex = startIndex;
+    let enteredTestBody = false;
     for (let i = startIndex; i < lines.length; i += 1) {
       const line = lines[i] || '';
       block.push(line);
       depth = updateBraceDepth(line, depth);
+      if (depth > initialDepth) enteredTestBody = true;
       endIndex = i;
-      if (i > startIndex && depth <= initialDepth) break;
+      // A multiline `test(` declaration can spend several lines on its title
+      // and options before the async callback opens `{`. Stopping merely
+      // because brace depth is still unchanged truncates the block and silently
+      // loses per-test requirements such as `requireMarketMaker: true`.
+      if (enteredTestBody && depth <= initialDepth) break;
     }
     return { text: block.join('\n'), endIndex, depthAfter: depth };
   };
@@ -717,8 +723,9 @@ export const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] =
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i] || '';
       const matchesTopLevelTest = braceDepth <= 1 && /^\s*test(?:\.(?:only|fail))?\(/.test(line);
-      if (matchesTopLevelTest && extractTopLevelTestTitle(line) === title) {
-        return collectTestBlock(lines, i, braceDepth).text;
+      if (matchesTopLevelTest) {
+        const block = collectTestBlock(lines, i, braceDepth);
+        if (extractTopLevelTestTitle(block.text) === title) return block.text;
       }
       braceDepth = updateBraceDepth(line, braceDepth);
     }
@@ -778,9 +785,9 @@ export const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] =
       const line = lines[i] || '';
       const matchesTopLevelTest = braceDepth <= 1 && /^\s*test(?:\.(?:only|fail))?\(/.test(line);
       if (matchesTopLevelTest) {
-        const title = extractTopLevelTestTitle(line);
-        if (!title) continue;
         const block = collectTestBlock(lines, i, braceDepth);
+        const title = extractTopLevelTestTitle(block.text);
+        if (!title) continue;
         out.push({
           target: file,
           requireMarketMaker: requiresMarketMaker(file, title, block.text),

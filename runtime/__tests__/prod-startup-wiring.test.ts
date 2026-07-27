@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { discoverHubIds } from '../orchestrator/custody-bootstrap';
 import { createOrchestratorProxyHandlers } from '../orchestrator/proxy';
 import { E2E_FATAL_LOG_TAIL_LINES, findFirstRuntimeFatalLogHit, tailLog } from '../scripts/e2e-fatal-log-monitor';
+import { expandPlaywrightTargets } from '../scripts/run-e2e-parallel-isolated';
 
 const repoRoot = process.cwd();
 
@@ -1108,6 +1109,14 @@ describe('production startup wiring', () => {
     expect(runner).toContain('rmSync(anvilTmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });');
     expect(runner).toContain('rmSync(anvil2TmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });');
     expect(runner).not.toContain('await stopProcess(api,');
+  });
+
+  test('isolated e2e discovers requirements inside multiline Playwright declarations', () => {
+    const title = 'market maker prepublishes same-chain and ETH/TRON cross-chain books before user swaps';
+    const target = expandPlaywrightTargets(['tests/e2e-cross-j-swap.spec.ts']).find(entry => entry.title === title);
+
+    expect(target).toBeDefined();
+    expect(target?.requireMarketMaker).toBe(true);
   });
 
   test('non-production Anvil harnesses keep bounded history in memory', () => {
