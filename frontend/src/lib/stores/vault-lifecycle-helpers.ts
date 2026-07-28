@@ -34,7 +34,7 @@ export const runtimeQuiesceWorkSummary = (env: Env) => ({
   inFlightEntityInputs: env.runtimeState?.inFlightEntityInputs ?? 0,
   pendingCommittedJOutbox: env.runtimeState?.pendingCommittedJOutbox?.length ?? 0,
   pendingJurisdictionImports: env.runtimeState?.pendingJurisdictionImports?.size ?? 0,
-  mempool: runtimeInputWorkSummary(env.runtimeMempool ?? env.runtimeInput),
+  mempool: runtimeInputWorkSummary(env.runtimeMempool),
   pendingOutputs: env.pendingOutputs?.length ?? 0,
   networkInbox: env.networkInbox?.length ?? 0,
   pendingNetworkOutputs: env.pendingNetworkOutputs?.length ?? 0,

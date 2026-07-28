@@ -7,69 +7,29 @@ const RUNTIME_BUILD_ID = '2026-07-18-16:00Z';
 export const RUNTIME_SCHEMA_VERSION = 5;
 export const RUNTIME_BUILD = RUNTIME_BUILD_ID;
 
-const RUNTIME_APPLY_PROFILE = nodeProcess?.env?.['XLN_RUNTIME_APPLY_PROFILE'] === '1';
-const RUNTIME_APPLY_SLOW_MS = Math.max(0, Number(nodeProcess?.env?.['XLN_RUNTIME_APPLY_SLOW_MS'] || '500'));
-import { getPerfMs, getWallClockMs } from './utils';
-import { cumulativeMarksToPhases } from './infra/perf-profile';
+import { getWallClockMs } from './utils';
 import { requireBoundaryInteger } from './protocol/boundary-validation';
 import { recordRuntimeHistoryTraceForTesting } from './history-retention';
-import { mergeEntityInputs } from './entity/consensus/index';
-import { hasVerifiedEntityCommitPrecertificate } from './entity/consensus/commit-precheck';
-import {
-  isLocalEntityLeaderTimeoutVote,
-} from './entity/consensus/leader';
 import { setBrowserVMJurisdiction } from './jadapter';
-import { createGossipLayer } from './networking/gossip';
 import { attachEventEmitters, clearPendingAuditEvents, flushPendingAuditEvents } from './runtime/env-events';
 import {
   deriveSignerAddressSync,
   deriveSignerKeySync,
   registerSignerKey,
 } from './account/crypto';
-import { normalizeRuntimeId } from './networking/runtime-id';
-import {
-  markRestoredReliableOutputsDue,
-  splitRoutedOutputByDeliveryLane,
-} from './runtime/output-routing';
+import { markRestoredReliableOutputsDue } from './runtime/output-routing';
 import { collectDueLocalProfileCertificationInputs } from './networking/local-profile-lifecycle';
-import {
-  assertScheduledWakeTxAuthorized,
-} from './runtime/scheduled-wake';
 import { transitionRuntimeLifecycle } from './runtime/lifecycle';
 import { requireRuntimeMempool } from './runtime/input-queue';
-import { validateRuntimeInputShapeAndLimits } from './runtime/input-validation';
 import { ensureRuntimeState } from './runtime/runtime-state';
-import {
-  applyReliableDeliveryReceipts,
-  commitReliableIngress,
-  getInputReliableIdentity,
-  registerReliableIngress,
-  releaseUncommittedReliableIngress,
-  type ReliableIngressCommit,
-} from './runtime/reliable-delivery';
-import { reliableIdentityExactKey } from './runtime/reliable-frontier';
-import { mergeDurableReceiptOnlyInputs } from './runtime/reliable-durable-inputs';
-import { applyRuntimeTx } from './runtime/tx-handlers';
-import { applyMergedEntityInputs } from './runtime/entity-inputs';
-import { safeStringify } from './protocol/serialization';
-import { validateJInputs } from './wal/runtime-machine-schema/j';
-import {
-  beginRuntimeCheckpointLineageRefresh,
-  refreshRuntimeCheckpointLineageForEntity,
-} from './storage/entity-lineage';
 import { materializePendingJurisdictionImportResults } from './runtime/jurisdiction-import';
-import { validateEntityInput } from './validation-utils';
 import type {
   EntityInput,
   EntityTx,
   Env,
-  JInput,
-  ReliableDeliveryReceipt,
-  RoutedEntityInput,
   RuntimeInput,
 } from './types';
-import { DEBUG, log } from './utils';
-import { createStructuredLogger, logError, shortId } from './infra/logger';
+import { createStructuredLogger } from './infra/logger';
 import { createPersistenceQueries } from './persistence/queries';
 import {
   createRuntimeStorageApi,
@@ -114,14 +74,9 @@ import { prepareRuntimeFrameInput } from './runtime/frame/prepare';
 import { prepareRuntimeFrameCommit } from './runtime/frame/snapshot';
 import { startRuntimeFrame } from './runtime/frame/start';
 import {
-  atomicCrossJPairIndexesThatDidNotCommit,
   prepareAtomicCrossJAccountInputs,
-  selectPotentialAtomicCrossJInputIndexes,
 } from './runtime/frame/cross-j-preflight';
-import {
-  markCommittedAtomicCrossJAckOutputs,
-  summarizeAtomicCrossJAccountInput,
-} from './runtime/frame/cross-j-evidence';
+import { createRuntimeInputReducer } from './runtime/frame/input-reducer';
 
 export { prepareAtomicCrossJAccountInputs };
 
@@ -296,394 +251,21 @@ const notifyRuntimeFrameCommitted = (env: Env, runtimeInput: RuntimeInput): void
   }
 };
 
-const applyRuntimeInput = async (
-  env: Env,
-  runtimeInput: RuntimeInput,
-): Promise<{
-  entityOutbox: RoutedEntityInput[];
-  mergedInputs: RoutedEntityInput[];
-  jOutbox: JInput[];
-  appliedRuntimeInput: RuntimeInput;
-  reliableIngressCommits: ReliableIngressCommit[];
-  immediateReliableReceipts: Array<{
-    runtimeId: string;
-    receipt: ReliableDeliveryReceipt;
-  }>;
-}> => {
-  failfastAssert(
-    env.scenarioMode === true || envRecord(env)[ENV_APPLY_ALLOWED_KEY] === true,
-    'RUNTIME_APPLY_DIRECT_CALL',
-    'applyRuntimeInput must be invoked via process()/WAL replay (non-scenario)',
-    { runtimeId: env.runtimeId, height: env.height },
-  );
-  const startTime = getPerfMs();
-  const applyProfileMarks: Record<string, number> = {};
-  const markApplyProfile = (label: string): void => {
-    applyProfileMarks[label] = Math.round(getPerfMs() - startTime);
-  };
-
-  // Ensure event emitters are attached (may be lost after store serialization)
-  if (!env.emit) {
-    attachEventEmitters(env);
-  }
-
-  try {
-    const rejectRuntimeInput = (message: string): never => {
-      log.error(`❌ ${message}`);
-      throw new Error(message);
-    };
-    if (envRecord(env)[ENV_REPLAY_MODE_KEY] === true) {
-      runtimeLog.debug('input.replay.apply', {
-        runtimeTxs: runtimeInput.runtimeTxs.length,
-        entityInputs: runtimeInput.entityInputs.length,
-      });
-    }
-    validateRuntimeInputShapeAndLimits(env, runtimeInput, rejectRuntimeInput);
-
-    // Collect incoming J-inputs into early jOutbox (will be merged with handler jOutputs later)
-    // These are NOT pushed to jReplica.mempool — they go to jOutbox → JAdapter post-save
-    const earlyJOutbox: JInput[] = [];
-    if (runtimeInput.jInputs && Array.isArray(runtimeInput.jInputs)) {
-      const validatedJInputs = validateJInputs(runtimeInput.jInputs, 'RUNTIME_INPUT_J');
-      runtimeLog.debug('joutbox.incoming', { jInputs: runtimeInput.jInputs.length });
-      for (const jInput of validatedJInputs) {
-        const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
-        if (!jReplica) {
-          rejectRuntimeInput(`Unknown J jurisdiction: ${jInput.jurisdictionName}`);
-        }
-        runtimeLog.debug('joutbox.collect', {
-          jurisdictionName: jInput.jurisdictionName,
-          jTxs: jInput.jTxs.length,
-          types: jInput.jTxs.map(t => t.type),
-        });
-        earlyJOutbox.push(jInput);
-      }
-    }
-
-    const validatedRuntimeTxs = [...runtimeInput.runtimeTxs];
-    let validatedEntityInputs = runtimeInput.entityInputs.map((input, i) => {
-      try {
-        const isReplay = envRecord(env)[ENV_REPLAY_MODE_KEY] === true;
-        for (const tx of input.entityTxs ?? []) assertScheduledWakeTxAuthorized(tx, isReplay);
-        return normalizeRuntimeEntityInput(env, validateEntityInput(input), `runtimeInput[${i}]`);
-      } catch (error) {
-        logError('RUNTIME_TICK', `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityInput[${i}] before merge!`, {
-          error: (error as Error).message,
-          entityId: shortId(input?.entityId, 12),
-          signerId: shortId(input?.signerId, 12),
-          sourceRuntimeId: shortId(input?.from, 12),
-          sourceRuntimeHeight: (input as Partial<RoutedEntityInput>).sourceRuntimeFrame?.height ?? null,
-          entityTxTypes: Array.isArray(input?.entityTxs) ? input.entityTxs.map(tx => tx?.type) : [],
-        });
-        throw error; // Fail fast
-      }
-    });
-
-    const isReplay = envRecord(env)[ENV_REPLAY_MODE_KEY] === true;
-    const immediateReliableReceipts: Array<{
-      runtimeId: string;
-      receipt: ReliableDeliveryReceipt;
-    }> = [];
-    const atomicCrossJInputIndexes =
-      selectPotentialAtomicCrossJInputIndexes(validatedEntityInputs);
-    const admittedEntityInputs: RoutedEntityInput[] = [];
-    for (const [inputIndex, input] of validatedEntityInputs.entries()) {
-      const sourceRuntimeId = normalizeRuntimeId(input.from);
-      // Local inputs and non-reliable remote inputs enter the frame directly.
-      // Reliable remote ingress is registered only on this isolated working
-      // Env, never by transport against the live committed Env.
-      if (!sourceRuntimeId || !getInputReliableIdentity(input)) {
-        admittedEntityInputs.push(input);
-        continue;
-      }
-      const registration = registerReliableIngress(env, sourceRuntimeId, input, {
-        allowContiguousPendingAccountAck: atomicCrossJInputIndexes.has(inputIndex),
-      });
-      // WAL replay contains only inputs selected by the original committed
-      // frame. Recreate its frontier and apply the exact persisted batch.
-      if (isReplay || registration.kind === 'ordinary' || registration.kind === 'enqueue') {
-        admittedEntityInputs.push(input);
-        continue;
-      }
-      if (registration.kind === 'receipt') {
-        immediateReliableReceipts.push({ runtimeId: sourceRuntimeId, receipt: registration.receipt });
-      }
-    }
-    validatedEntityInputs = admittedEntityInputs;
-
-    const mergedRuntimeTxs = [...validatedRuntimeTxs];
-    const mergedInputs = mergeEntityInputs([...validatedEntityInputs], input =>
-      hasVerifiedEntityCommitPrecertificate(env, input),
+const applyRuntimeInput = createRuntimeInputReducer({
+  assertApplyAllowed: env => {
+    failfastAssert(
+      env.scenarioMode === true || envRecord(env)[ENV_APPLY_ALLOWED_KEY] === true,
+      'RUNTIME_APPLY_DIRECT_CALL',
+      'applyRuntimeInput must be invoked via process()/WAL replay (non-scenario)',
+      { runtimeId: env.runtimeId, height: env.height },
     );
-    markApplyProfile('validateMerge');
-
-    if (runtimeInput.reliableReceipts && runtimeInput.reliableReceipts.length > 0) {
-      applyReliableDeliveryReceipts(env, runtimeInput.reliableReceipts);
-    }
-    const runtimeTxJOutbox: JInput[] = [];
-    const lineageRefreshGuards = new Map<string, ReturnType<typeof beginRuntimeCheckpointLineageRefresh>>();
-    const refreshLineageBeforeEntityApply = (rawEntityId: string, force = false): void => {
-      const entityId = rawEntityId.trim().toLowerCase();
-      if (force) {
-        lineageRefreshGuards.get(entityId)?.finalize();
-        lineageRefreshGuards.delete(entityId);
-        refreshRuntimeCheckpointLineageForEntity(env, entityId);
-        return;
-      }
-      if (lineageRefreshGuards.has(entityId)) return;
-      lineageRefreshGuards.set(entityId, beginRuntimeCheckpointLineageRefresh(env, entityId));
-    };
-    // RuntimeTxs are replayable R-machine commands. Most are local metadata
-    // transitions; retryJSubmit additionally materializes a sealed post-commit
-    // J side effect whose attempt record is persisted before external I/O.
-    for (const runtimeTx of mergedRuntimeTxs) {
-      runtimeTxJOutbox.push(
-        ...(await applyRuntimeTx(env, runtimeTx, {
-          isReplay,
-        })),
-      );
-      if (runtimeTx.type === 'importReplica') {
-        // A repeated import can add another validator-local replica for the
-        // same Entity in this R-frame, so rebuild that Entity's replica-set
-        // anchor after every import rather than relying on the touched set.
-        refreshLineageBeforeEntityApply(runtimeTx.entityId, true);
-      }
-    }
-    markApplyProfile('runtimeTxs');
-
-    // Seal each Entity at most once immediately before its first E-frame in
-    // this R-frame. Internal cross-j cascades use the same hook. Subsequent
-    // commits for that Entity intentionally retain the contiguous links until
-    // the enclosing Runtime WAL commit.
-    markApplyProfile('lineage');
-
-    const routingDeps = getRuntimeEntityRoutingDeps();
-    const initialJOutbox = [...earlyJOutbox, ...runtimeTxJOutbox];
-    const preparedEntityInputs = await prepareAtomicCrossJAccountInputs(
-      env,
-      mergedInputs,
-      initialJOutbox,
-      isReplay,
-      routingDeps,
-    );
-    markApplyProfile('atomicCrossJPreflight');
-    const appliedEntityBatch = await applyMergedEntityInputs(env, preparedEntityInputs.inputs, initialJOutbox, {
-      isReplay,
-      routingDeps,
-      beforeEntityApply: refreshLineageBeforeEntityApply,
-    });
-    for (const guard of lineageRefreshGuards.values()) guard.finalize();
-    if (preparedEntityInputs.pairs.length > 0) {
-      runtimeLog.info('crossj.atomic_pair_commit', {
-        pairCount: preparedEntityInputs.pairs.length,
-        outcomes: appliedEntityBatch.inputOutcomes.map(({ outcome }, inputIndex) => ({
-          inputIndex,
-          entityId: preparedEntityInputs.inputs[inputIndex]?.entityId ?? 'missing',
-          kind: outcome.kind,
-        })),
-        outputSummary: safeStringify(
-          appliedEntityBatch.entityOutbox.map((output, outputIndex) => ({
-            outputIndex,
-            ...summarizeAtomicCrossJAccountInput(output, outputIndex),
-          })),
-        ),
-      });
-    }
-    markApplyProfile('entityApply');
-    const failedAtomicIndexes = atomicCrossJPairIndexesThatDidNotCommit(
-      preparedEntityInputs.pairs,
-      appliedEntityBatch.inputOutcomes,
-    );
-    if (failedAtomicIndexes.size > 0) {
-      throw new Error('RUNTIME_CROSS_J_ACCOUNT_PAIR_COMMIT_DIVERGED_FROM_PREFLIGHT');
-    }
-    markCommittedAtomicCrossJAckOutputs(appliedEntityBatch.entityOutbox, preparedEntityInputs.pairs);
-    const { entityOutbox, appliedEntityInputs, entityFrameCommitted, jOutbox } = appliedEntityBatch;
-
-    // Reliable receiver authority is part of the R-machine post-state, not a
-    // transport side effect. Plan it before deciding whether this tick owns a
-    // WAL height. Otherwise a terminal receipt-only transition can ACK/GC an
-    // input while no replayable frame records the new frontier.
-    const reliableIngressCommits = commitReliableIngress(env, appliedEntityInputs);
-    markApplyProfile('reliableCommit');
-    applyCommittedLocalReliableReceipts(env, reliableIngressCommits, {
-      isReplay,
-      replayInputs: validatedEntityInputs,
-    });
-    markApplyProfile('reliableLocalReceipts');
-    releaseUncommittedReliableIngress(env, validatedEntityInputs, appliedEntityInputs);
-    markApplyProfile('reliableRelease');
-    // Releasing a rejected/deferred ingress mutates only the live transport
-    // waiter set. It is deliberately absent from snapshots and cannot own a
-    // WAL height. Durable active/terminal frontier commits remain replayable.
-    const reliableIngressStateChanged = reliableIngressCommits.length > 0;
-
-    if (jOutbox.length > 0) {
-      for (const jInput of jOutbox) {
-        for (const jTx of jInput.jTxs) {
-          const jTxBatchSize = (jTx.data as { batchSize?: number } | undefined)?.batchSize;
-          env.emit('JBatchQueued', {
-            entityId: jTx.entityId,
-            batchSize: jTxBatchSize,
-            jurisdictionName: jInput.jurisdictionName,
-          });
-        }
-      }
-    }
-
-    const hasRuntimeTxs = mergedRuntimeTxs.length > 0;
-    const meaningfulEntityInputCount = appliedEntityInputs.reduce((count, input) => {
-      const hasEntityTxs = (input.entityTxs?.length || 0) > 0;
-      const hasProposal = !!input.proposedFrame;
-      const hasHashPrecommits = !!input.hashPrecommits && input.hashPrecommits.size > 0;
-      const hasJPrefixAttestations = !!input.jPrefixAttestations && input.jPrefixAttestations.size > 0;
-      const hasLeaderTimeoutVote = !!input.leaderTimeoutVote;
-      return (
-        count +
-        (hasEntityTxs || hasProposal || hasHashPrecommits || hasJPrefixAttestations || hasLeaderTimeoutVote ? 1 : 0)
-      );
-    }, 0);
-    // A local empty tick may commit work already held in the Entity/Account
-    // mempools. Input shape cannot detect that transition. The authoritative
-    // signal is the validated Entity height advancing exactly H -> H+1.
-    const runtimeEntityInputCount = entityFrameCommitted
-      ? Math.max(meaningfulEntityInputCount, appliedEntityInputs.length)
-      : meaningfulEntityInputCount;
-    const hasEntityInputs = runtimeEntityInputCount > 0;
-    const hasReliableReceipts = (runtimeInput.reliableReceipts?.length ?? 0) > 0;
-    const hasOutputs = entityOutbox.length > 0;
-    const hasJOutputs = jOutbox.length > 0;
-
-    if (
-      hasRuntimeTxs ||
-      hasEntityInputs ||
-      hasReliableReceipts ||
-      hasOutputs ||
-      hasJOutputs ||
-      reliableIngressStateChanged
-    ) {
-      // Emit runtime tick event
-      env.emit('RuntimeTick', {
-        height: env.height + 1,
-        runtimeTxs: mergedRuntimeTxs.length,
-        entityInputs: runtimeEntityInputCount,
-        outputs: entityOutbox.length,
-      });
-
-      // Update env in-place first.
-      // This is intentional blockchain-style execution semantics: we execute the
-      // next frame against one mutable working state, then persist the resulting
-      // post-state as the committed frame below. That is simpler and safer than
-      // trying to keep a separate pre-commit shadow env in lockstep.
-      env.height++;
-      // IMPORTANT: Do NOT mutate env.timestamp here.
-      // process() sets a single frame timestamp before applyRuntimeInput(),
-      // and that exact value must be used both for frame hashing and WAL journal.
-    } else {
-      if (env.quietRuntimeLogs !== true) {
-        runtimeLog.debug('frame.skip_empty');
-      }
-      // Clear env.extra even when skipping frame to prevent stale solvency expectations
-      env.extra = undefined;
-    }
-
-    if (!env.gossip) {
-      runtimeLog.warn('gossip.missing_recreate', { height: env.height });
-      env.gossip = createGossipLayer();
-      runtimeLog.info('gossip.recreated', { height: env.height });
-    }
-    markApplyProfile('finalize');
-
-    const durableReliableIngressSources = new Map<string, Set<string>>();
-    for (const commit of reliableIngressCommits) {
-      if (!commit.key) continue;
-      const sources = durableReliableIngressSources.get(commit.key) ?? new Set<string>();
-      commit.targetRuntimeIds.forEach(source => sources.add(source));
-      durableReliableIngressSources.set(commit.key, sources);
-    }
-    for (const ledger of [
-      env.runtimeState?.reliableIngressReceiptLedger,
-      env.runtimeState?.reliableIngressTerminalWatermarks,
-    ]) {
-      for (const [frontierKey, receipt] of ledger ?? []) {
-        const parsed = JSON.parse(frontierKey) as { sourceRuntimeId?: unknown };
-        const source = normalizeRuntimeId(parsed.sourceRuntimeId);
-        if (!source) throw new Error('RELIABLE_INGRESS_FRONTIER_SOURCE_RUNTIME_INVALID');
-        const key = reliableIdentityExactKey(receipt.body.identity);
-        const sources = durableReliableIngressSources.get(key) ?? new Set<string>();
-        sources.add(source);
-        durableReliableIngressSources.set(key, sources);
-      }
-    }
-    const durableReceiptOnlyInputs = validatedEntityInputs.flatMap(input =>
-      splitRoutedOutputByDeliveryLane(input).flatMap(lane => {
-        if (lane.leaderTimeoutVote?.signature === '' && isLocalEntityLeaderTimeoutVote(lane.leaderTimeoutVote)) {
-          // This is a local scheduler command, not authenticated transport
-          // ingress. Consensus replaces it with the signed canonical value in
-          // appliedEntityInputs before WAL persistence.
-          return [];
-        }
-        const identity = getInputReliableIdentity(lane);
-        if (!identity) return [];
-        const sources = durableReliableIngressSources.get(reliableIdentityExactKey(identity));
-        if (!sources || sources.size === 0) return [];
-        if (lane.from) return [lane];
-        return [...sources].sort().map(source => ({ ...lane, from: source }));
-      }),
-    );
-    // `existing` may be the canonical merge of several independently
-    // certified delivery lanes. Provenance annotates that applied batch;
-    // replacing it with one receipt lane silently drops the other txs from WAL
-    // and makes crash replay build a different Entity frame.
-    const persistedEntityInputs = mergeDurableReceiptOnlyInputs(appliedEntityInputs, durableReceiptOnlyInputs);
-    markApplyProfile('durableReceiptInputs');
-    const appliedRuntimeInput: RuntimeInput = {
-      runtimeTxs: mergedRuntimeTxs,
-      entityInputs: persistedEntityInputs,
-      ...(runtimeInput.jInputs && runtimeInput.jInputs.length > 0 ? { jInputs: runtimeInput.jInputs } : {}),
-      ...(runtimeInput.reliableReceipts && runtimeInput.reliableReceipts.length > 0
-        ? { reliableReceipts: runtimeInput.reliableReceipts }
-        : {}),
-    };
-    const applyElapsedMs = Math.round(getPerfMs() - startTime);
-    if (RUNTIME_APPLY_PROFILE || applyElapsedMs >= RUNTIME_APPLY_SLOW_MS) {
-      runtimeLog.info('apply.profile', {
-        height: env.height,
-        elapsedMs: applyElapsedMs,
-        runtimeTxs: mergedRuntimeTxs.length,
-        entityInputs: appliedEntityInputs.length,
-        entityTxs: appliedEntityInputs.reduce((sum, input) => sum + Number(input.entityTxs?.length || 0), 0),
-        outputs: entityOutbox.length,
-        jOutputs: jOutbox.length,
-        phases: cumulativeMarksToPhases(applyProfileMarks, applyElapsedMs),
-      });
-    }
-    if (DEBUG) {
-      runtimeLog.debug('tick.completed', {
-        height: env.height - 1,
-        elapsedMs: applyElapsedMs,
-      });
-    }
-    return {
-      entityOutbox,
-      mergedInputs: preparedEntityInputs.inputs,
-      jOutbox,
-      appliedRuntimeInput,
-      reliableIngressCommits,
-      immediateReliableReceipts,
-    };
-  } catch (error) {
-    // Strict scenarios already surface the thrown value at their outer boundary.
-    // Logging directly to process stderr here would make the strict console trap throw a
-    // second Error and erase the original stack, hiding the actual failing reducer.
-    if (env.strictScenario) throw error;
-    runtimeLog.error('apply_input.failed', {
-      error: error instanceof Error ? error.message : String(error),
-      ...(error instanceof Error && error.stack ? { stack: error.stack } : {}),
-    });
-    throw error; // Don't swallow - fail fast and loud
-  }
-};
+  },
+  isReplay: env => envRecord(env)[ENV_REPLAY_MODE_KEY] === true,
+  normalizeEntityInput: normalizeRuntimeEntityInput,
+  getRoutingDeps: getRuntimeEntityRoutingDeps,
+  applyCommittedLocalReceipts: (env, commits, options) =>
+    applyCommittedLocalReliableReceipts(env, commits, options),
+});
 
 // Runtime bootstrap
 export type RuntimeLocalSigner = Readonly<{
