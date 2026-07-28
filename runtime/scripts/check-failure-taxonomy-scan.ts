@@ -53,7 +53,12 @@ const readText = (path: string): string => {
       'runtime/entity/tx/handlers/dispute.ts',
       'runtime/entity/tx/handlers/dispute/shared.ts',
       'runtime/entity/tx/handlers/dispute/start.ts',
+      'runtime/entity/tx/handlers/dispute/start-admission.ts',
+      'runtime/entity/tx/handlers/dispute/start-evidence.ts',
+      'runtime/entity/tx/handlers/dispute/start-hanko.ts',
       'runtime/entity/tx/handlers/dispute/finalize.ts',
+      'runtime/entity/tx/handlers/dispute/finalize-admission.ts',
+      'runtime/entity/tx/handlers/dispute/finalize-proof.ts',
     ],
     'runtime/account/consensus/propose.ts': [
       'runtime/account/consensus/propose.ts',

@@ -195,7 +195,12 @@ test('dispute handler traces stay behind structured logging', () => {
     'runtime/entity/tx/handlers/dispute.ts',
     'runtime/entity/tx/handlers/dispute/shared.ts',
     'runtime/entity/tx/handlers/dispute/start.ts',
+    'runtime/entity/tx/handlers/dispute/start-admission.ts',
+    'runtime/entity/tx/handlers/dispute/start-evidence.ts',
+    'runtime/entity/tx/handlers/dispute/start-hanko.ts',
     'runtime/entity/tx/handlers/dispute/finalize.ts',
+    'runtime/entity/tx/handlers/dispute/finalize-admission.ts',
+    'runtime/entity/tx/handlers/dispute/finalize-proof.ts',
   ].map(path => readFileSync(join(process.cwd(), path), 'utf8')).join('\n');
 
   expect(source).toContain("export const disputeLog = createStructuredLogger('entity.dispute');");
