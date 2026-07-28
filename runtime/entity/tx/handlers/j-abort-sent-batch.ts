@@ -5,13 +5,68 @@ import { createStructuredLogger, shortId } from '../../../infra/logger';
 
 const jBatchActionLog = createStructuredLogger('entity.jbatch');
 
-function shouldRequeueDisputeFinalize(_state: EntityState, _counterpartyIdRaw: unknown): boolean {
-  // Dispute finality is watcher-authoritative. Do not resurrect disputeFinalize from a
-  // local abort path: if finalize really succeeded on-chain, requeueing races the next
-  // DisputeFinalized poll and can poison an unrelated mixed batch. If finalize did not
-  // succeed, crontab/manual dispute flow will draft a fresh op from current account state.
-  return false;
-}
+const dropDisputeFinalizations = (
+  state: EntityState,
+  dropped: Set<string>,
+): void => {
+  const finalizations = state.jBatchState?.sentBatch?.batch.disputeFinalizations;
+  if (!finalizations?.length) return;
+  for (const operation of finalizations) {
+    dropped.add(String(operation.counterentity).toLowerCase());
+  }
+  state.jBatchState!.sentBatch!.batch.disputeFinalizations = [];
+  // Dispute finality is watcher-authoritative. An abort must never resurrect a
+  // finalize operation: if it landed, replay would poison the next batch; if
+  // it did not, crontab/manual flow drafts fresh evidence from current state.
+  jBatchActionLog.debug('abort.filtered_dispute_finalize', {
+    entity: shortId(state.entityId),
+    count: finalizations.length,
+  });
+};
+
+const dropStaleCollateralToReserve = (state: EntityState): void => {
+  const operations = state.jBatchState?.sentBatch?.batch.collateralToReserve;
+  if (!operations?.length) return;
+  const retained = operations.filter(operation => {
+    const counterparty = String(operation.counterparty).toLowerCase();
+    const account = [...state.accounts.entries()].find(
+      ([accountId]) => accountId.toLowerCase() === counterparty,
+    )?.[1];
+    const jNonce = account?.jNonce ?? 0;
+    if (operation.nonce > jNonce) return true;
+    jBatchActionLog.warn('abort.drop_stale_c2r', {
+      entity: shortId(state.entityId),
+      counterparty: shortId(counterparty),
+      signedNonce: operation.nonce,
+      jNonce,
+    });
+    // AccountSettled finality alone clears the workspace. This stale operation
+    // may name an older workspace, so abort cannot delete the current one.
+    return false;
+  });
+  state.jBatchState!.sentBatch!.batch.collateralToReserve = retained;
+  if (retained.length !== operations.length) {
+    jBatchActionLog.debug('abort.filtered_c2r', {
+      entity: shortId(state.entityId),
+      count: operations.length - retained.length,
+    });
+  }
+};
+
+const releaseAbortedBatchLatches = (
+  state: EntityState,
+  droppedFinalizers: Set<string>,
+): void => {
+  for (const [counterpartyId, account] of state.accounts) {
+    account.shadow.rebalance.submittedAtByToken.clear();
+    if (
+      account.activeDispute &&
+      droppedFinalizers.has(counterpartyId.toLowerCase())
+    ) {
+      account.activeDispute.finalizeQueued = false;
+    }
+  }
+};
 
 export async function handleJAbortSentBatch(
   entityState: EntityState,
@@ -42,70 +97,15 @@ export async function handleJAbortSentBatch(
     if (!newState.jBatchState.batch) {
       newState.jBatchState.batch = createEmptyBatch();
     }
-    if (sent.batch.disputeFinalizations?.length) {
-      const before = sent.batch.disputeFinalizations.length;
-      sent.batch.disputeFinalizations = sent.batch.disputeFinalizations.filter((op) => {
-        const keep = shouldRequeueDisputeFinalize(newState, op.counterentity);
-        if (!keep) {
-          droppedFinalizeCounterparties.add(String(op.counterentity).toLowerCase());
-        }
-        return keep;
-      });
-      if (before !== sent.batch.disputeFinalizations.length) {
-        jBatchActionLog.debug('abort.filtered_dispute_finalize', {
-          entity: shortId(entityState.entityId),
-          count: before - sent.batch.disputeFinalizations.length,
-        });
-      }
-    }
-    // Drop stale C2R ops whose signed nonce is now <= on-chain nonce (would revert E2).
-    if (sent.batch.collateralToReserve?.length) {
-      const before = sent.batch.collateralToReserve.length;
-      sent.batch.collateralToReserve = sent.batch.collateralToReserve.filter(c2r => {
-        const cpId = String(c2r.counterparty).toLowerCase();
-        const account = [...newState.accounts.entries()].find(
-          ([k]) => k.toLowerCase() === cpId,
-        )?.[1];
-        const jNonce = account?.jNonce ?? 0;
-        if (c2r.nonce <= jNonce) {
-          jBatchActionLog.warn('abort.drop_stale_c2r', {
-            entity: shortId(entityState.entityId),
-            counterparty: shortId(cpId),
-            signedNonce: c2r.nonce,
-            jNonce,
-          });
-          // AccountSettled finality is the sole authority that clears the
-          // workspace. The stale batch may refer to an older workspace than
-          // the account's current one, and deleting here could both erase the
-          // newer proposal and strand its exact workspace holds.
-          return false;
-        }
-        return true;
-      });
-      if (before !== sent.batch.collateralToReserve.length) {
-        jBatchActionLog.debug('abort.filtered_c2r', {
-          entity: shortId(entityState.entityId),
-          count: before - sent.batch.collateralToReserve.length,
-        });
-      }
-    }
+    dropDisputeFinalizations(newState, droppedFinalizeCounterparties);
+    dropStaleCollateralToReserve(newState);
     mergeBatchOps(newState.jBatchState.batch, sent.batch);
   }
 
   delete newState.jBatchState.sentBatch;
   newState.jBatchState.status = getBatchSize(newState.jBatchState.batch) > 0 ? 'accumulating' : 'empty';
 
-  // Release stale "submitted" latches if operator aborts the in-flight batch.
-  for (const account of newState.accounts.values()) {
-    account.shadow.rebalance.submittedAtByToken.clear();
-  }
-  if (droppedFinalizeCounterparties.size > 0) {
-    for (const [counterpartyId, account] of newState.accounts.entries()) {
-      if (!account.activeDispute) continue;
-      if (!droppedFinalizeCounterparties.has(counterpartyId.toLowerCase())) continue;
-      account.activeDispute.finalizeQueued = false;
-    }
-  }
+  releaseAbortedBatchLatches(newState, droppedFinalizeCounterparties);
 
   addMessage(
     newState,

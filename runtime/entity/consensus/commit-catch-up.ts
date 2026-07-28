@@ -1,5 +1,6 @@
 import { logError, shortHash } from '../../infra/logger';
 import type {
+  EntityState,
   ProposedEntityFrame,
   ValidatorEntityFrameExecution,
 } from '../../types';
@@ -30,6 +31,15 @@ import {
 
 export type CommitExecutionResolution =
   | { kind: 'execution'; execution: ValidatorEntityFrameExecution }
+  | { kind: 'result'; result: ApplyEntityInputResult };
+
+type ReplayedCommitments =
+  | {
+      kind: 'valid';
+      authorityRoot: string;
+      replayedHash: string;
+      stateRoot: string;
+    }
   | { kind: 'result'; result: ApplyEntityInputResult };
 
 const validateCatchUpJRange = (
@@ -67,6 +77,49 @@ const validateCatchUpJRange = (
   return null;
 };
 
+const validateReplayedCommitments = (
+  context: ApplyEntityInputContext,
+  frame: ProposedEntityFrame,
+  state: EntityState,
+): ReplayedCommitments => {
+  const { workingReplica } = context;
+  const stateRoot = computeCanonicalEntityConsensusStateHash(state);
+  if (stateRoot !== frame.stateRoot) {
+    return {
+      kind: 'result',
+      result: rejectEntityConsensusInput(context, 'COMMIT_STATE_ROOT_MISMATCH'),
+    };
+  }
+  const authorityRoot = computeEntityFrameAuthorityRoot(
+    buildEntityFrameAuthority(state),
+  );
+  if (authorityRoot !== frame.authorityRoot) {
+    return {
+      kind: 'result',
+      result: rejectEntityConsensusInput(context, 'COMMIT_AUTHORITY_ROOT_MISMATCH'),
+    };
+  }
+  const replayedHash = createEntityFrameHashFromStateRoot(
+    getPrevFrameHash(workingReplica.state),
+    frame.height,
+    frame.timestamp,
+    frame.txs,
+    state.entityId,
+    stateRoot,
+    authorityRoot,
+    frame.jPrefixCertificate,
+  );
+  if (replayedHash !== frame.hash) {
+    logError(
+      'FRAME_CONSENSUS',
+      '❌ COMMIT REJECTED: replayed catch-up state does not match signed frame hash!',
+      { expected: replayedHash, received: frame.hash },
+    );
+    return { kind: 'result', result: rejectEntityConsensusInput(context) };
+  }
+  return { kind: 'valid', authorityRoot, replayedHash, stateRoot };
+};
+
 const replayCommitFrame = async (
   context: ApplyEntityInputContext,
   frame: ProposedEntityFrame,
@@ -96,46 +149,9 @@ const replayCommitFrame = async (
     timestamp: frame.timestamp,
     leaderState: expectedCommittedLeaderState(workingReplica.state, frame),
   };
-  const stateRoot = computeCanonicalEntityConsensusStateHash(state);
-  if (stateRoot !== frame.stateRoot) {
-    return {
-      kind: 'result',
-      result: rejectEntityConsensusInput(context, 'COMMIT_STATE_ROOT_MISMATCH'),
-    };
-  }
-  const authorityRoot = computeEntityFrameAuthorityRoot(
-    buildEntityFrameAuthority(state),
-  );
-  if (authorityRoot !== frame.authorityRoot) {
-    return {
-      kind: 'result',
-      result: rejectEntityConsensusInput(
-        context,
-        'COMMIT_AUTHORITY_ROOT_MISMATCH',
-      ),
-    };
-  }
-  const replayedHash = createEntityFrameHashFromStateRoot(
-    getPrevFrameHash(workingReplica.state),
-    frame.height,
-    frame.timestamp,
-    frame.txs,
-    state.entityId,
-    stateRoot,
-    authorityRoot,
-    frame.jPrefixCertificate,
-  );
-  if (replayedHash !== frame.hash) {
-    logError(
-      'FRAME_CONSENSUS',
-      '❌ COMMIT REJECTED: replayed catch-up state does not match signed frame hash!',
-      { expected: replayedHash, received: frame.hash },
-    );
-    return {
-      kind: 'result',
-      result: rejectEntityConsensusInput(context),
-    };
-  }
+  const commitments = validateReplayedCommitments(context, frame, state);
+  if (commitments.kind === 'result') return commitments;
+  const { replayedHash } = commitments;
   const outputHashes = buildCertifiedEntityOutputHashes(
     state,
     env,

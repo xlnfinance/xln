@@ -527,89 +527,110 @@ export const verifyEntityLeaderCertificate = (
   }
 };
 
+type PreparedFrameGroup = {
+  frame: ProposedEntityFrame;
+  signatures: Map<string, string[]>;
+};
+
+const validatePreparedFrameEvidence = (
+  env: RuntimeState,
+  state: EntityLeaderStateView,
+  certificate: EntityLeaderCertificate,
+  evidence: ProposedEntityFrame,
+): Map<string, string[]> => {
+  if (evidence.height !== certificate.targetHeight) {
+    throw new Error(`ENTITY_PREPARED_HEIGHT_MISMATCH:${evidence.height}:${certificate.targetHeight}`);
+  }
+  const expectedParent = state.height === 0 ? 'genesis' : String(state.prevFrameHash || '');
+  if (evidence.parentFrameHash !== expectedParent) {
+    throw new Error(`ENTITY_PREPARED_PARENT_MISMATCH:${evidence.parentFrameHash}:${expectedParent}`);
+  }
+  const recomputedHash = createEntityFrameHashFromStateRoot(
+    evidence.parentFrameHash,
+    evidence.height,
+    evidence.timestamp,
+    evidence.txs,
+    state.entityId,
+    evidence.stateRoot,
+    evidence.authorityRoot,
+    evidence.jPrefixCertificate,
+  );
+  if (recomputedHash !== evidence.hash) {
+    throw new Error(`ENTITY_PREPARED_FRAME_HASH_MISMATCH:${recomputedHash}:${evidence.hash}`);
+  }
+  if (evidence.leader.relayCertificate) {
+    throw new Error(`ENTITY_PREPARED_RELAY_CERTIFICATE_NESTED:${evidence.hash}`);
+  }
+  if (!verifyEntityLeaderCertificate(env, state, evidence)) {
+    throw new Error(`ENTITY_PREPARED_LEADER_INVALID:${evidence.hash}:${evidence.leader.view}`);
+  }
+  const hashes = evidence.hashesToSign;
+  if (!hashes?.length || hashes[0]?.type !== 'entityFrame' || hashes[0]?.hash !== evidence.hash) {
+    throw new Error(`ENTITY_PREPARED_MANIFEST_INVALID:${evidence.hash}`);
+  }
+  const normalized = normalizePrecommitBundles(
+    state.config,
+    evidence.collectedSigs ?? new Map(),
+    'ENTITY_PREPARED_EVIDENCE',
+  );
+  for (const [signerId, signatures] of normalized) {
+    if (!verifyHashPrecommitSignatures(
+      env,
+      signerId,
+      hashes,
+      evidence.hash,
+      evidence.height,
+      signatures,
+      'ENTITY_PREPARED_EVIDENCE',
+    )) {
+      throw new Error(`ENTITY_PREPARED_SIGNATURE_INVALID:${evidence.hash}:${signerId}`);
+    }
+  }
+  return normalized;
+};
+
+const mergePreparedFrameEvidence = (
+  groups: Map<string, PreparedFrameGroup>,
+  evidence: ProposedEntityFrame,
+  signatures: Map<string, string[]>,
+): void => {
+  const group = groups.get(evidence.hash) ?? {
+    frame: structuredClone(evidence),
+    signatures: new Map<string, string[]>(),
+  };
+  if (
+    encodeCanonicalEntityConsensusValue({ ...group.frame, collectedSigs: undefined }) !==
+    encodeCanonicalEntityConsensusValue({ ...evidence, collectedSigs: undefined })
+  ) {
+    throw new Error(`ENTITY_PREPARED_BODY_CONFLICT:${evidence.hash}`);
+  }
+  for (const [signerId, signerSignatures] of signatures) {
+    const existing = group.signatures.get(signerId);
+    if (
+      existing &&
+      (existing.length !== signerSignatures.length ||
+        existing.some((signature, index) => signature !== signerSignatures[index]))
+    ) {
+      throw new Error(`ENTITY_PREPARED_SIGNER_EQUIVOCATION:${evidence.hash}:${signerId}`);
+    }
+    group.signatures.set(signerId, signerSignatures);
+  }
+  groups.set(evidence.hash, group);
+};
+
 export const selectPreparedFrameFromCertificate = (
   env: RuntimeState,
   state: EntityLeaderStateView,
   certificate: EntityLeaderCertificate,
 ): ProposedEntityFrame | null => {
-  type PreparedGroup = { frame: ProposedEntityFrame; signatures: Map<string, string[]> };
-  const groups = new Map<string, PreparedGroup>();
+  const groups = new Map<string, PreparedFrameGroup>();
   let evidenceCount = 0;
   for (const vote of getCertificateSignedVotes(certificate).values()) {
     const evidence = vote.preparedFrame;
     if (!evidence) continue;
     evidenceCount += 1;
-    if (evidence.height !== certificate.targetHeight) {
-      throw new Error(`ENTITY_PREPARED_HEIGHT_MISMATCH:${evidence.height}:${certificate.targetHeight}`);
-    }
-    const expectedParent = state.height === 0 ? 'genesis' : String(state.prevFrameHash || '');
-    if (evidence.parentFrameHash !== expectedParent) {
-      throw new Error(`ENTITY_PREPARED_PARENT_MISMATCH:${evidence.parentFrameHash}:${expectedParent}`);
-    }
-    const recomputedEvidenceHash = createEntityFrameHashFromStateRoot(
-      evidence.parentFrameHash,
-      evidence.height,
-      evidence.timestamp,
-      evidence.txs,
-      state.entityId,
-      evidence.stateRoot,
-      evidence.authorityRoot,
-      evidence.jPrefixCertificate,
-    );
-    if (recomputedEvidenceHash !== evidence.hash) {
-      throw new Error(`ENTITY_PREPARED_FRAME_HASH_MISMATCH:${recomputedEvidenceHash}:${evidence.hash}`);
-    }
-    if (evidence.leader.relayCertificate) {
-      throw new Error(`ENTITY_PREPARED_RELAY_CERTIFICATE_NESTED:${evidence.hash}`);
-    }
-    if (!verifyEntityLeaderCertificate(env, state, evidence)) {
-      throw new Error(`ENTITY_PREPARED_LEADER_INVALID:${evidence.hash}:${evidence.leader.view}`);
-    }
-    const hashes = evidence.hashesToSign;
-    if (!hashes?.length || hashes[0]?.type !== 'entityFrame' || hashes[0]?.hash !== evidence.hash) {
-      throw new Error(`ENTITY_PREPARED_MANIFEST_INVALID:${evidence.hash}`);
-    }
-    const normalized = normalizePrecommitBundles(
-      state.config,
-      evidence.collectedSigs ?? new Map(),
-      'ENTITY_PREPARED_EVIDENCE',
-    );
-    for (const [signerId, signatures] of normalized) {
-      if (
-        !verifyHashPrecommitSignatures(
-          env,
-          signerId,
-          hashes,
-          evidence.hash,
-          evidence.height,
-          signatures,
-          'ENTITY_PREPARED_EVIDENCE',
-        )
-      ) {
-        throw new Error(`ENTITY_PREPARED_SIGNATURE_INVALID:${evidence.hash}:${signerId}`);
-      }
-    }
-    const group = groups.get(evidence.hash) ?? {
-      frame: structuredClone(evidence),
-      signatures: new Map<string, string[]>(),
-    };
-    if (
-      encodeCanonicalEntityConsensusValue({ ...group.frame, collectedSigs: undefined }) !==
-      encodeCanonicalEntityConsensusValue({ ...evidence, collectedSigs: undefined })
-    ) {
-      throw new Error(`ENTITY_PREPARED_BODY_CONFLICT:${evidence.hash}`);
-    }
-    for (const [signerId, signatures] of normalized) {
-      const existing = group.signatures.get(signerId);
-      if (
-        existing &&
-        (existing.length !== signatures.length || existing.some((signature, index) => signature !== signatures[index]))
-      ) {
-        throw new Error(`ENTITY_PREPARED_SIGNER_EQUIVOCATION:${evidence.hash}:${signerId}`);
-      }
-      group.signatures.set(signerId, signatures);
-    }
-    groups.set(evidence.hash, group);
+    const signatures = validatePreparedFrameEvidence(env, state, certificate, evidence);
+    mergePreparedFrameEvidence(groups, evidence, signatures);
   }
   if (evidenceCount === 0) return null;
 

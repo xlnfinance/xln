@@ -16,10 +16,10 @@ import {
   verifyHashPrecommitSignatures,
 } from './shared';
 
-const mergeIncomingPrecommits = (
+const validateActivePrecommitTarget = (
   context: ApplyEntityInputContext,
 ): ApplyEntityInputResult | null => {
-  const { env, entityInput, workingReplica } = context;
+  const { entityInput, workingReplica } = context;
   const proposal = workingReplica.proposal ?? workingReplica.lockedFrame!;
   const execution = getValidatorExecutionForFrame(workingReplica, proposal);
   if (!execution) {
@@ -27,32 +27,32 @@ const mergeIncomingPrecommits = (
       `ENTITY_VALIDATOR_EXECUTION_MISSING:${proposal.height}:${proposal.hash}`,
     );
   }
-  if (
-    getEntityHashManifestMismatch(
-      execution.hashesToSign,
-      proposal.hashesToSign,
-    )
-  ) {
-    return rejectEntityConsensusInput(
-      context,
-      'PRECOMMIT_LOCAL_MANIFEST_MISMATCH',
-    );
+  if (getEntityHashManifestMismatch(execution.hashesToSign, proposal.hashesToSign)) {
+    return rejectEntityConsensusInput(context, 'PRECOMMIT_LOCAL_MANIFEST_MISMATCH');
   }
-  const precommitFrame = entityInput.hashPrecommitFrame;
+  const reference = entityInput.hashPrecommitFrame;
   if (
     entityInput.hashPrecommits?.size &&
-    (!precommitFrame ||
-      precommitFrame.height !== proposal.height ||
-      precommitFrame.frameHash.toLowerCase() !== proposal.hash.toLowerCase())
+    (!reference ||
+      reference.height !== proposal.height ||
+      reference.frameHash.toLowerCase() !== proposal.hash.toLowerCase())
   ) {
     entityLog.warn('precommit.frame_mismatch', {
-      receivedHeight: precommitFrame?.height,
-      receivedHash: precommitFrame?.frameHash,
+      receivedHeight: reference?.height,
+      receivedHash: reference?.frameHash,
       activeHeight: proposal.height,
       activeHash: proposal.hash,
     });
     return rejectEntityConsensusInput(context, 'PRECOMMIT_FRAME_MISMATCH');
   }
+  return null;
+};
+
+const normalizeIncomingPrecommits = (
+  context: ApplyEntityInputContext,
+): Map<string, string[]> | ApplyEntityInputResult => {
+  const { entityInput, workingReplica } = context;
+  const proposal = workingReplica.proposal ?? workingReplica.lockedFrame!;
   try {
     proposal.collectedSigs = normalizePrecommitBundles(
       workingReplica.state.config,
@@ -63,59 +63,70 @@ const mergeIncomingPrecommits = (
     entityLog.error('precommit.collected_bundle_rejected', {
       error: error instanceof Error ? error.message : String(error),
     });
-    return rejectEntityConsensusInput(
-      context,
-      'COLLECTED_PRECOMMITS_REJECTED',
-    );
+    return rejectEntityConsensusInput(context, 'COLLECTED_PRECOMMITS_REJECTED');
   }
-  let incoming = new Map<string, string[]>();
   try {
-    if (entityInput.hashPrecommits?.size) {
-      incoming = normalizePrecommitBundles(
-        workingReplica.state.config,
-        entityInput.hashPrecommits,
-        'PRECOMMIT_REJECTED',
-      );
-    }
+    return entityInput.hashPrecommits?.size
+      ? normalizePrecommitBundles(
+          workingReplica.state.config,
+          entityInput.hashPrecommits,
+          'PRECOMMIT_REJECTED',
+        )
+      : new Map();
   } catch (error) {
     entityLog.error('precommit.bundle_rejected', {
       error: error instanceof Error ? error.message : String(error),
     });
     return rejectEntityConsensusInput(context, 'PRECOMMIT_BUNDLE_REJECTED');
   }
+};
+
+const mergeVerifiedPrecommits = (
+  context: ApplyEntityInputContext,
+  incoming: Map<string, string[]>,
+): ApplyEntityInputResult | null => {
+  const { env, workingReplica } = context;
+  const proposal = workingReplica.proposal ?? workingReplica.lockedFrame!;
+  const execution = getValidatorExecutionForFrame(workingReplica, proposal)!;
+  const collectedSigs = proposal.collectedSigs;
+  if (!collectedSigs) {
+    throw new Error(
+      `ENTITY_PRECOMMIT_COLLECTION_MISSING_AFTER_NORMALIZATION:${proposal.height}:${proposal.hash}`,
+    );
+  }
   for (const [signerId, signatures] of incoming) {
-    if (
-      !verifyHashPrecommitSignatures(
-        env,
-        signerId,
-        execution.hashesToSign,
-        proposal.hash,
-        proposal.height,
-        signatures,
-        'PRECOMMIT_REJECTED',
-      )
-    ) {
-      return rejectEntityConsensusInput(
-        context,
-        'PRECOMMIT_SIGNATURE_REJECTED',
-      );
+    if (!verifyHashPrecommitSignatures(
+      env,
+      signerId,
+      execution.hashesToSign,
+      proposal.hash,
+      proposal.height,
+      signatures,
+      'PRECOMMIT_REJECTED',
+    )) {
+      return rejectEntityConsensusInput(context, 'PRECOMMIT_SIGNATURE_REJECTED');
     }
-    const existing = proposal.collectedSigs.get(signerId);
+    const existing = collectedSigs.get(signerId);
     if (
       existing &&
       (existing.length !== signatures.length ||
-        existing.some(
-          (signature, index) => signature !== signatures[index],
-        ))
+        existing.some((signature, index) => signature !== signatures[index]))
     ) {
-      return rejectEntityConsensusInput(
-        context,
-        'PRECOMMIT_SIGNER_EQUIVOCATION',
-      );
+      return rejectEntityConsensusInput(context, 'PRECOMMIT_SIGNER_EQUIVOCATION');
     }
-    proposal.collectedSigs.set(signerId, [...signatures]);
+    collectedSigs.set(signerId, [...signatures]);
   }
   return null;
+};
+
+const mergeIncomingPrecommits = (
+  context: ApplyEntityInputContext,
+): ApplyEntityInputResult | null => {
+  const targetRejection = validateActivePrecommitTarget(context);
+  if (targetRejection) return targetRejection;
+  const incoming = normalizeIncomingPrecommits(context);
+  if (!(incoming instanceof Map)) return incoming;
+  return mergeVerifiedPrecommits(context, incoming);
 };
 
 export const handleHashPrecommits = async (

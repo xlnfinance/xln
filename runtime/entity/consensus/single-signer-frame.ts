@@ -61,6 +61,63 @@ export type SingleSignerFrameOptions = Pick<
   checkpoint(label: string): void;
 };
 
+const buildSingleSignerCommitments = (
+  context: ApplyEntityInputContext,
+  options: SingleSignerFrameOptions,
+  applied: Awaited<ReturnType<typeof applyEntityFrame>>,
+) => {
+  const { env, workingReplica } = context;
+  const leader = getEntityLeaderState(workingReplica.state);
+  const height = workingReplica.state.height + 1;
+  const timestamp = env.timestamp;
+  const parentFrameHash = getPrevFrameHash(workingReplica.state);
+  const state = {
+    ...applied.newState,
+    entityId: workingReplica.state.entityId,
+    height,
+    timestamp,
+    leaderState: leader,
+  };
+  const stateRoot = computeCanonicalEntityConsensusStateHash(state);
+  const authority = buildEntityFrameAuthority(state);
+  const authorityRoot = computeEntityFrameAuthorityRoot(authority);
+  const frameHash = createEntityFrameHashFromStateRoot(
+    parentFrameHash,
+    height,
+    timestamp,
+    options.proposalTxs,
+    state.entityId,
+    stateRoot,
+    authorityRoot,
+    options.proposalJPrefixCertificate ?? undefined,
+  );
+  const outputHashes = buildCertifiedEntityOutputHashes(
+    state,
+    env,
+    height,
+    frameHash,
+    applied.outputs,
+  );
+  const hashesToSign = buildEntityHashesToSign(
+    workingReplica.state.entityId,
+    height,
+    frameHash,
+    [...(applied.collectedHashes ?? []), ...outputHashes],
+  );
+  return {
+    authority,
+    authorityRoot,
+    frameHash,
+    hashesToSign,
+    height,
+    leader,
+    parentFrameHash,
+    state,
+    stateRoot,
+    timestamp,
+  };
+};
+
 const buildSingleSignerFrame = async (
   context: ApplyEntityInputContext,
   options: SingleSignerFrameOptions,
@@ -88,71 +145,36 @@ const buildSingleSignerFrame = async (
     env.timestamp,
   );
   options.checkpoint('frameApply');
-  const height = workingReplica.state.height + 1;
-  const timestamp = env.timestamp;
-  const parentFrameHash = getPrevFrameHash(workingReplica.state);
-  const state = {
-    ...applied.newState,
-    entityId: workingReplica.state.entityId,
-    height,
-    timestamp,
-    leaderState: leader,
-  };
-  const stateRoot = computeCanonicalEntityConsensusStateHash(state);
-  const authority = buildEntityFrameAuthority(state);
-  const authorityRoot = computeEntityFrameAuthorityRoot(authority);
-  const frameHash = createEntityFrameHashFromStateRoot(
-    parentFrameHash,
-    height,
-    timestamp,
-    proposalTxs,
-    state.entityId,
-    stateRoot,
-    authorityRoot,
-    proposalJPrefixCertificate ?? undefined,
-  );
-  const outputHashes = buildCertifiedEntityOutputHashes(
-    state,
-    env,
-    height,
-    frameHash,
-    applied.outputs,
-  );
-  const hashesToSign = buildEntityHashesToSign(
-    workingReplica.state.entityId,
-    height,
-    frameHash,
-    [...(applied.collectedHashes ?? []), ...outputHashes],
-  );
+  const commitments = buildSingleSignerCommitments(context, options, applied);
   options.checkpoint('commitments');
   const hankos = await signEntityHashes(
     env,
     workingReplica.state.entityId,
     workingReplica.signerId,
-    hashesToSign.map(hashInfo => hashInfo.hash),
-    state,
+    commitments.hashesToSign.map(hashInfo => hashInfo.hash),
+    commitments.state,
   );
   const signatures = await Promise.all(
-    hashesToSign.map(hashInfo =>
+    commitments.hashesToSign.map(hashInfo =>
       signAccountFrame(env, workingReplica.signerId, hashInfo.hash)),
   );
   options.checkpoint('signatures');
   const frame: ProposedEntityFrame = {
-    height,
-    parentFrameHash,
-    stateRoot,
-    authorityRoot,
-    timestamp,
+    height: commitments.height,
+    parentFrameHash: commitments.parentFrameHash,
+    stateRoot: commitments.stateRoot,
+    authorityRoot: commitments.authorityRoot,
+    timestamp: commitments.timestamp,
     txs: [...proposalTxs],
-    hash: frameHash,
+    hash: commitments.frameHash,
     leader: {
       proposerSignerId: workingReplica.signerId.toLowerCase(),
-      view: leader.view,
+      view: commitments.leader.view,
     },
     ...(proposalJPrefixCertificate
       ? { jPrefixCertificate: structuredClone(proposalJPrefixCertificate) }
       : {}),
-    hashesToSign,
+    hashesToSign: commitments.hashesToSign,
     collectedSigs: new Map([
       [workingReplica.signerId.toLowerCase(), signatures],
     ]),
@@ -160,11 +182,11 @@ const buildSingleSignerFrame = async (
   };
   return {
     ...applied,
-    authority,
+    authority: commitments.authority,
     frame,
     hankos,
-    hashesToSign,
-    state,
+    hashesToSign: commitments.hashesToSign,
+    state: commitments.state,
   };
 };
 

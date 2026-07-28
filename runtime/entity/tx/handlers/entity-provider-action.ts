@@ -129,28 +129,37 @@ const releasePayload = (
   };
 };
 
+const resolveActionDomain = (state: EntityState, env: RuntimeState) => {
+  const configuredName = getJurisdictionConfigName(state.config.jurisdiction);
+  if (!configuredName) throw new Error('ENTITY_PROVIDER_ACTION_JURISDICTION_MISSING');
+  const jurisdiction = requireRuntimeJurisdictionConfigByName(
+    env,
+    configuredName,
+    state.config.jurisdiction,
+  );
+  const chainId = BigInt(jurisdiction.chainId ?? 0);
+  if (chainId <= 0n) throw new Error(`ENTITY_PROVIDER_ACTION_CHAIN_ID_INVALID:${chainId}`);
+  return {
+    jurisdiction,
+    chainId,
+    entityProviderAddress: requireUsableContractAddress(
+      'entity_provider',
+      jurisdiction.entityProviderAddress,
+    ).toLowerCase(),
+    depositoryAddress: requireUsableContractAddress(
+      'depository',
+      jurisdiction.depositoryAddress,
+    ).toLowerCase(),
+  };
+};
+
 const handleAction = (
   entityState: EntityState,
   entityTx: TransferTx | ReleaseTx,
   env: RuntimeState,
 ): EntityTxReducerResult => {
-  const configuredName = getJurisdictionConfigName(entityState.config.jurisdiction);
-  if (!configuredName) throw new Error('ENTITY_PROVIDER_ACTION_JURISDICTION_MISSING');
-  const jurisdiction = requireRuntimeJurisdictionConfigByName(
-    env,
-    configuredName,
-    entityState.config.jurisdiction,
-  );
-  const chainId = BigInt(jurisdiction.chainId ?? 0);
-  if (chainId <= 0n) throw new Error(`ENTITY_PROVIDER_ACTION_CHAIN_ID_INVALID:${chainId}`);
-  const entityProviderAddress = requireUsableContractAddress(
-    'entity_provider',
-    jurisdiction.entityProviderAddress,
-  ).toLowerCase();
-  const depositoryAddress = requireUsableContractAddress(
-    'depository',
-    jurisdiction.depositoryAddress,
-  ).toLowerCase();
+  const { jurisdiction, chainId, entityProviderAddress, depositoryAddress } =
+    resolveActionDomain(entityState, env);
   const current = currentActionState(entityState);
   if (current.pending) {
     throw new Error(
@@ -235,22 +244,8 @@ export const handleEntityProviderCancelAction = (
   entityTx: CancelTx,
   env: RuntimeState,
 ): EntityTxReducerResult => {
-  const configuredName = getJurisdictionConfigName(entityState.config.jurisdiction);
-  if (!configuredName) throw new Error('ENTITY_PROVIDER_ACTION_JURISDICTION_MISSING');
-  const jurisdiction = requireRuntimeJurisdictionConfigByName(
-    env,
-    configuredName,
-    entityState.config.jurisdiction,
-  );
-  const chainId = BigInt(jurisdiction.chainId ?? 0);
-  const entityProviderAddress = requireUsableContractAddress(
-    'entity_provider',
-    jurisdiction.entityProviderAddress,
-  ).toLowerCase();
-  const depositoryAddress = requireUsableContractAddress(
-    'depository',
-    jurisdiction.depositoryAddress,
-  ).toLowerCase();
+  const { jurisdiction, chainId, entityProviderAddress, depositoryAddress } =
+    resolveActionDomain(entityState, env);
   const current = currentActionState(entityState);
   const boardEpoch = requireCertifiedBoardEpoch(entityState, env);
   const pending = current.pending;
