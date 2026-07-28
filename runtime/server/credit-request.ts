@@ -1,4 +1,4 @@
-import type { RuntimeState, RuntimeInput } from '../types';
+import type { AccountState, RuntimeInput, RuntimeState } from '../types';
 import { safeStringify } from '../protocol/serialization';
 import { resolveEntityProposerId } from '../state-helpers';
 import { getAccountState, getEntityOutCapacity, hasAccount } from './entity-lookup';
@@ -7,7 +7,7 @@ import { getRequestCreditCap } from './hub-health';
 import { isEntityId32 } from './utils';
 import type { RegisterReceiptOptions, RuntimeIngressReceipt } from './ingress-receipts';
 
-export const handleCreditRequest = async (input: {
+type CreditRequestInput = {
   req: Request;
   env: RuntimeState | null;
   headers: HeadersInit;
@@ -17,154 +17,186 @@ export const handleCreditRequest = async (input: {
   registerReceipt: (receipt: RegisterReceiptOptions) => RuntimeIngressReceipt;
   getCurrentRuntimeHeight: (env: RuntimeState | null) => number;
   buildRuntimeInputStatusUrl: (id: string) => string;
-}): Promise<Response> => {
-  const { req, env, headers } = input;
+};
+
+type ParsedCreditRequest = {
+  userEntityId: string;
+  hubEntityId: string;
+  tokenId: number;
+  requestedAmount: bigint;
+};
+
+type AdmittedCreditRequest = ParsedCreditRequest & {
+  account: AccountState;
+  approvedAmount: bigint;
+};
+
+const json = (
+  headers: HeadersInit,
+  body: Record<string, unknown>,
+  status = 200,
+): Response => new Response(safeStringify(body), { status, headers });
+
+const parseCreditRequest = async (
+  req: Request,
+  headers: HeadersInit,
+): Promise<ParsedCreditRequest | Response> => {
+  const body: unknown = await req.json();
+  const value = body && typeof body === 'object' ? body as Record<string, unknown> : {};
+  const userEntityId = typeof value['userEntityId'] === 'string' ? value['userEntityId'].toLowerCase() : '';
+  const hubEntityId = typeof value['hubEntityId'] === 'string' ? value['hubEntityId'].toLowerCase() : '';
+  const tokenId = Number(value['tokenId'] ?? 1);
+  const amount = typeof value['amount'] === 'string' ? value['amount'].trim() : '';
+  if (!isEntityId32(userEntityId)) return json(headers, { error: 'Invalid userEntityId' }, 400);
+  if (!isEntityId32(hubEntityId)) return json(headers, { error: 'Invalid hubEntityId' }, 400);
+  if (!/^\d+$/.test(amount)) return json(headers, { error: 'Invalid amount' }, 400);
+  if (!Number.isSafeInteger(tokenId) || tokenId <= 0) {
+    return json(headers, { error: 'Invalid tokenId' }, 400);
+  }
+  const requestedAmount = BigInt(amount);
+  if (requestedAmount <= 0n) return json(headers, { error: 'Amount must be positive' }, 400);
+  return { userEntityId, hubEntityId, tokenId, requestedAmount };
+};
+
+const admitCreditRequest = (
+  env: RuntimeState,
+  request: ParsedCreditRequest,
+  activeHubEntityIds: string[],
+  headers: HeadersInit,
+): AdmittedCreditRequest | Response => {
+  const hubs = getFaucetHubProfiles(env, activeHubEntityIds);
+  const hub = hubs.find(profile => profile.entityId.toLowerCase() === request.hubEntityId);
+  if (!hub) {
+    return json(headers, {
+      error: 'Requested hub is not available',
+      knownHubEntityIds: hubs.map(profile => profile.entityId),
+    }, 404);
+  }
+  const account = getAccountState(env, hub.entityId, request.userEntityId);
+  if (!account || !hasAccount(env, hub.entityId, request.userEntityId)) {
+    return json(headers, {
+      error: 'No bilateral account with selected hub. Open account first.',
+      hubEntityId: hub.entityId,
+      userEntityId: request.userEntityId,
+    }, 409);
+  }
+  const cap = getRequestCreditCap(request.tokenId);
+  return {
+    ...request,
+    hubEntityId: hub.entityId,
+    account,
+    approvedAmount: request.requestedAmount > cap ? cap : request.requestedAmount,
+  };
+};
+
+const alreadySatisfied = (
+  input: CreditRequestInput,
+  env: RuntimeState,
+  request: AdmittedCreditRequest,
+): Response | null => {
+  const capacity = getEntityOutCapacity(request.account, request.hubEntityId, request.tokenId);
+  if (capacity < request.approvedAmount) return null;
+  return json(input.headers, {
+    success: true,
+    status: 'already_satisfied',
+    runtimeId: typeof env.runtimeId === 'string' ? env.runtimeId : null,
+    currentHeight: input.getCurrentRuntimeHeight(env),
+    hubEntityId: request.hubEntityId,
+    userEntityId: request.userEntityId,
+    tokenId: request.tokenId,
+    approvedAmount: capacity.toString(),
+  });
+};
+
+const buildCreditRuntimeInput = (
+  request: AdmittedCreditRequest,
+  signerId: string,
+): RuntimeInput => ({
+  runtimeTxs: [],
+  entityInputs: [{
+    entityId: request.hubEntityId,
+    signerId,
+    entityTxs: [{
+      type: 'extendCredit',
+      data: {
+        counterpartyEntityId: request.userEntityId,
+        tokenId: request.tokenId,
+        amount: request.approvedAmount,
+      },
+    }],
+  }],
+});
+
+const resolveHubSigner = (
+  env: RuntimeState,
+  hubEntityId: string,
+  headers: HeadersInit,
+): string | Response => {
   try {
-    if (!env) {
-      return new Response(safeStringify({ error: 'Runtime not initialized' }), { status: 503, headers });
-    }
+    return resolveEntityProposerId(env, hubEntityId, 'credit-request');
+  } catch (error) {
+    return json(headers, {
+      error: error instanceof Error ? error.message : 'Hub signer unavailable',
+    }, 503);
+  }
+};
 
-    const body = await req.json();
-    const userEntityId = typeof body?.userEntityId === 'string' ? body.userEntityId.toLowerCase() : '';
-    const requestedHubEntityId = typeof body?.hubEntityId === 'string' ? body.hubEntityId.toLowerCase() : '';
-    const tokenId = Number(body?.tokenId ?? 1);
-    const amountRaw = typeof body?.amount === 'string' ? body.amount.trim() : '';
+const queueCreditRequest = (
+  input: CreditRequestInput,
+  env: RuntimeState,
+  request: AdmittedCreditRequest,
+  runtimeInput: RuntimeInput,
+): Response => {
+  const requestId = `credit_${globalThis.crypto.randomUUID()}`;
+  let receipt: RuntimeIngressReceipt;
+  try {
+    input.validateRuntimeInputAdmission(env, runtimeInput);
+    input.enqueueRuntimeInput(env, runtimeInput);
+    receipt = input.registerReceipt({
+      id: requestId,
+      kind: 'credit-request',
+      counts: { runtimeTxs: 0, entityInputs: 1, jInputs: 0 },
+      enqueuedHeight: input.getCurrentRuntimeHeight(env),
+      runtimeInput,
+      note: 'Credit request was accepted into the hub runtime queue; poll statusUrl and account state for settlement.',
+    });
+  } catch (error) {
+    return json(input.headers, {
+      error: 'Failed to admit credit request into runtime',
+      code: 'CREDIT_REQUEST_ADMISSION_FAILED',
+      details: error instanceof Error ? error.message : String(error),
+    }, 503);
+  }
+  return json(input.headers, {
+    success: true,
+    status: 'queued',
+    requestId,
+    receipt,
+    statusUrl: input.buildRuntimeInputStatusUrl(receipt.id),
+    runtimeId: typeof env.runtimeId === 'string' ? env.runtimeId : null,
+    currentHeight: input.getCurrentRuntimeHeight(env),
+    hubEntityId: request.hubEntityId,
+    userEntityId: request.userEntityId,
+    tokenId: request.tokenId,
+    approvedAmount: request.approvedAmount.toString(),
+  });
+};
 
-    if (!isEntityId32(userEntityId)) {
-      return new Response(safeStringify({ error: 'Invalid userEntityId' }), { status: 400, headers });
-    }
-    if (!isEntityId32(requestedHubEntityId)) {
-      return new Response(safeStringify({ error: 'Invalid hubEntityId' }), { status: 400, headers });
-    }
-    if (!/^\d+$/.test(amountRaw)) {
-      return new Response(safeStringify({ error: 'Invalid amount' }), { status: 400, headers });
-    }
-    if (!Number.isFinite(tokenId) || tokenId <= 0) {
-      return new Response(safeStringify({ error: 'Invalid tokenId' }), { status: 400, headers });
-    }
-
-    const hubs = getFaucetHubProfiles(env, input.activeHubEntityIds);
-    const hubProfile = hubs.find((profile) => profile.entityId.toLowerCase() === requestedHubEntityId);
-    if (!hubProfile) {
-      return new Response(
-        JSON.stringify({
-          error: 'Requested hub is not available',
-          knownHubEntityIds: hubs.map((profile) => profile.entityId),
-        }),
-        { status: 404, headers },
-      );
-    }
-
-    const hubEntityId = hubProfile.entityId;
-    const account = getAccountState(env, hubEntityId, userEntityId);
-    if (!account || !hasAccount(env, hubEntityId, userEntityId)) {
-      return new Response(
-        JSON.stringify({
-          error: 'No bilateral account with selected hub. Open account first.',
-          hubEntityId,
-          userEntityId,
-        }),
-        { status: 409, headers },
-      );
-    }
-
-    const requestedAmount = BigInt(amountRaw);
-    if (requestedAmount <= 0n) {
-      return new Response(safeStringify({ error: 'Amount must be positive' }), { status: 400, headers });
-    }
-
-    const approvedAmount = requestedAmount > getRequestCreditCap(tokenId)
-      ? getRequestCreditCap(tokenId)
-      : requestedAmount;
-    const currentOutCapacity = getEntityOutCapacity(account, hubEntityId, tokenId);
-    if (currentOutCapacity >= approvedAmount) {
-      return new Response(
-        JSON.stringify({
-          success: true,
-          status: 'already_satisfied',
-          runtimeId: typeof env.runtimeId === 'string' ? env.runtimeId : null,
-          currentHeight: input.getCurrentRuntimeHeight(env),
-          hubEntityId,
-          userEntityId,
-          tokenId,
-          approvedAmount: currentOutCapacity.toString(),
-        }),
-        { status: 200, headers },
-      );
-    }
-
-    let hubSignerId: string;
-    try {
-      hubSignerId = resolveEntityProposerId(env, hubEntityId, 'credit-request');
-    } catch (error) {
-      return new Response(
-        JSON.stringify({ error: error instanceof Error ? error.message : 'Hub signer unavailable' }),
-        { status: 503, headers },
-      );
-    }
-
-    const runtimeInput: RuntimeInput = {
-      runtimeTxs: [],
-      entityInputs: [
-        {
-          entityId: hubEntityId,
-          signerId: hubSignerId,
-          entityTxs: [
-            {
-              type: 'extendCredit',
-              data: {
-                counterpartyEntityId: userEntityId,
-                tokenId,
-                amount: approvedAmount,
-              },
-            },
-          ],
-        },
-      ],
-    };
-
-    const requestId = `credit_${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`}`;
-    let receipt: RuntimeIngressReceipt;
-    try {
-      input.validateRuntimeInputAdmission(env, runtimeInput);
-      input.enqueueRuntimeInput(env, runtimeInput);
-      receipt = input.registerReceipt({
-        id: requestId,
-        kind: 'credit-request',
-        counts: { runtimeTxs: 0, entityInputs: 1, jInputs: 0 },
-        enqueuedHeight: input.getCurrentRuntimeHeight(env),
-        runtimeInput,
-        note: 'Credit request was accepted into the hub runtime queue; poll statusUrl and account state for settlement.',
-      });
-    } catch (error) {
-      return new Response(
-        JSON.stringify({
-          error: 'Failed to admit credit request into runtime',
-          code: 'CREDIT_REQUEST_ADMISSION_FAILED',
-          details: error instanceof Error ? error.message : String(error),
-        }),
-        { status: 503, headers },
-      );
-    }
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        status: 'queued',
-        requestId,
-        receipt,
-        statusUrl: input.buildRuntimeInputStatusUrl(receipt.id),
-        runtimeId: typeof env.runtimeId === 'string' ? env.runtimeId : null,
-        currentHeight: input.getCurrentRuntimeHeight(env),
-        hubEntityId,
-        userEntityId,
-        tokenId,
-        approvedAmount: approvedAmount.toString(),
-      }),
-      { status: 200, headers },
-    );
+export const handleCreditRequest = async (input: CreditRequestInput): Promise<Response> => {
+  try {
+    if (!input.env) return json(input.headers, { error: 'Runtime not initialized' }, 503);
+    const parsed = await parseCreditRequest(input.req, input.headers);
+    if (parsed instanceof Response) return parsed;
+    const admitted = admitCreditRequest(input.env, parsed, input.activeHubEntityIds, input.headers);
+    if (admitted instanceof Response) return admitted;
+    const satisfied = alreadySatisfied(input, input.env, admitted);
+    if (satisfied) return satisfied;
+    const signerId = resolveHubSigner(input.env, admitted.hubEntityId, input.headers);
+    if (signerId instanceof Response) return signerId;
+    const runtimeInput = buildCreditRuntimeInput(admitted, signerId);
+    return queueCreditRequest(input, input.env, admitted, runtimeInput);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return new Response(safeStringify({ error: message }), { status: 500, headers });
+    return json(input.headers, { error: message }, 500);
   }
 };
