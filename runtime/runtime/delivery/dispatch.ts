@@ -294,7 +294,39 @@ const deferOutputsAfterDeliveryFailure = (
   deferredOutputs.push(...sendable);
 };
 
-const dispatchOutputEnvelope = (
+const tryDirectOutputEnvelope = (
+  env: Env,
+  group: OutputEnvelopeGroup,
+  sendable: DeliverableEntityInput[],
+  envelope: RuntimeEntityInputsEnvelope,
+  deps: RuntimeOutputRoutingDeps,
+  deferredOutputs: RoutedEntityInput[],
+): boolean => {
+  const state = deps.ensureRuntimeState(env);
+  const directDispatch = state.directEntityInputsDispatch;
+  if (!directDispatch) return false;
+  const delivery = requireDeliveryResult(
+    directDispatch(
+      group.targetRuntimeId,
+      envelope,
+      envelope.sourceRuntimeTimestamp,
+    ),
+    'ROUTE_DIRECT_INVALID_DELIVERY_RESULT',
+  );
+  if (!isDeliveryDelivered(delivery)) return false;
+  routeLog.info('output.accepted', {
+    atMs: getWallClockMs(),
+    transport: 'direct',
+    code: delivery.code,
+    targetRuntimeId: group.targetRuntimeId,
+    sourceRuntimeHeight: envelope.sourceRuntimeHeight,
+    outputs: summarizeAccountEnvelopeOutputs(sendable),
+  });
+  retainDeliveredReliableOutputs(sendable, group.atomic, deferredOutputs);
+  return true;
+};
+
+const dispatchP2POutputEnvelope = (
   env: Env,
   group: OutputEnvelopeGroup,
   sendable: DeliverableEntityInput[],
@@ -302,27 +334,6 @@ const dispatchOutputEnvelope = (
   deps: RuntimeOutputRoutingDeps,
   deferredOutputs: RoutedEntityInput[],
 ): void => {
-  const state = deps.ensureRuntimeState(env);
-  const directDispatch = state.directEntityInputsDispatch;
-  if (directDispatch) {
-    const delivery = requireDeliveryResult(
-      directDispatch(group.targetRuntimeId, envelope, envelope.sourceRuntimeTimestamp),
-      'ROUTE_DIRECT_INVALID_DELIVERY_RESULT',
-    );
-    if (isDeliveryDelivered(delivery)) {
-      routeLog.info('output.accepted', {
-        atMs: getWallClockMs(),
-        transport: 'direct',
-        code: delivery.code,
-        targetRuntimeId: group.targetRuntimeId,
-        sourceRuntimeHeight: envelope.sourceRuntimeHeight,
-        outputs: summarizeAccountEnvelopeOutputs(sendable),
-      });
-      retainDeliveredReliableOutputs(sendable, group.atomic, deferredOutputs);
-      return;
-    }
-  }
-
   const p2p = deps.getP2P(env);
   if (!p2p) {
     for (const output of sendable) {
@@ -403,6 +414,36 @@ const dispatchOutputEnvelope = (
     });
     throw error;
   }
+};
+
+const dispatchOutputEnvelope = (
+  env: Env,
+  group: OutputEnvelopeGroup,
+  sendable: DeliverableEntityInput[],
+  envelope: RuntimeEntityInputsEnvelope,
+  deps: RuntimeOutputRoutingDeps,
+  deferredOutputs: RoutedEntityInput[],
+): void => {
+  if (
+    tryDirectOutputEnvelope(
+      env,
+      group,
+      sendable,
+      envelope,
+      deps,
+      deferredOutputs,
+    )
+  ) {
+    return;
+  }
+  dispatchP2POutputEnvelope(
+    env,
+    group,
+    sendable,
+    envelope,
+    deps,
+    deferredOutputs,
+  );
 };
 
 export const dispatchEntityOutputs = (
@@ -486,4 +527,3 @@ export const sendEntityInputWithRouting = (
     }),
   };
 };
-

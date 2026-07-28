@@ -672,6 +672,10 @@ const commitRuntimeFrame = async (
 
 export const processRuntime = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0) => {
   const liveEnv = env;
+  // Direct callers and the background loop must hash the same effective local
+  // configuration. Recovery replays normalize these defaults before applying
+  // a journal frame, so the live writer must do so before its own frame too.
+  ensureRuntimeConfig(env);
   const processState = ensureRuntimeState(env);
   // Admission belongs to the one live Runtime mempool, not to the writer that
   // happens to process it. Enqueue synchronously before waiting so inputs that

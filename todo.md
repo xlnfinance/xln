@@ -38,15 +38,15 @@ long-term work belongs in `docs/roadmap.md`, and permanent rules belong in
   `runtime/account`. Reduce every coordinator to at most 150 lines and every
   pure/helper function to at most 100 lines, with no file above 3000 lines;
   `check:state-machine-size` now ratchets the current debt at 15 functions over
-  150 lines and 70 over 100, rejects any new/growing allowance and rejects
+  150 lines and 69 over 100, rejects any new/growing allowance and rejects
   files over 3000 lines. Keep reducing both counts to zero, deleting each exact
   allowance as its function is split.
   Keep Runtime-machine logic under `runtime/runtime/`, Entity-machine logic
   under `runtime/entity/`, and Account money/consensus logic under
   `runtime/account/`; adapters, storage, transport, UI and QA remain separate
   infrastructure rather than being mislabeled as a state machine. The current
-  first structural targets are:
-  Runtime output plan/dispatch (189/201).
+  first structural targets are Account pending-ACK/preflight (208/190),
+  committed lending follow-up (195), and settlement execution/seal (194/184).
   Each split must follow protocol phase, owner and failure boundary—not
   arbitrary line chunks—and preserve byte-identical roots, failures and
   ordering through characterization tests.

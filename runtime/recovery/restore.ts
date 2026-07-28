@@ -518,9 +518,15 @@ export const createRuntimeRecoveryApi = (deps: RuntimeRecoveryDeps) => {
           if (frame.runtimeStateHash) {
             const actualStateHash = computeCanonicalStateHashFromEnv(env);
             if (actualStateHash !== frame.runtimeStateHash) {
+              const expectedMachine = frame.runtimeMachine;
+              const actualMachine = buildDurableRuntimeMachineSnapshot(env);
+              const differingMachineKeys = expectedMachine
+                ? recoveryMachineMismatchFields(expectedMachine, actualMachine)
+                : ['runtimeMachine'];
               throw new Error(
                 `RECOVERY_JOURNAL_STATE_HASH_MISMATCH:height=${frameHeight}:` +
-                  `expected=${frame.runtimeStateHash}:actual=${actualStateHash}`,
+                  `expected=${frame.runtimeStateHash}:actual=${actualStateHash}:` +
+                  `runtimeMachineDiff=${differingMachineKeys.join(',') || 'none'}`,
               );
             }
           }

@@ -34,7 +34,7 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   'runtime/entity/tx/handlers/j-broadcast.ts::handleJBroadcast': 154,
 };
 
-const MAX_OVER_100_FUNCTIONS = 70;
+const MAX_OVER_100_FUNCTIONS = 69;
 
 type FunctionSize = {
   key: string;
