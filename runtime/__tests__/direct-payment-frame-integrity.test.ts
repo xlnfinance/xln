@@ -130,9 +130,10 @@ describe('direct payment frame integrity', () => {
         state,
         newState,
         input: {} as AccountInput,
-        accountMachine: account,
+        account,
         outputs: [],
         accountTxs,
+        candidateEffects: [],
       });
 
       expect(accountTxs).toHaveLength(paymentCount);
@@ -150,9 +151,10 @@ describe('direct payment frame integrity', () => {
       state: { entityId: LEFT } as EntityState,
       newState: { entityId: LEFT, accounts: new Map() } as EntityState,
       input: {} as AccountInput,
-      accountMachine: account,
+      account,
       outputs: [],
       accountTxs: [],
+      candidateEffects: [],
     })).toThrow('ROUTED_PAYMENT_NEXT_HOP_ACCOUNT_MISSING');
     expect(account.pendingForwards).toHaveLength(1);
   });

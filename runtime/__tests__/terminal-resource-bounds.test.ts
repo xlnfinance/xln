@@ -209,7 +209,7 @@ test('timeout terminal activity is emitted before its HTLC notes are removed', (
     state,
     newState: state,
     input: { fromEntityId: rightEntity, toEntityId: leftEntity, watchSeed: account.watchSeed },
-    accountMachine: account,
+    account,
     outputs: [],
     accountTxs: [],
     candidateEffects,

@@ -77,6 +77,22 @@ const logProposalProfile = (
   });
 };
 
+const logProposalAdmission = (
+  account: AccountState,
+  proposalWindow: readonly AccountTx[],
+): void => {
+  if (!HEAVY_LOGS) return;
+  accountLog.debug('proof.header', {
+    from: shortId(account.proofHeader.fromEntity, 8),
+    to: shortId(account.proofHeader.toEntity, 8),
+  });
+  accountLog.debug('mempool.before_process', {
+    proposalWindow: proposalWindow.length,
+    mempool: account.mempool.length,
+    txs: proposalWindow.map(tx => tx.type),
+  });
+};
+
 export async function proposeAccountFrame(
   env: RuntimeState,
   account: AccountState,
@@ -107,20 +123,7 @@ export async function proposeAccountFrame(
     frameJHeight,
   } = admission;
   checkpointProfile('admission');
-  if (HEAVY_LOGS) {
-    accountLog.debug('proof.header', {
-      from: shortId(account.proofHeader.fromEntity, 8),
-      to: shortId(account.proofHeader.toEntity, 8),
-    });
-  }
-
-  if (HEAVY_LOGS) {
-    accountLog.debug('mempool.before_process', {
-      proposalWindow: proposalWindow.length,
-      mempool: account.mempool.length,
-      txs: proposalWindow.map(tx => tx.type),
-    });
-  }
+  logProposalAdmission(account, proposalWindow);
   const validation = await validateProposalTransactions({
     env,
     account: account,

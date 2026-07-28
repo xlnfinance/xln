@@ -5,6 +5,7 @@
 
 import type {
   AccountState,
+  AccountDisputeSeal,
   AccountFrame,
   AccountInput,
   AccountPeerInput,
@@ -1613,30 +1614,29 @@ async function verifySenderFrameHash(
   return undefined;
 }
 
-async function validateIncomingFrameOnClone(
+type IncomingFrameReplay = Omit<IncomingFrameValidation, 'clonedMachine' | 'proofResult'>;
+type IncomingFrameReplayResult =
+  | { kind: 'continue'; replay: IncomingFrameReplay }
+  | { kind: 'return'; result: HandleAccountInputResult };
+
+const replayIncomingFrameOnClone = async (
   env: RuntimeState,
-  account: AccountState,
+  clonedMachine: AccountState,
   input: AccountInput,
   receivedFrame: AccountFrame,
   frameJHeight: number,
   events: string[],
   timedOutHashlocks: string[],
-  validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined,
-  accountJClaimNodeStore: AccountJClaimNodeStore,
+  jClaimSession: AccountJClaimSession,
   securityContext: AccountInputSecurityContext,
-): Promise<IncomingFrameValidationResult> {
-  const clonedMachine = cloneAccountState(account);
-  const jClaimSession = createAccountJClaimSession(env, accountJClaimNodeStore);
-  const processEvents: string[] = [];
-  const revealedSecrets: AccountRevealedSecret[] = [];
-  const swapOffersCreated: AccountSwapOfferCreated[] = [];
-  const swapCancelRequests: AccountSwapCancelRequest[] = [];
-  const swapOffersCancelled: AccountSwapCancelRequest[] = [];
-
-  accountLog.debug('frame.receiver_validate', {
-    height: receivedFrame.height,
-    txs: receivedFrame.accountTxs.map(tx => tx.type),
-  });
+): Promise<IncomingFrameReplayResult> => {
+  const replay: IncomingFrameReplay = {
+    processEvents: [],
+    revealedSecrets: [],
+    swapOffersCreated: [],
+    swapCancelRequests: [],
+    swapOffersCancelled: [],
+  };
   for (const accountTx of receivedFrame.accountTxs) {
     const beforeSettlement = captureSettlementVector(clonedMachine);
     const result = await applyAccountTx(
@@ -1651,31 +1651,63 @@ async function validateIncomingFrameOnClone(
       securityContext.counterpartyCertifiedBoardHash,
     );
     if (!result.success) {
-      return { kind: 'return', result: { success: false, error: `Frame application failed: ${result.error}`, events } };
+      return {
+        kind: 'return',
+        result: { success: false, error: `Frame application failed: ${result.error}`, events },
+      };
     }
     assertNoUnilateralSettlementMutation(clonedMachine, beforeSettlement, accountTx, 'receiver/validate');
-    processEvents.push(...result.events);
-
-    if (HEAVY_LOGS) accountLog.debug('receiver.tx.processed', { type: accountTx.type, success: result.success });
+    if (HEAVY_LOGS) {
+      accountLog.debug('receiver.tx.processed', { type: accountTx.type, success: true });
+    }
+    replay.processEvents.push(...result.events);
     if (result.secret && result.hashlock) {
-      revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
+      replay.revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
     }
-    if (result.timedOutHashlock) {
-      timedOutHashlocks.push(result.timedOutHashlock);
-    }
-    if (result.swapOfferCreated) {
-      swapOffersCreated.push(result.swapOfferCreated);
-    }
+    if (result.timedOutHashlock) timedOutHashlocks.push(result.timedOutHashlock);
+    if (result.swapOfferCreated) replay.swapOffersCreated.push(result.swapOfferCreated);
     if (result.swapOfferCancelRequested) {
-      swapCancelRequests.push({
+      replay.swapCancelRequests.push({
         ...result.swapOfferCancelRequested,
         accountId: input.fromEntityId,
       });
     }
-    if (result.swapOfferCancelled) {
-      swapOffersCancelled.push(result.swapOfferCancelled);
-    }
+    if (result.swapOfferCancelled) replay.swapOffersCancelled.push(result.swapOfferCancelled);
   }
+  return { kind: 'continue', replay };
+};
+
+async function validateIncomingFrameOnClone(
+  env: RuntimeState,
+  account: AccountState,
+  input: AccountInput,
+  receivedFrame: AccountFrame,
+  frameJHeight: number,
+  events: string[],
+  timedOutHashlocks: string[],
+  validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined,
+  accountJClaimNodeStore: AccountJClaimNodeStore,
+  securityContext: AccountInputSecurityContext,
+): Promise<IncomingFrameValidationResult> {
+  const clonedMachine = cloneAccountState(account);
+  const jClaimSession = createAccountJClaimSession(env, accountJClaimNodeStore);
+
+  accountLog.debug('frame.receiver_validate', {
+    height: receivedFrame.height,
+    txs: receivedFrame.accountTxs.map(tx => tx.type),
+  });
+  const replayResult = await replayIncomingFrameOnClone(
+    env,
+    clonedMachine,
+    input,
+    receivedFrame,
+    frameJHeight,
+    events,
+    timedOutHashlocks,
+    jClaimSession,
+    securityContext,
+  );
+  if (replayResult.kind === 'return') return replayResult;
 
   const frameHashMismatch = await verifySenderFrameHash(receivedFrame, events);
   if (frameHashMismatch) return { kind: 'return', result: frameHashMismatch };
@@ -1724,14 +1756,45 @@ async function validateIncomingFrameOnClone(
     validation: {
       clonedMachine,
       proofResult,
-      processEvents,
-      revealedSecrets,
-      swapOffersCreated,
-      swapCancelRequests,
-      swapOffersCancelled,
+      ...replayResult.replay,
     },
   };
 }
+
+const reexecuteIncomingFrame = async (
+  env: RuntimeState,
+  account: AccountState,
+  receivedFrame: AccountFrame,
+  frameJHeight: number,
+  committedJClaims: AccountJClaimSession,
+  securityContext: AccountInputSecurityContext,
+  candidateEffects: EntityCandidateEffect[],
+): Promise<void> => {
+  for (const tx of receivedFrame.accountTxs) {
+    const beforeSettlement = captureSettlementVector(account);
+    const commitResult = await applyAccountTx(
+      account,
+      tx,
+      receivedFrame.byLeft!,
+      receivedFrame.timestamp,
+      frameJHeight,
+      false,
+      env,
+      committedJClaims,
+      securityContext.counterpartyCertifiedBoardHash,
+    );
+    candidateEffects.push(...(commitResult.candidateEffects ?? []));
+    if (!commitResult.success) {
+      accountLog.error('frame.commit.failed', {
+        side: 'receiver',
+        type: tx.type,
+        error: commitResult.error,
+      });
+      throw new Error(`Frame ${receivedFrame.height} commit failed: ${tx.type} - ${commitResult.error}`);
+    }
+    assertNoUnilateralSettlementMutation(account, beforeSettlement, tx, 'receiver/commit');
+  }
+};
 
 async function commitIncomingFrameOnRealState(
   env: RuntimeState,
@@ -1756,27 +1819,15 @@ async function commitIncomingFrameOnRealState(
     });
   }
 
-  for (const tx of receivedFrame.accountTxs) {
-    const beforeSettlement = captureSettlementVector(account);
-    const commitResult = await applyAccountTx(
-      account,
-      tx,
-      receivedFrame.byLeft!,
-      receivedFrame.timestamp,
-      frameJHeight,
-      false,
-      env,
-      committedJClaims,
-      securityContext.counterpartyCertifiedBoardHash,
-    );
-    candidateEffects.push(...(commitResult.candidateEffects ?? []));
-
-    if (!commitResult.success) {
-      accountLog.error('frame.commit.failed', { side: 'receiver', type: tx.type, error: commitResult.error });
-      throw new Error(`Frame ${receivedFrame.height} commit failed: ${tx.type} - ${commitResult.error}`);
-    }
-    assertNoUnilateralSettlementMutation(account, beforeSettlement, tx, 'receiver/commit');
-  }
+  await reexecuteIncomingFrame(
+    env,
+    account,
+    receivedFrame,
+    frameJHeight,
+    committedJClaims,
+    securityContext,
+    candidateEffects,
+  );
 
   forkAccountCommitmentCache(validation.clonedMachine, account);
   assertLiveCommitMatchesFrame(
@@ -1856,6 +1907,56 @@ type IncomingFrameAckMaterialResult =
   | { kind: 'continue'; material: IncomingFrameAckMaterial }
   | { kind: 'return'; result: HandleAccountInputResult };
 
+const storeAckProofSnapshot = (
+  account: AccountState,
+  proofResult: ReturnType<typeof buildAccountProofBodyFromEnv>,
+  signedNonce: number,
+): void => {
+  account.disputeProofNoncesByHash ??= {};
+  account.disputeProofNoncesByHash[proofResult.proofBodyHash] = signedNonce;
+  account.disputeProofBodiesByHash ??= {};
+  account.disputeProofBodiesByHash[proofResult.proofBodyHash] = proofResult.proofBodyStruct;
+  storeDisputeArgumentSnapshot(
+    account,
+    captureDisputeArgumentSnapshot(
+      account,
+      proofResult.proofBodyHash,
+      signedNonce,
+      proofResult.proofBodyStruct,
+    ),
+  );
+};
+
+const selectAckDisputeSeal = (
+  account: AccountState,
+  proofBodyHash: string,
+  signedNonce: number,
+  proofChanged: boolean,
+  disputeHash: string | undefined,
+  disputeHanko: HankoString | undefined,
+): AccountDisputeSeal | undefined => {
+  if (proofChanged && disputeHash) {
+    return {
+      ...(disputeHanko ? { hanko: disputeHanko } : {}),
+      hash: disputeHash,
+      proofBodyHash,
+      proofNonce: signedNonce,
+    };
+  }
+  const reusable =
+    account.currentDisputeProofHanko &&
+    account.currentDisputeHash &&
+    account.currentDisputeProofBodyHash?.toLowerCase() === proofBodyHash.toLowerCase() &&
+    Number(account.currentDisputeProofNonce ?? 0) > Number(account.jNonce ?? 0);
+  if (!reusable) return undefined;
+  return {
+    hanko: account.currentDisputeProofHanko!,
+    hash: account.currentDisputeHash!,
+    proofBodyHash: account.currentDisputeProofBodyHash!,
+    proofNonce: account.currentDisputeProofNonce!,
+  };
+};
+
 async function buildIncomingFrameAckMaterial(
   env: RuntimeState,
   account: AccountState,
@@ -1910,38 +2011,16 @@ async function buildIncomingFrameAckMaterial(
     if (!ackDisputeHash || (directSigner && !ackDisputeHanko)) {
       return { kind: 'return', result: { success: false, error: 'Failed to build ACK dispute hanko', events } };
     }
-    account.disputeProofNoncesByHash ??= {};
-    account.disputeProofNoncesByHash[ackProofResult.proofBodyHash] = ackSignedNonce;
-    account.disputeProofBodiesByHash ??= {};
-    account.disputeProofBodiesByHash[ackProofResult.proofBodyHash] = ackProofResult.proofBodyStruct;
-    storeDisputeArgumentSnapshot(
-      account,
-      captureDisputeArgumentSnapshot(
-        account,
-        ackProofResult.proofBodyHash,
-        ackSignedNonce,
-        ackProofResult.proofBodyStruct,
-      ),
-    );
+    storeAckProofSnapshot(account, ackProofResult, ackSignedNonce);
   }
 
-  const ackDisputeSeal = proofChanged && ackDisputeHash ? {
-    ...(ackDisputeHanko ? { hanko: ackDisputeHanko } : {}),
-    hash: ackDisputeHash,
-    proofBodyHash: ackProofResult.proofBodyHash,
-    proofNonce: ackSignedNonce,
-  } : (
-    account.currentDisputeProofHanko &&
-    account.currentDisputeHash &&
-    account.currentDisputeProofBodyHash?.toLowerCase() === ackProofResult.proofBodyHash.toLowerCase() &&
-    Number(account.currentDisputeProofNonce ?? 0) > Number(account.jNonce ?? 0)
-      ? {
-          hanko: account.currentDisputeProofHanko,
-          hash: account.currentDisputeHash,
-          proofBodyHash: account.currentDisputeProofBodyHash,
-          proofNonce: account.currentDisputeProofNonce!,
-        }
-      : undefined
+  const ackDisputeSeal = selectAckDisputeSeal(
+    account,
+    ackProofResult.proofBodyHash,
+    ackSignedNonce,
+    proofChanged,
+    ackDisputeHash,
+    ackDisputeHanko,
   );
 
   const response: Extract<AccountInput, { kind: 'ack' }> = {

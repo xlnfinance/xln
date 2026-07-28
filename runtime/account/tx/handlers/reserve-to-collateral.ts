@@ -37,7 +37,7 @@ const reserveToCollateralLog = createStructuredLogger('account.reserve');
  * via j_event_claim + authenticated bilateral matching.
  */
 export function handleReserveToCollateral(
-  _accountMachine: AccountState,
+  _account: AccountState,
   accountTx: Extract<AccountTx, { type: 'reserve_to_collateral' }>
 ): { success: boolean; events: string[]; error?: string } {
   // ═══════════════════════════════════════════════════════════════════════════
