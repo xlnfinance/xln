@@ -237,7 +237,6 @@ export class RuntimeWsClient {
   }
 
   private async connectForGeneration(generation: number): Promise<void> {
-    // Close any stale WS before creating new one
     if (this.ws) {
       const staleWs = this.ws;
       wsLog.debug('stale_socket.drain_start', {
@@ -274,124 +273,97 @@ export class RuntimeWsClient {
       return;
     }
     if (this.ws !== socket) throw new Error('WS_CONNECT_SOCKET_OWNERSHIP_LOST');
+    if (isNodeWebSocket(socket)) this.bindNodeSocket(socket, generation);
+    else this.bindBrowserSocket(socket, generation);
+  }
 
-    if ('on' in socket && typeof (socket as NodeWebSocket).on === 'function') {
-      const nodeSocket = socket as NodeWebSocket;
-      nodeSocket.on('open', () => {
-        if (this.closed || generation !== this.lifecycleGeneration) return;
-        wsLog.debug('connected', {
-          runtimeId: this.options.runtimeId,
-          url: this.options.url,
-        });
-        if (!this.options.useHelloAuth) {
-          this.connecting = false;
-          this.reconnectAttempts = 0;
-          if (!this.sendHello()) return;
-          this.options.onOpen?.();
-        }
-      });
-      nodeSocket.on('message', (data: Buffer) => this.dispatchMessage(data, generation));
-      nodeSocket.on('close', (code: number, reasonBuf: Buffer) => {
-        wsLog.debug('socket.closed', {
-          code,
-          currentGeneration: this.lifecycleGeneration,
-          generation,
-          readyState: readSocketReadyState(nodeSocket),
-          runtimeId: this.options.runtimeId,
-          url: this.options.url,
-        });
-        if (generation !== this.lifecycleGeneration) return;
-        this.connecting = false;
-        this.rejectPendingRecoveryBundleRequests(new Error('RECOVERY_REQUEST_SOCKET_CLOSED'));
-        if (this.suppressNextClose) {
-          this.suppressNextClose = false;
-          return;
-        }
-        if (this.closed) return;
-        const reason = Buffer.isBuffer(reasonBuf) ? reasonBuf.toString('utf8') : String(reasonBuf || '');
-        const summary =
-          `WS_CLOSE runtime=${this.options.runtimeId.slice(0, 10)} relay=${this.options.url} ` +
-          `code=${Number(code || 0)} reason="${reason || 'n/a'}"`;
-        const shouldReconnect = this.shouldReconnectAfterClose(Number(code || 0), reason);
-        if (shouldReconnect) {
-          const normalClose = NORMAL_CLOSE_CODES.has(Number(code || 0));
-          (normalClose ? console.warn : console.error)(`[WS] ${summary} — scheduling reconnect`);
-          if (!normalClose) this.options.onError?.(new Error(`WS_DISCONNECTED: ${summary}`));
-          this.scheduleReconnect();
-        } else if (!this.isDuplicateRuntimeClose(Number(code || 0), reason)) {
-          console.warn(`[WS] ${summary} — reconnect disabled`);
-        }
-      });
-      nodeSocket.on('error', (err: Error) => {
-        wsLog.debug('socket.error', {
-          currentGeneration: this.lifecycleGeneration,
-          error: err.message,
-          generation,
-          readyState: readSocketReadyState(nodeSocket),
-          runtimeId: this.options.runtimeId,
-          url: this.options.url,
-        });
-        if (this.closed || generation !== this.lifecycleGeneration) return;
-        this.connecting = false;
-        this.options.onError?.(err);
-        // Some WS handshake failures emit only "error" without a "close" callback.
-        // Keep reconnect ownership idempotent via scheduleReconnect() guards.
-        if (!this.closed && !this.isOpen()) {
-          console.error(`[WS] Error on ${this.options.url} — scheduling reconnect`);
-          this.scheduleReconnect();
-        }
-      });
-    } else {
-      const browserSocket = socket as BrowserWebSocket;
-      browserSocket.onopen = () => {
-        if (this.closed || generation !== this.lifecycleGeneration) return;
-        wsLog.debug('connected', {
-          runtimeId: this.options.runtimeId,
-          url: this.options.url,
-        });
-        if (!this.options.useHelloAuth) {
-          this.connecting = false;
-          this.reconnectAttempts = 0;
-          if (!this.sendHello()) return;
-          this.options.onOpen?.();
-        }
-      };
-      browserSocket.onmessage = (event: MessageEvent) => this.dispatchMessage(event.data, generation);
-      browserSocket.onclose = (event: CloseEvent) => {
-        if (generation !== this.lifecycleGeneration) return;
-        this.connecting = false;
-        this.rejectPendingRecoveryBundleRequests(new Error('RECOVERY_REQUEST_SOCKET_CLOSED'));
-        if (this.suppressNextClose) {
-          this.suppressNextClose = false;
-          return;
-        }
-        if (this.closed) return;
-        const code = Number(event.code || 0);
-        const reason = String(event.reason || '');
-        const summary =
-          `WS_CLOSE runtime=${this.options.runtimeId.slice(0, 10)} relay=${this.options.url} ` +
-          `code=${code} reason="${reason || 'n/a'}" clean=${event.wasClean ? 1 : 0}`;
-        const shouldReconnect = this.shouldReconnectAfterClose(code, reason);
-        if (shouldReconnect) {
-          const normalClose = event.wasClean || NORMAL_CLOSE_CODES.has(code);
-          (normalClose ? console.warn : console.error)(`[WS] ${summary} — scheduling reconnect`);
-          if (!normalClose) this.options.onError?.(new Error(`WS_DISCONNECTED: ${summary}`));
-          this.scheduleReconnect();
-        } else if (!this.isDuplicateRuntimeClose(code, reason)) {
-          console.warn(`[WS] ${summary} — reconnect disabled`);
-        }
-      };
-      browserSocket.onerror = (event: Event) => {
-        if (this.closed || generation !== this.lifecycleGeneration) return;
-        this.connecting = false;
-        this.options.onError?.(new Error(`WebSocket error: ${event.type}`));
-        // Browser can also surface error before close in transient network failures.
-        if (!this.closed && !this.isOpen()) {
-          console.error(`[WS] Error on ${this.options.url} — scheduling reconnect`);
-          this.scheduleReconnect();
-        }
-      };
+  private handleSocketOpen(generation: number): void {
+    if (this.closed || generation !== this.lifecycleGeneration) return;
+    wsLog.debug('connected', { runtimeId: this.options.runtimeId, url: this.options.url });
+    if (!this.options.useHelloAuth) {
+      this.connecting = false;
+      this.reconnectAttempts = 0;
+      if (!this.sendHello()) return;
+      this.options.onOpen?.();
     }
+  }
+
+  private handleSocketClose(
+    generation: number,
+    codeInput: number,
+    reasonInput: string,
+    wasClean?: boolean,
+  ): void {
+    if (generation !== this.lifecycleGeneration) return;
+    this.connecting = false;
+    this.rejectPendingRecoveryBundleRequests(new Error('RECOVERY_REQUEST_SOCKET_CLOSED'));
+    if (this.suppressNextClose) {
+      this.suppressNextClose = false;
+      return;
+    }
+    if (this.closed) return;
+    const code = Number(codeInput || 0);
+    const reason = String(reasonInput || '');
+    const cleanSuffix = wasClean === undefined ? '' : ` clean=${wasClean ? 1 : 0}`;
+    const summary =
+      `WS_CLOSE runtime=${this.options.runtimeId.slice(0, 10)} relay=${this.options.url} ` +
+      `code=${code} reason="${reason || 'n/a'}"${cleanSuffix}`;
+    const shouldReconnect = this.shouldReconnectAfterClose(code, reason);
+    if (shouldReconnect) {
+      const normalClose = wasClean === true || NORMAL_CLOSE_CODES.has(code);
+      (normalClose ? console.warn : console.error)(`[WS] ${summary} — scheduling reconnect`);
+      if (!normalClose) this.options.onError?.(new Error(`WS_DISCONNECTED: ${summary}`));
+      this.scheduleReconnect();
+    } else if (!this.isDuplicateRuntimeClose(code, reason)) {
+      console.warn(`[WS] ${summary} — reconnect disabled`);
+    }
+  }
+
+  private handleSocketError(generation: number, error: Error): void {
+    if (this.closed || generation !== this.lifecycleGeneration) return;
+    this.connecting = false;
+    this.options.onError?.(error);
+    // Some implementations emit only "error" when the handshake fails.
+    // scheduleReconnect owns idempotence if a later close event also arrives.
+    if (!this.closed && !this.isOpen()) {
+      console.error(`[WS] Error on ${this.options.url} — scheduling reconnect`);
+      this.scheduleReconnect();
+    }
+  }
+
+  private bindNodeSocket(socket: NodeWebSocket, generation: number): void {
+    socket.on('open', () => this.handleSocketOpen(generation));
+    socket.on('message', data => this.dispatchMessage(data, generation));
+    socket.on('close', (code, reasonBuffer) => {
+      wsLog.debug('socket.closed', {
+        code,
+        currentGeneration: this.lifecycleGeneration,
+        generation,
+        readyState: readSocketReadyState(socket),
+        runtimeId: this.options.runtimeId,
+        url: this.options.url,
+      });
+      const reason = Buffer.isBuffer(reasonBuffer) ? reasonBuffer.toString('utf8') : String(reasonBuffer || '');
+      this.handleSocketClose(generation, code, reason);
+    });
+    socket.on('error', error => {
+      wsLog.debug('socket.error', {
+        currentGeneration: this.lifecycleGeneration,
+        error: error.message,
+        generation,
+        readyState: readSocketReadyState(socket),
+        runtimeId: this.options.runtimeId,
+        url: this.options.url,
+      });
+      this.handleSocketError(generation, error);
+    });
+  }
+
+  private bindBrowserSocket(socket: BrowserWebSocket, generation: number): void {
+    socket.onopen = () => this.handleSocketOpen(generation);
+    socket.onmessage = event => this.dispatchMessage(event.data, generation);
+    socket.onclose = event => this.handleSocketClose(generation, event.code, event.reason, event.wasClean);
+    socket.onerror = event => this.handleSocketError(generation, new Error(`WebSocket error: ${event.type}`));
   }
 
   private computeBackoffMs(): number {
@@ -550,16 +522,12 @@ export class RuntimeWsClient {
     });
   }
 
-  private async handleMessage(
-    raw: string | Buffer | ArrayBuffer,
-    generation = this.lifecycleGeneration,
-  ) {
-    if (this.closed || generation !== this.lifecycleGeneration) return;
-    let msg: RuntimeWsMessage;
+  private decodeMessage(raw: string | Buffer | ArrayBuffer): RuntimeWsMessage | null {
     try {
-      msg = deserializeWsMessage(raw);
+      const msg = deserializeWsMessage(raw);
       failfastAssert(!!msg && typeof msg === 'object', 'WS_MSG_NOT_OBJECT', 'WS message must be an object');
       failfastAssert(typeof msg.type === 'string', 'WS_MSG_TYPE_INVALID', 'WS message type must be a string', { msg });
+      return msg;
     } catch (error) {
       this.sendDebugEvent({
         level: 'error',
@@ -567,11 +535,14 @@ export class RuntimeWsClient {
         failfast: asFailFastPayload(error),
       });
       this.options.onError?.(error as Error);
-      return;
+      return null;
     }
+  }
+
+  private handleHandshakeMessage(msg: RuntimeWsMessage): boolean {
     if (msg.type === 'hello_challenge') {
-      if (!this.options.useHelloAuth || !msg.challenge || !this.sendHello(msg.challenge)) return;
-      return;
+      if (this.options.useHelloAuth && msg.challenge) this.sendHello(msg.challenge);
+      return true;
     }
     if (msg.type === 'hello_ack') {
       const expectedRuntimeId = this.options.runtimeId.toLowerCase();
@@ -582,9 +553,9 @@ export class RuntimeWsClient {
         );
         this.options.onError?.(error);
         this.ws?.close();
-        return;
+        return true;
       }
-      if (this.helloAcknowledged) return;
+      if (this.helloAcknowledged) return true;
       this.helloAcknowledged = true;
       this.connecting = false;
       this.reconnectAttempts = 0;
@@ -592,93 +563,96 @@ export class RuntimeWsClient {
         this.options.onPeerEncryptionKey?.(msg.from, msg.fromEncryptionPubKey);
       }
       this.options.onOpen?.();
-      return;
+      return true;
     }
     if (msg.type === 'error') {
       if (this.settlePendingRecoveryBundleRequest(msg.inReplyTo, undefined, msg.error || 'Unknown error')) {
-        return;
+        return true;
       }
       this.options.onError?.(new Error(msg.error || 'Unknown error'));
-      return;
+      return true;
     }
+    return false;
+  }
 
-    if (typeof msg.from === 'string' && typeof msg.fromEncryptionPubKey === 'string') {
-      this.options.onPeerEncryptionKey?.(msg.from, msg.fromEncryptionPubKey);
+  private async handleEntityInputsMessage(msg: RuntimeWsMessage): Promise<boolean> {
+    if (msg.type !== 'entity_inputs' || !msg.payload || !msg.from) return false;
+    // One encrypted envelope carries every output from one source R-frame.
+    if (!msg.encrypted) {
+      console.error(`❌ WS-CLIENT: Rejected unencrypted entity_inputs from ${msg.from}`);
+      this.sendDebugEvent({
+        level: 'error',
+        code: 'P2P_UNENCRYPTED',
+        message: 'Rejected unencrypted entity_inputs',
+        from: msg.from,
+      });
+      this.options.onError?.(new Error(`P2P_UNENCRYPTED: Received unencrypted entity_inputs from ${msg.from}`));
+      return true;
     }
-
-    if (msg.type === 'entity_inputs' && msg.payload && msg.from) {
-      // One encrypted envelope carries every output from one source R-frame.
-
-      // Reject unencrypted entity_input messages
-      if (!msg.encrypted) {
-        console.error(`❌ WS-CLIENT: Rejected unencrypted entity_inputs from ${msg.from}`);
-        this.sendDebugEvent({
-          level: 'error',
-          code: 'P2P_UNENCRYPTED',
-          message: 'Rejected unencrypted entity_inputs',
-          from: msg.from,
-        });
-        this.options.onError?.(new Error(`P2P_UNENCRYPTED: Received unencrypted entity_inputs from ${msg.from}`));
-        return;
-      }
-
-      if (!this.options.encryptionKeyPair) {
-        console.error(`❌ WS-CLIENT: No encryption keypair for decryption`);
-        this.sendDebugEvent({
-          level: 'error',
-          code: 'P2P_NO_DECRYPTION',
-          message: 'Missing encryption keypair for decrypt',
-          from: msg.from,
-        });
-        this.options.onError?.(new Error('P2P_NO_DECRYPTION: Cannot decrypt without keypair'));
-        return;
-      }
-
-      // Decrypt - throws on error (fail-fast)
-      let envelope: RuntimeEntityInputsEnvelope;
-      try {
-        envelope = decryptJSON<RuntimeEntityInputsEnvelope>(msg.payload as string, this.options.encryptionKeyPair.privateKey);
-        // Decrypted successfully
-      } catch (decryptError) {
-        console.error(`❌ WS-CLIENT-DECRYPT-FAILED:`, decryptError);
-        this.sendDebugEvent({
-          level: 'error',
-          code: 'DECRYPT_FAIL',
-          message: (decryptError as Error).message,
-          from: msg.from,
-        });
-        this.options.onError?.(decryptError as Error);
-        return;
-      }
-
-      await this.options.onEntityInputs?.(msg.from, envelope, typeof msg.timestamp === 'number' ? msg.timestamp : undefined);
-      return;
+    if (!this.options.encryptionKeyPair) {
+      console.error('❌ WS-CLIENT: No encryption keypair for decryption');
+      this.sendDebugEvent({
+        level: 'error',
+        code: 'P2P_NO_DECRYPTION',
+        message: 'Missing encryption keypair for decrypt',
+        from: msg.from,
+      });
+      this.options.onError?.(new Error('P2P_NO_DECRYPTION: Cannot decrypt without keypair'));
+      return true;
     }
+    try {
+      const envelope = decryptJSON<RuntimeEntityInputsEnvelope>(
+        msg.payload as string,
+        this.options.encryptionKeyPair.privateKey,
+      );
+      await this.options.onEntityInputs?.(
+        msg.from,
+        envelope,
+        typeof msg.timestamp === 'number' ? msg.timestamp : undefined,
+      );
+    } catch (error) {
+      console.error('❌ WS-CLIENT-DECRYPT-FAILED:', error);
+      this.sendDebugEvent({
+        level: 'error',
+        code: 'DECRYPT_FAIL',
+        message: (error as Error).message,
+        from: msg.from,
+      });
+      this.options.onError?.(error as Error);
+    }
+    return true;
+  }
+
+  private async handleApplicationMessage(msg: RuntimeWsMessage): Promise<boolean> {
     if (msg.type === 'entity_input_receipt' && msg.payload && msg.from) {
       await this.options.onReliableReceipt?.(msg.from, msg.payload as ReliableDeliveryReceipt);
-      return;
+      return true;
     }
     if (msg.type === 'gossip_request' && msg.payload && msg.from) {
       await this.options.onGossipRequest?.(msg.from, msg.payload);
-      return;
+      return true;
     }
     if ((msg.type === 'gossip_response' || msg.type === 'gossip_subscribed') && msg.payload && msg.from) {
       await this.options.onGossipResponse?.(msg.from, msg.payload);
-      return;
+      return true;
     }
     if ((msg.type === 'gossip_announce' || msg.type === 'gossip_update') && msg.payload && msg.from) {
       await this.options.onGossipAnnounce?.(msg.from, msg.payload);
-      return;
+      return true;
     }
+    return false;
+  }
+
+  private async handleRecoveryMessage(msg: RuntimeWsMessage): Promise<boolean> {
     if (msg.type === 'recovery_bundle_request' && msg.from) {
       const lookupKey = readRecoveryLookupKey(msg.payload);
       if (!lookupKey) {
         this.sendRecoveryBundleResponse(msg.from, msg.id, undefined, 'Recovery lookupKey is required');
-        return;
+        return true;
       }
       if (!this.options.onRecoveryBundleRequest) {
         this.sendRecoveryBundleResponse(msg.from, msg.id, undefined, 'Recovery bundle reads unavailable');
-        return;
+        return true;
       }
       try {
         const payload = await this.options.onRecoveryBundleRequest(msg.from, lookupKey);
@@ -691,19 +665,35 @@ export class RuntimeWsClient {
           `Recovery bundle request failed: ${(error as Error).message}`,
         );
       }
-      return;
+      return true;
     }
     if (msg.type === 'recovery_bundle_response' && msg.from) {
       if (this.settlePendingRecoveryBundleRequest(msg.inReplyTo, msg.payload, msg.error)) {
-        return;
+        return true;
       }
       if (msg.error) {
         this.options.onError?.(new Error(msg.error));
-        return;
+        return true;
       }
       await this.options.onRecoveryBundleResponse?.(msg.from, msg.payload, msg);
-      return;
+      return true;
     }
+    return false;
+  }
+
+  private async handleMessage(
+    raw: string | Buffer | ArrayBuffer,
+    generation = this.lifecycleGeneration,
+  ): Promise<void> {
+    if (this.closed || generation !== this.lifecycleGeneration) return;
+    const msg = this.decodeMessage(raw);
+    if (!msg || this.handleHandshakeMessage(msg)) return;
+    if (typeof msg.from === 'string' && typeof msg.fromEncryptionPubKey === 'string') {
+      this.options.onPeerEncryptionKey?.(msg.from, msg.fromEncryptionPubKey);
+    }
+    if (await this.handleEntityInputsMessage(msg)) return;
+    if (await this.handleApplicationMessage(msg)) return;
+    await this.handleRecoveryMessage(msg);
   }
 
   sendEntityInputsRaw(to: string, envelope: RuntimeEntityInputsEnvelope, ingressTimestamp?: number): boolean {
