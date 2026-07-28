@@ -17,10 +17,7 @@ const TARGET_COORDINATOR_LINES = 150;
 // fails the gate. Refactors therefore ratchet the list toward zero instead of
 // turning today's debt into a permanent global threshold.
 const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
-  'runtime/account/consensus/index.ts::handlePendingFrameAck': 208,
-  'runtime/entity/tx/handlers/account/committed-frame-followups.ts::applyCommittedLendingFollowup': 195,
   'runtime/entity/tx/handlers/settle.ts::handleSettleExecute': 194,
-  'runtime/account/consensus/index.ts::preflightIncomingAccountFrame': 190,
   'runtime/account/tx/handlers/settle-transition.ts::applySettlementSeal': 184,
   'runtime/account/tx/handlers/htlc-resolve.ts::handleHtlcResolve': 182,
   'runtime/entity/tx/handlers/cross-j-clear.ts::handleRequestCrossJurisdictionClearEntityTx': 179,
@@ -34,7 +31,7 @@ const COORDINATOR_DEBT: Readonly<Record<string, number>> = {
   'runtime/entity/tx/handlers/j-broadcast.ts::handleJBroadcast': 154,
 };
 
-const MAX_OVER_100_FUNCTIONS = 69;
+const MAX_OVER_100_FUNCTIONS = 66;
 
 type FunctionSize = {
   key: string;
